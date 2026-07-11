@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { main, isPrMerged } from './cli/index.js';
+import { main, isPrMerged, findOpenPRNumber, findOpenPRForIssue, squashMergeAndDelete } from './cli/index.js';
 
 describe('cli', () => {
   it('exports the main entrypoint', () => {
@@ -19,5 +19,91 @@ describe('cli', () => {
   it('returns false when the head branch has no merged PR', async () => {
     const octokit: any = { rest: { pulls: { list: async () => ({ data: [{ merged_at: null }] }) } } };
     expect(await isPrMerged(octokit, 'on-par', 'software-factory', 'ship-it/22-x')).toBe(false);
+  });
+
+  it('finds an open PR number for the matching head branch', async () => {
+    const octokit: any = {
+      rest: { pulls: { list: async ({ head }: any) =>
+        head === 'on-par:ship-it/19-land'
+          ? { data: [{ number: 123 }] }
+          : { data: [] } } },
+    };
+
+    expect(await findOpenPRNumber(octokit, 'on-par', 'software-factory', 'ship-it/19-land')).toBe(123);
+  });
+
+  it('returns undefined when no open PR exists for the head branch', async () => {
+    const octokit: any = {
+      rest: { pulls: { list: async () => ({ data: [] }) } },
+    };
+
+    expect(await findOpenPRNumber(octokit, 'on-par', 'software-factory', 'ship-it/19-land')).toBeUndefined();
+  });
+
+  it('falls back to matching the open PR that references the issue in its body', async () => {
+    const octokit: any = {
+      rest: {
+        pulls: {
+          list: async () => ({
+            data: [
+              { number: 1, body: 'Closes #7', head: { ref: 'ship-it/1-unrelated' } },
+              { number: 42, body: 'Fixes some things.\n\nCloses #19', head: { ref: 'ship-it/19-renamed-title' } },
+            ],
+          }),
+        },
+      },
+    };
+
+    expect(await findOpenPRForIssue(octokit, 'on-par', 'software-factory', 19)).toEqual({
+      number: 42,
+      branch: 'ship-it/19-renamed-title',
+    });
+  });
+
+  it('returns undefined from the issue-body fallback when no open PR references the issue', async () => {
+    const octokit: any = {
+      rest: { pulls: { list: async () => ({ data: [{ number: 1, body: 'Closes #7', head: { ref: 'x' } }] }) } },
+    };
+
+    expect(await findOpenPRForIssue(octokit, 'on-par', 'software-factory', 19)).toBeUndefined();
+  });
+
+  it('squash-merges a PR and deletes its branch', async () => {
+    const calls: any[] = [];
+    const octokit: any = {
+      rest: {
+        pulls: {
+          merge: async (args: any) => {
+            calls.push(['merge', args]);
+          },
+        },
+        git: {
+          deleteRef: async (args: any) => {
+            calls.push(['deleteRef', args]);
+          },
+        },
+      },
+    };
+
+    // cmdLand reuses withGitLock for merge serialization; lock behavior is covered in core.
+    await squashMergeAndDelete(octokit, 'on-par', 'software-factory', 'ship-it/19-land', 123);
+
+    expect(calls).toEqual([
+      ['merge', { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash' }],
+      ['deleteRef', { owner: 'on-par', repo: 'software-factory', ref: 'heads/ship-it/19-land' }],
+    ]);
+  });
+
+  it('does not throw when deleting the merged branch fails', async () => {
+    const octokit: any = {
+      rest: {
+        pulls: { merge: async () => {} },
+        git: { deleteRef: async () => { throw new Error('not found'); } },
+      },
+    };
+
+    await expect(
+      squashMergeAndDelete(octokit, 'on-par', 'software-factory', 'ship-it/19-land', 123),
+    ).resolves.toBeUndefined();
   });
 });
