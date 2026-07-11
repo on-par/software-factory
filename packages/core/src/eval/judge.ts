@@ -12,8 +12,60 @@ export interface JudgeSpecOpts {
 interface JudgeRunResult {
   score: number;
   reasons: string;
+  malformed: boolean;
+  rawOutput?: string;
   result?: RouterResult;
   prompt: string;
+}
+
+export function extractVerdict(output: string): { score: number; reasons: string } | null {
+  for (let start = 0; start < output.length; start++) {
+    if (output[start] !== '{') continue;
+
+    let depth = 0;
+    let inString = false;
+
+    for (let i = start; i < output.length; i++) {
+      const ch = output[i];
+
+      if (inString) {
+        if (ch === '\\') {
+          i++;
+          continue;
+        }
+        if (ch === '"') inString = false;
+        continue;
+      }
+
+      if (ch === '"') {
+        inString = true;
+        continue;
+      }
+      if (ch === '{') depth++;
+      else if (ch === '}') depth--;
+
+      if (depth === 0) {
+        const candidate = output.slice(start, i + 1);
+        try {
+          const parsed = JSON.parse(candidate);
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            const rawScore = Number(parsed.score);
+            if (Number.isFinite(rawScore)) {
+              return {
+                score: Math.max(0, Math.min(10, rawScore)),
+                reasons: String(parsed.reasons ?? ''),
+              };
+            }
+          }
+        } catch {
+          // Keep scanning for the next balanced JSON object.
+        }
+        break;
+      }
+    }
+  }
+
+  return null;
 }
 
 export async function judgeSpec(router: ModelRouter, opts: JudgeSpecOpts): Promise<{ score: number; reasons: string }> {
@@ -29,17 +81,26 @@ export async function runJudgeSpec(router: ModelRouter, opts: JudgeSpecOpts): Pr
       worktree: opts.worktree,
       timeout: opts.timeout,
     });
-    const jsonMatch = result.output.match(/\{[^{}]*"score"[^{}]*\}/);
-    if (!jsonMatch) {
-      return { score: 0, reasons: `judge failed: no valid JSON: ${result.output.slice(0, 200)}`, result, prompt };
+    const verdict = extractVerdict(result.output);
+    if (!verdict) {
+      return {
+        score: 0,
+        reasons: 'judge failed: no parseable score',
+        malformed: true,
+        rawOutput: result.output,
+        result,
+        prompt,
+      };
     }
 
-    const parsed = JSON.parse(jsonMatch[0]);
-    const rawScore = Number(parsed.score);
-    const score = Number.isFinite(rawScore) ? Math.max(0, Math.min(10, rawScore)) : 0;
-    return { score, reasons: String(parsed.reasons ?? ''), result, prompt };
+    return { score: verdict.score, reasons: verdict.reasons, malformed: false, result, prompt };
   } catch (err) {
-    return { score: 0, reasons: `judge failed: ${err instanceof Error ? err.message : String(err)}`, prompt };
+    return {
+      score: 0,
+      reasons: `judge failed: ${err instanceof Error ? err.message : String(err)}`,
+      malformed: true,
+      prompt,
+    };
   }
 }
 

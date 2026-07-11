@@ -38,6 +38,8 @@ export async function runEval(opts: RunEvalOpts): Promise<EvalSummary> {
       const deterministicPass = scored.checks.every(check => check.pass);
       const shouldJudge = opts.judge && !c.deterministicOnly && c.rubric.length > 0 && scored.route !== 'escalate';
       let rubricScore: number | undefined;
+      let judgeMalformed = false;
+      let malformedRaw: string | undefined;
       let costEstimate = estimateCost(opts.router, result.model, prompt, result.output);
 
       if (shouldJudge) {
@@ -51,13 +53,18 @@ export async function runEval(opts: RunEvalOpts): Promise<EvalSummary> {
           timeout,
         });
         latencyMs += now() - judgeStarted;
-        rubricScore = judged.score;
+        if (judged.malformed) {
+          judgeMalformed = true;
+          malformedRaw = judged.rawOutput ?? judged.reasons;
+        } else {
+          rubricScore = judged.score;
+        }
         if (judged.result) {
           costEstimate += estimateCost(opts.router, judged.result.model, judged.prompt, judged.result.output);
         }
       }
 
-      const pass = deterministicPass && (!shouldJudge || (rubricScore ?? 0) >= c.minRubricScore);
+      const pass = deterministicPass && !judgeMalformed && (!shouldJudge || (rubricScore ?? 0) >= c.minRubricScore);
       results.push({
         id: c.id,
         pass,
@@ -65,10 +72,12 @@ export async function runEval(opts: RunEvalOpts): Promise<EvalSummary> {
         routeCorrect: scored.routeCorrect,
         checks: scored.checks,
         ...(rubricScore !== undefined ? { rubricScore } : {}),
+        ...(judgeMalformed ? { judgeMalformed: true } : {}),
         judgeSkipped: !shouldJudge,
         model: result.model,
         latencyMs,
         costEstimate,
+        ...(malformedRaw !== undefined ? { error: `judge-malformed: ${malformedRaw}` } : {}),
       });
     } catch (err) {
       results.push({
