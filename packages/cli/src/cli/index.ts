@@ -811,6 +811,7 @@ export async function landOpenPullRequest(
   if (state.mergeStateStatus === 'DIRTY') {
     await rebaseDirtyPullRequest({ issue, branch, worktree, prNumber, log, run, pathExists });
     await watchPullRequestChecks(prNumber, ghRepo, repoRoot, run);
+    state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
   }
 
   for (let attempt = 1; ; attempt++) {
