@@ -37,6 +37,8 @@ export type { CaseResult, DeterministicCheck, EvalSummary, ExpectedRoute, Golden
 export { logEvent, logCost, readCosts, slugify, branchFor, setupWorktree, cleanupWorktree, gitFetch, shellEscape, ensureDir, isEscalation, escalationLine, codexDisabled } from './utils/index.js';
 export { withGitLock, withFileLock } from './utils/lock.js';
 export type { FileLockOptions } from './utils/lock.js';
+export { watchChecks } from './utils/ci-watch.js';
+export type { CiOutcome, WatchChecksOptions } from './utils/ci-watch.js';
 
 // Usage
 export { estimateTrailingSpend, formatUsageReport, watchUsage, priceFor, defaultTranscriptRoots, TRAILING_WINDOW_MS } from './usage/index.js';
