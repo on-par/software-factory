@@ -6,6 +6,7 @@ import {
   estimateTrailingSpend,
   formatUsageReport,
   priceFor,
+  watchUsage,
 } from './index.js';
 
 const now = new Date('2026-07-10T12:00:00Z');
@@ -130,5 +131,113 @@ describe('usage', () => {
   it('formats the usage report', () => {
     expect(formatUsageReport(187.4, 227)).toBe('trailing-5h usage ~= $187 = 83% of $227 cap');
     expect(formatUsageReport(0, 227)).toBe('trailing-5h usage ~= $0 = 0% of $227 cap');
+  });
+});
+
+describe('watchUsage', () => {
+  it('stops when the cap is reached mid-run', async () => {
+    const events: Array<[string, string, string | number, string]> = [];
+    const spends = [100, 180];
+    const stopCalls: string[] = [];
+    let sleepCalls = 0;
+
+    await expect(watchUsage({
+      cap: 227,
+      stopAt: 0.75,
+      pollMs: 180_000,
+      stopFile: '/repo/.factory/STOP',
+      eventsFile: '/repo/.factory/events.ndjson',
+      estimateSpend: () => spends.shift()!,
+      emitEvent: (...args) => {
+        events.push(args);
+      },
+      setStop: file => {
+        stopCalls.push(file);
+      },
+      sleep: async () => {
+        sleepCalls++;
+      },
+    })).resolves.toBe('stopped');
+
+    expect(stopCalls).toEqual(['/repo/.factory/STOP']);
+    expect(events).toEqual([
+      ['/repo/.factory/events.ndjson', 'watchdog', 'usage', 'usage watchdog armed: stop at 75% of $227 cap, poll 180s'],
+      ['/repo/.factory/events.ndjson', 'usage-stop', 'usage', 'trailing-5h usage ~= $180 = 79% of $227 cap -- STOP set, lanes halt between issues'],
+    ]);
+    expect(sleepCalls).toBe(1);
+  });
+
+  it('keeps polling below the cap and aborts cleanly', async () => {
+    const controller = new AbortController();
+    const events: Array<[string, string, string | number, string]> = [];
+    const stopCalls: string[] = [];
+    let sleepCalls = 0;
+
+    await expect(watchUsage({
+      cap: 227,
+      stopAt: 0.75,
+      pollMs: 180_000,
+      stopFile: '/repo/.factory/STOP',
+      eventsFile: '/repo/.factory/events.ndjson',
+      signal: controller.signal,
+      estimateSpend: () => 10,
+      emitEvent: (...args) => {
+        events.push(args);
+      },
+      setStop: file => {
+        stopCalls.push(file);
+      },
+      sleep: async () => {
+        sleepCalls++;
+        if (sleepCalls === 3) controller.abort();
+      },
+    })).resolves.toBe('aborted');
+
+    expect(stopCalls).toEqual([]);
+    expect(events.map(([, type]) => type)).toEqual(['watchdog']);
+    expect(sleepCalls).toBe(3);
+  });
+
+  it('stops at the exact threshold', async () => {
+    await expect(watchUsage({
+      cap: 200,
+      stopAt: 0.75,
+      pollMs: 180_000,
+      stopFile: '/repo/.factory/STOP',
+      eventsFile: '/repo/.factory/events.ndjson',
+      estimateSpend: () => 150,
+      emitEvent: () => {},
+      setStop: () => {},
+      sleep: async () => {},
+    })).resolves.toBe('stopped');
+  });
+
+  it('formats the armed event', async () => {
+    const controller = new AbortController();
+    const events: Array<[string, string, string | number, string]> = [];
+
+    await watchUsage({
+      cap: 227,
+      stopAt: 0.75,
+      pollMs: 180_000,
+      stopFile: '/repo/.factory/STOP',
+      eventsFile: '/repo/.factory/events.ndjson',
+      signal: controller.signal,
+      estimateSpend: () => 10,
+      emitEvent: (...args) => {
+        events.push(args);
+      },
+      setStop: () => {},
+      sleep: async () => {
+        controller.abort();
+      },
+    });
+
+    expect(events[0]).toEqual([
+      '/repo/.factory/events.ndjson',
+      'watchdog',
+      'usage',
+      'usage watchdog armed: stop at 75% of $227 cap, poll 180s',
+    ]);
   });
 });

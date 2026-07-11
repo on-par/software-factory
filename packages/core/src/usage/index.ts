@@ -1,8 +1,9 @@
 // src/usage/index.ts — Claude Code transcript usage estimation helpers
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
+import { logEvent } from '../utils/index.js';
 
 export const TRAILING_WINDOW_MS = 5 * 60 * 60 * 1000;
 
@@ -96,4 +97,72 @@ export function estimateTrailingSpend(opts: TrailingUsageOptions = {}): number {
 
 export function formatUsageReport(spend: number, cap: number): string {
   return `trailing-5h usage ~= $${spend.toFixed(0)} = ${Math.round((spend / cap) * 100)}% of $${cap.toFixed(0)} cap`;
+}
+
+export interface WatchUsageOptions {
+  cap: number;
+  stopAt: number;
+  pollMs: number;
+  stopFile: string;
+  eventsFile: string;
+  signal?: AbortSignal;
+  estimateSpend?: () => number;
+  emitEvent?: typeof logEvent;
+  setStop?: (file: string) => void;
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.resolve();
+
+  return new Promise(resolve => {
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener('abort', done, { once: true });
+  });
+}
+
+export async function watchUsage(opts: WatchUsageOptions): Promise<'stopped' | 'aborted'> {
+  const {
+    cap,
+    stopAt,
+    pollMs,
+    stopFile,
+    eventsFile,
+    signal,
+    estimateSpend = () => estimateTrailingSpend(),
+    emitEvent = logEvent,
+    setStop = (file: string) => writeFileSync(file, ''),
+    sleep: wait = sleep,
+  } = opts;
+
+  emitEvent(
+    eventsFile,
+    'watchdog',
+    'usage',
+    `usage watchdog armed: stop at ${Math.round(stopAt * 100)}% of $${cap.toFixed(0)} cap, poll ${pollMs / 1000}s`,
+  );
+
+  while (!signal?.aborted) {
+    const spend = estimateSpend();
+    const pct = spend / cap;
+    if (pct >= stopAt) {
+      setStop(stopFile);
+      emitEvent(
+        eventsFile,
+        'usage-stop',
+        'usage',
+        `${formatUsageReport(spend, cap)} -- STOP set, lanes halt between issues`,
+      );
+      return 'stopped';
+    }
+
+    await wait(pollMs, signal);
+  }
+
+  return 'aborted';
 }

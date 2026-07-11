@@ -16,6 +16,7 @@ import {
   shipPhase,
   estimateTrailingSpend,
   formatUsageReport,
+  watchUsage,
 } from '@on-par/factory-core';
 import { logEvent, branchFor, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock, shellEscape } from '@on-par/factory-core';
 import { exec as execCb } from 'node:child_process';
@@ -157,15 +158,48 @@ async function cmdCost() {
   console.log(`  Total: $${grandTotal.toFixed(4)}`);
 }
 
-async function cmdUsage() {
-  const cap = Number(process.env.FACTORY_USAGE_CAP ?? 227);
+export interface UsageKnobs {
+  cap: number;
+  stopAt: number;
+  pollMs: number;
+  watch: boolean;
+}
+
+export function resolveUsageKnobs(env: NodeJS.ProcessEnv = process.env): UsageKnobs {
+  const cap = Number(env.FACTORY_USAGE_CAP ?? 227);
   if (!Number.isFinite(cap) || cap <= 0) {
-    console.error(chalk.red('factory: FACTORY_USAGE_CAP must be a positive number'));
+    throw new Error('FACTORY_USAGE_CAP must be a positive number');
+  }
+
+  const stopAt = Number(env.FACTORY_STOP_AT ?? 0.75);
+  if (!Number.isFinite(stopAt) || stopAt <= 0 || stopAt > 1) {
+    throw new Error('FACTORY_STOP_AT must be a number in (0, 1]');
+  }
+
+  const pollSeconds = Number(env.FACTORY_USAGE_POLL ?? 180);
+  if (!Number.isFinite(pollSeconds) || pollSeconds <= 0) {
+    throw new Error('FACTORY_USAGE_POLL must be a positive number');
+  }
+
+  return {
+    cap,
+    stopAt,
+    pollMs: pollSeconds * 1000,
+    watch: env.FACTORY_USAGE_WATCH !== '0',
+  };
+}
+
+async function cmdUsage() {
+  let knobs: UsageKnobs;
+  try {
+    knobs = resolveUsageKnobs();
+  } catch (err: any) {
+    console.error(chalk.red(`factory: ${err.message}`));
     process.exit(2);
   }
 
   const spend = estimateTrailingSpend();
-  console.log(formatUsageReport(spend, cap));
+  console.log(formatUsageReport(spend, knobs.cap));
 }
 
 async function cmdStatus() {
@@ -441,6 +475,22 @@ async function cmdRun() {
     lanes.get(lane)!.push(parseInt(issue, 10));
   }
 
+  const knobs = resolveUsageKnobs();
+  const controller = new AbortController();
+  const watchdog = knobs.watch
+    ? watchUsage({
+        cap: knobs.cap,
+        stopAt: knobs.stopAt,
+        pollMs: knobs.pollMs,
+        stopFile: paths.stop,
+        eventsFile: paths.events,
+        signal: controller.signal,
+      }).catch((err: any) => {
+        // a watchdog crash must never take down the run
+        console.error(chalk.red(`factory: usage watchdog crashed: ${err.message}`));
+      })
+    : Promise.resolve();
+
   // Run lanes in parallel
   const pids: Promise<void>[] = [];
   for (const [lane, issues] of lanes) {
@@ -449,6 +499,8 @@ async function cmdRun() {
   }
 
   await Promise.allSettled(pids);
+  controller.abort();
+  await watchdog;
   logEvent(paths.events, 'run-done', 'all', 'all lanes finished');
 }
 
