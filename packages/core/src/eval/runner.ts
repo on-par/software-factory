@@ -2,7 +2,7 @@ import { buildPlanPrompt } from '../phases/plan.js';
 import type { ModelRouter } from '../router/index.js';
 import { runJudgeSpec } from './judge.js';
 import { scoreSpec } from './score.js';
-import type { CaseResult, EvalSummary, GoldenCase } from './types.js';
+import { isRouteAsserted, type CaseResult, type EvalSummary, type GoldenCase } from './types.js';
 
 export interface RunEvalOpts {
   cases: GoldenCase[];
@@ -69,6 +69,7 @@ export async function runEval(opts: RunEvalOpts): Promise<EvalSummary> {
         id: c.id,
         pass,
         route: scored.route,
+        expectedRoute: c.expectedRoute,
         routeCorrect: scored.routeCorrect,
         checks: scored.checks,
         ...(rubricScore !== undefined ? { rubricScore } : {}),
@@ -84,6 +85,7 @@ export async function runEval(opts: RunEvalOpts): Promise<EvalSummary> {
         id: c.id,
         pass: false,
         route: 'unparseable',
+        expectedRoute: c.expectedRoute,
         routeCorrect: false,
         checks: [],
         judgeSkipped: true,
@@ -98,12 +100,16 @@ export async function runEval(opts: RunEvalOpts): Promise<EvalSummary> {
   const total = results.length;
   const passed = results.filter(result => result.pass).length;
   const failed = total - passed;
+  const routeAsserted = results.filter(result => isRouteAsserted(result.expectedRoute)).length;
+  const routeCorrect = results.filter(result => isRouteAsserted(result.expectedRoute) && result.routeCorrect).length;
   return {
     results,
     total,
     passed,
     failed,
     passRate: total ? passed / total : 0,
+    routeAsserted,
+    routeAccuracy: routeAsserted ? routeCorrect / routeAsserted : 1,
     totalCostEstimate: results.reduce((sum, result) => sum + result.costEstimate, 0),
     totalLatencyMs: results.reduce((sum, result) => sum + result.latencyMs, 0),
   };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CaseResult, EvalSummary } from './types.js';
+import { isRouteAsserted, type CaseResult, type EvalSummary } from './types.js';
 import { compareToBaseline, toBaseline } from './baseline.js';
 
 function caseResult(overrides: Partial<CaseResult> = {}): CaseResult {
@@ -7,6 +7,7 @@ function caseResult(overrides: Partial<CaseResult> = {}): CaseResult {
     id: 'case',
     pass: true,
     route: 'codex',
+    expectedRoute: 'codex',
     routeCorrect: true,
     checks: [],
     judgeSkipped: true,
@@ -20,12 +21,16 @@ function caseResult(overrides: Partial<CaseResult> = {}): CaseResult {
 function summaryOf(results: CaseResult[]): EvalSummary {
   const total = results.length;
   const passed = results.filter(r => r.pass).length;
+  const routeAsserted = results.filter(r => isRouteAsserted(r.expectedRoute)).length;
+  const routeCorrect = results.filter(r => isRouteAsserted(r.expectedRoute) && r.routeCorrect).length;
   return {
     results,
     total,
     passed,
     failed: total - passed,
     passRate: total ? passed / total : 0,
+    routeAsserted,
+    routeAccuracy: routeAsserted ? routeCorrect / routeAsserted : 1,
     totalCostEstimate: 0,
     totalLatencyMs: 0,
   };
@@ -42,8 +47,9 @@ describe('toBaseline', () => {
 
     expect(baseline).toEqual({
       version: 1,
-      tolerance: { passRate: 0, rubricScore: 1.0 },
+      tolerance: { passRate: 0, rubricScore: 1.0, routeAccuracy: 0 },
       passRate: 0.5,
+      routeAccuracy: 1,
       cases: {
         a: { pass: true },
         b: { pass: false, rubricScore: 8.5 },
@@ -53,8 +59,35 @@ describe('toBaseline', () => {
 
   it('applies a custom tolerance when provided', () => {
     const summary = summaryOf([caseResult({ id: 'a' })]);
-    const baseline = toBaseline(summary, { passRate: 0.1, rubricScore: 2 });
-    expect(baseline.tolerance).toEqual({ passRate: 0.1, rubricScore: 2 });
+    const baseline = toBaseline(summary, { passRate: 0.1, rubricScore: 2, routeAccuracy: 0.2 });
+    expect(baseline.tolerance).toEqual({ passRate: 0.1, rubricScore: 2, routeAccuracy: 0.2 });
+  });
+
+  it('carries routing accuracy through the baseline', () => {
+    const summary = summaryOf([
+      caseResult({ id: 'a' }),
+      caseResult({ id: 'x', expectedRoute: 'claude', route: 'codex', routeCorrect: false }),
+    ]);
+
+    const baseline = toBaseline(summary);
+
+    expect(summary.routeAccuracy).toBe(0.5);
+    expect(baseline.routeAccuracy).toBe(0.5);
+  });
+
+  it('excludes any route cases from routing accuracy', () => {
+    const withAny = summaryOf([
+      caseResult({ id: 'any', expectedRoute: 'any' }),
+      caseResult({ id: 'asserted' }),
+    ]);
+    const onlyAny = summaryOf([
+      caseResult({ id: 'any', expectedRoute: 'any' }),
+    ]);
+
+    expect(withAny.routeAsserted).toBe(1);
+    expect(withAny.routeAccuracy).toBe(1);
+    expect(onlyAny.routeAsserted).toBe(0);
+    expect(onlyAny.routeAccuracy).toBe(1);
   });
 });
 
@@ -76,6 +109,37 @@ describe('compareToBaseline', () => {
 
     expect(comparison.ok).toBe(false);
     expect(comparison.regressions.some(r => r.includes('overall pass rate dropped'))).toBe(true);
+  });
+
+  it('flags a routing accuracy regression and names misrouted cases', () => {
+    const baseline = toBaseline(summaryOf([caseResult({ id: 'a' }), caseResult({ id: 'b' })]));
+    const summary = summaryOf([
+      caseResult({ id: 'a' }),
+      caseResult({ id: 'misroute', expectedRoute: 'claude', route: 'codex', routeCorrect: false }),
+    ]);
+
+    const comparison = compareToBaseline(summary, baseline);
+
+    expect(comparison.ok).toBe(false);
+    expect(
+      comparison.regressions.some(r => /routing accuracy dropped/.test(r) && r.includes('misrouted: misroute')),
+    ).toBe(true);
+  });
+
+  it('does not flag a within-tolerance routing accuracy drop', () => {
+    const baseline = toBaseline(
+      summaryOf([caseResult({ id: 'a' }), caseResult({ id: 'b' })]),
+      { passRate: 0, rubricScore: 1.0, routeAccuracy: 0.5 },
+    );
+    const summary = summaryOf([
+      caseResult({ id: 'a' }),
+      caseResult({ id: 'b', expectedRoute: 'claude', route: 'codex', routeCorrect: false }),
+    ]);
+
+    const comparison = compareToBaseline(summary, baseline);
+
+    expect(comparison.ok).toBe(true);
+    expect(comparison.regressions).toEqual([]);
   });
 
   it('flags a baseline-passing case that now fails', () => {

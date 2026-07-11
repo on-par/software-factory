@@ -2,9 +2,11 @@
   "version": 1,
   "tolerance": {
     "passRate": 0,
-    "rubricScore": 1
+    "rubricScore": 1,
+    "routeAccuracy": 0
   },
   "passRate": 1,
+  "routeAccuracy": 1,
   "cases": {
     "mechanical-bug-fix": {
       "pass": true
