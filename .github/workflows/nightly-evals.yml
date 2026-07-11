@@ -62,7 +62,7 @@ jobs:
           fi
           existing=$(gh issue list --state open --label evals \
             --json number,title \
-            --jq '[.[] | select(.title == "Nightly eval regression")][0].number')
+            --jq '[.[] | select(.title == "Nightly eval regression")][0].number // empty')
           if [ -n "$existing" ]; then
             gh issue edit "$existing" --body-file regression-issue.md
             gh issue comment "$existing" \

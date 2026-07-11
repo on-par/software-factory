@@ -33,7 +33,7 @@ export function formatRegressionIssue(
           result.rubricScore < baselineCase.rubricScore - baseline.tolerance.rubricScore);
 
       const columns = [
-        result.id,
+        escapeCell(result.id),
         formatPass(baselineCase?.pass),
         formatPass(result.pass),
         formatScore(baselineCase?.rubricScore),
@@ -57,6 +57,10 @@ export function formatRegressionIssue(
     title: REGRESSION_ISSUE_TITLE,
     body: lines.join('\n'),
   };
+}
+
+function escapeCell(value: string): string {
+  return value.replace(/\|/g, '\\|');
 }
 
 function formatPass(pass: boolean | undefined): string {

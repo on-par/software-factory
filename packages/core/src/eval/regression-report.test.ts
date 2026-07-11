@@ -86,6 +86,16 @@ describe('formatRegressionIssue', () => {
     expect(issue.body).toContain('| b | — | ✅ | — | 7.0 | — |  |');
   });
 
+  it('escapes pipe characters in case ids so the markdown table stays intact', () => {
+    const baseline = toBaseline(summaryOf([caseResult({ id: 'a|b', pass: true })]));
+    const summary = summaryOf([caseResult({ id: 'a|b', pass: true })]);
+    const comparison = compareToBaseline(summary, baseline);
+
+    const issue = formatRegressionIssue(summary, baseline, comparison, 'https://example.test/run');
+
+    expect(issue.body).toContain('| a\\|b | ✅ | ✅ | — | — | — |  |');
+  });
+
   it('renders notes only when present', () => {
     const baselineWithMissingCase = toBaseline(summaryOf([caseResult({ id: 'a' })]));
     const summaryWithExtraCase = summaryOf([caseResult({ id: 'a' }), caseResult({ id: 'b' })]);
