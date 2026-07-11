@@ -245,6 +245,37 @@ describe('ModelRouter with StubModelExecutor', () => {
     expect(stub.calls).toHaveLength(2);
   });
 
+  it("throws when a route's tier has no available models", async () => {
+    const noModels: ModelsConfig = {
+      ...models,
+      tiers: { boss: [] },
+    };
+    const stub = new StubModelExecutor({ scripts: {} });
+    const router = new ModelRouter(noModels, routes, false, stub);
+
+    await expect(router.run('plan', 'do it')).rejects.toThrow(
+      "No available models for task 'plan'",
+    );
+    expect(stub.calls).toHaveLength(0);
+  });
+
+  it('fails over immediately on usage cap without retrying the same model', async () => {
+    const stub = new StubModelExecutor({
+      scripts: { plan: [{ fail: 'usage_cap' }, { output: 'RECOVERED' }] },
+    });
+    const router = new ModelRouter(twoModels, routes, false, stub);
+
+    const result = await router.run('plan', 'do it');
+
+    expect(result.output).toBe('RECOVERED');
+    expect(result.model).toBe('model-b');
+    expect(stub.calls.map(call => call.model)).toEqual(['model-a', 'model-b']);
+    expect(result.attempts).toEqual([
+      { model: 'model-a', reason: 'usage_cap', ok: false },
+      { model: 'model-b', reason: null, ok: true },
+    ]);
+  });
+
   it('skips experimental models by default', () => {
     const router = new ModelRouter(experimentalFirstModels, routes, false, new StubModelExecutor({ scripts: {} }), false);
 
