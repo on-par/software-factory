@@ -31,6 +31,7 @@ export interface CaseResult {
   routeCorrect: boolean;
   checks: DeterministicCheck[];
   rubricScore?: number;
+  judgeMalformed?: boolean;
   judgeSkipped: boolean;
   model: string;
   latencyMs: number;

@@ -128,7 +128,7 @@ function printTable(results: typeof summary.results, expectedRoutes: Map<string,
 
   for (const result of results) {
     const checksPassed = `${result.checks.filter(c => c.pass).length}/${result.checks.length}`;
-    const rubric = result.rubricScore === undefined ? '—' : result.rubricScore.toFixed(1);
+    const rubric = result.judgeMalformed ? 'MALFORMED' : result.rubricScore === undefined ? '—' : result.rubricScore.toFixed(1);
     console.log([
       result.id.padEnd(28),
       result.route.padEnd(12),
