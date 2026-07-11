@@ -11,11 +11,23 @@ import {
   LandConflictError,
   resolveUsageKnobs,
   superviseLoop,
+  triageProposalMessage,
 } from './cli/index.js';
 
 describe('cli', () => {
   it('exports the main entrypoint', () => {
     expect(typeof main).toBe('function');
+  });
+
+  it('formats the triage proposal message with a mv hint for non-empty content', () => {
+    const message = triageProposalMessage('lane-a 1\nlane-b 2\n', '/repo/.factory/queue.proposed', '/repo/.factory/queue');
+    expect(message).toContain('lane-a 1\nlane-b 2');
+    expect(message).toContain('mv /repo/.factory/queue.proposed /repo/.factory/queue');
+  });
+
+  it('returns null for empty or whitespace-only triage proposals', () => {
+    expect(triageProposalMessage('', '/repo/.factory/queue.proposed', '/repo/.factory/queue')).toBeNull();
+    expect(triageProposalMessage('   \n  ', '/repo/.factory/queue.proposed', '/repo/.factory/queue')).toBeNull();
   });
 
   it('resolves usage knobs from defaults', () => {
