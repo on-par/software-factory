@@ -176,7 +176,10 @@ describe('ModelRouter with StubModelExecutor', () => {
       return result;
     });
 
-    await Promise.resolve();
+    // Flush every pending microtask without ever advancing the fake clock: if the
+    // cooldown were not actually awaited, the retry loop would race through on
+    // microtasks alone and this promise would already be settled.
+    for (let i = 0; i < 100; i++) await Promise.resolve();
     expect(settled).toBe(false);
     await vi.advanceTimersByTimeAsync(cooldownMs * 2);
     const result = await promise;
