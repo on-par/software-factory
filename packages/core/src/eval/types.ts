@@ -22,6 +22,7 @@ export interface CaseResult {
   id: string;
   pass: boolean;
   route: 'codex' | 'claude' | 'escalate' | 'unparseable';
+  expectedRoute: ExpectedRoute;
   routeCorrect: boolean;
   checks: DeterministicCheck[];
   rubricScore?: number;
@@ -38,6 +39,9 @@ export interface EvalSummary {
   passed: number;
   failed: number;
   passRate: number;
+  routeAsserted: number;
+  // With no asserted routes, there is nothing that can misroute, so the gate should pass.
+  routeAccuracy: number;
   totalCostEstimate: number;
   totalLatencyMs: number;
 }

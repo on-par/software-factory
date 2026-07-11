@@ -90,6 +90,9 @@ describe('runEval', () => {
     expect(summary.passed).toBe(1);
     expect(summary.failed).toBe(1);
     expect(summary.passRate).toBe(0.5);
+    expect(summary.routeAsserted).toBe(2);
+    expect(summary.routeAccuracy).toBe(0.5);
+    expect(summary.results[0].expectedRoute).toBe('codex');
     expect(summary.totalLatencyMs).toBe(20);
   });
 
