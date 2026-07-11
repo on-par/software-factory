@@ -14,6 +14,8 @@ import {
   buildPhase,
   checkPhase,
   shipPhase,
+  estimateTrailingSpend,
+  formatUsageReport,
 } from '@on-par/factory-core';
 import { logEvent, branchFor, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock, shellEscape } from '@on-par/factory-core';
 import { exec as execCb } from 'node:child_process';
@@ -153,6 +155,17 @@ async function cmdCost() {
   const grandTotal = costs.reduce((s, c) => s + c.cost, 0);
   console.log('  ---');
   console.log(`  Total: $${grandTotal.toFixed(4)}`);
+}
+
+async function cmdUsage() {
+  const cap = Number(process.env.FACTORY_USAGE_CAP ?? 227);
+  if (!Number.isFinite(cap) || cap <= 0) {
+    console.error(chalk.red('factory: FACTORY_USAGE_CAP must be a positive number'));
+    process.exit(2);
+  }
+
+  const spend = estimateTrailingSpend();
+  console.log(formatUsageReport(spend, cap));
 }
 
 async function cmdStatus() {
@@ -683,6 +696,8 @@ export async function main() {
   program.command('models').description('List available models and costs').action(cmdModels);
 
   program.command('cost').description('Show cost tracking summary').action(cmdCost);
+
+  program.command('usage').description('Report trailing-5h cost-weighted subscription usage vs cap').action(cmdUsage);
 
   program.command('status').description('Show queue, events, PRs, models').action(cmdStatus);
 

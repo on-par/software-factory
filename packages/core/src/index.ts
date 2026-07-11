@@ -31,5 +31,9 @@ export { shipPhase } from './phases/ship.js';
 export { logEvent, logCost, readCosts, slugify, branchFor, setupWorktree, cleanupWorktree, gitFetch, shellEscape, ensureDir } from './utils/index.js';
 export { withGitLock } from './utils/lock.js';
 
+// Usage
+export { estimateTrailingSpend, formatUsageReport, priceFor, defaultTranscriptRoots, TRAILING_WINDOW_MS } from './usage/index.js';
+export type { TrailingUsageOptions } from './usage/index.js';
+
 // Types
 export * from './types/index.js';
