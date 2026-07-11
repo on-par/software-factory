@@ -90,8 +90,81 @@ async function cmdInit() {
   console.log(`Next: factory constitution --product <name>, then factory triage`);
 }
 
-async function cmdConstitution(opts: { list?: boolean; product?: string }) {
+export class ConstitutionExistsError extends Error {}
+export class InvalidProductNameError extends Error {}
+
+// Product names become a filename in the constitutions dir; keep them to a safe,
+// listable charset. Leading '_' is reserved (listProducts hides `_*.md`).
+export function assertValidProduct(product: string): void {
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(product)) {
+    throw new InvalidProductNameError(
+      `invalid product name '${product}': use letters, digits, '.', '_' or '-' and do not start with '_' or '.'`,
+    );
+  }
+}
+
+/** Extract the template's ```markdown skeleton and fill in the product name. */
+export function scaffoldConstitution(template: string, product: string): string {
+  const match = template.match(/```markdown\n([\s\S]*?)```/);
+  if (!match) {
+    throw new Error('constitution template is missing its ```markdown skeleton block');
+  }
+  const skeleton = match[1].replace(/\s+$/, '') + '\n';
+  const display = product
+    .split(/[-_]/)
+    .map(w => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(' ');
+  return skeleton
+    .replaceAll('<product-name>', product)
+    .replaceAll('<Product>', display);
+}
+
+export interface InitConstitutionDeps {
+  dir?: string;
+  readFile?: (p: string) => string;
+  fileExists?: (p: string) => boolean;
+  writeFile?: (p: string, data: string) => void;
+}
+
+/** Scaffold `<dir>/<product>.md` from the template. Returns the written path. */
+export function initConstitution(product: string, deps: InitConstitutionDeps = {}): string {
+  const {
+    dir = getConstitutionsDir(),
+    readFile = (p: string) => readFileSync(p, 'utf-8'),
+    fileExists = existsSync,
+    writeFile = (p: string, d: string) => writeFileSync(p, d),
+  } = deps;
+  assertValidProduct(product);
+  const target = resolve(dir, `${product}.md`);
+  if (fileExists(target)) {
+    throw new ConstitutionExistsError(`constitution '${product}' already exists at ${target} — nothing changed`);
+  }
+  const content = scaffoldConstitution(readFile(resolve(dir, '_template.md')), product);
+  writeFile(target, content);
+  return target;
+}
+
+async function cmdConstitution(opts: { list?: boolean; product?: string; init?: string }) {
   const loader = new ConstitutionLoader();
+
+  if (opts.init) {
+    try {
+      const target = initConstitution(opts.init);
+      console.log(chalk.green(`Created constitution at ${target}`));
+      console.log(`Next: edit its Purpose, Standards, and Quality Gates, then run: factory constitution --product ${opts.init}`);
+    } catch (err: any) {
+      if (err instanceof ConstitutionExistsError) {
+        console.error(chalk.red(err.message));
+        process.exit(1);
+      }
+      if (err instanceof InvalidProductNameError) {
+        console.error(chalk.red(err.message));
+        process.exit(2);
+      }
+      throw err;
+    }
+    return;
+  }
 
   if (opts.list) {
     const products = loader.listProducts();
@@ -112,7 +185,7 @@ async function cmdConstitution(opts: { list?: boolean; product?: string }) {
     return;
   }
 
-  console.error('usage: factory constitution --list | --product <name>');
+  console.error('usage: factory constitution --init <product> | --list | --product <name>');
   process.exit(2);
 }
 
@@ -959,6 +1032,7 @@ export async function main() {
   program
     .command('constitution')
     .description('Manage product constitutions')
+    .option('--init <product>', 'Scaffold a new constitution from the template')
     .option('--list', 'List available constitutions')
     .option('--product <name>', 'Set active product constitution')
     .action(cmdConstitution);
