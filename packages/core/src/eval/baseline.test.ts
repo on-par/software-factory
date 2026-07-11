@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CaseResult, EvalSummary } from './types.js';
+import { isRouteAsserted, type CaseResult, type EvalSummary } from './types.js';
 import { compareToBaseline, toBaseline } from './baseline.js';
 
 function caseResult(overrides: Partial<CaseResult> = {}): CaseResult {
@@ -21,8 +21,8 @@ function caseResult(overrides: Partial<CaseResult> = {}): CaseResult {
 function summaryOf(results: CaseResult[]): EvalSummary {
   const total = results.length;
   const passed = results.filter(r => r.pass).length;
-  const routeAsserted = results.filter(r => r.expectedRoute !== 'any').length;
-  const routeCorrect = results.filter(r => r.expectedRoute !== 'any' && r.routeCorrect).length;
+  const routeAsserted = results.filter(r => isRouteAsserted(r.expectedRoute)).length;
+  const routeCorrect = results.filter(r => isRouteAsserted(r.expectedRoute) && r.routeCorrect).length;
   return {
     results,
     total,

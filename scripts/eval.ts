@@ -2,6 +2,7 @@ import { writeFileSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   compareToBaseline,
+  isRouteAsserted,
   loadGoldenCases,
   loadModelsConfig,
   loadRoutesConfig,
@@ -50,7 +51,7 @@ const summary = await runEval({
 });
 
 printTable(summary.results, new Map(cases.map(c => [c.id, c.expectedRoute])));
-const routeCorrectCount = summary.results.filter(result => result.expectedRoute !== 'any' && result.routeCorrect).length;
+const routeCorrectCount = summary.results.filter(result => isRouteAsserted(result.expectedRoute) && result.routeCorrect).length;
 console.log(
   `pass-rate ${summary.passed}/${summary.total} (${Math.round(summary.passRate * 100)}%) · ` +
   `route-accuracy ${Math.round(summary.routeAccuracy * 100)}% (${routeCorrectCount}/${summary.routeAsserted}) · ` +

@@ -1,4 +1,4 @@
-import type { EvalSummary } from './types.js';
+import { isRouteAsserted, type EvalSummary } from './types.js';
 
 export interface BaselineCase {
   pass: boolean;
@@ -53,7 +53,7 @@ export function compareToBaseline(summary: EvalSummary, baseline: Baseline): Bas
     summary.routeAccuracy < baseline.routeAccuracy - (baseline.tolerance.routeAccuracy ?? 0)
   ) {
     const misrouted = summary.results
-      .filter(result => result.expectedRoute !== 'any' && !result.routeCorrect)
+      .filter(result => isRouteAsserted(result.expectedRoute) && !result.routeCorrect)
       .map(result => result.id);
     regressions.push(
       `routing accuracy dropped: ${summary.routeAccuracy} < baseline ${baseline.routeAccuracy} ` +

@@ -1,5 +1,10 @@
 export type ExpectedRoute = 'codex' | 'claude' | 'escalate' | 'any';
 
+// A case is "route-asserted" when it expects a specific route, i.e. it can be misrouted.
+export function isRouteAsserted(expectedRoute: ExpectedRoute): boolean {
+  return expectedRoute !== 'any';
+}
+
 export interface GoldenCase {
   id: string;
   title: string;
