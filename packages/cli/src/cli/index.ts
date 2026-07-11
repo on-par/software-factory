@@ -15,7 +15,7 @@ import {
   checkPhase,
   shipPhase,
 } from '@on-par/factory-core';
-import { logEvent, branchFor, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock } from '@on-par/factory-core';
+import { logEvent, branchFor, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock, shellEscape } from '@on-par/factory-core';
 import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -24,6 +24,7 @@ import { Octokit } from '@octokit/rest';
 import { resolveConfigPath } from '@on-par/factory-config';
 
 const exec = promisify(execCb);
+type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<unknown>;
 
 // ---------- helpers ----------
 
@@ -283,6 +284,31 @@ async function cmdLand(issueNum: number) {
   const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
   const octokit = getOctokit();
+
+  try {
+    const result = await landIssue(issueNum, repoRoot, ghRepo, paths, octokit);
+    console.log(chalk.green(`✅ Landed PR #${result.prNumber} for issue #${issueNum}`));
+  } catch (err: any) {
+    if (err instanceof LandConflictError) {
+      console.error(chalk.red(`factory: ${err.message}`));
+      process.exit(3);
+    }
+    if (err instanceof LandFailureError) {
+      console.error(chalk.red(`factory: ${err.message}`));
+      process.exit(err.code);
+    }
+    console.error(chalk.red(`factory: merge failed for issue #${issueNum}: ${err.message}`));
+    process.exit(5);
+  }
+}
+
+async function landIssue(
+  issueNum: number,
+  repoRoot: string,
+  ghRepo: string,
+  paths: ReturnType<typeof getFactoryPaths>,
+  octokit: Octokit,
+): Promise<{ branch: string; prNumber: number }> {
   const [owner, repoName] = ghRepo.split('/');
   const log = (type: string, msg: string) => logEvent(paths.events, type, issueNum, msg);
 
@@ -311,23 +337,33 @@ async function cmdLand(issueNum: number) {
 
   if (!prNumber) {
     log('fail', `no open PR for ${guessedBranch}`);
-    console.error(chalk.red(`factory: no open PR for issue #${issueNum} (${guessedBranch})`));
-    process.exit(1);
+    throw new LandFailureError(`no open PR for issue #${issueNum} (${guessedBranch})`, 1);
   }
 
   try {
     await withGitLock(repoRoot, async () => {
-      await squashMergeAndDelete(octokit, owner, repoName, branch, prNumber!);
+      await landOpenPullRequest({
+        octokit,
+        owner,
+        repoName,
+        ghRepo,
+        repoRoot,
+        issue: issueNum,
+        branch,
+        worktree,
+        prNumber: prNumber!,
+        log,
+      });
       log('merged', `squash-merged PR #${prNumber}`);
       await cleanupWorktree(repoRoot, worktree);
     });
   } catch (err: any) {
+    if (err instanceof LandConflictError) throw err;
     log('fail', `merge failed: ${err.message}`);
-    console.error(chalk.red(`factory: merge failed for issue #${issueNum}: ${err.message}`));
-    process.exit(5);
+    throw new LandFailureError(`merge failed for issue #${issueNum}: ${err.message}`, 5);
   }
 
-  console.log(chalk.green(`✅ Landed PR #${prNumber} for issue #${issueNum}`));
+  return { branch, prNumber };
 }
 
 async function cmdTriage(opts: { product?: string }) {
@@ -412,7 +448,7 @@ async function runLane(lane: string, issues: number[], repoRoot: string, ghRepo:
     try {
       const branch = await cmdShip(issue, {});
       // Wait for merge
-      await waitForMerge(issue, branch, ghRepo, paths);
+      await waitForMerge(issue, branch, repoRoot, ghRepo, paths);
     } catch (err: any) {
       logEvent(paths.events, 'parked', issue, `failure: ${err.message}`);
     }
@@ -471,7 +507,107 @@ export async function squashMergeAndDelete(
     .catch(() => {});
 }
 
-async function waitForMerge(issue: number, branch: string, ghRepo: string, paths: ReturnType<typeof getFactoryPaths>) {
+export class LandConflictError extends Error {}
+
+export class LandFailureError extends Error {
+  constructor(message: string, readonly code: number) {
+    super(message);
+  }
+}
+
+export async function getPullRequestMergeStateStatus(
+  octokit: Octokit,
+  owner: string,
+  repoName: string,
+  prNumber: number,
+): Promise<string | undefined> {
+  const result = await octokit.graphql<{
+    repository?: { pullRequest?: { mergeStateStatus?: string } };
+  }>(
+    `query PullRequestMergeState($owner: String!, $repo: String!, $number: Int!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $number) {
+          mergeStateStatus
+        }
+      }
+    }`,
+    { owner, repo: repoName, number: prNumber },
+  );
+  return result.repository?.pullRequest?.mergeStateStatus;
+}
+
+export async function watchPullRequestChecks(
+  prNumber: number,
+  ghRepo: string,
+  repoRoot: string,
+  run: CommandRunner = exec,
+): Promise<void> {
+  await run(
+    `gh pr checks ${shellEscape(String(prNumber))} --repo ${shellEscape(ghRepo)} --watch --fail-fast`,
+    { cwd: repoRoot, timeout: 600_000 },
+  ).catch(() => {});
+}
+
+export async function rebaseDirtyPullRequest(
+  opts: {
+    issue: number;
+    branch: string;
+    worktree: string;
+    prNumber: number;
+    log: (type: string, msg: string) => void;
+    run?: CommandRunner;
+    pathExists?: (path: string) => boolean;
+  },
+): Promise<void> {
+  const { issue, branch, worktree, prNumber, log, run = exec, pathExists = existsSync } = opts;
+
+  if (!pathExists(worktree)) {
+    const msg = `PR #${prNumber} DIRTY on ${branch} and worktree gone`;
+    log('conflict', msg);
+    throw new LandConflictError(msg);
+  }
+
+  try {
+    await run('git rebase origin/main', { cwd: worktree });
+    await run(`git push --force-with-lease origin ${shellEscape(branch)}`, { cwd: worktree });
+  } catch {
+    await run('git rebase --abort', { cwd: worktree }).catch(() => {});
+    const msg = `rebase conflict on ${branch} — parked`;
+    log('conflict', msg);
+    throw new LandConflictError(`issue #${issue}: ${msg}`);
+  }
+}
+
+export async function landOpenPullRequest(
+  opts: {
+    octokit: Octokit;
+    owner: string;
+    repoName: string;
+    ghRepo: string;
+    repoRoot: string;
+    issue: number;
+    branch: string;
+    worktree: string;
+    prNumber: number;
+    log: (type: string, msg: string) => void;
+    run?: CommandRunner;
+    pathExists?: (path: string) => boolean;
+  },
+): Promise<void> {
+  const { octokit, owner, repoName, ghRepo, repoRoot, issue, branch, worktree, prNumber, log, run, pathExists } = opts;
+
+  await watchPullRequestChecks(prNumber, ghRepo, repoRoot, run);
+  const mergeState = await getPullRequestMergeStateStatus(octokit, owner, repoName, prNumber);
+
+  if (mergeState === 'DIRTY') {
+    await rebaseDirtyPullRequest({ issue, branch, worktree, prNumber, log, run, pathExists });
+    await watchPullRequestChecks(prNumber, ghRepo, repoRoot, run);
+  }
+
+  await squashMergeAndDelete(octokit, owner, repoName, branch, prNumber);
+}
+
+async function waitForMerge(issue: number, branch: string, repoRoot: string, ghRepo: string, paths: ReturnType<typeof getFactoryPaths>) {
   const octokit = getOctokit();
   const [owner, repoName] = ghRepo.split('/');
 
@@ -482,8 +618,7 @@ async function waitForMerge(issue: number, branch: string, ghRepo: string, paths
     }
 
     if (process.env.FACTORY_MERGE === '1') {
-      // Auto-merge logic would go here
-      logEvent(paths.events, 'merge', issue, 'auto-merge not yet implemented');
+      await landIssue(issue, repoRoot, ghRepo, paths, octokit);
       return;
     }
 
