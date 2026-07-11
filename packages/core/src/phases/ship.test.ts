@@ -327,7 +327,8 @@ describe('shipPhase CI watch', () => {
       expect(logs.some(([, msg]) => msg.includes('CI green'))).toBe(false);
       expect(logs.some(([, msg]) => msg.includes('CI failed'))).toBe(false);
       expect(logs).toContainEqual(['ready', 'PR #123 ready for review']);
-      expect(callCount()).toBeGreaterThanOrEqual(39);
+      expect(callCount()).toBeGreaterThan(0);
+      expect(callCount()).toBeLessThanOrEqual(15); // backoff → far fewer polls than fixed 15s (~40)
     } finally {
       vi.useRealTimers();
     }

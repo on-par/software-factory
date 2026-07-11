@@ -4,6 +4,7 @@ import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { Octokit } from '@octokit/rest';
 import { shellEscape } from '../utils/index.js';
+import { watchChecks } from '../utils/ci-watch.js';
 
 const exec = promisify(execCb);
 type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<{ stdout: string }>;
@@ -110,28 +111,10 @@ Closes #${issue}`,
   if (watchCI) {
     log('ship', `Watching CI for PR #${prNumber}`);
     try {
-      // Poll checks for up to 10 minutes
-      const deadline = Date.now() + 600_000;
-      while (Date.now() < deadline) {
-        const { data: checks } = await octokit.rest.checks.listForRef({
-          owner,
-          repo: repoName,
-          ref: branch,
-        });
-        if (checks.check_runs.length > 0) {
-          const allDone = checks.check_runs.every(r => r.status === 'completed');
-          const anyFailed = checks.check_runs.some(r => r.conclusion === 'failure');
-          if (allDone) {
-            if (anyFailed) {
-              log('ship', `CI failed for PR #${prNumber}`);
-            } else {
-              log('ship', `CI green for PR #${prNumber}`);
-            }
-            break;
-          }
-        }
-        await sleep(15_000);
-      }
+      const outcome = await watchChecks({ octokit, owner, repo: repoName, ref: branch });
+      if (outcome === 'success') log('ship', `CI green for PR #${prNumber}`);
+      else if (outcome === 'failure') log('ship', `CI failed for PR #${prNumber}`);
+      // outcome === 'timeout': no log, proceed to ready (unchanged best-effort behavior)
     } catch {}
   }
 
@@ -167,6 +150,3 @@ async function inspectRecoveryState(
   };
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise(r => setTimeout(r, ms));
-}

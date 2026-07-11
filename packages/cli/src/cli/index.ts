@@ -19,6 +19,7 @@ import {
   formatUsageReport,
   watchUsage,
   diagnoseModels,
+  watchChecks,
 } from '@on-par/factory-core';
 import type { ModelDiagnosis } from '@on-par/factory-core';
 import { logEvent, branchFor, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock, withFileLock, shellEscape } from '@on-par/factory-core';
@@ -746,18 +747,6 @@ export async function markPullRequestReady(octokit: Octokit, pullRequestId: stri
   );
 }
 
-export async function watchPullRequestChecks(
-  prNumber: number,
-  ghRepo: string,
-  repoRoot: string,
-  run: CommandRunner = exec,
-): Promise<void> {
-  await run(
-    `gh pr checks ${shellEscape(String(prNumber))} --repo ${shellEscape(ghRepo)} --watch --fail-fast`,
-    { cwd: repoRoot, timeout: 600_000 },
-  ).catch(() => {});
-}
-
 export async function rebaseDirtyPullRequest(
   opts: {
     issue: number;
@@ -821,12 +810,12 @@ export async function landOpenPullRequest(
     sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)),
   } = opts;
 
-  await watchPullRequestChecks(prNumber, ghRepo, repoRoot, run);
+  await watchChecks({ octokit, owner, repo: repoName, ref: branch }).catch(() => {});
   let state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
 
   if (state.mergeStateStatus === 'DIRTY') {
     await rebaseDirtyPullRequest({ issue, branch, worktree, prNumber, log, run, pathExists });
-    await watchPullRequestChecks(prNumber, ghRepo, repoRoot, run);
+    await watchChecks({ octokit, owner, repo: repoName, ref: branch }).catch(() => {});
     state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
   }
 

@@ -466,6 +466,9 @@ describe('cli', () => {
             calls.push(['deleteRef', args]);
           },
         },
+        checks: {
+          listForRef: async () => ({ data: { check_runs: [{ status: 'completed', conclusion: 'success' }] } }),
+        },
       },
     };
     const run = async (command: string, options: any) => {
@@ -489,10 +492,8 @@ describe('cli', () => {
     });
 
     expect(calls).toEqual([
-      ['run', "gh pr checks '123' --repo 'on-par/software-factory' --watch --fail-fast", { cwd: '/repo', timeout: 600_000 }],
       ['run', 'git rebase origin/main', { cwd: '/repo-factory-20' }],
       ['run', "git push --force-with-lease origin 'ship-it/20-dirty'", { cwd: '/repo-factory-20' }],
-      ['run', "gh pr checks '123' --repo 'on-par/software-factory' --watch --fail-fast", { cwd: '/repo', timeout: 600_000 }],
       ['merge', { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash' }],
       ['deleteRef', { owner: 'on-par', repo: 'software-factory', ref: 'heads/ship-it/20-dirty' }],
     ]);
@@ -509,6 +510,9 @@ describe('cli', () => {
           },
         },
         git: { deleteRef: async () => {} },
+        checks: {
+          listForRef: async () => ({ data: { check_runs: [{ status: 'completed', conclusion: 'success' }] } }),
+        },
       },
     };
     const run = async (command: string, options: any) => {
@@ -535,7 +539,6 @@ describe('cli', () => {
     ).rejects.toBeInstanceOf(LandConflictError);
 
     expect(calls).toEqual([
-      ['run', "gh pr checks '123' --repo 'on-par/software-factory' --watch --fail-fast", { cwd: '/repo', timeout: 600_000 }],
       ['run', 'git rebase origin/main', { cwd: '/repo-factory-20' }],
       ['run', 'git rebase --abort', { cwd: '/repo-factory-20' }],
       ['log', 'conflict', 'rebase conflict on ship-it/20-dirty — parked'],
@@ -553,6 +556,9 @@ describe('cli', () => {
           },
         },
         git: { deleteRef: async () => {} },
+        checks: {
+          listForRef: async () => ({ data: { check_runs: [{ status: 'completed', conclusion: 'success' }] } }),
+        },
       },
     };
     const run = async (command: string, options: any) => {
@@ -578,7 +584,6 @@ describe('cli', () => {
     ).rejects.toBeInstanceOf(LandConflictError);
 
     expect(calls).toEqual([
-      ['run', "gh pr checks '123' --repo 'on-par/software-factory' --watch --fail-fast", { cwd: '/repo', timeout: 600_000 }],
       ['log', 'conflict', 'PR #123 DIRTY on ship-it/20-dirty and worktree gone'],
     ]);
   });
@@ -605,6 +610,9 @@ describe('cli', () => {
           },
         },
         git: { deleteRef: async (args: any) => calls.push(['deleteRef', args]) },
+        checks: {
+          listForRef: async () => ({ data: { check_runs: [{ status: 'completed', conclusion: 'success' }] } }),
+        },
       },
     };
 
@@ -653,6 +661,9 @@ describe('cli', () => {
           },
         },
         git: { deleteRef: async () => {} },
+        checks: {
+          listForRef: async () => ({ data: { check_runs: [{ status: 'completed', conclusion: 'success' }] } }),
+        },
       },
     };
 
@@ -696,6 +707,9 @@ describe('cli', () => {
           },
         },
         git: { deleteRef: async () => {} },
+        checks: {
+          listForRef: async () => ({ data: { check_runs: [{ status: 'completed', conclusion: 'success' }] } }),
+        },
       },
     };
 
@@ -734,6 +748,9 @@ describe('cli', () => {
           },
         },
         git: { deleteRef: async () => {} },
+        checks: {
+          listForRef: async () => ({ data: { check_runs: [{ status: 'completed', conclusion: 'success' }] } }),
+        },
       },
     };
 
