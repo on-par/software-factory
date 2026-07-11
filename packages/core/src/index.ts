@@ -8,8 +8,10 @@ export type { ModelsConfig, RoutesConfig, FactoryConfig } from './config/index.j
 export { ModelRegistry, isCommandAvailable } from './models/index.js';
 
 // Router
-export { ModelRouter } from './router/index.js';
-export type { RouterResult, FailoverReason } from './router/index.js';
+export { ModelRouter, CliModelExecutor } from './router/index.js';
+export type { RouterResult, FailoverReason, ModelExecutor, ModelExecutorContext } from './router/index.js';
+export { StubModelExecutor } from './router/stub.js';
+export type { StubModelExecutorOptions } from './router/stub.js';
 
 // Constitutions
 export { ConstitutionLoader } from './constitutions/index.js';

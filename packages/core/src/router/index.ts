@@ -27,6 +27,89 @@ export interface RouterResult {
   attempts: { model: string; reason: FailoverReason | null; ok: boolean }[];
 }
 
+export interface ModelExecutorContext {
+  worktree: string;
+  timeout: number;
+  task: TaskType;
+  registry: ModelRegistry;
+  routesConfig: RoutesConfig;
+}
+
+/** Executes a single resolved model. Implementations must, on failure,
+ *  throw an Error carrying a `reason: FailoverReason` property (the router's
+ *  catch block reads `err.reason ?? classifyFailure(...)`). */
+export interface ModelExecutor {
+  runModel(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string>;
+}
+
+/** Classify a failure from stderr/exit code */
+function classifyFailure(stderr: string, exitCode: number): FailoverReason {
+  if (exitCode === 124) return 'timeout';
+  const text = stderr.toLowerCase();
+  if (/rate.?limit|429|too many requests/.test(text)) return 'rate_limit';
+  if (/usage.?limit|quota|billing|insufficient|credit/.test(text)) return 'usage_cap';
+  if (/empty|no content|no response/.test(text)) return 'empty_response';
+  if (/error|fail|exception/.test(text)) return 'error';
+  return 'unknown';
+}
+
+export class CliModelExecutor implements ModelExecutor {
+  /** Run a single model via Claude CLI or Codex CLI */
+  async runModel(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string> {
+    const def = ctx.registry.get(model);
+    if (!def) throw new Error(`Unknown model: ${model}`);
+
+    const { worktree, timeout } = ctx;
+
+    if (def.codex && (ctx.task === 'build_codex' || ctx.routesConfig.routes[ctx.task]?.requires === 'codex')) {
+      return this.runCodex(model, prompt, worktree, timeout, ctx.registry);
+    }
+    return this.runClaude(model, prompt, worktree, timeout, ctx.registry);
+  }
+
+  /** Run via Claude CLI: claude -p <prompt> --model <flag> --dangerously-skip-permissions */
+  private async runClaude(model: string, prompt: string, worktree: string, timeout: number, registry: ModelRegistry): Promise<string> {
+    const flag = registry.getClaudeFlag(model);
+    const modelArg = flag ? `--model ${flag}` : '';
+    const cmd = `claude -p ${shellEscape(prompt)} ${modelArg} --dangerously-skip-permissions`;
+
+    try {
+      const { stdout } = await exec(cmd, {
+        cwd: worktree,
+        timeout: timeout * 1000,
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      return stdout;
+    } catch (err: any) {
+      err.reason = err.killed ? 'timeout' : classifyFailure(err.stderr ?? '', err.code ?? 1);
+      throw err;
+    }
+  }
+
+  /** Run via Codex CLI: codex exec --yolo -C <worktree> [flags] -o <output> - < prompt */
+  private async runCodex(model: string, prompt: string, worktree: string, timeout: number, registry: ModelRegistry): Promise<string> {
+    const extraFlag = registry.getCodexFlag(model) ?? '';
+    const tmpFile = await mktemp(join(tmpdir(), 'factory-codex-'));
+    const outFile = await mktemp(join(tmpdir(), 'factory-codex-out-'));
+    await writeFile(tmpFile, prompt);
+
+    const cmd = `codex exec --yolo -C ${shellEscape(worktree)} ${extraFlag} -o ${shellEscape(outFile)} - < ${shellEscape(tmpFile)}`;
+
+    try {
+      await exec(cmd, { timeout: timeout * 1000, maxBuffer: 10 * 1024 * 1024 });
+      const output = await readFile(outFile, 'utf-8').catch(() => '');
+      return output;
+    } catch (err: any) {
+      err.reason = err.killed ? 'timeout' : classifyFailure(err.stderr ?? '', err.code ?? 1);
+      throw err;
+    } finally {
+      // Cleanup temp files
+      await writeFile(tmpFile, '').catch(() => {});
+      await writeFile(outFile, '').catch(() => {});
+    }
+  }
+}
+
 export class ModelRouter {
   private registry: ModelRegistry;
 
@@ -34,6 +117,7 @@ export class ModelRouter {
     private modelsConfig: ModelsConfig,
     private routesConfig: RoutesConfig,
     private byok = false,
+    private executor: ModelExecutor = new CliModelExecutor(),
   ) {
     this.registry = new ModelRegistry(modelsConfig);
   }
@@ -61,13 +145,7 @@ export class ModelRouter {
 
   /** Classify a failure from stderr/exit code */
   classifyFailure(stderr: string, exitCode: number): FailoverReason {
-    if (exitCode === 124) return 'timeout';
-    const text = stderr.toLowerCase();
-    if (/rate.?limit|429|too many requests/.test(text)) return 'rate_limit';
-    if (/usage.?limit|quota|billing|insufficient|credit/.test(text)) return 'usage_cap';
-    if (/empty|no content|no response/.test(text)) return 'empty_response';
-    if (/error|fail|exception/.test(text)) return 'error';
-    return 'unknown';
+    return classifyFailure(stderr, exitCode);
   }
 
   /**
@@ -103,7 +181,9 @@ export class ModelRouter {
         onLog(`Trying ${model} for ${task} (attempt ${retries + 1})`);
 
         try {
-          const output = await this.runModel(model, prompt, { worktree, timeout, task });
+          const output = await this.executor.runModel(model, prompt, {
+            worktree, timeout, task, registry: this.registry, routesConfig: this.routesConfig,
+          });
 
           if (output.trim().length > 0) {
             // Success
@@ -157,65 +237,6 @@ export class ModelRouter {
     }
 
     throw new Error(`All models failed for task '${task}': ${attempts.map(a => `${a.model}(${a.reason})`).join(', ')}`);
-  }
-
-  /** Run a single model via Claude CLI or Codex CLI */
-  private async runModel(
-    model: string,
-    prompt: string,
-    options: { worktree: string; timeout: number; task: TaskType },
-  ): Promise<string> {
-    const def = this.registry.get(model);
-    if (!def) throw new Error(`Unknown model: ${model}`);
-
-    const { worktree, timeout } = options;
-
-    if (def.codex && (options.task === 'build_codex' || this.routesConfig.routes[options.task]?.requires === 'codex')) {
-      return this.runCodex(model, prompt, worktree, timeout);
-    }
-    return this.runClaude(model, prompt, worktree, timeout);
-  }
-
-  /** Run via Claude CLI: claude -p <prompt> --model <flag> --dangerously-skip-permissions */
-  private async runClaude(model: string, prompt: string, worktree: string, timeout: number): Promise<string> {
-    const flag = this.registry.getClaudeFlag(model);
-    const modelArg = flag ? `--model ${flag}` : '';
-    const cmd = `claude -p ${shellEscape(prompt)} ${modelArg} --dangerously-skip-permissions`;
-
-    try {
-      const { stdout } = await exec(cmd, {
-        cwd: worktree,
-        timeout: timeout * 1000,
-        maxBuffer: 10 * 1024 * 1024,
-      });
-      return stdout;
-    } catch (err: any) {
-      err.reason = err.killed ? 'timeout' : this.classifyFailure(err.stderr ?? '', err.code ?? 1);
-      throw err;
-    }
-  }
-
-  /** Run via Codex CLI: codex exec --yolo -C <worktree> [flags] -o <output> - < prompt */
-  private async runCodex(model: string, prompt: string, worktree: string, timeout: number): Promise<string> {
-    const extraFlag = this.registry.getCodexFlag(model) ?? '';
-    const tmpFile = await mktemp(join(tmpdir(), 'factory-codex-'));
-    const outFile = await mktemp(join(tmpdir(), 'factory-codex-out-'));
-    await writeFile(tmpFile, prompt);
-
-    const cmd = `codex exec --yolo -C ${shellEscape(worktree)} ${extraFlag} -o ${shellEscape(outFile)} - < ${shellEscape(tmpFile)}`;
-
-    try {
-      await exec(cmd, { timeout: timeout * 1000, maxBuffer: 10 * 1024 * 1024 });
-      const output = await readFile(outFile, 'utf-8').catch(() => '');
-      return output;
-    } catch (err: any) {
-      err.reason = err.killed ? 'timeout' : this.classifyFailure(err.stderr ?? '', err.code ?? 1);
-      throw err;
-    } finally {
-      // Cleanup temp files
-      await writeFile(tmpFile, '').catch(() => {});
-      await writeFile(outFile, '').catch(() => {});
-    }
   }
 }
 
