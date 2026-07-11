@@ -1,7 +1,8 @@
 {
   "name": "@on-par/factory-server",
+  "private": true,
   "version": "2.0.0",
-  "description": "SaaS server for the Software Factory — webhook triggers, sandboxed execution, multi-tenant.",
+  "description": "Phase-2 SaaS server stub — NOT IMPLEMENTED, do not use. createServer() throws. Marked private so it is never published.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
