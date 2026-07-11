@@ -21,7 +21,7 @@ import {
 import { logEvent, branchFor, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock, shellEscape } from '@on-par/factory-core';
 import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { resolve, dirname, basename } from 'node:path';
 import { Octokit } from '@octokit/rest';
 import { resolveConfigPath } from '@on-par/factory-config';
@@ -161,6 +161,7 @@ async function cmdCost() {
 export interface UsageKnobs {
   cap: number;
   stopAt: number;
+  resumeAt: number;
   pollMs: number;
   watch: boolean;
 }
@@ -176,6 +177,11 @@ export function resolveUsageKnobs(env: NodeJS.ProcessEnv = process.env): UsageKn
     throw new Error('FACTORY_STOP_AT must be a number in (0, 1]');
   }
 
+  const resumeAt = Number(env.FACTORY_RESUME_AT ?? 0.65);
+  if (!Number.isFinite(resumeAt) || resumeAt <= 0 || resumeAt > 1) {
+    throw new Error('FACTORY_RESUME_AT must be a number in (0, 1]');
+  }
+
   const pollSeconds = Number(env.FACTORY_USAGE_POLL ?? 180);
   if (!Number.isFinite(pollSeconds) || pollSeconds <= 0) {
     throw new Error('FACTORY_USAGE_POLL must be a positive number');
@@ -184,6 +190,7 @@ export function resolveUsageKnobs(env: NodeJS.ProcessEnv = process.env): UsageKn
   return {
     cap,
     stopAt,
+    resumeAt,
     pollMs: pollSeconds * 1000,
     watch: env.FACTORY_USAGE_WATCH !== '0',
   };
@@ -504,6 +511,37 @@ async function cmdRun() {
   logEvent(paths.events, 'run-done', 'all', 'all lanes finished');
 }
 
+async function cmdSupervise(opts: { now?: boolean }) {
+  const repoRoot = await getRepoRoot();
+  const paths = getFactoryPaths(repoRoot);
+
+  const queueLines = existsSync(paths.queue)
+    ? readFileSync(paths.queue, 'utf-8').split('\n').filter(l => l.trim() && !l.trim().startsWith('#'))
+    : [];
+  if (queueLines.length === 0) {
+    console.error('queue empty — run factory init + triage first');
+    process.exit(2);
+  }
+
+  let knobs: UsageKnobs;
+  try {
+    knobs = resolveUsageKnobs();
+  } catch (err: any) {
+    console.error(chalk.red(`factory: ${err.message}`));
+    process.exit(2);
+  }
+
+  await superviseLoop({
+    cap: knobs.cap,
+    resumeAt: knobs.resumeAt,
+    pollMs: knobs.pollMs,
+    stopFile: paths.stop,
+    eventsFile: paths.events,
+    now: opts.now,
+    runQueue: () => cmdRun(),
+  });
+}
+
 async function runLane(lane: string, issues: number[], repoRoot: string, ghRepo: string, paths: ReturnType<typeof getFactoryPaths>) {
   for (const issue of issues) {
     if (existsSync(paths.stop)) {
@@ -726,6 +764,58 @@ export async function waitForMerge(
   }
 }
 
+export interface SuperviseDeps {
+  cap: number;
+  resumeAt: number;
+  pollMs: number;
+  stopFile: string;
+  eventsFile: string;
+  now?: boolean;
+  runQueue: () => Promise<void>;
+  estimateSpend?: () => number;
+  pathExists?: (path: string) => boolean;
+  clearStop?: (path: string) => void;
+  sleep?: (ms: number) => Promise<void>;
+  emitEvent?: typeof logEvent;
+  writeLine?: (line: string) => void;
+}
+
+export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
+  const {
+    cap,
+    resumeAt,
+    pollMs,
+    stopFile,
+    eventsFile,
+    now,
+    runQueue,
+    estimateSpend = estimateTrailingSpend,
+    pathExists = existsSync,
+    clearStop = (path: string) => rmSync(path, { force: true }),
+    sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)),
+    emitEvent = logEvent,
+    writeLine = (line: string) => console.log(line),
+  } = deps;
+
+  let cycle = 0;
+  while (true) {
+    cycle++;
+    let pct = estimateSpend() / cap;
+    if (cycle > 1 || !now) {
+      while (pct >= resumeAt) {
+        writeLine(`[factory] supervise: trailing usage ${Math.round(pct * 100)}% >= resume gate ${Math.round(resumeAt * 100)}% — waiting ${pollMs / 1000}s`);
+        await sleep(pollMs);
+        pct = estimateSpend() / cap;
+      }
+    }
+    emitEvent(eventsFile, 'resumed', 'usage', `supervise cycle ${cycle}: trailing usage at ${Math.round(pct * 100)}% of cap — starting run`);
+    clearStop(stopFile);
+    await runQueue();
+    if (!pathExists(stopFile)) break;
+  }
+  emitEvent(eventsFile, 'supervisor-done', 'usage', 'supervise finished — queue drained or lanes need attention');
+}
+
 // ---------- main ----------
 
 export async function main() {
@@ -776,6 +866,14 @@ export async function main() {
     });
 
   program.command('run').description('Process the whole queue (lanes in parallel)').action(cmdRun);
+
+  program
+    .command('supervise')
+    .description('Multi-window loop: wait for usage headroom, run the queue, repeat until drained')
+    .option('--now', 'Skip the initial headroom wait')
+    .action(async (opts) => {
+      await cmdSupervise(opts);
+    });
 
   program
     .command('stop')
