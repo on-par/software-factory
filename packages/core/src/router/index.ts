@@ -42,6 +42,17 @@ export interface ModelExecutor {
   runModel(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string>;
 }
 
+/** Classify a failure from stderr/exit code */
+function classifyFailure(stderr: string, exitCode: number): FailoverReason {
+  if (exitCode === 124) return 'timeout';
+  const text = stderr.toLowerCase();
+  if (/rate.?limit|429|too many requests/.test(text)) return 'rate_limit';
+  if (/usage.?limit|quota|billing|insufficient|credit/.test(text)) return 'usage_cap';
+  if (/empty|no content|no response/.test(text)) return 'empty_response';
+  if (/error|fail|exception/.test(text)) return 'error';
+  return 'unknown';
+}
+
 export class CliModelExecutor implements ModelExecutor {
   /** Run a single model via Claude CLI or Codex CLI */
   async runModel(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string> {
@@ -70,7 +81,7 @@ export class CliModelExecutor implements ModelExecutor {
       });
       return stdout;
     } catch (err: any) {
-      err.reason = err.killed ? 'timeout' : this.classifyFailure(err.stderr ?? '', err.code ?? 1);
+      err.reason = err.killed ? 'timeout' : classifyFailure(err.stderr ?? '', err.code ?? 1);
       throw err;
     }
   }
@@ -89,24 +100,13 @@ export class CliModelExecutor implements ModelExecutor {
       const output = await readFile(outFile, 'utf-8').catch(() => '');
       return output;
     } catch (err: any) {
-      err.reason = err.killed ? 'timeout' : this.classifyFailure(err.stderr ?? '', err.code ?? 1);
+      err.reason = err.killed ? 'timeout' : classifyFailure(err.stderr ?? '', err.code ?? 1);
       throw err;
     } finally {
       // Cleanup temp files
       await writeFile(tmpFile, '').catch(() => {});
       await writeFile(outFile, '').catch(() => {});
     }
-  }
-
-  /** Classify a failure from stderr/exit code */
-  private classifyFailure(stderr: string, exitCode: number): FailoverReason {
-    if (exitCode === 124) return 'timeout';
-    const text = stderr.toLowerCase();
-    if (/rate.?limit|429|too many requests/.test(text)) return 'rate_limit';
-    if (/usage.?limit|quota|billing|insufficient|credit/.test(text)) return 'usage_cap';
-    if (/empty|no content|no response/.test(text)) return 'empty_response';
-    if (/error|fail|exception/.test(text)) return 'error';
-    return 'unknown';
   }
 }
 
@@ -145,13 +145,7 @@ export class ModelRouter {
 
   /** Classify a failure from stderr/exit code */
   classifyFailure(stderr: string, exitCode: number): FailoverReason {
-    if (exitCode === 124) return 'timeout';
-    const text = stderr.toLowerCase();
-    if (/rate.?limit|429|too many requests/.test(text)) return 'rate_limit';
-    if (/usage.?limit|quota|billing|insufficient|credit/.test(text)) return 'usage_cap';
-    if (/empty|no content|no response/.test(text)) return 'empty_response';
-    if (/error|fail|exception/.test(text)) return 'error';
-    return 'unknown';
+    return classifyFailure(stderr, exitCode);
   }
 
   /**
