@@ -9,11 +9,41 @@ import {
   landOpenPullRequest,
   waitForMerge,
   LandConflictError,
+  resolveUsageKnobs,
 } from './cli/index.js';
 
 describe('cli', () => {
   it('exports the main entrypoint', () => {
     expect(typeof main).toBe('function');
+  });
+
+  it('resolves usage knobs from defaults', () => {
+    expect(resolveUsageKnobs({})).toEqual({
+      cap: 227,
+      stopAt: 0.75,
+      pollMs: 180_000,
+      watch: true,
+    });
+  });
+
+  it('resolves usage knobs from env overrides', () => {
+    expect(resolveUsageKnobs({
+      FACTORY_USAGE_CAP: '100',
+      FACTORY_STOP_AT: '0.5',
+      FACTORY_USAGE_POLL: '60',
+      FACTORY_USAGE_WATCH: '0',
+    })).toEqual({
+      cap: 100,
+      stopAt: 0.5,
+      pollMs: 60_000,
+      watch: false,
+    });
+  });
+
+  it('rejects invalid usage knob values with env var names', () => {
+    expect(() => resolveUsageKnobs({ FACTORY_USAGE_CAP: '-5' })).toThrow(/FACTORY_USAGE_CAP/);
+    expect(() => resolveUsageKnobs({ FACTORY_STOP_AT: '1.5' })).toThrow(/FACTORY_STOP_AT/);
+    expect(() => resolveUsageKnobs({ FACTORY_USAGE_POLL: 'abc' })).toThrow(/FACTORY_USAGE_POLL/);
   });
 
   it('detects a merge by head branch even when it is outside the recent-closed window', async () => {

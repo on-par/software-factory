@@ -10,9 +10,9 @@
   "scripts": {
     "build": "npm run build -w @on-par/factory-config && npm run build -w @on-par/factory-core && npm run build -w @on-par/factory-cli && npm run build -w @on-par/factory-server",
     "dev": "npm run dev --workspace @on-par/factory-cli",
-    "lint": "npm run lint --workspaces",
+    "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces",
-    "test": "npm run test --workspaces",
+    "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "clean": "rm -rf packages/*/dist packages/*/node_modules"
   },
