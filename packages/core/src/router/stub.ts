@@ -1,7 +1,9 @@
 import type { ModelExecutor, ModelExecutorContext, FailoverReason } from './index.js';
 import type { TaskType } from '../types/index.js';
 
-type StubStep = { output: string } | { fail: FailoverReason };
+type StubStep =
+  | { output: string; effect?: (ctx: ModelExecutorContext) => Promise<void> | void }
+  | { fail: FailoverReason };
 
 export interface StubModelExecutorOptions {
   /** Scripted steps per task type, consumed in order across successive runModel calls. */
@@ -29,7 +31,10 @@ export class StubModelExecutor implements ModelExecutor {
       err.exitCode = 1;
       throw err;
     }
-    if (step && 'output' in step) return step.output;
+    if (step && 'output' in step) {
+      await step.effect?.(ctx);
+      return step.output;
+    }
     if (this.options.defaultOutput !== undefined) return this.options.defaultOutput;
     throw new Error(`StubModelExecutor: no scripted step or defaultOutput for task '${ctx.task}'`);
   }
