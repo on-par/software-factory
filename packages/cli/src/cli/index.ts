@@ -461,7 +461,7 @@ async function landIssue(
           log,
         });
         log('merged', `squash-merged PR #${prNumber}`);
-        await cleanupWorktree(repoRoot, worktree);
+        await cleanupWorktree(repoRoot, worktree, log);
       }, { onSteal: pid => log('lock-stolen', `stole ${paths.mergeLock} from dead holder pid ${pid ?? 'unknown'}`) })
     );
   } catch (err: any) {

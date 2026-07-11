@@ -2,7 +2,7 @@
 
 import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
-import { writeFile, mkdtemp, readFile } from 'node:fs/promises';
+import { writeFile, mkdtemp, readFile, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ModelRegistry } from '../models/index.js';
@@ -103,9 +103,9 @@ export class CliModelExecutor implements ModelExecutor {
       err.reason = err.killed ? 'timeout' : classifyFailure(err.stderr ?? '', err.code ?? 1);
       throw err;
     } finally {
-      // Cleanup temp files
-      await writeFile(tmpFile, '').catch(() => {});
-      await writeFile(outFile, '').catch(() => {});
+      // Cleanup temp files (remove, don't zero out)
+      await unlink(tmpFile).catch(() => {});
+      await unlink(outFile).catch(() => {});
     }
   }
 }
