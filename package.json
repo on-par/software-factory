@@ -14,6 +14,7 @@
     "typecheck": "npm run typecheck --workspaces",
     "test": "npm run test --workspaces",
     "test:coverage": "vitest run --coverage",
+    "eval": "tsx scripts/eval.ts",
     "clean": "rm -rf packages/*/dist packages/*/node_modules"
   },
   "engines": {

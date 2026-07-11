@@ -39,6 +39,10 @@
       "tier": "checker",
       "description": "Product-specific custom checks (from constitution)"
     },
+    "eval_judge": {
+      "tier": "checker",
+      "description": "LLM judge scoring eval specs against a rubric"
+    },
     "review_pr": {
       "tier": "checker",
       "description": "Code review of the final diff before PR"
