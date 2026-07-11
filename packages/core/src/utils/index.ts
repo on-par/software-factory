@@ -65,9 +65,19 @@ export async function setupWorktree(
   await exec(`git worktree add -b ${shellEscape(branch)} ${shellEscape(worktreePath)} origin/main`, { cwd: repoRoot });
 }
 
-export async function cleanupWorktree(repoRoot: string, worktreePath: string): Promise<void> {
-  await exec(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot }).catch(() => {});
-  await exec('git worktree prune', { cwd: repoRoot }).catch(() => {});
+export async function cleanupWorktree(
+  repoRoot: string,
+  worktreePath: string,
+  log: (type: string, msg: string) => void = () => {},
+): Promise<void> {
+  await exec(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot })
+    .catch((err: any) =>
+      log('warn', `git worktree remove failed for ${worktreePath}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`),
+    );
+  await exec('git worktree prune', { cwd: repoRoot })
+    .catch((err: any) =>
+      log('warn', `git worktree prune failed in ${repoRoot}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`),
+    );
 }
 
 export function slugify(s: string): string {

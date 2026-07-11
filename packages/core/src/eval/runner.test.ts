@@ -150,7 +150,30 @@ describe('runEval', () => {
     });
 
     expect(summary.results[0].pass).toBe(false);
-    expect(summary.results[0].rubricScore).toBe(0);
+    expect(summary.results[0].judgeMalformed).toBe(true);
+    expect(summary.results[0].rubricScore).toBeUndefined();
+    expect(summary.results[0].error).toContain('not json');
+  });
+
+  it('parses nested-brace judge verdicts', async () => {
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [{ output: goodSpec }],
+        eval_judge: [{ output: '{"score":9,"reasons":"has {nested} braces"}' }],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+
+    const summary = await runEval({
+      cases: [goldenCase({ rubric: ['Names file'], minRubricScore: 8 })],
+      router,
+      judge: true,
+      now: tickingNow(),
+    });
+
+    expect(summary.results[0].rubricScore).toBe(9);
+    expect(summary.results[0].pass).toBe(true);
+    expect(summary.results[0].judgeMalformed).toBeFalsy();
   });
 
   it('records router errors and continues the run', async () => {
