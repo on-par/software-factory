@@ -8,6 +8,7 @@ export interface BaselineCase {
 export interface Baseline {
   version: 1;
   tolerance: { passRate: number; rubricScore: number; routeAccuracy: number };
+  budgets?: { totalCostEstimate?: number; latencyMs?: number };
   passRate: number;
   routeAccuracy: number;
   cases: Record<string, BaselineCase>;
@@ -21,7 +22,11 @@ export interface BaselineComparison {
 
 const DEFAULT_TOLERANCE: Baseline['tolerance'] = { passRate: 0, rubricScore: 1.0, routeAccuracy: 0 };
 
-export function toBaseline(summary: EvalSummary, tolerance: Baseline['tolerance'] = DEFAULT_TOLERANCE): Baseline {
+export function toBaseline(
+  summary: EvalSummary,
+  tolerance: Baseline['tolerance'] = DEFAULT_TOLERANCE,
+  budgets?: Baseline['budgets'],
+): Baseline {
   const cases: Record<string, BaselineCase> = {};
   for (const result of summary.results) {
     cases[result.id] = {
@@ -32,6 +37,7 @@ export function toBaseline(summary: EvalSummary, tolerance: Baseline['tolerance'
   return {
     version: 1,
     tolerance,
+    ...(budgets ? { budgets } : {}),
     passRate: summary.passRate,
     routeAccuracy: summary.routeAccuracy,
     cases,
@@ -60,6 +66,25 @@ export function compareToBaseline(summary: EvalSummary, baseline: Baseline): Bas
       `- tolerance ${baseline.tolerance.routeAccuracy ?? 0}` +
       (misrouted.length ? ` (misrouted: ${misrouted.join(', ')})` : ''),
     );
+  }
+
+  if (
+    baseline.budgets?.totalCostEstimate !== undefined &&
+    summary.totalCostEstimate > baseline.budgets.totalCostEstimate
+  ) {
+    regressions.push(
+      `estimated cost exceeds budget: ${summary.totalCostEstimate} > budget ${baseline.budgets.totalCostEstimate}`,
+    );
+  }
+
+  if (baseline.budgets?.latencyMs !== undefined) {
+    for (const result of summary.results) {
+      if (result.latencyMs > baseline.budgets.latencyMs) {
+        regressions.push(
+          `case '${result.id}' latency exceeds budget: ${result.latencyMs}ms > budget ${baseline.budgets.latencyMs}ms`,
+        );
+      }
+    }
   }
 
   const runIds = new Set(summary.results.map(result => result.id));
