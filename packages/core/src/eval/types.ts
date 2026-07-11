@@ -1,0 +1,43 @@
+export type ExpectedRoute = 'codex' | 'claude' | 'escalate' | 'any';
+
+export interface GoldenCase {
+  id: string;
+  title: string;
+  body: string;
+  expectedRoute: ExpectedRoute;
+  deterministicOnly: boolean;
+  rubric: string[];
+  minRubricScore: number;
+  stubOutput?: string;
+  path: string;
+}
+
+export interface DeterministicCheck {
+  name: string;
+  pass: boolean;
+  details: string;
+}
+
+export interface CaseResult {
+  id: string;
+  pass: boolean;
+  route: 'codex' | 'claude' | 'escalate' | 'unparseable';
+  routeCorrect: boolean;
+  checks: DeterministicCheck[];
+  rubricScore?: number;
+  judgeSkipped: boolean;
+  model: string;
+  latencyMs: number;
+  costEstimate: number;
+  error?: string;
+}
+
+export interface EvalSummary {
+  results: CaseResult[];
+  total: number;
+  passed: number;
+  failed: number;
+  passRate: number;
+  totalCostEstimate: number;
+  totalLatencyMs: number;
+}

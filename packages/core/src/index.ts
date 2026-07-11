@@ -22,10 +22,15 @@ export type { CheckerOutput, CheckSummary } from './types/index.js';
 export type { CheckerContext } from './checkers/index.js';
 
 // Phases
-export { planPhase } from './phases/plan.js';
+export { buildPlanPrompt, planPhase } from './phases/plan.js';
+export type { PlanPromptOpts } from './phases/plan.js';
 export { buildPhase } from './phases/build.js';
 export { checkPhase, disputeResolution } from './phases/check.js';
 export { shipPhase } from './phases/ship.js';
+
+// Eval
+export { loadGoldenCases, scoreSpec, judgeSpec, runEval } from './eval/index.js';
+export type { CaseResult, DeterministicCheck, EvalSummary, ExpectedRoute, GoldenCase, RunEvalOpts } from './eval/index.js';
 
 // Utils
 export { logEvent, logCost, readCosts, slugify, branchFor, setupWorktree, cleanupWorktree, gitFetch, shellEscape, ensureDir } from './utils/index.js';

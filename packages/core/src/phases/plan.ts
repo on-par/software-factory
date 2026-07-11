@@ -14,31 +14,19 @@ export interface PlanResult {
   escalate?: string;
 }
 
-export async function planPhase(
-  opts: {
-    issue: number;
-    repo: string;
-    worktree: string;
-    specPath: string;
-    product?: string;
-    router: ModelRouter;
-    constitutionLoader: ConstitutionLoader;
-    octokit: Octokit;
-    log: (type: string, msg: string) => void;
-  },
-): Promise<PlanResult> {
-  const { issue, repo, worktree, specPath, product, router, constitutionLoader, octokit, log } = opts;
+export interface PlanPromptOpts {
+  issue: number;
+  issueTitle: string;
+  issueBody: string;
+  specPath: string;
+  constitutionCtx: string;
+  product?: string;
+}
 
-  // Get issue details
-  const [owner, repoName] = repo.split('/');
-  const { data: issueData } = await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issue });
-  const issueTitle = issueData.title;
-  const issueBody = issueData.body ?? '';
+export function buildPlanPrompt(opts: PlanPromptOpts): string {
+  const { issue, issueTitle, issueBody, specPath, constitutionCtx, product } = opts;
 
-  // Build constitution context
-  const constitutionCtx = product ? constitutionLoader.buildContext(product) : '';
-
-  const prompt = `You are the PLAN phase of a multi-agent software factory for issue #${issue}.
+  return `You are the PLAN phase of a multi-agent software factory for issue #${issue}.
 Do NOT implement anything. You are already inside the isolated worktree (cwd).
 
 ${constitutionCtx}
@@ -80,6 +68,33 @@ Do not run tests, do not write or edit any other file, do not touch git.
 If the issue is genuinely too vague to plan without a product decision only a human
 can make, print a line starting exactly with "ESCALATE:" followed by the question,
 and do NOT write ${specPath}.`;
+}
+
+export async function planPhase(
+  opts: {
+    issue: number;
+    repo: string;
+    worktree: string;
+    specPath: string;
+    product?: string;
+    router: ModelRouter;
+    constitutionLoader: ConstitutionLoader;
+    octokit: Octokit;
+    log: (type: string, msg: string) => void;
+  },
+): Promise<PlanResult> {
+  const { issue, repo, worktree, specPath, product, router, constitutionLoader, octokit, log } = opts;
+
+  // Get issue details
+  const [owner, repoName] = repo.split('/');
+  const { data: issueData } = await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issue });
+  const issueTitle = issueData.title;
+  const issueBody = issueData.body ?? '';
+
+  // Build constitution context
+  const constitutionCtx = product ? constitutionLoader.buildContext(product) : '';
+
+  const prompt = buildPlanPrompt({ issue, issueTitle, issueBody, specPath, constitutionCtx, product });
 
   log('plan', `Starting plan phase`);
 
