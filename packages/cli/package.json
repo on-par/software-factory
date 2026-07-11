@@ -12,7 +12,7 @@
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "echo 'no tests yet' && exit 0"
+    "test": "vitest run"
   },
   "dependencies": {
     "@on-par/factory-core": "*",
