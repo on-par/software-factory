@@ -9,6 +9,7 @@ jobs:
   evals:
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
       issues: write
     steps:
@@ -41,6 +42,37 @@ jobs:
         with:
           name: eval-report
           path: eval-report.json
+
+      - name: Download previous eval history
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ids=$(gh run list --workflow nightly-evals.yml --status completed \
+            --limit 20 --json databaseId --jq '.[].databaseId')
+          : > history.jsonl
+          for id in $ids; do
+            if gh run download "$id" -n eval-history -D prev 2>/dev/null; then
+              cp prev/history.jsonl history.jsonl
+              break
+            fi
+          done
+
+      - name: Append + render trend
+        if: always()
+        run: |
+          npm run eval-history -- \
+            --report eval-report.json \
+            --history history.jsonl \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload eval history
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-history
+          path: history.jsonl
 
       - name: Build regression issue body
         if: steps.eval.outcome == 'failure'
