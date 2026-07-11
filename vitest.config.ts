@@ -19,12 +19,13 @@ export default defineConfig({
         'packages/server/**',
       ],
       thresholds: {
-        // RATCHET: set to today's floor, capped at 80. Raise toward
-        // 100 as tracks A/B add tests. All four kept equal for a simple global gate.
-        lines: 22,
-        functions: 22,
-        branches: 22,
-        statements: 22,
+        // RATCHET: each metric set ~2 points below the measured floor on
+        // main (branches capped at 80 per the hard cap). Raise toward 100
+        // as coverage grows; hard cap at 80.
+        lines: 73,
+        functions: 75,
+        branches: 80,
+        statements: 73,
       },
     },
   },
