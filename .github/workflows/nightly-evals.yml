@@ -8,6 +8,9 @@ on:
 jobs:
   evals:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@v4
 
@@ -26,6 +29,8 @@ jobs:
         run: npm install -g @anthropic-ai/claude-code
 
       - name: Full eval run
+        id: eval
+        continue-on-error: true
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: npm run eval -- --report eval-report.json --baseline evals/baseline.json
@@ -36,3 +41,41 @@ jobs:
         with:
           name: eval-report
           path: eval-report.json
+
+      - name: Build regression issue body
+        if: steps.eval.outcome == 'failure'
+        run: |
+          npm run regression-issue -- \
+            --report eval-report.json \
+            --baseline evals/baseline.json \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --out regression-issue.md
+
+      - name: File or update regression issue
+        if: steps.eval.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -f regression-issue.md ]; then
+            echo "no regression body produced — nothing to file"
+            exit 0
+          fi
+          existing=$(gh issue list --state open --label evals \
+            --json number,title \
+            --jq '[.[] | select(.title == "Nightly eval regression")][0].number')
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --body-file regression-issue.md
+            gh issue comment "$existing" \
+              --body "Refreshed from run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "updated existing regression issue #$existing"
+          else
+            gh issue create --label evals \
+              --title "Nightly eval regression" \
+              --body-file regression-issue.md
+          fi
+
+      - name: Fail the job on eval regression
+        if: steps.eval.outcome == 'failure'
+        run: |
+          echo "nightly eval step failed (regression or infra) — marking job red"
+          exit 1
