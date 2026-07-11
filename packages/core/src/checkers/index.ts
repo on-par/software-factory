@@ -2,20 +2,26 @@
 
 import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { ModelRouter } from '../router/index.js';
 import { ConstitutionLoader } from '../constitutions/index.js';
 import type { CheckerOutput, CheckSummary } from '../types/index.js';
 
 const exec = promisify(execCb);
 
+interface PackageJson {
+  scripts?: Record<string, string>;
+  [k: string]: unknown;
+}
+
 export interface CheckerContext {
   worktree: string;
   specPath: string;
   constitutionBody: string;
   product?: string;
+  packageJson?: PackageJson | null;
 }
 
 export type CheckerFn = (ctx: CheckerContext) => Promise<CheckerOutput>;
@@ -24,8 +30,8 @@ export type CheckerFn = (ctx: CheckerContext) => Promise<CheckerOutput>;
 
 export const compileChecker: CheckerFn = async (ctx) => {
   try {
-    const { stdout: pkg } = await exec('cat package.json', { cwd: ctx.worktree }).catch(() => ({ stdout: '' } as any));
-    const hasBuild = pkg && JSON.parse(pkg || '{}')?.scripts?.build;
+    const pkg = await getPackageJson(ctx);
+    const hasBuild = pkg?.scripts?.build;
 
     if (hasBuild) {
       try {
@@ -65,8 +71,8 @@ export const testsChecker: CheckerFn = async (ctx) => {
       }
     }
 
-    const { stdout: pkg } = await exec('cat package.json', { cwd: ctx.worktree }).catch(() => ({ stdout: '' } as any));
-    if (pkg && JSON.parse(pkg || '{}')?.scripts?.test) {
+    const pkg = await getPackageJson(ctx);
+    if (pkg?.scripts?.test) {
       try {
         await exec('npm test', { cwd: ctx.worktree, timeout: 300000 });
         return { checker: 'tests', result: 'PASS', details: 'npm test: OK' };
@@ -85,8 +91,8 @@ export const lintChecker: CheckerFn = async (ctx) => {
   const details: string[] = [];
   let result: 'PASS' | 'FAIL' = 'PASS';
 
-  const { stdout: pkg } = await exec('cat package.json', { cwd: ctx.worktree }).catch(() => ({ stdout: '' } as any));
-  const scripts = JSON.parse(pkg || '{}')?.scripts ?? {};
+  const pkg = await getPackageJson(ctx);
+  const scripts = pkg?.scripts ?? {};
 
   if (scripts.lint) {
     try {
@@ -161,39 +167,30 @@ export const linksChecker: CheckerFn = async (ctx) => {
 };
 
 export const accessibilityChecker: CheckerFn = async (ctx) => {
-  const { stdout: htmlFiles } = await exec(
-    `find . -name '*.html' -not -path '*/node_modules/*' -not -path '*/.git/*' 2>/dev/null | head -20`,
-    { cwd: ctx.worktree },
-  ).catch(() => ({ stdout: '' } as any));
+  const files = await findHtmlFiles(ctx.worktree, 20);
 
-  if (!htmlFiles.trim()) {
+  if (files.length === 0) {
     return { checker: 'accessibility', result: 'PASS', details: 'no HTML files — skipped' };
   }
 
   let issues = 0;
   const details: string[] = [];
 
-  for (const f of htmlFiles.trim().split('\n').filter(Boolean)) {
+  for (const rel of files) {
+    const html = await readFile(join(ctx.worktree, rel), 'utf-8').catch(() => '');
+
     // Images without alt
-    const { stdout: imgCount } = await exec(
-      `grep -oE '<img[^>]*>' "${f}" 2>/dev/null | grep -vc 'alt=' || echo 0`,
-      { cwd: ctx.worktree, shell: 'bash' },
-    ).catch(() => ({ stdout: '0' } as any));
-    const imgNoAlt = parseInt(imgCount.trim() || '0', 10);
+    const imgNoAlt = (html.match(/<img[^>]*>/g) ?? []).filter(t => !t.includes('alt=')).length;
     if (imgNoAlt > 0) {
       issues += imgNoAlt;
-      details.push(`${f}: ${imgNoAlt} images without alt`);
+      details.push(`${rel}: ${imgNoAlt} images without alt`);
     }
 
     // Placeholder links
-    const { stdout: phCount } = await exec(
-      `grep -coE 'href="#"' "${f}" 2>/dev/null || echo 0`,
-      { cwd: ctx.worktree, shell: 'bash' },
-    ).catch(() => ({ stdout: '0' } as any));
-    const ph = parseInt(phCount.trim() || '0', 10);
+    const ph = html.split(/\r?\n/).filter(l => l.includes('href="#"')).length;
     if (ph > 0) {
       issues += ph;
-      details.push(`${f}: ${ph} placeholder links`);
+      details.push(`${rel}: ${ph} placeholder links`);
     }
   }
 
@@ -279,14 +276,16 @@ export async function runAllCheckers(
   const productCheckers = ctx.product ? constitutionLoader.getCheckers(ctx.product) : [];
 
   const allCheckers = [...standardNames, ...productCheckers.filter(c => !standardNames.includes(c))];
+  const packageJson = await loadPackageJson(ctx.worktree);
+  const sharedCtx: CheckerContext = { ...ctx, packageJson };
 
   for (const name of allCheckers) {
     let output: CheckerOutput;
 
     if (BUILT_IN_CHECKERS[name]) {
-      output = await BUILT_IN_CHECKERS[name](ctx);
+      output = await BUILT_IN_CHECKERS[name](sharedCtx);
     } else if (name.startsWith('custom_')) {
-      output = await runCustomChecker(ctx, name, router);
+      output = await runCustomChecker(sharedCtx, name, router);
     } else {
       continue; // skip unknown
     }
@@ -306,6 +305,47 @@ export async function runAllCheckers(
 }
 
 // ---------- Helpers ----------
+
+async function loadPackageJson(worktree: string): Promise<PackageJson | null> {
+  try {
+    return JSON.parse(await readFile(join(worktree, 'package.json'), 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+async function getPackageJson(ctx: CheckerContext): Promise<PackageJson | null> {
+  return ctx.packageJson !== undefined ? ctx.packageJson : loadPackageJson(ctx.worktree);
+}
+
+async function findHtmlFiles(worktree: string, limit = Infinity): Promise<string[]> {
+  const results: string[] = [];
+
+  async function walk(dir: string): Promise<void> {
+    if (results.length >= limit) return;
+
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (results.length >= limit) return;
+
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules' || entry.name === '.git') continue;
+        await walk(join(dir, entry.name));
+      } else if (entry.isFile() && entry.name.endsWith('.html')) {
+        results.push(relative(worktree, join(dir, entry.name)));
+      }
+    }
+  }
+
+  await walk(worktree);
+  return results;
+}
 
 async function fileExists(path: string): Promise<boolean> {
   try {

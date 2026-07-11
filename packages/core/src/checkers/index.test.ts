@@ -7,6 +7,7 @@ import { ConstitutionLoader } from '../constitutions/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import {
+  accessibilityChecker,
   compileChecker,
   linksChecker,
   runAllCheckers,
@@ -134,6 +135,17 @@ describe('testsChecker', () => {
 
     expect(result.result).toBe('FAIL');
   });
+
+  it('uses shared package.json from context instead of re-reading from disk', async () => {
+    const worktree = await makeWorktree({
+      'package.json': '{"name":"fixture","version":"1.0.0","scripts":{"test":"node -e \\"process.exit(1)\\""}}',
+    });
+
+    const result = await testsChecker({ ...makeContext(worktree), packageJson: { scripts: {} } });
+
+    expect(result.result).toBe('PASS');
+    expect(result.details).toContain('no test command found');
+  });
 });
 
 describe('linksChecker', () => {
@@ -197,6 +209,47 @@ describe('linksChecker', () => {
     const result = await linksChecker(makeContext(worktree));
 
     expect(result.result).toBe('PASS');
+  });
+});
+
+describe('accessibilityChecker', () => {
+  it('counts images without alt text and placeholder links from HTML files', async () => {
+    const worktree = await makeWorktree({
+      'a.html': '<img src="a.png">\n<a href="#">x</a>\n<a href="#">y</a>',
+      'b.html': '<img src="b.png"><img src="c.png" alt="ok">\n<a href="#">z</a>',
+      'c.html': '<img src="d.png">\n<img src="e.png">',
+      'd.html': '<img src="f.png" alt="ok">',
+      'e.html': '<a href="/ok">ok</a>',
+      'f.html': '<main>clean</main>',
+      'nested/g.html': '<img src="g.png">\n<a href="#">nested</a>',
+      'nested/h.html': '<img src="h.png" alt="ok">',
+      'nested/i.html': '<a href="/fine">fine</a>',
+      'nested/j.html': '<section>also clean</section>',
+    });
+
+    const result = await accessibilityChecker(makeContext(worktree));
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain('a.html: 1 images without alt');
+    expect(result.details).toContain('a.html: 2 placeholder links');
+    expect(result.details).toContain('b.html: 1 images without alt');
+    expect(result.details).toContain('b.html: 1 placeholder links');
+    expect(result.details).toContain('c.html: 2 images without alt');
+    expect(result.details).toContain('nested/g.html: 1 images without alt');
+    expect(result.details).toContain('nested/g.html: 1 placeholder links');
+    expect(result.details).toContain('browser-based axe-core recommended');
+  });
+
+  it('passes when basic accessibility checks find no issues', async () => {
+    const worktree = await makeWorktree({
+      'index.html': '<img src="a.png" alt="ok">\n<a href="/ok">ok</a>',
+      'nested/page.html': '<main><img src="b.png" alt="also ok"></main>',
+    });
+
+    const result = await accessibilityChecker(makeContext(worktree));
+
+    expect(result.result).toBe('PASS');
+    expect(result.details).toContain('basic checks passed');
   });
 });
 
