@@ -33,7 +33,7 @@ jobs:
         continue-on-error: true
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: npm run eval -- --report eval-report.json --baseline evals/baseline.json
+        run: npm run eval -- --judge-k 3 --report eval-report.json --baseline evals/baseline.json
 
       - name: Upload report
         if: always()

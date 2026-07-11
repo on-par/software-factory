@@ -21,10 +21,11 @@ interface Args {
   report?: string;
   baseline?: string;
   writeBaseline?: string;
+  judgeK: number;
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { stub: false, judge: true, dir: 'evals/golden' };
+  const args: Args = { stub: false, judge: true, dir: 'evals/golden', judgeK: 1 };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--stub') args.stub = true;
@@ -34,6 +35,13 @@ function parseArgs(argv: string[]): Args {
     else if (arg === '--report') args.report = argv[++i];
     else if (arg === '--baseline') args.baseline = argv[++i];
     else if (arg === '--write-baseline') args.writeBaseline = argv[++i];
+    else if (arg === '--judge-k') {
+      const judgeK = Number(argv[++i]);
+      if (!Number.isFinite(judgeK) || !Number.isInteger(judgeK) || judgeK < 1) {
+        throw new Error(`invalid flag: ${arg}`);
+      }
+      args.judgeK = judgeK;
+    }
     else throw new Error(`unknown flag: ${arg}`);
   }
   return args;
@@ -47,6 +55,7 @@ const summary = await runEval({
   cases,
   router,
   judge: args.stub ? false : args.judge,
+  judgeK: args.stub ? 1 : args.judgeK,
   worktree: process.cwd(),
 });
 
