@@ -45,6 +45,18 @@ describe('scoreSpec', () => {
     expect(result.checks.find(check => check.name === 'sections-present')?.pass).toBe(false);
   });
 
+  it('requires constitution compliance only when requested', () => {
+    const missing = scoreSpec(goodSpec, goodSpec, 'codex', { requireConstitution: true });
+    const withConstitution = `${goodSpec}## Constitution compliance
+S1 satisfied.
+`;
+    const present = scoreSpec(withConstitution, withConstitution, 'codex', { requireConstitution: true });
+
+    expect(missing.checks.find(check => check.name === 'sections-present')?.pass).toBe(false);
+    expect(missing.checks.find(check => check.name === 'sections-present')?.details).toContain('## Constitution compliance');
+    expect(present.checks.find(check => check.name === 'sections-present')?.pass).toBe(true);
+  });
+
   it('fails route-correct when the spec route differs from expected', () => {
     const spec = goodSpec.replace('route: codex', 'route: claude');
     const result = scoreSpec(spec, spec, 'codex');

@@ -2,6 +2,8 @@
 
 Each `evals/golden/*.md` file is one issue-shaped prompt fixture.
 Frontmatter may set `id`, `expectedRoute`, `deterministicOnly`, `rubric`, and `minRubricScore`.
+When `constitution:` is set, the runner injects it as the prompt constitution context and the deterministic scorer requires a `## Constitution compliance` section.
+Failure replays may also use documentary `replay:` and `sourceIssue:` markers for never-retire cases.
 The first `# ` heading becomes the issue title.
 All markdown after that heading becomes the issue body.
 Use `expectedRoute: any` when only spec structure matters.

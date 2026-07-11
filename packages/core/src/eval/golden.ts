@@ -32,6 +32,7 @@ export async function loadGoldenCases(dir: string): Promise<GoldenCase[]> {
       rubric: Array.isArray(data.rubric) ? data.rubric.map(String) : [],
       minRubricScore: typeof data.minRubricScore === 'number' ? data.minRubricScore : 7,
       ...(stubOutput !== undefined ? { stubOutput } : {}),
+      ...(typeof data.constitution === 'string' && data.constitution.trim() ? { constitution: data.constitution } : {}),
       path,
     };
   }));
