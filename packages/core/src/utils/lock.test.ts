@@ -106,6 +106,17 @@ describe('withFileLock', () => {
     expect(existsSync(lockDir)).toBe(false);
   });
 
+  it('propagates an fn() error carrying an EEXIST code instead of swallowing and retrying', async () => {
+    const lockDir = makeLockDir();
+    const fn = vi.fn(async () => {
+      throw Object.assign(new Error('caller EEXIST'), { code: 'EEXIST' });
+    });
+
+    await expect(withFileLock(lockDir, fn)).rejects.toThrow('caller EEXIST');
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(existsSync(lockDir)).toBe(false);
+  });
+
   it('steals from a dead holder', async () => {
     const lockDir = makeLockDir();
     mkdirSync(lockDir);
@@ -157,6 +168,18 @@ describe('withFileLock', () => {
     })).rejects.toThrow(/stuck/);
 
     expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('tags the timeout error with reason "timeout" so callers can distinguish it from a plain failure', async () => {
+    const lockDir = makeLockDir();
+    mkdirSync(lockDir);
+    writeFileSync(join(lockDir, 'pid'), '12345');
+
+    await expect(withFileLock(lockDir, vi.fn(), {
+      pollMs: 10,
+      timeoutMs: 50,
+      isPidAlive: () => true,
+    })).rejects.toMatchObject({ reason: 'timeout' });
   });
 
   it('steals an orphan dir with no pid file', async () => {

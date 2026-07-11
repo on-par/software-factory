@@ -55,9 +55,8 @@ function readHolderPid(pidPath: string): number | null {
   }
 }
 
-async function waitForNextPoll(pollMs: number): Promise<number> {
-  await sleep(pollMs);
-  return pollMs;
+function lockTimeoutError(lockDir: string): Error & { reason: string } {
+  return Object.assign(new Error(`lock ${lockDir} stuck >30m`), { reason: 'timeout' });
 }
 
 export async function withFileLock<T>(
@@ -76,8 +75,15 @@ export async function withFileLock<T>(
   mkdirSync(dirname(lockDir), { recursive: true });
 
   while (true) {
+    let acquired = false;
     try {
       mkdirSync(lockDir);
+      acquired = true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    }
+
+    if (acquired) {
       try {
         writeFileSync(pidPath, ourPid);
       } catch (err) {
@@ -88,19 +94,10 @@ export async function withFileLock<T>(
       try {
         return await fn();
       } finally {
-        let stillOwnedByUs = false;
-        try {
-          stillOwnedByUs = readFileSync(pidPath, 'utf-8').trim() === ourPid;
-        } catch {
-          stillOwnedByUs = false;
-        }
-
-        if (stillOwnedByUs) {
+        if (readHolderPid(pidPath) === Number(ourPid)) {
           rmSync(lockDir, { recursive: true, force: true });
         }
       }
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
     }
 
     const holderPid = readHolderPid(pidPath);
@@ -112,9 +109,10 @@ export async function withFileLock<T>(
       }
 
       if (waitedMs >= timeoutMs) {
-        throw new Error(`lock ${lockDir} stuck >30m`);
+        throw lockTimeoutError(lockDir);
       }
-      waitedMs += await waitForNextPoll(pollMs);
+      await sleep(pollMs);
+      waitedMs += pollMs;
       continue;
     }
 
@@ -131,8 +129,9 @@ export async function withFileLock<T>(
     }
 
     if (waitedMs >= timeoutMs) {
-      throw new Error(`lock ${lockDir} stuck >30m`);
+      throw lockTimeoutError(lockDir);
     }
-    waitedMs += await waitForNextPoll(pollMs);
+    await sleep(pollMs);
+    waitedMs += pollMs;
   }
 }
