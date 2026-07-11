@@ -27,5 +27,13 @@
     "tsx": "^4.23.0",
     "typescript": "^7.0.2",
     "vitest": "^3.2.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/on-par/software-factory.git"
+  },
+  "homepage": "https://github.com/on-par/software-factory#readme",
+  "bugs": {
+    "url": "https://github.com/on-par/software-factory/issues"
   }
 }
