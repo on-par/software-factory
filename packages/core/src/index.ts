@@ -29,6 +29,7 @@ export { shipPhase } from './phases/ship.js';
 
 // Utils
 export { logEvent, logCost, readCosts, slugify, setupWorktree, cleanupWorktree, gitFetch, shellEscape, ensureDir } from './utils/index.js';
+export { withGitLock } from './utils/lock.js';
 
 // Types
 export * from './types/index.js';
