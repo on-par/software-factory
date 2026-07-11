@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import matter from 'gray-matter';
 import { ModelRouter } from '../router/index.js';
 import { ConstitutionLoader } from '../constitutions/index.js';
-import { escalationLine, isEscalation } from '../utils/index.js';
+import { escalationLine, isEscalation, codexDisabled } from '../utils/index.js';
 import type { Octokit } from '@octokit/rest';
 
 export interface PlanResult {
@@ -123,12 +123,24 @@ export async function planPhase(
   // Read route from spec frontmatter
   const specContent = await readFile(specPath, 'utf-8');
   let route: 'codex' | 'claude' = 'claude';
+  let parsedSpec: ReturnType<typeof matter> | undefined;
   try {
-    const rawRoute = matter(specContent).data.route;
+    parsedSpec = matter(specContent);
+    const rawRoute = parsedSpec.data.route;
     const trimmedRoute = typeof rawRoute === 'string' ? rawRoute.trim() : rawRoute;
     if (trimmedRoute === 'codex' || trimmedRoute === 'claude') route = trimmedRoute;
   } catch {
     // malformed frontmatter -> keep default 'claude'
+  }
+
+  if (route === 'codex' && codexDisabled()) {
+    log('warn', 'codex unavailable — falling back to claude');
+    route = 'claude';
+    // Keep the persisted spec's frontmatter in sync with the actual route,
+    // since it's the frozen artifact downstream consumers (eval scoring, PR review) read.
+    if (parsedSpec) {
+      await writeFile(specPath, matter.stringify(parsedSpec.content, { ...parsedSpec.data, route: 'claude' }));
+    }
   }
 
   log('plan', `Plan complete with model ${result.model}, route: ${route}`);

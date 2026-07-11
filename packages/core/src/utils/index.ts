@@ -141,3 +141,8 @@ export function isEscalation(output: string): boolean {
 export function escalationLine(output: string): string | undefined {
   return output.split('\n').find(line => line.startsWith('ESCALATE:'));
 }
+
+/** FACTORY_CODEX=0 kill-switch: force all work onto the Claude route. */
+export function codexDisabled(): boolean {
+  return process.env.FACTORY_CODEX === '0';
+}

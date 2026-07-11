@@ -1,7 +1,7 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ConstitutionLoader } from '../constitutions/index.js';
 import { ModelRouter } from '../router/index.js';
@@ -39,8 +39,16 @@ const routes: RoutesConfig = {
 };
 
 const tempDirs = new Set<string>();
+let prevFactoryCodex: string | undefined;
+
+beforeEach(() => {
+  prevFactoryCodex = process.env.FACTORY_CODEX;
+  delete process.env.FACTORY_CODEX;
+});
 
 afterEach(async () => {
+  if (prevFactoryCodex === undefined) delete process.env.FACTORY_CODEX;
+  else process.env.FACTORY_CODEX = prevFactoryCodex;
   await Promise.all([...tempDirs].map(dir => rm(dir, { recursive: true, force: true })));
   tempDirs.clear();
 });
@@ -166,5 +174,85 @@ describe('planPhase', () => {
     });
 
     expect(result.route).toBe('codex');
+  });
+
+  describe('FACTORY_CODEX kill-switch', () => {
+    it('forces route to claude and logs a warn when FACTORY_CODEX=0', async () => {
+      process.env.FACTORY_CODEX = '0';
+
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-79.md');
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{
+            output: '---\nroute: codex\n---\n# Spec\n',
+          }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: {
+          issues: {
+            get: async () => ({ data: { title: 'Add kill-switch', body: 'Add FACTORY_CODEX=0.' } }),
+          },
+        },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      const result = await planPhase({
+        issue: 79,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitutionLoader: new ConstitutionLoader(),
+        octokit,
+        log: (type, msg) => { logs.push({ type, msg }); },
+      });
+
+      expect(result.route).toBe('claude');
+      expect(logs).toContainEqual({ type: 'warn', msg: 'codex unavailable — falling back to claude' });
+
+      const persisted = await readFile(specPath, 'utf-8');
+      expect(persisted).toContain('route: claude');
+      expect(persisted).not.toContain('route: codex');
+    });
+
+    it('keeps route codex when FACTORY_CODEX is unset', async () => {
+      delete process.env.FACTORY_CODEX;
+
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-79.md');
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{
+            output: '---\nroute: codex\n---\n# Spec\n',
+          }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: {
+          issues: {
+            get: async () => ({ data: { title: 'Add kill-switch', body: 'Add FACTORY_CODEX=0.' } }),
+          },
+        },
+      };
+
+      const result = await planPhase({
+        issue: 79,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitutionLoader: new ConstitutionLoader(),
+        octokit,
+        log: () => {},
+      });
+
+      expect(result.route).toBe('codex');
+    });
   });
 });
