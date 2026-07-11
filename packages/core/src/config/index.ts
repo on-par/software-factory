@@ -58,16 +58,16 @@ const FactoryConfigSchema = z.object({
     events: z.string(),
   }),
   timeouts: z.object({
-    planSeconds: z.number(),
-    buildSeconds: z.number(),
-    checkSeconds: z.number(),
-    mergePollSeconds: z.number(),
+    plan_seconds: z.number(),
+    build_seconds: z.number(),
+    check_seconds: z.number(),
+    merge_poll_seconds: z.number(),
   }),
   merge: z.object({ auto: z.boolean(), comment: z.string() }),
   worktree: z.object({ prefix: z.string(), parent: z.string(), comment: z.string() }),
   byok: z.object({ enabled: z.boolean(), comment: z.string() }),
   notifications: z.record(z.string(), z.boolean()),
-  costTracking: z.object({ enabled: z.boolean(), logFile: z.string(), comment: z.string() }),
+  cost_tracking: z.object({ enabled: z.boolean(), log_file: z.string(), comment: z.string() }),
 });
 
 // ---------- Types ----------
@@ -94,6 +94,22 @@ export function loadFactoryConfig(path?: string): FactoryConfig {
   const p = path ?? resolveConfigPath('factory.json');
   const raw = JSON.parse(readFileSync(p, 'utf-8'));
   return FactoryConfigSchema.parse(raw);
+}
+
+export function resolveTimeouts(
+  config: FactoryConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): { plan: number; build: number; check: number } {
+  const fromEnv = (v?: string) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  };
+
+  return {
+    plan: fromEnv(env.FACTORY_PLAN_TIMEOUT) ?? config.timeouts.plan_seconds ?? 1800,
+    build: fromEnv(env.FACTORY_BUILD_TIMEOUT) ?? config.timeouts.build_seconds ?? 7200,
+    check: fromEnv(env.FACTORY_CHECK_TIMEOUT) ?? config.timeouts.check_seconds ?? 1800,
+  };
 }
 
 // ---------- Factory state paths ----------

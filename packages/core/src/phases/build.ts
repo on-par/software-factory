@@ -22,9 +22,10 @@ export async function buildPhase(
     router: ModelRouter;
     constitutionLoader: ConstitutionLoader;
     log: (type: string, msg: string) => void;
+    timeoutSeconds?: number;
   },
 ): Promise<BuildResult> {
-  const { issue, repo, worktree, specPath, branch, product, route, router, constitutionLoader, log } = opts;
+  const { issue, repo, worktree, specPath, branch, product, route, router, constitutionLoader, log, timeoutSeconds } = opts;
 
   const constitutionCtx = product ? constitutionLoader.buildContext(product) : '';
   const spec = await readFile(specPath, 'utf-8').catch(() => '');
@@ -81,7 +82,7 @@ with "ESCALATE:" followed by the question, then STOP.`;
 
   const result = await router.run(taskType, prompt, {
     worktree,
-    timeout: 7200,
+    timeout: timeoutSeconds ?? 7200,
     onLog: (msg) => log('router', msg),
   });
 
