@@ -28,24 +28,47 @@ config  ←  core  ←  cli
 - **@on-par/factory-cli** — The `factory` CLI. Imports core.
 - **@on-par/factory-server** — Future SaaS server. Imports core. Currently a stub.
 
-## Quick Start
+## Quick Start (5 minutes)
 
+**Prerequisites**
+- Node.js ≥ 20
+- `git` and the GitHub CLI `gh`, authenticated (`gh auth login`) — the factory uses `gh repo view` to detect your repo and `gh pr checks` when landing
+- Claude Code CLI (`claude`) on PATH — the PLAN and TRIAGE phases shell out to `claude -p`
+- Optional: OpenAI Codex CLI (`codex`) for cheap worker builds, and `ollama` for free local worker models
+
+**Step 1 — Install**
 ```bash
-# Install all workspace packages
+git clone https://github.com/on-par/software-factory
+cd software-factory
 npm install
-
-# Build everything
 npm run build
-
-# Link the CLI globally
 npm link --workspace @on-par/factory-cli
-
-# In any git repo with a GitHub remote:
-factory init
-factory constitution --product example-marketing-site
-factory triage
-factory run
 ```
+
+**Step 2 — Point it at your repo**
+```bash
+cd /path/to/your/repo        # any git repo with a GitHub remote and open issues
+export GITHUB_TOKEN=$(gh auth token)   # the factory opens PRs via the GitHub API
+factory init                 # creates .factory/ (state, logs, plans, queue)
+```
+
+**Step 3 — Pick a constitution**
+```bash
+factory constitution --list                    # see available product constitutions
+factory constitution --product example-marketing-site
+```
+
+**Step 4 — Triage the backlog**
+```bash
+factory triage               # proposes .factory/queue from your open issues
+```
+
+**Step 5 — Ship your first issue**
+```bash
+factory ship 42              # PLAN → BUILD → CHECK → SHIP one issue (use an issue number from your repo)
+```
+
+`factory ship` ends at a green, ready-for-review PR that closes the issue (it prints `✅ Issue #N → PR #M ready for review`); merging stays with you — review the PR and merge it, or run `factory land <N>` to squash-merge and clean up the worktree. To process the whole triaged queue in parallel lanes instead, run `factory run`.
 
 ## CLI Commands
 
@@ -56,9 +79,11 @@ factory constitution --product <p>  Set the active constitution
 factory models                      List available models and costs
 factory triage                      Propose a queue from open issues
 factory ship <N>                    Plan → build → check → ship one issue
+factory land <N>                    Squash-merge a ready PR and clean up its worktree
 factory run                         Process the whole queue (lanes in parallel)
 factory status                      Show queue, events, PRs, models
 factory cost                        Show cost tracking summary
+factory usage                       Report trailing-5h subscription usage vs cap
 factory stop                        Halt between issues
 factory resume                      Resume after stop
 ```
