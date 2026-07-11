@@ -240,6 +240,71 @@ describe('cli', () => {
     expect(await findOpenPRForIssue(octokit, 'on-par', 'software-factory', 19)).toBeUndefined();
   });
 
+  it('paginates the issue-body fallback to find a match beyond the first page', async () => {
+    const calledPages: number[] = [];
+    const octokit: any = {
+      rest: {
+        pulls: {
+          list: async ({ page }: any) => {
+            calledPages.push(page);
+            if (page === 1) {
+              return {
+                data: Array.from({ length: 100 }, (_, i) => ({
+                  number: i + 1,
+                  body: 'Closes #7',
+                  head: { ref: `ship-it/${i + 1}-unrelated` },
+                })),
+              };
+            }
+            if (page === 2) {
+              return {
+                data: Array.from({ length: 30 }, (_, i) => {
+                  if (i === 19) {
+                    return { number: 999, body: 'Closes #19', head: { ref: 'ship-it/19-renamed-title' } };
+                  }
+                  return { number: 100 + i + 1, body: 'Closes #7', head: { ref: `ship-it/${100 + i + 1}-unrelated` } };
+                }),
+              };
+            }
+            return { data: [] };
+          },
+        },
+      },
+    };
+
+    expect(await findOpenPRForIssue(octokit, 'on-par', 'software-factory', 19)).toEqual({
+      number: 999,
+      branch: 'ship-it/19-renamed-title',
+    });
+    expect(calledPages).toEqual([1, 2]);
+  });
+
+  it('paginates through every page and returns undefined when no page matches', async () => {
+    const calledPages: number[] = [];
+    const octokit: any = {
+      rest: {
+        pulls: {
+          list: async ({ page }: any) => {
+            calledPages.push(page);
+            if (page === 1 || page === 2) {
+              return {
+                data: Array.from({ length: 100 }, (_, i) => ({
+                  number: (page - 1) * 100 + i + 1,
+                  body: 'Closes #7',
+                  head: { ref: `ship-it/${(page - 1) * 100 + i + 1}-unrelated` },
+                })),
+              };
+            }
+            return { data: [] };
+          },
+        },
+      },
+    };
+
+    expect(await findOpenPRForIssue(octokit, 'on-par', 'software-factory', 19)).toBeUndefined();
+    expect(calledPages).toEqual([1, 2, 3]);
+  });
+
   it('self-merges a ready PR when FACTORY_MERGE is enabled', async () => {
     const calls: any[] = [];
     const octokit: any = {};

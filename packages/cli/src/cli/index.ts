@@ -671,11 +671,16 @@ export async function findOpenPRForIssue(
   repoName: string,
   issueNum: number,
 ): Promise<{ number: number; branch: string } | undefined> {
-  const { data: prs } = await octokit.rest.pulls
-    .list({ owner, repo: repoName, state: 'open', per_page: 100 })
-    .catch(() => ({ data: [] as any[] }));
-  const pr = prs.find((p: any) => new RegExp(`\\bcloses\\s+#${issueNum}\\b`, 'i').test(p.body ?? ''));
-  return pr ? { number: pr.number, branch: pr.head.ref } : undefined;
+  const perPage = 100;
+  const matches = new RegExp(`\\bcloses\\s+#${issueNum}\\b`, 'i');
+  for (let page = 1; ; page++) {
+    const { data: prs } = await octokit.rest.pulls
+      .list({ owner, repo: repoName, state: 'open', per_page: perPage, page })
+      .catch(() => ({ data: [] as any[] }));
+    const pr = prs.find((p: any) => matches.test(p.body ?? ''));
+    if (pr) return { number: pr.number, branch: pr.head.ref };
+    if (prs.length < perPage) return undefined;
+  }
 }
 
 export async function squashMergeAndDelete(
