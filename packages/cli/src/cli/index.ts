@@ -15,7 +15,7 @@ import {
   checkPhase,
   shipPhase,
 } from '@on-par/factory-core';
-import { logEvent, slugify, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch } from '@on-par/factory-core';
+import { logEvent, slugify, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock } from '@on-par/factory-core';
 import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -230,8 +230,10 @@ async function cmdShip(issueNum: number, opts: { product?: string; autoRework?: 
   }
 
   // Setup worktree
-  await gitFetch(repoRoot);
-  await setupWorktree(repoRoot, branch, worktree);
+  await withGitLock(repoRoot, async () => {
+    await gitFetch(repoRoot);
+    await setupWorktree(repoRoot, branch, worktree);
+  });
   log('worktree', `Worktree ready at ${worktree}`);
 
   // BUILD
