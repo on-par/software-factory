@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -213,6 +213,10 @@ describe('planPhase', () => {
 
       expect(result.route).toBe('claude');
       expect(logs).toContainEqual({ type: 'warn', msg: 'codex unavailable — falling back to claude' });
+
+      const persisted = await readFile(specPath, 'utf-8');
+      expect(persisted).toContain('route: claude');
+      expect(persisted).not.toContain('route: codex');
     });
 
     it('keeps route codex when FACTORY_CODEX is unset', async () => {

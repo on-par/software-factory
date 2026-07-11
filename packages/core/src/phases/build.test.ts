@@ -57,9 +57,10 @@ afterEach(async () => {
 });
 
 describe('buildPhase FACTORY_CODEX kill-switch', () => {
-  const prevFactoryCodex = process.env.FACTORY_CODEX;
+  let prevFactoryCodex: string | undefined;
 
   beforeEach(() => {
+    prevFactoryCodex = process.env.FACTORY_CODEX;
     delete process.env.FACTORY_CODEX;
   });
 
