@@ -28,7 +28,7 @@ export { checkPhase, disputeResolution } from './phases/check.js';
 export { shipPhase } from './phases/ship.js';
 
 // Utils
-export { logEvent, logCost, readCosts, slugify, setupWorktree, cleanupWorktree, gitFetch, shellEscape, ensureDir } from './utils/index.js';
+export { logEvent, logCost, readCosts, slugify, branchFor, setupWorktree, cleanupWorktree, gitFetch, shellEscape, ensureDir } from './utils/index.js';
 export { withGitLock } from './utils/lock.js';
 
 // Types

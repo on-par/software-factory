@@ -15,7 +15,7 @@ import {
   checkPhase,
   shipPhase,
 } from '@on-par/factory-core';
-import { logEvent, slugify, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock } from '@on-par/factory-core';
+import { logEvent, branchFor, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock } from '@on-par/factory-core';
 import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -215,7 +215,7 @@ async function cmdShip(issueNum: number, opts: { product?: string; autoRework?: 
   const product = opts.product ?? (existsSync(paths.product) ? readFileSync(paths.product, 'utf-8').trim() : undefined);
   const autoRework = opts.autoRework ?? true;
 
-  const branch = `ship-it/${issueNum}-${slugify(await getIssueTitle(octokit, ghRepo, issueNum))}`;
+  const branch = branchFor(issueNum, await getIssueTitle(octokit, ghRepo, issueNum));
   const worktree = resolve(dirname(repoRoot), `${basename(repoRoot)}-factory-${issueNum}`);
   const specPath = resolve(paths.plans, `issue-${issueNum}.md`);
 
@@ -363,23 +363,27 @@ async function runLane(lane: string, issues: number[], repoRoot: string, ghRepo:
   logEvent(paths.events, 'lane-done', lane, 'lane complete');
 }
 
+export async function isPrMerged(
+  octokit: Octokit,
+  owner: string,
+  repoName: string,
+  branch: string,
+): Promise<boolean> {
+  const { data: prs } = await octokit.rest.pulls
+    .list({ owner, repo: repoName, state: 'closed', head: `${owner}:${branch}` })
+    .catch(() => ({ data: [] as any[] }));
+  return prs.some((pr: any) => Boolean(pr.merged_at));
+}
+
 async function waitForMerge(issue: number, ghRepo: string, paths: ReturnType<typeof getFactoryPaths>) {
   const octokit = getOctokit();
   const [owner, repoName] = ghRepo.split('/');
-  const branch = `ship-it/${issue}-`; // simplified
+  const branch = branchFor(issue, await getIssueTitle(octokit, ghRepo, issue));
 
   while (!existsSync(paths.stop)) {
-    const { data: prs } = await octokit.rest.pulls.list({
-      owner, repo: repoName, state: 'closed', per_page: 5,
-    }).catch(() => ({ data: [] as any[] }));
-
-    // Check if any merged PR closes this issue
-    for (const pr of prs) {
-      if (!pr.merged_at) continue;
-      if (pr.body?.includes(`Closes #${issue}`)) {
-        logEvent(paths.events, 'landed', issue, 'PR merged');
-        return;
-      }
+    if (await isPrMerged(octokit, owner, repoName, branch)) {
+      logEvent(paths.events, 'landed', issue, 'PR merged');
+      return;
     }
 
     if (process.env.FACTORY_MERGE === '1') {
