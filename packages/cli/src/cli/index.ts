@@ -274,6 +274,41 @@ async function getIssueTitle(octokit: Octokit, repo: string, issue: number): Pro
   return data.title;
 }
 
+async function cmdLand(issueNum: number) {
+  const repoRoot = await getRepoRoot();
+  const ghRepo = await getGitHubRepo();
+  const paths = getFactoryPaths(repoRoot);
+  const octokit = getOctokit();
+  const [owner, repoName] = ghRepo.split('/');
+  const log = (type: string, msg: string) => logEvent(paths.events, type, issueNum, msg);
+
+  const branch = branchFor(issueNum, await getIssueTitle(octokit, ghRepo, issueNum));
+  const worktree = resolve(dirname(repoRoot), `${basename(repoRoot)}-factory-${issueNum}`);
+
+  await gitFetch(repoRoot);
+
+  const prNumber = await findOpenPRNumber(octokit, owner, repoName, branch);
+  if (!prNumber) {
+    log('fail', `no open PR for ${branch}`);
+    console.error(chalk.red(`factory: no open PR for issue #${issueNum} (${branch})`));
+    process.exit(1);
+  }
+
+  try {
+    await withGitLock(repoRoot, async () => {
+      await squashMergeAndDelete(octokit, owner, repoName, branch, prNumber);
+      log('merged', `squash-merged PR #${prNumber}`);
+      await cleanupWorktree(repoRoot, worktree);
+    });
+  } catch (err: any) {
+    log('fail', `merge failed: ${err.message}`);
+    console.error(chalk.red(`factory: merge failed for issue #${issueNum}: ${err.message}`));
+    process.exit(5);
+  }
+
+  console.log(chalk.green(`✅ Landed PR #${prNumber} for issue #${issueNum}`));
+}
+
 async function cmdTriage(opts: { product?: string }) {
   const repoRoot = await getRepoRoot();
   const ghRepo = await getGitHubRepo();
@@ -376,6 +411,32 @@ export async function isPrMerged(
   return prs.some((pr: any) => Boolean(pr.merged_at));
 }
 
+export async function findOpenPRNumber(
+  octokit: Octokit,
+  owner: string,
+  repoName: string,
+  branch: string,
+): Promise<number | undefined> {
+  const { data: prs } = await octokit.rest.pulls
+    .list({ owner, repo: repoName, state: 'open', head: `${owner}:${branch}` })
+    .catch(() => ({ data: [] as any[] }));
+  return prs[0]?.number;
+}
+
+export async function squashMergeAndDelete(
+  octokit: Octokit,
+  owner: string,
+  repoName: string,
+  branch: string,
+  prNumber: number,
+): Promise<void> {
+  await octokit.rest.pulls.merge({ owner, repo: repoName, pull_number: prNumber, merge_method: 'squash' });
+  // Best-effort branch delete: the merge is the source of truth.
+  await octokit.rest.git
+    .deleteRef({ owner, repo: repoName, ref: `heads/${branch}` })
+    .catch(() => {});
+}
+
 async function waitForMerge(issue: number, branch: string, ghRepo: string, paths: ReturnType<typeof getFactoryPaths>) {
   const octokit = getOctokit();
   const [owner, repoName] = ghRepo.split('/');
@@ -435,6 +496,13 @@ export async function main() {
     .option('--no-auto-rework', 'Disable automatic rework loop')
     .action(async (issueNum, opts) => {
       await cmdShip(issueNum, opts);
+    });
+
+  program
+    .command('land <issue>')
+    .description('Squash-merge a ready PR and clean up its worktree')
+    .action(async (issueNum) => {
+      await cmdLand(parseInt(issueNum, 10));
     });
 
   program.command('run').description('Process the whole queue (lanes in parallel)').action(cmdRun);
