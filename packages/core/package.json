@@ -15,7 +15,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --root ../.. packages/core/src"
+    "test": "vitest run"
   },
   "dependencies": {
     "@on-par/factory-config": "*",
