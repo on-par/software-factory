@@ -5,6 +5,10 @@
     "rubricScore": 1,
     "routeAccuracy": 0
   },
+  "budgets": {
+    "totalCostEstimate": 1,
+    "latencyMs": 120000
+  },
   "passRate": 1,
   "routeAccuracy": 1,
   "cases": {

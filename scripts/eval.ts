@@ -73,7 +73,11 @@ if (args.report) {
 }
 
 if (args.writeBaseline) {
-  writeFileSync(args.writeBaseline, JSON.stringify(toBaseline(summary), null, 2) + '\n');
+  const existing = readExistingBaseline(args.writeBaseline);
+  writeFileSync(
+    args.writeBaseline,
+    JSON.stringify(toBaseline(summary, existing?.tolerance, existing?.budgets), null, 2) + '\n',
+  );
 }
 
 if (args.baseline) {
@@ -84,6 +88,14 @@ if (args.baseline) {
   process.exitCode = comparison.ok ? 0 : 1;
 } else if (summary.failed > 0) {
   process.exitCode = 1;
+}
+
+function readExistingBaseline(path: string): Baseline | undefined {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return undefined;
+  }
 }
 
 function buildStubRouter(cases: typeof allCases): ModelRouter {

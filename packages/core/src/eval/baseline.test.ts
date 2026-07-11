@@ -18,7 +18,7 @@ function caseResult(overrides: Partial<CaseResult> = {}): CaseResult {
   };
 }
 
-function summaryOf(results: CaseResult[]): EvalSummary {
+function summaryOf(results: CaseResult[], overrides: Partial<EvalSummary> = {}): EvalSummary {
   const total = results.length;
   const passed = results.filter(r => r.pass).length;
   const routeAsserted = results.filter(r => isRouteAsserted(r.expectedRoute)).length;
@@ -33,6 +33,7 @@ function summaryOf(results: CaseResult[]): EvalSummary {
     routeAccuracy: routeAsserted ? routeCorrect / routeAsserted : 1,
     totalCostEstimate: 0,
     totalLatencyMs: 0,
+    ...overrides,
   };
 }
 
@@ -61,6 +62,21 @@ describe('toBaseline', () => {
     const summary = summaryOf([caseResult({ id: 'a' })]);
     const baseline = toBaseline(summary, { passRate: 0.1, rubricScore: 2, routeAccuracy: 0.2 });
     expect(baseline.tolerance).toEqual({ passRate: 0.1, rubricScore: 2, routeAccuracy: 0.2 });
+  });
+
+  it('includes budgets only when provided', () => {
+    const summary = summaryOf([caseResult({ id: 'a' })]);
+    const budgets = { totalCostEstimate: 1, latencyMs: 120000 };
+
+    const baselineWithBudgets = toBaseline(
+      summary,
+      { passRate: 0.1, rubricScore: 2, routeAccuracy: 0.2 },
+      budgets,
+    );
+    const baselineWithoutBudgets = toBaseline(summary);
+
+    expect(baselineWithBudgets.budgets).toEqual(budgets);
+    expect(baselineWithoutBudgets.budgets).toBeUndefined();
   });
 
   it('carries routing accuracy through the baseline', () => {
@@ -140,6 +156,60 @@ describe('compareToBaseline', () => {
 
     expect(comparison.ok).toBe(true);
     expect(comparison.regressions).toEqual([]);
+  });
+
+  it('flags a cost budget breach', () => {
+    const summary = summaryOf([caseResult({ id: 'a' })], { totalCostEstimate: 0.75 });
+    const baseline = toBaseline(
+      summaryOf([caseResult({ id: 'a' })]),
+      { passRate: 0, rubricScore: 1.0, routeAccuracy: 0 },
+      { totalCostEstimate: 0.5 },
+    );
+
+    const comparison = compareToBaseline(summary, baseline);
+
+    expect(comparison.ok).toBe(false);
+    expect(comparison.regressions.some(r => r.includes('estimated cost exceeds budget'))).toBe(true);
+  });
+
+  it('flags a latency budget breach and names the case', () => {
+    const summary = summaryOf([caseResult({ id: 'slow-case', latencyMs: 250 })]);
+    const baseline = toBaseline(
+      summaryOf([caseResult({ id: 'slow-case' })]),
+      { passRate: 0, rubricScore: 1.0, routeAccuracy: 0 },
+      { latencyMs: 100 },
+    );
+
+    const comparison = compareToBaseline(summary, baseline);
+
+    expect(comparison.ok).toBe(false);
+    expect(comparison.regressions).toContain("case 'slow-case' latency exceeds budget: 250ms > budget 100ms");
+  });
+
+  it('does not flag budget regressions when within budget or budgets are absent', () => {
+    const summary = summaryOf([
+      caseResult({ id: 'a', latencyMs: 80 }),
+      caseResult({ id: 'b', latencyMs: 90 }),
+    ], { totalCostEstimate: 0.25 });
+    const baselineWithBudgets = toBaseline(
+      summaryOf([caseResult({ id: 'a' }), caseResult({ id: 'b' })]),
+      { passRate: 0, rubricScore: 1.0, routeAccuracy: 0 },
+      { totalCostEstimate: 0.5, latencyMs: 100 },
+    );
+    const baselineWithoutBudgets = toBaseline(
+      summaryOf([caseResult({ id: 'a' }), caseResult({ id: 'b' })]),
+    );
+
+    const withinBudget = compareToBaseline(summary, baselineWithBudgets);
+    const withoutBudgets = compareToBaseline(
+      summaryOf([caseResult({ id: 'a', latencyMs: 250 })], { totalCostEstimate: 0.75 }),
+      baselineWithoutBudgets,
+    );
+
+    expect(withinBudget.ok).toBe(true);
+    expect(withinBudget.regressions.filter(r => r.includes('budget'))).toEqual([]);
+    expect(withoutBudgets.ok).toBe(true);
+    expect(withoutBudgets.regressions.filter(r => r.includes('budget'))).toEqual([]);
   });
 
   it('flags a baseline-passing case that now fails', () => {
