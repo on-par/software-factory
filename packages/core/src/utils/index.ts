@@ -79,6 +79,10 @@ export function slugify(s: string): string {
     .replace(/-+$/, '');
 }
 
+export function branchFor(issue: number, title: string): string {
+  return `ship-it/${issue}-${slugify(title)}`;
+}
+
 export async function getIssueTitle(repo: string, issue: number, octokit: any): Promise<string> {
   const { data } = await octokit.rest.issues.get({ owner: repo.split('/')[0], repo: repo.split('/')[1], issue_number: issue });
   return data.title;
