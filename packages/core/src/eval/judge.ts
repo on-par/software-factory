@@ -18,6 +18,29 @@ interface JudgeRunResult {
   prompt: string;
 }
 
+export interface JudgeSample {
+  score: number | null;
+  reasons: string;
+  malformed: boolean;
+  rawOutput?: string;
+}
+
+export interface JudgeAggregate {
+  score: number | undefined;
+  reasons: string;
+  samples: JudgeSample[];
+  validCount: number;
+  malformedCount: number;
+  results: RouterResult[];
+  prompt: string;
+}
+
+export function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
 export function extractVerdict(output: string): { score: number; reasons: string } | null {
   for (let start = 0; start < output.length; start++) {
     if (output[start] !== '{') continue;
@@ -101,6 +124,51 @@ export async function runJudgeSpec(router: ModelRouter, opts: JudgeSpecOpts): Pr
       prompt,
     };
   }
+}
+
+export async function runJudgeSamples(
+  router: ModelRouter,
+  opts: JudgeSpecOpts,
+  k: number,
+): Promise<JudgeAggregate> {
+  const n = Math.max(1, Math.floor(k));
+  const samples: JudgeSample[] = [];
+  const results: RouterResult[] = [];
+  let prompt = '';
+
+  for (let i = 0; i < n; i++) {
+    const r = await runJudgeSpec(router, opts);
+    samples.push({
+      score: r.malformed ? null : r.score,
+      reasons: r.reasons,
+      malformed: r.malformed,
+      ...(r.rawOutput !== undefined ? { rawOutput: r.rawOutput } : {}),
+    });
+    if (r.result) results.push(r.result);
+    prompt = r.prompt;
+  }
+
+  const validSamples = samples.filter(sample => !sample.malformed && sample.score !== null);
+  const validScores = validSamples.map(sample => sample.score as number);
+  const validCount = validScores.length;
+  const malformedCount = n - validCount;
+  const score = validCount > 0 ? median(validScores) : undefined;
+  const reasons = score === undefined
+    ? ''
+    : validSamples.reduce((best, sample) => {
+      if (sample.score === null || best.score === null) return best;
+      return Math.abs(sample.score - score) < Math.abs(best.score - score) ? sample : best;
+    }).reasons;
+
+  return {
+    score,
+    reasons,
+    samples,
+    validCount,
+    malformedCount,
+    results,
+    prompt,
+  };
 }
 
 function buildJudgePrompt(opts: JudgeSpecOpts): string {

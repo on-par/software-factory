@@ -133,6 +133,91 @@ describe('runEval', () => {
     expect(stub.calls.map(call => call.task)).toEqual(['plan', 'eval_judge']);
   });
 
+  it('uses the median judge score when judgeK is greater than one', async () => {
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [{ output: goodSpec }],
+        eval_judge: [
+          { output: '{"score":8}' },
+          { output: '{"score":3}' },
+          { output: '{"score":7}' },
+        ],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+
+    const summary = await runEval({
+      cases: [goldenCase({ rubric: ['Names file'], minRubricScore: 7 })],
+      router,
+      judge: true,
+      judgeK: 3,
+      now: tickingNow(),
+    });
+
+    expect(summary.results[0].rubricScore).toBe(7);
+    expect(summary.results[0].pass).toBe(true);
+    expect(summary.results[0].judgeSamples).toHaveLength(3);
+  });
+
+  it('excludes malformed judge samples from the runner median', async () => {
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [{ output: goodSpec }],
+        eval_judge: [
+          { output: '{"score":8}' },
+          { output: 'not json' },
+          { output: '{"score":7}' },
+        ],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+
+    const summary = await runEval({
+      cases: [goldenCase({ rubric: ['Names file'], minRubricScore: 7 })],
+      router,
+      judge: true,
+      judgeK: 3,
+      now: tickingNow(),
+    });
+
+    expect(summary.results[0].rubricScore).toBe(7.5);
+    expect(summary.results[0].judgeMalformed).toBeFalsy();
+    expect(summary.results[0].judgeMalformedCount).toBe(1);
+    expect(summary.results[0].judgeValidCount).toBe(2);
+  });
+
+  it('does not spend judge calls on deterministic-only or escalated cases', async () => {
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [
+          { output: goodSpec },
+          { output: 'ESCALATE: missing required context' },
+        ],
+        eval_judge: [
+          { output: '{"score":8}' },
+          { output: '{"score":7}' },
+          { output: '{"score":6}' },
+        ],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+
+    const summary = await runEval({
+      cases: [
+        goldenCase({ id: 'deterministic', deterministicOnly: true, rubric: ['Names file'] }),
+        goldenCase({ id: 'escalated', expectedRoute: 'escalate', rubric: ['Names file'] }),
+      ],
+      router,
+      judge: true,
+      judgeK: 3,
+      now: tickingNow(),
+    });
+
+    expect(stub.calls.map(call => call.task)).not.toContain('eval_judge');
+    expect(summary.results[0].judgeSkipped).toBe(true);
+    expect(summary.results[1].judgeSkipped).toBe(true);
+  });
+
   it('fails loudly when the judge returns garbage', async () => {
     const stub = new StubModelExecutor({
       scripts: {

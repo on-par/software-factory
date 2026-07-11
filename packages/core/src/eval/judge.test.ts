@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
-import { runJudgeSpec } from './judge.js';
+import { median, runJudgeSamples, runJudgeSpec } from './judge.js';
 
 const models: ModelsConfig = {
   version: 1,
@@ -35,11 +35,15 @@ const routes: RoutesConfig = {
 };
 
 function routerFor(output: string): ModelRouter {
+  return routerForOutputs([output]);
+}
+
+function routerForOutputs(outputs: string[]): ModelRouter {
   return new ModelRouter(
     models,
     routes,
     false,
-    new StubModelExecutor({ scripts: { eval_judge: [{ output }] } }),
+    new StubModelExecutor({ scripts: { eval_judge: outputs.map(output => ({ output })) } }),
   );
 }
 
@@ -106,5 +110,56 @@ describe('runJudgeSpec', () => {
 
     expect(bool.malformed).toBe(true);
     expect(emptyString.malformed).toBe(true);
+  });
+});
+
+describe('median', () => {
+  it('returns the median for odd, even, and single-value inputs', () => {
+    expect(median([8, 3, 7])).toBe(7);
+    expect(median([7, 8])).toBe(7.5);
+    expect(median([5])).toBe(5);
+  });
+});
+
+describe('runJudgeSamples', () => {
+  it('aggregates valid samples with the median score', async () => {
+    const result = await runJudgeSamples(
+      routerForOutputs(['{"score":8}', '{"score":3}', '{"score":7}']),
+      judgeOpts(),
+      3,
+    );
+
+    expect(result.score).toBe(7);
+    expect(result.samples).toHaveLength(3);
+    expect(result.validCount).toBe(3);
+    expect(result.malformedCount).toBe(0);
+  });
+
+  it('excludes malformed samples from the median', async () => {
+    const result = await runJudgeSamples(
+      routerForOutputs(['{"score":8}', 'not json', '{"score":7}']),
+      judgeOpts(),
+      3,
+    );
+
+    expect(result.score).toBe(7.5);
+    expect(result.validCount).toBe(2);
+    expect(result.malformedCount).toBe(1);
+    expect(result.samples[1]).toMatchObject({
+      malformed: true,
+      score: null,
+    });
+  });
+
+  it('returns no score when all samples are malformed', async () => {
+    const result = await runJudgeSamples(
+      routerForOutputs(['not json', '{"reasons":"missing score"}', '{"score":true}']),
+      judgeOpts(),
+      3,
+    );
+
+    expect(result.score).toBeUndefined();
+    expect(result.validCount).toBe(0);
+    expect(result.malformedCount).toBe(3);
   });
 });

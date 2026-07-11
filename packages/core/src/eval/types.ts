@@ -1,3 +1,5 @@
+import type { JudgeSample } from './judge.js';
+
 export type ExpectedRoute = 'codex' | 'claude' | 'escalate' | 'any';
 
 // A case is "route-asserted" when it expects a specific route, i.e. it can be misrouted.
@@ -32,6 +34,9 @@ export interface CaseResult {
   checks: DeterministicCheck[];
   rubricScore?: number;
   judgeMalformed?: boolean;
+  judgeSamples?: JudgeSample[];
+  judgeValidCount?: number;
+  judgeMalformedCount?: number;
   judgeSkipped: boolean;
   model: string;
   latencyMs: number;
