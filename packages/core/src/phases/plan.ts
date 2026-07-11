@@ -4,6 +4,7 @@ import { writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { ModelRouter } from '../router/index.js';
 import { ConstitutionLoader } from '../constitutions/index.js';
+import { escalationLine, isEscalation } from '../utils/index.js';
 import type { Octokit } from '@octokit/rest';
 
 export interface PlanResult {
@@ -106,8 +107,8 @@ export async function planPhase(
   });
 
   // Check for escalation
-  if (result.output.includes('ESCALATE:')) {
-    const escalateLine = result.output.split('\n').find(l => l.startsWith('ESCALATE:'));
+  if (isEscalation(result.output)) {
+    const escalateLine = escalationLine(result.output);
     log('escalate', escalateLine ?? 'plan escalated');
     return { ok: false, route: 'claude', specPath, model: result.model, escalate: escalateLine };
   }

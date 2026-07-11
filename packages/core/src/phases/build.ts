@@ -3,6 +3,7 @@
 import { readFile } from 'node:fs/promises';
 import { ModelRouter } from '../router/index.js';
 import { ConstitutionLoader } from '../constitutions/index.js';
+import { escalationLine, isEscalation } from '../utils/index.js';
 
 export interface BuildResult {
   ok: boolean;
@@ -86,8 +87,8 @@ with "ESCALATE:" followed by the question, then STOP.`;
     onLog: (msg) => log('router', msg),
   });
 
-  if (result.output.includes('ESCALATE:')) {
-    const escalateLine = result.output.split('\n').find(l => l.startsWith('ESCALATE:'));
+  if (isEscalation(result.output)) {
+    const escalateLine = escalationLine(result.output);
     log('escalate', escalateLine ?? 'build escalated');
     return { ok: false, model: result.model, escalate: escalateLine };
   }

@@ -11,6 +11,11 @@ import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 
 const exec = promisify(execCb);
 
+export type ExecFn = (
+  cmd: string,
+  opts: { cwd?: string; timeout?: number; maxBuffer?: number },
+) => Promise<{ stdout: string; stderr: string }>;
+
 export type FailoverReason =
   | 'rate_limit'
   | 'usage_cap'
@@ -54,6 +59,8 @@ function classifyFailure(stderr: string, exitCode: number): FailoverReason {
 }
 
 export class CliModelExecutor implements ModelExecutor {
+  constructor(private execFn: ExecFn = exec) {}
+
   /** Run a single model via Claude CLI or Codex CLI */
   async runModel(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string> {
     const def = ctx.registry.get(model);
@@ -74,7 +81,7 @@ export class CliModelExecutor implements ModelExecutor {
     const cmd = `claude -p ${shellEscape(prompt)} ${modelArg} --dangerously-skip-permissions`;
 
     try {
-      const { stdout } = await exec(cmd, {
+      const { stdout } = await this.execFn(cmd, {
         cwd: worktree,
         timeout: timeout * 1000,
         maxBuffer: 10 * 1024 * 1024,
@@ -96,7 +103,7 @@ export class CliModelExecutor implements ModelExecutor {
     const cmd = `codex exec --yolo -C ${shellEscape(worktree)} ${extraFlag} -o ${shellEscape(outFile)} - < ${shellEscape(tmpFile)}`;
 
     try {
-      await exec(cmd, { timeout: timeout * 1000, maxBuffer: 10 * 1024 * 1024 });
+      await this.execFn(cmd, { timeout: timeout * 1000, maxBuffer: 10 * 1024 * 1024 });
       const output = await readFile(outFile, 'utf-8').catch(() => '');
       return output;
     } catch (err: any) {
