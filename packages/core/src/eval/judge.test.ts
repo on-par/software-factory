@@ -99,4 +99,12 @@ describe('runJudgeSpec', () => {
     expect(result.malformed).toBe(true);
     expect(result.rawOutput).toBe(output);
   });
+
+  it('marks non-numeric score types malformed instead of coercing them', async () => {
+    const bool = await runJudgeSpec(routerFor('{"score": true, "reasons": "looks good"}'), judgeOpts());
+    const emptyString = await runJudgeSpec(routerFor('{"score": "", "reasons": "n/a"}'), judgeOpts());
+
+    expect(bool.malformed).toBe(true);
+    expect(emptyString.malformed).toBe(true);
+  });
 });

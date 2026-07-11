@@ -49,10 +49,9 @@ export function extractVerdict(output: string): { score: number; reasons: string
         try {
           const parsed = JSON.parse(candidate);
           if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-            const rawScore = Number(parsed.score);
-            if (Number.isFinite(rawScore)) {
+            if (typeof parsed.score === 'number' && Number.isFinite(parsed.score)) {
               return {
-                score: Math.max(0, Math.min(10, rawScore)),
+                score: Math.max(0, Math.min(10, parsed.score)),
                 reasons: String(parsed.reasons ?? ''),
               };
             }
