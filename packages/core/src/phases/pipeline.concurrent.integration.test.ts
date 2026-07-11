@@ -75,7 +75,12 @@ const cleanupTargets: Array<{ repoRoot: string; worktree: string }> = [];
 const tempDirs = new Set<string>();
 
 afterEach(async () => {
-  await Promise.all(cleanupTargets.map(({ repoRoot, worktree }) => cleanupWorktree(repoRoot, worktree)));
+  // Two lanes share one repoRoot, so concurrent cleanup must go through the
+  // same lock the test proves guards worktree mutation, or it races the
+  // shared .git/worktrees metadata the way an unlocked ship would.
+  await Promise.all(
+    cleanupTargets.map(({ repoRoot, worktree }) => withGitLock(repoRoot, () => cleanupWorktree(repoRoot, worktree))),
+  );
   cleanupTargets.length = 0;
 
   await Promise.all([...tempDirs].map(dir => rm(dir, { recursive: true, force: true })));
