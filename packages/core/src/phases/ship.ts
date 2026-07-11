@@ -6,6 +6,7 @@ import type { Octokit } from '@octokit/rest';
 import { shellEscape } from '../utils/index.js';
 
 const exec = promisify(execCb);
+type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<{ stdout: string }>;
 
 export interface ShipResult {
   ok: boolean;
@@ -21,18 +22,29 @@ export async function shipPhase(
     octokit: Octokit;
     watchCI?: boolean;
     log: (type: string, msg: string) => void;
+    run?: CommandRunner;
   },
 ): Promise<ShipResult> {
-  const { issue, repo, worktree, branch, octokit, watchCI = true, log } = opts;
+  const { issue, repo, worktree, branch, octokit, watchCI = true, log, run = exec } = opts;
   const [owner, repoName] = repo.split('/');
 
   // Check if a PR already exists (claude route may have created one)
   let prNumber = await findOpenPR(octokit, owner, repoName, branch);
 
   if (!prNumber) {
+    const recoveryState = await inspectRecoveryState(worktree, run);
+    if (!recoveryState.clean) {
+      log('ship', `not recovering ${branch}: worktree has uncommitted changes`);
+      return { ok: false };
+    }
+    if (!recoveryState.ahead) {
+      log('ship', `not recovering ${branch}: no commits ahead of origin/main`);
+      return { ok: false };
+    }
+
     // Push branch
     try {
-      await exec(`git push -u origin ${shellEscape(branch)}`, { cwd: worktree });
+      await run(`git push -u origin ${shellEscape(branch)}`, { cwd: worktree });
     } catch {
       log('ship', 'push failed — trying to continue');
     }
@@ -44,7 +56,7 @@ export async function shipPhase(
     // Get diff stats
     let stat = '';
     try {
-      const { stdout } = await exec('git diff --stat origin/main...HEAD', { cwd: worktree });
+      const { stdout } = await run('git diff --stat origin/main...HEAD', { cwd: worktree });
       stat = stdout.split('\n').slice(-20).join('\n');
     } catch {}
 
@@ -70,6 +82,7 @@ Closes #${issue}`,
     });
 
     prNumber = pr.number;
+    log('recovered', `opened PR #${prNumber} for committed work on ${branch}`);
   }
 
   if (!prNumber) {
@@ -127,6 +140,20 @@ async function findOpenPR(octokit: Octokit, owner: string, repo: string, branch:
   } catch {
     return undefined;
   }
+}
+
+async function inspectRecoveryState(
+  worktree: string,
+  run: CommandRunner,
+): Promise<{ clean: boolean; ahead: boolean }> {
+  const [{ stdout: status }, { stdout: ahead }] = await Promise.all([
+    run('git status --porcelain', { cwd: worktree }),
+    run('git rev-list --count origin/main..HEAD', { cwd: worktree }),
+  ]);
+  return {
+    clean: status.trim() === '',
+    ahead: Number.parseInt(ahead.trim(), 10) > 0,
+  };
 }
 
 function sleep(ms: number): Promise<void> {
