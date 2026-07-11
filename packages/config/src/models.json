@@ -5,30 +5,52 @@
     "claude-opus-4-8": {
       "provider": "anthropic",
       "tier": "boss",
-      "costPerMtokInput": 5.00,
-      "costPerMtokOutput": 25.00,
+      "costPerMtokInput": 5.0,
+      "costPerMtokOutput": 25.0,
       "contextWindow": 200000,
-      "capabilities": ["planning", "design", "architecture", "review", "dispute_resolution"],
-      "envKey": "ANTHROPIC_API_KEY",
-      "claudeFlag": "--model claude-opus-4-8"
+      "capabilities": [
+        "planning",
+        "design",
+        "architecture",
+        "review",
+        "dispute_resolution"
+      ],
+      "envKey": null,
+      "claudeFlag": "claude-opus-4-8",
+      "note": "Uses claude CLI subscription auth, no API key needed."
     },
     "claude-sonnet-5": {
       "provider": "anthropic",
-      "tier": ["checker", "boss_fallback", "worker_fallback"],
-      "costPerMtokInput": 3.00,
-      "costPerMtokOutput": 15.00,
+      "tier": [
+        "checker",
+        "boss_fallback",
+        "worker_fallback"
+      ],
+      "costPerMtokInput": 3.0,
+      "costPerMtokOutput": 15.0,
       "contextWindow": 200000,
-      "capabilities": ["review", "verification", "implementation", "triage"],
-      "envKey": "ANTHROPIC_API_KEY",
-      "claudeFlag": "--model claude-sonnet-5"
+      "capabilities": [
+        "review",
+        "verification",
+        "implementation",
+        "triage"
+      ],
+      "envKey": null,
+      "claudeFlag": "claude-sonnet-5",
+      "note": "Uses claude CLI subscription auth, no API key needed."
     },
     "gpt-5.1-codex": {
       "provider": "openai",
-      "tier": ["worker"],
+      "tier": [
+        "worker"
+      ],
       "costPerMtokInput": 1.25,
-      "costPerMtokOutput": 10.00,
+      "costPerMtokOutput": 10.0,
       "contextWindow": 272000,
-      "capabilities": ["implementation", "codex"],
+      "capabilities": [
+        "implementation",
+        "codex"
+      ],
       "envKey": "OPENAI_API_KEY",
       "codex": true,
       "codexFlag": "-c model_reasoning_effort=high"
@@ -36,26 +58,32 @@
     "gpt-4.1-mini": {
       "provider": "openai",
       "tier": "checker",
-      "costPerMtokInput": 0.40,
-      "costPerMtokOutput": 1.60,
+      "costPerMtokInput": 0.4,
+      "costPerMtokOutput": 1.6,
       "contextWindow": 128000,
-      "capabilities": ["verification", "lightweight_review"],
+      "capabilities": [
+        "verification",
+        "lightweight_review"
+      ],
       "envKey": "OPENAI_API_KEY",
-      "claudeFlag": "--model gpt-4.1-mini",
+      "claudeFlag": "gpt-4.1-mini",
       "experimental": true,
-      "note": "claude-CLI wiring is unproven — the Claude CLI only serves Anthropic models"
+      "note": "claude-CLI wiring is unproven \u2014 the Claude CLI only serves Anthropic models"
     },
     "glm-5.2": {
       "provider": "ollama",
       "tier": "worker",
-      "costPerMtokInput": 0.10,
-      "costPerMtokOutput": 0.50,
+      "costPerMtokInput": 0.1,
+      "costPerMtokOutput": 0.5,
       "contextWindow": 131072,
-      "capabilities": ["implementation", "coding"],
+      "capabilities": [
+        "implementation",
+        "coding"
+      ],
       "envKey": null,
-      "claudeFlag": "--model ollama/glm-5.2:cloud",
+      "claudeFlag": "ollama/glm-5.2:cloud",
       "experimental": true,
-      "note": "speculative — opt in with FACTORY_EXPERIMENTAL=1"
+      "note": "speculative \u2014 opt in with FACTORY_EXPERIMENTAL=1"
     },
     "deepseek-v3": {
       "provider": "deepseek",
@@ -63,33 +91,62 @@
       "costPerMtokInput": 0.07,
       "costPerMtokOutput": 0.28,
       "contextWindow": 128000,
-      "capabilities": ["implementation", "coding"],
+      "capabilities": [
+        "implementation",
+        "coding"
+      ],
       "envKey": "DEEPSEEK_API_KEY",
-      "claudeFlag": "--model deepseek/deepseek-chat",
+      "claudeFlag": "deepseek/deepseek-chat",
       "experimental": true,
-      "note": "speculative — opt in with FACTORY_EXPERIMENTAL=1"
+      "note": "speculative \u2014 opt in with FACTORY_EXPERIMENTAL=1"
     },
     "qwen-3.5-coder": {
       "provider": "ollama",
       "tier": "worker",
       "costPerMtokInput": 0.05,
-      "costPerMtokOutput": 0.20,
+      "costPerMtokOutput": 0.2,
       "contextWindow": 131072,
-      "capabilities": ["implementation", "coding"],
+      "capabilities": [
+        "implementation",
+        "coding"
+      ],
       "envKey": null,
-      "claudeFlag": "--model ollama/qwen3.5-coder:cloud",
+      "claudeFlag": "ollama/qwen3.5-coder:cloud",
       "experimental": true,
-      "note": "speculative — opt in with FACTORY_EXPERIMENTAL=1"
+      "note": "speculative \u2014 opt in with FACTORY_EXPERIMENTAL=1"
     }
   },
   "tiers": {
-    "boss": ["claude-opus-4-8", "claude-sonnet-5"],
-    "worker": ["gpt-5.1-codex", "claude-sonnet-5", "glm-5.2", "deepseek-v3", "qwen-3.5-coder"],
-    "checker": ["claude-sonnet-5", "gpt-4.1-mini", "glm-5.2"],
-    "triage": ["claude-sonnet-5", "glm-5.2"]
+    "boss": [
+      "claude-opus-4-8",
+      "claude-sonnet-5",
+      "glm-5.2"
+    ],
+    "worker": [
+      "gpt-5.1-codex",
+      "claude-sonnet-5",
+      "glm-5.2",
+      "deepseek-v3",
+      "qwen-3.5-coder"
+    ],
+    "checker": [
+      "claude-sonnet-5",
+      "gpt-4.1-mini",
+      "glm-5.2"
+    ],
+    "triage": [
+      "claude-sonnet-5",
+      "glm-5.2"
+    ]
   },
   "failover": {
-    "triggers": ["rate_limit", "usage_cap", "timeout", "error", "empty_response"],
+    "triggers": [
+      "rate_limit",
+      "usage_cap",
+      "timeout",
+      "error",
+      "empty_response"
+    ],
     "maxRetries": 2,
     "cooldownMs": 5000,
     "escalateAfterTierExhausted": true
@@ -97,12 +154,17 @@
   "routingRules": {
     "codex_available": {
       "if": "command -v codex && FACTORY_CODEX != 0",
-      "worker_preferred": ["gpt-5.1-codex"],
+      "worker_preferred": [
+        "gpt-5.1-codex"
+      ],
       "note": "Codex flat-rate is cheapest for implementation when available"
     },
     "ollama_available": {
       "if": "command -v ollama",
-      "worker_preferred_add": ["glm-5.2", "qwen-3.5-coder"],
+      "worker_preferred_add": [
+        "glm-5.2",
+        "qwen-3.5-coder"
+      ],
       "note": "Local Ollama models are free but slower; good for bulk work"
     },
     "byok_active": {
