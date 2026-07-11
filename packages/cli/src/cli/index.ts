@@ -342,7 +342,7 @@ export async function shipIssue(issueNum: number, opts: { product?: string; auto
   }
 
   // CHECK
-  const check = await checkPhase({ issue: issueNum, worktree, specPath, product, router, constitutionLoader, log });
+  const check = await checkPhase({ issue: issueNum, worktree, specPath, product, router, constitutionLoader, log, autoRework });
   if (!check.passed) {
     const failures = check.summary.results.filter(r => r.result === 'FAIL');
     for (const f of failures) {
