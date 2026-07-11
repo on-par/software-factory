@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import matter from 'gray-matter';
 import { ModelRouter } from '../router/index.js';
 import { ConstitutionLoader } from '../constitutions/index.js';
-import { escalationLine, isEscalation } from '../utils/index.js';
+import { escalationLine, isEscalation, codexDisabled } from '../utils/index.js';
 import type { Octokit } from '@octokit/rest';
 
 export interface PlanResult {
@@ -129,6 +129,11 @@ export async function planPhase(
     if (trimmedRoute === 'codex' || trimmedRoute === 'claude') route = trimmedRoute;
   } catch {
     // malformed frontmatter -> keep default 'claude'
+  }
+
+  if (route === 'codex' && codexDisabled()) {
+    log('warn', 'codex unavailable — falling back to claude');
+    route = 'claude';
   }
 
   log('plan', `Plan complete with model ${result.model}, route: ${route}`);

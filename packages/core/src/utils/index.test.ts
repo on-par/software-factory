@@ -15,6 +15,7 @@ import {
   readJsonIfExists,
   isEscalation,
   escalationLine,
+  codexDisabled,
 } from './index.js';
 
 let tmpDir: string | undefined;
@@ -218,5 +219,31 @@ ESCALATE: which behavior should win?`;
     expect(escalationLine('')).toBeUndefined();
     expect(isEscalation('No escalation here.')).toBe(false);
     expect(escalationLine('No escalation here.')).toBeUndefined();
+  });
+});
+
+describe('codexDisabled', () => {
+  const prevFactoryCodex = process.env.FACTORY_CODEX;
+
+  afterEach(() => {
+    if (prevFactoryCodex === undefined) delete process.env.FACTORY_CODEX;
+    else process.env.FACTORY_CODEX = prevFactoryCodex;
+  });
+
+  it('is true when FACTORY_CODEX is exactly "0"', () => {
+    process.env.FACTORY_CODEX = '0';
+    expect(codexDisabled()).toBe(true);
+  });
+
+  it('is false when FACTORY_CODEX is unset', () => {
+    delete process.env.FACTORY_CODEX;
+    expect(codexDisabled()).toBe(false);
+  });
+
+  it('is false when FACTORY_CODEX is "1" or any other value', () => {
+    process.env.FACTORY_CODEX = '1';
+    expect(codexDisabled()).toBe(false);
+    process.env.FACTORY_CODEX = 'false';
+    expect(codexDisabled()).toBe(false);
   });
 });

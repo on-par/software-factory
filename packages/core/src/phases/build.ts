@@ -3,7 +3,7 @@
 import { readFile } from 'node:fs/promises';
 import { ModelRouter } from '../router/index.js';
 import { ConstitutionLoader } from '../constitutions/index.js';
-import { escalationLine, isEscalation } from '../utils/index.js';
+import { escalationLine, isEscalation, codexDisabled } from '../utils/index.js';
 
 export interface BuildResult {
   ok: boolean;
@@ -26,13 +26,19 @@ export async function buildPhase(
     timeoutSeconds?: number;
   },
 ): Promise<BuildResult> {
-  const { issue, repo, worktree, specPath, branch, product, route, router, constitutionLoader, log, timeoutSeconds } = opts;
+  const { issue, repo, worktree, specPath, branch, product, router, constitutionLoader, log, timeoutSeconds } = opts;
+  let route = opts.route;
 
   const constitutionCtx = product ? constitutionLoader.buildContext(product) : '';
   const spec = await readFile(specPath, 'utf-8').catch(() => '');
 
   let prompt: string;
   let taskType: 'build_codex' | 'build_claude';
+
+  if (route === 'codex' && codexDisabled()) {
+    log('warn', 'codex unavailable — falling back to claude');
+    route = 'claude';
+  }
 
   if (route === 'codex') {
     taskType = 'build_codex';
