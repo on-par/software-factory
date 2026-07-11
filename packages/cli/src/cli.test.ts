@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ModelDiagnosis } from '@on-par/factory-core';
 import {
   main,
@@ -20,6 +20,11 @@ import {
   triageProposalMessage,
   formatDoctorReport,
   hasReachableWorker,
+  scaffoldConstitution,
+  initConstitution,
+  assertValidProduct,
+  ConstitutionExistsError,
+  InvalidProductNameError,
 } from './cli/index.js';
 
 describe('cli', () => {
@@ -945,6 +950,109 @@ describe('cli', () => {
         { model: 'claude-sonnet-5', provider: 'anthropic', tiers: ['checker', 'worker_fallback'], reachable: true, experimental: false, reason: 'ok (claude CLI)' },
       ];
       expect(hasReachableWorker(diagnoses)).toBe(true);
+    });
+  });
+
+  describe('constitution scaffolder', () => {
+    const TEMPLATE = `# Constitution Template
+
+Some prose about writing a constitution.
+
+## Format
+
+\`\`\`markdown
+---
+product: <product-name>
+version: 1
+checkers:
+  - example-checker
+enforced_on: [plan, build, check]
+---
+
+# <Product> Constitution
+
+## Purpose
+<One paragraph>
+
+## Standards
+
+## Quality Gates
+
+## Dispute Rules
+
+## Non-Goals
+\`\`\`
+
+## Writing a Constitution
+
+More prose here.
+`;
+
+    it('scaffoldConstitution fills the product name in', () => {
+      const result = scaffoldConstitution(TEMPLATE, 'acme-app');
+      expect(result).toContain('product: "acme-app"');
+      expect(result).toContain('# Acme App Constitution');
+      expect(result).not.toContain('<product-name>');
+      expect(result).not.toContain('<Product>');
+    });
+
+    it('scaffoldConstitution quotes an all-digit product name so YAML parses it as a string', () => {
+      const result = scaffoldConstitution(TEMPLATE, '2024');
+      expect(result).toContain('product: "2024"');
+    });
+
+    it('scaffoldConstitution collapses repeated/trailing separators without stray spaces in the heading', () => {
+      expect(scaffoldConstitution(TEMPLATE, 'acme--app')).toContain('# Acme App Constitution');
+      expect(scaffoldConstitution(TEMPLATE, 'acme-')).toContain('# Acme Constitution');
+    });
+
+    it('scaffoldConstitution extracts the skeleton, not the surrounding docs', () => {
+      const result = scaffoldConstitution(TEMPLATE, 'acme-app');
+      expect(result).not.toContain('Writing a Constitution');
+    });
+
+    it('scaffoldConstitution throws when no ```markdown block exists', () => {
+      expect(() => scaffoldConstitution('# just some docs, no fenced block', 'acme-app')).toThrow();
+    });
+
+    it('initConstitution scaffolds a product (happy path)', () => {
+      const writeFile = vi.fn();
+      const target = initConstitution('acme-app', {
+        dir: '/constitutions',
+        readFile: () => TEMPLATE,
+        fileExists: () => false,
+        writeFile,
+      });
+
+      expect(target).toMatch(/\/acme-app\.md$/);
+      expect(writeFile).toHaveBeenCalledTimes(1);
+      const [writtenPath, writtenContent] = writeFile.mock.calls[0];
+      expect(writtenPath).toBe(target);
+      expect(writtenContent).toContain('product: "acme-app"');
+      expect(writtenContent).toContain('# Acme App Constitution');
+    });
+
+    it('initConstitution refuses to clobber an existing constitution', () => {
+      const writeFile = vi.fn(() => {
+        throw new Error('writeFile should not be called');
+      });
+
+      expect(() =>
+        initConstitution('acme-app', {
+          dir: '/constitutions',
+          readFile: () => TEMPLATE,
+          fileExists: () => true,
+          writeFile,
+        }),
+      ).toThrow(ConstitutionExistsError);
+      expect(writeFile).not.toHaveBeenCalled();
+    });
+
+    it('assertValidProduct rejects unsafe names and accepts normal ones', () => {
+      expect(() => assertValidProduct('../evil')).toThrow(InvalidProductNameError);
+      expect(() => assertValidProduct('_reserved')).toThrow(InvalidProductNameError);
+      expect(() => assertValidProduct('a/b')).toThrow(InvalidProductNameError);
+      expect(() => assertValidProduct('acme-app')).not.toThrow();
     });
   });
 });
