@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { ModelDiagnosis } from '@on-par/factory-core';
 import {
   main,
   isPrMerged,
@@ -16,6 +17,8 @@ import {
   resolveUsageKnobs,
   superviseLoop,
   triageProposalMessage,
+  formatDoctorReport,
+  hasReachableWorker,
 } from './cli/index.js';
 
 describe('cli', () => {
@@ -594,6 +597,63 @@ describe('cli', () => {
       expect(calls.some(c => c[0] === 'event' && c[1] === 'parked')).toBe(false);
       const lastEvent = calls.filter(c => c[0] === 'event').at(-1);
       expect(lastEvent).toEqual(['event', 'lane-done', 'app', 'lane complete']);
+    });
+  });
+
+  describe('formatDoctorReport', () => {
+    const diagnoses: ModelDiagnosis[] = [
+      { model: 'claude-opus-4-8', provider: 'anthropic', tiers: ['boss'], reachable: true, experimental: false, reason: 'ok (claude CLI)' },
+      { model: 'gpt-5.1-codex', provider: 'openai', tiers: ['worker'], reachable: false, experimental: false, reason: 'codex CLI not found on PATH' },
+    ];
+
+    it('renders one line per diagnosis with model, provider, tiers, and reason', () => {
+      const report = formatDoctorReport(diagnoses);
+      expect(report).toContain('== Model Doctor ==');
+      expect(report).toContain('claude-opus-4-8');
+      expect(report).toContain('provider=anthropic');
+      expect(report).toContain('tier=boss');
+      expect(report).toContain('ok (claude CLI)');
+      expect(report).toContain('gpt-5.1-codex');
+      expect(report).toContain('provider=openai');
+      expect(report).toContain('tier=worker');
+      expect(report).toContain('codex CLI not found on PATH');
+    });
+
+    it('marks reachable models with a check and unreachable models with an x', () => {
+      const report = formatDoctorReport(diagnoses);
+      const lines = report.split('\n');
+      expect(lines.find(l => l.includes('claude-opus-4-8'))).toContain('✅');
+      expect(lines.find(l => l.includes('gpt-5.1-codex'))).toContain('❌');
+    });
+  });
+
+  describe('hasReachableWorker', () => {
+    it('is false when every model is unreachable', () => {
+      const diagnoses: ModelDiagnosis[] = [
+        { model: 'gpt-5.1-codex', provider: 'openai', tiers: ['worker'], reachable: false, experimental: false, reason: 'codex CLI not found on PATH' },
+      ];
+      expect(hasReachableWorker(diagnoses)).toBe(false);
+    });
+
+    it('is false when the only reachable model is boss-tier', () => {
+      const diagnoses: ModelDiagnosis[] = [
+        { model: 'claude-opus-4-8', provider: 'anthropic', tiers: ['boss'], reachable: true, experimental: false, reason: 'ok (claude CLI)' },
+      ];
+      expect(hasReachableWorker(diagnoses)).toBe(false);
+    });
+
+    it('is true when a worker-tier model is reachable', () => {
+      const diagnoses: ModelDiagnosis[] = [
+        { model: 'gpt-5.1-codex', provider: 'openai', tiers: ['worker'], reachable: true, experimental: false, reason: 'ok (codex CLI)' },
+      ];
+      expect(hasReachableWorker(diagnoses)).toBe(true);
+    });
+
+    it('is true when a worker_fallback-tier model is reachable', () => {
+      const diagnoses: ModelDiagnosis[] = [
+        { model: 'claude-sonnet-5', provider: 'anthropic', tiers: ['checker', 'worker_fallback'], reachable: true, experimental: false, reason: 'ok (claude CLI)' },
+      ];
+      expect(hasReachableWorker(diagnoses)).toBe(true);
     });
   });
 });

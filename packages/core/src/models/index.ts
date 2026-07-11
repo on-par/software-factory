@@ -97,3 +97,67 @@ export function isCommandAvailable(cmd: string): boolean {
     return false;
   }
 }
+
+export interface DoctorProbes {
+  commandAvailable?: (cmd: string) => boolean;
+  envPresent?: (key: string) => boolean;
+}
+
+export interface ModelDiagnosis {
+  model: string;
+  provider: string;
+  tiers: ModelTier[];
+  reachable: boolean;
+  experimental: boolean;
+  reason: string;
+}
+
+/** Probe which registered models are actually reachable on this machine (CLIs on PATH, env keys set). */
+export function diagnoseModels(
+  registry: ModelRegistry,
+  probes: DoctorProbes = {},
+  allowExperimental = false,
+): ModelDiagnosis[] {
+  const commandAvailable = probes.commandAvailable ?? isCommandAvailable;
+  const envPresent = probes.envPresent ?? ((key: string) => !!process.env[key]);
+
+  return registry.list().map((m) => {
+    const def = registry.get(m)!;
+    const experimental = registry.isExperimental(m);
+    const tiers = registry.getTiers(m);
+    const provider = def.provider;
+
+    let reachable = false;
+    let reason = '';
+
+    if (experimental && !allowExperimental) {
+      reason = 'experimental — set FACTORY_EXPERIMENTAL=1 to enable';
+    } else if (def.codex === true) {
+      if (!commandAvailable('codex')) {
+        reason = 'codex CLI not found on PATH';
+      } else {
+        reachable = true;
+        reason = 'ok (codex CLI)';
+      }
+    } else if (!commandAvailable('claude')) {
+      reason = 'claude CLI not found on PATH';
+    } else if (provider === 'ollama' && !commandAvailable('ollama')) {
+      reason = 'ollama not found on PATH';
+    } else if (provider === 'anthropic') {
+      reachable = true;
+      reason = envPresent(def.envKey ?? 'ANTHROPIC_API_KEY')
+        ? 'ok (claude CLI)'
+        : `ok (claude CLI auth; ${def.envKey ?? 'ANTHROPIC_API_KEY'} not set)`;
+    } else if (def.envKey && !envPresent(def.envKey)) {
+      reason = `${def.envKey} not set`;
+    } else if (provider === 'ollama') {
+      reachable = true;
+      reason = 'ok (claude CLI + ollama)';
+    } else {
+      reachable = true;
+      reason = 'ok (claude CLI)';
+    }
+
+    return { model: m, provider, tiers, reachable, experimental, reason };
+  });
+}
