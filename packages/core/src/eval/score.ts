@@ -7,6 +7,7 @@ export function scoreSpec(
   specContent: string,
   output: string,
   expected: ExpectedRoute,
+  opts: { requireConstitution?: boolean } = {},
 ): { route: ScoredRoute; routeCorrect: boolean; checks: DeterministicCheck[] } {
   if (output.split('\n').some(line => line.startsWith('ESCALATE:'))) {
     const routeCorrect = expected === 'escalate' || expected === 'any';
@@ -32,8 +33,9 @@ export function scoreSpec(
   const routeMatch = specContent.match(/^route:\s*(codex|claude)\s*$/m);
   const route = (routeMatch?.[1] as 'codex' | 'claude' | undefined) ?? 'unparseable';
   const routeCorrect = expected === 'any' || route === expected;
-  const missingSections = ['## Goal', '## Files / approach', '## Tests', '## Non-goals']
-    .filter(section => !specContent.includes(section));
+  const requiredSections = ['## Goal', '## Files / approach', '## Tests', '## Non-goals'];
+  if (opts.requireConstitution) requiredSections.push('## Constitution compliance');
+  const missingSections = requiredSections.filter(section => !specContent.includes(section));
 
   return {
     route,

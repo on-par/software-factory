@@ -14,6 +14,7 @@ export interface GoldenCase {
   rubric: string[];
   minRubricScore: number;
   stubOutput?: string;
+  constitution?: string;
   path: string;
 }
 

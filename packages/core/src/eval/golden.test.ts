@@ -35,6 +35,7 @@ The body explains the issue.
       rubric: [],
       minRubricScore: 7,
     }]);
+    expect(cases[0].constitution).toBeUndefined();
   });
 
   it('extracts and strips stub-output blocks', async () => {
@@ -92,5 +93,27 @@ body
 `);
 
     await expect(loadGoldenCases(dir)).rejects.toThrow(`${path}: invalid expectedRoute 'gpt'`);
+  });
+
+  it('parses inline constitution frontmatter', async () => {
+    const dir = await tempDir();
+    await writeFile(join(dir, 'case.md'), `---
+id: with-constitution
+expectedRoute: codex
+constitution: |
+  <constitution product="eval-demo">
+  # Standards
+  - S1: Label user-facing strings.
+  </constitution>
+---
+# Add a CLI flag
+
+Issue body.
+`);
+
+    const [golden] = await loadGoldenCases(dir);
+
+    expect(golden.constitution).toContain('<constitution product="eval-demo">');
+    expect(golden.constitution).toContain('S1: Label user-facing strings.');
   });
 });

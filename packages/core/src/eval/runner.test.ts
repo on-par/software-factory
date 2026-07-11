@@ -50,6 +50,22 @@ npm run test -w @on-par/factory-core
 No extras.
 `;
 
+const constitutionSpec = `---
+route: codex
+---
+# Spec
+## Goal
+Do it.
+## Files / approach
+Edit packages/core/src/eval/runner.ts.
+## Tests
+npm run test -w @on-par/factory-core
+## Constitution compliance
+S1 is satisfied by labels. S2 is satisfied by a focused unit test.
+## Non-goals
+No extras.
+`;
+
 function goldenCase(overrides: Partial<GoldenCase> = {}): GoldenCase {
   return {
     id: 'case',
@@ -208,5 +224,27 @@ describe('runEval', () => {
     expect(summary.results[0].latencyMs).toBe(10);
     expect(summary.results[0].costEstimate).toBe(0);
     expect(summary.totalCostEstimate).toBe(0);
+  });
+
+  it('requires constitution compliance for cases with an inline constitution', async () => {
+    const stub = new StubModelExecutor({
+      scripts: { plan: [{ output: constitutionSpec }, { output: goodSpec }] },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+
+    const summary = await runEval({
+      cases: [
+        goldenCase({ id: 'with-constitution', constitution: '<constitution>S1</constitution>' }),
+        goldenCase({ id: 'missing-constitution', constitution: '<constitution>S1</constitution>' }),
+      ],
+      router,
+      judge: false,
+      now: tickingNow(),
+    });
+
+    expect(summary.results[0].pass).toBe(true);
+    expect(summary.results[1].pass).toBe(false);
+    expect(summary.results[1].checks.find(check => check.name === 'sections-present')?.details)
+      .toContain('## Constitution compliance');
   });
 });
