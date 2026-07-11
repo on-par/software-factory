@@ -8,10 +8,10 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w @on-par/factory-config && npm run build -w @on-par/factory-core && npm run build -w @on-par/factory-cli && npm run build -w @on-par/factory-server",
+    "build": "tsc -b",
     "dev": "npm run dev --workspace @on-par/factory-cli",
     "lint": "npm run lint --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces",
+    "typecheck": "tsc -b && npm run typecheck --workspaces",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "eval": "tsx scripts/eval.ts",
