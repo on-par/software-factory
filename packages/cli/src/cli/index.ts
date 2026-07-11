@@ -870,12 +870,11 @@ export async function waitForMerge(
     land = landIssue,
     sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)),
     emitEvent = logEvent,
-    mergeEnabled = () => {
-      const cfg = loadFactoryConfig();
-      return cfg.merge.auto || process.env.FACTORY_MERGE === '1';
-    },
+    mergeEnabled,
     writeLine = line => console.log(line),
   } = deps;
+  const factoryConfig = loadFactoryConfig();
+  const isMergeEnabled = mergeEnabled ?? (() => factoryConfig.merge.auto || process.env.FACTORY_MERGE === '1');
   const octokit = createOctokit();
   const [owner, repoName] = ghRepo.split('/');
 
@@ -885,7 +884,7 @@ export async function waitForMerge(
       return;
     }
 
-    if (mergeEnabled()) {
+    if (isMergeEnabled()) {
       await land(issue, repoRoot, ghRepo, paths, octokit);
       return;
     }
