@@ -265,6 +265,7 @@ async function cmdShip(issueNum: number, opts: { product?: string; autoRework?: 
 
   log('ready', `PR #${ship.prNumber} ready for review`);
   console.log(chalk.green(`✅ Issue #${issueNum} → PR #${ship.prNumber} ready for review`));
+  return branch;
 }
 
 async function getIssueTitle(octokit: Octokit, repo: string, issue: number): Promise<string> {
@@ -353,9 +354,9 @@ async function runLane(lane: string, issues: number[], repoRoot: string, ghRepo:
       return;
     }
     try {
-      await cmdShip(issue, {});
+      const branch = await cmdShip(issue, {});
       // Wait for merge
-      await waitForMerge(issue, ghRepo, paths);
+      await waitForMerge(issue, branch, ghRepo, paths);
     } catch (err: any) {
       logEvent(paths.events, 'parked', issue, `failure: ${err.message}`);
     }
@@ -375,10 +376,9 @@ export async function isPrMerged(
   return prs.some((pr: any) => Boolean(pr.merged_at));
 }
 
-async function waitForMerge(issue: number, ghRepo: string, paths: ReturnType<typeof getFactoryPaths>) {
+async function waitForMerge(issue: number, branch: string, ghRepo: string, paths: ReturnType<typeof getFactoryPaths>) {
   const octokit = getOctokit();
   const [owner, repoName] = ghRepo.split('/');
-  const branch = branchFor(issue, await getIssueTitle(octokit, ghRepo, issue));
 
   while (!existsSync(paths.stop)) {
     if (await isPrMerged(octokit, owner, repoName, branch)) {
@@ -433,7 +433,9 @@ export async function main() {
     .description('Plan → build → check → ship one issue')
     .option('--product <name>', 'Override active product constitution')
     .option('--no-auto-rework', 'Disable automatic rework loop')
-    .action(cmdShip);
+    .action(async (issueNum, opts) => {
+      await cmdShip(issueNum, opts);
+    });
 
   program.command('run').description('Process the whole queue (lanes in parallel)').action(cmdRun);
 
