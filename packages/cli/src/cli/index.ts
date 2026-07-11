@@ -17,7 +17,9 @@ import {
   estimateTrailingSpend,
   formatUsageReport,
   watchUsage,
+  diagnoseModels,
 } from '@on-par/factory-core';
+import type { ModelDiagnosis } from '@on-par/factory-core';
 import { logEvent, branchFor, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock, shellEscape } from '@on-par/factory-core';
 import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -112,11 +114,35 @@ async function cmdConstitution(opts: { list?: boolean; product?: string }) {
   process.exit(2);
 }
 
-async function cmdModels() {
+export function formatDoctorReport(diagnoses: ModelDiagnosis[]): string {
+  const lines = [chalk.bold('\n== Model Doctor ==')];
+  for (const d of diagnoses) {
+    const icon = d.reachable ? chalk.green('✅') : chalk.red('❌');
+    const tiers = d.tiers.join('/');
+    lines.push(`  ${icon} ${d.model} provider=${d.provider} tier=${tiers} — ${d.reason}`);
+  }
+  return lines.join('\n');
+}
+
+export function hasReachableWorker(diagnoses: ModelDiagnosis[]): boolean {
+  return diagnoses.some((d) => d.reachable && (d.tiers.includes('worker') || d.tiers.includes('worker_fallback')));
+}
+
+async function cmdModels(opts: { doctor?: boolean } = {}) {
   const modelsConfig = loadModelsConfig();
   const { ModelRegistry } = await import('@on-par/factory-core');
   const registry = new ModelRegistry(modelsConfig);
   const allowExperimental = process.env.FACTORY_EXPERIMENTAL === '1';
+
+  if (opts.doctor) {
+    const diagnoses = diagnoseModels(registry, {}, allowExperimental);
+    console.log(formatDoctorReport(diagnoses));
+    if (!hasReachableWorker(diagnoses)) {
+      console.error(chalk.red('factory: no worker model is reachable — fix the reasons above before running a queue'));
+      process.exit(1);
+    }
+    return;
+  }
 
   console.log(chalk.bold('\n== Available Models =='));
   for (const m of registry.list()) {
@@ -884,7 +910,11 @@ export async function main() {
     .option('--product <name>', 'Set active product constitution')
     .action(cmdConstitution);
 
-  program.command('models').description('List available models and costs').action(cmdModels);
+  program
+    .command('models')
+    .description('List available models and costs')
+    .option('--doctor', 'Probe provider CLIs and env keys; report per-model reachability')
+    .action(cmdModels);
 
   program.command('cost').description('Show cost tracking summary').action(cmdCost);
 
