@@ -7,6 +7,7 @@ import {
   squashMergeAndDelete,
   getPullRequestMergeStateStatus,
   landOpenPullRequest,
+  waitForMerge,
   LandConflictError,
 } from './cli/index.js';
 
@@ -75,6 +76,82 @@ describe('cli', () => {
     };
 
     expect(await findOpenPRForIssue(octokit, 'on-par', 'software-factory', 19)).toBeUndefined();
+  });
+
+  it('self-merges a ready PR when FACTORY_MERGE is enabled', async () => {
+    const calls: any[] = [];
+    const octokit: any = {};
+    const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
+    const originalFactoryMerge = process.env.FACTORY_MERGE;
+
+    try {
+      process.env.FACTORY_MERGE = '1';
+      await waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
+        createOctokit: () => octokit,
+        pathExists: () => false,
+        checkMerged: async (...args: any[]) => {
+          calls.push(['checkMerged', args]);
+          return false;
+        },
+        land: async (...args: any[]) => {
+          calls.push(['land', args]);
+          return { branch: 'ship-it/21-self-merge', prNumber: 321 };
+        },
+        sleep: async () => {
+          calls.push(['sleep']);
+        },
+      });
+    } finally {
+      if (originalFactoryMerge === undefined) {
+        delete process.env.FACTORY_MERGE;
+      } else {
+        process.env.FACTORY_MERGE = originalFactoryMerge;
+      }
+    }
+
+    expect(calls).toEqual([
+      ['checkMerged', [octokit, 'on-par', 'software-factory', 'ship-it/21-self-merge']],
+      ['land', [21, '/repo', 'on-par/software-factory', paths, octokit]],
+    ]);
+  });
+
+  it('defaults to review mode and polls without merging', async () => {
+    const calls: any[] = [];
+    const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
+    const originalFactoryMerge = process.env.FACTORY_MERGE;
+    let stopped = false;
+
+    try {
+      delete process.env.FACTORY_MERGE;
+      await waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
+        createOctokit: () => ({} as any),
+        pathExists: () => stopped,
+        checkMerged: async () => {
+          calls.push(['checkMerged']);
+          return false;
+        },
+        land: async () => {
+          throw new Error('land should not be called');
+        },
+        writeLine: line => calls.push(['writeLine', line]),
+        sleep: async ms => {
+          calls.push(['sleep', ms]);
+          stopped = true;
+        },
+      });
+    } finally {
+      if (originalFactoryMerge === undefined) {
+        delete process.env.FACTORY_MERGE;
+      } else {
+        process.env.FACTORY_MERGE = originalFactoryMerge;
+      }
+    }
+
+    expect(calls).toEqual([
+      ['checkMerged'],
+      ['writeLine', '[factory] #21 awaiting human merge (poll 120s)'],
+      ['sleep', 120_000],
+    ]);
   });
 
   it('squash-merges a PR and deletes its branch', async () => {
