@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "description": "Global factory configuration",
+  "paths": {
+    "constitutions": "constitutions/",
+    "checkers": "lib/checkers/",
+    "plans": ".factory/plans/",
+    "logs": ".factory/logs/",
+    "events": ".factory/events.ndjson"
+  },
+  "timeouts": {
+    "plan_seconds": 1800,
+    "build_seconds": 7200,
+    "check_seconds": 1800,
+    "merge_poll_seconds": 120
+  },
+  "merge": {
+    "auto": false,
+    "comment": "Set FACTORY_MERGE=1 to enable autonomous squash-merge"
+  },
+  "worktree": {
+    "prefix": "ship-it/",
+    "parent": "../",
+    "comment": "Worktrees created as siblings of the repo"
+  },
+  "byok": {
+    "enabled": false,
+    "comment": "When true, only use models whose API keys are present in env"
+  },
+  "notifications": {
+    "on_ship": true,
+    "on_fail": true,
+    "on_escalate": true,
+    "on_park": true,
+    "on_merge": true
+  },
+  "cost_tracking": {
+    "enabled": true,
+    "log_file": ".factory/costs.jsonl",
+    "comment": "Per-task token usage and cost logged for analysis"
+  }
+}

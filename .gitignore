@@ -1,0 +1,16 @@
+# Runtime state (per-repo, created by the factory)
+.factory/
+
+# OS files
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Node
+node_modules/
+dist/
+
+# Logs
+*.log

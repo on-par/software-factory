@@ -1,0 +1,107 @@
+// src/utils/index.ts — Shared utilities: logging, git ops, cost tracking, shell helpers
+
+import { appendFileSync, existsSync, readFileSync, mkdirSync } from 'node:fs';
+import { exec as execCb } from 'node:child_process';
+import { promisify } from 'node:util';
+import { resolve } from 'node:path';
+import type { FactoryEvent, CostEntry } from '../types/index.js';
+
+const exec = promisify(execCb);
+
+// ---------- Event Logging ----------
+
+export function logEvent(eventsFile: string, type: string, issue: string | number, msg: string): void {
+  const event: FactoryEvent = {
+    ts: new Date().toISOString(),
+    type,
+    issue: String(issue),
+    msg,
+  };
+  const line = JSON.stringify(event) + '\n';
+  try {
+    appendFileSync(eventsFile, line);
+  } catch {
+    mkdirSync(resolve(eventsFile, '..'), { recursive: true });
+    appendFileSync(eventsFile, line);
+  }
+  console.log(`[factory] ${type} #${issue}: ${msg}`);
+}
+
+// ---------- Cost Tracking ----------
+
+export function logCost(costsFile: string, entry: Omit<CostEntry, 'ts'>): void {
+  const full: CostEntry = { ...entry, ts: new Date().toISOString() };
+  const line = JSON.stringify(full) + '\n';
+  try {
+    appendFileSync(costsFile, line);
+  } catch {
+    mkdirSync(resolve(costsFile, '..'), { recursive: true });
+    appendFileSync(costsFile, line);
+  }
+}
+
+export function readCosts(costsFile: string): CostEntry[] {
+  if (!existsSync(costsFile)) return [];
+  return readFileSync(costsFile, 'utf-8')
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map(l => JSON.parse(l) as CostEntry);
+}
+
+// ---------- Git Operations ----------
+
+export async function gitFetch(repoRoot: string): Promise<void> {
+  await exec('git fetch origin -q', { cwd: repoRoot });
+}
+
+export async function setupWorktree(
+  repoRoot: string,
+  branch: string,
+  worktreePath: string,
+): Promise<void> {
+  await exec(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot }).catch(() => {});
+  await exec(`git branch -D ${shellEscape(branch)}`, { cwd: repoRoot }).catch(() => {});
+  await exec(`git worktree add -b ${shellEscape(branch)} ${shellEscape(worktreePath)} origin/main`, { cwd: repoRoot });
+}
+
+export async function cleanupWorktree(repoRoot: string, worktreePath: string): Promise<void> {
+  await exec(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot }).catch(() => {});
+  await exec('git worktree prune', { cwd: repoRoot }).catch(() => {});
+}
+
+export function slugify(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32)
+    .replace(/-+$/, '');
+}
+
+export async function getIssueTitle(repo: string, issue: number, octokit: any): Promise<string> {
+  const { data } = await octokit.rest.issues.get({ owner: repo.split('/')[0], repo: repo.split('/')[1], issue_number: issue });
+  return data.title;
+}
+
+// ---------- Shell helpers ----------
+
+export function shellEscape(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+// ---------- File helpers ----------
+
+export function ensureDir(path: string): void {
+  if (!existsSync(path)) {
+    mkdirSync(path, { recursive: true });
+  }
+}
+
+export function readJsonIfExists<T>(path: string, fallback: T): T {
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8')) as T;
+  } catch {
+    return fallback;
+  }
+}

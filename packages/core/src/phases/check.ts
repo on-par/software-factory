@@ -1,0 +1,164 @@
+// src/phases/check.ts — CHECK phase: independent checkers verify output, rework loop, dispute resolution
+
+import { ModelRouter } from '../router/index.js';
+import { ConstitutionLoader } from '../constitutions/index.js';
+import { runAllCheckers, type CheckerContext } from '../checkers/index.js';
+import type { CheckSummary, CheckerOutput, DisputeResult } from '../types/index.js';
+
+export interface CheckPhaseResult {
+  passed: boolean;
+  summary: CheckSummary;
+  reworkRounds: number;
+}
+
+const MAX_REWORK_ROUNDS = 3;
+
+export async function checkPhase(
+  opts: {
+    issue: number;
+    worktree: string;
+    specPath: string;
+    product?: string;
+    router: ModelRouter;
+    constitutionLoader: ConstitutionLoader;
+    log: (type: string, msg: string) => void;
+  },
+): Promise<CheckPhaseResult> {
+  const { issue, worktree, specPath, product, router, constitutionLoader, log } = opts;
+
+  const constitutionBody = product ? constitutionLoader.getBody(product) : '';
+
+  const ctx: CheckerContext = {
+    worktree,
+    specPath,
+    constitutionBody,
+    product,
+  };
+
+  log('check', 'Running checkers');
+
+  let summary = await runAllCheckers(ctx, router, constitutionLoader);
+  let reworkRounds = 0;
+
+  while (summary.failures > 0 && reworkRounds < MAX_REWORK_ROUNDS) {
+    reworkRounds++;
+    log('rework', `${summary.failures} failures — sending back to worker (round ${reworkRounds})`);
+
+    await reworkWorker(issue, worktree, specPath, summary, product, constitutionLoader, router, log);
+
+    summary = await runAllCheckers(ctx, router, constitutionLoader);
+    log('check', `Rework round ${reworkRounds}: ${summary.failures} failures remaining`);
+  }
+
+  if (summary.failures > 0) {
+    log('fail', `${summary.failures} check failures after ${reworkRounds} rework rounds — parking`);
+  } else {
+    log('check', 'All checkers passed');
+  }
+
+  return {
+    passed: summary.failures === 0,
+    summary,
+    reworkRounds,
+  };
+}
+
+async function reworkWorker(
+  issue: number,
+  worktree: string,
+  specPath: string,
+  summary: CheckSummary,
+  product: string | undefined,
+  constitutionLoader: ConstitutionLoader,
+  router: ModelRouter,
+  log: (type: string, msg: string) => void,
+): Promise<void> {
+  const constitutionCtx = product ? constitutionLoader.buildContext(product) : '';
+  const failures = summary.results.filter(r => r.result === 'FAIL');
+  const failureDetails = failures.map(f => `### ${f.checker}\n${f.details}`).join('\n\n');
+
+  const prompt = `You are a WORKER agent in the rework loop of a software factory.
+Your previous work on issue #${issue} failed independent verification. Fix the
+specific failures listed below.
+
+WORKTREE: ${worktree} (you are here)
+SPEC: ${specPath}
+
+${constitutionCtx}
+
+## Check Failures (from independent verification agents)
+${failureDetails}
+
+## Instructions
+1. Read each failure carefully. The checker verified your work independently —
+   do not argue with the checkers. Fix the issues.
+2. Re-read the spec and constitution if needed to understand the standard.
+3. Fix each failure in the worktree.
+4. Re-run any tests/builds to confirm your fixes work.
+5. Commit your fixes with a clear message.
+
+Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`;
+
+  await router.run('build_claude', prompt, {
+    worktree,
+    timeout: 7200,
+    onLog: (msg) => log('router', msg),
+  }).catch(() => {});
+}
+
+export async function disputeResolution(
+  opts: {
+    issue: number;
+    worktree: string;
+    specPath: string;
+    checkerName: string;
+    checkerDetails: string;
+    product?: string;
+    router: ModelRouter;
+    constitutionLoader: ConstitutionLoader;
+  },
+): Promise<DisputeResult> {
+  const { issue, worktree, specPath, checkerName, checkerDetails, product, router, constitutionLoader } = opts;
+  const constitutionCtx = product ? constitutionLoader.buildContext(product) : '';
+
+  const prompt = `You are the BOSS in a software factory. A worker agent is disputing
+a checker agent's failure. You must arbitrate by re-reading the constitution —
+standards outrank both the worker and the checker.
+
+ISSUE: #${issue}
+WORKTREE: ${worktree}
+SPEC: ${specPath}
+
+${constitutionCtx}
+
+## Checker Finding
+Checker: ${checkerName}
+Details: ${checkerDetails}
+
+## Your Job
+1. Read the constitution's standards and dispute rules carefully.
+2. Inspect the actual work in the worktree.
+3. Decide: Is the checker correct (upheld) or is the worker correct (overruled)?
+4. Return JSON (and ONLY the JSON):
+{"verdict":"upheld" or "overruled","reasoning":"<one paragraph citing the standard>","action":"<what happens next>"}`;
+
+  const result = await router.run('dispute_resolution', prompt, {
+    worktree,
+    timeout: 1800,
+  }).catch(() => null);
+
+  if (!result) {
+    return { verdict: 'upheld', reasoning: 'dispute agent failed', action: 'worker must fix' };
+  }
+
+  const match = result.output.match(/"verdict"\s*:\s*"(upheld|overruled)"/);
+  const verdict = (match?.[1] as 'upheld' | 'overruled') ?? 'upheld';
+  const reasoningMatch = result.output.match(/"reasoning"\s*:\s*"([^"]*)"/);
+  const actionMatch = result.output.match(/"action"\s*:\s*"([^"]*)"/);
+
+  return {
+    verdict,
+    reasoning: reasoningMatch?.[1] ?? '',
+    action: actionMatch?.[1] ?? '',
+  };
+}

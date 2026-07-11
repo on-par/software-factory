@@ -1,0 +1,25 @@
+{
+  "name": "@on-par/factory-server",
+  "version": "2.0.0",
+  "description": "SaaS server for the Software Factory — webhook triggers, sandboxed execution, multi-tenant.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "echo 'no tests yet' && exit 0"
+  },
+  "dependencies": {
+    "@on-par/factory-core": "*",
+    "@on-par/factory-config": "*",
+    "@octokit/rest": "^22.0.0",
+    "@octokit/webhooks": "^13.0.0"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^24.0.0"
+  }
+}

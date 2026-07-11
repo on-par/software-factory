@@ -1,0 +1,28 @@
+{
+  "name": "@on-par/factory-cli",
+  "version": "2.0.0",
+  "description": "CLI for the Software Factory — ships verified GitHub issues via boss-worker-checker orchestration.",
+  "type": "module",
+  "main": "dist/cli.js",
+  "bin": {
+    "factory": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/cli.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "echo 'no tests yet' && exit 0"
+  },
+  "dependencies": {
+    "@on-par/factory-core": "*",
+    "@on-par/factory-config": "*",
+    "@octokit/rest": "^22.0.0",
+    "chalk": "^5.4.0",
+    "commander": "^14.0.0"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^24.0.0"
+  }
+}

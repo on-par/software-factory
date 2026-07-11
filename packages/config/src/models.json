@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "description": "Model registry for the Software Factory. Defines providers, costs, capabilities, and failover chains.",
+  "models": {
+    "claude-opus-4-8": {
+      "provider": "anthropic",
+      "tier": "boss",
+      "cost_per_mtok_output": 50.00,
+      "cost_per_mtok_input": 15.00,
+      "context_window": 200000,
+      "capabilities": ["planning", "design", "architecture", "review", "dispute_resolution"],
+      "env_key": "ANTHROPIC_API_KEY",
+      "claude_flag": "--model claude-opus-4-8"
+    },
+    "claude-sonnet-5": {
+      "provider": "anthropic",
+      "tier": ["checker", "boss_fallback", "worker_fallback"],
+      "cost_per_mtok_output": 15.00,
+      "cost_per_mtok_input": 3.00,
+      "context_window": 200000,
+      "capabilities": ["review", "verification", "implementation", "triage"],
+      "env_key": "ANTHROPIC_API_KEY",
+      "claude_flag": "--model claude-sonnet-5"
+    },
+    "gpt-5.5": {
+      "provider": "openai",
+      "tier": ["worker", "boss_fallback"],
+      "cost_per_mtok_output": 10.00,
+      "cost_per_mtok_input": 2.50,
+      "context_window": 256000,
+      "capabilities": ["implementation", "codex", "planning"],
+      "env_key": "OPENAI_API_KEY",
+      "codex": true,
+      "codex_flag": "-c model_reasoning_effort=high"
+    },
+    "glm-5.2": {
+      "provider": "ollama",
+      "tier": "worker",
+      "cost_per_mtok_output": 0.50,
+      "cost_per_mtok_input": 0.10,
+      "context_window": 131072,
+      "capabilities": ["implementation", "coding"],
+      "env_key": null,
+      "claude_flag": "--model ollama/glm-5.2:cloud"
+    },
+    "gpt-4.1-mini": {
+      "provider": "openai",
+      "tier": "checker",
+      "cost_per_mtok_output": 3.00,
+      "cost_per_mtok_input": 0.50,
+      "context_window": 128000,
+      "capabilities": ["verification", "lightweight_review"],
+      "env_key": "OPENAI_API_KEY",
+      "claude_flag": "--model gpt-4.1-mini"
+    },
+    "deepseek-v3": {
+      "provider": "deepseek",
+      "tier": "worker",
+      "cost_per_mtok_output": 0.28,
+      "cost_per_mtok_input": 0.07,
+      "context_window": 128000,
+      "capabilities": ["implementation", "coding"],
+      "env_key": "DEEPSEEK_API_KEY",
+      "claude_flag": "--model deepseek/deepseek-chat"
+    },
+    "qwen-3.5-coder": {
+      "provider": "ollama",
+      "tier": "worker",
+      "cost_per_mtok_output": 0.20,
+      "cost_per_mtok_input": 0.05,
+      "context_window": 131072,
+      "capabilities": ["implementation", "coding"],
+      "env_key": null,
+      "claude_flag": "--model ollama/qwen3.5-coder:cloud"
+    }
+  },
+  "tiers": {
+    "boss": ["claude-opus-4-8", "gpt-5.5", "claude-sonnet-5"],
+    "worker": ["glm-5.2", "deepseek-v3", "qwen-3.5-coder", "gpt-5.5", "claude-sonnet-5"],
+    "checker": ["claude-sonnet-5", "gpt-4.1-mini", "glm-5.2"],
+    "triage": ["claude-sonnet-5", "glm-5.2"]
+  },
+  "failover": {
+    "triggers": ["rate_limit", "usage_cap", "timeout", "error", "empty_response"],
+    "max_retries": 2,
+    "cooldown_ms": 5000,
+    "escalate_after_tier_exhausted": true
+  },
+  "routing_rules": {
+    "codex_available": {
+      "if": "command -v codex && FACTORY_CODEX != 0",
+      "worker_preferred": ["gpt-5.5"],
+      "note": "Codex flat-rate is cheapest for implementation when available"
+    },
+    "ollama_available": {
+      "if": "command -v ollama",
+      "worker_preferred_add": ["glm-5.2", "qwen-3.5-coder"],
+      "note": "Local Ollama models are free but slower; good for bulk work"
+    },
+    "byok_active": {
+      "if": "FACTORY_BYOK=1",
+      "skip_models_without_env": true,
+      "note": "In BYOK mode, only use models whose env keys are present"
+    }
+  }
+}

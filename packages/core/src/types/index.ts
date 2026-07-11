@@ -1,0 +1,135 @@
+// src/types/index.ts — Core type definitions for the Software Factory
+
+// ---------- Models ----------
+
+export type ModelProvider = 'anthropic' | 'openai' | 'ollama' | 'deepseek' | 'custom' | (string & {});
+export type ModelTier = string; // 'boss' | 'worker' | 'checker' | 'triage' | '*_fallback' — kept as string for extensibility
+export type ModelCapability = string; // kept as string for extensibility
+
+export interface ModelDefinition {
+  provider: ModelProvider;
+  tier: ModelTier | ModelTier[];
+  costPerMtokInput: number;
+  costPerMtokOutput: number;
+  contextWindow: number;
+  capabilities: ModelCapability[];
+  envKey: string | null;
+  /** Flag to pass to `claude -p --model <flag>` */
+  claudeFlag?: string;
+  /** Whether this model runs via Codex CLI */
+  codex?: boolean;
+  /** Extra Codex CLI flags */
+  codexFlag?: string;
+}
+
+// ---------- Config types (re-exported from config module) ----------
+// See config/index.ts for the Zod-validated type definitions.
+// These are re-exported here for convenience.
+
+// ---------- Routes ----------
+
+export type TaskType =
+  | 'plan'
+  | 'build_codex'
+  | 'build_claude'
+  | 'check_compile'
+  | 'check_tests'
+  | 'check_lint'
+  | 'check_accessibility'
+  | 'check_links'
+  | 'check_custom'
+  | 'review_pr'
+  | 'security_review'
+  | 'dispute_resolution'
+  | 'triage'
+  | (string & {}); // extensible
+
+export interface RouteDefinition {
+  tier: string;
+  description: string;
+  requires?: string;
+}
+
+// ---------- Factory Config ----------
+// FactoryConfig is also defined via Zod in config/index.ts.
+
+// ---------- Constitutions ----------
+
+export interface Constitution {
+  product: string;
+  version: number;
+  checkers: string[];
+  enforcedOn: string[];
+  body: string;
+  path: string;
+}
+
+// ---------- Checkers ----------
+
+export type CheckResult = 'PASS' | 'FAIL' | 'SKIP';
+
+export interface CheckerOutput {
+  checker: string;
+  result: CheckResult;
+  details: string;
+  linksChecked?: number;
+  broken?: number;
+}
+
+export interface CheckSummary {
+  failures: number;
+  passes: number;
+  total: number;
+  results: CheckerOutput[];
+}
+
+// ---------- Events ----------
+
+export interface FactoryEvent {
+  ts: string;
+  type: string;
+  issue: string;
+  msg: string;
+}
+
+// ---------- Cost Tracking ----------
+
+export interface CostEntry {
+  ts: string;
+  issue: string;
+  task: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
+}
+
+// ---------- Dispute ----------
+
+export type DisputeVerdict = 'upheld' | 'overruled';
+
+export interface DisputeResult {
+  verdict: DisputeVerdict;
+  reasoning: string;
+  action: string;
+}
+
+// ---------- Run State ----------
+
+export type RunStatus = 'pending' | 'planning' | 'building' | 'checking' | 'reworking' | 'shipping' | 'ready' | 'parked' | 'escalated' | 'merged' | 'failed';
+
+export interface IssueRunState {
+  issue: number;
+  lane: string;
+  status: RunStatus;
+  branch: string;
+  worktree: string;
+  specPath: string;
+  model: string;
+  route: 'codex' | 'claude';
+  attempts: number;
+  startedAt: string;
+  updatedAt: string;
+  prNumber?: number;
+  failures?: CheckerOutput[];
+}
