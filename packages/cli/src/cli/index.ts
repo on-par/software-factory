@@ -256,7 +256,22 @@ async function cmdStatus() {
   }
 }
 
-async function cmdShip(issueNum: number, opts: { product?: string; autoRework?: boolean }) {
+export type ParkReason = 'escalate' | 'timeout' | 'fail' | 'conflict';
+
+export class LaneParkError extends Error {
+  constructor(message: string, readonly reason: ParkReason) {
+    super(message);
+  }
+}
+
+export function parkReasonFor(err: unknown): ParkReason {
+  if (err instanceof LaneParkError) return err.reason;
+  if (err instanceof LandConflictError) return 'conflict';
+  if ((err as any)?.reason === 'timeout') return 'timeout';
+  return 'fail';
+}
+
+export async function shipIssue(issueNum: number, opts: { product?: string; autoRework?: boolean }) {
   const repoRoot = await getRepoRoot();
   const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
@@ -279,9 +294,7 @@ async function cmdShip(issueNum: number, opts: { product?: string; autoRework?: 
   // PLAN
   const plan = await planPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, product, router, constitutionLoader, octokit, log });
   if (!plan.ok) {
-    log('fail', 'plan phase failed');
-    console.error(chalk.red(`Plan failed: ${plan.escalate ?? 'unknown'}`));
-    process.exit(1);
+    throw new LaneParkError(`plan escalated: ${plan.escalate ?? 'unknown'}`, 'escalate');
   }
 
   // Setup worktree
@@ -294,9 +307,7 @@ async function cmdShip(issueNum: number, opts: { product?: string; autoRework?: 
   // BUILD
   const build = await buildPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, branch, product, route: plan.route, router, constitutionLoader, log });
   if (!build.ok) {
-    log('fail', 'build phase failed');
-    console.error(chalk.red(`Build failed: ${build.escalate ?? 'unknown'}`));
-    process.exit(1);
+    throw new LaneParkError(`build escalated: ${build.escalate ?? 'unknown'}`, 'escalate');
   }
 
   // CHECK
@@ -306,21 +317,30 @@ async function cmdShip(issueNum: number, opts: { product?: string; autoRework?: 
     for (const f of failures) {
       console.error(chalk.red(`  FAIL: ${f.checker} — ${f.details}`));
     }
-    log('parked', `${check.summary.failures} failures after ${check.reworkRounds} rework rounds`);
-    process.exit(1);
+    throw new LaneParkError(`${check.summary.failures} check failures after ${check.reworkRounds} rework rounds`, 'fail');
   }
 
   // SHIP
   const ship = await shipPhase({ issue: issueNum, repo: ghRepo, worktree, branch, octokit, log });
   if (!ship.ok) {
-    log('fail', 'ship phase failed');
-    console.error(chalk.red('Ship failed'));
-    process.exit(1);
+    throw new LaneParkError('ship phase failed', 'fail');
   }
 
   log('ready', `PR #${ship.prNumber} ready for review`);
   console.log(chalk.green(`✅ Issue #${issueNum} → PR #${ship.prNumber} ready for review`));
   return branch;
+}
+
+async function cmdShip(issueNum: number, opts: { product?: string; autoRework?: boolean }) {
+  try {
+    return await shipIssue(issueNum, opts);
+  } catch (err: any) {
+    const repoRoot = await getRepoRoot();
+    const paths = getFactoryPaths(repoRoot);
+    logEvent(paths.events, parkReasonFor(err), issueNum, err.message);
+    console.error(chalk.red(`Ship failed for issue #${issueNum}: ${err.message}`));
+    process.exit(1);
+  }
 }
 
 async function getIssueTitle(octokit: Octokit, repo: string, issue: number): Promise<string> {
@@ -549,21 +569,39 @@ async function cmdSupervise(opts: { now?: boolean }) {
   });
 }
 
-async function runLane(lane: string, issues: number[], repoRoot: string, ghRepo: string, paths: ReturnType<typeof getFactoryPaths>) {
-  for (const issue of issues) {
-    if (existsSync(paths.stop)) {
-      logEvent(paths.events, 'stopped', issue, 'STOP file present');
+type RunLaneDeps = {
+  ship?: (issue: number, opts: {}) => Promise<string>;
+  waitMerge?: typeof waitForMerge;
+  pathExists?: (path: string) => boolean;
+  emitEvent?: typeof logEvent;
+};
+
+export async function runLane(
+  lane: string,
+  issues: number[],
+  repoRoot: string,
+  ghRepo: string,
+  paths: ReturnType<typeof getFactoryPaths>,
+  deps: RunLaneDeps = {},
+) {
+  const { ship = shipIssue, waitMerge = waitForMerge, pathExists = existsSync, emitEvent = logEvent } = deps;
+  for (let i = 0; i < issues.length; i++) {
+    const issue = issues[i];
+    if (pathExists(paths.stop)) {
+      emitEvent(paths.events, 'stopped', issue, 'STOP file present');
       return;
     }
     try {
-      const branch = await cmdShip(issue, {});
-      // Wait for merge
-      await waitForMerge(issue, branch, repoRoot, ghRepo, paths);
+      const branch = await ship(issue, {});
+      await waitMerge(issue, branch, repoRoot, ghRepo, paths);
     } catch (err: any) {
-      logEvent(paths.events, 'parked', issue, `failure: ${err.message}`);
+      const reason = parkReasonFor(err);
+      emitEvent(paths.events, reason, issue, err.message);
+      emitEvent(paths.events, 'parked', issue, `lane '${lane}' parked (${reason}); ${issues.length - i - 1} issues remaining`);
+      return;
     }
   }
-  logEvent(paths.events, 'lane-done', lane, 'lane complete');
+  emitEvent(paths.events, 'lane-done', lane, 'lane complete');
 }
 
 export async function isPrMerged(

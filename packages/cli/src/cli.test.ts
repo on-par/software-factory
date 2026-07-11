@@ -9,6 +9,10 @@ import {
   landOpenPullRequest,
   waitForMerge,
   LandConflictError,
+  LandFailureError,
+  LaneParkError,
+  parkReasonFor,
+  runLane,
   resolveUsageKnobs,
   superviseLoop,
   triageProposalMessage,
@@ -490,5 +494,106 @@ describe('cli', () => {
       ['run', "gh pr checks '123' --repo 'on-par/software-factory' --watch --fail-fast", { cwd: '/repo', timeout: 600_000 }],
       ['log', 'conflict', 'PR #123 DIRTY on ship-it/20-dirty and worktree gone'],
     ]);
+  });
+
+  describe('parkReasonFor', () => {
+    it('maps a LaneParkError to its own reason', () => {
+      expect(parkReasonFor(new LaneParkError('x', 'escalate'))).toBe('escalate');
+      expect(parkReasonFor(new LaneParkError('x', 'fail'))).toBe('fail');
+    });
+
+    it('maps a LandConflictError to conflict', () => {
+      expect(parkReasonFor(new LandConflictError('x'))).toBe('conflict');
+    });
+
+    it('maps an error carrying reason: timeout to timeout', () => {
+      expect(parkReasonFor(Object.assign(new Error('x'), { reason: 'timeout' }))).toBe('timeout');
+    });
+
+    it('defaults a plain Error or LandFailureError to fail', () => {
+      expect(parkReasonFor(new Error('x'))).toBe('fail');
+      expect(parkReasonFor(new LandFailureError('x', 5))).toBe('fail');
+    });
+  });
+
+  describe('runLane', () => {
+    const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
+
+    it('parks the lane on an escalate error and skips remaining issues', async () => {
+      const calls: any[] = [];
+      await runLane('app', [7, 8], '/repo', 'on-par/software-factory', paths, {
+        ship: async (issue) => {
+          calls.push(['ship', issue]);
+          throw new LaneParkError('plan escalated: needs a human decision', 'escalate');
+        },
+        waitMerge: async () => { throw new Error('waitMerge should not be called'); },
+        pathExists: () => false,
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
+      });
+
+      expect(calls.filter(c => c[0] === 'ship')).toEqual([['ship', 7]]);
+      const events = calls.filter(c => c[0] === 'event');
+      expect(events[0]).toEqual(['event', 'escalate', 7, 'plan escalated: needs a human decision']);
+      expect(events[1][0]).toBe('event');
+      expect(events[1][1]).toBe('parked');
+      expect(events[1][2]).toBe(7);
+      expect(events.some(e => e[1] === 'lane-done')).toBe(false);
+    });
+
+    it('parks the lane on a timeout error', async () => {
+      const calls: any[] = [];
+      await runLane('app', [9], '/repo', 'on-par/software-factory', paths, {
+        ship: async () => { throw Object.assign(new Error('router exhausted'), { reason: 'timeout' }); },
+        waitMerge: async () => { throw new Error('waitMerge should not be called'); },
+        pathExists: () => false,
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
+      });
+
+      expect(calls[0]).toEqual(['event', 'timeout', 9, 'router exhausted']);
+      expect(calls[1][1]).toBe('parked');
+    });
+
+    it('parks the lane on a plain fail error', async () => {
+      const calls: any[] = [];
+      await runLane('app', [10], '/repo', 'on-par/software-factory', paths, {
+        ship: async () => { throw new Error('boom'); },
+        waitMerge: async () => { throw new Error('waitMerge should not be called'); },
+        pathExists: () => false,
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
+      });
+
+      expect(calls[0]).toEqual(['event', 'fail', 10, 'boom']);
+      expect(calls[1][1]).toBe('parked');
+    });
+
+    it('parks the lane on a conflict error from waitMerge', async () => {
+      const calls: any[] = [];
+      await runLane('app', [11], '/repo', 'on-par/software-factory', paths, {
+        ship: async (issue) => { calls.push(['ship', issue]); return 'ship-it/11-x'; },
+        waitMerge: async () => { throw new LandConflictError('rebase conflict on ship-it/11-x — parked'); },
+        pathExists: () => false,
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
+      });
+
+      expect(calls[0]).toEqual(['ship', 11]);
+      expect(calls[1]).toEqual(['event', 'conflict', 11, 'rebase conflict on ship-it/11-x — parked']);
+      expect(calls[2][1]).toBe('parked');
+    });
+
+    it('runs both issues and logs lane-done on the green path', async () => {
+      const calls: any[] = [];
+      await runLane('app', [1, 2], '/repo', 'on-par/software-factory', paths, {
+        ship: async (issue) => { calls.push(['ship', issue]); return `ship-it/${issue}-x`; },
+        waitMerge: async (issue) => { calls.push(['waitMerge', issue]); },
+        pathExists: () => false,
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
+      });
+
+      expect(calls.filter(c => c[0] === 'ship')).toEqual([['ship', 1], ['ship', 2]]);
+      expect(calls.filter(c => c[0] === 'waitMerge')).toEqual([['waitMerge', 1], ['waitMerge', 2]]);
+      expect(calls.some(c => c[0] === 'event' && c[1] === 'parked')).toBe(false);
+      const lastEvent = calls.filter(c => c[0] === 'event').at(-1);
+      expect(lastEvent).toEqual(['event', 'lane-done', 'app', 'lane complete']);
+    });
   });
 });

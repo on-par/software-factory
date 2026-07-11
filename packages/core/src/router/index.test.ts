@@ -104,9 +104,15 @@ describe('ModelRouter with StubModelExecutor', () => {
     });
     const router = new ModelRouter(models, routes, false, stub);
 
-    await expect(router.run('plan', 'do it')).rejects.toThrow(
+    const err: any = await router.run('plan', 'do it').catch(e => e);
+    expect(err.message).toBe(
       "All models failed for task 'plan': stub-model(error), stub-model(error)",
     );
+    expect(err.reason).toBe('error');
+    expect(err.attempts).toEqual([
+      { model: 'stub-model', reason: 'error', ok: false },
+      { model: 'stub-model', reason: 'error', ok: false },
+    ]);
     expect(stub.calls).toHaveLength(2);
   });
 
@@ -194,9 +200,15 @@ describe('ModelRouter with StubModelExecutor', () => {
     });
     const router = new ModelRouter(twoModels, routes, false, stub);
 
-    await expect(router.run('plan', 'do it')).rejects.toThrow(
+    const err: any = await router.run('plan', 'do it').catch(e => e);
+    expect(err.message).toBe(
       "All models failed for task 'plan': model-a(timeout), model-b(timeout)",
     );
+    expect(err.reason).toBe('timeout');
+    expect(err.attempts).toEqual([
+      { model: 'model-a', reason: 'timeout', ok: false },
+      { model: 'model-b', reason: 'timeout', ok: false },
+    ]);
     expect(stub.calls).toHaveLength(2);
   });
 });

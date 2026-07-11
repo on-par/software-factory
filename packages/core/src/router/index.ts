@@ -236,7 +236,13 @@ export class ModelRouter {
       }
     }
 
-    throw new Error(`All models failed for task '${task}': ${attempts.map(a => `${a.model}(${a.reason})`).join(', ')}`);
+    const error = new Error(`All models failed for task '${task}': ${attempts.map(a => `${a.model}(${a.reason})`).join(', ')}`) as Error & {
+      reason?: FailoverReason;
+      attempts?: RouterResult['attempts'];
+    };
+    error.reason = attempts[attempts.length - 1]?.reason ?? 'error';
+    error.attempts = attempts;
+    throw error;
   }
 }
 
