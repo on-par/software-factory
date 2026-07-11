@@ -1,4 +1,4 @@
-import type { EvalSummary } from './types.js';
+import { isRouteAsserted, type EvalSummary } from './types.js';
 
 export interface BaselineCase {
   pass: boolean;
@@ -7,8 +7,9 @@ export interface BaselineCase {
 
 export interface Baseline {
   version: 1;
-  tolerance: { passRate: number; rubricScore: number };
+  tolerance: { passRate: number; rubricScore: number; routeAccuracy: number };
   passRate: number;
+  routeAccuracy: number;
   cases: Record<string, BaselineCase>;
 }
 
@@ -18,7 +19,7 @@ export interface BaselineComparison {
   ok: boolean;
 }
 
-const DEFAULT_TOLERANCE: Baseline['tolerance'] = { passRate: 0, rubricScore: 1.0 };
+const DEFAULT_TOLERANCE: Baseline['tolerance'] = { passRate: 0, rubricScore: 1.0, routeAccuracy: 0 };
 
 export function toBaseline(summary: EvalSummary, tolerance: Baseline['tolerance'] = DEFAULT_TOLERANCE): Baseline {
   const cases: Record<string, BaselineCase> = {};
@@ -32,6 +33,7 @@ export function toBaseline(summary: EvalSummary, tolerance: Baseline['tolerance'
     version: 1,
     tolerance,
     passRate: summary.passRate,
+    routeAccuracy: summary.routeAccuracy,
     cases,
   };
 }
@@ -43,6 +45,20 @@ export function compareToBaseline(summary: EvalSummary, baseline: Baseline): Bas
   if (summary.passRate < baseline.passRate - baseline.tolerance.passRate) {
     regressions.push(
       `overall pass rate dropped: ${summary.passRate} < baseline ${baseline.passRate} - tolerance ${baseline.tolerance.passRate}`,
+    );
+  }
+
+  if (
+    baseline.routeAccuracy !== undefined &&
+    summary.routeAccuracy < baseline.routeAccuracy - (baseline.tolerance.routeAccuracy ?? 0)
+  ) {
+    const misrouted = summary.results
+      .filter(result => isRouteAsserted(result.expectedRoute) && !result.routeCorrect)
+      .map(result => result.id);
+    regressions.push(
+      `routing accuracy dropped: ${summary.routeAccuracy} < baseline ${baseline.routeAccuracy} ` +
+      `- tolerance ${baseline.tolerance.routeAccuracy ?? 0}` +
+      (misrouted.length ? ` (misrouted: ${misrouted.join(', ')})` : ''),
     );
   }
 
