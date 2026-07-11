@@ -102,6 +102,7 @@ export function getFactoryPaths(repoRoot: string) {
   return {
     state,
     queue: resolve(state, 'queue'),
+    queueProposed: resolve(state, 'queue.proposed'),
     events: resolve(state, 'events.ndjson'),
     logs: resolve(state, 'logs'),
     plans: resolve(state, 'plans'),

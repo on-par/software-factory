@@ -438,7 +438,7 @@ ${constitutionNote}
 Run: gh issue list --repo ${ghRepo} --state open --limit 100 --json number,title,labels,body
 Read every body. Exclude epics/PRDs/meta, external-account/credential/outreach issues,
 and anything too vague. Group by lane (same-file issues together). Order by dependency then value.
-Write ONLY the queue to ${paths.queue} in format '<lane> <issue#>', with '#' comments
+Write ONLY the queue to ${paths.queueProposed} in format '<lane> <issue#>', with '#' comments
 explaining exclusions.` ;
 
   logEvent(paths.events, 'triage', '-', `Triaging ${ghRepo} with ${model}`);
@@ -446,12 +446,19 @@ explaining exclusions.` ;
     `claude -p ${shellEscapeInline(prompt)} ${flag ? `--model ${flag}` : ''} --allowedTools "Bash(gh issue:*)" "Bash(gh repo:*)" Read Glob Grep Write`,
   ).catch(() => ({ stdout: '' }));
 
-  if (existsSync(paths.queue)) {
-    console.log(readFileSync(paths.queue, 'utf-8'));
+  const proposed = existsSync(paths.queueProposed) ? readFileSync(paths.queueProposed, 'utf-8') : '';
+  const message = triageProposalMessage(proposed, paths.queueProposed, paths.queue);
+  if (message) {
+    console.log(message);
   } else {
-    console.error('triage produced no queue');
+    console.error('triage produced no proposal');
     process.exit(1);
   }
+}
+
+export function triageProposalMessage(proposed: string, proposedPath: string, queuePath: string): string | null {
+  if (!proposed.trim()) return null;
+  return `${proposed}\n---\nreview and: mv ${proposedPath} ${queuePath}`;
 }
 
 function shellEscapeInline(s: string): string {
