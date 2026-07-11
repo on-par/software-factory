@@ -30,8 +30,29 @@ describe('scoreSpec', () => {
     expect(result.checks.find(check => check.name === 'frontmatter-valid')?.pass).toBe(false);
   });
 
+  it('parses a quoted codex route', () => {
+    const spec = goodSpec.replace('route: codex', 'route: "codex"');
+    const result = scoreSpec(spec, spec, 'codex');
+
+    expect(result.route).toBe('codex');
+    expect(result.checks.find(check => check.name === 'route-parseable')?.pass).toBe(true);
+  });
+
+  it('parses claude routes with or without quotes', () => {
+    const unquoted = goodSpec.replace('route: codex', 'route: claude');
+    const quoted = goodSpec.replace('route: codex', 'route: "claude"');
+
+    const unquotedResult = scoreSpec(unquoted, unquoted, 'claude');
+    const quotedResult = scoreSpec(quoted, quoted, 'claude');
+
+    expect(unquotedResult.route).toBe('claude');
+    expect(unquotedResult.checks.find(check => check.name === 'route-parseable')?.pass).toBe(true);
+    expect(quotedResult.route).toBe('claude');
+    expect(quotedResult.checks.find(check => check.name === 'route-parseable')?.pass).toBe(true);
+  });
+
   it('fails an unparseable route', () => {
-    const spec = goodSpec.replace('route: codex', 'route: gpt');
+    const spec = goodSpec.replace('route: codex', 'route: gpt-5');
     const result = scoreSpec(spec, spec, 'codex');
 
     expect(result.route).toBe('unparseable');
