@@ -5,13 +5,14 @@ import {
   REGRESSION_ISSUE_MARKER,
   REGRESSION_ISSUE_TITLE,
 } from './regression-report.js';
-import type { CaseResult, EvalSummary } from './types.js';
+import { isRouteAsserted, type CaseResult, type EvalSummary } from './types.js';
 
 function caseResult(overrides: Partial<CaseResult> = {}): CaseResult {
   return {
     id: 'case',
     pass: true,
     route: 'codex',
+    expectedRoute: 'codex',
     routeCorrect: true,
     checks: [],
     judgeSkipped: true,
@@ -25,12 +26,16 @@ function caseResult(overrides: Partial<CaseResult> = {}): CaseResult {
 function summaryOf(results: CaseResult[]): EvalSummary {
   const total = results.length;
   const passed = results.filter(r => r.pass).length;
+  const routeAsserted = results.filter(r => isRouteAsserted(r.expectedRoute)).length;
+  const routeCorrect = results.filter(r => isRouteAsserted(r.expectedRoute) && r.routeCorrect).length;
   return {
     results,
     total,
     passed,
     failed: total - passed,
     passRate: total ? passed / total : 0,
+    routeAsserted,
+    routeAccuracy: routeAsserted ? routeCorrect / routeAsserted : 1,
     totalCostEstimate: 0,
     totalLatencyMs: 0,
   };
@@ -54,6 +59,7 @@ describe('formatRegressionIssue', () => {
     const baseline = toBaseline(summaryOf([caseResult({ id: 'a', rubricScore: 8.0 })]), {
       passRate: 0,
       rubricScore: 1.0,
+      routeAccuracy: 0,
     });
     const summary = summaryOf([caseResult({ id: 'a', rubricScore: 6.0 })]);
     const comparison = compareToBaseline(summary, baseline);
