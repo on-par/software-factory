@@ -10,6 +10,7 @@ import {
   waitForMerge,
   LandConflictError,
   resolveUsageKnobs,
+  superviseLoop,
 } from './cli/index.js';
 
 describe('cli', () => {
@@ -21,6 +22,7 @@ describe('cli', () => {
     expect(resolveUsageKnobs({})).toEqual({
       cap: 227,
       stopAt: 0.75,
+      resumeAt: 0.65,
       pollMs: 180_000,
       watch: true,
     });
@@ -30,11 +32,13 @@ describe('cli', () => {
     expect(resolveUsageKnobs({
       FACTORY_USAGE_CAP: '100',
       FACTORY_STOP_AT: '0.5',
+      FACTORY_RESUME_AT: '0.4',
       FACTORY_USAGE_POLL: '60',
       FACTORY_USAGE_WATCH: '0',
     })).toEqual({
       cap: 100,
       stopAt: 0.5,
+      resumeAt: 0.4,
       pollMs: 60_000,
       watch: false,
     });
@@ -43,7 +47,115 @@ describe('cli', () => {
   it('rejects invalid usage knob values with env var names', () => {
     expect(() => resolveUsageKnobs({ FACTORY_USAGE_CAP: '-5' })).toThrow(/FACTORY_USAGE_CAP/);
     expect(() => resolveUsageKnobs({ FACTORY_STOP_AT: '1.5' })).toThrow(/FACTORY_STOP_AT/);
+    expect(() => resolveUsageKnobs({ FACTORY_RESUME_AT: '1.5' })).toThrow(/FACTORY_RESUME_AT/);
     expect(() => resolveUsageKnobs({ FACTORY_USAGE_POLL: 'abc' })).toThrow(/FACTORY_USAGE_POLL/);
+  });
+
+  it('waits for the resume gate, runs the queue, and loops again while STOP is present', async () => {
+    const calls: any[] = [];
+    const spends = [0.9, 0.9, 0.5, 0.5];
+    const pathExistsResults = [true, false];
+    let runQueueCalls = 0;
+
+    await superviseLoop({
+      cap: 1,
+      resumeAt: 0.65,
+      pollMs: 1000,
+      stopFile: '/repo/.factory/STOP',
+      eventsFile: '/repo/.factory/events.ndjson',
+      now: false,
+      estimateSpend: () => spends.shift()!,
+      pathExists: () => pathExistsResults.shift()!,
+      clearStop: path => calls.push(['clearStop', path]),
+      sleep: async () => { calls.push(['sleep']); },
+      emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) => { calls.push(['event', type, issue, msg]); },
+      writeLine: line => calls.push(['writeLine', line]),
+      runQueue: async () => {
+        runQueueCalls++;
+        calls.push(['runQueue']);
+      },
+    });
+
+    expect(runQueueCalls).toBe(2);
+    const firstRunQueueIdx = calls.findIndex(c => c[0] === 'runQueue');
+    const firstSleepIdx = calls.findIndex(c => c[0] === 'sleep');
+    expect(firstSleepIdx).toBeGreaterThanOrEqual(0);
+    expect(firstSleepIdx).toBeLessThan(firstRunQueueIdx);
+
+    const clearStopCalls = calls.filter(c => c[0] === 'clearStop');
+    expect(clearStopCalls).toHaveLength(2);
+
+    const events = calls.filter(c => c[0] === 'event');
+    expect(events.filter(e => e[1] === 'resumed')).toHaveLength(2);
+    expect(events.filter(e => e[1] === 'supervisor-done')).toHaveLength(1);
+    expect(events[events.length - 1][1]).toBe('supervisor-done');
+  });
+
+  it('exits after one cycle when the queue drains without STOP present', async () => {
+    const calls: any[] = [];
+
+    await superviseLoop({
+      cap: 1,
+      resumeAt: 0.65,
+      pollMs: 1000,
+      stopFile: '/repo/.factory/STOP',
+      eventsFile: '/repo/.factory/events.ndjson',
+      now: true,
+      estimateSpend: () => 0.1,
+      pathExists: () => false,
+      clearStop: () => {},
+      sleep: async () => { calls.push(['sleep']); },
+      emitEvent: (_eventsFile: string, type: string) => { calls.push(['event', type]); },
+      runQueue: async () => { calls.push(['runQueue']); },
+    });
+
+    expect(calls.filter(c => c[0] === 'runQueue')).toHaveLength(1);
+    expect(calls.filter(c => c[0] === 'sleep')).toHaveLength(0);
+    expect(calls.filter(c => c[0] === 'event' && c[1] === 'supervisor-done')).toHaveLength(1);
+  });
+
+  it('skips the initial headroom wait when --now is set', async () => {
+    const calls: any[] = [];
+
+    await superviseLoop({
+      cap: 1,
+      resumeAt: 0.65,
+      pollMs: 1000,
+      stopFile: '/repo/.factory/STOP',
+      eventsFile: '/repo/.factory/events.ndjson',
+      now: true,
+      estimateSpend: () => 0.9,
+      pathExists: () => false,
+      clearStop: () => {},
+      sleep: async () => { calls.push(['sleep']); },
+      emitEvent: () => {},
+      runQueue: async () => { calls.push(['runQueue']); },
+    });
+
+    expect(calls).toEqual([['runQueue']]);
+  });
+
+  it('re-checks the resume gate after each wait', async () => {
+    const calls: any[] = [];
+    const spends = [0.9, 0.9, 0.5];
+
+    await superviseLoop({
+      cap: 1,
+      resumeAt: 0.65,
+      pollMs: 1000,
+      stopFile: '/repo/.factory/STOP',
+      eventsFile: '/repo/.factory/events.ndjson',
+      now: false,
+      estimateSpend: () => spends.shift()!,
+      pathExists: () => false,
+      clearStop: () => {},
+      sleep: async () => {},
+      emitEvent: () => {},
+      writeLine: line => calls.push(line),
+      runQueue: async () => {},
+    });
+
+    expect(calls).toHaveLength(2);
   });
 
   it('detects a merge by head branch even when it is outside the recent-closed window', async () => {
