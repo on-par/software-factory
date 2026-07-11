@@ -133,6 +133,9 @@ export function diagnoseModels(
     if (experimental && !allowExperimental) {
       reason = 'experimental — set FACTORY_EXPERIMENTAL=1 to enable';
     } else if (def.codex === true) {
+      // Deliberately does not check def.envKey here, unlike ModelRegistry.isAvailable():
+      // the codex CLI carries its own (OAuth-based) auth, so a missing API key doesn't
+      // make the model unreachable for doctor purposes.
       if (!commandAvailable('codex')) {
         reason = 'codex CLI not found on PATH';
       } else {
