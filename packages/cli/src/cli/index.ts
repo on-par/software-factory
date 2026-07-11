@@ -607,23 +607,57 @@ export async function landOpenPullRequest(
   await squashMergeAndDelete(octokit, owner, repoName, branch, prNumber);
 }
 
-async function waitForMerge(issue: number, branch: string, repoRoot: string, ghRepo: string, paths: ReturnType<typeof getFactoryPaths>) {
-  const octokit = getOctokit();
+type WaitForMergeDeps = {
+  createOctokit?: () => Octokit;
+  pathExists?: (path: string) => boolean;
+  checkMerged?: typeof isPrMerged;
+  land?: (
+    issueNum: number,
+    repoRoot: string,
+    ghRepo: string,
+    paths: ReturnType<typeof getFactoryPaths>,
+    octokit: Octokit,
+  ) => Promise<{ branch: string; prNumber: number }>;
+  sleep?: (ms: number) => Promise<void>;
+  emitEvent?: typeof logEvent;
+  mergeEnabled?: () => boolean;
+  writeLine?: (line: string) => void;
+};
+
+export async function waitForMerge(
+  issue: number,
+  branch: string,
+  repoRoot: string,
+  ghRepo: string,
+  paths: ReturnType<typeof getFactoryPaths>,
+  deps: WaitForMergeDeps = {},
+) {
+  const {
+    createOctokit = getOctokit,
+    pathExists = existsSync,
+    checkMerged = isPrMerged,
+    land = landIssue,
+    sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)),
+    emitEvent = logEvent,
+    mergeEnabled = () => process.env.FACTORY_MERGE === '1',
+    writeLine = line => console.log(line),
+  } = deps;
+  const octokit = createOctokit();
   const [owner, repoName] = ghRepo.split('/');
 
-  while (!existsSync(paths.stop)) {
-    if (await isPrMerged(octokit, owner, repoName, branch)) {
-      logEvent(paths.events, 'landed', issue, 'PR merged');
+  while (!pathExists(paths.stop)) {
+    if (await checkMerged(octokit, owner, repoName, branch)) {
+      emitEvent(paths.events, 'landed', issue, 'PR merged');
       return;
     }
 
-    if (process.env.FACTORY_MERGE === '1') {
-      await landIssue(issue, repoRoot, ghRepo, paths, octokit);
+    if (mergeEnabled()) {
+      await land(issue, repoRoot, ghRepo, paths, octokit);
       return;
     }
 
-    console.log(`[factory] #${issue} awaiting human merge (poll 120s)`);
-    await new Promise(r => setTimeout(r, 120_000));
+    writeLine(`[factory] #${issue} awaiting human merge (poll 120s)`);
+    await sleep(120_000);
   }
 }
 
