@@ -13,6 +13,8 @@ import {
   readCosts,
   ensureDir,
   readJsonIfExists,
+  isEscalation,
+  escalationLine,
 } from './index.js';
 
 let tmpDir: string | undefined;
@@ -184,5 +186,37 @@ describe('utils', () => {
 
     writeFileSync(invalidFile, 'not json{');
     expect(readJsonIfExists(invalidFile, fallback)).toBe(fallback);
+  });
+});
+
+describe('isEscalation / escalationLine', () => {
+  it('matches a line-start escalation marker', () => {
+    const output = 'ESCALATE: missing product decision';
+
+    expect(isEscalation(output)).toBe(true);
+    expect(escalationLine(output)).toBe('ESCALATE: missing product decision');
+  });
+
+  it('matches a later line-start escalation marker', () => {
+    const output = `I inspected the repository.
+This issue needs a product decision.
+ESCALATE: which behavior should win?`;
+
+    expect(isEscalation(output)).toBe(true);
+    expect(escalationLine(output)).toBe('ESCALATE: which behavior should win?');
+  });
+
+  it('ignores a mid-paragraph mention of the marker', () => {
+    const output = 'Consider whether to ESCALATE: this later.';
+
+    expect(isEscalation(output)).toBe(false);
+    expect(escalationLine(output)).toBeUndefined();
+  });
+
+  it('does not match empty output or output without a marker', () => {
+    expect(isEscalation('')).toBe(false);
+    expect(escalationLine('')).toBeUndefined();
+    expect(isEscalation('No escalation here.')).toBe(false);
+    expect(escalationLine('No escalation here.')).toBeUndefined();
   });
 });

@@ -1,4 +1,5 @@
 import matter from 'gray-matter';
+import { isEscalation } from '../utils/index.js';
 import type { DeterministicCheck, ExpectedRoute } from './types.js';
 
 type ScoredRoute = 'codex' | 'claude' | 'escalate' | 'unparseable';
@@ -9,7 +10,7 @@ export function scoreSpec(
   expected: ExpectedRoute,
   opts: { requireConstitution?: boolean } = {},
 ): { route: ScoredRoute; routeCorrect: boolean; checks: DeterministicCheck[] } {
-  if (output.split('\n').some(line => line.startsWith('ESCALATE:'))) {
+  if (isEscalation(output)) {
     const routeCorrect = expected === 'escalate' || expected === 'any';
     return {
       route: 'escalate',
