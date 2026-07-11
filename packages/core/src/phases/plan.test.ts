@@ -133,4 +133,38 @@ describe('planPhase', () => {
 
     expect(result.route).toBe('codex');
   });
+
+  it('trims incidental whitespace inside a quoted route value', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-37.md');
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [{
+          output: '---\nroute: "codex "\n---\n# Spec\n',
+        }],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+        },
+      },
+    };
+
+    const result = await planPhase({
+      issue: 37,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitutionLoader: new ConstitutionLoader(),
+      octokit,
+      log: () => {},
+    });
+
+    expect(result.route).toBe('codex');
+  });
 });

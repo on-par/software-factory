@@ -125,7 +125,8 @@ export async function planPhase(
   let route: 'codex' | 'claude' = 'claude';
   try {
     const rawRoute = matter(specContent).data.route;
-    if (rawRoute === 'codex' || rawRoute === 'claude') route = rawRoute;
+    const trimmedRoute = typeof rawRoute === 'string' ? rawRoute.trim() : rawRoute;
+    if (trimmedRoute === 'codex' || trimmedRoute === 'claude') route = trimmedRoute;
   } catch {
     // malformed frontmatter -> keep default 'claude'
   }
