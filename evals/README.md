@@ -9,3 +9,4 @@ Use `deterministicOnly: true` to skip the LLM judge even in real mode.
 Add rubric items only for cases that need qualitative scoring.
 For offline runs, include a fenced `stub-output` block with the canned PLAN output.
 Run `npm run eval -- --stub` before committing prompt or golden-set changes.
+CI also runs the stub subset on every PR, so a broken prompt or golden case fails the PR check at zero model cost.

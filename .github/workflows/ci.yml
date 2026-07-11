@@ -33,3 +33,6 @@ jobs:
 
       - name: Test & coverage
         run: npm run test:coverage
+
+      - name: Eval (deterministic, stub)
+        run: npm run eval -- --stub

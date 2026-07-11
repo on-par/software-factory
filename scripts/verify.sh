@@ -7,3 +7,4 @@ npm ci
 npm run build
 npm run typecheck
 npm run test:coverage
+npm run eval -- --stub
