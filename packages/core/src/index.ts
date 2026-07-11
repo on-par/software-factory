@@ -29,8 +29,8 @@ export { checkPhase, disputeResolution } from './phases/check.js';
 export { shipPhase } from './phases/ship.js';
 
 // Eval
-export { loadGoldenCases, scoreSpec, judgeSpec, runEval } from './eval/index.js';
-export type { CaseResult, DeterministicCheck, EvalSummary, ExpectedRoute, GoldenCase, RunEvalOpts } from './eval/index.js';
+export { loadGoldenCases, scoreSpec, judgeSpec, runEval, toBaseline, compareToBaseline } from './eval/index.js';
+export type { CaseResult, DeterministicCheck, EvalSummary, ExpectedRoute, GoldenCase, RunEvalOpts, Baseline, BaselineCase, BaselineComparison } from './eval/index.js';
 
 // Utils
 export { logEvent, logCost, readCosts, slugify, branchFor, setupWorktree, cleanupWorktree, gitFetch, shellEscape, ensureDir } from './utils/index.js';

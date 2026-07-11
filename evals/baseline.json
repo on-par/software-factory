@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "tolerance": {
+    "passRate": 0,
+    "rubricScore": 1
+  },
+  "passRate": 1,
+  "cases": {
+    "mechanical-bug-fix": {
+      "pass": true
+    },
+    "ux-feature": {
+      "pass": true
+    },
+    "tiny-diff": {
+      "pass": true
+    },
+    "test-writing": {
+      "pass": true
+    },
+    "vague-issue": {
+      "pass": true
+    },
+    "deterministic-shape": {
+      "pass": true
+    }
+  }
+}
