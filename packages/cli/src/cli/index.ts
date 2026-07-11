@@ -596,6 +596,7 @@ export async function runLane(
       await waitMerge(issue, branch, repoRoot, ghRepo, paths);
     } catch (err: any) {
       const reason = parkReasonFor(err);
+      console.error(chalk.red(`[factory] lane '${lane}' #${issue} parked (${reason}): ${err.message}`));
       emitEvent(paths.events, reason, issue, err.message);
       emitEvent(paths.events, 'parked', issue, `lane '${lane}' parked (${reason}); ${issues.length - i - 1} issues remaining`);
       return;
