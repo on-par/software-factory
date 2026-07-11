@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { getFactoryPaths, loadModelsConfig } from './index.js';
+import { getFactoryPaths, loadFactoryConfig, loadModelsConfig, resolveTimeouts } from './index.js';
 
 describe('getFactoryPaths', () => {
   it('stages triage output alongside the live queue path', () => {
@@ -34,5 +34,39 @@ describe('loadModelsConfig', () => {
       .map(([id]) => id)
       .sort();
     expect(nonExperimental).toEqual(['claude-opus-4-8', 'claude-sonnet-5', 'gpt-5.1-codex'].sort());
+  });
+});
+
+describe('loadFactoryConfig', () => {
+  it('parses the shipped factory.json without throwing', () => {
+    expect(() => loadFactoryConfig()).not.toThrow();
+  });
+});
+
+describe('resolveTimeouts', () => {
+  it('uses config values when env overrides are absent', () => {
+    const config = loadFactoryConfig();
+    expect(resolveTimeouts({
+      ...config,
+      timeouts: { ...config.timeouts, plan_seconds: 900 },
+    }, {}).plan).toBe(900);
+  });
+
+  it('lets env override config values', () => {
+    const config = loadFactoryConfig();
+    expect(resolveTimeouts({
+      ...config,
+      timeouts: { ...config.timeouts, build_seconds: 7200 },
+    }, { FACTORY_BUILD_TIMEOUT: '3600' }).build).toBe(3600);
+  });
+
+  it('preserves defaults and ignores invalid env values', () => {
+    const config = loadFactoryConfig();
+
+    expect(resolveTimeouts(config, {})).toEqual({ plan: 1800, build: 7200, check: 1800 });
+    expect(resolveTimeouts(config, {
+      FACTORY_PLAN_TIMEOUT: 'abc',
+      FACTORY_CHECK_TIMEOUT: '',
+    })).toEqual({ plan: 1800, build: 7200, check: 1800 });
   });
 });

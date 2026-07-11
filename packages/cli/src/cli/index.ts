@@ -6,6 +6,7 @@ import {
   loadModelsConfig,
   loadRoutesConfig,
   loadFactoryConfig,
+  resolveTimeouts,
   getFactoryPaths,
   getConstitutionsDir,
   ModelRouter,
@@ -308,6 +309,8 @@ export async function shipIssue(issueNum: number, opts: { product?: string; auto
 
   const modelsConfig = loadModelsConfig();
   const routesConfig = loadRoutesConfig();
+  const factoryConfig = loadFactoryConfig();
+  const timeouts = resolveTimeouts(factoryConfig);
   const router = new ModelRouter(modelsConfig, routesConfig);
   const constitutionLoader = new ConstitutionLoader();
 
@@ -321,7 +324,7 @@ export async function shipIssue(issueNum: number, opts: { product?: string; auto
   const log = (type: string, msg: string) => logEvent(paths.events, type, issueNum, msg);
 
   // PLAN
-  const plan = await planPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, product, router, constitutionLoader, octokit, log });
+  const plan = await planPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, product, router, constitutionLoader, octokit, log, timeoutSeconds: timeouts.plan });
   if (!plan.ok) {
     throw new LaneParkError(`plan escalated: ${plan.escalate ?? 'unknown'}`, 'escalate');
   }
@@ -336,13 +339,13 @@ export async function shipIssue(issueNum: number, opts: { product?: string; auto
   log('worktree', `Worktree ready at ${worktree}`);
 
   // BUILD
-  const build = await buildPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, branch, product, route: plan.route, router, constitutionLoader, log });
+  const build = await buildPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, branch, product, route: plan.route, router, constitutionLoader, log, timeoutSeconds: timeouts.build });
   if (!build.ok) {
     throw new LaneParkError(`build escalated: ${build.escalate ?? 'unknown'}`, 'escalate');
   }
 
   // CHECK
-  const check = await checkPhase({ issue: issueNum, worktree, specPath, product, router, constitutionLoader, log, autoRework });
+  const check = await checkPhase({ issue: issueNum, worktree, specPath, product, router, constitutionLoader, log, autoRework, buildTimeoutSeconds: timeouts.build, checkTimeoutSeconds: timeouts.check });
   if (!check.passed) {
     const failures = check.summary.results.filter(r => r.result === 'FAIL');
     for (const f of failures) {
@@ -867,7 +870,10 @@ export async function waitForMerge(
     land = landIssue,
     sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)),
     emitEvent = logEvent,
-    mergeEnabled = () => process.env.FACTORY_MERGE === '1',
+    mergeEnabled = () => {
+      const cfg = loadFactoryConfig();
+      return cfg.merge.auto || process.env.FACTORY_MERGE === '1';
+    },
     writeLine = line => console.log(line),
   } = deps;
   const octokit = createOctokit();

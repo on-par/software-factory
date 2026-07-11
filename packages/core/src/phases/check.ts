@@ -23,9 +23,11 @@ export async function checkPhase(
     constitutionLoader: ConstitutionLoader;
     log: (type: string, msg: string) => void;
     autoRework?: boolean;
+    buildTimeoutSeconds?: number;
+    checkTimeoutSeconds?: number;
   },
 ): Promise<CheckPhaseResult> {
-  const { issue, worktree, specPath, product, router, constitutionLoader, log, autoRework = true } = opts;
+  const { issue, worktree, specPath, product, router, constitutionLoader, log, autoRework = true, buildTimeoutSeconds } = opts;
 
   const constitutionBody = product ? constitutionLoader.getBody(product) : '';
 
@@ -46,7 +48,7 @@ export async function checkPhase(
     reworkRounds++;
     log('rework', `${summary.failures} failures — sending back to worker (round ${reworkRounds})`);
 
-    await reworkWorker(issue, worktree, specPath, summary, product, constitutionLoader, router, log);
+    await reworkWorker(issue, worktree, specPath, summary, product, constitutionLoader, router, log, buildTimeoutSeconds);
 
     summary = await runAllCheckers(ctx, router, constitutionLoader);
     log('check', `Rework round ${reworkRounds}: ${summary.failures} failures remaining`);
@@ -74,6 +76,7 @@ async function reworkWorker(
   constitutionLoader: ConstitutionLoader,
   router: ModelRouter,
   log: (type: string, msg: string) => void,
+  timeoutSeconds?: number,
 ): Promise<void> {
   const constitutionCtx = product ? constitutionLoader.buildContext(product) : '';
   const failures = summary.results.filter(r => r.result === 'FAIL');
@@ -103,7 +106,7 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
 
   await router.run('build_claude', prompt, {
     worktree,
-    timeout: 7200,
+    timeout: timeoutSeconds ?? 7200,
     onLog: (msg) => log('router', msg),
   }).catch(() => {});
 }
@@ -118,9 +121,10 @@ export async function disputeResolution(
     product?: string;
     router: ModelRouter;
     constitutionLoader: ConstitutionLoader;
+    timeoutSeconds?: number;
   },
 ): Promise<DisputeResult> {
-  const { issue, worktree, specPath, checkerName, checkerDetails, product, router, constitutionLoader } = opts;
+  const { issue, worktree, specPath, checkerName, checkerDetails, product, router, constitutionLoader, timeoutSeconds } = opts;
   const constitutionCtx = product ? constitutionLoader.buildContext(product) : '';
 
   const prompt = `You are the BOSS in a software factory. A worker agent is disputing
@@ -146,7 +150,7 @@ Details: ${checkerDetails}
 
   const result = await router.run('dispute_resolution', prompt, {
     worktree,
-    timeout: 1800,
+    timeout: timeoutSeconds ?? 1800,
   }).catch(() => null);
 
   if (!result) {
