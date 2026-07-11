@@ -1,19 +1,25 @@
+import { writeFileSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
+  compareToBaseline,
   loadGoldenCases,
   loadModelsConfig,
   loadRoutesConfig,
   ModelRouter,
   runEval,
   StubModelExecutor,
+  toBaseline,
 } from '@on-par/factory-core';
-import type { ModelsConfig, RoutesConfig } from '@on-par/factory-core';
+import type { Baseline, ModelsConfig, RoutesConfig } from '@on-par/factory-core';
 
 interface Args {
   stub: boolean;
   judge: boolean;
   filter?: string;
   dir: string;
+  report?: string;
+  baseline?: string;
+  writeBaseline?: string;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -24,6 +30,9 @@ function parseArgs(argv: string[]): Args {
     else if (arg === '--no-judge') args.judge = false;
     else if (arg === '--filter') args.filter = argv[++i];
     else if (arg === '--dir') args.dir = argv[++i] ?? args.dir;
+    else if (arg === '--report') args.report = argv[++i];
+    else if (arg === '--baseline') args.baseline = argv[++i];
+    else if (arg === '--write-baseline') args.writeBaseline = argv[++i];
     else throw new Error(`unknown flag: ${arg}`);
   }
   return args;
@@ -47,7 +56,23 @@ console.log(
   `total latency ${(summary.totalLatencyMs / 1000).toFixed(2)}s`,
 );
 
-if (summary.failed > 0) process.exitCode = 1;
+if (args.report) {
+  writeFileSync(args.report, JSON.stringify(summary, null, 2) + '\n');
+}
+
+if (args.writeBaseline) {
+  writeFileSync(args.writeBaseline, JSON.stringify(toBaseline(summary), null, 2) + '\n');
+}
+
+if (args.baseline) {
+  const baseline: Baseline = JSON.parse(readFileSync(args.baseline, 'utf8'));
+  const comparison = compareToBaseline(summary, baseline);
+  for (const note of comparison.notes) console.log(`NOTE: ${note}`);
+  for (const regression of comparison.regressions) console.log(`REGRESSION: ${regression}`);
+  process.exitCode = comparison.ok ? 0 : 1;
+} else if (summary.failed > 0) {
+  process.exitCode = 1;
+}
 
 function buildStubRouter(cases: typeof allCases): ModelRouter {
   const models: ModelsConfig = {

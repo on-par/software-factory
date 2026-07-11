@@ -10,3 +10,22 @@ Add rubric items only for cases that need qualitative scoring.
 For offline runs, include a fenced `stub-output` block with the canned PLAN output.
 Run `npm run eval -- --stub` before committing prompt or golden-set changes.
 CI also runs the stub subset on every PR, so a broken prompt or golden case fails the PR check at zero model cost.
+
+## Nightly full eval run
+
+The `Nightly Evals` workflow (`.github/workflows/nightly-evals.yml`) runs the full
+scored suite — real models, LLM judge, no `--stub` — nightly and on
+`workflow_dispatch`, then compares the results against the committed baseline at
+`evals/baseline.json`, failing the job if any case regresses beyond its tolerance.
+The run report is always uploaded as a build artifact, even on failure.
+
+Refresh the baseline after an intentional prompt or golden-set change:
+
+```
+npm run eval -- --write-baseline evals/baseline.json
+```
+
+Run this in real mode (no `--stub`) locally, or copy the numbers from a nightly
+artifact, then commit the updated file. The committed seed baseline was generated
+from the stub run, so per-case rubric-score comparison stays dormant until a
+maintainer commits a baseline generated from a real run.
