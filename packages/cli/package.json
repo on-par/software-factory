@@ -8,7 +8,7 @@
     "factory": "dist/cli.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
