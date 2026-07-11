@@ -107,6 +107,8 @@ export function getFactoryPaths(repoRoot: string) {
     events: resolve(state, 'events.ndjson'),
     logs: resolve(state, 'logs'),
     plans: resolve(state, 'plans'),
+    mergeLock: resolve(state, 'merge.lock'),
+    gitLock: resolve(state, 'git.lock'),
     product: resolve(state, 'product'),
     stop: resolve(state, 'STOP'),
     costs: resolve(state, 'costs.jsonl'),
