@@ -112,10 +112,11 @@ export function scaffoldConstitution(template: string, product: string): string 
   const skeleton = match[1].replace(/\s+$/, '') + '\n';
   const display = product
     .split(/[-_]/)
-    .map(w => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .filter(Boolean)
+    .map(w => w[0].toUpperCase() + w.slice(1))
     .join(' ');
   return skeleton
-    .replaceAll('<product-name>', product)
+    .replaceAll('<product-name>', JSON.stringify(product))
     .replaceAll('<Product>', display);
 }
 

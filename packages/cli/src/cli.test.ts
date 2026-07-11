@@ -990,10 +990,20 @@ More prose here.
 
     it('scaffoldConstitution fills the product name in', () => {
       const result = scaffoldConstitution(TEMPLATE, 'acme-app');
-      expect(result).toContain('product: acme-app');
+      expect(result).toContain('product: "acme-app"');
       expect(result).toContain('# Acme App Constitution');
       expect(result).not.toContain('<product-name>');
       expect(result).not.toContain('<Product>');
+    });
+
+    it('scaffoldConstitution quotes an all-digit product name so YAML parses it as a string', () => {
+      const result = scaffoldConstitution(TEMPLATE, '2024');
+      expect(result).toContain('product: "2024"');
+    });
+
+    it('scaffoldConstitution collapses repeated/trailing separators without stray spaces in the heading', () => {
+      expect(scaffoldConstitution(TEMPLATE, 'acme--app')).toContain('# Acme App Constitution');
+      expect(scaffoldConstitution(TEMPLATE, 'acme-')).toContain('# Acme Constitution');
     });
 
     it('scaffoldConstitution extracts the skeleton, not the surrounding docs', () => {
@@ -1018,7 +1028,7 @@ More prose here.
       expect(writeFile).toHaveBeenCalledTimes(1);
       const [writtenPath, writtenContent] = writeFile.mock.calls[0];
       expect(writtenPath).toBe(target);
-      expect(writtenContent).toContain('product: acme-app');
+      expect(writtenContent).toContain('product: "acme-app"');
       expect(writtenContent).toContain('# Acme App Constitution');
     });
 
