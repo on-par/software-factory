@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from './index.js';
 import { StubModelExecutor } from './stub.js';
@@ -33,7 +33,43 @@ const routes: RoutesConfig = {
   },
 };
 
+const twoModels: ModelsConfig = {
+  version: 1,
+  models: {
+    'model-a': {
+      provider: 'custom',
+      tier: 'boss',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+    },
+    'model-b': {
+      provider: 'custom',
+      tier: 'boss',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+    },
+  },
+  tiers: { boss: ['model-a', 'model-b'] },
+  failover: {
+    triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+    maxRetries: 2,
+    cooldownMs: 0,
+    escalateAfterTierExhausted: true,
+  },
+  routingRules: {},
+};
+
 describe('ModelRouter with StubModelExecutor', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('returns canned responses without invoking a CLI', async () => {
     const stub = new StubModelExecutor({ scripts: { plan: [{ output: 'SCRIPTED PLAN' }] } });
     const router = new ModelRouter(models, routes, false, stub);
@@ -70,6 +106,93 @@ describe('ModelRouter with StubModelExecutor', () => {
 
     await expect(router.run('plan', 'do it')).rejects.toThrow(
       "All models failed for task 'plan': stub-model(error), stub-model(error)",
+    );
+    expect(stub.calls).toHaveLength(2);
+  });
+
+  it.each([
+    ['429 too many', 1, 'rate_limit'],
+    ['quota exceeded', 1, 'usage_cap'],
+    ['anything', 124, 'timeout'],
+    ['no content', 1, 'empty_response'],
+    ['Error: boom', 1, 'error'],
+    ['mysterious', 1, 'unknown'],
+    ['rate limit hit', 1, 'rate_limit'],
+    ['insufficient credit', 1, 'usage_cap'],
+  ] as const)('classifies %j with exit code %i as %s', (stderr, exitCode, expected) => {
+    const router = new ModelRouter(models, routes);
+
+    expect(router.classifyFailure(stderr, exitCode)).toBe(expected);
+  });
+
+  it('retries rate limits then fails over to the next model', async () => {
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [
+          { fail: 'rate_limit' },
+          { fail: 'rate_limit' },
+          { fail: 'rate_limit' },
+          { output: 'RECOVERED' },
+        ],
+      },
+    });
+    const router = new ModelRouter(twoModels, routes, false, stub);
+
+    const result = await router.run('plan', 'do it');
+
+    expect(result.output).toBe('RECOVERED');
+    expect(result.model).toBe('model-b');
+    expect(stub.calls).toHaveLength(4);
+    expect(result.attempts).toEqual([
+      { model: 'model-a', reason: 'rate_limit', ok: false },
+      { model: 'model-a', reason: 'rate_limit', ok: false },
+      { model: 'model-a', reason: 'rate_limit', ok: false },
+      { model: 'model-b', reason: null, ok: true },
+    ]);
+  });
+
+  it('awaits cooldown between rate-limit retries', async () => {
+    vi.useFakeTimers();
+    const cooldownMs = 1000;
+    const modelsWithCooldown: ModelsConfig = {
+      ...twoModels,
+      failover: { ...twoModels.failover, cooldownMs },
+    };
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [
+          { fail: 'rate_limit' },
+          { fail: 'rate_limit' },
+          { fail: 'rate_limit' },
+          { output: 'RECOVERED' },
+        ],
+      },
+    });
+    const router = new ModelRouter(modelsWithCooldown, routes, false, stub);
+    let settled = false;
+
+    const promise = router.run('plan', 'do it').then(result => {
+      settled = true;
+      return result;
+    });
+
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(cooldownMs * 2);
+    const result = await promise;
+
+    expect(result.output).toBe('RECOVERED');
+    expect(result.model).toBe('model-b');
+  });
+
+  it('lists each model and reason when all models are exhausted', async () => {
+    const stub = new StubModelExecutor({
+      scripts: { plan: [{ fail: 'timeout' }, { fail: 'timeout' }] },
+    });
+    const router = new ModelRouter(twoModels, routes, false, stub);
+
+    await expect(router.run('plan', 'do it')).rejects.toThrow(
+      "All models failed for task 'plan': model-a(timeout), model-b(timeout)",
     );
     expect(stub.calls).toHaveLength(2);
   });
