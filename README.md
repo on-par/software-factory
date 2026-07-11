@@ -60,7 +60,8 @@ factory constitution --product example-marketing-site
 
 **Step 4 — Triage the backlog**
 ```bash
-factory triage               # proposes .factory/queue from your open issues
+factory triage               # proposes .factory/queue.proposed from your open issues — review it, then:
+mv .factory/queue.proposed .factory/queue
 ```
 
 **Step 5 — Ship your first issue**
@@ -68,7 +69,7 @@ factory triage               # proposes .factory/queue from your open issues
 factory ship 42              # PLAN → BUILD → CHECK → SHIP one issue (use an issue number from your repo)
 ```
 
-`factory ship` ends at a green, ready-for-review PR that closes the issue (it prints `✅ Issue #N → PR #M ready for review`); merging stays with you — review the PR and merge it, or run `factory land <N>` to squash-merge and clean up the worktree. To process the whole triaged queue in parallel lanes instead, run `factory run`.
+`factory ship` ends at a green, ready-for-review PR that closes the issue (it prints `✅ Issue #N → PR #M ready for review`); merging stays with you — review the PR and merge it, or run `factory land <N>` to squash-merge and clean up the worktree. To process the whole triaged queue in parallel lanes instead, run `factory run` (after accepting a triage proposal with the `mv` above).
 
 ## CLI Commands
 
@@ -77,7 +78,7 @@ factory init                        Initialize .factory in this repo
 factory constitution --list         List available product constitutions
 factory constitution --product <p>  Set the active constitution
 factory models                      List available models and costs
-factory triage                      Propose a queue from open issues
+factory triage                      Propose queue.proposed from open issues (review + mv to accept)
 factory ship <N>                    Plan → build → check → ship one issue
 factory land <N>                    Squash-merge a ready PR and clean up its worktree
 factory run                         Process the whole queue (lanes in parallel)
