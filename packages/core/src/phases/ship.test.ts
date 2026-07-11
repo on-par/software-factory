@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { shipPhase } from './ship.js';
 
-function createOctokit() {
+function createOctokit(prDraft = true) {
   const calls: any[] = [];
   const octokit = {
+    graphql: async (query: string, vars: any) => {
+      calls.push(['graphql', query, vars]);
+      return { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } };
+    },
     rest: {
       pulls: {
         list: async (args: any) => {
@@ -14,9 +18,9 @@ function createOctokit() {
           calls.push(['pulls.create', args]);
           return { data: { number: 123 } };
         },
-        update: async (args: any) => {
-          calls.push(['pulls.update', args]);
-          return { data: {} };
+        get: async (args: any) => {
+          calls.push(['pulls.get', args]);
+          return { data: { draft: prDraft, node_id: 'PR_1' } };
         },
       },
       issues: {
@@ -80,10 +84,44 @@ describe('shipPhase self-healing', () => {
       }),
     ]);
     expect(calls).toContainEqual([
-      'pulls.update',
-      { owner: 'on-par', repo: 'software-factory', pull_number: 123, draft: false },
+      'pulls.get',
+      { owner: 'on-par', repo: 'software-factory', pull_number: 123 },
+    ]);
+    expect(calls).toContainEqual([
+      'graphql',
+      expect.stringContaining('markPullRequestReadyForReview'),
+      { id: 'PR_1' },
     ]);
     expect(logs).toContainEqual(['recovered', 'opened PR #123 for committed work on ship-it/23-self-heal']);
+  });
+
+  it('does not mark a pull request ready when it is not a draft', async () => {
+    const { octokit, calls } = createOctokit(false);
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 123 });
+    expect(calls).toContainEqual([
+      'pulls.get',
+      { owner: 'on-par', repo: 'software-factory', pull_number: 123 },
+    ]);
+    expect(calls.some(call => call[0] === 'graphql')).toBe(false);
   });
 
   it('does not push or open a PR when the worktree has uncommitted changes', async () => {

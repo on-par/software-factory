@@ -693,25 +693,41 @@ export class LandFailureError extends Error {
   }
 }
 
-export async function getPullRequestMergeStateStatus(
+const MAX_MERGE_ATTEMPTS = 5;
+const MERGE_RETRY_BASE_MS = 5_000;
+
+export async function getPullRequestLandState(
   octokit: Octokit,
   owner: string,
   repoName: string,
   prNumber: number,
-): Promise<string | undefined> {
+): Promise<{ id?: string; isDraft?: boolean; mergeStateStatus?: string }> {
   const result = await octokit.graphql<{
-    repository?: { pullRequest?: { mergeStateStatus?: string } };
+    repository?: { pullRequest?: { id?: string; isDraft?: boolean; mergeStateStatus?: string } };
   }>(
-    `query PullRequestMergeState($owner: String!, $repo: String!, $number: Int!) {
+    `query PullRequestLandState($owner: String!, $repo: String!, $number: Int!) {
       repository(owner: $owner, name: $repo) {
         pullRequest(number: $number) {
+          id
+          isDraft
           mergeStateStatus
         }
       }
     }`,
     { owner, repo: repoName, number: prNumber },
   );
-  return result.repository?.pullRequest?.mergeStateStatus;
+  return result.repository?.pullRequest ?? {};
+}
+
+export async function markPullRequestReady(octokit: Octokit, pullRequestId: string): Promise<void> {
+  await octokit.graphql(
+    `mutation MarkPullRequestReady($id: ID!) {
+      markPullRequestReadyForReview(input: { pullRequestId: $id }) {
+        pullRequest { isDraft }
+      }
+    }`,
+    { id: pullRequestId },
+  );
 }
 
 export async function watchPullRequestChecks(
@@ -770,19 +786,48 @@ export async function landOpenPullRequest(
     log: (type: string, msg: string) => void;
     run?: CommandRunner;
     pathExists?: (path: string) => boolean;
+    sleep?: (ms: number) => Promise<void>;
   },
 ): Promise<void> {
-  const { octokit, owner, repoName, ghRepo, repoRoot, issue, branch, worktree, prNumber, log, run, pathExists } = opts;
+  const {
+    octokit,
+    owner,
+    repoName,
+    ghRepo,
+    repoRoot,
+    issue,
+    branch,
+    worktree,
+    prNumber,
+    log,
+    run,
+    pathExists,
+    sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)),
+  } = opts;
 
   await watchPullRequestChecks(prNumber, ghRepo, repoRoot, run);
-  const mergeState = await getPullRequestMergeStateStatus(octokit, owner, repoName, prNumber);
+  let state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
 
-  if (mergeState === 'DIRTY') {
+  if (state.mergeStateStatus === 'DIRTY') {
     await rebaseDirtyPullRequest({ issue, branch, worktree, prNumber, log, run, pathExists });
     await watchPullRequestChecks(prNumber, ghRepo, repoRoot, run);
   }
 
-  await squashMergeAndDelete(octokit, owner, repoName, branch, prNumber);
+  for (let attempt = 1; ; attempt++) {
+    if (state.isDraft && state.id) {
+      log('land', `PR #${prNumber} still a draft — re-issuing ready-for-review (attempt ${attempt})`);
+      await markPullRequestReady(octokit, state.id).catch(() => {});
+    }
+    try {
+      await squashMergeAndDelete(octokit, owner, repoName, branch, prNumber);
+      return;
+    } catch (err: any) {
+      if (attempt >= MAX_MERGE_ATTEMPTS) throw err;
+      log('land', `merge attempt ${attempt}/${MAX_MERGE_ATTEMPTS} failed (${err.message}); mergeStateStatus=${state.mergeStateStatus ?? 'unknown'} — retrying with backoff`);
+      await sleep(MERGE_RETRY_BASE_MS * 2 ** (attempt - 1));
+      state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
+    }
+  }
 }
 
 type WaitForMergeDeps = {
