@@ -216,7 +216,7 @@ async function cmdShip(issueNum: number, opts: { product?: string; autoRework?: 
   const autoRework = opts.autoRework ?? true;
 
   const branch = branchFor(issueNum, await getIssueTitle(octokit, ghRepo, issueNum));
-  const worktree = resolve(dirname(repoRoot), `${basename(repoRoot)}-factory-${issueNum}`);
+  const worktree = worktreePathFor(repoRoot, issueNum);
   const specPath = resolve(paths.plans, `issue-${issueNum}.md`);
 
   const log = (type: string, msg: string) => logEvent(paths.events, type, issueNum, msg);
@@ -274,6 +274,10 @@ async function getIssueTitle(octokit: Octokit, repo: string, issue: number): Pro
   return data.title;
 }
 
+function worktreePathFor(repoRoot: string, issueNum: number): string {
+  return resolve(dirname(repoRoot), `${basename(repoRoot)}-factory-${issueNum}`);
+}
+
 async function cmdLand(issueNum: number) {
   const repoRoot = await getRepoRoot();
   const ghRepo = await getGitHubRepo();
@@ -282,21 +286,38 @@ async function cmdLand(issueNum: number) {
   const [owner, repoName] = ghRepo.split('/');
   const log = (type: string, msg: string) => logEvent(paths.events, type, issueNum, msg);
 
-  const branch = branchFor(issueNum, await getIssueTitle(octokit, ghRepo, issueNum));
-  const worktree = resolve(dirname(repoRoot), `${basename(repoRoot)}-factory-${issueNum}`);
+  // The issue title may have been edited since the PR was opened, so a
+  // freshly-derived branch name can drift from the branch the PR actually
+  // lives on (same failure mode fixed for waitForMerge in #51). Guess the
+  // branch from the current title first, but fall back to matching the open
+  // PR that references this issue directly and use its real head branch.
+  const guessedBranch = branchFor(issueNum, await getIssueTitle(octokit, ghRepo, issueNum));
+  const worktree = worktreePathFor(repoRoot, issueNum);
 
-  await gitFetch(repoRoot);
+  const [, guessedPrNumber] = await Promise.all([
+    gitFetch(repoRoot),
+    findOpenPRNumber(octokit, owner, repoName, guessedBranch),
+  ]);
 
-  const prNumber = await findOpenPRNumber(octokit, owner, repoName, branch);
+  let branch = guessedBranch;
+  let prNumber = guessedPrNumber;
   if (!prNumber) {
-    log('fail', `no open PR for ${branch}`);
-    console.error(chalk.red(`factory: no open PR for issue #${issueNum} (${branch})`));
+    const fallback = await findOpenPRForIssue(octokit, owner, repoName, issueNum);
+    if (fallback) {
+      branch = fallback.branch;
+      prNumber = fallback.number;
+    }
+  }
+
+  if (!prNumber) {
+    log('fail', `no open PR for ${guessedBranch}`);
+    console.error(chalk.red(`factory: no open PR for issue #${issueNum} (${guessedBranch})`));
     process.exit(1);
   }
 
   try {
     await withGitLock(repoRoot, async () => {
-      await squashMergeAndDelete(octokit, owner, repoName, branch, prNumber);
+      await squashMergeAndDelete(octokit, owner, repoName, branch, prNumber!);
       log('merged', `squash-merged PR #${prNumber}`);
       await cleanupWorktree(repoRoot, worktree);
     });
@@ -421,6 +442,19 @@ export async function findOpenPRNumber(
     .list({ owner, repo: repoName, state: 'open', head: `${owner}:${branch}` })
     .catch(() => ({ data: [] as any[] }));
   return prs[0]?.number;
+}
+
+export async function findOpenPRForIssue(
+  octokit: Octokit,
+  owner: string,
+  repoName: string,
+  issueNum: number,
+): Promise<{ number: number; branch: string } | undefined> {
+  const { data: prs } = await octokit.rest.pulls
+    .list({ owner, repo: repoName, state: 'open', per_page: 100 })
+    .catch(() => ({ data: [] as any[] }));
+  const pr = prs.find((p: any) => new RegExp(`\\bcloses\\s+#${issueNum}\\b`, 'i').test(p.body ?? ''));
+  return pr ? { number: pr.number, branch: pr.head.ref } : undefined;
 }
 
 export async function squashMergeAndDelete(

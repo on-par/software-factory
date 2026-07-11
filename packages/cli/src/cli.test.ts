@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { main, isPrMerged, findOpenPRNumber, squashMergeAndDelete } from './cli/index.js';
+import { main, isPrMerged, findOpenPRNumber, findOpenPRForIssue, squashMergeAndDelete } from './cli/index.js';
 
 describe('cli', () => {
   it('exports the main entrypoint', () => {
@@ -38,6 +38,34 @@ describe('cli', () => {
     };
 
     expect(await findOpenPRNumber(octokit, 'on-par', 'software-factory', 'ship-it/19-land')).toBeUndefined();
+  });
+
+  it('falls back to matching the open PR that references the issue in its body', async () => {
+    const octokit: any = {
+      rest: {
+        pulls: {
+          list: async () => ({
+            data: [
+              { number: 1, body: 'Closes #7', head: { ref: 'ship-it/1-unrelated' } },
+              { number: 42, body: 'Fixes some things.\n\nCloses #19', head: { ref: 'ship-it/19-renamed-title' } },
+            ],
+          }),
+        },
+      },
+    };
+
+    expect(await findOpenPRForIssue(octokit, 'on-par', 'software-factory', 19)).toEqual({
+      number: 42,
+      branch: 'ship-it/19-renamed-title',
+    });
+  });
+
+  it('returns undefined from the issue-body fallback when no open PR references the issue', async () => {
+    const octokit: any = {
+      rest: { pulls: { list: async () => ({ data: [{ number: 1, body: 'Closes #7', head: { ref: 'x' } }] }) } },
+    };
+
+    expect(await findOpenPRForIssue(octokit, 'on-par', 'software-factory', 19)).toBeUndefined();
   });
 
   it('squash-merges a PR and deletes its branch', async () => {
