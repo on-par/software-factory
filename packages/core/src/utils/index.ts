@@ -46,7 +46,13 @@ export function readCosts(costsFile: string): CostEntry[] {
     .trim()
     .split('\n')
     .filter(Boolean)
-    .map(l => JSON.parse(l) as CostEntry);
+    .flatMap(l => {
+      try {
+        return [JSON.parse(l) as CostEntry];
+      } catch {
+        return [];
+      }
+    });
 }
 
 // ---------- Git Operations ----------
