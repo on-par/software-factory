@@ -48,7 +48,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          ids=$(gh run list --workflow nightly-evals.yml --status completed \
+          ids=$(gh run list --workflow nightly-evals.yml --branch main --status completed \
             --limit 20 --json databaseId --jq '.[].databaseId')
           : > history.jsonl
           for id in $ids; do
