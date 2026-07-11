@@ -116,13 +116,16 @@ async function cmdModels() {
   const modelsConfig = loadModelsConfig();
   const { ModelRegistry } = await import('@on-par/factory-core');
   const registry = new ModelRegistry(modelsConfig);
+  const allowExperimental = process.env.FACTORY_EXPERIMENTAL === '1';
 
   console.log(chalk.bold('\n== Available Models =='));
   for (const m of registry.list()) {
     const tiers = registry.getTiers(m).join('/');
     const cost = registry.estimateCost(m, 1_000_000, 1_000_000).toFixed(2);
-    const avail = registry.isAvailable(m) ? chalk.green('✅') : chalk.red('❌');
-    console.log(`  ${avail} ${m} tier=${tiers} $${cost}/M`);
+    const gated = registry.isExperimental(m) && !allowExperimental;
+    const avail = !gated && registry.isAvailable(m) ? chalk.green('✅') : chalk.red('❌');
+    const tag = registry.isExperimental(m) ? chalk.yellow(' [experimental]') : '';
+    console.log(`  ${avail} ${m} tier=${tiers} $${cost}/M${tag}`);
   }
 
   console.log(chalk.bold('\n== Tiers =='));

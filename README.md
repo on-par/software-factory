@@ -115,10 +115,12 @@ The router picks the cheapest model capable of each task type. When a model hits
 
 | Tier | Models (priority order) | Cost $/M output | Use |
 |------|------------------------|-----------------|-----|
-| boss | claude-opus-4-8 → gpt-5.5 → claude-sonnet-5 | $50 → $10 → $15 | Specs, design, disputes |
-| worker | glm-5.2 → deepseek-v3 → qwen-3.5-coder → gpt-5.5 → claude-sonnet-5 | $0.50 → $0.28 → $0.20 → $10 → $15 | Implementation |
-| checker | claude-sonnet-5 → gpt-4.1-mini → glm-5.2 | $15 → $3 → $0.50 | Verification |
-| triage | claude-sonnet-5 → glm-5.2 | $15 → $0.50 | Issue triage |
+| boss | claude-opus-4-8 → claude-sonnet-5 | $25 → $15 | Specs, design, disputes |
+| worker | gpt-5.1-codex → claude-sonnet-5 | $10 → $15 | Implementation |
+| checker | claude-sonnet-5 | $15 | Verification |
+| triage | claude-sonnet-5 | $15 | Issue triage |
+
+Experimental models (glm-5.2, deepseek-v3, qwen-3.5-coder, gpt-4.1-mini) exist in `models.json` but are only routed when `FACTORY_EXPERIMENTAL=1`.
 
 ## Failover Triggers
 
