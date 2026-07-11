@@ -1,6 +1,6 @@
 import { buildPlanPrompt } from '../phases/plan.js';
 import type { ModelRouter } from '../router/index.js';
-import { runJudgeSpec } from './judge.js';
+import { runJudgeSamples } from './judge.js';
 import { scoreSpec } from './score.js';
 import { isRouteAsserted, type CaseResult, type EvalSummary, type GoldenCase } from './types.js';
 
@@ -10,6 +10,7 @@ export interface RunEvalOpts {
   judge: boolean;
   worktree?: string;
   timeoutSeconds?: number;
+  judgeK?: number;
   now?: () => number;
   onLog?: (msg: string) => void;
 }
@@ -18,49 +19,59 @@ export async function runEval(opts: RunEvalOpts): Promise<EvalSummary> {
   const results: CaseResult[] = [];
   const worktree = opts.worktree ?? process.cwd();
   const timeout = opts.timeoutSeconds ?? 600;
+  const judgeK = opts.judgeK ?? 1;
   const now = opts.now ?? Date.now;
 
   for (const c of opts.cases) {
     opts.onLog?.(`running ${c.id}`);
+    const constitutionCtx = c.constitution ?? '';
     const prompt = buildPlanPrompt({
       issue: 0,
       issueTitle: c.title,
       issueBody: c.body,
       specPath: '<eval-spec>',
-      constitutionCtx: '',
+      constitutionCtx,
+      ...(c.constitution ? { product: 'eval' } : {}),
     });
     const started = now();
 
     try {
       const result = await opts.router.run('plan', prompt, { worktree, timeout });
       let latencyMs = now() - started;
-      const scored = scoreSpec(result.output, result.output, c.expectedRoute);
+      const scored = scoreSpec(result.output, result.output, c.expectedRoute, { requireConstitution: Boolean(c.constitution) });
       const deterministicPass = scored.checks.every(check => check.pass);
       const shouldJudge = opts.judge && !c.deterministicOnly && c.rubric.length > 0 && scored.route !== 'escalate';
       let rubricScore: number | undefined;
       let judgeMalformed = false;
       let malformedRaw: string | undefined;
+      let judgeSamples: CaseResult['judgeSamples'];
+      let judgeValidCount: number | undefined;
+      let judgeMalformedCount: number | undefined;
       let costEstimate = estimateCost(opts.router, result.model, prompt, result.output);
 
       if (shouldJudge) {
         const judgeStarted = now();
-        const judged = await runJudgeSpec(opts.router, {
+        const judged = await runJudgeSamples(opts.router, {
           specContent: result.output,
           issueTitle: c.title,
           issueBody: c.body,
           rubric: c.rubric,
           worktree,
           timeout,
-        });
+        }, judgeK);
         latencyMs += now() - judgeStarted;
-        if (judged.malformed) {
+        judgeSamples = judged.samples;
+        judgeValidCount = judged.validCount;
+        judgeMalformedCount = judged.malformedCount;
+        if (judged.validCount === 0) {
           judgeMalformed = true;
-          malformedRaw = judged.rawOutput ?? judged.reasons;
+          const malformedSample = judged.samples.find(sample => sample.malformed);
+          malformedRaw = malformedSample?.rawOutput ?? malformedSample?.reasons;
         } else {
           rubricScore = judged.score;
         }
-        if (judged.result) {
-          costEstimate += estimateCost(opts.router, judged.result.model, judged.prompt, judged.result.output);
+        for (const r of judged.results) {
+          costEstimate += estimateCost(opts.router, r.model, judged.prompt, r.output);
         }
       }
 
@@ -74,6 +85,9 @@ export async function runEval(opts: RunEvalOpts): Promise<EvalSummary> {
         checks: scored.checks,
         ...(rubricScore !== undefined ? { rubricScore } : {}),
         ...(judgeMalformed ? { judgeMalformed: true } : {}),
+        ...(judgeSamples !== undefined ? { judgeSamples } : {}),
+        ...(judgeValidCount !== undefined ? { judgeValidCount } : {}),
+        ...(judgeMalformedCount !== undefined ? { judgeMalformedCount } : {}),
         judgeSkipped: !shouldJudge,
         model: result.model,
         latencyMs,
