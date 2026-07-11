@@ -33,6 +33,39 @@ const routes: RoutesConfig = {
   },
 };
 
+const experimentalFirstModels: ModelsConfig = {
+  version: 1,
+  models: {
+    'exp-model': {
+      provider: 'custom',
+      tier: 'boss',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+      experimental: true,
+    },
+    'real-model': {
+      provider: 'custom',
+      tier: 'boss',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+    },
+  },
+  tiers: { boss: ['exp-model', 'real-model'] },
+  failover: {
+    triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+    maxRetries: 2,
+    cooldownMs: 0,
+    escalateAfterTierExhausted: true,
+  },
+  routingRules: {},
+};
+
 const twoModels: ModelsConfig = {
   version: 1,
   models: {
@@ -210,5 +243,17 @@ describe('ModelRouter with StubModelExecutor', () => {
       { model: 'model-b', reason: 'timeout', ok: false },
     ]);
     expect(stub.calls).toHaveLength(2);
+  });
+
+  it('skips experimental models by default', () => {
+    const router = new ModelRouter(experimentalFirstModels, routes, false, new StubModelExecutor({ scripts: {} }), false);
+
+    expect(router.resolve('plan')).toBe('real-model');
+  });
+
+  it('includes experimental models when allowExperimental is true', () => {
+    const router = new ModelRouter(experimentalFirstModels, routes, false, new StubModelExecutor({ scripts: {} }), true);
+
+    expect(router.resolve('plan')).toBe('exp-model');
   });
 });

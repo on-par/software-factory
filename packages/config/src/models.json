@@ -5,91 +5,99 @@
     "claude-opus-4-8": {
       "provider": "anthropic",
       "tier": "boss",
-      "cost_per_mtok_output": 50.00,
-      "cost_per_mtok_input": 15.00,
-      "context_window": 200000,
+      "costPerMtokInput": 5.00,
+      "costPerMtokOutput": 25.00,
+      "contextWindow": 200000,
       "capabilities": ["planning", "design", "architecture", "review", "dispute_resolution"],
-      "env_key": "ANTHROPIC_API_KEY",
-      "claude_flag": "--model claude-opus-4-8"
+      "envKey": "ANTHROPIC_API_KEY",
+      "claudeFlag": "--model claude-opus-4-8"
     },
     "claude-sonnet-5": {
       "provider": "anthropic",
       "tier": ["checker", "boss_fallback", "worker_fallback"],
-      "cost_per_mtok_output": 15.00,
-      "cost_per_mtok_input": 3.00,
-      "context_window": 200000,
+      "costPerMtokInput": 3.00,
+      "costPerMtokOutput": 15.00,
+      "contextWindow": 200000,
       "capabilities": ["review", "verification", "implementation", "triage"],
-      "env_key": "ANTHROPIC_API_KEY",
-      "claude_flag": "--model claude-sonnet-5"
+      "envKey": "ANTHROPIC_API_KEY",
+      "claudeFlag": "--model claude-sonnet-5"
     },
-    "gpt-5.5": {
+    "gpt-5.1-codex": {
       "provider": "openai",
-      "tier": ["worker", "boss_fallback"],
-      "cost_per_mtok_output": 10.00,
-      "cost_per_mtok_input": 2.50,
-      "context_window": 256000,
-      "capabilities": ["implementation", "codex", "planning"],
-      "env_key": "OPENAI_API_KEY",
+      "tier": ["worker"],
+      "costPerMtokInput": 1.25,
+      "costPerMtokOutput": 10.00,
+      "contextWindow": 272000,
+      "capabilities": ["implementation", "codex"],
+      "envKey": "OPENAI_API_KEY",
       "codex": true,
-      "codex_flag": "-c model_reasoning_effort=high"
-    },
-    "glm-5.2": {
-      "provider": "ollama",
-      "tier": "worker",
-      "cost_per_mtok_output": 0.50,
-      "cost_per_mtok_input": 0.10,
-      "context_window": 131072,
-      "capabilities": ["implementation", "coding"],
-      "env_key": null,
-      "claude_flag": "--model ollama/glm-5.2:cloud"
+      "codexFlag": "-c model_reasoning_effort=high"
     },
     "gpt-4.1-mini": {
       "provider": "openai",
       "tier": "checker",
-      "cost_per_mtok_output": 3.00,
-      "cost_per_mtok_input": 0.50,
-      "context_window": 128000,
+      "costPerMtokInput": 0.40,
+      "costPerMtokOutput": 1.60,
+      "contextWindow": 128000,
       "capabilities": ["verification", "lightweight_review"],
-      "env_key": "OPENAI_API_KEY",
-      "claude_flag": "--model gpt-4.1-mini"
+      "envKey": "OPENAI_API_KEY",
+      "claudeFlag": "--model gpt-4.1-mini",
+      "experimental": true,
+      "note": "claude-CLI wiring is unproven — the Claude CLI only serves Anthropic models"
+    },
+    "glm-5.2": {
+      "provider": "ollama",
+      "tier": "worker",
+      "costPerMtokInput": 0.10,
+      "costPerMtokOutput": 0.50,
+      "contextWindow": 131072,
+      "capabilities": ["implementation", "coding"],
+      "envKey": null,
+      "claudeFlag": "--model ollama/glm-5.2:cloud",
+      "experimental": true,
+      "note": "speculative — opt in with FACTORY_EXPERIMENTAL=1"
     },
     "deepseek-v3": {
       "provider": "deepseek",
       "tier": "worker",
-      "cost_per_mtok_output": 0.28,
-      "cost_per_mtok_input": 0.07,
-      "context_window": 128000,
+      "costPerMtokInput": 0.07,
+      "costPerMtokOutput": 0.28,
+      "contextWindow": 128000,
       "capabilities": ["implementation", "coding"],
-      "env_key": "DEEPSEEK_API_KEY",
-      "claude_flag": "--model deepseek/deepseek-chat"
+      "envKey": "DEEPSEEK_API_KEY",
+      "claudeFlag": "--model deepseek/deepseek-chat",
+      "experimental": true,
+      "note": "speculative — opt in with FACTORY_EXPERIMENTAL=1"
     },
     "qwen-3.5-coder": {
       "provider": "ollama",
       "tier": "worker",
-      "cost_per_mtok_output": 0.20,
-      "cost_per_mtok_input": 0.05,
-      "context_window": 131072,
+      "costPerMtokInput": 0.05,
+      "costPerMtokOutput": 0.20,
+      "contextWindow": 131072,
       "capabilities": ["implementation", "coding"],
-      "env_key": null,
-      "claude_flag": "--model ollama/qwen3.5-coder:cloud"
+      "envKey": null,
+      "claudeFlag": "--model ollama/qwen3.5-coder:cloud",
+      "experimental": true,
+      "note": "speculative — opt in with FACTORY_EXPERIMENTAL=1"
     }
   },
   "tiers": {
-    "boss": ["claude-opus-4-8", "gpt-5.5", "claude-sonnet-5"],
-    "worker": ["glm-5.2", "deepseek-v3", "qwen-3.5-coder", "gpt-5.5", "claude-sonnet-5"],
+    "boss": ["claude-opus-4-8", "claude-sonnet-5"],
+    "worker": ["gpt-5.1-codex", "claude-sonnet-5", "glm-5.2", "deepseek-v3", "qwen-3.5-coder"],
     "checker": ["claude-sonnet-5", "gpt-4.1-mini", "glm-5.2"],
     "triage": ["claude-sonnet-5", "glm-5.2"]
   },
   "failover": {
     "triggers": ["rate_limit", "usage_cap", "timeout", "error", "empty_response"],
-    "max_retries": 2,
-    "cooldown_ms": 5000,
-    "escalate_after_tier_exhausted": true
+    "maxRetries": 2,
+    "cooldownMs": 5000,
+    "escalateAfterTierExhausted": true
   },
-  "routing_rules": {
+  "routingRules": {
     "codex_available": {
       "if": "command -v codex && FACTORY_CODEX != 0",
-      "worker_preferred": ["gpt-5.5"],
+      "worker_preferred": ["gpt-5.1-codex"],
       "note": "Codex flat-rate is cheapest for implementation when available"
     },
     "ollama_available": {

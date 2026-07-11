@@ -23,6 +23,7 @@ const ModelDefSchema = z.object({
   claudeFlag: z.string().optional(),
   codex: z.boolean().optional(),
   codexFlag: z.string().optional(),
+  experimental: z.boolean().optional(),
 });
 
 const ModelsConfigSchema = z.object({

@@ -118,6 +118,7 @@ export class ModelRouter {
     private routesConfig: RoutesConfig,
     private byok = false,
     private executor: ModelExecutor = new CliModelExecutor(),
+    private allowExperimental = process.env.FACTORY_EXPERIMENTAL === '1',
   ) {
     this.registry = new ModelRegistry(modelsConfig);
   }
@@ -133,14 +134,14 @@ export class ModelRouter {
   resolve(task: TaskType): string | undefined {
     const tier = this.getTier(task);
     if (!tier) return undefined;
-    return this.registry.getAvailableModelsForTier(tier, this.byok)[0];
+    return this.registry.getAvailableModelsForTier(tier, this.byok, this.allowExperimental)[0];
   }
 
   /** Resolve all available models for a task (for failover chain) */
   resolveAll(task: TaskType): string[] {
     const tier = this.getTier(task);
     if (!tier) return [];
-    return this.registry.getAvailableModelsForTier(tier, this.byok);
+    return this.registry.getAvailableModelsForTier(tier, this.byok, this.allowExperimental);
   }
 
   /** Classify a failure from stderr/exit code */

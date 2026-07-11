@@ -43,6 +43,11 @@ export class ModelRegistry {
     return !!def?.codex;
   }
 
+  /** Check if a model is speculative/unproven (excluded from routing unless opted in) */
+  isExperimental(modelId: string): boolean {
+    return !!this.get(modelId)?.experimental;
+  }
+
   /** Check if a model is fully available (env key + required binaries) */
   isAvailable(modelId: string): boolean {
     if (!this.isEnvAvailable(modelId)) return false;
@@ -69,8 +74,9 @@ export class ModelRegistry {
   }
 
   /** Get all available models for a tier, in priority order */
-  getAvailableModelsForTier(tier: string, byok = false): string[] {
+  getAvailableModelsForTier(tier: string, byok = false, allowExperimental = false): string[] {
     return this.getModelsInTier(tier).filter(m => {
+      if (!allowExperimental && this.isExperimental(m)) return false;
       if (byok && !this.isEnvAvailable(m)) return false;
       return this.isAvailable(m);
     });

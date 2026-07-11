@@ -20,6 +20,8 @@ export interface ModelDefinition {
   codex?: boolean;
   /** Extra Codex CLI flags */
   codexFlag?: string;
+  /** Speculative/unproven model — excluded from routing unless FACTORY_EXPERIMENTAL=1 */
+  experimental?: boolean;
 }
 
 // ---------- Config types (re-exported from config module) ----------
