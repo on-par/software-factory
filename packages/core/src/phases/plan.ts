@@ -2,6 +2,7 @@
 
 import { writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import matter from 'gray-matter';
 import { ModelRouter } from '../router/index.js';
 import { ConstitutionLoader } from '../constitutions/index.js';
 import { escalationLine, isEscalation } from '../utils/index.js';
@@ -121,8 +122,14 @@ export async function planPhase(
 
   // Read route from spec frontmatter
   const specContent = await readFile(specPath, 'utf-8');
-  const routeMatch = specContent.match(/^route:\s*(codex|claude)\s*$/m);
-  const route = (routeMatch?.[1] as 'codex' | 'claude') ?? 'claude';
+  let route: 'codex' | 'claude' = 'claude';
+  try {
+    const rawRoute = matter(specContent).data.route;
+    const trimmedRoute = typeof rawRoute === 'string' ? rawRoute.trim() : rawRoute;
+    if (trimmedRoute === 'codex' || trimmedRoute === 'claude') route = trimmedRoute;
+  } catch {
+    // malformed frontmatter -> keep default 'claude'
+  }
 
   log('plan', `Plan complete with model ${result.model}, route: ${route}`);
 

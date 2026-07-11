@@ -24,15 +24,17 @@ export function scoreSpec(
     };
   }
 
+  let data: Record<string, unknown> = {};
   let frontmatterPass = false;
   try {
-    frontmatterPass = Object.keys(matter(specContent).data).length > 0;
+    data = matter(specContent).data;
+    frontmatterPass = Object.keys(data).length > 0;
   } catch {
     frontmatterPass = false;
   }
 
-  const routeMatch = specContent.match(/^route:\s*(codex|claude)\s*$/m);
-  const route = (routeMatch?.[1] as 'codex' | 'claude' | undefined) ?? 'unparseable';
+  const rawRoute = typeof data.route === 'string' ? data.route.trim() : undefined;
+  const route: ScoredRoute = rawRoute === 'codex' || rawRoute === 'claude' ? rawRoute : 'unparseable';
   const routeCorrect = expected === 'any' || route === expected;
   const requiredSections = ['## Goal', '## Files / approach', '## Tests', '## Non-goals'];
   if (opts.requireConstitution) requiredSections.push('## Constitution compliance');
