@@ -485,7 +485,10 @@ async function cmdRun() {
         stopFile: paths.stop,
         eventsFile: paths.events,
         signal: controller.signal,
-      }).catch(() => {})
+      }).catch((err: any) => {
+        // a watchdog crash must never take down the run
+        console.error(chalk.red(`factory: usage watchdog crashed: ${err.message}`));
+      })
     : Promise.resolve();
 
   // Run lanes in parallel

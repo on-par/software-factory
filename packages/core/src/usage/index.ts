@@ -156,7 +156,7 @@ export async function watchUsage(opts: WatchUsageOptions): Promise<'stopped' | '
         eventsFile,
         'usage-stop',
         'usage',
-        `trailing-5h usage ~= $${spend.toFixed(0)} = ${Math.round(pct * 100)}% of $${cap.toFixed(0)} cap -- STOP set, lanes halt between issues`,
+        `${formatUsageReport(spend, cap)} -- STOP set, lanes halt between issues`,
       );
       return 'stopped';
     }
