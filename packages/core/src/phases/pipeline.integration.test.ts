@@ -157,8 +157,13 @@ describe('pipeline integration', () => {
       }),
     ]);
     expect(calls).toContainEqual([
-      'pulls.update',
-      expect.objectContaining({ pull_number: 101, draft: false }),
+      'pulls.get',
+      expect.objectContaining({ pull_number: 101 }),
+    ]);
+    expect(calls).toContainEqual([
+      'graphql',
+      expect.stringContaining('markPullRequestReadyForReview'),
+      { id: 'PR_101' },
     ]);
     expect(events.some(([type]) => type === 'ready')).toBe(true);
     await expect(exec(`git -C '${origin}' rev-parse --verify refs/heads/'${branch}'`)).resolves.toBeTruthy();
@@ -289,6 +294,10 @@ async function commitAll(cwd: string, message: string): Promise<void> {
 function makeOctokit(issueTitle: string) {
   const calls: any[] = [];
   const octokit = {
+    graphql: async (query: string, vars: any) => {
+      calls.push(['graphql', query, vars]);
+      return { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } };
+    },
     rest: {
       issues: {
         get: async (args: any) => {
@@ -305,9 +314,9 @@ function makeOctokit(issueTitle: string) {
           calls.push(['pulls.create', args]);
           return { data: { number: 101 } };
         },
-        update: async (args: any) => {
-          calls.push(['pulls.update', args]);
-          return { data: {} };
+        get: async (args: any) => {
+          calls.push(['pulls.get', args]);
+          return { data: { draft: true, node_id: 'PR_101' } };
         },
       },
       checks: {

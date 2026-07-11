@@ -6,7 +6,8 @@ import {
   findOpenPRNumber,
   findOpenPRForIssue,
   squashMergeAndDelete,
-  getPullRequestMergeStateStatus,
+  getPullRequestLandState,
+  markPullRequestReady,
   landOpenPullRequest,
   waitForMerge,
   LandConflictError,
@@ -354,26 +355,41 @@ describe('cli', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('reads the pull request mergeStateStatus field', async () => {
+  it('reads the pull request land state fields', async () => {
     const calls: any[] = [];
     const octokit: any = {
       graphql: async (query: string, vars: any) => {
         calls.push({ query, vars });
-        return { repository: { pullRequest: { mergeStateStatus: 'DIRTY' } } };
+        return { repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' } } };
       },
     };
 
     await expect(
-      getPullRequestMergeStateStatus(octokit, 'on-par', 'software-factory', 123),
-    ).resolves.toBe('DIRTY');
+      getPullRequestLandState(octokit, 'on-par', 'software-factory', 123),
+    ).resolves.toEqual({ id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' });
     expect(calls[0].vars).toEqual({ owner: 'on-par', repo: 'software-factory', number: 123 });
+    expect(calls[0].query).toContain('isDraft');
     expect(calls[0].query).toContain('mergeStateStatus');
+  });
+
+  it('marks a pull request ready for review by node id', async () => {
+    const calls: any[] = [];
+    const octokit: any = {
+      graphql: async (query: string, vars: any) => {
+        calls.push({ query, vars });
+      },
+    };
+
+    await markPullRequestReady(octokit, 'PR_1');
+
+    expect(calls[0].vars).toEqual({ id: 'PR_1' });
+    expect(calls[0].query).toContain('markPullRequestReadyForReview');
   });
 
   it('rebases and force-pushes a DIRTY PR before squash-merging it', async () => {
     const calls: any[] = [];
     const octokit: any = {
-      graphql: async () => ({ repository: { pullRequest: { mergeStateStatus: 'DIRTY' } } }),
+      graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' } } }),
       rest: {
         pulls: {
           merge: async (args: any) => {
@@ -404,6 +420,7 @@ describe('cli', () => {
       log: (type, msg) => calls.push(['log', type, msg]),
       run,
       pathExists: () => true,
+      sleep: async () => { throw new Error('sleep should not be called'); },
     });
 
     expect(calls).toEqual([
@@ -419,7 +436,7 @@ describe('cli', () => {
   it('aborts the rebase, logs conflict with the branch, and skips merge when rebase fails', async () => {
     const calls: any[] = [];
     const octokit: any = {
-      graphql: async () => ({ repository: { pullRequest: { mergeStateStatus: 'DIRTY' } } }),
+      graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' } } }),
       rest: {
         pulls: {
           merge: async (args: any) => {
@@ -448,6 +465,7 @@ describe('cli', () => {
         log: (type, msg) => calls.push(['log', type, msg]),
         run,
         pathExists: () => true,
+        sleep: async () => { throw new Error('sleep should not be called'); },
       }),
     ).rejects.toBeInstanceOf(LandConflictError);
 
@@ -462,7 +480,7 @@ describe('cli', () => {
   it('logs conflict and skips merge when a DIRTY PR worktree is gone', async () => {
     const calls: any[] = [];
     const octokit: any = {
-      graphql: async () => ({ repository: { pullRequest: { mergeStateStatus: 'DIRTY' } } }),
+      graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' } } }),
       rest: {
         pulls: {
           merge: async (args: any) => {
@@ -490,6 +508,7 @@ describe('cli', () => {
         log: (type, msg) => calls.push(['log', type, msg]),
         run,
         pathExists: () => false,
+        sleep: async () => { throw new Error('sleep should not be called'); },
       }),
     ).rejects.toBeInstanceOf(LandConflictError);
 
@@ -497,6 +516,182 @@ describe('cli', () => {
       ['run', "gh pr checks '123' --repo 'on-par/software-factory' --watch --fail-fast", { cwd: '/repo', timeout: 600_000 }],
       ['log', 'conflict', 'PR #123 DIRTY on ship-it/20-dirty and worktree gone'],
     ]);
+  });
+
+  it('re-issues the ready flip when the PR is still a draft, then merges', async () => {
+    const calls: any[] = [];
+    const sleeps: number[] = [];
+    const octokit: any = {
+      graphql: async (query: string, vars: any) => {
+        if (query.trimStart().startsWith('query')) {
+          calls.push(['query', vars]);
+          return { repository: { pullRequest: { id: 'PR_1', isDraft: true, mergeStateStatus: 'BLOCKED' } } };
+        }
+        if (query.includes('markPullRequestReadyForReview')) {
+          calls.push(['mutation', vars]);
+          return { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } };
+        }
+        throw new Error('unexpected graphql');
+      },
+      rest: {
+        pulls: {
+          merge: async (args: any) => {
+            calls.push(['merge', args]);
+          },
+        },
+        git: { deleteRef: async (args: any) => calls.push(['deleteRef', args]) },
+      },
+    };
+
+    await landOpenPullRequest({
+      octokit,
+      owner: 'on-par',
+      repoName: 'software-factory',
+      ghRepo: 'on-par/software-factory',
+      repoRoot: '/repo',
+      issue: 20,
+      branch: 'ship-it/20-draft',
+      worktree: '/repo-factory-20',
+      prNumber: 123,
+      log: (type, msg) => calls.push(['log', type, msg]),
+      run: async () => {},
+      pathExists: () => true,
+      sleep: async ms => { sleeps.push(ms); },
+    });
+
+    expect(calls.findIndex(c => c[0] === 'mutation')).toBeLessThan(calls.findIndex(c => c[0] === 'merge'));
+    expect(calls).toContainEqual(['mutation', { id: 'PR_1' }]);
+    expect(sleeps).toEqual([]);
+  });
+
+  it('retries the merge with backoff while the PR is still a draft', async () => {
+    const sleeps: number[] = [];
+    const states = [
+      { id: 'PR_1', isDraft: true, mergeStateStatus: 'BLOCKED' },
+      { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' },
+    ];
+    let mergeCalls = 0;
+    const octokit: any = {
+      graphql: async (query: string, vars: any) => {
+        if (query.trimStart().startsWith('query')) {
+          return { repository: { pullRequest: states.shift() } };
+        }
+        expect(query).toContain('markPullRequestReadyForReview');
+        expect(vars).toEqual({ id: 'PR_1' });
+        return { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } };
+      },
+      rest: {
+        pulls: {
+          merge: async () => {
+            mergeCalls++;
+            if (mergeCalls === 1) throw new Error('Pull Request is still a draft');
+          },
+        },
+        git: { deleteRef: async () => {} },
+      },
+    };
+
+    await landOpenPullRequest({
+      octokit,
+      owner: 'on-par',
+      repoName: 'software-factory',
+      ghRepo: 'on-par/software-factory',
+      repoRoot: '/repo',
+      issue: 20,
+      branch: 'ship-it/20-draft',
+      worktree: '/repo-factory-20',
+      prNumber: 123,
+      log: () => {},
+      run: async () => {},
+      pathExists: () => true,
+      sleep: async ms => { sleeps.push(ms); },
+    });
+
+    expect(mergeCalls).toBe(2);
+    expect(sleeps).toEqual([5000]);
+  });
+
+  it('retries while mergeStateStatus is UNKNOWN', async () => {
+    const sleeps: number[] = [];
+    let mergeCalls = 0;
+    let mutationCalls = 0;
+    const octokit: any = {
+      graphql: async (query: string) => {
+        if (query.trimStart().startsWith('query')) {
+          return { repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'UNKNOWN' } } };
+        }
+        mutationCalls++;
+        return { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } };
+      },
+      rest: {
+        pulls: {
+          merge: async () => {
+            mergeCalls++;
+            if (mergeCalls < 3) throw new Error('Pull Request is not mergeable');
+          },
+        },
+        git: { deleteRef: async () => {} },
+      },
+    };
+
+    await landOpenPullRequest({
+      octokit,
+      owner: 'on-par',
+      repoName: 'software-factory',
+      ghRepo: 'on-par/software-factory',
+      repoRoot: '/repo',
+      issue: 20,
+      branch: 'ship-it/20-unknown',
+      worktree: '/repo-factory-20',
+      prNumber: 123,
+      log: () => {},
+      run: async () => {},
+      pathExists: () => true,
+      sleep: async ms => { sleeps.push(ms); },
+    });
+
+    expect(mergeCalls).toBe(3);
+    expect(sleeps).toEqual([5000, 10000]);
+    expect(mutationCalls).toBe(0);
+  });
+
+  it('parks only after retries are exhausted', async () => {
+    const sleeps: number[] = [];
+    const mergeError = new Error('Pull Request is still a draft');
+    let mergeCalls = 0;
+    const octokit: any = {
+      graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'UNKNOWN' } } }),
+      rest: {
+        pulls: {
+          merge: async () => {
+            mergeCalls++;
+            throw mergeError;
+          },
+        },
+        git: { deleteRef: async () => {} },
+      },
+    };
+
+    await expect(
+      landOpenPullRequest({
+        octokit,
+        owner: 'on-par',
+        repoName: 'software-factory',
+        ghRepo: 'on-par/software-factory',
+        repoRoot: '/repo',
+        issue: 20,
+        branch: 'ship-it/20-retry',
+        worktree: '/repo-factory-20',
+        prNumber: 123,
+        log: () => {},
+        run: async () => {},
+        pathExists: () => true,
+        sleep: async ms => { sleeps.push(ms); },
+      }),
+    ).rejects.toBe(mergeError);
+
+    expect(mergeCalls).toBe(5);
+    expect(sleeps).toEqual([5000, 10000, 20000, 40000]);
   });
 
   describe('parkReasonFor', () => {

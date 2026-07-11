@@ -90,9 +90,20 @@ Closes #${issue}`,
     return { ok: false };
   }
 
-  // Mark ready for review (if draft)
+  // Mark ready for review (if draft). REST pulls.update ignores `draft`;
+  // undrafting requires the markPullRequestReadyForReview GraphQL mutation.
   try {
-    await octokit.rest.pulls.update({ owner, repo: repoName, pull_number: prNumber, draft: false });
+    const { data: pr } = await octokit.rest.pulls.get({ owner, repo: repoName, pull_number: prNumber });
+    if (pr.draft) {
+      await octokit.graphql(
+        `mutation MarkPullRequestReady($id: ID!) {
+          markPullRequestReadyForReview(input: { pullRequestId: $id }) {
+            pullRequest { isDraft }
+          }
+        }`,
+        { id: pr.node_id },
+      );
+    }
   } catch {}
 
   // Watch CI (best-effort)
