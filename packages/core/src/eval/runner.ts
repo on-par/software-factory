@@ -22,19 +22,21 @@ export async function runEval(opts: RunEvalOpts): Promise<EvalSummary> {
 
   for (const c of opts.cases) {
     opts.onLog?.(`running ${c.id}`);
+    const constitutionCtx = c.constitution ?? '';
     const prompt = buildPlanPrompt({
       issue: 0,
       issueTitle: c.title,
       issueBody: c.body,
       specPath: '<eval-spec>',
-      constitutionCtx: '',
+      constitutionCtx,
+      ...(c.constitution ? { product: 'eval' } : {}),
     });
     const started = now();
 
     try {
       const result = await opts.router.run('plan', prompt, { worktree, timeout });
       let latencyMs = now() - started;
-      const scored = scoreSpec(result.output, result.output, c.expectedRoute);
+      const scored = scoreSpec(result.output, result.output, c.expectedRoute, { requireConstitution: Boolean(c.constitution) });
       const deterministicPass = scored.checks.every(check => check.pass);
       const shouldJudge = opts.judge && !c.deterministicOnly && c.rubric.length > 0 && scored.route !== 'escalate';
       let rubricScore: number | undefined;

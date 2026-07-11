@@ -25,6 +25,18 @@
     },
     "deterministic-shape": {
       "pass": true
+    },
+    "draft-flip-replay": {
+      "pass": true
+    },
+    "stale-lock-replay": {
+      "pass": true
+    },
+    "ambiguous-route": {
+      "pass": true
+    },
+    "constitution-compliance": {
+      "pass": true
     }
   }
 }
