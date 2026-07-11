@@ -46,25 +46,8 @@ const routes: RoutesConfig = {
 };
 
 const tempDirs = new Set<string>();
-const originalPath = process.env.PATH;
-
-beforeEach(async () => {
-  const binDir = await mkdtemp(join(tmpdir(), 'checker-test-bin-'));
-  tempDirs.add(binDir);
-  const pastePath = join(binDir, 'paste');
-  await writeFile(
-    pastePath,
-    '#!/usr/bin/env node\n' +
-      "const input = await new Promise(resolve => { let data = ''; process.stdin.on('data', chunk => data += chunk); process.stdin.on('end', () => resolve(data)); });\n" +
-      "const lines = String(input).split(/\\r?\\n/).filter(Boolean);\n" +
-      "process.stdout.write(lines.join('+') + (lines.length ? '\\n' : ''));\n",
-  );
-  await chmod(pastePath, 0o755);
-  process.env.PATH = `${binDir}:${originalPath ?? ''}`;
-});
 
 afterEach(async () => {
-  process.env.PATH = originalPath;
   await Promise.all([...tempDirs].map(dir => rm(dir, { recursive: true, force: true })));
   tempDirs.clear();
 });
@@ -154,6 +137,37 @@ describe('testsChecker', () => {
 });
 
 describe('linksChecker', () => {
+  // linksChecker shells out to `paste -sd+`, whose stdin-with-no-file-argument
+  // behavior differs between BSD paste (macOS) and GNU paste (CI). Stub it with
+  // a Node script so these tests assert linksChecker's own logic consistently
+  // across platforms rather than the host's paste implementation.
+  const originalPath = process.env.PATH;
+
+  beforeEach(async () => {
+    const binDir = await mkdtemp(join(tmpdir(), 'checker-test-bin-'));
+    tempDirs.add(binDir);
+    const pastePath = join(binDir, 'paste');
+    await writeFile(
+      pastePath,
+      '#!/usr/bin/env node\n' +
+        '(async () => {\n' +
+        "  const input = await new Promise(resolve => { let data = ''; process.stdin.on('data', chunk => data += chunk); process.stdin.on('end', () => resolve(data)); });\n" +
+        "  const lines = String(input).split(/\\r?\\n/).filter(Boolean);\n" +
+        "  process.stdout.write(lines.join('+') + (lines.length ? '\\n' : ''));\n" +
+        '})();\n',
+    );
+    await chmod(pastePath, 0o755);
+    process.env.PATH = `${binDir}:${originalPath ?? ''}`;
+  });
+
+  afterEach(() => {
+    if (originalPath === undefined) {
+      delete process.env.PATH;
+    } else {
+      process.env.PATH = originalPath;
+    }
+  });
+
   it('passes and skips when no HTML files exist', async () => {
     const worktree = await makeWorktree();
 
