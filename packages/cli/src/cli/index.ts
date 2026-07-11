@@ -20,7 +20,7 @@ import {
   diagnoseModels,
 } from '@on-par/factory-core';
 import type { ModelDiagnosis } from '@on-par/factory-core';
-import { logEvent, branchFor, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock, shellEscape } from '@on-par/factory-core';
+import { logEvent, branchFor, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock, withFileLock, shellEscape } from '@on-par/factory-core';
 import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
@@ -327,10 +327,12 @@ export async function shipIssue(issueNum: number, opts: { product?: string; auto
   }
 
   // Setup worktree
-  await withGitLock(repoRoot, async () => {
-    await gitFetch(repoRoot);
-    await setupWorktree(repoRoot, branch, worktree);
-  });
+  await withGitLock(repoRoot, () =>
+    withFileLock(paths.gitLock, async () => {
+      await gitFetch(repoRoot);
+      await setupWorktree(repoRoot, branch, worktree);
+    }, { onSteal: pid => log('lock-stolen', `stole ${paths.gitLock} from dead holder pid ${pid ?? 'unknown'}`) })
+  );
   log('worktree', `Worktree ready at ${worktree}`);
 
   // BUILD
@@ -444,22 +446,24 @@ async function landIssue(
   }
 
   try {
-    await withGitLock(repoRoot, async () => {
-      await landOpenPullRequest({
-        octokit,
-        owner,
-        repoName,
-        ghRepo,
-        repoRoot,
-        issue: issueNum,
-        branch,
-        worktree,
-        prNumber: prNumber!,
-        log,
-      });
-      log('merged', `squash-merged PR #${prNumber}`);
-      await cleanupWorktree(repoRoot, worktree);
-    });
+    await withGitLock(repoRoot, () =>
+      withFileLock(paths.mergeLock, async () => {
+        await landOpenPullRequest({
+          octokit,
+          owner,
+          repoName,
+          ghRepo,
+          repoRoot,
+          issue: issueNum,
+          branch,
+          worktree,
+          prNumber: prNumber!,
+          log,
+        });
+        log('merged', `squash-merged PR #${prNumber}`);
+        await cleanupWorktree(repoRoot, worktree);
+      }, { onSteal: pid => log('lock-stolen', `stole ${paths.mergeLock} from dead holder pid ${pid ?? 'unknown'}`) })
+    );
   } catch (err: any) {
     if (err instanceof LandConflictError) throw err;
     log('fail', `merge failed: ${err.message}`);

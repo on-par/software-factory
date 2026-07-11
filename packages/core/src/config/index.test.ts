@@ -8,6 +8,8 @@ describe('getFactoryPaths', () => {
     const paths = getFactoryPaths(repoRoot);
     expect(paths.queue).toBe(resolve(repoRoot, '.factory', 'queue'));
     expect(paths.queueProposed).toBe(resolve(repoRoot, '.factory', 'queue.proposed'));
+    expect(paths.mergeLock).toBe(resolve(repoRoot, '.factory', 'merge.lock'));
+    expect(paths.gitLock).toBe(resolve(repoRoot, '.factory', 'git.lock'));
   });
 });
 

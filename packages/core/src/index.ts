@@ -35,7 +35,8 @@ export type { CaseResult, DeterministicCheck, EvalSummary, ExpectedRoute, Golden
 
 // Utils
 export { logEvent, logCost, readCosts, slugify, branchFor, setupWorktree, cleanupWorktree, gitFetch, shellEscape, ensureDir } from './utils/index.js';
-export { withGitLock } from './utils/lock.js';
+export { withGitLock, withFileLock } from './utils/lock.js';
+export type { FileLockOptions } from './utils/lock.js';
 
 // Usage
 export { estimateTrailingSpend, formatUsageReport, watchUsage, priceFor, defaultTranscriptRoots, TRAILING_WINDOW_MS } from './usage/index.js';

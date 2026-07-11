@@ -1,4 +1,15 @@
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+
 const tails = new Map<string, Promise<unknown>>();
+
+export interface FileLockOptions {
+  timeoutMs?: number;
+  pollMs?: number;
+  graceMs?: number;
+  isPidAlive?: (pid: number) => boolean;
+  onSteal?: (holderPid: number | null) => void;
+}
 
 /**
  * Serializes async work per key within this process. The next waiter proceeds
@@ -17,4 +28,111 @@ export function withGitLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
   });
 
   return run;
+}
+
+const DEFAULT_TIMEOUT_MS = 30 * 60_000;
+const DEFAULT_POLL_MS = 5_000;
+const DEFAULT_GRACE_MS = 10_000;
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+function defaultIsPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+function readHolderPid(pidPath: string): number | null {
+  try {
+    const raw = readFileSync(pidPath, 'utf-8').trim();
+    const pid = Number(raw);
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+async function waitForNextPoll(pollMs: number): Promise<number> {
+  await sleep(pollMs);
+  return pollMs;
+}
+
+export async function withFileLock<T>(
+  lockDir: string,
+  fn: () => Promise<T>,
+  opts: FileLockOptions = {},
+): Promise<T> {
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const pollMs = opts.pollMs ?? DEFAULT_POLL_MS;
+  const graceMs = opts.graceMs ?? DEFAULT_GRACE_MS;
+  const isPidAlive = opts.isPidAlive ?? defaultIsPidAlive;
+  const pidPath = join(lockDir, 'pid');
+  const ourPid = String(process.pid);
+  let waitedMs = 0;
+
+  mkdirSync(dirname(lockDir), { recursive: true });
+
+  while (true) {
+    try {
+      mkdirSync(lockDir);
+      try {
+        writeFileSync(pidPath, ourPid);
+      } catch (err) {
+        rmSync(lockDir, { recursive: true, force: true });
+        throw err;
+      }
+
+      try {
+        return await fn();
+      } finally {
+        let stillOwnedByUs = false;
+        try {
+          stillOwnedByUs = readFileSync(pidPath, 'utf-8').trim() === ourPid;
+        } catch {
+          stillOwnedByUs = false;
+        }
+
+        if (stillOwnedByUs) {
+          rmSync(lockDir, { recursive: true, force: true });
+        }
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    }
+
+    const holderPid = readHolderPid(pidPath);
+    if (holderPid !== null) {
+      if (!isPidAlive(holderPid)) {
+        rmSync(lockDir, { recursive: true, force: true });
+        opts.onSteal?.(holderPid);
+        continue;
+      }
+
+      if (waitedMs >= timeoutMs) {
+        throw new Error(`lock ${lockDir} stuck >30m`);
+      }
+      waitedMs += await waitForNextPoll(pollMs);
+      continue;
+    }
+
+    try {
+      const stat = statSync(lockDir);
+      if (Date.now() - stat.mtimeMs > graceMs) {
+        rmSync(lockDir, { recursive: true, force: true });
+        opts.onSteal?.(null);
+        continue;
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw err;
+    }
+
+    if (waitedMs >= timeoutMs) {
+      throw new Error(`lock ${lockDir} stuck >30m`);
+    }
+    waitedMs += await waitForNextPoll(pollMs);
+  }
 }
