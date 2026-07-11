@@ -2,6 +2,26 @@
 
 A token-efficient, highly capable multi-agent software factory that ships verified work autonomously. Built in TypeScript/Node.js with the **boss-worker-checker** orchestration pattern, intelligent **model routing** with automatic **failover** across providers, and per-product **constitutions**.
 
+## Status
+
+Honest snapshot of what works today vs. what is experimental. Statuses reflect the actual code, not the roadmap.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `factory ship` pipeline (PLAN → BUILD → CHECK → SHIP) | ✅ Working | Covered by an end-to-end pipeline integration test |
+| `factory triage` (queue from open issues) | ✅ Working | |
+| `factory run` (parallel lanes) | ✅ Working | Merges are serialized per lane via a merge-wait step |
+| `factory land` / auto-merge | ✅ Working | Auto-merge is **off by default** (`merge.auto: false`); set `FACTORY_MERGE=1` to enable autonomous squash-merge |
+| `factory supervise` (multi-window unattended runs) | ✅ Working | Waits for usage headroom, runs the queue, repeats until drained |
+| Usage-cap watchdog (`factory usage`, stop-at-cap) | ✅ Working | Trailing-5h cost-weighted usage vs. cap; lanes stop at the cap |
+| Codex worker builds (`codex exec`) | ✅ Working | Used for the `build_codex` route |
+| Claude worker/boss models (`claude -p`) | ✅ Working | PLAN and TRIAGE always shell out to `claude -p` |
+| Non-Anthropic models via the Claude CLI (GPT, DeepSeek, Ollama) | ⚠️ Experimental | Registry entries and failover chains exist, but routing them through `claude --model ollama/...` etc. is unverified — expect failover to a Claude model |
+| Evals (`npm run eval`) | ✅ Working | Deterministic stub subset runs in CI on every PR; LLM-judge "real" mode runs locally |
+| Cost tracking (`factory cost`) | ✅ Working | Per-task tokens and cost logged to `.factory/costs.jsonl` |
+| Constitutions + checker rework loop | ✅ Working | Up to 3 rework rounds with dispute resolution |
+| Server (`packages/server`) | 🚧 Stub | Exports config types only; `createServer()` throws — Phase 2 of the roadmap |
+
 ## Monorepo Structure
 
 ```
@@ -117,6 +137,14 @@ A constitution is a written standard that defines "done right" for a product. Ev
 - `packages/config/src/constitutions/example-data-app.md` — Data analysis (data integrity, report validation)
 - `packages/config/src/constitutions/example-client-delivery.md` — Client delivery (client brand adherence, tech spec)
 - `packages/config/src/constitutions/_template.md` — Template for new products
+
+## Open-Core Boundary & Safety
+
+**What's OSS (this repo):** `packages/cli`, `packages/core`, and `packages/config` are the open-source core — the full local pipeline (router, constitutions, checkers, phases) runs from this repo alone, MIT-licensed.
+
+**What isn't:** the hosted control plane (web dashboard, multi-tenant orchestration) lives in a separate repo and is not part of this codebase. `packages/server` here is a stub that reserves the integration point — it exports config types and a `createServer()` that throws.
+
+**Safety note:** to run unattended, the factory invokes agent CLIs with permission checks disabled — `claude -p ... --dangerously-skip-permissions` and `codex exec --yolo`. Every build runs inside an isolated git worktree (created as a sibling of your repo under the `ship-it/` branch prefix), never in your main checkout. The factory defaults to review mode: pipelines end at a green, ready-for-review PR and merging stays with you unless you explicitly opt in with `FACTORY_MERGE=1`. Only run the factory against repos where you accept agent-authored code executing in that worktree (builds run tests, install dependencies, etc.).
 
 ## SaaS Roadmap
 
