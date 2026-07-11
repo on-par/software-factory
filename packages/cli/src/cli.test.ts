@@ -858,6 +858,20 @@ describe('cli', () => {
       const lastEvent = calls.filter(c => c[0] === 'event').at(-1);
       expect(lastEvent).toEqual(['event', 'lane-done', 'app', 'lane complete']);
     });
+
+    it('threads the run repoRoot and ghRepo into ship instead of re-resolving per issue', async () => {
+      const seen: any[] = [];
+      await runLane('app', [1, 2], '/repo', 'on-par/software-factory', paths, {
+        ship: async (_issue, _opts, ctx) => { seen.push(ctx); return 'ship-it/x'; },
+        waitMerge: async () => {},
+        pathExists: () => false,
+        emitEvent: () => {},
+      });
+      expect(seen).toEqual([
+        { repoRoot: '/repo', ghRepo: 'on-par/software-factory' },
+        { repoRoot: '/repo', ghRepo: 'on-par/software-factory' },
+      ]);
+    });
   });
 
   describe('formatDoctorReport', () => {

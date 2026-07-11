@@ -301,9 +301,13 @@ export function parkReasonFor(err: unknown): ParkReason {
   return 'fail';
 }
 
-export async function shipIssue(issueNum: number, opts: { product?: string; autoRework?: boolean }) {
-  const repoRoot = await getRepoRoot();
-  const ghRepo = await getGitHubRepo();
+export async function shipIssue(
+  issueNum: number,
+  opts: { product?: string; autoRework?: boolean },
+  ctx?: { repoRoot: string; ghRepo: string },
+) {
+  const repoRoot = ctx?.repoRoot ?? (await getRepoRoot());
+  const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo());
   const paths = getFactoryPaths(repoRoot);
   const octokit = getOctokit();
 
@@ -606,7 +610,7 @@ async function cmdSupervise(opts: { now?: boolean }) {
 }
 
 type RunLaneDeps = {
-  ship?: (issue: number, opts: {}) => Promise<string>;
+  ship?: (issue: number, opts: {}, ctx?: { repoRoot: string; ghRepo: string }) => Promise<string>;
   waitMerge?: typeof waitForMerge;
   pathExists?: (path: string) => boolean;
   emitEvent?: typeof logEvent;
@@ -628,7 +632,7 @@ export async function runLane(
       return;
     }
     try {
-      const branch = await ship(issue, {});
+      const branch = await ship(issue, {}, { repoRoot, ghRepo });
       await waitMerge(issue, branch, repoRoot, ghRepo, paths);
     } catch (err: any) {
       const reason = parkReasonFor(err);
