@@ -22,9 +22,10 @@ export async function checkPhase(
     router: ModelRouter;
     constitutionLoader: ConstitutionLoader;
     log: (type: string, msg: string) => void;
+    autoRework?: boolean;
   },
 ): Promise<CheckPhaseResult> {
-  const { issue, worktree, specPath, product, router, constitutionLoader, log } = opts;
+  const { issue, worktree, specPath, product, router, constitutionLoader, log, autoRework = true } = opts;
 
   const constitutionBody = product ? constitutionLoader.getBody(product) : '';
 
@@ -39,8 +40,9 @@ export async function checkPhase(
 
   let summary = await runAllCheckers(ctx, router, constitutionLoader);
   let reworkRounds = 0;
+  const maxRounds = autoRework ? MAX_REWORK_ROUNDS : 0;
 
-  while (summary.failures > 0 && reworkRounds < MAX_REWORK_ROUNDS) {
+  while (summary.failures > 0 && reworkRounds < maxRounds) {
     reworkRounds++;
     log('rework', `${summary.failures} failures — sending back to worker (round ${reworkRounds})`);
 
