@@ -2,6 +2,23 @@
   "version": 1,
   "description": "Model registry for the Software Factory. Defines providers, costs, capabilities, and failover chains.",
   "models": {
+    "claude-fable-5": {
+      "provider": "anthropic",
+      "tier": "boss",
+      "costPerMtokInput": 8.0,
+      "costPerMtokOutput": 40.0,
+      "contextWindow": 200000,
+      "capabilities": [
+        "planning",
+        "design",
+        "architecture",
+        "review",
+        "dispute_resolution"
+      ],
+      "envKey": null,
+      "claudeFlag": "fable",
+      "note": "Claude Fable 5 — most capable model, uses claude CLI subscription auth. Falls back to opus on rate-limit/usage-cap."
+    },
     "claude-opus-4-8": {
       "provider": "anthropic",
       "tier": "boss",
@@ -118,6 +135,7 @@
   },
   "tiers": {
     "boss": [
+      "claude-fable-5",
       "claude-opus-4-8",
       "claude-sonnet-5",
       "glm-5.2"
