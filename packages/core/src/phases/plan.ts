@@ -22,11 +22,10 @@ export interface PlanPromptOpts {
   issueBody: string;
   specPath: string;
   constitutionCtx: string;
-  product?: string;
 }
 
 export function buildPlanPrompt(opts: PlanPromptOpts): string {
-  const { issue, issueTitle, issueBody, specPath, constitutionCtx, product } = opts;
+  const { issue, issueTitle, issueBody, specPath, constitutionCtx } = opts;
 
   return `You are the PLAN phase of a multi-agent software factory for issue #${issue}.
 Do NOT implement anything. You are already inside the isolated worktree (cwd).
@@ -47,7 +46,7 @@ Steps:
    - route: claude — when the work needs UX, design, or architecture judgment; naming/API
      design calls; is a tiny diff (<20 lines); or needs session tools
    Default to route: claude when genuinely unsure.
-${product ? '4. The constitution above defines the standards for this product. Your spec MUST satisfy every standard.' : '4. No constitution loaded — use your best judgment.'}
+${constitutionCtx ? '4. The constitution above defines the standards for this product. Your spec MUST satisfy every standard.' : '4. No constitution loaded — use your best judgment.'}
 
 Write EXACTLY ONE file, at ${specPath}, in this shape:
 ---
@@ -61,7 +60,7 @@ route: codex
 that a cheap worker model could build it without re-reading the issue>
 ## Tests
 <what to add or change, and the exact command that proves it passes>
-${product ? `## Constitution compliance\nFor each standard in the constitution, note how the plan satisfies it.` : '## Constitution compliance\nN/A — no constitution'}
+${constitutionCtx ? `## Constitution compliance\nFor each standard in the constitution, note how the plan satisfies it.` : '## Constitution compliance\nN/A — no constitution'}
 ## Non-goals
 <explicitly out of scope, from the issue>
 
@@ -94,10 +93,11 @@ export async function planPhase(
   const issueTitle = issueData.title;
   const issueBody = issueData.body ?? '';
 
-  // Build constitution context
-  const constitutionCtx = product ? constitutionLoader.buildContext(product) : '';
+  // Build constitution context: repo instruction files first, bundled <product>.md as fallback
+  const constitutionCtx = constitutionLoader.buildContextFor(worktree, product);
+  if (!constitutionCtx) log('plan', 'No standards found (no repo instruction files, no constitution) — proceeding without');
 
-  const prompt = buildPlanPrompt({ issue, issueTitle, issueBody, specPath, constitutionCtx, product });
+  const prompt = buildPlanPrompt({ issue, issueTitle, issueBody, specPath, constitutionCtx });
 
   log('plan', `Starting plan phase`);
 

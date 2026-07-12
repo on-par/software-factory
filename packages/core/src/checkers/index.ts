@@ -273,7 +273,7 @@ export async function runAllCheckers(
 ): Promise<CheckSummary> {
   const results: CheckerOutput[] = [];
   const standardNames = ['compile', 'tests', 'lint', 'links', 'accessibility'];
-  const productCheckers = ctx.product ? constitutionLoader.getCheckers(ctx.product) : [];
+  const productCheckers = constitutionLoader.getCheckersFor(ctx.worktree, ctx.product);
 
   const allCheckers = [...standardNames, ...productCheckers.filter(c => !standardNames.includes(c))];
   const packageJson = await loadPackageJson(ctx.worktree);

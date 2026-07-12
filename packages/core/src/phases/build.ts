@@ -30,7 +30,8 @@ export async function buildPhase(
   const { issue, repo, worktree, specPath, branch, product, router, constitutionLoader, log, timeoutSeconds, skipCI } = opts;
   let route = opts.route;
 
-  const constitutionCtx = product ? constitutionLoader.buildContext(product) : '';
+  const constitutionCtx = constitutionLoader.buildContextFor(worktree, product);
+  if (!constitutionCtx) log('build', 'No standards found (no repo instruction files, no constitution) — proceeding without');
   const spec = await readFile(specPath, 'utf-8').catch(() => '');
 
   let prompt: string;

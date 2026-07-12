@@ -29,7 +29,8 @@ export async function checkPhase(
 ): Promise<CheckPhaseResult> {
   const { issue, worktree, specPath, product, router, constitutionLoader, log, autoRework = true, buildTimeoutSeconds } = opts;
 
-  const constitutionBody = product ? constitutionLoader.getBody(product) : '';
+  const constitutionBody = constitutionLoader.getBodyFor(worktree, product);
+  if (!constitutionBody) log('check', 'No standards found (no repo instruction files, no constitution) — proceeding without');
 
   const ctx: CheckerContext = {
     worktree,
@@ -78,7 +79,7 @@ async function reworkWorker(
   log: (type: string, msg: string) => void,
   timeoutSeconds?: number,
 ): Promise<void> {
-  const constitutionCtx = product ? constitutionLoader.buildContext(product) : '';
+  const constitutionCtx = constitutionLoader.buildContextFor(worktree, product);
   const failures = summary.results.filter(r => r.result === 'FAIL');
   const failureDetails = failures.map(f => `### ${f.checker}\n${f.details}`).join('\n\n');
 
@@ -125,7 +126,7 @@ export async function disputeResolution(
   },
 ): Promise<DisputeResult> {
   const { issue, worktree, specPath, checkerName, checkerDetails, product, router, constitutionLoader, timeoutSeconds } = opts;
-  const constitutionCtx = product ? constitutionLoader.buildContext(product) : '';
+  const constitutionCtx = constitutionLoader.buildContextFor(worktree, product);
 
   const prompt = `You are the BOSS in a software factory. A worker agent is disputing
 a checker agent's failure. You must arbitrate by re-reading the constitution —
