@@ -38,7 +38,8 @@ ${constitutionCtx}
 ${issueBody}
 
 Steps:
-1. Read the issue above fully. Read CLAUDE.md / CONTEXT.md / docs/adr/ if present.
+1. Read the issue above fully. Read CONTEXT.md / docs/adr/ if present. (Any
+   CLAUDE.md/AGENTS.md standards are already included above — do not re-read them.)
 2. Explore the codebase (read/search only) enough to name the exact files, functions,
    and existing patterns/tests this issue touches, and any edge cases.
 3. Decide the build route:

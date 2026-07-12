@@ -72,16 +72,27 @@ describe('ConstitutionLoader repo-first resolution', () => {
     expect(c.body).toContain('.github/copilot-instructions.md');
   });
 
-  it('prefers repo instruction files for the body but keeps the product custom checkers', async () => {
+  it('repo instruction files lead, with the configured constitution riding along', async () => {
     await writeFile(join(bundledDir, 'acme-app.md'), BUNDLED);
     await writeFile(join(repoDir, 'AGENTS.md'), 'repo wins');
 
     const c = loader.resolve(repoDir, 'acme-app')!;
     expect(c.source).toBe('repo');
-    expect(c.body).toContain('repo wins');
-    expect(c.body).not.toContain('Bundled standards body.');
-    // explicitly configured checkers must not be silently dropped
+    // explicitly configured checkers must not be silently dropped, and the
+    // standards that define them must stay in the body they are graded against
     expect(c.checkers).toEqual(['compile', 'custom_a11y']);
+    expect(c.body.indexOf('repo wins')).toBeGreaterThanOrEqual(0);
+    expect(c.body.indexOf('repo wins')).toBeLessThan(c.body.indexOf('Bundled standards body.'));
+    expect(c.body).toContain('<standards source="constitution:acme-app">');
+  });
+
+  it('does not append an empty bundled body when merging', async () => {
+    await writeFile(join(bundledDir, 'bare.md'), '---\nproduct: bare\ncheckers:\n  - custom_x\n---\n');
+    await writeFile(join(repoDir, 'CLAUDE.md'), 'repo rules');
+
+    const c = loader.resolve(repoDir, 'bare')!;
+    expect(c.checkers).toEqual(['custom_x']);
+    expect(c.body).not.toContain('constitution:bare');
   });
 
   it('falls back to the bundled constitution when the repo has no instruction files', async () => {
@@ -137,6 +148,11 @@ describe('buildConstitutionContext', () => {
 
   it('is empty for null', () => {
     expect(buildConstitutionContext(null)).toBe('');
+  });
+
+  it('is empty for a frontmatter-only constitution (no prose to enforce)', async () => {
+    await writeFile(join(bundledDir, 'bare.md'), '---\nproduct: bare\ncheckers:\n  - custom_x\n---\n');
+    expect(buildConstitutionContext(loader.resolve(repoDir, 'bare'))).toBe('');
   });
 
   it('wraps repo standards and names the instruction files', async () => {

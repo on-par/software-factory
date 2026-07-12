@@ -61,11 +61,10 @@ export interface Constitution {
   product: string;
   version: number;
   checkers: string[];
-  enforcedOn: string[];
   body: string;
   path: string;
   /** Where the standards came from: the target repo's own instruction files, or a bundled <product>.md */
-  source?: 'repo' | 'bundled';
+  source: 'repo' | 'bundled';
 }
 
 // ---------- Checkers ----------

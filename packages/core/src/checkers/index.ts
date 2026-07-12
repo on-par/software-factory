@@ -18,7 +18,8 @@ interface PackageJson {
 export interface CheckerContext {
   worktree: string;
   specPath: string;
-  constitutionBody: string;
+  /** Set by runAllCheckers from the resolved constitution — the single source of the standards text */
+  constitutionBody?: string;
   packageJson?: PackageJson | null;
 }
 
@@ -207,6 +208,7 @@ export async function runCustomChecker(
   ctx: CheckerContext,
   checkerName: string,
   router: ModelRouter,
+  timeoutSeconds?: number,
 ): Promise<CheckerOutput> {
   const prompt = `You are a CHECKER agent for a software factory. Your job is to independently
 verify the work in the worktree against a specific standard. Do NOT trust the worker's
@@ -217,7 +219,7 @@ CHECKER NAME: ${checkerName}
 SPEC: ${await readFile(ctx.specPath, 'utf-8').catch(() => '(no spec)')}
 
 CONSTITUTION (the written standard):
-${ctx.constitutionBody}
+${ctx.constitutionBody ?? '(none)'}
 
 Your job: Run the '${checkerName}' check. This is a custom checker defined in the
 constitution above. Find the relevant standard in the constitution and verify the
@@ -233,7 +235,7 @@ Steps:
   try {
     const result = await router.run('check_custom', prompt, {
       worktree: ctx.worktree,
-      timeout: 1800,
+      timeout: timeoutSeconds ?? 1800,
     });
     // Extract JSON from output
     const jsonMatch = result.output.match(/\{[^{}]*"checker"[^{}]*\}/);
@@ -268,6 +270,7 @@ export async function runAllCheckers(
   ctx: CheckerContext,
   router: ModelRouter,
   constitution: Constitution | null,
+  customCheckerTimeoutSeconds?: number,
 ): Promise<CheckSummary> {
   const results: CheckerOutput[] = [];
   const standardNames = ['compile', 'tests', 'lint', 'links', 'accessibility'];
@@ -275,7 +278,9 @@ export async function runAllCheckers(
 
   const allCheckers = [...standardNames, ...productCheckers.filter(c => !standardNames.includes(c))];
   const packageJson = await loadPackageJson(ctx.worktree);
-  const sharedCtx: CheckerContext = { ...ctx, packageJson };
+  // the constitution is the single source of truth for the standards body —
+  // custom checkers must be graded against the same text that declared them
+  const sharedCtx: CheckerContext = { ...ctx, packageJson, constitutionBody: constitution?.body ?? '' };
 
   for (const name of allCheckers) {
     let output: CheckerOutput;
@@ -283,7 +288,7 @@ export async function runAllCheckers(
     if (BUILT_IN_CHECKERS[name]) {
       output = await BUILT_IN_CHECKERS[name](sharedCtx);
     } else if (name.startsWith('custom_')) {
-      output = await runCustomChecker(sharedCtx, name, router);
+      output = await runCustomChecker(sharedCtx, name, router, customCheckerTimeoutSeconds);
     } else {
       continue; // skip unknown
     }

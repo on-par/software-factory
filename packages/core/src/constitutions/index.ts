@@ -36,7 +36,6 @@ export class ConstitutionLoader {
       product: data.product ?? product,
       version: data.version ?? 1,
       checkers: data.checkers ?? [],
-      enforcedOn: data.enforcedOn ?? ['plan', 'build', 'check'],
       body: content,
       path,
       source: 'bundled',
@@ -63,7 +62,6 @@ export class ConstitutionLoader {
       product: 'repo',
       version: 1,
       checkers: [],
-      enforcedOn: ['plan', 'build', 'check'],
       body: sections.join('\n\n'),
       path: repoDir,
       source: 'repo',
@@ -87,7 +85,19 @@ export class ConstitutionLoader {
   resolve(repoDir: string, product?: string): Constitution | null {
     const bundled = product ? this.load(product) : null;
     const fromRepo = this.loadFromRepo(repoDir);
-    if (fromRepo && bundled) return { ...fromRepo, checkers: bundled.checkers };
+    if (fromRepo && bundled) {
+      // Repo files lead, but the configured constitution rides along: it is
+      // what defines the custom checkers, so those standards must stay in the
+      // body the checkers are graded against.
+      const bundledBody = bundled.body.trim();
+      return {
+        ...fromRepo,
+        body: bundledBody
+          ? `${fromRepo.body}\n\n<standards source="constitution:${bundled.product}">\n\n${bundledBody}\n\n</standards>`
+          : fromRepo.body,
+        checkers: bundled.checkers,
+      };
+    }
     return fromRepo ?? bundled;
   }
 
@@ -101,7 +111,10 @@ export class ConstitutionLoader {
 
 /** Build the prompt context for an already-resolved constitution */
 export function buildConstitutionContext(c: Constitution | null): string {
-  if (!c) return '';
+  // frontmatter-only constitutions have no prose to enforce — injecting an
+  // empty <constitution> block would flip prompts into the "standards exist"
+  // branch with nothing to comply with
+  if (!c || !c.body.trim()) return '';
 
   const origin = c.source === 'repo'
     ? `this repository's own agent instruction files (${REPO_INSTRUCTION_FILES.join(', ')})`

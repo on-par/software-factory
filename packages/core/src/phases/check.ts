@@ -26,17 +26,13 @@ export async function checkPhase(
     checkTimeoutSeconds?: number;
   },
 ): Promise<CheckPhaseResult> {
-  const { issue, worktree, specPath, constitution, router, log, autoRework = true, buildTimeoutSeconds } = opts;
+  const { issue, worktree, specPath, constitution, router, log, autoRework = true, buildTimeoutSeconds, checkTimeoutSeconds } = opts;
 
-  const ctx: CheckerContext = {
-    worktree,
-    specPath,
-    constitutionBody: constitution?.body ?? '',
-  };
+  const ctx: CheckerContext = { worktree, specPath };
 
   log('check', 'Running checkers');
 
-  let summary = await runAllCheckers(ctx, router, constitution);
+  let summary = await runAllCheckers(ctx, router, constitution, checkTimeoutSeconds);
   let reworkRounds = 0;
   const maxRounds = autoRework ? MAX_REWORK_ROUNDS : 0;
 
@@ -46,7 +42,7 @@ export async function checkPhase(
 
     await reworkWorker(issue, worktree, specPath, summary, constitution, router, log, buildTimeoutSeconds);
 
-    summary = await runAllCheckers(ctx, router, constitution);
+    summary = await runAllCheckers(ctx, router, constitution, checkTimeoutSeconds);
     log('check', `Rework round ${reworkRounds}: ${summary.failures} failures remaining`);
   }
 
