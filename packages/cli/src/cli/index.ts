@@ -24,7 +24,7 @@ import {
 } from '@on-par/factory-core';
 import type { ModelDiagnosis } from '@on-par/factory-core';
 import { logEvent, branchFor, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock, withFileLock, shellEscape } from '@on-par/factory-core';
-import { exec as execCb } from 'node:child_process';
+import { exec as execCb, execSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { resolve, dirname, basename } from 'node:path';
@@ -57,7 +57,14 @@ async function getGitHubRepo(): Promise<string> {
 }
 
 function getOctokit(): Octokit {
-  return new Octokit({ auth: process.env.GITHUB_TOKEN ?? undefined });
+  let token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+  if (!token) {
+    try {
+      const out = execSync('gh auth token', { encoding: 'utf-8', timeout: 5_000 });
+      token = out.trim() || undefined;
+    } catch {}
+  }
+  return new Octokit({ auth: token });
 }
 
 // ---------- commands ----------
