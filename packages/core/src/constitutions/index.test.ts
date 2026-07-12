@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConstitutionLoader, REPO_INSTRUCTION_FILES } from './index.js';
+import { ConstitutionLoader, REPO_INSTRUCTION_FILES, buildConstitutionContext } from './index.js';
 
 const BUNDLED = `---
 product: acme-app
@@ -41,7 +41,7 @@ describe('ConstitutionLoader repo-first resolution', () => {
     ]);
   });
 
-  it('resolves standards from a repo CLAUDE.md with default (no custom) checkers', async () => {
+  it('resolves standards from a repo CLAUDE.md', async () => {
     await writeFile(join(repoDir, 'CLAUDE.md'), '# House rules\nAlways TDD.');
 
     const c = loader.resolve(repoDir);
@@ -72,7 +72,7 @@ describe('ConstitutionLoader repo-first resolution', () => {
     expect(c.body).toContain('.github/copilot-instructions.md');
   });
 
-  it('prefers repo instruction files over a bundled constitution', async () => {
+  it('prefers repo instruction files for the body but keeps the product custom checkers', async () => {
     await writeFile(join(bundledDir, 'acme-app.md'), BUNDLED);
     await writeFile(join(repoDir, 'AGENTS.md'), 'repo wins');
 
@@ -80,6 +80,8 @@ describe('ConstitutionLoader repo-first resolution', () => {
     expect(c.source).toBe('repo');
     expect(c.body).toContain('repo wins');
     expect(c.body).not.toContain('Bundled standards body.');
+    // explicitly configured checkers must not be silently dropped
+    expect(c.checkers).toEqual(['compile', 'custom_a11y']);
   });
 
   it('falls back to the bundled constitution when the repo has no instruction files', async () => {
@@ -91,44 +93,74 @@ describe('ConstitutionLoader repo-first resolution', () => {
     expect(c.checkers).toEqual(['compile', 'custom_a11y']);
   });
 
-  it('returns null when nothing is found, without throwing on a missing bundled product', () => {
+  it('returns null when nothing is configured and the repo has no instruction files', () => {
     expect(loader.resolve(repoDir)).toBeNull();
-    expect(loader.resolve(repoDir, 'no-such-product')).toBeNull();
   });
 
-  it('buildContextFor wraps repo standards and is empty when nothing is found', async () => {
-    expect(loader.buildContextFor(repoDir)).toBe('');
-
-    await writeFile(join(repoDir, 'CLAUDE.md'), 'context body here');
-    const ctx = loader.buildContextFor(repoDir);
-    expect(ctx).toContain('context body here');
-    expect(ctx).toContain('instruction files');
-  });
-
-  it('buildContextFor falls back to the bundled wrapper unchanged', async () => {
-    await writeFile(join(bundledDir, 'acme-app.md'), BUNDLED);
-    const ctx = loader.buildContextFor(repoDir, 'acme-app');
-    expect(ctx).toContain('Bundled standards body.');
-    expect(ctx).toBe(loader.buildContext('acme-app'));
-  });
-
-  it('getCheckersFor returns bundled custom checkers only on fallback', async () => {
-    await writeFile(join(bundledDir, 'acme-app.md'), BUNDLED);
-    expect(loader.getCheckersFor(repoDir, 'acme-app')).toEqual(['compile', 'custom_a11y']);
+  it('fails fast on a configured product with no bundled constitution', async () => {
+    // a typo'd --product must halt the run, not silently drop all standards
+    expect(() => loader.resolve(repoDir, 'no-such-product')).toThrow(/No constitution for 'no-such-product'/);
 
     await writeFile(join(repoDir, 'CLAUDE.md'), 'repo rules');
-    expect(loader.getCheckersFor(repoDir, 'acme-app')).toEqual([]);
-    expect(loader.getCheckersFor(repoDir)).toEqual([]);
+    expect(() => loader.resolve(repoDir, 'no-such-product')).toThrow(/No constitution for 'no-such-product'/);
   });
 
-  it('getBodyFor mirrors resolve', async () => {
-    expect(loader.getBodyFor(repoDir)).toBe('');
-    await writeFile(join(repoDir, 'CLAUDE.md'), 'body via getBodyFor');
-    expect(loader.getBodyFor(repoDir)).toContain('body via getBodyFor');
+  it('skips unreadable instruction entries (e.g. a directory named AGENTS.md)', async () => {
+    await mkdir(join(repoDir, 'AGENTS.md'));
+    expect(loader.resolve(repoDir)).toBeNull();
+
+    await writeFile(join(repoDir, 'CLAUDE.md'), 'still resolves');
+    expect(loader.resolve(repoDir)!.body).toContain('still resolves');
   });
 
   it('ignores empty instruction files', async () => {
     await writeFile(join(repoDir, 'CLAUDE.md'), '   \n');
     expect(loader.resolve(repoDir)).toBeNull();
+  });
+});
+
+describe('buildConstitutionContext', () => {
+  let bundledDir: string;
+  let repoDir: string;
+  let loader: ConstitutionLoader;
+
+  beforeEach(async () => {
+    bundledDir = await mkdtemp(join(tmpdir(), 'constitutions-'));
+    repoDir = await mkdtemp(join(tmpdir(), 'repo-'));
+    loader = new ConstitutionLoader(bundledDir);
+  });
+
+  afterEach(async () => {
+    await rm(bundledDir, { recursive: true, force: true });
+    await rm(repoDir, { recursive: true, force: true });
+  });
+
+  it('is empty for null', () => {
+    expect(buildConstitutionContext(null)).toBe('');
+  });
+
+  it('wraps repo standards and names the instruction files', async () => {
+    await writeFile(join(repoDir, 'CLAUDE.md'), 'context body here');
+    const ctx = buildConstitutionContext(loader.resolve(repoDir));
+    expect(ctx).toContain('context body here');
+    expect(ctx).toContain('instruction files');
+    expect(ctx).not.toContain('Dispute Rules');
+  });
+
+  it('wraps bundled standards and keeps the Dispute Rules pointer', async () => {
+    await writeFile(join(bundledDir, 'acme-app.md'), BUNDLED);
+    const ctx = buildConstitutionContext(loader.resolve(repoDir, 'acme-app'));
+    expect(ctx).toContain('Bundled standards body.');
+    expect(ctx).toContain('Dispute Rules');
+  });
+
+  it('does not re-load by frontmatter product name (filename/frontmatter mismatch is safe)', async () => {
+    // frontmatter product differs from the filename — building context from the
+    // resolved object must not re-resolve `Acme App.md` and throw
+    await writeFile(join(bundledDir, 'foo.md'), BUNDLED.replace('product: acme-app', 'product: Acme App'));
+    const c = loader.resolve(repoDir, 'foo');
+    expect(c!.product).toBe('Acme App');
+    expect(() => buildConstitutionContext(c)).not.toThrow();
+    expect(buildConstitutionContext(c)).toContain('Bundled standards body.');
   });
 });

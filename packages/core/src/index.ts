@@ -15,7 +15,7 @@ export { StubModelExecutor } from './router/stub.js';
 export type { StubModelExecutorOptions } from './router/stub.js';
 
 // Constitutions
-export { ConstitutionLoader } from './constitutions/index.js';
+export { ConstitutionLoader, buildConstitutionContext, REPO_INSTRUCTION_FILES } from './constitutions/index.js';
 
 // Checkers
 export { runAllCheckers, compileChecker, testsChecker, lintChecker, linksChecker, accessibilityChecker, runCustomChecker } from './checkers/index.js';

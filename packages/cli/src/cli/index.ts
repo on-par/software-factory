@@ -419,8 +419,22 @@ export async function shipIssue(
   );
   log('worktree', `Worktree ready at ${worktree}`);
 
+  // Resolve standards ONCE against the fresh worktree: repo instruction files
+  // (CLAUDE.md/AGENTS.md/copilot-instructions.md) win the standards body, a
+  // bundled <product>.md is the fallback, and a configured product still
+  // contributes its custom checkers. Resolving again later would let the
+  // build worker author the standards it is graded by.
+  const constitution = constitutionLoader.resolve(worktree, product);
+  if (constitution) {
+    log('constitution', constitution.source === 'repo'
+      ? `Standards from repo instruction files${product ? ` (custom checkers from '${product}')` : ''}`
+      : `Standards from bundled constitution '${constitution.product}'`);
+  } else {
+    log('constitution', 'No standards found (no repo instruction files, no constitution) — proceeding without');
+  }
+
   // PLAN
-  const plan = await planPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, product, router, constitutionLoader, octokit, log, timeoutSeconds: timeouts.plan });
+  const plan = await planPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, constitution, router, octokit, log, timeoutSeconds: timeouts.plan });
   if (!plan.ok) {
     throw new LaneParkError(`plan escalated: ${plan.escalate ?? 'unknown'}`, 'escalate');
   }
@@ -428,13 +442,13 @@ export async function shipIssue(
   const skipCI = resolveSkipCI(factoryConfig);
 
   // BUILD
-  const build = await buildPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, branch, product, route: plan.route, router, constitutionLoader, log, timeoutSeconds: timeouts.build, skipCI });
+  const build = await buildPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, branch, constitution, route: plan.route, router, log, timeoutSeconds: timeouts.build, skipCI });
   if (!build.ok) {
     throw new LaneParkError(`build escalated: ${build.escalate ?? 'unknown'}`, 'escalate');
   }
 
   // CHECK
-  const check = await checkPhase({ issue: issueNum, worktree, specPath, product, router, constitutionLoader, log, autoRework, buildTimeoutSeconds: timeouts.build, checkTimeoutSeconds: timeouts.check });
+  const check = await checkPhase({ issue: issueNum, worktree, specPath, constitution, router, log, autoRework, buildTimeoutSeconds: timeouts.build, checkTimeoutSeconds: timeouts.check });
   if (!check.passed) {
     const failures = check.summary.results.filter(r => r.result === 'FAIL');
     for (const f of failures) {

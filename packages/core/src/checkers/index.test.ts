@@ -330,12 +330,9 @@ describe('runAllCheckers', () => {
       scripts: { check_custom: [{ output: '{"checker":"custom_style","result":"PASS","details":"ok"}' }] },
     });
     const router = new ModelRouter(models, routes, false, stub);
-    const ctx: CheckerContext = {
-      ...makeContext(worktree),
-      product: 'myproduct',
-    };
+    const constitution = new ConstitutionLoader(constitutionDir).resolve(worktree, 'myproduct');
 
-    const summary = await runAllCheckers(ctx, router, new ConstitutionLoader(constitutionDir));
+    const summary = await runAllCheckers(makeContext(worktree), router, constitution);
 
     expect(summary.total).toBe(6);
     expect(summary.passes + summary.failures).toBe(summary.total);
@@ -343,16 +340,14 @@ describe('runAllCheckers', () => {
     expect(summary.results.map(result => result.checker)).not.toContain('not_a_real_checker');
   });
 
-  it('runs only built-ins when no product is provided', { timeout: 60000 }, async () => {
-    const constitutionDir = await mkdtemp(join(tmpdir(), 'checker-test-constitution-'));
-    tempDirs.add(constitutionDir);
+  it('runs only built-ins when no constitution is resolved', { timeout: 60000 }, async () => {
     const worktree = await makeWorktree();
     const stub = new StubModelExecutor({
       scripts: { check_custom: [{ output: '{"checker":"custom_style","result":"PASS","details":"ok"}' }] },
     });
     const router = new ModelRouter(models, routes, false, stub);
 
-    const summary = await runAllCheckers(makeContext(worktree), router, new ConstitutionLoader(constitutionDir));
+    const summary = await runAllCheckers(makeContext(worktree), router, null);
 
     expect(summary.total).toBe(5);
     expect(stub.calls).toHaveLength(0);

@@ -6,7 +6,6 @@ import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ConstitutionLoader } from '../constitutions/index.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
@@ -115,7 +114,7 @@ describe('concurrent lanes integration', () => {
           },
         });
         const router = new ModelRouter(models, routes, false, stub);
-        const constitutionLoader = new ConstitutionLoader();
+        const constitution = null;
 
         const branch = branchFor(issue, titles[issue]);
         const worktree = `${repoRoot}-wt-${issue}`;
@@ -128,7 +127,7 @@ describe('concurrent lanes integration', () => {
           worktree,
           specPath,
           router,
-          constitutionLoader,
+          constitution,
           octokit: octokit as any,
           log,
         });
@@ -150,12 +149,12 @@ describe('concurrent lanes integration', () => {
           branch,
           route: plan.route,
           router,
-          constitutionLoader,
+          constitution,
           log,
         });
         expect(build.ok).toBe(true);
 
-        const check = await checkPhase({ issue, worktree, specPath, router, constitutionLoader, log });
+        const check = await checkPhase({ issue, worktree, specPath, router, constitution, log });
         expect(check.passed).toBe(true);
 
         const ship = await shipPhase({

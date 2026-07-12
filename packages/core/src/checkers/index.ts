@@ -6,8 +6,7 @@ import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { ModelRouter } from '../router/index.js';
-import { ConstitutionLoader } from '../constitutions/index.js';
-import type { CheckerOutput, CheckSummary } from '../types/index.js';
+import type { CheckerOutput, CheckSummary, Constitution } from '../types/index.js';
 
 const exec = promisify(execCb);
 
@@ -20,7 +19,6 @@ export interface CheckerContext {
   worktree: string;
   specPath: string;
   constitutionBody: string;
-  product?: string;
   packageJson?: PackageJson | null;
 }
 
@@ -269,11 +267,11 @@ const BUILT_IN_CHECKERS: Record<string, CheckerFn> = {
 export async function runAllCheckers(
   ctx: CheckerContext,
   router: ModelRouter,
-  constitutionLoader: ConstitutionLoader,
+  constitution: Constitution | null,
 ): Promise<CheckSummary> {
   const results: CheckerOutput[] = [];
   const standardNames = ['compile', 'tests', 'lint', 'links', 'accessibility'];
-  const productCheckers = constitutionLoader.getCheckersFor(ctx.worktree, ctx.product);
+  const productCheckers = constitution?.checkers ?? [];
 
   const allCheckers = [...standardNames, ...productCheckers.filter(c => !standardNames.includes(c))];
   const packageJson = await loadPackageJson(ctx.worktree);

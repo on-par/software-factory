@@ -4,8 +4,9 @@ import { writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import matter from 'gray-matter';
 import { ModelRouter } from '../router/index.js';
-import { ConstitutionLoader } from '../constitutions/index.js';
+import { buildConstitutionContext } from '../constitutions/index.js';
 import { escalationLine, isEscalation, codexDisabled } from '../utils/index.js';
+import type { Constitution } from '../types/index.js';
 import type { Octokit } from '@octokit/rest';
 
 export interface PlanResult {
@@ -77,15 +78,14 @@ export async function planPhase(
     repo: string;
     worktree: string;
     specPath: string;
-    product?: string;
+    constitution: Constitution | null;
     router: ModelRouter;
-    constitutionLoader: ConstitutionLoader;
     octokit: Octokit;
     log: (type: string, msg: string) => void;
     timeoutSeconds?: number;
   },
 ): Promise<PlanResult> {
-  const { issue, repo, worktree, specPath, product, router, constitutionLoader, octokit, log, timeoutSeconds } = opts;
+  const { issue, repo, worktree, specPath, constitution, router, octokit, log, timeoutSeconds } = opts;
 
   // Get issue details
   const [owner, repoName] = repo.split('/');
@@ -93,9 +93,7 @@ export async function planPhase(
   const issueTitle = issueData.title;
   const issueBody = issueData.body ?? '';
 
-  // Build constitution context: repo instruction files first, bundled <product>.md as fallback
-  const constitutionCtx = constitutionLoader.buildContextFor(worktree, product);
-  if (!constitutionCtx) log('plan', 'No standards found (no repo instruction files, no constitution) — proceeding without');
+  const constitutionCtx = buildConstitutionContext(constitution);
 
   const prompt = buildPlanPrompt({ issue, issueTitle, issueBody, specPath, constitutionCtx });
 

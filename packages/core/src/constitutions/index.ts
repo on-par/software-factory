@@ -8,8 +8,8 @@ import { getConstitutionsDir } from '../config/index.js';
 
 /**
  * Agent instruction files a target repo may carry, in priority order.
- * When any of these exist, they ARE the standards — a bundled <product>.md
- * is only a fallback for repos that have none.
+ * When any of these exist, they ARE the standards body — a bundled
+ * <product>.md is only a fallback for repos that have none.
  */
 export const REPO_INSTRUCTION_FILES = [
   'CLAUDE.md',
@@ -20,9 +20,13 @@ export const REPO_INSTRUCTION_FILES = [
 export class ConstitutionLoader {
   constructor(private dir: string = getConstitutionsDir()) {}
 
-  /** Load a constitution by product name */
+  private bundledPath(product: string): string {
+    return resolve(this.dir, `${product}.md`);
+  }
+
+  /** Load a bundled constitution by product name. Throws if it does not exist. */
   load(product: string): Constitution {
-    const path = resolve(this.dir, `${product}.md`);
+    const path = this.bundledPath(product);
     if (!existsSync(path)) {
       throw new Error(`No constitution for '${product}' at ${path}`);
     }
@@ -43,9 +47,14 @@ export class ConstitutionLoader {
   loadFromRepo(repoDir: string): Constitution | null {
     const sections: string[] = [];
     for (const file of REPO_INSTRUCTION_FILES) {
-      const path = join(repoDir, file);
-      if (!existsSync(path)) continue;
-      const content = readFileSync(path, 'utf-8').trim();
+      let content: string;
+      try {
+        // existsSync alone is not enough: the name may be a directory (EISDIR)
+        // or unreadable (EACCES) — skip anything that can't be read as a file.
+        content = readFileSync(join(repoDir, file), 'utf-8').trim();
+      } catch {
+        continue;
+      }
       if (!content) continue;
       sections.push(`<standards source="${file}">\n\n${content}\n\n</standards>`);
     }
@@ -62,47 +71,24 @@ export class ConstitutionLoader {
   }
 
   /**
-   * Resolve standards repo-first: the target repo's instruction files win;
-   * a bundled <product>.md is the fallback. Never throws — a missing bundled
-   * product just resolves to null.
+   * Resolve the standards for one issue run, repo-first. Call this ONCE per
+   * run (against the freshly created worktree) and pass the result through —
+   * re-resolving later would let a worker that writes a CLAUDE.md mid-build
+   * author the standards it is graded by.
+   *
+   * - Repo instruction files win the standards body. A configured product
+   *   still contributes its custom checkers — the operator asked for them
+   *   explicitly, and repo files can't declare checkers.
+   * - No repo files → the bundled <product>.md.
+   * - A configured product whose bundled file is missing throws (fail fast:
+   *   an unattended run must not silently drop the standards it was given).
+   * - No product and no repo files → null.
    */
   resolve(repoDir: string, product?: string): Constitution | null {
+    const bundled = product ? this.load(product) : null;
     const fromRepo = this.loadFromRepo(repoDir);
-    if (fromRepo) return fromRepo;
-    if (product && existsSync(resolve(this.dir, `${product}.md`))) {
-      return this.load(product);
-    }
-    return null;
-  }
-
-  /** Repo-first body; '' when nothing is found */
-  getBodyFor(repoDir: string, product?: string): string {
-    return this.resolve(repoDir, product)?.body ?? '';
-  }
-
-  /** Repo-first custom checkers; repo-derived standards declare none */
-  getCheckersFor(repoDir: string, product?: string): string[] {
-    return this.resolve(repoDir, product)?.checkers ?? [];
-  }
-
-  /** Repo-first prompt context; '' when nothing is found */
-  buildContextFor(repoDir: string, product?: string): string {
-    const c = this.resolve(repoDir, product);
-    if (!c) return '';
-    if (c.source === 'bundled') return this.buildContext(c.product);
-
-    return `<constitution source="repo instruction files">
-
-${c.body}
-
-</constitution>
-
-IMPORTANT: The standards above come from this repository's own agent
-instruction files (${REPO_INSTRUCTION_FILES.join(', ')}). They are the
-written standard for this repo. Every piece of work must satisfy them —
-checkers will verify your output against them, not against your self-report.
-
-`;
+    if (fromRepo && bundled) return { ...fromRepo, checkers: bundled.checkers };
+    return fromRepo ?? bundled;
   }
 
   /** List available product constitutions */
@@ -111,40 +97,28 @@ checkers will verify your output against them, not against your self-report.
       .filter(f => f.endsWith('.md') && !f.startsWith('_'))
       .map(f => f.replace(/\.md$/, ''));
   }
+}
 
-  /** Get checkers for a product */
-  getCheckers(product: string): string[] {
-    return this.load(product).checkers;
-  }
+/** Build the prompt context for an already-resolved constitution */
+export function buildConstitutionContext(c: Constitution | null): string {
+  if (!c) return '';
 
-  /** Check if a phase should use this constitution */
-  enforcedIn(product: string, phase: string): boolean {
-    const c = this.load(product);
-    return c.enforcedOn.includes(phase);
-  }
+  const origin = c.source === 'repo'
+    ? `this repository's own agent instruction files (${REPO_INSTRUCTION_FILES.join(', ')})`
+    : `the written standard for "${c.product}"`;
+  const dispute = c.source === 'repo'
+    ? ''
+    : ' If a checker\nflags your work, refer to the Dispute Rules section to understand how\nto escalate.';
 
-  /** Get the body (standards + rules) without frontmatter */
-  getBody(product: string): string {
-    return this.load(product).body;
-  }
+  return `<constitution source="${c.source === 'repo' ? 'repo instruction files' : c.product}">
 
-  /** Build the constitution context for injection into prompts */
-  buildContext(product: string): string {
-    const body = this.getBody(product);
-    if (!body) return '';
-
-    return `<constitution product="${product}">
-
-${body}
+${c.body}
 
 </constitution>
 
-IMPORTANT: The constitution above is the written standard for "${product}".
+IMPORTANT: The constitution above is ${origin}.
 Every piece of work must satisfy these standards. Checkers will verify
-your output against them — not against your self-report. If a checker
-flags your work, refer to the Dispute Rules section to understand how
-to escalate.
+your output against them — not against your self-report.${dispute}
 
 `;
-  }
 }

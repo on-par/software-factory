@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
-import { ConstitutionLoader } from '../constitutions/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { checkPhase } from './check.js';
@@ -49,7 +48,7 @@ describe('checkPhase auto rework', () => {
   it('does not re-invoke the worker when auto rework is disabled', { timeout: 120_000 }, async () => {
     const { worktree, specPath } = await makeFailingWorktree();
     const { router, stub } = makeRouter();
-    const constitutionLoader = new ConstitutionLoader();
+    const constitution = null;
     const log = () => {};
 
     const check = await checkPhase({
@@ -57,7 +56,7 @@ describe('checkPhase auto rework', () => {
       worktree,
       specPath,
       router,
-      constitutionLoader,
+      constitution,
       log,
       autoRework: false,
     });
@@ -70,7 +69,7 @@ describe('checkPhase auto rework', () => {
   it('keeps the existing rework behavior by default', { timeout: 120_000 }, async () => {
     const { worktree, specPath } = await makeFailingWorktree();
     const { router, stub } = makeRouter();
-    const constitutionLoader = new ConstitutionLoader();
+    const constitution = null;
     const log = () => {};
 
     const check = await checkPhase({
@@ -78,7 +77,7 @@ describe('checkPhase auto rework', () => {
       worktree,
       specPath,
       router,
-      constitutionLoader,
+      constitution,
       log,
     });
 
