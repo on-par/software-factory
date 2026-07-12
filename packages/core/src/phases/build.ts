@@ -24,9 +24,10 @@ export async function buildPhase(
     constitutionLoader: ConstitutionLoader;
     log: (type: string, msg: string) => void;
     timeoutSeconds?: number;
+    skipCI?: boolean;
   },
 ): Promise<BuildResult> {
-  const { issue, repo, worktree, specPath, branch, product, router, constitutionLoader, log, timeoutSeconds } = opts;
+  const { issue, repo, worktree, specPath, branch, product, router, constitutionLoader, log, timeoutSeconds, skipCI } = opts;
   let route = opts.route;
 
   const constitutionCtx = product ? constitutionLoader.buildContext(product) : '';
@@ -79,7 +80,7 @@ Never pause for permission or input — nobody is watching this session.
 Stop at a green, ready-for-review PR — do NOT merge (the factory handles merging).
 CRITICAL: your session terminates the moment you end your turn, so NEVER end your
 turn after an intermediate step. Before ending: (1) branch ${branch} is pushed,
-(2) open PR exists with 'Closes #${issue}' in its body, (3) CI is green, (4) PR ready.
+(2) open PR exists with 'Closes #${issue}' in its body, ${skipCI ? '(3) local verify passes (CI is intentionally skipped — do NOT block on GitHub Actions CI, do NOT escalate if CI cannot run), (4) PR ready.' : '(3) CI is green, (4) PR ready.'}
 
 If and ONLY IF you hit something genuinely ambiguous, print a line starting exactly
 with "ESCALATE:" followed by the question, then STOP.`;

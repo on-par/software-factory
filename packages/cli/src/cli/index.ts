@@ -425,8 +425,10 @@ export async function shipIssue(
     throw new LaneParkError(`plan escalated: ${plan.escalate ?? 'unknown'}`, 'escalate');
   }
 
+  const skipCI = resolveSkipCI(factoryConfig);
+
   // BUILD
-  const build = await buildPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, branch, product, route: plan.route, router, constitutionLoader, log, timeoutSeconds: timeouts.build });
+  const build = await buildPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, branch, product, route: plan.route, router, constitutionLoader, log, timeoutSeconds: timeouts.build, skipCI });
   if (!build.ok) {
     throw new LaneParkError(`build escalated: ${build.escalate ?? 'unknown'}`, 'escalate');
   }
@@ -442,7 +444,6 @@ export async function shipIssue(
   }
 
   // SHIP
-  const skipCI = resolveSkipCI(factoryConfig);
   const ship = await shipPhase({ issue: issueNum, repo: ghRepo, worktree, branch, octokit, watchCI: !skipCI, log });
   if (!ship.ok) {
     throw new LaneParkError('ship phase failed', 'fail');
