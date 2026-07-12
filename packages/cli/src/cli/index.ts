@@ -403,13 +403,7 @@ export async function shipIssue(
 
   const log = (type: string, msg: string) => logEvent(paths.events, type, issueNum, msg);
 
-  // PLAN
-  const plan = await planPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, product, router, constitutionLoader, octokit, log, timeoutSeconds: timeouts.plan });
-  if (!plan.ok) {
-    throw new LaneParkError(`plan escalated: ${plan.escalate ?? 'unknown'}`, 'escalate');
-  }
-
-  // Setup worktree
+  // Setup worktree FIRST — plan phase needs cwd=worktree to run claude
   await withGitLock(repoRoot, () =>
     withFileLock(paths.gitLock, async () => {
       await gitFetch(repoRoot);
@@ -417,6 +411,12 @@ export async function shipIssue(
     }, { onSteal: pid => log('lock-stolen', `stole ${paths.gitLock} from dead holder pid ${pid ?? 'unknown'}`) })
   );
   log('worktree', `Worktree ready at ${worktree}`);
+
+  // PLAN
+  const plan = await planPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, product, router, constitutionLoader, octokit, log, timeoutSeconds: timeouts.plan });
+  if (!plan.ok) {
+    throw new LaneParkError(`plan escalated: ${plan.escalate ?? 'unknown'}`, 'escalate');
+  }
 
   // BUILD
   const build = await buildPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, branch, product, route: plan.route, router, constitutionLoader, log, timeoutSeconds: timeouts.build });
