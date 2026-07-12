@@ -38,5 +38,9 @@
     "enabled": true,
     "log_file": ".factory/costs.jsonl",
     "comment": "Per-task token usage and cost logged for analysis"
+  },
+  "ci": {
+    "skip": false,
+    "comment": "Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging"
   }
 }

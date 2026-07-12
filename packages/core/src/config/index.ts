@@ -68,6 +68,10 @@ const FactoryConfigSchema = z.object({
   byok: z.object({ enabled: z.boolean(), comment: z.string() }),
   notifications: z.record(z.string(), z.boolean()),
   cost_tracking: z.object({ enabled: z.boolean(), log_file: z.string(), comment: z.string() }),
+  ci: z.object({
+    skip: z.boolean().default(false),
+    comment: z.string().default('Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging'),
+  }).default({ skip: false, comment: 'Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging' }),
 });
 
 // ---------- Types ----------
@@ -110,6 +114,15 @@ export function resolveTimeouts(
     build: fromEnv(env.FACTORY_BUILD_TIMEOUT) ?? config.timeouts.build_seconds ?? 7200,
     check: fromEnv(env.FACTORY_CHECK_TIMEOUT) ?? config.timeouts.check_seconds ?? 1800,
   };
+}
+
+export function resolveSkipCI(
+  config: FactoryConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (env.FACTORY_SKIP_CI === '1') return true;
+  if (env.FACTORY_SKIP_CI === '0') return false;
+  return config.ci?.skip ?? false;
 }
 
 // ---------- Factory state paths ----------

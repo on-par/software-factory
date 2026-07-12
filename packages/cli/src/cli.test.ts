@@ -343,7 +343,7 @@ describe('cli', () => {
 
     expect(calls).toEqual([
       ['checkMerged', [octokit, 'on-par', 'software-factory', 'ship-it/21-self-merge']],
-      ['land', [21, '/repo', 'on-par/software-factory', paths, octokit]],
+      ['land', [21, '/repo', 'on-par/software-factory', paths, octokit, false]],
     ]);
   });
 

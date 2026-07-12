@@ -1,7 +1,7 @@
 // packages/core/src/index.ts — Library entry point for programmatic use
 
 // Config
-export { loadModelsConfig, loadRoutesConfig, loadFactoryConfig, resolveTimeouts, getFactoryPaths, getConstitutionsDir } from './config/index.js';
+export { loadModelsConfig, loadRoutesConfig, loadFactoryConfig, resolveTimeouts, resolveSkipCI, getFactoryPaths, getConstitutionsDir } from './config/index.js';
 export type { ModelsConfig, RoutesConfig, FactoryConfig } from './config/index.js';
 
 // Models

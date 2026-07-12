@@ -7,6 +7,7 @@ import {
   loadRoutesConfig,
   loadFactoryConfig,
   resolveTimeouts,
+  resolveSkipCI,
   getFactoryPaths,
   getConstitutionsDir,
   ModelRouter,
@@ -434,9 +435,14 @@ export async function shipIssue(
   }
 
   // SHIP
-  const ship = await shipPhase({ issue: issueNum, repo: ghRepo, worktree, branch, octokit, log });
+  const skipCI = resolveSkipCI(factoryConfig);
+  const ship = await shipPhase({ issue: issueNum, repo: ghRepo, worktree, branch, octokit, watchCI: !skipCI, log });
   if (!ship.ok) {
     throw new LaneParkError('ship phase failed', 'fail');
+  }
+
+  if (skipCI) {
+    log('skip-ci', `skipping CI watch (FACTORY_SKIP_CI=1) — merging on local verify`);
   }
 
   log('ready', `PR #${ship.prNumber} ready for review`);
@@ -471,9 +477,11 @@ async function cmdLand(issueNum: number) {
   const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
   const octokit = getOctokit();
+  const factoryConfig = loadFactoryConfig();
+  const skipCI = resolveSkipCI(factoryConfig);
 
   try {
-    const result = await landIssue(issueNum, repoRoot, ghRepo, paths, octokit);
+    const result = await landIssue(issueNum, repoRoot, ghRepo, paths, octokit, skipCI);
     console.log(chalk.green(`✅ Landed PR #${result.prNumber} for issue #${issueNum}`));
   } catch (err: any) {
     if (err instanceof LandConflictError) {
@@ -495,6 +503,7 @@ async function landIssue(
   ghRepo: string,
   paths: ReturnType<typeof getFactoryPaths>,
   octokit: Octokit,
+  skipCI?: boolean,
 ): Promise<{ branch: string; prNumber: number }> {
   const [owner, repoName] = ghRepo.split('/');
   const log = (type: string, msg: string) => logEvent(paths.events, type, issueNum, msg);
@@ -541,6 +550,7 @@ async function landIssue(
           worktree,
           prNumber: prNumber!,
           log,
+          skipCI,
         });
         log('merged', `squash-merged PR #${prNumber}`);
         await cleanupWorktree(repoRoot, worktree, log);
@@ -866,6 +876,7 @@ export async function landOpenPullRequest(
     run?: CommandRunner;
     pathExists?: (path: string) => boolean;
     sleep?: (ms: number) => Promise<void>;
+    skipCI?: boolean;
   },
 ): Promise<void> {
   const {
@@ -882,14 +893,19 @@ export async function landOpenPullRequest(
     run,
     pathExists,
     sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)),
+    skipCI = false,
   } = opts;
 
-  await watchChecks({ octokit, owner, repo: repoName, ref: branch }).catch(() => {});
+  if (!skipCI) {
+    await watchChecks({ octokit, owner, repo: repoName, ref: branch }).catch(() => {});
+  }
   let state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
 
   if (state.mergeStateStatus === 'DIRTY') {
     await rebaseDirtyPullRequest({ issue, branch, worktree, prNumber, log, run, pathExists });
-    await watchChecks({ octokit, owner, repo: repoName, ref: branch }).catch(() => {});
+    if (!skipCI) {
+      await watchChecks({ octokit, owner, repo: repoName, ref: branch }).catch(() => {});
+    }
     state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
   }
 
@@ -947,6 +963,7 @@ export async function waitForMerge(
   } = deps;
   const factoryConfig = loadFactoryConfig();
   const isMergeEnabled = mergeEnabled ?? (() => factoryConfig.merge.auto || process.env.FACTORY_MERGE === '1');
+  const skipCI = resolveSkipCI(factoryConfig);
   const octokit = createOctokit();
   const [owner, repoName] = ghRepo.split('/');
 
@@ -957,7 +974,7 @@ export async function waitForMerge(
     }
 
     if (isMergeEnabled()) {
-      await land(issue, repoRoot, ghRepo, paths, octokit);
+      await land(issue, repoRoot, ghRepo, paths, octokit, skipCI);
       return;
     }
 
