@@ -709,6 +709,7 @@ async function cmdSupervise(opts: { now?: boolean }) {
     cap: knobs.cap,
     resumeAt: knobs.resumeAt,
     pollMs: knobs.pollMs,
+    watch: knobs.watch,
     stopFile: paths.stop,
     eventsFile: paths.events,
     now: opts.now,
@@ -1009,6 +1010,7 @@ export interface SuperviseDeps {
   cap: number;
   resumeAt: number;
   pollMs: number;
+  watch?: boolean;
   stopFile: string;
   eventsFile: string;
   now?: boolean;
@@ -1026,6 +1028,7 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
     cap,
     resumeAt,
     pollMs,
+    watch = true,
     stopFile,
     eventsFile,
     now,
@@ -1041,8 +1044,10 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
   let cycle = 0;
   while (true) {
     cycle++;
-    let pct = estimateSpend() / cap;
-    if (cycle > 1 || !now) {
+    let pct = watch ? estimateSpend() / cap : 0;
+    if (!watch) {
+      writeLine('[factory] supervise: usage watchdog disabled (FACTORY_USAGE_WATCH=0) — skipping resume gate');
+    } else if (cycle > 1 || !now) {
       while (pct >= resumeAt) {
         writeLine(`[factory] supervise: trailing usage ${Math.round(pct * 100)}% >= resume gate ${Math.round(resumeAt * 100)}% — waiting ${pollMs / 1000}s`);
         await sleep(pollMs);
