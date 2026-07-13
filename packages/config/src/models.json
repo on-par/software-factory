@@ -56,6 +56,23 @@
       "claudeFlag": "claude-sonnet-5",
       "note": "Uses claude CLI subscription auth, no API key needed."
     },
+    "gpt-5.6-sol": {
+      "provider": "openai",
+      "tier": [
+        "worker"
+      ],
+      "costPerMtokInput": 1.25,
+      "costPerMtokOutput": 10.0,
+      "contextWindow": 272000,
+      "capabilities": [
+        "implementation",
+        "codex"
+      ],
+      "envKey": null,
+      "codex": true,
+      "codexFlag": "-m gpt-5.6-sol -c model_reasoning_effort=medium",
+      "note": "Codex CLI subscription auth (ChatGPT/OAuth), not an API key — do not gate availability on OPENAI_API_KEY. Explicitly pins -m gpt-5.6-sol instead of silently riding ~/.codex/config.toml's default model."
+    },
     "gpt-5.1-codex": {
       "provider": "openai",
       "tier": [
@@ -71,7 +88,7 @@
       "envKey": null,
       "codex": true,
       "codexFlag": "-c model_reasoning_effort=high",
-      "note": "Codex CLI subscription auth (ChatGPT/OAuth), not an API key — do not gate availability on OPENAI_API_KEY. Actual served model follows ~/.codex/config.toml's default (currently resolves to gpt-5-codex)."
+      "note": "Codex CLI subscription auth (ChatGPT/OAuth), not an API key — do not gate availability on OPENAI_API_KEY. Actual served model follows ~/.codex/config.toml's default (currently resolves to gpt-5-codex). Kept as fallback behind gpt-5.6-sol."
     },
     "gpt-4.1-mini": {
       "provider": "openai",
@@ -142,6 +159,7 @@
       "glm-5.2"
     ],
     "worker": [
+      "gpt-5.6-sol",
       "gpt-5.1-codex",
       "claude-sonnet-5",
       "glm-5.2",
@@ -174,9 +192,10 @@
     "codex_available": {
       "if": "command -v codex && FACTORY_CODEX != 0",
       "worker_preferred": [
+        "gpt-5.6-sol",
         "gpt-5.1-codex"
       ],
-      "note": "Codex flat-rate is cheapest for implementation when available"
+      "note": "Codex flat-rate is cheapest for implementation when available. gpt-5.6-sol pinned explicitly via -m; gpt-5.1-codex kept as fallback (rides config.toml default)."
     },
     "ollama_available": {
       "if": "command -v ollama",
