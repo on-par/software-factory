@@ -183,6 +183,30 @@ describe('cli', () => {
     expect(calls).toHaveLength(2);
   });
 
+  it('skips the resume gate entirely when watch is false, even at a high estimated spend', async () => {
+    const calls: any[] = [];
+
+    await superviseLoop({
+      cap: 1,
+      resumeAt: 0.65,
+      pollMs: 1000,
+      watch: false,
+      stopFile: '/repo/.factory/STOP',
+      eventsFile: '/repo/.factory/events.ndjson',
+      now: false,
+      estimateSpend: () => 1.6,
+      pathExists: () => false,
+      clearStop: () => {},
+      sleep: async () => { calls.push(['sleep']); },
+      emitEvent: () => {},
+      writeLine: line => calls.push(['writeLine', line]),
+      runQueue: async () => { calls.push(['runQueue']); },
+    });
+
+    expect(calls.filter(c => c[0] === 'sleep')).toHaveLength(0);
+    expect(calls.filter(c => c[0] === 'runQueue')).toHaveLength(1);
+  });
+
   it('detects a merge by head branch even when it is outside the recent-closed window', async () => {
     const octokit: any = {
       rest: { pulls: { list: async ({ head }: any) =>
