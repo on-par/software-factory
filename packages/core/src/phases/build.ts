@@ -62,7 +62,11 @@ merge — a separate checker and ship phase handles that next.
 
 Stay strictly within the spec's scope: no unrelated refactors, no drive-by changes.
 If you get genuinely stuck, commit whatever safely builds/passes so far with a
-message explaining what's blocked, and stop there.`;
+message explaining what's blocked, and stop there.
+
+Keep sub-agent/parallel-task usage modest: only fan out when a piece of work is
+genuinely independent and parallelizable. Prefer doing the work directly over
+spawning sub-agents for a single small issue — this keeps token usage efficient.`;
   } else {
     taskType = 'build_claude';
     prompt = `/ship-it ${issue} — Run fully autonomously in headless mode, BUILD phase.

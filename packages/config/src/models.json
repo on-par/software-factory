@@ -68,9 +68,10 @@
         "implementation",
         "codex"
       ],
-      "envKey": "OPENAI_API_KEY",
+      "envKey": null,
       "codex": true,
-      "codexFlag": "-c model_reasoning_effort=high"
+      "codexFlag": "-c model_reasoning_effort=high",
+      "note": "Codex CLI subscription auth (ChatGPT/OAuth), not an API key — do not gate availability on OPENAI_API_KEY. Actual served model follows ~/.codex/config.toml's default (currently resolves to gpt-5-codex)."
     },
     "gpt-4.1-mini": {
       "provider": "openai",
