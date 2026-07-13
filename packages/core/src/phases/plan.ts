@@ -4,8 +4,9 @@ import { writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import matter from 'gray-matter';
 import { ModelRouter } from '../router/index.js';
-import { ConstitutionLoader } from '../constitutions/index.js';
+import { buildConstitutionContext } from '../constitutions/index.js';
 import { escalationLine, isEscalation, codexDisabled } from '../utils/index.js';
+import type { Constitution } from '../types/index.js';
 import type { Octokit } from '@octokit/rest';
 
 export interface PlanResult {
@@ -22,11 +23,10 @@ export interface PlanPromptOpts {
   issueBody: string;
   specPath: string;
   constitutionCtx: string;
-  product?: string;
 }
 
 export function buildPlanPrompt(opts: PlanPromptOpts): string {
-  const { issue, issueTitle, issueBody, specPath, constitutionCtx, product } = opts;
+  const { issue, issueTitle, issueBody, specPath, constitutionCtx } = opts;
 
   return `You are the PLAN phase of a multi-agent software factory for issue #${issue}.
 Do NOT implement anything. You are already inside the isolated worktree (cwd).
@@ -38,7 +38,8 @@ ${constitutionCtx}
 ${issueBody}
 
 Steps:
-1. Read the issue above fully. Read CLAUDE.md / CONTEXT.md / docs/adr/ if present.
+1. Read the issue above fully. Read CONTEXT.md / docs/adr/ if present. (Any
+   CLAUDE.md/AGENTS.md standards are already included above — do not re-read them.)
 2. Explore the codebase (read/search only) enough to name the exact files, functions,
    and existing patterns/tests this issue touches, and any edge cases.
 3. Decide the build route:
@@ -47,7 +48,7 @@ Steps:
    - route: claude — when the work needs UX, design, or architecture judgment; naming/API
      design calls; is a tiny diff (<20 lines); or needs session tools
    Default to route: claude when genuinely unsure.
-${product ? '4. The constitution above defines the standards for this product. Your spec MUST satisfy every standard.' : '4. No constitution loaded — use your best judgment.'}
+${constitutionCtx ? '4. The constitution above defines the standards for this product. Your spec MUST satisfy every standard.' : '4. No constitution loaded — use your best judgment.'}
 
 Write EXACTLY ONE file, at ${specPath}, in this shape:
 ---
@@ -61,7 +62,7 @@ route: codex
 that a cheap worker model could build it without re-reading the issue>
 ## Tests
 <what to add or change, and the exact command that proves it passes>
-${product ? `## Constitution compliance\nFor each standard in the constitution, note how the plan satisfies it.` : '## Constitution compliance\nN/A — no constitution'}
+${constitutionCtx ? `## Constitution compliance\nFor each standard in the constitution, note how the plan satisfies it.` : '## Constitution compliance\nN/A — no constitution'}
 ## Non-goals
 <explicitly out of scope, from the issue>
 
@@ -78,15 +79,14 @@ export async function planPhase(
     repo: string;
     worktree: string;
     specPath: string;
-    product?: string;
+    constitution: Constitution | null;
     router: ModelRouter;
-    constitutionLoader: ConstitutionLoader;
     octokit: Octokit;
     log: (type: string, msg: string) => void;
     timeoutSeconds?: number;
   },
 ): Promise<PlanResult> {
-  const { issue, repo, worktree, specPath, product, router, constitutionLoader, octokit, log, timeoutSeconds } = opts;
+  const { issue, repo, worktree, specPath, constitution, router, octokit, log, timeoutSeconds } = opts;
 
   // Get issue details
   const [owner, repoName] = repo.split('/');
@@ -94,10 +94,9 @@ export async function planPhase(
   const issueTitle = issueData.title;
   const issueBody = issueData.body ?? '';
 
-  // Build constitution context
-  const constitutionCtx = product ? constitutionLoader.buildContext(product) : '';
+  const constitutionCtx = buildConstitutionContext(constitution);
 
-  const prompt = buildPlanPrompt({ issue, issueTitle, issueBody, specPath, constitutionCtx, product });
+  const prompt = buildPlanPrompt({ issue, issueTitle, issueBody, specPath, constitutionCtx });
 
   log('plan', `Starting plan phase`);
 

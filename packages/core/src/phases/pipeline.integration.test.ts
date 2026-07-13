@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ConstitutionLoader } from '../constitutions/index.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
@@ -103,7 +102,7 @@ describe('pipeline integration', () => {
       },
     });
     const router = new ModelRouter(models, routes, false, stub);
-    const constitutionLoader = new ConstitutionLoader();
+    const constitution = null;
 
     const plan = await planPhase({
       issue,
@@ -111,7 +110,7 @@ describe('pipeline integration', () => {
       worktree,
       specPath,
       router,
-      constitutionLoader,
+      constitution,
       octokit: octokit as any,
       log,
     });
@@ -128,12 +127,12 @@ describe('pipeline integration', () => {
       branch,
       route: plan.route,
       router,
-      constitutionLoader,
+      constitution,
       log,
     });
     expect(build.ok).toBe(true);
 
-    const check = await checkPhase({ issue, worktree, specPath, router, constitutionLoader, log });
+    const check = await checkPhase({ issue, worktree, specPath, router, constitution, log });
     expect(check.passed).toBe(true);
     expect(check.reworkRounds).toBe(0);
 
@@ -203,7 +202,7 @@ describe('pipeline integration', () => {
       },
     });
     const router = new ModelRouter(models, routes, false, stub);
-    const constitutionLoader = new ConstitutionLoader();
+    const constitution = null;
 
     const plan = await planPhase({
       issue,
@@ -211,7 +210,7 @@ describe('pipeline integration', () => {
       worktree,
       specPath,
       router,
-      constitutionLoader,
+      constitution,
       octokit: octokit as any,
       log,
     });
@@ -228,12 +227,12 @@ describe('pipeline integration', () => {
       branch,
       route: plan.route,
       router,
-      constitutionLoader,
+      constitution,
       log,
     });
     expect(build.ok).toBe(true);
 
-    const check = await checkPhase({ issue, worktree, specPath, router, constitutionLoader, log });
+    const check = await checkPhase({ issue, worktree, specPath, router, constitution, log });
     expect(check.passed).toBe(true);
     expect(check.reworkRounds).toBe(1);
 

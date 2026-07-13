@@ -2,8 +2,9 @@
 
 import { readFile } from 'node:fs/promises';
 import { ModelRouter } from '../router/index.js';
-import { ConstitutionLoader } from '../constitutions/index.js';
+import { buildConstitutionContext } from '../constitutions/index.js';
 import { escalationLine, isEscalation, codexDisabled } from '../utils/index.js';
+import type { Constitution } from '../types/index.js';
 
 export interface BuildResult {
   ok: boolean;
@@ -18,19 +19,18 @@ export async function buildPhase(
     worktree: string;
     specPath: string;
     branch: string;
-    product?: string;
+    constitution: Constitution | null;
     route: 'codex' | 'claude';
     router: ModelRouter;
-    constitutionLoader: ConstitutionLoader;
     log: (type: string, msg: string) => void;
     timeoutSeconds?: number;
     skipCI?: boolean;
   },
 ): Promise<BuildResult> {
-  const { issue, repo, worktree, specPath, branch, product, router, constitutionLoader, log, timeoutSeconds, skipCI } = opts;
+  const { issue, repo, worktree, specPath, branch, constitution, router, log, timeoutSeconds, skipCI } = opts;
   let route = opts.route;
 
-  const constitutionCtx = product ? constitutionLoader.buildContext(product) : '';
+  const constitutionCtx = buildConstitutionContext(constitution);
   const spec = await readFile(specPath, 'utf-8').catch(() => '');
 
   let prompt: string;

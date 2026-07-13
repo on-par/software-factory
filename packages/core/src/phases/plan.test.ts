@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
-import { ConstitutionLoader } from '../constitutions/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { buildPlanPrompt, planPhase } from './plan.js';
@@ -99,7 +98,7 @@ describe('planPhase', () => {
       worktree,
       specPath,
       router,
-      constitutionLoader: new ConstitutionLoader(),
+      constitution: null,
       octokit,
       log: () => {},
       timeoutSeconds: 900,
@@ -134,7 +133,7 @@ describe('planPhase', () => {
       worktree,
       specPath,
       router,
-      constitutionLoader: new ConstitutionLoader(),
+      constitution: null,
       octokit,
       log: () => {},
     });
@@ -168,7 +167,7 @@ describe('planPhase', () => {
       worktree,
       specPath,
       router,
-      constitutionLoader: new ConstitutionLoader(),
+      constitution: null,
       octokit,
       log: () => {},
     });
@@ -206,7 +205,7 @@ describe('planPhase', () => {
         worktree,
         specPath,
         router,
-        constitutionLoader: new ConstitutionLoader(),
+        constitution: null,
         octokit,
         log: (type, msg) => { logs.push({ type, msg }); },
       });
@@ -247,7 +246,7 @@ describe('planPhase', () => {
         worktree,
         specPath,
         router,
-        constitutionLoader: new ConstitutionLoader(),
+        constitution: null,
         octokit,
         log: () => {},
       });

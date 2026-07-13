@@ -31,7 +31,6 @@ export async function runEval(opts: RunEvalOpts): Promise<EvalSummary> {
       issueBody: c.body,
       specPath: '<eval-spec>',
       constitutionCtx,
-      ...(c.constitution ? { product: 'eval' } : {}),
     });
     const started = now();
 

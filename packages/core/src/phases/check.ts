@@ -1,9 +1,9 @@
 // src/phases/check.ts — CHECK phase: independent checkers verify output, rework loop, dispute resolution
 
 import { ModelRouter } from '../router/index.js';
-import { ConstitutionLoader } from '../constitutions/index.js';
+import { buildConstitutionContext } from '../constitutions/index.js';
 import { runAllCheckers, type CheckerContext } from '../checkers/index.js';
-import type { CheckSummary, CheckerOutput, DisputeResult } from '../types/index.js';
+import type { CheckSummary, CheckerOutput, Constitution, DisputeResult } from '../types/index.js';
 
 export interface CheckPhaseResult {
   passed: boolean;
@@ -18,29 +18,21 @@ export async function checkPhase(
     issue: number;
     worktree: string;
     specPath: string;
-    product?: string;
+    constitution: Constitution | null;
     router: ModelRouter;
-    constitutionLoader: ConstitutionLoader;
     log: (type: string, msg: string) => void;
     autoRework?: boolean;
     buildTimeoutSeconds?: number;
     checkTimeoutSeconds?: number;
   },
 ): Promise<CheckPhaseResult> {
-  const { issue, worktree, specPath, product, router, constitutionLoader, log, autoRework = true, buildTimeoutSeconds } = opts;
+  const { issue, worktree, specPath, constitution, router, log, autoRework = true, buildTimeoutSeconds, checkTimeoutSeconds } = opts;
 
-  const constitutionBody = product ? constitutionLoader.getBody(product) : '';
-
-  const ctx: CheckerContext = {
-    worktree,
-    specPath,
-    constitutionBody,
-    product,
-  };
+  const ctx: CheckerContext = { worktree, specPath };
 
   log('check', 'Running checkers');
 
-  let summary = await runAllCheckers(ctx, router, constitutionLoader);
+  let summary = await runAllCheckers(ctx, router, constitution, checkTimeoutSeconds);
   let reworkRounds = 0;
   const maxRounds = autoRework ? MAX_REWORK_ROUNDS : 0;
 
@@ -48,9 +40,9 @@ export async function checkPhase(
     reworkRounds++;
     log('rework', `${summary.failures} failures — sending back to worker (round ${reworkRounds})`);
 
-    await reworkWorker(issue, worktree, specPath, summary, product, constitutionLoader, router, log, buildTimeoutSeconds);
+    await reworkWorker(issue, worktree, specPath, summary, constitution, router, log, buildTimeoutSeconds);
 
-    summary = await runAllCheckers(ctx, router, constitutionLoader);
+    summary = await runAllCheckers(ctx, router, constitution, checkTimeoutSeconds);
     log('check', `Rework round ${reworkRounds}: ${summary.failures} failures remaining`);
   }
 
@@ -72,13 +64,12 @@ async function reworkWorker(
   worktree: string,
   specPath: string,
   summary: CheckSummary,
-  product: string | undefined,
-  constitutionLoader: ConstitutionLoader,
+  constitution: Constitution | null,
   router: ModelRouter,
   log: (type: string, msg: string) => void,
   timeoutSeconds?: number,
 ): Promise<void> {
-  const constitutionCtx = product ? constitutionLoader.buildContext(product) : '';
+  const constitutionCtx = buildConstitutionContext(constitution);
   const failures = summary.results.filter(r => r.result === 'FAIL');
   const failureDetails = failures.map(f => `### ${f.checker}\n${f.details}`).join('\n\n');
 
@@ -118,14 +109,13 @@ export async function disputeResolution(
     specPath: string;
     checkerName: string;
     checkerDetails: string;
-    product?: string;
+    constitution: Constitution | null;
     router: ModelRouter;
-    constitutionLoader: ConstitutionLoader;
     timeoutSeconds?: number;
   },
 ): Promise<DisputeResult> {
-  const { issue, worktree, specPath, checkerName, checkerDetails, product, router, constitutionLoader, timeoutSeconds } = opts;
-  const constitutionCtx = product ? constitutionLoader.buildContext(product) : '';
+  const { issue, worktree, specPath, checkerName, checkerDetails, constitution, router, timeoutSeconds } = opts;
+  const constitutionCtx = buildConstitutionContext(constitution);
 
   const prompt = `You are the BOSS in a software factory. A worker agent is disputing
 a checker agent's failure. You must arbitrate by re-reading the constitution —

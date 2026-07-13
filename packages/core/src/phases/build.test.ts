@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
-import { ConstitutionLoader } from '../constitutions/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { buildPhase } from './build.js';
@@ -92,7 +91,7 @@ describe('buildPhase FACTORY_CODEX kill-switch', () => {
       branch: 'ship-it/79-add-factory-codex-0-kill-switch',
       route: 'codex',
       router,
-      constitutionLoader: new ConstitutionLoader(),
+      constitution: null,
       log: (type, msg) => { logs.push({ type, msg }); },
     });
 
@@ -122,7 +121,7 @@ describe('buildPhase FACTORY_CODEX kill-switch', () => {
       branch: 'ship-it/79-add-factory-codex-0-kill-switch',
       route: 'codex',
       router,
-      constitutionLoader: new ConstitutionLoader(),
+      constitution: null,
       log: (type, msg) => { logs.push({ type, msg }); },
     });
 
