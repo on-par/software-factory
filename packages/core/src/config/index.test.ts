@@ -33,7 +33,7 @@ describe('loadModelsConfig', () => {
       .filter(([, def]) => !def.experimental)
       .map(([id]) => id)
       .sort();
-    expect(nonExperimental).toEqual(['claude-fable-5', 'claude-opus-4-8', 'claude-sonnet-5', 'gpt-5.1-codex'].sort());
+    expect(nonExperimental).toEqual(['claude-fable-5', 'claude-opus-4-8', 'claude-sonnet-5', 'gpt-5.1-codex', 'gpt-5.6-sol'].sort());
   });
 });
 
