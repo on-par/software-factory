@@ -123,7 +123,7 @@ describe('CliModelExecutor', () => {
 
     expect(output).toBe('');
     expect(rec.calls).toHaveLength(1);
-    expect(rec.calls[0].cmd).toMatch(/^codex exec --yolo -C '/);
+    expect(rec.calls[0].cmd).toMatch(/^codex exec --sandbox workspace-write --ask-for-approval never -C '/);
     expect(rec.calls[0].cmd).toContain(`-C '${worktree}'`);
     expect(rec.calls[0].cmd).toContain('--model gpt-5-codex');
     expect(rec.calls[0].cmd).toContain(' -o ');

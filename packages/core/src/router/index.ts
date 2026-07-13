@@ -93,14 +93,14 @@ export class CliModelExecutor implements ModelExecutor {
     }
   }
 
-  /** Run via Codex CLI: codex exec --yolo -C <worktree> [flags] -o <output> - < prompt */
+  /** Run via Codex CLI: codex exec --sandbox workspace-write --ask-for-approval never -C <worktree> [flags] -o <output> - < prompt */
   private async runCodex(model: string, prompt: string, worktree: string, timeout: number, registry: ModelRegistry): Promise<string> {
     const extraFlag = registry.getCodexFlag(model) ?? '';
     const tmpFile = await mktemp(join(tmpdir(), 'factory-codex-'));
     const outFile = await mktemp(join(tmpdir(), 'factory-codex-out-'));
     await writeFile(tmpFile, prompt);
 
-    const cmd = `codex exec --yolo -C ${shellEscape(worktree)} ${extraFlag} -o ${shellEscape(outFile)} - < ${shellEscape(tmpFile)}`;
+    const cmd = `codex exec --sandbox workspace-write --ask-for-approval never -C ${shellEscape(worktree)} ${extraFlag} -o ${shellEscape(outFile)} - < ${shellEscape(tmpFile)}`;
 
     try {
       await this.execFn(cmd, { timeout: timeout * 1000, maxBuffer: 10 * 1024 * 1024 });
