@@ -132,6 +132,14 @@ export async function planPhase(
     // malformed frontmatter -> keep default 'claude'
   }
 
+  if (process.env.FACTORY_LOCAL_ONLY === '1' && route !== 'codex') {
+    log('warn', 'local-only mode requires a local Codex harness — forcing route to codex');
+    route = 'codex';
+    if (parsedSpec) {
+      await writeFile(specPath, matter.stringify(parsedSpec.content, { ...parsedSpec.data, route: 'codex' }));
+    }
+  }
+
   if (route === 'codex' && codexDisabled()) {
     log('warn', 'codex unavailable — falling back to claude');
     route = 'claude';

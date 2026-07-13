@@ -120,6 +120,125 @@
       "experimental": true,
       "note": "speculative \u2014 opt in with FACTORY_EXPERIMENTAL=1"
     },
+    "qwen2.5-coder:14b": {
+      "provider": "ollama",
+      "tier": [
+        "boss",
+        "worker",
+        "checker",
+        "triage"
+      ],
+      "costPerMtokInput": 0,
+      "costPerMtokOutput": 0,
+      "contextWindow": 32768,
+      "capabilities": [
+        "planning",
+        "implementation",
+        "coding",
+        "review",
+        "verification",
+        "triage"
+      ],
+      "envKey": null,
+      "providerModel": "qwen2.5-coder:14b",
+      "providerOptions": {
+        "num_ctx": 16384,
+        "temperature": 0.1
+      },
+      "note": "Local-only Ollama coding model for 16GB Macs. Slow is acceptable; keep concurrency low."
+    },
+    "codex-ollama-qwen3.5:9b": {
+      "provider": "ollama",
+      "tier": [
+        "worker"
+      ],
+      "costPerMtokInput": 0,
+      "costPerMtokOutput": 0,
+      "contextWindow": 32768,
+      "capabilities": [
+        "implementation",
+        "coding",
+        "codex"
+      ],
+      "envKey": null,
+      "providerModel": "qwen3.5:9b",
+      "providerOptions": {
+        "num_ctx": 8192,
+        "temperature": 0.1
+      },
+      "codex": true,
+      "codexFlag": "--oss --local-provider ollama -m qwen3.5:9b",
+      "note": "Local-only command-loop worker using Ollama qwen3.5:9b; use for build_codex so the model can edit files and run commands."
+    },
+    "qwen3.5:9b": {
+      "provider": "ollama",
+      "tier": [
+        "worker",
+        "checker"
+      ],
+      "costPerMtokInput": 0,
+      "costPerMtokOutput": 0,
+      "contextWindow": 65536,
+      "capabilities": [
+        "implementation",
+        "coding",
+        "review",
+        "verification"
+      ],
+      "envKey": null,
+      "providerModel": "qwen3.5:9b",
+      "providerOptions": {
+        "num_ctx": 8192,
+        "temperature": 0.1
+      },
+      "note": "Local Ollama fallback/second-opinion model; supports tools/thinking in Ollama."
+    },
+    "qwen3:8b": {
+      "provider": "ollama",
+      "tier": [
+        "worker",
+        "checker"
+      ],
+      "costPerMtokInput": 0,
+      "costPerMtokOutput": 0,
+      "contextWindow": 40960,
+      "capabilities": [
+        "implementation",
+        "coding",
+        "review",
+        "verification"
+      ],
+      "envKey": null,
+      "providerModel": "qwen3:8b",
+      "providerOptions": {
+        "num_ctx": 24576,
+        "temperature": 0.2
+      },
+      "note": "Smaller local Ollama fallback for memory-constrained runs."
+    },
+    "gemma4:12b": {
+      "provider": "ollama",
+      "tier": [
+        "boss",
+        "checker"
+      ],
+      "costPerMtokInput": 0,
+      "costPerMtokOutput": 0,
+      "contextWindow": 131072,
+      "capabilities": [
+        "planning",
+        "review",
+        "verification",
+        "dispute_resolution"
+      ],
+      "envKey": null,
+      "providerModel": "gemma4:12b",
+      "providerOptions": {
+        "num_ctx": 32768,
+        "temperature": 0.2
+      },
+      "note": "Local Ollama planning/review alternative; expect model swaps on 16GB hosts."
+    },
     "deepseek-v3": {
       "provider": "deepseek",
       "tier": "worker",
@@ -153,12 +272,18 @@
   },
   "tiers": {
     "boss": [
+      "qwen2.5-coder:14b",
+      "gemma4:12b",
       "claude-fable-5",
       "claude-opus-4-8",
       "claude-sonnet-5",
       "glm-5.2"
     ],
     "worker": [
+      "codex-ollama-qwen3.5:9b",
+      "qwen2.5-coder:14b",
+      "qwen3.5:9b",
+      "qwen3:8b",
       "gpt-5.6-sol",
       "gpt-5.1-codex",
       "claude-sonnet-5",
@@ -167,11 +292,16 @@
       "qwen-3.5-coder"
     ],
     "checker": [
+      "qwen3.5:9b",
+      "gemma4:12b",
+      "qwen2.5-coder:14b",
+      "qwen3:8b",
       "claude-sonnet-5",
       "gpt-4.1-mini",
       "glm-5.2"
     ],
     "triage": [
+      "qwen2.5-coder:14b",
       "claude-sonnet-5",
       "glm-5.2"
     ]
@@ -200,8 +330,10 @@
     "ollama_available": {
       "if": "command -v ollama",
       "worker_preferred_add": [
-        "glm-5.2",
-        "qwen-3.5-coder"
+        "codex-ollama-qwen3.5:9b",
+        "qwen2.5-coder:14b",
+        "qwen3.5:9b",
+        "qwen3:8b"
       ],
       "note": "Local Ollama models are free but slower; good for bulk work"
     },

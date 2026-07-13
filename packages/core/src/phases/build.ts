@@ -32,6 +32,7 @@ export async function buildPhase(
 
   const constitutionCtx = buildConstitutionContext(constitution);
   const spec = await readFile(specPath, 'utf-8').catch(() => '');
+  const localOnly = process.env.FACTORY_LOCAL_ONLY === '1';
 
   let prompt: string;
   let taskType: 'build_codex' | 'build_claude';
@@ -43,7 +44,23 @@ export async function buildPhase(
 
   if (route === 'codex') {
     taskType = 'build_codex';
-    prompt = `Implement issue #${issue} exactly per the frozen spec at ${specPath} in this repository.
+    prompt = localOnly
+      ? `Local-small build for issue #${issue}.
+You are in the isolated worktree for branch ${branch}.
+Do one small implementation pass from this frozen spec, then commit.
+
+Rules:
+- Prefer one or two files.
+- Inspect only the files you need.
+- Make the smallest change that satisfies the acceptance criteria.
+- Run one cheap verification command if available.
+- Create exactly one git commit.
+- Do not push, open a PR, or merge.
+
+Frozen spec:
+${compactForLocalModel(spec)}
+`
+      : `Implement issue #${issue} exactly per the frozen spec at ${specPath} in this repository.
 Read the full spec before writing any code — it is the approved plan; do not deviate.
 
 ${constitutionCtx}
@@ -106,4 +123,10 @@ with "ESCALATE:" followed by the question, then STOP.`;
 
   log('build', `Build complete with model ${result.model}`);
   return { ok: true, model: result.model };
+}
+
+function compactForLocalModel(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= 6000) return trimmed;
+  return `${trimmed.slice(0, 5600)}\n\n[truncated for local model: keep the implementation minimal and inspect files as needed]`;
 }

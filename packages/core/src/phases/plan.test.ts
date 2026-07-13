@@ -176,6 +176,54 @@ describe('planPhase', () => {
   });
 
   describe('FACTORY_CODEX kill-switch', () => {
+    it('forces route to codex when FACTORY_LOCAL_ONLY=1 so builds use the local agent harness', async () => {
+      const prevLocalOnly = process.env.FACTORY_LOCAL_ONLY;
+      process.env.FACTORY_LOCAL_ONLY = '1';
+
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-79.md');
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{
+            output: '---\nroute: claude\n---\n# Spec\n',
+          }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub, false, false);
+      const octokit: any = {
+        rest: {
+          issues: {
+            get: async () => ({ data: { title: 'Use local models', body: 'Keep spend at zero.' } }),
+          },
+        },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      try {
+        const result = await planPhase({
+          issue: 79,
+          repo: 'on-par/software-factory',
+          worktree,
+          specPath,
+          router,
+          constitution: null,
+          octokit,
+          log: (type, msg) => { logs.push({ type, msg }); },
+        });
+
+        expect(result.route).toBe('codex');
+        expect(logs).toContainEqual({ type: 'warn', msg: 'local-only mode requires a local Codex harness — forcing route to codex' });
+
+        const persisted = await readFile(specPath, 'utf-8');
+        expect(persisted).toContain('route: codex');
+        expect(persisted).not.toContain('route: claude');
+      } finally {
+        if (prevLocalOnly === undefined) delete process.env.FACTORY_LOCAL_ONLY;
+        else process.env.FACTORY_LOCAL_ONLY = prevLocalOnly;
+      }
+    });
+
     it('forces route to claude and logs a warn when FACTORY_CODEX=0', async () => {
       process.env.FACTORY_CODEX = '0';
 

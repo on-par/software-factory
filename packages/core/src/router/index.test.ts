@@ -287,4 +287,48 @@ describe('ModelRouter with StubModelExecutor', () => {
 
     expect(router.resolve('plan')).toBe('exp-model');
   });
+
+  it('filters resolved models to non-cloud Ollama models in local-only mode', () => {
+    const mixedModels: ModelsConfig = {
+      version: 1,
+      models: {
+        'codex-model': {
+          provider: 'openai',
+          tier: 'boss',
+          costPerMtokInput: 0,
+          costPerMtokOutput: 0,
+          contextWindow: 1000,
+          capabilities: [],
+          envKey: null,
+          codex: true,
+        },
+        'ollama-cloud': {
+          provider: 'ollama',
+          tier: 'boss',
+          costPerMtokInput: 0,
+          costPerMtokOutput: 0,
+          contextWindow: 1000,
+          capabilities: [],
+          envKey: null,
+          providerModel: 'glm-5.2:cloud',
+        },
+        'ollama-local': {
+          provider: 'ollama',
+          tier: 'boss',
+          costPerMtokInput: 0,
+          costPerMtokOutput: 0,
+          contextWindow: 1000,
+          capabilities: [],
+          envKey: null,
+          providerModel: 'qwen2.5-coder:14b',
+        },
+      },
+      tiers: { boss: ['codex-model', 'ollama-cloud', 'ollama-local'] },
+      failover: models.failover,
+      routingRules: {},
+    };
+    const router = new ModelRouter(mixedModels, routes, false, new StubModelExecutor({ scripts: {} }), true, true);
+
+    expect(router.resolveAll('plan')).toEqual(['ollama-local']);
+  });
 });

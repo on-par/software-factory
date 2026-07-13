@@ -21,6 +21,8 @@ const ModelDefSchema = z.object({
   capabilities: z.array(z.string()),
   envKey: z.string().nullable(),
   claudeFlag: z.string().optional(),
+  providerModel: z.string().optional(),
+  providerOptions: z.record(z.string(), z.unknown()).optional(),
   codex: z.boolean().optional(),
   codexFlag: z.string().optional(),
   experimental: z.boolean().optional(),

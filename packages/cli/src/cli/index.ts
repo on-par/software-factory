@@ -212,14 +212,27 @@ export function hasReachableWorker(diagnoses: ModelDiagnosis[]): boolean {
   return diagnoses.some((d) => d.reachable && (d.tiers.includes('worker') || d.tiers.includes('worker_fallback')));
 }
 
+function ollamaModelSet(): Set<string> | undefined {
+  try {
+    const out = execSync('ollama list', { encoding: 'utf-8', timeout: 10_000 });
+    return new Set(out.split('\n').slice(1).map(line => line.trim().split(/\s+/)[0]).filter(Boolean));
+  } catch {
+    return undefined;
+  }
+}
+
 async function cmdModels(opts: { doctor?: boolean } = {}) {
   const modelsConfig = loadModelsConfig();
   const { ModelRegistry } = await import('@on-par/factory-core');
   const registry = new ModelRegistry(modelsConfig);
   const allowExperimental = process.env.FACTORY_EXPERIMENTAL === '1';
+  const localOnly = process.env.FACTORY_LOCAL_ONLY === '1';
 
   if (opts.doctor) {
-    const diagnoses = diagnoseModels(registry, {}, allowExperimental);
+    const ollamaModels = ollamaModelSet();
+    const diagnoses = diagnoseModels(registry, {
+      ollamaModelPresent: ollamaModels ? (model: string) => ollamaModels.has(model) : undefined,
+    }, allowExperimental, localOnly);
     console.log(formatDoctorReport(diagnoses));
     if (!hasReachableWorker(diagnoses)) {
       console.error(chalk.red('factory: no worker model is reachable — fix the reasons above before running a queue'));
@@ -491,7 +504,8 @@ async function getIssueTitle(octokit: Octokit, repo: string, issue: number): Pro
 }
 
 function worktreePathFor(repoRoot: string, issueNum: number): string {
-  return resolve(dirname(repoRoot), `${basename(repoRoot)}-factory-${issueNum}`);
+  const branchPrefix = (process.env.FACTORY_BRANCH_PREFIX ?? 'ship-it').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'ship-it';
+  return resolve(dirname(repoRoot), `${basename(repoRoot)}-factory-${branchPrefix}-${issueNum}`);
 }
 
 async function cmdLand(issueNum: number) {

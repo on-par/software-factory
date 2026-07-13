@@ -84,6 +84,17 @@ const doctorConfig: ModelsConfig = {
       contextWindow: 1000,
       capabilities: [],
       envKey: null,
+      providerModel: 'qwen2.5-coder:14b',
+    },
+    'ollama-cloud-model': {
+      provider: 'ollama',
+      tier: 'worker',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+      providerModel: 'glm-5.2:cloud',
     },
     'deepseek-model': {
       provider: 'deepseek',
@@ -107,7 +118,7 @@ const doctorConfig: ModelsConfig = {
   },
   tiers: {
     boss: ['anthropic-model'],
-    worker: ['codex-model', 'ollama-model', 'deepseek-model', 'experimental-model'],
+    worker: ['codex-model', 'ollama-model', 'ollama-cloud-model', 'deepseek-model', 'experimental-model'],
   },
   failover: {
     triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
@@ -163,13 +174,37 @@ describe('diagnoseModels', () => {
     expect(d.reason).toBe('ollama not found on PATH');
   });
 
-  it('marks an ollama model reachable when claude and ollama are both present', () => {
+  it('marks an ollama model reachable through native ollama when ollama is present', () => {
     const d = diagnosisFor('ollama-model', {
-      commandAvailable: (cmd) => cmd === 'claude' || cmd === 'ollama',
+      commandAvailable: (cmd) => cmd === 'ollama',
+      ollamaModelPresent: (model) => model === 'qwen2.5-coder:14b',
       envPresent: () => false,
     }, true);
     expect(d.reachable).toBe(true);
-    expect(d.reason).toBe('ok (claude CLI + ollama)');
+    expect(d.reason).toBe('ok (ollama native)');
+  });
+
+  it('marks an ollama model unreachable when the native model is missing', () => {
+    const d = diagnosisFor('ollama-model', {
+      commandAvailable: (cmd) => cmd === 'ollama',
+      ollamaModelPresent: () => false,
+      envPresent: () => false,
+    }, true);
+    expect(d.reachable).toBe(false);
+    expect(d.reason).toBe('qwen2.5-coder:14b not found in ollama list');
+  });
+
+  it('excludes non-local models in local-only mode', () => {
+    const registry = new ModelRegistry(doctorConfig);
+    const diagnoses = diagnoseModels(registry, {
+      commandAvailable: () => true,
+      envPresent: () => true,
+      ollamaModelPresent: () => true,
+    }, true, true);
+
+    expect(diagnoses.find(d => d.model === 'ollama-model')?.reachable).toBe(true);
+    expect(diagnoses.find(d => d.model === 'ollama-cloud-model')?.reason).toBe('excluded by FACTORY_LOCAL_ONLY=1');
+    expect(diagnoses.find(d => d.model === 'codex-model')?.reason).toBe('excluded by FACTORY_LOCAL_ONLY=1');
   });
 
   it('marks a non-anthropic env-keyed model unreachable when the key is missing, naming the key', () => {

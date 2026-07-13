@@ -16,6 +16,22 @@ export type ExecFn = (
   opts: { cwd?: string; timeout?: number; maxBuffer?: number },
 ) => Promise<{ stdout: string; stderr: string }>;
 
+export type FetchFn = (
+  input: string,
+  init?: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+    signal?: AbortSignal;
+  },
+) => Promise<{
+  ok: boolean;
+  status: number;
+  statusText: string;
+  text(): Promise<string>;
+  json(): Promise<unknown>;
+}>;
+
 export type FailoverReason =
   | 'rate_limit'
   | 'usage_cap'
@@ -59,19 +75,128 @@ function classifyFailure(stderr: string, exitCode: number): FailoverReason {
 }
 
 export class CliModelExecutor implements ModelExecutor {
-  constructor(private execFn: ExecFn = exec) {}
+  constructor(
+    private execFn: ExecFn = exec,
+    private fetchFn: FetchFn = globalThis.fetch as unknown as FetchFn,
+  ) {}
 
-  /** Run a single model via Claude CLI or Codex CLI */
+  /** Run a single model via its native provider when available, otherwise Claude/Codex CLI. */
   async runModel(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string> {
     const def = ctx.registry.get(model);
     if (!def) throw new Error(`Unknown model: ${model}`);
 
     const { worktree, timeout } = ctx;
 
-    if (def.codex && (ctx.task === 'build_codex' || ctx.routesConfig.routes[ctx.task]?.requires === 'codex')) {
+    if (def.codex && def.provider === 'ollama' && (ctx.task === 'build_codex' || ctx.task === 'build_claude' || ctx.routesConfig.routes[ctx.task]?.requires === 'codex')) {
+      return this.runOllamaCommandAgent(model, prompt, worktree, timeout, ctx.registry);
+    }
+    if (def.codex && (ctx.task === 'build_codex' || ctx.task === 'build_claude' || ctx.routesConfig.routes[ctx.task]?.requires === 'codex')) {
       return this.runCodex(model, prompt, worktree, timeout, ctx.registry);
     }
+    if (def.provider === 'ollama') {
+      return this.runOllama(model, prompt, timeout, ctx.registry);
+    }
     return this.runClaude(model, prompt, worktree, timeout, ctx.registry);
+  }
+
+  /** Run via Ollama's native HTTP API. */
+  private async runOllama(model: string, prompt: string, timeout: number, registry: ModelRegistry): Promise<string> {
+    return this.callOllama(model, prompt, timeout, registry);
+  }
+
+  /** Run a small local command loop for Ollama worker models. */
+  private async runOllamaCommandAgent(model: string, prompt: string, worktree: string, timeout: number, registry: ModelRegistry): Promise<string> {
+    const transcript: string[] = [];
+    let conversation = `${prompt}
+
+You are a local command worker. You act only by returning commands.
+Return JSON only: {"commands":["..."],"done":false,"final":"short status"}
+First inspect, then edit, then run one cheap check, then git add/commit.
+Use at most 3 commands per turn. No markdown.`;
+
+    for (let step = 0; step < 8; step++) {
+      const output = await this.callOllama(model, conversation, timeout, registry);
+      transcript.push(`MODEL STEP ${step + 1}:\n${output}`);
+      const action = parseLocalAgentAction(output);
+
+      if (action.commands.length === 0) {
+        if (action.done) break;
+        throw Object.assign(new Error(`local Ollama worker returned no commands: ${output.slice(0, 500)}`), { reason: 'empty_response' as FailoverReason });
+      }
+
+      const commandOutputs: string[] = [];
+      for (const command of action.commands.slice(0, 6)) {
+        const { stdout, stderr } = await this.execFn(command, {
+          cwd: worktree,
+          timeout: Math.max(30_000, Math.floor(timeout * 1000 / 4)),
+          maxBuffer: 10 * 1024 * 1024,
+        });
+        commandOutputs.push(`$ ${command}\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`);
+      }
+      transcript.push(commandOutputs.join('\n\n'));
+      conversation = `${prompt}
+
+Previous command output:
+${commandOutputs.join('\n\n').slice(-5000)}
+
+Return next JSON command action. If committed, return {"commands":[],"done":true,"final":"done"}.`;
+    }
+
+    const status = await this.execFn('git status --short', { cwd: worktree, timeout: 30_000, maxBuffer: 1024 * 1024 });
+    if (status.stdout.trim()) {
+      await this.execFn('git add -A && git commit -m "feat: implement factory issue"', {
+        cwd: worktree,
+        timeout: 120_000,
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      transcript.push('AUTO-COMMIT: committed remaining worktree changes.');
+    }
+
+    return transcript.join('\n\n');
+  }
+
+  private async callOllama(model: string, prompt: string, timeout: number, registry: ModelRegistry): Promise<string> {
+    const baseUrl = (process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434').replace(/\/+$/, '');
+    const nativeModel = registry.getProviderModel(model);
+    const options = registry.getProviderOptions(model);
+
+    try {
+      const res = await this.fetchFn(`${baseUrl}/api/chat`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        signal: AbortSignal.timeout(timeout * 1000),
+        body: JSON.stringify({
+          model: nativeModel,
+          stream: false,
+          messages: [{ role: 'user', content: prompt }],
+          ...(options ? { options } : {}),
+        }),
+      });
+
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        const err = new Error(`ollama ${res.status} ${res.statusText}: ${body}`) as Error & { reason?: FailoverReason; stderr?: string; code?: number };
+        err.stderr = body;
+        err.code = res.status;
+        err.reason = classifyFailure(body, res.status);
+        throw err;
+      }
+
+      const data = await res.json() as { message?: { content?: string }; response?: string; error?: string };
+      if (data.error) {
+        const err = new Error(data.error) as Error & { reason?: FailoverReason; stderr?: string; code?: number };
+        err.stderr = data.error;
+        err.code = 1;
+        err.reason = classifyFailure(data.error, 1);
+        throw err;
+      }
+
+      return data.message?.content ?? data.response ?? '';
+    } catch (err: any) {
+      if (err.name === 'TimeoutError' || err.name === 'AbortError') err.reason = 'timeout';
+      else err.reason = err.reason ?? classifyFailure(err.stderr ?? err.message ?? '', err.code ?? 1);
+      throw err;
+    }
   }
 
   /** Run via Claude CLI: claude -p <prompt> --model <flag> --dangerously-skip-permissions */
@@ -126,6 +251,7 @@ export class ModelRouter {
     private byok = false,
     private executor: ModelExecutor = new CliModelExecutor(),
     private allowExperimental = process.env.FACTORY_EXPERIMENTAL === '1',
+    private localOnly = process.env.FACTORY_LOCAL_ONLY === '1',
   ) {
     this.registry = new ModelRegistry(modelsConfig);
   }
@@ -141,14 +267,18 @@ export class ModelRouter {
   resolve(task: TaskType): string | undefined {
     const tier = this.getTier(task);
     if (!tier) return undefined;
-    return this.registry.getAvailableModelsForTier(tier, this.byok, this.allowExperimental)[0];
+    return this.registry.getAvailableModelsForTier(tier, this.byok, this.allowExperimental, this.localOnly)[0];
   }
 
   /** Resolve all available models for a task (for failover chain) */
   resolveAll(task: TaskType): string[] {
     const tier = this.getTier(task);
     if (!tier) return [];
-    return this.registry.getAvailableModelsForTier(tier, this.byok, this.allowExperimental);
+    const models = this.registry.getAvailableModelsForTier(tier, this.byok, this.allowExperimental, this.localOnly);
+    if (this.routesConfig.routes[task]?.requires === 'codex') {
+      return models.filter(model => this.registry.isCodexModel(model));
+    }
+    return models;
   }
 
   /** Classify a failure from stderr/exit code */
@@ -256,6 +386,37 @@ export class ModelRouter {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function parseLocalAgentAction(output: string): { commands: string[]; done: boolean; final: string } {
+  const jsonText = extractJsonObject(output);
+  if (jsonText) {
+    try {
+      const parsed = JSON.parse(jsonText) as { commands?: unknown; done?: unknown; final?: unknown };
+      return {
+        commands: Array.isArray(parsed.commands) ? parsed.commands.filter((cmd): cmd is string => typeof cmd === 'string' && cmd.trim().length > 0) : [],
+        done: parsed.done === true,
+        final: typeof parsed.final === 'string' ? parsed.final : '',
+      };
+    } catch {}
+  }
+
+  const fenced = [...output.matchAll(/```(?:bash|sh|zsh|shell)?\n([\s\S]*?)```/g)]
+    .map(match => match[1].trim())
+    .filter(Boolean);
+  if (fenced.length > 0) return { commands: fenced, done: false, final: '' };
+
+  return { commands: [], done: false, final: output.trim() };
+}
+
+function extractJsonObject(output: string): string | undefined {
+  const fenced = output.match(/```(?:json)?\n([\s\S]*?)```/);
+  if (fenced) return fenced[1].trim();
+
+  const start = output.indexOf('{');
+  const end = output.lastIndexOf('}');
+  if (start >= 0 && end > start) return output.slice(start, end + 1);
+  return undefined;
 }
 
 /** Minimal shell escaping for safe CLI args */

@@ -96,7 +96,8 @@ export function slugify(s: string): string {
 }
 
 export function branchFor(issue: number, title: string): string {
-  return `ship-it/${issue}-${slugify(title)}`;
+  const prefix = process.env.FACTORY_BRANCH_PREFIX || 'ship-it';
+  return `${slugify(prefix)}/${issue}-${slugify(title)}`;
 }
 
 export async function getIssueTitle(repo: string, issue: number, octokit: any): Promise<string> {
