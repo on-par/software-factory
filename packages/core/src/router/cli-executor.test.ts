@@ -227,6 +227,53 @@ describe('CliModelExecutor', () => {
     expect(execCalls).toEqual(['printf hello > local.txt', 'git status --short']);
   });
 
+  it('feeds non-zero local command exits back into the Ollama command loop as observations', async () => {
+    const execCalls: string[] = [];
+    const execFn = async (cmd: string) => {
+      execCalls.push(cmd);
+      if (cmd === 'missing-command') {
+        throw Object.assign(new Error('not found'), {
+          code: 127,
+          stdout: '',
+          stderr: 'command not found',
+        });
+      }
+      if (cmd === 'git status --short') return { stdout: '', stderr: '' };
+      return { stdout: 'ok', stderr: '' };
+    };
+    const fetchCalls: string[] = [];
+    const fetchFn = async (_input: string, init: any) => {
+      fetchCalls.push(init.body);
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => '',
+        json: async () => ({
+          message: {
+            content: fetchCalls.length === 1
+              ? '{"commands":["missing-command"],"done":false,"final":"inspect failed"}'
+              : '{"commands":[],"done":true,"final":"handled failure"}',
+          },
+        }),
+      };
+    };
+    const executor = new CliModelExecutor(execFn, fetchFn);
+
+    const output = await executor.runModel('ollama-codex-model', 'build it', {
+      worktree,
+      timeout,
+      task: 'build_codex',
+      registry,
+      routesConfig,
+    });
+
+    expect(output).toContain('EXIT_CODE: 127');
+    expect(output).toContain('command not found');
+    expect(fetchCalls).toHaveLength(2);
+    expect(execCalls).toEqual(['missing-command', 'git status --short']);
+  });
+
   it('classifies rate-limit failures from the exec seam', async () => {
     const executor = new CliModelExecutor(async () => {
       throw Object.assign(new Error('boom'), { stderr: 'rate limit exceeded', code: 1 });

@@ -1,7 +1,8 @@
 // src/phases/plan.ts — PLAN phase: boss model reads issue, explores repo, freezes spec, picks route
 
-import { writeFile, readFile } from 'node:fs/promises';
+import { mkdir, rename, writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import matter from 'gray-matter';
 import { ModelRouter } from '../router/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
@@ -99,6 +100,7 @@ export async function planPhase(
   const prompt = buildPlanPrompt({ issue, issueTitle, issueBody, specPath, constitutionCtx });
 
   log('plan', `Starting plan phase`);
+  await archiveExistingSpec(specPath, log);
 
   const result = await router.run('plan', prompt, {
     worktree,
@@ -113,9 +115,9 @@ export async function planPhase(
     return { ok: false, route: 'claude', specPath, model: result.model, escalate: escalateLine };
   }
 
-  // Check spec file was created
+  // Check spec file was created. If the model is chat-only, the output is the
+  // spec content; if it has file tools, it may have written specPath directly.
   if (!existsSync(specPath)) {
-    // The Claude output might BE the spec content
     await writeFile(specPath, result.output);
   }
 
@@ -153,4 +155,17 @@ export async function planPhase(
   log('plan', `Plan complete with model ${result.model}, route: ${route}`);
 
   return { ok: true, route, specPath, model: result.model };
+}
+
+async function archiveExistingSpec(
+  specPath: string,
+  log: (type: string, msg: string) => void,
+): Promise<void> {
+  if (!existsSync(specPath)) return;
+
+  const archiveDir = join(dirname(specPath), '.archive');
+  const archivedPath = join(archiveDir, `${Date.now()}-${specPath.split('/').pop() ?? 'spec.md'}`);
+  await mkdir(archiveDir, { recursive: true });
+  await rename(specPath, archivedPath);
+  log('plan', `Archived existing spec before planning: ${archivedPath}`);
 }

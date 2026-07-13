@@ -125,13 +125,18 @@ Use at most 3 commands per turn. No markdown.`;
       }
 
       const commandOutputs: string[] = [];
-      for (const command of action.commands.slice(0, 6)) {
-        const { stdout, stderr } = await this.execFn(command, {
-          cwd: worktree,
-          timeout: Math.max(30_000, Math.floor(timeout * 1000 / 4)),
-          maxBuffer: 10 * 1024 * 1024,
-        });
-        commandOutputs.push(`$ ${command}\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`);
+      for (const command of action.commands.slice(0, 3)) {
+        try {
+          const { stdout, stderr } = await this.execFn(command, {
+            cwd: worktree,
+            timeout: Math.max(30_000, Math.floor(timeout * 1000 / 4)),
+            maxBuffer: 10 * 1024 * 1024,
+          });
+          commandOutputs.push(`$ ${command}\nEXIT_CODE: 0\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`);
+        } catch (err: any) {
+          const exitCode = typeof err.code === 'number' ? err.code : err.killed ? 124 : 1;
+          commandOutputs.push(`$ ${command}\nEXIT_CODE: ${exitCode}\nSTDOUT:\n${err.stdout ?? ''}\nSTDERR:\n${err.stderr ?? err.message ?? ''}`);
+        }
       }
       transcript.push(commandOutputs.join('\n\n'));
       conversation = `${prompt}
