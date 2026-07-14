@@ -54,6 +54,96 @@ describe('ModelRegistry', () => {
   });
 });
 
+const harnessConfig: ModelsConfig = {
+  version: 1,
+  models: {
+    'declared-harness-model': {
+      provider: 'ollama',
+      tier: 'worker',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+      harness: 'codex-cli',
+    },
+    'codex-ollama-model': {
+      provider: 'ollama',
+      tier: 'worker',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+      codex: true,
+    },
+    'codex-model': {
+      provider: 'openai',
+      tier: 'worker',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+      codex: true,
+    },
+    'ollama-model': {
+      provider: 'ollama',
+      tier: 'worker',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+    },
+    'default-model': {
+      provider: 'anthropic',
+      tier: 'worker',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+    },
+  },
+  tiers: { worker: ['declared-harness-model', 'codex-ollama-model', 'codex-model', 'ollama-model', 'default-model'] },
+  failover: {
+    triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+    maxRetries: 2,
+    cooldownMs: 0,
+    escalateAfterTierExhausted: true,
+  },
+  routingRules: {},
+};
+
+describe('getHarnessId', () => {
+  const registry = new ModelRegistry(harnessConfig);
+
+  it('prefers the declared harness over inference', () => {
+    expect(registry.getHarnessId('declared-harness-model')).toBe('codex-cli');
+  });
+
+  it('infers ollama-command-agent for codex+ollama models', () => {
+    expect(registry.getHarnessId('codex-ollama-model')).toBe('ollama-command-agent');
+  });
+
+  it('infers codex-cli for codex models', () => {
+    expect(registry.getHarnessId('codex-model')).toBe('codex-cli');
+  });
+
+  it('infers ollama-http for ollama models', () => {
+    expect(registry.getHarnessId('ollama-model')).toBe('ollama-http');
+  });
+
+  it('defaults to claude-cli', () => {
+    expect(registry.getHarnessId('default-model')).toBe('claude-cli');
+  });
+
+  it('returns undefined for an unknown model', () => {
+    expect(registry.getHarnessId('missing-model')).toBeUndefined();
+  });
+});
+
 const doctorConfig: ModelsConfig = {
   version: 1,
   models: {

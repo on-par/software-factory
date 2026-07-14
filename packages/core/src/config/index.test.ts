@@ -1,6 +1,40 @@
-import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import { getFactoryPaths, loadFactoryConfig, loadModelsConfig, resolveTimeouts } from './index.js';
+
+function baseModelDef(overrides: Record<string, unknown> = {}) {
+  return {
+    provider: 'anthropic',
+    tier: 'boss',
+    costPerMtokInput: 0,
+    costPerMtokOutput: 0,
+    contextWindow: 1000,
+    capabilities: [],
+    envKey: null,
+    ...overrides,
+  };
+}
+
+function writeModelsConfig(dir: string, harness?: string) {
+  const config = {
+    version: 1,
+    models: {
+      'some-model': baseModelDef(harness !== undefined ? { harness } : {}),
+    },
+    tiers: { boss: ['some-model'] },
+    failover: {
+      triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+      maxRetries: 2,
+      cooldownMs: 0,
+      escalateAfterTierExhausted: true,
+    },
+    routingRules: {},
+  };
+  const path = join(dir, 'models.json');
+  return writeFile(path, JSON.stringify(config)).then(() => path);
+}
 
 describe('getFactoryPaths', () => {
   it('stages triage output alongside the live queue path', () => {
@@ -14,8 +48,38 @@ describe('getFactoryPaths', () => {
 });
 
 describe('loadModelsConfig', () => {
+  let tmpDir: string | undefined;
+
+  afterEach(async () => {
+    if (tmpDir) {
+      await rm(tmpDir, { recursive: true, force: true });
+      tmpDir = undefined;
+    }
+  });
+
   it('parses the shipped models.json without throwing', () => {
     expect(() => loadModelsConfig()).not.toThrow();
+  });
+
+  it('throws naming the model and the unknown harness id', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-models-config-'));
+    const path = await writeModelsConfig(tmpDir, 'opencode');
+
+    expect(() => loadModelsConfig(path)).toThrow(/some-model.*opencode/s);
+  });
+
+  it('parses a model declaring a known harness id', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-models-config-'));
+    const path = await writeModelsConfig(tmpDir, 'claude-cli');
+
+    expect(() => loadModelsConfig(path)).not.toThrow();
+  });
+
+  it('parses a model with no harness declared', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-models-config-'));
+    const path = await writeModelsConfig(tmpDir);
+
+    expect(() => loadModelsConfig(path)).not.toThrow();
   });
 
   it('lists every model referenced by a tier in the models map', () => {

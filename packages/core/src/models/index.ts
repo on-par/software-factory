@@ -43,6 +43,18 @@ export class ModelRegistry {
     return !!def?.codex;
   }
 
+  /** Harness id for a model: the config-declared `harness`, else inferred from
+   *  legacy provider/codex flags (pre-#187 dispatch behavior). */
+  getHarnessId(modelId: string): string | undefined {
+    const def = this.get(modelId);
+    if (!def) return undefined;
+    if (def.harness) return def.harness;
+    if (def.codex && def.provider === 'ollama') return 'ollama-command-agent';
+    if (def.codex) return 'codex-cli';
+    if (def.provider === 'ollama') return 'ollama-http';
+    return 'claude-cli';
+  }
+
   /** Check if a model is speculative/unproven (excluded from routing unless opted in) */
   isExperimental(modelId: string): boolean {
     return !!this.get(modelId)?.experimental;
