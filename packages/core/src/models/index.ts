@@ -56,13 +56,11 @@ export class ModelRegistry {
     return def.provider === 'ollama' && !nativeModel.includes(':cloud') && !modelId.includes(':cloud');
   }
 
-  /** Check if a model is fully available (env key + required binaries) */
+  /** Check if a model is routable from static config/env. Machine probes live in diagnoseModels(). */
   isAvailable(modelId: string): boolean {
     const def = this.get(modelId);
     if (!def) return false;
     if (!this.isEnvAvailable(modelId)) return false;
-    if (def.provider === 'ollama') return isCommandAvailable('ollama');
-    if (this.isCodexModel(modelId) && !isCommandAvailable('codex')) return false;
     return true;
   }
 
