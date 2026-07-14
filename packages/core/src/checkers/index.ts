@@ -123,7 +123,9 @@ export const lintChecker: CheckerFn = async (ctx) => {
 
 export const linksChecker: CheckerFn = async (ctx) => {
   const { stdout: htmlFiles } = await exec(
-    `find . -name '*.html' -not -path '*/node_modules/*' -not -path '*/.git/*' 2>/dev/null || true`,
+    `find . -name '*.html' -not -path '*/node_modules/*' -not -path '*/.git/*' ` +
+    `-not -path '*/coverage/*' -not -path '*/dist/*' -not -path '*/build/*' ` +
+    `-not -path '*/.next/*' -not -path '*/out/*' 2>/dev/null || true`,
     { cwd: ctx.worktree },
   ).catch(() => ({ stdout: '' } as any));
 
@@ -321,6 +323,11 @@ async function getPackageJson(ctx: CheckerContext): Promise<PackageJson | null> 
   return ctx.packageJson !== undefined ? ctx.packageJson : loadPackageJson(ctx.worktree);
 }
 
+// Generated output, not product source — scanning these produces false
+// positives (e.g. a coverage HTML report embeds source text like `href="#"`
+// literals from the checkers themselves as syntax-highlighted code, not markup).
+const GENERATED_DIRS = new Set(['node_modules', '.git', 'coverage', 'dist', 'build', '.next', 'out']);
+
 async function findHtmlFiles(worktree: string, limit = Infinity): Promise<string[]> {
   const results: string[] = [];
 
@@ -338,7 +345,7 @@ async function findHtmlFiles(worktree: string, limit = Infinity): Promise<string
       if (results.length >= limit) return;
 
       if (entry.isDirectory()) {
-        if (entry.name === 'node_modules' || entry.name === '.git') continue;
+        if (GENERATED_DIRS.has(entry.name)) continue;
         await walk(join(dir, entry.name));
       } else if (entry.isFile() && entry.name.endsWith('.html')) {
         results.push(relative(worktree, join(dir, entry.name)));
