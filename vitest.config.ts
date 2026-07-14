@@ -7,7 +7,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       // 'text' prints the per-file table; 'text-summary' prints the totals line.
-      reporter: ['text', 'text-summary', 'html', 'json-summary', 'lcov'],
+      reporter: ['text', 'text-summary', 'html', 'json-summary', 'lcov', 'cobertura'],
       include: ['packages/*/src/**/*.ts'],
       exclude: [
         ...configDefaults.coverage.exclude,
