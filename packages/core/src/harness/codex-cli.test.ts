@@ -13,6 +13,19 @@ function outFileFromCmd(cmd: string): string {
   return match[1];
 }
 
+function tempPathsFromCmd(cmd: string): { outFile: string; tmpFile: string } {
+  return {
+    outFile: cmd.match(/ -o '([^']+)'/)![1],
+    tmpFile: cmd.match(/ < '([^']+)'$/)![1],
+  };
+}
+
+function expectTempFilesCleanedUp(cmd: string): void {
+  const { outFile, tmpFile } = tempPathsFromCmd(cmd);
+  expect(existsSync(outFile)).toBe(false);
+  expect(existsSync(tmpFile)).toBe(false);
+}
+
 describe('CodingHarness contract: CodexCliHarness', () => {
   const cases = codingHarnessContractCases({
     success: () => ({
@@ -126,11 +139,7 @@ describe('CodexCliHarness temp file cleanup', () => {
 
     await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
 
-    const cmd = rec.calls[0].cmd;
-    const outFile = cmd.match(/ -o '([^']+)'/)![1];
-    const tmpFile = cmd.match(/ < '([^']+)'$/)![1];
-    expect(existsSync(outFile)).toBe(false);
-    expect(existsSync(tmpFile)).toBe(false);
+    expectTempFilesCleanedUp(rec.calls[0].cmd);
   });
 
   it('removes both temp files after a failing run', async () => {
@@ -143,11 +152,7 @@ describe('CodexCliHarness temp file cleanup', () => {
     const err: any = await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' })).catch(e => e);
 
     expect(err).toBeInstanceOf(HarnessError);
-    const cmd = rec.calls[0].cmd;
-    const outFile = cmd.match(/ -o '([^']+)'/)![1];
-    const tmpFile = cmd.match(/ < '([^']+)'$/)![1];
-    expect(existsSync(outFile)).toBe(false);
-    expect(existsSync(tmpFile)).toBe(false);
+    expectTempFilesCleanedUp(rec.calls[0].cmd);
   });
 
   it('removes both temp files after an empty-output run', async () => {
@@ -159,11 +164,7 @@ describe('CodexCliHarness temp file cleanup', () => {
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('empty_response');
     expect(err.details.exitCode).toBe(0);
-    const cmd = rec.calls[0].cmd;
-    const outFile = cmd.match(/ -o '([^']+)'/)![1];
-    const tmpFile = cmd.match(/ < '([^']+)'$/)![1];
-    expect(existsSync(outFile)).toBe(false);
-    expect(existsSync(tmpFile)).toBe(false);
+    expectTempFilesCleanedUp(rec.calls[0].cmd);
   });
 });
 
