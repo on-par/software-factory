@@ -226,7 +226,15 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
     });
     await writeFile(trace.retryPromptPath, repairPrompt);
 
-    const repairedOutput = await this.callOllama(opts.model, repairPrompt, opts.timeout, opts.registry);
+    let repairedOutput: string;
+    try {
+      repairedOutput = await this.callOllama(opts.model, repairPrompt, opts.timeout, opts.registry);
+    } catch (err: any) {
+      throw Object.assign(
+        new Error(`local command-agent repair failed after malformed output (${trace.malformedReason}); trace written to ${trace.tracePath}; retry prompt ${trace.retryPromptPath}; repair error: ${err.message ?? String(err)}`),
+        { reason: err.reason ?? 'error' as FailoverReason, tracePath: trace.tracePath },
+      );
+    }
     const repairedAction = parseLocalAgentAction(repairedOutput);
     return {
       ...repairedAction,
@@ -531,9 +539,14 @@ function normalizeLocalCommand(value: unknown): string[] {
     const command = value.trim();
     return command ? [command] : [];
   }
-  if (!isPlainObject(value) || typeof value.command !== 'string') return [];
+  if (!isPlainObject(value)) return [];
 
-  const command = value.command.trim();
+  const commandValue = typeof value.command === 'string'
+    ? value.command
+    : typeof value.name === 'string'
+      ? value.name
+      : '';
+  const command = commandValue.trim();
   if (!command) return [];
   if (!Array.isArray(value.args) || value.args.length === 0) return [command];
   const args = value.args.filter((arg): arg is string => typeof arg === 'string');
