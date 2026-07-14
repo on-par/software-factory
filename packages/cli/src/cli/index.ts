@@ -23,7 +23,7 @@ import {
   watchChecks,
 } from '@on-par/factory-core';
 import type { ModelDiagnosis } from '@on-par/factory-core';
-import { logEvent, branchFor, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock, withFileLock, shellEscape } from '@on-par/factory-core';
+import { logEvent, branchFor, branchPrefixSlug, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock, withFileLock, shellEscape } from '@on-par/factory-core';
 import { exec as execCb, execSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
@@ -504,8 +504,7 @@ async function getIssueTitle(octokit: Octokit, repo: string, issue: number): Pro
 }
 
 function worktreePathFor(repoRoot: string, issueNum: number): string {
-  const branchPrefix = (process.env.FACTORY_BRANCH_PREFIX ?? 'ship-it').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'ship-it';
-  return resolve(dirname(repoRoot), `${basename(repoRoot)}-factory-${branchPrefix}-${issueNum}`);
+  return resolve(dirname(repoRoot), `${basename(repoRoot)}-factory-${branchPrefixSlug()}-${issueNum}`);
 }
 
 async function cmdLand(issueNum: number) {

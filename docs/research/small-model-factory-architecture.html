@@ -482,7 +482,6 @@
   <script>
     const buttons = [...document.querySelectorAll(".toggle button")];
     const runtimes = [...document.querySelectorAll(".runtime")];
-
     buttons.forEach((button) => {
       button.addEventListener("click", () => {
         buttons.forEach((b) => b.classList.remove("active"));
@@ -490,7 +489,6 @@
         document.body.className = button.dataset.mode;
       });
     });
-
     runtimes.forEach((runtime) => {
       runtime.addEventListener("click", () => {
         runtimes.forEach((r) => r.classList.remove("selected"));

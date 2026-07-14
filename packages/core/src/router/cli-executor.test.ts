@@ -224,7 +224,7 @@ describe('CliModelExecutor', () => {
     });
 
     expect(output).toContain('MODEL STEP 1');
-    expect(execCalls).toEqual(['printf hello > local.txt', 'git status --short']);
+    expect(execCalls).toEqual(['git status --short', 'printf hello > local.txt', 'git status --short']);
   });
 
   it('feeds non-zero local command exits back into the Ollama command loop as observations', async () => {
@@ -271,7 +271,51 @@ describe('CliModelExecutor', () => {
     expect(output).toContain('EXIT_CODE: 127');
     expect(output).toContain('command not found');
     expect(fetchCalls).toHaveLength(2);
-    expect(execCalls).toEqual(['missing-command', 'git status --short']);
+    expect(execCalls).toEqual(['git status --short', 'missing-command', 'git status --short']);
+  });
+
+  it('auto-commits only paths that became dirty during the local command loop', async () => {
+    const execCalls: string[] = [];
+    const execFn = async (cmd: string) => {
+      execCalls.push(cmd);
+      if (cmd === 'git status --short' && execCalls.length === 1) {
+        return { stdout: '?? preexisting.txt\n', stderr: '' };
+      }
+      if (cmd === 'git status --short') {
+        return { stdout: '?? preexisting.txt\n M fresh.txt\n', stderr: '' };
+      }
+      return { stdout: 'ok', stderr: '' };
+    };
+    const fetchCalls: string[] = [];
+    const fetchFn = async (_input: string, init: any) => {
+      fetchCalls.push(init.body);
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => '',
+        json: async () => ({
+          message: {
+            content: fetchCalls.length === 1
+              ? '{"commands":["printf ok > fresh.txt"],"done":false,"final":"created"}'
+              : '{"commands":[],"done":true,"final":"done"}',
+          },
+        }),
+      };
+    };
+    const executor = new CliModelExecutor(execFn, fetchFn);
+
+    const output = await executor.runModel('ollama-codex-model', 'build it', {
+      worktree,
+      timeout,
+      task: 'build_codex',
+      registry,
+      routesConfig,
+    });
+
+    expect(output).toContain('AUTO-COMMIT: committed 1 changed path(s).');
+    expect(execCalls).toContain("git add -- 'fresh.txt' && git commit -m \"feat: implement factory issue\"");
+    expect(execCalls).not.toContain("git add -- 'preexisting.txt' && git commit -m \"feat: implement factory issue\"");
   });
 
   it('classifies rate-limit failures from the exec seam', async () => {

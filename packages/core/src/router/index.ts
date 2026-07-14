@@ -87,7 +87,7 @@ export class CliModelExecutor implements ModelExecutor {
 
     const { worktree, timeout } = ctx;
 
-    if (def.codex && def.provider === 'ollama' && (ctx.task === 'build_codex' || ctx.task === 'build_claude' || ctx.routesConfig.routes[ctx.task]?.requires === 'codex')) {
+    if (def.codex && def.provider === 'ollama' && (ctx.task === 'build_codex' || ctx.routesConfig.routes[ctx.task]?.requires === 'codex')) {
       return this.runOllamaCommandAgent(model, prompt, worktree, timeout, ctx.registry);
     }
     if (def.codex && (ctx.task === 'build_codex' || ctx.task === 'build_claude' || ctx.routesConfig.routes[ctx.task]?.requires === 'codex')) {
@@ -107,6 +107,10 @@ export class CliModelExecutor implements ModelExecutor {
   /** Run a small local command loop for Ollama worker models. */
   private async runOllamaCommandAgent(model: string, prompt: string, worktree: string, timeout: number, registry: ModelRegistry): Promise<string> {
     const transcript: string[] = [];
+    const initialStatus = await this.execFn('git status --short', { cwd: worktree, timeout: 30_000, maxBuffer: 1024 * 1024 })
+      .then(result => result.stdout)
+      .catch(() => '');
+    const initiallyDirty = new Set(parseGitStatusPaths(initialStatus));
     let conversation = `${prompt}
 
 You are a local command worker. You act only by returning commands.
@@ -148,13 +152,14 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
     }
 
     const status = await this.execFn('git status --short', { cwd: worktree, timeout: 30_000, maxBuffer: 1024 * 1024 });
-    if (status.stdout.trim()) {
-      await this.execFn('git add -A && git commit -m "feat: implement factory issue"', {
+    const changedPaths = parseGitStatusPaths(status.stdout).filter(path => !initiallyDirty.has(path));
+    if (changedPaths.length > 0) {
+      await this.execFn(`git add -- ${changedPaths.map(shellEscape).join(' ')} && git commit -m "feat: implement factory issue"`, {
         cwd: worktree,
         timeout: 120_000,
         maxBuffer: 10 * 1024 * 1024,
       });
-      transcript.push('AUTO-COMMIT: committed remaining worktree changes.');
+      transcript.push(`AUTO-COMMIT: committed ${changedPaths.length} changed path(s).`);
     }
 
     return transcript.join('\n\n');
@@ -270,9 +275,7 @@ export class ModelRouter {
 
   /** Resolve a task type to the first available model */
   resolve(task: TaskType): string | undefined {
-    const tier = this.getTier(task);
-    if (!tier) return undefined;
-    return this.registry.getAvailableModelsForTier(tier, this.byok, this.allowExperimental, this.localOnly)[0];
+    return this.resolveAll(task)[0];
   }
 
   /** Resolve all available models for a task (for failover chain) */
@@ -422,6 +425,18 @@ function extractJsonObject(output: string): string | undefined {
   const end = output.lastIndexOf('}');
   if (start >= 0 && end > start) return output.slice(start, end + 1);
   return undefined;
+}
+
+function parseGitStatusPaths(status: string): string[] {
+  return status
+    .split('\n')
+    .map(line => line.trimEnd())
+    .filter(Boolean)
+    .map(line => {
+      const path = line.slice(3).trim();
+      return path.includes(' -> ') ? path.split(' -> ').pop()!.trim() : path;
+    })
+    .filter(Boolean);
 }
 
 /** Minimal shell escaping for safe CLI args */

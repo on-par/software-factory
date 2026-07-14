@@ -58,7 +58,10 @@ export class ModelRegistry {
 
   /** Check if a model is fully available (env key + required binaries) */
   isAvailable(modelId: string): boolean {
+    const def = this.get(modelId);
+    if (!def) return false;
     if (!this.isEnvAvailable(modelId)) return false;
+    if (def.provider === 'ollama') return isCommandAvailable('ollama');
     if (this.isCodexModel(modelId) && !isCommandAvailable('codex')) return false;
     return true;
   }
@@ -156,19 +159,24 @@ export function diagnoseModels(
       reason = 'experimental — set FACTORY_EXPERIMENTAL=1 to enable';
     } else if (localOnly && !registry.isLocalOnlyModel(m)) {
       reason = 'excluded by FACTORY_LOCAL_ONLY=1';
+    } else if (def.codex === true && def.provider === 'ollama') {
+      if (!commandAvailable('ollama')) {
+        reason = 'ollama not found on PATH';
+      } else if (ollamaModelPresent && !ollamaModelPresent(registry.getProviderModel(m))) {
+        reason = `${registry.getProviderModel(m)} not found in ollama list`;
+      } else {
+        reachable = true;
+        reason = 'ok (ollama native command agent)';
+      }
     } else if (def.codex === true) {
       // Deliberately does not check def.envKey here, unlike ModelRegistry.isAvailable():
       // the codex CLI carries its own (OAuth-based) auth, so a missing API key doesn't
       // make the model unreachable for doctor purposes.
       if (!commandAvailable('codex')) {
         reason = 'codex CLI not found on PATH';
-      } else if (def.provider === 'ollama' && !commandAvailable('ollama')) {
-        reason = 'ollama not found on PATH';
-      } else if (def.provider === 'ollama' && ollamaModelPresent && !ollamaModelPresent(registry.getProviderModel(m))) {
-        reason = `${registry.getProviderModel(m)} not found in ollama list`;
       } else {
         reachable = true;
-        reason = def.provider === 'ollama' ? 'ok (codex local ollama)' : 'ok (codex CLI)';
+        reason = 'ok (codex CLI)';
       }
     } else if (provider === 'ollama') {
       if (!commandAvailable('ollama')) {

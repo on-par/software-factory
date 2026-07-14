@@ -86,6 +86,17 @@ const doctorConfig: ModelsConfig = {
       envKey: null,
       providerModel: 'qwen2.5-coder:14b',
     },
+    'ollama-codex-model': {
+      provider: 'ollama',
+      tier: 'worker',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+      providerModel: 'qwen3.5:9b',
+      codex: true,
+    },
     'ollama-cloud-model': {
       provider: 'ollama',
       tier: 'worker',
@@ -118,7 +129,7 @@ const doctorConfig: ModelsConfig = {
   },
   tiers: {
     boss: ['anthropic-model'],
-    worker: ['codex-model', 'ollama-model', 'ollama-cloud-model', 'deepseek-model', 'experimental-model'],
+    worker: ['codex-model', 'ollama-model', 'ollama-codex-model', 'ollama-cloud-model', 'deepseek-model', 'experimental-model'],
   },
   failover: {
     triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
@@ -182,6 +193,16 @@ describe('diagnoseModels', () => {
     }, true);
     expect(d.reachable).toBe(true);
     expect(d.reason).toBe('ok (ollama native)');
+  });
+
+  it('marks a codex-tagged ollama model reachable through native ollama without codex CLI', () => {
+    const d = diagnosisFor('ollama-codex-model', {
+      commandAvailable: (cmd) => cmd === 'ollama',
+      ollamaModelPresent: (model) => model === 'qwen3.5:9b',
+      envPresent: () => false,
+    }, true);
+    expect(d.reachable).toBe(true);
+    expect(d.reason).toBe('ok (ollama native command agent)');
   });
 
   it('marks an ollama model unreachable when the native model is missing', () => {
