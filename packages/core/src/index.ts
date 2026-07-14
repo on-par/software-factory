@@ -14,6 +14,14 @@ export type { RouterResult, FailoverReason, ModelExecutor, ModelExecutorContext 
 export { StubModelExecutor } from './router/stub.js';
 export type { StubModelExecutorOptions } from './router/stub.js';
 
+// Coding harness contract
+export { HarnessError } from './harness/index.js';
+export type { CodingHarness, HarnessFailureReason, HarnessRequest, HarnessResult } from './harness/index.js';
+export { StubCodingHarness } from './harness/stub.js';
+export type { StubCodingHarnessOptions, StubHarnessStep } from './harness/stub.js';
+export { codingHarnessContractCases, makeContractRequest } from './harness/contract.js';
+export type { HarnessContractCase, HarnessContractScenario, HarnessContractScenarios } from './harness/contract.js';
+
 // Constitutions
 export { ConstitutionLoader, buildConstitutionContext, REPO_INSTRUCTION_FILES } from './constitutions/index.js';
 
