@@ -2,14 +2,14 @@
 
 import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, writeFile, mkdtemp, readFile, unlink } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, writeFile, mkdtemp } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ModelRegistry } from '../models/index.js';
 import type { TaskType } from '../types/index.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { HarnessError } from '../harness/index.js';
 import { ClaudeCliHarness } from '../harness/claude-cli.js';
+import { CodexCliHarness } from '../harness/codex-cli.js';
 import { classifyFailure } from '../harness/classify.js';
 
 const exec = promisify(execCb);
@@ -75,12 +75,14 @@ export interface ModelExecutor {
 
 export class CliModelExecutor implements ModelExecutor {
   private claudeHarness: ClaudeCliHarness;
+  private codexHarness: CodexCliHarness;
 
   constructor(
     private execFn: ExecFn = exec,
     private fetchFn: FetchFn = globalThis.fetch as unknown as FetchFn,
   ) {
     this.claudeHarness = new ClaudeCliHarness(execFn);
+    this.codexHarness = new CodexCliHarness(execFn);
   }
 
   /** Run a single model via its native provider when available, otherwise Claude/Codex CLI. */
@@ -94,7 +96,7 @@ export class CliModelExecutor implements ModelExecutor {
       return this.runOllamaCommandAgent(model, prompt, worktree, timeout, ctx.registry);
     }
     if (def.codex && (ctx.task === 'build_codex' || ctx.task === 'build_claude' || ctx.routesConfig.routes[ctx.task]?.requires === 'codex')) {
-      return this.runCodex(model, prompt, worktree, timeout, ctx.registry);
+      return this.runCodex(model, prompt, ctx);
     }
     if (def.provider === 'ollama') {
       return this.runOllama(model, prompt, timeout, ctx.registry);
@@ -380,26 +382,26 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
     }
   }
 
-  /** Run via Codex CLI: codex exec --sandbox workspace-write --ask-for-approval never -C <worktree> [flags] -o <output> - < prompt */
-  private async runCodex(model: string, prompt: string, worktree: string, timeout: number, registry: ModelRegistry): Promise<string> {
-    const extraFlag = registry.getCodexFlag(model) ?? '';
-    const tmpFile = await mktemp(join(tmpdir(), 'factory-codex-'));
-    const outFile = await mktemp(join(tmpdir(), 'factory-codex-out-'));
-    await writeFile(tmpFile, prompt);
-
-    const cmd = `codex exec --sandbox workspace-write --ask-for-approval never -C ${shellEscape(worktree)} ${extraFlag} -o ${shellEscape(outFile)} - < ${shellEscape(tmpFile)}`;
-
+  /** Run via Codex CLI (delegates to CodexCliHarness). */
+  private async runCodex(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string> {
     try {
-      await this.execFn(cmd, { timeout: timeout * 1000, maxBuffer: 10 * 1024 * 1024 });
-      const output = await readFile(outFile, 'utf-8').catch(() => '');
+      const { output } = await this.codexHarness.run({
+        model,
+        prompt,
+        worktree: ctx.worktree,
+        timeoutSeconds: ctx.timeout,
+        task: ctx.task,
+        registry: ctx.registry,
+      });
       return output;
     } catch (err: any) {
-      err.reason = err.killed ? 'timeout' : classifyFailure(err.stderr ?? '', err.code ?? 1);
+      if (err instanceof HarnessError && err.reason === 'empty_response' && err.details.exitCode === 0) {
+        // The harness contract forbids resolving with empty output, but the
+        // router's run loop owns empty-output handling for executors —
+        // return it unchanged so router behavior is byte-identical.
+        return '';
+      }
       throw err;
-    } finally {
-      // Cleanup temp files (remove, don't zero out)
-      await unlink(tmpFile).catch(() => {});
-      await unlink(outFile).catch(() => {});
     }
   }
 }
@@ -647,11 +649,4 @@ function parseGitStatusPaths(status: string): string[] {
 /** Minimal shell escaping for safe CLI args */
 function shellEscape(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
-}
-
-async function mktemp(prefix: string): Promise<string> {
-  const { writeFile } = await import('node:fs/promises');
-  const path = `${prefix}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  await writeFile(path, '');
-  return path;
 }
