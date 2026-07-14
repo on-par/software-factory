@@ -123,10 +123,28 @@ export class CliModelExecutor implements ModelExecutor {
 You are a local command worker. You act only by returning commands.
 Return JSON only: {"commands":["..."],"done":false,"final":"short status"}
 First inspect, then edit, then run one cheap check, then git add/commit.
-Use at most 3 commands per turn. No markdown.`;
+    Use at most 3 commands per turn. No markdown.`;
 
     for (let step = 0; step < 8; step++) {
-      const output = await this.callOllama(model, conversation, timeout, registry);
+      let output: string;
+      try {
+        output = await this.callOllama(model, conversation, timeout, registry);
+      } catch (err: any) {
+        const reason = err.reason ?? 'error' as FailoverReason;
+        const trace = await this.writeLocalAgentCallFailureTrace({
+          model,
+          worktree,
+          prompt,
+          conversation,
+          attempt: step + 1,
+          failureReason: reason,
+          errorMessage: err.message ?? String(err),
+        });
+        throw Object.assign(
+          new Error(`local command-agent model call failed (${reason}); trace written to ${trace.tracePath}; error: ${err.message ?? String(err)}`),
+          { reason, tracePath: trace.tracePath },
+        );
+      }
       transcript.push(`MODEL STEP ${step + 1}:\n${output}`);
       const action = await this.parseLocalAgentActionWithRepair({
         model,
@@ -273,6 +291,30 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
       retryPromptPath,
     }, null, 2)}\n`);
     return { tracePath, retryPromptPath, malformedReason: opts.malformedReason, rawResponseSummary };
+  }
+
+  private async writeLocalAgentCallFailureTrace(opts: {
+    model: string;
+    worktree: string;
+    prompt: string;
+    conversation: string;
+    attempt: number;
+    failureReason: FailoverReason;
+    errorMessage: string;
+  }): Promise<{ tracePath: string }> {
+    const traceDir = join(opts.worktree, '.factory', 'local-agent-traces');
+    await mkdir(traceDir, { recursive: true });
+    const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const tracePath = join(traceDir, `${stamp}-call-failure.json`);
+    await writeFile(tracePath, `${JSON.stringify({
+      model: opts.model,
+      attempt: opts.attempt,
+      promptSize: opts.prompt.length,
+      conversationSize: opts.conversation.length,
+      failureReason: opts.failureReason,
+      errorMessage: opts.errorMessage,
+    }, null, 2)}\n`);
+    return { tracePath };
   }
 
   private async callOllama(model: string, prompt: string, timeout: number, registry: ModelRegistry): Promise<string> {
