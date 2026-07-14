@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRegistry } from '../models/index.js';
 import { CliModelExecutor } from './index.js';
@@ -81,6 +85,14 @@ const routesConfig: RoutesConfig = {
 const registry = new ModelRegistry(modelsConfig);
 const worktree = '/tmp/factory worktree';
 const timeout = 7;
+let tmpWorktree: string | undefined;
+
+afterEach(async () => {
+  if (tmpWorktree) {
+    await rm(tmpWorktree, { recursive: true, force: true });
+    tmpWorktree = undefined;
+  }
+});
 
 function recordingExec(result: { stdout?: string; stderr?: string } = {}) {
   const calls: { cmd: string; opts: any }[] = [];
@@ -316,6 +328,116 @@ describe('CliModelExecutor', () => {
     expect(output).toContain('AUTO-COMMIT: committed 1 changed path(s).');
     expect(execCalls).toContain("git add -- 'fresh.txt' && git commit -m \"feat: implement factory issue\"");
     expect(execCalls).not.toContain("git add -- 'preexisting.txt' && git commit -m \"feat: implement factory issue\"");
+  });
+
+  it('retries an empty local command-agent response with a compact repair prompt', async () => {
+    tmpWorktree = await mkdtemp(join(tmpdir(), 'factory-command-agent-'));
+    const execCalls: string[] = [];
+    const execFn = async (cmd: string) => {
+      execCalls.push(cmd);
+      if (cmd === 'git status --short') return { stdout: '', stderr: '' };
+      return { stdout: 'ok', stderr: '' };
+    };
+    const prompts: string[] = [];
+    const responses = [
+      '',
+      '{"commands":["printf repaired > local.txt"],"done":false,"final":"repaired"}',
+      '{"commands":[],"done":true,"final":"done"}',
+    ];
+    const fetchFn = async (_input: string, init: any) => {
+      const body = JSON.parse(init.body);
+      prompts.push(body.messages[0].content);
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => '',
+        json: async () => ({
+          message: {
+            content: responses.shift(),
+          },
+        }),
+      };
+    };
+    const executor = new CliModelExecutor(execFn, fetchFn);
+
+    const output = await executor.runModel('ollama-codex-model', 'build it', {
+      worktree: tmpWorktree,
+      timeout,
+      task: 'build_codex',
+      registry,
+      routesConfig,
+    });
+
+    expect(output).toContain('REPAIR STEP 1');
+    expect(prompts[1]).toContain('Return exactly one JSON object');
+    expect(execCalls).toEqual(['git status --short', 'printf repaired > local.txt', 'git status --short']);
+  });
+
+  it('retries invalid JSON and succeeds when the repair response is valid', async () => {
+    tmpWorktree = await mkdtemp(join(tmpdir(), 'factory-command-agent-'));
+    const execFn = async (cmd: string) => {
+      if (cmd === 'git status --short') return { stdout: '', stderr: '' };
+      return { stdout: 'ok', stderr: '' };
+    };
+    const responses = ['{"commands":[', '{"commands":[],"done":true,"final":"done"}'];
+    const fetchFn = async () => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      text: async () => '',
+      json: async () => ({ message: { content: responses.shift() } }),
+    });
+    const executor = new CliModelExecutor(execFn, fetchFn as any);
+
+    const output = await executor.runModel('ollama-codex-model', 'build it', {
+      worktree: tmpWorktree,
+      timeout,
+      task: 'build_codex',
+      registry,
+      routesConfig,
+    });
+
+    expect(output).toContain('REPAIR STEP 1');
+  });
+
+  it('writes an actionable trace when local command-agent repair is exhausted', async () => {
+    tmpWorktree = await mkdtemp(join(tmpdir(), 'factory-command-agent-'));
+    const execFn = async (cmd: string) => {
+      if (cmd === 'git status --short') return { stdout: '', stderr: '' };
+      return { stdout: 'ok', stderr: '' };
+    };
+    const fetchFn = async () => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      text: async () => '',
+      json: async () => ({ message: { content: '' } }),
+    });
+    const executor = new CliModelExecutor(execFn, fetchFn as any);
+
+    const err: any = await executor.runModel('ollama-codex-model', 'build it', {
+      worktree: tmpWorktree,
+      timeout,
+      task: 'build_codex',
+      registry,
+      routesConfig,
+    }).catch(e => e);
+
+    expect(err.reason).toBe('empty_response');
+    expect(err.message).toContain('trace written to');
+    const traceDir = join(tmpWorktree, '.factory', 'local-agent-traces');
+    const traceFiles = readdirSync(traceDir);
+    expect(traceFiles.some(file => file.endsWith('.json'))).toBe(true);
+    expect(traceFiles.some(file => file.endsWith('-repair-prompt.md'))).toBe(true);
+    const trace = JSON.parse(readFileSync(join(traceDir, traceFiles.find(file => file.endsWith('.json'))!), 'utf-8'));
+    expect(trace).toMatchObject({
+      model: 'ollama-codex-model',
+      attempt: 1,
+      promptSize: 'build it'.length,
+      malformedReason: 'empty_response',
+    });
+    expect(existsSync(trace.retryPromptPath)).toBe(true);
   });
 
   it('classifies rate-limit failures from the exec seam', async () => {

@@ -34,6 +34,7 @@ describe('local-only run reports', () => {
         { ts: '2026-07-14T02:28:11.000Z', issue: '137', type: 'plan', msg: 'Plan complete with model qwen2.5-coder:14b, route: codex' },
         { ts: '2026-07-14T02:28:12.000Z', issue: '137', type: 'router', msg: 'Trying codex-ollama-qwen3.5:9b for build_codex (attempt 1)' },
         { ts: '2026-07-14T02:29:20.000Z', issue: '137', type: 'router', msg: 'codex-ollama-qwen3.5:9b failed (empty_response) on build_codex' },
+        { ts: '2026-07-14T02:29:20.000Z', issue: '137', type: 'router', msg: 'local command-agent trace: local command-agent malformed output (empty_response); trace written to .factory/local-agent-traces/trace.json; retry prompt .factory/local-agent-traces/repair.md' },
         { ts: '2026-07-14T02:29:20.000Z', issue: '137', type: 'fail', msg: "All models failed for task 'build_codex'" },
       ],
     });
@@ -44,7 +45,7 @@ describe('local-only run reports', () => {
     expect(markdown).toContain('- codex-ollama-qwen3.5:9b for build_codex, attempt ?: empty_response');
     expect(markdown).toContain('- M AGENTS.md');
     expect(markdown).toContain('AGENTS.md | 20 ++++++++++++++++++++');
-    expect(markdown).toContain('No command-level observations were captured');
+    expect(markdown).toContain('trace written to .factory/local-agent-traces/trace.json');
     expect(markdown).toContain("All models failed for task 'build_codex'");
   });
 
