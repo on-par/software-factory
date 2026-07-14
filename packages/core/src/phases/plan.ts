@@ -85,9 +85,10 @@ export async function planPhase(
     octokit: Octokit;
     log: (type: string, msg: string) => void;
     timeoutSeconds?: number;
+    modelOverride?: string;
   },
 ): Promise<PlanResult> {
-  const { issue, repo, worktree, specPath, constitution, router, octokit, log, timeoutSeconds } = opts;
+  const { issue, repo, worktree, specPath, constitution, router, octokit, log, timeoutSeconds, modelOverride } = opts;
 
   // Get issue details
   const [owner, repoName] = repo.split('/');
@@ -105,6 +106,7 @@ export async function planPhase(
   const result = await router.run('plan', prompt, {
     worktree,
     timeout: timeoutSeconds ?? 1800,
+    modelOverride,
     onLog: (msg) => log('router', msg),
   });
 

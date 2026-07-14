@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ModelsConfig } from '../config/index.js';
-import { ModelRegistry, diagnoseModels } from './index.js';
+import { ModelRegistry, diagnoseModels, resolveModelOverrides } from './index.js';
 
 const config: ModelsConfig = {
   version: 1,
@@ -260,5 +260,69 @@ describe('diagnoseModels', () => {
       envPresent: () => true,
     }, true);
     expect(d.reachable).toBe(true);
+  });
+});
+
+const overridesConfig: ModelsConfig = {
+  version: 1,
+  models: {
+    'stub-model': {
+      provider: 'custom',
+      tier: 'boss',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+    },
+  },
+  tiers: { boss: ['stub-model'] },
+  failover: {
+    triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+    maxRetries: 2,
+    cooldownMs: 0,
+    escalateAfterTierExhausted: true,
+  },
+  routingRules: {},
+};
+
+describe('resolveModelOverrides', () => {
+  const registry = new ModelRegistry(overridesConfig);
+
+  it('returns undefined for both fields when neither var is set', () => {
+    expect(resolveModelOverrides(registry, {})).toEqual({ plan: undefined, build: undefined });
+  });
+
+  it('resolves FACTORY_PLAN_MODEL to plan', () => {
+    expect(resolveModelOverrides(registry, { FACTORY_PLAN_MODEL: 'stub-model' })).toEqual({
+      plan: 'stub-model',
+      build: undefined,
+    });
+  });
+
+  it('resolves FACTORY_BUILD_MODEL to build', () => {
+    expect(resolveModelOverrides(registry, { FACTORY_BUILD_MODEL: 'stub-model' })).toEqual({
+      plan: undefined,
+      build: 'stub-model',
+    });
+  });
+
+  it('throws naming FACTORY_PLAN_MODEL and the unknown model', () => {
+    expect(() => resolveModelOverrides(registry, { FACTORY_PLAN_MODEL: 'no-such-model' })).toThrow(
+      /FACTORY_PLAN_MODEL.*no-such-model/s,
+    );
+  });
+
+  it('throws naming FACTORY_BUILD_MODEL and the unknown model', () => {
+    expect(() => resolveModelOverrides(registry, { FACTORY_BUILD_MODEL: 'no-such-model' })).toThrow(
+      /FACTORY_BUILD_MODEL.*no-such-model/s,
+    );
+  });
+
+  it('treats empty and whitespace-only values as unset', () => {
+    expect(resolveModelOverrides(registry, { FACTORY_PLAN_MODEL: '', FACTORY_BUILD_MODEL: '   ' })).toEqual({
+      plan: undefined,
+      build: undefined,
+    });
   });
 });
