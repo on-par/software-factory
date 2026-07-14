@@ -63,14 +63,21 @@ describe('loadModelsConfig', () => {
 
   it('throws naming the model and the unknown harness id', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-models-config-'));
-    const path = await writeModelsConfig(tmpDir, 'opencode');
+    const path = await writeModelsConfig(tmpDir, 'not-a-harness');
 
-    expect(() => loadModelsConfig(path)).toThrow(/some-model.*opencode/s);
+    expect(() => loadModelsConfig(path)).toThrow(/some-model.*not-a-harness/s);
   });
 
   it('parses a model declaring a known harness id', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-models-config-'));
     const path = await writeModelsConfig(tmpDir, 'claude-cli');
+
+    expect(() => loadModelsConfig(path)).not.toThrow();
+  });
+
+  it('parses a model declaring harness opencode', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-models-config-'));
+    const path = await writeModelsConfig(tmpDir, 'opencode');
 
     expect(() => loadModelsConfig(path)).not.toThrow();
   });

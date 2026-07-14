@@ -282,6 +282,24 @@
       "claudeFlag": "ollama/qwen3.5-coder:cloud",
       "experimental": true,
       "note": "speculative \u2014 opt in with FACTORY_EXPERIMENTAL=1"
+    },
+    "opencode-sonnet": {
+      "provider": "custom",
+      "tier": [
+        "worker"
+      ],
+      "costPerMtokInput": 3.0,
+      "costPerMtokOutput": 15.0,
+      "contextWindow": 200000,
+      "capabilities": [
+        "implementation",
+        "coding"
+      ],
+      "envKey": null,
+      "harness": "opencode",
+      "providerModel": "anthropic/claude-sonnet-5",
+      "experimental": true,
+      "note": "First provider added via the generic harness seam (#188). OpenCode CLI (opencode run) with provider/model id; opt in with FACTORY_EXPERIMENTAL=1. Doctor reports 'opencode CLI not found on PATH' when the CLI is missing."
     }
   },
   "tiers": {
@@ -303,7 +321,8 @@
       "claude-sonnet-5",
       "glm-5.2",
       "deepseek-v3",
-      "qwen-3.5-coder"
+      "qwen-3.5-coder",
+      "opencode-sonnet"
     ],
     "checker": [
       "qwen3.5:9b",

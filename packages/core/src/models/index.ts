@@ -195,6 +195,15 @@ export function diagnoseModels(
       reason = 'experimental — set FACTORY_EXPERIMENTAL=1 to enable';
     } else if (localOnly && !registry.isLocalOnlyModel(m)) {
       reason = 'excluded by FACTORY_LOCAL_ONLY=1';
+    } else if (registry.getHarnessId(m) === 'opencode') {
+      if (!commandAvailable('opencode')) {
+        reason = 'opencode CLI not found on PATH';
+      } else if (def.envKey && !envPresent(def.envKey)) {
+        reason = `${def.envKey} not set`;
+      } else {
+        reachable = true;
+        reason = 'ok (opencode CLI)';
+      }
     } else if (def.codex === true && def.provider === 'ollama') {
       if (!commandAvailable('ollama')) {
         reason = 'ollama not found on PATH';
