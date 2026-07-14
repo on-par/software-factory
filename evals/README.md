@@ -26,6 +26,41 @@ Run only that case with:
 npm run eval -- --stub --filter local-small-first-green --no-judge
 ```
 
+## Local-small scoreboard
+
+The local-small scoreboard is file-based and can run without cloud credentials.
+Collect one JSON row per model/scenario run:
+
+```json
+{
+  "runs": [
+    {
+      "scenario": "local-small-first-green",
+      "runtime": "local-small",
+      "model": "qwen2.5-coder:7b",
+      "patchApplied": true,
+      "testsPassed": true,
+      "diffSize": 5,
+      "repairCount": 0,
+      "durationMs": 900,
+      "reviewerGrade": 9
+    }
+  ]
+}
+```
+
+Render Markdown locally:
+
+```
+npm run local-small-scoreboard -- --input runs.json --output scoreboard.md
+```
+
+Compare against a previous baseline:
+
+```
+npm run local-small-scoreboard -- --input runs.json --baseline baseline-runs.json
+```
+
 ## Nightly full eval run
 
 The `Nightly Evals` workflow (`.github/workflows/nightly-evals.yml`) runs the full

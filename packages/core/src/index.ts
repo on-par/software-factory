@@ -38,8 +38,8 @@ export { applyLocalSmallPatchStep, createLocalSmallDryRun } from './local-small/
 export type { LocalSmallContextPack, LocalSmallDryRunInput, LocalSmallDryRunResult, LocalSmallLimits, LocalSmallPatchChange, LocalSmallPatchProposal, LocalSmallPatchStepInput, LocalSmallPatchStepResult, LocalSmallPatchStepStatus, LocalSmallStep, LocalSmallStepPlan } from './local-small/stepwise.js';
 
 // Eval
-export { loadGoldenCases, scoreSpec, judgeSpec, median, runJudgeSamples, runEval, toBaseline, compareToBaseline, isRouteAsserted, formatRegressionIssue, REGRESSION_ISSUE_TITLE, REGRESSION_ISSUE_MARKER, appendHistoryLine, parseHistory, renderTrend, summaryToHistoryRecord } from './eval/index.js';
-export type { CaseResult, DeterministicCheck, EvalSummary, ExpectedRoute, GoldenCase, RunEvalOpts, Baseline, BaselineCase, BaselineComparison, RegressionIssue, JudgeAggregate, JudgeSample, HistoryRecord } from './eval/index.js';
+export { loadGoldenCases, scoreSpec, judgeSpec, median, runJudgeSamples, runEval, toBaseline, compareToBaseline, isRouteAsserted, formatRegressionIssue, REGRESSION_ISSUE_TITLE, REGRESSION_ISSUE_MARKER, appendHistoryLine, parseHistory, renderTrend, summaryToHistoryRecord, buildLocalSmallScoreboard, renderLocalSmallScoreboardMarkdown } from './eval/index.js';
+export type { CaseResult, DeterministicCheck, EvalSummary, ExpectedRoute, GoldenCase, RunEvalOpts, Baseline, BaselineCase, BaselineComparison, RegressionIssue, JudgeAggregate, JudgeSample, HistoryRecord, LocalSmallRuntime, LocalSmallScoreboardInput, LocalSmallScoreboardReport, LocalSmallScoreboardRow, LocalSmallScoreboardRun } from './eval/index.js';
 
 // Utils
 export { logEvent, logCost, readCosts, slugify, branchPrefixSlug, branchFor, setupWorktree, cleanupWorktree, gitFetch, shellEscape, ensureDir, isEscalation, escalationLine, codexDisabled } from './utils/index.js';
