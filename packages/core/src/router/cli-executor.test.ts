@@ -574,6 +574,38 @@ describe('CliModelExecutor', () => {
     expect(existsSync(err.tracePath)).toBe(true);
   });
 
+  it('writes a trace when the local command-agent Ollama call fails before output', async () => {
+    tmpWorktree = await mkdtemp(join(tmpdir(), 'factory-command-agent-'));
+    const execFn = async (cmd: string) => {
+      if (cmd === 'git status --short') return { stdout: '', stderr: '' };
+      return { stdout: 'ok', stderr: '' };
+    };
+    const fetchFn = async () => {
+      throw Object.assign(new Error('ollama socket closed'), { reason: 'error' });
+    };
+    const executor = new CliModelExecutor(execFn, fetchFn as any);
+
+    const err: any = await executor.runModel('ollama-codex-model', 'build it', {
+      worktree: tmpWorktree,
+      timeout,
+      task: 'build_codex',
+      registry,
+      routesConfig,
+    }).catch(e => e);
+
+    expect(err.reason).toBe('error');
+    expect(err.tracePath).toBeTruthy();
+    expect(err.message).toContain('local command-agent model call failed');
+    expect(err.message).toContain('trace written to');
+    const trace = JSON.parse(readFileSync(err.tracePath, 'utf-8'));
+    expect(trace).toMatchObject({
+      model: 'ollama-codex-model',
+      attempt: 1,
+      failureReason: 'error',
+      errorMessage: 'ollama socket closed',
+    });
+  });
+
   it('classifies rate-limit failures from the exec seam', async () => {
     const executor = new CliModelExecutor(async () => {
       throw Object.assign(new Error('boom'), { stderr: 'rate limit exceeded', code: 1 });
