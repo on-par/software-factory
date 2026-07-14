@@ -34,8 +34,8 @@ export { writeLocalRunReport, renderLocalRunReport } from './reports/local-run.j
 export type { LocalRunOutcome, LocalRunReport, LocalRunReportInput, LocalRunReportDeps } from './reports/local-run.js';
 
 // Local-small harness
-export { createLocalSmallDryRun } from './local-small/stepwise.js';
-export type { LocalSmallContextPack, LocalSmallDryRunInput, LocalSmallDryRunResult, LocalSmallLimits, LocalSmallStep, LocalSmallStepPlan } from './local-small/stepwise.js';
+export { applyLocalSmallPatchStep, createLocalSmallDryRun } from './local-small/stepwise.js';
+export type { LocalSmallContextPack, LocalSmallDryRunInput, LocalSmallDryRunResult, LocalSmallLimits, LocalSmallPatchChange, LocalSmallPatchProposal, LocalSmallPatchStepInput, LocalSmallPatchStepResult, LocalSmallPatchStepStatus, LocalSmallStep, LocalSmallStepPlan } from './local-small/stepwise.js';
 
 // Eval
 export { loadGoldenCases, scoreSpec, judgeSpec, median, runJudgeSamples, runEval, toBaseline, compareToBaseline, isRouteAsserted, formatRegressionIssue, REGRESSION_ISSUE_TITLE, REGRESSION_ISSUE_MARKER, appendHistoryLine, parseHistory, renderTrend, summaryToHistoryRecord } from './eval/index.js';

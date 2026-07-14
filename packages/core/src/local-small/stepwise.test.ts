@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createLocalSmallDryRun } from './stepwise.js';
+import { applyLocalSmallPatchStep, createLocalSmallDryRun } from './stepwise.js';
 
 let tmpDir: string | undefined;
 
@@ -79,3 +79,218 @@ describe('local-small stepwise dry-run harness', () => {
     expect(existsSync(join(outputDir, 'step-1-context.md'))).toBe(true);
   });
 });
+
+describe('local-small schema-bound patch step', () => {
+  afterEach(async () => {
+    if (tmpDir) {
+      await rm(tmpDir, { recursive: true, force: true });
+      tmpDir = undefined;
+    }
+  });
+
+  it('validates, applies one constrained patch, and runs verification', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-stepwise-'));
+    const repoRoot = join(tmpDir, 'repo');
+    await mkdir(join(repoRoot, 'src'), { recursive: true });
+    writeFileSync(join(repoRoot, 'src', 'app.ts'), 'export const value = 1;\n');
+    const commands: string[] = [];
+
+    const result = await applyLocalSmallPatchStep({
+      repoRoot,
+      contextPack: {
+        issue: 167,
+        issueTitle: 'Apply one schema-bound local-small patch step',
+        stepId: 'schema-bound-change',
+        stepTitle: 'Propose one schema-bound patch',
+        dryRun: true,
+        allowedFiles: ['src/app.ts'],
+        limits: { maxFilesPerStep: 4, maxContextTokens: 2000 },
+        instructions: [],
+        issueBody: '',
+        specExcerpt: '',
+      },
+      proposal: {
+        stepId: 'schema-bound-change',
+        summary: 'Update exported value',
+        changes: [{ file: 'src/app.ts', find: 'value = 1', replace: 'value = 2' }],
+        verifyCommand: 'npm test -- src/app.test.ts',
+      },
+      run: async (command) => {
+        commands.push(command);
+        return { stdout: 'ok\n', stderr: '' };
+      },
+    });
+
+    expect(result.status).toBe('success');
+    expect(readFileSync(join(repoRoot, 'src', 'app.ts'), 'utf-8')).toBe('export const value = 2;\n');
+    expect(commands).toEqual(['npm test -- src/app.test.ts']);
+    expect(result.reportEvent).toEqual({
+      type: 'local-small-step',
+      msg: 'schema-bound-change success: Update exported value; verified with npm test -- src/app.test.ts',
+    });
+  });
+
+  it('rejects invalid proposals before applying files', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-stepwise-'));
+    const repoRoot = join(tmpDir, 'repo');
+    await mkdir(join(repoRoot, 'src'), { recursive: true });
+    writeFileSync(join(repoRoot, 'src', 'app.ts'), 'export const value = 1;\n');
+
+    const result = await applyLocalSmallPatchStep({
+      repoRoot,
+      contextPack: contextPackFor(['src/app.ts']),
+      proposal: {
+        stepId: 'schema-bound-change',
+        summary: 'Try an outside file',
+        changes: [{ file: 'src/other.ts', find: 'x', replace: 'y' }],
+        verifyCommand: 'npm test',
+      },
+      run: async () => {
+        throw new Error('verification should not run');
+      },
+    });
+
+    expect(result.status).toBe('repair-needed');
+    expect(result.reason).toContain('not in allowed files');
+    expect(readFileSync(join(repoRoot, 'src', 'app.ts'), 'utf-8')).toBe('export const value = 1;\n');
+  });
+
+  it('returns repair-needed when the patch cannot be applied', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-stepwise-'));
+    const repoRoot = join(tmpDir, 'repo');
+    await mkdir(join(repoRoot, 'src'), { recursive: true });
+    writeFileSync(join(repoRoot, 'src', 'app.ts'), 'export const value = 1;\n');
+
+    const result = await applyLocalSmallPatchStep({
+      repoRoot,
+      contextPack: contextPackFor(['src/app.ts']),
+      proposal: {
+        stepId: 'schema-bound-change',
+        summary: 'Replace missing text',
+        changes: [{ file: 'src/app.ts', find: 'value = 9', replace: 'value = 2' }],
+        verifyCommand: 'npm test',
+      },
+      run: async () => {
+        throw new Error('verification should not run');
+      },
+    });
+
+    expect(result.status).toBe('repair-needed');
+    expect(result.reason).toContain('find text was not present');
+    expect(readFileSync(join(repoRoot, 'src', 'app.ts'), 'utf-8')).toBe('export const value = 1;\n');
+  });
+
+  it('does not leave a partial patch when a later change cannot be applied', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-stepwise-'));
+    const repoRoot = join(tmpDir, 'repo');
+    await mkdir(join(repoRoot, 'src'), { recursive: true });
+    writeFileSync(join(repoRoot, 'src', 'app.ts'), 'export const app = 1;\n');
+    writeFileSync(join(repoRoot, 'src', 'util.ts'), 'export const util = 1;\n');
+
+    const result = await applyLocalSmallPatchStep({
+      repoRoot,
+      contextPack: contextPackFor(['src/app.ts', 'src/util.ts']),
+      proposal: {
+        stepId: 'schema-bound-change',
+        summary: 'Update two files',
+        changes: [
+          { file: 'src/app.ts', find: 'app = 1', replace: 'app = 2' },
+          { file: 'src/util.ts', find: 'util = 9', replace: 'util = 2' },
+        ],
+        verifyCommand: 'npm test',
+      },
+      run: async () => {
+        throw new Error('verification should not run');
+      },
+    });
+
+    expect(result.status).toBe('repair-needed');
+    expect(readFileSync(join(repoRoot, 'src', 'app.ts'), 'utf-8')).toBe('export const app = 1;\n');
+    expect(readFileSync(join(repoRoot, 'src', 'util.ts'), 'utf-8')).toBe('export const util = 1;\n');
+  });
+
+  it('rejects unsafe relative paths even if they appear in the context pack', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-stepwise-'));
+    const repoRoot = join(tmpDir, 'repo');
+    await mkdir(repoRoot, { recursive: true });
+
+    const result = await applyLocalSmallPatchStep({
+      repoRoot,
+      contextPack: contextPackFor(['../outside.ts']),
+      proposal: {
+        stepId: 'schema-bound-change',
+        summary: 'Escape repo root',
+        changes: [{ file: '../outside.ts', find: 'x', replace: 'y' }],
+        verifyCommand: 'npm test',
+      },
+    });
+
+    expect(result.status).toBe('repair-needed');
+    expect(result.reason).toContain('unsafe path');
+  });
+
+  it('rejects duplicate file entries to keep patch application deterministic', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-stepwise-'));
+    const repoRoot = join(tmpDir, 'repo');
+    await mkdir(join(repoRoot, 'src'), { recursive: true });
+    writeFileSync(join(repoRoot, 'src', 'app.ts'), 'export const value = 1;\n');
+
+    const result = await applyLocalSmallPatchStep({
+      repoRoot,
+      contextPack: contextPackFor(['src/app.ts']),
+      proposal: {
+        stepId: 'schema-bound-change',
+        summary: 'Duplicate edits',
+        changes: [
+          { file: 'src/app.ts', find: 'value = 1', replace: 'value = 2' },
+          { file: 'src/app.ts', find: 'const', replace: 'let' },
+        ],
+        verifyCommand: 'npm test',
+      },
+    });
+
+    expect(result.status).toBe('repair-needed');
+    expect(result.reason).toContain('duplicate file');
+    expect(readFileSync(join(repoRoot, 'src', 'app.ts'), 'utf-8')).toBe('export const value = 1;\n');
+  });
+
+  it('returns repair-needed when verification fails after applying', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-stepwise-'));
+    const repoRoot = join(tmpDir, 'repo');
+    await mkdir(join(repoRoot, 'src'), { recursive: true });
+    writeFileSync(join(repoRoot, 'src', 'app.ts'), 'export const value = 1;\n');
+
+    const result = await applyLocalSmallPatchStep({
+      repoRoot,
+      contextPack: contextPackFor(['src/app.ts']),
+      proposal: {
+        stepId: 'schema-bound-change',
+        summary: 'Update exported value',
+        changes: [{ file: 'src/app.ts', find: 'value = 1', replace: 'value = 2' }],
+        verifyCommand: 'npm test',
+      },
+      run: async () => {
+        throw new Error('tests failed');
+      },
+    });
+
+    expect(result.status).toBe('repair-needed');
+    expect(result.reason).toContain('verification failed');
+    expect(readFileSync(join(repoRoot, 'src', 'app.ts'), 'utf-8')).toBe('export const value = 2;\n');
+  });
+});
+
+function contextPackFor(allowedFiles: string[]) {
+  return {
+    issue: 167,
+    issueTitle: 'Apply one schema-bound local-small patch step',
+    stepId: 'schema-bound-change' as const,
+    stepTitle: 'Propose one schema-bound patch',
+    dryRun: true as const,
+    allowedFiles,
+    limits: { maxFilesPerStep: 4, maxContextTokens: 2000 },
+    instructions: [],
+    issueBody: '',
+    specExcerpt: '',
+  };
+}
