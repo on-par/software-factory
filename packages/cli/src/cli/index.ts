@@ -21,6 +21,7 @@ import {
   watchUsage,
   diagnoseModels,
   watchChecks,
+  writeLocalRunReport,
 } from '@on-par/factory-core';
 import type { ModelDiagnosis } from '@on-par/factory-core';
 import { logEvent, branchFor, branchPrefixSlug, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock, withFileLock, shellEscape } from '@on-par/factory-core';
@@ -420,6 +421,8 @@ export async function shipIssue(
   const branch = branchFor(issueNum, await getIssueTitle(octokit, ghRepo, issueNum));
   const worktree = worktreePathFor(repoRoot, issueNum);
   const specPath = resolve(paths.plans, `issue-${issueNum}.md`);
+  const runStartedAt = new Date().toISOString();
+  let route: 'codex' | 'claude' | undefined;
 
   const log = (type: string, msg: string) => logEvent(paths.events, type, issueNum, msg);
 
@@ -446,43 +449,100 @@ export async function shipIssue(
     log('constitution', 'No standards found (no repo instruction files, no constitution) — proceeding without');
   }
 
-  // PLAN
-  const plan = await planPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, constitution, router, octokit, log, timeoutSeconds: timeouts.plan });
-  if (!plan.ok) {
-    throw new LaneParkError(`plan escalated: ${plan.escalate ?? 'unknown'}`, 'escalate');
-  }
-
-  const skipCI = resolveSkipCI(factoryConfig);
-
-  // BUILD
-  const build = await buildPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, branch, constitution, route: plan.route, router, log, timeoutSeconds: timeouts.build, skipCI });
-  if (!build.ok) {
-    throw new LaneParkError(`build escalated: ${build.escalate ?? 'unknown'}`, 'escalate');
-  }
-
-  // CHECK
-  const check = await checkPhase({ issue: issueNum, worktree, specPath, constitution, router, log, autoRework, buildTimeoutSeconds: timeouts.build, checkTimeoutSeconds: timeouts.check });
-  if (!check.passed) {
-    const failures = check.summary.results.filter(r => r.result === 'FAIL');
-    for (const f of failures) {
-      console.error(chalk.red(`  FAIL: ${f.checker} — ${f.details}`));
+  try {
+    // PLAN
+    const plan = await planPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, constitution, router, octokit, log, timeoutSeconds: timeouts.plan });
+    route = plan.route;
+    if (!plan.ok) {
+      throw new LaneParkError(`plan escalated: ${plan.escalate ?? 'unknown'}`, 'escalate');
     }
-    throw new LaneParkError(`${check.summary.failures} check failures after ${check.reworkRounds} rework rounds`, 'fail');
-  }
 
-  // SHIP
-  const ship = await shipPhase({ issue: issueNum, repo: ghRepo, worktree, branch, octokit, watchCI: !skipCI, log });
-  if (!ship.ok) {
-    throw new LaneParkError('ship phase failed', 'fail');
-  }
+    const skipCI = resolveSkipCI(factoryConfig);
 
-  if (skipCI) {
-    log('skip-ci', `skipping CI watch (FACTORY_SKIP_CI=1) — merging on local verify`);
-  }
+    // BUILD
+    const build = await buildPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, branch, constitution, route: plan.route, router, log, timeoutSeconds: timeouts.build, skipCI });
+    if (!build.ok) {
+      throw new LaneParkError(`build escalated: ${build.escalate ?? 'unknown'}`, 'escalate');
+    }
 
-  log('ready', `PR #${ship.prNumber} ready for review`);
-  console.log(chalk.green(`✅ Issue #${issueNum} → PR #${ship.prNumber} ready for review`));
-  return branch;
+    // CHECK
+    const check = await checkPhase({ issue: issueNum, worktree, specPath, constitution, router, log, autoRework, buildTimeoutSeconds: timeouts.build, checkTimeoutSeconds: timeouts.check });
+    if (!check.passed) {
+      const failures = check.summary.results.filter(r => r.result === 'FAIL');
+      for (const f of failures) {
+        console.error(chalk.red(`  FAIL: ${f.checker} — ${f.details}`));
+      }
+      throw new LaneParkError(`${check.summary.failures} check failures after ${check.reworkRounds} rework rounds`, 'fail');
+    }
+
+    // SHIP
+    const ship = await shipPhase({ issue: issueNum, repo: ghRepo, worktree, branch, octokit, watchCI: !skipCI, log });
+    if (!ship.ok) {
+      throw new LaneParkError('ship phase failed', 'fail');
+    }
+
+    if (skipCI) {
+      log('skip-ci', `skipping CI watch (FACTORY_SKIP_CI=1) — merging on local verify`);
+    }
+
+    log('ready', `PR #${ship.prNumber} ready for review`);
+    await maybeWriteLocalRunReport({
+      issueNum,
+      paths,
+      startedAt: runStartedAt,
+      outcome: 'ready',
+      branch,
+      worktree,
+      specPath,
+      route,
+    });
+    console.log(chalk.green(`✅ Issue #${issueNum} → PR #${ship.prNumber} ready for review`));
+    return branch;
+  } catch (err: any) {
+    if (process.env.FACTORY_LOCAL_ONLY === '1') {
+      log(parkReasonFor(err), err.message);
+    }
+    await maybeWriteLocalRunReport({
+      issueNum,
+      paths,
+      startedAt: runStartedAt,
+      outcome: parkReasonFor(err) === 'escalate' ? 'escalated' : 'failed',
+      branch,
+      worktree,
+      specPath,
+      route,
+      reason: err.message,
+    });
+    throw err;
+  }
+}
+
+async function maybeWriteLocalRunReport(opts: {
+  issueNum: number;
+  paths: ReturnType<typeof getFactoryPaths>;
+  startedAt: string;
+  outcome: 'ready' | 'failed' | 'parked' | 'escalated';
+  branch?: string;
+  worktree?: string;
+  specPath?: string;
+  route?: string;
+  reason?: string;
+}) {
+  if (process.env.FACTORY_LOCAL_ONLY !== '1') return;
+  const report = await writeLocalRunReport({
+    issue: opts.issueNum,
+    eventsFile: opts.paths.events,
+    reportsDir: opts.paths.reports,
+    startedAt: opts.startedAt,
+    outcome: opts.outcome,
+    profile: 'local-only',
+    branch: opts.branch,
+    worktree: opts.worktree,
+    specPath: opts.specPath,
+    route: opts.route,
+    reason: opts.reason,
+  });
+  console.log(chalk.cyan(`local-only report: ${report.path}`));
 }
 
 async function cmdShip(issueNum: number, opts: { product?: string; autoRework?: boolean }) {
@@ -491,7 +551,9 @@ async function cmdShip(issueNum: number, opts: { product?: string; autoRework?: 
   } catch (err: any) {
     const repoRoot = await getRepoRoot();
     const paths = getFactoryPaths(repoRoot);
-    logEvent(paths.events, parkReasonFor(err), issueNum, err.message);
+    if (process.env.FACTORY_LOCAL_ONLY !== '1') {
+      logEvent(paths.events, parkReasonFor(err), issueNum, err.message);
+    }
     console.error(chalk.red(`Ship failed for issue #${issueNum}: ${err.message}`));
     process.exit(1);
   }
@@ -737,6 +799,13 @@ type RunLaneDeps = {
   emitEvent?: typeof logEvent;
 };
 
+export function shouldEmitLaneTerminalEvent(
+  injectedShip: RunLaneDeps['ship'],
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return !(env.FACTORY_LOCAL_ONLY === '1' && (injectedShip ?? shipIssue) === shipIssue);
+}
+
 export async function runLane(
   lane: string,
   issues: number[],
@@ -746,6 +815,7 @@ export async function runLane(
   deps: RunLaneDeps = {},
 ) {
   const { ship = shipIssue, waitMerge = waitForMerge, pathExists = existsSync, emitEvent = logEvent } = deps;
+  const emitTerminalEvent = shouldEmitLaneTerminalEvent(deps.ship);
   for (let i = 0; i < issues.length; i++) {
     const issue = issues[i];
     if (pathExists(paths.stop)) {
@@ -758,7 +828,9 @@ export async function runLane(
     } catch (err: any) {
       const reason = parkReasonFor(err);
       console.error(chalk.red(`[factory] lane '${lane}' #${issue} parked (${reason}): ${err.message}`));
-      emitEvent(paths.events, reason, issue, err.message);
+      if (emitTerminalEvent) {
+        emitEvent(paths.events, reason, issue, err.message);
+      }
       emitEvent(paths.events, 'parked', issue, `lane '${lane}' parked (${reason}); ${issues.length - i - 1} issues remaining`);
       return;
     }
