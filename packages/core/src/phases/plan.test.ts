@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -175,7 +175,98 @@ describe('planPhase', () => {
     expect(result.route).toBe('codex');
   });
 
+  it('archives a pre-existing spec before writing the fresh plan output', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-38.md');
+    await writeFile(specPath, '---\nroute: claude\n---\n# Stale Spec\n');
+
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [{
+          output: '---\nroute: codex\n---\n# Fresh Spec\n',
+        }],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 'Refresh stale plan', body: 'Do not reuse old specs.' } }),
+        },
+      },
+    };
+    const logs: Array<{ type: string; msg: string }> = [];
+
+    const result = await planPhase({
+      issue: 38,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit,
+      log: (type, msg) => { logs.push({ type, msg }); },
+    });
+
+    expect(result.route).toBe('codex');
+    await expect(readFile(specPath, 'utf-8')).resolves.toContain('# Fresh Spec');
+
+    const archived = await readdir(join(worktree, '.archive'));
+    expect(archived).toHaveLength(1);
+    await expect(readFile(join(worktree, '.archive', archived[0]), 'utf-8')).resolves.toContain('# Stale Spec');
+    expect(logs.some(l => l.type === 'plan' && l.msg.startsWith('Archived existing spec before planning:'))).toBe(true);
+  });
+
   describe('FACTORY_CODEX kill-switch', () => {
+    it('forces route to codex when FACTORY_LOCAL_ONLY=1 so builds use the local agent harness', async () => {
+      const prevLocalOnly = process.env.FACTORY_LOCAL_ONLY;
+      process.env.FACTORY_LOCAL_ONLY = '1';
+
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-79.md');
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{
+            output: '---\nroute: claude\n---\n# Spec\n',
+          }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub, false, false);
+      const octokit: any = {
+        rest: {
+          issues: {
+            get: async () => ({ data: { title: 'Use local models', body: 'Keep spend at zero.' } }),
+          },
+        },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      try {
+        const result = await planPhase({
+          issue: 79,
+          repo: 'on-par/software-factory',
+          worktree,
+          specPath,
+          router,
+          constitution: null,
+          octokit,
+          log: (type, msg) => { logs.push({ type, msg }); },
+        });
+
+        expect(result.route).toBe('codex');
+        expect(logs).toContainEqual({ type: 'warn', msg: 'local-only mode requires a local Codex harness — forcing route to codex' });
+
+        const persisted = await readFile(specPath, 'utf-8');
+        expect(persisted).toContain('route: codex');
+        expect(persisted).not.toContain('route: claude');
+      } finally {
+        if (prevLocalOnly === undefined) delete process.env.FACTORY_LOCAL_ONLY;
+        else process.env.FACTORY_LOCAL_ONLY = prevLocalOnly;
+      }
+    });
+
     it('forces route to claude and logs a warn when FACTORY_CODEX=0', async () => {
       process.env.FACTORY_CODEX = '0';
 

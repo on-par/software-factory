@@ -48,16 +48,35 @@ export class ModelRegistry {
     return !!this.get(modelId)?.experimental;
   }
 
-  /** Check if a model is fully available (env key + required binaries) */
+  /** Check if a model is safe for local-only routing. */
+  isLocalOnlyModel(modelId: string): boolean {
+    const def = this.get(modelId);
+    if (!def) return false;
+    const nativeModel = def.providerModel ?? modelId;
+    return def.provider === 'ollama' && !nativeModel.includes(':cloud') && !modelId.includes(':cloud');
+  }
+
+  /** Check if a model is routable from static config/env. Machine probes live in diagnoseModels(). */
   isAvailable(modelId: string): boolean {
+    const def = this.get(modelId);
+    if (!def) return false;
     if (!this.isEnvAvailable(modelId)) return false;
-    if (this.isCodexModel(modelId) && !isCommandAvailable('codex')) return false;
     return true;
   }
 
   /** Get the claude -p flag for a model */
   getClaudeFlag(modelId: string): string | undefined {
     return this.get(modelId)?.claudeFlag;
+  }
+
+  /** Get provider-native model id */
+  getProviderModel(modelId: string): string {
+    return this.get(modelId)?.providerModel ?? modelId;
+  }
+
+  /** Get provider-native options */
+  getProviderOptions(modelId: string): Record<string, unknown> | undefined {
+    return this.get(modelId)?.providerOptions;
   }
 
   /** Get codex flags for a model */
@@ -74,9 +93,10 @@ export class ModelRegistry {
   }
 
   /** Get all available models for a tier, in priority order */
-  getAvailableModelsForTier(tier: string, byok = false, allowExperimental = false): string[] {
+  getAvailableModelsForTier(tier: string, byok = false, allowExperimental = false, localOnly = false): string[] {
     return this.getModelsInTier(tier).filter(m => {
       if (!allowExperimental && this.isExperimental(m)) return false;
+      if (localOnly && !this.isLocalOnlyModel(m)) return false;
       if (byok && !this.isEnvAvailable(m)) return false;
       return this.isAvailable(m);
     });
@@ -101,6 +121,7 @@ export function isCommandAvailable(cmd: string): boolean {
 export interface DoctorProbes {
   commandAvailable?: (cmd: string) => boolean;
   envPresent?: (key: string) => boolean;
+  ollamaModelPresent?: (model: string) => boolean;
 }
 
 export interface ModelDiagnosis {
@@ -117,9 +138,11 @@ export function diagnoseModels(
   registry: ModelRegistry,
   probes: DoctorProbes = {},
   allowExperimental = false,
+  localOnly = false,
 ): ModelDiagnosis[] {
   const commandAvailable = probes.commandAvailable ?? isCommandAvailable;
   const envPresent = probes.envPresent ?? ((key: string) => !!process.env[key]);
+  const ollamaModelPresent = probes.ollamaModelPresent;
 
   return registry.list().map((m) => {
     const def = registry.get(m)!;
@@ -132,6 +155,17 @@ export function diagnoseModels(
 
     if (experimental && !allowExperimental) {
       reason = 'experimental — set FACTORY_EXPERIMENTAL=1 to enable';
+    } else if (localOnly && !registry.isLocalOnlyModel(m)) {
+      reason = 'excluded by FACTORY_LOCAL_ONLY=1';
+    } else if (def.codex === true && def.provider === 'ollama') {
+      if (!commandAvailable('ollama')) {
+        reason = 'ollama not found on PATH';
+      } else if (ollamaModelPresent && !ollamaModelPresent(registry.getProviderModel(m))) {
+        reason = `${registry.getProviderModel(m)} not found in ollama list`;
+      } else {
+        reachable = true;
+        reason = 'ok (ollama native command agent)';
+      }
     } else if (def.codex === true) {
       // Deliberately does not check def.envKey here, unlike ModelRegistry.isAvailable():
       // the codex CLI carries its own (OAuth-based) auth, so a missing API key doesn't
@@ -142,10 +176,17 @@ export function diagnoseModels(
         reachable = true;
         reason = 'ok (codex CLI)';
       }
+    } else if (provider === 'ollama') {
+      if (!commandAvailable('ollama')) {
+        reason = 'ollama not found on PATH';
+      } else if (ollamaModelPresent && !ollamaModelPresent(registry.getProviderModel(m))) {
+        reason = `${registry.getProviderModel(m)} not found in ollama list`;
+      } else {
+        reachable = true;
+        reason = 'ok (ollama native)';
+      }
     } else if (!commandAvailable('claude')) {
       reason = 'claude CLI not found on PATH';
-    } else if (provider === 'ollama' && !commandAvailable('ollama')) {
-      reason = 'ollama not found on PATH';
     } else if (provider === 'anthropic') {
       reachable = true;
       reason = envPresent(def.envKey ?? 'ANTHROPIC_API_KEY')
@@ -153,9 +194,6 @@ export function diagnoseModels(
         : `ok (claude CLI auth; ${def.envKey ?? 'ANTHROPIC_API_KEY'} not set)`;
     } else if (def.envKey && !envPresent(def.envKey)) {
       reason = `${def.envKey} not set`;
-    } else if (provider === 'ollama') {
-      reachable = true;
-      reason = 'ok (claude CLI + ollama)';
     } else {
       reachable = true;
       reason = 'ok (claude CLI)';

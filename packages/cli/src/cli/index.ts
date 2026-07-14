@@ -23,7 +23,7 @@ import {
   watchChecks,
 } from '@on-par/factory-core';
 import type { ModelDiagnosis } from '@on-par/factory-core';
-import { logEvent, branchFor, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock, withFileLock, shellEscape } from '@on-par/factory-core';
+import { logEvent, branchFor, branchPrefixSlug, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock, withFileLock, shellEscape } from '@on-par/factory-core';
 import { exec as execCb, execSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
@@ -212,14 +212,27 @@ export function hasReachableWorker(diagnoses: ModelDiagnosis[]): boolean {
   return diagnoses.some((d) => d.reachable && (d.tiers.includes('worker') || d.tiers.includes('worker_fallback')));
 }
 
+function ollamaModelSet(): Set<string> | undefined {
+  try {
+    const out = execSync('ollama list', { encoding: 'utf-8', timeout: 10_000 });
+    return new Set(out.split('\n').slice(1).map(line => line.trim().split(/\s+/)[0]).filter(Boolean));
+  } catch {
+    return undefined;
+  }
+}
+
 async function cmdModels(opts: { doctor?: boolean } = {}) {
   const modelsConfig = loadModelsConfig();
   const { ModelRegistry } = await import('@on-par/factory-core');
   const registry = new ModelRegistry(modelsConfig);
   const allowExperimental = process.env.FACTORY_EXPERIMENTAL === '1';
+  const localOnly = process.env.FACTORY_LOCAL_ONLY === '1';
 
   if (opts.doctor) {
-    const diagnoses = diagnoseModels(registry, {}, allowExperimental);
+    const ollamaModels = ollamaModelSet();
+    const diagnoses = diagnoseModels(registry, {
+      ollamaModelPresent: ollamaModels ? (model: string) => ollamaModels.has(model) : undefined,
+    }, allowExperimental, localOnly);
     console.log(formatDoctorReport(diagnoses));
     if (!hasReachableWorker(diagnoses)) {
       console.error(chalk.red('factory: no worker model is reachable — fix the reasons above before running a queue'));
@@ -491,7 +504,7 @@ async function getIssueTitle(octokit: Octokit, repo: string, issue: number): Pro
 }
 
 function worktreePathFor(repoRoot: string, issueNum: number): string {
-  return resolve(dirname(repoRoot), `${basename(repoRoot)}-factory-${issueNum}`);
+  return resolve(dirname(repoRoot), `${basename(repoRoot)}-factory-${branchPrefixSlug()}-${issueNum}`);
 }
 
 async function cmdLand(issueNum: number) {

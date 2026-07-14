@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   slugify,
+  branchPrefixSlug,
   shellEscape,
   branchFor,
   cleanupWorktree,
@@ -40,9 +41,32 @@ describe('utils', () => {
     expect(shellEscape('plain')).toBe("'plain'");
   });
 
-  it('builds a ship-it branch from issue and title, matching slugify', () => {
+  it('builds a ship-it branch from issue and title by default, matching slugify', () => {
     expect(branchFor(22, 'Reliably detect a merged PR')).toBe(`ship-it/22-${slugify('Reliably detect a merged PR')}`);
     expect(branchFor(7, 'Hello, World!')).toBe('ship-it/7-hello-world');
+  });
+
+  it('allows comparison runs to use a custom branch prefix', () => {
+    const prev = process.env.FACTORY_BRANCH_PREFIX;
+    process.env.FACTORY_BRANCH_PREFIX = 'compare-local';
+    try {
+      expect(branchFor(7, 'Hello, World!')).toBe('compare-local/7-hello-world');
+    } finally {
+      if (prev === undefined) delete process.env.FACTORY_BRANCH_PREFIX;
+      else process.env.FACTORY_BRANCH_PREFIX = prev;
+    }
+  });
+
+  it('falls back to ship-it when the custom branch prefix has no slug characters', () => {
+    const prev = process.env.FACTORY_BRANCH_PREFIX;
+    process.env.FACTORY_BRANCH_PREFIX = '!!!';
+    try {
+      expect(branchPrefixSlug()).toBe('ship-it');
+      expect(branchFor(7, 'Hello, World!')).toBe('ship-it/7-hello-world');
+    } finally {
+      if (prev === undefined) delete process.env.FACTORY_BRANCH_PREFIX;
+      else process.env.FACTORY_BRANCH_PREFIX = prev;
+    }
   });
 
   it('logs worktree cleanup failures without rejecting', async () => {

@@ -36,8 +36,31 @@ const modelsConfig: ModelsConfig = {
       codex: true,
       codexFlag: '--model gpt-5-codex',
     },
+    'ollama-model': {
+      provider: 'ollama',
+      tier: 'boss',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 32768,
+      capabilities: [],
+      envKey: null,
+      providerModel: 'qwen2.5-coder:14b',
+      providerOptions: { num_ctx: 16384, temperature: 0.2 },
+    },
+    'ollama-codex-model': {
+      provider: 'ollama',
+      tier: 'boss',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 32768,
+      capabilities: [],
+      envKey: null,
+      providerModel: 'qwen2.5-coder:14b',
+      codex: true,
+      codexFlag: '--oss --local-provider ollama -m qwen2.5-coder:14b',
+    },
   },
-  tiers: { boss: ['claude-model', 'claude-no-flag', 'codex-model'] },
+  tiers: { boss: ['claude-model', 'claude-no-flag', 'codex-model', 'ollama-model', 'ollama-codex-model'] },
   failover: {
     triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
     maxRetries: 2,
@@ -130,6 +153,169 @@ describe('CliModelExecutor', () => {
     expect(rec.calls[0].cmd).toMatch(/ - < '\/.*factory-codex-[^']+'$/);
     expect(rec.calls[0].cmd).toMatch(/ -o '\/.*factory-codex-out-[^']+' - </);
     expect(rec.calls[0].opts.timeout).toBe(timeout * 1000);
+  });
+
+  it('runs Ollama through the native chat API with provider options', async () => {
+    const calls: { input: string; init: any }[] = [];
+    const fetchFn = async (input: string, init: any) => {
+      calls.push({ input, init });
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => '',
+        json: async () => ({ message: { content: 'OLLAMA OUTPUT' } }),
+      };
+    };
+    const executor = new CliModelExecutor(recordingExec().fn, fetchFn);
+
+    const output = await executor.runModel('ollama-model', 'draft plan', {
+      worktree,
+      timeout,
+      task: 'plan',
+      registry,
+      routesConfig,
+    });
+
+    expect(output).toBe('OLLAMA OUTPUT');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].input).toBe('http://127.0.0.1:11434/api/chat');
+    const body = JSON.parse(calls[0].init.body);
+    expect(body).toEqual({
+      model: 'qwen2.5-coder:14b',
+      stream: false,
+      messages: [{ role: 'user', content: 'draft plan' }],
+      options: { num_ctx: 16384, temperature: 0.2 },
+    });
+  });
+
+  it('runs a codex-enabled Ollama model through the local command loop for codex tasks', async () => {
+    const execCalls: string[] = [];
+    const execFn = async (cmd: string) => {
+      execCalls.push(cmd);
+      if (cmd === 'git status --short') return { stdout: '', stderr: '' };
+      return { stdout: 'ok', stderr: '' };
+    };
+    const fetchCalls: string[] = [];
+    const fetchFn = async (_input: string, init: any) => {
+      fetchCalls.push(init.body);
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => '',
+        json: async () => ({
+          message: {
+            content: fetchCalls.length === 1
+              ? '{"commands":["printf hello > local.txt"],"done":false,"final":"created"}'
+              : '{"commands":[],"done":true,"final":"done"}',
+          },
+        }),
+      };
+    };
+    const executor = new CliModelExecutor(execFn, fetchFn);
+
+    const output = await executor.runModel('ollama-codex-model', 'build it', {
+      worktree,
+      timeout,
+      task: 'build_codex',
+      registry,
+      routesConfig,
+    });
+
+    expect(output).toContain('MODEL STEP 1');
+    expect(execCalls).toEqual(['git status --short', 'printf hello > local.txt', 'git status --short']);
+  });
+
+  it('feeds non-zero local command exits back into the Ollama command loop as observations', async () => {
+    const execCalls: string[] = [];
+    const execFn = async (cmd: string) => {
+      execCalls.push(cmd);
+      if (cmd === 'missing-command') {
+        throw Object.assign(new Error('not found'), {
+          code: 127,
+          stdout: '',
+          stderr: 'command not found',
+        });
+      }
+      if (cmd === 'git status --short') return { stdout: '', stderr: '' };
+      return { stdout: 'ok', stderr: '' };
+    };
+    const fetchCalls: string[] = [];
+    const fetchFn = async (_input: string, init: any) => {
+      fetchCalls.push(init.body);
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => '',
+        json: async () => ({
+          message: {
+            content: fetchCalls.length === 1
+              ? '{"commands":["missing-command"],"done":false,"final":"inspect failed"}'
+              : '{"commands":[],"done":true,"final":"handled failure"}',
+          },
+        }),
+      };
+    };
+    const executor = new CliModelExecutor(execFn, fetchFn);
+
+    const output = await executor.runModel('ollama-codex-model', 'build it', {
+      worktree,
+      timeout,
+      task: 'build_codex',
+      registry,
+      routesConfig,
+    });
+
+    expect(output).toContain('EXIT_CODE: 127');
+    expect(output).toContain('command not found');
+    expect(fetchCalls).toHaveLength(2);
+    expect(execCalls).toEqual(['git status --short', 'missing-command', 'git status --short']);
+  });
+
+  it('auto-commits only paths that became dirty during the local command loop', async () => {
+    const execCalls: string[] = [];
+    const execFn = async (cmd: string) => {
+      execCalls.push(cmd);
+      if (cmd === 'git status --short' && execCalls.length === 1) {
+        return { stdout: '?? preexisting.txt\n', stderr: '' };
+      }
+      if (cmd === 'git status --short') {
+        return { stdout: '?? preexisting.txt\n M fresh.txt\n', stderr: '' };
+      }
+      return { stdout: 'ok', stderr: '' };
+    };
+    const fetchCalls: string[] = [];
+    const fetchFn = async (_input: string, init: any) => {
+      fetchCalls.push(init.body);
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => '',
+        json: async () => ({
+          message: {
+            content: fetchCalls.length === 1
+              ? '{"commands":["printf ok > fresh.txt"],"done":false,"final":"created"}'
+              : '{"commands":[],"done":true,"final":"done"}',
+          },
+        }),
+      };
+    };
+    const executor = new CliModelExecutor(execFn, fetchFn);
+
+    const output = await executor.runModel('ollama-codex-model', 'build it', {
+      worktree,
+      timeout,
+      task: 'build_codex',
+      registry,
+      routesConfig,
+    });
+
+    expect(output).toContain('AUTO-COMMIT: committed 1 changed path(s).');
+    expect(execCalls).toContain("git add -- 'fresh.txt' && git commit -m \"feat: implement factory issue\"");
+    expect(execCalls).not.toContain("git add -- 'preexisting.txt' && git commit -m \"feat: implement factory issue\"");
   });
 
   it('classifies rate-limit failures from the exec seam', async () => {

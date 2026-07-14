@@ -34,7 +34,7 @@ export { loadGoldenCases, scoreSpec, judgeSpec, median, runJudgeSamples, runEval
 export type { CaseResult, DeterministicCheck, EvalSummary, ExpectedRoute, GoldenCase, RunEvalOpts, Baseline, BaselineCase, BaselineComparison, RegressionIssue, JudgeAggregate, JudgeSample, HistoryRecord } from './eval/index.js';
 
 // Utils
-export { logEvent, logCost, readCosts, slugify, branchFor, setupWorktree, cleanupWorktree, gitFetch, shellEscape, ensureDir, isEscalation, escalationLine, codexDisabled } from './utils/index.js';
+export { logEvent, logCost, readCosts, slugify, branchPrefixSlug, branchFor, setupWorktree, cleanupWorktree, gitFetch, shellEscape, ensureDir, isEscalation, escalationLine, codexDisabled } from './utils/index.js';
 export { withGitLock, withFileLock } from './utils/lock.js';
 export type { FileLockOptions } from './utils/lock.js';
 export { watchChecks } from './utils/ci-watch.js';

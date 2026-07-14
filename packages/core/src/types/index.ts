@@ -16,6 +16,10 @@ export interface ModelDefinition {
   envKey: string | null;
   /** Flag to pass to `claude -p --model <flag>` */
   claudeFlag?: string;
+  /** Provider-native model id, e.g. the Ollama tag to pass to /api/chat */
+  providerModel?: string;
+  /** Provider-native options, e.g. Ollama num_ctx/temperature */
+  providerOptions?: Record<string, unknown>;
   /** Whether this model runs via Codex CLI */
   codex?: boolean;
   /** Extra Codex CLI flags */
