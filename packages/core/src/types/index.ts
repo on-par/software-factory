@@ -24,6 +24,9 @@ export interface ModelDefinition {
   codex?: boolean;
   /** Extra Codex CLI flags */
   codexFlag?: string;
+  /** Coding-harness id this model dispatches through (see harness/catalog.ts).
+   *  When absent, inferred from provider/codex flags for back-compat. */
+  harness?: string;
   /** Speculative/unproven model — excluded from routing unless FACTORY_EXPERIMENTAL=1 */
   experimental?: boolean;
 }

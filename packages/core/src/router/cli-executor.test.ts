@@ -63,8 +63,28 @@ const modelsConfig: ModelsConfig = {
       codex: true,
       codexFlag: '--oss --local-provider ollama -m qwen2.5-coder:14b',
     },
+    'ollama-declared-claude-cli': {
+      provider: 'ollama',
+      tier: 'boss',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+      harness: 'claude-cli',
+      claudeFlag: 'claude-sonnet-5',
+    },
   },
-  tiers: { boss: ['claude-model', 'claude-no-flag', 'codex-model', 'ollama-model', 'ollama-codex-model'] },
+  tiers: {
+    boss: [
+      'claude-model',
+      'claude-no-flag',
+      'codex-model',
+      'ollama-model',
+      'ollama-codex-model',
+      'ollama-declared-claude-cli',
+    ],
+  },
   failover: {
     triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
     maxRetries: 2,
@@ -199,6 +219,36 @@ describe('CliModelExecutor', () => {
       messages: [{ role: 'user', content: 'draft plan' }],
       options: { num_ctx: 16384, temperature: 0.2 },
     });
+  });
+
+  it('dispatches through a declared harness instead of inferring from provider', async () => {
+    const rec = recordingExec({ stdout: 'CLAUDE OUTPUT' });
+    const executor = new CliModelExecutor(rec.fn);
+
+    const output = await executor.runModel('ollama-declared-claude-cli', 'draft plan', {
+      worktree,
+      timeout,
+      task: 'plan',
+      registry,
+      routesConfig,
+    });
+
+    expect(output).toBe('CLAUDE OUTPUT');
+    expect(rec.calls).toHaveLength(1);
+    expect(rec.calls[0].cmd).toContain('claude -p');
+    expect(rec.calls[0].cmd).toContain('--model claude-sonnet-5');
+  });
+
+  it('rejects a non-agentic harness on a build task, naming the model and harness', async () => {
+    const executor = new CliModelExecutor(recordingExec().fn);
+
+    await expect(executor.runModel('ollama-model', 'build it', {
+      worktree,
+      timeout,
+      task: 'build_claude',
+      registry,
+      routesConfig,
+    })).rejects.toThrow(/ollama-model.*ollama-http.*cannot edit files/s);
   });
 
   it('runs a codex-enabled Ollama model through the local command loop for codex tasks', async () => {

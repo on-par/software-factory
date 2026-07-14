@@ -60,3 +60,6 @@ export interface CodingHarness {
   readonly agentic: boolean;
   run(request: HarnessRequest): Promise<HarnessResult>;
 }
+
+export { HARNESS_CATALOG, KNOWN_HARNESS_IDS, isAgenticHarness } from './catalog.js';
+export type { HarnessCatalogEntry } from './catalog.js';

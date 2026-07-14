@@ -30,6 +30,7 @@ const routes: RoutesConfig = {
   version: 1,
   routes: {
     plan: { tier: 'boss', description: 'stub' },
+    build_claude: { tier: 'boss', description: 'stub' },
   },
 };
 
@@ -330,5 +331,37 @@ describe('ModelRouter with StubModelExecutor', () => {
     const router = new ModelRouter(mixedModels, routes, false, new StubModelExecutor({ scripts: {} }), true, true);
 
     expect(router.resolveAll('plan')).toEqual(['ollama-local']);
+  });
+
+  it('excludes non-agentic harnesses from build_claude while keeping agentic ones', () => {
+    const buildModels: ModelsConfig = {
+      version: 1,
+      models: {
+        'agentic-model': {
+          provider: 'anthropic',
+          tier: 'boss',
+          costPerMtokInput: 0,
+          costPerMtokOutput: 0,
+          contextWindow: 1000,
+          capabilities: [],
+          envKey: null,
+        },
+        'non-agentic-model': {
+          provider: 'ollama',
+          tier: 'boss',
+          costPerMtokInput: 0,
+          costPerMtokOutput: 0,
+          contextWindow: 1000,
+          capabilities: [],
+          envKey: null,
+        },
+      },
+      tiers: { boss: ['agentic-model', 'non-agentic-model'] },
+      failover: models.failover,
+      routingRules: {},
+    };
+    const router = new ModelRouter(buildModels, routes, false, new StubModelExecutor({ scripts: {} }));
+
+    expect(router.resolveAll('build_claude')).toEqual(['agentic-model']);
   });
 });

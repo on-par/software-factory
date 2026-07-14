@@ -16,6 +16,7 @@
         "dispute_resolution"
       ],
       "envKey": null,
+      "harness": "claude-cli",
       "claudeFlag": "fable",
       "note": "Claude Fable 5 — most capable model, uses claude CLI subscription auth. Falls back to opus on rate-limit/usage-cap."
     },
@@ -33,6 +34,7 @@
         "dispute_resolution"
       ],
       "envKey": null,
+      "harness": "claude-cli",
       "claudeFlag": "claude-opus-4-8",
       "note": "Uses claude CLI subscription auth, no API key needed."
     },
@@ -53,6 +55,7 @@
         "triage"
       ],
       "envKey": null,
+      "harness": "claude-cli",
       "claudeFlag": "claude-sonnet-5",
       "note": "Uses claude CLI subscription auth, no API key needed."
     },
@@ -69,6 +72,7 @@
         "codex"
       ],
       "envKey": null,
+      "harness": "codex-cli",
       "codex": true,
       "codexFlag": "-m gpt-5.6-sol -c model_reasoning_effort=medium",
       "note": "Codex CLI subscription auth (ChatGPT/OAuth), not an API key — do not gate availability on OPENAI_API_KEY. Explicitly pins -m gpt-5.6-sol instead of silently riding ~/.codex/config.toml's default model."
@@ -86,6 +90,7 @@
         "codex"
       ],
       "envKey": null,
+      "harness": "codex-cli",
       "codex": true,
       "codexFlag": "-c model_reasoning_effort=high",
       "note": "Codex CLI subscription auth (ChatGPT/OAuth), not an API key — do not gate availability on OPENAI_API_KEY. Actual served model follows ~/.codex/config.toml's default (currently resolves to gpt-5-codex). Kept as fallback behind gpt-5.6-sol."
@@ -101,6 +106,7 @@
         "lightweight_review"
       ],
       "envKey": "OPENAI_API_KEY",
+      "harness": "claude-cli",
       "claudeFlag": "gpt-4.1-mini",
       "experimental": true,
       "note": "claude-CLI wiring is unproven \u2014 the Claude CLI only serves Anthropic models"
@@ -116,6 +122,7 @@
         "coding"
       ],
       "envKey": null,
+      "harness": "ollama-http",
       "claudeFlag": "ollama/glm-5.2:cloud",
       "experimental": true,
       "note": "speculative \u2014 opt in with FACTORY_EXPERIMENTAL=1"
@@ -140,6 +147,7 @@
         "triage"
       ],
       "envKey": null,
+      "harness": "ollama-http",
       "providerModel": "qwen2.5-coder:14b",
       "providerOptions": {
         "num_ctx": 16384,
@@ -161,6 +169,7 @@
         "codex"
       ],
       "envKey": null,
+      "harness": "ollama-command-agent",
       "providerModel": "qwen3.5:9b",
       "providerOptions": {
         "num_ctx": 8192,
@@ -186,6 +195,7 @@
         "verification"
       ],
       "envKey": null,
+      "harness": "ollama-http",
       "providerModel": "qwen3.5:9b",
       "providerOptions": {
         "num_ctx": 8192,
@@ -209,6 +219,7 @@
         "verification"
       ],
       "envKey": null,
+      "harness": "ollama-http",
       "providerModel": "qwen3:8b",
       "providerOptions": {
         "num_ctx": 24576,
@@ -232,6 +243,7 @@
         "dispute_resolution"
       ],
       "envKey": null,
+      "harness": "ollama-http",
       "providerModel": "gemma4:12b",
       "providerOptions": {
         "num_ctx": 32768,
@@ -250,6 +262,7 @@
         "coding"
       ],
       "envKey": "DEEPSEEK_API_KEY",
+      "harness": "claude-cli",
       "claudeFlag": "deepseek/deepseek-chat",
       "experimental": true,
       "note": "speculative \u2014 opt in with FACTORY_EXPERIMENTAL=1"
@@ -265,6 +278,7 @@
         "coding"
       ],
       "envKey": null,
+      "harness": "ollama-http",
       "claudeFlag": "ollama/qwen3.5-coder:cloud",
       "experimental": true,
       "note": "speculative \u2014 opt in with FACTORY_EXPERIMENTAL=1"

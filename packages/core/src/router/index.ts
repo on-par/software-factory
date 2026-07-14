@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { ModelRegistry } from '../models/index.js';
 import type { TaskType } from '../types/index.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
-import { HarnessError } from '../harness/index.js';
+import { HarnessError, isAgenticHarness } from '../harness/index.js';
 import { ClaudeCliHarness } from '../harness/claude-cli.js';
 import { CodexCliHarness } from '../harness/codex-cli.js';
 import { OllamaHttpHarness } from '../harness/ollama-http.js';
@@ -78,6 +78,7 @@ export class CliModelExecutor implements ModelExecutor {
   private claudeHarness: ClaudeCliHarness;
   private codexHarness: CodexCliHarness;
   private ollamaHarness: OllamaHttpHarness;
+  private harnesses: Record<string, { run(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string> }>;
 
   constructor(
     private execFn: ExecFn = exec,
@@ -86,25 +87,28 @@ export class CliModelExecutor implements ModelExecutor {
     this.claudeHarness = new ClaudeCliHarness(execFn);
     this.codexHarness = new CodexCliHarness(execFn);
     this.ollamaHarness = new OllamaHttpHarness(fetchFn);
+    this.harnesses = {
+      'claude-cli': { run: (m, p, c) => this.runClaude(m, p, c) },
+      'codex-cli': { run: (m, p, c) => this.runCodex(m, p, c) },
+      'ollama-http': { run: (m, p, c) => this.runOllama(m, p, c) },
+      'ollama-command-agent': { run: (m, p, c) => this.runOllamaCommandAgent(m, p, c.worktree, c.timeout, c.registry) },
+    };
   }
 
-  /** Run a single model via its native provider when available, otherwise Claude/Codex CLI. */
+  /** Run a single model via the harness declared (or inferred) for it in the registry. */
   async runModel(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string> {
     const def = ctx.registry.get(model);
     if (!def) throw new Error(`Unknown model: ${model}`);
 
-    const { worktree, timeout } = ctx;
-
-    if (def.codex && def.provider === 'ollama' && (ctx.task === 'build_codex' || ctx.routesConfig.routes[ctx.task]?.requires === 'codex')) {
-      return this.runOllamaCommandAgent(model, prompt, worktree, timeout, ctx.registry);
+    const harnessId = ctx.registry.getHarnessId(model)!;
+    const entry = this.harnesses[harnessId];
+    if (!entry) {
+      throw new Error(`Model '${model}' declares unknown harness '${harnessId}' (known harnesses: ${Object.keys(this.harnesses).join(', ')})`);
     }
-    if (def.codex && (ctx.task === 'build_codex' || ctx.task === 'build_claude' || ctx.routesConfig.routes[ctx.task]?.requires === 'codex')) {
-      return this.runCodex(model, prompt, ctx);
+    if (!isAgenticHarness(harnessId) && (ctx.task === 'build_codex' || ctx.task === 'build_claude')) {
+      throw new Error(`Model '${model}' uses non-agentic harness '${harnessId}', which cannot edit files — rejected for build task '${ctx.task}'`);
     }
-    if (def.provider === 'ollama') {
-      return this.runOllama(model, prompt, ctx);
-    }
-    return this.runClaude(model, prompt, ctx);
+    return entry.run(model, prompt, ctx);
   }
 
   /** Run via Ollama's native HTTP API. */
@@ -412,9 +416,12 @@ export class ModelRouter {
   resolveAll(task: TaskType): string[] {
     const tier = this.getTier(task);
     if (!tier) return [];
-    const models = this.registry.getAvailableModelsForTier(tier, this.byok, this.allowExperimental, this.localOnly);
+    let models = this.registry.getAvailableModelsForTier(tier, this.byok, this.allowExperimental, this.localOnly);
     if (this.routesConfig.routes[task]?.requires === 'codex') {
-      return models.filter(model => this.registry.isCodexModel(model));
+      models = models.filter(model => this.registry.isCodexModel(model));
+    }
+    if (task === 'build_codex' || task === 'build_claude') {
+      models = models.filter(model => isAgenticHarness(this.registry.getHarnessId(model) ?? ''));
     }
     return models;
   }

@@ -9,6 +9,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { resolveConfigPath } from '@on-par/factory-config';
+import { KNOWN_HARNESS_IDS } from '../harness/catalog.js';
 
 // ---------- Schemas ----------
 
@@ -25,6 +26,7 @@ const ModelDefSchema = z.object({
   providerOptions: z.record(z.string(), z.unknown()).optional(),
   codex: z.boolean().optional(),
   codexFlag: z.string().optional(),
+  harness: z.string().optional(),
   experimental: z.boolean().optional(),
 });
 
@@ -39,6 +41,16 @@ const ModelsConfigSchema = z.object({
     escalateAfterTierExhausted: z.boolean(),
   }),
   routingRules: z.record(z.string(), z.unknown()).default({}),
+}).superRefine((config, ctx) => {
+  for (const [name, def] of Object.entries(config.models)) {
+    if (def.harness !== undefined && !KNOWN_HARNESS_IDS.includes(def.harness)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['models', name, 'harness'],
+        message: `Model '${name}' declares unknown harness '${def.harness}' (known harnesses: ${KNOWN_HARNESS_IDS.join(', ')})`,
+      });
+    }
+  }
 });
 
 const RoutesConfigSchema = z.object({
