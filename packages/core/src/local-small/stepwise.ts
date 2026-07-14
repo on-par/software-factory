@@ -1,5 +1,10 @@
+import { exec as execCb } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { resolve, relative } from 'node:path';
+import { isAbsolute, relative, resolve } from 'node:path';
+import { promisify } from 'node:util';
+
+const exec = promisify(execCb);
+type PatchRun = (command: string, options: { cwd: string; timeout: number; maxBuffer: number }) => Promise<{ stdout: string; stderr: string }>;
 
 export interface LocalSmallLimits {
   maxSteps: number;
@@ -60,6 +65,39 @@ export interface LocalSmallDryRunResult {
   contextPath: string;
 }
 
+export interface LocalSmallPatchChange {
+  file: string;
+  find: string;
+  replace: string;
+}
+
+export interface LocalSmallPatchProposal {
+  stepId: LocalSmallStep['id'];
+  summary: string;
+  changes: LocalSmallPatchChange[];
+  verifyCommand: string;
+}
+
+export type LocalSmallPatchStepStatus = 'success' | 'repair-needed';
+
+export interface LocalSmallPatchStepResult {
+  status: LocalSmallPatchStepStatus;
+  appliedFiles: string[];
+  verifyCommand?: string;
+  reason?: string;
+  reportEvent: {
+    type: 'local-small-step';
+    msg: string;
+  };
+}
+
+export interface LocalSmallPatchStepInput {
+  repoRoot: string;
+  contextPack: LocalSmallContextPack;
+  proposal: unknown;
+  run?: PatchRun;
+}
+
 const DEFAULT_LIMITS: LocalSmallLimits = {
   maxSteps: 3,
   maxFilesPerStep: 4,
@@ -112,6 +150,58 @@ export async function createLocalSmallDryRun(input: LocalSmallDryRunInput): Prom
   return { plan, contextPack, planPath, contextPath };
 }
 
+export async function applyLocalSmallPatchStep(input: LocalSmallPatchStepInput): Promise<LocalSmallPatchStepResult> {
+  const validation = validatePatchProposal(input.proposal, input.contextPack);
+  if (!validation.ok) {
+    return repairNeeded(input.contextPack.stepId, validation.reason, []);
+  }
+
+  const proposal = validation.proposal;
+  const preparedChanges: Array<{ change: LocalSmallPatchChange; path: string; content: string }> = [];
+  for (const change of proposal.changes) {
+    const path = resolve(input.repoRoot, change.file);
+    const content = await readFile(path, 'utf-8').catch(() => undefined);
+    if (content === undefined) {
+      return repairNeeded(proposal.stepId, `${change.file}: file could not be read`, []);
+    }
+    if (!content.includes(change.find)) {
+      return repairNeeded(proposal.stepId, `${change.file}: find text was not present`, []);
+    }
+    preparedChanges.push({ change, path, content });
+  }
+
+  const appliedFiles: string[] = [];
+  for (const { change, path, content } of preparedChanges) {
+    await writeFile(path, content.replace(change.find, change.replace));
+    appliedFiles.push(change.file);
+  }
+
+  try {
+    await (input.run ?? exec)(proposal.verifyCommand, {
+      cwd: input.repoRoot,
+      timeout: 120_000,
+      maxBuffer: 1024 * 1024,
+    });
+  } catch (err: any) {
+    return repairNeeded(
+      proposal.stepId,
+      `verification failed: ${err.message ?? 'unknown error'}`,
+      appliedFiles,
+      proposal.verifyCommand,
+    );
+  }
+
+  return {
+    status: 'success',
+    appliedFiles,
+    verifyCommand: proposal.verifyCommand,
+    reportEvent: {
+      type: 'local-small-step',
+      msg: `${proposal.stepId} success: ${proposal.summary}; verified with ${proposal.verifyCommand}`,
+    },
+  };
+}
+
 function buildSteps(allowedFiles: string[], limits: LocalSmallLimits): LocalSmallStep[] {
   const files = allowedFiles.slice(0, limits.maxFilesPerStep);
   const steps: LocalSmallStep[] = [
@@ -144,6 +234,97 @@ function buildSteps(allowedFiles: string[], limits: LocalSmallLimits): LocalSmal
     },
   ];
   return steps.slice(0, limits.maxSteps);
+}
+
+function validatePatchProposal(
+  proposal: unknown,
+  contextPack: LocalSmallContextPack,
+): { ok: true; proposal: LocalSmallPatchProposal } | { ok: false; reason: string } {
+  if (!isRecord(proposal)) return { ok: false, reason: 'proposal must be an object' };
+  if (proposal.stepId !== contextPack.stepId) {
+    return { ok: false, reason: `proposal stepId must match ${contextPack.stepId}` };
+  }
+  if (typeof proposal.summary !== 'string' || proposal.summary.trim() === '') {
+    return { ok: false, reason: 'proposal summary is required' };
+  }
+  if (typeof proposal.verifyCommand !== 'string' || proposal.verifyCommand.trim() === '') {
+    return { ok: false, reason: 'proposal verifyCommand is required' };
+  }
+  if (!Array.isArray(proposal.changes) || proposal.changes.length === 0) {
+    return { ok: false, reason: 'proposal changes must be a non-empty array' };
+  }
+  if (proposal.changes.length > contextPack.limits.maxFilesPerStep) {
+    return { ok: false, reason: `proposal changes exceed maxFilesPerStep ${contextPack.limits.maxFilesPerStep}` };
+  }
+
+  const allowed = new Set(contextPack.allowedFiles);
+  const seenFiles = new Set<string>();
+  const changes: LocalSmallPatchChange[] = [];
+  for (const change of proposal.changes) {
+    if (!isRecord(change)) return { ok: false, reason: 'each change must be an object' };
+    if (typeof change.file !== 'string' || change.file.trim() === '') {
+      return { ok: false, reason: 'each change requires a file' };
+    }
+    if (!allowed.has(change.file)) {
+      return { ok: false, reason: `${change.file} is not in allowed files` };
+    }
+    if (!isSafeRelativeFile(change.file)) {
+      return { ok: false, reason: `${change.file}: unsafe path` };
+    }
+    if (seenFiles.has(change.file)) {
+      return { ok: false, reason: `${change.file}: duplicate file entries are not supported` };
+    }
+    if (typeof change.find !== 'string' || change.find === '') {
+      return { ok: false, reason: `${change.file}: find text is required` };
+    }
+    if (typeof change.replace !== 'string') {
+      return { ok: false, reason: `${change.file}: replace text is required` };
+    }
+    seenFiles.add(change.file);
+    changes.push({ file: change.file, find: change.find, replace: change.replace });
+  }
+
+  return {
+    ok: true,
+    proposal: {
+      stepId: contextPack.stepId,
+      summary: proposal.summary.trim(),
+      changes,
+      verifyCommand: proposal.verifyCommand.trim(),
+    },
+  };
+}
+
+function repairNeeded(
+  stepId: LocalSmallStep['id'],
+  reason: string,
+  appliedFiles: string[],
+  verifyCommand?: string,
+): LocalSmallPatchStepResult {
+  return {
+    status: 'repair-needed',
+    appliedFiles,
+    verifyCommand,
+    reason,
+    reportEvent: {
+      type: 'local-small-step',
+      msg: `${stepId} repair-needed: ${reason}`,
+    },
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isSafeRelativeFile(file: string): boolean {
+  if (isAbsolute(file)) return false;
+  const normalized = relative('.', file);
+  return normalized !== '' && normalized !== '..' && !normalized.startsWith(`..${pathSeparator()}`);
+}
+
+function pathSeparator(): string {
+  return process.platform === 'win32' ? '\\' : '/';
 }
 
 function inferAllowedFiles(spec: string, repoRoot: string, maxFiles: number): string[] {
