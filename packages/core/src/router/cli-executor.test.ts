@@ -74,6 +74,17 @@ const modelsConfig: ModelsConfig = {
       harness: 'claude-cli',
       claudeFlag: 'claude-sonnet-5',
     },
+    'opencode-declared': {
+      provider: 'custom',
+      tier: 'boss',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+      harness: 'opencode',
+      providerModel: 'anthropic/claude-sonnet-5',
+    },
   },
   tiers: {
     boss: [
@@ -83,6 +94,7 @@ const modelsConfig: ModelsConfig = {
       'ollama-model',
       'ollama-codex-model',
       'ollama-declared-claude-cli',
+      'opencode-declared',
     ],
   },
   failover: {
@@ -237,6 +249,24 @@ describe('CliModelExecutor', () => {
     expect(rec.calls).toHaveLength(1);
     expect(rec.calls[0].cmd).toContain('claude -p');
     expect(rec.calls[0].cmd).toContain('--model claude-sonnet-5');
+  });
+
+  it('dispatches through the opencode harness', async () => {
+    const rec = recordingExec({ stdout: 'OC OUT' });
+    const executor = new CliModelExecutor(rec.fn);
+
+    const output = await executor.runModel('opencode-declared', 'do it', {
+      worktree,
+      timeout,
+      task: 'plan',
+      registry,
+      routesConfig,
+    });
+
+    expect(output).toBe('OC OUT');
+    expect(rec.calls).toHaveLength(1);
+    expect(rec.calls[0].cmd).toMatch(/^opencode run /);
+    expect(rec.calls[0].opts.cwd).toBe(worktree);
   });
 
   it('rejects a non-agentic harness on a build task, naming the model and harness', async () => {

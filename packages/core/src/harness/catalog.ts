@@ -11,6 +11,7 @@ export const HARNESS_CATALOG: Record<string, HarnessCatalogEntry> = {
   'claude-cli': { id: 'claude-cli', agentic: true },
   'codex-cli': { id: 'codex-cli', agentic: true },
   'ollama-http': { id: 'ollama-http', agentic: false },
+  'opencode': { id: 'opencode', agentic: true },
   // Local command-loop worker (runOllamaCommandAgent). Not yet extracted into a
   // contract-verified CodingHarness (out of scope here); dispatched via an
   // internal adapter in CliModelExecutor.

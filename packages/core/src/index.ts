@@ -27,6 +27,8 @@ export { CodexCliHarness } from './harness/codex-cli.js';
 export type { CodexExecFn } from './harness/codex-cli.js';
 export { OllamaHttpHarness } from './harness/ollama-http.js';
 export type { OllamaFetchFn } from './harness/ollama-http.js';
+export { OpenCodeHarness } from './harness/opencode.js';
+export type { OpenCodeExecFn } from './harness/opencode.js';
 export { classifyFailure } from './harness/classify.js';
 
 // Constitutions

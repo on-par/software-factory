@@ -216,10 +216,21 @@ const doctorConfig: ModelsConfig = {
       envKey: null,
       experimental: true,
     },
+    'opencode-model': {
+      provider: 'custom',
+      tier: 'worker',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+      harness: 'opencode',
+      providerModel: 'anthropic/claude-sonnet-5',
+    },
   },
   tiers: {
     boss: ['anthropic-model'],
-    worker: ['codex-model', 'ollama-model', 'ollama-codex-model', 'ollama-cloud-model', 'deepseek-model', 'experimental-model'],
+    worker: ['codex-model', 'ollama-model', 'ollama-codex-model', 'ollama-cloud-model', 'deepseek-model', 'experimental-model', 'opencode-model'],
   },
   failover: {
     triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
@@ -350,6 +361,24 @@ describe('diagnoseModels', () => {
       envPresent: () => true,
     }, true);
     expect(d.reachable).toBe(true);
+  });
+
+  it('marks an opencode model unreachable when opencode is missing even with claude present', () => {
+    const d = diagnosisFor('opencode-model', {
+      commandAvailable: (cmd) => cmd === 'claude',
+      envPresent: () => false,
+    }, true);
+    expect(d.reachable).toBe(false);
+    expect(d.reason).toBe('opencode CLI not found on PATH');
+  });
+
+  it('marks an opencode model reachable when opencode is present', () => {
+    const d = diagnosisFor('opencode-model', {
+      commandAvailable: (cmd) => cmd === 'opencode',
+      envPresent: () => false,
+    }, true);
+    expect(d.reachable).toBe(true);
+    expect(d.reason).toBe('ok (opencode CLI)');
   });
 });
 
