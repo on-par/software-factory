@@ -8,6 +8,9 @@ import { join } from 'node:path';
 import { ModelRegistry } from '../models/index.js';
 import type { TaskType } from '../types/index.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { HarnessError } from '../harness/index.js';
+import { ClaudeCliHarness } from '../harness/claude-cli.js';
+import { classifyFailure } from '../harness/classify.js';
 
 const exec = promisify(execCb);
 
@@ -70,22 +73,15 @@ export interface ModelExecutor {
   runModel(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string>;
 }
 
-/** Classify a failure from stderr/exit code */
-function classifyFailure(stderr: string, exitCode: number): FailoverReason {
-  if (exitCode === 124) return 'timeout';
-  const text = stderr.toLowerCase();
-  if (/rate.?limit|429|too many requests/.test(text)) return 'rate_limit';
-  if (/usage.?limit|quota|billing|insufficient|credit/.test(text)) return 'usage_cap';
-  if (/empty|no content|no response/.test(text)) return 'empty_response';
-  if (/error|fail|exception/.test(text)) return 'error';
-  return 'unknown';
-}
-
 export class CliModelExecutor implements ModelExecutor {
+  private claudeHarness: ClaudeCliHarness;
+
   constructor(
     private execFn: ExecFn = exec,
     private fetchFn: FetchFn = globalThis.fetch as unknown as FetchFn,
-  ) {}
+  ) {
+    this.claudeHarness = new ClaudeCliHarness(execFn);
+  }
 
   /** Run a single model via its native provider when available, otherwise Claude/Codex CLI. */
   async runModel(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string> {
@@ -103,7 +99,7 @@ export class CliModelExecutor implements ModelExecutor {
     if (def.provider === 'ollama') {
       return this.runOllama(model, prompt, timeout, ctx.registry);
     }
-    return this.runClaude(model, prompt, worktree, timeout, ctx.registry);
+    return this.runClaude(model, prompt, ctx);
   }
 
   /** Run via Ollama's native HTTP API. */
@@ -361,21 +357,25 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
     }
   }
 
-  /** Run via Claude CLI: claude -p <prompt> --model <flag> --dangerously-skip-permissions */
-  private async runClaude(model: string, prompt: string, worktree: string, timeout: number, registry: ModelRegistry): Promise<string> {
-    const flag = registry.getClaudeFlag(model);
-    const modelArg = flag ? `--model ${flag}` : '';
-    const cmd = `claude -p ${shellEscape(prompt)} ${modelArg} --dangerously-skip-permissions`;
-
+  /** Run via Claude CLI (delegates to ClaudeCliHarness). */
+  private async runClaude(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string> {
     try {
-      const { stdout } = await this.execFn(cmd, {
-        cwd: worktree,
-        timeout: timeout * 1000,
-        maxBuffer: 10 * 1024 * 1024,
+      const { output } = await this.claudeHarness.run({
+        model,
+        prompt,
+        worktree: ctx.worktree,
+        timeoutSeconds: ctx.timeout,
+        task: ctx.task,
+        registry: ctx.registry,
       });
-      return stdout;
+      return output;
     } catch (err: any) {
-      err.reason = err.killed ? 'timeout' : classifyFailure(err.stderr ?? '', err.code ?? 1);
+      if (err instanceof HarnessError && err.reason === 'empty_response' && err.details.exitCode === 0) {
+        // The harness contract forbids resolving with empty output, but the
+        // router's run loop owns empty-output handling for executors —
+        // return it unchanged so router behavior is byte-identical.
+        return '';
+      }
       throw err;
     }
   }

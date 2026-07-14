@@ -21,6 +21,9 @@ export { StubCodingHarness } from './harness/stub.js';
 export type { StubCodingHarnessOptions, StubHarnessStep } from './harness/stub.js';
 export { codingHarnessContractCases, makeContractRequest } from './harness/contract.js';
 export type { HarnessContractCase, HarnessContractScenario, HarnessContractScenarios } from './harness/contract.js';
+export { ClaudeCliHarness } from './harness/claude-cli.js';
+export type { ClaudeExecFn } from './harness/claude-cli.js';
+export { classifyFailure } from './harness/classify.js';
 
 // Constitutions
 export { ConstitutionLoader, buildConstitutionContext, REPO_INSTRUCTION_FILES } from './constitutions/index.js';
