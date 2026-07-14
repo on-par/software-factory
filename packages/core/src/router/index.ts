@@ -10,6 +10,7 @@ import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { HarnessError } from '../harness/index.js';
 import { ClaudeCliHarness } from '../harness/claude-cli.js';
 import { CodexCliHarness } from '../harness/codex-cli.js';
+import { OllamaHttpHarness } from '../harness/ollama-http.js';
 import { classifyFailure } from '../harness/classify.js';
 
 const exec = promisify(execCb);
@@ -76,6 +77,7 @@ export interface ModelExecutor {
 export class CliModelExecutor implements ModelExecutor {
   private claudeHarness: ClaudeCliHarness;
   private codexHarness: CodexCliHarness;
+  private ollamaHarness: OllamaHttpHarness;
 
   constructor(
     private execFn: ExecFn = exec,
@@ -83,6 +85,7 @@ export class CliModelExecutor implements ModelExecutor {
   ) {
     this.claudeHarness = new ClaudeCliHarness(execFn);
     this.codexHarness = new CodexCliHarness(execFn);
+    this.ollamaHarness = new OllamaHttpHarness(fetchFn);
   }
 
   /** Run a single model via its native provider when available, otherwise Claude/Codex CLI. */
@@ -99,14 +102,14 @@ export class CliModelExecutor implements ModelExecutor {
       return this.runCodex(model, prompt, ctx);
     }
     if (def.provider === 'ollama') {
-      return this.runOllama(model, prompt, timeout, ctx.registry);
+      return this.runOllama(model, prompt, ctx);
     }
     return this.runClaude(model, prompt, ctx);
   }
 
   /** Run via Ollama's native HTTP API. */
-  private async runOllama(model: string, prompt: string, timeout: number, registry: ModelRegistry): Promise<string> {
-    return this.callOllama(model, prompt, timeout, registry);
+  private async runOllama(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string> {
+    return this.callOllama(model, prompt, ctx.timeout, ctx.registry, ctx.worktree, ctx.task);
   }
 
   /** Run a small local command loop for Ollama worker models. */
@@ -126,7 +129,7 @@ First inspect, then edit, then run one cheap check, then git add/commit.
     for (let step = 0; step < 8; step++) {
       let output: string;
       try {
-        output = await this.callOllama(model, conversation, timeout, registry);
+        output = await this.callOllama(model, conversation, timeout, registry, worktree, 'build_codex');
       } catch (err: any) {
         const reason = err.reason ?? 'error' as FailoverReason;
         const trace = await this.writeLocalAgentCallFailureTrace({
@@ -244,7 +247,7 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
 
     let repairedOutput: string;
     try {
-      repairedOutput = await this.callOllama(opts.model, repairPrompt, opts.timeout, opts.registry);
+      repairedOutput = await this.callOllama(opts.model, repairPrompt, opts.timeout, opts.registry, opts.worktree, 'build_codex');
     } catch (err: any) {
       throw Object.assign(
         new Error(`local command-agent repair failed after malformed output (${trace.malformedReason}); trace written to ${trace.tracePath}; retry prompt ${trace.retryPromptPath}; repair error: ${err.message ?? String(err)}`),
@@ -315,46 +318,19 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
     return { tracePath };
   }
 
-  private async callOllama(model: string, prompt: string, timeout: number, registry: ModelRegistry): Promise<string> {
-    const baseUrl = (process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434').replace(/\/+$/, '');
-    const nativeModel = registry.getProviderModel(model);
-    const options = registry.getProviderOptions(model);
-
+  private async callOllama(model: string, prompt: string, timeout: number, registry: ModelRegistry, worktree: string, task: TaskType): Promise<string> {
     try {
-      const res = await this.fetchFn(`${baseUrl}/api/chat`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        signal: AbortSignal.timeout(timeout * 1000),
-        body: JSON.stringify({
-          model: nativeModel,
-          stream: false,
-          messages: [{ role: 'user', content: prompt }],
-          ...(options ? { options } : {}),
-        }),
+      const { output } = await this.ollamaHarness.run({
+        model, prompt, worktree, timeoutSeconds: timeout, task, registry,
       });
-
-      if (!res.ok) {
-        const body = await res.text().catch(() => '');
-        const err = new Error(`ollama ${res.status} ${res.statusText}: ${body}`) as Error & { reason?: FailoverReason; stderr?: string; code?: number };
-        err.stderr = body;
-        err.code = res.status;
-        err.reason = classifyFailure(body, res.status);
-        throw err;
-      }
-
-      const data = await res.json() as { message?: { content?: string }; response?: string; error?: string };
-      if (data.error) {
-        const err = new Error(data.error) as Error & { reason?: FailoverReason; stderr?: string; code?: number };
-        err.stderr = data.error;
-        err.code = 1;
-        err.reason = classifyFailure(data.error, 1);
-        throw err;
-      }
-
-      return data.message?.content ?? data.response ?? '';
+      return output;
     } catch (err: any) {
-      if (err.name === 'TimeoutError' || err.name === 'AbortError') err.reason = 'timeout';
-      else err.reason = err.reason ?? classifyFailure(err.stderr ?? err.message ?? '', err.code ?? 1);
+      if (err instanceof HarnessError && err.reason === 'empty_response' && err.details.exitCode === 0) {
+        // The harness contract forbids resolving with empty output, but the
+        // router's run loop and the command-agent loop own empty-output
+        // handling — return it unchanged so router behavior is byte-identical.
+        return '';
+      }
       throw err;
     }
   }
