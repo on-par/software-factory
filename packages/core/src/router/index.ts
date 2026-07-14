@@ -12,6 +12,7 @@ import { ClaudeCliHarness } from '../harness/claude-cli.js';
 import { CodexCliHarness } from '../harness/codex-cli.js';
 import { OllamaHttpHarness } from '../harness/ollama-http.js';
 import { OpenCodeHarness } from '../harness/opencode.js';
+import { OllamaAgenticHarness } from '../harness/ollama-agentic.js';
 import { classifyFailure } from '../harness/classify.js';
 
 const exec = promisify(execCb);
@@ -80,6 +81,7 @@ export class CliModelExecutor implements ModelExecutor {
   private codexHarness: CodexCliHarness;
   private ollamaHarness: OllamaHttpHarness;
   private opencodeHarness: OpenCodeHarness;
+  private ollamaAgenticHarness: OllamaAgenticHarness;
   private harnesses: Record<string, { run(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string> }>;
 
   constructor(
@@ -90,12 +92,14 @@ export class CliModelExecutor implements ModelExecutor {
     this.codexHarness = new CodexCliHarness(execFn);
     this.ollamaHarness = new OllamaHttpHarness(fetchFn);
     this.opencodeHarness = new OpenCodeHarness(execFn);
+    this.ollamaAgenticHarness = new OllamaAgenticHarness(fetchFn, execFn);
     this.harnesses = {
       'claude-cli': { run: (m, p, c) => this.runClaude(m, p, c) },
       'codex-cli': { run: (m, p, c) => this.runCodex(m, p, c) },
       'ollama-http': { run: (m, p, c) => this.runOllama(m, p, c) },
       'ollama-command-agent': { run: (m, p, c) => this.runOllamaCommandAgent(m, p, c.worktree, c.timeout, c.registry) },
       'opencode': { run: (m, p, c) => this.runOpenCode(m, p, c) },
+      'ollama-agentic': { run: (m, p, c) => this.runOllamaAgentic(m, p, c) },
     };
   }
 
@@ -393,6 +397,29 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
   private async runOpenCode(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string> {
     try {
       const { output } = await this.opencodeHarness.run({
+        model,
+        prompt,
+        worktree: ctx.worktree,
+        timeoutSeconds: ctx.timeout,
+        task: ctx.task,
+        registry: ctx.registry,
+      });
+      return output;
+    } catch (err: any) {
+      if (err instanceof HarnessError && err.reason === 'empty_response' && err.details.exitCode === 0) {
+        // The harness contract forbids resolving with empty output, but the
+        // router's run loop owns empty-output handling for executors —
+        // return it unchanged so router behavior is byte-identical.
+        return '';
+      }
+      throw err;
+    }
+  }
+
+  /** Run via the schema-bound Ollama patch harness (delegates to OllamaAgenticHarness). */
+  private async runOllamaAgentic(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string> {
+    try {
+      const { output } = await this.ollamaAgenticHarness.run({
         model,
         prompt,
         worktree: ctx.worktree,

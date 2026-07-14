@@ -9,6 +9,7 @@ describe('local-small eval scoreboard', () => {
           scenario: 'local-small-first-green',
           runtime: 'local-small',
           model: 'qwen2.5-coder:7b',
+          harness: 'ollama-agentic',
           patchApplied: true,
           testsPassed: false,
           diffSize: 8,
@@ -20,6 +21,7 @@ describe('local-small eval scoreboard', () => {
           scenario: 'local-small-first-green',
           runtime: 'workhorse',
           model: 'claude-sonnet-5',
+          harness: 'codex-cli',
           patchApplied: true,
           testsPassed: true,
           diffSize: 6,
@@ -34,6 +36,7 @@ describe('local-small eval scoreboard', () => {
             scenario: 'local-small-first-green',
             runtime: 'local-small',
             model: 'qwen2.5-coder:7b',
+            harness: 'ollama-agentic',
             patchApplied: true,
             testsPassed: true,
             diffSize: 4,
@@ -50,6 +53,7 @@ describe('local-small eval scoreboard', () => {
       scenario: 'local-small-first-green',
       runtime: 'local-small',
       model: 'qwen2.5-coder:7b',
+      harness: 'ollama-agentic',
       patchApplied: true,
       testsPassed: false,
       diffSize: 8,
@@ -59,11 +63,11 @@ describe('local-small eval scoreboard', () => {
       passed: false,
     });
     expect(report.regressions).toEqual([
-      'local-small-first-green / local-small / qwen2.5-coder:7b: tests-passed regressed from true to false',
-      'local-small-first-green / local-small / qwen2.5-coder:7b: diff-size grew from 4 to 8',
-      'local-small-first-green / local-small / qwen2.5-coder:7b: repair-count grew from 1 to 2',
-      'local-small-first-green / local-small / qwen2.5-coder:7b: duration grew from 1000ms to 2500ms',
-      'local-small-first-green / local-small / qwen2.5-coder:7b: reviewer-grade fell from 8 to 7',
+      'local-small-first-green / local-small / qwen2.5-coder:7b / ollama-agentic: tests-passed regressed from true to false',
+      'local-small-first-green / local-small / qwen2.5-coder:7b / ollama-agentic: diff-size grew from 4 to 8',
+      'local-small-first-green / local-small / qwen2.5-coder:7b / ollama-agentic: repair-count grew from 1 to 2',
+      'local-small-first-green / local-small / qwen2.5-coder:7b / ollama-agentic: duration grew from 1000ms to 2500ms',
+      'local-small-first-green / local-small / qwen2.5-coder:7b / ollama-agentic: reviewer-grade fell from 8 to 7',
     ]);
   });
 
@@ -74,6 +78,7 @@ describe('local-small eval scoreboard', () => {
           scenario: 'local-small-first-green',
           runtime: 'local-small',
           model: 'qwen2.5-coder:7b',
+          harness: 'ollama-agentic',
           patchApplied: true,
           testsPassed: true,
           diffSize: 5,
@@ -86,8 +91,8 @@ describe('local-small eval scoreboard', () => {
 
     const markdown = renderLocalSmallScoreboardMarkdown(report);
 
-    expect(markdown).toContain('| Scenario | Runtime | Model | Patch | Tests | Diff | Repairs | Duration | Grade |');
-    expect(markdown).toContain('| local-small-first-green | local-small | qwen2.5-coder:7b | yes | yes | 5 | 0 | 0.90s | 9 |');
+    expect(markdown).toContain('| Scenario | Runtime | Model | Harness | Patch | Tests | Diff | Repairs | Duration | Grade |');
+    expect(markdown).toContain('| local-small-first-green | local-small | qwen2.5-coder:7b | ollama-agentic | yes | yes | 5 | 0 | 0.90s | 9 |');
     expect(markdown).toContain('No regressions against baseline.');
   });
 });

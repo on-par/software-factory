@@ -85,6 +85,18 @@ const modelsConfig: ModelsConfig = {
       harness: 'opencode',
       providerModel: 'anthropic/claude-sonnet-5',
     },
+    'ollama-agentic-declared': {
+      provider: 'ollama',
+      tier: 'boss',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 32768,
+      capabilities: [],
+      envKey: null,
+      harness: 'ollama-agentic',
+      providerModel: 'qwen3.5:9b',
+      providerOptions: { num_ctx: 8192 },
+    },
   },
   tiers: {
     boss: [
@@ -95,6 +107,7 @@ const modelsConfig: ModelsConfig = {
       'ollama-codex-model',
       'ollama-declared-claude-cli',
       'opencode-declared',
+      'ollama-agentic-declared',
     ],
   },
   failover: {
@@ -267,6 +280,42 @@ describe('CliModelExecutor', () => {
     expect(rec.calls).toHaveLength(1);
     expect(rec.calls[0].cmd).toMatch(/^opencode run /);
     expect(rec.calls[0].opts.cwd).toBe(worktree);
+  });
+
+  it('dispatches through the ollama-agentic harness', async () => {
+    tmpWorktree = await mkdtemp(join(tmpdir(), 'factory-ollama-agentic-'));
+    const execFn = async (cmd: string) => ({ stdout: '', stderr: '' });
+    const fetchFn = async (_input: string, init: any) => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      text: async () => '',
+      json: async () => ({
+        message: {
+          content: JSON.stringify({
+            summary: 'add first-green marker',
+            changes: [{
+              file: 'docs/local-small-first-green.md',
+              find: '',
+              replace: '# Local-Small First Green\n',
+            }],
+            verifyCommand: 'test -f docs/local-small-first-green.md',
+          }),
+        },
+      }),
+    });
+    const executor = new CliModelExecutor(execFn, fetchFn);
+
+    const output = await executor.runModel('ollama-agentic-declared', 'build it', {
+      worktree: tmpWorktree,
+      timeout,
+      task: 'build_codex',
+      registry,
+      routesConfig,
+    });
+
+    expect(output).toContain('APPLIED:');
+    expect(existsSync(join(tmpWorktree, 'docs/local-small-first-green.md'))).toBe(true);
   });
 
   it('rejects a non-agentic harness on a build task, naming the model and harness', async () => {
