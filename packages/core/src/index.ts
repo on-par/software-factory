@@ -23,6 +23,8 @@ export { codingHarnessContractCases, makeContractRequest } from './harness/contr
 export type { HarnessContractCase, HarnessContractScenario, HarnessContractScenarios } from './harness/contract.js';
 export { ClaudeCliHarness } from './harness/claude-cli.js';
 export type { ClaudeExecFn } from './harness/claude-cli.js';
+export { CodexCliHarness } from './harness/codex-cli.js';
+export type { CodexExecFn } from './harness/codex-cli.js';
 export { classifyFailure } from './harness/classify.js';
 
 // Constitutions
