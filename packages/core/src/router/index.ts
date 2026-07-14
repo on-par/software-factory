@@ -2,7 +2,7 @@
 
 import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
-import { writeFile, mkdtemp, readFile, unlink } from 'node:fs/promises';
+import { mkdir, writeFile, mkdtemp, readFile, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ModelRegistry } from '../models/index.js';
@@ -31,6 +31,13 @@ export type FetchFn = (
   text(): Promise<string>;
   json(): Promise<unknown>;
 }>;
+
+interface LocalAgentTrace {
+  tracePath: string;
+  retryPromptPath: string;
+  malformedReason: 'empty_response' | 'invalid_json';
+  rawResponseSummary: string;
+}
 
 export type FailoverReason =
   | 'rate_limit'
@@ -121,11 +128,33 @@ Use at most 3 commands per turn. No markdown.`;
     for (let step = 0; step < 8; step++) {
       const output = await this.callOllama(model, conversation, timeout, registry);
       transcript.push(`MODEL STEP ${step + 1}:\n${output}`);
-      const action = parseLocalAgentAction(output);
+      const action = await this.parseLocalAgentActionWithRepair({
+        model,
+        prompt,
+        conversation,
+        output,
+        worktree,
+        timeout,
+        registry,
+        step,
+      });
+      if (action.repairTranscript) transcript.push(action.repairTranscript);
 
       if (action.commands.length === 0) {
         if (action.done) break;
-        throw Object.assign(new Error(`local Ollama worker returned no commands: ${output.slice(0, 500)}`), { reason: 'empty_response' as FailoverReason });
+        const trace = action.traceForFailure ?? await this.writeLocalAgentTrace({
+          model,
+          worktree,
+          prompt,
+          conversation,
+          attempt: step + 1,
+          rawResponse: output,
+          malformedReason: action.malformedReason ?? 'empty_response',
+        });
+        throw Object.assign(
+          new Error(`local command-agent malformed output (${trace.malformedReason}); trace written to ${trace.tracePath}; retry prompt ${trace.retryPromptPath}`),
+          { reason: 'empty_response' as FailoverReason, tracePath: trace.tracePath },
+        );
       }
 
       const commandOutputs: string[] = [];
@@ -163,6 +192,79 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
     }
 
     return transcript.join('\n\n');
+  }
+
+  private async parseLocalAgentActionWithRepair(opts: {
+    model: string;
+    prompt: string;
+    conversation: string;
+    output: string;
+    worktree: string;
+    timeout: number;
+    registry: ModelRegistry;
+    step: number;
+  }): Promise<ReturnType<typeof parseLocalAgentAction> & {
+    repairTranscript?: string;
+    traceForFailure?: LocalAgentTrace;
+  }> {
+    const action = parseLocalAgentAction(opts.output);
+    if (action.commands.length > 0 || action.done) return action;
+
+    const trace = await this.writeLocalAgentTrace({
+      model: opts.model,
+      worktree: opts.worktree,
+      prompt: opts.prompt,
+      conversation: opts.conversation,
+      attempt: opts.step + 1,
+      rawResponse: opts.output,
+      malformedReason: action.malformedReason ?? 'empty_response',
+    });
+    const repairPrompt = buildLocalAgentRepairPrompt({
+      retryPromptPath: trace.retryPromptPath,
+      malformedReason: trace.malformedReason,
+      rawSummary: trace.rawResponseSummary,
+    });
+    await writeFile(trace.retryPromptPath, repairPrompt);
+
+    const repairedOutput = await this.callOllama(opts.model, repairPrompt, opts.timeout, opts.registry);
+    const repairedAction = parseLocalAgentAction(repairedOutput);
+    return {
+      ...repairedAction,
+      traceForFailure: repairedAction.commands.length === 0 && !repairedAction.done ? trace : undefined,
+      repairTranscript: [
+        `REPAIR STEP ${opts.step + 1}:`,
+        `TRACE: ${trace.tracePath}`,
+        `RETRY PROMPT: ${trace.retryPromptPath}`,
+        repairedOutput,
+      ].join('\n'),
+    };
+  }
+
+  private async writeLocalAgentTrace(opts: {
+    model: string;
+    worktree: string;
+    prompt: string;
+    conversation: string;
+    attempt: number;
+    rawResponse: string;
+    malformedReason: 'empty_response' | 'invalid_json';
+  }): Promise<LocalAgentTrace> {
+    const traceDir = join(opts.worktree, '.factory', 'local-agent-traces');
+    await mkdir(traceDir, { recursive: true });
+    const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const retryPromptPath = join(traceDir, `${stamp}-repair-prompt.md`);
+    const tracePath = join(traceDir, `${stamp}.json`);
+    const rawResponseSummary = summarizeRawResponse(opts.rawResponse);
+    await writeFile(tracePath, `${JSON.stringify({
+      model: opts.model,
+      attempt: opts.attempt,
+      promptSize: opts.prompt.length,
+      conversationSize: opts.conversation.length,
+      malformedReason: opts.malformedReason,
+      rawResponseSummary,
+      retryPromptPath,
+    }, null, 2)}\n`);
+    return { tracePath, retryPromptPath, malformedReason: opts.malformedReason, rawResponseSummary };
   }
 
   private async callOllama(model: string, prompt: string, timeout: number, registry: ModelRegistry): Promise<string> {
@@ -349,6 +451,7 @@ export class ModelRouter {
           const reason = err.reason ?? this.classifyFailure(err.stderr ?? '', err.exitCode ?? 1);
           attempts.push({ model, reason, ok: false });
           onLog(`${model} failed (${reason}) on ${task}`);
+          if (err.tracePath) onLog(`local command-agent trace: ${err.message}`);
 
           // Rate limit → retry with cooldown
           if (reason === 'rate_limit' && retries < maxRetries) {
@@ -396,7 +499,11 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function parseLocalAgentAction(output: string): { commands: string[]; done: boolean; final: string } {
+function parseLocalAgentAction(output: string): { commands: string[]; done: boolean; final: string; malformedReason?: 'empty_response' | 'invalid_json' } {
+  if (output.trim().length === 0) {
+    return { commands: [], done: false, final: '', malformedReason: 'empty_response' };
+  }
+
   const jsonText = extractJsonObject(output);
   if (jsonText) {
     try {
@@ -406,7 +513,9 @@ function parseLocalAgentAction(output: string): { commands: string[]; done: bool
         done: parsed.done === true,
         final: typeof parsed.final === 'string' ? parsed.final : '',
       };
-    } catch {}
+    } catch {
+      return { commands: [], done: false, final: output.trim(), malformedReason: 'invalid_json' };
+    }
   }
 
   const fenced = [...output.matchAll(/```(?:bash|sh|zsh|shell)?\n([\s\S]*?)```/g)]
@@ -414,7 +523,29 @@ function parseLocalAgentAction(output: string): { commands: string[]; done: bool
     .filter(Boolean);
   if (fenced.length > 0) return { commands: fenced, done: false, final: '' };
 
-  return { commands: [], done: false, final: output.trim() };
+  return { commands: [], done: false, final: output.trim(), malformedReason: 'invalid_json' };
+}
+
+function buildLocalAgentRepairPrompt(opts: {
+  retryPromptPath: string;
+  malformedReason: 'empty_response' | 'invalid_json';
+  rawSummary: string;
+}): string {
+  return `Your previous local command-agent response was malformed: ${opts.malformedReason}.
+Trace retry prompt path: ${opts.retryPromptPath}
+Raw response summary: ${opts.rawSummary}
+
+Return exactly one JSON object, no markdown, no prose:
+{"commands":["one safe shell command"],"done":false,"final":"short status"}
+
+If the task is already complete, return:
+{"commands":[],"done":true,"final":"done"}`;
+}
+
+function summarizeRawResponse(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '<empty>';
+  return trimmed.replace(/\s+/g, ' ').slice(0, 500);
 }
 
 function extractJsonObject(output: string): string | undefined {
