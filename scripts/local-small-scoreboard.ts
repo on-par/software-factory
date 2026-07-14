@@ -46,6 +46,7 @@ function validateRun(value: unknown): LocalSmallScoreboardRun {
     scenario: stringField(value, 'scenario'),
     runtime: stringField(value, 'runtime'),
     model: stringField(value, 'model'),
+    harness: stringField(value, 'harness'),
     patchApplied: booleanField(value, 'patchApplied'),
     testsPassed: booleanField(value, 'testsPassed'),
     diffSize: numberField(value, 'diffSize'),

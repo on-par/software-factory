@@ -4,6 +4,7 @@ export interface LocalSmallScoreboardRun {
   scenario: string;
   runtime: LocalSmallRuntime;
   model: string;
+  harness: string;
   patchApplied: boolean;
   testsPassed: boolean;
   diffSize: number;
@@ -44,12 +45,13 @@ export function renderLocalSmallScoreboardMarkdown(report: LocalSmallScoreboardR
   const lines = [
     '# Local-small eval scoreboard',
     '',
-    '| Scenario | Runtime | Model | Patch | Tests | Diff | Repairs | Duration | Grade |',
-    '| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: |',
+    '| Scenario | Runtime | Model | Harness | Patch | Tests | Diff | Repairs | Duration | Grade |',
+    '| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: |',
     ...report.rows.map(row => [
       row.scenario,
       row.runtime,
       row.model,
+      row.harness,
       row.patchApplied ? 'yes' : 'no',
       row.testsPassed ? 'yes' : 'no',
       String(row.diffSize),
@@ -92,6 +94,6 @@ function regressionsFor(current: LocalSmallScoreboardRun, baseline?: LocalSmallS
   return regressions;
 }
 
-function scoreboardKey(run: Pick<LocalSmallScoreboardRun, 'scenario' | 'runtime' | 'model'>): string {
-  return `${run.scenario} / ${run.runtime} / ${run.model}`;
+function scoreboardKey(run: Pick<LocalSmallScoreboardRun, 'scenario' | 'runtime' | 'model' | 'harness'>): string {
+  return `${run.scenario} / ${run.runtime} / ${run.model} / ${run.harness}`;
 }

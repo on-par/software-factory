@@ -29,6 +29,8 @@ export { OllamaHttpHarness } from './harness/ollama-http.js';
 export type { OllamaFetchFn } from './harness/ollama-http.js';
 export { OpenCodeHarness } from './harness/opencode.js';
 export type { OpenCodeExecFn } from './harness/opencode.js';
+export { OllamaAgenticHarness, PATCH_PROPOSAL_SCHEMA } from './harness/ollama-agentic.js';
+export type { OllamaAgenticExecFn, OllamaAgenticChange, OllamaAgenticProposal } from './harness/ollama-agentic.js';
 export { classifyFailure } from './harness/classify.js';
 
 // Constitutions

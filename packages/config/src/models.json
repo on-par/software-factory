@@ -169,7 +169,7 @@
         "codex"
       ],
       "envKey": null,
-      "harness": "ollama-command-agent",
+      "harness": "ollama-agentic",
       "providerModel": "qwen3.5:9b",
       "providerOptions": {
         "num_ctx": 8192,
@@ -177,7 +177,7 @@
       },
       "codex": true,
       "codexFlag": "--oss --local-provider ollama -m qwen3.5:9b",
-      "note": "Local-only command-loop worker using Ollama qwen3.5:9b; use for build_codex so the model can edit files and run commands."
+      "note": "Local-only worker using Ollama qwen3.5:9b via the schema-bound ollama-agentic harness (patch proposals via Ollama structured outputs) for build_codex so the model can edit files and run commands."
     },
     "qwen3.5:9b": {
       "provider": "ollama",
