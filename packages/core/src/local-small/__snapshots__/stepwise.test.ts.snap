@@ -1,0 +1,86 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`local-small stepwise dry-run harness > writes a deterministic bounded step plan and first context pack 1`] = `
+"{
+  "issue": 166,
+  "issueTitle": "Introduce local-small stepwise harness skeleton",
+  "profile": "local-small-stepwise",
+  "dryRun": true,
+  "createdAt": "2026-07-14T12:00:00.000Z",
+  "specPath": "../issue-166.md",
+  "limits": {
+    "maxSteps": 3,
+    "maxFilesPerStep": 4,
+    "maxContextTokens": 2000,
+    "maxSpecChars": 6000
+  },
+  "steps": [
+    {
+      "id": "inspect-context",
+      "title": "Inspect the frozen spec and bounded file set",
+      "goal": "Confirm the smallest useful change and identify any missing context before patching.",
+      "allowedFiles": [
+        "packages/core/src/local-small/stepwise.ts",
+        "packages/core/src/index.ts"
+      ],
+      "maxFiles": 4,
+      "maxTokens": 2000,
+      "verification": "No source changes; context pack artifact exists."
+    },
+    {
+      "id": "schema-bound-change",
+      "title": "Propose one schema-bound patch",
+      "goal": "Produce a single constrained patch proposal against the allowed files.",
+      "allowedFiles": [
+        "packages/core/src/local-small/stepwise.ts",
+        "packages/core/src/index.ts"
+      ],
+      "maxFiles": 4,
+      "maxTokens": 2000,
+      "verification": "Patch schema validates before any apply attempt."
+    },
+    {
+      "id": "verify-and-report",
+      "title": "Run focused verification and report status",
+      "goal": "Run one configured verification command and record ready or repair-needed status.",
+      "allowedFiles": [
+        "packages/core/src/local-small/stepwise.ts",
+        "packages/core/src/index.ts"
+      ],
+      "maxFiles": 4,
+      "maxTokens": 2000,
+      "verification": "Verification result is attached to the local-only run report."
+    }
+  ]
+}
+"
+`;
+
+exports[`local-small stepwise dry-run harness > writes a deterministic bounded step plan and first context pack 2`] = `
+"# Local-small context pack: issue #166
+
+- Step: inspect-context - Inspect the frozen spec and bounded file set
+- Dry run: true
+- Max files: 4
+- Max context tokens: 2000
+
+## Allowed Files
+- packages/core/src/local-small/stepwise.ts
+- packages/core/src/index.ts
+
+## Instructions
+- Read the frozen spec excerpt and the allowed file list.
+- Do not modify files in dry-run mode.
+- Return only observations needed to decide the next bounded step.
+
+## Issue
+Create a dry-run skeleton with deterministic output.
+
+## Frozen Spec Excerpt
+\`\`\`markdown
+# Spec: Introduce local-small stepwise harness skeleton (#166)
+Update \`packages/core/src/local-small/stepwise.ts\` and \`packages/core/src/index.ts\`.
+Run \`npm test -- packages/core/src/local-small/stepwise.test.ts\`.
+\`\`\`
+"
+`;

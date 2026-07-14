@@ -22,6 +22,7 @@ import {
   diagnoseModels,
   watchChecks,
   writeLocalRunReport,
+  createLocalSmallDryRun,
 } from '@on-par/factory-core';
 import type { ModelDiagnosis } from '@on-par/factory-core';
 import { logEvent, branchFor, branchPrefixSlug, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock, withFileLock, shellEscape } from '@on-par/factory-core';
@@ -557,6 +558,29 @@ async function cmdShip(issueNum: number, opts: { product?: string; autoRework?: 
     console.error(chalk.red(`Ship failed for issue #${issueNum}: ${err.message}`));
     process.exit(1);
   }
+}
+
+async function cmdLocalSmallDryRun(issueNum: number, opts: { spec?: string; output?: string }) {
+  const repoRoot = await getRepoRoot();
+  const ghRepo = await getGitHubRepo();
+  const paths = getFactoryPaths(repoRoot);
+  const octokit = getOctokit();
+  const [owner, repoName] = ghRepo.split('/');
+  const specPath = resolve(repoRoot, opts.spec ?? resolve(paths.plans, `issue-${issueNum}.md`));
+  const outputDir = resolve(repoRoot, opts.output ?? resolve(paths.state, 'local-small', `issue-${issueNum}`));
+  const { data: issue } = await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issueNum });
+
+  const result = await createLocalSmallDryRun({
+    issue: issueNum,
+    issueTitle: issue.title,
+    issueBody: issue.body ?? '',
+    repoRoot,
+    specPath,
+    outputDir,
+  });
+
+  console.log(chalk.green(`local-small dry run: ${result.planPath}`));
+  console.log(chalk.green(`local-small context: ${result.contextPath}`));
 }
 
 async function getIssueTitle(octokit: Octokit, repo: string, issue: number): Promise<string> {
@@ -1192,6 +1216,15 @@ export async function main() {
     .option('--no-auto-rework', 'Disable automatic rework loop')
     .action(async (issueNum, opts) => {
       await cmdShip(issueNum, opts);
+    });
+
+  program
+    .command('local-small-dry-run <issue>')
+    .description('Create a bounded local-small step plan and first context pack without changing source files')
+    .option('--spec <path>', 'Frozen spec path; defaults to .factory/plans/issue-<n>.md')
+    .option('--output <path>', 'Artifact directory; defaults to .factory/local-small/issue-<n>')
+    .action(async (issueNum, opts) => {
+      await cmdLocalSmallDryRun(parseInt(issueNum, 10), opts);
     });
 
   program
