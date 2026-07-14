@@ -251,6 +251,19 @@ describe('accessibilityChecker', () => {
     expect(result.result).toBe('PASS');
     expect(result.details).toContain('basic checks passed');
   });
+
+  it('ignores generated-output dirs like coverage reports embedding source markup', async () => {
+    const worktree = await makeWorktree({
+      'index.html': '<img src="a.png" alt="ok">\n<a href="/ok">ok</a>',
+      'coverage/core/src/checkers/index.ts.html': '<img src="a.png">\n<a href="#">x</a>\n<a href="#">y</a>',
+      'dist/index.html': '<a href="#">z</a>',
+    });
+
+    const result = await accessibilityChecker(makeContext(worktree));
+
+    expect(result.result).toBe('PASS');
+    expect(result.details).toContain('basic checks passed');
+  });
 });
 
 describe('runCustomChecker', () => {
