@@ -13,6 +13,19 @@ For offline runs, include a fenced `stub-output` block with the canned PLAN outp
 Run `npm run eval -- --stub` before committing prompt or golden-set changes.
 CI also runs the stub subset on every PR, so a broken prompt or golden case fails the PR check at zero model cost.
 
+## Local-small first green
+
+The canonical first-green local-small yardstick is `local-small-first-green`.
+It is intentionally a tiny docs-only issue with an exact expected diff and one
+cheap verification command, so failures point at harness or model behavior
+rather than task ambiguity.
+
+Run only that case with:
+
+```
+npm run eval -- --stub --filter local-small-first-green --no-judge
+```
+
 ## Nightly full eval run
 
 The `Nightly Evals` workflow (`.github/workflows/nightly-evals.yml`) runs the full
