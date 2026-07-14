@@ -439,6 +439,38 @@ describe('CliModelExecutor', () => {
     expect(execCalls).toEqual(['git status --short', "cat 'docs/revenue-model.md'", 'git status --short']);
   });
 
+  it('accepts name/args command objects from local command-agent responses', async () => {
+    tmpWorktree = await mkdtemp(join(tmpdir(), 'factory-command-agent-'));
+    const execCalls: string[] = [];
+    const execFn = async (cmd: string) => {
+      execCalls.push(cmd);
+      if (cmd === 'git status --short') return { stdout: '', stderr: '' };
+      return { stdout: 'ok', stderr: '' };
+    };
+    const responses = [
+      '{"commands":[{"name":"cat","args":["docs/revenue-model.md"]}],"done":false,"final":"read"}',
+      '{"commands":[],"done":true,"final":"done"}',
+    ];
+    const fetchFn = async () => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      text: async () => '',
+      json: async () => ({ message: { content: responses.shift() } }),
+    });
+    const executor = new CliModelExecutor(execFn, fetchFn as any);
+
+    await executor.runModel('ollama-codex-model', 'build it', {
+      worktree: tmpWorktree,
+      timeout,
+      task: 'build_codex',
+      registry,
+      routesConfig,
+    });
+
+    expect(execCalls).toEqual(['git status --short', "cat 'docs/revenue-model.md'", 'git status --short']);
+  });
+
   it('retries invalid JSON and succeeds when the repair response is valid', async () => {
     tmpWorktree = await mkdtemp(join(tmpdir(), 'factory-command-agent-'));
     const execFn = async (cmd: string) => {
@@ -503,6 +535,43 @@ describe('CliModelExecutor', () => {
       malformedReason: 'empty_response',
     });
     expect(existsSync(trace.retryPromptPath)).toBe(true);
+  });
+
+  it('keeps the malformed-output trace when local command-agent repair fails', async () => {
+    tmpWorktree = await mkdtemp(join(tmpdir(), 'factory-command-agent-'));
+    const execFn = async (cmd: string) => {
+      if (cmd === 'git status --short') return { stdout: '', stderr: '' };
+      return { stdout: 'ok', stderr: '' };
+    };
+    let calls = 0;
+    const fetchFn = async () => {
+      calls++;
+      if (calls === 1) {
+        return {
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          text: async () => '',
+          json: async () => ({ message: { content: '{"commands":[' } }),
+        };
+      }
+      throw Object.assign(new Error('ollama repair transport failed'), { reason: 'error' });
+    };
+    const executor = new CliModelExecutor(execFn, fetchFn as any);
+
+    const err: any = await executor.runModel('ollama-codex-model', 'build it', {
+      worktree: tmpWorktree,
+      timeout,
+      task: 'build_codex',
+      registry,
+      routesConfig,
+    }).catch(e => e);
+
+    expect(err.reason).toBe('error');
+    expect(err.tracePath).toBeTruthy();
+    expect(err.message).toContain('trace written to');
+    expect(err.message).toContain('repair error: ollama repair transport failed');
+    expect(existsSync(err.tracePath)).toBe(true);
   });
 
   it('classifies rate-limit failures from the exec seam', async () => {
