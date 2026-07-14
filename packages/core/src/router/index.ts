@@ -509,7 +509,7 @@ function parseLocalAgentAction(output: string): { commands: string[]; done: bool
     try {
       const parsed = JSON.parse(jsonText) as { commands?: unknown; done?: unknown; final?: unknown };
       return {
-        commands: Array.isArray(parsed.commands) ? parsed.commands.filter((cmd): cmd is string => typeof cmd === 'string' && cmd.trim().length > 0) : [],
+        commands: Array.isArray(parsed.commands) ? parsed.commands.flatMap(normalizeLocalCommand) : [],
         done: parsed.done === true,
         final: typeof parsed.final === 'string' ? parsed.final : '',
       };
@@ -524,6 +524,25 @@ function parseLocalAgentAction(output: string): { commands: string[]; done: bool
   if (fenced.length > 0) return { commands: fenced, done: false, final: '' };
 
   return { commands: [], done: false, final: output.trim(), malformedReason: 'invalid_json' };
+}
+
+function normalizeLocalCommand(value: unknown): string[] {
+  if (typeof value === 'string') {
+    const command = value.trim();
+    return command ? [command] : [];
+  }
+  if (!isPlainObject(value) || typeof value.command !== 'string') return [];
+
+  const command = value.command.trim();
+  if (!command) return [];
+  if (!Array.isArray(value.args) || value.args.length === 0) return [command];
+  const args = value.args.filter((arg): arg is string => typeof arg === 'string');
+  if (args.length !== value.args.length) return [];
+  return [`${command} ${args.map(shellEscape).join(' ')}`];
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function buildLocalAgentRepairPrompt(opts: {

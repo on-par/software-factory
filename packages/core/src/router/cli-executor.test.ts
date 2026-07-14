@@ -374,6 +374,71 @@ describe('CliModelExecutor', () => {
     expect(execCalls).toEqual(['git status --short', 'printf repaired > local.txt', 'git status --short']);
   });
 
+  it('accepts command objects from local command-agent responses', async () => {
+    tmpWorktree = await mkdtemp(join(tmpdir(), 'factory-command-agent-'));
+    const execCalls: string[] = [];
+    const execFn = async (cmd: string) => {
+      execCalls.push(cmd);
+      if (cmd === 'git status --short') return { stdout: '', stderr: '' };
+      return { stdout: 'ok', stderr: '' };
+    };
+    const responses = [
+      '{"commands":[{"command":"printf object-command > local.txt","name":"write_file"}],"done":false,"final":"wrote"}',
+      '{"commands":[],"done":true,"final":"done"}',
+    ];
+    const fetchFn = async () => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      text: async () => '',
+      json: async () => ({ message: { content: responses.shift() } }),
+    });
+    const executor = new CliModelExecutor(execFn, fetchFn as any);
+
+    const output = await executor.runModel('ollama-codex-model', 'build it', {
+      worktree: tmpWorktree,
+      timeout,
+      task: 'build_codex',
+      registry,
+      routesConfig,
+    });
+
+    expect(output).toContain('MODEL STEP 1');
+    expect(execCalls).toEqual(['git status --short', 'printf object-command > local.txt', 'git status --short']);
+  });
+
+  it('accepts command objects with args from local command-agent responses', async () => {
+    tmpWorktree = await mkdtemp(join(tmpdir(), 'factory-command-agent-'));
+    const execCalls: string[] = [];
+    const execFn = async (cmd: string) => {
+      execCalls.push(cmd);
+      if (cmd === 'git status --short') return { stdout: '', stderr: '' };
+      return { stdout: 'ok', stderr: '' };
+    };
+    const responses = [
+      '{"commands":[{"command":"cat","args":["docs/revenue-model.md"],"description":"read doc"}],"done":false,"final":"read"}',
+      '{"commands":[],"done":true,"final":"done"}',
+    ];
+    const fetchFn = async () => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      text: async () => '',
+      json: async () => ({ message: { content: responses.shift() } }),
+    });
+    const executor = new CliModelExecutor(execFn, fetchFn as any);
+
+    await executor.runModel('ollama-codex-model', 'build it', {
+      worktree: tmpWorktree,
+      timeout,
+      task: 'build_codex',
+      registry,
+      routesConfig,
+    });
+
+    expect(execCalls).toEqual(['git status --short', "cat 'docs/revenue-model.md'", 'git status --short']);
+  });
+
   it('retries invalid JSON and succeeds when the repair response is valid', async () => {
     tmpWorktree = await mkdtemp(join(tmpdir(), 'factory-command-agent-'));
     const execFn = async (cmd: string) => {
