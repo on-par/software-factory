@@ -62,6 +62,7 @@ jobs:
           path: |
             coverage/coverage-summary.json
             coverage/lcov.info
+            coverage/cobertura-coverage.xml
           if-no-files-found: warn
 
       - name: Eval (deterministic, stub)
