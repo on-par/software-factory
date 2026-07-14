@@ -25,6 +25,8 @@ export { ClaudeCliHarness } from './harness/claude-cli.js';
 export type { ClaudeExecFn } from './harness/claude-cli.js';
 export { CodexCliHarness } from './harness/codex-cli.js';
 export type { CodexExecFn } from './harness/codex-cli.js';
+export { OllamaHttpHarness } from './harness/ollama-http.js';
+export type { OllamaFetchFn } from './harness/ollama-http.js';
 export { classifyFailure } from './harness/classify.js';
 
 // Constitutions
