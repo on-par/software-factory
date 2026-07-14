@@ -15,6 +15,7 @@ import {
   LaneParkError,
   parkReasonFor,
   runLane,
+  shouldEmitLaneTerminalEvent,
   resolveUsageKnobs,
   superviseLoop,
   triageProposalMessage,
@@ -827,6 +828,14 @@ describe('cli', () => {
 
   describe('runLane', () => {
     const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
+
+    it('does not double-log terminal events when the default local-only ship writes the run report', () => {
+      const stubShip = async () => 'ship-it/1-x';
+
+      expect(shouldEmitLaneTerminalEvent(undefined, { FACTORY_LOCAL_ONLY: '1' } as any)).toBe(false);
+      expect(shouldEmitLaneTerminalEvent(stubShip, { FACTORY_LOCAL_ONLY: '1' } as any)).toBe(true);
+      expect(shouldEmitLaneTerminalEvent(undefined, {} as any)).toBe(true);
+    });
 
     it('parks the lane on an escalate error and skips remaining issues', async () => {
       const calls: any[] = [];

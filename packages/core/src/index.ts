@@ -29,6 +29,10 @@ export { buildPhase } from './phases/build.js';
 export { checkPhase, disputeResolution } from './phases/check.js';
 export { shipPhase } from './phases/ship.js';
 
+// Reports
+export { writeLocalRunReport, renderLocalRunReport } from './reports/local-run.js';
+export type { LocalRunOutcome, LocalRunReport, LocalRunReportInput, LocalRunReportDeps } from './reports/local-run.js';
+
 // Eval
 export { loadGoldenCases, scoreSpec, judgeSpec, median, runJudgeSamples, runEval, toBaseline, compareToBaseline, isRouteAsserted, formatRegressionIssue, REGRESSION_ISSUE_TITLE, REGRESSION_ISSUE_MARKER, appendHistoryLine, parseHistory, renderTrend, summaryToHistoryRecord } from './eval/index.js';
 export type { CaseResult, DeterministicCheck, EvalSummary, ExpectedRoute, GoldenCase, RunEvalOpts, Baseline, BaselineCase, BaselineComparison, RegressionIssue, JudgeAggregate, JudgeSample, HistoryRecord } from './eval/index.js';
