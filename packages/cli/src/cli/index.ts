@@ -12,6 +12,7 @@ import {
   getConstitutionsDir,
   ModelRouter,
   ConstitutionLoader,
+  resolveModelOverrides,
   planPhase,
   buildPhase,
   checkPhase,
@@ -414,6 +415,7 @@ export async function shipIssue(
   const factoryConfig = loadFactoryConfig();
   const timeouts = resolveTimeouts(factoryConfig);
   const router = new ModelRouter(modelsConfig, routesConfig);
+  const modelOverrides = resolveModelOverrides(router.registryRef);
   const constitutionLoader = new ConstitutionLoader();
 
   const product = opts.product ?? (existsSync(paths.product) ? readFileSync(paths.product, 'utf-8').trim() : undefined);
@@ -426,6 +428,8 @@ export async function shipIssue(
   let route: 'codex' | 'claude' | undefined;
 
   const log = (type: string, msg: string) => logEvent(paths.events, type, issueNum, msg);
+  if (modelOverrides.plan) log('model-override', `plan model pinned to ${modelOverrides.plan} (FACTORY_PLAN_MODEL)`);
+  if (modelOverrides.build) log('model-override', `build model pinned to ${modelOverrides.build} (FACTORY_BUILD_MODEL)`);
 
   // Setup worktree FIRST — plan phase needs cwd=worktree to run claude
   await withGitLock(repoRoot, () =>
@@ -452,7 +456,7 @@ export async function shipIssue(
 
   try {
     // PLAN
-    const plan = await planPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, constitution, router, octokit, log, timeoutSeconds: timeouts.plan });
+    const plan = await planPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, constitution, router, octokit, log, timeoutSeconds: timeouts.plan, modelOverride: modelOverrides.plan });
     route = plan.route;
     if (!plan.ok) {
       throw new LaneParkError(`plan escalated: ${plan.escalate ?? 'unknown'}`, 'escalate');
@@ -461,7 +465,7 @@ export async function shipIssue(
     const skipCI = resolveSkipCI(factoryConfig);
 
     // BUILD
-    const build = await buildPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, branch, constitution, route: plan.route, router, log, timeoutSeconds: timeouts.build, skipCI });
+    const build = await buildPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, branch, constitution, route: plan.route, router, log, timeoutSeconds: timeouts.build, skipCI, modelOverride: modelOverrides.build });
     if (!build.ok) {
       throw new LaneParkError(`build escalated: ${build.escalate ?? 'unknown'}`, 'escalate');
     }

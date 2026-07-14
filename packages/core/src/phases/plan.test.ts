@@ -19,8 +19,17 @@ const models: ModelsConfig = {
       capabilities: [],
       envKey: null,
     },
+    'pinned-model': {
+      provider: 'custom',
+      tier: 'boss',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+    },
   },
-  tiers: { boss: ['stub-model'] },
+  tiers: { boss: ['stub-model', 'pinned-model'] },
   failover: {
     triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
     maxRetries: 2,
@@ -105,6 +114,76 @@ describe('planPhase', () => {
     });
 
     expect(captured).toBe(900);
+  });
+
+  it('routes to the default tier-order model when no modelOverride is given', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-40.md');
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [{
+          output: '---\nroute: codex\n---\n# Spec\n',
+        }],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+        },
+      },
+    };
+
+    await planPhase({
+      issue: 40,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit,
+      log: () => {},
+    });
+
+    expect(stub.calls[0].model).toBe('stub-model');
+  });
+
+  it('pins the plan model via modelOverride, bypassing default tier order', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-41.md');
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [{
+          output: '---\nroute: codex\n---\n# Spec\n',
+        }],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+        },
+      },
+    };
+
+    const result = await planPhase({
+      issue: 41,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit,
+      log: () => {},
+      modelOverride: 'pinned-model',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(stub.calls[0].model).toBe('pinned-model');
   });
 
   it('parses a quoted codex route from frontmatter', async () => {

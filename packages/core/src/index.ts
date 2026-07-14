@@ -5,8 +5,8 @@ export { loadModelsConfig, loadRoutesConfig, loadFactoryConfig, resolveTimeouts,
 export type { ModelsConfig, RoutesConfig, FactoryConfig } from './config/index.js';
 
 // Models
-export { ModelRegistry, isCommandAvailable, diagnoseModels } from './models/index.js';
-export type { DoctorProbes, ModelDiagnosis } from './models/index.js';
+export { ModelRegistry, isCommandAvailable, diagnoseModels, resolveModelOverrides } from './models/index.js';
+export type { DoctorProbes, ModelDiagnosis, ModelOverrides } from './models/index.js';
 
 // Router
 export { ModelRouter, CliModelExecutor } from './router/index.js';

@@ -108,6 +108,32 @@ export class ModelRegistry {
   }
 }
 
+export interface ModelOverrides {
+  plan?: string;
+  build?: string;
+}
+
+/** Resolve FACTORY_PLAN_MODEL / FACTORY_BUILD_MODEL env overrides, validated
+ *  against the registry. Throws a configuration error naming the env var when
+ *  it references a model not present in models.json. Empty/whitespace values
+ *  are treated as unset. */
+export function resolveModelOverrides(
+  registry: ModelRegistry,
+  env: NodeJS.ProcessEnv = process.env,
+): ModelOverrides {
+  const resolveVar = (envVar: 'FACTORY_PLAN_MODEL' | 'FACTORY_BUILD_MODEL'): string | undefined => {
+    const value = env[envVar]?.trim();
+    if (!value) return undefined;
+    if (!registry.get(value)) {
+      throw new Error(
+        `${envVar} is set to '${value}', which is not a model in models.json (known models: ${registry.list().join(', ')})`,
+      );
+    }
+    return value;
+  };
+  return { plan: resolveVar('FACTORY_PLAN_MODEL'), build: resolveVar('FACTORY_BUILD_MODEL') };
+}
+
 /** Check if a command is available on PATH */
 export function isCommandAvailable(cmd: string): boolean {
   try {

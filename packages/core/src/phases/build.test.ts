@@ -29,8 +29,17 @@ const models: ModelsConfig = {
       envKey: null,
       codex: true,
     },
+    'pinned-model': {
+      provider: 'custom',
+      tier: 'worker',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+    },
   },
-  tiers: { worker: ['stub-codex', 'stub-worker'] },
+  tiers: { worker: ['stub-codex', 'stub-worker', 'pinned-model'] },
   failover: {
     triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
     maxRetries: 2,
@@ -128,5 +137,62 @@ describe('buildPhase FACTORY_CODEX kill-switch', () => {
     expect(result.ok).toBe(true);
     expect(stub.calls[stub.calls.length - 1].task).toBe('build_codex');
     expect(logs.some(l => l.type === 'warn')).toBe(false);
+  });
+});
+
+describe('buildPhase modelOverride', () => {
+  it('uses the default tier-order model when no modelOverride is given', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-80.md');
+    const stub = new StubModelExecutor({
+      scripts: {
+        build_claude: [{ output: 'claude output' }],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+
+    const result = await buildPhase({
+      issue: 80,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/80-add-model-override',
+      route: 'claude',
+      router,
+      constitution: null,
+      log: () => {},
+    });
+
+    expect(result.ok).toBe(true);
+    expect(stub.calls[0].model).toBe(router.resolveAll('build_claude')[0]);
+  });
+
+  it('pins the build model via modelOverride, bypassing default tier order', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-81.md');
+    const stub = new StubModelExecutor({
+      scripts: {
+        build_claude: [{ output: 'claude output' }],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+
+    const result = await buildPhase({
+      issue: 81,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/81-add-model-override',
+      route: 'claude',
+      router,
+      constitution: null,
+      log: () => {},
+      modelOverride: 'pinned-model',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(stub.calls[0].model).toBe('pinned-model');
   });
 });
