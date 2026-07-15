@@ -53,14 +53,6 @@ export type TaskType =
   | 'triage'
   | (string & {}); // extensible
 
-/** Tasks that edit files in a worktree and therefore require an agentic harness. */
-export const AGENTIC_BUILD_TASKS = ['build_codex', 'build_claude'] as const satisfies readonly TaskType[];
-
-/** Single source of truth for whether a task requires a file-editing (agentic) harness. */
-export function taskRequiresAgenticHarness(task: TaskType): boolean {
-  return (AGENTIC_BUILD_TASKS as readonly string[]).includes(task);
-}
-
 export interface RouteDefinition {
   tier: string;
   description: string;
