@@ -1,16 +1,21 @@
 import { exec as execCb } from 'node:child_process';
-import { realpathSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
-import { branchFor, cleanupWorktree, gitFetch, setupWorktree } from '../utils/index.js';
+import { branchFor, gitFetch, setupWorktree } from '../utils/index.js';
 import { withGitLock } from '../utils/lock.js';
+import {
+  commitAll,
+  makeFakeOctokit,
+  makeStubModelsConfig,
+  makeStubRoutesConfig,
+  PipelineTestKit,
+  specContentFor,
+} from '../test-support/index.js';
 import { buildPhase } from './build.js';
 import { checkPhase } from './check.js';
 import { planPhase } from './plan.js';
@@ -21,79 +26,18 @@ const repo = 'on-par/software-factory';
 
 const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-const models: ModelsConfig = {
-  version: 1,
-  models: {
-    'stub-model': {
-      provider: 'custom',
-      tier: 'boss',
-      costPerMtokInput: 0,
-      costPerMtokOutput: 0,
-      contextWindow: 1000,
-      capabilities: [],
-      envKey: null,
-    },
-  },
-  tiers: { boss: ['stub-model'] },
-  failover: {
-    triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
-    maxRetries: 2,
-    cooldownMs: 0,
-    escalateAfterTierExhausted: true,
-  },
-  routingRules: {},
-};
+const kit = new PipelineTestKit();
 
-const routes: RoutesConfig = {
-  version: 1,
-  routes: {
-    plan: { tier: 'boss', description: 'stub' },
-    build_claude: { tier: 'boss', description: 'stub' },
-  },
-};
-
-function specContentFor(issue: number): string {
-  return `---
-route: claude
----
-# Spec: Concurrent lane test (#${issue})
-## Goal
-Exercise the phase pipeline against a throwaway repository.
-## Files / approach
-Use the scripted stub executor to mutate the worktree.
-## Tests
-Run the built-in checker sequence.
-## Constitution compliance
-N/A - no constitution
-## Non-goals
-No network calls.
-`;
-}
-
-const cleanupTargets: Array<{ repoRoot: string; worktree: string }> = [];
-const tempDirs = new Set<string>();
-
-afterEach(async () => {
-  // Two lanes share one repoRoot, so concurrent cleanup must go through the
-  // same lock the test proves guards worktree mutation, or it races the
-  // shared .git/worktrees metadata the way an unlocked ship would.
-  await Promise.all(
-    cleanupTargets.map(({ repoRoot, worktree }) => withGitLock(repoRoot, () => cleanupWorktree(repoRoot, worktree))),
-  );
-  cleanupTargets.length = 0;
-
-  await Promise.all([...tempDirs].map(dir => rm(dir, { recursive: true, force: true })));
-  tempDirs.clear();
-});
+afterEach(() => kit.cleanup());
 
 describe('concurrent lanes integration', () => {
   it(
     'two lanes run concurrently: each gets its own PR and the lock serializes the worktree critical section',
     { timeout: 180_000 },
     async () => {
-      const { origin, repoRoot } = await makeThrowawayRepo();
+      const { origin, repoRoot } = await kit.makeThrowawayRepo();
       const titles: Record<number, string> = { 41: 'Concurrent lane one', 42: 'Concurrent lane two' };
-      const { octokit, calls } = makeOctokit(titles);
+      const { octokit, calls } = makeFakeOctokit(titles);
       const intervals: Array<{ issue: number; enter: number; exit: number }> = [];
 
       async function runLane(issue: number) {
@@ -101,7 +45,7 @@ describe('concurrent lanes integration', () => {
         const log = (type: string, msg: string) => events.push([type, msg]);
         const stub = new StubModelExecutor({
           scripts: {
-            plan: [{ output: specContentFor(issue) }],
+            plan: [{ output: specContentFor(issue, 'Concurrent lane test') }],
             build_claude: [
               {
                 output: 'built',
@@ -113,13 +57,12 @@ describe('concurrent lanes integration', () => {
             ],
           },
         });
-        const router = new ModelRouter(models, routes, false, stub);
+        const router = new ModelRouter(makeStubModelsConfig(), makeStubRoutesConfig(), false, stub);
         const constitution = null;
 
         const branch = branchFor(issue, titles[issue]);
-        const worktree = `${repoRoot}-wt-${issue}`;
-        cleanupTargets.push({ repoRoot, worktree });
-        const specPath = await makeSpecPath(issue);
+        const worktree = kit.trackWorktree(repoRoot, issue);
+        const specPath = await kit.makeSpecPath(issue);
 
         const plan = await planPhase({
           issue,
@@ -201,71 +144,3 @@ describe('concurrent lanes integration', () => {
     },
   );
 });
-
-async function makeThrowawayRepo(): Promise<{ origin: string; repoRoot: string }> {
-  const origin = realpathSync(await mkdtemp(join(tmpdir(), 'factory-origin-')));
-  const repoRoot = realpathSync(await mkdtemp(join(tmpdir(), 'factory-repo-')));
-  tempDirs.add(origin);
-  tempDirs.add(repoRoot);
-
-  await exec('git -c init.defaultBranch=main init --bare', { cwd: origin });
-  await exec(`git clone '${origin}' '${repoRoot}'`);
-  await exec('git config user.name factory-test', { cwd: repoRoot });
-  await exec('git config user.email factory@test', { cwd: repoRoot });
-  await exec('git checkout -b main', { cwd: repoRoot });
-  await writeFile(join(repoRoot, 'README.md'), '# Throwaway\n');
-  await commitAll(repoRoot, 'chore: initial commit');
-  await exec('git push -u origin main', { cwd: repoRoot });
-
-  return { origin, repoRoot };
-}
-
-async function makeSpecPath(issue: number): Promise<string> {
-  const root = realpathSync(await mkdtemp(join(tmpdir(), 'factory-plan-')));
-  tempDirs.add(root);
-  const plans = join(root, 'plans');
-  await mkdir(plans, { recursive: true });
-  return join(plans, `issue-${issue}.md`);
-}
-
-async function commitAll(cwd: string, message: string): Promise<void> {
-  await exec('git add -A', { cwd });
-  await exec(`git commit -m '${message}'`, { cwd });
-}
-
-function makeOctokit(titles: Record<number, string>) {
-  const calls: any[] = [];
-  let nextPr = 101;
-  const octokit = {
-    rest: {
-      issues: {
-        get: async (args: any) => {
-          calls.push(['issues.get', args]);
-          return { data: { title: titles[args.issue_number], body: 'stub issue body' } };
-        },
-      },
-      pulls: {
-        list: async (args: any) => {
-          calls.push(['pulls.list', args]);
-          return { data: [] };
-        },
-        create: async (args: any) => {
-          calls.push(['pulls.create', args]);
-          return { data: { number: nextPr++ } };
-        },
-        update: async (args: any) => {
-          calls.push(['pulls.update', args]);
-          return { data: {} };
-        },
-      },
-      checks: {
-        listForRef: async (args: any) => {
-          calls.push(['checks.listForRef', args]);
-          return { data: { check_runs: [] } };
-        },
-      },
-    },
-  };
-
-  return { octokit, calls };
-}
