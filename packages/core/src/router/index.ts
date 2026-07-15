@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { mkdir, writeFile, mkdtemp } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ModelRegistry } from '../models/index.js';
-import type { TaskType } from '../types/index.js';
+import { taskRequiresAgenticHarness, type TaskType } from '../types/index.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { HarnessError, isAgenticHarness } from '../harness/index.js';
 import { ClaudeCliHarness } from '../harness/claude-cli.js';
@@ -113,7 +113,7 @@ export class CliModelExecutor implements ModelExecutor {
     if (!entry) {
       throw new Error(`Model '${model}' declares unknown harness '${harnessId}' (known harnesses: ${Object.keys(this.harnesses).join(', ')})`);
     }
-    if (!isAgenticHarness(harnessId) && (ctx.task === 'build_codex' || ctx.task === 'build_claude')) {
+    if (!isAgenticHarness(harnessId) && taskRequiresAgenticHarness(ctx.task)) {
       throw new Error(`Model '${model}' uses non-agentic harness '${harnessId}', which cannot edit files — rejected for build task '${ctx.task}'`);
     }
     return entry.run(model, prompt, ctx);
@@ -474,7 +474,7 @@ export class ModelRouter {
     if (this.routesConfig.routes[task]?.requires === 'codex') {
       models = models.filter(model => this.registry.isCodexModel(model));
     }
-    if (task === 'build_codex' || task === 'build_claude') {
+    if (taskRequiresAgenticHarness(task)) {
       models = models.filter(model => isAgenticHarness(this.registry.getHarnessId(model) ?? ''));
     }
     return models;
