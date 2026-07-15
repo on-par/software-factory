@@ -329,6 +329,88 @@ describe('runCustomChecker', () => {
     expect(result.result).toBe('FAIL');
     expect(result.details).toBe('checker agent failed');
   });
+
+  it('fails closed on a lowercase result value', async () => {
+    const worktree = await makeWorktree();
+    const { router } = makeRouter('{"checker":"custom_x","result":"pass","details":"ok"}');
+
+    const result = await runCustomChecker(makeContext(worktree), 'custom_x', router);
+
+    expect(result.checker).toBe('custom_x');
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toMatch(/malformed verdict/);
+    expect(result.details).toContain('"result":"pass"');
+  });
+
+  it('fails closed on an invalid result value', async () => {
+    const worktree = await makeWorktree();
+    const { router } = makeRouter('{"checker":"custom_x","result":"PASSED","details":"ok"}');
+
+    const result = await runCustomChecker(makeContext(worktree), 'custom_x', router);
+
+    expect(result.checker).toBe('custom_x');
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toMatch(/malformed verdict/);
+    expect(result.details).toContain('"result":"PASSED"');
+  });
+
+  it('fails closed on a mismatched checker name', async () => {
+    const worktree = await makeWorktree();
+    const { router } = makeRouter('{"checker":"custom_other","result":"PASS","details":"ok"}');
+
+    const result = await runCustomChecker(makeContext(worktree), 'custom_x', router);
+
+    expect(result.checker).toBe('custom_x');
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toMatch(/malformed verdict/);
+    expect(result.details).toContain('"checker":"custom_other"');
+  });
+
+  it('fails closed on a non-string checker name', async () => {
+    const worktree = await makeWorktree();
+    const { router } = makeRouter('{"checker":42,"result":"PASS","details":"ok"}');
+
+    const result = await runCustomChecker(makeContext(worktree), 'custom_x', router);
+
+    expect(result.checker).toBe('custom_x');
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toMatch(/malformed verdict/);
+    expect(result.details).toContain('"checker":42');
+  });
+
+  it('fails closed when a custom checker returns SKIP', async () => {
+    const worktree = await makeWorktree();
+    const { router } = makeRouter('{"checker":"custom_x","result":"SKIP","details":"ok"}');
+
+    const result = await runCustomChecker(makeContext(worktree), 'custom_x', router);
+
+    expect(result.checker).toBe('custom_x');
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toMatch(/malformed verdict/);
+    expect(result.details).toContain('"result":"SKIP"');
+  });
+
+  it('fails closed on non-string details', async () => {
+    const worktree = await makeWorktree();
+    const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":42}');
+
+    const result = await runCustomChecker(makeContext(worktree), 'custom_x', router);
+
+    expect(result.checker).toBe('custom_x');
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toMatch(/malformed verdict/);
+    expect(result.details).toContain('"details":42');
+  });
+
+  it('falls through to the no-valid-JSON path when the checker key is missing', async () => {
+    const worktree = await makeWorktree();
+    const { router } = makeRouter('{"result":"PASS","details":"ok"}');
+
+    const result = await runCustomChecker(makeContext(worktree), 'custom_x', router);
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toMatch(/^checker produced no valid JSON/);
+  });
 });
 
 describe('runAllCheckers', () => {
