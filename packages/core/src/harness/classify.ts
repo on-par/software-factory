@@ -9,6 +9,9 @@ export function classifyFailure(stderr: string, exitCode: number): HarnessFailur
   if (/rate.?limit|429|too many requests/.test(text)) return 'rate_limit';
   if (/usage.?limit|quota|billing|insufficient|credit/.test(text)) return 'usage_cap';
   if (/empty|no content|no response/.test(text)) return 'empty_response';
+  if (/schema[_ ]?invalid/.test(text)) return 'schema_invalid';
+  if (/apply[_ ]?failed/.test(text)) return 'apply_failed';
+  if (/verify[_ ]?failed|verification failed/.test(text)) return 'verify_failed';
   if (/error|fail|exception/.test(text)) return 'error';
   return 'unknown';
 }

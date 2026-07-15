@@ -7,7 +7,8 @@ import { join } from 'node:path';
 import { ModelRegistry } from '../models/index.js';
 import type { TaskType } from '../types/index.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
-import { HarnessError, isAgenticHarness, taskRequiresAgenticHarness } from '../harness/index.js';
+import { HarnessError, isAgenticHarness, isRetryableFailure, taskRequiresAgenticHarness } from '../harness/index.js';
+import type { HarnessFailureReason } from '../harness/index.js';
 import { ClaudeCliHarness } from '../harness/claude-cli.js';
 import { CodexCliHarness } from '../harness/codex-cli.js';
 import { OllamaHttpHarness } from '../harness/ollama-http.js';
@@ -49,13 +50,7 @@ interface LocalAgentTrace {
   rawResponseSummary: string;
 }
 
-export type FailoverReason =
-  | 'rate_limit'
-  | 'usage_cap'
-  | 'timeout'
-  | 'error'
-  | 'empty_response'
-  | 'unknown';
+export type FailoverReason = HarnessFailureReason;
 
 export interface RouterResult {
   model: string;
@@ -540,6 +535,18 @@ export class ModelRouter {
           attempts.push(detail ? { model, reason, ok: false, detail } : { model, reason, ok: false });
           onLog(`${model} failed (${reason}) on ${task}`);
           if (detail) onLog(`${model} failure detail on ${task}: ${detail}`);
+
+          // Deterministic failure — another model cannot plausibly help; do not
+          // burn the next tier. Reason + attempts are preserved for event logs.
+          if (!isRetryableFailure(reason)) {
+            onLog(`${model} failed (${reason}) on ${task} — non-retryable, not failing over`);
+            const error = new Error(
+              `Non-retryable failure (${reason}) from ${model} for task '${task}'${detail ? `: ${detail}` : ''}`,
+            ) as Error & { reason?: FailoverReason; attempts?: RouterResult['attempts'] };
+            error.reason = reason;
+            error.attempts = attempts;
+            throw error;
+          }
 
           // Rate limit → retry with cooldown
           if (reason === 'rate_limit' && retries < maxRetries) {

@@ -140,7 +140,7 @@ export class OllamaAgenticHarness implements CodingHarness {
           detail: attempt.detail,
           rawResponseSummary: summarizeRawResponse(repairRaw),
         });
-        const reason = attempt.malformedReason === 'empty_response' ? 'empty_response' : 'error';
+        const reason = attempt.malformedReason === 'invalid_json' ? 'error' : attempt.malformedReason;
         throw new HarnessError(
           `ollama-agentic malformed output (${attempt.malformedReason}); trace written to ${tracePath}`,
           reason,
@@ -166,7 +166,7 @@ export class OllamaAgenticHarness implements CodingHarness {
       });
       throw new HarnessError(
         `ollama-agentic verify failed (${proposal.verifyCommand}); trace written to ${tracePath}`,
-        'error',
+        'verify_failed',
         { stderr: err.stderr },
       );
     }
