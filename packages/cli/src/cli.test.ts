@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import type { ModelDiagnosis } from '@on-par/factory-core';
 import {
@@ -33,6 +33,20 @@ import {
 } from './cli/index.js';
 
 describe('cli', () => {
+  const originalFactoryMerge = process.env.FACTORY_MERGE;
+
+  beforeEach(() => {
+    delete process.env.FACTORY_MERGE;
+  });
+
+  afterEach(() => {
+    if (originalFactoryMerge === undefined) {
+      delete process.env.FACTORY_MERGE;
+    } else {
+      process.env.FACTORY_MERGE = originalFactoryMerge;
+    }
+  });
+
   it('exports the main entrypoint', () => {
     expect(typeof main).toBe('function');
   });
