@@ -697,10 +697,10 @@ describe('CliModelExecutor', () => {
     }).catch(e => e);
 
     expect(err.reason).toBe('error');
-    expect(err.tracePath).toBeTruthy();
+    expect(err.details.tracePath).toBeTruthy();
     expect(err.message).toContain('trace written to');
     expect(err.message).toContain('repair error: ollama repair transport failed');
-    expect(existsSync(err.tracePath)).toBe(true);
+    expect(existsSync(err.details.tracePath)).toBe(true);
   });
 
   it('writes a trace when the local command-agent Ollama call fails before output', async () => {
@@ -723,10 +723,10 @@ describe('CliModelExecutor', () => {
     }).catch(e => e);
 
     expect(err.reason).toBe('error');
-    expect(err.tracePath).toBeTruthy();
+    expect(err.details.tracePath).toBeTruthy();
     expect(err.message).toContain('local command-agent model call failed');
     expect(err.message).toContain('trace written to');
-    const trace = JSON.parse(readFileSync(err.tracePath, 'utf-8'));
+    const trace = JSON.parse(readFileSync(err.details.tracePath, 'utf-8'));
     expect(trace).toMatchObject({
       model: 'ollama-codex-model',
       attempt: 1,

@@ -48,6 +48,7 @@ export function describeFailureDetail(err: unknown): string {
   if (typeof stderr === 'string' && stderr.trim()) {
     parts.push(`stderr="${truncate(collapse(stderr), STDERR_LIMIT)}"`);
   }
-  if (typeof e.tracePath === 'string' && e.tracePath) parts.push(`trace=${e.tracePath}`);
+  const tracePath = e.tracePath ?? details.tracePath;
+  if (typeof tracePath === 'string' && tracePath) parts.push(`trace=${tracePath}`);
   return redactSecrets(parts.join(' '));
 }

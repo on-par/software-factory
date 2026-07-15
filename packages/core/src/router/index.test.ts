@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
-import { ModelRouter } from './index.js';
+import { ModelRouter, ModelExecutorError } from './index.js';
 import { StubModelExecutor } from './stub.js';
+import { HarnessError } from '../harness/index.js';
 
 const models: ModelsConfig = {
   version: 1,
@@ -456,6 +457,64 @@ describe('ModelRouter with StubModelExecutor', () => {
     const router = new ModelRouter(buildModels, routes, false, new StubModelExecutor({ scripts: {} }));
 
     expect(router.resolveAll('build_claude')).toEqual(['agentic-model']);
+  });
+
+  it('reads the failover reason from a typed ModelExecutorError and fails over immediately', async () => {
+    const calls: { model: string }[] = [];
+    const executor = {
+      async runModel(model: string) {
+        calls.push({ model });
+        throw new ModelExecutorError('cap', 'usage_cap', { exitCode: 1 });
+      },
+    };
+    const router = new ModelRouter(models, routes, false, executor);
+
+    const err: any = await router.run('plan', 'do it').catch(e => e);
+
+    expect(err.attempts[0]).toMatchObject({ model: 'stub-model', reason: 'usage_cap', ok: false });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('reads the failover reason from a HarnessError and fails over without retrying', async () => {
+    const calls: { model: string }[] = [];
+    const executor = {
+      async runModel(model: string) {
+        calls.push({ model });
+        throw new HarnessError('timed out', 'timeout');
+      },
+    };
+    const router = new ModelRouter(models, routes, false, executor);
+
+    const err: any = await router.run('plan', 'do it').catch(e => e);
+
+    expect(err.attempts[0]).toMatchObject({ model: 'stub-model', reason: 'timeout', ok: false });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('ignores a bolted-on reason property on a plain Error and classifies from stderr/exit code instead', async () => {
+    const executor = {
+      async runModel() {
+        throw Object.assign(new Error('boom'), { reason: 'usage_cap', stderr: 'quota exceeded', exitCode: 1 });
+      },
+    };
+    const router = new ModelRouter(models, routes, false, executor);
+
+    const err: any = await router.run('plan', 'do it').catch(e => e);
+
+    expect(err.attempts[0]).toMatchObject({ reason: 'usage_cap' });
+  });
+
+  it('records the tracePath detail from a ModelExecutorError', async () => {
+    const executor = {
+      async runModel() {
+        throw new ModelExecutorError('failed', 'error', { tracePath: '/tmp/t.json' });
+      },
+    };
+    const router = new ModelRouter(models, routes, false, executor);
+
+    const err: any = await router.run('plan', 'do it').catch(e => e);
+
+    expect(err.attempts[0].detail).toContain('trace=/tmp/t.json');
   });
 });
 

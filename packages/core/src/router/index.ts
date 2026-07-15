@@ -15,6 +15,9 @@ import { OpenCodeHarness } from '../harness/opencode.js';
 import { OllamaAgenticHarness } from '../harness/ollama-agentic.js';
 import { classifyFailure } from '../harness/classify.js';
 import { describeFailureDetail } from './failure-detail.js';
+import { ModelExecutorError, extractFailoverReason } from './executor-error.js';
+
+export { ModelExecutorError, extractFailoverReason } from './executor-error.js';
 
 const exec = promisify(execCb);
 
@@ -70,9 +73,10 @@ export interface ModelExecutorContext {
   routesConfig: RoutesConfig;
 }
 
-/** Executes a single resolved model. Implementations must, on failure,
- *  throw an Error carrying a `reason: FailoverReason` property (the router's
- *  catch block reads `err.reason ?? classifyFailure(...)`). */
+/** Executes a single resolved model. On failure, implementations should
+ *  throw a ModelExecutorError (or let a HarnessError propagate) so the
+ *  router can read a typed `reason`; plain Errors are classified from
+ *  stderr/exit code as an intentional fallback. */
 export interface ModelExecutor {
   runModel(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string>;
 }
@@ -143,8 +147,9 @@ First inspect, then edit, then run one cheap check, then git add/commit.
       let output: string;
       try {
         output = await this.callOllama(model, conversation, timeout, registry, worktree, 'build_codex');
-      } catch (err: any) {
-        const reason = err.reason ?? 'error' as FailoverReason;
+      } catch (err) {
+        const reason = extractFailoverReason(err) ?? 'error';
+        const message = err instanceof Error ? err.message : String(err);
         const trace = await this.writeLocalAgentCallFailureTrace({
           model,
           worktree,
@@ -152,11 +157,12 @@ First inspect, then edit, then run one cheap check, then git add/commit.
           conversation,
           attempt: step + 1,
           failureReason: reason,
-          errorMessage: err.message ?? String(err),
+          errorMessage: message,
         });
-        throw Object.assign(
-          new Error(`local command-agent model call failed (${reason}); trace written to ${trace.tracePath}; error: ${err.message ?? String(err)}`),
-          { reason, tracePath: trace.tracePath },
+        throw new ModelExecutorError(
+          `local command-agent model call failed (${reason}); trace written to ${trace.tracePath}; error: ${message}`,
+          reason,
+          { tracePath: trace.tracePath },
         );
       }
       transcript.push(`MODEL STEP ${step + 1}:\n${output}`);
@@ -183,9 +189,10 @@ First inspect, then edit, then run one cheap check, then git add/commit.
           rawResponse: output,
           malformedReason: action.malformedReason ?? 'empty_response',
         });
-        throw Object.assign(
-          new Error(`local command-agent malformed output (${trace.malformedReason}); trace written to ${trace.tracePath}; retry prompt ${trace.retryPromptPath}`),
-          { reason: 'empty_response' as FailoverReason, tracePath: trace.tracePath },
+        throw new ModelExecutorError(
+          `local command-agent malformed output (${trace.malformedReason}); trace written to ${trace.tracePath}; retry prompt ${trace.retryPromptPath}`,
+          'empty_response',
+          { tracePath: trace.tracePath },
         );
       }
 
@@ -261,10 +268,13 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
     let repairedOutput: string;
     try {
       repairedOutput = await this.callOllama(opts.model, repairPrompt, opts.timeout, opts.registry, opts.worktree, 'build_codex');
-    } catch (err: any) {
-      throw Object.assign(
-        new Error(`local command-agent repair failed after malformed output (${trace.malformedReason}); trace written to ${trace.tracePath}; retry prompt ${trace.retryPromptPath}; repair error: ${err.message ?? String(err)}`),
-        { reason: err.reason ?? 'error' as FailoverReason, tracePath: trace.tracePath },
+    } catch (err) {
+      const reason = extractFailoverReason(err) ?? 'error';
+      const message = err instanceof Error ? err.message : String(err);
+      throw new ModelExecutorError(
+        `local command-agent repair failed after malformed output (${trace.malformedReason}); trace written to ${trace.tracePath}; retry prompt ${trace.retryPromptPath}; repair error: ${message}`,
+        reason,
+        { tracePath: trace.tracePath },
       );
     }
     const repairedAction = parseLocalAgentAction(repairedOutput);
@@ -523,8 +533,9 @@ export class ModelRouter {
           output = await this.executor.runModel(model, prompt, {
             worktree, timeout, task, registry: this.registry, routesConfig: this.routesConfig,
           });
-        } catch (err: any) {
-          const reason = err.reason ?? this.classifyFailure(err.stderr ?? '', err.exitCode ?? 1);
+        } catch (err) {
+          const reason = extractFailoverReason(err)
+            ?? this.classifyFailure(errStderr(err), errExitCode(err));
           const detail = describeFailureDetail(err);
           attempts.push(detail ? { model, reason, ok: false, detail } : { model, reason, ok: false });
           onLog(`${model} failed (${reason}) on ${task}`);
@@ -593,6 +604,16 @@ export class ModelRouter {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function errStderr(err: unknown): string {
+  const stderr = (err as { stderr?: unknown } | null)?.stderr;
+  return typeof stderr === 'string' ? stderr : '';
+}
+
+function errExitCode(err: unknown): number {
+  const exitCode = (err as { exitCode?: unknown } | null)?.exitCode;
+  return typeof exitCode === 'number' ? exitCode : 1;
 }
 
 function parseLocalAgentAction(output: string): { commands: string[]; done: boolean; final: string; malformedReason?: 'empty_response' | 'invalid_json' } {
