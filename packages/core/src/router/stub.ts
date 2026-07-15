@@ -1,5 +1,6 @@
 import type { ModelExecutor, ModelExecutorContext, FailoverReason } from './index.js';
 import type { TaskType } from '../types/index.js';
+import { ModelExecutorError } from './executor-error.js';
 
 type StubStep =
   | { output: string; effect?: (ctx: ModelExecutorContext) => Promise<void> | void }
@@ -26,10 +27,7 @@ export class StubModelExecutor implements ModelExecutor {
     this.calls.push({ model, prompt, task: ctx.task });
     const step = this.queues.get(ctx.task)?.shift();
     if (step && 'fail' in step) {
-      const err: any = new Error(`stub failure: ${step.fail}`);
-      err.reason = step.fail;
-      err.exitCode = 1;
-      throw err;
+      throw new ModelExecutorError(`stub failure: ${step.fail}`, step.fail, { exitCode: 1 });
     }
     if (step && 'output' in step) {
       await step.effect?.(ctx);

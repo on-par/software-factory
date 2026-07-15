@@ -28,6 +28,14 @@ describe('describeFailureDetail', () => {
     expect(describeFailureDetail(new Error('x'))).toBe('msg="x"');
   });
 
+  it('reads tracePath from a details bag when there is no top-level tracePath', () => {
+    const err = { message: 'boom', details: { tracePath: '/tmp/t.json' } };
+
+    const detail = describeFailureDetail(err);
+
+    expect(detail).toContain('trace=/tmp/t.json');
+  });
+
   it('reads fields from a HarnessError details bag', () => {
     const err = new HarnessError('claude CLI died', 'unknown', { exitCode: 1, stderr: 'oops', signal: 'SIGTERM' });
 
