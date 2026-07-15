@@ -27,6 +27,9 @@ import {
   assertValidProduct,
   ConstitutionExistsError,
   InvalidProductNameError,
+  errorDetail,
+  triageNoProposalError,
+  prLookupFailure,
 } from './cli/index.js';
 
 describe('cli', () => {
@@ -43,6 +46,50 @@ describe('cli', () => {
   it('returns null for empty or whitespace-only triage proposals', () => {
     expect(triageProposalMessage('', '/repo/.factory/queue.proposed', '/repo/.factory/queue')).toBeNull();
     expect(triageProposalMessage('   \n  ', '/repo/.factory/queue.proposed', '/repo/.factory/queue')).toBeNull();
+  });
+
+  describe('errorDetail', () => {
+    it('prefers a trimmed stderr string over message', () => {
+      expect(errorDetail({ stderr: '  boom on stderr  \n', message: 'boom message' })).toBe('boom on stderr');
+    });
+
+    it('falls back to message when stderr is absent or empty', () => {
+      expect(errorDetail({ message: 'boom message' })).toBe('boom message');
+      expect(errorDetail({ stderr: '', message: 'boom message' })).toBe('boom message');
+      expect(errorDetail({ stderr: '   ', message: 'boom message' })).toBe('boom message');
+    });
+
+    it('falls back to String(err) for non-Error values', () => {
+      expect(errorDetail('boom')).toBe('boom');
+      expect(errorDetail(null)).toBe('null');
+      expect(errorDetail(undefined)).toBe('undefined');
+    });
+  });
+
+  describe('triageNoProposalError', () => {
+    it('includes the planner failure detail when a planner error is present', () => {
+      const err = triageNoProposalError(new Error('claude: command not found'));
+      expect(err.code).toBe(1);
+      expect(err.message).toContain('triage produced no proposal');
+      expect(err.message).toContain('planner failed: claude: command not found');
+    });
+
+    it('is exactly the base message when there is no planner error', () => {
+      const err = triageNoProposalError(undefined);
+      expect(err.code).toBe(1);
+      expect(err.message).toBe('triage produced no proposal');
+    });
+  });
+
+  describe('prLookupFailure', () => {
+    it('returns a LandFailureError with code 5 and the issue/branch/detail in the message', () => {
+      const err = prLookupFailure(42, 'ship-it/42-x', new Error('rate limited'));
+      expect(err).toBeInstanceOf(LandFailureError);
+      expect(err.code).toBe(5);
+      expect(err.message).toContain('#42');
+      expect(err.message).toContain('ship-it/42-x');
+      expect(err.message).toContain('rate limited');
+    });
   });
 
   it('resolves usage knobs from defaults', () => {
@@ -224,6 +271,11 @@ describe('cli', () => {
     expect(await isPrMerged(octokit, 'on-par', 'software-factory', 'ship-it/22-x')).toBe(false);
   });
 
+  it('propagates API failures from isPrMerged instead of treating them as not-merged', async () => {
+    const octokit: any = { rest: { pulls: { list: async () => { throw new Error('rate limited'); } } } };
+    await expect(isPrMerged(octokit, 'on-par', 'software-factory', 'ship-it/22-x')).rejects.toThrow('rate limited');
+  });
+
   it('finds an open PR number for the matching head branch', async () => {
     const octokit: any = {
       rest: { pulls: { list: async ({ head }: any) =>
@@ -241,6 +293,11 @@ describe('cli', () => {
     };
 
     expect(await findOpenPRNumber(octokit, 'on-par', 'software-factory', 'ship-it/19-land')).toBeUndefined();
+  });
+
+  it('propagates API failures from findOpenPRNumber instead of treating them as no-PR', async () => {
+    const octokit: any = { rest: { pulls: { list: async () => { throw new Error('rate limited'); } } } };
+    await expect(findOpenPRNumber(octokit, 'on-par', 'software-factory', 'ship-it/19-land')).rejects.toThrow('rate limited');
   });
 
   it('falls back to matching the open PR that references the issue in its body', async () => {
@@ -269,6 +326,11 @@ describe('cli', () => {
     };
 
     expect(await findOpenPRForIssue(octokit, 'on-par', 'software-factory', 19)).toBeUndefined();
+  });
+
+  it('propagates API failures from findOpenPRForIssue instead of treating them as no-match', async () => {
+    const octokit: any = { rest: { pulls: { list: async () => { throw new Error('rate limited'); } } } };
+    await expect(findOpenPRForIssue(octokit, 'on-par', 'software-factory', 19)).rejects.toThrow('rate limited');
   });
 
   it('paginates the issue-body fallback to find a match beyond the first page', async () => {
@@ -412,6 +474,48 @@ describe('cli', () => {
     ]);
   });
 
+  it('records a failed merged-state check as a warn event and keeps polling instead of crashing', async () => {
+    const calls: any[] = [];
+    const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
+    const originalFactoryMerge = process.env.FACTORY_MERGE;
+    let stopped = false;
+
+    try {
+      delete process.env.FACTORY_MERGE;
+      await waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
+        createOctokit: () => ({} as any),
+        pathExists: () => stopped,
+        checkMerged: async () => {
+          throw new Error('rate limited');
+        },
+        land: async () => {
+          throw new Error('land should not be called');
+        },
+        emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
+        writeLine: line => calls.push(['writeLine', line]),
+        sleep: async ms => {
+          calls.push(['sleep', ms]);
+          stopped = true;
+        },
+      });
+    } finally {
+      if (originalFactoryMerge === undefined) {
+        delete process.env.FACTORY_MERGE;
+      } else {
+        process.env.FACTORY_MERGE = originalFactoryMerge;
+      }
+    }
+
+    const warnEvent = calls.find(c => c[0] === 'event' && c[1] === 'warn');
+    expect(warnEvent).toBeDefined();
+    expect(warnEvent[2]).toBe(21);
+    expect(warnEvent[3]).toContain('merged-state check failed');
+    expect(warnEvent[3]).toContain('rate limited');
+
+    expect(calls).toContainEqual(['writeLine', '[factory] #21 awaiting human merge (poll 120s)']);
+    expect(calls).toContainEqual(['sleep', 120_000]);
+  });
+
   it('squash-merges a PR and deletes its branch', async () => {
     const calls: any[] = [];
     const octokit: any = {
@@ -528,6 +632,146 @@ describe('cli', () => {
       ['merge', { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash' }],
       ['deleteRef', { owner: 'on-par', repo: 'software-factory', ref: 'heads/ship-it/20-dirty' }],
     ]);
+  });
+
+  it('logs a warn and still merges when the CI watch call throws', async () => {
+    const calls: any[] = [];
+    const octokit: any = {
+      graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
+      rest: {
+        pulls: {
+          merge: async (args: any) => {
+            calls.push(['merge', args]);
+          },
+        },
+        git: {
+          deleteRef: async (args: any) => {
+            calls.push(['deleteRef', args]);
+          },
+        },
+        checks: {
+          listForRef: async () => { throw new Error('api down'); },
+        },
+      },
+    };
+    const run = async (command: string, options: any) => {
+      calls.push(['run', command, options]);
+    };
+
+    await landOpenPullRequest({
+      octokit,
+      owner: 'on-par',
+      repoName: 'software-factory',
+      ghRepo: 'on-par/software-factory',
+      repoRoot: '/repo',
+      issue: 20,
+      branch: 'ship-it/20-ci-down',
+      worktree: '/repo-factory-20',
+      prNumber: 123,
+      log: (type, msg) => calls.push(['log', type, msg]),
+      run,
+      pathExists: () => true,
+      sleep: async () => { throw new Error('sleep should not be called'); },
+    });
+
+    const warnCall = calls.find(c => c[0] === 'log' && c[1] === 'warn');
+    expect(warnCall).toBeDefined();
+    expect(warnCall[2]).toContain('CI watch');
+    expect(warnCall[2]).toContain('api down');
+    expect(calls).toContainEqual(['merge', { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash' }]);
+  });
+
+  it('logs a warn when CI ends in failure and still proceeds to merge', async () => {
+    const calls: any[] = [];
+    const octokit: any = {
+      graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
+      rest: {
+        pulls: {
+          merge: async (args: any) => {
+            calls.push(['merge', args]);
+          },
+        },
+        git: {
+          deleteRef: async (args: any) => {
+            calls.push(['deleteRef', args]);
+          },
+        },
+        checks: {
+          listForRef: async () => ({ data: { check_runs: [{ status: 'completed', conclusion: 'failure' }] } }),
+        },
+      },
+    };
+    const run = async (command: string, options: any) => {
+      calls.push(['run', command, options]);
+    };
+
+    await landOpenPullRequest({
+      octokit,
+      owner: 'on-par',
+      repoName: 'software-factory',
+      ghRepo: 'on-par/software-factory',
+      repoRoot: '/repo',
+      issue: 20,
+      branch: 'ship-it/20-ci-failed',
+      worktree: '/repo-factory-20',
+      prNumber: 123,
+      log: (type, msg) => calls.push(['log', type, msg]),
+      run,
+      pathExists: () => true,
+      sleep: async () => { throw new Error('sleep should not be called'); },
+    });
+
+    const warnCall = calls.find(c => c[0] === 'log' && c[1] === 'warn');
+    expect(warnCall).toBeDefined();
+    expect(warnCall[2]).toContain('ended failure');
+    expect(calls).toContainEqual(['merge', { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash' }]);
+  });
+
+  it('logs a warn when the ready-for-review flip fails but still merges', async () => {
+    const calls: any[] = [];
+    const octokit: any = {
+      graphql: async (query: string) => {
+        if (query.trimStart().startsWith('query')) {
+          return { repository: { pullRequest: { id: 'PR_1', isDraft: true, mergeStateStatus: 'BLOCKED' } } };
+        }
+        if (query.includes('markPullRequestReadyForReview')) {
+          throw new Error('flip failed');
+        }
+        throw new Error('unexpected graphql');
+      },
+      rest: {
+        pulls: {
+          merge: async (args: any) => {
+            calls.push(['merge', args]);
+          },
+        },
+        git: { deleteRef: async (args: any) => calls.push(['deleteRef', args]) },
+        checks: {
+          listForRef: async () => ({ data: { check_runs: [{ status: 'completed', conclusion: 'success' }] } }),
+        },
+      },
+    };
+
+    await landOpenPullRequest({
+      octokit,
+      owner: 'on-par',
+      repoName: 'software-factory',
+      ghRepo: 'on-par/software-factory',
+      repoRoot: '/repo',
+      issue: 20,
+      branch: 'ship-it/20-flip-fails',
+      worktree: '/repo-factory-20',
+      prNumber: 123,
+      log: (type, msg) => calls.push(['log', type, msg]),
+      run: async () => {},
+      pathExists: () => true,
+      sleep: async () => { throw new Error('sleep should not be called'); },
+    });
+
+    const warnCall = calls.find(c => c[0] === 'log' && c[1] === 'warn');
+    expect(warnCall).toBeDefined();
+    expect(warnCall[2]).toContain('ready-for-review flip failed');
+    expect(calls).toContainEqual(['merge', { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash' }]);
   });
 
   it('aborts the rebase, logs conflict with the branch, and skips merge when rebase fails', async () => {
