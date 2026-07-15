@@ -4,9 +4,8 @@
 // that ships the JSON configs + constitution markdown). This module loads
 // them by resolving the config package's exports, or by explicit path.
 
-import { readFileSync, existsSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { z } from 'zod';
 import { resolveConfigPath } from '@on-par/factory-config';
 import { KNOWN_HARNESS_IDS } from '../harness/catalog.js';

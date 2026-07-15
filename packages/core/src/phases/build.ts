@@ -28,7 +28,7 @@ export async function buildPhase(
     modelOverride?: string;
   },
 ): Promise<BuildResult> {
-  const { issue, repo, worktree, specPath, branch, constitution, router, log, timeoutSeconds, skipCI, modelOverride } = opts;
+  const { issue, worktree, specPath, branch, constitution, router, log, timeoutSeconds, skipCI, modelOverride } = opts;
   let route = opts.route;
 
   const constitutionCtx = buildConstitutionContext(constitution);

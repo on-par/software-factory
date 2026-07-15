@@ -284,8 +284,8 @@ describe('CliModelExecutor', () => {
 
   it('dispatches through the ollama-agentic harness', async () => {
     tmpWorktree = await mkdtemp(join(tmpdir(), 'factory-ollama-agentic-'));
-    const execFn = async (cmd: string) => ({ stdout: '', stderr: '' });
-    const fetchFn = async (_input: string, init: any) => ({
+    const execFn = async (_cmd: string) => ({ stdout: '', stderr: '' });
+    const fetchFn = async (_input: string, _init: any) => ({
       ok: true,
       status: 200,
       statusText: 'OK',
