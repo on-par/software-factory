@@ -511,9 +511,7 @@ export async function shipIssue(
     console.log(chalk.green(`✅ Issue #${issueNum} → PR #${ship.prNumber} ready for review`));
     return branch;
   } catch (err: any) {
-    if (process.env.FACTORY_LOCAL_ONLY === '1') {
-      log(parkReasonFor(err), err.message);
-    }
+    log(parkReasonFor(err), err.message);
     await maybeWriteLocalRunReport({
       issueNum,
       paths,
@@ -561,11 +559,6 @@ async function cmdShip(issueNum: number, opts: { product?: string; autoRework?: 
   try {
     return await shipIssue(issueNum, opts);
   } catch (err: any) {
-    const repoRoot = await getRepoRoot();
-    const paths = getFactoryPaths(repoRoot);
-    if (process.env.FACTORY_LOCAL_ONLY !== '1') {
-      logEvent(paths.events, parkReasonFor(err), issueNum, err.message);
-    }
     throw new CliExitError(`Ship failed for issue #${issueNum}: ${err.message}`, 1);
   }
 }
@@ -826,13 +819,6 @@ type RunLaneDeps = {
   emitEvent?: typeof logEvent;
 };
 
-export function shouldEmitLaneTerminalEvent(
-  injectedShip: RunLaneDeps['ship'],
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
-  return !(env.FACTORY_LOCAL_ONLY === '1' && (injectedShip ?? shipIssue) === shipIssue);
-}
-
 export async function runLane(
   lane: string,
   issues: number[],
@@ -842,7 +828,6 @@ export async function runLane(
   deps: RunLaneDeps = {},
 ) {
   const { ship = shipIssue, waitMerge = waitForMerge, pathExists = existsSync, emitEvent = logEvent } = deps;
-  const emitTerminalEvent = shouldEmitLaneTerminalEvent(deps.ship);
   for (let i = 0; i < issues.length; i++) {
     const issue = issues[i];
     if (pathExists(paths.stop)) {
@@ -855,9 +840,10 @@ export async function runLane(
     } catch (err: any) {
       const reason = parkReasonFor(err);
       console.error(chalk.red(`[factory] lane '${lane}' #${issue} parked (${reason}): ${err.message}`));
-      if (emitTerminalEvent) {
-        emitEvent(paths.events, reason, issue, err.message);
-      }
+      // Terminal reason events (escalate/timeout/fail/conflict) are emitted exactly
+      // once by the layer that detects the failure — shipIssue for pipeline failures,
+      // the land path for merge failures. runLane owns only lane-lifecycle events
+      // (stopped/parked/lane-done), so injected ship functions never change ownership.
       emitEvent(paths.events, 'parked', issue, `lane '${lane}' parked (${reason}); ${issues.length - i - 1} issues remaining`);
       return;
     }

@@ -17,7 +17,6 @@ import {
   LaneParkError,
   parkReasonFor,
   runLane,
-  shouldEmitLaneTerminalEvent,
   resolveUsageKnobs,
   superviseLoop,
   triageProposalMessage,
@@ -831,15 +830,7 @@ describe('cli', () => {
   describe('runLane', () => {
     const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
 
-    it('does not double-log terminal events when the default local-only ship writes the run report', () => {
-      const stubShip = async () => 'ship-it/1-x';
-
-      expect(shouldEmitLaneTerminalEvent(undefined, { FACTORY_LOCAL_ONLY: '1' } as any)).toBe(false);
-      expect(shouldEmitLaneTerminalEvent(stubShip, { FACTORY_LOCAL_ONLY: '1' } as any)).toBe(true);
-      expect(shouldEmitLaneTerminalEvent(undefined, {} as any)).toBe(true);
-    });
-
-    it('parks the lane on an escalate error and skips remaining issues', async () => {
+    it('parks the lane without re-emitting the terminal event (shipIssue owns it) on an escalate error', async () => {
       const calls: any[] = [];
       await runLane('app', [7, 8], '/repo', 'on-par/software-factory', paths, {
         ship: async (issue) => {
@@ -853,14 +844,15 @@ describe('cli', () => {
 
       expect(calls.filter(c => c[0] === 'ship')).toEqual([['ship', 7]]);
       const events = calls.filter(c => c[0] === 'event');
-      expect(events[0]).toEqual(['event', 'escalate', 7, 'plan escalated: needs a human decision']);
-      expect(events[1][0]).toBe('event');
-      expect(events[1][1]).toBe('parked');
-      expect(events[1][2]).toBe(7);
+      expect(events).toHaveLength(1);
+      expect(events[0][1]).toBe('parked');
+      expect(events[0][2]).toBe(7);
+      expect(events[0][3]).toContain('(escalate)');
+      expect(events.some(e => e[1] === 'escalate')).toBe(false);
       expect(events.some(e => e[1] === 'lane-done')).toBe(false);
     });
 
-    it('parks the lane on a timeout error', async () => {
+    it('parks the lane without re-emitting the terminal event (shipIssue owns it) on a timeout error', async () => {
       const calls: any[] = [];
       await runLane('app', [9], '/repo', 'on-par/software-factory', paths, {
         ship: async () => { throw Object.assign(new Error('router exhausted'), { reason: 'timeout' }); },
@@ -869,11 +861,15 @@ describe('cli', () => {
         emitEvent: (_events: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
       });
 
-      expect(calls[0]).toEqual(['event', 'timeout', 9, 'router exhausted']);
-      expect(calls[1][1]).toBe('parked');
+      const events = calls.filter(c => c[0] === 'event');
+      expect(events).toHaveLength(1);
+      expect(events[0][1]).toBe('parked');
+      expect(events[0][2]).toBe(9);
+      expect(events[0][3]).toContain('(timeout)');
+      expect(events.some(e => e[1] === 'timeout')).toBe(false);
     });
 
-    it('parks the lane on a plain fail error', async () => {
+    it('parks the lane without re-emitting the terminal event (shipIssue owns it) on a plain fail error', async () => {
       const calls: any[] = [];
       await runLane('app', [10], '/repo', 'on-par/software-factory', paths, {
         ship: async () => { throw new Error('boom'); },
@@ -882,11 +878,15 @@ describe('cli', () => {
         emitEvent: (_events: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
       });
 
-      expect(calls[0]).toEqual(['event', 'fail', 10, 'boom']);
-      expect(calls[1][1]).toBe('parked');
+      const events = calls.filter(c => c[0] === 'event');
+      expect(events).toHaveLength(1);
+      expect(events[0][1]).toBe('parked');
+      expect(events[0][2]).toBe(10);
+      expect(events[0][3]).toContain('(fail)');
+      expect(events.some(e => e[1] === 'fail')).toBe(false);
     });
 
-    it('parks the lane on a conflict error from waitMerge', async () => {
+    it('parks the lane without re-emitting the terminal event (land path owns it) on a conflict error from waitMerge', async () => {
       const calls: any[] = [];
       await runLane('app', [11], '/repo', 'on-par/software-factory', paths, {
         ship: async (issue) => { calls.push(['ship', issue]); return 'ship-it/11-x'; },
@@ -896,8 +896,12 @@ describe('cli', () => {
       });
 
       expect(calls[0]).toEqual(['ship', 11]);
-      expect(calls[1]).toEqual(['event', 'conflict', 11, 'rebase conflict on ship-it/11-x — parked']);
-      expect(calls[2][1]).toBe('parked');
+      const events = calls.filter(c => c[0] === 'event');
+      expect(events).toHaveLength(1);
+      expect(events[0][1]).toBe('parked');
+      expect(events[0][2]).toBe(11);
+      expect(events[0][3]).toContain('(conflict)');
+      expect(events.some(e => e[1] === 'conflict')).toBe(false);
     });
 
     it('runs both issues and logs lane-done on the green path', async () => {
