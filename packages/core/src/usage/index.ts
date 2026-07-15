@@ -4,6 +4,7 @@ import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from '
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { logEvent } from '../utils/index.js';
+import type { CostEntry } from '../types/index.js';
 
 export const TRAILING_WINDOW_MS = 5 * 60 * 60 * 1000;
 
@@ -165,4 +166,114 @@ export async function watchUsage(opts: WatchUsageOptions): Promise<'stopped' | '
   }
 
   return 'aborted';
+}
+
+// ---------- Cost reading + aggregation (TUI Costs tab) ----------
+
+export interface CostsRead {
+  entries: CostEntry[];
+  skipped: number;
+}
+
+function isValidCostEntry(value: unknown): value is CostEntry {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.issue === 'string'
+    && typeof v.model === 'string'
+    && Number.isFinite(v.cost)
+    && (v.inputTokens === undefined || Number.isFinite(v.inputTokens))
+    && (v.outputTokens === undefined || Number.isFinite(v.outputTokens))
+  );
+}
+
+/** Like readCosts (utils/index.ts) but counts malformed/wrong-shape lines instead of silently dropping them. */
+export function readCostsFile(costsFile: string): CostsRead {
+  if (!existsSync(costsFile)) return { entries: [], skipped: 0 };
+
+  const entries: CostEntry[] = [];
+  let skipped = 0;
+
+  for (const line of readFileSync(costsFile, 'utf-8').trim().split('\n').filter(Boolean)) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      skipped++;
+      continue;
+    }
+
+    if (isValidCostEntry(parsed)) {
+      entries.push(parsed);
+    } else {
+      skipped++;
+    }
+  }
+
+  return { entries, skipped };
+}
+
+export interface ModelCostRow {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
+  tasks: number;
+}
+
+export interface IssueCostRow {
+  issue: string;
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
+  perModel: ModelCostRow[];
+}
+
+export interface CostsSummary {
+  perIssue: IssueCostRow[];
+  total: { inputTokens: number; outputTokens: number; cost: number };
+}
+
+/** Group cost entries by issue (first-seen order), with a nested per-model rollup and a grand total. Pure, no I/O. */
+export function aggregateCosts(entries: CostEntry[]): CostsSummary {
+  const issueOrder: string[] = [];
+  const byIssue = new Map<string, IssueCostRow>();
+  const modelByIssue = new Map<string, Map<string, ModelCostRow>>();
+  const total = { inputTokens: 0, outputTokens: 0, cost: 0 };
+
+  for (const e of entries) {
+    const inputTokens = e.inputTokens ?? 0;
+    const outputTokens = e.outputTokens ?? 0;
+    const cost = e.cost ?? 0;
+
+    if (!byIssue.has(e.issue)) {
+      issueOrder.push(e.issue);
+      byIssue.set(e.issue, { issue: e.issue, inputTokens: 0, outputTokens: 0, cost: 0, perModel: [] });
+      modelByIssue.set(e.issue, new Map());
+    }
+
+    const issueRow = byIssue.get(e.issue)!;
+    issueRow.inputTokens += inputTokens;
+    issueRow.outputTokens += outputTokens;
+    issueRow.cost += cost;
+
+    const models = modelByIssue.get(e.issue)!;
+    const modelRow = models.get(e.model) ?? { model: e.model, inputTokens: 0, outputTokens: 0, cost: 0, tasks: 0 };
+    modelRow.inputTokens += inputTokens;
+    modelRow.outputTokens += outputTokens;
+    modelRow.cost += cost;
+    modelRow.tasks += 1;
+    models.set(e.model, modelRow);
+
+    total.inputTokens += inputTokens;
+    total.outputTokens += outputTokens;
+    total.cost += cost;
+  }
+
+  const perIssue = issueOrder.map(issue => ({
+    ...byIssue.get(issue)!,
+    perModel: Array.from(modelByIssue.get(issue)!.values()),
+  }));
+
+  return { perIssue, total };
 }

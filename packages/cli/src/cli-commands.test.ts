@@ -31,7 +31,7 @@ const h = vi.hoisted(() => {
     routerResolve: (_route: string): string | undefined => 'claude-model',
     factoryConfig: { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: false } } as any,
     gcReport: { removed: [], kept: 0, dryRun: false } as any,
-    runTuiCalls: [] as Array<{ eventsFile: string; repo?: string; stopFile?: string }>,
+    runTuiCalls: [] as Array<{ eventsFile: string; repo?: string; stopFile?: string; queueFile?: string; queueProposedFile?: string; costsFile?: string }>,
   };
 });
 
@@ -57,7 +57,7 @@ vi.mock('@octokit/rest', () => ({
 }));
 
 vi.mock('@on-par/factory-tui', () => ({
-  runTui: vi.fn(async (opts: { eventsFile: string; repo?: string; stopFile?: string }) => {
+  runTui: vi.fn(async (opts: { eventsFile: string; repo?: string; stopFile?: string; queueFile?: string; queueProposedFile?: string; costsFile?: string }) => {
     h.runTuiCalls.push(opts);
   }),
 }));
@@ -439,6 +439,9 @@ describe('cli commands (via main dispatch)', () => {
       expect(h.runTuiCalls[0].eventsFile.endsWith(join('.factory', 'events.ndjson'))).toBe(true);
       expect(h.runTuiCalls[0].repo).toBe(h.ghRepo);
       expect(h.runTuiCalls[0].stopFile?.endsWith(join('.factory', 'STOP'))).toBe(true);
+      expect(h.runTuiCalls[0].queueFile?.endsWith(join('.factory', 'queue'))).toBe(true);
+      expect(h.runTuiCalls[0].queueProposedFile?.endsWith(join('.factory', 'queue.proposed'))).toBe(true);
+      expect(h.runTuiCalls[0].costsFile?.endsWith(join('.factory', 'costs.jsonl'))).toBe(true);
     });
 
     it('calls runTui with repo undefined when gh repo detection fails', async () => {

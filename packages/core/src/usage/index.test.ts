@@ -4,11 +4,14 @@ import { defaultTranscriptRoots } from './index.js';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
+  aggregateCosts,
   estimateTrailingSpend,
   formatUsageReport,
   priceFor,
+  readCostsFile,
   watchUsage,
 } from './index.js';
+import type { CostEntry } from '../types/index.js';
 
 const now = new Date('2026-07-10T12:00:00Z');
 const tempDirs: string[] = [];
@@ -164,6 +167,98 @@ describe('usage', () => {
   it('formats the usage report', () => {
     expect(formatUsageReport(187.4, 227)).toBe('trailing-5h usage ~= $187 = 83% of $227 cap');
     expect(formatUsageReport(0, 227)).toBe('trailing-5h usage ~= $0 = 0% of $227 cap');
+  });
+});
+
+describe('readCostsFile', () => {
+  it('returns zero entries and zero skipped when the file is missing', () => {
+    const dir = mkdtemp();
+    expect(readCostsFile(join(dir, 'costs.jsonl'))).toEqual({ entries: [], skipped: 0 });
+  });
+
+  it('parses valid lines and counts malformed JSON and wrong-shape lines as skipped', () => {
+    const dir = mkdtemp();
+    const file = join(dir, 'costs.jsonl');
+    const valid: CostEntry = { ts: '2026-07-10T11:30:00Z', issue: '61', task: 'build', model: 'claude-sonnet-5', inputTokens: 100, outputTokens: 50, cost: 0.01 };
+    writeFileSync(file, [
+      JSON.stringify(valid),
+      'not valid json {{{',
+      JSON.stringify({ ts: '2026-07-10T11:31:00Z', task: 'build', cost: 'not-a-number' }),
+    ].join('\n') + '\n');
+
+    const result = readCostsFile(file);
+    expect(result.entries).toEqual([valid]);
+    expect(result.skipped).toBe(2);
+  });
+
+  it('handles a trailing newline without producing a phantom skipped line', () => {
+    const dir = mkdtemp();
+    const file = join(dir, 'costs.jsonl');
+    const valid: CostEntry = { ts: '2026-07-10T11:30:00Z', issue: '61', task: 'build', model: 'claude-sonnet-5', inputTokens: 100, outputTokens: 50, cost: 0.01 };
+    writeFileSync(file, JSON.stringify(valid) + '\n\n');
+    expect(readCostsFile(file)).toEqual({ entries: [valid], skipped: 0 });
+  });
+
+  it('counts a line with non-numeric token fields as skipped instead of admitting it for aggregation', () => {
+    const dir = mkdtemp();
+    const file = join(dir, 'costs.jsonl');
+    const valid: CostEntry = { ts: '2026-07-10T11:30:00Z', issue: '61', task: 'build', model: 'claude-sonnet-5', inputTokens: 100, outputTokens: 50, cost: 0.01 };
+    const corruptTokens = { ts: '2026-07-10T11:31:00Z', issue: '62', task: 'build', model: 'gpt-5', inputTokens: '1000', outputTokens: 50, cost: 0.01 };
+    writeFileSync(file, [JSON.stringify(valid), JSON.stringify(corruptTokens)].join('\n') + '\n');
+
+    const result = readCostsFile(file);
+    expect(result.entries).toEqual([valid]);
+    expect(result.skipped).toBe(1);
+  });
+});
+
+describe('aggregateCosts', () => {
+  it('returns empty perIssue and zero totals for empty input', () => {
+    expect(aggregateCosts([])).toEqual({ perIssue: [], total: { inputTokens: 0, outputTokens: 0, cost: 0 } });
+  });
+
+  it('sums per-issue, nests per-model, and computes a grand total, preserving first-seen issue order', () => {
+    const entries: CostEntry[] = [
+      { ts: 't1', issue: '61', task: 'build', model: 'claude-sonnet-5', inputTokens: 100, outputTokens: 50, cost: 0.01 },
+      { ts: 't2', issue: '62', task: 'plan', model: 'gpt-5', inputTokens: 200, outputTokens: 100, cost: 0.02 },
+      { ts: 't3', issue: '61', task: 'check', model: 'claude-sonnet-5', inputTokens: 10, outputTokens: 5, cost: 0.001 },
+      { ts: 't4', issue: '61', task: 'ship', model: 'claude-haiku-5', inputTokens: 1, outputTokens: 1, cost: 0.0001 },
+    ];
+
+    const summary = aggregateCosts(entries);
+
+    expect(summary.perIssue.map(r => r.issue)).toEqual(['61', '62']);
+
+    const issue61 = summary.perIssue[0];
+    expect(issue61.inputTokens).toBe(111);
+    expect(issue61.outputTokens).toBe(56);
+    expect(issue61.cost).toBeCloseTo(0.0111, 10);
+    expect(issue61.perModel).toEqual([
+      { model: 'claude-sonnet-5', inputTokens: 110, outputTokens: 55, cost: 0.011, tasks: 2 },
+      { model: 'claude-haiku-5', inputTokens: 1, outputTokens: 1, cost: 0.0001, tasks: 1 },
+    ]);
+
+    const issue62 = summary.perIssue[1];
+    expect(issue62).toEqual({
+      issue: '62',
+      inputTokens: 200,
+      outputTokens: 100,
+      cost: 0.02,
+      perModel: [{ model: 'gpt-5', inputTokens: 200, outputTokens: 100, cost: 0.02, tasks: 1 }],
+    });
+
+    expect(summary.total.inputTokens).toBe(311);
+    expect(summary.total.outputTokens).toBe(156);
+    expect(summary.total.cost).toBeCloseTo(0.0311, 10);
+  });
+
+  it('defaults missing token fields to zero', () => {
+    const entries = [
+      { ts: 't1', issue: '61', task: 'build', model: 'claude-sonnet-5', cost: 0.01 } as CostEntry,
+    ];
+    const summary = aggregateCosts(entries);
+    expect(summary.perIssue[0].inputTokens).toBe(0);
+    expect(summary.perIssue[0].outputTokens).toBe(0);
   });
 });
 

@@ -5,8 +5,8 @@ export { loadModelsConfig, loadRoutesConfig, loadFactoryConfig, resolveTimeouts,
 export type { ModelsConfig, RoutesConfig, FactoryConfig } from './config/index.js';
 
 // Queue
-export { validateQueue, parseQueue } from './queue/index.js';
-export type { QueueValidationResult, QueueEntry, QueueDiagnostic, ParsedQueue } from './queue/index.js';
+export { validateQueue, parseQueue, readQueue } from './queue/index.js';
+export type { QueueValidationResult, QueueEntry, QueueDiagnostic, ParsedQueue, QueueSnapshot, QueueSnapshotEntry } from './queue/index.js';
 
 // Events
 export { readEvents, followEvents } from './events/index.js';
@@ -80,8 +80,8 @@ export { runCommand, describeCommandFailure } from './utils/command-runner.js';
 export type { RunCommandOptions, CommandResult } from './utils/command-runner.js';
 
 // Usage
-export { estimateTrailingSpend, formatUsageReport, watchUsage, priceFor, defaultTranscriptRoots, TRAILING_WINDOW_MS } from './usage/index.js';
-export type { TrailingUsageOptions, WatchUsageOptions } from './usage/index.js';
+export { estimateTrailingSpend, formatUsageReport, watchUsage, priceFor, defaultTranscriptRoots, TRAILING_WINDOW_MS, readCostsFile, aggregateCosts } from './usage/index.js';
+export type { TrailingUsageOptions, WatchUsageOptions, CostsRead, ModelCostRow, IssueCostRow, CostsSummary } from './usage/index.js';
 
 // Types
 export * from './types/index.js';
