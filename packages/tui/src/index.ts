@@ -13,7 +13,7 @@ export {
 export type { LaneStatus, LaneState, DashboardState } from './dashboard.js';
 export { Header } from './components/Header.js';
 export type { HeaderProps } from './components/Header.js';
-export { PhaseRow, spinnerFrame, formatElapsed } from './components/PhaseRow.js';
+export { PhaseRow, spinnerFrame, formatElapsed, formatDuration } from './components/PhaseRow.js';
 export type { PhaseRowProps } from './components/PhaseRow.js';
 export { EventFeed } from './components/EventFeed.js';
 export type { EventFeedProps } from './components/EventFeed.js';

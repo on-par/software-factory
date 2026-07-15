@@ -10,13 +10,16 @@ export function spinnerFrame(now: number): string {
   return SPINNER_FRAMES[Math.floor(now / 100) % SPINNER_FRAMES.length];
 }
 
-export function formatElapsed(startedAt: string | undefined, now: number): string {
-  if (!startedAt) return '00:00';
-  const elapsedMs = Math.max(0, now - Date.parse(startedAt));
-  const totalSeconds = Math.floor(elapsedMs / 1000);
+export function formatDuration(elapsedMs: number): string {
+  const totalSeconds = Math.floor(Math.max(0, elapsedMs) / 1000);
   const mm = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
   const ss = String(totalSeconds % 60).padStart(2, '0');
   return `${mm}:${ss}`;
+}
+
+export function formatElapsed(startedAt: string | undefined, now: number): string {
+  if (!startedAt) return '00:00';
+  return formatDuration(now - Date.parse(startedAt));
 }
 
 export interface PhaseRowProps {

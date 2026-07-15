@@ -1,7 +1,7 @@
 import type { JSX } from 'react';
 import { Box, Text } from 'ink';
-import type { LaneState } from '../dashboard.js';
-import { spinnerFrame, formatElapsed } from './PhaseRow.js';
+import { laneElapsedMs, type LaneState } from '../dashboard.js';
+import { spinnerFrame, formatDuration } from './PhaseRow.js';
 
 const TITLE_MAX_LENGTH = 32;
 
@@ -46,8 +46,6 @@ export interface LaneRowProps {
 }
 
 export function LaneRow({ lane, selected, now, trainPosition }: LaneRowProps): JSX.Element {
-  const elapsedNow = lane.finishedAt ? Date.parse(lane.finishedAt) : now;
-
   return (
     <Box>
       <Text color={selected ? 'cyan' : undefined}>{selected ? '❯ ' : '  '}</Text>
@@ -55,7 +53,7 @@ export function LaneRow({ lane, selected, now, trainPosition }: LaneRowProps): J
       <Text>
         {' '}
         <Text bold>#{lane.issue}</Text> {truncate(lane.title ?? '', TITLE_MAX_LENGTH)}{' '}
-        <Text dimColor>{lane.run.model ?? '?'}</Text> {formatElapsed(lane.startedAt, elapsedNow)}
+        <Text dimColor>{lane.run.model ?? '?'}</Text> {formatDuration(laneElapsedMs(lane, now))}
       </Text>
     </Box>
   );
