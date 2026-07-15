@@ -129,4 +129,16 @@ describe('ClaudeCliHarness failure classification', () => {
     expect(err.reason).toBe('empty_response');
     expect(err.details.exitCode).toBe(0);
   });
+
+  it('preserves signal/killed/code in details when the exec error carries them', async () => {
+    const harness = new ClaudeCliHarness(async () => {
+      throw Object.assign(new Error('killed'), { killed: true, signal: 'SIGTERM', code: null });
+    });
+
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch(e => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.details.signal).toBe('SIGTERM');
+    expect(err.details.killed).toBe(true);
+  });
 });

@@ -122,5 +122,14 @@ export function codingHarnessContractCases(scenarios: HarnessContractScenarios):
         await expectHarnessError(scenarios.failure(), err => assert.ok(HARNESS_FAILURE_REASONS.includes(err.reason)));
       },
     },
+    {
+      name: 'failure rejections carry a non-empty diagnostic message',
+      async run() {
+        for (const scenario of [scenarios.timeout(), scenarios.emptyOutput(), scenarios.failure()]) {
+          await expectHarnessError(scenario, err =>
+            assert.ok(err.message.trim().length > 0, `harness rejected with an empty message (reason=${err.reason})`));
+        }
+      },
+    },
   ];
 }

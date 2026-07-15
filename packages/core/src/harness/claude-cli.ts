@@ -41,6 +41,9 @@ export class ClaudeCliHarness implements CodingHarness {
       throw new HarnessError(err.message ?? String(err), reason, {
         exitCode: typeof err.code === 'number' ? err.code : undefined,
         stderr: err.stderr,
+        code: typeof err.code === 'string' || typeof err.code === 'number' ? err.code : undefined,
+        signal: typeof err.signal === 'string' ? err.signal : undefined,
+        killed: err.killed === true ? true : undefined,
       });
     }
 

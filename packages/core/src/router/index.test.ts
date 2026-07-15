@@ -126,7 +126,7 @@ describe('ModelRouter with StubModelExecutor', () => {
 
     expect(result.output).toBe('RECOVERED');
     expect(result.attempts).toEqual([
-      { model: 'stub-model', reason: 'rate_limit', ok: false },
+      { model: 'stub-model', reason: 'rate_limit', ok: false, detail: 'msg="stub failure: rate_limit" exitCode=1' },
       { model: 'stub-model', reason: null, ok: true },
     ]);
     expect(stub.calls).toHaveLength(2);
@@ -140,12 +140,12 @@ describe('ModelRouter with StubModelExecutor', () => {
 
     const err: any = await router.run('plan', 'do it').catch(e => e);
     expect(err.message).toBe(
-      "All models failed for task 'plan': stub-model(error), stub-model(error)",
+      "All models failed for task 'plan': stub-model(error: msg=\"stub failure: error\" exitCode=1), stub-model(error: msg=\"stub failure: error\" exitCode=1)",
     );
     expect(err.reason).toBe('error');
     expect(err.attempts).toEqual([
-      { model: 'stub-model', reason: 'error', ok: false },
-      { model: 'stub-model', reason: 'error', ok: false },
+      { model: 'stub-model', reason: 'error', ok: false, detail: 'msg="stub failure: error" exitCode=1' },
+      { model: 'stub-model', reason: 'error', ok: false, detail: 'msg="stub failure: error" exitCode=1' },
     ]);
     expect(stub.calls).toHaveLength(2);
   });
@@ -184,9 +184,9 @@ describe('ModelRouter with StubModelExecutor', () => {
     expect(result.model).toBe('model-b');
     expect(stub.calls).toHaveLength(4);
     expect(result.attempts).toEqual([
-      { model: 'model-a', reason: 'rate_limit', ok: false },
-      { model: 'model-a', reason: 'rate_limit', ok: false },
-      { model: 'model-a', reason: 'rate_limit', ok: false },
+      { model: 'model-a', reason: 'rate_limit', ok: false, detail: 'msg="stub failure: rate_limit" exitCode=1' },
+      { model: 'model-a', reason: 'rate_limit', ok: false, detail: 'msg="stub failure: rate_limit" exitCode=1' },
+      { model: 'model-a', reason: 'rate_limit', ok: false, detail: 'msg="stub failure: rate_limit" exitCode=1' },
       { model: 'model-b', reason: null, ok: true },
     ]);
   });
@@ -236,12 +236,12 @@ describe('ModelRouter with StubModelExecutor', () => {
 
     const err: any = await router.run('plan', 'do it').catch(e => e);
     expect(err.message).toBe(
-      "All models failed for task 'plan': model-a(timeout), model-b(timeout)",
+      "All models failed for task 'plan': model-a(timeout: msg=\"stub failure: timeout\" exitCode=1), model-b(timeout: msg=\"stub failure: timeout\" exitCode=1)",
     );
     expect(err.reason).toBe('timeout');
     expect(err.attempts).toEqual([
-      { model: 'model-a', reason: 'timeout', ok: false },
-      { model: 'model-b', reason: 'timeout', ok: false },
+      { model: 'model-a', reason: 'timeout', ok: false, detail: 'msg="stub failure: timeout" exitCode=1' },
+      { model: 'model-b', reason: 'timeout', ok: false, detail: 'msg="stub failure: timeout" exitCode=1' },
     ]);
     expect(stub.calls).toHaveLength(2);
   });
@@ -272,9 +272,73 @@ describe('ModelRouter with StubModelExecutor', () => {
     expect(result.model).toBe('model-b');
     expect(stub.calls.map(call => call.model)).toEqual(['model-a', 'model-b']);
     expect(result.attempts).toEqual([
-      { model: 'model-a', reason: 'usage_cap', ok: false },
+      { model: 'model-a', reason: 'usage_cap', ok: false, detail: 'msg="stub failure: usage_cap" exitCode=1' },
       { model: 'model-b', reason: null, ok: true },
     ]);
+  });
+
+  it('preserves detail when a bare error collapses to unknown (regression)', async () => {
+    const calls: { model: string }[] = [];
+    const executor = {
+      async runModel(model: string) {
+        calls.push({ model });
+        throw new Error('spawn claude EAGAIN');
+      },
+    };
+    const router = new ModelRouter(models, routes, false, executor);
+    const logs: string[] = [];
+
+    const err: any = await router.run('plan', 'do it', { onLog: msg => logs.push(msg) }).catch(e => e);
+
+    expect(calls).toHaveLength(1);
+    expect(err.attempts).toEqual([
+      { model: 'stub-model', reason: 'unknown', ok: false, detail: 'msg="spawn claude EAGAIN"' },
+    ]);
+    expect(logs).toContain('stub-model failed (unknown) on plan');
+    expect(logs).toContain('stub-model failure detail on plan: msg="spawn claude EAGAIN"');
+    expect(err.message).toContain('unknown: msg="spawn claude EAGAIN"');
+  });
+
+  it('carries sanitized child-process fields in the failure detail', async () => {
+    const executor = {
+      async runModel() {
+        throw Object.assign(new Error('Command failed: claude'), {
+          code: 'EAGAIN',
+          signal: 'SIGKILL',
+          killed: true,
+          stderr: `ANTHROPIC_API_KEY=sk-live-abc123 ${'x'.repeat(1000)}`,
+        });
+      },
+    };
+    const router = new ModelRouter(models, routes, false, executor);
+    const logs: string[] = [];
+
+    await router.run('plan', 'do it', { onLog: msg => logs.push(msg) }).catch(() => {});
+
+    const detailLog = logs.find(msg => msg.includes('failure detail'));
+    expect(detailLog).toContain('code=EAGAIN');
+    expect(detailLog).toContain('signal=SIGKILL');
+    expect(detailLog).toContain('killed=true');
+    expect(detailLog).toContain('…');
+    expect(detailLog).not.toContain('x'.repeat(1000));
+    expect(detailLog).toContain('[redacted]');
+    expect(detailLog).not.toContain('sk-live-abc123');
+  });
+
+  it('reclassifies empty output as empty_response without a duplicate attempt entry', async () => {
+    const stub = new StubModelExecutor({ scripts: { plan: [{ output: '' }] } });
+    const router = new ModelRouter(models, routes, false, stub);
+    const logs: string[] = [];
+
+    const err: any = await router.run('plan', 'do it', { onLog: msg => logs.push(msg) }).catch(e => e);
+
+    expect(err.attempts).toEqual([
+      { model: 'stub-model', reason: 'empty_response', ok: false, detail: 'msg="model returned empty output"' },
+    ]);
+    expect(logs).toContain('stub-model failed (empty_response) on plan');
+    expect(err.message).toBe(
+      "All models failed for task 'plan': stub-model(empty_response: msg=\"model returned empty output\")",
+    );
   });
 
   it('skips experimental models by default', () => {
