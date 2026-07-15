@@ -130,6 +130,62 @@ describe('compileChecker', () => {
     expect(result.result).toBe('FAIL');
     expect(result.details).toContain('unexpected checker error');
   });
+
+  it('fails when a Makefile is present and make fails', { timeout: 30000 }, async () => {
+    const worktree = await makeWorktree({
+      Makefile: 'all:\n\texit 1\n',
+    });
+
+    const result = await compileChecker(makeContext(worktree));
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain('make failed');
+  });
+
+  it('passes when a Makefile is present and make succeeds', { timeout: 30000 }, async () => {
+    const worktree = await makeWorktree({
+      Makefile: 'all:\n\t@true\n',
+    });
+
+    const result = await compileChecker(makeContext(worktree));
+
+    expect(result.result).toBe('PASS');
+    expect(result.details).toContain('make: OK');
+  });
+
+  it('fails when Cargo.toml is present and cargo build fails', { timeout: 30000 }, async () => {
+    const worktree = await makeWorktree({
+      'Cargo.toml': 'this is not [[[ valid cargo manifest',
+    });
+
+    const result = await compileChecker(makeContext(worktree));
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain('cargo build failed');
+  });
+
+  it('skips when package.json has no build script and no other manifest exists', async () => {
+    const worktree = await makeWorktree({
+      'package.json': '{"name":"fixture","version":"1.0.0"}',
+    });
+
+    const result = await compileChecker(makeContext(worktree));
+
+    expect(result.result).toBe('PASS');
+    expect(result.details).toContain('no build system detected — skipped');
+  });
+
+  it('prefers make over cargo when both manifests are present', { timeout: 30000 }, async () => {
+    const worktree = await makeWorktree({
+      Makefile: 'all:\n\texit 1\n',
+      'Cargo.toml': 'this is not [[[ valid cargo manifest',
+    });
+
+    const result = await compileChecker(makeContext(worktree));
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain('make failed');
+  });
 });
 
 describe('testsChecker', () => {
