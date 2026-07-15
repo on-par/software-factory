@@ -160,6 +160,9 @@ describe('ModelRouter with StubModelExecutor', () => {
     ['mysterious', 1, 'unknown'],
     ['rate limit hit', 1, 'rate_limit'],
     ['insufficient credit', 1, 'usage_cap'],
+    ['schema_invalid: proposal must be an object', 1, 'schema_invalid'],
+    ['apply_failed: file could not be read', 1, 'apply_failed'],
+    ['verification failed: exit 1', 1, 'verify_failed'],
   ] as const)('classifies %j with exit code %i as %s', (stderr, exitCode, expected) => {
     const router = new ModelRouter(models, routes);
 
@@ -369,6 +372,50 @@ describe('ModelRouter with StubModelExecutor', () => {
       { model: 'model-a', reason: 'empty_response', ok: false },
       { model: 'model-b', reason: null, ok: true },
     ]);
+  });
+
+  it.each(['schema_invalid', 'apply_failed', 'verify_failed'] as const)(
+    'stops the failover chain on a non-retryable %s reason without burning the next tier',
+    async reason => {
+      const stub = new StubModelExecutor({
+        scripts: { plan: [{ fail: reason }, { output: 'SHOULD NOT BE REACHED' }] },
+      });
+      const router = new ModelRouter(twoModels, routes, false, stub);
+
+      const err: any = await router.run('plan', 'do it').catch(e => e);
+
+      expect(err.reason).toBe(reason);
+      expect(err.attempts).toEqual([
+        { model: 'model-a', reason, ok: false, detail: `msg="stub failure: ${reason}" exitCode=1` },
+      ]);
+      expect(stub.calls).toEqual([{ model: 'model-a', prompt: 'do it', task: 'plan' }]);
+    },
+  );
+
+  it('logs the standard failure line and a non-retryable notice for a deterministic failure', async () => {
+    const stub = new StubModelExecutor({
+      scripts: { plan: [{ fail: 'schema_invalid' }] },
+    });
+    const router = new ModelRouter(twoModels, routes, false, stub);
+    const logs: string[] = [];
+
+    await router.run('plan', 'do it', { onLog: msg => logs.push(msg) }).catch(() => {});
+
+    expect(logs).toContain('model-a failed (schema_invalid) on plan');
+    expect(logs).toContain('model-a failed (schema_invalid) on plan — non-retryable, not failing over');
+  });
+
+  it('still retries a generic error once then fails over (non-retryable short-circuit does not change retryable behavior)', async () => {
+    const stub = new StubModelExecutor({
+      scripts: { plan: [{ fail: 'error' }, { fail: 'error' }, { output: 'RECOVERED' }] },
+    });
+    const router = new ModelRouter(twoModels, routes, false, stub);
+
+    const result = await router.run('plan', 'do it');
+
+    expect(result.output).toBe('RECOVERED');
+    expect(result.model).toBe('model-b');
+    expect(stub.calls).toHaveLength(3);
   });
 
   it('skips experimental models by default', () => {

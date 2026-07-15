@@ -9,6 +9,9 @@ const HARNESS_FAILURE_REASONS: HarnessFailureReason[] = [
   'timeout',
   'error',
   'empty_response',
+  'schema_invalid',
+  'apply_failed',
+  'verify_failed',
   'unknown',
 ];
 

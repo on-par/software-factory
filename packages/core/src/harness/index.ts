@@ -4,9 +4,8 @@
 import type { TaskType } from '../types/index.js';
 import type { ModelRegistry } from '../models/index.js';
 
-/** Mirrors router FailoverReason. Defined here (not imported from ../router)
- *  so extracting harnesses out of the router later cannot create an import
- *  cycle; the unions must stay value-identical. */
+/** Router's FailoverReason is a type alias of HarnessFailureReason (see
+ *  ../router/index.ts) so the two unions can never drift. */
 /** Tasks that edit files in a worktree and therefore require an agentic harness. */
 export const AGENTIC_BUILD_TASKS = ['build_codex', 'build_claude'] as const satisfies readonly TaskType[];
 
@@ -21,7 +20,19 @@ export type HarnessFailureReason =
   | 'timeout'
   | 'error'
   | 'empty_response'
+  | 'schema_invalid'   // model output failed deterministic schema validation
+  | 'apply_failed'     // patch could not be applied to the worktree
+  | 'verify_failed'    // deterministic verify/build command failed in the environment
   | 'unknown';
+
+/** Deterministic failures: another model cannot plausibly help, so the
+ *  router must not fail over to the next tier. */
+export const NON_RETRYABLE_FAILURE_REASONS = ['schema_invalid', 'apply_failed', 'verify_failed'] as const satisfies readonly HarnessFailureReason[];
+
+/** True when failing over to another model can plausibly help. */
+export function isRetryableFailure(reason: HarnessFailureReason): boolean {
+  return !(NON_RETRYABLE_FAILURE_REASONS as readonly string[]).includes(reason);
+}
 
 export interface HarnessRequest {
   /** Registry model id (key in models.json), not the provider-native id. */

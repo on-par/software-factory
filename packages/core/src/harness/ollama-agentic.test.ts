@@ -177,7 +177,7 @@ describe('OllamaAgenticHarness unsafe paths', () => {
     const err: any = await harness.run(makeContractRequest({ model: 'local-agentic-model', registry, worktree })).catch(e => e);
 
     expect(err).toBeInstanceOf(HarnessError);
-    expect(err.reason).toBe('error');
+    expect(err.reason).toBe('schema_invalid');
     const tracePath = err.message.match(/trace written to (.+)$/)[1];
     const trace = JSON.parse(await readFile(tracePath, 'utf-8'));
     expect(trace.malformedReason).toBe('schema_invalid');
@@ -203,7 +203,7 @@ describe('OllamaAgenticHarness apply failures', () => {
     const err: any = await harness.run(makeContractRequest({ model: 'local-agentic-model', registry, worktree })).catch(e => e);
 
     expect(err).toBeInstanceOf(HarnessError);
-    expect(err.reason).toBe('error');
+    expect(err.reason).toBe('apply_failed');
     const tracePath = err.message.match(/trace written to (.+)$/)[1];
     const trace = JSON.parse(await readFile(tracePath, 'utf-8'));
     expect(trace.malformedReason).toBe('apply_failed');
@@ -223,7 +223,7 @@ describe('OllamaAgenticHarness verify failures', () => {
     const err: any = await harness.run(makeContractRequest({ model: 'local-agentic-model', registry, worktree })).catch(e => e);
 
     expect(err).toBeInstanceOf(HarnessError);
-    expect(err.reason).toBe('error');
+    expect(err.reason).toBe('verify_failed');
     expect(err.message).toMatch(/verify failed/);
     expect(fetchFn.calls).toHaveLength(1);
 
