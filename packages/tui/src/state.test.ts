@@ -74,6 +74,12 @@ describe('reduceEvent', () => {
     expect(state.done).toBe(true);
     expect(state.activePhase).toBeUndefined();
     expect(state.phaseStatus).toEqual({ PLAN: 'done', BUILD: 'done', CHECK: 'done', SHIP: 'done' });
+
+    // A queue can drain straight into the next issue on the same events file —
+    // once a new phase event arrives, the header must stop reporting "ready".
+    state = reduceEvent(state, ev('plan', 'Starting plan phase', '2026-01-01T01:00:00.000Z', '193'));
+    expect(state.done).toBe(false);
+    expect(state.activePhase).toBe('PLAN');
   });
 
   it('caps the feed at the last 10 events', () => {

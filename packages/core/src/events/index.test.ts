@@ -1,4 +1,4 @@
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -138,6 +138,23 @@ describe('followEvents', () => {
     writeFileSync(file, line({ type: 'build', msg: 'Starting build phase' }));
     await waitFor(() => seen.length >= 2);
     expect(seen[1].type).toBe('build');
+  });
+
+  it('detects a delete+recreate race even when the new file is already as large as the old offset', async () => {
+    writeFileSync(file, line({ type: 'plan', msg: 'Starting plan phase' }));
+    const seen: FactoryEvent[] = [];
+    const stop = followEvents(file, e => seen.push(e), { fromStart: true, pollMs: 10 });
+    stops.push(stop);
+
+    await waitFor(() => seen.length >= 1);
+
+    // Delete and recreate with content that is >= the old offset in size, so a
+    // size-only truncation check would miss this and concatenate stale bytes.
+    unlinkSync(file);
+    writeFileSync(file, line({ type: 'build', msg: 'Starting build phase, replacing the old log entirely' }));
+    await waitFor(() => seen.length >= 2);
+    expect(seen[1].type).toBe('build');
+    expect(seen[1].msg).toBe('Starting build phase, replacing the old log entirely');
   });
 
   it('stop() halts delivery and is idempotent', async () => {

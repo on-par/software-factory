@@ -36,10 +36,13 @@ export function followEvents(
 
   let offset = 0;
   let carry = '';
+  let ino: number | undefined;
 
   if (!fromStart) {
     try {
-      offset = statSync(eventsFile).size;
+      const stat = statSync(eventsFile);
+      offset = stat.size;
+      ino = stat.ino;
     } catch {
       offset = 0;
     }
@@ -47,16 +50,25 @@ export function followEvents(
 
   const tick = (): void => {
     let size: number;
+    let currentIno: number | undefined;
     try {
-      size = statSync(eventsFile).size;
+      const stat = statSync(eventsFile);
+      size = stat.size;
+      currentIno = stat.ino;
     } catch {
       size = 0;
     }
 
-    if (size < offset) {
+    // A changed inode means the file was deleted and recreated (e.g. log
+    // rotation) — comparing size alone can miss this if the new file already
+    // reached or exceeded the old offset before the next poll.
+    const recreated = ino !== undefined && currentIno !== undefined && currentIno !== ino;
+
+    if (recreated || size < offset) {
       offset = 0;
       carry = '';
     }
+    ino = currentIno;
 
     if (size > offset) {
       const toRead = size - offset;

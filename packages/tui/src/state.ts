@@ -96,6 +96,7 @@ export function reduceEvent(state: RunState, e: FactoryEvent): RunState {
     phaseStartedAt: phaseChanged ? e.ts : state.phaseStartedAt,
     model,
     route,
+    done: false,
     feed,
   };
 }
