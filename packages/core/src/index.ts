@@ -72,6 +72,8 @@ export { watchChecks } from './utils/ci-watch.js';
 export type { CiOutcome, WatchChecksOptions } from './utils/ci-watch.js';
 export { sweepWorktrees, parseWorktreeList, findCredentialFiles, scrubFile, zeroFill, formatGcReport } from './utils/worktree-gc.js';
 export type { GcReport, GcCandidate, GcReason, WorktreeListEntry, SweepDeps } from './utils/worktree-gc.js';
+export { runCommand, describeCommandFailure } from './utils/command-runner.js';
+export type { RunCommandOptions, CommandResult } from './utils/command-runner.js';
 
 // Usage
 export { estimateTrailingSpend, formatUsageReport, watchUsage, priceFor, defaultTranscriptRoots, TRAILING_WINDOW_MS } from './usage/index.js';
