@@ -406,7 +406,7 @@ describe('cli commands (via main dispatch)', () => {
   });
 
   describe('triage', () => {
-    it('prints the proposed queue with a mv hint', async () => {
+    it('prints the proposed queue with an accept hint', async () => {
       h.execImpl = (cmd: string) => {
         if (cmd.includes('rev-parse')) return h.repoRoot;
         if (cmd.includes('gh repo view')) return h.ghRepo;
@@ -419,13 +419,58 @@ describe('cli commands (via main dispatch)', () => {
       await runMain('triage');
       const out = logged();
       expect(out).toContain('app 5');
-      expect(out).toContain('mv');
+      expect(out).toContain('factory triage accept');
     });
 
     it('exits 1 when triage produces no proposal', async () => {
       const res = await runMain('triage');
       expect(res).toEqual({ exited: true, code: 1 });
       expect(errored()).toContain('no proposal');
+    });
+  });
+
+  describe('triage accept', () => {
+    beforeEach(() => {
+      h.execImpl = (cmd: string) => (cmd.includes('rev-parse') ? h.repoRoot : '');
+    });
+
+    it('accepts a valid proposed queue', async () => {
+      writeFileSync(paths().queueProposed, 'app 5\napp 6\n');
+      await runMain('triage', 'accept');
+      expect(existsSync(paths().queueProposed)).toBe(false);
+      expect(readFileSync(paths().queue, 'utf-8')).toBe('app 5\napp 6\n');
+      expect(logged()).toContain('queue accepted');
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('"type":"triage_accepted"');
+      expect(events).toContain('5, 6');
+    });
+
+    it('rejects an invalid queue and leaves it unchanged', async () => {
+      writeFileSync(paths().queueProposed, 'app 5\napp notanumber\n');
+      const res = await runMain('triage', 'accept');
+      expect(res).toEqual({ exited: true, code: 1 });
+      const err = errored();
+      expect(err).toContain('invalid');
+      expect(err).toContain('malformed');
+      expect(existsSync(paths().queueProposed)).toBe(true);
+      expect(readFileSync(paths().queueProposed, 'utf-8')).toBe('app 5\napp notanumber\n');
+      expect(existsSync(paths().queue)).toBe(false);
+    });
+
+    it('reports nothing to accept when there is no proposed queue', async () => {
+      const res = await runMain('triage', 'accept');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('nothing to accept');
+    });
+
+    it('--force skips validation and promotes as-is', async () => {
+      writeFileSync(paths().queueProposed, 'app notanumber\n');
+      await runMain('triage', 'accept', '--force');
+      expect(existsSync(paths().queueProposed)).toBe(false);
+      expect(readFileSync(paths().queue, 'utf-8')).toBe('app notanumber\n');
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('triage_accepted');
+      expect(events).toContain('--force');
     });
   });
 

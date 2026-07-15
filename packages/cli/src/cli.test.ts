@@ -34,10 +34,10 @@ describe('cli', () => {
     expect(typeof main).toBe('function');
   });
 
-  it('formats the triage proposal message with a mv hint for non-empty content', () => {
+  it('formats the triage proposal message with an accept hint for non-empty content', () => {
     const message = triageProposalMessage('lane-a 1\nlane-b 2\n', '/repo/.factory/queue.proposed', '/repo/.factory/queue');
     expect(message).toContain('lane-a 1\nlane-b 2');
-    expect(message).toContain('mv /repo/.factory/queue.proposed /repo/.factory/queue');
+    expect(message).toContain('factory triage accept');
   });
 
   it('returns null for empty or whitespace-only triage proposals', () => {
