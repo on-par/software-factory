@@ -21,7 +21,9 @@
   "worktree": {
     "prefix": "ship-it/",
     "parent": "../",
-    "comment": "Worktrees created as siblings of the repo"
+    "comment": "Worktrees created as siblings of the repo",
+    "gcTtlDays": 7,
+    "autoGcOnRun": true
   },
   "byok": {
     "enabled": false,

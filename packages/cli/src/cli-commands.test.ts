@@ -29,6 +29,8 @@ const h = vi.hoisted(() => {
     costs: [] as any[],
     trailingSpend: 10,
     routerResolve: (_route: string): string | undefined => 'claude-model',
+    factoryConfig: { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: false } } as any,
+    gcReport: { removed: [], kept: 0, dryRun: false } as any,
   };
 });
 
@@ -60,7 +62,7 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
     // Config loaders — return inert values.
     loadModelsConfig: vi.fn(() => ({}) as any),
     loadRoutesConfig: vi.fn(() => ({}) as any),
-    loadFactoryConfig: vi.fn(() => ({ merge: { auto: false, comment: '' } }) as any),
+    loadFactoryConfig: vi.fn(() => h.factoryConfig),
     resolveTimeouts: vi.fn(() => ({ plan: 1, build: 1, check: 1 })),
     resolveSkipCI: vi.fn(() => false),
     getConstitutionsDir: vi.fn(() => h.constitutionsDir),
@@ -105,10 +107,14 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
     withGitLock: vi.fn(async (_root: string, fn: () => Promise<unknown>) => fn()),
     withFileLock: vi.fn(async (_lock: string, fn: () => Promise<unknown>, _opts?: unknown) => fn()),
     ensureDir: vi.fn((p: string) => mkdirSync(p, { recursive: true })),
+    // Worktree GC.
+    sweepWorktrees: vi.fn(async () => h.gcReport),
+    formatGcReport: vi.fn((report: any) => `GC_REPORT:${report.dryRun ? 'dry' : 'real'}:removed=${report.removed.length}:kept=${report.kept}`),
   };
 });
 
 import { main, shipIssue, CliExitError, cmdConstitution, cmdUsage, cmdLand } from './cli/index.js';
+import { sweepWorktrees, formatGcReport, withGitLock } from '@on-par/factory-core';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -207,6 +213,8 @@ beforeEach(() => {
   h.costs = [];
   h.trailingSpend = 10;
   h.routerResolve = () => 'claude-model';
+  h.factoryConfig = { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: false } };
+  h.gcReport = { removed: [], kept: 0, dryRun: false };
 
   ['FACTORY_LOCAL_ONLY', 'FACTORY_MERGE', 'FACTORY_SKIP_CI', 'FACTORY_USAGE_CAP', 'FACTORY_STOP_AT',
     'FACTORY_RESUME_AT', 'FACTORY_USAGE_POLL', 'FACTORY_USAGE_WATCH'].forEach(k => trackEnv(k));
@@ -509,6 +517,69 @@ describe('cli commands (via main dispatch)', () => {
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('stopped');
       expect(events).toContain('run-done');
+    });
+
+    it('runs worktree gc before lanes when worktree.autoGcOnRun is true', async () => {
+      h.factoryConfig = { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: true } };
+      writeFileSync(paths().queue, '# header\napp 1\n');
+      writeFileSync(paths().stop, '');
+      const res = await runMain('run');
+      expect(res.exited).toBe(false);
+      expect(sweepWorktrees).toHaveBeenCalledWith(
+        expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7 }),
+        expect.anything(),
+      );
+      expect(formatGcReport).toHaveBeenCalled();
+    });
+
+    it('does not run worktree gc when worktree.autoGcOnRun is false', async () => {
+      h.factoryConfig = { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: false } };
+      writeFileSync(paths().queue, '# header\napp 1\n');
+      writeFileSync(paths().stop, '');
+      const res = await runMain('run');
+      expect(res.exited).toBe(false);
+      expect(sweepWorktrees).not.toHaveBeenCalled();
+    });
+
+    it('proceeds with the run even when worktree gc rejects', async () => {
+      h.factoryConfig = { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: true } };
+      (sweepWorktrees as any).mockRejectedValueOnce(new Error('gc boom'));
+      writeFileSync(paths().queue, '# header\napp 1\n');
+      writeFileSync(paths().stop, '');
+      const res = await runMain('run');
+      expect(res.exited).toBe(false);
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('gc boom');
+      expect(events).toContain('run-done');
+    });
+  });
+
+  describe('worktree gc', () => {
+    it('dry-run calls sweepWorktrees with dryRun: true and takes no lock', async () => {
+      h.gcReport = { removed: [], kept: 3, dryRun: true };
+      const res = await runMain('worktree', 'gc', '--dry-run');
+      expect(res.exited).toBe(false);
+      expect(sweepWorktrees).toHaveBeenCalledWith(
+        expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7, dryRun: true }),
+        expect.anything(),
+      );
+      expect(withGitLock).not.toHaveBeenCalled();
+      expect(logged()).toContain('GC_REPORT:dry:removed=0:kept=3');
+    });
+
+    it('--ttl-days overrides the config default', async () => {
+      const res = await runMain('worktree', 'gc', '--ttl-days', '3');
+      expect(res.exited).toBe(false);
+      expect(sweepWorktrees).toHaveBeenCalledWith(
+        expect.objectContaining({ ttlDays: 3 }),
+        expect.anything(),
+      );
+    });
+
+    it('exits 2 on a non-numeric --ttl-days', async () => {
+      const res = await runMain('worktree', 'gc', '--ttl-days', 'nope');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('--ttl-days');
     });
   });
 

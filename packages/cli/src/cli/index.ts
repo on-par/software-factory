@@ -25,6 +25,8 @@ import {
   writeLocalRunReport,
   createLocalSmallDryRun,
   validateQueue,
+  sweepWorktrees,
+  formatGcReport,
 } from '@on-par/factory-core';
 import type { ModelDiagnosis } from '@on-par/factory-core';
 import { logEvent, branchFor, branchPrefixSlug, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock, withFileLock, shellEscape } from '@on-par/factory-core';
@@ -609,6 +611,22 @@ function worktreePathFor(repoRoot: string, issueNum: number): string {
   return resolve(dirname(repoRoot), `${basename(repoRoot)}-factory-${branchPrefixSlug()}-${issueNum}`);
 }
 
+export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }) {
+  const repoRoot = await getRepoRoot();
+  const paths = getFactoryPaths(repoRoot);
+  const factoryConfig = loadFactoryConfig();
+  const ttlDays = opts.ttlDays !== undefined ? Number(opts.ttlDays) : factoryConfig.worktree.gcTtlDays;
+  if (!Number.isFinite(ttlDays) || ttlDays < 0) {
+    throw new CliExitError('factory: --ttl-days must be a non-negative number', 2);
+  }
+  const log = (type: string, msg: string) => logEvent(paths.events, type, '-', msg);
+  const run = () => sweepWorktrees({ repoRoot, ttlDays, dryRun: opts.dryRun }, { log });
+  const report = opts.dryRun
+    ? await run()
+    : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
+  console.log(formatGcReport(report));
+}
+
 export async function cmdLand(issueNum: number) {
   const repoRoot = await getRepoRoot();
   const ghRepo = await getGitHubRepo();
@@ -805,6 +823,22 @@ async function cmdRun() {
 
   if (!existsSync(paths.queue)) {
     throw new CliExitError('queue empty — run factory init + triage first', 2);
+  }
+
+  const factoryConfig = loadFactoryConfig();
+  if (factoryConfig.worktree.autoGcOnRun) {
+    try {
+      const gcLog = (type: string, msg: string) => logEvent(paths.events, type, '-', msg);
+      const report = await withGitLock(repoRoot, () =>
+        withFileLock(paths.gitLock, () =>
+          sweepWorktrees({ repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays }, { log: gcLog }),
+        ),
+      );
+      logEvent(paths.events, 'worktree-gc', 'all', `removed ${report.removed.length} stale worktree(s), kept ${report.kept}`);
+      console.log(formatGcReport(report));
+    } catch (err: any) {
+      logEvent(paths.events, 'warn', 'all', `worktree gc failed: ${err.message}`);
+    }
   }
 
   // Read queue
@@ -1316,6 +1350,14 @@ export async function main() {
     });
 
   program.command('run').description('Process the whole queue (lanes in parallel)').action(cmdRun);
+
+  const worktreeCmd = program.command('worktree').description('Worktree maintenance');
+  worktreeCmd
+    .command('gc')
+    .description('Remove stale factory worktrees (merged/closed branches or older than TTL) and scrub credentials')
+    .option('--dry-run', 'Preview what would be removed without deleting anything')
+    .option('--ttl-days <n>', 'Override worktree.gcTtlDays from factory.json')
+    .action(cmdWorktreeGc);
 
   program
     .command('supervise')

@@ -70,6 +70,8 @@ export { withGitLock, withFileLock } from './utils/lock.js';
 export type { FileLockOptions } from './utils/lock.js';
 export { watchChecks } from './utils/ci-watch.js';
 export type { CiOutcome, WatchChecksOptions } from './utils/ci-watch.js';
+export { sweepWorktrees, parseWorktreeList, findCredentialFiles, scrubFile, zeroFill, formatGcReport } from './utils/worktree-gc.js';
+export type { GcReport, GcCandidate, GcReason, WorktreeListEntry, SweepDeps } from './utils/worktree-gc.js';
 
 // Usage
 export { estimateTrailingSpend, formatUsageReport, watchUsage, priceFor, defaultTranscriptRoots, TRAILING_WINDOW_MS } from './usage/index.js';
