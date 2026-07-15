@@ -31,6 +31,7 @@ import {
   parseQueue,
   sweepWorktrees,
   formatGcReport,
+  isCommandAvailable,
 } from '@on-par/factory-core';
 import type { ModelDiagnosis, QueueDiagnostic, UsageReading } from '@on-par/factory-core';
 import { logEvent, branchFor, branchPrefixSlug, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock, withFileLock, shellEscape } from '@on-par/factory-core';
@@ -42,6 +43,8 @@ import { resolve, dirname, basename } from 'node:path';
 import { createRequire } from 'node:module';
 import { userInfo } from 'node:os';
 import { Octokit } from '@octokit/rest';
+import { formatOverview, missingClaudeCliMessage, missingTokenMessage, notInitializedMessage } from './first-run.js';
+import { runDoctorChecks, formatDoctorChecks, doctorFailed } from './doctor.js';
 
 const exec = promisify(execCb);
 type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<unknown>;
@@ -92,10 +95,24 @@ export function errorDetail(err: unknown): string {
   return String(err);
 }
 
+export function hasGitHubToken(env: NodeJS.ProcessEnv = process.env, tryToken?: () => string): boolean {
+  if (env.GITHUB_TOKEN || env.GH_TOKEN) return true;
+  try {
+    const out = (tryToken ?? (() => execSync('gh auth token', { encoding: 'utf-8', timeout: 5_000 })))();
+    return out.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 // ---------- commands ----------
 
 async function cmdInit() {
   const repoRoot = await getRepoRoot();
+  if (!hasGitHubToken()) {
+    console.error(chalk.red(`factory: ${missingTokenMessage()}`));
+    process.exit(2);
+  }
   const paths = getFactoryPaths(repoRoot);
   ensureDir(paths.state);
   ensureDir(paths.logs);
@@ -643,6 +660,14 @@ async function maybeWriteLocalRunReport(opts: {
 }
 
 async function cmdShip(issueNum: number, opts: { product?: string; autoRework?: boolean; interactive?: boolean }) {
+  if (!isCommandAvailable('claude')) {
+    throw new CliExitError(`factory: ${missingClaudeCliMessage()}`, 2);
+  }
+  const repoRoot = await getRepoRoot();
+  const paths = getFactoryPaths(repoRoot);
+  if (!existsSync(paths.state)) {
+    throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
+  }
   try {
     return await shipIssue(issueNum, opts);
   } catch (err: any) {
@@ -805,6 +830,9 @@ async function cmdTriage(opts: { product?: string }) {
   const repoRoot = await getRepoRoot();
   const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
+  if (!existsSync(paths.state)) {
+    throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
+  }
   const product = opts.product ?? readActiveProduct(paths.product);
 
   const modelsConfig = loadModelsConfig();
@@ -1374,9 +1402,28 @@ export function getCliVersion(): string {
   return createRequire(import.meta.url)('../../package.json').version;
 }
 
+async function cmdDoctor() {
+  const checks = runDoctorChecks({
+    commandAvailable: isCommandAvailable,
+    envPresent: (key) => !!process.env[key],
+    tryExec: (cmd) => {
+      try { return execSync(cmd, { encoding: 'utf-8', timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
+      catch { return null; }
+    },
+    pathExists: existsSync,
+  });
+  console.log(formatDoctorChecks(checks));
+  if (doctorFailed(checks)) process.exit(1);
+}
+
 // ---------- main ----------
 
 export async function main() {
+  if (process.argv.slice(2).length === 0) {
+    console.log(formatOverview());
+    return;
+  }
+
   const program = new Command();
 
   program
@@ -1400,6 +1447,8 @@ export async function main() {
     .description('List available models and costs')
     .option('--doctor', 'Probe provider CLIs and env keys; report per-model reachability')
     .action(cmdModels);
+
+  program.command('doctor').description('Preflight-check your environment (claude, gh, token, git, npm, sandbox)').action(cmdDoctor);
 
   program.command('cost').description('Show cost tracking summary').action(cmdCost);
 

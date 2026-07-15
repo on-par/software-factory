@@ -16,6 +16,7 @@ const h = vi.hoisted(() => {
     execSyncImpl: (_cmd: string): string => {
       throw new Error('execSync not stubbed');
     },
+    claudeAvailable: undefined as boolean | undefined,
     // octokit instance returned by `new Octokit()`
     octokit: {} as any,
     // configurable core behaviour
@@ -75,6 +76,7 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
     resolveSkipCI: vi.fn(() => false),
     getConstitutionsDir: vi.fn(() => h.constitutionsDir),
     resolveModelOverrides: vi.fn(() => h.modelOverrides),
+    isCommandAvailable: vi.fn(() => h.claudeAvailable ?? true),
     // Router / loaders as light stubs.
     ModelRouter: vi.fn(() => ({
       resolve: (route: string) => h.routerResolve(route),
@@ -226,11 +228,15 @@ beforeEach(() => {
   h.factoryConfig = { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: false } };
   h.gcReport = { removed: [], kept: 0, dryRun: false };
   h.runTuiCalls = [];
+  h.claudeAvailable = undefined;
 
   ['FACTORY_LOCAL_ONLY', 'FACTORY_MERGE', 'FACTORY_SKIP_CI', 'FACTORY_USAGE_CAP', 'FACTORY_STOP_AT',
-    'FACTORY_RESUME_AT', 'FACTORY_USAGE_POLL', 'FACTORY_USAGE_WATCH', 'FACTORY_USAGE_ESTIMATOR'].forEach(k => trackEnv(k));
+    'FACTORY_RESUME_AT', 'FACTORY_USAGE_POLL', 'FACTORY_USAGE_WATCH', 'FACTORY_USAGE_ESTIMATOR',
+    'GITHUB_TOKEN', 'GH_TOKEN'].forEach(k => trackEnv(k));
   delete process.env.FACTORY_LOCAL_ONLY;
   delete process.env.FACTORY_MERGE;
+  delete process.env.GITHUB_TOKEN;
+  process.env.GH_TOKEN = 'test-token';
   process.exitCode = undefined;
 
   exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
@@ -263,6 +269,16 @@ function errored(): string {
 
 // ===========================================================================
 describe('cli commands (via main dispatch)', () => {
+  describe('overview (bare factory)', () => {
+    it('prints the designed overview and does not call process.exit', async () => {
+      const res = await runMain();
+      expect(res.exited).toBe(false);
+      const out = logged();
+      expect(out).toContain('factory — ship verified GitHub issues autonomously');
+      expect(out).toContain('factory ship <issue>');
+    });
+  });
+
   describe('init', () => {
     it('creates .factory dirs, the git exclude entry, and a sample queue', async () => {
       const res = await runMain('init');
@@ -280,6 +296,26 @@ describe('cli commands (via main dispatch)', () => {
       const exclude = readFileSync(join(h.repoRoot, '.git/info/exclude'), 'utf-8');
       expect(exclude.match(/\.factory\//g)).toHaveLength(1);
       expect(readFileSync(paths().queue, 'utf-8')).toBe('app 1\n');
+    });
+
+    it('exits 2 with the missing-token message when no token source is available', async () => {
+      delete process.env.GITHUB_TOKEN;
+      delete process.env.GH_TOKEN;
+      h.execSyncImpl = (cmd: string) => {
+        if (cmd.includes('gh auth token')) throw new Error('not authenticated');
+        return '';
+      };
+      const res = await runMain('init');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('GITHUB_TOKEN not set — create a token at');
+    });
+
+    it('succeeds when GH_TOKEN is set even without GITHUB_TOKEN', async () => {
+      delete process.env.GITHUB_TOKEN;
+      process.env.GH_TOKEN = 'test-token';
+      const res = await runMain('init');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('Initialized');
     });
   });
 
@@ -481,6 +517,13 @@ describe('cli commands (via main dispatch)', () => {
       const res = await runMain('triage');
       expect(res).toEqual({ exited: true, code: 1 });
       expect(errored()).toContain('no proposal');
+    });
+
+    it('exits 2 with the not-initialized message when .factory/ is missing', async () => {
+      rmSync(paths().state, { recursive: true, force: true });
+      const res = await runMain('triage');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('factory not initialized — run `factory init` first');
     });
   });
 
@@ -777,6 +820,43 @@ describe('cli commands (via main dispatch)', () => {
       expect(res.exited).toBe(false);
       const call = vi.mocked(core.shipPhase).mock.calls.at(-1)?.[0] as any;
       expect(typeof call.approvalGate).toBe('function');
+    });
+
+    it('exits 2 with the missing-claude message and never invokes the phase mocks when claude is unavailable', async () => {
+      h.claudeAvailable = false;
+      const core = await import('@on-par/factory-core');
+      const res = await runMain('ship', '42');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('claude CLI not found — install Claude Code first:');
+      expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
+      expect(vi.mocked(core.buildPhase)).not.toHaveBeenCalled();
+      expect(vi.mocked(core.checkPhase)).not.toHaveBeenCalled();
+      expect(vi.mocked(core.shipPhase)).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('doctor', () => {
+    beforeEach(() => {
+      h.execSyncImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('status --porcelain')) return '';
+        if (cmd.includes('gh auth token')) return 'gho_token';
+        if (cmd.includes('gh auth status')) return 'Logged in';
+        return '';
+      };
+    });
+
+    it('prints the report and does not exit when the environment is all green', async () => {
+      h.claudeAvailable = true;
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('== factory doctor ==');
+    });
+
+    it('exits 1 when claude is unavailable', async () => {
+      h.claudeAvailable = false;
+      const res = await runMain('doctor');
+      expect(res).toEqual({ exited: true, code: 1 });
     });
   });
 });
