@@ -1,1 +1,42 @@
 @import "tailwindcss";
+
+@theme {
+  /* Wipe Tailwind's default palette so ONLY On Par colors exist.
+     This is what guarantees "no green token exists anywhere in the theme". */
+  --color-*: initial;
+
+  /* Brand palette */
+  --color-white: #ffffff;
+  --color-canvas: #f8fafc; /* near-white content canvas */
+  --color-navy-950: #0a1628; /* sidebar background */
+  --color-navy-900: #0f1f38;
+  --color-navy-800: #16294a;
+  --color-navy-700: #1e355e;
+  --color-navy-400: #5b729b; /* muted text on navy */
+  --color-navy-200: #b8c4db; /* nav item text on navy */
+  --color-teal-400: #2dd4bf;
+  --color-teal-500: #14b8a6; /* live / in-progress */
+  --color-teal-600: #0d9488;
+  --color-blue-500: #3b82f6; /* interactive elements */
+  --color-blue-600: #2563eb;
+  --color-blue-700: #1d4ed8;
+  --color-red-500: #ef4444; /* failure */
+  --color-ink-900: #0f172a; /* primary text on light */
+  --color-ink-600: #475569; /* secondary text on light */
+  --color-ink-400: #94a3b8; /* tertiary/muted text */
+  --color-hairline: #e2e8f0; /* hairline card/section borders */
+
+  /* Named status tokens — teal for in-progress, blue for done, NEVER green */
+  --color-status-queued: #64748b;
+  --color-status-building: #14b8a6;
+  --color-status-checking: #2dd4bf;
+  --color-status-shipped: #2563eb;
+  --color-status-failed: #ef4444;
+
+  /* Typography: Inter with system sans fallback; mono token for code/logs */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* 8px grid: spacing utilities scale in 8px steps (p-1 = 8px, p-2 = 16px) */
+  --spacing: 8px;
+}
