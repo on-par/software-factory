@@ -35,7 +35,7 @@ jobs:
         run: npm run lint
 
       - name: Test & coverage
-        run: npm run test:coverage
+        run: npm run test
 
       - name: Coverage summary
         if: ${{ !cancelled() }}
