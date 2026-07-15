@@ -2,8 +2,7 @@
 
 import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { ModelRouter } from '../router/index.js';
 import type { CheckerOutput, CheckSummary, Constitution } from '../types/index.js';
@@ -357,10 +356,10 @@ async function findHtmlFiles(worktree: string, limit = Infinity): Promise<string
   return results;
 }
 
-async function fileExists(path: string): Promise<boolean> {
+/** True when the path exists and is a regular file — directories and missing paths return false. */
+export async function fileExists(path: string): Promise<boolean> {
   try {
-    await readFile(path);
-    return true;
+    return (await stat(path)).isFile();
   } catch {
     return false;
   }
