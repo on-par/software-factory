@@ -43,8 +43,7 @@ async function getRepoRoot(): Promise<string> {
     const { stdout } = await exec('git rev-parse --show-toplevel');
     return stdout.trim();
   } catch {
-    console.error(chalk.red('factory: not inside a git repository'));
-    process.exit(2);
+    throw new CliExitError('factory: not inside a git repository', 2);
   }
 }
 
@@ -53,8 +52,7 @@ async function getGitHubRepo(): Promise<string> {
     const { stdout } = await exec('gh repo view --json nameWithOwner --jq .nameWithOwner');
     return stdout.trim();
   } catch {
-    console.error(chalk.red('factory: no GitHub remote detected (gh repo view failed)'));
-    process.exit(2);
+    throw new CliExitError('factory: no GitHub remote detected (gh repo view failed)', 2);
   }
 }
 
@@ -102,6 +100,14 @@ async function cmdInit() {
 
 export class ConstitutionExistsError extends Error {}
 export class InvalidProductNameError extends Error {}
+
+/** Expected user-facing CLI failure. Thrown by command helpers; only main() maps it to a process exit code. */
+export class CliExitError extends Error {
+  constructor(message: string, readonly code: number) {
+    super(message);
+    this.name = 'CliExitError';
+  }
+}
 
 // Product names become a filename in the constitutions dir; keep them to a safe,
 // listable charset. Leading '_' is reserved (listProducts hides `_*.md`).
@@ -155,7 +161,7 @@ export function initConstitution(product: string, deps: InitConstitutionDeps = {
   return target;
 }
 
-async function cmdConstitution(opts: { list?: boolean; product?: string; init?: string }) {
+export async function cmdConstitution(opts: { list?: boolean; product?: string; init?: string }) {
   const loader = new ConstitutionLoader();
 
   if (opts.init) {
@@ -165,12 +171,10 @@ async function cmdConstitution(opts: { list?: boolean; product?: string; init?: 
       console.log(`Next: edit its Purpose, Standards, and Quality Gates, then run: factory constitution --product ${opts.init}`);
     } catch (err: any) {
       if (err instanceof ConstitutionExistsError) {
-        console.error(chalk.red(err.message));
-        process.exit(1);
+        throw new CliExitError(err.message, 1);
       }
       if (err instanceof InvalidProductNameError) {
-        console.error(chalk.red(err.message));
-        process.exit(2);
+        throw new CliExitError(err.message, 2);
       }
       throw err;
     }
@@ -186,8 +190,7 @@ async function cmdConstitution(opts: { list?: boolean; product?: string; init?: 
   if (opts.product) {
     const constPath = resolve(getConstitutionsDir(), `${opts.product}.md`);
     if (!existsSync(constPath)) {
-      console.error(chalk.red(`No constitution '${opts.product}' found`));
-      process.exit(1);
+      throw new CliExitError(`No constitution '${opts.product}' found`, 1);
     }
     const repoRoot = await getRepoRoot();
     const paths = getFactoryPaths(repoRoot);
@@ -196,8 +199,7 @@ async function cmdConstitution(opts: { list?: boolean; product?: string; init?: 
     return;
   }
 
-  console.error('usage: factory constitution --init <product> | --list | --product <name>');
-  process.exit(2);
+  throw new CliExitError('usage: factory constitution --init <product> | --list | --product <name>', 2);
 }
 
 export function formatDoctorReport(diagnoses: ModelDiagnosis[]): string {
@@ -237,8 +239,7 @@ async function cmdModels(opts: { doctor?: boolean } = {}) {
     }, allowExperimental, localOnly);
     console.log(formatDoctorReport(diagnoses));
     if (!hasReachableWorker(diagnoses)) {
-      console.error(chalk.red('factory: no worker model is reachable — fix the reasons above before running a queue'));
-      process.exit(1);
+      throw new CliExitError('factory: no worker model is reachable — fix the reasons above before running a queue', 1);
     }
     return;
   }
@@ -324,13 +325,12 @@ export function resolveUsageKnobs(env: NodeJS.ProcessEnv = process.env): UsageKn
   };
 }
 
-async function cmdUsage() {
+export async function cmdUsage() {
   let knobs: UsageKnobs;
   try {
     knobs = resolveUsageKnobs();
   } catch (err: any) {
-    console.error(chalk.red(`factory: ${err.message}`));
-    process.exit(2);
+    throw new CliExitError(`factory: ${err.message}`, 2);
   }
 
   const spend = estimateTrailingSpend();
@@ -558,8 +558,7 @@ async function cmdShip(issueNum: number, opts: { product?: string; autoRework?: 
     if (process.env.FACTORY_LOCAL_ONLY !== '1') {
       logEvent(paths.events, parkReasonFor(err), issueNum, err.message);
     }
-    console.error(chalk.red(`Ship failed for issue #${issueNum}: ${err.message}`));
-    process.exit(1);
+    throw new CliExitError(`Ship failed for issue #${issueNum}: ${err.message}`, 1);
   }
 }
 
@@ -596,7 +595,7 @@ function worktreePathFor(repoRoot: string, issueNum: number): string {
   return resolve(dirname(repoRoot), `${basename(repoRoot)}-factory-${branchPrefixSlug()}-${issueNum}`);
 }
 
-async function cmdLand(issueNum: number) {
+export async function cmdLand(issueNum: number) {
   const repoRoot = await getRepoRoot();
   const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
@@ -609,15 +608,12 @@ async function cmdLand(issueNum: number) {
     console.log(chalk.green(`✅ Landed PR #${result.prNumber} for issue #${issueNum}`));
   } catch (err: any) {
     if (err instanceof LandConflictError) {
-      console.error(chalk.red(`factory: ${err.message}`));
-      process.exit(3);
+      throw new CliExitError(`factory: ${err.message}`, 3);
     }
     if (err instanceof LandFailureError) {
-      console.error(chalk.red(`factory: ${err.message}`));
-      process.exit(err.code);
+      throw new CliExitError(`factory: ${err.message}`, err.code);
     }
-    console.error(chalk.red(`factory: merge failed for issue #${issueNum}: ${err.message}`));
-    process.exit(5);
+    throw new CliExitError(`factory: merge failed for issue #${issueNum}: ${err.message}`, 5);
   }
 }
 
@@ -720,8 +716,7 @@ explaining exclusions.` ;
   if (message) {
     console.log(message);
   } else {
-    console.error('triage produced no proposal');
-    process.exit(1);
+    throw new CliExitError('triage produced no proposal', 1);
   }
 }
 
@@ -740,8 +735,7 @@ async function cmdRun() {
   const paths = getFactoryPaths(repoRoot);
 
   if (!existsSync(paths.queue)) {
-    console.error('queue empty — run factory init + triage first');
-    process.exit(2);
+    throw new CliExitError('queue empty — run factory init + triage first', 2);
   }
 
   // Read queue
@@ -795,16 +789,14 @@ async function cmdSupervise(opts: { now?: boolean }) {
     ? readFileSync(paths.queue, 'utf-8').split('\n').filter(l => l.trim() && !l.trim().startsWith('#'))
     : [];
   if (queueLines.length === 0) {
-    console.error('queue empty — run factory init + triage first');
-    process.exit(2);
+    throw new CliExitError('queue empty — run factory init + triage first', 2);
   }
 
   let knobs: UsageKnobs;
   try {
     knobs = resolveUsageKnobs();
   } catch (err: any) {
-    console.error(chalk.red(`factory: ${err.message}`));
-    process.exit(2);
+    throw new CliExitError(`factory: ${err.message}`, 2);
   }
 
   await superviseLoop({
@@ -1267,7 +1259,16 @@ export async function main() {
       console.log('STOP cleared');
     });
 
-  await program.parseAsync(process.argv);
+  try {
+    await program.parseAsync(process.argv);
+  } catch (err) {
+    if (err instanceof CliExitError) {
+      console.error(chalk.red(err.message));
+      process.exitCode = err.code;
+      return;
+    }
+    throw err;
+  }
 }
 
 // Run if invoked directly
