@@ -4,6 +4,10 @@
 export { loadModelsConfig, loadRoutesConfig, loadFactoryConfig, resolveTimeouts, resolveSkipCI, getFactoryPaths, getConstitutionsDir } from './config/index.js';
 export type { ModelsConfig, RoutesConfig, FactoryConfig } from './config/index.js';
 
+// Queue
+export { validateQueue } from './queue/index.js';
+export type { QueueValidationResult } from './queue/index.js';
+
 // Models
 export { ModelRegistry, isCommandAvailable, diagnoseModels, resolveModelOverrides } from './models/index.js';
 export type { DoctorProbes, ModelDiagnosis, ModelOverrides } from './models/index.js';

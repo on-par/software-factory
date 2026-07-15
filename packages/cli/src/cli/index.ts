@@ -24,14 +24,16 @@ import {
   watchChecks,
   writeLocalRunReport,
   createLocalSmallDryRun,
+  validateQueue,
 } from '@on-par/factory-core';
 import type { ModelDiagnosis } from '@on-par/factory-core';
 import { logEvent, branchFor, branchPrefixSlug, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock, withFileLock, shellEscape } from '@on-par/factory-core';
 import { exec as execCb, execSync } from 'node:child_process';
 import { promisify } from 'node:util';
-import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, rmSync, renameSync } from 'node:fs';
 import { resolve, dirname, basename } from 'node:path';
 import { createRequire } from 'node:module';
+import { userInfo } from 'node:os';
 import { Octokit } from '@octokit/rest';
 
 const exec = promisify(execCb);
@@ -723,7 +725,41 @@ explaining exclusions.` ;
 
 export function triageProposalMessage(proposed: string, proposedPath: string, queuePath: string): string | null {
   if (!proposed.trim()) return null;
-  return `${proposed}\n---\nreview and: mv ${proposedPath} ${queuePath}`;
+  return `${proposed}\n---\nreview and run: factory triage accept   (promotes ${proposedPath} -> ${queuePath})`;
+}
+
+export async function cmdTriageAccept(opts: { force?: boolean }) {
+  const repoRoot = await getRepoRoot();
+  const paths = getFactoryPaths(repoRoot);
+
+  if (!existsSync(paths.queueProposed)) {
+    console.log(`nothing to accept — ${paths.queueProposed} not found`);
+    return; // zero exit
+  }
+
+  const content = readFileSync(paths.queueProposed, 'utf-8');
+  const result = validateQueue(content);
+
+  if (!opts.force && !result.ok) {
+    throw new CliExitError(
+      `factory: proposed queue is invalid — ${paths.queueProposed} left unchanged\n` +
+        result.errors.map(e => `  - ${e}`).join('\n'),
+      1,
+    );
+  }
+
+  renameSync(paths.queueProposed, paths.queue); // same dir → atomic
+
+  let acceptedBy = 'unknown';
+  try { acceptedBy = userInfo().username; } catch { /* keep 'unknown' */ }
+  const suffix = opts.force ? ' (--force, validation skipped)' : '';
+  logEvent(
+    paths.events,
+    'triage_accepted',
+    '-',
+    `accepted ${result.issues.length} issue(s) [${result.issues.join(', ')}] by ${acceptedBy}${suffix}`,
+  );
+  console.log(chalk.green(`queue accepted — ${result.issues.length} issue(s) promoted to ${paths.queue}`));
 }
 
 function shellEscapeInline(s: string): string {
@@ -1192,11 +1228,19 @@ export async function main() {
 
   program.command('status').description('Show queue, events, PRs, models').action(cmdStatus);
 
-  program
+  const triage = program
     .command('triage')
     .description('Propose a queue from open issues')
     .option('--product <name>', 'Product constitution to scope triage')
     .action(cmdTriage);
+
+  triage
+    .command('accept')
+    .description('Validate and atomically promote .factory/queue.proposed to .factory/queue')
+    .option('--force', 'Skip validation and promote as-is')
+    .action(async (opts) => {
+      await cmdTriageAccept(opts);
+    });
 
   program
     .command('ship <issue>')
