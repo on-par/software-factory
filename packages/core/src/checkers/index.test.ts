@@ -299,16 +299,46 @@ describe('linksChecker', () => {
     expect(result.result).toBe('PASS');
   });
 
-  it('does not shell-interpolate a crafted file name', async () => {
-    const worktree = await makeWorktree({
-      "a'b $(touch pwned).html": '<html><body><a href="#">click</a></body></html>',
+  describe('treats crafted file paths as data, never shell', () => {
+    const adversarialNames = [
+      ["single quotes", "a'b'c.html"],
+      ["double quotes", 'a"b"c.html'],
+      ["semicolons", 'a;touch pwned;b.html'],
+      ["dollar command substitution", 'a$(touch pwned).html'],
+      ["backtick command substitution", 'a`touch pwned`.html'],
+      ["combined metacharacters", "a'b $(touch pwned); `touch pwned`.html"],
+    ] as const;
+
+    it.each(adversarialNames)(
+      'handles a filename with %s without executing it',
+      async (_label, name) => {
+        const worktree = await makeWorktree({
+          [name]: '<html><body><a href="#">click</a><a href="https://example.com">ok</a></body></html>',
+        });
+
+        const result = await linksChecker(makeContext(worktree));
+
+        // The file was read as data: its placeholder link was counted.
+        expect(result.result).toBe('FAIL');
+        expect(result.broken).toBeGreaterThanOrEqual(1);
+        // No command execution side effect anywhere plausible.
+        expect(await fileExists(join(worktree, 'pwned'))).toBe(false);
+        expect(await fileExists(join(process.cwd(), 'pwned'))).toBe(false);
+      },
+    );
+
+    it('handles metacharacters in directory names during traversal', async () => {
+      const worktree = await makeWorktree({
+        'evil $(touch pwned); dir/index.html': '<a href="https://example.com">ok</a>',
+      });
+
+      const result = await linksChecker(makeContext(worktree));
+
+      expect(result.result).toBe('PASS');
+      expect(result.linksChecked).toBe(1);
+      expect(await fileExists(join(worktree, 'pwned'))).toBe(false);
+      expect(await fileExists(join(process.cwd(), 'pwned'))).toBe(false);
     });
-
-    const result = await linksChecker(makeContext(worktree));
-
-    expect(result.result).toBe('FAIL');
-    expect(result.broken).toBeGreaterThanOrEqual(1);
-    expect(await fileExists(join(worktree, 'pwned'))).toBe(false);
   });
 
   it('deduplicates URLs across files and excludes non-http-ish/fragment links', async () => {
