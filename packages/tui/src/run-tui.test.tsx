@@ -82,4 +82,32 @@ describe('runTui', () => {
     const [element] = renderFn.mock.calls[0] as unknown as [any, any];
     expect(element.props.stopFile).toBe('/repo/.factory/STOP');
   });
+
+  it('forwards queueFile, queueProposedFile, and costsFile through to the rendered App', async () => {
+    const stdout = fakeStdout(true);
+    const waitUntilExit = vi.fn().mockResolvedValue(undefined);
+    const renderFn = vi.fn(() => ({
+      rerender: vi.fn(),
+      unmount: vi.fn(),
+      waitUntilExit,
+      cleanup: vi.fn(),
+      clear: vi.fn(),
+    }));
+    const followPlainFn = vi.fn(() => vi.fn());
+
+    await runTui({
+      eventsFile: 'events.ndjson',
+      queueFile: '/repo/.factory/queue',
+      queueProposedFile: '/repo/.factory/queue.proposed',
+      costsFile: '/repo/.factory/costs.jsonl',
+      stdout,
+      render: renderFn as any,
+      followPlainFn,
+    });
+
+    const [element] = renderFn.mock.calls[0] as unknown as [any, any];
+    expect(element.props.queueFile).toBe('/repo/.factory/queue');
+    expect(element.props.queueProposedFile).toBe('/repo/.factory/queue.proposed');
+    expect(element.props.costsFile).toBe('/repo/.factory/costs.jsonl');
+  });
 });

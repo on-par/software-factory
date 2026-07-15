@@ -6,6 +6,9 @@ export interface RunTuiOptions {
   eventsFile: string;
   repo?: string;
   stopFile?: string;
+  queueFile?: string;
+  queueProposedFile?: string;
+  costsFile?: string;
   stdout?: NodeJS.WriteStream;
   render?: typeof render;
   followPlainFn?: typeof followPlain;
@@ -32,6 +35,9 @@ export async function runTui(opts: RunTuiOptions): Promise<void> {
     eventsFile,
     repo,
     stopFile,
+    queueFile,
+    queueProposedFile,
+    costsFile,
     stdout = process.stdout,
     render: renderFn = render,
     followPlainFn = followPlain,
@@ -43,7 +49,17 @@ export async function runTui(opts: RunTuiOptions): Promise<void> {
   }
 
   try {
-    const app = renderFn(<App eventsFile={eventsFile} repo={repo} stopFile={stopFile} />, { exitOnCtrlC: true });
+    const app = renderFn(
+      <App
+        eventsFile={eventsFile}
+        repo={repo}
+        stopFile={stopFile}
+        queueFile={queueFile}
+        queueProposedFile={queueProposedFile}
+        costsFile={costsFile}
+      />,
+      { exitOnCtrlC: true },
+    );
     await app.waitUntilExit();
   } catch {
     await runPlain(eventsFile, stdout, followPlainFn);

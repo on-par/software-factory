@@ -1,5 +1,7 @@
 // packages/core/src/queue/index.ts — Proposed-queue validation for `factory triage accept`.
 
+import { existsSync, readFileSync } from 'node:fs';
+
 const ENTRY_RE = /^(\S+)\s+(\d+)\s*$/;
 
 export interface QueueValidationResult {
@@ -103,4 +105,41 @@ export function validateQueue(content: string): QueueValidationResult {
   }
 
   return { ok: errors.length === 0, issues, errors };
+}
+
+// ---------- Queue reading (TUI Queue tab) ----------
+
+export interface QueueSnapshotEntry {
+  lane: string;
+  issue: number;
+}
+
+export interface QueueSnapshot {
+  entries: QueueSnapshotEntry[];
+  proposedCount?: number;
+}
+
+/** De-duplicated {lane, issue} pairs from the shared parseQueue() parser, first occurrence wins. */
+function dedupedEntries(content: string): QueueSnapshotEntry[] {
+  const seenIssues = new Set<number>();
+  const entries: QueueSnapshotEntry[] = [];
+
+  for (const { lane, issue } of parseQueue(content).entries) {
+    if (seenIssues.has(issue)) continue;
+    seenIssues.add(issue);
+    entries.push({ lane, issue });
+  }
+
+  return entries;
+}
+
+/** Read the queue (and optional proposed queue) from disk. Missing file(s) → empty/undefined. */
+export function readQueue(queueFile: string, queueProposedFile?: string): QueueSnapshot {
+  const entries = existsSync(queueFile) ? dedupedEntries(readFileSync(queueFile, 'utf-8')) : [];
+
+  const proposedCount = queueProposedFile && existsSync(queueProposedFile)
+    ? parseQueue(readFileSync(queueProposedFile, 'utf-8')).entries.length
+    : undefined;
+
+  return proposedCount === undefined ? { entries } : { entries, proposedCount };
 }

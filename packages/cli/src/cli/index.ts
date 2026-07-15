@@ -444,7 +444,14 @@ async function cmdTui() {
   } catch {
     // header just omits the repo
   }
-  await runTui({ eventsFile: paths.events, repo, stopFile: paths.stop });
+  await runTui({
+    eventsFile: paths.events,
+    repo,
+    stopFile: paths.stop,
+    queueFile: paths.queue,
+    queueProposedFile: paths.queueProposed,
+    costsFile: paths.costs,
+  });
 }
 
 export type ParkReason = 'escalate' | 'timeout' | 'fail' | 'conflict';

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render } from 'ink-testing-library';
-import type { FactoryEvent } from '@on-par/factory-core';
+import type { CostsRead, FactoryEvent, QueueSnapshot } from '@on-par/factory-core';
 import { App } from './App.js';
 
 afterEach(() => {
@@ -143,5 +143,127 @@ describe('App', () => {
     const frame = lastFrame() ?? '';
     expect(frame).toContain('FACTORY STOPPED');
     expect(frame).toContain('daily usage cap reached');
+  });
+
+  it('cycles Dashboard -> Queue -> Costs -> Log -> Dashboard on Tab, and jumps directly on digit keys', async () => {
+    const fake = makeFakeFollow();
+    const { lastFrame, stdin } = render(<App eventsFile="ignored" follow={fake.follow} />);
+
+    stdin.write('\t');
+    await flush();
+    expect(lastFrame()).toContain('[2 Queue]');
+
+    stdin.write('\t');
+    await flush();
+    expect(lastFrame()).toContain('[3 Costs]');
+
+    stdin.write('\t');
+    await flush();
+    expect(lastFrame()).toContain('[4 Log]');
+
+    stdin.write('\t');
+    await flush();
+    expect(lastFrame()).toContain('[1 Dashboard]');
+
+    stdin.write('2');
+    await flush();
+    expect(lastFrame()).toContain('[2 Queue]');
+  });
+
+  it('shows Queue tab entries with titles joined from issue-title events', async () => {
+    const fake = makeFakeFollow();
+    const queueSnap: QueueSnapshot = { entries: [{ lane: 'app', issue: 296 }] };
+    const readQueueFn = vi.fn(() => queueSnap);
+    const { lastFrame, stdin } = render(
+      <App eventsFile="ignored" follow={fake.follow} queueFile="/repo/.factory/queue" readQueueFn={readQueueFn} />,
+    );
+
+    fake.push(ev('plan', 'Starting plan phase', '296'));
+    fake.push(ev('issue-title', 'Fix the flaky test', '296'));
+    await flush();
+
+    stdin.write('2');
+    await flush();
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('#296');
+    expect(frame).toContain('running');
+    expect(frame).toContain('Fix the flaky test');
+  });
+
+  it('shows Costs tab totals and the skipped-line warning without crashing', async () => {
+    const fake = makeFakeFollow();
+    const costsRead: CostsRead = {
+      entries: [{ ts: 't1', issue: '296', task: 'build', model: 'claude-sonnet-5', inputTokens: 100, outputTokens: 50, cost: 0.01 }],
+      skipped: 1,
+    };
+    const readCostsFn = vi.fn(() => costsRead);
+    const { lastFrame, stdin } = render(
+      <App eventsFile="ignored" follow={fake.follow} costsFile="/repo/.factory/costs.jsonl" readCostsFn={readCostsFn} />,
+    );
+
+    stdin.write('3');
+    await flush();
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('#296');
+    expect(frame).toContain('⚠ skipped 1 malformed line(s) in costs.jsonl');
+    expect(frame).toContain('session total');
+  });
+
+  it('scrolls the Log tab with the up arrow and re-enables follow with f', async () => {
+    const fake = makeFakeFollow();
+    const { lastFrame, stdin } = render(<App eventsFile="ignored" follow={fake.follow} />);
+
+    for (let i = 0; i < 30; i++) {
+      fake.push(ev('build', `step ${i}`, '296', `2026-01-01T00:00:${String(i).padStart(2, '0')}.000Z`));
+    }
+    await flush();
+
+    stdin.write('4');
+    await flush();
+    await flush(); // extra tick: let useInput's effect resubscribe with the updated tab before the next keypress
+    let frame = lastFrame() ?? '';
+    expect(frame).toContain('step 29');
+    expect(frame).toContain('follow: on');
+
+    stdin.write('\x1B[A'); // up arrow
+    await flush();
+    await flush();
+    frame = lastFrame() ?? '';
+    expect(frame).toContain('follow: off');
+    expect(frame).not.toContain('step 29');
+
+    stdin.write('f');
+    await flush();
+    await flush();
+    frame = lastFrame() ?? '';
+    expect(frame).toContain('follow: on');
+    expect(frame).toContain('step 29');
+  });
+
+  it('keeps dashboard keys (up/down/enter/escape) scoped to the dashboard tab', async () => {
+    const fake = makeFakeFollow();
+    const { lastFrame, stdin } = render(<App eventsFile="ignored" follow={fake.follow} />);
+
+    fake.push(ev('plan', 'Starting plan phase', '296'));
+    fake.push(ev('plan', 'Starting plan phase', '301'));
+    await flush();
+
+    stdin.write('4'); // switch to Log tab
+    await flush();
+    await flush(); // extra tick: let useInput's effect resubscribe with the updated tab before the next keypress
+    stdin.write('\x1B[B'); // down arrow -- should scroll the log, not select a dashboard lane
+    await flush();
+    stdin.write('\r'); // enter -- should do nothing on the Log tab
+    await flush();
+
+    const frame = lastFrame() ?? '';
+    expect(frame).not.toContain('esc back · q quit');
+    expect(frame).toContain('follow: on'); // down arrow while already at the tail is a no-op, log stays on follow
+
+    stdin.write('1'); // back to Dashboard tab
+    await flush();
+    expect(lastFrame()).toContain('2 lane(s)');
   });
 });

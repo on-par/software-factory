@@ -1,5 +1,22 @@
-import { describe, expect, it } from 'vitest';
-import { validateQueue, parseQueue } from './index.js';
+import { afterEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { parseQueue, readQueue, validateQueue } from './index.js';
+
+const tempDirs: string[] = [];
+
+function mkdtemp(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'factory-queue-'));
+  tempDirs.push(dir);
+  return dir;
+}
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 describe('validateQueue', () => {
   it('accepts a valid queue', () => {
@@ -103,5 +120,54 @@ describe('parseQueue', () => {
     expect(() => parseQueue('\n\n')).not.toThrow();
     expect(() => parseQueue('app 99999999\n')).not.toThrow();
     expect(parseQueue('app 99999999\n').entries).toEqual([{ lane: 'app', issue: 99999999, lineNo: 1 }]);
+  });
+});
+
+describe('readQueue', () => {
+  it('returns empty entries and no proposedCount when the queue file is missing', () => {
+    const dir = mkdtemp();
+    expect(readQueue(join(dir, 'queue'))).toEqual({ entries: [] });
+  });
+
+  it('reads entries from an existing queue file', () => {
+    const dir = mkdtemp();
+    const queueFile = join(dir, 'queue');
+    writeFileSync(queueFile, 'app 5\ninfra 6\n');
+    expect(readQueue(queueFile)).toEqual({ entries: [{ lane: 'app', issue: 5 }, { lane: 'infra', issue: 6 }] });
+  });
+
+  it('sets proposedCount when a proposed queue file is given and exists', () => {
+    const dir = mkdtemp();
+    const queueFile = join(dir, 'queue');
+    const proposedFile = join(dir, 'queue.proposed');
+    writeFileSync(queueFile, 'app 5\n');
+    writeFileSync(proposedFile, 'app 6\napp 7\n');
+    expect(readQueue(queueFile, proposedFile)).toEqual({
+      entries: [{ lane: 'app', issue: 5 }],
+      proposedCount: 2,
+    });
+  });
+
+  it('leaves proposedCount undefined when the proposed file is missing', () => {
+    const dir = mkdtemp();
+    const queueFile = join(dir, 'queue');
+    writeFileSync(queueFile, 'app 5\n');
+    expect(readQueue(queueFile, join(dir, 'queue.proposed'))).toEqual({
+      entries: [{ lane: 'app', issue: 5 }],
+    });
+  });
+
+  it('de-duplicates repeated issues in the accepted queue, keeping the first lane', () => {
+    const dir = mkdtemp();
+    const queueFile = join(dir, 'queue');
+    writeFileSync(queueFile, 'app 5\ninfra 5\n');
+    expect(readQueue(queueFile)).toEqual({ entries: [{ lane: 'app', issue: 5 }] });
+  });
+
+  it('tolerates leading whitespace on an otherwise well-formed entry', () => {
+    const dir = mkdtemp();
+    const queueFile = join(dir, 'queue');
+    writeFileSync(queueFile, '  app 5\n\tinfra 6\n');
+    expect(readQueue(queueFile)).toEqual({ entries: [{ lane: 'app', issue: 5 }, { lane: 'infra', issue: 6 }] });
   });
 });
