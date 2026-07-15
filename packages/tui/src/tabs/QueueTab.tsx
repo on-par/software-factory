@@ -33,10 +33,12 @@ export function QueueTab({ snapshot, lanes }: QueueTabProps): JSX.Element {
     );
   }
 
+  const laneByIssue = new Map(lanes.map(l => [l.issue, l]));
+
   return (
     <Box flexDirection="column">
       {snapshot.entries.map((entry, i) => {
-        const lane = lanes.find(l => l.issue === String(entry.issue));
+        const lane = laneByIssue.get(String(entry.issue));
         const status: LaneStatus | 'queued' = lane?.status ?? 'queued';
         return (
           <Text key={`${entry.lane}-${entry.issue}`}>

@@ -1,4 +1,4 @@
-import type { JSX } from 'react';
+import { useMemo, type JSX } from 'react';
 import { Box, Text } from 'ink';
 import { aggregateCosts, type CostsRead } from '@on-par/factory-core';
 
@@ -16,7 +16,7 @@ export interface CostsTabProps {
 }
 
 export function CostsTab({ costs, selectedIndex }: CostsTabProps): JSX.Element {
-  const summary = aggregateCosts(costs.entries);
+  const summary = useMemo(() => aggregateCosts(costs.entries), [costs.entries]);
 
   if (summary.perIssue.length === 0) {
     return (

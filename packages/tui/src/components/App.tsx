@@ -111,10 +111,13 @@ export function App({
     }
     if (key.tab) {
       setTab(t => TAB_ORDER[(TAB_ORDER.indexOf(t) + 1) % TAB_ORDER.length]);
+      setView('dashboard');
       return;
     }
-    if (input === '1' || input === '2' || input === '3' || input === '4') {
-      setTab(TAB_ORDER[Number(input) - 1]);
+    const digit = Number(input);
+    if (Number.isInteger(digit) && digit >= 1 && digit <= TAB_ORDER.length) {
+      setTab(TAB_ORDER[digit - 1]);
+      setView('dashboard');
       return;
     }
 

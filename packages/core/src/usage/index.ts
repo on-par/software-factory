@@ -178,7 +178,13 @@ export interface CostsRead {
 function isValidCostEntry(value: unknown): value is CostEntry {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
-  return typeof v.issue === 'string' && typeof v.model === 'string' && Number.isFinite(v.cost);
+  return (
+    typeof v.issue === 'string'
+    && typeof v.model === 'string'
+    && Number.isFinite(v.cost)
+    && (v.inputTokens === undefined || Number.isFinite(v.inputTokens))
+    && (v.outputTokens === undefined || Number.isFinite(v.outputTokens))
+  );
 }
 
 /** Like readCosts (utils/index.ts) but counts malformed/wrong-shape lines instead of silently dropping them. */

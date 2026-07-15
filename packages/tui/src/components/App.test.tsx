@@ -266,4 +266,28 @@ describe('App', () => {
     await flush();
     expect(lastFrame()).toContain('2 lane(s)');
   });
+
+  it('resets a stale dashboard drill-down when leaving and returning to the Dashboard tab', async () => {
+    const fake = makeFakeFollow();
+    const { lastFrame, stdin } = render(<App eventsFile="ignored" follow={fake.follow} />);
+
+    fake.push(ev('plan', 'Starting plan phase', '296'));
+    fake.push(ev('plan', 'Starting plan phase', '301'));
+    await flush();
+
+    stdin.write('\x1B[B'); // down arrow to select the second lane
+    await flush();
+    stdin.write('\r'); // enter drill-down view
+    await flush();
+    expect(lastFrame() ?? '').toContain('esc back · q quit');
+
+    stdin.write('2'); // switch away to the Queue tab (without pressing escape first)
+    await flush();
+    stdin.write('1'); // back to the Dashboard tab
+    await flush();
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('2 lane(s)');
+    expect(frame).not.toContain('esc back · q quit');
+  });
 });
