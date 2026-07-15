@@ -8,6 +8,10 @@ export type { ModelsConfig, RoutesConfig, FactoryConfig } from './config/index.j
 export { validateQueue } from './queue/index.js';
 export type { QueueValidationResult } from './queue/index.js';
 
+// Events
+export { readEvents, followEvents } from './events/index.js';
+export type { FollowEventsOptions } from './events/index.js';
+
 // Models
 export { ModelRegistry, isCommandAvailable, diagnoseModels, resolveModelOverrides } from './models/index.js';
 export type { DoctorProbes, ModelDiagnosis, ModelOverrides } from './models/index.js';

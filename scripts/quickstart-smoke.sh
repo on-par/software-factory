@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Quickstart smoke test: packs @on-par/factory-{config,core,cli} into tarballs,
-# installs them into a fresh project (as npm would from the registry), and
-# verifies `factory --version`, `factory --help`, and `factory init` work.
+# Quickstart smoke test: packs @on-par/factory-{config,core,tui,cli} into
+# tarballs, installs them into a fresh project (as npm would from the
+# registry), and verifies `factory --version`, `factory --help`, and
+# `factory init` work.
 #
 # Assumes `npm ci` and `npm run build` have already run at the repo root
 # (CI does this before invoking this script).
@@ -20,16 +21,18 @@ trap cleanup EXIT
 (cd "$ROOT" && npm pack \
   --workspace @on-par/factory-config \
   --workspace @on-par/factory-core \
+  --workspace @on-par/factory-tui \
   --workspace @on-par/factory-cli \
   --pack-destination "$PACKDIR")
 
 CONFIG_TGZ=("$PACKDIR"/on-par-factory-config-*.tgz)
 CORE_TGZ=("$PACKDIR"/on-par-factory-core-*.tgz)
+TUI_TGZ=("$PACKDIR"/on-par-factory-tui-*.tgz)
 CLI_TGZ=("$PACKDIR"/on-par-factory-cli-*.tgz)
 
 cd "$INSTALL_DIR"
 npm init -y >/dev/null
-npm install "${CONFIG_TGZ[@]}" "${CORE_TGZ[@]}" "${CLI_TGZ[@]}"
+npm install "${CONFIG_TGZ[@]}" "${CORE_TGZ[@]}" "${TUI_TGZ[@]}" "${CLI_TGZ[@]}"
 
 FACTORY="$INSTALL_DIR/node_modules/.bin/factory"
 

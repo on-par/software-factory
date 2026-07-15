@@ -30,6 +30,7 @@ import {
 } from '@on-par/factory-core';
 import type { ModelDiagnosis } from '@on-par/factory-core';
 import { logEvent, branchFor, branchPrefixSlug, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock, withFileLock, shellEscape } from '@on-par/factory-core';
+import { runTui } from '@on-par/factory-tui';
 import { exec as execCb, execSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, readFileSync, writeFileSync, rmSync, renameSync } from 'node:fs';
@@ -402,6 +403,18 @@ async function cmdStatus() {
   if (existsSync(paths.stop)) {
     console.log(chalk.red('\n!! STOP file present — factory halting between issues'));
   }
+}
+
+async function cmdTui() {
+  const repoRoot = await getRepoRoot();
+  const paths = getFactoryPaths(repoRoot);
+  let repo: string | undefined;
+  try {
+    repo = await getGitHubRepo();
+  } catch {
+    // header just omits the repo
+  }
+  await runTui({ eventsFile: paths.events, repo });
 }
 
 export type ParkReason = 'escalate' | 'timeout' | 'fail' | 'conflict';
@@ -1309,6 +1322,8 @@ export async function main() {
   program.command('usage').description('Report trailing-5h cost-weighted subscription usage vs cap').action(cmdUsage);
 
   program.command('status').description('Show queue, events, PRs, models').action(cmdStatus);
+
+  program.command('tui').description('Live read-only view of the current run (q to quit)').action(cmdTui);
 
   const triage = program
     .command('triage')

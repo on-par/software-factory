@@ -1,11 +1,16 @@
 {
-  "name": "@on-par/factory-cli",
+  "name": "@on-par/factory-tui",
   "version": "2.0.0",
-  "description": "CLI for the Software Factory — ships verified GitHub issues via boss-worker-checker orchestration.",
+  "description": "Read-only Ink TUI for a live view of the current Software Factory run.",
   "type": "module",
-  "main": "dist/cli.js",
-  "bin": {
-    "factory": "dist/cli.js"
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
   },
   "files": [
     "dist"
@@ -16,7 +21,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/on-par/software-factory.git",
-    "directory": "packages/cli"
+    "directory": "packages/tui"
   },
   "homepage": "https://github.com/on-par/software-factory#readme",
   "bugs": {
@@ -27,22 +32,19 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "tsx src/cli.ts",
-    "start": "node dist/cli.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@on-par/factory-core": "^2.0.0",
-    "@on-par/factory-config": "^2.0.0",
-    "@on-par/factory-tui": "^2.0.0",
-    "@octokit/rest": "^22.0.0",
-    "chalk": "^5.4.0",
-    "commander": "^14.0.0"
+    "ink": "^6.0.0",
+    "react": "^19.0.0"
   },
   "license": "MIT",
   "devDependencies": {
-    "@types/node": "^24.0.0"
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "ink-testing-library": "^4.0.0"
   }
 }
