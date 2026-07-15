@@ -1,13 +1,10 @@
 // src/checkers/index.ts — Checker framework: built-in + custom checkers
 
-import { exec as execCb } from 'node:child_process';
-import { promisify } from 'node:util';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { ModelRouter } from '../router/index.js';
 import type { CheckerOutput, CheckSummary, Constitution } from '../types/index.js';
-
-const exec = promisify(execCb);
+import { runCommand, describeCommandFailure } from '../utils/command-runner.js';
 
 interface PackageJson {
   scripts?: Record<string, string>;
@@ -34,30 +31,21 @@ export const compileChecker: CheckerFn = async (ctx) => {
     const hasBuild = pkg?.scripts?.build;
 
     if (hasBuild) {
-      try {
-        await exec('npm run build', { cwd: ctx.worktree, timeout: 120000 });
-        return { checker: 'compile', result: 'PASS', details: 'npm run build: OK' };
-      } catch (e: any) {
-        return { checker: 'compile', result: 'FAIL', details: `npm run build failed: ${(e.stderr || e.message || '').slice(0, 500)}` };
-      }
+      const r = await runCommand(['npm', 'run', 'build'], { cwd: ctx.worktree, timeoutMs: 120_000 });
+      if (r.ok) return { checker: 'compile', result: 'PASS', details: 'npm run build: OK' };
+      return { checker: 'compile', result: 'FAIL', details: `npm run build failed: ${describeCommandFailure(r).slice(0, 500)}` };
     }
 
     if (await fileExists(join(ctx.worktree, 'Makefile'))) {
-      try {
-        await exec('make', { cwd: ctx.worktree, timeout: 120000 });
-        return { checker: 'compile', result: 'PASS', details: 'make: OK' };
-      } catch (e: any) {
-        return { checker: 'compile', result: 'FAIL', details: `make failed: ${(e.stderr || e.message || '').slice(0, 500)}` };
-      }
+      const r = await runCommand(['make'], { cwd: ctx.worktree, timeoutMs: 120_000 });
+      if (r.ok) return { checker: 'compile', result: 'PASS', details: 'make: OK' };
+      return { checker: 'compile', result: 'FAIL', details: `make failed: ${describeCommandFailure(r).slice(0, 500)}` };
     }
 
     if (await fileExists(join(ctx.worktree, 'Cargo.toml'))) {
-      try {
-        await exec('cargo build', { cwd: ctx.worktree, timeout: 120000 });
-        return { checker: 'compile', result: 'PASS', details: 'cargo build: OK' };
-      } catch (e: any) {
-        return { checker: 'compile', result: 'FAIL', details: `cargo build failed: ${(e.stderr || e.message || '').slice(0, 500)}` };
-      }
+      const r = await runCommand(['cargo', 'build'], { cwd: ctx.worktree, timeoutMs: 120_000 });
+      if (r.ok) return { checker: 'compile', result: 'PASS', details: 'cargo build: OK' };
+      return { checker: 'compile', result: 'FAIL', details: `cargo build failed: ${describeCommandFailure(r).slice(0, 500)}` };
     }
 
     return { checker: 'compile', result: 'PASS', details: 'no build system detected — skipped' };
@@ -73,22 +61,16 @@ export const compileChecker: CheckerFn = async (ctx) => {
 export const testsChecker: CheckerFn = async (ctx) => {
   try {
     if (await fileExists(join(ctx.worktree, 'scripts/verify.sh'))) {
-      try {
-        await exec('bash scripts/verify.sh --no-e2e', { cwd: ctx.worktree, timeout: 300000 });
-        return { checker: 'tests', result: 'PASS', details: 'scripts/verify.sh: OK' };
-      } catch (e: any) {
-        return { checker: 'tests', result: 'FAIL', details: `verify.sh failed: ${(e.stderr || e.message || '').slice(0, 500)}` };
-      }
+      const r = await runCommand(['bash', 'scripts/verify.sh', '--no-e2e'], { cwd: ctx.worktree, timeoutMs: 300_000 });
+      if (r.ok) return { checker: 'tests', result: 'PASS', details: 'scripts/verify.sh: OK' };
+      return { checker: 'tests', result: 'FAIL', details: `verify.sh failed: ${describeCommandFailure(r).slice(0, 500)}` };
     }
 
     const pkg = await getPackageJson(ctx);
     if (pkg?.scripts?.test) {
-      try {
-        await exec('npm test', { cwd: ctx.worktree, timeout: 300000 });
-        return { checker: 'tests', result: 'PASS', details: 'npm test: OK' };
-      } catch (e: any) {
-        return { checker: 'tests', result: 'FAIL', details: `npm test failed: ${(e.stderr || e.message || '').slice(0, 500)}` };
-      }
+      const r = await runCommand(['npm', 'test'], { cwd: ctx.worktree, timeoutMs: 300_000 });
+      if (r.ok) return { checker: 'tests', result: 'PASS', details: 'npm test: OK' };
+      return { checker: 'tests', result: 'FAIL', details: `npm test failed: ${describeCommandFailure(r).slice(0, 500)}` };
     }
 
     if (ctx.testsRequired) {
@@ -120,23 +102,23 @@ export const lintChecker: CheckerFn = async (ctx) => {
   const scripts = pkg?.scripts ?? {};
 
   if (scripts.lint) {
-    try {
-      await exec('npm run lint', { cwd: ctx.worktree, timeout: 120000 });
+    const r = await runCommand(['npm', 'run', 'lint'], { cwd: ctx.worktree, timeoutMs: 120_000 });
+    if (r.ok) {
       details.push('eslint: OK');
-    } catch (e: any) {
+    } else {
       result = 'FAIL';
-      details.push(`eslint failed: ${(e.stderr || e.message || '').slice(0, 300)}`);
+      details.push(`eslint failed: ${describeCommandFailure(r).slice(0, 300)}`);
     }
   }
 
   // TypeScript type check
   if (await fileExists(join(ctx.worktree, 'tsconfig.json'))) {
-    try {
-      await exec('npx tsc --noEmit', { cwd: ctx.worktree, timeout: 120000 });
+    const r = await runCommand(['npx', 'tsc', '--noEmit'], { cwd: ctx.worktree, timeoutMs: 120_000 });
+    if (r.ok) {
       details.push('tsc: OK');
-    } catch (e: any) {
+    } else {
       result = 'FAIL';
-      details.push(`tsc failed: ${(e.stderr || e.message || '').slice(0, 300)}`);
+      details.push(`tsc failed: ${describeCommandFailure(r).slice(0, 300)}`);
     }
   }
 
@@ -148,39 +130,28 @@ export const lintChecker: CheckerFn = async (ctx) => {
 };
 
 export const linksChecker: CheckerFn = async (ctx) => {
-  const { stdout: htmlFiles } = await exec(
-    `find . -name '*.html' -not -path '*/node_modules/*' -not -path '*/.git/*' ` +
-    `-not -path '*/coverage/*' -not -path '*/dist/*' -not -path '*/build/*' ` +
-    `-not -path '*/.next/*' -not -path '*/out/*' 2>/dev/null || true`,
-    { cwd: ctx.worktree },
-  ).catch(() => ({ stdout: '' } as any));
+  const files = await findHtmlFiles(ctx.worktree);
 
-  if (!htmlFiles.trim()) {
+  if (files.length === 0) {
     return { checker: 'links', result: 'PASS', details: 'no HTML files — skipped' };
   }
 
-  // Extract all URLs from href/src
-  const { stdout: urls } = await exec(
-    `echo '${htmlFiles}' | while IFS= read -r f; do ` +
-    `grep -ohE '(href|src)=["'"'"'][^"'"'"'#]*' "$f" 2>/dev/null ` +
-    `| sed -E 's/^(href|src)=["'"'"']//' ` +
-    `| sed -E 's/#.*$//' ` +
-    `| grep -vE '^(mailto:|tel:|javascript:|data:|$)'; ` +
-    `done | sort -u | wc -l`,
-    { cwd: ctx.worktree, shell: 'bash' },
-  ).catch(() => ({ stdout: '0' } as any));
+  const urls = new Set<string>();
+  let broken = 0;
 
-  const checked = parseInt(urls.trim() || '0', 10);
+  for (const rel of files) {
+    const html = await readFile(join(ctx.worktree, rel), 'utf-8').catch(() => '');
 
-  // Check for placeholder links
-  const { stdout: placeholders } = await exec(
-    `echo '${htmlFiles}' | while IFS= read -r f; do ` +
-    `grep -coE 'href="#"' "$f" 2>/dev/null || echo 0; ` +
-    `done | paste -sd+ | bc`,
-    { cwd: ctx.worktree, shell: 'bash' },
-  ).catch(() => ({ stdout: '0' } as any));
+    for (const match of html.matchAll(/(?:href|src)=["']([^"'#]*)/g)) {
+      const url = match[1];
+      if (!url || /^(mailto:|tel:|javascript:|data:)/.test(url)) continue;
+      urls.add(url);
+    }
 
-  const broken = parseInt(placeholders.trim() || '0', 10);
+    broken += html.split(/\r?\n/).filter(l => l.includes('href="#"')).length;
+  }
+
+  const checked = urls.size;
 
   return {
     checker: 'links',

@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { afterEach, describe, expect, it } from 'vitest';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
@@ -268,37 +268,6 @@ describe('testsChecker', () => {
 });
 
 describe('linksChecker', () => {
-  // linksChecker shells out to `paste -sd+`, whose stdin-with-no-file-argument
-  // behavior differs between BSD paste (macOS) and GNU paste (CI). Stub it with
-  // a Node script so these tests assert linksChecker's own logic consistently
-  // across platforms rather than the host's paste implementation.
-  const originalPath = process.env.PATH;
-
-  beforeEach(async () => {
-    const binDir = await mkdtemp(join(tmpdir(), 'checker-test-bin-'));
-    tempDirs.add(binDir);
-    const pastePath = join(binDir, 'paste');
-    await writeFile(
-      pastePath,
-      '#!/usr/bin/env node\n' +
-        '(async () => {\n' +
-        "  const input = await new Promise(resolve => { let data = ''; process.stdin.on('data', chunk => data += chunk); process.stdin.on('end', () => resolve(data)); });\n" +
-        "  const lines = String(input).split(/\\r?\\n/).filter(Boolean);\n" +
-        "  process.stdout.write(lines.join('+') + (lines.length ? '\\n' : ''));\n" +
-        '})();\n',
-    );
-    await chmod(pastePath, 0o755);
-    process.env.PATH = `${binDir}:${originalPath ?? ''}`;
-  });
-
-  afterEach(() => {
-    if (originalPath === undefined) {
-      delete process.env.PATH;
-    } else {
-      process.env.PATH = originalPath;
-    }
-  });
-
   it('passes and skips when no HTML files exist', async () => {
     const worktree = await makeWorktree();
 
@@ -328,6 +297,30 @@ describe('linksChecker', () => {
     const result = await linksChecker(makeContext(worktree));
 
     expect(result.result).toBe('PASS');
+  });
+
+  it('does not shell-interpolate a crafted file name', async () => {
+    const worktree = await makeWorktree({
+      "a'b $(touch pwned).html": '<html><body><a href="#">click</a></body></html>',
+    });
+
+    const result = await linksChecker(makeContext(worktree));
+
+    expect(result.result).toBe('FAIL');
+    expect(result.broken).toBeGreaterThanOrEqual(1);
+    expect(await fileExists(join(worktree, 'pwned'))).toBe(false);
+  });
+
+  it('deduplicates URLs across files and excludes non-http-ish/fragment links', async () => {
+    const worktree = await makeWorktree({
+      'a.html': '<a href="https://example.com/shared">shared</a><a href="mailto:x@example.com">mail</a><a href="#section">frag</a>',
+      'b.html': '<a href="https://example.com/shared">shared</a><a href="tel:+15551234567">tel</a><a href="javascript:void(0)">js</a><a href="data:text/plain,x">data</a>',
+    });
+
+    const result = await linksChecker(makeContext(worktree));
+
+    expect(result.result).toBe('PASS');
+    expect(result.linksChecked).toBe(1);
   });
 });
 
