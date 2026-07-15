@@ -518,26 +518,11 @@ export class ModelRouter {
       while (retries <= maxRetries) {
         onLog(`Trying ${model} for ${task} (attempt ${retries + 1})`);
 
+        let output: string;
         try {
-          const output = await this.executor.runModel(model, prompt, {
+          output = await this.executor.runModel(model, prompt, {
             worktree, timeout, task, registry: this.registry, routesConfig: this.routesConfig,
           });
-
-          if (output.trim().length > 0) {
-            // Success
-            attempts.push({ model, reason: null, ok: true });
-            return {
-              model,
-              output: output,
-              exitCode: 0,
-              cost: 0, // cost tracked separately
-              attempts,
-            };
-          } else {
-            const emptyErr = new Error('model returned empty output') as Error & { reason: FailoverReason };
-            emptyErr.reason = 'empty_response';
-            throw emptyErr;
-          }
         } catch (err: any) {
           const reason = err.reason ?? this.classifyFailure(err.stderr ?? '', err.exitCode ?? 1);
           const detail = describeFailureDetail(err);
@@ -571,9 +556,27 @@ export class ModelRouter {
             continue;
           }
 
-          // Empty response → failover
+          // Anything else (incl. harness-thrown empty_response) → failover
           break;
         }
+
+        if (output.trim().length > 0) {
+          // Success
+          attempts.push({ model, reason: null, ok: true });
+          return {
+            model,
+            output: output,
+            exitCode: 0,
+            cost: 0, // cost tracked separately
+            attempts,
+          };
+        }
+
+        // Empty output is a local failure, not an exception: record exactly one
+        // empty_response attempt and fail over to the next model.
+        attempts.push({ model, reason: 'empty_response', ok: false });
+        onLog(`${model} failed (empty_response) on ${task}`);
+        break;
       }
     }
 
