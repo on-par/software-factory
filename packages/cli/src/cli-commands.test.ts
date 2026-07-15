@@ -536,8 +536,31 @@ describe('cli commands (via main dispatch)', () => {
       };
       const res = await runMain('ship', '5');
       expect(res).toEqual({ exited: true, code: 1 });
-      const events = readFileSync(paths().events, 'utf-8');
-      expect(events).toContain('fail');
+      const events = readFileSync(paths().events, 'utf-8')
+        .trim()
+        .split('\n')
+        .map(line => JSON.parse(line));
+      const failEvents = events.filter((e: any) => e.type === 'fail' && e.issue === '5');
+      expect(failEvents).toHaveLength(1);
+      expect(errored()).toContain('Ship failed');
+    });
+
+    it('exits 1 and logs exactly one park event when a check fails under FACTORY_LOCAL_ONLY=1', async () => {
+      trackEnv('FACTORY_LOCAL_ONLY');
+      process.env.FACTORY_LOCAL_ONLY = '1';
+      h.checkResult = {
+        passed: false,
+        summary: { results: [{ checker: 'lint', result: 'FAIL', details: 'bad' }], failures: 1 },
+        reworkRounds: 2,
+      };
+      const res = await runMain('ship', '5');
+      expect(res).toEqual({ exited: true, code: 1 });
+      const events = readFileSync(paths().events, 'utf-8')
+        .trim()
+        .split('\n')
+        .map(line => JSON.parse(line));
+      const failEvents = events.filter((e: any) => e.type === 'fail' && e.issue === '5');
+      expect(failEvents).toHaveLength(1);
       expect(errored()).toContain('Ship failed');
     });
   });
@@ -580,6 +603,17 @@ describe('shipIssue (direct)', () => {
   it('throws a LaneParkError with reason escalate when the plan escalates', async () => {
     h.planResult = { ok: false, route: 'claude', escalate: 'needs human' };
     await expect(shipIssue(5, {}, ctx())).rejects.toMatchObject({ reason: 'escalate' });
+  });
+
+  it('emits exactly one escalate event for the issue outside local-only mode', async () => {
+    h.planResult = { ok: false, route: 'claude', escalate: 'needs human' };
+    await expect(shipIssue(5, {}, ctx())).rejects.toMatchObject({ reason: 'escalate' });
+    const events = readFileSync(paths().events, 'utf-8')
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line));
+    const escalateEvents = events.filter((e: any) => e.type === 'escalate' && e.issue === '5');
+    expect(escalateEvents).toHaveLength(1);
   });
 
   it('throws a LaneParkError with reason escalate when the build escalates', async () => {
