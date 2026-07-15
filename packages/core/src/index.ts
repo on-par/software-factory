@@ -5,8 +5,8 @@ export { loadModelsConfig, loadRoutesConfig, loadFactoryConfig, resolveTimeouts,
 export type { ModelsConfig, RoutesConfig, FactoryConfig } from './config/index.js';
 
 // Queue
-export { validateQueue } from './queue/index.js';
-export type { QueueValidationResult } from './queue/index.js';
+export { validateQueue, parseQueue } from './queue/index.js';
+export type { QueueValidationResult, QueueEntry, QueueDiagnostic, ParsedQueue } from './queue/index.js';
 
 // Events
 export { readEvents, followEvents } from './events/index.js';

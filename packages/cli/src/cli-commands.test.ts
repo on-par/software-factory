@@ -419,6 +419,16 @@ describe('cli commands (via main dispatch)', () => {
       expect(out).toContain('(none)');
       expect(out).toContain('Product: (none)');
     });
+
+    it('warns on malformed queue lines and never renders NaN', async () => {
+      writeFileSync(paths().queue, 'app 1\napp abc\n');
+      await runMain('status');
+      expect(logged()).toContain('app 1');
+      const err = errored();
+      expect(err).toContain('malformed');
+      expect(err).toContain('line 2');
+      expect(logged() + err).not.toContain('NaN');
+    });
   });
 
   describe('tui', () => {
@@ -583,6 +593,21 @@ describe('cli commands (via main dispatch)', () => {
       expect(events).toContain('gc boom');
       expect(events).toContain('run-done');
     });
+
+    it('skips malformed queue lines, starts lanes only for valid entries, and warns', async () => {
+      writeFileSync(paths().queue, '# header\napp 1\napp abc\ndocs 3\n');
+      writeFileSync(paths().stop, '');
+      const res = await runMain('run');
+      expect(res.exited).toBe(false);
+      const out = logged();
+      expect(out).toContain(`lane 'app' started (1 issues)`);
+      expect(out).toContain(`lane 'docs' started (1 issues)`);
+      const err = errored();
+      expect(err).toContain('malformed');
+      expect(out + err).not.toContain('NaN');
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('run-done');
+    });
   });
 
   describe('worktree gc', () => {
@@ -627,6 +652,13 @@ describe('cli commands (via main dispatch)', () => {
       const res = await runMain('supervise', '--now');
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('FACTORY_USAGE_CAP');
+    });
+
+    it('exits 2 when the queue contains only malformed lines, and warns why', async () => {
+      writeFileSync(paths().queue, 'app abc\n');
+      const res = await runMain('supervise', '--now');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('malformed');
     });
   });
 
