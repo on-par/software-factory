@@ -123,6 +123,41 @@ describe('loadFactoryConfig', () => {
   it('parses the shipped factory.json without throwing', () => {
     expect(() => loadFactoryConfig()).not.toThrow();
   });
+
+  it('shipped config has worktree gc defaults', () => {
+    const config = loadFactoryConfig();
+    expect(config.worktree.gcTtlDays).toBe(7);
+    expect(config.worktree.autoGcOnRun).toBe(true);
+  });
+
+  it('applies worktree gc defaults when the config omits them', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
+    try {
+      const path = join(dir, 'factory.json');
+      const minimal = {
+        version: 1,
+        paths: {
+          constitutions: 'constitutions/',
+          checkers: 'lib/checkers/',
+          plans: '.factory/plans/',
+          logs: '.factory/logs/',
+          events: '.factory/events.ndjson',
+        },
+        timeouts: { plan_seconds: 1800, build_seconds: 7200, check_seconds: 1800, merge_poll_seconds: 120 },
+        merge: { auto: false, comment: '' },
+        worktree: { prefix: 'ship-it/', parent: '../', comment: '' },
+        byok: { enabled: false, comment: '' },
+        notifications: {},
+        cost_tracking: { enabled: true, log_file: '.factory/costs.jsonl', comment: '' },
+      };
+      await writeFile(path, JSON.stringify(minimal));
+      const config = loadFactoryConfig(path);
+      expect(config.worktree.gcTtlDays).toBe(7);
+      expect(config.worktree.autoGcOnRun).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('resolveTimeouts', () => {
