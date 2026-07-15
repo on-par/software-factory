@@ -332,7 +332,7 @@ describe('runCustomChecker', () => {
 });
 
 describe('runAllCheckers', () => {
-  it('aggregates built-ins and custom checkers while skipping unknown checker names', { timeout: 60000 }, async () => {
+  it('aggregates built-ins and custom checkers and fails closed on unknown checker names', { timeout: 60000 }, async () => {
     const constitutionDir = await mkdtemp(join(tmpdir(), 'checker-test-constitution-'));
     tempDirs.add(constitutionDir);
     await writeFile(
@@ -348,10 +348,31 @@ describe('runAllCheckers', () => {
 
     const summary = await runAllCheckers(makeContext(worktree), router, constitution);
 
-    expect(summary.total).toBe(6);
+    expect(summary.total).toBe(7); // 5 built-ins + custom_style + not_a_real_checker
     expect(summary.passes + summary.failures).toBe(summary.total);
     expect(summary.results.map(result => result.checker)).toContain('custom_style');
-    expect(summary.results.map(result => result.checker)).not.toContain('not_a_real_checker');
+    const unknown = summary.results.find(result => result.checker === 'not_a_real_checker');
+    expect(unknown?.result).toBe('FAIL');
+    expect(unknown?.details).toContain('unknown checker');
+    expect(summary.failures).toBeGreaterThanOrEqual(1);
+  });
+
+  it('fails closed on an unknown checker alone, blocking a clean pass', { timeout: 60000 }, async () => {
+    const constitutionDir = await mkdtemp(join(tmpdir(), 'checker-test-constitution-'));
+    tempDirs.add(constitutionDir);
+    await writeFile(
+      join(constitutionDir, 'myproduct.md'),
+      '---\nproduct: myproduct\ncheckers:\n  - ghost_checker\n---\nBody standard text\n',
+    );
+    const worktree = await makeWorktree();
+    const { router, stub } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
+    const constitution = new ConstitutionLoader(constitutionDir).resolve(worktree, 'myproduct');
+
+    const summary = await runAllCheckers(makeContext(worktree), router, constitution);
+
+    expect(summary.failures).toBeGreaterThanOrEqual(1);
+    expect(summary.results.some(r => r.checker === 'ghost_checker' && r.result === 'FAIL')).toBe(true);
+    expect(stub.calls).toHaveLength(0); // unknown names must NOT be routed to the custom-checker agent
   });
 
   it('runs only built-ins when no constitution is resolved', { timeout: 60000 }, async () => {
@@ -364,6 +385,7 @@ describe('runAllCheckers', () => {
     const summary = await runAllCheckers(makeContext(worktree), router, null);
 
     expect(summary.total).toBe(5);
+    expect(summary.results.map(r => r.checker)).toEqual(['compile', 'tests', 'lint', 'links', 'accessibility']);
     expect(stub.calls).toHaveLength(0);
   });
 });
