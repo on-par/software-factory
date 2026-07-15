@@ -2,7 +2,7 @@
 
 import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, writeFile, mkdtemp } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ModelRegistry } from '../models/index.js';
 import type { TaskType } from '../types/index.js';
@@ -86,7 +86,7 @@ export class CliModelExecutor implements ModelExecutor {
 
   constructor(
     private execFn: ExecFn = exec,
-    private fetchFn: FetchFn = globalThis.fetch as unknown as FetchFn,
+    fetchFn: FetchFn = globalThis.fetch as unknown as FetchFn,
   ) {
     this.claudeHarness = new ClaudeCliHarness(execFn);
     this.codexHarness = new CodexCliHarness(execFn);
@@ -444,7 +444,7 @@ export class ModelRouter {
   private registry: ModelRegistry;
 
   constructor(
-    private modelsConfig: ModelsConfig,
+    modelsConfig: ModelsConfig,
     private routesConfig: RoutesConfig,
     private byok = false,
     private executor: ModelExecutor = new CliModelExecutor(),

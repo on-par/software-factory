@@ -32,7 +32,6 @@ import { promisify } from 'node:util';
 import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { resolve, dirname, basename } from 'node:path';
 import { Octokit } from '@octokit/rest';
-import { resolveConfigPath } from '@on-par/factory-config';
 
 const exec = promisify(execCb);
 type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<unknown>;
@@ -712,7 +711,7 @@ Write ONLY the queue to ${paths.queueProposed} in format '<lane> <issue#>', with
 explaining exclusions.` ;
 
   logEvent(paths.events, 'triage', '-', `Triaging ${ghRepo} with ${model}`);
-  const { stdout } = await exec(
+  await exec(
     `claude -p ${shellEscapeInline(prompt)} ${flag ? `--model ${flag}` : ''} --allowedTools "Bash(gh issue:*)" "Bash(gh repo:*)" Read Glob Grep Write`,
   ).catch(() => ({ stdout: '' }));
 
@@ -1019,8 +1018,6 @@ export async function landOpenPullRequest(
     octokit,
     owner,
     repoName,
-    ghRepo,
-    repoRoot,
     issue,
     branch,
     worktree,

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { defaultTranscriptRoots } from './index.js';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -128,6 +129,38 @@ describe('usage', () => {
     expect(estimateTrailingSpend({ roots: [root], now })).toBe(0);
   });
 
+  it('skips a root that exists but cannot be read as a directory', () => {
+    const dir = mkdtemp();
+    const notADir = join(dir, 'not-a-directory');
+    // The root exists (existsSync passes) but readdirSync throws ENOTDIR — the
+    // per-root try/catch must swallow it and continue rather than crashing.
+    writeFileSync(notADir, 'contents');
+
+    expect(estimateTrailingSpend({ roots: [notADir], now })).toBe(0);
+  });
+
+  it('skips a .jsonl entry that is a directory rather than a readable file', () => {
+    const root = makeRoot();
+    // A directory whose name ends in .jsonl passes the extension filter and the
+    // mtime gate, but readFileSync throws EISDIR — the inner try/catch continues.
+    const fakeFile = join(root, 'session.jsonl');
+    mkdirSync(fakeFile, { recursive: true });
+    utimesSync(fakeFile, now, now);
+    // A real transcript alongside it still contributes so we prove the loop went on.
+    writeTranscript(root, 'real/session.jsonl', [
+      transcriptLine('2026-07-10T11:30:00Z', 'claude-sonnet-5', { input_tokens: 1_000_000 }),
+    ]);
+
+    expect(estimateTrailingSpend({ roots: [root], now })).toBe(3);
+  });
+
+  it('exposes the default transcript roots', () => {
+    const roots = defaultTranscriptRoots();
+    expect(roots).toHaveLength(2);
+    expect(roots[0].endsWith('.claude/projects')).toBe(true);
+    expect(roots[1].endsWith('.config/claude/projects')).toBe(true);
+  });
+
   it('formats the usage report', () => {
     expect(formatUsageReport(187.4, 227)).toBe('trailing-5h usage ~= $187 = 83% of $227 cap');
     expect(formatUsageReport(0, 227)).toBe('trailing-5h usage ~= $0 = 0% of $227 cap');
@@ -210,6 +243,32 @@ describe('watchUsage', () => {
       setStop: () => {},
       sleep: async () => {},
     })).resolves.toBe('stopped');
+  });
+
+  it('uses the real timer-based sleep between polls until aborted', async () => {
+    const controller = new AbortController();
+    let estimateCalls = 0;
+
+    // No injected sleep: this exercises the module's real setTimeout-based
+    // sleep, both its Promise path (first poll) and its already-aborted
+    // fast-return path (second poll, after the abort).
+    await expect(watchUsage({
+      cap: 227,
+      stopAt: 0.75,
+      pollMs: 1,
+      stopFile: '/repo/.factory/STOP',
+      eventsFile: '/repo/.factory/events.ndjson',
+      signal: controller.signal,
+      estimateSpend: () => {
+        estimateCalls++;
+        if (estimateCalls >= 2) controller.abort();
+        return 10;
+      },
+      emitEvent: () => {},
+      setStop: () => {},
+    })).resolves.toBe('aborted');
+
+    expect(estimateCalls).toBe(2);
   });
 
   it('formats the armed event', async () => {

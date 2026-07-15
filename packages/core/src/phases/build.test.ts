@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -137,6 +137,138 @@ describe('buildPhase FACTORY_CODEX kill-switch', () => {
     expect(result.ok).toBe(true);
     expect(stub.calls[stub.calls.length - 1].task).toBe('build_codex');
     expect(logs.some(l => l.type === 'warn')).toBe(false);
+  });
+});
+
+describe('buildPhase local-only codex prompt', () => {
+  let prevLocalOnly: string | undefined;
+
+  beforeEach(() => {
+    prevLocalOnly = process.env.FACTORY_LOCAL_ONLY;
+    process.env.FACTORY_LOCAL_ONLY = '1';
+  });
+
+  afterEach(() => {
+    if (prevLocalOnly === undefined) delete process.env.FACTORY_LOCAL_ONLY;
+    else process.env.FACTORY_LOCAL_ONLY = prevLocalOnly;
+  });
+
+  it('sends the compact local-small prompt with the trimmed spec', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-82.md');
+    await writeFile(specPath, '   # Frozen spec 82\nDo the small thing.   \n');
+
+    const stub = new StubModelExecutor({ scripts: { build_codex: [{ output: 'codex output' }] } });
+    // Force the router itself out of local-only mode so the stub models still
+    // resolve; buildPhase reads FACTORY_LOCAL_ONLY directly for prompt shaping.
+    const router = new ModelRouter(models, routes, false, stub, false, false);
+
+    const result = await buildPhase({
+      issue: 82,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/82-local-small',
+      route: 'codex',
+      router,
+      constitution: null,
+      log: () => {},
+    });
+
+    expect(result.ok).toBe(true);
+    const prompt = stub.calls[stub.calls.length - 1].prompt;
+    expect(stub.calls[stub.calls.length - 1].task).toBe('build_codex');
+    expect(prompt).toContain('Local-small build for issue #82.');
+    // Spec is trimmed (leading/trailing whitespace removed) and inlined.
+    expect(prompt).toContain('# Frozen spec 82');
+    expect(prompt).not.toContain('   # Frozen spec 82');
+    expect(prompt).not.toContain('[truncated for local model');
+  });
+
+  it('truncates an oversized spec for the local model', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-83.md');
+    const bigSpec = 'x'.repeat(7000);
+    await writeFile(specPath, bigSpec);
+
+    const stub = new StubModelExecutor({ scripts: { build_codex: [{ output: 'codex output' }] } });
+    const router = new ModelRouter(models, routes, false, stub, false, false);
+
+    const result = await buildPhase({
+      issue: 83,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/83-big-spec',
+      route: 'codex',
+      router,
+      constitution: null,
+      log: () => {},
+    });
+
+    expect(result.ok).toBe(true);
+    const prompt = stub.calls[stub.calls.length - 1].prompt;
+    expect(prompt).toContain('[truncated for local model: keep the implementation minimal and inspect files as needed]');
+    // Only the first 5600 chars of the spec are retained before the truncation note.
+    expect(prompt).toContain('x'.repeat(5600));
+    expect(prompt).not.toContain('x'.repeat(6001));
+  });
+});
+
+describe('buildPhase escalation', () => {
+  it('returns not-ok and surfaces the ESCALATE line when the worker escalates', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-84.md');
+    const stub = new StubModelExecutor({
+      scripts: {
+        build_claude: [{ output: 'progress line\nESCALATE: the acceptance criteria are ambiguous\nmore text' }],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const logs: Array<{ type: string; msg: string }> = [];
+
+    const result = await buildPhase({
+      issue: 84,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/84-ambiguous',
+      route: 'claude',
+      router,
+      constitution: null,
+      log: (type, msg) => { logs.push({ type, msg }); },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.escalate).toBe('ESCALATE: the acceptance criteria are ambiguous');
+    expect(logs).toContainEqual({ type: 'escalate', msg: 'ESCALATE: the acceptance criteria are ambiguous' });
+  });
+
+  it('includes the skip-CI guidance in the claude prompt when skipCI is set', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-85.md');
+    const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'ready for review' }] } });
+    const router = new ModelRouter(models, routes, false, stub);
+
+    const result = await buildPhase({
+      issue: 85,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/85-skip-ci',
+      route: 'claude',
+      router,
+      constitution: null,
+      log: () => {},
+      skipCI: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(stub.calls[stub.calls.length - 1].prompt).toContain('CI is intentionally skipped');
   });
 });
 

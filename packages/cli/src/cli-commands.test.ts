@@ -1,0 +1,607 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+// ---------------------------------------------------------------------------
+// Shared mutable state the hoisted mocks read from. Set per test in beforeEach.
+// ---------------------------------------------------------------------------
+const h = vi.hoisted(() => {
+  return {
+    repoRoot: '',
+    constitutionsDir: '',
+    ghRepo: 'on-par/software-factory',
+    // child_process shims
+    execImpl: (_cmd: string): string => '',
+    execSyncImpl: (_cmd: string): string => {
+      throw new Error('execSync not stubbed');
+    },
+    // octokit instance returned by `new Octokit()`
+    octokit: {} as any,
+    // configurable core behaviour
+    constitutionResolve: (_worktree: string, _product?: string): any => null,
+    modelOverrides: {} as Record<string, string>,
+    planResult: { ok: true, route: 'claude' } as any,
+    buildResult: { ok: true } as any,
+    checkResult: { passed: true, summary: { results: [], failures: 0 }, reworkRounds: 0 } as any,
+    shipResult: { ok: true, prNumber: 99 } as any,
+    diagnoses: [] as any[],
+    costs: [] as any[],
+    trailingSpend: 10,
+    routerResolve: (_route: string): string | undefined => 'claude-model',
+  };
+});
+
+// ---------------------------------------------------------------------------
+// Module mocks (hoisted above imports by vitest)
+// ---------------------------------------------------------------------------
+vi.mock('node:child_process', () => {
+  const exec = (cmd: string, optsOrCb: any, maybeCb?: any) => {
+    const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
+    try {
+      const stdout = h.execImpl(cmd);
+      cb(null, { stdout, stderr: '' });
+    } catch (err) {
+      cb(err);
+    }
+  };
+  const execSync = (cmd: string) => h.execSyncImpl(cmd);
+  return { exec, execSync, default: { exec, execSync } };
+});
+
+vi.mock('@octokit/rest', () => ({
+  Octokit: vi.fn(() => h.octokit),
+}));
+
+vi.mock('@on-par/factory-core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@on-par/factory-core')>();
+  return {
+    ...actual,
+    // Config loaders — return inert values.
+    loadModelsConfig: vi.fn(() => ({}) as any),
+    loadRoutesConfig: vi.fn(() => ({}) as any),
+    loadFactoryConfig: vi.fn(() => ({ merge: { auto: false, comment: '' } }) as any),
+    resolveTimeouts: vi.fn(() => ({ plan: 1, build: 1, check: 1 })),
+    resolveSkipCI: vi.fn(() => false),
+    getConstitutionsDir: vi.fn(() => h.constitutionsDir),
+    resolveModelOverrides: vi.fn(() => h.modelOverrides),
+    // Router / loaders as light stubs.
+    ModelRouter: vi.fn(() => ({
+      resolve: (route: string) => h.routerResolve(route),
+      registryRef: { getClaudeFlag: () => '--flag', getModelsInTier: () => ['m'] },
+    })),
+    ConstitutionLoader: vi.fn(() => ({
+      listProducts: () => ['alpha', 'beta'],
+      resolve: (worktree: string, product?: string) => h.constitutionResolve(worktree, product),
+    })),
+    ModelRegistry: vi.fn(() => ({
+      list: () => ['claude-model'],
+      getTiers: () => ['worker'],
+      estimateCost: () => 1.23,
+      isExperimental: () => false,
+      isAvailable: () => true,
+      getModelsInTier: () => ['claude-model'],
+    })),
+    // Phases.
+    planPhase: vi.fn(async () => h.planResult),
+    buildPhase: vi.fn(async () => h.buildResult),
+    checkPhase: vi.fn(async () => h.checkResult),
+    shipPhase: vi.fn(async () => h.shipResult),
+    // Usage / reports.
+    estimateTrailingSpend: vi.fn(() => h.trailingSpend),
+    formatUsageReport: vi.fn(() => 'USAGE REPORT'),
+    watchUsage: vi.fn(async () => {}),
+    diagnoseModels: vi.fn(() => h.diagnoses),
+    watchChecks: vi.fn(async () => {}),
+    writeLocalRunReport: vi.fn(async () => ({ path: '/tmp/report.md' })),
+    createLocalSmallDryRun: vi.fn(async () => ({ planPath: '/tmp/plan.md', contextPath: '/tmp/ctx.md' })),
+    diagnoseModelsDefault: undefined,
+    // Cost.
+    readCosts: vi.fn(() => h.costs),
+    // Git / worktree side-effects — no-ops.
+    setupWorktree: vi.fn(async () => {}),
+    cleanupWorktree: vi.fn(async () => {}),
+    gitFetch: vi.fn(async () => {}),
+    withGitLock: vi.fn(async (_root: string, fn: () => Promise<unknown>) => fn()),
+    withFileLock: vi.fn(async (_lock: string, fn: () => Promise<unknown>, _opts?: unknown) => fn()),
+    ensureDir: vi.fn((p: string) => mkdirSync(p, { recursive: true })),
+  };
+});
+
+import { main, shipIssue } from './cli/index.js';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+class ExitError extends Error {
+  constructor(readonly code: number) {
+    super(`process.exit(${code})`);
+  }
+}
+
+let exitSpy: any;
+let logSpy: any;
+let errSpy: any;
+const savedEnv: Record<string, string | undefined> = {};
+
+function trackEnv(...keys: string[]) {
+  for (const k of keys) savedEnv[k] = process.env[k];
+}
+
+function paths() {
+  const state = join(h.repoRoot, '.factory');
+  return {
+    state,
+    queue: join(state, 'queue'),
+    queueProposed: join(state, 'queue.proposed'),
+    events: join(state, 'events.ndjson'),
+    plans: join(state, 'plans'),
+    product: join(state, 'product'),
+    stop: join(state, 'STOP'),
+    costs: join(state, 'costs.jsonl'),
+    reports: join(state, 'reports'),
+  };
+}
+
+function defaultOctokit() {
+  return {
+    rest: {
+      issues: { get: vi.fn(async () => ({ data: { title: 'Fix the bug' } })) },
+      pulls: {
+        list: vi.fn(async ({ state }: any) =>
+          state === 'open'
+            ? { data: [{ number: 77, head: { ref: 'ship-it/5-fix-the-bug' }, body: 'Closes #5' }] }
+            : { data: [] },
+        ),
+        merge: vi.fn(async () => ({})),
+      },
+      git: { deleteRef: vi.fn(async () => ({})) },
+      checks: { listForRef: vi.fn(async () => ({ data: { check_runs: [] } })) },
+    },
+    graphql: vi.fn(async (query: string) =>
+      query.trimStart().startsWith('query')
+        ? { repository: { pullRequest: { id: 'PR_ID', isDraft: false, mergeStateStatus: 'CLEAN' } } }
+        : {},
+    ),
+  };
+}
+
+async function runMain(...args: string[]) {
+  process.argv = ['node', 'factory', ...args];
+  try {
+    await main();
+    return { exited: false as const, code: undefined };
+  } catch (err) {
+    if (err instanceof ExitError) return { exited: true as const, code: err.code };
+    throw err;
+  }
+}
+
+beforeEach(() => {
+  h.repoRoot = mkdtempSync(join(tmpdir(), 'factory-cli-'));
+  h.constitutionsDir = mkdtempSync(join(tmpdir(), 'factory-const-'));
+  mkdirSync(join(h.repoRoot, '.git', 'info'), { recursive: true });
+  mkdirSync(paths().state, { recursive: true });
+  mkdirSync(paths().plans, { recursive: true });
+
+  h.execImpl = (cmd: string) => {
+    if (cmd.includes('rev-parse')) return h.repoRoot;
+    if (cmd.includes('gh repo view')) return h.ghRepo;
+    return '';
+  };
+  h.execSyncImpl = (_cmd: string) => {
+    throw new Error('no cli available');
+  };
+  h.octokit = defaultOctokit();
+  h.constitutionResolve = () => null;
+  h.modelOverrides = {};
+  h.planResult = { ok: true, route: 'claude' };
+  h.buildResult = { ok: true };
+  h.checkResult = { passed: true, summary: { results: [], failures: 0 }, reworkRounds: 0 };
+  h.shipResult = { ok: true, prNumber: 99 };
+  h.diagnoses = [];
+  h.costs = [];
+  h.trailingSpend = 10;
+  h.routerResolve = () => 'claude-model';
+
+  ['FACTORY_LOCAL_ONLY', 'FACTORY_MERGE', 'FACTORY_SKIP_CI', 'FACTORY_USAGE_CAP', 'FACTORY_STOP_AT',
+    'FACTORY_RESUME_AT', 'FACTORY_USAGE_POLL', 'FACTORY_USAGE_WATCH'].forEach(k => trackEnv(k));
+  delete process.env.FACTORY_LOCAL_ONLY;
+  delete process.env.FACTORY_MERGE;
+
+  exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+    throw new ExitError(code ?? 0);
+  }) as any);
+  logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+});
+
+afterEach(() => {
+  rmSync(h.repoRoot, { recursive: true, force: true });
+  rmSync(h.constitutionsDir, { recursive: true, force: true });
+  for (const [k, v] of Object.entries(savedEnv)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+  exitSpy.mockRestore();
+  logSpy.mockRestore();
+  errSpy.mockRestore();
+  vi.clearAllMocks();
+});
+
+function logged(): string {
+  return logSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
+}
+function errored(): string {
+  return errSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
+}
+
+// ===========================================================================
+describe('cli commands (via main dispatch)', () => {
+  describe('init', () => {
+    it('creates .factory dirs, the git exclude entry, and a sample queue', async () => {
+      const res = await runMain('init');
+      expect(res.exited).toBe(false);
+      expect(existsSync(paths().queue)).toBe(true);
+      const exclude = readFileSync(join(h.repoRoot, '.git/info/exclude'), 'utf-8');
+      expect(exclude).toContain('.factory/');
+      expect(logged()).toContain('Initialized');
+    });
+
+    it('does not duplicate the exclude entry or clobber an existing queue', async () => {
+      writeFileSync(join(h.repoRoot, '.git/info/exclude'), '.factory/\n');
+      writeFileSync(paths().queue, 'app 1\n');
+      await runMain('init');
+      const exclude = readFileSync(join(h.repoRoot, '.git/info/exclude'), 'utf-8');
+      expect(exclude.match(/\.factory\//g)).toHaveLength(1);
+      expect(readFileSync(paths().queue, 'utf-8')).toBe('app 1\n');
+    });
+  });
+
+  describe('constitution', () => {
+    it('scaffolds a new constitution with --init', async () => {
+      writeFileSync(join(h.constitutionsDir, '_template.md'),
+        '```markdown\n---\nproduct: <product-name>\n---\n# <Product> Constitution\n```\n');
+      const res = await runMain('constitution', '--init', 'gizmo');
+      expect(res.exited).toBe(false);
+      expect(existsSync(join(h.constitutionsDir, 'gizmo.md'))).toBe(true);
+      expect(logged()).toContain('Created constitution');
+    });
+
+    it('exits 1 when --init targets an existing constitution', async () => {
+      writeFileSync(join(h.constitutionsDir, '_template.md'), '```markdown\n# <Product>\n```\n');
+      writeFileSync(join(h.constitutionsDir, 'gizmo.md'), 'existing');
+      const res = await runMain('constitution', '--init', 'gizmo');
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('already exists');
+    });
+
+    it('exits 2 when --init gets an invalid product name', async () => {
+      const res = await runMain('constitution', '--init', '../evil');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('invalid product name');
+    });
+
+    it('lists products with --list', async () => {
+      await runMain('constitution', '--list');
+      expect(logged()).toContain('alpha');
+      expect(logged()).toContain('beta');
+    });
+
+    it('sets the active product when the constitution exists', async () => {
+      writeFileSync(join(h.constitutionsDir, 'alpha.md'), '# alpha');
+      const res = await runMain('constitution', '--product', 'alpha');
+      expect(res.exited).toBe(false);
+      expect(readFileSync(paths().product, 'utf-8')).toBe('alpha');
+      expect(logged()).toContain('Active product: alpha');
+    });
+
+    it('exits 1 for --product on a missing constitution', async () => {
+      const res = await runMain('constitution', '--product', 'nope');
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain("No constitution 'nope'");
+    });
+
+    it('exits 2 with a usage line when no sub-option is given', async () => {
+      const res = await runMain('constitution');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('usage: factory constitution');
+    });
+  });
+
+  describe('models', () => {
+    it('lists models, costs, and tiers', async () => {
+      await runMain('models');
+      const out = logged();
+      expect(out).toContain('Available Models');
+      expect(out).toContain('claude-model');
+      expect(out).toContain('Tiers');
+      expect(out).toContain('boss:');
+    });
+
+    it('doctor prints the report and returns when a worker is reachable', async () => {
+      h.diagnoses = [
+        { model: 'w', provider: 'openai', tiers: ['worker'], reachable: true, experimental: false, reason: 'ok' },
+      ];
+      const res = await runMain('models', '--doctor');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('Model Doctor');
+    });
+
+    it('doctor exits 1 when no worker is reachable', async () => {
+      h.diagnoses = [
+        { model: 'b', provider: 'anthropic', tiers: ['boss'], reachable: true, experimental: false, reason: 'ok' },
+      ];
+      const res = await runMain('models', '--doctor');
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('no worker model is reachable');
+    });
+  });
+
+  describe('cost', () => {
+    it('reports no data when there are no costs', async () => {
+      h.costs = [];
+      await runMain('cost');
+      expect(logged()).toContain('no cost data yet');
+    });
+
+    it('aggregates costs by model with a grand total', async () => {
+      h.costs = [
+        { model: 'a', cost: 1 },
+        { model: 'a', cost: 0.5 },
+        { model: 'b', cost: 2 },
+      ];
+      await runMain('cost');
+      const out = logged();
+      expect(out).toContain('Cost Summary');
+      expect(out).toContain('a: 2 tasks, $1.5000');
+      expect(out).toContain('b: 1 tasks, $2.0000');
+      expect(out).toContain('Total: $3.5000');
+    });
+  });
+
+  describe('usage', () => {
+    it('prints the usage report from resolved knobs', async () => {
+      await runMain('usage');
+      expect(logged()).toContain('USAGE REPORT');
+    });
+
+    it('exits 2 on an invalid usage cap', async () => {
+      process.env.FACTORY_USAGE_CAP = '-5';
+      const res = await runMain('usage');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('FACTORY_USAGE_CAP');
+    });
+  });
+
+  describe('status', () => {
+    it('prints product, models, queue, events, and STOP state', async () => {
+      writeFileSync(paths().product, 'alpha\n');
+      writeFileSync(paths().queue, '# comment\napp 1\napp 2\n');
+      writeFileSync(paths().events, JSON.stringify({ type: 'ready', issue: 1, msg: 'done' }) + '\nnot-json\n');
+      writeFileSync(paths().stop, '');
+      await runMain('status');
+      const out = logged();
+      expect(out).toContain('on-par/software-factory');
+      expect(out).toContain('Product: alpha');
+      expect(out).toContain('app 1');
+      expect(out).toContain('ready #1: done');
+      expect(logged() + errored()).toContain('STOP file present');
+    });
+
+    it('handles an empty queue and no events gracefully', async () => {
+      writeFileSync(paths().queue, '# only comments\n');
+      await runMain('status');
+      const out = logged();
+      expect(out).toContain('(empty)');
+      expect(out).toContain('(none)');
+      expect(out).toContain('Product: (none)');
+    });
+  });
+
+  describe('triage', () => {
+    it('prints the proposed queue with a mv hint', async () => {
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) return h.ghRepo;
+        if (cmd.includes('claude -p')) {
+          writeFileSync(paths().queueProposed, 'app 5\napp 6\n');
+          return '';
+        }
+        return '';
+      };
+      await runMain('triage');
+      const out = logged();
+      expect(out).toContain('app 5');
+      expect(out).toContain('mv');
+    });
+
+    it('exits 1 when triage produces no proposal', async () => {
+      const res = await runMain('triage');
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('no proposal');
+    });
+  });
+
+  describe('stop / resume', () => {
+    it('stop writes the STOP file', async () => {
+      await runMain('stop');
+      expect(existsSync(paths().stop)).toBe(true);
+      expect(logged()).toContain('STOP set');
+    });
+
+    it('resume removes an existing STOP file', async () => {
+      writeFileSync(paths().stop, '');
+      await runMain('resume');
+      expect(existsSync(paths().stop)).toBe(false);
+      expect(logged()).toContain('STOP cleared');
+    });
+
+    it('resume is a no-op when there is no STOP file', async () => {
+      await runMain('resume');
+      expect(logged()).toContain('STOP cleared');
+    });
+  });
+
+  describe('run', () => {
+    it('exits 2 when the queue file is missing', async () => {
+      rmSync(paths().queue, { force: true });
+      const res = await runMain('run');
+      expect(res).toEqual({ exited: true, code: 2 });
+    });
+
+    it('reads the queue, starts lanes, and stops immediately when STOP is present', async () => {
+      writeFileSync(paths().queue, '# header\napp 1\napp 2\ndocs 3\n');
+      writeFileSync(paths().stop, '');
+      const res = await runMain('run');
+      expect(res.exited).toBe(false);
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('stopped');
+      expect(events).toContain('run-done');
+    });
+  });
+
+  describe('supervise', () => {
+    it('exits 2 when the queue is empty', async () => {
+      writeFileSync(paths().queue, '# just comments\n');
+      const res = await runMain('supervise', '--now');
+      expect(res).toEqual({ exited: true, code: 2 });
+    });
+
+    it('exits 2 on invalid usage knobs', async () => {
+      writeFileSync(paths().queue, 'app 1\n');
+      process.env.FACTORY_USAGE_CAP = 'abc';
+      const res = await runMain('supervise', '--now');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('FACTORY_USAGE_CAP');
+    });
+  });
+
+  describe('local-small-dry-run', () => {
+    it('creates the dry-run plan and context and prints their paths', async () => {
+      const res = await runMain('local-small-dry-run', '5');
+      expect(res.exited).toBe(false);
+      const out = logged();
+      expect(out).toContain('/tmp/plan.md');
+      expect(out).toContain('/tmp/ctx.md');
+    });
+  });
+
+  describe('land', () => {
+    it('lands an open PR and prints success', async () => {
+      const res = await runMain('land', '5');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('Landed PR #77');
+      expect(h.octokit.rest.pulls.merge).toHaveBeenCalled();
+    });
+
+    it('exits 1 when there is no open PR for the issue', async () => {
+      h.octokit.rest.pulls.list = vi.fn(async () => ({ data: [] }));
+      const res = await runMain('land', '5');
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('no open PR');
+    });
+
+    it('exits 3 on a rebase conflict (LandConflictError)', async () => {
+      h.octokit.graphql = vi.fn(async (query: string) =>
+        query.trimStart().startsWith('query')
+          ? { repository: { pullRequest: { id: 'PR_ID', isDraft: false, mergeStateStatus: 'DIRTY' } } }
+          : {},
+      );
+      // worktree does not exist -> DIRTY with missing worktree -> LandConflictError
+      const res = await runMain('land', '5');
+      expect(res).toEqual({ exited: true, code: 3 });
+      expect(errored()).toContain('factory:');
+    });
+  });
+
+  describe('ship (via cmdShip)', () => {
+    it('ships an issue through all phases and prints the ready PR', async () => {
+      const res = await runMain('ship', '5');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('PR #99 ready for review');
+    });
+
+    it('exits 1 and logs a park event when a check fails', async () => {
+      h.checkResult = {
+        passed: false,
+        summary: { results: [{ checker: 'lint', result: 'FAIL', details: 'bad' }], failures: 1 },
+        reworkRounds: 2,
+      };
+      const res = await runMain('ship', '5');
+      expect(res).toEqual({ exited: true, code: 1 });
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('fail');
+      expect(errored()).toContain('Ship failed');
+    });
+  });
+});
+
+// ===========================================================================
+describe('shipIssue (direct)', () => {
+  const ctx = () => ({ repoRoot: h.repoRoot, ghRepo: h.ghRepo });
+
+  it('returns the branch on the happy path and logs a ready event', async () => {
+    const branch = await shipIssue(5, {}, ctx());
+    expect(branch).toBe('ship-it/5-fix-the-bug');
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('ready');
+    expect(events).toContain('worktree');
+  });
+
+  it('logs model-override events when overrides are pinned', async () => {
+    h.modelOverrides = { plan: 'plan-x', build: 'build-y' };
+    await shipIssue(5, {}, ctx());
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('plan-x');
+    expect(events).toContain('build-y');
+  });
+
+  it('logs standards source when a repo constitution resolves', async () => {
+    h.constitutionResolve = () => ({ source: 'repo', product: 'alpha' });
+    await shipIssue(5, { product: 'alpha' }, ctx());
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('Standards from repo instruction files');
+  });
+
+  it('logs bundled standards source when a bundled constitution resolves', async () => {
+    h.constitutionResolve = () => ({ source: 'bundled', product: 'beta' });
+    await shipIssue(5, {}, ctx());
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain("bundled constitution 'beta'");
+  });
+
+  it('throws a LaneParkError with reason escalate when the plan escalates', async () => {
+    h.planResult = { ok: false, route: 'claude', escalate: 'needs human' };
+    await expect(shipIssue(5, {}, ctx())).rejects.toMatchObject({ reason: 'escalate' });
+  });
+
+  it('throws a LaneParkError with reason escalate when the build escalates', async () => {
+    h.buildResult = { ok: false, escalate: 'stuck' };
+    await expect(shipIssue(5, {}, ctx())).rejects.toMatchObject({ reason: 'escalate' });
+  });
+
+  it('throws a LaneParkError with reason fail when the ship phase fails', async () => {
+    h.shipResult = { ok: false };
+    await expect(shipIssue(5, {}, ctx())).rejects.toMatchObject({ reason: 'fail' });
+  });
+
+  it('writes a local-only run report on success when FACTORY_LOCAL_ONLY=1', async () => {
+    trackEnv('FACTORY_LOCAL_ONLY');
+    process.env.FACTORY_LOCAL_ONLY = '1';
+    const core = await import('@on-par/factory-core');
+    await shipIssue(5, {}, ctx());
+    expect(vi.mocked(core.writeLocalRunReport)).toHaveBeenCalled();
+    expect(logged()).toContain('local-only report');
+  });
+
+  it('writes a failed local-only run report and logs the park reason on error', async () => {
+    trackEnv('FACTORY_LOCAL_ONLY');
+    process.env.FACTORY_LOCAL_ONLY = '1';
+    h.checkResult = { passed: false, summary: { results: [], failures: 1 }, reworkRounds: 0 };
+    const core = await import('@on-par/factory-core');
+    await expect(shipIssue(5, {}, ctx())).rejects.toBeTruthy();
+    const report = vi.mocked(core.writeLocalRunReport).mock.calls.at(-1)?.[0] as any;
+    expect(report.outcome).toBe('failed');
+  });
+});

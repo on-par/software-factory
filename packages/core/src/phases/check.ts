@@ -3,7 +3,7 @@
 import { ModelRouter } from '../router/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { runAllCheckers, type CheckerContext } from '../checkers/index.js';
-import type { CheckSummary, CheckerOutput, Constitution, DisputeResult } from '../types/index.js';
+import type { CheckSummary, Constitution, DisputeResult } from '../types/index.js';
 
 export interface CheckPhaseResult {
   passed: boolean;
