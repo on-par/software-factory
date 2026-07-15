@@ -6,11 +6,11 @@ import { PHASES, type RunState } from '../state.js';
 // nested `ink`/`react` copy would otherwise duplicate the reconciler in this tree.
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
-function spinnerFrame(now: number): string {
+export function spinnerFrame(now: number): string {
   return SPINNER_FRAMES[Math.floor(now / 100) % SPINNER_FRAMES.length];
 }
 
-function formatElapsed(startedAt: string | undefined, now: number): string {
+export function formatElapsed(startedAt: string | undefined, now: number): string {
   if (!startedAt) return '00:00';
   const elapsedMs = Math.max(0, now - Date.parse(startedAt));
   const totalSeconds = Math.floor(elapsedMs / 1000);

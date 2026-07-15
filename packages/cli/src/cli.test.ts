@@ -417,6 +417,7 @@ describe('cli', () => {
           calls.push(['land', args]);
           return { branch: 'ship-it/21-self-merge', prNumber: 321 };
         },
+        emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
         sleep: async () => {
           calls.push(['sleep']);
         },
@@ -430,6 +431,7 @@ describe('cli', () => {
     }
 
     expect(calls).toEqual([
+      ['event', 'await-merge', 21, 'waiting to merge ship-it/21-self-merge'],
       ['checkMerged', [octokit, 'on-par', 'software-factory', 'ship-it/21-self-merge']],
       ['land', [21, '/repo', 'on-par/software-factory', paths, octokit, false]],
     ]);
@@ -453,6 +455,7 @@ describe('cli', () => {
         land: async () => {
           throw new Error('land should not be called');
         },
+        emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
         writeLine: line => calls.push(['writeLine', line]),
         sleep: async ms => {
           calls.push(['sleep', ms]);
@@ -468,6 +471,7 @@ describe('cli', () => {
     }
 
     expect(calls).toEqual([
+      ['event', 'await-merge', 21, 'waiting to merge ship-it/21-self-merge'],
       ['checkMerged'],
       ['writeLine', '[factory] #21 awaiting human merge (poll 120s)'],
       ['sleep', 120_000],
@@ -512,6 +516,7 @@ describe('cli', () => {
     expect(warnEvent[3]).toContain('merged-state check failed');
     expect(warnEvent[3]).toContain('rate limited');
 
+    expect(calls).toContainEqual(['event', 'await-merge', 21, 'waiting to merge ship-it/21-self-merge']);
     expect(calls).toContainEqual(['writeLine', '[factory] #21 awaiting human merge (poll 120s)']);
     expect(calls).toContainEqual(['sleep', 120_000]);
   });
