@@ -31,6 +31,7 @@ const h = vi.hoisted(() => {
     routerResolve: (_route: string): string | undefined => 'claude-model',
     factoryConfig: { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: false } } as any,
     gcReport: { removed: [], kept: 0, dryRun: false } as any,
+    runTuiCalls: [] as Array<{ eventsFile: string; repo?: string }>,
   };
 });
 
@@ -53,6 +54,12 @@ vi.mock('node:child_process', () => {
 
 vi.mock('@octokit/rest', () => ({
   Octokit: vi.fn(() => h.octokit),
+}));
+
+vi.mock('@on-par/factory-tui', () => ({
+  runTui: vi.fn(async (opts: { eventsFile: string; repo?: string }) => {
+    h.runTuiCalls.push(opts);
+  }),
 }));
 
 vi.mock('@on-par/factory-core', async (importOriginal) => {
@@ -215,6 +222,7 @@ beforeEach(() => {
   h.routerResolve = () => 'claude-model';
   h.factoryConfig = { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: false } };
   h.gcReport = { removed: [], kept: 0, dryRun: false };
+  h.runTuiCalls = [];
 
   ['FACTORY_LOCAL_ONLY', 'FACTORY_MERGE', 'FACTORY_SKIP_CI', 'FACTORY_USAGE_CAP', 'FACTORY_STOP_AT',
     'FACTORY_RESUME_AT', 'FACTORY_USAGE_POLL', 'FACTORY_USAGE_WATCH'].forEach(k => trackEnv(k));
@@ -410,6 +418,28 @@ describe('cli commands (via main dispatch)', () => {
       expect(out).toContain('(empty)');
       expect(out).toContain('(none)');
       expect(out).toContain('Product: (none)');
+    });
+  });
+
+  describe('tui', () => {
+    it('calls runTui with the events file and detected repo', async () => {
+      const res = await runMain('tui');
+      expect(res.exited).toBe(false);
+      expect(h.runTuiCalls).toHaveLength(1);
+      expect(h.runTuiCalls[0].eventsFile.endsWith(join('.factory', 'events.ndjson'))).toBe(true);
+      expect(h.runTuiCalls[0].repo).toBe(h.ghRepo);
+    });
+
+    it('calls runTui with repo undefined when gh repo detection fails', async () => {
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) throw new Error('gh not authenticated');
+        return '';
+      };
+      const res = await runMain('tui');
+      expect(res.exited).toBe(false);
+      expect(h.runTuiCalls).toHaveLength(1);
+      expect(h.runTuiCalls[0].repo).toBeUndefined();
     });
   });
 
