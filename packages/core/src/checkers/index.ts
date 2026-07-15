@@ -205,6 +205,20 @@ export const accessibilityChecker: CheckerFn = async (ctx) => {
 
 // ---------- Custom Checker (agent-based) ----------
 
+/** Trust boundary: LLM checker output is unvalidated JSON — accept only an exact-shape verdict. */
+function isCustomCheckerVerdict(
+  value: unknown,
+  checkerName: string,
+): value is { checker: string; result: 'PASS' | 'FAIL'; details: string } {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    v.checker === checkerName &&
+    (v.result === 'PASS' || v.result === 'FAIL') &&
+    typeof v.details === 'string'
+  );
+}
+
 export async function runCustomChecker(
   ctx: CheckerContext,
   checkerName: string,
@@ -241,7 +255,15 @@ Steps:
     // Extract JSON from output
     const jsonMatch = result.output.match(/\{[^{}]*"checker"[^{}]*\}/);
     if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
+      const verdict: unknown = JSON.parse(jsonMatch[0]);
+      if (isCustomCheckerVerdict(verdict, checkerName)) {
+        return { checker: checkerName, result: verdict.result, details: verdict.details };
+      }
+      return {
+        checker: checkerName,
+        result: 'FAIL',
+        details: `checker returned a malformed verdict: ${jsonMatch[0].slice(0, 200)}`,
+      };
     }
     return {
       checker: checkerName,
