@@ -55,6 +55,48 @@ export const PATCH_PROPOSAL_SCHEMA = {
 
 const MAX_CHANGES = 4;
 
+/** Explicit allowlist of safe verification command prefixes. A verify command
+ *  must equal one of these exactly or start with `<prefix> ` (space-delimited,
+ *  so 'true' does not match 'truely'). Keep this list intentionally small:
+ *  verification is limited to known project checks and simple file-existence
+ *  probes — it is not a general shell. */
+export const ALLOWED_VERIFY_COMMAND_PREFIXES = [
+  'npm test',
+  'npm run test',
+  'npm run build',
+  'npm run lint',
+  'npm run typecheck',
+  'npx vitest run',
+  'test -f',
+  'test -d',
+  'true',
+] as const;
+
+// Character allowlist: letters, digits, dot, underscore, slash, dash, equals,
+// colon, and single spaces. Rejects by construction: ; & | < > ` $ ( ) { } quotes,
+// backslash, newlines, globs — i.e. every shell-metacharacter escape hatch.
+const VERIFY_COMMAND_CHARS = /^[A-Za-z0-9._/:=-]+(?: [A-Za-z0-9._/:=-]+)*$/;
+
+export type VerifyCommandCheck = { ok: true } | { ok: false; detail: string };
+
+export function validateVerifyCommand(command: string): VerifyCommandCheck {
+  if (!VERIFY_COMMAND_CHARS.test(command)) {
+    return { ok: false, detail: `verifyCommand rejected (${JSON.stringify(command)}): contains characters outside the safe set (no shell metacharacters, quotes, substitution, or redirection)` };
+  }
+  const tokens = command.split(' ');
+  if (tokens.some(t => t.startsWith('/'))) {
+    return { ok: false, detail: `verifyCommand rejected (${JSON.stringify(command)}): absolute paths are not allowed` };
+  }
+  if (tokens.some(t => t === '..' || t.startsWith('../') || t.includes('/../') || t.endsWith('/..'))) {
+    return { ok: false, detail: `verifyCommand rejected (${JSON.stringify(command)}): path traversal is not allowed` };
+  }
+  const allowed = ALLOWED_VERIFY_COMMAND_PREFIXES.some(p => command === p || command.startsWith(`${p} `));
+  if (!allowed) {
+    return { ok: false, detail: `verifyCommand rejected (${JSON.stringify(command)}): not an allowed verification command; use one of: ${ALLOWED_VERIFY_COMMAND_PREFIXES.join(', ')}` };
+  }
+  return { ok: true };
+}
+
 type MalformedReason = 'empty_response' | 'invalid_json' | 'schema_invalid' | 'apply_failed';
 
 type ParseResult =
@@ -193,13 +235,15 @@ export class OllamaAgenticHarness implements CodingHarness {
   }
 }
 
+const VERIFY_COMMAND_PROMPT_HINT = `"verifyCommand" must be one cheap check that proves the change worked and must start with one of: ${ALLOWED_VERIFY_COMMAND_PREFIXES.join(', ')}. No shell metacharacters, pipes, redirection, or absolute paths.`;
+
 function buildProposalPrompt(taskPrompt: string): string {
   return `${taskPrompt}
 
 Respond with exactly one JSON object matching the schema, no markdown, no prose.
 Each entry in "changes" is applied as an exact-match find/replace inside "file" (a path relative to the repo root).
 Use "find": "" to create a new file whose full content is "replace".
-"verifyCommand" must be one cheap shell command that proves the change worked.`;
+${VERIFY_COMMAND_PROMPT_HINT}`;
 }
 
 function buildRepairPrompt(taskPrompt: string, malformedReason: MalformedReason, detail: string, raw: string): string {
@@ -211,7 +255,7 @@ Raw response summary: ${summarizeRawResponse(raw)}
 Respond with exactly one JSON object matching the schema, no markdown, no prose.
 Each entry in "changes" is applied as an exact-match find/replace inside "file" (a path relative to the repo root).
 Use "find": "" to create a new file whose full content is "replace".
-"verifyCommand" must be one cheap shell command that proves the change worked.`;
+${VERIFY_COMMAND_PROMPT_HINT}`;
 }
 
 function parseProposal(raw: string): ParseResult {
@@ -244,6 +288,11 @@ function validateProposalSchema(value: unknown): ParseResult {
   }
   if (typeof value.verifyCommand !== 'string' || value.verifyCommand.trim() === '') {
     return { ok: false, malformedReason: 'schema_invalid', detail: 'verifyCommand is required' };
+  }
+  const verifyCommand = value.verifyCommand.trim();
+  const verifyCheck = validateVerifyCommand(verifyCommand);
+  if (!verifyCheck.ok) {
+    return { ok: false, malformedReason: 'schema_invalid', detail: verifyCheck.detail };
   }
   if (!Array.isArray(value.changes) || value.changes.length === 0) {
     return { ok: false, malformedReason: 'schema_invalid', detail: 'changes must be a non-empty array' };
@@ -282,7 +331,7 @@ function validateProposalSchema(value: unknown): ParseResult {
     proposal: {
       summary: value.summary.trim(),
       changes,
-      verifyCommand: value.verifyCommand.trim(),
+      verifyCommand,
     },
   };
 }
