@@ -9,6 +9,7 @@ import { StubModelExecutor } from '../router/stub.js';
 import {
   accessibilityChecker,
   compileChecker,
+  fileExists,
   linksChecker,
   runAllCheckers,
   runCustomChecker,
@@ -364,5 +365,22 @@ describe('runAllCheckers', () => {
 
     expect(summary.total).toBe(5);
     expect(stub.calls).toHaveLength(0);
+  });
+});
+
+describe('fileExists', () => {
+  it('returns true for an existing regular file', async () => {
+    const worktree = await makeWorktree({ 'scripts/verify.sh': 'exit 0' });
+    expect(await fileExists(join(worktree, 'scripts/verify.sh'))).toBe(true);
+  });
+
+  it('returns false for a missing path', async () => {
+    const worktree = await makeWorktree();
+    expect(await fileExists(join(worktree, 'no-such-file'))).toBe(false);
+  });
+
+  it('returns false for a directory', async () => {
+    const worktree = await makeWorktree({ 'scripts/verify.sh': 'exit 0' });
+    expect(await fileExists(join(worktree, 'scripts'))).toBe(false);
   });
 });

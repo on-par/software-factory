@@ -7,5 +7,5 @@ npm ci
 npm run build
 npm run typecheck
 npm run lint
-npm run test:coverage
+npm run test
 npm run eval -- --stub
