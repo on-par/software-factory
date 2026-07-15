@@ -398,39 +398,39 @@ describe('cli', () => {
     expect(calledPages).toEqual([1, 2, 3]);
   });
 
-  it('self-merges a ready PR when FACTORY_MERGE is enabled', async () => {
+  const fakeFactoryConfig = (auto: boolean): any => ({
+    merge: { auto, comment: '' },
+    ci: { skip: false, comment: '' },
+  });
+
+  it('self-merges a ready PR when merge is enabled via config', async () => {
     const calls: any[] = [];
     const octokit: any = {};
     const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
-    const originalFactoryMerge = process.env.FACTORY_MERGE;
 
-    try {
-      process.env.FACTORY_MERGE = '1';
-      await waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
-        createOctokit: () => octokit,
-        pathExists: () => false,
-        checkMerged: async (...args: any[]) => {
-          calls.push(['checkMerged', args]);
-          return false;
-        },
-        land: async (...args: any[]) => {
-          calls.push(['land', args]);
-          return { branch: 'ship-it/21-self-merge', prNumber: 321 };
-        },
-        emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
-        sleep: async () => {
-          calls.push(['sleep']);
-        },
-      });
-    } finally {
-      if (originalFactoryMerge === undefined) {
-        delete process.env.FACTORY_MERGE;
-      } else {
-        process.env.FACTORY_MERGE = originalFactoryMerge;
-      }
-    }
+    await waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
+      createOctokit: () => octokit,
+      pathExists: () => false,
+      checkMerged: async (...args: any[]) => {
+        calls.push(['checkMerged', args]);
+        return false;
+      },
+      loadConfig: () => {
+        calls.push(['loadConfig']);
+        return fakeFactoryConfig(true);
+      },
+      land: async (...args: any[]) => {
+        calls.push(['land', args]);
+        return { branch: 'ship-it/21-self-merge', prNumber: 321 };
+      },
+      emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
+      sleep: async () => {
+        calls.push(['sleep']);
+      },
+    });
 
     expect(calls).toEqual([
+      ['loadConfig'],
       ['event', 'await-merge', 21, 'waiting to merge ship-it/21-self-merge'],
       ['checkMerged', [octokit, 'on-par', 'software-factory', 'ship-it/21-self-merge']],
       ['land', [21, '/repo', 'on-par/software-factory', paths, octokit, false]],
@@ -440,35 +440,26 @@ describe('cli', () => {
   it('defaults to review mode and polls without merging', async () => {
     const calls: any[] = [];
     const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
-    const originalFactoryMerge = process.env.FACTORY_MERGE;
     let stopped = false;
 
-    try {
-      delete process.env.FACTORY_MERGE;
-      await waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
-        createOctokit: () => ({} as any),
-        pathExists: () => stopped,
-        checkMerged: async () => {
-          calls.push(['checkMerged']);
-          return false;
-        },
-        land: async () => {
-          throw new Error('land should not be called');
-        },
-        emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
-        writeLine: line => calls.push(['writeLine', line]),
-        sleep: async ms => {
-          calls.push(['sleep', ms]);
-          stopped = true;
-        },
-      });
-    } finally {
-      if (originalFactoryMerge === undefined) {
-        delete process.env.FACTORY_MERGE;
-      } else {
-        process.env.FACTORY_MERGE = originalFactoryMerge;
-      }
-    }
+    await waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
+      createOctokit: () => ({} as any),
+      pathExists: () => stopped,
+      checkMerged: async () => {
+        calls.push(['checkMerged']);
+        return false;
+      },
+      loadConfig: () => fakeFactoryConfig(false),
+      land: async () => {
+        throw new Error('land should not be called');
+      },
+      emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
+      writeLine: line => calls.push(['writeLine', line]),
+      sleep: async ms => {
+        calls.push(['sleep', ms]);
+        stopped = true;
+      },
+    });
 
     expect(calls).toEqual([
       ['event', 'await-merge', 21, 'waiting to merge ship-it/21-self-merge'],
@@ -481,34 +472,25 @@ describe('cli', () => {
   it('records a failed merged-state check as a warn event and keeps polling instead of crashing', async () => {
     const calls: any[] = [];
     const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
-    const originalFactoryMerge = process.env.FACTORY_MERGE;
     let stopped = false;
 
-    try {
-      delete process.env.FACTORY_MERGE;
-      await waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
-        createOctokit: () => ({} as any),
-        pathExists: () => stopped,
-        checkMerged: async () => {
-          throw new Error('rate limited');
-        },
-        land: async () => {
-          throw new Error('land should not be called');
-        },
-        emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
-        writeLine: line => calls.push(['writeLine', line]),
-        sleep: async ms => {
-          calls.push(['sleep', ms]);
-          stopped = true;
-        },
-      });
-    } finally {
-      if (originalFactoryMerge === undefined) {
-        delete process.env.FACTORY_MERGE;
-      } else {
-        process.env.FACTORY_MERGE = originalFactoryMerge;
-      }
-    }
+    await waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
+      createOctokit: () => ({} as any),
+      pathExists: () => stopped,
+      checkMerged: async () => {
+        throw new Error('rate limited');
+      },
+      loadConfig: () => fakeFactoryConfig(false),
+      land: async () => {
+        throw new Error('land should not be called');
+      },
+      emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
+      writeLine: line => calls.push(['writeLine', line]),
+      sleep: async ms => {
+        calls.push(['sleep', ms]);
+        stopped = true;
+      },
+    });
 
     const warnEvent = calls.find(c => c[0] === 'event' && c[1] === 'warn');
     expect(warnEvent).toBeDefined();
