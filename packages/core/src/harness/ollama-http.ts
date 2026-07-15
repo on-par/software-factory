@@ -75,6 +75,9 @@ export class OllamaHttpHarness implements CodingHarness {
       throw new HarnessError(err.message ?? String(err), err.reason ?? classifyFailure(err.stderr ?? err.message ?? '', err.code ?? 1), {
         exitCode: typeof err.code === 'number' ? err.code : undefined,
         stderr: err.stderr,
+        code: typeof err.code === 'string' || typeof err.code === 'number' ? err.code : undefined,
+        signal: typeof err.signal === 'string' ? err.signal : undefined,
+        killed: err.killed === true ? true : undefined,
       });
     }
   }

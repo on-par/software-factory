@@ -14,6 +14,7 @@ import { OllamaHttpHarness } from '../harness/ollama-http.js';
 import { OpenCodeHarness } from '../harness/opencode.js';
 import { OllamaAgenticHarness } from '../harness/ollama-agentic.js';
 import { classifyFailure } from '../harness/classify.js';
+import { describeFailureDetail } from './failure-detail.js';
 
 const exec = promisify(execCb);
 
@@ -58,7 +59,7 @@ export interface RouterResult {
   output: string;
   exitCode: number;
   cost: number;
-  attempts: { model: string; reason: FailoverReason | null; ok: boolean }[];
+  attempts: { model: string; reason: FailoverReason | null; ok: boolean; detail?: string }[];
 }
 
 export interface ModelExecutorContext {
@@ -533,14 +534,16 @@ export class ModelRouter {
               attempts,
             };
           } else {
-            attempts.push({ model, reason: 'empty_response', ok: false });
-            throw new Error('empty response');
+            const emptyErr = new Error('model returned empty output') as Error & { reason: FailoverReason };
+            emptyErr.reason = 'empty_response';
+            throw emptyErr;
           }
         } catch (err: any) {
           const reason = err.reason ?? this.classifyFailure(err.stderr ?? '', err.exitCode ?? 1);
-          attempts.push({ model, reason, ok: false });
+          const detail = describeFailureDetail(err);
+          attempts.push(detail ? { model, reason, ok: false, detail } : { model, reason, ok: false });
           onLog(`${model} failed (${reason}) on ${task}`);
-          if (err.tracePath) onLog(`local command-agent trace: ${err.message}`);
+          if (detail) onLog(`${model} failure detail on ${task}: ${detail}`);
 
           // Rate limit → retry with cooldown
           if (reason === 'rate_limit' && retries < maxRetries) {
@@ -574,7 +577,8 @@ export class ModelRouter {
       }
     }
 
-    const error = new Error(`All models failed for task '${task}': ${attempts.map(a => `${a.model}(${a.reason})`).join(', ')}`) as Error & {
+    const summary = attempts.map(a => `${a.model}(${a.reason}${a.detail ? `: ${a.detail}` : ''})`).join(', ');
+    const error = new Error(`All models failed for task '${task}': ${summary}`) as Error & {
       reason?: FailoverReason;
       attempts?: RouterResult['attempts'];
     };

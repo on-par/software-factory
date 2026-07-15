@@ -46,7 +46,7 @@ export class HarnessError extends Error {
   constructor(
     message: string,
     readonly reason: HarnessFailureReason,
-    readonly details: { exitCode?: number; stderr?: string } = {},
+    readonly details: { exitCode?: number; stderr?: string; code?: string | number; signal?: string; killed?: boolean } = {},
   ) {
     super(message);
     this.name = 'HarnessError';
