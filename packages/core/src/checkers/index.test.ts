@@ -102,6 +102,34 @@ describe('compileChecker', () => {
     expect(result.result).toBe('FAIL');
     expect(result.details).toContain('npm run build failed');
   });
+
+  it('passes when there is no package.json and no other build system detected', async () => {
+    const worktree = await makeWorktree();
+
+    const result = await compileChecker(makeContext(worktree));
+
+    expect(result.result).toBe('PASS');
+    expect(result.details).toContain('no build system detected — skipped');
+  });
+
+  it('fails closed when package.json cannot be read', async () => {
+    const worktree = await makeWorktree();
+    await mkdir(join(worktree, 'package.json'));
+
+    const result = await compileChecker(makeContext(worktree));
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain('unexpected checker error');
+  });
+
+  it('fails closed on malformed package.json', async () => {
+    const worktree = await makeWorktree({ 'package.json': '{not json' });
+
+    const result = await compileChecker(makeContext(worktree));
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain('unexpected checker error');
+  });
 });
 
 describe('testsChecker', () => {
@@ -146,6 +174,16 @@ describe('testsChecker', () => {
 
     expect(result.result).toBe('PASS');
     expect(result.details).toContain('no test command found');
+  });
+
+  it('fails closed when package.json cannot be read', async () => {
+    const worktree = await makeWorktree();
+    await mkdir(join(worktree, 'package.json'));
+
+    const result = await testsChecker(makeContext(worktree));
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain('unexpected checker error');
   });
 });
 
@@ -469,6 +507,20 @@ describe('runAllCheckers', () => {
     expect(summary.total).toBe(5);
     expect(summary.results.map(r => r.checker)).toEqual(['compile', 'tests', 'lint', 'links', 'accessibility']);
     expect(stub.calls).toHaveLength(0);
+  });
+
+  it('does not throw and fails closed when package.json is unreadable', { timeout: 60000 }, async () => {
+    const worktree = await makeWorktree();
+    await mkdir(join(worktree, 'package.json'));
+    const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
+
+    const summary = await runAllCheckers(makeContext(worktree), router, null);
+
+    expect(summary.failures).toBeGreaterThanOrEqual(3);
+    for (const name of ['compile', 'tests', 'lint']) {
+      const output = summary.results.find(r => r.checker === name);
+      expect(output?.result).toBe('FAIL');
+    }
   });
 });
 
