@@ -5,6 +5,8 @@ import { promisify } from 'node:util';
 import type { Octokit } from '@octokit/rest';
 import { shellEscape } from '../utils/index.js';
 import { watchChecks } from '../utils/ci-watch.js';
+import type { ApprovalGate } from '../approvals/index.js';
+import type { CheckSummary } from '../types/index.js';
 
 const exec = promisify(execCb);
 type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<{ stdout: string }>;
@@ -12,6 +14,8 @@ type CommandRunner = (command: string, options?: { cwd?: string; timeout?: numbe
 export interface ShipResult {
   ok: boolean;
   prNumber?: number;
+  denied?: boolean;
+  deniedReason?: string;
 }
 
 export async function shipPhase(
@@ -24,10 +28,30 @@ export async function shipPhase(
     watchCI?: boolean;
     log: (type: string, msg: string) => void;
     run?: CommandRunner;
+    approvalGate?: ApprovalGate;
+    checkSummary?: CheckSummary;
   },
 ): Promise<ShipResult> {
-  const { issue, repo, worktree, branch, octokit, watchCI = true, log, run = exec } = opts;
+  const { issue, repo, worktree, branch, octokit, watchCI = true, log, run = exec, approvalGate, checkSummary } = opts;
   const [owner, repoName] = repo.split('/');
+
+  let diffStat: string | undefined;
+
+  if (approvalGate) {
+    // Log a 'ship'-typed event before anything else so the TUI's activePhase
+    // advances to SHIP first — otherwise a denial reports failedPhase as
+    // whichever phase (CHECK/BUILD) last logged, which is misleading.
+    log('ship', `Starting ship phase for ${branch}`);
+    diffStat = await computeDiffStat(run, worktree);
+    log('approval_requested', `awaiting approval to ship ${branch}${checkSummary ? ` (checks: ${checkSummary.passes} pass, ${checkSummary.failures} fail, ${checkSummary.skips} skip)` : ''}`);
+    const response = await approvalGate({ issue, branch, worktree, diffStat, checkSummary });
+    if (!response.approved) {
+      const reason = response.reason ?? 'denied';
+      log('ship_denied', `ship denied for ${branch}: ${reason}`);
+      return { ok: false, denied: true, deniedReason: reason };
+    }
+    log('approval_granted', `approval granted for ${branch}`);
+  }
 
   // Check if a PR already exists (claude route may have created one)
   let prNumber = await findOpenPR(octokit, owner, repoName, branch);
@@ -54,12 +78,8 @@ export async function shipPhase(
     const { data: issueData } = await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issue });
     const title = issueData.title;
 
-    // Get diff stats
-    let stat = '';
-    try {
-      const { stdout } = await run('git diff --stat origin/main...HEAD', { cwd: worktree });
-      stat = stdout.split('\n').slice(-20).join('\n');
-    } catch {}
+    // Get diff stats (reuse the approval gate's diff stat when already computed)
+    const stat = diffStat ?? await computeDiffStat(run, worktree);
 
     // Create PR
     const { data: pr } = await octokit.rest.pulls.create({
@@ -120,6 +140,15 @@ Closes #${issue}`,
 
   log('ready', `PR #${prNumber} ready for review`);
   return { ok: true, prNumber };
+}
+
+async function computeDiffStat(run: CommandRunner, worktree: string): Promise<string> {
+  try {
+    const { stdout } = await run('git diff --stat origin/main...HEAD', { cwd: worktree });
+    return stdout.split('\n').slice(-20).join('\n');
+  } catch {
+    return '';
+  }
 }
 
 async function findOpenPR(octokit: Octokit, owner: string, repo: string, branch: string): Promise<number | undefined> {

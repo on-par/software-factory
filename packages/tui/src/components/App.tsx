@@ -4,13 +4,17 @@ import { existsSync } from 'node:fs';
 import {
   aggregateCosts,
   followEvents,
+  listPendingApprovals,
   readCostsFile,
   readQueue,
+  respondToApproval,
+  type ApprovalRequest,
   type CostsRead,
   type FactoryEvent,
   type QueueSnapshot,
 } from '@on-par/factory-core';
 import { initialDashboard, reduceDashboard, type DashboardState } from '../dashboard.js';
+import { ApprovalPrompt } from './ApprovalPrompt.js';
 import { Header } from './Header.js';
 import { Dashboard } from './Dashboard.js';
 import { RunDetail } from './RunDetail.js';
@@ -36,6 +40,9 @@ export interface AppProps {
   costsFile?: string;
   readQueueFn?: typeof readQueue;
   readCostsFn?: typeof readCostsFile;
+  approvalsDir?: string;
+  listPendingFn?: typeof listPendingApprovals;
+  respondFn?: typeof respondToApproval;
 }
 
 type View = 'dashboard' | 'detail';
@@ -51,6 +58,9 @@ export function App({
   costsFile,
   readQueueFn = readQueue,
   readCostsFn = readCostsFile,
+  approvalsDir,
+  listPendingFn = listPendingApprovals,
+  respondFn = respondToApproval,
 }: AppProps): JSX.Element {
   const { exit } = useApp();
   const { stdout } = useStdout();
@@ -65,6 +75,9 @@ export function App({
   const [costsRead, setCostsRead] = useState<CostsRead>({ entries: [], skipped: 0 });
   const [costsSelected, setCostsSelected] = useState(0);
   const [logScroll, setLogScroll] = useState(initialLogScroll());
+  const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
+  const [denyReason, setDenyReason] = useState<string | undefined>(undefined);
+  const [answered, setAnswered] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const stop = follow(eventsFile, (e: FactoryEvent) => {
@@ -101,10 +114,56 @@ export function App({
     return () => clearInterval(interval);
   }, [costsFile, readCostsFn]);
 
+  useEffect(() => {
+    if (!approvalsDir) return;
+    const read = () => setPendingApprovals(listPendingFn(approvalsDir));
+    read();
+    const interval = setInterval(read, POLL_MS);
+    return () => clearInterval(interval);
+  }, [approvalsDir, listPendingFn]);
+
   const issueCount = useMemo(() => aggregateCosts(costsRead.entries).perIssue.length, [costsRead]);
   const logHeight = Math.max(5, (stdout?.rows ?? 24) - 4);
+  const visibleApprovals = pendingApprovals.filter(r => !answered.has(r.id));
 
   useInput((input, key) => {
+    if (denyReason !== undefined) {
+      const active = visibleApprovals[0];
+      if (key.return) {
+        if (active) {
+          respondFn(approvalsDir!, active.id, { approved: false, reason: denyReason.trim() || undefined });
+          setAnswered(prev => new Set(prev).add(active.id));
+        }
+        setDenyReason(undefined);
+        return;
+      }
+      if (key.escape) {
+        setDenyReason(undefined);
+        return;
+      }
+      if (key.backspace || key.delete) {
+        setDenyReason(reason => (reason ?? '').slice(0, -1));
+        return;
+      }
+      if (input && !key.ctrl && !key.meta) {
+        setDenyReason(reason => (reason ?? '') + input);
+      }
+      return;
+    }
+
+    if (visibleApprovals.length > 0) {
+      const active = visibleApprovals[0];
+      if (input === 'y') {
+        respondFn(approvalsDir!, active.id, { approved: true });
+        setAnswered(prev => new Set(prev).add(active.id));
+        return;
+      }
+      if (input === 'n') {
+        setDenyReason('');
+        return;
+      }
+    }
+
     if (input === 'q') {
       exit();
       return;
@@ -172,6 +231,9 @@ export function App({
 
   return (
     <Box flexDirection="column">
+      {visibleApprovals.length > 0 && (
+        <ApprovalPrompt request={visibleApprovals[0]} pendingCount={visibleApprovals.length} denyReason={denyReason} />
+      )}
       <TabBar active={tab} />
       {tab === 'dashboard' && <DashboardPane />}
       {tab === 'queue' && <QueueTab snapshot={queueSnap} lanes={state.lanes} />}

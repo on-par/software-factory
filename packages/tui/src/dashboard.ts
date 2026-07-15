@@ -31,7 +31,7 @@ export function isLaneEvent(e: FactoryEvent): boolean {
 }
 
 const PHASE_EVENT_TYPES = new Set(['plan', 'build', 'check', 'rework', 'ship']);
-const FAILURE_TYPES = new Set(['fail', 'escalate', 'timeout', 'conflict', 'parked']);
+const FAILURE_TYPES = new Set(['fail', 'escalate', 'timeout', 'conflict', 'parked', 'ship_denied']);
 
 function newLane(e: FactoryEvent): LaneState {
   return { issue: e.issue, run: initialState(), status: 'running', startedAt: e.ts };

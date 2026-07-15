@@ -44,6 +44,7 @@ describe('getFactoryPaths', () => {
     expect(paths.queueProposed).toBe(resolve(repoRoot, '.factory', 'queue.proposed'));
     expect(paths.mergeLock).toBe(resolve(repoRoot, '.factory', 'merge.lock'));
     expect(paths.gitLock).toBe(resolve(repoRoot, '.factory', 'git.lock'));
+    expect(paths.approvals).toBe(resolve(repoRoot, '.factory', 'approvals'));
   });
 });
 
@@ -130,6 +131,11 @@ describe('loadFactoryConfig', () => {
     expect(config.worktree.autoGcOnRun).toBe(true);
   });
 
+  it('shipped config sets a 1800s approval timeout', () => {
+    const config = loadFactoryConfig();
+    expect(config.timeouts.approval_seconds).toBe(1800);
+  });
+
   it('applies worktree gc defaults when the config omits them', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
     try {
@@ -154,6 +160,7 @@ describe('loadFactoryConfig', () => {
       const config = loadFactoryConfig(path);
       expect(config.worktree.gcTtlDays).toBe(7);
       expect(config.worktree.autoGcOnRun).toBe(true);
+      expect(config.timeouts.approval_seconds).toBe(1800);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -180,10 +187,23 @@ describe('resolveTimeouts', () => {
   it('preserves defaults and ignores invalid env values', () => {
     const config = loadFactoryConfig();
 
-    expect(resolveTimeouts(config, {})).toEqual({ plan: 1800, build: 7200, check: 1800 });
+    expect(resolveTimeouts(config, {})).toEqual({ plan: 1800, build: 7200, check: 1800, approval: 1800 });
     expect(resolveTimeouts(config, {
       FACTORY_PLAN_TIMEOUT: 'abc',
       FACTORY_CHECK_TIMEOUT: '',
-    })).toEqual({ plan: 1800, build: 7200, check: 1800 });
+    })).toEqual({ plan: 1800, build: 7200, check: 1800, approval: 1800 });
+  });
+
+  it('honors approval_seconds from config', () => {
+    const config = loadFactoryConfig();
+    expect(resolveTimeouts({
+      ...config,
+      timeouts: { ...config.timeouts, approval_seconds: 900 },
+    }, {}).approval).toBe(900);
+  });
+
+  it('lets FACTORY_APPROVAL_TIMEOUT override config', () => {
+    const config = loadFactoryConfig();
+    expect(resolveTimeouts(config, { FACTORY_APPROVAL_TIMEOUT: '60' }).approval).toBe(60);
   });
 });

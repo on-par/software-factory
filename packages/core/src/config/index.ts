@@ -75,6 +75,7 @@ const FactoryConfigSchema = z.object({
     build_seconds: z.number(),
     check_seconds: z.number(),
     merge_poll_seconds: z.number(),
+    approval_seconds: z.number().default(1800),
   }),
   merge: z.object({ auto: z.boolean(), comment: z.string() }),
   worktree: z.object({
@@ -122,7 +123,7 @@ export function loadFactoryConfig(path?: string): FactoryConfig {
 export function resolveTimeouts(
   config: FactoryConfig,
   env: NodeJS.ProcessEnv = process.env,
-): { plan: number; build: number; check: number } {
+): { plan: number; build: number; check: number; approval: number } {
   const fromEnv = (v?: string) => {
     const n = Number(v);
     return Number.isFinite(n) && n > 0 ? n : undefined;
@@ -132,6 +133,7 @@ export function resolveTimeouts(
     plan: fromEnv(env.FACTORY_PLAN_TIMEOUT) ?? config.timeouts.plan_seconds ?? 1800,
     build: fromEnv(env.FACTORY_BUILD_TIMEOUT) ?? config.timeouts.build_seconds ?? 7200,
     check: fromEnv(env.FACTORY_CHECK_TIMEOUT) ?? config.timeouts.check_seconds ?? 1800,
+    approval: fromEnv(env.FACTORY_APPROVAL_TIMEOUT) ?? config.timeouts.approval_seconds ?? 1800,
   };
 }
 
@@ -161,6 +163,7 @@ export function getFactoryPaths(repoRoot: string) {
     product: resolve(state, 'product'),
     stop: resolve(state, 'STOP'),
     costs: resolve(state, 'costs.jsonl'),
+    approvals: resolve(state, 'approvals'),
   };
 }
 

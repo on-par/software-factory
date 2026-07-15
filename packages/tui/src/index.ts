@@ -27,6 +27,8 @@ export { Dashboard } from './components/Dashboard.js';
 export type { DashboardProps } from './components/Dashboard.js';
 export { App } from './components/App.js';
 export type { AppProps } from './components/App.js';
+export { ApprovalPrompt } from './components/ApprovalPrompt.js';
+export type { ApprovalPromptProps } from './components/ApprovalPrompt.js';
 export { TabBar } from './tabs/TabBar.js';
 export type { TabBarProps } from './tabs/TabBar.js';
 export { QueueTab } from './tabs/QueueTab.js';

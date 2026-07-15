@@ -70,7 +70,7 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
     loadModelsConfig: vi.fn(() => ({}) as any),
     loadRoutesConfig: vi.fn(() => ({}) as any),
     loadFactoryConfig: vi.fn(() => h.factoryConfig),
-    resolveTimeouts: vi.fn(() => ({ plan: 1, build: 1, check: 1 })),
+    resolveTimeouts: vi.fn(() => ({ plan: 1, build: 1, check: 1, approval: 1 })),
     resolveSkipCI: vi.fn(() => false),
     getConstitutionsDir: vi.fn(() => h.constitutionsDir),
     resolveModelOverrides: vi.fn(() => h.modelOverrides),
@@ -759,6 +759,22 @@ describe('cli commands (via main dispatch)', () => {
       expect(failEvents).toHaveLength(1);
       expect(errored()).toContain('Ship failed');
     });
+
+    it('reaches shipPhase without an approval gate when --interactive is not passed', async () => {
+      const core = await import('@on-par/factory-core');
+      const res = await runMain('ship', '5');
+      expect(res.exited).toBe(false);
+      const call = vi.mocked(core.shipPhase).mock.calls.at(-1)?.[0] as any;
+      expect(call.approvalGate).toBeUndefined();
+    });
+
+    it('passes an approval gate to shipPhase when --interactive is set', async () => {
+      const core = await import('@on-par/factory-core');
+      const res = await runMain('ship', '5', '--interactive');
+      expect(res.exited).toBe(false);
+      const call = vi.mocked(core.shipPhase).mock.calls.at(-1)?.[0] as any;
+      expect(typeof call.approvalGate).toBe('function');
+    });
   });
 });
 
@@ -829,6 +845,26 @@ describe('shipIssue (direct)', () => {
   it('throws a LaneParkError with reason fail when the ship phase fails', async () => {
     h.shipResult = { ok: false };
     await expect(shipIssue(5, {}, ctx())).rejects.toMatchObject({ reason: 'fail' });
+  });
+
+  it('throws a LaneParkError with reason escalate and the denial message when ship is denied', async () => {
+    h.shipResult = { ok: false, denied: true, deniedReason: 'not today' };
+    await expect(shipIssue(5, {}, ctx())).rejects.toMatchObject({ reason: 'escalate', message: 'ship denied: not today' });
+  });
+
+  it('does not construct an approval gate when interactive is not requested', async () => {
+    const core = await import('@on-par/factory-core');
+    await shipIssue(5, {}, ctx());
+    const call = vi.mocked(core.shipPhase).mock.calls.at(-1)?.[0] as any;
+    expect(call.approvalGate).toBeUndefined();
+    expect(call.checkSummary).toBe(h.checkResult.summary);
+  });
+
+  it('constructs an approval gate when interactive:true is passed', async () => {
+    const core = await import('@on-par/factory-core');
+    await shipIssue(5, { interactive: true }, ctx());
+    const call = vi.mocked(core.shipPhase).mock.calls.at(-1)?.[0] as any;
+    expect(typeof call.approvalGate).toBe('function');
   });
 
   it('writes a local-only run report on success when FACTORY_LOCAL_ONLY=1', async () => {

@@ -92,7 +92,7 @@ describe('reduceDashboard — lifecycle events', () => {
     expect(state.lanes[0].finishedAt).toBe('2026-01-01T00:10:00.000Z');
   });
 
-  it.each(['fail', 'escalate', 'timeout', 'conflict', 'parked'])(
+  it.each(['fail', 'escalate', 'timeout', 'conflict', 'parked', 'ship_denied'])(
     '%s sets status failed with the phase active at failure and preserves the reason',
     type => {
       const state = reduceAll([
