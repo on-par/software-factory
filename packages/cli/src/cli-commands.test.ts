@@ -573,6 +573,20 @@ describe('cli commands (via main dispatch)', () => {
       expect(logged()).toContain('PR #99 ready for review');
     });
 
+    it('prints a yellow SKIP line for a skipped checker while the run still succeeds', async () => {
+      h.checkResult = {
+        passed: true,
+        summary: {
+          results: [{ checker: 'tests', result: 'SKIP', details: 'no verification command was run — no scripts/verify.sh and no package.json test script found' }],
+          failures: 0,
+        },
+        reworkRounds: 0,
+      };
+      const res = await runMain('ship', '5');
+      expect(res.exited).toBe(false);
+      expect(errored()).toContain('SKIP: tests');
+    });
+
     it('exits 1 and logs a park event when a check fails', async () => {
       h.checkResult = {
         passed: false,

@@ -489,6 +489,9 @@ export async function shipIssue(
 
     // CHECK
     const check = await checkPhase({ issue: issueNum, worktree, specPath, constitution, router, log, autoRework, buildTimeoutSeconds: timeouts.build, checkTimeoutSeconds: timeouts.check });
+    for (const s of check.summary.results.filter(r => r.result === 'SKIP')) {
+      console.error(chalk.yellow(`  SKIP: ${s.checker} — ${s.details}`));
+    }
     if (!check.passed) {
       const failures = check.summary.results.filter(r => r.result === 'FAIL');
       for (const f of failures) {

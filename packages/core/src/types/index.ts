@@ -68,6 +68,8 @@ export interface Constitution {
   product: string;
   version: number;
   checkers: string[];
+  /** When true, a worktree with no verify/test command FAILs the tests checker instead of SKIPping (frontmatter: requireTests) */
+  requireTests?: boolean;
   body: string;
   path: string;
   /** Where the standards came from: the target repo's own instruction files, or a bundled <product>.md */
@@ -89,6 +91,7 @@ export interface CheckerOutput {
 export interface CheckSummary {
   failures: number;
   passes: number;
+  skips: number;
   total: number;
   results: CheckerOutput[];
 }

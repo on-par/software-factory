@@ -112,6 +112,55 @@ describe('checkPhase success paths', () => {
     expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed' });
   });
 
+  it('passes with a skipped tests checker when the worktree has no test command', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeSpecOnlyWorktree();
+    const { router, stub } = makeRouter();
+    const logs: Array<{ type: string; msg: string }> = [];
+
+    const check = await checkPhase({
+      issue: 94,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      log: (type, msg) => { logs.push({ type, msg }); },
+    });
+
+    expect(check.passed).toBe(true);
+    expect(stub.calls).toHaveLength(0);
+    expect(logs.some(l => l.type === 'check' && l.msg.startsWith('SKIPPED: tests'))).toBe(true);
+    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (1 skipped)' });
+  });
+
+  it('fails the tests checker when requireTests is true and the worktree has no test command', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeSpecOnlyWorktree();
+    const { router } = makeRouter();
+    const constitution: Constitution = {
+      product: 'strict-app',
+      version: 1,
+      checkers: [],
+      requireTests: true,
+      body: 'Strict standards body.',
+      path: worktree,
+      source: 'bundled',
+    };
+
+    const check = await checkPhase({
+      issue: 95,
+      worktree,
+      specPath,
+      router,
+      constitution,
+      log: () => {},
+      autoRework: false,
+    });
+
+    expect(check.passed).toBe(false);
+    const testsFailure = check.summary.results.find(r => r.checker === 'tests');
+    expect(testsFailure?.result).toBe('FAIL');
+    expect(testsFailure?.details).toContain('no verification command was run');
+  });
+
   it('exits the rework loop early once a round repairs the failing check', { timeout: 120_000 }, async () => {
     const { worktree, specPath } = await makeFailingWorktree();
     // The scripted worker "fixes" the repo the first time it is invoked by
@@ -254,6 +303,16 @@ async function makePassingWorktree(): Promise<{ worktree: string; specPath: stri
 
   const specPath = join(worktree, 'issue-88.md');
   await writeFixture(worktree, 'issue-88.md', '# Spec: passing checks\n');
+
+  return { worktree, specPath };
+}
+
+async function makeSpecOnlyWorktree(): Promise<{ worktree: string; specPath: string }> {
+  const worktree = await mkdtemp(join(tmpdir(), 'check-phase-spec-only-'));
+  tempDirs.add(worktree);
+
+  const specPath = join(worktree, 'issue-94.md');
+  await writeFixture(worktree, 'issue-94.md', '# Spec: no package.json at all\n');
 
   return { worktree, specPath };
 }

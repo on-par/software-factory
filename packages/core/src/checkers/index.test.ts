@@ -3,6 +3,7 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import type { Constitution } from '../types/index.js';
 import { ConstitutionLoader } from '../constitutions/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
@@ -189,15 +190,38 @@ describe('compileChecker', () => {
 });
 
 describe('testsChecker', () => {
-  it('passes and skips when no test command is found', async () => {
+  it('skips when no test command is found', async () => {
     const worktree = await makeWorktree({
       'package.json': '{"name":"fixture","version":"1.0.0"}',
     });
 
     const result = await testsChecker(makeContext(worktree));
 
+    expect(result.result).toBe('SKIP');
+    expect(result.details).toContain('no verification command was run');
+  });
+
+  it('fails when testsRequired is set and no test command is found', async () => {
+    const worktree = await makeWorktree({
+      'package.json': '{"name":"fixture","version":"1.0.0"}',
+    });
+
+    const result = await testsChecker({ ...makeContext(worktree), testsRequired: true });
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain('requireTests');
+    expect(result.details).toContain('no verification command was run');
+  });
+
+  it('still passes when testsRequired is set and scripts/verify.sh succeeds', async () => {
+    const worktree = await makeWorktree({
+      'scripts/verify.sh': '#!/bin/bash\nexit 0',
+    });
+
+    const result = await testsChecker({ ...makeContext(worktree), testsRequired: true });
+
     expect(result.result).toBe('PASS');
-    expect(result.details).toContain('no test command found');
+    expect(result.details).toContain('verify.sh');
   });
 
   it('passes through scripts/verify.sh', async () => {
@@ -228,8 +252,8 @@ describe('testsChecker', () => {
 
     const result = await testsChecker({ ...makeContext(worktree), packageJson: { scripts: {} } });
 
-    expect(result.result).toBe('PASS');
-    expect(result.details).toContain('no test command found');
+    expect(result.result).toBe('SKIP');
+    expect(result.details).toContain('no verification command was run');
   });
 
   it('fails closed when package.json cannot be read', async () => {
@@ -525,7 +549,7 @@ describe('runAllCheckers', () => {
     const summary = await runAllCheckers(makeContext(worktree), router, constitution);
 
     expect(summary.total).toBe(7); // 5 built-ins + custom_style + not_a_real_checker
-    expect(summary.passes + summary.failures).toBe(summary.total);
+    expect(summary.passes + summary.failures + summary.skips).toBe(summary.total);
     expect(summary.results.map(result => result.checker)).toContain('custom_style');
     const unknown = summary.results.find(result => result.checker === 'not_a_real_checker');
     expect(unknown?.result).toBe('FAIL');
@@ -563,6 +587,39 @@ describe('runAllCheckers', () => {
     expect(summary.total).toBe(5);
     expect(summary.results.map(r => r.checker)).toEqual(['compile', 'tests', 'lint', 'links', 'accessibility']);
     expect(stub.calls).toHaveLength(0);
+  });
+
+  it('fails the tests checker when constitution.requireTests is true and no test command exists', { timeout: 60000 }, async () => {
+    const worktree = await makeWorktree();
+    const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
+    const constitution: Constitution = {
+      product: 'myproduct',
+      version: 1,
+      checkers: [],
+      requireTests: true,
+      body: 'Body standard text',
+      path: worktree,
+      source: 'bundled',
+    };
+
+    const summary = await runAllCheckers(makeContext(worktree), router, constitution);
+
+    const tests = summary.results.find(r => r.checker === 'tests');
+    expect(tests?.result).toBe('FAIL');
+    expect(summary.failures).toBeGreaterThanOrEqual(1);
+  });
+
+  it('skips the tests checker and counts it in summary.skips when requireTests is not set', { timeout: 60000 }, async () => {
+    const worktree = await makeWorktree();
+    const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
+
+    const summary = await runAllCheckers(makeContext(worktree), router, null);
+
+    const tests = summary.results.find(r => r.checker === 'tests');
+    expect(tests?.result).toBe('SKIP');
+    expect(summary.skips).toBe(1);
+    expect(summary.total).toBe(5);
+    expect(summary.failures + summary.passes + summary.skips).toBe(summary.total);
   });
 
   it('does not throw and fails closed when package.json is unreadable', { timeout: 60000 }, async () => {

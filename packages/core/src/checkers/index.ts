@@ -20,6 +20,8 @@ export interface CheckerContext {
   /** Set by runAllCheckers from the resolved constitution — the single source of the standards text */
   constitutionBody?: string;
   packageJson?: PackageJson | null;
+  /** Set by runAllCheckers from constitution.requireTests — missing test command becomes FAIL instead of SKIP */
+  testsRequired?: boolean;
 }
 
 export type CheckerFn = (ctx: CheckerContext) => Promise<CheckerOutput>;
@@ -89,7 +91,18 @@ export const testsChecker: CheckerFn = async (ctx) => {
       }
     }
 
-    return { checker: 'tests', result: 'PASS', details: 'no test command found — skipped' };
+    if (ctx.testsRequired) {
+      return {
+        checker: 'tests',
+        result: 'FAIL',
+        details: 'no verification command was run — constitution requires tests (requireTests: true) but the worktree has no scripts/verify.sh and no package.json test script',
+      };
+    }
+    return {
+      checker: 'tests',
+      result: 'SKIP',
+      details: 'no verification command was run — no scripts/verify.sh and no package.json test script found',
+    };
   } catch (e: any) {
     return {
       checker: 'tests',
@@ -322,7 +335,12 @@ export async function runAllCheckers(
   }
   // the constitution is the single source of truth for the standards body —
   // custom checkers must be graded against the same text that declared them
-  const sharedCtx: CheckerContext = { ...ctx, packageJson, constitutionBody: constitution?.body ?? '' };
+  const sharedCtx: CheckerContext = {
+    ...ctx,
+    packageJson,
+    constitutionBody: constitution?.body ?? '',
+    testsRequired: constitution?.requireTests === true,
+  };
 
   for (const name of allCheckers) {
     let output: CheckerOutput;
@@ -354,10 +372,12 @@ export async function runAllCheckers(
 
   const failures = results.filter(r => r.result === 'FAIL').length;
   const passes = results.filter(r => r.result === 'PASS').length;
+  const skips = results.filter(r => r.result === 'SKIP').length;
 
   return {
     failures,
     passes,
+    skips,
     total: results.length,
     results,
   };

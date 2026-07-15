@@ -36,6 +36,7 @@ export class ConstitutionLoader {
       product: data.product ?? product,
       version: data.version ?? 1,
       checkers: data.checkers ?? [],
+      requireTests: data.requireTests === true,
       body: content,
       path,
       source: 'bundled',
@@ -62,6 +63,7 @@ export class ConstitutionLoader {
       product: 'repo',
       version: 1,
       checkers: [],
+      requireTests: false,
       body: sections.join('\n\n'),
       path: repoDir,
       source: 'repo',
@@ -96,6 +98,7 @@ export class ConstitutionLoader {
           ? `${fromRepo.body}\n\n<standards source="constitution:${bundled.product}">\n\n${bundledBody}\n\n</standards>`
           : fromRepo.body,
         checkers: bundled.checkers,
+        requireTests: bundled.requireTests,
       };
     }
     return fromRepo ?? bundled;
