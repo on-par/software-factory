@@ -61,6 +61,12 @@ config  ←  core  ←  cli
 
 **Step 1 — Install**
 ```bash
+npm install -g @on-par/factory-cli
+factory --version
+```
+
+Development alternative (clone and build from source):
+```bash
 git clone https://github.com/on-par/software-factory
 cd software-factory
 npm install

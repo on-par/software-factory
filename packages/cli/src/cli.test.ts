@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import type { ModelDiagnosis } from '@on-par/factory-core';
 import {
   main,
+  PREREQUISITES_TEXT,
   isPrMerged,
   findOpenPRNumber,
   findOpenPRForIssue,
@@ -1086,6 +1088,23 @@ More prose here.
       expect(() => assertValidProduct('_reserved')).toThrow(InvalidProductNameError);
       expect(() => assertValidProduct('a/b')).toThrow(InvalidProductNameError);
       expect(() => assertValidProduct('acme-app')).not.toThrow();
+    });
+  });
+
+  describe('publish contract', () => {
+    it('PREREQUISITES_TEXT mentions all three prerequisites', () => {
+      expect(PREREQUISITES_TEXT).toMatch(/Claude/);
+      expect(PREREQUISITES_TEXT).toMatch(/gh auth/);
+      expect(PREREQUISITES_TEXT).toMatch(/GITHUB_TOKEN/);
+    });
+
+    it('pins the publish-critical fields of package.json', () => {
+      const cliPkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf-8'));
+      expect(cliPkg.files).toEqual(['dist']);
+      expect(cliPkg.publishConfig.access).toBe('public');
+      expect(cliPkg.bin.factory).toBe('dist/cli.js');
+      expect(typeof cliPkg.version).toBe('string');
+      expect(cliPkg.version).toMatch(/^\d+\.\d+\.\d+/);
     });
   });
 });

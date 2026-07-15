@@ -67,3 +67,23 @@ jobs:
 
       - name: Eval (deterministic, stub)
         run: npm run eval -- --stub
+
+  quickstart:
+    name: quickstart-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Quickstart smoke (pack → install → factory init)
+        run: bash scripts/quickstart-smoke.sh

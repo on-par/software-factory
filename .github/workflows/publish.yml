@@ -1,0 +1,37 @@
+name: Publish
+on:
+  push:
+    tags: ['v*']
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions: { contents: read, issues: read }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'
+      - name: Verify
+        run: bash scripts/verify.sh
+      - name: Quickstart smoke
+        run: bash scripts/quickstart-smoke.sh
+      - name: Check v1.0 blockers (#195, #151)
+        id: gate
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          ok=true
+          for n in 195 151; do
+            state="$(gh issue view "$n" --repo "$GITHUB_REPOSITORY" --json state -q .state)"
+            echo "issue #$n: $state"
+            [ "$state" = "CLOSED" ] || ok=false
+          done
+          echo "allowed=$ok" >> "$GITHUB_OUTPUT"
+      - name: Skip publish
+        if: steps.gate.outputs.allowed != 'true'
+        run: echo "v1.0 blockers not yet resolved — skipping publish"
+      - name: Publish to npm
+        if: steps.gate.outputs.allowed == 'true'
+        env: { NODE_AUTH_TOKEN: '${{ secrets.NPM_TOKEN }}' }
+        run: npm publish --workspace @on-par/factory-config --workspace @on-par/factory-core --workspace @on-par/factory-cli

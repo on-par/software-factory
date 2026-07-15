@@ -12,13 +12,32 @@
       "types": "./dist/index.d.ts"
     }
   },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/on-par/software-factory.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/on-par/software-factory#readme",
+  "bugs": {
+    "url": "https://github.com/on-par/software-factory/issues"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@on-par/factory-config": "*",
+    "@on-par/factory-config": "^2.0.0",
     "@octokit/rest": "^22.0.0",
     "execa": "^9.0.0",
     "gray-matter": "^4.0.3",
