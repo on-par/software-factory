@@ -31,6 +31,7 @@ import {
   errorDetail,
   triageNoProposalError,
   prLookupFailure,
+  getCliVersion,
 } from './cli/index.js';
 
 describe('cli', () => {
@@ -1381,6 +1382,11 @@ More prose here.
       expect(cliPkg.bin.factory).toBe('dist/cli.js');
       expect(typeof cliPkg.version).toBe('string');
       expect(cliPkg.version).toMatch(/^\d+\.\d+\.\d+/);
+    });
+
+    it('registers the version from package.json (no hardcoded duplicate)', () => {
+      const cliPkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf-8'));
+      expect(getCliVersion()).toBe(cliPkg.version);
     });
   });
 });

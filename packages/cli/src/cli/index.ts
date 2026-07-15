@@ -1321,16 +1321,19 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
   emitEvent(eventsFile, 'supervisor-done', 'usage', 'supervise finished — queue drained or lanes need attention');
 }
 
+export function getCliVersion(): string {
+  return createRequire(import.meta.url)('../../package.json').version;
+}
+
 // ---------- main ----------
 
 export async function main() {
   const program = new Command();
-  const cliPkg = createRequire(import.meta.url)('../../package.json');
 
   program
     .name('factory')
     .description('Multi-agent software factory with boss-worker-checker orchestration')
-    .version(cliPkg.version)
+    .version(getCliVersion())
     .addHelpText('before', PREREQUISITES_TEXT);
 
   program.command('init').description('Initialize .factory in this repo').action(cmdInit);
