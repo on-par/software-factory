@@ -336,13 +336,17 @@ describe('shipPhase CI watch', () => {
 });
 
 describe('shipPhase approval gate', () => {
-  it('approves: gate resolving approved:true lets ship proceed and logs approval_requested then approval_granted', async () => {
+  it('approves: gate resolving approved:true lets ship proceed and logs ship, then approval_requested, then approval_granted', async () => {
     const { octokit, calls } = createOctokit();
     const logs: Array<[string, string]> = [];
+    const diffStatCalls: string[] = [];
     const run = async (command: string) => {
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
-      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      if (command === 'git diff --stat origin/main...HEAD') {
+        diffStatCalls.push(command);
+        return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      }
       return { stdout: '' };
     };
     const checkSummary = { failures: 0, passes: 3, skips: 0, total: 3, results: [] };
@@ -369,11 +373,19 @@ describe('shipPhase approval gate', () => {
       worktree: '/repo-factory-23',
       checkSummary,
     }));
+    // git diff --stat runs exactly once — the PR body reuses the approval gate's diffStat.
+    expect(diffStatCalls).toHaveLength(1);
+    const shipIdx = logs.findIndex(([type]) => type === 'ship');
     const requestedIdx = logs.findIndex(([type]) => type === 'approval_requested');
     const grantedIdx = logs.findIndex(([type]) => type === 'approval_granted');
-    expect(requestedIdx).toBeGreaterThanOrEqual(0);
+    expect(shipIdx).toBe(0);
+    expect(requestedIdx).toBeGreaterThan(shipIdx);
     expect(grantedIdx).toBeGreaterThan(requestedIdx);
     expect(logs[requestedIdx][1]).toContain('checks: 3 pass, 0 fail, 0 skip');
+    expect(calls).toContainEqual([
+      'pulls.create',
+      expect.objectContaining({ body: expect.stringContaining('ship.ts | 12 ++++++++++++') }),
+    ]);
   });
 
   it('denies: gate resolving approved:false stops before push/PR and logs ship_denied with the reason', async () => {
@@ -403,6 +415,8 @@ describe('shipPhase approval gate', () => {
     expect(calls).toEqual([]);
     expect(commands).toEqual(['git diff --stat origin/main...HEAD']);
     expect(logs).toContainEqual(['ship_denied', 'ship denied for ship-it/23-self-heal: not today']);
+    // A 'ship'-typed event fires first so a denial doesn't misreport the TUI's failed phase as CHECK/BUILD.
+    expect(logs[0]).toEqual(['ship', 'Starting ship phase for ship-it/23-self-heal']);
   });
 
   it('no gate: behaves exactly like the non-interactive path (no approval_requested/granted logs)', async () => {
