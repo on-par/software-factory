@@ -274,7 +274,7 @@ export async function runAllCheckers(
   customCheckerTimeoutSeconds?: number,
 ): Promise<CheckSummary> {
   const results: CheckerOutput[] = [];
-  const standardNames = ['compile', 'tests', 'lint', 'links', 'accessibility'];
+  const standardNames = Object.keys(BUILT_IN_CHECKERS);
   const productCheckers = constitution?.checkers ?? [];
 
   const allCheckers = [...standardNames, ...productCheckers.filter(c => !standardNames.includes(c))];
@@ -291,7 +291,12 @@ export async function runAllCheckers(
     } else if (name.startsWith('custom_')) {
       output = await runCustomChecker(sharedCtx, name, router, customCheckerTimeoutSeconds);
     } else {
-      continue; // skip unknown
+      // Fail closed: a declared standard we can't run must not vanish from the summary
+      output = {
+        checker: name,
+        result: 'FAIL',
+        details: `unknown checker '${name}' — not a built-in (${standardNames.join(', ')}) and not a custom_* agent checker; failing closed so the declared standard is not silently skipped`,
+      };
     }
 
     results.push(output);
