@@ -280,6 +280,169 @@ describe('local-small schema-bound patch step', () => {
   });
 });
 
+describe('local-small proposal validation branches', () => {
+  afterEach(async () => {
+    if (tmpDir) {
+      await rm(tmpDir, { recursive: true, force: true });
+      tmpDir = undefined;
+    }
+  });
+
+  async function runProposal(proposal: unknown, allowedFiles = ['src/app.ts']) {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-stepwise-'));
+    const repoRoot = join(tmpDir, 'repo');
+    await mkdir(join(repoRoot, 'src'), { recursive: true });
+    writeFileSync(join(repoRoot, 'src', 'app.ts'), 'export const value = 1;\n');
+    return applyLocalSmallPatchStep({
+      repoRoot,
+      contextPack: contextPackFor(allowedFiles),
+      proposal,
+      run: async () => {
+        throw new Error('verification should not run for invalid proposals');
+      },
+    });
+  }
+
+  const base = {
+    stepId: 'schema-bound-change' as const,
+    summary: 'Valid summary',
+    verifyCommand: 'npm test',
+    changes: [{ file: 'src/app.ts', find: 'value = 1', replace: 'value = 2' }],
+  };
+
+  it('rejects a non-object proposal', async () => {
+    expect((await runProposal('not an object')).reason).toContain('must be an object');
+  });
+
+  it('rejects a stepId that does not match the context pack', async () => {
+    expect((await runProposal({ ...base, stepId: 'inspect-context' })).reason).toContain('stepId must match');
+  });
+
+  it('rejects a blank summary', async () => {
+    expect((await runProposal({ ...base, summary: '   ' })).reason).toContain('summary is required');
+  });
+
+  it('rejects a blank verifyCommand', async () => {
+    expect((await runProposal({ ...base, verifyCommand: '' })).reason).toContain('verifyCommand is required');
+  });
+
+  it('rejects a non-array changes field', async () => {
+    expect((await runProposal({ ...base, changes: 'nope' })).reason).toContain('non-empty array');
+  });
+
+  it('rejects an empty changes array', async () => {
+    expect((await runProposal({ ...base, changes: [] })).reason).toContain('non-empty array');
+  });
+
+  it('rejects more changes than maxFilesPerStep', async () => {
+    const changes = Array.from({ length: 5 }, (_v, i) => ({ file: `src/f${i}.ts`, find: 'a', replace: 'b' }));
+    expect((await runProposal({ ...base, changes })).reason).toContain('exceed maxFilesPerStep');
+  });
+
+  it('rejects a change that is not an object', async () => {
+    expect((await runProposal({ ...base, changes: [42] })).reason).toContain('each change must be an object');
+  });
+
+  it('rejects a change with no file', async () => {
+    expect((await runProposal({ ...base, changes: [{ find: 'a', replace: 'b' }] })).reason).toContain('requires a file');
+  });
+
+  it('rejects a change with an empty find', async () => {
+    const result = await runProposal({ ...base, changes: [{ file: 'src/app.ts', find: '', replace: 'b' }] });
+    expect(result.reason).toContain('find text is required');
+  });
+
+  it('rejects a change with a non-string replace', async () => {
+    const result = await runProposal({ ...base, changes: [{ file: 'src/app.ts', find: 'value = 1', replace: 42 }] });
+    expect(result.reason).toContain('replace text is required');
+  });
+
+  it('reports repair-needed when an allowed file is missing on disk', async () => {
+    const result = await runProposal(
+      { ...base, changes: [{ file: 'src/missing.ts', find: 'x', replace: 'y' }] },
+      ['src/missing.ts'],
+    );
+    expect(result.status).toBe('repair-needed');
+    expect(result.reason).toContain('file could not be read');
+  });
+});
+
+describe('local-small dry-run inference branches', () => {
+  afterEach(async () => {
+    if (tmpDir) {
+      await rm(tmpDir, { recursive: true, force: true });
+      tmpDir = undefined;
+    }
+  });
+
+  it('falls back to the repo root when the spec names no file paths', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-stepwise-'));
+    const repoRoot = join(tmpDir, 'repo');
+    const outputDir = join(tmpDir, 'artifacts');
+    const specPath = join(tmpDir, 'issue-200.md');
+    await mkdir(repoRoot);
+    writeFileSync(specPath, 'A prose-only spec with no concrete file references at all.\n');
+
+    const result = await createLocalSmallDryRun({
+      issue: 200,
+      issueTitle: 'Prose only',
+      issueBody: 'body',
+      repoRoot,
+      specPath,
+      outputDir,
+    });
+
+    expect(result.plan.steps[0].allowedFiles).toEqual(['.']);
+  });
+
+  it('ignores urls and parent-traversal paths when inferring allowed files', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-stepwise-'));
+    const repoRoot = join(tmpDir, 'repo');
+    const outputDir = join(tmpDir, 'artifacts');
+    const specPath = join(tmpDir, 'issue-201.md');
+    await mkdir(repoRoot);
+    writeFileSync(specPath, [
+      'Edit `src/keep.ts` for the change.',
+      'See `http://example.com/skip.js` for context.',
+      'Do not touch `../outside/escape.ts`.',
+    ].join('\n'));
+
+    const result = await createLocalSmallDryRun({
+      issue: 201,
+      issueTitle: 'Filtering',
+      issueBody: 'body',
+      repoRoot,
+      specPath,
+      outputDir,
+    });
+
+    expect(result.plan.steps[0].allowedFiles).toEqual(['src/keep.ts']);
+  });
+
+  it('truncates an oversized spec excerpt and honors a reduced maxSteps', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-stepwise-'));
+    const repoRoot = join(tmpDir, 'repo');
+    const outputDir = join(tmpDir, 'artifacts');
+    const specPath = join(tmpDir, 'issue-202.md');
+    await mkdir(repoRoot);
+    writeFileSync(specPath, `Edit \`src/big.ts\`.\n${'y'.repeat(200)}`);
+
+    const result = await createLocalSmallDryRun({
+      issue: 202,
+      issueTitle: 'Truncation',
+      issueBody: 'body',
+      repoRoot,
+      specPath,
+      outputDir,
+      limits: { maxSpecChars: 80, maxSteps: 2 },
+    });
+
+    expect(result.plan.steps).toHaveLength(2);
+    expect(result.contextPack.specExcerpt).toContain('[truncated for local-small context pack]');
+    expect(result.contextPack.specExcerpt.length).toBeLessThanOrEqual(80);
+  });
+});
+
 function contextPackFor(allowedFiles: string[]) {
   return {
     issue: 167,

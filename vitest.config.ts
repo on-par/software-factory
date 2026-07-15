@@ -23,12 +23,11 @@ export default defineConfig({
       ],
       thresholds: {
         // RATCHET: each metric set ~1 point below the measured floor on
-        // main (branches capped at 80 per the hard cap). Raise toward 100
-        // as coverage grows; hard cap at 80.
-        lines: 74,
-        functions: 76,
-        branches: 80,
-        statements: 74,
+        // main. Raise toward 100 as coverage grows; never lower.
+        lines: 94,
+        functions: 91,
+        branches: 85,
+        statements: 94,
       },
     },
   },

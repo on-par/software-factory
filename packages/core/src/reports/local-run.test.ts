@@ -49,6 +49,83 @@ describe('local-only run reports', () => {
     expect(markdown).toContain("All models failed for task 'build_codex'");
   });
 
+  it('renders empty-state sections when there are no events or changes', () => {
+    const markdown = renderLocalRunReport({
+      issue: 300,
+      profile: 'local-only',
+      outcome: 'parked',
+      startedAt: '2026-07-14T02:27:00.000Z',
+      reportTime: '2026-07-14T02:30:00.000Z',
+      changedFiles: [],
+      diffStat: '',
+      events: [],
+    });
+
+    expect(markdown).toContain('- Route: unknown');
+    expect(markdown).toContain('- Branch: unknown');
+    expect(markdown).not.toContain('- Reason:');
+    expect(markdown).toContain('- No model attempts recorded.');
+    expect(markdown).toContain('- No changed files recorded.');
+    expect(markdown).toContain('No diff against origin/main.');
+    expect(markdown).toContain('- No verification events recorded.');
+    expect(markdown).toContain('- None recorded.');
+    expect(markdown).toContain('- No events recorded for this run window.');
+    // commandObservations default guidance when no command-level events exist.
+    expect(markdown).toContain('No command-level observations were captured');
+  });
+
+  it('surfaces command observations captured in the event log', () => {
+    const markdown = renderLocalRunReport({
+      issue: 301,
+      profile: 'local-only',
+      outcome: 'ready',
+      startedAt: '2026-07-14T02:27:00.000Z',
+      reportTime: '2026-07-14T02:30:00.000Z',
+      changedFiles: [],
+      diffStat: '',
+      events: [
+        { ts: '2026-07-14T02:28:00.000Z', issue: '301', type: 'router', msg: '$ npm test' },
+      ],
+    });
+
+    expect(markdown).toContain('- router: $ npm test');
+    expect(markdown).not.toContain('No command-level observations were captured');
+  });
+
+  it('degrades gracefully when git commands throw and event lines are malformed', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-local-report-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+    const reportsDir = join(tmpDir, 'reports');
+    const worktree = join(tmpDir, 'worktree');
+    await mkdir(worktree);
+    writeFileSync(eventsFile, [
+      '{ this is not valid json',
+      JSON.stringify({ ts: '2026-07-14T02:28:11.000Z', issue: '137', type: 'ready', msg: 'PR #200 ready for review' }),
+    ].join('\n'));
+
+    const report = await writeLocalRunReport({
+      issue: 137,
+      eventsFile,
+      reportsDir,
+      startedAt: '2026-07-14T02:27:00.000Z',
+      outcome: 'ready',
+      profile: 'local-only',
+      worktree,
+    }, {
+      now: () => new Date('2026-07-14T02:30:00.000Z'),
+      run: async () => {
+        throw new Error('git failed');
+      },
+    });
+
+    const written = readFileSync(report.path, 'utf-8');
+    // Malformed line is skipped; the valid one survives.
+    expect(written).toContain('PR #200 ready for review');
+    // Both git-backed sections fall back to their empty states after the throw.
+    expect(written).toContain('- No changed files recorded.');
+    expect(written).toContain('No diff against origin/main.');
+  });
+
   it('writes a report for only the current run window', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-local-report-'));
     const eventsFile = join(tmpDir, 'events.ndjson');
