@@ -5,6 +5,7 @@ import { followPlain } from './fallback.js';
 export interface RunTuiOptions {
   eventsFile: string;
   repo?: string;
+  stopFile?: string;
   stdout?: NodeJS.WriteStream;
   render?: typeof render;
   followPlainFn?: typeof followPlain;
@@ -30,6 +31,7 @@ export async function runTui(opts: RunTuiOptions): Promise<void> {
   const {
     eventsFile,
     repo,
+    stopFile,
     stdout = process.stdout,
     render: renderFn = render,
     followPlainFn = followPlain,
@@ -41,7 +43,7 @@ export async function runTui(opts: RunTuiOptions): Promise<void> {
   }
 
   try {
-    const app = renderFn(<App eventsFile={eventsFile} repo={repo} />, { exitOnCtrlC: true });
+    const app = renderFn(<App eventsFile={eventsFile} repo={repo} stopFile={stopFile} />, { exitOnCtrlC: true });
     await app.waitUntilExit();
   } catch {
     await runPlain(eventsFile, stdout, followPlainFn);

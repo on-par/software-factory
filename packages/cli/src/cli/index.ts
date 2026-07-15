@@ -414,7 +414,7 @@ async function cmdTui() {
   } catch {
     // header just omits the repo
   }
-  await runTui({ eventsFile: paths.events, repo });
+  await runTui({ eventsFile: paths.events, repo, stopFile: paths.stop });
 }
 
 export type ParkReason = 'escalate' | 'timeout' | 'fail' | 'conflict';
@@ -453,13 +453,15 @@ export async function shipIssue(
   const product = opts.product ?? (existsSync(paths.product) ? readFileSync(paths.product, 'utf-8').trim() : undefined);
   const autoRework = opts.autoRework ?? true;
 
-  const branch = branchFor(issueNum, await getIssueTitle(octokit, ghRepo, issueNum));
+  const issueTitle = await getIssueTitle(octokit, ghRepo, issueNum);
+  const branch = branchFor(issueNum, issueTitle);
   const worktree = worktreePathFor(repoRoot, issueNum);
   const specPath = resolve(paths.plans, `issue-${issueNum}.md`);
   const runStartedAt = new Date().toISOString();
   let route: 'codex' | 'claude' | undefined;
 
   const log = (type: string, msg: string) => logEvent(paths.events, type, issueNum, msg);
+  log('issue-title', issueTitle);
   if (modelOverrides.plan) log('model-override', `plan model pinned to ${modelOverrides.plan} (FACTORY_PLAN_MODEL)`);
   if (modelOverrides.build) log('model-override', `build model pinned to ${modelOverrides.build} (FACTORY_BUILD_MODEL)`);
 
@@ -1211,6 +1213,7 @@ export async function waitForMerge(
   const octokit = createOctokit();
   const [owner, repoName] = ghRepo.split('/');
 
+  emitEvent(paths.events, 'await-merge', issue, `waiting to merge ${branch}`);
   while (!pathExists(paths.stop)) {
     let merged = false;
     try {

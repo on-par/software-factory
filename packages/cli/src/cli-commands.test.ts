@@ -31,7 +31,7 @@ const h = vi.hoisted(() => {
     routerResolve: (_route: string): string | undefined => 'claude-model',
     factoryConfig: { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: false } } as any,
     gcReport: { removed: [], kept: 0, dryRun: false } as any,
-    runTuiCalls: [] as Array<{ eventsFile: string; repo?: string }>,
+    runTuiCalls: [] as Array<{ eventsFile: string; repo?: string; stopFile?: string }>,
   };
 });
 
@@ -57,7 +57,7 @@ vi.mock('@octokit/rest', () => ({
 }));
 
 vi.mock('@on-par/factory-tui', () => ({
-  runTui: vi.fn(async (opts: { eventsFile: string; repo?: string }) => {
+  runTui: vi.fn(async (opts: { eventsFile: string; repo?: string; stopFile?: string }) => {
     h.runTuiCalls.push(opts);
   }),
 }));
@@ -428,6 +428,7 @@ describe('cli commands (via main dispatch)', () => {
       expect(h.runTuiCalls).toHaveLength(1);
       expect(h.runTuiCalls[0].eventsFile.endsWith(join('.factory', 'events.ndjson'))).toBe(true);
       expect(h.runTuiCalls[0].repo).toBe(h.ghRepo);
+      expect(h.runTuiCalls[0].stopFile?.endsWith(join('.factory', 'STOP'))).toBe(true);
     });
 
     it('calls runTui with repo undefined when gh repo detection fails', async () => {
@@ -736,6 +737,15 @@ describe('shipIssue (direct)', () => {
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('ready');
     expect(events).toContain('worktree');
+  });
+
+  it('logs an issue-title event with the fetched title before any other events', async () => {
+    await shipIssue(5, {}, ctx());
+    const events = readFileSync(paths().events, 'utf-8')
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line));
+    expect(events[0]).toMatchObject({ type: 'issue-title', issue: '5', msg: 'Fix the bug' });
   });
 
   it('logs model-override events when overrides are pinned', async () => {

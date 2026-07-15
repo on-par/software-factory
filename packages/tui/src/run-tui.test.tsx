@@ -57,4 +57,29 @@ describe('runTui', () => {
     expect(waitUntilExit).toHaveBeenCalled();
     expect(followPlainFn).not.toHaveBeenCalled();
   });
+
+  it('forwards stopFile through to the rendered App', async () => {
+    const stdout = fakeStdout(true);
+    const waitUntilExit = vi.fn().mockResolvedValue(undefined);
+    const renderFn = vi.fn(() => ({
+      rerender: vi.fn(),
+      unmount: vi.fn(),
+      waitUntilExit,
+      cleanup: vi.fn(),
+      clear: vi.fn(),
+    }));
+    const followPlainFn = vi.fn(() => vi.fn());
+
+    await runTui({
+      eventsFile: 'events.ndjson',
+      stopFile: '/repo/.factory/STOP',
+      stdout,
+      render: renderFn as any,
+      followPlainFn,
+    });
+
+    expect(renderFn).toHaveBeenCalled();
+    const [element] = renderFn.mock.calls[0] as unknown as [any, any];
+    expect(element.props.stopFile).toBe('/repo/.factory/STOP');
+  });
 });
