@@ -25,6 +25,7 @@ import {
   scaffoldConstitution,
   initConstitution,
   assertValidProduct,
+  readActiveProduct,
   ConstitutionExistsError,
   InvalidProductNameError,
   errorDetail,
@@ -1337,6 +1338,32 @@ More prose here.
       expect(() => assertValidProduct('_reserved')).toThrow(InvalidProductNameError);
       expect(() => assertValidProduct('a/b')).toThrow(InvalidProductNameError);
       expect(() => assertValidProduct('acme-app')).not.toThrow();
+    });
+  });
+
+  describe('readActiveProduct', () => {
+    it('returns the trimmed product name when the file exists', () => {
+      expect(
+        readActiveProduct('/repo/.factory/product', {
+          fileExists: () => true,
+          readFile: () => 'alpha\n',
+        }),
+      ).toBe('alpha');
+    });
+
+    it('returns undefined when the file is missing', () => {
+      expect(
+        readActiveProduct('/repo/.factory/product', { fileExists: () => false }),
+      ).toBeUndefined();
+    });
+
+    it('returns undefined when the file contains only whitespace', () => {
+      expect(
+        readActiveProduct('/repo/.factory/product', {
+          fileExists: () => true,
+          readFile: () => '  \n\t ',
+        }),
+      ).toBeUndefined();
     });
   });
 

@@ -141,6 +141,29 @@ export function assertValidProduct(product: string): void {
   }
 }
 
+export interface ReadActiveProductDeps {
+  fileExists?: (p: string) => boolean;
+  readFile?: (p: string) => string;
+}
+
+/**
+ * Read the active product name from the `.factory/product` file.
+ * Returns the trimmed content, or undefined when the file is missing
+ * or contains only whitespace.
+ */
+export function readActiveProduct(
+  productPath: string,
+  deps: ReadActiveProductDeps = {},
+): string | undefined {
+  const {
+    fileExists = existsSync,
+    readFile = (p: string) => readFileSync(p, 'utf-8'),
+  } = deps;
+  if (!fileExists(productPath)) return undefined;
+  const product = readFile(productPath).trim();
+  return product || undefined;
+}
+
 /** Extract the template's ```markdown skeleton and fill in the product name. */
 export function scaffoldConstitution(template: string, product: string): string {
   const match = template.match(/```markdown\n([\s\S]*?)```/);
@@ -373,7 +396,7 @@ async function cmdStatus() {
   const modelsConfig = loadModelsConfig();
   const routesConfig = loadRoutesConfig();
   const router = new ModelRouter(modelsConfig, routesConfig);
-  const product = existsSync(paths.product) ? readFileSync(paths.product, 'utf-8').trim() : '(none)';
+  const product = readActiveProduct(paths.product) ?? '(none)';
 
   console.log(chalk.bold(`== ${ghRepo} ==`));
   console.log(`Product: ${product}`);
@@ -457,7 +480,7 @@ export async function shipIssue(
   const modelOverrides = resolveModelOverrides(router.registryRef);
   const constitutionLoader = new ConstitutionLoader();
 
-  const product = opts.product ?? (existsSync(paths.product) ? readFileSync(paths.product, 'utf-8').trim() : undefined);
+  const product = opts.product ?? readActiveProduct(paths.product);
   const autoRework = opts.autoRework ?? true;
 
   const issueTitle = await getIssueTitle(octokit, ghRepo, issueNum);
@@ -755,7 +778,7 @@ async function cmdTriage(opts: { product?: string }) {
   const repoRoot = await getRepoRoot();
   const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
-  const product = opts.product ?? (existsSync(paths.product) ? readFileSync(paths.product, 'utf-8').trim() : undefined);
+  const product = opts.product ?? readActiveProduct(paths.product);
 
   const modelsConfig = loadModelsConfig();
   const routesConfig = loadRoutesConfig();
