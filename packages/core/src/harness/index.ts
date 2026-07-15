@@ -7,6 +7,14 @@ import type { ModelRegistry } from '../models/index.js';
 /** Mirrors router FailoverReason. Defined here (not imported from ../router)
  *  so extracting harnesses out of the router later cannot create an import
  *  cycle; the unions must stay value-identical. */
+/** Tasks that edit files in a worktree and therefore require an agentic harness. */
+export const AGENTIC_BUILD_TASKS = ['build_codex', 'build_claude'] as const satisfies readonly TaskType[];
+
+/** Single source of truth for whether a task requires a file-editing (agentic) harness. */
+export function taskRequiresAgenticHarness(task: TaskType): boolean {
+  return (AGENTIC_BUILD_TASKS as readonly string[]).includes(task);
+}
+
 export type HarnessFailureReason =
   | 'rate_limit'
   | 'usage_cap'
