@@ -40,19 +40,25 @@ export const compileChecker: CheckerFn = async (ctx) => {
       }
     }
 
-    // Try make
-    try {
-      await exec('make', { cwd: ctx.worktree, timeout: 120000 });
-      return { checker: 'compile', result: 'PASS', details: 'make: OK' };
-    } catch {
-      // Try cargo
+    if (await fileExists(join(ctx.worktree, 'Makefile'))) {
+      try {
+        await exec('make', { cwd: ctx.worktree, timeout: 120000 });
+        return { checker: 'compile', result: 'PASS', details: 'make: OK' };
+      } catch (e: any) {
+        return { checker: 'compile', result: 'FAIL', details: `make failed: ${(e.stderr || e.message || '').slice(0, 500)}` };
+      }
+    }
+
+    if (await fileExists(join(ctx.worktree, 'Cargo.toml'))) {
       try {
         await exec('cargo build', { cwd: ctx.worktree, timeout: 120000 });
         return { checker: 'compile', result: 'PASS', details: 'cargo build: OK' };
-      } catch {
-        return { checker: 'compile', result: 'PASS', details: 'no build system detected — skipped' };
+      } catch (e: any) {
+        return { checker: 'compile', result: 'FAIL', details: `cargo build failed: ${(e.stderr || e.message || '').slice(0, 500)}` };
       }
     }
+
+    return { checker: 'compile', result: 'PASS', details: 'no build system detected — skipped' };
   } catch (e: any) {
     return {
       checker: 'compile',
