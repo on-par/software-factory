@@ -1180,6 +1180,7 @@ type WaitForMergeDeps = {
   createOctokit?: () => Octokit;
   pathExists?: (path: string) => boolean;
   checkMerged?: typeof isPrMerged;
+  loadConfig?: typeof loadFactoryConfig;
   land?: (
     issueNum: number,
     repoRoot: string,
@@ -1205,13 +1206,14 @@ export async function waitForMerge(
     createOctokit = getOctokit,
     pathExists = existsSync,
     checkMerged = isPrMerged,
+    loadConfig = loadFactoryConfig,
     land = landIssue,
     sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)),
     emitEvent = logEvent,
     mergeEnabled,
     writeLine = line => console.log(line),
   } = deps;
-  const factoryConfig = loadFactoryConfig();
+  const factoryConfig = loadConfig();
   const isMergeEnabled = mergeEnabled ?? (() => factoryConfig.merge.auto || process.env.FACTORY_MERGE === '1');
   const skipCI = resolveSkipCI(factoryConfig);
   const octokit = createOctokit();
