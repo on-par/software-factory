@@ -46,10 +46,16 @@ export async function checkPhase(
     log('check', `Rework round ${reworkRounds}: ${summary.failures} failures remaining`);
   }
 
+  for (const s of summary.results.filter(r => r.result === 'SKIP')) {
+    log('check', `SKIPPED: ${s.checker} — ${s.details}`);
+  }
+
   if (summary.failures > 0) {
     log('fail', `${summary.failures} check failures after ${reworkRounds} rework rounds — parking`);
   } else {
-    log('check', 'All checkers passed');
+    log('check', summary.skips > 0
+      ? `All checkers passed (${summary.skips} skipped)`
+      : 'All checkers passed');
   }
 
   return {

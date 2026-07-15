@@ -14,6 +14,7 @@ checkers:
   - <checker-name>      # References lib/checkers/<checker-name>.sh
   - <checker-name>
 enforced_on: [plan, build, check]  # Which phases load this constitution
+requireTests: true    # FAIL (instead of SKIP) the tests checker when the repo has no verify/test command
 ---
 
 # <Product> Constitution

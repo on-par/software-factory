@@ -104,6 +104,36 @@ describe('ConstitutionLoader repo-first resolution', () => {
     expect(c.checkers).toEqual(['compile', 'custom_a11y']);
   });
 
+  it('load() parses requireTests: true from frontmatter and defaults to false when absent', async () => {
+    await writeFile(join(bundledDir, 'acme-app.md'), BUNDLED);
+    await writeFile(
+      join(bundledDir, 'strict-app.md'),
+      '---\nproduct: strict-app\nrequireTests: true\n---\nStrict body.\n',
+    );
+
+    expect(loader.load('acme-app').requireTests).toBe(false);
+    expect(loader.load('strict-app').requireTests).toBe(true);
+  });
+
+  it('resolve() preserves the bundled requireTests flag when merging with repo instruction files', async () => {
+    await writeFile(
+      join(bundledDir, 'strict-app.md'),
+      '---\nproduct: strict-app\nrequireTests: true\n---\nStrict body.\n',
+    );
+    await writeFile(join(repoDir, 'CLAUDE.md'), 'repo wins');
+
+    const c = loader.resolve(repoDir, 'strict-app')!;
+    expect(c.source).toBe('repo');
+    expect(c.requireTests).toBe(true);
+  });
+
+  it('resolve() with only repo instruction files yields requireTests: false', async () => {
+    await writeFile(join(repoDir, 'CLAUDE.md'), 'repo only');
+
+    const c = loader.resolve(repoDir)!;
+    expect(c.requireTests).toBe(false);
+  });
+
   it('returns null when nothing is configured and the repo has no instruction files', () => {
     expect(loader.resolve(repoDir)).toBeNull();
   });
