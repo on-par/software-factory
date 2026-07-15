@@ -25,10 +25,11 @@ import {
   writeLocalRunReport,
   createLocalSmallDryRun,
   validateQueue,
+  parseQueue,
   sweepWorktrees,
   formatGcReport,
 } from '@on-par/factory-core';
-import type { ModelDiagnosis } from '@on-par/factory-core';
+import type { ModelDiagnosis, QueueDiagnostic } from '@on-par/factory-core';
 import { logEvent, branchFor, branchPrefixSlug, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock, withFileLock, shellEscape } from '@on-par/factory-core';
 import { runTui } from '@on-par/factory-tui';
 import { exec as execCb, execSync } from 'node:child_process';
@@ -358,6 +359,12 @@ export async function cmdUsage() {
   console.log(formatUsageReport(spend, knobs.cap));
 }
 
+function warnQueueDiagnostics(diagnostics: QueueDiagnostic[]): void {
+  for (const d of diagnostics) {
+    console.error(chalk.yellow(`factory: queue ${d.message} — skipped`));
+  }
+}
+
 async function cmdStatus() {
   const repoRoot = await getRepoRoot();
   const ghRepo = await getGitHubRepo();
@@ -376,13 +383,13 @@ async function cmdStatus() {
 
   console.log(chalk.bold('\n== Queue =='));
   if (existsSync(paths.queue)) {
-    const queue = readFileSync(paths.queue, 'utf-8');
-    const lines = queue.split('\n').filter(l => l.trim() && !l.trim().startsWith('#'));
-    if (lines.length > 0) {
-      for (const l of lines) console.log(`  ${l}`);
-    } else {
+    const { entries, diagnostics } = parseQueue(readFileSync(paths.queue, 'utf-8'));
+    if (entries.length > 0) {
+      for (const e of entries) console.log(`  ${e.lane} ${e.issue}`);
+    } else if (diagnostics.length === 0) {
       console.log('  (empty)');
     }
+    warnQueueDiagnostics(diagnostics);
   } else {
     console.log('  (no queue file)');
   }
@@ -857,17 +864,14 @@ async function cmdRun() {
   }
 
   // Read queue
-  const queueLines = readFileSync(paths.queue, 'utf-8')
-    .split('\n')
-    .filter(l => l.trim() && !l.trim().startsWith('#'));
+  const { entries, diagnostics } = parseQueue(readFileSync(paths.queue, 'utf-8'));
+  warnQueueDiagnostics(diagnostics);
 
   // Group by lane
   const lanes = new Map<string, number[]>();
-  for (const line of queueLines) {
-    const [lane, issue] = line.trim().split(/\s+/);
-    if (!lane || !issue) continue;
-    if (!lanes.has(lane)) lanes.set(lane, []);
-    lanes.get(lane)!.push(parseInt(issue, 10));
+  for (const e of entries) {
+    if (!lanes.has(e.lane)) lanes.set(e.lane, []);
+    lanes.get(e.lane)!.push(e.issue);
   }
 
   const knobs = resolveUsageKnobs();
@@ -903,10 +907,10 @@ async function cmdSupervise(opts: { now?: boolean }) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
 
-  const queueLines = existsSync(paths.queue)
-    ? readFileSync(paths.queue, 'utf-8').split('\n').filter(l => l.trim() && !l.trim().startsWith('#'))
-    : [];
-  if (queueLines.length === 0) {
+  const content = existsSync(paths.queue) ? readFileSync(paths.queue, 'utf-8') : '';
+  const { entries, diagnostics } = parseQueue(content);
+  warnQueueDiagnostics(diagnostics);
+  if (entries.length === 0) {
     throw new CliExitError('queue empty — run factory init + triage first', 2);
   }
 

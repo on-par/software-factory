@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateQueue } from './index.js';
+import { validateQueue, parseQueue } from './index.js';
 
 describe('validateQueue', () => {
   it('accepts a valid queue', () => {
@@ -45,5 +45,63 @@ describe('validateQueue', () => {
     expect(validateQueue('').errors).toContain('queue has no issue entries');
     expect(validateQueue('# nothing\n').ok).toBe(false);
     expect(validateQueue('# nothing\n').errors).toContain('queue has no issue entries');
+  });
+});
+
+describe('parseQueue', () => {
+  it('parses a valid queue', () => {
+    const result = parseQueue('app 5\napp 6\ninfra 7\n');
+    expect(result.diagnostics).toEqual([]);
+    expect(result.entries).toEqual([
+      { lane: 'app', issue: 5, lineNo: 1 },
+      { lane: 'app', issue: 6, lineNo: 2 },
+      { lane: 'infra', issue: 7, lineNo: 3 },
+    ]);
+  });
+
+  it('tolerates comments, blank lines (including mid-file), and surrounding whitespace', () => {
+    const result = parseQueue('# plan\n\n  app 5  \n');
+    expect(result.diagnostics).toEqual([]);
+    expect(result.entries).toEqual([{ lane: 'app', issue: 5, lineNo: 3 }]);
+  });
+
+  it.each([
+    ['app abc\n'],
+    ['justoneword\n'],
+    ['app 0\n'],
+    ['app 5 extra\n'],
+  ])('flags a malformed entry with a diagnostic: %s', (content) => {
+    const result = parseQueue(content);
+    expect(result.entries).toEqual([]);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0].lineNo).toBe(1);
+    expect(result.diagnostics[0].message).toContain('malformed');
+  });
+
+  it('skips malformed lines but keeps valid entries in a mixed file', () => {
+    const result = parseQueue('# h\napp 1\nbad line here\napp 2\n');
+    expect(result.entries.map(e => e.issue)).toEqual([1, 2]);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0].lineNo).toBe(3);
+  });
+
+  it('keeps duplicate entries (dedup is an accept-time concern)', () => {
+    const result = parseQueue('app 5\ninfra 5\n');
+    expect(result.entries).toEqual([
+      { lane: 'app', issue: 5, lineNo: 1 },
+      { lane: 'infra', issue: 5, lineNo: 2 },
+    ]);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it('returns empty entries and diagnostics for empty or comment-only content', () => {
+    expect(parseQueue('')).toEqual({ entries: [], diagnostics: [] });
+    expect(parseQueue('# nothing\n')).toEqual({ entries: [], diagnostics: [] });
+  });
+
+  it('never throws on arbitrary string input', () => {
+    expect(() => parseQueue('\n\n')).not.toThrow();
+    expect(() => parseQueue('app 99999999\n')).not.toThrow();
+    expect(parseQueue('app 99999999\n').entries).toEqual([{ lane: 'app', issue: 99999999, lineNo: 1 }]);
   });
 });
