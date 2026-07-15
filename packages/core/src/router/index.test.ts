@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { taskRequiresAgenticHarness } from '../types/index.js';
 import { ModelRouter } from './index.js';
 import { StubModelExecutor } from './stub.js';
 
@@ -363,5 +364,18 @@ describe('ModelRouter with StubModelExecutor', () => {
     const router = new ModelRouter(buildModels, routes, false, new StubModelExecutor({ scripts: {} }));
 
     expect(router.resolveAll('build_claude')).toEqual(['agentic-model']);
+  });
+});
+
+describe('taskRequiresAgenticHarness', () => {
+  it('returns true for build tasks that edit files', () => {
+    expect(taskRequiresAgenticHarness('build_codex')).toBe(true);
+    expect(taskRequiresAgenticHarness('build_claude')).toBe(true);
+  });
+
+  it('returns false for non-build tasks', () => {
+    expect(taskRequiresAgenticHarness('plan')).toBe(false);
+    expect(taskRequiresAgenticHarness('review_pr')).toBe(false);
+    expect(taskRequiresAgenticHarness('check_custom')).toBe(false);
   });
 });
