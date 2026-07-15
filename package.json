@@ -8,11 +8,12 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && npm run build --workspace @on-par/factory-dashboard",
     "dev": "npm run dev --workspace @on-par/factory-cli",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "tsc -b && npm run typecheck --workspaces",
     "test": "vitest run --coverage",
+    "test:coverage": "vitest run --coverage",
     "eval": "tsx scripts/eval.ts",
     "local-small-scoreboard": "tsx scripts/local-small-scoreboard.ts",
     "eval-history": "tsx scripts/eval-history.ts",
@@ -26,6 +27,7 @@
   "devDependencies": {
     "@vitest/coverage-v8": "^3.2.0",
     "@types/node": "^26.1.1",
+    "jsdom": "^26.0.0",
     "tsx": "^4.23.0",
     "typescript": "^7.0.2",
     "vitest": "^3.2.0"

@@ -15,6 +15,7 @@ software-factory/
 │   │                                        factory.json, and constitution markdown.
 │   ├── core/     @on-par/factory-core     — The engine (imports config).
 │   ├── cli/      @on-par/factory-cli       — The `factory` CLI (imports core + config).
+│   ├── dashboard/ @on-par/factory-dashboard — Vite + React + Tailwind dashboard (walking skeleton, private).
 │   └── server/   @on-par/factory-server    — Phase-2 SaaS server STUB. createServer()
 │                                             throws; marked private, never published.
 ├── scripts/      Root tooling: verify.sh, eval.ts, eval-history.ts,
@@ -73,6 +74,7 @@ Run from the repo root unless noted. Node.js **≥ 20** required.
 - **Coverage gate:** v8 thresholds enforced by Vitest — lines 74, functions 76, branches 80, statements 74. The build fails if coverage drops below these. They ratchet upward, so add tests with your code rather than lowering the floor. `packages/server/**` and `packages/core/src/types/**` are excluded from coverage.
 - **TDD is expected:** write or update the colocated `*.test.ts` alongside any source change. Integration tests for the pipeline live under `packages/core/src/phases/`.
 - **Evals:** golden cases live in `evals/golden/*.md` with `evals/baseline.json`. The deterministic stub subset (`npm run eval -- --stub`) runs in CI on every PR; the full LLM-judge mode runs locally/nightly.
+- `packages/dashboard` renders via Vite; its component tests are `*.test.tsx` files colocated in `src/` (e.g. `packages/dashboard/src/App.test.tsx`).
 
 ## Before committing
 
