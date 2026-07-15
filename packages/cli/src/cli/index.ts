@@ -31,10 +31,18 @@ import { exec as execCb, execSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { resolve, dirname, basename } from 'node:path';
+import { createRequire } from 'node:module';
 import { Octokit } from '@octokit/rest';
 
 const exec = promisify(execCb);
 type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<unknown>;
+
+export const PREREQUISITES_TEXT = `Prerequisites:
+  - Claude Code CLI installed and authenticated (Claude subscription): https://claude.com/claude-code
+  - GitHub CLI authenticated: gh auth login
+  - GITHUB_TOKEN or GH_TOKEN set (falls back to \`gh auth token\`)
+Run inside a git repository with a GitHub remote.
+`;
 
 // ---------- helpers ----------
 
@@ -1176,11 +1184,13 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
 
 export async function main() {
   const program = new Command();
+  const cliPkg = createRequire(import.meta.url)('../../package.json');
 
   program
     .name('factory')
     .description('Multi-agent software factory with boss-worker-checker orchestration')
-    .version('2.0.0');
+    .version(cliPkg.version)
+    .addHelpText('before', PREREQUISITES_TEXT);
 
   program.command('init').description('Initialize .factory in this repo').action(cmdInit);
 

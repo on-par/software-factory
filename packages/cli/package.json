@@ -7,16 +7,35 @@
   "bin": {
     "factory": "dist/cli.js"
   },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/on-par/software-factory.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/on-par/software-factory#readme",
+  "bugs": {
+    "url": "https://github.com/on-par/software-factory/issues"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@on-par/factory-core": "*",
-    "@on-par/factory-config": "*",
+    "@on-par/factory-core": "^2.0.0",
+    "@on-par/factory-config": "^2.0.0",
     "@octokit/rest": "^22.0.0",
     "chalk": "^5.4.0",
     "commander": "^14.0.0"
