@@ -77,6 +77,14 @@ function getOctokit(): Octokit {
   return new Octokit({ auth: token });
 }
 
+export function errorDetail(err: unknown): string {
+  const e = err as { stderr?: unknown; message?: unknown } | null;
+  const stderr = typeof e?.stderr === 'string' ? e.stderr.trim() : '';
+  if (stderr) return stderr;
+  if (typeof e?.message === 'string' && e.message) return e.message;
+  return String(err);
+}
+
 // ---------- commands ----------
 
 async function cmdInit() {
@@ -639,19 +647,24 @@ async function landIssue(
   const guessedBranch = branchFor(issueNum, await getIssueTitle(octokit, ghRepo, issueNum));
   const worktree = worktreePathFor(repoRoot, issueNum);
 
-  const [, guessedPrNumber] = await Promise.all([
-    gitFetch(repoRoot),
-    findOpenPRNumber(octokit, owner, repoName, guessedBranch),
-  ]);
-
   let branch = guessedBranch;
-  let prNumber = guessedPrNumber;
-  if (!prNumber) {
-    const fallback = await findOpenPRForIssue(octokit, owner, repoName, issueNum);
-    if (fallback) {
-      branch = fallback.branch;
-      prNumber = fallback.number;
+  let prNumber: number | undefined;
+  try {
+    [, prNumber] = await Promise.all([
+      gitFetch(repoRoot),
+      findOpenPRNumber(octokit, owner, repoName, guessedBranch),
+    ]);
+    if (!prNumber) {
+      const fallback = await findOpenPRForIssue(octokit, owner, repoName, issueNum);
+      if (fallback) {
+        branch = fallback.branch;
+        prNumber = fallback.number;
+      }
     }
+  } catch (err) {
+    const failure = prLookupFailure(issueNum, guessedBranch, err);
+    log('fail', failure.message);
+    throw failure;
   }
 
   if (!prNumber) {
@@ -688,6 +701,13 @@ async function landIssue(
   return { branch, prNumber };
 }
 
+export function prLookupFailure(issueNum: number, branch: string, err: unknown): LandFailureError {
+  return new LandFailureError(
+    `PR lookup failed for issue #${issueNum} (${branch}): ${errorDetail(err)}`,
+    5,
+  );
+}
+
 async function cmdTriage(opts: { product?: string }) {
   const repoRoot = await getRepoRoot();
   const ghRepo = await getGitHubRepo();
@@ -709,17 +729,21 @@ and anything too vague. Group by lane (same-file issues together). Order by depe
 Write ONLY the queue to ${paths.queueProposed} in format '<lane> <issue#>', with '#' comments
 explaining exclusions.` ;
 
+  let plannerError: unknown;
   logEvent(paths.events, 'triage', '-', `Triaging ${ghRepo} with ${model}`);
   await exec(
     `claude -p ${shellEscapeInline(prompt)} ${flag ? `--model ${flag}` : ''} --allowedTools "Bash(gh issue:*)" "Bash(gh repo:*)" Read Glob Grep Write`,
-  ).catch(() => ({ stdout: '' }));
+  ).catch((err: unknown) => {
+    plannerError = err;
+    logEvent(paths.events, 'warn', '-', `triage planner failed: ${errorDetail(err)}`);
+  });
 
   const proposed = existsSync(paths.queueProposed) ? readFileSync(paths.queueProposed, 'utf-8') : '';
   const message = triageProposalMessage(proposed, paths.queueProposed, paths.queue);
   if (message) {
     console.log(message);
   } else {
-    throw new CliExitError('triage produced no proposal', 1);
+    throw triageNoProposalError(plannerError);
   }
 }
 
@@ -760,6 +784,11 @@ export async function cmdTriageAccept(opts: { force?: boolean }) {
     `accepted ${result.issues.length} issue(s) [${result.issues.join(', ')}] by ${acceptedBy}${suffix}`,
   );
   console.log(chalk.green(`queue accepted — ${result.issues.length} issue(s) promoted to ${paths.queue}`));
+}
+
+export function triageNoProposalError(plannerError: unknown): CliExitError {
+  const detail = plannerError ? ` — planner failed: ${errorDetail(plannerError)}` : '';
+  return new CliExitError(`triage produced no proposal${detail}`, 1);
 }
 
 function shellEscapeInline(s: string): string {
@@ -894,8 +923,7 @@ export async function isPrMerged(
   branch: string,
 ): Promise<boolean> {
   const { data: prs } = await octokit.rest.pulls
-    .list({ owner, repo: repoName, state: 'closed', head: `${owner}:${branch}` })
-    .catch(() => ({ data: [] as any[] }));
+    .list({ owner, repo: repoName, state: 'closed', head: `${owner}:${branch}` });
   return prs.some((pr: any) => Boolean(pr.merged_at));
 }
 
@@ -906,8 +934,7 @@ export async function findOpenPRNumber(
   branch: string,
 ): Promise<number | undefined> {
   const { data: prs } = await octokit.rest.pulls
-    .list({ owner, repo: repoName, state: 'open', head: `${owner}:${branch}` })
-    .catch(() => ({ data: [] as any[] }));
+    .list({ owner, repo: repoName, state: 'open', head: `${owner}:${branch}` });
   return prs[0]?.number;
 }
 
@@ -921,8 +948,7 @@ export async function findOpenPRForIssue(
   const matches = new RegExp(`\\bcloses\\s+#${issueNum}\\b`, 'i');
   for (let page = 1; ; page++) {
     const { data: prs } = await octokit.rest.pulls
-      .list({ owner, repo: repoName, state: 'open', per_page: perPage, page })
-      .catch(() => ({ data: [] as any[] }));
+      .list({ owner, repo: repoName, state: 'open', per_page: perPage, page });
     const pr = prs.find((p: any) => matches.test(p.body ?? ''));
     if (pr) return { number: pr.number, branch: pr.head.ref };
     if (prs.length < perPage) return undefined;
@@ -1011,6 +1037,7 @@ export async function rebaseDirtyPullRequest(
     await run('git rebase origin/main', { cwd: worktree });
     await run(`git push --force-with-lease origin ${shellEscape(branch)}`, { cwd: worktree });
   } catch {
+    // Best-effort cleanup: the conflict logged below is the error we surface.
     await run('git rebase --abort', { cwd: worktree }).catch(() => {});
     const msg = `rebase conflict on ${branch} — parked`;
     log('conflict', msg);
@@ -1051,15 +1078,26 @@ export async function landOpenPullRequest(
     skipCI = false,
   } = opts;
 
+  const watchCi = async () => {
+    try {
+      const outcome = await watchChecks({ octokit, owner, repo: repoName, ref: branch });
+      if (outcome !== 'success') {
+        log('warn', `CI watch for ${branch} ended ${outcome} — proceeding to merge state check`);
+      }
+    } catch (err) {
+      log('warn', `CI watch for ${branch} failed: ${errorDetail(err)} — proceeding to merge state check`);
+    }
+  };
+
   if (!skipCI) {
-    await watchChecks({ octokit, owner, repo: repoName, ref: branch }).catch(() => {});
+    await watchCi();
   }
   let state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
 
   if (state.mergeStateStatus === 'DIRTY') {
     await rebaseDirtyPullRequest({ issue, branch, worktree, prNumber, log, run, pathExists });
     if (!skipCI) {
-      await watchChecks({ octokit, owner, repo: repoName, ref: branch }).catch(() => {});
+      await watchCi();
     }
     state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
   }
@@ -1067,7 +1105,8 @@ export async function landOpenPullRequest(
   for (let attempt = 1; ; attempt++) {
     if (state.isDraft && state.id) {
       log('land', `PR #${prNumber} still a draft — re-issuing ready-for-review (attempt ${attempt})`);
-      await markPullRequestReady(octokit, state.id).catch(() => {});
+      await markPullRequestReady(octokit, state.id).catch((err: unknown) =>
+        log('warn', `ready-for-review flip failed for PR #${prNumber}: ${errorDetail(err)}`));
     }
     try {
       await squashMergeAndDelete(octokit, owner, repoName, branch, prNumber);
@@ -1123,7 +1162,13 @@ export async function waitForMerge(
   const [owner, repoName] = ghRepo.split('/');
 
   while (!pathExists(paths.stop)) {
-    if (await checkMerged(octokit, owner, repoName, branch)) {
+    let merged = false;
+    try {
+      merged = await checkMerged(octokit, owner, repoName, branch);
+    } catch (err) {
+      emitEvent(paths.events, 'warn', issue, `merged-state check failed (treating as not merged): ${errorDetail(err)}`);
+    }
+    if (merged) {
       emitEvent(paths.events, 'landed', issue, 'PR merged');
       return;
     }
