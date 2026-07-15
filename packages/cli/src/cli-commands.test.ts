@@ -108,7 +108,7 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
   };
 });
 
-import { main, shipIssue } from './cli/index.js';
+import { main, shipIssue, CliExitError, cmdConstitution, cmdUsage, cmdLand } from './cli/index.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -170,11 +170,15 @@ async function runMain(...args: string[]) {
   process.argv = ['node', 'factory', ...args];
   try {
     await main();
-    return { exited: false as const, code: undefined };
   } catch (err) {
     if (err instanceof ExitError) return { exited: true as const, code: err.code };
     throw err;
   }
+  const code = process.exitCode as number | undefined;
+  process.exitCode = undefined;
+  return code === undefined
+    ? { exited: false as const, code: undefined }
+    : { exited: true as const, code };
 }
 
 beforeEach(() => {
@@ -208,6 +212,7 @@ beforeEach(() => {
     'FACTORY_RESUME_AT', 'FACTORY_USAGE_POLL', 'FACTORY_USAGE_WATCH'].forEach(k => trackEnv(k));
   delete process.env.FACTORY_LOCAL_ONLY;
   delete process.env.FACTORY_MERGE;
+  process.exitCode = undefined;
 
   exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
     throw new ExitError(code ?? 0);
@@ -223,6 +228,7 @@ afterEach(() => {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
   }
+  process.exitCode = undefined;
   exitSpy.mockRestore();
   logSpy.mockRestore();
   errSpy.mockRestore();
@@ -603,5 +609,55 @@ describe('shipIssue (direct)', () => {
     await expect(shipIssue(5, {}, ctx())).rejects.toBeTruthy();
     const report = vi.mocked(core.writeLocalRunReport).mock.calls.at(-1)?.[0] as any;
     expect(report.outcome).toBe('failed');
+  });
+});
+
+// ===========================================================================
+describe('CliExitError (direct command invocation)', () => {
+  it('is a proper Error subclass carrying a code', () => {
+    const err = new CliExitError('msg', 3);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.name).toBe('CliExitError');
+    expect(err.message).toBe('msg');
+    expect(err.code).toBe(3);
+  });
+
+  it('cmdConstitution({}) rejects with code 2 and the usage message', async () => {
+    await expect(cmdConstitution({})).rejects.toMatchObject({
+      name: 'CliExitError',
+      code: 2,
+      message: expect.stringContaining('usage: factory constitution'),
+    });
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it("cmdConstitution({ product: 'nope' }) rejects with code 1 and the not-found message", async () => {
+    await expect(cmdConstitution({ product: 'nope' })).rejects.toMatchObject({
+      name: 'CliExitError',
+      code: 1,
+      message: expect.stringContaining("No constitution 'nope'"),
+    });
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('cmdUsage() rejects with code 2 when FACTORY_USAGE_CAP is invalid', async () => {
+    trackEnv('FACTORY_USAGE_CAP');
+    process.env.FACTORY_USAGE_CAP = '-5';
+    await expect(cmdUsage()).rejects.toMatchObject({
+      name: 'CliExitError',
+      code: 2,
+      message: expect.stringContaining('FACTORY_USAGE_CAP'),
+    });
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('cmdLand(5) rejects with code 1 when there is no open PR', async () => {
+    h.octokit.rest.pulls.list = vi.fn(async () => ({ data: [] }));
+    await expect(cmdLand(5)).rejects.toMatchObject({
+      name: 'CliExitError',
+      code: 1,
+      message: expect.stringContaining('no open PR'),
+    });
+    expect(exitSpy).not.toHaveBeenCalled();
   });
 });
