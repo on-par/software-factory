@@ -334,3 +334,99 @@ describe('shipPhase CI watch', () => {
     }
   });
 });
+
+describe('shipPhase approval gate', () => {
+  it('approves: gate resolving approved:true lets ship proceed and logs approval_requested then approval_granted', async () => {
+    const { octokit, calls } = createOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+    const checkSummary = { failures: 0, passes: 3, skips: 0, total: 3, results: [] };
+    const approvalGate = vi.fn(async () => ({ id: 'a1', approved: true, respondedAt: new Date().toISOString() }));
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+      approvalGate,
+      checkSummary,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(calls.filter(c => c[0] === 'pulls.create')).toHaveLength(1);
+    expect(approvalGate).toHaveBeenCalledWith(expect.objectContaining({
+      issue: 23,
+      branch: 'ship-it/23-self-heal',
+      worktree: '/repo-factory-23',
+      checkSummary,
+    }));
+    const requestedIdx = logs.findIndex(([type]) => type === 'approval_requested');
+    const grantedIdx = logs.findIndex(([type]) => type === 'approval_granted');
+    expect(requestedIdx).toBeGreaterThanOrEqual(0);
+    expect(grantedIdx).toBeGreaterThan(requestedIdx);
+    expect(logs[requestedIdx][1]).toContain('checks: 3 pass, 0 fail, 0 skip');
+  });
+
+  it('denies: gate resolving approved:false stops before push/PR and logs ship_denied with the reason', async () => {
+    const { octokit, calls } = createOctokit();
+    const logs: Array<[string, string]> = [];
+    const commands: string[] = [];
+    const run = async (command: string) => {
+      commands.push(command);
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+    const approvalGate = vi.fn(async () => ({ id: 'a2', approved: false, reason: 'not today', respondedAt: new Date().toISOString() }));
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+      approvalGate,
+    });
+
+    expect(result).toEqual({ ok: false, denied: true, deniedReason: 'not today' });
+    expect(calls).toEqual([]);
+    expect(commands).toEqual(['git diff --stat origin/main...HEAD']);
+    expect(logs).toContainEqual(['ship_denied', 'ship denied for ship-it/23-self-heal: not today']);
+  });
+
+  it('no gate: behaves exactly like the non-interactive path (no approval_requested/granted logs)', async () => {
+    const { octokit } = createOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 123 });
+    expect(logs.some(([type]) => type === 'approval_requested' || type === 'approval_granted')).toBe(false);
+  });
+});

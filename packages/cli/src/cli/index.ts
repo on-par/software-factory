@@ -17,6 +17,7 @@ import {
   buildPhase,
   checkPhase,
   shipPhase,
+  createFileApprovalGate,
   estimateTrailingSpend,
   formatUsageReport,
   watchUsage,
@@ -451,6 +452,7 @@ async function cmdTui() {
     queueFile: paths.queue,
     queueProposedFile: paths.queueProposed,
     costsFile: paths.costs,
+    approvalsDir: paths.approvals,
   });
 }
 
@@ -471,7 +473,7 @@ export function parkReasonFor(err: unknown): ParkReason {
 
 export async function shipIssue(
   issueNum: number,
-  opts: { product?: string; autoRework?: boolean },
+  opts: { product?: string; autoRework?: boolean; interactive?: boolean },
   ctx?: { repoRoot: string; ghRepo: string },
 ) {
   const repoRoot = ctx?.repoRoot ?? (await getRepoRoot());
@@ -555,9 +557,12 @@ export async function shipIssue(
     }
 
     // SHIP
-    const ship = await shipPhase({ issue: issueNum, repo: ghRepo, worktree, branch, octokit, watchCI: !skipCI, log });
+    const approvalGate = opts.interactive
+      ? createFileApprovalGate({ dir: paths.approvals, timeoutMs: timeouts.approval * 1000 })
+      : undefined;
+    const ship = await shipPhase({ issue: issueNum, repo: ghRepo, worktree, branch, octokit, watchCI: !skipCI, log, approvalGate, checkSummary: check.summary });
     if (!ship.ok) {
-      throw new LaneParkError('ship phase failed', 'fail');
+      throw new LaneParkError(ship.denied ? `ship denied: ${ship.deniedReason}` : 'ship phase failed', ship.denied ? 'escalate' : 'fail');
     }
 
     if (skipCI) {
@@ -622,7 +627,7 @@ async function maybeWriteLocalRunReport(opts: {
   console.log(chalk.cyan(`local-only report: ${report.path}`));
 }
 
-async function cmdShip(issueNum: number, opts: { product?: string; autoRework?: boolean }) {
+async function cmdShip(issueNum: number, opts: { product?: string; autoRework?: boolean; interactive?: boolean }) {
   try {
     return await shipIssue(issueNum, opts);
   } catch (err: any) {
@@ -1386,6 +1391,7 @@ export async function main() {
     .description('Plan → build → check → ship one issue')
     .option('--product <name>', 'Override active product constitution')
     .option('--no-auto-rework', 'Disable automatic rework loop')
+    .option('--interactive', 'Pause before opening the PR and wait for approval from the TUI')
     .action(async (issueNum, opts) => {
       await cmdShip(issueNum, opts);
     });

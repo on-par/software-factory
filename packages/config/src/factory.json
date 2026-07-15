@@ -12,7 +12,8 @@
     "plan_seconds": 1800,
     "build_seconds": 7200,
     "check_seconds": 1800,
-    "merge_poll_seconds": 120
+    "merge_poll_seconds": 120,
+    "approval_seconds": 1800
   },
   "merge": {
     "auto": false,

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render } from 'ink-testing-library';
-import type { CostsRead, FactoryEvent, QueueSnapshot } from '@on-par/factory-core';
+import type { ApprovalRequest, CostsRead, FactoryEvent, QueueSnapshot } from '@on-par/factory-core';
 import { App } from './App.js';
 
 afterEach(() => {
@@ -289,5 +289,103 @@ describe('App', () => {
     const frame = lastFrame() ?? '';
     expect(frame).toContain('2 lane(s)');
     expect(frame).not.toContain('esc back · q quit');
+  });
+});
+
+describe('App approvals', () => {
+  function makeRequest(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
+    return {
+      id: 'req-1',
+      issue: 296,
+      branch: 'ship-it/296-thing',
+      worktree: '/repo-296',
+      diffStat: ' file.ts | 2 ++\n',
+      requestedAt: '2026-01-01T00:00:00.000Z',
+      ...overrides,
+    };
+  }
+
+  it('renders the approval prompt on the dashboard tab and after switching tabs', async () => {
+    const fake = makeFakeFollow();
+    const listPendingFn = vi.fn(() => [makeRequest()]);
+    const respondFn = vi.fn();
+    const { lastFrame, stdin } = render(
+      <App eventsFile="ignored" follow={fake.follow} approvalsDir="/repo/.factory/approvals" listPendingFn={listPendingFn} respondFn={respondFn} />,
+    );
+    await flush();
+
+    expect(lastFrame()).toContain('APPROVAL REQUIRED');
+
+    stdin.write('\t'); // switch to Queue tab
+    await flush();
+    expect(lastFrame()).toContain('APPROVAL REQUIRED');
+  });
+
+  it('approves with y and the prompt disappears from the frame', async () => {
+    const fake = makeFakeFollow();
+    const listPendingFn = vi.fn(() => [makeRequest()]);
+    const respondFn = vi.fn();
+    const { lastFrame, stdin } = render(
+      <App eventsFile="ignored" follow={fake.follow} approvalsDir="/repo/.factory/approvals" listPendingFn={listPendingFn} respondFn={respondFn} />,
+    );
+    await flush();
+
+    stdin.write('y');
+    await flush();
+
+    expect(respondFn).toHaveBeenCalledWith('/repo/.factory/approvals', 'req-1', { approved: true });
+    expect(lastFrame()).not.toContain('APPROVAL REQUIRED');
+  });
+
+  it('denies with n then a typed reason then Enter, and q does not exit while typing', async () => {
+    const fake = makeFakeFollow();
+    const listPendingFn = vi.fn(() => [makeRequest()]);
+    const respondFn = vi.fn();
+    const { lastFrame, stdin } = render(
+      <App eventsFile="ignored" follow={fake.follow} approvalsDir="/repo/.factory/approvals" listPendingFn={listPendingFn} respondFn={respondFn} />,
+    );
+    await flush();
+
+    stdin.write('n');
+    await flush();
+    await flush(); // extra tick: let useInput's effect resubscribe with the updated deny-mode state
+    expect(lastFrame()).toContain('deny reason');
+
+    stdin.write('nope');
+    await flush();
+    await flush();
+    expect(lastFrame()).toContain('nope');
+    expect(respondFn).not.toHaveBeenCalled();
+
+    stdin.write('q');
+    await flush();
+    await flush();
+    expect(lastFrame()).toContain('nopeq');
+
+    stdin.write('\r');
+    await flush();
+
+    expect(respondFn).toHaveBeenCalledWith('/repo/.factory/approvals', 'req-1', { approved: false, reason: 'nopeq' });
+    expect(lastFrame()).not.toContain('APPROVAL REQUIRED');
+  });
+
+  it('cancels deny mode with Escape without calling respondFn', async () => {
+    const fake = makeFakeFollow();
+    const listPendingFn = vi.fn(() => [makeRequest()]);
+    const respondFn = vi.fn();
+    const { lastFrame, stdin } = render(
+      <App eventsFile="ignored" follow={fake.follow} approvalsDir="/repo/.factory/approvals" listPendingFn={listPendingFn} respondFn={respondFn} />,
+    );
+    await flush();
+
+    stdin.write('n');
+    await flush();
+    expect(lastFrame()).toContain('deny reason');
+
+    stdin.write('\x1B'); // escape
+    await flush();
+
+    expect(lastFrame()).toContain('y approve · n deny');
+    expect(respondFn).not.toHaveBeenCalled();
   });
 });

@@ -9,6 +9,7 @@ export interface RunTuiOptions {
   queueFile?: string;
   queueProposedFile?: string;
   costsFile?: string;
+  approvalsDir?: string;
   stdout?: NodeJS.WriteStream;
   render?: typeof render;
   followPlainFn?: typeof followPlain;
@@ -38,6 +39,7 @@ export async function runTui(opts: RunTuiOptions): Promise<void> {
     queueFile,
     queueProposedFile,
     costsFile,
+    approvalsDir,
     stdout = process.stdout,
     render: renderFn = render,
     followPlainFn = followPlain,
@@ -57,6 +59,7 @@ export async function runTui(opts: RunTuiOptions): Promise<void> {
         queueFile={queueFile}
         queueProposedFile={queueProposedFile}
         costsFile={costsFile}
+        approvalsDir={approvalsDir}
       />,
       { exitOnCtrlC: true },
     );

@@ -56,6 +56,10 @@ export { buildPhase } from './phases/build.js';
 export { checkPhase, disputeResolution } from './phases/check.js';
 export { shipPhase } from './phases/ship.js';
 
+// Approvals
+export { createFileApprovalGate, listPendingApprovals, respondToApproval } from './approvals/index.js';
+export type { ApprovalGate, ApprovalRequest, ApprovalResponse, FileApprovalGateOptions } from './approvals/index.js';
+
 // Reports
 export { writeLocalRunReport, renderLocalRunReport } from './reports/local-run.js';
 export type { LocalRunOutcome, LocalRunReport, LocalRunReportInput, LocalRunReportDeps } from './reports/local-run.js';
