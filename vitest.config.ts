@@ -23,6 +23,10 @@ export default defineConfig({
         // DOM bootstrap entry (createRoot side effect) — not exercisable in unit
         // tests; the page itself is covered via App.test.tsx.
         'packages/dashboard/src/main.tsx',
+        // Test-only fixture kit (throwaway repos, fake Octokit) exercised by the
+        // integration suites; it is scaffolding, not product code, and its fake
+        // branches would only dilute the gate.
+        'packages/core/src/test-support/**',
       ],
       thresholds: {
         // RATCHET: global catch-all. Files matched by the per-package globs below

@@ -1,14 +1,19 @@
 import { exec as execCb } from 'node:child_process';
-import { realpathSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
-import { branchFor, cleanupWorktree, setupWorktree } from '../utils/index.js';
+import { branchFor, setupWorktree } from '../utils/index.js';
+import {
+  commitAll,
+  makeFakeOctokit,
+  makeStubModelsConfig,
+  makeStubRoutesConfig,
+  PipelineTestKit,
+  specContentFor,
+} from '../test-support/index.js';
 import { buildPhase } from './build.js';
 import { checkPhase } from './check.js';
 import { planPhase } from './plan.js';
@@ -18,78 +23,23 @@ const exec = promisify(execCb);
 const repo = 'on-par/software-factory';
 const issue = 34;
 
-const models: ModelsConfig = {
-  version: 1,
-  models: {
-    'stub-model': {
-      provider: 'custom',
-      tier: 'boss',
-      costPerMtokInput: 0,
-      costPerMtokOutput: 0,
-      contextWindow: 1000,
-      capabilities: [],
-      envKey: null,
-    },
-  },
-  tiers: { boss: ['stub-model'] },
-  failover: {
-    triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
-    maxRetries: 2,
-    cooldownMs: 0,
-    escalateAfterTierExhausted: true,
-  },
-  routingRules: {},
-};
+const kit = new PipelineTestKit();
 
-const routes: RoutesConfig = {
-  version: 1,
-  routes: {
-    plan: { tier: 'boss', description: 'stub' },
-    build_claude: { tier: 'boss', description: 'stub' },
-  },
-};
-
-const specContent = `---
-route: claude
----
-# Spec: Pipeline integration test (#34)
-## Goal
-Exercise the phase pipeline against a throwaway repository.
-## Files / approach
-Use the scripted stub executor to mutate the worktree.
-## Tests
-Run the built-in checker sequence.
-## Constitution compliance
-N/A - no constitution
-## Non-goals
-No network calls.
-`;
-
-const cleanupTargets: Array<{ repoRoot: string; worktree: string }> = [];
-const tempDirs = new Set<string>();
-
-afterEach(async () => {
-  await Promise.all(cleanupTargets.map(({ repoRoot, worktree }) => cleanupWorktree(repoRoot, worktree)));
-  cleanupTargets.length = 0;
-
-  await Promise.all([...tempDirs].map(dir => rm(dir, { recursive: true, force: true })));
-  tempDirs.clear();
-});
+afterEach(() => kit.cleanup());
 
 describe('pipeline integration', () => {
   it('green path: PLAN→BUILD→CHECK→SHIP creates a ready PR', { timeout: 120_000 }, async () => {
     const title = 'Full pipeline green path';
-    const { origin, repoRoot } = await makeThrowawayRepo();
-    const worktree = `${repoRoot}-wt-34`;
-    cleanupTargets.push({ repoRoot, worktree });
+    const { origin, repoRoot } = await kit.makeThrowawayRepo();
+    const worktree = kit.trackWorktree(repoRoot, issue);
     const branch = branchFor(issue, title);
-    const specPath = await makeSpecPath();
-    const { octokit, calls } = makeOctokit(title);
+    const specPath = await kit.makeSpecPath(issue);
+    const { octokit, calls } = makeFakeOctokit({ [issue]: title });
     const events: Array<[string, string]> = [];
     const log = (type: string, msg: string) => events.push([type, msg]);
     const stub = new StubModelExecutor({
       scripts: {
-        plan: [{ output: specContent }],
+        plan: [{ output: specContentFor(issue) }],
         build_claude: [
           {
             output: 'built',
@@ -101,7 +51,7 @@ describe('pipeline integration', () => {
         ],
       },
     });
-    const router = new ModelRouter(models, routes, false, stub);
+    const router = new ModelRouter(makeStubModelsConfig(), makeStubRoutesConfig(), false, stub);
     const constitution = null;
 
     const plan = await planPhase({
@@ -170,17 +120,16 @@ describe('pipeline integration', () => {
 
   it('rework path: failing checker re-invokes worker with failure details, then ships', { timeout: 120_000 }, async () => {
     const title = 'Full pipeline rework path';
-    const { repoRoot } = await makeThrowawayRepo();
-    const worktree = `${repoRoot}-wt-34`;
-    cleanupTargets.push({ repoRoot, worktree });
+    const { repoRoot } = await kit.makeThrowawayRepo();
+    const worktree = kit.trackWorktree(repoRoot, issue);
     const branch = branchFor(issue, title);
-    const specPath = await makeSpecPath();
-    const { octokit, calls } = makeOctokit(title);
+    const specPath = await kit.makeSpecPath(issue);
+    const { octokit, calls } = makeFakeOctokit({ [issue]: title });
     const events: Array<[string, string]> = [];
     const log = (type: string, msg: string) => events.push([type, msg]);
     const stub = new StubModelExecutor({
       scripts: {
-        plan: [{ output: specContent }],
+        plan: [{ output: specContentFor(issue) }],
         build_claude: [
           {
             output: 'built with failing verify',
@@ -201,7 +150,7 @@ describe('pipeline integration', () => {
         ],
       },
     });
-    const router = new ModelRouter(models, routes, false, stub);
+    const router = new ModelRouter(makeStubModelsConfig(), makeStubRoutesConfig(), false, stub);
     const constitution = null;
 
     const plan = await planPhase({
@@ -258,74 +207,3 @@ describe('pipeline integration', () => {
     expect(calls.filter(([name]) => name === 'pulls.create')).toHaveLength(1);
   });
 });
-
-async function makeThrowawayRepo(): Promise<{ origin: string; repoRoot: string }> {
-  const origin = realpathSync(await mkdtemp(join(tmpdir(), 'factory-origin-')));
-  const repoRoot = realpathSync(await mkdtemp(join(tmpdir(), 'factory-repo-')));
-  tempDirs.add(origin);
-  tempDirs.add(repoRoot);
-
-  await exec('git -c init.defaultBranch=main init --bare', { cwd: origin });
-  await exec(`git clone '${origin}' '${repoRoot}'`);
-  await exec('git config user.name factory-test', { cwd: repoRoot });
-  await exec('git config user.email factory@test', { cwd: repoRoot });
-  await exec('git checkout -b main', { cwd: repoRoot });
-  await writeFile(join(repoRoot, 'README.md'), '# Throwaway\n');
-  await commitAll(repoRoot, 'chore: initial commit');
-  await exec('git push -u origin main', { cwd: repoRoot });
-
-  return { origin, repoRoot };
-}
-
-async function makeSpecPath(): Promise<string> {
-  const root = realpathSync(await mkdtemp(join(tmpdir(), 'factory-plan-')));
-  tempDirs.add(root);
-  const plans = join(root, 'plans');
-  await mkdir(plans, { recursive: true });
-  return join(plans, 'issue-34.md');
-}
-
-async function commitAll(cwd: string, message: string): Promise<void> {
-  await exec('git add -A', { cwd });
-  await exec(`git commit -m '${message}'`, { cwd });
-}
-
-function makeOctokit(issueTitle: string) {
-  const calls: any[] = [];
-  const octokit = {
-    graphql: async (query: string, vars: any) => {
-      calls.push(['graphql', query, vars]);
-      return { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } };
-    },
-    rest: {
-      issues: {
-        get: async (args: any) => {
-          calls.push(['issues.get', args]);
-          return { data: { title: issueTitle, body: 'stub issue body' } };
-        },
-      },
-      pulls: {
-        list: async (args: any) => {
-          calls.push(['pulls.list', args]);
-          return { data: [] };
-        },
-        create: async (args: any) => {
-          calls.push(['pulls.create', args]);
-          return { data: { number: 101 } };
-        },
-        get: async (args: any) => {
-          calls.push(['pulls.get', args]);
-          return { data: { draft: true, node_id: 'PR_101' } };
-        },
-      },
-      checks: {
-        listForRef: async (args: any) => {
-          calls.push(['checks.listForRef', args]);
-          return { data: { check_runs: [] } };
-        },
-      },
-    },
-  };
-
-  return { octokit, calls };
-}
