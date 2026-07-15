@@ -53,8 +53,12 @@ export const compileChecker: CheckerFn = async (ctx) => {
         return { checker: 'compile', result: 'PASS', details: 'no build system detected — skipped' };
       }
     }
-  } catch {
-    return { checker: 'compile', result: 'PASS', details: 'no build system detected — skipped' };
+  } catch (e: any) {
+    return {
+      checker: 'compile',
+      result: 'FAIL',
+      details: `unexpected checker error: ${(e?.stderr || e?.message || String(e)).slice(0, 500)}`,
+    };
   }
 };
 
@@ -80,8 +84,12 @@ export const testsChecker: CheckerFn = async (ctx) => {
     }
 
     return { checker: 'tests', result: 'PASS', details: 'no test command found — skipped' };
-  } catch {
-    return { checker: 'tests', result: 'PASS', details: 'no test command found — skipped' };
+  } catch (e: any) {
+    return {
+      checker: 'tests',
+      result: 'FAIL',
+      details: `unexpected checker error: ${(e?.stderr || e?.message || String(e)).slice(0, 500)}`,
+    };
   }
 };
 
@@ -300,7 +308,12 @@ export async function runAllCheckers(
   const productCheckers = constitution?.checkers ?? [];
 
   const allCheckers = [...standardNames, ...productCheckers.filter(c => !standardNames.includes(c))];
-  const packageJson = await loadPackageJson(ctx.worktree);
+  let packageJson: PackageJson | null | undefined;
+  try {
+    packageJson = await loadPackageJson(ctx.worktree);
+  } catch {
+    packageJson = undefined; // let each checker surface the read error through its own error handling
+  }
   // the constitution is the single source of truth for the standards body —
   // custom checkers must be graded against the same text that declared them
   const sharedCtx: CheckerContext = { ...ctx, packageJson, constitutionBody: constitution?.body ?? '' };
@@ -309,7 +322,16 @@ export async function runAllCheckers(
     let output: CheckerOutput;
 
     if (BUILT_IN_CHECKERS[name]) {
-      output = await BUILT_IN_CHECKERS[name](sharedCtx);
+      try {
+        output = await BUILT_IN_CHECKERS[name](sharedCtx);
+      } catch (e: any) {
+        // Fail closed: a checker that crashes must not vanish from the summary
+        output = {
+          checker: name,
+          result: 'FAIL',
+          details: `checker crashed: ${(e?.message ?? String(e)).slice(0, 500)}`,
+        };
+      }
     } else if (name.startsWith('custom_')) {
       output = await runCustomChecker(sharedCtx, name, router, customCheckerTimeoutSeconds);
     } else {
@@ -338,11 +360,14 @@ export async function runAllCheckers(
 // ---------- Helpers ----------
 
 async function loadPackageJson(worktree: string): Promise<PackageJson | null> {
+  let raw: string;
   try {
-    return JSON.parse(await readFile(join(worktree, 'package.json'), 'utf-8'));
-  } catch {
-    return null;
+    raw = await readFile(join(worktree, 'package.json'), 'utf-8');
+  } catch (e: any) {
+    if (e?.code === 'ENOENT') return null; // no package.json is a legitimate skip, not an error
+    throw e;
   }
+  return JSON.parse(raw) as PackageJson;
 }
 
 async function getPackageJson(ctx: CheckerContext): Promise<PackageJson | null> {
