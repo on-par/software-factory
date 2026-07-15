@@ -325,7 +325,7 @@ describe('ModelRouter with StubModelExecutor', () => {
     expect(detailLog).not.toContain('sk-live-abc123');
   });
 
-  it('reclassifies empty output as empty_response without a duplicate attempt entry', async () => {
+  it('records exactly one empty_response attempt for empty output without throwing through the catch path', async () => {
     const stub = new StubModelExecutor({ scripts: { plan: [{ output: '' }] } });
     const router = new ModelRouter(models, routes, false, stub);
     const logs: string[] = [];
@@ -333,12 +333,41 @@ describe('ModelRouter with StubModelExecutor', () => {
     const err: any = await router.run('plan', 'do it', { onLog: msg => logs.push(msg) }).catch(e => e);
 
     expect(err.attempts).toEqual([
-      { model: 'stub-model', reason: 'empty_response', ok: false, detail: 'msg="model returned empty output"' },
+      { model: 'stub-model', reason: 'empty_response', ok: false },
     ]);
     expect(logs).toContain('stub-model failed (empty_response) on plan');
-    expect(err.message).toBe(
-      "All models failed for task 'plan': stub-model(empty_response: msg=\"model returned empty output\")",
-    );
+    expect(err.message).toBe("All models failed for task 'plan': stub-model(empty_response)");
+    expect(err.reason).toBe('empty_response');
+  });
+
+  it('treats whitespace-only output as empty_response without retrying the same model', async () => {
+    const stub = new StubModelExecutor({ scripts: { plan: [{ output: '   \n\t ' }] } });
+    const router = new ModelRouter(models, routes, false, stub);
+    const logs: string[] = [];
+
+    const err: any = await router.run('plan', 'do it', { onLog: msg => logs.push(msg) }).catch(e => e);
+
+    expect(err.attempts).toEqual([
+      { model: 'stub-model', reason: 'empty_response', ok: false },
+    ]);
+    expect(err.reason).toBe('empty_response');
+    expect(stub.calls).toHaveLength(1);
+  });
+
+  it('fails over to the next model after an empty_response attempt', async () => {
+    const stub = new StubModelExecutor({
+      scripts: { plan: [{ output: '' }, { output: 'RECOVERED' }] },
+    });
+    const router = new ModelRouter(twoModels, routes, false, stub);
+
+    const result = await router.run('plan', 'do it');
+
+    expect(result.model).toBe('model-b');
+    expect(result.output).toBe('RECOVERED');
+    expect(result.attempts).toEqual([
+      { model: 'model-a', reason: 'empty_response', ok: false },
+      { model: 'model-b', reason: null, ok: true },
+    ]);
   });
 
   it('skips experimental models by default', () => {
