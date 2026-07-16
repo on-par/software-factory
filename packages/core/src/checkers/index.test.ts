@@ -430,6 +430,40 @@ describe('runCustomChecker', () => {
     expect(result.result).toBe('FAIL');
   });
 
+  it('parses a valid verdict whose details contain braces', async () => {
+    const worktree = await makeWorktree();
+    const { router } = makeRouter(
+      '{"checker":"custom_x","result":"PASS","details":"config must include {\\"strict\\": true} — found { strict: false }"}',
+    );
+
+    const result = await runCustomChecker(makeContext(worktree), 'custom_x', router);
+
+    expect(result.result).toBe('PASS');
+    expect(result.details).toContain('{"strict": true}');
+  });
+
+  it('finds the verdict after prose containing code braces', async () => {
+    const worktree = await makeWorktree();
+    const { router } = makeRouter(
+      'I inspected function f() { return { a: 1 }; } and concluded:\n{"checker":"custom_x","result":"FAIL","details":"missing {config} block"}',
+    );
+
+    const result = await runCustomChecker(makeContext(worktree), 'custom_x', router);
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toBe('missing {config} block');
+  });
+
+  it('preserves nested-JSON details', async () => {
+    const worktree = await makeWorktree();
+    const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"saw {\\"a\\":{\\"b\\":1}}"}');
+
+    const result = await runCustomChecker(makeContext(worktree), 'custom_x', router);
+
+    expect(result.result).toBe('PASS');
+    expect(result.details).toBe('saw {"a":{"b":1}}');
+  });
+
   it('fails when prose contains no JSON verdict', async () => {
     const worktree = await makeWorktree();
     const { router } = makeRouter('I could not determine anything.');
@@ -450,14 +484,14 @@ describe('runCustomChecker', () => {
     expect(result.details).toMatch(/^checker produced no valid JSON/);
   });
 
-  it('fails when a regex-matched verdict cannot be parsed as JSON', async () => {
+  it('fails with the raw output when pseudo-JSON cannot be parsed', async () => {
     const worktree = await makeWorktree();
     const { router } = makeRouter('{"checker": custom_x, "result": PASS}');
 
     const result = await runCustomChecker(makeContext(worktree), 'custom_x', router);
 
     expect(result.result).toBe('FAIL');
-    expect(result.details).toBe('checker agent failed');
+    expect(result.details).toMatch(/^checker produced no valid JSON/);
   });
 
   it('fails when the router fails', async () => {
@@ -468,7 +502,8 @@ describe('runCustomChecker', () => {
     const result = await runCustomChecker(makeContext(worktree), 'custom_x', router);
 
     expect(result.result).toBe('FAIL');
-    expect(result.details).toBe('checker agent failed');
+    expect(result.details).toMatch(/^checker agent failed: /);
+    expect(result.details).toContain('error');
   });
 
   it('fails closed on a lowercase result value', async () => {

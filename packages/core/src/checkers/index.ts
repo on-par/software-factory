@@ -5,6 +5,7 @@ import { join, relative } from 'node:path';
 import { ModelRouter } from '../router/index.js';
 import type { CheckerOutput, CheckSummary, Constitution } from '../types/index.js';
 import { runCommand, describeCommandFailure } from '../utils/command-runner.js';
+import { extractJsonObjects } from '../utils/json.js';
 
 interface PackageJson {
   scripts?: Record<string, string>;
@@ -250,17 +251,19 @@ Steps:
       worktree: ctx.worktree,
       timeout: timeoutSeconds ?? 1800,
     });
-    // Extract JSON from output
-    const jsonMatch = result.output.match(/\{[^{}]*"checker"[^{}]*\}/);
-    if (jsonMatch) {
-      const verdict: unknown = JSON.parse(jsonMatch[0]);
-      if (isCustomCheckerVerdict(verdict, checkerName)) {
-        return { checker: checkerName, result: verdict.result, details: verdict.details };
+    // Extract the verdict: first balanced JSON object that carries a "checker" key
+    const candidates = extractJsonObjects(result.output);
+    const verdictCandidate = candidates.find(
+      c => typeof c.value === 'object' && c.value !== null && !Array.isArray(c.value) && 'checker' in (c.value as Record<string, unknown>),
+    );
+    if (verdictCandidate) {
+      if (isCustomCheckerVerdict(verdictCandidate.value, checkerName)) {
+        return { checker: checkerName, result: verdictCandidate.value.result, details: verdictCandidate.value.details };
       }
       return {
         checker: checkerName,
         result: 'FAIL',
-        details: `checker returned a malformed verdict: ${jsonMatch[0].slice(0, 200)}`,
+        details: `checker returned a malformed verdict: ${verdictCandidate.text.slice(0, 200)}`,
       };
     }
     return {
@@ -268,11 +271,11 @@ Steps:
       result: 'FAIL',
       details: `checker produced no valid JSON: ${result.output.slice(0, 200)}`,
     };
-  } catch {
+  } catch (e: any) {
     return {
       checker: checkerName,
       result: 'FAIL',
-      details: `checker agent failed`,
+      details: `checker agent failed: ${(e?.stderr || e?.message || String(e)).slice(0, 300)}`,
     };
   }
 }
