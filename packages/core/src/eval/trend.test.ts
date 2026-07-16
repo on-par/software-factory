@@ -137,7 +137,7 @@ describe('renderTrend', () => {
   it('shows the warmup note before seven records', () => {
     const rendered = renderTrend([historyRecord()]);
 
-    expect(rendered).toContain('_Trend visible after 7+ nightly runs (currently 1)._');
+    expect(rendered).toContain('_Trend visible after 7+ weekly runs (currently 1)._');
   });
 
   it('omits the warmup note once seven records are present', () => {

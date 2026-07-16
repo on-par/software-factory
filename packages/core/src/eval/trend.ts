@@ -67,7 +67,7 @@ export function renderTrend(records: HistoryRecord[], opts: { window?: number; m
   );
 
   if (records.length < minForTrend) {
-    lines.push('', `_Trend visible after ${minForTrend}+ nightly runs (currently ${records.length})._`);
+    lines.push('', `_Trend visible after ${minForTrend}+ weekly runs (currently ${records.length})._`);
   }
 
   return `${lines.join('\n')}\n`;
