@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { HarnessError } from '../harness/index.js';
 import { ModelRegistry } from '../models/index.js';
 import { CliModelExecutor } from './index.js';
 
@@ -172,7 +173,7 @@ describe('CliModelExecutor', () => {
   });
 
   it('runs Claude without a model flag when none is configured', async () => {
-    const rec = recordingExec();
+    const rec = recordingExec({ stdout: 'CLAUDE OUTPUT' });
     const executor = new CliModelExecutor(rec.fn);
 
     await executor.runModel('claude-no-flag', 'draft plan', {
@@ -193,15 +194,16 @@ describe('CliModelExecutor', () => {
     const rec = recordingExec();
     const executor = new CliModelExecutor(rec.fn);
 
-    const output = await executor.runModel('codex-model', 'build it', {
+    const err: any = await executor.runModel('codex-model', 'build it', {
       worktree,
       timeout,
       task: 'build_codex',
       registry,
       routesConfig,
-    });
+    }).catch(e => e);
 
-    expect(output).toBe('');
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('empty_response');
     expect(rec.calls).toHaveLength(1);
     expect(rec.calls[0].cmd).toMatch(/^codex exec --sandbox workspace-write --ask-for-approval never -C '/);
     expect(rec.calls[0].cmd).toContain(`-C '${worktree}'`);
@@ -244,6 +246,45 @@ describe('CliModelExecutor', () => {
       messages: [{ role: 'user', content: 'draft plan' }],
       options: { num_ctx: 16384, temperature: 0.2 },
     });
+  });
+
+  it('rejects with empty_response instead of resolving empty Claude output', async () => {
+    const rec = recordingExec();
+    const executor = new CliModelExecutor(rec.fn);
+
+    const err: any = await executor.runModel('claude-model', 'draft plan', {
+      worktree,
+      timeout,
+      task: 'plan',
+      registry,
+      routesConfig,
+    }).catch(e => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('empty_response');
+    expect(err.details.exitCode).toBe(0);
+  });
+
+  it('rejects with empty_response instead of resolving empty Ollama output', async () => {
+    const fetchFn = async () => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      text: async () => '',
+      json: async () => ({ message: { content: '' } }),
+    });
+    const executor = new CliModelExecutor(recordingExec().fn, fetchFn);
+
+    const err: any = await executor.runModel('ollama-model', 'draft plan', {
+      worktree,
+      timeout,
+      task: 'plan',
+      registry,
+      routesConfig,
+    }).catch(e => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('empty_response');
   });
 
   it('dispatches through a declared harness instead of inferring from provider', async () => {
@@ -895,7 +936,7 @@ describe('CliModelExecutor harness injection', () => {
   });
 });
 
-describe('CliModelExecutor shared empty-response translation', () => {
+describe('CliModelExecutor shared empty-response propagation', () => {
   const emptyOllamaFetch = async () => ({
     ok: true,
     status: 200,
@@ -908,28 +949,31 @@ describe('CliModelExecutor shared empty-response translation', () => {
     ['claude-cli', 'claude-model', 'plan'],
     ['codex-cli', 'codex-model', 'build_codex'],
     ['opencode', 'opencode-declared', 'plan'],
-  ] as const)('translates an empty %s harness response to empty output', async (_harness, model, task) => {
+  ] as const)('propagates an empty_response from %s instead of resolving empty output', async (_harness, model, task) => {
     const executor = new CliModelExecutor(recordingExec().fn);
-    const output = await executor.runModel(model, 'prompt', {
+    const err: any = await executor.runModel(model, 'prompt', {
       worktree, timeout, task, registry, routesConfig,
-    });
-    expect(output).toBe('');
+    }).catch(e => e);
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('empty_response');
   });
 
-  it('translates an empty ollama-http harness response to empty output', async () => {
+  it('propagates an empty_response from ollama-http instead of resolving empty output', async () => {
     const executor = new CliModelExecutor(recordingExec().fn, emptyOllamaFetch as any);
-    const output = await executor.runModel('ollama-model', 'prompt', {
+    const err: any = await executor.runModel('ollama-model', 'prompt', {
       worktree, timeout, task: 'plan', registry, routesConfig,
-    });
-    expect(output).toBe('');
+    }).catch(e => e);
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('empty_response');
   });
 
-  it('translates an empty ollama-agentic harness response to empty output', async () => {
+  it('propagates an empty_response from ollama-agentic instead of resolving empty output', async () => {
     tmpWorktree = await mkdtemp(join(tmpdir(), 'factory-empty-agentic-'));
     const executor = new CliModelExecutor(recordingExec().fn, emptyOllamaFetch as any);
-    const output = await executor.runModel('ollama-agentic-declared', 'prompt', {
+    const err: any = await executor.runModel('ollama-agentic-declared', 'prompt', {
       worktree: tmpWorktree, timeout, task: 'build_codex', registry, routesConfig,
-    });
-    expect(output).toBe('');
+    }).catch(e => e);
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('empty_response');
   });
 });

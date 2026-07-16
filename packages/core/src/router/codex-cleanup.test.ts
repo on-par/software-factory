@@ -64,7 +64,7 @@ describe('CliModelExecutor Codex cleanup', () => {
       task: 'build_codex',
       registry,
       routesConfig,
-    });
+    }).catch(() => {});
 
     expect(unlink).toHaveBeenCalledTimes(2);
     expect(vi.mocked(unlink).mock.calls).toEqual([
