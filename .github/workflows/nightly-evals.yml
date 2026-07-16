@@ -1,4 +1,4 @@
-name: Weekly Evals
+name: Weekly Prompt Evals
 
 on:
   schedule:
@@ -29,12 +29,17 @@ jobs:
       - name: Install Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code
 
-      - name: Full eval run
+      - name: Prompt regression eval run
         id: eval
         continue-on-error: true
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: npm run eval -- --judge-k 3 --report eval-report.json --baseline evals/baseline.json
+        run: >
+          npm run eval -- --judge-k 3
+          --plan-model claude-fable-5
+          --judge-model claude-sonnet-5
+          --report eval-report.json
+          --baseline evals/baseline.json
 
       - name: Upload report
         if: always()
@@ -94,7 +99,7 @@ jobs:
           fi
           existing=$(gh issue list --state open --label evals \
             --json number,title \
-            --jq '[.[] | select(.title == "Weekly eval regression" or .title == "Nightly eval regression")][0].number // empty')
+            --jq '[.[] | select(.title == "Weekly prompt eval regression" or .title == "Weekly eval regression" or .title == "Nightly eval regression")][0].number // empty')
           if [ -n "$existing" ]; then
             gh issue edit "$existing" --body-file regression-issue.md
             gh issue comment "$existing" \
@@ -102,12 +107,12 @@ jobs:
             echo "updated existing regression issue #$existing"
           else
             gh issue create --label evals \
-              --title "Weekly eval regression" \
+              --title "Weekly prompt eval regression" \
               --body-file regression-issue.md
           fi
 
       - name: Fail the job on eval regression
         if: steps.eval.outcome == 'failure'
         run: |
-          echo "weekly eval step failed (regression or infra) — marking job red"
+          echo "weekly prompt eval step failed (regression or infra) — marking job red"
           exit 1
