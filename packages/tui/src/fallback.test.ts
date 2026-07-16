@@ -39,4 +39,29 @@ describe('followPlain', () => {
       stop();
     }).not.toThrow();
   });
+
+  it('colors output when the injected stream reports a TTY', () => {
+    const prevForceColor = process.env.FORCE_COLOR;
+    const prevNoColor = process.env.NO_COLOR;
+    delete process.env.FORCE_COLOR;
+    delete process.env.NO_COLOR;
+    try {
+      const fake = makeFakeFollow();
+      const out = { write: (chunk: string) => { (out as any).chunks.push(chunk); return true; }, chunks: [] as string[], isTTY: true } as unknown as NodeJS.WritableStream & { chunks: string[] };
+
+      const stop = followPlain('events.ndjson', out, fake.follow);
+      fake.push({ ts: '2026-01-01T00:00:00.000Z', type: 'plan', issue: '192', msg: 'Starting plan phase' });
+
+      const chunk = (out as any).chunks[0] as string;
+      expect(chunk).toContain('[');
+      expect(chunk).toContain('Starting plan phase');
+
+      stop();
+    } finally {
+      if (prevForceColor === undefined) delete process.env.FORCE_COLOR;
+      else process.env.FORCE_COLOR = prevForceColor;
+      if (prevNoColor === undefined) delete process.env.NO_COLOR;
+      else process.env.NO_COLOR = prevNoColor;
+    }
+  });
 });
