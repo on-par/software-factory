@@ -83,7 +83,7 @@ describe('utils', () => {
   });
 
   it('appends events as NDJSON', async () => {
-    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
     const eventsFile = join(tmpDir, 'events.ndjson');
 
@@ -106,6 +106,8 @@ describe('utils', () => {
       issue: '85',
       msg: 'second',
     });
+
+    expect(logSpy).toHaveBeenCalledWith('[factory] plan #85: first');
   });
 
   it('creates missing directories when logging events', async () => {

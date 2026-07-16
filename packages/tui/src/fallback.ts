@@ -1,4 +1,4 @@
-import { followEvents, type FactoryEvent } from '@on-par/factory-core';
+import { followEvents, formatEventLine, colorEnabled, type FactoryEvent } from '@on-par/factory-core';
 
 /**
  * Plain-line fallback printer — mirrors `logEvent`'s console output
@@ -11,6 +11,6 @@ export function followPlain(
   follow: typeof followEvents = followEvents,
 ): () => void {
   return follow(eventsFile, (e: FactoryEvent) => {
-    out.write(`[factory] ${e.type} #${e.issue}: ${e.msg}\n`);
+    out.write(formatEventLine(e.type, e.issue, e.msg, { color: colorEnabled(out as { isTTY?: boolean }) }) + '\n');
   }, { fromStart: true });
 }

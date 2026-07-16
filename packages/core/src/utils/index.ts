@@ -5,6 +5,9 @@ import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import { resolve } from 'node:path';
 import type { FactoryEvent, CostEntry } from '../types/index.js';
+import { formatEventLine, colorEnabled } from './format.js';
+
+export { formatEventLine, colorEnabled } from './format.js';
 
 const exec = promisify(execCb);
 
@@ -24,7 +27,7 @@ export function logEvent(eventsFile: string, type: string, issue: string | numbe
     mkdirSync(resolve(eventsFile, '..'), { recursive: true });
     appendFileSync(eventsFile, line);
   }
-  console.log(`[factory] ${type} #${issue}: ${msg}`);
+  console.log(formatEventLine(type, String(issue), msg, { color: colorEnabled(process.stdout) }));
 }
 
 // ---------- Cost Tracking ----------
