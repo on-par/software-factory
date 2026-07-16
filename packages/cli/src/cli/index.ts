@@ -383,10 +383,11 @@ export async function cmdUsage() {
     throw new CliExitError(`factory: ${err.message}`, 2);
   }
 
+  const subscriptionPromise = fetchSubscriptionUsage();
   const spend = estimateTrailingSpend();
   const heuristicLine = formatUsageReport(spend, knobs.cap);
 
-  const subscription = await fetchSubscriptionUsage();
+  const subscription = await subscriptionPromise;
   if (subscription !== null) {
     const resets = subscription.fiveHourResetsAt ? `, resets ${subscription.fiveHourResetsAt}` : '';
     console.log(`5h subscription usage: ${Math.round(subscription.fiveHourUtilization)}% of plan limit${resets}`);

@@ -31,6 +31,16 @@ describe('readClaudeAccessToken', () => {
     expect(token).toBe('sk-ant-oat-fixture-token');
   });
 
+  it('falls back to the credentials file when the keychain resolves to an empty string', async () => {
+    const readKeychain = vi.fn().mockResolvedValue('');
+    const readCredentialsFile = vi.fn().mockReturnValue(validCreds);
+
+    const token = await readClaudeAccessToken({ platform: 'darwin', readKeychain, readCredentialsFile });
+
+    expect(token).toBe('sk-ant-oat-fixture-token');
+    expect(readCredentialsFile).toHaveBeenCalled();
+  });
+
   it('skips the keychain entirely on non-darwin platforms', async () => {
     const readKeychain = vi.fn();
     const readCredentialsFile = vi.fn().mockReturnValue(validCreds);

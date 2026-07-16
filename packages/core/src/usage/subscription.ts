@@ -26,7 +26,7 @@ export interface SubscriptionUsageDeps {
 const DEFAULT_CREDENTIALS_PATH = resolve(homedir(), '.claude/.credentials.json');
 
 async function defaultReadKeychain(): Promise<string> {
-  const result = await execa('security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w']);
+  const result = await execa('security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w'], { timeout: 10_000 });
   return result.stdout;
 }
 
@@ -53,7 +53,8 @@ export async function readClaudeAccessToken(deps: SubscriptionUsageDeps = {}): P
 
   if (platform === 'darwin') {
     try {
-      raw = await readKeychain();
+      const keychainRaw = await readKeychain();
+      if (keychainRaw.trim().length > 0) raw = keychainRaw;
     } catch {
       raw = null;
     }
