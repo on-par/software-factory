@@ -34,6 +34,6 @@ comments or PR descriptions, if anywhere.
 
 ## Index
 
-| Number | Title | Status |
-|--------|-------|--------|
+| Number                                       | Title                                                     | Status   |
+| -------------------------------------------- | --------------------------------------------------------- | -------- |
 | [0001](0001-boss-worker-checker-pipeline.md) | Boss–worker–checker pipeline with per-issue build routing | Accepted |
