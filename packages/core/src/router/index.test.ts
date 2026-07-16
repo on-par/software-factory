@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter, ModelExecutorError, failoversFrom } from './index.js';
+import type { ExecFn } from './index.js';
 import { StubModelExecutor } from './stub.js';
 import { HarnessError } from '../harness/index.js';
 
@@ -629,6 +630,128 @@ describe('ModelRouter with StubModelExecutor', () => {
     const err: any = await router.run('plan', 'do it').catch(e => e);
 
     expect(err.attempts[0].detail).toContain('trace=/tmp/t.json');
+  });
+});
+
+describe('ModelRouter worktree reset guard', () => {
+  const worktree = '/fake/worktree';
+
+  function makeFakeGitExec(opts: {
+    toplevel?: string | Error;
+    postFailureStatus?: string;
+    diffText?: string;
+    resetError?: Error;
+  } = {}): { execFn: ExecFn; calls: string[] } {
+    const calls: string[] = [];
+    let statusCallCount = 0;
+    const execFn: ExecFn = async cmd => {
+      calls.push(cmd);
+      if (/git rev-parse --show-toplevel/.test(cmd)) {
+        if (opts.toplevel instanceof Error) throw opts.toplevel;
+        return { stdout: `${opts.toplevel ?? worktree}\n`, stderr: '' };
+      }
+      if (/git rev-parse HEAD/.test(cmd)) return { stdout: 'abc123\n', stderr: '' };
+      if (/git status --porcelain/.test(cmd)) {
+        statusCallCount++;
+        const status = statusCallCount === 1 ? '' : (opts.postFailureStatus ?? ' M src/x.ts\n?? junk.txt\n');
+        return { stdout: status, stderr: '' };
+      }
+      if (/git diff HEAD/.test(cmd)) return { stdout: opts.diffText ?? 'diff text\n', stderr: '' };
+      if (/git reset --hard/.test(cmd)) {
+        if (opts.resetError) throw opts.resetError;
+        return { stdout: '', stderr: '' };
+      }
+      if (/git clean -fd/.test(cmd)) return { stdout: '', stderr: '' };
+      throw new Error(`unhandled fake git command: ${cmd}`);
+    };
+    return { execFn, calls };
+  }
+
+  it('resets the worktree between a failed attempt and the failover attempt', async () => {
+    const events: string[] = [];
+    const { execFn, calls } = makeFakeGitExec();
+    const stub = new StubModelExecutor({
+      scripts: {
+        build_claude: [
+          { fail: 'timeout', effect: () => { events.push('call:model-a'); } },
+          { output: 'OK', effect: () => { events.push('call:model-b'); } },
+        ],
+      },
+    });
+    const router = new ModelRouter(twoModels, routes, false, stub, undefined, undefined, execFn);
+
+    const result = await router.run('build_claude', 'do it', { worktree });
+
+    expect(result.model).toBe('model-b');
+    expect(calls).toContain(`git reset --hard 'abc123'`);
+    expect(calls.some(c => c.startsWith('git clean -fd'))).toBe(true);
+
+    const resetIndex = events.indexOf('call:model-a');
+    const failoverIndex = events.indexOf('call:model-b');
+    const resetCallIndex = calls.findIndex(c => c.startsWith('git reset --hard'));
+    const cleanCallIndex = calls.findIndex(c => c.startsWith('git clean -fd'));
+    expect(resetIndex).toBeGreaterThanOrEqual(0);
+    expect(failoverIndex).toBeGreaterThan(resetIndex);
+    expect(resetCallIndex).toBeGreaterThanOrEqual(0);
+    expect(cleanCallIndex).toBeGreaterThan(resetCallIndex);
+  });
+
+  it('issues zero git commands for non-agentic tasks', async () => {
+    const { execFn, calls } = makeFakeGitExec();
+    const stub = new StubModelExecutor({
+      scripts: { plan: [{ fail: 'timeout' }, { output: 'OK' }] },
+    });
+    const router = new ModelRouter(twoModels, routes, false, stub, undefined, undefined, execFn);
+
+    const result = await router.run('plan', 'do it', { worktree });
+
+    expect(result.model).toBe('model-b');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('failover still works when the worktree guard is disabled', async () => {
+    const { execFn, calls } = makeFakeGitExec({ toplevel: new Error('not a repo') });
+    const stub = new StubModelExecutor({
+      scripts: {
+        build_claude: [{ fail: 'timeout' }, { output: 'OK' }],
+      },
+    });
+    const router = new ModelRouter(twoModels, routes, false, stub, undefined, undefined, execFn);
+
+    const result = await router.run('build_claude', 'do it', { worktree });
+
+    expect(result.model).toBe('model-b');
+    expect(calls.some(c => c.startsWith('git reset --hard'))).toBe(false);
+  });
+
+  it('aborts failover when the reset fails', async () => {
+    const { execFn } = makeFakeGitExec({ resetError: new Error('reset exploded') });
+    const stub = new StubModelExecutor({
+      scripts: {
+        build_claude: [{ fail: 'timeout' }, { output: 'OK' }],
+      },
+    });
+    const router = new ModelRouter(twoModels, routes, false, stub, undefined, undefined, execFn);
+
+    const err: any = await router.run('build_claude', 'do it', { worktree }).catch(e => e);
+
+    expect(err.message).toMatch(/aborting failover to avoid mixing attempt state/);
+    expect(stub.calls).toHaveLength(1);
+  });
+
+  it('skips the reset on a non-retryable failure', async () => {
+    const { execFn, calls } = makeFakeGitExec();
+    const stub = new StubModelExecutor({
+      scripts: {
+        build_claude: [{ fail: 'verify_failed' }, { output: 'SHOULD NOT BE REACHED' }],
+      },
+    });
+    const router = new ModelRouter(twoModels, routes, false, stub, undefined, undefined, execFn);
+
+    const err: any = await router.run('build_claude', 'do it', { worktree }).catch(e => e);
+
+    expect(err.reason).toBe('verify_failed');
+    expect(calls.some(c => c.startsWith('git reset --hard'))).toBe(false);
   });
 });
 
