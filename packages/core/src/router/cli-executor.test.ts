@@ -792,3 +792,93 @@ describe('CliModelExecutor', () => {
     expect(err.reason).toBe('timeout');
   });
 });
+
+describe('CliModelExecutor harness injection', () => {
+  it('lets an injected harness handle the run for its id', async () => {
+    const rec = recordingExec({ stdout: 'REAL CLAUDE' });
+    const fake = { calls: [] as { model: string; prompt: string }[] };
+    const executor = new CliModelExecutor(rec.fn, undefined, {
+      'claude-cli': {
+        run: async (model, prompt) => {
+          fake.calls.push({ model, prompt });
+          return 'FAKE HARNESS OUTPUT';
+        },
+      },
+    });
+
+    const output = await executor.runModel('claude-model', 'draft plan', {
+      worktree,
+      timeout,
+      task: 'plan',
+      registry,
+      routesConfig,
+    });
+
+    expect(output).toBe('FAKE HARNESS OUTPUT');
+    expect(fake.calls).toEqual([{ model: 'claude-model', prompt: 'draft plan' }]);
+    expect(rec.calls).toEqual([]);
+  });
+
+  it('leaves other default harnesses intact when only one id is overridden', async () => {
+    const rec = recordingExec({ stdout: 'OC OUT' });
+    const executor = new CliModelExecutor(rec.fn, undefined, {
+      'claude-cli': { run: async () => 'FAKE HARNESS OUTPUT' },
+    });
+
+    const output = await executor.runModel('opencode-declared', 'do it', {
+      worktree,
+      timeout,
+      task: 'plan',
+      registry,
+      routesConfig,
+    });
+
+    expect(output).toBe('OC OUT');
+    expect(rec.calls).toHaveLength(1);
+    expect(rec.calls[0].cmd).toMatch(/^opencode run /);
+  });
+
+  it('lets the injected map add a brand-new harness id', async () => {
+    const fakeHarnessModelsConfig: ModelsConfig = {
+      ...modelsConfig,
+      models: {
+        ...modelsConfig.models,
+        'fake-harness-model': {
+          provider: 'custom',
+          tier: 'boss',
+          costPerMtokInput: 0,
+          costPerMtokOutput: 0,
+          contextWindow: 1000,
+          capabilities: [],
+          envKey: null,
+          harness: 'fake-harness',
+        },
+      },
+      tiers: {
+        boss: [...modelsConfig.tiers.boss, 'fake-harness-model'],
+      },
+    };
+    const fakeHarnessRegistry = new ModelRegistry(fakeHarnessModelsConfig);
+    const executor = new CliModelExecutor(recordingExec().fn, undefined, {
+      'fake-harness': { run: async () => 'NEW ID OUTPUT' },
+    });
+
+    const output = await executor.runModel('fake-harness-model', 'draft plan', {
+      worktree,
+      timeout,
+      task: 'plan',
+      registry: fakeHarnessRegistry,
+      routesConfig,
+    });
+
+    expect(output).toBe('NEW ID OUTPUT');
+
+    await expect(executor.runModel('fake-harness-model', 'build it', {
+      worktree,
+      timeout,
+      task: 'build_claude',
+      registry: fakeHarnessRegistry,
+      routesConfig,
+    })).rejects.toThrow(/cannot edit files/);
+  });
+});

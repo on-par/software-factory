@@ -18,7 +18,7 @@ export type { DoctorProbes, ModelDiagnosis, ModelOverrides } from './models/inde
 
 // Router
 export { ModelRouter, CliModelExecutor } from './router/index.js';
-export type { RouterResult, FailoverReason, ModelExecutor, ModelExecutorContext } from './router/index.js';
+export type { RouterResult, FailoverReason, ModelExecutor, ModelExecutorContext, ExecutorHarness } from './router/index.js';
 export { StubModelExecutor } from './router/stub.js';
 export type { StubModelExecutorOptions } from './router/stub.js';
 
