@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
-import { HarnessError } from '../harness/index.js';
+import { HarnessError, KNOWN_HARNESS_IDS } from '../harness/index.js';
 import { ModelRegistry } from '../models/index.js';
 import { CliModelExecutor } from './index.js';
 
@@ -359,17 +359,20 @@ describe('CliModelExecutor', () => {
     expect(existsSync(join(tmpWorktree, 'docs/local-small-first-green.md'))).toBe(true);
   });
 
-  it('rejects a non-agentic harness on a build task, naming the model and harness', async () => {
-    const executor = new CliModelExecutor(recordingExec().fn);
+  it.each(['build_claude', 'build_codex'] as const)(
+    'rejects a non-agentic harness on build task %s, naming the model and harness',
+    async (task) => {
+      const executor = new CliModelExecutor(recordingExec().fn);
 
-    await expect(executor.runModel('ollama-model', 'build it', {
-      worktree,
-      timeoutSeconds,
-      task: 'build_claude',
-      registry,
-      routesConfig,
-    })).rejects.toThrow(/ollama-model.*ollama-http.*cannot edit files/s);
-  });
+      await expect(executor.runModel('ollama-model', 'build it', {
+        worktree,
+        timeoutSeconds,
+        task,
+        registry,
+        routesConfig,
+      })).rejects.toThrow(/ollama-model.*ollama-http.*cannot edit files/s);
+    },
+  );
 
   it('throws a clear missing-harness error when no harness id resolves', async () => {
     const { fn } = recordingExec();
@@ -843,6 +846,21 @@ describe('CliModelExecutor', () => {
     }).catch(e => e);
 
     expect(err.reason).toBe('timeout');
+  });
+
+  it('keeps the executor dispatch table in exact sync with HARNESS_CATALOG', () => {
+    const executor = new CliModelExecutor(recordingExec().fn);
+    // Exact set equality, both directions: a catalog id with no dispatch entry
+    // fails (config-valid but runtime-unknown), and a dispatch-only id fails
+    // (executor accepts what config validation would reject).
+    expect([...executor.supportedHarnessIds()].sort()).toEqual([...KNOWN_HARNESS_IDS].sort());
+  });
+
+  it('overriding an existing harness id does not change the supported id set', () => {
+    const executor = new CliModelExecutor(recordingExec().fn, undefined, {
+      'codex-cli': { run: async () => 'stub-output' },
+    });
+    expect([...executor.supportedHarnessIds()].sort()).toEqual([...KNOWN_HARNESS_IDS].sort());
   });
 });
 
