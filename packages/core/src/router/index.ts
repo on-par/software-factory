@@ -29,6 +29,8 @@ export type ExecFn = (
   opts: { cwd?: string; timeout?: number; maxBuffer?: number },
 ) => Promise<{ stdout: string; stderr: string }>;
 
+export type SleepFn = (ms: number) => Promise<void>;
+
 export type FetchFn = (
   input: string,
   init?: {
@@ -58,7 +60,6 @@ export interface RouterResult {
   model: string;
   output: string;
   exitCode: number;
-  cost: number;
   /** Why the winning model was reached via failover (undefined if the first model succeeded). */
   failoverReason?: FailoverReason;
   attempts: { model: string; reason: FailoverReason | null; ok: boolean; detail?: string }[];
@@ -421,6 +422,7 @@ export class ModelRouter {
     private allowExperimental = process.env.FACTORY_EXPERIMENTAL === '1',
     private localOnly = process.env.FACTORY_LOCAL_ONLY === '1',
     private gitExecFn: ExecFn = exec,
+    private sleepFn: SleepFn = sleep,
   ) {
     this.registry = new ModelRegistry(modelsConfig);
   }
@@ -536,7 +538,7 @@ export class ModelRouter {
           if (reason === 'rate_limit' && retries < maxRetries) {
             retries++;
             onLog(`Rate limited — cooldown ${cooldownMs}ms before retry`);
-            await sleep(cooldownMs);
+            await this.sleepFn(cooldownMs);
             continue;
           }
 
@@ -575,7 +577,6 @@ export class ModelRouter {
             model,
             output: output,
             exitCode: 0,
-            cost: 0, // cost tracked separately
             ...(failoverReason ? { failoverReason } : {}),
             attempts,
           };
