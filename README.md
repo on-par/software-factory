@@ -20,7 +20,7 @@ Honest snapshot of what works today vs. what is experimental. Statuses reflect t
 | GPT worker models via the Codex CLI | ✅ Working | `gpt-5.6-sol` → `gpt-5.1-codex`, dispatched through the `codex-cli` harness |
 | Local Ollama + OpenCode models | ⚠️ Experimental | Harnesses are contract-tested, but real-run behavior is unverified — expect failover to a cloud model |
 | DeepSeek / gpt-4.1-mini via `claude --model ...` | ⚠️ Experimental | The Claude CLI only serves Anthropic models; this wiring is unproven |
-| Evals (`npm run eval`) | ✅ Working | Deterministic stub subset runs in CI on every PR; LLM-judge "real" mode runs locally and weekly in CI |
+| Prompt evals (`npm run eval`) | ✅ Working | Deterministic stub subset runs in CI on every PR; weekly real run checks prompt/constitution/skill regressions under pinned model IDs |
 | Cost tracking (`factory cost`) | ✅ Working | Per-task tokens and cost logged to `.factory/costs.jsonl` |
 | Constitutions + checker rework loop | ✅ Working | Up to 3 rework rounds with dispute resolution |
 | Server (`packages/server`) | 🚧 Stub | Exports config types only; `createServer()` throws — Phase 2 of the roadmap |

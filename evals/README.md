@@ -10,8 +10,9 @@ Use `expectedRoute: any` when only spec structure matters.
 Use `deterministicOnly: true` to skip the LLM judge even in real mode.
 Add rubric items only for cases that need qualitative scoring.
 For offline runs, include a fenced `stub-output` block with the canned PLAN output.
-Run `npm run eval -- --stub` before committing prompt or golden-set changes.
-CI also runs the stub subset on every PR, so a broken prompt or golden case fails the PR check at zero model cost.
+Run `npm run eval -- --stub` before committing prompt, skill, constitution, or
+golden-set changes. CI also runs the stub subset on every PR, so a broken prompt
+or golden case fails the PR check at zero model cost.
 
 ## Local-small first green
 
@@ -61,18 +62,29 @@ Compare against a previous baseline:
 npm run local-small-scoreboard -- --input runs.json --baseline baseline-runs.json
 ```
 
-## Weekly full eval run
+## Weekly prompt regression eval run
 
-The `Weekly Evals` workflow (`.github/workflows/nightly-evals.yml`) runs the full
-scored suite — real models, LLM judge, no `--stub` — weekly and on
-`workflow_dispatch`, then compares the results against the committed baseline at
-`evals/baseline.json`, failing the job if any case regresses beyond its tolerance.
-The run report is always uploaded as a build artifact, even on failure.
+The `Weekly Prompt Evals` workflow (`.github/workflows/nightly-evals.yml`) runs
+the full scored suite weekly and on `workflow_dispatch`. This is a prompt,
+system-prompt, skill, and constitution regression signal, not a model bakeoff:
+the workflow pins the plan model and judge model so model choice stays stable
+while prompt behavior changes are measured.
+
+The weekly run uses real LLM calls, compares the results against the committed
+baseline at `evals/baseline.json`, and fails the job if any case regresses beyond
+its tolerance. The run report is always uploaded as a build artifact, even on
+failure.
+
+Run the same pinned real eval locally:
+
+```
+npm run eval -- --judge-k 3 --plan-model claude-fable-5 --judge-model claude-sonnet-5 --report eval-report.json --baseline evals/baseline.json
+```
 
 Refresh the baseline after an intentional prompt or golden-set change:
 
 ```
-npm run eval -- --write-baseline evals/baseline.json
+npm run eval -- --plan-model claude-fable-5 --judge-model claude-sonnet-5 --write-baseline evals/baseline.json
 ```
 
 Run this in real mode (no `--stub`) locally, or copy the numbers from a weekly

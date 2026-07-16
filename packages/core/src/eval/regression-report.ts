@@ -1,8 +1,8 @@
 import type { Baseline, BaselineComparison } from './baseline.js';
 import type { EvalSummary } from './types.js';
 
-export const REGRESSION_ISSUE_TITLE = 'Weekly eval regression';
-export const REGRESSION_ISSUE_MARKER = '<!-- weekly-eval-regression -->';
+export const REGRESSION_ISSUE_TITLE = 'Weekly prompt eval regression';
+export const REGRESSION_ISSUE_MARKER = '<!-- weekly-prompt-eval-regression -->';
 
 export interface RegressionIssue {
   title: string;
@@ -17,7 +17,7 @@ export function formatRegressionIssue(
 ): RegressionIssue {
   const lines = [
     REGRESSION_ISSUE_MARKER,
-    `Weekly eval regression detected. See the [workflow run](<${runUrl}>).`,
+    `Weekly prompt eval regression detected. See the [workflow run](<${runUrl}>).`,
     '',
     `**Overall pass rate:** ${summary.passRate} (baseline ${baseline.passRate}, tolerance ${baseline.tolerance.passRate})`,
     '',

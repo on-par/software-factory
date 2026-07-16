@@ -22,6 +22,8 @@ interface Args {
   baseline?: string;
   writeBaseline?: string;
   judgeK: number;
+  planModel?: string;
+  judgeModel?: string;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -35,6 +37,8 @@ function parseArgs(argv: string[]): Args {
     else if (arg === '--report') args.report = argv[++i];
     else if (arg === '--baseline') args.baseline = argv[++i];
     else if (arg === '--write-baseline') args.writeBaseline = argv[++i];
+    else if (arg === '--plan-model') args.planModel = argv[++i];
+    else if (arg === '--judge-model') args.judgeModel = argv[++i];
     else if (arg === '--judge-k') {
       const judgeK = Number(argv[++i]);
       if (!Number.isFinite(judgeK) || !Number.isInteger(judgeK) || judgeK < 1) {
@@ -50,7 +54,7 @@ function parseArgs(argv: string[]): Args {
 const args = parseArgs(process.argv.slice(2));
 const allCases = await loadGoldenCases(resolve(args.dir));
 const cases = args.filter ? allCases.filter(c => c.id.includes(args.filter!)) : allCases;
-const router = args.stub ? buildStubRouter(cases) : new ModelRouter(loadModelsConfig(), loadRoutesConfig());
+const router = args.stub ? buildStubRouter(cases) : buildRealRouter(args);
 const summary = await runEval({
   cases,
   router,
@@ -134,6 +138,33 @@ function buildStubRouter(cases: typeof allCases): ModelRouter {
     },
   });
   return new ModelRouter(models, routes, false, executor);
+}
+
+function buildRealRouter(args: Args): ModelRouter {
+  const models = loadModelsConfig();
+  const routes = loadRoutesConfig();
+
+  assertKnownModel(models, args.planModel, '--plan-model');
+  assertKnownModel(models, args.judgeModel, '--judge-model');
+
+  if (!args.planModel && !args.judgeModel) return new ModelRouter(models, routes);
+
+  const pinnedModels: ModelsConfig = {
+    ...models,
+    tiers: {
+      ...models.tiers,
+      ...(args.planModel ? { boss: [args.planModel] } : {}),
+      ...(args.judgeModel ? { checker: [args.judgeModel] } : {}),
+    },
+  };
+
+  return new ModelRouter(pinnedModels, routes);
+}
+
+function assertKnownModel(models: ModelsConfig, model: string | undefined, flag: string): void {
+  if (model && !models.models[model]) {
+    throw new Error(`${flag} references unknown model '${model}'`);
+  }
 }
 
 function printTable(results: typeof summary.results, expectedRoutes: Map<string, string>) {
