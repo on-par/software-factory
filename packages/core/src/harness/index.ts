@@ -81,4 +81,4 @@ export interface CodingHarness {
 }
 
 export { HARNESS_CATALOG, KNOWN_HARNESS_IDS, isAgenticHarness } from './catalog.js';
-export type { HarnessCatalogEntry } from './catalog.js';
+export type { HarnessCatalogEntry, HarnessProbe } from './catalog.js';

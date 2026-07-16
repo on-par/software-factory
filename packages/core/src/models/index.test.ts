@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ModelsConfig } from '../config/index.js';
 import { ModelRegistry, diagnoseModels, resolveModelOverrides } from './index.js';
 
@@ -227,10 +227,55 @@ const doctorConfig: ModelsConfig = {
       harness: 'opencode',
       providerModel: 'anthropic/claude-sonnet-5',
     },
+    'declared-codex-over-ollama-model': {
+      provider: 'ollama',
+      tier: 'worker',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+      codex: true,
+      harness: 'codex-cli',
+    },
+    'ollama-http-model': {
+      provider: 'ollama',
+      tier: 'worker',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+      harness: 'ollama-http',
+      providerModel: 'qwen2.5-coder:14b',
+    },
+    'ollama-agentic-model': {
+      provider: 'ollama',
+      tier: 'worker',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+      harness: 'ollama-agentic',
+      codex: true,
+      providerModel: 'qwen3.5:9b',
+    },
   },
   tiers: {
     boss: ['anthropic-model'],
-    worker: ['codex-model', 'ollama-model', 'ollama-codex-model', 'ollama-cloud-model', 'deepseek-model', 'experimental-model', 'opencode-model'],
+    worker: [
+      'codex-model',
+      'ollama-model',
+      'ollama-codex-model',
+      'ollama-cloud-model',
+      'deepseek-model',
+      'experimental-model',
+      'opencode-model',
+      'declared-codex-over-ollama-model',
+      'ollama-http-model',
+      'ollama-agentic-model',
+    ],
   },
   failover: {
     triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
@@ -379,6 +424,147 @@ describe('diagnoseModels', () => {
     }, true);
     expect(d.reachable).toBe(true);
     expect(d.reason).toBe('ok (opencode CLI)');
+  });
+
+  it('probes by declared harness even when legacy fields say ollama: reachable via codex CLI', () => {
+    const d = diagnosisFor('declared-codex-over-ollama-model', {
+      commandAvailable: (cmd) => cmd === 'codex',
+      envPresent: () => false,
+    }, true);
+    expect(d.reachable).toBe(true);
+    expect(d.reason).toBe('ok (codex CLI)');
+  });
+
+  it('probes by declared harness even when legacy fields say ollama: unreachable when codex CLI is missing', () => {
+    const d = diagnosisFor('declared-codex-over-ollama-model', {
+      commandAvailable: (cmd) => cmd === 'ollama',
+      envPresent: () => false,
+    }, true);
+    expect(d.reachable).toBe(false);
+    expect(d.reason).toBe('codex CLI not found on PATH');
+  });
+
+  it('marks a declared ollama-http model unreachable when ollama is missing and no base URL is set', () => {
+    const d = diagnosisFor('ollama-http-model', {
+      commandAvailable: () => false,
+      envPresent: () => false,
+    }, true);
+    expect(d.reachable).toBe(false);
+    expect(d.reason).toBe('ollama not found on PATH');
+  });
+
+  it('marks a declared ollama-http model reachable via native ollama', () => {
+    const d = diagnosisFor('ollama-http-model', {
+      commandAvailable: (cmd) => cmd === 'ollama',
+      ollamaModelPresent: (model) => model === 'qwen2.5-coder:14b',
+      envPresent: () => false,
+    }, true);
+    expect(d.reachable).toBe(true);
+    expect(d.reason).toBe('ok (ollama native)');
+  });
+
+  it('marks a declared ollama-agentic model reachable via native ollama', () => {
+    const d = diagnosisFor('ollama-agentic-model', {
+      commandAvailable: (cmd) => cmd === 'ollama',
+      ollamaModelPresent: (model) => model === 'qwen3.5:9b',
+      envPresent: () => false,
+    }, true);
+    expect(d.reachable).toBe(true);
+    expect(d.reason).toBe('ok (ollama agentic)');
+  });
+
+  it('marks a declared ollama-agentic model unreachable when ollama is missing', () => {
+    const d = diagnosisFor('ollama-agentic-model', {
+      commandAvailable: () => false,
+      envPresent: () => false,
+    }, true);
+    expect(d.reachable).toBe(false);
+    expect(d.reason).toBe('ollama not found on PATH');
+  });
+
+  it('marks an ollama-agentic model reachable via a remote OLLAMA_BASE_URL without a local CLI', () => {
+    const d = diagnosisFor('ollama-agentic-model', {
+      commandAvailable: () => false,
+      envPresent: () => false,
+      ollamaBaseUrl: () => 'http://gpu-box:11434',
+    }, true);
+    expect(d.reachable).toBe(true);
+    expect(d.reason).toBe('ok (ollama agentic via http://gpu-box:11434)');
+  });
+
+  it('marks an ollama-http model reachable via a remote OLLAMA_BASE_URL without a local CLI', () => {
+    const d = diagnosisFor('ollama-http-model', {
+      commandAvailable: () => false,
+      envPresent: () => false,
+      ollamaBaseUrl: () => 'http://gpu-box:11434',
+    }, true);
+    expect(d.reachable).toBe(true);
+    expect(d.reason).toBe('ok (ollama native via http://gpu-box:11434)');
+  });
+
+  it('treats a loopback OLLAMA_BASE_URL as local and still requires the ollama CLI', () => {
+    const d = diagnosisFor('ollama-agentic-model', {
+      commandAvailable: () => false,
+      envPresent: () => false,
+      ollamaBaseUrl: () => 'http://127.0.0.1:11434',
+    }, true);
+    expect(d.reachable).toBe(false);
+    expect(d.reason).toBe('ollama not found on PATH');
+  });
+
+  it('falls back to local probing for an unparseable OLLAMA_BASE_URL', () => {
+    const d = diagnosisFor('ollama-agentic-model', {
+      commandAvailable: () => false,
+      envPresent: () => false,
+      ollamaBaseUrl: () => 'not a url',
+    }, true);
+    expect(d.reachable).toBe(false);
+    expect(d.reason).toBe('ollama not found on PATH');
+  });
+
+  describe('default OLLAMA_BASE_URL probe', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it('reads OLLAMA_BASE_URL from the environment when no probe override is given', () => {
+      vi.stubEnv('OLLAMA_BASE_URL', 'http://gpu-box:11434');
+      const registry = new ModelRegistry(doctorConfig);
+      const d = diagnoseModels(registry, {
+        commandAvailable: () => false,
+        envPresent: () => false,
+      }, true).find((x) => x.model === 'ollama-agentic-model')!;
+      expect(d.reachable).toBe(true);
+      expect(d.reason).toBe('ok (ollama agentic via http://gpu-box:11434)');
+    });
+  });
+
+  it('marks a model with an unknown declared harness unreachable, naming the known harnesses', () => {
+    const unknownHarnessConfig: ModelsConfig = {
+      ...doctorConfig,
+      models: {
+        ...doctorConfig.models,
+        'bogus-harness-model': {
+          provider: 'custom',
+          tier: 'worker',
+          costPerMtokInput: 0,
+          costPerMtokOutput: 0,
+          contextWindow: 1000,
+          capabilities: [],
+          envKey: null,
+          harness: 'bogus',
+        },
+      },
+      tiers: {
+        ...doctorConfig.tiers,
+        worker: [...doctorConfig.tiers.worker, 'bogus-harness-model'],
+      },
+    };
+    const registry = new ModelRegistry(unknownHarnessConfig);
+    const d = diagnoseModels(registry, { commandAvailable: () => true, envPresent: () => true }, true)
+      .find((x) => x.model === 'bogus-harness-model')!;
+    expect(d.reachable).toBe(false);
+    expect(d.reason).toMatch(/^unknown harness 'bogus'/);
   });
 });
 
