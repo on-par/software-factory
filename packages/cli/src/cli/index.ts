@@ -33,7 +33,7 @@ import {
   formatGcReport,
   isCommandAvailable,
 } from '@on-par/factory-core';
-import type { ModelDiagnosis, QueueDiagnostic, UsageReading } from '@on-par/factory-core';
+import type { ModelDiagnosis, QueueDiagnostic, UsageReading, FailoverReason } from '@on-par/factory-core';
 import { logEvent, branchFor, branchPrefixSlug, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock, withFileLock, shellEscape } from '@on-par/factory-core';
 import { runTui } from '@on-par/factory-tui';
 import { exec as execCb, execSync } from 'node:child_process';
@@ -326,26 +326,45 @@ async function cmdModels(opts: { doctor?: boolean } = {}) {
   }
 }
 
-async function cmdCost() {
+async function cmdCost(opts: { issue?: string } = {}) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   const costs = readCosts(paths.costs);
+
+  if (opts.issue) {
+    const filtered = costs.filter(c => c.issue === String(opts.issue));
+    if (filtered.length === 0) {
+      console.log(`no cost data for issue ${opts.issue}`);
+      return;
+    }
+    console.log(chalk.bold(`== Costs for issue ${opts.issue} ==`));
+    for (const c of filtered) {
+      console.log(`  ${c.task} ${c.model} $${c.cost.toFixed(4)}${c.failoverReason ? ` [failover: ${c.failoverReason}]` : ''}`);
+    }
+    const total = filtered.reduce((s, c) => s + c.cost, 0);
+    console.log('  ---');
+    console.log(`  Total: $${total.toFixed(4)}`);
+    return;
+  }
+
   if (costs.length === 0) {
     console.log('no cost data yet');
     return;
   }
 
-  const byModel = new Map<string, { tasks: number; total: number }>();
+  const byModel = new Map<string, { tasks: number; total: number; failovers: number }>();
   for (const c of costs) {
-    const e = byModel.get(c.model) ?? { tasks: 0, total: 0 };
+    const e = byModel.get(c.model) ?? { tasks: 0, total: 0, failovers: 0 };
     e.tasks++;
     e.total += c.cost;
+    if (c.failoverReason) e.failovers++;
     byModel.set(c.model, e);
   }
 
   console.log(chalk.bold('== Cost Summary =='));
-  for (const [model, { tasks, total }] of byModel) {
-    console.log(`  ${model}: ${tasks} tasks, $${total.toFixed(4)}`);
+  for (const [model, { tasks, total, failovers }] of byModel) {
+    const failoverSuffix = failovers > 0 ? ` (${failovers} failover${failovers === 1 ? '' : 's'})` : '';
+    console.log(`  ${model}: ${tasks} tasks, $${total.toFixed(4)}${failoverSuffix}`);
   }
   const grandTotal = costs.reduce((s, c) => s + c.cost, 0);
   console.log('  ---');
@@ -531,7 +550,7 @@ export async function shipIssue(
   const runStartedAt = new Date().toISOString();
   let route: 'codex' | 'claude' | undefined;
 
-  const log = (type: string, msg: string) => logEvent(paths.events, type, issueNum, msg);
+  const log = (type: string, msg: string, extra?: { failoverReason?: FailoverReason }) => logEvent(paths.events, type, issueNum, msg, extra);
   log('issue-title', issueTitle);
   if (modelOverrides.plan) log('model-override', `plan model pinned to ${modelOverrides.plan} (FACTORY_PLAN_MODEL)`);
   if (modelOverrides.build) log('model-override', `build model pinned to ${modelOverrides.build} (FACTORY_BUILD_MODEL)`);
@@ -755,7 +774,7 @@ async function landIssue(
   skipCI?: boolean,
 ): Promise<{ branch: string; prNumber: number }> {
   const [owner, repoName] = ghRepo.split('/');
-  const log = (type: string, msg: string) => logEvent(paths.events, type, issueNum, msg);
+  const log = (type: string, msg: string, extra?: { failoverReason?: FailoverReason }) => logEvent(paths.events, type, issueNum, msg, extra);
 
   // The issue title may have been edited since the PR was opened, so a
   // freshly-derived branch name can drift from the branch the PR actually
@@ -1450,7 +1469,10 @@ export async function main() {
 
   program.command('doctor').description('Preflight-check your environment (claude, gh, token, git, npm, sandbox)').action(cmdDoctor);
 
-  program.command('cost').description('Show cost tracking summary').action(cmdCost);
+  program.command('cost')
+    .description('Show cost tracking summary')
+    .option('--issue <number>', 'show per-entry detail for one issue')
+    .action((opts: { issue?: string }) => cmdCost(opts));
 
   program.command('usage').description('Report real 5h subscription usage (with a list-price heuristic fallback)').action(cmdUsage);
 

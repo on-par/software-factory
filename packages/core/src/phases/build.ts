@@ -1,10 +1,10 @@
 // src/phases/build.ts — BUILD phase: worker model implements the frozen spec
 
 import { readFile } from 'node:fs/promises';
-import { ModelRouter } from '../router/index.js';
+import { ModelRouter, failoversFrom } from '../router/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { escalationLine, isEscalation, codexDisabled } from '../utils/index.js';
-import type { Constitution } from '../types/index.js';
+import type { Constitution, FailoverReason } from '../types/index.js';
 
 export interface BuildResult {
   ok: boolean;
@@ -22,7 +22,7 @@ export async function buildPhase(
     constitution: Constitution | null;
     route: 'codex' | 'claude';
     router: ModelRouter;
-    log: (type: string, msg: string) => void;
+    log: (type: string, msg: string, extra?: { failoverReason?: FailoverReason }) => void;
     timeoutSeconds?: number;
     skipCI?: boolean;
     modelOverride?: string;
@@ -116,6 +116,10 @@ with "ESCALATE:" followed by the question, then STOP.`;
     modelOverride,
     onLog: (msg) => log('router', msg),
   });
+
+  for (const f of failoversFrom(result.attempts)) {
+    log('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, { failoverReason: f.reason });
+  }
 
   if (isEscalation(result.output)) {
     const escalateLine = escalationLine(result.output);

@@ -1,9 +1,11 @@
 // src/phases/check.ts — CHECK phase: independent checkers verify output, rework loop, dispute resolution
 
-import { ModelRouter } from '../router/index.js';
+import { ModelRouter, failoversFrom } from '../router/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { runAllCheckers, type CheckerContext } from '../checkers/index.js';
-import type { CheckSummary, Constitution, DisputeResult } from '../types/index.js';
+import type { CheckSummary, Constitution, DisputeResult, FailoverReason } from '../types/index.js';
+
+type LogFn = (type: string, msg: string, extra?: { failoverReason?: FailoverReason }) => void;
 
 export interface CheckPhaseResult {
   passed: boolean;
@@ -20,7 +22,7 @@ export async function checkPhase(
     specPath: string;
     constitution: Constitution | null;
     router: ModelRouter;
-    log: (type: string, msg: string) => void;
+    log: LogFn;
     autoRework?: boolean;
     buildTimeoutSeconds?: number;
     checkTimeoutSeconds?: number;
@@ -72,7 +74,7 @@ async function reworkWorker(
   summary: CheckSummary,
   constitution: Constitution | null,
   router: ModelRouter,
-  log: (type: string, msg: string) => void,
+  log: LogFn,
   timeoutSeconds?: number,
 ): Promise<void> {
   const constitutionCtx = buildConstitutionContext(constitution);
@@ -101,11 +103,17 @@ ${failureDetails}
 
 Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`;
 
-  await router.run('build_claude', prompt, {
+  const reworkResult = await router.run('build_claude', prompt, {
     worktree,
     timeout: timeoutSeconds ?? 7200,
     onLog: (msg) => log('router', msg),
-  }).catch(() => {});
+  }).catch(() => null);
+
+  if (reworkResult) {
+    for (const f of failoversFrom(reworkResult.attempts)) {
+      log('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, { failoverReason: f.reason });
+    }
+  }
 }
 
 export async function disputeResolution(
@@ -118,9 +126,10 @@ export async function disputeResolution(
     constitution: Constitution | null;
     router: ModelRouter;
     timeoutSeconds?: number;
+    log?: LogFn;
   },
 ): Promise<DisputeResult> {
-  const { issue, worktree, specPath, checkerName, checkerDetails, constitution, router, timeoutSeconds } = opts;
+  const { issue, worktree, specPath, checkerName, checkerDetails, constitution, router, timeoutSeconds, log } = opts;
   const constitutionCtx = buildConstitutionContext(constitution);
 
   const prompt = `You are the BOSS in a software factory. A worker agent is disputing
@@ -151,6 +160,10 @@ Details: ${checkerDetails}
 
   if (!result) {
     return { verdict: 'upheld', reasoning: 'dispute agent failed', action: 'worker must fix' };
+  }
+
+  for (const f of failoversFrom(result.attempts)) {
+    log?.('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, { failoverReason: f.reason });
   }
 
   const match = result.output.match(/"verdict"\s*:\s*"(upheld|overruled)"/);

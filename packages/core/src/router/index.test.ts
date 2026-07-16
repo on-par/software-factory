@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
-import { ModelRouter, ModelExecutorError } from './index.js';
+import { ModelRouter, ModelExecutorError, failoversFrom } from './index.js';
 import { StubModelExecutor } from './stub.js';
 import { HarnessError } from '../harness/index.js';
 
@@ -114,6 +114,7 @@ describe('ModelRouter with StubModelExecutor', () => {
     expect(result.output).toBe('SCRIPTED PLAN');
     expect(result.model).toBe('stub-model');
     expect(result.attempts).toEqual([{ model: 'stub-model', reason: null, ok: true }]);
+    expect(result.failoverReason).toBeUndefined();
     expect(stub.calls).toHaveLength(1);
   });
 
@@ -279,6 +280,34 @@ describe('ModelRouter with StubModelExecutor', () => {
       { model: 'model-a', reason: 'usage_cap', ok: false, detail: 'msg="stub failure: usage_cap" exitCode=1' },
       { model: 'model-b', reason: null, ok: true },
     ]);
+    expect(result.failoverReason).toBe('usage_cap');
+  });
+
+  it.each(['usage_cap', 'timeout', 'empty_response'] as const)(
+    'surfaces failoverReason %s on the winning result when the first model fails over to the second',
+    async reason => {
+      const stub = new StubModelExecutor({
+        scripts: { plan: [{ fail: reason }, { output: 'RECOVERED' }] },
+      });
+      const router = new ModelRouter(twoModels, routes, false, stub);
+
+      const result = await router.run('plan', 'do it');
+
+      expect(result.model).toBe('model-b');
+      expect(result.failoverReason).toBe(reason);
+    },
+  );
+
+  it('surfaces failoverReason error once the single same-model retry is exhausted and it fails over', async () => {
+    const stub = new StubModelExecutor({
+      scripts: { plan: [{ fail: 'error' }, { fail: 'error' }, { output: 'RECOVERED' }] },
+    });
+    const router = new ModelRouter(twoModels, routes, false, stub);
+
+    const result = await router.run('plan', 'do it');
+
+    expect(result.model).toBe('model-b');
+    expect(result.failoverReason).toBe('error');
   });
 
   it('preserves detail when a bare error collapses to unknown (regression)', async () => {
@@ -567,6 +596,28 @@ describe('ModelRouter with StubModelExecutor', () => {
     expect(err.attempts[0]).toMatchObject({ reason: 'usage_cap' });
   });
 
+  it('sets failoverReason on the RouterResult when a typed executor error on the first model fails over to the second', async () => {
+    const zeroRetryModels: ModelsConfig = {
+      ...twoModels,
+      failover: { ...twoModels.failover, maxRetries: 0 },
+    };
+    let calls = 0;
+    const executor = {
+      async runModel(model: string) {
+        calls++;
+        if (model === 'model-a') throw new ModelExecutorError('cap', 'rate_limit', { exitCode: 1 });
+        return 'RECOVERED';
+      },
+    };
+    const router = new ModelRouter(zeroRetryModels, routes, false, executor);
+
+    const result = await router.run('plan', 'do it');
+
+    expect(result.model).toBe('model-b');
+    expect(result.failoverReason).toBe('rate_limit');
+    expect(calls).toBe(2);
+  });
+
   it('records the tracePath detail from a ModelExecutorError', async () => {
     const executor = {
       async runModel() {
@@ -578,6 +629,48 @@ describe('ModelRouter with StubModelExecutor', () => {
     const err: any = await router.run('plan', 'do it').catch(e => e);
 
     expect(err.attempts[0].detail).toContain('trace=/tmp/t.json');
+  });
+});
+
+describe('failoversFrom', () => {
+  it('returns [] for a same-model rate_limit retry followed by a same-model success', () => {
+    const attempts: Parameters<typeof failoversFrom>[0] = [
+      { model: 'A', reason: 'rate_limit', ok: false },
+      { model: 'A', reason: null, ok: true },
+    ];
+
+    expect(failoversFrom(attempts)).toEqual([]);
+  });
+
+  it('returns one entry when model A fails rate_limit and model B succeeds', () => {
+    const attempts: Parameters<typeof failoversFrom>[0] = [
+      { model: 'A', reason: 'rate_limit', ok: false, detail: 'boom' },
+      { model: 'B', reason: null, ok: true },
+    ];
+
+    expect(failoversFrom(attempts)).toEqual([{ model: 'A', reason: 'rate_limit', detail: 'boom' }]);
+  });
+
+  it('returns one entry per model switch across mixed same-model retries and multi-hop failover', () => {
+    const attempts: Parameters<typeof failoversFrom>[0] = [
+      { model: 'A', reason: 'rate_limit', ok: false },
+      { model: 'A', reason: 'rate_limit', ok: false, detail: 'still limited' },
+      { model: 'B', reason: 'error', ok: false, detail: 'boom on B' },
+      { model: 'C', reason: null, ok: true },
+    ];
+
+    expect(failoversFrom(attempts)).toEqual([
+      { model: 'A', reason: 'rate_limit', detail: 'still limited' },
+      { model: 'B', reason: 'error', detail: 'boom on B' },
+    ]);
+  });
+
+  it('excludes the final failure with no following attempt (nothing to switch to)', () => {
+    const attempts: Parameters<typeof failoversFrom>[0] = [
+      { model: 'A', reason: 'error', ok: false, detail: 'boom' },
+    ];
+
+    expect(failoversFrom(attempts)).toEqual([]);
   });
 });
 

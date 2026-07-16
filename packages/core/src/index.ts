@@ -17,7 +17,7 @@ export { ModelRegistry, isCommandAvailable, diagnoseModels, resolveModelOverride
 export type { DoctorProbes, ModelDiagnosis, ModelOverrides } from './models/index.js';
 
 // Router
-export { ModelRouter, CliModelExecutor } from './router/index.js';
+export { ModelRouter, CliModelExecutor, failoversFrom } from './router/index.js';
 export type { RouterResult, FailoverReason, ModelExecutor, ModelExecutorContext, ExecutorHarness } from './router/index.js';
 export { StubModelExecutor } from './router/stub.js';
 export type { StubModelExecutorOptions } from './router/stub.js';

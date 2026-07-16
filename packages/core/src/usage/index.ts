@@ -249,6 +249,7 @@ function isValidCostEntry(value: unknown): value is CostEntry {
     && Number.isFinite(v.cost)
     && (v.inputTokens === undefined || Number.isFinite(v.inputTokens))
     && (v.outputTokens === undefined || Number.isFinite(v.outputTokens))
+    && (v.failoverReason === undefined || typeof v.failoverReason === 'string')
   );
 }
 

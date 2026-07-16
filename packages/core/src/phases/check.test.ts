@@ -39,6 +39,23 @@ const routes: RoutesConfig = {
   },
 };
 
+const twoModels: ModelsConfig = {
+  ...models,
+  models: {
+    ...models.models,
+    'second-model': {
+      provider: 'custom',
+      tier: 'boss',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+    },
+  },
+  tiers: { boss: ['stub-model', 'second-model'] },
+};
+
 const tempDirs = new Set<string>();
 
 afterEach(async () => {
@@ -86,6 +103,27 @@ describe('checkPhase auto rework', () => {
     expect(check.passed).toBe(false);
     expect(check.reworkRounds).toBe(3);
     expect(stub.calls).toHaveLength(3);
+  });
+
+  it('emits a structured failover event from the rework site when the rework worker fails over', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const stub = new StubModelExecutor({
+      scripts: { build_claude: [{ fail: 'usage_cap' }, { output: 'rework complete' }] },
+      defaultOutput: 'rework complete',
+    });
+    const router = new ModelRouter(twoModels, routes, false, stub);
+    const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
+
+    await checkPhase({
+      issue: 78,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      log: (type, msg, extra) => { logCalls.push([type, msg, extra]); },
+    });
+
+    expect(logCalls).toContainEqual(['failover', expect.stringContaining('usage_cap'), { failoverReason: 'usage_cap' }]);
   });
 });
 
@@ -290,6 +328,45 @@ describe('disputeResolution', () => {
       reasoning: 'dispute agent failed',
       action: 'worker must fix',
     });
+  });
+
+  it('emits a structured failover event when a log callback is provided and the dispute router fails over', async () => {
+    const stub = new StubModelExecutor({
+      scripts: { dispute_resolution: [{ fail: 'usage_cap' }, { output: '{"verdict":"upheld","reasoning":"r","action":"a"}' }] },
+    });
+    const router = new ModelRouter(twoModels, routes, false, stub);
+    const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
+
+    const result = await disputeResolution({
+      issue: 94,
+      worktree: '/tmp/wt',
+      specPath: '/tmp/wt/spec.md',
+      checkerName: 'custom_style',
+      checkerDetails: 'naming disagreement',
+      constitution: null,
+      router,
+      log: (type, msg, extra) => { logCalls.push([type, msg, extra]); },
+    });
+
+    expect(result.verdict).toBe('upheld');
+    expect(logCalls).toContainEqual(['failover', expect.stringContaining('usage_cap'), { failoverReason: 'usage_cap' }]);
+  });
+
+  it('does not throw when no log callback is provided and the dispute router fails over', async () => {
+    const stub = new StubModelExecutor({
+      scripts: { dispute_resolution: [{ fail: 'usage_cap' }, { output: '{"verdict":"upheld","reasoning":"r","action":"a"}' }] },
+    });
+    const router = new ModelRouter(twoModels, routes, false, stub);
+
+    await expect(disputeResolution({
+      issue: 95,
+      worktree: '/tmp/wt',
+      specPath: '/tmp/wt/spec.md',
+      checkerName: 'custom_style',
+      checkerDetails: 'naming disagreement',
+      constitution: null,
+      router,
+    })).resolves.toMatchObject({ verdict: 'upheld' });
   });
 });
 

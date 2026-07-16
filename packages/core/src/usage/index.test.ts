@@ -14,6 +14,9 @@ import {
 } from './index.js';
 import type { UsageReading } from './index.js';
 import type { CostEntry } from '../types/index.js';
+import type { logEvent } from '../utils/index.js';
+
+type EmitEventArgs = Parameters<typeof logEvent>;
 
 const now = new Date('2026-07-10T12:00:00Z');
 const tempDirs: string[] = [];
@@ -325,7 +328,7 @@ describe('readUsage', () => {
 
 describe('watchUsage', () => {
   it('stops when the cap is reached mid-run', async () => {
-    const events: Array<[string, string, string | number, string]> = [];
+    const events: EmitEventArgs[] = [];
     const readings: Array<UsageReading> = [
       { pct: 0.5, source: 'estimate', detail: 'trailing-5h usage ~= $100 = 44% of $227 cap' },
       { pct: 0.79, source: 'estimate', detail: 'trailing-5h usage ~= $180 = 79% of $227 cap' },
@@ -361,7 +364,7 @@ describe('watchUsage', () => {
 
   it('keeps polling below the cap and aborts cleanly', async () => {
     const controller = new AbortController();
-    const events: Array<[string, string, string | number, string]> = [];
+    const events: EmitEventArgs[] = [];
     const stopCalls: string[] = [];
     let sleepCalls = 0;
 
@@ -406,7 +409,7 @@ describe('watchUsage', () => {
 
   it('emits usage-unavailable exactly once across consecutive null readings, then re-arms after recovery', async () => {
     const controller = new AbortController();
-    const events: Array<[string, string, string | number, string]> = [];
+    const events: EmitEventArgs[] = [];
     const readings: Array<UsageReading | null> = [null, null, { pct: 0.1, source: 'subscription', detail: '5h subscription window at 10%' }, null];
     let sleepCalls = 0;
 
@@ -459,7 +462,7 @@ describe('watchUsage', () => {
 
   it('formats the armed event', async () => {
     const controller = new AbortController();
-    const events: Array<[string, string, string | number, string]> = [];
+    const events: EmitEventArgs[] = [];
 
     await watchUsage({
       cap: 227,

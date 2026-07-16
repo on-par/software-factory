@@ -96,6 +96,22 @@ export interface CheckSummary {
   results: CheckerOutput[];
 }
 
+// ---------- Failover ----------
+
+/** Why the router abandoned a model. Matches the harness failure classification
+ *  (harness/index.ts aliases HarnessFailureReason to this type). */
+export type FailoverReason =
+  | 'rate_limit'
+  | 'usage_cap'
+  | 'timeout'
+  | 'error'
+  | 'empty_response'
+  | 'unavailable'
+  | 'schema_invalid'
+  | 'apply_failed'
+  | 'verify_failed'
+  | 'unknown';
+
 // ---------- Events ----------
 
 export interface FactoryEvent {
@@ -103,6 +119,7 @@ export interface FactoryEvent {
   type: string;
   issue: string;
   msg: string;
+  failoverReason?: FailoverReason;
 }
 
 // ---------- Cost Tracking ----------
@@ -115,6 +132,7 @@ export interface CostEntry {
   inputTokens: number;
   outputTokens: number;
   cost: number;
+  failoverReason?: FailoverReason;
 }
 
 // ---------- Dispute ----------
