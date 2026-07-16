@@ -72,14 +72,19 @@ export interface ModelExecutorContext {
 /** Executes a single resolved model. On failure, implementations should
  *  throw a ModelExecutorError (or let a HarnessError propagate) so the
  *  router can read a typed `reason`; plain Errors are classified from
- *  stderr/exit code as an intentional fallback. */
+ *  stderr/exit code as an intentional fallback. runModel must resolve
+ *  only with non-empty (trimmed) output — empty provider output must
+ *  surface as a typed error (HarnessError or ModelExecutorError) with
+ *  reason 'empty_response', never as a resolved empty string. */
 export interface ModelExecutor {
   runModel(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string>;
 }
 
 /** A dispatch-map entry in CliModelExecutor: runs one model through one harness.
  *  This is the executor-internal seam (string in/out), not the CodingHarness
- *  contract — injected fakes only need to implement run(). */
+ *  contract — injected fakes only need to implement run(). Implementations
+ *  must uphold the same non-empty-output guarantee as ModelExecutor: never
+ *  resolve with empty output, surface it as a typed 'empty_response' error. */
 export interface ExecutorHarness {
   run(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string>;
 }
@@ -132,33 +137,23 @@ export class CliModelExecutor implements ModelExecutor {
     return entry.run(model, prompt, ctx);
   }
 
-  /** Delegate to a harness and translate the contract's empty-output
-   *  rejection into the empty string the router's run loop owns. The
-   *  harness contract forbids resolving with empty output, but the
-   *  router's run loop (and the command-agent loop) own empty-output
-   *  handling — return '' unchanged so router behavior is byte-identical. */
+  /** Delegate to a harness while preserving the CodingHarness contract:
+   *  empty provider output rejects with HarnessError('empty_response'). */
   private async runViaHarness(
     harness: CodingHarness,
     model: string,
     prompt: string,
     ctx: Pick<ModelExecutorContext, 'worktree' | 'timeout' | 'task' | 'registry'>,
   ): Promise<string> {
-    try {
-      const { output } = await harness.run({
-        model,
-        prompt,
-        worktree: ctx.worktree,
-        timeoutSeconds: ctx.timeout,
-        task: ctx.task,
-        registry: ctx.registry,
-      });
-      return output;
-    } catch (err) {
-      if (err instanceof HarnessError && err.reason === 'empty_response' && err.details.exitCode === 0) {
-        return '';
-      }
-      throw err;
-    }
+    const { output } = await harness.run({
+      model,
+      prompt,
+      worktree: ctx.worktree,
+      timeoutSeconds: ctx.timeout,
+      task: ctx.task,
+      registry: ctx.registry,
+    });
+    return output;
   }
 
   /** Run a small local command loop for Ollama worker models. */
@@ -178,7 +173,7 @@ First inspect, then edit, then run one cheap check, then git add/commit.
     for (let step = 0; step < 8; step++) {
       let output: string;
       try {
-        output = await this.callOllama(model, conversation, timeout, registry, worktree, 'build_codex');
+        output = await this.callOllamaForCommandAgent(model, conversation, timeout, registry, worktree, 'build_codex');
       } catch (err) {
         const reason = extractFailoverReason(err) ?? 'error';
         const message = err instanceof Error ? err.message : String(err);
@@ -299,7 +294,7 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
 
     let repairedOutput: string;
     try {
-      repairedOutput = await this.callOllama(opts.model, repairPrompt, opts.timeout, opts.registry, opts.worktree, 'build_codex');
+      repairedOutput = await this.callOllamaForCommandAgent(opts.model, repairPrompt, opts.timeout, opts.registry, opts.worktree, 'build_codex');
     } catch (err) {
       const reason = extractFailoverReason(err) ?? 'error';
       const message = err instanceof Error ? err.message : String(err);
@@ -375,6 +370,22 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
 
   private async callOllama(model: string, prompt: string, timeout: number, registry: ModelRegistry, worktree: string, task: TaskType): Promise<string> {
     return this.runViaHarness(this.ollamaHarness, model, prompt, { worktree, timeout, task, registry });
+  }
+
+  /** Command-agent-only seam: the local command loop owns empty-output handling
+   *  (it feeds '' into its malformed-output repair prompt), so an
+   *  empty_response from a clean exit is returned as '' here instead of
+   *  propagating. Every other path must let HarnessError('empty_response')
+   *  propagate — ModelExecutor.runModel never resolves empty output. */
+  private async callOllamaForCommandAgent(model: string, prompt: string, timeout: number, registry: ModelRegistry, worktree: string, task: TaskType): Promise<string> {
+    try {
+      return await this.callOllama(model, prompt, timeout, registry, worktree, task);
+    } catch (err) {
+      if (err instanceof HarnessError && err.reason === 'empty_response' && err.details.exitCode === 0) {
+        return '';
+      }
+      throw err;
+    }
   }
 }
 
@@ -506,7 +517,11 @@ export class ModelRouter {
             continue;
           }
 
-          // Anything else (incl. harness-thrown empty_response) → failover
+          // This is the documented empty-output path: a harness throws
+          // HarnessError('empty_response'), the executor propagates it
+          // (CliModelExecutor no longer catches and resolves ''), it's
+          // classified as retryable here, one attempt is recorded above,
+          // and we fail over to the next model.
           break;
         }
 
@@ -522,8 +537,10 @@ export class ModelRouter {
           };
         }
 
-        // Empty output is a local failure, not an exception: record exactly one
-        // empty_response attempt and fail over to the next model.
+        // Defensive backstop for non-conforming executors: ModelExecutor.runModel
+        // is documented to never resolve empty output, but if some injected/custom
+        // executor does anyway, treat it the same as a thrown empty_response —
+        // record exactly one attempt and fail over to the next model.
         attempts.push({ model, reason: 'empty_response', ok: false });
         onLog(`${model} failed (empty_response) on ${task}`);
         break;

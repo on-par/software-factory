@@ -374,6 +374,22 @@ describe('ModelRouter with StubModelExecutor', () => {
     ]);
   });
 
+  it('fails over to the next model when the executor throws a typed empty_response', async () => {
+    const stub = new StubModelExecutor({
+      scripts: { plan: [{ fail: 'empty_response' }, { output: 'RECOVERED' }] },
+    });
+    const router = new ModelRouter(twoModels, routes, false, stub);
+
+    const result = await router.run('plan', 'do it');
+
+    expect(result.model).toBe('model-b');
+    expect(result.output).toBe('RECOVERED');
+    expect(result.attempts).toEqual([
+      { model: 'model-a', reason: 'empty_response', ok: false, detail: 'msg="stub failure: empty_response" exitCode=1' },
+      { model: 'model-b', reason: null, ok: true },
+    ]);
+  });
+
   it.each(['schema_invalid', 'apply_failed', 'verify_failed'] as const)(
     'stops the failover chain on a non-retryable %s reason without burning the next tier',
     async reason => {

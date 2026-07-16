@@ -70,6 +70,8 @@ export class HarnessError extends Error {
  * - Empty provider output rejects with HarnessError reason 'empty_response'.
  * - Timeouts reject with HarnessError reason 'timeout'.
  * - Nonzero exits / provider errors reject with a classified HarnessFailureReason.
+ * - Callers (executors) must propagate the 'empty_response' rejection —
+ *   resolving an empty string in place of it violates this contract.
  */
 export interface CodingHarness {
   /** Stable identifier, e.g. 'stub', 'claude-cli', 'codex-cli', 'ollama-http'. */
