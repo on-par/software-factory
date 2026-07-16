@@ -41,6 +41,22 @@ describe('utils', () => {
     expect(shellEscape('plain')).toBe("'plain'");
   });
 
+  it('wraps strings with spaces in single quotes', () => {
+    expect(shellEscape('path with spaces/file.txt')).toBe("'path with spaces/file.txt'");
+  });
+
+  it('preserves double quotes and shell metacharacters inside single quotes', () => {
+    expect(shellEscape('say "hi" && rm -rf /')).toBe("'say \"hi\" && rm -rf /'");
+  });
+
+  it('escapes multiple embedded single quotes', () => {
+    expect(shellEscape("a'b'c")).toBe("'a'\\''b'\\''c'");
+  });
+
+  it('handles the empty string', () => {
+    expect(shellEscape('')).toBe("''");
+  });
+
   it('builds a ship-it branch from issue and title by default, matching slugify', () => {
     expect(branchFor(22, 'Reliably detect a merged PR')).toBe(`ship-it/22-${slugify('Reliably detect a merged PR')}`);
     expect(branchFor(7, 'Hello, World!')).toBe('ship-it/7-hello-world');

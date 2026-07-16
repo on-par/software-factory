@@ -810,7 +810,7 @@ explaining exclusions.` ;
   let plannerError: unknown;
   logEvent(paths.events, 'triage', '-', `Triaging ${ghRepo} with ${model}`);
   await exec(
-    `claude -p ${shellEscapeInline(prompt)} ${flag ? `--model ${flag}` : ''} --allowedTools "Bash(gh issue:*)" "Bash(gh repo:*)" Read Glob Grep Write`,
+    `claude -p ${shellEscape(prompt)} ${flag ? `--model ${flag}` : ''} --allowedTools "Bash(gh issue:*)" "Bash(gh repo:*)" Read Glob Grep Write`,
   ).catch((err: unknown) => {
     plannerError = err;
     logEvent(paths.events, 'warn', '-', `triage planner failed: ${errorDetail(err)}`);
@@ -867,10 +867,6 @@ export async function cmdTriageAccept(opts: { force?: boolean }) {
 export function triageNoProposalError(plannerError: unknown): CliExitError {
   const detail = plannerError ? ` — planner failed: ${errorDetail(plannerError)}` : '';
   return new CliExitError(`triage produced no proposal${detail}`, 1);
-}
-
-function shellEscapeInline(s: string): string {
-  return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
 async function cmdRun() {
