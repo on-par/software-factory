@@ -88,7 +88,7 @@ describe('planPhase', () => {
       scripts: {
         plan: [{
           output: '---\nroute: codex\n---\n# Spec\n',
-          effect: (ctx) => { captured = ctx.timeout; },
+          effect: (ctx) => { captured = ctx.timeoutSeconds; },
         }],
       },
     });

@@ -115,7 +115,7 @@ describe('CodexCliHarness command shape', () => {
     expect(cmd).toContain('--model gpt-5-codex');
     expect(cmd).toMatch(/ -o '\/.*factory-codex-out-[^']+' - </);
     expect(cmd).toMatch(/ - < '\/.*factory-codex-[^']+'$/);
-    expect(opts.timeout).toBe(7 * 1000);
+    expect(opts.timeoutMs).toBe(7 * 1000);
     expect(opts.maxBuffer).toBe(10 * 1024 * 1024);
     expect(opts.cwd).toBeUndefined();
   });

@@ -105,7 +105,7 @@ export async function planPhase(
 
   const result = await router.run('plan', prompt, {
     worktree,
-    timeout: timeoutSeconds ?? 1800,
+    timeoutSeconds: timeoutSeconds ?? 1800,
     modelOverride,
     onLog: (msg) => log('router', msg),
   });

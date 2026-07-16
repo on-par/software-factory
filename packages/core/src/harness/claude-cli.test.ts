@@ -79,7 +79,7 @@ describe('ClaudeCliHarness command shape', () => {
     expect(rec.calls[0].cmd).toContain('--model claude-sonnet-5');
     expect(rec.calls[0].cmd).toContain('--dangerously-skip-permissions');
     expect(rec.calls[0].opts.cwd).toBe('/tmp/factory worktree');
-    expect(rec.calls[0].opts.timeout).toBe(7 * 1000);
+    expect(rec.calls[0].opts.timeoutMs).toBe(7 * 1000);
     expect(rec.calls[0].opts.maxBuffer).toBe(10 * 1024 * 1024);
   });
 

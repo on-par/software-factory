@@ -6,7 +6,7 @@ export interface JudgeSpecOpts {
   issueBody: string;
   rubric: string[];
   worktree: string;
-  timeout: number;
+  timeoutSeconds: number;
 }
 
 interface JudgeRunResult {
@@ -101,7 +101,7 @@ export async function runJudgeSpec(router: ModelRouter, opts: JudgeSpecOpts): Pr
   try {
     const result = await router.run('eval_judge', prompt, {
       worktree: opts.worktree,
-      timeout: opts.timeout,
+      timeoutSeconds: opts.timeoutSeconds,
     });
     const verdict = extractVerdict(result.output);
     if (!verdict) {

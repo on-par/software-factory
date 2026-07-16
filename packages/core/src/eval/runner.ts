@@ -18,7 +18,7 @@ export interface RunEvalOpts {
 export async function runEval(opts: RunEvalOpts): Promise<EvalSummary> {
   const results: CaseResult[] = [];
   const worktree = opts.worktree ?? process.cwd();
-  const timeout = opts.timeoutSeconds ?? 600;
+  const timeoutSeconds = opts.timeoutSeconds ?? 600;
   const judgeK = opts.judgeK ?? 1;
   const now = opts.now ?? Date.now;
 
@@ -35,7 +35,7 @@ export async function runEval(opts: RunEvalOpts): Promise<EvalSummary> {
     const started = now();
 
     try {
-      const result = await opts.router.run('plan', prompt, { worktree, timeout });
+      const result = await opts.router.run('plan', prompt, { worktree, timeoutSeconds });
       let latencyMs = now() - started;
       const scored = scoreSpec(result.output, result.output, c.expectedRoute, { requireConstitution: Boolean(c.constitution) });
       const deterministicPass = scored.checks.every(check => check.pass);
@@ -56,7 +56,7 @@ export async function runEval(opts: RunEvalOpts): Promise<EvalSummary> {
           issueBody: c.body,
           rubric: c.rubric,
           worktree,
-          timeout,
+          timeoutSeconds,
         }, judgeK);
         latencyMs += now() - judgeStarted;
         judgeSamples = judged.samples;

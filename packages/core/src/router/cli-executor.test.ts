@@ -130,7 +130,7 @@ const routesConfig: RoutesConfig = {
 
 const registry = new ModelRegistry(modelsConfig);
 const worktree = '/tmp/factory worktree';
-const timeout = 7;
+const timeoutSeconds = 7;
 let tmpWorktree: string | undefined;
 
 afterEach(async () => {
@@ -156,7 +156,7 @@ describe('CliModelExecutor', () => {
 
     const output = await executor.runModel('claude-model', 'draft plan', {
       worktree,
-      timeout,
+      timeoutSeconds,
       task: 'plan',
       registry,
       routesConfig,
@@ -169,7 +169,7 @@ describe('CliModelExecutor', () => {
     expect(rec.calls[0].cmd).toContain('--model claude-sonnet-5');
     expect(rec.calls[0].cmd).toContain('--dangerously-skip-permissions');
     expect(rec.calls[0].opts.cwd).toBe(worktree);
-    expect(rec.calls[0].opts.timeout).toBe(timeout * 1000);
+    expect(rec.calls[0].opts.timeoutMs).toBe(timeoutSeconds * 1000);
   });
 
   it('runs Claude without a model flag when none is configured', async () => {
@@ -178,7 +178,7 @@ describe('CliModelExecutor', () => {
 
     await executor.runModel('claude-no-flag', 'draft plan', {
       worktree,
-      timeout,
+      timeoutSeconds,
       task: 'plan',
       registry,
       routesConfig,
@@ -196,7 +196,7 @@ describe('CliModelExecutor', () => {
 
     const err: any = await executor.runModel('codex-model', 'build it', {
       worktree,
-      timeout,
+      timeoutSeconds,
       task: 'build_codex',
       registry,
       routesConfig,
@@ -211,7 +211,7 @@ describe('CliModelExecutor', () => {
     expect(rec.calls[0].cmd).toContain(' -o ');
     expect(rec.calls[0].cmd).toMatch(/ - < '\/.*factory-codex-[^']+'$/);
     expect(rec.calls[0].cmd).toMatch(/ -o '\/.*factory-codex-out-[^']+' - </);
-    expect(rec.calls[0].opts.timeout).toBe(timeout * 1000);
+    expect(rec.calls[0].opts.timeoutMs).toBe(timeoutSeconds * 1000);
   });
 
   it('runs Ollama through the native chat API with provider options', async () => {
@@ -230,7 +230,7 @@ describe('CliModelExecutor', () => {
 
     const output = await executor.runModel('ollama-model', 'draft plan', {
       worktree,
-      timeout,
+      timeoutSeconds,
       task: 'plan',
       registry,
       routesConfig,
@@ -254,7 +254,7 @@ describe('CliModelExecutor', () => {
 
     const err: any = await executor.runModel('claude-model', 'draft plan', {
       worktree,
-      timeout,
+      timeoutSeconds,
       task: 'plan',
       registry,
       routesConfig,
@@ -277,7 +277,7 @@ describe('CliModelExecutor', () => {
 
     const err: any = await executor.runModel('ollama-model', 'draft plan', {
       worktree,
-      timeout,
+      timeoutSeconds,
       task: 'plan',
       registry,
       routesConfig,
@@ -293,7 +293,7 @@ describe('CliModelExecutor', () => {
 
     const output = await executor.runModel('ollama-declared-claude-cli', 'draft plan', {
       worktree,
-      timeout,
+      timeoutSeconds,
       task: 'plan',
       registry,
       routesConfig,
@@ -311,7 +311,7 @@ describe('CliModelExecutor', () => {
 
     const output = await executor.runModel('opencode-declared', 'do it', {
       worktree,
-      timeout,
+      timeoutSeconds,
       task: 'plan',
       registry,
       routesConfig,
@@ -349,7 +349,7 @@ describe('CliModelExecutor', () => {
 
     const output = await executor.runModel('ollama-agentic-declared', 'build it', {
       worktree: tmpWorktree,
-      timeout,
+      timeoutSeconds,
       task: 'build_codex',
       registry,
       routesConfig,
@@ -364,7 +364,7 @@ describe('CliModelExecutor', () => {
 
     await expect(executor.runModel('ollama-model', 'build it', {
       worktree,
-      timeout,
+      timeoutSeconds,
       task: 'build_claude',
       registry,
       routesConfig,
@@ -379,7 +379,7 @@ describe('CliModelExecutor', () => {
     }
     const noHarnessRegistry = new NoHarnessRegistry(modelsConfig);
     await expect(
-      executor.runModel('claude-model', 'p', { worktree, timeout, task: 'plan', registry: noHarnessRegistry, routesConfig }),
+      executor.runModel('claude-model', 'p', { worktree, timeoutSeconds, task: 'plan', registry: noHarnessRegistry, routesConfig }),
     ).rejects.toThrow(/has no resolvable harness id/);
   });
 
@@ -411,7 +411,7 @@ describe('CliModelExecutor', () => {
 
     const output = await executor.runModel('ollama-codex-model', 'build it', {
       worktree,
-      timeout,
+      timeoutSeconds,
       task: 'build_codex',
       registry,
       routesConfig,
@@ -456,7 +456,7 @@ describe('CliModelExecutor', () => {
 
     const output = await executor.runModel('ollama-codex-model', 'build it', {
       worktree,
-      timeout,
+      timeoutSeconds,
       task: 'build_codex',
       registry,
       routesConfig,
@@ -501,7 +501,7 @@ describe('CliModelExecutor', () => {
 
     const output = await executor.runModel('ollama-codex-model', 'build it', {
       worktree,
-      timeout,
+      timeoutSeconds,
       task: 'build_codex',
       registry,
       routesConfig,
@@ -545,7 +545,7 @@ describe('CliModelExecutor', () => {
 
     const output = await executor.runModel('ollama-codex-model', 'build it', {
       worktree: tmpWorktree,
-      timeout,
+      timeoutSeconds,
       task: 'build_codex',
       registry,
       routesConfig,
@@ -579,7 +579,7 @@ describe('CliModelExecutor', () => {
 
     const output = await executor.runModel('ollama-codex-model', 'build it', {
       worktree: tmpWorktree,
-      timeout,
+      timeoutSeconds,
       task: 'build_codex',
       registry,
       routesConfig,
@@ -612,7 +612,7 @@ describe('CliModelExecutor', () => {
 
     await executor.runModel('ollama-codex-model', 'build it', {
       worktree: tmpWorktree,
-      timeout,
+      timeoutSeconds,
       task: 'build_codex',
       registry,
       routesConfig,
@@ -644,7 +644,7 @@ describe('CliModelExecutor', () => {
 
     await executor.runModel('ollama-codex-model', 'build it', {
       worktree: tmpWorktree,
-      timeout,
+      timeoutSeconds,
       task: 'build_codex',
       registry,
       routesConfig,
@@ -671,7 +671,7 @@ describe('CliModelExecutor', () => {
 
     const output = await executor.runModel('ollama-codex-model', 'build it', {
       worktree: tmpWorktree,
-      timeout,
+      timeoutSeconds,
       task: 'build_codex',
       registry,
       routesConfig,
@@ -697,7 +697,7 @@ describe('CliModelExecutor', () => {
 
     const err: any = await executor.runModel('ollama-codex-model', 'build it', {
       worktree: tmpWorktree,
-      timeout,
+      timeoutSeconds,
       task: 'build_codex',
       registry,
       routesConfig,
@@ -743,7 +743,7 @@ describe('CliModelExecutor', () => {
 
     const err: any = await executor.runModel('ollama-codex-model', 'build it', {
       worktree: tmpWorktree,
-      timeout,
+      timeoutSeconds,
       task: 'build_codex',
       registry,
       routesConfig,
@@ -769,7 +769,7 @@ describe('CliModelExecutor', () => {
 
     const err: any = await executor.runModel('ollama-codex-model', 'build it', {
       worktree: tmpWorktree,
-      timeout,
+      timeoutSeconds,
       task: 'build_codex',
       registry,
       routesConfig,
@@ -795,7 +795,7 @@ describe('CliModelExecutor', () => {
 
     const err: any = await executor.runModel('claude-model', 'draft plan', {
       worktree,
-      timeout,
+      timeoutSeconds,
       task: 'plan',
       registry,
       routesConfig,
@@ -819,7 +819,7 @@ describe('CliModelExecutor', () => {
 
       const err: any = await executor.runModel(model, 'prompt', {
         worktree,
-        timeout,
+        timeoutSeconds,
         task,
         registry,
         routesConfig,
@@ -836,7 +836,7 @@ describe('CliModelExecutor', () => {
 
     const err: any = await executor.runModel('claude-model', 'draft plan', {
       worktree,
-      timeout,
+      timeoutSeconds,
       task: 'plan',
       registry,
       routesConfig,
@@ -861,7 +861,7 @@ describe('CliModelExecutor harness injection', () => {
 
     const output = await executor.runModel('claude-model', 'draft plan', {
       worktree,
-      timeout,
+      timeoutSeconds,
       task: 'plan',
       registry,
       routesConfig,
@@ -880,7 +880,7 @@ describe('CliModelExecutor harness injection', () => {
 
     const output = await executor.runModel('opencode-declared', 'do it', {
       worktree,
-      timeout,
+      timeoutSeconds,
       task: 'plan',
       registry,
       routesConfig,
@@ -918,7 +918,7 @@ describe('CliModelExecutor harness injection', () => {
 
     const output = await executor.runModel('fake-harness-model', 'draft plan', {
       worktree,
-      timeout,
+      timeoutSeconds,
       task: 'plan',
       registry: fakeHarnessRegistry,
       routesConfig,
@@ -928,7 +928,7 @@ describe('CliModelExecutor harness injection', () => {
 
     await expect(executor.runModel('fake-harness-model', 'build it', {
       worktree,
-      timeout,
+      timeoutSeconds,
       task: 'build_claude',
       registry: fakeHarnessRegistry,
       routesConfig,
@@ -952,7 +952,7 @@ describe('CliModelExecutor shared empty-response propagation', () => {
   ] as const)('propagates an empty_response from %s instead of resolving empty output', async (_harness, model, task) => {
     const executor = new CliModelExecutor(recordingExec().fn);
     const err: any = await executor.runModel(model, 'prompt', {
-      worktree, timeout, task, registry, routesConfig,
+      worktree, timeoutSeconds, task, registry, routesConfig,
     }).catch(e => e);
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('empty_response');
@@ -961,7 +961,7 @@ describe('CliModelExecutor shared empty-response propagation', () => {
   it('propagates an empty_response from ollama-http instead of resolving empty output', async () => {
     const executor = new CliModelExecutor(recordingExec().fn, emptyOllamaFetch as any);
     const err: any = await executor.runModel('ollama-model', 'prompt', {
-      worktree, timeout, task: 'plan', registry, routesConfig,
+      worktree, timeoutSeconds, task: 'plan', registry, routesConfig,
     }).catch(e => e);
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('empty_response');
@@ -971,7 +971,7 @@ describe('CliModelExecutor shared empty-response propagation', () => {
     tmpWorktree = await mkdtemp(join(tmpdir(), 'factory-empty-agentic-'));
     const executor = new CliModelExecutor(recordingExec().fn, emptyOllamaFetch as any);
     const err: any = await executor.runModel('ollama-agentic-declared', 'prompt', {
-      worktree: tmpWorktree, timeout, task: 'build_codex', registry, routesConfig,
+      worktree: tmpWorktree, timeoutSeconds, task: 'build_codex', registry, routesConfig,
     }).catch(e => e);
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('empty_response');

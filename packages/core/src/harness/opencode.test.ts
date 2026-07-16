@@ -81,7 +81,7 @@ describe('OpenCodeHarness command shape', () => {
     expect(cmd).toContain("--model 'anthropic/claude-sonnet-5'");
     expect(cmd).toContain("'build it'");
     expect(opts.cwd).toBe('/tmp/factory worktree');
-    expect(opts.timeout).toBe(7 * 1000);
+    expect(opts.timeoutMs).toBe(7 * 1000);
     expect(opts.maxBuffer).toBe(10 * 1024 * 1024);
   });
 

@@ -1,22 +1,15 @@
 // src/harness/codex-cli.ts — CodingHarness adapter for the Codex CLI.
 
-import { exec as execCb } from 'node:child_process';
-import { promisify } from 'node:util';
 import { writeFile, readFile, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CodingHarness, HarnessError, HarnessRequest, HarnessResult } from './index.js';
 import { classifyFailure } from './classify.js';
 import { shellEscape } from '../utils/index.js';
+import { defaultExecFn } from '../utils/exec.js';
+import type { ExecFn } from '../utils/exec.js';
 
-const exec = promisify(execCb);
-
-/** Structurally identical to the router's ExecFn — defined here so the harness
- *  does not import from ../router (avoids an import cycle). */
-export type CodexExecFn = (
-  cmd: string,
-  opts: { cwd?: string; timeout?: number; maxBuffer?: number },
-) => Promise<{ stdout: string; stderr: string }>;
+export type CodexExecFn = ExecFn;
 
 /** Runs a model via the Codex CLI:
  *  codex exec --sandbox workspace-write --ask-for-approval never -C <worktree> [flags] -o <output> - < <prompt> */
@@ -24,7 +17,7 @@ export class CodexCliHarness implements CodingHarness {
   readonly id = 'codex-cli';
   readonly agentic = true;
 
-  constructor(private execFn: CodexExecFn = exec) {}
+  constructor(private execFn: CodexExecFn = defaultExecFn) {}
 
   async run(request: HarnessRequest): Promise<HarnessResult> {
     const { model, prompt, worktree, timeoutSeconds, registry } = request;
@@ -38,7 +31,7 @@ export class CodexCliHarness implements CodingHarness {
 
     try {
       try {
-        await this.execFn(cmd, { timeout: timeoutSeconds * 1000, maxBuffer: 10 * 1024 * 1024 });
+        await this.execFn(cmd, { timeoutMs: timeoutSeconds * 1000, maxBuffer: 10 * 1024 * 1024 });
       } catch (err: any) {
         const reason = err.killed ? 'timeout' : classifyFailure(err.stderr ?? '', err.code ?? 1);
         throw new HarnessError(err.message ?? String(err), reason, {

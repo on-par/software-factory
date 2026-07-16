@@ -54,7 +54,7 @@ function judgeOpts() {
     issueBody: 'Body',
     rubric: ['Score it'],
     worktree: process.cwd(),
-    timeout: 10,
+    timeoutSeconds: 10,
   };
 }
 

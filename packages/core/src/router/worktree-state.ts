@@ -6,12 +6,9 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { shellEscape } from '../utils/index.js';
+import type { ExecFn } from '../utils/exec.js';
 
-/** Structurally identical to router/index.ts's ExecFn — kept local to avoid an import cycle. */
-export type GitExecFn = (
-  cmd: string,
-  opts: { cwd?: string; timeout?: number; maxBuffer?: number },
-) => Promise<{ stdout: string; stderr: string }>;
+export type GitExecFn = ExecFn;
 
 export interface WorktreeSnapshot {
   headSha: string;
@@ -21,7 +18,7 @@ export interface WorktreeSnapshot {
   untrackedPaths: string[];
 }
 
-const GIT_OPTS = { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 };
+const GIT_OPTS = { timeoutMs: 30_000, maxBuffer: 10 * 1024 * 1024 };
 
 export async function captureWorktreeState(
   execFn: GitExecFn,

@@ -3,20 +3,15 @@
 // and runs the proposal's verify command. Malformed output gets exactly one repair
 // attempt before a trace artifact is written and the run fails with a classified reason.
 
-import { exec as execCb } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { promisify } from 'node:util';
 import { CodingHarness, HarnessError, HarnessRequest, HarnessResult } from './index.js';
 import { classifyFailure } from './classify.js';
 import type { OllamaFetchFn } from './ollama-http.js';
+import { defaultExecFn } from '../utils/exec.js';
+import type { ExecFn } from '../utils/exec.js';
 
-/** Structurally identical to the router's ExecFn — defined here so the harness
- *  does not import from ../router (avoids an import cycle). */
-export type OllamaAgenticExecFn = (
-  cmd: string,
-  opts: { cwd?: string; timeout?: number; maxBuffer?: number },
-) => Promise<{ stdout: string; stderr: string }>;
+export type OllamaAgenticExecFn = ExecFn;
 
 export interface OllamaAgenticChange {
   file: string;
@@ -115,7 +110,7 @@ export class OllamaAgenticHarness implements CodingHarness {
 
   constructor(
     private fetchFn: OllamaFetchFn = globalThis.fetch as unknown as OllamaFetchFn,
-    private execFn: OllamaAgenticExecFn = promisify(execCb),
+    private execFn: OllamaAgenticExecFn = defaultExecFn,
   ) {}
 
   async run(request: HarnessRequest): Promise<HarnessResult> {
@@ -196,7 +191,7 @@ export class OllamaAgenticHarness implements CodingHarness {
     try {
       await this.execFn(proposal.verifyCommand, {
         cwd: worktree,
-        timeout: Math.min(timeoutSeconds * 1000, 120_000),
+        timeoutMs: Math.min(timeoutSeconds * 1000, 120_000),
         maxBuffer: 1024 * 1024,
       });
     } catch (err: any) {
