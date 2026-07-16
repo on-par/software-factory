@@ -392,6 +392,7 @@ describe('accessibilityChecker', () => {
 
     expect(result.result).toBe('PASS');
     expect(result.details).toContain('basic checks passed');
+    expect(result.details).not.toContain('not scanned');
   });
 
   it('ignores generated-output dirs like coverage reports embedding source markup', async () => {
@@ -405,6 +406,56 @@ describe('accessibilityChecker', () => {
 
     expect(result.result).toBe('PASS');
     expect(result.details).toContain('basic checks passed');
+  });
+
+  it('reports truncation when more than 20 HTML files exist', async () => {
+    const files: Record<string, string> = {};
+    for (let i = 0; i < 25; i++) {
+      const name = `f${String(i).padStart(2, '0')}.html`;
+      files[name] = '<main>clean</main>';
+    }
+    const worktree = await makeWorktree(files);
+
+    const result = await accessibilityChecker(makeContext(worktree));
+
+    expect(result.result).toBe('PASS');
+    expect(result.details).toContain('first 20 of 25');
+    expect(result.details).toContain('5 not scanned');
+    expect(result.details).toContain('basic checks passed');
+  });
+
+  it('does not hide that unscanned files were skipped when the issue is beyond the cap', async () => {
+    const files: Record<string, string> = {
+      'z-broken.html': '<img src="x.png">',
+    };
+    for (let i = 0; i < 20; i++) {
+      const name = `a${String(i).padStart(2, '0')}.html`;
+      files[name] = '<main>clean</main>';
+    }
+    const worktree = await makeWorktree(files);
+
+    const result = await accessibilityChecker(makeContext(worktree));
+
+    expect(result.result).toBe('PASS');
+    expect(result.details).toContain('first 20 of 21');
+    expect(result.details).toContain('1 not scanned');
+  });
+
+  it('deterministically scans the lexicographically-first files, reporting truncation on the FAIL path', async () => {
+    const files: Record<string, string> = {
+      'a-bad.html': '<img src="x.png">',
+    };
+    for (let i = 0; i < 20; i++) {
+      const name = `m${String(i).padStart(2, '0')}.html`;
+      files[name] = '<main>clean</main>';
+    }
+    const worktree = await makeWorktree(files);
+
+    const result = await accessibilityChecker(makeContext(worktree));
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain('a-bad.html: 1 images without alt');
+    expect(result.details).toContain('first 20 of 21');
   });
 });
 
