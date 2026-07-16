@@ -4,7 +4,7 @@ import { ModelExecutorError } from './executor-error.js';
 
 type StubStep =
   | { output: string; effect?: (ctx: ModelExecutorContext) => Promise<void> | void }
-  | { fail: FailoverReason };
+  | { fail: FailoverReason; effect?: (ctx: ModelExecutorContext) => Promise<void> | void };
 
 export interface StubModelExecutorOptions {
   /** Scripted steps per task type, consumed in order across successive runModel calls. */
@@ -27,6 +27,7 @@ export class StubModelExecutor implements ModelExecutor {
     this.calls.push({ model, prompt, task: ctx.task });
     const step = this.queues.get(ctx.task)?.shift();
     if (step && 'fail' in step) {
+      await step.effect?.(ctx);
       throw new ModelExecutorError(`stub failure: ${step.fail}`, step.fail, { exitCode: 1 });
     }
     if (step && 'output' in step) {

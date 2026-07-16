@@ -1,8 +1,10 @@
 import { exec as execCb } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { ModelsConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { branchFor, setupWorktree } from '../utils/index.js';
@@ -18,6 +20,25 @@ import { buildPhase } from './build.js';
 import { checkPhase } from './check.js';
 import { planPhase } from './plan.js';
 import { shipPhase } from './ship.js';
+
+function makeTwoModelStubConfig(): ModelsConfig {
+  const base = makeStubModelsConfig().models['stub-model'];
+  return {
+    version: 1,
+    models: {
+      'model-a': { ...base },
+      'model-b': { ...base },
+    },
+    tiers: { boss: ['model-a', 'model-b'] },
+    failover: {
+      triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+      maxRetries: 2,
+      cooldownMs: 0,
+      escalateAfterTierExhausted: true,
+    },
+    routingRules: {},
+  };
+}
 
 const exec = promisify(execCb);
 const repo = 'on-par/software-factory';
@@ -205,5 +226,75 @@ describe('pipeline integration', () => {
     expect(events.some(([type]) => type === 'rework')).toBe(true);
     expect(events.some(([type]) => type === 'ready')).toBe(true);
     expect(calls.filter(([name]) => name === 'pulls.create')).toHaveLength(1);
+  });
+
+  it('resets worktree state between a failed build attempt and its failover', { timeout: 120_000 }, async () => {
+    const title = 'Worktree reset between failover attempts';
+    const { repoRoot } = await kit.makeThrowawayRepo();
+    const worktree = kit.trackWorktree(repoRoot, issue);
+    const branch = branchFor(issue, title);
+    const specPath = await kit.makeSpecPath(issue);
+    const { octokit } = makeFakeOctokit({ [issue]: title });
+    const events: Array<[string, string]> = [];
+    const log = (type: string, msg: string) => events.push([type, msg]);
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [{ output: specContentFor(issue) }],
+        build_claude: [
+          {
+            fail: 'timeout',
+            effect: async (ctx) => {
+              await writeFile(join(ctx.worktree, 'README.md'), 'garbage from a failed attempt\n');
+              await writeFile(join(ctx.worktree, 'partial.txt'), 'partial\n');
+            },
+          },
+          {
+            output: 'built after reset',
+            effect: async (ctx) => {
+              const readmeContent = await readFile(join(ctx.worktree, 'README.md'), 'utf-8');
+              expect(readmeContent).toBe('# Throwaway\n');
+              expect(existsSync(join(ctx.worktree, 'partial.txt'))).toBe(false);
+              await writeFile(join(ctx.worktree, 'feature.txt'), 'reset guard path\n');
+              await commitAll(ctx.worktree, 'feat: stub work after reset');
+            },
+          },
+        ],
+      },
+    });
+    const router = new ModelRouter(makeTwoModelStubConfig(), makeStubRoutesConfig(), false, stub);
+    const constitution = null;
+
+    const plan = await planPhase({
+      issue,
+      repo,
+      worktree,
+      specPath,
+      router,
+      constitution,
+      octokit: octokit as any,
+      log,
+    });
+    expect(plan.ok).toBe(true);
+
+    await setupWorktree(repoRoot, branch, worktree);
+
+    const build = await buildPhase({
+      issue,
+      repo,
+      worktree,
+      specPath,
+      branch,
+      route: plan.route,
+      router,
+      constitution,
+      log,
+    });
+
+    expect(build.ok).toBe(true);
+    expect(build.model).toBe('model-b');
+
+    const buildCalls = stub.calls.filter(call => call.task === 'build_claude');
+    expect(buildCalls).toHaveLength(2);
+    expect(buildCalls.map(call => call.model)).toEqual(['model-a', 'model-b']);
   });
 });

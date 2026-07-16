@@ -18,6 +18,7 @@ import { classifyFailure } from '../harness/classify.js';
 import { describeFailureDetail } from './failure-detail.js';
 import { ModelExecutorError, extractFailoverReason } from './executor-error.js';
 import { shellEscape } from '../utils/index.js';
+import { captureWorktreeState, resetWorktreeState } from './worktree-state.js';
 
 export { ModelExecutorError, extractFailoverReason } from './executor-error.js';
 
@@ -419,6 +420,7 @@ export class ModelRouter {
     private executor: ModelExecutor = new CliModelExecutor(),
     private allowExperimental = process.env.FACTORY_EXPERIMENTAL === '1',
     private localOnly = process.env.FACTORY_LOCAL_ONLY === '1',
+    private gitExecFn: ExecFn = exec,
   ) {
     this.registry = new ModelRegistry(modelsConfig);
   }
@@ -480,6 +482,10 @@ export class ModelRouter {
     const cooldownMs = this.registry.failover.cooldownMs;
     const attempts: RouterResult['attempts'] = [];
 
+    const snapshot = taskRequiresAgenticHarness(task)
+      ? await captureWorktreeState(this.gitExecFn, worktree, onLog)
+      : null;
+
     for (const model of models) {
       let retries = 0;
 
@@ -509,6 +515,21 @@ export class ModelRouter {
             error.reason = reason;
             error.attempts = attempts;
             throw error;
+          }
+
+          if (snapshot) {
+            try {
+              const { didReset, tracePath } = await resetWorktreeState(this.gitExecFn, worktree, snapshot, onLog);
+              if (didReset) onLog(`Reset worktree to pre-attempt state after ${model} failure${tracePath ? ` (attempt diff preserved at ${tracePath})` : ''}`);
+            } catch (resetErr) {
+              const message = resetErr instanceof Error ? resetErr.message : String(resetErr);
+              const error = new Error(
+                `Worktree reset failed after ${model} failure (${reason}) for task '${task}' — aborting failover to avoid mixing attempt state: ${message}`,
+              ) as Error & { reason?: FailoverReason; attempts?: RouterResult['attempts'] };
+              error.reason = 'error';
+              error.attempts = attempts;
+              throw error;
+            }
           }
 
           // Rate limit → retry with cooldown
@@ -566,6 +587,21 @@ export class ModelRouter {
         // record exactly one attempt and fail over to the next model.
         attempts.push({ model, reason: 'empty_response', ok: false });
         onLog(`${model} failed (empty_response) on ${task}`);
+
+        if (snapshot) {
+          try {
+            const { didReset, tracePath } = await resetWorktreeState(this.gitExecFn, worktree, snapshot, onLog);
+            if (didReset) onLog(`Reset worktree to pre-attempt state after ${model} failure${tracePath ? ` (attempt diff preserved at ${tracePath})` : ''}`);
+          } catch (resetErr) {
+            const message = resetErr instanceof Error ? resetErr.message : String(resetErr);
+            const error = new Error(
+              `Worktree reset failed after ${model} failure (empty_response) for task '${task}' — aborting failover to avoid mixing attempt state: ${message}`,
+            ) as Error & { reason?: FailoverReason; attempts?: RouterResult['attempts'] };
+            error.reason = 'error';
+            error.attempts = attempts;
+            throw error;
+          }
+        }
         break;
       }
     }
