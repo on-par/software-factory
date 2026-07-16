@@ -31,8 +31,8 @@ source of truth for routing; core never hard-codes model lists.
 
 - **Boss (PLAN)** — a strong model reads the issue, explores the repo, and
   freezes a spec at `.factory/plans/issue-N.md`. Crucially, the boss also
-  makes the per-issue *build-route decision*, recorded as `route: codex |
-  claude` frontmatter on the spec: `route: codex` when implementation from the
+  makes the per-issue _build-route decision_, recorded as `route: codex |
+claude` frontmatter on the spec: `route: codex` when implementation from the
   frozen spec is bounded and mechanical, `route: claude` when the work needs
   design/UX/architecture judgment (see the `build_codex` vs `build_claude`
   routes in `routes.json`). This is where "which model builds it" is
