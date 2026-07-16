@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  appendHistoryLine,
-  parseHistory,
-  renderTrend,
-  summaryToHistoryRecord,
-  type HistoryRecord,
-} from './trend.js';
+import { appendHistoryLine, parseHistory, renderTrend, summaryToHistoryRecord, type HistoryRecord } from './trend.js';
 import { isRouteAsserted, type CaseResult, type EvalSummary } from './types.js';
 
 function caseResult(overrides: Partial<CaseResult> = {}): CaseResult {
@@ -26,9 +20,9 @@ function caseResult(overrides: Partial<CaseResult> = {}): CaseResult {
 
 function summaryOf(results: CaseResult[], totalCostEstimate = 0): EvalSummary {
   const total = results.length;
-  const passed = results.filter(r => r.pass).length;
-  const routeAsserted = results.filter(r => isRouteAsserted(r.expectedRoute)).length;
-  const routeCorrect = results.filter(r => isRouteAsserted(r.expectedRoute) && r.routeCorrect).length;
+  const passed = results.filter((r) => r.pass).length;
+  const routeAsserted = results.filter((r) => isRouteAsserted(r.expectedRoute)).length;
+  const routeCorrect = results.filter((r) => isRouteAsserted(r.expectedRoute) && r.routeCorrect).length;
   return {
     results,
     total,

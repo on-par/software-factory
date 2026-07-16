@@ -323,71 +323,100 @@ describe('diagnoseModels', () => {
   });
 
   it('marks an ollama model unreachable when ollama is missing, even with claude present', () => {
-    const d = diagnosisFor('ollama-model', {
-      commandAvailable: (cmd) => cmd === 'claude',
-      envPresent: () => false,
-    }, true);
+    const d = diagnosisFor(
+      'ollama-model',
+      {
+        commandAvailable: (cmd) => cmd === 'claude',
+        envPresent: () => false,
+      },
+      true,
+    );
     expect(d.reachable).toBe(false);
     expect(d.reason).toBe('ollama not found on PATH');
   });
 
   it('marks an ollama model reachable through native ollama when ollama is present', () => {
-    const d = diagnosisFor('ollama-model', {
-      commandAvailable: (cmd) => cmd === 'ollama',
-      ollamaModelPresent: (model) => model === 'qwen2.5-coder:14b',
-      envPresent: () => false,
-    }, true);
+    const d = diagnosisFor(
+      'ollama-model',
+      {
+        commandAvailable: (cmd) => cmd === 'ollama',
+        ollamaModelPresent: (model) => model === 'qwen2.5-coder:14b',
+        envPresent: () => false,
+      },
+      true,
+    );
     expect(d.reachable).toBe(true);
     expect(d.reason).toBe('ok (ollama native)');
   });
 
   it('marks a codex-tagged ollama model reachable through native ollama without codex CLI', () => {
-    const d = diagnosisFor('ollama-codex-model', {
-      commandAvailable: (cmd) => cmd === 'ollama',
-      ollamaModelPresent: (model) => model === 'qwen3.5:9b',
-      envPresent: () => false,
-    }, true);
+    const d = diagnosisFor(
+      'ollama-codex-model',
+      {
+        commandAvailable: (cmd) => cmd === 'ollama',
+        ollamaModelPresent: (model) => model === 'qwen3.5:9b',
+        envPresent: () => false,
+      },
+      true,
+    );
     expect(d.reachable).toBe(true);
     expect(d.reason).toBe('ok (ollama native command agent)');
   });
 
   it('marks an ollama model unreachable when the native model is missing', () => {
-    const d = diagnosisFor('ollama-model', {
-      commandAvailable: (cmd) => cmd === 'ollama',
-      ollamaModelPresent: () => false,
-      envPresent: () => false,
-    }, true);
+    const d = diagnosisFor(
+      'ollama-model',
+      {
+        commandAvailable: (cmd) => cmd === 'ollama',
+        ollamaModelPresent: () => false,
+        envPresent: () => false,
+      },
+      true,
+    );
     expect(d.reachable).toBe(false);
     expect(d.reason).toBe('qwen2.5-coder:14b not found in ollama list');
   });
 
   it('excludes non-local models in local-only mode', () => {
     const registry = new ModelRegistry(doctorConfig);
-    const diagnoses = diagnoseModels(registry, {
-      commandAvailable: () => true,
-      envPresent: () => true,
-      ollamaModelPresent: () => true,
-    }, true, true);
+    const diagnoses = diagnoseModels(
+      registry,
+      {
+        commandAvailable: () => true,
+        envPresent: () => true,
+        ollamaModelPresent: () => true,
+      },
+      true,
+      true,
+    );
 
-    expect(diagnoses.find(d => d.model === 'ollama-model')?.reachable).toBe(true);
-    expect(diagnoses.find(d => d.model === 'ollama-cloud-model')?.reason).toBe('excluded by FACTORY_LOCAL_ONLY=1');
-    expect(diagnoses.find(d => d.model === 'codex-model')?.reason).toBe('excluded by FACTORY_LOCAL_ONLY=1');
+    expect(diagnoses.find((d) => d.model === 'ollama-model')?.reachable).toBe(true);
+    expect(diagnoses.find((d) => d.model === 'ollama-cloud-model')?.reason).toBe('excluded by FACTORY_LOCAL_ONLY=1');
+    expect(diagnoses.find((d) => d.model === 'codex-model')?.reason).toBe('excluded by FACTORY_LOCAL_ONLY=1');
   });
 
   it('marks a non-anthropic env-keyed model unreachable when the key is missing, naming the key', () => {
-    const d = diagnosisFor('deepseek-model', {
-      commandAvailable: (cmd) => cmd === 'claude',
-      envPresent: () => false,
-    }, true);
+    const d = diagnosisFor(
+      'deepseek-model',
+      {
+        commandAvailable: (cmd) => cmd === 'claude',
+        envPresent: () => false,
+      },
+      true,
+    );
     expect(d.reachable).toBe(false);
     expect(d.reason).toBe('DEEPSEEK_API_KEY not set');
   });
 
   it('marks a non-anthropic env-keyed model reachable when the key is present', () => {
-    const d = diagnosisFor('deepseek-model', {
-      commandAvailable: (cmd) => cmd === 'claude',
-      envPresent: (key) => key === 'DEEPSEEK_API_KEY',
-    }, true);
+    const d = diagnosisFor(
+      'deepseek-model',
+      {
+        commandAvailable: (cmd) => cmd === 'claude',
+        envPresent: (key) => key === 'DEEPSEEK_API_KEY',
+      },
+      true,
+    );
     expect(d.reachable).toBe(true);
   });
 
@@ -401,123 +430,175 @@ describe('diagnoseModels', () => {
   });
 
   it('probes an experimental model normally when opted in', () => {
-    const d = diagnosisFor('experimental-model', {
-      commandAvailable: () => true,
-      envPresent: () => true,
-    }, true);
+    const d = diagnosisFor(
+      'experimental-model',
+      {
+        commandAvailable: () => true,
+        envPresent: () => true,
+      },
+      true,
+    );
     expect(d.reachable).toBe(true);
   });
 
   it('marks an opencode model unreachable when opencode is missing even with claude present', () => {
-    const d = diagnosisFor('opencode-model', {
-      commandAvailable: (cmd) => cmd === 'claude',
-      envPresent: () => false,
-    }, true);
+    const d = diagnosisFor(
+      'opencode-model',
+      {
+        commandAvailable: (cmd) => cmd === 'claude',
+        envPresent: () => false,
+      },
+      true,
+    );
     expect(d.reachable).toBe(false);
     expect(d.reason).toBe('opencode CLI not found on PATH');
   });
 
   it('marks an opencode model reachable when opencode is present', () => {
-    const d = diagnosisFor('opencode-model', {
-      commandAvailable: (cmd) => cmd === 'opencode',
-      envPresent: () => false,
-    }, true);
+    const d = diagnosisFor(
+      'opencode-model',
+      {
+        commandAvailable: (cmd) => cmd === 'opencode',
+        envPresent: () => false,
+      },
+      true,
+    );
     expect(d.reachable).toBe(true);
     expect(d.reason).toBe('ok (opencode CLI)');
   });
 
   it('probes by declared harness even when legacy fields say ollama: reachable via codex CLI', () => {
-    const d = diagnosisFor('declared-codex-over-ollama-model', {
-      commandAvailable: (cmd) => cmd === 'codex',
-      envPresent: () => false,
-    }, true);
+    const d = diagnosisFor(
+      'declared-codex-over-ollama-model',
+      {
+        commandAvailable: (cmd) => cmd === 'codex',
+        envPresent: () => false,
+      },
+      true,
+    );
     expect(d.reachable).toBe(true);
     expect(d.reason).toBe('ok (codex CLI)');
   });
 
   it('probes by declared harness even when legacy fields say ollama: unreachable when codex CLI is missing', () => {
-    const d = diagnosisFor('declared-codex-over-ollama-model', {
-      commandAvailable: (cmd) => cmd === 'ollama',
-      envPresent: () => false,
-    }, true);
+    const d = diagnosisFor(
+      'declared-codex-over-ollama-model',
+      {
+        commandAvailable: (cmd) => cmd === 'ollama',
+        envPresent: () => false,
+      },
+      true,
+    );
     expect(d.reachable).toBe(false);
     expect(d.reason).toBe('codex CLI not found on PATH');
   });
 
   it('marks a declared ollama-http model unreachable when ollama is missing and no base URL is set', () => {
-    const d = diagnosisFor('ollama-http-model', {
-      commandAvailable: () => false,
-      envPresent: () => false,
-    }, true);
+    const d = diagnosisFor(
+      'ollama-http-model',
+      {
+        commandAvailable: () => false,
+        envPresent: () => false,
+      },
+      true,
+    );
     expect(d.reachable).toBe(false);
     expect(d.reason).toBe('ollama not found on PATH');
   });
 
   it('marks a declared ollama-http model reachable via native ollama', () => {
-    const d = diagnosisFor('ollama-http-model', {
-      commandAvailable: (cmd) => cmd === 'ollama',
-      ollamaModelPresent: (model) => model === 'qwen2.5-coder:14b',
-      envPresent: () => false,
-    }, true);
+    const d = diagnosisFor(
+      'ollama-http-model',
+      {
+        commandAvailable: (cmd) => cmd === 'ollama',
+        ollamaModelPresent: (model) => model === 'qwen2.5-coder:14b',
+        envPresent: () => false,
+      },
+      true,
+    );
     expect(d.reachable).toBe(true);
     expect(d.reason).toBe('ok (ollama native)');
   });
 
   it('marks a declared ollama-agentic model reachable via native ollama', () => {
-    const d = diagnosisFor('ollama-agentic-model', {
-      commandAvailable: (cmd) => cmd === 'ollama',
-      ollamaModelPresent: (model) => model === 'qwen3.5:9b',
-      envPresent: () => false,
-    }, true);
+    const d = diagnosisFor(
+      'ollama-agentic-model',
+      {
+        commandAvailable: (cmd) => cmd === 'ollama',
+        ollamaModelPresent: (model) => model === 'qwen3.5:9b',
+        envPresent: () => false,
+      },
+      true,
+    );
     expect(d.reachable).toBe(true);
     expect(d.reason).toBe('ok (ollama agentic)');
   });
 
   it('marks a declared ollama-agentic model unreachable when ollama is missing', () => {
-    const d = diagnosisFor('ollama-agentic-model', {
-      commandAvailable: () => false,
-      envPresent: () => false,
-    }, true);
+    const d = diagnosisFor(
+      'ollama-agentic-model',
+      {
+        commandAvailable: () => false,
+        envPresent: () => false,
+      },
+      true,
+    );
     expect(d.reachable).toBe(false);
     expect(d.reason).toBe('ollama not found on PATH');
   });
 
   it('marks an ollama-agentic model reachable via a remote OLLAMA_BASE_URL without a local CLI', () => {
-    const d = diagnosisFor('ollama-agentic-model', {
-      commandAvailable: () => false,
-      envPresent: () => false,
-      ollamaBaseUrl: () => 'http://gpu-box:11434',
-    }, true);
+    const d = diagnosisFor(
+      'ollama-agentic-model',
+      {
+        commandAvailable: () => false,
+        envPresent: () => false,
+        ollamaBaseUrl: () => 'http://gpu-box:11434',
+      },
+      true,
+    );
     expect(d.reachable).toBe(true);
     expect(d.reason).toBe('ok (ollama agentic via http://gpu-box:11434)');
   });
 
   it('marks an ollama-http model reachable via a remote OLLAMA_BASE_URL without a local CLI', () => {
-    const d = diagnosisFor('ollama-http-model', {
-      commandAvailable: () => false,
-      envPresent: () => false,
-      ollamaBaseUrl: () => 'http://gpu-box:11434',
-    }, true);
+    const d = diagnosisFor(
+      'ollama-http-model',
+      {
+        commandAvailable: () => false,
+        envPresent: () => false,
+        ollamaBaseUrl: () => 'http://gpu-box:11434',
+      },
+      true,
+    );
     expect(d.reachable).toBe(true);
     expect(d.reason).toBe('ok (ollama native via http://gpu-box:11434)');
   });
 
   it('treats a loopback OLLAMA_BASE_URL as local and still requires the ollama CLI', () => {
-    const d = diagnosisFor('ollama-agentic-model', {
-      commandAvailable: () => false,
-      envPresent: () => false,
-      ollamaBaseUrl: () => 'http://127.0.0.1:11434',
-    }, true);
+    const d = diagnosisFor(
+      'ollama-agentic-model',
+      {
+        commandAvailable: () => false,
+        envPresent: () => false,
+        ollamaBaseUrl: () => 'http://127.0.0.1:11434',
+      },
+      true,
+    );
     expect(d.reachable).toBe(false);
     expect(d.reason).toBe('ollama not found on PATH');
   });
 
   it('falls back to local probing for an unparseable OLLAMA_BASE_URL', () => {
-    const d = diagnosisFor('ollama-agentic-model', {
-      commandAvailable: () => false,
-      envPresent: () => false,
-      ollamaBaseUrl: () => 'not a url',
-    }, true);
+    const d = diagnosisFor(
+      'ollama-agentic-model',
+      {
+        commandAvailable: () => false,
+        envPresent: () => false,
+        ollamaBaseUrl: () => 'not a url',
+      },
+      true,
+    );
     expect(d.reachable).toBe(false);
     expect(d.reason).toBe('ollama not found on PATH');
   });
@@ -530,10 +611,14 @@ describe('diagnoseModels', () => {
     it('reads OLLAMA_BASE_URL from the environment when no probe override is given', () => {
       vi.stubEnv('OLLAMA_BASE_URL', 'http://gpu-box:11434');
       const registry = new ModelRegistry(doctorConfig);
-      const d = diagnoseModels(registry, {
-        commandAvailable: () => false,
-        envPresent: () => false,
-      }, true).find((x) => x.model === 'ollama-agentic-model')!;
+      const d = diagnoseModels(
+        registry,
+        {
+          commandAvailable: () => false,
+          envPresent: () => false,
+        },
+        true,
+      ).find((x) => x.model === 'ollama-agentic-model')!;
       expect(d.reachable).toBe(true);
       expect(d.reason).toBe('ok (ollama agentic via http://gpu-box:11434)');
     });
@@ -561,8 +646,9 @@ describe('diagnoseModels', () => {
       },
     };
     const registry = new ModelRegistry(unknownHarnessConfig);
-    const d = diagnoseModels(registry, { commandAvailable: () => true, envPresent: () => true }, true)
-      .find((x) => x.model === 'bogus-harness-model')!;
+    const d = diagnoseModels(registry, { commandAvailable: () => true, envPresent: () => true }, true).find(
+      (x) => x.model === 'bogus-harness-model',
+    )!;
     expect(d.reachable).toBe(false);
     expect(d.reason).toMatch(/^unknown harness 'bogus'/);
   });

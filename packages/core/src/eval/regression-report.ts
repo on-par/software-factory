@@ -24,7 +24,7 @@ export function formatRegressionIssue(
     '## Per-case deltas',
     '| case | baseline pass | current pass | baseline rubric | current rubric | Δ rubric | |',
     '| --- | --- | --- | --- | --- | --- | --- |',
-    ...summary.results.map(result => {
+    ...summary.results.map((result) => {
       const baselineCase = baseline.cases[result.id];
       const regressed =
         (baselineCase?.pass === true && !result.pass) ||
@@ -46,11 +46,11 @@ export function formatRegressionIssue(
     }),
     '',
     '## Regressions',
-    ...comparison.regressions.map(regression => `- ${regression}`),
+    ...comparison.regressions.map((regression) => `- ${regression}`),
   ];
 
   if (comparison.notes.length > 0) {
-    lines.push('', '## Notes', ...comparison.notes.map(note => `- ${note}`));
+    lines.push('', '## Notes', ...comparison.notes.map((note) => `- ${note}`));
   }
 
   return {

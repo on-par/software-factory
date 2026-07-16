@@ -118,7 +118,9 @@ describe('fetchSubscriptionUsage', () => {
       throw new Error('ENOENT');
     });
 
-    const result = await fetchSubscriptionUsage(deps({ readCredentialsFile, fetchImpl: fetchImpl as unknown as typeof fetch }));
+    const result = await fetchSubscriptionUsage(
+      deps({ readCredentialsFile, fetchImpl: fetchImpl as unknown as typeof fetch }),
+    );
 
     expect(result).toBeNull();
     expect(fetchImpl).not.toHaveBeenCalled();

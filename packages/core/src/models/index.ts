@@ -101,13 +101,12 @@ export class ModelRegistry {
   estimateCost(modelId: string, inputTokens: number, outputTokens: number): number {
     const def = this.get(modelId);
     if (!def) return 0;
-    return (inputTokens / 1_000_000) * def.costPerMtokInput +
-           (outputTokens / 1_000_000) * def.costPerMtokOutput;
+    return (inputTokens / 1_000_000) * def.costPerMtokInput + (outputTokens / 1_000_000) * def.costPerMtokOutput;
   }
 
   /** Get all available models for a tier, in priority order */
   getAvailableModelsForTier(tier: string, byok = false, allowExperimental = false, localOnly = false): string[] {
-    return this.getModelsInTier(tier).filter(m => {
+    return this.getModelsInTier(tier).filter((m) => {
       if (!allowExperimental && this.isExperimental(m)) return false;
       if (localOnly && !this.isLocalOnlyModel(m)) return false;
       if (byok && !this.isEnvAvailable(m)) return false;
@@ -130,10 +129,7 @@ export interface ModelOverrides {
  *  against the registry. Throws a configuration error naming the env var when
  *  it references a model not present in models.json. Empty/whitespace values
  *  are treated as unset. */
-export function resolveModelOverrides(
-  registry: ModelRegistry,
-  env: NodeJS.ProcessEnv = process.env,
-): ModelOverrides {
+export function resolveModelOverrides(registry: ModelRegistry, env: NodeJS.ProcessEnv = process.env): ModelOverrides {
   const resolveVar = (envVar: 'FACTORY_PLAN_MODEL' | 'FACTORY_BUILD_MODEL'): string | undefined => {
     const value = env[envVar]?.trim();
     if (!value) return undefined;

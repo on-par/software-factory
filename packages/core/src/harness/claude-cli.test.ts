@@ -8,9 +8,17 @@ import type { ModelsConfig } from '../config/index.js';
 describe('CodingHarness contract: ClaudeCliHarness', () => {
   const cases = codingHarnessContractCases({
     success: () => ({ harness: new ClaudeCliHarness(async () => ({ stdout: 'claude output', stderr: '' })) }),
-    timeout: () => ({ harness: new ClaudeCliHarness(async () => { throw Object.assign(new Error('killed'), { killed: true }); }) }),
+    timeout: () => ({
+      harness: new ClaudeCliHarness(async () => {
+        throw Object.assign(new Error('killed'), { killed: true });
+      }),
+    }),
     emptyOutput: () => ({ harness: new ClaudeCliHarness(async () => ({ stdout: '   ', stderr: '' })) }),
-    failure: () => ({ harness: new ClaudeCliHarness(async () => { throw Object.assign(new Error('boom'), { stderr: 'rate limit exceeded', code: 1 }); }) }),
+    failure: () => ({
+      harness: new ClaudeCliHarness(async () => {
+        throw Object.assign(new Error('boom'), { stderr: 'rate limit exceeded', code: 1 });
+      }),
+    }),
   });
   for (const contractCase of cases) it(contractCase.name, contractCase.run);
 });
@@ -64,13 +72,15 @@ describe('ClaudeCliHarness command shape', () => {
     const rec = recordingExec({ stdout: 'CLAUDE OUTPUT' });
     const harness = new ClaudeCliHarness(rec.fn);
 
-    const result = await harness.run(makeContractRequest({
-      model: 'claude-model',
-      registry,
-      prompt: 'draft plan',
-      worktree: '/tmp/factory worktree',
-      timeoutSeconds: 7,
-    }));
+    const result = await harness.run(
+      makeContractRequest({
+        model: 'claude-model',
+        registry,
+        prompt: 'draft plan',
+        worktree: '/tmp/factory worktree',
+        timeoutSeconds: 7,
+      }),
+    );
 
     expect(result.output).toBe('CLAUDE OUTPUT');
     expect(rec.calls).toHaveLength(1);
@@ -102,7 +112,7 @@ describe('ClaudeCliHarness failure classification', () => {
       throw Object.assign(new Error('boom'), { stderr: 'quota exceeded', code: 1 });
     });
 
-    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch(e => e);
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('usage_cap');
@@ -114,7 +124,7 @@ describe('ClaudeCliHarness failure classification', () => {
       throw Object.assign(new Error('killed'), { killed: true });
     });
 
-    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch(e => e);
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('timeout');
@@ -123,7 +133,7 @@ describe('ClaudeCliHarness failure classification', () => {
   it('classifies empty stdout as empty_response with exitCode 0', async () => {
     const harness = new ClaudeCliHarness(async () => ({ stdout: '   ', stderr: '' }));
 
-    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch(e => e);
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('empty_response');
@@ -135,7 +145,7 @@ describe('ClaudeCliHarness failure classification', () => {
       throw Object.assign(new Error('killed'), { killed: true, signal: 'SIGTERM', code: null });
     });
 
-    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch(e => e);
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.details.signal).toBe('SIGTERM');

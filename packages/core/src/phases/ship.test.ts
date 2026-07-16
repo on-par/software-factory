@@ -141,15 +141,8 @@ describe('shipPhase self-healing', () => {
         body: expect.stringContaining('Closes #23'),
       }),
     ]);
-    expect(calls).toContainEqual([
-      'pulls.get',
-      { owner: 'on-par', repo: 'software-factory', pull_number: 123 },
-    ]);
-    expect(calls).toContainEqual([
-      'graphql',
-      expect.stringContaining('markPullRequestReadyForReview'),
-      { id: 'PR_1' },
-    ]);
+    expect(calls).toContainEqual(['pulls.get', { owner: 'on-par', repo: 'software-factory', pull_number: 123 }]);
+    expect(calls).toContainEqual(['graphql', expect.stringContaining('markPullRequestReadyForReview'), { id: 'PR_1' }]);
     expect(logs).toContainEqual(['recovered', 'opened PR #123 for committed work on ship-it/23-self-heal']);
   });
 
@@ -175,11 +168,8 @@ describe('shipPhase self-healing', () => {
     });
 
     expect(result).toEqual({ ok: true, prNumber: 123 });
-    expect(calls).toContainEqual([
-      'pulls.get',
-      { owner: 'on-par', repo: 'software-factory', pull_number: 123 },
-    ]);
-    expect(calls.some(call => call[0] === 'graphql')).toBe(false);
+    expect(calls).toContainEqual(['pulls.get', { owner: 'on-par', repo: 'software-factory', pull_number: 123 }]);
+    expect(calls.some((call) => call[0] === 'graphql')).toBe(false);
   });
 
   it('does not push or open a PR when the worktree has uncommitted changes', async () => {
@@ -205,10 +195,7 @@ describe('shipPhase self-healing', () => {
     });
 
     expect(result).toEqual({ ok: false });
-    expect(commands).toEqual([
-      'git status --porcelain',
-      'git rev-list --count origin/main..HEAD',
-    ]);
+    expect(commands).toEqual(['git status --porcelain', 'git rev-list --count origin/main..HEAD']);
     expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
     expect(logs).toContainEqual(['ship', 'not recovering ship-it/23-self-heal: worktree has uncommitted changes']);
   });
@@ -366,13 +353,15 @@ describe('shipPhase approval gate', () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(calls.filter(c => c[0] === 'pulls.create')).toHaveLength(1);
-    expect(approvalGate).toHaveBeenCalledWith(expect.objectContaining({
-      issue: 23,
-      branch: 'ship-it/23-self-heal',
-      worktree: '/repo-factory-23',
-      checkSummary,
-    }));
+    expect(calls.filter((c) => c[0] === 'pulls.create')).toHaveLength(1);
+    expect(approvalGate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        issue: 23,
+        branch: 'ship-it/23-self-heal',
+        worktree: '/repo-factory-23',
+        checkSummary,
+      }),
+    );
     // git diff --stat runs exactly once — the PR body reuses the approval gate's diffStat.
     expect(diffStatCalls).toHaveLength(1);
     const shipIdx = logs.findIndex(([type]) => type === 'ship');
@@ -397,7 +386,12 @@ describe('shipPhase approval gate', () => {
       if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
       return { stdout: '' };
     };
-    const approvalGate = vi.fn(async () => ({ id: 'a2', approved: false, reason: 'not today', respondedAt: new Date().toISOString() }));
+    const approvalGate = vi.fn(async () => ({
+      id: 'a2',
+      approved: false,
+      reason: 'not today',
+      respondedAt: new Date().toISOString(),
+    }));
 
     const result = await shipPhase({
       issue: 23,

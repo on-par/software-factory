@@ -33,7 +33,7 @@ export function QueueTab({ snapshot, lanes }: QueueTabProps): JSX.Element {
     );
   }
 
-  const laneByIssue = new Map(lanes.map(l => [l.issue, l]));
+  const laneByIssue = new Map(lanes.map((l) => [l.issue, l]));
 
   return (
     <Box flexDirection="column">

@@ -1,12 +1,27 @@
 // packages/core/src/index.ts — Library entry point for programmatic use
 
 // Config
-export { loadModelsConfig, loadRoutesConfig, loadFactoryConfig, resolveTimeouts, resolveSkipCI, getFactoryPaths, getConstitutionsDir } from './config/index.js';
+export {
+  loadModelsConfig,
+  loadRoutesConfig,
+  loadFactoryConfig,
+  resolveTimeouts,
+  resolveSkipCI,
+  getFactoryPaths,
+  getConstitutionsDir,
+} from './config/index.js';
 export type { ModelsConfig, RoutesConfig, FactoryConfig } from './config/index.js';
 
 // Queue
 export { validateQueue, parseQueue, readQueue } from './queue/index.js';
-export type { QueueValidationResult, QueueEntry, QueueDiagnostic, ParsedQueue, QueueSnapshot, QueueSnapshotEntry } from './queue/index.js';
+export type {
+  QueueValidationResult,
+  QueueEntry,
+  QueueDiagnostic,
+  ParsedQueue,
+  QueueSnapshot,
+  QueueSnapshotEntry,
+} from './queue/index.js';
 
 // Events
 export { readEvents, followEvents } from './events/index.js';
@@ -18,13 +33,33 @@ export type { DoctorProbes, ModelDiagnosis, ModelOverrides } from './models/inde
 
 // Router
 export { ModelRouter, CliModelExecutor, failoversFrom } from './router/index.js';
-export type { RouterResult, FailoverReason, ModelExecutor, ModelExecutorContext, ExecutorHarness, SleepFn } from './router/index.js';
+export type {
+  RouterResult,
+  FailoverReason,
+  ModelExecutor,
+  ModelExecutorContext,
+  ExecutorHarness,
+  SleepFn,
+} from './router/index.js';
 export { StubModelExecutor } from './router/stub.js';
 export type { StubModelExecutorOptions } from './router/stub.js';
 
 // Coding harness contract
-export { HarnessError, HARNESS_CATALOG, KNOWN_HARNESS_IDS, isAgenticHarness, NON_RETRYABLE_FAILURE_REASONS, isRetryableFailure } from './harness/index.js';
-export type { CodingHarness, HarnessFailureReason, HarnessRequest, HarnessResult, HarnessCatalogEntry } from './harness/index.js';
+export {
+  HarnessError,
+  HARNESS_CATALOG,
+  KNOWN_HARNESS_IDS,
+  isAgenticHarness,
+  NON_RETRYABLE_FAILURE_REASONS,
+  isRetryableFailure,
+} from './harness/index.js';
+export type {
+  CodingHarness,
+  HarnessFailureReason,
+  HarnessRequest,
+  HarnessResult,
+  HarnessCatalogEntry,
+} from './harness/index.js';
 export { StubCodingHarness } from './harness/stub.js';
 export type { StubCodingHarnessOptions, StubHarnessStep } from './harness/stub.js';
 export { codingHarnessContractCases, makeContractRequest } from './harness/contract.js';
@@ -45,7 +80,15 @@ export { classifyFailure } from './harness/classify.js';
 export { ConstitutionLoader, buildConstitutionContext, REPO_INSTRUCTION_FILES } from './constitutions/index.js';
 
 // Checkers
-export { runAllCheckers, compileChecker, testsChecker, lintChecker, linksChecker, accessibilityChecker, runCustomChecker } from './checkers/index.js';
+export {
+  runAllCheckers,
+  compileChecker,
+  testsChecker,
+  lintChecker,
+  linksChecker,
+  accessibilityChecker,
+  runCustomChecker,
+} from './checkers/index.js';
 export type { CheckerOutput, CheckSummary } from './types/index.js';
 export type { CheckerContext } from './checkers/index.js';
 
@@ -66,30 +109,131 @@ export type { LocalRunOutcome, LocalRunReport, LocalRunReportInput, LocalRunRepo
 
 // Local-small harness
 export { applyLocalSmallPatchStep, createLocalSmallDryRun } from './local-small/stepwise.js';
-export type { LocalSmallContextPack, LocalSmallDryRunInput, LocalSmallDryRunResult, LocalSmallLimits, LocalSmallPatchChange, LocalSmallPatchProposal, LocalSmallPatchStepInput, LocalSmallPatchStepResult, LocalSmallPatchStepStatus, LocalSmallStep, LocalSmallStepPlan } from './local-small/stepwise.js';
+export type {
+  LocalSmallContextPack,
+  LocalSmallDryRunInput,
+  LocalSmallDryRunResult,
+  LocalSmallLimits,
+  LocalSmallPatchChange,
+  LocalSmallPatchProposal,
+  LocalSmallPatchStepInput,
+  LocalSmallPatchStepResult,
+  LocalSmallPatchStepStatus,
+  LocalSmallStep,
+  LocalSmallStepPlan,
+} from './local-small/stepwise.js';
 
 // Eval
-export { loadGoldenCases, scoreSpec, judgeSpec, median, runJudgeSamples, runEval, toBaseline, compareToBaseline, isRouteAsserted, formatRegressionIssue, REGRESSION_ISSUE_TITLE, REGRESSION_ISSUE_MARKER, appendHistoryLine, parseHistory, renderTrend, summaryToHistoryRecord, buildLocalSmallScoreboard, renderLocalSmallScoreboardMarkdown } from './eval/index.js';
-export type { CaseResult, DeterministicCheck, EvalSummary, ExpectedRoute, GoldenCase, RunEvalOpts, Baseline, BaselineCase, BaselineComparison, RegressionIssue, JudgeAggregate, JudgeSample, HistoryRecord, LocalSmallRuntime, LocalSmallScoreboardInput, LocalSmallScoreboardReport, LocalSmallScoreboardRow, LocalSmallScoreboardRun } from './eval/index.js';
+export {
+  loadGoldenCases,
+  scoreSpec,
+  judgeSpec,
+  median,
+  runJudgeSamples,
+  runEval,
+  toBaseline,
+  compareToBaseline,
+  isRouteAsserted,
+  formatRegressionIssue,
+  REGRESSION_ISSUE_TITLE,
+  REGRESSION_ISSUE_MARKER,
+  appendHistoryLine,
+  parseHistory,
+  renderTrend,
+  summaryToHistoryRecord,
+  buildLocalSmallScoreboard,
+  renderLocalSmallScoreboardMarkdown,
+} from './eval/index.js';
+export type {
+  CaseResult,
+  DeterministicCheck,
+  EvalSummary,
+  ExpectedRoute,
+  GoldenCase,
+  RunEvalOpts,
+  Baseline,
+  BaselineCase,
+  BaselineComparison,
+  RegressionIssue,
+  JudgeAggregate,
+  JudgeSample,
+  HistoryRecord,
+  LocalSmallRuntime,
+  LocalSmallScoreboardInput,
+  LocalSmallScoreboardReport,
+  LocalSmallScoreboardRow,
+  LocalSmallScoreboardRun,
+} from './eval/index.js';
 
 // Utils
-export { logEvent, logCost, readCosts, slugify, branchPrefixSlug, branchFor, setupWorktree, cleanupWorktree, gitFetch, shellEscape, ensureDir, isEscalation, escalationLine, codexDisabled, formatEventLine, colorEnabled } from './utils/index.js';
+export {
+  logEvent,
+  logCost,
+  readCosts,
+  slugify,
+  branchPrefixSlug,
+  branchFor,
+  setupWorktree,
+  cleanupWorktree,
+  gitFetch,
+  shellEscape,
+  ensureDir,
+  isEscalation,
+  escalationLine,
+  codexDisabled,
+  formatEventLine,
+  colorEnabled,
+} from './utils/index.js';
 export { withGitLock, withFileLock } from './utils/lock.js';
 export type { FileLockOptions } from './utils/lock.js';
 export { watchChecks } from './utils/ci-watch.js';
 export type { CiOutcome, WatchChecksOptions } from './utils/ci-watch.js';
-export { sweepWorktrees, parseWorktreeList, findCredentialFiles, scrubFile, zeroFill, formatGcReport } from './utils/worktree-gc.js';
+export {
+  sweepWorktrees,
+  parseWorktreeList,
+  findCredentialFiles,
+  scrubFile,
+  zeroFill,
+  formatGcReport,
+} from './utils/worktree-gc.js';
 export type { GcReport, GcCandidate, GcReason, WorktreeListEntry, SweepDeps } from './utils/worktree-gc.js';
 export { runCommand, describeCommandFailure } from './utils/command-runner.js';
 export type { RunCommandOptions, CommandResult } from './utils/command-runner.js';
 
 // Coverage ratchet
-export { parseCoverageSummary, parseCoverageSummaryScopes, checkRatchetDrift, checkScopedRatchetDrift, renderRatchetReport, DEFAULT_RATCHET_SLACK } from './utils/coverage-ratchet.js';
+export {
+  parseCoverageSummary,
+  parseCoverageSummaryScopes,
+  checkRatchetDrift,
+  checkScopedRatchetDrift,
+  renderRatchetReport,
+  DEFAULT_RATCHET_SLACK,
+} from './utils/coverage-ratchet.js';
 export type { CoverageMetrics, RatchetDrift, RatchetCheckResult } from './utils/coverage-ratchet.js';
 
 // Usage
-export { estimateTrailingSpend, formatUsageReport, watchUsage, readUsage, priceFor, defaultTranscriptRoots, TRAILING_WINDOW_MS, readCostsFile, aggregateCosts } from './usage/index.js';
-export type { TrailingUsageOptions, WatchUsageOptions, ReadUsageOptions, UsageReading, UsageSource, CostsRead, ModelCostRow, IssueCostRow, CostsSummary } from './usage/index.js';
+export {
+  estimateTrailingSpend,
+  formatUsageReport,
+  watchUsage,
+  readUsage,
+  priceFor,
+  defaultTranscriptRoots,
+  TRAILING_WINDOW_MS,
+  readCostsFile,
+  aggregateCosts,
+} from './usage/index.js';
+export type {
+  TrailingUsageOptions,
+  WatchUsageOptions,
+  ReadUsageOptions,
+  UsageReading,
+  UsageSource,
+  CostsRead,
+  ModelCostRow,
+  IssueCostRow,
+  CostsSummary,
+} from './usage/index.js';
 export { fetchSubscriptionUsage, readClaudeAccessToken } from './usage/subscription.js';
 export type { SubscriptionUsage, SubscriptionUsageDeps } from './usage/subscription.js';
 

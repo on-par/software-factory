@@ -11,33 +11,39 @@ a standard plus a way to check it.
 product: <product-name>
 version: 1
 checkers:
-  - <checker-name>      # References lib/checkers/<checker-name>.sh
+  - <checker-name> # References lib/checkers/<checker-name>.sh
   - <checker-name>
-enforced_on: [plan, build, check]  # Which phases load this constitution
-requireTests: true    # FAIL (instead of SKIP) the tests checker when the repo has no verify/test command
+enforced_on: [plan, build, check] # Which phases load this constitution
+requireTests: true # FAIL (instead of SKIP) the tests checker when the repo has no verify/test command
 ---
 
 # <Product> Constitution
 
 ## Purpose
+
 <One paragraph: what this product does and who it's for>
 
 ## Standards
 
 ### <Standard Category 1>
+
 <What "done right" means for this category. Be specific and testable.>
 
 ### <Standard Category 2>
+
 <...>
 
 ## Quality Gates
+
 <Which checks must pass before work ships. References checkers in lib/checkers/.>
 
 ## Dispute Rules
+
 <How the boss should arbitrate when a worker disputes a checker failure.
 Reference the standards above, not subjective judgment.>
 
 ## Non-Goals
+
 <What this constitution does NOT cover — explicitly out of scope.>
 ```
 

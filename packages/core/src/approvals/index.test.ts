@@ -2,12 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  createFileApprovalGate,
-  listPendingApprovals,
-  respondToApproval,
-  type ApprovalRequest,
-} from './index.js';
+import { createFileApprovalGate, listPendingApprovals, respondToApproval, type ApprovalRequest } from './index.js';
 
 function makeDir(): string {
   return mkdtempSync(join(tmpdir(), 'approvals-'));
@@ -17,7 +12,7 @@ async function waitFor<T>(check: () => T | undefined, tries = 40, delayMs = 5): 
   for (let i = 0; i < tries; i++) {
     const value = check();
     if (value !== undefined) return value;
-    await new Promise(resolve => setTimeout(resolve, delayMs));
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
   throw new Error('waitFor: condition never became truthy');
 }
@@ -36,7 +31,7 @@ describe('createFileApprovalGate', () => {
       });
 
       const request = await waitFor<ApprovalRequest>(() => {
-        const files = readdirSync(dir).filter(f => f.endsWith('.request.json'));
+        const files = readdirSync(dir).filter((f) => f.endsWith('.request.json'));
         return files.length > 0 ? JSON.parse(readFileSync(join(dir, files[0]), 'utf-8')) : undefined;
       });
 
@@ -64,7 +59,7 @@ describe('createFileApprovalGate', () => {
       const promise = gate({ issue: 1, branch: 'b', worktree: '/w', diffStat: '' });
 
       setTimeout(() => {
-        const files = readdirSync(dir).filter(f => f.endsWith('.request.json'));
+        const files = readdirSync(dir).filter((f) => f.endsWith('.request.json'));
         const id = files[0].replace('.request.json', '');
         respondToApproval(dir, id, { approved: true });
       }, 20);
@@ -134,15 +129,33 @@ describe('listPendingApprovals', () => {
     try {
       writeFileSync(
         join(dir, 'newer.request.json'),
-        JSON.stringify({ issue: 2, branch: 'b2', worktree: '/w', diffStat: '', requestedAt: '2024-01-02T00:00:00.000Z' }),
+        JSON.stringify({
+          issue: 2,
+          branch: 'b2',
+          worktree: '/w',
+          diffStat: '',
+          requestedAt: '2024-01-02T00:00:00.000Z',
+        }),
       );
       writeFileSync(
         join(dir, 'older.request.json'),
-        JSON.stringify({ issue: 1, branch: 'b1', worktree: '/w', diffStat: '', requestedAt: '2024-01-01T00:00:00.000Z' }),
+        JSON.stringify({
+          issue: 1,
+          branch: 'b1',
+          worktree: '/w',
+          diffStat: '',
+          requestedAt: '2024-01-01T00:00:00.000Z',
+        }),
       );
       writeFileSync(
         join(dir, 'answered.request.json'),
-        JSON.stringify({ issue: 3, branch: 'b3', worktree: '/w', diffStat: '', requestedAt: '2024-01-01T12:00:00.000Z' }),
+        JSON.stringify({
+          issue: 3,
+          branch: 'b3',
+          worktree: '/w',
+          diffStat: '',
+          requestedAt: '2024-01-01T12:00:00.000Z',
+        }),
       );
       writeFileSync(
         join(dir, 'answered.response.json'),
@@ -151,7 +164,7 @@ describe('listPendingApprovals', () => {
       writeFileSync(join(dir, 'broken.request.json'), '{not json');
 
       const pending = listPendingApprovals(dir);
-      expect(pending.map(r => r.id)).toEqual(['older', 'newer']);
+      expect(pending.map((r) => r.id)).toEqual(['older', 'newer']);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

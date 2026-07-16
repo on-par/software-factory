@@ -18,7 +18,11 @@ export type HarnessFailureReason = FailoverReason;
 
 /** Deterministic failures: another model cannot plausibly help, so the
  *  router must not fail over to the next tier. */
-export const NON_RETRYABLE_FAILURE_REASONS = ['schema_invalid', 'apply_failed', 'verify_failed'] as const satisfies readonly HarnessFailureReason[];
+export const NON_RETRYABLE_FAILURE_REASONS = [
+  'schema_invalid',
+  'apply_failed',
+  'verify_failed',
+] as const satisfies readonly HarnessFailureReason[];
 
 /** True when failing over to another model can plausibly help. */
 export function isRetryableFailure(reason: HarnessFailureReason): boolean {
@@ -48,7 +52,13 @@ export class HarnessError extends Error {
   constructor(
     message: string,
     readonly reason: HarnessFailureReason,
-    readonly details: { exitCode?: number; stderr?: string; code?: string | number; signal?: string; killed?: boolean } = {},
+    readonly details: {
+      exitCode?: number;
+      stderr?: string;
+      code?: string | number;
+      signal?: string;
+      killed?: boolean;
+    } = {},
   ) {
     super(message);
     this.name = 'HarnessError';

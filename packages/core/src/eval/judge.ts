@@ -126,11 +126,7 @@ export async function runJudgeSpec(router: ModelRouter, opts: JudgeSpecOpts): Pr
   }
 }
 
-export async function runJudgeSamples(
-  router: ModelRouter,
-  opts: JudgeSpecOpts,
-  k: number,
-): Promise<JudgeAggregate> {
+export async function runJudgeSamples(router: ModelRouter, opts: JudgeSpecOpts, k: number): Promise<JudgeAggregate> {
   const n = Math.max(1, Math.floor(k));
   const samples: JudgeSample[] = [];
   const results: RouterResult[] = [];
@@ -148,17 +144,18 @@ export async function runJudgeSamples(
     prompt = r.prompt;
   }
 
-  const validSamples = samples.filter(sample => !sample.malformed && sample.score !== null);
-  const validScores = validSamples.map(sample => sample.score as number);
+  const validSamples = samples.filter((sample) => !sample.malformed && sample.score !== null);
+  const validScores = validSamples.map((sample) => sample.score as number);
   const validCount = validScores.length;
   const malformedCount = n - validCount;
   const score = validCount > 0 ? median(validScores) : undefined;
-  const reasons = score === undefined
-    ? ''
-    : validSamples.reduce((best, sample) => {
-      if (sample.score === null || best.score === null) return best;
-      return Math.abs(sample.score - score) < Math.abs(best.score - score) ? sample : best;
-    }).reasons;
+  const reasons =
+    score === undefined
+      ? ''
+      : validSamples.reduce((best, sample) => {
+          if (sample.score === null || best.score === null) return best;
+          return Math.abs(sample.score - score) < Math.abs(best.score - score) ? sample : best;
+        }).reasons;
 
   return {
     score,
@@ -172,9 +169,8 @@ export async function runJudgeSamples(
 }
 
 function buildJudgePrompt(opts: JudgeSpecOpts): string {
-  const rubric = opts.rubric.length > 0
-    ? opts.rubric.map((item, index) => `${index + 1}. ${item}`).join('\n')
-    : '(no rubric items)';
+  const rubric =
+    opts.rubric.length > 0 ? opts.rubric.map((item, index) => `${index + 1}. ${item}`).join('\n') : '(no rubric items)';
 
   return `You are an eval judge. Score this frozen spec against the rubric, 0-10.
 Return ONLY JSON: {"score": <0-10>, "reasons": "<short>"}

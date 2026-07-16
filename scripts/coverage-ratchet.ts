@@ -28,11 +28,11 @@ const args = parseArgs(process.argv.slice(2));
 
 const thresholds = vitestConfig.test?.coverage?.thresholds;
 if (
-  !thresholds
-  || typeof thresholds.lines !== 'number'
-  || typeof thresholds.functions !== 'number'
-  || typeof thresholds.branches !== 'number'
-  || typeof thresholds.statements !== 'number'
+  !thresholds ||
+  typeof thresholds.lines !== 'number' ||
+  typeof thresholds.functions !== 'number' ||
+  typeof thresholds.branches !== 'number' ||
+  typeof thresholds.statements !== 'number'
 ) {
   console.error('vitest.config.ts is missing numeric coverage.thresholds for lines/functions/branches/statements');
   process.exit(1);
@@ -67,10 +67,12 @@ function thresholdMetrics(value: unknown): CoverageMetrics {
 }
 
 function isCoverageMetrics(value: unknown): value is CoverageMetrics {
-  return !!value
-    && typeof value === 'object'
-    && typeof (value as CoverageMetrics).lines === 'number'
-    && typeof (value as CoverageMetrics).functions === 'number'
-    && typeof (value as CoverageMetrics).branches === 'number'
-    && typeof (value as CoverageMetrics).statements === 'number';
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    typeof (value as CoverageMetrics).lines === 'number' &&
+    typeof (value as CoverageMetrics).functions === 'number' &&
+    typeof (value as CoverageMetrics).branches === 'number' &&
+    typeof (value as CoverageMetrics).statements === 'number'
+  );
 }

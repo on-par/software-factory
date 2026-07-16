@@ -11,6 +11,7 @@ enforced_on: [plan, build, check]
 # Sound Buddy Constitution
 
 ## Purpose
+
 Sound Buddy is a desktop audio analysis application (Electron + React) that
 helps live-sound engineers assess and improve their mixes. It captures audio
 from a Midas M32R console, runs spectral analysis, compares against ideal
@@ -20,6 +21,7 @@ Cloudflare Worker handling Stripe webhooks, licensing, and email delivery.
 ## Standards
 
 ### Test-Driven Development
+
 - All new code must be written test-first: write a failing test (red), make it
   pass (green), then refactor — never the reverse.
 - Every new function, branch, and error path must have a test before the code
@@ -31,6 +33,7 @@ Cloudflare Worker handling Stripe webhooks, licensing, and email delivery.
   check a function exists without exercising it.
 
 ### Coverage — Ratchet, Never Regress
+
 - Coverage must increase or stay the same with every change. It must never go
   down.
 - The end goal is 100% meaningful statement coverage. "Meaningful" means every
@@ -43,6 +46,7 @@ Cloudflare Worker handling Stripe webhooks, licensing, and email delivery.
   emit no runtime code). This is configured in vitest.config.ts, not per-file.
 
 ### Test Colocation (TypeScript / JavaScript)
+
 - In Node/TS/JS packages, tests must be colocated with the file they test:
   `foo.ts` → `foo.test.ts` in the same directory.
 - No `__tests__/` directories. No `test/` directories. No `__mocks__/`
@@ -54,8 +58,9 @@ Cloudflare Worker handling Stripe webhooks, licensing, and email delivery.
   only.
 
 ### E2e Test Settings
+
 - E2e tests (Playwright or similar) must run headless by default: `headless:
-  true` in the config (or simply omitted — headless is Playwright's default),
+true` in the config (or simply omitted — headless is Playwright's default),
   and no `--headed`, `--ui`, or `--debug` flags in any npm script or CI step.
   Headed/UI modes are for a human debugging locally, invoked by hand only.
 - Reporters must never block or open anything: use `list`, `line`, or `dot`.
@@ -72,6 +77,7 @@ Cloudflare Worker handling Stripe webhooks, licensing, and email delivery.
   (e.g. `npm run test:e2e`) so unit-test gates stay fast and display-free.
 
 ### Code Quality
+
 - TypeScript strict mode — no `any` without a comment explaining why.
 - No floating-point comparisons without epsilon tolerance.
 - No hardcoded magic numbers — named constants or config.
@@ -79,6 +85,7 @@ Cloudflare Worker handling Stripe webhooks, licensing, and email delivery.
   broke).
 
 ### Architecture
+
 - Pure functions are preferred. Side effects are injected (via params or
   dependency injection), not imported globally.
 - Electron main-process code must extract testable logic into pure functions
@@ -88,12 +95,14 @@ Cloudflare Worker handling Stripe webhooks, licensing, and email delivery.
   be tested without Electron.
 
 ## Quality Gates
+
 1. `compile` — `tsc --noEmit` passes with no errors
 2. `lint` — No lint errors
 3. `tests` — `npm test` passes — all existing tests still green plus new tests
    for new code
 
 ## Dispute Rules
+
 - If a checker flags missing coverage, the worker must either add the test or
   add a `/* c8 ignore */` with a justification comment. "It's hard to test" is
   not a justification — extract pure functions and test those.
@@ -104,6 +113,7 @@ Cloudflare Worker handling Stripe webhooks, licensing, and email delivery.
   The only resolution is to write the test.
 
 ## Non-Goals
+
 - This constitution does not dictate test framework, assertion style, or mock
   pattern — those are in the codebase already, follow what's there.
 - This constitution does not require 100% branch coverage on type narrowing

@@ -19,8 +19,14 @@ export interface FileLockOptions {
  */
 export function withGitLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
   const prev = tails.get(key) ?? Promise.resolve();
-  const run = prev.then(() => fn(), () => fn());
-  const tail = run.then(() => {}, () => {});
+  const run = prev.then(
+    () => fn(),
+    () => fn(),
+  );
+  const tail = run.then(
+    () => {},
+    () => {},
+  );
 
   tails.set(key, tail);
   tail.finally(() => {
@@ -34,7 +40,7 @@ const DEFAULT_TIMEOUT_MS = 30 * 60_000;
 const DEFAULT_POLL_MS = 5_000;
 const DEFAULT_GRACE_MS = 10_000;
 
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function defaultIsPidAlive(pid: number): boolean {
   try {
@@ -59,11 +65,7 @@ function lockTimeoutError(lockDir: string): Error & { reason: string } {
   return Object.assign(new Error(`lock ${lockDir} stuck >30m`), { reason: 'timeout' });
 }
 
-export async function withFileLock<T>(
-  lockDir: string,
-  fn: () => Promise<T>,
-  opts: FileLockOptions = {},
-): Promise<T> {
+export async function withFileLock<T>(lockDir: string, fn: () => Promise<T>, opts: FileLockOptions = {}): Promise<T> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const pollMs = opts.pollMs ?? DEFAULT_POLL_MS;
   const graceMs = opts.graceMs ?? DEFAULT_GRACE_MS;

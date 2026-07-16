@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { DOCS_URL, formatOverview, missingClaudeCliMessage, missingTokenMessage, notInitializedMessage } from './first-run.js';
+import {
+  DOCS_URL,
+  formatOverview,
+  missingClaudeCliMessage,
+  missingTokenMessage,
+  notInitializedMessage,
+} from './first-run.js';
 
 describe('formatOverview', () => {
   it('matches the frozen copy', () => {
@@ -59,7 +65,9 @@ describe('missingTokenMessage', () => {
   });
 
   it('contains the acceptance-criteria substring verbatim', () => {
-    expect(missingTokenMessage()).toContain('GITHUB_TOKEN not set — create a token at https://github.com/settings/tokens and export it');
+    expect(missingTokenMessage()).toContain(
+      'GITHUB_TOKEN not set — create a token at https://github.com/settings/tokens and export it',
+    );
   });
 });
 

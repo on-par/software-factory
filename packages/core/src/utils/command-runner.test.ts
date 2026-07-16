@@ -7,7 +7,7 @@ import { describeCommandFailure, runCommand } from './command-runner.js';
 const tempDirs = new Set<string>();
 
 afterEach(async () => {
-  await Promise.all([...tempDirs].map(dir => rm(dir, { recursive: true, force: true })));
+  await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
   tempDirs.clear();
 });
 
@@ -39,11 +39,7 @@ describe('runCommand', () => {
   });
 
   it('resolves (does not throw) on a non-zero exit code', async () => {
-    const result = await runCommand([
-      process.execPath,
-      '-e',
-      'console.error("boom"); process.exit(3)',
-    ]);
+    const result = await runCommand([process.execPath, '-e', 'console.error("boom"); process.exit(3)']);
 
     expect(result.ok).toBe(false);
     expect(result.exitCode).toBe(3);
@@ -54,12 +50,7 @@ describe('runCommand', () => {
     const dir = await makeTmpDir();
     const payload = `$(touch ${join(dir, 'pwned')}); echo hacked > ${join(dir, 'pwned2')}`;
 
-    const result = await runCommand([
-      process.execPath,
-      '-e',
-      'console.log(process.argv[1])',
-      payload,
-    ]);
+    const result = await runCommand([process.execPath, '-e', 'console.log(process.argv[1])', payload]);
 
     expect(result.stdout.trim()).toBe(payload);
     expect(await pathExists(join(dir, 'pwned'))).toBe(false);
@@ -69,21 +60,13 @@ describe('runCommand', () => {
   it('round-trips untrusted-path-style args byte-identically', async () => {
     const payload = `weird 'path' with spaces and \`backticks\``;
 
-    const result = await runCommand([
-      process.execPath,
-      '-e',
-      'console.log(process.argv[1])',
-      payload,
-    ]);
+    const result = await runCommand([process.execPath, '-e', 'console.log(process.argv[1])', payload]);
 
     expect(result.stdout.trim()).toBe(payload);
   });
 
   it('kills and reports timedOut when timeoutMs elapses', async () => {
-    const result = await runCommand(
-      [process.execPath, '-e', 'setTimeout(() => {}, 60000)'],
-      { timeoutMs: 200 },
-    );
+    const result = await runCommand([process.execPath, '-e', 'setTimeout(() => {}, 60000)'], { timeoutMs: 200 });
 
     expect(result.ok).toBe(false);
     expect(result.timedOut).toBe(true);

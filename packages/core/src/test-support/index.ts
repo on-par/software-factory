@@ -166,11 +166,13 @@ export class PipelineTestKit {
     // guards worktree mutation, or they race the shared .git/worktrees
     // metadata; the lock is a harmless no-op cost for single-lane suites.
     await Promise.all(
-      this.cleanupTargets.map(({ repoRoot, worktree }) => withGitLock(repoRoot, () => cleanupWorktree(repoRoot, worktree))),
+      this.cleanupTargets.map(({ repoRoot, worktree }) =>
+        withGitLock(repoRoot, () => cleanupWorktree(repoRoot, worktree)),
+      ),
     );
     this.cleanupTargets.length = 0;
 
-    await Promise.all([...this.tempDirs].map(dir => rm(dir, { recursive: true, force: true })));
+    await Promise.all([...this.tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
     this.tempDirs.clear();
   }
 }

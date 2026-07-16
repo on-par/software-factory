@@ -23,7 +23,9 @@ export function ApprovalPrompt({ request, pendingCount, denyReason }: ApprovalPr
         {pendingCount > 1 ? ` [1 of ${pendingCount}]` : ''}
       </Text>
       {visibleDiff.map((line, i) => (
-        <Text key={i} dimColor>{line}</Text>
+        <Text key={i} dimColor>
+          {line}
+        </Text>
       ))}
       {truncated && <Text dimColor>… (truncated)</Text>}
       {summary && (

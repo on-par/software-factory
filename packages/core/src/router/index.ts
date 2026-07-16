@@ -128,8 +128,10 @@ export class CliModelExecutor implements ModelExecutor {
       'claude-cli': { run: (m, p, c) => this.runViaHarness(this.claudeHarness, m, p, c) },
       'codex-cli': { run: (m, p, c) => this.runViaHarness(this.codexHarness, m, p, c) },
       'ollama-http': { run: (m, p, c) => this.runViaHarness(this.ollamaHarness, m, p, c) },
-      'ollama-command-agent': { run: (m, p, c) => this.runOllamaCommandAgent(m, p, c.worktree, c.timeoutSeconds, c.registry) },
-      'opencode': { run: (m, p, c) => this.runViaHarness(this.opencodeHarness, m, p, c) },
+      'ollama-command-agent': {
+        run: (m, p, c) => this.runOllamaCommandAgent(m, p, c.worktree, c.timeoutSeconds, c.registry),
+      },
+      opencode: { run: (m, p, c) => this.runViaHarness(this.opencodeHarness, m, p, c) },
       'ollama-agentic': { run: (m, p, c) => this.runViaHarness(this.ollamaAgenticHarness, m, p, c) },
       ...harnessOverrides,
     };
@@ -153,10 +155,14 @@ export class CliModelExecutor implements ModelExecutor {
     }
     const entry = this.harnesses[harnessId];
     if (!entry) {
-      throw new Error(`Model '${model}' declares unknown harness '${harnessId}' (known harnesses: ${Object.keys(this.harnesses).join(', ')})`);
+      throw new Error(
+        `Model '${model}' declares unknown harness '${harnessId}' (known harnesses: ${Object.keys(this.harnesses).join(', ')})`,
+      );
     }
     if (!isAgenticHarness(harnessId) && taskRequiresAgenticHarness(ctx.task)) {
-      throw new Error(`Model '${model}' uses non-agentic harness '${harnessId}', which cannot edit files — rejected for build task '${ctx.task}'`);
+      throw new Error(
+        `Model '${model}' uses non-agentic harness '${harnessId}', which cannot edit files — rejected for build task '${ctx.task}'`,
+      );
     }
     return entry.run(model, prompt, ctx);
   }
@@ -181,10 +187,20 @@ export class CliModelExecutor implements ModelExecutor {
   }
 
   /** Run a small local command loop for Ollama worker models. */
-  private async runOllamaCommandAgent(model: string, prompt: string, worktree: string, timeoutSeconds: number, registry: ModelRegistry): Promise<string> {
+  private async runOllamaCommandAgent(
+    model: string,
+    prompt: string,
+    worktree: string,
+    timeoutSeconds: number,
+    registry: ModelRegistry,
+  ): Promise<string> {
     const transcript: string[] = [];
-    const initialStatus = await this.execFn('git status --short', { cwd: worktree, timeoutMs: 30_000, maxBuffer: 1024 * 1024 })
-      .then(result => result.stdout)
+    const initialStatus = await this.execFn('git status --short', {
+      cwd: worktree,
+      timeoutMs: 30_000,
+      maxBuffer: 1024 * 1024,
+    })
+      .then((result) => result.stdout)
       .catch(() => '');
     const initiallyDirty = new Set(parseGitStatusPaths(initialStatus));
     let conversation = `${prompt}
@@ -197,7 +213,14 @@ First inspect, then edit, then run one cheap check, then git add/commit.
     for (let step = 0; step < 8; step++) {
       let output: string;
       try {
-        output = await this.callOllamaForCommandAgent(model, conversation, timeoutSeconds, registry, worktree, 'build_codex');
+        output = await this.callOllamaForCommandAgent(
+          model,
+          conversation,
+          timeoutSeconds,
+          registry,
+          worktree,
+          'build_codex',
+        );
       } catch (err) {
         const reason = extractFailoverReason(err) ?? 'error';
         const message = err instanceof Error ? err.message : String(err);
@@ -231,15 +254,17 @@ First inspect, then edit, then run one cheap check, then git add/commit.
 
       if (action.commands.length === 0) {
         if (action.done) break;
-        const trace = action.traceForFailure ?? await this.writeLocalAgentTrace({
-          model,
-          worktree,
-          prompt,
-          conversation,
-          attempt: step + 1,
-          rawResponse: output,
-          malformedReason: action.malformedReason ?? 'empty_response',
-        });
+        const trace =
+          action.traceForFailure ??
+          (await this.writeLocalAgentTrace({
+            model,
+            worktree,
+            prompt,
+            conversation,
+            attempt: step + 1,
+            rawResponse: output,
+            malformedReason: action.malformedReason ?? 'empty_response',
+          }));
         throw new ModelExecutorError(
           `local command-agent malformed output (${trace.malformedReason}); trace written to ${trace.tracePath}; retry prompt ${trace.retryPromptPath}`,
           'empty_response',
@@ -252,13 +277,15 @@ First inspect, then edit, then run one cheap check, then git add/commit.
         try {
           const { stdout, stderr } = await this.execFn(command, {
             cwd: worktree,
-            timeoutMs: Math.max(30_000, Math.floor(timeoutSeconds * 1000 / 4)),
+            timeoutMs: Math.max(30_000, Math.floor((timeoutSeconds * 1000) / 4)),
             maxBuffer: 10 * 1024 * 1024,
           });
           commandOutputs.push(`$ ${command}\nEXIT_CODE: 0\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`);
         } catch (err: any) {
           const exitCode = typeof err.code === 'number' ? err.code : err.killed ? 124 : 1;
-          commandOutputs.push(`$ ${command}\nEXIT_CODE: ${exitCode}\nSTDOUT:\n${err.stdout ?? ''}\nSTDERR:\n${err.stderr ?? err.message ?? ''}`);
+          commandOutputs.push(
+            `$ ${command}\nEXIT_CODE: ${exitCode}\nSTDOUT:\n${err.stdout ?? ''}\nSTDERR:\n${err.stderr ?? err.message ?? ''}`,
+          );
         }
       }
       transcript.push(commandOutputs.join('\n\n'));
@@ -270,14 +297,21 @@ ${commandOutputs.join('\n\n').slice(-5000)}
 Return next JSON command action. If committed, return {"commands":[],"done":true,"final":"done"}.`;
     }
 
-    const status = await this.execFn('git status --short', { cwd: worktree, timeoutMs: 30_000, maxBuffer: 1024 * 1024 });
-    const changedPaths = parseGitStatusPaths(status.stdout).filter(path => !initiallyDirty.has(path));
+    const status = await this.execFn('git status --short', {
+      cwd: worktree,
+      timeoutMs: 30_000,
+      maxBuffer: 1024 * 1024,
+    });
+    const changedPaths = parseGitStatusPaths(status.stdout).filter((path) => !initiallyDirty.has(path));
     if (changedPaths.length > 0) {
-      await this.execFn(`git add -- ${changedPaths.map(shellEscape).join(' ')} && git commit -m "feat: implement factory issue"`, {
-        cwd: worktree,
-        timeoutMs: 120_000,
-        maxBuffer: 10 * 1024 * 1024,
-      });
+      await this.execFn(
+        `git add -- ${changedPaths.map(shellEscape).join(' ')} && git commit -m "feat: implement factory issue"`,
+        {
+          cwd: worktree,
+          timeoutMs: 120_000,
+          maxBuffer: 10 * 1024 * 1024,
+        },
+      );
       transcript.push(`AUTO-COMMIT: committed ${changedPaths.length} changed path(s).`);
     }
 
@@ -293,10 +327,12 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
     timeoutSeconds: number;
     registry: ModelRegistry;
     step: number;
-  }): Promise<ReturnType<typeof parseLocalAgentAction> & {
-    repairTranscript?: string;
-    traceForFailure?: LocalAgentTrace;
-  }> {
+  }): Promise<
+    ReturnType<typeof parseLocalAgentAction> & {
+      repairTranscript?: string;
+      traceForFailure?: LocalAgentTrace;
+    }
+  > {
     const action = parseLocalAgentAction(opts.output);
     if (action.commands.length > 0 || action.done) return action;
 
@@ -318,7 +354,14 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
 
     let repairedOutput: string;
     try {
-      repairedOutput = await this.callOllamaForCommandAgent(opts.model, repairPrompt, opts.timeoutSeconds, opts.registry, opts.worktree, 'build_codex');
+      repairedOutput = await this.callOllamaForCommandAgent(
+        opts.model,
+        repairPrompt,
+        opts.timeoutSeconds,
+        opts.registry,
+        opts.worktree,
+        'build_codex',
+      );
     } catch (err) {
       const reason = extractFailoverReason(err) ?? 'error';
       const message = err instanceof Error ? err.message : String(err);
@@ -356,15 +399,22 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
     const retryPromptPath = join(traceDir, `${stamp}-repair-prompt.md`);
     const tracePath = join(traceDir, `${stamp}.json`);
     const rawResponseSummary = summarizeRawResponse(opts.rawResponse);
-    await writeFile(tracePath, `${JSON.stringify({
-      model: opts.model,
-      attempt: opts.attempt,
-      promptSize: opts.prompt.length,
-      conversationSize: opts.conversation.length,
-      malformedReason: opts.malformedReason,
-      rawResponseSummary,
-      retryPromptPath,
-    }, null, 2)}\n`);
+    await writeFile(
+      tracePath,
+      `${JSON.stringify(
+        {
+          model: opts.model,
+          attempt: opts.attempt,
+          promptSize: opts.prompt.length,
+          conversationSize: opts.conversation.length,
+          malformedReason: opts.malformedReason,
+          rawResponseSummary,
+          retryPromptPath,
+        },
+        null,
+        2,
+      )}\n`,
+    );
     return { tracePath, retryPromptPath, malformedReason: opts.malformedReason, rawResponseSummary };
   }
 
@@ -381,18 +431,32 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
     await mkdir(traceDir, { recursive: true });
     const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const tracePath = join(traceDir, `${stamp}-call-failure.json`);
-    await writeFile(tracePath, `${JSON.stringify({
-      model: opts.model,
-      attempt: opts.attempt,
-      promptSize: opts.prompt.length,
-      conversationSize: opts.conversation.length,
-      failureReason: opts.failureReason,
-      errorMessage: opts.errorMessage,
-    }, null, 2)}\n`);
+    await writeFile(
+      tracePath,
+      `${JSON.stringify(
+        {
+          model: opts.model,
+          attempt: opts.attempt,
+          promptSize: opts.prompt.length,
+          conversationSize: opts.conversation.length,
+          failureReason: opts.failureReason,
+          errorMessage: opts.errorMessage,
+        },
+        null,
+        2,
+      )}\n`,
+    );
     return { tracePath };
   }
 
-  private async callOllama(model: string, prompt: string, timeoutSeconds: number, registry: ModelRegistry, worktree: string, task: TaskType): Promise<string> {
+  private async callOllama(
+    model: string,
+    prompt: string,
+    timeoutSeconds: number,
+    registry: ModelRegistry,
+    worktree: string,
+    task: TaskType,
+  ): Promise<string> {
     return this.runViaHarness(this.ollamaHarness, model, prompt, { worktree, timeoutSeconds, task, registry });
   }
 
@@ -401,7 +465,14 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
    *  empty_response from a clean exit is returned as '' here instead of
    *  propagating. Every other path must let HarnessError('empty_response')
    *  propagate — ModelExecutor.runModel never resolves empty output. */
-  private async callOllamaForCommandAgent(model: string, prompt: string, timeoutSeconds: number, registry: ModelRegistry, worktree: string, task: TaskType): Promise<string> {
+  private async callOllamaForCommandAgent(
+    model: string,
+    prompt: string,
+    timeoutSeconds: number,
+    registry: ModelRegistry,
+    worktree: string,
+    task: TaskType,
+  ): Promise<string> {
     try {
       return await this.callOllama(model, prompt, timeoutSeconds, registry, worktree, task);
     } catch (err) {
@@ -429,7 +500,9 @@ export class ModelRouter {
     this.registry = new ModelRegistry(modelsConfig);
   }
 
-  get registryRef() { return this.registry; }
+  get registryRef() {
+    return this.registry;
+  }
 
   /** Resolve a task type to its tier */
   getTier(task: TaskType): string | undefined {
@@ -447,10 +520,10 @@ export class ModelRouter {
     if (!tier) return [];
     let models = this.registry.getAvailableModelsForTier(tier, this.byok, this.allowExperimental, this.localOnly);
     if (this.routesConfig.routes[task]?.requires === 'codex') {
-      models = models.filter(model => this.registry.isCodexModel(model));
+      models = models.filter((model) => this.registry.isCodexModel(model));
     }
     if (taskRequiresAgenticHarness(task)) {
-      models = models.filter(model => isAgenticHarness(this.registry.getHarnessId(model) ?? ''));
+      models = models.filter((model) => isAgenticHarness(this.registry.getHarnessId(model) ?? ''));
     }
     return models;
   }
@@ -499,11 +572,14 @@ export class ModelRouter {
         let output: string;
         try {
           output = await this.executor.runModel(model, prompt, {
-            worktree, timeoutSeconds, task, registry: this.registry, routesConfig: this.routesConfig,
+            worktree,
+            timeoutSeconds,
+            task,
+            registry: this.registry,
+            routesConfig: this.routesConfig,
           });
         } catch (err) {
-          const reason = extractFailoverReason(err)
-            ?? this.classifyFailure(errStderr(err), errExitCode(err));
+          const reason = extractFailoverReason(err) ?? this.classifyFailure(errStderr(err), errExitCode(err));
           const detail = describeFailureDetail(err);
           attempts.push(detail ? { model, reason, ok: false, detail } : { model, reason, ok: false });
           onLog(`${model} failed (${reason}) on ${task}`);
@@ -524,7 +600,10 @@ export class ModelRouter {
           if (snapshot) {
             try {
               const { didReset, tracePath } = await resetWorktreeState(this.gitExecFn, worktree, snapshot, onLog);
-              if (didReset) onLog(`Reset worktree to pre-attempt state after ${model} failure${tracePath ? ` (attempt diff preserved at ${tracePath})` : ''}`);
+              if (didReset)
+                onLog(
+                  `Reset worktree to pre-attempt state after ${model} failure${tracePath ? ` (attempt diff preserved at ${tracePath})` : ''}`,
+                );
             } catch (resetErr) {
               const message = resetErr instanceof Error ? resetErr.message : String(resetErr);
               const error = new Error(
@@ -594,7 +673,10 @@ export class ModelRouter {
         if (snapshot) {
           try {
             const { didReset, tracePath } = await resetWorktreeState(this.gitExecFn, worktree, snapshot, onLog);
-            if (didReset) onLog(`Reset worktree to pre-attempt state after ${model} failure${tracePath ? ` (attempt diff preserved at ${tracePath})` : ''}`);
+            if (didReset)
+              onLog(
+                `Reset worktree to pre-attempt state after ${model} failure${tracePath ? ` (attempt diff preserved at ${tracePath})` : ''}`,
+              );
           } catch (resetErr) {
             const message = resetErr instanceof Error ? resetErr.message : String(resetErr);
             const error = new Error(
@@ -609,7 +691,7 @@ export class ModelRouter {
       }
     }
 
-    const summary = attempts.map(a => `${a.model}(${a.reason}${a.detail ? `: ${a.detail}` : ''})`).join(', ');
+    const summary = attempts.map((a) => `${a.model}(${a.reason}${a.detail ? `: ${a.detail}` : ''})`).join(', ');
     const error = new Error(`All models failed for task '${task}': ${summary}`) as Error & {
       reason?: FailoverReason;
       attempts?: RouterResult['attempts'];
@@ -621,7 +703,7 @@ export class ModelRouter {
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function errStderr(err: unknown): string {
@@ -634,7 +716,12 @@ function errExitCode(err: unknown): number {
   return typeof exitCode === 'number' ? exitCode : 1;
 }
 
-function parseLocalAgentAction(output: string): { commands: string[]; done: boolean; final: string; malformedReason?: 'empty_response' | 'invalid_json' } {
+function parseLocalAgentAction(output: string): {
+  commands: string[];
+  done: boolean;
+  final: string;
+  malformedReason?: 'empty_response' | 'invalid_json';
+} {
   if (output.trim().length === 0) {
     return { commands: [], done: false, final: '', malformedReason: 'empty_response' };
   }
@@ -654,7 +741,7 @@ function parseLocalAgentAction(output: string): { commands: string[]; done: bool
   }
 
   const fenced = [...output.matchAll(/```(?:bash|sh|zsh|shell)?\n([\s\S]*?)```/g)]
-    .map(match => match[1].trim())
+    .map((match) => match[1].trim())
     .filter(Boolean);
   if (fenced.length > 0) return { commands: fenced, done: false, final: '' };
 
@@ -668,11 +755,8 @@ function normalizeLocalCommand(value: unknown): string[] {
   }
   if (!isPlainObject(value)) return [];
 
-  const commandValue = typeof value.command === 'string'
-    ? value.command
-    : typeof value.name === 'string'
-      ? value.name
-      : '';
+  const commandValue =
+    typeof value.command === 'string' ? value.command : typeof value.name === 'string' ? value.name : '';
   const command = commandValue.trim();
   if (!command) return [];
   if (!Array.isArray(value.args) || value.args.length === 0) return [command];
@@ -720,9 +804,9 @@ function extractJsonObject(output: string): string | undefined {
 function parseGitStatusPaths(status: string): string[] {
   return status
     .split('\n')
-    .map(line => line.trimEnd())
+    .map((line) => line.trimEnd())
     .filter(Boolean)
-    .map(line => {
+    .map((line) => {
       const path = line.slice(3).trim();
       return path.includes(' -> ') ? path.split(' -> ').pop()!.trim() : path;
     })

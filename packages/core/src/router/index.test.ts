@@ -142,9 +142,9 @@ describe('ModelRouter with StubModelExecutor', () => {
     });
     const router = new ModelRouter(models, routes, false, stub);
 
-    const err: any = await router.run('plan', 'do it').catch(e => e);
+    const err: any = await router.run('plan', 'do it').catch((e) => e);
     expect(err.message).toBe(
-      "All models failed for task 'plan': stub-model(error: msg=\"stub failure: error\" exitCode=1), stub-model(error: msg=\"stub failure: error\" exitCode=1)",
+      'All models failed for task \'plan\': stub-model(error: msg="stub failure: error" exitCode=1), stub-model(error: msg="stub failure: error" exitCode=1)',
     );
     expect(err.reason).toBe('error');
     expect(err.attempts).toEqual([
@@ -175,12 +175,7 @@ describe('ModelRouter with StubModelExecutor', () => {
   it('retries rate limits then fails over to the next model', async () => {
     const stub = new StubModelExecutor({
       scripts: {
-        plan: [
-          { fail: 'rate_limit' },
-          { fail: 'rate_limit' },
-          { fail: 'rate_limit' },
-          { output: 'RECOVERED' },
-        ],
+        plan: [{ fail: 'rate_limit' }, { fail: 'rate_limit' }, { fail: 'rate_limit' }, { output: 'RECOVERED' }],
       },
     });
     const router = new ModelRouter(twoModels, routes, false, stub);
@@ -206,24 +201,21 @@ describe('ModelRouter with StubModelExecutor', () => {
     };
     const stub = new StubModelExecutor({
       scripts: {
-        plan: [
-          { fail: 'rate_limit' },
-          { fail: 'rate_limit' },
-          { fail: 'rate_limit' },
-          { output: 'RECOVERED' },
-        ],
+        plan: [{ fail: 'rate_limit' }, { fail: 'rate_limit' }, { fail: 'rate_limit' }, { output: 'RECOVERED' }],
       },
     });
     const sleepCalls: number[] = [];
     let releaseSleep!: () => void;
     const sleepFn = (ms: number) => {
       sleepCalls.push(ms);
-      return new Promise<void>(resolve => { releaseSleep = resolve; });
+      return new Promise<void>((resolve) => {
+        releaseSleep = resolve;
+      });
     };
     const router = new ModelRouter(modelsWithCooldown, routes, false, stub, undefined, undefined, undefined, sleepFn);
     let settled = false;
 
-    const promise = router.run('plan', 'do it').then(result => {
+    const promise = router.run('plan', 'do it').then((result) => {
       settled = true;
       return result;
     });
@@ -252,9 +244,9 @@ describe('ModelRouter with StubModelExecutor', () => {
     });
     const router = new ModelRouter(twoModels, routes, false, stub);
 
-    const err: any = await router.run('plan', 'do it').catch(e => e);
+    const err: any = await router.run('plan', 'do it').catch((e) => e);
     expect(err.message).toBe(
-      "All models failed for task 'plan': model-a(timeout: msg=\"stub failure: timeout\" exitCode=1), model-b(timeout: msg=\"stub failure: timeout\" exitCode=1)",
+      'All models failed for task \'plan\': model-a(timeout: msg="stub failure: timeout" exitCode=1), model-b(timeout: msg="stub failure: timeout" exitCode=1)',
     );
     expect(err.reason).toBe('timeout');
     expect(err.attempts).toEqual([
@@ -272,9 +264,7 @@ describe('ModelRouter with StubModelExecutor', () => {
     const stub = new StubModelExecutor({ scripts: {} });
     const router = new ModelRouter(noModels, routes, false, stub);
 
-    await expect(router.run('plan', 'do it')).rejects.toThrow(
-      "No available models for task 'plan'",
-    );
+    await expect(router.run('plan', 'do it')).rejects.toThrow("No available models for task 'plan'");
     expect(stub.calls).toHaveLength(0);
   });
 
@@ -288,7 +278,7 @@ describe('ModelRouter with StubModelExecutor', () => {
 
     expect(result.output).toBe('RECOVERED');
     expect(result.model).toBe('model-b');
-    expect(stub.calls.map(call => call.model)).toEqual(['model-a', 'model-b']);
+    expect(stub.calls.map((call) => call.model)).toEqual(['model-a', 'model-b']);
     expect(result.attempts).toEqual([
       { model: 'model-a', reason: 'usage_cap', ok: false, detail: 'msg="stub failure: usage_cap" exitCode=1' },
       { model: 'model-b', reason: null, ok: true },
@@ -298,7 +288,7 @@ describe('ModelRouter with StubModelExecutor', () => {
 
   it.each(['usage_cap', 'timeout', 'empty_response'] as const)(
     'surfaces failoverReason %s on the winning result when the first model fails over to the second',
-    async reason => {
+    async (reason) => {
       const stub = new StubModelExecutor({
         scripts: { plan: [{ fail: reason }, { output: 'RECOVERED' }] },
       });
@@ -334,7 +324,7 @@ describe('ModelRouter with StubModelExecutor', () => {
     const router = new ModelRouter(models, routes, false, executor);
     const logs: string[] = [];
 
-    const err: any = await router.run('plan', 'do it', { onLog: msg => logs.push(msg) }).catch(e => e);
+    const err: any = await router.run('plan', 'do it', { onLog: (msg) => logs.push(msg) }).catch((e) => e);
 
     expect(calls).toHaveLength(1);
     expect(err.attempts).toEqual([
@@ -359,9 +349,9 @@ describe('ModelRouter with StubModelExecutor', () => {
     const router = new ModelRouter(models, routes, false, executor);
     const logs: string[] = [];
 
-    await router.run('plan', 'do it', { onLog: msg => logs.push(msg) }).catch(() => {});
+    await router.run('plan', 'do it', { onLog: (msg) => logs.push(msg) }).catch(() => {});
 
-    const detailLog = logs.find(msg => msg.includes('failure detail'));
+    const detailLog = logs.find((msg) => msg.includes('failure detail'));
     expect(detailLog).toContain('code=EAGAIN');
     expect(detailLog).toContain('signal=SIGKILL');
     expect(detailLog).toContain('killed=true');
@@ -376,11 +366,9 @@ describe('ModelRouter with StubModelExecutor', () => {
     const router = new ModelRouter(models, routes, false, stub);
     const logs: string[] = [];
 
-    const err: any = await router.run('plan', 'do it', { onLog: msg => logs.push(msg) }).catch(e => e);
+    const err: any = await router.run('plan', 'do it', { onLog: (msg) => logs.push(msg) }).catch((e) => e);
 
-    expect(err.attempts).toEqual([
-      { model: 'stub-model', reason: 'empty_response', ok: false },
-    ]);
+    expect(err.attempts).toEqual([{ model: 'stub-model', reason: 'empty_response', ok: false }]);
     expect(logs).toContain('stub-model failed (empty_response) on plan');
     expect(err.message).toBe("All models failed for task 'plan': stub-model(empty_response)");
     expect(err.reason).toBe('empty_response');
@@ -391,11 +379,9 @@ describe('ModelRouter with StubModelExecutor', () => {
     const router = new ModelRouter(models, routes, false, stub);
     const logs: string[] = [];
 
-    const err: any = await router.run('plan', 'do it', { onLog: msg => logs.push(msg) }).catch(e => e);
+    const err: any = await router.run('plan', 'do it', { onLog: (msg) => logs.push(msg) }).catch((e) => e);
 
-    expect(err.attempts).toEqual([
-      { model: 'stub-model', reason: 'empty_response', ok: false },
-    ]);
+    expect(err.attempts).toEqual([{ model: 'stub-model', reason: 'empty_response', ok: false }]);
     expect(err.reason).toBe('empty_response');
     expect(stub.calls).toHaveLength(1);
   });
@@ -427,20 +413,25 @@ describe('ModelRouter with StubModelExecutor', () => {
     expect(result.model).toBe('model-b');
     expect(result.output).toBe('RECOVERED');
     expect(result.attempts).toEqual([
-      { model: 'model-a', reason: 'empty_response', ok: false, detail: 'msg="stub failure: empty_response" exitCode=1' },
+      {
+        model: 'model-a',
+        reason: 'empty_response',
+        ok: false,
+        detail: 'msg="stub failure: empty_response" exitCode=1',
+      },
       { model: 'model-b', reason: null, ok: true },
     ]);
   });
 
   it.each(['schema_invalid', 'apply_failed', 'verify_failed'] as const)(
     'stops the failover chain on a non-retryable %s reason without burning the next tier',
-    async reason => {
+    async (reason) => {
       const stub = new StubModelExecutor({
         scripts: { plan: [{ fail: reason }, { output: 'SHOULD NOT BE REACHED' }] },
       });
       const router = new ModelRouter(twoModels, routes, false, stub);
 
-      const err: any = await router.run('plan', 'do it').catch(e => e);
+      const err: any = await router.run('plan', 'do it').catch((e) => e);
 
       expect(err.reason).toBe(reason);
       expect(err.attempts).toEqual([
@@ -457,7 +448,7 @@ describe('ModelRouter with StubModelExecutor', () => {
     const router = new ModelRouter(twoModels, routes, false, stub);
     const logs: string[] = [];
 
-    await router.run('plan', 'do it', { onLog: msg => logs.push(msg) }).catch(() => {});
+    await router.run('plan', 'do it', { onLog: (msg) => logs.push(msg) }).catch(() => {});
 
     expect(logs).toContain('model-a failed (schema_invalid) on plan');
     expect(logs).toContain('model-a failed (schema_invalid) on plan — non-retryable, not failing over');
@@ -477,13 +468,25 @@ describe('ModelRouter with StubModelExecutor', () => {
   });
 
   it('skips experimental models by default', () => {
-    const router = new ModelRouter(experimentalFirstModels, routes, false, new StubModelExecutor({ scripts: {} }), false);
+    const router = new ModelRouter(
+      experimentalFirstModels,
+      routes,
+      false,
+      new StubModelExecutor({ scripts: {} }),
+      false,
+    );
 
     expect(router.resolve('plan')).toBe('real-model');
   });
 
   it('includes experimental models when allowExperimental is true', () => {
-    const router = new ModelRouter(experimentalFirstModels, routes, false, new StubModelExecutor({ scripts: {} }), true);
+    const router = new ModelRouter(
+      experimentalFirstModels,
+      routes,
+      false,
+      new StubModelExecutor({ scripts: {} }),
+      true,
+    );
 
     expect(router.resolve('plan')).toBe('exp-model');
   });
@@ -574,7 +577,7 @@ describe('ModelRouter with StubModelExecutor', () => {
     };
     const router = new ModelRouter(models, routes, false, executor);
 
-    const err: any = await router.run('plan', 'do it').catch(e => e);
+    const err: any = await router.run('plan', 'do it').catch((e) => e);
 
     expect(err.attempts[0]).toMatchObject({ model: 'stub-model', reason: 'usage_cap', ok: false });
     expect(calls).toHaveLength(1);
@@ -590,7 +593,7 @@ describe('ModelRouter with StubModelExecutor', () => {
     };
     const router = new ModelRouter(models, routes, false, executor);
 
-    const err: any = await router.run('plan', 'do it').catch(e => e);
+    const err: any = await router.run('plan', 'do it').catch((e) => e);
 
     expect(err.attempts[0]).toMatchObject({ model: 'stub-model', reason: 'timeout', ok: false });
     expect(calls).toHaveLength(1);
@@ -604,7 +607,7 @@ describe('ModelRouter with StubModelExecutor', () => {
     };
     const router = new ModelRouter(models, routes, false, executor);
 
-    const err: any = await router.run('plan', 'do it').catch(e => e);
+    const err: any = await router.run('plan', 'do it').catch((e) => e);
 
     expect(err.attempts[0]).toMatchObject({ reason: 'usage_cap' });
   });
@@ -639,7 +642,7 @@ describe('ModelRouter with StubModelExecutor', () => {
     };
     const router = new ModelRouter(models, routes, false, executor);
 
-    const err: any = await router.run('plan', 'do it').catch(e => e);
+    const err: any = await router.run('plan', 'do it').catch((e) => e);
 
     expect(err.attempts[0].detail).toContain('trace=/tmp/t.json');
   });
@@ -648,15 +651,17 @@ describe('ModelRouter with StubModelExecutor', () => {
 describe('ModelRouter worktree reset guard', () => {
   const worktree = '/fake/worktree';
 
-  function makeFakeGitExec(opts: {
-    toplevel?: string | Error;
-    postFailureStatus?: string;
-    diffText?: string;
-    resetError?: Error;
-  } = {}): { execFn: ExecFn; calls: string[] } {
+  function makeFakeGitExec(
+    opts: {
+      toplevel?: string | Error;
+      postFailureStatus?: string;
+      diffText?: string;
+      resetError?: Error;
+    } = {},
+  ): { execFn: ExecFn; calls: string[] } {
     const calls: string[] = [];
     let statusCallCount = 0;
-    const execFn: ExecFn = async cmd => {
+    const execFn: ExecFn = async (cmd) => {
       calls.push(cmd);
       if (/git rev-parse --show-toplevel/.test(cmd)) {
         if (opts.toplevel instanceof Error) throw opts.toplevel;
@@ -685,8 +690,18 @@ describe('ModelRouter worktree reset guard', () => {
     const stub = new StubModelExecutor({
       scripts: {
         build_claude: [
-          { fail: 'timeout', effect: () => { events.push('call:model-a'); } },
-          { output: 'OK', effect: () => { events.push('call:model-b'); } },
+          {
+            fail: 'timeout',
+            effect: () => {
+              events.push('call:model-a');
+            },
+          },
+          {
+            output: 'OK',
+            effect: () => {
+              events.push('call:model-b');
+            },
+          },
         ],
       },
     });
@@ -696,12 +711,12 @@ describe('ModelRouter worktree reset guard', () => {
 
     expect(result.model).toBe('model-b');
     expect(calls).toContain(`git reset --hard 'abc123'`);
-    expect(calls.some(c => c.startsWith('git clean -fd'))).toBe(true);
+    expect(calls.some((c) => c.startsWith('git clean -fd'))).toBe(true);
 
     const resetIndex = events.indexOf('call:model-a');
     const failoverIndex = events.indexOf('call:model-b');
-    const resetCallIndex = calls.findIndex(c => c.startsWith('git reset --hard'));
-    const cleanCallIndex = calls.findIndex(c => c.startsWith('git clean -fd'));
+    const resetCallIndex = calls.findIndex((c) => c.startsWith('git reset --hard'));
+    const cleanCallIndex = calls.findIndex((c) => c.startsWith('git clean -fd'));
     expect(resetIndex).toBeGreaterThanOrEqual(0);
     expect(failoverIndex).toBeGreaterThan(resetIndex);
     expect(resetCallIndex).toBeGreaterThanOrEqual(0);
@@ -733,7 +748,7 @@ describe('ModelRouter worktree reset guard', () => {
     const result = await router.run('build_claude', 'do it', { worktree });
 
     expect(result.model).toBe('model-b');
-    expect(calls.some(c => c.startsWith('git reset --hard'))).toBe(false);
+    expect(calls.some((c) => c.startsWith('git reset --hard'))).toBe(false);
   });
 
   it('aborts failover when the reset fails', async () => {
@@ -745,7 +760,7 @@ describe('ModelRouter worktree reset guard', () => {
     });
     const router = new ModelRouter(twoModels, routes, false, stub, undefined, undefined, execFn);
 
-    const err: any = await router.run('build_claude', 'do it', { worktree }).catch(e => e);
+    const err: any = await router.run('build_claude', 'do it', { worktree }).catch((e) => e);
 
     expect(err.message).toMatch(/aborting failover to avoid mixing attempt state/);
     expect(stub.calls).toHaveLength(1);
@@ -760,10 +775,10 @@ describe('ModelRouter worktree reset guard', () => {
     });
     const router = new ModelRouter(twoModels, routes, false, stub, undefined, undefined, execFn);
 
-    const err: any = await router.run('build_claude', 'do it', { worktree }).catch(e => e);
+    const err: any = await router.run('build_claude', 'do it', { worktree }).catch((e) => e);
 
     expect(err.reason).toBe('verify_failed');
-    expect(calls.some(c => c.startsWith('git reset --hard'))).toBe(false);
+    expect(calls.some((c) => c.startsWith('git reset --hard'))).toBe(false);
   });
 });
 
@@ -801,11 +816,8 @@ describe('failoversFrom', () => {
   });
 
   it('excludes the final failure with no following attempt (nothing to switch to)', () => {
-    const attempts: Parameters<typeof failoversFrom>[0] = [
-      { model: 'A', reason: 'error', ok: false, detail: 'boom' },
-    ];
+    const attempts: Parameters<typeof failoversFrom>[0] = [{ model: 'A', reason: 'error', ok: false, detail: 'boom' }];
 
     expect(failoversFrom(attempts)).toEqual([]);
   });
 });
-

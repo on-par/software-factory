@@ -59,12 +59,12 @@ export function compareToBaseline(summary: EvalSummary, baseline: Baseline): Bas
     summary.routeAccuracy < baseline.routeAccuracy - (baseline.tolerance.routeAccuracy ?? 0)
   ) {
     const misrouted = summary.results
-      .filter(result => isRouteAsserted(result.expectedRoute) && !result.routeCorrect)
-      .map(result => result.id);
+      .filter((result) => isRouteAsserted(result.expectedRoute) && !result.routeCorrect)
+      .map((result) => result.id);
     regressions.push(
       `routing accuracy dropped: ${summary.routeAccuracy} < baseline ${baseline.routeAccuracy} ` +
-      `- tolerance ${baseline.tolerance.routeAccuracy ?? 0}` +
-      (misrouted.length ? ` (misrouted: ${misrouted.join(', ')})` : ''),
+        `- tolerance ${baseline.tolerance.routeAccuracy ?? 0}` +
+        (misrouted.length ? ` (misrouted: ${misrouted.join(', ')})` : ''),
     );
   }
 
@@ -87,7 +87,7 @@ export function compareToBaseline(summary: EvalSummary, baseline: Baseline): Bas
     }
   }
 
-  const runIds = new Set(summary.results.map(result => result.id));
+  const runIds = new Set(summary.results.map((result) => result.id));
   const baselineIds = new Set(Object.keys(baseline.cases));
 
   for (const result of summary.results) {

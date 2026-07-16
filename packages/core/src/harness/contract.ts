@@ -111,27 +111,28 @@ export function codingHarnessContractCases(scenarios: HarnessContractScenarios):
     {
       name: 'rejects with HarnessError reason timeout on timeout',
       async run() {
-        await expectHarnessError(scenarios.timeout(), err => assert.equal(err.reason, 'timeout'));
+        await expectHarnessError(scenarios.timeout(), (err) => assert.equal(err.reason, 'timeout'));
       },
     },
     {
       name: 'rejects with HarnessError reason empty_response on empty output',
       async run() {
-        await expectHarnessError(scenarios.emptyOutput(), err => assert.equal(err.reason, 'empty_response'));
+        await expectHarnessError(scenarios.emptyOutput(), (err) => assert.equal(err.reason, 'empty_response'));
       },
     },
     {
       name: 'rejects with a classified reason on nonzero failure',
       async run() {
-        await expectHarnessError(scenarios.failure(), err => assert.ok(HARNESS_FAILURE_REASONS.includes(err.reason)));
+        await expectHarnessError(scenarios.failure(), (err) => assert.ok(HARNESS_FAILURE_REASONS.includes(err.reason)));
       },
     },
     {
       name: 'failure rejections carry a non-empty diagnostic message',
       async run() {
         for (const scenario of [scenarios.timeout(), scenarios.emptyOutput(), scenarios.failure()]) {
-          await expectHarnessError(scenario, err =>
-            assert.ok(err.message.trim().length > 0, `harness rejected with an empty message (reason=${err.reason})`));
+          await expectHarnessError(scenario, (err) =>
+            assert.ok(err.message.trim().length > 0, `harness rejected with an empty message (reason=${err.reason})`),
+          );
         }
       },
     },

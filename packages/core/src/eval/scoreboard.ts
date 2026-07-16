@@ -30,14 +30,14 @@ export interface LocalSmallScoreboardReport {
 }
 
 export function buildLocalSmallScoreboard(input: LocalSmallScoreboardInput): LocalSmallScoreboardReport {
-  const baseline = new Map((input.baseline?.runs ?? []).map(run => [scoreboardKey(run), run]));
-  const rows = input.runs.map(run => ({
+  const baseline = new Map((input.baseline?.runs ?? []).map((run) => [scoreboardKey(run), run]));
+  const rows = input.runs.map((run) => ({
     ...run,
     passed: run.patchApplied && run.testsPassed && run.reviewerGrade >= 7,
   }));
   return {
     rows,
-    regressions: rows.flatMap(row => regressionsFor(row, baseline.get(scoreboardKey(row)))),
+    regressions: rows.flatMap((row) => regressionsFor(row, baseline.get(scoreboardKey(row)))),
   };
 }
 
@@ -47,22 +47,26 @@ export function renderLocalSmallScoreboardMarkdown(report: LocalSmallScoreboardR
     '',
     '| Scenario | Runtime | Model | Harness | Patch | Tests | Diff | Repairs | Duration | Grade |',
     '| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: |',
-    ...report.rows.map(row => [
-      row.scenario,
-      row.runtime,
-      row.model,
-      row.harness,
-      row.patchApplied ? 'yes' : 'no',
-      row.testsPassed ? 'yes' : 'no',
-      String(row.diffSize),
-      String(row.repairCount),
-      `${(row.durationMs / 1000).toFixed(2)}s`,
-      String(row.reviewerGrade),
-    ].join(' | ')).map(row => `| ${row} |`),
+    ...report.rows
+      .map((row) =>
+        [
+          row.scenario,
+          row.runtime,
+          row.model,
+          row.harness,
+          row.patchApplied ? 'yes' : 'no',
+          row.testsPassed ? 'yes' : 'no',
+          String(row.diffSize),
+          String(row.repairCount),
+          `${(row.durationMs / 1000).toFixed(2)}s`,
+          String(row.reviewerGrade),
+        ].join(' | '),
+      )
+      .map((row) => `| ${row} |`),
     '',
     '## Regressions',
     report.regressions.length > 0
-      ? report.regressions.map(regression => `- ${regression}`).join('\n')
+      ? report.regressions.map((regression) => `- ${regression}`).join('\n')
       : 'No regressions against baseline.',
     '',
   ];

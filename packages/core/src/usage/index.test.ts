@@ -184,12 +184,23 @@ describe('readCostsFile', () => {
   it('parses valid lines and counts malformed JSON and wrong-shape lines as skipped', () => {
     const dir = mkdtemp();
     const file = join(dir, 'costs.jsonl');
-    const valid: CostEntry = { ts: '2026-07-10T11:30:00Z', issue: '61', task: 'build', model: 'claude-sonnet-5', inputTokens: 100, outputTokens: 50, cost: 0.01 };
-    writeFileSync(file, [
-      JSON.stringify(valid),
-      'not valid json {{{',
-      JSON.stringify({ ts: '2026-07-10T11:31:00Z', task: 'build', cost: 'not-a-number' }),
-    ].join('\n') + '\n');
+    const valid: CostEntry = {
+      ts: '2026-07-10T11:30:00Z',
+      issue: '61',
+      task: 'build',
+      model: 'claude-sonnet-5',
+      inputTokens: 100,
+      outputTokens: 50,
+      cost: 0.01,
+    };
+    writeFileSync(
+      file,
+      [
+        JSON.stringify(valid),
+        'not valid json {{{',
+        JSON.stringify({ ts: '2026-07-10T11:31:00Z', task: 'build', cost: 'not-a-number' }),
+      ].join('\n') + '\n',
+    );
 
     const result = readCostsFile(file);
     expect(result.entries).toEqual([valid]);
@@ -199,7 +210,15 @@ describe('readCostsFile', () => {
   it('handles a trailing newline without producing a phantom skipped line', () => {
     const dir = mkdtemp();
     const file = join(dir, 'costs.jsonl');
-    const valid: CostEntry = { ts: '2026-07-10T11:30:00Z', issue: '61', task: 'build', model: 'claude-sonnet-5', inputTokens: 100, outputTokens: 50, cost: 0.01 };
+    const valid: CostEntry = {
+      ts: '2026-07-10T11:30:00Z',
+      issue: '61',
+      task: 'build',
+      model: 'claude-sonnet-5',
+      inputTokens: 100,
+      outputTokens: 50,
+      cost: 0.01,
+    };
     writeFileSync(file, JSON.stringify(valid) + '\n\n');
     expect(readCostsFile(file)).toEqual({ entries: [valid], skipped: 0 });
   });
@@ -207,8 +226,24 @@ describe('readCostsFile', () => {
   it('counts a line with non-numeric token fields as skipped instead of admitting it for aggregation', () => {
     const dir = mkdtemp();
     const file = join(dir, 'costs.jsonl');
-    const valid: CostEntry = { ts: '2026-07-10T11:30:00Z', issue: '61', task: 'build', model: 'claude-sonnet-5', inputTokens: 100, outputTokens: 50, cost: 0.01 };
-    const corruptTokens = { ts: '2026-07-10T11:31:00Z', issue: '62', task: 'build', model: 'gpt-5', inputTokens: '1000', outputTokens: 50, cost: 0.01 };
+    const valid: CostEntry = {
+      ts: '2026-07-10T11:30:00Z',
+      issue: '61',
+      task: 'build',
+      model: 'claude-sonnet-5',
+      inputTokens: 100,
+      outputTokens: 50,
+      cost: 0.01,
+    };
+    const corruptTokens = {
+      ts: '2026-07-10T11:31:00Z',
+      issue: '62',
+      task: 'build',
+      model: 'gpt-5',
+      inputTokens: '1000',
+      outputTokens: 50,
+      cost: 0.01,
+    };
     writeFileSync(file, [JSON.stringify(valid), JSON.stringify(corruptTokens)].join('\n') + '\n');
 
     const result = readCostsFile(file);
@@ -224,7 +259,15 @@ describe('aggregateCosts', () => {
 
   it('sums per-issue, nests per-model, and computes a grand total, preserving first-seen issue order', () => {
     const entries: CostEntry[] = [
-      { ts: 't1', issue: '61', task: 'build', model: 'claude-sonnet-5', inputTokens: 100, outputTokens: 50, cost: 0.01 },
+      {
+        ts: 't1',
+        issue: '61',
+        task: 'build',
+        model: 'claude-sonnet-5',
+        inputTokens: 100,
+        outputTokens: 50,
+        cost: 0.01,
+      },
       { ts: 't2', issue: '62', task: 'plan', model: 'gpt-5', inputTokens: 200, outputTokens: 100, cost: 0.02 },
       { ts: 't3', issue: '61', task: 'check', model: 'claude-sonnet-5', inputTokens: 10, outputTokens: 5, cost: 0.001 },
       { ts: 't4', issue: '61', task: 'ship', model: 'claude-haiku-5', inputTokens: 1, outputTokens: 1, cost: 0.0001 },
@@ -232,7 +275,7 @@ describe('aggregateCosts', () => {
 
     const summary = aggregateCosts(entries);
 
-    expect(summary.perIssue.map(r => r.issue)).toEqual(['61', '62']);
+    expect(summary.perIssue.map((r) => r.issue)).toEqual(['61', '62']);
 
     const issue61 = summary.perIssue[0];
     expect(issue61.inputTokens).toBe(111);
@@ -258,9 +301,7 @@ describe('aggregateCosts', () => {
   });
 
   it('defaults missing token fields to zero', () => {
-    const entries = [
-      { ts: 't1', issue: '61', task: 'build', model: 'claude-sonnet-5', cost: 0.01 } as CostEntry,
-    ];
+    const entries = [{ ts: 't1', issue: '61', task: 'build', model: 'claude-sonnet-5', cost: 0.01 } as CostEntry];
     const summary = aggregateCosts(entries);
     expect(summary.perIssue[0].inputTokens).toBe(0);
     expect(summary.perIssue[0].outputTokens).toBe(0);
@@ -336,28 +377,35 @@ describe('watchUsage', () => {
     const stopCalls: string[] = [];
     let sleepCalls = 0;
 
-    await expect(watchUsage({
-      cap: 227,
-      stopAt: 0.75,
-      pollMs: 180_000,
-      stopFile: '/repo/.factory/STOP',
-      eventsFile: '/repo/.factory/events.ndjson',
-      readUsageFn: async () => readings.shift()!,
-      emitEvent: (...args) => {
-        events.push(args);
-      },
-      setStop: file => {
-        stopCalls.push(file);
-      },
-      sleep: async () => {
-        sleepCalls++;
-      },
-    })).resolves.toBe('stopped');
+    await expect(
+      watchUsage({
+        cap: 227,
+        stopAt: 0.75,
+        pollMs: 180_000,
+        stopFile: '/repo/.factory/STOP',
+        eventsFile: '/repo/.factory/events.ndjson',
+        readUsageFn: async () => readings.shift()!,
+        emitEvent: (...args) => {
+          events.push(args);
+        },
+        setStop: (file) => {
+          stopCalls.push(file);
+        },
+        sleep: async () => {
+          sleepCalls++;
+        },
+      }),
+    ).resolves.toBe('stopped');
 
     expect(stopCalls).toEqual(['/repo/.factory/STOP']);
     expect(events).toEqual([
       ['/repo/.factory/events.ndjson', 'watchdog', 'usage', 'usage watchdog armed: stop at 75% of $227 cap, poll 180s'],
-      ['/repo/.factory/events.ndjson', 'usage-stop', 'usage', 'trailing-5h usage ~= $180 = 79% of $227 cap -- STOP set, lanes halt between issues'],
+      [
+        '/repo/.factory/events.ndjson',
+        'usage-stop',
+        'usage',
+        'trailing-5h usage ~= $180 = 79% of $227 cap -- STOP set, lanes halt between issues',
+      ],
     ]);
     expect(sleepCalls).toBe(1);
   });
@@ -368,25 +416,31 @@ describe('watchUsage', () => {
     const stopCalls: string[] = [];
     let sleepCalls = 0;
 
-    await expect(watchUsage({
-      cap: 227,
-      stopAt: 0.75,
-      pollMs: 180_000,
-      stopFile: '/repo/.factory/STOP',
-      eventsFile: '/repo/.factory/events.ndjson',
-      signal: controller.signal,
-      readUsageFn: async () => ({ pct: 0.04, source: 'estimate', detail: 'trailing-5h usage ~= $10 = 4% of $227 cap' }),
-      emitEvent: (...args) => {
-        events.push(args);
-      },
-      setStop: file => {
-        stopCalls.push(file);
-      },
-      sleep: async () => {
-        sleepCalls++;
-        if (sleepCalls === 3) controller.abort();
-      },
-    })).resolves.toBe('aborted');
+    await expect(
+      watchUsage({
+        cap: 227,
+        stopAt: 0.75,
+        pollMs: 180_000,
+        stopFile: '/repo/.factory/STOP',
+        eventsFile: '/repo/.factory/events.ndjson',
+        signal: controller.signal,
+        readUsageFn: async () => ({
+          pct: 0.04,
+          source: 'estimate',
+          detail: 'trailing-5h usage ~= $10 = 4% of $227 cap',
+        }),
+        emitEvent: (...args) => {
+          events.push(args);
+        },
+        setStop: (file) => {
+          stopCalls.push(file);
+        },
+        sleep: async () => {
+          sleepCalls++;
+          if (sleepCalls === 3) controller.abort();
+        },
+      }),
+    ).resolves.toBe('aborted');
 
     expect(stopCalls).toEqual([]);
     expect(events.map(([, type]) => type)).toEqual(['watchdog']);
@@ -394,23 +448,34 @@ describe('watchUsage', () => {
   });
 
   it('stops at the exact threshold', async () => {
-    await expect(watchUsage({
-      cap: 200,
-      stopAt: 0.75,
-      pollMs: 180_000,
-      stopFile: '/repo/.factory/STOP',
-      eventsFile: '/repo/.factory/events.ndjson',
-      readUsageFn: async () => ({ pct: 0.75, source: 'estimate', detail: 'trailing-5h usage ~= $150 = 75% of $200 cap' }),
-      emitEvent: () => {},
-      setStop: () => {},
-      sleep: async () => {},
-    })).resolves.toBe('stopped');
+    await expect(
+      watchUsage({
+        cap: 200,
+        stopAt: 0.75,
+        pollMs: 180_000,
+        stopFile: '/repo/.factory/STOP',
+        eventsFile: '/repo/.factory/events.ndjson',
+        readUsageFn: async () => ({
+          pct: 0.75,
+          source: 'estimate',
+          detail: 'trailing-5h usage ~= $150 = 75% of $200 cap',
+        }),
+        emitEvent: () => {},
+        setStop: () => {},
+        sleep: async () => {},
+      }),
+    ).resolves.toBe('stopped');
   });
 
   it('emits usage-unavailable exactly once across consecutive null readings, then re-arms after recovery', async () => {
     const controller = new AbortController();
     const events: EmitEventArgs[] = [];
-    const readings: Array<UsageReading | null> = [null, null, { pct: 0.1, source: 'subscription', detail: '5h subscription window at 10%' }, null];
+    const readings: Array<UsageReading | null> = [
+      null,
+      null,
+      { pct: 0.1, source: 'subscription', detail: '5h subscription window at 10%' },
+      null,
+    ];
     let sleepCalls = 0;
 
     await watchUsage({
@@ -441,21 +506,23 @@ describe('watchUsage', () => {
     // No injected sleep: this exercises the module's real setTimeout-based
     // sleep, both its Promise path (first poll) and its already-aborted
     // fast-return path (second poll, after the abort).
-    await expect(watchUsage({
-      cap: 227,
-      stopAt: 0.75,
-      pollMs: 1,
-      stopFile: '/repo/.factory/STOP',
-      eventsFile: '/repo/.factory/events.ndjson',
-      signal: controller.signal,
-      readUsageFn: async () => {
-        readCalls++;
-        if (readCalls >= 2) controller.abort();
-        return { pct: 0.04, source: 'estimate', detail: 'trailing-5h usage ~= $10 = 4% of $227 cap' };
-      },
-      emitEvent: () => {},
-      setStop: () => {},
-    })).resolves.toBe('aborted');
+    await expect(
+      watchUsage({
+        cap: 227,
+        stopAt: 0.75,
+        pollMs: 1,
+        stopFile: '/repo/.factory/STOP',
+        eventsFile: '/repo/.factory/events.ndjson',
+        signal: controller.signal,
+        readUsageFn: async () => {
+          readCalls++;
+          if (readCalls >= 2) controller.abort();
+          return { pct: 0.04, source: 'estimate', detail: 'trailing-5h usage ~= $10 = 4% of $227 cap' };
+        },
+        emitEvent: () => {},
+        setStop: () => {},
+      }),
+    ).resolves.toBe('aborted');
 
     expect(readCalls).toBe(2);
   });

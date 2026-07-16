@@ -58,13 +58,15 @@ describe('CliModelExecutor Codex cleanup', () => {
     const registry = new ModelRegistry(modelsConfig);
     const executor = new CliModelExecutor();
 
-    await executor.runModel('codex-model', 'prompt', {
-      worktree: tmpdir(),
-      timeoutSeconds: 5,
-      task: 'build_codex',
-      registry,
-      routesConfig,
-    }).catch(() => {});
+    await executor
+      .runModel('codex-model', 'prompt', {
+        worktree: tmpdir(),
+        timeoutSeconds: 5,
+        task: 'build_codex',
+        registry,
+        routesConfig,
+      })
+      .catch(() => {});
 
     expect(unlink).toHaveBeenCalledTimes(2);
     expect(vi.mocked(unlink).mock.calls).toEqual([
@@ -75,8 +77,9 @@ describe('CliModelExecutor Codex cleanup', () => {
     const promptWriteIndex = vi.mocked(writeFile).mock.calls.findIndex(([, data]) => data === 'prompt');
     expect(promptWriteIndex).toBeGreaterThanOrEqual(0);
     expect(
-      vi.mocked(writeFile).mock.calls
-        .slice(promptWriteIndex + 1)
+      vi
+        .mocked(writeFile)
+        .mock.calls.slice(promptWriteIndex + 1)
         .some(([, data]) => data === ''),
     ).toBe(false);
   });

@@ -32,7 +32,10 @@ describe('QueueTab', () => {
   });
 
   it('shows the lane title when present', () => {
-    const lane: LaneState = { ...laneFor('61', [{ type: 'plan', msg: 'Starting plan phase' }]), title: 'Fix the flaky test' };
+    const lane: LaneState = {
+      ...laneFor('61', [{ type: 'plan', msg: 'Starting plan phase' }]),
+      title: 'Fix the flaky test',
+    };
     const snapshot: QueueSnapshot = { entries: [{ lane: 'app', issue: 61 }] };
     const { lastFrame } = render(<QueueTab snapshot={snapshot} lanes={[lane]} />);
     expect(lastFrame()).toContain('Fix the flaky test');

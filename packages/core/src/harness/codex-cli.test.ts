@@ -29,14 +29,22 @@ function expectTempFilesCleanedUp(cmd: string): void {
 describe('CodingHarness contract: CodexCliHarness', () => {
   const cases = codingHarnessContractCases({
     success: () => ({
-      harness: new CodexCliHarness(async cmd => {
+      harness: new CodexCliHarness(async (cmd) => {
         await realWriteFile(outFileFromCmd(cmd), 'codex output');
         return { stdout: '', stderr: '' };
       }),
     }),
-    timeout: () => ({ harness: new CodexCliHarness(async () => { throw Object.assign(new Error('killed'), { killed: true }); }) }),
+    timeout: () => ({
+      harness: new CodexCliHarness(async () => {
+        throw Object.assign(new Error('killed'), { killed: true });
+      }),
+    }),
     emptyOutput: () => ({ harness: new CodexCliHarness(async () => ({ stdout: '', stderr: '' })) }),
-    failure: () => ({ harness: new CodexCliHarness(async () => { throw Object.assign(new Error('boom'), { stderr: 'rate limit exceeded', code: 1 }); }) }),
+    failure: () => ({
+      harness: new CodexCliHarness(async () => {
+        throw Object.assign(new Error('boom'), { stderr: 'rate limit exceeded', code: 1 });
+      }),
+    }),
   });
   for (const contractCase of cases) it(contractCase.name, contractCase.run);
 });
@@ -78,7 +86,10 @@ const modelsConfig: ModelsConfig = {
 
 const registry = new ModelRegistry(modelsConfig);
 
-function recordingExec(result: { stdout?: string; stderr?: string } = {}, onCmd?: (cmd: string) => Promise<void> | void) {
+function recordingExec(
+  result: { stdout?: string; stderr?: string } = {},
+  onCmd?: (cmd: string) => Promise<void> | void,
+) {
   const calls: { cmd: string; opts: any }[] = [];
   const fn = async (cmd: string, opts: any) => {
     calls.push({ cmd, opts });
@@ -89,7 +100,7 @@ function recordingExec(result: { stdout?: string; stderr?: string } = {}, onCmd?
 }
 
 function successExec() {
-  return recordingExec({}, async cmd => {
+  return recordingExec({}, async (cmd) => {
     await realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT');
   });
 }
@@ -99,13 +110,15 @@ describe('CodexCliHarness command shape', () => {
     const rec = successExec();
     const harness = new CodexCliHarness(rec.fn);
 
-    const result = await harness.run(makeContractRequest({
-      model: 'codex-model',
-      registry,
-      prompt: 'build it',
-      worktree: '/tmp/factory worktree',
-      timeoutSeconds: 7,
-    }));
+    const result = await harness.run(
+      makeContractRequest({
+        model: 'codex-model',
+        registry,
+        prompt: 'build it',
+        worktree: '/tmp/factory worktree',
+        timeoutSeconds: 7,
+      }),
+    );
 
     expect(result.output).toBe('CODEX OUTPUT');
     expect(rec.calls).toHaveLength(1);
@@ -149,7 +162,9 @@ describe('CodexCliHarness temp file cleanup', () => {
       throw Object.assign(new Error('boom'), { stderr: 'boom', code: 1 });
     });
 
-    const err: any = await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' })).catch(e => e);
+    const err: any = await harness
+      .run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }))
+      .catch((e) => e);
 
     expect(err).toBeInstanceOf(HarnessError);
     expectTempFilesCleanedUp(rec.calls[0].cmd);
@@ -159,7 +174,9 @@ describe('CodexCliHarness temp file cleanup', () => {
     const rec = recordingExec();
     const harness = new CodexCliHarness(rec.fn);
 
-    const err: any = await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' })).catch(e => e);
+    const err: any = await harness
+      .run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }))
+      .catch((e) => e);
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('empty_response');
@@ -174,7 +191,7 @@ describe('CodexCliHarness failure classification', () => {
       throw Object.assign(new Error('boom'), { stderr: 'quota exceeded', code: 1 });
     });
 
-    const err: any = await harness.run(makeContractRequest({ model: 'codex-model', registry })).catch(e => e);
+    const err: any = await harness.run(makeContractRequest({ model: 'codex-model', registry })).catch((e) => e);
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('usage_cap');
@@ -186,7 +203,7 @@ describe('CodexCliHarness failure classification', () => {
       throw Object.assign(new Error('killed'), { killed: true });
     });
 
-    const err: any = await harness.run(makeContractRequest({ model: 'codex-model', registry })).catch(e => e);
+    const err: any = await harness.run(makeContractRequest({ model: 'codex-model', registry })).catch((e) => e);
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('timeout');

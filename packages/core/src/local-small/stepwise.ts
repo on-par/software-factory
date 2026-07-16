@@ -4,7 +4,10 @@ import { isAbsolute, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 const exec = promisify(execCb);
-type PatchRun = (command: string, options: { cwd: string; timeout: number; maxBuffer: number }) => Promise<{ stdout: string; stderr: string }>;
+type PatchRun = (
+  command: string,
+  options: { cwd: string; timeout: number; maxBuffer: number },
+) => Promise<{ stdout: string; stderr: string }>;
 
 export interface LocalSmallLimits {
   maxSteps: number;
@@ -340,9 +343,7 @@ function inferAllowedFiles(spec: string, repoRoot: string, maxFiles: number): st
   }
 
   if (candidates.size === 0) return ['.'];
-  return [...candidates]
-    .map(path => relative(repoRoot, resolve(repoRoot, path)) || path)
-    .slice(0, maxFiles);
+  return [...candidates].map((path) => relative(repoRoot, resolve(repoRoot, path)) || path).slice(0, maxFiles);
 }
 
 function renderContextPack(pack: LocalSmallContextPack): string {
@@ -355,10 +356,10 @@ function renderContextPack(pack: LocalSmallContextPack): string {
     `- Max context tokens: ${pack.limits.maxContextTokens}`,
     '',
     '## Allowed Files',
-    ...pack.allowedFiles.map(file => `- ${file}`),
+    ...pack.allowedFiles.map((file) => `- ${file}`),
     '',
     '## Instructions',
-    ...pack.instructions.map(instruction => `- ${instruction}`),
+    ...pack.instructions.map((instruction) => `- ${instruction}`),
     '',
     '## Issue',
     pack.issueBody || '(no issue body)',

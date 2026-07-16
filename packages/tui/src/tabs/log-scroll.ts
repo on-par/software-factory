@@ -12,7 +12,12 @@ export function initialLogScroll(): LogScrollState {
 
 export type LogScrollAction = 'up' | 'down' | 'pageUp' | 'pageDown' | 'toggleFollow';
 
-export function reduceLogScroll(s: LogScrollState, a: LogScrollAction, pageSize: number, total: number): LogScrollState {
+export function reduceLogScroll(
+  s: LogScrollState,
+  a: LogScrollAction,
+  pageSize: number,
+  total: number,
+): LogScrollState {
   const maxOffset = Math.max(0, total - pageSize);
 
   switch (a) {

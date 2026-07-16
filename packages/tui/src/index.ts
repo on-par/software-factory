@@ -3,13 +3,7 @@ export type { RunTuiOptions } from './run-tui.js';
 export { followPlain } from './fallback.js';
 export { PHASES, initialState, reduceEvent, isFailoverEvent } from './state.js';
 export type { PhaseName, PhaseStatus, RunState } from './state.js';
-export {
-  initialDashboard,
-  isLaneEvent,
-  reduceDashboard,
-  mergeTrainPosition,
-  laneElapsedMs,
-} from './dashboard.js';
+export { initialDashboard, isLaneEvent, reduceDashboard, mergeTrainPosition, laneElapsedMs } from './dashboard.js';
 export type { LaneStatus, LaneState, DashboardState } from './dashboard.js';
 export { Header } from './components/Header.js';
 export type { HeaderProps } from './components/Header.js';

@@ -21,15 +21,13 @@ describe('runDoctorChecks', () => {
   it('all-green: 8 checks, every ok true, doctorFailed false', () => {
     const checks = runDoctorChecks(probes());
     expect(checks).toHaveLength(8);
-    expect(checks.every(c => c.ok)).toBe(true);
+    expect(checks.every((c) => c.ok)).toBe(true);
     expect(doctorFailed(checks)).toBe(false);
   });
 
   it('claude CLI missing fails with the Claude Code fix', () => {
-    const checks = runDoctorChecks(
-      probes({ commandAvailable: (cmd) => cmd !== 'claude' }),
-    );
-    const claude = checks.find(c => c.name === 'claude CLI')!;
+    const checks = runDoctorChecks(probes({ commandAvailable: (cmd) => cmd !== 'claude' }));
+    const claude = checks.find((c) => c.name === 'claude CLI')!;
     expect(claude.ok).toBe(false);
     expect(claude.fix).toContain('install Claude Code first:');
     expect(doctorFailed(checks)).toBe(true);
@@ -49,8 +47,8 @@ describe('runDoctorChecks', () => {
       }),
     );
 
-    const missingCheck = ghMissing.find(c => c.name === 'gh auth')!;
-    const unauthCheck = ghUnauth.find(c => c.name === 'gh auth')!;
+    const missingCheck = ghMissing.find((c) => c.name === 'gh auth')!;
+    const unauthCheck = ghUnauth.find((c) => c.name === 'gh auth')!;
     expect(missingCheck.ok).toBe(false);
     expect(unauthCheck.ok).toBe(false);
     expect(missingCheck.detail).not.toBe(unauthCheck.detail);
@@ -60,7 +58,7 @@ describe('runDoctorChecks', () => {
 
   it('falls back to gh auth token when no env token is set', () => {
     const checks = runDoctorChecks(probes({ envPresent: () => false }));
-    const token = checks.find(c => c.name === 'GitHub token')!;
+    const token = checks.find((c) => c.name === 'GitHub token')!;
     expect(token.ok).toBe(true);
     expect(token.detail).toBe('using gh auth token');
   });
@@ -78,7 +76,7 @@ describe('runDoctorChecks', () => {
         },
       }),
     );
-    const token = checks.find(c => c.name === 'GitHub token')!;
+    const token = checks.find((c) => c.name === 'GitHub token')!;
     expect(token.ok).toBe(false);
     expect(token.detail).toBe('no GITHUB_TOKEN, GH_TOKEN, or gh auth token');
     expect(token.fix).toContain('create a token at https://github.com/settings/tokens');
@@ -95,9 +93,9 @@ describe('runDoctorChecks', () => {
         },
       }),
     );
-    const git = checks.find(c => c.name === 'git repository')!;
-    const worktree = checks.find(c => c.name === 'git worktree clean')!;
-    const factoryInit = checks.find(c => c.name === '.factory initialized')!;
+    const git = checks.find((c) => c.name === 'git repository')!;
+    const worktree = checks.find((c) => c.name === 'git worktree clean')!;
+    const factoryInit = checks.find((c) => c.name === '.factory initialized')!;
 
     expect(git.ok).toBe(false);
     expect(worktree.ok).toBe(false);
@@ -119,7 +117,7 @@ describe('runDoctorChecks', () => {
         },
       }),
     );
-    const worktree = checks.find(c => c.name === 'git worktree clean')!;
+    const worktree = checks.find((c) => c.name === 'git worktree clean')!;
     expect(worktree.ok).toBe(false);
     expect(worktree.optional).toBe(true);
     expect(worktree.detail).toBe('uncommitted changes present');
@@ -128,7 +126,7 @@ describe('runDoctorChecks', () => {
 
   it('.factory initialized fails with the init fix when the directory is missing in a real repo', () => {
     const checks = runDoctorChecks(probes({ pathExists: () => false }));
-    const factoryInit = checks.find(c => c.name === '.factory initialized')!;
+    const factoryInit = checks.find((c) => c.name === '.factory initialized')!;
     expect(factoryInit.ok).toBe(false);
     expect(factoryInit.optional).toBe(true);
     expect(factoryInit.detail).toBe('.factory/ missing');
@@ -138,7 +136,7 @@ describe('runDoctorChecks', () => {
 
   it('codex missing is an optional failure only', () => {
     const checks = runDoctorChecks(probes({ commandAvailable: (cmd) => cmd !== 'codex' }));
-    const codex = checks.find(c => c.name === 'codex sandbox')!;
+    const codex = checks.find((c) => c.name === 'codex sandbox')!;
     expect(codex.ok).toBe(false);
     expect(codex.optional).toBe(true);
     expect(doctorFailed(checks)).toBe(false);
@@ -149,8 +147,19 @@ describe('formatDoctorChecks', () => {
   it('matches the frozen format for a mixed pass/fail/warning set', () => {
     const checks = [
       { name: 'git repository', ok: true, detail: '/path/to/repo' },
-      { name: 'claude CLI', ok: false, detail: 'not found on PATH', fix: 'install Claude Code first: https://docs.anthropic.com/en/docs/claude-code' },
-      { name: 'codex sandbox', ok: false, optional: true, detail: 'codex CLI not found — codex build routes unavailable', fix: 'install the codex CLI, or rely on claude routes' },
+      {
+        name: 'claude CLI',
+        ok: false,
+        detail: 'not found on PATH',
+        fix: 'install Claude Code first: https://docs.anthropic.com/en/docs/claude-code',
+      },
+      {
+        name: 'codex sandbox',
+        ok: false,
+        optional: true,
+        detail: 'codex CLI not found — codex build routes unavailable',
+        fix: 'install the codex CLI, or rely on claude routes',
+      },
     ];
     expect(formatDoctorChecks(checks)).toMatchInlineSnapshot(`
       "== factory doctor ==

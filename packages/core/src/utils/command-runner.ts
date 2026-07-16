@@ -24,10 +24,7 @@ export interface CommandResult {
   ok: boolean;
 }
 
-export async function runCommand(
-  argv: readonly string[],
-  options: RunCommandOptions = {},
-): Promise<CommandResult> {
+export async function runCommand(argv: readonly string[], options: RunCommandOptions = {}): Promise<CommandResult> {
   if (argv.length === 0 || argv[0].trim() === '') {
     throw new TypeError('runCommand: argv must be non-empty and argv[0] must not be blank');
   }
@@ -46,9 +43,8 @@ export async function runCommand(
   const killed = r.isTerminated === true;
   const timedOut = r.timedOut === true;
   const stdout = typeof r.stdout === 'string' ? r.stdout : '';
-  const stderr = r.failed && typeof r.exitCode !== 'number'
-    ? (r.shortMessage ?? '')
-    : (typeof r.stderr === 'string' ? r.stderr : '');
+  const stderr =
+    r.failed && typeof r.exitCode !== 'number' ? (r.shortMessage ?? '') : typeof r.stderr === 'string' ? r.stderr : '';
 
   return {
     command: argv,

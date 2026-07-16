@@ -21,11 +21,14 @@ describe('NON_RETRYABLE_FAILURE_REASONS', () => {
 });
 
 describe('isRetryableFailure', () => {
-  it.each(['schema_invalid', 'apply_failed', 'verify_failed'] as const)('returns false for %s', reason => {
+  it.each(['schema_invalid', 'apply_failed', 'verify_failed'] as const)('returns false for %s', (reason) => {
     expect(isRetryableFailure(reason)).toBe(false);
   });
 
-  it.each(['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response', 'unknown'] as const)('returns true for %s', reason => {
-    expect(isRetryableFailure(reason)).toBe(true);
-  });
+  it.each(['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response', 'unknown'] as const)(
+    'returns true for %s',
+    (reason) => {
+      expect(isRetryableFailure(reason)).toBe(true);
+    },
+  );
 });

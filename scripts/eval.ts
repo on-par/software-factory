@@ -45,15 +45,14 @@ function parseArgs(argv: string[]): Args {
         throw new Error(`invalid flag: ${arg}`);
       }
       args.judgeK = judgeK;
-    }
-    else throw new Error(`unknown flag: ${arg}`);
+    } else throw new Error(`unknown flag: ${arg}`);
   }
   return args;
 }
 
 const args = parseArgs(process.argv.slice(2));
 const allCases = await loadGoldenCases(resolve(args.dir));
-const cases = args.filter ? allCases.filter(c => c.id.includes(args.filter!)) : allCases;
+const cases = args.filter ? allCases.filter((c) => c.id.includes(args.filter!)) : allCases;
 const router = args.stub ? buildStubRouter(cases) : buildRealRouter(args);
 const summary = await runEval({
   cases,
@@ -63,13 +62,15 @@ const summary = await runEval({
   worktree: process.cwd(),
 });
 
-printTable(summary.results, new Map(cases.map(c => [c.id, c.expectedRoute])));
-const routeCorrectCount = summary.results.filter(result => isRouteAsserted(result.expectedRoute) && result.routeCorrect).length;
+printTable(summary.results, new Map(cases.map((c) => [c.id, c.expectedRoute])));
+const routeCorrectCount = summary.results.filter(
+  (result) => isRouteAsserted(result.expectedRoute) && result.routeCorrect,
+).length;
 console.log(
   `pass-rate ${summary.passed}/${summary.total} (${Math.round(summary.passRate * 100)}%) · ` +
-  `route-accuracy ${Math.round(summary.routeAccuracy * 100)}% (${routeCorrectCount}/${summary.routeAsserted}) · ` +
-  `est. cost $${summary.totalCostEstimate.toFixed(4)} · ` +
-  `total latency ${(summary.totalLatencyMs / 1000).toFixed(2)}s`,
+    `route-accuracy ${Math.round(summary.routeAccuracy * 100)}% (${routeCorrectCount}/${summary.routeAsserted}) · ` +
+    `est. cost $${summary.totalCostEstimate.toFixed(4)} · ` +
+    `total latency ${(summary.totalLatencyMs / 1000).toFixed(2)}s`,
 );
 
 if (args.report) {
@@ -134,7 +135,7 @@ function buildStubRouter(cases: typeof allCases): ModelRouter {
   };
   const executor = new StubModelExecutor({
     scripts: {
-      plan: cases.map(c => ({ output: c.stubOutput ?? '' })),
+      plan: cases.map((c) => ({ output: c.stubOutput ?? '' })),
     },
   });
   return new ModelRouter(models, routes, false, executor);
@@ -168,28 +169,36 @@ function assertKnownModel(models: ModelsConfig, model: string | undefined, flag:
 }
 
 function printTable(results: typeof summary.results, expectedRoutes: Map<string, string>) {
-  console.log([
-    'id'.padEnd(28),
-    'route'.padEnd(12),
-    'expected'.padEnd(10),
-    'checks'.padEnd(8),
-    'rubric'.padEnd(8),
-    'latency'.padEnd(10),
-    'cost',
-  ].join(' '));
+  console.log(
+    [
+      'id'.padEnd(28),
+      'route'.padEnd(12),
+      'expected'.padEnd(10),
+      'checks'.padEnd(8),
+      'rubric'.padEnd(8),
+      'latency'.padEnd(10),
+      'cost',
+    ].join(' '),
+  );
 
   for (const result of results) {
-    const checksPassed = `${result.checks.filter(c => c.pass).length}/${result.checks.length}`;
-    const rubric = result.judgeMalformed ? 'MALFORMED' : result.rubricScore === undefined ? '—' : result.rubricScore.toFixed(1);
-    console.log([
-      result.id.padEnd(28),
-      result.route.padEnd(12),
-      (expectedRoutes.get(result.id) ?? '?').padEnd(10),
-      checksPassed.padEnd(8),
-      rubric.padEnd(8),
-      `${result.latencyMs}ms`.padEnd(10),
-      `$${result.costEstimate.toFixed(4)}`,
-    ].join(' '));
+    const checksPassed = `${result.checks.filter((c) => c.pass).length}/${result.checks.length}`;
+    const rubric = result.judgeMalformed
+      ? 'MALFORMED'
+      : result.rubricScore === undefined
+        ? '—'
+        : result.rubricScore.toFixed(1);
+    console.log(
+      [
+        result.id.padEnd(28),
+        result.route.padEnd(12),
+        (expectedRoutes.get(result.id) ?? '?').padEnd(10),
+        checksPassed.padEnd(8),
+        rubric.padEnd(8),
+        `${result.latencyMs}ms`.padEnd(10),
+        `$${result.costEstimate.toFixed(4)}`,
+      ].join(' '),
+    );
     if (result.error) console.log(`  error: ${result.error}`);
   }
 }

@@ -13,7 +13,7 @@ A comparison of the two implementations of the software factory, and a recommend
 
 **The bash tool is the working product. The TS repo is the better architecture — but it is not yet a working product, and in a few places it silently regresses on safety.**
 
-The right productization move is **not** "finish the rewrite" or "ship the bash script." It's a **merge**: keep the TS repo's genuinely novel ideas (config-driven multi-provider routing, per-product *constitutions*, an independent *checker* framework with a rework loop) and **port back the operational core that the bash version already got right** (git/merge locking, `land`, `supervise`/usage-watchdog, self-heal). Right now those two halves live in two different languages and neither file has both.
+The right productization move is **not** "finish the rewrite" or "ship the bash script." It's a **merge**: keep the TS repo's genuinely novel ideas (config-driven multi-provider routing, per-product _constitutions_, an independent _checker_ framework with a rework loop) and **port back the operational core that the bash version already got right** (git/merge locking, `land`, `supervise`/usage-watchdog, self-heal). Right now those two halves live in two different languages and neither file has both.
 
 ---
 
@@ -34,42 +34,42 @@ A single script that shells out to `claude -p` and `codex exec`. It owns very li
 
 Same PLAN → BUILD skeleton, re-expressed as a typed library plus three new subsystems the bash version has no concept of:
 
-| Package | Role |
-|---|---|
-| `@on-par/factory-config` | Zero-dep. `models.json`, `routes.json`, `factory.json` + constitution markdown. |
-| `@on-par/factory-core` | The engine: `ModelRegistry`, `ModelRouter` (failover), `ConstitutionLoader`, checker framework, PLAN/BUILD/CHECK/SHIP phases. |
-| `@on-par/factory-cli` | The `factory` command (commander/chalk). |
-| `@on-par/factory-server` | **Stub.** `createServer()` throws "not yet implemented". |
+| Package                  | Role                                                                                                                          |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `@on-par/factory-config` | Zero-dep. `models.json`, `routes.json`, `factory.json` + constitution markdown.                                               |
+| `@on-par/factory-core`   | The engine: `ModelRegistry`, `ModelRouter` (failover), `ConstitutionLoader`, checker framework, PLAN/BUILD/CHECK/SHIP phases. |
+| `@on-par/factory-cli`    | The `factory` command (commander/chalk).                                                                                      |
+| `@on-par/factory-server` | **Stub.** `createServer()` throws "not yet implemented".                                                                      |
 
 ---
 
 ## Feature parity matrix
 
-| Capability | bash `factory` | TS monorepo | Notes |
-|---|:---:|:---:|---|
-| PLAN phase (freeze spec, pick route) | ✅ | ✅ | Near-identical prompts |
-| BUILD via Codex CLI | ✅ | ✅ | TS loses `-C` worktree flag nuance & per-run effort override |
-| BUILD via Claude `/ship-it` | ✅ | ✅ | |
-| FINISH pass (review Codex's diff) | ✅ | ⚠️ | bash has a dedicated FINISH prompt; TS folds it into CHECK |
-| Route fallback codex→claude when codex absent | ✅ | ⚠️ | bash explicit; TS relies on registry availability |
-| Lane parallelism + serial-within-lane | ✅ | ✅ | |
-| **`.git` lock serialization** | ✅ | ❌ | **TS runs `setupWorktree` on concurrent lanes with no lock** |
-| **Merge serialization (`MERGE_LOCK`)** | ✅ | ❌ | |
-| **`land` / squash-merge / rebase-on-dirty** | ✅ | ❌ | TS `waitForMerge`: "auto-merge not yet implemented" |
-| **`supervise` (multi-window usage loop)** | ✅ | ❌ | Entire subsystem absent |
-| **`usage` (trailing-5h cost cap)** | ✅ | ❌ | Absent (there is a per-task `cost` report instead) |
-| **Self-heal `recover_pr`** | ✅ | ❌ | Absent |
-| `STOP` / `resume` | ✅ | ✅ | |
-| `ESCALATE:` protocol | ✅ | ✅ | |
-| Triage → human-reviewed `.proposed` | ✅ | ⚠️ | TS writes queue directly, no `.proposed` staging |
-| **Multi-provider model routing + failover** | ❌ | ✅ | anthropic/openai/ollama/deepseek, tiered, retry+cooldown |
-| **Per-product constitutions** | ❌ | ✅ | Written standard injected into every phase |
-| **Independent checker framework** | ⚠️ | ✅ | bash had checker *stubs* in `legacy/lib/checkers`; TS makes it real |
-| **CHECK rework loop (≤3 rounds) + dispute resolution** | ❌ | ✅ | Boss arbitrates worker-vs-checker via constitution |
-| **Cost tracking per task/model** | ❌ | ✅ | `factory cost` |
-| Typed, unit-testable, packaged | ❌ | ✅ | |
-| SaaS server | ❌ | 🟡 stub | |
-| **Actually run end-to-end unattended today** | ✅ | ❌ | TS can't merge, can't self-supervise, can corrupt `.git` |
+| Capability                                             | bash `factory` | TS monorepo | Notes                                                               |
+| ------------------------------------------------------ | :------------: | :---------: | ------------------------------------------------------------------- |
+| PLAN phase (freeze spec, pick route)                   |       ✅       |     ✅      | Near-identical prompts                                              |
+| BUILD via Codex CLI                                    |       ✅       |     ✅      | TS loses `-C` worktree flag nuance & per-run effort override        |
+| BUILD via Claude `/ship-it`                            |       ✅       |     ✅      |                                                                     |
+| FINISH pass (review Codex's diff)                      |       ✅       |     ⚠️      | bash has a dedicated FINISH prompt; TS folds it into CHECK          |
+| Route fallback codex→claude when codex absent          |       ✅       |     ⚠️      | bash explicit; TS relies on registry availability                   |
+| Lane parallelism + serial-within-lane                  |       ✅       |     ✅      |                                                                     |
+| **`.git` lock serialization**                          |       ✅       |     ❌      | **TS runs `setupWorktree` on concurrent lanes with no lock**        |
+| **Merge serialization (`MERGE_LOCK`)**                 |       ✅       |     ❌      |                                                                     |
+| **`land` / squash-merge / rebase-on-dirty**            |       ✅       |     ❌      | TS `waitForMerge`: "auto-merge not yet implemented"                 |
+| **`supervise` (multi-window usage loop)**              |       ✅       |     ❌      | Entire subsystem absent                                             |
+| **`usage` (trailing-5h cost cap)**                     |       ✅       |     ❌      | Absent (there is a per-task `cost` report instead)                  |
+| **Self-heal `recover_pr`**                             |       ✅       |     ❌      | Absent                                                              |
+| `STOP` / `resume`                                      |       ✅       |     ✅      |                                                                     |
+| `ESCALATE:` protocol                                   |       ✅       |     ✅      |                                                                     |
+| Triage → human-reviewed `.proposed`                    |       ✅       |     ⚠️      | TS writes queue directly, no `.proposed` staging                    |
+| **Multi-provider model routing + failover**            |       ❌       |     ✅      | anthropic/openai/ollama/deepseek, tiered, retry+cooldown            |
+| **Per-product constitutions**                          |       ❌       |     ✅      | Written standard injected into every phase                          |
+| **Independent checker framework**                      |       ⚠️       |     ✅      | bash had checker _stubs_ in `legacy/lib/checkers`; TS makes it real |
+| **CHECK rework loop (≤3 rounds) + dispute resolution** |       ❌       |     ✅      | Boss arbitrates worker-vs-checker via constitution                  |
+| **Cost tracking per task/model**                       |       ❌       |     ✅      | `factory cost`                                                      |
+| Typed, unit-testable, packaged                         |       ❌       |     ✅      |                                                                     |
+| SaaS server                                            |       ❌       |   🟡 stub   |                                                                     |
+| **Actually run end-to-end unattended today**           |       ✅       |     ❌      | TS can't merge, can't self-supervise, can corrupt `.git`            |
 
 Legend: ✅ present · ⚠️ partial/weaker · 🟡 stub · ❌ absent
 
@@ -79,7 +79,7 @@ Legend: ✅ present · ⚠️ partial/weaker · 🟡 stub · ❌ absent
 
 These are the reasons to invest in the TS line rather than just polishing bash. None of them exist in the bash tool:
 
-1. **Constitutions.** A per-product markdown "written standard + how to check it" (`packages/config/src/constitutions/*.md`), injected into PLAN, BUILD, and CHECK, and referenced by checkers. This is the differentiated idea — it reframes the prompt from *instructions* to *standard + verifier*. Great OSS hook.
+1. **Constitutions.** A per-product markdown "written standard + how to check it" (`packages/config/src/constitutions/*.md`), injected into PLAN, BUILD, and CHECK, and referenced by checkers. This is the differentiated idea — it reframes the prompt from _instructions_ to _standard + verifier_. Great OSS hook.
 2. **Config-driven multi-provider routing** (`models.json` + `routes.json`). Task-type → tier → first-available-model, with a real failover state machine (rate-limit retry+cooldown, usage-cap failover, timeout failover). Lets users bring cheap local (Ollama) or third-party (DeepSeek) models for bulk work and reserve Opus for planning. The bash tool is Anthropic+Codex only.
 3. **Independent checker framework with a rework loop.** `compile / tests / lint / links / accessibility` built-ins plus agent-based `custom_*` checkers pulled from the constitution, a ≤3-round rework loop, and boss-arbitrated dispute resolution. This is a real quality gate the bash tool delegates entirely to `/ship-it`.
 4. **A clean seam for a SaaS product.** `core` is deliberately UI-less so a webhook server or a hosted control plane can consume it. The bash tool cannot be a library.
@@ -88,7 +88,7 @@ These are the reasons to invest in the TS line rather than just polishing bash. 
 
 ## What the rewrite dropped or broke (the gap to a shippable product)
 
-The rewrite ported the *happy path* and left out the *operational hardening* — which is exactly the part that took the bash tool from "demo" to "runs for days unattended." Concrete issues:
+The rewrite ported the _happy path_ and left out the _operational hardening_ — which is exactly the part that took the bash tool from "demo" to "runs for days unattended." Concrete issues:
 
 ### Correctness / safety bugs in the current TS code
 
@@ -103,7 +103,7 @@ The rewrite ported the *happy path* and left out the *operational hardening* —
 ### Design regressions
 
 - Triage writes the live queue directly instead of a human-reviewed `.proposed` (bash deliberately stages it).
-- The FINISH-vs-CHECK split means the TS version reviews Codex's diff with *built-in* checkers rather than the richer `/ship-it` + `/code-review` + `/security-review` pass the bash FINISH prompt invokes.
+- The FINISH-vs-CHECK split means the TS version reviews Codex's diff with _built-in_ checkers rather than the richer `/ship-it` + `/code-review` + `/security-review` pass the bash FINISH prompt invokes.
 
 ---
 
@@ -112,7 +112,9 @@ The rewrite ported the *happy path* and left out the *operational hardening* —
 **Adopt the TS monorepo as the home, and port the bash tool's operational core into `core` before adding anything new.** Concretely, three tracks:
 
 ### Track 1 — Close the correctness gap (make TS match bash; ~1–2 wk)
+
 Non-negotiable before this is safe to run or ship as OSS:
+
 1. Port `GIT_LOCK` / `MERGE_LOCK` serialization into an `orchestrator` module (a promise-mutex around worktree + merge ops).
 2. Implement real `land`: rebase-on-DIRTY, `gh pr merge --squash --delete-branch`, worktree prune. Wire `FACTORY_MERGE`.
 3. Fix `waitForMerge` to track the real branch name and query by head, not a 5-PR scan.
@@ -121,11 +123,13 @@ Non-negotiable before this is safe to run or ship as OSS:
 6. Add an integration test that runs the whole pipeline against a throwaway repo with a stub "model" (an echo script), so the orchestration is tested without spending tokens.
 
 ### Track 2 — Make the novel ideas real & documented (the OSS differentiator)
+
 1. Ship 2–3 **example constitutions** + a `constitution --init` scaffolder; document the "standard + checker" model prominently — it's the project's identity.
 2. Prune `models.json` to models that actually exist and are tested; mark the rest `experimental`. Add a `factory models --doctor` that probes which providers are reachable.
 3. Unit-test the router failover state machine and the checker JSON parsing (both are brittle string-matching today).
 
 ### Track 3 — OSS packaging
+
 1. **Name & scope.** `@on-par/*` is a personal scope; pick a neutral public name and MIT-license the whole thing (LICENSE already present).
 2. **`README` = 5-minute quickstart** on a real public repo, plus an honest "what works / what's experimental" table (Codex, Ollama, merge, supervise).
 3. **`npx <tool> init`** with zero global install; publish `cli` + `core` + `config`, keep `server` out of the first release.
@@ -133,6 +137,7 @@ Non-negotiable before this is safe to run or ship as OSS:
 5. Delete or clearly quarantine the `server` stub for v1 — a stub that throws in a published package is a bad first impression.
 
 ### What to explicitly NOT do first
+
 - Don't build the SaaS server yet. The unattended-CLI story is the wedge; the hosted product only makes sense once `core` is proven and merge/supervise work.
 - Don't expand the model matrix further until the existing chain is tested.
 

@@ -59,7 +59,7 @@ const twoModels: ModelsConfig = {
 const tempDirs = new Set<string>();
 
 afterEach(async () => {
-  await Promise.all([...tempDirs].map(dir => rm(dir, { recursive: true, force: true })));
+  await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
   tempDirs.clear();
 });
 
@@ -105,26 +105,36 @@ describe('checkPhase auto rework', () => {
     expect(stub.calls).toHaveLength(3);
   });
 
-  it('emits a structured failover event from the rework site when the rework worker fails over', { timeout: 120_000 }, async () => {
-    const { worktree, specPath } = await makeFailingWorktree();
-    const stub = new StubModelExecutor({
-      scripts: { build_claude: [{ fail: 'usage_cap' }, { output: 'rework complete' }] },
-      defaultOutput: 'rework complete',
-    });
-    const router = new ModelRouter(twoModels, routes, false, stub);
-    const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
+  it(
+    'emits a structured failover event from the rework site when the rework worker fails over',
+    { timeout: 120_000 },
+    async () => {
+      const { worktree, specPath } = await makeFailingWorktree();
+      const stub = new StubModelExecutor({
+        scripts: { build_claude: [{ fail: 'usage_cap' }, { output: 'rework complete' }] },
+        defaultOutput: 'rework complete',
+      });
+      const router = new ModelRouter(twoModels, routes, false, stub);
+      const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
 
-    await checkPhase({
-      issue: 78,
-      worktree,
-      specPath,
-      router,
-      constitution: null,
-      log: (type, msg, extra) => { logCalls.push([type, msg, extra]); },
-    });
+      await checkPhase({
+        issue: 78,
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        log: (type, msg, extra) => {
+          logCalls.push([type, msg, extra]);
+        },
+      });
 
-    expect(logCalls).toContainEqual(['failover', expect.stringContaining('usage_cap'), { failoverReason: 'usage_cap' }]);
-  });
+      expect(logCalls).toContainEqual([
+        'failover',
+        expect.stringContaining('usage_cap'),
+        { failoverReason: 'usage_cap' },
+      ]);
+    },
+  );
 });
 
 describe('checkPhase success paths', () => {
@@ -139,7 +149,9 @@ describe('checkPhase success paths', () => {
       specPath,
       router,
       constitution: null,
-      log: (type, msg) => { logs.push({ type, msg }); },
+      log: (type, msg) => {
+        logs.push({ type, msg });
+      },
     });
 
     expect(check.passed).toBe(true);
@@ -161,43 +173,49 @@ describe('checkPhase success paths', () => {
       specPath,
       router,
       constitution: null,
-      log: (type, msg) => { logs.push({ type, msg }); },
+      log: (type, msg) => {
+        logs.push({ type, msg });
+      },
     });
 
     expect(check.passed).toBe(true);
     expect(stub.calls).toHaveLength(0);
-    expect(logs.some(l => l.type === 'check' && l.msg.startsWith('SKIPPED: tests'))).toBe(true);
+    expect(logs.some((l) => l.type === 'check' && l.msg.startsWith('SKIPPED: tests'))).toBe(true);
     expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (1 skipped)' });
   });
 
-  it('fails the tests checker when requireTests is true and the worktree has no test command', { timeout: 120_000 }, async () => {
-    const { worktree, specPath } = await makeSpecOnlyWorktree();
-    const { router } = makeRouter();
-    const constitution: Constitution = {
-      product: 'strict-app',
-      version: 1,
-      checkers: [],
-      requireTests: true,
-      body: 'Strict standards body.',
-      path: worktree,
-      source: 'bundled',
-    };
+  it(
+    'fails the tests checker when requireTests is true and the worktree has no test command',
+    { timeout: 120_000 },
+    async () => {
+      const { worktree, specPath } = await makeSpecOnlyWorktree();
+      const { router } = makeRouter();
+      const constitution: Constitution = {
+        product: 'strict-app',
+        version: 1,
+        checkers: [],
+        requireTests: true,
+        body: 'Strict standards body.',
+        path: worktree,
+        source: 'bundled',
+      };
 
-    const check = await checkPhase({
-      issue: 95,
-      worktree,
-      specPath,
-      router,
-      constitution,
-      log: () => {},
-      autoRework: false,
-    });
+      const check = await checkPhase({
+        issue: 95,
+        worktree,
+        specPath,
+        router,
+        constitution,
+        log: () => {},
+        autoRework: false,
+      });
 
-    expect(check.passed).toBe(false);
-    const testsFailure = check.summary.results.find(r => r.checker === 'tests');
-    expect(testsFailure?.result).toBe('FAIL');
-    expect(testsFailure?.details).toContain('no verification command was run');
-  });
+      expect(check.passed).toBe(false);
+      const testsFailure = check.summary.results.find((r) => r.checker === 'tests');
+      expect(testsFailure?.result).toBe('FAIL');
+      expect(testsFailure?.details).toContain('no verification command was run');
+    },
+  );
 
   it('exits the rework loop early once a round repairs the failing check', { timeout: 120_000 }, async () => {
     const { worktree, specPath } = await makeFailingWorktree();
@@ -205,15 +223,14 @@ describe('checkPhase success paths', () => {
     // rewriting the failing test script to pass, so the next check round is clean.
     const stub = new StubModelExecutor({
       scripts: {
-        build_claude: [{
-          output: 'fixed the failing test',
-          effect: async (ctx) => {
-            await writeFile(
-              join(ctx.worktree, 'package.json'),
-              JSON.stringify({ scripts: { test: 'exit 0' } }),
-            );
+        build_claude: [
+          {
+            output: 'fixed the failing test',
+            effect: async (ctx) => {
+              await writeFile(join(ctx.worktree, 'package.json'), JSON.stringify({ scripts: { test: 'exit 0' } }));
+            },
           },
-        }],
+        ],
       },
     });
     const router = new ModelRouter(models, routes, false, stub);
@@ -225,7 +242,9 @@ describe('checkPhase success paths', () => {
       specPath,
       router,
       constitution: null,
-      log: (type, msg) => { logs.push({ type, msg }); },
+      log: (type, msg) => {
+        logs.push({ type, msg });
+      },
     });
 
     expect(check.passed).toBe(true);
@@ -332,7 +351,9 @@ describe('disputeResolution', () => {
 
   it('emits a structured failover event when a log callback is provided and the dispute router fails over', async () => {
     const stub = new StubModelExecutor({
-      scripts: { dispute_resolution: [{ fail: 'usage_cap' }, { output: '{"verdict":"upheld","reasoning":"r","action":"a"}' }] },
+      scripts: {
+        dispute_resolution: [{ fail: 'usage_cap' }, { output: '{"verdict":"upheld","reasoning":"r","action":"a"}' }],
+      },
     });
     const router = new ModelRouter(twoModels, routes, false, stub);
     const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
@@ -345,28 +366,38 @@ describe('disputeResolution', () => {
       checkerDetails: 'naming disagreement',
       constitution: null,
       router,
-      log: (type, msg, extra) => { logCalls.push([type, msg, extra]); },
+      log: (type, msg, extra) => {
+        logCalls.push([type, msg, extra]);
+      },
     });
 
     expect(result.verdict).toBe('upheld');
-    expect(logCalls).toContainEqual(['failover', expect.stringContaining('usage_cap'), { failoverReason: 'usage_cap' }]);
+    expect(logCalls).toContainEqual([
+      'failover',
+      expect.stringContaining('usage_cap'),
+      { failoverReason: 'usage_cap' },
+    ]);
   });
 
   it('does not throw when no log callback is provided and the dispute router fails over', async () => {
     const stub = new StubModelExecutor({
-      scripts: { dispute_resolution: [{ fail: 'usage_cap' }, { output: '{"verdict":"upheld","reasoning":"r","action":"a"}' }] },
+      scripts: {
+        dispute_resolution: [{ fail: 'usage_cap' }, { output: '{"verdict":"upheld","reasoning":"r","action":"a"}' }],
+      },
     });
     const router = new ModelRouter(twoModels, routes, false, stub);
 
-    await expect(disputeResolution({
-      issue: 95,
-      worktree: '/tmp/wt',
-      specPath: '/tmp/wt/spec.md',
-      checkerName: 'custom_style',
-      checkerDetails: 'naming disagreement',
-      constitution: null,
-      router,
-    })).resolves.toMatchObject({ verdict: 'upheld' });
+    await expect(
+      disputeResolution({
+        issue: 95,
+        worktree: '/tmp/wt',
+        specPath: '/tmp/wt/spec.md',
+        checkerName: 'custom_style',
+        checkerDetails: 'naming disagreement',
+        constitution: null,
+        router,
+      }),
+    ).resolves.toMatchObject({ verdict: 'upheld' });
   });
 });
 
@@ -374,9 +405,13 @@ async function makePassingWorktree(): Promise<{ worktree: string; specPath: stri
   const worktree = await mkdtemp(join(tmpdir(), 'check-phase-pass-'));
   tempDirs.add(worktree);
 
-  await writeFixture(worktree, 'package.json', JSON.stringify({
-    scripts: { test: 'exit 0' },
-  }));
+  await writeFixture(
+    worktree,
+    'package.json',
+    JSON.stringify({
+      scripts: { test: 'exit 0' },
+    }),
+  );
 
   const specPath = join(worktree, 'issue-88.md');
   await writeFixture(worktree, 'issue-88.md', '# Spec: passing checks\n');
@@ -398,9 +433,13 @@ async function makeFailingWorktree(): Promise<{ worktree: string; specPath: stri
   const worktree = await mkdtemp(join(tmpdir(), 'check-phase-test-'));
   tempDirs.add(worktree);
 
-  await writeFixture(worktree, 'package.json', JSON.stringify({
-    scripts: { test: 'exit 1' },
-  }));
+  await writeFixture(
+    worktree,
+    'package.json',
+    JSON.stringify({
+      scripts: { test: 'exit 1' },
+    }),
+  );
 
   const specPath = join(worktree, 'issue-77.md');
   await writeFixture(worktree, 'issue-77.md', '# Spec: failing checks\n');

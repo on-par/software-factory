@@ -30,11 +30,36 @@ describe('local-only run reports', () => {
       changedFiles: ['M AGENTS.md'],
       diffStat: 'AGENTS.md | 20 ++++++++++++++++++++',
       events: [
-        { ts: '2026-07-14T02:27:23.000Z', issue: '137', type: 'router', msg: 'Trying qwen2.5-coder:14b for plan (attempt 1)' },
-        { ts: '2026-07-14T02:28:11.000Z', issue: '137', type: 'plan', msg: 'Plan complete with model qwen2.5-coder:14b, route: codex' },
-        { ts: '2026-07-14T02:28:12.000Z', issue: '137', type: 'router', msg: 'Trying codex-ollama-qwen3.5:9b for build_codex (attempt 1)' },
-        { ts: '2026-07-14T02:29:20.000Z', issue: '137', type: 'router', msg: 'codex-ollama-qwen3.5:9b failed (empty_response) on build_codex' },
-        { ts: '2026-07-14T02:29:20.000Z', issue: '137', type: 'router', msg: 'local command-agent trace: local command-agent malformed output (empty_response); trace written to .factory/local-agent-traces/trace.json; retry prompt .factory/local-agent-traces/repair.md' },
+        {
+          ts: '2026-07-14T02:27:23.000Z',
+          issue: '137',
+          type: 'router',
+          msg: 'Trying qwen2.5-coder:14b for plan (attempt 1)',
+        },
+        {
+          ts: '2026-07-14T02:28:11.000Z',
+          issue: '137',
+          type: 'plan',
+          msg: 'Plan complete with model qwen2.5-coder:14b, route: codex',
+        },
+        {
+          ts: '2026-07-14T02:28:12.000Z',
+          issue: '137',
+          type: 'router',
+          msg: 'Trying codex-ollama-qwen3.5:9b for build_codex (attempt 1)',
+        },
+        {
+          ts: '2026-07-14T02:29:20.000Z',
+          issue: '137',
+          type: 'router',
+          msg: 'codex-ollama-qwen3.5:9b failed (empty_response) on build_codex',
+        },
+        {
+          ts: '2026-07-14T02:29:20.000Z',
+          issue: '137',
+          type: 'router',
+          msg: 'local command-agent trace: local command-agent malformed output (empty_response); trace written to .factory/local-agent-traces/trace.json; retry prompt .factory/local-agent-traces/repair.md',
+        },
         { ts: '2026-07-14T02:29:20.000Z', issue: '137', type: 'fail', msg: "All models failed for task 'build_codex'" },
       ],
     });
@@ -83,9 +108,7 @@ describe('local-only run reports', () => {
       reportTime: '2026-07-14T02:30:00.000Z',
       changedFiles: [],
       diffStat: '',
-      events: [
-        { ts: '2026-07-14T02:28:00.000Z', issue: '301', type: 'router', msg: '$ npm test' },
-      ],
+      events: [{ ts: '2026-07-14T02:28:00.000Z', issue: '301', type: 'router', msg: '$ npm test' }],
     });
 
     expect(markdown).toContain('- router: $ npm test');
@@ -98,25 +121,36 @@ describe('local-only run reports', () => {
     const reportsDir = join(tmpDir, 'reports');
     const worktree = join(tmpDir, 'worktree');
     await mkdir(worktree);
-    writeFileSync(eventsFile, [
-      '{ this is not valid json',
-      JSON.stringify({ ts: '2026-07-14T02:28:11.000Z', issue: '137', type: 'ready', msg: 'PR #200 ready for review' }),
-    ].join('\n'));
-
-    const report = await writeLocalRunReport({
-      issue: 137,
+    writeFileSync(
       eventsFile,
-      reportsDir,
-      startedAt: '2026-07-14T02:27:00.000Z',
-      outcome: 'ready',
-      profile: 'local-only',
-      worktree,
-    }, {
-      now: () => new Date('2026-07-14T02:30:00.000Z'),
-      run: async () => {
-        throw new Error('git failed');
+      [
+        '{ this is not valid json',
+        JSON.stringify({
+          ts: '2026-07-14T02:28:11.000Z',
+          issue: '137',
+          type: 'ready',
+          msg: 'PR #200 ready for review',
+        }),
+      ].join('\n'),
+    );
+
+    const report = await writeLocalRunReport(
+      {
+        issue: 137,
+        eventsFile,
+        reportsDir,
+        startedAt: '2026-07-14T02:27:00.000Z',
+        outcome: 'ready',
+        profile: 'local-only',
+        worktree,
       },
-    });
+      {
+        now: () => new Date('2026-07-14T02:30:00.000Z'),
+        run: async () => {
+          throw new Error('git failed');
+        },
+      },
+    );
 
     const written = readFileSync(report.path, 'utf-8');
     // Malformed line is skipped; the valid one survives.
@@ -132,30 +166,56 @@ describe('local-only run reports', () => {
     const reportsDir = join(tmpDir, 'reports');
     const worktree = join(tmpDir, 'worktree');
     await mkdir(worktree);
-    writeFileSync(eventsFile, [
-      JSON.stringify({ ts: '2026-07-14T02:00:00.000Z', issue: '137', type: 'router', msg: 'Trying stale-model for plan (attempt 1)' }),
-      JSON.stringify({ ts: '2026-07-14T02:27:23.000Z', issue: '137', type: 'router', msg: 'Trying qwen2.5-coder:14b for plan (attempt 1)' }),
-      JSON.stringify({ ts: '2026-07-14T02:28:11.000Z', issue: '137', type: 'ready', msg: 'PR #200 ready for review' }),
-      JSON.stringify({ ts: '2026-07-14T02:28:11.000Z', issue: '138', type: 'ready', msg: 'PR #201 ready for review' }),
-    ].join('\n'));
-
-    const report = await writeLocalRunReport({
-      issue: 137,
+    writeFileSync(
       eventsFile,
-      reportsDir,
-      startedAt: '2026-07-14T02:27:00.000Z',
-      outcome: 'ready',
-      profile: 'local-only',
-      route: 'codex',
-      worktree,
-      specPath: join(tmpDir, 'plans', 'issue-137.md'),
-    }, {
-      now: () => new Date('2026-07-14T02:30:00.000Z'),
-      run: async (command) => {
-        if (command === 'git status --short') return { stdout: '', stderr: '' };
-        return { stdout: 'AGENTS.md | 4 ++++\n', stderr: '' };
+      [
+        JSON.stringify({
+          ts: '2026-07-14T02:00:00.000Z',
+          issue: '137',
+          type: 'router',
+          msg: 'Trying stale-model for plan (attempt 1)',
+        }),
+        JSON.stringify({
+          ts: '2026-07-14T02:27:23.000Z',
+          issue: '137',
+          type: 'router',
+          msg: 'Trying qwen2.5-coder:14b for plan (attempt 1)',
+        }),
+        JSON.stringify({
+          ts: '2026-07-14T02:28:11.000Z',
+          issue: '137',
+          type: 'ready',
+          msg: 'PR #200 ready for review',
+        }),
+        JSON.stringify({
+          ts: '2026-07-14T02:28:11.000Z',
+          issue: '138',
+          type: 'ready',
+          msg: 'PR #201 ready for review',
+        }),
+      ].join('\n'),
+    );
+
+    const report = await writeLocalRunReport(
+      {
+        issue: 137,
+        eventsFile,
+        reportsDir,
+        startedAt: '2026-07-14T02:27:00.000Z',
+        outcome: 'ready',
+        profile: 'local-only',
+        route: 'codex',
+        worktree,
+        specPath: join(tmpDir, 'plans', 'issue-137.md'),
       },
-    });
+      {
+        now: () => new Date('2026-07-14T02:30:00.000Z'),
+        run: async (command) => {
+          if (command === 'git status --short') return { stdout: '', stderr: '' };
+          return { stdout: 'AGENTS.md | 4 ++++\n', stderr: '' };
+        },
+      },
+    );
 
     expect(report.path).toBe(join(reportsDir, '2026-07-14T02-30-00-000Z-issue-137-ready.md'));
     expect(existsSync(report.path)).toBe(true);

@@ -60,7 +60,7 @@ const routes: RoutesConfig = {
 const tempDirs = new Set<string>();
 
 afterEach(async () => {
-  await Promise.all([...tempDirs].map(dir => rm(dir, { recursive: true, force: true })));
+  await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
   tempDirs.clear();
 });
 
@@ -101,7 +101,9 @@ describe('buildPhase FACTORY_CODEX kill-switch', () => {
       route: 'codex',
       router,
       constitution: null,
-      log: (type, msg) => { logs.push({ type, msg }); },
+      log: (type, msg) => {
+        logs.push({ type, msg });
+      },
     });
 
     expect(result.ok).toBe(true);
@@ -131,12 +133,14 @@ describe('buildPhase FACTORY_CODEX kill-switch', () => {
       route: 'codex',
       router,
       constitution: null,
-      log: (type, msg) => { logs.push({ type, msg }); },
+      log: (type, msg) => {
+        logs.push({ type, msg });
+      },
     });
 
     expect(result.ok).toBe(true);
     expect(stub.calls[stub.calls.length - 1].task).toBe('build_codex');
-    expect(logs.some(l => l.type === 'warn')).toBe(false);
+    expect(logs.some((l) => l.type === 'warn')).toBe(false);
   });
 });
 
@@ -210,7 +214,9 @@ describe('buildPhase local-only codex prompt', () => {
 
     expect(result.ok).toBe(true);
     const prompt = stub.calls[stub.calls.length - 1].prompt;
-    expect(prompt).toContain('[truncated for local model: keep the implementation minimal and inspect files as needed]');
+    expect(prompt).toContain(
+      '[truncated for local model: keep the implementation minimal and inspect files as needed]',
+    );
     // Only the first 5600 chars of the spec are retained before the truncation note.
     expect(prompt).toContain('x'.repeat(5600));
     expect(prompt).not.toContain('x'.repeat(6001));
@@ -239,7 +245,9 @@ describe('buildPhase escalation', () => {
       route: 'claude',
       router,
       constitution: null,
-      log: (type, msg) => { logs.push({ type, msg }); },
+      log: (type, msg) => {
+        logs.push({ type, msg });
+      },
     });
 
     expect(result.ok).toBe(false);
@@ -336,10 +344,7 @@ describe('buildPhase failover events', () => {
     const specPath = join(worktree, 'issue-90.md');
     const stub = new StubModelExecutor({
       scripts: {
-        build_claude: [
-          { fail: 'usage_cap' },
-          { output: 'claude output' },
-        ],
+        build_claude: [{ fail: 'usage_cap' }, { output: 'claude output' }],
       },
     });
     const router = new ModelRouter(models, routes, false, stub);
@@ -354,10 +359,16 @@ describe('buildPhase failover events', () => {
       route: 'claude',
       router,
       constitution: null,
-      log: (type, msg, extra) => { logCalls.push([type, msg, extra]); },
+      log: (type, msg, extra) => {
+        logCalls.push([type, msg, extra]);
+      },
     });
 
     expect(result.ok).toBe(true);
-    expect(logCalls).toContainEqual(['failover', expect.stringContaining('usage_cap'), { failoverReason: 'usage_cap' }]);
+    expect(logCalls).toContainEqual([
+      'failover',
+      expect.stringContaining('usage_cap'),
+      { failoverReason: 'usage_cap' },
+    ]);
   });
 });

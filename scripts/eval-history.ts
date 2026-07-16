@@ -1,10 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import {
-  appendHistoryLine,
-  parseHistory,
-  renderTrend,
-  summaryToHistoryRecord,
-} from '@on-par/factory-core';
+import { appendHistoryLine, parseHistory, renderTrend, summaryToHistoryRecord } from '@on-par/factory-core';
 import type { EvalSummary } from '@on-par/factory-core';
 
 interface Args {

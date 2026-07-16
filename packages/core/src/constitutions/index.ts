@@ -11,11 +11,7 @@ import { getConstitutionsDir } from '../config/index.js';
  * When any of these exist, they ARE the standards body — a bundled
  * <product>.md is only a fallback for repos that have none.
  */
-export const REPO_INSTRUCTION_FILES = [
-  'CLAUDE.md',
-  'AGENTS.md',
-  '.github/copilot-instructions.md',
-] as const;
+export const REPO_INSTRUCTION_FILES = ['CLAUDE.md', 'AGENTS.md', '.github/copilot-instructions.md'] as const;
 
 export class ConstitutionLoader {
   constructor(private dir: string = getConstitutionsDir()) {}
@@ -107,8 +103,8 @@ export class ConstitutionLoader {
   /** List available product constitutions */
   listProducts(): string[] {
     return readdirSync(this.dir)
-      .filter(f => f.endsWith('.md') && !f.startsWith('_'))
-      .map(f => f.replace(/\.md$/, ''));
+      .filter((f) => f.endsWith('.md') && !f.startsWith('_'))
+      .map((f) => f.replace(/\.md$/, ''));
   }
 }
 
@@ -119,12 +115,14 @@ export function buildConstitutionContext(c: Constitution | null): string {
   // branch with nothing to comply with
   if (!c || !c.body.trim()) return '';
 
-  const origin = c.source === 'repo'
-    ? `this repository's own agent instruction files (${REPO_INSTRUCTION_FILES.join(', ')})`
-    : `the written standard for "${c.product}"`;
-  const dispute = c.source === 'repo'
-    ? ''
-    : ' If a checker\nflags your work, refer to the Dispute Rules section to understand how\nto escalate.';
+  const origin =
+    c.source === 'repo'
+      ? `this repository's own agent instruction files (${REPO_INSTRUCTION_FILES.join(', ')})`
+      : `the written standard for "${c.product}"`;
+  const dispute =
+    c.source === 'repo'
+      ? ''
+      : ' If a checker\nflags your work, refer to the Dispute Rules section to understand how\nto escalate.';
 
   return `<constitution source="${c.source === 'repo' ? 'repo instruction files' : c.product}">
 

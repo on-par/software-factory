@@ -15,12 +15,8 @@ export interface RunTuiOptions {
   followPlainFn?: typeof followPlain;
 }
 
-function runPlain(
-  eventsFile: string,
-  stdout: NodeJS.WriteStream,
-  followPlainFn: typeof followPlain,
-): Promise<void> {
-  return new Promise(resolve => {
+function runPlain(eventsFile: string, stdout: NodeJS.WriteStream, followPlainFn: typeof followPlain): Promise<void> {
+  return new Promise((resolve) => {
     const stop = followPlainFn(eventsFile, stdout);
     const finish = () => {
       stop();

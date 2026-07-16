@@ -44,20 +44,22 @@ Dependency direction: `config ← core ← cli` and `config ← core ← server`
 
 Run from the repo root unless noted. Node.js **≥ 20** required.
 
-| Task | Command |
-|------|---------|
-| Install (clean, CI-style) | `npm ci` |
-| Install (dev) | `npm install` |
-| Build all packages | `npm run build` (`tsc -b`) |
-| Typecheck | `npm run typecheck` |
-| Lint | `npm run lint` |
-| Test with coverage | `npm run test` (`vitest run --coverage`) |
-| Coverage ratchet drift check | `npm run coverage-ratchet` |
-| Eval (deterministic stub) | `npm run eval -- --stub` |
-| Eval (full harness) | `npm run eval` |
-| Full verify (all of the above) | `bash scripts/verify.sh` |
+| Task                           | Command                                  |
+| ------------------------------ | ---------------------------------------- |
+| Install (clean, CI-style)      | `npm ci`                                 |
+| Install (dev)                  | `npm install`                            |
+| Build all packages             | `npm run build` (`tsc -b`)               |
+| Typecheck                      | `npm run typecheck`                      |
+| Lint                           | `npm run lint`                           |
+| Format all files               | `npm run format`                         |
+| Format check                   | `npm run format:check`                   |
+| Test with coverage             | `npm run test` (`vitest run --coverage`) |
+| Coverage ratchet drift check   | `npm run coverage-ratchet`               |
+| Eval (deterministic stub)      | `npm run eval -- --stub`                 |
+| Eval (full harness)            | `npm run eval`                           |
+| Full verify (all of the above) | `bash scripts/verify.sh`                 |
 
-`scripts/verify.sh` runs, in order: `npm ci` → `npm run build` → `npm run typecheck` → `npm run lint` → `npm run test` → `npm run coverage-ratchet` → `npm run eval -- --stub`. This mirrors the CI workflow in `.github/workflows/ci.yml`.
+`scripts/verify.sh` runs, in order: `npm ci` → `npm run format:check` → `npm run build` → `npm run typecheck` → `npm run lint` → `npm run test` → `npm run coverage-ratchet` → `npm run eval -- --stub`. This mirrors the CI workflow in `.github/workflows/ci.yml`.
 
 ## Conventions
 

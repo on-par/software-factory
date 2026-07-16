@@ -91,8 +91,12 @@ describe('local-small eval scoreboard', () => {
 
     const markdown = renderLocalSmallScoreboardMarkdown(report);
 
-    expect(markdown).toContain('| Scenario | Runtime | Model | Harness | Patch | Tests | Diff | Repairs | Duration | Grade |');
-    expect(markdown).toContain('| local-small-first-green | local-small | qwen2.5-coder:7b | ollama-agentic | yes | yes | 5 | 0 | 0.90s | 9 |');
+    expect(markdown).toContain(
+      '| Scenario | Runtime | Model | Harness | Patch | Tests | Diff | Repairs | Duration | Grade |',
+    );
+    expect(markdown).toContain(
+      '| local-small-first-green | local-small | qwen2.5-coder:7b | ollama-agentic | yes | yes | 5 | 0 | 0.90s | 9 |',
+    );
     expect(markdown).toContain('No regressions against baseline.');
   });
 });

@@ -49,7 +49,10 @@ describe('reduceLogScroll', () => {
   });
 
   it('toggleFollow flips follow and resets offset to 0 when turning on', () => {
-    expect(reduceLogScroll({ follow: false, offset: 42 }, 'toggleFollow', 10, 100)).toEqual({ follow: true, offset: 0 });
+    expect(reduceLogScroll({ follow: false, offset: 42 }, 'toggleFollow', 10, 100)).toEqual({
+      follow: true,
+      offset: 0,
+    });
   });
 
   it('toggleFollow flips follow off and preserves offset', () => {
@@ -77,7 +80,7 @@ describe('visibleSlice', () => {
   it('shows the newest window when offset is 0 (follow)', () => {
     const evs = events(20);
     const { slice, first, last } = visibleSlice(evs, { follow: true, offset: 0 }, 5);
-    expect(slice.map(e => e.msg)).toEqual(['msg 15', 'msg 16', 'msg 17', 'msg 18', 'msg 19']);
+    expect(slice.map((e) => e.msg)).toEqual(['msg 15', 'msg 16', 'msg 17', 'msg 18', 'msg 19']);
     expect(first).toBe(16);
     expect(last).toBe(20);
   });
@@ -85,7 +88,7 @@ describe('visibleSlice', () => {
   it('shows an older window when scrolled up by offset', () => {
     const evs = events(20);
     const { slice, first, last } = visibleSlice(evs, { follow: false, offset: 5 }, 5);
-    expect(slice.map(e => e.msg)).toEqual(['msg 10', 'msg 11', 'msg 12', 'msg 13', 'msg 14']);
+    expect(slice.map((e) => e.msg)).toEqual(['msg 10', 'msg 11', 'msg 12', 'msg 13', 'msg 14']);
     expect(first).toBe(11);
     expect(last).toBe(15);
   });
@@ -93,7 +96,7 @@ describe('visibleSlice', () => {
   it('clamps the offset to the oldest possible window', () => {
     const evs = events(20);
     const { slice, first, last } = visibleSlice(evs, { follow: false, offset: 100 }, 5);
-    expect(slice.map(e => e.msg)).toEqual(['msg 0', 'msg 1', 'msg 2', 'msg 3', 'msg 4']);
+    expect(slice.map((e) => e.msg)).toEqual(['msg 0', 'msg 1', 'msg 2', 'msg 3', 'msg 4']);
     expect(first).toBe(1);
     expect(last).toBe(5);
   });

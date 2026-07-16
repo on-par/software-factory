@@ -18,20 +18,18 @@ export interface ShipResult {
   deniedReason?: string;
 }
 
-export async function shipPhase(
-  opts: {
-    issue: number;
-    repo: string;
-    worktree: string;
-    branch: string;
-    octokit: Octokit;
-    watchCI?: boolean;
-    log: (type: string, msg: string) => void;
-    run?: CommandRunner;
-    approvalGate?: ApprovalGate;
-    checkSummary?: CheckSummary;
-  },
-): Promise<ShipResult> {
+export async function shipPhase(opts: {
+  issue: number;
+  repo: string;
+  worktree: string;
+  branch: string;
+  octokit: Octokit;
+  watchCI?: boolean;
+  log: (type: string, msg: string) => void;
+  run?: CommandRunner;
+  approvalGate?: ApprovalGate;
+  checkSummary?: CheckSummary;
+}): Promise<ShipResult> {
   const { issue, repo, worktree, branch, octokit, watchCI = true, log, run = exec, approvalGate, checkSummary } = opts;
   const [owner, repoName] = repo.split('/');
 
@@ -43,7 +41,10 @@ export async function shipPhase(
     // whichever phase (CHECK/BUILD) last logged, which is misleading.
     log('ship', `Starting ship phase for ${branch}`);
     diffStat = await computeDiffStat(run, worktree);
-    log('approval_requested', `awaiting approval to ship ${branch}${checkSummary ? ` (checks: ${checkSummary.passes} pass, ${checkSummary.failures} fail, ${checkSummary.skips} skip)` : ''}`);
+    log(
+      'approval_requested',
+      `awaiting approval to ship ${branch}${checkSummary ? ` (checks: ${checkSummary.passes} pass, ${checkSummary.failures} fail, ${checkSummary.skips} skip)` : ''}`,
+    );
     const response = await approvalGate({ issue, branch, worktree, diffStat, checkSummary });
     if (!response.approved) {
       const reason = response.reason ?? 'denied';
@@ -79,7 +80,7 @@ export async function shipPhase(
     const title = issueData.title;
 
     // Get diff stats (reuse the approval gate's diff stat when already computed)
-    const stat = diffStat ?? await computeDiffStat(run, worktree);
+    const stat = diffStat ?? (await computeDiffStat(run, worktree));
 
     // Create PR
     const { data: pr } = await octokit.rest.pulls.create({
@@ -165,10 +166,7 @@ async function findOpenPR(octokit: Octokit, owner: string, repo: string, branch:
   }
 }
 
-async function inspectRecoveryState(
-  worktree: string,
-  run: CommandRunner,
-): Promise<{ clean: boolean; ahead: boolean }> {
+async function inspectRecoveryState(worktree: string, run: CommandRunner): Promise<{ clean: boolean; ahead: boolean }> {
   const [{ stdout: status }, { stdout: ahead }] = await Promise.all([
     run('git status --porcelain', { cwd: worktree }),
     run('git rev-list --count origin/main..HEAD', { cwd: worktree }),
@@ -178,4 +176,3 @@ async function inspectRecoveryState(
     ahead: Number.parseInt(ahead.trim(), 10) > 0,
   };
 }
-

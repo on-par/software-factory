@@ -28,8 +28,8 @@ function ev(type: string, msg: string, issue = '192', ts = new Date().toISOStrin
 
 /** Ink schedules re-renders on a microtask; flush it before reading lastFrame(). */
 const flush = async () => {
-  await new Promise(resolve => setImmediate(resolve));
-  await new Promise(resolve => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
 };
 
 describe('App', () => {
@@ -194,12 +194,27 @@ describe('App', () => {
   it('shows Costs tab totals and the skipped-line warning without crashing', async () => {
     const fake = makeFakeFollow();
     const costsRead: CostsRead = {
-      entries: [{ ts: 't1', issue: '296', task: 'build', model: 'claude-sonnet-5', inputTokens: 100, outputTokens: 50, cost: 0.01 }],
+      entries: [
+        {
+          ts: 't1',
+          issue: '296',
+          task: 'build',
+          model: 'claude-sonnet-5',
+          inputTokens: 100,
+          outputTokens: 50,
+          cost: 0.01,
+        },
+      ],
       skipped: 1,
     };
     const readCostsFn = vi.fn(() => costsRead);
     const { lastFrame, stdin } = render(
-      <App eventsFile="ignored" follow={fake.follow} costsFile="/repo/.factory/costs.jsonl" readCostsFn={readCostsFn} />,
+      <App
+        eventsFile="ignored"
+        follow={fake.follow}
+        costsFile="/repo/.factory/costs.jsonl"
+        readCostsFn={readCostsFn}
+      />,
     );
 
     stdin.write('3');
@@ -310,7 +325,13 @@ describe('App approvals', () => {
     const listPendingFn = vi.fn(() => [makeRequest()]);
     const respondFn = vi.fn();
     const { lastFrame, stdin } = render(
-      <App eventsFile="ignored" follow={fake.follow} approvalsDir="/repo/.factory/approvals" listPendingFn={listPendingFn} respondFn={respondFn} />,
+      <App
+        eventsFile="ignored"
+        follow={fake.follow}
+        approvalsDir="/repo/.factory/approvals"
+        listPendingFn={listPendingFn}
+        respondFn={respondFn}
+      />,
     );
     await flush();
 
@@ -326,7 +347,13 @@ describe('App approvals', () => {
     const listPendingFn = vi.fn(() => [makeRequest()]);
     const respondFn = vi.fn();
     const { lastFrame, stdin } = render(
-      <App eventsFile="ignored" follow={fake.follow} approvalsDir="/repo/.factory/approvals" listPendingFn={listPendingFn} respondFn={respondFn} />,
+      <App
+        eventsFile="ignored"
+        follow={fake.follow}
+        approvalsDir="/repo/.factory/approvals"
+        listPendingFn={listPendingFn}
+        respondFn={respondFn}
+      />,
     );
     await flush();
 
@@ -342,7 +369,13 @@ describe('App approvals', () => {
     const listPendingFn = vi.fn(() => [makeRequest()]);
     const respondFn = vi.fn();
     const { lastFrame, stdin } = render(
-      <App eventsFile="ignored" follow={fake.follow} approvalsDir="/repo/.factory/approvals" listPendingFn={listPendingFn} respondFn={respondFn} />,
+      <App
+        eventsFile="ignored"
+        follow={fake.follow}
+        approvalsDir="/repo/.factory/approvals"
+        listPendingFn={listPendingFn}
+        respondFn={respondFn}
+      />,
     );
     await flush();
 
@@ -374,7 +407,13 @@ describe('App approvals', () => {
     const listPendingFn = vi.fn(() => [makeRequest()]);
     const respondFn = vi.fn();
     const { lastFrame, stdin } = render(
-      <App eventsFile="ignored" follow={fake.follow} approvalsDir="/repo/.factory/approvals" listPendingFn={listPendingFn} respondFn={respondFn} />,
+      <App
+        eventsFile="ignored"
+        follow={fake.follow}
+        approvalsDir="/repo/.factory/approvals"
+        listPendingFn={listPendingFn}
+        respondFn={respondFn}
+      />,
     );
     await flush();
 

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { withFileLock, withGitLock } from './lock.js';
 
-const delay = (ms = 0) => new Promise(resolve => setTimeout(resolve, ms));
+const delay = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe('withGitLock', () => {
   it('serializes work for the same key', async () => {
@@ -40,15 +40,19 @@ describe('withGitLock', () => {
   it('releases the lock when work throws', async () => {
     const key = 'throw-key';
 
-    await expect(withGitLock(key, async () => {
-      throw new Error('boom');
-    })).rejects.toThrow('boom');
+    await expect(
+      withGitLock(key, async () => {
+        throw new Error('boom');
+      }),
+    ).rejects.toThrow('boom');
 
     let ran = false;
-    await expect(withGitLock(key, async () => {
-      ran = true;
-      return 'ok';
-    })).resolves.toBe('ok');
+    await expect(
+      withGitLock(key, async () => {
+        ran = true;
+        return 'ok';
+      }),
+    ).resolves.toBe('ok');
 
     expect(ran).toBe(true);
   });
@@ -64,10 +68,7 @@ describe('withGitLock', () => {
       active--;
     };
 
-    await Promise.all([
-      withGitLock('key-a', run),
-      withGitLock('key-b', run),
-    ]);
+    await Promise.all([withGitLock('key-a', run), withGitLock('key-b', run)]);
 
     expect(peakActive).toBe(2);
   });
@@ -98,10 +99,12 @@ describe('withFileLock', () => {
 
     expect(existsSync(lockDir)).toBe(false);
 
-    await expect(withFileLock(lockDir, async () => {
-      expect(readFileSync(join(lockDir, 'pid'), 'utf-8')).toBe(String(process.pid));
-      throw new Error('boom');
-    })).rejects.toThrow('boom');
+    await expect(
+      withFileLock(lockDir, async () => {
+        expect(readFileSync(join(lockDir, 'pid'), 'utf-8')).toBe(String(process.pid));
+        throw new Error('boom');
+      }),
+    ).rejects.toThrow('boom');
 
     expect(existsSync(lockDir)).toBe(false);
   });
@@ -124,9 +127,13 @@ describe('withFileLock', () => {
     const onSteal = vi.fn();
     let ran = false;
 
-    await withFileLock(lockDir, async () => {
-      ran = true;
-    }, { pollMs: 10, timeoutMs: 100, isPidAlive: () => false, onSteal });
+    await withFileLock(
+      lockDir,
+      async () => {
+        ran = true;
+      },
+      { pollMs: 10, timeoutMs: 100, isPidAlive: () => false, onSteal },
+    );
 
     expect(ran).toBe(true);
     expect(onSteal).toHaveBeenCalledWith(999999);
@@ -145,9 +152,13 @@ describe('withFileLock', () => {
     }, 50);
 
     try {
-      await withFileLock(lockDir, async () => {
-        expect(removed).toBe(true);
-      }, { pollMs: 10, timeoutMs: 500, isPidAlive: () => true, onSteal });
+      await withFileLock(
+        lockDir,
+        async () => {
+          expect(removed).toBe(true);
+        },
+        { pollMs: 10, timeoutMs: 500, isPidAlive: () => true, onSteal },
+      );
     } finally {
       clearTimeout(timer);
     }
@@ -161,11 +172,13 @@ describe('withFileLock', () => {
     writeFileSync(join(lockDir, 'pid'), '12345');
     const fn = vi.fn();
 
-    await expect(withFileLock(lockDir, fn, {
-      pollMs: 10,
-      timeoutMs: 50,
-      isPidAlive: () => true,
-    })).rejects.toThrow(/stuck/);
+    await expect(
+      withFileLock(lockDir, fn, {
+        pollMs: 10,
+        timeoutMs: 50,
+        isPidAlive: () => true,
+      }),
+    ).rejects.toThrow(/stuck/);
 
     expect(fn).not.toHaveBeenCalled();
   });
@@ -175,11 +188,13 @@ describe('withFileLock', () => {
     mkdirSync(lockDir);
     writeFileSync(join(lockDir, 'pid'), '12345');
 
-    await expect(withFileLock(lockDir, vi.fn(), {
-      pollMs: 10,
-      timeoutMs: 50,
-      isPidAlive: () => true,
-    })).rejects.toMatchObject({ reason: 'timeout' });
+    await expect(
+      withFileLock(lockDir, vi.fn(), {
+        pollMs: 10,
+        timeoutMs: 50,
+        isPidAlive: () => true,
+      }),
+    ).rejects.toMatchObject({ reason: 'timeout' });
   });
 
   it('steals an orphan dir with no pid file', async () => {
@@ -190,9 +205,13 @@ describe('withFileLock', () => {
     const onSteal = vi.fn();
     let ran = false;
 
-    await withFileLock(lockDir, async () => {
-      ran = true;
-    }, { pollMs: 10, timeoutMs: 100, graceMs: 10, onSteal });
+    await withFileLock(
+      lockDir,
+      async () => {
+        ran = true;
+      },
+      { pollMs: 10, timeoutMs: 100, graceMs: 10, onSteal },
+    );
 
     expect(ran).toBe(true);
     expect(onSteal).toHaveBeenCalledWith(null);
@@ -204,12 +223,14 @@ describe('withFileLock', () => {
     const onSteal = vi.fn();
     const fn = vi.fn();
 
-    await expect(withFileLock(lockDir, fn, {
-      pollMs: 10,
-      timeoutMs: 80,
-      graceMs: 10_000,
-      onSteal,
-    })).rejects.toThrow(/stuck/);
+    await expect(
+      withFileLock(lockDir, fn, {
+        pollMs: 10,
+        timeoutMs: 80,
+        graceMs: 10_000,
+        onSteal,
+      }),
+    ).rejects.toThrow(/stuck/);
 
     expect(fn).not.toHaveBeenCalled();
     expect(onSteal).not.toHaveBeenCalled();

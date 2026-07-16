@@ -105,18 +105,20 @@ describe('loadModelsConfig', () => {
       .filter(([, def]) => !def.experimental)
       .map(([id]) => id)
       .sort();
-    expect(nonExperimental).toEqual([
-      'claude-fable-5',
-      'claude-opus-4-8',
-      'claude-sonnet-5',
-      'codex-ollama-qwen3.5:9b',
-      'gemma4:12b',
-      'gpt-5.1-codex',
-      'gpt-5.6-sol',
-      'qwen2.5-coder:14b',
-      'qwen3.5:9b',
-      'qwen3:8b',
-    ].sort());
+    expect(nonExperimental).toEqual(
+      [
+        'claude-fable-5',
+        'claude-opus-4-8',
+        'claude-sonnet-5',
+        'codex-ollama-qwen3.5:9b',
+        'gemma4:12b',
+        'gpt-5.1-codex',
+        'gpt-5.6-sol',
+        'qwen2.5-coder:14b',
+        'qwen3.5:9b',
+        'qwen3:8b',
+      ].sort(),
+    );
   });
 });
 
@@ -170,36 +172,53 @@ describe('loadFactoryConfig', () => {
 describe('resolveTimeouts', () => {
   it('uses config values when env overrides are absent', () => {
     const config = loadFactoryConfig();
-    expect(resolveTimeouts({
-      ...config,
-      timeouts: { ...config.timeouts, plan_seconds: 900 },
-    }, {}).plan).toBe(900);
+    expect(
+      resolveTimeouts(
+        {
+          ...config,
+          timeouts: { ...config.timeouts, plan_seconds: 900 },
+        },
+        {},
+      ).plan,
+    ).toBe(900);
   });
 
   it('lets env override config values', () => {
     const config = loadFactoryConfig();
-    expect(resolveTimeouts({
-      ...config,
-      timeouts: { ...config.timeouts, build_seconds: 7200 },
-    }, { FACTORY_BUILD_TIMEOUT: '3600' }).build).toBe(3600);
+    expect(
+      resolveTimeouts(
+        {
+          ...config,
+          timeouts: { ...config.timeouts, build_seconds: 7200 },
+        },
+        { FACTORY_BUILD_TIMEOUT: '3600' },
+      ).build,
+    ).toBe(3600);
   });
 
   it('preserves defaults and ignores invalid env values', () => {
     const config = loadFactoryConfig();
 
     expect(resolveTimeouts(config, {})).toEqual({ plan: 1800, build: 7200, check: 1800, approval: 1800 });
-    expect(resolveTimeouts(config, {
-      FACTORY_PLAN_TIMEOUT: 'abc',
-      FACTORY_CHECK_TIMEOUT: '',
-    })).toEqual({ plan: 1800, build: 7200, check: 1800, approval: 1800 });
+    expect(
+      resolveTimeouts(config, {
+        FACTORY_PLAN_TIMEOUT: 'abc',
+        FACTORY_CHECK_TIMEOUT: '',
+      }),
+    ).toEqual({ plan: 1800, build: 7200, check: 1800, approval: 1800 });
   });
 
   it('honors approval_seconds from config', () => {
     const config = loadFactoryConfig();
-    expect(resolveTimeouts({
-      ...config,
-      timeouts: { ...config.timeouts, approval_seconds: 900 },
-    }, {}).approval).toBe(900);
+    expect(
+      resolveTimeouts(
+        {
+          ...config,
+          timeouts: { ...config.timeouts, approval_seconds: 900 },
+        },
+        {},
+      ).approval,
+    ).toBe(900);
   });
 
   it('lets FACTORY_APPROVAL_TIMEOUT override config', () => {

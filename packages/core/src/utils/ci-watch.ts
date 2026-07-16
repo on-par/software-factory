@@ -17,11 +17,14 @@ export interface WatchChecksOptions {
 
 export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> {
   const {
-    octokit, owner, repo, ref,
+    octokit,
+    owner,
+    repo,
+    ref,
     deadlineMs = 600_000,
     initialIntervalMs = 15_000,
     maxIntervalMs = 60_000,
-    sleep = (ms) => new Promise<void>(r => setTimeout(r, ms)),
+    sleep = (ms) => new Promise<void>((r) => setTimeout(r, ms)),
     now = () => Date.now(),
   } = opts;
 
@@ -30,8 +33,8 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
   while (now() < deadline) {
     const { data: checks } = await octokit.rest.checks.listForRef({ owner, repo, ref });
     if (checks.check_runs.length > 0) {
-      const allDone = checks.check_runs.every(r => r.status === 'completed');
-      const anyFailed = checks.check_runs.some(r => r.conclusion === 'failure');
+      const allDone = checks.check_runs.every((r) => r.status === 'completed');
+      const anyFailed = checks.check_runs.some((r) => r.conclusion === 'failure');
       if (allDone) return anyFailed ? 'failure' : 'success';
     }
     await sleep(interval);

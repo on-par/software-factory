@@ -56,7 +56,7 @@ export function readCosts(costsFile: string): CostEntry[] {
     .trim()
     .split('\n')
     .filter(Boolean)
-    .flatMap(l => {
+    .flatMap((l) => {
       try {
         return [JSON.parse(l) as CostEntry];
       } catch {
@@ -71,11 +71,7 @@ export async function gitFetch(repoRoot: string): Promise<void> {
   await exec('git fetch origin -q', { cwd: repoRoot });
 }
 
-export async function setupWorktree(
-  repoRoot: string,
-  branch: string,
-  worktreePath: string,
-): Promise<void> {
+export async function setupWorktree(repoRoot: string, branch: string, worktreePath: string): Promise<void> {
   await exec(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot }).catch(() => {});
   await exec(`git branch -D ${shellEscape(branch)}`, { cwd: repoRoot }).catch(() => {});
   await exec(`git worktree add -b ${shellEscape(branch)} ${shellEscape(worktreePath)} origin/main`, { cwd: repoRoot });
@@ -86,14 +82,18 @@ export async function cleanupWorktree(
   worktreePath: string,
   log: (type: string, msg: string) => void = () => {},
 ): Promise<void> {
-  await exec(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot })
-    .catch((err: any) =>
-      log('warn', `git worktree remove failed for ${worktreePath}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`),
-    );
-  await exec('git worktree prune', { cwd: repoRoot })
-    .catch((err: any) =>
-      log('warn', `git worktree prune failed in ${repoRoot}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`),
-    );
+  await exec(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot }).catch((err: any) =>
+    log(
+      'warn',
+      `git worktree remove failed for ${worktreePath}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`,
+    ),
+  );
+  await exec('git worktree prune', { cwd: repoRoot }).catch((err: any) =>
+    log(
+      'warn',
+      `git worktree prune failed in ${repoRoot}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`,
+    ),
+  );
 }
 
 export function slugify(s: string): string {
@@ -114,7 +114,11 @@ export function branchFor(issue: number, title: string): string {
 }
 
 export async function getIssueTitle(repo: string, issue: number, octokit: any): Promise<string> {
-  const { data } = await octokit.rest.issues.get({ owner: repo.split('/')[0], repo: repo.split('/')[1], issue_number: issue });
+  const { data } = await octokit.rest.issues.get({
+    owner: repo.split('/')[0],
+    repo: repo.split('/')[1],
+    issue_number: issue,
+  });
   return data.title;
 }
 
@@ -148,12 +152,12 @@ export function readJsonIfExists<T>(path: string, fallback: T): T {
  * Used by both production phases and the eval scorer so evals match production behavior.
  */
 export function isEscalation(output: string): boolean {
-  return output.split('\n').some(line => line.startsWith('ESCALATE:'));
+  return output.split('\n').some((line) => line.startsWith('ESCALATE:'));
 }
 
 /** The first `ESCALATE:`-prefixed line, or undefined when the output is not an escalation. */
 export function escalationLine(output: string): string | undefined {
-  return output.split('\n').find(line => line.startsWith('ESCALATE:'));
+  return output.split('\n').find((line) => line.startsWith('ESCALATE:'));
 }
 
 /** FACTORY_CODEX=0 kill-switch: force all work onto the Claude route. */

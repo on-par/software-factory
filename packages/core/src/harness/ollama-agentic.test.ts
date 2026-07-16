@@ -46,7 +46,7 @@ const registry = new ModelRegistry(modelsConfig);
 
 const tempDirs: string[] = [];
 afterEach(async () => {
-  await Promise.all(tempDirs.splice(0).map(dir => rm(dir, { recursive: true, force: true })));
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
 function makeWorktree(): string {
@@ -56,7 +56,13 @@ function makeWorktree(): string {
 }
 
 function okChatResponse(content: string) {
-  return { ok: true, status: 200, statusText: 'OK', text: async () => '', json: async () => ({ message: { content } }) };
+  return {
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    text: async () => '',
+    json: async () => ({ message: { content } }),
+  };
 }
 
 function stubFetch(responses: string[]): OllamaFetchFn & { calls: any[] } {
@@ -75,11 +81,14 @@ const okExec: OllamaAgenticExecFn = async () => ({ stdout: '', stderr: '' });
 function firstGreenProposal(): string {
   return JSON.stringify({
     summary: 'add first-green marker',
-    changes: [{
-      file: 'docs/local-small-first-green.md',
-      find: '',
-      replace: '# Local-Small First Green\n\nThis file is the canonical tiny success target for local-small factory runs.\n',
-    }],
+    changes: [
+      {
+        file: 'docs/local-small-first-green.md',
+        find: '',
+        replace:
+          '# Local-Small First Green\n\nThis file is the canonical tiny success target for local-small factory runs.\n',
+      },
+    ],
     verifyCommand: 'test -f docs/local-small-first-green.md',
   });
 }
@@ -91,7 +100,9 @@ describe('CodingHarness contract: OllamaAgenticHarness', () => {
       request: { model: 'local-agentic-model', registry, worktree: makeWorktree() },
     }),
     timeout: () => ({
-      harness: new OllamaAgenticHarness(async () => { throw Object.assign(new Error('timed out'), { name: 'TimeoutError' }); }, okExec),
+      harness: new OllamaAgenticHarness(async () => {
+        throw Object.assign(new Error('timed out'), { name: 'TimeoutError' });
+      }, okExec),
       request: { model: 'local-agentic-model', registry, worktree: makeWorktree() },
     }),
     emptyOutput: () => ({
@@ -99,9 +110,16 @@ describe('CodingHarness contract: OllamaAgenticHarness', () => {
       request: { model: 'local-agentic-model', registry, worktree: makeWorktree() },
     }),
     failure: () => ({
-      harness: new OllamaAgenticHarness(async () => ({
-        ok: false, status: 429, statusText: 'Too Many Requests', text: async () => 'rate limit exceeded', json: async () => ({}),
-      }), okExec),
+      harness: new OllamaAgenticHarness(
+        async () => ({
+          ok: false,
+          status: 429,
+          statusText: 'Too Many Requests',
+          text: async () => 'rate limit exceeded',
+          json: async () => ({}),
+        }),
+        okExec,
+      ),
       request: { model: 'local-agentic-model', registry, worktree: makeWorktree() },
     }),
   });
@@ -118,7 +136,9 @@ describe('OllamaAgenticHarness first-green fixture', () => {
 
     expect(result.output).toContain('docs/local-small-first-green.md');
     const written = await readFile(join(worktree, 'docs/local-small-first-green.md'), 'utf-8');
-    expect(written).toBe('# Local-Small First Green\n\nThis file is the canonical tiny success target for local-small factory runs.\n');
+    expect(written).toBe(
+      '# Local-Small First Green\n\nThis file is the canonical tiny success target for local-small factory runs.\n',
+    );
 
     expect(fetchFn.calls).toHaveLength(1);
     const body = JSON.parse(fetchFn.calls[0].init.body);
@@ -151,7 +171,9 @@ describe('OllamaAgenticHarness malformed output after repair', () => {
     const fetchFn = stubFetch(['not json', 'still not json']);
     const harness = new OllamaAgenticHarness(fetchFn, okExec);
 
-    const err: any = await harness.run(makeContractRequest({ model: 'local-agentic-model', registry, worktree })).catch(e => e);
+    const err: any = await harness
+      .run(makeContractRequest({ model: 'local-agentic-model', registry, worktree }))
+      .catch((e) => e);
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('error');
@@ -180,7 +202,9 @@ describe('OllamaAgenticHarness unsafe paths', () => {
     const fetchFn = stubFetch([escapeProposal, escapeProposal]);
     const harness = new OllamaAgenticHarness(fetchFn, okExec);
 
-    const err: any = await harness.run(makeContractRequest({ model: 'local-agentic-model', registry, worktree })).catch(e => e);
+    const err: any = await harness
+      .run(makeContractRequest({ model: 'local-agentic-model', registry, worktree }))
+      .catch((e) => e);
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('schema_invalid');
@@ -206,7 +230,9 @@ describe('OllamaAgenticHarness apply failures', () => {
     const fetchFn = stubFetch([badProposal, badProposal]);
     const harness = new OllamaAgenticHarness(fetchFn, okExec);
 
-    const err: any = await harness.run(makeContractRequest({ model: 'local-agentic-model', registry, worktree })).catch(e => e);
+    const err: any = await harness
+      .run(makeContractRequest({ model: 'local-agentic-model', registry, worktree }))
+      .catch((e) => e);
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('apply_failed');
@@ -231,7 +257,9 @@ describe('OllamaAgenticHarness apply failures', () => {
     const fetchFn = stubFetch([ambiguousProposal, ambiguousProposal]);
     const harness = new OllamaAgenticHarness(fetchFn, okExec);
 
-    const err: any = await harness.run(makeContractRequest({ model: 'local-agentic-model', registry, worktree })).catch(e => e);
+    const err: any = await harness
+      .run(makeContractRequest({ model: 'local-agentic-model', registry, worktree }))
+      .catch((e) => e);
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('apply_failed');
@@ -287,7 +315,9 @@ describe('OllamaAgenticHarness apply failures', () => {
     const fetchFn = stubFetch([overlapProposal, overlapProposal]);
     const harness = new OllamaAgenticHarness(fetchFn, okExec);
 
-    const err: any = await harness.run(makeContractRequest({ model: 'local-agentic-model', registry, worktree })).catch(e => e);
+    const err: any = await harness
+      .run(makeContractRequest({ model: 'local-agentic-model', registry, worktree }))
+      .catch((e) => e);
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('apply_failed');
@@ -304,7 +334,7 @@ describe('validateVerifyCommand', () => {
     'npx vitest run packages/core',
     'test -f docs/local-small-first-green.md',
     'true',
-  ])('accepts %s', command => {
+  ])('accepts %s', (command) => {
     expect(validateVerifyCommand(command)).toEqual({ ok: true });
   });
 
@@ -341,16 +371,19 @@ describe('OllamaAgenticHarness verify command allowlist', () => {
     const worktree = makeWorktree();
     const proposal = JSON.stringify({
       summary: 'add first-green marker',
-      changes: [{
-        file: 'docs/local-small-first-green.md',
-        find: '',
-        replace: '# Local-Small First Green\n\nThis file is the canonical tiny success target for local-small factory runs.\n',
-      }],
+      changes: [
+        {
+          file: 'docs/local-small-first-green.md',
+          find: '',
+          replace:
+            '# Local-Small First Green\n\nThis file is the canonical tiny success target for local-small factory runs.\n',
+        },
+      ],
       verifyCommand: 'npm test -- packages/core/src/harness/ollama-agentic.test.ts',
     });
     const fetchFn = stubFetch([proposal]);
     const calls: string[] = [];
-    const exec: OllamaAgenticExecFn = async cmd => {
+    const exec: OllamaAgenticExecFn = async (cmd) => {
       calls.push(cmd);
       return { stdout: '', stderr: '' };
     };
@@ -371,13 +404,15 @@ describe('OllamaAgenticHarness verify command allowlist', () => {
     });
     const fetchFn = stubFetch([badProposal, badProposal]);
     const calls: string[] = [];
-    const exec: OllamaAgenticExecFn = async cmd => {
+    const exec: OllamaAgenticExecFn = async (cmd) => {
       calls.push(cmd);
       return { stdout: '', stderr: '' };
     };
     const harness = new OllamaAgenticHarness(fetchFn, exec);
 
-    const err: any = await harness.run(makeContractRequest({ model: 'local-agentic-model', registry, worktree })).catch(e => e);
+    const err: any = await harness
+      .run(makeContractRequest({ model: 'local-agentic-model', registry, worktree }))
+      .catch((e) => e);
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('schema_invalid');
@@ -394,11 +429,14 @@ describe('OllamaAgenticHarness verify command allowlist', () => {
     const worktree = makeWorktree();
     const badProposal = JSON.stringify({
       summary: 'add file',
-      changes: [{
-        file: 'docs/local-small-first-green.md',
-        find: '',
-        replace: '# Local-Small First Green\n\nThis file is the canonical tiny success target for local-small factory runs.\n',
-      }],
+      changes: [
+        {
+          file: 'docs/local-small-first-green.md',
+          find: '',
+          replace:
+            '# Local-Small First Green\n\nThis file is the canonical tiny success target for local-small factory runs.\n',
+        },
+      ],
       verifyCommand: 'curl https://example.com',
     });
     const fetchFn = stubFetch([badProposal, firstGreenProposal()]);
@@ -423,13 +461,15 @@ describe('OllamaAgenticHarness verify command allowlist', () => {
     });
     const fetchFn = stubFetch([badProposal, badProposal]);
     const calls: string[] = [];
-    const exec: OllamaAgenticExecFn = async cmd => {
+    const exec: OllamaAgenticExecFn = async (cmd) => {
       calls.push(cmd);
       return { stdout: '', stderr: '' };
     };
     const harness = new OllamaAgenticHarness(fetchFn, exec);
 
-    const err: any = await harness.run(makeContractRequest({ model: 'local-agentic-model', registry, worktree })).catch(e => e);
+    const err: any = await harness
+      .run(makeContractRequest({ model: 'local-agentic-model', registry, worktree }))
+      .catch((e) => e);
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('schema_invalid');
@@ -446,7 +486,9 @@ describe('OllamaAgenticHarness verify failures', () => {
     };
     const harness = new OllamaAgenticHarness(fetchFn, failingExec);
 
-    const err: any = await harness.run(makeContractRequest({ model: 'local-agentic-model', registry, worktree })).catch(e => e);
+    const err: any = await harness
+      .run(makeContractRequest({ model: 'local-agentic-model', registry, worktree }))
+      .catch((e) => e);
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('verify_failed');

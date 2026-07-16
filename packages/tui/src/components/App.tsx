@@ -80,10 +80,14 @@ export function App({
   const [answered, setAnswered] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    const stop = follow(eventsFile, (e: FactoryEvent) => {
-      setState(s => reduceDashboard(s, e));
-      setEvents(prev => (prev.length >= MAX_LOG_EVENTS ? [...prev.slice(1), e] : [...prev, e]));
-    }, { fromStart: true });
+    const stop = follow(
+      eventsFile,
+      (e: FactoryEvent) => {
+        setState((s) => reduceDashboard(s, e));
+        setEvents((prev) => (prev.length >= MAX_LOG_EVENTS ? [...prev.slice(1), e] : [...prev, e]));
+      },
+      { fromStart: true },
+    );
     return stop;
   }, [eventsFile, follow]);
 
@@ -124,7 +128,7 @@ export function App({
 
   const issueCount = useMemo(() => aggregateCosts(costsRead.entries).perIssue.length, [costsRead]);
   const logHeight = Math.max(5, (stdout?.rows ?? 24) - 4);
-  const visibleApprovals = pendingApprovals.filter(r => !answered.has(r.id));
+  const visibleApprovals = pendingApprovals.filter((r) => !answered.has(r.id));
 
   useInput((input, key) => {
     if (denyReason !== undefined) {
@@ -132,7 +136,7 @@ export function App({
       if (key.return) {
         if (active) {
           respondFn(approvalsDir!, active.id, { approved: false, reason: denyReason.trim() || undefined });
-          setAnswered(prev => new Set(prev).add(active.id));
+          setAnswered((prev) => new Set(prev).add(active.id));
         }
         setDenyReason(undefined);
         return;
@@ -142,11 +146,11 @@ export function App({
         return;
       }
       if (key.backspace || key.delete) {
-        setDenyReason(reason => (reason ?? '').slice(0, -1));
+        setDenyReason((reason) => (reason ?? '').slice(0, -1));
         return;
       }
       if (input && !key.ctrl && !key.meta) {
-        setDenyReason(reason => (reason ?? '') + input);
+        setDenyReason((reason) => (reason ?? '') + input);
       }
       return;
     }
@@ -155,7 +159,7 @@ export function App({
       const active = visibleApprovals[0];
       if (input === 'y') {
         respondFn(approvalsDir!, active.id, { approved: true });
-        setAnswered(prev => new Set(prev).add(active.id));
+        setAnswered((prev) => new Set(prev).add(active.id));
         return;
       }
       if (input === 'n') {
@@ -169,7 +173,7 @@ export function App({
       return;
     }
     if (key.tab) {
-      setTab(t => TAB_ORDER[(TAB_ORDER.indexOf(t) + 1) % TAB_ORDER.length]);
+      setTab((t) => TAB_ORDER[(TAB_ORDER.indexOf(t) + 1) % TAB_ORDER.length]);
       setView('dashboard');
       return;
     }
@@ -182,21 +186,21 @@ export function App({
 
     if (tab === 'dashboard') {
       if (view === 'dashboard') {
-        if (key.upArrow) setSelectedIndex(i => Math.max(0, i - 1));
-        if (key.downArrow) setSelectedIndex(i => Math.min(state.lanes.length - 1, i + 1));
+        if (key.upArrow) setSelectedIndex((i) => Math.max(0, i - 1));
+        if (key.downArrow) setSelectedIndex((i) => Math.min(state.lanes.length - 1, i + 1));
         if (key.return) setView('detail');
       } else if (key.escape) {
         setView('dashboard');
       }
     } else if (tab === 'costs') {
-      if (key.upArrow) setCostsSelected(i => Math.max(0, i - 1));
-      if (key.downArrow) setCostsSelected(i => Math.min(Math.max(0, issueCount - 1), i + 1));
+      if (key.upArrow) setCostsSelected((i) => Math.max(0, i - 1));
+      if (key.downArrow) setCostsSelected((i) => Math.min(Math.max(0, issueCount - 1), i + 1));
     } else if (tab === 'log') {
-      if (key.upArrow) setLogScroll(s => reduceLogScroll(s, 'up', logHeight, events.length));
-      if (key.downArrow) setLogScroll(s => reduceLogScroll(s, 'down', logHeight, events.length));
-      if (key.pageUp) setLogScroll(s => reduceLogScroll(s, 'pageUp', logHeight, events.length));
-      if (key.pageDown) setLogScroll(s => reduceLogScroll(s, 'pageDown', logHeight, events.length));
-      if (input === 'f') setLogScroll(s => reduceLogScroll(s, 'toggleFollow', logHeight, events.length));
+      if (key.upArrow) setLogScroll((s) => reduceLogScroll(s, 'up', logHeight, events.length));
+      if (key.downArrow) setLogScroll((s) => reduceLogScroll(s, 'down', logHeight, events.length));
+      if (key.pageUp) setLogScroll((s) => reduceLogScroll(s, 'pageUp', logHeight, events.length));
+      if (key.pageDown) setLogScroll((s) => reduceLogScroll(s, 'pageDown', logHeight, events.length));
+      if (input === 'f') setLogScroll((s) => reduceLogScroll(s, 'toggleFollow', logHeight, events.length));
     }
   });
 

@@ -62,7 +62,7 @@ const CATALOG_ENTRIES: HarnessCatalogEntry[] = [
 ];
 
 export const HARNESS_CATALOG: Record<string, HarnessCatalogEntry> = Object.fromEntries(
-  CATALOG_ENTRIES.map(entry => [entry.id, entry]),
+  CATALOG_ENTRIES.map((entry) => [entry.id, entry]),
 );
 
 export const KNOWN_HARNESS_IDS = Object.keys(HARNESS_CATALOG);

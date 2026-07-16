@@ -6,36 +6,38 @@ import type { ExpectedRoute, GoldenCase } from './types.js';
 const EXPECTED_ROUTES = new Set<ExpectedRoute>(['codex', 'claude', 'escalate', 'any']);
 
 export async function loadGoldenCases(dir: string): Promise<GoldenCase[]> {
-  const files = (await readdir(dir))
-    .filter(file => file.endsWith('.md'))
-    .sort();
+  const files = (await readdir(dir)).filter((file) => file.endsWith('.md')).sort();
 
-  return Promise.all(files.map(async file => {
-    const path = join(dir, file);
-    const raw = await readFile(path, 'utf-8');
-    const { data, content } = matter(raw);
+  return Promise.all(
+    files.map(async (file) => {
+      const path = join(dir, file);
+      const raw = await readFile(path, 'utf-8');
+      const { data, content } = matter(raw);
 
-    const expectedRoute = (data.expectedRoute ?? 'any') as ExpectedRoute;
-    if (!EXPECTED_ROUTES.has(expectedRoute)) {
-      throw new Error(`${path}: invalid expectedRoute '${String(data.expectedRoute)}'`);
-    }
+      const expectedRoute = (data.expectedRoute ?? 'any') as ExpectedRoute;
+      if (!EXPECTED_ROUTES.has(expectedRoute)) {
+        throw new Error(`${path}: invalid expectedRoute '${String(data.expectedRoute)}'`);
+      }
 
-    const { content: contentWithoutStub, stubOutput } = extractStubOutput(content);
-    const { title, body } = extractTitleAndBody(contentWithoutStub, path);
+      const { content: contentWithoutStub, stubOutput } = extractStubOutput(content);
+      const { title, body } = extractTitleAndBody(contentWithoutStub, path);
 
-    return {
-      id: typeof data.id === 'string' && data.id.trim() ? data.id : basename(file, '.md'),
-      title,
-      body,
-      expectedRoute,
-      deterministicOnly: data.deterministicOnly ?? false,
-      rubric: Array.isArray(data.rubric) ? data.rubric.map(String) : [],
-      minRubricScore: typeof data.minRubricScore === 'number' ? data.minRubricScore : 7,
-      ...(stubOutput !== undefined ? { stubOutput } : {}),
-      ...(typeof data.constitution === 'string' && data.constitution.trim() ? { constitution: data.constitution } : {}),
-      path,
-    };
-  }));
+      return {
+        id: typeof data.id === 'string' && data.id.trim() ? data.id : basename(file, '.md'),
+        title,
+        body,
+        expectedRoute,
+        deterministicOnly: data.deterministicOnly ?? false,
+        rubric: Array.isArray(data.rubric) ? data.rubric.map(String) : [],
+        minRubricScore: typeof data.minRubricScore === 'number' ? data.minRubricScore : 7,
+        ...(stubOutput !== undefined ? { stubOutput } : {}),
+        ...(typeof data.constitution === 'string' && data.constitution.trim()
+          ? { constitution: data.constitution }
+          : {}),
+        path,
+      };
+    }),
+  );
 }
 
 function extractStubOutput(content: string): { content: string; stubOutput?: string } {

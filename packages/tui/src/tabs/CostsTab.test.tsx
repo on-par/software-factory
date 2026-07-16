@@ -45,10 +45,7 @@ describe('CostsTab', () => {
 
   it('follows selectedIndex to show the per-model section for a different issue', () => {
     const costs: CostsRead = {
-      entries: [
-        entry({ issue: '61', model: 'claude-sonnet-5' }),
-        entry({ issue: '62', model: 'gpt-5' }),
-      ],
+      entries: [entry({ issue: '61', model: 'claude-sonnet-5' }), entry({ issue: '62', model: 'gpt-5' })],
       skipped: 0,
     };
     const { lastFrame } = render(<CostsTab costs={costs} selectedIndex={1} />);

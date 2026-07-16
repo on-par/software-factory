@@ -8,9 +8,7 @@ afterEach(cleanup);
 describe('App', () => {
   it('renders the On Par Factory heading', () => {
     render(<App />);
-    expect(
-      screen.getByRole('heading', { name: 'On Par Factory' }),
-    ).toBeDefined();
+    expect(screen.getByRole('heading', { name: 'On Par Factory' })).toBeDefined();
   });
 
   it('applies Tailwind utility classes to the page shell', () => {

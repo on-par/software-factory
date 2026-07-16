@@ -16,8 +16,23 @@ describe('types module', () => {
     const reasons: FailoverReason[] = ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response', 'unavailable'];
 
     for (const failoverReason of reasons) {
-      const cost: CostEntry = { ts: '2026-07-16T00:00:00Z', issue: '1', task: 'build', model: 'm', inputTokens: 0, outputTokens: 0, cost: 0, failoverReason };
-      const event: FactoryEvent = { ts: '2026-07-16T00:00:00Z', type: 'failover', issue: '1', msg: 'm', failoverReason };
+      const cost: CostEntry = {
+        ts: '2026-07-16T00:00:00Z',
+        issue: '1',
+        task: 'build',
+        model: 'm',
+        inputTokens: 0,
+        outputTokens: 0,
+        cost: 0,
+        failoverReason,
+      };
+      const event: FactoryEvent = {
+        ts: '2026-07-16T00:00:00Z',
+        type: 'failover',
+        issue: '1',
+        msg: 'm',
+        failoverReason,
+      };
 
       expect(JSON.parse(JSON.stringify(cost)).failoverReason).toBe(failoverReason);
       expect(JSON.parse(JSON.stringify(event)).failoverReason).toBe(failoverReason);

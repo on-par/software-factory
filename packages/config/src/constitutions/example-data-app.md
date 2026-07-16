@@ -16,6 +16,7 @@ enforced_on: [plan, build, check]
 > where reported numbers must be grounded in the underlying data.
 
 ## Purpose
+
 An app that analyzes an input dataset and produces a report with scores,
 recommendations, and a narrative. Demonstrates checkers that verify reported
 values against the source data so nothing is fabricated.
@@ -23,6 +24,7 @@ values against the source data so nothing is fabricated.
 ## Standards
 
 ### Data Integrity
+
 - All reported values must match the measured/input data — no fabricated numbers
 - Recommendations must be grounded in the measured data (if the data shows a peak
   at some value, a recommendation must not contradict it)
@@ -30,6 +32,7 @@ values against the source data so nothing is fabricated.
 - Input metadata (size, format, counts, duration) must match the source file
 
 ### Report Quality
+
 - Every report must include: an overall score, per-category scores, recommendations,
   and a narrative
 - Scores must be on the defined scale and match the scoring rubric
@@ -37,17 +40,20 @@ values against the source data so nothing is fabricated.
 - Recommendations must be actionable and specific, not vague
 
 ### Input Handling
+
 - Parsing must handle each supported input format
 - Diffs between inputs must show exact changes (field, old value, new value)
 - No values may be fabricated — all must come from the parsed input
 
 ### Code Quality
+
 - Type checking must pass with no errors
 - All public functions must have doc comments
 - Analysis functions must be deterministic (same input → same output)
 - No floating-point comparisons without epsilon tolerance
 
 ## Quality Gates
+
 1. `compile` — Builds without errors
 2. `lint` — Linting passes
 3. `tests` — Test suite passes (including fixture-based analysis tests)
@@ -55,6 +61,7 @@ values against the source data so nothing is fabricated.
 5. `custom_report_validation` — Report has all required sections and references real data
 
 ## Dispute Rules
+
 - If the data-verification checker flags a number as "not matching the data," the
   worker must show the calculation chain. If the calculation is correct and the
   checker used the wrong reference data, the checker is overruled.
@@ -65,6 +72,7 @@ values against the source data so nothing is fabricated.
   the source of truth, not the checker's interpretation.
 
 ## Non-Goals
+
 - Real-time/streaming analysis — this example covers batch input only
 - Any platform-specific or hardware-specific handling
 - UI/responsive design — not in scope for this example
