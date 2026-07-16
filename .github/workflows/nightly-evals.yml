@@ -1,8 +1,8 @@
-name: Nightly Evals
+name: Weekly Evals
 
 on:
   schedule:
-    - cron: '0 8 * * *'   # nightly, 08:00 UTC
+    - cron: '0 8 * * 1'   # weekly on Monday, 08:00 UTC
   workflow_dispatch:
 
 jobs:
@@ -94,7 +94,7 @@ jobs:
           fi
           existing=$(gh issue list --state open --label evals \
             --json number,title \
-            --jq '[.[] | select(.title == "Nightly eval regression")][0].number // empty')
+            --jq '[.[] | select(.title == "Weekly eval regression" or .title == "Nightly eval regression")][0].number // empty')
           if [ -n "$existing" ]; then
             gh issue edit "$existing" --body-file regression-issue.md
             gh issue comment "$existing" \
@@ -102,12 +102,12 @@ jobs:
             echo "updated existing regression issue #$existing"
           else
             gh issue create --label evals \
-              --title "Nightly eval regression" \
+              --title "Weekly eval regression" \
               --body-file regression-issue.md
           fi
 
       - name: Fail the job on eval regression
         if: steps.eval.outcome == 'failure'
         run: |
-          echo "nightly eval step failed (regression or infra) — marking job red"
+          echo "weekly eval step failed (regression or infra) — marking job red"
           exit 1
