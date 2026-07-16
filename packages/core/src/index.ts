@@ -84,8 +84,10 @@ export { runCommand, describeCommandFailure } from './utils/command-runner.js';
 export type { RunCommandOptions, CommandResult } from './utils/command-runner.js';
 
 // Usage
-export { estimateTrailingSpend, formatUsageReport, watchUsage, priceFor, defaultTranscriptRoots, TRAILING_WINDOW_MS, readCostsFile, aggregateCosts } from './usage/index.js';
-export type { TrailingUsageOptions, WatchUsageOptions, CostsRead, ModelCostRow, IssueCostRow, CostsSummary } from './usage/index.js';
+export { estimateTrailingSpend, formatUsageReport, watchUsage, readUsage, priceFor, defaultTranscriptRoots, TRAILING_WINDOW_MS, readCostsFile, aggregateCosts } from './usage/index.js';
+export type { TrailingUsageOptions, WatchUsageOptions, ReadUsageOptions, UsageReading, UsageSource, CostsRead, ModelCostRow, IssueCostRow, CostsSummary } from './usage/index.js';
+export { fetchSubscriptionUsage, readClaudeAccessToken } from './usage/subscription.js';
+export type { SubscriptionUsage, SubscriptionUsageDeps } from './usage/subscription.js';
 
 // Types
 export * from './types/index.js';

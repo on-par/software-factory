@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { defaultTranscriptRoots } from './index.js';
 import { dirname, join } from 'node:path';
@@ -9,8 +9,10 @@ import {
   formatUsageReport,
   priceFor,
   readCostsFile,
+  readUsage,
   watchUsage,
 } from './index.js';
+import type { UsageReading } from './index.js';
 import type { CostEntry } from '../types/index.js';
 
 const now = new Date('2026-07-10T12:00:00Z');
@@ -262,10 +264,72 @@ describe('aggregateCosts', () => {
   });
 });
 
+describe('readUsage', () => {
+  it('prefers the subscription signal over the estimator', async () => {
+    const estimateSpend = vi.fn(() => 180);
+    const reading = await readUsage({
+      cap: 227,
+      estimator: true,
+      fetchSubscription: async () => ({ fiveHourUtilization: 42, fiveHourResetsAt: null }),
+      estimateSpend,
+    });
+
+    expect(reading).toEqual({ pct: 0.42, source: 'subscription', detail: '5h subscription window at 42%' });
+    expect(estimateSpend).not.toHaveBeenCalled();
+  });
+
+  it('includes the reset timestamp in the detail when present', async () => {
+    const reading = await readUsage({
+      cap: 227,
+      estimator: false,
+      fetchSubscription: async () => ({ fiveHourUtilization: 20, fiveHourResetsAt: '2026-07-15T18:00:00Z' }),
+    });
+
+    expect(reading?.detail).toBe('5h subscription window at 20%, resets 2026-07-15T18:00:00Z');
+  });
+
+  it('falls back to the estimator only when the subscription signal is unavailable and estimator is enabled', async () => {
+    const reading = await readUsage({
+      cap: 227,
+      estimator: true,
+      fetchSubscription: async () => null,
+      estimateSpend: () => 180,
+    });
+
+    expect(reading).toEqual({ pct: 180 / 227, source: 'estimate', detail: formatUsageReport(180, 227) });
+  });
+
+  it('returns null when both the subscription signal and the estimator are unavailable', async () => {
+    const reading = await readUsage({
+      cap: 227,
+      estimator: false,
+      fetchSubscription: async () => null,
+    });
+
+    expect(reading).toBeNull();
+  });
+
+  it('returns null when the subscription signal is unavailable and estimator is disabled, even if an estimateSpend fn is provided', async () => {
+    const estimateSpend = vi.fn(() => 180);
+    const reading = await readUsage({
+      cap: 227,
+      estimator: false,
+      fetchSubscription: async () => null,
+      estimateSpend,
+    });
+
+    expect(reading).toBeNull();
+    expect(estimateSpend).not.toHaveBeenCalled();
+  });
+});
+
 describe('watchUsage', () => {
   it('stops when the cap is reached mid-run', async () => {
     const events: Array<[string, string, string | number, string]> = [];
-    const spends = [100, 180];
+    const readings: Array<UsageReading> = [
+      { pct: 0.5, source: 'estimate', detail: 'trailing-5h usage ~= $100 = 44% of $227 cap' },
+      { pct: 0.79, source: 'estimate', detail: 'trailing-5h usage ~= $180 = 79% of $227 cap' },
+    ];
     const stopCalls: string[] = [];
     let sleepCalls = 0;
 
@@ -275,7 +339,7 @@ describe('watchUsage', () => {
       pollMs: 180_000,
       stopFile: '/repo/.factory/STOP',
       eventsFile: '/repo/.factory/events.ndjson',
-      estimateSpend: () => spends.shift()!,
+      readUsageFn: async () => readings.shift()!,
       emitEvent: (...args) => {
         events.push(args);
       },
@@ -308,7 +372,7 @@ describe('watchUsage', () => {
       stopFile: '/repo/.factory/STOP',
       eventsFile: '/repo/.factory/events.ndjson',
       signal: controller.signal,
-      estimateSpend: () => 10,
+      readUsageFn: async () => ({ pct: 0.04, source: 'estimate', detail: 'trailing-5h usage ~= $10 = 4% of $227 cap' }),
       emitEvent: (...args) => {
         events.push(args);
       },
@@ -333,16 +397,43 @@ describe('watchUsage', () => {
       pollMs: 180_000,
       stopFile: '/repo/.factory/STOP',
       eventsFile: '/repo/.factory/events.ndjson',
-      estimateSpend: () => 150,
+      readUsageFn: async () => ({ pct: 0.75, source: 'estimate', detail: 'trailing-5h usage ~= $150 = 75% of $200 cap' }),
       emitEvent: () => {},
       setStop: () => {},
       sleep: async () => {},
     })).resolves.toBe('stopped');
   });
 
+  it('emits usage-unavailable exactly once across consecutive null readings, then re-arms after recovery', async () => {
+    const controller = new AbortController();
+    const events: Array<[string, string, string | number, string]> = [];
+    const readings: Array<UsageReading | null> = [null, null, { pct: 0.1, source: 'subscription', detail: '5h subscription window at 10%' }, null];
+    let sleepCalls = 0;
+
+    await watchUsage({
+      cap: 227,
+      stopAt: 0.75,
+      pollMs: 180_000,
+      stopFile: '/repo/.factory/STOP',
+      eventsFile: '/repo/.factory/events.ndjson',
+      signal: controller.signal,
+      readUsageFn: async () => readings.shift() ?? null,
+      emitEvent: (...args) => {
+        events.push(args);
+      },
+      setStop: () => {},
+      sleep: async () => {
+        sleepCalls++;
+        if (sleepCalls === 4) controller.abort();
+      },
+    });
+
+    expect(events.map(([, type]) => type)).toEqual(['watchdog', 'usage-unavailable', 'usage-unavailable']);
+  });
+
   it('uses the real timer-based sleep between polls until aborted', async () => {
     const controller = new AbortController();
-    let estimateCalls = 0;
+    let readCalls = 0;
 
     // No injected sleep: this exercises the module's real setTimeout-based
     // sleep, both its Promise path (first poll) and its already-aborted
@@ -354,16 +445,16 @@ describe('watchUsage', () => {
       stopFile: '/repo/.factory/STOP',
       eventsFile: '/repo/.factory/events.ndjson',
       signal: controller.signal,
-      estimateSpend: () => {
-        estimateCalls++;
-        if (estimateCalls >= 2) controller.abort();
-        return 10;
+      readUsageFn: async () => {
+        readCalls++;
+        if (readCalls >= 2) controller.abort();
+        return { pct: 0.04, source: 'estimate', detail: 'trailing-5h usage ~= $10 = 4% of $227 cap' };
       },
       emitEvent: () => {},
       setStop: () => {},
     })).resolves.toBe('aborted');
 
-    expect(estimateCalls).toBe(2);
+    expect(readCalls).toBe(2);
   });
 
   it('formats the armed event', async () => {
@@ -377,7 +468,7 @@ describe('watchUsage', () => {
       stopFile: '/repo/.factory/STOP',
       eventsFile: '/repo/.factory/events.ndjson',
       signal: controller.signal,
-      estimateSpend: () => 10,
+      readUsageFn: async () => ({ pct: 0.04, source: 'estimate', detail: 'trailing-5h usage ~= $10 = 4% of $227 cap' }),
       emitEvent: (...args) => {
         events.push(args);
       },
