@@ -76,17 +76,25 @@ export interface ModelExecutor {
   runModel(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string>;
 }
 
+/** A dispatch-map entry in CliModelExecutor: runs one model through one harness.
+ *  This is the executor-internal seam (string in/out), not the CodingHarness
+ *  contract — injected fakes only need to implement run(). */
+export interface ExecutorHarness {
+  run(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string>;
+}
+
 export class CliModelExecutor implements ModelExecutor {
   private claudeHarness: ClaudeCliHarness;
   private codexHarness: CodexCliHarness;
   private ollamaHarness: OllamaHttpHarness;
   private opencodeHarness: OpenCodeHarness;
   private ollamaAgenticHarness: OllamaAgenticHarness;
-  private harnesses: Record<string, { run(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string> }>;
+  private harnesses: Record<string, ExecutorHarness>;
 
   constructor(
     private execFn: ExecFn = exec,
     fetchFn: FetchFn = globalThis.fetch as unknown as FetchFn,
+    harnessOverrides: Record<string, ExecutorHarness> = {},
   ) {
     this.claudeHarness = new ClaudeCliHarness(execFn);
     this.codexHarness = new CodexCliHarness(execFn);
@@ -100,6 +108,7 @@ export class CliModelExecutor implements ModelExecutor {
       'ollama-command-agent': { run: (m, p, c) => this.runOllamaCommandAgent(m, p, c.worktree, c.timeout, c.registry) },
       'opencode': { run: (m, p, c) => this.runOpenCode(m, p, c) },
       'ollama-agentic': { run: (m, p, c) => this.runOllamaAgentic(m, p, c) },
+      ...harnessOverrides,
     };
   }
 
