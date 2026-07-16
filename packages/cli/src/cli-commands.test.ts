@@ -124,7 +124,7 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
   };
 });
 
-import { main, shipIssue, CliExitError, cmdConstitution, cmdUsage, cmdLand } from './cli/index.js';
+import { main, shipIssue, CliExitError, cmdConstitution, cmdUsage, cmdLand, parseIssueArg } from './cli/index.js';
 import { sweepWorktrees, formatGcReport, withGitLock } from '@on-par/factory-core';
 
 // ---------------------------------------------------------------------------
@@ -1067,4 +1067,46 @@ describe('CliExitError (direct command invocation)', () => {
     });
     expect(exitSpy).not.toHaveBeenCalled();
   });
+});
+
+// ===========================================================================
+describe('parseIssueArg', () => {
+  it('returns the parsed number for a valid issue argument', () => {
+    expect(parseIssueArg('123')).toBe(123);
+  });
+
+  it('trims surrounding whitespace before parsing', () => {
+    expect(parseIssueArg(' 42 ')).toBe(42);
+  });
+
+  it.each(['abc', '', '12abc', '1.5', '-3', '0', '#123'])(
+    "throws CliExitError(2) naming the invalid argument for '%s'",
+    (raw) => {
+      expect(() => parseIssueArg(raw)).toThrowError(CliExitError);
+      try {
+        parseIssueArg(raw);
+        expect.fail('expected parseIssueArg to throw');
+      } catch (err) {
+        expect(err).toMatchObject({
+          name: 'CliExitError',
+          code: 2,
+          message: expect.stringContaining(`'${raw}'`),
+        });
+      }
+    },
+  );
+});
+
+// ===========================================================================
+describe('parseIssueArg wired into ship/land/local-small-dry-run', () => {
+  it.each(['ship', 'land', 'local-small-dry-run'])(
+    "'%s abc' fails before any GitHub or git work runs",
+    async (command) => {
+      const res = await runMain(command, 'abc');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain("invalid issue argument 'abc'");
+      expect(h.octokit.rest.issues.get).not.toHaveBeenCalled();
+      expect(h.octokit.rest.pulls.list).not.toHaveBeenCalled();
+    },
+  );
 });
