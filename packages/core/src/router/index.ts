@@ -17,6 +17,7 @@ import { OllamaAgenticHarness } from '../harness/ollama-agentic.js';
 import { classifyFailure } from '../harness/classify.js';
 import { describeFailureDetail } from './failure-detail.js';
 import { ModelExecutorError, extractFailoverReason } from './executor-error.js';
+import { shellEscape } from '../utils/index.js';
 
 export { ModelExecutorError, extractFailoverReason } from './executor-error.js';
 
@@ -728,9 +729,4 @@ function parseGitStatusPaths(status: string): string[] {
       return path.includes(' -> ') ? path.split(' -> ').pop()!.trim() : path;
     })
     .filter(Boolean);
-}
-
-/** Minimal shell escaping for safe CLI args */
-function shellEscape(s: string): string {
-  return `'${s.replace(/'/g, "'\\''")}'`;
 }
