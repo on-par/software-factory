@@ -151,6 +151,18 @@ export class CliExitError extends Error {
   }
 }
 
+/** Parse a CLI <issue> argument. Throws CliExitError(2) before any git/GitHub work runs. */
+export function parseIssueArg(raw: string): number {
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed) || Number(trimmed) < 1) {
+    throw new CliExitError(
+      `factory: invalid issue argument '${raw}' — expected a positive integer issue number`,
+      2,
+    );
+  }
+  return Number(trimmed);
+}
+
 // Product names become a filename in the constitutions dir; keep them to a safe,
 // listable charset. Leading '_' is reserved (listProducts hides `_*.md`).
 export function assertValidProduct(product: string): void {
@@ -1501,7 +1513,7 @@ export async function main() {
     .option('--no-auto-rework', 'Disable automatic rework loop')
     .option('--interactive', 'Pause before opening the PR and wait for approval from the TUI')
     .action(async (issueNum, opts) => {
-      await cmdShip(issueNum, opts);
+      await cmdShip(parseIssueArg(issueNum), opts);
     });
 
   program
@@ -1510,14 +1522,14 @@ export async function main() {
     .option('--spec <path>', 'Frozen spec path; defaults to .factory/plans/issue-<n>.md')
     .option('--output <path>', 'Artifact directory; defaults to .factory/local-small/issue-<n>')
     .action(async (issueNum, opts) => {
-      await cmdLocalSmallDryRun(parseInt(issueNum, 10), opts);
+      await cmdLocalSmallDryRun(parseIssueArg(issueNum), opts);
     });
 
   program
     .command('land <issue>')
     .description('Squash-merge a ready PR and clean up its worktree')
     .action(async (issueNum) => {
-      await cmdLand(parseInt(issueNum, 10));
+      await cmdLand(parseIssueArg(issueNum));
     });
 
   program.command('run').description('Process the whole queue (lanes in parallel)').action(cmdRun);
