@@ -419,6 +419,39 @@ describe('cli commands (via main dispatch)', () => {
       expect(out).toContain('b: 1 tasks, $2.0000');
       expect(out).toContain('Total: $3.5000');
     });
+
+    it('shows a per-entry breakdown filtered to one issue via --issue', async () => {
+      h.costs = [
+        { issue: '296', task: 'build_codex', model: 'qwen', cost: 0, failoverReason: 'rate_limit' },
+        { issue: '296', task: 'plan', model: 'opus', cost: 0.12 },
+        { issue: '7', task: 'plan', model: 'opus', cost: 0.05 },
+      ];
+      await runMain('cost', '--issue', '296');
+      const out = logged();
+      expect(out).toContain('build_codex');
+      expect(out).toContain('qwen');
+      expect(out).toContain('[failover: rate_limit]');
+      expect(out).not.toContain('0.05');
+    });
+
+    it('reports no cost data for an issue with no entries', async () => {
+      h.costs = [{ issue: '7', task: 'plan', model: 'opus', cost: 0.05 }];
+      await runMain('cost', '--issue', '296');
+      expect(logged()).toContain('no cost data for issue 296');
+    });
+
+    it('appends a failover count to the summary line only when failovers are present', async () => {
+      h.costs = [
+        { model: 'a', cost: 1 },
+        { model: 'a', cost: 0.5, failoverReason: 'rate_limit' },
+        { model: 'b', cost: 2 },
+      ];
+      await runMain('cost');
+      const out = logged();
+      expect(out).toContain('a: 2 tasks, $1.5000 (1 failover)');
+      expect(out).toContain('b: 1 tasks, $2.0000');
+      expect(out).not.toContain('b: 1 tasks, $2.0000 (');
+    });
   });
 
   describe('usage', () => {

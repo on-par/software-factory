@@ -1,7 +1,7 @@
 // src/harness/index.ts — CodingHarness contract: the common target every
 // provider adapter (Claude CLI, Codex CLI, Ollama, OpenCode, Pi) must satisfy.
 
-import type { TaskType } from '../types/index.js';
+import type { FailoverReason, TaskType } from '../types/index.js';
 import type { ModelRegistry } from '../models/index.js';
 
 /** Router's FailoverReason is a type alias of HarnessFailureReason (see
@@ -14,16 +14,7 @@ export function taskRequiresAgenticHarness(task: TaskType): boolean {
   return (AGENTIC_BUILD_TASKS as readonly string[]).includes(task);
 }
 
-export type HarnessFailureReason =
-  | 'rate_limit'
-  | 'usage_cap'
-  | 'timeout'
-  | 'error'
-  | 'empty_response'
-  | 'schema_invalid'   // model output failed deterministic schema validation
-  | 'apply_failed'     // patch could not be applied to the worktree
-  | 'verify_failed'    // deterministic verify/build command failed in the environment
-  | 'unknown';
+export type HarnessFailureReason = FailoverReason;
 
 /** Deterministic failures: another model cannot plausibly help, so the
  *  router must not fail over to the next tier. */

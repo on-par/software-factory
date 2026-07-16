@@ -58,7 +58,27 @@ export interface RouterResult {
   output: string;
   exitCode: number;
   cost: number;
+  /** Why the winning model was reached via failover (undefined if the first model succeeded). */
+  failoverReason?: FailoverReason;
   attempts: { model: string; reason: FailoverReason | null; ok: boolean; detail?: string }[];
+}
+
+/** Failed attempts that actually caused a model switch: the next attempt (or the
+ *  final success) ran on a DIFFERENT model. Same-model retries (rate_limit
+ *  cooldown, generic-error retry) are not failovers. */
+export function failoversFrom(
+  attempts: RouterResult['attempts'],
+): { model: string; reason: FailoverReason; detail?: string }[] {
+  const out: { model: string; reason: FailoverReason; detail?: string }[] = [];
+  for (let i = 0; i < attempts.length; i++) {
+    const a = attempts[i];
+    if (a.ok || a.reason === null) continue;
+    const next = attempts[i + 1];
+    if (next && next.model !== a.model) {
+      out.push({ model: a.model, reason: a.reason, ...(a.detail ? { detail: a.detail } : {}) });
+    }
+  }
+  return out;
 }
 
 export interface ModelExecutorContext {
@@ -528,11 +548,14 @@ export class ModelRouter {
         if (output.trim().length > 0) {
           // Success
           attempts.push({ model, reason: null, ok: true });
+          const failovers = failoversFrom(attempts);
+          const failoverReason = failovers.at(-1)?.reason;
           return {
             model,
             output: output,
             exitCode: 0,
             cost: 0, // cost tracked separately
+            ...(failoverReason ? { failoverReason } : {}),
             attempts,
           };
         }

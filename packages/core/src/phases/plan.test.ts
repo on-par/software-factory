@@ -424,4 +424,40 @@ describe('planPhase', () => {
       expect(result.route).toBe('codex');
     });
   });
+
+  it('emits a structured failover event when the router fails over to a different model', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-40.md');
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [
+          { fail: 'usage_cap' },
+          { output: '---\nroute: codex\n---\n# Spec\n' },
+        ],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+        },
+      },
+    };
+    const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
+
+    await planPhase({
+      issue: 40,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit,
+      log: (type, msg, extra) => { logCalls.push([type, msg, extra]); },
+    });
+
+    expect(logCalls).toContainEqual(['failover', expect.stringContaining('usage_cap'), { failoverReason: 'usage_cap' }]);
+  });
 });

@@ -126,6 +126,36 @@ describe('utils', () => {
     expect(logSpy).toHaveBeenCalledWith('[factory] plan #85: first');
   });
 
+  it('logs a structured failoverReason when extra is provided', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+
+    logEvent(eventsFile, 'failover', 5, 'msg', { failoverReason: 'rate_limit' });
+
+    const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter(Boolean);
+    expect(JSON.parse(lines[0])).toEqual({
+      ts: expect.any(String),
+      type: 'failover',
+      issue: '5',
+      msg: 'msg',
+      failoverReason: 'rate_limit',
+    });
+  });
+
+  it('omits failoverReason when extra is not provided (old shape preserved)', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+
+    logEvent(eventsFile, 'plan', 5, 'msg');
+
+    const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter(Boolean);
+    const parsed = JSON.parse(lines[0]);
+    expect(parsed).not.toHaveProperty('failoverReason');
+    expect(Object.keys(parsed).sort()).toEqual(['issue', 'msg', 'ts', 'type']);
+  });
+
   it('creates missing directories when logging events', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
@@ -206,6 +236,54 @@ describe('utils', () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-costs-'));
 
     expect(readCosts(join(tmpDir, 'does-not-exist.ndjson'))).toEqual([]);
+  });
+
+  it('round-trips a failoverReason on a cost entry', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-costs-'));
+    const costsFile = join(tmpDir, 'costs.ndjson');
+    const entry = {
+      issue: '85',
+      task: 'build_codex',
+      model: 'qwen-local',
+      inputTokens: 10,
+      outputTokens: 5,
+      cost: 0,
+      failoverReason: 'usage_cap' as const,
+    };
+
+    logCost(costsFile, entry);
+
+    const costs = readCosts(costsFile);
+    expect(costs).toHaveLength(1);
+    expect(costs[0]).toEqual({ ...entry, ts: expect.any(String) });
+  });
+
+  it('reads both a pre-change line (no failoverReason) and a new line from the same file', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-costs-'));
+    const costsFile = join(tmpDir, 'costs.ndjson');
+    const oldLine = {
+      ts: '2026-07-11T00:00:00.000Z',
+      issue: '85',
+      task: 'plan',
+      model: 'claude-opus-4-8',
+      inputTokens: 100,
+      outputTokens: 50,
+      cost: 0.01,
+    };
+    const newLine = {
+      ts: '2026-07-16T00:00:00.000Z',
+      issue: '86',
+      task: 'build_codex',
+      model: 'qwen-local',
+      inputTokens: 0,
+      outputTokens: 0,
+      cost: 0,
+      failoverReason: 'rate_limit',
+    };
+    writeFileSync(costsFile, `${JSON.stringify(oldLine)}\n${JSON.stringify(newLine)}\n`);
+
+    expect(() => readCosts(costsFile)).not.toThrow();
+    expect(readCosts(costsFile)).toEqual([oldLine, newLine]);
   });
 
   it('ensures directories exist idempotently', async () => {

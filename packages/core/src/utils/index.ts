@@ -4,7 +4,7 @@ import { appendFileSync, existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import { resolve } from 'node:path';
-import type { FactoryEvent, CostEntry } from '../types/index.js';
+import type { FactoryEvent, CostEntry, FailoverReason } from '../types/index.js';
 import { formatEventLine, colorEnabled } from './format.js';
 
 export { formatEventLine, colorEnabled } from './format.js';
@@ -13,12 +13,19 @@ const exec = promisify(execCb);
 
 // ---------- Event Logging ----------
 
-export function logEvent(eventsFile: string, type: string, issue: string | number, msg: string): void {
+export function logEvent(
+  eventsFile: string,
+  type: string,
+  issue: string | number,
+  msg: string,
+  extra?: { failoverReason?: FailoverReason },
+): void {
   const event: FactoryEvent = {
     ts: new Date().toISOString(),
     type,
     issue: String(issue),
     msg,
+    ...(extra?.failoverReason ? { failoverReason: extra.failoverReason } : {}),
   };
   const line = JSON.stringify(event) + '\n';
   try {

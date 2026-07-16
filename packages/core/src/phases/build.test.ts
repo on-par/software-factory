@@ -328,3 +328,36 @@ describe('buildPhase modelOverride', () => {
     expect(stub.calls[0].model).toBe('pinned-model');
   });
 });
+
+describe('buildPhase failover events', () => {
+  it('emits a structured failover event when the router fails over to a different model', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-90.md');
+    const stub = new StubModelExecutor({
+      scripts: {
+        build_claude: [
+          { fail: 'usage_cap' },
+          { output: 'claude output' },
+        ],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
+
+    const result = await buildPhase({
+      issue: 90,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/90-failover',
+      route: 'claude',
+      router,
+      constitution: null,
+      log: (type, msg, extra) => { logCalls.push([type, msg, extra]); },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(logCalls).toContainEqual(['failover', expect.stringContaining('usage_cap'), { failoverReason: 'usage_cap' }]);
+  });
+});
