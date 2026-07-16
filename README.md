@@ -34,7 +34,6 @@ software-factory/
 │   ├── cli/          @on-par/factory-cli      — CLI app (factory init, ship, run, triage, ...)
 │   ├── config/       @on-par/factory-config   — Shared JSON configs + product constitutions
 │   └── server/       @on-par/factory-server   — SaaS server (stub — Phase 2 of roadmap)
-├── legacy/           Original bash version (preserved for reference)
 ├── tsconfig.base.json
 └── package.json      (npm workspaces root)
 ```
