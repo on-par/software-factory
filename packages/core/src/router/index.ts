@@ -135,6 +135,13 @@ export class CliModelExecutor implements ModelExecutor {
     };
   }
 
+  /** Harness ids this executor can dispatch — the defaults plus any injected
+   *  overrides. Must stay in lockstep with HARNESS_CATALOG; a parity test in
+   *  cli-executor.test.ts fails on any drift in either direction. */
+  supportedHarnessIds(): string[] {
+    return Object.keys(this.harnesses);
+  }
+
   /** Run a single model via the harness declared (or inferred) for it in the registry. */
   async runModel(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string> {
     const def = ctx.registry.get(model);
