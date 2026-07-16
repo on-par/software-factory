@@ -4,6 +4,8 @@ import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from '
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { logEvent } from '../utils/index.js';
+import { fetchSubscriptionUsage } from './subscription.js';
+import type { SubscriptionUsage } from './subscription.js';
 import type { CostEntry } from '../types/index.js';
 
 export const TRAILING_WINDOW_MS = 5 * 60 * 60 * 1000;
@@ -100,6 +102,52 @@ export function formatUsageReport(spend: number, cap: number): string {
   return `trailing-5h usage ~= $${spend.toFixed(0)} = ${Math.round((spend / cap) * 100)}% of $${cap.toFixed(0)} cap`;
 }
 
+// ---------- Unified usage reading (real subscription signal, estimator fallback) ----------
+
+export type UsageSource = 'subscription' | 'estimate';
+
+export interface UsageReading {
+  pct: number;
+  source: UsageSource;
+  detail: string;
+}
+
+export interface ReadUsageOptions {
+  cap: number;
+  estimator: boolean;
+  fetchSubscription?: () => Promise<SubscriptionUsage | null>;
+  estimateSpend?: () => number;
+}
+
+/**
+ * Prefers the real Anthropic subscription rate-limit signal over the list-price
+ * transcript heuristic, which cannot be calibrated against the real 5h window.
+ * The estimator is opt-in only (FACTORY_USAGE_ESTIMATOR=1) and used solely when
+ * the subscription signal is unavailable (expired/missing token, offline, etc).
+ */
+export async function readUsage(opts: ReadUsageOptions): Promise<UsageReading | null> {
+  const {
+    cap,
+    estimator,
+    fetchSubscription = fetchSubscriptionUsage,
+    estimateSpend = () => estimateTrailingSpend(),
+  } = opts;
+
+  const subscription = await fetchSubscription();
+  if (subscription !== null) {
+    const detail = `5h subscription window at ${Math.round(subscription.fiveHourUtilization)}%`
+      + (subscription.fiveHourResetsAt ? `, resets ${subscription.fiveHourResetsAt}` : '');
+    return { pct: subscription.fiveHourUtilization / 100, source: 'subscription', detail };
+  }
+
+  if (estimator) {
+    const spend = estimateSpend();
+    return { pct: spend / cap, source: 'estimate', detail: formatUsageReport(spend, cap) };
+  }
+
+  return null;
+}
+
 export interface WatchUsageOptions {
   cap: number;
   stopAt: number;
@@ -107,7 +155,8 @@ export interface WatchUsageOptions {
   stopFile: string;
   eventsFile: string;
   signal?: AbortSignal;
-  estimateSpend?: () => number;
+  estimator?: boolean;
+  readUsageFn?: () => Promise<UsageReading | null>;
   emitEvent?: typeof logEvent;
   setStop?: (file: string) => void;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -135,7 +184,8 @@ export async function watchUsage(opts: WatchUsageOptions): Promise<'stopped' | '
     stopFile,
     eventsFile,
     signal,
-    estimateSpend = () => estimateTrailingSpend(),
+    estimator = false,
+    readUsageFn = () => readUsage({ cap, estimator }),
     emitEvent = logEvent,
     setStop = (file: string) => writeFileSync(file, ''),
     sleep: wait = sleep,
@@ -148,18 +198,33 @@ export async function watchUsage(opts: WatchUsageOptions): Promise<'stopped' | '
     `usage watchdog armed: stop at ${Math.round(stopAt * 100)}% of $${cap.toFixed(0)} cap, poll ${pollMs / 1000}s`,
   );
 
+  let unavailableWarned = false;
+
   while (!signal?.aborted) {
-    const spend = estimateSpend();
-    const pct = spend / cap;
-    if (pct >= stopAt) {
-      setStop(stopFile);
-      emitEvent(
-        eventsFile,
-        'usage-stop',
-        'usage',
-        `${formatUsageReport(spend, cap)} -- STOP set, lanes halt between issues`,
-      );
-      return 'stopped';
+    const reading = await readUsageFn();
+
+    if (reading === null) {
+      if (!unavailableWarned) {
+        unavailableWarned = true;
+        emitEvent(
+          eventsFile,
+          'usage-unavailable',
+          'usage',
+          'usage signal unavailable — watchdog idle (set FACTORY_USAGE_ESTIMATOR=1 to gate on the list-price heuristic)',
+        );
+      }
+    } else {
+      unavailableWarned = false;
+      if (reading.pct >= stopAt) {
+        setStop(stopFile);
+        emitEvent(
+          eventsFile,
+          'usage-stop',
+          'usage',
+          `${reading.detail} -- STOP set, lanes halt between issues`,
+        );
+        return 'stopped';
+      }
     }
 
     await wait(pollMs, signal);

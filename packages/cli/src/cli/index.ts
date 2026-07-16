@@ -21,6 +21,8 @@ import {
   estimateTrailingSpend,
   formatUsageReport,
   watchUsage,
+  readUsage,
+  fetchSubscriptionUsage,
   diagnoseModels,
   watchChecks,
   writeLocalRunReport,
@@ -30,7 +32,7 @@ import {
   sweepWorktrees,
   formatGcReport,
 } from '@on-par/factory-core';
-import type { ModelDiagnosis, QueueDiagnostic } from '@on-par/factory-core';
+import type { ModelDiagnosis, QueueDiagnostic, UsageReading } from '@on-par/factory-core';
 import { logEvent, branchFor, branchPrefixSlug, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock, withFileLock, shellEscape } from '@on-par/factory-core';
 import { runTui } from '@on-par/factory-tui';
 import { exec as execCb, execSync } from 'node:child_process';
@@ -339,6 +341,7 @@ export interface UsageKnobs {
   resumeAt: number;
   pollMs: number;
   watch: boolean;
+  estimator: boolean;
 }
 
 export function resolveUsageKnobs(env: NodeJS.ProcessEnv = process.env): UsageKnobs {
@@ -368,6 +371,7 @@ export function resolveUsageKnobs(env: NodeJS.ProcessEnv = process.env): UsageKn
     resumeAt,
     pollMs: pollSeconds * 1000,
     watch: env.FACTORY_USAGE_WATCH !== '0',
+    estimator: env.FACTORY_USAGE_ESTIMATOR === '1',
   };
 }
 
@@ -380,7 +384,17 @@ export async function cmdUsage() {
   }
 
   const spend = estimateTrailingSpend();
-  console.log(formatUsageReport(spend, knobs.cap));
+  const heuristicLine = formatUsageReport(spend, knobs.cap);
+
+  const subscription = await fetchSubscriptionUsage();
+  if (subscription !== null) {
+    const resets = subscription.fiveHourResetsAt ? `, resets ${subscription.fiveHourResetsAt}` : '';
+    console.log(`5h subscription usage: ${Math.round(subscription.fiveHourUtilization)}% of plan limit${resets}`);
+    console.log(`heuristic list-price estimate: ${heuristicLine}`);
+  } else {
+    console.log(chalk.yellow(`factory: real subscription usage unavailable — falling back to a rough list-price proxy, not the real subscription limit`));
+    console.log(heuristicLine);
+  }
 }
 
 function warnQueueDiagnostics(diagnostics: QueueDiagnostic[]): void {
@@ -919,6 +933,7 @@ async function cmdRun() {
         stopFile: paths.stop,
         eventsFile: paths.events,
         signal: controller.signal,
+        estimator: knobs.estimator,
       }).catch((err: any) => {
         // a watchdog crash must never take down the run
         console.error(chalk.red(`factory: usage watchdog crashed: ${err.message}`));
@@ -961,6 +976,7 @@ async function cmdSupervise(opts: { now?: boolean }) {
     resumeAt: knobs.resumeAt,
     pollMs: knobs.pollMs,
     watch: knobs.watch,
+    estimator: knobs.estimator,
     stopFile: paths.stop,
     eventsFile: paths.events,
     now: opts.now,
@@ -1282,11 +1298,12 @@ export interface SuperviseDeps {
   resumeAt: number;
   pollMs: number;
   watch?: boolean;
+  estimator?: boolean;
   stopFile: string;
   eventsFile: string;
   now?: boolean;
   runQueue: () => Promise<void>;
-  estimateSpend?: () => number;
+  readUsageFn?: () => Promise<UsageReading | null>;
   pathExists?: (path: string) => boolean;
   clearStop?: (path: string) => void;
   sleep?: (ms: number) => Promise<void>;
@@ -1294,17 +1311,20 @@ export interface SuperviseDeps {
   writeLine?: (line: string) => void;
 }
 
+const USAGE_UNAVAILABLE_LINE = '[factory] supervise: usage signal unavailable — proceeding without resume gate (set FACTORY_USAGE_ESTIMATOR=1 to gate on the heuristic)';
+
 export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
   const {
     cap,
     resumeAt,
     pollMs,
     watch = true,
+    estimator = false,
     stopFile,
     eventsFile,
     now,
     runQueue,
-    estimateSpend = estimateTrailingSpend,
+    readUsageFn = () => readUsage({ cap, estimator }),
     pathExists = existsSync,
     clearStop = (path: string) => rmSync(path, { force: true }),
     sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)),
@@ -1315,17 +1335,37 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
   let cycle = 0;
   while (true) {
     cycle++;
-    let pct = watch ? estimateSpend() / cap : 0;
+    let pct = 0;
+    let source = 'unavailable';
+
     if (!watch) {
       writeLine('[factory] supervise: usage watchdog disabled (FACTORY_USAGE_WATCH=0) — skipping resume gate');
-    } else if (cycle > 1 || !now) {
-      while (pct >= resumeAt) {
-        writeLine(`[factory] supervise: trailing usage ${Math.round(pct * 100)}% >= resume gate ${Math.round(resumeAt * 100)}% — waiting ${pollMs / 1000}s`);
-        await sleep(pollMs);
-        pct = estimateSpend() / cap;
+    } else {
+      let reading = await readUsageFn();
+      if (reading === null) {
+        writeLine(USAGE_UNAVAILABLE_LINE);
+      } else {
+        pct = reading.pct;
+        source = reading.source;
+        if (cycle > 1 || !now) {
+          while (pct >= resumeAt) {
+            writeLine(`[factory] supervise: trailing usage (${source}) ${Math.round(pct * 100)}% >= resume gate ${Math.round(resumeAt * 100)}% — waiting ${pollMs / 1000}s`);
+            await sleep(pollMs);
+            reading = await readUsageFn();
+            if (reading === null) {
+              writeLine(USAGE_UNAVAILABLE_LINE);
+              pct = 0;
+              source = 'unavailable';
+              break;
+            }
+            pct = reading.pct;
+            source = reading.source;
+          }
+        }
       }
     }
-    emitEvent(eventsFile, 'resumed', 'usage', `supervise cycle ${cycle}: trailing usage at ${Math.round(pct * 100)}% of cap — starting run`);
+
+    emitEvent(eventsFile, 'resumed', 'usage', `supervise cycle ${cycle}: trailing usage (${source}) at ${Math.round(pct * 100)}% of cap — starting run`);
     clearStop(stopFile);
     await runQueue();
     if (!pathExists(stopFile)) break;
@@ -1366,7 +1406,7 @@ export async function main() {
 
   program.command('cost').description('Show cost tracking summary').action(cmdCost);
 
-  program.command('usage').description('Report trailing-5h cost-weighted subscription usage vs cap').action(cmdUsage);
+  program.command('usage').description('Report real 5h subscription usage (with a list-price heuristic fallback)').action(cmdUsage);
 
   program.command('status').description('Show queue, events, PRs, models').action(cmdStatus);
 

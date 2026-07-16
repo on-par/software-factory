@@ -28,6 +28,7 @@ const h = vi.hoisted(() => {
     diagnoses: [] as any[],
     costs: [] as any[],
     trailingSpend: 10,
+    subscriptionUsage: null as { fiveHourUtilization: number; fiveHourResetsAt: string | null } | null,
     routerResolve: (_route: string): string | undefined => 'claude-model',
     factoryConfig: { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: false } } as any,
     gcReport: { removed: [], kept: 0, dryRun: false } as any,
@@ -100,6 +101,7 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
     estimateTrailingSpend: vi.fn(() => h.trailingSpend),
     formatUsageReport: vi.fn(() => 'USAGE REPORT'),
     watchUsage: vi.fn(async () => {}),
+    fetchSubscriptionUsage: vi.fn(async () => h.subscriptionUsage),
     diagnoseModels: vi.fn(() => h.diagnoses),
     watchChecks: vi.fn(async () => {}),
     writeLocalRunReport: vi.fn(async () => ({ path: '/tmp/report.md' })),
@@ -219,13 +221,14 @@ beforeEach(() => {
   h.diagnoses = [];
   h.costs = [];
   h.trailingSpend = 10;
+  h.subscriptionUsage = null;
   h.routerResolve = () => 'claude-model';
   h.factoryConfig = { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: false } };
   h.gcReport = { removed: [], kept: 0, dryRun: false };
   h.runTuiCalls = [];
 
   ['FACTORY_LOCAL_ONLY', 'FACTORY_MERGE', 'FACTORY_SKIP_CI', 'FACTORY_USAGE_CAP', 'FACTORY_STOP_AT',
-    'FACTORY_RESUME_AT', 'FACTORY_USAGE_POLL', 'FACTORY_USAGE_WATCH'].forEach(k => trackEnv(k));
+    'FACTORY_RESUME_AT', 'FACTORY_USAGE_POLL', 'FACTORY_USAGE_WATCH', 'FACTORY_USAGE_ESTIMATOR'].forEach(k => trackEnv(k));
   delete process.env.FACTORY_LOCAL_ONLY;
   delete process.env.FACTORY_MERGE;
   process.exitCode = undefined;
@@ -924,6 +927,22 @@ describe('CliExitError (direct command invocation)', () => {
       message: expect.stringContaining('FACTORY_USAGE_CAP'),
     });
     expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('cmdUsage() prints the real subscription usage plus the heuristic comparison when the subscription signal is available', async () => {
+    h.subscriptionUsage = { fiveHourUtilization: 42, fiveHourResetsAt: '2026-07-15T18:00:00Z' };
+    await cmdUsage();
+    const logged = logSpy.mock.calls.map((c: any[]) => c[0]).join('\n');
+    expect(logged).toContain('5h subscription usage: 42% of plan limit, resets 2026-07-15T18:00:00Z');
+    expect(logged).toContain('heuristic list-price estimate: USAGE REPORT');
+  });
+
+  it('cmdUsage() falls back to the heuristic with a warning when the subscription signal is unavailable', async () => {
+    h.subscriptionUsage = null;
+    await cmdUsage();
+    const logged = logSpy.mock.calls.map((c: any[]) => c[0]).join('\n');
+    expect(logged).toContain('real subscription usage unavailable');
+    expect(logged).toContain('USAGE REPORT');
   });
 
   it('cmdLand(5) rejects with code 1 when there is no open PR', async () => {

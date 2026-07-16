@@ -115,6 +115,7 @@ describe('cli', () => {
       resumeAt: 0.65,
       pollMs: 180_000,
       watch: true,
+      estimator: false,
     });
   });
 
@@ -125,13 +126,20 @@ describe('cli', () => {
       FACTORY_RESUME_AT: '0.4',
       FACTORY_USAGE_POLL: '60',
       FACTORY_USAGE_WATCH: '0',
+      FACTORY_USAGE_ESTIMATOR: '1',
     })).toEqual({
       cap: 100,
       stopAt: 0.5,
       resumeAt: 0.4,
       pollMs: 60_000,
       watch: false,
+      estimator: true,
     });
+  });
+
+  it('defaults estimator to false for any value other than "1"', () => {
+    expect(resolveUsageKnobs({ FACTORY_USAGE_ESTIMATOR: 'true' }).estimator).toBe(false);
+    expect(resolveUsageKnobs({}).estimator).toBe(false);
   });
 
   it('rejects invalid usage knob values with env var names', () => {
@@ -141,9 +149,13 @@ describe('cli', () => {
     expect(() => resolveUsageKnobs({ FACTORY_USAGE_POLL: 'abc' })).toThrow(/FACTORY_USAGE_POLL/);
   });
 
+  function reading(pct: number, source: 'subscription' | 'estimate' = 'subscription') {
+    return { pct, source, detail: `detail at ${Math.round(pct * 100)}%` };
+  }
+
   it('waits for the resume gate, runs the queue, and loops again while STOP is present', async () => {
     const calls: any[] = [];
-    const spends = [0.9, 0.9, 0.5, 0.5];
+    const readings = [reading(0.9), reading(0.9), reading(0.5), reading(0.5)];
     const pathExistsResults = [true, false];
     let runQueueCalls = 0;
 
@@ -154,7 +166,7 @@ describe('cli', () => {
       stopFile: '/repo/.factory/STOP',
       eventsFile: '/repo/.factory/events.ndjson',
       now: false,
-      estimateSpend: () => spends.shift()!,
+      readUsageFn: async () => readings.shift()!,
       pathExists: () => pathExistsResults.shift()!,
       clearStop: path => calls.push(['clearStop', path]),
       sleep: async () => { calls.push(['sleep']); },
@@ -179,6 +191,7 @@ describe('cli', () => {
     expect(events.filter(e => e[1] === 'resumed')).toHaveLength(2);
     expect(events.filter(e => e[1] === 'supervisor-done')).toHaveLength(1);
     expect(events[events.length - 1][1]).toBe('supervisor-done');
+    expect(events[0][3]).toContain('(subscription)');
   });
 
   it('exits after one cycle when the queue drains without STOP present', async () => {
@@ -191,7 +204,7 @@ describe('cli', () => {
       stopFile: '/repo/.factory/STOP',
       eventsFile: '/repo/.factory/events.ndjson',
       now: true,
-      estimateSpend: () => 0.1,
+      readUsageFn: async () => reading(0.1),
       pathExists: () => false,
       clearStop: () => {},
       sleep: async () => { calls.push(['sleep']); },
@@ -214,7 +227,7 @@ describe('cli', () => {
       stopFile: '/repo/.factory/STOP',
       eventsFile: '/repo/.factory/events.ndjson',
       now: true,
-      estimateSpend: () => 0.9,
+      readUsageFn: async () => reading(0.9),
       pathExists: () => false,
       clearStop: () => {},
       sleep: async () => { calls.push(['sleep']); },
@@ -227,7 +240,7 @@ describe('cli', () => {
 
   it('re-checks the resume gate after each wait', async () => {
     const calls: any[] = [];
-    const spends = [0.9, 0.9, 0.5];
+    const readings = [reading(0.9), reading(0.9), reading(0.5)];
 
     await superviseLoop({
       cap: 1,
@@ -236,7 +249,7 @@ describe('cli', () => {
       stopFile: '/repo/.factory/STOP',
       eventsFile: '/repo/.factory/events.ndjson',
       now: false,
-      estimateSpend: () => spends.shift()!,
+      readUsageFn: async () => readings.shift()!,
       pathExists: () => false,
       clearStop: () => {},
       sleep: async () => {},
@@ -248,7 +261,7 @@ describe('cli', () => {
     expect(calls).toHaveLength(2);
   });
 
-  it('skips the resume gate entirely when watch is false, even at a high estimated spend', async () => {
+  it('skips the resume gate entirely when watch is false, even with a readUsageFn that would gate', async () => {
     const calls: any[] = [];
 
     await superviseLoop({
@@ -259,7 +272,7 @@ describe('cli', () => {
       stopFile: '/repo/.factory/STOP',
       eventsFile: '/repo/.factory/events.ndjson',
       now: false,
-      estimateSpend: () => 1.6,
+      readUsageFn: async () => reading(1.6),
       pathExists: () => false,
       clearStop: () => {},
       sleep: async () => { calls.push(['sleep']); },
@@ -270,6 +283,32 @@ describe('cli', () => {
 
     expect(calls.filter(c => c[0] === 'sleep')).toHaveLength(0);
     expect(calls.filter(c => c[0] === 'runQueue')).toHaveLength(1);
+  });
+
+  it('proceeds immediately without gating when the usage reading is null, logging the unavailable warning', async () => {
+    const calls: any[] = [];
+
+    await superviseLoop({
+      cap: 1,
+      resumeAt: 0.65,
+      pollMs: 1000,
+      stopFile: '/repo/.factory/STOP',
+      eventsFile: '/repo/.factory/events.ndjson',
+      now: false,
+      readUsageFn: async () => null,
+      pathExists: () => false,
+      clearStop: () => {},
+      sleep: async () => { calls.push(['sleep']); },
+      emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) => { calls.push(['event', type, issue, msg]); },
+      writeLine: line => calls.push(['writeLine', line]),
+      runQueue: async () => { calls.push(['runQueue']); },
+    });
+
+    expect(calls.filter(c => c[0] === 'sleep')).toHaveLength(0);
+    expect(calls.filter(c => c[0] === 'runQueue')).toHaveLength(1);
+    expect(calls.some(c => c[0] === 'writeLine' && c[1].includes('usage signal unavailable'))).toBe(true);
+    const resumedEvent = calls.find(c => c[0] === 'event' && c[1] === 'resumed');
+    expect(resumedEvent[3]).toContain('(unavailable)');
   });
 
   it('detects a merge by head branch even when it is outside the recent-closed window', async () => {
