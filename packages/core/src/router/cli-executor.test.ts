@@ -330,6 +330,18 @@ describe('CliModelExecutor', () => {
     })).rejects.toThrow(/ollama-model.*ollama-http.*cannot edit files/s);
   });
 
+  it('throws a clear missing-harness error when no harness id resolves', async () => {
+    const { fn } = recordingExec();
+    const executor = new CliModelExecutor(fn);
+    class NoHarnessRegistry extends ModelRegistry {
+      override getHarnessId(): undefined { return undefined; }
+    }
+    const noHarnessRegistry = new NoHarnessRegistry(modelsConfig);
+    await expect(
+      executor.runModel('claude-model', 'p', { worktree, timeout, task: 'plan', registry: noHarnessRegistry, routesConfig }),
+    ).rejects.toThrow(/has no resolvable harness id/);
+  });
+
   it('runs a codex-enabled Ollama model through the local command loop for codex tasks', async () => {
     const execCalls: string[] = [];
     const execFn = async (cmd: string) => {

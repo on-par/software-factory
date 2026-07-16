@@ -117,7 +117,10 @@ export class CliModelExecutor implements ModelExecutor {
     const def = ctx.registry.get(model);
     if (!def) throw new Error(`Unknown model: ${model}`);
 
-    const harnessId = ctx.registry.getHarnessId(model)!;
+    const harnessId = ctx.registry.getHarnessId(model);
+    if (!harnessId) {
+      throw new Error(`Model '${model}' has no resolvable harness id — declare a 'harness' in models.json`);
+    }
     const entry = this.harnesses[harnessId];
     if (!entry) {
       throw new Error(`Model '${model}' declares unknown harness '${harnessId}' (known harnesses: ${Object.keys(this.harnesses).join(', ')})`);
