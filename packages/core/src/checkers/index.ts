@@ -165,12 +165,17 @@ export const linksChecker: CheckerFn = async (ctx) => {
   };
 };
 
-export const accessibilityChecker: CheckerFn = async (ctx) => {
-  const files = await findHtmlFiles(ctx.worktree, 20);
+const MAX_ACCESSIBILITY_FILES = 20;
 
-  if (files.length === 0) {
+export const accessibilityChecker: CheckerFn = async (ctx) => {
+  const allFiles = await findHtmlFiles(ctx.worktree);
+
+  if (allFiles.length === 0) {
     return { checker: 'accessibility', result: 'PASS', details: 'no HTML files — skipped' };
   }
+
+  const files = allFiles.slice(0, MAX_ACCESSIBILITY_FILES);
+  const unscanned = allFiles.length - files.length;
 
   let issues = 0;
   const details: string[] = [];
@@ -193,12 +198,16 @@ export const accessibilityChecker: CheckerFn = async (ctx) => {
     }
   }
 
+  const coverage = unscanned > 0
+    ? `scanned first ${files.length} of ${allFiles.length} HTML files (${unscanned} not scanned)`
+    : `scanned ${files.length} HTML files`;
+
   return {
     checker: 'accessibility',
     result: issues > 0 ? 'FAIL' : 'PASS',
     details: details.length > 0
-      ? details.join('; ') + ' (note: browser-based axe-core recommended for full WCAG)'
-      : 'basic checks passed (alt, placeholder links)',
+      ? `${coverage}; ${details.join('; ')} (note: browser-based axe-core recommended for full WCAG)`
+      : `basic checks passed (alt, placeholder links) — ${coverage}`,
   };
 };
 
@@ -379,12 +388,10 @@ async function getPackageJson(ctx: CheckerContext): Promise<PackageJson | null> 
 // literals from the checkers themselves as syntax-highlighted code, not markup).
 const GENERATED_DIRS = new Set(['node_modules', '.git', 'coverage', 'dist', 'build', '.next', 'out']);
 
-async function findHtmlFiles(worktree: string, limit = Infinity): Promise<string[]> {
+async function findHtmlFiles(worktree: string): Promise<string[]> {
   const results: string[] = [];
 
   async function walk(dir: string): Promise<void> {
-    if (results.length >= limit) return;
-
     let entries;
     try {
       entries = await readdir(dir, { withFileTypes: true });
@@ -393,8 +400,6 @@ async function findHtmlFiles(worktree: string, limit = Infinity): Promise<string
     }
 
     for (const entry of entries) {
-      if (results.length >= limit) return;
-
       if (entry.isDirectory()) {
         if (GENERATED_DIRS.has(entry.name)) continue;
         await walk(join(dir, entry.name));
@@ -405,6 +410,7 @@ async function findHtmlFiles(worktree: string, limit = Infinity): Promise<string
   }
 
   await walk(worktree);
+  results.sort();
   return results;
 }
 
