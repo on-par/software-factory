@@ -7,17 +7,21 @@ export interface HarnessCatalogEntry {
   agentic: boolean;
 }
 
-export const HARNESS_CATALOG: Record<string, HarnessCatalogEntry> = {
-  'claude-cli': { id: 'claude-cli', agentic: true },
-  'codex-cli': { id: 'codex-cli', agentic: true },
-  'ollama-http': { id: 'ollama-http', agentic: false },
-  'opencode': { id: 'opencode', agentic: true },
-  'ollama-agentic': { id: 'ollama-agentic', agentic: true },
+const CATALOG_ENTRIES: HarnessCatalogEntry[] = [
+  { id: 'claude-cli', agentic: true },
+  { id: 'codex-cli', agentic: true },
+  { id: 'ollama-http', agentic: false },
+  { id: 'opencode', agentic: true },
+  { id: 'ollama-agentic', agentic: true },
   // Local command-loop worker (runOllamaCommandAgent). Not yet extracted into a
   // contract-verified CodingHarness (out of scope here); dispatched via an
   // internal adapter in CliModelExecutor.
-  'ollama-command-agent': { id: 'ollama-command-agent', agentic: true },
-};
+  { id: 'ollama-command-agent', agentic: true },
+];
+
+export const HARNESS_CATALOG: Record<string, HarnessCatalogEntry> = Object.fromEntries(
+  CATALOG_ENTRIES.map(entry => [entry.id, entry]),
+);
 
 export const KNOWN_HARNESS_IDS = Object.keys(HARNESS_CATALOG);
 
