@@ -22,7 +22,7 @@ software-factory/
 │                 regression-issue.ts, local-small-scoreboard.ts,
 │                 coverage-ratchet.ts
 ├── evals/        Golden eval cases (evals/golden/*.md) + baseline.json + README
-├── docs/         Research notes (docs/research/*)
+├── docs/         Research notes (docs/research/*) + ADRs (docs/adr/ — see its README)
 ├── tsconfig.base.json / tsconfig.json      Composite project references
 └── package.json  npm workspaces root
 ```
