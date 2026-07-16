@@ -22,7 +22,6 @@ software-factory/
 │                 regression-issue.ts, local-small-scoreboard.ts
 ├── evals/        Golden eval cases (evals/golden/*.md) + baseline.json + README
 ├── docs/         Research notes (docs/research/*)
-├── legacy/       Original bash `factory` implementation, preserved for reference only
 ├── tsconfig.base.json / tsconfig.json      Composite project references
 └── package.json  npm workspaces root
 ```
