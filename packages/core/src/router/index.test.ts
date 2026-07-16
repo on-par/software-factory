@@ -117,6 +117,7 @@ describe('ModelRouter with StubModelExecutor', () => {
     expect(result.attempts).toEqual([{ model: 'stub-model', reason: null, ok: true }]);
     expect(result.failoverReason).toBeUndefined();
     expect(stub.calls).toHaveLength(1);
+    expect('cost' in result).toBe(false);
   });
 
   it('retries a simulated rate limit and then succeeds', async () => {
@@ -198,7 +199,6 @@ describe('ModelRouter with StubModelExecutor', () => {
   });
 
   it('awaits cooldown between rate-limit retries', async () => {
-    vi.useFakeTimers();
     const cooldownMs = 1000;
     const modelsWithCooldown: ModelsConfig = {
       ...twoModels,
@@ -214,7 +214,13 @@ describe('ModelRouter with StubModelExecutor', () => {
         ],
       },
     });
-    const router = new ModelRouter(modelsWithCooldown, routes, false, stub);
+    const sleepCalls: number[] = [];
+    let releaseSleep!: () => void;
+    const sleepFn = (ms: number) => {
+      sleepCalls.push(ms);
+      return new Promise<void>(resolve => { releaseSleep = resolve; });
+    };
+    const router = new ModelRouter(modelsWithCooldown, routes, false, stub, undefined, undefined, undefined, sleepFn);
     let settled = false;
 
     const promise = router.run('plan', 'do it').then(result => {
@@ -222,14 +228,20 @@ describe('ModelRouter with StubModelExecutor', () => {
       return result;
     });
 
-    // Flush every pending microtask without ever advancing the fake clock: if the
+    // Flush every pending microtask without resolving the injected sleep: if the
     // cooldown were not actually awaited, the retry loop would race through on
     // microtasks alone and this promise would already be settled.
     for (let i = 0; i < 100; i++) await Promise.resolve();
     expect(settled).toBe(false);
-    await vi.advanceTimersByTimeAsync(cooldownMs * 2);
+    expect(stub.calls).toHaveLength(1);
+
+    while (!settled) {
+      releaseSleep();
+      for (let i = 0; i < 100; i++) await Promise.resolve();
+    }
     const result = await promise;
 
+    expect(sleepCalls).toEqual([1000, 1000]);
     expect(result.output).toBe('RECOVERED');
     expect(result.model).toBe('model-b');
   });
