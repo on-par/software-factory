@@ -3,6 +3,7 @@
 import { execSync } from 'node:child_process';
 import type { ModelDefinition, ModelTier } from '../types/index.js';
 import type { ModelsConfig } from '../config/index.js';
+import { HARNESS_CATALOG, KNOWN_HARNESS_IDS } from '../harness/catalog.js';
 
 export class ModelRegistry {
   constructor(private config: ModelsConfig) {}
@@ -160,6 +161,8 @@ export interface DoctorProbes {
   commandAvailable?: (cmd: string) => boolean;
   envPresent?: (key: string) => boolean;
   ollamaModelPresent?: (model: string) => boolean;
+  /** Base URL the Ollama-family harnesses will actually hit (OLLAMA_BASE_URL). */
+  ollamaBaseUrl?: () => string | undefined;
 }
 
 export interface ModelDiagnosis {
@@ -171,7 +174,22 @@ export interface ModelDiagnosis {
   reason: string;
 }
 
-/** Probe which registered models are actually reachable on this machine (CLIs on PATH, env keys set). */
+/** True when OLLAMA_BASE_URL points at a non-loopback host, i.e. the local
+ *  `ollama` CLI and `ollama list` are the wrong probes. Unparseable URLs fall
+ *  back to local probing. */
+function isRemoteOllamaBaseUrl(baseUrl: string | undefined): boolean {
+  if (!baseUrl?.trim()) return false;
+  try {
+    const host = new URL(baseUrl).hostname;
+    return !['localhost', '127.0.0.1', '::1', '[::1]', '0.0.0.0'].includes(host);
+  } catch {
+    return false;
+  }
+}
+
+/** Probe which registered models are actually reachable on this machine (CLIs on PATH, env keys set).
+ *  Probe selection is keyed solely on the model's declared/inferred harness id
+ *  (registry.getHarnessId), with probe metadata sourced from the harness catalog. */
 export function diagnoseModels(
   registry: ModelRegistry,
   probes: DoctorProbes = {},
@@ -181,6 +199,7 @@ export function diagnoseModels(
   const commandAvailable = probes.commandAvailable ?? isCommandAvailable;
   const envPresent = probes.envPresent ?? ((key: string) => !!process.env[key]);
   const ollamaModelPresent = probes.ollamaModelPresent;
+  const ollamaBaseUrl = probes.ollamaBaseUrl ?? (() => process.env.OLLAMA_BASE_URL);
 
   return registry.list().map((m) => {
     const def = registry.get(m)!;
@@ -195,55 +214,46 @@ export function diagnoseModels(
       reason = 'experimental — set FACTORY_EXPERIMENTAL=1 to enable';
     } else if (localOnly && !registry.isLocalOnlyModel(m)) {
       reason = 'excluded by FACTORY_LOCAL_ONLY=1';
-    } else if (registry.getHarnessId(m) === 'opencode') {
-      if (!commandAvailable('opencode')) {
-        reason = 'opencode CLI not found on PATH';
-      } else if (def.envKey && !envPresent(def.envKey)) {
-        reason = `${def.envKey} not set`;
-      } else {
-        reachable = true;
-        reason = 'ok (opencode CLI)';
-      }
-    } else if (def.codex === true && def.provider === 'ollama') {
-      if (!commandAvailable('ollama')) {
-        reason = 'ollama not found on PATH';
-      } else if (ollamaModelPresent && !ollamaModelPresent(registry.getProviderModel(m))) {
-        reason = `${registry.getProviderModel(m)} not found in ollama list`;
-      } else {
-        reachable = true;
-        reason = 'ok (ollama native command agent)';
-      }
-    } else if (def.codex === true) {
-      // Deliberately does not check def.envKey here, unlike ModelRegistry.isAvailable():
-      // the codex CLI carries its own (OAuth-based) auth, so a missing API key doesn't
-      // make the model unreachable for doctor purposes.
-      if (!commandAvailable('codex')) {
-        reason = 'codex CLI not found on PATH';
-      } else {
-        reachable = true;
-        reason = 'ok (codex CLI)';
-      }
-    } else if (provider === 'ollama') {
-      if (!commandAvailable('ollama')) {
-        reason = 'ollama not found on PATH';
-      } else if (ollamaModelPresent && !ollamaModelPresent(registry.getProviderModel(m))) {
-        reason = `${registry.getProviderModel(m)} not found in ollama list`;
-      } else {
-        reachable = true;
-        reason = 'ok (ollama native)';
-      }
-    } else if (!commandAvailable('claude')) {
-      reason = 'claude CLI not found on PATH';
-    } else if (provider === 'anthropic') {
-      reachable = true;
-      reason = envPresent(def.envKey ?? 'ANTHROPIC_API_KEY')
-        ? 'ok (claude CLI)'
-        : `ok (claude CLI auth; ${def.envKey ?? 'ANTHROPIC_API_KEY'} not set)`;
-    } else if (def.envKey && !envPresent(def.envKey)) {
-      reason = `${def.envKey} not set`;
     } else {
-      reachable = true;
-      reason = 'ok (claude CLI)';
+      const harnessId = registry.getHarnessId(m);
+      const entry = harnessId ? HARNESS_CATALOG[harnessId] : undefined;
+      if (!entry) {
+        reason = `unknown harness '${harnessId ?? 'none'}' — declare a 'harness' from: ${KNOWN_HARNESS_IDS.join(', ')}`;
+      } else if (entry.probe.kind === 'command') {
+        const probe = entry.probe;
+        if (!commandAvailable(probe.command)) {
+          reason = `${probe.command} CLI not found on PATH`;
+        } else if (probe.auth === 'cli') {
+          // CLI carries its own (OAuth-based) auth — a missing API key doesn't make
+          // the model unreachable for doctor purposes (preserves the old codex note).
+          reachable = true;
+          reason = `ok (${probe.okLabel})`;
+        } else if (probe.selfAuth?.providers.includes(def.provider)) {
+          const key = def.envKey ?? probe.selfAuth.defaultEnvKey;
+          reachable = true;
+          reason = envPresent(key) ? `ok (${probe.okLabel})` : `ok (${probe.okLabel} auth; ${key} not set)`;
+        } else if (def.envKey && !envPresent(def.envKey)) {
+          reason = `${def.envKey} not set`;
+        } else {
+          reachable = true;
+          reason = `ok (${probe.okLabel})`;
+        }
+      } else {
+        // kind === 'ollama' — HTTP harnesses talk to OLLAMA_BASE_URL; only probe the
+        // local CLI when the daemon is (implicitly) local.
+        const baseUrl = ollamaBaseUrl();
+        if (isRemoteOllamaBaseUrl(baseUrl)) {
+          reachable = true;
+          reason = `ok (${entry.probe.okLabel} via ${baseUrl!.trim()})`;
+        } else if (!commandAvailable('ollama')) {
+          reason = 'ollama not found on PATH';
+        } else if (ollamaModelPresent && !ollamaModelPresent(registry.getProviderModel(m))) {
+          reason = `${registry.getProviderModel(m)} not found in ollama list`;
+        } else {
+          reachable = true;
+          reason = `ok (${entry.probe.okLabel})`;
+        }
+      }
     }
 
     return { model: m, provider, tiers, reachable, experimental, reason };
