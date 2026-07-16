@@ -215,6 +215,84 @@ describe('OllamaAgenticHarness apply failures', () => {
     expect(trace.malformedReason).toBe('apply_failed');
     expect(await readFile(targetPath, 'utf-8')).toBe('original content\n');
   });
+
+  it('rejects an ambiguous find that matches more than one location, leaving the file unchanged', async () => {
+    const worktree = makeWorktree();
+    const targetPath = join(worktree, 'src', 'file.txt');
+    await mkdir(dirname(targetPath), { recursive: true });
+    const original = 'const x = 1;\nconst x = 1;\n';
+    await writeFile(targetPath, original);
+
+    const ambiguousProposal = JSON.stringify({
+      summary: 'change it',
+      changes: [{ file: 'src/file.txt', find: 'const x = 1;', replace: 'const x = 2;' }],
+      verifyCommand: 'true',
+    });
+    const fetchFn = stubFetch([ambiguousProposal, ambiguousProposal]);
+    const harness = new OllamaAgenticHarness(fetchFn, okExec);
+
+    const err: any = await harness.run(makeContractRequest({ model: 'local-agentic-model', registry, worktree })).catch(e => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('apply_failed');
+    const tracePath = err.message.match(/trace written to (.+)$/)[1];
+    const trace = JSON.parse(await readFile(tracePath, 'utf-8'));
+    expect(trace.malformedReason).toBe('apply_failed');
+    expect(trace.detail).toContain('ambiguous');
+    expect(trace.detail).toMatch(/longer find|unique/);
+    expect(await readFile(targetPath, 'utf-8')).toBe(original);
+  });
+
+  it('carries the ambiguity explanation into the repair prompt, then succeeds with a unique find', async () => {
+    const worktree = makeWorktree();
+    const targetPath = join(worktree, 'src', 'file.txt');
+    await mkdir(dirname(targetPath), { recursive: true });
+    await writeFile(targetPath, 'const x = 1;\nconst x = 1;\n');
+
+    const ambiguousProposal = JSON.stringify({
+      summary: 'change it',
+      changes: [{ file: 'src/file.txt', find: 'const x = 1;', replace: 'const x = 2;' }],
+      verifyCommand: 'true',
+    });
+    const fixedProposal = JSON.stringify({
+      summary: 'change it, uniquely this time',
+      changes: [{ file: 'src/file.txt', find: 'const x = 1;\nconst x = 1;', replace: 'const x = 2;\nconst x = 2;' }],
+      verifyCommand: 'true',
+    });
+    const fetchFn = stubFetch([ambiguousProposal, fixedProposal]);
+    const harness = new OllamaAgenticHarness(fetchFn, okExec);
+
+    const result = await harness.run(makeContractRequest({ model: 'local-agentic-model', registry, worktree }));
+
+    expect(result.output).toContain('src/file.txt');
+    expect(fetchFn.calls).toHaveLength(2);
+    const secondPrompt = JSON.parse(fetchFn.calls[1].init.body).messages[0].content;
+    expect(secondPrompt).toContain('apply_failed');
+    expect(secondPrompt).toContain('ambiguous');
+    expect(await readFile(targetPath, 'utf-8')).toBe('const x = 2;\nconst x = 2;\n');
+  });
+
+  it('treats overlapping matches as ambiguous', async () => {
+    const worktree = makeWorktree();
+    const targetPath = join(worktree, 'src', 'file.txt');
+    await mkdir(dirname(targetPath), { recursive: true });
+    const original = 'aaa\n';
+    await writeFile(targetPath, original);
+
+    const overlapProposal = JSON.stringify({
+      summary: 'change it',
+      changes: [{ file: 'src/file.txt', find: 'aa', replace: 'bb' }],
+      verifyCommand: 'true',
+    });
+    const fetchFn = stubFetch([overlapProposal, overlapProposal]);
+    const harness = new OllamaAgenticHarness(fetchFn, okExec);
+
+    const err: any = await harness.run(makeContractRequest({ model: 'local-agentic-model', registry, worktree })).catch(e => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('apply_failed');
+    expect(await readFile(targetPath, 'utf-8')).toBe(original);
+  });
 });
 
 describe('validateVerifyCommand', () => {

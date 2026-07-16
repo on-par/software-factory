@@ -237,12 +237,14 @@ export class OllamaAgenticHarness implements CodingHarness {
 
 const VERIFY_COMMAND_PROMPT_HINT = `"verifyCommand" must be one cheap check that proves the change worked and must start with one of: ${ALLOWED_VERIFY_COMMAND_PREFIXES.join(', ')}. No shell metacharacters, pipes, redirection, or absolute paths.`;
 
+const FIND_REPLACE_PROMPT_HINT = `Each entry in "changes" is applied as an exact-match find/replace inside "file" (a path relative to the repo root); "find" must match exactly one location in the file, so include enough surrounding context to make it unique.
+Use "find": "" to create a new file whose full content is "replace".`;
+
 function buildProposalPrompt(taskPrompt: string): string {
   return `${taskPrompt}
 
 Respond with exactly one JSON object matching the schema, no markdown, no prose.
-Each entry in "changes" is applied as an exact-match find/replace inside "file" (a path relative to the repo root).
-Use "find": "" to create a new file whose full content is "replace".
+${FIND_REPLACE_PROMPT_HINT}
 ${VERIFY_COMMAND_PROMPT_HINT}`;
 }
 
@@ -253,8 +255,7 @@ Your previous response was malformed: ${malformedReason} (${detail}).
 Raw response summary: ${summarizeRawResponse(raw)}
 
 Respond with exactly one JSON object matching the schema, no markdown, no prose.
-Each entry in "changes" is applied as an exact-match find/replace inside "file" (a path relative to the repo root).
-Use "find": "" to create a new file whose full content is "replace".
+${FIND_REPLACE_PROMPT_HINT}
 ${VERIFY_COMMAND_PROMPT_HINT}`;
 }
 
@@ -373,6 +374,13 @@ async function prepareChanges(
       }
       if (!content.includes(change.find)) {
         return { ok: false, detail: `${change.file}: find text was not present` };
+      }
+      const secondMatch = content.indexOf(change.find, content.indexOf(change.find) + 1);
+      if (secondMatch !== -1) {
+        return {
+          ok: false,
+          detail: `${change.file}: find text is ambiguous (matches more than one location); provide a longer find string that matches exactly once`,
+        };
       }
       prepared.push({ change, path, content, create: false });
     }
