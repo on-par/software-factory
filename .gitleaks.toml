@@ -1,0 +1,6 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Fake fixture token used by router redaction tests (packages/core/src/router/index.test.ts); also present in git history"
+regexes = ['''sk-live-abc123''']
