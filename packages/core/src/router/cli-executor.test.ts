@@ -894,3 +894,42 @@ describe('CliModelExecutor harness injection', () => {
     })).rejects.toThrow(/cannot edit files/);
   });
 });
+
+describe('CliModelExecutor shared empty-response translation', () => {
+  const emptyOllamaFetch = async () => ({
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    text: async () => '',
+    json: async () => ({ message: { content: '' } }),
+  });
+
+  it.each([
+    ['claude-cli', 'claude-model', 'plan'],
+    ['codex-cli', 'codex-model', 'build_codex'],
+    ['opencode', 'opencode-declared', 'plan'],
+  ] as const)('translates an empty %s harness response to empty output', async (_harness, model, task) => {
+    const executor = new CliModelExecutor(recordingExec().fn);
+    const output = await executor.runModel(model, 'prompt', {
+      worktree, timeout, task, registry, routesConfig,
+    });
+    expect(output).toBe('');
+  });
+
+  it('translates an empty ollama-http harness response to empty output', async () => {
+    const executor = new CliModelExecutor(recordingExec().fn, emptyOllamaFetch as any);
+    const output = await executor.runModel('ollama-model', 'prompt', {
+      worktree, timeout, task: 'plan', registry, routesConfig,
+    });
+    expect(output).toBe('');
+  });
+
+  it('translates an empty ollama-agentic harness response to empty output', async () => {
+    tmpWorktree = await mkdtemp(join(tmpdir(), 'factory-empty-agentic-'));
+    const executor = new CliModelExecutor(recordingExec().fn, emptyOllamaFetch as any);
+    const output = await executor.runModel('ollama-agentic-declared', 'prompt', {
+      worktree: tmpWorktree, timeout, task: 'build_codex', registry, routesConfig,
+    });
+    expect(output).toBe('');
+  });
+});
