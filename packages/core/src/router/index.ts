@@ -1,7 +1,5 @@
 // src/router/index.ts — Model router with cost-tier routing and automatic failover
 
-import { exec as execCb } from 'node:child_process';
-import { promisify } from 'node:util';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ModelRegistry } from '../models/index.js';
@@ -18,16 +16,13 @@ import { classifyFailure } from '../harness/classify.js';
 import { describeFailureDetail } from './failure-detail.js';
 import { ModelExecutorError, extractFailoverReason } from './executor-error.js';
 import { shellEscape } from '../utils/index.js';
+import { defaultExecFn } from '../utils/exec.js';
+import type { ExecFn } from '../utils/exec.js';
 import { captureWorktreeState, resetWorktreeState } from './worktree-state.js';
 
 export { ModelExecutorError, extractFailoverReason } from './executor-error.js';
 
-const exec = promisify(execCb);
-
-export type ExecFn = (
-  cmd: string,
-  opts: { cwd?: string; timeout?: number; maxBuffer?: number },
-) => Promise<{ stdout: string; stderr: string }>;
+export type { ExecFn } from '../utils/exec.js';
 
 export type SleepFn = (ms: number) => Promise<void>;
 
@@ -85,7 +80,7 @@ export function failoversFrom(
 
 export interface ModelExecutorContext {
   worktree: string;
-  timeout: number;
+  timeoutSeconds: number;
   task: TaskType;
   registry: ModelRegistry;
   routesConfig: RoutesConfig;
@@ -120,7 +115,7 @@ export class CliModelExecutor implements ModelExecutor {
   private harnesses: Record<string, ExecutorHarness>;
 
   constructor(
-    private execFn: ExecFn = exec,
+    private execFn: ExecFn = defaultExecFn,
     fetchFn: FetchFn = globalThis.fetch as unknown as FetchFn,
     harnessOverrides: Record<string, ExecutorHarness> = {},
   ) {
@@ -133,7 +128,7 @@ export class CliModelExecutor implements ModelExecutor {
       'claude-cli': { run: (m, p, c) => this.runViaHarness(this.claudeHarness, m, p, c) },
       'codex-cli': { run: (m, p, c) => this.runViaHarness(this.codexHarness, m, p, c) },
       'ollama-http': { run: (m, p, c) => this.runViaHarness(this.ollamaHarness, m, p, c) },
-      'ollama-command-agent': { run: (m, p, c) => this.runOllamaCommandAgent(m, p, c.worktree, c.timeout, c.registry) },
+      'ollama-command-agent': { run: (m, p, c) => this.runOllamaCommandAgent(m, p, c.worktree, c.timeoutSeconds, c.registry) },
       'opencode': { run: (m, p, c) => this.runViaHarness(this.opencodeHarness, m, p, c) },
       'ollama-agentic': { run: (m, p, c) => this.runViaHarness(this.ollamaAgenticHarness, m, p, c) },
       ...harnessOverrides,
@@ -165,13 +160,13 @@ export class CliModelExecutor implements ModelExecutor {
     harness: CodingHarness,
     model: string,
     prompt: string,
-    ctx: Pick<ModelExecutorContext, 'worktree' | 'timeout' | 'task' | 'registry'>,
+    ctx: Pick<ModelExecutorContext, 'worktree' | 'timeoutSeconds' | 'task' | 'registry'>,
   ): Promise<string> {
     const { output } = await harness.run({
       model,
       prompt,
       worktree: ctx.worktree,
-      timeoutSeconds: ctx.timeout,
+      timeoutSeconds: ctx.timeoutSeconds,
       task: ctx.task,
       registry: ctx.registry,
     });
@@ -179,9 +174,9 @@ export class CliModelExecutor implements ModelExecutor {
   }
 
   /** Run a small local command loop for Ollama worker models. */
-  private async runOllamaCommandAgent(model: string, prompt: string, worktree: string, timeout: number, registry: ModelRegistry): Promise<string> {
+  private async runOllamaCommandAgent(model: string, prompt: string, worktree: string, timeoutSeconds: number, registry: ModelRegistry): Promise<string> {
     const transcript: string[] = [];
-    const initialStatus = await this.execFn('git status --short', { cwd: worktree, timeout: 30_000, maxBuffer: 1024 * 1024 })
+    const initialStatus = await this.execFn('git status --short', { cwd: worktree, timeoutMs: 30_000, maxBuffer: 1024 * 1024 })
       .then(result => result.stdout)
       .catch(() => '');
     const initiallyDirty = new Set(parseGitStatusPaths(initialStatus));
@@ -195,7 +190,7 @@ First inspect, then edit, then run one cheap check, then git add/commit.
     for (let step = 0; step < 8; step++) {
       let output: string;
       try {
-        output = await this.callOllamaForCommandAgent(model, conversation, timeout, registry, worktree, 'build_codex');
+        output = await this.callOllamaForCommandAgent(model, conversation, timeoutSeconds, registry, worktree, 'build_codex');
       } catch (err) {
         const reason = extractFailoverReason(err) ?? 'error';
         const message = err instanceof Error ? err.message : String(err);
@@ -221,7 +216,7 @@ First inspect, then edit, then run one cheap check, then git add/commit.
         conversation,
         output,
         worktree,
-        timeout,
+        timeoutSeconds,
         registry,
         step,
       });
@@ -250,7 +245,7 @@ First inspect, then edit, then run one cheap check, then git add/commit.
         try {
           const { stdout, stderr } = await this.execFn(command, {
             cwd: worktree,
-            timeout: Math.max(30_000, Math.floor(timeout * 1000 / 4)),
+            timeoutMs: Math.max(30_000, Math.floor(timeoutSeconds * 1000 / 4)),
             maxBuffer: 10 * 1024 * 1024,
           });
           commandOutputs.push(`$ ${command}\nEXIT_CODE: 0\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`);
@@ -268,12 +263,12 @@ ${commandOutputs.join('\n\n').slice(-5000)}
 Return next JSON command action. If committed, return {"commands":[],"done":true,"final":"done"}.`;
     }
 
-    const status = await this.execFn('git status --short', { cwd: worktree, timeout: 30_000, maxBuffer: 1024 * 1024 });
+    const status = await this.execFn('git status --short', { cwd: worktree, timeoutMs: 30_000, maxBuffer: 1024 * 1024 });
     const changedPaths = parseGitStatusPaths(status.stdout).filter(path => !initiallyDirty.has(path));
     if (changedPaths.length > 0) {
       await this.execFn(`git add -- ${changedPaths.map(shellEscape).join(' ')} && git commit -m "feat: implement factory issue"`, {
         cwd: worktree,
-        timeout: 120_000,
+        timeoutMs: 120_000,
         maxBuffer: 10 * 1024 * 1024,
       });
       transcript.push(`AUTO-COMMIT: committed ${changedPaths.length} changed path(s).`);
@@ -288,7 +283,7 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
     conversation: string;
     output: string;
     worktree: string;
-    timeout: number;
+    timeoutSeconds: number;
     registry: ModelRegistry;
     step: number;
   }): Promise<ReturnType<typeof parseLocalAgentAction> & {
@@ -316,7 +311,7 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
 
     let repairedOutput: string;
     try {
-      repairedOutput = await this.callOllamaForCommandAgent(opts.model, repairPrompt, opts.timeout, opts.registry, opts.worktree, 'build_codex');
+      repairedOutput = await this.callOllamaForCommandAgent(opts.model, repairPrompt, opts.timeoutSeconds, opts.registry, opts.worktree, 'build_codex');
     } catch (err) {
       const reason = extractFailoverReason(err) ?? 'error';
       const message = err instanceof Error ? err.message : String(err);
@@ -390,8 +385,8 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
     return { tracePath };
   }
 
-  private async callOllama(model: string, prompt: string, timeout: number, registry: ModelRegistry, worktree: string, task: TaskType): Promise<string> {
-    return this.runViaHarness(this.ollamaHarness, model, prompt, { worktree, timeout, task, registry });
+  private async callOllama(model: string, prompt: string, timeoutSeconds: number, registry: ModelRegistry, worktree: string, task: TaskType): Promise<string> {
+    return this.runViaHarness(this.ollamaHarness, model, prompt, { worktree, timeoutSeconds, task, registry });
   }
 
   /** Command-agent-only seam: the local command loop owns empty-output handling
@@ -399,9 +394,9 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
    *  empty_response from a clean exit is returned as '' here instead of
    *  propagating. Every other path must let HarnessError('empty_response')
    *  propagate — ModelExecutor.runModel never resolves empty output. */
-  private async callOllamaForCommandAgent(model: string, prompt: string, timeout: number, registry: ModelRegistry, worktree: string, task: TaskType): Promise<string> {
+  private async callOllamaForCommandAgent(model: string, prompt: string, timeoutSeconds: number, registry: ModelRegistry, worktree: string, task: TaskType): Promise<string> {
     try {
-      return await this.callOllama(model, prompt, timeout, registry, worktree, task);
+      return await this.callOllama(model, prompt, timeoutSeconds, registry, worktree, task);
     } catch (err) {
       if (err instanceof HarnessError && err.reason === 'empty_response' && err.details.exitCode === 0) {
         return '';
@@ -421,7 +416,7 @@ export class ModelRouter {
     private executor: ModelExecutor = new CliModelExecutor(),
     private allowExperimental = process.env.FACTORY_EXPERIMENTAL === '1',
     private localOnly = process.env.FACTORY_LOCAL_ONLY === '1',
-    private gitExecFn: ExecFn = exec,
+    private gitExecFn: ExecFn = defaultExecFn,
     private sleepFn: SleepFn = sleep,
   ) {
     this.registry = new ModelRegistry(modelsConfig);
@@ -468,12 +463,12 @@ export class ModelRouter {
     prompt: string,
     options: {
       worktree?: string;
-      timeout?: number;
+      timeoutSeconds?: number;
       modelOverride?: string;
       onLog?: (msg: string) => void;
     } = {},
   ): Promise<RouterResult> {
-    const { worktree = process.cwd(), timeout = 1800, modelOverride, onLog = () => {} } = options;
+    const { worktree = process.cwd(), timeoutSeconds = 1800, modelOverride, onLog = () => {} } = options;
 
     const models = modelOverride ? [modelOverride] : this.resolveAll(task);
     if (models.length === 0) {
@@ -497,7 +492,7 @@ export class ModelRouter {
         let output: string;
         try {
           output = await this.executor.runModel(model, prompt, {
-            worktree, timeout, task, registry: this.registry, routesConfig: this.routesConfig,
+            worktree, timeoutSeconds, task, registry: this.registry, routesConfig: this.routesConfig,
           });
         } catch (err) {
           const reason = extractFailoverReason(err)

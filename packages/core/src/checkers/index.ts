@@ -258,7 +258,7 @@ Steps:
   try {
     const result = await router.run('check_custom', prompt, {
       worktree: ctx.worktree,
-      timeout: timeoutSeconds ?? 1800,
+      timeoutSeconds: timeoutSeconds ?? 1800,
     });
     // Extract the verdict: first balanced JSON object that carries a "checker" key
     const candidates = extractJsonObjects(result.output);

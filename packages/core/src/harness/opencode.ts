@@ -1,26 +1,19 @@
 // src/harness/opencode.ts — CodingHarness adapter for the OpenCode CLI.
 
-import { exec as execCb } from 'node:child_process';
-import { promisify } from 'node:util';
 import { CodingHarness, HarnessError, HarnessRequest, HarnessResult } from './index.js';
 import { classifyFailure } from './classify.js';
 import { shellEscape } from '../utils/index.js';
+import { defaultExecFn } from '../utils/exec.js';
+import type { ExecFn } from '../utils/exec.js';
 
-const exec = promisify(execCb);
-
-/** Structurally identical to the router's ExecFn — defined here so the harness
- *  does not import from ../router (avoids an import cycle). */
-export type OpenCodeExecFn = (
-  cmd: string,
-  opts: { cwd?: string; timeout?: number; maxBuffer?: number },
-) => Promise<{ stdout: string; stderr: string }>;
+export type OpenCodeExecFn = ExecFn;
 
 /** Runs a model via the OpenCode CLI: opencode run [--model <provider/model>] <prompt>, executed with cwd = worktree. */
 export class OpenCodeHarness implements CodingHarness {
   readonly id = 'opencode';
   readonly agentic = true;
 
-  constructor(private execFn: OpenCodeExecFn = exec) {}
+  constructor(private execFn: OpenCodeExecFn = defaultExecFn) {}
 
   async run(request: HarnessRequest): Promise<HarnessResult> {
     const { model, prompt, worktree, timeoutSeconds, registry } = request;
@@ -32,7 +25,7 @@ export class OpenCodeHarness implements CodingHarness {
     try {
       ({ stdout } = await this.execFn(cmd, {
         cwd: worktree,
-        timeout: timeoutSeconds * 1000,
+        timeoutMs: timeoutSeconds * 1000,
         maxBuffer: 10 * 1024 * 1024,
       }));
     } catch (err: any) {

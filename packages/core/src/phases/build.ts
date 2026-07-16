@@ -112,7 +112,7 @@ with "ESCALATE:" followed by the question, then STOP.`;
 
   const result = await router.run(taskType, prompt, {
     worktree,
-    timeout: timeoutSeconds ?? 7200,
+    timeoutSeconds: timeoutSeconds ?? 7200,
     modelOverride,
     onLog: (msg) => log('router', msg),
   });

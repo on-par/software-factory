@@ -60,7 +60,7 @@ describe('CliModelExecutor Codex cleanup', () => {
 
     await executor.runModel('codex-model', 'prompt', {
       worktree: tmpdir(),
-      timeout: 5,
+      timeoutSeconds: 5,
       task: 'build_codex',
       registry,
       routesConfig,

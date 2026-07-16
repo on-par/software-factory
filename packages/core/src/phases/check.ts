@@ -105,7 +105,7 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
 
   const reworkResult = await router.run('build_claude', prompt, {
     worktree,
-    timeout: timeoutSeconds ?? 7200,
+    timeoutSeconds: timeoutSeconds ?? 7200,
     onLog: (msg) => log('router', msg),
   }).catch(() => null);
 
@@ -155,7 +155,7 @@ Details: ${checkerDetails}
 
   const result = await router.run('dispute_resolution', prompt, {
     worktree,
-    timeout: timeoutSeconds ?? 1800,
+    timeoutSeconds: timeoutSeconds ?? 1800,
   }).catch(() => null);
 
   if (!result) {
