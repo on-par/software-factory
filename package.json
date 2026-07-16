@@ -14,6 +14,7 @@
     "typecheck": "tsc -b && npm run typecheck --workspaces",
     "test": "vitest run --coverage",
     "test:coverage": "vitest run --coverage",
+    "coverage-ratchet": "tsx scripts/coverage-ratchet.ts",
     "eval": "tsx scripts/eval.ts",
     "local-small-scoreboard": "tsx scripts/local-small-scoreboard.ts",
     "eval-history": "tsx scripts/eval-history.ts",

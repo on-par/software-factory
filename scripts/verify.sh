@@ -8,4 +8,5 @@ npm run build
 npm run typecheck
 npm run lint
 npm run test
+npm run coverage-ratchet
 npm run eval -- --stub

@@ -19,7 +19,8 @@ software-factory/
 │   └── server/   @on-par/factory-server    — Phase-2 SaaS server STUB. createServer()
 │                                             throws; marked private, never published.
 ├── scripts/      Root tooling: verify.sh, eval.ts, eval-history.ts,
-│                 regression-issue.ts, local-small-scoreboard.ts
+│                 regression-issue.ts, local-small-scoreboard.ts,
+│                 coverage-ratchet.ts
 ├── evals/        Golden eval cases (evals/golden/*.md) + baseline.json + README
 ├── docs/         Research notes (docs/research/*)
 ├── tsconfig.base.json / tsconfig.json      Composite project references
@@ -51,11 +52,12 @@ Run from the repo root unless noted. Node.js **≥ 20** required.
 | Typecheck | `npm run typecheck` |
 | Lint | `npm run lint` |
 | Test with coverage | `npm run test` (`vitest run --coverage`) |
+| Coverage ratchet drift check | `npm run coverage-ratchet` |
 | Eval (deterministic stub) | `npm run eval -- --stub` |
 | Eval (full harness) | `npm run eval` |
 | Full verify (all of the above) | `bash scripts/verify.sh` |
 
-`scripts/verify.sh` runs, in order: `npm ci` → `npm run build` → `npm run typecheck` → `npm run lint` → `npm run test` → `npm run eval -- --stub`. This mirrors the CI workflow in `.github/workflows/ci.yml`.
+`scripts/verify.sh` runs, in order: `npm ci` → `npm run build` → `npm run typecheck` → `npm run lint` → `npm run test` → `npm run coverage-ratchet` → `npm run eval -- --stub`. This mirrors the CI workflow in `.github/workflows/ci.yml`.
 
 ## Conventions
 
@@ -70,7 +72,7 @@ Run from the repo root unless noted. Node.js **≥ 20** required.
 
 - Test runner is **Vitest**. Tests are `*.test.ts` files **colocated** next to the source they cover in each package's `src/` tree (e.g. `packages/core/src/router/index.test.ts`).
 - `npm run test` at the root runs all workspace tests in one pass and aggregates coverage (config in `vitest.config.ts`, which globs `packages/*/src/**/*.test.ts`).
-- **Coverage gate:** v8 thresholds enforced by Vitest — lines 94, functions 91, branches 85, statements 94 globally. Each package (`config`, `core`, `cli`, `dashboard`) also has its own ratcheting thresholds in `vitest.config.ts`, so a per-package regression fails the build even if the aggregate stays above the global floor. They ratchet upward, so add tests with your code rather than lowering the floor. `packages/server/**` and `packages/core/src/types/**` are excluded from coverage.
+- **Coverage gate:** v8 thresholds enforced by Vitest — lines 94, functions 91, branches 85, statements 94 globally. Each package (`config`, `core`, `cli`, `dashboard`) also has its own ratcheting thresholds in `vitest.config.ts`, so a per-package regression fails the build even if the aggregate stays above the global floor. The ratchet is self-enforcing: `npm run coverage-ratchet` (run by `verify.sh` and CI after tests) fails when measured coverage exceeds any threshold by more than 2 points, telling you to raise the thresholds in the same PR. Never lower them. `packages/server/**` and `packages/core/src/types/**` are excluded from coverage.
 - **TDD is expected:** write or update the colocated `*.test.ts` alongside any source change. Integration tests for the pipeline live under `packages/core/src/phases/`.
 - **Evals:** golden cases live in `evals/golden/*.md` with `evals/baseline.json`. The deterministic stub subset (`npm run eval -- --stub`) runs in CI on every PR; the full LLM-judge mode runs locally/nightly.
 - `packages/dashboard` renders via Vite; its component tests are `*.test.tsx` files colocated in `src/` (e.g. `packages/dashboard/src/App.test.tsx`).

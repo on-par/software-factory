@@ -37,6 +37,9 @@ jobs:
       - name: Test & coverage
         run: npm run test
 
+      - name: Coverage ratchet
+        run: npm run coverage-ratchet
+
       - name: Coverage summary
         if: ${{ !cancelled() }}
         run: |

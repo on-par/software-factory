@@ -83,6 +83,10 @@ export type { GcReport, GcCandidate, GcReason, WorktreeListEntry, SweepDeps } fr
 export { runCommand, describeCommandFailure } from './utils/command-runner.js';
 export type { RunCommandOptions, CommandResult } from './utils/command-runner.js';
 
+// Coverage ratchet
+export { parseCoverageSummary, parseCoverageSummaryScopes, checkRatchetDrift, checkScopedRatchetDrift, renderRatchetReport, DEFAULT_RATCHET_SLACK } from './utils/coverage-ratchet.js';
+export type { CoverageMetrics, RatchetDrift, RatchetCheckResult } from './utils/coverage-ratchet.js';
+
 // Usage
 export { estimateTrailingSpend, formatUsageReport, watchUsage, readUsage, priceFor, defaultTranscriptRoots, TRAILING_WINDOW_MS, readCostsFile, aggregateCosts } from './usage/index.js';
 export type { TrailingUsageOptions, WatchUsageOptions, ReadUsageOptions, UsageReading, UsageSource, CostsRead, ModelCostRow, IssueCostRow, CostsSummary } from './usage/index.js';
