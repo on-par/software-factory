@@ -37,8 +37,10 @@ export async function runEval(opts: RunEvalOpts): Promise<EvalSummary> {
     try {
       const result = await opts.router.run('plan', prompt, { worktree, timeoutSeconds });
       let latencyMs = now() - started;
-      const scored = scoreSpec(result.output, result.output, c.expectedRoute, { requireConstitution: Boolean(c.constitution) });
-      const deterministicPass = scored.checks.every(check => check.pass);
+      const scored = scoreSpec(result.output, result.output, c.expectedRoute, {
+        requireConstitution: Boolean(c.constitution),
+      });
+      const deterministicPass = scored.checks.every((check) => check.pass);
       const shouldJudge = opts.judge && !c.deterministicOnly && c.rubric.length > 0 && scored.route !== 'escalate';
       let rubricScore: number | undefined;
       let judgeMalformed = false;
@@ -50,21 +52,25 @@ export async function runEval(opts: RunEvalOpts): Promise<EvalSummary> {
 
       if (shouldJudge) {
         const judgeStarted = now();
-        const judged = await runJudgeSamples(opts.router, {
-          specContent: result.output,
-          issueTitle: c.title,
-          issueBody: c.body,
-          rubric: c.rubric,
-          worktree,
-          timeoutSeconds,
-        }, judgeK);
+        const judged = await runJudgeSamples(
+          opts.router,
+          {
+            specContent: result.output,
+            issueTitle: c.title,
+            issueBody: c.body,
+            rubric: c.rubric,
+            worktree,
+            timeoutSeconds,
+          },
+          judgeK,
+        );
         latencyMs += now() - judgeStarted;
         judgeSamples = judged.samples;
         judgeValidCount = judged.validCount;
         judgeMalformedCount = judged.malformedCount;
         if (judged.validCount === 0) {
           judgeMalformed = true;
-          const malformedSample = judged.samples.find(sample => sample.malformed);
+          const malformedSample = judged.samples.find((sample) => sample.malformed);
           malformedRaw = malformedSample?.rawOutput ?? malformedSample?.reasons;
         } else {
           rubricScore = judged.score;
@@ -111,10 +117,10 @@ export async function runEval(opts: RunEvalOpts): Promise<EvalSummary> {
   }
 
   const total = results.length;
-  const passed = results.filter(result => result.pass).length;
+  const passed = results.filter((result) => result.pass).length;
   const failed = total - passed;
-  const routeAsserted = results.filter(result => isRouteAsserted(result.expectedRoute)).length;
-  const routeCorrect = results.filter(result => isRouteAsserted(result.expectedRoute) && result.routeCorrect).length;
+  const routeAsserted = results.filter((result) => isRouteAsserted(result.expectedRoute)).length;
+  const routeCorrect = results.filter((result) => isRouteAsserted(result.expectedRoute) && result.routeCorrect).length;
   return {
     results,
     total,
@@ -131,6 +137,7 @@ export async function runEval(opts: RunEvalOpts): Promise<EvalSummary> {
 function estimateCost(router: ModelRouter, model: string, input: string, output: string): number {
   const def = router.registryRef.get(model);
   if (!def) return 0;
-  return (input.length / 4 / 1_000_000) * def.costPerMtokInput +
-    (output.length / 4 / 1_000_000) * def.costPerMtokOutput;
+  return (
+    (input.length / 4 / 1_000_000) * def.costPerMtokInput + (output.length / 4 / 1_000_000) * def.costPerMtokOutput
+  );
 }

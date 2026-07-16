@@ -33,7 +33,14 @@ const h = vi.hoisted(() => {
     routerResolve: (_route: string): string | undefined => 'claude-model',
     factoryConfig: { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: false } } as any,
     gcReport: { removed: [], kept: 0, dryRun: false } as any,
-    runTuiCalls: [] as Array<{ eventsFile: string; repo?: string; stopFile?: string; queueFile?: string; queueProposedFile?: string; costsFile?: string }>,
+    runTuiCalls: [] as Array<{
+      eventsFile: string;
+      repo?: string;
+      stopFile?: string;
+      queueFile?: string;
+      queueProposedFile?: string;
+      costsFile?: string;
+    }>,
   };
 });
 
@@ -59,9 +66,18 @@ vi.mock('@octokit/rest', () => ({
 }));
 
 vi.mock('@on-par/factory-tui', () => ({
-  runTui: vi.fn(async (opts: { eventsFile: string; repo?: string; stopFile?: string; queueFile?: string; queueProposedFile?: string; costsFile?: string }) => {
-    h.runTuiCalls.push(opts);
-  }),
+  runTui: vi.fn(
+    async (opts: {
+      eventsFile: string;
+      repo?: string;
+      stopFile?: string;
+      queueFile?: string;
+      queueProposedFile?: string;
+      costsFile?: string;
+    }) => {
+      h.runTuiCalls.push(opts);
+    },
+  ),
 }));
 
 vi.mock('@on-par/factory-core', async (importOriginal) => {
@@ -120,7 +136,10 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
     ensureDir: vi.fn((p: string) => mkdirSync(p, { recursive: true })),
     // Worktree GC.
     sweepWorktrees: vi.fn(async () => h.gcReport),
-    formatGcReport: vi.fn((report: any) => `GC_REPORT:${report.dryRun ? 'dry' : 'real'}:removed=${report.removed.length}:kept=${report.kept}`),
+    formatGcReport: vi.fn(
+      (report: any) =>
+        `GC_REPORT:${report.dryRun ? 'dry' : 'real'}:removed=${report.removed.length}:kept=${report.kept}`,
+    ),
   };
 });
 
@@ -193,9 +212,7 @@ async function runMain(...args: string[]) {
   }
   const code = process.exitCode as number | undefined;
   process.exitCode = undefined;
-  return code === undefined
-    ? { exited: false as const, code: undefined }
-    : { exited: true as const, code };
+  return code === undefined ? { exited: false as const, code: undefined } : { exited: true as const, code };
 }
 
 beforeEach(() => {
@@ -230,9 +247,19 @@ beforeEach(() => {
   h.runTuiCalls = [];
   h.claudeAvailable = undefined;
 
-  ['FACTORY_LOCAL_ONLY', 'FACTORY_MERGE', 'FACTORY_SKIP_CI', 'FACTORY_USAGE_CAP', 'FACTORY_STOP_AT',
-    'FACTORY_RESUME_AT', 'FACTORY_USAGE_POLL', 'FACTORY_USAGE_WATCH', 'FACTORY_USAGE_ESTIMATOR',
-    'GITHUB_TOKEN', 'GH_TOKEN'].forEach(k => trackEnv(k));
+  [
+    'FACTORY_LOCAL_ONLY',
+    'FACTORY_MERGE',
+    'FACTORY_SKIP_CI',
+    'FACTORY_USAGE_CAP',
+    'FACTORY_STOP_AT',
+    'FACTORY_RESUME_AT',
+    'FACTORY_USAGE_POLL',
+    'FACTORY_USAGE_WATCH',
+    'FACTORY_USAGE_ESTIMATOR',
+    'GITHUB_TOKEN',
+    'GH_TOKEN',
+  ].forEach((k) => trackEnv(k));
   delete process.env.FACTORY_LOCAL_ONLY;
   delete process.env.FACTORY_MERGE;
   delete process.env.GITHUB_TOKEN;
@@ -321,8 +348,10 @@ describe('cli commands (via main dispatch)', () => {
 
   describe('constitution', () => {
     it('scaffolds a new constitution with --init', async () => {
-      writeFileSync(join(h.constitutionsDir, '_template.md'),
-        '```markdown\n---\nproduct: <product-name>\n---\n# <Product> Constitution\n```\n');
+      writeFileSync(
+        join(h.constitutionsDir, '_template.md'),
+        '```markdown\n---\nproduct: <product-name>\n---\n# <Product> Constitution\n```\n',
+      );
       const res = await runMain('constitution', '--init', 'gizmo');
       expect(res.exited).toBe(false);
       expect(existsSync(join(h.constitutionsDir, 'gizmo.md'))).toBe(true);
@@ -708,10 +737,7 @@ describe('cli commands (via main dispatch)', () => {
     it('--ttl-days overrides the config default', async () => {
       const res = await runMain('worktree', 'gc', '--ttl-days', '3');
       expect(res.exited).toBe(false);
-      expect(sweepWorktrees).toHaveBeenCalledWith(
-        expect.objectContaining({ ttlDays: 3 }),
-        expect.anything(),
-      );
+      expect(sweepWorktrees).toHaveBeenCalledWith(expect.objectContaining({ ttlDays: 3 }), expect.anything());
     });
 
     it('exits 2 on a non-numeric --ttl-days', async () => {
@@ -793,7 +819,13 @@ describe('cli commands (via main dispatch)', () => {
       h.checkResult = {
         passed: true,
         summary: {
-          results: [{ checker: 'tests', result: 'SKIP', details: 'no verification command was run — no scripts/verify.sh and no package.json test script found' }],
+          results: [
+            {
+              checker: 'tests',
+              result: 'SKIP',
+              details: 'no verification command was run — no scripts/verify.sh and no package.json test script found',
+            },
+          ],
           failures: 0,
         },
         reworkRounds: 0,
@@ -814,7 +846,7 @@ describe('cli commands (via main dispatch)', () => {
       const events = readFileSync(paths().events, 'utf-8')
         .trim()
         .split('\n')
-        .map(line => JSON.parse(line));
+        .map((line) => JSON.parse(line));
       const failEvents = events.filter((e: any) => e.type === 'fail' && e.issue === '5');
       expect(failEvents).toHaveLength(1);
       expect(errored()).toContain('Ship failed');
@@ -833,7 +865,7 @@ describe('cli commands (via main dispatch)', () => {
       const events = readFileSync(paths().events, 'utf-8')
         .trim()
         .split('\n')
-        .map(line => JSON.parse(line));
+        .map((line) => JSON.parse(line));
       const failEvents = events.filter((e: any) => e.type === 'fail' && e.issue === '5');
       expect(failEvents).toHaveLength(1);
       expect(errored()).toContain('Ship failed');
@@ -911,7 +943,7 @@ describe('shipIssue (direct)', () => {
     const events = readFileSync(paths().events, 'utf-8')
       .trim()
       .split('\n')
-      .map(line => JSON.parse(line));
+      .map((line) => JSON.parse(line));
     expect(events[0]).toMatchObject({ type: 'issue-title', issue: '5', msg: 'Fix the bug' });
   });
 
@@ -948,7 +980,7 @@ describe('shipIssue (direct)', () => {
     const events = readFileSync(paths().events, 'utf-8')
       .trim()
       .split('\n')
-      .map(line => JSON.parse(line));
+      .map((line) => JSON.parse(line));
     const escalateEvents = events.filter((e: any) => e.type === 'escalate' && e.issue === '5');
     expect(escalateEvents).toHaveLength(1);
   });
@@ -965,7 +997,10 @@ describe('shipIssue (direct)', () => {
 
   it('throws a LaneParkError with reason escalate and the denial message when ship is denied', async () => {
     h.shipResult = { ok: false, denied: true, deniedReason: 'not today' };
-    await expect(shipIssue(5, {}, ctx())).rejects.toMatchObject({ reason: 'escalate', message: 'ship denied: not today' });
+    await expect(shipIssue(5, {}, ctx())).rejects.toMatchObject({
+      reason: 'escalate',
+      message: 'ship denied: not today',
+    });
   });
 
   it('does not construct an approval gate when interactive is not requested', async () => {

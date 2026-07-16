@@ -38,9 +38,7 @@ export function PhaseRow({ state, now }: PhaseRowProps): JSX.Element {
             {status === 'done' && <Text color="green">✔ {phase}</Text>}
             {status === 'active' && (
               <Text>
-                <Text color="yellow">{spinnerFrame(now)}</Text>
-                {' '}
-                {phase}
+                <Text color="yellow">{spinnerFrame(now)}</Text> {phase}
                 {' ('}
                 {state.model ?? '?'}
                 {' · '}

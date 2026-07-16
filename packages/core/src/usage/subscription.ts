@@ -26,7 +26,9 @@ export interface SubscriptionUsageDeps {
 const DEFAULT_CREDENTIALS_PATH = resolve(homedir(), '.claude/.credentials.json');
 
 async function defaultReadKeychain(): Promise<string> {
-  const result = await execa('security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w'], { timeout: 10_000 });
+  const result = await execa('security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w'], {
+    timeout: 10_000,
+  });
   return result.stdout;
 }
 
@@ -34,12 +36,14 @@ function defaultReadCredentialsFile(): string {
   return readFileSync(DEFAULT_CREDENTIALS_PATH, 'utf-8');
 }
 
-const UsageResponseSchema = z.object({
-  five_hour: z.object({
-    utilization: z.number(),
-    resets_at: z.string().nullish(),
-  }),
-}).passthrough();
+const UsageResponseSchema = z
+  .object({
+    five_hour: z.object({
+      utilization: z.number(),
+      resets_at: z.string().nullish(),
+    }),
+  })
+  .passthrough();
 
 export async function readClaudeAccessToken(deps: SubscriptionUsageDeps = {}): Promise<string | null> {
   const {

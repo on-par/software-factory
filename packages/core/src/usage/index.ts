@@ -28,15 +28,12 @@ export interface TrailingUsageOptions {
 }
 
 export function priceFor(model: string): { input: number; output: number } {
-  const price = PRICES.find(candidate => model.includes(candidate.match)) ?? DEFAULT_PRICE;
+  const price = PRICES.find((candidate) => model.includes(candidate.match)) ?? DEFAULT_PRICE;
   return { input: price.input, output: price.output };
 }
 
 export function defaultTranscriptRoots(): string[] {
-  return [
-    resolve(homedir(), '.claude/projects'),
-    resolve(homedir(), '.config/claude/projects'),
-  ];
+  return [resolve(homedir(), '.claude/projects'), resolve(homedir(), '.config/claude/projects')];
 }
 
 export function estimateTrailingSpend(opts: TrailingUsageOptions = {}): number {
@@ -82,12 +79,12 @@ export function estimateTrailingSpend(opts: TrailingUsageOptions = {}): number {
           if (Number.isNaN(timestamp) || timestamp < startTs || timestamp > endTs) continue;
 
           const { input, output } = priceFor(model);
-          total += (
-            (usage.input_tokens ?? 0) * input
-            + (usage.output_tokens ?? 0) * output
-            + (usage.cache_read_input_tokens ?? 0) * input * 0.1
-            + (usage.cache_creation_input_tokens ?? 0) * input * 1.25
-          ) / 1e6;
+          total +=
+            ((usage.input_tokens ?? 0) * input +
+              (usage.output_tokens ?? 0) * output +
+              (usage.cache_read_input_tokens ?? 0) * input * 0.1 +
+              (usage.cache_creation_input_tokens ?? 0) * input * 1.25) /
+            1e6;
         }
       } catch {
         continue;
@@ -135,8 +132,9 @@ export async function readUsage(opts: ReadUsageOptions): Promise<UsageReading | 
 
   const subscription = await fetchSubscription();
   if (subscription !== null) {
-    const detail = `5h subscription window at ${Math.round(subscription.fiveHourUtilization)}%`
-      + (subscription.fiveHourResetsAt ? `, resets ${subscription.fiveHourResetsAt}` : '');
+    const detail =
+      `5h subscription window at ${Math.round(subscription.fiveHourUtilization)}%` +
+      (subscription.fiveHourResetsAt ? `, resets ${subscription.fiveHourResetsAt}` : '');
     return { pct: subscription.fiveHourUtilization / 100, source: 'subscription', detail };
   }
 
@@ -165,7 +163,7 @@ export interface WatchUsageOptions {
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return Promise.resolve();
 
-  return new Promise(resolve => {
+  return new Promise((resolve) => {
     const done = () => {
       clearTimeout(timer);
       signal?.removeEventListener('abort', done);
@@ -217,12 +215,7 @@ export async function watchUsage(opts: WatchUsageOptions): Promise<'stopped' | '
       unavailableWarned = false;
       if (reading.pct >= stopAt) {
         setStop(stopFile);
-        emitEvent(
-          eventsFile,
-          'usage-stop',
-          'usage',
-          `${reading.detail} -- STOP set, lanes halt between issues`,
-        );
+        emitEvent(eventsFile, 'usage-stop', 'usage', `${reading.detail} -- STOP set, lanes halt between issues`);
         return 'stopped';
       }
     }
@@ -244,12 +237,12 @@ function isValidCostEntry(value: unknown): value is CostEntry {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
   return (
-    typeof v.issue === 'string'
-    && typeof v.model === 'string'
-    && Number.isFinite(v.cost)
-    && (v.inputTokens === undefined || Number.isFinite(v.inputTokens))
-    && (v.outputTokens === undefined || Number.isFinite(v.outputTokens))
-    && (v.failoverReason === undefined || typeof v.failoverReason === 'string')
+    typeof v.issue === 'string' &&
+    typeof v.model === 'string' &&
+    Number.isFinite(v.cost) &&
+    (v.inputTokens === undefined || Number.isFinite(v.inputTokens)) &&
+    (v.outputTokens === undefined || Number.isFinite(v.outputTokens)) &&
+    (v.failoverReason === undefined || typeof v.failoverReason === 'string')
   );
 }
 
@@ -336,7 +329,7 @@ export function aggregateCosts(entries: CostEntry[]): CostsSummary {
     total.cost += cost;
   }
 
-  const perIssue = issueOrder.map(issue => ({
+  const perIssue = issueOrder.map((issue) => ({
     ...byIssue.get(issue)!,
     perModel: Array.from(modelByIssue.get(issue)!.values()),
   }));

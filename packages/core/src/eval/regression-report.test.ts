@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { compareToBaseline, toBaseline } from './baseline.js';
-import {
-  formatRegressionIssue,
-  REGRESSION_ISSUE_MARKER,
-  REGRESSION_ISSUE_TITLE,
-} from './regression-report.js';
+import { formatRegressionIssue, REGRESSION_ISSUE_MARKER, REGRESSION_ISSUE_TITLE } from './regression-report.js';
 import { isRouteAsserted, type CaseResult, type EvalSummary } from './types.js';
 
 function caseResult(overrides: Partial<CaseResult> = {}): CaseResult {
@@ -25,9 +21,9 @@ function caseResult(overrides: Partial<CaseResult> = {}): CaseResult {
 
 function summaryOf(results: CaseResult[]): EvalSummary {
   const total = results.length;
-  const passed = results.filter(r => r.pass).length;
-  const routeAsserted = results.filter(r => isRouteAsserted(r.expectedRoute)).length;
-  const routeCorrect = results.filter(r => isRouteAsserted(r.expectedRoute) && r.routeCorrect).length;
+  const passed = results.filter((r) => r.pass).length;
+  const routeAsserted = results.filter((r) => isRouteAsserted(r.expectedRoute)).length;
+  const routeCorrect = results.filter((r) => isRouteAsserted(r.expectedRoute) && r.routeCorrect).length;
   return {
     results,
     total,
@@ -81,10 +77,7 @@ describe('formatRegressionIssue', () => {
 
   it('renders missing baseline entries with dashes and no regression marker', () => {
     const baseline = toBaseline(summaryOf([caseResult({ id: 'a', rubricScore: 8.0 })]));
-    const summary = summaryOf([
-      caseResult({ id: 'a', rubricScore: 8.0 }),
-      caseResult({ id: 'b', rubricScore: 7.0 }),
-    ]);
+    const summary = summaryOf([caseResult({ id: 'a', rubricScore: 8.0 }), caseResult({ id: 'b', rubricScore: 7.0 })]);
     const comparison = compareToBaseline(summary, baseline);
 
     const issue = formatRegressionIssue(summary, baseline, comparison, 'https://example.test/run');

@@ -43,7 +43,7 @@ function routerForOutputs(outputs: string[]): ModelRouter {
     models,
     routes,
     false,
-    new StubModelExecutor({ scripts: { eval_judge: outputs.map(output => ({ output })) } }),
+    new StubModelExecutor({ scripts: { eval_judge: outputs.map((output) => ({ output })) } }),
   );
 }
 
@@ -136,11 +136,7 @@ describe('runJudgeSamples', () => {
   });
 
   it('excludes malformed samples from the median', async () => {
-    const result = await runJudgeSamples(
-      routerForOutputs(['{"score":8}', 'not json', '{"score":7}']),
-      judgeOpts(),
-      3,
-    );
+    const result = await runJudgeSamples(routerForOutputs(['{"score":8}', 'not json', '{"score":7}']), judgeOpts(), 3);
 
     expect(result.score).toBe(7.5);
     expect(result.validCount).toBe(2);

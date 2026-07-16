@@ -76,18 +76,24 @@ export type VerifyCommandCheck = { ok: true } | { ok: false; detail: string };
 
 export function validateVerifyCommand(command: string): VerifyCommandCheck {
   if (!VERIFY_COMMAND_CHARS.test(command)) {
-    return { ok: false, detail: `verifyCommand rejected (${JSON.stringify(command)}): contains characters outside the safe set (no shell metacharacters, quotes, substitution, or redirection)` };
+    return {
+      ok: false,
+      detail: `verifyCommand rejected (${JSON.stringify(command)}): contains characters outside the safe set (no shell metacharacters, quotes, substitution, or redirection)`,
+    };
   }
   const tokens = command.split(' ');
-  if (tokens.some(t => t.startsWith('/'))) {
+  if (tokens.some((t) => t.startsWith('/'))) {
     return { ok: false, detail: `verifyCommand rejected (${JSON.stringify(command)}): absolute paths are not allowed` };
   }
-  if (tokens.some(t => t === '..' || t.startsWith('../') || t.includes('/../') || t.endsWith('/..'))) {
+  if (tokens.some((t) => t === '..' || t.startsWith('../') || t.includes('/../') || t.endsWith('/..'))) {
     return { ok: false, detail: `verifyCommand rejected (${JSON.stringify(command)}): path traversal is not allowed` };
   }
-  const allowed = ALLOWED_VERIFY_COMMAND_PREFIXES.some(p => command === p || command.startsWith(`${p} `));
+  const allowed = ALLOWED_VERIFY_COMMAND_PREFIXES.some((p) => command === p || command.startsWith(`${p} `));
   if (!allowed) {
-    return { ok: false, detail: `verifyCommand rejected (${JSON.stringify(command)}): not an allowed verification command; use one of: ${ALLOWED_VERIFY_COMMAND_PREFIXES.join(', ')}` };
+    return {
+      ok: false,
+      detail: `verifyCommand rejected (${JSON.stringify(command)}): not an allowed verification command; use one of: ${ALLOWED_VERIFY_COMMAND_PREFIXES.join(', ')}`,
+    };
   }
   return { ok: true };
 }
@@ -142,7 +148,7 @@ export class OllamaAgenticHarness implements CodingHarness {
           });
         }
 
-        const data = await res.json() as { message?: { content?: string }; response?: string; error?: string };
+        const data = (await res.json()) as { message?: { content?: string }; response?: string; error?: string };
         if (data.error) {
           throw new HarnessError(data.error, classifyFailure(data.error, 1), { exitCode: 1, stderr: data.error });
         }
@@ -153,13 +159,17 @@ export class OllamaAgenticHarness implements CodingHarness {
         if (err.name === 'TimeoutError' || err.name === 'AbortError') {
           throw new HarnessError(err.message ?? String(err), 'timeout', {});
         }
-        throw new HarnessError(err.message ?? String(err), err.reason ?? classifyFailure(err.stderr ?? err.message ?? '', err.code ?? 1), {
-          exitCode: typeof err.code === 'number' ? err.code : undefined,
-          stderr: err.stderr,
-          code: typeof err.code === 'string' || typeof err.code === 'number' ? err.code : undefined,
-          signal: typeof err.signal === 'string' ? err.signal : undefined,
-          killed: err.killed === true ? true : undefined,
-        });
+        throw new HarnessError(
+          err.message ?? String(err),
+          err.reason ?? classifyFailure(err.stderr ?? err.message ?? '', err.code ?? 1),
+          {
+            exitCode: typeof err.code === 'number' ? err.code : undefined,
+            stderr: err.stderr,
+            code: typeof err.code === 'string' || typeof err.code === 'number' ? err.code : undefined,
+            signal: typeof err.signal === 'string' ? err.signal : undefined,
+            killed: err.killed === true ? true : undefined,
+          },
+        );
       }
     };
 
@@ -209,7 +219,7 @@ export class OllamaAgenticHarness implements CodingHarness {
     }
 
     const output = [
-      `APPLIED: ${proposal.changes.map(change => change.file).join(', ')}`,
+      `APPLIED: ${proposal.changes.map((change) => change.file).join(', ')}`,
       `VERIFIED: ${proposal.verifyCommand}`,
       `SUMMARY: ${proposal.summary}`,
     ].join('\n');
@@ -316,7 +326,11 @@ function validateProposalSchema(value: unknown): ParseResult {
       return { ok: false, malformedReason: 'schema_invalid', detail: `${change.file}: unsafe path` };
     }
     if (seenFiles.has(change.file)) {
-      return { ok: false, malformedReason: 'schema_invalid', detail: `${change.file}: duplicate file entries are not supported` };
+      return {
+        ok: false,
+        malformedReason: 'schema_invalid',
+        detail: `${change.file}: duplicate file entries are not supported`,
+      };
     }
     seenFiles.add(change.file);
     changes.push({ file: change.file, find: change.find, replace: change.replace });
@@ -401,14 +415,21 @@ async function writeAgenticTrace(
   const traceDir = join(worktree, '.factory', 'local-agent-traces');
   await mkdir(traceDir, { recursive: true });
   const tracePath = join(traceDir, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`);
-  await writeFile(tracePath, `${JSON.stringify({
-    harness: 'ollama-agentic',
-    model: trace.model,
-    attempts: 2,
-    malformedReason: trace.malformedReason,
-    detail: trace.detail,
-    rawResponseSummary: trace.rawResponseSummary,
-  }, null, 2)}\n`);
+  await writeFile(
+    tracePath,
+    `${JSON.stringify(
+      {
+        harness: 'ollama-agentic',
+        model: trace.model,
+        attempts: 2,
+        malformedReason: trace.malformedReason,
+        detail: trace.detail,
+        rawResponseSummary: trace.rawResponseSummary,
+      },
+      null,
+      2,
+    )}\n`,
+  );
   return tracePath;
 }
 

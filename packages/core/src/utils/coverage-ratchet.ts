@@ -87,9 +87,7 @@ export function checkScopedRatchetDrift(
       throw new Error(`coverage summary has no measured data for threshold scope "${scope}"`);
     }
     const scoped = checkRatchetDrift(measured, thresholds, slack);
-    drifts.push(...scoped.drifts.map(drift => (
-      scope === GLOBAL_SCOPE ? drift : { ...drift, scope }
-    )));
+    drifts.push(...scoped.drifts.map((drift) => (scope === GLOBAL_SCOPE ? drift : { ...drift, scope })));
   }
 
   return { ok: drifts.length === 0, drifts };
@@ -100,14 +98,14 @@ export function renderRatchetReport(result: RatchetCheckResult, slack: number): 
     return `Coverage ratchet OK — all thresholds within ${slack}pts of measured coverage.`;
   }
 
-  const hasScopes = result.drifts.some(drift => drift.scope);
+  const hasScopes = result.drifts.some((drift) => drift.scope);
   const lines = [
     hasScopes
       ? '| Scope | Metric | Measured | Threshold | Suggested |'
       : '| Metric | Measured | Threshold | Suggested |',
     hasScopes ? '| --- | --- | --- | --- | --- |' : '| --- | --- | --- | --- |',
-    ...result.drifts.map(
-      drift => hasScopes
+    ...result.drifts.map((drift) =>
+      hasScopes
         ? `| ${drift.scope ?? GLOBAL_SCOPE} | ${drift.metric} | ${drift.measured}% | ${drift.threshold}% | ${drift.suggested}% |`
         : `| ${drift.metric} | ${drift.measured}% | ${drift.threshold}% | ${drift.suggested}% |`,
     ),
@@ -182,8 +180,11 @@ function matchesCoverageScope(filePath: string, scope: string): boolean {
   if (!normalizedPath.startsWith(prefix) && !normalizedPath.includes(`/${prefix}`)) return false;
 
   if (suffix.startsWith('.{') && suffix.endsWith('}')) {
-    const extensions = suffix.slice(2, -1).split(',').map(ext => `.${ext}`);
-    return extensions.some(extension => normalizedPath.endsWith(extension));
+    const extensions = suffix
+      .slice(2, -1)
+      .split(',')
+      .map((ext) => `.${ext}`);
+    return extensions.some((extension) => normalizedPath.endsWith(extension));
   }
 
   return suffix === '' || normalizedPath.endsWith(suffix);

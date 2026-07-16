@@ -9,7 +9,15 @@ function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 
-function StatusCell({ lane, now, trainPosition }: { lane: LaneState; now: number; trainPosition?: number }): JSX.Element {
+function StatusCell({
+  lane,
+  now,
+  trainPosition,
+}: {
+  lane: LaneState;
+  now: number;
+  trainPosition?: number;
+}): JSX.Element {
   switch (lane.status) {
     case 'running':
       return (
@@ -18,11 +26,7 @@ function StatusCell({ lane, now, trainPosition }: { lane: LaneState; now: number
         </Text>
       );
     case 'ready':
-      return (
-        <Text color="green">
-          ✔ ready{lane.prNumber ? ` PR #${lane.prNumber}` : ''}
-        </Text>
-      );
+      return <Text color="green">✔ ready{lane.prNumber ? ` PR #${lane.prNumber}` : ''}</Text>;
     case 'waiting-merge':
       return (
         <Text color="yellow">

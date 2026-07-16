@@ -6,24 +6,24 @@ A multi-agent software factory that ships verified work autonomously. Built in T
 
 Honest snapshot of what works today vs. what is experimental. Statuses reflect the actual code, not the roadmap.
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| `factory ship` pipeline (PLAN → BUILD → CHECK → SHIP) | ✅ Working | Covered by an end-to-end pipeline integration test |
-| `factory triage` (queue from open issues) | ✅ Working | |
-| `factory run` (parallel lanes) | ✅ Working | Merges are serialized per lane via a merge-wait step |
-| `factory land` / auto-merge | ✅ Working | Auto-merge is **off by default** (`merge.auto: false`); set `FACTORY_MERGE=1` to enable autonomous squash-merge |
-| `factory supervise` (multi-window unattended runs) | ✅ Working | Waits for usage headroom, runs the queue, repeats until drained |
-| Usage-cap watchdog (`factory usage`, stop-at-cap) | ✅ Working | Trailing-5h cost-weighted usage vs. cap (Claude models only); lanes stop at the cap |
-| Codex worker builds (`codex exec`) | ✅ Working | Used for the `build_codex` route |
-| Claude models via the Claude CLI (`claude -p`) | ✅ Working | TRIAGE always shells out to `claude -p`; PLAN routes through the boss tier (local models first, Claude as failover) |
-| Harness dispatch (per-model provider adapters) | ✅ Working | Each model declares a `harness` in `models.json`: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, `opencode` |
-| GPT worker models via the Codex CLI | ✅ Working | `gpt-5.6-sol` → `gpt-5.1-codex`, dispatched through the `codex-cli` harness |
-| Local Ollama + OpenCode models | ⚠️ Experimental | Harnesses are contract-tested, but real-run behavior is unverified — expect failover to a cloud model |
-| DeepSeek / gpt-4.1-mini via `claude --model ...` | ⚠️ Experimental | The Claude CLI only serves Anthropic models; this wiring is unproven |
-| Prompt evals (`npm run eval`) | ✅ Working | Deterministic stub subset runs in CI on every PR; weekly real run checks prompt/constitution/skill regressions under pinned model IDs |
-| Cost tracking (`factory cost`) | ✅ Working | Per-task tokens and cost logged to `.factory/costs.jsonl` |
-| Constitutions + checker rework loop | ✅ Working | Up to 3 rework rounds with dispute resolution |
-| Server (`packages/server`) | 🚧 Stub | Exports config types only; `createServer()` throws — Phase 2 of the roadmap |
+| Feature                                               | Status          | Notes                                                                                                                                 |
+| ----------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `factory ship` pipeline (PLAN → BUILD → CHECK → SHIP) | ✅ Working      | Covered by an end-to-end pipeline integration test                                                                                    |
+| `factory triage` (queue from open issues)             | ✅ Working      |                                                                                                                                       |
+| `factory run` (parallel lanes)                        | ✅ Working      | Merges are serialized per lane via a merge-wait step                                                                                  |
+| `factory land` / auto-merge                           | ✅ Working      | Auto-merge is **off by default** (`merge.auto: false`); set `FACTORY_MERGE=1` to enable autonomous squash-merge                       |
+| `factory supervise` (multi-window unattended runs)    | ✅ Working      | Waits for usage headroom, runs the queue, repeats until drained                                                                       |
+| Usage-cap watchdog (`factory usage`, stop-at-cap)     | ✅ Working      | Trailing-5h cost-weighted usage vs. cap (Claude models only); lanes stop at the cap                                                   |
+| Codex worker builds (`codex exec`)                    | ✅ Working      | Used for the `build_codex` route                                                                                                      |
+| Claude models via the Claude CLI (`claude -p`)        | ✅ Working      | TRIAGE always shells out to `claude -p`; PLAN routes through the boss tier (local models first, Claude as failover)                   |
+| Harness dispatch (per-model provider adapters)        | ✅ Working      | Each model declares a `harness` in `models.json`: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, `opencode`              |
+| GPT worker models via the Codex CLI                   | ✅ Working      | `gpt-5.6-sol` → `gpt-5.1-codex`, dispatched through the `codex-cli` harness                                                           |
+| Local Ollama + OpenCode models                        | ⚠️ Experimental | Harnesses are contract-tested, but real-run behavior is unverified — expect failover to a cloud model                                 |
+| DeepSeek / gpt-4.1-mini via `claude --model ...`      | ⚠️ Experimental | The Claude CLI only serves Anthropic models; this wiring is unproven                                                                  |
+| Prompt evals (`npm run eval`)                         | ✅ Working      | Deterministic stub subset runs in CI on every PR; weekly real run checks prompt/constitution/skill regressions under pinned model IDs |
+| Cost tracking (`factory cost`)                        | ✅ Working      | Per-task tokens and cost logged to `.factory/costs.jsonl`                                                                             |
+| Constitutions + checker rework loop                   | ✅ Working      | Up to 3 rework rounds with dispute resolution                                                                                         |
+| Server (`packages/server`)                            | 🚧 Stub         | Exports config types only; `createServer()` throws — Phase 2 of the roadmap                                                           |
 
 ## Monorepo Structure
 
@@ -53,18 +53,21 @@ config  ←  core  ←  cli
 ## Quick Start (5 minutes)
 
 **Prerequisites**
+
 - Node.js ≥ 20
 - `git` and the GitHub CLI `gh`, authenticated (`gh auth login`) — the factory uses `gh repo view` to detect your repo and polls CI checks via the GitHub API when landing
 - Claude Code CLI (`claude`) on PATH — the TRIAGE phase shells out to `claude -p`, and Claude models in every tier dispatch through it
 - Optional: OpenAI Codex CLI (`codex`) for cheap worker builds, and `ollama` for free local worker models
 
 **Step 1 — Install**
+
 ```bash
 npm install -g @on-par/factory-cli
 factory --version
 ```
 
 Development alternative (clone and build from source):
+
 ```bash
 git clone https://github.com/on-par/software-factory
 cd software-factory
@@ -74,6 +77,7 @@ npm link --workspace @on-par/factory-cli
 ```
 
 **Step 2 — Point it at your repo**
+
 ```bash
 cd /path/to/your/repo        # any git repo with a GitHub remote and open issues
 export GITHUB_TOKEN=$(gh auth token)   # the factory opens PRs via the GitHub API
@@ -81,18 +85,21 @@ factory init                 # creates .factory/ (state, logs, plans, queue)
 ```
 
 **Step 3 — Pick a constitution**
+
 ```bash
 factory constitution --list                    # see available product constitutions
 factory constitution --product example-marketing-site
 ```
 
 **Step 4 — Triage the backlog**
+
 ```bash
 factory triage               # proposes .factory/queue.proposed from your open issues — review it, then:
 mv .factory/queue.proposed .factory/queue
 ```
 
 **Step 5 — Ship your first issue**
+
 ```bash
 factory ship 42              # PLAN → BUILD → CHECK → SHIP one issue (use an issue number from your repo)
 ```
@@ -124,12 +131,12 @@ factory resume                      Resume after stop
 
 Each task type maps to a tier, and each tier is a hand-ordered priority list in `models.json` — free local models first, then cloud models ranked by capability. The router takes the first available model in the list; when a model hits a usage limit, rate limit, or error, it automatically fails over to the next one. (`models.json` is the source of truth; the snapshot below can drift.)
 
-| Tier | Priority order (experimental models excluded) | Cloud cost $/M output | Use |
-|------|-----------------------------------------------|-----------------------|-----|
-| boss | qwen2.5-coder:14b → gemma4:12b → claude-fable-5 → claude-opus-4-8 → claude-sonnet-5 | $40 → $25 → $15 | Specs, design, disputes |
-| worker | codex-ollama-qwen3.5:9b → qwen2.5-coder:14b → qwen3.5:9b → qwen3:8b → gpt-5.6-sol → gpt-5.1-codex → claude-sonnet-5 | $10 → $10 → $15 | Implementation |
-| checker | qwen3.5:9b → gemma4:12b → qwen2.5-coder:14b → qwen3:8b → claude-sonnet-5 | $15 | Verification |
-| triage | qwen2.5-coder:14b → claude-sonnet-5 | $15 | Issue triage |
+| Tier    | Priority order (experimental models excluded)                                                                       | Cloud cost $/M output | Use                     |
+| ------- | ------------------------------------------------------------------------------------------------------------------- | --------------------- | ----------------------- |
+| boss    | qwen2.5-coder:14b → gemma4:12b → claude-fable-5 → claude-opus-4-8 → claude-sonnet-5                                 | $40 → $25 → $15       | Specs, design, disputes |
+| worker  | codex-ollama-qwen3.5:9b → qwen2.5-coder:14b → qwen3.5:9b → qwen3:8b → gpt-5.6-sol → gpt-5.1-codex → claude-sonnet-5 | $10 → $10 → $15       | Implementation          |
+| checker | qwen3.5:9b → gemma4:12b → qwen2.5-coder:14b → qwen3:8b → claude-sonnet-5                                            | $15                   | Verification            |
+| triage  | qwen2.5-coder:14b → claude-sonnet-5                                                                                 | $15                   | Issue triage            |
 
 Local Ollama models cost $0 and lead every tier. `FACTORY_LOCAL_ONLY=1` restricts routing to local models entirely. Experimental models (glm-5.2, deepseek-v3, qwen-3.5-coder, gpt-4.1-mini, opencode-sonnet) exist in `models.json` but are only routed when `FACTORY_EXPERIMENTAL=1`.
 
@@ -137,13 +144,13 @@ Every model declares a **harness** — the provider adapter that executes it: `c
 
 ## Failover Triggers
 
-| Trigger | Behavior |
-|---------|----------|
-| `rate_limit` (429) | Retry with cooldown (max 2), then failover |
-| `usage_cap` (quota/billing) | Failover immediately to next model |
-| `timeout` | Failover immediately |
-| `error` | Retry once, then failover |
-| `empty_response` | Failover immediately |
+| Trigger                     | Behavior                                   |
+| --------------------------- | ------------------------------------------ |
+| `rate_limit` (429)          | Retry with cooldown (max 2), then failover |
+| `usage_cap` (quota/billing) | Failover immediately to next model         |
+| `timeout`                   | Failover immediately                       |
+| `error`                     | Retry once, then failover                  |
+| `empty_response`            | Failover immediately                       |
 
 ## Constitutions
 

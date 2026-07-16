@@ -48,8 +48,11 @@ export async function captureWorktreeState(
   }
 
   const { stdout: statusText } = await execFn('git status --porcelain', { cwd: worktree, ...GIT_OPTS });
-  const lines = statusText.split('\n').map(line => line.trimEnd()).filter(Boolean);
-  if (lines.some(line => !line.startsWith('??'))) {
+  const lines = statusText
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter(Boolean);
+  if (lines.some((line) => !line.startsWith('??'))) {
     onLog('worktree state guard disabled: baseline has uncommitted tracked changes');
     return null;
   }
@@ -86,7 +89,7 @@ export async function resetWorktreeState(
   }
 
   await execFn(`git reset --hard ${shellEscape(snapshot.headSha)}`, { cwd: worktree, ...GIT_OPTS });
-  const cleanArgs = snapshot.untrackedPaths.map(path => `-e ${shellEscape(path)}`).join(' ');
+  const cleanArgs = snapshot.untrackedPaths.map((path) => `-e ${shellEscape(path)}`).join(' ');
   await execFn(`git clean -fd${cleanArgs ? ` ${cleanArgs}` : ''}`, { cwd: worktree, ...GIT_OPTS });
 
   return { didReset: true, ...(tracePath ? { tracePath } : {}) };
@@ -95,9 +98,9 @@ export async function resetWorktreeState(
 function parseGitStatusPaths(status: string): string[] {
   return status
     .split('\n')
-    .map(line => line.trimEnd())
-    .filter(line => line.startsWith('??'))
-    .map(line => {
+    .map((line) => line.trimEnd())
+    .filter((line) => line.startsWith('??'))
+    .map((line) => {
       const path = line.slice(3).trim();
       return path.includes(' -> ') ? path.split(' -> ').pop()!.trim() : path;
     })

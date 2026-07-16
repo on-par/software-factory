@@ -14,33 +14,40 @@ async function tempDir() {
 
 describe('loadGoldenCases', () => {
   afterEach(async () => {
-    await Promise.all(tempDirs.splice(0).map(dir => rm(dir, { recursive: true, force: true })));
+    await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
   });
 
   it('parses defaults and extracts title/body', async () => {
     const dir = await tempDir();
-    await writeFile(join(dir, 'case.md'), `# Fix the thing
+    await writeFile(
+      join(dir, 'case.md'),
+      `# Fix the thing
 
 The body explains the issue.
-`);
+`,
+    );
 
     const cases = await loadGoldenCases(dir);
 
-    expect(cases).toMatchObject([{
-      id: 'case',
-      title: 'Fix the thing',
-      body: 'The body explains the issue.',
-      expectedRoute: 'any',
-      deterministicOnly: false,
-      rubric: [],
-      minRubricScore: 7,
-    }]);
+    expect(cases).toMatchObject([
+      {
+        id: 'case',
+        title: 'Fix the thing',
+        body: 'The body explains the issue.',
+        expectedRoute: 'any',
+        deterministicOnly: false,
+        rubric: [],
+        minRubricScore: 7,
+      },
+    ]);
     expect(cases[0].constitution).toBeUndefined();
   });
 
   it('extracts and strips stub-output blocks', async () => {
     const dir = await tempDir();
-    await writeFile(join(dir, 'case.md'), `---
+    await writeFile(
+      join(dir, 'case.md'),
+      `---
 id: with-stub
 expectedRoute: codex
 deterministicOnly: true
@@ -58,7 +65,8 @@ route: codex
 ---
 # Spec
 \`\`\`
-`);
+`,
+    );
 
     const [golden] = await loadGoldenCases(dir);
 
@@ -78,26 +86,31 @@ route: codex
 
     const cases = await loadGoldenCases(dir);
 
-    expect(cases.map(c => c.id)).toEqual(['a', 'b']);
+    expect(cases.map((c) => c.id)).toEqual(['a', 'b']);
   });
 
   it('throws on bad expectedRoute and names the file', async () => {
     const dir = await tempDir();
     const path = join(dir, 'bad.md');
-    await writeFile(path, `---
+    await writeFile(
+      path,
+      `---
 expectedRoute: gpt
 ---
 # Bad
 
 body
-`);
+`,
+    );
 
     await expect(loadGoldenCases(dir)).rejects.toThrow(`${path}: invalid expectedRoute 'gpt'`);
   });
 
   it('parses inline constitution frontmatter', async () => {
     const dir = await tempDir();
-    await writeFile(join(dir, 'case.md'), `---
+    await writeFile(
+      join(dir, 'case.md'),
+      `---
 id: with-constitution
 expectedRoute: codex
 constitution: |
@@ -109,7 +122,8 @@ constitution: |
 # Add a CLI flag
 
 Issue body.
-`);
+`,
+    );
 
     const [golden] = await loadGoldenCases(dir);
 

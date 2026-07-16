@@ -19,7 +19,11 @@ export function scoreSpec(
         { name: 'frontmatter-valid', pass: true, details: 'n/a — escalated' },
         { name: 'route-parseable', pass: true, details: 'n/a — escalated' },
         { name: 'sections-present', pass: true, details: 'n/a — escalated' },
-        { name: 'route-correct', pass: routeCorrect, details: routeCorrect ? 'expected escalation' : `expected ${expected}` },
+        {
+          name: 'route-correct',
+          pass: routeCorrect,
+          details: routeCorrect ? 'expected escalation' : `expected ${expected}`,
+        },
       ],
     };
   }
@@ -38,7 +42,7 @@ export function scoreSpec(
   const routeCorrect = expected === 'any' || route === expected;
   const requiredSections = ['## Goal', '## Files / approach', '## Tests', '## Non-goals'];
   if (opts.requireConstitution) requiredSections.push('## Constitution compliance');
-  const missingSections = requiredSections.filter(section => !specContent.includes(section));
+  const missingSections = requiredSections.filter((section) => !specContent.includes(section));
 
   return {
     route,
@@ -57,7 +61,8 @@ export function scoreSpec(
       {
         name: 'sections-present',
         pass: missingSections.length === 0,
-        details: missingSections.length === 0 ? 'all required sections present' : `missing ${missingSections.join(', ')}`,
+        details:
+          missingSections.length === 0 ? 'all required sections present' : `missing ${missingSections.join(', ')}`,
       },
       {
         name: 'route-correct',

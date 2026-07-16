@@ -12,7 +12,7 @@ describe('defaultExecFn', () => {
   });
 
   it('passes timeoutMs through as a real kill timeout', async () => {
-    const err: any = await defaultExecFn('sleep 2', { timeoutMs: 50 }).catch(e => e);
+    const err: any = await defaultExecFn('sleep 2', { timeoutMs: 50 }).catch((e) => e);
 
     expect(err).toBeTruthy();
     expect(err.killed).toBe(true);

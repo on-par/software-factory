@@ -51,7 +51,7 @@ const routes: RoutesConfig = {
 const tempDirs = new Set<string>();
 
 afterEach(async () => {
-  await Promise.all([...tempDirs].map(dir => rm(dir, { recursive: true, force: true })));
+  await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
   tempDirs.clear();
 });
 
@@ -301,31 +301,28 @@ describe('linksChecker', () => {
 
   describe('treats crafted file paths as data, never shell', () => {
     const adversarialNames = [
-      ["single quotes", "a'b'c.html"],
-      ["double quotes", 'a"b"c.html'],
-      ["semicolons", 'a;touch pwned;b.html'],
-      ["dollar command substitution", 'a$(touch pwned).html'],
-      ["backtick command substitution", 'a`touch pwned`.html'],
-      ["combined metacharacters", "a'b $(touch pwned); `touch pwned`.html"],
+      ['single quotes', "a'b'c.html"],
+      ['double quotes', 'a"b"c.html'],
+      ['semicolons', 'a;touch pwned;b.html'],
+      ['dollar command substitution', 'a$(touch pwned).html'],
+      ['backtick command substitution', 'a`touch pwned`.html'],
+      ['combined metacharacters', "a'b $(touch pwned); `touch pwned`.html"],
     ] as const;
 
-    it.each(adversarialNames)(
-      'handles a filename with %s without executing it',
-      async (_label, name) => {
-        const worktree = await makeWorktree({
-          [name]: '<html><body><a href="#">click</a><a href="https://example.com">ok</a></body></html>',
-        });
+    it.each(adversarialNames)('handles a filename with %s without executing it', async (_label, name) => {
+      const worktree = await makeWorktree({
+        [name]: '<html><body><a href="#">click</a><a href="https://example.com">ok</a></body></html>',
+      });
 
-        const result = await linksChecker(makeContext(worktree));
+      const result = await linksChecker(makeContext(worktree));
 
-        // The file was read as data: its placeholder link was counted.
-        expect(result.result).toBe('FAIL');
-        expect(result.broken).toBeGreaterThanOrEqual(1);
-        // No command execution side effect anywhere plausible.
-        expect(await fileExists(join(worktree, 'pwned'))).toBe(false);
-        expect(await fileExists(join(process.cwd(), 'pwned'))).toBe(false);
-      },
-    );
+      // The file was read as data: its placeholder link was counted.
+      expect(result.result).toBe('FAIL');
+      expect(result.broken).toBeGreaterThanOrEqual(1);
+      // No command execution side effect anywhere plausible.
+      expect(await fileExists(join(worktree, 'pwned'))).toBe(false);
+      expect(await fileExists(join(process.cwd(), 'pwned'))).toBe(false);
+    });
 
     it('handles metacharacters in directory names during traversal', async () => {
       const worktree = await makeWorktree({
@@ -343,8 +340,10 @@ describe('linksChecker', () => {
 
   it('deduplicates URLs across files and excludes non-http-ish/fragment links', async () => {
     const worktree = await makeWorktree({
-      'a.html': '<a href="https://example.com/shared">shared</a><a href="mailto:x@example.com">mail</a><a href="#section">frag</a>',
-      'b.html': '<a href="https://example.com/shared">shared</a><a href="tel:+15551234567">tel</a><a href="javascript:void(0)">js</a><a href="data:text/plain,x">data</a>',
+      'a.html':
+        '<a href="https://example.com/shared">shared</a><a href="mailto:x@example.com">mail</a><a href="#section">frag</a>',
+      'b.html':
+        '<a href="https://example.com/shared">shared</a><a href="tel:+15551234567">tel</a><a href="javascript:void(0)">js</a><a href="data:text/plain,x">data</a>',
     });
 
     const result = await linksChecker(makeContext(worktree));
@@ -641,30 +640,34 @@ describe('runCustomChecker', () => {
 });
 
 describe('runAllCheckers', () => {
-  it('aggregates built-ins and custom checkers and fails closed on unknown checker names', { timeout: 60000 }, async () => {
-    const constitutionDir = await mkdtemp(join(tmpdir(), 'checker-test-constitution-'));
-    tempDirs.add(constitutionDir);
-    await writeFile(
-      join(constitutionDir, 'myproduct.md'),
-      '---\nproduct: myproduct\ncheckers:\n  - custom_style\n  - not_a_real_checker\n---\nBody standard text\n',
-    );
-    const worktree = await makeWorktree();
-    const stub = new StubModelExecutor({
-      scripts: { check_custom: [{ output: '{"checker":"custom_style","result":"PASS","details":"ok"}' }] },
-    });
-    const router = new ModelRouter(models, routes, false, stub);
-    const constitution = new ConstitutionLoader(constitutionDir).resolve(worktree, 'myproduct');
+  it(
+    'aggregates built-ins and custom checkers and fails closed on unknown checker names',
+    { timeout: 60000 },
+    async () => {
+      const constitutionDir = await mkdtemp(join(tmpdir(), 'checker-test-constitution-'));
+      tempDirs.add(constitutionDir);
+      await writeFile(
+        join(constitutionDir, 'myproduct.md'),
+        '---\nproduct: myproduct\ncheckers:\n  - custom_style\n  - not_a_real_checker\n---\nBody standard text\n',
+      );
+      const worktree = await makeWorktree();
+      const stub = new StubModelExecutor({
+        scripts: { check_custom: [{ output: '{"checker":"custom_style","result":"PASS","details":"ok"}' }] },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const constitution = new ConstitutionLoader(constitutionDir).resolve(worktree, 'myproduct');
 
-    const summary = await runAllCheckers(makeContext(worktree), router, constitution);
+      const summary = await runAllCheckers(makeContext(worktree), router, constitution);
 
-    expect(summary.total).toBe(7); // 5 built-ins + custom_style + not_a_real_checker
-    expect(summary.passes + summary.failures + summary.skips).toBe(summary.total);
-    expect(summary.results.map(result => result.checker)).toContain('custom_style');
-    const unknown = summary.results.find(result => result.checker === 'not_a_real_checker');
-    expect(unknown?.result).toBe('FAIL');
-    expect(unknown?.details).toContain('unknown checker');
-    expect(summary.failures).toBeGreaterThanOrEqual(1);
-  });
+      expect(summary.total).toBe(7); // 5 built-ins + custom_style + not_a_real_checker
+      expect(summary.passes + summary.failures + summary.skips).toBe(summary.total);
+      expect(summary.results.map((result) => result.checker)).toContain('custom_style');
+      const unknown = summary.results.find((result) => result.checker === 'not_a_real_checker');
+      expect(unknown?.result).toBe('FAIL');
+      expect(unknown?.details).toContain('unknown checker');
+      expect(summary.failures).toBeGreaterThanOrEqual(1);
+    },
+  );
 
   it('fails closed on an unknown checker alone, blocking a clean pass', { timeout: 60000 }, async () => {
     const constitutionDir = await mkdtemp(join(tmpdir(), 'checker-test-constitution-'));
@@ -680,7 +683,7 @@ describe('runAllCheckers', () => {
     const summary = await runAllCheckers(makeContext(worktree), router, constitution);
 
     expect(summary.failures).toBeGreaterThanOrEqual(1);
-    expect(summary.results.some(r => r.checker === 'ghost_checker' && r.result === 'FAIL')).toBe(true);
+    expect(summary.results.some((r) => r.checker === 'ghost_checker' && r.result === 'FAIL')).toBe(true);
     expect(stub.calls).toHaveLength(0); // unknown names must NOT be routed to the custom-checker agent
   });
 
@@ -694,42 +697,50 @@ describe('runAllCheckers', () => {
     const summary = await runAllCheckers(makeContext(worktree), router, null);
 
     expect(summary.total).toBe(5);
-    expect(summary.results.map(r => r.checker)).toEqual(['compile', 'tests', 'lint', 'links', 'accessibility']);
+    expect(summary.results.map((r) => r.checker)).toEqual(['compile', 'tests', 'lint', 'links', 'accessibility']);
     expect(stub.calls).toHaveLength(0);
   });
 
-  it('fails the tests checker when constitution.requireTests is true and no test command exists', { timeout: 60000 }, async () => {
-    const worktree = await makeWorktree();
-    const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
-    const constitution: Constitution = {
-      product: 'myproduct',
-      version: 1,
-      checkers: [],
-      requireTests: true,
-      body: 'Body standard text',
-      path: worktree,
-      source: 'bundled',
-    };
+  it(
+    'fails the tests checker when constitution.requireTests is true and no test command exists',
+    { timeout: 60000 },
+    async () => {
+      const worktree = await makeWorktree();
+      const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
+      const constitution: Constitution = {
+        product: 'myproduct',
+        version: 1,
+        checkers: [],
+        requireTests: true,
+        body: 'Body standard text',
+        path: worktree,
+        source: 'bundled',
+      };
 
-    const summary = await runAllCheckers(makeContext(worktree), router, constitution);
+      const summary = await runAllCheckers(makeContext(worktree), router, constitution);
 
-    const tests = summary.results.find(r => r.checker === 'tests');
-    expect(tests?.result).toBe('FAIL');
-    expect(summary.failures).toBeGreaterThanOrEqual(1);
-  });
+      const tests = summary.results.find((r) => r.checker === 'tests');
+      expect(tests?.result).toBe('FAIL');
+      expect(summary.failures).toBeGreaterThanOrEqual(1);
+    },
+  );
 
-  it('skips the tests checker and counts it in summary.skips when requireTests is not set', { timeout: 60000 }, async () => {
-    const worktree = await makeWorktree();
-    const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
+  it(
+    'skips the tests checker and counts it in summary.skips when requireTests is not set',
+    { timeout: 60000 },
+    async () => {
+      const worktree = await makeWorktree();
+      const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
 
-    const summary = await runAllCheckers(makeContext(worktree), router, null);
+      const summary = await runAllCheckers(makeContext(worktree), router, null);
 
-    const tests = summary.results.find(r => r.checker === 'tests');
-    expect(tests?.result).toBe('SKIP');
-    expect(summary.skips).toBe(1);
-    expect(summary.total).toBe(5);
-    expect(summary.failures + summary.passes + summary.skips).toBe(summary.total);
-  });
+      const tests = summary.results.find((r) => r.checker === 'tests');
+      expect(tests?.result).toBe('SKIP');
+      expect(summary.skips).toBe(1);
+      expect(summary.total).toBe(5);
+      expect(summary.failures + summary.passes + summary.skips).toBe(summary.total);
+    },
+  );
 
   it('does not throw and fails closed when package.json is unreadable', { timeout: 60000 }, async () => {
     const worktree = await makeWorktree();
@@ -740,7 +751,7 @@ describe('runAllCheckers', () => {
 
     expect(summary.failures).toBeGreaterThanOrEqual(3);
     for (const name of ['compile', 'tests', 'lint']) {
-      const output = summary.results.find(r => r.checker === name);
+      const output = summary.results.find((r) => r.checker === name);
       expect(output?.result).toBe('FAIL');
     }
   });

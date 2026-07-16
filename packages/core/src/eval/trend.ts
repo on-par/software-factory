@@ -10,9 +10,7 @@ export interface HistoryRecord {
 }
 
 export function summaryToHistoryRecord(summary: EvalSummary, date: string, runUrl?: string): HistoryRecord {
-  const rubricScores = summary.results
-    .map(result => result.rubricScore)
-    .filter(score => score !== undefined);
+  const rubricScores = summary.results.map((result) => result.rubricScore).filter((score) => score !== undefined);
 
   return {
     date,
@@ -29,8 +27,8 @@ export function summaryToHistoryRecord(summary: EvalSummary, date: string, runUr
 export function parseHistory(jsonl: string): HistoryRecord[] {
   return jsonl
     .split('\n')
-    .filter(line => line.trim())
-    .map(line => JSON.parse(line) as HistoryRecord);
+    .filter((line) => line.trim())
+    .map((line) => JSON.parse(line) as HistoryRecord);
 }
 
 export function appendHistoryLine(existing: string, record: HistoryRecord): string {
@@ -54,7 +52,7 @@ export function renderTrend(records: HistoryRecord[], opts: { window?: number; m
   lines.push(
     '| date | pass rate | route acc | mean rubric | cost |',
     '| --- | --- | --- | --- | --- |',
-    ...visible.map(record => {
+    ...visible.map((record) => {
       const columns = [
         record.date,
         formatPercent(record.passRate),

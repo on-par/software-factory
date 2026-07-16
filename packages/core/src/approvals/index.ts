@@ -39,7 +39,7 @@ const REQUEST_SUFFIX = '.request.json';
 const RESPONSE_SUFFIX = '.response.json';
 
 function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function createFileApprovalGate(opts: FileApprovalGateOptions): ApprovalGate {
@@ -101,7 +101,11 @@ export function listPendingApprovals(dir: string): ApprovalRequest[] {
 }
 
 /** Write <id>.response.json atomically (write to <id>.response.json.tmp, then renameSync). TUI-side helper. */
-export function respondToApproval(dir: string, id: string, res: { approved: boolean; reason?: string }): ApprovalResponse {
+export function respondToApproval(
+  dir: string,
+  id: string,
+  res: { approved: boolean; reason?: string },
+): ApprovalResponse {
   const response: ApprovalResponse = {
     id,
     approved: res.approved,

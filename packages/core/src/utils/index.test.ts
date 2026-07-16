@@ -46,7 +46,7 @@ describe('utils', () => {
   });
 
   it('preserves double quotes and shell metacharacters inside single quotes', () => {
-    expect(shellEscape('say "hi" && rm -rf /')).toBe("'say \"hi\" && rm -rf /'");
+    expect(shellEscape('say "hi" && rm -rf /')).toBe('\'say "hi" && rm -rf /\'');
   });
 
   it('escapes multiple embedded single quotes', () => {
@@ -92,10 +92,7 @@ describe('utils', () => {
 
     await expect(cleanupWorktree(tmpDir, worktreePath, spy)).resolves.toBeUndefined();
 
-    expect(spy).toHaveBeenCalledWith(
-      'warn',
-      expect.stringContaining('nonexistent-wt'),
-    );
+    expect(spy).toHaveBeenCalledWith('warn', expect.stringContaining('nonexistent-wt'));
   });
 
   it('appends events as NDJSON', async () => {
@@ -109,7 +106,7 @@ describe('utils', () => {
     const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter(Boolean);
     expect(lines).toHaveLength(2);
 
-    const events = lines.map(line => JSON.parse(line));
+    const events = lines.map((line) => JSON.parse(line));
     expect(events[0]).toEqual({
       ts: expect.any(String),
       type: 'plan',

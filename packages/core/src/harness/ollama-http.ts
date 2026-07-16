@@ -57,7 +57,7 @@ export class OllamaHttpHarness implements CodingHarness {
         });
       }
 
-      const data = await res.json() as { message?: { content?: string }; response?: string; error?: string };
+      const data = (await res.json()) as { message?: { content?: string }; response?: string; error?: string };
       if (data.error) {
         throw new HarnessError(data.error, classifyFailure(data.error, 1), { exitCode: 1, stderr: data.error });
       }
@@ -72,13 +72,17 @@ export class OllamaHttpHarness implements CodingHarness {
       if (err.name === 'TimeoutError' || err.name === 'AbortError') {
         throw new HarnessError(err.message ?? String(err), 'timeout', {});
       }
-      throw new HarnessError(err.message ?? String(err), err.reason ?? classifyFailure(err.stderr ?? err.message ?? '', err.code ?? 1), {
-        exitCode: typeof err.code === 'number' ? err.code : undefined,
-        stderr: err.stderr,
-        code: typeof err.code === 'string' || typeof err.code === 'number' ? err.code : undefined,
-        signal: typeof err.signal === 'string' ? err.signal : undefined,
-        killed: err.killed === true ? true : undefined,
-      });
+      throw new HarnessError(
+        err.message ?? String(err),
+        err.reason ?? classifyFailure(err.stderr ?? err.message ?? '', err.code ?? 1),
+        {
+          exitCode: typeof err.code === 'number' ? err.code : undefined,
+          stderr: err.stderr,
+          code: typeof err.code === 'string' || typeof err.code === 'number' ? err.code : undefined,
+          signal: typeof err.signal === 'string' ? err.signal : undefined,
+          killed: err.killed === true ? true : undefined,
+        },
+      );
     }
   }
 }

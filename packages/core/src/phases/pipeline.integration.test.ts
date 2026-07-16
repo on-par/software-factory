@@ -126,10 +126,7 @@ describe('pipeline integration', () => {
         body: expect.stringContaining('Closes #34'),
       }),
     ]);
-    expect(calls).toContainEqual([
-      'pulls.get',
-      expect.objectContaining({ pull_number: 101 }),
-    ]);
+    expect(calls).toContainEqual(['pulls.get', expect.objectContaining({ pull_number: 101 })]);
     expect(calls).toContainEqual([
       'graphql',
       expect.stringContaining('markPullRequestReadyForReview'),
@@ -139,94 +136,98 @@ describe('pipeline integration', () => {
     await expect(exec(`git -C '${origin}' rev-parse --verify refs/heads/'${branch}'`)).resolves.toBeTruthy();
   });
 
-  it('rework path: failing checker re-invokes worker with failure details, then ships', { timeout: 120_000 }, async () => {
-    const title = 'Full pipeline rework path';
-    const { repoRoot } = await kit.makeThrowawayRepo();
-    const worktree = kit.trackWorktree(repoRoot, issue);
-    const branch = branchFor(issue, title);
-    const specPath = await kit.makeSpecPath(issue);
-    const { octokit, calls } = makeFakeOctokit({ [issue]: title });
-    const events: Array<[string, string]> = [];
-    const log = (type: string, msg: string) => events.push([type, msg]);
-    const stub = new StubModelExecutor({
-      scripts: {
-        plan: [{ output: specContentFor(issue) }],
-        build_claude: [
-          {
-            output: 'built with failing verify',
-            effect: async (ctx) => {
-              await writeFile(join(ctx.worktree, 'feature.txt'), 'rework path\n');
-              await mkdir(join(ctx.worktree, 'scripts'), { recursive: true });
-              await writeFile(join(ctx.worktree, 'scripts', 'verify.sh'), '#!/bin/bash\necho "boom" >&2\nexit 1\n');
-              await commitAll(ctx.worktree, 'feat: stub work');
+  it(
+    'rework path: failing checker re-invokes worker with failure details, then ships',
+    { timeout: 120_000 },
+    async () => {
+      const title = 'Full pipeline rework path';
+      const { repoRoot } = await kit.makeThrowawayRepo();
+      const worktree = kit.trackWorktree(repoRoot, issue);
+      const branch = branchFor(issue, title);
+      const specPath = await kit.makeSpecPath(issue);
+      const { octokit, calls } = makeFakeOctokit({ [issue]: title });
+      const events: Array<[string, string]> = [];
+      const log = (type: string, msg: string) => events.push([type, msg]);
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{ output: specContentFor(issue) }],
+          build_claude: [
+            {
+              output: 'built with failing verify',
+              effect: async (ctx) => {
+                await writeFile(join(ctx.worktree, 'feature.txt'), 'rework path\n');
+                await mkdir(join(ctx.worktree, 'scripts'), { recursive: true });
+                await writeFile(join(ctx.worktree, 'scripts', 'verify.sh'), '#!/bin/bash\necho "boom" >&2\nexit 1\n');
+                await commitAll(ctx.worktree, 'feat: stub work');
+              },
             },
-          },
-          {
-            output: 'fixed',
-            effect: async (ctx) => {
-              await writeFile(join(ctx.worktree, 'scripts', 'verify.sh'), '#!/bin/bash\nexit 0\n');
-              await commitAll(ctx.worktree, 'fix: repair verify script');
+            {
+              output: 'fixed',
+              effect: async (ctx) => {
+                await writeFile(join(ctx.worktree, 'scripts', 'verify.sh'), '#!/bin/bash\nexit 0\n');
+                await commitAll(ctx.worktree, 'fix: repair verify script');
+              },
             },
-          },
-        ],
-      },
-    });
-    const router = new ModelRouter(makeStubModelsConfig(), makeStubRoutesConfig(), false, stub);
-    const constitution = null;
+          ],
+        },
+      });
+      const router = new ModelRouter(makeStubModelsConfig(), makeStubRoutesConfig(), false, stub);
+      const constitution = null;
 
-    const plan = await planPhase({
-      issue,
-      repo,
-      worktree,
-      specPath,
-      router,
-      constitution,
-      octokit: octokit as any,
-      log,
-    });
-    expect(plan.ok).toBe(true);
-    expect(plan.route).toBe('claude');
+      const plan = await planPhase({
+        issue,
+        repo,
+        worktree,
+        specPath,
+        router,
+        constitution,
+        octokit: octokit as any,
+        log,
+      });
+      expect(plan.ok).toBe(true);
+      expect(plan.route).toBe('claude');
 
-    await setupWorktree(repoRoot, branch, worktree);
+      await setupWorktree(repoRoot, branch, worktree);
 
-    const build = await buildPhase({
-      issue,
-      repo,
-      worktree,
-      specPath,
-      branch,
-      route: plan.route,
-      router,
-      constitution,
-      log,
-    });
-    expect(build.ok).toBe(true);
+      const build = await buildPhase({
+        issue,
+        repo,
+        worktree,
+        specPath,
+        branch,
+        route: plan.route,
+        router,
+        constitution,
+        log,
+      });
+      expect(build.ok).toBe(true);
 
-    const check = await checkPhase({ issue, worktree, specPath, router, constitution, log });
-    expect(check.passed).toBe(true);
-    expect(check.reworkRounds).toBe(1);
+      const check = await checkPhase({ issue, worktree, specPath, router, constitution, log });
+      expect(check.passed).toBe(true);
+      expect(check.reworkRounds).toBe(1);
 
-    const buildCalls = stub.calls.filter(call => call.task === 'build_claude');
-    expect(buildCalls).toHaveLength(2);
-    expect(buildCalls[1].prompt).toContain('Check Failures');
-    expect(buildCalls[1].prompt).toContain('### tests');
-    expect(buildCalls[1].prompt).toContain('boom');
+      const buildCalls = stub.calls.filter((call) => call.task === 'build_claude');
+      expect(buildCalls).toHaveLength(2);
+      expect(buildCalls[1].prompt).toContain('Check Failures');
+      expect(buildCalls[1].prompt).toContain('### tests');
+      expect(buildCalls[1].prompt).toContain('boom');
 
-    const ship = await shipPhase({
-      issue,
-      repo,
-      worktree,
-      branch,
-      octokit: octokit as any,
-      watchCI: false,
-      log,
-    });
+      const ship = await shipPhase({
+        issue,
+        repo,
+        worktree,
+        branch,
+        octokit: octokit as any,
+        watchCI: false,
+        log,
+      });
 
-    expect(ship).toEqual({ ok: true, prNumber: 101 });
-    expect(events.some(([type]) => type === 'rework')).toBe(true);
-    expect(events.some(([type]) => type === 'ready')).toBe(true);
-    expect(calls.filter(([name]) => name === 'pulls.create')).toHaveLength(1);
-  });
+      expect(ship).toEqual({ ok: true, prNumber: 101 });
+      expect(events.some(([type]) => type === 'rework')).toBe(true);
+      expect(events.some(([type]) => type === 'ready')).toBe(true);
+      expect(calls.filter(([name]) => name === 'pulls.create')).toHaveLength(1);
+    },
+  );
 
   it('resets worktree state between a failed build attempt and its failover', { timeout: 120_000 }, async () => {
     const title = 'Worktree reset between failover attempts';
@@ -293,8 +294,8 @@ describe('pipeline integration', () => {
     expect(build.ok).toBe(true);
     expect(build.model).toBe('model-b');
 
-    const buildCalls = stub.calls.filter(call => call.task === 'build_claude');
+    const buildCalls = stub.calls.filter((call) => call.task === 'build_claude');
     expect(buildCalls).toHaveLength(2);
-    expect(buildCalls.map(call => call.model)).toEqual(['model-a', 'model-b']);
+    expect(buildCalls.map((call) => call.model)).toEqual(['model-a', 'model-b']);
   });
 });

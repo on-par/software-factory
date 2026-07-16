@@ -86,7 +86,7 @@ Root causes, in order of importance:
    propagates out of `runOllamaCommandAgent`, the router classifies it as
    `error`, retries once, then kills the model. For an agent loop this is
    backwards — a failing command (file not found, grep no-match, failing
-   test) is the most valuable *observation* to feed back, not a crash. This
+   test) is the most valuable _observation_ to feed back, not a crash. This
    is the direct mechanism behind both `(error)` failures.
 3. **`empty_response` = format non-compliance.** When the model's first turn
    contains neither parseable JSON nor a bash fence, `parseLocalAgentAction`
@@ -96,7 +96,7 @@ Root causes, in order of importance:
 4. **No context accounting.** The worker prompt = compacted spec (≤6,000
    chars) + rules + growing tails of command output, re-sent as one flat user
    message every turn against `num_ctx: 8192`. Ollama silently truncates the
-   *front* of an over-long prompt — exactly where the spec sits.
+   _front_ of an over-long prompt — exactly where the spec sits.
 5. **Wrong task granularity.** The frozen #137 spec is a ~60-line multi-
    section document with an embedded verification protocol. Small models
    reliably execute one bounded step with its context in hand; they do not
@@ -129,7 +129,7 @@ Ollama's native API gives us the primitives needed for a better harness:
   against subagent fanout on 16 GB RAM.
   Source: https://github.com/ollama/ollama/blob/main/docs/faq.mdx
 - The Codex CLI installed here supports `codex exec --oss --local-provider
-  ollama -m <model>`, but local models still need a harness that they can actually
+ollama -m <model>`, but local models still need a harness that they can actually
   follow. The CLI option proves connectivity, not tool-use reliability.
   Source: local `codex exec --help`, observed 2026-07-13.
 - SWE-agent's paper argues that agent-computer interface design materially
@@ -215,19 +215,19 @@ agent runtimes can handle bigger chunks.
 
 `TaskSizer`
 : Reads the issue/spec and classifies work by estimated complexity: files
-  touched, test surface, design ambiguity, and maximum safe step size. Emits a
-  profile recommendation: `local-small`, `workhorse`, or `escalate`.
+touched, test surface, design ambiguity, and maximum safe step size. Emits a
+profile recommendation: `local-small`, `workhorse`, or `escalate`.
 
 `StepPlan`
 : A structured artifact committed to the worktree or temp dir. It contains tiny
-  deliverable steps, acceptance criteria per step, expected files, verification
-  command, and escalation conditions. This is the Markdown/JSON bridge Patrick
-  described.
+deliverable steps, acceptance criteria per step, expected files, verification
+command, and escalation conditions. This is the Markdown/JSON bridge Patrick
+described.
 
 `ContextPackBuilder`
 : Deterministically builds the prompt context for one step. It should use repo
-  search, file excerpts, test snippets, package scripts, and git diff. It should
-  not dump the full issue, full spec, and full constitution on every turn.
+search, file excerpts, test snippets, package scripts, and git diff. It should
+not dump the full issue, full spec, and full constitution on every turn.
 
 `PatchProposer`
 : Calls the model with a JSON schema and asks for either:
@@ -239,21 +239,21 @@ agent runtimes can handle bigger chunks.
 
 `PatchApplier`
 : Validates and applies unified diffs. Enforces max files, max lines, allowed
-  paths, no lockfile churn unless requested, and no unrelated files. This is
-  safer than letting small models issue arbitrary shell edits.
+paths, no lockfile churn unless requested, and no unrelated files. This is
+safer than letting small models issue arbitrary shell edits.
 
 `StepVerifier`
 : Runs the cheapest relevant command after each step. Uses deterministic checks
-  first. If verification fails, captures only the useful failure excerpt for a
-  repair prompt.
+first. If verification fails, captures only the useful failure excerpt for a
+repair prompt.
 
 `RepairLoop`
 : Allows one or two repair attempts per step. If repair fails, shrink the step,
-  replan, or escalate to a larger profile.
+replan, or escalate to a larger profile.
 
 `ModelProfile`
 : Encodes prompt budget, max touched files, max patch lines, allowed action
-  types, retry count, Ollama keep-alive policy, and concurrency.
+types, retry count, Ollama keep-alive policy, and concurrency.
 
 ## Local-Small Profile
 

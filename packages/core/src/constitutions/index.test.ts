@@ -34,11 +34,7 @@ describe('ConstitutionLoader repo-first resolution', () => {
   });
 
   it('exposes the instruction-file priority order', () => {
-    expect(REPO_INSTRUCTION_FILES).toEqual([
-      'CLAUDE.md',
-      'AGENTS.md',
-      '.github/copilot-instructions.md',
-    ]);
+    expect(REPO_INSTRUCTION_FILES).toEqual(['CLAUDE.md', 'AGENTS.md', '.github/copilot-instructions.md']);
   });
 
   it('resolves standards from a repo CLAUDE.md', async () => {

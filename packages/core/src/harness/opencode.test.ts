@@ -8,9 +8,17 @@ import type { ModelsConfig } from '../config/index.js';
 describe('CodingHarness contract: OpenCodeHarness', () => {
   const cases = codingHarnessContractCases({
     success: () => ({ harness: new OpenCodeHarness(async () => ({ stdout: 'opencode output', stderr: '' })) }),
-    timeout: () => ({ harness: new OpenCodeHarness(async () => { throw Object.assign(new Error('killed'), { killed: true }); }) }),
+    timeout: () => ({
+      harness: new OpenCodeHarness(async () => {
+        throw Object.assign(new Error('killed'), { killed: true });
+      }),
+    }),
     emptyOutput: () => ({ harness: new OpenCodeHarness(async () => ({ stdout: '   ', stderr: '' })) }),
-    failure: () => ({ harness: new OpenCodeHarness(async () => { throw Object.assign(new Error('boom'), { stderr: 'rate limit exceeded', code: 1 }); }) }),
+    failure: () => ({
+      harness: new OpenCodeHarness(async () => {
+        throw Object.assign(new Error('boom'), { stderr: 'rate limit exceeded', code: 1 });
+      }),
+    }),
   });
   for (const contractCase of cases) it(contractCase.name, contractCase.run);
 });
@@ -66,13 +74,15 @@ describe('OpenCodeHarness command shape', () => {
     const rec = recordingExec({ stdout: 'OPENCODE OUTPUT' });
     const harness = new OpenCodeHarness(rec.fn);
 
-    const result = await harness.run(makeContractRequest({
-      model: 'opencode-model',
-      registry,
-      prompt: 'build it',
-      worktree: '/tmp/factory worktree',
-      timeoutSeconds: 7,
-    }));
+    const result = await harness.run(
+      makeContractRequest({
+        model: 'opencode-model',
+        registry,
+        prompt: 'build it',
+        worktree: '/tmp/factory worktree',
+        timeoutSeconds: 7,
+      }),
+    );
 
     expect(result.output).toBe('OPENCODE OUTPUT');
     expect(rec.calls).toHaveLength(1);
@@ -104,7 +114,7 @@ describe('OpenCodeHarness failure classification', () => {
       throw Object.assign(new Error('boom'), { stderr: 'quota exceeded', code: 1 });
     });
 
-    const err: any = await harness.run(makeContractRequest({ model: 'opencode-model', registry })).catch(e => e);
+    const err: any = await harness.run(makeContractRequest({ model: 'opencode-model', registry })).catch((e) => e);
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('usage_cap');
@@ -116,7 +126,7 @@ describe('OpenCodeHarness failure classification', () => {
       throw Object.assign(new Error('killed'), { killed: true });
     });
 
-    const err: any = await harness.run(makeContractRequest({ model: 'opencode-model', registry })).catch(e => e);
+    const err: any = await harness.run(makeContractRequest({ model: 'opencode-model', registry })).catch((e) => e);
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('timeout');

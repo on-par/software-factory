@@ -34,7 +34,11 @@ export const compileChecker: CheckerFn = async (ctx) => {
     if (hasBuild) {
       const r = await runCommand(['npm', 'run', 'build'], { cwd: ctx.worktree, timeoutMs: 120_000 });
       if (r.ok) return { checker: 'compile', result: 'PASS', details: 'npm run build: OK' };
-      return { checker: 'compile', result: 'FAIL', details: `npm run build failed: ${describeCommandFailure(r).slice(0, 500)}` };
+      return {
+        checker: 'compile',
+        result: 'FAIL',
+        details: `npm run build failed: ${describeCommandFailure(r).slice(0, 500)}`,
+      };
     }
 
     if (await fileExists(join(ctx.worktree, 'Makefile'))) {
@@ -46,7 +50,11 @@ export const compileChecker: CheckerFn = async (ctx) => {
     if (await fileExists(join(ctx.worktree, 'Cargo.toml'))) {
       const r = await runCommand(['cargo', 'build'], { cwd: ctx.worktree, timeoutMs: 120_000 });
       if (r.ok) return { checker: 'compile', result: 'PASS', details: 'cargo build: OK' };
-      return { checker: 'compile', result: 'FAIL', details: `cargo build failed: ${describeCommandFailure(r).slice(0, 500)}` };
+      return {
+        checker: 'compile',
+        result: 'FAIL',
+        details: `cargo build failed: ${describeCommandFailure(r).slice(0, 500)}`,
+      };
     }
 
     return { checker: 'compile', result: 'PASS', details: 'no build system detected — skipped' };
@@ -64,21 +72,30 @@ export const testsChecker: CheckerFn = async (ctx) => {
     if (await fileExists(join(ctx.worktree, 'scripts/verify.sh'))) {
       const r = await runCommand(['bash', 'scripts/verify.sh', '--no-e2e'], { cwd: ctx.worktree, timeoutMs: 300_000 });
       if (r.ok) return { checker: 'tests', result: 'PASS', details: 'scripts/verify.sh: OK' };
-      return { checker: 'tests', result: 'FAIL', details: `verify.sh failed: ${describeCommandFailure(r).slice(0, 500)}` };
+      return {
+        checker: 'tests',
+        result: 'FAIL',
+        details: `verify.sh failed: ${describeCommandFailure(r).slice(0, 500)}`,
+      };
     }
 
     const pkg = await getPackageJson(ctx);
     if (pkg?.scripts?.test) {
       const r = await runCommand(['npm', 'test'], { cwd: ctx.worktree, timeoutMs: 300_000 });
       if (r.ok) return { checker: 'tests', result: 'PASS', details: 'npm test: OK' };
-      return { checker: 'tests', result: 'FAIL', details: `npm test failed: ${describeCommandFailure(r).slice(0, 500)}` };
+      return {
+        checker: 'tests',
+        result: 'FAIL',
+        details: `npm test failed: ${describeCommandFailure(r).slice(0, 500)}`,
+      };
     }
 
     if (ctx.testsRequired) {
       return {
         checker: 'tests',
         result: 'FAIL',
-        details: 'no verification command was run — constitution requires tests (requireTests: true) but the worktree has no scripts/verify.sh and no package.json test script',
+        details:
+          'no verification command was run — constitution requires tests (requireTests: true) but the worktree has no scripts/verify.sh and no package.json test script',
       };
     }
     return {
@@ -149,7 +166,7 @@ export const linksChecker: CheckerFn = async (ctx) => {
       urls.add(url);
     }
 
-    broken += html.split(/\r?\n/).filter(l => l.includes('href="#"')).length;
+    broken += html.split(/\r?\n/).filter((l) => l.includes('href="#"')).length;
   }
 
   const checked = urls.size;
@@ -157,9 +174,7 @@ export const linksChecker: CheckerFn = async (ctx) => {
   return {
     checker: 'links',
     result: broken > 0 ? 'FAIL' : 'PASS',
-    details: broken > 0
-      ? `${broken} placeholder href="#" links found`
-      : `checked ${checked} links, all OK`,
+    details: broken > 0 ? `${broken} placeholder href="#" links found` : `checked ${checked} links, all OK`,
     linksChecked: checked,
     broken,
   };
@@ -184,30 +199,32 @@ export const accessibilityChecker: CheckerFn = async (ctx) => {
     const html = await readFile(join(ctx.worktree, rel), 'utf-8').catch(() => '');
 
     // Images without alt
-    const imgNoAlt = (html.match(/<img[^>]*>/g) ?? []).filter(t => !t.includes('alt=')).length;
+    const imgNoAlt = (html.match(/<img[^>]*>/g) ?? []).filter((t) => !t.includes('alt=')).length;
     if (imgNoAlt > 0) {
       issues += imgNoAlt;
       details.push(`${rel}: ${imgNoAlt} images without alt`);
     }
 
     // Placeholder links
-    const ph = html.split(/\r?\n/).filter(l => l.includes('href="#"')).length;
+    const ph = html.split(/\r?\n/).filter((l) => l.includes('href="#"')).length;
     if (ph > 0) {
       issues += ph;
       details.push(`${rel}: ${ph} placeholder links`);
     }
   }
 
-  const coverage = unscanned > 0
-    ? `scanned first ${files.length} of ${allFiles.length} HTML files (${unscanned} not scanned)`
-    : `scanned ${files.length} HTML files`;
+  const coverage =
+    unscanned > 0
+      ? `scanned first ${files.length} of ${allFiles.length} HTML files (${unscanned} not scanned)`
+      : `scanned ${files.length} HTML files`;
 
   return {
     checker: 'accessibility',
     result: issues > 0 ? 'FAIL' : 'PASS',
-    details: details.length > 0
-      ? `${coverage}; ${details.join('; ')} (note: browser-based axe-core recommended for full WCAG)`
-      : `basic checks passed (alt, placeholder links) — ${coverage}`,
+    details:
+      details.length > 0
+        ? `${coverage}; ${details.join('; ')} (note: browser-based axe-core recommended for full WCAG)`
+        : `basic checks passed (alt, placeholder links) — ${coverage}`,
   };
 };
 
@@ -220,11 +237,7 @@ function isCustomCheckerVerdict(
 ): value is { checker: string; result: 'PASS' | 'FAIL'; details: string } {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
-  return (
-    v.checker === checkerName &&
-    (v.result === 'PASS' || v.result === 'FAIL') &&
-    typeof v.details === 'string'
-  );
+  return v.checker === checkerName && (v.result === 'PASS' || v.result === 'FAIL') && typeof v.details === 'string';
 }
 
 export async function runCustomChecker(
@@ -263,7 +276,11 @@ Steps:
     // Extract the verdict: first balanced JSON object that carries a "checker" key
     const candidates = extractJsonObjects(result.output);
     const verdictCandidate = candidates.find(
-      c => typeof c.value === 'object' && c.value !== null && !Array.isArray(c.value) && 'checker' in (c.value as Record<string, unknown>),
+      (c) =>
+        typeof c.value === 'object' &&
+        c.value !== null &&
+        !Array.isArray(c.value) &&
+        'checker' in (c.value as Record<string, unknown>),
     );
     if (verdictCandidate) {
       if (isCustomCheckerVerdict(verdictCandidate.value, checkerName)) {
@@ -309,7 +326,7 @@ export async function runAllCheckers(
   const standardNames = Object.keys(BUILT_IN_CHECKERS);
   const productCheckers = constitution?.checkers ?? [];
 
-  const allCheckers = [...standardNames, ...productCheckers.filter(c => !standardNames.includes(c))];
+  const allCheckers = [...standardNames, ...productCheckers.filter((c) => !standardNames.includes(c))];
   let packageJson: PackageJson | null | undefined;
   try {
     packageJson = await loadPackageJson(ctx.worktree);
@@ -353,9 +370,9 @@ export async function runAllCheckers(
     results.push(output);
   }
 
-  const failures = results.filter(r => r.result === 'FAIL').length;
-  const passes = results.filter(r => r.result === 'PASS').length;
-  const skips = results.filter(r => r.result === 'SKIP').length;
+  const failures = results.filter((r) => r.result === 'FAIL').length;
+  const passes = results.filter((r) => r.result === 'PASS').length;
+  const skips = results.filter((r) => r.result === 'SKIP').length;
 
   return {
     failures,

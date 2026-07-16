@@ -5,7 +5,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { captureWorktreeState, resetWorktreeState } from './worktree-state.js';
 import type { GitExecFn, WorktreeSnapshot } from './worktree-state.js';
 
-type Handler = (cmd: string, opts: { cwd?: string }) => Promise<{ stdout: string; stderr: string }> | { stdout: string; stderr: string };
+type Handler = (
+  cmd: string,
+  opts: { cwd?: string },
+) => Promise<{ stdout: string; stderr: string }> | { stdout: string; stderr: string };
 
 function makeFakeExec(handlers: Array<[RegExp, Handler]>): { execFn: GitExecFn; calls: string[] } {
   const calls: string[] = [];
@@ -24,11 +27,16 @@ const worktree = '/fake/worktree';
 describe('captureWorktreeState', () => {
   it('returns null and logs when git rev-parse --show-toplevel rejects', async () => {
     const { execFn } = makeFakeExec([
-      [/git rev-parse --show-toplevel/, () => { throw new Error('not a git repo'); }],
+      [
+        /git rev-parse --show-toplevel/,
+        () => {
+          throw new Error('not a git repo');
+        },
+      ],
     ]);
     const logs: string[] = [];
 
-    const result = await captureWorktreeState(execFn, worktree, msg => logs.push(msg));
+    const result = await captureWorktreeState(execFn, worktree, (msg) => logs.push(msg));
 
     expect(result).toBeNull();
     expect(logs).toContain(`worktree state guard disabled: ${worktree} is not a git worktree root`);
@@ -40,7 +48,7 @@ describe('captureWorktreeState', () => {
     ]);
     const logs: string[] = [];
 
-    const result = await captureWorktreeState(execFn, worktree, msg => logs.push(msg));
+    const result = await captureWorktreeState(execFn, worktree, (msg) => logs.push(msg));
 
     expect(result).toBeNull();
     expect(logs).toContain(`worktree state guard disabled: ${worktree} is not a git worktree root`);
@@ -54,7 +62,7 @@ describe('captureWorktreeState', () => {
     ]);
     const logs: string[] = [];
 
-    const result = await captureWorktreeState(execFn, worktree, msg => logs.push(msg));
+    const result = await captureWorktreeState(execFn, worktree, (msg) => logs.push(msg));
 
     expect(result).toBeNull();
     expect(logs).toContain('worktree state guard disabled: baseline has uncommitted tracked changes');
@@ -68,7 +76,7 @@ describe('captureWorktreeState', () => {
     ]);
     const logs: string[] = [];
 
-    const result = await captureWorktreeState(execFn, worktree, msg => logs.push(msg));
+    const result = await captureWorktreeState(execFn, worktree, (msg) => logs.push(msg));
 
     expect(result).toEqual({
       headSha: 'abc123',
@@ -82,7 +90,7 @@ describe('resetWorktreeState', () => {
   const writtenFiles: string[] = [];
 
   afterEach(async () => {
-    await Promise.all(writtenFiles.map(path => rm(path, { force: true })));
+    await Promise.all(writtenFiles.map((path) => rm(path, { force: true })));
     writtenFiles.length = 0;
   });
 
@@ -99,10 +107,10 @@ describe('resetWorktreeState', () => {
     ]);
     const logs: string[] = [];
 
-    const result = await resetWorktreeState(execFn, worktree, snapshot, msg => logs.push(msg));
+    const result = await resetWorktreeState(execFn, worktree, snapshot, (msg) => logs.push(msg));
 
     expect(result).toEqual({ didReset: false });
-    expect(calls.some(c => c.includes('git reset'))).toBe(false);
+    expect(calls.some((c) => c.includes('git reset'))).toBe(false);
   });
 
   it('resets and writes a trace when dirty', async () => {
@@ -115,17 +123,17 @@ describe('resetWorktreeState', () => {
     ]);
     const logs: string[] = [];
 
-    const result = await resetWorktreeState(execFn, worktree, snapshot, msg => logs.push(msg));
+    const result = await resetWorktreeState(execFn, worktree, snapshot, (msg) => logs.push(msg));
 
     expect(result.didReset).toBe(true);
     expect(result.tracePath).toBeDefined();
     expect(result.tracePath!.startsWith(tmpdir())).toBe(true);
     if (result.tracePath) writtenFiles.push(result.tracePath);
 
-    const resetCmd = calls.find(c => c.startsWith('git reset --hard'));
+    const resetCmd = calls.find((c) => c.startsWith('git reset --hard'));
     expect(resetCmd).toBe(`git reset --hard 'abc123'`);
 
-    const cleanCmd = calls.find(c => c.startsWith('git clean -fd'));
+    const cleanCmd = calls.find((c) => c.startsWith('git clean -fd'));
     expect(cleanCmd).toContain(`-e 'notes.txt'`);
     expect(cleanCmd).not.toContain('-x');
 
@@ -138,18 +146,23 @@ describe('resetWorktreeState', () => {
     const { execFn, calls } = makeFakeExec([
       [/git rev-parse HEAD/, () => ({ stdout: 'def456\n', stderr: '' })],
       [/git status --porcelain/, () => ({ stdout: ' M src/x.ts\n', stderr: '' })],
-      [/git diff HEAD/, () => { throw new Error('diff exploded'); }],
+      [
+        /git diff HEAD/,
+        () => {
+          throw new Error('diff exploded');
+        },
+      ],
       [/git reset --hard/, () => ({ stdout: '', stderr: '' })],
       [/git clean -fd/, () => ({ stdout: '', stderr: '' })],
     ]);
     const logs: string[] = [];
 
-    const result = await resetWorktreeState(execFn, worktree, snapshot, msg => logs.push(msg));
+    const result = await resetWorktreeState(execFn, worktree, snapshot, (msg) => logs.push(msg));
 
     expect(result.didReset).toBe(true);
     expect(result.tracePath).toBeUndefined();
-    expect(logs.some(msg => msg.includes('failed to write attempt trace'))).toBe(true);
-    expect(calls.some(c => c.startsWith('git reset --hard'))).toBe(true);
+    expect(logs.some((msg) => msg.includes('failed to write attempt trace'))).toBe(true);
+    expect(calls.some((c) => c.startsWith('git reset --hard'))).toBe(true);
   });
 
   it('propagates a rejecting git reset --hard', async () => {
@@ -157,10 +170,17 @@ describe('resetWorktreeState', () => {
       [/git rev-parse HEAD/, () => ({ stdout: 'def456\n', stderr: '' })],
       [/git status --porcelain/, () => ({ stdout: ' M src/x.ts\n', stderr: '' })],
       [/git diff HEAD/, () => ({ stdout: 'diff text\n', stderr: '' })],
-      [/git reset --hard/, () => { throw new Error('reset exploded'); }],
+      [
+        /git reset --hard/,
+        () => {
+          throw new Error('reset exploded');
+        },
+      ],
     ]);
     const logs: string[] = [];
 
-    await expect(resetWorktreeState(execFn, worktree, snapshot, msg => logs.push(msg))).rejects.toThrow('reset exploded');
+    await expect(resetWorktreeState(execFn, worktree, snapshot, (msg) => logs.push(msg))).rejects.toThrow(
+      'reset exploded',
+    );
   });
 });

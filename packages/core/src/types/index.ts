@@ -147,7 +147,18 @@ export interface DisputeResult {
 
 // ---------- Run State ----------
 
-export type RunStatus = 'pending' | 'planning' | 'building' | 'checking' | 'reworking' | 'shipping' | 'ready' | 'parked' | 'escalated' | 'merged' | 'failed';
+export type RunStatus =
+  | 'pending'
+  | 'planning'
+  | 'building'
+  | 'checking'
+  | 'reworking'
+  | 'shipping'
+  | 'ready'
+  | 'parked'
+  | 'escalated'
+  | 'merged'
+  | 'failed';
 
 export interface IssueRunState {
   issue: number;

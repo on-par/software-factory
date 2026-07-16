@@ -177,5 +177,5 @@ export function formatDoctorChecks(checks: DoctorCheck[]): string {
 }
 
 export function doctorFailed(checks: DoctorCheck[]): boolean {
-  return checks.some(c => !c.ok && !c.optional);
+  return checks.some((c) => !c.ok && !c.optional);
 }

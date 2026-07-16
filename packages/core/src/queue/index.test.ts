@@ -35,14 +35,14 @@ describe('validateQueue', () => {
   it('rejects a blank line in the middle', () => {
     const result = validateQueue('app 5\n\napp 6\n');
     expect(result.ok).toBe(false);
-    expect(result.errors.some(e => e.includes('line 2') && e.includes('empty line'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('line 2') && e.includes('empty line'))).toBe(true);
   });
 
   it('rejects malformed entries', () => {
     expect(validateQueue('app five\n').ok).toBe(false);
-    expect(validateQueue('app five\n').errors.some(e => e.includes('malformed'))).toBe(true);
+    expect(validateQueue('app five\n').errors.some((e) => e.includes('malformed'))).toBe(true);
     expect(validateQueue('justoneword\n').ok).toBe(false);
-    expect(validateQueue('justoneword\n').errors.some(e => e.includes('malformed'))).toBe(true);
+    expect(validateQueue('justoneword\n').errors.some((e) => e.includes('malformed'))).toBe(true);
   });
 
   it('rejects issue number 0', () => {
@@ -53,7 +53,7 @@ describe('validateQueue', () => {
   it('rejects duplicate issues but keeps the first parse', () => {
     const result = validateQueue('app 5\ninfra 5\n');
     expect(result.ok).toBe(false);
-    expect(result.errors.some(e => e.includes('duplicate issue #5'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('duplicate issue #5'))).toBe(true);
     expect(result.issues).toEqual([5]);
   });
 
@@ -82,22 +82,20 @@ describe('parseQueue', () => {
     expect(result.entries).toEqual([{ lane: 'app', issue: 5, lineNo: 3 }]);
   });
 
-  it.each([
-    ['app abc\n'],
-    ['justoneword\n'],
-    ['app 0\n'],
-    ['app 5 extra\n'],
-  ])('flags a malformed entry with a diagnostic: %s', (content) => {
-    const result = parseQueue(content);
-    expect(result.entries).toEqual([]);
-    expect(result.diagnostics).toHaveLength(1);
-    expect(result.diagnostics[0].lineNo).toBe(1);
-    expect(result.diagnostics[0].message).toContain('malformed');
-  });
+  it.each([['app abc\n'], ['justoneword\n'], ['app 0\n'], ['app 5 extra\n']])(
+    'flags a malformed entry with a diagnostic: %s',
+    (content) => {
+      const result = parseQueue(content);
+      expect(result.entries).toEqual([]);
+      expect(result.diagnostics).toHaveLength(1);
+      expect(result.diagnostics[0].lineNo).toBe(1);
+      expect(result.diagnostics[0].message).toContain('malformed');
+    },
+  );
 
   it('skips malformed lines but keeps valid entries in a mixed file', () => {
     const result = parseQueue('# h\napp 1\nbad line here\napp 2\n');
-    expect(result.entries.map(e => e.issue)).toEqual([1, 2]);
+    expect(result.entries.map((e) => e.issue)).toEqual([1, 2]);
     expect(result.diagnostics).toHaveLength(1);
     expect(result.diagnostics[0].lineNo).toBe(3);
   });
@@ -133,7 +131,12 @@ describe('readQueue', () => {
     const dir = mkdtemp();
     const queueFile = join(dir, 'queue');
     writeFileSync(queueFile, 'app 5\ninfra 6\n');
-    expect(readQueue(queueFile)).toEqual({ entries: [{ lane: 'app', issue: 5 }, { lane: 'infra', issue: 6 }] });
+    expect(readQueue(queueFile)).toEqual({
+      entries: [
+        { lane: 'app', issue: 5 },
+        { lane: 'infra', issue: 6 },
+      ],
+    });
   });
 
   it('sets proposedCount when a proposed queue file is given and exists', () => {
@@ -168,6 +171,11 @@ describe('readQueue', () => {
     const dir = mkdtemp();
     const queueFile = join(dir, 'queue');
     writeFileSync(queueFile, '  app 5\n\tinfra 6\n');
-    expect(readQueue(queueFile)).toEqual({ entries: [{ lane: 'app', issue: 5 }, { lane: 'infra', issue: 6 }] });
+    expect(readQueue(queueFile)).toEqual({
+      entries: [
+        { lane: 'app', issue: 5 },
+        { lane: 'infra', issue: 6 },
+      ],
+    });
   });
 });

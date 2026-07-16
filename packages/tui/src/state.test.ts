@@ -34,7 +34,10 @@ describe('reduceEvent', () => {
     expect(state.model).toBe('claude-sonnet');
 
     // Plan completes with a different timestamp — since PLAN is still active, phaseStartedAt must not reset.
-    state = reduceEvent(state, ev('plan', 'Plan complete with model claude-sonnet, route: claude', '2026-01-01T00:05:00.000Z'));
+    state = reduceEvent(
+      state,
+      ev('plan', 'Plan complete with model claude-sonnet, route: claude', '2026-01-01T00:05:00.000Z'),
+    );
     expect(state.phaseStartedAt).toBe('2026-01-01T00:00:00.000Z');
     expect(state.model).toBe('claude-sonnet');
     expect(state.route).toBe('claude');
@@ -56,7 +59,10 @@ describe('reduceEvent', () => {
     expect(state.phaseStartedAt).toBe('2026-01-01T00:10:00.000Z');
 
     // Rework round: CHECK remains active, timer must not reset.
-    state = reduceEvent(state, ev('rework', '2 failures — sending back to worker (round 1)', '2026-01-01T00:12:00.000Z'));
+    state = reduceEvent(
+      state,
+      ev('rework', '2 failures — sending back to worker (round 1)', '2026-01-01T00:12:00.000Z'),
+    );
     expect(state.activePhase).toBe('CHECK');
     expect(state.phaseStartedAt).toBe('2026-01-01T00:10:00.000Z');
 

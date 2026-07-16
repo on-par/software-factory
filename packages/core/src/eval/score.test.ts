@@ -21,13 +21,13 @@ describe('scoreSpec', () => {
 
     expect(result.route).toBe('codex');
     expect(result.routeCorrect).toBe(true);
-    expect(result.checks.every(check => check.pass)).toBe(true);
+    expect(result.checks.every((check) => check.pass)).toBe(true);
   });
 
   it('fails missing frontmatter', () => {
     const result = scoreSpec(goodSpec.replace('---\nroute: codex\n---\n', ''), goodSpec, 'codex');
 
-    expect(result.checks.find(check => check.name === 'frontmatter-valid')?.pass).toBe(false);
+    expect(result.checks.find((check) => check.name === 'frontmatter-valid')?.pass).toBe(false);
   });
 
   it('parses a quoted codex route', () => {
@@ -35,7 +35,7 @@ describe('scoreSpec', () => {
     const result = scoreSpec(spec, spec, 'codex');
 
     expect(result.route).toBe('codex');
-    expect(result.checks.find(check => check.name === 'route-parseable')?.pass).toBe(true);
+    expect(result.checks.find((check) => check.name === 'route-parseable')?.pass).toBe(true);
   });
 
   it('parses claude routes with or without quotes', () => {
@@ -46,9 +46,9 @@ describe('scoreSpec', () => {
     const quotedResult = scoreSpec(quoted, quoted, 'claude');
 
     expect(unquotedResult.route).toBe('claude');
-    expect(unquotedResult.checks.find(check => check.name === 'route-parseable')?.pass).toBe(true);
+    expect(unquotedResult.checks.find((check) => check.name === 'route-parseable')?.pass).toBe(true);
     expect(quotedResult.route).toBe('claude');
-    expect(quotedResult.checks.find(check => check.name === 'route-parseable')?.pass).toBe(true);
+    expect(quotedResult.checks.find((check) => check.name === 'route-parseable')?.pass).toBe(true);
   });
 
   it('fails an unparseable route', () => {
@@ -56,14 +56,14 @@ describe('scoreSpec', () => {
     const result = scoreSpec(spec, spec, 'codex');
 
     expect(result.route).toBe('unparseable');
-    expect(result.checks.find(check => check.name === 'route-parseable')?.pass).toBe(false);
+    expect(result.checks.find((check) => check.name === 'route-parseable')?.pass).toBe(false);
   });
 
   it('fails when a required section is missing', () => {
     const spec = goodSpec.replace('## Tests\nnpm test\n', '');
     const result = scoreSpec(spec, spec, 'codex');
 
-    expect(result.checks.find(check => check.name === 'sections-present')?.pass).toBe(false);
+    expect(result.checks.find((check) => check.name === 'sections-present')?.pass).toBe(false);
   });
 
   it('requires constitution compliance only when requested', () => {
@@ -73,9 +73,11 @@ S1 satisfied.
 `;
     const present = scoreSpec(withConstitution, withConstitution, 'codex', { requireConstitution: true });
 
-    expect(missing.checks.find(check => check.name === 'sections-present')?.pass).toBe(false);
-    expect(missing.checks.find(check => check.name === 'sections-present')?.details).toContain('## Constitution compliance');
-    expect(present.checks.find(check => check.name === 'sections-present')?.pass).toBe(true);
+    expect(missing.checks.find((check) => check.name === 'sections-present')?.pass).toBe(false);
+    expect(missing.checks.find((check) => check.name === 'sections-present')?.details).toContain(
+      '## Constitution compliance',
+    );
+    expect(present.checks.find((check) => check.name === 'sections-present')?.pass).toBe(true);
   });
 
   it('fails route-correct when the spec route differs from expected', () => {
@@ -84,7 +86,7 @@ S1 satisfied.
 
     expect(result.route).toBe('claude');
     expect(result.routeCorrect).toBe(false);
-    expect(result.checks.find(check => check.name === 'route-correct')?.pass).toBe(false);
+    expect(result.checks.find((check) => check.name === 'route-correct')?.pass).toBe(false);
   });
 
   it('accepts any expected route', () => {
@@ -103,6 +105,6 @@ S1 satisfied.
     expect(escalated.routeCorrect).toBe(true);
     expect(any.routeCorrect).toBe(true);
     expect(wrong.routeCorrect).toBe(false);
-    expect(wrong.checks.find(check => check.name === 'frontmatter-valid')?.pass).toBe(true);
+    expect(wrong.checks.find((check) => check.name === 'frontmatter-valid')?.pass).toBe(true);
   });
 });

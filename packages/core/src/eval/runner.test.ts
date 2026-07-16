@@ -124,7 +124,7 @@ describe('runEval', () => {
     });
 
     expect(summary.passed).toBe(1);
-    expect(stub.calls.map(call => call.task)).toEqual(['plan']);
+    expect(stub.calls.map((call) => call.task)).toEqual(['plan']);
     expect(summary.results[0].judgeSkipped).toBe(true);
   });
 
@@ -146,18 +146,14 @@ describe('runEval', () => {
 
     expect(summary.results[0].pass).toBe(true);
     expect(summary.results[0].rubricScore).toBe(9);
-    expect(stub.calls.map(call => call.task)).toEqual(['plan', 'eval_judge']);
+    expect(stub.calls.map((call) => call.task)).toEqual(['plan', 'eval_judge']);
   });
 
   it('uses the median judge score when judgeK is greater than one', async () => {
     const stub = new StubModelExecutor({
       scripts: {
         plan: [{ output: goodSpec }],
-        eval_judge: [
-          { output: '{"score":8}' },
-          { output: '{"score":3}' },
-          { output: '{"score":7}' },
-        ],
+        eval_judge: [{ output: '{"score":8}' }, { output: '{"score":3}' }, { output: '{"score":7}' }],
       },
     });
     const router = new ModelRouter(models, routes, false, stub);
@@ -179,11 +175,7 @@ describe('runEval', () => {
     const stub = new StubModelExecutor({
       scripts: {
         plan: [{ output: goodSpec }],
-        eval_judge: [
-          { output: '{"score":8}' },
-          { output: 'not json' },
-          { output: '{"score":7}' },
-        ],
+        eval_judge: [{ output: '{"score":8}' }, { output: 'not json' }, { output: '{"score":7}' }],
       },
     });
     const router = new ModelRouter(models, routes, false, stub);
@@ -205,15 +197,8 @@ describe('runEval', () => {
   it('does not spend judge calls on deterministic-only or escalated cases', async () => {
     const stub = new StubModelExecutor({
       scripts: {
-        plan: [
-          { output: goodSpec },
-          { output: 'ESCALATE: missing required context' },
-        ],
-        eval_judge: [
-          { output: '{"score":8}' },
-          { output: '{"score":7}' },
-          { output: '{"score":6}' },
-        ],
+        plan: [{ output: goodSpec }, { output: 'ESCALATE: missing required context' }],
+        eval_judge: [{ output: '{"score":8}' }, { output: '{"score":7}' }, { output: '{"score":6}' }],
       },
     });
     const router = new ModelRouter(models, routes, false, stub);
@@ -229,7 +214,7 @@ describe('runEval', () => {
       now: tickingNow(),
     });
 
-    expect(stub.calls.map(call => call.task)).not.toContain('eval_judge');
+    expect(stub.calls.map((call) => call.task)).not.toContain('eval_judge');
     expect(summary.results[0].judgeSkipped).toBe(true);
     expect(summary.results[1].judgeSkipped).toBe(true);
   });
@@ -329,7 +314,8 @@ describe('runEval', () => {
 
     expect(summary.results[0].pass).toBe(true);
     expect(summary.results[1].pass).toBe(false);
-    expect(summary.results[1].checks.find(check => check.name === 'sections-present')?.details)
-      .toContain('## Constitution compliance');
+    expect(summary.results[1].checks.find((check) => check.name === 'sections-present')?.details).toContain(
+      '## Constitution compliance',
+    );
   });
 });

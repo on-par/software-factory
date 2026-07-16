@@ -74,20 +74,18 @@ can make, print a line starting exactly with "ESCALATE:" followed by the questio
 and do NOT write ${specPath}.`;
 }
 
-export async function planPhase(
-  opts: {
-    issue: number;
-    repo: string;
-    worktree: string;
-    specPath: string;
-    constitution: Constitution | null;
-    router: ModelRouter;
-    octokit: Octokit;
-    log: (type: string, msg: string, extra?: { failoverReason?: FailoverReason }) => void;
-    timeoutSeconds?: number;
-    modelOverride?: string;
-  },
-): Promise<PlanResult> {
+export async function planPhase(opts: {
+  issue: number;
+  repo: string;
+  worktree: string;
+  specPath: string;
+  constitution: Constitution | null;
+  router: ModelRouter;
+  octokit: Octokit;
+  log: (type: string, msg: string, extra?: { failoverReason?: FailoverReason }) => void;
+  timeoutSeconds?: number;
+  modelOverride?: string;
+}): Promise<PlanResult> {
   const { issue, repo, worktree, specPath, constitution, router, octokit, log, timeoutSeconds, modelOverride } = opts;
 
   // Get issue details
@@ -111,7 +109,9 @@ export async function planPhase(
   });
 
   for (const f of failoversFrom(result.attempts)) {
-    log('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, { failoverReason: f.reason });
+    log('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, {
+      failoverReason: f.reason,
+    });
   }
 
   // Check for escalation
@@ -163,10 +163,7 @@ export async function planPhase(
   return { ok: true, route, specPath, model: result.model };
 }
 
-async function archiveExistingSpec(
-  specPath: string,
-  log: (type: string, msg: string) => void,
-): Promise<void> {
+async function archiveExistingSpec(specPath: string, log: (type: string, msg: string) => void): Promise<void> {
   if (!existsSync(specPath)) return;
 
   const archiveDir = join(dirname(specPath), '.archive');

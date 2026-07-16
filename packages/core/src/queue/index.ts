@@ -137,9 +137,10 @@ function dedupedEntries(content: string): QueueSnapshotEntry[] {
 export function readQueue(queueFile: string, queueProposedFile?: string): QueueSnapshot {
   const entries = existsSync(queueFile) ? dedupedEntries(readFileSync(queueFile, 'utf-8')) : [];
 
-  const proposedCount = queueProposedFile && existsSync(queueProposedFile)
-    ? parseQueue(readFileSync(queueProposedFile, 'utf-8')).entries.length
-    : undefined;
+  const proposedCount =
+    queueProposedFile && existsSync(queueProposedFile)
+      ? parseQueue(readFileSync(queueProposedFile, 'utf-8')).entries.length
+      : undefined;
 
   return proposedCount === undefined ? { entries } : { entries, proposedCount };
 }

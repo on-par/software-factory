@@ -54,7 +54,11 @@ describe('cli', () => {
   });
 
   it('formats the triage proposal message with an accept hint for non-empty content', () => {
-    const message = triageProposalMessage('lane-a 1\nlane-b 2\n', '/repo/.factory/queue.proposed', '/repo/.factory/queue');
+    const message = triageProposalMessage(
+      'lane-a 1\nlane-b 2\n',
+      '/repo/.factory/queue.proposed',
+      '/repo/.factory/queue',
+    );
     expect(message).toContain('lane-a 1\nlane-b 2');
     expect(message).toContain('factory triage accept');
   });
@@ -120,14 +124,16 @@ describe('cli', () => {
   });
 
   it('resolves usage knobs from env overrides', () => {
-    expect(resolveUsageKnobs({
-      FACTORY_USAGE_CAP: '100',
-      FACTORY_STOP_AT: '0.5',
-      FACTORY_RESUME_AT: '0.4',
-      FACTORY_USAGE_POLL: '60',
-      FACTORY_USAGE_WATCH: '0',
-      FACTORY_USAGE_ESTIMATOR: '1',
-    })).toEqual({
+    expect(
+      resolveUsageKnobs({
+        FACTORY_USAGE_CAP: '100',
+        FACTORY_STOP_AT: '0.5',
+        FACTORY_RESUME_AT: '0.4',
+        FACTORY_USAGE_POLL: '60',
+        FACTORY_USAGE_WATCH: '0',
+        FACTORY_USAGE_ESTIMATOR: '1',
+      }),
+    ).toEqual({
       cap: 100,
       stopAt: 0.5,
       resumeAt: 0.4,
@@ -168,10 +174,14 @@ describe('cli', () => {
       now: false,
       readUsageFn: async () => readings.shift()!,
       pathExists: () => pathExistsResults.shift()!,
-      clearStop: path => calls.push(['clearStop', path]),
-      sleep: async () => { calls.push(['sleep']); },
-      emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) => { calls.push(['event', type, issue, msg]); },
-      writeLine: line => calls.push(['writeLine', line]),
+      clearStop: (path) => calls.push(['clearStop', path]),
+      sleep: async () => {
+        calls.push(['sleep']);
+      },
+      emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) => {
+        calls.push(['event', type, issue, msg]);
+      },
+      writeLine: (line) => calls.push(['writeLine', line]),
       runQueue: async () => {
         runQueueCalls++;
         calls.push(['runQueue']);
@@ -179,17 +189,17 @@ describe('cli', () => {
     });
 
     expect(runQueueCalls).toBe(2);
-    const firstRunQueueIdx = calls.findIndex(c => c[0] === 'runQueue');
-    const firstSleepIdx = calls.findIndex(c => c[0] === 'sleep');
+    const firstRunQueueIdx = calls.findIndex((c) => c[0] === 'runQueue');
+    const firstSleepIdx = calls.findIndex((c) => c[0] === 'sleep');
     expect(firstSleepIdx).toBeGreaterThanOrEqual(0);
     expect(firstSleepIdx).toBeLessThan(firstRunQueueIdx);
 
-    const clearStopCalls = calls.filter(c => c[0] === 'clearStop');
+    const clearStopCalls = calls.filter((c) => c[0] === 'clearStop');
     expect(clearStopCalls).toHaveLength(2);
 
-    const events = calls.filter(c => c[0] === 'event');
-    expect(events.filter(e => e[1] === 'resumed')).toHaveLength(2);
-    expect(events.filter(e => e[1] === 'supervisor-done')).toHaveLength(1);
+    const events = calls.filter((c) => c[0] === 'event');
+    expect(events.filter((e) => e[1] === 'resumed')).toHaveLength(2);
+    expect(events.filter((e) => e[1] === 'supervisor-done')).toHaveLength(1);
     expect(events[events.length - 1][1]).toBe('supervisor-done');
     expect(events[0][3]).toContain('(subscription)');
   });
@@ -207,14 +217,20 @@ describe('cli', () => {
       readUsageFn: async () => reading(0.1),
       pathExists: () => false,
       clearStop: () => {},
-      sleep: async () => { calls.push(['sleep']); },
-      emitEvent: (_eventsFile: string, type: string) => { calls.push(['event', type]); },
-      runQueue: async () => { calls.push(['runQueue']); },
+      sleep: async () => {
+        calls.push(['sleep']);
+      },
+      emitEvent: (_eventsFile: string, type: string) => {
+        calls.push(['event', type]);
+      },
+      runQueue: async () => {
+        calls.push(['runQueue']);
+      },
     });
 
-    expect(calls.filter(c => c[0] === 'runQueue')).toHaveLength(1);
-    expect(calls.filter(c => c[0] === 'sleep')).toHaveLength(0);
-    expect(calls.filter(c => c[0] === 'event' && c[1] === 'supervisor-done')).toHaveLength(1);
+    expect(calls.filter((c) => c[0] === 'runQueue')).toHaveLength(1);
+    expect(calls.filter((c) => c[0] === 'sleep')).toHaveLength(0);
+    expect(calls.filter((c) => c[0] === 'event' && c[1] === 'supervisor-done')).toHaveLength(1);
   });
 
   it('skips the initial headroom wait when --now is set', async () => {
@@ -230,9 +246,13 @@ describe('cli', () => {
       readUsageFn: async () => reading(0.9),
       pathExists: () => false,
       clearStop: () => {},
-      sleep: async () => { calls.push(['sleep']); },
+      sleep: async () => {
+        calls.push(['sleep']);
+      },
       emitEvent: () => {},
-      runQueue: async () => { calls.push(['runQueue']); },
+      runQueue: async () => {
+        calls.push(['runQueue']);
+      },
     });
 
     expect(calls).toEqual([['runQueue']]);
@@ -254,7 +274,7 @@ describe('cli', () => {
       clearStop: () => {},
       sleep: async () => {},
       emitEvent: () => {},
-      writeLine: line => calls.push(line),
+      writeLine: (line) => calls.push(line),
       runQueue: async () => {},
     });
 
@@ -275,14 +295,18 @@ describe('cli', () => {
       readUsageFn: async () => reading(1.6),
       pathExists: () => false,
       clearStop: () => {},
-      sleep: async () => { calls.push(['sleep']); },
+      sleep: async () => {
+        calls.push(['sleep']);
+      },
       emitEvent: () => {},
-      writeLine: line => calls.push(['writeLine', line]),
-      runQueue: async () => { calls.push(['runQueue']); },
+      writeLine: (line) => calls.push(['writeLine', line]),
+      runQueue: async () => {
+        calls.push(['runQueue']);
+      },
     });
 
-    expect(calls.filter(c => c[0] === 'sleep')).toHaveLength(0);
-    expect(calls.filter(c => c[0] === 'runQueue')).toHaveLength(1);
+    expect(calls.filter((c) => c[0] === 'sleep')).toHaveLength(0);
+    expect(calls.filter((c) => c[0] === 'runQueue')).toHaveLength(1);
   });
 
   it('proceeds immediately without gating when the usage reading is null, logging the unavailable warning', async () => {
@@ -298,25 +322,33 @@ describe('cli', () => {
       readUsageFn: async () => null,
       pathExists: () => false,
       clearStop: () => {},
-      sleep: async () => { calls.push(['sleep']); },
-      emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) => { calls.push(['event', type, issue, msg]); },
-      writeLine: line => calls.push(['writeLine', line]),
-      runQueue: async () => { calls.push(['runQueue']); },
+      sleep: async () => {
+        calls.push(['sleep']);
+      },
+      emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) => {
+        calls.push(['event', type, issue, msg]);
+      },
+      writeLine: (line) => calls.push(['writeLine', line]),
+      runQueue: async () => {
+        calls.push(['runQueue']);
+      },
     });
 
-    expect(calls.filter(c => c[0] === 'sleep')).toHaveLength(0);
-    expect(calls.filter(c => c[0] === 'runQueue')).toHaveLength(1);
-    expect(calls.some(c => c[0] === 'writeLine' && c[1].includes('usage signal unavailable'))).toBe(true);
-    const resumedEvent = calls.find(c => c[0] === 'event' && c[1] === 'resumed');
+    expect(calls.filter((c) => c[0] === 'sleep')).toHaveLength(0);
+    expect(calls.filter((c) => c[0] === 'runQueue')).toHaveLength(1);
+    expect(calls.some((c) => c[0] === 'writeLine' && c[1].includes('usage signal unavailable'))).toBe(true);
+    const resumedEvent = calls.find((c) => c[0] === 'event' && c[1] === 'resumed');
     expect(resumedEvent[3]).toContain('(unavailable)');
   });
 
   it('detects a merge by head branch even when it is outside the recent-closed window', async () => {
     const octokit: any = {
-      rest: { pulls: { list: async ({ head }: any) =>
-        head === 'on-par:ship-it/22-x'
-          ? { data: [{ merged_at: '2026-01-01T00:00:00Z' }] }
-          : { data: [] } } },
+      rest: {
+        pulls: {
+          list: async ({ head }: any) =>
+            head === 'on-par:ship-it/22-x' ? { data: [{ merged_at: '2026-01-01T00:00:00Z' }] } : { data: [] },
+        },
+      },
     };
     expect(await isPrMerged(octokit, 'on-par', 'software-factory', 'ship-it/22-x')).toBe(true);
   });
@@ -327,16 +359,26 @@ describe('cli', () => {
   });
 
   it('propagates API failures from isPrMerged instead of treating them as not-merged', async () => {
-    const octokit: any = { rest: { pulls: { list: async () => { throw new Error('rate limited'); } } } };
+    const octokit: any = {
+      rest: {
+        pulls: {
+          list: async () => {
+            throw new Error('rate limited');
+          },
+        },
+      },
+    };
     await expect(isPrMerged(octokit, 'on-par', 'software-factory', 'ship-it/22-x')).rejects.toThrow('rate limited');
   });
 
   it('finds an open PR number for the matching head branch', async () => {
     const octokit: any = {
-      rest: { pulls: { list: async ({ head }: any) =>
-        head === 'on-par:ship-it/19-land'
-          ? { data: [{ number: 123 }] }
-          : { data: [] } } },
+      rest: {
+        pulls: {
+          list: async ({ head }: any) =>
+            head === 'on-par:ship-it/19-land' ? { data: [{ number: 123 }] } : { data: [] },
+        },
+      },
     };
 
     expect(await findOpenPRNumber(octokit, 'on-par', 'software-factory', 'ship-it/19-land')).toBe(123);
@@ -351,8 +393,18 @@ describe('cli', () => {
   });
 
   it('propagates API failures from findOpenPRNumber instead of treating them as no-PR', async () => {
-    const octokit: any = { rest: { pulls: { list: async () => { throw new Error('rate limited'); } } } };
-    await expect(findOpenPRNumber(octokit, 'on-par', 'software-factory', 'ship-it/19-land')).rejects.toThrow('rate limited');
+    const octokit: any = {
+      rest: {
+        pulls: {
+          list: async () => {
+            throw new Error('rate limited');
+          },
+        },
+      },
+    };
+    await expect(findOpenPRNumber(octokit, 'on-par', 'software-factory', 'ship-it/19-land')).rejects.toThrow(
+      'rate limited',
+    );
   });
 
   it('falls back to matching the open PR that references the issue in its body', async () => {
@@ -384,7 +436,15 @@ describe('cli', () => {
   });
 
   it('propagates API failures from findOpenPRForIssue instead of treating them as no-match', async () => {
-    const octokit: any = { rest: { pulls: { list: async () => { throw new Error('rate limited'); } } } };
+    const octokit: any = {
+      rest: {
+        pulls: {
+          list: async () => {
+            throw new Error('rate limited');
+          },
+        },
+      },
+    };
     await expect(findOpenPRForIssue(octokit, 'on-par', 'software-factory', 19)).rejects.toThrow('rate limited');
   });
 
@@ -478,7 +538,8 @@ describe('cli', () => {
         calls.push(['land', args]);
         return { branch: 'ship-it/21-self-merge', prNumber: 321 };
       },
-      emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
+      emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) =>
+        calls.push(['event', type, issue, msg]),
       sleep: async () => {
         calls.push(['sleep']);
       },
@@ -498,7 +559,7 @@ describe('cli', () => {
     let stopped = false;
 
     await waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
-      createOctokit: () => ({} as any),
+      createOctokit: () => ({}) as any,
       pathExists: () => stopped,
       checkMerged: async () => {
         calls.push(['checkMerged']);
@@ -508,9 +569,10 @@ describe('cli', () => {
       land: async () => {
         throw new Error('land should not be called');
       },
-      emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
-      writeLine: line => calls.push(['writeLine', line]),
-      sleep: async ms => {
+      emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) =>
+        calls.push(['event', type, issue, msg]),
+      writeLine: (line) => calls.push(['writeLine', line]),
+      sleep: async (ms) => {
         calls.push(['sleep', ms]);
         stopped = true;
       },
@@ -530,7 +592,7 @@ describe('cli', () => {
     let stopped = false;
 
     await waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
-      createOctokit: () => ({} as any),
+      createOctokit: () => ({}) as any,
       pathExists: () => stopped,
       checkMerged: async () => {
         throw new Error('rate limited');
@@ -539,15 +601,16 @@ describe('cli', () => {
       land: async () => {
         throw new Error('land should not be called');
       },
-      emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
-      writeLine: line => calls.push(['writeLine', line]),
-      sleep: async ms => {
+      emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) =>
+        calls.push(['event', type, issue, msg]),
+      writeLine: (line) => calls.push(['writeLine', line]),
+      sleep: async (ms) => {
         calls.push(['sleep', ms]);
         stopped = true;
       },
     });
 
-    const warnEvent = calls.find(c => c[0] === 'event' && c[1] === 'warn');
+    const warnEvent = calls.find((c) => c[0] === 'event' && c[1] === 'warn');
     expect(warnEvent).toBeDefined();
     expect(warnEvent[2]).toBe(21);
     expect(warnEvent[3]).toContain('merged-state check failed');
@@ -588,7 +651,11 @@ describe('cli', () => {
     const octokit: any = {
       rest: {
         pulls: { merge: async () => {} },
-        git: { deleteRef: async () => { throw new Error('not found'); } },
+        git: {
+          deleteRef: async () => {
+            throw new Error('not found');
+          },
+        },
       },
     };
 
@@ -606,9 +673,11 @@ describe('cli', () => {
       },
     };
 
-    await expect(
-      getPullRequestLandState(octokit, 'on-par', 'software-factory', 123),
-    ).resolves.toEqual({ id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' });
+    await expect(getPullRequestLandState(octokit, 'on-par', 'software-factory', 123)).resolves.toEqual({
+      id: 'PR_1',
+      isDraft: false,
+      mergeStateStatus: 'DIRTY',
+    });
     expect(calls[0].vars).toEqual({ owner: 'on-par', repo: 'software-factory', number: 123 });
     expect(calls[0].query).toContain('isDraft');
     expect(calls[0].query).toContain('mergeStateStatus');
@@ -665,7 +734,9 @@ describe('cli', () => {
       log: (type, msg) => calls.push(['log', type, msg]),
       run,
       pathExists: () => true,
-      sleep: async () => { throw new Error('sleep should not be called'); },
+      sleep: async () => {
+        throw new Error('sleep should not be called');
+      },
     });
 
     expect(calls).toEqual([
@@ -692,7 +763,9 @@ describe('cli', () => {
           },
         },
         checks: {
-          listForRef: async () => { throw new Error('api down'); },
+          listForRef: async () => {
+            throw new Error('api down');
+          },
         },
       },
     };
@@ -713,14 +786,19 @@ describe('cli', () => {
       log: (type, msg) => calls.push(['log', type, msg]),
       run,
       pathExists: () => true,
-      sleep: async () => { throw new Error('sleep should not be called'); },
+      sleep: async () => {
+        throw new Error('sleep should not be called');
+      },
     });
 
-    const warnCall = calls.find(c => c[0] === 'log' && c[1] === 'warn');
+    const warnCall = calls.find((c) => c[0] === 'log' && c[1] === 'warn');
     expect(warnCall).toBeDefined();
     expect(warnCall[2]).toContain('CI watch');
     expect(warnCall[2]).toContain('api down');
-    expect(calls).toContainEqual(['merge', { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash' }]);
+    expect(calls).toContainEqual([
+      'merge',
+      { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash' },
+    ]);
   });
 
   it('logs a warn when CI ends in failure and still proceeds to merge', async () => {
@@ -760,13 +838,18 @@ describe('cli', () => {
       log: (type, msg) => calls.push(['log', type, msg]),
       run,
       pathExists: () => true,
-      sleep: async () => { throw new Error('sleep should not be called'); },
+      sleep: async () => {
+        throw new Error('sleep should not be called');
+      },
     });
 
-    const warnCall = calls.find(c => c[0] === 'log' && c[1] === 'warn');
+    const warnCall = calls.find((c) => c[0] === 'log' && c[1] === 'warn');
     expect(warnCall).toBeDefined();
     expect(warnCall[2]).toContain('ended failure');
-    expect(calls).toContainEqual(['merge', { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash' }]);
+    expect(calls).toContainEqual([
+      'merge',
+      { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash' },
+    ]);
   });
 
   it('logs a warn when the ready-for-review flip fails but still merges', async () => {
@@ -807,13 +890,18 @@ describe('cli', () => {
       log: (type, msg) => calls.push(['log', type, msg]),
       run: async () => {},
       pathExists: () => true,
-      sleep: async () => { throw new Error('sleep should not be called'); },
+      sleep: async () => {
+        throw new Error('sleep should not be called');
+      },
     });
 
-    const warnCall = calls.find(c => c[0] === 'log' && c[1] === 'warn');
+    const warnCall = calls.find((c) => c[0] === 'log' && c[1] === 'warn');
     expect(warnCall).toBeDefined();
     expect(warnCall[2]).toContain('ready-for-review flip failed');
-    expect(calls).toContainEqual(['merge', { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash' }]);
+    expect(calls).toContainEqual([
+      'merge',
+      { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash' },
+    ]);
   });
 
   it('aborts the rebase, logs conflict with the branch, and skips merge when rebase fails', async () => {
@@ -851,7 +939,9 @@ describe('cli', () => {
         log: (type, msg) => calls.push(['log', type, msg]),
         run,
         pathExists: () => true,
-        sleep: async () => { throw new Error('sleep should not be called'); },
+        sleep: async () => {
+          throw new Error('sleep should not be called');
+        },
       }),
     ).rejects.toBeInstanceOf(LandConflictError);
 
@@ -896,13 +986,13 @@ describe('cli', () => {
         log: (type, msg) => calls.push(['log', type, msg]),
         run,
         pathExists: () => false,
-        sleep: async () => { throw new Error('sleep should not be called'); },
+        sleep: async () => {
+          throw new Error('sleep should not be called');
+        },
       }),
     ).rejects.toBeInstanceOf(LandConflictError);
 
-    expect(calls).toEqual([
-      ['log', 'conflict', 'PR #123 DIRTY on ship-it/20-dirty and worktree gone'],
-    ]);
+    expect(calls).toEqual([['log', 'conflict', 'PR #123 DIRTY on ship-it/20-dirty and worktree gone']]);
   });
 
   it('re-issues the ready flip when the PR is still a draft, then merges', async () => {
@@ -946,10 +1036,12 @@ describe('cli', () => {
       log: (type, msg) => calls.push(['log', type, msg]),
       run: async () => {},
       pathExists: () => true,
-      sleep: async ms => { sleeps.push(ms); },
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
     });
 
-    expect(calls.findIndex(c => c[0] === 'mutation')).toBeLessThan(calls.findIndex(c => c[0] === 'merge'));
+    expect(calls.findIndex((c) => c[0] === 'mutation')).toBeLessThan(calls.findIndex((c) => c[0] === 'merge'));
     expect(calls).toContainEqual(['mutation', { id: 'PR_1' }]);
     expect(sleeps).toEqual([]);
   });
@@ -997,7 +1089,9 @@ describe('cli', () => {
       log: () => {},
       run: async () => {},
       pathExists: () => true,
-      sleep: async ms => { sleeps.push(ms); },
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
     });
 
     expect(mergeCalls).toBe(2);
@@ -1043,7 +1137,9 @@ describe('cli', () => {
       log: () => {},
       run: async () => {},
       pathExists: () => true,
-      sleep: async ms => { sleeps.push(ms); },
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
     });
 
     expect(mergeCalls).toBe(3);
@@ -1056,7 +1152,9 @@ describe('cli', () => {
     const mergeError = new Error('Pull Request is still a draft');
     let mergeCalls = 0;
     const octokit: any = {
-      graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'UNKNOWN' } } }),
+      graphql: async () => ({
+        repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'UNKNOWN' } },
+      }),
       rest: {
         pulls: {
           merge: async () => {
@@ -1085,7 +1183,9 @@ describe('cli', () => {
         log: () => {},
         run: async () => {},
         pathExists: () => true,
-        sleep: async ms => { sleeps.push(ms); },
+        sleep: async (ms) => {
+          sleeps.push(ms);
+        },
       }),
     ).rejects.toBe(mergeError);
 
@@ -1123,93 +1223,127 @@ describe('cli', () => {
           calls.push(['ship', issue]);
           throw new LaneParkError('plan escalated: needs a human decision', 'escalate');
         },
-        waitMerge: async () => { throw new Error('waitMerge should not be called'); },
+        waitMerge: async () => {
+          throw new Error('waitMerge should not be called');
+        },
         pathExists: () => false,
-        emitEvent: (_events: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string) =>
+          calls.push(['event', type, issue, msg]),
       });
 
-      expect(calls.filter(c => c[0] === 'ship')).toEqual([['ship', 7]]);
-      const events = calls.filter(c => c[0] === 'event');
+      expect(calls.filter((c) => c[0] === 'ship')).toEqual([['ship', 7]]);
+      const events = calls.filter((c) => c[0] === 'event');
       expect(events).toHaveLength(1);
       expect(events[0][1]).toBe('parked');
       expect(events[0][2]).toBe(7);
       expect(events[0][3]).toContain('(escalate)');
-      expect(events.some(e => e[1] === 'escalate')).toBe(false);
-      expect(events.some(e => e[1] === 'lane-done')).toBe(false);
+      expect(events.some((e) => e[1] === 'escalate')).toBe(false);
+      expect(events.some((e) => e[1] === 'lane-done')).toBe(false);
     });
 
     it('parks the lane without re-emitting the terminal event (shipIssue owns it) on a timeout error', async () => {
       const calls: any[] = [];
       await runLane('app', [9], '/repo', 'on-par/software-factory', paths, {
-        ship: async () => { throw Object.assign(new Error('router exhausted'), { reason: 'timeout' }); },
-        waitMerge: async () => { throw new Error('waitMerge should not be called'); },
+        ship: async () => {
+          throw Object.assign(new Error('router exhausted'), { reason: 'timeout' });
+        },
+        waitMerge: async () => {
+          throw new Error('waitMerge should not be called');
+        },
         pathExists: () => false,
-        emitEvent: (_events: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string) =>
+          calls.push(['event', type, issue, msg]),
       });
 
-      const events = calls.filter(c => c[0] === 'event');
+      const events = calls.filter((c) => c[0] === 'event');
       expect(events).toHaveLength(1);
       expect(events[0][1]).toBe('parked');
       expect(events[0][2]).toBe(9);
       expect(events[0][3]).toContain('(timeout)');
-      expect(events.some(e => e[1] === 'timeout')).toBe(false);
+      expect(events.some((e) => e[1] === 'timeout')).toBe(false);
     });
 
     it('parks the lane without re-emitting the terminal event (shipIssue owns it) on a plain fail error', async () => {
       const calls: any[] = [];
       await runLane('app', [10], '/repo', 'on-par/software-factory', paths, {
-        ship: async () => { throw new Error('boom'); },
-        waitMerge: async () => { throw new Error('waitMerge should not be called'); },
+        ship: async () => {
+          throw new Error('boom');
+        },
+        waitMerge: async () => {
+          throw new Error('waitMerge should not be called');
+        },
         pathExists: () => false,
-        emitEvent: (_events: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string) =>
+          calls.push(['event', type, issue, msg]),
       });
 
-      const events = calls.filter(c => c[0] === 'event');
+      const events = calls.filter((c) => c[0] === 'event');
       expect(events).toHaveLength(1);
       expect(events[0][1]).toBe('parked');
       expect(events[0][2]).toBe(10);
       expect(events[0][3]).toContain('(fail)');
-      expect(events.some(e => e[1] === 'fail')).toBe(false);
+      expect(events.some((e) => e[1] === 'fail')).toBe(false);
     });
 
     it('parks the lane without re-emitting the terminal event (land path owns it) on a conflict error from waitMerge', async () => {
       const calls: any[] = [];
       await runLane('app', [11], '/repo', 'on-par/software-factory', paths, {
-        ship: async (issue) => { calls.push(['ship', issue]); return 'ship-it/11-x'; },
-        waitMerge: async () => { throw new LandConflictError('rebase conflict on ship-it/11-x — parked'); },
+        ship: async (issue) => {
+          calls.push(['ship', issue]);
+          return 'ship-it/11-x';
+        },
+        waitMerge: async () => {
+          throw new LandConflictError('rebase conflict on ship-it/11-x — parked');
+        },
         pathExists: () => false,
-        emitEvent: (_events: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string) =>
+          calls.push(['event', type, issue, msg]),
       });
 
       expect(calls[0]).toEqual(['ship', 11]);
-      const events = calls.filter(c => c[0] === 'event');
+      const events = calls.filter((c) => c[0] === 'event');
       expect(events).toHaveLength(1);
       expect(events[0][1]).toBe('parked');
       expect(events[0][2]).toBe(11);
       expect(events[0][3]).toContain('(conflict)');
-      expect(events.some(e => e[1] === 'conflict')).toBe(false);
+      expect(events.some((e) => e[1] === 'conflict')).toBe(false);
     });
 
     it('runs both issues and logs lane-done on the green path', async () => {
       const calls: any[] = [];
       await runLane('app', [1, 2], '/repo', 'on-par/software-factory', paths, {
-        ship: async (issue) => { calls.push(['ship', issue]); return `ship-it/${issue}-x`; },
-        waitMerge: async (issue) => { calls.push(['waitMerge', issue]); },
+        ship: async (issue) => {
+          calls.push(['ship', issue]);
+          return `ship-it/${issue}-x`;
+        },
+        waitMerge: async (issue) => {
+          calls.push(['waitMerge', issue]);
+        },
         pathExists: () => false,
-        emitEvent: (_events: string, type: string, issue: string | number, msg: string) => calls.push(['event', type, issue, msg]),
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string) =>
+          calls.push(['event', type, issue, msg]),
       });
 
-      expect(calls.filter(c => c[0] === 'ship')).toEqual([['ship', 1], ['ship', 2]]);
-      expect(calls.filter(c => c[0] === 'waitMerge')).toEqual([['waitMerge', 1], ['waitMerge', 2]]);
-      expect(calls.some(c => c[0] === 'event' && c[1] === 'parked')).toBe(false);
-      const lastEvent = calls.filter(c => c[0] === 'event').at(-1);
+      expect(calls.filter((c) => c[0] === 'ship')).toEqual([
+        ['ship', 1],
+        ['ship', 2],
+      ]);
+      expect(calls.filter((c) => c[0] === 'waitMerge')).toEqual([
+        ['waitMerge', 1],
+        ['waitMerge', 2],
+      ]);
+      expect(calls.some((c) => c[0] === 'event' && c[1] === 'parked')).toBe(false);
+      const lastEvent = calls.filter((c) => c[0] === 'event').at(-1);
       expect(lastEvent).toEqual(['event', 'lane-done', 'app', 'lane complete']);
     });
 
     it('threads the run repoRoot and ghRepo into ship instead of re-resolving per issue', async () => {
       const seen: any[] = [];
       await runLane('app', [1, 2], '/repo', 'on-par/software-factory', paths, {
-        ship: async (_issue, _opts, ctx) => { seen.push(ctx); return 'ship-it/x'; },
+        ship: async (_issue, _opts, ctx) => {
+          seen.push(ctx);
+          return 'ship-it/x';
+        },
         waitMerge: async () => {},
         pathExists: () => false,
         emitEvent: () => {},
@@ -1223,8 +1357,22 @@ describe('cli', () => {
 
   describe('formatDoctorReport', () => {
     const diagnoses: ModelDiagnosis[] = [
-      { model: 'claude-opus-4-8', provider: 'anthropic', tiers: ['boss'], reachable: true, experimental: false, reason: 'ok (claude CLI)' },
-      { model: 'gpt-5.1-codex', provider: 'openai', tiers: ['worker'], reachable: false, experimental: false, reason: 'codex CLI not found on PATH' },
+      {
+        model: 'claude-opus-4-8',
+        provider: 'anthropic',
+        tiers: ['boss'],
+        reachable: true,
+        experimental: false,
+        reason: 'ok (claude CLI)',
+      },
+      {
+        model: 'gpt-5.1-codex',
+        provider: 'openai',
+        tiers: ['worker'],
+        reachable: false,
+        experimental: false,
+        reason: 'codex CLI not found on PATH',
+      },
     ];
 
     it('renders one line per diagnosis with model, provider, tiers, and reason', () => {
@@ -1243,36 +1391,64 @@ describe('cli', () => {
     it('marks reachable models with a check and unreachable models with an x', () => {
       const report = formatDoctorReport(diagnoses);
       const lines = report.split('\n');
-      expect(lines.find(l => l.includes('claude-opus-4-8'))).toContain('✅');
-      expect(lines.find(l => l.includes('gpt-5.1-codex'))).toContain('❌');
+      expect(lines.find((l) => l.includes('claude-opus-4-8'))).toContain('✅');
+      expect(lines.find((l) => l.includes('gpt-5.1-codex'))).toContain('❌');
     });
   });
 
   describe('hasReachableWorker', () => {
     it('is false when every model is unreachable', () => {
       const diagnoses: ModelDiagnosis[] = [
-        { model: 'gpt-5.1-codex', provider: 'openai', tiers: ['worker'], reachable: false, experimental: false, reason: 'codex CLI not found on PATH' },
+        {
+          model: 'gpt-5.1-codex',
+          provider: 'openai',
+          tiers: ['worker'],
+          reachable: false,
+          experimental: false,
+          reason: 'codex CLI not found on PATH',
+        },
       ];
       expect(hasReachableWorker(diagnoses)).toBe(false);
     });
 
     it('is false when the only reachable model is boss-tier', () => {
       const diagnoses: ModelDiagnosis[] = [
-        { model: 'claude-opus-4-8', provider: 'anthropic', tiers: ['boss'], reachable: true, experimental: false, reason: 'ok (claude CLI)' },
+        {
+          model: 'claude-opus-4-8',
+          provider: 'anthropic',
+          tiers: ['boss'],
+          reachable: true,
+          experimental: false,
+          reason: 'ok (claude CLI)',
+        },
       ];
       expect(hasReachableWorker(diagnoses)).toBe(false);
     });
 
     it('is true when a worker-tier model is reachable', () => {
       const diagnoses: ModelDiagnosis[] = [
-        { model: 'gpt-5.1-codex', provider: 'openai', tiers: ['worker'], reachable: true, experimental: false, reason: 'ok (codex CLI)' },
+        {
+          model: 'gpt-5.1-codex',
+          provider: 'openai',
+          tiers: ['worker'],
+          reachable: true,
+          experimental: false,
+          reason: 'ok (codex CLI)',
+        },
       ];
       expect(hasReachableWorker(diagnoses)).toBe(true);
     });
 
     it('is true when a worker_fallback-tier model is reachable', () => {
       const diagnoses: ModelDiagnosis[] = [
-        { model: 'claude-sonnet-5', provider: 'anthropic', tiers: ['checker', 'worker_fallback'], reachable: true, experimental: false, reason: 'ok (claude CLI)' },
+        {
+          model: 'claude-sonnet-5',
+          provider: 'anthropic',
+          tiers: ['checker', 'worker_fallback'],
+          reachable: true,
+          experimental: false,
+          reason: 'ok (claude CLI)',
+        },
       ];
       expect(hasReachableWorker(diagnoses)).toBe(true);
     });
@@ -1392,9 +1568,7 @@ More prose here.
     });
 
     it('returns undefined when the file is missing', () => {
-      expect(
-        readActiveProduct('/repo/.factory/product', { fileExists: () => false }),
-      ).toBeUndefined();
+      expect(readActiveProduct('/repo/.factory/product', { fileExists: () => false })).toBeUndefined();
     });
 
     it('returns undefined when the file contains only whitespace', () => {

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FactoryEvent } from '../types/index.js';
 import { followEvents, readEvents } from './index.js';
 
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function waitFor(predicate: () => boolean, timeoutMs = 2000, stepMs = 10): Promise<void> {
   const start = Date.now();
@@ -40,7 +40,10 @@ describe('readEvents', () => {
   });
 
   it('parses valid NDJSON lines', () => {
-    writeFileSync(file, line({ type: 'plan', msg: 'Starting plan phase' }) + line({ type: 'build', msg: 'Starting build phase' }));
+    writeFileSync(
+      file,
+      line({ type: 'plan', msg: 'Starting plan phase' }) + line({ type: 'build', msg: 'Starting build phase' }),
+    );
     const events = readEvents(file);
     expect(events).toHaveLength(2);
     expect(events[0].type).toBe('plan');
@@ -51,7 +54,7 @@ describe('readEvents', () => {
     writeFileSync(file, line({ type: 'plan', msg: 'ok' }) + 'not json\n' + line({ type: 'ship', msg: 'ok2' }));
     const events = readEvents(file);
     expect(events).toHaveLength(2);
-    expect(events.map(e => e.type)).toEqual(['plan', 'ship']);
+    expect(events.map((e) => e.type)).toEqual(['plan', 'ship']);
   });
 });
 
@@ -73,7 +76,7 @@ describe('followEvents', () => {
   it('replays existing events when fromStart is true, then delivers appended ones', async () => {
     writeFileSync(file, line({ type: 'plan', msg: 'Starting plan phase' }));
     const seen: FactoryEvent[] = [];
-    const stop = followEvents(file, e => seen.push(e), { fromStart: true, pollMs: 10 });
+    const stop = followEvents(file, (e) => seen.push(e), { fromStart: true, pollMs: 10 });
     stops.push(stop);
 
     await waitFor(() => seen.length >= 1);
@@ -87,7 +90,7 @@ describe('followEvents', () => {
   it('skips history when fromStart is false', async () => {
     writeFileSync(file, line({ type: 'plan', msg: 'Starting plan phase' }));
     const seen: FactoryEvent[] = [];
-    const stop = followEvents(file, e => seen.push(e), { fromStart: false, pollMs: 10 });
+    const stop = followEvents(file, (e) => seen.push(e), { fromStart: false, pollMs: 10 });
     stops.push(stop);
 
     appendFileSync(file, line({ type: 'build', msg: 'Starting build phase' }));
@@ -98,7 +101,7 @@ describe('followEvents', () => {
 
   it('picks up a file created after following starts', async () => {
     const seen: FactoryEvent[] = [];
-    const stop = followEvents(file, e => seen.push(e), { fromStart: true, pollMs: 10 });
+    const stop = followEvents(file, (e) => seen.push(e), { fromStart: true, pollMs: 10 });
     stops.push(stop);
 
     await delay(30);
@@ -110,7 +113,7 @@ describe('followEvents', () => {
   it('delivers a partial line exactly once after it is completed', async () => {
     writeFileSync(file, '');
     const seen: FactoryEvent[] = [];
-    const stop = followEvents(file, e => seen.push(e), { fromStart: true, pollMs: 10 });
+    const stop = followEvents(file, (e) => seen.push(e), { fromStart: true, pollMs: 10 });
     stops.push(stop);
 
     const full = line({ type: 'plan', msg: 'Starting plan phase' });
@@ -128,7 +131,7 @@ describe('followEvents', () => {
   it('resets and re-reads after truncation', async () => {
     writeFileSync(file, line({ type: 'plan', msg: 'Starting plan phase' }));
     const seen: FactoryEvent[] = [];
-    const stop = followEvents(file, e => seen.push(e), { fromStart: true, pollMs: 10 });
+    const stop = followEvents(file, (e) => seen.push(e), { fromStart: true, pollMs: 10 });
     stops.push(stop);
 
     await waitFor(() => seen.length >= 1);
@@ -143,7 +146,7 @@ describe('followEvents', () => {
   it('detects a log-rotation-style replace even when the new file is already as large as the old offset', async () => {
     writeFileSync(file, line({ type: 'plan', msg: 'Starting plan phase' }));
     const seen: FactoryEvent[] = [];
-    const stop = followEvents(file, e => seen.push(e), { fromStart: true, pollMs: 10 });
+    const stop = followEvents(file, (e) => seen.push(e), { fromStart: true, pollMs: 10 });
     stops.push(stop);
 
     await waitFor(() => seen.length >= 1);
@@ -164,7 +167,7 @@ describe('followEvents', () => {
   it('stop() halts delivery and is idempotent', async () => {
     const seen: FactoryEvent[] = [];
     writeFileSync(file, '');
-    const stop = followEvents(file, e => seen.push(e), { fromStart: true, pollMs: 10 });
+    const stop = followEvents(file, (e) => seen.push(e), { fromStart: true, pollMs: 10 });
 
     appendFileSync(file, line({ type: 'plan', msg: 'Starting plan phase' }));
     await waitFor(() => seen.length >= 1);

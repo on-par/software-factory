@@ -17,7 +17,10 @@ function parseArgs(argv: string[]): Args {
     else if (arg === '--output') args.output = argv[++i];
     else throw new Error(`unknown flag: ${arg}`);
   }
-  if (!args.input) throw new Error('usage: npm run local-small-scoreboard -- --input runs.json [--baseline baseline.json] [--output report.md]');
+  if (!args.input)
+    throw new Error(
+      'usage: npm run local-small-scoreboard -- --input runs.json [--baseline baseline.json] [--output report.md]',
+    );
   return args;
 }
 
@@ -75,6 +78,7 @@ function booleanField(record: Record<string, unknown>, field: string): boolean {
 
 function numberField(record: Record<string, unknown>, field: string): number {
   const value = record[field];
-  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`scoreboard run requires finite number ${field}`);
+  if (typeof value !== 'number' || !Number.isFinite(value))
+    throw new Error(`scoreboard run requires finite number ${field}`);
   return value;
 }

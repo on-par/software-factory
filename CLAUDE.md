@@ -8,4 +8,4 @@ Key reminder — before committing, run the full verification gate and make sure
 bash scripts/verify.sh
 ```
 
-This runs build, typecheck, lint, test (with coverage thresholds), and the stub eval — the same checks CI enforces.
+This runs build, typecheck, lint, format check, test (with coverage thresholds), and the stub eval — the same checks CI enforces.

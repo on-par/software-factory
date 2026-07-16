@@ -1,8 +1,6 @@
 import { CodingHarness, HarnessError, HarnessRequest, HarnessResult, HarnessFailureReason } from './index.js';
 
-export type StubHarnessStep =
-  | { output: string }
-  | { fail: HarnessFailureReason; message?: string };
+export type StubHarnessStep = { output: string } | { fail: HarnessFailureReason; message?: string };
 
 export interface StubCodingHarnessOptions {
   id?: string;
@@ -17,7 +15,10 @@ export class StubCodingHarness implements CodingHarness {
   readonly calls: HarnessRequest[] = [];
   private steps: StubHarnessStep[];
 
-  constructor(steps: StubHarnessStep[] = [], private options: StubCodingHarnessOptions = {}) {
+  constructor(
+    steps: StubHarnessStep[] = [],
+    private options: StubCodingHarnessOptions = {},
+  ) {
     this.steps = [...steps];
     this.id = options.id ?? 'stub';
     this.agentic = options.agentic ?? true;
@@ -31,9 +32,7 @@ export class StubCodingHarness implements CodingHarness {
       throw new HarnessError(step.message ?? `stub failure: ${step.fail}`, step.fail, { exitCode: 1 });
     }
 
-    const output = step && 'output' in step
-      ? step.output
-      : this.options.defaultOutput;
+    const output = step && 'output' in step ? step.output : this.options.defaultOutput;
     if (output === undefined) {
       throw new Error('StubCodingHarness: no scripted step or defaultOutput remaining');
     }

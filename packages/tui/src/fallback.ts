@@ -10,7 +10,11 @@ export function followPlain(
   out: NodeJS.WritableStream = process.stdout,
   follow: typeof followEvents = followEvents,
 ): () => void {
-  return follow(eventsFile, (e: FactoryEvent) => {
-    out.write(formatEventLine(e.type, e.issue, e.msg, { color: colorEnabled(out as { isTTY?: boolean }) }) + '\n');
-  }, { fromStart: true });
+  return follow(
+    eventsFile,
+    (e: FactoryEvent) => {
+      out.write(formatEventLine(e.type, e.issue, e.msg, { color: colorEnabled(out as { isTTY?: boolean }) }) + '\n');
+    },
+    { fromStart: true },
+  );
 }

@@ -14,7 +14,13 @@ function makeFakeFollow() {
 
 function makeFakeOut() {
   const chunks: string[] = [];
-  return { write: (chunk: string) => { chunks.push(chunk); return true; }, chunks } as unknown as NodeJS.WritableStream & { chunks: string[] };
+  return {
+    write: (chunk: string) => {
+      chunks.push(chunk);
+      return true;
+    },
+    chunks,
+  } as unknown as NodeJS.WritableStream & { chunks: string[] };
 }
 
 describe('followPlain', () => {
@@ -47,7 +53,14 @@ describe('followPlain', () => {
     delete process.env.NO_COLOR;
     try {
       const fake = makeFakeFollow();
-      const out = { write: (chunk: string) => { (out as any).chunks.push(chunk); return true; }, chunks: [] as string[], isTTY: true } as unknown as NodeJS.WritableStream & { chunks: string[] };
+      const out = {
+        write: (chunk: string) => {
+          (out as any).chunks.push(chunk);
+          return true;
+        },
+        chunks: [] as string[],
+        isTTY: true,
+      } as unknown as NodeJS.WritableStream & { chunks: string[] };
 
       const stop = followPlain('events.ndjson', out, fake.follow);
       fake.push({ ts: '2026-01-01T00:00:00.000Z', type: 'plan', issue: '192', msg: 'Starting plan phase' });

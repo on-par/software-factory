@@ -44,7 +44,7 @@ export function reduceDashboard(state: DashboardState, e: FactoryEvent): Dashboa
     return state;
   }
 
-  const idx = state.lanes.findIndex(l => l.issue === e.issue);
+  const idx = state.lanes.findIndex((l) => l.issue === e.issue);
   const prevLane = idx === -1 ? newLane(e) : state.lanes[idx];
   const prevStatus = prevLane.status;
 
@@ -85,12 +85,12 @@ export function reduceDashboard(state: DashboardState, e: FactoryEvent): Dashboa
 
 export function mergeTrainPosition(state: DashboardState, issue: string): number | undefined {
   const waiting = state.lanes
-    .filter(l => l.status === 'waiting-merge')
+    .filter((l) => l.status === 'waiting-merge')
     .sort((a, b) => {
       const diff = Date.parse(a.waitingSince ?? '') - Date.parse(b.waitingSince ?? '');
       return diff !== 0 ? diff : Number(a.issue) - Number(b.issue);
     });
-  const idx = waiting.findIndex(l => l.issue === issue);
+  const idx = waiting.findIndex((l) => l.issue === issue);
   return idx === -1 ? undefined : idx + 1;
 }
 

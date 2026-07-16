@@ -34,7 +34,19 @@ import {
   isCommandAvailable,
 } from '@on-par/factory-core';
 import type { ModelDiagnosis, QueueDiagnostic, UsageReading, FailoverReason } from '@on-par/factory-core';
-import { logEvent, branchFor, branchPrefixSlug, readCosts, ensureDir, setupWorktree, cleanupWorktree, gitFetch, withGitLock, withFileLock, shellEscape } from '@on-par/factory-core';
+import {
+  logEvent,
+  branchFor,
+  branchPrefixSlug,
+  readCosts,
+  ensureDir,
+  setupWorktree,
+  cleanupWorktree,
+  gitFetch,
+  withGitLock,
+  withFileLock,
+  shellEscape,
+} from '@on-par/factory-core';
 import { runTui } from '@on-par/factory-tui';
 import { exec as execCb, execSync } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -127,13 +139,16 @@ async function cmdInit() {
 
   // Create sample queue if not exists
   if (!existsSync(paths.queue)) {
-    writeFileSync(paths.queue, `# factory queue — "<lane> <issue#>", priority-ordered.
+    writeFileSync(
+      paths.queue,
+      `# factory queue — "<lane> <issue#>", priority-ordered.
 # Lanes run in parallel; issues within a lane run serially.
 # Put issues that touch the same files in the same lane.
 # Example:
 #   app 61
 #   docs 66
-`);
+`,
+    );
   }
 
   console.log(chalk.green(`Initialized ${paths.state}`));
@@ -145,7 +160,10 @@ export class InvalidProductNameError extends Error {}
 
 /** Expected user-facing CLI failure. Thrown by command helpers; only main() maps it to a process exit code. */
 export class CliExitError extends Error {
-  constructor(message: string, readonly code: number) {
+  constructor(
+    message: string,
+    readonly code: number,
+  ) {
     super(message);
     this.name = 'CliExitError';
   }
@@ -155,10 +173,7 @@ export class CliExitError extends Error {
 export function parseIssueArg(raw: string): number {
   const trimmed = raw.trim();
   if (!/^\d+$/.test(trimmed) || Number(trimmed) < 1) {
-    throw new CliExitError(
-      `factory: invalid issue argument '${raw}' — expected a positive integer issue number`,
-      2,
-    );
+    throw new CliExitError(`factory: invalid issue argument '${raw}' — expected a positive integer issue number`, 2);
   }
   return Number(trimmed);
 }
@@ -183,14 +198,8 @@ export interface ReadActiveProductDeps {
  * Returns the trimmed content, or undefined when the file is missing
  * or contains only whitespace.
  */
-export function readActiveProduct(
-  productPath: string,
-  deps: ReadActiveProductDeps = {},
-): string | undefined {
-  const {
-    fileExists = existsSync,
-    readFile = (p: string) => readFileSync(p, 'utf-8'),
-  } = deps;
+export function readActiveProduct(productPath: string, deps: ReadActiveProductDeps = {}): string | undefined {
+  const { fileExists = existsSync, readFile = (p: string) => readFileSync(p, 'utf-8') } = deps;
   if (!fileExists(productPath)) return undefined;
   const product = readFile(productPath).trim();
   return product || undefined;
@@ -206,11 +215,9 @@ export function scaffoldConstitution(template: string, product: string): string 
   const display = product
     .split(/[-_]/)
     .filter(Boolean)
-    .map(w => w[0].toUpperCase() + w.slice(1))
+    .map((w) => w[0].toUpperCase() + w.slice(1))
     .join(' ');
-  return skeleton
-    .replaceAll('<product-name>', JSON.stringify(product))
-    .replaceAll('<Product>', display);
+  return skeleton.replaceAll('<product-name>', JSON.stringify(product)).replaceAll('<Product>', display);
 }
 
 export interface InitConstitutionDeps {
@@ -245,7 +252,9 @@ export async function cmdConstitution(opts: { list?: boolean; product?: string; 
     try {
       const target = initConstitution(opts.init);
       console.log(chalk.green(`Created constitution at ${target}`));
-      console.log(`Next: edit its Purpose, Standards, and Quality Gates, then run: factory constitution --product ${opts.init}`);
+      console.log(
+        `Next: edit its Purpose, Standards, and Quality Gates, then run: factory constitution --product ${opts.init}`,
+      );
     } catch (err: any) {
       if (err instanceof ConstitutionExistsError) {
         throw new CliExitError(err.message, 1);
@@ -296,7 +305,13 @@ export function hasReachableWorker(diagnoses: ModelDiagnosis[]): boolean {
 function ollamaModelSet(): Set<string> | undefined {
   try {
     const out = execSync('ollama list', { encoding: 'utf-8', timeout: 10_000 });
-    return new Set(out.split('\n').slice(1).map(line => line.trim().split(/\s+/)[0]).filter(Boolean));
+    return new Set(
+      out
+        .split('\n')
+        .slice(1)
+        .map((line) => line.trim().split(/\s+/)[0])
+        .filter(Boolean),
+    );
   } catch {
     return undefined;
   }
@@ -311,9 +326,14 @@ async function cmdModels(opts: { doctor?: boolean } = {}) {
 
   if (opts.doctor) {
     const ollamaModels = ollamaModelSet();
-    const diagnoses = diagnoseModels(registry, {
-      ollamaModelPresent: ollamaModels ? (model: string) => ollamaModels.has(model) : undefined,
-    }, allowExperimental, localOnly);
+    const diagnoses = diagnoseModels(
+      registry,
+      {
+        ollamaModelPresent: ollamaModels ? (model: string) => ollamaModels.has(model) : undefined,
+      },
+      allowExperimental,
+      localOnly,
+    );
     console.log(formatDoctorReport(diagnoses));
     if (!hasReachableWorker(diagnoses)) {
       throw new CliExitError('factory: no worker model is reachable — fix the reasons above before running a queue', 1);
@@ -344,14 +364,16 @@ async function cmdCost(opts: { issue?: string } = {}) {
   const costs = readCosts(paths.costs);
 
   if (opts.issue) {
-    const filtered = costs.filter(c => c.issue === String(opts.issue));
+    const filtered = costs.filter((c) => c.issue === String(opts.issue));
     if (filtered.length === 0) {
       console.log(`no cost data for issue ${opts.issue}`);
       return;
     }
     console.log(chalk.bold(`== Costs for issue ${opts.issue} ==`));
     for (const c of filtered) {
-      console.log(`  ${c.task} ${c.model} $${c.cost.toFixed(4)}${c.failoverReason ? ` [failover: ${c.failoverReason}]` : ''}`);
+      console.log(
+        `  ${c.task} ${c.model} $${c.cost.toFixed(4)}${c.failoverReason ? ` [failover: ${c.failoverReason}]` : ''}`,
+      );
     }
     const total = filtered.reduce((s, c) => s + c.cost, 0);
     console.log('  ---');
@@ -441,7 +463,11 @@ export async function cmdUsage() {
     console.log(`5h subscription usage: ${Math.round(subscription.fiveHourUtilization)}% of plan limit${resets}`);
     console.log(`heuristic list-price estimate: ${heuristicLine}`);
   } else {
-    console.log(chalk.yellow(`factory: real subscription usage unavailable — falling back to a rough list-price proxy, not the real subscription limit`));
+    console.log(
+      chalk.yellow(
+        `factory: real subscription usage unavailable — falling back to a rough list-price proxy, not the real subscription limit`,
+      ),
+    );
     console.log(heuristicLine);
   }
 }
@@ -522,7 +548,10 @@ async function cmdTui() {
 export type ParkReason = 'escalate' | 'timeout' | 'fail' | 'conflict';
 
 export class LaneParkError extends Error {
-  constructor(message: string, readonly reason: ParkReason) {
+  constructor(
+    message: string,
+    readonly reason: ParkReason,
+  ) {
     super(message);
   }
 }
@@ -562,17 +591,23 @@ export async function shipIssue(
   const runStartedAt = new Date().toISOString();
   let route: 'codex' | 'claude' | undefined;
 
-  const log = (type: string, msg: string, extra?: { failoverReason?: FailoverReason }) => logEvent(paths.events, type, issueNum, msg, extra);
+  const log = (type: string, msg: string, extra?: { failoverReason?: FailoverReason }) =>
+    logEvent(paths.events, type, issueNum, msg, extra);
   log('issue-title', issueTitle);
   if (modelOverrides.plan) log('model-override', `plan model pinned to ${modelOverrides.plan} (FACTORY_PLAN_MODEL)`);
-  if (modelOverrides.build) log('model-override', `build model pinned to ${modelOverrides.build} (FACTORY_BUILD_MODEL)`);
+  if (modelOverrides.build)
+    log('model-override', `build model pinned to ${modelOverrides.build} (FACTORY_BUILD_MODEL)`);
 
   // Setup worktree FIRST — plan phase needs cwd=worktree to run claude
   await withGitLock(repoRoot, () =>
-    withFileLock(paths.gitLock, async () => {
-      await gitFetch(repoRoot);
-      await setupWorktree(repoRoot, branch, worktree);
-    }, { onSteal: pid => log('lock-stolen', `stole ${paths.gitLock} from dead holder pid ${pid ?? 'unknown'}`) })
+    withFileLock(
+      paths.gitLock,
+      async () => {
+        await gitFetch(repoRoot);
+        await setupWorktree(repoRoot, branch, worktree);
+      },
+      { onSteal: (pid) => log('lock-stolen', `stole ${paths.gitLock} from dead holder pid ${pid ?? 'unknown'}`) },
+    ),
   );
   log('worktree', `Worktree ready at ${worktree}`);
 
@@ -583,16 +618,30 @@ export async function shipIssue(
   // build worker author the standards it is graded by.
   const constitution = constitutionLoader.resolve(worktree, product);
   if (constitution) {
-    log('constitution', constitution.source === 'repo'
-      ? `Standards from repo instruction files${product ? ` (custom checkers from '${product}')` : ''}`
-      : `Standards from bundled constitution '${constitution.product}'`);
+    log(
+      'constitution',
+      constitution.source === 'repo'
+        ? `Standards from repo instruction files${product ? ` (custom checkers from '${product}')` : ''}`
+        : `Standards from bundled constitution '${constitution.product}'`,
+    );
   } else {
     log('constitution', 'No standards found (no repo instruction files, no constitution) — proceeding without');
   }
 
   try {
     // PLAN
-    const plan = await planPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, constitution, router, octokit, log, timeoutSeconds: timeouts.plan, modelOverride: modelOverrides.plan });
+    const plan = await planPhase({
+      issue: issueNum,
+      repo: ghRepo,
+      worktree,
+      specPath,
+      constitution,
+      router,
+      octokit,
+      log,
+      timeoutSeconds: timeouts.plan,
+      modelOverride: modelOverrides.plan,
+    });
     route = plan.route;
     if (!plan.ok) {
       throw new LaneParkError(`plan escalated: ${plan.escalate ?? 'unknown'}`, 'escalate');
@@ -601,31 +650,70 @@ export async function shipIssue(
     const skipCI = resolveSkipCI(factoryConfig);
 
     // BUILD
-    const build = await buildPhase({ issue: issueNum, repo: ghRepo, worktree, specPath, branch, constitution, route: plan.route, router, log, timeoutSeconds: timeouts.build, skipCI, modelOverride: modelOverrides.build });
+    const build = await buildPhase({
+      issue: issueNum,
+      repo: ghRepo,
+      worktree,
+      specPath,
+      branch,
+      constitution,
+      route: plan.route,
+      router,
+      log,
+      timeoutSeconds: timeouts.build,
+      skipCI,
+      modelOverride: modelOverrides.build,
+    });
     if (!build.ok) {
       throw new LaneParkError(`build escalated: ${build.escalate ?? 'unknown'}`, 'escalate');
     }
 
     // CHECK
-    const check = await checkPhase({ issue: issueNum, worktree, specPath, constitution, router, log, autoRework, buildTimeoutSeconds: timeouts.build, checkTimeoutSeconds: timeouts.check });
-    for (const s of check.summary.results.filter(r => r.result === 'SKIP')) {
+    const check = await checkPhase({
+      issue: issueNum,
+      worktree,
+      specPath,
+      constitution,
+      router,
+      log,
+      autoRework,
+      buildTimeoutSeconds: timeouts.build,
+      checkTimeoutSeconds: timeouts.check,
+    });
+    for (const s of check.summary.results.filter((r) => r.result === 'SKIP')) {
       console.error(chalk.yellow(`  SKIP: ${s.checker} — ${s.details}`));
     }
     if (!check.passed) {
-      const failures = check.summary.results.filter(r => r.result === 'FAIL');
+      const failures = check.summary.results.filter((r) => r.result === 'FAIL');
       for (const f of failures) {
         console.error(chalk.red(`  FAIL: ${f.checker} — ${f.details}`));
       }
-      throw new LaneParkError(`${check.summary.failures} check failures after ${check.reworkRounds} rework rounds`, 'fail');
+      throw new LaneParkError(
+        `${check.summary.failures} check failures after ${check.reworkRounds} rework rounds`,
+        'fail',
+      );
     }
 
     // SHIP
     const approvalGate = opts.interactive
       ? createFileApprovalGate({ dir: paths.approvals, timeoutMs: timeouts.approval * 1000 })
       : undefined;
-    const ship = await shipPhase({ issue: issueNum, repo: ghRepo, worktree, branch, octokit, watchCI: !skipCI, log, approvalGate, checkSummary: check.summary });
+    const ship = await shipPhase({
+      issue: issueNum,
+      repo: ghRepo,
+      worktree,
+      branch,
+      octokit,
+      watchCI: !skipCI,
+      log,
+      approvalGate,
+      checkSummary: check.summary,
+    });
     if (!ship.ok) {
-      throw new LaneParkError(ship.denied ? `ship denied: ${ship.deniedReason}` : 'ship phase failed', ship.denied ? 'escalate' : 'fail');
+      throw new LaneParkError(
+        ship.denied ? `ship denied: ${ship.deniedReason}` : 'ship phase failed',
+        ship.denied ? 'escalate' : 'fail',
+      );
     }
 
     if (skipCI) {
@@ -749,9 +837,7 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }
   }
   const log = (type: string, msg: string) => logEvent(paths.events, type, '-', msg);
   const run = () => sweepWorktrees({ repoRoot, ttlDays, dryRun: opts.dryRun }, { log });
-  const report = opts.dryRun
-    ? await run()
-    : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
+  const report = opts.dryRun ? await run() : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
   console.log(formatGcReport(report));
 }
 
@@ -786,7 +872,8 @@ async function landIssue(
   skipCI?: boolean,
 ): Promise<{ branch: string; prNumber: number }> {
   const [owner, repoName] = ghRepo.split('/');
-  const log = (type: string, msg: string, extra?: { failoverReason?: FailoverReason }) => logEvent(paths.events, type, issueNum, msg, extra);
+  const log = (type: string, msg: string, extra?: { failoverReason?: FailoverReason }) =>
+    logEvent(paths.events, type, issueNum, msg, extra);
 
   // The issue title may have been edited since the PR was opened, so a
   // freshly-derived branch name can drift from the branch the PR actually
@@ -799,10 +886,7 @@ async function landIssue(
   let branch = guessedBranch;
   let prNumber: number | undefined;
   try {
-    [, prNumber] = await Promise.all([
-      gitFetch(repoRoot),
-      findOpenPRNumber(octokit, owner, repoName, guessedBranch),
-    ]);
+    [, prNumber] = await Promise.all([gitFetch(repoRoot), findOpenPRNumber(octokit, owner, repoName, guessedBranch)]);
     if (!prNumber) {
       const fallback = await findOpenPRForIssue(octokit, owner, repoName, issueNum);
       if (fallback) {
@@ -823,23 +907,27 @@ async function landIssue(
 
   try {
     await withGitLock(repoRoot, () =>
-      withFileLock(paths.mergeLock, async () => {
-        await landOpenPullRequest({
-          octokit,
-          owner,
-          repoName,
-          ghRepo,
-          repoRoot,
-          issue: issueNum,
-          branch,
-          worktree,
-          prNumber: prNumber!,
-          log,
-          skipCI,
-        });
-        log('merged', `squash-merged PR #${prNumber}`);
-        await cleanupWorktree(repoRoot, worktree, log);
-      }, { onSteal: pid => log('lock-stolen', `stole ${paths.mergeLock} from dead holder pid ${pid ?? 'unknown'}`) })
+      withFileLock(
+        paths.mergeLock,
+        async () => {
+          await landOpenPullRequest({
+            octokit,
+            owner,
+            repoName,
+            ghRepo,
+            repoRoot,
+            issue: issueNum,
+            branch,
+            worktree,
+            prNumber: prNumber!,
+            log,
+            skipCI,
+          });
+          log('merged', `squash-merged PR #${prNumber}`);
+          await cleanupWorktree(repoRoot, worktree, log);
+        },
+        { onSteal: (pid) => log('lock-stolen', `stole ${paths.mergeLock} from dead holder pid ${pid ?? 'unknown'}`) },
+      ),
     );
   } catch (err: any) {
     if (err instanceof LandConflictError) throw err;
@@ -851,10 +939,7 @@ async function landIssue(
 }
 
 export function prLookupFailure(issueNum: number, branch: string, err: unknown): LandFailureError {
-  return new LandFailureError(
-    `PR lookup failed for issue #${issueNum} (${branch}): ${errorDetail(err)}`,
-    5,
-  );
+  return new LandFailureError(`PR lookup failed for issue #${issueNum} (${branch}): ${errorDetail(err)}`, 5);
 }
 
 async function cmdTriage(opts: { product?: string }) {
@@ -879,7 +964,7 @@ Run: gh issue list --repo ${ghRepo} --state open --limit 100 --json number,title
 Read every body. Exclude epics/PRDs/meta, external-account/credential/outreach issues,
 and anything too vague. Group by lane (same-file issues together). Order by dependency then value.
 Write ONLY the queue to ${paths.queueProposed} in format '<lane> <issue#>', with '#' comments
-explaining exclusions.` ;
+explaining exclusions.`;
 
   let plannerError: unknown;
   logEvent(paths.events, 'triage', '-', `Triaging ${ghRepo} with ${model}`);
@@ -919,7 +1004,7 @@ export async function cmdTriageAccept(opts: { force?: boolean }) {
   if (!opts.force && !result.ok) {
     throw new CliExitError(
       `factory: proposed queue is invalid — ${paths.queueProposed} left unchanged\n` +
-        result.errors.map(e => `  - ${e}`).join('\n'),
+        result.errors.map((e) => `  - ${e}`).join('\n'),
       1,
     );
   }
@@ -927,7 +1012,11 @@ export async function cmdTriageAccept(opts: { force?: boolean }) {
   renameSync(paths.queueProposed, paths.queue); // same dir → atomic
 
   let acceptedBy = 'unknown';
-  try { acceptedBy = userInfo().username; } catch { /* keep 'unknown' */ }
+  try {
+    acceptedBy = userInfo().username;
+  } catch {
+    /* keep 'unknown' */
+  }
   const suffix = opts.force ? ' (--force, validation skipped)' : '';
   logEvent(
     paths.events,
@@ -961,7 +1050,12 @@ async function cmdRun() {
           sweepWorktrees({ repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays }, { log: gcLog }),
         ),
       );
-      logEvent(paths.events, 'worktree-gc', 'all', `removed ${report.removed.length} stale worktree(s), kept ${report.kept}`);
+      logEvent(
+        paths.events,
+        'worktree-gc',
+        'all',
+        `removed ${report.removed.length} stale worktree(s), kept ${report.kept}`,
+      );
       console.log(formatGcReport(report));
     } catch (err: any) {
       logEvent(paths.events, 'warn', 'all', `worktree gc failed: ${err.message}`);
@@ -1072,21 +1166,25 @@ export async function runLane(
       // once by the layer that detects the failure — shipIssue for pipeline failures,
       // the land path for merge failures. runLane owns only lane-lifecycle events
       // (stopped/parked/lane-done), so injected ship functions never change ownership.
-      emitEvent(paths.events, 'parked', issue, `lane '${lane}' parked (${reason}); ${issues.length - i - 1} issues remaining`);
+      emitEvent(
+        paths.events,
+        'parked',
+        issue,
+        `lane '${lane}' parked (${reason}); ${issues.length - i - 1} issues remaining`,
+      );
       return;
     }
   }
   emitEvent(paths.events, 'lane-done', lane, 'lane complete');
 }
 
-export async function isPrMerged(
-  octokit: Octokit,
-  owner: string,
-  repoName: string,
-  branch: string,
-): Promise<boolean> {
-  const { data: prs } = await octokit.rest.pulls
-    .list({ owner, repo: repoName, state: 'closed', head: `${owner}:${branch}` });
+export async function isPrMerged(octokit: Octokit, owner: string, repoName: string, branch: string): Promise<boolean> {
+  const { data: prs } = await octokit.rest.pulls.list({
+    owner,
+    repo: repoName,
+    state: 'closed',
+    head: `${owner}:${branch}`,
+  });
   return prs.some((pr: any) => Boolean(pr.merged_at));
 }
 
@@ -1096,8 +1194,12 @@ export async function findOpenPRNumber(
   repoName: string,
   branch: string,
 ): Promise<number | undefined> {
-  const { data: prs } = await octokit.rest.pulls
-    .list({ owner, repo: repoName, state: 'open', head: `${owner}:${branch}` });
+  const { data: prs } = await octokit.rest.pulls.list({
+    owner,
+    repo: repoName,
+    state: 'open',
+    head: `${owner}:${branch}`,
+  });
   return prs[0]?.number;
 }
 
@@ -1110,8 +1212,13 @@ export async function findOpenPRForIssue(
   const perPage = 100;
   const matches = new RegExp(`\\bcloses\\s+#${issueNum}\\b`, 'i');
   for (let page = 1; ; page++) {
-    const { data: prs } = await octokit.rest.pulls
-      .list({ owner, repo: repoName, state: 'open', per_page: perPage, page });
+    const { data: prs } = await octokit.rest.pulls.list({
+      owner,
+      repo: repoName,
+      state: 'open',
+      per_page: perPage,
+      page,
+    });
     const pr = prs.find((p: any) => matches.test(p.body ?? ''));
     if (pr) return { number: pr.number, branch: pr.head.ref };
     if (prs.length < perPage) return undefined;
@@ -1127,15 +1234,16 @@ export async function squashMergeAndDelete(
 ): Promise<void> {
   await octokit.rest.pulls.merge({ owner, repo: repoName, pull_number: prNumber, merge_method: 'squash' });
   // Best-effort branch delete: the merge is the source of truth.
-  await octokit.rest.git
-    .deleteRef({ owner, repo: repoName, ref: `heads/${branch}` })
-    .catch(() => {});
+  await octokit.rest.git.deleteRef({ owner, repo: repoName, ref: `heads/${branch}` }).catch(() => {});
 }
 
 export class LandConflictError extends Error {}
 
 export class LandFailureError extends Error {
-  constructor(message: string, readonly code: number) {
+  constructor(
+    message: string,
+    readonly code: number,
+  ) {
     super(message);
   }
 }
@@ -1177,17 +1285,15 @@ export async function markPullRequestReady(octokit: Octokit, pullRequestId: stri
   );
 }
 
-export async function rebaseDirtyPullRequest(
-  opts: {
-    issue: number;
-    branch: string;
-    worktree: string;
-    prNumber: number;
-    log: (type: string, msg: string) => void;
-    run?: CommandRunner;
-    pathExists?: (path: string) => boolean;
-  },
-): Promise<void> {
+export async function rebaseDirtyPullRequest(opts: {
+  issue: number;
+  branch: string;
+  worktree: string;
+  prNumber: number;
+  log: (type: string, msg: string) => void;
+  run?: CommandRunner;
+  pathExists?: (path: string) => boolean;
+}): Promise<void> {
   const { issue, branch, worktree, prNumber, log, run = exec, pathExists = existsSync } = opts;
 
   if (!pathExists(worktree)) {
@@ -1208,24 +1314,22 @@ export async function rebaseDirtyPullRequest(
   }
 }
 
-export async function landOpenPullRequest(
-  opts: {
-    octokit: Octokit;
-    owner: string;
-    repoName: string;
-    ghRepo: string;
-    repoRoot: string;
-    issue: number;
-    branch: string;
-    worktree: string;
-    prNumber: number;
-    log: (type: string, msg: string) => void;
-    run?: CommandRunner;
-    pathExists?: (path: string) => boolean;
-    sleep?: (ms: number) => Promise<void>;
-    skipCI?: boolean;
-  },
-): Promise<void> {
+export async function landOpenPullRequest(opts: {
+  octokit: Octokit;
+  owner: string;
+  repoName: string;
+  ghRepo: string;
+  repoRoot: string;
+  issue: number;
+  branch: string;
+  worktree: string;
+  prNumber: number;
+  log: (type: string, msg: string) => void;
+  run?: CommandRunner;
+  pathExists?: (path: string) => boolean;
+  sleep?: (ms: number) => Promise<void>;
+  skipCI?: boolean;
+}): Promise<void> {
   const {
     octokit,
     owner,
@@ -1237,7 +1341,7 @@ export async function landOpenPullRequest(
     log,
     run,
     pathExists,
-    sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)),
+    sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
     skipCI = false,
   } = opts;
 
@@ -1269,14 +1373,18 @@ export async function landOpenPullRequest(
     if (state.isDraft && state.id) {
       log('land', `PR #${prNumber} still a draft — re-issuing ready-for-review (attempt ${attempt})`);
       await markPullRequestReady(octokit, state.id).catch((err: unknown) =>
-        log('warn', `ready-for-review flip failed for PR #${prNumber}: ${errorDetail(err)}`));
+        log('warn', `ready-for-review flip failed for PR #${prNumber}: ${errorDetail(err)}`),
+      );
     }
     try {
       await squashMergeAndDelete(octokit, owner, repoName, branch, prNumber);
       return;
     } catch (err: any) {
       if (attempt >= MAX_MERGE_ATTEMPTS) throw err;
-      log('land', `merge attempt ${attempt}/${MAX_MERGE_ATTEMPTS} failed (${err.message}); mergeStateStatus=${state.mergeStateStatus ?? 'unknown'} — retrying with backoff`);
+      log(
+        'land',
+        `merge attempt ${attempt}/${MAX_MERGE_ATTEMPTS} failed (${err.message}); mergeStateStatus=${state.mergeStateStatus ?? 'unknown'} — retrying with backoff`,
+      );
       await sleep(MERGE_RETRY_BASE_MS * 2 ** (attempt - 1));
       state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
     }
@@ -1315,10 +1423,10 @@ export async function waitForMerge(
     checkMerged = isPrMerged,
     loadConfig = loadFactoryConfig,
     land = landIssue,
-    sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)),
+    sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
     emitEvent = logEvent,
     mergeEnabled,
-    writeLine = line => console.log(line),
+    writeLine = (line) => console.log(line),
   } = deps;
   const factoryConfig = loadConfig();
   const isMergeEnabled = mergeEnabled ?? (() => factoryConfig.merge.auto || process.env.FACTORY_MERGE === '1');
@@ -1367,7 +1475,8 @@ export interface SuperviseDeps {
   writeLine?: (line: string) => void;
 }
 
-const USAGE_UNAVAILABLE_LINE = '[factory] supervise: usage signal unavailable — proceeding without resume gate (set FACTORY_USAGE_ESTIMATOR=1 to gate on the heuristic)';
+const USAGE_UNAVAILABLE_LINE =
+  '[factory] supervise: usage signal unavailable — proceeding without resume gate (set FACTORY_USAGE_ESTIMATOR=1 to gate on the heuristic)';
 
 export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
   const {
@@ -1383,7 +1492,7 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
     readUsageFn = () => readUsage({ cap, estimator }),
     pathExists = existsSync,
     clearStop = (path: string) => rmSync(path, { force: true }),
-    sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)),
+    sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
     emitEvent = logEvent,
     writeLine = (line: string) => console.log(line),
   } = deps;
@@ -1405,7 +1514,9 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
         source = reading.source;
         if (cycle > 1 || !now) {
           while (pct >= resumeAt) {
-            writeLine(`[factory] supervise: trailing usage (${source}) ${Math.round(pct * 100)}% >= resume gate ${Math.round(resumeAt * 100)}% — waiting ${pollMs / 1000}s`);
+            writeLine(
+              `[factory] supervise: trailing usage (${source}) ${Math.round(pct * 100)}% >= resume gate ${Math.round(resumeAt * 100)}% — waiting ${pollMs / 1000}s`,
+            );
             await sleep(pollMs);
             reading = await readUsageFn();
             if (reading === null) {
@@ -1421,7 +1532,12 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
       }
     }
 
-    emitEvent(eventsFile, 'resumed', 'usage', `supervise cycle ${cycle}: trailing usage (${source}) at ${Math.round(pct * 100)}% of cap — starting run`);
+    emitEvent(
+      eventsFile,
+      'resumed',
+      'usage',
+      `supervise cycle ${cycle}: trailing usage (${source}) at ${Math.round(pct * 100)}% of cap — starting run`,
+    );
     clearStop(stopFile);
     await runQueue();
     if (!pathExists(stopFile)) break;
@@ -1438,8 +1554,11 @@ async function cmdDoctor() {
     commandAvailable: isCommandAvailable,
     envPresent: (key) => !!process.env[key],
     tryExec: (cmd) => {
-      try { return execSync(cmd, { encoding: 'utf-8', timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
-      catch { return null; }
+      try {
+        return execSync(cmd, { encoding: 'utf-8', timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      } catch {
+        return null;
+      }
     },
     pathExists: existsSync,
   });
@@ -1479,14 +1598,21 @@ export async function main() {
     .option('--doctor', 'Probe provider CLIs and env keys; report per-model reachability')
     .action(cmdModels);
 
-  program.command('doctor').description('Preflight-check your environment (claude, gh, token, git, npm, sandbox)').action(cmdDoctor);
+  program
+    .command('doctor')
+    .description('Preflight-check your environment (claude, gh, token, git, npm, sandbox)')
+    .action(cmdDoctor);
 
-  program.command('cost')
+  program
+    .command('cost')
     .description('Show cost tracking summary')
     .option('--issue <number>', 'show per-entry detail for one issue')
     .action((opts: { issue?: string }) => cmdCost(opts));
 
-  program.command('usage').description('Report real 5h subscription usage (with a list-price heuristic fallback)').action(cmdUsage);
+  program
+    .command('usage')
+    .description('Report real 5h subscription usage (with a list-price heuristic fallback)')
+    .action(cmdUsage);
 
   program.command('status').description('Show queue, events, PRs, models').action(cmdStatus);
 
@@ -1567,7 +1693,7 @@ export async function main() {
       const repoRoot = await getRepoRoot();
       const paths = getFactoryPaths(repoRoot);
       if (existsSync(paths.stop)) {
-        await import('node:fs/promises').then(fs => fs.unlink(paths.stop));
+        await import('node:fs/promises').then((fs) => fs.unlink(paths.stop));
       }
       console.log('STOP cleared');
     });
@@ -1586,7 +1712,7 @@ export async function main() {
 
 // Run if invoked directly
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch(err => {
+  main().catch((err) => {
     console.error(chalk.red(err.message));
     process.exit(1);
   });

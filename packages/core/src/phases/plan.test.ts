@@ -57,7 +57,7 @@ beforeEach(() => {
 afterEach(async () => {
   if (prevFactoryCodex === undefined) delete process.env.FACTORY_CODEX;
   else process.env.FACTORY_CODEX = prevFactoryCodex;
-  await Promise.all([...tempDirs].map(dir => rm(dir, { recursive: true, force: true })));
+  await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
   tempDirs.clear();
 });
 
@@ -86,10 +86,14 @@ describe('planPhase', () => {
     let captured: number | undefined;
     const stub = new StubModelExecutor({
       scripts: {
-        plan: [{
-          output: '---\nroute: codex\n---\n# Spec\n',
-          effect: (ctx) => { captured = ctx.timeoutSeconds; },
-        }],
+        plan: [
+          {
+            output: '---\nroute: codex\n---\n# Spec\n',
+            effect: (ctx) => {
+              captured = ctx.timeoutSeconds;
+            },
+          },
+        ],
       },
     });
     const router = new ModelRouter(models, routes, false, stub);
@@ -122,9 +126,11 @@ describe('planPhase', () => {
     const specPath = join(worktree, 'issue-40.md');
     const stub = new StubModelExecutor({
       scripts: {
-        plan: [{
-          output: '---\nroute: codex\n---\n# Spec\n',
-        }],
+        plan: [
+          {
+            output: '---\nroute: codex\n---\n# Spec\n',
+          },
+        ],
       },
     });
     const router = new ModelRouter(models, routes, false, stub);
@@ -156,9 +162,11 @@ describe('planPhase', () => {
     const specPath = join(worktree, 'issue-41.md');
     const stub = new StubModelExecutor({
       scripts: {
-        plan: [{
-          output: '---\nroute: codex\n---\n# Spec\n',
-        }],
+        plan: [
+          {
+            output: '---\nroute: codex\n---\n# Spec\n',
+          },
+        ],
       },
     });
     const router = new ModelRouter(models, routes, false, stub);
@@ -192,9 +200,11 @@ describe('planPhase', () => {
     const specPath = join(worktree, 'issue-36.md');
     const stub = new StubModelExecutor({
       scripts: {
-        plan: [{
-          output: '---\nroute: "codex"\n---\n# Spec\n',
-        }],
+        plan: [
+          {
+            output: '---\nroute: "codex"\n---\n# Spec\n',
+          },
+        ],
       },
     });
     const router = new ModelRouter(models, routes, false, stub);
@@ -226,9 +236,11 @@ describe('planPhase', () => {
     const specPath = join(worktree, 'issue-37.md');
     const stub = new StubModelExecutor({
       scripts: {
-        plan: [{
-          output: '---\nroute: "codex "\n---\n# Spec\n',
-        }],
+        plan: [
+          {
+            output: '---\nroute: "codex "\n---\n# Spec\n',
+          },
+        ],
       },
     });
     const router = new ModelRouter(models, routes, false, stub);
@@ -262,9 +274,11 @@ describe('planPhase', () => {
 
     const stub = new StubModelExecutor({
       scripts: {
-        plan: [{
-          output: '---\nroute: codex\n---\n# Fresh Spec\n',
-        }],
+        plan: [
+          {
+            output: '---\nroute: codex\n---\n# Fresh Spec\n',
+          },
+        ],
       },
     });
     const router = new ModelRouter(models, routes, false, stub);
@@ -285,7 +299,9 @@ describe('planPhase', () => {
       router,
       constitution: null,
       octokit,
-      log: (type, msg) => { logs.push({ type, msg }); },
+      log: (type, msg) => {
+        logs.push({ type, msg });
+      },
     });
 
     expect(result.route).toBe('codex');
@@ -294,7 +310,9 @@ describe('planPhase', () => {
     const archived = await readdir(join(worktree, '.archive'));
     expect(archived).toHaveLength(1);
     await expect(readFile(join(worktree, '.archive', archived[0]), 'utf-8')).resolves.toContain('# Stale Spec');
-    expect(logs.some(l => l.type === 'plan' && l.msg.startsWith('Archived existing spec before planning:'))).toBe(true);
+    expect(logs.some((l) => l.type === 'plan' && l.msg.startsWith('Archived existing spec before planning:'))).toBe(
+      true,
+    );
   });
 
   describe('FACTORY_CODEX kill-switch', () => {
@@ -307,9 +325,11 @@ describe('planPhase', () => {
       const specPath = join(worktree, 'issue-79.md');
       const stub = new StubModelExecutor({
         scripts: {
-          plan: [{
-            output: '---\nroute: claude\n---\n# Spec\n',
-          }],
+          plan: [
+            {
+              output: '---\nroute: claude\n---\n# Spec\n',
+            },
+          ],
         },
       });
       const router = new ModelRouter(models, routes, false, stub, false, false);
@@ -331,11 +351,16 @@ describe('planPhase', () => {
           router,
           constitution: null,
           octokit,
-          log: (type, msg) => { logs.push({ type, msg }); },
+          log: (type, msg) => {
+            logs.push({ type, msg });
+          },
         });
 
         expect(result.route).toBe('codex');
-        expect(logs).toContainEqual({ type: 'warn', msg: 'local-only mode requires a local Codex harness — forcing route to codex' });
+        expect(logs).toContainEqual({
+          type: 'warn',
+          msg: 'local-only mode requires a local Codex harness — forcing route to codex',
+        });
 
         const persisted = await readFile(specPath, 'utf-8');
         expect(persisted).toContain('route: codex');
@@ -354,9 +379,11 @@ describe('planPhase', () => {
       const specPath = join(worktree, 'issue-79.md');
       const stub = new StubModelExecutor({
         scripts: {
-          plan: [{
-            output: '---\nroute: codex\n---\n# Spec\n',
-          }],
+          plan: [
+            {
+              output: '---\nroute: codex\n---\n# Spec\n',
+            },
+          ],
         },
       });
       const router = new ModelRouter(models, routes, false, stub);
@@ -377,7 +404,9 @@ describe('planPhase', () => {
         router,
         constitution: null,
         octokit,
-        log: (type, msg) => { logs.push({ type, msg }); },
+        log: (type, msg) => {
+          logs.push({ type, msg });
+        },
       });
 
       expect(result.route).toBe('claude');
@@ -396,9 +425,11 @@ describe('planPhase', () => {
       const specPath = join(worktree, 'issue-79.md');
       const stub = new StubModelExecutor({
         scripts: {
-          plan: [{
-            output: '---\nroute: codex\n---\n# Spec\n',
-          }],
+          plan: [
+            {
+              output: '---\nroute: codex\n---\n# Spec\n',
+            },
+          ],
         },
       });
       const router = new ModelRouter(models, routes, false, stub);
@@ -431,10 +462,7 @@ describe('planPhase', () => {
     const specPath = join(worktree, 'issue-40.md');
     const stub = new StubModelExecutor({
       scripts: {
-        plan: [
-          { fail: 'usage_cap' },
-          { output: '---\nroute: codex\n---\n# Spec\n' },
-        ],
+        plan: [{ fail: 'usage_cap' }, { output: '---\nroute: codex\n---\n# Spec\n' }],
       },
     });
     const router = new ModelRouter(models, routes, false, stub);
@@ -455,9 +483,15 @@ describe('planPhase', () => {
       router,
       constitution: null,
       octokit,
-      log: (type, msg, extra) => { logCalls.push([type, msg, extra]); },
+      log: (type, msg, extra) => {
+        logCalls.push([type, msg, extra]);
+      },
     });
 
-    expect(logCalls).toContainEqual(['failover', expect.stringContaining('usage_cap'), { failoverReason: 'usage_cap' }]);
+    expect(logCalls).toContainEqual([
+      'failover',
+      expect.stringContaining('usage_cap'),
+      { failoverReason: 'usage_cap' },
+    ]);
   });
 });

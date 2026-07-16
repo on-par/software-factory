@@ -15,20 +15,28 @@ export interface CheckPhaseResult {
 
 const MAX_REWORK_ROUNDS = 3;
 
-export async function checkPhase(
-  opts: {
-    issue: number;
-    worktree: string;
-    specPath: string;
-    constitution: Constitution | null;
-    router: ModelRouter;
-    log: LogFn;
-    autoRework?: boolean;
-    buildTimeoutSeconds?: number;
-    checkTimeoutSeconds?: number;
-  },
-): Promise<CheckPhaseResult> {
-  const { issue, worktree, specPath, constitution, router, log, autoRework = true, buildTimeoutSeconds, checkTimeoutSeconds } = opts;
+export async function checkPhase(opts: {
+  issue: number;
+  worktree: string;
+  specPath: string;
+  constitution: Constitution | null;
+  router: ModelRouter;
+  log: LogFn;
+  autoRework?: boolean;
+  buildTimeoutSeconds?: number;
+  checkTimeoutSeconds?: number;
+}): Promise<CheckPhaseResult> {
+  const {
+    issue,
+    worktree,
+    specPath,
+    constitution,
+    router,
+    log,
+    autoRework = true,
+    buildTimeoutSeconds,
+    checkTimeoutSeconds,
+  } = opts;
 
   const ctx: CheckerContext = { worktree, specPath };
 
@@ -48,16 +56,14 @@ export async function checkPhase(
     log('check', `Rework round ${reworkRounds}: ${summary.failures} failures remaining`);
   }
 
-  for (const s of summary.results.filter(r => r.result === 'SKIP')) {
+  for (const s of summary.results.filter((r) => r.result === 'SKIP')) {
     log('check', `SKIPPED: ${s.checker} — ${s.details}`);
   }
 
   if (summary.failures > 0) {
     log('fail', `${summary.failures} check failures after ${reworkRounds} rework rounds — parking`);
   } else {
-    log('check', summary.skips > 0
-      ? `All checkers passed (${summary.skips} skipped)`
-      : 'All checkers passed');
+    log('check', summary.skips > 0 ? `All checkers passed (${summary.skips} skipped)` : 'All checkers passed');
   }
 
   return {
@@ -78,8 +84,8 @@ async function reworkWorker(
   timeoutSeconds?: number,
 ): Promise<void> {
   const constitutionCtx = buildConstitutionContext(constitution);
-  const failures = summary.results.filter(r => r.result === 'FAIL');
-  const failureDetails = failures.map(f => `### ${f.checker}\n${f.details}`).join('\n\n');
+  const failures = summary.results.filter((r) => r.result === 'FAIL');
+  const failureDetails = failures.map((f) => `### ${f.checker}\n${f.details}`).join('\n\n');
 
   const prompt = `You are a WORKER agent in the rework loop of a software factory.
 Your previous work on issue #${issue} failed independent verification. Fix the
@@ -103,32 +109,34 @@ ${failureDetails}
 
 Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`;
 
-  const reworkResult = await router.run('build_claude', prompt, {
-    worktree,
-    timeoutSeconds: timeoutSeconds ?? 7200,
-    onLog: (msg) => log('router', msg),
-  }).catch(() => null);
+  const reworkResult = await router
+    .run('build_claude', prompt, {
+      worktree,
+      timeoutSeconds: timeoutSeconds ?? 7200,
+      onLog: (msg) => log('router', msg),
+    })
+    .catch(() => null);
 
   if (reworkResult) {
     for (const f of failoversFrom(reworkResult.attempts)) {
-      log('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, { failoverReason: f.reason });
+      log('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, {
+        failoverReason: f.reason,
+      });
     }
   }
 }
 
-export async function disputeResolution(
-  opts: {
-    issue: number;
-    worktree: string;
-    specPath: string;
-    checkerName: string;
-    checkerDetails: string;
-    constitution: Constitution | null;
-    router: ModelRouter;
-    timeoutSeconds?: number;
-    log?: LogFn;
-  },
-): Promise<DisputeResult> {
+export async function disputeResolution(opts: {
+  issue: number;
+  worktree: string;
+  specPath: string;
+  checkerName: string;
+  checkerDetails: string;
+  constitution: Constitution | null;
+  router: ModelRouter;
+  timeoutSeconds?: number;
+  log?: LogFn;
+}): Promise<DisputeResult> {
   const { issue, worktree, specPath, checkerName, checkerDetails, constitution, router, timeoutSeconds, log } = opts;
   const constitutionCtx = buildConstitutionContext(constitution);
 
@@ -153,17 +161,21 @@ Details: ${checkerDetails}
 4. Return JSON (and ONLY the JSON):
 {"verdict":"upheld" or "overruled","reasoning":"<one paragraph citing the standard>","action":"<what happens next>"}`;
 
-  const result = await router.run('dispute_resolution', prompt, {
-    worktree,
-    timeoutSeconds: timeoutSeconds ?? 1800,
-  }).catch(() => null);
+  const result = await router
+    .run('dispute_resolution', prompt, {
+      worktree,
+      timeoutSeconds: timeoutSeconds ?? 1800,
+    })
+    .catch(() => null);
 
   if (!result) {
     return { verdict: 'upheld', reasoning: 'dispute agent failed', action: 'worker must fix' };
   }
 
   for (const f of failoversFrom(result.attempts)) {
-    log?.('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, { failoverReason: f.reason });
+    log?.('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, {
+      failoverReason: f.reason,
+    });
   }
 
   const match = result.output.match(/"verdict"\s*:\s*"(upheld|overruled)"/);

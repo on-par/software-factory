@@ -12,22 +12,20 @@ export interface BuildResult {
   escalate?: string;
 }
 
-export async function buildPhase(
-  opts: {
-    issue: number;
-    repo: string;
-    worktree: string;
-    specPath: string;
-    branch: string;
-    constitution: Constitution | null;
-    route: 'codex' | 'claude';
-    router: ModelRouter;
-    log: (type: string, msg: string, extra?: { failoverReason?: FailoverReason }) => void;
-    timeoutSeconds?: number;
-    skipCI?: boolean;
-    modelOverride?: string;
-  },
-): Promise<BuildResult> {
+export async function buildPhase(opts: {
+  issue: number;
+  repo: string;
+  worktree: string;
+  specPath: string;
+  branch: string;
+  constitution: Constitution | null;
+  route: 'codex' | 'claude';
+  router: ModelRouter;
+  log: (type: string, msg: string, extra?: { failoverReason?: FailoverReason }) => void;
+  timeoutSeconds?: number;
+  skipCI?: boolean;
+  modelOverride?: string;
+}): Promise<BuildResult> {
   const { issue, worktree, specPath, branch, constitution, router, log, timeoutSeconds, skipCI, modelOverride } = opts;
   let route = opts.route;
 
@@ -118,7 +116,9 @@ with "ESCALATE:" followed by the question, then STOP.`;
   });
 
   for (const f of failoversFrom(result.attempts)) {
-    log('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, { failoverReason: f.reason });
+    log('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, {
+      failoverReason: f.reason,
+    });
   }
 
   if (isEscalation(result.output)) {

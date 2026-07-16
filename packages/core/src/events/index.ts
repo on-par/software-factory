@@ -10,7 +10,7 @@ export function readEvents(eventsFile: string): FactoryEvent[] {
     .trim()
     .split('\n')
     .filter(Boolean)
-    .flatMap(line => {
+    .flatMap((line) => {
       try {
         return [JSON.parse(line) as FactoryEvent];
       } catch {

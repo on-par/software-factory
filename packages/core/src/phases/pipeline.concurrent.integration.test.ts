@@ -24,7 +24,7 @@ import { shipPhase } from './ship.js';
 const exec = promisify(execCb);
 const repo = 'on-par/software-factory';
 
-const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const kit = new PipelineTestKit();
 
@@ -118,7 +118,7 @@ describe('concurrent lanes integration', () => {
       for (const result of results) {
         expect(result.ship.ok).toBe(true);
       }
-      const prNumbers = results.map(r => r.ship.prNumber);
+      const prNumbers = results.map((r) => r.ship.prNumber);
       expect(prNumbers[0]).toBeDefined();
       expect(prNumbers[1]).toBeDefined();
       expect(prNumbers[0]).not.toBe(prNumbers[1]);
@@ -133,9 +133,7 @@ describe('concurrent lanes integration', () => {
             body: expect.stringContaining(`Closes #${result.issue}`),
           }),
         ]);
-        await expect(
-          exec(`git -C '${origin}' rev-parse --verify refs/heads/'${result.branch}'`),
-        ).resolves.toBeTruthy();
+        await expect(exec(`git -C '${origin}' rev-parse --verify refs/heads/'${result.branch}'`)).resolves.toBeTruthy();
       }
 
       expect(intervals).toHaveLength(2);

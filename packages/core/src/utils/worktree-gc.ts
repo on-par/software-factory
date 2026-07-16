@@ -40,7 +40,10 @@ const CREDENTIAL_BASENAMES = new Set(['.git-credentials', '.npmrc']);
 
 export function parseWorktreeList(porcelain: string): WorktreeListEntry[] {
   const entries: WorktreeListEntry[] = [];
-  const blocks = porcelain.split(/\n\s*\n/).map(b => b.trim()).filter(Boolean);
+  const blocks = porcelain
+    .split(/\n\s*\n/)
+    .map((b) => b.trim())
+    .filter(Boolean);
 
   for (const block of blocks) {
     let path: string | null = null;
@@ -53,7 +56,10 @@ export function parseWorktreeList(porcelain: string): WorktreeListEntry[] {
       } else if (line.startsWith('HEAD ')) {
         head = line.slice('HEAD '.length).trim();
       } else if (line.startsWith('branch ')) {
-        branch = line.slice('branch '.length).trim().replace(/^refs\/heads\//, '');
+        branch = line
+          .slice('branch '.length)
+          .trim()
+          .replace(/^refs\/heads\//, '');
       }
     }
 
@@ -137,11 +143,7 @@ export async function sweepWorktrees(
   opts: { repoRoot: string; ttlDays: number; dryRun?: boolean },
   deps: SweepDeps = {},
 ): Promise<GcReport> {
-  const {
-    runCommand = defaultRunCommand,
-    now = () => Date.now(),
-    log = () => {},
-  } = deps;
+  const { runCommand = defaultRunCommand, now = () => Date.now(), log = () => {} } = deps;
   const { repoRoot, ttlDays, dryRun = false } = opts;
 
   const { stdout } = await runCommand('git worktree list --porcelain', { cwd: repoRoot });
@@ -151,7 +153,7 @@ export async function sweepWorktrees(
   const repoBase = basename(repoRootResolved);
   const factoryPrefix = `${repoBase}-factory-`;
 
-  const candidates: WorktreeListEntry[] = entries.filter(entry => {
+  const candidates: WorktreeListEntry[] = entries.filter((entry) => {
     const entryPath = resolve(entry.path);
     if (entryPath === repoRootResolved) return false;
     return basename(entryPath).startsWith(factoryPrefix);
@@ -178,11 +180,9 @@ export async function sweepWorktrees(
     }
 
     if (!reason && entry.branch) {
-      const lsRemote = await safeExec(
-        runCommand,
-        `git ls-remote --heads origin ${shellEscape(entry.branch)}`,
-        { cwd: repoRoot },
-      );
+      const lsRemote = await safeExec(runCommand, `git ls-remote --heads origin ${shellEscape(entry.branch)}`, {
+        cwd: repoRoot,
+      });
       if (lsRemote !== null && lsRemote.stdout.trim() === '') {
         reason = 'remote-gone';
       }

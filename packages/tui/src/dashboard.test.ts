@@ -35,12 +35,12 @@ describe('reduceDashboard — lane creation and independence', () => {
       ev('plan', '305', 'Starting plan phase', '2026-01-01T00:00:02.000Z'),
     ]);
 
-    expect(state.lanes.map(l => l.issue)).toEqual(['296', '301', '305']);
-    expect(state.lanes.every(l => l.run.activePhase === 'PLAN')).toBe(true);
+    expect(state.lanes.map((l) => l.issue)).toEqual(['296', '301', '305']);
+    expect(state.lanes.every((l) => l.run.activePhase === 'PLAN')).toBe(true);
 
     const afterBuild = reduceDashboard(state, ev('build', '301', 'Starting build phase (route: claude)'));
-    const lane296 = afterBuild.lanes.find(l => l.issue === '296')!;
-    const lane301 = afterBuild.lanes.find(l => l.issue === '301')!;
+    const lane296 = afterBuild.lanes.find((l) => l.issue === '296')!;
+    const lane301 = afterBuild.lanes.find((l) => l.issue === '301')!;
     expect(lane296.run.activePhase).toBe('PLAN');
     expect(lane301.run.activePhase).toBe('BUILD');
   });
@@ -56,19 +56,13 @@ describe('reduceDashboard — lifecycle events', () => {
   });
 
   it('ready sets status to ready and parses the PR number', () => {
-    const state = reduceAll([
-      ev('plan', '296', 'Starting plan phase'),
-      ev('ready', '296', 'PR #123 ready for review'),
-    ]);
+    const state = reduceAll([ev('plan', '296', 'Starting plan phase'), ev('ready', '296', 'PR #123 ready for review')]);
     expect(state.lanes[0].status).toBe('ready');
     expect(state.lanes[0].prNumber).toBe('123');
   });
 
   it('ready without a parseable PR number leaves prNumber unset', () => {
-    const state = reduceAll([
-      ev('plan', '296', 'Starting plan phase'),
-      ev('ready', '296', 'ready for review'),
-    ]);
+    const state = reduceAll([ev('plan', '296', 'Starting plan phase'), ev('ready', '296', 'ready for review')]);
     expect(state.lanes[0].status).toBe('ready');
     expect(state.lanes[0].prNumber).toBeUndefined();
   });
@@ -94,7 +88,7 @@ describe('reduceDashboard — lifecycle events', () => {
 
   it.each(['fail', 'escalate', 'timeout', 'conflict', 'parked', 'ship_denied'])(
     '%s sets status failed with the phase active at failure and preserves the reason',
-    type => {
+    (type) => {
       const state = reduceAll([
         ev('plan', '296', 'Starting plan phase'),
         ev('build', '296', 'Starting build phase (route: claude)'),

@@ -79,7 +79,7 @@ describe('findCredentialFiles / zeroFill / scrubFile', () => {
     zeroFill(envPath);
     const zeroed = readFileSync(envPath);
     expect(zeroed.length).toBe(originalSize);
-    expect(zeroed.every(b => b === 0)).toBe(true);
+    expect(zeroed.every((b) => b === 0)).toBe(true);
 
     scrubFile(envPath);
     expect(existsSync(envPath)).toBe(false);
@@ -129,7 +129,7 @@ describe('sweepWorktrees', () => {
     const report = await sweepWorktrees({ repoRoot, ttlDays: 7 }, { runCommand });
     expect(report.removed).toHaveLength(0);
     expect(report.kept).toBe(0);
-    expect(commands.some(c => c.includes('worktree remove'))).toBe(false);
+    expect(commands.some((c) => c.includes('worktree remove'))).toBe(false);
   });
 
   it('removes a merged worktree, scrubbing credentials before the remove command runs', async () => {
@@ -142,7 +142,9 @@ describe('sweepWorktrees', () => {
     const runCommand = async (cmd: string) => {
       commands.push(cmd);
       if (cmd === 'git worktree list --porcelain') {
-        return { stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/5-feature\n\n` };
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/5-feature\n\n`,
+        };
       }
       if (cmd.startsWith('git merge-base --is-ancestor')) {
         return { stdout: '' }; // exit 0 => ancestor => merged
@@ -156,11 +158,11 @@ describe('sweepWorktrees', () => {
     expect(report.removed[0].scrubbedFiles).toEqual([join(wt, '.env')]);
     expect(existsSync(join(wt, '.env'))).toBe(false);
 
-    const removeIdx = commands.findIndex(c => c.includes('worktree remove'));
+    const removeIdx = commands.findIndex((c) => c.includes('worktree remove'));
     expect(removeIdx).toBeGreaterThan(-1);
     // credential scrub happens via fs ops before the remove command is issued
     expect(existsSync(join(wt, '.env'))).toBe(false);
-    expect(commands.some(c => c === 'git worktree prune')).toBe(true);
+    expect(commands.some((c) => c === 'git worktree prune')).toBe(true);
   });
 
   it('classifies a remote-gone branch when ancestor check fails and ls-remote is empty', async () => {
@@ -170,7 +172,9 @@ describe('sweepWorktrees', () => {
 
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
-        return { stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/6-feature\n\n` };
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/6-feature\n\n`,
+        };
       }
       if (cmd.startsWith('git merge-base --is-ancestor')) {
         throw new Error('exit 1'); // not an ancestor
@@ -193,7 +197,9 @@ describe('sweepWorktrees', () => {
 
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
-        return { stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/7-feature\n\n` };
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/7-feature\n\n`,
+        };
       }
       if (cmd.startsWith('git merge-base --is-ancestor')) {
         throw new Error('exit 1');
@@ -218,7 +224,9 @@ describe('sweepWorktrees', () => {
 
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
-        return { stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/8-feature\n\n` };
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/8-feature\n\n`,
+        };
       }
       if (cmd.startsWith('git merge-base --is-ancestor')) {
         throw new Error('exit 1');
@@ -242,7 +250,9 @@ describe('sweepWorktrees', () => {
 
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
-        return { stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/9-feature\n\n` };
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/9-feature\n\n`,
+        };
       }
       if (cmd.startsWith('git merge-base --is-ancestor')) {
         throw new Error('exit 1');
@@ -268,7 +278,9 @@ describe('sweepWorktrees', () => {
     const runCommand = async (cmd: string) => {
       commands.push(cmd);
       if (cmd === 'git worktree list --porcelain') {
-        return { stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/10-feature\n\n` };
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/10-feature\n\n`,
+        };
       }
       if (cmd.startsWith('git merge-base --is-ancestor')) {
         return { stdout: '' };
@@ -280,8 +292,8 @@ describe('sweepWorktrees', () => {
     expect(report.dryRun).toBe(true);
     expect(report.removed).toHaveLength(1);
     expect(report.removed[0].scrubbedFiles).toEqual([]);
-    expect(commands.some(c => c.includes('worktree remove'))).toBe(false);
-    expect(commands.some(c => c === 'git worktree prune')).toBe(false);
+    expect(commands.some((c) => c.includes('worktree remove'))).toBe(false);
+    expect(commands.some((c) => c === 'git worktree prune')).toBe(false);
     expect(existsSync(join(wt, '.env'))).toBe(true);
   });
 
@@ -292,7 +304,9 @@ describe('sweepWorktrees', () => {
 
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
-        return { stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/11-feature\n\n` };
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/11-feature\n\n`,
+        };
       }
       if (cmd.startsWith('git merge-base --is-ancestor')) {
         return { stdout: '' };
@@ -315,7 +329,13 @@ describe('formatGcReport', () => {
       dryRun: true,
       kept: 2,
       removed: [
-        { path: '/repo/foo-factory-ship-it-1', branch: 'ship-it/1-x', ageDays: 3.2, reason: 'merged', scrubbedFiles: [] },
+        {
+          path: '/repo/foo-factory-ship-it-1',
+          branch: 'ship-it/1-x',
+          ageDays: 3.2,
+          reason: 'merged',
+          scrubbedFiles: [],
+        },
       ],
     });
     expect(text).toContain('/repo/foo-factory-ship-it-1 (ship-it/1-x, 3d old) — merged');
@@ -336,7 +356,9 @@ describe('formatGcReport', () => {
         },
       ],
     });
-    expect(text).toContain('/repo/foo-factory-ship-it-2 (detached, 10d old) — ttl-expired, scrubbed 1 credential file(s)');
+    expect(text).toContain(
+      '/repo/foo-factory-ship-it-2 (detached, 10d old) — ttl-expired, scrubbed 1 credential file(s)',
+    );
     expect(text).toContain('removed 1 worktree(s), kept 0');
   });
 });

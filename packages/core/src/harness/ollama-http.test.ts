@@ -12,9 +12,21 @@ function okFetch(json: unknown): OllamaFetchFn {
 describe('CodingHarness contract: OllamaHttpHarness', () => {
   const cases = codingHarnessContractCases({
     success: () => ({ harness: new OllamaHttpHarness(okFetch({ message: { content: 'ollama output' } })) }),
-    timeout: () => ({ harness: new OllamaHttpHarness(async () => { throw Object.assign(new Error('timed out'), { name: 'TimeoutError' }); }) }),
+    timeout: () => ({
+      harness: new OllamaHttpHarness(async () => {
+        throw Object.assign(new Error('timed out'), { name: 'TimeoutError' });
+      }),
+    }),
     emptyOutput: () => ({ harness: new OllamaHttpHarness(okFetch({ message: { content: '   ' } })) }),
-    failure: () => ({ harness: new OllamaHttpHarness(async () => ({ ok: false, status: 429, statusText: 'Too Many Requests', text: async () => 'rate limit exceeded', json: async () => ({}) })) }),
+    failure: () => ({
+      harness: new OllamaHttpHarness(async () => ({
+        ok: false,
+        status: 429,
+        statusText: 'Too Many Requests',
+        text: async () => 'rate limit exceeded',
+        json: async () => ({}),
+      })),
+    }),
   });
   for (const contractCase of cases) it(contractCase.name, contractCase.run);
 });
@@ -83,11 +95,13 @@ describe('OllamaHttpHarness request shape', () => {
     const rec = recordingFetch();
     const harness = new OllamaHttpHarness(rec.fn);
 
-    const result = await harness.run(makeContractRequest({
-      model: 'ollama-model',
-      registry,
-      prompt: 'draft plan',
-    }));
+    const result = await harness.run(
+      makeContractRequest({
+        model: 'ollama-model',
+        registry,
+        prompt: 'draft plan',
+      }),
+    );
 
     expect(result.output).toBe('OLLAMA OUTPUT');
     expect(rec.calls).toHaveLength(1);
@@ -141,7 +155,7 @@ describe('OllamaHttpHarness failure classification', () => {
       json: async () => ({}),
     }));
 
-    const err: any = await harness.run(makeContractRequest({ model: 'ollama-model', registry })).catch(e => e);
+    const err: any = await harness.run(makeContractRequest({ model: 'ollama-model', registry })).catch((e) => e);
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.details.exitCode).toBe(500);
@@ -152,7 +166,7 @@ describe('OllamaHttpHarness failure classification', () => {
   it('classifies a JSON error payload as usage_cap', async () => {
     const harness = new OllamaHttpHarness(okFetch({ error: 'quota exceeded' }));
 
-    const err: any = await harness.run(makeContractRequest({ model: 'ollama-model', registry })).catch(e => e);
+    const err: any = await harness.run(makeContractRequest({ model: 'ollama-model', registry })).catch((e) => e);
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('usage_cap');
@@ -162,7 +176,7 @@ describe('OllamaHttpHarness failure classification', () => {
   it('classifies empty message content as empty_response', async () => {
     const harness = new OllamaHttpHarness(okFetch({ message: { content: '' } }));
 
-    const err: any = await harness.run(makeContractRequest({ model: 'ollama-model', registry })).catch(e => e);
+    const err: any = await harness.run(makeContractRequest({ model: 'ollama-model', registry })).catch((e) => e);
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('empty_response');
@@ -182,7 +196,7 @@ describe('OllamaHttpHarness failure classification', () => {
       throw Object.assign(new Error('socket closed'), { reason: 'error' });
     });
 
-    const err: any = await harness.run(makeContractRequest({ model: 'ollama-model', registry })).catch(e => e);
+    const err: any = await harness.run(makeContractRequest({ model: 'ollama-model', registry })).catch((e) => e);
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('error');

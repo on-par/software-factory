@@ -22,11 +22,14 @@ describe('local-small stepwise dry-run harness', () => {
     const specPath = join(tmpDir, 'issue-166.md');
     await mkdir(repoRoot);
     writeFileSync(join(repoRoot, 'source.ts'), 'export const value = 1;\n');
-    writeFileSync(specPath, [
-      '# Spec: Introduce local-small stepwise harness skeleton (#166)',
-      'Update `packages/core/src/local-small/stepwise.ts` and `packages/core/src/index.ts`.',
-      'Run `npm test -- packages/core/src/local-small/stepwise.test.ts`.',
-    ].join('\n'));
+    writeFileSync(
+      specPath,
+      [
+        '# Spec: Introduce local-small stepwise harness skeleton (#166)',
+        'Update `packages/core/src/local-small/stepwise.ts` and `packages/core/src/index.ts`.',
+        'Run `npm test -- packages/core/src/local-small/stepwise.test.ts`.',
+      ].join('\n'),
+    );
 
     const result = await createLocalSmallDryRun({
       issue: 166,
@@ -38,13 +41,13 @@ describe('local-small stepwise dry-run harness', () => {
       now: () => new Date('2026-07-14T12:00:00.000Z'),
     });
 
-    expect(result.plan.steps.map(step => step.id)).toEqual([
+    expect(result.plan.steps.map((step) => step.id)).toEqual([
       'inspect-context',
       'schema-bound-change',
       'verify-and-report',
     ]);
-    expect(result.plan.steps.every(step => step.maxFiles <= 4)).toBe(true);
-    expect(result.plan.steps.every(step => step.maxTokens <= 2000)).toBe(true);
+    expect(result.plan.steps.every((step) => step.maxFiles <= 4)).toBe(true);
+    expect(result.plan.steps.every((step) => step.maxTokens <= 2000)).toBe(true);
     expect(result.contextPack.stepId).toBe('inspect-context');
     expect(result.contextPack.allowedFiles).toEqual([
       'packages/core/src/local-small/stepwise.ts',
@@ -344,7 +347,9 @@ describe('local-small proposal validation branches', () => {
   });
 
   it('rejects a change with no file', async () => {
-    expect((await runProposal({ ...base, changes: [{ find: 'a', replace: 'b' }] })).reason).toContain('requires a file');
+    expect((await runProposal({ ...base, changes: [{ find: 'a', replace: 'b' }] })).reason).toContain(
+      'requires a file',
+    );
   });
 
   it('rejects a change with an empty find', async () => {
@@ -358,10 +363,9 @@ describe('local-small proposal validation branches', () => {
   });
 
   it('reports repair-needed when an allowed file is missing on disk', async () => {
-    const result = await runProposal(
-      { ...base, changes: [{ file: 'src/missing.ts', find: 'x', replace: 'y' }] },
-      ['src/missing.ts'],
-    );
+    const result = await runProposal({ ...base, changes: [{ file: 'src/missing.ts', find: 'x', replace: 'y' }] }, [
+      'src/missing.ts',
+    ]);
     expect(result.status).toBe('repair-needed');
     expect(result.reason).toContain('file could not be read');
   });
@@ -401,11 +405,14 @@ describe('local-small dry-run inference branches', () => {
     const outputDir = join(tmpDir, 'artifacts');
     const specPath = join(tmpDir, 'issue-201.md');
     await mkdir(repoRoot);
-    writeFileSync(specPath, [
-      'Edit `src/keep.ts` for the change.',
-      'See `http://example.com/skip.js` for context.',
-      'Do not touch `../outside/escape.ts`.',
-    ].join('\n'));
+    writeFileSync(
+      specPath,
+      [
+        'Edit `src/keep.ts` for the change.',
+        'See `http://example.com/skip.js` for context.',
+        'Do not touch `../outside/escape.ts`.',
+      ].join('\n'),
+    );
 
     const result = await createLocalSmallDryRun({
       issue: 201,

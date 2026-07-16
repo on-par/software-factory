@@ -1,5 +1,5 @@
 ---
-product: "launchblitz"
+product: 'launchblitz'
 version: 1
 checkers:
   - compile
@@ -11,6 +11,7 @@ enforced_on: [plan, build, check]
 # Launchblitz Constitution
 
 ## Purpose
+
 LaunchBlitz takes a founder from a raw business idea to a launch-ready
 handoff in one guided session. A **Build** is a persisted founder project
 worked through ordered **Stages** (idea capture, market validation, customer
@@ -24,6 +25,7 @@ full product vocabulary — use its terms exactly (e.g. "Build" not "Project",
 ## Standards
 
 ### Speed-to-MVP, with coverage trending up
+
 - The goal right now is shipping working stages toward a payable MVP — do
   not block an issue on the repo already having full coverage, and don't
   demand exhaustive branch coverage of every edge case just to ship one
@@ -37,6 +39,7 @@ full product vocabulary — use its terms exactly (e.g. "Build" not "Project",
   acceptance criteria over a more general or "future-proof" one.
 
 ### Test-Driven, Pragmatically
+
 - New business logic (API routes, repository/db functions, validation)
   should ship with a colocated test: `foo.ts` → `foo.test.ts`, following the
   existing pattern (`route.test.ts`, `repository.test.ts`, `validation.test.ts`).
@@ -47,6 +50,7 @@ full product vocabulary — use its terms exactly (e.g. "Build" not "Project",
   function exists without exercising real behavior.
 
 ### E2e Tests
+
 - Live in the top-level `e2e/` directory (established pattern — this product
   spans `apps/web` + `packages/*`, so top-level is correct, not a colocation
   violation).
@@ -56,6 +60,7 @@ full product vocabulary — use its terms exactly (e.g. "Build" not "Project",
   packet). Don't e2e-test what a unit/integration test already covers.
 
 ### Code Quality
+
 - TypeScript strict mode — no `any` without a comment explaining why.
 - Tailwind for all styling — no new inline `<style>` blocks or hand-rolled
   CSS files outside `apps/web/app/globals.css` tokens. If a one-off vanilla
@@ -66,6 +71,7 @@ full product vocabulary — use its terms exactly (e.g. "Build" not "Project",
   the `pr-verify.yml` workflow — do not weaken it.
 
 ### Architecture
+
 - Business logic (repository functions, validation, Stripe/Clerk
   integration) lives in `packages/*`, not inline in route handlers or page
   components — route handlers stay thin and delegate.
@@ -73,6 +79,7 @@ full product vocabulary — use its terms exactly (e.g. "Build" not "Project",
   never hand-edited against a live database.
 
 ## Quality Gates
+
 1. `compile` — `tsc --noEmit` (or the Turborepo `build` task) passes with no
    errors across affected packages.
 2. `lint` — no lint errors.
@@ -82,6 +89,7 @@ full product vocabulary — use its terms exactly (e.g. "Build" not "Project",
    on-par repos.
 
 ## Dispute Rules
+
 - If a checker flags a missing test on a genuinely trivial composition file
   (per the UI exception above), the worker may argue it and the boss
   arbitrates against the Standards section — not subjective judgment.
@@ -92,6 +100,7 @@ full product vocabulary — use its terms exactly (e.g. "Build" not "Project",
   trend aside.
 
 ## Non-Goals
+
 - No hard repo-wide coverage floor/gate (contrast with sound-buddy's
   ratchet-to-current-floor approach) — coverage should trend up per PR,
   not be enforced as a blocking threshold before that's earned.

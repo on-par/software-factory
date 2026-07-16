@@ -33,26 +33,27 @@ export function CostsTab({ costs, selectedIndex }: CostsTabProps): JSX.Element {
   return (
     <Box flexDirection="column">
       {costs.skipped > 0 && <Text color="yellow">⚠ skipped {costs.skipped} malformed line(s) in costs.jsonl</Text>}
-      <Text bold>issue        in-tokens    out-tokens   cost</Text>
+      <Text bold>issue in-tokens out-tokens cost</Text>
       {summary.perIssue.map((row, i) => (
         <Text key={row.issue}>
           <Text color={i === clampedIndex ? 'cyan' : undefined}>{i === clampedIndex ? '❯ ' : '  '}</Text>
           <Text inverse={i === clampedIndex}>
-            #{row.issue}  {fmtTokens(row.inputTokens)}  {fmtTokens(row.outputTokens)}  {fmtCost(row.cost)}
+            #{row.issue} {fmtTokens(row.inputTokens)} {fmtTokens(row.outputTokens)} {fmtCost(row.cost)}
           </Text>
         </Text>
       ))}
       <Text> </Text>
       <Text bold>per-model — #{selected.issue}</Text>
-      {selected.perModel.map(m => (
+      {selected.perModel.map((m) => (
         <Text key={m.model}>
           {' '}
-          {m.model}  {m.tasks} task(s)  in {fmtTokens(m.inputTokens)}  out {fmtTokens(m.outputTokens)}  {fmtCost(m.cost)}
+          {m.model} {m.tasks} task(s) in {fmtTokens(m.inputTokens)} out {fmtTokens(m.outputTokens)} {fmtCost(m.cost)}
         </Text>
       ))}
       <Text> </Text>
       <Text dimColor>
-        session total: in {fmtTokens(summary.total.inputTokens)} · out {fmtTokens(summary.total.outputTokens)} · {fmtCost(summary.total.cost)}
+        session total: in {fmtTokens(summary.total.inputTokens)} · out {fmtTokens(summary.total.outputTokens)} ·{' '}
+        {fmtCost(summary.total.cost)}
       </Text>
     </Box>
   );

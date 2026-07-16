@@ -144,8 +144,7 @@ describe('parseCoverageSummaryScopes', () => {
       statements: { total: 100, covered: 95, pct: 95 },
     });
 
-    expect(() => parseCoverageSummaryScopes(json, ['packages/missing/src/**/*.{ts,tsx}']))
-      .toThrow(/no files/);
+    expect(() => parseCoverageSummaryScopes(json, ['packages/missing/src/**/*.{ts,tsx}'])).toThrow(/no files/);
   });
 });
 
@@ -166,16 +165,14 @@ describe('checkRatchetDrift', () => {
     const measured: CoverageMetrics = { lines: 95, functions: 90, branches: 85, statements: 90 };
     const result = checkRatchetDrift(measured, thresholds, 2);
     expect(result.ok).toBe(false);
-    expect(result.drifts).toEqual([
-      { metric: 'lines', measured: 95, threshold: 90, suggested: 94 },
-    ]);
+    expect(result.drifts).toEqual([{ metric: 'lines', measured: 95, threshold: 90, suggested: 94 }]);
   });
 
   it('flags multiple metrics over slack', () => {
     const measured: CoverageMetrics = { lines: 95, functions: 96, branches: 85, statements: 90 };
     const result = checkRatchetDrift(measured, thresholds, 2);
     expect(result.ok).toBe(false);
-    expect(result.drifts.map(d => d.metric)).toEqual(['lines', 'functions']);
+    expect(result.drifts.map((d) => d.metric)).toEqual(['lines', 'functions']);
   });
 
   it('respects a custom slack', () => {
@@ -198,9 +195,7 @@ describe('checkRatchetDrift', () => {
       { lines: 90, functions: 90, branches: 85, statements: 90 },
       2,
     );
-    expect(result.drifts).toEqual([
-      { metric: 'branches', measured: 88.42, threshold: 85, suggested: 87 },
-    ]);
+    expect(result.drifts).toEqual([{ metric: 'branches', measured: 88.42, threshold: 85, suggested: 87 }]);
   });
 });
 
@@ -258,12 +253,15 @@ describe('renderRatchetReport', () => {
   });
 
   it('renders scoped drifts with scope labels', () => {
-    const report = renderRatchetReport({
-      ok: false,
-      drifts: [
-        { scope: 'packages/core/src/**/*.{ts,tsx}', metric: 'lines', measured: 98, threshold: 94, suggested: 97 },
-      ],
-    }, 2);
+    const report = renderRatchetReport(
+      {
+        ok: false,
+        drifts: [
+          { scope: 'packages/core/src/**/*.{ts,tsx}', metric: 'lines', measured: 98, threshold: 94, suggested: 97 },
+        ],
+      },
+      2,
+    );
 
     expect(report).toContain('Scope');
     expect(report).toContain('packages/core/src/**/*.{ts,tsx}');

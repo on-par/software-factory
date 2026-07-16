@@ -29,36 +29,41 @@ const ModelDefSchema = z.object({
   experimental: z.boolean().optional(),
 });
 
-const ModelsConfigSchema = z.object({
-  version: z.number(),
-  models: z.record(z.string(), ModelDefSchema),
-  tiers: z.record(z.string(), z.array(z.string())),
-  failover: z.object({
-    triggers: z.array(z.string()),
-    maxRetries: z.number(),
-    cooldownMs: z.number(),
-    escalateAfterTierExhausted: z.boolean(),
-  }),
-  routingRules: z.record(z.string(), z.unknown()).default({}),
-}).superRefine((config, ctx) => {
-  for (const [name, def] of Object.entries(config.models)) {
-    if (def.harness !== undefined && !KNOWN_HARNESS_IDS.includes(def.harness)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['models', name, 'harness'],
-        message: `Model '${name}' declares unknown harness '${def.harness}' (known harnesses: ${KNOWN_HARNESS_IDS.join(', ')})`,
-      });
+const ModelsConfigSchema = z
+  .object({
+    version: z.number(),
+    models: z.record(z.string(), ModelDefSchema),
+    tiers: z.record(z.string(), z.array(z.string())),
+    failover: z.object({
+      triggers: z.array(z.string()),
+      maxRetries: z.number(),
+      cooldownMs: z.number(),
+      escalateAfterTierExhausted: z.boolean(),
+    }),
+    routingRules: z.record(z.string(), z.unknown()).default({}),
+  })
+  .superRefine((config, ctx) => {
+    for (const [name, def] of Object.entries(config.models)) {
+      if (def.harness !== undefined && !KNOWN_HARNESS_IDS.includes(def.harness)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['models', name, 'harness'],
+          message: `Model '${name}' declares unknown harness '${def.harness}' (known harnesses: ${KNOWN_HARNESS_IDS.join(', ')})`,
+        });
+      }
     }
-  }
-});
+  });
 
 const RoutesConfigSchema = z.object({
   version: z.number(),
-  routes: z.record(z.string(), z.object({
-    tier: z.string(),
-    description: z.string(),
-    requires: z.string().optional(),
-  })),
+  routes: z.record(
+    z.string(),
+    z.object({
+      tier: z.string(),
+      description: z.string(),
+      requires: z.string().optional(),
+    }),
+  ),
 });
 
 const FactoryConfigSchema = z.object({
@@ -88,10 +93,12 @@ const FactoryConfigSchema = z.object({
   byok: z.object({ enabled: z.boolean(), comment: z.string() }),
   notifications: z.record(z.string(), z.boolean()),
   cost_tracking: z.object({ enabled: z.boolean(), log_file: z.string(), comment: z.string() }),
-  ci: z.object({
-    skip: z.boolean().default(false),
-    comment: z.string().default('Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging'),
-  }).default({ skip: false, comment: 'Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging' }),
+  ci: z
+    .object({
+      skip: z.boolean().default(false),
+      comment: z.string().default('Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging'),
+    })
+    .default({ skip: false, comment: 'Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging' }),
 });
 
 // ---------- Types ----------
@@ -137,10 +144,7 @@ export function resolveTimeouts(
   };
 }
 
-export function resolveSkipCI(
-  config: FactoryConfig,
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
+export function resolveSkipCI(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.FACTORY_SKIP_CI === '1') return true;
   if (env.FACTORY_SKIP_CI === '0') return false;
   return config.ci?.skip ?? false;

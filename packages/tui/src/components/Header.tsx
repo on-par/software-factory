@@ -8,13 +8,14 @@ export interface HeaderProps {
 }
 
 export function Header({ issue, repo, done }: HeaderProps): JSX.Element {
-  const text = repo && issue
-    ? `Factory — issue #${issue} · ${repo}`
-    : issue
-      ? `Factory — issue #${issue}`
-      : repo
-        ? `Factory — ${repo}`
-        : 'Factory';
+  const text =
+    repo && issue
+      ? `Factory — issue #${issue} · ${repo}`
+      : issue
+        ? `Factory — issue #${issue}`
+        : repo
+          ? `Factory — ${repo}`
+          : 'Factory';
 
   return (
     <Text bold color="cyan">
