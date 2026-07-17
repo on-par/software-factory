@@ -14,9 +14,6 @@ export default defineConfig({
         '**/*.test.{ts,tsx}',
         '**/*.d.ts',
         '**/dist/**',
-        // SaaS server is an unwired stub with no tests yet (see FACTORY_COMPARISON.md);
-        // it would only dilute the gate. Bring it under coverage when it gets tests.
-        'packages/server/**',
         // Types-only module (all `export type`/`export interface`, no executable
         // statements) — reports 0% and would only dilute the gate.
         'packages/core/src/types/**',
@@ -47,6 +44,7 @@ export default defineConfig({
         'packages/core/src/**/*.{ts,tsx}': { lines: 95, functions: 94, branches: 87, statements: 95 },
         'packages/cli/src/**/*.{ts,tsx}': { lines: 94, functions: 84, branches: 90, statements: 94 },
         'packages/dashboard/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
+        'packages/server/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
       },
     },
   },

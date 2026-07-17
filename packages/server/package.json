@@ -11,7 +11,7 @@
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "echo 'no tests yet' && exit 0"
+    "test": "vitest run"
   },
   "dependencies": {
     "@on-par/factory-core": "*",
