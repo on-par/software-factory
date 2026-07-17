@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   slugify,
   branchPrefixSlug,
@@ -22,6 +22,10 @@ import {
 let tmpDir: string | undefined;
 
 describe('utils', () => {
+  beforeEach(() => {
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+  });
+
   afterEach(async () => {
     vi.restoreAllMocks();
     if (tmpDir) {
@@ -95,8 +99,7 @@ describe('utils', () => {
     expect(spy).toHaveBeenCalledWith('warn', expect.stringContaining('nonexistent-wt'));
   });
 
-  it('appends events as NDJSON', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  it('appends events as NDJSON with a level derived from type', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
     const eventsFile = join(tmpDir, 'events.ndjson');
 
@@ -112,19 +115,28 @@ describe('utils', () => {
       type: 'plan',
       issue: '85',
       msg: 'first',
+      level: 'info',
     });
     expect(events[1]).toEqual({
       ts: expect.any(String),
       type: 'build',
       issue: '85',
       msg: 'second',
+      level: 'info',
     });
+  });
 
-    expect(logSpy).toHaveBeenCalledWith('[factory] plan #85: first');
+  it('derives level=error for error-category types like fail', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+
+    logEvent(eventsFile, 'fail', 85, 'boom');
+
+    const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter(Boolean);
+    expect(JSON.parse(lines[0]).level).toBe('error');
   });
 
   it('logs a structured failoverReason when extra is provided', async () => {
-    vi.spyOn(console, 'log').mockImplementation(() => {});
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
     const eventsFile = join(tmpDir, 'events.ndjson');
 
@@ -136,12 +148,30 @@ describe('utils', () => {
       type: 'failover',
       issue: '5',
       msg: 'msg',
+      level: 'info',
       failoverReason: 'rate_limit',
     });
   });
 
-  it('omits failoverReason when extra is not provided (old shape preserved)', async () => {
-    vi.spyOn(console, 'log').mockImplementation(() => {});
+  it('includes lane and phase in the written event when passed as extra', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+
+    logEvent(eventsFile, 'build', 5, 'msg', { lane: 'app', phase: 'build' });
+
+    const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter(Boolean);
+    expect(JSON.parse(lines[0])).toEqual({
+      ts: expect.any(String),
+      type: 'build',
+      issue: '5',
+      msg: 'msg',
+      level: 'info',
+      lane: 'app',
+      phase: 'build',
+    });
+  });
+
+  it('omits failoverReason/lane/phase when extra is not provided (old shape preserved plus level)', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
     const eventsFile = join(tmpDir, 'events.ndjson');
 
@@ -150,11 +180,10 @@ describe('utils', () => {
     const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter(Boolean);
     const parsed = JSON.parse(lines[0]);
     expect(parsed).not.toHaveProperty('failoverReason');
-    expect(Object.keys(parsed).sort()).toEqual(['issue', 'msg', 'ts', 'type']);
+    expect(Object.keys(parsed).sort()).toEqual(['issue', 'level', 'msg', 'ts', 'type']);
   });
 
   it('creates missing directories when logging events', async () => {
-    vi.spyOn(console, 'log').mockImplementation(() => {});
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
     const eventsFile = join(tmpDir, 'nested', 'sub', 'events.ndjson');
 
@@ -168,6 +197,7 @@ describe('utils', () => {
       type: 'plan',
       issue: '85',
       msg: 'created',
+      level: 'info',
     });
   });
 

@@ -1221,6 +1221,7 @@ describe('cli', () => {
 
     it('parks the lane without re-emitting the terminal event (shipIssue owns it) on an escalate error', async () => {
       const calls: any[] = [];
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       await runLane('app', [7, 8], '/repo', 'on-par/software-factory', paths, {
         ship: async (issue) => {
           calls.push(['ship', issue]);
@@ -1230,8 +1231,8 @@ describe('cli', () => {
           throw new Error('waitMerge should not be called');
         },
         pathExists: () => false,
-        emitEvent: (_events: string, type: string, issue: string | number, msg: string) =>
-          calls.push(['event', type, issue, msg]),
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
+          calls.push(['event', type, issue, msg, extra]),
       });
 
       expect(calls.filter((c) => c[0] === 'ship')).toEqual([['ship', 7]]);
@@ -1240,8 +1241,10 @@ describe('cli', () => {
       expect(events[0][1]).toBe('parked');
       expect(events[0][2]).toBe(7);
       expect(events[0][3]).toContain('(escalate)');
+      expect(events[0][4]).toEqual({ lane: 'app' });
       expect(events.some((e) => e[1] === 'escalate')).toBe(false);
       expect(events.some((e) => e[1] === 'lane-done')).toBe(false);
+      expect(errorSpy).not.toHaveBeenCalled();
     });
 
     it('parks the lane without re-emitting the terminal event (shipIssue owns it) on a timeout error', async () => {
@@ -1254,8 +1257,8 @@ describe('cli', () => {
           throw new Error('waitMerge should not be called');
         },
         pathExists: () => false,
-        emitEvent: (_events: string, type: string, issue: string | number, msg: string) =>
-          calls.push(['event', type, issue, msg]),
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
+          calls.push(['event', type, issue, msg, extra]),
       });
 
       const events = calls.filter((c) => c[0] === 'event');
@@ -1276,8 +1279,8 @@ describe('cli', () => {
           throw new Error('waitMerge should not be called');
         },
         pathExists: () => false,
-        emitEvent: (_events: string, type: string, issue: string | number, msg: string) =>
-          calls.push(['event', type, issue, msg]),
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
+          calls.push(['event', type, issue, msg, extra]),
       });
 
       const events = calls.filter((c) => c[0] === 'event');
@@ -1299,8 +1302,8 @@ describe('cli', () => {
           throw new LandConflictError('rebase conflict on ship-it/11-x — parked');
         },
         pathExists: () => false,
-        emitEvent: (_events: string, type: string, issue: string | number, msg: string) =>
-          calls.push(['event', type, issue, msg]),
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
+          calls.push(['event', type, issue, msg, extra]),
       });
 
       expect(calls[0]).toEqual(['ship', 11]);
@@ -1323,8 +1326,8 @@ describe('cli', () => {
           calls.push(['waitMerge', issue]);
         },
         pathExists: () => false,
-        emitEvent: (_events: string, type: string, issue: string | number, msg: string) =>
-          calls.push(['event', type, issue, msg]),
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
+          calls.push(['event', type, issue, msg, extra]),
       });
 
       expect(calls.filter((c) => c[0] === 'ship')).toEqual([
@@ -1337,14 +1340,14 @@ describe('cli', () => {
       ]);
       expect(calls.some((c) => c[0] === 'event' && c[1] === 'parked')).toBe(false);
       const lastEvent = calls.filter((c) => c[0] === 'event').at(-1);
-      expect(lastEvent).toEqual(['event', 'lane-done', 'app', 'lane complete']);
+      expect(lastEvent).toEqual(['event', 'lane-done', 'app', 'lane complete', { lane: 'app' }]);
     });
 
-    it('threads the run repoRoot and ghRepo into ship instead of re-resolving per issue', async () => {
+    it('threads ship options plus the run repoRoot, ghRepo, and lane into ship', async () => {
       const seen: any[] = [];
       await runLane('app', [1, 2], '/repo', 'on-par/software-factory', paths, {
-        ship: async (_issue, _opts, ctx) => {
-          seen.push(ctx);
+        ship: async (_issue, opts, ctx) => {
+          seen.push({ opts, ctx });
           return 'ship-it/x';
         },
         waitMerge: async () => {},
@@ -1352,8 +1355,8 @@ describe('cli', () => {
         emitEvent: () => {},
       });
       expect(seen).toEqual([
-        { repoRoot: '/repo', ghRepo: 'on-par/software-factory' },
-        { repoRoot: '/repo', ghRepo: 'on-par/software-factory' },
+        { opts: {}, ctx: { repoRoot: '/repo', ghRepo: 'on-par/software-factory', lane: 'app' } },
+        { opts: {}, ctx: { repoRoot: '/repo', ghRepo: 'on-par/software-factory', lane: 'app' } },
       ]);
     });
   });

@@ -114,11 +114,16 @@ export type FailoverReason =
 
 // ---------- Events ----------
 
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
 export interface FactoryEvent {
   ts: string;
   type: string;
   issue: string;
   msg: string;
+  level?: LogLevel;
+  lane?: string;
+  phase?: string;
   failoverReason?: FailoverReason;
 }
 

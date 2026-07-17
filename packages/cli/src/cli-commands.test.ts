@@ -710,14 +710,13 @@ describe('cli commands (via main dispatch)', () => {
       writeFileSync(paths().stop, '');
       const res = await runMain('run');
       expect(res.exited).toBe(false);
-      const out = logged();
-      expect(out).toContain(`lane 'app' started (1 issues)`);
-      expect(out).toContain(`lane 'docs' started (1 issues)`);
       const err = errored();
       expect(err).toContain('malformed');
-      expect(out + err).not.toContain('NaN');
       const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain(`lane 'app' started (1 issues)`);
+      expect(events).toContain(`lane 'docs' started (1 issues)`);
       expect(events).toContain('run-done');
+      expect(events + err).not.toContain('NaN');
     });
   });
 

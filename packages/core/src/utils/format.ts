@@ -1,6 +1,8 @@
 // src/utils/format.ts — Hand-rolled ANSI formatter for the live `[factory]` log stream.
 // No new dependency: keep core's dep list (execa, @octokit/rest, gray-matter, zod) stable.
 
+import type { LogLevel } from '../types/index.js';
+
 const RESET = '\x1b[0m';
 const BOLD = '\x1b[1m';
 const DIM = '\x1b[2m';
@@ -25,9 +27,9 @@ export function colorEnabled(
 type Category = 'phase' | 'ok' | 'warn' | 'error' | 'router' | 'other';
 
 const PHASE_TYPES = new Set(['plan', 'build', 'check', 'ship', 'triage']);
-const OK_TYPES = new Set(['ready', 'recovered', 'approval_granted', 'run-done']);
-const WARN_TYPES = new Set(['warn', 'rework', 'approval_requested']);
-const ERROR_TYPES = new Set(['fail', 'escalate', 'ship_denied']);
+const OK_TYPES = new Set(['ready', 'recovered', 'approval_granted', 'run-done', 'lane-start']);
+const WARN_TYPES = new Set(['warn', 'rework', 'approval_requested', 'stopped']);
+const ERROR_TYPES = new Set(['fail', 'escalate', 'ship_denied', 'parked']);
 
 function categorize(type: string): Category {
   if (PHASE_TYPES.has(type)) return 'phase';
@@ -36,6 +38,14 @@ function categorize(type: string): Category {
   if (ERROR_TYPES.has(type)) return 'error';
   if (type === 'router') return 'router';
   return 'other';
+}
+
+/** Maps an event `type` to its log severity, reusing the console category sets above. */
+export function levelForType(type: string): LogLevel {
+  const category = categorize(type);
+  if (category === 'warn') return 'warn';
+  if (category === 'error') return 'error';
+  return 'info';
 }
 
 const ROUTER_HIGHLIGHT = /failed|failing over|rate limited|usage cap|timed out|cooldown|non-retryable/i;
@@ -53,10 +63,10 @@ export function formatEventLine(
   type: string,
   issue: string | number,
   msg: string,
-  opts: { color?: boolean } = {},
+  opts: { color?: boolean; lane?: string } = {},
 ): string {
   if (!opts.color) {
-    return `[factory] ${type} #${issue}: ${msg}`;
+    return opts.lane ? `[factory] ${type} #${issue} [${opts.lane}]: ${msg}` : `[factory] ${type} #${issue}: ${msg}`;
   }
 
   const category = categorize(type);
@@ -72,5 +82,7 @@ export function formatEventLine(
     renderedMsg = msg;
   }
 
-  return `${DIM}[factory]${RESET} ${symbol} ${coloredType} ${BOLD}#${issue}${RESET}: ${renderedMsg}`;
+  const laneToken = opts.lane ? ` ${DIM}[${opts.lane}]${RESET}` : '';
+
+  return `${DIM}[factory]${RESET} ${symbol} ${coloredType} ${BOLD}#${issue}${RESET}${laneToken}: ${renderedMsg}`;
 }
