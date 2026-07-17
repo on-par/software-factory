@@ -566,7 +566,7 @@ export function parkReasonFor(err: unknown): ParkReason {
 export async function shipIssue(
   issueNum: number,
   opts: { product?: string; autoRework?: boolean; interactive?: boolean },
-  ctx?: { repoRoot: string; ghRepo: string },
+  ctx?: { repoRoot: string; ghRepo: string; lane?: string },
 ) {
   const repoRoot = ctx?.repoRoot ?? (await getRepoRoot());
   const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo());
@@ -591,8 +591,10 @@ export async function shipIssue(
   const runStartedAt = new Date().toISOString();
   let route: 'codex' | 'claude' | undefined;
 
-  const log = (type: string, msg: string, extra?: { failoverReason?: FailoverReason }) =>
-    logEvent(paths.events, type, issueNum, msg, extra);
+  const lane = ctx?.lane;
+  const mkLog = (phase?: string) => (type: string, msg: string, extra?: { failoverReason?: FailoverReason }) =>
+    logEvent(paths.events, type, issueNum, msg, { ...extra, lane, phase });
+  const log = mkLog();
   log('issue-title', issueTitle);
   if (modelOverrides.plan) log('model-override', `plan model pinned to ${modelOverrides.plan} (FACTORY_PLAN_MODEL)`);
   if (modelOverrides.build)
@@ -638,7 +640,7 @@ export async function shipIssue(
       constitution,
       router,
       octokit,
-      log,
+      log: mkLog('plan'),
       timeoutSeconds: timeouts.plan,
       modelOverride: modelOverrides.plan,
     });
@@ -659,7 +661,7 @@ export async function shipIssue(
       constitution,
       route: plan.route,
       router,
-      log,
+      log: mkLog('build'),
       timeoutSeconds: timeouts.build,
       skipCI,
       modelOverride: modelOverrides.build,
@@ -675,7 +677,7 @@ export async function shipIssue(
       specPath,
       constitution,
       router,
-      log,
+      log: mkLog('check'),
       autoRework,
       buildTimeoutSeconds: timeouts.build,
       checkTimeoutSeconds: timeouts.check,
@@ -705,7 +707,7 @@ export async function shipIssue(
       branch,
       octokit,
       watchCI: !skipCI,
-      log,
+      log: mkLog('ship'),
       approvalGate,
       checkSummary: check.summary,
     });
@@ -1086,14 +1088,14 @@ async function cmdRun() {
         estimator: knobs.estimator,
       }).catch((err: any) => {
         // a watchdog crash must never take down the run
-        console.error(chalk.red(`factory: usage watchdog crashed: ${err.message}`));
+        logEvent(paths.events, 'warn', '-', `usage watchdog crashed: ${err.message}`);
       })
     : Promise.resolve();
 
   // Run lanes in parallel
   const pids: Promise<void>[] = [];
   for (const [lane, issues] of lanes) {
-    console.log(chalk.cyan(`[factory] lane '${lane}' started (${issues.length} issues)`));
+    logEvent(paths.events, 'lane-start', '-', `lane '${lane}' started (${issues.length} issues)`, { lane });
     pids.push(runLane(lane, issues, repoRoot, ghRepo, paths));
   }
 
@@ -1138,7 +1140,7 @@ type RunLaneDeps = {
   ship?: (
     issue: number,
     opts: { product?: string; autoRework?: boolean; interactive?: boolean },
-    ctx?: { repoRoot: string; ghRepo: string },
+    ctx?: { repoRoot: string; ghRepo: string; lane?: string },
   ) => Promise<string>;
   waitMerge?: typeof waitForMerge;
   pathExists?: (path: string) => boolean;
@@ -1157,15 +1159,14 @@ export async function runLane(
   for (let i = 0; i < issues.length; i++) {
     const issue = issues[i];
     if (pathExists(paths.stop)) {
-      emitEvent(paths.events, 'stopped', issue, 'STOP file present');
+      emitEvent(paths.events, 'stopped', issue, 'STOP file present', { lane });
       return;
     }
     try {
-      const branch = await ship(issue, {}, { repoRoot, ghRepo });
+      const branch = await ship(issue, {}, { repoRoot, ghRepo, lane });
       await waitMerge(issue, branch, repoRoot, ghRepo, paths);
     } catch (err: any) {
       const reason = parkReasonFor(err);
-      console.error(chalk.red(`[factory] lane '${lane}' #${issue} parked (${reason}): ${err.message}`));
       // Terminal reason events (escalate/timeout/fail/conflict) are emitted exactly
       // once by the layer that detects the failure — shipIssue for pipeline failures,
       // the land path for merge failures. runLane owns only lane-lifecycle events
@@ -1175,11 +1176,12 @@ export async function runLane(
         'parked',
         issue,
         `lane '${lane}' parked (${reason}); ${issues.length - i - 1} issues remaining`,
+        { lane },
       );
       return;
     }
   }
-  emitEvent(paths.events, 'lane-done', lane, 'lane complete');
+  emitEvent(paths.events, 'lane-done', lane, 'lane complete', { lane });
 }
 
 export async function isPrMerged(octokit: Octokit, owner: string, repoName: string, branch: string): Promise<boolean> {

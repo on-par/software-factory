@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { colorEnabled, formatEventLine } from './format.js';
+import { colorEnabled, formatEventLine, levelForType } from './format.js';
 
+const RESET = '\x1b[0m';
 const BOLD = '\x1b[1m';
 const DIM = '\x1b[2m';
 const RED = '\x1b[31m';
@@ -97,5 +98,41 @@ describe('formatEventLine — unknown type', () => {
     const line = formatEventLine('worktree-gc', 1, 'swept 3 worktrees', { color: true });
     expect(line).toContain('•');
     expect(line).toContain(DIM);
+  });
+});
+
+describe('formatEventLine — lane option', () => {
+  it('renders the lane after the issue in plain mode', () => {
+    expect(formatEventLine('plan', 209, 'msg', { lane: 'app' })).toBe('[factory] plan #209 [app]: msg');
+  });
+
+  it('renders the lane wrapped in DIM after the issue in color mode', () => {
+    const line = formatEventLine('plan', 209, 'msg', { color: true, lane: 'app' });
+    expect(line).toContain(`${DIM}[app]${RESET}`);
+    expect(line).toContain('#209');
+  });
+
+  it('is byte-identical to the legacy format when no lane is passed', () => {
+    expect(formatEventLine('plan', 209, 'msg')).toBe('[factory] plan #209: msg');
+    expect(formatEventLine('plan', 209, 'msg', { color: true })).not.toContain('[app]');
+  });
+});
+
+describe('levelForType', () => {
+  it.each([
+    ['warn', 'warn'],
+    ['rework', 'warn'],
+    ['approval_requested', 'warn'],
+    ['stopped', 'warn'],
+    ['fail', 'error'],
+    ['escalate', 'error'],
+    ['ship_denied', 'error'],
+    ['parked', 'error'],
+    ['plan', 'info'],
+    ['ready', 'info'],
+    ['lane-start', 'info'],
+    ['some-unknown-type', 'info'],
+  ])('maps %s to level %s', (type, level) => {
+    expect(levelForType(type)).toBe(level);
   });
 });

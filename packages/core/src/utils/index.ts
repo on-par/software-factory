@@ -4,10 +4,11 @@ import { appendFileSync, existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import { resolve } from 'node:path';
-import type { FactoryEvent, CostEntry, FailoverReason } from '../types/index.js';
-import { formatEventLine, colorEnabled } from './format.js';
+import type { CostEntry, FailoverReason, LogLevel } from '../types/index.js';
+import { levelForType } from './format.js';
+import { createLogger } from '../logger/index.js';
 
-export { formatEventLine, colorEnabled } from './format.js';
+export { formatEventLine, colorEnabled, levelForType } from './format.js';
 
 const exec = promisify(execCb);
 
@@ -18,23 +19,11 @@ export function logEvent(
   type: string,
   issue: string | number,
   msg: string,
-  extra?: { failoverReason?: FailoverReason },
+  extra?: { failoverReason?: FailoverReason; lane?: string; phase?: string; level?: LogLevel },
 ): void {
-  const event: FactoryEvent = {
-    ts: new Date().toISOString(),
-    type,
-    issue: String(issue),
-    msg,
-    ...(extra?.failoverReason ? { failoverReason: extra.failoverReason } : {}),
-  };
-  const line = JSON.stringify(event) + '\n';
-  try {
-    appendFileSync(eventsFile, line);
-  } catch {
-    mkdirSync(resolve(eventsFile, '..'), { recursive: true });
-    appendFileSync(eventsFile, line);
-  }
-  console.log(formatEventLine(type, String(issue), msg, { color: colorEnabled(process.stdout) }));
+  const logger = createLogger(eventsFile, { issue, lane: extra?.lane, phase: extra?.phase });
+  const level = extra?.level ?? levelForType(type);
+  logger[level](type, msg, extra?.failoverReason ? { failoverReason: extra.failoverReason } : undefined);
 }
 
 // ---------- Cost Tracking ----------

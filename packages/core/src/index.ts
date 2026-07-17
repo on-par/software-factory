@@ -183,7 +183,13 @@ export {
   codexDisabled,
   formatEventLine,
   colorEnabled,
+  levelForType,
 } from './utils/index.js';
+
+// Logger
+export { createLogger } from './logger/index.js';
+export type { FactoryLogger, LogContext, LogExtra, LoggerOptions } from './logger/index.js';
+export type { LogLevel } from './types/index.js';
 export { withGitLock, withFileLock } from './utils/lock.js';
 export type { FileLockOptions } from './utils/lock.js';
 export { watchChecks } from './utils/ci-watch.js';
