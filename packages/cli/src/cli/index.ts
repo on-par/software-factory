@@ -1135,7 +1135,11 @@ async function cmdSupervise(opts: { now?: boolean }) {
 }
 
 type RunLaneDeps = {
-  ship?: (issue: number, opts: {}, ctx?: { repoRoot: string; ghRepo: string }) => Promise<string>;
+  ship?: (
+    issue: number,
+    opts: { product?: string; autoRework?: boolean; interactive?: boolean },
+    ctx?: { repoRoot: string; ghRepo: string },
+  ) => Promise<string>;
   waitMerge?: typeof waitForMerge;
   pathExists?: (path: string) => boolean;
   emitEvent?: typeof logEvent;
