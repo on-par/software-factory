@@ -10,6 +10,16 @@
       "development": "./src/index.ts",
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./internal": {
+      "development": "./src/internal.ts",
+      "import": "./dist/internal.js",
+      "types": "./dist/internal.d.ts"
+    },
+    "./testing": {
+      "development": "./src/testing.ts",
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
     }
   },
   "files": [

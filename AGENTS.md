@@ -73,6 +73,7 @@ Run from the repo root unless noted. Node.js **≥ 20** required.
 - **Monorepo:** npm workspaces (`packages/*`) with TypeScript composite project references (`tsc -b`). Cross-package imports use the published names (`@on-par/factory-core`, `@on-par/factory-config`), not relative paths across package boundaries.
 - **Dependencies:** keep `config` zero-dependency. Core depends on `execa`, `@octokit/rest`, `gray-matter`, `zod`.
 - **Config as source of truth:** model routing lives in `packages/config/src/models.json` + `routes.json`; do not hard-code model lists in `core`.
+- **`core`'s root export is the narrow public API** — implementation details live behind `@on-par/factory-core/internal`, test helpers behind `@on-par/factory-core/testing` (ADR-0004).
 - **The `server` package is a stub** — do not build features on it; `createServer()` intentionally throws.
 - **Lint:** ESLint flat config (`eslint.config.mjs` at root re-exporting `tools/lint/eslint.config.mjs`), run via `npm run lint` with `--max-warnings 0`.
 

@@ -39,3 +39,4 @@ comments or PR descriptions, if anywhere.
 | [0001](0001-boss-worker-checker-pipeline.md)          | Boss–worker–checker pipeline with per-issue build routing              | Accepted |
 | [0002](0002-structured-logging-via-event-log.md)      | Structured logging via the existing event log, not pino                | Accepted |
 | [0003](0003-quarantine-ollama-command-agent-spike.md) | Quarantine the Ollama command-agent spike behind the experimental flag | Accepted |
+| [0004](0004-narrow-public-core-api.md)                | A narrow public API for `@on-par/factory-core`                         | Accepted |

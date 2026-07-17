@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type * as FactoryCore from '@on-par/factory-core';
+import type * as FactoryCoreInternal from '@on-par/factory-core/internal';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
@@ -123,10 +124,17 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
     watchUsage: vi.fn(async () => {}),
     fetchSubscriptionUsage: vi.fn(async () => h.subscriptionUsage),
     diagnoseModels: vi.fn(() => h.diagnoses),
-    watchChecks: vi.fn(async () => {}),
     writeLocalRunReport: vi.fn(async () => ({ path: '/tmp/report.md' })),
-    createLocalSmallDryRun: vi.fn(async () => ({ planPath: '/tmp/plan.md', contextPath: '/tmp/ctx.md' })),
     diagnoseModelsDefault: undefined,
+  };
+});
+
+vi.mock('@on-par/factory-core/internal', async (importOriginal) => {
+  const actual = await importOriginal<typeof FactoryCoreInternal>();
+  return {
+    ...actual,
+    watchChecks: vi.fn(async () => {}),
+    createLocalSmallDryRun: vi.fn(async () => ({ planPath: '/tmp/plan.md', contextPath: '/tmp/ctx.md' })),
     // Cost.
     readCosts: vi.fn(() => h.costs),
     // Git / worktree side-effects — no-ops.
@@ -145,7 +153,7 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
   };
 });
 
-import { formatGcReport, sweepWorktrees, withGitLock } from '@on-par/factory-core';
+import { formatGcReport, sweepWorktrees, withGitLock } from '@on-par/factory-core/internal';
 
 import { CliExitError, cmdConstitution, cmdLand, cmdUsage, main, parseIssueArg, shipIssue } from './cli/index.js';
 
