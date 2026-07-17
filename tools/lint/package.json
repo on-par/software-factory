@@ -1,0 +1,15 @@
+{
+  "name": "@on-par/factory-lint",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Lint toolchain workspace — carries a nested TypeScript 5.x so typescript-eslint can run alongside the root TypeScript 7 (native) compiler.",
+  "scripts": {
+    "typecheck": "echo 'no typecheck (lint tooling only)' && exit 0"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.64.0"
+  }
+}

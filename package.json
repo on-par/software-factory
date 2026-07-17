@@ -5,12 +5,13 @@
   "description": "Multi-agent software factory monorepo — boss-worker-checker orchestration with multi-provider model routing and per-product constitutions.",
   "type": "module",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "tools/*"
   ],
   "scripts": {
     "build": "tsc -b && npm run build --workspace @on-par/factory-dashboard",
     "dev": "npm run dev --workspace @on-par/factory-cli",
-    "lint": "npm run lint --workspaces --if-present",
+    "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc -b && npm run typecheck --workspaces",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -35,6 +36,11 @@
     "tsx": "^4.23.0",
     "typescript": "^7.0.2",
     "vitest": "^3.2.0"
+  },
+  "overrides": {
+    "ts-api-utils": {
+      "typescript": "^5.9.0"
+    }
   },
   "repository": {
     "type": "git",
