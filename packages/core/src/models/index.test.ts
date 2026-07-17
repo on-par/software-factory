@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig } from '../config/index.js';
+import { loadModelsConfig } from '../config/index.js';
 import { diagnoseModels, ModelRegistry, resolveModelOverrides } from './index.js';
 
 const config: ModelsConfig = {
@@ -45,6 +46,12 @@ describe('ModelRegistry', () => {
   it('includes experimental models when opted in', () => {
     const registry = new ModelRegistry(config);
     expect(registry.getAvailableModelsForTier('boss', false, true)).toEqual(['exp-model', 'real-model']);
+  });
+
+  it('excludes the quarantined command-agent spike from local worker routing unless experimental is allowed', () => {
+    const registry = new ModelRegistry(loadModelsConfig());
+    expect(registry.getAvailableModelsForTier('worker', false, false, true)).not.toContain('codex-ollama-qwen3.5:9b');
+    expect(registry.getAvailableModelsForTier('worker', false, true, true)).toContain('codex-ollama-qwen3.5:9b');
   });
 
   it('reports experimental status per model', () => {

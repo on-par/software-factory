@@ -112,7 +112,6 @@ describe('loadModelsConfig', () => {
         'claude-fable-5',
         'claude-opus-4-8',
         'claude-sonnet-5',
-        'codex-ollama-qwen3.5:9b',
         'gemma4:12b',
         'gpt-5.1-codex',
         'gpt-5.6-sol',
@@ -121,6 +120,15 @@ describe('loadModelsConfig', () => {
         'qwen3:8b',
       ].sort(),
     );
+  });
+
+  it('quarantines the codex-ollama command-agent spike as an experiment (#172)', () => {
+    const config = loadModelsConfig();
+    const spike = config.models['codex-ollama-qwen3.5:9b'];
+    expect(spike?.experimental).toBe(true);
+    expect(spike?.codexFlag).toBeUndefined();
+    expect(spike?.harness).toBe('ollama-agentic');
+    expect(spike?.codex).toBe(true);
   });
 });
 
