@@ -5,8 +5,9 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
-import { shellEscape } from '../utils/index.js';
+
 import type { ExecFn } from '../utils/exec.js';
+import { shellEscape } from '../utils/index.js';
 
 export type GitExecFn = ExecFn;
 

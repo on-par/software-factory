@@ -7,6 +7,7 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
+
 import { execa } from 'execa';
 import { z } from 'zod';
 

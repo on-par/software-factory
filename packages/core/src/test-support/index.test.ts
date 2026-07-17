@@ -1,7 +1,9 @@
 import { exec as execCb } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { promisify } from 'node:util';
+
 import { afterEach, describe, expect, it } from 'vitest';
+
 import {
   makeFakeOctokit,
   makeStubModelsConfig,

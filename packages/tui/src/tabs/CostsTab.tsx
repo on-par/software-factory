@@ -1,6 +1,6 @@
-import { useMemo, type JSX } from 'react';
-import { Box, Text } from 'ink';
 import { aggregateCosts, type CostsRead } from '@on-par/factory-core';
+import { Box, Text } from 'ink';
+import { type JSX, useMemo } from 'react';
 
 function fmtTokens(n: number): string {
   return n.toLocaleString('en-US');

@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
-import { buildLocalSmallScoreboard, renderLocalSmallScoreboardMarkdown } from '@on-par/factory-core';
+
 import type { LocalSmallScoreboardInput, LocalSmallScoreboardRun } from '@on-par/factory-core';
+import { buildLocalSmallScoreboard, renderLocalSmallScoreboardMarkdown } from '@on-par/factory-core';
 
 interface Args {
   input?: string;

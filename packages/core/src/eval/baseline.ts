@@ -1,4 +1,4 @@
-import { isRouteAsserted, type EvalSummary } from './types.js';
+import { type EvalSummary, isRouteAsserted } from './types.js';
 
 export interface BaselineCase {
   pass: boolean;

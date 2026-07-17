@@ -1,6 +1,8 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+
 import matter from 'gray-matter';
+
 import type { ExpectedRoute, GoldenCase } from './types.js';
 
 const EXPECTED_ROUTES = new Set<ExpectedRoute>(['codex', 'claude', 'escalate', 'any']);

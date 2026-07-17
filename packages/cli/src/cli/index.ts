@@ -1,62 +1,64 @@
 // packages/cli/src/cli/index.ts — CLI entry point: factory <command> [options]
 
-import { Command } from 'commander';
-import chalk from 'chalk';
-import {
-  loadModelsConfig,
-  loadRoutesConfig,
-  loadFactoryConfig,
-  resolveTimeouts,
-  resolveSkipCI,
-  getFactoryPaths,
-  getConstitutionsDir,
-  ModelRouter,
-  ConstitutionLoader,
-  resolveModelOverrides,
-  planPhase,
-  buildPhase,
-  checkPhase,
-  shipPhase,
-  createFileApprovalGate,
-  estimateTrailingSpend,
-  formatUsageReport,
-  watchUsage,
-  readUsage,
-  fetchSubscriptionUsage,
-  diagnoseModels,
-  watchChecks,
-  writeLocalRunReport,
-  createLocalSmallDryRun,
-  validateQueue,
-  parseQueue,
-  sweepWorktrees,
-  formatGcReport,
-  isCommandAvailable,
-} from '@on-par/factory-core';
-import type { ModelDiagnosis, QueueDiagnostic, UsageReading, FailoverReason } from '@on-par/factory-core';
-import {
-  logEvent,
-  branchFor,
-  branchPrefixSlug,
-  readCosts,
-  ensureDir,
-  setupWorktree,
-  cleanupWorktree,
-  gitFetch,
-  withGitLock,
-  withFileLock,
-  shellEscape,
-} from '@on-par/factory-core';
-import { runTui } from '@on-par/factory-tui';
 import { exec as execCb, execSync } from 'node:child_process';
-import { promisify } from 'node:util';
-import { existsSync, readFileSync, writeFileSync, rmSync, renameSync } from 'node:fs';
-import { resolve, dirname, basename } from 'node:path';
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { userInfo } from 'node:os';
+import { basename, dirname, resolve } from 'node:path';
+import { promisify } from 'node:util';
+
 import { Octokit } from '@octokit/rest';
+import type { FailoverReason, ModelDiagnosis, QueueDiagnostic, UsageReading } from '@on-par/factory-core';
+import {
+  buildPhase,
+  checkPhase,
+  ConstitutionLoader,
+  createFileApprovalGate,
+  createLocalSmallDryRun,
+  diagnoseModels,
+  estimateTrailingSpend,
+  fetchSubscriptionUsage,
+  formatGcReport,
+  formatUsageReport,
+  getConstitutionsDir,
+  getFactoryPaths,
+  isCommandAvailable,
+  loadFactoryConfig,
+  loadModelsConfig,
+  loadRoutesConfig,
+  ModelRouter,
+  parseQueue,
+  planPhase,
+  readUsage,
+  resolveModelOverrides,
+  resolveSkipCI,
+  resolveTimeouts,
+  shipPhase,
+  sweepWorktrees,
+  validateQueue,
+  watchChecks,
+  watchUsage,
+  writeLocalRunReport,
+} from '@on-par/factory-core';
+import {
+  branchFor,
+  branchPrefixSlug,
+  cleanupWorktree,
+  ensureDir,
+  gitFetch,
+  logEvent,
+  readCosts,
+  setupWorktree,
+  shellEscape,
+  withFileLock,
+  withGitLock,
+} from '@on-par/factory-core';
+import { runTui } from '@on-par/factory-tui';
+import chalk from 'chalk';
+import { Command } from 'commander';
+
+import { doctorFailed, formatDoctorChecks, runDoctorChecks } from './doctor.js';
 import { formatOverview, missingClaudeCliMessage, missingTokenMessage, notInitializedMessage } from './first-run.js';
-import { runDoctorChecks, formatDoctorChecks, doctorFailed } from './doctor.js';
 
 const exec = promisify(execCb);
 type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<unknown>;

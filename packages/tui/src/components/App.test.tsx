@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render } from 'ink-testing-library';
 import type { ApprovalRequest, CostsRead, FactoryEvent, QueueSnapshot } from '@on-par/factory-core';
+import { cleanup, render } from 'ink-testing-library';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
 import { App } from './App.js';
 
 afterEach(() => {

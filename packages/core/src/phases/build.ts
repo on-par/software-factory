@@ -1,10 +1,12 @@
 // src/phases/build.ts — BUILD phase: worker model implements the frozen spec
 
 import { readFile } from 'node:fs/promises';
-import { ModelRouter, failoversFrom } from '../router/index.js';
+
 import { buildConstitutionContext } from '../constitutions/index.js';
-import { escalationLine, isEscalation, codexDisabled } from '../utils/index.js';
+import type { ModelRouter } from '../router/index.js';
+import { failoversFrom } from '../router/index.js';
 import type { Constitution, FailoverReason } from '../types/index.js';
+import { codexDisabled, escalationLine, isEscalation } from '../utils/index.js';
 
 export interface BuildResult {
   ok: boolean;

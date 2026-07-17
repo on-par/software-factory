@@ -1,11 +1,13 @@
 import { existsSync } from 'node:fs';
 import { writeFile as realWriteFile } from 'node:fs/promises';
+
 import { describe, expect, it } from 'vitest';
-import { codingHarnessContractCases, makeContractRequest } from './contract.js';
-import { CodexCliHarness } from './codex-cli.js';
-import { HarnessError } from './index.js';
-import { ModelRegistry } from '../models/index.js';
+
 import type { ModelsConfig } from '../config/index.js';
+import { ModelRegistry } from '../models/index.js';
+import { CodexCliHarness } from './codex-cli.js';
+import { codingHarnessContractCases, makeContractRequest } from './contract.js';
+import { HarnessError } from './index.js';
 
 function outFileFromCmd(cmd: string): string {
   const match = cmd.match(/-o '([^']+)'/);

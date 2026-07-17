@@ -1,8 +1,13 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
-import { defaultTranscriptRoots } from './index.js';
-import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import type { CostEntry } from '../types/index.js';
+import type { logEvent } from '../utils/index.js';
+import type { UsageReading } from './index.js';
+import { defaultTranscriptRoots } from './index.js';
 import {
   aggregateCosts,
   estimateTrailingSpend,
@@ -12,9 +17,6 @@ import {
   readUsage,
   watchUsage,
 } from './index.js';
-import type { UsageReading } from './index.js';
-import type { CostEntry } from '../types/index.js';
-import type { logEvent } from '../utils/index.js';
 
 type EmitEventArgs = Parameters<typeof logEvent>;
 

@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render } from 'ink-testing-library';
 import type { CostEntry, CostsRead } from '@on-par/factory-core';
+import { cleanup, render } from 'ink-testing-library';
+import { afterEach, describe, expect, it } from 'vitest';
+
 import { CostsTab } from './CostsTab.js';
 
 afterEach(cleanup);

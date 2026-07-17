@@ -1,6 +1,7 @@
-import type { JSX } from 'react';
-import { Box, Text } from 'ink';
 import type { FactoryEvent } from '@on-par/factory-core';
+import { Box, Text } from 'ink';
+import type { JSX } from 'react';
+
 import { isFailoverEvent } from '../state.js';
 
 const MAX_MSG_LENGTH = 100;

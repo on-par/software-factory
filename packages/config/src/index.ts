@@ -3,7 +3,7 @@
 // Other packages import `resolveConfigPath` to find the JSON configs and
 // constitution markdown files shipped by this package.
 
-import { resolve, dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -23,6 +23,6 @@ export function resolveConfigPath(filename: string): string {
 export const constitutionsDir = resolveConfigPath('constitutions');
 
 /** Re-export the raw JSON for direct import if needed */
+export { default as factoryConfig } from './factory.json' with { type: 'json' };
 export { default as modelsConfig } from './models.json' with { type: 'json' };
 export { default as routesConfig } from './routes.json' with { type: 'json' };
-export { default as factoryConfig } from './factory.json' with { type: 'json' };

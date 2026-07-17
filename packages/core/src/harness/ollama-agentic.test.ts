@@ -2,19 +2,21 @@ import { existsSync, mkdtempSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+
 import { afterEach, describe, expect, it } from 'vitest';
+
+import type { ModelsConfig } from '../config/index.js';
+import { ModelRegistry } from '../models/index.js';
 import { codingHarnessContractCases, makeContractRequest } from './contract.js';
+import { HarnessError } from './index.js';
+import type { OllamaAgenticExecFn } from './ollama-agentic.js';
 import {
   ALLOWED_VERIFY_COMMAND_PREFIXES,
   OllamaAgenticHarness,
-  OllamaAgenticExecFn,
   PATCH_PROPOSAL_SCHEMA,
   validateVerifyCommand,
 } from './ollama-agentic.js';
 import type { OllamaFetchFn } from './ollama-http.js';
-import { HarnessError } from './index.js';
-import { ModelRegistry } from '../models/index.js';
-import type { ModelsConfig } from '../config/index.js';
 
 const modelsConfig: ModelsConfig = {
   version: 1,

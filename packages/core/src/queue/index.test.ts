@@ -1,7 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
+
 import { parseQueue, readQueue, validateQueue } from './index.js';
 
 const tempDirs: string[] = [];

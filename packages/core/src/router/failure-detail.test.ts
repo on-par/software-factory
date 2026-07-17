@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { describeFailureDetail, redactSecrets } from './failure-detail.js';
+
 import { HarnessError } from '../harness/index.js';
+import { describeFailureDetail, redactSecrets } from './failure-detail.js';
 
 describe('describeFailureDetail', () => {
   it('includes every recognized field from a child-process-shaped error', () => {

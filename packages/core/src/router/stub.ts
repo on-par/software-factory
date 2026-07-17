@@ -1,6 +1,6 @@
-import type { ModelExecutor, ModelExecutorContext, FailoverReason } from './index.js';
 import type { TaskType } from '../types/index.js';
 import { ModelExecutorError } from './executor-error.js';
+import type { FailoverReason, ModelExecutor, ModelExecutorContext } from './index.js';
 
 type StubStep =
   | { output: string; effect?: (ctx: ModelExecutorContext) => Promise<void> | void }

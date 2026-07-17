@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { ModelExecutorError, extractFailoverReason } from './executor-error.js';
+
 import { HarnessError } from '../harness/index.js';
+import { extractFailoverReason, ModelExecutorError } from './executor-error.js';
 
 describe('ModelExecutorError', () => {
   it('sets name, message, reason, and details', () => {

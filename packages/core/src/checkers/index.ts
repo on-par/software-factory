@@ -1,10 +1,11 @@
 // src/checkers/index.ts — Checker framework: built-in + custom checkers
 
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
-import { ModelRouter } from '../router/index.js';
+
+import type { ModelRouter } from '../router/index.js';
 import type { CheckerOutput, CheckSummary, Constitution } from '../types/index.js';
-import { runCommand, describeCommandFailure } from '../utils/command-runner.js';
+import { describeCommandFailure, runCommand } from '../utils/command-runner.js';
 import { extractJsonObjects } from '../utils/json.js';
 
 interface PackageJson {

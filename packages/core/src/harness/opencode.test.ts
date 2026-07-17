@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { codingHarnessContractCases, makeContractRequest } from './contract.js';
-import { OpenCodeHarness } from './opencode.js';
-import { HarnessError } from './index.js';
-import { ModelRegistry } from '../models/index.js';
+
 import type { ModelsConfig } from '../config/index.js';
+import { ModelRegistry } from '../models/index.js';
+import { codingHarnessContractCases, makeContractRequest } from './contract.js';
+import { HarnessError } from './index.js';
+import { OpenCodeHarness } from './opencode.js';
 
 describe('CodingHarness contract: OpenCodeHarness', () => {
   const cases = codingHarnessContractCases({

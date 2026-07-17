@@ -1,8 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createFileApprovalGate, listPendingApprovals, respondToApproval, type ApprovalRequest } from './index.js';
+
+import { describe, expect, it } from 'vitest';
+
+import { type ApprovalRequest, createFileApprovalGate, listPendingApprovals, respondToApproval } from './index.js';
 
 function makeDir(): string {
   return mkdtempSync(join(tmpdir(), 'approvals-'));

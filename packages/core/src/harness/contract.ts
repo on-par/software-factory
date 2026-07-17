@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
-import { CodingHarness, HarnessError, HarnessRequest, HarnessFailureReason } from './index.js';
-import { ModelRegistry } from '../models/index.js';
+
 import type { ModelsConfig } from '../config/index.js';
+import { ModelRegistry } from '../models/index.js';
+import type { CodingHarness, HarnessFailureReason, HarnessRequest } from './index.js';
+import { HarnessError } from './index.js';
 
 const HARNESS_FAILURE_REASONS: HarnessFailureReason[] = [
   'rate_limit',

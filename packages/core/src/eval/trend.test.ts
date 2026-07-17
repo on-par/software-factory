@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { appendHistoryLine, parseHistory, renderTrend, summaryToHistoryRecord, type HistoryRecord } from './trend.js';
-import { isRouteAsserted, type CaseResult, type EvalSummary } from './types.js';
+
+import { appendHistoryLine, type HistoryRecord, parseHistory, renderTrend, summaryToHistoryRecord } from './trend.js';
+import { type CaseResult, type EvalSummary, isRouteAsserted } from './types.js';
 
 function caseResult(overrides: Partial<CaseResult> = {}): CaseResult {
   return {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { scoreSpec } from './score.js';
 
 const goodSpec = `---

@@ -1,9 +1,11 @@
-import { readFile, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+
 import { afterEach, describe, expect, it } from 'vitest';
-import { captureWorktreeState, resetWorktreeState } from './worktree-state.js';
+
 import type { GitExecFn, WorktreeSnapshot } from './worktree-state.js';
+import { captureWorktreeState, resetWorktreeState } from './worktree-state.js';
 
 type Handler = (
   cmd: string,

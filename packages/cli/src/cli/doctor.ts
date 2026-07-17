@@ -1,6 +1,7 @@
 // packages/cli/src/cli/doctor.ts — `factory doctor` environment preflight
 
 import { resolve } from 'node:path';
+
 import { CLAUDE_CODE_URL, GITHUB_TOKENS_URL } from './first-run.js';
 
 export interface DoctorCheck {

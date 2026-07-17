@@ -1,30 +1,32 @@
-import { useEffect, useMemo, useState, type JSX } from 'react';
-import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import { existsSync } from 'node:fs';
+
 import {
   aggregateCosts,
-  followEvents,
-  listPendingApprovals,
-  readCostsFile,
-  readQueue,
-  respondToApproval,
   type ApprovalRequest,
   type CostsRead,
   type FactoryEvent,
+  followEvents,
+  listPendingApprovals,
   type QueueSnapshot,
+  readCostsFile,
+  readQueue,
+  respondToApproval,
 } from '@on-par/factory-core';
-import { initialDashboard, reduceDashboard, type DashboardState } from '../dashboard.js';
+import { Box, Text, useApp, useInput, useStdout } from 'ink';
+import { type JSX, useEffect, useMemo, useState } from 'react';
+
+import { type DashboardState, initialDashboard, reduceDashboard } from '../dashboard.js';
+import { CostsTab } from '../tabs/CostsTab.js';
+import { initialLogScroll, reduceLogScroll } from '../tabs/log-scroll.js';
+import { LogTab } from '../tabs/LogTab.js';
+import { QueueTab } from '../tabs/QueueTab.js';
+import { TabBar } from '../tabs/TabBar.js';
+import { TAB_ORDER, type TabName } from '../tabs/types.js';
 import { ApprovalPrompt } from './ApprovalPrompt.js';
-import { Header } from './Header.js';
 import { Dashboard } from './Dashboard.js';
+import { Header } from './Header.js';
 import { RunDetail } from './RunDetail.js';
 import { StopBanner } from './StopBanner.js';
-import { TabBar } from '../tabs/TabBar.js';
-import { QueueTab } from '../tabs/QueueTab.js';
-import { CostsTab } from '../tabs/CostsTab.js';
-import { LogTab } from '../tabs/LogTab.js';
-import { TAB_ORDER, type TabName } from '../tabs/types.js';
-import { initialLogScroll, reduceLogScroll } from '../tabs/log-scroll.js';
 
 const MAX_LOG_EVENTS = 5000;
 const POLL_MS = 2000;

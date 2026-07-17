@@ -1,6 +1,9 @@
+import type * as NodeFsPromises from 'node:fs/promises';
+import { unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { writeFile, unlink } from 'node:fs/promises';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRegistry } from '../models/index.js';
 import { CliModelExecutor } from './index.js';
@@ -10,7 +13,7 @@ vi.mock('node:child_process', () => ({
 }));
 
 vi.mock('node:fs/promises', async (importActual) => {
-  const actual = await importActual<typeof import('node:fs/promises')>();
+  const actual = await importActual<typeof NodeFsPromises>();
   return {
     ...actual,
     writeFile: vi.fn(actual.writeFile),

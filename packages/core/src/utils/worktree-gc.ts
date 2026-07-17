@@ -1,9 +1,11 @@
 // src/utils/worktree-gc.ts — Stale factory worktree cleanup + credential scrub
 
-import { existsSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { exec as execCb } from 'node:child_process';
-import { promisify } from 'node:util';
+import type { Dirent } from 'node:fs';
+import { existsSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
+import { promisify } from 'node:util';
+
 import { shellEscape } from './index.js';
 
 const exec = promisify(execCb);
@@ -99,7 +101,7 @@ export function findCredentialFiles(worktreePath: string): string[] {
 }
 
 function walkFiles(dir: string, found: string[]): void {
-  let entries: import('node:fs').Dirent[];
+  let entries: Dirent[];
   try {
     entries = readdirSync(dir, { withFileTypes: true });
   } catch {

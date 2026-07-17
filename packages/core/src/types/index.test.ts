@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import type { CostEntry, FactoryEvent, FailoverReason } from './index.js';
 
 // The types module is types-only by contract: its coverage exclusion in

@@ -1,14 +1,16 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, basename } from 'node:path';
+import { basename, join } from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
+
 import {
-  parseWorktreeList,
   findCredentialFiles,
-  scrubFile,
-  zeroFill,
-  sweepWorktrees,
   formatGcReport,
+  parseWorktreeList,
+  scrubFile,
+  sweepWorktrees,
+  zeroFill,
 } from './worktree-gc.js';
 
 describe('parseWorktreeList', () => {

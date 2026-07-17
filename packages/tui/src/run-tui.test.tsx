@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+
 import { runTui } from './run-tui.js';
 
 function fakeStdout(isTTY: boolean): NodeJS.WriteStream {

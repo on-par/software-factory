@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
 import type { FactoryEvent } from '@on-par/factory-core';
-import { PHASES, initialState, isFailoverEvent, reduceEvent } from './state.js';
+import { describe, expect, it } from 'vitest';
+
+import { initialState, isFailoverEvent, PHASES, reduceEvent } from './state.js';
 
 function ev(type: string, msg: string, ts = new Date().toISOString(), issue = '192'): FactoryEvent {
   return { ts, type, issue, msg };

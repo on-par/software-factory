@@ -1,12 +1,13 @@
 // src/usage/index.ts — Claude Code transcript usage estimation helpers
 
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
-import { logEvent } from '../utils/index.js';
-import { fetchSubscriptionUsage } from './subscription.js';
-import type { SubscriptionUsage } from './subscription.js';
+
 import type { CostEntry } from '../types/index.js';
+import { logEvent } from '../utils/index.js';
+import type { SubscriptionUsage } from './subscription.js';
+import { fetchSubscriptionUsage } from './subscription.js';
 
 export const TRAILING_WINDOW_MS = 5 * 60 * 60 * 1000;
 

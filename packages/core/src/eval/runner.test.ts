@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
+
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
-import type { GoldenCase } from './types.js';
 import { runEval } from './runner.js';
+import type { GoldenCase } from './types.js';
 
 const models: ModelsConfig = {
   version: 1,

@@ -1,7 +1,8 @@
-import type { JSX } from 'react';
 import { Box, Text } from 'ink';
+import type { JSX } from 'react';
+
 import { laneElapsedMs, type LaneState } from '../dashboard.js';
-import { spinnerFrame, formatDuration } from './PhaseRow.js';
+import { formatDuration, spinnerFrame } from './PhaseRow.js';
 
 const TITLE_MAX_LENGTH = 32;
 

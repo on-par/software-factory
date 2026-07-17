@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
-import { ModelRouter, ModelExecutorError, failoversFrom } from './index.js';
-import type { ExecFn } from './index.js';
-import { StubModelExecutor } from './stub.js';
 import { HarnessError } from '../harness/index.js';
+import type { ExecFn } from './index.js';
+import { failoversFrom, ModelExecutorError, ModelRouter } from './index.js';
+import { StubModelExecutor } from './stub.js';
 
 const models: ModelsConfig = {
   version: 1,

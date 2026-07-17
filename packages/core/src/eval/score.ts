@@ -1,4 +1,5 @@
 import matter from 'gray-matter';
+
 import { isEscalation } from '../utils/index.js';
 import type { DeterministicCheck, ExpectedRoute } from './types.js';
 

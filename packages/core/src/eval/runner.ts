@@ -2,7 +2,7 @@ import { buildPlanPrompt } from '../phases/plan.js';
 import type { ModelRouter } from '../router/index.js';
 import { runJudgeSamples } from './judge.js';
 import { scoreSpec } from './score.js';
-import { isRouteAsserted, type CaseResult, type EvalSummary, type GoldenCase } from './types.js';
+import { type CaseResult, type EvalSummary, type GoldenCase, isRouteAsserted } from './types.js';
 
 export interface RunEvalOpts {
   cases: GoldenCase[];

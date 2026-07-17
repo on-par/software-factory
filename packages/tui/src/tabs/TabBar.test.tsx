@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render } from 'ink-testing-library';
+import { afterEach, describe, expect, it } from 'vitest';
+
 import { TabBar } from './TabBar.js';
 
 afterEach(cleanup);

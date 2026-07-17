@@ -1,6 +1,7 @@
-import type { JSX } from 'react';
-import { Box, Text } from 'ink';
 import type { QueueSnapshot } from '@on-par/factory-core';
+import { Box, Text } from 'ink';
+import type { JSX } from 'react';
+
 import type { LaneState, LaneStatus } from '../dashboard.js';
 
 const TITLE_MAX_LENGTH = 40;

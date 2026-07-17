@@ -1,13 +1,15 @@
 // src/harness/codex-cli.ts — CodingHarness adapter for the Codex CLI.
 
-import { writeFile, readFile, unlink } from 'node:fs/promises';
+import { readFile, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CodingHarness, HarnessError, HarnessRequest, HarnessResult } from './index.js';
-import { classifyFailure } from './classify.js';
-import { shellEscape } from '../utils/index.js';
-import { defaultExecFn } from '../utils/exec.js';
+
 import type { ExecFn } from '../utils/exec.js';
+import { defaultExecFn } from '../utils/exec.js';
+import { shellEscape } from '../utils/index.js';
+import { classifyFailure } from './classify.js';
+import type { CodingHarness, HarnessRequest, HarnessResult } from './index.js';
+import { HarnessError } from './index.js';
 
 export type CodexExecFn = ExecFn;
 

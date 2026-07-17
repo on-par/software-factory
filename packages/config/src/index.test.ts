@@ -1,6 +1,8 @@
 import { isAbsolute } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
-import { resolveConfigPath, constitutionsDir } from './index.js';
+
+import { constitutionsDir, resolveConfigPath } from './index.js';
 
 describe('config paths', () => {
   it('resolves shared config paths', () => {

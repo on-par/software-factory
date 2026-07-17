@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render } from 'ink-testing-library';
 import type { QueueSnapshot } from '@on-par/factory-core';
-import { initialDashboard, reduceDashboard, type LaneState } from '../dashboard.js';
+import { cleanup, render } from 'ink-testing-library';
+import { afterEach, describe, expect, it } from 'vitest';
+
+import { initialDashboard, type LaneState, reduceDashboard } from '../dashboard.js';
 import { QueueTab } from './QueueTab.js';
 
 afterEach(cleanup);

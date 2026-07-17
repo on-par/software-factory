@@ -1,7 +1,8 @@
 // src/harness/ollama-http.ts — CodingHarness adapter for Ollama's native HTTP chat API.
 
-import { CodingHarness, HarnessError, HarnessRequest, HarnessResult } from './index.js';
 import { classifyFailure } from './classify.js';
+import type { CodingHarness, HarnessRequest, HarnessResult } from './index.js';
+import { HarnessError } from './index.js';
 
 /** Structurally identical to the router's FetchFn — defined here so the harness
  *  does not import from ../router (avoids an import cycle). */

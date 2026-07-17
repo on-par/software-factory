@@ -2,27 +2,27 @@
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { ModelRegistry } from '../models/index.js';
-import type { TaskType } from '../types/index.js';
+
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
-import { HarnessError, isAgenticHarness, isRetryableFailure, taskRequiresAgenticHarness } from '../harness/index.js';
-import type { CodingHarness, HarnessFailureReason } from '../harness/index.js';
+import { classifyFailure } from '../harness/classify.js';
 import { ClaudeCliHarness } from '../harness/claude-cli.js';
 import { CodexCliHarness } from '../harness/codex-cli.js';
+import type { CodingHarness, HarnessFailureReason } from '../harness/index.js';
+import { HarnessError, isAgenticHarness, isRetryableFailure, taskRequiresAgenticHarness } from '../harness/index.js';
+import { OllamaAgenticHarness } from '../harness/ollama-agentic.js';
 import { OllamaHttpHarness } from '../harness/ollama-http.js';
 import { OpenCodeHarness } from '../harness/opencode.js';
-import { OllamaAgenticHarness } from '../harness/ollama-agentic.js';
-import { classifyFailure } from '../harness/classify.js';
-import { describeFailureDetail } from './failure-detail.js';
-import { ModelExecutorError, extractFailoverReason } from './executor-error.js';
-import { shellEscape } from '../utils/index.js';
-import { defaultExecFn } from '../utils/exec.js';
+import { ModelRegistry } from '../models/index.js';
+import type { TaskType } from '../types/index.js';
 import type { ExecFn } from '../utils/exec.js';
+import { defaultExecFn } from '../utils/exec.js';
+import { shellEscape } from '../utils/index.js';
+import { extractFailoverReason, ModelExecutorError } from './executor-error.js';
+import { describeFailureDetail } from './failure-detail.js';
 import { captureWorktreeState, resetWorktreeState } from './worktree-state.js';
 
-export { ModelExecutorError, extractFailoverReason } from './executor-error.js';
-
 export type { ExecFn } from '../utils/exec.js';
+export { extractFailoverReason, ModelExecutorError } from './executor-error.js';
 
 export type SleepFn = (ms: number) => Promise<void>;
 

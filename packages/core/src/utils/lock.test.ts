@@ -1,7 +1,9 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
 import { withFileLock, withGitLock } from './lock.js';
 
 const delay = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { NON_RETRYABLE_FAILURE_REASONS, isRetryableFailure, taskRequiresAgenticHarness } from './index.js';
+
+import { isRetryableFailure, NON_RETRYABLE_FAILURE_REASONS, taskRequiresAgenticHarness } from './index.js';
 
 describe('taskRequiresAgenticHarness', () => {
   it('returns true for build tasks that edit files', () => {

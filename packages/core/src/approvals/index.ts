@@ -3,9 +3,10 @@
 // <id>.response.json is written by a responder (TUI). A future socket/IPC transport
 // only needs to implement ApprovalGate.
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+
 import type { CheckSummary } from '../types/index.js';
 
 export interface ApprovalRequest {

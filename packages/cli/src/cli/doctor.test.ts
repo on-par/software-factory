@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { doctorFailed, formatDoctorChecks, runDoctorChecks, type DoctorEnvProbes } from './doctor.js';
+
+import { type DoctorEnvProbes, doctorFailed, formatDoctorChecks, runDoctorChecks } from './doctor.js';
 
 function probes(overrides: Partial<DoctorEnvProbes> = {}): DoctorEnvProbes {
   return {

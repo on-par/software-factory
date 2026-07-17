@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
+
 import { codingHarnessContractCases, makeContractRequest } from './contract.js';
-import { StubCodingHarness } from './stub.js';
 import { HarnessError } from './index.js';
+import { StubCodingHarness } from './stub.js';
 
 describe('CodingHarness contract: StubCodingHarness', () => {
   const cases = codingHarnessContractCases({
