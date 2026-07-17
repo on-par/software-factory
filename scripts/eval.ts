@@ -10,9 +10,9 @@ import {
   loadRoutesConfig,
   ModelRouter,
   runEval,
-  StubModelExecutor,
   toBaseline,
 } from '@on-par/factory-core';
+import { StubModelExecutor } from '@on-par/factory-core/testing';
 
 interface Args {
   stub: boolean;

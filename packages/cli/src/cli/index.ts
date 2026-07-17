@@ -14,11 +14,9 @@ import {
   checkPhase,
   ConstitutionLoader,
   createFileApprovalGate,
-  createLocalSmallDryRun,
   diagnoseModels,
   estimateTrailingSpend,
   fetchSubscriptionUsage,
-  formatGcReport,
   formatUsageReport,
   getConstitutionsDir,
   getFactoryPaths,
@@ -34,9 +32,7 @@ import {
   resolveSkipCI,
   resolveTimeouts,
   shipPhase,
-  sweepWorktrees,
   validateQueue,
-  watchChecks,
   watchUsage,
   writeLocalRunReport,
 } from '@on-par/factory-core';
@@ -44,15 +40,19 @@ import {
   branchFor,
   branchPrefixSlug,
   cleanupWorktree,
+  createLocalSmallDryRun,
   ensureDir,
+  formatGcReport,
   gitFetch,
   logEvent,
   readCosts,
   setupWorktree,
   shellEscape,
+  sweepWorktrees,
+  watchChecks,
   withFileLock,
   withGitLock,
-} from '@on-par/factory-core';
+} from '@on-par/factory-core/internal';
 import { runTui } from '@on-par/factory-tui';
 import chalk from 'chalk';
 import { Command } from 'commander';
