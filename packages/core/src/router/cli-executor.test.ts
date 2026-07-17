@@ -538,6 +538,38 @@ describe('CliModelExecutor', () => {
     expect(execCalls).not.toContain('git add -- \'preexisting.txt\' && git commit -m "feat: implement factory issue"');
   });
 
+  it('drives ollama+codex models through the native command agent, never codex exec (#172)', async () => {
+    const execCalls: string[] = [];
+    const execFn = async (cmd: string) => {
+      execCalls.push(cmd);
+      return { stdout: '', stderr: '' };
+    };
+    let ollamaCalls = 0;
+    const fetchFn = async (_input: string, _init: any) => {
+      ollamaCalls++;
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => '',
+        json: async () => ({ message: { content: '{"commands":[],"done":true,"final":"done"}' } }),
+      };
+    };
+    const executor = new CliModelExecutor(execFn, fetchFn);
+
+    await executor.runModel('ollama-codex-model', 'build it', {
+      worktree,
+      timeoutSeconds,
+      task: 'build_codex',
+      registry,
+      routesConfig,
+    });
+
+    expect(ollamaCalls).toBeGreaterThan(0);
+    expect(execCalls.some((cmd) => cmd.startsWith('codex'))).toBe(false);
+    expect(execCalls.join('\n')).not.toContain('--local-provider');
+  });
+
   it('retries an empty local command-agent response with a compact repair prompt', async () => {
     tmpWorktree = await mkdtemp(join(tmpdir(), 'factory-command-agent-'));
     const execCalls: string[] = [];

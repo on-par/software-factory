@@ -121,8 +121,8 @@
         "temperature": 0.1
       },
       "codex": true,
-      "codexFlag": "--oss --local-provider ollama -m qwen3.5:9b",
-      "note": "Local-only worker using Ollama qwen3.5:9b via the schema-bound ollama-agentic harness (patch proposals via Ollama structured outputs) for build_codex so the model can edit files and run commands."
+      "experimental": true,
+      "note": "EXPERIMENTAL quarantined spike (ADR-0003): local-only worker driving Ollama qwen3.5:9b through the schema-bound ollama-agentic harness. codex: true only marks build_codex eligibility — this model never runs 'codex exec --local-provider'; there is no codexFlag. Opt in with FACTORY_EXPERIMENTAL=1. Retire or keep after the #170 bounded-retry test and the first green local fixture run (epic #163)."
     },
     "qwen3.5:9b": {
       "provider": "ollama",
