@@ -1,14 +1,17 @@
 // src/phases/plan.ts — PLAN phase: boss model reads issue, explores repo, freezes spec, picks route
 
-import { mkdir, rename, writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import matter from 'gray-matter';
-import { ModelRouter, failoversFrom } from '../router/index.js';
-import { buildConstitutionContext } from '../constitutions/index.js';
-import { escalationLine, isEscalation, codexDisabled } from '../utils/index.js';
-import type { Constitution, FailoverReason } from '../types/index.js';
+
 import type { Octokit } from '@octokit/rest';
+import matter from 'gray-matter';
+
+import { buildConstitutionContext } from '../constitutions/index.js';
+import type { ModelRouter } from '../router/index.js';
+import { failoversFrom } from '../router/index.js';
+import type { Constitution, FailoverReason } from '../types/index.js';
+import { codexDisabled, escalationLine, isEscalation } from '../utils/index.js';
 
 export interface PlanResult {
   ok: boolean;

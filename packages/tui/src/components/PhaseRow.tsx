@@ -1,5 +1,6 @@
-import type { JSX } from 'react';
 import { Box, Text } from 'ink';
+import type { JSX } from 'react';
+
 import { PHASES, type RunState } from '../state.js';
 
 // A small, self-contained "dots" cycle — avoids pulling in ink-spinner, whose

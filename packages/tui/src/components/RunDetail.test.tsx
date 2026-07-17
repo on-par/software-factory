@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render } from 'ink-testing-library';
 import type { FactoryEvent } from '@on-par/factory-core';
+import { cleanup, render } from 'ink-testing-library';
+import { afterEach, describe, expect, it } from 'vitest';
+
 import { initialState, reduceEvent } from '../state.js';
 import { RunDetail } from './RunDetail.js';
 

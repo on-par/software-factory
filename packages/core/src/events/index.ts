@@ -1,6 +1,7 @@
 // src/events/index.ts — Read and tail the .factory/events.ndjson append log
 
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
+
 import type { FactoryEvent } from '../types/index.js';
 
 /** Parse all events currently in the file. Missing file → []. Malformed lines are skipped. */

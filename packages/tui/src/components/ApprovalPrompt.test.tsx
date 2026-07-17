@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render } from 'ink-testing-library';
 import type { ApprovalRequest } from '@on-par/factory-core';
+import { cleanup, render } from 'ink-testing-library';
+import { afterEach, describe, expect, it } from 'vitest';
+
 import { ApprovalPrompt } from './ApprovalPrompt.js';
 
 afterEach(cleanup);

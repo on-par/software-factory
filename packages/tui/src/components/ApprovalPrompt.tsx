@@ -1,6 +1,6 @@
-import type { JSX } from 'react';
-import { Box, Text } from 'ink';
 import type { ApprovalRequest } from '@on-par/factory-core';
+import { Box, Text } from 'ink';
+import type { JSX } from 'react';
 
 const MAX_DIFF_LINES = 10;
 

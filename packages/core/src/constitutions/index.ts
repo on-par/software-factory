@@ -1,10 +1,12 @@
 // src/constitutions/index.ts — Constitution loading and enforcement
 
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+
 import matter from 'gray-matter';
-import type { Constitution } from '../types/index.js';
+
 import { getConstitutionsDir } from '../config/index.js';
+import type { Constitution } from '../types/index.js';
 
 /**
  * Agent instruction files a target repo may carry, in priority order.

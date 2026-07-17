@@ -1,4 +1,5 @@
-import { CodingHarness, HarnessError, HarnessRequest, HarnessResult, HarnessFailureReason } from './index.js';
+import type { CodingHarness, HarnessFailureReason, HarnessRequest, HarnessResult } from './index.js';
+import { HarnessError } from './index.js';
 
 export type StubHarnessStep = { output: string } | { fail: HarnessFailureReason; message?: string };
 

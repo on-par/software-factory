@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { codingHarnessContractCases, makeContractRequest } from './contract.js';
-import { OllamaHttpHarness, OllamaFetchFn } from './ollama-http.js';
-import { HarnessError } from './index.js';
-import { ModelRegistry } from '../models/index.js';
+
 import type { ModelsConfig } from '../config/index.js';
+import { ModelRegistry } from '../models/index.js';
+import { codingHarnessContractCases, makeContractRequest } from './contract.js';
+import { HarnessError } from './index.js';
+import type { OllamaFetchFn } from './ollama-http.js';
+import { OllamaHttpHarness } from './ollama-http.js';
 
 function okFetch(json: unknown): OllamaFetchFn {
   return async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => '', json: async () => json });

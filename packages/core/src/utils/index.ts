@@ -1,14 +1,15 @@
 // src/utils/index.ts — Shared utilities: logging, git ops, cost tracking, shell helpers
 
-import { appendFileSync, existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { exec as execCb } from 'node:child_process';
-import { promisify } from 'node:util';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { promisify } from 'node:util';
+
+import { createLogger } from '../logger/index.js';
 import type { CostEntry, FailoverReason, LogLevel } from '../types/index.js';
 import { levelForType } from './format.js';
-import { createLogger } from '../logger/index.js';
 
-export { formatEventLine, colorEnabled, levelForType } from './format.js';
+export { colorEnabled, formatEventLine, levelForType } from './format.js';
 
 const exec = promisify(execCb);
 

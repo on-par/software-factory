@@ -6,8 +6,10 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { z } from 'zod';
+
 import { resolveConfigPath } from '@on-par/factory-config';
+import { z } from 'zod';
+
 import { KNOWN_HARNESS_IDS } from '../harness/catalog.js';
 
 // ---------- Schemas ----------

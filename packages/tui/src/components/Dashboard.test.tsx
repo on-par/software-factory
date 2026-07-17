@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render } from 'ink-testing-library';
 import type { FactoryEvent } from '@on-par/factory-core';
-import { initialDashboard, reduceDashboard, type DashboardState } from '../dashboard.js';
+import { cleanup, render } from 'ink-testing-library';
+import { afterEach, describe, expect, it } from 'vitest';
+
+import { type DashboardState, initialDashboard, reduceDashboard } from '../dashboard.js';
 import { Dashboard } from './Dashboard.js';
 
 afterEach(cleanup);

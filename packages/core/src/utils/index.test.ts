@@ -2,21 +2,23 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import {
-  slugify,
-  branchPrefixSlug,
-  shellEscape,
   branchFor,
+  branchPrefixSlug,
   cleanupWorktree,
-  logEvent,
-  logCost,
-  readCosts,
-  ensureDir,
-  readJsonIfExists,
-  isEscalation,
-  escalationLine,
   codexDisabled,
+  ensureDir,
+  escalationLine,
+  isEscalation,
+  logCost,
+  logEvent,
+  readCosts,
+  readJsonIfExists,
+  shellEscape,
+  slugify,
 } from './index.js';
 
 let tmpDir: string | undefined;

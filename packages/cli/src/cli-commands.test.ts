@@ -1,7 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+import type * as FactoryCore from '@on-par/factory-core';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Shared mutable state the hoisted mocks read from. Set per test in beforeEach.
@@ -81,7 +83,7 @@ vi.mock('@on-par/factory-tui', () => ({
 }));
 
 vi.mock('@on-par/factory-core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@on-par/factory-core')>();
+  const actual = await importOriginal<typeof FactoryCore>();
   return {
     ...actual,
     // Config loaders — return inert values.
@@ -143,8 +145,9 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
   };
 });
 
-import { main, shipIssue, CliExitError, cmdConstitution, cmdUsage, cmdLand, parseIssueArg } from './cli/index.js';
-import { sweepWorktrees, formatGcReport, withGitLock } from '@on-par/factory-core';
+import { formatGcReport, sweepWorktrees, withGitLock } from '@on-par/factory-core';
+
+import { CliExitError, cmdConstitution, cmdLand, cmdUsage, main, parseIssueArg, shipIssue } from './cli/index.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

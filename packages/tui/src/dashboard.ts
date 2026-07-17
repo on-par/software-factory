@@ -1,5 +1,6 @@
 import type { FactoryEvent } from '@on-par/factory-core';
-import { initialState, reduceEvent, type PhaseName, type RunState } from './state.js';
+
+import { initialState, type PhaseName, reduceEvent, type RunState } from './state.js';
 
 export type LaneStatus = 'running' | 'waiting-merge' | 'ready' | 'merged' | 'failed' | 'stopped';
 

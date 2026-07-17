@@ -5,11 +5,13 @@
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { CodingHarness, HarnessError, HarnessRequest, HarnessResult } from './index.js';
-import { classifyFailure } from './classify.js';
-import type { OllamaFetchFn } from './ollama-http.js';
-import { defaultExecFn } from '../utils/exec.js';
+
 import type { ExecFn } from '../utils/exec.js';
+import { defaultExecFn } from '../utils/exec.js';
+import { classifyFailure } from './classify.js';
+import type { CodingHarness, HarnessRequest, HarnessResult } from './index.js';
+import { HarnessError } from './index.js';
+import type { OllamaFetchFn } from './ollama-http.js';
 
 export type OllamaAgenticExecFn = ExecFn;
 

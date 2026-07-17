@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';

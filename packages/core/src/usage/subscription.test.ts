@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+
 import { fetchSubscriptionUsage, readClaudeAccessToken } from './subscription.js';
 
 const validCreds = JSON.stringify({

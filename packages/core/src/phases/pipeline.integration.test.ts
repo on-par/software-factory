@@ -3,11 +3,12 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+
 import { afterEach, describe, expect, it } from 'vitest';
+
 import type { ModelsConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
-import { branchFor, setupWorktree } from '../utils/index.js';
 import {
   commitAll,
   makeFakeOctokit,
@@ -16,6 +17,7 @@ import {
   PipelineTestKit,
   specContentFor,
 } from '../test-support/index.js';
+import { branchFor, setupWorktree } from '../utils/index.js';
 import { buildPhase } from './build.js';
 import { checkPhase } from './check.js';
 import { planPhase } from './plan.js';

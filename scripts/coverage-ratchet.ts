@@ -1,11 +1,13 @@
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+
+import type { CoverageMetrics } from '@on-par/factory-core';
 import {
   checkScopedRatchetDrift,
   DEFAULT_RATCHET_SLACK,
   parseCoverageSummaryScopes,
   renderRatchetReport,
 } from '@on-par/factory-core';
-import type { CoverageMetrics } from '@on-par/factory-core';
+
 import vitestConfig from '../vitest.config.js';
 
 interface Args {

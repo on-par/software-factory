@@ -1,8 +1,8 @@
 // src/harness/index.ts — CodingHarness contract: the common target every
 // provider adapter (Claude CLI, Codex CLI, Ollama, OpenCode, Pi) must satisfy.
 
-import type { FailoverReason, TaskType } from '../types/index.js';
 import type { ModelRegistry } from '../models/index.js';
+import type { FailoverReason, TaskType } from '../types/index.js';
 
 /** Router's FailoverReason is a type alias of HarnessFailureReason (see
  *  ../router/index.ts) so the two unions can never drift. */
@@ -83,5 +83,5 @@ export interface CodingHarness {
   run(request: HarnessRequest): Promise<HarnessResult>;
 }
 
-export { HARNESS_CATALOG, KNOWN_HARNESS_IDS, isAgenticHarness } from './catalog.js';
 export type { HarnessCatalogEntry, HarnessProbe } from './catalog.js';
+export { HARNESS_CATALOG, isAgenticHarness, KNOWN_HARNESS_IDS } from './catalog.js';

@@ -1,10 +1,11 @@
 // src/harness/opencode.ts — CodingHarness adapter for the OpenCode CLI.
 
-import { CodingHarness, HarnessError, HarnessRequest, HarnessResult } from './index.js';
-import { classifyFailure } from './classify.js';
-import { shellEscape } from '../utils/index.js';
-import { defaultExecFn } from '../utils/exec.js';
 import type { ExecFn } from '../utils/exec.js';
+import { defaultExecFn } from '../utils/exec.js';
+import { shellEscape } from '../utils/index.js';
+import { classifyFailure } from './classify.js';
+import type { CodingHarness, HarnessRequest, HarnessResult } from './index.js';
+import { HarnessError } from './index.js';
 
 export type OpenCodeExecFn = ExecFn;
 

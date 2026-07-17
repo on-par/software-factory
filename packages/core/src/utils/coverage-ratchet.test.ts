@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
+
 import {
   checkRatchetDrift,
   checkScopedRatchetDrift,
+  type CoverageMetrics,
   DEFAULT_RATCHET_SLACK,
   parseCoverageSummary,
   parseCoverageSummaryScopes,
-  renderRatchetReport,
-  type CoverageMetrics,
   type RatchetCheckResult,
+  renderRatchetReport,
 } from './coverage-ratchet.js';
 
 function summaryJson(metrics: Record<keyof CoverageMetrics, { total: number; covered: number; pct: number }>): string {

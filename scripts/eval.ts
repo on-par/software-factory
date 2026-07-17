@@ -1,5 +1,7 @@
-import { writeFileSync, readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+import type { Baseline, ModelsConfig, RoutesConfig } from '@on-par/factory-core';
 import {
   compareToBaseline,
   isRouteAsserted,
@@ -11,7 +13,6 @@ import {
   StubModelExecutor,
   toBaseline,
 } from '@on-par/factory-core';
-import type { Baseline, ModelsConfig, RoutesConfig } from '@on-par/factory-core';
 
 interface Args {
   stub: boolean;

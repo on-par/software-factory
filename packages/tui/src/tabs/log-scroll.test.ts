@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
 import type { FactoryEvent } from '@on-par/factory-core';
+import { describe, expect, it } from 'vitest';
+
 import { initialLogScroll, reduceLogScroll, visibleSlice } from './log-scroll.js';
 
 function events(n: number): FactoryEvent[] {

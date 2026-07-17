@@ -1,21 +1,23 @@
-import { afterEach, describe, expect, it } from 'vitest';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
+
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
-import type { Constitution } from '../types/index.js';
 import { ConstitutionLoader } from '../constitutions/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
+import type { Constitution } from '../types/index.js';
 import {
   accessibilityChecker,
+  type CheckerContext,
   compileChecker,
   fileExists,
   linksChecker,
   runAllCheckers,
   runCustomChecker,
   testsChecker,
-  type CheckerContext,
 } from './index.js';
 
 const models: ModelsConfig = {

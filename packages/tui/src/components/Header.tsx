@@ -1,5 +1,5 @@
-import type { JSX } from 'react';
 import { Text } from 'ink';
+import type { JSX } from 'react';
 
 export interface HeaderProps {
   issue?: string;

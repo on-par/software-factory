@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { HARNESS_CATALOG, KNOWN_HARNESS_IDS, isAgenticHarness } from './catalog.js';
+
+import { HARNESS_CATALOG, isAgenticHarness, KNOWN_HARNESS_IDS } from './catalog.js';
 
 describe('HARNESS_CATALOG', () => {
   it('has an id on every entry that matches its record key', () => {

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
 import type { ModelsConfig } from '../config/index.js';
-import { ModelRegistry, diagnoseModels, resolveModelOverrides } from './index.js';
+import { diagnoseModels, ModelRegistry, resolveModelOverrides } from './index.js';
 
 const config: ModelsConfig = {
   version: 1,

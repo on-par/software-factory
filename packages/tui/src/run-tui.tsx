@@ -1,4 +1,5 @@
 import { render } from 'ink';
+
 import { App } from './components/App.js';
 import { followPlain } from './fallback.js';
 

@@ -1,6 +1,7 @@
-import type { JSX } from 'react';
 import { Box, Text } from 'ink';
-import { mergeTrainPosition, type DashboardState } from '../dashboard.js';
+import type { JSX } from 'react';
+
+import { type DashboardState, mergeTrainPosition } from '../dashboard.js';
 import { LaneRow } from './LaneRow.js';
 import { StopBanner } from './StopBanner.js';
 

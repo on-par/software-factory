@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { colorEnabled, formatEventLine, levelForType } from './format.js';
 
 const RESET = '\x1b[0m';

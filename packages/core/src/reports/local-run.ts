@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { exec as execCb } from 'node:child_process';
-import { promisify } from 'node:util';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { promisify } from 'node:util';
+
 import type { FactoryEvent } from '../types/index.js';
 
 const exec = promisify(execCb);

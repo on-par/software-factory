@@ -5,8 +5,9 @@
 
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
+
 import type { FactoryEvent, FailoverReason, LogLevel } from '../types/index.js';
-import { formatEventLine, colorEnabled } from '../utils/format.js';
+import { colorEnabled, formatEventLine } from '../utils/format.js';
 
 export interface LogContext {
   lane?: string;

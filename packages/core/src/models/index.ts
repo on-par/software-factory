@@ -1,9 +1,10 @@
 // src/models/index.ts — Model registry: availability checks, cost calculation, tier resolution
 
 import { execSync } from 'node:child_process';
-import type { ModelDefinition, ModelTier } from '../types/index.js';
+
 import type { ModelsConfig } from '../config/index.js';
 import { HARNESS_CATALOG, KNOWN_HARNESS_IDS } from '../harness/catalog.js';
+import type { ModelDefinition, ModelTier } from '../types/index.js';
 
 export class ModelRegistry {
   constructor(private config: ModelsConfig) {}

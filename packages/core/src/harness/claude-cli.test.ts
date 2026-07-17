@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { codingHarnessContractCases, makeContractRequest } from './contract.js';
-import { ClaudeCliHarness } from './claude-cli.js';
-import { HarnessError } from './index.js';
-import { ModelRegistry } from '../models/index.js';
+
 import type { ModelsConfig } from '../config/index.js';
+import { ModelRegistry } from '../models/index.js';
+import { ClaudeCliHarness } from './claude-cli.js';
+import { codingHarnessContractCases, makeContractRequest } from './contract.js';
+import { HarnessError } from './index.js';
 
 describe('CodingHarness contract: ClaudeCliHarness', () => {
   const cases = codingHarnessContractCases({

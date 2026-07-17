@@ -1,8 +1,9 @@
-import type { JSX } from 'react';
-import { Box, Text } from 'ink';
 import type { FactoryEvent } from '@on-par/factory-core';
+import { Box, Text } from 'ink';
+import type { JSX } from 'react';
+
 import { EventFeed } from '../components/EventFeed.js';
-import { visibleSlice, type LogScrollState } from './log-scroll.js';
+import { type LogScrollState, visibleSlice } from './log-scroll.js';
 
 export interface LogTabProps {
   events: FactoryEvent[];

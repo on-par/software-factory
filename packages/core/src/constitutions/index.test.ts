@@ -1,8 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ConstitutionLoader, REPO_INSTRUCTION_FILES, buildConstitutionContext } from './index.js';
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { buildConstitutionContext, ConstitutionLoader, REPO_INSTRUCTION_FILES } from './index.js';
 
 const BUNDLED = `---
 product: acme-app

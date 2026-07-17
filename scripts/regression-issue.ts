@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
-import { compareToBaseline, formatRegressionIssue } from '@on-par/factory-core';
+
 import type { Baseline, EvalSummary } from '@on-par/factory-core';
+import { compareToBaseline, formatRegressionIssue } from '@on-par/factory-core';
 
 interface Args {
   report: string;

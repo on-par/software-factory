@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render } from 'ink-testing-library';
 import type { FactoryEvent } from '@on-par/factory-core';
-import { LogTab } from './LogTab.js';
+import { cleanup, render } from 'ink-testing-library';
+import { afterEach, describe, expect, it } from 'vitest';
+
 import { initialLogScroll } from './log-scroll.js';
+import { LogTab } from './LogTab.js';
 
 afterEach(cleanup);
 

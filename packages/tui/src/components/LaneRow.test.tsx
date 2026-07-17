@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render } from 'ink-testing-library';
-import { initialDashboard, reduceDashboard, type LaneState } from '../dashboard.js';
+import { afterEach, describe, expect, it } from 'vitest';
+
+import { initialDashboard, type LaneState, reduceDashboard } from '../dashboard.js';
 import { LaneRow } from './LaneRow.js';
 
 afterEach(cleanup);

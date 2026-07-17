@@ -1,5 +1,6 @@
-import type { JSX } from 'react';
 import { Box, Text } from 'ink';
+import type { JSX } from 'react';
+
 import { TAB_LABELS, TAB_ORDER, type TabName } from './types.js';
 
 export interface TabBarProps {

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
+
 import { compareToBaseline, toBaseline } from './baseline.js';
 import { formatRegressionIssue, REGRESSION_ISSUE_MARKER, REGRESSION_ISSUE_TITLE } from './regression-report.js';
-import { isRouteAsserted, type CaseResult, type EvalSummary } from './types.js';
+import { type CaseResult, type EvalSummary, isRouteAsserted } from './types.js';
 
 function caseResult(overrides: Partial<CaseResult> = {}): CaseResult {
   return {

@@ -2,11 +2,13 @@
 
 import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
+
 import type { Octokit } from '@octokit/rest';
-import { shellEscape } from '../utils/index.js';
-import { watchChecks } from '../utils/ci-watch.js';
+
 import type { ApprovalGate } from '../approvals/index.js';
 import type { CheckSummary } from '../types/index.js';
+import { watchChecks } from '../utils/ci-watch.js';
+import { shellEscape } from '../utils/index.js';
 
 const exec = promisify(execCb);
 type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<{ stdout: string }>;

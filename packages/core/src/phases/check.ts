@@ -1,8 +1,9 @@
 // src/phases/check.ts — CHECK phase: independent checkers verify output, rework loop, dispute resolution
 
-import { ModelRouter, failoversFrom } from '../router/index.js';
+import { type CheckerContext, runAllCheckers } from '../checkers/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
-import { runAllCheckers, type CheckerContext } from '../checkers/index.js';
+import type { ModelRouter } from '../router/index.js';
+import { failoversFrom } from '../router/index.js';
 import type { CheckSummary, Constitution, DisputeResult, FailoverReason } from '../types/index.js';
 
 type LogFn = (type: string, msg: string, extra?: { failoverReason?: FailoverReason }) => void;

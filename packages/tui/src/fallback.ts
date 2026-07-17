@@ -1,4 +1,4 @@
-import { followEvents, formatEventLine, colorEnabled, type FactoryEvent } from '@on-par/factory-core';
+import { colorEnabled, type FactoryEvent, followEvents, formatEventLine } from '@on-par/factory-core';
 
 /**
  * Plain-line fallback printer — mirrors `logEvent`'s console output

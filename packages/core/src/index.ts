@@ -1,114 +1,113 @@
 // packages/core/src/index.ts — Library entry point for programmatic use
 
 // Config
+export type { FactoryConfig, ModelsConfig, RoutesConfig } from './config/index.js';
 export {
+  getConstitutionsDir,
+  getFactoryPaths,
+  loadFactoryConfig,
   loadModelsConfig,
   loadRoutesConfig,
-  loadFactoryConfig,
-  resolveTimeouts,
   resolveSkipCI,
-  getFactoryPaths,
-  getConstitutionsDir,
+  resolveTimeouts,
 } from './config/index.js';
-export type { ModelsConfig, RoutesConfig, FactoryConfig } from './config/index.js';
 
 // Queue
-export { validateQueue, parseQueue, readQueue } from './queue/index.js';
 export type {
-  QueueValidationResult,
-  QueueEntry,
-  QueueDiagnostic,
   ParsedQueue,
+  QueueDiagnostic,
+  QueueEntry,
   QueueSnapshot,
   QueueSnapshotEntry,
+  QueueValidationResult,
 } from './queue/index.js';
+export { parseQueue, readQueue, validateQueue } from './queue/index.js';
 
 // Events
-export { readEvents, followEvents } from './events/index.js';
 export type { FollowEventsOptions } from './events/index.js';
+export { followEvents, readEvents } from './events/index.js';
 
 // Models
-export { ModelRegistry, isCommandAvailable, diagnoseModels, resolveModelOverrides } from './models/index.js';
 export type { DoctorProbes, ModelDiagnosis, ModelOverrides } from './models/index.js';
+export { diagnoseModels, isCommandAvailable, ModelRegistry, resolveModelOverrides } from './models/index.js';
 
 // Router
-export { ModelRouter, CliModelExecutor, failoversFrom } from './router/index.js';
 export type {
-  RouterResult,
+  ExecutorHarness,
   FailoverReason,
   ModelExecutor,
   ModelExecutorContext,
-  ExecutorHarness,
+  RouterResult,
   SleepFn,
 } from './router/index.js';
-export { StubModelExecutor } from './router/stub.js';
+export { CliModelExecutor, failoversFrom, ModelRouter } from './router/index.js';
 export type { StubModelExecutorOptions } from './router/stub.js';
+export { StubModelExecutor } from './router/stub.js';
 
 // Coding harness contract
-export {
-  HarnessError,
-  HARNESS_CATALOG,
-  KNOWN_HARNESS_IDS,
-  isAgenticHarness,
-  NON_RETRYABLE_FAILURE_REASONS,
-  isRetryableFailure,
-} from './harness/index.js';
+export { classifyFailure } from './harness/classify.js';
+export type { ClaudeExecFn } from './harness/claude-cli.js';
+export { ClaudeCliHarness } from './harness/claude-cli.js';
+export type { CodexExecFn } from './harness/codex-cli.js';
+export { CodexCliHarness } from './harness/codex-cli.js';
+export type { HarnessContractCase, HarnessContractScenario, HarnessContractScenarios } from './harness/contract.js';
+export { codingHarnessContractCases, makeContractRequest } from './harness/contract.js';
 export type {
   CodingHarness,
+  HarnessCatalogEntry,
   HarnessFailureReason,
   HarnessRequest,
   HarnessResult,
-  HarnessCatalogEntry,
 } from './harness/index.js';
-export { StubCodingHarness } from './harness/stub.js';
-export type { StubCodingHarnessOptions, StubHarnessStep } from './harness/stub.js';
-export { codingHarnessContractCases, makeContractRequest } from './harness/contract.js';
-export type { HarnessContractCase, HarnessContractScenario, HarnessContractScenarios } from './harness/contract.js';
-export { ClaudeCliHarness } from './harness/claude-cli.js';
-export type { ClaudeExecFn } from './harness/claude-cli.js';
-export { CodexCliHarness } from './harness/codex-cli.js';
-export type { CodexExecFn } from './harness/codex-cli.js';
-export { OllamaHttpHarness } from './harness/ollama-http.js';
-export type { OllamaFetchFn } from './harness/ollama-http.js';
-export { OpenCodeHarness } from './harness/opencode.js';
-export type { OpenCodeExecFn } from './harness/opencode.js';
+export {
+  HARNESS_CATALOG,
+  HarnessError,
+  isAgenticHarness,
+  isRetryableFailure,
+  KNOWN_HARNESS_IDS,
+  NON_RETRYABLE_FAILURE_REASONS,
+} from './harness/index.js';
+export type { OllamaAgenticChange, OllamaAgenticExecFn, OllamaAgenticProposal } from './harness/ollama-agentic.js';
 export { OllamaAgenticHarness, PATCH_PROPOSAL_SCHEMA } from './harness/ollama-agentic.js';
-export type { OllamaAgenticExecFn, OllamaAgenticChange, OllamaAgenticProposal } from './harness/ollama-agentic.js';
-export { classifyFailure } from './harness/classify.js';
+export type { OllamaFetchFn } from './harness/ollama-http.js';
+export { OllamaHttpHarness } from './harness/ollama-http.js';
+export type { OpenCodeExecFn } from './harness/opencode.js';
+export { OpenCodeHarness } from './harness/opencode.js';
+export type { StubCodingHarnessOptions, StubHarnessStep } from './harness/stub.js';
+export { StubCodingHarness } from './harness/stub.js';
 
 // Constitutions
-export { ConstitutionLoader, buildConstitutionContext, REPO_INSTRUCTION_FILES } from './constitutions/index.js';
+export { buildConstitutionContext, ConstitutionLoader, REPO_INSTRUCTION_FILES } from './constitutions/index.js';
 
 // Checkers
+export type { CheckerContext } from './checkers/index.js';
 export {
-  runAllCheckers,
-  compileChecker,
-  testsChecker,
-  lintChecker,
-  linksChecker,
   accessibilityChecker,
+  compileChecker,
+  linksChecker,
+  lintChecker,
+  runAllCheckers,
   runCustomChecker,
+  testsChecker,
 } from './checkers/index.js';
 export type { CheckerOutput, CheckSummary } from './types/index.js';
-export type { CheckerContext } from './checkers/index.js';
 
 // Phases
-export { buildPlanPrompt, planPhase } from './phases/plan.js';
-export type { PlanPromptOpts } from './phases/plan.js';
 export { buildPhase } from './phases/build.js';
 export { checkPhase, disputeResolution } from './phases/check.js';
+export type { PlanPromptOpts } from './phases/plan.js';
+export { buildPlanPrompt, planPhase } from './phases/plan.js';
 export { shipPhase } from './phases/ship.js';
 
 // Approvals
-export { createFileApprovalGate, listPendingApprovals, respondToApproval } from './approvals/index.js';
 export type { ApprovalGate, ApprovalRequest, ApprovalResponse, FileApprovalGateOptions } from './approvals/index.js';
+export { createFileApprovalGate, listPendingApprovals, respondToApproval } from './approvals/index.js';
 
 // Reports
-export { writeLocalRunReport, renderLocalRunReport } from './reports/local-run.js';
-export type { LocalRunOutcome, LocalRunReport, LocalRunReportInput, LocalRunReportDeps } from './reports/local-run.js';
+export type { LocalRunOutcome, LocalRunReport, LocalRunReportDeps, LocalRunReportInput } from './reports/local-run.js';
+export { renderLocalRunReport, writeLocalRunReport } from './reports/local-run.js';
 
 // Local-small harness
-export { applyLocalSmallPatchStep, createLocalSmallDryRun } from './local-small/stepwise.js';
 export type {
   LocalSmallContextPack,
   LocalSmallDryRunInput,
@@ -122,126 +121,127 @@ export type {
   LocalSmallStep,
   LocalSmallStepPlan,
 } from './local-small/stepwise.js';
+export { applyLocalSmallPatchStep, createLocalSmallDryRun } from './local-small/stepwise.js';
 
 // Eval
-export {
-  loadGoldenCases,
-  scoreSpec,
-  judgeSpec,
-  median,
-  runJudgeSamples,
-  runEval,
-  toBaseline,
-  compareToBaseline,
-  isRouteAsserted,
-  formatRegressionIssue,
-  REGRESSION_ISSUE_TITLE,
-  REGRESSION_ISSUE_MARKER,
-  appendHistoryLine,
-  parseHistory,
-  renderTrend,
-  summaryToHistoryRecord,
-  buildLocalSmallScoreboard,
-  renderLocalSmallScoreboardMarkdown,
-} from './eval/index.js';
 export type {
+  Baseline,
+  BaselineCase,
+  BaselineComparison,
   CaseResult,
   DeterministicCheck,
   EvalSummary,
   ExpectedRoute,
   GoldenCase,
-  RunEvalOpts,
-  Baseline,
-  BaselineCase,
-  BaselineComparison,
-  RegressionIssue,
+  HistoryRecord,
   JudgeAggregate,
   JudgeSample,
-  HistoryRecord,
   LocalSmallRuntime,
   LocalSmallScoreboardInput,
   LocalSmallScoreboardReport,
   LocalSmallScoreboardRow,
   LocalSmallScoreboardRun,
+  RegressionIssue,
+  RunEvalOpts,
+} from './eval/index.js';
+export {
+  appendHistoryLine,
+  buildLocalSmallScoreboard,
+  compareToBaseline,
+  formatRegressionIssue,
+  isRouteAsserted,
+  judgeSpec,
+  loadGoldenCases,
+  median,
+  parseHistory,
+  REGRESSION_ISSUE_MARKER,
+  REGRESSION_ISSUE_TITLE,
+  renderLocalSmallScoreboardMarkdown,
+  renderTrend,
+  runEval,
+  runJudgeSamples,
+  scoreSpec,
+  summaryToHistoryRecord,
+  toBaseline,
 } from './eval/index.js';
 
 // Utils
 export {
-  logEvent,
-  logCost,
-  readCosts,
-  slugify,
-  branchPrefixSlug,
   branchFor,
-  setupWorktree,
+  branchPrefixSlug,
   cleanupWorktree,
-  gitFetch,
-  shellEscape,
-  ensureDir,
-  isEscalation,
-  escalationLine,
   codexDisabled,
-  formatEventLine,
   colorEnabled,
+  ensureDir,
+  escalationLine,
+  formatEventLine,
+  gitFetch,
+  isEscalation,
   levelForType,
+  logCost,
+  logEvent,
+  readCosts,
+  setupWorktree,
+  shellEscape,
+  slugify,
 } from './utils/index.js';
 
 // Logger
-export { createLogger } from './logger/index.js';
 export type { FactoryLogger, LogContext, LogExtra, LoggerOptions } from './logger/index.js';
+export { createLogger } from './logger/index.js';
 export type { LogLevel } from './types/index.js';
-export { withGitLock, withFileLock } from './utils/lock.js';
-export type { FileLockOptions } from './utils/lock.js';
-export { watchChecks } from './utils/ci-watch.js';
 export type { CiOutcome, WatchChecksOptions } from './utils/ci-watch.js';
+export { watchChecks } from './utils/ci-watch.js';
+export type { CommandResult, RunCommandOptions } from './utils/command-runner.js';
+export { describeCommandFailure, runCommand } from './utils/command-runner.js';
+export type { FileLockOptions } from './utils/lock.js';
+export { withFileLock, withGitLock } from './utils/lock.js';
+export type { GcCandidate, GcReason, GcReport, SweepDeps, WorktreeListEntry } from './utils/worktree-gc.js';
 export {
-  sweepWorktrees,
-  parseWorktreeList,
   findCredentialFiles,
-  scrubFile,
-  zeroFill,
   formatGcReport,
+  parseWorktreeList,
+  scrubFile,
+  sweepWorktrees,
+  zeroFill,
 } from './utils/worktree-gc.js';
-export type { GcReport, GcCandidate, GcReason, WorktreeListEntry, SweepDeps } from './utils/worktree-gc.js';
-export { runCommand, describeCommandFailure } from './utils/command-runner.js';
-export type { RunCommandOptions, CommandResult } from './utils/command-runner.js';
 
 // Coverage ratchet
+export type { CoverageMetrics, RatchetCheckResult, RatchetDrift } from './utils/coverage-ratchet.js';
 export {
-  parseCoverageSummary,
-  parseCoverageSummaryScopes,
   checkRatchetDrift,
   checkScopedRatchetDrift,
-  renderRatchetReport,
   DEFAULT_RATCHET_SLACK,
+  parseCoverageSummary,
+  parseCoverageSummaryScopes,
+  renderRatchetReport,
 } from './utils/coverage-ratchet.js';
-export type { CoverageMetrics, RatchetDrift, RatchetCheckResult } from './utils/coverage-ratchet.js';
 
 // Usage
-export {
-  estimateTrailingSpend,
-  formatUsageReport,
-  watchUsage,
-  readUsage,
-  priceFor,
-  defaultTranscriptRoots,
-  TRAILING_WINDOW_MS,
-  readCostsFile,
-  aggregateCosts,
-} from './usage/index.js';
 export type {
-  TrailingUsageOptions,
-  WatchUsageOptions,
+  CostsRead,
+  CostsSummary,
+  IssueCostRow,
+  ModelCostRow,
   ReadUsageOptions,
+  TrailingUsageOptions,
   UsageReading,
   UsageSource,
-  CostsRead,
-  ModelCostRow,
-  IssueCostRow,
-  CostsSummary,
+  WatchUsageOptions,
 } from './usage/index.js';
-export { fetchSubscriptionUsage, readClaudeAccessToken } from './usage/subscription.js';
+export {
+  aggregateCosts,
+  defaultTranscriptRoots,
+  estimateTrailingSpend,
+  formatUsageReport,
+  priceFor,
+  readCostsFile,
+  readUsage,
+  TRAILING_WINDOW_MS,
+  watchUsage,
+} from './usage/index.js';
 export type { SubscriptionUsage, SubscriptionUsageDeps } from './usage/subscription.js';
+export { fetchSubscriptionUsage, readClaudeAccessToken } from './usage/subscription.js';
 
 // Types
 export * from './types/index.js';

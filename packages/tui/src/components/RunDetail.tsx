@@ -1,9 +1,10 @@
-import type { JSX } from 'react';
 import { Box, Text } from 'ink';
+import type { JSX } from 'react';
+
 import type { RunState } from '../state.js';
+import { EventFeed } from './EventFeed.js';
 import { Header } from './Header.js';
 import { PhaseRow } from './PhaseRow.js';
-import { EventFeed } from './EventFeed.js';
 
 export interface RunDetailProps {
   run: RunState;

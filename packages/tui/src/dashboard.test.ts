@@ -1,12 +1,13 @@
-import { describe, expect, it } from 'vitest';
 import type { FactoryEvent } from '@on-par/factory-core';
+import { describe, expect, it } from 'vitest';
+
 import {
+  type DashboardState,
   initialDashboard,
   isLaneEvent,
   laneElapsedMs,
   mergeTrainPosition,
   reduceDashboard,
-  type DashboardState,
 } from './dashboard.js';
 
 function ev(type: string, issue: string, msg: string, ts = '2026-01-01T00:00:00.000Z'): FactoryEvent {

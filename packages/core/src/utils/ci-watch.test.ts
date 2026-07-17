@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { watchChecks } from './ci-watch.js';
 
 function scriptChecks(sequence: any[][]) {

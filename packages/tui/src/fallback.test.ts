@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
 import type { FactoryEvent } from '@on-par/factory-core';
+import { describe, expect, it, vi } from 'vitest';
+
 import { followPlain } from './fallback.js';
 
 function makeFakeFollow() {

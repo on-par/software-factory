@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { buildLocalSmallScoreboard, renderLocalSmallScoreboardMarkdown } from './scoreboard.js';
 
 describe('local-small eval scoreboard', () => {
