@@ -1391,6 +1391,148 @@ export async function landOpenPullRequest(opts: {
   }
 }
 
+export function issueFromFactoryBranch(branch: string): number | undefined {
+  const match = /^ship-it\/(\d+)-/.exec(branch);
+  return match ? Number(match[1]) : undefined;
+}
+
+export async function listOpenFactoryPRs(
+  octokit: Octokit,
+  owner: string,
+  repoName: string,
+): Promise<Array<{ number: number; branch: string; reviewDecision?: string; isDraft?: boolean }>> {
+  const prs: Array<{ number: number; branch: string; reviewDecision?: string; isDraft?: boolean }> = [];
+  let cursor: string | undefined;
+
+  for (;;) {
+    const result = await octokit.graphql<{
+      repository?: {
+        pullRequests?: {
+          pageInfo?: { hasNextPage?: boolean; endCursor?: string };
+          nodes?: Array<{ number: number; headRefName: string; reviewDecision?: string; isDraft?: boolean }>;
+        };
+      };
+    }>(
+      `query OpenFactoryPRs($owner: String!, $repo: String!, $cursor: String) {
+        repository(owner: $owner, name: $repo) {
+          pullRequests(states: OPEN, first: 100, after: $cursor) {
+            pageInfo { hasNextPage endCursor }
+            nodes { number headRefName reviewDecision isDraft }
+          }
+        }
+      }`,
+      { owner, repo: repoName, cursor },
+    );
+
+    const pullRequests = result.repository?.pullRequests;
+    for (const node of pullRequests?.nodes ?? []) {
+      if (node.headRefName.startsWith('ship-it/')) {
+        prs.push({
+          number: node.number,
+          branch: node.headRefName,
+          reviewDecision: node.reviewDecision,
+          isDraft: node.isDraft,
+        });
+      }
+    }
+
+    if (!pullRequests?.pageInfo?.hasNextPage) break;
+    cursor = pullRequests.pageInfo.endCursor;
+  }
+
+  return prs;
+}
+
+export interface SweepDeps {
+  createOctokit?: () => Octokit;
+  loadConfig?: typeof loadFactoryConfig;
+  listPRs?: typeof listOpenFactoryPRs;
+  land?: typeof landIssue;
+  emitEvent?: typeof logEvent;
+  writeLine?: (line: string) => void;
+}
+
+export async function sweepApprovedPRs(
+  repoRoot: string,
+  ghRepo: string,
+  paths: ReturnType<typeof getFactoryPaths>,
+  deps: SweepDeps = {},
+): Promise<{
+  landed: number[];
+  skipped: Array<{ pr: number; branch: string; reason: string }>;
+  failed: Array<{ pr: number; issue: number; reason: string }>;
+}> {
+  const {
+    createOctokit = getOctokit,
+    loadConfig = loadFactoryConfig,
+    listPRs = listOpenFactoryPRs,
+    land = landIssue,
+    emitEvent = logEvent,
+    writeLine = (line: string) => console.log(line),
+  } = deps;
+
+  const [owner, repoName] = ghRepo.split('/');
+  const octokit = createOctokit();
+  const skipCI = resolveSkipCI(loadConfig());
+  const prs = await listPRs(octokit, owner, repoName);
+
+  const landed: number[] = [];
+  const skipped: Array<{ pr: number; branch: string; reason: string }> = [];
+  const failed: Array<{ pr: number; issue: number; reason: string }> = [];
+
+  for (const pr of prs) {
+    const issue = issueFromFactoryBranch(pr.branch);
+    if (issue === undefined) {
+      const reason = 'no issue number in branch';
+      skipped.push({ pr: pr.number, branch: pr.branch, reason });
+      writeLine(`[factory] PR #${pr.number} (${pr.branch}) skipped: ${reason}`);
+      continue;
+    }
+
+    if (pr.reviewDecision !== 'APPROVED') {
+      const reason = `not approved (reviewDecision: ${pr.reviewDecision ?? 'none'})`;
+      skipped.push({ pr: pr.number, branch: pr.branch, reason });
+      writeLine(`[factory] PR #${pr.number} (${pr.branch}) skipped: ${reason}`);
+      continue;
+    }
+
+    try {
+      await land(issue, repoRoot, ghRepo, paths, octokit, skipCI);
+      landed.push(pr.number);
+      writeLine(`[factory] PR #${pr.number} (${pr.branch}) landed for issue #${issue}`);
+    } catch (err) {
+      const reason = errorDetail(err);
+      failed.push({ pr: pr.number, issue, reason });
+      writeLine(`[factory] PR #${pr.number} (${pr.branch}) failed to land: ${reason}`);
+      continue;
+    }
+  }
+
+  emitEvent(
+    paths.events,
+    'resume-approved',
+    '-',
+    `sweep: ${landed.length} landed, ${skipped.length} skipped, ${failed.length} failed of ${prs.length} open factory PRs`,
+  );
+
+  return { landed, skipped, failed };
+}
+
+export async function cmdResumeApproved() {
+  const repoRoot = await getRepoRoot();
+  const ghRepo = await getGitHubRepo();
+  const paths = getFactoryPaths(repoRoot);
+  const result = await sweepApprovedPRs(repoRoot, ghRepo, paths);
+  console.log(
+    chalk.green(
+      `✅ resume-approved: ${result.landed.length} landed, ${result.skipped.length} skipped, ${result.failed.length} failed`,
+    ),
+  );
+  if (result.failed.length > 0) {
+    throw new CliExitError(`factory: resume-approved: ${result.failed.length} PR(s) failed to land`, 5);
+  }
+}
+
 type WaitForMergeDeps = {
   createOctokit?: () => Octokit;
   pathExists?: (path: string) => boolean;
@@ -1656,6 +1798,13 @@ export async function main() {
     .description('Squash-merge a ready PR and clean up its worktree')
     .action(async (issueNum) => {
       await cmdLand(parseIssueArg(issueNum));
+    });
+
+  program
+    .command('resume-approved')
+    .description('Land open factory PRs (ship-it/*) whose review is now approved; skip the rest')
+    .action(async () => {
+      await cmdResumeApproved();
     });
 
   program.command('run').description('Process the whole queue (lanes in parallel)').action(cmdRun);

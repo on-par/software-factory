@@ -808,6 +808,14 @@ describe('cli commands (via main dispatch)', () => {
     });
   });
 
+  describe('resume-approved', () => {
+    it('resolves cleanly when there are no open factory PRs', async () => {
+      const res = await runMain('resume-approved');
+      expect(res.exited).toBe(false);
+      expect(errored()).toBe('');
+    });
+  });
+
   describe('ship (via cmdShip)', () => {
     it('ships an issue through all phases and prints the ready PR', async () => {
       const res = await runMain('ship', '5');
