@@ -458,6 +458,44 @@ describe('App steering composer', () => {
     expect(lastFrame()).not.toContain('Steer issue #296');
   });
 
+  it('does not open the composer over a pending approval, and leaves y/n handling intact', async () => {
+    const fake = makeFakeFollow();
+    const listPendingFn = vi.fn(() => [
+      {
+        id: 'req-1',
+        issue: 296,
+        branch: 'ship-it/296-thing',
+        worktree: '/repo-296',
+        diffStat: '',
+        requestedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+    const respondFn = vi.fn();
+    const { lastFrame, stdin } = render(
+      <App
+        eventsFile="ignored"
+        follow={fake.follow}
+        steeringDir="/repo/.factory/steering"
+        approvalsDir="/repo/.factory/approvals"
+        listPendingFn={listPendingFn}
+        respondFn={respondFn}
+      />,
+    );
+    fake.push(ev('plan', 'Starting plan phase', '296'));
+    await flush();
+
+    stdin.write('i');
+    await flush();
+
+    expect(lastFrame()).not.toContain('Steer issue #296');
+    expect(lastFrame()).toContain('APPROVAL REQUIRED');
+
+    stdin.write('y');
+    await flush();
+
+    expect(respondFn).toHaveBeenCalledWith('/repo/.factory/approvals', 'req-1', { approved: true });
+  });
+
   it('types text then Enter queues the message and closes the composer', async () => {
     const fake = makeFakeFollow();
     const queueSteeringFn = vi.fn();

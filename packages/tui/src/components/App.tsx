@@ -148,6 +148,8 @@ export function App({
     return () => clearInterval(interval);
   }, [approvalsDir, listPendingFn]);
 
+  const laneIssuesKey = state.lanes.map((l) => l.issue).join(',');
+
   useEffect(() => {
     if (!steeringDir) return;
     const read = () => {
@@ -160,7 +162,9 @@ export function App({
     read();
     const interval = setInterval(read, POLL_MS);
     return () => clearInterval(interval);
-  }, [steeringDir, listSteeringFn, state.lanes]);
+    // laneIssuesKey (not state.lanes) is the dep: it only changes when the set of
+    // issues changes, so this poll doesn't tear down/reinstall on every factory event.
+  }, [steeringDir, listSteeringFn, laneIssuesKey]);
 
   const issueCount = useMemo(() => aggregateCosts(costsRead.entries).perIssue.length, [costsRead]);
   const logHeight = Math.max(5, (stdout?.rows ?? 24) - 4);
@@ -240,7 +244,13 @@ export function App({
       }
     }
 
-    if (tab === 'dashboard' && steeringDir && input === 'i' && state.lanes.length > 0) {
+    if (
+      tab === 'dashboard' &&
+      steeringDir &&
+      input === 'i' &&
+      state.lanes.length > 0 &&
+      visibleApprovals.length === 0
+    ) {
       const activeLane = state.lanes[clampedIndex];
       if (activeLane) {
         setComposer({ issue: activeLane.issue, worktree: activeLane.worktree, text: '', warned: false });

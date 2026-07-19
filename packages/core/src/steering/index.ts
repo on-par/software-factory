@@ -2,7 +2,7 @@
 // drain it at worker prompt-assembly boundaries (.factory/steering/)
 
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 
 export interface SteeringMessage {
@@ -27,8 +27,29 @@ export const MAX_ATTACHMENT_BYTES = 50_000;
 
 const PATH_CANDIDATE_RE = /(?:^|[\s"'`([])([A-Za-z0-9_.@-]+(?:\/[A-Za-z0-9_.@-]+)+)/g;
 
+/** Truncate a buffer to at most `maxBytes`, backing off over any trailing incomplete UTF-8 sequence. */
+function truncateUtf8(buffer: Buffer, maxBytes: number): Buffer {
+  let end = maxBytes;
+  while (end > 0 && (buffer[end] & 0b1100_0000) === 0b1000_0000) end--;
+  return buffer.subarray(0, end);
+}
+
 export function steeringFileFor(dir: string, issue: number): string {
   return join(dir, `issue-${issue}.ndjson`);
+}
+
+/** Parse NDJSON message lines, skipping blank/malformed ones. */
+function parseSteeringMessages(raw: string): SteeringMessage[] {
+  const messages: SteeringMessage[] = [];
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      messages.push(JSON.parse(line) as SteeringMessage);
+    } catch {
+      // skip malformed line
+    }
+  }
+  return messages;
 }
 
 export function queueSteeringMessage(dir: string, issue: number, text: string): SteeringMessage {
@@ -46,19 +67,12 @@ export function queueSteeringMessage(dir: string, issue: number, text: string): 
 /** Queued messages for `issue`, oldest first. Missing file → []. Malformed lines skipped. */
 export function listQueuedSteering(dir: string, issue: number): SteeringMessage[] {
   const file = steeringFileFor(dir, issue);
-  if (!existsSync(file)) return [];
-
-  const messages: SteeringMessage[] = [];
-  const lines = readFileSync(file, 'utf-8').split('\n');
-  for (const line of lines) {
-    if (!line.trim()) continue;
-    try {
-      messages.push(JSON.parse(line) as SteeringMessage);
-    } catch {
-      // skip malformed line
-    }
+  try {
+    return parseSteeringMessages(readFileSync(file, 'utf-8'));
+  } catch {
+    // missing (or concurrently drained/renamed away) → no queued messages
+    return [];
   }
-  return messages;
 }
 
 /** Path-like tokens embedded in free text (repo-relative, no traversal, no leading slash). */
@@ -90,16 +104,7 @@ export function drainSteering(dir: string, issue: number, worktree: string): Con
     return { messages: [], attachments: [] };
   }
 
-  const messages: SteeringMessage[] = [];
-  const lines = readFileSync(draining, 'utf-8').split('\n');
-  for (const line of lines) {
-    if (!line.trim()) continue;
-    try {
-      messages.push(JSON.parse(line) as SteeringMessage);
-    } catch {
-      // skip malformed line
-    }
-  }
+  const messages = parseSteeringMessages(readFileSync(draining, 'utf-8'));
   unlinkSync(draining);
 
   const attachments: SteeringAttachment[] = [];
@@ -120,12 +125,19 @@ export function drainSteering(dir: string, issue: number, worktree: string): Con
       }
       if (!stat.isFile()) continue;
 
+      let raw;
+      try {
+        raw = readFileSync(resolved);
+      } catch {
+        // deleted/replaced between the stat above and this read — skip, don't lose the drained messages
+        continue;
+      }
+
       seenPaths.add(candidate);
-      const raw = readFileSync(resolved, 'utf-8');
-      const truncated = raw.length > MAX_ATTACHMENT_BYTES;
+      const truncated = raw.byteLength > MAX_ATTACHMENT_BYTES;
       attachments.push({
         path: candidate,
-        content: truncated ? raw.slice(0, MAX_ATTACHMENT_BYTES) : raw,
+        content: (truncated ? truncateUtf8(raw, MAX_ATTACHMENT_BYTES) : raw).toString('utf-8'),
         truncated,
       });
     }

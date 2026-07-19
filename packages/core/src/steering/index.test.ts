@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -163,6 +163,28 @@ describe('drainSteering', () => {
     }
   });
 
+  it('truncates multi-byte UTF-8 content by byte length, never splitting a character', () => {
+    const dir = makeDir();
+    const worktree = makeDir();
+    try {
+      mkdirSync(join(worktree, 'sub'), { recursive: true });
+      // '€' is 3 bytes in UTF-8 — repeating it crosses MAX_ATTACHMENT_BYTES mid-character
+      // unless truncation is byte-aware.
+      const big = '€'.repeat(Math.ceil(MAX_ATTACHMENT_BYTES / 3) + 10);
+      writeFileSync(join(worktree, 'sub', 'multibyte.txt'), big, 'utf-8');
+      queueSteeringMessage(dir, 5, 'see sub/multibyte.txt');
+
+      const drained = drainSteering(dir, 5, worktree);
+      expect(drained.attachments).toHaveLength(1);
+      expect(drained.attachments[0].truncated).toBe(true);
+      expect(Buffer.byteLength(drained.attachments[0].content, 'utf-8')).toBeLessThanOrEqual(MAX_ATTACHMENT_BYTES);
+      expect(drained.attachments[0].content.replace(/€/g, '')).toBe('');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
   it('does not attach a non-existent path but still consumes the message', () => {
     const dir = makeDir();
     const worktree = makeDir();
@@ -205,6 +227,26 @@ describe('drainSteering', () => {
       expect(drained.messages).toHaveLength(2);
       expect(drained.attachments).toHaveLength(1);
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
+  it('skips an attachment that fails to read after the stat check, without losing the drained messages', () => {
+    const dir = makeDir();
+    const worktree = makeDir();
+    try {
+      mkdirSync(join(worktree, 'sub'), { recursive: true });
+      const unreadable = join(worktree, 'sub', 'unreadable.txt');
+      writeFileSync(unreadable, 'secret');
+      chmodSync(unreadable, 0o000);
+      queueSteeringMessage(dir, 5, 'check sub/unreadable.txt');
+
+      const drained = drainSteering(dir, 5, worktree);
+      expect(drained.messages).toHaveLength(1);
+      expect(drained.attachments).toEqual([]);
+    } finally {
+      chmodSync(join(worktree, 'sub', 'unreadable.txt'), 0o644);
       rmSync(dir, { recursive: true, force: true });
       rmSync(worktree, { recursive: true, force: true });
     }
