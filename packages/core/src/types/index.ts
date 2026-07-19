@@ -160,6 +160,7 @@ export type RunStatus =
   | 'reworking'
   | 'shipping'
   | 'ready'
+  | 'awaiting-review'
   | 'parked'
   | 'escalated'
   | 'merged'

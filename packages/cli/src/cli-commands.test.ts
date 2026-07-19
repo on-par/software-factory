@@ -288,12 +288,14 @@ beforeEach(() => {
     'FACTORY_USAGE_POLL',
     'FACTORY_USAGE_WATCH',
     'FACTORY_USAGE_ESTIMATOR',
+    'FACTORY_SANDBOX',
     'GITHUB_TOKEN',
     'GH_TOKEN',
   ].forEach((k) => trackEnv(k));
   delete process.env.FACTORY_LOCAL_ONLY;
   delete process.env.FACTORY_MERGE;
   delete process.env.FACTORY_MERGE_ADMIN;
+  delete process.env.FACTORY_SANDBOX;
   delete process.env.GITHUB_TOKEN;
   process.env.GH_TOKEN = 'test-token';
   process.exitCode = undefined;
@@ -1509,6 +1511,37 @@ describe('CliExitError (direct command invocation)', () => {
       message: expect.stringContaining('no open PR'),
     });
     expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('cmdLand(5) resolves cleanly and leaves the PR open when the merge is blocked on a required review', async () => {
+    h.octokit.graphql = vi.fn(async (query: string) =>
+      query.trimStart().startsWith('query')
+        ? {
+            repository: {
+              pullRequest: {
+                id: 'PR_1',
+                isDraft: false,
+                mergeStateStatus: 'BLOCKED',
+                reviewDecision: 'REVIEW_REQUIRED',
+              },
+            },
+          }
+        : {},
+    );
+    h.octokit.rest.pulls.merge = vi.fn(async () => {
+      throw new Error('At least 1 approving review is required by reviewers with write access.');
+    });
+
+    await expect(cmdLand(5)).resolves.toBeUndefined();
+
+    expect(logged()).toContain('awaiting human review');
+    expect(cleanupWorktree).toHaveBeenCalled();
+
+    const events = readFileSync(paths().events, 'utf-8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(events.some((e) => e.type === 'awaiting-review')).toBe(true);
   });
 });
 

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   assertValidProduct,
+  AwaitingReviewError,
   ConstitutionExistsError,
   errorDetail,
   findOpenPRForIssue,
@@ -16,6 +17,7 @@ import {
   initConstitution,
   InvalidProductNameError,
   isPrMerged,
+  isReviewRequiredMergeError,
   issueFromFactoryBranch,
   LandConflictError,
   LandFailureError,
@@ -592,6 +594,32 @@ describe('cli', () => {
       ['checkMerged', [octokit, 'on-par', 'software-factory', 'ship-it/21-self-merge']],
       ['land', [21, '/repo', 'on-par/software-factory', paths, octokit, false]],
     ]);
+  });
+
+  it('propagates an AwaitingReviewError from land unchanged instead of swallowing it', async () => {
+    const calls: any[] = [];
+    const octokit: any = {};
+    const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
+    const awaitingReviewError = new AwaitingReviewError('PR #101 awaiting review', 101);
+
+    await expect(
+      waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
+        createOctokit: () => octokit,
+        pathExists: () => false,
+        checkMerged: async () => false,
+        loadConfig: () => fakeFactoryConfig(true),
+        land: async () => {
+          throw awaitingReviewError;
+        },
+        emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) =>
+          calls.push(['event', type, issue, msg]),
+        sleep: async () => {
+          throw new Error('sleep should not be called');
+        },
+      }),
+    ).rejects.toBe(awaitingReviewError);
+
+    expect(calls).toEqual([['event', 'await-merge', 21, 'waiting to merge ship-it/21-self-merge']]);
   });
 
   it('returns immediately and logs a landed event once checkMerged reports the PR merged', async () => {
@@ -1289,6 +1317,91 @@ describe('cli', () => {
     expect(sleeps).toEqual([5000, 10000, 20000, 40000]);
   });
 
+  it('classifies a review-blocked merge as awaiting-review without retrying', async () => {
+    const sleeps: number[] = [];
+    const logs: Array<[string, string]> = [];
+    let mergeCalls = 0;
+    const octokit: any = {
+      graphql: async () => ({
+        repository: {
+          pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'BLOCKED', reviewDecision: 'REVIEW_REQUIRED' },
+        },
+      }),
+      rest: {
+        pulls: {
+          merge: async () => {
+            mergeCalls++;
+            throw new Error('At least 1 approving review is required by reviewers with write access.');
+          },
+        },
+        git: { deleteRef: async () => {} },
+        checks: {
+          listForRef: async () => ({ data: { check_runs: [{ status: 'completed', conclusion: 'success' }] } }),
+        },
+      },
+    };
+
+    const err = await landOpenPullRequest({
+      octokit,
+      owner: 'on-par',
+      repoName: 'software-factory',
+      ghRepo: 'on-par/software-factory',
+      repoRoot: '/repo',
+      issue: 20,
+      branch: 'ship-it/20-review',
+      worktree: '/repo-factory-20',
+      prNumber: 555,
+      log: (type, msg) => logs.push([type, msg]),
+      run: async () => {},
+      pathExists: () => true,
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    }).then(
+      () => undefined,
+      (e) => e,
+    );
+
+    expect(err).toBeInstanceOf(AwaitingReviewError);
+    expect((err as AwaitingReviewError).prNumber).toBe(555);
+    expect(mergeCalls).toBe(1);
+    expect(sleeps).toEqual([]);
+    expect(logs.some(([type, msg]) => type === 'awaiting-review' && msg.includes('555'))).toBe(true);
+  });
+
+  describe('isReviewRequiredMergeError', () => {
+    it('matches the GitHub REST 405 approving-review message regardless of state', () => {
+      expect(
+        isReviewRequiredMergeError(
+          new Error('At least 1 approving review is required by reviewers with write access.'),
+          {},
+        ),
+      ).toBe(true);
+    });
+
+    it('matches a generic not-mergeable error when state is BLOCKED with REVIEW_REQUIRED', () => {
+      expect(
+        isReviewRequiredMergeError(new Error('Pull Request is not mergeable'), {
+          mergeStateStatus: 'BLOCKED',
+          reviewDecision: 'REVIEW_REQUIRED',
+        }),
+      ).toBe(true);
+    });
+
+    it('does not match the same message when BLOCKED is caused by something other than review (e.g. red CI)', () => {
+      expect(
+        isReviewRequiredMergeError(new Error('Pull Request is not mergeable'), {
+          mergeStateStatus: 'BLOCKED',
+          reviewDecision: 'APPROVED',
+        }),
+      ).toBe(false);
+    });
+
+    it('does not match unrelated merge failures', () => {
+      expect(isReviewRequiredMergeError(new Error('merge conflict'), { mergeStateStatus: 'DIRTY' })).toBe(false);
+    });
+  });
+
   describe('parkReasonFor', () => {
     it('maps a LaneParkError to its own reason', () => {
       expect(parkReasonFor(new LaneParkError('x', 'escalate'))).toBe('escalate');
@@ -1433,7 +1546,45 @@ describe('cli', () => {
       ]);
       expect(calls.some((c) => c[0] === 'event' && c[1] === 'parked')).toBe(false);
       const lastEvent = calls.filter((c) => c[0] === 'event').at(-1);
-      expect(lastEvent).toEqual(['event', 'lane-done', 'app', 'lane complete', { lane: 'app' }]);
+      expect(lastEvent).toEqual([
+        'event',
+        'lane-done',
+        'app',
+        'lane complete (2 merged, 0 awaiting review)',
+        { lane: 'app' },
+      ]);
+    });
+
+    it('continues to the next issue on an AwaitingReviewError instead of parking, and counts outcomes', async () => {
+      const calls: any[] = [];
+      await runLane('app', [1, 2], '/repo', 'on-par/software-factory', paths, {
+        ship: async (issue) => {
+          calls.push(['ship', issue]);
+          return `ship-it/${issue}-x`;
+        },
+        waitMerge: async (issue) => {
+          calls.push(['waitMerge', issue]);
+          if (issue === 1) throw new AwaitingReviewError('PR #101 awaiting review', 101);
+        },
+        pathExists: () => false,
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
+          calls.push(['event', type, issue, msg, extra]),
+      });
+
+      expect(calls.filter((c) => c[0] === 'ship')).toEqual([
+        ['ship', 1],
+        ['ship', 2],
+      ]);
+      const events = calls.filter((c) => c[0] === 'event');
+      expect(events.some((e) => e[1] === 'parked')).toBe(false);
+      expect(events.some((e) => e[1] === 'awaiting-review')).toBe(false);
+      expect(events.at(-1)).toEqual([
+        'event',
+        'lane-done',
+        'app',
+        'lane complete (1 merged, 1 awaiting review)',
+        { lane: 'app' },
+      ]);
     });
 
     it('threads ship options plus the run repoRoot, ghRepo, and lane into ship', async () => {
