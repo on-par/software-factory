@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { HarnessError } from '../harness/index.js';
-import type { ExecFn } from './index.js';
+import type { SandboxPolicy } from '../sandbox/index.js';
+import type { ExecFn, ModelExecutorContext } from './index.js';
 import { failoversFrom, ModelExecutorError, ModelRouter } from './index.js';
 import { StubModelExecutor } from './stub.js';
 
@@ -646,6 +647,85 @@ describe('ModelRouter with StubModelExecutor', () => {
     const err: any = await router.run('plan', 'do it').catch((e) => e);
 
     expect(err.attempts[0].detail).toContain('trace=/tmp/t.json');
+  });
+});
+
+describe('ModelRouter sandbox threading', () => {
+  const sandboxPolicy: SandboxPolicy = {
+    runtime: 'sandbox-exec',
+    worktree: '/tmp/factory-worktree',
+    writablePaths: ['/tmp/factory-worktree'],
+    allowHosts: [],
+    cpuMs: 300_000,
+    memMb: 4096,
+  };
+
+  it('threads the sandbox policy into the executor context', async () => {
+    const seenCtx: ModelExecutorContext[] = [];
+    const executor = {
+      async runModel(_model: string, _prompt: string, ctx: ModelExecutorContext) {
+        seenCtx.push(ctx);
+        return 'ok';
+      },
+    };
+    const router = new ModelRouter(models, routes, false, executor);
+
+    await router.run('plan', 'do it', { sandbox: sandboxPolicy });
+
+    expect(seenCtx[0].sandbox).toBe(sandboxPolicy);
+  });
+
+  it('leaves ctx.sandbox undefined when no sandbox option is passed', async () => {
+    const seenCtx: ModelExecutorContext[] = [];
+    const executor = {
+      async runModel(_model: string, _prompt: string, ctx: ModelExecutorContext) {
+        seenCtx.push(ctx);
+        return 'ok';
+      },
+    };
+    const router = new ModelRouter(models, routes, false, executor);
+
+    await router.run('plan', 'do it');
+
+    expect(seenCtx[0].sandbox).toBeUndefined();
+  });
+
+  it('invokes onSandboxEvent for a sandbox_violation and still fails over as before', async () => {
+    let calls = 0;
+    const executor = {
+      async runModel(_model: string) {
+        calls++;
+        if (calls === 1) throw new HarnessError('denied', 'timeout', { stderr: 'Operation not permitted' });
+        return 'RECOVERED';
+      },
+    };
+    const twoModelRouter = new ModelRouter(twoModels, routes, false, executor);
+    const events: { type: string; detail: string }[] = [];
+
+    const result = await twoModelRouter.run('plan', 'do it', {
+      sandbox: sandboxPolicy,
+      onSandboxEvent: (type, detail) => events.push({ type, detail }),
+    });
+
+    expect(events).toEqual([{ type: 'sandbox_violation', detail: 'Operation not permitted' }]);
+    expect(result.model).toBe('model-b');
+    expect(calls).toBe(2);
+  });
+
+  it('does not call onSandboxEvent when no sandbox policy is active', async () => {
+    const executor = {
+      async runModel() {
+        throw new HarnessError('denied', 'error', { stderr: 'Operation not permitted' });
+      },
+    };
+    const router = new ModelRouter(models, routes, false, executor);
+    const events: { type: string; detail: string }[] = [];
+
+    await router
+      .run('plan', 'do it', { onSandboxEvent: (type, detail) => events.push({ type, detail }) })
+      .catch(() => {});
+
+    expect(events).toEqual([]);
   });
 });
 

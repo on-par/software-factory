@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
+import type { SandboxPolicy } from '../sandbox/index.js';
 import type { Constitution } from '../types/index.js';
 import { checkPhase, disputeResolution } from './check.js';
 
@@ -137,6 +138,47 @@ describe('checkPhase auto rework', () => {
       ]);
     },
   );
+});
+
+describe('checkPhase sandbox', () => {
+  it('forwards the sandbox policy + onSandboxEvent from reworkWorker to router.run', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const sandbox: SandboxPolicy = {
+      runtime: 'firejail',
+      worktree,
+      writablePaths: [worktree],
+      allowHosts: [],
+      cpuMs: 300_000,
+      memMb: 4096,
+    };
+    const captured: { options: any }[] = [];
+    const fakeRouter = {
+      run: async (_task: string, _prompt: string, options: any) => {
+        captured.push({ options });
+        return { model: 'fake-model', output: 'reworked', exitCode: 0, attempts: [] };
+      },
+    } as any;
+    const logs: Array<{ type: string; msg: string }> = [];
+
+    await checkPhase({
+      issue: 96,
+      worktree,
+      specPath,
+      router: fakeRouter,
+      constitution: null,
+      log: (type, msg) => {
+        logs.push({ type, msg });
+      },
+      sandbox,
+    });
+
+    expect(captured.length).toBeGreaterThan(0);
+    expect(captured[0].options.sandbox).toBe(sandbox);
+    expect(typeof captured[0].options.onSandboxEvent).toBe('function');
+
+    captured[0].options.onSandboxEvent('resource_limit', 'cpu time limit exceeded');
+    expect(logs).toContainEqual({ type: 'resource_limit', msg: 'cpu time limit exceeded' });
+  });
 });
 
 describe('checkPhase success paths', () => {

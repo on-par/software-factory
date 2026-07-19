@@ -13,6 +13,8 @@ import { OllamaAgenticHarness } from '../harness/ollama-agentic.js';
 import { OllamaHttpHarness } from '../harness/ollama-http.js';
 import { OpenCodeHarness } from '../harness/opencode.js';
 import { ModelRegistry } from '../models/index.js';
+import type { SandboxEventType, SandboxPolicy } from '../sandbox/index.js';
+import { sandboxEventFromError } from '../sandbox/index.js';
 import type { TaskType } from '../types/index.js';
 import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
@@ -84,6 +86,7 @@ export interface ModelExecutorContext {
   task: TaskType;
   registry: ModelRegistry;
   routesConfig: RoutesConfig;
+  sandbox?: SandboxPolicy;
 }
 
 /** Executes a single resolved model. On failure, implementations should
@@ -173,7 +176,7 @@ export class CliModelExecutor implements ModelExecutor {
     harness: CodingHarness,
     model: string,
     prompt: string,
-    ctx: Pick<ModelExecutorContext, 'worktree' | 'timeoutSeconds' | 'task' | 'registry'>,
+    ctx: Pick<ModelExecutorContext, 'worktree' | 'timeoutSeconds' | 'task' | 'registry' | 'sandbox'>,
   ): Promise<string> {
     const { output } = await harness.run({
       model,
@@ -182,6 +185,7 @@ export class CliModelExecutor implements ModelExecutor {
       timeoutSeconds: ctx.timeoutSeconds,
       task: ctx.task,
       registry: ctx.registry,
+      sandbox: ctx.sandbox,
     });
     return output;
   }
@@ -546,9 +550,11 @@ export class ModelRouter {
       timeoutSeconds?: number;
       modelOverride?: string;
       onLog?: (msg: string) => void;
+      sandbox?: SandboxPolicy;
+      onSandboxEvent?: (type: SandboxEventType, detail: string) => void;
     } = {},
   ): Promise<RouterResult> {
-    const { worktree = process.cwd(), timeoutSeconds = 1800, modelOverride, onLog = () => {} } = options;
+    const { worktree = process.cwd(), timeoutSeconds = 1800, modelOverride, onLog = () => {}, sandbox } = options;
 
     const models = modelOverride ? [modelOverride] : this.resolveAll(task);
     if (models.length === 0) {
@@ -577,8 +583,13 @@ export class ModelRouter {
             task,
             registry: this.registry,
             routesConfig: this.routesConfig,
+            sandbox,
           });
         } catch (err) {
+          if (sandbox) {
+            const sandboxEvent = sandboxEventFromError(err);
+            if (sandboxEvent) options.onSandboxEvent?.(sandboxEvent.type, sandboxEvent.detail);
+          }
           const reason = extractFailoverReason(err) ?? this.classifyFailure(errStderr(err), errExitCode(err));
           const detail = describeFailureDetail(err);
           attempts.push(detail ? { model, reason, ok: false, detail } : { model, reason, ok: false });

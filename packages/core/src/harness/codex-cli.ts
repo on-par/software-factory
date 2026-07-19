@@ -4,6 +4,7 @@ import { readFile, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { wrapCommandInSandbox } from '../sandbox/index.js';
 import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
 import { shellEscape } from '../utils/index.js';
@@ -22,7 +23,7 @@ export class CodexCliHarness implements CodingHarness {
   constructor(private execFn: CodexExecFn = defaultExecFn) {}
 
   async run(request: HarnessRequest): Promise<HarnessResult> {
-    const { model, prompt, worktree, timeoutSeconds, registry } = request;
+    const { model, prompt, worktree, timeoutSeconds, registry, sandbox } = request;
     const extraFlag = registry.getCodexFlag(model) ?? '';
 
     const tmpFile = await mktemp(join(tmpdir(), 'factory-codex-'));
@@ -30,10 +31,11 @@ export class CodexCliHarness implements CodingHarness {
     await writeFile(tmpFile, prompt);
 
     const cmd = `codex exec --sandbox workspace-write --ask-for-approval never -C ${shellEscape(worktree)} ${extraFlag} -o ${shellEscape(outFile)} - < ${shellEscape(tmpFile)}`;
+    const finalCmd = sandbox ? wrapCommandInSandbox(cmd, sandbox) : cmd;
 
     try {
       try {
-        await this.execFn(cmd, { timeoutMs: timeoutSeconds * 1000, maxBuffer: 10 * 1024 * 1024 });
+        await this.execFn(finalCmd, { timeoutMs: timeoutSeconds * 1000, maxBuffer: 10 * 1024 * 1024 });
       } catch (err: any) {
         const reason = err.killed ? 'timeout' : classifyFailure(err.stderr ?? '', err.code ?? 1);
         throw new HarnessError(err.message ?? String(err), reason, {
