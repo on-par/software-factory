@@ -62,6 +62,10 @@ Compare against a previous baseline:
 npm run local-small-scoreboard -- --input runs.json --baseline baseline-runs.json
 ```
 
+The committed baseline input for `--baseline` is
+[`evals/local-small/baseline-runs.json`](local-small/baseline-runs.json) — see
+`docs/research/local-only-baseline-run.md` for the run it records.
+
 ## Weekly prompt regression eval run
 
 The `Weekly Prompt Evals` workflow (`.github/workflows/nightly-evals.yml`) runs
