@@ -3,6 +3,8 @@
 
 export type { HarnessContractCase, HarnessContractScenario, HarnessContractScenarios } from './harness/contract.js';
 export { codingHarnessContractCases, makeContractRequest } from './harness/contract.js';
+export type { InjectionFixture, InjectionSurface } from './harness/injection-fixtures.js';
+export { loadInjectionFixtures } from './harness/injection-fixtures.js';
 export type { StubCodingHarnessOptions, StubHarnessStep } from './harness/stub.js';
 export { StubCodingHarness } from './harness/stub.js';
 export type { StubModelExecutorOptions } from './router/stub.js';

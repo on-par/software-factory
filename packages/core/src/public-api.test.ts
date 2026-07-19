@@ -167,6 +167,7 @@ const TESTING_API_KEYS = [
   'StubCodingHarness',
   'codingHarnessContractCases',
   'makeContractRequest',
+  'loadInjectionFixtures',
 ];
 
 describe('public API surface (ADR-0004)', () => {

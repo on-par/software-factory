@@ -41,9 +41,11 @@ import {
 
 describe('cli', () => {
   const originalFactoryMerge = process.env.FACTORY_MERGE;
+  const originalFactoryMergeAdmin = process.env.FACTORY_MERGE_ADMIN;
 
   beforeEach(() => {
     delete process.env.FACTORY_MERGE;
+    delete process.env.FACTORY_MERGE_ADMIN;
   });
 
   afterEach(() => {
@@ -51,6 +53,11 @@ describe('cli', () => {
       delete process.env.FACTORY_MERGE;
     } else {
       process.env.FACTORY_MERGE = originalFactoryMerge;
+    }
+    if (originalFactoryMergeAdmin === undefined) {
+      delete process.env.FACTORY_MERGE_ADMIN;
+    } else {
+      process.env.FACTORY_MERGE_ADMIN = originalFactoryMergeAdmin;
     }
   });
 
