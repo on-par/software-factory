@@ -138,6 +138,39 @@ describe('checkPhase auto rework', () => {
       ]);
     },
   );
+
+  it(
+    'omits the detail suffix from the rework failover log when the failed attempt carries no detail',
+    { timeout: 120_000 },
+    async () => {
+      const { worktree, specPath } = await makeFailingWorktree();
+      const fakeRouter = {
+        run: async () => ({
+          model: 'stub-model',
+          output: 'reworked',
+          exitCode: 0,
+          attempts: [
+            { model: 'first-model', reason: 'timeout' as const, ok: false },
+            { model: 'stub-model', reason: null, ok: true },
+          ],
+        }),
+      } as any;
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      await checkPhase({
+        issue: 99,
+        worktree,
+        specPath,
+        router: fakeRouter,
+        constitution: null,
+        log: (type, msg) => {
+          logs.push({ type, msg });
+        },
+      });
+
+      expect(logs).toContainEqual({ type: 'failover', msg: 'first-model failed (timeout) — failed over' });
+    },
+  );
 });
 
 describe('checkPhase sandbox', () => {
@@ -420,6 +453,41 @@ describe('disputeResolution', () => {
       'failover',
       expect.stringContaining('usage_cap'),
       { failoverReason: 'usage_cap' },
+    ]);
+  });
+
+  it('omits the detail suffix from the dispute failover log when the failed attempt carries no detail', async () => {
+    const fakeRouter = {
+      run: async () => ({
+        model: 'stub-model',
+        output: '{"verdict":"upheld","reasoning":"r","action":"a"}',
+        exitCode: 0,
+        attempts: [
+          { model: 'first-model', reason: 'timeout' as const, ok: false },
+          { model: 'stub-model', reason: null, ok: true },
+        ],
+      }),
+    } as any;
+    const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
+
+    const result = await disputeResolution({
+      issue: 97,
+      worktree: '/tmp/wt',
+      specPath: '/tmp/wt/spec.md',
+      checkerName: 'custom_style',
+      checkerDetails: 'naming disagreement',
+      constitution: null,
+      router: fakeRouter,
+      log: (type, msg, extra) => {
+        logCalls.push([type, msg, extra]);
+      },
+    });
+
+    expect(result.verdict).toBe('upheld');
+    expect(logCalls).toContainEqual([
+      'failover',
+      'first-model failed (timeout) — failed over',
+      { failoverReason: 'timeout' },
     ]);
   });
 
