@@ -15,7 +15,7 @@ import { HarnessError } from './index.js';
 export type CodexExecFn = ExecFn;
 
 /** Runs a model via the Codex CLI:
- *  codex exec --sandbox workspace-write --ask-for-approval never -C <worktree> [flags] -o <output> - < <prompt> */
+ *  codex exec --sandbox workspace-write -c approval_policy=never -C <worktree> [flags] -o <output> - < <prompt> */
 export class CodexCliHarness implements CodingHarness {
   readonly id = 'codex-cli';
   readonly agentic = true;
@@ -30,7 +30,7 @@ export class CodexCliHarness implements CodingHarness {
     const outFile = await mktemp(join(tmpdir(), 'factory-codex-out-'));
     await writeFile(tmpFile, prompt);
 
-    const cmd = `codex exec --sandbox workspace-write --ask-for-approval never -C ${shellEscape(worktree)} ${extraFlag} -o ${shellEscape(outFile)} - < ${shellEscape(tmpFile)}`;
+    const cmd = `codex exec --sandbox workspace-write -c approval_policy=never -C ${shellEscape(worktree)} ${extraFlag} -o ${shellEscape(outFile)} - < ${shellEscape(tmpFile)}`;
     const finalCmd = sandbox ? wrapCommandInSandbox(cmd, sandbox) : cmd;
 
     try {
