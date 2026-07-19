@@ -847,6 +847,35 @@ describe('ModelRouter worktree reset guard', () => {
     expect(stub.calls).toHaveLength(1);
   });
 
+  it('applies the empty-output defensive backstop, resets, and fails over to the next model', async () => {
+    const { execFn, calls } = makeFakeGitExec();
+    const stub = new StubModelExecutor({
+      scripts: { build_claude: [{ output: '' }, { output: 'RECOVERED' }] },
+    });
+    const router = new ModelRouter(twoModels, routes, false, stub, undefined, undefined, execFn);
+    const logs: string[] = [];
+
+    const result = await router.run('build_claude', 'do it', { worktree, onLog: (m) => logs.push(m) });
+
+    expect(result.model).toBe('model-b');
+    expect(result.output).toBe('RECOVERED');
+    expect(calls).toContain(`git reset --hard 'abc123'`);
+    expect(logs.some((m) => m.includes('Reset worktree to pre-attempt state after model-a failure'))).toBe(true);
+  });
+
+  it('aborts failover when the reset after an empty-output backstop fails', async () => {
+    const { execFn } = makeFakeGitExec({ resetError: new Error('reset exploded') });
+    const stub = new StubModelExecutor({
+      scripts: { build_claude: [{ output: '' }, { output: 'RECOVERED' }] },
+    });
+    const router = new ModelRouter(twoModels, routes, false, stub, undefined, undefined, execFn);
+
+    const err: any = await router.run('build_claude', 'do it', { worktree }).catch((e) => e);
+
+    expect(err.message).toMatch(/aborting failover to avoid mixing attempt state/);
+    expect(err.message).toContain('empty_response');
+  });
+
   it('skips the reset on a non-retryable failure', async () => {
     const { execFn, calls } = makeFakeGitExec();
     const stub = new StubModelExecutor({

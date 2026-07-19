@@ -78,6 +78,22 @@ describe('buildPlanPrompt', () => {
     expect(prompt).toContain('Write EXACTLY ONE file, at /tmp/spec.md');
     expect(prompt).toContain('route: codex');
   });
+
+  it('references the constitution above when constitutionCtx is non-empty', () => {
+    const prompt = buildPlanPrompt({
+      issue: 36,
+      issueTitle: 'Add eval runner',
+      issueBody: 'Measure the current prompt.',
+      specPath: '/tmp/spec.md',
+      constitutionCtx: 'STANDARDS TEXT',
+    });
+
+    expect(prompt).toContain('The constitution above defines the standards for this product.');
+    expect(prompt).toContain('## Constitution compliance');
+    expect(prompt).toContain('For each standard in the constitution, note how the plan satisfies it.');
+    expect(prompt).not.toContain('No constitution loaded');
+    expect(prompt).not.toContain('N/A — no constitution');
+  });
 });
 
 describe('planPhase', () => {
@@ -495,5 +511,216 @@ describe('planPhase', () => {
       expect.stringContaining('usage_cap'),
       { failoverReason: 'usage_cap' },
     ]);
+  });
+
+  it('omits the detail suffix from the failover log when the failed attempt carries no descriptive detail', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-42.md');
+    let calls = 0;
+    const executor = {
+      async runModel() {
+        calls++;
+        if (calls === 1) throw new Error('');
+        return '---\nroute: codex\n---\n# Spec\n';
+      },
+    };
+    const router = new ModelRouter(models, routes, false, executor as any);
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+        },
+      },
+    };
+    const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
+
+    const result = await planPhase({
+      issue: 42,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit,
+      log: (type, msg, extra) => {
+        logCalls.push([type, msg, extra]);
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    const failoverLog = logCalls.find(([type]) => type === 'failover');
+    expect(failoverLog?.[1]).toMatch(/failed \(unknown\) — failed over$/);
+  });
+
+  it('returns not-ok and surfaces the ESCALATE line when the planner escalates', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-43.md');
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [{ output: 'notes\nESCALATE: which auth provider should we use?\nmore text' }],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 'Add auth', body: 'Add authentication.' } }),
+        },
+      },
+    };
+    const logs: Array<{ type: string; msg: string }> = [];
+
+    const result = await planPhase({
+      issue: 43,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit,
+      log: (type, msg) => {
+        logs.push({ type, msg });
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.route).toBe('claude');
+    expect(result.escalate).toBe('ESCALATE: which auth provider should we use?');
+    expect(logs).toContainEqual({ type: 'escalate', msg: 'ESCALATE: which auth provider should we use?' });
+  });
+
+  it('defaults a null issue body to an empty string instead of the literal "null"', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-44.md');
+    const stub = new StubModelExecutor({
+      scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 'No body issue', body: null } }),
+        },
+      },
+    };
+
+    const result = await planPhase({
+      issue: 44,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit,
+      log: () => {},
+    });
+
+    expect(result.ok).toBe(true);
+    expect(stub.calls[0].prompt).not.toContain('null');
+  });
+
+  it('keeps the default claude route when frontmatter route is a non-string value', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-45.md');
+    const stub = new StubModelExecutor({
+      scripts: { plan: [{ output: '---\nroute: 123\n---\n# Spec\n' }] },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+        },
+      },
+    };
+
+    const result = await planPhase({
+      issue: 45,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit,
+      log: () => {},
+    });
+
+    expect(result.route).toBe('claude');
+  });
+
+  it('keeps the default claude route when frontmatter YAML is malformed', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-47.md');
+    const stub = new StubModelExecutor({
+      scripts: { plan: [{ output: '---\nroute: [unclosed\n---\n# Spec\n' }] },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+        },
+      },
+    };
+
+    const result = await planPhase({
+      issue: 47,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit,
+      log: () => {},
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.route).toBe('claude');
+  });
+
+  it('skips writing the spec when the model already wrote it directly via file tools', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-46.md');
+    const output = '---\nroute: codex\n---\n# Written directly by the model\n';
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [
+          {
+            output,
+            effect: async () => {
+              await writeFile(specPath, output);
+            },
+          },
+        ],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+        },
+      },
+    };
+
+    const result = await planPhase({
+      issue: 46,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit,
+      log: () => {},
+    });
+
+    expect(result.ok).toBe(true);
+    await expect(readFile(specPath, 'utf-8')).resolves.toBe(output);
   });
 });

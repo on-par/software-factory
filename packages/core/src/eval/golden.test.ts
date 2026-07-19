@@ -108,6 +108,55 @@ body
     await expect(loadGoldenCases(dir)).rejects.toThrow(`${path}: invalid expectedRoute 'gpt'`);
   });
 
+  it('throws when a case is missing the first "# " title heading', async () => {
+    const dir = await tempDir();
+    const path = join(dir, 'no-title.md');
+    await writeFile(path, 'Just a body with no heading.\n');
+
+    await expect(loadGoldenCases(dir)).rejects.toThrow(`${path}: missing first '# ' issue title heading`);
+  });
+
+  it('handles a title with no trailing content as an empty body', async () => {
+    const dir = await tempDir();
+    await writeFile(join(dir, 'case.md'), '# OnlyTitle');
+
+    const [golden] = await loadGoldenCases(dir);
+
+    expect(golden.title).toBe('OnlyTitle');
+    expect(golden.body).toBe('');
+  });
+
+  it('only loads .md files, ignoring other extensions in the same directory', async () => {
+    const dir = await tempDir();
+    await writeFile(join(dir, 'case.md'), '# A case\n\nbody');
+    await writeFile(join(dir, 'notes.txt'), 'not a golden case');
+
+    const cases = await loadGoldenCases(dir);
+
+    expect(cases).toHaveLength(1);
+    expect(cases[0].id).toBe('case');
+  });
+
+  it('falls back to the filename id when frontmatter id is blank, and defaults minRubricScore for non-number values', async () => {
+    const dir = await tempDir();
+    await writeFile(
+      join(dir, 'blank-id.md'),
+      `---
+id: "   "
+minRubricScore: "not a number"
+---
+# Blank id case
+
+body
+`,
+    );
+
+    const [golden] = await loadGoldenCases(dir);
+
+    expect(golden.id).toBe('blank-id');
+    expect(golden.minRubricScore).toBe(7);
+  });
+
   it('parses inline constitution frontmatter', async () => {
     const dir = await tempDir();
     await writeFile(
