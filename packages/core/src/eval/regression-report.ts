@@ -19,6 +19,12 @@ export function formatRegressionIssue(
     REGRESSION_ISSUE_MARKER,
     `Weekly prompt eval regression detected. See the [workflow run](<${runUrl}>).`,
     '',
+    ...(comparison.infraFailure
+      ? [
+          `> **Infrastructure failure:** all ${summary.results.length} cases errored before producing a spec. The per-case ❌s below are a symptom of the eval run failing to execute models, not prompt regressions.`,
+          '',
+        ]
+      : []),
     `**Overall pass rate:** ${summary.passRate} (baseline ${baseline.passRate}, tolerance ${baseline.tolerance.passRate})`,
     '',
     '## Per-case deltas',
@@ -49,6 +55,15 @@ export function formatRegressionIssue(
     ...comparison.regressions.map((regression) => `- ${regression}`),
   ];
 
+  const erroredResults = summary.results.filter((result) => result.error !== undefined);
+  if (erroredResults.length > 0) {
+    lines.push(
+      '',
+      '## Errors',
+      ...erroredResults.map((result) => `- \`${result.id}\`: ${truncate(collapse(result.error ?? ''), 300)}`),
+    );
+  }
+
   if (comparison.notes.length > 0) {
     lines.push('', '## Notes', ...comparison.notes.map((note) => `- ${note}`));
   }
@@ -57,6 +72,14 @@ export function formatRegressionIssue(
     title: REGRESSION_ISSUE_TITLE,
     body: lines.join('\n'),
   };
+}
+
+function collapse(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function truncate(text: string, limit: number): string {
+  return text.length > limit ? `${text.slice(0, limit)}…` : text;
 }
 
 function escapeCell(value: string): string {

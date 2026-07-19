@@ -41,6 +41,9 @@
     },
     "constitution-compliance": {
       "pass": true
+    },
+    "local-small-first-green": {
+      "pass": true
     }
   }
 }

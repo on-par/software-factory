@@ -37,6 +37,39 @@ describe('describeFailureDetail', () => {
     expect(detail).toContain('trace=/tmp/t.json');
   });
 
+  it('includes top-level stdout in the rendered detail', () => {
+    const err = Object.assign(new Error('boom'), { stdout: 'Invalid API key · Please run /login' });
+
+    const detail = describeFailureDetail(err);
+
+    expect(detail).toContain('stdout="Invalid API key · Please run /login"');
+  });
+
+  it('reads stdout from a details bag when there is no top-level stdout', () => {
+    const err = { message: 'boom', details: { stdout: 'Invalid API key · Please run /login' } };
+
+    const detail = describeFailureDetail(err);
+
+    expect(detail).toContain('stdout="Invalid API key · Please run /login"');
+  });
+
+  it('truncates an overlong stdout to 400 chars plus an ellipsis', () => {
+    const err = Object.assign(new Error('boom'), { stdout: 'c'.repeat(500) });
+
+    const detail = describeFailureDetail(err);
+
+    expect(detail).toContain(`stdout="${'c'.repeat(400)}…"`);
+  });
+
+  it('redacts secrets found in stdout', () => {
+    const err = Object.assign(new Error('boom'), { stdout: 'token: hunter2 rest' });
+
+    const detail = describeFailureDetail(err);
+
+    expect(detail).toContain('stdout="token: [redacted] rest"');
+    expect(detail).not.toContain('hunter2');
+  });
+
   it('reads fields from a HarnessError details bag', () => {
     const err = new HarnessError('claude CLI died', 'unknown', { exitCode: 1, stderr: 'oops', signal: 'SIGTERM' });
 

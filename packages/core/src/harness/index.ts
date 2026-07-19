@@ -58,6 +58,7 @@ export class HarnessError extends Error {
     readonly details: {
       exitCode?: number;
       stderr?: string;
+      stdout?: string;
       code?: string | number;
       signal?: string;
       killed?: boolean;

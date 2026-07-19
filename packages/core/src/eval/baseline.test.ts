@@ -251,4 +251,72 @@ describe('compareToBaseline', () => {
     expect(comparison.ok).toBe(true);
     expect(comparison.notes).toContain("case 'b' is present in the baseline but missing from the run");
   });
+
+  it('reports an infra failure when every case errored before producing a spec', () => {
+    const baseline = toBaseline(
+      summaryOf([caseResult({ id: 'a', pass: true }), caseResult({ id: 'b', pass: true }), caseResult({ id: 'c' })]),
+    );
+    const summary = summaryOf([
+      caseResult({
+        id: 'a',
+        pass: false,
+        route: 'unparseable',
+        checks: [],
+        error: 'fetch failed\n  at boom',
+      }),
+      caseResult({
+        id: 'b',
+        pass: false,
+        route: 'unparseable',
+        checks: [],
+        error: 'claude CLI returned empty output',
+      }),
+    ]);
+
+    const comparison = compareToBaseline(summary, baseline);
+
+    expect(comparison.ok).toBe(false);
+    expect(comparison.regressions).toHaveLength(1);
+    expect(comparison.regressions[0]).toMatch(/eval infrastructure failure: all 2 cases errored/);
+    expect(comparison.infraFailure).toEqual({
+      erroredCases: ['a', 'b'],
+      firstError: 'fetch failed at boom',
+    });
+    expect(comparison.regressions.some((r) => r.includes('was passing in the baseline'))).toBe(false);
+    expect(comparison.regressions.some((r) => r.includes('routing accuracy'))).toBe(false);
+    expect(comparison.notes).toContain("case 'c' is present in the baseline but missing from the run");
+    expect(comparison.notes).toContain(
+      'per-case and routing regressions suppressed: every case failed at execution, not at spec quality',
+    );
+  });
+
+  it('does not report an infra failure for a mixed run of one errored and one passing case', () => {
+    const baseline = toBaseline(summaryOf([caseResult({ id: 'a', pass: true }), caseResult({ id: 'b', pass: true })]));
+    const summary = summaryOf([
+      caseResult({ id: 'a', pass: false, route: 'unparseable', checks: [], error: 'fetch failed' }),
+      caseResult({ id: 'b', pass: true }),
+    ]);
+
+    const comparison = compareToBaseline(summary, baseline);
+
+    expect(comparison.infraFailure).toBeUndefined();
+    expect(comparison.ok).toBe(false);
+    expect(comparison.regressions).toContain("case 'a' was passing in the baseline and now fails");
+  });
+
+  it('does not count a judge-malformed result toward infra failure', () => {
+    const baseline = toBaseline(summaryOf([caseResult({ id: 'a', pass: true })]));
+    const summary = summaryOf([
+      caseResult({
+        id: 'a',
+        pass: false,
+        error: 'judge-malformed: not valid json',
+        checks: [{ name: 'lint', pass: true, details: 'ok' }],
+      }),
+    ]);
+
+    const comparison = compareToBaseline(summary, baseline);
+
+    expect(comparison.infraFailure).toBeUndefined();
+  });
 });
