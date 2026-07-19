@@ -2,7 +2,16 @@
 // drain it at worker prompt-assembly boundaries (.factory/steering/)
 
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from 'node:fs';
+import {
+  appendFileSync,
+  closeSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+} from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 
 export interface SteeringMessage {
@@ -117,29 +126,29 @@ export function drainSteering(dir: string, issue: number, worktree: string): Con
       const resolved = resolve(worktree, candidate);
       if (!resolved.startsWith(worktreePrefix)) continue;
 
-      let stat;
+      // Open once and stat/read the same descriptor (rather than statSync(path)
+      // then readFileSync(path)) so there's no check-then-use race window on the path.
+      let fd: number;
       try {
-        stat = statSync(resolved);
+        fd = openSync(resolved, 'r');
       } catch {
         continue;
       }
-      if (!stat.isFile()) continue;
 
-      let raw;
       try {
-        raw = readFileSync(resolved);
-      } catch {
-        // deleted/replaced between the stat above and this read — skip, don't lose the drained messages
-        continue;
-      }
+        if (!fstatSync(fd).isFile()) continue;
 
-      seenPaths.add(candidate);
-      const truncated = raw.byteLength > MAX_ATTACHMENT_BYTES;
-      attachments.push({
-        path: candidate,
-        content: (truncated ? truncateUtf8(raw, MAX_ATTACHMENT_BYTES) : raw).toString('utf-8'),
-        truncated,
-      });
+        const raw = readFileSync(fd);
+        seenPaths.add(candidate);
+        const truncated = raw.byteLength > MAX_ATTACHMENT_BYTES;
+        attachments.push({
+          path: candidate,
+          content: (truncated ? truncateUtf8(raw, MAX_ATTACHMENT_BYTES) : raw).toString('utf-8'),
+          truncated,
+        });
+      } finally {
+        closeSync(fd);
+      }
     }
   }
 
