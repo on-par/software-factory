@@ -293,6 +293,35 @@ describe('cli', () => {
     expect(calls).toHaveLength(2);
   });
 
+  it('falls back to unavailable and stops waiting when a poll inside the resume gate returns null', async () => {
+    const calls: any[] = [];
+    const readings: Array<ReturnType<typeof reading> | null> = [reading(0.9), null];
+
+    await superviseLoop({
+      cap: 1,
+      resumeAt: 0.65,
+      pollMs: 1000,
+      stopFile: '/repo/.factory/STOP',
+      eventsFile: '/repo/.factory/events.ndjson',
+      now: false,
+      readUsageFn: async () => readings.shift() ?? null,
+      pathExists: () => false,
+      clearStop: () => {},
+      sleep: async () => {
+        calls.push(['sleep']);
+      },
+      emitEvent: () => {},
+      writeLine: (line) => calls.push(['writeLine', line]),
+      runQueue: async () => {
+        calls.push(['runQueue']);
+      },
+    });
+
+    expect(calls.filter((c) => c[0] === 'sleep')).toHaveLength(1);
+    expect(calls).toContainEqual(['runQueue']);
+    expect(calls.some((c) => c[0] === 'writeLine' && c[1].includes('usage signal unavailable'))).toBe(true);
+  });
+
   it('skips the resume gate entirely when watch is false, even with a readUsageFn that would gate', async () => {
     const calls: any[] = [];
 
@@ -562,6 +591,31 @@ describe('cli', () => {
       ['event', 'await-merge', 21, 'waiting to merge ship-it/21-self-merge'],
       ['checkMerged', [octokit, 'on-par', 'software-factory', 'ship-it/21-self-merge']],
       ['land', [21, '/repo', 'on-par/software-factory', paths, octokit, false]],
+    ]);
+  });
+
+  it('returns immediately and logs a landed event once checkMerged reports the PR merged', async () => {
+    const calls: any[] = [];
+    const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
+
+    await waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
+      createOctokit: () => ({}) as any,
+      pathExists: () => false,
+      checkMerged: async () => true,
+      loadConfig: () => fakeFactoryConfig(false),
+      land: async () => {
+        throw new Error('land should not be called');
+      },
+      emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) =>
+        calls.push(['event', type, issue, msg]),
+      sleep: async () => {
+        throw new Error('sleep should not be called');
+      },
+    });
+
+    expect(calls).toEqual([
+      ['event', 'await-merge', 21, 'waiting to merge ship-it/21-self-merge'],
+      ['event', 'landed', 21, 'PR merged'],
     ]);
   });
 

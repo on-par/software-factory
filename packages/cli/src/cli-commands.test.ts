@@ -163,7 +163,7 @@ vi.mock('@on-par/factory-core/internal', async (importOriginal) => {
   };
 });
 
-import { formatGcReport, sweepWorktrees, withGitLock } from '@on-par/factory-core/internal';
+import { cleanupWorktree, formatGcReport, sweepWorktrees, withGitLock } from '@on-par/factory-core/internal';
 
 import { CliExitError, cmdConstitution, cmdLand, cmdUsage, main, parseIssueArg, shipIssue } from './cli/index.js';
 
@@ -429,6 +429,13 @@ describe('cli commands (via main dispatch)', () => {
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('usage: factory constitution');
     });
+
+    it('rethrows an unexpected scaffolding error uncaught (not a CliExitError)', async () => {
+      writeFileSync(join(h.constitutionsDir, '_template.md'), 'no markdown skeleton block here');
+      await expect(runMain('constitution', '--init', 'gizmo')).rejects.toThrow(
+        'constitution template is missing its ```markdown skeleton block',
+      );
+    });
   });
 
   describe('models', () => {
@@ -562,6 +569,12 @@ describe('cli commands (via main dispatch)', () => {
       expect(err).toContain('line 2');
       expect(logged() + err).not.toContain('NaN');
     });
+
+    it('prints "(no queue file)" when the queue does not exist', async () => {
+      const res = await runMain('status');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('(no queue file)');
+    });
   });
 
   describe('tui', () => {
@@ -619,6 +632,21 @@ describe('cli commands (via main dispatch)', () => {
       const res = await runMain('triage');
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('factory not initialized — run `factory init` first');
+    });
+
+    it('logs the planner failure detail and exits 1 with no proposal when the planner exec call fails', async () => {
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) return h.ghRepo;
+        if (cmd.includes('claude -p')) throw new Error('claude crashed');
+        return '';
+      };
+      const res = await runMain('triage');
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('no proposal');
+      expect(errored()).toContain('claude crashed');
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('triage planner failed');
     });
   });
 
@@ -751,6 +779,29 @@ describe('cli commands (via main dispatch)', () => {
       expect(events).toContain('run-done');
       expect(events + err).not.toContain('NaN');
     });
+
+    it('skips starting the usage watchdog when FACTORY_USAGE_WATCH=0', async () => {
+      trackEnv('FACTORY_USAGE_WATCH');
+      process.env.FACTORY_USAGE_WATCH = '0';
+      writeFileSync(paths().queue, 'app 1\n');
+      writeFileSync(paths().stop, '');
+      const res = await runMain('run');
+      expect(res.exited).toBe(false);
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('run-done');
+    });
+
+    it('logs a warn event without crashing the run when the usage watchdog rejects', async () => {
+      const core = await import('@on-par/factory-core');
+      vi.mocked(core.watchUsage).mockRejectedValueOnce(new Error('watchdog exploded'));
+      writeFileSync(paths().queue, 'app 1\n');
+      writeFileSync(paths().stop, '');
+      const res = await runMain('run');
+      expect(res.exited).toBe(false);
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('usage watchdog crashed');
+      expect(events).toContain('watchdog exploded');
+    });
   });
 
   describe('worktree gc', () => {
@@ -800,6 +851,16 @@ describe('cli commands (via main dispatch)', () => {
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('malformed');
     });
+
+    it('--now runs the queue once end-to-end and finishes once the queue drains without STOP', async () => {
+      process.env.FACTORY_MERGE = '1';
+      writeFileSync(paths().queue, 'app 1\n');
+      const res = await runMain('supervise', '--now');
+      expect(res.exited).toBe(false);
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('supervisor-done');
+      expect(events).toContain('run-done');
+    }, 20_000);
   });
 
   describe('local-small-dry-run', () => {
@@ -856,6 +917,41 @@ describe('cli commands (via main dispatch)', () => {
       expect(res).toEqual({ exited: true, code: 4 });
       expect(errored()).toContain('halted');
     });
+
+    it('exits 4 mentioning no reachable local worker when no worker-tier model is reachable', async () => {
+      h.diagnoses = [
+        { model: 'w', provider: 'openai', tiers: ['worker'], reachable: false, experimental: false, reason: 'no key' },
+      ];
+      const queueDir = join(paths().state, 'local-small');
+      mkdirSync(queueDir, { recursive: true });
+      writeFileSync(join(queueDir, 'overnight-queue'), 'overnight 5\n');
+
+      const res = await runMain('local-small-overnight');
+
+      expect(res).toEqual({ exited: true, code: 4 });
+      expect(errored()).toContain('no reachable local worker model');
+    });
+
+    it('parks an item, reports it, and logs overnight-park when shipIssue escalates', async () => {
+      h.diagnoses = [
+        { model: 'w', provider: 'openai', tiers: ['worker'], reachable: true, experimental: false, reason: 'ok' },
+      ];
+      h.planResult = { ok: false, route: 'claude', escalate: 'needs human' };
+      const queueDir = join(paths().state, 'local-small');
+      mkdirSync(queueDir, { recursive: true });
+      writeFileSync(join(queueDir, 'overnight-queue'), 'overnight 5\n');
+
+      const res = await runMain('local-small-overnight');
+
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('overnight parked: 1');
+      expect(logged()).toContain('parked');
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('overnight-park');
+
+      const state = JSON.parse(readFileSync(join(queueDir, 'overnight-state.json'), 'utf-8'));
+      expect(state.items).toEqual([expect.objectContaining({ issue: 5, status: 'parked' })]);
+    });
   });
 
   describe('land', () => {
@@ -884,6 +980,35 @@ describe('cli commands (via main dispatch)', () => {
       expect(res).toEqual({ exited: true, code: 3 });
       expect(errored()).toContain('factory:');
     });
+
+    it('wraps a PR-lookup failure as a code-5 CliExitError naming the issue and branch', async () => {
+      h.octokit.rest.pulls.list = vi.fn(async ({ state }: any) => {
+        if (state === 'open') throw new Error('rate limited');
+        return { data: [] };
+      });
+      const res = await runMain('land', '5');
+      expect(res).toEqual({ exited: true, code: 5 });
+      expect(errored()).toContain('PR lookup failed for issue #5');
+      expect(errored()).toContain('rate limited');
+    });
+
+    it('wraps a post-merge cleanup failure as a code-5 CliExitError', async () => {
+      vi.mocked(cleanupWorktree).mockRejectedValueOnce(new Error('rm -rf failed'));
+      const res = await runMain('land', '5');
+      expect(res).toEqual({ exited: true, code: 5 });
+      expect(errored()).toContain('merge failed for issue #5');
+      expect(errored()).toContain('rm -rf failed');
+    });
+
+    it('wraps an unexpected pre-lock failure (e.g. issue lookup) in a generic code-5 CliExitError', async () => {
+      h.octokit.rest.issues.get = vi.fn(async () => {
+        throw new Error('issue vanished');
+      });
+      const res = await runMain('land', '5');
+      expect(res).toEqual({ exited: true, code: 5 });
+      expect(errored()).toContain('merge failed for issue #5');
+      expect(errored()).toContain('issue vanished');
+    });
   });
 
   describe('resume-approved', () => {
@@ -891,6 +1016,31 @@ describe('cli commands (via main dispatch)', () => {
       const res = await runMain('resume-approved');
       expect(res.exited).toBe(false);
       expect(errored()).toBe('');
+    });
+
+    it('exits 5 and reports failed PRs when landing an approved PR fails', async () => {
+      h.octokit.graphql = vi.fn(async (query: string) => {
+        if (query.includes('OpenFactoryPRs')) {
+          return {
+            repository: {
+              pullRequests: {
+                pageInfo: { hasNextPage: false },
+                nodes: [
+                  { number: 12, headRefName: 'ship-it/5-fix-the-bug', reviewDecision: 'APPROVED', isDraft: false },
+                ],
+              },
+            },
+          };
+        }
+        return {};
+      });
+      h.octokit.rest.issues.get = vi.fn(async () => {
+        throw new Error('issue vanished');
+      });
+      const res = await runMain('resume-approved');
+      expect(res).toEqual({ exited: true, code: 5 });
+      expect(logged()).toContain('failed to land');
+      expect(errored()).toContain('1 PR(s) failed to land');
     });
   });
 
@@ -985,6 +1135,13 @@ describe('cli commands (via main dispatch)', () => {
       expect(vi.mocked(core.shipPhase)).not.toHaveBeenCalled();
     });
 
+    it('exits 2 with the not-initialized message when .factory/ is missing', async () => {
+      rmSync(paths().state, { recursive: true, force: true });
+      const res = await runMain('ship', '5');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('factory not initialized — run `factory init` first');
+    });
+
     it('parses --no-sandbox to opts.sandbox === false and logs sandbox disabled by the CLI flag', async () => {
       const res = await runMain('ship', '5', '--no-sandbox');
       expect(res.exited).toBe(false);
@@ -1030,6 +1187,44 @@ describe('cli commands (via main dispatch)', () => {
       h.claudeAvailable = false;
       const res = await runMain('doctor');
       expect(res).toEqual({ exited: true, code: 1 });
+    });
+
+    it('exits 1 and reports auth failure when an execSync probe throws', async () => {
+      h.claudeAvailable = true;
+      h.execSyncImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('status --porcelain')) return '';
+        if (cmd.includes('gh auth token')) return 'gho_token';
+        if (cmd.includes('gh auth status')) throw new Error('not logged in');
+        return '';
+      };
+      const res = await runMain('doctor');
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(logged()).toContain('gh is not authenticated');
+    });
+  });
+
+  describe('git/github detection failures', () => {
+    it('exits 2 with "not inside a git repository" when git rev-parse fails', async () => {
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) throw new Error('fatal: not a git repository');
+        return '';
+      };
+      const res = await runMain('status');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('not inside a git repository');
+    });
+
+    it('falls back to `gh auth token` via execSync when no GITHUB_TOKEN/GH_TOKEN env var is set', async () => {
+      delete process.env.GITHUB_TOKEN;
+      delete process.env.GH_TOKEN;
+      h.execSyncImpl = (cmd: string) => {
+        if (cmd.includes('gh auth token')) return 'gho_fallback_token\n';
+        throw new Error('not stubbed');
+      };
+      const res = await runMain('land', '5');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('Landed PR #77');
     });
   });
 });
@@ -1143,6 +1338,51 @@ describe('shipIssue (direct)', () => {
     await expect(shipIssue(5, {}, ctx())).rejects.toBeTruthy();
     const report = vi.mocked(core.writeLocalRunReport).mock.calls.at(-1)?.[0] as any;
     expect(report.outcome).toBe('failed');
+  });
+
+  it('logs sandbox-disabled by config when factory.json sandbox.enabled is false', async () => {
+    h.factoryConfig = { ...h.factoryConfig, sandbox: { ...h.factoryConfig.sandbox, enabled: false } };
+    await shipIssue(5, {}, ctx());
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('sandbox disabled by config/FACTORY_SANDBOX');
+  });
+
+  it('activates the sandbox policy and logs the degraded-egress warning when a sandbox runtime is available', async () => {
+    h.execSyncImpl = (cmd: string) => {
+      if (cmd.includes('command -v sandbox-exec') || cmd.includes('command -v firejail')) return '/usr/bin/tool';
+      throw new Error('not stubbed');
+    };
+    await shipIssue(5, {}, ctx());
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('sandbox-degraded');
+    expect(events).toContain('host-level egress filtering unavailable');
+    expect(events).not.toContain('sandbox-unavailable');
+  });
+
+  it('logs skip-ci when FACTORY_SKIP_CI resolves to true', async () => {
+    const core = await import('@on-par/factory-core');
+    vi.mocked(core.resolveSkipCI).mockReturnValueOnce(true);
+    await shipIssue(5, {}, ctx());
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('skip-ci');
+    expect(events).toContain('skipping CI watch');
+  });
+
+  it('logs unconsumed steering when interactive leftover messages remain after ship', async () => {
+    // Queue a fresh steering message as a side effect of shipPhase — after the
+    // build-time drain but before shipIssue's post-ship leftover check.
+    const core = await import('@on-par/factory-core');
+    vi.mocked(core.shipPhase).mockImplementationOnce(async () => {
+      mkdirSync(paths().steering, { recursive: true });
+      writeFileSync(
+        join(paths().steering, 'issue-5.ndjson'),
+        `${JSON.stringify({ id: 'steer-late', issue: 5, text: 'too late', queuedAt: '2026-01-01T00:00:00.000Z' })}\n`,
+      );
+      return h.shipResult;
+    });
+    await shipIssue(5, { interactive: true }, ctx());
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('steering_unconsumed');
   });
 
   describe('steering', () => {
