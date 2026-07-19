@@ -252,6 +252,46 @@ describe('readCostsFile', () => {
     expect(result.entries).toEqual([valid]);
     expect(result.skipped).toBe(1);
   });
+
+  it('skips lines that parse to null or a non-object JSON value', () => {
+    const dir = mkdtemp();
+    const file = join(dir, 'costs.jsonl');
+    writeFileSync(file, ['null', '42'].join('\n') + '\n');
+
+    const result = readCostsFile(file);
+    expect(result.entries).toEqual([]);
+    expect(result.skipped).toBe(2);
+  });
+
+  it('accepts a line with a string failoverReason and skips one with a non-string failoverReason', () => {
+    const dir = mkdtemp();
+    const file = join(dir, 'costs.jsonl');
+    const withReason: CostEntry = {
+      ts: '2026-07-10T11:30:00Z',
+      issue: '61',
+      task: 'build',
+      model: 'claude-sonnet-5',
+      inputTokens: 100,
+      outputTokens: 50,
+      cost: 0.01,
+      failoverReason: 'rate_limit',
+    };
+    const badReason = {
+      ts: '2026-07-10T11:31:00Z',
+      issue: '62',
+      task: 'build',
+      model: 'claude-sonnet-5',
+      inputTokens: 100,
+      outputTokens: 50,
+      cost: 0.01,
+      failoverReason: 404,
+    };
+    writeFileSync(file, [JSON.stringify(withReason), JSON.stringify(badReason)].join('\n') + '\n');
+
+    const result = readCostsFile(file);
+    expect(result.entries).toEqual([withReason]);
+    expect(result.skipped).toBe(1);
+  });
 });
 
 describe('aggregateCosts', () => {
@@ -307,6 +347,13 @@ describe('aggregateCosts', () => {
     const summary = aggregateCosts(entries);
     expect(summary.perIssue[0].inputTokens).toBe(0);
     expect(summary.perIssue[0].outputTokens).toBe(0);
+  });
+
+  it('defaults a missing cost field to zero', () => {
+    const entries = [{ ts: 't1', issue: '61', task: 'build', model: 'claude-sonnet-5' } as CostEntry];
+    const summary = aggregateCosts(entries);
+    expect(summary.perIssue[0].cost).toBe(0);
+    expect(summary.total.cost).toBe(0);
   });
 });
 

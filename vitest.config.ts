@@ -34,14 +34,14 @@ export default defineConfig({
         // in the same PR when it fires.
         lines: 95,
         functions: 93,
-        branches: 88,
+        branches: 89,
         statements: 95,
         // RATCHET per package: each metric set ~1 point below that package's
         // measured floor (see #242). Raise toward 100 as coverage grows; never
         // lower. Package-scoped so one workspace cannot hide another workspace's
         // regression behind the aggregate average.
         'packages/config/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 49, statements: 99 },
-        'packages/core/src/**/*.{ts,tsx}': { lines: 95, functions: 95, branches: 88, statements: 95 },
+        'packages/core/src/**/*.{ts,tsx}': { lines: 95, functions: 96, branches: 88, statements: 95 },
         'packages/cli/src/**/*.{ts,tsx}': { lines: 94, functions: 84, branches: 90, statements: 94 },
         'packages/dashboard/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
         'packages/server/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
