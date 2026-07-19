@@ -1000,6 +1000,10 @@ export async function cmdLand(issueNum: number) {
     const result = await landIssue(issueNum, repoRoot, ghRepo, paths, octokit, skipCI);
     console.log(chalk.green(`✅ Landed PR #${result.prNumber} for issue #${issueNum}`));
   } catch (err: any) {
+    if (err instanceof AwaitingReviewError) {
+      console.log(chalk.yellow(`⏸ PR #${err.prNumber} for issue #${issueNum} awaiting human review — left open`));
+      return;
+    }
     if (err instanceof LandConflictError) {
       throw new CliExitError(`factory: ${err.message}`, 3);
     }
@@ -1057,19 +1061,26 @@ async function landIssue(
       withFileLock(
         paths.mergeLock,
         async () => {
-          await landOpenPullRequest({
-            octokit,
-            owner,
-            repoName,
-            ghRepo,
-            repoRoot,
-            issue: issueNum,
-            branch,
-            worktree,
-            prNumber: prNumber!,
-            log,
-            skipCI,
-          });
+          try {
+            await landOpenPullRequest({
+              octokit,
+              owner,
+              repoName,
+              ghRepo,
+              repoRoot,
+              issue: issueNum,
+              branch,
+              worktree,
+              prNumber: prNumber!,
+              log,
+              skipCI,
+            });
+          } catch (err) {
+            if (err instanceof AwaitingReviewError) {
+              await cleanupWorktree(repoRoot, worktree, log);
+            }
+            throw err;
+          }
           log('merged', `squash-merged PR #${prNumber}`);
           await cleanupWorktree(repoRoot, worktree, log);
         },
@@ -1077,7 +1088,7 @@ async function landIssue(
       ),
     );
   } catch (err: any) {
-    if (err instanceof LandConflictError) throw err;
+    if (err instanceof LandConflictError || err instanceof AwaitingReviewError) throw err;
     log('fail', `merge failed: ${err.message}`);
     throw new LandFailureError(`merge failed for issue #${issueNum}: ${err.message}`, 5);
   }
@@ -1301,6 +1312,8 @@ export async function runLane(
   deps: RunLaneDeps = {},
 ) {
   const { ship = shipIssue, waitMerge = waitForMerge, pathExists = existsSync, emitEvent = logEvent } = deps;
+  let merged = 0;
+  let awaitingReview = 0;
   for (let i = 0; i < issues.length; i++) {
     const issue = issues[i];
     if (pathExists(paths.stop)) {
@@ -1310,7 +1323,14 @@ export async function runLane(
     try {
       const branch = await ship(issue, {}, { repoRoot, ghRepo, lane });
       await waitMerge(issue, branch, repoRoot, ghRepo, paths);
+      merged++;
     } catch (err: any) {
+      if (err instanceof AwaitingReviewError) {
+        // The land path already emitted the awaiting-review event and cleaned the
+        // worktree — this is a clean outcome, not a park; move to the next issue.
+        awaitingReview++;
+        continue;
+      }
       const reason = parkReasonFor(err);
       // Terminal reason events (escalate/timeout/fail/conflict) are emitted exactly
       // once by the layer that detects the failure — shipIssue for pipeline failures,
@@ -1326,7 +1346,9 @@ export async function runLane(
       return;
     }
   }
-  emitEvent(paths.events, 'lane-done', lane, 'lane complete', { lane });
+  emitEvent(paths.events, 'lane-done', lane, `lane complete (${merged} merged, ${awaitingReview} awaiting review)`, {
+    lane,
+  });
 }
 
 export async function isPrMerged(octokit: Octokit, owner: string, repoName: string, branch: string): Promise<boolean> {
@@ -1397,6 +1419,15 @@ export async function squashMergeAndDelete(
 
 export class LandConflictError extends Error {}
 
+export class AwaitingReviewError extends Error {
+  constructor(
+    message: string,
+    readonly prNumber: number,
+  ) {
+    super(message);
+  }
+}
+
 export class LandFailureError extends Error {
   constructor(
     message: string,
@@ -1409,14 +1440,25 @@ export class LandFailureError extends Error {
 const MAX_MERGE_ATTEMPTS = 5;
 const MERGE_RETRY_BASE_MS = 5_000;
 
+export function isReviewRequiredMergeError(
+  err: unknown,
+  state: { mergeStateStatus?: string; reviewDecision?: string },
+): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/approving review/i.test(msg) || /review is required/i.test(msg)) return true;
+  return state.mergeStateStatus === 'BLOCKED' && state.reviewDecision === 'REVIEW_REQUIRED';
+}
+
 export async function getPullRequestLandState(
   octokit: Octokit,
   owner: string,
   repoName: string,
   prNumber: number,
-): Promise<{ id?: string; isDraft?: boolean; mergeStateStatus?: string }> {
+): Promise<{ id?: string; isDraft?: boolean; mergeStateStatus?: string; reviewDecision?: string }> {
   const result = await octokit.graphql<{
-    repository?: { pullRequest?: { id?: string; isDraft?: boolean; mergeStateStatus?: string } };
+    repository?: {
+      pullRequest?: { id?: string; isDraft?: boolean; mergeStateStatus?: string; reviewDecision?: string };
+    };
   }>(
     `query PullRequestLandState($owner: String!, $repo: String!, $number: Int!) {
       repository(owner: $owner, name: $repo) {
@@ -1424,6 +1466,7 @@ export async function getPullRequestLandState(
           id
           isDraft
           mergeStateStatus
+          reviewDecision
         }
       }
     }`,
@@ -1540,6 +1583,10 @@ export async function landOpenPullRequest(opts: {
       await squashMergeAndDelete(octokit, owner, repoName, branch, prNumber, { admin: adminMerge, run });
       return;
     } catch (err: any) {
+      if (isReviewRequiredMergeError(err, state)) {
+        log('awaiting-review', `PR #${prNumber} blocked on human review — leaving open for approval`);
+        throw new AwaitingReviewError(`PR #${prNumber} awaiting review: ${err.message}`, prNumber);
+      }
       if (attempt >= MAX_MERGE_ATTEMPTS) throw err;
       log(
         'land',

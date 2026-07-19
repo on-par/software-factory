@@ -1510,6 +1510,37 @@ describe('CliExitError (direct command invocation)', () => {
     });
     expect(exitSpy).not.toHaveBeenCalled();
   });
+
+  it('cmdLand(5) resolves cleanly and leaves the PR open when the merge is blocked on a required review', async () => {
+    h.octokit.graphql = vi.fn(async (query: string) =>
+      query.trimStart().startsWith('query')
+        ? {
+            repository: {
+              pullRequest: {
+                id: 'PR_1',
+                isDraft: false,
+                mergeStateStatus: 'BLOCKED',
+                reviewDecision: 'REVIEW_REQUIRED',
+              },
+            },
+          }
+        : {},
+    );
+    h.octokit.rest.pulls.merge = vi.fn(async () => {
+      throw new Error('At least 1 approving review is required by reviewers with write access.');
+    });
+
+    await expect(cmdLand(5)).resolves.toBeUndefined();
+
+    expect(logged()).toContain('awaiting human review');
+    expect(cleanupWorktree).toHaveBeenCalled();
+
+    const events = readFileSync(paths().events, 'utf-8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(events.some((e) => e.type === 'awaiting-review')).toBe(true);
+  });
 });
 
 // ===========================================================================
