@@ -111,6 +111,7 @@ const INTERNAL_API_KEYS = [
   // Local-small harness
   'applyLocalSmallPatchStep',
   'createLocalSmallDryRun',
+  'runOvernightQueue',
   // Eval internals
   'judgeSpec',
   'median',

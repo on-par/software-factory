@@ -790,6 +790,52 @@ describe('cli commands (via main dispatch)', () => {
     });
   });
 
+  describe('local-small-overnight', () => {
+    it('exits 2 mentioning the expected path when the queue file is missing', async () => {
+      const res = await runMain('local-small-overnight');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain(join(paths().state, 'local-small', 'overnight-queue'));
+    });
+
+    it('exits 2 when the queue file has only malformed lines', async () => {
+      const queueDir = join(paths().state, 'local-small');
+      mkdirSync(queueDir, { recursive: true });
+      writeFileSync(join(queueDir, 'overnight-queue'), 'not a valid line\n');
+      const res = await runMain('local-small-overnight');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('malformed');
+    });
+
+    it('runs the happy path: ships the queued issue and records it as ready', async () => {
+      h.diagnoses = [
+        { model: 'w', provider: 'openai', tiers: ['worker'], reachable: true, experimental: false, reason: 'ok' },
+      ];
+      const queueDir = join(paths().state, 'local-small');
+      mkdirSync(queueDir, { recursive: true });
+      writeFileSync(join(queueDir, 'overnight-queue'), 'overnight 5\n');
+
+      const res = await runMain('local-small-overnight');
+
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('overnight ready: 1');
+
+      const state = JSON.parse(readFileSync(join(queueDir, 'overnight-state.json'), 'utf-8'));
+      expect(state.items).toEqual([expect.objectContaining({ issue: 5, status: 'ready' })]);
+    });
+
+    it('exits 4 mentioning halted when preflight fails', async () => {
+      h.claudeAvailable = false;
+      const queueDir = join(paths().state, 'local-small');
+      mkdirSync(queueDir, { recursive: true });
+      writeFileSync(join(queueDir, 'overnight-queue'), 'overnight 5\n');
+
+      const res = await runMain('local-small-overnight');
+
+      expect(res).toEqual({ exited: true, code: 4 });
+      expect(errored()).toContain('halted');
+    });
+  });
+
   describe('land', () => {
     it('lands an open PR and prints success', async () => {
       const res = await runMain('land', '5');

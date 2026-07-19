@@ -26,6 +26,17 @@ export { buildPlanPrompt } from './phases/plan.js';
 
 // Local-small harness
 export type {
+  OvernightItemOutcome,
+  OvernightItemStatus,
+  OvernightPreflightResult,
+  OvernightQueueDeps,
+  OvernightQueueInput,
+  OvernightQueueResult,
+  OvernightQueueState,
+  OvernightStateItem,
+} from './local-small/overnight.js';
+export { runOvernightQueue } from './local-small/overnight.js';
+export type {
   LocalSmallContextPack,
   LocalSmallDryRunInput,
   LocalSmallDryRunResult,

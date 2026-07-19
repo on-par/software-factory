@@ -24,6 +24,7 @@ import {
   loadFactoryConfig,
   loadModelsConfig,
   loadRoutesConfig,
+  ModelRegistry,
   ModelRouter,
   parseQueue,
   planPhase,
@@ -36,6 +37,12 @@ import {
   watchUsage,
   writeLocalRunReport,
 } from '@on-par/factory-core';
+import type {
+  OvernightItemOutcome,
+  OvernightPreflightResult,
+  OvernightQueueDeps,
+  OvernightStateItem,
+} from '@on-par/factory-core/internal';
 import {
   branchFor,
   branchPrefixSlug,
@@ -46,6 +53,7 @@ import {
   gitFetch,
   logEvent,
   readCosts,
+  runOvernightQueue,
   setupWorktree,
   shellEscape,
   sweepWorktrees,
@@ -819,6 +827,86 @@ async function cmdLocalSmallDryRun(issueNum: number, opts: { spec?: string; outp
 
   console.log(chalk.green(`local-small dry run: ${result.planPath}`));
   console.log(chalk.green(`local-small context: ${result.contextPath}`));
+}
+
+async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }) {
+  const repoRoot = await getRepoRoot();
+  const ghRepo = await getGitHubRepo();
+  const paths = getFactoryPaths(repoRoot);
+  const queueFile = resolve(repoRoot, opts.queue ?? resolve(paths.state, 'local-small', 'overnight-queue'));
+  const statePath = resolve(repoRoot, opts.state ?? resolve(paths.state, 'local-small', 'overnight-state.json'));
+
+  if (!existsSync(queueFile)) {
+    throw new CliExitError(
+      `factory: overnight queue not found at ${queueFile} — create it with "<lane> <issue#>" lines`,
+      2,
+    );
+  }
+
+  const { entries, diagnostics } = parseQueue(readFileSync(queueFile, 'utf-8'));
+  warnQueueDiagnostics(diagnostics);
+  if (entries.length === 0) {
+    throw new CliExitError(`factory: overnight queue at ${queueFile} has no valid entries`, 2);
+  }
+
+  process.env.FACTORY_LOCAL_ONLY = '1';
+
+  const preflight = async (): Promise<OvernightPreflightResult> => {
+    if (!isCommandAvailable('claude')) return { ok: false, reason: missingClaudeCliMessage() };
+    const registry = new ModelRegistry(loadModelsConfig());
+    const ollamaModels = ollamaModelSet();
+    const diagnoses = diagnoseModels(
+      registry,
+      { ollamaModelPresent: ollamaModels ? (m: string) => ollamaModels.has(m) : undefined },
+      process.env.FACTORY_EXPERIMENTAL === '1',
+      true, // localOnly
+    );
+    if (!hasReachableWorker(diagnoses)) {
+      const reasons = diagnoses.filter((d) => !d.reachable).map((d) => `${d.model}: ${d.reason}`);
+      return { ok: false, reason: `no reachable local worker model — ${reasons.join('; ')}` };
+    }
+    return { ok: true };
+  };
+
+  const processItem = async (issue: number): Promise<OvernightItemOutcome> => {
+    try {
+      await shipIssue(issue, { autoRework: true, interactive: false }, { repoRoot, ghRepo, lane: 'overnight' });
+      return { status: 'ready' };
+    } catch (err: any) {
+      return parkReasonFor(err) === 'escalate'
+        ? { status: 'parked', reason: err.message }
+        : { status: 'failed', reason: err.message };
+    }
+  };
+
+  const report = (item: OvernightStateItem) => {
+    console.log(chalk.yellow(`factory: issue #${item.issue} ${item.status} — ${item.reason ?? 'unknown'}`));
+    logEvent(
+      paths.events,
+      'overnight-park',
+      item.issue,
+      `${item.status}: ${item.reason ?? 'unknown'} — see ${paths.reports}`,
+    );
+  };
+  const log = (type: string, msg: string) => logEvent(paths.events, type, '-', msg);
+
+  const deps: OvernightQueueDeps = { preflight, processItem, report, log };
+  const result = await runOvernightQueue({ issues: entries.map((e) => e.issue), statePath }, deps);
+
+  const ready = result.processed.filter((item) => item.status === 'ready');
+  const parked = result.processed.filter((item) => item.status === 'parked');
+  const failed = result.processed.filter((item) => item.status === 'failed');
+  console.log(chalk.green(`overnight ready: ${ready.length}`));
+  console.log(chalk.yellow(`overnight parked: ${parked.length}`));
+  console.log(chalk.red(`overnight failed: ${failed.length}`));
+  console.log(chalk.yellow(`overnight skipped (already resumed): ${result.skipped.length}`));
+
+  if (result.halted) {
+    throw new CliExitError(
+      `factory: overnight halted before issue #${result.halted.issue}: ${result.halted.reason} — fix the environment and re-run to resume`,
+      4,
+    );
+  }
 }
 
 async function getIssueTitle(octokit: Octokit, repo: string, issue: number): Promise<string> {
@@ -1799,6 +1887,17 @@ export async function main() {
     .option('--output <path>', 'Artifact directory; defaults to .factory/local-small/issue-<n>')
     .action(async (issueNum, opts) => {
       await cmdLocalSmallDryRun(parseIssueArg(issueNum), opts);
+    });
+
+  program
+    .command('local-small-overnight')
+    .description(
+      'Process a curated local-small queue one issue at a time: review-only PRs, never merges, parks on ambiguity',
+    )
+    .option('--queue <path>', 'Curated queue file; defaults to .factory/local-small/overnight-queue')
+    .option('--state <path>', 'Resume-state file; defaults to .factory/local-small/overnight-state.json')
+    .action(async (opts) => {
+      await cmdLocalSmallOvernight(opts);
     });
 
   program
