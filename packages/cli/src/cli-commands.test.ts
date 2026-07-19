@@ -277,6 +277,7 @@ beforeEach(() => {
   [
     'FACTORY_LOCAL_ONLY',
     'FACTORY_MERGE',
+    'FACTORY_MERGE_ADMIN',
     'FACTORY_SKIP_CI',
     'FACTORY_USAGE_CAP',
     'FACTORY_STOP_AT',
@@ -289,6 +290,7 @@ beforeEach(() => {
   ].forEach((k) => trackEnv(k));
   delete process.env.FACTORY_LOCAL_ONLY;
   delete process.env.FACTORY_MERGE;
+  delete process.env.FACTORY_MERGE_ADMIN;
   delete process.env.GITHUB_TOKEN;
   process.env.GH_TOKEN = 'test-token';
   process.exitCode = undefined;
