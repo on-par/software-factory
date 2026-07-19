@@ -209,7 +209,7 @@ describe('CliModelExecutor', () => {
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('empty_response');
     expect(rec.calls).toHaveLength(1);
-    expect(rec.calls[0].cmd).toMatch(/^codex exec --sandbox workspace-write --ask-for-approval never -C '/);
+    expect(rec.calls[0].cmd).toMatch(/^codex exec --sandbox workspace-write -c approval_policy=never -C '/);
     expect(rec.calls[0].cmd).toContain(`-C '${worktree}'`);
     expect(rec.calls[0].cmd).toContain('--model gpt-5-codex');
     expect(rec.calls[0].cmd).toContain(' -o ');
