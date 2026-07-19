@@ -41,7 +41,7 @@ export default defineConfig({
         // lower. Package-scoped so one workspace cannot hide another workspace's
         // regression behind the aggregate average.
         'packages/config/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 49, statements: 99 },
-        'packages/core/src/**/*.{ts,tsx}': { lines: 95, functions: 94, branches: 88, statements: 95 },
+        'packages/core/src/**/*.{ts,tsx}': { lines: 95, functions: 95, branches: 88, statements: 95 },
         'packages/cli/src/**/*.{ts,tsx}': { lines: 94, functions: 84, branches: 90, statements: 94 },
         'packages/dashboard/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
         'packages/server/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },

@@ -156,6 +156,31 @@ describe('ConstitutionLoader repo-first resolution', () => {
     await writeFile(join(repoDir, 'CLAUDE.md'), '   \n');
     expect(loader.resolve(repoDir)).toBeNull();
   });
+
+  it('listProducts() lists bundled product names, filtering non-md files and underscore-prefixed templates', async () => {
+    await writeFile(join(bundledDir, 'alpha.md'), '# Alpha');
+    await writeFile(join(bundledDir, 'beta.md'), '# Beta');
+    await writeFile(join(bundledDir, '_template.md'), '# Template');
+    await writeFile(join(bundledDir, 'notes.txt'), 'not a constitution');
+
+    expect(loader.listProducts().sort()).toEqual(['alpha', 'beta']);
+  });
+
+  it('defaults to the real bundled constitutions dir when constructed with no argument', () => {
+    const defaultLoader = new ConstitutionLoader();
+    const products = defaultLoader.listProducts();
+
+    expect(products.length).toBeGreaterThan(0);
+    expect(products.some((p) => p.startsWith('_'))).toBe(false);
+  });
+
+  it('falls back to the filename-derived product when frontmatter omits product', async () => {
+    await writeFile(join(bundledDir, 'noname.md'), '---\nversion: 3\n---\nBody.\n');
+
+    const c = loader.load('noname');
+    expect(c.product).toBe('noname');
+    expect(c.version).toBe(3);
+  });
 });
 
 describe('buildConstitutionContext', () => {
