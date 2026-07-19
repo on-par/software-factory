@@ -1362,7 +1362,14 @@ export async function squashMergeAndDelete(
   repoName: string,
   branch: string,
   prNumber: number,
+  opts: { admin?: boolean; run?: CommandRunner } = {},
 ): Promise<void> {
+  if (opts.admin) {
+    const run = opts.run ?? exec;
+    await run(`gh pr merge ${prNumber} --repo ${shellEscape(`${owner}/${repoName}`)} --admin --squash --delete-branch`);
+    return;
+  }
+
   await octokit.rest.pulls.merge({ owner, repo: repoName, pull_number: prNumber, merge_method: 'squash' });
   // Best-effort branch delete: the merge is the source of truth.
   await octokit.rest.git.deleteRef({ owner, repo: repoName, ref: `heads/${branch}` }).catch(() => {});
@@ -1460,6 +1467,7 @@ export async function landOpenPullRequest(opts: {
   pathExists?: (path: string) => boolean;
   sleep?: (ms: number) => Promise<void>;
   skipCI?: boolean;
+  adminMerge?: boolean;
 }): Promise<void> {
   const {
     octokit,
@@ -1474,6 +1482,7 @@ export async function landOpenPullRequest(opts: {
     pathExists,
     sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
     skipCI = false,
+    adminMerge = process.env.FACTORY_MERGE_ADMIN === '1',
   } = opts;
 
   const watchCi = async () => {
@@ -1508,7 +1517,7 @@ export async function landOpenPullRequest(opts: {
       );
     }
     try {
-      await squashMergeAndDelete(octokit, owner, repoName, branch, prNumber);
+      await squashMergeAndDelete(octokit, owner, repoName, branch, prNumber, { admin: adminMerge, run });
       return;
     } catch (err: any) {
       if (attempt >= MAX_MERGE_ATTEMPTS) throw err;

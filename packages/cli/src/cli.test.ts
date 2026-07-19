@@ -652,6 +652,36 @@ describe('cli', () => {
     ]);
   });
 
+  it('uses GitHub admin override when admin merge is enabled', async () => {
+    const calls: any[] = [];
+    const octokit: any = {
+      rest: {
+        pulls: {
+          merge: async (args: any) => {
+            calls.push(['merge', args]);
+          },
+        },
+        git: {
+          deleteRef: async (args: any) => {
+            calls.push(['deleteRef', args]);
+          },
+        },
+      },
+    };
+    const run = async (command: string) => {
+      calls.push(['run', command]);
+    };
+
+    await squashMergeAndDelete(octokit, 'on-par', 'software-factory', 'ship-it/19-land', 123, {
+      admin: true,
+      run,
+    });
+
+    expect(calls).toEqual([
+      ['run', "gh pr merge 123 --repo 'on-par/software-factory' --admin --squash --delete-branch"],
+    ]);
+  });
+
   it('does not throw when deleting the merged branch fails', async () => {
     const octokit: any = {
       rest: {

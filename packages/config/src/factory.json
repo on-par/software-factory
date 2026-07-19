@@ -17,7 +17,7 @@
   },
   "merge": {
     "auto": false,
-    "comment": "Set FACTORY_MERGE=1 to enable autonomous squash-merge"
+    "comment": "Set FACTORY_MERGE=1 to enable autonomous squash-merge; set FACTORY_MERGE_ADMIN=1 to bypass unmet merge requirements with GitHub admin privileges"
   },
   "worktree": {
     "prefix": "ship-it/",
