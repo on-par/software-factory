@@ -86,6 +86,10 @@ Run from the repo root unless noted. Node.js **≥ 20** required.
 - **Evals:** golden cases live in `evals/golden/*.md` with `evals/baseline.json`. The deterministic stub subset (`npm run eval -- --stub`) runs in CI on every PR; the full LLM-judge mode runs locally/nightly.
 - `packages/dashboard` renders via Vite; its component tests are `*.test.tsx` files colocated in `src/` (e.g. `packages/dashboard/src/App.test.tsx`).
 
+## Known agent traps
+
+- **Do not "fix" the `test` script in `packages/core/package.json`.** It is intentionally `"test": "vitest run"`. Codex-style agents repeatedly rewrite it to work around a pre-existing vitest quirk when running tests from inside the package — that change is always out of scope and must be reverted. Run tests from the **repo root** with `npm run test` (or `bash scripts/verify.sh`), which is where coverage is configured and aggregated.
+
 ## Before committing
 
 Run the full verification gate and make sure everything is green:
