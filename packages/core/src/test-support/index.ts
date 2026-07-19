@@ -84,7 +84,10 @@ export interface FakeOctokit {
   };
 }
 
-export function makeFakeOctokit(titles: Record<number, string>): { octokit: FakeOctokit; calls: RecordedCall[] } {
+export function makeFakeOctokit(
+  titles: Record<number, string>,
+  bodies: Record<number, string> = {},
+): { octokit: FakeOctokit; calls: RecordedCall[] } {
   const calls: RecordedCall[] = [];
   let nextPr = 101;
 
@@ -97,7 +100,7 @@ export function makeFakeOctokit(titles: Record<number, string>): { octokit: Fake
       issues: {
         get: async (args: any) => {
           calls.push(['issues.get', args]);
-          return { data: { title: titles[args.issue_number], body: 'stub issue body' } };
+          return { data: { title: titles[args.issue_number], body: bodies[args.issue_number] ?? 'stub issue body' } };
         },
       },
       pulls: {

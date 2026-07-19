@@ -4,6 +4,7 @@ import type { ModelsConfig } from '../config/index.js';
 import { ModelRegistry } from '../models/index.js';
 import type { CodingHarness, HarnessFailureReason, HarnessRequest } from './index.js';
 import { HarnessError } from './index.js';
+import { loadInjectionFixtures } from './injection-fixtures.js';
 
 const HARNESS_FAILURE_REASONS: HarnessFailureReason[] = [
   'rate_limit',
@@ -92,6 +93,20 @@ async function expectHarnessError(
 }
 
 export function codingHarnessContractCases(scenarios: HarnessContractScenarios): HarnessContractCase[] {
+  const injectionCases: HarnessContractCase[] = loadInjectionFixtures().map((fx) => ({
+    name: `handles injected instruction without following it: ${fx.name}`,
+    async run() {
+      const scenario = scenarios.success();
+      try {
+        const result = await scenario.harness.run(makeContractRequest({ ...scenario.request, prompt: fx.content }));
+        assert.equal(typeof result.output, 'string');
+      } catch (err) {
+        assert.ok(err instanceof HarnessError);
+        assert.ok(HARNESS_FAILURE_REASONS.includes((err as HarnessError).reason));
+      }
+    },
+  }));
+
   return [
     {
       name: 'resolves with non-empty output on success',
@@ -138,5 +153,6 @@ export function codingHarnessContractCases(scenarios: HarnessContractScenarios):
         }
       },
     },
+    ...injectionCases,
   ];
 }

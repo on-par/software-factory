@@ -212,6 +212,13 @@ describe('sandboxEventFromError', () => {
     expect(sandboxEventFromError(err)).toMatchObject({ type: 'sandbox_violation' });
   });
 
+  it('classifies a blocked ~/.ssh/id_rsa read under sandbox-exec as sandbox_violation', () => {
+    const err = new HarnessError('boom', 'error', {
+      stderr: 'sandbox-exec: deny(1) file-read-data /Users/x/.ssh/id_rsa',
+    });
+    expect(sandboxEventFromError(err)).toMatchObject({ type: 'sandbox_violation' });
+  });
+
   it('classifies a HarnessError with SIGXCPU signal in details as resource_limit', () => {
     const err = new HarnessError('boom', 'timeout', { signal: 'SIGXCPU' });
     expect(sandboxEventFromError(err)).toMatchObject({ type: 'resource_limit' });
