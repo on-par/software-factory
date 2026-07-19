@@ -6,6 +6,7 @@ import { buildConstitutionContext } from '../constitutions/index.js';
 import type { ModelRouter } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
+import { applySteering, type ConsumedSteering } from '../steering/index.js';
 import type { Constitution, FailoverReason } from '../types/index.js';
 import { codexDisabled, escalationLine, isEscalation } from '../utils/index.js';
 
@@ -29,6 +30,7 @@ export async function buildPhase(opts: {
   skipCI?: boolean;
   modelOverride?: string;
   sandbox?: SandboxPolicy;
+  steering?: ConsumedSteering;
 }): Promise<BuildResult> {
   const {
     issue,
@@ -42,6 +44,7 @@ export async function buildPhase(opts: {
     skipCI,
     modelOverride,
     sandbox,
+    steering,
   } = opts;
   let route = opts.route;
 
@@ -121,6 +124,8 @@ turn after an intermediate step. Before ending: (1) branch ${branch} is pushed,
 If and ONLY IF you hit something genuinely ambiguous, print a line starting exactly
 with "ESCALATE:" followed by the question, then STOP.`;
   }
+
+  prompt = applySteering(prompt, steering);
 
   log('build', `Starting build phase (route: ${route})`);
   if (sandbox) {

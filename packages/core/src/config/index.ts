@@ -186,6 +186,7 @@ export function getFactoryPaths(repoRoot: string) {
     stop: resolve(state, 'STOP'),
     costs: resolve(state, 'costs.jsonl'),
     approvals: resolve(state, 'approvals'),
+    steering: resolve(state, 'steering'),
   };
 }
 

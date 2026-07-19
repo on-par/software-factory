@@ -56,6 +56,14 @@ describe('reduceDashboard — lifecycle events', () => {
     expect(state.lanes[0].title).toBe('Add multi-lane dashboard');
   });
 
+  it('worktree event sets the lane worktree path', () => {
+    const state = reduceAll([
+      ev('plan', '296', 'Starting plan phase'),
+      ev('worktree', '296', 'Worktree ready at /tmp/wt'),
+    ]);
+    expect(state.lanes[0].worktree).toBe('/tmp/wt');
+  });
+
   it('ready sets status to ready and parses the PR number', () => {
     const state = reduceAll([ev('plan', '296', 'Starting plan phase'), ev('ready', '296', 'PR #123 ready for review')]);
     expect(state.lanes[0].status).toBe('ready');

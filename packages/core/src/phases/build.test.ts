@@ -412,6 +412,89 @@ describe('buildPhase sandbox', () => {
   });
 });
 
+describe('buildPhase steering', () => {
+  it('appends the operator guidance block to the claude route prompt when steering is passed', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-93.md');
+    const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'claude output' }] } });
+    const router = new ModelRouter(models, routes, false, stub);
+
+    const result = await buildPhase({
+      issue: 93,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/93-steering',
+      route: 'claude',
+      router,
+      constitution: null,
+      log: () => {},
+      steering: {
+        messages: [{ id: '1', issue: 93, text: 'prefer the simpler fix', queuedAt: '2026-01-01T00:00:00.000Z' }],
+        attachments: [],
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    const prompt = stub.calls[stub.calls.length - 1].prompt;
+    expect(prompt).toContain('## Operator guidance (steering)');
+    expect(prompt).toContain('prefer the simpler fix');
+  });
+
+  it('appends the operator guidance block to the codex route prompt when steering is passed', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-94.md');
+    const stub = new StubModelExecutor({ scripts: { build_codex: [{ output: 'codex output' }] } });
+    const router = new ModelRouter(models, routes, false, stub);
+
+    const result = await buildPhase({
+      issue: 94,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/94-steering',
+      route: 'codex',
+      router,
+      constitution: null,
+      log: () => {},
+      steering: {
+        messages: [{ id: '1', issue: 94, text: 'watch out for the flaky test', queuedAt: '2026-01-01T00:00:00.000Z' }],
+        attachments: [],
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    const prompt = stub.calls[stub.calls.length - 1].prompt;
+    expect(prompt).toContain('## Operator guidance (steering)');
+    expect(prompt).toContain('watch out for the flaky test');
+  });
+
+  it('leaves the prompt unchanged (no steering block) when no steering is passed', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-95.md');
+    const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'claude output' }] } });
+    const router = new ModelRouter(models, routes, false, stub);
+
+    await buildPhase({
+      issue: 95,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/95-no-steering',
+      route: 'claude',
+      router,
+      constitution: null,
+      log: () => {},
+    });
+
+    const prompt = stub.calls[stub.calls.length - 1].prompt;
+    expect(prompt).not.toContain('## Operator guidance (steering)');
+  });
+});
+
 describe('buildPhase failover events', () => {
   it('emits a structured failover event when the router fails over to a different model', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));

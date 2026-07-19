@@ -1,13 +1,17 @@
 import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 import {
   aggregateCosts,
   type ApprovalRequest,
   type CostsRead,
+  extractPathCandidates,
   type FactoryEvent,
   followEvents,
   listPendingApprovals,
+  listQueuedSteering,
   type QueueSnapshot,
+  queueSteeringMessage,
   readCostsFile,
   readQueue,
   respondToApproval,
@@ -26,6 +30,7 @@ import { ApprovalPrompt } from './ApprovalPrompt.js';
 import { Dashboard } from './Dashboard.js';
 import { Header } from './Header.js';
 import { RunDetail } from './RunDetail.js';
+import { SteeringComposer } from './SteeringComposer.js';
 import { StopBanner } from './StopBanner.js';
 
 const MAX_LOG_EVENTS = 5000;
@@ -45,9 +50,19 @@ export interface AppProps {
   approvalsDir?: string;
   listPendingFn?: typeof listPendingApprovals;
   respondFn?: typeof respondToApproval;
+  steeringDir?: string;
+  queueSteeringFn?: typeof queueSteeringMessage;
+  listSteeringFn?: typeof listQueuedSteering;
 }
 
 type View = 'dashboard' | 'detail';
+
+interface ComposerState {
+  issue: string;
+  worktree?: string;
+  text: string;
+  warned: boolean;
+}
 
 export function App({
   eventsFile,
@@ -63,6 +78,9 @@ export function App({
   approvalsDir,
   listPendingFn = listPendingApprovals,
   respondFn = respondToApproval,
+  steeringDir,
+  queueSteeringFn = queueSteeringMessage,
+  listSteeringFn = listQueuedSteering,
 }: AppProps): JSX.Element {
   const { exit } = useApp();
   const { stdout } = useStdout();
@@ -80,6 +98,8 @@ export function App({
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
   const [denyReason, setDenyReason] = useState<string | undefined>(undefined);
   const [answered, setAnswered] = useState<Set<string>>(new Set());
+  const [composer, setComposer] = useState<ComposerState | undefined>(undefined);
+  const [steeringQueued, setSteeringQueued] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const stop = follow(
@@ -128,11 +148,65 @@ export function App({
     return () => clearInterval(interval);
   }, [approvalsDir, listPendingFn]);
 
+  const laneIssuesKey = state.lanes.map((l) => l.issue).join(',');
+
+  useEffect(() => {
+    if (!steeringDir) return;
+    const read = () => {
+      const counts: Record<string, number> = {};
+      for (const lane of state.lanes) {
+        counts[lane.issue] = listSteeringFn(steeringDir, Number(lane.issue)).length;
+      }
+      setSteeringQueued(counts);
+    };
+    read();
+    const interval = setInterval(read, POLL_MS);
+    return () => clearInterval(interval);
+    // laneIssuesKey (not state.lanes) is the dep: it only changes when the set of
+    // issues changes, so this poll doesn't tear down/reinstall on every factory event.
+  }, [steeringDir, listSteeringFn, laneIssuesKey]);
+
   const issueCount = useMemo(() => aggregateCosts(costsRead.entries).perIssue.length, [costsRead]);
   const logHeight = Math.max(5, (stdout?.rows ?? 24) - 4);
   const visibleApprovals = pendingApprovals.filter((r) => !answered.has(r.id));
+  const clampedIndex = Math.min(selectedIndex, Math.max(0, state.lanes.length - 1));
 
   useInput((input, key) => {
+    if (composer) {
+      if (key.escape) {
+        setComposer(undefined);
+        return;
+      }
+      if (key.return) {
+        const missing = extractPathCandidates(composer.text).filter(
+          (p) => composer.worktree && !pathExists(join(composer.worktree, p)),
+        );
+        if (missing.length > 0 && !composer.warned) {
+          setComposer((c) => (c ? { ...c, warned: true } : c));
+          return;
+        }
+        if (composer.text.length > 0) {
+          queueSteeringFn(steeringDir!, Number(composer.issue), composer.text);
+        }
+        setComposer(undefined);
+        return;
+      }
+      if (key.backspace || key.delete) {
+        setComposer((c) => (c ? { ...c, text: c.text.slice(0, -1) } : c));
+        return;
+      }
+      if (input && input.length > 1) {
+        // eslint-disable-next-line no-control-regex -- stripping bracketed-paste markers
+        const cleaned = input.replace(/\x1b\[200~|\x1b\[201~/g, '').replace(/\r\n|\r/g, '\n');
+        setComposer((c) => (c ? { ...c, text: c.text + cleaned, warned: false } : c));
+        return;
+      }
+      if (input && !key.ctrl && !key.meta) {
+        setComposer((c) => (c ? { ...c, text: c.text + input, warned: false } : c));
+      }
+      return;
+    }
+
     if (denyReason !== undefined) {
       const active = visibleApprovals[0];
       if (key.return) {
@@ -168,6 +242,20 @@ export function App({
         setDenyReason('');
         return;
       }
+    }
+
+    if (
+      tab === 'dashboard' &&
+      steeringDir &&
+      input === 'i' &&
+      state.lanes.length > 0 &&
+      visibleApprovals.length === 0
+    ) {
+      const activeLane = state.lanes[clampedIndex];
+      if (activeLane) {
+        setComposer({ issue: activeLane.issue, worktree: activeLane.worktree, text: '', warned: false });
+      }
+      return;
     }
 
     if (input === 'q') {
@@ -207,7 +295,6 @@ export function App({
   });
 
   const stopReason = stopFlag || state.usageStop ? (state.usageStop ?? 'STOP flag present (.factory/STOP)') : undefined;
-  const clampedIndex = Math.min(selectedIndex, Math.max(0, state.lanes.length - 1));
 
   function DashboardPane(): JSX.Element {
     if (state.lanes.length === 0) {
@@ -223,7 +310,12 @@ export function App({
       return (
         <Box flexDirection="column">
           {stopReason && <StopBanner reason={stopReason} />}
-          <RunDetail run={state.lanes[0].run} repo={repo} now={now} />
+          <RunDetail
+            run={state.lanes[0].run}
+            repo={repo}
+            now={now}
+            steeringQueued={steeringQueued[state.lanes[0].issue]}
+          />
         </Box>
       );
     }
@@ -231,14 +323,32 @@ export function App({
     return view === 'dashboard' ? (
       <Dashboard state={state} selectedIndex={clampedIndex} now={now} repo={repo} stopReason={stopReason} />
     ) : (
-      <RunDetail run={state.lanes[clampedIndex].run} repo={repo} now={now} showBackHint />
+      <RunDetail
+        run={state.lanes[clampedIndex].run}
+        repo={repo}
+        now={now}
+        showBackHint
+        steeringQueued={steeringQueued[state.lanes[clampedIndex].issue]}
+      />
     );
   }
 
+  const composerMissingPaths = composer?.warned
+    ? extractPathCandidates(composer.text).filter((p) => composer.worktree && !pathExists(join(composer.worktree, p)))
+    : [];
+
   return (
     <Box flexDirection="column">
-      {visibleApprovals.length > 0 && (
-        <ApprovalPrompt request={visibleApprovals[0]} pendingCount={visibleApprovals.length} denyReason={denyReason} />
+      {composer ? (
+        <SteeringComposer issue={composer.issue} draft={composer.text} missingPaths={composerMissingPaths} />
+      ) : (
+        visibleApprovals.length > 0 && (
+          <ApprovalPrompt
+            request={visibleApprovals[0]}
+            pendingCount={visibleApprovals.length}
+            denyReason={denyReason}
+          />
+        )
       )}
       <TabBar active={tab} />
       {tab === 'dashboard' && <DashboardPane />}

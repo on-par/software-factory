@@ -64,6 +64,15 @@ const PUBLIC_API_KEYS = [
   'createFileApprovalGate',
   'listPendingApprovals',
   'respondToApproval',
+  // Steering
+  'applySteering',
+  'describeSteering',
+  'drainSteering',
+  'extractPathCandidates',
+  'listQueuedSteering',
+  'MAX_ATTACHMENT_BYTES',
+  'queueSteeringMessage',
+  'steeringFileFor',
   // Reports
   'renderLocalRunReport',
   'writeLocalRunReport',

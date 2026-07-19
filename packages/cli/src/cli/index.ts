@@ -20,13 +20,16 @@ import {
   checkPhase,
   ConstitutionLoader,
   createFileApprovalGate,
+  describeSteering,
   diagnoseModels,
+  drainSteering,
   estimateTrailingSpend,
   fetchSubscriptionUsage,
   formatUsageReport,
   getConstitutionsDir,
   getFactoryPaths,
   isCommandAvailable,
+  listQueuedSteering,
   loadFactoryConfig,
   loadModelsConfig,
   loadRoutesConfig,
@@ -559,6 +562,7 @@ async function cmdTui() {
     queueProposedFile: paths.queueProposed,
     costsFile: paths.costs,
     approvalsDir: paths.approvals,
+    steeringDir: paths.steering,
   });
 }
 
@@ -692,6 +696,13 @@ export async function shipIssue(
     const skipCI = resolveSkipCI(factoryConfig);
 
     // BUILD
+    let buildSteering;
+    if (opts.interactive) {
+      buildSteering = drainSteering(paths.steering, issueNum, worktree);
+      if (buildSteering.messages.length > 0) {
+        mkLog('build')('steering_applied', describeSteering(buildSteering));
+      }
+    }
     const build = await buildPhase({
       issue: issueNum,
       repo: ghRepo,
@@ -706,6 +717,7 @@ export async function shipIssue(
       skipCI,
       modelOverride: modelOverrides.build,
       sandbox: activeSandboxPolicy,
+      steering: buildSteering,
     });
     if (!build.ok) {
       throw new LaneParkError(`build escalated: ${build.escalate ?? 'unknown'}`, 'escalate');
@@ -723,6 +735,7 @@ export async function shipIssue(
       buildTimeoutSeconds: timeouts.build,
       checkTimeoutSeconds: timeouts.check,
       sandbox: activeSandboxPolicy,
+      drainSteering: opts.interactive ? () => drainSteering(paths.steering, issueNum, worktree) : undefined,
     });
     for (const s of check.summary.results.filter((r) => r.result === 'SKIP')) {
       console.error(chalk.yellow(`  SKIP: ${s.checker} — ${s.details}`));
@@ -762,6 +775,13 @@ export async function shipIssue(
 
     if (skipCI) {
       log('skip-ci', `skipping CI watch (FACTORY_SKIP_CI=1) — merging on local verify`);
+    }
+
+    if (opts.interactive) {
+      const leftover = listQueuedSteering(paths.steering, issueNum);
+      if (leftover.length > 0) {
+        log('steering_unconsumed', `${leftover.length} steering message(s) not consumed (no worker phase remained)`);
+      }
     }
 
     log('ready', `PR #${ship.prNumber} ready for review`);

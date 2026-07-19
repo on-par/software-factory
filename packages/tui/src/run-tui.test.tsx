@@ -135,4 +135,28 @@ describe('runTui', () => {
     const [element] = renderFn.mock.calls[0] as unknown as [any, any];
     expect(element.props.approvalsDir).toBe('/repo/.factory/approvals');
   });
+
+  it('forwards steeringDir through to the rendered App', async () => {
+    const stdout = fakeStdout(true);
+    const waitUntilExit = vi.fn().mockResolvedValue(undefined);
+    const renderFn = vi.fn(() => ({
+      rerender: vi.fn(),
+      unmount: vi.fn(),
+      waitUntilExit,
+      cleanup: vi.fn(),
+      clear: vi.fn(),
+    }));
+    const followPlainFn = vi.fn(() => vi.fn());
+
+    await runTui({
+      eventsFile: 'events.ndjson',
+      steeringDir: '/repo/.factory/steering',
+      stdout,
+      render: renderFn as any,
+      followPlainFn,
+    });
+
+    const [element] = renderFn.mock.calls[0] as unknown as [any, any];
+    expect(element.props.steeringDir).toBe('/repo/.factory/steering');
+  });
 });

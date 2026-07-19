@@ -429,3 +429,255 @@ describe('App approvals', () => {
     expect(respondFn).not.toHaveBeenCalled();
   });
 });
+
+describe('App steering composer', () => {
+  it('opens the composer for the active lane on "i"', async () => {
+    const fake = makeFakeFollow();
+    const { lastFrame, stdin } = render(
+      <App eventsFile="ignored" follow={fake.follow} steeringDir="/repo/.factory/steering" />,
+    );
+    fake.push(ev('plan', 'Starting plan phase', '296'));
+    await flush();
+
+    stdin.write('i');
+    await flush();
+
+    expect(lastFrame()).toContain('Steer issue #296');
+    expect(lastFrame()).toContain('Enter send · Esc cancel');
+  });
+
+  it('does not open the composer when steeringDir is unset', async () => {
+    const fake = makeFakeFollow();
+    const { lastFrame, stdin } = render(<App eventsFile="ignored" follow={fake.follow} />);
+    fake.push(ev('plan', 'Starting plan phase', '296'));
+    await flush();
+
+    stdin.write('i');
+    await flush();
+
+    expect(lastFrame()).not.toContain('Steer issue #296');
+  });
+
+  it('does not open the composer over a pending approval, and leaves y/n handling intact', async () => {
+    const fake = makeFakeFollow();
+    const listPendingFn = vi.fn(() => [
+      {
+        id: 'req-1',
+        issue: 296,
+        branch: 'ship-it/296-thing',
+        worktree: '/repo-296',
+        diffStat: '',
+        requestedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+    const respondFn = vi.fn();
+    const { lastFrame, stdin } = render(
+      <App
+        eventsFile="ignored"
+        follow={fake.follow}
+        steeringDir="/repo/.factory/steering"
+        approvalsDir="/repo/.factory/approvals"
+        listPendingFn={listPendingFn}
+        respondFn={respondFn}
+      />,
+    );
+    fake.push(ev('plan', 'Starting plan phase', '296'));
+    await flush();
+
+    stdin.write('i');
+    await flush();
+
+    expect(lastFrame()).not.toContain('Steer issue #296');
+    expect(lastFrame()).toContain('APPROVAL REQUIRED');
+
+    stdin.write('y');
+    await flush();
+
+    expect(respondFn).toHaveBeenCalledWith('/repo/.factory/approvals', 'req-1', { approved: true });
+  });
+
+  it('types text then Enter queues the message and closes the composer', async () => {
+    const fake = makeFakeFollow();
+    const queueSteeringFn = vi.fn();
+    const { lastFrame, stdin } = render(
+      <App
+        eventsFile="ignored"
+        follow={fake.follow}
+        steeringDir="/repo/.factory/steering"
+        queueSteeringFn={queueSteeringFn}
+      />,
+    );
+    fake.push(ev('plan', 'Starting plan phase', '296'));
+    await flush();
+
+    stdin.write('i');
+    await flush();
+    stdin.write('hello there');
+    await flush();
+    await flush(); // extra tick: let useInput's effect resubscribe with the updated draft before Enter
+    stdin.write('\r');
+    await flush();
+
+    expect(queueSteeringFn).toHaveBeenCalledWith('/repo/.factory/steering', 296, 'hello there');
+    expect(lastFrame()).not.toContain('Steer issue #296');
+  });
+
+  it('Escape closes the composer without sending', async () => {
+    const fake = makeFakeFollow();
+    const queueSteeringFn = vi.fn();
+    const { lastFrame, stdin } = render(
+      <App
+        eventsFile="ignored"
+        follow={fake.follow}
+        steeringDir="/repo/.factory/steering"
+        queueSteeringFn={queueSteeringFn}
+      />,
+    );
+    fake.push(ev('plan', 'Starting plan phase', '296'));
+    await flush();
+
+    stdin.write('i');
+    await flush();
+    stdin.write('some text');
+    await flush();
+    stdin.write('\x1B'); // escape
+    await flush();
+
+    expect(queueSteeringFn).not.toHaveBeenCalled();
+    expect(lastFrame()).not.toContain('Steer issue #296');
+  });
+
+  it('lands a multi-line paste into one draft and sends it as a single message', async () => {
+    const fake = makeFakeFollow();
+    const queueSteeringFn = vi.fn();
+    const { stdin } = render(
+      <App
+        eventsFile="ignored"
+        follow={fake.follow}
+        steeringDir="/repo/.factory/steering"
+        queueSteeringFn={queueSteeringFn}
+      />,
+    );
+    fake.push(ev('plan', 'Starting plan phase', '296'));
+    await flush();
+
+    stdin.write('i');
+    await flush();
+    stdin.write('use a\nand b\n plus packages/x.ts');
+    await flush();
+    await flush(); // extra tick: let useInput's effect resubscribe with the updated draft before Enter
+    stdin.write('\r');
+    await flush();
+
+    expect(queueSteeringFn).toHaveBeenCalledTimes(1);
+    expect(queueSteeringFn).toHaveBeenCalledWith('/repo/.factory/steering', 296, 'use a\nand b\n plus packages/x.ts');
+  });
+
+  it('shows a warning on the first Enter when a referenced path is missing, and sends on the second Enter', async () => {
+    const fake = makeFakeFollow();
+    const queueSteeringFn = vi.fn();
+    const pathExists = vi.fn(() => false);
+    const { lastFrame, stdin } = render(
+      <App
+        eventsFile="ignored"
+        follow={fake.follow}
+        steeringDir="/repo/.factory/steering"
+        queueSteeringFn={queueSteeringFn}
+        pathExists={pathExists}
+      />,
+    );
+    fake.push(ev('plan', 'Starting plan phase', '296'));
+    fake.push(ev('worktree', 'Worktree ready at /repo-296', '296'));
+    await flush();
+
+    stdin.write('i');
+    await flush();
+    stdin.write('check packages/missing.ts');
+    await flush();
+    await flush(); // extra tick: let useInput's effect resubscribe with the updated draft before Enter
+    stdin.write('\r');
+    await flush();
+
+    expect(queueSteeringFn).not.toHaveBeenCalled();
+    expect(lastFrame()).toContain('not found in worktree: packages/missing.ts');
+
+    await flush(); // extra tick: let useInput's effect resubscribe with the warned state before the next Enter
+    stdin.write('\r');
+    await flush();
+
+    expect(queueSteeringFn).toHaveBeenCalledWith('/repo/.factory/steering', 296, 'check packages/missing.ts');
+  });
+
+  it('sends on the first Enter when the referenced path exists', async () => {
+    const fake = makeFakeFollow();
+    const queueSteeringFn = vi.fn();
+    const pathExists = vi.fn(() => true);
+    const { lastFrame, stdin } = render(
+      <App
+        eventsFile="ignored"
+        follow={fake.follow}
+        steeringDir="/repo/.factory/steering"
+        queueSteeringFn={queueSteeringFn}
+        pathExists={pathExists}
+      />,
+    );
+    fake.push(ev('plan', 'Starting plan phase', '296'));
+    fake.push(ev('worktree', 'Worktree ready at /repo-296', '296'));
+    await flush();
+
+    stdin.write('i');
+    await flush();
+    stdin.write('check packages/present.ts');
+    await flush();
+    await flush(); // extra tick: let useInput's effect resubscribe with the updated draft before Enter
+    stdin.write('\r');
+    await flush();
+
+    expect(queueSteeringFn).toHaveBeenCalledWith('/repo/.factory/steering', 296, 'check packages/present.ts');
+    expect(lastFrame()).not.toContain('Steer issue #296');
+  });
+
+  it('renders the queued-for-next-phase-boundary count when listSteeringFn returns entries', async () => {
+    const fake = makeFakeFollow();
+    const listSteeringFn = vi.fn(() => [
+      { id: '1', issue: 296, text: 'a', queuedAt: '2026-01-01T00:00:00.000Z' },
+      { id: '2', issue: 296, text: 'b', queuedAt: '2026-01-01T00:00:01.000Z' },
+    ]);
+    const { lastFrame } = render(
+      <App
+        eventsFile="ignored"
+        follow={fake.follow}
+        steeringDir="/repo/.factory/steering"
+        listSteeringFn={listSteeringFn}
+      />,
+    );
+    fake.push(ev('plan', 'Starting plan phase', '296'));
+    await flush();
+    await flush(); // extra tick: let the steering-poll effect re-run now that state.lanes is populated
+
+    expect(lastFrame()).toContain('steering: 2 message(s) queued for next phase boundary');
+  });
+
+  it('keeps navigation keys (q, tab, digits) inert while the composer is open', async () => {
+    const fake = makeFakeFollow();
+    const { lastFrame, stdin } = render(
+      <App eventsFile="ignored" follow={fake.follow} steeringDir="/repo/.factory/steering" />,
+    );
+    fake.push(ev('plan', 'Starting plan phase', '296'));
+    fake.push(ev('plan', 'Starting plan phase', '301'));
+    await flush();
+
+    stdin.write('i');
+    await flush();
+
+    stdin.write('q');
+    await flush();
+    stdin.write('\t');
+    await flush();
+    stdin.write('2');
+    await flush();
+
+    expect(fake.stop).not.toHaveBeenCalled();
+    expect(lastFrame()).toContain('Steer issue #');
+  });
+});

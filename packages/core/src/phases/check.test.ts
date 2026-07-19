@@ -333,6 +333,120 @@ describe('checkPhase success paths', () => {
   });
 });
 
+describe('checkPhase steering', () => {
+  it('invokes drainSteering once per rework round', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router } = makeRouter();
+    let calls = 0;
+    const drainSteering = () => {
+      calls++;
+      return { messages: [], attachments: [] };
+    };
+
+    await checkPhase({
+      issue: 100,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      log: () => {},
+      drainSteering,
+    });
+
+    expect(calls).toBe(3);
+  });
+
+  it('applies drained steering to the rework prompt and logs steering_applied', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const captured: string[] = [];
+    const fakeRouter = {
+      run: async (_task: string, prompt: string, _options: any) => {
+        captured.push(prompt);
+        return { model: 'fake-model', output: 'reworked', exitCode: 0, attempts: [] };
+      },
+    } as any;
+    const logs: Array<{ type: string; msg: string }> = [];
+    const drainSteering = () => ({
+      messages: [
+        { id: 'steer-1', issue: 100, text: 'focus on the lock file bug', queuedAt: '2026-01-01T00:00:00.000Z' },
+      ],
+      attachments: [],
+    });
+
+    await checkPhase({
+      issue: 100,
+      worktree,
+      specPath,
+      router: fakeRouter,
+      constitution: null,
+      log: (type, msg) => logs.push({ type, msg }),
+      drainSteering,
+      autoRework: true,
+    });
+
+    expect(captured[0]).toContain('## Operator guidance (steering)');
+    expect(captured[0]).toContain('focus on the lock file bug');
+    expect(logs.some((l) => l.type === 'steering_applied' && l.msg.includes('steer-1'))).toBe(true);
+  });
+
+  it(
+    'leaves the rework prompt unchanged and logs nothing extra when no drainSteering is passed',
+    { timeout: 120_000 },
+    async () => {
+      const { worktree, specPath } = await makeFailingWorktree();
+      const captured: string[] = [];
+      const fakeRouter = {
+        run: async (_task: string, prompt: string, _options: any) => {
+          captured.push(prompt);
+          return { model: 'fake-model', output: 'reworked', exitCode: 0, attempts: [] };
+        },
+      } as any;
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      await checkPhase({
+        issue: 101,
+        worktree,
+        specPath,
+        router: fakeRouter,
+        constitution: null,
+        log: (type, msg) => logs.push({ type, msg }),
+      });
+
+      expect(captured[0]).not.toContain('## Operator guidance (steering)');
+      expect(logs.some((l) => l.type === 'steering_applied')).toBe(false);
+    },
+  );
+
+  it(
+    'logs no steering_applied event and leaves the prompt unchanged when drainSteering returns empty',
+    { timeout: 120_000 },
+    async () => {
+      const { worktree, specPath } = await makeFailingWorktree();
+      const captured: string[] = [];
+      const fakeRouter = {
+        run: async (_task: string, prompt: string, _options: any) => {
+          captured.push(prompt);
+          return { model: 'fake-model', output: 'reworked', exitCode: 0, attempts: [] };
+        },
+      } as any;
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      await checkPhase({
+        issue: 102,
+        worktree,
+        specPath,
+        router: fakeRouter,
+        constitution: null,
+        log: (type, msg) => logs.push({ type, msg }),
+        drainSteering: () => ({ messages: [], attachments: [] }),
+      });
+
+      expect(captured[0]).not.toContain('## Operator guidance (steering)');
+      expect(logs.some((l) => l.type === 'steering_applied')).toBe(false);
+    },
+  );
+});
+
 describe('disputeResolution', () => {
   const constitution: Constitution = {
     product: 'demo',
