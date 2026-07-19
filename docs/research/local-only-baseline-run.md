@@ -190,9 +190,11 @@ if (process.env.FACTORY_LOCAL_ONLY === '1' && route !== 'codex') {
 }
 ```
 
-In this run the plan model's own frontmatter already said `route: codex`, so
-the force was a no-op — but it would have fired regardless. The `build_codex`
-task requires a model with capability `codex: true`
+The warn fired in this run (see the event log above), which per the guard
+clause means the plan model's own route choice was **not** already `codex` —
+the force is what actually set `route: codex` on the persisted spec (the frozen
+spec quoted above reflects the post-force value, not the model's original
+choice). The `build_codex` task requires a model with capability `codex: true`
 (`packages/config/src/routes.json`). Cross-referencing
 `packages/config/src/models.json`, exactly three models carry `codex: true`:
 
@@ -216,6 +218,13 @@ forced route requires.
 **Failed.** No PR was opened (there is nothing to review-only; the run never
 produced a diff). No merge commands were run (`ship` never calls `land`/`gh pr
 merge` in any case).
+
+The committed scoreboard row (`evals/local-small/baseline-runs.json`) records
+`"model": "qwen2.5-coder:14b"`. That is the PLAN model, not a worker model —
+BUILD never selected or invoked one, since zero models were eligible for
+`build_codex`. It is the only model this run actually exercised, so it is
+recorded as the closest honest answer to "model" the schema requires; a reader
+of the scoreboard should not infer any worker model was attempted.
 
 ## Opus review
 
