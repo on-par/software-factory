@@ -18,9 +18,18 @@ export interface BaselineComparison {
   regressions: string[];
   notes: string[];
   ok: boolean;
+  infraFailure?: { erroredCases: string[]; firstError: string };
 }
 
 const DEFAULT_TOLERANCE: Baseline['tolerance'] = { passRate: 0, rubricScore: 1.0, routeAccuracy: 0 };
+
+function collapse(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function truncate(text: string, limit: number): string {
+  return text.length > limit ? `${text.slice(0, limit)}…` : text;
+}
 
 export function toBaseline(
   summary: EvalSummary,
@@ -47,6 +56,34 @@ export function toBaseline(
 export function compareToBaseline(summary: EvalSummary, baseline: Baseline): BaselineComparison {
   const regressions: string[] = [];
   const notes: string[] = [];
+
+  const errored = summary.results.filter((r) => r.error !== undefined && r.checks.length === 0);
+  if (errored.length === summary.results.length && summary.results.length > 0) {
+    const runIds = new Set(summary.results.map((result) => result.id));
+    const baselineIds = new Set(Object.keys(baseline.cases));
+
+    for (const result of summary.results) {
+      if (!baseline.cases[result.id]) {
+        notes.push(`case '${result.id}' is present in the run but missing from the baseline`);
+      }
+    }
+    for (const id of baselineIds) {
+      if (!runIds.has(id)) {
+        notes.push(`case '${id}' is present in the baseline but missing from the run`);
+      }
+    }
+    notes.push('per-case and routing regressions suppressed: every case failed at execution, not at spec quality');
+
+    const firstError = truncate(collapse(errored[0].error ?? ''), 300);
+    return {
+      regressions: [
+        `eval infrastructure failure: all ${summary.results.length} cases errored before producing a spec — first error: ${firstError}`,
+      ],
+      notes,
+      ok: false,
+      infraFailure: { erroredCases: errored.map((r) => r.id), firstError },
+    };
+  }
 
   if (summary.passRate < baseline.passRate - baseline.tolerance.passRate) {
     regressions.push(

@@ -22,7 +22,7 @@ export class ClaudeCliHarness implements CodingHarness {
     const { model, prompt, worktree, timeoutSeconds, registry, sandbox } = request;
     const flag = registry.getClaudeFlag(model);
     const modelArg = flag ? `--model ${flag}` : '';
-    const cmd = `claude -p ${shellEscape(prompt)} ${modelArg} --dangerously-skip-permissions`;
+    const cmd = `claude -p ${shellEscape(prompt)} ${modelArg} --dangerously-skip-permissions < /dev/null`;
     const finalCmd = sandbox ? wrapCommandInSandbox(cmd, sandbox) : cmd;
 
     let stdout: string;
@@ -37,6 +37,7 @@ export class ClaudeCliHarness implements CodingHarness {
       throw new HarnessError(err.message ?? String(err), reason, {
         exitCode: typeof err.code === 'number' ? err.code : undefined,
         stderr: err.stderr,
+        stdout: typeof err.stdout === 'string' && err.stdout.length > 0 ? err.stdout : undefined,
         code: typeof err.code === 'string' || typeof err.code === 'number' ? err.code : undefined,
         signal: typeof err.signal === 'string' ? err.signal : undefined,
         killed: err.killed === true ? true : undefined,

@@ -99,6 +99,7 @@ describe('ClaudeCliHarness command shape', () => {
     expect(rec.calls[0].cmd).toContain("'draft plan'");
     expect(rec.calls[0].cmd).toContain('--model claude-sonnet-5');
     expect(rec.calls[0].cmd).toContain('--dangerously-skip-permissions');
+    expect(rec.calls[0].cmd).toMatch(/--dangerously-skip-permissions\s*< \/dev\/null$/);
     expect(rec.calls[0].opts.cwd).toBe('/tmp/factory worktree');
     expect(rec.calls[0].opts.timeoutMs).toBe(7 * 1000);
     expect(rec.calls[0].opts.maxBuffer).toBe(10 * 1024 * 1024);
@@ -163,6 +164,32 @@ describe('ClaudeCliHarness failure classification', () => {
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('empty_response');
     expect(err.details.exitCode).toBe(0);
+  });
+
+  it('captures stdout in HarnessError details when the exec error carries it', async () => {
+    const harness = new ClaudeCliHarness(async () => {
+      throw Object.assign(new Error('boom'), {
+        stdout: 'Invalid API key · Please run /login',
+        stderr: '',
+        code: 1,
+      });
+    });
+
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.details.stdout).toBe('Invalid API key · Please run /login');
+  });
+
+  it('omits stdout from details when the exec error carries none', async () => {
+    const harness = new ClaudeCliHarness(async () => {
+      throw Object.assign(new Error('boom'), { stderr: 'rate limit exceeded', code: 1 });
+    });
+
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.details.stdout).toBeUndefined();
   });
 
   it('preserves signal/killed/code in details when the exec error carries them', async () => {

@@ -125,6 +125,39 @@ describe('formatRegressionIssue', () => {
     expect(issueWithoutNotes.body).not.toContain('## Notes');
   });
 
+  it('renders an infrastructure failure blockquote and Errors section when infraFailure is set', () => {
+    const baseline = toBaseline(summaryOf([caseResult({ id: 'a', pass: true }), caseResult({ id: 'b', pass: true })]));
+    const summary = summaryOf([
+      caseResult({ id: 'a', pass: false, route: 'unparseable', checks: [], error: 'fetch failed\n  at boom' }),
+      caseResult({ id: 'b', pass: false, route: 'unparseable', checks: [], error: 'empty output' }),
+    ]);
+    const comparison = compareToBaseline(summary, baseline);
+
+    const issue = formatRegressionIssue(summary, baseline, comparison, 'https://example.test/run');
+
+    expect(issue.body).toContain(
+      '> **Infrastructure failure:** all 2 cases errored before producing a spec. The per-case ❌s below are a symptom of the eval run failing to execute models, not prompt regressions.',
+    );
+    expect(issue.body).toContain('## Errors');
+    expect(issue.body).toContain('- `a`: fetch failed at boom');
+    expect(issue.body).toContain('- `b`: empty output');
+  });
+
+  it('renders an Errors section without a blockquote when infraFailure is absent but a result has an error', () => {
+    const baseline = toBaseline(summaryOf([caseResult({ id: 'a', pass: true }), caseResult({ id: 'b', pass: true })]));
+    const summary = summaryOf([
+      caseResult({ id: 'a', pass: false, route: 'unparseable', checks: [], error: 'fetch failed' }),
+      caseResult({ id: 'b', pass: true }),
+    ]);
+    const comparison = compareToBaseline(summary, baseline);
+
+    const issue = formatRegressionIssue(summary, baseline, comparison, 'https://example.test/run');
+
+    expect(issue.body).not.toContain('**Infrastructure failure:**');
+    expect(issue.body).toContain('## Errors');
+    expect(issue.body).toContain('- `a`: fetch failed');
+  });
+
   it('returns the stable title constant', () => {
     const baseline = toBaseline(summaryOf([caseResult({ id: 'a', pass: true })]));
     const summary = summaryOf([caseResult({ id: 'a', pass: false })]);

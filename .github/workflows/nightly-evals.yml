@@ -29,6 +29,15 @@ jobs:
       - name: Install Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code
 
+      - name: Preflight — require ANTHROPIC_API_KEY
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::ANTHROPIC_API_KEY repo secret is not configured — the Claude CLI cannot authenticate, so the real eval run would fail on every case. Add the secret in repo settings."
+            exit 1
+          fi
+
       - name: Prompt regression eval run
         id: eval
         continue-on-error: true
