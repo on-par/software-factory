@@ -5,6 +5,7 @@ import { buildConstitutionContext } from '../constitutions/index.js';
 import type { ModelRouter } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
+import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
 import type { CheckSummary, Constitution, DisputeResult, FailoverReason } from '../types/index.js';
 
 type LogFn = (type: string, msg: string, extra?: { failoverReason?: FailoverReason }) => void;
@@ -28,6 +29,7 @@ export async function checkPhase(opts: {
   buildTimeoutSeconds?: number;
   checkTimeoutSeconds?: number;
   sandbox?: SandboxPolicy;
+  drainSteering?: () => ConsumedSteering;
 }): Promise<CheckPhaseResult> {
   const {
     issue,
@@ -40,6 +42,7 @@ export async function checkPhase(opts: {
     buildTimeoutSeconds,
     checkTimeoutSeconds,
     sandbox,
+    drainSteering,
   } = opts;
 
   const ctx: CheckerContext = { worktree, specPath };
@@ -54,7 +57,23 @@ export async function checkPhase(opts: {
     reworkRounds++;
     log('rework', `${summary.failures} failures — sending back to worker (round ${reworkRounds})`);
 
-    await reworkWorker(issue, worktree, specPath, summary, constitution, router, log, buildTimeoutSeconds, sandbox);
+    const steering = drainSteering?.();
+    if (steering && steering.messages.length > 0) {
+      log('steering_applied', describeSteering(steering));
+    }
+
+    await reworkWorker(
+      issue,
+      worktree,
+      specPath,
+      summary,
+      constitution,
+      router,
+      log,
+      buildTimeoutSeconds,
+      sandbox,
+      steering,
+    );
 
     summary = await runAllCheckers(ctx, router, constitution, checkTimeoutSeconds);
     log('check', `Rework round ${reworkRounds}: ${summary.failures} failures remaining`);
@@ -87,12 +106,13 @@ async function reworkWorker(
   log: LogFn,
   timeoutSeconds?: number,
   sandbox?: SandboxPolicy,
+  steering?: ConsumedSteering,
 ): Promise<void> {
   const constitutionCtx = buildConstitutionContext(constitution);
   const failures = summary.results.filter((r) => r.result === 'FAIL');
   const failureDetails = failures.map((f) => `### ${f.checker}\n${f.details}`).join('\n\n');
 
-  const prompt = `You are a WORKER agent in the rework loop of a software factory.
+  let prompt = `You are a WORKER agent in the rework loop of a software factory.
 Your previous work on issue #${issue} failed independent verification. Fix the
 specific failures listed below.
 
@@ -113,6 +133,8 @@ ${failureDetails}
 5. Commit your fixes with a clear message.
 
 Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`;
+
+  prompt = applySteering(prompt, steering);
 
   const reworkResult = await router
     .run('build_claude', prompt, {

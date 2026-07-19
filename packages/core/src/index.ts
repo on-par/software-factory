@@ -86,6 +86,19 @@ export { shipPhase } from './phases/ship.js';
 export type { ApprovalGate, ApprovalRequest, ApprovalResponse, FileApprovalGateOptions } from './approvals/index.js';
 export { createFileApprovalGate, listPendingApprovals, respondToApproval } from './approvals/index.js';
 
+// Steering
+export type { ConsumedSteering, SteeringAttachment, SteeringMessage } from './steering/index.js';
+export {
+  applySteering,
+  describeSteering,
+  drainSteering,
+  extractPathCandidates,
+  listQueuedSteering,
+  MAX_ATTACHMENT_BYTES,
+  queueSteeringMessage,
+  steeringFileFor,
+} from './steering/index.js';
+
 // Reports
 export type { LocalRunOutcome, LocalRunReport, LocalRunReportDeps, LocalRunReportInput } from './reports/local-run.js';
 export { renderLocalRunReport, writeLocalRunReport } from './reports/local-run.js';

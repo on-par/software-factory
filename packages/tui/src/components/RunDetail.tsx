@@ -11,15 +11,19 @@ export interface RunDetailProps {
   repo?: string;
   now: number;
   showBackHint?: boolean;
+  steeringQueued?: number;
 }
 
-export function RunDetail({ run, repo, now, showBackHint }: RunDetailProps): JSX.Element {
+export function RunDetail({ run, repo, now, showBackHint, steeringQueued }: RunDetailProps): JSX.Element {
   const hasEvents = run.feed.length > 0;
 
   return (
     <Box flexDirection="column">
       <Header issue={run.issue} repo={repo} done={run.done} />
       {hasEvents ? <PhaseRow state={run} now={now} /> : <Text dimColor>waiting for factory events…</Text>}
+      {!!steeringQueued && (
+        <Text dimColor>{`steering: ${steeringQueued} message(s) queued for next phase boundary`}</Text>
+      )}
       <EventFeed events={run.feed} />
       {showBackHint && <Text dimColor>esc back · q quit</Text>}
     </Box>

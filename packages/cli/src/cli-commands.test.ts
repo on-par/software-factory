@@ -51,6 +51,7 @@ const h = vi.hoisted(() => {
       queueFile?: string;
       queueProposedFile?: string;
       costsFile?: string;
+      steeringDir?: string;
     }>,
   };
 });
@@ -85,6 +86,7 @@ vi.mock('@on-par/factory-tui', () => ({
       queueFile?: string;
       queueProposedFile?: string;
       costsFile?: string;
+      steeringDir?: string;
     }) => {
       h.runTuiCalls.push(opts);
     },
@@ -195,6 +197,7 @@ function paths() {
     stop: join(state, 'STOP'),
     costs: join(state, 'costs.jsonl'),
     reports: join(state, 'reports'),
+    steering: join(state, 'steering'),
   };
 }
 
@@ -572,6 +575,7 @@ describe('cli commands (via main dispatch)', () => {
       expect(h.runTuiCalls[0].queueFile?.endsWith(join('.factory', 'queue'))).toBe(true);
       expect(h.runTuiCalls[0].queueProposedFile?.endsWith(join('.factory', 'queue.proposed'))).toBe(true);
       expect(h.runTuiCalls[0].costsFile?.endsWith(join('.factory', 'costs.jsonl'))).toBe(true);
+      expect(h.runTuiCalls[0].steeringDir?.endsWith(join('.factory', 'steering'))).toBe(true);
     });
 
     it('calls runTui with repo undefined when gh repo detection fails', async () => {
@@ -1139,6 +1143,66 @@ describe('shipIssue (direct)', () => {
     await expect(shipIssue(5, {}, ctx())).rejects.toBeTruthy();
     const report = vi.mocked(core.writeLocalRunReport).mock.calls.at(-1)?.[0] as any;
     expect(report.outcome).toBe('failed');
+  });
+
+  describe('steering', () => {
+    function writeQueuedSteering() {
+      mkdirSync(paths().steering, { recursive: true });
+      writeFileSync(
+        join(paths().steering, 'issue-5.ndjson'),
+        `${JSON.stringify({ id: 'steer-1', issue: 5, text: 'prefer approach B', queuedAt: '2026-01-01T00:00:00.000Z' })}\n`,
+      );
+    }
+
+    it('drains queued steering into buildPhase and logs steering_applied when interactive', async () => {
+      writeQueuedSteering();
+      const core = await import('@on-par/factory-core');
+
+      await shipIssue(5, { interactive: true }, ctx());
+
+      const buildCall = vi.mocked(core.buildPhase).mock.calls.at(-1)?.[0] as any;
+      expect(buildCall.steering.messages).toEqual([
+        { id: 'steer-1', issue: 5, text: 'prefer approach B', queuedAt: '2026-01-01T00:00:00.000Z' },
+      ]);
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('steering_applied');
+      expect(existsSync(join(paths().steering, 'issue-5.ndjson'))).toBe(false);
+    });
+
+    it('passes a drainSteering callback to checkPhase that drains the same issue steering queue', async () => {
+      const core = await import('@on-par/factory-core');
+
+      await shipIssue(5, { interactive: true }, ctx());
+
+      const checkCall = vi.mocked(core.checkPhase).mock.calls.at(-1)?.[0] as any;
+      expect(typeof checkCall.drainSteering).toBe('function');
+
+      mkdirSync(paths().steering, { recursive: true });
+      writeFileSync(
+        join(paths().steering, 'issue-5.ndjson'),
+        `${JSON.stringify({ id: 'steer-2', issue: 5, text: 'follow up guidance', queuedAt: '2026-01-01T00:00:00.000Z' })}\n`,
+      );
+
+      const drained = checkCall.drainSteering();
+      expect(drained.messages).toEqual([
+        { id: 'steer-2', issue: 5, text: 'follow up guidance', queuedAt: '2026-01-01T00:00:00.000Z' },
+      ]);
+    });
+
+    it('does not drain steering, and passes steering: undefined, when not interactive', async () => {
+      writeQueuedSteering();
+      const core = await import('@on-par/factory-core');
+
+      await shipIssue(5, {}, ctx());
+
+      const buildCall = vi.mocked(core.buildPhase).mock.calls.at(-1)?.[0] as any;
+      expect(buildCall.steering).toBeUndefined();
+      const checkCall = vi.mocked(core.checkPhase).mock.calls.at(-1)?.[0] as any;
+      expect(checkCall.drainSteering).toBeUndefined();
+      expect(existsSync(join(paths().steering, 'issue-5.ndjson'))).toBe(true);
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).not.toContain('steering_applied');
+    });
   });
 });
 

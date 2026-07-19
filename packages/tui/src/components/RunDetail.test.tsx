@@ -41,4 +41,17 @@ describe('RunDetail', () => {
     const withoutHint = render(<RunDetail run={run} now={NOW} />);
     expect(withoutHint.lastFrame()).not.toContain('esc back');
   });
+
+  it('shows the queued steering count when greater than zero', () => {
+    const { lastFrame } = render(<RunDetail run={initialState()} now={NOW} steeringQueued={2} />);
+    expect(lastFrame()).toContain('steering: 2 message(s) queued for next phase boundary');
+  });
+
+  it('omits the queued steering line when zero or unset', () => {
+    const zero = render(<RunDetail run={initialState()} now={NOW} steeringQueued={0} />);
+    expect(zero.lastFrame()).not.toContain('queued for next phase boundary');
+
+    const unset = render(<RunDetail run={initialState()} now={NOW} />);
+    expect(unset.lastFrame()).not.toContain('queued for next phase boundary');
+  });
 });

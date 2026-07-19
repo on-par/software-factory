@@ -15,6 +15,7 @@ export interface LaneState {
   startedAt: string;
   finishedAt?: string;
   waitingSince?: string;
+  worktree?: string;
 }
 
 export interface DashboardState {
@@ -62,6 +63,8 @@ export function reduceDashboard(state: DashboardState, e: FactoryEvent): Dashboa
     };
   } else if (e.type === 'issue-title') {
     lane = { ...lane, title: e.msg };
+  } else if (e.type === 'worktree') {
+    lane = { ...lane, worktree: e.msg.match(/Worktree ready at (.+)$/)?.[1] ?? lane.worktree };
   } else if (e.type === 'ready') {
     lane = { ...lane, status: 'ready', prNumber: e.msg.match(/PR #(\d+)/)?.[1] ?? lane.prNumber };
   } else if (e.type === 'await-merge') {
