@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { PipelineTestKit } from '../test-support/index.js';
 import {
   branchFor,
   branchPrefixSlug,
@@ -12,11 +13,14 @@ import {
   codexDisabled,
   ensureDir,
   escalationLine,
+  getIssueTitle,
+  gitFetch,
   isEscalation,
   logCost,
   logEvent,
   readCosts,
   readJsonIfExists,
+  setupWorktree,
   shellEscape,
   slugify,
 } from './index.js';
@@ -99,6 +103,32 @@ describe('utils', () => {
     await expect(cleanupWorktree(tmpDir, worktreePath, spy)).resolves.toBeUndefined();
 
     expect(spy).toHaveBeenCalledWith('warn', expect.stringContaining('nonexistent-wt'));
+  });
+
+  it('does not throw when called without a log callback', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-cleanup-'));
+    const worktreePath = join(tmpDir, 'nonexistent-wt');
+
+    await expect(cleanupWorktree(tmpDir, worktreePath)).resolves.toBeUndefined();
+  });
+
+  it('fetches the issue title, splitting owner/repo from the "owner/repo" string', async () => {
+    const calls: any[] = [];
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async (args: any) => {
+            calls.push(args);
+            return { data: { title: 'Fetched title' } };
+          },
+        },
+      },
+    };
+
+    const title = await getIssueTitle('on-par/software-factory', 133, octokit);
+
+    expect(title).toBe('Fetched title');
+    expect(calls).toEqual([{ owner: 'on-par', repo: 'software-factory', issue_number: 133 }]);
   });
 
   it('appends events as NDJSON with a level derived from type', async () => {
@@ -185,6 +215,16 @@ describe('utils', () => {
     expect(Object.keys(parsed).sort()).toEqual(['issue', 'level', 'msg', 'ts', 'type']);
   });
 
+  it('honors an explicit level override instead of the type-derived one', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+
+    logEvent(eventsFile, 'plan', 85, 'forced error level', { level: 'error' });
+
+    const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter(Boolean);
+    expect(JSON.parse(lines[0]).level).toBe('error');
+  });
+
   it('creates missing directories when logging events', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
     const eventsFile = join(tmpDir, 'nested', 'sub', 'events.ndjson');
@@ -201,6 +241,24 @@ describe('utils', () => {
       msg: 'created',
       level: 'info',
     });
+  });
+
+  it('creates the missing parent directory when the costs file cannot be appended to directly', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-costs-'));
+    const costsFile = join(tmpDir, 'nested', 'sub', 'costs.ndjson');
+    const entry = {
+      issue: '85',
+      task: 'plan',
+      model: 'claude-opus-4-8',
+      inputTokens: 10,
+      outputTokens: 5,
+      cost: 0,
+    };
+
+    logCost(costsFile, entry);
+
+    expect(existsSync(costsFile)).toBe(true);
+    expect(readCosts(costsFile)).toEqual([{ ...entry, ts: expect.any(String) }]);
   });
 
   it('round-trips costs with timestamps', async () => {
@@ -336,6 +394,46 @@ describe('utils', () => {
 
     writeFileSync(invalidFile, 'not json{');
     expect(readJsonIfExists(invalidFile, fallback)).toBe(fallback);
+  });
+});
+
+describe('gitFetch / setupWorktree', () => {
+  const kit = new PipelineTestKit();
+
+  afterEach(async () => {
+    await kit.cleanup();
+  });
+
+  it('fetches from origin without throwing on a repo with a remote', async () => {
+    const { repoRoot } = await kit.makeThrowawayRepo();
+
+    await expect(gitFetch(repoRoot)).resolves.toBeUndefined();
+  });
+
+  it('rejects when the repo has no fetchable remote', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-nogit-'));
+
+    await expect(gitFetch(tmpDir)).rejects.toThrow();
+  });
+
+  it('creates a fresh worktree and branch from origin/main, swallowing pre-cleanup errors on the first run', async () => {
+    const { repoRoot } = await kit.makeThrowawayRepo();
+    const worktree = kit.trackWorktree(repoRoot, 201);
+
+    await setupWorktree(repoRoot, 'ship-it/201-fresh-worktree', worktree);
+
+    expect(existsSync(join(worktree, 'README.md'))).toBe(true);
+  });
+
+  it('removes and recreates an existing worktree and branch on a second setup call', async () => {
+    const { repoRoot } = await kit.makeThrowawayRepo();
+    const worktree = kit.trackWorktree(repoRoot, 202);
+    const branch = 'ship-it/202-rerun-worktree';
+
+    await setupWorktree(repoRoot, branch, worktree);
+    await setupWorktree(repoRoot, branch, worktree);
+
+    expect(existsSync(join(worktree, 'README.md'))).toBe(true);
   });
 });
 

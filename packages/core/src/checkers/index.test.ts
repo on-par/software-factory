@@ -1,6 +1,7 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -15,6 +16,7 @@ import {
   compileChecker,
   fileExists,
   linksChecker,
+  lintChecker,
   runAllCheckers,
   runCustomChecker,
   testsChecker,
@@ -81,6 +83,16 @@ function makeContext(worktree: string): CheckerContext {
 function makeRouter(output: string): { router: ModelRouter; stub: StubModelExecutor } {
   const stub = new StubModelExecutor({ scripts: { check_custom: [{ output }] } });
   return { router: new ModelRouter(models, routes, false, stub), stub };
+}
+
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
+
+/** npx resolves tsc by walking up from cwd — symlink the repo's real typescript install into the worktree. */
+async function linkTypescript(worktree: string): Promise<void> {
+  const binDir = join(worktree, 'node_modules', '.bin');
+  await mkdir(binDir, { recursive: true });
+  await symlink(join(repoRoot, 'node_modules', 'typescript'), join(worktree, 'node_modules', 'typescript'), 'dir');
+  await symlink(join(repoRoot, 'node_modules', 'typescript', 'bin', 'tsc'), join(binDir, 'tsc'), 'file');
 }
 
 describe('compileChecker', () => {
@@ -267,6 +279,89 @@ describe('testsChecker', () => {
     expect(result.result).toBe('FAIL');
     expect(result.details).toContain('unexpected checker error');
   });
+
+  it('passes when npm test exits successfully and no scripts/verify.sh is present', { timeout: 30000 }, async () => {
+    const worktree = await makeWorktree({
+      'package.json': '{"name":"fixture","version":"1.0.0","scripts":{"test":"node -e \\"process.exit(0)\\""}}',
+    });
+
+    const result = await testsChecker(makeContext(worktree));
+
+    expect(result.result).toBe('PASS');
+    expect(result.details).toContain('npm test: OK');
+  });
+
+  it('fails when npm test exits unsuccessfully and no scripts/verify.sh is present', { timeout: 30000 }, async () => {
+    const worktree = await makeWorktree({
+      'package.json': '{"name":"fixture","version":"1.0.0","scripts":{"test":"node -e \\"process.exit(1)\\""}}',
+    });
+
+    const result = await testsChecker(makeContext(worktree));
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain('npm test failed');
+  });
+});
+
+describe('lintChecker', () => {
+  it('passes when npm run lint exits successfully', { timeout: 30000 }, async () => {
+    const worktree = await makeWorktree({
+      'package.json': '{"name":"fixture","version":"1.0.0","scripts":{"lint":"node -e \\"process.exit(0)\\""}}',
+    });
+
+    const result = await lintChecker(makeContext(worktree));
+
+    expect(result.result).toBe('PASS');
+    expect(result.details).toContain('eslint: OK');
+  });
+
+  it('fails when npm run lint exits unsuccessfully', { timeout: 30000 }, async () => {
+    const worktree = await makeWorktree({
+      'package.json': '{"name":"fixture","version":"1.0.0","scripts":{"lint":"node -e \\"process.exit(1)\\""}}',
+    });
+
+    const result = await lintChecker(makeContext(worktree));
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain('eslint failed');
+  });
+
+  it('passes tsc --noEmit against a type-correct tsconfig project', { timeout: 60000 }, async () => {
+    const worktree = await makeWorktree({
+      'tsconfig.json': '{"compilerOptions":{"strict":true,"noEmit":true},"include":["index.ts"]}',
+      'index.ts': 'export const x: number = 1;\n',
+    });
+    await linkTypescript(worktree);
+
+    const result = await lintChecker(makeContext(worktree));
+
+    expect(result.result).toBe('PASS');
+    expect(result.details).toContain('tsc: OK');
+  });
+
+  it('fails tsc --noEmit against a project with a real type error', { timeout: 60000 }, async () => {
+    const worktree = await makeWorktree({
+      'tsconfig.json': '{"compilerOptions":{"strict":true,"noEmit":true},"include":["index.ts"]}',
+      'index.ts': 'export const x: number = "not a number";\n',
+    });
+    await linkTypescript(worktree);
+
+    const result = await lintChecker(makeContext(worktree));
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain('tsc failed');
+  });
+
+  it('reports skipped when no lint script and no tsconfig.json are present', async () => {
+    const worktree = await makeWorktree({
+      'package.json': '{"name":"fixture","version":"1.0.0"}',
+    });
+
+    const result = await lintChecker(makeContext(worktree));
+
+    expect(result.result).toBe('PASS');
+    expect(result.details).toContain('no linting configured — skipped');
+  });
 });
 
 describe('linksChecker', () => {
@@ -338,6 +433,24 @@ describe('linksChecker', () => {
       expect(await fileExists(join(worktree, 'pwned'))).toBe(false);
       expect(await fileExists(join(process.cwd(), 'pwned'))).toBe(false);
     });
+  });
+
+  it('silently skips a subdirectory that cannot be read during traversal', async () => {
+    const worktree = await makeWorktree({
+      'index.html': '<a href="https://example.com">ok</a>',
+      'locked/inner.html': '<a href="#">nope</a>',
+    });
+    const lockedDir = join(worktree, 'locked');
+    await chmod(lockedDir, 0o000);
+
+    try {
+      const result = await linksChecker(makeContext(worktree));
+
+      expect(result.result).toBe('PASS');
+      expect(result.linksChecked).toBe(1);
+    } finally {
+      await chmod(lockedDir, 0o755);
+    }
   });
 
   it('deduplicates URLs across files and excludes non-http-ish/fragment links', async () => {

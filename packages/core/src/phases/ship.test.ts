@@ -201,6 +201,147 @@ describe('shipPhase self-healing', () => {
     expect(logs).toContainEqual(['ship', 'not recovering ship-it/23-self-heal: worktree has uncommitted changes']);
   });
 
+  it('does not push or open a PR when there are no commits ahead of origin/main', async () => {
+    const { octokit, calls } = createOctokit();
+    const commands: string[] = [];
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      commands.push(command);
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '0\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(commands).toEqual(['git status --porcelain', 'git rev-list --count origin/main..HEAD']);
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
+    expect(logs).toContainEqual(['ship', 'not recovering ship-it/23-self-heal: no commits ahead of origin/main']);
+  });
+
+  it('logs and continues when git push fails instead of aborting the recovery', async () => {
+    const { octokit, calls } = createOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command.startsWith('git push')) throw new Error('remote rejected');
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 123 });
+    expect(logs).toContainEqual(['ship', 'push failed — trying to continue']);
+    expect(calls).toContainEqual(['pulls.create', expect.anything()]);
+  });
+
+  it('falls through to pulls.create when findOpenPR throws', async () => {
+    const { octokit, calls } = createOctokit();
+    octokit.rest.pulls.list = async (args: any) => {
+      calls.push(['pulls.list', args]);
+      throw new Error('list failed');
+    };
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 123 });
+    expect(calls).toContainEqual(['pulls.create', expect.anything()]);
+  });
+
+  it('builds the PR body with an empty diff stat when computeDiffStat throws', async () => {
+    const { octokit, calls } = createOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --stat origin/main...HEAD') throw new Error('diff failed');
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 123 });
+    expect(calls).toContainEqual([
+      'pulls.create',
+      expect.objectContaining({ body: expect.stringContaining('```\n\n```') }),
+    ]);
+  });
+
+  it('still completes and logs ready when marking the PR ready for review throws', async () => {
+    const { octokit, calls } = createOctokit();
+    octokit.rest.pulls.get = async (args: any) => {
+      calls.push(['pulls.get', args]);
+      throw new Error('pulls.get failed');
+    };
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 123 });
+    expect(logs).toContainEqual(['ready', 'PR #123 ready for review']);
+  });
+
   it('reports fail and returns not ok when a PR cannot be created or found', async () => {
     const { octokit, calls } = createOctokit();
     octokit.rest.pulls.create = async (args: any) => {
@@ -321,6 +462,29 @@ describe('shipPhase CI watch', () => {
       vi.useRealTimers();
     }
   });
+
+  it('still logs ready when watching CI throws', async () => {
+    const { octokit } = createWatchOctokit([allSuccess]);
+    octokit.rest.checks.listForRef = async () => {
+      throw new Error('checks API unavailable');
+    };
+    const logs: Array<[string, string]> = [];
+    const run = async () => ({ stdout: '' });
+
+    const result = await shipPhase({
+      issue: 123,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-123',
+      branch: 'ship-it/123-ci-poll',
+      octokit: octokit as any,
+      watchCI: true,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 123 });
+    expect(logs).toContainEqual(['ready', 'PR #123 ready for review']);
+  });
 });
 
 describe('shipPhase approval gate', () => {
@@ -412,6 +576,32 @@ describe('shipPhase approval gate', () => {
     expect(logs).toContainEqual(['ship_denied', 'ship denied for ship-it/23-self-heal: not today']);
     // A 'ship'-typed event fires first so a denial doesn't misreport the TUI's failed phase as CHECK/BUILD.
     expect(logs[0]).toEqual(['ship', 'Starting ship phase for ship-it/23-self-heal']);
+  });
+
+  it('denies with the default "denied" reason when the gate response omits one', async () => {
+    const { octokit, calls } = createOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+    const approvalGate = vi.fn(async () => ({ id: 'a3', approved: false, respondedAt: new Date().toISOString() }));
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+      approvalGate,
+    });
+
+    expect(result).toEqual({ ok: false, denied: true, deniedReason: 'denied' });
+    expect(calls).toEqual([]);
+    expect(logs).toContainEqual(['ship_denied', 'ship denied for ship-it/23-self-heal: denied']);
   });
 
   it('no gate: behaves exactly like the non-interactive path (no approval_requested/granted logs)', async () => {

@@ -386,6 +386,41 @@ describe('buildPhase sandbox', () => {
     expect(logs).toContainEqual({ type: 'sandbox_violation', msg: 'Operation not permitted' });
   });
 
+  it('logs an allow-list sandbox start event when the policy grants allowHosts', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-93.md');
+    const sandbox: SandboxPolicy = {
+      runtime: 'sandbox-exec',
+      worktree,
+      writablePaths: [worktree],
+      allowHosts: ['example.com'],
+      cpuMs: 300_000,
+      memMb: 4096,
+    };
+    const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'claude output' }] } });
+    const router = new ModelRouter(models, routes, false, stub);
+    const logs: Array<{ type: string; msg: string }> = [];
+
+    const result = await buildPhase({
+      issue: 93,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/93-sandbox-allow-list',
+      route: 'claude',
+      router,
+      constitution: null,
+      log: (type, msg) => {
+        logs.push({ type, msg });
+      },
+      sandbox,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(logs).toContainEqual({ type: 'sandbox', msg: 'containment active (runtime sandbox-exec, net allow-list)' });
+  });
+
   it('does not log a sandbox start event when no sandbox policy is set', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);
@@ -445,5 +480,70 @@ describe('buildPhase failover events', () => {
       expect.stringContaining('usage_cap'),
       { failoverReason: 'usage_cap' },
     ]);
+  });
+
+  it('omits the detail suffix from the failover log when the failed attempt carries no descriptive detail', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-93.md');
+    let calls = 0;
+    const executor = {
+      async runModel() {
+        calls++;
+        if (calls === 1) throw new Error('');
+        return 'claude output';
+      },
+    };
+    const router = new ModelRouter(models, routes, false, executor as any);
+    const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
+
+    const result = await buildPhase({
+      issue: 94,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/94-no-detail-failover',
+      route: 'claude',
+      router,
+      constitution: null,
+      log: (type, msg, extra) => {
+        logCalls.push([type, msg, extra]);
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    const failoverLog = logCalls.find(([type]) => type === 'failover');
+    expect(failoverLog?.[1]).toMatch(/failed \(unknown\) — failed over$/);
+  });
+});
+
+describe('buildPhase timeoutSeconds', () => {
+  it('forwards a custom timeoutSeconds to router.run instead of the 7200s default', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-95.md');
+    const captured: { options?: any } = {};
+    const fakeRouter = {
+      run: async (_task: string, _prompt: string, options: any) => {
+        captured.options = options;
+        return { model: 'fake-model', output: 'done', exitCode: 0, attempts: [] };
+      },
+    } as any;
+
+    const result = await buildPhase({
+      issue: 95,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/95-timeout',
+      route: 'claude',
+      router: fakeRouter,
+      constitution: null,
+      log: () => {},
+      timeoutSeconds: 123,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(captured.options.timeoutSeconds).toBe(123);
   });
 });

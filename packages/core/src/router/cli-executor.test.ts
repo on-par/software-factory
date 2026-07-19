@@ -386,6 +386,53 @@ describe('CliModelExecutor', () => {
     },
   );
 
+  it('rejects with an unknown-model error when the registry has no definition for it', async () => {
+    const { fn } = recordingExec();
+    const executor = new CliModelExecutor(fn);
+
+    await expect(
+      executor.runModel('no-such-model', 'p', {
+        worktree,
+        timeoutSeconds,
+        task: 'plan',
+        registry,
+        routesConfig,
+      }),
+    ).rejects.toThrow('Unknown model: no-such-model');
+  });
+
+  it('rejects with an unknown-harness error when the declared harness id has no dispatch entry', async () => {
+    const { fn } = recordingExec();
+    const executor = new CliModelExecutor(fn);
+    const bogusHarnessConfig: ModelsConfig = {
+      ...modelsConfig,
+      models: {
+        ...modelsConfig.models,
+        'bogus-harness-model': {
+          provider: 'custom',
+          tier: 'boss',
+          costPerMtokInput: 0,
+          costPerMtokOutput: 0,
+          contextWindow: 1000,
+          capabilities: [],
+          envKey: null,
+          harness: 'totally-bogus',
+        },
+      },
+    };
+    const bogusRegistry = new ModelRegistry(bogusHarnessConfig);
+
+    await expect(
+      executor.runModel('bogus-harness-model', 'p', {
+        worktree,
+        timeoutSeconds,
+        task: 'plan',
+        registry: bogusRegistry,
+        routesConfig,
+      }),
+    ).rejects.toThrow(/declares unknown harness 'totally-bogus'/);
+  });
+
   it('throws a clear missing-harness error when no harness id resolves', async () => {
     const { fn } = recordingExec();
     const executor = new CliModelExecutor(fn);
@@ -536,6 +583,148 @@ describe('CliModelExecutor', () => {
     expect(output).toContain('AUTO-COMMIT: committed 1 changed path(s).');
     expect(execCalls).toContain('git add -- \'fresh.txt\' && git commit -m "feat: implement factory issue"');
     expect(execCalls).not.toContain('git add -- \'preexisting.txt\' && git commit -m "feat: implement factory issue"');
+  });
+
+  it('resolves a git status rename line to its new path when auto-committing', async () => {
+    const execCalls: string[] = [];
+    const execFn = async (cmd: string) => {
+      execCalls.push(cmd);
+      if (cmd === 'git status --short' && execCalls.length === 1) return { stdout: '', stderr: '' };
+      if (cmd === 'git status --short') return { stdout: 'R  old.txt -> new.txt\n', stderr: '' };
+      return { stdout: 'ok', stderr: '' };
+    };
+    const fetchFn = async () => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      text: async () => '',
+      json: async () => ({ message: { content: '{"commands":[],"done":true,"final":"done"}' } }),
+    });
+    const executor = new CliModelExecutor(execFn, fetchFn as any);
+
+    await executor.runModel('ollama-codex-model', 'build it', {
+      worktree,
+      timeoutSeconds,
+      task: 'build_codex',
+      registry,
+      routesConfig,
+    });
+
+    expect(execCalls).toContain('git add -- \'new.txt\' && git commit -m "feat: implement factory issue"');
+  });
+
+  it('parses fenced bash commands when the response carries no JSON action', async () => {
+    const execCalls: string[] = [];
+    const execFn = async (cmd: string) => {
+      execCalls.push(cmd);
+      if (cmd === 'git status --short') return { stdout: '', stderr: '' };
+      return { stdout: 'ok', stderr: '' };
+    };
+    const fetchCalls: string[] = [];
+    const fetchFn = async () => {
+      fetchCalls.push('call');
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => '',
+        json: async () => ({
+          message: {
+            content:
+              fetchCalls.length === 1
+                ? '```bash\nprintf hi > fenced.txt\n```'
+                : '{"commands":[],"done":true,"final":"done"}',
+          },
+        }),
+      };
+    };
+    const executor = new CliModelExecutor(execFn, fetchFn as any);
+
+    await executor.runModel('ollama-codex-model', 'build it', {
+      worktree,
+      timeoutSeconds,
+      task: 'build_codex',
+      registry,
+      routesConfig,
+    });
+
+    expect(execCalls).toContain('printf hi > fenced.txt');
+  });
+
+  it('extracts a JSON action wrapped in a fenced json code block', async () => {
+    const execCalls: string[] = [];
+    const execFn = async (cmd: string) => {
+      execCalls.push(cmd);
+      if (cmd === 'git status --short') return { stdout: '', stderr: '' };
+      return { stdout: 'ok', stderr: '' };
+    };
+    const fetchCalls: string[] = [];
+    const fetchFn = async () => {
+      fetchCalls.push('call');
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => '',
+        json: async () => ({
+          message: {
+            content:
+              fetchCalls.length === 1
+                ? '```json\n{"commands":["printf hi > fencedjson.txt"],"done":false,"final":"created"}\n```'
+                : '{"commands":[],"done":true,"final":"done"}',
+          },
+        }),
+      };
+    };
+    const executor = new CliModelExecutor(execFn, fetchFn as any);
+
+    await executor.runModel('ollama-codex-model', 'build it', {
+      worktree,
+      timeoutSeconds,
+      task: 'build_codex',
+      registry,
+      routesConfig,
+    });
+
+    expect(execCalls).toContain('printf hi > fencedjson.txt');
+  });
+
+  it('treats a brace-containing but syntactically invalid response as invalid_json and retries via repair', async () => {
+    tmpWorktree = await mkdtemp(join(tmpdir(), 'factory-command-agent-'));
+    const execFn = async (cmd: string) => {
+      if (cmd === 'git status --short') return { stdout: '', stderr: '' };
+      return { stdout: 'ok', stderr: '' };
+    };
+    const fetchCalls: string[] = [];
+    const fetchFn = async () => {
+      fetchCalls.push('call');
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => '',
+        json: async () => ({
+          message: {
+            content: fetchCalls.length === 1 ? '{not valid json at all}' : '{"commands":[],"done":true,"final":"done"}',
+          },
+        }),
+      };
+    };
+    const executor = new CliModelExecutor(execFn, fetchFn as any);
+
+    const output = await executor.runModel('ollama-codex-model', 'build it', {
+      worktree: tmpWorktree,
+      timeoutSeconds,
+      task: 'build_codex',
+      registry,
+      routesConfig,
+    });
+
+    expect(output).toContain('REPAIR STEP 1');
+    const traceDir = join(tmpWorktree, '.factory', 'local-agent-traces');
+    const traceFile = readdirSync(traceDir).find((f) => f.endsWith('.json'));
+    const trace = JSON.parse(readFileSync(join(traceDir, traceFile!), 'utf-8'));
+    expect(trace.malformedReason).toBe('invalid_json');
   });
 
   it('drives ollama+codex models through the native command agent, never codex exec (#172)', async () => {

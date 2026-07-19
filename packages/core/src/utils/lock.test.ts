@@ -1,4 +1,14 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -236,5 +246,93 @@ describe('withFileLock', () => {
 
     expect(fn).not.toHaveBeenCalled();
     expect(onSteal).not.toHaveBeenCalled();
+  });
+
+  it('defaultIsPidAlive: treats our own live pid as alive, so acquisition times out', async () => {
+    const lockDir = makeLockDir();
+    mkdirSync(lockDir);
+    writeFileSync(join(lockDir, 'pid'), String(process.pid));
+    const fn = vi.fn();
+
+    await expect(withFileLock(lockDir, fn, { pollMs: 10, timeoutMs: 50 })).rejects.toThrow(/stuck/);
+
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('defaultIsPidAlive: treats a dead pid as not alive, so it steals after grace', async () => {
+    const lockDir = makeLockDir();
+    mkdirSync(lockDir);
+    const dead = spawnSync(process.execPath, ['-e', 'process.exit(0)']);
+    writeFileSync(join(lockDir, 'pid'), String(dead.pid));
+    let ran = false;
+
+    await withFileLock(
+      lockDir,
+      async () => {
+        ran = true;
+      },
+      { pollMs: 10, timeoutMs: 200, graceMs: 10 },
+    );
+
+    expect(ran).toBe(true);
+  });
+
+  it('treats an unparseable pid file as orphaned and steals it once stale (also covers the no-onSteal arm)', async () => {
+    const lockDir = makeLockDir();
+    mkdirSync(lockDir);
+    writeFileSync(join(lockDir, 'pid'), 'abc');
+    const past = new Date(Date.now() - 1_000);
+    utimesSync(lockDir, past, past);
+    let ran = false;
+
+    await withFileLock(
+      lockDir,
+      async () => {
+        ran = true;
+      },
+      { pollMs: 10, timeoutMs: 100, graceMs: 10 },
+    );
+
+    expect(ran).toBe(true);
+  });
+
+  it('steals a dead holder without an onSteal callback', async () => {
+    const lockDir = makeLockDir();
+    mkdirSync(lockDir);
+    writeFileSync(join(lockDir, 'pid'), '999999');
+    let ran = false;
+
+    await withFileLock(
+      lockDir,
+      async () => {
+        ran = true;
+      },
+      { pollMs: 10, timeoutMs: 100, isPidAlive: () => false },
+    );
+
+    expect(ran).toBe(true);
+  });
+
+  it('rethrows a non-EEXIST error from mkdirSync(lockDir)', async () => {
+    const parent = mkdtempSync(join(tmpdir(), 'lock-'));
+    tmpRoots.push(parent);
+    const lockDir = join(parent, 'test.lock');
+    chmodSync(parent, 0o555);
+
+    try {
+      await expect(withFileLock(lockDir, vi.fn())).rejects.toThrow();
+    } finally {
+      chmodSync(parent, 0o755);
+    }
+  });
+
+  it('skips lock dir cleanup when the pid file no longer matches this process on the way out', async () => {
+    const lockDir = makeLockDir();
+
+    await withFileLock(lockDir, async () => {
+      writeFileSync(join(lockDir, 'pid'), '999999');
+    });
+
+    expect(existsSync(lockDir)).toBe(true);
   });
 });

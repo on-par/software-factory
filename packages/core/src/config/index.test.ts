@@ -4,7 +4,15 @@ import { join, resolve } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { getFactoryPaths, loadFactoryConfig, loadModelsConfig, resolveTimeouts } from './index.js';
+import {
+  getConstitutionsDir,
+  getFactoryPaths,
+  loadFactoryConfig,
+  loadModelsConfig,
+  loadRoutesConfig,
+  resolveSkipCI,
+  resolveTimeouts,
+} from './index.js';
 
 function baseModelDef(overrides: Record<string, unknown> = {}) {
   return {
@@ -216,6 +224,75 @@ describe('loadFactoryConfig', () => {
   });
 });
 
+describe('loadRoutesConfig', () => {
+  let tmpDir: string | undefined;
+
+  afterEach(async () => {
+    if (tmpDir) {
+      await rm(tmpDir, { recursive: true, force: true });
+      tmpDir = undefined;
+    }
+  });
+
+  it('parses the shipped routes.json without throwing', () => {
+    expect(() => loadRoutesConfig()).not.toThrow();
+  });
+
+  it('parses a route declaring the optional requires field', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-routes-config-'));
+    const path = join(tmpDir, 'routes.json');
+    await writeFile(
+      path,
+      JSON.stringify({
+        version: 1,
+        routes: { build_codex: { tier: 'worker', description: 'stub', requires: 'codex' } },
+      }),
+    );
+
+    const config = loadRoutesConfig(path);
+    expect(config.routes.build_codex.requires).toBe('codex');
+  });
+
+  it('throws on an invalid routes schema', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-routes-config-'));
+    const path = join(tmpDir, 'routes.json');
+    await writeFile(path, JSON.stringify({ version: 1, routes: { plan: { tier: 'boss' } } }));
+
+    expect(() => loadRoutesConfig(path)).toThrow();
+  });
+});
+
+describe('resolveSkipCI', () => {
+  it('is true when FACTORY_SKIP_CI is exactly "1", regardless of config', () => {
+    const config = loadFactoryConfig();
+    expect(resolveSkipCI({ ...config, ci: { skip: false, comment: '' } }, { FACTORY_SKIP_CI: '1' })).toBe(true);
+  });
+
+  it('is false when FACTORY_SKIP_CI is exactly "0", even when config.ci.skip is true', () => {
+    const config = loadFactoryConfig();
+    expect(resolveSkipCI({ ...config, ci: { skip: true, comment: '' } }, { FACTORY_SKIP_CI: '0' })).toBe(false);
+  });
+
+  it('falls back to config.ci.skip when the env var is unset', () => {
+    const config = loadFactoryConfig();
+    expect(resolveSkipCI({ ...config, ci: { skip: true, comment: '' } }, {})).toBe(true);
+    expect(resolveSkipCI({ ...config, ci: { skip: false, comment: '' } }, {})).toBe(false);
+  });
+
+  it('defaults to false when config.ci is absent', () => {
+    const config = loadFactoryConfig();
+    const { ci: _ci, ...withoutCi } = config;
+
+    expect(resolveSkipCI(withoutCi as typeof config, {})).toBe(false);
+  });
+});
+
+describe('getConstitutionsDir', () => {
+  it('resolves a path ending in the constitutions directory', () => {
+    expect(getConstitutionsDir()).toMatch(/constitutions$/);
+  });
+});
+
 describe('resolveTimeouts', () => {
   it('uses config values when env overrides are absent', () => {
     const config = loadFactoryConfig();
@@ -271,5 +348,24 @@ describe('resolveTimeouts', () => {
   it('lets FACTORY_APPROVAL_TIMEOUT override config', () => {
     const config = loadFactoryConfig();
     expect(resolveTimeouts(config, { FACTORY_APPROVAL_TIMEOUT: '60' }).approval).toBe(60);
+  });
+
+  it('falls back to the hard-coded defaults when config.timeouts fields are all absent', () => {
+    const config = loadFactoryConfig();
+    const emptyTimeouts = { ...config, timeouts: {} as typeof config.timeouts };
+
+    expect(resolveTimeouts(emptyTimeouts, {})).toEqual({ plan: 1800, build: 7200, check: 1800, approval: 1800 });
+  });
+
+  it('reads from process.env when no env argument is passed', () => {
+    const config = loadFactoryConfig();
+    const prev = process.env.FACTORY_PLAN_TIMEOUT;
+    process.env.FACTORY_PLAN_TIMEOUT = '111';
+    try {
+      expect(resolveTimeouts(config).plan).toBe(111);
+    } finally {
+      if (prev === undefined) delete process.env.FACTORY_PLAN_TIMEOUT;
+      else process.env.FACTORY_PLAN_TIMEOUT = prev;
+    }
   });
 });

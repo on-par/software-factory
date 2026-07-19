@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig } from '../config/index.js';
 import { loadModelsConfig } from '../config/index.js';
-import { diagnoseModels, ModelRegistry, resolveModelOverrides } from './index.js';
+import { diagnoseModels, isCommandAvailable, ModelRegistry, resolveModelOverrides } from './index.js';
 
 const config: ModelsConfig = {
   version: 1,
@@ -59,6 +59,125 @@ describe('ModelRegistry', () => {
     expect(registry.isExperimental('exp-model')).toBe(true);
     expect(registry.isExperimental('real-model')).toBe(false);
     expect(registry.isExperimental('missing')).toBe(false);
+  });
+
+  it('returns false/[] for missing models across the boolean and lookup guards', () => {
+    const registry = new ModelRegistry(config);
+    expect(registry.getTiers('missing-model')).toEqual([]);
+    expect(registry.isEnvAvailable('missing-model')).toBe(false);
+    expect(registry.isCodexModel('missing-model')).toBe(false);
+    expect(registry.isLocalOnlyModel('missing-model')).toBe(false);
+    expect(registry.isAvailable('missing-model')).toBe(false);
+  });
+
+  it('returns [] for a tier with no configured models', () => {
+    const registry = new ModelRegistry(config);
+    expect(registry.getModelsInTier('missing-tier')).toEqual([]);
+  });
+
+  it('resolves an array tier value to itself instead of wrapping it', () => {
+    const arrayTierConfig: ModelsConfig = {
+      ...config,
+      models: {
+        ...config.models,
+        'multi-tier-model': {
+          provider: 'custom',
+          tier: ['boss', 'worker'],
+          costPerMtokInput: 0,
+          costPerMtokOutput: 0,
+          contextWindow: 1000,
+          capabilities: [],
+          envKey: null,
+        },
+      },
+    };
+    const registry = new ModelRegistry(arrayTierConfig);
+    expect(registry.getTiers('multi-tier-model')).toEqual(['boss', 'worker']);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('checks a non-null envKey against the environment', () => {
+    const envConfig: ModelsConfig = {
+      ...config,
+      models: {
+        ...config.models,
+        'keyed-model': {
+          provider: 'anthropic',
+          tier: 'boss',
+          costPerMtokInput: 0,
+          costPerMtokOutput: 0,
+          contextWindow: 1000,
+          capabilities: [],
+          envKey: 'SOME_TEST_ENV_KEY_XYZ',
+        },
+      },
+    };
+    const registry = new ModelRegistry(envConfig);
+
+    vi.stubEnv('SOME_TEST_ENV_KEY_XYZ', '');
+    expect(registry.isEnvAvailable('keyed-model')).toBe(false);
+
+    vi.stubEnv('SOME_TEST_ENV_KEY_XYZ', '1');
+    expect(registry.isEnvAvailable('keyed-model')).toBe(true);
+  });
+
+  it('excludes a byok model without a set env key while keeping free models available', () => {
+    const byokConfig: ModelsConfig = {
+      ...config,
+      models: {
+        ...config.models,
+        'byok-model': {
+          provider: 'anthropic',
+          tier: 'boss',
+          costPerMtokInput: 0,
+          costPerMtokOutput: 0,
+          contextWindow: 1000,
+          capabilities: [],
+          envKey: 'BYOK_TEST_ENV_KEY_XYZ',
+        },
+      },
+      tiers: { boss: ['real-model', 'byok-model'] },
+    };
+    vi.stubEnv('BYOK_TEST_ENV_KEY_XYZ', '');
+    const registry = new ModelRegistry(byokConfig);
+    expect(registry.getAvailableModelsForTier('boss', true)).toEqual(['real-model']);
+  });
+});
+
+describe('estimateCost', () => {
+  it('computes cost from per-mtok input/output rates', () => {
+    const costConfig: ModelsConfig = {
+      ...config,
+      models: {
+        ...config.models,
+        'priced-model': {
+          provider: 'custom',
+          tier: 'boss',
+          costPerMtokInput: 3,
+          costPerMtokOutput: 15,
+          contextWindow: 1000,
+          capabilities: [],
+          envKey: null,
+        },
+      },
+    };
+    const registry = new ModelRegistry(costConfig);
+    expect(registry.estimateCost('priced-model', 1_000_000, 500_000)).toBeCloseTo(3 + 7.5);
+  });
+
+  it('returns 0 for an unknown model', () => {
+    const registry = new ModelRegistry(config);
+    expect(registry.estimateCost('missing-model', 1000, 1000)).toBe(0);
+  });
+});
+
+describe('isCommandAvailable', () => {
+  it('returns true for a real command and false for a nonexistent one', () => {
+    expect(isCommandAvailable('sh')).toBe(true);
+    expect(isCommandAvailable('definitely-not-a-cmd-xyz123')).toBe(false);
   });
 });
 
@@ -630,6 +749,47 @@ describe('diagnoseModels', () => {
       expect(d.reachable).toBe(true);
       expect(d.reason).toBe('ok (ollama agentic via http://gpu-box:11434)');
     });
+  });
+
+  it('marks a self-auth model reachable via API key when the env key is present', () => {
+    const d = diagnosisFor('anthropic-model', { commandAvailable: (cmd) => cmd === 'claude', envPresent: () => true });
+    expect(d.reachable).toBe(true);
+    expect(d.reason).toBe('ok (claude CLI)');
+  });
+
+  it('falls back to the harness default env key for a self-auth model with no envKey configured', () => {
+    const noKeyConfig: ModelsConfig = {
+      ...doctorConfig,
+      models: {
+        ...doctorConfig.models,
+        'anthropic-no-key-model': {
+          provider: 'anthropic',
+          tier: 'boss',
+          costPerMtokInput: 0,
+          costPerMtokOutput: 0,
+          contextWindow: 1000,
+          capabilities: [],
+          envKey: null,
+        },
+      },
+      tiers: { ...doctorConfig.tiers, boss: [...doctorConfig.tiers.boss, 'anthropic-no-key-model'] },
+    };
+    const registry = new ModelRegistry(noKeyConfig);
+    const d = diagnoseModels(
+      registry,
+      { commandAvailable: (cmd) => cmd === 'claude', envPresent: (key) => key === 'ANTHROPIC_API_KEY' },
+      true,
+    ).find((x) => x.model === 'anthropic-no-key-model')!;
+    expect(d.reachable).toBe(true);
+    expect(d.reason).toBe('ok (claude CLI)');
+  });
+
+  it('falls back to isCommandAvailable and real env presence when no probes are given', () => {
+    const registry = new ModelRegistry(doctorConfig);
+    const diagnoses = diagnoseModels(registry, {}, true);
+    const d = diagnoses.find((x) => x.model === 'anthropic-model')!;
+    expect(typeof d.reachable).toBe('boolean');
+    expect(typeof d.reason).toBe('string');
   });
 
   it('marks a model with an unknown declared harness unreachable, naming the known harnesses', () => {

@@ -52,6 +52,24 @@ describe('scoreSpec', () => {
     expect(quotedResult.checks.find((check) => check.name === 'route-parseable')?.pass).toBe(true);
   });
 
+  it('fails frontmatter-valid when the YAML frontmatter is syntactically malformed', () => {
+    const spec = goodSpec.replace('route: codex', 'route: [unclosed');
+    const result = scoreSpec(spec, spec, 'codex');
+
+    expect(result.checks.find((check) => check.name === 'frontmatter-valid')?.pass).toBe(false);
+    expect(result.checks.find((check) => check.name === 'frontmatter-valid')?.details).toBe(
+      'missing or invalid frontmatter',
+    );
+  });
+
+  it('treats a non-string route value as unparseable', () => {
+    const spec = goodSpec.replace('route: codex', 'route: 123');
+    const result = scoreSpec(spec, spec, 'codex');
+
+    expect(result.route).toBe('unparseable');
+    expect(result.checks.find((check) => check.name === 'route-parseable')?.pass).toBe(false);
+  });
+
   it('fails an unparseable route', () => {
     const spec = goodSpec.replace('route: codex', 'route: gpt-5');
     const result = scoreSpec(spec, spec, 'codex');
