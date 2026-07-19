@@ -1,0 +1,16 @@
+{
+  "runs": [
+    {
+      "scenario": "repo-issue-132",
+      "runtime": "local-small",
+      "model": "qwen2.5-coder:14b",
+      "harness": "factory-ship-local-only",
+      "patchApplied": false,
+      "testsPassed": false,
+      "diffSize": 0,
+      "repairCount": 0,
+      "durationMs": 135844,
+      "reviewerGrade": 5
+    }
+  ]
+}
