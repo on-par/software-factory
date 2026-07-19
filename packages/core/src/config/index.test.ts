@@ -177,6 +177,43 @@ describe('loadFactoryConfig', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('shipped config has a default-enabled sandbox block', () => {
+    const config = loadFactoryConfig();
+    expect(config.sandbox.enabled).toBe(true);
+    expect(config.sandbox.network.allow).toEqual(['api.anthropic.com', 'github.com']);
+    expect(config.sandbox.resources).toEqual({ cpuMs: 300_000, memMb: 4096 });
+  });
+
+  it('applies sandbox defaults when the config omits the sandbox key', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
+    try {
+      const path = join(dir, 'factory.json');
+      const minimal = {
+        version: 1,
+        paths: {
+          constitutions: 'constitutions/',
+          checkers: 'lib/checkers/',
+          plans: '.factory/plans/',
+          logs: '.factory/logs/',
+          events: '.factory/events.ndjson',
+        },
+        timeouts: { plan_seconds: 1800, build_seconds: 7200, check_seconds: 1800, merge_poll_seconds: 120 },
+        merge: { auto: false, comment: '' },
+        worktree: { prefix: 'ship-it/', parent: '../', comment: '' },
+        byok: { enabled: false, comment: '' },
+        notifications: {},
+        cost_tracking: { enabled: true, log_file: '.factory/costs.jsonl', comment: '' },
+      };
+      await writeFile(path, JSON.stringify(minimal));
+      const config = loadFactoryConfig(path);
+      expect(config.sandbox.enabled).toBe(true);
+      expect(config.sandbox.network.allow).toEqual(['api.anthropic.com', 'github.com']);
+      expect(config.sandbox.resources).toEqual({ cpuMs: 300_000, memMb: 4096 });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('resolveTimeouts', () => {

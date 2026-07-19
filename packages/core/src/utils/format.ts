@@ -28,7 +28,17 @@ type Category = 'phase' | 'ok' | 'warn' | 'error' | 'router' | 'other';
 
 const PHASE_TYPES = new Set(['plan', 'build', 'check', 'ship', 'triage']);
 const OK_TYPES = new Set(['ready', 'recovered', 'approval_granted', 'run-done', 'lane-start']);
-const WARN_TYPES = new Set(['warn', 'rework', 'approval_requested', 'stopped']);
+const WARN_TYPES = new Set([
+  'warn',
+  'rework',
+  'approval_requested',
+  'stopped',
+  'sandbox_violation',
+  'resource_limit',
+  'sandbox-unavailable',
+  'sandbox-degraded',
+  'sandbox-disabled',
+]);
 const ERROR_TYPES = new Set(['fail', 'escalate', 'ship_denied', 'parked']);
 
 function categorize(type: string): Category {

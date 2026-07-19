@@ -45,5 +45,11 @@
   "ci": {
     "skip": false,
     "comment": "Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging"
+  },
+  "sandbox": {
+    "enabled": true,
+    "network": { "allow": ["api.anthropic.com", "github.com"] },
+    "resources": { "cpuMs": 300000, "memMb": 4096 },
+    "comment": "Containment for agentic build runs. Disable per-run with --no-sandbox or FACTORY_SANDBOX=0. Empty network.allow denies all egress; non-empty leaves egress open (per-host filtering is logged as degraded in v1)."
   }
 }

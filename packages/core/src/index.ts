@@ -59,6 +59,10 @@ export { HARNESS_CATALOG, HarnessError, KNOWN_HARNESS_IDS } from './harness/inde
 // Constitutions
 export { buildConstitutionContext, ConstitutionLoader, REPO_INSTRUCTION_FILES } from './constitutions/index.js';
 
+// Sandbox
+export type { SandboxEventType, SandboxPolicy, SandboxRuntime } from './sandbox/index.js';
+export { detectSandboxRuntime, resolveSandboxPolicy } from './sandbox/index.js';
+
 // Checkers
 export type { CheckerContext } from './checkers/index.js';
 export {

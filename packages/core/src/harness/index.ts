@@ -2,6 +2,7 @@
 // provider adapter (Claude CLI, Codex CLI, Ollama, OpenCode, Pi) must satisfy.
 
 import type { ModelRegistry } from '../models/index.js';
+import type { SandboxPolicy } from '../sandbox/index.js';
 import type { FailoverReason, TaskType } from '../types/index.js';
 
 /** Router's FailoverReason is a type alias of HarnessFailureReason (see
@@ -39,6 +40,8 @@ export interface HarnessRequest {
   task: TaskType;
   /** For resolving provider flags/ids (claudeFlag, codexFlag, providerModel). */
   registry: ModelRegistry;
+  /** When set, the harness wraps its CLI invocation in this containment policy. */
+  sandbox?: SandboxPolicy;
 }
 
 export interface HarnessResult {

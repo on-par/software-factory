@@ -2,9 +2,19 @@ import { describe, expect, it } from 'vitest';
 
 import type { ModelsConfig } from '../config/index.js';
 import { ModelRegistry } from '../models/index.js';
+import type { SandboxPolicy } from '../sandbox/index.js';
 import { ClaudeCliHarness } from './claude-cli.js';
 import { codingHarnessContractCases, makeContractRequest } from './contract.js';
 import { HarnessError } from './index.js';
+
+const sandboxPolicy: SandboxPolicy = {
+  runtime: 'sandbox-exec',
+  worktree: '/tmp/factory worktree',
+  writablePaths: ['/tmp/factory worktree'],
+  allowHosts: [],
+  cpuMs: 300_000,
+  memMb: 4096,
+};
 
 describe('CodingHarness contract: ClaudeCliHarness', () => {
   const cases = codingHarnessContractCases({
@@ -103,6 +113,20 @@ describe('ClaudeCliHarness command shape', () => {
     expect(rec.calls).toHaveLength(1);
     expect(rec.calls[0].cmd).toContain('claude -p');
     expect(rec.calls[0].cmd).not.toMatch(/(^|\s)--model(\s|$)/);
+    expect(rec.calls[0].cmd).toContain('--dangerously-skip-permissions');
+  });
+
+  it('wraps the invocation in sandbox-exec when request.sandbox is set', async () => {
+    const rec = recordingExec({ stdout: 'CLAUDE OUTPUT' });
+    const harness = new ClaudeCliHarness(rec.fn);
+
+    await harness.run(
+      makeContractRequest({ model: 'claude-model', registry, prompt: 'draft plan', sandbox: sandboxPolicy }),
+    );
+
+    expect(rec.calls).toHaveLength(1);
+    expect(rec.calls[0].cmd.startsWith('sandbox-exec -p ')).toBe(true);
+    expect(rec.calls[0].cmd).toContain('claude -p');
     expect(rec.calls[0].cmd).toContain('--dangerously-skip-permissions');
   });
 });

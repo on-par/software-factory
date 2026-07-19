@@ -34,7 +34,15 @@ const h = vi.hoisted(() => {
     trailingSpend: 10,
     subscriptionUsage: null as { fiveHourUtilization: number; fiveHourResetsAt: string | null } | null,
     routerResolve: (_route: string): string | undefined => 'claude-model',
-    factoryConfig: { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: false } } as any,
+    factoryConfig: {
+      merge: { auto: false, comment: '' },
+      worktree: { gcTtlDays: 7, autoGcOnRun: false },
+      sandbox: {
+        enabled: true,
+        network: { allow: ['api.anthropic.com', 'github.com'] },
+        resources: { cpuMs: 300_000, memMb: 4096 },
+      },
+    } as any,
     gcReport: { removed: [], kept: 0, dryRun: false } as any,
     runTuiCalls: [] as Array<{
       eventsFile: string;
@@ -253,7 +261,15 @@ beforeEach(() => {
   h.trailingSpend = 10;
   h.subscriptionUsage = null;
   h.routerResolve = () => 'claude-model';
-  h.factoryConfig = { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: false } };
+  h.factoryConfig = {
+    merge: { auto: false, comment: '' },
+    worktree: { gcTtlDays: 7, autoGcOnRun: false },
+    sandbox: {
+      enabled: true,
+      network: { allow: ['api.anthropic.com', 'github.com'] },
+      resources: { cpuMs: 300_000, memMb: 4096 },
+    },
+  };
   h.gcReport = { removed: [], kept: 0, dryRun: false };
   h.runTuiCalls = [];
   h.claudeAvailable = undefined;
@@ -915,6 +931,28 @@ describe('cli commands (via main dispatch)', () => {
       expect(vi.mocked(core.buildPhase)).not.toHaveBeenCalled();
       expect(vi.mocked(core.checkPhase)).not.toHaveBeenCalled();
       expect(vi.mocked(core.shipPhase)).not.toHaveBeenCalled();
+    });
+
+    it('parses --no-sandbox to opts.sandbox === false and logs sandbox disabled by the CLI flag', async () => {
+      const res = await runMain('ship', '5', '--no-sandbox');
+      expect(res.exited).toBe(false);
+      expect(errored()).toContain('sandbox disabled by --no-sandbox — agent runs are UNCONTAINED');
+      const events = readFileSync(paths().events, 'utf-8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      expect(events.some((e: any) => e.type === 'sandbox-disabled' && e.msg.includes('--no-sandbox'))).toBe(true);
+    });
+
+    it('defaults --sandbox to true (no CLI-disabled event) when the flag is not passed', async () => {
+      const res = await runMain('ship', '5');
+      expect(res.exited).toBe(false);
+      expect(errored()).not.toContain('sandbox disabled by --no-sandbox');
+      const events = readFileSync(paths().events, 'utf-8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      expect(events.some((e: any) => e.type === 'sandbox-disabled' && e.msg.includes('--no-sandbox'))).toBe(false);
     });
   });
 

@@ -4,6 +4,7 @@ import { type CheckerContext, runAllCheckers } from '../checkers/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import type { ModelRouter } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
+import type { SandboxPolicy } from '../sandbox/index.js';
 import type { CheckSummary, Constitution, DisputeResult, FailoverReason } from '../types/index.js';
 
 type LogFn = (type: string, msg: string, extra?: { failoverReason?: FailoverReason }) => void;
@@ -26,6 +27,7 @@ export async function checkPhase(opts: {
   autoRework?: boolean;
   buildTimeoutSeconds?: number;
   checkTimeoutSeconds?: number;
+  sandbox?: SandboxPolicy;
 }): Promise<CheckPhaseResult> {
   const {
     issue,
@@ -37,6 +39,7 @@ export async function checkPhase(opts: {
     autoRework = true,
     buildTimeoutSeconds,
     checkTimeoutSeconds,
+    sandbox,
   } = opts;
 
   const ctx: CheckerContext = { worktree, specPath };
@@ -51,7 +54,7 @@ export async function checkPhase(opts: {
     reworkRounds++;
     log('rework', `${summary.failures} failures — sending back to worker (round ${reworkRounds})`);
 
-    await reworkWorker(issue, worktree, specPath, summary, constitution, router, log, buildTimeoutSeconds);
+    await reworkWorker(issue, worktree, specPath, summary, constitution, router, log, buildTimeoutSeconds, sandbox);
 
     summary = await runAllCheckers(ctx, router, constitution, checkTimeoutSeconds);
     log('check', `Rework round ${reworkRounds}: ${summary.failures} failures remaining`);
@@ -83,6 +86,7 @@ async function reworkWorker(
   router: ModelRouter,
   log: LogFn,
   timeoutSeconds?: number,
+  sandbox?: SandboxPolicy,
 ): Promise<void> {
   const constitutionCtx = buildConstitutionContext(constitution);
   const failures = summary.results.filter((r) => r.result === 'FAIL');
@@ -114,6 +118,8 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
     .run('build_claude', prompt, {
       worktree,
       timeoutSeconds: timeoutSeconds ?? 7200,
+      sandbox,
+      onSandboxEvent: (type, detail) => log(type, detail),
       onLog: (msg) => log('router', msg),
     })
     .catch(() => null);

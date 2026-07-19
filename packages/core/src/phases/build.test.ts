@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
+import type { SandboxPolicy } from '../sandbox/index.js';
 import { buildPhase } from './build.js';
 
 const models: ModelsConfig = {
@@ -336,6 +337,78 @@ describe('buildPhase modelOverride', () => {
 
     expect(result.ok).toBe(true);
     expect(stub.calls[0].model).toBe('pinned-model');
+  });
+});
+
+describe('buildPhase sandbox', () => {
+  it('logs the sandbox start event and forwards the policy + onSandboxEvent to router.run', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-91.md');
+    const sandbox: SandboxPolicy = {
+      runtime: 'sandbox-exec',
+      worktree,
+      writablePaths: [worktree],
+      allowHosts: [],
+      cpuMs: 300_000,
+      memMb: 4096,
+    };
+    const captured: { options?: any } = {};
+    const fakeRouter = {
+      run: async (_task: string, _prompt: string, options: any) => {
+        captured.options = options;
+        return { model: 'fake-model', output: 'done', exitCode: 0, attempts: [] };
+      },
+    } as any;
+    const logs: Array<{ type: string; msg: string }> = [];
+
+    const result = await buildPhase({
+      issue: 91,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/91-sandbox',
+      route: 'claude',
+      router: fakeRouter,
+      constitution: null,
+      log: (type, msg) => {
+        logs.push({ type, msg });
+      },
+      sandbox,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(logs).toContainEqual({ type: 'sandbox', msg: 'containment active (runtime sandbox-exec, net deny-all)' });
+    expect(captured.options.sandbox).toBe(sandbox);
+    expect(typeof captured.options.onSandboxEvent).toBe('function');
+
+    captured.options.onSandboxEvent('sandbox_violation', 'Operation not permitted');
+    expect(logs).toContainEqual({ type: 'sandbox_violation', msg: 'Operation not permitted' });
+  });
+
+  it('does not log a sandbox start event when no sandbox policy is set', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-92.md');
+    const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'claude output' }] } });
+    const router = new ModelRouter(models, routes, false, stub);
+    const logs: Array<{ type: string; msg: string }> = [];
+
+    await buildPhase({
+      issue: 92,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/92-no-sandbox',
+      route: 'claude',
+      router,
+      constitution: null,
+      log: (type, msg) => {
+        logs.push({ type, msg });
+      },
+    });
+
+    expect(logs.some((l) => l.type === 'sandbox')).toBe(false);
   });
 });
 

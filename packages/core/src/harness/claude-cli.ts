@@ -1,5 +1,6 @@
 // src/harness/claude-cli.ts — CodingHarness adapter for the Claude CLI.
 
+import { wrapCommandInSandbox } from '../sandbox/index.js';
 import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
 import { shellEscape } from '../utils/index.js';
@@ -18,14 +19,15 @@ export class ClaudeCliHarness implements CodingHarness {
   constructor(private execFn: ClaudeExecFn = defaultExecFn) {}
 
   async run(request: HarnessRequest): Promise<HarnessResult> {
-    const { model, prompt, worktree, timeoutSeconds, registry } = request;
+    const { model, prompt, worktree, timeoutSeconds, registry, sandbox } = request;
     const flag = registry.getClaudeFlag(model);
     const modelArg = flag ? `--model ${flag}` : '';
     const cmd = `claude -p ${shellEscape(prompt)} ${modelArg} --dangerously-skip-permissions`;
+    const finalCmd = sandbox ? wrapCommandInSandbox(cmd, sandbox) : cmd;
 
     let stdout: string;
     try {
-      ({ stdout } = await this.execFn(cmd, {
+      ({ stdout } = await this.execFn(finalCmd, {
         cwd: worktree,
         timeoutMs: timeoutSeconds * 1000,
         maxBuffer: 10 * 1024 * 1024,

@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import type { ModelRouter } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
+import type { SandboxPolicy } from '../sandbox/index.js';
 import type { Constitution, FailoverReason } from '../types/index.js';
 import { codexDisabled, escalationLine, isEscalation } from '../utils/index.js';
 
@@ -27,8 +28,21 @@ export async function buildPhase(opts: {
   timeoutSeconds?: number;
   skipCI?: boolean;
   modelOverride?: string;
+  sandbox?: SandboxPolicy;
 }): Promise<BuildResult> {
-  const { issue, worktree, specPath, branch, constitution, router, log, timeoutSeconds, skipCI, modelOverride } = opts;
+  const {
+    issue,
+    worktree,
+    specPath,
+    branch,
+    constitution,
+    router,
+    log,
+    timeoutSeconds,
+    skipCI,
+    modelOverride,
+    sandbox,
+  } = opts;
   let route = opts.route;
 
   const constitutionCtx = buildConstitutionContext(constitution);
@@ -109,11 +123,19 @@ with "ESCALATE:" followed by the question, then STOP.`;
   }
 
   log('build', `Starting build phase (route: ${route})`);
+  if (sandbox) {
+    log(
+      'sandbox',
+      `containment active (runtime ${sandbox.runtime}, net ${sandbox.allowHosts.length ? 'allow-list' : 'deny-all'})`,
+    );
+  }
 
   const result = await router.run(taskType, prompt, {
     worktree,
     timeoutSeconds: timeoutSeconds ?? 7200,
     modelOverride,
+    sandbox,
+    onSandboxEvent: (type, detail) => log(type, detail),
     onLog: (msg) => log('router', msg),
   });
 

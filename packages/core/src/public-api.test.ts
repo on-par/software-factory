@@ -44,6 +44,9 @@ const PUBLIC_API_KEYS = [
   'buildConstitutionContext',
   'ConstitutionLoader',
   'REPO_INSTRUCTION_FILES',
+  // Sandbox
+  'detectSandboxRuntime',
+  'resolveSandboxPolicy',
   // Checkers
   'accessibilityChecker',
   'compileChecker',

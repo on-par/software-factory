@@ -101,6 +101,22 @@ const FactoryConfigSchema = z.object({
       comment: z.string().default('Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging'),
     })
     .default({ skip: false, comment: 'Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging' }),
+  sandbox: z
+    .object({
+      enabled: z.boolean().default(true),
+      network: z
+        .object({ allow: z.array(z.string()).default(['api.anthropic.com', 'github.com']) })
+        .default({ allow: ['api.anthropic.com', 'github.com'] }),
+      resources: z
+        .object({ cpuMs: z.number().positive().default(300_000), memMb: z.number().positive().default(4096) })
+        .default({ cpuMs: 300_000, memMb: 4096 }),
+      comment: z.string().optional(),
+    })
+    .default({
+      enabled: true,
+      network: { allow: ['api.anthropic.com', 'github.com'] },
+      resources: { cpuMs: 300_000, memMb: 4096 },
+    }),
 });
 
 // ---------- Types ----------

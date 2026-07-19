@@ -8,7 +8,13 @@ import { basename, dirname, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import { Octokit } from '@octokit/rest';
-import type { FailoverReason, ModelDiagnosis, QueueDiagnostic, UsageReading } from '@on-par/factory-core';
+import type {
+  FailoverReason,
+  ModelDiagnosis,
+  QueueDiagnostic,
+  SandboxPolicy,
+  UsageReading,
+} from '@on-par/factory-core';
 import {
   buildPhase,
   checkPhase,
@@ -29,6 +35,7 @@ import {
   planPhase,
   readUsage,
   resolveModelOverrides,
+  resolveSandboxPolicy,
   resolveSkipCI,
   resolveTimeouts,
   shipPhase,
@@ -567,7 +574,7 @@ export function parkReasonFor(err: unknown): ParkReason {
 
 export async function shipIssue(
   issueNum: number,
-  opts: { product?: string; autoRework?: boolean; interactive?: boolean },
+  opts: { product?: string; autoRework?: boolean; interactive?: boolean; sandbox?: boolean },
   ctx?: { repoRoot: string; ghRepo: string; lane?: string },
 ) {
   const repoRoot = ctx?.repoRoot ?? (await getRepoRoot());
@@ -632,6 +639,29 @@ export async function shipIssue(
     log('constitution', 'No standards found (no repo instruction files, no constitution) — proceeding without');
   }
 
+  const sandboxPolicy = resolveSandboxPolicy(factoryConfig.sandbox, {
+    worktree,
+    repoRoot,
+    cliDisabled: opts.sandbox === false,
+  });
+  let activeSandboxPolicy: SandboxPolicy | undefined;
+  if (opts.sandbox === false) {
+    console.error(chalk.yellow('factory: sandbox disabled by --no-sandbox — agent runs are UNCONTAINED'));
+    log('sandbox-disabled', 'sandbox disabled by --no-sandbox');
+  } else if (!sandboxPolicy) {
+    log('sandbox-disabled', 'sandbox disabled by config/FACTORY_SANDBOX');
+  } else if (sandboxPolicy.runtime === 'none') {
+    log('sandbox-unavailable', 'no sandbox runtime found (sandbox-exec/firejail) — running uncontained');
+  } else {
+    activeSandboxPolicy = sandboxPolicy;
+    if (sandboxPolicy.allowHosts.length > 0) {
+      log(
+        'sandbox-degraded',
+        `host-level egress filtering unavailable in v1; intended allowlist: ${sandboxPolicy.allowHosts.join(', ')}`,
+      );
+    }
+  }
+
   try {
     // PLAN
     const plan = await planPhase({
@@ -667,6 +697,7 @@ export async function shipIssue(
       timeoutSeconds: timeouts.build,
       skipCI,
       modelOverride: modelOverrides.build,
+      sandbox: activeSandboxPolicy,
     });
     if (!build.ok) {
       throw new LaneParkError(`build escalated: ${build.escalate ?? 'unknown'}`, 'escalate');
@@ -683,6 +714,7 @@ export async function shipIssue(
       autoRework,
       buildTimeoutSeconds: timeouts.build,
       checkTimeoutSeconds: timeouts.check,
+      sandbox: activeSandboxPolicy,
     });
     for (const s of check.summary.results.filter((r) => r.result === 'SKIP')) {
       console.error(chalk.yellow(`  SKIP: ${s.checker} — ${s.details}`));
@@ -782,7 +814,10 @@ async function maybeWriteLocalRunReport(opts: {
   console.log(chalk.cyan(`local-only report: ${report.path}`));
 }
 
-async function cmdShip(issueNum: number, opts: { product?: string; autoRework?: boolean; interactive?: boolean }) {
+async function cmdShip(
+  issueNum: number,
+  opts: { product?: string; autoRework?: boolean; interactive?: boolean; sandbox?: boolean },
+) {
   if (!isCommandAvailable('claude')) {
     throw new CliExitError(`factory: ${missingClaudeCliMessage()}`, 2);
   }
@@ -1788,6 +1823,7 @@ export async function main() {
     .option('--product <name>', 'Override active product constitution')
     .option('--no-auto-rework', 'Disable automatic rework loop')
     .option('--interactive', 'Pause before opening the PR and wait for approval from the TUI')
+    .option('--no-sandbox', 'Disable the containment sandbox for agent runs (dangerous)')
     .action(async (issueNum, opts) => {
       await cmdShip(parseIssueArg(issueNum), opts);
     });
