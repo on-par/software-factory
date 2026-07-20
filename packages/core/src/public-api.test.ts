@@ -79,6 +79,14 @@ const PUBLIC_API_KEYS = [
   'renderEvidencePack',
   'renderLocalRunReport',
   'writeLocalRunReport',
+  // KPIs
+  'appendKpiHistoryLine',
+  'computeHealthKpis',
+  'formatKpiLines',
+  'kpisToHistoryRecord',
+  'parseKpiHistory',
+  'renderKpiReport',
+  'renderKpiTrend',
   // Discovery
   'DEFAULT_MAX_CANDIDATES',
   'runDiscoveryScan',
