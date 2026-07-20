@@ -51,5 +51,11 @@
     "network": { "allow": ["api.anthropic.com", "github.com"] },
     "resources": { "cpuMs": 300000, "memMb": 4096 },
     "comment": "Containment for agentic build runs. Disable per-run with --no-sandbox or FACTORY_SANDBOX=0. Empty network.allow denies all egress; non-empty leaves egress open (per-host filtering is logged as degraded in v1)."
+  },
+  "discovery": {
+    "enabled": true,
+    "schedule": "weekly",
+    "maxCandidates": 5,
+    "comment": "Scheduled read-only scan that proposes a ranked, capped list of candidate ideas from product signals. No GitHub writes."
   }
 }

@@ -103,6 +103,17 @@ export {
 export type { LocalRunOutcome, LocalRunReport, LocalRunReportDeps, LocalRunReportInput } from './reports/local-run.js';
 export { renderLocalRunReport, writeLocalRunReport } from './reports/local-run.js';
 
+// Discovery
+export type {
+  DiscoveryCandidate,
+  DiscoveryScanDeps,
+  DiscoveryScanOptions,
+  DiscoveryScanResult,
+  DiscoverySignal,
+  DiscoverySignalSource,
+} from './discovery/index.js';
+export { DEFAULT_MAX_CANDIDATES, runDiscoveryScan } from './discovery/index.js';
+
 // Eval
 export type {
   Baseline,
