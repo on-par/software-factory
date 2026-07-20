@@ -79,6 +79,11 @@ const PUBLIC_API_KEYS = [
   // Discovery
   'DEFAULT_MAX_CANDIDATES',
   'runDiscoveryScan',
+  'authorDraftEpic',
+  'DEFAULT_OWNER_QUESTIONS',
+  'DISCOVERY_LABEL',
+  'EXPLORING_LABEL',
+  'ideaMarker',
   // Eval
   'appendHistoryLine',
   'buildLocalSmallScoreboard',

@@ -104,6 +104,14 @@ export type { LocalRunOutcome, LocalRunReport, LocalRunReportDeps, LocalRunRepor
 export { renderLocalRunReport, writeLocalRunReport } from './reports/local-run.js';
 
 // Discovery
+export type { AuthorDraftEpicDeps, AuthorDraftEpicOptions, AuthorDraftEpicResult } from './discovery/author.js';
+export {
+  authorDraftEpic,
+  DEFAULT_OWNER_QUESTIONS,
+  DISCOVERY_LABEL,
+  EXPLORING_LABEL,
+  ideaMarker,
+} from './discovery/author.js';
 export type {
   DiscoveryCandidate,
   DiscoveryScanDeps,
