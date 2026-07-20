@@ -13,7 +13,8 @@
     },
     "build_claude": {
       "tier": "worker",
-      "description": "Claude implementation from frozen spec (design/UX tasks)"
+      "description": "Claude implementation from frozen spec (design/UX tasks) - requires the claude-cli harness, which drives its own commits",
+      "requires": "claude"
     },
     "check_compile": {
       "tier": "checker",

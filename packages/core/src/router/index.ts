@@ -523,8 +523,14 @@ export class ModelRouter {
     const tier = this.getTier(task);
     if (!tier) return [];
     let models = this.registry.getAvailableModelsForTier(tier, this.byok, this.allowExperimental, this.localOnly);
-    if (this.routesConfig.routes[task]?.requires === 'codex') {
+    const requires = this.routesConfig.routes[task]?.requires;
+    if (requires === 'codex') {
       models = models.filter((model) => this.registry.isCodexModel(model));
+    } else if (requires === 'claude') {
+      // build_claude's prompt contract assumes the claude-cli harness (it drives its
+      // own commits). Running a codex-cli model here "succeeds" but leaves the
+      // worktree with no commits, so the ship phase fails and parks the lane.
+      models = models.filter((model) => this.registry.getHarnessId(model) === 'claude-cli');
     }
     if (taskRequiresAgenticHarness(task)) {
       models = models.filter((model) => isAgenticHarness(this.registry.getHarnessId(model) ?? ''));

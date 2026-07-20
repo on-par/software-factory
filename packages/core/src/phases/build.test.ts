@@ -630,3 +630,198 @@ describe('buildPhase timeoutSeconds', () => {
     expect(captured.options.timeoutSeconds).toBe(123);
   });
 });
+
+describe('buildPhase cross-harness failover', () => {
+  const failoverModels: ModelsConfig = {
+    version: 1,
+    models: {
+      'codex-a': {
+        provider: 'openai',
+        tier: 'worker',
+        costPerMtokInput: 0,
+        costPerMtokOutput: 0,
+        contextWindow: 1000,
+        capabilities: ['codex'],
+        envKey: null,
+        codex: true,
+        harness: 'codex-cli',
+      },
+      'codex-b': {
+        provider: 'openai',
+        tier: 'worker',
+        costPerMtokInput: 0,
+        costPerMtokOutput: 0,
+        contextWindow: 1000,
+        capabilities: ['codex'],
+        envKey: null,
+        codex: true,
+        harness: 'codex-cli',
+      },
+      'claude-sonnet-5': {
+        provider: 'anthropic',
+        tier: 'worker',
+        costPerMtokInput: 0,
+        costPerMtokOutput: 0,
+        contextWindow: 1000,
+        capabilities: [],
+        envKey: null,
+        harness: 'claude-cli',
+      },
+    },
+    tiers: { worker: ['codex-a', 'codex-b', 'claude-sonnet-5'] },
+    failover: {
+      triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+      maxRetries: 2,
+      cooldownMs: 0,
+      escalateAfterTierExhausted: true,
+    },
+    routingRules: {},
+  };
+  const failoverRoutes: RoutesConfig = {
+    version: 1,
+    routes: {
+      build_codex: { tier: 'worker', description: 'stub', requires: 'codex' },
+      build_claude: { tier: 'worker', description: 'stub', requires: 'claude' },
+    },
+  };
+
+  it('continues a codex build on claude when every codex worker is quota-exhausted', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-367.md');
+    const stub = new StubModelExecutor({
+      scripts: {
+        build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
+        build_claude: [{ output: 'claude output' }],
+      },
+    });
+    const router = new ModelRouter(failoverModels, failoverRoutes, false, stub);
+    const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
+
+    const result = await buildPhase({
+      issue: 367,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/367-cross-harness-build-failover',
+      route: 'codex',
+      router,
+      constitution: null,
+      log: (type, msg, extra) => {
+        logCalls.push([type, msg, extra]);
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.model).toBe('claude-sonnet-5');
+    expect(stub.calls.map((c) => ({ model: c.model, task: c.task }))).toEqual([
+      { model: 'codex-a', task: 'build_codex' },
+      { model: 'codex-b', task: 'build_codex' },
+      { model: 'claude-sonnet-5', task: 'build_claude' },
+    ]);
+    expect(logCalls).toContainEqual([
+      'worker_failover',
+      expect.stringMatching(
+        /^Codex build workers exhausted \(usage_cap\) — continuing on claude: from_model=codex-b to_model=claude-sonnet-5 from_route=build_codex to_route=build_claude reason=usage_cap$/,
+      ),
+      { failoverReason: 'usage_cap' },
+    ]);
+  });
+
+  it('continues a codex build on claude when every codex worker is rate-limited', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-367.md');
+    const stub = new StubModelExecutor({
+      scripts: {
+        build_codex: [{ fail: 'rate_limit' }, { fail: 'rate_limit' }, { fail: 'rate_limit' }],
+        build_claude: [{ output: 'claude output' }],
+      },
+    });
+    // maxRetries: 0 so a rate_limit fails over immediately instead of retrying the same model.
+    const rateLimitModels: ModelsConfig = {
+      ...failoverModels,
+      failover: { ...failoverModels.failover, maxRetries: 0 },
+    };
+    const router = new ModelRouter(rateLimitModels, failoverRoutes, false, stub);
+    const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
+
+    const result = await buildPhase({
+      issue: 367,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/367-cross-harness-build-failover',
+      route: 'codex',
+      router,
+      constitution: null,
+      log: (type, msg, extra) => {
+        logCalls.push([type, msg, extra]);
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.model).toBe('claude-sonnet-5');
+    expect(logCalls.some(([type]) => type === 'worker_failover')).toBe(true);
+  });
+
+  it('does not swap harnesses for a non-quota failure — the lane still parks', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-367.md');
+    const stub = new StubModelExecutor({
+      scripts: {
+        build_codex: [{ fail: 'error' }, { fail: 'error' }],
+        build_claude: [{ output: 'claude output' }],
+      },
+    });
+    const router = new ModelRouter(failoverModels, failoverRoutes, false, stub);
+    const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
+
+    await expect(
+      buildPhase({
+        issue: 367,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        branch: 'ship-it/367-cross-harness-build-failover',
+        route: 'codex',
+        router,
+        constitution: null,
+        log: (type, msg, extra) => {
+          logCalls.push([type, msg, extra]);
+        },
+      }),
+    ).rejects.toThrow(/All models failed for task 'build_codex'/);
+
+    expect(stub.calls.some((c) => c.task === 'build_claude')).toBe(false);
+    expect(logCalls.some(([type]) => type === 'worker_failover')).toBe(false);
+  });
+
+  it('re-throws when the claude fallback re-run itself fails', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-367.md');
+    const stub = new StubModelExecutor({
+      scripts: {
+        build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
+        build_claude: [{ fail: 'error' }, { fail: 'error' }],
+      },
+    });
+    const router = new ModelRouter(failoverModels, failoverRoutes, false, stub);
+
+    await expect(
+      buildPhase({
+        issue: 367,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        branch: 'ship-it/367-cross-harness-build-failover',
+        route: 'codex',
+        router,
+        constitution: null,
+        log: () => {},
+      }),
+    ).rejects.toThrow(/All models failed for task 'build_claude'/);
+  });
+});
