@@ -2,6 +2,17 @@
 // own packages (cli, tui, root scripts). No stability guarantee: these exports may
 // change or disappear without notice. See ADR-0004 for the public/internal split.
 
+// Failure fingerprint & evidence
+export { captureFailure, fingerprintFailure, normalizeFailureMessage } from './failure/index.js';
+export type {
+  CaptureFailureInput,
+  EvidencePack,
+  FailureOrigin,
+  FailurePhase,
+  FailureSignatureInput,
+  FingerprintedFailure,
+} from './types/index.js';
+
 // Concrete coding harnesses
 export { classifyFailure } from './harness/classify.js';
 export type { ClaudeExecFn } from './harness/claude-cli.js';

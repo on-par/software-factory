@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import type { EvidencePack } from '../types/index.js';
 import { createLogger } from './index.js';
 
 let tmpDir: string | undefined;
@@ -106,6 +107,41 @@ describe('createLogger', () => {
 
     const [event] = readEvents(eventsFile);
     expect(event.failoverReason).toBe('rate_limit');
+  });
+
+  it('includes fingerprint and evidence only when passed as extra', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+    const logger = createLogger(eventsFile, { issue: 5 }, { out: { write: () => {} } });
+    const evidence: EvidencePack = {
+      repo: 'on-par/software-factory',
+      issue: '372',
+      phase: 'check',
+      model: 'claude-sonnet-5',
+      reason: 'verify_failed',
+      component: 'check:tests',
+      origin: 'product',
+      eventExcerpt: 'test suite failed',
+      logPath: eventsFile,
+    };
+
+    logger.error('parked', 'msg', { fingerprint: 'ff_abc', evidence });
+
+    const [event] = readEvents(eventsFile);
+    expect(event.fingerprint).toBe('ff_abc');
+    expect(event.evidence).toEqual(evidence);
+  });
+
+  it('omits fingerprint and evidence when not supplied', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+    const logger = createLogger(eventsFile, {}, { out: { write: () => {} } });
+
+    logger.info('plan', 'no fingerprint');
+
+    const [event] = readEvents(eventsFile);
+    expect(event).not.toHaveProperty('fingerprint');
+    expect(event).not.toHaveProperty('evidence');
   });
 
   it('child(ctx) merges onto the parent context without mutating the parent', async () => {

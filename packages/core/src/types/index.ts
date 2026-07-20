@@ -112,6 +112,54 @@ export type FailoverReason =
   | 'verify_failed'
   | 'unknown';
 
+// ---------- Failure fingerprint & evidence (#372) ----------
+
+/** Pipeline phase a failure terminated in. */
+export type FailurePhase = 'plan' | 'build' | 'check' | 'ship';
+
+/** Whether the fault is in the factory itself or in the product under work. */
+export type FailureOrigin = 'factory-internal' | 'product';
+
+/** Fields that identify a defect and compose its deterministic signature. */
+export interface FailureSignatureInput {
+  /** Raw error message / event excerpt (volatile tokens stripped at fingerprint time). */
+  message: string;
+  phase: FailurePhase;
+  /** Harness id or checker name, e.g. 'codex-cli', 'check:tests'. */
+  component: string;
+  origin: FailureOrigin;
+  /** Classified reason from classifyFailure (#368). */
+  reason: FailoverReason;
+}
+
+/** Everything a downstream filing story needs without re-deriving from the log. */
+export interface EvidencePack {
+  repo: string;
+  issue: string;
+  phase: FailurePhase;
+  model: string;
+  reason: FailoverReason;
+  component: string;
+  origin: FailureOrigin;
+  eventExcerpt: string;
+  logPath: string;
+}
+
+/** Inputs to captureFailure: signature fields plus the evidence-only context. */
+export interface CaptureFailureInput extends FailureSignatureInput {
+  repo: string;
+  issue: string;
+  model: string;
+  logPath: string;
+  /** Excerpt char cap (default 600). */
+  excerptLimit?: number;
+}
+
+export interface FingerprintedFailure {
+  fingerprint: string;
+  evidence: EvidencePack;
+}
+
 // ---------- Events ----------
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -125,6 +173,8 @@ export interface FactoryEvent {
   lane?: string;
   phase?: string;
   failoverReason?: FailoverReason;
+  fingerprint?: string;
+  evidence?: EvidencePack;
 }
 
 // ---------- Cost Tracking ----------
