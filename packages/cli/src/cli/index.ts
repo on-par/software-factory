@@ -62,6 +62,7 @@ import {
   formatGcReport,
   gitFetch,
   isAutoMergeBlocked,
+  logCost,
   logEvent,
   readCosts,
   resolveFilingPolicy,
@@ -601,6 +602,7 @@ export async function shipIssue(
   const factoryConfig = loadFactoryConfig();
   const timeouts = resolveTimeouts(factoryConfig);
   const router = new ModelRouter(modelsConfig, routesConfig);
+  router.setCostSink((entry) => logCost(paths.costs, { ...entry, issue: String(issueNum) }));
   const modelOverrides = resolveModelOverrides(router.registryRef);
   const constitutionLoader = new ConstitutionLoader();
 
@@ -748,8 +750,10 @@ export async function shipIssue(
         console.error(chalk.red(`  FAIL: ${f.checker} — ${f.details}`));
       }
       throw new LaneParkError(
-        `${check.summary.failures} check failures after ${check.reworkRounds} rework rounds`,
-        'fail',
+        check.stuck
+          ? `lane stuck after ${check.reworkRounds} rework rounds (identical failures) — escalated`
+          : `${check.summary.failures} check failures after ${check.reworkRounds} rework rounds`,
+        check.stuck ? 'escalate' : 'fail',
       );
     }
 

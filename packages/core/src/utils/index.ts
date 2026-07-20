@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import { createLogger } from '../logger/index.js';
-import type { CostEntry, FailoverReason, LogLevel } from '../types/index.js';
+import type { CostEntry, FailoverReason, LogLevel, ReworkInfo } from '../types/index.js';
 import { levelForType } from './format.js';
 
 export { colorEnabled, formatEventLine, levelForType } from './format.js';
@@ -20,11 +20,20 @@ export function logEvent(
   type: string,
   issue: string | number,
   msg: string,
-  extra?: { failoverReason?: FailoverReason; lane?: string; phase?: string; level?: LogLevel },
+  extra?: {
+    failoverReason?: FailoverReason;
+    lane?: string;
+    phase?: string;
+    level?: LogLevel;
+    rework?: ReworkInfo;
+  },
 ): void {
   const logger = createLogger(eventsFile, { issue, lane: extra?.lane, phase: extra?.phase });
   const level = extra?.level ?? levelForType(type);
-  logger[level](type, msg, extra?.failoverReason ? { failoverReason: extra.failoverReason } : undefined);
+  const meta: { failoverReason?: FailoverReason; rework?: ReworkInfo } = {};
+  if (extra?.failoverReason) meta.failoverReason = extra.failoverReason;
+  if (extra?.rework) meta.rework = extra.rework;
+  logger[level](type, msg, Object.keys(meta).length > 0 ? meta : undefined);
 }
 
 // ---------- Cost Tracking ----------

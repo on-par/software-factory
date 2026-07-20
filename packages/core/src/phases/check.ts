@@ -6,17 +6,57 @@ import type { ModelRouter } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
-import type { CheckSummary, Constitution, DisputeResult, FailoverReason } from '../types/index.js';
+import type {
+  CheckSummary,
+  Constitution,
+  DisputeResult,
+  FailoverReason,
+  ReworkCause,
+  ReworkInfo,
+} from '../types/index.js';
 
-type LogFn = (type: string, msg: string, extra?: { failoverReason?: FailoverReason }) => void;
+type LogFn = (type: string, msg: string, extra?: { failoverReason?: FailoverReason; rework?: ReworkInfo }) => void;
 
 export interface CheckPhaseResult {
   passed: boolean;
   summary: CheckSummary;
   reworkRounds: number;
+  stuck?: boolean;
 }
 
 const MAX_REWORK_ROUNDS = 3;
+
+/** Consecutive no-progress rework rounds before the lane is declared stuck. */
+const STUCK_THRESHOLD = 2;
+
+/** Provider/CI-level reasons that point away from a factory fault. */
+const EXTERNAL_REASONS = new Set<FailoverReason>(['rate_limit', 'usage_cap', 'timeout', 'unavailable']);
+
+/** Deterministic signature of the failing checks: name + volatility-stripped detail. */
+function failureSignature(summary: CheckSummary): string {
+  return summary.results
+    .filter((r) => r.result === 'FAIL')
+    .map((r) => `${r.checker}:${normalizeDetail(r.details)}`)
+    .sort()
+    .join('|');
+}
+
+function normalizeDetail(details: string): string {
+  return details.toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
+function failingCheckerNames(summary: CheckSummary): string[] {
+  return summary.results.filter((r) => r.result === 'FAIL').map((r) => r.checker);
+}
+
+function classifyReworkCause(opts: {
+  steering?: ConsumedSteering;
+  failovers: { reason: FailoverReason }[];
+}): ReworkCause {
+  if (opts.steering && opts.steering.messages.length > 0) return 'direction-change';
+  if (opts.failovers.some((f) => EXTERNAL_REASONS.has(f.reason))) return 'external';
+  return 'factory-fault';
+}
 
 export async function checkPhase(opts: {
   issue: number;
@@ -53,16 +93,17 @@ export async function checkPhase(opts: {
   let reworkRounds = 0;
   const maxRounds = autoRework ? MAX_REWORK_ROUNDS : 0;
 
+  let stuck = false;
+  let noProgressStreak = 0;
+
   while (summary.failures > 0 && reworkRounds < maxRounds) {
     reworkRounds++;
-    log('rework', `${summary.failures} failures — sending back to worker (round ${reworkRounds})`);
+    const signatureBefore = failureSignature(summary);
+    const failingChecks = failingCheckerNames(summary);
 
     const steering = drainSteering?.();
-    if (steering && steering.messages.length > 0) {
-      log('steering_applied', describeSteering(steering));
-    }
 
-    await reworkWorker(
+    const { failovers } = await reworkWorker(
       issue,
       worktree,
       specPath,
@@ -75,8 +116,41 @@ export async function checkPhase(opts: {
       steering,
     );
 
+    const cause = classifyReworkCause({ steering, failovers });
+    log(
+      'rework',
+      `round ${reworkRounds}/${maxRounds}: ${summary.failures} failing (${failingChecks.join(', ')}) — cause=${cause}`,
+      { rework: { round: reworkRounds, failingChecks, cause } },
+    );
+    if (steering && steering.messages.length > 0) {
+      log('steering_applied', describeSteering(steering));
+    }
+
     summary = await runAllCheckers(ctx, router, constitution, checkTimeoutSeconds);
     log('check', `Rework round ${reworkRounds}: ${summary.failures} failures remaining`);
+
+    if (summary.failures > 0 && failureSignature(summary) === signatureBefore) {
+      noProgressStreak++;
+    } else {
+      noProgressStreak = 0;
+    }
+
+    if (noProgressStreak >= STUCK_THRESHOLD) {
+      stuck = true;
+      log(
+        'stuck',
+        `lane stuck: identical failures (${failingCheckerNames(summary).join(', ')}) across ${STUCK_THRESHOLD} consecutive rework rounds — escalating early`,
+        {
+          rework: {
+            round: reworkRounds,
+            failingChecks: failingCheckerNames(summary),
+            cause: 'factory-fault',
+            stuck: true,
+          },
+        },
+      );
+      break;
+    }
   }
 
   for (const s of summary.results.filter((r) => r.result === 'SKIP')) {
@@ -89,11 +163,7 @@ export async function checkPhase(opts: {
     log('check', summary.skips > 0 ? `All checkers passed (${summary.skips} skipped)` : 'All checkers passed');
   }
 
-  return {
-    passed: summary.failures === 0,
-    summary,
-    reworkRounds,
-  };
+  return { passed: summary.failures === 0, summary, reworkRounds, stuck };
 }
 
 async function reworkWorker(
@@ -107,7 +177,7 @@ async function reworkWorker(
   timeoutSeconds?: number,
   sandbox?: SandboxPolicy,
   steering?: ConsumedSteering,
-): Promise<void> {
+): Promise<{ failovers: { model: string; reason: FailoverReason; detail?: string }[] }> {
   const constitutionCtx = buildConstitutionContext(constitution);
   const failures = summary.results.filter((r) => r.result === 'FAIL');
   const failureDetails = failures.map((f) => `### ${f.checker}\n${f.details}`).join('\n\n');
@@ -146,13 +216,14 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
     })
     .catch(() => null);
 
-  if (reworkResult) {
-    for (const f of failoversFrom(reworkResult.attempts)) {
-      log('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, {
-        failoverReason: f.reason,
-      });
-    }
+  const failovers = reworkResult ? failoversFrom(reworkResult.attempts) : [];
+  for (const f of failovers) {
+    log('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, {
+      failoverReason: f.reason,
+    });
   }
+
+  return { failovers };
 }
 
 export async function disputeResolution(opts: {

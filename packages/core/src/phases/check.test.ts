@@ -104,8 +104,96 @@ describe('checkPhase auto rework', () => {
     });
 
     expect(check.passed).toBe(false);
-    expect(check.reworkRounds).toBe(3);
-    expect(stub.calls).toHaveLength(3);
+    expect(check.reworkRounds).toBe(2);
+    expect(stub.calls).toHaveLength(2);
+    expect(check.stuck).toBe(true);
+  });
+
+  it(
+    'emits a stuck event once identical failures repeat across consecutive rework rounds',
+    { timeout: 120_000 },
+    async () => {
+      const { worktree, specPath } = await makeFailingWorktree();
+      const { router } = makeRouter();
+      const logCalls: Array<
+        [
+          string,
+          string,
+          ({ rework?: { round: number; failingChecks: string[]; cause: string; stuck?: boolean } } | undefined)?,
+        ]
+      > = [];
+
+      await checkPhase({
+        issue: 77,
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        log: (type, msg, extra) => {
+          logCalls.push([type, msg, extra]);
+        },
+      });
+
+      const stuckCalls = logCalls.filter(([type]) => type === 'stuck');
+      expect(stuckCalls).toHaveLength(1);
+      const rework = stuckCalls[0][2]?.rework;
+      expect(rework?.stuck).toBe(true);
+      expect(rework?.cause).toBe('factory-fault');
+      expect(rework?.failingChecks.length).toBeGreaterThan(0);
+    },
+  );
+
+  it('emits a rework event carrying structured cause metadata', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router } = makeRouter();
+    const logCalls: Array<
+      [string, string, ({ rework?: { round: number; failingChecks: string[]; cause: string } } | undefined)?]
+    > = [];
+
+    await checkPhase({
+      issue: 77,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      log: (type, msg, extra) => {
+        logCalls.push([type, msg, extra]);
+      },
+    });
+
+    const reworkCalls = logCalls.filter(([type]) => type === 'rework');
+    expect(reworkCalls.length).toBeGreaterThan(0);
+    const first = reworkCalls[0];
+    expect(first[2]?.rework?.round).toBe(1);
+    expect(first[2]?.rework?.cause).toBe('factory-fault');
+    expect(first[2]?.rework?.failingChecks.length).toBeGreaterThan(0);
+  });
+
+  it('classifies the rework cause as direction-change when steering was applied', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router } = makeRouter();
+    const logCalls: Array<
+      [string, string, ({ rework?: { round: number; failingChecks: string[]; cause: string } } | undefined)?]
+    > = [];
+    const drainSteering = () => ({
+      messages: [{ id: 'steer-1', issue: 77, text: 'change the spec', queuedAt: '2026-01-01T00:00:00.000Z' }],
+      attachments: [],
+    });
+
+    await checkPhase({
+      issue: 77,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      log: (type, msg, extra) => {
+        logCalls.push([type, msg, extra]);
+      },
+      drainSteering,
+    });
+
+    const reworkCalls = logCalls.filter(([type]) => type === 'rework');
+    expect(reworkCalls[0][2]?.rework?.cause).toBe('direction-change');
   });
 
   it(
@@ -353,7 +441,7 @@ describe('checkPhase steering', () => {
       drainSteering,
     });
 
-    expect(calls).toBe(3);
+    expect(calls).toBe(2);
   });
 
   it('applies drained steering to the rework prompt and logs steering_applied', { timeout: 120_000 }, async () => {
