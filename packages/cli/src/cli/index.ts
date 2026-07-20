@@ -10,6 +10,7 @@ import { promisify } from 'node:util';
 import { Octokit } from '@octokit/rest';
 import type {
   FailoverReason,
+  IngestSettings,
   ModelDiagnosis,
   QueueDiagnostic,
   SandboxPolicy,
@@ -46,11 +47,13 @@ import {
   readUsage,
   renderKpiReport,
   renderKpiTrend,
+  resolveIngestConfig,
   resolveModelOverrides,
   resolvePlanApproval,
   resolveSandboxPolicy,
   resolveSkipCI,
   resolveTimeouts,
+  runAutoIngest,
   shipPhase,
   validateQueue,
   watchUsage,
@@ -1310,14 +1313,70 @@ async function cmdRun() {
   logEvent(paths.events, 'run-done', 'all', 'all lanes finished');
 }
 
+/** Wraps cmdRun so an empty queue is a no-op (not a throw) while auto-ingest is enabled and watching. */
+export function createSuperviseRunQueue(
+  paths: ReturnType<typeof getFactoryPaths>,
+  ingestCfg: IngestSettings,
+  deps: { cmdRunFn?: () => Promise<void>; readQueueFile?: () => string; emitEvent?: typeof logEvent } = {},
+): () => Promise<void> {
+  const {
+    cmdRunFn = cmdRun,
+    readQueueFile = () => (existsSync(paths.queue) ? readFileSync(paths.queue, 'utf-8') : ''),
+    emitEvent = logEvent,
+  } = deps;
+  return async () => {
+    const queueContent = readQueueFile();
+    if (parseQueue(queueContent).entries.length === 0 && ingestCfg.enabled) {
+      emitEvent(paths.events, 'idle', 'auto', 'queue empty — waiting for ready issues');
+      return;
+    }
+    await cmdRunFn();
+  };
+}
+
+/** Builds the per-cycle auto-ingest hook passed to superviseLoop; failures are logged, never thrown. */
+export function createIngestHook(
+  repoRoot: string,
+  paths: ReturnType<typeof getFactoryPaths>,
+  ingestCfg: IngestSettings,
+  deps: { runAutoIngestFn?: typeof runAutoIngest; emitEvent?: typeof logEvent } = {},
+): () => Promise<number> {
+  const { runAutoIngestFn = runAutoIngest, emitEvent = logEvent } = deps;
+  return async () => {
+    try {
+      const result = await runAutoIngestFn({
+        repoDir: repoRoot,
+        queueFile: paths.queue,
+        watermarkFile: paths.ingestWatermark,
+        label: ingestCfg.label,
+        lane: ingestCfg.lane,
+        maxPerCycle: ingestCfg.maxPerCycle,
+      });
+      if (result.appended.length) {
+        emitEvent(
+          paths.events,
+          'ingested',
+          'auto',
+          `auto-ingest appended ${result.appended.length} ready issue(s): ${result.appended.join(', ')}`,
+        );
+      }
+      return result.appended.length;
+    } catch (err) {
+      emitEvent(paths.events, 'warn', 'auto', `auto-ingest failed: ${errorDetail(err)}`);
+      return 0;
+    }
+  };
+}
+
 async function cmdSupervise(opts: { now?: boolean }) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
+  const ingestCfg = resolveIngestConfig(loadFactoryConfig());
 
   const content = existsSync(paths.queue) ? readFileSync(paths.queue, 'utf-8') : '';
   const { entries, diagnostics } = parseQueue(content);
   warnQueueDiagnostics(diagnostics);
-  if (entries.length === 0) {
+  if (entries.length === 0 && !ingestCfg.enabled) {
     throw new CliExitError('queue empty — run factory init + triage first', 2);
   }
 
@@ -1337,7 +1396,8 @@ async function cmdSupervise(opts: { now?: boolean }) {
     stopFile: paths.stop,
     eventsFile: paths.events,
     now: opts.now,
-    runQueue: () => cmdRun(),
+    runQueue: createSuperviseRunQueue(paths, ingestCfg),
+    ingest: ingestCfg.enabled ? createIngestHook(repoRoot, paths, ingestCfg) : undefined,
   });
 }
 
@@ -1899,6 +1959,9 @@ export interface SuperviseDeps {
   sleep?: (ms: number) => Promise<void>;
   emitEvent?: typeof logEvent;
   writeLine?: (line: string) => void;
+  /** When set, run once per cycle before draining the queue; returns count appended. Its presence
+   *  also switches the loop into perpetual-poll mode (see superviseLoop). */
+  ingest?: () => Promise<number>;
 }
 
 const USAGE_UNAVAILABLE_LINE =
@@ -1921,6 +1984,7 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
     sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
     emitEvent = logEvent,
     writeLine = (line: string) => console.log(line),
+    ingest,
   } = deps;
 
   let cycle = 0;
@@ -1965,8 +2029,17 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
       `supervise cycle ${cycle}: trailing usage (${source}) at ${Math.round(pct * 100)}% of cap — starting run`,
     );
     clearStop(stopFile);
+    if (ingest) {
+      const appended = await ingest();
+      if (appended > 0) writeLine(`[factory] supervise: auto-ingest appended ${appended} ready issue(s)`);
+    }
     await runQueue();
-    if (!pathExists(stopFile)) break;
+    if (pathExists(stopFile)) continue;
+    if (ingest) {
+      await sleep(pollMs);
+      continue;
+    }
+    break;
   }
   emitEvent(eventsFile, 'supervisor-done', 'usage', 'supervise finished — queue drained or lanes need attention');
 }

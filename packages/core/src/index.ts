@@ -5,13 +5,14 @@
 // kits live behind '@on-par/factory-core/testing'.
 
 // Config
-export type { FactoryConfig, ModelsConfig, RoutesConfig } from './config/index.js';
+export type { FactoryConfig, IngestSettings, ModelsConfig, RoutesConfig } from './config/index.js';
 export {
   getConstitutionsDir,
   getFactoryPaths,
   loadFactoryConfig,
   loadModelsConfig,
   loadRoutesConfig,
+  resolveIngestConfig,
   resolvePlanApproval,
   resolveSkipCI,
   resolveTimeouts,
@@ -161,6 +162,10 @@ export {
   VALIDATED_LABEL,
   WONTFIX_LABEL,
 } from './discovery/promote.js';
+
+// Ingest
+export type { AutoIngestDeps, AutoIngestOptions, AutoIngestResult } from './ingest/index.js';
+export { issueFromFactoryBranch, runAutoIngest } from './ingest/index.js';
 
 // Eval
 export type {

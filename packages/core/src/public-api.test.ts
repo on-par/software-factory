@@ -19,6 +19,7 @@ const PUBLIC_API_KEYS = [
   'loadFactoryConfig',
   'loadModelsConfig',
   'loadRoutesConfig',
+  'resolveIngestConfig',
   'resolvePlanApproval',
   'resolveSkipCI',
   'resolveTimeouts',
@@ -106,6 +107,9 @@ const PUBLIC_API_KEYS = [
   'seedStories',
   'VALIDATED_LABEL',
   'WONTFIX_LABEL',
+  // Ingest
+  'issueFromFactoryBranch',
+  'runAutoIngest',
   // Eval
   'appendHistoryLine',
   'buildLocalSmallScoreboard',
