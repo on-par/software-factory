@@ -129,7 +129,7 @@ export function renderLocalRunReport(input: LocalRunReportRenderInput): string {
     .join('\n');
 }
 
-function readIssueEvents(eventsFile: string, issue: number, startedAt: string): FactoryEvent[] {
+export function readIssueEvents(eventsFile: string, issue: number, startedAt: string): FactoryEvent[] {
   if (!existsSync(eventsFile)) return [];
   const started = Date.parse(startedAt);
   return readFileSync(eventsFile, 'utf-8')

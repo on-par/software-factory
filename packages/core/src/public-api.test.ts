@@ -74,6 +74,9 @@ const PUBLIC_API_KEYS = [
   'queueSteeringMessage',
   'steeringFileFor',
   // Reports
+  'gatherEvidencePack',
+  'readIssueEvents',
+  'renderEvidencePack',
   'renderLocalRunReport',
   'writeLocalRunReport',
   // Discovery
