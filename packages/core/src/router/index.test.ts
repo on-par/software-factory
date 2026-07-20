@@ -931,3 +931,107 @@ describe('failoversFrom', () => {
     expect(failoversFrom(attempts)).toEqual([]);
   });
 });
+
+describe('ModelRouter cost sink', () => {
+  const costModels: ModelsConfig = {
+    version: 1,
+    models: {
+      'stub-model': {
+        provider: 'custom',
+        tier: 'boss',
+        costPerMtokInput: 3,
+        costPerMtokOutput: 15,
+        contextWindow: 1000,
+        capabilities: [],
+        envKey: null,
+      },
+    },
+    tiers: { boss: ['stub-model'] },
+    failover: {
+      triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+      maxRetries: 2,
+      cooldownMs: 0,
+      escalateAfterTierExhausted: true,
+    },
+    routingRules: {},
+  };
+
+  const costTwoModels: ModelsConfig = {
+    version: 1,
+    models: {
+      'model-a': {
+        provider: 'custom',
+        tier: 'boss',
+        costPerMtokInput: 3,
+        costPerMtokOutput: 15,
+        contextWindow: 1000,
+        capabilities: [],
+        envKey: null,
+      },
+      'model-b': {
+        provider: 'custom',
+        tier: 'boss',
+        costPerMtokInput: 3,
+        costPerMtokOutput: 15,
+        contextWindow: 1000,
+        capabilities: [],
+        envKey: null,
+      },
+    },
+    tiers: { boss: ['model-a', 'model-b'] },
+    failover: {
+      triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+      maxRetries: 2,
+      cooldownMs: 0,
+      escalateAfterTierExhausted: true,
+    },
+    routingRules: {},
+  };
+
+  it('records exactly one cost row for a successful run', async () => {
+    const stub = new StubModelExecutor({ scripts: { plan: [{ output: 'SCRIPTED PLAN' }] } });
+    const router = new ModelRouter(costModels, routes, false, stub);
+    const rows: Parameters<Parameters<ModelRouter['setCostSink']>[0]>[0][] = [];
+    router.setCostSink((entry) => rows.push(entry));
+
+    await router.run('plan', 'do it');
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].task).toBe('plan');
+    expect(rows[0].model).toBe('stub-model');
+    expect(rows[0].inputTokens).toBeGreaterThan(0);
+    expect(rows[0].outputTokens).toBeGreaterThan(0);
+    expect(rows[0].cost).toBeGreaterThan(0);
+  });
+
+  it('does not record a cost row when all models fail', async () => {
+    const stub = new StubModelExecutor({
+      scripts: { plan: [{ fail: 'error' }, { fail: 'error' }, { fail: 'error' }] },
+    });
+    const router = new ModelRouter(costModels, routes, false, stub);
+    const rows: unknown[] = [];
+    router.setCostSink((entry) => rows.push(entry));
+
+    await expect(router.run('plan', 'do it')).rejects.toThrow();
+
+    expect(rows).toEqual([]);
+  });
+
+  it('records failoverReason on the row when a failover occurred', async () => {
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [{ fail: 'usage_cap' }, { output: 'FROM B' }],
+      },
+    });
+    const router = new ModelRouter(costTwoModels, routes, false, stub);
+    const rows: Parameters<Parameters<ModelRouter['setCostSink']>[0]>[0][] = [];
+    router.setCostSink((entry) => rows.push(entry));
+
+    const result = await router.run('plan', 'do it');
+
+    expect(result.model).toBe('model-b');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].model).toBe('model-b');
+    expect(rows[0].failoverReason).toBe('usage_cap');
+  });
+});

@@ -185,6 +185,25 @@ describe('utils', () => {
     });
   });
 
+  it('logs structured rework metadata when extra.rework is provided', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+
+    logEvent(eventsFile, 'rework', 77, 'msg', {
+      rework: { round: 1, failingChecks: ['tests'], cause: 'factory-fault' },
+    });
+
+    const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter(Boolean);
+    expect(JSON.parse(lines[0])).toEqual({
+      ts: expect.any(String),
+      type: 'rework',
+      issue: '77',
+      msg: 'msg',
+      level: 'warn',
+      rework: { round: 1, failingChecks: ['tests'], cause: 'factory-fault' },
+    });
+  });
+
   it('includes lane and phase in the written event when passed as extra', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
     const eventsFile = join(tmpDir, 'events.ndjson');

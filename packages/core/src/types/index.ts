@@ -164,6 +164,20 @@ export interface FingerprintedFailure {
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
+/** Best-effort classification of why a rework round happened (#386). */
+export type ReworkCause = 'factory-fault' | 'direction-change' | 'external';
+
+/** Structured payload carried on `rework`/`stuck` events for later metrics (#386). */
+export interface ReworkInfo {
+  /** 1-based rework round number. */
+  round: number;
+  /** Checker names that failed this round (e.g. ['tests','lint']). */
+  failingChecks: string[];
+  cause: ReworkCause;
+  /** True when this round marks the lane stuck (identical failures repeated). */
+  stuck?: boolean;
+}
+
 export interface FactoryEvent {
   ts: string;
   type: string;
@@ -175,6 +189,7 @@ export interface FactoryEvent {
   failoverReason?: FailoverReason;
   fingerprint?: string;
   evidence?: EvidencePack;
+  rework?: ReworkInfo;
 }
 
 // ---------- Cost Tracking ----------

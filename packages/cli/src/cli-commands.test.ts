@@ -110,6 +110,7 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
     ModelRouter: vi.fn(() => ({
       resolve: (route: string) => h.routerResolve(route),
       registryRef: { getClaudeFlag: () => '--flag', getModelsInTier: () => ['m'] },
+      setCostSink: vi.fn(),
     })),
     ConstitutionLoader: vi.fn(() => ({
       listProducts: () => ['alpha', 'beta'],

@@ -6,7 +6,7 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import type { EvidencePack, FactoryEvent, FailoverReason, LogLevel } from '../types/index.js';
+import type { EvidencePack, FactoryEvent, FailoverReason, LogLevel, ReworkInfo } from '../types/index.js';
 import { colorEnabled, formatEventLine } from '../utils/format.js';
 
 export interface LogContext {
@@ -19,6 +19,7 @@ export interface LogExtra {
   failoverReason?: FailoverReason;
   fingerprint?: string;
   evidence?: EvidencePack;
+  rework?: ReworkInfo;
 }
 
 export interface LoggerOptions {
@@ -57,6 +58,7 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(extra?.failoverReason ? { failoverReason: extra.failoverReason } : {}),
       ...(extra?.fingerprint ? { fingerprint: extra.fingerprint } : {}),
       ...(extra?.evidence ? { evidence: extra.evidence } : {}),
+      ...(extra?.rework ? { rework: extra.rework } : {}),
     };
     const line = JSON.stringify(event) + '\n';
     try {

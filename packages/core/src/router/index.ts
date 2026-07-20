@@ -15,7 +15,7 @@ import { OpenCodeHarness } from '../harness/opencode.js';
 import { ModelRegistry } from '../models/index.js';
 import type { SandboxEventType, SandboxPolicy } from '../sandbox/index.js';
 import { sandboxEventFromError } from '../sandbox/index.js';
-import type { TaskType } from '../types/index.js';
+import type { CostEntry, TaskType } from '../types/index.js';
 import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
 import { shellEscape } from '../utils/index.js';
@@ -488,8 +488,18 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
   }
 }
 
+/** Cost sink for router runs. `issue`/`ts` are filled by the caller/logCost. */
+export type CostSink = (entry: Omit<CostEntry, 'ts' | 'issue'>) => void;
+
+/** Rough token estimate for cost accounting (~4 chars/token). Best-effort:
+ *  provider harnesses don't return token counts, so cost is approximate. */
+function estimateTokens(text: string): number {
+  return Math.max(1, Math.ceil(text.length / 4));
+}
+
 export class ModelRouter {
   private registry: ModelRegistry;
+  private costSink?: CostSink;
 
   constructor(
     modelsConfig: ModelsConfig,
@@ -506,6 +516,25 @@ export class ModelRouter {
 
   get registryRef() {
     return this.registry;
+  }
+
+  /** Register a sink that receives one cost row per successful run(). */
+  setCostSink(sink: CostSink): void {
+    this.costSink = sink;
+  }
+
+  private recordCost(
+    task: TaskType,
+    model: string,
+    prompt: string,
+    output: string,
+    failoverReason?: FailoverReason,
+  ): void {
+    if (!this.costSink) return;
+    const inputTokens = estimateTokens(prompt);
+    const outputTokens = estimateTokens(output);
+    const cost = this.registry.estimateCost(model, inputTokens, outputTokens);
+    this.costSink({ task, model, inputTokens, outputTokens, cost, ...(failoverReason ? { failoverReason } : {}) });
   }
 
   /** Resolve a task type to its tier */
@@ -671,6 +700,7 @@ export class ModelRouter {
           attempts.push({ model, reason: null, ok: true });
           const failovers = failoversFrom(attempts);
           const failoverReason = failovers.at(-1)?.reason;
+          this.recordCost(task, model, prompt, output, failoverReason);
           return {
             model,
             output: output,
