@@ -152,7 +152,10 @@ export async function runAutoIngest(options: AutoIngestOptions, deps: AutoIngest
   const scannedAt = now().toISOString();
   const prevWatermark = readFile(watermarkFile)?.trim() || undefined;
 
-  const { ok: listOk, issues: readyIssues } = await listReadyIssues(run, repoDir, label, maxPerCycle * 5);
+  const [{ ok: listOk, issues: readyIssues }, inFlight] = await Promise.all([
+    listReadyIssues(run, repoDir, label, maxPerCycle * 5),
+    listInFlightIssues(run, repoDir, branchPrefix),
+  ]);
   if (!listOk) {
     // Don't advance past unseen work: leave the watermark exactly as it was.
     return {
@@ -168,7 +171,6 @@ export async function runAutoIngest(options: AutoIngestOptions, deps: AutoIngest
 
   const queueContent = readFile(queueFile) ?? '';
   const inQueue = new Set(parseQueue(queueContent).entries.map((e) => e.issue));
-  const inFlight = await listInFlightIssues(run, repoDir, branchPrefix);
 
   const appended: number[] = [];
   const skippedInQueue: number[] = [];
@@ -193,6 +195,7 @@ export async function runAutoIngest(options: AutoIngestOptions, deps: AutoIngest
   }
 
   const capped = toAppend.slice(0, maxPerCycle);
+  const deferred = toAppend.slice(maxPerCycle);
 
   if (capped.length > 0) {
     const needsNewline = queueContent.length > 0 && !queueContent.endsWith('\n');
@@ -202,8 +205,16 @@ export async function runAutoIngest(options: AutoIngestOptions, deps: AutoIngest
     appended.push(...capped.map((issue) => issue.number));
   }
 
+  // Never advance the watermark up to or past an issue the maxPerCycle cap deferred this
+  // cycle — otherwise it would be misclassified as stale (and permanently dropped) next cycle.
+  const deferredCeiling = deferred.reduce<string | undefined>(
+    (min, issue) => (min === undefined || issue.updatedAt < min ? issue.updatedAt : min),
+    undefined,
+  );
+
   let watermark = prevWatermark;
   for (const issue of readyIssues) {
+    if (deferredCeiling !== undefined && issue.updatedAt >= deferredCeiling) continue;
     if (watermark === undefined || issue.updatedAt > watermark) watermark = issue.updatedAt;
   }
   watermark = watermark ?? scannedAt;

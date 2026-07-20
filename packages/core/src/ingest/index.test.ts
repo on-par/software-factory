@@ -289,6 +289,47 @@ describe('runAutoIngest', () => {
     expect(writes[QUEUE_FILE]).toBe('auto 1\nauto 2\n');
   });
 
+  it('does not permanently drop issues deferred by maxPerCycle, even when a deferred issue is older than an appended one', async () => {
+    // Sorted by number (not updatedAt): issue 1 is oldest, issue 2 is newest, issues 3-5 are
+    // in between and get deferred by the cap — a prior bug advanced the watermark past issue 2's
+    // (later) updatedAt, which then wrongly marked issues 3-5 as stale (dropped forever) next cycle.
+    const issues: FakeIssue[] = [
+      { number: 1, title: 'Oldest, appended', updatedAt: '2026-07-19T00:00:00.000Z' },
+      { number: 2, title: 'Newest, appended', updatedAt: '2026-07-19T05:00:00.000Z' },
+      { number: 3, title: 'Deferred', updatedAt: '2026-07-19T01:00:00.000Z' },
+      { number: 4, title: 'Deferred', updatedAt: '2026-07-19T02:00:00.000Z' },
+      { number: 5, title: 'Deferred', updatedAt: '2026-07-19T03:00:00.000Z' },
+    ];
+    const files: Record<string, string | null> = { [QUEUE_FILE]: '', [WATERMARK_FILE]: null };
+    const deps: AutoIngestDeps = {
+      now: () => new Date('2026-07-20T00:00:00.000Z'),
+      run: fakeRun({ issues }).run,
+      readFile: (path) => files[path] ?? null,
+      writeFile: (path, content) => {
+        files[path] = content;
+      },
+    };
+
+    const cycle1 = await runAutoIngest(
+      { repoDir: '/repo', queueFile: QUEUE_FILE, watermarkFile: WATERMARK_FILE, maxPerCycle: 2 },
+      deps,
+    );
+
+    expect(cycle1.appended).toEqual([1, 2]);
+    // The watermark must stay behind every deferred issue's updatedAt (issue 3 is earliest at 01:00).
+    expect(cycle1.watermark < '2026-07-19T01:00:00.000Z').toBe(true);
+
+    const cycle2 = await runAutoIngest(
+      { repoDir: '/repo', queueFile: QUEUE_FILE, watermarkFile: WATERMARK_FILE, maxPerCycle: 2 },
+      deps,
+    );
+
+    // Deferred issues 3-5 are picked up (capped to 2 again) — none of them were dropped as stale.
+    // Issue 1 (already appended in cycle 1) is the only one at/behind the new watermark.
+    expect(cycle2.skippedStale).toEqual([1]);
+    expect(cycle2.appended).toEqual([3, 4]);
+  });
+
   it('honors a custom label (passed to gh issue list) and lane (written into the queue line)', async () => {
     const { deps, writes, run } = makeDeps({
       runOpts: { issues: [{ number: 9, title: 'Custom', updatedAt: '2026-07-19T00:00:00.000Z' }] },
