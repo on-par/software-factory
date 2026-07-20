@@ -3,7 +3,7 @@
 import { readFile } from 'node:fs/promises';
 
 import { buildConstitutionContext } from '../constitutions/index.js';
-import type { ModelRouter } from '../router/index.js';
+import type { ModelRouter, RouterResult } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { applySteering, type ConsumedSteering } from '../steering/index.js';
@@ -104,7 +104,83 @@ genuinely independent and parallelizable. Prefer doing the work directly over
 spawning sub-agents for a single small issue — this keeps token usage efficient.`;
   } else {
     taskType = 'build_claude';
-    prompt = `/ship-it ${issue} — Run fully autonomously in headless mode, BUILD phase.
+    prompt = buildClaudePrompt({ issue, branch, specPath, constitutionCtx, skipCI });
+  }
+
+  prompt = applySteering(prompt, steering);
+
+  log('build', `Starting build phase (route: ${route})`);
+  if (sandbox) {
+    log(
+      'sandbox',
+      `containment active (runtime ${sandbox.runtime}, net ${sandbox.allowHosts.length ? 'allow-list' : 'deny-all'})`,
+    );
+  }
+
+  const runOpts = {
+    worktree,
+    timeoutSeconds: timeoutSeconds ?? 7200,
+    modelOverride,
+    sandbox,
+    onSandboxEvent: (type: string, detail: string) => log(type, detail),
+    onLog: (msg: string) => log('router', msg),
+  };
+
+  let result: RouterResult;
+  try {
+    result = await router.run(taskType, prompt, runOpts);
+  } catch (err) {
+    const reason = (err as { reason?: FailoverReason }).reason;
+    const attempts = (err as { attempts?: RouterResult['attempts'] }).attempts;
+    const quota = reason === 'usage_cap' || reason === 'rate_limit';
+    // Only swap when we actually ran the codex route and it was exhausted on a
+    // quota reason. The router only throws after trying every eligible codex
+    // worker, so reaching here already means "no Codex-harness worker remains".
+    if (taskType !== 'build_codex' || !quota) throw err;
+    const toModel = router.resolveAll('build_claude')[0];
+    if (!toModel) throw err; // no claude fallback available — park as today
+    const fromModel = attempts?.at(-1)?.model ?? 'unknown';
+    log(
+      'worker_failover',
+      `Codex build workers exhausted (${reason}) — continuing on claude: ` +
+        `from_model=${fromModel} to_model=${toModel} ` +
+        `from_route=build_codex to_route=build_claude reason=${reason}`,
+      { failoverReason: reason },
+    );
+    route = 'claude';
+    taskType = 'build_claude';
+    const claudePrompt = applySteering(
+      buildClaudePrompt({ issue, branch, specPath, constitutionCtx, skipCI }),
+      steering,
+    );
+    result = await router.run('build_claude', claudePrompt, runOpts);
+  }
+
+  for (const f of failoversFrom(result.attempts)) {
+    log('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, {
+      failoverReason: f.reason,
+    });
+  }
+
+  if (isEscalation(result.output)) {
+    const escalateLine = escalationLine(result.output);
+    log('escalate', escalateLine ?? 'build escalated');
+    return { ok: false, model: result.model, escalate: escalateLine };
+  }
+
+  log('build', `Build complete with model ${result.model}`);
+  return { ok: true, model: result.model };
+}
+
+function buildClaudePrompt(opts: {
+  issue: number;
+  branch: string;
+  specPath: string;
+  constitutionCtx: string;
+  skipCI?: boolean;
+}): string {
+  const { issue, branch, specPath, constitutionCtx, skipCI } = opts;
+  return `/ship-it ${issue} — Run fully autonomously in headless mode, BUILD phase.
 You are ALREADY inside the isolated git worktree for issue ${issue} (branch ${branch},
 cwd is this worktree), so SKIP ship-it's worktree-creation step.
 
@@ -123,41 +199,6 @@ turn after an intermediate step. Before ending: (1) branch ${branch} is pushed,
 
 If and ONLY IF you hit something genuinely ambiguous, print a line starting exactly
 with "ESCALATE:" followed by the question, then STOP.`;
-  }
-
-  prompt = applySteering(prompt, steering);
-
-  log('build', `Starting build phase (route: ${route})`);
-  if (sandbox) {
-    log(
-      'sandbox',
-      `containment active (runtime ${sandbox.runtime}, net ${sandbox.allowHosts.length ? 'allow-list' : 'deny-all'})`,
-    );
-  }
-
-  const result = await router.run(taskType, prompt, {
-    worktree,
-    timeoutSeconds: timeoutSeconds ?? 7200,
-    modelOverride,
-    sandbox,
-    onSandboxEvent: (type, detail) => log(type, detail),
-    onLog: (msg) => log('router', msg),
-  });
-
-  for (const f of failoversFrom(result.attempts)) {
-    log('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, {
-      failoverReason: f.reason,
-    });
-  }
-
-  if (isEscalation(result.output)) {
-    const escalateLine = escalationLine(result.output);
-    log('escalate', escalateLine ?? 'build escalated');
-    return { ok: false, model: result.model, escalate: escalateLine };
-  }
-
-  log('build', `Build complete with model ${result.model}`);
-  return { ok: true, model: result.model };
 }
 
 function compactForLocalModel(text: string): string {
