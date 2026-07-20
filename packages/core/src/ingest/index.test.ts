@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { describe, expect, it, vi } from 'vitest';
 
 import { validateQueue } from '../queue/index.js';
+import * as commandRunner from '../utils/command-runner.js';
 import type { AutoIngestDeps } from './index.js';
 import { issueFromFactoryBranch, runAutoIngest } from './index.js';
 
@@ -309,5 +314,56 @@ describe('runAutoIngest', () => {
     expect(result.appended).toEqual([9]);
     expect(writes[QUEUE_FILE]).toBe('nightly 9\n');
     expect(calls.some((argv) => argv.includes('--label') && argv.includes('triaged'))).toBe(true);
+  });
+
+  it('falls back to production defaults (real fs readFile/writeFile, real now, runCommand) when deps are omitted', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'factory-ingest-'));
+    const queueFile = join(dir, 'queue');
+    const watermarkFile = join(dir, 'ingest-watermark');
+    writeFileSync(queueFile, 'manual 1\n');
+    const runCommandSpy = vi.spyOn(commandRunner, 'runCommand').mockImplementation(async (argv) => {
+      const stdout =
+        argv[1] === 'issue' && argv[2] === 'list'
+          ? JSON.stringify([{ number: 7, title: 'Real defaults', updatedAt: '2026-07-19T00:00:00.000Z' }])
+          : JSON.stringify([]);
+      return { command: argv, stdout, stderr: '', exitCode: 0, killed: false, timedOut: false, ok: true };
+    });
+
+    try {
+      const result = await runAutoIngest({ repoDir: dir, queueFile, watermarkFile });
+
+      expect(result.appended).toEqual([7]);
+      expect(readFileSync(queueFile, 'utf-8')).toBe('manual 1\nauto 7\n');
+      expect(readFileSync(watermarkFile, 'utf-8')).toBe('2026-07-19T00:00:00.000Z\n');
+      expect(new Date(result.scannedAt).getTime()).not.toBeNaN();
+      expect(runCommandSpy).toHaveBeenCalled();
+    } finally {
+      runCommandSpy.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('production defaultReadFile returns null for a missing file (no queue/watermark on disk yet)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'factory-ingest-'));
+    const queueFile = join(dir, 'queue');
+    const watermarkFile = join(dir, 'ingest-watermark');
+    const runCommandSpy = vi.spyOn(commandRunner, 'runCommand').mockResolvedValue({
+      command: [],
+      stdout: '[]',
+      stderr: '',
+      exitCode: 0,
+      killed: false,
+      timedOut: false,
+      ok: true,
+    });
+
+    try {
+      const result = await runAutoIngest({ repoDir: dir, queueFile, watermarkFile });
+
+      expect(result.appended).toEqual([]);
+    } finally {
+      runCommandSpy.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
