@@ -559,6 +559,16 @@ describe('cli', () => {
   const fakeFactoryConfig = (auto: boolean): any => ({
     merge: { auto, comment: '' },
     ci: { skip: false, comment: '' },
+    filing: {
+      enabled: true,
+      excludeReasons: ['rate_limit', 'usage_cap', 'timeout', 'verify_failed'],
+      repeatThreshold: 3,
+      maxPerRun: 5,
+      maxPerDay: 20,
+      selfFixLabel: 'no-auto-merge',
+      bugLabels: ['bug'],
+      sensitivePaths: ['packages/core/', 'packages/config/', 'packages/cli/', 'scripts/', '.github/'],
+    },
   });
 
   it('self-merges a ready PR when merge is enabled via config', async () => {
@@ -577,6 +587,10 @@ describe('cli', () => {
         calls.push(['loadConfig']);
         return fakeFactoryConfig(true);
       },
+      listIssueLabels: async (...args: any[]) => {
+        calls.push(['listIssueLabels', args]);
+        return ['bug'];
+      },
       land: async (...args: any[]) => {
         calls.push(['land', args]);
         return { branch: 'ship-it/21-self-merge', prNumber: 321 };
@@ -592,7 +606,82 @@ describe('cli', () => {
       ['loadConfig'],
       ['event', 'await-merge', 21, 'waiting to merge ship-it/21-self-merge'],
       ['checkMerged', [octokit, 'on-par', 'software-factory', 'ship-it/21-self-merge']],
+      ['listIssueLabels', [octokit, 'on-par', 'software-factory', 21]],
       ['land', [21, '/repo', 'on-par/software-factory', paths, octokit, false]],
+    ]);
+  });
+
+  it('gates auto-merge behind the no-auto-merge label and keeps polling', async () => {
+    const calls: any[] = [];
+    const octokit: any = {};
+    const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
+    let stopped = false;
+
+    await waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
+      createOctokit: () => octokit,
+      pathExists: () => stopped,
+      checkMerged: async () => false,
+      loadConfig: () => fakeFactoryConfig(true),
+      listIssueLabels: async () => ['bug', 'no-auto-merge'],
+      land: async () => {
+        throw new Error('land should not be called');
+      },
+      emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) =>
+        calls.push(['event', type, issue, msg]),
+      writeLine: (line) => calls.push(['writeLine', line]),
+      sleep: async (ms) => {
+        calls.push(['sleep', ms]);
+        stopped = true;
+      },
+    });
+
+    expect(calls).toContainEqual([
+      'event',
+      'merge-gated',
+      21,
+      'auto-merge blocked by no-auto-merge — awaiting human approval',
+    ]);
+    expect(calls).toContainEqual([
+      'writeLine',
+      '[factory] #21 auto-merge gated (no-auto-merge); awaiting human merge (poll 120s)',
+    ]);
+    expect(calls).toContainEqual(['sleep', 120_000]);
+  });
+
+  it('treats a failed label check as blocked and does not auto-merge (fail-safe)', async () => {
+    const calls: any[] = [];
+    const octokit: any = {};
+    const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
+    let stopped = false;
+
+    await waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
+      createOctokit: () => octokit,
+      pathExists: () => stopped,
+      checkMerged: async () => false,
+      loadConfig: () => fakeFactoryConfig(true),
+      listIssueLabels: async () => {
+        throw new Error('label lookup failed');
+      },
+      land: async () => {
+        throw new Error('land should not be called');
+      },
+      emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) =>
+        calls.push(['event', type, issue, msg]),
+      writeLine: (line) => calls.push(['writeLine', line]),
+      sleep: async (ms) => {
+        calls.push(['sleep', ms]);
+        stopped = true;
+      },
+    });
+
+    const warnEvent = calls.find((c) => c[0] === 'event' && c[1] === 'warn');
+    expect(warnEvent).toBeDefined();
+    expect(warnEvent[3]).toContain('label check failed');
+    expect(calls).toContainEqual([
+      'event',
+      'merge-gated',
+      21,
+      'auto-merge blocked by no-auto-merge — awaiting human approval',
     ]);
   });
 
@@ -608,6 +697,7 @@ describe('cli', () => {
         pathExists: () => false,
         checkMerged: async () => false,
         loadConfig: () => fakeFactoryConfig(true),
+        listIssueLabels: async () => ['bug'],
         land: async () => {
           throw awaitingReviewError;
         },

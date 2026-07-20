@@ -34,6 +34,23 @@ export {
   resolveTargetRepo,
 } from './filing/index.js';
 
+// Filing policy: when to file, caps, and self-fix labeling (#374)
+export type { FilingDecision, FilingLedger, FilingPolicy, FilingSkipReason } from './filing/policy.js';
+export {
+  DEFAULT_FILING_POLICY,
+  emptyLedger,
+  evaluateFilingPolicy,
+  isAutoMergeBlocked,
+  labelsFor,
+  recordFiled,
+  recordPark,
+  rollDay,
+  touchesSensitiveScope,
+} from './filing/policy.js';
+
+// Config
+export { resolveFilingPolicy } from './config/index.js';
+
 // Concrete coding harnesses
 export { classifyFailure } from './harness/classify.js';
 export type { ClaudeExecFn } from './harness/claude-cli.js';

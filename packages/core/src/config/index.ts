@@ -10,7 +10,9 @@ import { resolve } from 'node:path';
 import { resolveConfigPath } from '@on-par/factory-config';
 import { z } from 'zod';
 
+import type { FilingPolicy } from '../filing/policy.js';
 import { KNOWN_HARNESS_IDS } from '../harness/catalog.js';
+import type { FailoverReason } from '../types/index.js';
 
 // ---------- Schemas ----------
 
@@ -125,6 +127,30 @@ const FactoryConfigSchema = z.object({
       comment: z.string().optional(),
     })
     .default({ enabled: true, schedule: 'weekly', maxCandidates: 5 }),
+  filing: z
+    .object({
+      enabled: z.boolean().default(true),
+      excludeReasons: z.array(z.string()).default(['rate_limit', 'usage_cap', 'timeout', 'verify_failed']),
+      repeatThreshold: z.number().int().positive().default(3),
+      maxPerRun: z.number().int().positive().default(5),
+      maxPerDay: z.number().int().positive().default(20),
+      selfFixLabel: z.string().default('no-auto-merge'),
+      bugLabels: z.array(z.string()).default(['bug']),
+      sensitivePaths: z
+        .array(z.string())
+        .default(['packages/core/', 'packages/config/', 'packages/cli/', 'scripts/', '.github/']),
+      comment: z.string().optional(),
+    })
+    .default({
+      enabled: true,
+      excludeReasons: ['rate_limit', 'usage_cap', 'timeout', 'verify_failed'],
+      repeatThreshold: 3,
+      maxPerRun: 5,
+      maxPerDay: 20,
+      selfFixLabel: 'no-auto-merge',
+      bugLabels: ['bug'],
+      sensitivePaths: ['packages/core/', 'packages/config/', 'packages/cli/', 'scripts/', '.github/'],
+    }),
 });
 
 // ---------- Types ----------
@@ -174,6 +200,21 @@ export function resolveSkipCI(config: FactoryConfig, env: NodeJS.ProcessEnv = pr
   if (env.FACTORY_SKIP_CI === '1') return true;
   if (env.FACTORY_SKIP_CI === '0') return false;
   return config.ci?.skip ?? false;
+}
+
+export function resolveFilingPolicy(config: FactoryConfig): FilingPolicy {
+  const f = config.filing;
+  return {
+    enabled: f.enabled,
+    // Validated as free-form strings by the Zod schema; narrowed here to the FailoverReason union.
+    excludeReasons: f.excludeReasons as FailoverReason[],
+    repeatThreshold: f.repeatThreshold,
+    maxPerRun: f.maxPerRun,
+    maxPerDay: f.maxPerDay,
+    selfFixLabel: f.selfFixLabel,
+    bugLabels: f.bugLabels,
+    sensitivePaths: f.sensitivePaths,
+  };
 }
 
 // ---------- Factory state paths ----------
