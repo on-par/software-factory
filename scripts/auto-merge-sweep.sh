@@ -12,11 +12,19 @@ sweep_repo() {
   local repo_dir="/Users/moltbot/repos/on-par/$repo"
   local ghrepo="on-par/$repo"
 
-  gh pr list --repo "$ghrepo" --state open \
-    --json number,isDraft,mergeable,statusCheckRollup,closingIssuesReferences \
-    2>/dev/null | python3 -c '
+  local pr_json gh_exit
+  pr_json="$(gh pr list --repo "$ghrepo" --state open \
+    --json number,isDraft,mergeable,statusCheckRollup,closingIssuesReferences 2>&1)"
+  gh_exit=$?
+  if [ "$gh_exit" -ne 0 ]; then
+    echo "[$(date '+%H:%M:%S')] $repo: gh pr list failed (exit $gh_exit): $pr_json" >&2
+    return
+  fi
+
+  printf '%s' "$pr_json" | python3 -c '
 import json, sys
-prs = json.load(sys.stdin)
+raw = sys.stdin.read()
+prs = json.loads(raw) if raw.strip() else []
 for pr in prs:
     if pr["isDraft"]:
         continue
