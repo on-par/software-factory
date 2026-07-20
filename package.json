@@ -25,7 +25,7 @@
     "clean": "rm -rf packages/*/dist packages/*/node_modules"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=24.0.0"
   },
   "license": "MIT",
   "devDependencies": {

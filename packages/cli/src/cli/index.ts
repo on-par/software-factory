@@ -2230,11 +2230,3 @@ export async function main() {
     throw err;
   }
 }
-
-// Run if invoked directly
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((err) => {
-    console.error(chalk.red(err.message));
-    process.exit(1);
-  });
-}
