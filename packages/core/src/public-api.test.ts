@@ -111,6 +111,16 @@ const INTERNAL_API_KEYS = [
   'captureFailure',
   'fingerprintFailure',
   'normalizeFailureMessage',
+  // Auto-file a fingerprinted bug (#373)
+  'createOctokitFilingClient',
+  'DEFAULT_BUG_LABELS',
+  'DEFAULT_INTERNAL_REPO',
+  'fileBug',
+  'findMatchingIssue',
+  'fingerprintMarker',
+  'renderBugBody',
+  'renderOccurrenceComment',
+  'resolveTargetRepo',
   // Concrete coding harnesses
   'classifyFailure',
   'ClaudeCliHarness',
