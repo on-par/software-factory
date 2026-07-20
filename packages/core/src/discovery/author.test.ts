@@ -97,6 +97,9 @@ describe('authorDraftEpic', () => {
     expect(commentBody).toContain('wontfix');
 
     expect(calls.every((a) => a[0] === 'gh')).toBe(true);
+
+    const listCall = findCall(calls, 'issue', 'list')!;
+    expect(flagValue(listCall, '--state')).toBe('all');
   });
 
   it('dedup by marker: skips creation entirely', async () => {
