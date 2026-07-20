@@ -121,6 +121,26 @@ export type {
   DiscoverySignalSource,
 } from './discovery/index.js';
 export { DEFAULT_MAX_CANDIDATES, runDiscoveryScan } from './discovery/index.js';
+export type {
+  AdvanceDraftEpicDeps,
+  AdvanceDraftEpicOptions,
+  AdvanceDraftEpicResult,
+  DraftStory,
+  EpicLifecycle,
+  EpicView,
+  GherkinScenario,
+} from './discovery/promote.js';
+export {
+  advanceDraftEpic,
+  ARCHIVED_LABEL,
+  classifyLifecycle,
+  DEFAULT_MAX_STORIES,
+  READY_LABEL,
+  renderStoryBody,
+  seedStories,
+  VALIDATED_LABEL,
+  WONTFIX_LABEL,
+} from './discovery/promote.js';
 
 // Eval
 export type {

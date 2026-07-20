@@ -158,7 +158,7 @@ export async function authorDraftEpic(
       '--label',
       DISCOVERY_LABEL,
       '--state',
-      'open',
+      'all',
       '--limit',
       '100',
       '--json',
