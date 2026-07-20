@@ -236,6 +236,7 @@ export function getFactoryPaths(repoRoot: string) {
     costs: resolve(state, 'costs.jsonl'),
     approvals: resolve(state, 'approvals'),
     steering: resolve(state, 'steering'),
+    kpiHistory: resolve(state, 'kpi-history.jsonl'),
   };
 }
 

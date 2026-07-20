@@ -105,6 +105,18 @@ export { gatherEvidencePack, renderEvidencePack } from './reports/evidence-pack.
 export type { LocalRunOutcome, LocalRunReport, LocalRunReportDeps, LocalRunReportInput } from './reports/local-run.js';
 export { readIssueEvents, renderLocalRunReport, writeLocalRunReport } from './reports/local-run.js';
 
+// KPIs
+export type { HealthKpis, KpiHistoryRecord } from './kpis/index.js';
+export {
+  appendKpiHistoryLine,
+  computeHealthKpis,
+  formatKpiLines,
+  kpisToHistoryRecord,
+  parseKpiHistory,
+  renderKpiReport,
+  renderKpiTrend,
+} from './kpis/index.js';
+
 // Discovery
 export type { AuthorDraftEpicDeps, AuthorDraftEpicOptions, AuthorDraftEpicResult } from './discovery/author.js';
 export {

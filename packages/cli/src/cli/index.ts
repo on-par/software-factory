@@ -16,8 +16,10 @@ import type {
   UsageReading,
 } from '@on-par/factory-core';
 import {
+  appendKpiHistoryLine,
   buildPhase,
   checkPhase,
+  computeHealthKpis,
   ConstitutionLoader,
   createFileApprovalGate,
   describeSteering,
@@ -25,19 +27,25 @@ import {
   drainSteering,
   estimateTrailingSpend,
   fetchSubscriptionUsage,
+  formatKpiLines,
   formatUsageReport,
   getConstitutionsDir,
   getFactoryPaths,
   isCommandAvailable,
+  kpisToHistoryRecord,
   listQueuedSteering,
   loadFactoryConfig,
   loadModelsConfig,
   loadRoutesConfig,
   ModelRegistry,
   ModelRouter,
+  parseKpiHistory,
   parseQueue,
   planPhase,
+  readEvents,
   readUsage,
+  renderKpiReport,
+  renderKpiTrend,
   resolveModelOverrides,
   resolveSandboxPolicy,
   resolveSkipCI,
@@ -428,6 +436,21 @@ async function cmdCost(opts: { issue?: string } = {}) {
   console.log(`  Total: $${grandTotal.toFixed(4)}`);
 }
 
+async function cmdKpis() {
+  const repoRoot = await getRepoRoot();
+  const paths = getFactoryPaths(repoRoot);
+  const events = existsSync(paths.events) ? readEvents(paths.events) : [];
+  const costs = existsSync(paths.costs) ? readCosts(paths.costs) : [];
+  const kpis = computeHealthKpis(events, costs);
+
+  const record = kpisToHistoryRecord(kpis, new Date().toISOString().slice(0, 10));
+  const existing = existsSync(paths.kpiHistory) ? readFileSync(paths.kpiHistory, 'utf-8') : '';
+  writeFileSync(paths.kpiHistory, appendKpiHistoryLine(existing, record));
+
+  console.log(renderKpiReport(kpis));
+  console.log(renderKpiTrend(parseKpiHistory(readFileSync(paths.kpiHistory, 'utf-8'))));
+}
+
 export interface UsageKnobs {
   cap: number;
   stopAt: number;
@@ -541,6 +564,13 @@ async function cmdStatus() {
     }
   } else {
     console.log('  (none)');
+  }
+
+  console.log(chalk.bold('\n== Health KPIs =='));
+  const kpiEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
+  const kpiCosts = existsSync(paths.costs) ? readCosts(paths.costs) : [];
+  for (const line of formatKpiLines(computeHealthKpis(kpiEvents, kpiCosts))) {
+    console.log(`  ${line}`);
   }
 
   if (existsSync(paths.stop)) {
@@ -2003,6 +2033,8 @@ export async function main() {
     .action(cmdUsage);
 
   program.command('status').description('Show queue, events, PRs, models').action(cmdStatus);
+
+  program.command('kpis').description('Compute factory health KPIs and record a trend snapshot').action(cmdKpis);
 
   program.command('tui').description('Live read-only view of the current run (q to quit)').action(cmdTui);
 

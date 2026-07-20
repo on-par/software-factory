@@ -199,6 +199,7 @@ function paths() {
     costs: join(state, 'costs.jsonl'),
     reports: join(state, 'reports'),
     steering: join(state, 'steering'),
+    kpiHistory: join(state, 'kpi-history.jsonl'),
   };
 }
 
@@ -543,7 +544,20 @@ describe('cli commands (via main dispatch)', () => {
     it('prints product, models, queue, events, and STOP state', async () => {
       writeFileSync(paths().product, 'alpha\n');
       writeFileSync(paths().queue, '# comment\napp 1\napp 2\n');
-      writeFileSync(paths().events, JSON.stringify({ type: 'ready', issue: 1, msg: 'done' }) + '\nnot-json\n');
+      writeFileSync(
+        paths().events,
+        [
+          JSON.stringify({ type: 'ready', issue: 1, msg: 'done' }),
+          'not-json',
+          JSON.stringify({ type: 'issue-title', issue: '2', msg: 'title' }),
+          JSON.stringify({ type: 'merged', issue: '2', msg: 'merged' }),
+          JSON.stringify({ type: 'issue-title', issue: '3', msg: 'title' }),
+          JSON.stringify({ type: 'rework', issue: '3', msg: 'rework' }),
+          JSON.stringify({ type: 'issue-title', issue: '4', msg: 'title' }),
+          JSON.stringify({ type: 'parked', issue: '4', msg: 'parked' }),
+          '',
+        ].join('\n'),
+      );
       writeFileSync(paths().stop, '');
       await runMain('status');
       const out = logged();
@@ -551,6 +565,8 @@ describe('cli commands (via main dispatch)', () => {
       expect(out).toContain('Product: alpha');
       expect(out).toContain('app 1');
       expect(out).toContain('ready #1: done');
+      expect(out).toContain('== Health KPIs ==');
+      expect(out).toContain('Merge rate:');
       expect(logged() + errored()).toContain('STOP file present');
     });
 
@@ -561,6 +577,7 @@ describe('cli commands (via main dispatch)', () => {
       expect(out).toContain('(empty)');
       expect(out).toContain('(none)');
       expect(out).toContain('Product: (none)');
+      expect(out).toContain('No factory runs recorded yet.');
     });
 
     it('warns on malformed queue lines and never renders NaN', async () => {
@@ -577,6 +594,34 @@ describe('cli commands (via main dispatch)', () => {
       const res = await runMain('status');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('(no queue file)');
+    });
+  });
+
+  describe('kpis', () => {
+    it('renders a report and trend, and records a snapshot on each run', async () => {
+      writeFileSync(
+        paths().events,
+        [
+          JSON.stringify({ type: 'issue-title', issue: '1', msg: 'title' }),
+          JSON.stringify({ type: 'merged', issue: '1', msg: 'merged' }),
+          JSON.stringify({ type: 'issue-title', issue: '2', msg: 'title' }),
+          JSON.stringify({ type: 'rework', issue: '2', msg: 'rework' }),
+          '',
+        ].join('\n'),
+      );
+      writeFileSync(paths().costs, '');
+      h.costs = [{ issue: '1', task: 'build', model: 'a', cost: 0.5 }];
+
+      await runMain('kpis');
+      const out = logged();
+      expect(out).toContain('## Health KPIs');
+      expect(out).toContain('## Health KPI trend');
+      expect(existsSync(paths().kpiHistory)).toBe(true);
+      const historyLines = (jsonl: string) => jsonl.trim().split('\n').filter(Boolean);
+      expect(historyLines(readFileSync(paths().kpiHistory, 'utf-8'))).toHaveLength(1);
+
+      await runMain('kpis');
+      expect(historyLines(readFileSync(paths().kpiHistory, 'utf-8'))).toHaveLength(2);
     });
   });
 
