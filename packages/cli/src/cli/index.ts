@@ -767,6 +767,11 @@ export async function shipIssue(
       log: mkLog('ship'),
       approvalGate,
       checkSummary: check.summary,
+      specPath,
+      eventsFile: paths.events,
+      startedAt: runStartedAt,
+      logsDir: paths.logs,
+      reworkRounds: check.reworkRounds,
     });
     if (!ship.ok) {
       throw new LaneParkError(

@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import type { Octokit } from '@octokit/rest';
 
 import type { ApprovalGate } from '../approvals/index.js';
+import { gatherEvidencePack } from '../reports/evidence-pack.js';
 import type { CheckSummary } from '../types/index.js';
 import { watchChecks } from '../utils/ci-watch.js';
 import { shellEscape } from '../utils/index.js';
@@ -31,6 +32,11 @@ export async function shipPhase(opts: {
   run?: CommandRunner;
   approvalGate?: ApprovalGate;
   checkSummary?: CheckSummary;
+  specPath?: string;
+  eventsFile?: string;
+  startedAt?: string;
+  logsDir?: string;
+  reworkRounds?: number;
 }): Promise<ShipResult> {
   const { issue, repo, worktree, branch, octokit, watchCI = true, log, run = exec, approvalGate, checkSummary } = opts;
   const [owner, repoName] = repo.split('/');
@@ -113,6 +119,20 @@ Closes #${issue}`,
     log('fail', `Could not create or find PR for ${branch}`);
     return { ok: false };
   }
+
+  try {
+    const body = gatherEvidencePack({
+      issue,
+      checkSummary,
+      reworkRounds: opts.reworkRounds,
+      specPath: opts.specPath,
+      eventsFile: opts.eventsFile,
+      startedAt: opts.startedAt,
+      logsDir: opts.logsDir,
+    });
+    await octokit.rest.issues.createComment({ owner, repo: repoName, issue_number: prNumber, body });
+    log('evidence', `posted evidence pack to PR #${prNumber}`);
+  } catch {}
 
   // Mark ready for review (if draft). REST pulls.update ignores `draft`;
   // undrafting requires the markPullRequestReadyForReview GraphQL mutation.

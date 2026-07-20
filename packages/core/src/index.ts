@@ -100,8 +100,10 @@ export {
 } from './steering/index.js';
 
 // Reports
+export type { EvidencePackGatherInput, EvidencePackRenderInput } from './reports/evidence-pack.js';
+export { gatherEvidencePack, renderEvidencePack } from './reports/evidence-pack.js';
 export type { LocalRunOutcome, LocalRunReport, LocalRunReportDeps, LocalRunReportInput } from './reports/local-run.js';
-export { renderLocalRunReport, writeLocalRunReport } from './reports/local-run.js';
+export { readIssueEvents, renderLocalRunReport, writeLocalRunReport } from './reports/local-run.js';
 
 // Discovery
 export type { AuthorDraftEpicDeps, AuthorDraftEpicOptions, AuthorDraftEpicResult } from './discovery/author.js';
