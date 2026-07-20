@@ -104,6 +104,10 @@ const PUBLIC_API_KEYS = [
 ];
 
 const INTERNAL_API_KEYS = [
+  // Failure fingerprint & evidence
+  'captureFailure',
+  'fingerprintFailure',
+  'normalizeFailureMessage',
   // Concrete coding harnesses
   'classifyFailure',
   'ClaudeCliHarness',
