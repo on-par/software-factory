@@ -61,8 +61,10 @@ import {
   ensureDir,
   formatGcReport,
   gitFetch,
+  isAutoMergeBlocked,
   logEvent,
   readCosts,
+  resolveFilingPolicy,
   runOvernightQueue,
   setupWorktree,
   shellEscape,
@@ -1752,11 +1754,17 @@ type WaitForMergeDeps = {
     paths: ReturnType<typeof getFactoryPaths>,
     octokit: Octokit,
   ) => Promise<{ branch: string; prNumber: number }>;
+  listIssueLabels?: (octokit: Octokit, owner: string, repo: string, issue: number) => Promise<string[]>;
   sleep?: (ms: number) => Promise<void>;
   emitEvent?: typeof logEvent;
   mergeEnabled?: () => boolean;
   writeLine?: (line: string) => void;
 };
+
+async function defaultListIssueLabels(octokit: Octokit, owner: string, repo: string, issue: number): Promise<string[]> {
+  const { data } = await octokit.rest.issues.listLabelsOnIssue({ owner, repo, issue_number: issue });
+  return data.map((label) => label.name);
+}
 
 export async function waitForMerge(
   issue: number,
@@ -1772,6 +1780,7 @@ export async function waitForMerge(
     checkMerged = isPrMerged,
     loadConfig = loadFactoryConfig,
     land = landIssue,
+    listIssueLabels = defaultListIssueLabels,
     sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
     emitEvent = logEvent,
     mergeEnabled,
@@ -1780,6 +1789,7 @@ export async function waitForMerge(
   const factoryConfig = loadConfig();
   const isMergeEnabled = mergeEnabled ?? (() => factoryConfig.merge.auto || process.env.FACTORY_MERGE === '1');
   const skipCI = resolveSkipCI(factoryConfig);
+  const filingPolicy = resolveFilingPolicy(factoryConfig);
   const octokit = createOctokit();
   const [owner, repoName] = ghRepo.split('/');
 
@@ -1797,6 +1807,26 @@ export async function waitForMerge(
     }
 
     if (isMergeEnabled()) {
+      let labels: string[] = [];
+      try {
+        labels = await listIssueLabels(octokit, owner, repoName, issue);
+      } catch (err) {
+        emitEvent(paths.events, 'warn', issue, `label check failed (treating as blocked): ${errorDetail(err)}`);
+        labels = [filingPolicy.selfFixLabel];
+      }
+      if (isAutoMergeBlocked(labels, filingPolicy)) {
+        emitEvent(
+          paths.events,
+          'merge-gated',
+          issue,
+          `auto-merge blocked by ${filingPolicy.selfFixLabel} — awaiting human approval`,
+        );
+        writeLine(
+          `[factory] #${issue} auto-merge gated (${filingPolicy.selfFixLabel}); awaiting human merge (poll 120s)`,
+        );
+        await sleep(120_000);
+        continue;
+      }
       await land(issue, repoRoot, ghRepo, paths, octokit, skipCI);
       return;
     }

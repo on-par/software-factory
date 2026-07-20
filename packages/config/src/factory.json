@@ -57,5 +57,16 @@
     "schedule": "weekly",
     "maxCandidates": 5,
     "comment": "Scheduled read-only scan that proposes a ranked, capped list of candidate ideas from product signals. No GitHub writes."
+  },
+  "filing": {
+    "enabled": true,
+    "excludeReasons": ["rate_limit", "usage_cap", "timeout", "verify_failed"],
+    "repeatThreshold": 3,
+    "maxPerRun": 5,
+    "maxPerDay": 20,
+    "selfFixLabel": "no-auto-merge",
+    "bugLabels": ["bug"],
+    "sensitivePaths": ["packages/core/", "packages/config/", "packages/cli/", "scripts/", ".github/"],
+    "comment": "Guardrails for auto-filing self-defects. excludeReasons are never filed unless the same fingerprint parks >= repeatThreshold times. maxPerRun/maxPerDay cap new bugs. Bugs whose origin is factory-internal get selfFixLabel so the merge path refuses auto-merge (human approval required)."
   }
 }

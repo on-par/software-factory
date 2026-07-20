@@ -121,6 +121,18 @@ const INTERNAL_API_KEYS = [
   'renderBugBody',
   'renderOccurrenceComment',
   'resolveTargetRepo',
+  // Filing policy: when to file, caps, and self-fix labeling (#374)
+  'DEFAULT_FILING_POLICY',
+  'emptyLedger',
+  'evaluateFilingPolicy',
+  'isAutoMergeBlocked',
+  'labelsFor',
+  'recordFiled',
+  'recordPark',
+  'rollDay',
+  'touchesSensitiveScope',
+  // Config
+  'resolveFilingPolicy',
   // Concrete coding harnesses
   'classifyFailure',
   'ClaudeCliHarness',

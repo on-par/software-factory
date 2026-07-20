@@ -10,6 +10,7 @@ import {
   loadFactoryConfig,
   loadModelsConfig,
   loadRoutesConfig,
+  resolveFilingPolicy,
   resolveSkipCI,
   resolveTimeouts,
 } from './index.js';
@@ -282,6 +283,61 @@ describe('loadFactoryConfig', () => {
       await writeFile(path, JSON.stringify(minimal));
       const config = loadFactoryConfig(path);
       expect(config.discovery).toEqual({ enabled: false, schedule: 'daily', maxCandidates: 3 });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  const defaultFilingPolicy = {
+    enabled: true,
+    excludeReasons: ['rate_limit', 'usage_cap', 'timeout', 'verify_failed'],
+    repeatThreshold: 3,
+    maxPerRun: 5,
+    maxPerDay: 20,
+    selfFixLabel: 'no-auto-merge',
+    bugLabels: ['bug'],
+    sensitivePaths: ['packages/core/', 'packages/config/', 'packages/cli/', 'scripts/', '.github/'],
+  };
+
+  it('exposes filing defaults from the default config file', () => {
+    const config = loadFactoryConfig();
+    expect(config.filing.enabled).toBe(true);
+    expect(config.filing.excludeReasons).toEqual(['rate_limit', 'usage_cap', 'timeout', 'verify_failed']);
+    expect(config.filing.repeatThreshold).toBe(3);
+    expect(config.filing.maxPerRun).toBe(5);
+    expect(config.filing.maxPerDay).toBe(20);
+    expect(config.filing.selfFixLabel).toBe('no-auto-merge');
+  });
+
+  it('resolveFilingPolicy returns a FilingPolicy matching the config block', () => {
+    const config = loadFactoryConfig();
+    expect(resolveFilingPolicy(config)).toEqual(defaultFilingPolicy);
+  });
+
+  it('applies filing defaults when the config omits the filing key', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
+    try {
+      const path = join(dir, 'factory.json');
+      const minimal = {
+        version: 1,
+        paths: {
+          constitutions: 'constitutions/',
+          checkers: 'lib/checkers/',
+          plans: '.factory/plans/',
+          logs: '.factory/logs/',
+          events: '.factory/events.ndjson',
+        },
+        timeouts: { plan_seconds: 1800, build_seconds: 7200, check_seconds: 1800, merge_poll_seconds: 120 },
+        merge: { auto: false, comment: '' },
+        worktree: { prefix: 'ship-it/', parent: '../', comment: '' },
+        byok: { enabled: false, comment: '' },
+        notifications: {},
+        cost_tracking: { enabled: true, log_file: '.factory/costs.jsonl', comment: '' },
+      };
+      await writeFile(path, JSON.stringify(minimal));
+      const config = loadFactoryConfig(path);
+      expect(config.filing).toEqual(defaultFilingPolicy);
+      expect(resolveFilingPolicy(config)).toEqual(defaultFilingPolicy);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
