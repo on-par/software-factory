@@ -117,6 +117,14 @@ const FactoryConfigSchema = z.object({
       network: { allow: ['api.anthropic.com', 'github.com'] },
       resources: { cpuMs: 300_000, memMb: 4096 },
     }),
+  discovery: z
+    .object({
+      enabled: z.boolean().default(true),
+      schedule: z.enum(['weekly', 'daily', 'manual']).default('weekly'),
+      maxCandidates: z.number().int().positive().default(5),
+      comment: z.string().optional(),
+    })
+    .default({ enabled: true, schedule: 'weekly', maxCandidates: 5 }),
 });
 
 // ---------- Types ----------

@@ -76,6 +76,9 @@ const PUBLIC_API_KEYS = [
   // Reports
   'renderLocalRunReport',
   'writeLocalRunReport',
+  // Discovery
+  'DEFAULT_MAX_CANDIDATES',
+  'runDiscoveryScan',
   // Eval
   'appendHistoryLine',
   'buildLocalSmallScoreboard',

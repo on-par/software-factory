@@ -222,6 +222,70 @@ describe('loadFactoryConfig', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('resolves discovery defaults', () => {
+    const config = loadFactoryConfig();
+    expect(config.discovery.enabled).toBe(true);
+    expect(config.discovery.schedule).toBe('weekly');
+    expect(config.discovery.maxCandidates).toBe(5);
+  });
+
+  it('applies discovery defaults when the config omits the discovery key', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
+    try {
+      const path = join(dir, 'factory.json');
+      const minimal = {
+        version: 1,
+        paths: {
+          constitutions: 'constitutions/',
+          checkers: 'lib/checkers/',
+          plans: '.factory/plans/',
+          logs: '.factory/logs/',
+          events: '.factory/events.ndjson',
+        },
+        timeouts: { plan_seconds: 1800, build_seconds: 7200, check_seconds: 1800, merge_poll_seconds: 120 },
+        merge: { auto: false, comment: '' },
+        worktree: { prefix: 'ship-it/', parent: '../', comment: '' },
+        byok: { enabled: false, comment: '' },
+        notifications: {},
+        cost_tracking: { enabled: true, log_file: '.factory/costs.jsonl', comment: '' },
+      };
+      await writeFile(path, JSON.stringify(minimal));
+      const config = loadFactoryConfig(path);
+      expect(config.discovery).toEqual({ enabled: true, schedule: 'weekly', maxCandidates: 5 });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('parses a discovery override', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
+    try {
+      const path = join(dir, 'factory.json');
+      const minimal = {
+        version: 1,
+        paths: {
+          constitutions: 'constitutions/',
+          checkers: 'lib/checkers/',
+          plans: '.factory/plans/',
+          logs: '.factory/logs/',
+          events: '.factory/events.ndjson',
+        },
+        timeouts: { plan_seconds: 1800, build_seconds: 7200, check_seconds: 1800, merge_poll_seconds: 120 },
+        merge: { auto: false, comment: '' },
+        worktree: { prefix: 'ship-it/', parent: '../', comment: '' },
+        byok: { enabled: false, comment: '' },
+        notifications: {},
+        cost_tracking: { enabled: true, log_file: '.factory/costs.jsonl', comment: '' },
+        discovery: { enabled: false, schedule: 'daily', maxCandidates: 3 },
+      };
+      await writeFile(path, JSON.stringify(minimal));
+      const config = loadFactoryConfig(path);
+      expect(config.discovery).toEqual({ enabled: false, schedule: 'daily', maxCandidates: 3 });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('loadRoutesConfig', () => {
