@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   getConstitutionsDir,
@@ -11,6 +11,7 @@ import {
   loadModelsConfig,
   loadRoutesConfig,
   resolveFilingPolicy,
+  resolvePlanApproval,
   resolveSkipCI,
   resolveTimeouts,
 } from './index.js';
@@ -405,6 +406,44 @@ describe('resolveSkipCI', () => {
     const { ci: _ci, ...withoutCi } = config;
 
     expect(resolveSkipCI(withoutCi as typeof config, {})).toBe(false);
+  });
+});
+
+describe('resolvePlanApproval', () => {
+  let prevApprovePlan: string | undefined;
+
+  beforeEach(() => {
+    prevApprovePlan = process.env.FACTORY_APPROVE_PLAN;
+    delete process.env.FACTORY_APPROVE_PLAN;
+  });
+
+  afterEach(() => {
+    if (prevApprovePlan === undefined) delete process.env.FACTORY_APPROVE_PLAN;
+    else process.env.FACTORY_APPROVE_PLAN = prevApprovePlan;
+  });
+
+  it('defaults to false from the shipped config', () => {
+    const config = loadFactoryConfig();
+    expect(resolvePlanApproval(config, {})).toBe(false);
+  });
+
+  it('is true when FACTORY_APPROVE_PLAN is exactly "1", regardless of config', () => {
+    const config = loadFactoryConfig();
+    expect(resolvePlanApproval({ ...config, plan_approval: { enabled: false } }, { FACTORY_APPROVE_PLAN: '1' })).toBe(
+      true,
+    );
+  });
+
+  it('is false when FACTORY_APPROVE_PLAN is exactly "0", even when config.plan_approval.enabled is true', () => {
+    const config = loadFactoryConfig();
+    expect(resolvePlanApproval({ ...config, plan_approval: { enabled: true } }, { FACTORY_APPROVE_PLAN: '0' })).toBe(
+      false,
+    );
+  });
+
+  it('falls back to config.plan_approval.enabled when the env var is unset', () => {
+    const config = loadFactoryConfig();
+    expect(resolvePlanApproval({ ...config, plan_approval: { enabled: true } }, {})).toBe(true);
   });
 });
 

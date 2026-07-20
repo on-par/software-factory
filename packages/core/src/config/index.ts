@@ -103,6 +103,12 @@ const FactoryConfigSchema = z.object({
       comment: z.string().default('Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging'),
     })
     .default({ skip: false, comment: 'Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging' }),
+  plan_approval: z
+    .object({
+      enabled: z.boolean().default(false),
+      comment: z.string().optional(),
+    })
+    .default({ enabled: false }),
   sandbox: z
     .object({
       enabled: z.boolean().default(true),
@@ -200,6 +206,12 @@ export function resolveSkipCI(config: FactoryConfig, env: NodeJS.ProcessEnv = pr
   if (env.FACTORY_SKIP_CI === '1') return true;
   if (env.FACTORY_SKIP_CI === '0') return false;
   return config.ci?.skip ?? false;
+}
+
+export function resolvePlanApproval(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.FACTORY_APPROVE_PLAN === '1') return true;
+  if (env.FACTORY_APPROVE_PLAN === '0') return false;
+  return config.plan_approval?.enabled ?? false;
 }
 
 export function resolveFilingPolicy(config: FactoryConfig): FilingPolicy {

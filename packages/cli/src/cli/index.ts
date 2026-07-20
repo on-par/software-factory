@@ -47,6 +47,7 @@ import {
   renderKpiReport,
   renderKpiTrend,
   resolveModelOverrides,
+  resolvePlanApproval,
   resolveSandboxPolicy,
   resolveSkipCI,
   resolveTimeouts,
@@ -619,7 +620,7 @@ export function parkReasonFor(err: unknown): ParkReason {
 
 export async function shipIssue(
   issueNum: number,
-  opts: { product?: string; autoRework?: boolean; interactive?: boolean; sandbox?: boolean },
+  opts: { product?: string; autoRework?: boolean; interactive?: boolean; sandbox?: boolean; approvePlan?: boolean },
   ctx?: { repoRoot: string; ghRepo: string; lane?: string },
 ) {
   const repoRoot = ctx?.repoRoot ?? (await getRepoRoot());
@@ -708,6 +709,8 @@ export async function shipIssue(
     }
   }
 
+  const planApprovalEnabled = opts.approvePlan ?? resolvePlanApproval(factoryConfig);
+
   try {
     // PLAN
     const plan = await planPhase({
@@ -721,6 +724,11 @@ export async function shipIssue(
       log: mkLog('plan'),
       timeoutSeconds: timeouts.plan,
       modelOverride: modelOverrides.plan,
+      branch,
+      approvalGate: planApprovalEnabled
+        ? createFileApprovalGate({ dir: paths.approvals, timeoutMs: timeouts.approval * 1000 })
+        : undefined,
+      drainSteering: planApprovalEnabled ? () => drainSteering(paths.steering, issueNum, worktree) : undefined,
     });
     route = plan.route;
     if (!plan.ok) {
@@ -885,7 +893,7 @@ async function maybeWriteLocalRunReport(opts: {
 
 async function cmdShip(
   issueNum: number,
-  opts: { product?: string; autoRework?: boolean; interactive?: boolean; sandbox?: boolean },
+  opts: { product?: string; autoRework?: boolean; interactive?: boolean; sandbox?: boolean; approvePlan?: boolean },
 ) {
   if (!isCommandAvailable('claude')) {
     throw new CliExitError(`factory: ${missingClaudeCliMessage()}`, 2);
@@ -1336,7 +1344,7 @@ async function cmdSupervise(opts: { now?: boolean }) {
 type RunLaneDeps = {
   ship?: (
     issue: number,
-    opts: { product?: string; autoRework?: boolean; interactive?: boolean },
+    opts: { product?: string; autoRework?: boolean; interactive?: boolean; approvePlan?: boolean },
     ctx?: { repoRoot: string; ghRepo: string; lane?: string },
   ) => Promise<string>;
   waitMerge?: typeof waitForMerge;
@@ -2058,6 +2066,7 @@ export async function main() {
     .option('--product <name>', 'Override active product constitution')
     .option('--no-auto-rework', 'Disable automatic rework loop')
     .option('--interactive', 'Pause before opening the PR and wait for approval from the TUI')
+    .option('--approve-plan', 'Pause after PLAN freezes the spec and wait for approval before BUILD')
     .option('--no-sandbox', 'Disable the containment sandbox for agent runs (dangerous)')
     .action(async (issueNum, opts) => {
       await cmdShip(parseIssueArg(issueNum), opts);

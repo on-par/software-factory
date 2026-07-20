@@ -12,6 +12,7 @@ export {
   loadFactoryConfig,
   loadModelsConfig,
   loadRoutesConfig,
+  resolvePlanApproval,
   resolveSkipCI,
   resolveTimeouts,
 } from './config/index.js';
@@ -84,7 +85,12 @@ export { shipPhase } from './phases/ship.js';
 
 // Approvals
 export type { ApprovalGate, ApprovalRequest, ApprovalResponse, FileApprovalGateOptions } from './approvals/index.js';
-export { createFileApprovalGate, listPendingApprovals, respondToApproval } from './approvals/index.js';
+export {
+  createFileApprovalGate,
+  listPendingApprovals,
+  PLAN_SPEC_PREVIEW_BYTES,
+  respondToApproval,
+} from './approvals/index.js';
 
 // Steering
 export type { ConsumedSteering, SteeringAttachment, SteeringMessage } from './steering/index.js';

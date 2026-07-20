@@ -7,9 +7,12 @@ import { dirname, join } from 'node:path';
 import type { Octokit } from '@octokit/rest';
 import matter from 'gray-matter';
 
+import type { ApprovalGate } from '../approvals/index.js';
+import { PLAN_SPEC_PREVIEW_BYTES } from '../approvals/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import type { ModelRouter } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
+import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
 import type { Constitution, FailoverReason } from '../types/index.js';
 import { codexDisabled, escalationLine, isEscalation } from '../utils/index.js';
 
@@ -88,8 +91,27 @@ export async function planPhase(opts: {
   log: (type: string, msg: string, extra?: { failoverReason?: FailoverReason }) => void;
   timeoutSeconds?: number;
   modelOverride?: string;
+  branch?: string;
+  approvalGate?: ApprovalGate;
+  drainSteering?: () => ConsumedSteering;
+  maxReplans?: number;
 }): Promise<PlanResult> {
-  const { issue, repo, worktree, specPath, constitution, router, octokit, log, timeoutSeconds, modelOverride } = opts;
+  const {
+    issue,
+    repo,
+    worktree,
+    specPath,
+    constitution,
+    router,
+    octokit,
+    log,
+    timeoutSeconds,
+    modelOverride,
+    branch,
+    approvalGate,
+    drainSteering,
+  } = opts;
+  const maxReplans = opts.maxReplans ?? 3;
 
   // Get issue details
   const [owner, repoName] = repo.split('/');
@@ -99,71 +121,123 @@ export async function planPhase(opts: {
 
   const constitutionCtx = buildConstitutionContext(constitution);
 
-  const prompt = buildPlanPrompt({ issue, issueTitle, issueBody, specPath, constitutionCtx });
-
   log('plan', `Starting plan phase`);
-  await archiveExistingSpec(specPath, log);
 
-  const result = await router.run('plan', prompt, {
-    worktree,
-    timeoutSeconds: timeoutSeconds ?? 1800,
-    modelOverride,
-    onLog: (msg) => log('router', msg),
-  });
+  let steering: ConsumedSteering | undefined;
+  let replans = 0;
 
-  for (const f of failoversFrom(result.attempts)) {
-    log('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, {
-      failoverReason: f.reason,
+  while (true) {
+    const prompt = applySteering(
+      buildPlanPrompt({ issue, issueTitle, issueBody, specPath, constitutionCtx }),
+      steering,
+    );
+
+    if (replans > 0) {
+      log('plan', `Re-planning after operator redirect (attempt ${replans + 1})`);
+    }
+    await archiveExistingSpec(specPath, log);
+
+    const result = await router.run('plan', prompt, {
+      worktree,
+      timeoutSeconds: timeoutSeconds ?? 1800,
+      modelOverride,
+      onLog: (msg) => log('router', msg),
     });
-  }
 
-  // Check for escalation
-  if (isEscalation(result.output)) {
-    const escalateLine = escalationLine(result.output);
-    log('escalate', escalateLine ?? 'plan escalated');
-    return { ok: false, route: 'claude', specPath, model: result.model, escalate: escalateLine };
-  }
-
-  // Check spec file was created. If the model is chat-only, the output is the
-  // spec content; if it has file tools, it may have written specPath directly.
-  if (!existsSync(specPath)) {
-    await writeFile(specPath, result.output);
-  }
-
-  // Read route from spec frontmatter
-  const specContent = await readFile(specPath, 'utf-8');
-  let route: 'codex' | 'claude' = 'claude';
-  let parsedSpec: ReturnType<typeof matter> | undefined;
-  try {
-    parsedSpec = matter(specContent);
-    const rawRoute = parsedSpec.data.route;
-    const trimmedRoute = typeof rawRoute === 'string' ? rawRoute.trim() : rawRoute;
-    if (trimmedRoute === 'codex' || trimmedRoute === 'claude') route = trimmedRoute;
-  } catch {
-    // malformed frontmatter -> keep default 'claude'
-  }
-
-  if (process.env.FACTORY_LOCAL_ONLY === '1' && route !== 'codex') {
-    log('warn', 'local-only mode requires a local Codex harness — forcing route to codex');
-    route = 'codex';
-    if (parsedSpec) {
-      await writeFile(specPath, matter.stringify(parsedSpec.content, { ...parsedSpec.data, route: 'codex' }));
+    for (const f of failoversFrom(result.attempts)) {
+      log('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, {
+        failoverReason: f.reason,
+      });
     }
-  }
 
-  if (route === 'codex' && codexDisabled()) {
-    log('warn', 'codex unavailable — falling back to claude');
-    route = 'claude';
-    // Keep the persisted spec's frontmatter in sync with the actual route,
-    // since it's the frozen artifact downstream consumers (eval scoring, PR review) read.
-    if (parsedSpec) {
-      await writeFile(specPath, matter.stringify(parsedSpec.content, { ...parsedSpec.data, route: 'claude' }));
+    // Check for escalation
+    if (isEscalation(result.output)) {
+      const escalateLine = escalationLine(result.output);
+      log('escalate', escalateLine ?? 'plan escalated');
+      return { ok: false, route: 'claude', specPath, model: result.model, escalate: escalateLine };
     }
+
+    // Check spec file was created. If the model is chat-only, the output is the
+    // spec content; if it has file tools, it may have written specPath directly.
+    if (!existsSync(specPath)) {
+      await writeFile(specPath, result.output);
+    }
+
+    // Read route from spec frontmatter
+    const specContent = await readFile(specPath, 'utf-8');
+    let route: 'codex' | 'claude' = 'claude';
+    let parsedSpec: ReturnType<typeof matter> | undefined;
+    try {
+      parsedSpec = matter(specContent);
+      const rawRoute = parsedSpec.data.route;
+      const trimmedRoute = typeof rawRoute === 'string' ? rawRoute.trim() : rawRoute;
+      if (trimmedRoute === 'codex' || trimmedRoute === 'claude') route = trimmedRoute;
+    } catch {
+      // malformed frontmatter -> keep default 'claude'
+    }
+
+    if (process.env.FACTORY_LOCAL_ONLY === '1' && route !== 'codex') {
+      log('warn', 'local-only mode requires a local Codex harness — forcing route to codex');
+      route = 'codex';
+      if (parsedSpec) {
+        await writeFile(specPath, matter.stringify(parsedSpec.content, { ...parsedSpec.data, route: 'codex' }));
+      }
+    }
+
+    if (route === 'codex' && codexDisabled()) {
+      log('warn', 'codex unavailable — falling back to claude');
+      route = 'claude';
+      // Keep the persisted spec's frontmatter in sync with the actual route,
+      // since it's the frozen artifact downstream consumers (eval scoring, PR review) read.
+      if (parsedSpec) {
+        await writeFile(specPath, matter.stringify(parsedSpec.content, { ...parsedSpec.data, route: 'claude' }));
+      }
+    }
+
+    log('plan', `Plan complete with model ${result.model}, route: ${route}`);
+
+    const planResult: PlanResult = { ok: true, route, specPath, model: result.model };
+
+    if (!approvalGate) return planResult;
+
+    const specForApproval = await readFile(specPath, 'utf-8');
+    const specPreview =
+      specForApproval.length > PLAN_SPEC_PREVIEW_BYTES
+        ? specForApproval.slice(0, PLAN_SPEC_PREVIEW_BYTES)
+        : specForApproval;
+
+    log('plan_approval_requested', `awaiting plan approval for issue #${issue} (route: ${route})`);
+    const response = await approvalGate({
+      issue,
+      branch: branch ?? '',
+      worktree,
+      diffStat: '',
+      kind: 'plan',
+      specPreview,
+    });
+
+    if (response.approved) {
+      log('plan_approval_granted', `plan approved for issue #${issue}`);
+      return planResult;
+    }
+
+    const redirect = drainSteering?.();
+    if (redirect && redirect.messages.length > 0) {
+      if (replans >= maxReplans) {
+        const reason = `plan re-plan limit exceeded (${maxReplans} redirects)`;
+        log('plan_rejected', reason);
+        return { ok: false, route, specPath, model: result.model, escalate: reason };
+      }
+      replans++;
+      steering = redirect;
+      log('plan_redirect', describeSteering(redirect));
+      continue; // re-plan with the redirect applied to the prompt
+    }
+
+    const reason = response.reason ?? 'plan rejected by operator';
+    log('plan_rejected', reason);
+    return { ok: false, route, specPath, model: result.model, escalate: `plan rejected: ${reason}` };
   }
-
-  log('plan', `Plan complete with model ${result.model}, route: ${route}`);
-
-  return { ok: true, route, specPath, model: result.model };
 }
 
 async function archiveExistingSpec(specPath: string, log: (type: string, msg: string) => void): Promise<void> {
