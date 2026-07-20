@@ -7,6 +7,8 @@ import {
   assertValidProduct,
   AwaitingReviewError,
   ConstitutionExistsError,
+  createIngestHook,
+  createSuperviseRunQueue,
   errorDetail,
   findOpenPRForIssue,
   findOpenPRNumber,
@@ -382,6 +384,211 @@ describe('cli', () => {
     expect(calls.some((c) => c[0] === 'writeLine' && c[1].includes('usage signal unavailable'))).toBe(true);
     const resumedEvent = calls.find((c) => c[0] === 'event' && c[1] === 'resumed');
     expect(resumedEvent[3]).toContain('(unavailable)');
+  });
+
+  it('without an ingest dep, keeps the existing drain-and-exit behavior (one runQueue, breaks when STOP absent)', async () => {
+    const calls: any[] = [];
+
+    await superviseLoop({
+      cap: 1,
+      resumeAt: 0.65,
+      pollMs: 1000,
+      watch: false,
+      stopFile: '/repo/.factory/STOP',
+      eventsFile: '/repo/.factory/events.ndjson',
+      now: true,
+      pathExists: () => false,
+      clearStop: () => {},
+      sleep: async () => {
+        calls.push(['sleep']);
+      },
+      emitEvent: () => {},
+      writeLine: (line) => calls.push(['writeLine', line]),
+      runQueue: async () => {
+        calls.push(['runQueue']);
+      },
+    });
+
+    expect(calls.filter((c) => c[0] === 'runQueue')).toHaveLength(1);
+    expect(calls.filter((c) => c[0] === 'sleep')).toHaveLength(0);
+  });
+
+  it('with an ingest dep, polls again after runQueue while STOP stays absent, and logs appended counts', async () => {
+    const calls: any[] = [];
+    let ingestCalls = 0;
+    let runQueueCalls = 0;
+
+    await expect(
+      superviseLoop({
+        cap: 1,
+        resumeAt: 0.65,
+        pollMs: 1000,
+        watch: false,
+        stopFile: '/repo/.factory/STOP',
+        eventsFile: '/repo/.factory/events.ndjson',
+        now: true,
+        pathExists: () => false,
+        clearStop: () => {},
+        sleep: async () => {
+          calls.push(['sleep']);
+        },
+        emitEvent: () => {},
+        writeLine: (line) => calls.push(['writeLine', line]),
+        runQueue: async () => {
+          runQueueCalls++;
+          calls.push(['runQueue']);
+        },
+        ingest: async () => {
+          ingestCalls++;
+          if (ingestCalls >= 3) throw new Error('stop the test loop');
+          return ingestCalls === 1 ? 2 : 0;
+        },
+      }),
+    ).rejects.toThrow('stop the test loop');
+
+    expect(runQueueCalls).toBe(2);
+    expect(calls.filter((c) => c[0] === 'sleep')).toHaveLength(2);
+    expect(calls).toContainEqual(['writeLine', '[factory] supervise: auto-ingest appended 2 ready issue(s)']);
+  });
+
+  describe('createSuperviseRunQueue', () => {
+    const paths = { queue: '/repo/.factory/queue', events: '/repo/.factory/events.ndjson' } as any;
+
+    it('runs cmdRun when the queue is non-empty', async () => {
+      let cmdRunCalls = 0;
+      const events: any[] = [];
+      const runQueue = createSuperviseRunQueue(
+        paths,
+        { enabled: true, label: 'ready', lane: 'auto', maxPerCycle: 20 },
+        {
+          cmdRunFn: async () => {
+            cmdRunCalls++;
+          },
+          readQueueFile: () => 'auto 1\n',
+          emitEvent: (...args: any[]) => events.push(args),
+        },
+      );
+
+      await runQueue();
+
+      expect(cmdRunCalls).toBe(1);
+      expect(events).toHaveLength(0);
+    });
+
+    it('is a no-op and logs idle when the queue is empty and ingest is enabled', async () => {
+      let cmdRunCalls = 0;
+      const events: any[] = [];
+      const runQueue = createSuperviseRunQueue(
+        paths,
+        { enabled: true, label: 'ready', lane: 'auto', maxPerCycle: 20 },
+        {
+          cmdRunFn: async () => {
+            cmdRunCalls++;
+          },
+          readQueueFile: () => '',
+          emitEvent: (...args: any[]) => events.push(args),
+        },
+      );
+
+      await runQueue();
+
+      expect(cmdRunCalls).toBe(0);
+      expect(events).toEqual([[paths.events, 'idle', 'auto', 'queue empty — waiting for ready issues']]);
+    });
+
+    it('runs cmdRun even on an empty queue when ingest is disabled', async () => {
+      let cmdRunCalls = 0;
+      const runQueue = createSuperviseRunQueue(
+        paths,
+        { enabled: false, label: 'ready', lane: 'auto', maxPerCycle: 20 },
+        {
+          cmdRunFn: async () => {
+            cmdRunCalls++;
+          },
+          readQueueFile: () => '',
+        },
+      );
+
+      await runQueue();
+
+      expect(cmdRunCalls).toBe(1);
+    });
+  });
+
+  describe('createIngestHook', () => {
+    const paths = {
+      queue: '/repo/.factory/queue',
+      events: '/repo/.factory/events.ndjson',
+      ingestWatermark: '/repo/.factory/ingest-watermark',
+    } as any;
+    const ingestCfg = { enabled: true, label: 'ready', lane: 'auto', maxPerCycle: 20 };
+
+    it('logs an ingested event and returns the appended count when issues are appended', async () => {
+      const events: any[] = [];
+      const hook = createIngestHook('/repo', paths, ingestCfg, {
+        runAutoIngestFn: async (opts) => {
+          expect(opts).toEqual({
+            repoDir: '/repo',
+            queueFile: paths.queue,
+            watermarkFile: paths.ingestWatermark,
+            label: 'ready',
+            lane: 'auto',
+            maxPerCycle: 20,
+          });
+          return {
+            scannedAt: '2026-07-20T00:00:00.000Z',
+            candidates: 1,
+            appended: [42],
+            skippedInQueue: [],
+            skippedInFlight: [],
+            skippedStale: [],
+            watermark: '2026-07-20T00:00:00.000Z',
+          };
+        },
+        emitEvent: (...args: any[]) => events.push(args),
+      });
+
+      const appended = await hook();
+
+      expect(appended).toBe(1);
+      expect(events).toEqual([[paths.events, 'ingested', 'auto', 'auto-ingest appended 1 ready issue(s): 42']]);
+    });
+
+    it('does not log when nothing was appended', async () => {
+      const events: any[] = [];
+      const hook = createIngestHook('/repo', paths, ingestCfg, {
+        runAutoIngestFn: async () => ({
+          scannedAt: '2026-07-20T00:00:00.000Z',
+          candidates: 0,
+          appended: [],
+          skippedInQueue: [],
+          skippedInFlight: [],
+          skippedStale: [],
+          watermark: '2026-07-20T00:00:00.000Z',
+        }),
+        emitEvent: (...args: any[]) => events.push(args),
+      });
+
+      const appended = await hook();
+
+      expect(appended).toBe(0);
+      expect(events).toHaveLength(0);
+    });
+
+    it('catches a runAutoIngest failure, logs a warn event, and returns 0', async () => {
+      const events: any[] = [];
+      const hook = createIngestHook('/repo', paths, ingestCfg, {
+        runAutoIngestFn: async () => {
+          throw new Error('gh unavailable');
+        },
+        emitEvent: (...args: any[]) => events.push(args),
+      });
+
+      const appended = await hook();
+
+      expect(appended).toBe(0);
+      expect(events).toEqual([[paths.events, 'warn', 'auto', 'auto-ingest failed: gh unavailable']]);
+    });
   });
 
   it('detects a merge by head branch even when it is outside the recent-closed window', async () => {

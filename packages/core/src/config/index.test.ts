@@ -11,6 +11,7 @@ import {
   loadModelsConfig,
   loadRoutesConfig,
   resolveFilingPolicy,
+  resolveIngestConfig,
   resolvePlanApproval,
   resolveSkipCI,
   resolveTimeouts,
@@ -58,6 +59,7 @@ describe('getFactoryPaths', () => {
     expect(paths.gitLock).toBe(resolve(repoRoot, '.factory', 'git.lock'));
     expect(paths.approvals).toBe(resolve(repoRoot, '.factory', 'approvals'));
     expect(paths.kpiHistory).toBe(resolve(repoRoot, '.factory', 'kpi-history.jsonl'));
+    expect(paths.ingestWatermark).toBe(resolve(repoRoot, '.factory', 'ingest-watermark'));
   });
 });
 
@@ -344,6 +346,71 @@ describe('loadFactoryConfig', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('resolves ingest defaults from the default config file', () => {
+    const config = loadFactoryConfig();
+    expect(config.ingest.enabled).toBe(false);
+    expect(config.ingest.label).toBe('ready');
+    expect(config.ingest.lane).toBe('auto');
+    expect(config.ingest.maxPerCycle).toBe(20);
+  });
+
+  it('applies ingest defaults when the config omits the ingest key', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
+    try {
+      const path = join(dir, 'factory.json');
+      const minimal = {
+        version: 1,
+        paths: {
+          constitutions: 'constitutions/',
+          checkers: 'lib/checkers/',
+          plans: '.factory/plans/',
+          logs: '.factory/logs/',
+          events: '.factory/events.ndjson',
+        },
+        timeouts: { plan_seconds: 1800, build_seconds: 7200, check_seconds: 1800, merge_poll_seconds: 120 },
+        merge: { auto: false, comment: '' },
+        worktree: { prefix: 'ship-it/', parent: '../', comment: '' },
+        byok: { enabled: false, comment: '' },
+        notifications: {},
+        cost_tracking: { enabled: true, log_file: '.factory/costs.jsonl', comment: '' },
+      };
+      await writeFile(path, JSON.stringify(minimal));
+      const config = loadFactoryConfig(path);
+      expect(config.ingest).toEqual({ enabled: false, label: 'ready', lane: 'auto', maxPerCycle: 20 });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('parses an ingest override', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
+    try {
+      const path = join(dir, 'factory.json');
+      const minimal = {
+        version: 1,
+        paths: {
+          constitutions: 'constitutions/',
+          checkers: 'lib/checkers/',
+          plans: '.factory/plans/',
+          logs: '.factory/logs/',
+          events: '.factory/events.ndjson',
+        },
+        timeouts: { plan_seconds: 1800, build_seconds: 7200, check_seconds: 1800, merge_poll_seconds: 120 },
+        merge: { auto: false, comment: '' },
+        worktree: { prefix: 'ship-it/', parent: '../', comment: '' },
+        byok: { enabled: false, comment: '' },
+        notifications: {},
+        cost_tracking: { enabled: true, log_file: '.factory/costs.jsonl', comment: '' },
+        ingest: { enabled: true, label: 'triaged', lane: 'nightly', maxPerCycle: 3 },
+      };
+      await writeFile(path, JSON.stringify(minimal));
+      const config = loadFactoryConfig(path);
+      expect(config.ingest).toEqual({ enabled: true, label: 'triaged', lane: 'nightly', maxPerCycle: 3 });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('loadRoutesConfig', () => {
@@ -444,6 +511,49 @@ describe('resolvePlanApproval', () => {
   it('falls back to config.plan_approval.enabled when the env var is unset', () => {
     const config = loadFactoryConfig();
     expect(resolvePlanApproval({ ...config, plan_approval: { enabled: true } }, {})).toBe(true);
+  });
+});
+
+describe('resolveIngestConfig', () => {
+  it('defaults to disabled from the shipped config', () => {
+    const config = loadFactoryConfig();
+    expect(resolveIngestConfig(config, {})).toEqual({ enabled: false, label: 'ready', lane: 'auto', maxPerCycle: 20 });
+  });
+
+  it('honors an enabled config value', () => {
+    const config = loadFactoryConfig();
+    const settings = resolveIngestConfig(
+      { ...config, ingest: { enabled: true, label: 'triaged', lane: 'nightly', maxPerCycle: 3 } },
+      {},
+    );
+    expect(settings).toEqual({ enabled: true, label: 'triaged', lane: 'nightly', maxPerCycle: 3 });
+  });
+
+  it('is true when FACTORY_AUTO_INGEST is exactly "1", regardless of config', () => {
+    const config = loadFactoryConfig();
+    expect(
+      resolveIngestConfig({ ...config, ingest: { ...config.ingest, enabled: false } }, { FACTORY_AUTO_INGEST: '1' })
+        .enabled,
+    ).toBe(true);
+  });
+
+  it('is false when FACTORY_AUTO_INGEST is exactly "0", even when config.ingest.enabled is true', () => {
+    const config = loadFactoryConfig();
+    expect(
+      resolveIngestConfig({ ...config, ingest: { ...config.ingest, enabled: true } }, { FACTORY_AUTO_INGEST: '0' })
+        .enabled,
+    ).toBe(false);
+  });
+
+  it('passes through label/lane/maxPerCycle from config unchanged', () => {
+    const config = loadFactoryConfig();
+    const settings = resolveIngestConfig(
+      { ...config, ingest: { enabled: false, label: 'custom-label', lane: 'custom-lane', maxPerCycle: 7 } },
+      {},
+    );
+    expect(settings.label).toBe('custom-label');
+    expect(settings.lane).toBe('custom-lane');
+    expect(settings.maxPerCycle).toBe(7);
   });
 });
 

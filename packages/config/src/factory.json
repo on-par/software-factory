@@ -72,5 +72,12 @@
     "bugLabels": ["bug"],
     "sensitivePaths": ["packages/core/", "packages/config/", "packages/cli/", "scripts/", ".github/"],
     "comment": "Guardrails for auto-filing self-defects. excludeReasons are never filed unless the same fingerprint parks >= repeatThreshold times. maxPerRun/maxPerDay cap new bugs. Bugs whose origin is factory-internal get selfFixLabel so the merge path refuses auto-merge (human approval required)."
+  },
+  "ingest": {
+    "enabled": false,
+    "label": "ready",
+    "lane": "auto",
+    "maxPerCycle": 20,
+    "comment": "Always-on auto-ingest. When enabled, `factory supervise` polls each cycle for open issues carrying `label` and appends new ones (deduped against the queue and open ship-it/* PRs) to the queue under `lane`. Enable per-run with FACTORY_AUTO_INGEST=1; disable with =0."
   }
 }

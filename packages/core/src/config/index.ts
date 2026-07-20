@@ -157,6 +157,15 @@ const FactoryConfigSchema = z.object({
       bugLabels: ['bug'],
       sensitivePaths: ['packages/core/', 'packages/config/', 'packages/cli/', 'scripts/', '.github/'],
     }),
+  ingest: z
+    .object({
+      enabled: z.boolean().default(false),
+      label: z.string().default('ready'),
+      lane: z.string().default('auto'),
+      maxPerCycle: z.number().int().positive().default(20),
+      comment: z.string().optional(),
+    })
+    .default({ enabled: false, label: 'ready', lane: 'auto', maxPerCycle: 20 }),
 });
 
 // ---------- Types ----------
@@ -214,6 +223,26 @@ export function resolvePlanApproval(config: FactoryConfig, env: NodeJS.ProcessEn
   return config.plan_approval?.enabled ?? false;
 }
 
+export interface IngestSettings {
+  enabled: boolean;
+  label: string;
+  lane: string;
+  maxPerCycle: number;
+}
+
+export function resolveIngestConfig(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): IngestSettings {
+  const i = config.ingest;
+  let enabled = i?.enabled ?? false;
+  if (env.FACTORY_AUTO_INGEST === '1') enabled = true;
+  if (env.FACTORY_AUTO_INGEST === '0') enabled = false;
+  return {
+    enabled,
+    label: i?.label ?? 'ready',
+    lane: i?.lane ?? 'auto',
+    maxPerCycle: i?.maxPerCycle ?? 20,
+  };
+}
+
 export function resolveFilingPolicy(config: FactoryConfig): FilingPolicy {
   const f = config.filing;
   return {
@@ -249,6 +278,7 @@ export function getFactoryPaths(repoRoot: string) {
     approvals: resolve(state, 'approvals'),
     steering: resolve(state, 'steering'),
     kpiHistory: resolve(state, 'kpi-history.jsonl'),
+    ingestWatermark: resolve(state, 'ingest-watermark'),
   };
 }
 
