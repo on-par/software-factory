@@ -19,6 +19,7 @@ const PUBLIC_API_KEYS = [
   'loadFactoryConfig',
   'loadModelsConfig',
   'loadRoutesConfig',
+  'resolvePlanApproval',
   'resolveSkipCI',
   'resolveTimeouts',
   // Queue
@@ -63,6 +64,7 @@ const PUBLIC_API_KEYS = [
   // Approvals
   'createFileApprovalGate',
   'listPendingApprovals',
+  'PLAN_SPEC_PREVIEW_BYTES',
   'respondToApproval',
   // Steering
   'applySteering',

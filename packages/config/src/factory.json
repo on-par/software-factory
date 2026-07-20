@@ -46,6 +46,10 @@
     "skip": false,
     "comment": "Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging"
   },
+  "plan_approval": {
+    "enabled": false,
+    "comment": "OPTIONAL pre-code gate: when true (or --approve-plan / FACTORY_APPROVE_PLAN=1), PLAN pauses after freezing the spec and waits for operator approval before BUILD. Default off keeps unattended auto-plan. Independent of the SHIP/auto-merge gate."
+  },
   "sandbox": {
     "enabled": true,
     "network": { "allow": ["api.anthropic.com", "github.com"] },

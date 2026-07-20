@@ -1171,6 +1171,24 @@ describe('cli commands (via main dispatch)', () => {
       expect(typeof call.approvalGate).toBe('function');
     });
 
+    it('reaches planPhase without an approval gate when --approve-plan is not passed', async () => {
+      const core = await import('@on-par/factory-core');
+      const res = await runMain('ship', '5');
+      expect(res.exited).toBe(false);
+      const call = vi.mocked(core.planPhase).mock.calls.at(-1)?.[0] as any;
+      expect(call.approvalGate).toBeUndefined();
+      expect(call.drainSteering).toBeUndefined();
+    });
+
+    it('passes an approval gate and drainSteering to planPhase when --approve-plan is set', async () => {
+      const core = await import('@on-par/factory-core');
+      const res = await runMain('ship', '5', '--approve-plan');
+      expect(res.exited).toBe(false);
+      const call = vi.mocked(core.planPhase).mock.calls.at(-1)?.[0] as any;
+      expect(typeof call.approvalGate).toBe('function');
+      expect(typeof call.drainSteering).toBe('function');
+    });
+
     it('exits 2 with the missing-claude message and never invokes the phase mocks when claude is unavailable', async () => {
       h.claudeAvailable = false;
       const core = await import('@on-par/factory-core');
@@ -1367,6 +1385,32 @@ describe('shipIssue (direct)', () => {
     await shipIssue(5, { interactive: true }, ctx());
     const call = vi.mocked(core.shipPhase).mock.calls.at(-1)?.[0] as any;
     expect(typeof call.approvalGate).toBe('function');
+  });
+
+  it('does not construct a plan approval gate when approvePlan is not requested', async () => {
+    const core = await import('@on-par/factory-core');
+    await shipIssue(5, {}, ctx());
+    const call = vi.mocked(core.planPhase).mock.calls.at(-1)?.[0] as any;
+    expect(call.approvalGate).toBeUndefined();
+    expect(call.drainSteering).toBeUndefined();
+  });
+
+  it('constructs a plan approval gate when approvePlan:true is passed', async () => {
+    const core = await import('@on-par/factory-core');
+    await shipIssue(5, { approvePlan: true }, ctx());
+    const call = vi.mocked(core.planPhase).mock.calls.at(-1)?.[0] as any;
+    expect(typeof call.approvalGate).toBe('function');
+    expect(typeof call.drainSteering).toBe('function');
+
+    mkdirSync(paths().steering, { recursive: true });
+    writeFileSync(
+      join(paths().steering, 'issue-5.ndjson'),
+      `${JSON.stringify({ id: 'steer-3', issue: 5, text: 'use provider X', queuedAt: '2026-01-01T00:00:00.000Z' })}\n`,
+    );
+    const drained = call.drainSteering();
+    expect(drained.messages).toEqual([
+      { id: 'steer-3', issue: 5, text: 'use provider X', queuedAt: '2026-01-01T00:00:00.000Z' },
+    ]);
   });
 
   it('writes a local-only run report on success when FACTORY_LOCAL_ONLY=1', async () => {

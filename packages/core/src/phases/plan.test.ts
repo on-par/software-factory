@@ -723,4 +723,222 @@ describe('planPhase', () => {
     expect(result.ok).toBe(true);
     await expect(readFile(specPath, 'utf-8')).resolves.toBe(output);
   });
+
+  describe('plan-approval gate', () => {
+    it('is unchanged when no approvalGate is passed (disabled default)', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-50.md');
+      const stub = new StubModelExecutor({
+        scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: {
+          issues: {
+            get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+          },
+        },
+      };
+      const gateCalled = false;
+
+      const result = await planPhase({
+        issue: 50,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: () => {},
+      });
+
+      expect(result.ok).toBe(true);
+      expect(gateCalled).toBe(false);
+    });
+
+    it('grants approval and returns ok, requesting a kind:"plan" approval with the frozen spec', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-51.md');
+      const stub = new StubModelExecutor({
+        scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec v1\n' }] },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: {
+          issues: {
+            get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+          },
+        },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+      let gateCalls = 0;
+      let capturedRequest: any;
+
+      const result = await planPhase({
+        issue: 51,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: (type, msg) => logs.push({ type, msg }),
+        approvalGate: async (req) => {
+          gateCalls++;
+          capturedRequest = req;
+          return { id: 'x', approved: true, respondedAt: new Date().toISOString() };
+        },
+      });
+
+      expect(result.ok).toBe(true);
+      expect(gateCalls).toBe(1);
+      expect(capturedRequest.kind).toBe('plan');
+      expect(capturedRequest.specPreview).toContain('# Spec v1');
+      expect(logs.some((l) => l.type === 'plan_approval_granted')).toBe(true);
+    });
+
+    it('re-plans on a redirect: applies steering to the next prompt and returns the revised spec', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-52.md');
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{ output: '---\nroute: codex\n---\n# Spec v1\n' }, { output: '---\nroute: codex\n---\n# Spec v2\n' }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: {
+          issues: {
+            get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+          },
+        },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+      let gateCalls = 0;
+      let drainCalls = 0;
+
+      const result = await planPhase({
+        issue: 52,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: (type, msg) => logs.push({ type, msg }),
+        approvalGate: async () => {
+          gateCalls++;
+          return {
+            id: 'x',
+            approved: gateCalls > 1,
+            respondedAt: new Date().toISOString(),
+          };
+        },
+        drainSteering: () => {
+          drainCalls++;
+          return drainCalls === 1
+            ? {
+                messages: [{ id: 'm1', issue: 52, text: 'use provider X', queuedAt: new Date().toISOString() }],
+                attachments: [],
+              }
+            : { messages: [], attachments: [] };
+        },
+      });
+
+      expect(stub.calls.length).toBe(2);
+      expect(stub.calls[1].prompt).toContain('Operator guidance (steering)');
+      expect(stub.calls[1].prompt).toContain('use provider X');
+      await expect(readFile(specPath, 'utf-8')).resolves.toContain('Spec v2');
+      expect(result.ok).toBe(true);
+      expect(logs.some((l) => l.type === 'plan_redirect')).toBe(true);
+    });
+
+    it('rejects without a redirect and escalates with the operator reason', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-53.md');
+      const stub = new StubModelExecutor({
+        scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: {
+          issues: {
+            get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+          },
+        },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      const result = await planPhase({
+        issue: 53,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: (type, msg) => logs.push({ type, msg }),
+        approvalGate: async () => ({
+          id: 'x',
+          approved: false,
+          reason: 'wrong framing',
+          respondedAt: new Date().toISOString(),
+        }),
+        drainSteering: () => ({ messages: [], attachments: [] }),
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.escalate).toContain('wrong framing');
+      expect(logs.some((l) => l.type === 'plan_rejected')).toBe(true);
+    });
+
+    it('bounds the redirect loop with maxReplans and escalates once exceeded', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-54.md');
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [
+            { output: '---\nroute: codex\n---\n# Spec v1\n' },
+            { output: '---\nroute: codex\n---\n# Spec v2\n' },
+            { output: '---\nroute: codex\n---\n# Spec v3\n' },
+          ],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: {
+          issues: {
+            get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+          },
+        },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      const result = await planPhase({
+        issue: 54,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: (type, msg) => logs.push({ type, msg }),
+        maxReplans: 2,
+        approvalGate: async () => ({ id: 'x', approved: false, respondedAt: new Date().toISOString() }),
+        drainSteering: () => ({
+          messages: [{ id: 'm1', issue: 54, text: 'try again', queuedAt: new Date().toISOString() }],
+          attachments: [],
+        }),
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.escalate).toContain('re-plan limit');
+      expect(stub.calls.length).toBe(3);
+    });
+  });
 });

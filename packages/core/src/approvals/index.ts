@@ -17,6 +17,10 @@ export interface ApprovalRequest {
   /** Output of `git diff --stat origin/main...HEAD` (may be ''). */
   diffStat: string;
   checkSummary?: CheckSummary;
+  /** Discriminates a spec/plan approval from the default ship approval. Absent ⇒ 'ship'. */
+  kind?: 'ship' | 'plan';
+  /** For plan approvals: the frozen spec content (truncated to PLAN_SPEC_PREVIEW_BYTES). */
+  specPreview?: string;
   requestedAt: string; // ISO
 }
 
@@ -38,6 +42,7 @@ export interface FileApprovalGateOptions {
 
 const REQUEST_SUFFIX = '.request.json';
 const RESPONSE_SUFFIX = '.response.json';
+export const PLAN_SPEC_PREVIEW_BYTES = 16_000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
