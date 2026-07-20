@@ -13,6 +13,27 @@ export type {
   FingerprintedFailure,
 } from './types/index.js';
 
+// Auto-file a fingerprinted bug (#373)
+export type {
+  CandidateIssue,
+  FileBugAction,
+  FileBugInput,
+  FileBugResult,
+  FilingGitHubClient,
+  OctokitFilingClientOptions,
+} from './filing/index.js';
+export {
+  createOctokitFilingClient,
+  DEFAULT_BUG_LABELS,
+  DEFAULT_INTERNAL_REPO,
+  fileBug,
+  findMatchingIssue,
+  fingerprintMarker,
+  renderBugBody,
+  renderOccurrenceComment,
+  resolveTargetRepo,
+} from './filing/index.js';
+
 // Concrete coding harnesses
 export { classifyFailure } from './harness/classify.js';
 export type { ClaudeExecFn } from './harness/claude-cli.js';
