@@ -818,6 +818,41 @@ describe('cli', () => {
     ]);
   });
 
+  it('falls back to the GitHub API for issue labels when no listIssueLabels override is provided', async () => {
+    const calls: any[] = [];
+    const octokit: any = {
+      rest: {
+        issues: {
+          listLabelsOnIssue: async (...args: any[]) => {
+            calls.push(['listLabelsOnIssue', args]);
+            return { data: [{ name: 'bug' }, { name: 'priority' }] };
+          },
+        },
+      },
+    };
+    const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
+
+    await waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
+      createOctokit: () => octokit,
+      pathExists: () => false,
+      checkMerged: async () => false,
+      loadConfig: () => fakeFactoryConfig(true),
+      land: async (...args: any[]) => {
+        calls.push(['land', args]);
+        return { branch: 'ship-it/21-self-merge', prNumber: 321 };
+      },
+      emitEvent: () => {},
+      sleep: async () => {
+        throw new Error('sleep should not be called');
+      },
+    });
+
+    expect(calls).toEqual([
+      ['listLabelsOnIssue', [{ owner: 'on-par', repo: 'software-factory', issue_number: 21 }]],
+      ['land', [21, '/repo', 'on-par/software-factory', paths, octokit, false]],
+    ]);
+  });
+
   it('gates auto-merge behind the no-auto-merge label and keeps polling', async () => {
     const calls: any[] = [];
     const octokit: any = {};
