@@ -63,29 +63,21 @@ source "$ROOT/scripts/auto-merge-sweep.sh"
 
 output="$(sweep_repo fakerepo 2>&1)"
 
-assert_contains() {
-  local needle="$1"
-  if ! grep -qF "$needle" <<<"$output"; then
-    echo "FAIL: expected output to contain: $needle" >&2
+# Usage: assert_line contains|not_contains "<needle>"
+assert_line() {
+  local mode="$1" needle="$2" found=1
+  grep -qF "$needle" <<<"$output" && found=0
+  if { [ "$mode" = "contains" ] && [ "$found" -ne 0 ]; } || { [ "$mode" = "not_contains" ] && [ "$found" -eq 0 ]; }; then
+    echo "FAIL: expected output to $mode: $needle" >&2
     echo "--- actual output ---" >&2
     echo "$output" >&2
     exit 1
   fi
 }
 
-assert_not_contains() {
-  local needle="$1"
-  if grep -qF "$needle" <<<"$output"; then
-    echo "FAIL: expected output to NOT contain: $needle" >&2
-    echo "--- actual output ---" >&2
-    echo "$output" >&2
-    exit 1
-  fi
-}
-
-assert_contains "FAILED to merge PR #101 (exit 3)"
-assert_contains "FAILED to land #42 (PR #102) (exit 7)"
-assert_not_contains "merged PR #101"
-assert_not_contains "landed #42"
+assert_line contains "FAILED to merge PR #101 (exit 3)"
+assert_line contains "FAILED to land #42 (PR #102) (exit 7)"
+assert_line not_contains "merged PR #101"
+assert_line not_contains "landed #42"
 
 echo "PASS: auto-merge-sweep logs merge/land failures with exit codes"
