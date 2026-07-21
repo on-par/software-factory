@@ -7,9 +7,15 @@ set -uo pipefail
 
 REPOS=(sound-buddy software-factory launchblitz)
 
+FACTORY_BIN="${FACTORY_BIN:-$HOME/.local/bin/factory}"
+REPO_ROOT="${REPO_ROOT:-/Users/moltbot/repos/on-par}"
+SLEEP_SECONDS="${SLEEP_SECONDS:-300}"
+
+log() { echo "[$(date '+%H:%M:%S')] $*"; }
+
 sweep_repo() {
   local repo="$1"
-  local repo_dir="/Users/moltbot/repos/on-par/$repo"
+  local repo_dir="$REPO_ROOT/$repo"
   local ghrepo="on-par/$repo"
 
   local pr_json gh_exit
@@ -17,7 +23,7 @@ sweep_repo() {
     --json number,isDraft,mergeable,statusCheckRollup,closingIssuesReferences 2>&1)"
   gh_exit=$?
   if [ "$gh_exit" -ne 0 ]; then
-    echo "[$(date '+%H:%M:%S')] $repo: gh pr list failed (exit $gh_exit): $pr_json" >&2
+    log "$repo: gh pr list failed (exit $gh_exit): $pr_json" >&2
     return
   fi
 
@@ -43,18 +49,32 @@ for pr in prs:
 ' | while IFS=$'\t' read -r pr issue; do
     [ -z "$pr" ] && continue
     if [ -n "$issue" ]; then
-      echo "[$(date '+%H:%M:%S')] $repo: landing issue #$issue (PR #$pr) via factory land"
-      (cd "$repo_dir" && ~/.local/bin/factory land "$issue") 2>&1
+      log "$repo: landing issue #$issue (PR #$pr) via factory land"
+      if (cd "$repo_dir" && "$FACTORY_BIN" land "$issue") 2>&1; then
+        log "$repo: landed #$issue (PR #$pr)"
+      else
+        log "$repo: FAILED to land #$issue (PR #$pr) (exit $?)"
+      fi
     else
-      echo "[$(date '+%H:%M:%S')] $repo: merging standalone PR #$pr via gh"
-      gh pr merge "$pr" --repo "$ghrepo" --squash --delete-branch 2>&1
+      log "$repo: merging standalone PR #$pr via gh"
+      if gh pr merge "$pr" --repo "$ghrepo" --squash --delete-branch 2>&1; then
+        log "$repo: merged PR #$pr"
+      else
+        log "$repo: FAILED to merge PR #$pr (exit $?)"
+      fi
     fi
   done
 }
 
-while true; do
-  for r in "${REPOS[@]}"; do
-    sweep_repo "$r"
+run_sweep_loop() {
+  while true; do
+    for r in "${REPOS[@]}"; do
+      sweep_repo "$r"
+    done
+    sleep "$SLEEP_SECONDS"
   done
-  sleep 300
-done
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  run_sweep_loop
+fi

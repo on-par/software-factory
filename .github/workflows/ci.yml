@@ -95,3 +95,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/quickstart-smoke.sh
+
+  auto-merge-sweep-test:
+    name: auto-merge-sweep-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Merge-exit-code regression test
+        run: bash scripts/auto-merge-sweep.test.sh
