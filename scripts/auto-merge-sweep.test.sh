@@ -16,6 +16,9 @@ trap cleanup EXIT
 
 mkdir -p "$REPO_ROOT/fakerepo"
 
+FACTORY_CALL_LOG="$BINDIR/factory-calls.log"
+: >"$FACTORY_CALL_LOG"
+
 cat >"$BINDIR/gh" <<'EOF'
 #!/usr/bin/env bash
 set -uo pipefail
@@ -47,8 +50,9 @@ exit 0
 EOF
 chmod +x "$BINDIR/gh"
 
-cat >"$BINDIR/fake-factory" <<'EOF'
+cat >"$BINDIR/fake-factory" <<EOF
 #!/usr/bin/env bash
+echo "called" >>"$FACTORY_CALL_LOG"
 echo "simulated land failure" >&2
 exit 7
 EOF
@@ -80,4 +84,18 @@ assert_line contains "FAILED to land #42 (PR #102) (exit 7)"
 assert_line not_contains "merged PR #101"
 assert_line not_contains "landed #42"
 
-echo "PASS: auto-merge-sweep logs merge/land failures with exit codes"
+calls_before_missing_dir="$(wc -l <"$FACTORY_CALL_LOG" | tr -d ' ')"
+
+missing_repo_dir="$REPO_ROOT/missingrepo"
+output="$(sweep_repo missingrepo 2>&1)"
+assert_line contains "missingrepo: repo dir missing: $missing_repo_dir"
+assert_line not_contains "landed #42"
+assert_line not_contains "FAILED to land #42"
+
+calls_after_missing_dir="$(wc -l <"$FACTORY_CALL_LOG" | tr -d ' ')"
+if [ "$calls_after_missing_dir" != "$calls_before_missing_dir" ]; then
+  echo "FAIL: factory land was invoked despite missing repo dir" >&2
+  exit 1
+fi
+
+echo "PASS: auto-merge-sweep skips landing when the repo dir is missing, without invoking factory"

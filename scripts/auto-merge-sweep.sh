@@ -49,6 +49,10 @@ for pr in prs:
 ' | while IFS=$'\t' read -r pr issue; do
     [ -z "$pr" ] && continue
     if [ -n "$issue" ]; then
+      if [ ! -d "$repo_dir" ]; then
+        log "$repo: repo dir missing: $repo_dir"
+        continue
+      fi
       log "$repo: landing issue #$issue (PR #$pr) via factory land"
       if (cd "$repo_dir" && "$FACTORY_BIN" land "$issue") 2>&1; then
         log "$repo: landed #$issue (PR #$pr)"
