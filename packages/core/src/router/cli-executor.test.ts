@@ -213,6 +213,24 @@ describe('CliModelExecutor', () => {
     });
   });
 
+  it('forwards ctx.onPgid through to the harness request', async () => {
+    const rec = recordingExec({ stdout: 'CLAUDE OUTPUT' });
+    const executor = new CliModelExecutor(rec.fn);
+    const onPgid = () => {};
+
+    await executor.runModel('claude-model', 'draft plan', {
+      worktree,
+      timeoutSeconds,
+      task: 'plan',
+      registry,
+      routesConfig,
+      onPgid,
+    });
+
+    expect(rec.calls).toHaveLength(1);
+    expect(rec.calls[0].opts.onPgid).toBe(onPgid);
+  });
+
   it('runs Codex with flags, output file, and prompt-file stdin redirect', async () => {
     const rec = recordingExec();
     const executor = new CliModelExecutor(rec.fn);
@@ -632,6 +650,52 @@ describe('CliModelExecutor', () => {
     });
 
     expect(execCalls).toContain('git add -- \'new.txt\' && git commit -m "feat: implement factory issue"');
+  });
+
+  it('forwards onPgid to model-proposed commands but not to git bookkeeping calls', async () => {
+    const calls: { cmd: string; opts: any }[] = [];
+    const execFn = async (cmd: string, opts: any) => {
+      calls.push({ cmd, opts });
+      return { stdout: '', stderr: '' };
+    };
+    const fetchCalls: string[] = [];
+    const fetchFn = async () => {
+      fetchCalls.push('call');
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => '',
+        json: async () => ({
+          message: {
+            content:
+              fetchCalls.length === 1
+                ? '{"commands":["echo hi"],"done":false,"final":"working"}'
+                : '{"commands":[],"done":true,"final":"done"}',
+          },
+        }),
+      };
+    };
+    const executor = new CliModelExecutor(execFn, fetchFn as any);
+    const onPgid = () => {};
+
+    await executor.runModel('ollama-codex-model', 'build it', {
+      worktree,
+      timeoutSeconds,
+      task: 'build_codex',
+      registry,
+      routesConfig,
+      onPgid,
+    });
+
+    const modelCommandCall = calls.find((c) => c.cmd === 'echo hi');
+    expect(modelCommandCall?.opts.onPgid).toBe(onPgid);
+
+    const bookkeepingCalls = calls.filter((c) => c.cmd === 'git status --short' || c.cmd.startsWith('git add --'));
+    expect(bookkeepingCalls.length).toBeGreaterThan(0);
+    for (const call of bookkeepingCalls) {
+      expect(call.opts.onPgid).toBeUndefined();
+    }
   });
 
   it('parses fenced bash commands when the response carries no JSON action', async () => {

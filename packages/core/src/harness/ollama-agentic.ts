@@ -122,7 +122,7 @@ export class OllamaAgenticHarness implements CodingHarness {
   ) {}
 
   async run(request: HarnessRequest): Promise<HarnessResult> {
-    const { model, prompt, worktree, timeoutSeconds, registry, env } = request;
+    const { model, prompt, worktree, timeoutSeconds, registry, env, onPgid } = request;
     const baseUrl = (process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434').replace(/\/+$/, '');
     const nativeModel = registry.getProviderModel(model);
     const options = registry.getProviderOptions(model);
@@ -206,6 +206,7 @@ export class OllamaAgenticHarness implements CodingHarness {
         timeoutMs: Math.min(timeoutSeconds * 1000, 120_000),
         maxBuffer: 1024 * 1024,
         env,
+        onPgid,
       });
     } catch (err: any) {
       const tracePath = await writeAgenticTrace(worktree, {

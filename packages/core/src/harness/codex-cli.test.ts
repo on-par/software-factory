@@ -176,6 +176,16 @@ describe('CodexCliHarness command shape', () => {
     });
   });
 
+  it('forwards request.onPgid to the execFn opts', async () => {
+    const rec = successExec();
+    const harness = new CodexCliHarness(rec.fn);
+    const onPgid = () => {};
+
+    await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it', onPgid }));
+
+    expect(rec.calls[0].opts.onPgid).toBe(onPgid);
+  });
+
   it('leaves opts.env undefined when the request has no env', async () => {
     const rec = successExec();
     const harness = new CodexCliHarness(rec.fn);

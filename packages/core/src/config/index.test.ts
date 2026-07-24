@@ -15,6 +15,7 @@ import {
   resolveFilingPolicy,
   resolveIngestConfig,
   resolvePlanApproval,
+  resolveProcessGroupGraceMs,
   resolveSkipCI,
   resolveTimeouts,
 } from './index.js';
@@ -582,7 +583,10 @@ describe('resolveEnvironmentPorts', () => {
     const config = loadFactoryConfig();
     expect(
       resolveEnvironmentPorts(
-        { ...config, environment: { ports: { enabled: true, range: [3100, 3999] } } },
+        {
+          ...config,
+          environment: { ports: { enabled: true, range: [3100, 3999] }, processGroups: { graceMs: 5000 } },
+        },
         { FACTORY_ENV_PORTS: '0' },
       ).enabled,
     ).toBe(false);
@@ -592,10 +596,95 @@ describe('resolveEnvironmentPorts', () => {
     const config = loadFactoryConfig();
     expect(
       resolveEnvironmentPorts(
-        { ...config, environment: { ports: { enabled: false, range: [3100, 3999] } } },
+        {
+          ...config,
+          environment: { ports: { enabled: false, range: [3100, 3999] }, processGroups: { graceMs: 5000 } },
+        },
         { FACTORY_ENV_PORTS: '1' },
       ).enabled,
     ).toBe(true);
+  });
+});
+
+describe('processGroups config', () => {
+  it('defaults graceMs to 5000 when environment is omitted from factory.json', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'factory-config-test-'));
+    try {
+      const path = join(dir, 'factory.json');
+      const minimal = {
+        version: 1,
+        paths: {
+          constitutions: 'constitutions/',
+          checkers: 'lib/checkers/',
+          plans: '.factory/plans/',
+          logs: '.factory/logs/',
+          events: '.factory/events.ndjson',
+        },
+        timeouts: { plan_seconds: 1800, build_seconds: 7200, check_seconds: 1800, merge_poll_seconds: 120 },
+        merge: { auto: false, comment: '' },
+        worktree: { prefix: 'ship-it/', parent: '../', comment: '' },
+        byok: { enabled: false, comment: '' },
+        notifications: {},
+        cost_tracking: { enabled: true, log_file: '.factory/costs.jsonl', comment: '' },
+      };
+      await writeFile(path, JSON.stringify(minimal));
+      const config = loadFactoryConfig(path);
+      expect(config.environment?.processGroups?.graceMs).toBe(5000);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('parses an overridden graceMs', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'factory-config-test-'));
+    try {
+      const path = join(dir, 'factory.json');
+      const minimal = {
+        version: 1,
+        paths: {
+          constitutions: 'constitutions/',
+          checkers: 'lib/checkers/',
+          plans: '.factory/plans/',
+          logs: '.factory/logs/',
+          events: '.factory/events.ndjson',
+        },
+        timeouts: { plan_seconds: 1800, build_seconds: 7200, check_seconds: 1800, merge_poll_seconds: 120 },
+        merge: { auto: false, comment: '' },
+        worktree: { prefix: 'ship-it/', parent: '../', comment: '' },
+        byok: { enabled: false, comment: '' },
+        notifications: {},
+        cost_tracking: { enabled: true, log_file: '.factory/costs.jsonl', comment: '' },
+        environment: { processGroups: { graceMs: 9000 } },
+      };
+      await writeFile(path, JSON.stringify(minimal));
+      const config = loadFactoryConfig(path);
+      expect(config.environment?.processGroups?.graceMs).toBe(9000);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('resolveProcessGroupGraceMs', () => {
+  it('defaults to 5000 from the shipped config', () => {
+    const config = loadFactoryConfig();
+    expect(resolveProcessGroupGraceMs(config)).toBe(5000);
+  });
+
+  it('honors a configured override', () => {
+    const config = loadFactoryConfig();
+    expect(
+      resolveProcessGroupGraceMs({
+        ...config,
+        environment: { ports: { enabled: true, range: [3100, 3999] }, processGroups: { graceMs: 12000 } },
+      }),
+    ).toBe(12000);
+  });
+
+  it('falls back to 5000 when environment is entirely absent', () => {
+    const config = loadFactoryConfig();
+    const { environment: _environment, ...rest } = config;
+    expect(resolveProcessGroupGraceMs(rest as typeof config)).toBe(5000);
   });
 });
 

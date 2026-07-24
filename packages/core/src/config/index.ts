@@ -178,8 +178,14 @@ const FactoryConfigSchema = z.object({
         })
         .refine((p) => p.range[0] <= p.range[1], { message: 'ports.range must be [low, high]' })
         .default({ enabled: true, range: [3100, 3999] }),
+      processGroups: z
+        .object({
+          graceMs: z.number().int().positive().default(5000),
+          comment: z.string().optional(),
+        })
+        .default({ graceMs: 5000 }),
     })
-    .default({ ports: { enabled: true, range: [3100, 3999] } }),
+    .default({ ports: { enabled: true, range: [3100, 3999] }, processGroups: { graceMs: 5000 } }),
   auto_failover: z
     .object({
       enabled: z.boolean().default(true),
@@ -295,6 +301,12 @@ export function resolveAutoFailover(config: FactoryConfig, env: NodeJS.ProcessEn
     Number.isFinite(envMinutes) && envMinutes > 0 ? envMinutes : (config.auto_failover?.cooldown_minutes ?? 30);
   const fallbackModel = env.FACTORY_FAILOVER_MODEL ?? config.auto_failover?.fallback_model ?? 'claude-sonnet-5';
   return { enabled, cooldownMs: minutes * 60_000, fallbackModel };
+}
+
+/** Grace period (ms) between SIGTERM and SIGKILL when sweeping a lane's
+ *  process groups on terminal state or reaping a dead lane's orphans. */
+export function resolveProcessGroupGraceMs(config: FactoryConfig): number {
+  return config.environment?.processGroups?.graceMs ?? 5000;
 }
 
 export function resolveFilingPolicy(config: FactoryConfig): FilingPolicy {

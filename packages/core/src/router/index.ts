@@ -89,6 +89,10 @@ export interface ModelExecutorContext {
   sandbox?: SandboxPolicy;
   /** Extra child-env vars (e.g. the lane's PORT lease) merged over the parent env. */
   env?: Record<string, string>;
+  /** When set, the harness's exec child is spawned detached (its own
+   *  process group) and its pid reported here so the lane can track and
+   *  later kill the whole group. */
+  onPgid?: (pgid: number) => void;
 }
 
 /** Executes a single resolved model. On failure, implementations should
@@ -134,7 +138,7 @@ export class CliModelExecutor implements ModelExecutor {
       'codex-cli': { run: (m, p, c) => this.runViaHarness(this.codexHarness, m, p, c) },
       'ollama-http': { run: (m, p, c) => this.runViaHarness(this.ollamaHarness, m, p, c) },
       'ollama-command-agent': {
-        run: (m, p, c) => this.runOllamaCommandAgent(m, p, c.worktree, c.timeoutSeconds, c.registry, c.env),
+        run: (m, p, c) => this.runOllamaCommandAgent(m, p, c.worktree, c.timeoutSeconds, c.registry, c.env, c.onPgid),
       },
       opencode: { run: (m, p, c) => this.runViaHarness(this.opencodeHarness, m, p, c) },
       'ollama-agentic': { run: (m, p, c) => this.runViaHarness(this.ollamaAgenticHarness, m, p, c) },
@@ -178,7 +182,7 @@ export class CliModelExecutor implements ModelExecutor {
     harness: CodingHarness,
     model: string,
     prompt: string,
-    ctx: Pick<ModelExecutorContext, 'worktree' | 'timeoutSeconds' | 'task' | 'registry' | 'sandbox' | 'env'>,
+    ctx: Pick<ModelExecutorContext, 'worktree' | 'timeoutSeconds' | 'task' | 'registry' | 'sandbox' | 'env' | 'onPgid'>,
   ): Promise<string> {
     const { output } = await harness.run({
       model,
@@ -189,6 +193,7 @@ export class CliModelExecutor implements ModelExecutor {
       registry: ctx.registry,
       sandbox: ctx.sandbox,
       env: ctx.env,
+      onPgid: ctx.onPgid,
     });
     return output;
   }
@@ -201,6 +206,7 @@ export class CliModelExecutor implements ModelExecutor {
     timeoutSeconds: number,
     registry: ModelRegistry,
     env?: Record<string, string>,
+    onPgid?: (pgid: number) => void,
   ): Promise<string> {
     const transcript: string[] = [];
     const initialStatus = await this.execFn('git status --short', {
@@ -288,6 +294,7 @@ First inspect, then edit, then run one cheap check, then git add/commit.
             timeoutMs: Math.max(30_000, Math.floor((timeoutSeconds * 1000) / 4)),
             maxBuffer: 10 * 1024 * 1024,
             env,
+            onPgid,
           });
           commandOutputs.push(`$ ${command}\nEXIT_CODE: 0\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`);
         } catch (err: any) {
@@ -602,6 +609,7 @@ export class ModelRouter {
       sandbox?: SandboxPolicy;
       onSandboxEvent?: (type: SandboxEventType, detail: string) => void;
       env?: Record<string, string>;
+      onPgid?: (pgid: number) => void;
       retryCause?: RetryCause;
     } = {},
   ): Promise<RouterResult> {
@@ -612,6 +620,7 @@ export class ModelRouter {
       onLog = () => {},
       sandbox,
       env,
+      onPgid,
       retryCause,
     } = options;
 
@@ -644,6 +653,7 @@ export class ModelRouter {
             routesConfig: this.routesConfig,
             sandbox,
             env,
+            onPgid,
           });
         } catch (err) {
           if (sandbox) {

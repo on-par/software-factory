@@ -28,6 +28,8 @@ const h = vi.hoisted(() => {
     planResult: { ok: true, route: 'claude' } as any,
     buildResult: { ok: true } as any,
     checkResult: { passed: true, summary: { results: [], failures: 0 }, reworkRounds: 0 } as any,
+    orphanEvents: [] as any[],
+    portListeners: [] as any[],
     shipResult: { ok: true, prNumber: 99 } as any,
     diagnoses: [] as any[],
     costs: [] as any[],
@@ -110,6 +112,11 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
       sources: {},
     })),
     isCommandAvailable: vi.fn(() => h.claudeAvailable ?? true),
+    defaultFindPortListeners: vi.fn(async () => h.portListeners),
+    reapOrphanProcesses: vi.fn(async (opts: any) => {
+      for (const e of h.orphanEvents) opts.onEvent?.(e);
+      return h.orphanEvents;
+    }),
     // Router / loaders as light stubs.
     ModelRouter: vi.fn(() => ({
       resolve: (route: string) => h.routerResolve(route),
@@ -288,6 +295,8 @@ beforeEach(() => {
   h.gcReport = { removed: [], kept: 0, dryRun: false };
   h.runTuiCalls = [];
   h.claudeAvailable = undefined;
+  h.orphanEvents = [];
+  h.portListeners = [];
 
   [
     'FACTORY_LOCAL_ONLY',
@@ -1408,6 +1417,36 @@ describe('cli commands (via main dispatch)', () => {
       expect(registry.leases[0].port).toBe(4001);
     });
 
+    it('--reconcile prints orphan-reaper events for the freed lease', async () => {
+      h.claudeAvailable = true;
+      const portsFile = join(h.repoRoot, '.factory', 'ports.json');
+      writeFileSync(
+        portsFile,
+        JSON.stringify({
+          version: 1,
+          leases: [
+            {
+              worktreeId: '/nonexistent/wt',
+              branch: 'gone',
+              port: 4002,
+              pid: 2 ** 30,
+              acquiredAt: '2026-01-01T00:00:00Z',
+            },
+          ],
+        }),
+      );
+      h.orphanEvents = [
+        { action: 'reported', worktreeId: '/nonexistent/wt', port: 4002, pid: 55, pgid: 66, command: 'stray-proc' },
+      ];
+
+      const res = await runMain('doctor', '--reconcile');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('reconcile: freed port 4002');
+      expect(logged()).toContain(
+        'reconcile: found pid 55 (pgid 66, stray-proc) squatting port 4002 of dead lane /nonexistent/wt — not factory-started, left running',
+      );
+    });
+
     it('reports event log corruption count and percentage', async () => {
       h.claudeAvailable = true;
       writeFileSync(
@@ -1563,6 +1602,145 @@ describe('shipIssue (direct)', () => {
     expect(drained.messages).toEqual([
       { id: 'steer-3', issue: 5, text: 'use provider X', queuedAt: '2026-01-01T00:00:00.000Z' },
     ]);
+  });
+
+  it('passes an onPgid callback to buildPhase and checkPhase', async () => {
+    const core = await import('@on-par/factory-core');
+    await shipIssue(5, {}, ctx());
+    const buildCall = vi.mocked(core.buildPhase).mock.calls.at(-1)?.[0] as any;
+    const checkCall = vi.mocked(core.checkPhase).mock.calls.at(-1)?.[0] as any;
+    expect(typeof buildCall.onPgid).toBe('function');
+    expect(typeof checkCall.onPgid).toBe('function');
+  });
+
+  it('tracks a pgid reported through onPgid and sweeps it before releasing the lease, without crashing the run', async () => {
+    const core = await import('@on-par/factory-core');
+    vi.mocked(core.buildPhase).mockImplementationOnce(async (opts: any) => {
+      // An already-dead pgid: exercises the track -> killAll path without touching a real process group.
+      opts.onPgid?.(999999999);
+      return h.buildResult;
+    });
+
+    const branch = await shipIssue(5, {}, ctx());
+    expect(branch).toBe('ship-it/5-fix-the-bug');
+  });
+
+  it('does not log environment_cleanup when no process groups were tracked', async () => {
+    await shipIssue(5, {}, ctx());
+    expect(logged()).not.toContain('environment_cleanup');
+  });
+
+  it('runs the orphan reaper over a reaped stale lease and logs each event', async () => {
+    const portsFile = join(h.repoRoot, '.factory', 'ports.json');
+    writeFileSync(
+      portsFile,
+      JSON.stringify({
+        version: 1,
+        leases: [
+          {
+            worktreeId: '/dead/worktree',
+            branch: 'gone',
+            port: 4002,
+            pid: 2 ** 30,
+            acquiredAt: '2026-01-01T00:00:00Z',
+          },
+        ],
+      }),
+    );
+    h.orphanEvents = [
+      { action: 'killed', worktreeId: '/dead/worktree', port: 4002, pid: 111, pgid: 222, command: 'node server.js' },
+    ];
+
+    await shipIssue(5, {}, ctx());
+
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('environment_lease_reaped');
+    expect(events).toContain('environment_orphan');
+    expect(events).toContain(
+      'killed pid 111 (pgid 222, node server.js) squatting port 4002 of dead lane /dead/worktree',
+    );
+  });
+
+  it('reports a busy-but-unleased port as a conflict without terminating anything', async () => {
+    const net = await import('node:net');
+    const server = net.createServer();
+    await new Promise<void>((resolve) => server.listen({ port: 0, host: '127.0.0.1' }, resolve));
+    const busyPort = (server.address() as any).port;
+
+    h.factoryConfig = {
+      ...h.factoryConfig,
+      environment: { ports: { enabled: true, range: [busyPort, busyPort + 1] } },
+    };
+    h.portListeners = [{ pid: 777, pgid: 888, command: 'some-other-proc' }];
+
+    try {
+      await shipIssue(5, {}, ctx());
+    } finally {
+      server.close();
+    }
+
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('environment_conflict');
+    expect(events).toContain(`port ${busyPort} busy but unleased — reported as conflict, not terminated`);
+    expect(events).toContain('pid 777 (some-other-proc)');
+  });
+
+  it('logs "no listener details available" when the conflict probe finds no listeners', async () => {
+    const net = await import('node:net');
+    const server = net.createServer();
+    await new Promise<void>((resolve) => server.listen({ port: 0, host: '127.0.0.1' }, resolve));
+    const busyPort = (server.address() as any).port;
+
+    h.factoryConfig = {
+      ...h.factoryConfig,
+      environment: { ports: { enabled: true, range: [busyPort, busyPort + 1] } },
+    };
+    h.portListeners = [];
+
+    try {
+      await shipIssue(5, {}, ctx());
+    } finally {
+      server.close();
+    }
+
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain(
+      `port ${busyPort} busy but unleased — reported as conflict, not terminated: no listener details available`,
+    );
+  });
+
+  it('logs environment_lease_failed when the conflict probe itself rejects and the range is exhausted', async () => {
+    const core = await import('@on-par/factory-core');
+    const net = await import('node:net');
+    const server = net.createServer();
+    await new Promise<void>((resolve) => server.listen({ port: 0, host: '127.0.0.1' }, resolve));
+    const busyPort = (server.address() as any).port;
+
+    h.factoryConfig = {
+      ...h.factoryConfig,
+      environment: { ports: { enabled: true, range: [busyPort, busyPort] } },
+    };
+    vi.mocked(core.defaultFindPortListeners).mockRejectedValueOnce(new Error('lsof unavailable'));
+
+    try {
+      await shipIssue(5, {}, ctx());
+    } finally {
+      server.close();
+    }
+
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain(`port ${busyPort} busy but unleased — reported as conflict, not terminated`);
+    expect(events).toContain('environment_lease_failed');
+    expect(events).toContain('port lease unavailable');
+  });
+
+  it('logs that port leasing is disabled when environment.ports.enabled is false', async () => {
+    h.factoryConfig = { ...h.factoryConfig, environment: { ports: { enabled: false, range: [3100, 3999] } } };
+
+    await shipIssue(5, {}, ctx());
+
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('port leasing disabled (environment.ports.enabled=false or FACTORY_ENV_PORTS=0)');
   });
 
   it('writes a local-only run report on success when FACTORY_LOCAL_ONLY=1', async () => {

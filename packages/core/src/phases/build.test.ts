@@ -793,6 +793,36 @@ describe('buildPhase appPort', () => {
     expect(captured.prompt).toContain('--headed');
   });
 
+  it('forwards onPgid to router.run options', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-96b.md');
+    const captured: { options?: any } = {};
+    const fakeRouter = {
+      run: async (_task: string, _prompt: string, options: any) => {
+        captured.options = options;
+        return { model: 'fake-model', output: 'done', exitCode: 0, attempts: [] };
+      },
+    } as any;
+    const onPgid = () => {};
+
+    const result = await buildPhase({
+      issue: 96,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/96-onpgid',
+      route: 'codex',
+      router: fakeRouter,
+      constitution: null,
+      log: () => {},
+      onPgid,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(captured.options.onPgid).toBe(onPgid);
+  });
+
   it('carries headless-only env and no port prompt block when appPort is unset', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);

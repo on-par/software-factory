@@ -153,6 +153,7 @@ export async function checkPhase(opts: {
   sandbox?: SandboxPolicy;
   drainSteering?: () => ConsumedSteering;
   appPort?: number;
+  onPgid?: (pgid: number) => void;
 }): Promise<CheckPhaseResult> {
   const {
     issue,
@@ -167,9 +168,10 @@ export async function checkPhase(opts: {
     sandbox,
     drainSteering,
     appPort,
+    onPgid,
   } = opts;
 
-  const ctx: CheckerContext = { worktree, specPath, env: laneEnv(appPort) };
+  const ctx: CheckerContext = { worktree, specPath, env: laneEnv(appPort), onPgid };
 
   if (appPort === undefined) {
     const signal = await detectLiveAppSignal(worktree);
@@ -217,6 +219,7 @@ export async function checkPhase(opts: {
       sandbox,
       steering,
       appPort,
+      onPgid,
     );
 
     const cause = classifyReworkCause({ steering, failovers });
@@ -286,6 +289,7 @@ async function reworkWorker(
   sandbox?: SandboxPolicy,
   steering?: ConsumedSteering,
   appPort?: number,
+  onPgid?: (pgid: number) => void,
 ): Promise<{ failovers: { model: string; reason: FailoverReason; detail?: string }[] }> {
   const constitutionCtx = buildConstitutionContext(constitution);
   const failures = summary.results.filter((r) => r.result === 'FAIL');
@@ -323,6 +327,7 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
       onSandboxEvent: (type, detail) => log(type, detail),
       onLog: (msg) => log('router', msg),
       env: laneEnv(appPort),
+      onPgid,
       retryCause: 'checker',
     })
     .catch(() => null);
