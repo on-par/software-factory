@@ -131,6 +131,8 @@ describe('levelForType', () => {
     ['sandbox-degraded', 'warn'],
     ['sandbox-disabled', 'warn'],
     ['environment_warning', 'warn'],
+    ['environment_orphan', 'warn'],
+    ['environment_conflict', 'warn'],
     ['fail', 'error'],
     ['escalate', 'error'],
     ['ship_denied', 'error'],
@@ -138,6 +140,7 @@ describe('levelForType', () => {
     ['plan', 'info'],
     ['ready', 'info'],
     ['lane-start', 'info'],
+    ['environment_cleanup', 'info'],
     ['some-unknown-type', 'info'],
   ])('maps %s to level %s', (type, level) => {
     expect(levelForType(type)).toBe(level);

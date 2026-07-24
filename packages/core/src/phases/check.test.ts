@@ -369,6 +369,32 @@ describe('checkPhase appPort', () => {
     expect(captured[0].options.env).toEqual({ FACTORY_HEADLESS: '1', PLAYWRIGHT_HEADLESS: '1' });
   });
 
+  it('forwards onPgid to the rework router.run options', async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const captured: { options: any }[] = [];
+    const fakeRouter = {
+      run: async (_task: string, _prompt: string, options: any) => {
+        captured.push({ options });
+        return { model: 'fake-model', output: 'reworked', exitCode: 0, attempts: [] };
+      },
+    } as any;
+    const onPgid = () => {};
+
+    await checkPhase({
+      issue: 103,
+      worktree,
+      specPath,
+      router: fakeRouter,
+      constitution: null,
+      log: () => {},
+      appPort: 3142,
+      onPgid,
+    });
+
+    expect(captured.length).toBeGreaterThan(0);
+    expect(captured[0].options.onPgid).toBe(onPgid);
+  });
+
   it('threads the lane env into the checker ctx so checker commands see it', { timeout: 30_000 }, async () => {
     const worktree = await makeEnvAssertingWorktree(101);
     const { router, stub } = makeRouter();

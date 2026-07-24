@@ -23,6 +23,7 @@ const PUBLIC_API_KEYS = [
   'resolveEnvironmentPorts',
   'resolveIngestConfig',
   'resolvePlanApproval',
+  'resolveProcessGroupGraceMs',
   'resolveSkipCI',
   'resolveTimeouts',
   // Repo config (.factory/config.json)
@@ -34,14 +35,20 @@ const PUBLIC_API_KEYS = [
   'resolveUsageCap',
   // Environment
   'acquirePortLease',
+  'defaultFindPortListeners',
   'defaultIsPidAlive',
   'defaultIsPortFree',
+  'defaultIsProcessGroupAlive',
   'headlessEnv',
   'inspectPortLeases',
+  'killProcessGroup',
   'laneEnv',
   'leaseEnv',
   'PortLeaseError',
+  'ProcessGroupTracker',
+  'reapOrphanProcesses',
   'reapStalePortLeases',
+  'recordLeasePgid',
   'releasePortLease',
   // Queue
   'parseQueue',

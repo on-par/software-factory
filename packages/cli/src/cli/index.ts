@@ -14,6 +14,7 @@ import type {
   LeaseHealth,
   ModelDiagnosis,
   QueueDiagnostic,
+  ReapedLease,
   RepoFactoryConfig,
   SandboxPolicy,
   UsageReading,
@@ -27,6 +28,7 @@ import {
   computeHealthKpis,
   ConstitutionLoader,
   createFileApprovalGate,
+  defaultFindPortListeners,
   describeEffectiveConfig,
   describeSteering,
   diagnoseModels,
@@ -53,11 +55,14 @@ import {
   parseKpiHistory,
   parseQueue,
   planPhase,
+  ProcessGroupTracker,
   ProviderBreaker,
   readEvents,
   readUsage,
+  reapOrphanProcesses,
   reapStalePortLeases,
   reconstructHumanEvents,
+  recordLeasePgid,
   releasePortLease,
   renderKpiReport,
   renderKpiTrend,
@@ -67,6 +72,7 @@ import {
   resolveEnvironmentPorts,
   resolveIngestConfig,
   resolvePlanApproval,
+  resolveProcessGroupGraceMs,
   resolveSandboxPolicy,
   resolveSkipCI,
   resolveTimeouts,
@@ -786,24 +792,66 @@ export async function shipIssue(
 
   const planApprovalEnabled = opts.approvePlan ?? resolvePlanApproval(factoryConfig);
 
+  const processGroupGraceMs = resolveProcessGroupGraceMs(factoryConfig);
+  const tracker = new ProcessGroupTracker();
+  const onPgid = (pgid: number) => {
+    tracker.track(pgid);
+    if (appPort !== undefined) {
+      void recordLeasePgid({ registryFile: paths.ports, lockDir: paths.portsLock, worktreeId: worktree, pgid }).catch(
+        () => {},
+      );
+    }
+  };
+
   const portsSettings = resolveEnvironmentPorts(factoryConfig);
   let appPort: number | undefined;
   if (portsSettings.enabled) {
     try {
+      const reaped: ReapedLease[] = [];
       const lease = await acquirePortLease({
         registryFile: paths.ports,
         lockDir: paths.portsLock,
         worktreeId: worktree,
         branch,
         range: portsSettings.range,
-        onReap: (r) =>
+        onReap: (r) => {
+          reaped.push(r);
           log(
             'environment_lease_reaped',
             `reaped stale lease: port ${r.lease.port}, pid ${r.lease.pid}, worktree ${r.lease.worktreeId} — reason: ${r.reason}`,
-          ),
+          );
+        },
+        onPortConflict: (port) => {
+          void defaultFindPortListeners(port)
+            .then((listeners) => {
+              const detail =
+                listeners.length > 0
+                  ? listeners.map((l) => `pid ${l.pid} (${l.command})`).join(', ')
+                  : 'no listener details available';
+              log(
+                'environment_conflict',
+                `port ${port} busy but unleased — reported as conflict, not terminated: ${detail}`,
+              );
+            })
+            .catch(() => {
+              log('environment_conflict', `port ${port} busy but unleased — reported as conflict, not terminated`);
+            });
+        },
       });
       appPort = lease.port;
       log('environment_lease', `leased port ${lease.port} for worktree ${worktree}`);
+
+      if (reaped.length > 0) {
+        await reapOrphanProcesses({
+          reaped,
+          graceMs: processGroupGraceMs,
+          onEvent: (e) =>
+            log(
+              'environment_orphan',
+              `${e.action === 'killed' ? 'killed' : 'found'} pid ${e.pid} (pgid ${e.pgid}, ${e.command}) squatting port ${e.port} of dead lane ${e.worktreeId}${e.action === 'reported' ? ' — not factory-started, left running' : ''}`,
+            ),
+        });
+      }
     } catch (err: any) {
       // Port collision is no worse than today — never park a lane over a lease.
       log('environment_lease_failed', `port lease unavailable (${err.message}) — running without injected PORT`);
@@ -893,6 +941,7 @@ export async function shipIssue(
           );
         },
       },
+      onPgid,
     });
     if (!build.ok) {
       throw new LaneParkError(`build escalated: ${build.escalate ?? 'unknown'}`, 'escalate');
@@ -912,6 +961,7 @@ export async function shipIssue(
       sandbox: activeSandboxPolicy,
       drainSteering: opts.interactive ? () => drainSteering(paths.steering, issueNum, worktree) : undefined,
       appPort,
+      onPgid,
     });
     for (const s of check.summary.results.filter((r) => r.result === 'SKIP')) {
       console.error(chalk.yellow(`  SKIP: ${s.checker} — ${s.details}`));
@@ -995,6 +1045,13 @@ export async function shipIssue(
     });
     throw err;
   } finally {
+    const outcomes = await tracker.killAll({ graceMs: processGroupGraceMs });
+    if (outcomes.length > 0) {
+      log(
+        'environment_cleanup',
+        `terminated ${outcomes.length} process group(s)${outcomes.some((o) => o.forced) ? ' (SIGKILL escalation used)' : ''}`,
+      );
+    }
     if (appPort !== undefined) {
       await releasePortLease({ registryFile: paths.ports, lockDir: paths.portsLock, worktreeId: worktree })
         .then(() => log('environment_release', `released port ${appPort} for worktree ${worktree}`))
@@ -2242,6 +2299,16 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     if (opts.reconcile) {
       const reaped = await reapStalePortLeases({ registryFile: paths.ports, lockDir: paths.portsLock });
       console.log(formatReconcileReport(reaped));
+
+      if (reaped.length > 0) {
+        const graceMs = resolveProcessGroupGraceMs(loadFactoryConfig());
+        const orphanEvents = await reapOrphanProcesses({ reaped, graceMs });
+        for (const e of orphanEvents) {
+          console.log(
+            `reconcile: ${e.action === 'killed' ? 'killed' : 'found'} pid ${e.pid} (pgid ${e.pgid}, ${e.command}) squatting port ${e.port} of dead lane ${e.worktreeId}${e.action === 'reported' ? ' — not factory-started, left running' : ''}`,
+          );
+        }
+      }
     }
   }
 

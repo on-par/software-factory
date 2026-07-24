@@ -1528,6 +1528,32 @@ describe('shipIssue (direct)', () => {
     ]);
   });
 
+  it('passes an onPgid callback to buildPhase and checkPhase', async () => {
+    const core = await import('@on-par/factory-core');
+    await shipIssue(5, {}, ctx());
+    const buildCall = vi.mocked(core.buildPhase).mock.calls.at(-1)?.[0] as any;
+    const checkCall = vi.mocked(core.checkPhase).mock.calls.at(-1)?.[0] as any;
+    expect(typeof buildCall.onPgid).toBe('function');
+    expect(typeof checkCall.onPgid).toBe('function');
+  });
+
+  it('tracks a pgid reported through onPgid and sweeps it before releasing the lease, without crashing the run', async () => {
+    const core = await import('@on-par/factory-core');
+    vi.mocked(core.buildPhase).mockImplementationOnce(async (opts: any) => {
+      // An already-dead pgid: exercises the track -> killAll path without touching a real process group.
+      opts.onPgid?.(999999999);
+      return h.buildResult;
+    });
+
+    const branch = await shipIssue(5, {}, ctx());
+    expect(branch).toBe('ship-it/5-fix-the-bug');
+  });
+
+  it('does not log environment_cleanup when no process groups were tracked', async () => {
+    await shipIssue(5, {}, ctx());
+    expect(logged()).not.toContain('environment_cleanup');
+  });
+
   it('writes a local-only run report on success when FACTORY_LOCAL_ONLY=1', async () => {
     trackEnv('FACTORY_LOCAL_ONLY');
     process.env.FACTORY_LOCAL_ONLY = '1';

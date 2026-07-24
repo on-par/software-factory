@@ -44,6 +44,10 @@ export interface HarnessRequest {
   sandbox?: SandboxPolicy;
   /** Extra child-env vars (e.g. the lane's PORT lease) merged over the parent env. */
   env?: Record<string, string>;
+  /** When set, the harness's exec child is spawned detached (its own
+   *  process group) and its pid reported here so the lane can track and
+   *  later kill the whole group. */
+  onPgid?: (pgid: number) => void;
 }
 
 export interface HarnessResult {

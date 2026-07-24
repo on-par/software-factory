@@ -17,7 +17,7 @@ export class OpenCodeHarness implements CodingHarness {
   constructor(private execFn: OpenCodeExecFn = defaultExecFn) {}
 
   async run(request: HarnessRequest): Promise<HarnessResult> {
-    const { model, prompt, worktree, timeoutSeconds, registry, env } = request;
+    const { model, prompt, worktree, timeoutSeconds, registry, env, onPgid } = request;
     const providerModel = registry.get(model)?.providerModel;
     const modelArg = providerModel ? `--model ${shellEscape(providerModel)}` : '';
     const cmd = `opencode run ${modelArg} ${shellEscape(prompt)}`;
@@ -29,6 +29,7 @@ export class OpenCodeHarness implements CodingHarness {
         timeoutMs: timeoutSeconds * 1000,
         maxBuffer: 10 * 1024 * 1024,
         env,
+        onPgid,
       }));
     } catch (err: any) {
       const reason = err.killed ? 'timeout' : classifyFailure(err.stderr ?? '', err.code ?? 1);

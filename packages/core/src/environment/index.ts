@@ -12,6 +12,11 @@ export interface PortLease {
   port: number;
   pid: number;
   acquiredAt: string;
+  /** Process-group ids of harness/checker children spawned by this lane,
+   *  recorded so the startup reaper can later prove a squatting process is
+   *  factory-owned before killing it. Absent on leases from older registry
+   *  files (backward compatible). Capped at 64 entries. */
+  pgids?: number[];
 }
 
 export class PortLeaseError extends Error {
@@ -57,6 +62,9 @@ export interface AcquirePortLeaseOptions {
   lockOpts?: FileLockOptions;
   probes?: LeaseLivenessProbes;
   onReap?: (reaped: ReapedLease) => void;
+  /** Fired for each port skipped because it's busy but unleased (a squatter
+   *  outside factory bookkeeping) — report only, never terminated. */
+  onPortConflict?: (port: number) => void;
 }
 
 interface PortRegistry {
@@ -156,7 +164,10 @@ export async function acquirePortLease(opts: AcquirePortLeaseOptions): Promise<P
 
         for (let port = low; port <= high; port++) {
           if (heldPorts.has(port)) continue;
-          if (!(await isPortFree(port))) continue;
+          if (!(await isPortFree(port))) {
+            opts.onPortConflict?.(port);
+            continue;
+          }
 
           const lease: PortLease = { worktreeId, branch, port, pid, acquiredAt: new Date().toISOString() };
           registry.leases.push(lease);
@@ -189,6 +200,39 @@ export async function releasePortLease(opts: {
         const next = registry.leases.filter((l) => l.worktreeId !== worktreeId);
         if (next.length === registry.leases.length) return;
         writeRegistry(registryFile, { version: 1, leases: next });
+      },
+      lockOpts,
+    ),
+  );
+}
+
+const MAX_TRACKED_PGIDS = 64;
+
+/** Appends `pgid` to the lease matched by `worktreeId`, deduped, capped at
+ *  64 entries to bound file growth. No-op if the lease is missing (already
+ *  reaped or never acquired) — never throws. */
+export async function recordLeasePgid(opts: {
+  registryFile: string;
+  lockDir: string;
+  worktreeId: string;
+  pgid: number;
+  lockOpts?: FileLockOptions;
+}): Promise<void> {
+  const { registryFile, lockDir, worktreeId, pgid, lockOpts } = opts;
+
+  return withGitLock(registryFile, () =>
+    withFileLock(
+      lockDir,
+      async () => {
+        const registry = readRegistry(registryFile);
+        const lease = registry.leases.find((l) => l.worktreeId === worktreeId);
+        if (!lease) return;
+
+        const pgids = lease.pgids ?? [];
+        if (pgids.includes(pgid)) return;
+
+        lease.pgids = [...pgids, pgid].slice(-MAX_TRACKED_PGIDS);
+        writeRegistry(registryFile, registry);
       },
       lockOpts,
     ),

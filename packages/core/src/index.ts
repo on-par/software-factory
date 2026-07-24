@@ -23,6 +23,7 @@ export {
   resolveEnvironmentPorts,
   resolveIngestConfig,
   resolvePlanApproval,
+  resolveProcessGroupGraceMs,
   resolveSkipCI,
   resolveTimeouts,
 } from './config/index.js';
@@ -56,8 +57,13 @@ export {
   leaseEnv,
   PortLeaseError,
   reapStalePortLeases,
+  recordLeasePgid,
   releasePortLease,
 } from './environment/index.js';
+export type { FindPortListenersFn, OrphanEvent, PortListener } from './environment/orphans.js';
+export { defaultFindPortListeners, reapOrphanProcesses } from './environment/orphans.js';
+export type { KillOutcome, KillProcessGroupOptions } from './environment/process-groups.js';
+export { defaultIsProcessGroupAlive, killProcessGroup, ProcessGroupTracker } from './environment/process-groups.js';
 
 // Queue
 export type {

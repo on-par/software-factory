@@ -1,4 +1,4 @@
-import { mkdtemp, realpath, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -101,6 +101,58 @@ describe('runCommand', () => {
 
   it('throws a TypeError on a blank argv[0]', async () => {
     await expect(runCommand(['   '])).rejects.toThrow(TypeError);
+  });
+
+  describe.skipIf(process.platform === 'win32')('onPgid (detached group tracking)', () => {
+    function isDead(pid: number): boolean {
+      try {
+        process.kill(pid, 0);
+        return false;
+      } catch (err: any) {
+        return err?.code === 'ESRCH';
+      }
+    }
+
+    it('fires onPgid and, on timeout, sweeps a backgrounded grandchild', async () => {
+      const dir = await makeTmpDir();
+      const pidFile = join(dir, 'gc.pid');
+      let reportedPid: number | undefined;
+
+      const result = await runCommand(['sh', '-c', `sleep 30 & echo $! > ${pidFile}; wait`], {
+        timeoutMs: 300,
+        killGraceMs: 100,
+        onPgid: (pgid) => {
+          reportedPid = pgid;
+        },
+      });
+
+      expect(result.timedOut).toBe(true);
+      expect(result.killed).toBe(true);
+      expect(reportedPid).toBeDefined();
+
+      let raw = '';
+      const deadline = Date.now() + 1000;
+      while (Date.now() < deadline && raw === '') {
+        try {
+          raw = (await readFile(pidFile, 'utf-8')).trim();
+        } catch {
+          // not written yet
+        }
+        if (raw === '') await new Promise((r) => setTimeout(r, 50));
+      }
+      const grandchildPid = Number(raw);
+
+      const aliveDeadline = Date.now() + 2000;
+      while (Date.now() < aliveDeadline && !isDead(grandchildPid)) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(isDead(grandchildPid)).toBe(true);
+    }, 10000);
+
+    it('does not spawn detached when onPgid is absent (existing tests untouched)', async () => {
+      const result = await runCommand([process.execPath, '-e', 'console.log("hi")']);
+      expect(result.stdout).toContain('hi');
+    });
   });
 });
 

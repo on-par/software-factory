@@ -222,6 +222,19 @@ describe('compileChecker', () => {
 
     expect(result.result).toBe('PASS');
   });
+
+  it('forwards ctx.onPgid to npm run build', { timeout: 30000 }, async () => {
+    const worktree = await makeWorktree({
+      'package.json': JSON.stringify({ name: 'fixture', version: '1.0.0', scripts: { build: 'true' } }),
+    });
+    const pgids: number[] = [];
+
+    const result = await compileChecker({ ...makeContext(worktree), onPgid: (pgid) => pgids.push(pgid) });
+
+    expect(result.result).toBe('PASS');
+    expect(pgids).toHaveLength(1);
+    expect(typeof pgids[0]).toBe('number');
+  });
 });
 
 describe('testsChecker', () => {
@@ -823,6 +836,22 @@ describe('runCustomChecker', () => {
 
     expect(captured[0].options.env).toEqual(LANE_ENV);
     expect(captured[1].options.env).toBeUndefined();
+  });
+
+  it('forwards ctx.onPgid to the router', async () => {
+    const worktree = await makeWorktree();
+    const captured: { options: any }[] = [];
+    const fakeRouter = {
+      run: async (_task: string, _prompt: string, options: any) => {
+        captured.push({ options });
+        return { model: 'fake-model', output: '{"checker":"custom_x","result":"PASS","details":"ok"}', attempts: [] };
+      },
+    } as any;
+    const onPgid = () => {};
+
+    await runCustomChecker({ ...makeContext(worktree), onPgid }, 'custom_x', fakeRouter);
+
+    expect(captured[0].options.onPgid).toBe(onPgid);
   });
 });
 

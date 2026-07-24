@@ -145,6 +145,16 @@ describe('ClaudeCliHarness command shape', () => {
     expect(rec.calls[0].opts.env).toBeUndefined();
   });
 
+  it('forwards request.onPgid to the execFn opts', async () => {
+    const rec = recordingExec({ stdout: 'CLAUDE OUTPUT' });
+    const harness = new ClaudeCliHarness(rec.fn);
+    const onPgid = () => {};
+
+    await harness.run(makeContractRequest({ model: 'claude-model', registry, onPgid }));
+
+    expect(rec.calls[0].opts.onPgid).toBe(onPgid);
+  });
+
   it('wraps the invocation in sandbox-exec when request.sandbox is set', async () => {
     const rec = recordingExec({ stdout: 'CLAUDE OUTPUT' });
     const harness = new ClaudeCliHarness(rec.fn);

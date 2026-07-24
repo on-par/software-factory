@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
@@ -16,6 +17,7 @@ import {
   leaseEnv,
   PortLeaseError,
   reapStalePortLeases,
+  recordLeasePgid,
   releasePortLease,
 } from './index.js';
 
@@ -724,5 +726,168 @@ describe('defaultIsPidAlive', () => {
     const result = spawnSync(process.execPath, ['-e', '""']);
     const exitedPid = result.pid ?? 2 ** 30;
     expect(defaultIsPidAlive(exitedPid)).toBe(false);
+  });
+});
+
+describe('recordLeasePgid', () => {
+  it('appends a pgid to the matching lease', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/a',
+        branch: 'a',
+        range: [3300, 3300],
+        isPortFree: alwaysFree,
+        probes: liveProbes,
+        lockOpts: LOCK_OPTS,
+      });
+
+      await recordLeasePgid({ registryFile, lockDir, worktreeId: '/wt/a', pgid: 111, lockOpts: LOCK_OPTS });
+
+      const raw = JSON.parse(await readFile(registryFile, 'utf-8'));
+      const lease = raw.leases.find((l: any) => l.worktreeId === '/wt/a');
+      expect(lease.pgids).toEqual([111]);
+    });
+  });
+
+  it('dedupes repeated pgids', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/a',
+        branch: 'a',
+        range: [3301, 3301],
+        isPortFree: alwaysFree,
+        probes: liveProbes,
+        lockOpts: LOCK_OPTS,
+      });
+
+      await recordLeasePgid({ registryFile, lockDir, worktreeId: '/wt/a', pgid: 111, lockOpts: LOCK_OPTS });
+      await recordLeasePgid({ registryFile, lockDir, worktreeId: '/wt/a', pgid: 111, lockOpts: LOCK_OPTS });
+
+      const raw = JSON.parse(await readFile(registryFile, 'utf-8'));
+      const lease = raw.leases.find((l: any) => l.worktreeId === '/wt/a');
+      expect(lease.pgids).toEqual([111]);
+    });
+  });
+
+  it('caps recorded pgids at 64', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/a',
+        branch: 'a',
+        range: [3302, 3302],
+        isPortFree: alwaysFree,
+        probes: liveProbes,
+        lockOpts: LOCK_OPTS,
+      });
+
+      for (let i = 0; i < 70; i++) {
+        await recordLeasePgid({ registryFile, lockDir, worktreeId: '/wt/a', pgid: i, lockOpts: LOCK_OPTS });
+      }
+
+      const raw = JSON.parse(await readFile(registryFile, 'utf-8'));
+      const lease = raw.leases.find((l: any) => l.worktreeId === '/wt/a');
+      expect(lease.pgids).toHaveLength(64);
+      expect(lease.pgids[63]).toBe(69);
+    });
+  });
+
+  it('no-ops when the lease is missing', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+
+      await recordLeasePgid({ registryFile, lockDir, worktreeId: '/wt/missing', pgid: 1, lockOpts: LOCK_OPTS });
+
+      expect(existsSync(registryFile)).toBe(false);
+    });
+  });
+
+  it('a lease with pgids round-trips through acquire-idempotency and survives release filtering of others', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/a',
+        branch: 'a',
+        range: [3303, 3304],
+        isPortFree: alwaysFree,
+        probes: liveProbes,
+        lockOpts: LOCK_OPTS,
+      });
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/b',
+        branch: 'b',
+        range: [3303, 3304],
+        isPortFree: alwaysFree,
+        probes: liveProbes,
+        lockOpts: LOCK_OPTS,
+      });
+
+      await recordLeasePgid({ registryFile, lockDir, worktreeId: '/wt/a', pgid: 42, lockOpts: LOCK_OPTS });
+
+      const again = await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/a',
+        branch: 'a',
+        range: [3303, 3304],
+        isPortFree: alwaysFree,
+        probes: liveProbes,
+        lockOpts: LOCK_OPTS,
+      });
+      expect(again.pgids).toEqual([42]);
+
+      await releasePortLease({ registryFile, lockDir, worktreeId: '/wt/b', lockOpts: LOCK_OPTS });
+
+      const raw = JSON.parse(await readFile(registryFile, 'utf-8'));
+      expect(raw.leases).toHaveLength(1);
+      expect(raw.leases[0].worktreeId).toBe('/wt/a');
+      expect(raw.leases[0].pgids).toEqual([42]);
+    });
+  });
+});
+
+describe('acquirePortLease onPortConflict', () => {
+  it('fires for a busy unleased port and still leases the next free port', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+      const conflicts: number[] = [];
+
+      const lease = await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/a',
+        branch: 'a',
+        range: [3400, 3402],
+        isPortFree: async (p) => p !== 3400,
+        probes: liveProbes,
+        lockOpts: LOCK_OPTS,
+        onPortConflict: (p) => conflicts.push(p),
+      });
+
+      expect(conflicts).toEqual([3400]);
+      expect(lease.port).toBe(3401);
+    });
   });
 });

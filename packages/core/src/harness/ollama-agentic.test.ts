@@ -193,6 +193,22 @@ describe('OllamaAgenticHarness env forwarding', () => {
 
     expect(calls[0].opts.env).toBeUndefined();
   });
+
+  it('forwards request.onPgid to the verify-command execFn opts', async () => {
+    const worktree = makeWorktree();
+    const fetchFn = stubFetch([firstGreenProposal()]);
+    const calls: any[] = [];
+    const exec: OllamaAgenticExecFn = async (cmd, opts) => {
+      calls.push({ cmd, opts });
+      return { stdout: '', stderr: '' };
+    };
+    const harness = new OllamaAgenticHarness(fetchFn, exec);
+    const onPgid = () => {};
+
+    await harness.run(makeContractRequest({ model: 'local-agentic-model', registry, worktree, onPgid }));
+
+    expect(calls[0].opts.onPgid).toBe(onPgid);
+  });
 });
 
 describe('OllamaAgenticHarness repair', () => {

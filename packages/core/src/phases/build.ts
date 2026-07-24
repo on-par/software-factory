@@ -39,6 +39,7 @@ export async function buildPhase(opts: {
     fallbackModel?: string;
     onQuotaExhausted?: (info: { provider: string; reason: FailoverReason }) => void | Promise<void>;
   };
+  onPgid?: (pgid: number) => void;
 }): Promise<BuildResult> {
   const {
     issue,
@@ -54,6 +55,7 @@ export async function buildPhase(opts: {
     sandbox,
     steering,
     appPort,
+    onPgid,
   } = opts;
   let route = opts.route;
 
@@ -137,6 +139,7 @@ ${headlessNote()}${appPort ? `\n\n${appPortNote(appPort)}` : ''}`;
     onSandboxEvent: (type: string, detail: string) => log(type, detail),
     onLog: (msg: string) => log('router', msg),
     env: laneEnv(appPort),
+    onPgid,
   };
 
   let result: RouterResult;
