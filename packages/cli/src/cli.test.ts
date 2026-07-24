@@ -1,4 +1,7 @@
 import { readFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import type { ModelDiagnosis } from '@on-par/factory-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -33,10 +36,12 @@ import {
   PREREQUISITES_TEXT,
   prLookupFailure,
   readActiveProduct,
+  resolveLaneBaseUrl,
   resolveUsageKnobs,
   runLane,
   scaffoldConstitution,
   squashMergeAndDelete,
+  startLaneProxy,
   superviseLoop,
   sweepApprovedPRs,
   triageNoProposalError,
@@ -521,6 +526,129 @@ describe('cli', () => {
       await runQueue();
 
       expect(cmdRunCalls).toBe(1);
+    });
+  });
+
+  describe('startLaneProxy', () => {
+    const settings = { enabled: true, port: 80, domain: 'factory.localhost' };
+    let dir: string;
+    let paths: any;
+
+    beforeEach(async () => {
+      dir = await mkdtemp(join(tmpdir(), 'cli-proxy-'));
+      paths = {
+        ports: join(dir, 'ports.json'),
+        proxyState: join(dir, 'proxy.json'),
+        events: join(dir, 'events.ndjson'),
+      };
+    });
+
+    afterEach(async () => {
+      await rm(dir, { recursive: true, force: true });
+    });
+
+    it('does nothing when the proxy feature is disabled', async () => {
+      const events: any[] = [];
+      const createProxy = vi.fn();
+      const result = await startLaneProxy(
+        paths,
+        { ...settings, enabled: false },
+        { createProxy, emitEvent: (...args: any[]) => events.push(args) },
+      );
+
+      expect(result.proxy).toBeUndefined();
+      expect(createProxy).not.toHaveBeenCalled();
+      expect(events).toHaveLength(0);
+    });
+
+    it('starts the proxy, writes proxy state, and emits exactly one environment_proxy event on success', async () => {
+      const events: any[] = [];
+      const stubProxy = { server: {} as any, port: 80, start: async () => 80, stop: async () => {} };
+      const createProxy = vi.fn(() => stubProxy);
+
+      const result = await startLaneProxy(paths, settings, {
+        createProxy,
+        emitEvent: (...args: any[]) => events.push(args),
+      });
+
+      expect(result.proxy).toBe(stubProxy);
+      expect(createProxy).toHaveBeenCalledWith({
+        registryFile: paths.ports,
+        domain: 'factory.localhost',
+        port: 80,
+      });
+      expect(events).toEqual([
+        [paths.events, 'environment_proxy', 'all', expect.stringContaining('lane proxy listening on 127.0.0.1:80')],
+      ]);
+    });
+
+    it('emits exactly one environment_proxy_unavailable event and returns no proxy when start() rejects', async () => {
+      const events: any[] = [];
+      const stubProxy = {
+        server: {} as any,
+        port: 80,
+        start: async () => {
+          throw new Error('EACCES: permission denied');
+        },
+        stop: async () => {},
+      };
+      const createProxy = vi.fn(() => stubProxy);
+
+      const result = await startLaneProxy(paths, settings, {
+        createProxy,
+        emitEvent: (...args: any[]) => events.push(args),
+      });
+
+      expect(result.proxy).toBeUndefined();
+      expect(events).toEqual([
+        [
+          paths.events,
+          'environment_proxy_unavailable',
+          'all',
+          expect.stringContaining('proxy unavailable (EACCES: permission denied)'),
+        ],
+      ]);
+    });
+  });
+
+  describe('resolveLaneBaseUrl', () => {
+    const paths = { proxyState: '/repo/.factory/proxy.json' } as any;
+    const settings = { enabled: true, port: 80, domain: 'factory.localhost' };
+
+    it('returns an empty note when the proxy feature is disabled', () => {
+      const result = resolveLaneBaseUrl(paths, { ...settings, enabled: false }, '/repo/ship-it-1', 3142, {
+        isRunning: () => ({ version: 1, pid: 1, port: 80, domain: 'factory.localhost', startedAt: 'now' }),
+      });
+      expect(result).toEqual({ note: '' });
+    });
+
+    it('returns an empty note when there is no leased appPort', () => {
+      const result = resolveLaneBaseUrl(paths, settings, '/repo/ship-it-1', undefined, {
+        isRunning: () => ({ version: 1, pid: 1, port: 80, domain: 'factory.localhost', startedAt: 'now' }),
+      });
+      expect(result).toEqual({ note: '' });
+    });
+
+    it('returns the stable lane URL when a matching-domain proxy is alive', () => {
+      const result = resolveLaneBaseUrl(paths, settings, '/repo/ship-it-1', 3142, {
+        isRunning: () => ({ version: 1, pid: 1, port: 80, domain: 'factory.localhost', startedAt: 'now' }),
+      });
+      expect(result.baseUrl).toBe('http://ship-it-1.factory.localhost');
+      expect(result.note).toContain('http://ship-it-1.factory.localhost');
+    });
+
+    it('returns a port-based note (no baseUrl) when the proxy is not running', () => {
+      const result = resolveLaneBaseUrl(paths, settings, '/repo/ship-it-1', 3142, { isRunning: () => undefined });
+      expect(result.baseUrl).toBeUndefined();
+      expect(result.note).toContain('http://127.0.0.1:3142');
+    });
+
+    it('returns a port-based note (no baseUrl) when the running proxy is on a different domain', () => {
+      const result = resolveLaneBaseUrl(paths, settings, '/repo/ship-it-1', 3142, {
+        isRunning: () => ({ version: 1, pid: 1, port: 80, domain: 'other.localhost', startedAt: 'now' }),
+      });
+      expect(result.baseUrl).toBeUndefined();
+      expect(result.note).toContain('http://127.0.0.1:3142');
     });
   });
 

@@ -153,6 +153,8 @@ export async function checkPhase(opts: {
   sandbox?: SandboxPolicy;
   drainSteering?: () => ConsumedSteering;
   appPort?: number;
+  /** Stable lane URL from the factory proxy (e.g. http://<lane>.factory.localhost), when running. */
+  appBaseUrl?: string;
   onPgid?: (pgid: number) => void;
 }): Promise<CheckPhaseResult> {
   const {
@@ -168,10 +170,11 @@ export async function checkPhase(opts: {
     sandbox,
     drainSteering,
     appPort,
+    appBaseUrl,
     onPgid,
   } = opts;
 
-  const ctx: CheckerContext = { worktree, specPath, env: laneEnv(appPort), onPgid };
+  const ctx: CheckerContext = { worktree, specPath, env: laneEnv(appPort, process.env, appBaseUrl), onPgid };
 
   if (appPort === undefined) {
     const signal = await detectLiveAppSignal(worktree);
@@ -219,6 +222,7 @@ export async function checkPhase(opts: {
       sandbox,
       steering,
       appPort,
+      appBaseUrl,
       onPgid,
     );
 
@@ -289,6 +293,7 @@ async function reworkWorker(
   sandbox?: SandboxPolicy,
   steering?: ConsumedSteering,
   appPort?: number,
+  appBaseUrl?: string,
   onPgid?: (pgid: number) => void,
 ): Promise<{ failovers: { model: string; reason: FailoverReason; detail?: string }[] }> {
   const constitutionCtx = buildConstitutionContext(constitution);
@@ -326,7 +331,7 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
       sandbox,
       onSandboxEvent: (type, detail) => log(type, detail),
       onLog: (msg) => log('router', msg),
-      env: laneEnv(appPort),
+      env: laneEnv(appPort, process.env, appBaseUrl),
       onPgid,
       retryCause: 'checker',
     })

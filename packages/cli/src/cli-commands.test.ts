@@ -1077,6 +1077,57 @@ bash scripts/verify.sh
     });
   });
 
+  describe('proxy', () => {
+    it('starts the foreground proxy, prints routes, and shuts down cleanly on SIGINT', async () => {
+      h.factoryConfig = {
+        ...h.factoryConfig,
+        environment: { proxy: { enabled: true, port: 0, domain: 'factory.localhost' } },
+      };
+      writeFileSync(
+        join(paths().state, 'ports.json'),
+        JSON.stringify({
+          version: 1,
+          leases: [
+            {
+              worktreeId: '/repo/ship-it-296',
+              branch: 'ship-it/296',
+              port: 3142,
+              pid: process.pid,
+              acquiredAt: new Date().toISOString(),
+            },
+          ],
+        }),
+      );
+
+      const runPromise = runMain('proxy');
+      while (!logged().includes('listening on')) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      process.emit('SIGINT');
+      const res = await runPromise;
+
+      expect(res.exited).toBe(true);
+      expect(res.code).toBe(0);
+      expect(logged()).toContain('ship-it-296.factory.localhost -> 127.0.0.1:3142');
+      expect(existsSync(join(paths().state, 'proxy.json'))).toBe(false);
+    });
+
+    it('warns but still starts when environment.proxy.enabled is false (the command is the explicit opt-in)', async () => {
+      h.factoryConfig = {
+        ...h.factoryConfig,
+        environment: { proxy: { enabled: false, port: 0, domain: 'factory.localhost' } },
+      };
+
+      const runPromise = runMain('proxy');
+      while (!logged().includes('listening on')) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      expect(logged()).toContain('explicit opt-in');
+      process.emit('SIGINT');
+      await runPromise;
+    });
+  });
+
   describe('worktree gc', () => {
     it('dry-run calls sweepWorktrees with dryRun: true and takes no lock', async () => {
       h.gcReport = { removed: [], kept: 3, dryRun: true };
@@ -1886,6 +1937,48 @@ describe('shipIssue (direct)', () => {
 
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('port leasing disabled (environment.ports.enabled=false or FACTORY_ENV_PORTS=0)');
+  });
+
+  it('resolves and logs a stable lane URL from the factory proxy when leasing and the proxy are both enabled and running', async () => {
+    h.factoryConfig = {
+      ...h.factoryConfig,
+      environment: {
+        ports: { enabled: true, range: [20100, 20150] },
+        proxy: { enabled: true, port: 80, domain: 'factory.localhost' },
+      },
+    };
+    writeFileSync(
+      join(paths().state, 'proxy.json'),
+      JSON.stringify({
+        version: 1,
+        pid: process.pid,
+        port: 80,
+        domain: 'factory.localhost',
+        startedAt: new Date().toISOString(),
+      }),
+    );
+
+    await shipIssue(5, {}, ctx());
+
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('stable lane URL http://');
+    expect(events).toContain('.factory.localhost -> 127.0.0.1:');
+  });
+
+  it('logs a port-based note when the proxy is enabled but not running', async () => {
+    h.factoryConfig = {
+      ...h.factoryConfig,
+      environment: {
+        ports: { enabled: true, range: [20200, 20250] },
+        proxy: { enabled: true, port: 80, domain: 'factory.localhost' },
+      },
+    };
+
+    await shipIssue(5, {}, ctx());
+
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('environment_proxy_unavailable');
+    expect(events).toContain('proxy enabled but not running — using http://127.0.0.1:');
   });
 
   it('writes a local-only run report on success when FACTORY_LOCAL_ONLY=1', async () => {

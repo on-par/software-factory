@@ -346,6 +346,37 @@ describe('checkPhase appPort', () => {
     });
   });
 
+  it('reaches the rework router.run options as FACTORY_BASE_URL while FACTORY_APP_PORT stays the raw port, when appBaseUrl is set', async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const captured: { options: any }[] = [];
+    const fakeRouter = {
+      run: async (_task: string, _prompt: string, options: any) => {
+        captured.push({ options });
+        return { model: 'fake-model', output: 'reworked', exitCode: 0, attempts: [] };
+      },
+    } as any;
+
+    await checkPhase({
+      issue: 101,
+      worktree,
+      specPath,
+      router: fakeRouter,
+      constitution: null,
+      log: () => {},
+      appPort: 3142,
+      appBaseUrl: 'http://ship-it-101.factory.localhost',
+    });
+
+    expect(captured.length).toBeGreaterThan(0);
+    expect(captured[0].options.env).toEqual({
+      FACTORY_HEADLESS: '1',
+      PLAYWRIGHT_HEADLESS: '1',
+      PORT: '3142',
+      FACTORY_APP_PORT: '3142',
+      FACTORY_BASE_URL: 'http://ship-it-101.factory.localhost',
+    });
+  });
+
   it('carries headless-only env in the rework router.run options when appPort is unset', async () => {
     const { worktree, specPath } = await makeFailingWorktree();
     const captured: { options: any }[] = [];

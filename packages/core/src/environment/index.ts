@@ -264,6 +264,12 @@ export async function reapStalePortLeases(opts: {
   );
 }
 
+/** Lock-free read of the current live+stale leases, used by the proxy per-request
+ *  (already tolerates a missing/corrupt registry file by returning `[]`). */
+export function readPortLeases(registryFile: string): PortLease[] {
+  return readRegistry(registryFile).leases;
+}
+
 /** Read-only health report over the registry; used by `factory doctor`. Never mutates. */
 export async function inspectPortLeases(opts: {
   registryFile: string;
@@ -287,12 +293,14 @@ export async function inspectPortLeases(opts: {
   return [...liveHealth, ...staleHealth];
 }
 
-/** Env vars a lane's build/check harness invocations get, derived from its leased port. */
-export function leaseEnv(port: number): Record<string, string> {
+/** Env vars a lane's build/check harness invocations get, derived from its leased port.
+ *  `baseUrl` overrides FACTORY_BASE_URL (e.g. a stable lane URL from the factory proxy);
+ *  PORT/FACTORY_APP_PORT always carry the raw port regardless. */
+export function leaseEnv(port: number, baseUrl?: string): Record<string, string> {
   return {
     PORT: String(port),
     FACTORY_APP_PORT: String(port),
-    FACTORY_BASE_URL: `http://127.0.0.1:${port}`,
+    FACTORY_BASE_URL: baseUrl ?? `http://127.0.0.1:${port}`,
   };
 }
 
@@ -304,10 +312,12 @@ export function headlessEnv(parentEnv: Record<string, string | undefined> = proc
 }
 
 /** Full lane environment for build/check/rework child processes: headless
- *  contract always, port-lease vars when the lane holds a lease. */
+ *  contract always, port-lease vars when the lane holds a lease. `baseUrl`
+ *  forwards to leaseEnv (e.g. a stable lane URL from the factory proxy). */
 export function laneEnv(
   port?: number,
   parentEnv: Record<string, string | undefined> = process.env,
+  baseUrl?: string,
 ): Record<string, string> {
-  return { ...headlessEnv(parentEnv), ...(port !== undefined ? leaseEnv(port) : {}) };
+  return { ...headlessEnv(parentEnv), ...(port !== undefined ? leaseEnv(port, baseUrl) : {}) };
 }

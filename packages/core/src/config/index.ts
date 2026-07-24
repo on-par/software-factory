@@ -184,8 +184,20 @@ const FactoryConfigSchema = z.object({
           comment: z.string().optional(),
         })
         .default({ graceMs: 5000 }),
+      proxy: z
+        .object({
+          enabled: z.boolean().default(false),
+          port: z.number().int().min(1).max(65535).default(80),
+          domain: z.string().default('factory.localhost'),
+          comment: z.string().optional(),
+        })
+        .default({ enabled: false, port: 80, domain: 'factory.localhost' }),
     })
-    .default({ ports: { enabled: true, range: [3100, 3999] }, processGroups: { graceMs: 5000 } }),
+    .default({
+      ports: { enabled: true, range: [3100, 3999] },
+      processGroups: { graceMs: 5000 },
+      proxy: { enabled: false, port: 80, domain: 'factory.localhost' },
+    }),
   auto_failover: z
     .object({
       enabled: z.boolean().default(true),
@@ -286,6 +298,26 @@ export function resolveEnvironmentPorts(
   return { enabled, range: config.environment?.ports?.range ?? [3100, 3999] };
 }
 
+export interface EnvironmentProxySettings {
+  enabled: boolean;
+  port: number;
+  domain: string;
+}
+
+export function resolveEnvironmentProxy(
+  config: FactoryConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): EnvironmentProxySettings {
+  let enabled = config.environment?.proxy?.enabled ?? false;
+  if (env.FACTORY_PROXY === '1') enabled = true;
+  if (env.FACTORY_PROXY === '0') enabled = false;
+  return {
+    enabled,
+    port: config.environment?.proxy?.port ?? 80,
+    domain: config.environment?.proxy?.domain ?? 'factory.localhost',
+  };
+}
+
 export interface AutoFailoverSettings {
   enabled: boolean;
   cooldownMs: number;
@@ -347,6 +379,7 @@ export function getFactoryPaths(repoRoot: string) {
     ingestWatermark: resolve(state, 'ingest-watermark'),
     ports: resolve(state, 'ports.json'),
     portsLock: resolve(state, 'ports.lock'),
+    proxyState: resolve(state, 'proxy.json'),
     config: resolve(state, 'config.json'),
     breaker: resolve(state, 'breaker.json'),
   };

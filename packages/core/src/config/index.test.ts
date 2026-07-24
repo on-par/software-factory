@@ -12,6 +12,7 @@ import {
   loadRoutesConfig,
   resolveAutoFailover,
   resolveEnvironmentPorts,
+  resolveEnvironmentProxy,
   resolveFilingPolicy,
   resolveIngestConfig,
   resolvePlanApproval,
@@ -65,6 +66,7 @@ describe('getFactoryPaths', () => {
     expect(paths.ingestWatermark).toBe(resolve(repoRoot, '.factory', 'ingest-watermark'));
     expect(paths.ports).toBe(resolve(repoRoot, '.factory', 'ports.json'));
     expect(paths.portsLock).toBe(resolve(repoRoot, '.factory', 'ports.lock'));
+    expect(paths.proxyState).toBe(resolve(repoRoot, '.factory', 'proxy.json'));
     expect(paths.breaker).toBe(resolve(repoRoot, '.factory', 'breaker.json'));
   });
 });
@@ -585,7 +587,11 @@ describe('resolveEnvironmentPorts', () => {
       resolveEnvironmentPorts(
         {
           ...config,
-          environment: { ports: { enabled: true, range: [3100, 3999] }, processGroups: { graceMs: 5000 } },
+          environment: {
+            ports: { enabled: true, range: [3100, 3999] },
+            processGroups: { graceMs: 5000 },
+            proxy: { enabled: false, port: 80, domain: 'factory.localhost' },
+          },
         },
         { FACTORY_ENV_PORTS: '0' },
       ).enabled,
@@ -598,11 +604,118 @@ describe('resolveEnvironmentPorts', () => {
       resolveEnvironmentPorts(
         {
           ...config,
-          environment: { ports: { enabled: false, range: [3100, 3999] }, processGroups: { graceMs: 5000 } },
+          environment: {
+            ports: { enabled: false, range: [3100, 3999] },
+            processGroups: { graceMs: 5000 },
+            proxy: { enabled: false, port: 80, domain: 'factory.localhost' },
+          },
         },
         { FACTORY_ENV_PORTS: '1' },
       ).enabled,
     ).toBe(true);
+  });
+});
+
+describe('environment.proxy config', () => {
+  it('shipped config has a disabled-by-default proxy on port 80 and factory.localhost', () => {
+    const config = loadFactoryConfig();
+    expect(config.environment.proxy).toEqual({
+      enabled: false,
+      port: 80,
+      domain: 'factory.localhost',
+      comment: expect.any(String),
+    });
+  });
+
+  it('applies environment.proxy defaults when the config omits the key', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
+    try {
+      const path = join(dir, 'factory.json');
+      const minimal = {
+        version: 1,
+        paths: {
+          constitutions: 'constitutions/',
+          checkers: 'lib/checkers/',
+          plans: '.factory/plans/',
+          logs: '.factory/logs/',
+          events: '.factory/events.ndjson',
+        },
+        timeouts: { plan_seconds: 1800, build_seconds: 7200, check_seconds: 1800, merge_poll_seconds: 120 },
+        merge: { auto: false, comment: '' },
+        worktree: { prefix: 'ship-it/', parent: '../', comment: '' },
+        byok: { enabled: false, comment: '' },
+        notifications: {},
+        cost_tracking: { enabled: true, log_file: '.factory/costs.jsonl', comment: '' },
+      };
+      await writeFile(path, JSON.stringify(minimal));
+      const config = loadFactoryConfig(path);
+      expect(config.environment.proxy.enabled).toBe(false);
+      expect(config.environment.proxy.port).toBe(80);
+      expect(config.environment.proxy.domain).toBe('factory.localhost');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an out-of-range port', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
+    try {
+      const path = join(dir, 'factory.json');
+      const minimal = {
+        version: 1,
+        paths: {
+          constitutions: 'constitutions/',
+          checkers: 'lib/checkers/',
+          plans: '.factory/plans/',
+          logs: '.factory/logs/',
+          events: '.factory/events.ndjson',
+        },
+        timeouts: { plan_seconds: 1800, build_seconds: 7200, check_seconds: 1800, merge_poll_seconds: 120 },
+        merge: { auto: false, comment: '' },
+        worktree: { prefix: 'ship-it/', parent: '../', comment: '' },
+        byok: { enabled: false, comment: '' },
+        notifications: {},
+        cost_tracking: { enabled: true, log_file: '.factory/costs.jsonl', comment: '' },
+        environment: { proxy: { enabled: true, port: 70000, domain: 'factory.localhost' } },
+      };
+      await writeFile(path, JSON.stringify(minimal));
+      expect(() => loadFactoryConfig(path)).toThrow();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('resolveEnvironmentProxy', () => {
+  it('defaults to the shipped config values (disabled, port 80, factory.localhost)', () => {
+    const config = loadFactoryConfig();
+    expect(resolveEnvironmentProxy(config, {})).toEqual({
+      enabled: false,
+      port: 80,
+      domain: 'factory.localhost',
+    });
+  });
+
+  it('honors FACTORY_PROXY=1 to force-enable, overriding config', () => {
+    const config = loadFactoryConfig();
+    expect(resolveEnvironmentProxy(config, { FACTORY_PROXY: '1' }).enabled).toBe(true);
+  });
+
+  it('honors FACTORY_PROXY=0 to force-disable, overriding config', () => {
+    const config = loadFactoryConfig();
+    expect(
+      resolveEnvironmentProxy(
+        {
+          ...config,
+          environment: {
+            ports: { enabled: true, range: [3100, 3999] },
+            processGroups: { graceMs: 5000 },
+            proxy: { enabled: true, port: 80, domain: 'factory.localhost' },
+          },
+        },
+        { FACTORY_PROXY: '0' },
+      ).enabled,
+    ).toBe(false);
   });
 });
 
@@ -676,7 +789,11 @@ describe('resolveProcessGroupGraceMs', () => {
     expect(
       resolveProcessGroupGraceMs({
         ...config,
-        environment: { ports: { enabled: true, range: [3100, 3999] }, processGroups: { graceMs: 12000 } },
+        environment: {
+          ports: { enabled: true, range: [3100, 3999] },
+          processGroups: { graceMs: 12000 },
+          proxy: { enabled: false, port: 80, domain: 'factory.localhost' },
+        },
       }),
     ).toBe(12000);
   });
