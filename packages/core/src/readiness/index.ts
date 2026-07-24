@@ -18,8 +18,12 @@ export const FACTORY_BUG_REQUIRED_FIELDS = ['Observed behavior', 'Expected behav
 
 export const EPIC_REQUIRED_FIELDS = ['Why', 'Children', 'Done when'] as const;
 
-const HEADING_RE = /^#{1,6}\s+(.*)$/;
+// A single required `\s` (not `\s+`) avoids a polynomial-backtracking pattern on
+// attacker-controlled issue bodies (CodeQL js/polynomial-redos) — the label capture
+// is `.trim()`-ed below, so any extra leading whitespace is stripped regardless.
+const HEADING_RE = /^#{1,6}\s(.*)$/;
 const CHECKBOX_RE = /^\s*-\s*\[[ xX]\]/m;
+const FENCE_RE = /^\s*(`{3,}|~{3,})/;
 const EMPTY_PLACEHOLDERS = new Set(['_no response_', 'none']);
 
 function extractSections(body: string): Map<string, string> {
@@ -28,6 +32,7 @@ function extractSections(body: string): Map<string, string> {
 
   let currentLabel: string | null = null;
   let currentContent: string[] = [];
+  let inFence = false;
 
   const flush = () => {
     if (currentLabel !== null) {
@@ -36,7 +41,13 @@ function extractSections(body: string): Map<string, string> {
   };
 
   for (const line of lines) {
-    const match = HEADING_RE.exec(line);
+    if (FENCE_RE.test(line)) {
+      inFence = !inFence;
+      currentContent.push(line);
+      continue;
+    }
+
+    const match = inFence ? null : HEADING_RE.exec(line);
     if (match) {
       flush();
       currentLabel = match[1].trim();

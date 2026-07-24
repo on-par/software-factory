@@ -199,4 +199,25 @@ Fix it.
     expect(result.template).toBe('factory-task');
     expect(result.score).toBe(0);
   });
+
+  it('does not mistake a `#` comment inside a fenced code block for a heading', () => {
+    const body = COMPLETE_FACTORY_TASK_BODY.replace(
+      '### Acceptance criteria\n\n- [ ] Widget no longer flickers on load\n- [x] Regression test added\n',
+      [
+        '### Acceptance criteria',
+        '',
+        '```py',
+        '# this comment starts with a hash and must not be read as a heading',
+        'print("hi")',
+        '```',
+        '',
+        '- [ ] Widget no longer flickers on load',
+        '- [x] Regression test added',
+        '',
+      ].join('\n'),
+    );
+    const result = scoreIssueReadiness({ title: 'Fix widget flicker', body });
+    expect(result.pass).toBe(true);
+    expect(result.missing).toEqual([]);
+  });
 });
