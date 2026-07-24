@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent for scripts/auto-merge-sweep.sh (issue #416).
+  Install:
+    cp scripts/launchd/com.on-par.auto-merge-sweep.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.on-par.auto-merge-sweep.plist
+  Verify:   launchctl print gui/$(id -u)/com.on-par.auto-merge-sweep
+  Restart:  launchctl kickstart -k gui/$(id -u)/com.on-par.auto-merge-sweep
+  Health:   ~/.factory/auto-merge-sweep.heartbeat is the last completed pass;
+            older than 10 minutes means the sweeper is stuck or dead.
+  Edit the absolute paths below if your checkout lives elsewhere — in
+  particular, the nvm node bin dir in PATH is version-pinned; update it
+  after any `nvm install` that changes the active version, or `factory
+  land` (which execs node) will fail under launchd with "command not found".
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.on-par.auto-merge-sweep</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/moltbot/repos/on-par/software-factory/scripts/auto-merge-sweep.sh</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/moltbot/.nvm/versions/node/v24.18.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>FACTORY_MERGE_ADMIN</key>
+    <string>1</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/moltbot/Library/Logs/auto-merge-sweep.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/moltbot/Library/Logs/auto-merge-sweep.log</string>
+</dict>
+</plist>

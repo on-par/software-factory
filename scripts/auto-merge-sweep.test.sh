@@ -19,6 +19,10 @@ mkdir -p "$REPO_ROOT/fakerepo"
 FACTORY_CALL_LOG="$BINDIR/factory-calls.log"
 : >"$FACTORY_CALL_LOG"
 
+GH_CALL_LOG="$BINDIR/gh-calls.log"
+export GH_CALL_LOG
+: >"$GH_CALL_LOG"
+
 cat >"$BINDIR/gh" <<'EOF'
 #!/usr/bin/env bash
 set -uo pipefail
@@ -43,6 +47,7 @@ if [ "$1 $2" = "pr list" ]; then
 JSON
   exit 0
 elif [ "$1 $2" = "pr merge" ]; then
+  echo "$@" >>"${GH_CALL_LOG}"
   echo "simulated merge failure" >&2
   exit 3
 fi
@@ -65,6 +70,7 @@ export REPO_ROOT
 # shellcheck disable=SC1091
 source "$ROOT/scripts/auto-merge-sweep.sh"
 
+unset FACTORY_MERGE_ADMIN
 output="$(sweep_repo fakerepo 2>&1)"
 
 # Usage: assert_line contains|not_contains "<needle>"
@@ -98,4 +104,69 @@ if [ "$calls_after_missing_dir" != "$calls_before_missing_dir" ]; then
   exit 1
 fi
 
-echo "PASS: auto-merge-sweep skips landing when the repo dir is missing, without invoking factory"
+# --- admin merge flag: default path omits --admin ---
+
+if ! grep -q -- "--squash --delete-branch" "$GH_CALL_LOG"; then
+  echo "FAIL: expected gh pr merge call to include --squash --delete-branch" >&2
+  cat "$GH_CALL_LOG" >&2
+  exit 1
+fi
+if grep -q -- "--admin" "$GH_CALL_LOG"; then
+  echo "FAIL: gh pr merge call included --admin without FACTORY_MERGE_ADMIN=1" >&2
+  cat "$GH_CALL_LOG" >&2
+  exit 1
+fi
+
+# --- admin merge flag: FACTORY_MERGE_ADMIN=1 adds --admin ---
+
+: >"$GH_CALL_LOG"
+export FACTORY_MERGE_ADMIN=1
+output="$(sweep_repo fakerepo 2>&1)"
+unset FACTORY_MERGE_ADMIN
+
+assert_line contains "FAILED to merge PR #101 (exit 3)"
+
+if ! grep -q -- "--admin" "$GH_CALL_LOG"; then
+  echo "FAIL: expected gh pr merge call to include --admin when FACTORY_MERGE_ADMIN=1" >&2
+  cat "$GH_CALL_LOG" >&2
+  exit 1
+fi
+if ! grep -q -- "--squash" "$GH_CALL_LOG"; then
+  echo "FAIL: expected gh pr merge call to include --squash when FACTORY_MERGE_ADMIN=1" >&2
+  cat "$GH_CALL_LOG" >&2
+  exit 1
+fi
+if ! grep -q -- "--delete-branch" "$GH_CALL_LOG"; then
+  echo "FAIL: expected gh pr merge call to include --delete-branch when FACTORY_MERGE_ADMIN=1" >&2
+  cat "$GH_CALL_LOG" >&2
+  exit 1
+fi
+
+# --- heartbeat: sweep_once writes a timestamp, creating parent dirs ---
+
+REPOS=(fakerepo)
+export HEARTBEAT_FILE="$BINDIR/hb/heartbeat"
+sweep_once >/dev/null 2>&1 || true
+
+if [ ! -f "$HEARTBEAT_FILE" ]; then
+  echo "FAIL: expected heartbeat file to be written at $HEARTBEAT_FILE" >&2
+  exit 1
+fi
+if ! grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}' "$HEARTBEAT_FILE"; then
+  echo "FAIL: heartbeat file does not contain a timestamp: $(cat "$HEARTBEAT_FILE")" >&2
+  exit 1
+fi
+
+# --- plist: valid property list with KeepAlive set ---
+
+PLIST="$ROOT/scripts/launchd/com.on-par.auto-merge-sweep.plist"
+if ! python3 -c 'import plistlib,sys; plistlib.load(open(sys.argv[1],"rb"))' "$PLIST"; then
+  echo "FAIL: $PLIST is not a valid property list" >&2
+  exit 1
+fi
+if ! grep -q "<key>KeepAlive</key>" "$PLIST"; then
+  echo "FAIL: $PLIST does not set KeepAlive" >&2
+  exit 1
+fi
+
+echo "PASS: auto-merge-sweep logs merge/land failures with real exit codes, skips landing when the repo dir is missing, honours FACTORY_MERGE_ADMIN for the standalone merge path, writes a heartbeat on each pass, and ships a valid KeepAlive launchd plist"
