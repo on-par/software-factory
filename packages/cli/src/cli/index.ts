@@ -35,6 +35,7 @@ import {
   fetchSubscriptionUsage,
   formatKpiLines,
   formatUsageReport,
+  gateBuildOnBreaker,
   getConstitutionsDir,
   getFactoryPaths,
   inspectPortLeases,
@@ -50,12 +51,14 @@ import {
   parseKpiHistory,
   parseQueue,
   planPhase,
+  ProviderBreaker,
   readEvents,
   readUsage,
   reapStalePortLeases,
   releasePortLease,
   renderKpiReport,
   renderKpiTrend,
+  resolveAutoFailover,
   resolveCodexDisabled,
   resolveEffectiveModelPins,
   resolveEnvironmentPorts,
@@ -575,6 +578,16 @@ export async function cmdStatus() {
     console.log(`  ${line}`);
   }
 
+  console.log(chalk.bold('\n== Provider breaker =='));
+  const openBreakers = await new ProviderBreaker(paths.breaker).list();
+  if (openBreakers.length === 0) {
+    console.log('  (closed)');
+  } else {
+    for (const b of openBreakers) {
+      console.log(`  ${b.provider}: OPEN (${b.reason}) — ${Math.ceil(b.remainingMs / 60_000)}m remaining`);
+    }
+  }
+
   console.log(chalk.bold('\n== Queue =='));
   if (existsSync(paths.queue)) {
     const { entries, diagnostics } = parseQueue(readFileSync(paths.queue, 'utf-8'));
@@ -667,6 +680,8 @@ export async function shipIssue(
   const routesConfig = loadRoutesConfig();
   const factoryConfig = loadFactoryConfig();
   const timeouts = resolveTimeouts(factoryConfig);
+  const failoverSettings = resolveAutoFailover(factoryConfig);
+  const breaker = new ProviderBreaker(paths.breaker);
   const router = new ModelRouter(modelsConfig, routesConfig);
   router.setCostSink((entry) => logCost(paths.costs, { ...entry, issue: String(issueNum) }));
   const modelPins = resolveEffectiveModelPins(router.registryRef, repoConfig);
@@ -813,6 +828,20 @@ export async function shipIssue(
         mkLog('build')('steering_applied', describeSteering(buildSteering));
       }
     }
+    let breakerBlocked = false;
+    if (failoverSettings.enabled) {
+      const providers = [
+        ...new Set(
+          router
+            .resolveAll('build_codex')
+            .map((m) => router.registryRef.get(m)?.provider)
+            .filter((p): p is string => Boolean(p)),
+        ),
+      ];
+      const gate = await gateBuildOnBreaker({ breaker, providers, log: mkLog('build') });
+      breakerBlocked = gate.codexBlocked;
+    }
+
     const build = await buildPhase({
       issue: issueNum,
       repo: ghRepo,
@@ -829,7 +858,22 @@ export async function shipIssue(
       sandbox: activeSandboxPolicy,
       steering: buildSteering,
       appPort,
-      codexDisabled: codexOff,
+      codexDisabled: codexOff || breakerBlocked,
+      autoFailover: {
+        enabled: failoverSettings.enabled,
+        fallbackModel: failoverSettings.fallbackModel,
+        onQuotaExhausted: async ({ provider, reason }) => {
+          await breaker.open(provider, reason, failoverSettings.cooldownMs);
+          // No failoverReason metadata here: the build's own worker_failover
+          // event already carries it for this same quota trip, and KPI retry
+          // counting (retryCauseOf) treats any failoverReason-bearing event as
+          // a distinct retry — attaching it here would double-count one retry.
+          mkLog('build')(
+            'provider_breaker_open',
+            `breaker opened for ${provider} (${reason}) — cooldown ${Math.round(failoverSettings.cooldownMs / 60_000)}m`,
+          );
+        },
+      },
     });
     if (!build.ok) {
       throw new LaneParkError(`build escalated: ${build.escalate ?? 'unknown'}`, 'escalate');

@@ -19,6 +19,7 @@ const PUBLIC_API_KEYS = [
   'loadFactoryConfig',
   'loadModelsConfig',
   'loadRoutesConfig',
+  'resolveAutoFailover',
   'resolveEnvironmentPorts',
   'resolveIngestConfig',
   'resolvePlanApproval',
@@ -57,6 +58,9 @@ const PUBLIC_API_KEYS = [
   // Router
   'failoversFrom',
   'ModelRouter',
+  // Provider circuit breaker
+  'gateBuildOnBreaker',
+  'ProviderBreaker',
   // Harness contract
   'HARNESS_CATALOG',
   'HarnessError',

@@ -10,6 +10,7 @@ import {
   loadFactoryConfig,
   loadModelsConfig,
   loadRoutesConfig,
+  resolveAutoFailover,
   resolveEnvironmentPorts,
   resolveFilingPolicy,
   resolveIngestConfig,
@@ -63,6 +64,7 @@ describe('getFactoryPaths', () => {
     expect(paths.ingestWatermark).toBe(resolve(repoRoot, '.factory', 'ingest-watermark'));
     expect(paths.ports).toBe(resolve(repoRoot, '.factory', 'ports.json'));
     expect(paths.portsLock).toBe(resolve(repoRoot, '.factory', 'ports.lock'));
+    expect(paths.breaker).toBe(resolve(repoRoot, '.factory', 'breaker.json'));
   });
 });
 
@@ -215,6 +217,13 @@ describe('loadFactoryConfig', () => {
     expect(config.sandbox.enabled).toBe(true);
     expect(config.sandbox.network.allow).toEqual(['api.anthropic.com', 'github.com']);
     expect(config.sandbox.resources).toEqual({ cpuMs: 300_000, memMb: 4096 });
+  });
+
+  it('shipped config has an enabled auto_failover block with a 30 minute cooldown', () => {
+    const config = loadFactoryConfig();
+    expect(config.auto_failover.enabled).toBe(true);
+    expect(config.auto_failover.cooldown_minutes).toBe(30);
+    expect(config.auto_failover.fallback_model).toBe('claude-sonnet-5');
   });
 
   it('applies sandbox defaults when the config omits the sandbox key', async () => {
@@ -668,6 +677,57 @@ describe('resolveIngestConfig', () => {
     expect(settings.label).toBe('custom-label');
     expect(settings.lane).toBe('custom-lane');
     expect(settings.maxPerCycle).toBe(7);
+  });
+});
+
+describe('resolveAutoFailover', () => {
+  it('defaults to enabled, 30m cooldown, claude-sonnet-5 fallback from the shipped config', () => {
+    const config = loadFactoryConfig();
+    expect(resolveAutoFailover(config, {})).toEqual({
+      enabled: true,
+      cooldownMs: 1_800_000,
+      fallbackModel: 'claude-sonnet-5',
+    });
+  });
+
+  it('is false when FACTORY_AUTO_FAILOVER is exactly "0", even when config.auto_failover.enabled is true', () => {
+    const config = loadFactoryConfig();
+    expect(
+      resolveAutoFailover(
+        { ...config, auto_failover: { ...config.auto_failover, enabled: true } },
+        {
+          FACTORY_AUTO_FAILOVER: '0',
+        },
+      ).enabled,
+    ).toBe(false);
+  });
+
+  it('is true when FACTORY_AUTO_FAILOVER is exactly "1", regardless of a disabled config', () => {
+    const config = loadFactoryConfig();
+    expect(
+      resolveAutoFailover(
+        { ...config, auto_failover: { ...config.auto_failover, enabled: false } },
+        {
+          FACTORY_AUTO_FAILOVER: '1',
+        },
+      ).enabled,
+    ).toBe(true);
+  });
+
+  it('honors FACTORY_FAILOVER_COOLDOWN_MINUTES', () => {
+    const config = loadFactoryConfig();
+    expect(resolveAutoFailover(config, { FACTORY_FAILOVER_COOLDOWN_MINUTES: '5' }).cooldownMs).toBe(300_000);
+  });
+
+  it('falls back to config cooldown on a non-numeric or negative env override', () => {
+    const config = loadFactoryConfig();
+    expect(resolveAutoFailover(config, { FACTORY_FAILOVER_COOLDOWN_MINUTES: 'nope' }).cooldownMs).toBe(1_800_000);
+    expect(resolveAutoFailover(config, { FACTORY_FAILOVER_COOLDOWN_MINUTES: '-5' }).cooldownMs).toBe(1_800_000);
+  });
+
+  it('lets FACTORY_FAILOVER_MODEL win over the config fallback', () => {
+    const config = loadFactoryConfig();
+    expect(resolveAutoFailover(config, { FACTORY_FAILOVER_MODEL: 'gpt-5.1' }).fallbackModel).toBe('gpt-5.1');
   });
 });
 

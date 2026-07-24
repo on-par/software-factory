@@ -113,7 +113,12 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
     // Router / loaders as light stubs.
     ModelRouter: vi.fn(() => ({
       resolve: (route: string) => h.routerResolve(route),
-      registryRef: { getClaudeFlag: () => '--flag', getModelsInTier: () => ['m'] },
+      resolveAll: (_route: string) => [],
+      registryRef: {
+        getClaudeFlag: () => '--flag',
+        getModelsInTier: () => ['m'],
+        get: () => undefined,
+      },
       setCostSink: vi.fn(),
     })),
     ConstitutionLoader: vi.fn(() => ({
@@ -204,6 +209,7 @@ function paths() {
     reports: join(state, 'reports'),
     steering: join(state, 'steering'),
     kpiHistory: join(state, 'kpi-history.jsonl'),
+    breaker: join(state, 'breaker.json'),
   };
 }
 
@@ -598,6 +604,30 @@ describe('cli commands (via main dispatch)', () => {
       const res = await runMain('status');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('(no queue file)');
+    });
+
+    it('shows an open provider breaker without mutating the breaker file', async () => {
+      const breakerFixture = {
+        version: 1,
+        providers: {
+          openai: { reason: 'usage_cap', openedAt: new Date().toISOString(), cooldownMs: 1_800_000 },
+        },
+      };
+      writeFileSync(paths().breaker, JSON.stringify(breakerFixture));
+
+      await runMain('status');
+      const out = logged();
+      expect(out).toContain('== Provider breaker ==');
+      expect(out).toContain('openai: OPEN (usage_cap)');
+      expect(out).toContain('m remaining');
+      expect(existsSync(paths().breaker)).toBe(true);
+    });
+
+    it('shows "(closed)" when there is no breaker file', async () => {
+      await runMain('status');
+      const out = logged();
+      expect(out).toContain('== Provider breaker ==');
+      expect(out).toContain('(closed)');
     });
   });
 
