@@ -492,6 +492,15 @@ function resolvedModelTiers(repoRoot: string): Record<string, string[]> {
   return modelsConfig.tiers ?? {};
 }
 
+function readTextFileOrEmpty(path: string): string {
+  try {
+    return readFileSync(path, 'utf-8');
+  } catch (err: any) {
+    if (err.code === 'ENOENT') return '';
+    throw err;
+  }
+}
+
 async function appendKpiSnapshot(
   paths: ReturnType<typeof getFactoryPaths>,
   repoRoot: string,
@@ -501,8 +510,7 @@ async function appendKpiSnapshot(
     commitSha: await currentCommitSha(),
     models: resolvedModelTiers(repoRoot),
   });
-  const existing = existsSync(paths.kpiHistory) ? readFileSync(paths.kpiHistory, 'utf-8') : '';
-  const updated = appendKpiHistoryLine(existing, record);
+  const updated = appendKpiHistoryLine(readTextFileOrEmpty(paths.kpiHistory), record);
   writeFileSync(paths.kpiHistory, updated);
   return { record, history: parseKpiHistory(updated) };
 }
@@ -539,7 +547,8 @@ async function cmdKpis() {
         `factory: KPI snapshot failed (${err?.message ?? err}) — showing the report without persisting a new snapshot`,
       ),
     );
-    history = existsSync(paths.kpiHistory) ? parseKpiHistory(readFileSync(paths.kpiHistory, 'utf-8')) : [];
+    const existing = readTextFileOrEmpty(paths.kpiHistory);
+    history = existing ? parseKpiHistory(existing) : [];
   }
 
   console.log(renderKpiReport(kpis));

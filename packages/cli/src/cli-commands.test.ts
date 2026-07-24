@@ -1018,6 +1018,18 @@ describe('cli commands (via main dispatch)', () => {
       const record = JSON.parse(lines[0]);
       expect(record.commitSha).toBeNull();
     });
+
+    it('does not fail the run when the KPI history path cannot be read for a reason other than "missing"', async () => {
+      writeFileSync(paths().queue, 'app 1\n');
+      writeFileSync(paths().stop, '');
+      mkdirSync(paths().kpiHistory);
+      const res = await runMain('run');
+      expect(res.exited).toBe(false);
+
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('run-done');
+      expect(events).toContain('kpi snapshot failed');
+    });
   });
 
   describe('worktree gc', () => {
