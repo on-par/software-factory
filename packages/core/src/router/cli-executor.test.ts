@@ -174,6 +174,37 @@ describe('CliModelExecutor', () => {
     expect(rec.calls[0].opts.timeoutMs).toBe(timeoutSeconds * 1000);
   });
 
+  it('reports parsed HarnessUsage to ctx.onUsage when the claude CLI returns a JSON envelope', async () => {
+    const envelope = JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'CLAUDE OUTPUT',
+      total_cost_usd: 0.0123,
+      usage: {
+        input_tokens: 12,
+        cache_creation_input_tokens: 4500,
+        cache_read_input_tokens: 230000,
+        output_tokens: 890,
+      },
+    });
+    const rec = recordingExec({ stdout: envelope });
+    const executor = new CliModelExecutor(rec.fn);
+    const usages: unknown[] = [];
+
+    const output = await executor.runModel('claude-model', 'draft plan', {
+      worktree,
+      timeoutSeconds,
+      task: 'plan',
+      registry,
+      routesConfig,
+      onUsage: (u) => usages.push(u),
+    });
+
+    expect(output).toBe('CLAUDE OUTPUT');
+    expect(usages).toEqual([{ inputTokens: 12 + 4500 + 230000, outputTokens: 890, costUsd: 0.0123 }]);
+  });
+
   it('runs Claude without a model flag when none is configured', async () => {
     const rec = recordingExec({ stdout: 'CLAUDE OUTPUT' });
     const executor = new CliModelExecutor(rec.fn);

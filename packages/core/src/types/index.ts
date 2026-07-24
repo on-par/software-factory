@@ -221,6 +221,9 @@ export interface CostEntry {
   failoverReason?: FailoverReason;
   /** Set when this row is the cost of a retry attempt (#419). */
   retryCause?: RetryCause;
+  /** False when inputTokens/outputTokens came from the provider's own usage
+   *  report; true when they are the character-count heuristic (#424). */
+  estimated?: boolean;
 }
 
 // ---------- Dispute ----------

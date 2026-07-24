@@ -1002,6 +1002,55 @@ describe('ModelRouter cost sink', () => {
     expect(rows[0].inputTokens).toBeGreaterThan(0);
     expect(rows[0].outputTokens).toBeGreaterThan(0);
     expect(rows[0].cost).toBeGreaterThan(0);
+    expect(rows[0].estimated).toBe(true);
+  });
+
+  it('records real usage and marks estimated false when the harness reports it', async () => {
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [
+          {
+            output: 'SCRIPTED PLAN',
+            effect: (ctx) => ctx.onUsage?.({ inputTokens: 1200, outputTokens: 340, costUsd: 0.05 }),
+          },
+        ],
+      },
+    });
+    const router = new ModelRouter(costModels, routes, false, stub);
+    const rows: Parameters<Parameters<ModelRouter['setCostSink']>[0]>[0][] = [];
+    router.setCostSink((entry) => rows.push(entry));
+
+    await router.run('plan', 'do it');
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].inputTokens).toBe(1200);
+    expect(rows[0].outputTokens).toBe(340);
+    expect(rows[0].cost).toBe(0.05);
+    expect(rows[0].estimated).toBe(false);
+  });
+
+  it('falls back to registry cost estimation when real usage lacks costUsd', async () => {
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [
+          {
+            output: 'SCRIPTED PLAN',
+            effect: (ctx) => ctx.onUsage?.({ inputTokens: 1000, outputTokens: 500 }),
+          },
+        ],
+      },
+    });
+    const router = new ModelRouter(costModels, routes, false, stub);
+    const rows: Parameters<Parameters<ModelRouter['setCostSink']>[0]>[0][] = [];
+    router.setCostSink((entry) => rows.push(entry));
+
+    await router.run('plan', 'do it');
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].inputTokens).toBe(1000);
+    expect(rows[0].outputTokens).toBe(500);
+    expect(rows[0].cost).toBeCloseTo(0.0105, 10);
+    expect(rows[0].estimated).toBe(false);
   });
 
   it('does not record a cost row when all models fail', async () => {
@@ -1033,6 +1082,53 @@ describe('ModelRouter cost sink', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].model).toBe('model-b');
     expect(rows[0].failoverReason).toBe('usage_cap');
+  });
+
+  it('carries real usage through a failover onto the successful attempt row', async () => {
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [
+          { fail: 'usage_cap' },
+          {
+            output: 'FROM B',
+            effect: (ctx) => ctx.onUsage?.({ inputTokens: 10, outputTokens: 20 }),
+          },
+        ],
+      },
+    });
+    const router = new ModelRouter(costTwoModels, routes, false, stub);
+    const rows: Parameters<Parameters<ModelRouter['setCostSink']>[0]>[0][] = [];
+    router.setCostSink((entry) => rows.push(entry));
+
+    const result = await router.run('plan', 'do it');
+
+    expect(result.model).toBe('model-b');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].failoverReason).toBe('usage_cap');
+    expect(rows[0].inputTokens).toBe(10);
+    expect(rows[0].estimated).toBe(false);
+  });
+
+  it('does not leak usage reported by a failed attempt onto the next attempt row', async () => {
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [
+          {
+            fail: 'usage_cap',
+            effect: (ctx) => ctx.onUsage?.({ inputTokens: 999, outputTokens: 999 }),
+          },
+          { output: 'FROM B' },
+        ],
+      },
+    });
+    const router = new ModelRouter(costTwoModels, routes, false, stub);
+    const rows: Parameters<Parameters<ModelRouter['setCostSink']>[0]>[0][] = [];
+    router.setCostSink((entry) => rows.push(entry));
+
+    await router.run('plan', 'do it');
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].estimated).toBe(true);
   });
 
   it('records retryCause on the row when the caller passes options.retryCause', async () => {
