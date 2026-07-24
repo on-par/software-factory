@@ -266,8 +266,9 @@ export async function checkPhase(opts: {
     log('check', summary.skips > 0 ? `All checkers passed (${summary.skips} skipped)` : 'All checkers passed');
   }
 
-  if (headedSignals.length > 0) {
-    summary = { ...summary, warnings: headedSignals };
+  const finalHeadedSignals = reworkRounds > 0 ? await detectHeadedModeSignals(worktree) : headedSignals;
+  if (finalHeadedSignals.length > 0) {
+    summary = { ...summary, warnings: finalHeadedSignals };
   }
 
   return { passed: summary.failures === 0, summary, reworkRounds, stuck };

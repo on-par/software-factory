@@ -626,6 +626,42 @@ describe('checkPhase headed-mode warnings', () => {
     ).toBeUndefined();
     expect(check.summary.warnings).toBeUndefined();
   });
+
+  it('drops the warning from the final summary once rework fixes the headed config', { timeout: 120_000 }, async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'check-phase-headed-rework-'));
+    tempDirs.add(worktree);
+    const marker = join(worktree, 'fixed.marker');
+
+    await writeFixture(worktree, 'playwright.config.ts', 'export default { use: { headless: false } };\n');
+    await writeFixture(
+      worktree,
+      'package.json',
+      JSON.stringify({ scripts: { test: `node -e "process.exit(require('fs').existsSync('${marker}') ? 0 : 1)"` } }),
+    );
+    const specPath = join(worktree, 'issue-113.md');
+    await writeFixture(worktree, 'issue-113.md', '# Spec: headed config fixed by rework\n');
+
+    const fakeRouter = {
+      run: async () => {
+        await writeFile(join(worktree, 'playwright.config.ts'), 'export default { use: { headless: true } };\n');
+        await writeFile(marker, '');
+        return { model: 'fake-model', output: 'fixed', exitCode: 0, attempts: [] };
+      },
+    } as any;
+
+    const check = await checkPhase({
+      issue: 113,
+      worktree,
+      specPath,
+      router: fakeRouter,
+      constitution: null,
+      log: () => {},
+    });
+
+    expect(check.passed).toBe(true);
+    expect(check.reworkRounds).toBe(1);
+    expect(check.summary.warnings).toBeUndefined();
+  });
 });
 
 describe('checkPhase success paths', () => {
