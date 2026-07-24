@@ -85,6 +85,12 @@
       "enabled": true,
       "range": [3100, 3999],
       "comment": "Per-lane app-port leases (.factory/ports.json). Each lane gets a unique port injected as PORT/FACTORY_APP_PORT/FACTORY_BASE_URL into BUILD/CHECK agent runs. Disable per-run with FACTORY_ENV_PORTS=0."
+    },
+    "proxy": {
+      "enabled": false,
+      "port": 80,
+      "domain": "factory.localhost",
+      "comment": "Opt-in loopback reverse proxy giving each lane a stable URL http://<lane>.<domain>[:port]. Routes resolve per-request from .factory/ports.json so they always track the lease lifecycle. Binds 127.0.0.1 only. *.localhost resolves to loopback in Chrome/Firefox and per RFC 6761; Safari/curl may need dnsmasq with a .test domain — documented, not solved, in v1. Started in-process by `factory run`/`supervise`, or manually via `factory proxy`. If the port cannot be bound (e.g. :80 without privileges on Linux) lanes degrade to port-based URLs with one informational log line. Override per-run with FACTORY_PROXY=1/0."
     }
   },
   "auto_failover": {

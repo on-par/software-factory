@@ -860,6 +860,45 @@ describe('buildPhase appPort', () => {
     expect(captured.prompt).toContain('--headed');
   });
 
+  it('reaches the executor env as FACTORY_BASE_URL while FACTORY_APP_PORT stays the raw port, and the prompt mentions the stable URL', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-99.md');
+    const captured: { options?: any; prompt?: string } = {};
+    const fakeRouter = {
+      run: async (_task: string, prompt: string, options: any) => {
+        captured.options = options;
+        captured.prompt = prompt;
+        return { model: 'fake-model', output: 'done', exitCode: 0, attempts: [] };
+      },
+    } as any;
+
+    const result = await buildPhase({
+      issue: 99,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/99-appbaseurl',
+      route: 'claude',
+      router: fakeRouter,
+      constitution: null,
+      log: () => {},
+      appPort: 3142,
+      appBaseUrl: 'http://ship-it-99.factory.localhost',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(captured.options.env).toEqual({
+      FACTORY_HEADLESS: '1',
+      PLAYWRIGHT_HEADLESS: '1',
+      PORT: '3142',
+      FACTORY_APP_PORT: '3142',
+      FACTORY_BASE_URL: 'http://ship-it-99.factory.localhost',
+    });
+    expect(captured.prompt).toContain('http://ship-it-99.factory.localhost');
+    expect(captured.prompt).toContain('via the factory proxy');
+  });
+
   it('forwards onPgid to router.run options', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);

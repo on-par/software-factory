@@ -38,6 +38,8 @@ export async function buildPhase(opts: {
   sandbox?: SandboxPolicy;
   steering?: ConsumedSteering;
   appPort?: number;
+  /** Stable lane URL from the factory proxy (e.g. http://<lane>.factory.localhost), when running. */
+  appBaseUrl?: string;
   codexDisabled?: boolean;
   autoFailover?: {
     enabled: boolean;
@@ -60,6 +62,7 @@ export async function buildPhase(opts: {
     sandbox,
     steering,
     appPort,
+    appBaseUrl,
     onPgid,
   } = opts;
   let route = opts.route;
@@ -127,10 +130,10 @@ Keep sub-agent/parallel-task usage modest: only fan out when a piece of work is
 genuinely independent and parallelizable. Prefer doing the work directly over
 spawning sub-agents for a single small issue — this keeps token usage efficient.
 
-${headlessNote()}${appPort ? `\n\n${appPortNote(appPort)}` : ''}`;
+${headlessNote()}${appPort ? `\n\n${appPortNote(appPort, appBaseUrl)}` : ''}`;
   } else {
     taskType = 'build_claude';
-    prompt = buildClaudePrompt({ issue, branch, specPath, constitutionCtx, skipCI, appPort });
+    prompt = buildClaudePrompt({ issue, branch, specPath, constitutionCtx, skipCI, appPort, appBaseUrl });
   }
 
   prompt = applySteering(prompt, steering);
@@ -150,7 +153,7 @@ ${headlessNote()}${appPort ? `\n\n${appPortNote(appPort)}` : ''}`;
     sandbox,
     onSandboxEvent: (type: string, detail: string) => log(type, detail),
     onLog: (msg: string) => log('router', msg),
-    env: laneEnv(appPort),
+    env: laneEnv(appPort, process.env, appBaseUrl),
     onPgid,
   };
 
@@ -192,7 +195,7 @@ ${headlessNote()}${appPort ? `\n\n${appPortNote(appPort)}` : ''}`;
     route = 'claude';
     taskType = 'build_claude';
     const claudePrompt = applySteering(
-      buildClaudePrompt({ issue, branch, specPath, constitutionCtx, skipCI, appPort }),
+      buildClaudePrompt({ issue, branch, specPath, constitutionCtx, skipCI, appPort, appBaseUrl }),
       steering,
     );
     result = await router.run('build_claude', claudePrompt, {
@@ -225,8 +228,9 @@ function buildClaudePrompt(opts: {
   constitutionCtx: string;
   skipCI?: boolean;
   appPort?: number;
+  appBaseUrl?: string;
 }): string {
-  const { issue, branch, specPath, constitutionCtx, skipCI, appPort } = opts;
+  const { issue, branch, specPath, constitutionCtx, skipCI, appPort, appBaseUrl } = opts;
   return `/ship-it ${issue} — Run fully autonomously in headless mode, BUILD phase.
 You are ALREADY inside the isolated git worktree for issue ${issue} (branch ${branch},
 cwd is this worktree), so SKIP ship-it's worktree-creation step.
@@ -247,7 +251,7 @@ turn after an intermediate step. Before ending: (1) branch ${branch} is pushed,
 If and ONLY IF you hit something genuinely ambiguous, print a line starting exactly
 with "ESCALATE:" followed by the question, then STOP.
 
-${headlessNote()}${appPort ? `\n\n${appPortNote(appPort)}` : ''}`;
+${headlessNote()}${appPort ? `\n\n${appPortNote(appPort, appBaseUrl)}` : ''}`;
 }
 
 function headlessNote(): string {
@@ -261,9 +265,12 @@ into package.json test scripts. Headed mode is a human's explicit local
 opt-in, not a config default.`;
 }
 
-function appPortNote(appPort: number): string {
+function appPortNote(appPort: number, appBaseUrl?: string): string {
+  const baseUrlSentence = appBaseUrl
+    ? `This lane owns port ${appPort}; its stable base URL is ${appBaseUrl} (via the factory proxy).`
+    : `This lane owns port ${appPort} (base URL http://127.0.0.1:${appPort}).`;
   return `## Assigned app port
-This lane owns port ${appPort} (base URL http://127.0.0.1:${appPort}); PORT and
+${baseUrlSentence} PORT and
 FACTORY_APP_PORT are set in your environment. Any dev server, preview, or e2e
 config must read process.env.PORT — never hardcode 3000 — and must use a strict
 port (Vite: --strictPort; Next.js: -p ${appPort}) so a port mismatch fails loudly

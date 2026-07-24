@@ -9,10 +9,12 @@ import { promisify } from 'node:util';
 
 import { Octokit } from '@octokit/rest';
 import type {
+  EnvironmentProxySettings,
   FailoverReason,
   HealthKpis,
   IngestSettings,
   KpiHistoryRecord,
+  LaneProxy,
   LeaseHealth,
   ModelDiagnosis,
   QueueDiagnostic,
@@ -28,9 +30,11 @@ import {
   applyRepoConfig,
   buildPhase,
   checkPhase,
+  clearProxyState,
   computeHealthKpis,
   ConstitutionLoader,
   createFileApprovalGate,
+  createLaneProxy,
   defaultFindPortListeners,
   describeEffectiveConfig,
   describeSteering,
@@ -47,7 +51,10 @@ import {
   hasUnresolvedPark,
   inspectPortLeases,
   isCommandAvailable,
+  isProxyRunning,
   kpisToHistoryRecord,
+  laneBaseUrl,
+  laneHostLabel,
   listQueuedSteering,
   loadFactoryConfig,
   loadModelsConfig,
@@ -61,6 +68,7 @@ import {
   ProcessGroupTracker,
   ProviderBreaker,
   readEvents,
+  readPortLeases,
   readUsage,
   reapOrphanProcesses,
   reapStalePortLeases,
@@ -73,6 +81,7 @@ import {
   resolveCodexDisabled,
   resolveEffectiveModelPins,
   resolveEnvironmentPorts,
+  resolveEnvironmentProxy,
   resolveIngestConfig,
   resolvePlanApproval,
   resolveProcessGroupGraceMs,
@@ -86,6 +95,7 @@ import {
   validateQueue,
   watchUsage,
   writeLocalRunReport,
+  writeProxyState,
 } from '@on-par/factory-core';
 import type {
   OvernightItemOutcome,
@@ -785,6 +795,28 @@ export function parkEvents(err: unknown): { type: string; msg: string }[] {
   return events;
 }
 
+/** Resolves the stable lane URL a build/check agent should use, by probing whether
+ *  a factory proxy (started by `factory run`/`supervise` or `factory proxy`) is
+ *  currently alive for the configured domain. Never throws — an absent/dead proxy
+ *  just degrades to the existing port-based URL, single informational note either way. */
+export function resolveLaneBaseUrl(
+  paths: ReturnType<typeof getFactoryPaths>,
+  settings: EnvironmentProxySettings,
+  worktree: string,
+  appPort: number | undefined,
+  deps: { isRunning?: typeof isProxyRunning } = {},
+): { baseUrl?: string; note: string } {
+  const { isRunning = isProxyRunning } = deps;
+  if (!settings.enabled || appPort === undefined) return { note: '' };
+
+  const state = isRunning(paths.proxyState);
+  if (state && state.domain === settings.domain) {
+    const baseUrl = laneBaseUrl(worktree, { domain: state.domain, port: state.port });
+    return { baseUrl, note: `stable lane URL ${baseUrl} -> 127.0.0.1:${appPort}` };
+  }
+  return { note: `proxy enabled but not running — using http://127.0.0.1:${appPort}` };
+}
+
 export async function shipIssue(
   issueNum: number,
   opts: { product?: string; autoRework?: boolean; interactive?: boolean; sandbox?: boolean; approvePlan?: boolean },
@@ -966,6 +998,12 @@ export async function shipIssue(
     log('environment_lease', 'port leasing disabled (environment.ports.enabled=false or FACTORY_ENV_PORTS=0)');
   }
 
+  const proxySettings = resolveEnvironmentProxy(factoryConfig);
+  const { baseUrl: appBaseUrl, note: proxyNote } = resolveLaneBaseUrl(paths, proxySettings, worktree, appPort);
+  if (proxySettings.enabled && appPort !== undefined) {
+    log(appBaseUrl ? 'environment_proxy' : 'environment_proxy_unavailable', proxyNote);
+  }
+
   try {
     // PLAN
     const plan = await planPhase({
@@ -1031,6 +1069,7 @@ export async function shipIssue(
       sandbox: activeSandboxPolicy,
       steering: buildSteering,
       appPort,
+      appBaseUrl,
       codexDisabled: codexOff || breakerBlocked,
       autoFailover: {
         enabled: failoverSettings.enabled,
@@ -1067,6 +1106,7 @@ export async function shipIssue(
       sandbox: activeSandboxPolicy,
       drainSteering: opts.interactive ? () => drainSteering(paths.steering, issueNum, worktree) : undefined,
       appPort,
+      appBaseUrl,
       onPgid,
     });
     for (const s of check.summary.results.filter((r) => r.result === 'SKIP')) {
@@ -1550,6 +1590,106 @@ export function triageNoProposalError(plannerError: unknown): CliExitError {
   return new CliExitError(`triage produced no proposal${detail}`, 1);
 }
 
+/** Starts the in-process lane proxy for `factory run`/`supervise` when
+ *  `environment.proxy.enabled`. Never throws: a bind failure (EACCES on :80,
+ *  EADDRINUSE, …) is logged as a single `environment_proxy_unavailable` event
+ *  and lanes degrade to port-based URLs, exactly as if the proxy were disabled. */
+export async function startLaneProxy(
+  paths: ReturnType<typeof getFactoryPaths>,
+  settings: EnvironmentProxySettings,
+  deps: { createProxy?: typeof createLaneProxy; emitEvent?: typeof logEvent } = {},
+): Promise<{ proxy?: LaneProxy }> {
+  if (!settings.enabled) return {};
+  const { createProxy = createLaneProxy, emitEvent = logEvent } = deps;
+
+  const proxy = createProxy({ registryFile: paths.ports, domain: settings.domain, port: settings.port });
+  try {
+    const boundPort = await proxy.start();
+    writeProxyState(paths.proxyState, {
+      version: 1,
+      pid: process.pid,
+      port: boundPort,
+      domain: settings.domain,
+      startedAt: new Date().toISOString(),
+    });
+    emitEvent(
+      paths.events,
+      'environment_proxy',
+      'all',
+      `lane proxy listening on 127.0.0.1:${boundPort} (*.${settings.domain})`,
+    );
+    return { proxy };
+  } catch (err: any) {
+    emitEvent(
+      paths.events,
+      'environment_proxy_unavailable',
+      'all',
+      `proxy unavailable (${err.message}) — lanes use port-based URLs`,
+    );
+    return {};
+  }
+}
+
+/** Runs the lane proxy in the foreground for manual use alongside single-lane
+ *  `factory ship` (which only probes proxy.json and degrades — it never spawns
+ *  a proxy itself). Running this command IS the opt-in: it starts even when
+ *  environment.proxy.enabled is false in factory.json. */
+async function cmdProxy() {
+  const repoRoot = await getRepoRoot();
+  const paths = getFactoryPaths(repoRoot);
+  const factoryConfig = loadFactoryConfig();
+  const settings = resolveEnvironmentProxy(factoryConfig);
+
+  if (!settings.enabled) {
+    console.log(
+      chalk.yellow(
+        'factory proxy: environment.proxy.enabled is false in factory.json — starting anyway (running this command is the explicit opt-in)',
+      ),
+    );
+  }
+
+  const proxy = createLaneProxy({ registryFile: paths.ports, domain: settings.domain, port: settings.port });
+  const boundPort = await proxy.start();
+  writeProxyState(paths.proxyState, {
+    version: 1,
+    pid: process.pid,
+    port: boundPort,
+    domain: settings.domain,
+    startedAt: new Date().toISOString(),
+  });
+
+  console.log(chalk.green(`factory proxy: listening on 127.0.0.1:${boundPort} (*.${settings.domain})`));
+  const leases = readPortLeases(paths.ports);
+  if (leases.length === 0) {
+    console.log('  no active lane leases yet');
+  } else {
+    for (const lease of leases) {
+      console.log(`  ${laneHostLabel(lease.worktreeId)}.${settings.domain} -> 127.0.0.1:${lease.port}`);
+    }
+  }
+  console.log(
+    chalk.dim(
+      '  *.localhost resolves to loopback in Chrome/Firefox out of the box (RFC 6761); Safari/curl may need ' +
+        'a dnsmasq-backed .test domain instead — documented here, not solved.',
+    ),
+  );
+
+  await new Promise<void>((resolveShutdown) => {
+    const shutdown = () => {
+      void proxy
+        .stop()
+        .catch(() => {})
+        .then(() => {
+          clearProxyState(paths.proxyState);
+          resolveShutdown();
+        });
+    };
+    process.once('SIGINT', shutdown);
+    process.once('SIGTERM', shutdown);
+  });
+  process.exit(0);
+}
+
 async function cmdRun() {
   const repoRoot = await getRepoRoot();
   const ghRepo = await getGitHubRepo();
@@ -1608,17 +1748,26 @@ async function cmdRun() {
       })
     : Promise.resolve();
 
-  // Run lanes in parallel
-  const pids: Promise<void>[] = [];
-  for (const [lane, issues] of lanes) {
-    logEvent(paths.events, 'lane-start', '-', `lane '${lane}' started (${issues.length} issues)`, { lane });
-    pids.push(runLane(lane, issues, repoRoot, ghRepo, paths));
-  }
+  const { proxy } = await startLaneProxy(paths, resolveEnvironmentProxy(factoryConfig));
 
-  await Promise.allSettled(pids);
-  controller.abort();
-  await watchdog;
-  logEvent(paths.events, 'run-done', 'all', 'all lanes finished');
+  try {
+    // Run lanes in parallel
+    const pids: Promise<void>[] = [];
+    for (const [lane, issues] of lanes) {
+      logEvent(paths.events, 'lane-start', '-', `lane '${lane}' started (${issues.length} issues)`, { lane });
+      pids.push(runLane(lane, issues, repoRoot, ghRepo, paths));
+    }
+
+    await Promise.allSettled(pids);
+    controller.abort();
+    await watchdog;
+    logEvent(paths.events, 'run-done', 'all', 'all lanes finished');
+  } finally {
+    if (proxy) {
+      await proxy.stop();
+      clearProxyState(paths.proxyState);
+    }
+  }
 
   if (entries.length > 0) {
     try {
@@ -2579,6 +2728,13 @@ export async function main() {
     });
 
   program.command('run').description('Process the whole queue (lanes in parallel)').action(cmdRun);
+
+  program
+    .command('proxy')
+    .description(
+      'Run the opt-in lane reverse proxy in the foreground (manual use; `factory run`/`supervise` host it in-process)',
+    )
+    .action(cmdProxy);
 
   const worktreeCmd = program.command('worktree').description('Worktree maintenance');
   worktreeCmd

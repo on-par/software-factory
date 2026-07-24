@@ -16,6 +16,7 @@ import {
   laneEnv,
   leaseEnv,
   PortLeaseError,
+  readPortLeases,
   reapStalePortLeases,
   recordLeasePgid,
   releasePortLease,
@@ -295,6 +296,37 @@ describe('leaseEnv', () => {
       FACTORY_BASE_URL: 'http://127.0.0.1:3142',
     });
   });
+
+  it('overrides FACTORY_BASE_URL with a stable lane URL while PORT/FACTORY_APP_PORT stay the raw port', () => {
+    expect(leaseEnv(3142, 'http://ship-it-296.factory.localhost')).toEqual({
+      PORT: '3142',
+      FACTORY_APP_PORT: '3142',
+      FACTORY_BASE_URL: 'http://ship-it-296.factory.localhost',
+    });
+  });
+});
+
+describe('readPortLeases', () => {
+  it('returns the leases persisted in the registry file', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'lock');
+      const lease = await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: dir,
+        branch: 'ship-it/x',
+        range: [4100, 4110],
+        isPortFree: alwaysFree,
+        lockOpts: LOCK_OPTS,
+      });
+      expect(readPortLeases(registryFile)).toEqual([lease]);
+    });
+  });
+
+  it('returns an empty array when the registry file is missing', () => {
+    expect(readPortLeases('/nonexistent/ports.json')).toEqual([]);
+  });
 });
 
 describe('headlessEnv', () => {
@@ -324,6 +356,16 @@ describe('laneEnv', () => {
 
   it('returns exactly leaseEnv(port) when the parent env opts out of headless', () => {
     expect(laneEnv(3142, { FACTORY_HEADLESS: '0' })).toEqual(leaseEnv(3142));
+  });
+
+  it('forwards baseUrl through to leaseEnv', () => {
+    expect(laneEnv(3142, {}, 'http://ship-it-296.factory.localhost')).toEqual({
+      FACTORY_HEADLESS: '1',
+      PLAYWRIGHT_HEADLESS: '1',
+      PORT: '3142',
+      FACTORY_APP_PORT: '3142',
+      FACTORY_BASE_URL: 'http://ship-it-296.factory.localhost',
+    });
   });
 });
 

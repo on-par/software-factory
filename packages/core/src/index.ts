@@ -8,6 +8,7 @@
 export type {
   AutoFailoverSettings,
   EnvironmentPortsSettings,
+  EnvironmentProxySettings,
   FactoryConfig,
   IngestSettings,
   ModelsConfig,
@@ -21,6 +22,7 @@ export {
   loadRoutesConfig,
   resolveAutoFailover,
   resolveEnvironmentPorts,
+  resolveEnvironmentProxy,
   resolveIngestConfig,
   resolvePlanApproval,
   resolveProcessGroupGraceMs,
@@ -56,6 +58,7 @@ export {
   laneEnv,
   leaseEnv,
   PortLeaseError,
+  readPortLeases,
   reapStalePortLeases,
   recordLeasePgid,
   releasePortLease,
@@ -64,6 +67,19 @@ export type { FindPortListenersFn, OrphanEvent, PortListener } from './environme
 export { defaultFindPortListeners, reapOrphanProcesses } from './environment/orphans.js';
 export type { KillOutcome, KillProcessGroupOptions } from './environment/process-groups.js';
 export { defaultIsProcessGroupAlive, killProcessGroup, ProcessGroupTracker } from './environment/process-groups.js';
+
+// Proxy
+export type { LaneProxy, LaneProxyOptions, LaneProxySettings, ProxyState } from './proxy/index.js';
+export {
+  clearProxyState,
+  createLaneProxy,
+  isProxyRunning,
+  laneBaseUrl,
+  laneHostLabel,
+  laneHostname,
+  readProxyState,
+  writeProxyState,
+} from './proxy/index.js';
 
 // Queue
 export type {
