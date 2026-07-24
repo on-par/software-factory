@@ -157,6 +157,41 @@ if ! grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}' "$HEARTBE
   exit 1
 fi
 
+# --- preflight: crash early on missing dependencies ---
+
+# all deps present => preflight passes silently
+if ! output="$( (preflight) 2>&1 )"; then
+  echo "FAIL: preflight failed with all dependencies present: $output" >&2
+  exit 1
+fi
+
+# missing factory binary => FATAL + non-zero
+if output="$( (FACTORY_BIN="$BINDIR/does-not-exist"; preflight) 2>&1 )"; then
+  echo "FAIL: preflight passed despite missing factory binary" >&2
+  exit 1
+fi
+grep -qF "FATAL: factory CLI missing or not executable at $BINDIR/does-not-exist" <<<"$output" || {
+  echo "FAIL: missing-factory FATAL message not found in: $output" >&2; exit 1; }
+
+# missing gh on PATH => FATAL + non-zero (PATH reduced to a dir with python3 only)
+GH_LESS_BIN="$(mktemp -d)"
+ln -s "$(command -v python3)" "$GH_LESS_BIN/python3"
+if output="$( (PATH="$GH_LESS_BIN"; preflight) 2>&1 )"; then
+  echo "FAIL: preflight passed despite gh missing from PATH" >&2
+  exit 1
+fi
+grep -qF "FATAL: gh not found on PATH" <<<"$output" || {
+  echo "FAIL: missing-gh FATAL message not found in: $output" >&2; exit 1; }
+rm -rf "$GH_LESS_BIN"
+
+# missing repo dir => FATAL + non-zero
+if output="$( (REPOS=(missingrepo); preflight) 2>&1 )"; then
+  echo "FAIL: preflight passed despite missing repo dir" >&2
+  exit 1
+fi
+grep -qF "FATAL: repo dir missing: $REPO_ROOT/missingrepo" <<<"$output" || {
+  echo "FAIL: missing-repo-dir FATAL message not found in: $output" >&2; exit 1; }
+
 # --- plist: valid property list with KeepAlive set ---
 
 PLIST="$ROOT/scripts/launchd/com.on-par.auto-merge-sweep.plist"
@@ -169,4 +204,4 @@ if ! grep -q "<key>KeepAlive</key>" "$PLIST"; then
   exit 1
 fi
 
-echo "PASS: auto-merge-sweep logs merge/land failures with real exit codes, skips landing when the repo dir is missing, honours FACTORY_MERGE_ADMIN for the standalone merge path, writes a heartbeat on each pass, and ships a valid KeepAlive launchd plist"
+echo "PASS: auto-merge-sweep logs merge/land failures with real exit codes, skips landing when the repo dir is missing, honours FACTORY_MERGE_ADMIN for the standalone merge path, writes a heartbeat on each pass, ships a valid KeepAlive launchd plist, and preflight fatally rejects missing gh/factory/repo-dir dependencies"

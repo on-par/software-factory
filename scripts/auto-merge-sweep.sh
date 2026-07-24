@@ -18,6 +18,28 @@ HEARTBEAT_FILE="${HEARTBEAT_FILE:-$HOME/.factory/auto-merge-sweep.heartbeat}"
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
+preflight() {
+  local ok=0
+  for bin in gh python3; do
+    if ! command -v "$bin" >/dev/null 2>&1; then
+      echo "FATAL: $bin not found on PATH" >&2
+      ok=1
+    fi
+  done
+  if [ ! -x "$FACTORY_BIN" ]; then
+    echo "FATAL: factory CLI missing or not executable at $FACTORY_BIN" >&2
+    ok=1
+  fi
+  local r
+  for r in "${REPOS[@]}"; do
+    if [ ! -d "$REPO_ROOT/$r" ]; then
+      echo "FATAL: repo dir missing: $REPO_ROOT/$r" >&2
+      ok=1
+    fi
+  done
+  return "$ok"
+}
+
 sweep_repo() {
   local repo="$1"
   local repo_dir="$REPO_ROOT/$repo"
@@ -99,5 +121,6 @@ run_sweep_loop() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  preflight || exit 1
   run_sweep_loop
 fi
