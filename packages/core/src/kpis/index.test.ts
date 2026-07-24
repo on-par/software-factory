@@ -220,6 +220,17 @@ describe('human intervention KPIs (#420)', () => {
     expect(lines).toContain('Human-touched runs: 50% (1/2, 0.50 human events/run)');
     expect(lines).toContain('Fully autonomous: 50% (1/2 merged with zero human events)');
   });
+
+  it('formats a null humanEventsPerRun as n/a instead of crashing (defensive: HealthKpis is public API)', () => {
+    const kpis = computeHealthKpis(
+      [event({ issue: '1', type: 'issue-title' }), event({ issue: '1', type: 'merged' })],
+      [],
+    );
+
+    const lines = formatKpiLines({ ...kpis, humanEventsPerRun: null });
+
+    expect(lines).toContain('Human-touched runs: 0% (0/1, n/a human events/run)');
+  });
 });
 
 describe('cycle time KPIs', () => {

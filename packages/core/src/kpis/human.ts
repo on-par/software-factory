@@ -35,7 +35,11 @@ export interface PrSource {
   closedAt: string | null;
 }
 
-const PARK_ISH_TYPES = new Set(['parked', 'stuck', 'fail', 'escalate']);
+// 'parked'/'stuck' are lane-lifecycle wrapper events (runLane, multi-issue queues);
+// 'escalate'/'timeout'/'fail'/'conflict' are the ParkReason values a single-issue
+// `factory ship <issue>` run logs directly (see ParkReason/parkReasonFor in cli/index.ts).
+// Both sets are checked so a retry is detected regardless of which path produced the park.
+const PARK_ISH_TYPES = new Set(['parked', 'stuck', 'fail', 'escalate', 'timeout', 'conflict']);
 
 export function reconstructHumanEvents(sources: PrSource[], logEvents: FactoryEvent[]): FactoryEvent[] {
   const eventsByIssue = new Map<string, FactoryEvent[]>();
@@ -184,47 +188,46 @@ export async function fetchHumanEventSources(
     if (data.length < 100) break;
   }
 
-  const sources: PrSource[] = [];
+  const matched = prs
+    .map((pr) => ({ pr, match: /^ship-it\/(\d+)-/.exec(pr.head?.ref ?? '') }))
+    .filter(({ match }) => match !== null && issues.has(match[1]));
 
-  for (const pr of prs) {
-    const match = /^ship-it\/(\d+)-/.exec(pr.head?.ref ?? '');
-    if (!match) continue;
-    const issue = match[1];
-    if (!issues.has(issue)) continue;
+  return Promise.all(
+    matched.map(async ({ pr, match }) => {
+      const issue = match![1];
 
-    const [{ data: commitsData }, { data: reviewsData }] = await Promise.all([
-      client.rest.pulls.listCommits({ owner, repo, pull_number: pr.number, per_page: 100 }),
-      client.rest.pulls.listReviews({ owner, repo, pull_number: pr.number, per_page: 100 }),
-    ]);
+      const [{ data: commitsData }, { data: reviewsData }] = await Promise.all([
+        client.rest.pulls.listCommits({ owner, repo, pull_number: pr.number, per_page: 100 }),
+        client.rest.pulls.listReviews({ owner, repo, pull_number: pr.number, per_page: 100 }),
+      ]);
 
-    const commits: CommitSource[] = commitsData.map((c: any) => ({
-      sha: c.sha,
-      author: c.author?.login ?? c.commit?.author?.name ?? 'unknown',
-      ts: c.commit.author.date,
-    }));
+      const commits: CommitSource[] = commitsData.map((c: any) => ({
+        sha: c.sha,
+        author: c.author?.login ?? c.commit?.author?.name ?? 'unknown',
+        ts: c.commit.author.date,
+      }));
 
-    const approvals = reviewsData
-      .filter((r: any) => r.state === 'APPROVED')
-      .map((r: any) => ({ actor: r.user?.login ?? 'unknown', ts: r.submitted_at }));
+      const approvals = reviewsData
+        .filter((r: any) => r.state === 'APPROVED')
+        .map((r: any) => ({ actor: r.user?.login ?? 'unknown', ts: r.submitted_at }));
 
-    const mergedAt: string | null = pr.merged_at ?? null;
-    let mergedBy: string | null | undefined;
-    if (mergedAt !== null) {
-      const { data: prDetail } = await client.rest.pulls.get({ owner, repo, pull_number: pr.number });
-      mergedBy = prDetail.merged_by?.login;
-    }
-    const closedAt: string | null = pr.state === 'closed' && !pr.merged_at ? pr.closed_at : null;
+      const mergedAt: string | null = pr.merged_at ?? null;
+      let mergedBy: string | null | undefined;
+      if (mergedAt !== null) {
+        const { data: prDetail } = await client.rest.pulls.get({ owner, repo, pull_number: pr.number });
+        mergedBy = prDetail.merged_by?.login;
+      }
+      const closedAt: string | null = pr.state === 'closed' && !pr.merged_at ? pr.closed_at : null;
 
-    sources.push({
-      issue,
-      prNumber: pr.number,
-      commits,
-      approvals,
-      mergedAt,
-      mergedBy,
-      closedAt,
-    });
-  }
-
-  return sources;
+      return {
+        issue,
+        prNumber: pr.number,
+        commits,
+        approvals,
+        mergedAt,
+        mergedBy,
+        closedAt,
+      };
+    }),
+  );
 }

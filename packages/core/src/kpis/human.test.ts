@@ -185,6 +185,13 @@ describe('hasUnresolvedPark', () => {
     const events = [event({ issue: '1', type: 'fail', ts: '2026-07-20T00:00:00.000Z' })];
     expect(hasUnresolvedPark(events, '1')).toBe(true);
   });
+
+  it('is true for the timeout/conflict ParkReason types a single-issue ship run logs directly', () => {
+    expect(hasUnresolvedPark([event({ issue: '1', type: 'timeout', ts: '2026-07-20T00:00:00.000Z' })], '1')).toBe(true);
+    expect(hasUnresolvedPark([event({ issue: '1', type: 'conflict', ts: '2026-07-20T00:00:00.000Z' })], '1')).toBe(
+      true,
+    );
+  });
 });
 
 describe('fetchHumanEventSources', () => {
