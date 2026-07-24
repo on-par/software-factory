@@ -26,12 +26,23 @@ export {
 } from './config/index.js';
 
 // Environment
-export type { AcquirePortLeaseOptions, IsPortFreeFn, PortLease } from './environment/index.js';
+export type {
+  AcquirePortLeaseOptions,
+  IsPortFreeFn,
+  LeaseHealth,
+  LeaseLivenessProbes,
+  PortLease,
+  ReapedLease,
+  ReapReason,
+} from './environment/index.js';
 export {
   acquirePortLease,
+  defaultIsPidAlive,
   defaultIsPortFree,
+  inspectPortLeases,
   leaseEnv,
   PortLeaseError,
+  reapStalePortLeases,
   releasePortLease,
 } from './environment/index.js';
 

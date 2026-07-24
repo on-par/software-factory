@@ -1268,6 +1268,74 @@ describe('cli commands (via main dispatch)', () => {
       expect(res).toEqual({ exited: true, code: 1 });
       expect(logged()).toContain('gh is not authenticated');
     });
+
+    it('reports a live and a stale port lease without failing doctor', async () => {
+      h.claudeAvailable = true;
+      const portsFile = join(h.repoRoot, '.factory', 'ports.json');
+      writeFileSync(
+        portsFile,
+        JSON.stringify({
+          version: 1,
+          leases: [
+            {
+              worktreeId: h.repoRoot,
+              branch: 'live',
+              port: 4001,
+              pid: process.pid,
+              acquiredAt: '2026-01-01T00:00:00Z',
+            },
+            {
+              worktreeId: '/nonexistent/wt',
+              branch: 'gone',
+              port: 4002,
+              pid: 2 ** 30,
+              acquiredAt: '2026-01-01T00:00:00Z',
+            },
+          ],
+        }),
+      );
+
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('port lease :4001');
+      expect(logged()).toContain('port lease :4002');
+      expect(logged()).toContain('--reconcile');
+    });
+
+    it('--reconcile removes stale leases and reports freed ports', async () => {
+      h.claudeAvailable = true;
+      const portsFile = join(h.repoRoot, '.factory', 'ports.json');
+      writeFileSync(
+        portsFile,
+        JSON.stringify({
+          version: 1,
+          leases: [
+            {
+              worktreeId: h.repoRoot,
+              branch: 'live',
+              port: 4001,
+              pid: process.pid,
+              acquiredAt: '2026-01-01T00:00:00Z',
+            },
+            {
+              worktreeId: '/nonexistent/wt',
+              branch: 'gone',
+              port: 4002,
+              pid: 2 ** 30,
+              acquiredAt: '2026-01-01T00:00:00Z',
+            },
+          ],
+        }),
+      );
+
+      const res = await runMain('doctor', '--reconcile');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('reconcile: freed port 4002');
+
+      const registry = JSON.parse(readFileSync(portsFile, 'utf-8'));
+      expect(registry.leases).toHaveLength(1);
+      expect(registry.leases[0].port).toBe(4001);
+    });
   });
 
   describe('git/github detection failures', () => {

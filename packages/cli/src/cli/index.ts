@@ -11,6 +11,7 @@ import { Octokit } from '@octokit/rest';
 import type {
   FailoverReason,
   IngestSettings,
+  LeaseHealth,
   ModelDiagnosis,
   QueueDiagnostic,
   SandboxPolicy,
@@ -33,6 +34,7 @@ import {
   formatUsageReport,
   getConstitutionsDir,
   getFactoryPaths,
+  inspectPortLeases,
   isCommandAvailable,
   kpisToHistoryRecord,
   listQueuedSteering,
@@ -46,6 +48,7 @@ import {
   planPhase,
   readEvents,
   readUsage,
+  reapStalePortLeases,
   releasePortLease,
   renderKpiReport,
   renderKpiTrend,
@@ -93,7 +96,14 @@ import { runTui } from '@on-par/factory-tui';
 import chalk from 'chalk';
 import { Command } from 'commander';
 
-import { doctorFailed, formatDoctorChecks, runDoctorChecks } from './doctor.js';
+import {
+  doctorFailed,
+  formatDoctorChecks,
+  formatReconcileReport,
+  leaseChecks,
+  type LeaseHealthRow,
+  runDoctorChecks,
+} from './doctor.js';
 import { formatOverview, missingClaudeCliMessage, missingTokenMessage, notInitializedMessage } from './first-run.js';
 import { distFreshnessProbe, runStalenessGuard } from './staleness.js';
 
@@ -728,6 +738,11 @@ export async function shipIssue(
         worktreeId: worktree,
         branch,
         range: portsSettings.range,
+        onReap: (r) =>
+          log(
+            'environment_lease_reaped',
+            `reaped stale lease: port ${r.lease.port}, pid ${r.lease.pid}, worktree ${r.lease.worktreeId} — reason: ${r.reason}`,
+          ),
       });
       appPort = lease.port;
       log('environment_lease', `leased port ${lease.port} for worktree ${worktree}`);
@@ -2081,7 +2096,19 @@ export function getCliVersion(): string {
   return createRequire(import.meta.url)('../../package.json').version;
 }
 
-async function cmdDoctor() {
+function toLeaseRow(health: LeaseHealth): LeaseHealthRow {
+  return {
+    worktreeId: health.lease.worktreeId,
+    branch: health.lease.branch,
+    port: health.lease.port,
+    pid: health.lease.pid,
+    alive: health.alive,
+    reason: health.reason,
+    portSquatted: health.portSquatted,
+  };
+}
+
+async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
   const checks = runDoctorChecks({
     commandAvailable: isCommandAvailable,
     envPresent: (key) => !!process.env[key],
@@ -2095,6 +2122,29 @@ async function cmdDoctor() {
     pathExists: existsSync,
     distFreshness: distFreshnessProbe(import.meta.url),
   });
+
+  let repoRoot: string | null;
+  try {
+    repoRoot = execSync('git rev-parse --show-toplevel', {
+      encoding: 'utf-8',
+      timeout: 10_000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    repoRoot = null;
+  }
+
+  if (repoRoot !== null) {
+    const paths = getFactoryPaths(repoRoot);
+    const health = await inspectPortLeases({ registryFile: paths.ports });
+    checks.push(...leaseChecks(health.map(toLeaseRow)));
+
+    if (opts.reconcile) {
+      const reaped = await reapStalePortLeases({ registryFile: paths.ports, lockDir: paths.portsLock });
+      console.log(formatReconcileReport(reaped));
+    }
+  }
+
   console.log(formatDoctorChecks(checks));
   if (doctorFailed(checks)) process.exit(1);
 }
@@ -2146,7 +2196,8 @@ export async function main() {
   program
     .command('doctor')
     .description('Preflight-check your environment (claude, gh, token, git, npm, sandbox)')
-    .action(cmdDoctor);
+    .option('--reconcile', 'Remove stale port leases and report freed ports')
+    .action((opts: { reconcile?: boolean }) => cmdDoctor(opts));
 
   program
     .command('cost')

@@ -1,14 +1,26 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { acquirePortLease, defaultIsPortFree, leaseEnv, PortLeaseError, releasePortLease } from './index.js';
+import {
+  acquirePortLease,
+  defaultIsPidAlive,
+  defaultIsPortFree,
+  inspectPortLeases,
+  leaseEnv,
+  PortLeaseError,
+  reapStalePortLeases,
+  releasePortLease,
+} from './index.js';
 
 const LOCK_OPTS = { pollMs: 5 };
 const alwaysFree = async () => true;
+const liveProbes = { isPidAlive: () => true, worktreeExists: () => true };
+const DEAD_PID = 4999999;
 
 async function withTmpDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(join(tmpdir(), 'ports-registry-'));
@@ -32,6 +44,7 @@ describe('acquirePortLease', () => {
         branch: 'a',
         range: [3100, 3999],
         isPortFree: alwaysFree,
+        probes: liveProbes,
         lockOpts: LOCK_OPTS,
       });
       const b = await acquirePortLease({
@@ -41,6 +54,7 @@ describe('acquirePortLease', () => {
         branch: 'b',
         range: [3100, 3999],
         isPortFree: alwaysFree,
+        probes: liveProbes,
         lockOpts: LOCK_OPTS,
       });
 
@@ -63,6 +77,7 @@ describe('acquirePortLease', () => {
         branch: 'a',
         range: [3100, 3999] as [number, number],
         isPortFree: alwaysFree,
+        probes: liveProbes,
         lockOpts: LOCK_OPTS,
       };
 
@@ -92,6 +107,7 @@ describe('acquirePortLease', () => {
               branch: 'b',
               range,
               isPortFree: alwaysFree,
+              probes: liveProbes,
               lockOpts: LOCK_OPTS,
             }),
           ),
@@ -151,6 +167,7 @@ describe('acquirePortLease', () => {
         branch: 'a',
         range: [3100, 3100],
         isPortFree: alwaysFree,
+        probes: liveProbes,
         lockOpts: LOCK_OPTS,
       });
 
@@ -162,6 +179,7 @@ describe('acquirePortLease', () => {
           branch: 'b',
           range: [3100, 3100],
           isPortFree: alwaysFree,
+          probes: liveProbes,
           lockOpts: LOCK_OPTS,
         }),
       ).rejects.toThrow(PortLeaseError);
@@ -182,6 +200,7 @@ describe('acquirePortLease', () => {
         branch: 'a',
         range: [3100, 3999],
         isPortFree: alwaysFree,
+        probes: liveProbes,
         lockOpts: LOCK_OPTS,
       });
 
@@ -217,6 +236,7 @@ describe('releasePortLease', () => {
         branch: 'a',
         range: [3100, 3999],
         isPortFree: alwaysFree,
+        probes: liveProbes,
         lockOpts: LOCK_OPTS,
       });
 
@@ -238,6 +258,7 @@ describe('releasePortLease', () => {
         branch: 'a',
         range: [3100, 3999],
         isPortFree: alwaysFree,
+        probes: liveProbes,
         lockOpts: LOCK_OPTS,
       });
 
@@ -269,5 +290,407 @@ describe('leaseEnv', () => {
       FACTORY_APP_PORT: '3142',
       FACTORY_BASE_URL: 'http://127.0.0.1:3142',
     });
+  });
+});
+
+describe('acquirePortLease reaping', () => {
+  it('reaps a dead-pid lease and reports it via onReap', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/dead',
+        branch: 'dead',
+        range: [3100, 3999],
+        pid: DEAD_PID,
+        isPortFree: alwaysFree,
+        probes: liveProbes,
+        lockOpts: LOCK_OPTS,
+      });
+
+      const onReap = vi.fn();
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/b',
+        branch: 'b',
+        range: [3100, 3999],
+        isPortFree: alwaysFree,
+        probes: { isPidAlive: (pid) => pid !== DEAD_PID, worktreeExists: () => true },
+        onReap,
+        lockOpts: LOCK_OPTS,
+      });
+
+      expect(onReap).toHaveBeenCalledTimes(1);
+      expect(onReap.mock.calls[0][0]).toMatchObject({
+        reason: 'dead-pid',
+        lease: { worktreeId: '/wt/dead' },
+      });
+
+      const registry = JSON.parse(await readFile(registryFile, 'utf-8'));
+      expect(registry.leases.map((l: { worktreeId: string }) => l.worktreeId)).not.toContain('/wt/dead');
+    });
+  });
+
+  it('reaps a missing-worktree lease', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/gone',
+        branch: 'gone',
+        range: [3100, 3999],
+        isPortFree: alwaysFree,
+        probes: liveProbes,
+        lockOpts: LOCK_OPTS,
+      });
+
+      const onReap = vi.fn();
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/b',
+        branch: 'b',
+        range: [3100, 3999],
+        isPortFree: alwaysFree,
+        probes: { isPidAlive: () => true, worktreeExists: (p) => p !== '/wt/gone' },
+        onReap,
+        lockOpts: LOCK_OPTS,
+      });
+
+      expect(onReap).toHaveBeenCalledTimes(1);
+      expect(onReap.mock.calls[0][0]).toMatchObject({ reason: 'missing-worktree' });
+    });
+  });
+
+  it('reports dead-pid when both pid and worktree checks fail', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/both-bad',
+        branch: 'both-bad',
+        range: [3100, 3999],
+        isPortFree: alwaysFree,
+        probes: liveProbes,
+        lockOpts: LOCK_OPTS,
+      });
+
+      const onReap = vi.fn();
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/b',
+        branch: 'b',
+        range: [3100, 3999],
+        isPortFree: alwaysFree,
+        probes: { isPidAlive: () => false, worktreeExists: () => false },
+        onReap,
+        lockOpts: LOCK_OPTS,
+      });
+
+      expect(onReap).toHaveBeenCalledTimes(1);
+      expect(onReap.mock.calls[0][0]).toMatchObject({ reason: 'dead-pid' });
+    });
+  });
+
+  it('frees the reaped port for re-allocation', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/dead',
+        branch: 'dead',
+        range: [3100, 3100],
+        isPortFree: alwaysFree,
+        probes: liveProbes,
+        lockOpts: LOCK_OPTS,
+      });
+
+      const lease = await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/b',
+        branch: 'b',
+        range: [3100, 3100],
+        isPortFree: alwaysFree,
+        probes: { isPidAlive: () => false, worktreeExists: () => true },
+        lockOpts: LOCK_OPTS,
+      });
+
+      expect(lease.port).toBe(3100);
+    });
+  });
+
+  it('recovers a SIGKILLed lease for the same worktree with a fresh pid', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+
+      const first = await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/a',
+        branch: 'a',
+        range: [3100, 3999],
+        pid: DEAD_PID,
+        isPortFree: alwaysFree,
+        probes: liveProbes,
+        lockOpts: LOCK_OPTS,
+      });
+
+      const second = await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/a',
+        branch: 'a',
+        range: [3100, 3999],
+        pid: process.pid,
+        isPortFree: alwaysFree,
+        probes: { isPidAlive: (pid) => pid !== DEAD_PID, worktreeExists: () => true },
+        lockOpts: LOCK_OPTS,
+      });
+
+      expect(second.pid).toBe(process.pid);
+      expect(second.pid).not.toBe(first.pid);
+
+      const registry = JSON.parse(await readFile(registryFile, 'utf-8'));
+      const aLeases = registry.leases.filter((l: { worktreeId: string }) => l.worktreeId === '/wt/a');
+      expect(aLeases).toHaveLength(1);
+    });
+  });
+
+  it('leaves live leases untouched and never calls onReap', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/a',
+        branch: 'a',
+        range: [3100, 3999],
+        isPortFree: alwaysFree,
+        probes: liveProbes,
+        lockOpts: LOCK_OPTS,
+      });
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/b',
+        branch: 'b',
+        range: [3100, 3999],
+        isPortFree: alwaysFree,
+        probes: liveProbes,
+        lockOpts: LOCK_OPTS,
+      });
+
+      const onReap = vi.fn();
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/c',
+        branch: 'c',
+        range: [3100, 3999],
+        isPortFree: alwaysFree,
+        probes: liveProbes,
+        onReap,
+        lockOpts: LOCK_OPTS,
+      });
+
+      expect(onReap).not.toHaveBeenCalled();
+      const registry = JSON.parse(await readFile(registryFile, 'utf-8'));
+      expect(registry.leases.map((l: { worktreeId: string }) => l.worktreeId).sort()).toEqual([
+        '/wt/a',
+        '/wt/b',
+        '/wt/c',
+      ]);
+    });
+  });
+});
+
+describe('reapStalePortLeases', () => {
+  it('removes stale leases and returns them with reasons, leaving live leases intact', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/live',
+        branch: 'live',
+        range: [3100, 3999],
+        isPortFree: alwaysFree,
+        probes: liveProbes,
+        lockOpts: LOCK_OPTS,
+      });
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/dead',
+        branch: 'dead',
+        range: [3100, 3999],
+        pid: DEAD_PID,
+        isPortFree: alwaysFree,
+        probes: liveProbes,
+        lockOpts: LOCK_OPTS,
+      });
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/gone',
+        branch: 'gone',
+        range: [3100, 3999],
+        isPortFree: alwaysFree,
+        probes: liveProbes,
+        lockOpts: LOCK_OPTS,
+      });
+
+      const reaped = await reapStalePortLeases({
+        registryFile,
+        lockDir,
+        probes: {
+          isPidAlive: (pid) => pid !== DEAD_PID,
+          worktreeExists: (p) => p !== '/wt/gone',
+        },
+        lockOpts: LOCK_OPTS,
+      });
+
+      expect(reaped.map((r) => r.lease.worktreeId).sort()).toEqual(['/wt/dead', '/wt/gone']);
+      const deadReap = reaped.find((r) => r.lease.worktreeId === '/wt/dead')!;
+      const goneReap = reaped.find((r) => r.lease.worktreeId === '/wt/gone')!;
+      expect(deadReap.reason).toBe('dead-pid');
+      expect(goneReap.reason).toBe('missing-worktree');
+
+      const registry = JSON.parse(await readFile(registryFile, 'utf-8'));
+      expect(registry.leases).toHaveLength(1);
+      expect(registry.leases[0].worktreeId).toBe('/wt/live');
+    });
+  });
+
+  it('resolves to [] when the registry file does not exist', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+
+      const reaped = await reapStalePortLeases({ registryFile, lockDir, lockOpts: LOCK_OPTS });
+      expect(reaped).toEqual([]);
+    });
+  });
+});
+
+describe('inspectPortLeases', () => {
+  it('reports live and stale rows with reasons and portSquatted, without mutating the registry', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/live',
+        branch: 'live',
+        range: [3100, 3100],
+        isPortFree: alwaysFree,
+        probes: liveProbes,
+        lockOpts: LOCK_OPTS,
+      });
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/dead',
+        branch: 'dead',
+        range: [3200, 3200],
+        isPortFree: alwaysFree,
+        probes: liveProbes,
+        lockOpts: LOCK_OPTS,
+      });
+
+      const before = await readFile(registryFile, 'utf-8');
+
+      const health = await inspectPortLeases({
+        registryFile,
+        probes: { isPidAlive: () => true, worktreeExists: (p) => p !== '/wt/dead' },
+        isPortFree: async (p) => p !== 3200,
+      });
+
+      const after = await readFile(registryFile, 'utf-8');
+      expect(after).toBe(before);
+
+      const live = health.find((h) => h.lease.worktreeId === '/wt/live')!;
+      expect(live.alive).toBe(true);
+      expect(live.reason).toBeUndefined();
+
+      const dead = health.find((h) => h.lease.worktreeId === '/wt/dead')!;
+      expect(dead.alive).toBe(false);
+      expect(dead.reason).toBe('missing-worktree');
+      expect(dead.portSquatted).toBe(true);
+    });
+  });
+
+  it('reports portSquatted=false when the stale port is free', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/dead',
+        branch: 'dead',
+        range: [3200, 3200],
+        isPortFree: alwaysFree,
+        probes: liveProbes,
+        lockOpts: LOCK_OPTS,
+      });
+
+      const health = await inspectPortLeases({
+        registryFile,
+        probes: { isPidAlive: () => false, worktreeExists: () => true },
+        isPortFree: alwaysFree,
+      });
+
+      expect(health).toHaveLength(1);
+      expect(health[0].alive).toBe(false);
+      expect(health[0].reason).toBe('dead-pid');
+      expect(health[0].portSquatted).toBe(false);
+    });
+  });
+
+  it('resolves to [] for a missing or corrupt registry', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+
+      expect(await inspectPortLeases({ registryFile })).toEqual([]);
+
+      await writeFile(registryFile, 'not json{{{');
+      expect(await inspectPortLeases({ registryFile })).toEqual([]);
+    });
+  });
+});
+
+describe('defaultIsPidAlive', () => {
+  it('is true for the current process', () => {
+    expect(defaultIsPidAlive(process.pid)).toBe(true);
+  });
+
+  it('is false for a guaranteed-dead pid', () => {
+    const result = spawnSync(process.execPath, ['-e', '""']);
+    const exitedPid = result.pid ?? 2 ** 30;
+    expect(defaultIsPidAlive(exitedPid)).toBe(false);
   });
 });

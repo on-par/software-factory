@@ -23,6 +23,29 @@ export class PortLeaseError extends Error {
 
 export type IsPortFreeFn = (port: number) => Promise<boolean>;
 
+export type ReapReason = 'dead-pid' | 'missing-worktree';
+
+export interface ReapedLease {
+  lease: PortLease;
+  reason: ReapReason;
+}
+
+export interface LeaseLivenessProbes {
+  /** Default: defaultIsPidAlive. */
+  isPidAlive?: (pid: number) => boolean;
+  /** Default: existsSync on the lease's worktreeId (worktreeId IS the worktree path — see cli/index.ts:652). */
+  worktreeExists?: (path: string) => boolean;
+}
+
+export interface LeaseHealth {
+  lease: PortLease;
+  alive: boolean;
+  /** Set only when alive=false. */
+  reason?: ReapReason;
+  /** Set only when alive=false: true when the leased port is still bound by some process (squatter). Report only — never kill. */
+  portSquatted?: boolean;
+}
+
 export interface AcquirePortLeaseOptions {
   registryFile: string;
   lockDir: string;
@@ -32,6 +55,8 @@ export interface AcquirePortLeaseOptions {
   pid?: number;
   isPortFree?: IsPortFreeFn;
   lockOpts?: FileLockOptions;
+  probes?: LeaseLivenessProbes;
+  onReap?: (reaped: ReapedLease) => void;
 }
 
 interface PortRegistry {
@@ -69,6 +94,39 @@ export const defaultIsPortFree: IsPortFreeFn = (port) =>
     });
   });
 
+/** True when a process with `pid` exists (signal-0 probe; EPERM means alive but not ours). */
+export function defaultIsPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err: any) {
+    return err?.code === 'EPERM';
+  }
+}
+
+function partitionLeases(
+  leases: PortLease[],
+  probes: LeaseLivenessProbes,
+): { live: PortLease[]; reaped: ReapedLease[] } {
+  const isPidAlive = probes.isPidAlive ?? defaultIsPidAlive;
+  const worktreeExists = probes.worktreeExists ?? existsSync;
+
+  const live: PortLease[] = [];
+  const reaped: ReapedLease[] = [];
+
+  for (const lease of leases) {
+    if (!isPidAlive(lease.pid)) {
+      reaped.push({ lease, reason: 'dead-pid' });
+    } else if (!worktreeExists(lease.worktreeId)) {
+      reaped.push({ lease, reason: 'missing-worktree' });
+    } else {
+      live.push(lease);
+    }
+  }
+
+  return { live, reaped };
+}
+
 /** Acquires a stable port lease for `worktreeId`, idempotent across repeated
  *  calls for the same worktree. Locked (in-process + cross-process) so
  *  concurrent lanes never race onto the same port. */
@@ -82,6 +140,13 @@ export async function acquirePortLease(opts: AcquirePortLeaseOptions): Promise<P
       lockDir,
       async () => {
         const registry = readRegistry(registryFile);
+
+        const { live, reaped } = partitionLeases(registry.leases, opts.probes ?? {});
+        if (reaped.length > 0) {
+          registry.leases = live;
+          writeRegistry(registryFile, registry);
+          for (const r of reaped) opts.onReap?.(r);
+        }
 
         const existing = registry.leases.find((l) => l.worktreeId === worktreeId);
         if (existing) return existing;
@@ -128,6 +193,54 @@ export async function releasePortLease(opts: {
       lockOpts,
     ),
   );
+}
+
+/** Removes all stale leases (dead pid or missing worktree) under the registry locks; returns what was reaped. */
+export async function reapStalePortLeases(opts: {
+  registryFile: string;
+  lockDir: string;
+  probes?: LeaseLivenessProbes;
+  lockOpts?: FileLockOptions;
+}): Promise<ReapedLease[]> {
+  const { registryFile, lockDir, lockOpts } = opts;
+
+  return withGitLock(registryFile, () =>
+    withFileLock(
+      lockDir,
+      async () => {
+        const registry = readRegistry(registryFile);
+        const { live, reaped } = partitionLeases(registry.leases, opts.probes ?? {});
+        if (reaped.length > 0) {
+          writeRegistry(registryFile, { version: 1, leases: live });
+        }
+        return reaped;
+      },
+      lockOpts,
+    ),
+  );
+}
+
+/** Read-only health report over the registry; used by `factory doctor`. Never mutates. */
+export async function inspectPortLeases(opts: {
+  registryFile: string;
+  probes?: LeaseLivenessProbes;
+  isPortFree?: IsPortFreeFn;
+}): Promise<LeaseHealth[]> {
+  const registry = readRegistry(opts.registryFile);
+  const isPortFree = opts.isPortFree ?? defaultIsPortFree;
+  const { live, reaped } = partitionLeases(registry.leases, opts.probes ?? {});
+
+  const liveHealth: LeaseHealth[] = live.map((lease) => ({ lease, alive: true }));
+  const staleHealth: LeaseHealth[] = await Promise.all(
+    reaped.map(async (r) => ({
+      lease: r.lease,
+      alive: false,
+      reason: r.reason,
+      portSquatted: !(await isPortFree(r.lease.port)),
+    })),
+  );
+
+  return [...liveHealth, ...staleHealth];
 }
 
 /** Env vars a lane's build/check harness invocations get, derived from its leased port. */
