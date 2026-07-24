@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+# Unit test for scripts/ruleset-copilot-review.sh, using the same no-network `gh`-stub
+# pattern as scripts/repo-merge-settings.test.sh: a fake `gh` executable logs its full
+# argv (and, for PUT calls, the stdin body) to $GH_CALL_LOG and answers based on
+# env-controlled toggles.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+BINDIR="$(mktemp -d)"
+
+cleanup() {
+  rm -rf "$BINDIR"
+}
+trap cleanup EXIT
+
+GH_CALL_LOG="$BINDIR/gh-calls.log"
+export GH_CALL_LOG
+: >"$GH_CALL_LOG"
+
+cat >"$BINDIR/gh" <<'EOF'
+#!/usr/bin/env bash
+set -uo pipefail
+echo "$@" >>"$GH_CALL_LOG"
+
+if [ "$1" = "api" ] && [ "$2" = "-X" ] && [ "$3" = "PUT" ]; then
+  body="$(cat)"
+  echo "PUT_BODY:$body" >>"$GH_CALL_LOG"
+  if [ "${GH_PUT_FAIL:-0}" = "1" ]; then
+    echo "simulated put failure" >&2
+    exit 5
+  fi
+  exit 0
+fi
+
+if [ "$1" = "api" ]; then
+  args="$*"
+  case "$args" in
+    *"bypass_actors"*)
+      # build_body's read-modify-write GET+jq call: return the canned
+      # protect-main shape as if jq had already forced the Copilot flag on.
+      cat <<'JSON'
+{"id":42,"name":"protect-main","target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"bypass_actors":[{"actor_id":1,"actor_type":"OrganizationAdmin","bypass_mode":"always"}],"rules":[{"type":"deletion"},{"type":"non_fast_forward"},{"type":"pull_request","parameters":{"allowed_merge_methods":["merge","squash","rebase"],"dismiss_stale_reviews_on_push":false,"dismissal_restriction":{"enabled":false,"allowed_actors":[]},"require_code_owner_review":false,"require_last_push_approval":false,"required_approving_review_count":1,"required_review_thread_resolution":false,"required_reviewers":[],"automatic_copilot_code_review_enabled":true}},{"type":"required_status_checks","parameters":{"required_status_checks":[],"strict_required_status_checks_policy":false}}]}
+JSON
+      exit 0
+      ;;
+    *"select(.type=="*)
+      # verify()'s post-apply GET: whether the flag actually persisted.
+      # Uses ${VAR-default} (not ${VAR:-default}) so an exported empty
+      # string (simulating a null/dropped field) is distinguishable from unset.
+      echo "${GH_VERIFY_OUTPUT-true}"
+      exit 0
+      ;;
+    *"/rulesets --jq"*)
+      # resolve_ruleset_id's list call.
+      echo "${GH_RULESET_ID:-42}"
+      exit 0
+      ;;
+  esac
+fi
+exit 0
+EOF
+chmod +x "$BINDIR/gh"
+
+export PATH="$BINDIR:$PATH"
+export REPO="test-org/test-repo"
+
+# --- 1. Happy path: apply + verify both succeed ---
+
+: >"$GH_CALL_LOG"
+output="$(bash "$ROOT/scripts/ruleset-copilot-review.sh" 2>&1)"
+status=$?
+
+if [ "$status" -ne 0 ]; then
+  echo "FAIL: expected exit 0 on matching settings, got $status: $output" >&2
+  exit 1
+fi
+grep -qF "PASS:" <<<"$output" || {
+  echo "FAIL: expected a PASS: line in output: $output" >&2; exit 1; }
+
+put_body="$(grep -F 'PUT_BODY:' "$GH_CALL_LOG" || true)"
+[ -n "$put_body" ] || { echo "FAIL: no PUT call logged" >&2; cat "$GH_CALL_LOG" >&2; exit 1; }
+for needle in '"automatic_copilot_code_review_enabled":true' '"required_status_checks"' \
+  '"non_fast_forward"' '"bypass_actors"' '"actor_type":"OrganizationAdmin"'; do
+  grep -qF -- "$needle" <<<"$put_body" || {
+    echo "FAIL: PUT body missing '$needle': $put_body" >&2; exit 1; }
+done
+
+# --- 2. Verify mismatch (the real-world 0-Copilot-seat outcome) ---
+
+: >"$GH_CALL_LOG"
+export GH_VERIFY_OUTPUT=""
+if output="$(bash "$ROOT/scripts/ruleset-copilot-review.sh" 2>&1)"; then
+  echo "FAIL: expected non-zero exit on verification mismatch" >&2
+  exit 1
+fi
+grep -qF "automatic_copilot_code_review_enabled" <<<"$output" || {
+  echo "FAIL: mismatch message did not name the drifted field: $output" >&2; exit 1; }
+grep -qiF "Copilot" <<<"$output" || {
+  echo "FAIL: mismatch message did not mention Copilot availability: $output" >&2; exit 1; }
+grep -qF "PASS:" <<<"$output" && {
+  echo "FAIL: PASS: line should not appear on mismatch: $output" >&2; exit 1; }
+unset GH_VERIFY_OUTPUT
+
+# --- 3. PUT failure propagates; no PASS printed ---
+
+: >"$GH_CALL_LOG"
+export GH_PUT_FAIL=1
+if output="$(bash "$ROOT/scripts/ruleset-copilot-review.sh" 2>&1)"; then
+  echo "FAIL: expected non-zero exit on PUT failure" >&2
+  exit 1
+fi
+grep -qF "PASS:" <<<"$output" && {
+  echo "FAIL: PASS: line should not appear on PUT failure: $output" >&2; exit 1; }
+unset GH_PUT_FAIL
+
+# --- 4. DRY_RUN makes no mutating call ---
+
+: >"$GH_CALL_LOG"
+export DRY_RUN=1
+output="$(bash "$ROOT/scripts/ruleset-copilot-review.sh" 2>&1)"
+status=$?
+unset DRY_RUN
+
+if [ "$status" -ne 0 ]; then
+  echo "FAIL: expected exit 0 under DRY_RUN, got $status: $output" >&2
+  exit 1
+fi
+if grep -qF "PUT" "$GH_CALL_LOG"; then
+  echo "FAIL: DRY_RUN made a mutating gh call" >&2
+  cat "$GH_CALL_LOG" >&2
+  exit 1
+fi
+
+echo "PASS: ruleset-copilot-review preserves all existing rules and bypass_actors while enabling automatic_copilot_code_review_enabled in one PUT, fails loudly naming the drifted field (and the likely Copilot-availability cause) on a verification mismatch, propagates a PUT failure without printing PASS, and DRY_RUN makes no mutating gh call"
