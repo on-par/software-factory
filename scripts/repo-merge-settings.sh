@@ -36,18 +36,22 @@ apply() {
 }
 
 verify() {
-  local expected="true true true PR_TITLE BLANK"
-  local actual
-  actual="$(gh api "repos/$REPO" --jq \
-    '[.delete_branch_on_merge, .allow_auto_merge, .allow_update_branch, .squash_merge_commit_title, .squash_merge_commit_message] | join(" ")')"
-
   local expected_fields=(delete_branch_on_merge allow_auto_merge allow_update_branch squash_merge_commit_title squash_merge_commit_message)
-  local expected_arr=($expected)
-  local actual_arr=($actual)
+  local expected_arr=(true true true PR_TITLE BLANK)
+  local actual
+  # "|"-joined, with nulls mapped to "": join(" ") silently collapses a null
+  # field to an empty string, and a space-delimited empty field is then lost
+  # entirely by bash's default (whitespace-collapsing) word-splitting below.
+  actual="$(gh api "repos/$REPO" --jq \
+    '[.delete_branch_on_merge, .allow_auto_merge, .allow_update_branch, .squash_merge_commit_title, .squash_merge_commit_message] | map(if . == null then "" else (.|tostring) end) | join("|")')"
+
+  local actual_arr
+  IFS='|' read -r -a actual_arr <<<"$actual"
+
   local i mismatch=0
   for i in "${!expected_fields[@]}"; do
-    if [ "${expected_arr[$i]}" != "${actual_arr[$i]}" ]; then
-      echo "MISMATCH: ${expected_fields[$i]} expected=${expected_arr[$i]} actual=${actual_arr[$i]}" >&2
+    if [ "${expected_arr[$i]}" != "${actual_arr[$i]:-}" ]; then
+      echo "MISMATCH: ${expected_fields[$i]} expected=${expected_arr[$i]} actual=${actual_arr[$i]:-}" >&2
       mismatch=1
     fi
   done
