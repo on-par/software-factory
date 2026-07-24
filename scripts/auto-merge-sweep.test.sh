@@ -27,6 +27,10 @@ cat >"$BINDIR/gh" <<'EOF'
 #!/usr/bin/env bash
 set -uo pipefail
 if [ "$1 $2" = "pr list" ]; then
+  if [ "${GH_PR_LIST_FAIL:-0}" = "1" ]; then
+    echo "simulated rate limit" >&2
+    exit 4
+  fi
   cat <<'JSON'
 [
   {
@@ -204,4 +208,58 @@ if ! grep -q "<key>KeepAlive</key>" "$PLIST"; then
   exit 1
 fi
 
-echo "PASS: auto-merge-sweep logs merge/land failures with real exit codes, skips landing when the repo dir is missing, honours FACTORY_MERGE_ADMIN for the standalone merge path, writes a heartbeat on each pass, ships a valid KeepAlive launchd plist, and preflight fatally rejects missing gh/factory/repo-dir dependencies"
+# --- backoff: next_sleep_seconds doubles and clamps to MAX_SLEEP_SECONDS ---
+
+MAX_SLEEP_SECONDS=3600
+[ "$(next_sleep_seconds 300)" = "600" ] || { echo "FAIL: next_sleep_seconds 300 != 600" >&2; exit 1; }
+[ "$(next_sleep_seconds 1800)" = "3600" ] || { echo "FAIL: next_sleep_seconds 1800 != 3600" >&2; exit 1; }
+[ "$(next_sleep_seconds 3600)" = "3600" ] || { echo "FAIL: next_sleep_seconds 3600 did not clamp" >&2; exit 1; }
+
+# --- backoff: sweep_repo signals gh pr list failure; sweep_once aggregates ---
+
+export GH_PR_LIST_FAIL=1
+if sweep_repo fakerepo >/dev/null 2>&1; then
+  echo "FAIL: sweep_repo returned success despite gh pr list failing" >&2; exit 1
+fi
+REPOS=(fakerepo)
+if sweep_once >/dev/null 2>&1; then
+  echo "FAIL: sweep_once returned success when every repo sweep failed" >&2; exit 1
+fi
+unset GH_PR_LIST_FAIL
+if ! sweep_once >/dev/null 2>&1; then
+  echo "FAIL: sweep_once returned failure on a healthy pass" >&2; exit 1
+fi
+
+# --- backoff: run_sweep_loop doubles sleep on repeated failure, clamps, resets on success ---
+
+SLEEP_LOG="$BINDIR/sleep.log"
+: >"$SLEEP_LOG"
+SWEEP_FAIL_COUNT_FILE="$BINDIR/sweep-fails"
+echo 3 >"$SWEEP_FAIL_COUNT_FILE" # first 3 passes fail, then succeed
+
+sweep_once() {
+  local left
+  left="$(cat "$SWEEP_FAIL_COUNT_FILE")"
+  if [ "$left" -gt 0 ]; then
+    echo $((left - 1)) >"$SWEEP_FAIL_COUNT_FILE"
+    return 1
+  fi
+  return 0
+}
+sleep() { echo "$1" >>"$SLEEP_LOG"; }
+
+SLEEP_SECONDS=300
+MAX_SLEEP_SECONDS=1000
+run_sweep_loop 5
+
+expected=$'600\n1000\n1000\n300'
+actual="$(cat "$SLEEP_LOG")"
+if [ "$actual" != "$expected" ]; then
+  echo "FAIL: backoff sleep sequence wrong" >&2
+  echo "expected: $expected" >&2
+  echo "actual:   $actual" >&2
+  exit 1
+fi
+unset -f sweep_once sleep
+
+echo "PASS: auto-merge-sweep logs merge/land failures with real exit codes, skips landing when the repo dir is missing, honours FACTORY_MERGE_ADMIN for the standalone merge path, writes a heartbeat on each pass, ships a valid KeepAlive launchd plist, preflight fatally rejects missing gh/factory/repo-dir dependencies, and backs off exponentially up to MAX_SLEEP_SECONDS on sweep-wide failures, resetting on success"

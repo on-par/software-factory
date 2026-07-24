@@ -6,7 +6,10 @@
 # Runs under launchd via scripts/launchd/com.on-par.auto-merge-sweep.plist (KeepAlive
 # restarts it on crash). Writes a heartbeat to ~/.factory/auto-merge-sweep.heartbeat
 # (override with HEARTBEAT_FILE) at the end of every completed pass so a monitor can
-# detect a stalled/dead sweeper.
+# detect a stalled/dead sweeper. On a sweep-wide failure (every repo's `gh pr list`
+# failed), the sleep between passes doubles each consecutive failing pass up to
+# MAX_SLEEP_SECONDS (default 3600), resetting to SLEEP_SECONDS as soon as a pass
+# succeeds again.
 set -uo pipefail
 
 REPOS=(sound-buddy software-factory launchblitz)
@@ -14,6 +17,7 @@ REPOS=(sound-buddy software-factory launchblitz)
 FACTORY_BIN="${FACTORY_BIN:-$HOME/.local/bin/factory}"
 REPO_ROOT="${REPO_ROOT:-/Users/moltbot/repos/on-par}"
 SLEEP_SECONDS="${SLEEP_SECONDS:-300}"
+MAX_SLEEP_SECONDS="${MAX_SLEEP_SECONDS:-3600}"
 HEARTBEAT_FILE="${HEARTBEAT_FILE:-$HOME/.factory/auto-merge-sweep.heartbeat}"
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
@@ -51,7 +55,7 @@ sweep_repo() {
   gh_exit=$?
   if [ "$gh_exit" -ne 0 ]; then
     log "$repo: gh pr list failed (exit $gh_exit): $pr_json" >&2
-    return
+    return 1
   fi
 
   printf '%s' "$pr_json" | python3 -c '
@@ -107,16 +111,39 @@ write_heartbeat() {
 }
 
 sweep_once() {
+  local failures=0
   for r in "${REPOS[@]}"; do
-    sweep_repo "$r"
+    sweep_repo "$r" || failures=$((failures + 1))
   done
   write_heartbeat
+  [ "$failures" -lt "${#REPOS[@]}" ]
+}
+
+# Doubles the current delay, clamped to MAX_SLEEP_SECONDS.
+next_sleep_seconds() {
+  local doubled=$(( $1 * 2 ))
+  if [ "$doubled" -gt "$MAX_SLEEP_SECONDS" ]; then
+    doubled="$MAX_SLEEP_SECONDS"
+  fi
+  echo "$doubled"
 }
 
 run_sweep_loop() {
+  local max_passes="${1:-0}"
+  local delay="$SLEEP_SECONDS"
+  local passes=0
   while true; do
-    sweep_once
-    sleep "$SLEEP_SECONDS"
+    if sweep_once; then
+      delay="$SLEEP_SECONDS"
+    else
+      delay="$(next_sleep_seconds "$delay")"
+      log "sweep-wide failure: backing off, next sweep in ${delay}s (cap ${MAX_SLEEP_SECONDS}s)" >&2
+    fi
+    passes=$((passes + 1))
+    if [ "$max_passes" -gt 0 ] && [ "$passes" -ge "$max_passes" ]; then
+      return 0
+    fi
+    sleep "$delay"
   done
 }
 
