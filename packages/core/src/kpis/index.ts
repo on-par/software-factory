@@ -1,6 +1,16 @@
 // src/kpis/index.ts — Pure aggregation of factory health KPIs from events + cost rows
 
 import type { CostEntry, FactoryEvent, RetryCause } from '../types/index.js';
+import { isHumanEvent } from './human.js';
+
+export type { CommitSource, HumanSourceClient, PrSource } from './human.js';
+export {
+  fetchHumanEventSources,
+  hasUnresolvedPark,
+  HUMAN_EVENT_TYPES,
+  isHumanEvent,
+  reconstructHumanEvents,
+} from './human.js';
 
 function isRealIssue(issue: string): boolean {
   return /^\d+$/.test(issue);
@@ -41,13 +51,21 @@ export interface HealthKpis {
    *  did it loop at all). See totalRetries/retriesByCause for depth + cause. */
   reworkRuns: number;
   stuckRuns: number;
-  interventionRuns: number;
   mergeRate: number;
   /** Share of runs that looped at all (breadth). Distinct from retries, which
    *  count how many times and why — both are kept intentionally. */
   reworkRate: number;
   stuckRate: number;
+  /** Share of runs with at least one explicit human-* event (#420). */
   humanInterventionRate: number;
+  /** Runs with at least one explicit human-* event (#420). */
+  humanTouchedRuns: number;
+  /** Runs that merged with zero human events — the demo headline (#420). */
+  fullyAutonomousRuns: number;
+  /** Mean human events per run; null when runs === 0. */
+  humanEventsPerRun: number | null;
+  /** fullyAutonomousRuns / runs; 0 when runs === 0. */
+  fullyAutonomousRate: number;
   totalCost: number;
   costPerMergedPr: number | null;
   medianCycleTimeMs: number | null;
@@ -70,15 +88,13 @@ interface RunStats {
   merged: boolean;
   reworked: boolean;
   stuck: boolean;
-  intervened: boolean;
+  humanEvents: number;
   firstTs: number | null;
   mergedTs: number | null;
   firstPhaseTs: number | null;
   phaseWindows: Map<string, { first: number; last: number }>;
   retries: number;
 }
-
-const INTERVENTION_EVENT_TYPES = new Set(['parked', 'escalate', 'awaiting-review']);
 
 /** Attribute one event to a retry-cause bucket, or null if it is not a retry.
  *  'rework' events are one checker retry per round; 'stuck' events repeat the
@@ -103,7 +119,7 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
       merged: false,
       reworked: false,
       stuck: false,
-      intervened: false,
+      humanEvents: 0,
       firstTs: null,
       mergedTs: null,
       firstPhaseTs: null,
@@ -111,10 +127,10 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
       retries: 0,
     };
 
-    if (event.type === 'merged') stats.merged = true;
+    if (event.type === 'merged' || event.type === 'human-merged') stats.merged = true;
     if (event.type === 'rework' || event.rework) stats.reworked = true;
     if (event.type === 'stuck' || event.rework?.stuck === true) stats.stuck = true;
-    if (INTERVENTION_EVENT_TYPES.has(event.type)) stats.intervened = true;
+    if (isHumanEvent(event)) stats.humanEvents++;
 
     const retryCause = retryCauseOf(event);
     if (retryCause) {
@@ -125,7 +141,7 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     const ts = Date.parse(event.ts);
     if (!Number.isNaN(ts)) {
       if (stats.firstTs === null || ts < stats.firstTs) stats.firstTs = ts;
-      if (event.type === 'merged' && stats.mergedTs === null) stats.mergedTs = ts;
+      if ((event.type === 'merged' || event.type === 'human-merged') && stats.mergedTs === null) stats.mergedTs = ts;
       if (event.phase) {
         if (stats.firstPhaseTs === null || ts < stats.firstPhaseTs) stats.firstPhaseTs = ts;
         const window = stats.phaseWindows.get(event.phase);
@@ -145,7 +161,9 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
   let merged = 0;
   let reworkRuns = 0;
   let stuckRuns = 0;
-  let interventionRuns = 0;
+  let humanTouchedRuns = 0;
+  let fullyAutonomousRuns = 0;
+  let totalHumanEvents = 0;
   const cycleTimes: number[] = [];
   const queueWaits: number[] = [];
   const phaseSamples = new Map<string, number[]>();
@@ -155,7 +173,9 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     if (stats.merged) merged++;
     if (stats.reworked) reworkRuns++;
     if (stats.stuck) stuckRuns++;
-    if (stats.intervened) interventionRuns++;
+    if (stats.humanEvents > 0) humanTouchedRuns++;
+    if (stats.merged && stats.humanEvents === 0) fullyAutonomousRuns++;
+    totalHumanEvents += stats.humanEvents;
     perRunRetryCounts.push(stats.retries);
 
     if (stats.firstTs !== null && stats.mergedTs !== null) {
@@ -194,11 +214,14 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     merged,
     reworkRuns,
     stuckRuns,
-    interventionRuns,
     mergeRate: runs === 0 ? 0 : merged / runs,
     reworkRate: runs === 0 ? 0 : reworkRuns / runs,
     stuckRate: runs === 0 ? 0 : stuckRuns / runs,
-    humanInterventionRate: runs === 0 ? 0 : interventionRuns / runs,
+    humanInterventionRate: runs === 0 ? 0 : humanTouchedRuns / runs,
+    humanTouchedRuns,
+    fullyAutonomousRuns,
+    humanEventsPerRun: runs === 0 ? null : totalHumanEvents / runs,
+    fullyAutonomousRate: runs === 0 ? 0 : fullyAutonomousRuns / runs,
     totalCost,
     costPerMergedPr: merged === 0 ? null : totalCost / merged,
     medianCycleTimeMs: percentileFromSorted(sortedCycleTimes, 0.5),
@@ -229,7 +252,8 @@ export function formatKpiLines(kpis: HealthKpis): string[] {
     `Merge rate: ${formatPercent(kpis.mergeRate)} (${kpis.merged}/${kpis.runs})`,
     `Rework rate: ${formatPercent(kpis.reworkRate)} (${kpis.reworkRuns}/${kpis.runs})`,
     `Stuck rate: ${formatPercent(kpis.stuckRate)} (${kpis.stuckRuns}/${kpis.runs})`,
-    `Human-intervention rate: ${formatPercent(kpis.humanInterventionRate)} (${kpis.interventionRuns}/${kpis.runs})`,
+    `Human-touched runs: ${formatPercent(kpis.humanInterventionRate)} (${kpis.humanTouchedRuns}/${kpis.runs}, ${kpis.humanEventsPerRun === null ? 'n/a' : kpis.humanEventsPerRun.toFixed(2)} human events/run)`,
+    `Fully autonomous: ${formatPercent(kpis.fullyAutonomousRate)} (${kpis.fullyAutonomousRuns}/${kpis.runs} merged with zero human events)`,
     `Retries: total ${kpis.totalRetries}, median ${kpis.retriesPerRun}/run (checker ${kpis.retriesByCause.checker} · failover ${kpis.retriesByCause.failover} · timeout ${kpis.retriesByCause.timeout} · other ${kpis.retriesByCause.other})`,
     `Retry cost share: ${formatPercent(kpis.retryCostShare)} of total spend`,
     `Cost per merged PR: ${kpis.costPerMergedPr === null ? 'n/a' : formatCost(kpis.costPerMergedPr)}`,
@@ -261,6 +285,7 @@ export interface KpiHistoryRecord {
   reworkRate: number;
   stuckRate: number;
   humanInterventionRate: number;
+  fullyAutonomousRate: number;
   costPerMergedPr: number | null;
   medianCycleTimeMs: number | null;
   p90CycleTimeMs: number | null;
@@ -274,6 +299,7 @@ export function kpisToHistoryRecord(kpis: HealthKpis, date: string): KpiHistoryR
     reworkRate: kpis.reworkRate,
     stuckRate: kpis.stuckRate,
     humanInterventionRate: kpis.humanInterventionRate,
+    fullyAutonomousRate: kpis.fullyAutonomousRate,
     costPerMergedPr: kpis.costPerMergedPr,
     medianCycleTimeMs: kpis.medianCycleTimeMs,
     p90CycleTimeMs: kpis.p90CycleTimeMs,
@@ -304,8 +330,8 @@ export function renderKpiTrend(records: KpiHistoryRecord[], opts: { window?: num
 
   const visible = records.slice(-window);
   lines.push(
-    '| date | runs | merge | rework | stuck | human | $/merged | cycle p50 | cycle p90 |',
-    '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| date | runs | merge | rework | stuck | human | auto | $/merged | cycle p50 | cycle p90 |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
     ...visible.map((record) => {
       const columns = [
         record.date,
@@ -314,6 +340,7 @@ export function renderKpiTrend(records: KpiHistoryRecord[], opts: { window?: num
         formatPercent(record.reworkRate),
         formatPercent(record.stuckRate),
         formatPercent(record.humanInterventionRate),
+        typeof record.fullyAutonomousRate === 'number' ? formatPercent(record.fullyAutonomousRate) : '—',
         record.costPerMergedPr === null ? '—' : formatCost(record.costPerMergedPr),
         typeof record.medianCycleTimeMs === 'number' ? formatDurationMs(record.medianCycleTimeMs) : '—',
         typeof record.p90CycleTimeMs === 'number' ? formatDurationMs(record.p90CycleTimeMs) : '—',

@@ -158,13 +158,18 @@ export type { LocalRunOutcome, LocalRunReport, LocalRunReportDeps, LocalRunRepor
 export { readIssueEvents, renderLocalRunReport, writeLocalRunReport } from './reports/local-run.js';
 
 // KPIs
-export type { HealthKpis, KpiHistoryRecord } from './kpis/index.js';
+export type { CommitSource, HealthKpis, HumanSourceClient, KpiHistoryRecord, PrSource } from './kpis/index.js';
 export {
   appendKpiHistoryLine,
   computeHealthKpis,
+  fetchHumanEventSources,
   formatKpiLines,
+  hasUnresolvedPark,
+  HUMAN_EVENT_TYPES,
+  isHumanEvent,
   kpisToHistoryRecord,
   parseKpiHistory,
+  reconstructHumanEvents,
   renderKpiReport,
   renderKpiTrend,
 } from './kpis/index.js';

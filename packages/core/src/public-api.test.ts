@@ -108,9 +108,14 @@ const PUBLIC_API_KEYS = [
   // KPIs
   'appendKpiHistoryLine',
   'computeHealthKpis',
+  'fetchHumanEventSources',
   'formatKpiLines',
+  'hasUnresolvedPark',
+  'HUMAN_EVENT_TYPES',
+  'isHumanEvent',
   'kpisToHistoryRecord',
   'parseKpiHistory',
+  'reconstructHumanEvents',
   'renderKpiReport',
   'renderKpiTrend',
   // Discovery

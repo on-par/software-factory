@@ -109,6 +109,17 @@ describe('createLogger', () => {
     expect(event.failoverReason).toBe('rate_limit');
   });
 
+  it('includes actor only when passed as extra', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+    const logger = createLogger(eventsFile, {}, { out: { write: () => {} } });
+
+    logger.info('human-restarted', 'msg', { actor: 'alice' });
+
+    const [event] = readEvents(eventsFile);
+    expect(event.actor).toBe('alice');
+  });
+
   it('includes fingerprint and evidence only when passed as extra', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
     const eventsFile = join(tmpDir, 'events.ndjson');
