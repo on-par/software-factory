@@ -35,7 +35,6 @@
   },
   "dependencies": {
     "@on-par/factory-core": "^2.0.0",
-    "@on-par/factory-config": "^2.0.0",
     "@on-par/factory-tui": "^2.0.0",
     "@octokit/rest": "^22.0.0",
     "chalk": "^5.4.0",

@@ -104,5 +104,5 @@ export interface CodingHarness {
   run(request: HarnessRequest): Promise<HarnessResult>;
 }
 
-export type { HarnessCatalogEntry, HarnessProbe } from './catalog.js';
+export type { HarnessCatalogEntry } from './catalog.js';
 export { HARNESS_CATALOG, isAgenticHarness, KNOWN_HARNESS_IDS } from './catalog.js';

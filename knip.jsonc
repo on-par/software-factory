@@ -1,0 +1,13 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  // Exports referenced within their own module are internal helpers, not
+  // dead code — don't force export-keyword churn on them (#143).
+  "ignoreExportsUsedInFile": true,
+  "workspaces": {
+    "packages/cli": {
+      // `ollama` is an external runtime binary the CLI shells out to;
+      // it is never an npm dependency.
+      "ignoreBinaries": ["ollama"],
+    },
+  },
+}
