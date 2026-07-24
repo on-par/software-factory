@@ -130,6 +130,7 @@ describe('levelForType', () => {
     ['sandbox-unavailable', 'warn'],
     ['sandbox-degraded', 'warn'],
     ['sandbox-disabled', 'warn'],
+    ['environment_warning', 'warn'],
     ['fail', 'error'],
     ['escalate', 'error'],
     ['ship_denied', 'error'],

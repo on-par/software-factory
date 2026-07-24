@@ -161,6 +161,23 @@ A constitution is a written standard that defines "done right" for a product. Ev
 - `packages/config/src/constitutions/example-client-delivery.md` — Client delivery (client brand adherence, tech spec)
 - `packages/config/src/constitutions/_template.md` — Template for new products
 
+### Lane environment (parallel e2e)
+
+Each lane leases a port from `.factory/ports.json` and every build/check
+command it runs (workers, `npm test`, lint, custom checkers) inherits:
+
+| Variable           | Example                 |
+| ------------------ | ----------------------- |
+| `PORT`             | `3142`                  |
+| `FACTORY_APP_PORT` | `3142`                  |
+| `FACTORY_BASE_URL` | `http://127.0.0.1:3142` |
+
+Product e2e suites should boot their app on `PORT` (strict-port) and point
+their test runner's base URL at `FACTORY_BASE_URL` — the constitution
+template scaffolds the full Playwright reference contract. When port
+leasing is disabled, checks still run but a `environment_warning` event
+flags the collision risk for app-testing worktrees.
+
 ## Open-Core Boundary & Safety
 
 **What's OSS (this repo):** `packages/cli`, `packages/core`, and `packages/config` are the open-source core — the full local pipeline (router, constitutions, checkers, phases) runs from this repo alone, MIT-licensed.

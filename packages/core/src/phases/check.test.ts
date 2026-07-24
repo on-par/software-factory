@@ -353,6 +353,163 @@ describe('checkPhase appPort', () => {
     expect(captured.length).toBeGreaterThan(0);
     expect(captured[0].options.env).toBeUndefined();
   });
+
+  it('threads the lane env into the checker ctx so checker commands see it', { timeout: 30_000 }, async () => {
+    const worktree = await makeEnvAssertingWorktree(101);
+    const { router, stub } = makeRouter();
+
+    const check = await checkPhase({
+      issue: 101,
+      worktree,
+      specPath: join(worktree, 'issue-101.md'),
+      router,
+      constitution: null,
+      log: () => {},
+      appPort: 3142,
+      autoRework: false,
+    });
+
+    expect(check.passed).toBe(true);
+    expect(stub.calls).toHaveLength(0);
+  });
+
+  it('fails the tests checker when appPort (and so ctx.env) is absent', { timeout: 30_000 }, async () => {
+    const worktree = await makeEnvAssertingWorktree(102);
+    const { router } = makeRouter();
+
+    const check = await checkPhase({
+      issue: 102,
+      worktree,
+      specPath: join(worktree, 'issue-102.md'),
+      router,
+      constitution: null,
+      log: () => {},
+      autoRework: false,
+    });
+
+    expect(check.passed).toBe(false);
+    expect(check.summary.results.find((r) => r.checker === 'tests')?.result).toBe('FAIL');
+  });
+
+  it('emits an environment_warning when there is no leased port and the worktree runs Playwright', async () => {
+    const worktree = await makeWorktreeWithFiles(103, { 'playwright.config.ts': 'export default {};\n' });
+    const { router } = makeRouter();
+    const logCalls: Array<[string, string]> = [];
+
+    const check = await checkPhase({
+      issue: 103,
+      worktree,
+      specPath: join(worktree, 'issue-103.md'),
+      router,
+      constitution: null,
+      log: (type, msg) => logCalls.push([type, msg]),
+      autoRework: false,
+    });
+
+    const warning = logCalls.find(([type]) => type === 'environment_warning');
+    expect(warning).toBeDefined();
+    expect(warning?.[1]).toContain('playwright.config.ts');
+    expect(warning?.[1]).toContain('collide');
+    expect(check).toBeDefined();
+  });
+
+  it('emits an environment_warning from a package.json e2e script when no playwright config is present', async () => {
+    const worktree = await makeWorktreeWithFiles(104, {
+      'package.json': JSON.stringify({ scripts: { e2e: 'playwright test' } }),
+    });
+    const { router } = makeRouter();
+    const logCalls: Array<[string, string]> = [];
+
+    await checkPhase({
+      issue: 104,
+      worktree,
+      specPath: join(worktree, 'issue-104.md'),
+      router,
+      constitution: null,
+      log: (type, msg) => logCalls.push([type, msg]),
+      autoRework: false,
+    });
+
+    const warning = logCalls.find(([type]) => type === 'environment_warning');
+    expect(warning).toBeDefined();
+    expect(warning?.[1]).toContain("package.json script 'e2e'");
+  });
+
+  it('does not warn when appPort is set, even if the worktree runs Playwright', async () => {
+    const worktree = await makeWorktreeWithFiles(105, { 'playwright.config.ts': 'export default {};\n' });
+    const { router } = makeRouter();
+    const logCalls: Array<[string, string]> = [];
+
+    await checkPhase({
+      issue: 105,
+      worktree,
+      specPath: join(worktree, 'issue-105.md'),
+      router,
+      constitution: null,
+      log: (type, msg) => logCalls.push([type, msg]),
+      appPort: 3142,
+      autoRework: false,
+    });
+
+    expect(logCalls.find(([type]) => type === 'environment_warning')).toBeUndefined();
+  });
+
+  it('does not warn when the worktree shows no live-app signal', async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router } = makeRouter();
+    const logCalls: Array<[string, string]> = [];
+
+    await checkPhase({
+      issue: 106,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      log: (type, msg) => logCalls.push([type, msg]),
+      autoRework: false,
+    });
+
+    expect(logCalls.find(([type]) => type === 'environment_warning')).toBeUndefined();
+  });
+
+  it('does not throw when package.json has a malformed scripts field', async () => {
+    const worktree = await makeWorktreeWithFiles(107, {
+      'package.json': JSON.stringify({ scripts: { e2e: true } }),
+    });
+    const { router } = makeRouter();
+    const logCalls: Array<[string, string]> = [];
+
+    await expect(
+      checkPhase({
+        issue: 107,
+        worktree,
+        specPath: join(worktree, 'issue-107.md'),
+        router,
+        constitution: null,
+        log: (type, msg) => logCalls.push([type, msg]),
+        autoRework: false,
+      }),
+    ).resolves.toBeDefined();
+
+    expect(logCalls.find(([type]) => type === 'environment_warning')).toBeUndefined();
+  });
+
+  it('does not throw when package.json parses to a non-object (e.g. null)', async () => {
+    const worktree = await makeWorktreeWithFiles(108, { 'package.json': 'null' });
+    const { router } = makeRouter();
+
+    await expect(
+      checkPhase({
+        issue: 108,
+        worktree,
+        specPath: join(worktree, 'issue-108.md'),
+        router,
+        constitution: null,
+        log: () => {},
+        autoRework: false,
+      }),
+    ).resolves.toBeDefined();
+  });
 });
 
 describe('checkPhase success paths', () => {
@@ -812,6 +969,35 @@ async function makeFailingWorktree(): Promise<{ worktree: string; specPath: stri
   await writeFixture(worktree, 'issue-77.md', '# Spec: failing checks\n');
 
   return { worktree, specPath };
+}
+
+/** Worktree whose package.json `test` script exits 0 only when PORT/FACTORY_APP_PORT/FACTORY_BASE_URL were forwarded into its process env. */
+async function makeEnvAssertingWorktree(issue: number): Promise<string> {
+  const worktree = await mkdtemp(join(tmpdir(), `check-phase-env-${issue}-`));
+  tempDirs.add(worktree);
+
+  const check =
+    "process.env.PORT === '3142' && process.env.FACTORY_APP_PORT === '3142' && process.env.FACTORY_BASE_URL === 'http://127.0.0.1:3142'";
+  await writeFixture(
+    worktree,
+    'package.json',
+    JSON.stringify({ scripts: { test: `node -e "process.exit(${check} ? 0 : 1)"` } }),
+  );
+  await writeFixture(worktree, `issue-${issue}.md`, `# Spec: env-asserting checks\n`);
+
+  return worktree;
+}
+
+async function makeWorktreeWithFiles(issue: number, files: Record<string, string>): Promise<string> {
+  const worktree = await mkdtemp(join(tmpdir(), `check-phase-files-${issue}-`));
+  tempDirs.add(worktree);
+
+  for (const [path, contents] of Object.entries(files)) {
+    await writeFixture(worktree, path, contents);
+  }
+  await writeFixture(worktree, `issue-${issue}.md`, `# Spec: live-app signal detection\n`);
+
+  return worktree;
 }
 
 async function writeFixture(root: string, path: string, contents: string): Promise<void> {

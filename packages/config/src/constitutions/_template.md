@@ -33,6 +33,24 @@ requireTests: true # FAIL (instead of SKIP) the tests checker when the repo has 
 
 <...>
 
+### End-to-end (e2e) environment contract
+
+The factory leases each lane a dedicated port and injects `PORT`,
+`FACTORY_APP_PORT`, and `FACTORY_BASE_URL` into every build and check
+command run in the worktree. E2e suites MUST boot the app on the leased
+port and test the URL it actually runs on:
+
+- `playwright.config` reads `process.env.PORT` for its `webServer`
+  (port or embedded in `command`), sets `reuseExistingServer: false`,
+  and uses a strict-port dev command (Vite: `--strictPort`;
+  Next.js: `-p $PORT`) so a port mismatch fails loudly.
+- `use.baseURL` derives from `process.env.FACTORY_BASE_URL`, falling
+  back to `http://127.0.0.1:${process.env.PORT}` — never a hard-coded
+  port or URL.
+- The contract is plain environment variables, so the same rules apply
+  to any e2e tool (Cypress, WebdriverIO, curl smoke tests); Playwright
+  is the documented reference, not a dependency.
+
 ## Quality Gates
 
 <Which checks must pass before work ships. References checkers in lib/checkers/.>

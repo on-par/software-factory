@@ -41,6 +41,7 @@ Dependency direction: `config ← core ← cli` and `config ← core ← server`
 - `phases/` — the four pipeline phases (`plan`, `build`, `check`, `ship`) plus integration tests (`pipeline.integration.test.ts`, `pipeline.concurrent.integration.test.ts`)
 - `checkers/` — the checker framework (compile/tests/lint/links/accessibility + agent-based custom checkers)
 - `constitutions/` — constitution loader
+- `environment/` — port-lease registry for parallel lanes (`.factory/ports.json`) + `leaseEnv()`, the `PORT`/`FACTORY_APP_PORT`/`FACTORY_BASE_URL` contract injected into build agents and all checker commands
 - `logger/` — structured leveled logger (`createLogger`) over the `.factory/events.ndjson` sink (ADR-0002)
 - `eval/` — the eval harness (runner, judge, scoring, golden loader, baseline/trend/regression reports)
 - `usage/`, `reports/`, `local-small/`, `utils/` (incl. `lock.ts`, `ci-watch.ts`), `config/`, `types/`

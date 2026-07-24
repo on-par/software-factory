@@ -21,6 +21,8 @@ export interface CheckerContext {
   packageJson?: PackageJson | null;
   /** Set by runAllCheckers from constitution.requireTests — missing test command becomes FAIL instead of SKIP */
   testsRequired?: boolean;
+  /** Lane environment (PORT, FACTORY_APP_PORT, FACTORY_BASE_URL) merged into every checker command — set by checkPhase from the lane's port lease */
+  env?: Record<string, string>;
 }
 
 export type CheckerFn = (ctx: CheckerContext) => Promise<CheckerOutput>;
@@ -33,7 +35,7 @@ export const compileChecker: CheckerFn = async (ctx) => {
     const hasBuild = pkg?.scripts?.build;
 
     if (hasBuild) {
-      const r = await runCommand(['npm', 'run', 'build'], { cwd: ctx.worktree, timeoutMs: 120_000 });
+      const r = await runCommand(['npm', 'run', 'build'], { cwd: ctx.worktree, timeoutMs: 120_000, env: ctx.env });
       if (r.ok) return { checker: 'compile', result: 'PASS', details: 'npm run build: OK' };
       return {
         checker: 'compile',
@@ -43,13 +45,13 @@ export const compileChecker: CheckerFn = async (ctx) => {
     }
 
     if (await fileExists(join(ctx.worktree, 'Makefile'))) {
-      const r = await runCommand(['make'], { cwd: ctx.worktree, timeoutMs: 120_000 });
+      const r = await runCommand(['make'], { cwd: ctx.worktree, timeoutMs: 120_000, env: ctx.env });
       if (r.ok) return { checker: 'compile', result: 'PASS', details: 'make: OK' };
       return { checker: 'compile', result: 'FAIL', details: `make failed: ${describeCommandFailure(r).slice(0, 500)}` };
     }
 
     if (await fileExists(join(ctx.worktree, 'Cargo.toml'))) {
-      const r = await runCommand(['cargo', 'build'], { cwd: ctx.worktree, timeoutMs: 120_000 });
+      const r = await runCommand(['cargo', 'build'], { cwd: ctx.worktree, timeoutMs: 120_000, env: ctx.env });
       if (r.ok) return { checker: 'compile', result: 'PASS', details: 'cargo build: OK' };
       return {
         checker: 'compile',
@@ -71,7 +73,11 @@ export const compileChecker: CheckerFn = async (ctx) => {
 export const testsChecker: CheckerFn = async (ctx) => {
   try {
     if (await fileExists(join(ctx.worktree, 'scripts/verify.sh'))) {
-      const r = await runCommand(['bash', 'scripts/verify.sh', '--no-e2e'], { cwd: ctx.worktree, timeoutMs: 300_000 });
+      const r = await runCommand(['bash', 'scripts/verify.sh', '--no-e2e'], {
+        cwd: ctx.worktree,
+        timeoutMs: 300_000,
+        env: ctx.env,
+      });
       if (r.ok) return { checker: 'tests', result: 'PASS', details: 'scripts/verify.sh: OK' };
       return {
         checker: 'tests',
@@ -82,7 +88,7 @@ export const testsChecker: CheckerFn = async (ctx) => {
 
     const pkg = await getPackageJson(ctx);
     if (pkg?.scripts?.test) {
-      const r = await runCommand(['npm', 'test'], { cwd: ctx.worktree, timeoutMs: 300_000 });
+      const r = await runCommand(['npm', 'test'], { cwd: ctx.worktree, timeoutMs: 300_000, env: ctx.env });
       if (r.ok) return { checker: 'tests', result: 'PASS', details: 'npm test: OK' };
       return {
         checker: 'tests',
@@ -121,7 +127,7 @@ export const lintChecker: CheckerFn = async (ctx) => {
   const scripts = pkg?.scripts ?? {};
 
   if (scripts.lint) {
-    const r = await runCommand(['npm', 'run', 'lint'], { cwd: ctx.worktree, timeoutMs: 120_000 });
+    const r = await runCommand(['npm', 'run', 'lint'], { cwd: ctx.worktree, timeoutMs: 120_000, env: ctx.env });
     if (r.ok) {
       details.push('eslint: OK');
     } else {
@@ -132,7 +138,7 @@ export const lintChecker: CheckerFn = async (ctx) => {
 
   // TypeScript type check
   if (await fileExists(join(ctx.worktree, 'tsconfig.json'))) {
-    const r = await runCommand(['npx', 'tsc', '--noEmit'], { cwd: ctx.worktree, timeoutMs: 120_000 });
+    const r = await runCommand(['npx', 'tsc', '--noEmit'], { cwd: ctx.worktree, timeoutMs: 120_000, env: ctx.env });
     if (r.ok) {
       details.push('tsc: OK');
     } else {
@@ -273,6 +279,7 @@ Steps:
     const result = await router.run('check_custom', prompt, {
       worktree: ctx.worktree,
       timeoutSeconds: timeoutSeconds ?? 1800,
+      env: ctx.env,
     });
     // Extract the verdict: first balanced JSON object that carries a "checker" key
     const candidates = extractJsonObjects(result.output);
