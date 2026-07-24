@@ -232,6 +232,49 @@ export function leaseChecks(rows: LeaseHealthRow[]): DoctorCheck[] {
   });
 }
 
+export interface EventLogIntegrity {
+  total: number;
+  unparseable: number;
+}
+
+export function analyzeEventLog(content: string): EventLogIntegrity {
+  const lines = content.split('\n').filter((l) => l.trim() !== '');
+  let unparseable = 0;
+  for (const line of lines) {
+    try {
+      JSON.parse(line);
+    } catch {
+      unparseable++;
+    }
+  }
+  return { total: lines.length, unparseable };
+}
+
+export function eventLogCheck(integrity: EventLogIntegrity | null): DoctorCheck {
+  if (integrity === null) {
+    return { name: 'event log integrity', ok: true, optional: true, detail: 'no events.ndjson yet' };
+  }
+  if (integrity.total === 0) {
+    return { name: 'event log integrity', ok: true, optional: true, detail: 'events.ndjson is empty' };
+  }
+  const pct = ((integrity.unparseable / integrity.total) * 100).toFixed(1);
+  if (integrity.unparseable === 0) {
+    return {
+      name: 'event log integrity',
+      ok: true,
+      optional: true,
+      detail: `${integrity.total} lines, 0 unparseable (0.0%)`,
+    };
+  }
+  return {
+    name: 'event log integrity',
+    ok: false,
+    optional: true,
+    detail: `${integrity.unparseable} of ${integrity.total} lines unparseable (${pct}%)`,
+    fix: 'historical corruption from pre-lock parallel writes; appends are now serialized — metrics over this file carry this error bar',
+  };
+}
+
 export function formatReconcileReport(
   reaped: Array<{ lease: { worktreeId: string; port: number }; reason: string }>,
 ): string {

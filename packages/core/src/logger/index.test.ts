@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -272,5 +272,30 @@ describe('createLogger', () => {
 
     expect(existsSync(eventsFile)).toBe(true);
     expect(readEvents(eventsFile)).toHaveLength(1);
+  });
+
+  it('append removes the lock dir when done', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+    const logger = createLogger(eventsFile, {}, { out: { write: () => {} } });
+
+    logger.info('plan', 'locked append');
+
+    expect(existsSync(`${eventsFile}.lock`)).toBe(false);
+  });
+
+  it('falls back to an unlocked append when the lock is held past timeout', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+    const lockDir = `${eventsFile}.lock`;
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(join(lockDir, 'pid'), String(process.pid));
+
+    const logger = createLogger(eventsFile, {}, { out: { write: () => {} }, lock: { timeoutMs: 30, pollMs: 5 } });
+
+    logger.info('plan', 'fallback append');
+
+    expect(readEvents(eventsFile)).toHaveLength(1);
+    expect(existsSync(lockDir)).toBe(true);
   });
 });

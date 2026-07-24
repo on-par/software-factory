@@ -8,6 +8,7 @@ import { resolve } from 'node:path';
 
 import type { EvidencePack, FactoryEvent, FailoverReason, LogLevel, ReworkInfo } from '../types/index.js';
 import { colorEnabled, formatEventLine } from '../utils/format.js';
+import { withFileLockSync } from '../utils/lock.js';
 
 export interface LogContext {
   lane?: string;
@@ -25,6 +26,8 @@ export interface LogExtra {
 export interface LoggerOptions {
   out?: { write(s: string): unknown; isTTY?: boolean };
   env?: NodeJS.ProcessEnv;
+  /** Event-log lock tuning; tests lower these. */
+  lock?: { timeoutMs?: number; pollMs?: number };
 }
 
 export interface FactoryLogger {
@@ -40,6 +43,27 @@ const LEVEL_RANK: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error
 function resolveThreshold(env: NodeJS.ProcessEnv): LogLevel {
   const raw = env.FACTORY_LOG_LEVEL;
   return raw === 'debug' || raw === 'info' || raw === 'warn' || raw === 'error' ? raw : 'info';
+}
+
+function appendLine(eventsFile: string, line: string, lock?: { timeoutMs?: number; pollMs?: number }): void {
+  const doAppend = () => {
+    try {
+      appendFileSync(eventsFile, line);
+    } catch {
+      mkdirSync(resolve(eventsFile, '..'), { recursive: true });
+      appendFileSync(eventsFile, line);
+    }
+  };
+  try {
+    withFileLockSync(`${eventsFile}.lock`, doAppend, {
+      timeoutMs: lock?.timeoutMs ?? 10_000,
+      pollMs: lock?.pollMs ?? 5,
+    });
+  } catch {
+    // Lock stuck past timeout: a possibly-torn line beats a lost event or a
+    // crashed lane. Dead holders are already stolen by the lock itself.
+    doAppend();
+  }
 }
 
 export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: LoggerOptions = {}): FactoryLogger {
@@ -61,12 +85,7 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(extra?.rework ? { rework: extra.rework } : {}),
     };
     const line = JSON.stringify(event) + '\n';
-    try {
-      appendFileSync(eventsFile, line);
-    } catch {
-      mkdirSync(resolve(eventsFile, '..'), { recursive: true });
-      appendFileSync(eventsFile, line);
-    }
+    appendLine(eventsFile, line, opts.lock);
 
     if (LEVEL_RANK[level] < LEVEL_RANK[resolveThreshold(env)]) return;
 

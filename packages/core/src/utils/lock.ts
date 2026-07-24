@@ -65,6 +65,101 @@ function lockTimeoutError(lockDir: string): Error & { reason: string } {
   return Object.assign(new Error(`lock ${lockDir} stuck >30m`), { reason: 'timeout' });
 }
 
+export interface SyncFileLockOptions {
+  timeoutMs?: number;
+  pollMs?: number;
+  graceMs?: number;
+  isPidAlive?: (pid: number) => boolean;
+  onSteal?: (holderPid: number | null) => void;
+}
+
+const DEFAULT_SYNC_TIMEOUT_MS = 10_000;
+const DEFAULT_SYNC_POLL_MS = 5;
+
+const sleepBuf = new Int32Array(new SharedArrayBuffer(4));
+function sleepSync(ms: number): void {
+  Atomics.wait(sleepBuf, 0, 0, ms);
+}
+
+/**
+ * Synchronous sibling of withFileLock, for callers on a synchronous hot path
+ * (the event logger) that cannot become async without changing their public
+ * API. Mirrors the exact same mkdir+pid on-disk protocol so sync and async
+ * holders of different locks coexist safely.
+ */
+export function withFileLockSync<T>(lockDir: string, fn: () => T, opts: SyncFileLockOptions = {}): T {
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_SYNC_TIMEOUT_MS;
+  const pollMs = opts.pollMs ?? DEFAULT_SYNC_POLL_MS;
+  const graceMs = opts.graceMs ?? DEFAULT_GRACE_MS;
+  const isPidAlive = opts.isPidAlive ?? defaultIsPidAlive;
+  const pidPath = join(lockDir, 'pid');
+  const ourPid = String(process.pid);
+  let waitedMs = 0;
+
+  mkdirSync(dirname(lockDir), { recursive: true });
+
+  while (true) {
+    let acquired = false;
+    try {
+      mkdirSync(lockDir);
+      acquired = true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    }
+
+    if (acquired) {
+      try {
+        writeFileSync(pidPath, ourPid);
+      } catch (err) {
+        rmSync(lockDir, { recursive: true, force: true });
+        throw err;
+      }
+
+      try {
+        return fn();
+      } finally {
+        if (readHolderPid(pidPath) === Number(ourPid)) {
+          rmSync(lockDir, { recursive: true, force: true });
+        }
+      }
+    }
+
+    const holderPid = readHolderPid(pidPath);
+    if (holderPid !== null) {
+      if (!isPidAlive(holderPid)) {
+        rmSync(lockDir, { recursive: true, force: true });
+        opts.onSteal?.(holderPid);
+        continue;
+      }
+
+      if (waitedMs >= timeoutMs) {
+        throw lockTimeoutError(lockDir);
+      }
+      sleepSync(pollMs);
+      waitedMs += pollMs;
+      continue;
+    }
+
+    try {
+      const stat = statSync(lockDir);
+      if (Date.now() - stat.mtimeMs > graceMs) {
+        rmSync(lockDir, { recursive: true, force: true });
+        opts.onSteal?.(null);
+        continue;
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw err;
+    }
+
+    if (waitedMs >= timeoutMs) {
+      throw lockTimeoutError(lockDir);
+    }
+    sleepSync(pollMs);
+    waitedMs += pollMs;
+  }
+}
+
 export async function withFileLock<T>(lockDir: string, fn: () => Promise<T>, opts: FileLockOptions = {}): Promise<T> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const pollMs = opts.pollMs ?? DEFAULT_POLL_MS;

@@ -140,8 +140,8 @@ export {
   shellEscape,
   slugify,
 } from './utils/index.js';
-export type { FileLockOptions } from './utils/lock.js';
-export { withFileLock, withGitLock } from './utils/lock.js';
+export type { FileLockOptions, SyncFileLockOptions } from './utils/lock.js';
+export { withFileLock, withFileLockSync, withGitLock } from './utils/lock.js';
 export type { GcCandidate, GcReason, GcReport, SweepDeps, WorktreeListEntry } from './utils/worktree-gc.js';
 export {
   findCredentialFiles,

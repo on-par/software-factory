@@ -226,6 +226,7 @@ const INTERNAL_API_KEYS = [
   'describeCommandFailure',
   'runCommand',
   'withFileLock',
+  'withFileLockSync',
   'withGitLock',
   'findCredentialFiles',
   'formatGcReport',
