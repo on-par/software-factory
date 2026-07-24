@@ -77,6 +77,7 @@ chmod +x "$BINDIR/fake-factory"
 export PATH="$BINDIR:$PATH"
 export FACTORY_BIN="$BINDIR/fake-factory"
 export REPO_ROOT
+export LOG_FILE="$BINDIR/state/auto-merge-sweep.log"
 
 # shellcheck disable=SC1091
 source "$ROOT/scripts/auto-merge-sweep.sh"
@@ -103,6 +104,27 @@ assert_line not_contains "landed #42"
 assert_line contains "SKIPPING PR #103: closes multiple issues (#55, #56)"
 assert_line not_contains "landing issue #55"
 assert_line not_contains "merging standalone PR #103"
+
+# --- log persistence: log() tees dated lines to LOG_FILE, creating its dir ---
+
+if [ ! -f "$LOG_FILE" ]; then
+  echo "FAIL: expected log file to be created at $LOG_FILE" >&2
+  exit 1
+fi
+grep -qF "FAILED to merge PR #101 (exit 3)" "$LOG_FILE" || {
+  echo "FAIL: merge failure line not persisted to $LOG_FILE" >&2; exit 1; }
+grep -qF "FAILED to land #42 (PR #102) (exit 7)" "$LOG_FILE" || {
+  echo "FAIL: land failure line not persisted to $LOG_FILE" >&2; exit 1; }
+grep -qF "SKIPPING PR #103" "$LOG_FILE" || {
+  echo "FAIL: skip line not persisted to $LOG_FILE" >&2; exit 1; }
+if grep -Evq '^\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\] ' "$LOG_FILE"; then
+  echo "FAIL: log file contains lines without a full dated timestamp" >&2
+  cat "$LOG_FILE" >&2
+  exit 1
+fi
+
+# append, not truncate: line count grows across runs
+log_lines_before="$(wc -l <"$LOG_FILE" | tr -d ' ')"
 
 if [ "$(wc -l <"$FACTORY_CALL_LOG" | tr -d ' ')" != "1" ]; then
   echo "FAIL: factory land call count wrong — multi-issue PR #103 may have been landed" >&2
@@ -144,6 +166,12 @@ output="$(sweep_repo fakerepo 2>&1)"
 unset FACTORY_MERGE_ADMIN
 
 assert_line contains "FAILED to merge PR #101 (exit 3)"
+
+log_lines_after="$(wc -l <"$LOG_FILE" | tr -d ' ')"
+if [ "$log_lines_after" -le "$log_lines_before" ]; then
+  echo "FAIL: log file did not grow across runs — tee -a not appending" >&2
+  exit 1
+fi
 
 if ! grep -q -- "--admin" "$GH_CALL_LOG"; then
   echo "FAIL: expected gh pr merge call to include --admin when FACTORY_MERGE_ADMIN=1" >&2
@@ -277,4 +305,4 @@ if [ "$actual" != "$expected" ]; then
 fi
 unset -f sweep_once sleep
 
-echo "PASS: auto-merge-sweep logs merge/land failures with real exit codes, skips landing when the repo dir is missing, honours FACTORY_MERGE_ADMIN for the standalone merge path, writes a heartbeat on each pass, ships a valid KeepAlive launchd plist, preflight fatally rejects missing gh/factory/repo-dir dependencies, backs off exponentially up to MAX_SLEEP_SECONDS on sweep-wide failures resetting on success, and skips multi-issue-closing PRs with an explicit SKIPPING log line instead of silently landing only the first issue"
+echo "PASS: auto-merge-sweep logs merge/land failures with real exit codes, skips landing when the repo dir is missing, honours FACTORY_MERGE_ADMIN for the standalone merge path, writes a heartbeat on each pass, ships a valid KeepAlive launchd plist, preflight fatally rejects missing gh/factory/repo-dir dependencies, backs off exponentially up to MAX_SLEEP_SECONDS on sweep-wide failures resetting on success, skips multi-issue-closing PRs with an explicit SKIPPING log line instead of silently landing only the first issue, and tees every dated log line to a persistent LOG_FILE, creating its parent directory"

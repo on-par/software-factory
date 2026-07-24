@@ -6,7 +6,9 @@
 # Runs under launchd via scripts/launchd/com.on-par.auto-merge-sweep.plist (KeepAlive
 # restarts it on crash). Writes a heartbeat to ~/.factory/auto-merge-sweep.heartbeat
 # (override with HEARTBEAT_FILE) at the end of every completed pass so a monitor can
-# detect a stalled/dead sweeper. On a sweep-wide failure (every repo's `gh pr list`
+# detect a stalled/dead sweeper. Every log line is also appended to a dated persistent
+# log at ~/.local/state/auto-merge-sweep.log (override with LOG_FILE). On a sweep-wide
+# failure (every repo's `gh pr list`
 # failed), the sleep between passes doubles each consecutive failing pass up to
 # MAX_SLEEP_SECONDS (default 3600), resetting to SLEEP_SECONDS as soon as a pass
 # succeeds again. PRs that close more than one issue are skipped with an explicit
@@ -21,8 +23,10 @@ REPO_ROOT="${REPO_ROOT:-/Users/moltbot/repos/on-par}"
 SLEEP_SECONDS="${SLEEP_SECONDS:-300}"
 MAX_SLEEP_SECONDS="${MAX_SLEEP_SECONDS:-3600}"
 HEARTBEAT_FILE="${HEARTBEAT_FILE:-$HOME/.factory/auto-merge-sweep.heartbeat}"
+LOG_FILE="${LOG_FILE:-$HOME/.local/state/auto-merge-sweep.log}"
+mkdir -p "$(dirname "$LOG_FILE")"
 
-log() { echo "[$(date '+%H:%M:%S')] $*"; }
+log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$LOG_FILE"; }
 
 preflight() {
   local ok=0
