@@ -239,6 +239,57 @@ describe('CodexCliHarness temp file cleanup', () => {
   });
 });
 
+describe('CodexCliHarness served-model verification', () => {
+  it('throws when the codex CLI banner reports a different model than requested (#415)', async () => {
+    const rec = recordingExec({ stderr: 'model: gpt-5.6-sol\nreasoning effort: high' }, async (cmd) => {
+      await realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT');
+    });
+    const harness = new CodexCliHarness(rec.fn);
+
+    const err: any = await harness
+      .run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }))
+      .catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('error');
+    expect(err.message).toContain('gpt-5.6-sol');
+    expect(err.message).toContain('gpt-5-codex');
+    expect(err.details.stderr).toBe('model: gpt-5.6-sol\nreasoning effort: high');
+    expectTempFilesCleanedUp(rec.calls[0].cmd);
+  });
+
+  it('succeeds when the codex CLI banner matches the requested model', async () => {
+    const rec = recordingExec({ stderr: 'model: gpt-5-codex\nreasoning effort: high' }, async (cmd) => {
+      await realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT');
+    });
+    const harness = new CodexCliHarness(rec.fn);
+
+    const result = await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
+
+    expect(result.output).toBe('CODEX OUTPUT');
+  });
+
+  it('tolerates a missing model banner (older/quieter CLI, sandbox wrappers)', async () => {
+    const rec = successExec();
+    const harness = new CodexCliHarness(rec.fn);
+
+    const result = await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
+
+    expect(result.output).toBe('CODEX OUTPUT');
+  });
+
+  it('skips verification when no model is pinned, even with a foreign banner', async () => {
+    const rec = recordingExec({ stderr: 'model: gpt-5.6-sol' }, async (cmd) => {
+      await realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT');
+    });
+    const harness = new CodexCliHarness(rec.fn);
+
+    const result = await harness.run(makeContractRequest({ model: 'codex-no-flag', registry, prompt: 'build it' }));
+
+    expect(result.output).toBe('CODEX OUTPUT');
+  });
+});
+
 describe('CodexCliHarness failure classification', () => {
   it('classifies usage_cap from stderr', async () => {
     const harness = new CodexCliHarness(async () => {
