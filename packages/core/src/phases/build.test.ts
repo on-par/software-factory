@@ -631,6 +631,112 @@ describe('buildPhase timeoutSeconds', () => {
   });
 });
 
+describe('buildPhase appPort', () => {
+  it('injects leaseEnv and the port prompt block on the codex route when appPort is set', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-96.md');
+    const captured: { options?: any; prompt?: string } = {};
+    const fakeRouter = {
+      run: async (_task: string, prompt: string, options: any) => {
+        captured.options = options;
+        captured.prompt = prompt;
+        return { model: 'fake-model', output: 'done', exitCode: 0, attempts: [] };
+      },
+    } as any;
+
+    const result = await buildPhase({
+      issue: 96,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/96-appport',
+      route: 'codex',
+      router: fakeRouter,
+      constitution: null,
+      log: () => {},
+      appPort: 3142,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(captured.options.env).toEqual({
+      PORT: '3142',
+      FACTORY_APP_PORT: '3142',
+      FACTORY_BASE_URL: 'http://127.0.0.1:3142',
+    });
+    expect(captured.prompt).toContain('3142');
+    expect(captured.prompt).toContain('http://127.0.0.1:3142');
+    expect(captured.prompt).toContain('--strictPort');
+  });
+
+  it('injects leaseEnv and the port prompt block on the claude route when appPort is set', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-97.md');
+    const captured: { options?: any; prompt?: string } = {};
+    const fakeRouter = {
+      run: async (_task: string, prompt: string, options: any) => {
+        captured.options = options;
+        captured.prompt = prompt;
+        return { model: 'fake-model', output: 'done', exitCode: 0, attempts: [] };
+      },
+    } as any;
+
+    const result = await buildPhase({
+      issue: 97,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/97-appport',
+      route: 'claude',
+      router: fakeRouter,
+      constitution: null,
+      log: () => {},
+      appPort: 3142,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(captured.options.env).toEqual({
+      PORT: '3142',
+      FACTORY_APP_PORT: '3142',
+      FACTORY_BASE_URL: 'http://127.0.0.1:3142',
+    });
+    expect(captured.prompt).toContain('3142');
+    expect(captured.prompt).toContain('http://127.0.0.1:3142');
+    expect(captured.prompt).toContain('--strictPort');
+  });
+
+  it('carries no env and no port prompt block when appPort is unset', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-98.md');
+    const captured: { options?: any; prompt?: string } = {};
+    const fakeRouter = {
+      run: async (_task: string, prompt: string, options: any) => {
+        captured.options = options;
+        captured.prompt = prompt;
+        return { model: 'fake-model', output: 'done', exitCode: 0, attempts: [] };
+      },
+    } as any;
+
+    const result = await buildPhase({
+      issue: 98,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/98-no-appport',
+      route: 'claude',
+      router: fakeRouter,
+      constitution: null,
+      log: () => {},
+    });
+
+    expect(result.ok).toBe(true);
+    expect(captured.options.env).toBeUndefined();
+    expect(captured.prompt).not.toContain('Assigned app port');
+  });
+});
+
 describe('buildPhase cross-harness failover', () => {
   const failoverModels: ModelsConfig = {
     version: 1,

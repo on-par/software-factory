@@ -79,5 +79,12 @@
     "lane": "auto",
     "maxPerCycle": 20,
     "comment": "Always-on auto-ingest. When enabled, `factory supervise` polls each cycle for open issues carrying `label` and appends new ones (deduped against the queue and open ship-it/* PRs) to the queue under `lane`. Enable per-run with FACTORY_AUTO_INGEST=1; disable with =0."
+  },
+  "environment": {
+    "ports": {
+      "enabled": true,
+      "range": [3100, 3999],
+      "comment": "Per-lane app-port leases (.factory/ports.json). Each lane gets a unique port injected as PORT/FACTORY_APP_PORT/FACTORY_BASE_URL into BUILD/CHECK agent runs. Disable per-run with FACTORY_ENV_PORTS=0."
+    }
   }
 }

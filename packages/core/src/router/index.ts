@@ -87,6 +87,8 @@ export interface ModelExecutorContext {
   registry: ModelRegistry;
   routesConfig: RoutesConfig;
   sandbox?: SandboxPolicy;
+  /** Extra child-env vars (e.g. the lane's PORT lease) merged over the parent env. */
+  env?: Record<string, string>;
 }
 
 /** Executes a single resolved model. On failure, implementations should
@@ -132,7 +134,7 @@ export class CliModelExecutor implements ModelExecutor {
       'codex-cli': { run: (m, p, c) => this.runViaHarness(this.codexHarness, m, p, c) },
       'ollama-http': { run: (m, p, c) => this.runViaHarness(this.ollamaHarness, m, p, c) },
       'ollama-command-agent': {
-        run: (m, p, c) => this.runOllamaCommandAgent(m, p, c.worktree, c.timeoutSeconds, c.registry),
+        run: (m, p, c) => this.runOllamaCommandAgent(m, p, c.worktree, c.timeoutSeconds, c.registry, c.env),
       },
       opencode: { run: (m, p, c) => this.runViaHarness(this.opencodeHarness, m, p, c) },
       'ollama-agentic': { run: (m, p, c) => this.runViaHarness(this.ollamaAgenticHarness, m, p, c) },
@@ -176,7 +178,7 @@ export class CliModelExecutor implements ModelExecutor {
     harness: CodingHarness,
     model: string,
     prompt: string,
-    ctx: Pick<ModelExecutorContext, 'worktree' | 'timeoutSeconds' | 'task' | 'registry' | 'sandbox'>,
+    ctx: Pick<ModelExecutorContext, 'worktree' | 'timeoutSeconds' | 'task' | 'registry' | 'sandbox' | 'env'>,
   ): Promise<string> {
     const { output } = await harness.run({
       model,
@@ -186,6 +188,7 @@ export class CliModelExecutor implements ModelExecutor {
       task: ctx.task,
       registry: ctx.registry,
       sandbox: ctx.sandbox,
+      env: ctx.env,
     });
     return output;
   }
@@ -197,6 +200,7 @@ export class CliModelExecutor implements ModelExecutor {
     worktree: string,
     timeoutSeconds: number,
     registry: ModelRegistry,
+    env?: Record<string, string>,
   ): Promise<string> {
     const transcript: string[] = [];
     const initialStatus = await this.execFn('git status --short', {
@@ -283,6 +287,7 @@ First inspect, then edit, then run one cheap check, then git add/commit.
             cwd: worktree,
             timeoutMs: Math.max(30_000, Math.floor((timeoutSeconds * 1000) / 4)),
             maxBuffer: 10 * 1024 * 1024,
+            env,
           });
           commandOutputs.push(`$ ${command}\nEXIT_CODE: 0\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`);
         } catch (err: any) {
@@ -587,9 +592,10 @@ export class ModelRouter {
       onLog?: (msg: string) => void;
       sandbox?: SandboxPolicy;
       onSandboxEvent?: (type: SandboxEventType, detail: string) => void;
+      env?: Record<string, string>;
     } = {},
   ): Promise<RouterResult> {
-    const { worktree = process.cwd(), timeoutSeconds = 1800, modelOverride, onLog = () => {}, sandbox } = options;
+    const { worktree = process.cwd(), timeoutSeconds = 1800, modelOverride, onLog = () => {}, sandbox, env } = options;
 
     const models = modelOverride ? [modelOverride] : this.resolveAll(task);
     if (models.length === 0) {
@@ -619,6 +625,7 @@ export class ModelRouter {
             registry: this.registry,
             routesConfig: this.routesConfig,
             sandbox,
+            env,
           });
         } catch (err) {
           if (sandbox) {

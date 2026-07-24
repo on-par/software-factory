@@ -5,18 +5,35 @@
 // kits live behind '@on-par/factory-core/testing'.
 
 // Config
-export type { FactoryConfig, IngestSettings, ModelsConfig, RoutesConfig } from './config/index.js';
+export type {
+  EnvironmentPortsSettings,
+  FactoryConfig,
+  IngestSettings,
+  ModelsConfig,
+  RoutesConfig,
+} from './config/index.js';
 export {
   getConstitutionsDir,
   getFactoryPaths,
   loadFactoryConfig,
   loadModelsConfig,
   loadRoutesConfig,
+  resolveEnvironmentPorts,
   resolveIngestConfig,
   resolvePlanApproval,
   resolveSkipCI,
   resolveTimeouts,
 } from './config/index.js';
+
+// Environment
+export type { AcquirePortLeaseOptions, IsPortFreeFn, PortLease } from './environment/index.js';
+export {
+  acquirePortLease,
+  defaultIsPortFree,
+  leaseEnv,
+  PortLeaseError,
+  releasePortLease,
+} from './environment/index.js';
 
 // Queue
 export type {

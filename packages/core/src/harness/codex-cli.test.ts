@@ -156,6 +156,35 @@ describe('CodexCliHarness command shape', () => {
     expect(rec.calls[0].cmd).not.toContain('--model');
   });
 
+  it('forwards request.env verbatim to the execFn opts', async () => {
+    const rec = successExec();
+    const harness = new CodexCliHarness(rec.fn);
+
+    await harness.run(
+      makeContractRequest({
+        model: 'codex-model',
+        registry,
+        prompt: 'build it',
+        env: { PORT: '3142', FACTORY_APP_PORT: '3142', FACTORY_BASE_URL: 'http://127.0.0.1:3142' },
+      }),
+    );
+
+    expect(rec.calls[0].opts.env).toEqual({
+      PORT: '3142',
+      FACTORY_APP_PORT: '3142',
+      FACTORY_BASE_URL: 'http://127.0.0.1:3142',
+    });
+  });
+
+  it('leaves opts.env undefined when the request has no env', async () => {
+    const rec = successExec();
+    const harness = new CodexCliHarness(rec.fn);
+
+    await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
+
+    expect(rec.calls[0].opts.env).toBeUndefined();
+  });
+
   it('wraps the invocation in sandbox-exec when request.sandbox is set', async () => {
     const rec = recordingExec();
     const harness = new CodexCliHarness(rec.fn);

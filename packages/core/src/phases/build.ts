@@ -3,6 +3,7 @@
 import { readFile } from 'node:fs/promises';
 
 import { buildConstitutionContext } from '../constitutions/index.js';
+import { leaseEnv } from '../environment/index.js';
 import type { ModelRouter, RouterResult } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
@@ -31,6 +32,7 @@ export async function buildPhase(opts: {
   modelOverride?: string;
   sandbox?: SandboxPolicy;
   steering?: ConsumedSteering;
+  appPort?: number;
 }): Promise<BuildResult> {
   const {
     issue,
@@ -45,6 +47,7 @@ export async function buildPhase(opts: {
     modelOverride,
     sandbox,
     steering,
+    appPort,
   } = opts;
   let route = opts.route;
 
@@ -101,10 +104,10 @@ message explaining what's blocked, and stop there.
 
 Keep sub-agent/parallel-task usage modest: only fan out when a piece of work is
 genuinely independent and parallelizable. Prefer doing the work directly over
-spawning sub-agents for a single small issue — this keeps token usage efficient.`;
+spawning sub-agents for a single small issue — this keeps token usage efficient.${appPort ? `\n\n${appPortNote(appPort)}` : ''}`;
   } else {
     taskType = 'build_claude';
-    prompt = buildClaudePrompt({ issue, branch, specPath, constitutionCtx, skipCI });
+    prompt = buildClaudePrompt({ issue, branch, specPath, constitutionCtx, skipCI, appPort });
   }
 
   prompt = applySteering(prompt, steering);
@@ -124,6 +127,7 @@ spawning sub-agents for a single small issue — this keeps token usage efficien
     sandbox,
     onSandboxEvent: (type: string, detail: string) => log(type, detail),
     onLog: (msg: string) => log('router', msg),
+    ...(appPort ? { env: leaseEnv(appPort) } : {}),
   };
 
   let result: RouterResult;
@@ -150,7 +154,7 @@ spawning sub-agents for a single small issue — this keeps token usage efficien
     route = 'claude';
     taskType = 'build_claude';
     const claudePrompt = applySteering(
-      buildClaudePrompt({ issue, branch, specPath, constitutionCtx, skipCI }),
+      buildClaudePrompt({ issue, branch, specPath, constitutionCtx, skipCI, appPort }),
       steering,
     );
     result = await router.run('build_claude', claudePrompt, runOpts);
@@ -178,8 +182,9 @@ function buildClaudePrompt(opts: {
   specPath: string;
   constitutionCtx: string;
   skipCI?: boolean;
+  appPort?: number;
 }): string {
-  const { issue, branch, specPath, constitutionCtx, skipCI } = opts;
+  const { issue, branch, specPath, constitutionCtx, skipCI, appPort } = opts;
   return `/ship-it ${issue} — Run fully autonomously in headless mode, BUILD phase.
 You are ALREADY inside the isolated git worktree for issue ${issue} (branch ${branch},
 cwd is this worktree), so SKIP ship-it's worktree-creation step.
@@ -198,7 +203,16 @@ turn after an intermediate step. Before ending: (1) branch ${branch} is pushed,
 (2) open PR exists with 'Closes #${issue}' in its body, ${skipCI ? '(3) local verify passes (CI is intentionally skipped — do NOT block on GitHub Actions CI, do NOT escalate if CI cannot run), (4) PR ready.' : '(3) CI is green, (4) PR ready.'}
 
 If and ONLY IF you hit something genuinely ambiguous, print a line starting exactly
-with "ESCALATE:" followed by the question, then STOP.`;
+with "ESCALATE:" followed by the question, then STOP.${appPort ? `\n\n${appPortNote(appPort)}` : ''}`;
+}
+
+function appPortNote(appPort: number): string {
+  return `## Assigned app port
+This lane owns port ${appPort} (base URL http://127.0.0.1:${appPort}); PORT and
+FACTORY_APP_PORT are set in your environment. Any dev server, preview, or e2e
+config must read process.env.PORT — never hardcode 3000 — and must use a strict
+port (Vite: --strictPort; Next.js: -p ${appPort}) so a port mismatch fails loudly
+instead of silently auto-incrementing.`;
 }
 
 function compactForLocalModel(text: string): string {

@@ -166,6 +166,20 @@ const FactoryConfigSchema = z.object({
       comment: z.string().optional(),
     })
     .default({ enabled: false, label: 'ready', lane: 'auto', maxPerCycle: 20 }),
+  environment: z
+    .object({
+      ports: z
+        .object({
+          enabled: z.boolean().default(true),
+          range: z
+            .tuple([z.number().int().min(1024).max(65535), z.number().int().min(1024).max(65535)])
+            .default([3100, 3999]),
+          comment: z.string().optional(),
+        })
+        .refine((p) => p.range[0] <= p.range[1], { message: 'ports.range must be [low, high]' })
+        .default({ enabled: true, range: [3100, 3999] }),
+    })
+    .default({ ports: { enabled: true, range: [3100, 3999] } }),
 });
 
 // ---------- Types ----------
@@ -243,6 +257,21 @@ export function resolveIngestConfig(config: FactoryConfig, env: NodeJS.ProcessEn
   };
 }
 
+export interface EnvironmentPortsSettings {
+  enabled: boolean;
+  range: [number, number];
+}
+
+export function resolveEnvironmentPorts(
+  config: FactoryConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): EnvironmentPortsSettings {
+  let enabled = config.environment?.ports?.enabled ?? true;
+  if (env.FACTORY_ENV_PORTS === '1') enabled = true;
+  if (env.FACTORY_ENV_PORTS === '0') enabled = false;
+  return { enabled, range: config.environment?.ports?.range ?? [3100, 3999] };
+}
+
 export function resolveFilingPolicy(config: FactoryConfig): FilingPolicy {
   const f = config.filing;
   return {
@@ -279,6 +308,8 @@ export function getFactoryPaths(repoRoot: string) {
     steering: resolve(state, 'steering'),
     kpiHistory: resolve(state, 'kpi-history.jsonl'),
     ingestWatermark: resolve(state, 'ingest-watermark'),
+    ports: resolve(state, 'ports.json'),
+    portsLock: resolve(state, 'ports.lock'),
   };
 }
 

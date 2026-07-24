@@ -1,0 +1,273 @@
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import net from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
+
+import { acquirePortLease, defaultIsPortFree, leaseEnv, PortLeaseError, releasePortLease } from './index.js';
+
+const LOCK_OPTS = { pollMs: 5 };
+const alwaysFree = async () => true;
+
+async function withTmpDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
+  const dir = await mkdtemp(join(tmpdir(), 'ports-registry-'));
+  try {
+    return await fn(dir);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+describe('acquirePortLease', () => {
+  it('grants distinct ports to distinct worktrees, both persisted', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+
+      const a = await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/a',
+        branch: 'a',
+        range: [3100, 3999],
+        isPortFree: alwaysFree,
+        lockOpts: LOCK_OPTS,
+      });
+      const b = await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/b',
+        branch: 'b',
+        range: [3100, 3999],
+        isPortFree: alwaysFree,
+        lockOpts: LOCK_OPTS,
+      });
+
+      expect(a.port).not.toBe(b.port);
+
+      const registry = JSON.parse(await readFile(registryFile, 'utf-8'));
+      expect(registry.leases).toHaveLength(2);
+      expect(registry.leases.map((l: { port: number }) => l.port).sort()).toEqual([a.port, b.port].sort());
+    });
+  });
+
+  it('is idempotent per worktreeId', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+      const opts = {
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/a',
+        branch: 'a',
+        range: [3100, 3999] as [number, number],
+        isPortFree: alwaysFree,
+        lockOpts: LOCK_OPTS,
+      };
+
+      const first = await acquirePortLease(opts);
+      const second = await acquirePortLease(opts);
+
+      expect(second.port).toBe(first.port);
+      const registry = JSON.parse(await readFile(registryFile, 'utf-8'));
+      expect(registry.leases.filter((l: { worktreeId: string }) => l.worktreeId === '/wt/a')).toHaveLength(1);
+    });
+  });
+
+  it('grants pairwise-distinct ports under concurrent acquisition, repeatedly', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+      const range: [number, number] = [3100, 3999];
+
+      for (let iter = 0; iter < 50; iter++) {
+        const worktreeIds = Array.from({ length: 20 }, (_, i) => `/wt/iter${iter}/${i}`);
+        const leases = await Promise.all(
+          worktreeIds.map((worktreeId) =>
+            acquirePortLease({
+              registryFile,
+              lockDir,
+              worktreeId,
+              branch: 'b',
+              range,
+              isPortFree: alwaysFree,
+              lockOpts: LOCK_OPTS,
+            }),
+          ),
+        );
+
+        const ports = leases.map((l) => l.port);
+        expect(new Set(ports).size).toBe(ports.length);
+
+        const registry = JSON.parse(await readFile(registryFile, 'utf-8'));
+        expect(registry.leases).toHaveLength(20);
+        expect(new Set(registry.leases.map((l: { port: number }) => l.port))).toEqual(new Set(ports));
+
+        await Promise.all(
+          worktreeIds.map((worktreeId) => releasePortLease({ registryFile, lockDir, worktreeId, lockOpts: LOCK_OPTS })),
+        );
+      }
+    });
+  }, 30_000);
+
+  it('skips an externally-bound port using the real bind probe', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+
+      const server = net.createServer();
+      await new Promise<void>((resolve) => server.listen({ port: 0, host: '127.0.0.1' }, () => resolve()));
+      const address = server.address();
+      const boundPort = typeof address === 'object' && address ? address.port : 0;
+
+      try {
+        const lease = await acquirePortLease({
+          registryFile,
+          lockDir,
+          worktreeId: '/wt/a',
+          branch: 'a',
+          range: [boundPort, boundPort + 10],
+          isPortFree: defaultIsPortFree,
+          lockOpts: LOCK_OPTS,
+        });
+
+        expect(lease.port).not.toBe(boundPort);
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    });
+  });
+
+  it('throws PortLeaseError when the range is exhausted', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/a',
+        branch: 'a',
+        range: [3100, 3100],
+        isPortFree: alwaysFree,
+        lockOpts: LOCK_OPTS,
+      });
+
+      await expect(
+        acquirePortLease({
+          registryFile,
+          lockDir,
+          worktreeId: '/wt/b',
+          branch: 'b',
+          range: [3100, 3100],
+          isPortFree: alwaysFree,
+          lockOpts: LOCK_OPTS,
+        }),
+      ).rejects.toThrow(PortLeaseError);
+    });
+  });
+
+  it('treats corrupt/garbage ports.json as empty', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+      const { writeFile } = await import('node:fs/promises');
+      await writeFile(registryFile, 'not json{{{');
+
+      const lease = await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/a',
+        branch: 'a',
+        range: [3100, 3999],
+        isPortFree: alwaysFree,
+        lockOpts: LOCK_OPTS,
+      });
+
+      expect(lease.port).toBe(3100);
+    });
+  });
+});
+
+describe('defaultIsPortFree', () => {
+  it('returns false while a port is bound and true once freed', async () => {
+    const server = net.createServer();
+    await new Promise<void>((resolve) => server.listen({ port: 0, host: '127.0.0.1' }, () => resolve()));
+    const address = server.address();
+    const port = typeof address === 'object' && address ? address.port : 0;
+
+    expect(await defaultIsPortFree(port)).toBe(false);
+
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+
+    expect(await defaultIsPortFree(port)).toBe(true);
+  });
+});
+
+describe('releasePortLease', () => {
+  it('removes the entry for the given worktreeId', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/a',
+        branch: 'a',
+        range: [3100, 3999],
+        isPortFree: alwaysFree,
+        lockOpts: LOCK_OPTS,
+      });
+
+      await releasePortLease({ registryFile, lockDir, worktreeId: '/wt/a', lockOpts: LOCK_OPTS });
+
+      const registry = JSON.parse(await readFile(registryFile, 'utf-8'));
+      expect(registry.leases).toHaveLength(0);
+    });
+  });
+
+  it('is a no-op releasing an unknown worktreeId', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+      await acquirePortLease({
+        registryFile,
+        lockDir,
+        worktreeId: '/wt/a',
+        branch: 'a',
+        range: [3100, 3999],
+        isPortFree: alwaysFree,
+        lockOpts: LOCK_OPTS,
+      });
+
+      await expect(
+        releasePortLease({ registryFile, lockDir, worktreeId: '/wt/unknown', lockOpts: LOCK_OPTS }),
+      ).resolves.toBeUndefined();
+
+      const registry = JSON.parse(await readFile(registryFile, 'utf-8'));
+      expect(registry.leases).toHaveLength(1);
+    });
+  });
+
+  it('is a no-op when the registry file does not exist', async () => {
+    await withTmpDir(async (dir) => {
+      const registryFile = join(dir, 'ports.json');
+      const lockDir = join(dir, 'ports.lock');
+
+      await expect(
+        releasePortLease({ registryFile, lockDir, worktreeId: '/wt/a', lockOpts: LOCK_OPTS }),
+      ).resolves.toBeUndefined();
+    });
+  });
+});
+
+describe('leaseEnv', () => {
+  it('derives PORT/FACTORY_APP_PORT/FACTORY_BASE_URL from the leased port', () => {
+    expect(leaseEnv(3142)).toEqual({
+      PORT: '3142',
+      FACTORY_APP_PORT: '3142',
+      FACTORY_BASE_URL: 'http://127.0.0.1:3142',
+    });
+  });
+});

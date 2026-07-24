@@ -19,10 +19,17 @@ const PUBLIC_API_KEYS = [
   'loadFactoryConfig',
   'loadModelsConfig',
   'loadRoutesConfig',
+  'resolveEnvironmentPorts',
   'resolveIngestConfig',
   'resolvePlanApproval',
   'resolveSkipCI',
   'resolveTimeouts',
+  // Environment
+  'acquirePortLease',
+  'defaultIsPortFree',
+  'leaseEnv',
+  'PortLeaseError',
+  'releasePortLease',
   // Queue
   'parseQueue',
   'readQueue',

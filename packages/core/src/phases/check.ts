@@ -2,6 +2,7 @@
 
 import { type CheckerContext, runAllCheckers } from '../checkers/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
+import { leaseEnv } from '../environment/index.js';
 import type { ModelRouter } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
@@ -70,6 +71,7 @@ export async function checkPhase(opts: {
   checkTimeoutSeconds?: number;
   sandbox?: SandboxPolicy;
   drainSteering?: () => ConsumedSteering;
+  appPort?: number;
 }): Promise<CheckPhaseResult> {
   const {
     issue,
@@ -83,6 +85,7 @@ export async function checkPhase(opts: {
     checkTimeoutSeconds,
     sandbox,
     drainSteering,
+    appPort,
   } = opts;
 
   const ctx: CheckerContext = { worktree, specPath };
@@ -114,6 +117,7 @@ export async function checkPhase(opts: {
       buildTimeoutSeconds,
       sandbox,
       steering,
+      appPort,
     );
 
     const cause = classifyReworkCause({ steering, failovers });
@@ -177,6 +181,7 @@ async function reworkWorker(
   timeoutSeconds?: number,
   sandbox?: SandboxPolicy,
   steering?: ConsumedSteering,
+  appPort?: number,
 ): Promise<{ failovers: { model: string; reason: FailoverReason; detail?: string }[] }> {
   const constitutionCtx = buildConstitutionContext(constitution);
   const failures = summary.results.filter((r) => r.result === 'FAIL');
@@ -213,6 +218,7 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
       sandbox,
       onSandboxEvent: (type, detail) => log(type, detail),
       onLog: (msg) => log('router', msg),
+      ...(appPort ? { env: leaseEnv(appPort) } : {}),
     })
     .catch(() => null);
 
