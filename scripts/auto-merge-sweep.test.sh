@@ -10,7 +10,7 @@ BINDIR="$(mktemp -d)"
 REPO_ROOT="$(mktemp -d)"
 
 cleanup() {
-  rm -rf "$BINDIR" "$REPO_ROOT"
+  rm -rf "$BINDIR" "$REPO_ROOT" "${FACTORY_BIN_TEST_DIR:-}" "${NO_FACTORY_PATH_DIR:-}"
 }
 trap cleanup EXIT
 
@@ -383,6 +383,5 @@ ln -s "$(command -v mkdir)" "$NO_FACTORY_PATH_DIR/mkdir"
 resolved_factory_bin_default="$(env -u FACTORY_BIN PATH="$NO_FACTORY_PATH_DIR" "$(command -v bash)" -c 'source "'"$ROOT"'/scripts/auto-merge-sweep.sh"; echo "$FACTORY_BIN"')"
 [ "$resolved_factory_bin_default" = "$HOME/.local/bin/factory" ] || {
   echo "FAIL: FACTORY_BIN did not fall back to default: $resolved_factory_bin_default" >&2; exit 1; }
-rm -rf "$FACTORY_BIN_TEST_DIR" "$NO_FACTORY_PATH_DIR"
 
 echo "PASS: auto-merge-sweep logs merge/land failures with real exit codes, skips landing when the repo dir is missing, honours FACTORY_MERGE_ADMIN for the standalone merge path, writes a heartbeat on each pass, ships a valid KeepAlive launchd plist, preflight fatally rejects missing gh/factory/repo-dir/filter-script dependencies, backs off exponentially up to MAX_SLEEP_SECONDS on sweep-wide failures resetting on success, skips multi-issue-closing PRs with an explicit SKIPPING log line instead of silently landing only the first issue, tees every dated log line to a persistent LOG_FILE creating its parent directory, and externalizes config so ORG drives both ghrepo and the REPO_ROOT default, SWEEP_REPOS overrides the repo list, MERGE_FLAGS overrides the standalone-merge flags, and FACTORY_BIN falls back to command -v factory"
