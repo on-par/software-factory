@@ -20,10 +20,11 @@ export interface DoctorEnvProbes {
   /** Run a command, return trimmed stdout, or null if it fails. */
   tryExec: (cmd: string) => string | null;
   pathExists: (p: string) => boolean;
+  distFreshness?: () => { fresh: boolean; detail: string };
 }
 
 export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
-  const { commandAvailable, envPresent, tryExec, pathExists } = probes;
+  const { commandAvailable, envPresent, tryExec, pathExists, distFreshness } = probes;
   const checks: DoctorCheck[] = [];
 
   const repoRoot = tryExec('git rev-parse --show-toplevel');
@@ -144,6 +145,20 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
       detail: '.factory/ missing',
       fix: 'run `factory init`',
     });
+  }
+
+  if (distFreshness) {
+    const { fresh, detail } = distFreshness();
+    checks.push(
+      fresh
+        ? { name: 'compiled dist fresh', ok: true, detail }
+        : {
+            name: 'compiled dist fresh',
+            ok: false,
+            detail,
+            fix: "run 'npm run build' at the monorepo root",
+          },
+    );
   }
 
   return checks;

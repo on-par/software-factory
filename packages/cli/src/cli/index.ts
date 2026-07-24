@@ -92,6 +92,7 @@ import { Command } from 'commander';
 
 import { doctorFailed, formatDoctorChecks, runDoctorChecks } from './doctor.js';
 import { formatOverview, missingClaudeCliMessage, missingTokenMessage, notInitializedMessage } from './first-run.js';
+import { distFreshnessProbe, runStalenessGuard } from './staleness.js';
 
 const exec = promisify(execCb);
 type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<unknown>;
@@ -2060,6 +2061,7 @@ async function cmdDoctor() {
       }
     },
     pathExists: existsSync,
+    distFreshness: distFreshnessProbe(import.meta.url),
   });
   console.log(formatDoctorChecks(checks));
   if (doctorFailed(checks)) process.exit(1);
@@ -2070,6 +2072,18 @@ async function cmdDoctor() {
 export async function main() {
   if (process.argv.slice(2).length === 0) {
     console.log(formatOverview());
+    return;
+  }
+
+  const staleExit = runStalenessGuard({
+    entryUrl: import.meta.url,
+    env: process.env,
+    argv: process.argv,
+    error: (m) => console.error(chalk.red(m)),
+    warn: (m) => console.error(chalk.yellow(m)),
+  });
+  if (staleExit !== null) {
+    process.exitCode = staleExit;
     return;
   }
 
