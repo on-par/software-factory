@@ -239,6 +239,14 @@ fi
 grep -qF "FATAL: repo dir missing: $REPO_ROOT/missingrepo" <<<"$output" || {
   echo "FAIL: missing-repo-dir FATAL message not found in: $output" >&2; exit 1; }
 
+# missing filter script => FATAL + non-zero
+if output="$( (SCRIPT_DIR="$BINDIR/nowhere"; preflight) 2>&1 )"; then
+  echo "FAIL: preflight passed despite missing filter script" >&2
+  exit 1
+fi
+grep -qF "FATAL: filter script missing: $BINDIR/nowhere/filter-green-prs.py" <<<"$output" || {
+  echo "FAIL: missing-filter FATAL message not found in: $output" >&2; exit 1; }
+
 # --- plist: valid property list with KeepAlive set ---
 
 PLIST="$ROOT/scripts/launchd/com.on-par.auto-merge-sweep.plist"
@@ -305,4 +313,4 @@ if [ "$actual" != "$expected" ]; then
 fi
 unset -f sweep_once sleep
 
-echo "PASS: auto-merge-sweep logs merge/land failures with real exit codes, skips landing when the repo dir is missing, honours FACTORY_MERGE_ADMIN for the standalone merge path, writes a heartbeat on each pass, ships a valid KeepAlive launchd plist, preflight fatally rejects missing gh/factory/repo-dir dependencies, backs off exponentially up to MAX_SLEEP_SECONDS on sweep-wide failures resetting on success, skips multi-issue-closing PRs with an explicit SKIPPING log line instead of silently landing only the first issue, and tees every dated log line to a persistent LOG_FILE, creating its parent directory"
+echo "PASS: auto-merge-sweep logs merge/land failures with real exit codes, skips landing when the repo dir is missing, honours FACTORY_MERGE_ADMIN for the standalone merge path, writes a heartbeat on each pass, ships a valid KeepAlive launchd plist, preflight fatally rejects missing gh/factory/repo-dir/filter-script dependencies, backs off exponentially up to MAX_SLEEP_SECONDS on sweep-wide failures resetting on success, skips multi-issue-closing PRs with an explicit SKIPPING log line instead of silently landing only the first issue, and tees every dated log line to a persistent LOG_FILE, creating its parent directory"
