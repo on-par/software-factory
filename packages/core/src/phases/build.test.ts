@@ -632,7 +632,19 @@ describe('buildPhase timeoutSeconds', () => {
 });
 
 describe('buildPhase appPort', () => {
-  it('injects leaseEnv and the port prompt block on the codex route when appPort is set', async () => {
+  let prevFactoryHeadless: string | undefined;
+
+  beforeEach(() => {
+    prevFactoryHeadless = process.env.FACTORY_HEADLESS;
+    delete process.env.FACTORY_HEADLESS;
+  });
+
+  afterEach(() => {
+    if (prevFactoryHeadless === undefined) delete process.env.FACTORY_HEADLESS;
+    else process.env.FACTORY_HEADLESS = prevFactoryHeadless;
+  });
+
+  it('injects laneEnv and the port prompt block on the codex route when appPort is set', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);
     const specPath = join(worktree, 'issue-96.md');
@@ -660,6 +672,8 @@ describe('buildPhase appPort', () => {
 
     expect(result.ok).toBe(true);
     expect(captured.options.env).toEqual({
+      FACTORY_HEADLESS: '1',
+      PLAYWRIGHT_HEADLESS: '1',
       PORT: '3142',
       FACTORY_APP_PORT: '3142',
       FACTORY_BASE_URL: 'http://127.0.0.1:3142',
@@ -667,9 +681,11 @@ describe('buildPhase appPort', () => {
     expect(captured.prompt).toContain('3142');
     expect(captured.prompt).toContain('http://127.0.0.1:3142');
     expect(captured.prompt).toContain('--strictPort');
+    expect(captured.prompt).toContain('## Headless e2e');
+    expect(captured.prompt).toContain('--headed');
   });
 
-  it('injects leaseEnv and the port prompt block on the claude route when appPort is set', async () => {
+  it('injects laneEnv and the port prompt block on the claude route when appPort is set', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);
     const specPath = join(worktree, 'issue-97.md');
@@ -697,6 +713,8 @@ describe('buildPhase appPort', () => {
 
     expect(result.ok).toBe(true);
     expect(captured.options.env).toEqual({
+      FACTORY_HEADLESS: '1',
+      PLAYWRIGHT_HEADLESS: '1',
       PORT: '3142',
       FACTORY_APP_PORT: '3142',
       FACTORY_BASE_URL: 'http://127.0.0.1:3142',
@@ -704,9 +722,11 @@ describe('buildPhase appPort', () => {
     expect(captured.prompt).toContain('3142');
     expect(captured.prompt).toContain('http://127.0.0.1:3142');
     expect(captured.prompt).toContain('--strictPort');
+    expect(captured.prompt).toContain('## Headless e2e');
+    expect(captured.prompt).toContain('--headed');
   });
 
-  it('carries no env and no port prompt block when appPort is unset', async () => {
+  it('carries headless-only env and no port prompt block when appPort is unset', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);
     const specPath = join(worktree, 'issue-98.md');
@@ -732,8 +752,9 @@ describe('buildPhase appPort', () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(captured.options.env).toBeUndefined();
+    expect(captured.options.env).toEqual({ FACTORY_HEADLESS: '1', PLAYWRIGHT_HEADLESS: '1' });
     expect(captured.prompt).not.toContain('Assigned app port');
+    expect(captured.prompt).toContain('## Headless e2e');
   });
 });
 

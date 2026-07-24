@@ -251,3 +251,19 @@ export function leaseEnv(port: number): Record<string, string> {
     FACTORY_BASE_URL: `http://127.0.0.1:${port}`,
   };
 }
+
+/** Headless contract for factory-managed child processes. Explicit human
+ *  opt-out: FACTORY_HEADLESS=0 in the parent environment disables injection. */
+export function headlessEnv(parentEnv: Record<string, string | undefined> = process.env): Record<string, string> {
+  if (parentEnv.FACTORY_HEADLESS === '0') return {};
+  return { FACTORY_HEADLESS: '1', PLAYWRIGHT_HEADLESS: '1' };
+}
+
+/** Full lane environment for build/check/rework child processes: headless
+ *  contract always, port-lease vars when the lane holds a lease. */
+export function laneEnv(
+  port?: number,
+  parentEnv: Record<string, string | undefined> = process.env,
+): Record<string, string> {
+  return { ...headlessEnv(parentEnv), ...(port !== undefined ? leaseEnv(port) : {}) };
+}

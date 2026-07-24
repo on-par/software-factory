@@ -47,9 +47,16 @@ port and test the URL it actually runs on:
 - `use.baseURL` derives from `process.env.FACTORY_BASE_URL`, falling
   back to `http://127.0.0.1:${process.env.PORT}` — never a hard-coded
   port or URL.
-- The contract is plain environment variables, so the same rules apply
-  to any e2e tool (Cypress, WebdriverIO, curl smoke tests); Playwright
-  is the documented reference, not a dependency.
+- The factory also injects `FACTORY_HEADLESS=1` and `PLAYWRIGHT_HEADLESS=1`
+  into every factory-managed build and check command: e2e configs MUST be
+  headless by default (`headless: true`, or omitted — headless is
+  Playwright's default) and MUST NOT bake `--headed`, `--ui`, or
+  `cypress open` into test scripts. Headed mode is an explicit human
+  opt-in run outside the factory (or `FACTORY_HEADLESS=0`), never a
+  config default. The CHECK phase warns on configs that force headed mode.
+- The contract (ports and headless) is plain environment variables, so
+  the same rules apply to any e2e tool (Cypress, WebdriverIO, curl smoke
+  tests); Playwright is the documented reference, not a dependency.
 
 ## Quality Gates
 

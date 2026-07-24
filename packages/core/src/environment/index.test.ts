@@ -10,7 +10,9 @@ import {
   acquirePortLease,
   defaultIsPidAlive,
   defaultIsPortFree,
+  headlessEnv,
   inspectPortLeases,
+  laneEnv,
   leaseEnv,
   PortLeaseError,
   reapStalePortLeases,
@@ -290,6 +292,36 @@ describe('leaseEnv', () => {
       FACTORY_APP_PORT: '3142',
       FACTORY_BASE_URL: 'http://127.0.0.1:3142',
     });
+  });
+});
+
+describe('headlessEnv', () => {
+  it('returns the headless pair for an empty parent env', () => {
+    expect(headlessEnv({})).toEqual({ FACTORY_HEADLESS: '1', PLAYWRIGHT_HEADLESS: '1' });
+  });
+
+  it('returns an empty object when the parent env explicitly opts out', () => {
+    expect(headlessEnv({ FACTORY_HEADLESS: '0' })).toEqual({});
+  });
+});
+
+describe('laneEnv', () => {
+  it('returns all five vars when a port is leased', () => {
+    expect(laneEnv(3142, {})).toEqual({
+      FACTORY_HEADLESS: '1',
+      PLAYWRIGHT_HEADLESS: '1',
+      PORT: '3142',
+      FACTORY_APP_PORT: '3142',
+      FACTORY_BASE_URL: 'http://127.0.0.1:3142',
+    });
+  });
+
+  it('returns only the headless pair when no port is leased', () => {
+    expect(laneEnv(undefined, {})).toEqual({ FACTORY_HEADLESS: '1', PLAYWRIGHT_HEADLESS: '1' });
+  });
+
+  it('returns exactly leaseEnv(port) when the parent env opts out of headless', () => {
+    expect(laneEnv(3142, { FACTORY_HEADLESS: '0' })).toEqual(leaseEnv(3142));
   });
 });
 

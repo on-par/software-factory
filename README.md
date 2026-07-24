@@ -166,17 +166,23 @@ A constitution is a written standard that defines "done right" for a product. Ev
 Each lane leases a port from `.factory/ports.json` and every build/check
 command it runs (workers, `npm test`, lint, custom checkers) inherits:
 
-| Variable           | Example                 |
-| ------------------ | ----------------------- |
-| `PORT`             | `3142`                  |
-| `FACTORY_APP_PORT` | `3142`                  |
-| `FACTORY_BASE_URL` | `http://127.0.0.1:3142` |
+| Variable              | Example                 |
+| --------------------- | ----------------------- |
+| `PORT`                | `3142`                  |
+| `FACTORY_APP_PORT`    | `3142`                  |
+| `FACTORY_BASE_URL`    | `http://127.0.0.1:3142` |
+| `FACTORY_HEADLESS`    | `1`                     |
+| `PLAYWRIGHT_HEADLESS` | `1`                     |
 
 Product e2e suites should boot their app on `PORT` (strict-port) and point
 their test runner's base URL at `FACTORY_BASE_URL` — the constitution
 template scaffolds the full Playwright reference contract. When port
 leasing is disabled, checks still run but a `environment_warning` event
-flags the collision risk for app-testing worktrees.
+flags the collision risk for app-testing worktrees. Factory-managed runs
+are headless by default — e2e configs must honor `FACTORY_HEADLESS` (headed
+runs are an explicit human opt-in outside the factory, or
+`FACTORY_HEADLESS=0`); unlike the port vars, `FACTORY_HEADLESS` and
+`PLAYWRIGHT_HEADLESS` are injected even when no port lease is configured.
 
 ## Open-Core Boundary & Safety
 

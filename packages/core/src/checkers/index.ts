@@ -21,7 +21,7 @@ export interface CheckerContext {
   packageJson?: PackageJson | null;
   /** Set by runAllCheckers from constitution.requireTests — missing test command becomes FAIL instead of SKIP */
   testsRequired?: boolean;
-  /** Lane environment (PORT, FACTORY_APP_PORT, FACTORY_BASE_URL) merged into every checker command — set by checkPhase from the lane's port lease */
+  /** Lane environment (FACTORY_HEADLESS, PLAYWRIGHT_HEADLESS, and PORT/FACTORY_APP_PORT/FACTORY_BASE_URL when a port is leased) merged into every checker command — set by checkPhase */
   env?: Record<string, string>;
 }
 

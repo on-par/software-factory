@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
@@ -303,7 +303,19 @@ describe('checkPhase sandbox', () => {
 });
 
 describe('checkPhase appPort', () => {
-  it('includes leaseEnv in the rework router.run options when appPort is set', async () => {
+  let prevFactoryHeadless: string | undefined;
+
+  beforeEach(() => {
+    prevFactoryHeadless = process.env.FACTORY_HEADLESS;
+    delete process.env.FACTORY_HEADLESS;
+  });
+
+  afterEach(() => {
+    if (prevFactoryHeadless === undefined) delete process.env.FACTORY_HEADLESS;
+    else process.env.FACTORY_HEADLESS = prevFactoryHeadless;
+  });
+
+  it('includes laneEnv in the rework router.run options when appPort is set', async () => {
     const { worktree, specPath } = await makeFailingWorktree();
     const captured: { options: any }[] = [];
     const fakeRouter = {
@@ -325,13 +337,15 @@ describe('checkPhase appPort', () => {
 
     expect(captured.length).toBeGreaterThan(0);
     expect(captured[0].options.env).toEqual({
+      FACTORY_HEADLESS: '1',
+      PLAYWRIGHT_HEADLESS: '1',
       PORT: '3142',
       FACTORY_APP_PORT: '3142',
       FACTORY_BASE_URL: 'http://127.0.0.1:3142',
     });
   });
 
-  it('carries no env in the rework router.run options when appPort is unset', async () => {
+  it('carries headless-only env in the rework router.run options when appPort is unset', async () => {
     const { worktree, specPath } = await makeFailingWorktree();
     const captured: { options: any }[] = [];
     const fakeRouter = {
@@ -351,7 +365,7 @@ describe('checkPhase appPort', () => {
     });
 
     expect(captured.length).toBeGreaterThan(0);
-    expect(captured[0].options.env).toBeUndefined();
+    expect(captured[0].options.env).toEqual({ FACTORY_HEADLESS: '1', PLAYWRIGHT_HEADLESS: '1' });
   });
 
   it('threads the lane env into the checker ctx so checker commands see it', { timeout: 30_000 }, async () => {
@@ -509,6 +523,108 @@ describe('checkPhase appPort', () => {
         autoRework: false,
       }),
     ).resolves.toBeDefined();
+  });
+});
+
+describe('checkPhase headed-mode warnings', () => {
+  it('warns and records summary.warnings when playwright.config.ts forces headless: false', async () => {
+    const worktree = await makeWorktreeWithFiles(109, {
+      'playwright.config.ts': 'export default { use: { headless: false } };\n',
+    });
+    const { router } = makeRouter();
+    const logCalls: Array<[string, string]> = [];
+
+    const check = await checkPhase({
+      issue: 109,
+      worktree,
+      specPath: join(worktree, 'issue-109.md'),
+      router,
+      constitution: null,
+      log: (type, msg) => logCalls.push([type, msg]),
+      appPort: 3142,
+      autoRework: false,
+    });
+
+    const warning = logCalls.find(
+      ([type, msg]) => type === 'environment_warning' && msg.includes('playwright.config.ts'),
+    );
+    expect(warning).toBeDefined();
+    expect(warning?.[1]).toContain('headless: false');
+    expect(check.summary.warnings).toEqual(['playwright.config.ts forces headless: false']);
+  });
+
+  it('warns when a package.json script passes --headed', async () => {
+    const worktree = await makeWorktreeWithFiles(110, {
+      'package.json': JSON.stringify({ scripts: { e2e: 'playwright test --headed' } }),
+    });
+    const { router } = makeRouter();
+    const logCalls: Array<[string, string]> = [];
+
+    const check = await checkPhase({
+      issue: 110,
+      worktree,
+      specPath: join(worktree, 'issue-110.md'),
+      router,
+      constitution: null,
+      log: (type, msg) => logCalls.push([type, msg]),
+      appPort: 3142,
+      autoRework: false,
+    });
+
+    const warning = logCalls.find(
+      ([type, msg]) => type === 'environment_warning' && msg.includes('headed e2e config detected'),
+    );
+    expect(warning).toBeDefined();
+    expect(warning?.[1]).toContain('--headed');
+    expect(check.summary.warnings).toEqual(["package.json script 'e2e' passes --headed"]);
+  });
+
+  it("warns when a package.json script runs 'cypress open'", async () => {
+    const worktree = await makeWorktreeWithFiles(111, {
+      'package.json': JSON.stringify({ scripts: { cy: 'cypress open' } }),
+    });
+    const { router } = makeRouter();
+    const logCalls: Array<[string, string]> = [];
+
+    const check = await checkPhase({
+      issue: 111,
+      worktree,
+      specPath: join(worktree, 'issue-111.md'),
+      router,
+      constitution: null,
+      log: (type, msg) => logCalls.push([type, msg]),
+      autoRework: false,
+    });
+
+    const warning = logCalls.find(([type, msg]) => type === 'environment_warning' && msg.includes("script 'cy'"));
+    expect(warning).toBeDefined();
+    expect(warning?.[1]).toContain('cypress open');
+    expect(check.summary.warnings).toEqual(["package.json script 'cy' runs 'cypress open' (interactive UI runner)"]);
+  });
+
+  it('does not warn for a plain headless playwright config and script', async () => {
+    const worktree = await makeWorktreeWithFiles(112, {
+      'playwright.config.ts': 'export default {};\n',
+      'package.json': JSON.stringify({ scripts: { e2e: 'playwright test' } }),
+    });
+    const { router } = makeRouter();
+    const logCalls: Array<[string, string]> = [];
+
+    const check = await checkPhase({
+      issue: 112,
+      worktree,
+      specPath: join(worktree, 'issue-112.md'),
+      router,
+      constitution: null,
+      log: (type, msg) => logCalls.push([type, msg]),
+      appPort: 3142,
+      autoRework: false,
+    });
+
+    expect(
+      logCalls.find(([type, msg]) => type === 'environment_warning' && msg.includes('headed e2e config detected')),
+    ).toBeUndefined();
+    expect(check.summary.warnings).toBeUndefined();
   });
 });
 
