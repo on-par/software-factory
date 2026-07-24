@@ -3,7 +3,7 @@
 import { readFile } from 'node:fs/promises';
 
 import { buildConstitutionContext } from '../constitutions/index.js';
-import { leaseEnv } from '../environment/index.js';
+import { laneEnv } from '../environment/index.js';
 import type { ModelRouter, RouterResult } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
@@ -104,7 +104,9 @@ message explaining what's blocked, and stop there.
 
 Keep sub-agent/parallel-task usage modest: only fan out when a piece of work is
 genuinely independent and parallelizable. Prefer doing the work directly over
-spawning sub-agents for a single small issue — this keeps token usage efficient.${appPort ? `\n\n${appPortNote(appPort)}` : ''}`;
+spawning sub-agents for a single small issue — this keeps token usage efficient.
+
+${headlessNote()}${appPort ? `\n\n${appPortNote(appPort)}` : ''}`;
   } else {
     taskType = 'build_claude';
     prompt = buildClaudePrompt({ issue, branch, specPath, constitutionCtx, skipCI, appPort });
@@ -127,7 +129,7 @@ spawning sub-agents for a single small issue — this keeps token usage efficien
     sandbox,
     onSandboxEvent: (type: string, detail: string) => log(type, detail),
     onLog: (msg: string) => log('router', msg),
-    ...(appPort ? { env: leaseEnv(appPort) } : {}),
+    env: laneEnv(appPort),
   };
 
   let result: RouterResult;
@@ -203,7 +205,20 @@ turn after an intermediate step. Before ending: (1) branch ${branch} is pushed,
 (2) open PR exists with 'Closes #${issue}' in its body, ${skipCI ? '(3) local verify passes (CI is intentionally skipped — do NOT block on GitHub Actions CI, do NOT escalate if CI cannot run), (4) PR ready.' : '(3) CI is green, (4) PR ready.'}
 
 If and ONLY IF you hit something genuinely ambiguous, print a line starting exactly
-with "ESCALATE:" followed by the question, then STOP.${appPort ? `\n\n${appPortNote(appPort)}` : ''}`;
+with "ESCALATE:" followed by the question, then STOP.
+
+${headlessNote()}${appPort ? `\n\n${appPortNote(appPort)}` : ''}`;
+}
+
+function headlessNote(): string {
+  return `## Headless e2e (factory-managed run)
+FACTORY_HEADLESS=1 and PLAYWRIGHT_HEADLESS=1 are set in your environment — this
+is an unattended run and must never open a visible browser window. Any e2e or
+browser-runner config you scaffold or edit (Playwright, Cypress, etc.) must be
+headless by default: keep \`headless: true\` (or omit it — headless is
+Playwright's default) and never bake \`--headed\`, \`--ui\`, or \`cypress open\`
+into package.json test scripts. Headed mode is a human's explicit local
+opt-in, not a config default.`;
 }
 
 function appPortNote(appPort: number): string {

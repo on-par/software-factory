@@ -94,6 +94,8 @@ export interface CheckSummary {
   skips: number;
   total: number;
   results: CheckerOutput[];
+  /** Non-blocking environment findings (e.g. headed e2e configs) surfaced during CHECK. */
+  warnings?: string[];
 }
 
 // ---------- Failover ----------

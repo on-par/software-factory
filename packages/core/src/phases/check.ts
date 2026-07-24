@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import { type CheckerContext, fileExists, runAllCheckers } from '../checkers/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
-import { leaseEnv } from '../environment/index.js';
+import { laneEnv } from '../environment/index.js';
 import type { ModelRouter } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
@@ -90,6 +90,47 @@ async function detectLiveAppSignal(worktree: string): Promise<string | null> {
   return null;
 }
 
+/** Human-readable headed-mode signals ("playwright.config.ts forces headless: false",
+ *  "package.json script 'e2e' passes --headed"), empty when nothing forces a headed browser. */
+async function detectHeadedModeSignals(worktree: string): Promise<string[]> {
+  const signals: string[] = [];
+
+  for (const f of PLAYWRIGHT_CONFIG_FILES) {
+    const content = await readFile(join(worktree, f), 'utf-8').catch(() => null);
+    if (content !== null && /headless\s*:\s*false/.test(content)) {
+      signals.push(`${f} forces headless: false`);
+    }
+  }
+
+  const raw = await readFile(join(worktree, 'package.json'), 'utf-8').catch(() => null);
+  if (raw !== null) {
+    let pkg: unknown;
+    try {
+      pkg = JSON.parse(raw);
+    } catch {
+      pkg = null;
+    }
+    if (typeof pkg === 'object' && pkg !== null) {
+      const scripts = (pkg as { scripts?: unknown }).scripts;
+      if (typeof scripts === 'object' && scripts !== null) {
+        for (const [name, script] of Object.entries(scripts as Record<string, unknown>)) {
+          if (typeof script !== 'string') continue;
+          if (/(^|\s)--headed\b/.test(script)) {
+            signals.push(`package.json script '${name}' passes --headed`);
+          } else if (/(^|\s)--ui\b/.test(script)) {
+            signals.push(`package.json script '${name}' passes --ui`);
+          }
+          if (/\bcypress\s+open\b/.test(script)) {
+            signals.push(`package.json script '${name}' runs 'cypress open' (interactive UI runner)`);
+          }
+        }
+      }
+    }
+  }
+
+  return signals;
+}
+
 function classifyReworkCause(opts: {
   steering?: ConsumedSteering;
   failovers: { reason: FailoverReason }[];
@@ -128,7 +169,7 @@ export async function checkPhase(opts: {
     appPort,
   } = opts;
 
-  const ctx: CheckerContext = { worktree, specPath, ...(appPort !== undefined ? { env: leaseEnv(appPort) } : {}) };
+  const ctx: CheckerContext = { worktree, specPath, env: laneEnv(appPort) };
 
   if (appPort === undefined) {
     const signal = await detectLiveAppSignal(worktree);
@@ -138,6 +179,14 @@ export async function checkPhase(opts: {
         `no leased port for this lane but the worktree runs a live app for testing (${signal}) — parallel-lane e2e servers may collide on a shared port; enable environment.ports in factory.json`,
       );
     }
+  }
+
+  const headedSignals = await detectHeadedModeSignals(worktree);
+  for (const signal of headedSignals) {
+    log(
+      'environment_warning',
+      `headed e2e config detected (${signal}) — factory-managed runs are headless by default; configs must honor FACTORY_HEADLESS/PLAYWRIGHT_HEADLESS (see the constitution's e2e environment contract)`,
+    );
   }
 
   log('check', 'Running checkers');
@@ -217,6 +266,11 @@ export async function checkPhase(opts: {
     log('check', summary.skips > 0 ? `All checkers passed (${summary.skips} skipped)` : 'All checkers passed');
   }
 
+  const finalHeadedSignals = reworkRounds > 0 ? await detectHeadedModeSignals(worktree) : headedSignals;
+  if (finalHeadedSignals.length > 0) {
+    summary = { ...summary, warnings: finalHeadedSignals };
+  }
+
   return { passed: summary.failures === 0, summary, reworkRounds, stuck };
 }
 
@@ -268,7 +322,7 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
       sandbox,
       onSandboxEvent: (type, detail) => log(type, detail),
       onLog: (msg) => log('router', msg),
-      ...(appPort ? { env: leaseEnv(appPort) } : {}),
+      env: laneEnv(appPort),
     })
     .catch(() => null);
 
