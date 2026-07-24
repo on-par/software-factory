@@ -153,6 +153,7 @@ export { readIssueEvents, renderLocalRunReport, writeLocalRunReport } from './re
 
 // KPIs
 export type { HealthKpis, KpiHistoryRecord } from './kpis/index.js';
+export type { CommitSource, HumanSourceClient, PrSource } from './kpis/index.js';
 export {
   appendKpiHistoryLine,
   computeHealthKpis,
@@ -161,6 +162,13 @@ export {
   parseKpiHistory,
   renderKpiReport,
   renderKpiTrend,
+} from './kpis/index.js';
+export {
+  fetchHumanEventSources,
+  hasUnresolvedPark,
+  HUMAN_EVENT_TYPES,
+  isHumanEvent,
+  reconstructHumanEvents,
 } from './kpis/index.js';
 
 // Discovery

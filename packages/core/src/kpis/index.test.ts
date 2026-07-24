@@ -57,11 +57,28 @@ describe('computeHealthKpis', () => {
     expect(kpis.merged).toBe(2);
     expect(kpis.reworkRuns).toBe(1);
     expect(kpis.stuckRuns).toBe(0);
-    expect(kpis.interventionRuns).toBe(1);
     expect(kpis.mergeRate).toBe(0.5);
     expect(kpis.reworkRate).toBe(0.25);
     expect(kpis.stuckRate).toBe(0);
-    expect(kpis.humanInterventionRate).toBe(0.25);
+    // 'parked' is a proxy event, not an explicit human-* event — the human
+    // metric is built solely from human-* events now (#420).
+    expect(kpis.humanTouchedRuns).toBe(0);
+    expect(kpis.humanInterventionRate).toBe(0);
+  });
+
+  it('counts an explicit human-* event toward humanTouchedRuns', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title' }),
+      event({ issue: '1', type: 'human-approved', actor: 'alice' }),
+      event({ issue: '1', type: 'merged' }),
+      event({ issue: '2', type: 'issue-title' }),
+      event({ issue: '2', type: 'merged' }),
+    ];
+
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.humanTouchedRuns).toBe(1);
+    expect(kpis.humanInterventionRate).toBe(0.5);
   });
 
   it('detects stuck runs via type: stuck and via rework.stuck', () => {
@@ -127,6 +144,8 @@ describe('computeHealthKpis', () => {
     expect(kpis.reworkRate).toBe(0);
     expect(kpis.stuckRate).toBe(0);
     expect(kpis.humanInterventionRate).toBe(0);
+    expect(kpis.humanEventsPerRun).toBeNull();
+    expect(kpis.fullyAutonomousRate).toBe(0);
     expect(kpis.costPerMergedPr).toBeNull();
     expect(kpis.medianCycleTimeMs).toBeNull();
     expect(kpis.p90CycleTimeMs).toBeNull();
@@ -137,6 +156,69 @@ describe('computeHealthKpis', () => {
     const lines = formatKpiLines(kpis);
     expect(lines).toEqual(['No factory runs recorded yet.']);
     expect(lines.join('\n')).not.toContain('NaN');
+  });
+});
+
+describe('human intervention KPIs (#420)', () => {
+  it('a human-pushed commit makes a merged run non-autonomous, a clean run stays autonomous', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title' }),
+      event({ issue: '1', type: 'human-edited', actor: 'alice' }),
+      event({ issue: '1', type: 'merged' }),
+      event({ issue: '2', type: 'issue-title' }),
+      event({ issue: '2', type: 'merged' }),
+    ];
+
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.merged).toBe(2);
+    expect(kpis.humanTouchedRuns).toBe(1);
+    expect(kpis.fullyAutonomousRuns).toBe(1);
+    expect(kpis.fullyAutonomousRate).toBe(0.5);
+  });
+
+  it('a human-merged event counts the run as merged but not autonomous', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title' }),
+      event({ issue: '1', type: 'human-merged', actor: 'bob' }),
+    ];
+
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.merged).toBe(1);
+    expect(kpis.mergeRate).toBe(1);
+    expect(kpis.humanTouchedRuns).toBe(1);
+    expect(kpis.fullyAutonomousRuns).toBe(0);
+  });
+
+  it('computes humanEventsPerRun as the mean human events across all runs', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title' }),
+      event({ issue: '1', type: 'human-approved', actor: 'alice' }),
+      event({ issue: '1', type: 'human-edited', actor: 'alice' }),
+      event({ issue: '2', type: 'issue-title' }),
+      event({ issue: '2', type: 'human-approved', actor: 'bob' }),
+    ];
+
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.humanEventsPerRun).toBe(1.5);
+  });
+
+  it('includes the human-touched and fully-autonomous lines in formatKpiLines', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title' }),
+      event({ issue: '1', type: 'human-approved', actor: 'alice' }),
+      event({ issue: '1', type: 'merged' }),
+      event({ issue: '2', type: 'issue-title' }),
+      event({ issue: '2', type: 'merged' }),
+    ];
+
+    const kpis = computeHealthKpis(events, []);
+    const lines = formatKpiLines(kpis);
+
+    expect(lines).toContain('Human-touched runs: 50% (1/2, 0.50 human events/run)');
+    expect(lines).toContain('Fully autonomous: 50% (1/2 merged with zero human events)');
   });
 });
 
@@ -352,6 +434,7 @@ describe('KPI trend', () => {
       reworkRate: 0.25,
       stuckRate: 0,
       humanInterventionRate: 0.25,
+      fullyAutonomousRate: 0.25,
       costPerMergedPr: 0.4,
       medianCycleTimeMs: 360_000,
       p90CycleTimeMs: 600_000,
@@ -376,7 +459,9 @@ describe('KPI trend', () => {
 
     const trend = renderKpiTrend(parsed);
     expect(trend).toContain('## Health KPI trend');
-    expect(trend).toContain('| date | runs | merge | rework | stuck | human | $/merged | cycle p50 | cycle p90 |');
+    expect(trend).toContain(
+      '| date | runs | merge | rework | stuck | human | auto | $/merged | cycle p50 | cycle p90 |',
+    );
     for (const record of records) {
       expect(trend).toContain(record.date);
     }
@@ -403,7 +488,7 @@ describe('KPI trend', () => {
     const trend = renderKpiTrend([legacy]);
     const row = trend.split('\n').find((line) => line.startsWith('| 2026-07-17'));
     expect(row).toBeDefined();
-    expect(row).toBe('| 2026-07-17 | 3 | 100% | 0% | 0% | 0% | — | — | — |');
+    expect(row).toBe('| 2026-07-17 | 3 | 100% | 0% | 0% | 0% | — | — | — | — |');
   });
 
   it('builds a history record from computed KPIs', () => {
@@ -419,6 +504,7 @@ describe('KPI trend', () => {
       reworkRate: 0,
       stuckRate: 0,
       humanInterventionRate: 0,
+      fullyAutonomousRate: 1,
       costPerMergedPr: 0,
       medianCycleTimeMs: 0,
       p90CycleTimeMs: 0,

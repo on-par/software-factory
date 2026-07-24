@@ -21,6 +21,7 @@ export interface LogExtra {
   fingerprint?: string;
   evidence?: EvidencePack;
   rework?: ReworkInfo;
+  actor?: string;
 }
 
 export interface LoggerOptions {
@@ -79,6 +80,7 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       level,
       ...(ctx.lane ? { lane: ctx.lane } : {}),
       ...(ctx.phase ? { phase: ctx.phase } : {}),
+      ...(extra?.actor ? { actor: extra.actor } : {}),
       ...(extra?.failoverReason ? { failoverReason: extra.failoverReason } : {}),
       ...(extra?.fingerprint ? { fingerprint: extra.fingerprint } : {}),
       ...(extra?.evidence ? { evidence: extra.evidence } : {}),

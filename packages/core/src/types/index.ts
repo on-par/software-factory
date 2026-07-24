@@ -174,6 +174,11 @@ export type ReworkCause = 'factory-fault' | 'direction-change' | 'external';
  *  other = unclassifiable. */
 export type RetryCause = 'checker' | 'failover' | 'timeout' | 'other';
 
+/** Explicit human-action event types (#420). Each event carries issue, actor, ts, msg.
+ *  'human-restarted' is emitted live by the CLI; the other four are reconstructed
+ *  from the GitHub API at report time by reconstructHumanEvents(). */
+export type HumanEventType = 'human-approved' | 'human-edited' | 'human-restarted' | 'human-merged' | 'human-abandoned';
+
 /** Structured payload carried on `rework`/`stuck` events for later metrics (#386). */
 export interface ReworkInfo {
   /** 1-based rework round number. */
@@ -193,6 +198,8 @@ export interface FactoryEvent {
   level?: LogLevel;
   lane?: string;
   phase?: string;
+  /** Human who performed the action, for human-* event types (#420). */
+  actor?: string;
   failoverReason?: FailoverReason;
   fingerprint?: string;
   evidence?: EvidencePack;

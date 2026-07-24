@@ -32,11 +32,13 @@ import {
   diagnoseModels,
   drainSteering,
   estimateTrailingSpend,
+  fetchHumanEventSources,
   fetchSubscriptionUsage,
   formatKpiLines,
   formatUsageReport,
   getConstitutionsDir,
   getFactoryPaths,
+  hasUnresolvedPark,
   inspectPortLeases,
   isCommandAvailable,
   kpisToHistoryRecord,
@@ -53,6 +55,7 @@ import {
   readEvents,
   readUsage,
   reapStalePortLeases,
+  reconstructHumanEvents,
   releasePortLease,
   renderKpiReport,
   renderKpiTrend,
@@ -468,7 +471,23 @@ async function cmdKpis() {
   const paths = getFactoryPaths(repoRoot);
   const events = existsSync(paths.events) ? readEvents(paths.events) : [];
   const costs = existsSync(paths.costs) ? readCosts(paths.costs) : [];
-  const kpis = computeHealthKpis(events, costs);
+
+  let allEvents = events;
+  try {
+    const ghRepo = await getGitHubRepo();
+    const [owner, repoName] = ghRepo.split('/');
+    const issues = new Set(events.map((e) => e.issue).filter((i) => /^\d+$/.test(i)));
+    const sources = await fetchHumanEventSources(getOctokit(), owner, repoName, issues);
+    allEvents = [...events, ...reconstructHumanEvents(sources, events)];
+  } catch (err: any) {
+    console.error(
+      chalk.yellow(
+        `factory: GitHub human-event reconstruction unavailable (${err?.message ?? err}) — KPIs use the local log only`,
+      ),
+    );
+  }
+
+  const kpis = computeHealthKpis(allEvents, costs);
 
   const record = kpisToHistoryRecord(kpis, new Date().toISOString().slice(0, 10));
   const existing = existsSync(paths.kpiHistory) ? readFileSync(paths.kpiHistory, 'utf-8') : '';
@@ -980,6 +999,14 @@ async function cmdShip(
   if (!existsSync(paths.state)) {
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
+
+  const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
+  if (hasUnresolvedPark(priorEvents, String(issueNum))) {
+    logEvent(paths.events, 'human-restarted', issueNum, 'manual retry of a previously parked/failed run', {
+      actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
+    });
+  }
+
   try {
     return await shipIssue(issueNum, opts);
   } catch (err: any) {
