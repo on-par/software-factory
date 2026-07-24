@@ -10,7 +10,7 @@ BINDIR="$(mktemp -d)"
 REPO_ROOT="$(mktemp -d)"
 
 cleanup() {
-  rm -rf "$BINDIR" "$REPO_ROOT"
+  rm -rf "$BINDIR" "$REPO_ROOT" "${FACTORY_BIN_TEST_DIR:-}" "${NO_FACTORY_PATH_DIR:-}"
 }
 trap cleanup EXIT
 
@@ -313,4 +313,75 @@ if [ "$actual" != "$expected" ]; then
 fi
 unset -f sweep_once sleep
 
-echo "PASS: auto-merge-sweep logs merge/land failures with real exit codes, skips landing when the repo dir is missing, honours FACTORY_MERGE_ADMIN for the standalone merge path, writes a heartbeat on each pass, ships a valid KeepAlive launchd plist, preflight fatally rejects missing gh/factory/repo-dir/filter-script dependencies, backs off exponentially up to MAX_SLEEP_SECONDS on sweep-wide failures resetting on success, skips multi-issue-closing PRs with an explicit SKIPPING log line instead of silently landing only the first issue, and tees every dated log line to a persistent LOG_FILE, creating its parent directory"
+# --- ORG derives ghrepo: sweep_repo reads $ORG at call time ---
+
+: >"$GH_CALL_LOG"
+ORG=testorg
+sweep_repo fakerepo >/dev/null 2>&1 || true
+grep -q -- "--repo testorg/fakerepo" "$GH_CALL_LOG" || {
+  echo "FAIL: ghrepo not derived from ORG" >&2; cat "$GH_CALL_LOG" >&2; exit 1; }
+ORG=on-par
+
+# --- MERGE_FLAGS override: replaces the default --squash --delete-branch ---
+
+: >"$GH_CALL_LOG"
+MERGE_FLAGS="--merge"
+sweep_repo fakerepo >/dev/null 2>&1 || true
+grep -q -- "--merge" "$GH_CALL_LOG" || {
+  echo "FAIL: expected gh pr merge call to include --merge" >&2; cat "$GH_CALL_LOG" >&2; exit 1; }
+grep -q -- "--squash" "$GH_CALL_LOG" && {
+  echo "FAIL: --squash should not appear when MERGE_FLAGS=--merge" >&2; cat "$GH_CALL_LOG" >&2; exit 1; }
+grep -q -- "--delete-branch" "$GH_CALL_LOG" && {
+  echo "FAIL: --delete-branch should not appear when MERGE_FLAGS=--merge" >&2; cat "$GH_CALL_LOG" >&2; exit 1; }
+MERGE_FLAGS="--squash --delete-branch"
+
+# --- MERGE_FLAGS + FACTORY_MERGE_ADMIN compose ---
+
+: >"$GH_CALL_LOG"
+MERGE_FLAGS="--merge"
+export FACTORY_MERGE_ADMIN=1
+sweep_repo fakerepo >/dev/null 2>&1 || true
+unset FACTORY_MERGE_ADMIN
+grep -q -- "--merge" "$GH_CALL_LOG" || {
+  echo "FAIL: expected gh pr merge call to include --merge (composed)" >&2; cat "$GH_CALL_LOG" >&2; exit 1; }
+grep -q -- "--admin" "$GH_CALL_LOG" || {
+  echo "FAIL: expected gh pr merge call to include --admin (composed)" >&2; cat "$GH_CALL_LOG" >&2; exit 1; }
+MERGE_FLAGS="--squash --delete-branch"
+
+# --- SWEEP_REPOS populates REPOS at source time ---
+
+repos_joined="$(SWEEP_REPOS="alpha beta" bash -c 'source "'"$ROOT"'/scripts/auto-merge-sweep.sh"; echo "${REPOS[*]}"')"
+[ "$repos_joined" = "alpha beta" ] || {
+  echo "FAIL: SWEEP_REPOS override not honoured: $repos_joined" >&2; exit 1; }
+
+repos_default="$(env -u SWEEP_REPOS bash -c 'source "'"$ROOT"'/scripts/auto-merge-sweep.sh"; echo "${REPOS[*]}"')"
+[ "$repos_default" = "sound-buddy software-factory launchblitz" ] || {
+  echo "FAIL: default REPOS wrong: $repos_default" >&2; exit 1; }
+
+# --- REPO_ROOT default derives from ORG ---
+
+repo_root_check="$(env -u REPO_ROOT ORG=xyz bash -c 'source "'"$ROOT"'/scripts/auto-merge-sweep.sh"; echo "$REPO_ROOT"')"
+[ "$repo_root_check" = "$HOME/repos/xyz" ] || {
+  echo "FAIL: REPO_ROOT default not derived from ORG: $repo_root_check" >&2; exit 1; }
+
+# --- FACTORY_BIN resolution: command -v factory, else $HOME/.local/bin/factory ---
+
+FACTORY_BIN_TEST_DIR="$(mktemp -d)"
+cat >"$FACTORY_BIN_TEST_DIR/factory" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$FACTORY_BIN_TEST_DIR/factory"
+
+resolved_factory_bin="$(env -u FACTORY_BIN PATH="$FACTORY_BIN_TEST_DIR:$PATH" bash -c 'source "'"$ROOT"'/scripts/auto-merge-sweep.sh"; echo "$FACTORY_BIN"')"
+[ "$resolved_factory_bin" = "$FACTORY_BIN_TEST_DIR/factory" ] || {
+  echo "FAIL: FACTORY_BIN did not resolve via command -v factory: $resolved_factory_bin" >&2; exit 1; }
+
+NO_FACTORY_PATH_DIR="$(mktemp -d)"
+ln -s "$(command -v dirname)" "$NO_FACTORY_PATH_DIR/dirname"
+ln -s "$(command -v mkdir)" "$NO_FACTORY_PATH_DIR/mkdir"
+resolved_factory_bin_default="$(env -u FACTORY_BIN PATH="$NO_FACTORY_PATH_DIR" "$(command -v bash)" -c 'source "'"$ROOT"'/scripts/auto-merge-sweep.sh"; echo "$FACTORY_BIN"')"
+[ "$resolved_factory_bin_default" = "$HOME/.local/bin/factory" ] || {
+  echo "FAIL: FACTORY_BIN did not fall back to default: $resolved_factory_bin_default" >&2; exit 1; }
+
+echo "PASS: auto-merge-sweep logs merge/land failures with real exit codes, skips landing when the repo dir is missing, honours FACTORY_MERGE_ADMIN for the standalone merge path, writes a heartbeat on each pass, ships a valid KeepAlive launchd plist, preflight fatally rejects missing gh/factory/repo-dir/filter-script dependencies, backs off exponentially up to MAX_SLEEP_SECONDS on sweep-wide failures resetting on success, skips multi-issue-closing PRs with an explicit SKIPPING log line instead of silently landing only the first issue, tees every dated log line to a persistent LOG_FILE creating its parent directory, and externalizes config so ORG drives both ghrepo and the REPO_ROOT default, SWEEP_REPOS overrides the repo list, MERGE_FLAGS overrides the standalone-merge flags, and FACTORY_BIN falls back to command -v factory"
