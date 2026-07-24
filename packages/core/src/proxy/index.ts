@@ -11,14 +11,30 @@ import { defaultIsPidAlive, type PortLease, readPortLeases } from '../environmen
 
 const DNS_LABEL_MAX_LENGTH = 63;
 
+/** True for a syntactically valid TCP port. Used to bound registry-file-sourced
+ *  port numbers before they reach http.request/net.connect. */
+function isValidPort(port: unknown): port is number {
+  return typeof port === 'number' && Number.isInteger(port) && port > 0 && port <= 65535;
+}
+
+/** Trims leading/trailing '-' with plain index scanning (no regex) — avoids
+ *  even the appearance of a ReDoS-shaped pattern on this untrusted input. */
+function trimDashes(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value[start] === '-') start++;
+  while (end > start && value[end - 1] === '-') end--;
+  return value.slice(start, end);
+}
+
 /** Derives a DNS-safe host label from a worktree path (worktreeId IS the
  *  worktree path — see environment/index.ts). Lowercased, every run of
  *  characters outside [a-z0-9-] collapsed to a single '-', leading/trailing
  *  '-' trimmed, truncated to the 63-char DNS label limit. */
 export function laneHostLabel(worktreeId: string): string {
   const lowered = basename(worktreeId).toLowerCase();
-  const collapsed = lowered.replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
-  return collapsed.slice(0, DNS_LABEL_MAX_LENGTH).replace(/-+$/g, '');
+  const collapsed = trimDashes(lowered.replace(/[^a-z0-9-]+/g, '-'));
+  return trimDashes(collapsed.slice(0, DNS_LABEL_MAX_LENGTH));
 }
 
 export function laneHostname(worktreeId: string, domain: string): string {
@@ -137,8 +153,13 @@ export function createLaneProxy(opts: LaneProxyOptions): LaneProxy {
     return null;
   }
 
+  // Bounds the registry-file-sourced port before it ever reaches http.request/net.connect:
+  // the proxy only ever dials 127.0.0.1 (never a file-controlled host), and only on a
+  // syntactically valid TCP port, so a corrupted or tampered ports.json can't do more than
+  // point at some other localhost port.
   function findLease(label: string): PortLease | undefined {
-    return readLeases(registryFile).find((lease) => laneHostLabel(lease.worktreeId) === label);
+    const lease = readLeases(registryFile).find((l) => laneHostLabel(l.worktreeId) === label);
+    return lease && isValidPort(lease.port) ? lease : undefined;
   }
 
   function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {

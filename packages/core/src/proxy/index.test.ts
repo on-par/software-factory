@@ -307,6 +307,25 @@ describe('createLaneProxy', () => {
     expect(body).toContain('nothing is answering');
   });
 
+  it('treats a lease with a corrupted/out-of-range port as not running (never dials it)', async () => {
+    const worktreeId = join(dir, 'ship-it-bad-port');
+    const lease = {
+      worktreeId,
+      branch: 'ship-it/bad-port',
+      port: 999999,
+      pid: process.pid,
+      acquiredAt: new Date().toISOString(),
+    } as unknown as PortLease;
+    await writeRegistry(registryFile, [lease]);
+
+    proxy = createLaneProxy({ registryFile, port: 0 });
+    await proxy.start();
+
+    const { statusCode, body } = await requestProxy(proxy.port, 'ship-it-bad-port.factory.localhost');
+    expect(statusCode).toBe(404);
+    expect(body).toContain('not running');
+  });
+
   it('defaults to port 80, host 127.0.0.1, and domain factory.localhost when omitted', () => {
     proxy = createLaneProxy({ registryFile });
     expect(proxy.port).toBe(80);
