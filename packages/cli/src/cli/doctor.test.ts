@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { type DoctorEnvProbes, doctorFailed, formatDoctorChecks, runDoctorChecks } from './doctor.js';
+import {
+  type DoctorEnvProbes,
+  doctorFailed,
+  formatDoctorChecks,
+  formatReconcileReport,
+  leaseChecks,
+  type LeaseHealthRow,
+  runDoctorChecks,
+} from './doctor.js';
 
 function probes(overrides: Partial<DoctorEnvProbes> = {}): DoctorEnvProbes {
   return {
@@ -198,5 +206,67 @@ describe('runDoctorChecks distFreshness probe', () => {
   it('omits the compiled dist fresh check when the probe is not provided', () => {
     const checks = runDoctorChecks(probes());
     expect(checks.find((c) => c.name === 'compiled dist fresh')).toBeUndefined();
+  });
+});
+
+describe('leaseChecks', () => {
+  it('reports a single optional ok check when there are no leases', () => {
+    const checks = leaseChecks([]);
+    expect(checks).toEqual([{ name: 'port leases', ok: true, optional: true, detail: 'no active leases' }]);
+    expect(doctorFailed(checks)).toBe(false);
+  });
+
+  it('reports one check per row; stale rows fail without failing doctor overall', () => {
+    const rows: LeaseHealthRow[] = [
+      { worktreeId: '/wt/a', branch: 'a', port: 3100, pid: 111, alive: true },
+      { worktreeId: '/wt/b', branch: 'b', port: 3101, pid: 222, alive: true },
+      { worktreeId: '/wt/c', branch: 'c', port: 3102, pid: 333, alive: false, reason: 'dead-pid' },
+    ];
+    const checks = leaseChecks(rows);
+    expect(checks).toHaveLength(3);
+
+    const stale = checks.find((c) => c.name === 'port lease :3102')!;
+    expect(stale.ok).toBe(false);
+    expect(stale.optional).toBe(true);
+    expect(stale.detail).toContain('/wt/c');
+    expect(stale.detail).toContain('3102');
+    expect(stale.detail).toContain('333');
+    expect(stale.detail).toContain('dead-pid');
+    expect(stale.fix).toContain('--reconcile');
+
+    expect(doctorFailed([...runDoctorChecks(probes()), ...checks])).toBe(false);
+  });
+
+  it('mentions the port being squatted in the detail when portSquatted is true', () => {
+    const rows: LeaseHealthRow[] = [
+      {
+        worktreeId: '/wt/c',
+        branch: 'c',
+        port: 3102,
+        pid: 333,
+        alive: false,
+        reason: 'missing-worktree',
+        portSquatted: true,
+      },
+    ];
+    const stale = leaseChecks(rows)[0];
+    expect(stale.detail).toContain('port still in use by another process');
+  });
+});
+
+describe('formatReconcileReport', () => {
+  it('reports no stale leases when empty', () => {
+    expect(formatReconcileReport([])).toBe('reconcile: no stale leases');
+  });
+
+  it('reports one freed-port line per reap', () => {
+    const report = formatReconcileReport([
+      { lease: { worktreeId: '/wt/a', port: 3100 }, reason: 'dead-pid' },
+      { lease: { worktreeId: '/wt/b', port: 3101 }, reason: 'missing-worktree' },
+    ]);
+    expect(report).toBe(
+      'reconcile: freed port 3100 (worktree /wt/a, reason dead-pid)\n' +
+        'reconcile: freed port 3101 (worktree /wt/b, reason missing-worktree)',
+    );
   });
 });

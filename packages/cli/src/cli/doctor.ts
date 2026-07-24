@@ -195,3 +195,49 @@ export function formatDoctorChecks(checks: DoctorCheck[]): string {
 export function doctorFailed(checks: DoctorCheck[]): boolean {
   return checks.some((c) => !c.ok && !c.optional);
 }
+
+export interface LeaseHealthRow {
+  worktreeId: string;
+  branch: string;
+  port: number;
+  pid: number;
+  alive: boolean;
+  reason?: 'dead-pid' | 'missing-worktree';
+  portSquatted?: boolean;
+}
+
+export function leaseChecks(rows: LeaseHealthRow[]): DoctorCheck[] {
+  if (rows.length === 0) {
+    return [{ name: 'port leases', ok: true, optional: true, detail: 'no active leases' }];
+  }
+
+  return rows.map((row) => {
+    if (row.alive) {
+      return {
+        name: `port lease :${row.port}`,
+        ok: true,
+        optional: true,
+        detail: `${row.worktreeId} — port ${row.port}, pid ${row.pid}, live`,
+      };
+    }
+
+    const squatted = row.portSquatted ? '; port still in use by another process' : '';
+    return {
+      name: `port lease :${row.port}`,
+      ok: false,
+      optional: true,
+      detail: `${row.worktreeId} — port ${row.port}, pid ${row.pid}, stale (${row.reason})${squatted}`,
+      fix: 'run `factory doctor --reconcile` to reclaim stale leases',
+    };
+  });
+}
+
+export function formatReconcileReport(
+  reaped: Array<{ lease: { worktreeId: string; port: number }; reason: string }>,
+): string {
+  if (reaped.length === 0) return 'reconcile: no stale leases';
+
+  return reaped
+    .map((r) => `reconcile: freed port ${r.lease.port} (worktree ${r.lease.worktreeId}, reason ${r.reason})`)
+    .join('\n');
+}

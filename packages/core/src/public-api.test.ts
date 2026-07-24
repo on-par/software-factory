@@ -26,9 +26,12 @@ const PUBLIC_API_KEYS = [
   'resolveTimeouts',
   // Environment
   'acquirePortLease',
+  'defaultIsPidAlive',
   'defaultIsPortFree',
+  'inspectPortLeases',
   'leaseEnv',
   'PortLeaseError',
+  'reapStalePortLeases',
   'releasePortLease',
   // Queue
   'parseQueue',
