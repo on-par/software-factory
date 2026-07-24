@@ -10,7 +10,9 @@ import { promisify } from 'node:util';
 import { Octokit } from '@octokit/rest';
 import type {
   FailoverReason,
+  HealthKpis,
   IngestSettings,
+  KpiHistoryRecord,
   LeaseHealth,
   ModelDiagnosis,
   QueueDiagnostic,
@@ -476,6 +478,34 @@ async function cmdCost(opts: { issue?: string } = {}) {
   console.log(`  Total: $${grandTotal.toFixed(4)}`);
 }
 
+async function currentCommitSha(): Promise<string | null> {
+  try {
+    const { stdout } = await exec('git rev-parse HEAD');
+    return stdout.trim();
+  } catch {
+    return null;
+  }
+}
+
+function resolvedModelTiers(repoRoot: string): Record<string, string[]> {
+  const modelsConfig = applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot));
+  return (modelsConfig as any).tiers ?? {};
+}
+
+async function appendKpiSnapshot(
+  paths: ReturnType<typeof getFactoryPaths>,
+  repoRoot: string,
+  kpis: HealthKpis,
+): Promise<KpiHistoryRecord> {
+  const record = kpisToHistoryRecord(kpis, new Date().toISOString().slice(0, 10), {
+    commitSha: await currentCommitSha(),
+    models: resolvedModelTiers(repoRoot),
+  });
+  const existing = existsSync(paths.kpiHistory) ? readFileSync(paths.kpiHistory, 'utf-8') : '';
+  writeFileSync(paths.kpiHistory, appendKpiHistoryLine(existing, record));
+  return record;
+}
+
 async function cmdKpis() {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
@@ -499,9 +529,7 @@ async function cmdKpis() {
 
   const kpis = computeHealthKpis(allEvents, costs);
 
-  const record = kpisToHistoryRecord(kpis, new Date().toISOString().slice(0, 10));
-  const existing = existsSync(paths.kpiHistory) ? readFileSync(paths.kpiHistory, 'utf-8') : '';
-  writeFileSync(paths.kpiHistory, appendKpiHistoryLine(existing, record));
+  await appendKpiSnapshot(paths, repoRoot, kpis);
 
   console.log(renderKpiReport(kpis));
   console.log(renderKpiTrend(parseKpiHistory(readFileSync(paths.kpiHistory, 'utf-8'))));
@@ -1534,6 +1562,18 @@ async function cmdRun() {
   controller.abort();
   await watchdog;
   logEvent(paths.events, 'run-done', 'all', 'all lanes finished');
+
+  if (entries.length > 0) {
+    try {
+      const events = existsSync(paths.events) ? readEvents(paths.events) : [];
+      const costs = existsSync(paths.costs) ? readCosts(paths.costs) : [];
+      const kpis = computeHealthKpis(events, costs);
+      await appendKpiSnapshot(paths, repoRoot, kpis);
+      logEvent(paths.events, 'kpi-snapshot', 'all', `KPI snapshot appended to ${paths.kpiHistory}`);
+    } catch (err: any) {
+      logEvent(paths.events, 'warn', 'all', `kpi snapshot failed: ${err.message}`);
+    }
+  }
 }
 
 /** Wraps cmdRun so an empty queue is a no-op (not a throw) while auto-ingest is enabled and watching. */

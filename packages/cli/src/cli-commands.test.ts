@@ -691,6 +691,12 @@ describe('cli commands (via main dispatch)', () => {
       );
       writeFileSync(paths().costs, '');
       h.costs = [{ issue: '1', task: 'build', model: 'a', cost: 0.5 }];
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse HEAD')) return 'deadbeef';
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) return h.ghRepo;
+        return '';
+      };
 
       await runMain('kpis');
       const out = logged();
@@ -699,6 +705,9 @@ describe('cli commands (via main dispatch)', () => {
       expect(existsSync(paths().kpiHistory)).toBe(true);
       const historyLines = (jsonl: string) => jsonl.trim().split('\n').filter(Boolean);
       expect(historyLines(readFileSync(paths().kpiHistory, 'utf-8'))).toHaveLength(1);
+      const firstRecord = JSON.parse(historyLines(readFileSync(paths().kpiHistory, 'utf-8'))[0]);
+      expect(firstRecord.commitSha).toBe('deadbeef');
+      expect(firstRecord.models).toEqual({});
 
       await runMain('kpis');
       expect(historyLines(readFileSync(paths().kpiHistory, 'utf-8'))).toHaveLength(2);
@@ -929,6 +938,72 @@ describe('cli commands (via main dispatch)', () => {
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('usage watchdog crashed');
       expect(events).toContain('watchdog exploded');
+    });
+
+    it('appends a KPI snapshot with the HEAD commit sha and resolved models when the queue has issues', async () => {
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse HEAD')) return 'deadbeef';
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) return h.ghRepo;
+        return '';
+      };
+      writeFileSync(paths().queue, 'app 1\n');
+      writeFileSync(paths().stop, '');
+      const res = await runMain('run');
+      expect(res.exited).toBe(false);
+
+      expect(existsSync(paths().kpiHistory)).toBe(true);
+      const lines = readFileSync(paths().kpiHistory, 'utf-8').trim().split('\n').filter(Boolean);
+      expect(lines).toHaveLength(1);
+      const record = JSON.parse(lines[0]);
+      expect(record.commitSha).toBe('deadbeef');
+      expect(record).toHaveProperty('models');
+
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('kpi-snapshot');
+    });
+
+    it('appends a second KPI snapshot on a second run', async () => {
+      writeFileSync(paths().queue, 'app 1\n');
+      writeFileSync(paths().stop, '');
+      await runMain('run');
+      await runMain('run');
+
+      const lines = readFileSync(paths().kpiHistory, 'utf-8').trim().split('\n').filter(Boolean);
+      expect(lines).toHaveLength(2);
+    });
+
+    it('does not create a KPI snapshot when the queue has no entries', async () => {
+      writeFileSync(paths().queue, '# header\n');
+      writeFileSync(paths().stop, '');
+      const res = await runMain('run');
+      expect(res.exited).toBe(false);
+
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('run-done');
+      expect(events).not.toContain('kpi-snapshot');
+      expect(existsSync(paths().kpiHistory)).toBe(false);
+    });
+
+    it('does not fail the run when the KPI snapshot git lookup fails', async () => {
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse HEAD')) throw new Error('git exploded');
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) return h.ghRepo;
+        return '';
+      };
+      writeFileSync(paths().queue, 'app 1\n');
+      writeFileSync(paths().stop, '');
+      const res = await runMain('run');
+      expect(res.exited).toBe(false);
+
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('run-done');
+      expect(events).toContain('kpi-snapshot');
+      const lines = readFileSync(paths().kpiHistory, 'utf-8').trim().split('\n').filter(Boolean);
+      expect(lines).toHaveLength(1);
+      const record = JSON.parse(lines[0]);
+      expect(record.commitSha).toBeNull();
     });
   });
 

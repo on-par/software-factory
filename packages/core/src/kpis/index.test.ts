@@ -556,4 +556,83 @@ describe('KPI trend', () => {
       p90CycleTimeMs: 0,
     });
   });
+
+  it('includes commitSha/models when meta is provided, omits both when it is not', () => {
+    const kpis = computeHealthKpis(
+      [event({ issue: '1', type: 'issue-title' }), event({ issue: '1', type: 'merged' })],
+      [],
+    );
+
+    const withMeta = kpisToHistoryRecord(kpis, '2026-07-20', {
+      commitSha: 'abc123',
+      models: { boss: ['m1'], worker: ['m2', 'm3'] },
+    });
+    expect(withMeta.commitSha).toBe('abc123');
+    expect(withMeta.models).toEqual({ boss: ['m1'], worker: ['m2', 'm3'] });
+
+    const withoutMeta = kpisToHistoryRecord(kpis, '2026-07-20');
+    expect('commitSha' in withoutMeta).toBe(false);
+    expect('models' in withoutMeta).toBe(false);
+  });
+
+  it('round-trips commitSha and models through append/parse', () => {
+    const record = historyRecord({ commitSha: 'deadbeef', models: { boss: ['claude'], worker: ['codex', 'ollama'] } });
+    const jsonl = appendKpiHistoryLine('', record);
+    const [parsed] = parseKpiHistory(jsonl);
+    expect(parsed.commitSha).toBe('deadbeef');
+    expect(parsed.models).toEqual({ boss: ['claude'], worker: ['codex', 'ollama'] });
+  });
+
+  it('omits the delta line with a single record', () => {
+    const trend = renderKpiTrend([historyRecord()]);
+    expect(trend).not.toContain('Δ vs previous');
+  });
+
+  it('renders a delta line comparing the last two records', () => {
+    const records = [
+      historyRecord({ date: '2026-07-18', runs: 4, mergeRate: 0.5, reworkRate: 0.3, stuckRate: 0.1 }),
+      historyRecord({ date: '2026-07-19', runs: 9, mergeRate: 0.6, reworkRate: 0.3, stuckRate: 0.05 }),
+    ];
+
+    const trend = renderKpiTrend(records);
+    const deltaLine = trend.split('\n').find((line) => line.startsWith('Δ vs previous'));
+    expect(deltaLine).toBeDefined();
+    expect(deltaLine).toContain('runs +5');
+    expect(deltaLine).toContain('merge +10pp');
+    expect(deltaLine).toContain('rework 0pp');
+    expect(deltaLine).toContain('stuck −5pp');
+  });
+
+  it('uses the last two records for the delta regardless of window size', () => {
+    const records = [
+      historyRecord({ date: '2026-07-10', runs: 1, mergeRate: 0 }),
+      historyRecord({ date: '2026-07-18', runs: 4, mergeRate: 0.5 }),
+      historyRecord({ date: '2026-07-19', runs: 9, mergeRate: 0.6 }),
+    ];
+
+    const trend = renderKpiTrend(records, { window: 1 });
+    const deltaLine = trend.split('\n').find((line) => line.startsWith('Δ vs previous'));
+    expect(deltaLine).toContain('runs +5');
+    expect(deltaLine).toContain('merge +10pp');
+  });
+
+  it('renders — for null/missing metrics in the delta line', () => {
+    const legacyPrev = {
+      date: '2026-07-17',
+      runs: 3,
+      mergeRate: 1,
+      reworkRate: 0,
+      stuckRate: 0,
+      humanInterventionRate: 0,
+      costPerMergedPr: null,
+    } as KpiHistoryRecord;
+    const curr = historyRecord({ date: '2026-07-18', costPerMergedPr: 1.5 });
+
+    const trend = renderKpiTrend([legacyPrev, curr]);
+    const deltaLine = trend.split('\n').find((line) => line.startsWith('Δ vs previous'));
+    expect(deltaLine).toContain('$/merged —');
+    expect(deltaLine).toContain('auto —');
+    expect(deltaLine).toContain('cycle p50 —');
+    expect(deltaLine).toContain('cycle p90 —');
+  });
 });
