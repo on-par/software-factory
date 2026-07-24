@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  analyzeEventLog,
   type DoctorEnvProbes,
   doctorFailed,
+  eventLogCheck,
   formatDoctorChecks,
   formatReconcileReport,
   leaseChecks,
@@ -251,6 +253,58 @@ describe('leaseChecks', () => {
     ];
     const stale = leaseChecks(rows)[0];
     expect(stale.detail).toContain('port still in use by another process');
+  });
+});
+
+describe('analyzeEventLog', () => {
+  it('reports 0 unparseable for clean NDJSON content', () => {
+    const content = ['{"a":1}', '{"b":2}', '{"c":3}'].join('\n') + '\n';
+    expect(analyzeEventLog(content)).toEqual({ total: 3, unparseable: 0 });
+  });
+
+  it('counts corrupt lines among total lines', () => {
+    const content = ['{"a":1}', 'not json', '{"b":2}', '{"c":', '{"d":4}'].join('\n');
+    expect(analyzeEventLog(content)).toEqual({ total: 5, unparseable: 2 });
+  });
+
+  it('reports 0 total for an empty string', () => {
+    expect(analyzeEventLog('')).toEqual({ total: 0, unparseable: 0 });
+  });
+
+  it('ignores blank lines', () => {
+    const content = '{"a":1}\n\n\n{"b":2}\n';
+    expect(analyzeEventLog(content)).toEqual({ total: 2, unparseable: 0 });
+  });
+});
+
+describe('eventLogCheck', () => {
+  it('is ok when there is no events.ndjson yet', () => {
+    const check = eventLogCheck(null);
+    expect(check.ok).toBe(true);
+    expect(check.optional).toBe(true);
+    expect(check.detail).toContain('no events.ndjson yet');
+  });
+
+  it('is ok when events.ndjson is empty', () => {
+    const check = eventLogCheck({ total: 0, unparseable: 0 });
+    expect(check.ok).toBe(true);
+    expect(check.optional).toBe(true);
+    expect(check.detail).toContain('empty');
+  });
+
+  it('is ok with a 0 unparseable detail when there is no corruption', () => {
+    const check = eventLogCheck({ total: 42, unparseable: 0 });
+    expect(check.ok).toBe(true);
+    expect(check.detail).toContain('0 unparseable');
+  });
+
+  it('fails as an optional check with the count and percentage when corrupted, and does not fail doctorFailed', () => {
+    const check = eventLogCheck({ total: 100, unparseable: 3 });
+    expect(check.ok).toBe(false);
+    expect(check.optional).toBe(true);
+    expect(check.detail).toContain('3 of 100');
+    expect(check.detail).toContain('3.0%');
+    expect(doctorFailed([check])).toBe(false);
   });
 });
 

@@ -1336,6 +1336,19 @@ describe('cli commands (via main dispatch)', () => {
       expect(registry.leases).toHaveLength(1);
       expect(registry.leases[0].port).toBe(4001);
     });
+
+    it('reports event log corruption count and percentage', async () => {
+      h.claudeAvailable = true;
+      writeFileSync(
+        paths().events,
+        ['{"ts":"1"}', '{"ts":"2"}', '{"ts":"3"}', '{"ts":"4"}', 'not json'].join('\n') + '\n',
+      );
+
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('unparseable');
+      expect(logged()).toContain('(20.0%)');
+    });
   });
 
   describe('git/github detection failures', () => {

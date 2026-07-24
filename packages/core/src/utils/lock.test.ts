@@ -14,7 +14,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { withFileLock, withGitLock } from './lock.js';
+import { withFileLock, withFileLockSync, withGitLock } from './lock.js';
 
 const delay = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -334,5 +334,121 @@ describe('withFileLock', () => {
     });
 
     expect(existsSync(lockDir)).toBe(true);
+  });
+});
+
+describe('withFileLockSync', () => {
+  const tmpRoots: string[] = [];
+
+  const makeLockDir = () => {
+    const root = mkdtempSync(join(tmpdir(), 'lock-sync-'));
+    tmpRoots.push(root);
+    return join(root, 'test.lock');
+  };
+
+  afterEach(() => {
+    for (const root of tmpRoots.splice(0)) {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('returns fn()s value and removes the lock dir afterwards', () => {
+    const lockDir = makeLockDir();
+
+    const result = withFileLockSync(lockDir, () => {
+      expect(readFileSync(join(lockDir, 'pid'), 'utf-8')).toBe(String(process.pid));
+      return 'ok';
+    });
+
+    expect(result).toBe('ok');
+    expect(existsSync(lockDir)).toBe(false);
+  });
+
+  it('releases the lock when fn throws, and rethrows', () => {
+    const lockDir = makeLockDir();
+
+    expect(() =>
+      withFileLockSync(lockDir, () => {
+        throw new Error('boom');
+      }),
+    ).toThrow('boom');
+
+    expect(existsSync(lockDir)).toBe(false);
+  });
+
+  it('steals a dead-pid lock and fires onSteal with the pid', () => {
+    const lockDir = makeLockDir();
+    mkdirSync(lockDir);
+    const dead = spawnSync(process.execPath, ['-e', 'process.exit(0)']);
+    writeFileSync(join(lockDir, 'pid'), String(dead.pid));
+    const onSteal = vi.fn();
+    let ran = false;
+
+    withFileLockSync(
+      lockDir,
+      () => {
+        ran = true;
+      },
+      { pollMs: 5, timeoutMs: 200, isPidAlive: () => false, onSteal },
+    );
+
+    expect(ran).toBe(true);
+    expect(onSteal).toHaveBeenCalledWith(dead.pid);
+  });
+
+  it('steals a pid-less lock dir whose mtime is past graceMs (no onSteal arm)', () => {
+    const lockDir = makeLockDir();
+    mkdirSync(lockDir);
+    const past = new Date(Date.now() - 1_000);
+    utimesSync(lockDir, past, past);
+    let ran = false;
+
+    withFileLockSync(
+      lockDir,
+      () => {
+        ran = true;
+      },
+      { pollMs: 5, timeoutMs: 200, graceMs: 10 },
+    );
+
+    expect(ran).toBe(true);
+  });
+
+  it('throws a stuck timeout error when the holder is alive', () => {
+    const lockDir = makeLockDir();
+    mkdirSync(lockDir);
+    writeFileSync(join(lockDir, 'pid'), '12345');
+    const fn = vi.fn();
+
+    expect(() =>
+      withFileLockSync(lockDir, fn, {
+        pollMs: 5,
+        timeoutMs: 25,
+        isPidAlive: () => true,
+      }),
+    ).toThrow(/stuck/);
+
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('treats an unparseable pid file as orphaned and steals it once stale', () => {
+    const lockDir = makeLockDir();
+    mkdirSync(lockDir);
+    writeFileSync(join(lockDir, 'pid'), 'not-a-pid');
+    const past = new Date(Date.now() - 1_000);
+    utimesSync(lockDir, past, past);
+    const onSteal = vi.fn();
+    let ran = false;
+
+    withFileLockSync(
+      lockDir,
+      () => {
+        ran = true;
+      },
+      { pollMs: 5, timeoutMs: 200, graceMs: 10, onSteal },
+    );
+
+    expect(ran).toBe(true);
+    expect(onSteal).toHaveBeenCalledWith(null);
   });
 });

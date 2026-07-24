@@ -97,7 +97,9 @@ import chalk from 'chalk';
 import { Command } from 'commander';
 
 import {
+  analyzeEventLog,
   doctorFailed,
+  eventLogCheck,
   formatDoctorChecks,
   formatReconcileReport,
   leaseChecks,
@@ -2138,6 +2140,9 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     const paths = getFactoryPaths(repoRoot);
     const health = await inspectPortLeases({ registryFile: paths.ports });
     checks.push(...leaseChecks(health.map(toLeaseRow)));
+
+    const eventsContent = existsSync(paths.events) ? readFileSync(paths.events, 'utf-8') : null;
+    checks.push(eventLogCheck(eventsContent === null ? null : analyzeEventLog(eventsContent)));
 
     if (opts.reconcile) {
       const reaped = await reapStalePortLeases({ registryFile: paths.ports, lockDir: paths.portsLock });
