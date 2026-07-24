@@ -8,14 +8,20 @@ function isRealIssue(issue: string): boolean {
 
 const PHASE_ORDER = ['plan', 'build', 'check', 'ship'];
 
-function percentile(values: number[], p: number): number | null {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
+function percentileFromSorted(sorted: number[], p: number): number | null {
+  if (sorted.length === 0) return null;
   const idx = (sorted.length - 1) * p;
   const lo = Math.floor(idx);
   const hi = Math.ceil(idx);
   if (lo === hi) return sorted[lo];
   return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+}
+
+function percentile(values: number[], p: number): number | null {
+  return percentileFromSorted(
+    [...values].sort((a, b) => a - b),
+    p,
+  );
 }
 
 function formatDurationMs(ms: number): string {
@@ -130,6 +136,7 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
   }
 
   const totalCost = costs.reduce((sum, entry) => sum + (entry.cost ?? 0), 0);
+  const sortedCycleTimes = [...cycleTimes].sort((a, b) => a - b);
 
   const observedPhases = [...phaseSamples.keys()];
   const orderedPhases = [
@@ -153,8 +160,8 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     humanInterventionRate: runs === 0 ? 0 : interventionRuns / runs,
     totalCost,
     costPerMergedPr: merged === 0 ? null : totalCost / merged,
-    medianCycleTimeMs: percentile(cycleTimes, 0.5),
-    p90CycleTimeMs: percentile(cycleTimes, 0.9),
+    medianCycleTimeMs: percentileFromSorted(sortedCycleTimes, 0.5),
+    p90CycleTimeMs: percentileFromSorted(sortedCycleTimes, 0.9),
     phaseDurations,
     queueWaitMs: percentile(queueWaits, 0.5),
     cycleTimeExcludedRuns: runs - cycleTimes.length,
