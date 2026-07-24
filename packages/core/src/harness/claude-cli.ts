@@ -12,8 +12,15 @@ export type ClaudeExecFn = ExecFn;
 
 /** Parses the `claude -p --output-format json` result envelope. Falls back to
  *  raw stdout as output when it isn't the expected JSON shape — usage capture
- *  must never cause a run to fail. */
-function parseResultEnvelope(stdout: string): { output: string; usage?: HarnessUsage } {
+ *  must never cause a run to fail. `isError`/`subtype` surface the CLI's own
+ *  error signal (e.g. max-turns exceeded) so a truncated error response isn't
+ *  mistaken for a completed result (#424 code review). */
+function parseResultEnvelope(stdout: string): {
+  output: string;
+  usage?: HarnessUsage;
+  isError?: boolean;
+  subtype?: string;
+} {
   let parsed: unknown;
   try {
     parsed = JSON.parse(stdout.trim());
@@ -42,7 +49,12 @@ function parseResultEnvelope(stdout: string): { output: string; usage?: HarnessU
       ...(costUsd !== undefined ? { costUsd } : {}),
     };
   }
-  return { output: env.result, usage };
+  return {
+    output: env.result,
+    usage,
+    isError: env.is_error === true,
+    subtype: typeof env.subtype === 'string' ? env.subtype : undefined,
+  };
 }
 
 /** Runs a model via the Claude CLI:
@@ -81,7 +93,13 @@ export class ClaudeCliHarness implements CodingHarness {
       });
     }
 
-    const { output, usage } = parseResultEnvelope(stdout);
+    const { output, usage, isError, subtype } = parseResultEnvelope(stdout);
+    if (isError) {
+      throw new HarnessError(`claude CLI returned an error result${subtype ? ` (${subtype})` : ''}`, 'error', {
+        exitCode: 0,
+        stdout: output,
+      });
+    }
     if (output.trim().length === 0) {
       throw new HarnessError('claude CLI returned empty output', 'empty_response', { exitCode: 0 });
     }

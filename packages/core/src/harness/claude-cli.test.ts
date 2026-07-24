@@ -247,6 +247,21 @@ describe('ClaudeCliHarness result-envelope usage parsing', () => {
     expect(err.reason).toBe('empty_response');
     expect(err.details.exitCode).toBe(0);
   });
+
+  it('rejects with reason error when the envelope reports is_error: true, even with a non-empty result', async () => {
+    const rec = recordingExec({
+      stdout: envelope({ is_error: true, subtype: 'error_max_turns', result: 'partial output before max turns' }),
+    });
+    const harness = new ClaudeCliHarness(rec.fn);
+
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('error');
+    expect(err.message).toContain('error_max_turns');
+    expect(err.details.exitCode).toBe(0);
+    expect(err.details.stdout).toBe('partial output before max turns');
+  });
 });
 
 describe('ClaudeCliHarness failure classification', () => {
