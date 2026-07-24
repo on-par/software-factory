@@ -17,6 +17,19 @@ GH_CALL_LOG="$BINDIR/gh-calls.log"
 export GH_CALL_LOG
 : >"$GH_CALL_LOG"
 
+# Canned raw ruleset fixtures, fed through the SCRIPT'S OWN --jq filter via a
+# real `jq` (not a pre-baked "as if jq already ran" string) so a broken filter
+# in build_body()/verify() actually fails this test instead of passing silently.
+RAW_RULESET_FIXTURE="$BINDIR/raw-ruleset.json"
+cat >"$RAW_RULESET_FIXTURE" <<'JSON'
+{"id":42,"name":"protect-main","target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"bypass_actors":[{"actor_id":1,"actor_type":"OrganizationAdmin","bypass_mode":"always"}],"rules":[{"type":"deletion"},{"type":"non_fast_forward"},{"type":"pull_request","parameters":{"allowed_merge_methods":["merge","squash","rebase"],"dismiss_stale_reviews_on_push":false,"dismissal_restriction":{"enabled":false,"allowed_actors":[]},"require_code_owner_review":false,"require_last_push_approval":false,"required_approving_review_count":1,"required_review_thread_resolution":false,"required_reviewers":[]}},{"type":"required_status_checks","parameters":{"required_status_checks":[],"strict_required_status_checks_policy":false}}]}
+JSON
+export RAW_RULESET_FIXTURE
+
+RULESET_LIST_FIXTURE="$BINDIR/ruleset-list.json"
+echo '[{"id":42,"name":"protect-main"},{"id":99,"name":"other-ruleset"}]' >"$RULESET_LIST_FIXTURE"
+export RULESET_LIST_FIXTURE
+
 cat >"$BINDIR/gh" <<'EOF'
 #!/usr/bin/env bash
 set -uo pipefail
@@ -33,26 +46,44 @@ if [ "$1" = "api" ] && [ "$2" = "-X" ] && [ "$3" = "PUT" ]; then
 fi
 
 if [ "$1" = "api" ]; then
+  # Extract the --jq filter argument so it can be run for real, exercising
+  # the same expression the script under test actually passed to `gh --jq`.
+  jq_filter=""
+  want_next=0
+  for a in "$@"; do
+    if [ "$want_next" = "1" ]; then
+      jq_filter="$a"
+      want_next=0
+    fi
+    [ "$a" = "--jq" ] && want_next=1
+  done
+
   args="$*"
   case "$args" in
+    *"/rulesets --jq"*)
+      # resolve_ruleset_id's list call.
+      jq -r "$jq_filter" "$RULESET_LIST_FIXTURE"
+      exit 0
+      ;;
     *"bypass_actors"*)
-      # build_body's read-modify-write GET+jq call: return the canned
-      # protect-main shape as if jq had already forced the Copilot flag on.
-      cat <<'JSON'
-{"id":42,"name":"protect-main","target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"bypass_actors":[{"actor_id":1,"actor_type":"OrganizationAdmin","bypass_mode":"always"}],"rules":[{"type":"deletion"},{"type":"non_fast_forward"},{"type":"pull_request","parameters":{"allowed_merge_methods":["merge","squash","rebase"],"dismiss_stale_reviews_on_push":false,"dismissal_restriction":{"enabled":false,"allowed_actors":[]},"require_code_owner_review":false,"require_last_push_approval":false,"required_approving_review_count":1,"required_review_thread_resolution":false,"required_reviewers":[],"automatic_copilot_code_review_enabled":true}},{"type":"required_status_checks","parameters":{"required_status_checks":[],"strict_required_status_checks_policy":false}}]}
-JSON
+      # build_body's read-modify-write GET+jq call: run the actual transform
+      # against a raw ruleset that does NOT yet have the Copilot flag, so the
+      # PUT body only contains automatic_copilot_code_review_enabled:true if
+      # the filter really sets it.
+      jq -c "$jq_filter" "$RAW_RULESET_FIXTURE"
       exit 0
       ;;
     *"select(.type=="*)
-      # verify()'s post-apply GET: whether the flag actually persisted.
-      # Uses ${VAR-default} (not ${VAR:-default}) so an exported empty
-      # string (simulating a null/dropped field) is distinguishable from unset.
-      echo "${GH_VERIFY_OUTPUT-true}"
-      exit 0
-      ;;
-    *"/rulesets --jq"*)
-      # resolve_ruleset_id's list call.
-      echo "${GH_RULESET_ID:-42}"
+      # verify()'s post-apply GET: run the actual extraction filter against a
+      # ruleset whose Copilot field value simulates the real post-PUT state.
+      # ${VAR+x} (not ${VAR:-x}) so an exported empty string (the field was
+      # dropped) is distinguishable from unset (happy path, field is true).
+      if [ -n "${GH_VERIFY_OUTPUT+x}" ]; then
+        jq -r "$jq_filter" "$RAW_RULESET_FIXTURE"
+      else
+        jq -c '(.rules[] | select(.type=="pull_request") | .parameters.automatic_copilot_code_review_enabled) = true' "$RAW_RULESET_FIXTURE" \
+          | jq -r "$jq_filter"
+      fi
       exit 0
       ;;
   esac

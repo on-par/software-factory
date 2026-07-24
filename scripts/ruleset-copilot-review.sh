@@ -24,10 +24,13 @@ set -euo pipefail
 REPO="${REPO:-on-par/software-factory}"
 RULESET_NAME="${RULESET_NAME:-protect-main}"
 DRY_RUN="${DRY_RUN:-0}"
+export RULESET_NAME
 
 resolve_ruleset_id() {
   local id
-  id="$(gh api "repos/$REPO/rulesets" --jq '.[] | select(.name=="'"$RULESET_NAME"'") | .id')"
+  # env.RULESET_NAME (not string-spliced into the filter) so a name containing
+  # a quote or other jq-significant character can't malform the expression.
+  id="$(gh api "repos/$REPO/rulesets" --jq '.[] | select(.name==env.RULESET_NAME) | .id')"
   if [ -z "$id" ]; then
     echo "ERROR: no ruleset named '$RULESET_NAME' found on $REPO" >&2
     return 1
@@ -49,8 +52,8 @@ build_body() {
 }
 
 apply() {
-  local id body
-  id="$(resolve_ruleset_id)"
+  local id="$1"
+  local body
   body="$(build_body "$id")"
 
   if [ "$DRY_RUN" = "1" ]; then
@@ -63,8 +66,8 @@ apply() {
 }
 
 verify() {
-  local id actual
-  id="$(resolve_ruleset_id)"
+  local id="$1"
+  local actual
   actual="$(gh api "repos/$REPO/rulesets/$id" --jq \
     '.rules[] | select(.type=="pull_request") | .parameters.automatic_copilot_code_review_enabled | if . == null then "" else (.|tostring) end')"
 
@@ -80,9 +83,12 @@ verify() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-  apply
+  # Resolved once and threaded through apply()/verify() — the id cannot
+  # change within a single run, so there is no need to re-list rulesets.
+  ruleset_id="$(resolve_ruleset_id)"
+  apply "$ruleset_id"
   if [ "$DRY_RUN" = "1" ]; then
     exit 0
   fi
-  verify
+  verify "$ruleset_id"
 fi
