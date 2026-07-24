@@ -155,6 +155,30 @@ describe('createLogger', () => {
     expect(event).not.toHaveProperty('evidence');
   });
 
+  it('includes model and tokens only when passed as extra', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+    const logger = createLogger(eventsFile, { issue: 5 }, { out: { write: () => {} } });
+
+    logger.info('plan', 'complete', { model: 'm', tokens: { input: 1, output: 2 } });
+
+    const [event] = readEvents(eventsFile);
+    expect(event.model).toBe('m');
+    expect(event.tokens).toEqual({ input: 1, output: 2 });
+  });
+
+  it('omits model and tokens when not supplied', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+    const logger = createLogger(eventsFile, {}, { out: { write: () => {} } });
+
+    logger.info('plan', 'no model');
+
+    const [event] = readEvents(eventsFile);
+    expect(event).not.toHaveProperty('model');
+    expect(event).not.toHaveProperty('tokens');
+  });
+
   it('child(ctx) merges onto the parent context without mutating the parent', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
     const eventsFile = join(tmpDir, 'events.ndjson');

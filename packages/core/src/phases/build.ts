@@ -26,7 +26,11 @@ export async function buildPhase(opts: {
   constitution: Constitution | null;
   route: 'codex' | 'claude';
   router: ModelRouter;
-  log: (type: string, msg: string, extra?: { failoverReason?: FailoverReason }) => void;
+  log: (
+    type: string,
+    msg: string,
+    extra?: { failoverReason?: FailoverReason; model?: string; tokens?: { input: number; output: number } },
+  ) => void;
   timeoutSeconds?: number;
   skipCI?: boolean;
   modelOverride?: string;
@@ -199,7 +203,7 @@ ${headlessNote()}${appPort ? `\n\n${appPortNote(appPort)}` : ''}`;
     return { ok: false, model: result.model, escalate: escalateLine };
   }
 
-  log('build', `Build complete with model ${result.model}`);
+  log('build', `Build complete with model ${result.model}`, { model: result.model });
   return { ok: true, model: result.model };
 }
 

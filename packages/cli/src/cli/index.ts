@@ -119,6 +119,7 @@ import {
   runDoctorChecks,
 } from './doctor.js';
 import { formatOverview, missingClaudeCliMessage, missingTokenMessage, notInitializedMessage } from './first-run.js';
+import { cmdLogs } from './logs.js';
 import { distFreshnessProbe, runStalenessGuard } from './staleness.js';
 
 const exec = promisify(execCb);
@@ -718,8 +719,14 @@ export async function shipIssue(
   let route: 'codex' | 'claude' | undefined;
 
   const lane = ctx?.lane;
-  const mkLog = (phase?: string) => (type: string, msg: string, extra?: { failoverReason?: FailoverReason }) =>
-    logEvent(paths.events, type, issueNum, msg, { ...extra, lane, phase });
+  const mkLog =
+    (phase?: string) =>
+    (
+      type: string,
+      msg: string,
+      extra?: { failoverReason?: FailoverReason; model?: string; tokens?: { input: number; output: number } },
+    ) =>
+      logEvent(paths.events, type, issueNum, msg, { ...extra, lane, phase });
   const log = mkLog();
   log('issue-title', issueTitle);
   if (modelPins.plan) {
@@ -2315,6 +2322,18 @@ export async function main() {
   program.command('kpis').description('Compute factory health KPIs and record a trend snapshot').action(cmdKpis);
 
   program.command('tui').description('Live read-only view of the current run (q to quit)').action(cmdTui);
+
+  program
+    .command('logs')
+    .description('Print pipeline events from .factory/events.ndjson (--follow to tail)')
+    .option('--follow', 'Keep watching for new events')
+    .option('--json', 'Emit one JSON object per line')
+    .option('--issue <number>', 'Only show events for this issue')
+    .action(async (opts: { follow?: boolean; json?: boolean; issue?: string }) => {
+      const repoRoot = await getRepoRoot();
+      const paths = getFactoryPaths(repoRoot);
+      await cmdLogs(opts, { eventsFile: paths.events });
+    });
 
   const triage = program
     .command('triage')

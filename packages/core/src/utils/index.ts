@@ -27,14 +27,24 @@ export function logEvent(
     level?: LogLevel;
     rework?: ReworkInfo;
     actor?: string;
+    model?: string;
+    tokens?: { input: number; output: number };
   },
 ): void {
   const logger = createLogger(eventsFile, { issue, lane: extra?.lane, phase: extra?.phase });
   const level = extra?.level ?? levelForType(type);
-  const meta: { failoverReason?: FailoverReason; rework?: ReworkInfo; actor?: string } = {};
+  const meta: {
+    failoverReason?: FailoverReason;
+    rework?: ReworkInfo;
+    actor?: string;
+    model?: string;
+    tokens?: { input: number; output: number };
+  } = {};
   if (extra?.failoverReason) meta.failoverReason = extra.failoverReason;
   if (extra?.rework) meta.rework = extra.rework;
   if (extra?.actor) meta.actor = extra.actor;
+  if (extra?.model) meta.model = extra.model;
+  if (extra?.tokens) meta.tokens = extra.tokens;
   logger[level](type, msg, Object.keys(meta).length > 0 ? meta : undefined);
 }
 
