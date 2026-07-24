@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Periodic auto-merge sweep for on-par/{sound-buddy,software-factory,launchblitz}.
+# Periodic auto-merge sweep for a configurable list of repos under one GitHub org.
 # Lands any open, non-draft, mergeable PR whose CI checks are ALL green.
 # Requested by Patrick 2026-07-13: auto-merge "for right now" across all three repos
 # while the factory supervisors (sb-factory/sf-factory/lb-factory tmux sessions) build.
@@ -14,14 +14,32 @@
 # succeeds again. PRs that close more than one issue are skipped with an explicit
 # SKIPPING log line (factory land takes exactly one issue); they must be landed
 # manually.
+#
+# All config below is env-overridable, each defined exactly once:
+#   ORG               GitHub org (default: on-par)
+#   REPO_ROOT         local checkout root (default: $HOME/repos/$ORG)
+#   SWEEP_REPOS       space-separated repo names under $ORG / $REPO_ROOT
+#                     (default: sound-buddy software-factory launchblitz)
+#   FACTORY_BIN       factory CLI path (default: `factory` on PATH, else
+#                     $HOME/.local/bin/factory)
+#   MERGE_FLAGS       flags passed to `gh pr merge` for standalone PRs
+#                     (default: --squash --delete-branch)
+#   SLEEP_SECONDS     delay between passes (default: 300)
+#   MAX_SLEEP_SECONDS backoff cap on sweep-wide failure (default: 3600)
+#   HEARTBEAT_FILE    heartbeat path (default: ~/.factory/auto-merge-sweep.heartbeat)
+#   LOG_FILE          persistent log path (default: ~/.local/state/auto-merge-sweep.log)
 set -uo pipefail
-
-REPOS=(sound-buddy software-factory launchblitz)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-FACTORY_BIN="${FACTORY_BIN:-$HOME/.local/bin/factory}"
-REPO_ROOT="${REPO_ROOT:-/Users/moltbot/repos/on-par}"
+# All config is env-overridable; each value is defined exactly once here.
+ORG="${ORG:-on-par}"
+REPO_ROOT="${REPO_ROOT:-$HOME/repos/$ORG}"
+FACTORY_BIN="${FACTORY_BIN:-$(command -v factory || echo "$HOME/.local/bin/factory")}"
+# Space-separated repo names under $ORG / $REPO_ROOT.
+IFS=' ' read -r -a REPOS <<<"${SWEEP_REPOS:-sound-buddy software-factory launchblitz}"
+# Flags passed to `gh pr merge` for standalone PRs (word-split; no spaces within a flag).
+MERGE_FLAGS="${MERGE_FLAGS:---squash --delete-branch}"
 SLEEP_SECONDS="${SLEEP_SECONDS:-300}"
 MAX_SLEEP_SECONDS="${MAX_SLEEP_SECONDS:-3600}"
 HEARTBEAT_FILE="${HEARTBEAT_FILE:-$HOME/.factory/auto-merge-sweep.heartbeat}"
@@ -59,7 +77,7 @@ preflight() {
 sweep_repo() {
   local repo="$1"
   local repo_dir="$REPO_ROOT/$repo"
-  local ghrepo="on-par/$repo"
+  local ghrepo="$ORG/$repo"
 
   local pr_json gh_exit
   pr_json="$(gh pr list --repo "$ghrepo" --state open \
@@ -87,7 +105,8 @@ sweep_repo() {
         log "$repo: FAILED to land #$issue (PR #$pr) (exit $?)"
       fi
     else
-      local merge_args=(--squash --delete-branch)
+      local merge_args
+      IFS=' ' read -r -a merge_args <<<"$MERGE_FLAGS"
       if [ "${FACTORY_MERGE_ADMIN:-0}" = "1" ]; then
         merge_args+=(--admin)
       fi
