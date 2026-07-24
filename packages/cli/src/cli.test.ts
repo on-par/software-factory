@@ -28,6 +28,7 @@ import {
   listOpenFactoryPRs,
   main,
   markPullRequestReady,
+  parkEvents,
   parkReasonFor,
   PREREQUISITES_TEXT,
   prLookupFailure,
@@ -1759,6 +1760,30 @@ describe('cli', () => {
     it('defaults a plain Error or LandFailureError to fail', () => {
       expect(parkReasonFor(new Error('x'))).toBe('fail');
       expect(parkReasonFor(new LandFailureError('x', 5))).toBe('fail');
+    });
+  });
+
+  describe('parkEvents', () => {
+    it('emits a stuck event alongside the timeout event when a run times out', () => {
+      const err = Object.assign(new Error('build timed out after 3600s'), { reason: 'timeout' });
+      const events = parkEvents(err);
+      expect(events).toHaveLength(2);
+      expect(events[0]).toEqual({ type: 'timeout', msg: 'build timed out after 3600s' });
+      expect(events[1].type).toBe('stuck');
+      expect(events[1].msg).toContain('phase timeout');
+      expect(events[1].msg).toContain('build timed out after 3600s');
+    });
+
+    it('emits only the terminal event for non-timeout park reasons', () => {
+      expect(parkEvents(new LaneParkError('x', 'escalate'))).toEqual([{ type: 'escalate', msg: 'x' }]);
+      expect(parkEvents(new Error('boom'))).toEqual([{ type: 'fail', msg: 'boom' }]);
+      expect(parkEvents(new LandConflictError('rebase conflict'))).toEqual([
+        { type: 'conflict', msg: 'rebase conflict' },
+      ]);
+    });
+
+    it('stringifies a non-Error input', () => {
+      expect(parkEvents('oops')).toEqual([{ type: 'fail', msg: 'oops' }]);
     });
   });
 

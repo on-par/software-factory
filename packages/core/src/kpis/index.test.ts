@@ -98,6 +98,41 @@ describe('computeHealthKpis', () => {
     expect(kpis.reworkRuns).toBe(2);
   });
 
+  it('counts a timeout park that also emits an explicit stuck event, and attributes it to the timed-out run', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title' }),
+      event({ issue: '1', type: 'merged' }),
+      event({ issue: '2', type: 'issue-title' }),
+      event({ issue: '2', type: 'timeout', msg: 'build timed out after 3600s' }),
+      event({
+        issue: '2',
+        type: 'stuck',
+        msg: 'run exceeded its phase timeout without progressing — build timed out after 3600s',
+      }),
+    ];
+
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.stuckRuns).toBe(1);
+    expect(kpis.stuckRate).toBe(0.5);
+    expect(kpis.merged).toBe(1);
+  });
+
+  it('reports a true zero stuckRate when every run reaches a terminal state within its timeout', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title' }),
+      event({ issue: '1', type: 'merged' }),
+      event({ issue: '2', type: 'issue-title' }),
+      event({ issue: '2', type: 'merged' }),
+    ];
+
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.stuckRuns).toBe(0);
+    expect(kpis.stuckRate).toBe(0);
+    expect(kpis.totalRetries).toBe(0);
+  });
+
   it('excludes sentinel issue ids from runs', () => {
     const events: FactoryEvent[] = [
       event({ issue: '-', type: 'issue-title' }),

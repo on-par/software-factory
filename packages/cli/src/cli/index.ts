@@ -684,6 +684,20 @@ export function parkReasonFor(err: unknown): ParkReason {
   return 'fail';
 }
 
+/** Terminal events to emit when a run parks. A timeout park additionally emits
+ *  an explicit 'stuck' event so stuckRate observes runs that exceeded their
+ *  phase timeout (#428). The other stuck condition — identical checker failures
+ *  across consecutive rework rounds — is emitted by the check phase itself. */
+export function parkEvents(err: unknown): { type: string; msg: string }[] {
+  const reason = parkReasonFor(err);
+  const msg = err instanceof Error ? err.message : String(err);
+  const events: { type: string; msg: string }[] = [{ type: reason, msg }];
+  if (reason === 'timeout') {
+    events.push({ type: 'stuck', msg: `run exceeded its phase timeout without progressing — ${msg}` });
+  }
+  return events;
+}
+
 export async function shipIssue(
   issueNum: number,
   opts: { product?: string; autoRework?: boolean; interactive?: boolean; sandbox?: boolean; approvePlan?: boolean },
@@ -981,7 +995,7 @@ export async function shipIssue(
     console.log(chalk.green(`✅ Issue #${issueNum} → PR #${ship.prNumber} ready for review`));
     return branch;
   } catch (err: any) {
-    log(parkReasonFor(err), err.message);
+    for (const e of parkEvents(err)) log(e.type, e.msg);
     await maybeWriteLocalRunReport({
       issueNum,
       paths,
