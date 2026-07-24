@@ -24,7 +24,7 @@ import { describeFailureDetail } from './failure-detail.js';
 import { captureWorktreeState, resetWorktreeState } from './worktree-state.js';
 
 export type { ExecFn } from '../utils/exec.js';
-export { extractFailoverReason, ModelExecutorError } from './executor-error.js';
+export { ModelExecutorError } from './executor-error.js';
 
 export type SleepFn = (ms: number) => Promise<void>;
 

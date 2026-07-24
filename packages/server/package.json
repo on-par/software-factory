@@ -13,12 +13,6 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
   },
-  "dependencies": {
-    "@on-par/factory-core": "*",
-    "@on-par/factory-config": "*",
-    "@octokit/rest": "^22.0.0",
-    "@octokit/webhooks": "^13.0.0"
-  },
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^24.0.0"

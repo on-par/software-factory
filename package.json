@@ -22,6 +22,7 @@
     "local-small-scoreboard": "tsx scripts/local-small-scoreboard.ts",
     "eval-history": "tsx scripts/eval-history.ts",
     "regression-issue": "tsx scripts/regression-issue.ts",
+    "knip": "knip",
     "clean": "rm -rf packages/*/dist packages/*/node_modules"
   },
   "engines": {
@@ -31,7 +32,9 @@
   "devDependencies": {
     "@types/node": "^26.1.1",
     "@vitest/coverage-v8": "^3.2.0",
+    "eslint": "^9.39.0",
     "jsdom": "^26.0.0",
+    "knip": "^6.29.0",
     "prettier": "3.9.5",
     "tsx": "^4.23.0",
     "typescript": "^7.0.2",

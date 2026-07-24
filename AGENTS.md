@@ -14,7 +14,7 @@ software-factory/
 │   ├── config/   @on-par/factory-config  — Zero-dep. Ships models.json, routes.json,
 │   │                                        factory.json, and constitution markdown.
 │   ├── core/     @on-par/factory-core     — The engine (imports config).
-│   ├── cli/      @on-par/factory-cli       — The `factory` CLI (imports core + config).
+│   ├── cli/      @on-par/factory-cli       — The `factory` CLI (imports core).
 │   ├── dashboard/ @on-par/factory-dashboard — Vite + React + Tailwind dashboard (walking skeleton, private).
 │   └── server/   @on-par/factory-server    — Phase-2 SaaS server STUB. createServer()
 │                                             throws; marked private, never published.
@@ -59,13 +59,14 @@ Run from the repo root unless noted. Node.js **≥ 20** required.
 | Lint                           | `npm run lint`                           |
 | Format all files               | `npm run format`                         |
 | Format check                   | `npm run format:check`                   |
+| Dead code / unused deps        | `npm run knip`                           |
 | Test with coverage             | `npm run test` (`vitest run --coverage`) |
 | Coverage ratchet drift check   | `npm run coverage-ratchet`               |
 | Eval (deterministic stub)      | `npm run eval -- --stub`                 |
 | Eval (full harness)            | `npm run eval`                           |
 | Full verify (all of the above) | `bash scripts/verify.sh`                 |
 
-`scripts/verify.sh` runs, in order: `npm ci` → `npm run format:check` → `npm run build` → `npm run typecheck` → `npm run lint` → `npm run test` → `npm run coverage-ratchet` → `npm run eval -- --stub`. This mirrors the CI workflow in `.github/workflows/ci.yml`.
+`scripts/verify.sh` runs, in order: `npm ci` → `npm run format:check` → `npm run build` → `npm run typecheck` → `npm run lint` → `npm run knip` → `npm run test` → `npm run coverage-ratchet` → `npm run eval -- --stub`. This mirrors the CI workflow in `.github/workflows/ci.yml`.
 
 ## Conventions
 
