@@ -192,6 +192,27 @@ describe('CliModelExecutor', () => {
     expect(rec.calls[0].cmd).toContain('--dangerously-skip-permissions');
   });
 
+  it('forwards ctx.env through to the harness request env', async () => {
+    const rec = recordingExec({ stdout: 'CLAUDE OUTPUT' });
+    const executor = new CliModelExecutor(rec.fn);
+
+    await executor.runModel('claude-model', 'draft plan', {
+      worktree,
+      timeoutSeconds,
+      task: 'plan',
+      registry,
+      routesConfig,
+      env: { PORT: '3142', FACTORY_APP_PORT: '3142', FACTORY_BASE_URL: 'http://127.0.0.1:3142' },
+    });
+
+    expect(rec.calls).toHaveLength(1);
+    expect(rec.calls[0].opts.env).toEqual({
+      PORT: '3142',
+      FACTORY_APP_PORT: '3142',
+      FACTORY_BASE_URL: 'http://127.0.0.1:3142',
+    });
+  });
+
   it('runs Codex with flags, output file, and prompt-file stdin redirect', async () => {
     const rec = recordingExec();
     const executor = new CliModelExecutor(rec.fn);

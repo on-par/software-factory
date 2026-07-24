@@ -10,6 +10,7 @@ import {
   loadFactoryConfig,
   loadModelsConfig,
   loadRoutesConfig,
+  resolveEnvironmentPorts,
   resolveFilingPolicy,
   resolveIngestConfig,
   resolvePlanApproval,
@@ -60,6 +61,8 @@ describe('getFactoryPaths', () => {
     expect(paths.approvals).toBe(resolve(repoRoot, '.factory', 'approvals'));
     expect(paths.kpiHistory).toBe(resolve(repoRoot, '.factory', 'kpi-history.jsonl'));
     expect(paths.ingestWatermark).toBe(resolve(repoRoot, '.factory', 'ingest-watermark'));
+    expect(paths.ports).toBe(resolve(repoRoot, '.factory', 'ports.json'));
+    expect(paths.portsLock).toBe(resolve(repoRoot, '.factory', 'ports.lock'));
   });
 });
 
@@ -473,6 +476,101 @@ describe('resolveSkipCI', () => {
     const { ci: _ci, ...withoutCi } = config;
 
     expect(resolveSkipCI(withoutCi as typeof config, {})).toBe(false);
+  });
+});
+
+describe('environment.ports config', () => {
+  it('shipped config has default-enabled ports leasing over [3100, 3999]', () => {
+    const config = loadFactoryConfig();
+    expect(config.environment.ports).toEqual({
+      enabled: true,
+      range: [3100, 3999],
+      comment: expect.any(String),
+    });
+  });
+
+  it('applies environment.ports defaults when the config omits the key', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
+    try {
+      const path = join(dir, 'factory.json');
+      const minimal = {
+        version: 1,
+        paths: {
+          constitutions: 'constitutions/',
+          checkers: 'lib/checkers/',
+          plans: '.factory/plans/',
+          logs: '.factory/logs/',
+          events: '.factory/events.ndjson',
+        },
+        timeouts: { plan_seconds: 1800, build_seconds: 7200, check_seconds: 1800, merge_poll_seconds: 120 },
+        merge: { auto: false, comment: '' },
+        worktree: { prefix: 'ship-it/', parent: '../', comment: '' },
+        byok: { enabled: false, comment: '' },
+        notifications: {},
+        cost_tracking: { enabled: true, log_file: '.factory/costs.jsonl', comment: '' },
+      };
+      await writeFile(path, JSON.stringify(minimal));
+      const config = loadFactoryConfig(path);
+      expect(config.environment.ports.enabled).toBe(true);
+      expect(config.environment.ports.range).toEqual([3100, 3999]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an inverted port range', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
+    try {
+      const path = join(dir, 'factory.json');
+      const minimal = {
+        version: 1,
+        paths: {
+          constitutions: 'constitutions/',
+          checkers: 'lib/checkers/',
+          plans: '.factory/plans/',
+          logs: '.factory/logs/',
+          events: '.factory/events.ndjson',
+        },
+        timeouts: { plan_seconds: 1800, build_seconds: 7200, check_seconds: 1800, merge_poll_seconds: 120 },
+        merge: { auto: false, comment: '' },
+        worktree: { prefix: 'ship-it/', parent: '../', comment: '' },
+        byok: { enabled: false, comment: '' },
+        notifications: {},
+        cost_tracking: { enabled: true, log_file: '.factory/costs.jsonl', comment: '' },
+        environment: { ports: { enabled: true, range: [3999, 3100] } },
+      };
+      await writeFile(path, JSON.stringify(minimal));
+      expect(() => loadFactoryConfig(path)).toThrow();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('resolveEnvironmentPorts', () => {
+  it('defaults to the shipped config values', () => {
+    const config = loadFactoryConfig();
+    expect(resolveEnvironmentPorts(config, {})).toEqual({ enabled: true, range: [3100, 3999] });
+  });
+
+  it('honors FACTORY_ENV_PORTS=0 to disable, overriding config', () => {
+    const config = loadFactoryConfig();
+    expect(
+      resolveEnvironmentPorts(
+        { ...config, environment: { ports: { enabled: true, range: [3100, 3999] } } },
+        { FACTORY_ENV_PORTS: '0' },
+      ).enabled,
+    ).toBe(false);
+  });
+
+  it('honors FACTORY_ENV_PORTS=1 to force-enable, overriding config', () => {
+    const config = loadFactoryConfig();
+    expect(
+      resolveEnvironmentPorts(
+        { ...config, environment: { ports: { enabled: false, range: [3100, 3999] } } },
+        { FACTORY_ENV_PORTS: '1' },
+      ).enabled,
+    ).toBe(true);
   });
 });
 

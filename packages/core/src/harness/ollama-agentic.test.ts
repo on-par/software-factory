@@ -151,6 +151,50 @@ describe('OllamaAgenticHarness first-green fixture', () => {
   });
 });
 
+describe('OllamaAgenticHarness env forwarding', () => {
+  it('forwards request.env verbatim to the verify-command execFn opts', async () => {
+    const worktree = makeWorktree();
+    const fetchFn = stubFetch([firstGreenProposal()]);
+    const calls: any[] = [];
+    const exec: OllamaAgenticExecFn = async (cmd, opts) => {
+      calls.push({ cmd, opts });
+      return { stdout: '', stderr: '' };
+    };
+    const harness = new OllamaAgenticHarness(fetchFn, exec);
+
+    await harness.run(
+      makeContractRequest({
+        model: 'local-agentic-model',
+        registry,
+        worktree,
+        env: { PORT: '3142', FACTORY_APP_PORT: '3142', FACTORY_BASE_URL: 'http://127.0.0.1:3142' },
+      }),
+    );
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].opts.env).toEqual({
+      PORT: '3142',
+      FACTORY_APP_PORT: '3142',
+      FACTORY_BASE_URL: 'http://127.0.0.1:3142',
+    });
+  });
+
+  it('leaves opts.env undefined when the request has no env', async () => {
+    const worktree = makeWorktree();
+    const fetchFn = stubFetch([firstGreenProposal()]);
+    const calls: any[] = [];
+    const exec: OllamaAgenticExecFn = async (cmd, opts) => {
+      calls.push({ cmd, opts });
+      return { stdout: '', stderr: '' };
+    };
+    const harness = new OllamaAgenticHarness(fetchFn, exec);
+
+    await harness.run(makeContractRequest({ model: 'local-agentic-model', registry, worktree }));
+
+    expect(calls[0].opts.env).toBeUndefined();
+  });
+});
+
 describe('OllamaAgenticHarness repair', () => {
   it('recovers from invalid JSON on the first attempt', async () => {
     const worktree = makeWorktree();

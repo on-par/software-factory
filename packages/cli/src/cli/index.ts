@@ -17,6 +17,7 @@ import type {
   UsageReading,
 } from '@on-par/factory-core';
 import {
+  acquirePortLease,
   appendKpiHistoryLine,
   buildPhase,
   checkPhase,
@@ -45,8 +46,10 @@ import {
   planPhase,
   readEvents,
   readUsage,
+  releasePortLease,
   renderKpiReport,
   renderKpiTrend,
+  resolveEnvironmentPorts,
   resolveIngestConfig,
   resolveModelOverrides,
   resolvePlanApproval,
@@ -715,6 +718,27 @@ export async function shipIssue(
 
   const planApprovalEnabled = opts.approvePlan ?? resolvePlanApproval(factoryConfig);
 
+  const portsSettings = resolveEnvironmentPorts(factoryConfig);
+  let appPort: number | undefined;
+  if (portsSettings.enabled) {
+    try {
+      const lease = await acquirePortLease({
+        registryFile: paths.ports,
+        lockDir: paths.portsLock,
+        worktreeId: worktree,
+        branch,
+        range: portsSettings.range,
+      });
+      appPort = lease.port;
+      log('environment_lease', `leased port ${lease.port} for worktree ${worktree}`);
+    } catch (err: any) {
+      // Port collision is no worse than today — never park a lane over a lease.
+      log('environment_lease_failed', `port lease unavailable (${err.message}) — running without injected PORT`);
+    }
+  } else {
+    log('environment_lease', 'port leasing disabled (environment.ports.enabled=false or FACTORY_ENV_PORTS=0)');
+  }
+
   try {
     // PLAN
     const plan = await planPhase({
@@ -764,6 +788,7 @@ export async function shipIssue(
       modelOverride: modelOverrides.build,
       sandbox: activeSandboxPolicy,
       steering: buildSteering,
+      appPort,
     });
     if (!build.ok) {
       throw new LaneParkError(`build escalated: ${build.escalate ?? 'unknown'}`, 'escalate');
@@ -782,6 +807,7 @@ export async function shipIssue(
       checkTimeoutSeconds: timeouts.check,
       sandbox: activeSandboxPolicy,
       drainSteering: opts.interactive ? () => drainSteering(paths.steering, issueNum, worktree) : undefined,
+      appPort,
     });
     for (const s of check.summary.results.filter((r) => r.result === 'SKIP')) {
       console.error(chalk.yellow(`  SKIP: ${s.checker} — ${s.details}`));
@@ -864,6 +890,12 @@ export async function shipIssue(
       reason: err.message,
     });
     throw err;
+  } finally {
+    if (appPort !== undefined) {
+      await releasePortLease({ registryFile: paths.ports, lockDir: paths.portsLock, worktreeId: worktree })
+        .then(() => log('environment_release', `released port ${appPort} for worktree ${worktree}`))
+        .catch((e: any) => log('environment_release_failed', `port release failed: ${e.message}`));
+    }
   }
 }
 

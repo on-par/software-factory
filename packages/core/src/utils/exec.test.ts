@@ -31,4 +31,18 @@ describe('defaultExecFn', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('merges opts.env over the parent env instead of replacing it', async () => {
+    const { stdout } = await defaultExecFn('node -p "process.env.FACTORY_APP_PORT + \':\' + typeof process.env.PATH"', {
+      env: { FACTORY_APP_PORT: '3142' },
+    });
+
+    expect(stdout.trim()).toBe('3142:string');
+  });
+
+  it('leaves the environment unchanged when opts.env is omitted', async () => {
+    const { stdout } = await defaultExecFn('node -p "typeof process.env.PATH"', {});
+
+    expect(stdout.trim()).toBe('string');
+  });
 });

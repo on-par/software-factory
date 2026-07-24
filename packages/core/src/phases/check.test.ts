@@ -302,6 +302,59 @@ describe('checkPhase sandbox', () => {
   });
 });
 
+describe('checkPhase appPort', () => {
+  it('includes leaseEnv in the rework router.run options when appPort is set', async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const captured: { options: any }[] = [];
+    const fakeRouter = {
+      run: async (_task: string, _prompt: string, options: any) => {
+        captured.push({ options });
+        return { model: 'fake-model', output: 'reworked', exitCode: 0, attempts: [] };
+      },
+    } as any;
+
+    await checkPhase({
+      issue: 99,
+      worktree,
+      specPath,
+      router: fakeRouter,
+      constitution: null,
+      log: () => {},
+      appPort: 3142,
+    });
+
+    expect(captured.length).toBeGreaterThan(0);
+    expect(captured[0].options.env).toEqual({
+      PORT: '3142',
+      FACTORY_APP_PORT: '3142',
+      FACTORY_BASE_URL: 'http://127.0.0.1:3142',
+    });
+  });
+
+  it('carries no env in the rework router.run options when appPort is unset', async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const captured: { options: any }[] = [];
+    const fakeRouter = {
+      run: async (_task: string, _prompt: string, options: any) => {
+        captured.push({ options });
+        return { model: 'fake-model', output: 'reworked', exitCode: 0, attempts: [] };
+      },
+    } as any;
+
+    await checkPhase({
+      issue: 100,
+      worktree,
+      specPath,
+      router: fakeRouter,
+      constitution: null,
+      log: () => {},
+    });
+
+    expect(captured.length).toBeGreaterThan(0);
+    expect(captured[0].options.env).toBeUndefined();
+  });
+});
+
 describe('checkPhase success paths', () => {
   it('passes without rework when all checkers pass on a clean worktree', { timeout: 120_000 }, async () => {
     const { worktree, specPath } = await makePassingWorktree();

@@ -19,7 +19,7 @@ export class ClaudeCliHarness implements CodingHarness {
   constructor(private execFn: ClaudeExecFn = defaultExecFn) {}
 
   async run(request: HarnessRequest): Promise<HarnessResult> {
-    const { model, prompt, worktree, timeoutSeconds, registry, sandbox } = request;
+    const { model, prompt, worktree, timeoutSeconds, registry, sandbox, env } = request;
     const flag = registry.getClaudeFlag(model);
     const modelArg = flag ? `--model ${flag}` : '';
     const cmd = `claude -p ${shellEscape(prompt)} ${modelArg} --dangerously-skip-permissions < /dev/null`;
@@ -31,6 +31,7 @@ export class ClaudeCliHarness implements CodingHarness {
         cwd: worktree,
         timeoutMs: timeoutSeconds * 1000,
         maxBuffer: 10 * 1024 * 1024,
+        env,
       }));
     } catch (err: any) {
       const reason = err.killed ? 'timeout' : classifyFailure(err.stderr ?? '', err.code ?? 1);

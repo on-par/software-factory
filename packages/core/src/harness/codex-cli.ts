@@ -23,7 +23,7 @@ export class CodexCliHarness implements CodingHarness {
   constructor(private execFn: CodexExecFn = defaultExecFn) {}
 
   async run(request: HarnessRequest): Promise<HarnessResult> {
-    const { model, prompt, worktree, timeoutSeconds, registry, sandbox } = request;
+    const { model, prompt, worktree, timeoutSeconds, registry, sandbox, env } = request;
     const extraFlag = registry.getCodexFlag(model) ?? '';
 
     const tmpFile = await mktemp(join(tmpdir(), 'factory-codex-'));
@@ -35,7 +35,7 @@ export class CodexCliHarness implements CodingHarness {
 
     try {
       try {
-        await this.execFn(finalCmd, { timeoutMs: timeoutSeconds * 1000, maxBuffer: 10 * 1024 * 1024 });
+        await this.execFn(finalCmd, { timeoutMs: timeoutSeconds * 1000, maxBuffer: 10 * 1024 * 1024, env });
       } catch (err: any) {
         const reason = err.killed ? 'timeout' : classifyFailure(err.stderr ?? '', err.code ?? 1);
         throw new HarnessError(err.message ?? String(err), reason, {

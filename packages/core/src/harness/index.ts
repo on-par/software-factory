@@ -42,6 +42,8 @@ export interface HarnessRequest {
   registry: ModelRegistry;
   /** When set, the harness wraps its CLI invocation in this containment policy. */
   sandbox?: SandboxPolicy;
+  /** Extra child-env vars (e.g. the lane's PORT lease) merged over the parent env. */
+  env?: Record<string, string>;
 }
 
 export interface HarnessResult {
