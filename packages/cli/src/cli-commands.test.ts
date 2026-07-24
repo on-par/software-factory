@@ -712,6 +712,19 @@ describe('cli commands (via main dispatch)', () => {
       await runMain('kpis');
       expect(historyLines(readFileSync(paths().kpiHistory, 'utf-8'))).toHaveLength(2);
     });
+
+    it('still renders the report when the KPI snapshot fails (e.g. a malformed repo tier config)', async () => {
+      writeFileSync(join(paths().state, 'config.json'), JSON.stringify({ tiers: { worker: ['no-such-model'] } }));
+      writeFileSync(paths().events, JSON.stringify({ type: 'issue-title', issue: '1', msg: 'title' }));
+
+      const res = await runMain('kpis');
+      expect(res.exited).toBe(false);
+      const out = logged();
+      expect(out).toContain('## Health KPIs');
+      expect(out).toContain('## Health KPI trend');
+      expect(errored()).toContain('KPI snapshot failed');
+      expect(existsSync(paths().kpiHistory)).toBe(false);
+    });
   });
 
   describe('tui', () => {

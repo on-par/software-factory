@@ -489,21 +489,22 @@ async function currentCommitSha(): Promise<string | null> {
 
 function resolvedModelTiers(repoRoot: string): Record<string, string[]> {
   const modelsConfig = applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot));
-  return (modelsConfig as any).tiers ?? {};
+  return modelsConfig.tiers ?? {};
 }
 
 async function appendKpiSnapshot(
   paths: ReturnType<typeof getFactoryPaths>,
   repoRoot: string,
   kpis: HealthKpis,
-): Promise<KpiHistoryRecord> {
+): Promise<{ record: KpiHistoryRecord; history: KpiHistoryRecord[] }> {
   const record = kpisToHistoryRecord(kpis, new Date().toISOString().slice(0, 10), {
     commitSha: await currentCommitSha(),
     models: resolvedModelTiers(repoRoot),
   });
   const existing = existsSync(paths.kpiHistory) ? readFileSync(paths.kpiHistory, 'utf-8') : '';
-  writeFileSync(paths.kpiHistory, appendKpiHistoryLine(existing, record));
-  return record;
+  const updated = appendKpiHistoryLine(existing, record);
+  writeFileSync(paths.kpiHistory, updated);
+  return { record, history: parseKpiHistory(updated) };
 }
 
 async function cmdKpis() {
@@ -529,10 +530,20 @@ async function cmdKpis() {
 
   const kpis = computeHealthKpis(allEvents, costs);
 
-  await appendKpiSnapshot(paths, repoRoot, kpis);
+  let history: KpiHistoryRecord[];
+  try {
+    ({ history } = await appendKpiSnapshot(paths, repoRoot, kpis));
+  } catch (err: any) {
+    console.error(
+      chalk.yellow(
+        `factory: KPI snapshot failed (${err?.message ?? err}) — showing the report without persisting a new snapshot`,
+      ),
+    );
+    history = existsSync(paths.kpiHistory) ? parseKpiHistory(readFileSync(paths.kpiHistory, 'utf-8')) : [];
+  }
 
   console.log(renderKpiReport(kpis));
-  console.log(renderKpiTrend(parseKpiHistory(readFileSync(paths.kpiHistory, 'utf-8'))));
+  console.log(renderKpiTrend(history));
 }
 
 export interface UsageKnobs {
