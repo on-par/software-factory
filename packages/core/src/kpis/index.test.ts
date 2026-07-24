@@ -22,6 +22,8 @@ function event(overrides: Partial<FactoryEvent> = {}): FactoryEvent {
   };
 }
 
+const at = (sec: number) => new Date(Date.UTC(2026, 6, 20, 0, 0, sec)).toISOString();
+
 function cost(overrides: Partial<CostEntry> = {}): CostEntry {
   return {
     ts: '2026-07-20T00:00:00.000Z',
@@ -125,10 +127,96 @@ describe('computeHealthKpis', () => {
     expect(kpis.stuckRate).toBe(0);
     expect(kpis.humanInterventionRate).toBe(0);
     expect(kpis.costPerMergedPr).toBeNull();
+    expect(kpis.medianCycleTimeMs).toBeNull();
+    expect(kpis.p90CycleTimeMs).toBeNull();
+    expect(kpis.queueWaitMs).toBeNull();
+    expect(kpis.phaseDurations).toEqual({});
+    expect(kpis.cycleTimeExcludedRuns).toBe(0);
 
     const lines = formatKpiLines(kpis);
     expect(lines).toEqual(['No factory runs recorded yet.']);
     expect(lines.join('\n')).not.toContain('NaN');
+  });
+});
+
+describe('cycle time KPIs', () => {
+  it('computes cycle time, phase durations, and queue wait for a single run', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title', ts: at(0) }),
+      event({ issue: '1', type: 'phase-start', phase: 'plan', ts: at(5) }),
+      event({ issue: '1', type: 'phase-end', phase: 'plan', ts: at(65) }),
+      event({ issue: '1', type: 'phase-start', phase: 'build', ts: at(65) }),
+      event({ issue: '1', type: 'phase-end', phase: 'build', ts: at(365) }),
+      event({ issue: '1', type: 'merged', ts: at(400) }),
+    ];
+
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.medianCycleTimeMs).toBe(400_000);
+    expect(kpis.p90CycleTimeMs).toBe(400_000);
+    expect(kpis.queueWaitMs).toBe(5_000);
+    expect(kpis.phaseDurations).toEqual({ plan: 60_000, build: 300_000 });
+    expect(kpis.cycleTimeExcludedRuns).toBe(0);
+  });
+
+  it('excludes runs with no terminal merge event from cycle stats', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title', ts: at(0) }),
+      event({ issue: '1', type: 'merged', ts: at(400) }),
+      event({ issue: '2', type: 'issue-title', ts: at(0) }),
+      event({ issue: '2', type: 'stuck', ts: at(10) }),
+    ];
+
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.medianCycleTimeMs).toBe(400_000);
+    expect(kpis.p90CycleTimeMs).toBe(400_000);
+    expect(kpis.cycleTimeExcludedRuns).toBe(1);
+    expect(formatKpiLines(kpis).join('\n')).toContain('1 excluded: no terminal event');
+  });
+
+  it('computes p90 with linear interpolation across more than 10 runs', () => {
+    const events: FactoryEvent[] = [];
+    for (let k = 1; k <= 11; k++) {
+      const issue = String(k);
+      events.push(event({ issue, type: 'issue-title', ts: at(0) }));
+      events.push(event({ issue, type: 'merged', ts: new Date(Date.UTC(2026, 6, 20, 0, k, 0)).toISOString() }));
+    }
+
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.medianCycleTimeMs).toBe(6 * 60_000);
+    expect(kpis.p90CycleTimeMs).toBe(10 * 60_000);
+  });
+
+  it('formats cycle time, phase medians, and queue wait lines, including hour-scale durations', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title', ts: at(0) }),
+      event({ issue: '1', type: 'phase-start', phase: 'plan', ts: at(5) }),
+      event({ issue: '1', type: 'phase-end', phase: 'plan', ts: at(65) }),
+      event({ issue: '1', type: 'merged', ts: new Date(Date.UTC(2026, 6, 20, 2, 0, 0)).toISOString() }),
+    ];
+
+    const kpis = computeHealthKpis(events, []);
+    const lines = formatKpiLines(kpis);
+
+    expect(lines.join('\n')).toContain('h ');
+    expect(lines).toContain('Phase medians: plan 1m 0s');
+    expect(lines).toContain('Queue wait (median): 5s');
+
+    const trendKpis = computeHealthKpis(
+      [
+        event({ issue: '10', type: 'issue-title', ts: at(0) }),
+        event({ issue: '10', type: 'merged', ts: new Date(Date.UTC(2026, 6, 20, 0, 6, 0)).toISOString() }),
+        event({ issue: '11', type: 'issue-title', ts: at(0) }),
+        event({ issue: '11', type: 'merged', ts: new Date(Date.UTC(2026, 6, 20, 0, 10, 0)).toISOString() }),
+      ],
+      [],
+    );
+    expect(formatKpiLines(trendKpis)).toContain(
+      'Cycle time (issue→merge): median 8m 0s, p90 9m 36s (2 merged, 0 excluded: no terminal event)',
+    );
+    expect(renderKpiReport(trendKpis)).toContain('## Health KPIs');
   });
 });
 
@@ -157,6 +245,8 @@ describe('KPI trend', () => {
       stuckRate: 0,
       humanInterventionRate: 0.25,
       costPerMergedPr: 0.4,
+      medianCycleTimeMs: 360_000,
+      p90CycleTimeMs: 600_000,
       ...overrides,
     };
   }
@@ -178,7 +268,7 @@ describe('KPI trend', () => {
 
     const trend = renderKpiTrend(parsed);
     expect(trend).toContain('## Health KPI trend');
-    expect(trend).toContain('| date | runs | merge | rework | stuck | human | $/merged |');
+    expect(trend).toContain('| date | runs | merge | rework | stuck | human | $/merged | cycle p50 | cycle p90 |');
     for (const record of records) {
       expect(trend).toContain(record.date);
     }
@@ -189,6 +279,23 @@ describe('KPI trend', () => {
     const trend = renderKpiTrend([]);
     expect(trend).toContain('## Health KPI trend');
     expect(trend).toContain('No KPI history yet.');
+  });
+
+  it('renders legacy records without cycle-time fields as em-dash cells', () => {
+    const legacy = {
+      date: '2026-07-17',
+      runs: 3,
+      mergeRate: 1,
+      reworkRate: 0,
+      stuckRate: 0,
+      humanInterventionRate: 0,
+      costPerMergedPr: null,
+    } as KpiHistoryRecord;
+
+    const trend = renderKpiTrend([legacy]);
+    const row = trend.split('\n').find((line) => line.startsWith('| 2026-07-17'));
+    expect(row).toBeDefined();
+    expect(row).toBe('| 2026-07-17 | 3 | 100% | 0% | 0% | 0% | — | — | — |');
   });
 
   it('builds a history record from computed KPIs', () => {
@@ -205,6 +312,8 @@ describe('KPI trend', () => {
       stuckRate: 0,
       humanInterventionRate: 0,
       costPerMergedPr: 0,
+      medianCycleTimeMs: 0,
+      p90CycleTimeMs: 0,
     });
   });
 });
