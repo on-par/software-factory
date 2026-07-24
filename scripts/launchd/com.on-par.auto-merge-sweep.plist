@@ -9,7 +9,10 @@
   Restart:  launchctl kickstart -k gui/$(id -u)/com.on-par.auto-merge-sweep
   Health:   ~/.factory/auto-merge-sweep.heartbeat is the last completed pass;
             older than 10 minutes means the sweeper is stuck or dead.
-  Edit the absolute paths below if your checkout lives elsewhere.
+  Edit the absolute paths below if your checkout lives elsewhere — in
+  particular, the nvm node bin dir in PATH is version-pinned; update it
+  after any `nvm install` that changes the active version, or `factory
+  land` (which execs node) will fail under launchd with "command not found".
 -->
 <plist version="1.0">
 <dict>
@@ -29,7 +32,7 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <string>/Users/moltbot/.nvm/versions/node/v24.18.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     <key>FACTORY_MERGE_ADMIN</key>
     <string>1</string>
   </dict>
