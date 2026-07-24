@@ -18,6 +18,8 @@ set -uo pipefail
 
 REPOS=(sound-buddy software-factory launchblitz)
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 FACTORY_BIN="${FACTORY_BIN:-$HOME/.local/bin/factory}"
 REPO_ROOT="${REPO_ROOT:-/Users/moltbot/repos/on-par}"
 SLEEP_SECONDS="${SLEEP_SECONDS:-300}"
@@ -38,6 +40,10 @@ preflight() {
   done
   if [ ! -x "$FACTORY_BIN" ]; then
     echo "FATAL: factory CLI missing or not executable at $FACTORY_BIN" >&2
+    ok=1
+  fi
+  if [ ! -f "$SCRIPT_DIR/filter-green-prs.py" ]; then
+    echo "FATAL: filter script missing: $SCRIPT_DIR/filter-green-prs.py" >&2
     ok=1
   fi
   local r
@@ -64,26 +70,7 @@ sweep_repo() {
     return 1
   fi
 
-  printf '%s' "$pr_json" | python3 -c '
-import json, sys
-raw = sys.stdin.read()
-prs = json.loads(raw) if raw.strip() else []
-for pr in prs:
-    if pr["isDraft"]:
-        continue
-    if pr.get("mergeable") != "MERGEABLE":
-        continue
-    checks = pr.get("statusCheckRollup") or []
-    if not checks:
-        continue
-    states = {c.get("conclusion") or c.get("state") for c in checks}
-    if states != {"SUCCESS"}:
-        continue
-    refs = pr.get("closingIssuesReferences") or []
-    issue = ",".join(dict.fromkeys(str(r["number"]) for r in refs))
-    num = pr["number"]
-    print(f"{num}\t{issue}")
-' | while IFS=$'\t' read -r pr issue; do
+  printf '%s' "$pr_json" | python3 "$SCRIPT_DIR/filter-green-prs.py" | while IFS=$'\t' read -r pr issue; do
     [ -z "$pr" ] && continue
     if [[ "$issue" == *,* ]]; then
       log "$repo: SKIPPING PR #$pr: closes multiple issues (#${issue//,/, #}) — factory land takes exactly one issue; land manually"

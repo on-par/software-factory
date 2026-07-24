@@ -12,3 +12,4 @@ npm run test
 npm run coverage-ratchet
 npm run eval -- --stub
 bash scripts/auto-merge-sweep.test.sh
+bash scripts/filter-green-prs.test.sh
