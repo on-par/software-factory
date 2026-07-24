@@ -76,7 +76,7 @@ for pr in prs:
     if states != {"SUCCESS"}:
         continue
     refs = pr.get("closingIssuesReferences") or []
-    issue = ",".join(str(r["number"]) for r in refs)
+    issue = ",".join(dict.fromkeys(str(r["number"]) for r in refs))
     num = pr["number"]
     print(f"{num}\t{issue}")
 ' | while IFS=$'\t' read -r pr issue; do
