@@ -9,7 +9,9 @@
 # detect a stalled/dead sweeper. On a sweep-wide failure (every repo's `gh pr list`
 # failed), the sleep between passes doubles each consecutive failing pass up to
 # MAX_SLEEP_SECONDS (default 3600), resetting to SLEEP_SECONDS as soon as a pass
-# succeeds again.
+# succeeds again. PRs that close more than one issue are skipped with an explicit
+# SKIPPING log line (factory land takes exactly one issue); they must be landed
+# manually.
 set -uo pipefail
 
 REPOS=(sound-buddy software-factory launchblitz)
@@ -74,12 +76,15 @@ for pr in prs:
     if states != {"SUCCESS"}:
         continue
     refs = pr.get("closingIssuesReferences") or []
-    issue = refs[0]["number"] if refs else ""
+    issue = ",".join(dict.fromkeys(str(r["number"]) for r in refs))
     num = pr["number"]
     print(f"{num}\t{issue}")
 ' | while IFS=$'\t' read -r pr issue; do
     [ -z "$pr" ] && continue
-    if [ -n "$issue" ]; then
+    if [[ "$issue" == *,* ]]; then
+      log "$repo: SKIPPING PR #$pr: closes multiple issues (#${issue//,/, #}) — factory land takes exactly one issue; land manually"
+      continue
+    elif [ -n "$issue" ]; then
       if [ ! -d "$repo_dir" ]; then
         log "$repo: repo dir missing: $repo_dir"
         continue
