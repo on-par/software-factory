@@ -34,8 +34,13 @@ export class CodexCliHarness implements CodingHarness {
     const finalCmd = sandbox ? wrapCommandInSandbox(cmd, sandbox) : cmd;
 
     try {
+      let execResult: { stdout: string; stderr: string };
       try {
-        await this.execFn(finalCmd, { timeoutMs: timeoutSeconds * 1000, maxBuffer: 10 * 1024 * 1024, env });
+        execResult = await this.execFn(finalCmd, {
+          timeoutMs: timeoutSeconds * 1000,
+          maxBuffer: 10 * 1024 * 1024,
+          env,
+        });
       } catch (err: any) {
         const reason = err.killed ? 'timeout' : classifyFailure(err.stderr ?? '', err.code ?? 1);
         throw new HarnessError(err.message ?? String(err), reason, {
@@ -46,6 +51,7 @@ export class CodexCliHarness implements CodingHarness {
           killed: err.killed === true ? true : undefined,
         });
       }
+      assertServedModelMatches(extraFlag, execResult.stderr);
       const output = await readFile(outFile, 'utf-8').catch(() => '');
       if (output.trim().length === 0) {
         throw new HarnessError('codex CLI returned empty output', 'empty_response', { exitCode: 0 });
@@ -63,4 +69,21 @@ async function mktemp(prefix: string): Promise<string> {
   const path = `${prefix}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   await writeFile(path, '');
   return path;
+}
+
+/** Throws if the codex CLI's `model:` banner reports a different model than the one pinned in extraFlag. */
+function assertServedModelMatches(extraFlag: string, stderr: string): void {
+  const pinnedMatch = extraFlag.match(/(?:^|\s)(?:-m|--model)\s+(\S+)/);
+  if (!pinnedMatch) return;
+  const servedMatch = stderr.match(/^\s*model:\s*(\S+)/m);
+  if (!servedMatch) return;
+
+  const pinned = pinnedMatch[1];
+  const served = servedMatch[1];
+  if (pinned !== served) {
+    throw new HarnessError(`codex CLI served model "${served}" but "${pinned}" was requested`, 'error', {
+      exitCode: 0,
+      stderr,
+    });
+  }
 }

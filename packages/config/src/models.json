@@ -61,8 +61,8 @@
       "envKey": null,
       "harness": "codex-cli",
       "codex": true,
-      "codexFlag": "-c model_reasoning_effort=high",
-      "note": "Codex CLI subscription auth (ChatGPT/OAuth), not an API key — do not gate availability on OPENAI_API_KEY. Actual served model follows ~/.codex/config.toml's default (currently resolves to gpt-5-codex). Kept as fallback behind gpt-5.6-sol."
+      "codexFlag": "-m gpt-5.1-codex -c model_reasoning_effort=high",
+      "note": "Codex CLI subscription auth (ChatGPT/OAuth), not an API key — do not gate availability on OPENAI_API_KEY. Explicitly pins -m gpt-5.1-codex so failover from gpt-5.6-sol actually changes models (#415). Kept as fallback behind gpt-5.6-sol."
     },
     "gpt-4.1-mini": {
       "provider": "openai",
@@ -248,7 +248,7 @@
     "codex_available": {
       "if": "command -v codex && FACTORY_CODEX != 0",
       "worker_preferred": ["gpt-5.6-sol", "gpt-5.1-codex"],
-      "note": "Codex flat-rate is cheapest for implementation when available. gpt-5.6-sol pinned explicitly via -m; gpt-5.1-codex kept as fallback (rides config.toml default)."
+      "note": "Codex flat-rate is cheapest for implementation when available. gpt-5.6-sol pinned explicitly via -m; gpt-5.1-codex kept as fallback (pinned via -m, #415)."
     },
     "ollama_available": {
       "if": "command -v ollama",

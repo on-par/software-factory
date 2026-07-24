@@ -146,6 +146,22 @@ describe('loadModelsConfig', () => {
     expect(spike?.harness).toBe('ollama-agentic');
     expect(spike?.codex).toBe(true);
   });
+
+  it('pins -m on every non-experimental codex-cli model so failover changes models (#415)', () => {
+    const config = loadModelsConfig();
+    const codexCliModels = Object.entries(config.models).filter(
+      ([, def]) => def.harness === 'codex-cli' && !def.experimental,
+    );
+    expect(codexCliModels.length).toBeGreaterThanOrEqual(2);
+    for (const [id, def] of codexCliModels) {
+      expect(def.codexFlag).toContain(`-m ${id}`);
+    }
+  });
+
+  it('pins gpt-5.1-codex explicitly via -m (#415)', () => {
+    const config = loadModelsConfig();
+    expect(config.models['gpt-5.1-codex']?.codexFlag).toBe('-m gpt-5.1-codex -c model_reasoning_effort=high');
+  });
 });
 
 describe('loadFactoryConfig', () => {
