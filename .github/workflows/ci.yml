@@ -108,3 +108,5 @@ jobs:
         run: bash scripts/auto-merge-sweep.test.sh
       - name: filter-green-prs unit test
         run: bash scripts/filter-green-prs.test.sh
+      - name: repo-merge-settings unit test
+        run: bash scripts/repo-merge-settings.test.sh
