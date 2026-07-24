@@ -3,6 +3,7 @@
 import { readFile } from 'node:fs/promises';
 
 import { buildConstitutionContext } from '../constitutions/index.js';
+import { readDesignArtifact } from '../design/index.js';
 import { laneEnv } from '../environment/index.js';
 import type { ModelRouter, RouterResult } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
@@ -65,6 +66,13 @@ export async function buildPhase(opts: {
 
   const constitutionCtx = buildConstitutionContext(constitution);
   const spec = await readFile(specPath, 'utf-8').catch(() => '');
+  const designArtifact = await readDesignArtifact(specPath);
+  if (designArtifact) {
+    log(
+      'design_artifact_received',
+      `design artifact received (open questions: ${designArtifact.openQuestions.length})`,
+    );
+  }
   const localOnly = process.env.FACTORY_LOCAL_ONLY === '1';
   const isCodexDisabled = opts.codexDisabled ?? codexDisabled();
 

@@ -199,6 +199,12 @@ const INTERNAL_API_KEYS = [
   'touchesSensitiveScope',
   // Config
   'resolveFilingPolicy',
+  // Design artifact (#422)
+  'DesignArtifactSchema',
+  'designArtifactPaths',
+  'parseDesignArtifact',
+  'readDesignArtifact',
+  'renderDesignArtifact',
   // Concrete coding harnesses
   'classifyFailure',
   'ClaudeCliHarness',

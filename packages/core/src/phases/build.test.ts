@@ -698,6 +698,73 @@ describe('buildPhase timeoutSeconds', () => {
   });
 });
 
+describe('buildPhase design artifact receipt (#422)', () => {
+  it('logs design_artifact_received with the open-question count when a valid .design.json sits beside the spec', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-422.md');
+    await writeFile(specPath, '---\nroute: claude\n---\n# Spec\n');
+    await writeFile(
+      join(worktree, 'issue-422.design.json'),
+      JSON.stringify({
+        restatedProblem: 'x',
+        approach: { chosen: 'y', rejected: [] },
+        interfacesTouched: ['a.ts'],
+        behaviorContract: ['z'],
+        verificationPlan: [{ command: 'npm test', passWhen: 'green' }],
+        riskBlastRadius: 'none',
+        openQuestions: ['q1', 'q2'],
+      }),
+    );
+    const fakeRouter = {
+      run: async () => ({ model: 'fake-model', output: 'done', exitCode: 0, attempts: [] }),
+    } as any;
+    const logs: Array<{ type: string; msg: string }> = [];
+
+    const result = await buildPhase({
+      issue: 422,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/422-design-artifact',
+      route: 'claude',
+      router: fakeRouter,
+      constitution: null,
+      log: (type, msg) => logs.push({ type, msg }),
+    });
+
+    expect(result.ok).toBe(true);
+    const receipt = logs.find((l) => l.type === 'design_artifact_received');
+    expect(receipt?.msg).toContain('open questions: 2');
+  });
+
+  it('does not log design_artifact_received and still succeeds when no .design.json exists', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-426.md');
+    await writeFile(specPath, '---\nroute: claude\n---\n# Spec\n');
+    const fakeRouter = {
+      run: async () => ({ model: 'fake-model', output: 'done', exitCode: 0, attempts: [] }),
+    } as any;
+    const logs: Array<{ type: string; msg: string }> = [];
+
+    const result = await buildPhase({
+      issue: 426,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/426-no-design-artifact',
+      route: 'claude',
+      router: fakeRouter,
+      constitution: null,
+      log: (type, msg) => logs.push({ type, msg }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(logs.some((l) => l.type === 'design_artifact_received')).toBe(false);
+  });
+});
+
 describe('buildPhase appPort', () => {
   let prevFactoryHeadless: string | undefined;
 

@@ -63,8 +63,8 @@ describe('renderEvidencePack', () => {
     }
     expect(markdown).toContain('issue-385.build.log');
     expect(markdown).toContain('issue-385.check.log');
-    expect(markdown.match(/<details>/g)?.length).toBe(5);
-    expect(markdown.match(/<\/details>/g)?.length).toBe(5);
+    expect(markdown.match(/<details>/g)?.length).toBe(6);
+    expect(markdown.match(/<\/details>/g)?.length).toBe(6);
   });
 
   it('truncates long checker details to ~200 characters', () => {
@@ -119,6 +119,24 @@ describe('renderEvidencePack', () => {
     });
 
     expect(markdown).toContain('Final result: 1 failure(s) remain');
+  });
+
+  it('includes designMarkdown in the Design artifact section when provided (#422)', () => {
+    const markdown = renderEvidencePack({
+      issue: 422,
+      events: [],
+      logFiles: [],
+      designMarkdown: '## Design artifact (#422)\n\nRestated problem here.',
+    });
+
+    expect(markdown).toContain('Design artifact');
+    expect(markdown).toContain('Restated problem here.');
+  });
+
+  it('falls back to "No design artifact recorded." when designMarkdown is absent (#422)', () => {
+    const markdown = renderEvidencePack({ issue: 422, events: [], logFiles: [] });
+
+    expect(markdown).toContain('- No design artifact recorded.');
   });
 });
 
@@ -191,5 +209,26 @@ describe('gatherEvidencePack', () => {
     const markdown = gatherEvidencePack({ issue: 8, specPath });
 
     expect(markdown).toContain('Just some body text describing the change.');
+  });
+
+  it('picks up a .design.md on disk beside the spec (#422)', () => {
+    const dir = mkdtemp();
+    const specPath = join(dir, 'issue-422.md');
+    writeFileSync(specPath, '---\nroute: codex\n---\n# Spec\n');
+    writeFileSync(join(dir, 'issue-422.design.md'), '## Design artifact (#422)\n\nRestated problem text.');
+
+    const markdown = gatherEvidencePack({ issue: 422, specPath });
+
+    expect(markdown).toContain('Restated problem text.');
+  });
+
+  it('falls back to "No design artifact recorded." when no .design.md exists (#422)', () => {
+    const dir = mkdtemp();
+    const specPath = join(dir, 'issue-423.md');
+    writeFileSync(specPath, '---\nroute: codex\n---\n# Spec\n');
+
+    const markdown = gatherEvidencePack({ issue: 423, specPath });
+
+    expect(markdown).toContain('- No design artifact recorded.');
   });
 });

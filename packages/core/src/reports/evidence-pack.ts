@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 
+import { designArtifactPaths } from '../design/index.js';
 import type { CheckSummary, FactoryEvent } from '../types/index.js';
 import { readIssueEvents } from './local-run.js';
 
@@ -12,6 +13,7 @@ export interface EvidencePackRenderInput {
   checkSummary?: CheckSummary;
   reworkRounds?: number;
   specSummary?: string;
+  designMarkdown?: string;
   events: FactoryEvent[];
   logFiles: string[];
 }
@@ -27,7 +29,7 @@ export interface EvidencePackGatherInput {
 }
 
 export function renderEvidencePack(input: EvidencePackRenderInput): string {
-  const { checkSummary, reworkRounds, specSummary, events, logFiles } = input;
+  const { checkSummary, reworkRounds, specSummary, designMarkdown, events, logFiles } = input;
 
   const summaryParts = [
     checkSummary
@@ -60,6 +62,7 @@ export function renderEvidencePack(input: EvidencePackRenderInput): string {
         : '- No checker results recorded.',
     ),
     section('Frozen spec', specSummary ?? '- Spec summary unavailable.'),
+    section('Design artifact', designMarkdown ?? '- No design artifact recorded.'),
     section(
       'Rework & verification',
       [
@@ -89,10 +92,11 @@ export function gatherEvidencePack(input: EvidencePackGatherInput): string {
   const { issue, checkSummary, reworkRounds, specPath, eventsFile, startedAt, logsDir } = input;
 
   const specSummary = readSpecSummary(specPath);
+  const designMarkdown = readDesignMarkdown(specPath);
   const events = eventsFile && startedAt ? readIssueEvents(eventsFile, issue, startedAt) : [];
   const logFiles = readLogFiles(logsDir, issue);
 
-  return renderEvidencePack({ issue, checkSummary, reworkRounds, specSummary, events, logFiles });
+  return renderEvidencePack({ issue, checkSummary, reworkRounds, specSummary, designMarkdown, events, logFiles });
 }
 
 function section(title: string, body: string): string {
@@ -108,6 +112,17 @@ function readSpecSummary(specPath?: string): string | undefined {
     const goalMatch = body.match(/## Goal\n([\s\S]*?)(?:\n## |$)/);
     const excerpt = goalMatch ? goalMatch[1] : body.slice(0, SPEC_SUMMARY_LIMIT);
     return truncate(excerpt.trim(), SPEC_SUMMARY_LIMIT);
+  } catch {
+    return undefined;
+  }
+}
+
+function readDesignMarkdown(specPath?: string): string | undefined {
+  if (!specPath) return undefined;
+  try {
+    const { markdown } = designArtifactPaths(specPath);
+    if (!existsSync(markdown)) return undefined;
+    return readFileSync(markdown, 'utf-8');
   } catch {
     return undefined;
   }
