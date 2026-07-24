@@ -175,3 +175,28 @@ describe('formatDoctorChecks', () => {
     `);
   });
 });
+
+describe('runDoctorChecks distFreshness probe', () => {
+  it('includes a failing compiled dist fresh check when the probe reports stale, and fails doctor', () => {
+    const checks = runDoctorChecks(probes({ distFreshness: () => ({ fresh: false, detail: 'core: stale' }) }));
+    const distCheck = checks.find((c) => c.name === 'compiled dist fresh')!;
+    expect(distCheck).toBeDefined();
+    expect(distCheck.ok).toBe(false);
+    expect(distCheck.optional).toBeUndefined();
+    expect(distCheck.fix).toContain('npm run build');
+    expect(doctorFailed(checks)).toBe(true);
+  });
+
+  it('includes a passing compiled dist fresh check when the probe reports fresh', () => {
+    const checks = runDoctorChecks(probes({ distFreshness: () => ({ fresh: true, detail: 'dist newer than src' }) }));
+    const distCheck = checks.find((c) => c.name === 'compiled dist fresh')!;
+    expect(distCheck).toBeDefined();
+    expect(distCheck.ok).toBe(true);
+    expect(doctorFailed(checks)).toBe(false);
+  });
+
+  it('omits the compiled dist fresh check when the probe is not provided', () => {
+    const checks = runDoctorChecks(probes());
+    expect(checks.find((c) => c.name === 'compiled dist fresh')).toBeUndefined();
+  });
+});
