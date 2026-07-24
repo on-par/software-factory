@@ -289,9 +289,17 @@ export interface KpiHistoryRecord {
   costPerMergedPr: number | null;
   medianCycleTimeMs: number | null;
   p90CycleTimeMs: number | null;
+  /** HEAD commit SHA at snapshot time; null when the git lookup failed. Absent in legacy rows. */
+  commitSha?: string | null;
+  /** Resolved tier → ranked model list at snapshot time. Absent in legacy rows. */
+  models?: Record<string, string[]>;
 }
 
-export function kpisToHistoryRecord(kpis: HealthKpis, date: string): KpiHistoryRecord {
+export function kpisToHistoryRecord(
+  kpis: HealthKpis,
+  date: string,
+  meta: { commitSha?: string | null; models?: Record<string, string[]> } = {},
+): KpiHistoryRecord {
   return {
     date,
     runs: kpis.runs,
@@ -303,6 +311,8 @@ export function kpisToHistoryRecord(kpis: HealthKpis, date: string): KpiHistoryR
     costPerMergedPr: kpis.costPerMergedPr,
     medianCycleTimeMs: kpis.medianCycleTimeMs,
     p90CycleTimeMs: kpis.p90CycleTimeMs,
+    ...(meta.commitSha !== undefined ? { commitSha: meta.commitSha } : {}),
+    ...(meta.models !== undefined ? { models: meta.models } : {}),
   };
 }
 
@@ -317,6 +327,48 @@ export function appendKpiHistoryLine(existing: string, record: KpiHistoryRecord)
   const line = `${JSON.stringify(record)}\n`;
   if (!existing.trim()) return line;
   return `${existing.endsWith('\n') ? existing : `${existing}\n`}${line}`;
+}
+
+function formatSignedPp(curr: number | undefined, prev: number | undefined): string {
+  if (typeof curr !== 'number' || typeof prev !== 'number') return '—';
+  const delta = Math.round((curr - prev) * 100);
+  if (delta === 0) return '0pp';
+  return `${delta > 0 ? '+' : '−'}${Math.abs(delta)}pp`;
+}
+
+function formatSignedInt(curr: number, prev: number): string {
+  const delta = curr - prev;
+  if (delta === 0) return '0';
+  return `${delta > 0 ? '+' : '−'}${Math.abs(delta)}`;
+}
+
+function formatSignedCost(curr: number | null, prev: number | null): string {
+  if (curr === null || prev === null) return '—';
+  const delta = curr - prev;
+  if (delta === 0) return formatCost(0);
+  return `${delta > 0 ? '+' : '−'}${formatCost(Math.abs(delta))}`;
+}
+
+function formatSignedDuration(curr: number | null | undefined, prev: number | null | undefined): string {
+  if (typeof curr !== 'number' || typeof prev !== 'number') return '—';
+  const delta = curr - prev;
+  if (delta === 0) return '0s';
+  return `${delta > 0 ? '+' : '−'}${formatDurationMs(Math.abs(delta))}`;
+}
+
+function renderKpiDeltaLine(prev: KpiHistoryRecord, curr: KpiHistoryRecord): string {
+  const parts = [
+    `runs ${formatSignedInt(curr.runs, prev.runs)}`,
+    `merge ${formatSignedPp(curr.mergeRate, prev.mergeRate)}`,
+    `rework ${formatSignedPp(curr.reworkRate, prev.reworkRate)}`,
+    `stuck ${formatSignedPp(curr.stuckRate, prev.stuckRate)}`,
+    `human ${formatSignedPp(curr.humanInterventionRate, prev.humanInterventionRate)}`,
+    `auto ${formatSignedPp(curr.fullyAutonomousRate, prev.fullyAutonomousRate)}`,
+    `$/merged ${formatSignedCost(curr.costPerMergedPr, prev.costPerMergedPr)}`,
+    `cycle p50 ${formatSignedDuration(curr.medianCycleTimeMs, prev.medianCycleTimeMs)}`,
+    `cycle p90 ${formatSignedDuration(curr.p90CycleTimeMs, prev.p90CycleTimeMs)}`,
+  ];
+  return `Δ vs previous: ${parts.join(' · ')}`;
 }
 
 export function renderKpiTrend(records: KpiHistoryRecord[], opts: { window?: number } = {}): string {
@@ -348,6 +400,12 @@ export function renderKpiTrend(records: KpiHistoryRecord[], opts: { window?: num
       return `| ${columns.join(' | ')} |`;
     }),
   );
+
+  if (records.length >= 2) {
+    const prev = records[records.length - 2];
+    const curr = records[records.length - 1];
+    lines.push('', renderKpiDeltaLine(prev, curr));
+  }
 
   return `${lines.join('\n')}\n`;
 }

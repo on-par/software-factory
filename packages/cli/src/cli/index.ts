@@ -10,7 +10,9 @@ import { promisify } from 'node:util';
 import { Octokit } from '@octokit/rest';
 import type {
   FailoverReason,
+  HealthKpis,
   IngestSettings,
+  KpiHistoryRecord,
   LeaseHealth,
   ModelDiagnosis,
   QueueDiagnostic,
@@ -476,6 +478,43 @@ async function cmdCost(opts: { issue?: string } = {}) {
   console.log(`  Total: $${grandTotal.toFixed(4)}`);
 }
 
+async function currentCommitSha(): Promise<string | null> {
+  try {
+    const { stdout } = await exec('git rev-parse HEAD');
+    return stdout.trim();
+  } catch {
+    return null;
+  }
+}
+
+function resolvedModelTiers(repoRoot: string): Record<string, string[]> {
+  const modelsConfig = applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot));
+  return modelsConfig.tiers ?? {};
+}
+
+function readTextFileOrEmpty(path: string): string {
+  try {
+    return readFileSync(path, 'utf-8');
+  } catch (err: any) {
+    if (err.code === 'ENOENT') return '';
+    throw err;
+  }
+}
+
+async function appendKpiSnapshot(
+  paths: ReturnType<typeof getFactoryPaths>,
+  repoRoot: string,
+  kpis: HealthKpis,
+): Promise<{ record: KpiHistoryRecord; history: KpiHistoryRecord[] }> {
+  const record = kpisToHistoryRecord(kpis, new Date().toISOString().slice(0, 10), {
+    commitSha: await currentCommitSha(),
+    models: resolvedModelTiers(repoRoot),
+  });
+  const updated = appendKpiHistoryLine(readTextFileOrEmpty(paths.kpiHistory), record);
+  writeFileSync(paths.kpiHistory, updated);
+  return { record, history: parseKpiHistory(updated) };
+}
+
 async function cmdKpis() {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
@@ -499,12 +538,21 @@ async function cmdKpis() {
 
   const kpis = computeHealthKpis(allEvents, costs);
 
-  const record = kpisToHistoryRecord(kpis, new Date().toISOString().slice(0, 10));
-  const existing = existsSync(paths.kpiHistory) ? readFileSync(paths.kpiHistory, 'utf-8') : '';
-  writeFileSync(paths.kpiHistory, appendKpiHistoryLine(existing, record));
+  let history: KpiHistoryRecord[];
+  try {
+    ({ history } = await appendKpiSnapshot(paths, repoRoot, kpis));
+  } catch (err: any) {
+    console.error(
+      chalk.yellow(
+        `factory: KPI snapshot failed (${err?.message ?? err}) — showing the report without persisting a new snapshot`,
+      ),
+    );
+    const existing = readTextFileOrEmpty(paths.kpiHistory);
+    history = existing ? parseKpiHistory(existing) : [];
+  }
 
   console.log(renderKpiReport(kpis));
-  console.log(renderKpiTrend(parseKpiHistory(readFileSync(paths.kpiHistory, 'utf-8'))));
+  console.log(renderKpiTrend(history));
 }
 
 export interface UsageKnobs {
@@ -1534,6 +1582,18 @@ async function cmdRun() {
   controller.abort();
   await watchdog;
   logEvent(paths.events, 'run-done', 'all', 'all lanes finished');
+
+  if (entries.length > 0) {
+    try {
+      const events = existsSync(paths.events) ? readEvents(paths.events) : [];
+      const costs = existsSync(paths.costs) ? readCosts(paths.costs) : [];
+      const kpis = computeHealthKpis(events, costs);
+      await appendKpiSnapshot(paths, repoRoot, kpis);
+      logEvent(paths.events, 'kpi-snapshot', 'all', `KPI snapshot appended to ${paths.kpiHistory}`);
+    } catch (err: any) {
+      logEvent(paths.events, 'warn', 'all', `kpi snapshot failed: ${err.message}`);
+    }
+  }
 }
 
 /** Wraps cmdRun so an empty queue is a no-op (not a throw) while auto-ingest is enabled and watching. */
