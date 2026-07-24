@@ -323,6 +323,7 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
       onSandboxEvent: (type, detail) => log(type, detail),
       onLog: (msg) => log('router', msg),
       env: laneEnv(appPort),
+      retryCause: 'checker',
     })
     .catch(() => null);
 

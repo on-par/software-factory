@@ -922,6 +922,63 @@ describe('buildPhase cross-harness failover', () => {
     ]);
   });
 
+  it('tags the claude fallback run with retryCause: failover on the cost row', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-367.md');
+    const stub = new StubModelExecutor({
+      scripts: {
+        build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
+        build_claude: [{ output: 'claude output' }],
+      },
+    });
+    const router = new ModelRouter(failoverModels, failoverRoutes, false, stub);
+    const costRows: Array<{ task: string; retryCause?: string }> = [];
+    router.setCostSink((entry) => costRows.push(entry));
+
+    await buildPhase({
+      issue: 367,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/367-cross-harness-build-failover',
+      route: 'codex',
+      router,
+      constitution: null,
+      log: () => {},
+    });
+
+    expect(costRows).toHaveLength(1);
+    expect(costRows[0].task).toBe('build_claude');
+    expect(costRows[0].retryCause).toBe('failover');
+  });
+
+  it('passes no retryCause on the cost row for a plain, non-fallback build run', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-367.md');
+    const stub = new StubModelExecutor({ scripts: { build_codex: [{ output: 'codex output' }] } });
+    const router = new ModelRouter(failoverModels, failoverRoutes, false, stub);
+    const costRows: Array<{ task: string; retryCause?: string }> = [];
+    router.setCostSink((entry) => costRows.push(entry));
+
+    await buildPhase({
+      issue: 367,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/367-cross-harness-build-failover',
+      route: 'codex',
+      router,
+      constitution: null,
+      log: () => {},
+    });
+
+    expect(costRows).toHaveLength(1);
+    expect(costRows[0].task).toBe('build_codex');
+    expect('retryCause' in costRows[0]).toBe(false);
+  });
+
   it('continues a codex build on claude when every codex worker is rate-limited', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);

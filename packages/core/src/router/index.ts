@@ -15,7 +15,7 @@ import { OpenCodeHarness } from '../harness/opencode.js';
 import { ModelRegistry } from '../models/index.js';
 import type { SandboxEventType, SandboxPolicy } from '../sandbox/index.js';
 import { sandboxEventFromError } from '../sandbox/index.js';
-import type { CostEntry, TaskType } from '../types/index.js';
+import type { CostEntry, RetryCause, TaskType } from '../types/index.js';
 import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
 import { shellEscape } from '../utils/index.js';
@@ -534,12 +534,21 @@ export class ModelRouter {
     prompt: string,
     output: string,
     failoverReason?: FailoverReason,
+    retryCause?: RetryCause,
   ): void {
     if (!this.costSink) return;
     const inputTokens = estimateTokens(prompt);
     const outputTokens = estimateTokens(output);
     const cost = this.registry.estimateCost(model, inputTokens, outputTokens);
-    this.costSink({ task, model, inputTokens, outputTokens, cost, ...(failoverReason ? { failoverReason } : {}) });
+    this.costSink({
+      task,
+      model,
+      inputTokens,
+      outputTokens,
+      cost,
+      ...(failoverReason ? { failoverReason } : {}),
+      ...(retryCause ? { retryCause } : {}),
+    });
   }
 
   /** Resolve a task type to its tier */
@@ -593,9 +602,18 @@ export class ModelRouter {
       sandbox?: SandboxPolicy;
       onSandboxEvent?: (type: SandboxEventType, detail: string) => void;
       env?: Record<string, string>;
+      retryCause?: RetryCause;
     } = {},
   ): Promise<RouterResult> {
-    const { worktree = process.cwd(), timeoutSeconds = 1800, modelOverride, onLog = () => {}, sandbox, env } = options;
+    const {
+      worktree = process.cwd(),
+      timeoutSeconds = 1800,
+      modelOverride,
+      onLog = () => {},
+      sandbox,
+      env,
+      retryCause,
+    } = options;
 
     const models = modelOverride ? [modelOverride] : this.resolveAll(task);
     if (models.length === 0) {
@@ -707,7 +725,7 @@ export class ModelRouter {
           attempts.push({ model, reason: null, ok: true });
           const failovers = failoversFrom(attempts);
           const failoverReason = failovers.at(-1)?.reason;
-          this.recordCost(task, model, prompt, output, failoverReason);
+          this.recordCost(task, model, prompt, output, failoverReason, retryCause);
           return {
             model,
             output: output,

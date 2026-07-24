@@ -1034,4 +1034,28 @@ describe('ModelRouter cost sink', () => {
     expect(rows[0].model).toBe('model-b');
     expect(rows[0].failoverReason).toBe('usage_cap');
   });
+
+  it('records retryCause on the row when the caller passes options.retryCause', async () => {
+    const stub = new StubModelExecutor({ scripts: { plan: [{ output: 'SCRIPTED PLAN' }] } });
+    const router = new ModelRouter(costModels, routes, false, stub);
+    const rows: Parameters<Parameters<ModelRouter['setCostSink']>[0]>[0][] = [];
+    router.setCostSink((entry) => rows.push(entry));
+
+    await router.run('plan', 'do it', { retryCause: 'checker' });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].retryCause).toBe('checker');
+  });
+
+  it('omits retryCause from the row when the caller does not pass it', async () => {
+    const stub = new StubModelExecutor({ scripts: { plan: [{ output: 'SCRIPTED PLAN' }] } });
+    const router = new ModelRouter(costModels, routes, false, stub);
+    const rows: Parameters<Parameters<ModelRouter['setCostSink']>[0]>[0][] = [];
+    router.setCostSink((entry) => rows.push(entry));
+
+    await router.run('plan', 'do it');
+
+    expect(rows).toHaveLength(1);
+    expect('retryCause' in rows[0]).toBe(false);
+  });
 });

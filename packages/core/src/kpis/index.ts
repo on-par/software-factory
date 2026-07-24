@@ -1,6 +1,6 @@
 // src/kpis/index.ts — Pure aggregation of factory health KPIs from events + cost rows
 
-import type { CostEntry, FactoryEvent } from '../types/index.js';
+import type { CostEntry, FactoryEvent, RetryCause } from '../types/index.js';
 
 function isRealIssue(issue: string): boolean {
   return /^\d+$/.test(issue);
@@ -37,10 +37,14 @@ function formatDurationMs(ms: number): string {
 export interface HealthKpis {
   runs: number;
   merged: number;
+  /** Runs that entered the rework loop at least once (breadth: run-level boolean —
+   *  did it loop at all). See totalRetries/retriesByCause for depth + cause. */
   reworkRuns: number;
   stuckRuns: number;
   interventionRuns: number;
   mergeRate: number;
+  /** Share of runs that looped at all (breadth). Distinct from retries, which
+   *  count how many times and why — both are kept intentionally. */
   reworkRate: number;
   stuckRate: number;
   humanInterventionRate: number;
@@ -51,6 +55,15 @@ export interface HealthKpis {
   phaseDurations: Record<string, number>;
   queueWaitMs: number | null;
   cycleTimeExcludedRuns: number;
+  /** Total retry attempts across all runs, from retryCauseOf() over events. */
+  totalRetries: number;
+  /** Median retries per run (all runs, including zero-retry runs); null when runs === 0. */
+  retriesPerRun: number | null;
+  /** Retry counts per cause bucket; all four keys always present. */
+  retriesByCause: Record<RetryCause, number>;
+  /** Fraction of totalCost from CostEntry rows tied to retry attempts
+   *  (rows with retryCause set or failoverReason set); 0 when totalCost is 0. */
+  retryCostShare: number;
 }
 
 interface RunStats {
@@ -62,12 +75,26 @@ interface RunStats {
   mergedTs: number | null;
   firstPhaseTs: number | null;
   phaseWindows: Map<string, { first: number; last: number }>;
+  retries: number;
 }
 
 const INTERVENTION_EVENT_TYPES = new Set(['parked', 'escalate', 'awaiting-review']);
 
+/** Attribute one event to a retry-cause bucket, or null if it is not a retry.
+ *  'rework' events are one checker retry per round; 'stuck' events repeat the
+ *  same round's payload and must NOT count. Any event carrying failoverReason
+ *  is a failover retry attempt, split out by timeout / unknown. */
+export function retryCauseOf(event: FactoryEvent): RetryCause | null {
+  if (event.type === 'rework') return 'checker';
+  if (event.failoverReason === 'timeout') return 'timeout';
+  if (event.failoverReason === 'unknown') return 'other';
+  if (event.failoverReason) return 'failover';
+  return null;
+}
+
 export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): HealthKpis {
   const runsByIssue = new Map<string, RunStats>();
+  const retriesByCause: Record<RetryCause, number> = { checker: 0, failover: 0, timeout: 0, other: 0 };
 
   for (const event of events) {
     if (!isRealIssue(event.issue)) continue;
@@ -81,12 +108,19 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
       mergedTs: null,
       firstPhaseTs: null,
       phaseWindows: new Map<string, { first: number; last: number }>(),
+      retries: 0,
     };
 
     if (event.type === 'merged') stats.merged = true;
     if (event.type === 'rework' || event.rework) stats.reworked = true;
     if (event.type === 'stuck' || event.rework?.stuck === true) stats.stuck = true;
     if (INTERVENTION_EVENT_TYPES.has(event.type)) stats.intervened = true;
+
+    const retryCause = retryCauseOf(event);
+    if (retryCause) {
+      stats.retries++;
+      retriesByCause[retryCause]++;
+    }
 
     const ts = Date.parse(event.ts);
     if (!Number.isNaN(ts)) {
@@ -115,12 +149,14 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
   const cycleTimes: number[] = [];
   const queueWaits: number[] = [];
   const phaseSamples = new Map<string, number[]>();
+  const perRunRetryCounts: number[] = [];
 
   for (const stats of runsByIssue.values()) {
     if (stats.merged) merged++;
     if (stats.reworked) reworkRuns++;
     if (stats.stuck) stuckRuns++;
     if (stats.intervened) interventionRuns++;
+    perRunRetryCounts.push(stats.retries);
 
     if (stats.firstTs !== null && stats.mergedTs !== null) {
       cycleTimes.push(Math.max(0, stats.mergedTs - stats.firstTs));
@@ -136,6 +172,11 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
   }
 
   const totalCost = costs.reduce((sum, entry) => sum + (entry.cost ?? 0), 0);
+  const retryCost = costs.reduce(
+    (sum, entry) => sum + (entry.retryCause || entry.failoverReason ? (entry.cost ?? 0) : 0),
+    0,
+  );
+  const totalRetries = retriesByCause.checker + retriesByCause.failover + retriesByCause.timeout + retriesByCause.other;
   const sortedCycleTimes = [...cycleTimes].sort((a, b) => a - b);
 
   const observedPhases = [...phaseSamples.keys()];
@@ -165,6 +206,10 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     phaseDurations,
     queueWaitMs: percentile(queueWaits, 0.5),
     cycleTimeExcludedRuns: runs - cycleTimes.length,
+    totalRetries,
+    retriesPerRun: runs === 0 ? null : percentile(perRunRetryCounts, 0.5),
+    retriesByCause,
+    retryCostShare: totalCost === 0 ? 0 : retryCost / totalCost,
   };
 }
 
@@ -185,6 +230,8 @@ export function formatKpiLines(kpis: HealthKpis): string[] {
     `Rework rate: ${formatPercent(kpis.reworkRate)} (${kpis.reworkRuns}/${kpis.runs})`,
     `Stuck rate: ${formatPercent(kpis.stuckRate)} (${kpis.stuckRuns}/${kpis.runs})`,
     `Human-intervention rate: ${formatPercent(kpis.humanInterventionRate)} (${kpis.interventionRuns}/${kpis.runs})`,
+    `Retries: total ${kpis.totalRetries}, median ${kpis.retriesPerRun}/run (checker ${kpis.retriesByCause.checker} · failover ${kpis.retriesByCause.failover} · timeout ${kpis.retriesByCause.timeout} · other ${kpis.retriesByCause.other})`,
+    `Retry cost share: ${formatPercent(kpis.retryCostShare)} of total spend`,
     `Cost per merged PR: ${kpis.costPerMergedPr === null ? 'n/a' : formatCost(kpis.costPerMergedPr)}`,
   ];
 

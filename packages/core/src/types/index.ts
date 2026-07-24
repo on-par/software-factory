@@ -169,6 +169,11 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 /** Best-effort classification of why a rework round happened (#386). */
 export type ReworkCause = 'factory-fault' | 'direction-change' | 'external';
 
+/** Cause bucket for a retry attempt (#419): checker = rework round after failed
+ *  checks, failover = provider/quota failover, timeout = runaway agent,
+ *  other = unclassifiable. */
+export type RetryCause = 'checker' | 'failover' | 'timeout' | 'other';
+
 /** Structured payload carried on `rework`/`stuck` events for later metrics (#386). */
 export interface ReworkInfo {
   /** 1-based rework round number. */
@@ -205,6 +210,8 @@ export interface CostEntry {
   outputTokens: number;
   cost: number;
   failoverReason?: FailoverReason;
+  /** Set when this row is the cost of a retry attempt (#419). */
+  retryCause?: RetryCause;
 }
 
 // ---------- Dispute ----------

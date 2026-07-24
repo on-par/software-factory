@@ -296,6 +296,7 @@ describe('checkPhase sandbox', () => {
     expect(captured.length).toBeGreaterThan(0);
     expect(captured[0].options.sandbox).toBe(sandbox);
     expect(typeof captured[0].options.onSandboxEvent).toBe('function');
+    expect(captured[0].options.retryCause).toBe('checker');
 
     captured[0].options.onSandboxEvent('resource_limit', 'cpu time limit exceeded');
     expect(logs).toContainEqual({ type: 'resource_limit', msg: 'cpu time limit exceeded' });
