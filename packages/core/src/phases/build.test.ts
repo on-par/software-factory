@@ -216,15 +216,20 @@ describe('buildPhase FACTORY_CODEX kill-switch', () => {
 
 describe('buildPhase local-only codex prompt', () => {
   let prevLocalOnly: string | undefined;
+  let prevFactoryCodex: string | undefined;
 
   beforeEach(() => {
     prevLocalOnly = process.env.FACTORY_LOCAL_ONLY;
     process.env.FACTORY_LOCAL_ONLY = '1';
+    prevFactoryCodex = process.env.FACTORY_CODEX;
+    delete process.env.FACTORY_CODEX;
   });
 
   afterEach(() => {
     if (prevLocalOnly === undefined) delete process.env.FACTORY_LOCAL_ONLY;
     else process.env.FACTORY_LOCAL_ONLY = prevLocalOnly;
+    if (prevFactoryCodex === undefined) delete process.env.FACTORY_CODEX;
+    else process.env.FACTORY_CODEX = prevFactoryCodex;
   });
 
   it('sends the compact local-small prompt with the trimmed spec', async () => {
@@ -515,6 +520,18 @@ describe('buildPhase sandbox', () => {
 });
 
 describe('buildPhase steering', () => {
+  let prevFactoryCodex: string | undefined;
+
+  beforeEach(() => {
+    prevFactoryCodex = process.env.FACTORY_CODEX;
+    delete process.env.FACTORY_CODEX;
+  });
+
+  afterEach(() => {
+    if (prevFactoryCodex === undefined) delete process.env.FACTORY_CODEX;
+    else process.env.FACTORY_CODEX = prevFactoryCodex;
+  });
+
   it('appends the operator guidance block to the claude route prompt when steering is passed', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);
@@ -962,6 +979,18 @@ describe('buildPhase appPort', () => {
 });
 
 describe('buildPhase cross-harness failover', () => {
+  let prevFactoryCodex: string | undefined;
+
+  beforeEach(() => {
+    prevFactoryCodex = process.env.FACTORY_CODEX;
+    delete process.env.FACTORY_CODEX;
+  });
+
+  afterEach(() => {
+    if (prevFactoryCodex === undefined) delete process.env.FACTORY_CODEX;
+    else process.env.FACTORY_CODEX = prevFactoryCodex;
+  });
+
   const failoverModels: ModelsConfig = {
     version: 1,
     models: {
