@@ -69,14 +69,19 @@ async function detectLiveAppSignal(worktree: string): Promise<string | null> {
   const raw = await readFile(join(worktree, 'package.json'), 'utf-8').catch(() => null);
   if (raw === null) return null;
 
-  let pkg: { scripts?: Record<string, string> };
+  let pkg: unknown;
   try {
     pkg = JSON.parse(raw);
   } catch {
     return null;
   }
+  if (typeof pkg !== 'object' || pkg === null) return null;
 
-  for (const [name, script] of Object.entries(pkg.scripts ?? {})) {
+  const scripts = (pkg as { scripts?: unknown }).scripts;
+  if (typeof scripts !== 'object' || scripts === null) return null;
+
+  for (const [name, script] of Object.entries(scripts as Record<string, unknown>)) {
+    if (typeof script !== 'string') continue;
     if (script.includes('playwright') || name === 'e2e' || name.includes('e2e')) {
       return `package.json script '${name}'`;
     }

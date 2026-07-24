@@ -471,6 +471,45 @@ describe('checkPhase appPort', () => {
 
     expect(logCalls.find(([type]) => type === 'environment_warning')).toBeUndefined();
   });
+
+  it('does not throw when package.json has a malformed scripts field', async () => {
+    const worktree = await makeWorktreeWithFiles(107, {
+      'package.json': JSON.stringify({ scripts: { e2e: true } }),
+    });
+    const { router } = makeRouter();
+    const logCalls: Array<[string, string]> = [];
+
+    await expect(
+      checkPhase({
+        issue: 107,
+        worktree,
+        specPath: join(worktree, 'issue-107.md'),
+        router,
+        constitution: null,
+        log: (type, msg) => logCalls.push([type, msg]),
+        autoRework: false,
+      }),
+    ).resolves.toBeDefined();
+
+    expect(logCalls.find(([type]) => type === 'environment_warning')).toBeUndefined();
+  });
+
+  it('does not throw when package.json parses to a non-object (e.g. null)', async () => {
+    const worktree = await makeWorktreeWithFiles(108, { 'package.json': 'null' });
+    const { router } = makeRouter();
+
+    await expect(
+      checkPhase({
+        issue: 108,
+        worktree,
+        specPath: join(worktree, 'issue-108.md'),
+        router,
+        constitution: null,
+        log: () => {},
+        autoRework: false,
+      }),
+    ).resolves.toBeDefined();
+  });
 });
 
 describe('checkPhase success paths', () => {

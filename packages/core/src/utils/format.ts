@@ -38,6 +38,7 @@ const WARN_TYPES = new Set([
   'sandbox-unavailable',
   'sandbox-degraded',
   'sandbox-disabled',
+  'environment_warning',
 ]);
 const ERROR_TYPES = new Set(['fail', 'escalate', 'ship_denied', 'parked']);
 
