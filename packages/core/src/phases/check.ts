@@ -1,6 +1,9 @@
 // src/phases/check.ts — CHECK phase: independent checkers verify output, rework loop, dispute resolution
 
-import { type CheckerContext, runAllCheckers } from '../checkers/index.js';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
+import { type CheckerContext, fileExists, runAllCheckers } from '../checkers/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { leaseEnv } from '../environment/index.js';
 import type { ModelRouter } from '../router/index.js';
@@ -50,6 +53,38 @@ function failingCheckerNames(summary: CheckSummary): string[] {
   return summary.results.filter((r) => r.result === 'FAIL').map((r) => r.checker);
 }
 
+const PLAYWRIGHT_CONFIG_FILES = [
+  'playwright.config.ts',
+  'playwright.config.js',
+  'playwright.config.mjs',
+  'playwright.config.cjs',
+];
+
+/** Human-readable e2e signal ("playwright.config.ts", "package.json script 'e2e'"), or null when the worktree shows no live-app testing. */
+async function detectLiveAppSignal(worktree: string): Promise<string | null> {
+  for (const f of PLAYWRIGHT_CONFIG_FILES) {
+    if (await fileExists(join(worktree, f))) return f;
+  }
+
+  const raw = await readFile(join(worktree, 'package.json'), 'utf-8').catch(() => null);
+  if (raw === null) return null;
+
+  let pkg: { scripts?: Record<string, string> };
+  try {
+    pkg = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+
+  for (const [name, script] of Object.entries(pkg.scripts ?? {})) {
+    if (script.includes('playwright') || name === 'e2e' || name.includes('e2e')) {
+      return `package.json script '${name}'`;
+    }
+  }
+
+  return null;
+}
+
 function classifyReworkCause(opts: {
   steering?: ConsumedSteering;
   failovers: { reason: FailoverReason }[];
@@ -88,7 +123,17 @@ export async function checkPhase(opts: {
     appPort,
   } = opts;
 
-  const ctx: CheckerContext = { worktree, specPath };
+  const ctx: CheckerContext = { worktree, specPath, ...(appPort !== undefined ? { env: leaseEnv(appPort) } : {}) };
+
+  if (appPort === undefined) {
+    const signal = await detectLiveAppSignal(worktree);
+    if (signal) {
+      log(
+        'environment_warning',
+        `no leased port for this lane but the worktree runs a live app for testing (${signal}) — parallel-lane e2e servers may collide on a shared port; enable environment.ports in factory.json`,
+      );
+    }
+  }
 
   log('check', 'Running checkers');
 

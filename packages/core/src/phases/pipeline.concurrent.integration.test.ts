@@ -1,5 +1,5 @@
 import { exec as execCb } from 'node:child_process';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { promisify } from 'node:util';
@@ -143,4 +143,110 @@ describe('concurrent lanes integration', () => {
       expect(sorted[0].exit).toBeLessThanOrEqual(sorted[1].enter);
     },
   );
+
+  it(
+    'two lanes with leased ports run checkPhase concurrently without colliding on a shared port',
+    { timeout: 180_000 },
+    async () => {
+      const { repoRoot } = await kit.makeThrowawayRepo();
+      const lanes: Array<{ issue: number; appPort: number }> = [
+        { issue: 43, appPort: 4361 },
+        { issue: 44, appPort: 4362 },
+      ];
+
+      async function runLane(issue: number, appPort: number) {
+        const events: Array<[string, string]> = [];
+        const log = (type: string, msg: string) => events.push([type, msg]);
+        const stub = new StubModelExecutor({
+          scripts: {
+            build_claude: [
+              {
+                output: 'built',
+                effect: async (ctx) => {
+                  await writeFile(join(ctx.worktree, 'check-port.mjs'), CHECK_PORT_SCRIPT);
+                  await writeFile(
+                    join(ctx.worktree, 'package.json'),
+                    JSON.stringify({ scripts: { test: 'node check-port.mjs' } }),
+                  );
+                  await commitAll(ctx.worktree, `feat: env-asserting lane ${issue}`);
+                },
+              },
+            ],
+          },
+        });
+        const router = new ModelRouter(makeStubModelsConfig(), makeStubRoutesConfig(), false, stub);
+        const constitution = null;
+
+        const branch = branchFor(issue, `Env lane ${issue}`);
+        const worktree = kit.trackWorktree(repoRoot, issue);
+        const specPath = await kit.makeSpecPath(issue);
+
+        await withGitLock(repoRoot, async () => {
+          await gitFetch(repoRoot);
+          await setupWorktree(repoRoot, branch, worktree);
+        });
+
+        const build = await buildPhase({
+          issue,
+          repo,
+          worktree,
+          specPath,
+          branch,
+          route: 'claude',
+          router,
+          constitution,
+          log,
+          appPort,
+        });
+        expect(build.ok).toBe(true);
+
+        const check = await checkPhase({ issue, worktree, specPath, router, constitution, log, appPort });
+        expect(check.passed).toBe(true);
+
+        const boundPort = (await readFile(join(worktree, 'bound-port.txt'), 'utf-8')).trim();
+        return { issue, appPort, boundPort };
+      }
+
+      const results = await Promise.all(lanes.map((l) => runLane(l.issue, l.appPort)));
+
+      for (const result of results) {
+        expect(result.boundPort).toBe(String(result.appPort));
+      }
+    },
+  );
 });
+
+const CHECK_PORT_SCRIPT = `import http from 'node:http';
+import { writeFile } from 'node:fs/promises';
+
+const server = http.createServer((_req, res) => {
+  res.writeHead(200);
+  res.end('ok');
+});
+
+server.on('error', (err) => {
+  console.error('server error', err);
+  process.exit(1);
+});
+
+server.listen(Number(process.env.PORT), '127.0.0.1', async () => {
+  try {
+    const boundPort = server.address().port;
+    if (boundPort !== Number(process.env.FACTORY_APP_PORT)) {
+      throw new Error(\`port mismatch: bound \${boundPort} expected \${process.env.FACTORY_APP_PORT}\`);
+    }
+
+    const response = await fetch(process.env.FACTORY_BASE_URL);
+    if (response.status !== 200) {
+      throw new Error(\`unexpected status \${response.status}\`);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await writeFile('bound-port.txt', String(boundPort));
+    server.close(() => process.exit(0));
+  } catch (err) {
+    console.error(err);
+    server.close(() => process.exit(1));
+  }
+});
+`;

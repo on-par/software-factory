@@ -85,6 +85,19 @@ function makeRouter(output: string): { router: ModelRouter; stub: StubModelExecu
   return { router: new ModelRouter(models, routes, false, stub), stub };
 }
 
+const LANE_ENV = { PORT: '3142', FACTORY_APP_PORT: '3142', FACTORY_BASE_URL: 'http://127.0.0.1:3142' };
+
+/** package.json whose `scriptKey` script exits 0 only when the lane env (PORT/FACTORY_APP_PORT/FACTORY_BASE_URL) was forwarded into its process env. */
+function envAssertingPackageJson(scriptKey: string): string {
+  const check =
+    "process.env.PORT === '3142' && process.env.FACTORY_APP_PORT === '3142' && process.env.FACTORY_BASE_URL === 'http://127.0.0.1:3142'";
+  return JSON.stringify({
+    name: 'fixture',
+    version: '1.0.0',
+    scripts: { [scriptKey]: `node -e "process.exit(${check} ? 0 : 1)"` },
+  });
+}
+
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
 
 /** npx resolves tsc by walking up from cwd — symlink the repo's real typescript install into the worktree. */
@@ -201,6 +214,14 @@ describe('compileChecker', () => {
     expect(result.result).toBe('FAIL');
     expect(result.details).toContain('make failed');
   });
+
+  it('forwards ctx.env to npm run build', { timeout: 30000 }, async () => {
+    const worktree = await makeWorktree({ 'package.json': envAssertingPackageJson('build') });
+
+    const result = await compileChecker({ ...makeContext(worktree), env: LANE_ENV });
+
+    expect(result.result).toBe('PASS');
+  });
 });
 
 describe('testsChecker', () => {
@@ -301,6 +322,32 @@ describe('testsChecker', () => {
     expect(result.result).toBe('FAIL');
     expect(result.details).toContain('npm test failed');
   });
+
+  it('forwards ctx.env to npm test', { timeout: 30000 }, async () => {
+    const worktree = await makeWorktree({ 'package.json': envAssertingPackageJson('test') });
+
+    const result = await testsChecker({ ...makeContext(worktree), env: LANE_ENV });
+
+    expect(result.result).toBe('PASS');
+  });
+
+  it('fails npm test when ctx.env is omitted (proves injection, not ambient env)', { timeout: 30000 }, async () => {
+    const worktree = await makeWorktree({ 'package.json': envAssertingPackageJson('test') });
+
+    const result = await testsChecker(makeContext(worktree));
+
+    expect(result.result).toBe('FAIL');
+  });
+
+  it('forwards ctx.env through scripts/verify.sh', { timeout: 30000 }, async () => {
+    const worktree = await makeWorktree({
+      'scripts/verify.sh': '#!/bin/bash\n[ "$PORT" = "3142" ] && exit 0 || exit 1\n',
+    });
+
+    const result = await testsChecker({ ...makeContext(worktree), env: LANE_ENV });
+
+    expect(result.result).toBe('PASS');
+  });
 });
 
 describe('lintChecker', () => {
@@ -361,6 +408,14 @@ describe('lintChecker', () => {
 
     expect(result.result).toBe('PASS');
     expect(result.details).toContain('no linting configured — skipped');
+  });
+
+  it('forwards ctx.env to npm run lint', { timeout: 30000 }, async () => {
+    const worktree = await makeWorktree({ 'package.json': envAssertingPackageJson('lint') });
+
+    const result = await lintChecker({ ...makeContext(worktree), env: LANE_ENV });
+
+    expect(result.result).toBe('PASS');
   });
 });
 
@@ -751,6 +806,23 @@ describe('runCustomChecker', () => {
 
     expect(result.result).toBe('FAIL');
     expect(result.details).toMatch(/^checker produced no valid JSON/);
+  });
+
+  it('forwards ctx.env to the router', async () => {
+    const worktree = await makeWorktree();
+    const captured: { options: any }[] = [];
+    const fakeRouter = {
+      run: async (_task: string, _prompt: string, options: any) => {
+        captured.push({ options });
+        return { model: 'fake-model', output: '{"checker":"custom_x","result":"PASS","details":"ok"}', attempts: [] };
+      },
+    } as any;
+
+    await runCustomChecker({ ...makeContext(worktree), env: LANE_ENV }, 'custom_x', fakeRouter);
+    await runCustomChecker(makeContext(worktree), 'custom_x', fakeRouter);
+
+    expect(captured[0].options.env).toEqual(LANE_ENV);
+    expect(captured[1].options.env).toBeUndefined();
   });
 });
 
