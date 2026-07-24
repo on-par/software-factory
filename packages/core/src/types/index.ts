@@ -264,3 +264,36 @@ export interface IssueRunState {
   prNumber?: number;
   failures?: CheckerOutput[];
 }
+
+// ---------- Design artifact (#422) ----------
+
+export interface RejectedApproach {
+  option: string;
+  reason: string;
+}
+
+export interface DesignApproach {
+  chosen: string;
+  rejected: RejectedApproach[];
+}
+
+export interface VerificationStep {
+  command: string;
+  passWhen: string;
+}
+
+/** Structured design artifact written by PLAN and consumed by BUILD (#422). */
+export interface DesignArtifact {
+  /** One paragraph restating the problem in the agent's own words. */
+  restatedProblem: string;
+  approach: DesignApproach;
+  /** Files, exported functions, types added or changed. */
+  interfacesTouched: string[];
+  /** What is true after this change that was not true before. */
+  behaviorContract: string[];
+  verificationPlan: VerificationStep[];
+  /** What breaks if this plan is wrong. */
+  riskBlastRadius: string;
+  /** Unresolved questions. Non-empty is a signal, flagged in the event stream. */
+  openQuestions: string[];
+}

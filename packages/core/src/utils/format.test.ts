@@ -133,6 +133,8 @@ describe('levelForType', () => {
     ['environment_warning', 'warn'],
     ['environment_orphan', 'warn'],
     ['environment_conflict', 'warn'],
+    ['design_open_questions', 'warn'],
+    ['design_artifact_invalid', 'warn'],
     ['fail', 'error'],
     ['escalate', 'error'],
     ['ship_denied', 'error'],

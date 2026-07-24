@@ -41,6 +41,8 @@ const WARN_TYPES = new Set([
   'environment_warning',
   'environment_orphan',
   'environment_conflict',
+  'design_open_questions',
+  'design_artifact_invalid',
 ]);
 const ERROR_TYPES = new Set(['fail', 'escalate', 'ship_denied', 'parked']);
 

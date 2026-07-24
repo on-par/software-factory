@@ -10,10 +10,11 @@ import matter from 'gray-matter';
 import type { ApprovalGate } from '../approvals/index.js';
 import { PLAN_SPEC_PREVIEW_BYTES } from '../approvals/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
+import { designArtifactPaths, parseDesignArtifact, renderDesignArtifact } from '../design/index.js';
 import type { ModelRouter } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
-import type { Constitution, FailoverReason } from '../types/index.js';
+import type { Constitution, DesignArtifact, FailoverReason } from '../types/index.js';
 import { codexDisabled, escalationLine, isEscalation } from '../utils/index.js';
 
 export interface PlanResult {
@@ -22,6 +23,7 @@ export interface PlanResult {
   specPath: string;
   model: string;
   escalate?: string;
+  designArtifact: DesignArtifact | null;
 }
 
 export interface PlanPromptOpts {
@@ -60,6 +62,23 @@ ${constitutionCtx ? '4. The constitution above defines the standards for this pr
 Write EXACTLY ONE file, at ${specPath}, in this shape:
 ---
 route: codex
+design:
+  restatedProblem: >-
+    <one paragraph, the problem in your own words — if this is wrong, stop>
+  approach:
+    chosen: <the chosen approach, briefly>
+    rejected:
+      - option: <rejected alternative>
+        reason: <why>
+  interfacesTouched:
+    - <file / exported function / type added or changed>
+  behaviorContract:
+    - <what is true after this change that was not true before>
+  verificationPlan:
+    - command: <exact command>
+      passWhen: <what a pass looks like>
+  riskBlastRadius: <what breaks if this is wrong>
+  openQuestions: []   # anything you could not resolve; empty list if none
 ---
 # Spec: ${issueTitle} (#${issue})
 ## Goal
@@ -74,6 +93,7 @@ ${constitutionCtx ? `## Constitution compliance\nFor each standard in the consti
 <explicitly out of scope, from the issue>
 
 (Replace 'codex' in the frontmatter with 'claude' if that's the route you chose.)
+The design: block is machine-validated — keys must match exactly as shown.
 Do not run tests, do not write or edit any other file, do not touch git.
 If the issue is genuinely too vague to plan without a product decision only a human
 can make, print a line starting exactly with "ESCALATE:" followed by the question,
@@ -160,7 +180,14 @@ export async function planPhase(opts: {
     if (isEscalation(result.output)) {
       const escalateLine = escalationLine(result.output);
       log('escalate', escalateLine ?? 'plan escalated');
-      return { ok: false, route: 'claude', specPath, model: result.model, escalate: escalateLine };
+      return {
+        ok: false,
+        route: 'claude',
+        specPath,
+        model: result.model,
+        escalate: escalateLine,
+        designArtifact: null,
+      };
     }
 
     // Check spec file was created. If the model is chat-only, the output is the
@@ -200,9 +227,27 @@ export async function planPhase(opts: {
       }
     }
 
+    const { artifact: designArtifact, errors: designErrors } = parseDesignArtifact(parsedSpec?.data ?? {});
+    if (designArtifact) {
+      const paths = designArtifactPaths(specPath);
+      await writeFile(paths.json, JSON.stringify(designArtifact, null, 2));
+      await writeFile(paths.markdown, renderDesignArtifact(designArtifact, issue));
+      log(
+        'design_artifact_emitted',
+        `design artifact validated and written (open questions: ${designArtifact.openQuestions.length})`,
+      );
+      if (designArtifact.openQuestions.length > 0) {
+        const summary = designArtifact.openQuestions.join('; ');
+        const truncated = summary.length > 300 ? `${summary.slice(0, 300)}…` : summary;
+        log('design_open_questions', `plan has ${designArtifact.openQuestions.length} open question(s): ${truncated}`);
+      }
+    } else {
+      log('design_artifact_invalid', `spec frontmatter has no valid design artifact: ${designErrors.join('; ')}`);
+    }
+
     log('plan', `Plan complete with model ${result.model}, route: ${route}`, { model: result.model });
 
-    const planResult: PlanResult = { ok: true, route, specPath, model: result.model };
+    const planResult: PlanResult = { ok: true, route, specPath, model: result.model, designArtifact };
 
     if (!approvalGate) return planResult;
 
@@ -232,7 +277,7 @@ export async function planPhase(opts: {
       if (replans >= maxReplans) {
         const reason = `plan re-plan limit exceeded (${maxReplans} redirects)`;
         log('plan_rejected', reason);
-        return { ok: false, route, specPath, model: result.model, escalate: reason };
+        return { ok: false, route, specPath, model: result.model, escalate: reason, designArtifact: null };
       }
       replans++;
       steering = redirect;
@@ -242,7 +287,14 @@ export async function planPhase(opts: {
 
     const reason = response.reason ?? 'plan rejected by operator';
     log('plan_rejected', reason);
-    return { ok: false, route, specPath, model: result.model, escalate: `plan rejected: ${reason}` };
+    return {
+      ok: false,
+      route,
+      specPath,
+      model: result.model,
+      escalate: `plan rejected: ${reason}`,
+      designArtifact: null,
+    };
   }
 }
 
@@ -250,8 +302,16 @@ async function archiveExistingSpec(specPath: string, log: (type: string, msg: st
   if (!existsSync(specPath)) return;
 
   const archiveDir = join(dirname(specPath), '.archive');
-  const archivedPath = join(archiveDir, `${Date.now()}-${specPath.split('/').pop() ?? 'spec.md'}`);
+  const timestamp = Date.now();
+  const archivedPath = join(archiveDir, `${timestamp}-${specPath.split('/').pop() ?? 'spec.md'}`);
   await mkdir(archiveDir, { recursive: true });
   await rename(specPath, archivedPath);
   log('plan', `Archived existing spec before planning: ${archivedPath}`);
+
+  const { json, markdown } = designArtifactPaths(specPath);
+  for (const designPath of [json, markdown]) {
+    if (!existsSync(designPath)) continue;
+    const archivedDesignPath = join(archiveDir, `${timestamp}-${designPath.split('/').pop() ?? 'spec.design'}`);
+    await rename(designPath, archivedDesignPath);
+  }
 }

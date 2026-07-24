@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -77,6 +78,25 @@ describe('buildPlanPrompt', () => {
     expect(prompt).toContain('Measure the current prompt.');
     expect(prompt).toContain('Write EXACTLY ONE file, at /tmp/spec.md');
     expect(prompt).toContain('route: codex');
+  });
+
+  it('includes the design: block template keys', () => {
+    const prompt = buildPlanPrompt({
+      issue: 36,
+      issueTitle: 'Add eval runner',
+      issueBody: 'Measure the current prompt.',
+      specPath: '/tmp/spec.md',
+      constitutionCtx: '',
+    });
+
+    expect(prompt).toContain('design:');
+    expect(prompt).toContain('restatedProblem');
+    expect(prompt).toContain('approach:');
+    expect(prompt).toContain('interfacesTouched');
+    expect(prompt).toContain('behaviorContract');
+    expect(prompt).toContain('verificationPlan');
+    expect(prompt).toContain('riskBlastRadius');
+    expect(prompt).toContain('openQuestions');
   });
 
   it('references the constitution above when constitutionCtx is non-empty', () => {
@@ -331,6 +351,167 @@ describe('planPhase', () => {
     expect(logs.some((l) => l.type === 'plan' && l.msg.startsWith('Archived existing spec before planning:'))).toBe(
       true,
     );
+  });
+
+  describe('design artifact (#422)', () => {
+    const validDesignYaml = `design:
+  restatedProblem: The problem statement, restated.
+  approach:
+    chosen: Do the thing.
+    rejected:
+      - option: Alt approach
+        reason: Worse.
+  interfacesTouched:
+    - packages/core/src/foo.ts
+  behaviorContract:
+    - Foo now does bar.
+  verificationPlan:
+    - command: npm test
+      passWhen: tests pass
+  riskBlastRadius: Nothing breaks.
+`;
+
+    it('writes .design.json and .design.md, populates result.designArtifact, and logs design_artifact_emitted', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-422.md');
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [
+            {
+              output: `---\nroute: codex\n${validDesignYaml}  openQuestions: []\n---\n# Spec\n`,
+            },
+          ],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: { issues: { get: async () => ({ data: { title: 'Design artifact', body: 'Body.' } }) } },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      const result = await planPhase({
+        issue: 422,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: (type, msg) => logs.push({ type, msg }),
+      });
+
+      expect(result.designArtifact).not.toBeNull();
+      expect(result.designArtifact?.restatedProblem).toBe('The problem statement, restated.');
+      await expect(readFile(`${specPath.replace(/\.md$/, '')}.design.json`, 'utf-8')).resolves.toContain(
+        'restatedProblem',
+      );
+      await expect(readFile(`${specPath.replace(/\.md$/, '')}.design.md`, 'utf-8')).resolves.toContain(
+        '## Design artifact (#422)',
+      );
+      expect(logs.some((l) => l.type === 'design_artifact_emitted')).toBe(true);
+      expect(logs.some((l) => l.type === 'design_open_questions')).toBe(false);
+    });
+
+    it('logs design_open_questions with the question text when openQuestions is non-empty', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-423.md');
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [
+            {
+              output: `---\nroute: codex\n${validDesignYaml}  openQuestions:\n    - is X intended?\n---\n# Spec\n`,
+            },
+          ],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: { issues: { get: async () => ({ data: { title: 'Open questions', body: 'Body.' } }) } },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      const result = await planPhase({
+        issue: 423,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: (type, msg) => logs.push({ type, msg }),
+      });
+
+      expect(result.designArtifact?.openQuestions).toEqual(['is X intended?']);
+      const questionLog = logs.find((l) => l.type === 'design_open_questions');
+      expect(questionLog?.msg).toContain('is X intended?');
+    });
+
+    it('leaves designArtifact null and logs design_artifact_invalid when the spec has no design block', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-424.md');
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: { issues: { get: async () => ({ data: { title: 'No design block', body: 'Body.' } }) } },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      const result = await planPhase({
+        issue: 424,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: (type, msg) => logs.push({ type, msg }),
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.designArtifact).toBeNull();
+      expect(logs.some((l) => l.type === 'design_artifact_invalid')).toBe(true);
+      expect(existsSync(`${specPath.replace(/\.md$/, '')}.design.json`)).toBe(false);
+    });
+
+    it('archives a pre-existing design artifact alongside a replanned spec', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-425.md');
+      await writeFile(specPath, '---\nroute: claude\n---\n# Stale Spec\n');
+      await writeFile(`${specPath.replace(/\.md$/, '')}.design.json`, JSON.stringify({ stale: true }));
+
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{ output: '---\nroute: codex\n---\n# Fresh Spec\n' }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: { issues: { get: async () => ({ data: { title: 'Replan', body: 'Body.' } }) } },
+      };
+
+      await planPhase({
+        issue: 425,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: () => {},
+      });
+
+      const archived = await readdir(join(worktree, '.archive'));
+      expect(archived.some((f) => f.endsWith('.design.json'))).toBe(true);
+      expect(existsSync(`${specPath.replace(/\.md$/, '')}.design.json`)).toBe(false);
+    });
   });
 
   describe('FACTORY_CODEX kill-switch', () => {
