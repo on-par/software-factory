@@ -110,3 +110,5 @@ jobs:
         run: bash scripts/filter-green-prs.test.sh
       - name: repo-merge-settings unit test
         run: bash scripts/repo-merge-settings.test.sh
+      - name: ruleset-copilot-review unit test
+        run: bash scripts/ruleset-copilot-review.test.sh
