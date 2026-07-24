@@ -6,7 +6,14 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import type { EvidencePack, FactoryEvent, FailoverReason, LogLevel, ReworkInfo } from '../types/index.js';
+import type {
+  EvidencePack,
+  FactoryEvent,
+  FailoverReason,
+  LogLevel,
+  ReadinessInfo,
+  ReworkInfo,
+} from '../types/index.js';
 import { colorEnabled, formatEventLine } from '../utils/format.js';
 import { withFileLockSync } from '../utils/lock.js';
 
@@ -21,6 +28,7 @@ export interface LogExtra {
   fingerprint?: string;
   evidence?: EvidencePack;
   rework?: ReworkInfo;
+  readiness?: ReadinessInfo;
   actor?: string;
   model?: string;
   tokens?: { input: number; output: number };
@@ -87,6 +95,7 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(extra?.fingerprint ? { fingerprint: extra.fingerprint } : {}),
       ...(extra?.evidence ? { evidence: extra.evidence } : {}),
       ...(extra?.rework ? { rework: extra.rework } : {}),
+      ...(extra?.readiness ? { readiness: extra.readiness } : {}),
       ...(extra?.model ? { model: extra.model } : {}),
       ...(extra?.tokens ? { tokens: extra.tokens } : {}),
     };

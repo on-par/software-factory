@@ -559,6 +559,51 @@ describe('cli commands (via main dispatch)', () => {
     });
   });
 
+  describe('ready', () => {
+    const COMPLETE_BODY = `### Problem statement
+
+Something is wrong.
+
+### In scope
+
+Fix it.
+
+### Out of scope
+
+Nothing else.
+
+### Acceptance criteria
+
+- [ ] it works
+
+### Verification
+
+bash scripts/verify.sh
+`;
+
+    it('prints the ready line and exits 0 for a complete issue body', async () => {
+      h.octokit.rest.issues.get = vi.fn(async () => ({ data: { title: 'Fix it', body: COMPLETE_BODY } }));
+      const res = await runMain('ready', '421');
+      expect(res).toEqual({ exited: false, code: undefined });
+      expect(logged()).toContain('issue #421 is factory-ready (factory-task, score 100%)');
+    });
+
+    it('prints the missing fields and exits 1 for an incomplete issue body', async () => {
+      const incompleteBody = COMPLETE_BODY.replace(/### Verification\n\nbash scripts\/verify\.sh\n/, '');
+      h.octokit.rest.issues.get = vi.fn(async () => ({ data: { title: 'Fix it', body: incompleteBody } }));
+      const res = await runMain('ready', '421');
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(logged()).toContain('missing: Verification');
+      expect(errored()).toContain('issue #421 is not factory-ready — missing: Verification');
+    });
+
+    it('exits 2 on an invalid issue argument', async () => {
+      const res = await runMain('ready', 'abc');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(h.octokit.rest.issues.get).not.toHaveBeenCalled();
+    });
+  });
+
   describe('status', () => {
     it('prints product, models, queue, events, and STOP state', async () => {
       writeFileSync(paths().product, 'alpha\n');

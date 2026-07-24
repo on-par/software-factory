@@ -11,10 +11,11 @@ import type { ApprovalGate } from '../approvals/index.js';
 import { PLAN_SPEC_PREVIEW_BYTES } from '../approvals/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { designArtifactPaths, parseDesignArtifact, renderDesignArtifact } from '../design/index.js';
+import { scoreIssueReadiness } from '../readiness/index.js';
 import type { ModelRouter } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
-import type { Constitution, DesignArtifact, FailoverReason } from '../types/index.js';
+import type { Constitution, DesignArtifact, FailoverReason, ReadinessInfo } from '../types/index.js';
 import { codexDisabled, escalationLine, isEscalation } from '../utils/index.js';
 
 export interface PlanResult {
@@ -111,7 +112,12 @@ export async function planPhase(opts: {
   log: (
     type: string,
     msg: string,
-    extra?: { failoverReason?: FailoverReason; model?: string; tokens?: { input: number; output: number } },
+    extra?: {
+      failoverReason?: FailoverReason;
+      model?: string;
+      tokens?: { input: number; output: number };
+      readiness?: ReadinessInfo;
+    },
   ) => void;
   timeoutSeconds?: number;
   modelOverride?: string;
@@ -148,6 +154,13 @@ export async function planPhase(opts: {
   const constitutionCtx = buildConstitutionContext(constitution);
 
   log('plan', `Starting plan phase`);
+
+  const readiness = scoreIssueReadiness({ title: issueTitle, body: issueBody });
+  log(
+    'readiness',
+    `issue readiness ${Math.round(readiness.score * 100)}% (${readiness.template})${readiness.pass ? '' : ` — missing: ${readiness.missing.join(', ')}`}`,
+    { readiness },
+  );
 
   let steering: ConsumedSteering | undefined;
   let replans = 0;

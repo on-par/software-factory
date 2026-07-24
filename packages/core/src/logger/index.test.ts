@@ -179,6 +179,29 @@ describe('createLogger', () => {
     expect(event).not.toHaveProperty('tokens');
   });
 
+  it('includes readiness only when passed as extra', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+    const logger = createLogger(eventsFile, { issue: 5 }, { out: { write: () => {} } });
+    const readiness = { template: 'factory-task' as const, score: 1, pass: true, missing: [] };
+
+    logger.info('readiness', 'issue readiness 100% (factory-task)', { readiness });
+
+    const [event] = readEvents(eventsFile);
+    expect(event.readiness).toEqual(readiness);
+  });
+
+  it('omits readiness when not supplied', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+    const logger = createLogger(eventsFile, {}, { out: { write: () => {} } });
+
+    logger.info('plan', 'no readiness');
+
+    const [event] = readEvents(eventsFile);
+    expect(event).not.toHaveProperty('readiness');
+  });
+
   it('child(ctx) merges onto the parent context without mutating the parent', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
     const eventsFile = join(tmpDir, 'events.ndjson');

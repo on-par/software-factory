@@ -456,6 +456,67 @@ describe('retry KPIs', () => {
   });
 });
 
+describe('issue readiness KPIs (#421)', () => {
+  const readyEvents: FactoryEvent[] = [
+    event({ issue: '1', type: 'issue-title', ts: at(0) }),
+    event({
+      issue: '1',
+      type: 'readiness',
+      ts: at(1),
+      readiness: { template: 'factory-task', score: 1, pass: true, missing: [] },
+    }),
+    event({ issue: '1', type: 'rework', ts: at(2) }),
+    event({ issue: '1', type: 'merged', ts: at(10) }),
+    event({ issue: '2', type: 'issue-title', ts: at(0) }),
+    event({
+      issue: '2',
+      type: 'readiness',
+      ts: at(1),
+      readiness: { template: 'factory-task', score: 0.4, pass: false, missing: ['Verification'] },
+    }),
+    event({ issue: '2', type: 'merged', ts: at(30) }),
+    event({ issue: '3', type: 'issue-title', ts: at(0) }),
+  ];
+
+  it('computes readinessScoredRuns, meanReadinessScore, and a ready/not-ready split', () => {
+    const kpis = computeHealthKpis(readyEvents, []);
+
+    expect(kpis.runs).toBe(3);
+    expect(kpis.readinessScoredRuns).toBe(2);
+    expect(kpis.meanReadinessScore).toBeCloseTo(0.7);
+    expect(kpis.readinessSplit).toEqual({
+      ready: { runs: 1, meanRetries: 1, medianCycleTimeMs: 10_000 },
+      notReady: { runs: 1, meanRetries: 0, medianCycleTimeMs: 30_000 },
+    });
+  });
+
+  it('includes the readiness lines in formatKpiLines', () => {
+    const kpis = computeHealthKpis(readyEvents, []);
+    const lines = formatKpiLines(kpis);
+
+    expect(lines).toContain('Issue readiness: mean 70% (2/3 runs scored)');
+    expect(lines).toContain(
+      'Readiness vs outcomes: ready 1 run (1.0 retries/run, cycle p50 10s) · not-ready 1 run (0.0 retries/run, cycle p50 30s)',
+    );
+  });
+
+  it('yields null meanReadinessScore and readinessSplit, and no readiness lines, when zero runs are scored', () => {
+    const events: FactoryEvent[] = [event({ issue: '1', type: 'issue-title' }), event({ issue: '1', type: 'merged' })];
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.readinessScoredRuns).toBe(0);
+    expect(kpis.meanReadinessScore).toBeNull();
+    expect(kpis.readinessSplit).toBeNull();
+    expect(formatKpiLines(kpis).some((line) => line.startsWith('Issue readiness'))).toBe(false);
+  });
+
+  it('round-trips meanReadinessScore through kpisToHistoryRecord', () => {
+    const kpis = computeHealthKpis(readyEvents, []);
+    const record = kpisToHistoryRecord(kpis, '2026-07-20');
+    expect(record.meanReadinessScore).toBeCloseTo(0.7);
+  });
+});
+
 describe('renderKpiReport', () => {
   it('renders a markdown block with the Health KPIs heading', () => {
     const kpis = computeHealthKpis(
@@ -554,6 +615,7 @@ describe('KPI trend', () => {
       costPerMergedPr: 0,
       medianCycleTimeMs: 0,
       p90CycleTimeMs: 0,
+      meanReadinessScore: null,
     });
   });
 

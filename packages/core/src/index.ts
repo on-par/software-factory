@@ -116,6 +116,14 @@ export { buildConstitutionContext, ConstitutionLoader, REPO_INSTRUCTION_FILES } 
 export type { SandboxEventType, SandboxPolicy, SandboxRuntime } from './sandbox/index.js';
 export { detectSandboxRuntime, resolveSandboxPolicy } from './sandbox/index.js';
 
+// Readiness
+export {
+  EPIC_REQUIRED_FIELDS,
+  FACTORY_BUG_REQUIRED_FIELDS,
+  FACTORY_TASK_REQUIRED_FIELDS,
+  scoreIssueReadiness,
+} from './readiness/index.js';
+
 // Checkers
 export type { CheckerContext } from './checkers/index.js';
 export {
