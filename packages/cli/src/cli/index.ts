@@ -864,10 +864,13 @@ export async function shipIssue(
         fallbackModel: failoverSettings.fallbackModel,
         onQuotaExhausted: async ({ provider, reason }) => {
           await breaker.open(provider, reason, failoverSettings.cooldownMs);
+          // No failoverReason metadata here: the build's own worker_failover
+          // event already carries it for this same quota trip, and KPI retry
+          // counting (retryCauseOf) treats any failoverReason-bearing event as
+          // a distinct retry — attaching it here would double-count one retry.
           mkLog('build')(
             'provider_breaker_open',
             `breaker opened for ${provider} (${reason}) — cooldown ${Math.round(failoverSettings.cooldownMs / 60_000)}m`,
-            { failoverReason: reason },
           );
         },
       },

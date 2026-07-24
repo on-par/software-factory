@@ -1141,6 +1141,44 @@ describe('buildPhase cross-harness failover', () => {
     expect(onQuotaExhausted).toHaveBeenCalledWith({ provider: 'openai', reason: 'usage_cap' });
   });
 
+  it('still completes the claude fallback when onQuotaExhausted itself throws', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-367.md');
+    const stub = new StubModelExecutor({
+      scripts: {
+        build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
+        build_claude: [{ output: 'claude output' }],
+      },
+    });
+    const router = new ModelRouter(failoverModels, failoverRoutes, false, stub);
+    const logCalls: Array<[string, string]> = [];
+
+    const result = await buildPhase({
+      issue: 367,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/367-cross-harness-build-failover',
+      route: 'codex',
+      router,
+      constitution: null,
+      log: (type, msg) => {
+        logCalls.push([type, msg]);
+      },
+      autoFailover: {
+        enabled: true,
+        onQuotaExhausted: async () => {
+          throw new Error('breaker file write failed');
+        },
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.model).toBe('claude-sonnet-5');
+    expect(logCalls.some(([type, msg]) => type === 'warn' && msg.includes('breaker file write failed'))).toBe(true);
+  });
+
   it('routes to a fallbackModel when it is an available build_claude worker', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);

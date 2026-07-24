@@ -166,7 +166,14 @@ ${headlessNote()}${appPort ? `\n\n${appPortNote(appPort)}` : ''}`;
         `from_route=build_codex to_route=build_claude reason=${reason}`,
       { failoverReason: reason },
     );
-    await opts.autoFailover?.onQuotaExhausted?.({ provider, reason });
+    try {
+      await opts.autoFailover?.onQuotaExhausted?.({ provider, reason });
+    } catch (breakerErr) {
+      // Best-effort circuit-breaker bookkeeping — a write failure here must
+      // never turn a successful codex→claude failover into a hard build
+      // failure.
+      log('warn', `provider breaker callback failed (non-fatal): ${(breakerErr as Error).message}`);
+    }
     route = 'claude';
     taskType = 'build_claude';
     const claudePrompt = applySteering(
