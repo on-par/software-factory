@@ -10,6 +10,7 @@ import {
   parseKpiHistory,
   renderKpiReport,
   renderKpiTrend,
+  retryCauseOf,
 } from './index.js';
 
 function event(overrides: Partial<FactoryEvent> = {}): FactoryEvent {
@@ -217,6 +218,113 @@ describe('cycle time KPIs', () => {
       'Cycle time (issue→merge): median 8m 0s, p90 9m 36s (2 merged, 0 excluded: no terminal event)',
     );
     expect(renderKpiReport(trendKpis)).toContain('## Health KPIs');
+  });
+});
+
+describe('retryCauseOf', () => {
+  it('classifies rework events as checker retries', () => {
+    expect(retryCauseOf(event({ type: 'rework' }))).toBe('checker');
+  });
+
+  it('classifies timeout failovers', () => {
+    expect(retryCauseOf(event({ type: 'failover', failoverReason: 'timeout' }))).toBe('timeout');
+  });
+
+  it('classifies unknown failovers as other', () => {
+    expect(retryCauseOf(event({ type: 'failover', failoverReason: 'unknown' }))).toBe('other');
+  });
+
+  it('classifies any other failoverReason as failover', () => {
+    expect(retryCauseOf(event({ type: 'failover', failoverReason: 'rate_limit' }))).toBe('failover');
+  });
+
+  it('returns null for a plain, non-retry event', () => {
+    expect(retryCauseOf(event({ type: 'issue-title' }))).toBeNull();
+  });
+});
+
+describe('retry KPIs', () => {
+  it('buckets each retry cause and sums totalRetries', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title' }),
+      event({ issue: '1', type: 'rework', rework: { round: 1, failingChecks: ['tests'], cause: 'factory-fault' } }),
+      event({ issue: '1', type: 'failover', failoverReason: 'timeout' }),
+      event({ issue: '1', type: 'failover', failoverReason: 'rate_limit' }),
+      event({ issue: '1', type: 'failover', failoverReason: 'unknown' }),
+    ];
+
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.retriesByCause).toEqual({ checker: 1, timeout: 1, failover: 1, other: 1 });
+    expect(kpis.totalRetries).toBe(4);
+  });
+
+  it('does not double-count a stuck event carrying a rework payload', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title' }),
+      event({
+        issue: '1',
+        type: 'stuck',
+        rework: { round: 2, failingChecks: ['tests'], cause: 'factory-fault', stuck: true },
+      }),
+    ];
+
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.totalRetries).toBe(0);
+    expect(kpis.retriesByCause).toEqual({ checker: 0, timeout: 0, failover: 0, other: 0 });
+  });
+
+  it('reports zero retries and zero cost share for a clean merged run', () => {
+    const events: FactoryEvent[] = [event({ issue: '1', type: 'issue-title' }), event({ issue: '1', type: 'merged' })];
+
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.totalRetries).toBe(0);
+    expect(kpis.retriesPerRun).toBe(0);
+    expect(kpis.retriesByCause).toEqual({ checker: 0, timeout: 0, failover: 0, other: 0 });
+    expect(kpis.retryCostShare).toBe(0);
+
+    const lines = formatKpiLines(kpis);
+    expect(lines).toContain('Retries: total 0, median 0/run (checker 0 · failover 0 · timeout 0 · other 0)');
+    expect(lines).toContain('Retry cost share: 0% of total spend');
+  });
+
+  it('yields a null median retries per run for an empty log', () => {
+    const kpis = computeHealthKpis([], []);
+    expect(kpis.retriesPerRun).toBeNull();
+    expect(formatKpiLines(kpis)).toEqual(['No factory runs recorded yet.']);
+  });
+
+  it('computes the median retries per run across zero- and multi-retry runs', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title' }),
+      event({ issue: '2', type: 'issue-title' }),
+      event({ issue: '2', type: 'rework', rework: { round: 1, failingChecks: ['tests'], cause: 'factory-fault' } }),
+      event({ issue: '2', type: 'rework', rework: { round: 2, failingChecks: ['tests'], cause: 'factory-fault' } }),
+    ];
+
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.retriesPerRun).toBe(1);
+    expect(kpis.totalRetries).toBe(2);
+  });
+
+  it('computes retryCostShare from tagged cost rows, counting dual-tagged rows once', () => {
+    const costs: CostEntry[] = [
+      cost({ cost: 0.5 }),
+      cost({ cost: 0.3, retryCause: 'checker' }),
+      cost({ cost: 0.2, failoverReason: 'rate_limit' }),
+    ];
+
+    const kpis = computeHealthKpis([event({ issue: '1', type: 'issue-title' })], costs);
+
+    expect(kpis.retryCostShare).toBeCloseTo(0.5);
+  });
+
+  it('yields a zero retryCostShare when totalCost is zero', () => {
+    const kpis = computeHealthKpis([event({ issue: '1', type: 'issue-title' })], []);
+    expect(kpis.retryCostShare).toBe(0);
   });
 });
 

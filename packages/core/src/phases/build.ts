@@ -161,7 +161,7 @@ ${headlessNote()}${appPort ? `\n\n${appPortNote(appPort)}` : ''}`;
       buildClaudePrompt({ issue, branch, specPath, constitutionCtx, skipCI, appPort }),
       steering,
     );
-    result = await router.run('build_claude', claudePrompt, runOpts);
+    result = await router.run('build_claude', claudePrompt, { ...runOpts, retryCause: 'failover' });
   }
 
   for (const f of failoversFrom(result.attempts)) {
