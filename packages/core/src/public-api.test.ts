@@ -24,6 +24,13 @@ const PUBLIC_API_KEYS = [
   'resolvePlanApproval',
   'resolveSkipCI',
   'resolveTimeouts',
+  // Repo config (.factory/config.json)
+  'applyRepoConfig',
+  'describeEffectiveConfig',
+  'loadRepoConfig',
+  'resolveCodexDisabled',
+  'resolveEffectiveModelPins',
+  'resolveUsageCap',
   // Environment
   'acquirePortLease',
   'defaultIsPidAlive',

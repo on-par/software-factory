@@ -95,6 +95,7 @@ export async function planPhase(opts: {
   approvalGate?: ApprovalGate;
   drainSteering?: () => ConsumedSteering;
   maxReplans?: number;
+  codexDisabled?: boolean;
 }): Promise<PlanResult> {
   const {
     issue,
@@ -112,6 +113,7 @@ export async function planPhase(opts: {
     drainSteering,
   } = opts;
   const maxReplans = opts.maxReplans ?? 3;
+  const isCodexDisabled = opts.codexDisabled ?? codexDisabled();
 
   // Get issue details
   const [owner, repoName] = repo.split('/');
@@ -184,7 +186,7 @@ export async function planPhase(opts: {
       }
     }
 
-    if (route === 'codex' && codexDisabled()) {
+    if (route === 'codex' && isCodexDisabled) {
       log('warn', 'codex unavailable — falling back to claude');
       route = 'claude';
       // Keep the persisted spec's frontmatter in sync with the actual route,

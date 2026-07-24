@@ -104,7 +104,11 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
     resolveTimeouts: vi.fn(() => ({ plan: 1, build: 1, check: 1, approval: 1 })),
     resolveSkipCI: vi.fn(() => false),
     getConstitutionsDir: vi.fn(() => h.constitutionsDir),
-    resolveModelOverrides: vi.fn(() => h.modelOverrides),
+    resolveEffectiveModelPins: vi.fn(() => ({
+      plan: h.modelOverrides.plan,
+      build: h.modelOverrides.build,
+      sources: {},
+    })),
     isCommandAvailable: vi.fn(() => h.claudeAvailable ?? true),
     // Router / loaders as light stubs.
     ModelRouter: vi.fn(() => ({

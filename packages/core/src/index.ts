@@ -24,6 +24,15 @@ export {
   resolveSkipCI,
   resolveTimeouts,
 } from './config/index.js';
+export type { EffectiveModelPins, EffectiveUsageCap, RepoFactoryConfig } from './config/repo.js';
+export {
+  applyRepoConfig,
+  describeEffectiveConfig,
+  loadRepoConfig,
+  resolveCodexDisabled,
+  resolveEffectiveModelPins,
+  resolveUsageCap,
+} from './config/repo.js';
 
 // Environment
 export type {

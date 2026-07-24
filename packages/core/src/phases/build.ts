@@ -33,6 +33,7 @@ export async function buildPhase(opts: {
   sandbox?: SandboxPolicy;
   steering?: ConsumedSteering;
   appPort?: number;
+  codexDisabled?: boolean;
 }): Promise<BuildResult> {
   const {
     issue,
@@ -54,11 +55,12 @@ export async function buildPhase(opts: {
   const constitutionCtx = buildConstitutionContext(constitution);
   const spec = await readFile(specPath, 'utf-8').catch(() => '');
   const localOnly = process.env.FACTORY_LOCAL_ONLY === '1';
+  const isCodexDisabled = opts.codexDisabled ?? codexDisabled();
 
   let prompt: string;
   let taskType: 'build_codex' | 'build_claude';
 
-  if (route === 'codex' && codexDisabled()) {
+  if (route === 'codex' && isCodexDisabled) {
     log('warn', 'codex unavailable — falling back to claude');
     route = 'claude';
   }

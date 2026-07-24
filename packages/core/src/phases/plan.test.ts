@@ -472,6 +472,79 @@ describe('planPhase', () => {
 
       expect(result.route).toBe('codex');
     });
+
+    it('forces route to claude via the codexDisabled opt with no env var set', async () => {
+      delete process.env.FACTORY_CODEX;
+
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-79.md');
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: {
+          issues: {
+            get: async () => ({ data: { title: 'Repo-pinned kill-switch', body: 'Disable codex via repo config.' } }),
+          },
+        },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      const result = await planPhase({
+        issue: 79,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: (type, msg) => {
+          logs.push({ type, msg });
+        },
+        codexDisabled: true,
+      });
+
+      expect(result.route).toBe('claude');
+      expect(logs).toContainEqual({ type: 'warn', msg: 'codex unavailable — falling back to claude' });
+    });
+
+    it('preserves FACTORY_CODEX=0 behavior when the codexDisabled opt is omitted', async () => {
+      process.env.FACTORY_CODEX = '0';
+
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-79.md');
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: {
+          issues: {
+            get: async () => ({ data: { title: 'Add kill-switch', body: 'Add FACTORY_CODEX=0.' } }),
+          },
+        },
+      };
+
+      const result = await planPhase({
+        issue: 79,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: () => {},
+      });
+
+      expect(result.route).toBe('claude');
+    });
   });
 
   it('emits a structured failover event when the router fails over to a different model', async () => {

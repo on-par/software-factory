@@ -145,6 +145,73 @@ describe('buildPhase FACTORY_CODEX kill-switch', () => {
     expect(stub.calls[stub.calls.length - 1].task).toBe('build_codex');
     expect(logs.some((l) => l.type === 'warn')).toBe(false);
   });
+
+  it('forces build_claude via the codexDisabled opt with no env var set', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-79.md');
+    const stub = new StubModelExecutor({
+      scripts: {
+        build_codex: [{ output: 'codex output' }],
+        build_claude: [{ output: 'claude output' }],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const logs: Array<{ type: string; msg: string }> = [];
+
+    const result = await buildPhase({
+      issue: 79,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/79-repo-config-codex-kill-switch',
+      route: 'codex',
+      router,
+      constitution: null,
+      log: (type, msg) => {
+        logs.push({ type, msg });
+      },
+      codexDisabled: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(stub.calls[stub.calls.length - 1].task).toBe('build_claude');
+    expect(logs).toContainEqual({ type: 'warn', msg: 'codex unavailable — falling back to claude' });
+  });
+
+  it('preserves FACTORY_CODEX=0 behavior when the codexDisabled opt is omitted', async () => {
+    process.env.FACTORY_CODEX = '0';
+
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-79.md');
+    const stub = new StubModelExecutor({
+      scripts: {
+        build_codex: [{ output: 'codex output' }],
+        build_claude: [{ output: 'claude output' }],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const logs: Array<{ type: string; msg: string }> = [];
+
+    const result = await buildPhase({
+      issue: 79,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/79-add-factory-codex-0-kill-switch',
+      route: 'codex',
+      router,
+      constitution: null,
+      log: (type, msg) => {
+        logs.push({ type, msg });
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(stub.calls[stub.calls.length - 1].task).toBe('build_claude');
+    expect(logs).toContainEqual({ type: 'warn', msg: 'codex unavailable — falling back to claude' });
+  });
 });
 
 describe('buildPhase local-only codex prompt', () => {
