@@ -180,6 +180,14 @@ const FactoryConfigSchema = z.object({
         .default({ enabled: true, range: [3100, 3999] }),
     })
     .default({ ports: { enabled: true, range: [3100, 3999] } }),
+  auto_failover: z
+    .object({
+      enabled: z.boolean().default(true),
+      cooldown_minutes: z.number().positive().default(30),
+      fallback_model: z.string().default('claude-sonnet-5'),
+      comment: z.string().optional(),
+    })
+    .default({ enabled: true, cooldown_minutes: 30, fallback_model: 'claude-sonnet-5' }),
 });
 
 // ---------- Types ----------
@@ -272,6 +280,23 @@ export function resolveEnvironmentPorts(
   return { enabled, range: config.environment?.ports?.range ?? [3100, 3999] };
 }
 
+export interface AutoFailoverSettings {
+  enabled: boolean;
+  cooldownMs: number;
+  fallbackModel: string;
+}
+
+export function resolveAutoFailover(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): AutoFailoverSettings {
+  let enabled = config.auto_failover?.enabled ?? true;
+  if (env.FACTORY_AUTO_FAILOVER === '1') enabled = true;
+  if (env.FACTORY_AUTO_FAILOVER === '0') enabled = false;
+  const envMinutes = Number(env.FACTORY_FAILOVER_COOLDOWN_MINUTES);
+  const minutes =
+    Number.isFinite(envMinutes) && envMinutes > 0 ? envMinutes : (config.auto_failover?.cooldown_minutes ?? 30);
+  const fallbackModel = env.FACTORY_FAILOVER_MODEL ?? config.auto_failover?.fallback_model ?? 'claude-sonnet-5';
+  return { enabled, cooldownMs: minutes * 60_000, fallbackModel };
+}
+
 export function resolveFilingPolicy(config: FactoryConfig): FilingPolicy {
   const f = config.filing;
   return {
@@ -311,6 +336,7 @@ export function getFactoryPaths(repoRoot: string) {
     ports: resolve(state, 'ports.json'),
     portsLock: resolve(state, 'ports.lock'),
     config: resolve(state, 'config.json'),
+    breaker: resolve(state, 'breaker.json'),
   };
 }
 

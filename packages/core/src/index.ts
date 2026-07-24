@@ -6,6 +6,7 @@
 
 // Config
 export type {
+  AutoFailoverSettings,
   EnvironmentPortsSettings,
   FactoryConfig,
   IngestSettings,
@@ -18,6 +19,7 @@ export {
   loadFactoryConfig,
   loadModelsConfig,
   loadRoutesConfig,
+  resolveAutoFailover,
   resolveEnvironmentPorts,
   resolveIngestConfig,
   resolvePlanApproval,
@@ -86,6 +88,10 @@ export type {
   SleepFn,
 } from './router/index.js';
 export { failoversFrom, ModelRouter } from './router/index.js';
+
+// Provider circuit breaker
+export type { BreakerEntry, BreakerStatus } from './router/breaker.js';
+export { gateBuildOnBreaker, ProviderBreaker } from './router/breaker.js';
 
 // Coding harness contract
 export type {

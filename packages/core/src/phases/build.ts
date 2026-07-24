@@ -34,6 +34,11 @@ export async function buildPhase(opts: {
   steering?: ConsumedSteering;
   appPort?: number;
   codexDisabled?: boolean;
+  autoFailover?: {
+    enabled: boolean;
+    fallbackModel?: string;
+    onQuotaExhausted?: (info: { provider: string; reason: FailoverReason }) => void | Promise<void>;
+  };
 }): Promise<BuildResult> {
   const {
     issue,
@@ -145,9 +150,15 @@ ${headlessNote()}${appPort ? `\n\n${appPortNote(appPort)}` : ''}`;
     // quota reason. The router only throws after trying every eligible codex
     // worker, so reaching here already means "no Codex-harness worker remains".
     if (taskType !== 'build_codex' || !quota) throw err;
-    const toModel = router.resolveAll('build_claude')[0];
-    if (!toModel) throw err; // no claude fallback available — park as today
+    if (opts.autoFailover && !opts.autoFailover.enabled) throw err;
     const fromModel = attempts?.at(-1)?.model ?? 'unknown';
+    const provider = router.registryRef.get(fromModel)?.provider ?? 'openai';
+    const fallback = opts.autoFailover?.fallbackModel;
+    const toModel =
+      fallback && router.resolveAll('build_claude').includes(fallback)
+        ? fallback
+        : router.resolveAll('build_claude')[0];
+    if (!toModel) throw err; // no claude fallback available — park as today
     log(
       'worker_failover',
       `Codex build workers exhausted (${reason}) — continuing on claude: ` +
@@ -155,13 +166,18 @@ ${headlessNote()}${appPort ? `\n\n${appPortNote(appPort)}` : ''}`;
         `from_route=build_codex to_route=build_claude reason=${reason}`,
       { failoverReason: reason },
     );
+    await opts.autoFailover?.onQuotaExhausted?.({ provider, reason });
     route = 'claude';
     taskType = 'build_claude';
     const claudePrompt = applySteering(
       buildClaudePrompt({ issue, branch, specPath, constitutionCtx, skipCI, appPort }),
       steering,
     );
-    result = await router.run('build_claude', claudePrompt, { ...runOpts, retryCause: 'failover' });
+    result = await router.run('build_claude', claudePrompt, {
+      ...runOpts,
+      retryCause: 'failover',
+      ...(toModel === fallback ? { modelOverride: fallback } : {}),
+    });
   }
 
   for (const f of failoversFrom(result.attempts)) {

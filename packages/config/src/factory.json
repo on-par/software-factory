@@ -86,5 +86,11 @@
       "range": [3100, 3999],
       "comment": "Per-lane app-port leases (.factory/ports.json). Each lane gets a unique port injected as PORT/FACTORY_APP_PORT/FACTORY_BASE_URL into BUILD/CHECK agent runs. Disable per-run with FACTORY_ENV_PORTS=0."
     }
+  },
+  "auto_failover": {
+    "enabled": true,
+    "cooldown_minutes": 30,
+    "fallback_model": "claude-sonnet-5",
+    "comment": "Supervisor circuit breaker for cross-harness build failover. On a quota trip (usage_cap/rate_limit) the Codex provider is skipped for cooldown_minutes and builds go straight to fallback_model's route. Disable with FACTORY_AUTO_FAILOVER=0; override cooldown with FACTORY_FAILOVER_COOLDOWN_MINUTES, fallback with FACTORY_FAILOVER_MODEL."
   }
 }
