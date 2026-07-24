@@ -16,6 +16,7 @@ import type {
   LeaseHealth,
   ModelDiagnosis,
   QueueDiagnostic,
+  ReadinessInfo,
   ReapedLease,
   RepoFactoryConfig,
   SandboxPolicy,
@@ -80,6 +81,7 @@ import {
   resolveTimeouts,
   resolveUsageCap,
   runAutoIngest,
+  scoreIssueReadiness,
   shipPhase,
   validateQueue,
   watchUsage,
@@ -478,6 +480,36 @@ async function cmdCost(opts: { issue?: string } = {}) {
   console.log(`  Total: $${grandTotal.toFixed(4)}`);
 }
 
+async function cmdReady(issueRaw: string) {
+  const issueNum = parseIssueArg(issueRaw);
+  const ghRepo = await getGitHubRepo();
+  const [owner, repoName] = ghRepo.split('/');
+  const { data } = await getOctokit().rest.issues.get({ owner, repo: repoName, issue_number: issueNum });
+  const readiness = scoreIssueReadiness({ title: data.title, body: data.body ?? '' });
+
+  if (readiness.pass) {
+    console.log(
+      chalk.green(
+        `issue #${issueNum} is factory-ready (${readiness.template}, score ${Math.round(readiness.score * 100)}%)`,
+      ),
+    );
+    return;
+  }
+
+  console.log(
+    chalk.yellow(
+      `issue #${issueNum} is not factory-ready (${readiness.template}, score ${Math.round(readiness.score * 100)}%)`,
+    ),
+  );
+  for (const field of readiness.missing) {
+    console.log(chalk.yellow(`  missing: ${field}`));
+  }
+  throw new CliExitError(
+    `factory: issue #${issueNum} is not factory-ready — missing: ${readiness.missing.join(', ')}`,
+    1,
+  );
+}
+
 async function currentCommitSha(): Promise<string | null> {
   try {
     const { stdout } = await exec('git rev-parse HEAD');
@@ -792,7 +824,12 @@ export async function shipIssue(
     (
       type: string,
       msg: string,
-      extra?: { failoverReason?: FailoverReason; model?: string; tokens?: { input: number; output: number } },
+      extra?: {
+        failoverReason?: FailoverReason;
+        model?: string;
+        tokens?: { input: number; output: number };
+        readiness?: ReadinessInfo;
+      },
     ) =>
       logEvent(paths.events, type, issueNum, msg, { ...extra, lane, phase });
   const log = mkLog();
@@ -2489,6 +2526,11 @@ export async function main() {
     .action(async (opts) => {
       await cmdTriageAccept(opts);
     });
+
+  program
+    .command('ready <issue>')
+    .description('Score an issue against the factory-ready template fields (pass/fail, names missing fields)')
+    .action(cmdReady);
 
   program
     .command('ship <issue>')

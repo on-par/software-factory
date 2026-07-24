@@ -190,6 +190,19 @@ export interface ReworkInfo {
   stuck?: boolean;
 }
 
+/** Which issue-form template an issue body was scored against (#421). */
+export type ReadinessTemplate = 'factory-task' | 'factory-bug' | 'epic';
+
+/** Structured payload carried on the `readiness` event PLAN emits once per run (#421). */
+export interface ReadinessInfo {
+  template: ReadinessTemplate;
+  /** presentRequiredFields / requiredFields, 0..1 */
+  score: number;
+  pass: boolean;
+  /** Labels of missing required fields, e.g. ['Verification']. */
+  missing: string[];
+}
+
 export interface FactoryEvent {
   ts: string;
   type: string;
@@ -204,6 +217,7 @@ export interface FactoryEvent {
   fingerprint?: string;
   evidence?: EvidencePack;
   rework?: ReworkInfo;
+  readiness?: ReadinessInfo;
   model?: string;
   tokens?: { input: number; output: number };
 }

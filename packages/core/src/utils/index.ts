@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import { createLogger } from '../logger/index.js';
-import type { CostEntry, FailoverReason, LogLevel, ReworkInfo } from '../types/index.js';
+import type { CostEntry, FailoverReason, LogLevel, ReadinessInfo, ReworkInfo } from '../types/index.js';
 import { levelForType } from './format.js';
 
 export { colorEnabled, formatEventLine, levelForType } from './format.js';
@@ -26,6 +26,7 @@ export function logEvent(
     phase?: string;
     level?: LogLevel;
     rework?: ReworkInfo;
+    readiness?: ReadinessInfo;
     actor?: string;
     model?: string;
     tokens?: { input: number; output: number };
@@ -36,12 +37,14 @@ export function logEvent(
   const meta: {
     failoverReason?: FailoverReason;
     rework?: ReworkInfo;
+    readiness?: ReadinessInfo;
     actor?: string;
     model?: string;
     tokens?: { input: number; output: number };
   } = {};
   if (extra?.failoverReason) meta.failoverReason = extra.failoverReason;
   if (extra?.rework) meta.rework = extra.rework;
+  if (extra?.readiness) meta.readiness = extra.readiness;
   if (extra?.actor) meta.actor = extra.actor;
   if (extra?.model) meta.model = extra.model;
   if (extra?.tokens) meta.tokens = extra.tokens;

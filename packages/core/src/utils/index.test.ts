@@ -222,6 +222,25 @@ describe('utils', () => {
     });
   });
 
+  it('logs structured readiness metadata when extra.readiness is provided', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+
+    logEvent(eventsFile, 'readiness', 85, 'issue readiness 100% (factory-task)', {
+      readiness: { template: 'factory-task', score: 1, pass: true, missing: [] },
+    });
+
+    const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter(Boolean);
+    expect(JSON.parse(lines[0])).toEqual({
+      ts: expect.any(String),
+      type: 'readiness',
+      issue: '85',
+      msg: 'issue readiness 100% (factory-task)',
+      level: 'info',
+      readiness: { template: 'factory-task', score: 1, pass: true, missing: [] },
+    });
+  });
+
   it('includes lane and phase in the written event when passed as extra', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
     const eventsFile = join(tmpDir, 'events.ndjson');

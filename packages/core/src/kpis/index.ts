@@ -1,6 +1,6 @@
 // src/kpis/index.ts — Pure aggregation of factory health KPIs from events + cost rows
 
-import type { CostEntry, FactoryEvent, RetryCause } from '../types/index.js';
+import type { CostEntry, FactoryEvent, ReadinessInfo, RetryCause } from '../types/index.js';
 import { isHumanEvent } from './human.js';
 
 export type { CommitSource, HumanSourceClient, PrSource } from './human.js';
@@ -32,6 +32,11 @@ function percentile(values: number[], p: number): number | null {
     [...values].sort((a, b) => a - b),
     p,
   );
+}
+
+function mean(values: number[]): number | null {
+  if (values.length === 0) return null;
+  return values.reduce((sum, v) => sum + v, 0) / values.length;
 }
 
 function formatDurationMs(ms: number): string {
@@ -82,6 +87,16 @@ export interface HealthKpis {
   /** Fraction of totalCost from CostEntry rows tied to retry attempts
    *  (rows with retryCause set or failoverReason set); 0 when totalCost is 0. */
   retryCostShare: number;
+  /** Runs carrying at least one `readiness` event (#421). */
+  readinessScoredRuns: number;
+  /** Mean readiness score across scored runs; null when readinessScoredRuns === 0. */
+  meanReadinessScore: number | null;
+  /** Retries + cycle time split by readiness.pass, for correlating issue quality
+   *  against factory outcomes (#421); null when readinessScoredRuns === 0. */
+  readinessSplit: {
+    ready: { runs: number; meanRetries: number | null; medianCycleTimeMs: number | null };
+    notReady: { runs: number; meanRetries: number | null; medianCycleTimeMs: number | null };
+  } | null;
 }
 
 interface RunStats {
@@ -94,6 +109,7 @@ interface RunStats {
   firstPhaseTs: number | null;
   phaseWindows: Map<string, { first: number; last: number }>;
   retries: number;
+  readiness: ReadinessInfo | null;
 }
 
 /** Attribute one event to a retry-cause bucket, or null if it is not a retry.
@@ -125,12 +141,14 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
       firstPhaseTs: null,
       phaseWindows: new Map<string, { first: number; last: number }>(),
       retries: 0,
+      readiness: null,
     };
 
     if (event.type === 'merged' || event.type === 'human-merged') stats.merged = true;
     if (event.type === 'rework' || event.rework) stats.reworked = true;
     if (event.type === 'stuck' || event.rework?.stuck === true) stats.stuck = true;
     if (isHumanEvent(event)) stats.humanEvents++;
+    if (event.readiness) stats.readiness = event.readiness;
 
     const retryCause = retryCauseOf(event);
     if (retryCause) {
@@ -168,6 +186,11 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
   const queueWaits: number[] = [];
   const phaseSamples = new Map<string, number[]>();
   const perRunRetryCounts: number[] = [];
+  const readinessScores: number[] = [];
+  const readyRetries: number[] = [];
+  const readyCycleTimes: number[] = [];
+  const notReadyRetries: number[] = [];
+  const notReadyCycleTimes: number[] = [];
 
   for (const stats of runsByIssue.values()) {
     if (stats.merged) merged++;
@@ -178,9 +201,9 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     totalHumanEvents += stats.humanEvents;
     perRunRetryCounts.push(stats.retries);
 
-    if (stats.firstTs !== null && stats.mergedTs !== null) {
-      cycleTimes.push(Math.max(0, stats.mergedTs - stats.firstTs));
-    }
+    const runCycleTime =
+      stats.firstTs !== null && stats.mergedTs !== null ? Math.max(0, stats.mergedTs - stats.firstTs) : null;
+    if (runCycleTime !== null) cycleTimes.push(runCycleTime);
     if (stats.firstTs !== null && stats.firstPhaseTs !== null) {
       queueWaits.push(Math.max(0, stats.firstPhaseTs - stats.firstTs));
     }
@@ -188,6 +211,14 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
       const samples = phaseSamples.get(phase) ?? [];
       samples.push(Math.max(0, window.last - window.first));
       phaseSamples.set(phase, samples);
+    }
+
+    if (stats.readiness) {
+      readinessScores.push(stats.readiness.score);
+      const cohortRetries = stats.readiness.pass ? readyRetries : notReadyRetries;
+      const cohortCycleTimes = stats.readiness.pass ? readyCycleTimes : notReadyCycleTimes;
+      cohortRetries.push(stats.retries);
+      if (runCycleTime !== null) cohortCycleTimes.push(runCycleTime);
     }
   }
 
@@ -233,6 +264,23 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     retriesPerRun: runs === 0 ? null : percentile(perRunRetryCounts, 0.5),
     retriesByCause,
     retryCostShare: totalCost === 0 ? 0 : retryCost / totalCost,
+    readinessScoredRuns: readinessScores.length,
+    meanReadinessScore: mean(readinessScores),
+    readinessSplit:
+      readinessScores.length === 0
+        ? null
+        : {
+            ready: {
+              runs: readyRetries.length,
+              meanRetries: mean(readyRetries),
+              medianCycleTimeMs: percentile(readyCycleTimes, 0.5),
+            },
+            notReady: {
+              runs: notReadyRetries.length,
+              meanRetries: mean(notReadyRetries),
+              medianCycleTimeMs: percentile(notReadyCycleTimes, 0.5),
+            },
+          },
   };
 }
 
@@ -270,6 +318,16 @@ export function formatKpiLines(kpis: HealthKpis): string[] {
   }
   lines.push(`Queue wait (median): ${kpis.queueWaitMs === null ? 'n/a' : formatDurationMs(kpis.queueWaitMs)}`);
 
+  if (kpis.readinessScoredRuns > 0 && kpis.readinessSplit) {
+    const { ready, notReady } = kpis.readinessSplit;
+    lines.push(
+      `Issue readiness: mean ${formatPercent(kpis.meanReadinessScore ?? 0)} (${kpis.readinessScoredRuns}/${kpis.runs} runs scored)`,
+    );
+    const describeCohort = (cohort: { runs: number; meanRetries: number | null; medianCycleTimeMs: number | null }) =>
+      `${cohort.runs} run${cohort.runs === 1 ? '' : 's'} (${cohort.meanRetries === null ? 'n/a' : cohort.meanRetries.toFixed(1)} retries/run, cycle p50 ${cohort.medianCycleTimeMs === null ? 'n/a' : formatDurationMs(cohort.medianCycleTimeMs)})`;
+    lines.push(`Readiness vs outcomes: ready ${describeCohort(ready)} · not-ready ${describeCohort(notReady)}`);
+  }
+
   return lines;
 }
 
@@ -293,6 +351,8 @@ export interface KpiHistoryRecord {
   commitSha?: string | null;
   /** Resolved tier → ranked model list at snapshot time. Absent in legacy rows. */
   models?: Record<string, string[]>;
+  /** Mean issue readiness score at snapshot time; null when no runs were scored. Absent in legacy rows. */
+  meanReadinessScore?: number | null;
 }
 
 export function kpisToHistoryRecord(
@@ -313,6 +373,7 @@ export function kpisToHistoryRecord(
     p90CycleTimeMs: kpis.p90CycleTimeMs,
     ...(meta.commitSha !== undefined ? { commitSha: meta.commitSha } : {}),
     ...(meta.models !== undefined ? { models: meta.models } : {}),
+    ...(kpis.meanReadinessScore !== undefined ? { meanReadinessScore: kpis.meanReadinessScore } : {}),
   };
 }
 

@@ -1,0 +1,53 @@
+name: Factory task
+description: A well-formed unit of work the factory can ship autonomously
+body:
+  - type: textarea
+    id: problem-statement
+    attributes:
+      label: Problem statement
+      description: What is broken or missing, and why does it matter?
+    validations:
+      required: true
+  - type: textarea
+    id: in-scope
+    attributes:
+      label: In scope
+      description: What this change does.
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
+      description: What this change explicitly does not do.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: Checkbox list, one independently verifiable item per line.
+      value: |
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: files-touched
+    attributes:
+      label: Files or modules likely touched
+    validations:
+      required: false
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification
+      description: The exact command that proves it works
+      placeholder: bash scripts/verify.sh
+    validations:
+      required: true
+  - type: input
+    id: design-artifact
+    attributes:
+      label: Design artifact link
+    validations:
+      required: false

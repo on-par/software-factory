@@ -845,6 +845,47 @@ describe('planPhase', () => {
     expect(logs).toContainEqual({ type: 'escalate', msg: 'ESCALATE: which auth provider should we use?' });
   });
 
+  it('logs exactly one readiness event with a structured payload, including on the escalation path', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-44.md');
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [{ output: 'notes\nESCALATE: which auth provider should we use?\nmore text' }],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 'Add auth', body: 'Add authentication.' } }),
+        },
+      },
+    };
+    const logCalls: Array<[string, string, unknown]> = [];
+
+    await planPhase({
+      issue: 44,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit,
+      log: (type, msg, extra) => {
+        logCalls.push([type, msg, extra]);
+      },
+    });
+
+    const readinessCalls = logCalls.filter(([type]) => type === 'readiness');
+    expect(readinessCalls).toHaveLength(1);
+    const [, msg, extra] = readinessCalls[0];
+    expect(msg).toContain('issue readiness');
+    expect(extra).toMatchObject({
+      readiness: { template: 'factory-task', pass: false },
+    });
+  });
+
   it('defaults a null issue body to an empty string instead of the literal "null"', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
     tempDirs.add(worktree);

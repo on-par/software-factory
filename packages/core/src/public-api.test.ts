@@ -79,6 +79,11 @@ const PUBLIC_API_KEYS = [
   // Sandbox
   'detectSandboxRuntime',
   'resolveSandboxPolicy',
+  // Readiness
+  'EPIC_REQUIRED_FIELDS',
+  'FACTORY_BUG_REQUIRED_FIELDS',
+  'FACTORY_TASK_REQUIRED_FIELDS',
+  'scoreIssueReadiness',
   // Checkers
   'accessibilityChecker',
   'compileChecker',
