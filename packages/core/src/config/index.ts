@@ -310,6 +310,7 @@ export function getFactoryPaths(repoRoot: string) {
     ingestWatermark: resolve(state, 'ingest-watermark'),
     ports: resolve(state, 'ports.json'),
     portsLock: resolve(state, 'ports.lock'),
+    config: resolve(state, 'config.json'),
   };
 }
 

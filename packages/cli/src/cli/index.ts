@@ -14,17 +14,20 @@ import type {
   LeaseHealth,
   ModelDiagnosis,
   QueueDiagnostic,
+  RepoFactoryConfig,
   SandboxPolicy,
   UsageReading,
 } from '@on-par/factory-core';
 import {
   acquirePortLease,
   appendKpiHistoryLine,
+  applyRepoConfig,
   buildPhase,
   checkPhase,
   computeHealthKpis,
   ConstitutionLoader,
   createFileApprovalGate,
+  describeEffectiveConfig,
   describeSteering,
   diagnoseModels,
   drainSteering,
@@ -40,6 +43,7 @@ import {
   listQueuedSteering,
   loadFactoryConfig,
   loadModelsConfig,
+  loadRepoConfig,
   loadRoutesConfig,
   ModelRegistry,
   ModelRouter,
@@ -52,13 +56,15 @@ import {
   releasePortLease,
   renderKpiReport,
   renderKpiTrend,
+  resolveCodexDisabled,
+  resolveEffectiveModelPins,
   resolveEnvironmentPorts,
   resolveIngestConfig,
-  resolveModelOverrides,
   resolvePlanApproval,
   resolveSandboxPolicy,
   resolveSkipCI,
   resolveTimeouts,
+  resolveUsageCap,
   runAutoIngest,
   shipPhase,
   validateQueue,
@@ -369,7 +375,8 @@ function ollamaModelSet(): Set<string> | undefined {
 }
 
 async function cmdModels(opts: { doctor?: boolean } = {}) {
-  const modelsConfig = loadModelsConfig();
+  const repoRoot = await getRepoRoot();
+  const modelsConfig = applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot));
   const { ModelRegistry } = await import('@on-par/factory-core');
   const registry = new ModelRegistry(modelsConfig);
   const allowExperimental = process.env.FACTORY_EXPERIMENTAL === '1';
@@ -480,11 +487,11 @@ export interface UsageKnobs {
   estimator: boolean;
 }
 
-export function resolveUsageKnobs(env: NodeJS.ProcessEnv = process.env): UsageKnobs {
-  const cap = Number(env.FACTORY_USAGE_CAP ?? 227);
-  if (!Number.isFinite(cap) || cap <= 0) {
-    throw new Error('FACTORY_USAGE_CAP must be a positive number');
-  }
+export function resolveUsageKnobs(
+  env: NodeJS.ProcessEnv = process.env,
+  repoConfig: RepoFactoryConfig | null = null,
+): UsageKnobs {
+  const { cap } = resolveUsageCap(repoConfig, env);
 
   const stopAt = Number(env.FACTORY_STOP_AT ?? 0.75);
   if (!Number.isFinite(stopAt) || stopAt <= 0 || stopAt > 1) {
@@ -512,9 +519,10 @@ export function resolveUsageKnobs(env: NodeJS.ProcessEnv = process.env): UsageKn
 }
 
 export async function cmdUsage() {
+  const repoRoot = await getRepoRoot();
   let knobs: UsageKnobs;
   try {
-    knobs = resolveUsageKnobs();
+    knobs = resolveUsageKnobs(process.env, loadRepoConfig(repoRoot));
   } catch (err: any) {
     throw new CliExitError(`factory: ${err.message}`, 2);
   }
@@ -544,21 +552,28 @@ function warnQueueDiagnostics(diagnostics: QueueDiagnostic[]): void {
   }
 }
 
-async function cmdStatus() {
+export async function cmdStatus() {
   const repoRoot = await getRepoRoot();
   const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
 
-  const modelsConfig = loadModelsConfig();
+  const repoConfig = loadRepoConfig(repoRoot);
+  const modelsConfig = applyRepoConfig(loadModelsConfig(), repoConfig);
   const routesConfig = loadRoutesConfig();
   const router = new ModelRouter(modelsConfig, routesConfig);
   const product = readActiveProduct(paths.product) ?? '(none)';
 
   console.log(chalk.bold(`== ${ghRepo} ==`));
   console.log(`Product: ${product}`);
-  console.log(`Plan model: ${router.resolve('plan') ?? 'none'}`);
-  console.log(`Build model: ${router.resolve('build_claude') ?? 'none'}`);
-  console.log(`Checker model: ${router.resolve('check_tests') ?? 'none'}`);
+
+  console.log(chalk.bold('\n== Effective config =='));
+  for (const line of describeEffectiveConfig({
+    router,
+    repo: repoConfig,
+    repoConfigPath: '.factory/config.json',
+  })) {
+    console.log(`  ${line}`);
+  }
 
   console.log(chalk.bold('\n== Queue =='));
   if (existsSync(paths.queue)) {
@@ -647,13 +662,15 @@ export async function shipIssue(
   const paths = getFactoryPaths(repoRoot);
   const octokit = getOctokit();
 
-  const modelsConfig = loadModelsConfig();
+  const repoConfig = loadRepoConfig(repoRoot);
+  const modelsConfig = applyRepoConfig(loadModelsConfig(), repoConfig);
   const routesConfig = loadRoutesConfig();
   const factoryConfig = loadFactoryConfig();
   const timeouts = resolveTimeouts(factoryConfig);
   const router = new ModelRouter(modelsConfig, routesConfig);
   router.setCostSink((entry) => logCost(paths.costs, { ...entry, issue: String(issueNum) }));
-  const modelOverrides = resolveModelOverrides(router.registryRef);
+  const modelPins = resolveEffectiveModelPins(router.registryRef, repoConfig);
+  const codexOff = resolveCodexDisabled(repoConfig);
   const constitutionLoader = new ConstitutionLoader();
 
   const product = opts.product ?? readActiveProduct(paths.product);
@@ -671,9 +688,14 @@ export async function shipIssue(
     logEvent(paths.events, type, issueNum, msg, { ...extra, lane, phase });
   const log = mkLog();
   log('issue-title', issueTitle);
-  if (modelOverrides.plan) log('model-override', `plan model pinned to ${modelOverrides.plan} (FACTORY_PLAN_MODEL)`);
-  if (modelOverrides.build)
-    log('model-override', `build model pinned to ${modelOverrides.build} (FACTORY_BUILD_MODEL)`);
+  if (modelPins.plan) {
+    const source = modelPins.sources.plan === 'repo' ? '.factory/config.json' : 'FACTORY_PLAN_MODEL';
+    log('model-override', `plan model pinned to ${modelPins.plan} (${source})`);
+  }
+  if (modelPins.build) {
+    const source = modelPins.sources.build === 'repo' ? '.factory/config.json' : 'FACTORY_BUILD_MODEL';
+    log('model-override', `build model pinned to ${modelPins.build} (${source})`);
+  }
 
   // Setup worktree FIRST — plan phase needs cwd=worktree to run claude
   await withGitLock(repoRoot, () =>
@@ -768,12 +790,13 @@ export async function shipIssue(
       octokit,
       log: mkLog('plan'),
       timeoutSeconds: timeouts.plan,
-      modelOverride: modelOverrides.plan,
+      modelOverride: modelPins.plan,
       branch,
       approvalGate: planApprovalEnabled
         ? createFileApprovalGate({ dir: paths.approvals, timeoutMs: timeouts.approval * 1000 })
         : undefined,
       drainSteering: planApprovalEnabled ? () => drainSteering(paths.steering, issueNum, worktree) : undefined,
+      codexDisabled: codexOff,
     });
     route = plan.route;
     if (!plan.ok) {
@@ -802,10 +825,11 @@ export async function shipIssue(
       log: mkLog('build'),
       timeoutSeconds: timeouts.build,
       skipCI,
-      modelOverride: modelOverrides.build,
+      modelOverride: modelPins.build,
       sandbox: activeSandboxPolicy,
       steering: buildSteering,
       appPort,
+      codexDisabled: codexOff,
     });
     if (!build.ok) {
       throw new LaneParkError(`build escalated: ${build.escalate ?? 'unknown'}`, 'escalate');
@@ -1010,7 +1034,7 @@ async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }) 
 
   const preflight = async (): Promise<OvernightPreflightResult> => {
     if (!isCommandAvailable('claude')) return { ok: false, reason: missingClaudeCliMessage() };
-    const registry = new ModelRegistry(loadModelsConfig());
+    const registry = new ModelRegistry(applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot)));
     const ollamaModels = ollamaModelSet();
     const diagnoses = diagnoseModels(
       registry,
@@ -1211,7 +1235,7 @@ async function cmdTriage(opts: { product?: string }) {
   }
   const product = opts.product ?? readActiveProduct(paths.product);
 
-  const modelsConfig = loadModelsConfig();
+  const modelsConfig = applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot));
   const routesConfig = loadRoutesConfig();
   const router = new ModelRouter(modelsConfig, routesConfig);
   const model = router.resolve('triage') ?? 'claude-sonnet-5';
@@ -1333,7 +1357,7 @@ async function cmdRun() {
     lanes.get(e.lane)!.push(e.issue);
   }
 
-  const knobs = resolveUsageKnobs();
+  const knobs = resolveUsageKnobs(process.env, loadRepoConfig(repoRoot));
   const controller = new AbortController();
   const watchdog = knobs.watch
     ? watchUsage({
@@ -1432,7 +1456,7 @@ async function cmdSupervise(opts: { now?: boolean }) {
 
   let knobs: UsageKnobs;
   try {
-    knobs = resolveUsageKnobs();
+    knobs = resolveUsageKnobs(process.env, loadRepoConfig(repoRoot));
   } catch (err: any) {
     throw new CliExitError(`factory: ${err.message}`, 2);
   }

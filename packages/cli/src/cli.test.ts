@@ -171,6 +171,14 @@ describe('cli', () => {
     expect(() => resolveUsageKnobs({ FACTORY_USAGE_POLL: 'abc' })).toThrow(/FACTORY_USAGE_POLL/);
   });
 
+  it('takes the repo config cap over FACTORY_USAGE_CAP when both are set', () => {
+    expect(resolveUsageKnobs({ FACTORY_USAGE_CAP: '100' }, { version: 1, usage: { capUsd: 50 } }).cap).toBe(50);
+  });
+
+  it('falls back to FACTORY_USAGE_CAP when no repo config is passed', () => {
+    expect(resolveUsageKnobs({ FACTORY_USAGE_CAP: '100' }, null).cap).toBe(100);
+  });
+
   function reading(pct: number, source: 'subscription' | 'estimate' = 'subscription') {
     return { pct, source, detail: `detail at ${Math.round(pct * 100)}%` };
   }
