@@ -177,6 +177,20 @@ describe('runLogs (follow)', () => {
     await delay(50);
     expect(written).toEqual(['[factory] plan #1: first\n']);
   });
+
+  it('stop() catches up on an event written in the poll window right before it is called', async () => {
+    writeFileSync(file, line({ type: 'plan', issue: '1', msg: 'first' }));
+    const { written, out } = outStub();
+    const stop = runLogs(file, { follow: true }, { out, env: {}, pollMs: 10 });
+    await waitFor(() => written.length >= 1);
+
+    // Append and stop synchronously (no await between them) so no poll tick can
+    // interleave — reproducing an event racing SIGINT within the poll window.
+    appendFileSync(file, line({ type: 'plan', issue: '1', msg: 'last-before-sigint' }));
+    stop();
+
+    expect(written).toEqual(['[factory] plan #1: first\n', '[factory] plan #1: last-before-sigint\n']);
+  });
 });
 
 describe('cmdLogs', () => {

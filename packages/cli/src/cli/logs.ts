@@ -32,7 +32,9 @@ export function runLogs(eventsFile: string, opts: LogsOptions, deps: LogsDeps = 
   const env = deps.env ?? process.env;
   const color = colorEnabled(out, env) && !opts.json;
 
+  let delivered = 0;
   const emit = (e: FactoryEvent): void => {
+    delivered++;
     if (!eventMatchesIssue(e, opts.issue)) return;
     out.write(renderEvent(e, { json: opts.json, color }) + '\n');
   };
@@ -42,7 +44,13 @@ export function runLogs(eventsFile: string, opts: LogsOptions, deps: LogsDeps = 
     return () => {};
   }
 
-  return followEvents(eventsFile, emit, { fromStart: true, pollMs: deps.pollMs ?? 250 });
+  const stopTailing = followEvents(eventsFile, emit, { fromStart: true, pollMs: deps.pollMs ?? 250 });
+  return () => {
+    stopTailing();
+    // Catch up on anything written in the poll window right before stop() (e.g. a
+    // Ctrl-C racing the final "build complete" event) so it isn't silently dropped.
+    for (const e of readEvents(eventsFile).slice(delivered)) emit(e);
+  };
 }
 
 /** Command entry point wired up to commander. Keeps the process alive until Ctrl-C in --follow mode. */
