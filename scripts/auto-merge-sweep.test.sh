@@ -46,6 +46,13 @@ if [ "$1 $2" = "pr list" ]; then
     "mergeable": "MERGEABLE",
     "statusCheckRollup": [{"conclusion": "SUCCESS"}],
     "closingIssuesReferences": [{"number": 42}]
+  },
+  {
+    "number": 103,
+    "isDraft": false,
+    "mergeable": "MERGEABLE",
+    "statusCheckRollup": [{"conclusion": "SUCCESS"}],
+    "closingIssuesReferences": [{"number": 55}, {"number": 56}]
   }
 ]
 JSON
@@ -93,6 +100,14 @@ assert_line contains "FAILED to merge PR #101 (exit 3)"
 assert_line contains "FAILED to land #42 (PR #102) (exit 7)"
 assert_line not_contains "merged PR #101"
 assert_line not_contains "landed #42"
+assert_line contains "SKIPPING PR #103: closes multiple issues (#55, #56)"
+assert_line not_contains "landing issue #55"
+assert_line not_contains "merging standalone PR #103"
+
+if [ "$(wc -l <"$FACTORY_CALL_LOG" | tr -d ' ')" != "1" ]; then
+  echo "FAIL: factory land call count wrong — multi-issue PR #103 may have been landed" >&2
+  exit 1
+fi
 
 calls_before_missing_dir="$(wc -l <"$FACTORY_CALL_LOG" | tr -d ' ')"
 
@@ -262,4 +277,4 @@ if [ "$actual" != "$expected" ]; then
 fi
 unset -f sweep_once sleep
 
-echo "PASS: auto-merge-sweep logs merge/land failures with real exit codes, skips landing when the repo dir is missing, honours FACTORY_MERGE_ADMIN for the standalone merge path, writes a heartbeat on each pass, ships a valid KeepAlive launchd plist, preflight fatally rejects missing gh/factory/repo-dir dependencies, and backs off exponentially up to MAX_SLEEP_SECONDS on sweep-wide failures, resetting on success"
+echo "PASS: auto-merge-sweep logs merge/land failures with real exit codes, skips landing when the repo dir is missing, honours FACTORY_MERGE_ADMIN for the standalone merge path, writes a heartbeat on each pass, ships a valid KeepAlive launchd plist, preflight fatally rejects missing gh/factory/repo-dir dependencies, backs off exponentially up to MAX_SLEEP_SECONDS on sweep-wide failures resetting on success, and skips multi-issue-closing PRs with an explicit SKIPPING log line instead of silently landing only the first issue"
