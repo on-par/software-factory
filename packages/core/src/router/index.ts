@@ -7,7 +7,7 @@ import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { classifyFailure } from '../harness/classify.js';
 import { ClaudeCliHarness } from '../harness/claude-cli.js';
 import { CodexCliHarness } from '../harness/codex-cli.js';
-import type { CodingHarness, HarnessFailureReason } from '../harness/index.js';
+import type { CodingHarness, HarnessFailureReason, HarnessUsage } from '../harness/index.js';
 import { HarnessError, isAgenticHarness, isRetryableFailure, taskRequiresAgenticHarness } from '../harness/index.js';
 import { OllamaAgenticHarness } from '../harness/ollama-agentic.js';
 import { OllamaHttpHarness } from '../harness/ollama-http.js';
@@ -93,6 +93,9 @@ export interface ModelExecutorContext {
    *  process group) and its pid reported here so the lane can track and
    *  later kill the whole group. */
   onPgid?: (pgid: number) => void;
+  /** Reports provider-reported token usage for the attempt, when the harness
+   *  surfaces one (#424). Called at most once per runModel call. */
+  onUsage?: (usage: HarnessUsage) => void;
 }
 
 /** Executes a single resolved model. On failure, implementations should
@@ -182,9 +185,12 @@ export class CliModelExecutor implements ModelExecutor {
     harness: CodingHarness,
     model: string,
     prompt: string,
-    ctx: Pick<ModelExecutorContext, 'worktree' | 'timeoutSeconds' | 'task' | 'registry' | 'sandbox' | 'env' | 'onPgid'>,
+    ctx: Pick<
+      ModelExecutorContext,
+      'worktree' | 'timeoutSeconds' | 'task' | 'registry' | 'sandbox' | 'env' | 'onPgid' | 'onUsage'
+    >,
   ): Promise<string> {
-    const { output } = await harness.run({
+    const { output, usage } = await harness.run({
       model,
       prompt,
       worktree: ctx.worktree,
@@ -195,6 +201,7 @@ export class CliModelExecutor implements ModelExecutor {
       env: ctx.env,
       onPgid: ctx.onPgid,
     });
+    if (usage) ctx.onUsage?.(usage);
     return output;
   }
 
@@ -503,8 +510,9 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
 /** Cost sink for router runs. `issue`/`ts` are filled by the caller/logCost. */
 export type CostSink = (entry: Omit<CostEntry, 'ts' | 'issue'>) => void;
 
-/** Rough token estimate for cost accounting (~4 chars/token). Best-effort:
- *  provider harnesses don't return token counts, so cost is approximate. */
+/** Rough token estimate for cost accounting (~4 chars/token). Fallback only:
+ *  used when the harness doesn't report real usage (claude-cli does; other
+ *  harnesses don't yet, #424) — the resulting cost row is marked `estimated: true`. */
 function estimateTokens(text: string): number {
   return Math.max(1, Math.ceil(text.length / 4));
 }
@@ -542,17 +550,19 @@ export class ModelRouter {
     output: string,
     failoverReason?: FailoverReason,
     retryCause?: RetryCause,
+    usage?: HarnessUsage,
   ): void {
     if (!this.costSink) return;
-    const inputTokens = estimateTokens(prompt);
-    const outputTokens = estimateTokens(output);
-    const cost = this.registry.estimateCost(model, inputTokens, outputTokens);
+    const inputTokens = usage?.inputTokens ?? estimateTokens(prompt);
+    const outputTokens = usage?.outputTokens ?? estimateTokens(output);
+    const cost = usage?.costUsd ?? this.registry.estimateCost(model, inputTokens, outputTokens);
     this.costSink({
       task,
       model,
       inputTokens,
       outputTokens,
       cost,
+      estimated: usage === undefined,
       ...(failoverReason ? { failoverReason } : {}),
       ...(retryCause ? { retryCause } : {}),
     });
@@ -643,6 +653,7 @@ export class ModelRouter {
       while (retries <= maxRetries) {
         onLog(`Trying ${model} for ${task} (attempt ${retries + 1})`);
 
+        let usage: HarnessUsage | undefined;
         let output: string;
         try {
           output = await this.executor.runModel(model, prompt, {
@@ -654,6 +665,9 @@ export class ModelRouter {
             sandbox,
             env,
             onPgid,
+            onUsage: (u) => {
+              usage = u;
+            },
           });
         } catch (err) {
           if (sandbox) {
@@ -735,7 +749,7 @@ export class ModelRouter {
           attempts.push({ model, reason: null, ok: true });
           const failovers = failoversFrom(attempts);
           const failoverReason = failovers.at(-1)?.reason;
-          this.recordCost(task, model, prompt, output, failoverReason, retryCause);
+          this.recordCost(task, model, prompt, output, failoverReason, retryCause, usage);
           return {
             model,
             output: output,

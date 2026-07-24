@@ -50,9 +50,20 @@ export interface HarnessRequest {
   onPgid?: (pgid: number) => void;
 }
 
+/** Provider-reported token usage for one harness invocation (#424). */
+export interface HarnessUsage {
+  /** All input-side tokens: input_tokens + cache_creation_input_tokens + cache_read_input_tokens. */
+  inputTokens: number;
+  outputTokens: number;
+  /** Provider-reported total cost in USD, when the CLI reports one. */
+  costUsd?: number;
+}
+
 export interface HarnessResult {
   /** Always non-empty after trim — empty provider output must throw instead. */
   output: string;
+  /** Real provider-reported usage, when the harness can parse it (#424). */
+  usage?: HarnessUsage;
 }
 
 /** Every harness failure must be thrown as a HarnessError so callers can

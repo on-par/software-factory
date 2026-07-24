@@ -292,6 +292,36 @@ describe('readCostsFile', () => {
     expect(result.entries).toEqual([withReason]);
     expect(result.skipped).toBe(1);
   });
+
+  it('accepts a line with a boolean estimated field and skips one with a non-boolean estimated field', () => {
+    const dir = mkdtemp();
+    const file = join(dir, 'costs.jsonl');
+    const withEstimated: CostEntry = {
+      ts: '2026-07-10T11:30:00Z',
+      issue: '61',
+      task: 'build',
+      model: 'claude-sonnet-5',
+      inputTokens: 100,
+      outputTokens: 50,
+      cost: 0.01,
+      estimated: true,
+    };
+    const badEstimated = {
+      ts: '2026-07-10T11:31:00Z',
+      issue: '62',
+      task: 'build',
+      model: 'claude-sonnet-5',
+      inputTokens: 100,
+      outputTokens: 50,
+      cost: 0.01,
+      estimated: 'yes',
+    };
+    writeFileSync(file, [JSON.stringify(withEstimated), JSON.stringify(badEstimated)].join('\n') + '\n');
+
+    const result = readCostsFile(file);
+    expect(result.entries).toEqual([withEstimated]);
+    expect(result.skipped).toBe(1);
+  });
 });
 
 describe('aggregateCosts', () => {

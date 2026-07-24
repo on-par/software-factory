@@ -69,6 +69,17 @@ const modelsConfig: ModelsConfig = {
 
 const registry = new ModelRegistry(modelsConfig);
 
+const envelope = (over: Record<string, unknown> = {}) =>
+  JSON.stringify({
+    type: 'result',
+    subtype: 'success',
+    is_error: false,
+    result: 'CLAUDE OUTPUT',
+    total_cost_usd: 0.0123,
+    usage: { input_tokens: 12, cache_creation_input_tokens: 4500, cache_read_input_tokens: 230000, output_tokens: 890 },
+    ...over,
+  });
+
 function recordingExec(result: { stdout?: string; stderr?: string } = {}) {
   const calls: { cmd: string; opts: any }[] = [];
   const fn = async (cmd: string, opts: any) => {
@@ -98,6 +109,7 @@ describe('ClaudeCliHarness command shape', () => {
     expect(rec.calls[0].cmd).toContain('claude -p');
     expect(rec.calls[0].cmd).toContain("'draft plan'");
     expect(rec.calls[0].cmd).toContain('--model claude-sonnet-5');
+    expect(rec.calls[0].cmd).toContain('--output-format json');
     expect(rec.calls[0].cmd).toContain('--dangerously-skip-permissions');
     expect(rec.calls[0].cmd).toMatch(/--dangerously-skip-permissions\s*< \/dev\/null$/);
     expect(rec.calls[0].opts.cwd).toBe('/tmp/factory worktree');
@@ -167,6 +179,88 @@ describe('ClaudeCliHarness command shape', () => {
     expect(rec.calls[0].cmd.startsWith('sandbox-exec -p ')).toBe(true);
     expect(rec.calls[0].cmd).toContain('claude -p');
     expect(rec.calls[0].cmd).toContain('--dangerously-skip-permissions');
+  });
+});
+
+describe('ClaudeCliHarness result-envelope usage parsing', () => {
+  it('parses usage and total_cost_usd from a well-formed envelope', async () => {
+    const rec = recordingExec({ stdout: envelope() });
+    const harness = new ClaudeCliHarness(rec.fn);
+
+    const result = await harness.run(makeContractRequest({ model: 'claude-model', registry }));
+
+    expect(result.output).toBe('CLAUDE OUTPUT');
+    expect(result.usage).toEqual({ inputTokens: 12 + 4500 + 230000, outputTokens: 890, costUsd: 0.0123 });
+  });
+
+  it('falls back to the older cost_usd field when total_cost_usd is absent', async () => {
+    const withOlderCostField = JSON.parse(envelope());
+    delete withOlderCostField.total_cost_usd;
+    withOlderCostField.cost_usd = 0.05;
+    const rec = recordingExec({ stdout: JSON.stringify(withOlderCostField) });
+    const harness = new ClaudeCliHarness(rec.fn);
+
+    const result = await harness.run(makeContractRequest({ model: 'claude-model', registry }));
+
+    expect(result.usage?.costUsd).toBe(0.05);
+  });
+
+  it('returns output with no usage when the usage block is absent', async () => {
+    const rec = recordingExec({ stdout: envelope({ usage: undefined }) });
+    const harness = new ClaudeCliHarness(rec.fn);
+
+    const result = await harness.run(makeContractRequest({ model: 'claude-model', registry }));
+
+    expect(result.output).toBe('CLAUDE OUTPUT');
+    expect(result.usage).toBeUndefined();
+  });
+
+  it('returns output with no usage when the usage block is malformed', async () => {
+    const rec = recordingExec({
+      stdout: envelope({ usage: { input_tokens: 'many', output_tokens: 890 } }),
+    });
+    const harness = new ClaudeCliHarness(rec.fn);
+
+    const result = await harness.run(makeContractRequest({ model: 'claude-model', registry }));
+
+    expect(result.output).toBe('CLAUDE OUTPUT');
+    expect(result.usage).toBeUndefined();
+  });
+
+  it('falls back to raw stdout as output when stdout is not JSON', async () => {
+    const rec = recordingExec({ stdout: 'CLAUDE OUTPUT' });
+    const harness = new ClaudeCliHarness(rec.fn);
+
+    const result = await harness.run(makeContractRequest({ model: 'claude-model', registry }));
+
+    expect(result.output).toBe('CLAUDE OUTPUT');
+    expect(result.usage).toBeUndefined();
+  });
+
+  it('rejects with empty_response when the envelope result is an empty string', async () => {
+    const rec = recordingExec({ stdout: envelope({ result: '' }) });
+    const harness = new ClaudeCliHarness(rec.fn);
+
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('empty_response');
+    expect(err.details.exitCode).toBe(0);
+  });
+
+  it('rejects with reason error when the envelope reports is_error: true, even with a non-empty result', async () => {
+    const rec = recordingExec({
+      stdout: envelope({ is_error: true, subtype: 'error_max_turns', result: 'partial output before max turns' }),
+    });
+    const harness = new ClaudeCliHarness(rec.fn);
+
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('error');
+    expect(err.message).toContain('error_max_turns');
+    expect(err.details.exitCode).toBe(0);
+    expect(err.details.stdout).toBe('partial output before max turns');
   });
 });
 
