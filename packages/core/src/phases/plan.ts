@@ -88,7 +88,11 @@ export async function planPhase(opts: {
   constitution: Constitution | null;
   router: ModelRouter;
   octokit: Octokit;
-  log: (type: string, msg: string, extra?: { failoverReason?: FailoverReason }) => void;
+  log: (
+    type: string,
+    msg: string,
+    extra?: { failoverReason?: FailoverReason; model?: string; tokens?: { input: number; output: number } },
+  ) => void;
   timeoutSeconds?: number;
   modelOverride?: string;
   branch?: string;
@@ -196,7 +200,7 @@ export async function planPhase(opts: {
       }
     }
 
-    log('plan', `Plan complete with model ${result.model}, route: ${route}`);
+    log('plan', `Plan complete with model ${result.model}, route: ${route}`, { model: result.model });
 
     const planResult: PlanResult = { ok: true, route, specPath, model: result.model };
 

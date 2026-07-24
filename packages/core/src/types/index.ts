@@ -204,6 +204,8 @@ export interface FactoryEvent {
   fingerprint?: string;
   evidence?: EvidencePack;
   rework?: ReworkInfo;
+  model?: string;
+  tokens?: { input: number; output: number };
 }
 
 // ---------- Cost Tracking ----------

@@ -22,6 +22,8 @@ export interface LogExtra {
   evidence?: EvidencePack;
   rework?: ReworkInfo;
   actor?: string;
+  model?: string;
+  tokens?: { input: number; output: number };
 }
 
 export interface LoggerOptions {
@@ -85,6 +87,8 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(extra?.fingerprint ? { fingerprint: extra.fingerprint } : {}),
       ...(extra?.evidence ? { evidence: extra.evidence } : {}),
       ...(extra?.rework ? { rework: extra.rework } : {}),
+      ...(extra?.model ? { model: extra.model } : {}),
+      ...(extra?.tokens ? { tokens: extra.tokens } : {}),
     };
     const line = JSON.stringify(event) + '\n';
     appendLine(eventsFile, line, opts.lock);
