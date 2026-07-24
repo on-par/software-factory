@@ -123,6 +123,21 @@ describe('checkDistFreshness', () => {
     expect(tui?.reason).toContain('dist/ missing');
   });
 
+  it('reports an existing but empty dist dir as stale without throwing', () => {
+    const tree = baseTree();
+    delete (tree as Record<string, number>)['/repo/packages/tui/dist/app.js'];
+    const base = fakeDeps(tree, baseContents);
+    // dist dir exists (e.g. `mkdir -p` with a failed build) but contains zero files.
+    const deps: StalenessDeps = {
+      ...base,
+      exists: (p) => p === '/repo/packages/tui/dist' || base.exists(p),
+    };
+    const results = checkDistFreshness('/repo', deps);
+    const tui = results.find((r) => r.pkg === 'tui');
+    expect(tui?.stale).toBe(true);
+    expect(tui?.reason).toContain('dist/ empty');
+  });
+
   it('skips a package with no src dir entirely', () => {
     const tree = baseTree();
     delete (tree as Record<string, number>)['/repo/packages/tui/src/app.ts'];

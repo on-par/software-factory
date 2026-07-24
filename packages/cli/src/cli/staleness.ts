@@ -83,6 +83,11 @@ export function checkDistFreshness(rootDir: string, deps: StalenessDeps): Packag
     }
 
     const distFiles = deps.listFiles(distDir);
+    if (distFiles.length === 0) {
+      results.push({ pkg, stale: true, reason: `${pkg}: dist/ empty` });
+      continue;
+    }
+
     const newestDist = newestMtime(distFiles, deps);
 
     if (newestSrc > newestDist) {
