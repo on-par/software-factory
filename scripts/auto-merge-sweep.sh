@@ -3,6 +3,10 @@
 # Lands any open, non-draft, mergeable PR whose CI checks are ALL green.
 # Requested by Patrick 2026-07-13: auto-merge "for right now" across all three repos
 # while the factory supervisors (sb-factory/sf-factory/lb-factory tmux sessions) build.
+# Runs under launchd via scripts/launchd/com.on-par.auto-merge-sweep.plist (KeepAlive
+# restarts it on crash). Writes a heartbeat to ~/.factory/auto-merge-sweep.heartbeat
+# (override with HEARTBEAT_FILE) at the end of every completed pass so a monitor can
+# detect a stalled/dead sweeper.
 set -uo pipefail
 
 REPOS=(sound-buddy software-factory launchblitz)
@@ -10,6 +14,7 @@ REPOS=(sound-buddy software-factory launchblitz)
 FACTORY_BIN="${FACTORY_BIN:-$HOME/.local/bin/factory}"
 REPO_ROOT="${REPO_ROOT:-/Users/moltbot/repos/on-par}"
 SLEEP_SECONDS="${SLEEP_SECONDS:-300}"
+HEARTBEAT_FILE="${HEARTBEAT_FILE:-$HOME/.factory/auto-merge-sweep.heartbeat}"
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
@@ -60,8 +65,12 @@ for pr in prs:
         log "$repo: FAILED to land #$issue (PR #$pr) (exit $?)"
       fi
     else
+      local merge_args=(--squash --delete-branch)
+      if [ "${FACTORY_MERGE_ADMIN:-0}" = "1" ]; then
+        merge_args+=(--admin)
+      fi
       log "$repo: merging standalone PR #$pr via gh"
-      if gh pr merge "$pr" --repo "$ghrepo" --squash --delete-branch 2>&1; then
+      if gh pr merge "$pr" --repo "$ghrepo" "${merge_args[@]}" 2>&1; then
         log "$repo: merged PR #$pr"
       else
         log "$repo: FAILED to merge PR #$pr (exit $?)"
@@ -70,11 +79,21 @@ for pr in prs:
   done
 }
 
+write_heartbeat() {
+  mkdir -p "$(dirname "$HEARTBEAT_FILE")"
+  date '+%Y-%m-%dT%H:%M:%S%z' >"$HEARTBEAT_FILE"
+}
+
+sweep_once() {
+  for r in "${REPOS[@]}"; do
+    sweep_repo "$r"
+  done
+  write_heartbeat
+}
+
 run_sweep_loop() {
   while true; do
-    for r in "${REPOS[@]}"; do
-      sweep_repo "$r"
-    done
+    sweep_once
     sleep "$SLEEP_SECONDS"
   done
 }
