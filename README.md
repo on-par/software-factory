@@ -34,6 +34,7 @@ software-factory/
 │   ├── cli/          @on-par/factory-cli      — CLI app (factory init, ship, run, triage, ...)
 │   ├── config/       @on-par/factory-config   — Shared JSON configs + product constitutions
 │   ├── contracts/    @on-par/contracts        — Shared typed seam: Issue/Epic/Story/DesignArtifact schemas
+│   ├── adr-kit/      @on-par/adr-kit          — Pure ADR kernel: parse/serialize/template/numbering, zero deps
 │   └── server/       @on-par/factory-server   — SaaS server (stub — Phase 2 of roadmap)
 ├── tsconfig.base.json
 └── package.json      (npm workspaces root)
@@ -51,6 +52,7 @@ contracts   ←  core  ←  server
 - **@on-par/factory-core** — The engine. Model registry, router with failover, constitution loader, checker framework, and the four pipeline phases (PLAN → BUILD → CHECK → SHIP). Imports config and contracts.
 - **@on-par/factory-cli** — The `factory` CLI. Imports core.
 - **@on-par/factory-server** — Future SaaS server. Imports core. Currently a stub.
+- **@on-par/adr-kit** — Zero runtime dependencies. Pure, no-I/O ADR kernel: parses ADR markdown into a typed record, serializes it back byte-stably, models the repo's ADR convention (Nygard fallback, or inferred/reused when the repo already has ADRs), and provides next-number and index-table helpers. Not yet imported anywhere — the ADR reader, ADR writer, and readiness-conformance checker consume it in later stories of epic #464.
 
 ## Quick Start (5 minutes)
 

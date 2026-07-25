@@ -11,6 +11,8 @@ Context for AI coding agents working in this repository. Read this before starti
 ```
 software-factory/
 ├── packages/
+│   ├── adr-kit/  @on-par/adr-kit           — Pure ADR kernel: parse/serialize/template/
+│   │                                        numbering, zero deps, no I/O.
 │   ├── contracts/ @on-par/contracts        — Shared typed seam: zod schemas + inferred
 │   │                                        types for Issue/Epic/Story/DesignArtifact.
 │   ├── config/   @on-par/factory-config  — Zero-dep. Ships models.json, routes.json,
@@ -34,6 +36,8 @@ software-factory/
 ```
 
 Dependency direction: `contracts ← core ← cli`, `config ← core ← cli`, and `config ← core ← server`.
+`@on-par/adr-kit` has no dependents yet — the ADR reader, ADR writer, and readiness-conformance
+checker named in epic #464 consume it in later stories.
 
 ### What lives in `packages/core/src`
 

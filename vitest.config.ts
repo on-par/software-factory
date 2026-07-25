@@ -33,13 +33,14 @@ export default defineConfig({
         // build if measured coverage exceeds these by >2pts — raise them here
         // in the same PR when it fires.
         lines: 97,
-        functions: 96,
+        functions: 97,
         branches: 91,
         statements: 97,
         // RATCHET per package: each metric set ~1 point below that package's
         // measured floor (see #242). Raise toward 100 as coverage grows; never
         // lower. Package-scoped so one workspace cannot hide another workspace's
         // regression behind the aggregate average.
+        'packages/adr-kit/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 94, statements: 99 },
         'packages/config/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 49, statements: 99 },
         'packages/contracts/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
         'packages/core/src/**/*.{ts,tsx}': { lines: 97, functions: 98, branches: 91, statements: 97 },

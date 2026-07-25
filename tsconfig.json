@@ -7,6 +7,9 @@
   "files": [],
   "references": [
     {
+      "path": "packages/adr-kit/tsconfig.build.json"
+    },
+    {
       "path": "packages/contracts/tsconfig.build.json"
     },
     {
