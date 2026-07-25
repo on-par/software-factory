@@ -1,4 +1,6 @@
 // src/discovery/promote.ts — Advance a draft Epic through owner dialogue to validation, then decompose into stories
+import type { AcceptanceCriterion } from '@on-par/contracts';
+
 import type { CommandResult } from '../utils/command-runner.js';
 import { runCommand } from '../utils/command-runner.js';
 import { EXPLORING_LABEL, ideaSlug, parseIssueNumber } from './author.js';
@@ -82,12 +84,8 @@ export function upsertSection(body: string, heading: string, content: string): s
 
 // ---------- Types ----------
 
-export interface GherkinScenario {
-  name: string;
-  given: string[];
-  when: string[];
-  then: string[];
-}
+/** @deprecated Alias kept for the public API; prefer AcceptanceCriterion from @on-par/contracts. */
+export type GherkinScenario = AcceptanceCriterion;
 
 export interface DraftStory {
   title: string;

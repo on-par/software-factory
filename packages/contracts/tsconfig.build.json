@@ -4,13 +4,5 @@
     "composite": true,
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
-  "references": [
-    {
-      "path": "../contracts/tsconfig.build.json"
-    },
-    {
-      "path": "../config/tsconfig.build.json"
-    }
-  ],
   "exclude": ["dist", "node_modules", "src/**/*.test.ts"]
 }

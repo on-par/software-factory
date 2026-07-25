@@ -1,7 +1,7 @@
 {
-  "name": "@on-par/factory-core",
+  "name": "@on-par/contracts",
   "version": "2.0.0",
-  "description": "Core engine: model router, constitutions, checkers, and pipeline phases for the Software Factory.",
+  "description": "Shared typed seam: engineering-ready issue/epic/story, Gherkin acceptance criteria, and the DesignArtifact schema.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -10,16 +10,6 @@
       "development": "./src/index.ts",
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
-    },
-    "./internal": {
-      "development": "./src/internal.ts",
-      "import": "./dist/internal.js",
-      "types": "./dist/internal.d.ts"
-    },
-    "./testing": {
-      "development": "./src/testing.ts",
-      "import": "./dist/testing.js",
-      "types": "./dist/testing.d.ts"
     }
   },
   "files": [
@@ -31,7 +21,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/on-par/software-factory.git",
-    "directory": "packages/core"
+    "directory": "packages/contracts"
   },
   "homepage": "https://github.com/on-par/software-factory#readme",
   "bugs": {
@@ -47,11 +37,6 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@on-par/contracts": "^2.0.0",
-    "@on-par/factory-config": "^2.0.0",
-    "@octokit/rest": "^22.0.0",
-    "execa": "^9.0.0",
-    "gray-matter": "^4.0.3",
     "zod": "^3.24.0"
   },
   "license": "MIT",
