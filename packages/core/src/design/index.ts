@@ -4,22 +4,11 @@
 
 import { readFile } from 'node:fs/promises';
 
-import { z } from 'zod';
+import { DesignArtifactSchema } from '@on-par/contracts';
 
 import type { DesignArtifact } from '../types/index.js';
 
-export const DesignArtifactSchema = z.object({
-  restatedProblem: z.string().min(1),
-  approach: z.object({
-    chosen: z.string().min(1),
-    rejected: z.array(z.object({ option: z.string().min(1), reason: z.string().min(1) })),
-  }),
-  interfacesTouched: z.array(z.string().min(1)),
-  behaviorContract: z.array(z.string().min(1)),
-  verificationPlan: z.array(z.object({ command: z.string().min(1), passWhen: z.string().min(1) })),
-  riskBlastRadius: z.string().min(1),
-  openQuestions: z.array(z.string()),
-});
+export { DesignArtifactSchema };
 
 export function parseDesignArtifact(frontmatter: unknown): { artifact: DesignArtifact | null; errors: string[] } {
   if (typeof frontmatter !== 'object' || frontmatter === null || !('design' in frontmatter)) {

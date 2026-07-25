@@ -11,6 +11,8 @@ Context for AI coding agents working in this repository. Read this before starti
 ```
 software-factory/
 ├── packages/
+│   ├── contracts/ @on-par/contracts        — Shared typed seam: zod schemas + inferred
+│   │                                        types for Issue/Epic/Story/DesignArtifact.
 │   ├── config/   @on-par/factory-config  — Zero-dep. Ships models.json, routes.json,
 │   │                                        factory.json, and constitution markdown.
 │   ├── core/     @on-par/factory-core     — The engine (imports config).
@@ -31,7 +33,7 @@ software-factory/
 └── package.json  npm workspaces root
 ```
 
-Dependency direction: `config ← core ← cli` and `config ← core ← server`.
+Dependency direction: `contracts ← core ← cli`, `config ← core ← cli`, and `config ← core ← server`.
 
 ### What lives in `packages/core/src`
 

@@ -10,9 +10,12 @@ import { describe, expect, it } from 'vitest';
 const configText = readFileSync(fileURLToPath(new URL('../../../vitest.config.ts', import.meta.url)), 'utf8');
 
 describe('root coverage gate', () => {
-  it.each(['config', 'core', 'cli', 'dashboard'])('declares a package-scoped threshold glob for packages/%s', (pkg) => {
-    expect(configText).toContain(`'packages/${pkg}/src/**/*.{ts,tsx}':`);
-  });
+  it.each(['config', 'contracts', 'core', 'cli', 'dashboard'])(
+    'declares a package-scoped threshold glob for packages/%s',
+    (pkg) => {
+      expect(configText).toContain(`'packages/${pkg}/src/**/*.{ts,tsx}':`);
+    },
+  );
 
   it.each(['json-summary', 'lcov', 'cobertura'])('keeps the %s coverage reporter CI uploads', (reporter) => {
     expect(configText).toContain(`'${reporter}'`);
