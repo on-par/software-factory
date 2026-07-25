@@ -33,6 +33,7 @@ software-factory/
 │   ├── core/         @on-par/factory-core     — Engine: router, constitutions, checkers, phases
 │   ├── cli/          @on-par/factory-cli      — CLI app (factory init, ship, run, triage, ...)
 │   ├── config/       @on-par/factory-config   — Shared JSON configs + product constitutions
+│   ├── contracts/    @on-par/contracts        — Shared typed seam: Issue/Epic/Story/DesignArtifact schemas
 │   └── server/       @on-par/factory-server   — SaaS server (stub — Phase 2 of roadmap)
 ├── tsconfig.base.json
 └── package.json      (npm workspaces root)
@@ -41,12 +42,13 @@ software-factory/
 ### Package Dependencies
 
 ```
-config  ←  core  ←  cli
-                ←  server
+config      ←  core  ←  cli
+contracts   ←  core  ←  server
 ```
 
 - **@on-par/factory-config** — Zero dependencies. Ships `models.json`, `routes.json`, `factory.json`, and constitution markdown files.
-- **@on-par/factory-core** — The engine. Model registry, router with failover, constitution loader, checker framework, and the four pipeline phases (PLAN → BUILD → CHECK → SHIP). Imports config.
+- **@on-par/contracts** — Zero dependencies besides zod. Zod schemas + inferred types for the engineering-ready Issue/Epic/Story, Gherkin AcceptanceCriterion, and DesignArtifact shapes PLAN emits and BUILD consumes.
+- **@on-par/factory-core** — The engine. Model registry, router with failover, constitution loader, checker framework, and the four pipeline phases (PLAN → BUILD → CHECK → SHIP). Imports config and contracts.
 - **@on-par/factory-cli** — The `factory` CLI. Imports core.
 - **@on-par/factory-server** — Future SaaS server. Imports core. Currently a stub.
 
