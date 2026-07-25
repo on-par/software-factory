@@ -40,7 +40,7 @@ export default defineConfig({
         // measured floor (see #242). Raise toward 100 as coverage grows; never
         // lower. Package-scoped so one workspace cannot hide another workspace's
         // regression behind the aggregate average.
-        'packages/adr-kit/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 93, statements: 99 },
+        'packages/adr-kit/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 94, statements: 99 },
         'packages/config/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 49, statements: 99 },
         'packages/contracts/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
         'packages/core/src/**/*.{ts,tsx}': { lines: 97, functions: 98, branches: 91, statements: 97 },

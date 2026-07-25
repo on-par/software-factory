@@ -1,22 +1,9 @@
 // src/parse.ts — parseAdr, tryParseAdr, and the convention-detection helpers (#467).
-import type { Adr, AdrReference } from './adr.js';
-import { AdrKitError } from './adr.js';
+import type { Adr, AdrReference, KnownField } from './adr.js';
+import { AdrKitError, matchKnownField } from './adr.js';
 import type { AdrConvention } from './convention.js';
 import { NYGARD_CONVENTION } from './convention.js';
 import { adrNumberFromFilename } from './numbering.js';
-
-type KnownField = 'status' | 'date' | 'context' | 'decision' | 'consequences' | 'references';
-
-function matchKnownField(heading: string): KnownField | undefined {
-  const trimmed = heading.trim();
-  if (/^status$/i.test(trimmed)) return 'status';
-  if (/^date$/i.test(trimmed)) return 'date';
-  if (/^context/i.test(trimmed)) return 'context';
-  if (/^decision/i.test(trimmed)) return 'decision';
-  if (/^consequences$/i.test(trimmed)) return 'consequences';
-  if (/^(references|links)$/i.test(trimmed)) return 'references';
-  return undefined;
-}
 
 function trimBlankEdges(lines: readonly string[]): string {
   let start = 0;
@@ -35,7 +22,7 @@ interface ParsedSection {
 function parseReferenceLine(line: string): AdrReference | undefined {
   let m = /^\s*([-*])\s+\[([^\]]+)]\(([^)]+)\)\s*$/.exec(line);
   if (m) return { text: m[2], url: m[3], marker: m[1] };
-  m = /^\s*([-*])\s+(<?https?:\/\/[^\s>]+>?)\s*$/.exec(line);
+  m = /^\s*([-*])\s+<?(https?:\/\/[^\s>]+)>?\s*$/.exec(line);
   if (m) return { text: m[2], url: m[2], marker: m[1] };
   m = /^\s*([-*])\s+(.+)$/.exec(line);
   if (m) return { text: m[2], marker: m[1] };
@@ -157,48 +144,58 @@ function parseInternal(source: string, options?: { filename?: string }): ParseIn
   let headingPrefix = NYGARD_CONVENTION.headingPrefix;
   let metaStyle: AdrConvention['metaStyle'] = frontmatter ? 'frontmatter' : 'bullet-list';
   const labels: Partial<Record<KnownField, string>> = {};
+  // A second heading that maps to a field already assigned (e.g. MADR's "Decision
+  // Drivers" and "Decision Outcome" both matching 'decision') must never silently
+  // overwrite the first — it falls through to extraSections so nothing is lost.
+  const assignedFields = new Set<KnownField>();
 
   for (const section of sections) {
     sectionOrder.push(section.heading);
     headingPrefix = section.headingMarker;
     const field = matchKnownField(section.heading);
-    if (field === 'status') {
-      labels.status = section.heading;
-      if (!status) status = section.body;
-      if (!sawPreambleStatus && !frontmatter) metaStyle = 'sections';
-      continue;
-    }
-    if (field === 'date') {
-      labels.date = section.heading;
-      if (!date) date = section.body;
-      continue;
-    }
-    if (field === 'context') {
-      labels.context = section.heading;
-      context = section.body;
-      continue;
-    }
-    if (field === 'decision') {
-      labels.decision = section.heading;
-      decision = section.body;
-      continue;
-    }
-    if (field === 'consequences') {
-      labels.consequences = section.heading;
-      consequences = section.body;
-      continue;
-    }
-    if (field === 'references') {
+    if (field && !assignedFields.has(field)) {
+      if (field === 'status') {
+        labels.status = section.heading;
+        if (!status) status = section.body;
+        if (!sawPreambleStatus && !frontmatter) metaStyle = 'sections';
+        assignedFields.add('status');
+        continue;
+      }
+      if (field === 'date') {
+        labels.date = section.heading;
+        if (!date) date = section.body;
+        assignedFields.add('date');
+        continue;
+      }
+      if (field === 'context') {
+        labels.context = section.heading;
+        context = section.body;
+        assignedFields.add('context');
+        continue;
+      }
+      if (field === 'decision') {
+        labels.decision = section.heading;
+        decision = section.body;
+        assignedFields.add('decision');
+        continue;
+      }
+      if (field === 'consequences') {
+        labels.consequences = section.heading;
+        consequences = section.body;
+        assignedFields.add('consequences');
+        continue;
+      }
+      // field === 'references'
       const bodyLines = section.body === '' ? [] : section.body.split('\n');
       const nonBlank = bodyLines.filter((line) => line.trim() !== '');
       const parsedRefs = nonBlank.map(parseReferenceLine);
       if (nonBlank.length > 0 && parsedRefs.every((ref): ref is AdrReference => ref !== undefined)) {
         labels.references = section.heading;
         references = parsedRefs;
-      } else {
-        extraSections.push({ heading: section.heading, body: section.body });
+        assignedFields.add('references');
+        continue;
       }
-      continue;
+      // Unstructured References body: fall through and replay it verbatim instead.
     }
     extraSections.push({ heading: section.heading, body: section.body });
   }

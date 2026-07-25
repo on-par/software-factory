@@ -15,6 +15,12 @@ const REAL_TABLE = `# Architecture Decision Records
 Trailing text after the table.
 `;
 
+const TABLE_WITH_GAP = `| Number | Title | Status |
+| --- | --- | --- |
+| [0001](0001-a.md) | First | Accepted |
+| [0003](0003-c.md) | Third | Accepted |
+`;
+
 describe('parseIndexTable', () => {
   it('parses the real docs/adr/README.md table shape', () => {
     const rows = parseIndexTable(REAL_TABLE);
@@ -87,21 +93,15 @@ describe('upsertIndexRow', () => {
   });
 
   it('inserts a new row in ascending order when the number is between existing rows', () => {
-    const updated = upsertIndexRow(REAL_TABLE, {
+    const inserted = upsertIndexRow(TABLE_WITH_GAP, {
       number: 2,
-      title: 'nope',
-      status: 'nope',
-      href: 'x.md',
-    });
-    void updated;
-    const inserted = upsertIndexRow(REAL_TABLE, {
-      number: 3,
-      title: 'Third decision',
+      title: 'Second',
       status: 'Accepted',
-      href: '0003-third.md',
+      href: '0002-b.md',
     });
     const rows = parseIndexTable(inserted);
     expect(rows.map((row) => row.number)).toEqual([1, 2, 3]);
+    expect(rows[1].title).toBe('Second');
   });
 
   it('inserts a new lowest-numbered row at the start', () => {

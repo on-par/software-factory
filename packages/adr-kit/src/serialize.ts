@@ -1,20 +1,8 @@
 // src/serialize.ts — serializeAdr, the byte-stable inverse of parseAdr (#467).
-import type { Adr, AdrReference } from './adr.js';
+import type { Adr, AdrReference, KnownField } from './adr.js';
+import { matchKnownField } from './adr.js';
 import type { AdrConvention } from './convention.js';
 import { NYGARD_CONVENTION } from './convention.js';
-
-type KnownField = 'status' | 'date' | 'context' | 'decision' | 'consequences' | 'references';
-
-function matchKnownField(heading: string): KnownField | undefined {
-  const trimmed = heading.trim();
-  if (/^status$/i.test(trimmed)) return 'status';
-  if (/^date$/i.test(trimmed)) return 'date';
-  if (/^context/i.test(trimmed)) return 'context';
-  if (/^decision/i.test(trimmed)) return 'decision';
-  if (/^consequences$/i.test(trimmed)) return 'consequences';
-  if (/^(references|links)$/i.test(trimmed)) return 'references';
-  return undefined;
-}
 
 function padNumber(value: number, width: number): string {
   return String(value).padStart(width, '0');
@@ -96,10 +84,13 @@ export function serializeAdr(adr: Adr, convention: AdrConvention = NYGARD_CONVEN
 
   if (hasSectionOrder) {
     for (const heading of adr.sectionOrder) {
+      // An extraSections entry means parse.ts deliberately left this heading unmapped
+      // (e.g. an unstructured References body, or a second heading colliding with an
+      // already-assigned field) — replay it verbatim rather than re-deriving it from a
+      // same-named Adr field that may hold a different section's content.
+      const extra = adr.extraSections.find((section) => section.heading === heading);
       const field = matchKnownField(heading);
-      const body = field
-        ? fieldBody(adr, field)
-        : (adr.extraSections.find((section) => section.heading === heading)?.body ?? '');
+      const body = extra ? extra.body : field ? fieldBody(adr, field) : '';
       blocks.push(renderSectionBlock(convention.headingPrefix, heading, body));
     }
   } else {

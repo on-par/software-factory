@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { AdrKitError, createAdr, normalizeStatus, supersededBy } from './adr.js';
+import { AdrKitError, createAdr, matchKnownField, normalizeStatus, supersededBy } from './adr.js';
 
 describe('normalizeStatus', () => {
   it.each(['Proposed', 'Accepted', 'Rejected', 'Deprecated', 'Superseded'])('recognizes %s', (value) => {
@@ -69,6 +69,30 @@ describe('createAdr', () => {
     expect(adr.decision).toBe('dec');
     expect(adr.consequences).toBe('cons');
     expect(adr.references).toEqual([{ text: 'ref', marker: '-' }]);
+  });
+});
+
+describe('matchKnownField', () => {
+  it.each([
+    ['Status', 'status'],
+    ['Date', 'date'],
+    ['Context', 'context'],
+    ['Context and Problem Statement', 'context'],
+    ['Decision', 'decision'],
+    ['Decision Outcome', 'decision'],
+    ['Consequences', 'consequences'],
+    ['References', 'references'],
+    ['Links', 'references'],
+  ])('maps %s to %s', (heading, field) => {
+    expect(matchKnownField(heading)).toBe(field);
+  });
+
+  it('does not collide MADR Decision Drivers with Decision Outcome', () => {
+    expect(matchKnownField('Decision Drivers')).toBeUndefined();
+  });
+
+  it('returns undefined for an unrecognised heading', () => {
+    expect(matchKnownField('Alternatives Considered')).toBeUndefined();
   });
 });
 

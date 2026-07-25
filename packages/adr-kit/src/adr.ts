@@ -36,6 +36,23 @@ export interface Adr {
   extraSections: AdrSection[];
 }
 
+export type KnownField = 'status' | 'date' | 'context' | 'decision' | 'consequences' | 'references';
+
+/** Maps a parsed heading to the Adr field it represents, shared by parse.ts and
+ *  serialize.ts so the two stay in lockstep — a heading either side recognizes
+ *  but the other doesn't would silently break the byte-stable round trip. */
+export function matchKnownField(heading: string): KnownField | undefined {
+  const trimmed = heading.trim();
+  if (/^status$/i.test(trimmed)) return 'status';
+  if (/^date$/i.test(trimmed)) return 'date';
+  if (/^context/i.test(trimmed)) return 'context';
+  if (/^decision outcome$/i.test(trimmed)) return 'decision';
+  if (/^decision$/i.test(trimmed)) return 'decision';
+  if (/^consequences$/i.test(trimmed)) return 'consequences';
+  if (/^(references|links)$/i.test(trimmed)) return 'references';
+  return undefined;
+}
+
 export class AdrKitError extends Error {
   constructor(
     message: string,

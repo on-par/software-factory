@@ -15,6 +15,75 @@ import { NYGARD_CONVENTION } from './convention.js';
 import { inferConvention, parseAdr } from './parse.js';
 import { serializeAdr } from './serialize.js';
 
+const UNSTRUCTURED_REFERENCES = `# ADR-0011: Unstructured references round-trip
+
+- Status: Accepted
+- Date: 2026-07-16
+
+## Context
+
+Body.
+
+## Decision
+
+Body.
+
+## Consequences
+
+Body.
+
+## References
+
+See the meeting notes for details.
+`;
+
+const MADR_WITH_DECISION_DRIVERS = `---
+status: accepted
+date: 2026-07-16
+---
+
+# Use fixture-based testing for decision drivers
+
+## Context and Problem Statement
+
+Body.
+
+## Decision Drivers
+
+- Driver one
+- Driver two
+
+## Decision Outcome
+
+Chosen option: A.
+
+## Consequences
+
+Body.
+`;
+
+const ANGLE_BRACKET_REFERENCE = `# ADR-0012: Angle-bracket bare URL reference
+
+- Status: Accepted
+- Date: 2026-07-16
+
+## Context
+
+Body.
+
+## Decision
+
+Body.
+
+## Consequences
+
+Body.
+
+## References
+
+- <https://example.com/foo>
+`;
+
 const DATE_AS_SECTION = `# ADR-0010: Sections style with a Date section
 
 ## Status
@@ -48,8 +117,34 @@ describe('serializeAdr — byte-stable round trip', () => {
     ['WITH_EXTRA_SECTION', WITH_EXTRA_SECTION],
     ['CRLF_NYGARD', CRLF_NYGARD],
     ['DATE_AS_SECTION', DATE_AS_SECTION],
+    ['UNSTRUCTURED_REFERENCES', UNSTRUCTURED_REFERENCES],
+    ['MADR_WITH_DECISION_DRIVERS', MADR_WITH_DECISION_DRIVERS],
   ])('reproduces %s exactly', (_name, text) => {
     expect(serializeAdr(parseAdr(text), inferConvention(text))).toBe(text);
+  });
+
+  it('normalizes a bare angle-bracketed URL reference to a clean markdown link, per the serialize contract, instead of corrupting it with embedded brackets', () => {
+    const result = serializeAdr(parseAdr(ANGLE_BRACKET_REFERENCE), inferConvention(ANGLE_BRACKET_REFERENCE));
+    expect(result).toContain('- [https://example.com/foo](https://example.com/foo)');
+    expect(result).not.toContain('<');
+    expect(result).not.toContain('>');
+  });
+
+  it('keeps Decision Drivers and Decision Outcome distinct instead of one clobbering the other', () => {
+    const adr = parseAdr(MADR_WITH_DECISION_DRIVERS);
+    expect(adr.decision).toBe('Chosen option: A.');
+    expect(adr.extraSections.find((s) => s.heading === 'Decision Drivers')?.body).toBe('- Driver one\n- Driver two');
+  });
+
+  it('parses a bare angle-bracketed URL reference without embedding the brackets', () => {
+    const adr = parseAdr(ANGLE_BRACKET_REFERENCE);
+    expect(adr.references).toEqual([{ text: 'https://example.com/foo', url: 'https://example.com/foo', marker: '-' }]);
+  });
+
+  it('preserves an unstructured References body as an extra section, not a dropped references field', () => {
+    const adr = parseAdr(UNSTRUCTURED_REFERENCES);
+    expect(adr.references).toEqual([]);
+    expect(adr.extraSections.find((s) => s.heading === 'References')?.body).toBe('See the meeting notes for details.');
   });
 });
 
