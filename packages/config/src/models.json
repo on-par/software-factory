@@ -14,6 +14,18 @@
       "claudeFlag": "fable",
       "note": "Claude Fable 5 — most capable model, uses claude CLI subscription auth. Falls back to opus on rate-limit/usage-cap."
     },
+    "claude-opus-5": {
+      "provider": "anthropic",
+      "tier": "boss",
+      "costPerMtokInput": 5.0,
+      "costPerMtokOutput": 25.0,
+      "contextWindow": 200000,
+      "capabilities": ["planning", "design", "architecture", "review", "dispute_resolution"],
+      "envKey": null,
+      "harness": "claude-cli",
+      "claudeFlag": "claude-opus-5",
+      "note": "Claude Opus 5 — boss/plan model, uses claude CLI subscription auth."
+    },
     "claude-opus-4-8": {
       "provider": "anthropic",
       "tier": "boss",
@@ -213,7 +225,7 @@
     }
   },
   "tiers": {
-    "boss": ["qwen2.5-coder:14b", "gemma4:12b", "claude-fable-5", "claude-opus-4-8", "claude-sonnet-5", "glm-5.2"],
+    "boss": ["claude-opus-5", "qwen2.5-coder:14b", "gemma4:12b", "claude-fable-5", "claude-opus-4-8", "claude-sonnet-5", "glm-5.2"],
     "worker": [
       "codex-ollama-qwen3.5:9b",
       "qwen2.5-coder:14b",
