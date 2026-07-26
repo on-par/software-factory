@@ -76,7 +76,9 @@ vi.mock('node:child_process', () => {
 });
 
 vi.mock('@octokit/rest', () => ({
-  Octokit: vi.fn(() => h.octokit),
+  Octokit: vi.fn(function () {
+    return h.octokit;
+  }),
 }));
 
 vi.mock('@on-par/factory-tui', () => ({
@@ -118,28 +120,34 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
       return h.orphanEvents;
     }),
     // Router / loaders as light stubs.
-    ModelRouter: vi.fn(() => ({
-      resolve: (route: string) => h.routerResolve(route),
-      resolveAll: (_route: string) => [],
-      registryRef: {
-        getClaudeFlag: () => '--flag',
-        getModelsInTier: () => ['m'],
-        get: () => undefined,
-      },
-      setCostSink: vi.fn(),
-    })),
-    ConstitutionLoader: vi.fn(() => ({
-      listProducts: () => ['alpha', 'beta'],
-      resolve: (worktree: string, product?: string) => h.constitutionResolve(worktree, product),
-    })),
-    ModelRegistry: vi.fn(() => ({
-      list: () => ['claude-model'],
-      getTiers: () => ['worker'],
-      estimateCost: () => 1.23,
-      isExperimental: () => false,
-      isAvailable: () => true,
-      getModelsInTier: () => ['claude-model'],
-    })),
+    ModelRouter: vi.fn(function () {
+      return {
+        resolve: (route: string) => h.routerResolve(route),
+        resolveAll: (_route: string) => [],
+        registryRef: {
+          getClaudeFlag: () => '--flag',
+          getModelsInTier: () => ['m'],
+          get: () => undefined,
+        },
+        setCostSink: vi.fn(),
+      };
+    }),
+    ConstitutionLoader: vi.fn(function () {
+      return {
+        listProducts: () => ['alpha', 'beta'],
+        resolve: (worktree: string, product?: string) => h.constitutionResolve(worktree, product),
+      };
+    }),
+    ModelRegistry: vi.fn(function () {
+      return {
+        list: () => ['claude-model'],
+        getTiers: () => ['worker'],
+        estimateCost: () => 1.23,
+        isExperimental: () => false,
+        isAvailable: () => true,
+        getModelsInTier: () => ['claude-model'],
+      };
+    }),
     // Phases.
     planPhase: vi.fn(async () => h.planResult),
     buildPhase: vi.fn(async () => h.buildResult),
