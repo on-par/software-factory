@@ -3,7 +3,14 @@
 import { Buffer } from 'node:buffer';
 
 import { normalizeRepoPath } from './path.js';
-import type { DegradeEvent, DegradeReason, OnDegrade, RepoContextReader, RepoDirEntry } from './reader.js';
+import type {
+  DegradeEvent,
+  DegradeReason,
+  OnDegrade,
+  RepoContextOperation,
+  RepoContextReader,
+  RepoDirEntry,
+} from './reader.js';
 import { EMPTY_DIR } from './reader.js';
 
 export interface FetchLikeResponse {
@@ -62,6 +69,10 @@ export function createGitHubContentsReader(options: GitHubContentsReaderOptions)
     } catch {
       // Never let a throwing observer break the "never throws" contract.
     }
+  }
+
+  function emitFailure(operation: RepoContextOperation, result: Extract<RequestResult, { ok: false }>): void {
+    emit({ operation, path: result.path, reason: result.reason, status: result.status, detail: result.detail });
   }
 
   function buildUrl(path: string): string {
@@ -136,13 +147,7 @@ export function createGitHubContentsReader(options: GitHubContentsReaderOptions)
     async readFile(rawPath) {
       const result = await request(rawPath);
       if (!result.ok) {
-        emit({
-          operation: 'readFile',
-          path: result.path,
-          reason: result.reason,
-          status: result.status,
-          detail: result.detail,
-        });
+        emitFailure('readFile', result);
         return undefined;
       }
 
@@ -186,13 +191,7 @@ export function createGitHubContentsReader(options: GitHubContentsReaderOptions)
     async readDir(rawPath) {
       const result = await request(rawPath);
       if (!result.ok) {
-        emit({
-          operation: 'readDir',
-          path: result.path,
-          reason: result.reason,
-          status: result.status,
-          detail: result.detail,
-        });
+        emitFailure('readDir', result);
         return EMPTY_DIR;
       }
 
@@ -225,13 +224,7 @@ export function createGitHubContentsReader(options: GitHubContentsReaderOptions)
         if (result.reason === 'not-found') {
           return false;
         }
-        emit({
-          operation: 'exists',
-          path: result.path,
-          reason: result.reason,
-          status: result.status,
-          detail: result.detail,
-        });
+        emitFailure('exists', result);
         return false;
       }
 
