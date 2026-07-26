@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Quickstart smoke test: packs @on-par/contracts and @on-par/factory-{config,core,tui,cli}
-# into tarballs, installs them into a fresh project (as npm would from the
-# registry), and verifies `factory --version`, `factory --help`, and
-# `factory init` work.
+# Quickstart smoke test: packs @on-par/{adr-kit,contracts,repo-context} and
+# @on-par/factory-{config,core,tui,cli} into tarballs, installs them into a
+# fresh project (as npm would from the registry), and verifies
+# `factory --version`, `factory --help`, and `factory init` work.
 #
 # Assumes `npm ci` and `npm run build` have already run at the repo root
 # (CI does this before invoking this script).
@@ -19,14 +19,18 @@ cleanup() {
 trap cleanup EXIT
 
 (cd "$ROOT" && npm pack \
+  --workspace @on-par/adr-kit \
   --workspace @on-par/contracts \
+  --workspace @on-par/repo-context \
   --workspace @on-par/factory-config \
   --workspace @on-par/factory-core \
   --workspace @on-par/factory-tui \
   --workspace @on-par/factory-cli \
   --pack-destination "$PACKDIR")
 
+ADR_KIT_TGZ=("$PACKDIR"/on-par-adr-kit-*.tgz)
 CONTRACTS_TGZ=("$PACKDIR"/on-par-contracts-*.tgz)
+REPO_CONTEXT_TGZ=("$PACKDIR"/on-par-repo-context-*.tgz)
 CONFIG_TGZ=("$PACKDIR"/on-par-factory-config-*.tgz)
 CORE_TGZ=("$PACKDIR"/on-par-factory-core-*.tgz)
 TUI_TGZ=("$PACKDIR"/on-par-factory-tui-*.tgz)
@@ -34,7 +38,9 @@ CLI_TGZ=("$PACKDIR"/on-par-factory-cli-*.tgz)
 
 cd "$INSTALL_DIR"
 npm init -y >/dev/null
-npm install "${CONTRACTS_TGZ[@]}" "${CONFIG_TGZ[@]}" "${CORE_TGZ[@]}" "${TUI_TGZ[@]}" "${CLI_TGZ[@]}"
+npm install \
+  "${ADR_KIT_TGZ[@]}" "${CONTRACTS_TGZ[@]}" "${REPO_CONTEXT_TGZ[@]}" \
+  "${CONFIG_TGZ[@]}" "${CORE_TGZ[@]}" "${TUI_TGZ[@]}" "${CLI_TGZ[@]}"
 
 FACTORY="$INSTALL_DIR/node_modules/.bin/factory"
 
