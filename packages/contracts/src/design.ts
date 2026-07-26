@@ -40,9 +40,21 @@ export const DesignArtifactSchema = z.object({
   restatedProblem: z.string().min(1),
   approach: DesignApproachSchema,
   interfacesTouched: z.array(z.string().min(1)),
-  targetTypes: z.array(TargetTypeSchema).default([]),
-  signatures: z.array(SignatureSchema).default([]),
-  callGraph: z.array(CallEdgeSchema).default([]),
+  // .nullish() (not .default()) so a bare YAML key with no items — which js-yaml
+  // parses to null, not undefined — still defaults to [] instead of failing the
+  // whole DesignArtifactSchema parse.
+  targetTypes: z
+    .array(TargetTypeSchema)
+    .nullish()
+    .transform((v) => v ?? []),
+  signatures: z
+    .array(SignatureSchema)
+    .nullish()
+    .transform((v) => v ?? []),
+  callGraph: z
+    .array(CallEdgeSchema)
+    .nullish()
+    .transform((v) => v ?? []),
   behaviorContract: z.array(z.string().min(1)),
   verificationPlan: z.array(VerificationStepSchema),
   riskBlastRadius: z.string().min(1),

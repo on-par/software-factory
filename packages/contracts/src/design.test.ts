@@ -81,4 +81,18 @@ describe('DesignArtifactSchema', () => {
     });
     expect(parsed.callGraph[0].note).toBeUndefined();
   });
+
+  it('parses an explicit null for targetTypes/signatures/callGraph to empty arrays (a bare YAML key, not an omitted one)', () => {
+    // js-yaml parses a bare `key:` with no following items as null, not undefined —
+    // .default() only substitutes for undefined, so this must not fail the whole parse.
+    const parsed = DesignArtifactSchema.parse({
+      ...validDesign,
+      targetTypes: null,
+      signatures: null,
+      callGraph: null,
+    });
+    expect(parsed.targetTypes).toEqual([]);
+    expect(parsed.signatures).toEqual([]);
+    expect(parsed.callGraph).toEqual([]);
+  });
 });
