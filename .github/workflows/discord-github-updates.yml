@@ -15,6 +15,8 @@ jobs:
   notify:
     if: ${{ github.event_name != 'check_suite' || github.event.check_suite.app.name == 'GitHub Actions' }}
     runs-on: ubuntu-latest
+    env:
+      DISCORD_GITHUB_UPDATES_WEBHOOK: ${{ secrets.DISCORD_GITHUB_UPDATES_WEBHOOK }}
     steps:
       - name: Build notification
         id: notification
@@ -54,9 +56,8 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Post to Discord
-        if: ${{ secrets.DISCORD_GITHUB_UPDATES_WEBHOOK != '' }}
+        if: ${{ env.DISCORD_GITHUB_UPDATES_WEBHOOK != '' }}
         env:
-          DISCORD_GITHUB_UPDATES_WEBHOOK: ${{ secrets.DISCORD_GITHUB_UPDATES_WEBHOOK }}
           MESSAGE: ${{ steps.notification.outputs.message }}
         run: |
           payload=$(jq -nc --arg content "$MESSAGE" '{content: $content}')
