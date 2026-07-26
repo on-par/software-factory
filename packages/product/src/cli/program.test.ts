@@ -62,6 +62,7 @@ describe('buildProgram', () => {
     expect(help).toContain('interview');
     expect(help).toContain('intent');
     expect(help).toContain('decompose');
+    expect(help).toContain('personas');
   });
 });
 
@@ -271,6 +272,50 @@ describe('main: decompose', () => {
     await expect(
       main(['node', 'product', 'decompose', '--text', BLOCKED_DUMP, '--budget', '0', '--approve', 'Pat'], deps),
     ).rejects.toThrow(/^product decompose: /);
+  });
+});
+
+describe('main: personas', () => {
+  it('approves the intent doc, decomposes it, and writes the rendered persona panel', async () => {
+    const deps = stubDeps();
+    await main(['node', 'product', 'personas', '--text', FULL_DUMP, '--budget', '0', '--approve', 'Pat'], deps);
+
+    expect(deps.write).toHaveBeenCalledWith('# Persona Panel');
+    expect(deps.write).toHaveBeenCalledWith(expect.stringMatching(/^Findings: \d+ from /));
+  });
+
+  it('reads the brain-dump from --file', async () => {
+    const readFile = vi.fn(async () => FULL_DUMP);
+    const deps = stubDeps({ readFile });
+    await main(['node', 'product', 'personas', '--file', 'notes.md', '--budget', '0', '--approve', 'Pat'], deps);
+
+    expect(readFile).toHaveBeenCalledWith('notes.md');
+  });
+
+  it('rejects without --approve, without creating a prompter', async () => {
+    const createPrompter = vi.fn(() => stubPrompter());
+    const deps = stubDeps({ createPrompter });
+    await expect(main(['node', 'product', 'personas', '--text', FULL_DUMP, '--budget', '0'], deps)).rejects.toThrow(
+      /required option/,
+    );
+    expect(createPrompter).not.toHaveBeenCalled();
+  });
+
+  it('rejects with cannot approve and still writes the draft lines when gaps remain', async () => {
+    const deps = stubDeps();
+    await expect(
+      main(['node', 'product', 'personas', '--text', SPARSE_DUMP, '--budget', '0', '--approve', 'Pat'], deps),
+    ).rejects.toThrow(/^product personas: cannot approve — /);
+
+    expect(deps.write).toHaveBeenCalledWith('# Intent Doc');
+    expect(deps.write).toHaveBeenCalledWith(expect.stringMatching(/^Status: draft$/));
+  });
+
+  it('rejects with the decomposition blockers when a scope statement is horizontal', async () => {
+    const deps = stubDeps();
+    await expect(
+      main(['node', 'product', 'personas', '--text', BLOCKED_DUMP, '--budget', '0', '--approve', 'Pat'], deps),
+    ).rejects.toThrow(/^product personas: /);
   });
 });
 

@@ -1,4 +1,4 @@
-// packages/product/src/cli/program.ts — `product <command>` wiring (#469, #470, #471, #472).
+// packages/product/src/cli/program.ts — `product <command>` wiring (#469, #470, #471, #472, #473).
 
 import { execSync } from 'node:child_process';
 import { readFile as readFileFs } from 'node:fs/promises';
@@ -7,10 +7,13 @@ import { createRequire } from 'node:module';
 import { Command } from 'commander';
 
 import { listAdrFilenames, nextAdrFilename, resolveAdrHome } from '../adr-home.js';
+import type { Decomposition } from '../decompose/index.js';
 import { decomposeIntent, renderDecomposition } from '../decompose/index.js';
+import type { IntentDoc } from '../intent/index.js';
 import { approveIntentDoc, buildIntentDoc, renderIntentDoc } from '../intent/index.js';
 import type { InterviewResult } from '../interview/index.js';
 import { DEFAULT_QUESTION_BUDGET, formatQuestion, renderInterviewSummary, runInterview } from '../interview/index.js';
+import { renderPersonaPanel, runPersonaPanel } from '../persona/index.js';
 import type { Prompter } from './prompter.js';
 import { createStdinPrompter } from './prompter.js';
 
@@ -61,6 +64,43 @@ function parseBudget(raw: string, command: string): number {
     throw new Error(`product ${command}: --budget must be a non-negative integer`);
   }
   return questionBudget;
+}
+
+/** Shared by `decompose` and `personas`: brain-dump -> approved doc -> decomposition, or throw. */
+async function decomposeFromDump(
+  opts: { text?: string; file?: string; budget: string; approve: string },
+  deps: ProgramDeps,
+  command: string,
+): Promise<{ doc: IntentDoc; decomposition: Decomposition }> {
+  const brainDump = await resolveBrainDump(opts, deps, command);
+  const questionBudget = parseBudget(opts.budget, command);
+  const prompter = deps.createPrompter();
+  let result: InterviewResult;
+  try {
+    result = await runInterview(
+      brainDump,
+      { ask: (question) => prompter.ask(formatQuestion(question)) },
+      { questionBudget },
+    );
+  } finally {
+    prompter.close();
+  }
+
+  const doc = buildIntentDoc(result);
+  const approval = approveIntentDoc(doc, opts.approve);
+  if (!approval.ok) {
+    for (const line of renderIntentDoc(doc)) {
+      deps.write(line);
+    }
+    throw new Error(`product ${command}: cannot approve — ${approval.blockers.join('; ')}`);
+  }
+
+  const decomposeResult = decomposeIntent(approval.doc);
+  if (!decomposeResult.ok) {
+    throw new Error(`product ${command}: ${decomposeResult.blockers.join('; ')}`);
+  }
+
+  return { doc: approval.doc, decomposition: decomposeResult.decomposition };
 }
 
 export function defaultDeps(): ProgramDeps {
@@ -175,35 +215,27 @@ export function buildProgram(deps: ProgramDeps = defaultDeps()): Command {
     // behavior for the rest of the CLI.
     .exitOverride()
     .action(async (opts: { text?: string; file?: string; budget: string; approve: string }) => {
-      const brainDump = await resolveBrainDump(opts, deps, 'decompose');
-      const questionBudget = parseBudget(opts.budget, 'decompose');
-      const prompter = deps.createPrompter();
-      let result: InterviewResult;
-      try {
-        result = await runInterview(
-          brainDump,
-          { ask: (question) => prompter.ask(formatQuestion(question)) },
-          { questionBudget },
-        );
-      } finally {
-        prompter.close();
+      const { decomposition } = await decomposeFromDump(opts, deps, 'decompose');
+      for (const line of renderDecomposition(decomposition)) {
+        deps.write(line);
       }
+    });
 
-      const doc = buildIntentDoc(result);
-      const approval = approveIntentDoc(doc, opts.approve);
-      if (!approval.ok) {
-        for (const line of renderIntentDoc(doc)) {
-          deps.write(line);
-        }
-        throw new Error(`product decompose: cannot approve — ${approval.blockers.join('; ')}`);
-      }
-
-      const decomposeResult = decomposeIntent(approval.doc);
-      if (!decomposeResult.ok) {
-        throw new Error(`product decompose: ${decomposeResult.blockers.join('; ')}`);
-      }
-
-      for (const line of renderDecomposition(decomposeResult.decomposition)) {
+  program
+    .command('personas')
+    .description('Interrogate a decomposition as eng/customer/support/security/ops')
+    .option('-t, --text <text>', 'the brain-dump as an inline string')
+    .option('-f, --file <path>', 'read the brain-dump from a file')
+    .option('-b, --budget <n>', 'max clarifying questions', String(DEFAULT_QUESTION_BUDGET))
+    .requiredOption('-a, --approve <approver>', 'approve the intent doc as <approver> (human gate #1)')
+    // Scoped to this command only: a missing --approve throws a catchable CommanderError
+    // instead of calling process.exit, matching every other command's error handling
+    // (main()'s caller decides whether to exit) without changing --help/--version
+    // behavior for the rest of the CLI.
+    .exitOverride()
+    .action(async (opts: { text?: string; file?: string; budget: string; approve: string }) => {
+      const { doc, decomposition } = await decomposeFromDump(opts, deps, 'personas');
+      for (const line of renderPersonaPanel(runPersonaPanel(decomposition, doc))) {
         deps.write(line);
       }
     });

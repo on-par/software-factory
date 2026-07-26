@@ -11,11 +11,12 @@ This package is private and is never published to npm.
 The foundation slice (#469) shipped a runnable `product --help` CLI skeleton.
 Story #470 added the Interviewer: given a PM's brain-dump, it asks
 clarifying questions until intent is pinned. Story #471 added the Intent
-Doc — the canonical artifact built from a pinned interview. This story
-(#472) adds the Decomposer: it expands an approved intent doc into an Epic
-plus INVEST stories. Later stories in epic #463 fill in the persona panel,
-judge/rework loop, readiness report, export, epic architecture design, and
-ADR reader.
+Doc — the canonical artifact built from a pinned interview. Story #472
+added the Decomposer: it expands an approved intent doc into an Epic plus
+INVEST stories. This story (#473) adds the Persona Panel: it interrogates a
+decomposition from five perspectives. Later stories in epic #463 fill in
+the judge/rework loop, readiness report, export, epic architecture design,
+and ADR reader.
 
 ## Commands
 
@@ -36,6 +37,11 @@ ADR reader.
   PM, then decompose it into an Epic plus INVEST stories and print the
   rendered decomposition; `--approve` is required, and the command fails
   with the approval or decomposition blockers when either gate refuses.
+- `product personas --text "<brain-dump>" --approve "<name>"` (or
+  `--file <path>`) — run the interview, approve, decompose, then interrogate
+  the decomposition as eng/customer/support/security/ops and print the
+  findings; `--approve` is required, and the command fails with the
+  approval or decomposition blockers when either gate refuses.
 
 ## Interviewer
 
@@ -111,6 +117,30 @@ duplicated anywhere else.
 The decomposer is pure and deterministic — no model calls, no repo access:
 `filesLikelyTouched` stays `[]` and verification steps are `manual: confirm
 <outcome>` placeholders until repo context lands in a later story.
+
+## Persona panel
+
+`product personas` interrogates a decomposition from five perspectives, one
+lens per persona:
+
+- **eng** — can this be built and verified as written?
+- **customer** — would the person with the problem notice, find, and value
+  this?
+- **support** — what happens when it breaks, and what does the agent on
+  the ticket read?
+- **security** — who is allowed to do this, what data moves, and what must
+  be refused?
+- **ops** — how does this roll out, get watched, and get turned off?
+
+Every finding is tagged with its persona, classified as a **gap**, **risk**,
+**assumption**, or **dependency**, and carries exactly one actionable ask —
+a clarifying question for the PM, or a proposed Gherkin acceptance
+criterion ready to paste into the story.
+
+The panel is pure and deterministic — rule-based cue matching over the
+story and intent doc text, no model calls (the model-graded pass is the
+Judge, #474). It surfaces rather than gates: it never blocks the pipeline,
+and human gate #2 is the readiness report (#475).
 
 ## ADR home
 
