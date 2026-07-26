@@ -3,7 +3,7 @@
 import { readFile } from 'node:fs/promises';
 
 import { buildConstitutionContext } from '../constitutions/index.js';
-import { readDesignArtifact } from '../design/index.js';
+import { readDesignArtifact, renderDesignGrounding } from '../design/index.js';
 import { laneEnv } from '../environment/index.js';
 import type { ModelRouter, RouterResult } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
@@ -70,10 +70,14 @@ export async function buildPhase(opts: {
   const constitutionCtx = buildConstitutionContext(constitution);
   const spec = await readFile(specPath, 'utf-8').catch(() => '');
   const designArtifact = await readDesignArtifact(specPath);
+  const designGrounding = designArtifact ? renderDesignGrounding(designArtifact) : '';
   if (designArtifact) {
     log(
       'design_artifact_received',
-      `design artifact received (open questions: ${designArtifact.openQuestions.length})`,
+      `design artifact received (open questions: ${designArtifact.openQuestions.length}, ` +
+        `target types: ${designArtifact.targetTypes.length}, ` +
+        `signatures: ${designArtifact.signatures.length}, ` +
+        `call edges: ${designArtifact.callGraph.length})`,
     );
   }
   const localOnly = process.env.FACTORY_LOCAL_ONLY === '1';
@@ -130,10 +134,19 @@ Keep sub-agent/parallel-task usage modest: only fan out when a piece of work is
 genuinely independent and parallelizable. Prefer doing the work directly over
 spawning sub-agents for a single small issue — this keeps token usage efficient.
 
-${headlessNote()}${appPort ? `\n\n${appPortNote(appPort, appBaseUrl)}` : ''}`;
+${headlessNote()}${appPort ? `\n\n${appPortNote(appPort, appBaseUrl)}` : ''}${designGrounding ? `\n\n${designGrounding}` : ''}`;
   } else {
     taskType = 'build_claude';
-    prompt = buildClaudePrompt({ issue, branch, specPath, constitutionCtx, skipCI, appPort, appBaseUrl });
+    prompt = buildClaudePrompt({
+      issue,
+      branch,
+      specPath,
+      constitutionCtx,
+      skipCI,
+      appPort,
+      appBaseUrl,
+      designGrounding,
+    });
   }
 
   prompt = applySteering(prompt, steering);
@@ -195,7 +208,7 @@ ${headlessNote()}${appPort ? `\n\n${appPortNote(appPort, appBaseUrl)}` : ''}`;
     route = 'claude';
     taskType = 'build_claude';
     const claudePrompt = applySteering(
-      buildClaudePrompt({ issue, branch, specPath, constitutionCtx, skipCI, appPort, appBaseUrl }),
+      buildClaudePrompt({ issue, branch, specPath, constitutionCtx, skipCI, appPort, appBaseUrl, designGrounding }),
       steering,
     );
     result = await router.run('build_claude', claudePrompt, {
@@ -229,8 +242,9 @@ function buildClaudePrompt(opts: {
   skipCI?: boolean;
   appPort?: number;
   appBaseUrl?: string;
+  designGrounding?: string;
 }): string {
-  const { issue, branch, specPath, constitutionCtx, skipCI, appPort, appBaseUrl } = opts;
+  const { issue, branch, specPath, constitutionCtx, skipCI, appPort, appBaseUrl, designGrounding } = opts;
   return `/ship-it ${issue} — Run fully autonomously in headless mode, BUILD phase.
 You are ALREADY inside the isolated git worktree for issue ${issue} (branch ${branch},
 cwd is this worktree), so SKIP ship-it's worktree-creation step.
@@ -251,7 +265,7 @@ turn after an intermediate step. Before ending: (1) branch ${branch} is pushed,
 If and ONLY IF you hit something genuinely ambiguous, print a line starting exactly
 with "ESCALATE:" followed by the question, then STOP.
 
-${headlessNote()}${appPort ? `\n\n${appPortNote(appPort, appBaseUrl)}` : ''}`;
+${headlessNote()}${appPort ? `\n\n${appPortNote(appPort, appBaseUrl)}` : ''}${designGrounding ? `\n\n${designGrounding}` : ''}`;
 }
 
 function headlessNote(): string {

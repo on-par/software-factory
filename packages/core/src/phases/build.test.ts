@@ -738,6 +738,145 @@ describe('buildPhase design artifact receipt (#422)', () => {
     expect(receipt?.msg).toContain('open questions: 2');
   });
 
+  it('injects the design grounding block into the claude worker prompt for a deepened .design.json', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-480.md');
+    await writeFile(specPath, '---\nroute: claude\n---\n# Spec\n');
+    await writeFile(
+      join(worktree, 'issue-480.design.json'),
+      JSON.stringify({
+        restatedProblem: 'x',
+        approach: { chosen: 'y', rejected: [] },
+        interfacesTouched: ['a.ts'],
+        targetTypes: [{ name: 'Foo', file: 'a.ts', kind: 'changed' }],
+        signatures: [{ symbol: 'doThing', file: 'a.ts', signature: '(x: string) => void' }],
+        callGraph: [{ from: 'buildPhase', to: 'doThing' }],
+        behaviorContract: ['z'],
+        verificationPlan: [{ command: 'npm test', passWhen: 'green' }],
+        riskBlastRadius: 'none',
+        openQuestions: [],
+      }),
+    );
+    const captured: { prompt?: string } = {};
+    const fakeRouter = {
+      run: async (_task: string, prompt: string) => {
+        captured.prompt = prompt;
+        return { model: 'fake-model', output: 'done', exitCode: 0, attempts: [] };
+      },
+    } as any;
+
+    const result = await buildPhase({
+      issue: 480,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/480-design-grounding',
+      route: 'claude',
+      router: fakeRouter,
+      constitution: null,
+      log: () => {},
+    });
+
+    expect(result.ok).toBe(true);
+    expect(captured.prompt).toContain('## Design grounding (from the frozen PLAN artifact)');
+    expect(captured.prompt).toContain('(x: string) => void');
+  });
+
+  it('injects the design grounding block into the codex worker prompt for a deepened .design.json', async () => {
+    const prevFactoryCodex = process.env.FACTORY_CODEX;
+    const prevLocalOnly = process.env.FACTORY_LOCAL_ONLY;
+    delete process.env.FACTORY_CODEX;
+    delete process.env.FACTORY_LOCAL_ONLY;
+
+    try {
+      const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-481.md');
+      await writeFile(specPath, '---\nroute: codex\n---\n# Spec\n');
+      await writeFile(
+        join(worktree, 'issue-481.design.json'),
+        JSON.stringify({
+          restatedProblem: 'x',
+          approach: { chosen: 'y', rejected: [] },
+          interfacesTouched: ['a.ts'],
+          targetTypes: [{ name: 'Foo', file: 'a.ts', kind: 'changed' }],
+          signatures: [{ symbol: 'doThing', file: 'a.ts', signature: '(x: string) => void' }],
+          callGraph: [{ from: 'buildPhase', to: 'doThing' }],
+          behaviorContract: ['z'],
+          verificationPlan: [{ command: 'npm test', passWhen: 'green' }],
+          riskBlastRadius: 'none',
+          openQuestions: [],
+        }),
+      );
+      const stub = new StubModelExecutor({ scripts: { build_codex: [{ output: 'codex output' }] } });
+      const router = new ModelRouter(models, routes, false, stub);
+
+      const result = await buildPhase({
+        issue: 481,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        branch: 'ship-it/481-design-grounding-codex',
+        route: 'codex',
+        router,
+        constitution: null,
+        log: () => {},
+      });
+
+      expect(result.ok).toBe(true);
+      const prompt = stub.calls[stub.calls.length - 1].prompt;
+      expect(prompt).toContain('## Design grounding (from the frozen PLAN artifact)');
+      expect(prompt).toContain('(x: string) => void');
+    } finally {
+      if (prevFactoryCodex === undefined) delete process.env.FACTORY_CODEX;
+      else process.env.FACTORY_CODEX = prevFactoryCodex;
+      if (prevLocalOnly === undefined) delete process.env.FACTORY_LOCAL_ONLY;
+      else process.env.FACTORY_LOCAL_ONLY = prevLocalOnly;
+    }
+  });
+
+  it('does not include the design grounding heading for a pre-#480 (shallow) .design.json', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-482.md');
+    await writeFile(specPath, '---\nroute: claude\n---\n# Spec\n');
+    await writeFile(
+      join(worktree, 'issue-482.design.json'),
+      JSON.stringify({
+        restatedProblem: 'x',
+        approach: { chosen: 'y', rejected: [] },
+        interfacesTouched: ['a.ts'],
+        behaviorContract: ['z'],
+        verificationPlan: [{ command: 'npm test', passWhen: 'green' }],
+        riskBlastRadius: 'none',
+        openQuestions: [],
+      }),
+    );
+    const captured: { prompt?: string } = {};
+    const fakeRouter = {
+      run: async (_task: string, prompt: string) => {
+        captured.prompt = prompt;
+        return { model: 'fake-model', output: 'done', exitCode: 0, attempts: [] };
+      },
+    } as any;
+
+    const result = await buildPhase({
+      issue: 482,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/482-shallow-design',
+      route: 'claude',
+      router: fakeRouter,
+      constitution: null,
+      log: () => {},
+    });
+
+    expect(result.ok).toBe(true);
+    expect(captured.prompt).not.toContain('## Design grounding');
+  });
+
   it('does not log design_artifact_received and still succeeds when no .design.json exists', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);

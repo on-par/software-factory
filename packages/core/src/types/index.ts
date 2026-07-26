@@ -282,6 +282,14 @@ export interface IssueRunState {
   failures?: CheckerOutput[];
 }
 
-// ---------- Design artifact (#422; moved to @on-par/contracts in #466) ----------
+// ---------- Design artifact (#422; moved to @on-par/contracts in #466; deepened in #480) ----------
 
-export type { DesignApproach, DesignArtifact, RejectedApproach, VerificationStep } from '@on-par/contracts';
+export type {
+  CallEdge,
+  DesignApproach,
+  DesignArtifact,
+  RejectedApproach,
+  Signature,
+  TargetType,
+  VerificationStep,
+} from '@on-par/contracts';

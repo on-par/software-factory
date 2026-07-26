@@ -73,6 +73,18 @@ design:
         reason: <why>
   interfacesTouched:
     - <file / exported function / type added or changed>
+  targetTypes:
+    - name: <exported type/interface/class this change centers on>
+      file: <path that exists in this checkout, or one you are creating>
+      kind: added|changed|read
+  signatures:
+    - symbol: <exported function/method name>
+      file: <path in this checkout>
+      signature: '<exact TypeScript signature after the change>'
+  callGraph:
+    - from: <caller symbol>
+      to: <callee symbol>
+      note: <what flows across this edge>
   behaviorContract:
     - <what is true after this change that was not true before>
   verificationPlan:
@@ -95,6 +107,11 @@ ${constitutionCtx ? `## Constitution compliance\nFor each standard in the consti
 
 (Replace 'codex' in the frontmatter with 'claude' if that's the route you chose.)
 The design: block is machine-validated — keys must match exactly as shown.
+targetTypes / signatures / callGraph must be grounded in the real checkout: every
+file must be one that exists (or one you are creating), and every name/symbol must
+be one you actually read or are adding — omit an entry rather than guess. Quote
+signature values in single quotes; unquoted YAML breaks on the colons in a
+TypeScript signature.
 Do not run tests, do not write or edit any other file, do not touch git.
 If the issue is genuinely too vague to plan without a product decision only a human
 can make, print a line starting exactly with "ESCALATE:" followed by the question,
@@ -247,8 +264,21 @@ export async function planPhase(opts: {
       await writeFile(paths.markdown, renderDesignArtifact(designArtifact, issue));
       log(
         'design_artifact_emitted',
-        `design artifact validated and written (open questions: ${designArtifact.openQuestions.length})`,
+        `design artifact validated and written (open questions: ${designArtifact.openQuestions.length}, ` +
+          `target types: ${designArtifact.targetTypes.length}, ` +
+          `signatures: ${designArtifact.signatures.length}, ` +
+          `call edges: ${designArtifact.callGraph.length})`,
       );
+      if (
+        designArtifact.targetTypes.length === 0 &&
+        designArtifact.signatures.length === 0 &&
+        designArtifact.callGraph.length === 0
+      ) {
+        log(
+          'design_shallow',
+          'design artifact has no targetTypes, signatures, or callGraph — BUILD will run without design grounding',
+        );
+      }
       if (designArtifact.openQuestions.length > 0) {
         const summary = designArtifact.openQuestions.join('; ');
         const truncated = summary.length > 300 ? `${summary.slice(0, 300)}…` : summary;
