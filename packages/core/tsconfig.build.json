@@ -6,10 +6,16 @@
   },
   "references": [
     {
+      "path": "../adr-kit/tsconfig.build.json"
+    },
+    {
       "path": "../contracts/tsconfig.build.json"
     },
     {
       "path": "../config/tsconfig.build.json"
+    },
+    {
+      "path": "../repo-context/tsconfig.build.json"
     }
   ],
   "exclude": ["dist", "node_modules", "src/**/*.test.ts"]
