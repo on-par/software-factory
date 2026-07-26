@@ -47,6 +47,7 @@ export default defineConfig({
         'packages/core/src/**/*.{ts,tsx}': { lines: 97, functions: 98, branches: 91, statements: 97 },
         'packages/cli/src/**/*.{ts,tsx}': { lines: 98, functions: 90, branches: 93, statements: 98 },
         'packages/dashboard/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
+        'packages/product/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
         'packages/server/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
       },
     },

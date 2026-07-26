@@ -22,6 +22,8 @@ software-factory/
 │   ├── core/     @on-par/factory-core     — The engine (imports config).
 │   ├── cli/      @on-par/factory-cli       — The `factory` CLI (imports core).
 │   ├── dashboard/ @on-par/factory-dashboard — Vite + React + Tailwind dashboard (walking skeleton, private).
+│   ├── product/  @on-par/product           — Product (proposer) app: brain-dump →
+│   │                                        engineering-ready issues. Read-only, private.
 │   └── server/   @on-par/factory-server    — Phase-2 SaaS server STUB. createServer()
 │                                             throws; marked private, never published.
 ├── tools/
@@ -37,8 +39,8 @@ software-factory/
 └── package.json  npm workspaces root
 ```
 
-Dependency direction: `contracts ← core ← cli`, `config ← core ← cli`, and `config ← core ← server`.
-`@on-par/adr-kit` and `@on-par/repo-context` have no dependents yet — the ADR reader, ADR writer,
+Dependency direction: `contracts ← core ← cli`, `config ← core ← cli`, `config ← core ← server`, and
+`adr-kit ← product`. `@on-par/repo-context` has no dependents yet — the ADR reader, ADR writer,
 and readiness-conformance checker named in epic #464 consume them in later stories.
 
 ### What lives in `packages/core/src`
