@@ -1,4 +1,4 @@
-// packages/product/src/cli/program.ts — `product <command>` wiring (#469, #470).
+// packages/product/src/cli/program.ts — `product <command>` wiring (#469, #470, #471).
 
 import { execSync } from 'node:child_process';
 import { readFile as readFileFs } from 'node:fs/promises';
@@ -7,6 +7,8 @@ import { createRequire } from 'node:module';
 import { Command } from 'commander';
 
 import { listAdrFilenames, nextAdrFilename, resolveAdrHome } from '../adr-home.js';
+import { approveIntentDoc, buildIntentDoc, renderIntentDoc } from '../intent/index.js';
+import type { InterviewResult } from '../interview/index.js';
 import { DEFAULT_QUESTION_BUDGET, formatQuestion, renderInterviewSummary, runInterview } from '../interview/index.js';
 import type { Prompter } from './prompter.js';
 import { createStdinPrompter } from './prompter.js';
@@ -38,6 +40,26 @@ function resolveRepoRoot(): string {
   } catch {
     return process.cwd();
   }
+}
+
+async function resolveBrainDump(
+  opts: { text?: string; file?: string },
+  deps: ProgramDeps,
+  command: string,
+): Promise<string> {
+  const brainDump = opts.text ?? (opts.file === undefined ? undefined : await deps.readFile(opts.file));
+  if (brainDump === undefined || brainDump.trim() === '') {
+    throw new Error(`product ${command}: pass --text "<brain-dump>" or --file <path>`);
+  }
+  return brainDump;
+}
+
+function parseBudget(raw: string, command: string): number {
+  const questionBudget = Number.parseInt(raw, 10);
+  if (!Number.isInteger(questionBudget) || questionBudget < 0) {
+    throw new Error(`product ${command}: --budget must be a non-negative integer`);
+  }
+  return questionBudget;
 }
 
 export function defaultDeps(): ProgramDeps {
@@ -82,14 +104,8 @@ export function buildProgram(deps: ProgramDeps = defaultDeps()): Command {
     .option('-f, --file <path>', 'read the brain-dump from a file')
     .option('-b, --budget <n>', 'max clarifying questions', String(DEFAULT_QUESTION_BUDGET))
     .action(async (opts: { text?: string; file?: string; budget: string }) => {
-      const brainDump = opts.text ?? (opts.file === undefined ? undefined : await deps.readFile(opts.file));
-      if (brainDump === undefined || brainDump.trim() === '') {
-        throw new Error('product interview: pass --text "<brain-dump>" or --file <path>');
-      }
-      const questionBudget = Number.parseInt(opts.budget, 10);
-      if (!Number.isInteger(questionBudget) || questionBudget < 0) {
-        throw new Error('product interview: --budget must be a non-negative integer');
-      }
+      const brainDump = await resolveBrainDump(opts, deps, 'interview');
+      const questionBudget = parseBudget(opts.budget, 'interview');
       const prompter = deps.createPrompter();
       try {
         const result = await runInterview(
@@ -102,6 +118,46 @@ export function buildProgram(deps: ProgramDeps = defaultDeps()): Command {
         }
       } finally {
         prompter.close();
+      }
+    });
+
+  program
+    .command('intent')
+    .description('Build the intent doc from a brain-dump: stable statement IDs, PM approval gate')
+    .option('-t, --text <text>', 'the brain-dump as an inline string')
+    .option('-f, --file <path>', 'read the brain-dump from a file')
+    .option('-b, --budget <n>', 'max clarifying questions', String(DEFAULT_QUESTION_BUDGET))
+    .option('-a, --approve <approver>', 'approve the doc as <approver> (human gate #1)')
+    .action(async (opts: { text?: string; file?: string; budget: string; approve?: string }) => {
+      const brainDump = await resolveBrainDump(opts, deps, 'intent');
+      const questionBudget = parseBudget(opts.budget, 'intent');
+      const prompter = deps.createPrompter();
+      let result: InterviewResult;
+      try {
+        result = await runInterview(
+          brainDump,
+          { ask: (question) => prompter.ask(formatQuestion(question)) },
+          { questionBudget },
+        );
+      } finally {
+        prompter.close();
+      }
+
+      let doc = buildIntentDoc(result);
+      if (opts.approve !== undefined) {
+        const approval = approveIntentDoc(doc, opts.approve);
+        if (approval.ok) {
+          doc = approval.doc;
+        } else {
+          for (const line of renderIntentDoc(doc)) {
+            deps.write(line);
+          }
+          throw new Error(`product intent: cannot approve — ${approval.blockers.join('; ')}`);
+        }
+      }
+
+      for (const line of renderIntentDoc(doc)) {
+        deps.write(line);
       }
     });
 

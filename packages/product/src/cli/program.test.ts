@@ -1,4 +1,4 @@
-// packages/product/src/cli/program.test.ts (#469, #470).
+// packages/product/src/cli/program.test.ts (#469, #470, #471).
 
 import type * as NodeChildProcess from 'node:child_process';
 import { execSync } from 'node:child_process';
@@ -29,6 +29,12 @@ function stubPrompter(overrides: Partial<Prompter> = {}): Prompter {
   };
 }
 
+const SPARSE_DUMP = 'The manual export process breaks every week and wastes an afternoon.';
+const FULL_DUMP =
+  'The manual export process breaks every week and wastes an afternoon, as a user on the ops team ' +
+  'we need this so that we reduce the manual toil; build the smallest slice, but out of scope for now is ' +
+  'automated retries, and this must ship before the deadline given the legacy platform constraint.';
+
 function stubDeps(overrides: Partial<ProgramDeps> = {}): ProgramDeps {
   return {
     repoRoot: '/repo',
@@ -54,6 +60,7 @@ describe('buildProgram', () => {
     expect(help).toContain('Usage: product');
     expect(help).toContain('adr');
     expect(help).toContain('interview');
+    expect(help).toContain('intent');
   });
 });
 
@@ -143,6 +150,67 @@ describe('main: interview', () => {
       main(['node', 'product', 'interview', '--text', 'Nothing notable to report right now.'], deps),
     ).rejects.toThrow('boom');
     expect(prompter.close).toHaveBeenCalled();
+  });
+});
+
+describe('main: intent', () => {
+  it('builds the intent doc from --text and writes it, closing the prompter', async () => {
+    const prompter = stubPrompter();
+    const createPrompter = vi.fn(() => prompter);
+    const deps = stubDeps({ createPrompter });
+    await main(['node', 'product', 'intent', '--text', SPARSE_DUMP, '--budget', '0'], deps);
+
+    expect(deps.write).toHaveBeenCalledWith('# Intent Doc');
+    expect(deps.write).toHaveBeenCalledWith(expect.stringMatching(/^Status: draft$/));
+    expect(prompter.close).toHaveBeenCalled();
+  });
+
+  it('reads the brain-dump from --file', async () => {
+    const readFile = vi.fn(async () => SPARSE_DUMP);
+    const deps = stubDeps({ readFile });
+    await main(['node', 'product', 'intent', '--file', 'notes.md', '--budget', '0'], deps);
+
+    expect(readFile).toHaveBeenCalledWith('notes.md');
+  });
+
+  it('asks via the prompter when the budget allows a clarifying question', async () => {
+    const prompter = stubPrompter();
+    const deps = stubDeps({ createPrompter: vi.fn(() => prompter) });
+    await main(['node', 'product', 'intent', '--text', SPARSE_DUMP, '--budget', '1'], deps);
+
+    expect(prompter.ask).toHaveBeenCalled();
+  });
+
+  it('rejects with neither --text nor --file, without creating a prompter', async () => {
+    const createPrompter = vi.fn(() => stubPrompter());
+    const deps = stubDeps({ createPrompter });
+    await expect(main(['node', 'product', 'intent'], deps)).rejects.toThrow(/pass --text/);
+    expect(createPrompter).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-numeric --budget', async () => {
+    const deps = stubDeps();
+    await expect(main(['node', 'product', 'intent', '--text', SPARSE_DUMP, '--budget', 'abc'], deps)).rejects.toThrow(
+      /--budget must be a non-negative integer/,
+    );
+  });
+
+  it('approves and writes Status: approved plus Approved by when the interview pins everything', async () => {
+    const deps = stubDeps();
+    await main(['node', 'product', 'intent', '--text', FULL_DUMP, '--budget', '0', '--approve', 'Pat'], deps);
+
+    expect(deps.write).toHaveBeenCalledWith('Status: approved');
+    expect(deps.write).toHaveBeenCalledWith('Approved by: Pat');
+  });
+
+  it('rejects with cannot approve and still writes the draft lines when gaps remain', async () => {
+    const deps = stubDeps();
+    await expect(
+      main(['node', 'product', 'intent', '--text', SPARSE_DUMP, '--budget', '0', '--approve', 'Pat'], deps),
+    ).rejects.toThrow(/cannot approve/);
+
+    expect(deps.write).toHaveBeenCalledWith('# Intent Doc');
+    expect(deps.write).toHaveBeenCalledWith(expect.stringMatching(/^Status: draft$/));
   });
 });
 

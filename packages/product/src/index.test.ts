@@ -1,4 +1,4 @@
-// packages/product/src/index.test.ts — public surface (#469, #470).
+// packages/product/src/index.test.ts — public surface (#469, #470, #471).
 
 import { describe, expect, it } from 'vitest';
 
@@ -28,5 +28,14 @@ describe('index', () => {
     expect(Array.isArray(api.DIMENSION_PROBES)).toBe(true);
     expect(Array.isArray(api.INTENT_DIMENSIONS)).toBe(true);
     expect(typeof api.DEFAULT_QUESTION_BUDGET).toBe('number');
+  });
+
+  it('re-exports the intent doc surface', () => {
+    expect(typeof api.buildIntentDoc).toBe('function');
+    expect(typeof api.approveIntentDoc).toBe('function');
+    expect(typeof api.checkTraceability).toBe('function');
+    expect(typeof api.renderIntentDoc).toBe('function');
+    expect(typeof api.extractStatements).toBe('function');
+    expect(typeof api.splitStatements).toBe('function');
   });
 });

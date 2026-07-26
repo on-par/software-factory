@@ -7,6 +7,9 @@
   "references": [
     {
       "path": "../adr-kit/tsconfig.build.json"
+    },
+    {
+      "path": "../contracts/tsconfig.build.json"
     }
   ],
   "exclude": ["dist", "node_modules", "src/**/*.test.ts"]
