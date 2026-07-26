@@ -40,6 +40,10 @@
       "tier": "checker",
       "description": "Product-specific custom checks (from constitution)"
     },
+    "check_design": {
+      "tier": "checker",
+      "description": "Program-design smell critic over the lane's real diff"
+    },
     "eval_judge": {
       "tier": "checker",
       "description": "LLM judge scoring eval specs against a rubric"

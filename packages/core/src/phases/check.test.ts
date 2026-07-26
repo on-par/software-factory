@@ -744,7 +744,8 @@ describe('checkPhase success paths', () => {
     expect(check.summary.failures).toBe(0);
     // Worker is never invoked when nothing fails.
     expect(stub.calls).toHaveLength(0);
-    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed' });
+    // design_smells fails open (SKIP) in this non-git temp worktree — it has no origin/main to diff against.
+    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (1 skipped)' });
   });
 
   it('passes with a skipped tests checker when the worktree has no test command', { timeout: 120_000 }, async () => {
@@ -766,7 +767,8 @@ describe('checkPhase success paths', () => {
     expect(check.passed).toBe(true);
     expect(stub.calls).toHaveLength(0);
     expect(logs.some((l) => l.type === 'check' && l.msg.startsWith('SKIPPED: tests'))).toBe(true);
-    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (1 skipped)' });
+    // Also SKIPped: design_smells, fail-open in this non-git temp worktree.
+    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (2 skipped)' });
   });
 
   it(
@@ -837,7 +839,8 @@ describe('checkPhase success paths', () => {
     // Only one rework round was needed, so the worker was invoked exactly once.
     expect(stub.calls).toHaveLength(1);
     expect(logs).toContainEqual({ type: 'check', msg: 'Rework round 1: 0 failures remaining' });
-    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed' });
+    // design_smells fails open (SKIP) in this non-git temp worktree — it has no origin/main to diff against.
+    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (1 skipped)' });
   });
 });
 

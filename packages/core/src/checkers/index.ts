@@ -7,6 +7,7 @@ import type { ModelRouter } from '../router/index.js';
 import type { CheckerOutput, CheckSummary, Constitution } from '../types/index.js';
 import { describeCommandFailure, runCommand } from '../utils/command-runner.js';
 import { extractJsonObjects } from '../utils/json.js';
+import { DESIGN_SMELLS_CHECKER, designSmellsChecker } from './design-smells.js';
 
 interface PackageJson {
   scripts?: Record<string, string>;
@@ -355,6 +356,13 @@ const BUILT_IN_CHECKERS: Record<string, CheckerFn> = {
   accessibility: accessibilityChecker,
 };
 
+/** Checkers that need the router (agent-backed) but ship as built-ins, not constitution opt-ins. */
+type AgentCheckerFn = (ctx: CheckerContext, router: ModelRouter, timeoutSeconds?: number) => Promise<CheckerOutput>;
+
+const AGENT_CHECKERS: Record<string, AgentCheckerFn> = {
+  [DESIGN_SMELLS_CHECKER]: designSmellsChecker,
+};
+
 export async function runAllCheckers(
   ctx: CheckerContext,
   router: ModelRouter,
@@ -362,7 +370,7 @@ export async function runAllCheckers(
   customCheckerTimeoutSeconds?: number,
 ): Promise<CheckSummary> {
   const results: CheckerOutput[] = [];
-  const standardNames = Object.keys(BUILT_IN_CHECKERS);
+  const standardNames = [...Object.keys(BUILT_IN_CHECKERS), ...Object.keys(AGENT_CHECKERS)];
   const productCheckers = constitution?.checkers ?? [];
 
   const allCheckers = [...standardNames, ...productCheckers.filter((c) => !standardNames.includes(c))];
@@ -387,6 +395,17 @@ export async function runAllCheckers(
     if (BUILT_IN_CHECKERS[name]) {
       try {
         output = await BUILT_IN_CHECKERS[name](sharedCtx);
+      } catch (e: any) {
+        // Fail closed: a checker that crashes must not vanish from the summary
+        output = {
+          checker: name,
+          result: 'FAIL',
+          details: `checker crashed: ${(e?.message ?? String(e)).slice(0, 500)}`,
+        };
+      }
+    } else if (AGENT_CHECKERS[name]) {
+      try {
+        output = await AGENT_CHECKERS[name](sharedCtx, router, customCheckerTimeoutSeconds);
       } catch (e: any) {
         // Fail closed: a checker that crashes must not vanish from the summary
         output = {

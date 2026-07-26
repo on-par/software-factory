@@ -141,6 +141,8 @@ export {
 } from './readiness/index.js';
 
 // Checkers
+export type { DesignSmell, DesignSmellVerdict } from './checkers/design-smells.js';
+export { designSmellsChecker } from './checkers/design-smells.js';
 export type { CheckerContext } from './checkers/index.js';
 export {
   accessibilityChecker,

@@ -98,6 +98,7 @@ const PUBLIC_API_KEYS = [
   // Checkers
   'accessibilityChecker',
   'compileChecker',
+  'designSmellsChecker',
   'linksChecker',
   'lintChecker',
   'runAllCheckers',
