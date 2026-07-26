@@ -25,6 +25,7 @@ export function splitStatements(text: string): string[] {
 /** Statements for every dimension the interview pinned, in canonical dimension order. */
 export function extractStatements(result: InterviewResult): IntentStatementDraft[] {
   const drafts: IntentStatementDraft[] = [];
+  const dumpStatements = splitStatements(result.brainDump);
 
   for (const dimension of INTENT_DIMENSIONS) {
     const exchange = result.transcript.find(
@@ -39,7 +40,7 @@ export function extractStatements(result: InterviewResult): IntentStatementDraft
 
     if (result.coveredByDump.includes(dimension)) {
       const cues = probeFor(dimension).cues;
-      for (const text of splitStatements(result.brainDump)) {
+      for (const text of dumpStatements) {
         if (cues.some((cue) => text.toLowerCase().includes(cue))) {
           drafts.push({ dimension, text, source: 'brain-dump' });
         }
