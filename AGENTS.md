@@ -26,10 +26,6 @@ software-factory/
 │   │                                        engineering-ready issues. Read-only, private.
 │   └── server/   @on-par/factory-server    — Phase-2 SaaS server STUB. createServer()
 │                                             throws; marked private, never published.
-├── tools/
-│   └── lint/     @on-par/factory-lint      — Lint toolchain workspace. Carries a nested
-│                                             TypeScript 5.x so typescript-eslint can run
-│                                             next to the root's native TypeScript 7 compiler.
 ├── scripts/      Root tooling: verify.sh, eval.ts, eval-history.ts,
 │                 regression-issue.ts, local-small-scoreboard.ts,
 │                 coverage-ratchet.ts
@@ -88,7 +84,7 @@ Run from the repo root unless noted. Node.js **≥ 20** required.
 - **Config as source of truth:** model routing lives in `packages/config/src/models.json` + `routes.json`; do not hard-code model lists in `core`.
 - **`core`'s root export is the narrow public API** — implementation details live behind `@on-par/factory-core/internal`, test helpers behind `@on-par/factory-core/testing` (ADR-0004).
 - **The `server` package is a stub** — do not build features on it; `createServer()` intentionally throws.
-- **Lint:** ESLint flat config (`eslint.config.mjs` at root re-exporting `tools/lint/eslint.config.mjs`), run via `npm run lint` with `--max-warnings 0`.
+- **Lint:** Oxlint with the TS 7-native `oxlint-tsgolint` type-aware backend. Configuration lives in `.oxlintrc.json`; run `npm run lint`, which denies warnings.
 
 ## Testing
 

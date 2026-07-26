@@ -196,7 +196,7 @@ export function App({
         return;
       }
       if (input && input.length > 1) {
-        // eslint-disable-next-line no-control-regex -- stripping bracketed-paste markers
+        // oxlint-disable-next-line no-control-regex -- stripping bracketed-paste markers
         const cleaned = input.replace(/\x1b\[200~|\x1b\[201~/g, '').replace(/\r\n|\r/g, '\n');
         setComposer((c) => (c ? { ...c, text: c.text + cleaned, warned: false } : c));
         return;

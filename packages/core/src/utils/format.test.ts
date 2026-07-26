@@ -47,7 +47,7 @@ describe('formatEventLine — plain mode', () => {
 
   it.each(['plan', 'ready', 'warn', 'fail', 'router', 'worktree-gc'])('contains no ANSI escape for type=%s', (type) => {
     const line = formatEventLine(type, 1, 'hello');
-    // eslint-disable-next-line no-control-regex
+    // oxlint-disable-next-line no-control-regex
     expect(line).not.toMatch(/\x1b\[/);
   });
 });
