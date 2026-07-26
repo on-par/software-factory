@@ -52,7 +52,7 @@ jobs:
 
       - name: Upload report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: eval-report
           path: eval-report.json
@@ -83,7 +83,7 @@ jobs:
 
       - name: Upload eval history
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: eval-history
           path: history.jsonl
