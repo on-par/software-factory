@@ -161,6 +161,7 @@ export function seedStories(epic: EpicView): DraftStory[] {
           given: [`the validated Epic #${epic.number}`],
           when: ['the slice is implemented and the verification gate runs'],
           then: ['the acceptance criteria pass', 'the change merges and closes this story'],
+          tracesTo: [],
         },
       ],
     },

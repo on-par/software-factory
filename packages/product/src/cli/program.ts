@@ -1,4 +1,4 @@
-// packages/product/src/cli/program.ts — `product <command>` wiring (#469, #470, #471).
+// packages/product/src/cli/program.ts — `product <command>` wiring (#469, #470, #471, #472).
 
 import { execSync } from 'node:child_process';
 import { readFile as readFileFs } from 'node:fs/promises';
@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { Command } from 'commander';
 
 import { listAdrFilenames, nextAdrFilename, resolveAdrHome } from '../adr-home.js';
+import { decomposeIntent, renderDecomposition } from '../decompose/index.js';
 import { approveIntentDoc, buildIntentDoc, renderIntentDoc } from '../intent/index.js';
 import type { InterviewResult } from '../interview/index.js';
 import { DEFAULT_QUESTION_BUDGET, formatQuestion, renderInterviewSummary, runInterview } from '../interview/index.js';
@@ -157,6 +158,52 @@ export function buildProgram(deps: ProgramDeps = defaultDeps()): Command {
       }
 
       for (const line of renderIntentDoc(doc)) {
+        deps.write(line);
+      }
+    });
+
+  program
+    .command('decompose')
+    .description('Decompose an approved intent doc into an Epic plus INVEST stories with Gherkin AC')
+    .option('-t, --text <text>', 'the brain-dump as an inline string')
+    .option('-f, --file <path>', 'read the brain-dump from a file')
+    .option('-b, --budget <n>', 'max clarifying questions', String(DEFAULT_QUESTION_BUDGET))
+    .requiredOption('-a, --approve <approver>', 'approve the intent doc as <approver> (human gate #1)')
+    // Scoped to this command only: a missing --approve throws a catchable CommanderError
+    // instead of calling process.exit, matching every other command's error handling
+    // (main()'s caller decides whether to exit) without changing --help/--version
+    // behavior for the rest of the CLI.
+    .exitOverride()
+    .action(async (opts: { text?: string; file?: string; budget: string; approve: string }) => {
+      const brainDump = await resolveBrainDump(opts, deps, 'decompose');
+      const questionBudget = parseBudget(opts.budget, 'decompose');
+      const prompter = deps.createPrompter();
+      let result: InterviewResult;
+      try {
+        result = await runInterview(
+          brainDump,
+          { ask: (question) => prompter.ask(formatQuestion(question)) },
+          { questionBudget },
+        );
+      } finally {
+        prompter.close();
+      }
+
+      const doc = buildIntentDoc(result);
+      const approval = approveIntentDoc(doc, opts.approve);
+      if (!approval.ok) {
+        for (const line of renderIntentDoc(doc)) {
+          deps.write(line);
+        }
+        throw new Error(`product decompose: cannot approve — ${approval.blockers.join('; ')}`);
+      }
+
+      const decomposeResult = decomposeIntent(approval.doc);
+      if (!decomposeResult.ok) {
+        throw new Error(`product decompose: ${decomposeResult.blockers.join('; ')}`);
+      }
+
+      for (const line of renderDecomposition(decomposeResult.decomposition)) {
         deps.write(line);
       }
     });

@@ -50,7 +50,7 @@ describe('checkTraceability', () => {
       problemStatement: 'The export breaks weekly.',
       inScope: ['x'],
       outOfScope: [],
-      acceptanceCriteria: [{ name: 'n', given: ['g'], when: ['w'], then: ['t'] }],
+      acceptanceCriteria: [{ name: 'n', given: ['g'], when: ['w'], then: ['t'], tracesTo: [] }],
       verification: [{ command: 'echo', passWhen: 'ok' }],
       filesLikelyTouched: ['x'],
       labels: [],
