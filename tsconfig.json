@@ -13,6 +13,9 @@
       "path": "packages/contracts/tsconfig.build.json"
     },
     {
+      "path": "packages/repo-context/tsconfig.build.json"
+    },
+    {
       "path": "packages/config/tsconfig.build.json"
     },
     {

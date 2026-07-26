@@ -15,6 +15,8 @@ software-factory/
 │   │                                        numbering, zero deps, no I/O.
 │   ├── contracts/ @on-par/contracts        — Shared typed seam: zod schemas + inferred
 │   │                                        types for Issue/Epic/Story/DesignArtifact.
+│   ├── repo-context/ @on-par/repo-context  — Read-only repo reader port: GitHub
+│   │                                        contents-API and in-memory impls, zero deps.
 │   ├── config/   @on-par/factory-config  — Zero-dep. Ships models.json, routes.json,
 │   │                                        factory.json, and constitution markdown.
 │   ├── core/     @on-par/factory-core     — The engine (imports config).
@@ -36,8 +38,8 @@ software-factory/
 ```
 
 Dependency direction: `contracts ← core ← cli`, `config ← core ← cli`, and `config ← core ← server`.
-`@on-par/adr-kit` has no dependents yet — the ADR reader, ADR writer, and readiness-conformance
-checker named in epic #464 consume it in later stories.
+`@on-par/adr-kit` and `@on-par/repo-context` have no dependents yet — the ADR reader, ADR writer,
+and readiness-conformance checker named in epic #464 consume them in later stories.
 
 ### What lives in `packages/core/src`
 

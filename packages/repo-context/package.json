@@ -1,0 +1,43 @@
+{
+  "name": "@on-par/repo-context",
+  "version": "2.0.0",
+  "description": "Read-only repo reader behind a stable interface: GitHub contents-API and in-memory implementations.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/on-par/software-factory.git",
+    "directory": "packages/repo-context"
+  },
+  "homepage": "https://github.com/on-par/software-factory#readme",
+  "bugs": {
+    "url": "https://github.com/on-par/software-factory/issues"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^24.0.0"
+  }
+}

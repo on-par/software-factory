@@ -43,6 +43,7 @@ export default defineConfig({
         'packages/adr-kit/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 94, statements: 99 },
         'packages/config/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 49, statements: 99 },
         'packages/contracts/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
+        'packages/repo-context/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 98, statements: 99 },
         'packages/core/src/**/*.{ts,tsx}': { lines: 97, functions: 98, branches: 91, statements: 97 },
         'packages/cli/src/**/*.{ts,tsx}': { lines: 98, functions: 90, branches: 93, statements: 98 },
         'packages/dashboard/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
