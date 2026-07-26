@@ -24,6 +24,10 @@ export function parseDesignArtifact(frontmatter: unknown): { artifact: DesignArt
   return { artifact: result.data, errors: [] };
 }
 
+function bulletList(items: string[]): string {
+  return items.length > 0 ? items.join('\n') : '_None recorded._';
+}
+
 export function renderDesignArtifact(artifact: DesignArtifact, issue: number): string {
   const rejectedList =
     artifact.approach.rejected.length > 0
@@ -58,6 +62,18 @@ export function renderDesignArtifact(artifact: DesignArtifact, issue: number): s
     '',
     artifact.interfacesTouched.map((i) => `- ${i}`).join('\n'),
     '',
+    '### Target types',
+    '',
+    bulletList(artifact.targetTypes.map((t) => `- \`${t.name}\` (${t.file}) — ${t.kind}`)),
+    '',
+    '### Key signatures',
+    '',
+    bulletList(artifact.signatures.map((s) => `- \`${s.symbol}\` (${s.file}) — \`${s.signature}\``)),
+    '',
+    '### Call graph',
+    '',
+    bulletList(artifact.callGraph.map((e) => `- ${e.from} → ${e.to}${e.note ? ` — ${e.note}` : ''}`)),
+    '',
     '### Behavior contract',
     '',
     artifact.behaviorContract.map((b) => `- ${b}`).join('\n'),
@@ -75,6 +91,39 @@ export function renderDesignArtifact(artifact: DesignArtifact, issue: number): s
     openQuestionsBody,
     '',
   ].join('\n');
+}
+
+/**
+ * Compact grounding block BUILD injects into the worker prompt (#480). Returns
+ * '' when the artifact carries none of the deepened design fields, so a
+ * pre-#480 artifact adds nothing to the prompt.
+ */
+export function renderDesignGrounding(artifact: DesignArtifact): string {
+  const { targetTypes, signatures, callGraph } = artifact;
+  if (targetTypes.length === 0 && signatures.length === 0 && callGraph.length === 0) return '';
+
+  const lines: string[] = ['## Design grounding (from the frozen PLAN artifact)'];
+
+  if (targetTypes.length > 0) {
+    lines.push('', 'Target types — the types this change centers on:', '');
+    lines.push(...targetTypes.map((t) => `- \`${t.name}\` in ${t.file} (${t.kind})`));
+  }
+  if (signatures.length > 0) {
+    lines.push('', 'Key signatures — implement exactly these:', '');
+    lines.push(...signatures.map((s) => `- \`${s.symbol}\` in ${s.file} — \`${s.signature}\``));
+  }
+  if (callGraph.length > 0) {
+    lines.push('', 'Call graph sketch:', '');
+    lines.push(...callGraph.map((e) => `- ${e.from} → ${e.to}${e.note ? ` — ${e.note}` : ''}`));
+  }
+
+  lines.push(
+    '',
+    'These are the frozen plan’s decisions — follow them. If the checkout contradicts one, ' +
+      'say so in your commit message instead of silently diverging.',
+  );
+
+  return lines.join('\n');
 }
 
 export function designArtifactPaths(specPath: string): { json: string; markdown: string } {

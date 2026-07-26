@@ -5,7 +5,13 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { DesignArtifact } from '../types/index.js';
-import { designArtifactPaths, parseDesignArtifact, readDesignArtifact, renderDesignArtifact } from './index.js';
+import {
+  designArtifactPaths,
+  parseDesignArtifact,
+  readDesignArtifact,
+  renderDesignArtifact,
+  renderDesignGrounding,
+} from './index.js';
 
 const validDesign = {
   restatedProblem: 'PLAN output is unstructured markdown.',
@@ -14,6 +20,15 @@ const validDesign = {
     rejected: [{ option: 'Separate file only', reason: 'BUILD would need an extra read.' }],
   },
   interfacesTouched: ['packages/core/src/types/index.ts'],
+  targetTypes: [{ name: 'DesignArtifact', file: 'packages/contracts/src/design.ts', kind: 'changed' as const }],
+  signatures: [
+    {
+      symbol: 'renderDesignGrounding',
+      file: 'packages/core/src/design/index.ts',
+      signature: '(artifact: DesignArtifact) => string',
+    },
+  ],
+  callGraph: [{ from: 'buildPhase', to: 'renderDesignGrounding', note: 'grounding block for the worker prompt' }],
   behaviorContract: ['PLAN emits a validated design artifact.'],
   verificationPlan: [{ command: 'bash scripts/verify.sh', passWhen: 'all checks green' }],
   riskBlastRadius: 'If wrong, PLAN output quality regresses to today.',
@@ -86,6 +101,14 @@ describe('renderDesignArtifact', () => {
     expect(md).toContain('**Separate file only** — BUILD would need an extra read.');
     expect(md).toContain('### Interfaces touched');
     expect(md).toContain('- packages/core/src/types/index.ts');
+    expect(md).toContain('### Target types');
+    expect(md).toContain('- `DesignArtifact` (packages/contracts/src/design.ts) — changed');
+    expect(md).toContain('### Key signatures');
+    expect(md).toContain(
+      '- `renderDesignGrounding` (packages/core/src/design/index.ts) — `(artifact: DesignArtifact) => string`',
+    );
+    expect(md).toContain('### Call graph');
+    expect(md).toContain('- buildPhase → renderDesignGrounding — grounding block for the worker prompt');
     expect(md).toContain('### Behavior contract');
     expect(md).toContain('- PLAN emits a validated design artifact.');
     expect(md).toContain('### Verification plan');
@@ -110,6 +133,62 @@ describe('renderDesignArtifact', () => {
     const md = renderDesignArtifact(withoutRejected, 422);
 
     expect(md).toContain('_None recorded._');
+  });
+
+  it('renders _None recorded._ for target types, signatures, and call graph when all three are empty', () => {
+    const shallow: DesignArtifact = { ...artifact, targetTypes: [], signatures: [], callGraph: [] };
+    const md = renderDesignArtifact(shallow, 422);
+
+    expect(md).toContain('### Target types');
+    expect(md).toContain('### Key signatures');
+    expect(md).toContain('### Call graph');
+    const noneRecordedCount = md.split('_None recorded._').length - 1;
+    expect(noneRecordedCount).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('renderDesignGrounding', () => {
+  it('returns "" when targetTypes, signatures, and callGraph are all empty', () => {
+    const shallow: DesignArtifact = { ...artifact, targetTypes: [], signatures: [], callGraph: [] };
+    expect(renderDesignGrounding(shallow)).toBe('');
+  });
+
+  it('renders the full grounding block with target types, signatures, and the call graph', () => {
+    const grounding = renderDesignGrounding(artifact);
+
+    expect(grounding).toContain('## Design grounding (from the frozen PLAN artifact)');
+    expect(grounding).toContain('DesignArtifact');
+    expect(grounding).toContain('(artifact: DesignArtifact) => string');
+    expect(grounding).toContain('buildPhase → renderDesignGrounding');
+  });
+
+  it('renders a call edge without a note without a trailing dash', () => {
+    const withoutNote: DesignArtifact = {
+      ...artifact,
+      callGraph: [{ from: 'a', to: 'b' }],
+    };
+    const grounding = renderDesignGrounding(withoutNote);
+
+    expect(grounding).toContain('- a → b');
+    expect(grounding).not.toContain('- a → b —');
+  });
+
+  it('renders only the target types section when signatures and callGraph are empty', () => {
+    const onlyTargetTypes: DesignArtifact = { ...artifact, signatures: [], callGraph: [] };
+    const grounding = renderDesignGrounding(onlyTargetTypes);
+
+    expect(grounding).toContain('Target types — the types this change centers on:');
+    expect(grounding).not.toContain('Key signatures — implement exactly these:');
+    expect(grounding).not.toContain('Call graph sketch:');
+  });
+
+  it('renders only the call graph section when targetTypes and signatures are empty', () => {
+    const onlyCallGraph: DesignArtifact = { ...artifact, targetTypes: [], signatures: [] };
+    const grounding = renderDesignGrounding(onlyCallGraph);
+
+    expect(grounding).not.toContain('Target types — the types this change centers on:');
+    expect(grounding).not.toContain('Key signatures — implement exactly these:');
+    expect(grounding).toContain('Call graph sketch:');
   });
 });
 

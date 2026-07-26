@@ -93,10 +93,14 @@ describe('buildPlanPrompt', () => {
     expect(prompt).toContain('restatedProblem');
     expect(prompt).toContain('approach:');
     expect(prompt).toContain('interfacesTouched');
+    expect(prompt).toContain('targetTypes');
+    expect(prompt).toContain('signatures');
+    expect(prompt).toContain('callGraph');
     expect(prompt).toContain('behaviorContract');
     expect(prompt).toContain('verificationPlan');
     expect(prompt).toContain('riskBlastRadius');
     expect(prompt).toContain('openQuestions');
+    expect(prompt).toContain('grounded in the real checkout');
   });
 
   it('references the constitution above when constitutionCtx is non-empty', () => {
@@ -411,6 +415,111 @@ describe('planPhase', () => {
       );
       expect(logs.some((l) => l.type === 'design_artifact_emitted')).toBe(true);
       expect(logs.some((l) => l.type === 'design_open_questions')).toBe(false);
+    });
+
+    it('logs design_shallow when the design block carries no targetTypes, signatures, or callGraph', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-427.md');
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [
+            {
+              output: `---\nroute: codex\n${validDesignYaml}  openQuestions: []\n---\n# Spec\n`,
+            },
+          ],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: { issues: { get: async () => ({ data: { title: 'Shallow design', body: 'Body.' } }) } },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      const result = await planPhase({
+        issue: 427,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: (type, msg) => logs.push({ type, msg }),
+      });
+
+      expect(result.ok).toBe(true);
+      expect(logs.some((l) => l.type === 'design_shallow')).toBe(true);
+    });
+
+    it('parses targetTypes, signatures, and callGraph, and logs counts with no design_shallow', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-480.md');
+      const deepenedYaml = `design:
+  restatedProblem: The problem statement, restated.
+  approach:
+    chosen: Do the thing.
+    rejected:
+      - option: Alt approach
+        reason: Worse.
+  interfacesTouched:
+    - packages/core/src/foo.ts
+  targetTypes:
+    - name: Foo
+      file: packages/core/src/foo.ts
+      kind: changed
+  signatures:
+    - symbol: doThing
+      file: packages/core/src/foo.ts
+      signature: '(x: string) => void'
+  callGraph:
+    - from: buildPhase
+      to: doThing
+      note: invoked during build
+  behaviorContract:
+    - Foo now does bar.
+  verificationPlan:
+    - command: npm test
+      passWhen: tests pass
+  riskBlastRadius: Nothing breaks.
+  openQuestions: []
+`;
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{ output: `---\nroute: codex\n${deepenedYaml}---\n# Spec\n` }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: { issues: { get: async () => ({ data: { title: 'Deepened design', body: 'Body.' } }) } },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      const result = await planPhase({
+        issue: 480,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: (type, msg) => logs.push({ type, msg }),
+      });
+
+      expect(result.designArtifact?.targetTypes).toEqual([
+        { name: 'Foo', file: 'packages/core/src/foo.ts', kind: 'changed' },
+      ]);
+      expect(result.designArtifact?.signatures).toEqual([
+        { symbol: 'doThing', file: 'packages/core/src/foo.ts', signature: '(x: string) => void' },
+      ]);
+      expect(result.designArtifact?.callGraph).toEqual([
+        { from: 'buildPhase', to: 'doThing', note: 'invoked during build' },
+      ]);
+      const emittedLog = logs.find((l) => l.type === 'design_artifact_emitted');
+      expect(emittedLog?.msg).toContain('target types: 1');
+      expect(emittedLog?.msg).toContain('signatures: 1');
+      expect(emittedLog?.msg).toContain('call edges: 1');
+      expect(logs.some((l) => l.type === 'design_shallow')).toBe(false);
     });
 
     it('logs design_open_questions with the question text when openQuestions is non-empty', async () => {
