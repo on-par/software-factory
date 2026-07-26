@@ -35,7 +35,7 @@
     "knip": "^6.29.0",
     "oxlint": "^1.75.0",
     "oxlint-tsgolint": "^7.0.2001",
-    "prettier": "3.9.5",
+    "prettier": "3.9.6",
     "tsx": "^4.23.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
