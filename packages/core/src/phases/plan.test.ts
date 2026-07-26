@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -117,6 +117,19 @@ describe('buildPlanPrompt', () => {
     expect(prompt).toContain('For each standard in the constitution, note how the plan satisfies it.');
     expect(prompt).not.toContain('No constitution loaded');
     expect(prompt).not.toContain('N/A — no constitution');
+  });
+
+  it('places a passed adrCtx block above the Issue heading', () => {
+    const prompt = buildPlanPrompt({
+      issue: 36,
+      issueTitle: 'Add eval runner',
+      issueBody: 'Measure the current prompt.',
+      specPath: '/tmp/spec.md',
+      constitutionCtx: '',
+      adrCtx: '## Active architecture decisions (docs/adr)\n\nADR-0001 stuff.\n',
+    });
+
+    expect(prompt.indexOf('ADR-0001 stuff.')).toBeLessThan(prompt.indexOf('## Issue #36'));
   });
 });
 
@@ -1343,6 +1356,78 @@ describe('planPhase', () => {
       expect(result.ok).toBe(false);
       expect(result.escalate).toContain('re-plan limit');
       expect(stub.calls.length).toBe(3);
+    });
+  });
+
+  describe('ADR constraints (#481)', () => {
+    it('injects Accepted ADRs into the prompt and omits Superseded ones', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      await mkdir(join(worktree, 'docs', 'adr'), { recursive: true });
+      await writeFile(
+        join(worktree, 'docs', 'adr', '0001-x.md'),
+        '# ADR-0001: Use fixture ADRs\n\n- Status: Accepted\n- Date: 2026-07-20\n\n## Decision\n\nDo the thing.\n',
+      );
+      await writeFile(
+        join(worktree, 'docs', 'adr', '0002-y.md'),
+        '# ADR-0002: Superseded fixture\n\n- Status: Superseded by ADR-0003\n- Date: 2026-07-20\n\n## Decision\n\nOld thing.\n',
+      );
+
+      const specPath = join(worktree, 'issue-481.md');
+      const stub = new StubModelExecutor({
+        scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: { issues: { get: async () => ({ data: { title: 'ADR reader', body: 'Body.' } }) } },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      await planPhase({
+        issue: 481,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: (type, msg) => logs.push({ type, msg }),
+      });
+
+      const prompt = stub.calls[0]?.prompt ?? '';
+      expect(prompt).toContain('ADR-0001');
+      expect(prompt).toContain('Use fixture ADRs');
+      expect(prompt).not.toContain('Superseded fixture');
+      expect(logs.some((l) => l.type === 'adr_context')).toBe(true);
+    });
+
+    it('plans without ADR constraints when the worktree has no docs/adr', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-481.md');
+      const stub = new StubModelExecutor({
+        scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: { issues: { get: async () => ({ data: { title: 'No ADRs', body: 'Body.' } }) } },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      await planPhase({
+        issue: 481,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: (type, msg) => logs.push({ type, msg }),
+      });
+
+      const prompt = stub.calls[0]?.prompt ?? '';
+      expect(prompt).not.toContain('## Active architecture decisions');
+      expect(logs.some((l) => l.type === 'adr_context_empty')).toBe(true);
     });
   });
 });

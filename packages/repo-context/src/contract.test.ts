@@ -1,7 +1,11 @@
 import { Buffer } from 'node:buffer';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { createFsReader } from './fs.js';
 import type { FetchLike, FetchLikeResponse } from './github.js';
 import { createGitHubContentsReader } from './github.js';
 import { createInMemoryReader } from './memory.js';
@@ -68,9 +72,29 @@ function makeGitHubReader(): RepoContextReader {
   return createGitHubContentsReader({ owner: 'o', repo: 'r', fetch: contentsFetchOver(TREE) });
 }
 
+let fsRoot: string;
+
+function makeFsReader(): RepoContextReader {
+  return createFsReader({ root: fsRoot });
+}
+
+beforeAll(async () => {
+  fsRoot = await mkdtemp(join(tmpdir(), 'repo-context-fs-'));
+  for (const [path, contents] of Object.entries(TREE)) {
+    const abs = join(fsRoot, path);
+    await mkdir(dirname(abs), { recursive: true });
+    await writeFile(abs, contents);
+  }
+});
+
+afterAll(async () => {
+  await rm(fsRoot, { recursive: true, force: true });
+});
+
 describe.each([
   ['in-memory', makeMemoryReader],
   ['github', makeGitHubReader],
+  ['fs', makeFsReader],
 ])('%s reader honors the RepoContextReader contract', (_label, makeReader) => {
   it('reads a nested file', async () => {
     const reader = makeReader();

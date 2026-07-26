@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest';
 import * as repoContext from './index.js';
 
 describe('index barrel', () => {
-  it('re-exports the public surface of all four modules', () => {
+  it('re-exports the public surface of all five modules', () => {
+    expect(repoContext.createFsReader).toBeTypeOf('function');
     expect(repoContext.createGitHubContentsReader).toBeTypeOf('function');
     expect(repoContext.createInMemoryReader).toBeTypeOf('function');
     expect(repoContext.normalizeRepoPath).toBeTypeOf('function');

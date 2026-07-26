@@ -5,8 +5,10 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
+import { createFsReader } from '@on-par/repo-context';
 import matter from 'gray-matter';
 
+import { adrLabel, readAdrContext, renderAdrConstraints } from '../adr/index.js';
 import type { ApprovalGate } from '../approvals/index.js';
 import { PLAN_SPEC_PREVIEW_BYTES } from '../approvals/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
@@ -33,23 +35,26 @@ export interface PlanPromptOpts {
   issueBody: string;
   specPath: string;
   constitutionCtx: string;
+  adrCtx?: string;
 }
 
 export function buildPlanPrompt(opts: PlanPromptOpts): string {
-  const { issue, issueTitle, issueBody, specPath, constitutionCtx } = opts;
+  const { issue, issueTitle, issueBody, specPath, constitutionCtx, adrCtx } = opts;
 
   return `You are the PLAN phase of a multi-agent software factory for issue #${issue}.
 Do NOT implement anything. You are already inside the isolated worktree (cwd).
 
 ${constitutionCtx}
-
+${adrCtx ?? ''}
 ## Issue #${issue}: ${issueTitle}
 
 ${issueBody}
 
 Steps:
-1. Read the issue above fully. Read CONTEXT.md / docs/adr/ if present. (Any
-   CLAUDE.md/AGENTS.md standards are already included above — do not re-read them.)
+1. Read the issue above fully. Read CONTEXT.md if present. Any Accepted ADRs in this checkout
+   are already summarized above — treat them as binding constraints and open docs/adr/<file>
+   only if you need the full text. (Any CLAUDE.md/AGENTS.md standards are already included
+   above — do not re-read them.)
 2. Explore the codebase (read/search only) enough to name the exact files, functions,
    and existing patterns/tests this issue touches, and any edge cases.
 3. Decide the build route:
@@ -179,12 +184,35 @@ export async function planPhase(opts: {
     { readiness },
   );
 
+  const adrReader = createFsReader({
+    root: worktree,
+    onDegrade: (event) => {
+      if (event.reason === 'not-found') return; // a repo with no docs/adr is normal
+      log('adr_read_degraded', `adr read degraded: ${event.operation} ${event.path} (${event.reason})`);
+    },
+  });
+  const adrContext = await readAdrContext(adrReader);
+  const adrCtx = renderAdrConstraints(adrContext);
+  if (adrContext.active.length > 0) {
+    const names = adrContext.active.map(adrLabel).join(', ');
+    log(
+      'adr_context',
+      `${adrContext.active.length} accepted ADR(s) injected as design constraints: ${names}` +
+        (adrContext.truncated > 0 ? ` (${adrContext.truncated} more omitted by the injection cap)` : ''),
+    );
+  } else {
+    log('adr_context_empty', `no accepted ADRs found in ${adrContext.dir} — planning without ADR constraints`);
+  }
+  if (adrContext.skipped.length > 0) {
+    log('adr_skipped', `${adrContext.skipped.length} ADR file(s) skipped (not Accepted or unparsable)`);
+  }
+
   let steering: ConsumedSteering | undefined;
   let replans = 0;
 
   while (true) {
     const prompt = applySteering(
-      buildPlanPrompt({ issue, issueTitle, issueBody, specPath, constitutionCtx }),
+      buildPlanPrompt({ issue, issueTitle, issueBody, specPath, constitutionCtx, adrCtx }),
       steering,
     );
 

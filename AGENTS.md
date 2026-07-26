@@ -39,9 +39,9 @@ software-factory/
 └── package.json  npm workspaces root
 ```
 
-Dependency direction: `contracts ← core ← cli`, `config ← core ← cli`, `config ← core ← server`, and
-`adr-kit ← product`. `@on-par/repo-context` has no dependents yet — the ADR reader, ADR writer,
-and readiness-conformance checker named in epic #464 consume them in later stories.
+Dependency direction: `contracts ← core ← cli`, `config ← core ← cli`, `config ← core ← server`,
+`adr-kit ← product`, `adr-kit ← core`, and `repo-context ← core` — the ADR writer and
+readiness-conformance checker named in epic #464 consume them in later stories.
 
 ### What lives in `packages/core/src`
 
@@ -51,6 +51,7 @@ and readiness-conformance checker named in epic #464 consume them in later stori
 - `phases/` — the four pipeline phases (`plan`, `build`, `check`, `ship`) plus integration tests (`pipeline.integration.test.ts`, `pipeline.concurrent.integration.test.ts`)
 - `checkers/` — the checker framework (compile/tests/lint/links/accessibility + agent-based custom checkers)
 - `constitutions/` — constitution loader
+- `adr/` — reads the checkout's `docs/adr` through a `RepoContextReader` and renders Accepted ADRs as PLAN constraints
 - `environment/` — port-lease registry for parallel lanes (`.factory/ports.json`) + `leaseEnv()`/`laneEnv()`, the `PORT`/`FACTORY_APP_PORT`/`FACTORY_BASE_URL` + `FACTORY_HEADLESS`/`PLAYWRIGHT_HEADLESS` contract injected into build agents and all checker commands
 - `logger/` — structured leveled logger (`createLogger`) over the `.factory/events.ndjson` sink (ADR-0002)
 - `eval/` — the eval harness (runner, judge, scoring, golden loader, baseline/trend/regression reports)
