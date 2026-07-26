@@ -1,0 +1,30 @@
+{
+  "name": "@on-par/product",
+  "private": true,
+  "version": "2.0.0",
+  "description": "Product app (proposer) — brain-dump to engineering-ready issues. Read-only: it proposes, it never writes the target codebase.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "product": "dist/cli.js"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/cli.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@on-par/adr-kit": "^2.0.0",
+    "commander": "^14.0.0"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^24.0.0"
+  }
+}

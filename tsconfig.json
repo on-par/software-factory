@@ -28,6 +28,9 @@
       "path": "packages/cli/tsconfig.build.json"
     },
     {
+      "path": "packages/product/tsconfig.build.json"
+    },
+    {
       "path": "packages/server/tsconfig.build.json"
     }
   ]
