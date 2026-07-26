@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 const configText = readFileSync(fileURLToPath(new URL('../../../vitest.config.ts', import.meta.url)), 'utf8');
 
 describe('root coverage gate', () => {
-  it.each(['adr-kit', 'config', 'contracts', 'core', 'cli', 'dashboard'])(
+  it.each(['adr-kit', 'config', 'contracts', 'core', 'cli', 'dashboard', 'repo-context'])(
     'declares a package-scoped threshold glob for packages/%s',
     (pkg) => {
       expect(configText).toContain(`'packages/${pkg}/src/**/*.{ts,tsx}':`);
