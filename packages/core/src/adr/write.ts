@@ -20,7 +20,7 @@ import type { AdrDraft } from '@on-par/contracts';
 import { AdrDraftSchema } from '@on-par/contracts';
 import type { RepoContextReader } from '@on-par/repo-context';
 
-import { DEFAULT_ADR_DIR } from './index.js';
+import { DEFAULT_ADR_DIR, isNonAdrFile } from './index.js';
 
 /** The index table lives in the ADR home's README.md — see docs/adr/README.md. */
 export const ADR_INDEX_FILE = 'README.md';
@@ -29,8 +29,6 @@ export const MAX_ADR_DRAFTS = 5;
 /** Existing ADRs sampled to detect the repo's convention. */
 const CONVENTION_SAMPLE = 10;
 
-const NON_ADR_FILENAME = /^(readme|index|_?template)\.md$/i;
-
 export interface RejectedAdrDraft {
   title: string;
   errors: string[];
@@ -38,7 +36,7 @@ export interface RejectedAdrDraft {
 export interface SkippedAdrDraft {
   title: string;
   path: string;
-  reason: 'already-accepted' | 'cap';
+  reason: 'already-accepted' | 'cap' | 'duplicate-slug' | 'unreadable';
 }
 export interface AdrFileWrite {
   /** Repo-root-relative, e.g. 'docs/adr/0005-cache-repo-context.md'. */
@@ -154,7 +152,7 @@ export async function planAdrWrites(
 
   const entries = await reader.readDir(dir);
   const adrFiles = entries.filter(
-    (entry) => entry.type === 'file' && /\.md$/i.test(entry.name) && !NON_ADR_FILENAME.test(entry.name),
+    (entry) => entry.type === 'file' && /\.md$/i.test(entry.name) && !isNonAdrFile(entry.name),
   );
 
   const conventionTexts: string[] = [];
@@ -182,6 +180,9 @@ export async function planAdrWrites(
     .map((draft) => ({ title: draft.title, path: '', reason: 'cap' as const }));
 
   const writes: AdrFileWrite[] = [];
+  // Tracks paths this run has already claimed — two drafts that share a slug (e.g. both
+  // matching one pre-existing Proposed ADR) must not silently overwrite each other.
+  const claimedPaths = new Set<string>();
 
   for (const draft of survivors) {
     const slug = adrSlug(draft.title);
@@ -193,6 +194,10 @@ export async function planAdrWrites(
     let promoted: boolean;
 
     if (existing) {
+      if (claimedPaths.has(existing.path)) {
+        skipped.push({ title: draft.title, path: existing.path, reason: 'duplicate-slug' });
+        continue;
+      }
       const file = await reader.readFile(existing.path);
       const parsed = file !== undefined ? parseAdr(file.text, { filename: existing.name }) : undefined;
       if (parsed !== undefined && normalizeStatus(parsed.status) === 'Proposed') {
@@ -200,7 +205,11 @@ export async function planAdrWrites(
         path = existing.path;
         promoted = true;
       } else {
-        skipped.push({ title: draft.title, path: existing.path, reason: 'already-accepted' });
+        skipped.push({
+          title: draft.title,
+          path: existing.path,
+          reason: file === undefined ? 'unreadable' : 'already-accepted',
+        });
         continue;
       }
     } else {
@@ -208,6 +217,7 @@ export async function planAdrWrites(
       path = `${dir}/${adrFilename(number, draft.title, convention.numberWidth)}`;
       promoted = false;
     }
+    claimedPaths.add(path);
 
     const references = draft.references.map((ref) => ({ text: ref.text, url: ref.url, marker: '-' }));
     if (opts.issueRef && !references.some((ref) => ref.url === opts.issueRef?.url)) {

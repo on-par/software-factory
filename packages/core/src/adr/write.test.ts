@@ -250,6 +250,45 @@ describe('planAdrWrites', () => {
     ]);
   });
 
+  it('skips a second draft that collides on the same slug instead of silently overwriting the first', async () => {
+    const reader = createInMemoryReader({
+      'docs/adr/0003-record-adr-drafts-during-plan.md': adrFixture('0003', 'Record ADR drafts during PLAN', 'Proposed'),
+    });
+
+    const plan = await planAdrWrites(reader, [goodDraft, { ...goodDraft }], { date: '2026-07-25' });
+
+    expect(plan.writes).toHaveLength(1);
+    expect(plan.writes[0].path).toBe('docs/adr/0003-record-adr-drafts-during-plan.md');
+    expect(plan.skipped).toEqual([
+      {
+        title: goodDraft.title,
+        path: 'docs/adr/0003-record-adr-drafts-during-plan.md',
+        reason: 'duplicate-slug',
+      },
+    ]);
+  });
+
+  it('skips with reason unreadable when an existing same-slug file cannot be read', async () => {
+    const reader = {
+      readDir: async () => [
+        {
+          name: '0003-record-adr-drafts-during-plan.md',
+          path: 'docs/adr/0003-record-adr-drafts-during-plan.md',
+          type: 'file' as const,
+        },
+      ],
+      readFile: async () => undefined,
+      exists: async () => true,
+    };
+
+    const plan = await planAdrWrites(reader, [goodDraft], { date: '2026-07-25' });
+
+    expect(plan.writes).toEqual([]);
+    expect(plan.skipped).toEqual([
+      { title: goodDraft.title, path: 'docs/adr/0003-record-adr-drafts-during-plan.md', reason: 'unreadable' },
+    ]);
+  });
+
   it('caps at maxDrafts, reporting the remainder as skipped with reason cap', async () => {
     const reader = createInMemoryReader({ 'README.md': 'root' });
     const drafts: AdrDraft[] = Array.from({ length: 6 }, (_, i) => ({
