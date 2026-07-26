@@ -47,6 +47,7 @@ export type TaskType =
   | 'check_accessibility'
   | 'check_links'
   | 'check_custom'
+  | 'check_design'
   | 'review_pr'
   | 'security_review'
   | 'dispute_resolution'

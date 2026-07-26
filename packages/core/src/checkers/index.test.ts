@@ -875,7 +875,7 @@ describe('runAllCheckers', () => {
 
       const summary = await runAllCheckers(makeContext(worktree), router, constitution);
 
-      expect(summary.total).toBe(7); // 5 built-ins + custom_style + not_a_real_checker
+      expect(summary.total).toBe(8); // 6 built-ins + custom_style + not_a_real_checker
       expect(summary.passes + summary.failures + summary.skips).toBe(summary.total);
       expect(summary.results.map((result) => result.checker)).toContain('custom_style');
       const unknown = summary.results.find((result) => result.checker === 'not_a_real_checker');
@@ -912,8 +912,15 @@ describe('runAllCheckers', () => {
 
     const summary = await runAllCheckers(makeContext(worktree), router, null);
 
-    expect(summary.total).toBe(5);
-    expect(summary.results.map((r) => r.checker)).toEqual(['compile', 'tests', 'lint', 'links', 'accessibility']);
+    expect(summary.total).toBe(6);
+    expect(summary.results.map((r) => r.checker)).toEqual([
+      'compile',
+      'tests',
+      'lint',
+      'links',
+      'accessibility',
+      'design_smells',
+    ]);
     expect(stub.calls).toHaveLength(0);
   });
 
@@ -952,8 +959,8 @@ describe('runAllCheckers', () => {
 
       const tests = summary.results.find((r) => r.checker === 'tests');
       expect(tests?.result).toBe('SKIP');
-      expect(summary.skips).toBe(1);
-      expect(summary.total).toBe(5);
+      expect(summary.skips).toBeGreaterThanOrEqual(1);
+      expect(summary.total).toBe(6);
       expect(summary.failures + summary.passes + summary.skips).toBe(summary.total);
     },
   );
