@@ -145,9 +145,11 @@ function aggregateCoverageScope(summary: Record<string, unknown>, scope: string)
     branches: { total: 0, covered: 0 },
     statements: { total: 0, covered: 0 },
   };
+  let matchedFiles = 0;
 
   for (const [filePath, block] of Object.entries(summary)) {
     if (filePath === 'total' || !matchesCoverageScope(filePath, scope)) continue;
+    matchedFiles++;
     for (const metric of METRICS) {
       const counts = (block as Record<string, { total?: unknown; covered?: unknown } | undefined>)[metric];
       if (!counts) continue;
@@ -160,9 +162,13 @@ function aggregateCoverageScope(summary: Record<string, unknown>, scope: string)
   }
 
   const metrics = {} as CoverageMetrics;
+  if (matchedFiles === 0) {
+    throw new Error(`coverage summary has no files for threshold scope "${scope}"`);
+  }
   for (const metric of METRICS) {
     if (totals[metric].total === 0) {
-      throw new Error(`coverage summary has no files for threshold scope "${scope}"`);
+      metrics[metric] = 100;
+      continue;
     }
     metrics[metric] = Number(((totals[metric].covered / totals[metric].total) * 100).toFixed(2));
   }

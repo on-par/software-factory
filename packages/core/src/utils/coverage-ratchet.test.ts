@@ -137,6 +137,27 @@ describe('parseCoverageSummaryScopes', () => {
     });
   });
 
+  it('treats a scoped metric with no instrumented entries as fully covered', () => {
+    const json = JSON.stringify({
+      total: {
+        lines: { total: 3, covered: 3, pct: 100 },
+        functions: { total: 2, covered: 2, pct: 100 },
+        branches: { total: 0, covered: 0, pct: 100 },
+        statements: { total: 3, covered: 3, pct: 100 },
+      },
+      '/repo/software-factory/packages/dashboard/src/App.tsx': {
+        lines: { total: 3, covered: 3 },
+        functions: { total: 2, covered: 2 },
+        branches: { total: 0, covered: 0 },
+        statements: { total: 3, covered: 3 },
+      },
+    });
+
+    expect(parseCoverageSummaryScopes(json, ['packages/dashboard/src/**/*.{ts,tsx}'])).toEqual({
+      'packages/dashboard/src/**/*.{ts,tsx}': { lines: 100, functions: 100, branches: 100, statements: 100 },
+    });
+  });
+
   it('throws when a scoped threshold has no matching files', () => {
     const json = summaryJson({
       lines: { total: 100, covered: 95, pct: 95 },
