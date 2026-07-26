@@ -131,6 +131,21 @@ describe('buildPlanPrompt', () => {
 
     expect(prompt.indexOf('ADR-0001 stuff.')).toBeLessThan(prompt.indexOf('## Issue #36'));
   });
+
+  it('includes the optional adr: frontmatter block and its guidance', () => {
+    const prompt = buildPlanPrompt({
+      issue: 36,
+      issueTitle: 'Add eval runner',
+      issueBody: 'Measure the current prompt.',
+      specPath: '/tmp/spec.md',
+      constitutionCtx: '',
+    });
+
+    expect(prompt).toContain('adr:');
+    expect(prompt).toContain('OPTIONAL');
+    expect(prompt).toContain("'why'");
+    expect(prompt).toContain('docs/adr/');
+  });
 });
 
 describe('planPhase', () => {
@@ -1428,6 +1443,128 @@ describe('planPhase', () => {
       const prompt = stub.calls[0]?.prompt ?? '';
       expect(prompt).not.toContain('## Active architecture decisions');
       expect(logs.some((l) => l.type === 'adr_context_empty')).toBe(true);
+    });
+  });
+
+  describe('ADR drafts (#482)', () => {
+    it('writes <spec>.adr.json and logs adr_drafts for a valid adr: entry', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-482.md');
+      const adrYaml = `adr:
+  - title: Record ADR drafts during PLAN
+    context: Decisions made during PLAN evaporate into spec prose.
+    decision: SHIP materializes drafts as Accepted ADRs.
+    consequences: Future PLAN runs can read prior decisions back.
+`;
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{ output: `---\nroute: codex\n${adrYaml}---\n# Spec\n` }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: { issues: { get: async () => ({ data: { title: 'ADR drafts', body: 'Body.' } }) } },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      await planPhase({
+        issue: 482,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: (type, msg) => logs.push({ type, msg }),
+      });
+
+      const adrDraftsPath = `${specPath.replace(/\.md$/, '')}.adr.json`;
+      const written = JSON.parse(await readFile(adrDraftsPath, 'utf-8'));
+      expect(written).toEqual([
+        {
+          title: 'Record ADR drafts during PLAN',
+          context: 'Decisions made during PLAN evaporate into spec prose.',
+          decision: 'SHIP materializes drafts as Accepted ADRs.',
+          consequences: 'Future PLAN runs can read prior decisions back.',
+          status: 'proposed',
+          references: [],
+        },
+      ]);
+      const draftsLog = logs.find((l) => l.type === 'adr_drafts');
+      expect(draftsLog?.msg).toContain('Record ADR drafts during PLAN');
+    });
+
+    it('refuses an adr: entry with an empty context, never freezing or writing it', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-483.md');
+      const adrYaml = `adr:
+  - title: Bad draft
+    context: ''
+    decision: Decided anyway.
+    consequences: Some consequence.
+`;
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{ output: `---\nroute: codex\n${adrYaml}---\n# Spec\n` }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: { issues: { get: async () => ({ data: { title: 'Bad ADR draft', body: 'Body.' } }) } },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      const result = await planPhase({
+        issue: 483,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: (type, msg) => logs.push({ type, msg }),
+      });
+
+      expect(result.ok).toBe(true);
+      const adrDraftsPath = `${specPath.replace(/\.md$/, '')}.adr.json`;
+      expect(existsSync(adrDraftsPath)).toBe(false);
+      const rejectedLog = logs.find((l) => l.type === 'adr_draft_rejected');
+      expect(rejectedLog?.msg).toMatch(/'why'\) is required/);
+    });
+
+    it('archives a pre-existing <spec>.adr.json alongside a replanned spec', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-484.md');
+      await writeFile(specPath, '---\nroute: claude\n---\n# Stale Spec\n');
+      await writeFile(`${specPath.replace(/\.md$/, '')}.adr.json`, JSON.stringify([{ stale: true }]));
+
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{ output: '---\nroute: codex\n---\n# Fresh Spec\n' }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: { issues: { get: async () => ({ data: { title: 'Replan', body: 'Body.' } }) } },
+      };
+
+      await planPhase({
+        issue: 484,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: () => {},
+      });
+
+      const archived = await readdir(join(worktree, '.archive'));
+      expect(archived.some((f) => f.endsWith('.adr.json'))).toBe(true);
+      expect(existsSync(`${specPath.replace(/\.md$/, '')}.adr.json`)).toBe(false);
     });
   });
 });

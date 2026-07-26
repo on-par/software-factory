@@ -9,6 +9,7 @@ import { createFsReader } from '@on-par/repo-context';
 import matter from 'gray-matter';
 
 import { adrLabel, readAdrContext, renderAdrConstraints } from '../adr/index.js';
+import { adrDraftsPath, parseAdrDrafts } from '../adr/write.js';
 import type { ApprovalGate } from '../approvals/index.js';
 import { PLAN_SPEC_PREVIEW_BYTES } from '../approvals/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
@@ -97,6 +98,18 @@ design:
       passWhen: <what a pass looks like>
   riskBlastRadius: <what breaks if this is wrong>
   openQuestions: []   # anything you could not resolve; empty list if none
+adr:            # OPTIONAL — omit entirely unless this change makes a decision worth recording
+  - title: <short decision title>
+    context: |
+      <REQUIRED — the 'why': the forces and constraints that drove this decision.
+      A draft with an empty context is refused and never written.>
+    decision: |
+      <what was decided, in the active voice>
+    consequences: |
+      <the positive and negative consequences you accept>
+    references:
+      - text: <link text>
+        url: <url>
 ---
 # Spec: ${issueTitle} (#${issue})
 ## Goal
@@ -117,6 +130,11 @@ file must be one that exists (or one you are creating), and every name/symbol mu
 be one you actually read or are adding — omit an entry rather than guess. Quote
 signature values in single quotes; unquoted YAML breaks on the colons in a
 TypeScript signature.
+Add an \`adr:\` entry ONLY for a decision that constrains how future code must be written,
+would be expensive to reverse, or looks arbitrary from the code alone. Reversible
+implementation details (names, a helper's internal structure) are NOT ADRs. SHIP writes
+each entry into \`docs/adr/\` as an Accepted, next-numbered ADR in the same PR as the code,
+and updates the ADR index — so write it as the permanent record, not as notes to yourself.
 Do not run tests, do not write or edit any other file, do not touch git.
 If the issue is genuinely too vague to plan without a product decision only a human
 can make, print a line starting exactly with "ESCALATE:" followed by the question,
@@ -316,6 +334,18 @@ export async function planPhase(opts: {
       log('design_artifact_invalid', `spec frontmatter has no valid design artifact: ${designErrors.join('; ')}`);
     }
 
+    const { drafts: adrDrafts, rejected: adrRejected } = parseAdrDrafts(parsedSpec?.data ?? {});
+    for (const r of adrRejected) {
+      log('adr_draft_rejected', `ADR draft "${r.title}" refused: ${r.errors.join('; ')}`);
+    }
+    if (adrDrafts.length > 0) {
+      await writeFile(adrDraftsPath(specPath), JSON.stringify(adrDrafts, null, 2));
+      log(
+        'adr_drafts',
+        `${adrDrafts.length} ADR draft(s) frozen for SHIP: ${adrDrafts.map((d) => d.title).join(', ')}`,
+      );
+    }
+
     log('plan', `Plan complete with model ${result.model}, route: ${route}`, { model: result.model });
 
     const planResult: PlanResult = { ok: true, route, specPath, model: result.model, designArtifact };
@@ -380,7 +410,7 @@ async function archiveExistingSpec(specPath: string, log: (type: string, msg: st
   log('plan', `Archived existing spec before planning: ${archivedPath}`);
 
   const { json, markdown } = designArtifactPaths(specPath);
-  for (const designPath of [json, markdown]) {
+  for (const designPath of [json, markdown, adrDraftsPath(specPath)]) {
     if (!existsSync(designPath)) continue;
     const archivedDesignPath = join(archiveDir, `${timestamp}-${designPath.split('/').pop() ?? 'spec.design'}`);
     await rename(designPath, archivedDesignPath);

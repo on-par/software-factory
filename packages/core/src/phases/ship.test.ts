@@ -1,5 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
+import type { AdrDraft } from '@on-par/contracts';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { adrDraftsPath } from '../adr/write.js';
 import { shipPhase } from './ship.js';
 
 function createOctokit(prDraft = true) {
@@ -738,5 +744,191 @@ describe('shipPhase approval gate', () => {
 
     expect(result).toEqual({ ok: true, prNumber: 123 });
     expect(logs.some(([type]) => type === 'approval_requested' || type === 'approval_granted')).toBe(false);
+  });
+});
+
+describe('ADR writer (#482)', () => {
+  const tempDirs = new Set<string>();
+  afterEach(async () => {
+    await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
+    tempDirs.clear();
+  });
+
+  const goodDraft: AdrDraft = {
+    title: 'Record ADR drafts during PLAN',
+    context: 'Decisions made during PLAN evaporate into spec prose.',
+    decision: 'SHIP materializes drafts as Accepted ADRs.',
+    consequences: 'Future PLAN runs can read prior decisions back.',
+    status: 'proposed',
+    references: [],
+  };
+
+  const README_WITH_TABLE = `# Architecture Decision Records
+
+## Index
+
+| Number                 | Title           | Status   |
+| ----------------------- | ---------------- | -------- |
+| [0001](0001-first.md)  | First decision  | Accepted |
+`;
+
+  async function makeWorktree(): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'ship-adr-test-'));
+    tempDirs.add(dir);
+    await mkdir(join(dir, 'docs', 'adr'), { recursive: true });
+    await writeFile(
+      join(dir, 'docs', 'adr', '0001-first.md'),
+      '# ADR-0001: First decision\n\n- Status: Accepted\n- Date: 2026-01-01\n\n## Context\n\nC.\n\n## Decision\n\nD.\n\n## Consequences\n\nCq.\n',
+    );
+    await writeFile(join(dir, 'docs', 'adr', 'README.md'), README_WITH_TABLE);
+    return dir;
+  }
+
+  it('writes docs/adr/0002-*.md, updates the index, and commits it before opening the PR', async () => {
+    const worktree = await makeWorktree();
+    const specPath = join(worktree, 'issue-482.md');
+    await writeFile(adrDraftsPath(specPath), JSON.stringify([goodDraft], null, 2));
+
+    const { octokit, calls } = createOctokit();
+    const commands: string[] = [];
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string, options?: { cwd?: string }) => {
+      commands.push(command);
+      void options;
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 482,
+      repo: 'on-par/software-factory',
+      worktree,
+      branch: 'ship-it/482-adr-writer',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+      specPath,
+      today: '2026-07-25',
+    });
+
+    expect(result.ok).toBe(true);
+    void calls;
+
+    const written = await readFile(join(worktree, 'docs', 'adr', '0002-record-adr-drafts-during-plan.md'), 'utf-8');
+    expect(written).toContain('# ADR-0002:');
+    expect(written).toContain('- Status: Accepted');
+    expect(written).toContain('- Date: 2026-07-25');
+
+    const index = await readFile(join(worktree, 'docs', 'adr', 'README.md'), 'utf-8');
+    expect(index).toContain('[0002](0002-record-adr-drafts-during-plan.md)');
+
+    const addIdx = commands.findIndex((c) => c.startsWith('git add'));
+    const commitIdx = commands.findIndex((c) => c.startsWith('git commit'));
+    expect(addIdx).toBeGreaterThanOrEqual(0);
+    expect(commitIdx).toBeGreaterThan(addIdx);
+    expect(commands[addIdx]).toContain('docs/adr/0002-record-adr-drafts-during-plan.md');
+    expect(commands[addIdx]).toContain('docs/adr/README.md');
+    expect(commands[commitIdx]).toContain('docs(adr): record ADR-0002 Record ADR drafts during PLAN (#482)');
+    expect(logs.some((l) => l[0] === 'adr_written')).toBe(true);
+  });
+
+  it('pushes the ADR commit to an already-open PR', async () => {
+    const worktree = await makeWorktree();
+    const specPath = join(worktree, 'issue-482.md');
+    await writeFile(adrDraftsPath(specPath), JSON.stringify([goodDraft], null, 2));
+
+    const { octokit } = createOctokit();
+    (octokit.rest.pulls.list as any) = async () => {
+      return { data: [{ number: 555 }] };
+    };
+    const commands: string[] = [];
+    const run = async (command: string) => {
+      commands.push(command);
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 482,
+      repo: 'on-par/software-factory',
+      worktree,
+      branch: 'ship-it/482-adr-writer',
+      octokit: octokit as any,
+      watchCI: false,
+      log: () => {},
+      run,
+      specPath,
+      today: '2026-07-25',
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 555 });
+    expect(commands).toContainEqual("git push origin 'ship-it/482-adr-writer'");
+  });
+
+  it('is a byte-identical no-op with no <spec>.adr.json — no git add/commit, no adr_* logs', async () => {
+    const worktree = await makeWorktree();
+    const specPath = join(worktree, 'issue-482.md');
+
+    const { octokit } = createOctokit();
+    const commands: string[] = [];
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      commands.push(command);
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 482,
+      repo: 'on-par/software-factory',
+      worktree,
+      branch: 'ship-it/482-adr-writer',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+      specPath,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(commands.some((c) => c.startsWith('git add'))).toBe(false);
+    expect(commands.some((c) => c.startsWith('git commit'))).toBe(false);
+    expect(logs.some((l) => l[0].startsWith('adr_'))).toBe(false);
+  });
+
+  it('logs adr_commit_skipped and still ships when git commit rejects', async () => {
+    const worktree = await makeWorktree();
+    const specPath = join(worktree, 'issue-482.md');
+    await writeFile(adrDraftsPath(specPath), JSON.stringify([goodDraft], null, 2));
+
+    const { octokit } = createOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command.startsWith('git commit')) throw new Error('nothing to commit');
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 482,
+      repo: 'on-par/software-factory',
+      worktree,
+      branch: 'ship-it/482-adr-writer',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+      specPath,
+      today: '2026-07-25',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(logs).toContainEqual(['adr_commit_skipped', expect.stringContaining('docs/adr')]);
   });
 });
