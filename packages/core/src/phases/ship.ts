@@ -4,7 +4,10 @@ import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
+import { formatAdrNumber } from '@on-par/adr-kit';
+import { createFsReader } from '@on-par/repo-context';
 
+import { applyAdrWritePlan, planAdrWrites, readAdrDrafts } from '../adr/write.js';
 import type { ApprovalGate } from '../approvals/index.js';
 import { gatherEvidencePack } from '../reports/evidence-pack.js';
 import type { CheckSummary } from '../types/index.js';
@@ -37,9 +40,20 @@ export async function shipPhase(opts: {
   startedAt?: string;
   logsDir?: string;
   reworkRounds?: number;
+  today?: string;
 }): Promise<ShipResult> {
   const { issue, repo, worktree, branch, octokit, watchCI = true, log, run = exec, approvalGate, checkSummary } = opts;
   const [owner, repoName] = repo.split('/');
+
+  const adr = await materializeAdrDrafts({
+    issue,
+    repo,
+    worktree,
+    specPath: opts.specPath,
+    run,
+    log,
+    today: opts.today ?? new Date().toISOString().slice(0, 10),
+  });
 
   let diffStat: string | undefined;
 
@@ -65,8 +79,18 @@ export async function shipPhase(opts: {
   // Check if a PR already exists (claude route may have created one)
   let prNumber = await findOpenPR(octokit, owner, repoName, branch);
 
+  if (prNumber && adr.committed) {
+    try {
+      await run(`git push origin ${shellEscape(branch)}`, { cwd: worktree });
+    } catch {
+      log('ship', 'pushing the ADR commit failed — the open PR may not include it');
+    }
+  }
+
   if (!prNumber) {
-    const recoveryState = await inspectRecoveryState(worktree, run);
+    // A failed ADR commit leaves its files on disk uncommitted (see materializeAdrDrafts) —
+    // never let that alone make the worktree look dirty and abort the whole ship.
+    const recoveryState = await inspectRecoveryState(worktree, run, adr.committed ? [] : adr.paths);
     if (!recoveryState.clean) {
       log('ship', `not recovering ${branch}: worktree has uncommitted changes`);
       return { ok: false };
@@ -188,13 +212,84 @@ async function findOpenPR(octokit: Octokit, owner: string, repo: string, branch:
   }
 }
 
-async function inspectRecoveryState(worktree: string, run: CommandRunner): Promise<{ clean: boolean; ahead: boolean }> {
+async function inspectRecoveryState(
+  worktree: string,
+  run: CommandRunner,
+  ignorePaths: string[] = [],
+): Promise<{ clean: boolean; ahead: boolean }> {
+  const statusCommand =
+    ignorePaths.length > 0
+      ? `git status --porcelain -- . ${ignorePaths.map((p) => shellEscape(`:!${p}`)).join(' ')}`
+      : 'git status --porcelain';
   const [{ stdout: status }, { stdout: ahead }] = await Promise.all([
-    run('git status --porcelain', { cwd: worktree }),
+    run(statusCommand, { cwd: worktree }),
     run('git rev-list --count origin/main..HEAD', { cwd: worktree }),
   ]);
   return {
     clean: status.trim() === '',
     ahead: Number.parseInt(ahead.trim(), 10) > 0,
   };
+}
+
+/** The written path's own filename already carries the repo's detected number padding
+ *  (e.g. '002-x.md' in a 3-digit-convention repo) — reuse it so the commit message and log
+ *  never disagree with the file actually on disk, unlike formatAdrNumber's default width-4. */
+function adrNumberLabel(write: { path: string; number: number }): string {
+  const match = /^(\d+)-/.exec(write.path.split('/').pop() ?? '');
+  return match ? match[1] : formatAdrNumber(write.number);
+}
+
+async function materializeAdrDrafts(o: {
+  issue: number;
+  repo: string;
+  worktree: string;
+  specPath?: string;
+  run: CommandRunner;
+  log: (type: string, msg: string) => void;
+  today: string;
+}): Promise<{ committed: boolean; paths: string[] }> {
+  if (!o.specPath) return { committed: false, paths: [] };
+  const drafts = await readAdrDrafts(o.specPath);
+  if (drafts.length === 0) return { committed: false, paths: [] };
+
+  // A 'ship'-typed line first, for the same reason the approval block logs one: it is what
+  // advances the TUI's activePhase to SHIP.
+  o.log('ship', `materializing ${drafts.length} ADR draft(s) from the frozen plan`);
+
+  const reader = createFsReader({
+    root: o.worktree,
+    onDegrade: (event) => {
+      if (event.reason === 'not-found') return; // a repo with no docs/adr is normal
+      o.log('adr_read_degraded', `adr read degraded: ${event.operation} ${event.path} (${event.reason})`);
+    },
+  });
+  const plan = await planAdrWrites(reader, drafts, {
+    date: o.today,
+    issueRef: { text: `Issue #${o.issue}`, url: `https://github.com/${o.repo}/issues/${o.issue}` },
+  });
+  for (const r of plan.rejected) {
+    o.log('adr_draft_rejected', `ADR draft "${r.title}" refused: ${r.errors.join('; ')}`);
+  }
+  for (const s of plan.skipped) {
+    o.log('adr_draft_skipped', `ADR draft "${s.title}" skipped (${s.reason})`);
+  }
+  if (plan.indexSkipped) {
+    o.log('adr_index_skipped', `ADR index not updated in ${plan.dir} (${plan.indexSkipped})`);
+  }
+  if (plan.writes.length === 0) return { committed: false, paths: [] };
+
+  const written = await applyAdrWritePlan(plan, { root: o.worktree });
+  const labels = plan.writes.map((w) => `ADR-${adrNumberLabel(w)} ${w.title}`).join(', ');
+  try {
+    await o.run(`git add ${written.map(shellEscape).join(' ')}`, { cwd: o.worktree });
+    await o.run(`git commit -m ${shellEscape(`docs(adr): record ${labels} (#${o.issue})`)}`, { cwd: o.worktree });
+  } catch {
+    // Nothing staged (an identical re-ship) or git refused — the files are on disk either
+    // way; never fail a ship over documentation. The caller excludes `paths` from its own
+    // dirty-worktree check so this alone never aborts the rest of shipPhase.
+    o.log('adr_commit_skipped', `could not commit ${plan.dir} — the ADR may not reach the PR`);
+    return { committed: false, paths: written };
+  }
+  o.log('adr_written', `recorded ${plan.writes.length} ADR(s) in ${plan.dir}: ${labels}`);
+  return { committed: true, paths: written };
 }

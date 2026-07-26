@@ -36,7 +36,8 @@ export interface AdrContext {
   truncated: number;
 }
 
-function isNonAdrFile(name: string): boolean {
+/** Shared with `adr/write.ts` so the two ADR directory scans never drift apart. */
+export function isNonAdrFile(name: string): boolean {
   return NON_ADR_FILENAME.test(name);
 }
 
