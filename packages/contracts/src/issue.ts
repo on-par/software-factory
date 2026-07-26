@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import { VerificationStepSchema } from './design.js';
 import { AcceptanceCriterionSchema } from './gherkin.js';
+import { TracesToSchema } from './trace.js';
 
 /** Bumped when a field is removed or its meaning changes; additive fields do not bump it. */
 export const CONTRACTS_SCHEMA_VERSION = 1;
@@ -23,6 +24,8 @@ export const EngineeringReadyIssueSchema = z.object({
   verification: z.array(VerificationStepSchema).min(1),
   filesLikelyTouched: z.array(z.string().min(1)),
   labels: z.array(z.string().min(1)),
+  /** Intent statement IDs this artifact realizes (#471). Additive — does not bump the schema version. */
+  tracesTo: TracesToSchema.default([]),
 });
 
 export const StorySchema = EngineeringReadyIssueSchema.extend({
@@ -46,6 +49,8 @@ export const EpicSchema = z.object({
   children: z.array(z.string().min(1)),
   whatAlreadyExists: z.string().min(1).optional(),
   labels: z.array(z.string().min(1)),
+  /** Intent statement IDs this artifact realizes (#471). Additive — does not bump the schema version. */
+  tracesTo: TracesToSchema.default([]),
 });
 
 export type IssueKind = z.infer<typeof IssueKindSchema>;

@@ -30,6 +30,7 @@ const baseIssue: EngineeringReadyIssue = {
   verification: [verificationStep],
   filesLikelyTouched: ['packages/contracts/src/index.ts'],
   labels: ['kernel'],
+  tracesTo: [],
 };
 
 describe('IssueKindSchema', () => {
@@ -64,6 +65,25 @@ describe('EngineeringReadyIssueSchema', () => {
   it('rejects an empty acceptanceCriteria', () => {
     expect(() => EngineeringReadyIssueSchema.parse({ ...baseIssue, acceptanceCriteria: [] })).toThrow();
   });
+
+  it('defaults tracesTo to [] when omitted', () => {
+    const { tracesTo, ...withoutTracesTo } = baseIssue;
+    void tracesTo;
+    const parsed = EngineeringReadyIssueSchema.parse(withoutTracesTo);
+    expect(parsed.tracesTo).toEqual([]);
+  });
+
+  it('parses a story with tracesTo referencing an intent statement', () => {
+    const parsed = StorySchema.parse({
+      ...baseIssue,
+      kind: 'story' as const,
+      role: 'factory operator',
+      want: 'a typed contract package',
+      soThat: 'proposer and writer apps share one schema',
+      tracesTo: ['INT-PROBLEM-01'],
+    });
+    expect(parsed.tracesTo).toEqual(['INT-PROBLEM-01']);
+  });
 });
 
 describe('StorySchema', () => {
@@ -86,6 +106,29 @@ describe('StorySchema', () => {
   });
 });
 
+describe('EpicSchema tracesTo', () => {
+  it('rejects a malformed tracesTo entry', () => {
+    expect(() =>
+      EpicSchema.parse({
+        schemaVersion: CONTRACTS_SCHEMA_VERSION,
+        kind: 'epic' as const,
+        title: 'Kernel packages',
+        why: 'Proposer and writer apps need a shared typed seam.',
+        doneWhen: ['contracts, adr-kit, and repo-context all exist'],
+        children: ['#466'],
+        labels: ['epic'],
+        tracesTo: ['nope'],
+      }),
+    ).toThrow();
+  });
+});
+
+describe('CONTRACTS_SCHEMA_VERSION', () => {
+  it('stays at 1 — tracesTo is additive', () => {
+    expect(CONTRACTS_SCHEMA_VERSION).toBe(1);
+  });
+});
+
 describe('EpicSchema', () => {
   const epic: Epic = {
     schemaVersion: CONTRACTS_SCHEMA_VERSION,
@@ -95,6 +138,7 @@ describe('EpicSchema', () => {
     doneWhen: ['contracts, adr-kit, and repo-context all exist'],
     children: ['#466', '#467', '#468'],
     labels: ['epic'],
+    tracesTo: [],
   };
 
   it('round-trips a fixture', () => {
