@@ -22,11 +22,12 @@ export function nextAdrNumberFromFilenames(filenames: readonly string[]): number
 }
 
 export function adrSlug(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+/, '')
-    .replace(/-+$/, '');
+  const dashed = title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  let start = 0;
+  while (start < dashed.length && dashed[start] === '-') start++;
+  let end = dashed.length;
+  while (end > start && dashed[end - 1] === '-') end--;
+  return dashed.slice(start, end);
 }
 
 export function adrFilename(value: number, title: string, width = 4): string {
