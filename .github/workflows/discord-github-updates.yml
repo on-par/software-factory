@@ -1,0 +1,66 @@
+name: Discord GitHub updates
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, closed]
+  pull_request_review:
+    types: [submitted]
+  check_suite:
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    if: ${{ github.event_name != 'check_suite' || github.event.check_suite.app.name == 'GitHub Actions' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build notification
+        id: notification
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.pull_request_review.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title || github.event.pull_request_review.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url || github.event.pull_request_review.pull_request.html_url }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          REVIEW_STATE: ${{ github.event.review.state }}
+          REVIEWER: ${{ github.event.review.user.login }}
+          CHECK_NAME: ${{ github.event.check_suite.name }}
+          CHECK_CONCLUSION: ${{ github.event.check_suite.conclusion }}
+          CHECK_URL: ${{ github.event.check_suite.html_url }}
+        run: |
+          case "$EVENT_NAME" in
+            pull_request)
+              if [[ "$EVENT_ACTION" == "closed" && "$PR_MERGED" == "true" ]]; then
+                message="✅ PR #$PR_NUMBER merged: $PR_TITLE\n$PR_URL"
+              else
+                message="🔀 PR #$PR_NUMBER $EVENT_ACTION: $PR_TITLE\n$PR_URL"
+              fi
+              ;;
+            pull_request_review)
+              message="📝 Review $REVIEW_STATE from @$REVIEWER on PR #$PR_NUMBER: $PR_TITLE\n$PR_URL"
+              ;;
+            check_suite)
+              message="${CHECK_CONCLUSION^^} CI: $CHECK_NAME\n$CHECK_URL"
+              ;;
+          esac
+          {
+            echo 'message<<EOF'
+            echo "$message"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post to Discord
+        if: ${{ secrets.DISCORD_GITHUB_UPDATES_WEBHOOK != '' }}
+        env:
+          DISCORD_GITHUB_UPDATES_WEBHOOK: ${{ secrets.DISCORD_GITHUB_UPDATES_WEBHOOK }}
+          MESSAGE: ${{ steps.notification.outputs.message }}
+        run: |
+          payload=$(jq -nc --arg content "$MESSAGE" '{content: $content}')
+          curl --fail --silent --show-error \
+            --header 'Content-Type: application/json' \
+            --data "$payload" \
+            "$DISCORD_GITHUB_UPDATES_WEBHOOK"
