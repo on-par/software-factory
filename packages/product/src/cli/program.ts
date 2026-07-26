@@ -1,5 +1,6 @@
 // packages/product/src/cli/program.ts — `product <command>` wiring (#469).
 
+import { execSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 
 import { Command } from 'commander';
@@ -17,9 +18,23 @@ export function getProductVersion(): string {
   return createRequire(import.meta.url)('../../package.json').version;
 }
 
+/**
+ * The monorepo root, not the process's cwd — matches `factory`'s own
+ * `getRepoRoot()` (packages/cli/src/cli/index.ts). Without this, `product adr
+ * home`/`adr next` compute the wrong ADR home (or ENOENT) whenever invoked
+ * from a subdirectory, e.g. `npm run dev -w packages/product`.
+ */
+function resolveRepoRoot(): string {
+  try {
+    return execSync('git rev-parse --show-toplevel', { encoding: 'utf-8' }).trim();
+  } catch {
+    return process.cwd();
+  }
+}
+
 export function defaultDeps(): ProgramDeps {
   return {
-    repoRoot: process.cwd(),
+    repoRoot: resolveRepoRoot(),
     listAdrs: (dir) => listAdrFilenames(dir),
     write: (line) => console.log(line),
   };

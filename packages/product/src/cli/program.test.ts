@@ -1,10 +1,17 @@
 // packages/product/src/cli/program.test.ts (#469).
 
+import type * as NodeChildProcess from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { buildProgram, defaultDeps, getProductVersion, main, type ProgramDeps } from './program.js';
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof NodeChildProcess>();
+  return { ...actual, execSync: vi.fn(actual.execSync) };
+});
 
 function stubDeps(overrides: Partial<ProgramDeps> = {}): ProgramDeps {
   return {
@@ -48,14 +55,14 @@ describe('main', () => {
 });
 
 describe('defaultDeps', () => {
-  const originalCwd = process.cwd();
+  const gitRepoRoot = execSync('git rev-parse --show-toplevel', { encoding: 'utf-8' }).trim();
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it('reads the repo root from process.cwd()', () => {
-    expect(defaultDeps().repoRoot).toBe(originalCwd);
+  it('reads the repo root from git, not process.cwd()', () => {
+    expect(defaultDeps().repoRoot).toBe(gitRepoRoot);
   });
 
   it('writes via console.log', () => {
@@ -65,7 +72,14 @@ describe('defaultDeps', () => {
   });
 
   it('lists ADRs from the real docs/adr/ directory', () => {
-    const result = defaultDeps().listAdrs(resolve(originalCwd, 'docs/adr'));
+    const result = defaultDeps().listAdrs(resolve(gitRepoRoot, 'docs/adr'));
     expect(Array.isArray(result)).toBe(true);
+  });
+
+  it('falls back to process.cwd() when git rev-parse fails', () => {
+    vi.mocked(execSync).mockImplementationOnce(() => {
+      throw new Error('not a git repository');
+    });
+    expect(defaultDeps().repoRoot).toBe(process.cwd());
   });
 });
