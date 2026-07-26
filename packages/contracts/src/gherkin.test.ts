@@ -10,6 +10,7 @@ describe('AcceptanceCriterionSchema', () => {
       given: ['a registered account'],
       when: ['they submit valid credentials'],
       then: ['they land on the dashboard'],
+      tracesTo: ['INT-PROBLEM-01'],
     };
 
     const raw = serialize(AcceptanceCriterionSchema, fixture);
@@ -22,6 +23,7 @@ describe('AcceptanceCriterionSchema', () => {
       given: [],
       when: ['the process starts'],
       then: ['it listens on the configured port'],
+      tracesTo: [],
     };
 
     const raw = serialize(AcceptanceCriterionSchema, fixture);
@@ -30,6 +32,27 @@ describe('AcceptanceCriterionSchema', () => {
 
   it('rejects an empty then array', () => {
     const invalid = { name: 'Broken', given: [], when: ['something happens'], then: [] };
+    expect(() => AcceptanceCriterionSchema.parse(invalid)).toThrow();
+  });
+
+  it('defaults tracesTo to [] when omitted', () => {
+    const parsed = AcceptanceCriterionSchema.parse({
+      name: 'App boots',
+      given: [],
+      when: ['the process starts'],
+      then: ['it listens on the configured port'],
+    });
+    expect(parsed.tracesTo).toEqual([]);
+  });
+
+  it('rejects a malformed intent statement ID in tracesTo', () => {
+    const invalid = {
+      name: 'App boots',
+      given: [],
+      when: ['the process starts'],
+      then: ['it listens on the configured port'],
+      tracesTo: ['nope'],
+    };
     expect(() => AcceptanceCriterionSchema.parse(invalid)).toThrow();
   });
 });

@@ -188,6 +188,7 @@ describe('renderStoryBody', () => {
         given: ['the validated Epic #10'],
         when: ['the slice is implemented'],
         then: ['it passes', 'it merges'],
+        tracesTo: [],
       },
     ],
   };
@@ -321,7 +322,7 @@ describe('advanceDraftEpic — promote', () => {
     role: 'product owner',
     want: 'a minimal slice',
     soThat: 'we validate the idea',
-    scenarios: [{ name: 'Ships', given: ['a validated Epic'], when: ['built'], then: ['it merges'] }],
+    scenarios: [{ name: 'Ships', given: ['a validated Epic'], when: ['built'], then: ['it merges'], tracesTo: [] }],
   };
 
   it('creates stories, ensures the ready label, and updates the Epic body', async () => {

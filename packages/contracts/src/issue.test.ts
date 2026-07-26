@@ -15,6 +15,7 @@ const acceptanceCriterion = {
   given: ['a frozen spec'],
   when: ['the build phase runs'],
   then: ['CI is green'],
+  tracesTo: [],
 };
 
 const verificationStep = { command: 'bash scripts/verify.sh', passWhen: 'all checks green' };

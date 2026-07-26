@@ -22,7 +22,7 @@ describe('deserialize', () => {
 
 describe('tryDeserialize', () => {
   it('returns ok: true with the parsed value on success', () => {
-    const fixture = { name: 'Sign in', given: [], when: ['a click'], then: ['a redirect'] };
+    const fixture = { name: 'Sign in', given: [], when: ['a click'], then: ['a redirect'], tracesTo: [] };
     const result = tryDeserialize(AcceptanceCriterionSchema, JSON.stringify(fixture));
     expect(result).toEqual({ ok: true, value: fixture });
   });
