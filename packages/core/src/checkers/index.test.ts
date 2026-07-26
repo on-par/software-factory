@@ -372,7 +372,7 @@ describe('lintChecker', () => {
     const result = await lintChecker(makeContext(worktree));
 
     expect(result.result).toBe('PASS');
-    expect(result.details).toContain('eslint: OK');
+    expect(result.details).toContain('lint: OK');
   });
 
   it('fails when npm run lint exits unsuccessfully', { timeout: 30000 }, async () => {
@@ -383,7 +383,7 @@ describe('lintChecker', () => {
     const result = await lintChecker(makeContext(worktree));
 
     expect(result.result).toBe('FAIL');
-    expect(result.details).toContain('eslint failed');
+    expect(result.details).toContain('lint failed');
   });
 
   it('passes tsc --noEmit against a type-correct tsconfig project', { timeout: 60000 }, async () => {

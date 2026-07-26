@@ -29,7 +29,7 @@ export function withGitLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
   );
 
   tails.set(key, tail);
-  tail.finally(() => {
+  void tail.finally(() => {
     if (tails.get(key) === tail) tails.delete(key);
   });
 

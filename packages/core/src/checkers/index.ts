@@ -155,10 +155,10 @@ export const lintChecker: CheckerFn = async (ctx) => {
       onPgid: ctx.onPgid,
     });
     if (r.ok) {
-      details.push('eslint: OK');
+      details.push('lint: OK');
     } else {
       result = 'FAIL';
-      details.push(`eslint failed: ${describeCommandFailure(r).slice(0, 300)}`);
+      details.push(`lint failed: ${describeCommandFailure(r).slice(0, 300)}`);
     }
   }
 
