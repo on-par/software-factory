@@ -51,9 +51,17 @@ function encodeContentsPath(path: string): string {
     .join('/');
 }
 
+function stripTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url[end - 1] === '/') {
+    end -= 1;
+  }
+  return url.slice(0, end);
+}
+
 export function createGitHubContentsReader(options: GitHubContentsReaderOptions): RepoContextReader {
   const { owner, repo, ref, token, onDegrade } = options;
-  const baseUrl = (options.baseUrl ?? DEFAULT_GITHUB_API_BASE_URL).replace(/\/+$/, '');
+  const baseUrl = stripTrailingSlashes(options.baseUrl ?? DEFAULT_GITHUB_API_BASE_URL);
   const maxFileBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
 
   const globalFetch = (globalThis as { fetch?: FetchLike }).fetch;
