@@ -1,4 +1,4 @@
-// packages/product/src/index.test.ts — public surface (#469).
+// packages/product/src/index.test.ts — public surface (#469, #470).
 
 import { describe, expect, it } from 'vitest';
 
@@ -15,5 +15,18 @@ describe('index', () => {
     expect(typeof api.defaultDeps).toBe('function');
     expect(typeof api.getProductVersion).toBe('function');
     expect(typeof api.main).toBe('function');
+  });
+
+  it('re-exports the interviewer surface', () => {
+    expect(typeof api.runInterview).toBe('function');
+    expect(typeof api.detectCoverage).toBe('function');
+    expect(typeof api.isSubstantiveAnswer).toBe('function');
+    expect(typeof api.formatQuestion).toBe('function');
+    expect(typeof api.renderInterviewSummary).toBe('function');
+    expect(typeof api.probeFor).toBe('function');
+    expect(typeof api.createStdinPrompter).toBe('function');
+    expect(Array.isArray(api.DIMENSION_PROBES)).toBe(true);
+    expect(Array.isArray(api.INTENT_DIMENSIONS)).toBe(true);
+    expect(typeof api.DEFAULT_QUESTION_BUDGET).toBe('number');
   });
 });
