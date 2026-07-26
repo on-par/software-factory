@@ -7,19 +7,19 @@ function formatIssues(error: z.ZodError): string[] {
 }
 
 /** Validate then JSON-encode. Throws ZodError when `value` does not satisfy `schema`. */
-export function serialize<T>(schema: z.ZodType<T, z.ZodTypeDef, unknown>, value: T): string {
+export function serialize<T>(schema: z.ZodType<T>, value: T): string {
   return JSON.stringify(schema.parse(value));
 }
 
 /** JSON-decode then validate. Throws SyntaxError or ZodError. */
-export function deserialize<T>(schema: z.ZodType<T, z.ZodTypeDef, unknown>, raw: string): T {
+export function deserialize<T>(schema: z.ZodType<T>, raw: string): T {
   return schema.parse(JSON.parse(raw));
 }
 
 export type DeserializeResult<T> = { ok: true; value: T } | { ok: false; errors: string[] };
 
 /** Non-throwing `deserialize`. Malformed JSON reports `['json: <message>']`. */
-export function tryDeserialize<T>(schema: z.ZodType<T, z.ZodTypeDef, unknown>, raw: string): DeserializeResult<T> {
+export function tryDeserialize<T>(schema: z.ZodType<T>, raw: string): DeserializeResult<T> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
