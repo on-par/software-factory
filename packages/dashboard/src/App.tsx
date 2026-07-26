@@ -5,7 +5,7 @@ export function App() {
     <div className="flex h-screen bg-canvas font-sans text-ink-900">
       <aside className="w-30 shrink-0 overflow-y-auto bg-navy-950 text-navy-200 flex flex-col">
         <nav aria-label="Primary" className="flex flex-col gap-1 p-2">
-          <h1 className="px-2 py-2 leading-tight tracking-tight">
+          <h1 aria-label="On Par Factory" className="px-2 py-2 leading-tight tracking-tight">
             <span className="block text-sm font-semibold text-white">On Par</span>
             <span className="block text-xs font-medium text-navy-400">Factory</span>
           </h1>
