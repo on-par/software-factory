@@ -81,11 +81,6 @@ export function buildProgram(deps: ProgramDeps = defaultDeps()): Command {
     .description('Product app — turn a brain-dump into engineering-ready issues (proposer: read-only)')
     .version(getProductVersion());
 
-  // `decompose`'s required --approve rejects via a thrown CommanderError rather than
-  // process.exit — matches every other command's error handling (main()'s caller decides
-  // whether to exit) and keeps the missing-flag path testable.
-  program.exitOverride();
-
   const adr = program.command('adr').description('Architecture Decision Record helpers');
 
   adr
@@ -174,6 +169,11 @@ export function buildProgram(deps: ProgramDeps = defaultDeps()): Command {
     .option('-f, --file <path>', 'read the brain-dump from a file')
     .option('-b, --budget <n>', 'max clarifying questions', String(DEFAULT_QUESTION_BUDGET))
     .requiredOption('-a, --approve <approver>', 'approve the intent doc as <approver> (human gate #1)')
+    // Scoped to this command only: a missing --approve throws a catchable CommanderError
+    // instead of calling process.exit, matching every other command's error handling
+    // (main()'s caller decides whether to exit) without changing --help/--version
+    // behavior for the rest of the CLI.
+    .exitOverride()
     .action(async (opts: { text?: string; file?: string; budget: string; approve: string }) => {
       const brainDump = await resolveBrainDump(opts, deps, 'decompose');
       const questionBudget = parseBudget(opts.budget, 'decompose');
