@@ -20,6 +20,8 @@ import { failoversFrom } from '../router/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
 import type { Constitution, DesignArtifact, FailoverReason, ReadinessInfo } from '../types/index.js';
 import { codexDisabled, escalationLine, isEscalation } from '../utils/index.js';
+import { GITHUB_ISSUE_SOURCE, type GithubIssueParams } from '../work/github-issue.js';
+import { createDefaultWorkSourceRegistry, type WorkRequestSourceKind, type WorkSourceRegistry } from '../work/index.js';
 
 export interface PlanResult {
   ok: boolean;
@@ -166,6 +168,10 @@ export async function planPhase(opts: {
   drainSteering?: () => ConsumedSteering;
   maxReplans?: number;
   codexDisabled?: boolean;
+  /** Input source to resolve before PLAN. Defaults to this run's GitHub issue. */
+  workSource?: { kind: WorkRequestSourceKind; params: unknown };
+  /** Source registry. Defaults to the built-in registry (GitHub issue adapter only). */
+  workSources?: WorkSourceRegistry;
 }): Promise<PlanResult> {
   const {
     issue,
@@ -185,14 +191,21 @@ export async function planPhase(opts: {
   const maxReplans = opts.maxReplans ?? 3;
   const isCodexDisabled = opts.codexDisabled ?? codexDisabled();
 
-  // Get issue details
-  const [owner, repoName] = repo.split('/');
-  const { data: issueData } = await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issue });
-  const issueTitle = issueData.title;
-  const issueBody = issueData.body ?? '';
+  const workSources = opts.workSources ?? createDefaultWorkSourceRegistry({ octokit });
+  const source = opts.workSource ?? {
+    kind: GITHUB_ISSUE_SOURCE,
+    params: { repo, issue } satisfies GithubIssueParams,
+  };
+  const work = await workSources.resolve(source.kind, source.params);
+  const issueTitle = work.title;
+  const issueBody = work.brief;
 
   const constitutionCtx = buildConstitutionContext(constitution);
 
+  log(
+    'work_request',
+    `resolved work request ${work.id} (${work.kind}, ${work.acceptanceCriteria.length} acceptance criteria)`,
+  );
   log('plan', `Starting plan phase`);
 
   const readiness = scoreIssueReadiness({ title: issueTitle, body: issueBody });

@@ -65,6 +65,14 @@ const PUBLIC_API_KEYS = [
   'parseQueue',
   'readQueue',
   'validateQueue',
+  // Work requests
+  'createDefaultWorkSourceRegistry',
+  'createGithubIssueAdapter',
+  'createOctokitIssueClient',
+  'GITHUB_ISSUE_SOURCE',
+  'InvalidWorkRequestInputError',
+  'UnsupportedWorkSourceError',
+  'WorkSourceRegistry',
   // Events
   'followEvents',
   'readEvents',

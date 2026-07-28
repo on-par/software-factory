@@ -26,7 +26,8 @@ const CHECKBOX_RE = /^\s*-\s*\[[ xX]\]/m;
 const FENCE_RE = /^\s*(`{3,}|~{3,})/;
 const EMPTY_PLACEHOLDERS = new Set(['_no response_', 'none']);
 
-function extractSections(body: string): Map<string, string> {
+/** Markdown H1–H6 sections of an issue body, keyed by lowercased heading. */
+export function extractIssueSections(body: string): Map<string, string> {
   const sections = new Map<string, string>();
   const lines = body.split('\n');
 
@@ -87,7 +88,7 @@ function requiredFieldsFor(template: ReadinessTemplate): readonly string[] {
 
 export function scoreIssueReadiness(input: { title: string; body: string }): ReadinessInfo {
   const body = input.body ?? '';
-  const sections = extractSections(body);
+  const sections = extractIssueSections(body);
   const template = detectTemplate(input.title ?? '', sections);
   const requiredFields = requiredFieldsFor(template);
 
