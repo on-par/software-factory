@@ -199,13 +199,13 @@ export async function planPhase(opts: {
   const work = await workSources.resolve(source.kind, source.params);
   const issueTitle = work.title;
   const issueBody = work.brief;
-
-  const constitutionCtx = buildConstitutionContext(constitution);
-
   log(
     'work_request',
     `resolved work request ${work.id} (${work.kind}, ${work.acceptanceCriteria.length} acceptance criteria)`,
   );
+
+  const constitutionCtx = buildConstitutionContext(constitution);
+
   log('plan', `Starting plan phase`);
 
   const readiness = scoreIssueReadiness({ title: issueTitle, body: issueBody });
