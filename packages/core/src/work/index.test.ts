@@ -67,6 +67,15 @@ describe('WorkSourceRegistry', () => {
   });
 });
 
+const VALID_BRIEF = `# Add a widget
+
+Please add a widget that does the thing.
+
+## Acceptance criteria
+
+- the widget exists
+`;
+
 describe('createDefaultWorkSourceRegistry', () => {
   it('registers the github-issue adapter and resolves through it', async () => {
     const octokit: any = {
@@ -81,6 +90,26 @@ describe('createDefaultWorkSourceRegistry', () => {
     expect(registry.has('github-issue')).toBe(true);
     const request = await registry.resolve('github-issue', { repo: 'on-par/software-factory', issue: 1 });
     expect(request.title).toBe('A title');
+  });
+
+  it('also registers the local-brief adapter', async () => {
+    const octokit: any = { rest: { issues: {} } };
+    const registry = createDefaultWorkSourceRegistry({ octokit });
+
+    expect(registry.has('local-brief')).toBe(true);
+    expect(registry.kinds()).toEqual(['github-issue', 'local-brief']);
+  });
+
+  it('resolves a local brief through an injected briefReader', async () => {
+    const octokit: any = { rest: { issues: {} } };
+    const registry = createDefaultWorkSourceRegistry({
+      octokit,
+      briefReader: { readFile: async () => VALID_BRIEF },
+    });
+
+    const request = await registry.resolve('local-brief', { path: 'brief.md' });
+    expect(request.title).toBe('Add a widget');
+    expect(request.kind).toBe('local-brief');
   });
 });
 

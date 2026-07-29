@@ -2,7 +2,7 @@
 
 import type { Octokit } from '@octokit/rest';
 
-import { extractIssueSections } from '../readiness/index.js';
+import { extractAcceptanceCriteria } from './acceptance.js';
 import { InvalidWorkRequestInputError, type WorkRequest, type WorkSourceAdapter } from './index.js';
 
 export const GITHUB_ISSUE_SOURCE = 'github-issue';
@@ -38,20 +38,6 @@ function isGithubIssueParams(params: unknown): params is GithubIssueParams {
   if (slashIndex <= 0 || slashIndex === repo.length - 1) return false;
   if (typeof issue !== 'number' || !Number.isInteger(issue) || issue <= 0) return false;
   return true;
-}
-
-function extractAcceptanceCriteria(body: string): string[] {
-  const section = extractIssueSections(body).get('acceptance criteria');
-  if (!section || section.trim().length === 0) return [];
-
-  const fenceRe = /^\s*(?:`{3,}|~{3,})/;
-  const markerRe = /^\s*(?:[-*]\s*(?:\[[ xX]\]\s*)?)/;
-
-  return section
-    .split('\n')
-    .filter((line) => !fenceRe.test(line))
-    .map((line) => line.replace(markerRe, '').trim())
-    .filter((line) => line.length > 0);
 }
 
 export function createGithubIssueAdapter(client: WorkIssueClient): WorkSourceAdapter {

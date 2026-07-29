@@ -3,9 +3,10 @@
 import type { Octokit } from '@octokit/rest';
 
 import { createGithubIssueAdapter, createOctokitIssueClient } from './github-issue.js';
+import { type BriefFileReader, createFsBriefReader, createLocalBriefAdapter } from './local-brief.js';
 
 /** Registered input sources. Open-ended by design — adapters register by string key. */
-export type WorkRequestSourceKind = 'github-issue' | (string & {});
+export type WorkRequestSourceKind = 'github-issue' | 'local-brief' | (string & {});
 
 /** Where the request came from, for traceability back to the native artifact. */
 export interface WorkRequestReference {
@@ -88,7 +89,12 @@ export class WorkSourceRegistry {
   }
 }
 
-/** Registry with today's only input source — the GitHub issue adapter — registered. */
-export function createDefaultWorkSourceRegistry(deps: { octokit: Octokit }): WorkSourceRegistry {
-  return new WorkSourceRegistry().register(createGithubIssueAdapter(createOctokitIssueClient(deps.octokit)));
+/** Registry with the built-in input sources — GitHub issue + local Markdown brief — registered. */
+export function createDefaultWorkSourceRegistry(deps: {
+  octokit: Octokit;
+  briefReader?: BriefFileReader;
+}): WorkSourceRegistry {
+  return new WorkSourceRegistry()
+    .register(createGithubIssueAdapter(createOctokitIssueClient(deps.octokit)))
+    .register(createLocalBriefAdapter(deps.briefReader ?? createFsBriefReader()));
 }

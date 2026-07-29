@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1623,6 +1624,162 @@ bash scripts/verify.sh
         ].join('\n'),
       );
       const res = await runMain('run-issue', '5');
+      expect(res.exited).toBe(false);
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('human-restarted');
+      expect(events).toContain('manual retry of a previously parked/failed run');
+    });
+  });
+
+  describe('run-brief (one-shot)', () => {
+    const VALID_BRIEF = `# Add a widget
+
+Please add a widget that does the thing.
+
+## Acceptance criteria
+
+- the widget exists
+`;
+
+    function writeBrief(content = VALID_BRIEF): string {
+      const briefPath = join(h.repoRoot, 'brief.md');
+      writeFileSync(briefPath, content);
+      return briefPath;
+    }
+
+    function readEventLines(): any[] {
+      return readFileSync(paths().events, 'utf-8')
+        .split('\n')
+        .filter((l) => l.trim().length > 0)
+        .map((l) => JSON.parse(l));
+    }
+
+    it('resolves the brief through the canonical work-request seam and ships it through all phases', async () => {
+      const core = await import('@on-par/factory-core');
+      const briefPath = writeBrief();
+      const digest = createHash('sha256').update(VALID_BRIEF).digest('hex');
+
+      const res = await runMain('run-brief', briefPath);
+
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('PR #99 ready for review');
+      expect(logged()).toContain('local-brief:');
+      expect(vi.mocked(core.planPhase)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(core.buildPhase)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(core.checkPhase)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(core.shipPhase)).toHaveBeenCalledTimes(1);
+      expect(h.octokit.rest.issues.get).not.toHaveBeenCalled();
+
+      const planArgs = vi.mocked(core.planPhase).mock.calls.at(-1)?.[0] as any;
+      expect(planArgs.workSource).toEqual({ kind: 'local-brief', params: { path: briefPath } });
+
+      const shipArgs = vi.mocked(core.shipPhase).mock.calls.at(-1)?.[0] as any;
+      expect(shipArgs.work).toMatchObject({ kind: 'local-brief' });
+
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('inline local brief');
+      expect(events).toContain(digest);
+
+      const workSourceEvent = readEventLines().find((e) => e.type === 'work-source');
+      expect(workSourceEvent.issue).toMatch(/^9\d{6}$/);
+    });
+
+    it('leaves the queue file untouched', async () => {
+      writeFileSync(paths().queue, 'app 7\ndocs 9\n');
+      const briefPath = writeBrief();
+
+      const res = await runMain('run-brief', briefPath);
+
+      expect(res.exited).toBe(false);
+      expect(readFileSync(paths().queue, 'utf-8')).toBe('app 7\ndocs 9\n');
+    });
+
+    it('fails pre-flight with exit 2 on a malformed brief — no worktree, no BUILD', async () => {
+      const core = await import('@on-par/factory-core');
+      const { setupWorktree } = await import('@on-par/factory-core/internal');
+      const briefPath = writeBrief('# Add a widget\n\nPlease add a widget that does the thing.\n');
+
+      const res = await runMain('run-brief', briefPath);
+
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('no acceptance criteria');
+      expect(vi.mocked(setupWorktree)).not.toHaveBeenCalled();
+      expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
+      expect(vi.mocked(core.buildPhase)).not.toHaveBeenCalled();
+    });
+
+    it('fails pre-flight with exit 2 when the brief file is missing — no worktree, no PR', async () => {
+      const core = await import('@on-par/factory-core');
+      const { setupWorktree } = await import('@on-par/factory-core/internal');
+      const briefPath = join(h.repoRoot, 'does-not-exist.md');
+
+      const res = await runMain('run-brief', briefPath);
+
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('could not resolve brief');
+      expect(errored()).toContain('no worktree or PR was created');
+      expect(vi.mocked(setupWorktree)).not.toHaveBeenCalled();
+      expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
+    });
+
+    it('exits 2 with the missing-claude message and never invokes the phase mocks when claude is unavailable', async () => {
+      h.claudeAvailable = false;
+      const core = await import('@on-par/factory-core');
+      const briefPath = writeBrief();
+
+      const res = await runMain('run-brief', briefPath);
+
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('claude CLI not found — install Claude Code first:');
+      expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
+      expect(vi.mocked(core.buildPhase)).not.toHaveBeenCalled();
+      expect(vi.mocked(core.checkPhase)).not.toHaveBeenCalled();
+      expect(vi.mocked(core.shipPhase)).not.toHaveBeenCalled();
+    });
+
+    it('exits 2 with the not-initialized message when .factory/ is missing', async () => {
+      rmSync(paths().state, { recursive: true, force: true });
+      const briefPath = writeBrief();
+
+      const res = await runMain('run-brief', briefPath);
+
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('factory not initialized — run `factory init` first');
+    });
+
+    it('maps a pipeline failure to exit 1, not a pre-flight error', async () => {
+      h.checkResult = {
+        passed: false,
+        summary: { results: [{ checker: 'lint', result: 'FAIL', details: 'bad' }], failures: 1 },
+        reworkRounds: 2,
+      };
+      const briefPath = writeBrief();
+
+      const res = await runMain('run-brief', briefPath);
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('Run failed for brief');
+    });
+
+    it('logs a human-restarted event when a prior run for the digest-derived run number was parked', async () => {
+      const briefPath = writeBrief();
+      const digest = createHash('sha256').update(VALID_BRIEF).digest('hex');
+      const runNum = 9_000_000 + (Number.parseInt(digest.slice(0, 8), 16) % 1_000_000);
+      writeFileSync(
+        paths().events,
+        [
+          JSON.stringify({
+            ts: '2026-07-01T00:00:00.000Z',
+            type: 'fail',
+            issue: String(runNum),
+            msg: 'checker failures',
+          }),
+          '',
+        ].join('\n'),
+      );
+
+      const res = await runMain('run-brief', briefPath);
+
       expect(res.exited).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('human-restarted');
