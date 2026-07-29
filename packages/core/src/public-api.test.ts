@@ -137,10 +137,15 @@ const PUBLIC_API_KEYS = [
   'queueSteeringMessage',
   'steeringFileFor',
   // Reports
+  'BENCHMARK_MANIFEST_VERSION',
+  'buildBenchmarkManifest',
   'gatherEvidencePack',
+  'InvalidArtifactsDirError',
   'readIssueEvents',
   'renderEvidencePack',
   'renderLocalRunReport',
+  'resolveArtifactsDir',
+  'writeBenchmarkArtifacts',
   'writeLocalRunReport',
   // KPIs
   'appendKpiHistoryLine',

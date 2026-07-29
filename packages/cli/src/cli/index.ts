@@ -9,8 +9,11 @@ import { promisify } from 'node:util';
 
 import { Octokit } from '@octokit/rest';
 import type {
+  BenchmarkRunFailure,
+  CheckSummary,
   EnvironmentProxySettings,
   FailoverReason,
+  FailurePhase,
   GithubIssueParams,
   HealthKpis,
   IngestSettings,
@@ -56,6 +59,7 @@ import {
   getFactoryPaths,
   GITHUB_ISSUE_SOURCE,
   hasUnresolvedPark,
+  InvalidArtifactsDirError,
   InvalidWorkRequestInputError,
   InvalidWorkspaceError,
   inspectPortLeases,
@@ -92,6 +96,7 @@ import {
   resolveEffectiveModelPins,
   resolveEnvironmentPorts,
   resolveEnvironmentProxy,
+  resolveArtifactsDir,
   resolveIngestConfig,
   resolveLocalOnlyPolicy,
   resolvePlanApproval,
@@ -105,6 +110,7 @@ import {
   shipPhase,
   validateQueue,
   watchUsage,
+  writeBenchmarkArtifacts,
   writeLocalRunReport,
   writeProxyState,
 } from '@on-par/factory-core';
@@ -847,6 +853,8 @@ export async function shipIssue(
     /** Local-only policy (#508): run in this caller-provided workspace, skip
      *  worktree creation, disable publishing, and skip the SHIP phase. */
     localOnly?: LocalOnlyPolicy;
+    /** Benchmark artifact directory (#509) — only set for local-only runs. */
+    artifactsDir?: string;
   },
 ) {
   const repoRoot = ctx?.repoRoot ?? (await getRepoRoot());
@@ -876,6 +884,9 @@ export async function shipIssue(
   const specPath = resolve(paths.plans, `issue-${issueNum}.md`);
   const runStartedAt = new Date().toISOString();
   let route: 'codex' | 'claude' | undefined;
+  let failurePhase: FailurePhase = 'plan';
+  let checkSummary: CheckSummary | undefined;
+  let reworkRounds: number | undefined;
 
   const lane = ctx?.lane;
   const mkLog =
@@ -1085,6 +1096,7 @@ export async function shipIssue(
       breakerBlocked = gate.codexBlocked;
     }
 
+    failurePhase = 'build';
     const build = await buildPhase({
       issue: issueNum,
       repo: ghRepo,
@@ -1126,6 +1138,7 @@ export async function shipIssue(
     }
 
     // CHECK
+    failurePhase = 'check';
     const check = await checkPhase({
       issue: issueNum,
       worktree,
@@ -1142,6 +1155,8 @@ export async function shipIssue(
       appBaseUrl,
       onPgid,
     });
+    checkSummary = check.summary;
+    reworkRounds = check.reworkRounds;
     for (const s of check.summary.results.filter((r) => r.result === 'SKIP')) {
       console.error(chalk.yellow(`  SKIP: ${s.checker} — ${s.details}`));
     }
@@ -1160,7 +1175,7 @@ export async function shipIssue(
 
     if (ctx?.localOnly) {
       log('local-only-complete', `local-only run complete in ${worktree} — publishing disabled, no PR created`);
-      await maybeWriteLocalRunReport({
+      const reportPath = await maybeWriteLocalRunReport({
         issueNum,
         paths,
         startedAt: runStartedAt,
@@ -1170,11 +1185,26 @@ export async function shipIssue(
         specPath,
         route,
       });
+      await maybeWriteBenchmarkArtifacts({
+        issueNum,
+        paths,
+        ctx,
+        startedAt: runStartedAt,
+        outcome: 'ready',
+        branch,
+        specPath,
+        route,
+        checkSummary,
+        reworkRounds,
+        reportPath,
+        log,
+      });
       console.log(chalk.green(`✅ Local-only run complete in ${worktree} (no PR — publishing disabled)`));
       return branch;
     }
 
     // SHIP
+    failurePhase = 'ship';
     const approvalGate = opts.interactive
       ? createFileApprovalGate({ dir: paths.approvals, timeoutMs: timeouts.approval * 1000 })
       : undefined;
@@ -1228,7 +1258,7 @@ export async function shipIssue(
     return branch;
   } catch (err: any) {
     for (const e of parkEvents(err)) log(e.type, e.msg);
-    await maybeWriteLocalRunReport({
+    const reportPath = await maybeWriteLocalRunReport({
       issueNum,
       paths,
       startedAt: runStartedAt,
@@ -1238,6 +1268,21 @@ export async function shipIssue(
       specPath,
       route,
       reason: err.message,
+    });
+    await maybeWriteBenchmarkArtifacts({
+      issueNum,
+      paths,
+      ctx,
+      startedAt: runStartedAt,
+      outcome: parkReasonFor(err) === 'escalate' ? 'escalated' : 'failed',
+      branch,
+      specPath,
+      route,
+      checkSummary,
+      reworkRounds,
+      failure: { phase: failurePhase, reason: parkReasonFor(err), message: err.message },
+      reportPath,
+      log,
     });
     throw err;
   } finally {
@@ -1266,8 +1311,8 @@ async function maybeWriteLocalRunReport(opts: {
   specPath?: string;
   route?: string;
   reason?: string;
-}) {
-  if (process.env.FACTORY_LOCAL_ONLY !== '1') return;
+}): Promise<string | undefined> {
+  if (process.env.FACTORY_LOCAL_ONLY !== '1') return undefined;
   const report = await writeLocalRunReport({
     issue: opts.issueNum,
     eventsFile: opts.paths.events,
@@ -1282,6 +1327,49 @@ async function maybeWriteLocalRunReport(opts: {
     reason: opts.reason,
   });
   console.log(chalk.cyan(`local-only report: ${report.path}`));
+  return report.path;
+}
+
+async function maybeWriteBenchmarkArtifacts(opts: {
+  issueNum: number;
+  paths: ReturnType<typeof getFactoryPaths>;
+  ctx?: { localOnly?: LocalOnlyPolicy; artifactsDir?: string; workRequest?: WorkRequest };
+  startedAt: string;
+  outcome: 'ready' | 'failed' | 'escalated';
+  branch?: string;
+  specPath?: string;
+  route?: string;
+  checkSummary?: CheckSummary;
+  reworkRounds?: number;
+  failure?: BenchmarkRunFailure;
+  reportPath?: string;
+  log: (type: string, msg: string) => void;
+}): Promise<void> {
+  if (!opts.ctx?.localOnly || !opts.ctx.artifactsDir) return;
+  try {
+    const { manifestPath } = await writeBenchmarkArtifacts({
+      issue: opts.issueNum,
+      artifactsDir: opts.ctx.artifactsDir,
+      eventsFile: opts.paths.events,
+      costsFile: opts.paths.costs,
+      startedAt: opts.startedAt,
+      outcome: opts.outcome,
+      workspace: opts.ctx.localOnly.workspace,
+      branch: opts.branch,
+      specPath: opts.specPath,
+      route: opts.route,
+      request: opts.ctx.workRequest,
+      checkSummary: opts.checkSummary,
+      reworkRounds: opts.reworkRounds,
+      failure: opts.failure,
+      reportPath: opts.reportPath,
+    });
+    opts.log('benchmark-artifacts', `manifest written to ${manifestPath}`);
+    console.log(chalk.cyan(`benchmark artifacts: ${manifestPath}`));
+  } catch (err: any) {
+    // Never let artifact emission mask the run outcome.
+    opts.log('benchmark-artifacts-failed', `could not write benchmark artifacts: ${err.message}`);
+  }
 }
 
 async function cmdShip(
@@ -1368,6 +1456,7 @@ async function cmdRunBrief(
     sandbox?: boolean;
     approvePlan?: boolean;
     workspace?: string;
+    artifacts?: string;
   },
 ) {
   if (!isCommandAvailable('claude')) {
@@ -1387,6 +1476,20 @@ async function cmdRunBrief(
       if (err instanceof InvalidWorkspaceError) throw new CliExitError(`factory: ${err.message}`, 2);
       throw err;
     }
+  }
+
+  let artifactsDir: string | undefined;
+  if (opts.artifacts !== undefined) {
+    if (!localOnly) {
+      throw new CliExitError('factory: --artifacts requires --workspace (local-only runs only)', 2);
+    }
+    try {
+      artifactsDir = resolveArtifactsDir(opts.artifacts);
+    } catch (err) {
+      if (err instanceof InvalidArtifactsDirError) throw new CliExitError(`factory: ${err.message}`, 2);
+      throw err;
+    }
+    console.log(chalk.cyan(`local-only: benchmark artifacts will be written to ${artifactsDir}`));
   }
 
   // Local-only runs never touch GitHub — no remote required, no mutation possible.
@@ -1435,6 +1538,7 @@ async function cmdRunBrief(
       workRequest: work,
       workSource: { kind: LOCAL_BRIEF_SOURCE, params: { path: briefPath } satisfies LocalBriefParams },
       localOnly,
+      artifactsDir,
     });
   } catch (err: any) {
     throw new CliExitError(`Run failed for brief ${briefPath}: ${err.message}`, 1);
@@ -2900,6 +3004,10 @@ export async function main() {
     .option(
       '--workspace <dir>',
       'Local-only: run PLAN/BUILD/CHECK in this caller-provided git workspace and disable PR creation, merging, queue polling, and GitHub mutations',
+    )
+    .option(
+      '--artifacts <dir>',
+      'Local-only: write a versioned benchmark artifact manifest (manifest.json, request.json, events.ndjson, diff.patch) to this directory; requires --workspace',
     )
     .action(async (file, opts) => {
       await cmdRunBrief(file, opts);

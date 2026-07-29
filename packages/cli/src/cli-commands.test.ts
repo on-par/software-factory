@@ -1892,6 +1892,111 @@ Please add a widget that does the thing.
         expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
       });
     });
+
+    describe('--artifacts (benchmark manifest)', () => {
+      const artifactsDirs: string[] = [];
+
+      function writeArtifactsDir(): string {
+        const dir = mkdtempSync(join(tmpdir(), 'factory-artifacts-'));
+        artifactsDirs.push(dir);
+        return dir;
+      }
+
+      afterEach(() => {
+        for (const dir of artifactsDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+      });
+
+      it('writes a versioned manifest plus request/events/diff artifacts on a successful run', async () => {
+        const ws = writeWorkspace();
+        const artDir = writeArtifactsDir();
+        const briefPath = writeBrief();
+
+        const res = await runMain('run-brief', briefPath, '--workspace', ws, '--artifacts', artDir);
+
+        expect(res.exited).toBe(false);
+        expect(logged()).toContain('benchmark artifacts:');
+
+        const manifestPath = join(artDir, 'manifest.json');
+        expect(existsSync(manifestPath)).toBe(true);
+        const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+        expect(manifest.manifestVersion).toBe(1);
+        expect(manifest.run.outcome).toBe('ready');
+        expect(manifest.request.kind).toBe('local-brief');
+        expect(manifest.phases.ship).toBe('skipped');
+
+        expect(existsSync(join(artDir, 'request.json'))).toBe(true);
+        expect(existsSync(join(artDir, 'events.ndjson'))).toBe(true);
+        expect(existsSync(join(artDir, 'diff.patch'))).toBe(true);
+      });
+
+      it('writes a diagnosable manifest with a typed failure when CHECK fails', async () => {
+        h.checkResult = {
+          passed: false,
+          summary: {
+            failures: 1,
+            passes: 0,
+            skips: 0,
+            total: 1,
+            results: [{ checker: 'tests', result: 'FAIL', details: 'boom' }],
+          },
+          reworkRounds: 1,
+        };
+        const ws = writeWorkspace();
+        const artDir = writeArtifactsDir();
+        const briefPath = writeBrief();
+
+        const res = await runMain('run-brief', briefPath, '--workspace', ws, '--artifacts', artDir);
+
+        expect(res).toEqual({ exited: true, code: 1 });
+        const manifestPath = join(artDir, 'manifest.json');
+        expect(existsSync(manifestPath)).toBe(true);
+        const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+        expect(manifest.run.outcome).toBe('failed');
+        expect(manifest.failure).toMatchObject({ phase: 'check', reason: 'fail' });
+        expect(manifest.artifacts.events).toBe('events.ndjson');
+      });
+
+      it('exits 2 with --artifacts requires --workspace when --workspace is absent', async () => {
+        const core = await import('@on-par/factory-core');
+        const { setupWorktree } = await import('@on-par/factory-core/internal');
+        const artDir = writeArtifactsDir();
+        const briefPath = writeBrief();
+
+        const res = await runMain('run-brief', briefPath, '--artifacts', artDir);
+
+        expect(res).toEqual({ exited: true, code: 2 });
+        expect(errored()).toContain('--artifacts requires --workspace');
+        expect(vi.mocked(setupWorktree)).not.toHaveBeenCalled();
+        expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
+      });
+
+      it('exits 2 with invalid artifacts directory when the path is a regular file', async () => {
+        const core = await import('@on-par/factory-core');
+        const ws = writeWorkspace();
+        const briefPath = writeBrief();
+        const notADir = join(h.repoRoot, 'artifacts-file');
+        writeFileSync(notADir, 'hello');
+
+        const res = await runMain('run-brief', briefPath, '--workspace', ws, '--artifacts', notADir);
+
+        expect(res).toEqual({ exited: true, code: 2 });
+        expect(errored()).toContain('invalid artifacts directory');
+        expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
+      });
+
+      it('writes no manifest for normal runs (no --artifacts)', async () => {
+        const briefPathA = writeBrief();
+        const resA = await runMain('run-brief', briefPathA);
+        expect(resA.exited).toBe(false);
+        expect(logged()).not.toContain('benchmark artifacts:');
+
+        const ws = writeWorkspace();
+        const briefPathB = writeBrief();
+        const resB = await runMain('run-brief', briefPathB, '--workspace', ws);
+        expect(resB.exited).toBe(false);
+        expect(logged()).not.toContain('benchmark artifacts:');
+      });
+    });
   });
 
   describe('doctor', () => {

@@ -174,20 +174,61 @@ async function readDiffStat(worktree?: string, run: ReportRun = exec): Promise<s
   }
 }
 
-function parseModelAttempts(
+export function parseModelAttempts(
   events: FactoryEvent[],
 ): { model: string; task: string; attempt: string; reason?: string }[] {
   const attempts: { model: string; task: string; attempt: string; reason?: string }[] = [];
   for (const event of events) {
-    const started = event.msg.match(/^Trying (.+) for (.+) \(attempt (\d+)\)$/);
+    const started = parseStartedAttempt(event.msg);
     if (started) {
-      attempts.push({ model: started[1], task: started[2], attempt: started[3] });
+      attempts.push(started);
       continue;
     }
-    const failed = event.msg.match(/^(.+) failed \((.+)\) on (.+)$/);
-    if (failed) attempts.push({ model: failed[1], task: failed[3], attempt: '?', reason: failed[2] });
+    const failed = parseFailedAttempt(event.msg);
+    if (failed) attempts.push(failed);
   }
   return attempts;
+}
+
+function parseStartedAttempt(msg: string): { model: string; task: string; attempt: string } | undefined {
+  if (!msg.startsWith('Trying ') || !msg.endsWith(')')) return undefined;
+  const attemptMarker = ' (attempt ';
+  const attemptStart = msg.lastIndexOf(attemptMarker);
+  if (attemptStart === -1) return undefined;
+  const attempt = msg.slice(attemptStart + attemptMarker.length, -1);
+  if (!isAsciiDigits(attempt)) return undefined;
+  const modelAndTask = msg.slice('Trying '.length, attemptStart);
+  const separator = modelAndTask.lastIndexOf(' for ');
+  if (separator === -1) return undefined;
+  return {
+    model: modelAndTask.slice(0, separator),
+    task: modelAndTask.slice(separator + ' for '.length),
+    attempt,
+  };
+}
+
+function isAsciiDigits(value: string): boolean {
+  if (value.length === 0) return false;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code < 48 || code > 57) return false;
+  }
+  return true;
+}
+
+function parseFailedAttempt(msg: string): { model: string; task: string; attempt: string; reason: string } | undefined {
+  const reasonStart = msg.indexOf(' failed (');
+  if (reasonStart === -1) return undefined;
+  const reasonEnd = msg.indexOf(') on ', reasonStart + ' failed ('.length);
+  if (reasonEnd === -1) return undefined;
+  const taskStart = reasonEnd + ') on '.length;
+  if (taskStart >= msg.length) return undefined;
+  return {
+    model: msg.slice(0, reasonStart),
+    reason: msg.slice(reasonStart + ' failed ('.length, reasonEnd),
+    task: msg.slice(taskStart),
+    attempt: '?',
+  };
 }
 
 function commandObservations(events: FactoryEvent[]): string {
