@@ -1066,6 +1066,7 @@ export async function shipIssue(
       drainSteering: planApprovalEnabled ? () => drainSteering(paths.steering, issueNum, worktree) : undefined,
       codexDisabled: codexOff,
       workSource: ctx?.workSource,
+      enforceReadiness: true,
     });
     route = plan.route;
     if (!plan.ok) {

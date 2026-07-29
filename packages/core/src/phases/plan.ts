@@ -14,6 +14,7 @@ import type { ApprovalGate } from '../approvals/index.js';
 import { PLAN_SPEC_PREVIEW_BYTES } from '../approvals/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { designArtifactPaths, parseDesignArtifact, renderDesignArtifact } from '../design/index.js';
+import { buildReadinessEnrichmentPrompt } from '../readiness/enrich.js';
 import { scoreIssueReadiness } from '../readiness/index.js';
 import type { ModelRouter } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
@@ -172,6 +173,8 @@ export async function planPhase(opts: {
   workSource?: { kind: WorkRequestSourceKind; params: unknown };
   /** Source registry. Defaults to the built-in registry (GitHub issue adapter only). */
   workSources?: WorkSourceRegistry;
+  /** Enrich incomplete GitHub factory-task issues before calling the boss PLAN task. */
+  enforceReadiness?: boolean;
 }): Promise<PlanResult> {
   const {
     issue,
@@ -198,7 +201,7 @@ export async function planPhase(opts: {
   };
   const work = await workSources.resolve(source.kind, source.params);
   const issueTitle = work.title;
-  const issueBody = work.brief;
+  let issueBody = work.brief;
   log(
     'work_request',
     `resolved work request ${work.id} (${work.kind}, ${work.acceptanceCriteria.length} acceptance criteria)`,
@@ -206,9 +209,61 @@ export async function planPhase(opts: {
 
   const constitutionCtx = buildConstitutionContext(constitution);
 
+  let readiness = scoreIssueReadiness({ title: issueTitle, body: issueBody });
+  if (
+    opts.enforceReadiness &&
+    source.kind === GITHUB_ISSUE_SOURCE &&
+    readiness.template === 'factory-task' &&
+    !readiness.pass
+  ) {
+    const params = source.params as GithubIssueParams;
+    const [owner, name] = params.repo.split('/');
+    log('readiness_enrichment_started', `enriching incomplete factory-task issue #${params.issue}`);
+    try {
+      const enrichment = await router.run(
+        'readiness_enrich',
+        buildReadinessEnrichmentPrompt({ title: issueTitle, body: issueBody, missing: readiness.missing }),
+        {
+          worktree,
+          timeoutSeconds: Math.min(timeoutSeconds ?? 1800, 300),
+          onLog: (msg) => log('router', msg),
+        },
+      );
+      const candidate = scoreIssueReadiness({ title: issueTitle, body: enrichment.output });
+      if (candidate.template !== 'factory-task' || !candidate.pass) {
+        const reason = `enrichment output failed readiness (${candidate.template}; missing: ${candidate.missing.join(', ') || 'none'})`;
+        log('readiness_enrichment_failed', reason);
+        return {
+          ok: false,
+          route: 'claude',
+          specPath,
+          model: enrichment.model,
+          escalate: reason,
+          designArtifact: null,
+        };
+      }
+      await octokit.rest.issues.update({ owner, repo: name, issue_number: params.issue, body: enrichment.output });
+      issueBody = enrichment.output;
+      readiness = candidate;
+      log('readiness_enrichment_succeeded', `enriched factory-task issue #${params.issue} with ${enrichment.model}`, {
+        model: enrichment.model,
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      log('readiness_enrichment_failed', `enrichment failed: ${reason}`);
+      return {
+        ok: false,
+        route: 'claude',
+        specPath,
+        model: '',
+        escalate: `readiness enrichment failed: ${reason}`,
+        designArtifact: null,
+      };
+    }
+  }
+
   log('plan', `Starting plan phase`);
 
-  const readiness = scoreIssueReadiness({ title: issueTitle, body: issueBody });
   log(
     'readiness',
     `issue readiness ${Math.round(readiness.score * 100)}% (${readiness.template})${readiness.pass ? '' : ` — missing: ${readiness.missing.join(', ')}`}`,

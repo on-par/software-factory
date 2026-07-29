@@ -47,6 +47,7 @@ const routes: RoutesConfig = {
   version: 1,
   routes: {
     plan: { tier: 'boss', description: 'stub' },
+    readiness_enrich: { tier: 'boss', description: 'stub' },
   },
 };
 
@@ -150,6 +151,194 @@ describe('buildPlanPrompt', () => {
 });
 
 describe('planPhase', () => {
+  it('enriches an incomplete GitHub factory task before a single PLAN call', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-492.md');
+    const updatedBodies: string[] = [];
+    const completeBody = `## Problem statement
+The import queue stalls.
+
+## In scope
+Repair queue processing.
+
+## Out of scope
+Changing the queue API.
+
+## Acceptance criteria
+- [ ] Queued imports complete.
+
+## Verification
+npm run test`;
+    const stub = new StubModelExecutor({
+      scripts: {
+        readiness_enrich: [{ output: completeBody }],
+        plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const costs: { task: string }[] = [];
+    router.setCostSink((entry) => costs.push(entry));
+    const readinessEvents: any[] = [];
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 'Repair import queue', body: '' } }),
+          update: async ({ body }: { body: string }) => updatedBodies.push(body),
+        },
+      },
+    };
+
+    const result = await planPhase({
+      issue: 492,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit,
+      log: (type, _msg, extra) => {
+        if (type === 'readiness') readinessEvents.push(extra);
+      },
+      enforceReadiness: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(updatedBodies).toEqual([completeBody]);
+    expect(stub.calls.map((call) => call.task)).toEqual(['readiness_enrich', 'plan']);
+    expect(costs.map((entry) => entry.task)).toEqual(['readiness_enrich', 'plan']);
+    expect(readinessEvents).toEqual([{ readiness: { template: 'factory-task', score: 1, pass: true, missing: [] } }]);
+  });
+
+  it('does not call PLAN or overwrite the issue when enrichment is invalid', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const stub = new StubModelExecutor({ scripts: { readiness_enrich: [{ output: 'not a factory task' }] } });
+    const router = new ModelRouter(models, routes, false, stub);
+    const update = async () => {
+      throw new Error('must not update');
+    };
+    const result = await planPhase({
+      issue: 492,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath: join(worktree, 'issue-492.md'),
+      router,
+      constitution: null,
+      octokit: {
+        rest: { issues: { get: async () => ({ data: { title: 'Repair import queue', body: '' } }), update } },
+      } as any,
+      log: () => {},
+      enforceReadiness: true,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(stub.calls.map((call) => call.task)).toEqual(['readiness_enrich']);
+  });
+
+  it('does not call PLAN when persisting a valid enrichment fails', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const validBody = `## Problem statement
+Queue stalls.
+## In scope
+Repair it.
+## Out of scope
+API changes.
+## Acceptance criteria
+- [ ] Queue works.
+## Verification
+npm run test`;
+    const stub = new StubModelExecutor({ scripts: { readiness_enrich: [{ output: validBody }] } });
+    const router = new ModelRouter(models, routes, false, stub);
+    const result = await planPhase({
+      issue: 492,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath: join(worktree, 'issue-492.md'),
+      router,
+      constitution: null,
+      octokit: {
+        rest: {
+          issues: {
+            get: async () => ({ data: { title: 'Repair import queue', body: '' } }),
+            update: async () => {
+              throw new Error('GitHub unavailable');
+            },
+          },
+        },
+      } as any,
+      log: () => {},
+      enforceReadiness: true,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(stub.calls.map((call) => call.task)).toEqual(['readiness_enrich']);
+  });
+
+  it('skips enrichment for an already-ready factory task', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const readyBody = `## Problem statement
+Queue stalls.
+## In scope
+Repair it.
+## Out of scope
+API changes.
+## Acceptance criteria
+- [ ] Queue works.
+## Verification
+npm run test`;
+    const stub = new StubModelExecutor({ scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] } });
+    const router = new ModelRouter(models, routes, false, stub);
+    let updates = 0;
+    const result = await planPhase({
+      issue: 492,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath: join(worktree, 'issue-492.md'),
+      router,
+      constitution: null,
+      octokit: {
+        rest: {
+          issues: {
+            get: async () => ({ data: { title: 'Repair import queue', body: readyBody } }),
+            update: async () => updates++,
+          },
+        },
+      } as any,
+      log: () => {},
+      enforceReadiness: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(stub.calls.map((call) => call.task)).toEqual(['plan']);
+    expect(updates).toBe(0);
+  });
+
+  it('stops before PLAN when the enrichment router fails', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const stub = new StubModelExecutor({ scripts: { readiness_enrich: [{ fail: 'error' }] } });
+    const router = new ModelRouter(models, routes, false, stub);
+    const events: string[] = [];
+    const result = await planPhase({
+      issue: 492,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath: join(worktree, 'issue-492.md'),
+      router,
+      constitution: null,
+      octokit: { rest: { issues: { get: async () => ({ data: { title: 'Repair import queue', body: '' } }) } } } as any,
+      log: (type) => events.push(type),
+      enforceReadiness: true,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(stub.calls.every((call) => call.task === 'readiness_enrich')).toBe(true);
+    expect(events).toContain('readiness_enrichment_failed');
+  });
+
   it('passes timeoutSeconds through to the router', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
     tempDirs.add(worktree);
@@ -1661,6 +1850,9 @@ describe('planPhase', () => {
               issuesGetCalled = true;
               return { data: { title: 'Should not be used', body: 'Should not be used.' } };
             },
+            update: async () => {
+              throw new Error('local briefs must not update GitHub');
+            },
           },
         },
       };
@@ -1686,6 +1878,7 @@ describe('planPhase', () => {
         log: () => {},
         workSources,
         workSource: { kind: 'local-brief', params: {} },
+        enforceReadiness: true,
       });
 
       expect(stub.calls[0].prompt).toContain('Local brief title');
