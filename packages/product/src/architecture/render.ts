@@ -1,6 +1,6 @@
 // packages/product/src/architecture/render.ts — ADR-conformance + design-critic report renderers (#477, #478).
 import { renderEpicArchitecture } from '../export/index.js';
-import type { CritiquedDesign } from './critic.js';
+import type { EpicDesignCritique } from './critic.js';
 import type { EpicArchitecture } from './design.js';
 
 export function renderArchitectureReport(architecture: EpicArchitecture): string[] {
@@ -22,28 +22,25 @@ export function renderArchitectureReport(architecture: EpicArchitecture): string
   return lines;
 }
 
-function criticStopReasonLine(critiqued: CritiquedDesign): string {
-  if (critiqued.stopReason === 'passed') {
+function criticStopReasonLine(critique: EpicDesignCritique): string {
+  if (critique.stopReason === 'passed') {
     return 'Stop reason: passed';
   }
-  return `Stop reason: ${critiqued.stopReason} after ${critiqued.iterations} rework iteration(s)`;
+  return `Stop reason: ${critique.stopReason} after ${critique.iterations} rework iteration(s)`;
 }
 
 /** Human-readable markdown lines for the CLI. Matches renderJudgeReport's style. */
-export function renderCriticReport(critiqued: CritiquedDesign): string[] {
-  const { verdict, failedCheckHistory } = critiqued;
+export function renderCriticReport(critique: EpicDesignCritique): string[] {
+  const { verdict, scoreHistory } = critique;
 
   const lines: string[] = [
-    '# Epic-Design Critic Report',
-    `Verdict: ${verdict.verdict}`,
-    criticStopReasonLine(critiqued),
-    `Failed-check history: ${failedCheckHistory.join(' → ')}`,
+    '# Epic-Design Critique',
+    `Verdict: ${verdict.verdict} — ${verdict.score}/100`,
+    criticStopReasonLine(critique),
+    `Score history: ${scoreHistory.join(' → ')}`,
+    verdict.violatedAdrs.length > 0 ? `Violated ADRs: ${verdict.violatedAdrs.join(', ')}` : 'Violated ADRs: none',
     `Rationale: ${verdict.rationale}`,
   ];
-
-  if (verdict.violatedAdrs.length > 0) {
-    lines.push(`Violated ADRs: ${verdict.violatedAdrs.join(', ')}`);
-  }
 
   const failedChecks = verdict.checks.filter((c) => !c.passed);
   if (failedChecks.length > 0) {

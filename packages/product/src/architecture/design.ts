@@ -1,4 +1,4 @@
-// packages/product/src/architecture/design.ts — the pure epic-level architecture designer (#477).
+// packages/product/src/architecture/design.ts — the pure epic-level architecture designer (#477, #478).
 import type { DesignArtifact } from '@on-par/contracts';
 import { DesignArtifactSchema } from '@on-par/contracts';
 
@@ -40,8 +40,14 @@ function storyText(story: Decomposition['stories'][number]): string {
   return [story.title, story.want, ...story.inScope].join(' ').toLowerCase();
 }
 
-function findBackingAdr(subject: string, adrs: readonly EpicAdr[]): EpicAdr | undefined {
+/** Finds the active ADR (if any) whose title or decision already covers `subject`. Shared by designer and critic. */
+export function findBackingAdr(subject: string, adrs: readonly EpicAdr[]): EpicAdr | undefined {
   return adrs.find((adr) => `${adr.title} ${adr.decision}`.toLowerCase().includes(subject));
+}
+
+/** The constraint an active ADR contributes to an architecture. Shared by designer and critic. */
+export function adrConstraintOf(adr: EpicAdr): ArchitectureConstraint {
+  return { text: `${adr.label} — ${adr.title}: ${condense(adr.decision, 300)}`, adr: adr.label };
 }
 
 export function designEpicArchitecture(
@@ -99,10 +105,7 @@ export function designEpicArchitecture(
     }
   }
 
-  const adrConstraints: ArchitectureConstraint[] = adrs.map((adr) => ({
-    text: `${adr.label} — ${adr.title}: ${condense(adr.decision, 300)}`,
-    adr: adr.label,
-  }));
+  const adrConstraints: ArchitectureConstraint[] = adrs.map(adrConstraintOf);
 
   const constraints: ArchitectureConstraint[] = [...adrConstraints, ...decisionConstraints];
 

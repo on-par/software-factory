@@ -1,16 +1,16 @@
 // packages/product/src/architecture/critic.test.ts (#478).
 import { CONTRACTS_SCHEMA_VERSION, DesignArtifactSchema, type Epic, type Story } from '@on-par/contracts';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { Decomposition } from '../decompose/index.js';
 import type { IntentDoc } from '../intent/index.js';
-import type { RubricCheck } from '../judge/index.js';
 import type { EpicAdr } from './adrs.js';
 import {
-  critiqueEpicDesign,
-  critiqueEpicDesignAgainstAdrs,
-  reworkEpicArchitectureMechanically,
-  type DesignCriticVerdict,
+  critiqueEpicArchitecture,
+  reworkArchitectureMechanically,
+  runEpicDesignCritic,
+  type EpicDesignCritic,
+  type EpicDesignReworker,
 } from './critic.js';
 import { designEpicArchitecture, type EpicArchitecture } from './design.js';
 import type { RepoSurvey } from './survey.js';
@@ -42,7 +42,7 @@ function buildStory(overrides: Partial<Story> = {}): Story {
     inScope: ['s'],
     outOfScope: [],
     acceptanceCriteria: [{ name: 'AC', given: [], when: ['x'], then: ['y'], tracesTo: ['INT-SCOPE-01'] }],
-    verification: [{ command: 'npm test', passWhen: 'widgets work' }],
+    verification: [{ command: 'manual: confirm', passWhen: 'y' }],
     filesLikelyTouched: [],
     labels: [],
     tracesTo: ['INT-SCOPE-01', 'INT-OUTCOME-01'],
@@ -64,352 +64,281 @@ function buildEpic(children: string[], overrides: Partial<Epic> = {}): Epic {
   };
 }
 
-const WIDGET_STORY = buildStory({ title: 'Add widget', want: 'support widgets', inScope: ['widget UI'] });
+const WIDGET_STORY = buildStory({
+  title: 'Add widget',
+  want: 'support widgets in the widget package',
+  inScope: ['widget UI'],
+  verification: [{ command: 'npm test', passWhen: 'widgets work' }],
+});
 
-const ADR_0004: EpicAdr = {
-  label: 'ADR-0004',
-  number: 4,
-  title: 'Narrow public core API',
-  path: 'docs/adr/0004-narrow-public-core-api.md',
-  decision: 'Only export the narrow API from core.',
+const ONBOARDING_STORY = buildStory({
+  title: 'Improve onboarding flow',
+  want: 'improve onboarding',
+  inScope: ['onboarding copy'],
+  verification: [{ command: 'npm test', passWhen: 'onboarding works' }],
+});
+
+const WIDGET_ADR: EpicAdr = {
+  label: 'ADR-0001',
+  number: 1,
+  title: 'Widget architecture',
+  path: 'docs/adr/0001-widget-architecture.md',
+  decision: 'Widgets are built as packages/widget.',
 };
 
-const EMPTY_SURVEY: RepoSurvey = { components: [], hasAdrHome: true };
+const SECOND_ADR: EpicAdr = {
+  label: 'ADR-0009',
+  number: 9,
+  title: 'Second decision',
+  path: 'docs/adr/0009-second-decision.md',
+  decision: 'Something unrelated to widgets.',
+};
 
-function buildConformingArchitecture(): EpicArchitecture {
-  const decomposition: Decomposition = { epic: buildEpic([WIDGET_STORY.title]), stories: [WIDGET_STORY] };
-  const result = designEpicArchitecture(decomposition, APPROVED_DOC, { adrs: [ADR_0004], survey: EMPTY_SURVEY });
+const SURVEY_WITH_WIDGET: RepoSurvey = {
+  components: [{ name: 'widget', path: 'packages/widget' }],
+  hasAdrHome: true,
+};
+
+function designArchitecture(
+  adrs: readonly EpicAdr[],
+  survey: RepoSurvey = SURVEY_WITH_WIDGET,
+  story: Story = WIDGET_STORY,
+): EpicArchitecture {
+  const decomposition: Decomposition = { epic: buildEpic([story.title]), stories: [story] };
+  const result = designEpicArchitecture(decomposition, APPROVED_DOC, { adrs, survey });
   if (!result.ok) {
     throw new Error(`fixture setup failed: ${result.blockers.join('; ')}`);
   }
   return result.architecture;
 }
 
-const CONFORMING_ARCHITECTURE = buildConformingArchitecture();
+// The Gherkin architecture: designed with no active ADRs, so the widget decision becomes an unbacked deviation.
+const GHERKIN_ARCHITECTURE = designArchitecture([]);
 
-/** CONFORMING_ARCHITECTURE with its ADR-0004 constraint removed, but the artifact left untouched. */
-function buildArchitectureMissingAdr(): EpicArchitecture {
-  return {
-    ...CONFORMING_ARCHITECTURE,
-    constraints: CONFORMING_ARCHITECTURE.constraints.filter((c) => c.adr !== 'ADR-0004'),
-  };
-}
+// An architecture designed against the same active ADR set it is critiqued against — every check should pass.
+const PASS_ARCHITECTURE = designArchitecture([WIDGET_ADR]);
 
-/** CONFORMING_ARCHITECTURE with its unbacked decision constraint re-labeled to a retired ADR. */
-function buildArchitectureWithStaleCitation(): EpicArchitecture {
-  return {
-    ...CONFORMING_ARCHITECTURE,
-    constraints: CONFORMING_ARCHITECTURE.constraints.map((c) => (c.adr === undefined ? { ...c, adr: 'ADR-9999' } : c)),
-  };
-}
-
-/** CONFORMING_ARCHITECTURE with its deviation's open question dropped. */
-function buildArchitectureMissingOpenQuestion(): EpicArchitecture {
-  return { ...CONFORMING_ARCHITECTURE, artifact: { ...CONFORMING_ARCHITECTURE.artifact, openQuestions: [] } };
-}
-
-/** CONFORMING_ARCHITECTURE with its behaviorContract emptied out, diverging from its constraints. */
-function buildArchitectureMissingContractLines(): EpicArchitecture {
-  return { ...CONFORMING_ARCHITECTURE, artifact: { ...CONFORMING_ARCHITECTURE.artifact, behaviorContract: [] } };
-}
-
-/**
- * CONFORMING_ARCHITECTURE with its ADR-0004 constraint removed from BOTH constraints and
- * behaviorContract — unlike buildArchitectureMissingAdr, behaviorContract never carried the
- * ADR-0004 line, so only adrs-honored fails and the fix genuinely has to extend behaviorContract
- * rather than happening to already agree with it.
- */
-function buildArchitectureNeverHadAdr(): EpicArchitecture {
-  const adrConstraint = CONFORMING_ARCHITECTURE.constraints.find((c) => c.adr === 'ADR-0004');
-  if (adrConstraint === undefined) {
-    throw new Error('fixture missing the ADR-0004 constraint');
-  }
-  return {
-    ...CONFORMING_ARCHITECTURE,
-    constraints: CONFORMING_ARCHITECTURE.constraints.filter((c) => c.adr !== 'ADR-0004'),
-    artifact: {
-      ...CONFORMING_ARCHITECTURE.artifact,
-      behaviorContract: CONFORMING_ARCHITECTURE.artifact.behaviorContract.filter((t) => t !== adrConstraint.text),
-    },
-  };
-}
-
-function checkById(verdict: DesignCriticVerdict, id: string): RubricCheck {
-  const check = verdict.checks.find((c) => c.id === id);
-  if (check === undefined) {
-    throw new Error(`no check with id ${id}`);
-  }
-  return check;
-}
-
-describe('critiqueEpicDesignAgainstAdrs', () => {
-  it('rework: the gherkin scenario — a design that drops active ADR-0004 as a constraint', () => {
-    const broken = buildArchitectureMissingAdr();
-
-    const verdict = critiqueEpicDesignAgainstAdrs(broken, APPROVED_DOC, [ADR_0004]);
+describe('critiqueEpicArchitecture', () => {
+  it('the Gherkin scenario: an architecture ignoring an active ADR gets rework, naming the ADR', () => {
+    const verdict = critiqueEpicArchitecture(GHERKIN_ARCHITECTURE, APPROVED_DOC, [WIDGET_ADR]);
 
     expect(verdict.verdict).toBe('rework');
-    expect(verdict.violatedAdrs).toEqual(['ADR-0004']);
-    expect(checkById(verdict, 'adrs-honored').passed).toBe(false);
-    expect(checkById(verdict, 'adrs-honored').note).toContain('ADR-0004');
+    expect(verdict.violatedAdrs).toContain('ADR-0001');
+    expect(verdict.checks.find((c) => c.id === 'adrs-covered')?.passed).toBe(false);
+    expect(verdict.checks.find((c) => c.id === 'no-adr-conflicts')?.passed).toBe(false);
   });
 
-  it('rework: a constraint citing a retired/unknown ADR label', () => {
-    const broken = buildArchitectureWithStaleCitation();
+  it('passes an architecture designed against the same active-ADR set', () => {
+    const verdict = critiqueEpicArchitecture(PASS_ARCHITECTURE, APPROVED_DOC, [WIDGET_ADR]);
 
-    const verdict = critiqueEpicDesignAgainstAdrs(broken, APPROVED_DOC, [ADR_0004]);
-
-    expect(verdict.verdict).toBe('rework');
-    expect(verdict.violatedAdrs).toEqual(['ADR-9999']);
-    expect(checkById(verdict, 'adr-citations-active').passed).toBe(false);
-    expect(checkById(verdict, 'adr-citations-active').note).toContain('ADR-9999');
-  });
-
-  it('pass: a conforming architecture yields an empty violatedAdrs list and a full rationale', () => {
-    const verdict = critiqueEpicDesignAgainstAdrs(CONFORMING_ARCHITECTURE, APPROVED_DOC, [ADR_0004]);
-
-    expect(verdict.verdict).toBe('pass');
-    expect(verdict.violatedAdrs).toEqual([]);
-    expect(verdict.rationale).toBe('All 6 checks passed.');
+    expect(verdict).toEqual({
+      verdict: 'pass',
+      score: 100,
+      rationale: 'All 5 checks passed.',
+      checks: verdict.checks,
+      violatedAdrs: [],
+    });
     expect(verdict.checks.every((c) => c.passed)).toBe(true);
   });
 
-  it('rework: unapproved doc, undisclosed deviation, divergent contract, and empty verification plan each fail their own check', () => {
-    const artifact = DesignArtifactSchema.parse({
-      restatedProblem: 'p',
-      approach: { chosen: 'c', rejected: [] },
-      interfacesTouched: [],
-      targetTypes: [],
-      signatures: [],
-      callGraph: [],
-      behaviorContract: [],
-      verificationPlan: [],
-      riskBlastRadius: 'r',
-      openQuestions: [],
-    });
-    const broken: EpicArchitecture = {
-      artifact,
-      constraints: [
-        { text: 'ADR-0004 — Narrow public core API: Only export the narrow API from core.', adr: 'ADR-0004' },
-      ],
-      deviations: [{ subject: 'x', text: 'introduce a new component for story "X"' }],
-    };
-
-    const verdict = critiqueEpicDesignAgainstAdrs(broken, DRAFT_DOC, [ADR_0004]);
+  it('fails intent-approved alone on a draft doc', () => {
+    const verdict = critiqueEpicArchitecture(PASS_ARCHITECTURE, DRAFT_DOC, [WIDGET_ADR]);
 
     expect(verdict.verdict).toBe('rework');
-    expect(checkById(verdict, 'intent-approved').passed).toBe(false);
-    expect(checkById(verdict, 'deviations-disclosed').passed).toBe(false);
-    expect(checkById(verdict, 'contract-mirrors-constraints').passed).toBe(false);
-    expect(checkById(verdict, 'verification-grounded').passed).toBe(false);
-    expect(checkById(verdict, 'adrs-honored').passed).toBe(true);
-    expect(checkById(verdict, 'adr-citations-active').passed).toBe(true);
-  });
-});
-
-describe('reworkEpicArchitectureMechanically', () => {
-  it('adds the missing ADR constraint and re-critiquing the result yields pass, without mutating the input', () => {
-    const broken = buildArchitectureMissingAdr();
-    const originalLength = broken.constraints.length;
-    const verdict = critiqueEpicDesignAgainstAdrs(broken, APPROVED_DOC, [ADR_0004]);
-
-    const reworked = reworkEpicArchitectureMechanically(broken, verdict, APPROVED_DOC, [ADR_0004]);
-
-    expect(reworked.constraints.some((c) => c.adr === 'ADR-0004')).toBe(true);
-    expect(broken.constraints.length).toBe(originalLength);
-
-    const reCritiqued = critiqueEpicDesignAgainstAdrs(reworked, APPROVED_DOC, [ADR_0004]);
-    expect(reCritiqued.verdict).toBe('pass');
-  });
-
-  it('drops a stale ADR citation and records the constraint as a disclosed deviation', () => {
-    const broken = buildArchitectureWithStaleCitation();
-    const verdict = critiqueEpicDesignAgainstAdrs(broken, APPROVED_DOC, [ADR_0004]);
-    const staleConstraint = broken.constraints.find((c) => c.adr === 'ADR-9999');
-    if (staleConstraint === undefined) {
-      throw new Error('fixture missing a stale constraint');
-    }
-
-    const reworked = reworkEpicArchitectureMechanically(broken, verdict, APPROVED_DOC, [ADR_0004]);
-
-    expect(reworked.constraints.some((c) => c.text === staleConstraint.text && c.adr === undefined)).toBe(true);
-    expect(reworked.deviations).toContainEqual({ subject: 'adr-9999', text: staleConstraint.text });
-    expect(reworked.artifact.openQuestions).toContain(`needs a new ADR: ${staleConstraint.text}`);
-  });
-
-  it('returns the input unchanged when nothing failed is mechanically fixable', () => {
-    const verdict = critiqueEpicDesignAgainstAdrs(CONFORMING_ARCHITECTURE, DRAFT_DOC, [ADR_0004]);
-    expect(checkById(verdict, 'intent-approved').passed).toBe(false);
+    expect(verdict.score).toBe(80);
+    const check = verdict.checks.find((c) => c.id === 'intent-approved');
+    expect(check?.passed).toBe(false);
+    expect(check?.note).toBe('the intent doc is a draft — the critic needs human gate #1');
     expect(verdict.checks.filter((c) => !c.passed)).toHaveLength(1);
-
-    const reworked = reworkEpicArchitectureMechanically(CONFORMING_ARCHITECTURE, verdict, DRAFT_DOC, [ADR_0004]);
-
-    expect(reworked).toBe(CONFORMING_ARCHITECTURE);
   });
 
-  it('returns the input unchanged when the verdict already passes', () => {
-    const verdict = critiqueEpicDesignAgainstAdrs(CONFORMING_ARCHITECTURE, APPROVED_DOC, [ADR_0004]);
-    expect(verdict.verdict).toBe('pass');
-
-    const reworked = reworkEpicArchitectureMechanically(CONFORMING_ARCHITECTURE, verdict, APPROVED_DOC, [ADR_0004]);
-
-    expect(reworked).toBe(CONFORMING_ARCHITECTURE);
-  });
-
-  it('does not duplicate an open question when multiple stale constraints share the same text', () => {
-    const broken: EpicArchitecture = {
-      ...CONFORMING_ARCHITECTURE,
-      constraints: [
-        ...CONFORMING_ARCHITECTURE.constraints,
-        { text: 'duplicate stale text', adr: 'ADR-9999' },
-        { text: 'duplicate stale text', adr: 'ADR-8888' },
-      ],
+  it('fails verification-planned alone on an architecture with an empty verification plan', () => {
+    const architecture: EpicArchitecture = {
+      ...PASS_ARCHITECTURE,
+      artifact: DesignArtifactSchema.parse({ ...PASS_ARCHITECTURE.artifact, verificationPlan: [] }),
     };
-    const verdict = critiqueEpicDesignAgainstAdrs(broken, APPROVED_DOC, [ADR_0004]);
-    expect(checkById(verdict, 'adr-citations-active').passed).toBe(false);
 
-    const reworked = reworkEpicArchitectureMechanically(broken, verdict, APPROVED_DOC, [ADR_0004]);
+    const verdict = critiqueEpicArchitecture(architecture, APPROVED_DOC, [WIDGET_ADR]);
 
-    const matchingOpenQuestions = reworked.artifact.openQuestions.filter(
-      (q) => q === 'needs a new ADR: duplicate stale text',
-    );
-    expect(matchingOpenQuestions).toHaveLength(1);
+    expect(verdict.verdict).toBe('rework');
+    const check = verdict.checks.find((c) => c.id === 'verification-planned');
+    expect(check?.passed).toBe(false);
+    expect(check?.note).toBe('verificationPlan is empty');
+    expect(verdict.checks.filter((c) => !c.passed)).toHaveLength(1);
   });
 
-  it('discloses a missing deviation as an open question and re-critiquing yields pass', () => {
-    const broken = buildArchitectureMissingOpenQuestion();
-    const verdict = critiqueEpicDesignAgainstAdrs(broken, APPROVED_DOC, [ADR_0004]);
-    expect(checkById(verdict, 'deviations-disclosed').passed).toBe(false);
+  it('fails deviations-declared alone when a deviation is missing its open-question line', () => {
+    const architecture: EpicArchitecture = {
+      ...GHERKIN_ARCHITECTURE,
+      artifact: DesignArtifactSchema.parse({ ...GHERKIN_ARCHITECTURE.artifact, openQuestions: [] }),
+    };
 
-    const reworked = reworkEpicArchitectureMechanically(broken, verdict, APPROVED_DOC, [ADR_0004]);
+    // Critiqued with no active ADRs: adrs-covered and no-adr-conflicts are vacuously satisfied.
+    const verdict = critiqueEpicArchitecture(architecture, APPROVED_DOC, []);
 
-    expect(reworked.artifact.openQuestions).toEqual(
-      CONFORMING_ARCHITECTURE.deviations.map((d) => `needs a new ADR: ${d.text}`),
-    );
-    const reCritiqued = critiqueEpicDesignAgainstAdrs(reworked, APPROVED_DOC, [ADR_0004]);
-    expect(reCritiqued.verdict).toBe('pass');
+    expect(verdict.verdict).toBe('rework');
+    const check = verdict.checks.find((c) => c.id === 'deviations-declared');
+    expect(check?.passed).toBe(false);
+    expect(check?.note).toContain(GHERKIN_ARCHITECTURE.deviations[0]!.text);
+    expect(verdict.checks.filter((c) => !c.passed)).toHaveLength(1);
   });
 
-  it('rebuilds the behavior contract from the constraints and re-critiquing yields pass', () => {
-    const broken = buildArchitectureMissingContractLines();
-    const verdict = critiqueEpicDesignAgainstAdrs(broken, APPROVED_DOC, [ADR_0004]);
-    expect(checkById(verdict, 'contract-mirrors-constraints').passed).toBe(false);
+  it('returns violatedAdrs sorted, deduped across missing and conflicting ADRs', () => {
+    const architecture: EpicArchitecture = {
+      artifact: DesignArtifactSchema.parse({
+        restatedProblem: 'p',
+        approach: { chosen: 'c', rejected: [] },
+        interfacesTouched: [],
+        targetTypes: [],
+        signatures: [],
+        callGraph: [],
+        behaviorContract: [],
+        verificationPlan: [{ command: 'npm test', passWhen: 'ok' }],
+        riskBlastRadius: 'r',
+        openQuestions: [],
+      }),
+      constraints: [],
+      deviations: [],
+    };
 
-    const reworked = reworkEpicArchitectureMechanically(broken, verdict, APPROVED_DOC, [ADR_0004]);
+    const verdict = critiqueEpicArchitecture(architecture, APPROVED_DOC, [SECOND_ADR, WIDGET_ADR]);
 
-    expect(reworked.artifact.behaviorContract).toEqual(broken.constraints.map((c) => c.text));
-    const reCritiqued = critiqueEpicDesignAgainstAdrs(reworked, APPROVED_DOC, [ADR_0004]);
-    expect(reCritiqued.verdict).toBe('pass');
-  });
-
-  it('rebuilds the behavior contract when adding a missing ADR constraint, even when contract-mirrors-constraints did not originally fail', () => {
-    const broken = buildArchitectureNeverHadAdr();
-    const verdict = critiqueEpicDesignAgainstAdrs(broken, APPROVED_DOC, [ADR_0004]);
-    expect(verdict.checks.filter((c) => !c.passed).map((c) => c.id)).toEqual(['adrs-honored']);
-
-    const reworked = reworkEpicArchitectureMechanically(broken, verdict, APPROVED_DOC, [ADR_0004]);
-
-    const addedConstraint = reworked.constraints.find((c) => c.adr === 'ADR-0004');
-    if (addedConstraint === undefined) {
-      throw new Error('rework did not add the ADR-0004 constraint');
-    }
-    expect(reworked.artifact.behaviorContract).toContain(addedConstraint.text);
-
-    const reCritiqued = critiqueEpicDesignAgainstAdrs(reworked, APPROVED_DOC, [ADR_0004]);
-    expect(reCritiqued.verdict).toBe('pass');
+    expect(verdict.violatedAdrs).toEqual(['ADR-0001', 'ADR-0009']);
   });
 });
 
-describe('critiqueEpicDesign', () => {
-  it('reworks a fixable violation to pass in one bounded iteration, with a strictly decreasing failed-check history', async () => {
-    const broken = buildArchitectureMissingAdr();
+describe('reworkArchitectureMechanically', () => {
+  it('fixes the ADR conflict and ADR coverage on the Gherkin architecture, rebuilding the artifact consistently', () => {
+    const verdict = critiqueEpicArchitecture(GHERKIN_ARCHITECTURE, APPROVED_DOC, [WIDGET_ADR]);
 
-    const result = await critiqueEpicDesign(broken, APPROVED_DOC, [ADR_0004]);
+    const reworked = reworkArchitectureMechanically(GHERKIN_ARCHITECTURE, verdict, APPROVED_DOC, [WIDGET_ADR]);
 
-    expect(result.stopReason).toBe('passed');
-    expect(result.iterations).toBe(1);
-    expect(result.failedCheckHistory).toEqual([1, 0]);
-    expect(result.verdict.verdict).toBe('pass');
+    expect(reworked).not.toBe(GHERKIN_ARCHITECTURE);
+    expect(reworked.deviations).toEqual([]);
+    expect(reworked.constraints.some((c) => c.adr === 'ADR-0001')).toBe(true);
+    expect(reworked.constraints.some((c) => c.text.endsWith('(per ADR-0001)'))).toBe(true);
+    expect(reworked.artifact.behaviorContract).toEqual(reworked.constraints.map((c) => c.text));
+    expect(reworked.artifact.openQuestions).toEqual([]);
+
+    // The fix is real: re-critiquing the reworked architecture improves the verdict.
+    const reworkedVerdict = critiqueEpicArchitecture(reworked, APPROVED_DOC, [WIDGET_ADR]);
+    expect(reworkedVerdict.verdict).toBe('pass');
   });
 
-  it('does not discard the adrs-honored fix as no-improvement when behaviorContract never carried the missing ADR line', async () => {
-    const broken = buildArchitectureNeverHadAdr();
+  it('leaves the architecture unchanged (same reference) when only unfixable checks fail', () => {
+    const verdict = critiqueEpicArchitecture(PASS_ARCHITECTURE, DRAFT_DOC, [WIDGET_ADR]);
 
-    const result = await critiqueEpicDesign(broken, APPROVED_DOC, [ADR_0004]);
+    const reworked = reworkArchitectureMechanically(PASS_ARCHITECTURE, verdict, DRAFT_DOC, [WIDGET_ADR]);
 
-    expect(result.stopReason).toBe('passed');
-    expect(result.iterations).toBe(1);
-    expect(result.verdict.verdict).toBe('pass');
+    expect(reworked).toBe(PASS_ARCHITECTURE);
   });
 
-  it('passes immediately for an already-conforming design, without reworking', async () => {
-    const result = await critiqueEpicDesign(CONFORMING_ARCHITECTURE, APPROVED_DOC, [ADR_0004]);
+  it('fixes only the deviation an active ADR backs, leaving an unbacked deviation declared', () => {
+    const decomposition: Decomposition = {
+      epic: buildEpic([WIDGET_STORY.title, ONBOARDING_STORY.title]),
+      stories: [WIDGET_STORY, ONBOARDING_STORY],
+    };
+    const result = designEpicArchitecture(decomposition, APPROVED_DOC, { adrs: [], survey: SURVEY_WITH_WIDGET });
+    if (!result.ok) {
+      throw new Error(`fixture setup failed: ${result.blockers.join('; ')}`);
+    }
+    const architecture = result.architecture;
 
-    expect(result.stopReason).toBe('passed');
+    const verdict = critiqueEpicArchitecture(architecture, APPROVED_DOC, [WIDGET_ADR]);
+    const reworked = reworkArchitectureMechanically(architecture, verdict, APPROVED_DOC, [WIDGET_ADR]);
+
+    expect(reworked.deviations).toEqual([
+      { subject: 'improve onboarding flow', text: 'introduce a new component for story "Improve onboarding flow"' },
+    ]);
+    expect(reworked.constraints.some((c) => c.adr === 'ADR-0001' && c.text.endsWith('(per ADR-0001)'))).toBe(true);
+    expect(reworked.artifact.openQuestions).toEqual([
+      'needs a new ADR: introduce a new component for story "Improve onboarding flow"',
+    ]);
+    expect(reworked.artifact.behaviorContract).toEqual(reworked.constraints.map((c) => c.text));
+  });
+});
+
+describe('runEpicDesignCritic', () => {
+  it('returns immediately with iterations: 0 and stopReason "passed" for an already-passing architecture', async () => {
+    const result = await runEpicDesignCritic(PASS_ARCHITECTURE, APPROVED_DOC, [WIDGET_ADR]);
+
     expect(result.iterations).toBe(0);
-    expect(result.failedCheckHistory).toEqual([0]);
+    expect(result.stopReason).toBe('passed');
+    expect(result.scoreHistory).toEqual([100]);
+    expect(result.verdict.verdict).toBe('pass');
   });
 
-  it('stops at no-improvement when the only failing check is not mechanically fixable', async () => {
-    const result = await critiqueEpicDesign(CONFORMING_ARCHITECTURE, DRAFT_DOC, [ADR_0004]);
+  it('reworks the Gherkin architecture to a pass in one iteration with default seams', async () => {
+    const result = await runEpicDesignCritic(GHERKIN_ARCHITECTURE, APPROVED_DOC, [WIDGET_ADR]);
+
+    expect(result.stopReason).toBe('passed');
+    expect(result.iterations).toBe(1);
+    expect(result.verdict.verdict).toBe('pass');
+    expect(result.scoreHistory).toHaveLength(2);
+    expect(result.scoreHistory[1]).toBe(100);
+  });
+
+  it('stops with "no-improvement" after one iteration on an unfixable failure, keeping the original best', async () => {
+    const result = await runEpicDesignCritic(PASS_ARCHITECTURE, DRAFT_DOC, [WIDGET_ADR]);
 
     expect(result.stopReason).toBe('no-improvement');
     expect(result.iterations).toBe(1);
-    expect(result.failedCheckHistory).toEqual([1, 1]);
+    expect(result.architecture).toBe(PASS_ARCHITECTURE);
   });
 
-  it('is structurally bounded — an adversarial critic/reworker that never reaches pass still stops at maxIterations', async () => {
-    function checksWithFailedCount(failCount: number): RubricCheck[] {
-      return Array.from({ length: 5 }, (_, idx) => ({
-        id: `check-${idx}`,
-        label: `check ${idx}`,
-        passed: idx >= failCount,
-        note: idx >= failCount ? 'passing' : 'failing',
-      }));
-    }
+  it('stops at exactly maxIterations when an adversarial critic keeps "improving" but never passes', async () => {
+    let score = 0;
+    const alwaysImprovingNeverPassingCritic: EpicDesignCritic = () => {
+      score += 1;
+      return { verdict: 'rework', score, rationale: 'never satisfied', checks: [], violatedAdrs: [] };
+    };
+    const identityRework: EpicDesignReworker = (architecture) => architecture;
 
-    function failCountQueueCritic(counts: readonly number[]) {
-      let i = 0;
-      return vi.fn(async (): Promise<DesignCriticVerdict> => {
-        const failCount = counts[Math.min(i, counts.length - 1)]!;
-        i += 1;
-        return {
-          verdict: failCount === 0 ? 'pass' : 'rework',
-          violatedAdrs: [],
-          rationale: failCount === 0 ? 'All 5 checks passed.' : 'still failing',
-          checks: checksWithFailedCount(failCount),
-        };
-      });
-    }
-
-    const critic = failCountQueueCritic([4, 3, 2, 1]);
-    const rework = vi.fn(async (architecture: EpicArchitecture) => architecture);
-
-    const result = await critiqueEpicDesign(
-      CONFORMING_ARCHITECTURE,
+    const result = await runEpicDesignCritic(
+      GHERKIN_ARCHITECTURE,
       APPROVED_DOC,
-      [ADR_0004],
-      { critic, rework },
+      [WIDGET_ADR],
+      { critic: alwaysImprovingNeverPassingCritic, rework: identityRework },
       { maxIterations: 3 },
     );
 
     expect(result.stopReason).toBe('max-iterations');
     expect(result.iterations).toBe(3);
-    expect(result.failedCheckHistory).toEqual([4, 3, 2, 1]);
+    expect(result.scoreHistory).toEqual([1, 2, 3, 4]);
   });
 
-  it('rejects a negative or non-integer maxIterations, and returns immediately at max-iterations for 0', async () => {
-    await expect(
-      critiqueEpicDesign(CONFORMING_ARCHITECTURE, APPROVED_DOC, [ADR_0004], {}, { maxIterations: -1 }),
-    ).rejects.toThrow('design critic: maxIterations must be a non-negative integer');
-    await expect(
-      critiqueEpicDesign(CONFORMING_ARCHITECTURE, APPROVED_DOC, [ADR_0004], {}, { maxIterations: 1.5 }),
-    ).rejects.toThrow('design critic: maxIterations must be a non-negative integer');
-
-    const broken = buildArchitectureMissingAdr();
-    const result = await critiqueEpicDesign(broken, APPROVED_DOC, [ADR_0004], {}, { maxIterations: 0 });
+  it('stops immediately at max-iterations with iterations: 0 when maxIterations is 0', async () => {
+    const result = await runEpicDesignCritic(PASS_ARCHITECTURE, DRAFT_DOC, [WIDGET_ADR], {}, { maxIterations: 0 });
 
     expect(result.stopReason).toBe('max-iterations');
     expect(result.iterations).toBe(0);
+    expect(result.scoreHistory).toEqual([80]);
+  });
+
+  it('throws the exact message for a negative maxIterations', async () => {
+    await expect(
+      runEpicDesignCritic(PASS_ARCHITECTURE, DRAFT_DOC, [WIDGET_ADR], {}, { maxIterations: -1 }),
+    ).rejects.toThrow('epic-design critic: maxIterations must be a non-negative integer');
+  });
+
+  it('throws the exact message for a non-integer maxIterations', async () => {
+    await expect(
+      runEpicDesignCritic(PASS_ARCHITECTURE, DRAFT_DOC, [WIDGET_ADR], {}, { maxIterations: 1.5 }),
+    ).rejects.toThrow('epic-design critic: maxIterations must be a non-negative integer');
+  });
+
+  it('works with async (Promise-returning) critic and reworker seams', async () => {
+    const asyncCritic: EpicDesignCritic = async (architecture, doc, adrs) =>
+      Promise.resolve(critiqueEpicArchitecture(architecture, doc, adrs));
+    const asyncRework: EpicDesignReworker = async (architecture, verdict, doc, adrs) =>
+      Promise.resolve(reworkArchitectureMechanically(architecture, verdict, doc, adrs));
+
+    const result = await runEpicDesignCritic(GHERKIN_ARCHITECTURE, APPROVED_DOC, [WIDGET_ADR], {
+      critic: asyncCritic,
+      rework: asyncRework,
+    });
+
+    expect(result.stopReason).toBe('passed');
+    expect(result.verdict.verdict).toBe('pass');
   });
 });

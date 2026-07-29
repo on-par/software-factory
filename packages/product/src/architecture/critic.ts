@@ -1,22 +1,29 @@
-// packages/product/src/architecture/critic.ts — epic-design critic + bounded rework loop (#478).
+// packages/product/src/architecture/critic.ts — epic-design critic, Judge pattern reused (#478).
 
 import { DesignArtifactSchema } from '@on-par/contracts';
 
 import type { IntentDoc } from '../intent/index.js';
-import type { JudgeStopReason, RubricCheck } from '../judge/index.js';
+import { DEFAULT_MAX_REWORK_ITERATIONS, type RubricCheck } from '../judge/index.js';
 import type { EpicAdr } from './adrs.js';
-import type { ArchitectureConstraint, EpicArchitecture } from './design.js';
-
-export type DesignCriticOutcome = 'pass' | 'rework';
+import {
+  adrConstraintOf,
+  findBackingAdr,
+  type ArchitectureConstraint,
+  type ArchitectureDecision,
+  type EpicArchitecture,
+} from './design.js';
 
 /** The critic's verdict on one epic-architecture version. */
-export interface DesignCriticVerdict {
-  verdict: DesignCriticOutcome;
-  /** ADR labels the design violates (missing or stale citations); empty on pass. Sorted, de-duplicated. */
-  violatedAdrs: readonly string[];
+export interface CriticVerdict {
+  /** 'pass' iff every check passed; otherwise 'rework'. */
+  verdict: 'pass' | 'rework';
+  /** Integer 0-100: share of checks passed (rubric-style). */
+  score: number;
   /** Non-empty. 'All N checks passed.' or the failed checks' notes joined with '; '. */
   rationale: string;
   checks: readonly RubricCheck[];
+  /** Labels of active ADRs the architecture ignores or re-decides; deduped, sorted. */
+  violatedAdrs: readonly string[];
 }
 
 /** The critic seam — an AI-backed critic plugs in here (async allowed). */
@@ -24,213 +31,164 @@ export type EpicDesignCritic = (
   architecture: EpicArchitecture,
   doc: IntentDoc,
   adrs: readonly EpicAdr[],
-) => DesignCriticVerdict | Promise<DesignCriticVerdict>;
+) => CriticVerdict | Promise<CriticVerdict>;
 
-/** The reworker seam — proposes an improved architecture from a rework verdict. */
+/** The reworker seam — proposes an improved architecture from a failing verdict. */
 export type EpicDesignReworker = (
   architecture: EpicArchitecture,
-  verdict: DesignCriticVerdict,
+  verdict: CriticVerdict,
   doc: IntentDoc,
   adrs: readonly EpicAdr[],
 ) => EpicArchitecture | Promise<EpicArchitecture>;
 
-export interface CritiquedDesign {
-  /** Best version seen (fewest failed checks). */
-  architecture: EpicArchitecture;
-  /** Verdict for that version. */
-  verdict: DesignCriticVerdict;
-  /** Rework rounds actually executed. */
-  iterations: number;
-  stopReason: JudgeStopReason;
-  /** Failed-check count for the initial critique, then one entry per rework round. */
-  failedCheckHistory: readonly number[];
-}
-
-export interface DesignCriticDeps {
+export interface EpicDesignCriticDeps {
   critic?: EpicDesignCritic;
   rework?: EpicDesignReworker;
 }
 
-export interface DesignCriticOptions {
+export interface EpicDesignCriticOptions {
   maxIterations?: number;
 }
 
-export const DEFAULT_MAX_CRITIC_ITERATIONS = 3;
+export type CriticStopReason = 'passed' | 'no-improvement' | 'max-iterations';
 
-function condense(text: string, max: number): string {
-  const collapsed = text.replace(/\s+/g, ' ').trim();
-  return collapsed.length > max ? `${collapsed.slice(0, max)}…` : collapsed;
+export interface EpicDesignCritique {
+  /** Best-scoring version seen. */
+  architecture: EpicArchitecture;
+  /** Verdict for that version. */
+  verdict: CriticVerdict;
+  /** Rework rounds actually executed. */
+  iterations: number;
+  stopReason: CriticStopReason;
+  /** Initial score first, then one entry per rework round. */
+  scoreHistory: readonly number[];
 }
 
-function resolveMaxIterations(options: DesignCriticOptions): number {
-  const maxIterations = options.maxIterations ?? DEFAULT_MAX_CRITIC_ITERATIONS;
+function resolveMaxIterations(options: EpicDesignCriticOptions): number {
+  const maxIterations = options.maxIterations ?? DEFAULT_MAX_REWORK_ITERATIONS;
   if (!Number.isInteger(maxIterations) || maxIterations < 0) {
-    throw new Error('design critic: maxIterations must be a non-negative integer');
+    throw new Error('epic-design critic: maxIterations must be a non-negative integer');
   }
   return maxIterations;
 }
 
-/** Six equally-weighted checks against the approved intent doc and the active ADRs. Pure, deterministic. */
-export function critiqueEpicDesignAgainstAdrs(
+/** Five equally-weighted checks against the approved intent doc and the active ADRs. Pure, deterministic. */
+export function critiqueEpicArchitecture(
   architecture: EpicArchitecture,
   doc: IntentDoc,
   adrs: readonly EpicAdr[],
-): DesignCriticVerdict {
-  const activeLabels = new Set(adrs.map((adr) => adr.label));
+): CriticVerdict {
+  const missing = adrs.map((a) => a.label).filter((label) => !architecture.constraints.some((c) => c.adr === label));
 
-  const missingAdrs = adrs.filter((adr) => !architecture.constraints.some((c) => c.adr === adr.label));
-  const staleConstraints = architecture.constraints.filter((c) => c.adr !== undefined && !activeLabels.has(c.adr));
-  const staleLabels = [...new Set(staleConstraints.map((c) => c.adr as string))];
+  const conflicts: { deviation: ArchitectureDecision; backing: EpicAdr }[] = [];
+  for (const deviation of architecture.deviations) {
+    const backing = findBackingAdr(deviation.subject, adrs);
+    if (backing !== undefined) {
+      conflicts.push({ deviation, backing });
+    }
+  }
 
-  const missingOpenQuestions = architecture.deviations.filter(
+  const undeclared = architecture.deviations.filter(
     (d) => !architecture.artifact.openQuestions.includes(`needs a new ADR: ${d.text}`),
-  );
-
-  const missingContractLines = architecture.constraints.filter(
-    (c) => !architecture.artifact.behaviorContract.includes(c.text),
   );
 
   const checks: readonly RubricCheck[] = [
     {
       id: 'intent-approved',
-      label: 'The design was critiqued against an approved intent doc',
+      label: 'The intent doc is approved (human gate #1)',
       passed: doc.status === 'approved',
       note:
         doc.status === 'approved'
-          ? 'the design was critiqued against an approved intent doc'
-          : 'the design was critiqued against an unapproved intent doc (human gate #1 not passed)',
+          ? 'the intent doc is approved'
+          : 'the intent doc is a draft — the critic needs human gate #1',
     },
     {
-      id: 'adrs-honored',
+      id: 'adrs-covered',
       label: 'Every active ADR is carried as a constraint',
-      passed: missingAdrs.length === 0,
+      passed: missing.length === 0,
       note:
-        missingAdrs.length === 0
+        missing.length === 0
           ? 'every active ADR is carried as a constraint'
-          : `design contradicts active ADR(s) it does not carry as constraints: ${missingAdrs.map((a) => a.label).join(', ')}`,
+          : `active ADRs missing from the constraints: ${missing.join(', ')}`,
     },
     {
-      id: 'adr-citations-active',
-      label: 'Every ADR-backed constraint cites an active ADR',
-      passed: staleLabels.length === 0,
+      id: 'no-adr-conflicts',
+      label: 'No deviation re-decides ground an active ADR covers',
+      passed: conflicts.length === 0,
       note:
-        staleLabels.length === 0
-          ? 'every ADR-backed constraint cites an active ADR'
-          : `design leans on retired/unknown ADR(s): ${staleLabels.join(', ')}`,
+        conflicts.length === 0
+          ? 'no deviation re-decides ground an active ADR covers'
+          : conflicts.map((c) => `"${c.deviation.text}" conflicts with ${c.backing.label}`).join('; '),
     },
     {
-      id: 'deviations-disclosed',
-      label: 'Every deviation is disclosed as an open question',
-      passed: missingOpenQuestions.length === 0,
+      id: 'deviations-declared',
+      label: 'Every deviation is declared as an open question',
+      passed: undeclared.length === 0,
       note:
-        missingOpenQuestions.length === 0
-          ? 'every deviation is disclosed as an open question'
-          : `deviations missing from openQuestions: ${missingOpenQuestions.map((d) => d.text).join(', ')}`,
+        undeclared.length === 0
+          ? 'every deviation is declared as an open question'
+          : `deviations not declared as open questions: ${undeclared.map((d) => d.text).join(', ')}`,
     },
     {
-      id: 'contract-mirrors-constraints',
-      label: 'The behavior contract mirrors the constraints',
-      passed: missingContractLines.length === 0,
-      note:
-        missingContractLines.length === 0
-          ? 'the behavior contract mirrors the constraints'
-          : `constraints missing from behaviorContract: ${missingContractLines.map((c) => c.text).join(', ')}`,
-    },
-    {
-      id: 'verification-grounded',
-      label: 'A non-empty verification plan grounds the design',
+      id: 'verification-planned',
+      label: 'The architecture carries a non-empty verification plan',
       passed: architecture.artifact.verificationPlan.length > 0,
       note:
         architecture.artifact.verificationPlan.length > 0
-          ? 'the verification plan is non-empty'
+          ? 'the architecture carries a non-empty verification plan'
           : 'verificationPlan is empty',
     },
   ];
 
-  const violatedAdrs = [...new Set([...missingAdrs.map((a) => a.label), ...staleLabels])].sort();
+  const passedCount = checks.filter((c) => c.passed).length;
+  const score = Math.round((passedCount / checks.length) * 100);
   const failed = checks.filter((c) => !c.passed);
-  const verdict: DesignCriticOutcome = failed.length === 0 ? 'pass' : 'rework';
+  const verdict: CriticVerdict['verdict'] = failed.length === 0 ? 'pass' : 'rework';
   const rationale = failed.length === 0 ? `All ${checks.length} checks passed.` : failed.map((c) => c.note).join('; ');
+  const violatedAdrs = [...new Set([...missing, ...conflicts.map((c) => c.backing.label)])].sort();
 
-  return { verdict, violatedAdrs, rationale, checks };
+  return { verdict, score, rationale, checks, violatedAdrs };
 }
 
-/** The deterministic reworker: fixes what it can, leaves the rest for the loop to judge honestly. */
-export function reworkEpicArchitectureMechanically(
+/** The deterministic critic-side reworker: fixes what it can, leaves the rest for the loop to judge honestly. */
+export function reworkArchitectureMechanically(
   architecture: EpicArchitecture,
-  verdict: DesignCriticVerdict,
+  verdict: CriticVerdict,
   _doc: IntentDoc,
   adrs: readonly EpicAdr[],
 ): EpicArchitecture {
   const failedIds = new Set(verdict.checks.filter((c) => !c.passed).map((c) => c.id));
-  if (failedIds.size === 0) {
+  const fixable = ['adrs-covered', 'no-adr-conflicts', 'deviations-declared'];
+  if (!fixable.some((id) => failedIds.has(id))) {
     return architecture;
   }
 
-  let constraints: readonly ArchitectureConstraint[] = architecture.constraints;
-  let deviations = architecture.deviations;
-  let openQuestions = architecture.artifact.openQuestions;
-  let fixed = false;
-  let constraintsChanged = false;
+  let constraints = [...architecture.constraints];
+  let deviations = [...architecture.deviations];
 
-  if (failedIds.has('adrs-honored')) {
-    const missingAdrs = adrs.filter((adr) => !constraints.some((c) => c.adr === adr.label));
-    const newConstraints: ArchitectureConstraint[] = missingAdrs.map((adr) => ({
-      text: `${adr.label} — ${adr.title}: ${condense(adr.decision, 300)}`,
-      adr: adr.label,
-    }));
-    constraints = [...newConstraints, ...constraints];
-    fixed = true;
-    constraintsChanged = true;
-  }
-
-  if (failedIds.has('adr-citations-active')) {
-    const activeLabels = new Set(adrs.map((adr) => adr.label));
-    const newDeviations = [...deviations];
-    let newOpenQuestions = [...openQuestions];
-
-    constraints = constraints.map((c) => {
-      if (c.adr === undefined || activeLabels.has(c.adr)) {
-        return c;
+  if (failedIds.has('no-adr-conflicts')) {
+    deviations = deviations.filter((d) => {
+      const backing = findBackingAdr(d.subject, adrs);
+      if (backing === undefined) {
+        return true;
       }
-      newDeviations.push({ subject: c.adr.toLowerCase(), text: c.text });
-      const openQuestion = `needs a new ADR: ${c.text}`;
-      if (!newOpenQuestions.includes(openQuestion)) {
-        newOpenQuestions = [...newOpenQuestions, openQuestion];
-      }
-      return { text: c.text };
+      constraints = constraints.map((c) =>
+        c.text === d.text && c.adr === undefined ? { text: `${d.text} (per ${backing.label})`, adr: backing.label } : c,
+      );
+      return false;
     });
-
-    deviations = newDeviations;
-    openQuestions = newOpenQuestions;
-    fixed = true;
-    constraintsChanged = true;
   }
 
-  if (failedIds.has('deviations-disclosed')) {
-    for (const deviation of deviations) {
-      const openQuestion = `needs a new ADR: ${deviation.text}`;
-      if (!openQuestions.includes(openQuestion)) {
-        openQuestions = [...openQuestions, openQuestion];
-      }
-    }
-    fixed = true;
+  if (failedIds.has('adrs-covered')) {
+    const missingAdrs = adrs.filter((adr) => !constraints.some((c) => c.adr === adr.label));
+    constraints = [...missingAdrs.map(adrConstraintOf), ...constraints];
   }
 
-  // Rebuild whenever the fixes above changed constraints, not just when this check
-  // originally failed — otherwise a newly-added/rewritten constraint's text would be
-  // absent from behaviorContract, turning a fix into a fresh contract-mirrors-constraints
-  // failure the bounded loop can't tell apart from no progress at all.
-  let behaviorContract = architecture.artifact.behaviorContract;
-  if (failedIds.has('contract-mirrors-constraints') || constraintsChanged) {
-    behaviorContract = constraints.map((c) => c.text);
-    fixed = true;
-  }
-
-  if (!fixed) {
-    return architecture;
-  }
-
+  const behaviorContract = constraints.map((c: ArchitectureConstraint) => c.text);
+  const openQuestions = [
+    ...architecture.artifact.openQuestions.filter((q) => !q.startsWith('needs a new ADR: ')),
+    ...deviations.map((d) => `needs a new ADR: ${d.text}`),
+  ];
   const artifact = DesignArtifactSchema.parse({ ...architecture.artifact, behaviorContract, openQuestions });
 
   return { artifact, constraints, deviations };
@@ -241,20 +199,19 @@ export function reworkEpicArchitectureMechanically(
  * loop is the for-loop over 1..maxIterations, so no injected critic/reworker (however adversarial) can
  * make this run indefinitely.
  */
-export async function critiqueEpicDesign(
+export async function runEpicDesignCritic(
   architecture: EpicArchitecture,
   doc: IntentDoc,
   adrs: readonly EpicAdr[],
-  deps: DesignCriticDeps = {},
-  options: DesignCriticOptions = {},
-): Promise<CritiquedDesign> {
-  const critic = deps.critic ?? critiqueEpicDesignAgainstAdrs;
-  const rework = deps.rework ?? reworkEpicArchitectureMechanically;
+  deps: EpicDesignCriticDeps = {},
+  options: EpicDesignCriticOptions = {},
+): Promise<EpicDesignCritique> {
+  const critic = deps.critic ?? critiqueEpicArchitecture;
+  const rework = deps.rework ?? reworkArchitectureMechanically;
   const maxIterations = resolveMaxIterations(options);
-  const failedCount = (v: DesignCriticVerdict) => v.checks.filter((c) => !c.passed).length;
 
   let best = { architecture, verdict: await critic(architecture, doc, adrs) };
-  const failedCheckHistory: number[] = [failedCount(best.verdict)];
+  const scoreHistory: number[] = [best.verdict.score];
 
   if (best.verdict.verdict === 'pass') {
     return {
@@ -262,22 +219,22 @@ export async function critiqueEpicDesign(
       verdict: best.verdict,
       iterations: 0,
       stopReason: 'passed',
-      failedCheckHistory,
+      scoreHistory,
     };
   }
 
   for (let i = 1; i <= maxIterations; i++) {
     const candidate = await rework(best.architecture, best.verdict, doc, adrs);
     const verdict = await critic(candidate, doc, adrs);
-    failedCheckHistory.push(failedCount(verdict));
+    scoreHistory.push(verdict.score);
 
-    if (failedCount(verdict) >= failedCount(best.verdict)) {
+    if (verdict.score <= best.verdict.score) {
       return {
         architecture: best.architecture,
         verdict: best.verdict,
         iterations: i,
         stopReason: 'no-improvement',
-        failedCheckHistory,
+        scoreHistory,
       };
     }
 
@@ -288,7 +245,7 @@ export async function critiqueEpicDesign(
         verdict: best.verdict,
         iterations: i,
         stopReason: 'passed',
-        failedCheckHistory,
+        scoreHistory,
       };
     }
   }
@@ -298,6 +255,6 @@ export async function critiqueEpicDesign(
     verdict: best.verdict,
     iterations: maxIterations,
     stopReason: 'max-iterations',
-    failedCheckHistory,
+    scoreHistory,
   };
 }

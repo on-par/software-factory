@@ -6,7 +6,7 @@ import type { Decomposition } from '../decompose/index.js';
 import type { IntentDoc } from '../intent/index.js';
 import { assessReadiness } from '../readiness/index.js';
 import type { EpicAdr } from './adrs.js';
-import { designEpicArchitecture } from './design.js';
+import { adrConstraintOf, designEpicArchitecture, findBackingAdr } from './design.js';
 import type { RepoSurvey } from './survey.js';
 
 const APPROVED_DOC: IntentDoc = {
@@ -300,5 +300,40 @@ describe('designEpicArchitecture', () => {
         source: 'epic-architecture',
       },
     ]);
+  });
+});
+
+describe('adrConstraintOf', () => {
+  it('returns the exact backed-constraint shape for an ADR', () => {
+    expect(adrConstraintOf(WIDGET_ADR)).toEqual({
+      text: 'ADR-0001 — Widget architecture: Widgets are built as packages/widget.',
+      adr: 'ADR-0001',
+    });
+  });
+
+  it('condenses a >300-char decision with an ellipsis', () => {
+    const longAdr: EpicAdr = { ...WIDGET_ADR, decision: 'a'.repeat(310) };
+
+    expect(adrConstraintOf(longAdr)).toEqual({
+      text: `ADR-0001 — Widget architecture: ${'a'.repeat(300)}…`,
+      adr: 'ADR-0001',
+    });
+  });
+});
+
+describe('findBackingAdr', () => {
+  it('finds an ADR by a title substring, matching case-insensitively against the ADR title', () => {
+    const shoutingAdr: EpicAdr = { ...WIDGET_ADR, title: 'WIDGET ARCHITECTURE' };
+    expect(findBackingAdr('widget architecture', [WIDGET_ADR])).toBe(WIDGET_ADR);
+    expect(findBackingAdr('widget', [shoutingAdr])).toBe(shoutingAdr);
+  });
+
+  it('finds an ADR by a decision-text substring', () => {
+    expect(findBackingAdr('packages/widget', [WIDGET_ADR])).toBe(WIDGET_ADR);
+  });
+
+  it('returns undefined when no ADR matches', () => {
+    expect(findBackingAdr('onboarding', [WIDGET_ADR])).toBeUndefined();
+    expect(findBackingAdr('widget', [])).toBeUndefined();
   });
 });

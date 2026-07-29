@@ -3,7 +3,7 @@ import type { DesignArtifact } from '@on-par/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { renderEpicArchitecture } from '../export/index.js';
-import type { CritiquedDesign } from './critic.js';
+import type { EpicDesignCritique } from './critic.js';
 import type { EpicArchitecture } from './design.js';
 import { renderArchitectureReport, renderCriticReport } from './render.js';
 
@@ -61,61 +61,62 @@ const CRITIQUED_ARCHITECTURE: EpicArchitecture = {
   deviations: [],
 };
 
-const REWORK_RESULT: CritiquedDesign = {
+const REWORK_RESULT: EpicDesignCritique = {
   architecture: CRITIQUED_ARCHITECTURE,
   verdict: {
     verdict: 'rework',
+    score: 60,
     violatedAdrs: ['ADR-0004'],
-    rationale: 'design contradicts active ADR(s) it does not carry as constraints: ADR-0004',
+    rationale: 'active ADRs missing from the constraints: ADR-0004',
     checks: [
       {
-        id: 'adrs-honored',
+        id: 'adrs-covered',
         label: 'Every active ADR is carried as a constraint',
         passed: false,
-        note: 'design contradicts active ADR(s) it does not carry as constraints: ADR-0004',
+        note: 'active ADRs missing from the constraints: ADR-0004',
       },
       {
-        id: 'verification-grounded',
-        label: 'A non-empty verification plan grounds the design',
+        id: 'verification-planned',
+        label: 'The architecture carries a non-empty verification plan',
         passed: true,
-        note: 'the verification plan is non-empty',
+        note: 'the architecture carries a non-empty verification plan',
       },
     ],
   },
-  iterations: 2,
+  iterations: 1,
   stopReason: 'no-improvement',
-  failedCheckHistory: [2, 1, 1],
+  scoreHistory: [60, 60],
 };
 
-const PASS_RESULT: CritiquedDesign = {
+const PASS_RESULT: EpicDesignCritique = {
   architecture: CRITIQUED_ARCHITECTURE,
-  verdict: { verdict: 'pass', violatedAdrs: [], rationale: 'All 6 checks passed.', checks: [] },
+  verdict: { verdict: 'pass', score: 100, violatedAdrs: [], rationale: 'All 5 checks passed.', checks: [] },
   iterations: 0,
   stopReason: 'passed',
-  failedCheckHistory: [0],
+  scoreHistory: [100],
 };
 
 describe('renderCriticReport', () => {
-  it('includes the verdict line, violated-ADR line, failed-check bullets, and the history arrow line on a rework result', () => {
+  it('includes the verdict line, violated-ADR line, failed-check bullets, and the score history arrow line on a rework result', () => {
     const lines = renderCriticReport(REWORK_RESULT);
 
-    expect(lines[0]).toBe('# Epic-Design Critic Report');
-    expect(lines).toContain('Verdict: rework');
-    expect(lines).toContain('Stop reason: no-improvement after 2 rework iteration(s)');
-    expect(lines).toContain('Failed-check history: 2 → 1 → 1');
-    expect(lines).toContain('Rationale: design contradicts active ADR(s) it does not carry as constraints: ADR-0004');
+    expect(lines[0]).toBe('# Epic-Design Critique');
+    expect(lines).toContain('Verdict: rework — 60/100');
+    expect(lines).toContain('Stop reason: no-improvement after 1 rework iteration(s)');
+    expect(lines).toContain('Score history: 60 → 60');
+    expect(lines).toContain('Rationale: active ADRs missing from the constraints: ADR-0004');
     expect(lines).toContain('Violated ADRs: ADR-0004');
     expect(lines).toContain('Failed checks:');
-    expect(lines).toContain(
-      '- adrs-honored: design contradicts active ADR(s) it does not carry as constraints: ADR-0004',
-    );
+    expect(lines).toContain('- adrs-covered: active ADRs missing from the constraints: ADR-0004');
   });
 
-  it('reports Stop reason: passed and omits the Failed checks section and Violated ADRs line on a pass result', () => {
+  it('reports Stop reason: passed, Violated ADRs: none, and omits the Failed checks section on a pass result', () => {
     const lines = renderCriticReport(PASS_RESULT);
 
+    expect(lines).toContain('Verdict: pass — 100/100');
     expect(lines).toContain('Stop reason: passed');
+    expect(lines).toContain('Score history: 100');
+    expect(lines).toContain('Violated ADRs: none');
     expect(lines).not.toContain('Failed checks:');
-    expect(lines.some((l) => l.startsWith('Violated ADRs:'))).toBe(false);
   });
 });
