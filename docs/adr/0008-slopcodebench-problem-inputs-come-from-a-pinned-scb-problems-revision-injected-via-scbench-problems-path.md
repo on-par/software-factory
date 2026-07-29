@@ -6,7 +6,7 @@
 ## Context
 
 The pinned SCBench harness commit (13de1a7a) does not contain the
-benchmark problems. Its `problem_catalog.py` downloads the *latest*
+benchmark problems. Its `problem_catalog.py` downloads the _latest_
 GitHub release of the separate `gabeorlanski/scb-problems` repository
 into a mutable per-host cache (`~/.cache/scbench`) on first use — so a
 harness SHA alone leaves the actual problem definitions, and therefore
