@@ -36,6 +36,18 @@ export function createExecaExec(): ExecFn {
 const GIT_EXCLUDE_ENTRY = '.factory/';
 const GIT_USER_ARGS = ['-c', 'user.email=scbench@local', '-c', 'user.name=scbench'];
 
+/** Read a file's content, treating "does not exist" as empty. Reads directly
+ *  instead of check-then-read (existsSync followed by readFileSync) so there
+ *  is no TOCTOU window between the check and the read. */
+function readIfPresent(path: string): string {
+  try {
+    return readFileSync(path, 'utf-8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return '';
+    throw err;
+  }
+}
+
 /** Idempotent: git-inits (with an initial commit) only when .git is absent,
  *  ensures .factory/{,logs,plans} exist without requiring `factory init` or
  *  a GitHub token, and excludes .factory/ via .git/info/exclude so Factory
@@ -54,7 +66,7 @@ export async function prepareWorkspace(dir: string, deps: WorkspaceDeps): Promis
   }
 
   const excludeFile = join(dir, '.git', 'info', 'exclude');
-  const existing = existsSync(excludeFile) ? readFileSync(excludeFile, 'utf-8') : '';
+  const existing = readIfPresent(excludeFile);
   if (!existing.includes(GIT_EXCLUDE_ENTRY)) {
     mkdirSync(join(dir, '.git', 'info'), { recursive: true });
     const separator = existing.length > 0 && !existing.endsWith('\n') ? '\n' : '';

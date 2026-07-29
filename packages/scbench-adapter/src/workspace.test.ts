@@ -61,6 +61,13 @@ describe('prepareWorkspace', () => {
     expect(exclude.match(/\.factory\//g)?.length).toBe(1);
   });
 
+  it('propagates a non-ENOENT error reading the exclude file (e.g. it is a directory)', async () => {
+    mkdirSync(join(dir, '.git', 'info', 'exclude'), { recursive: true });
+    const { exec } = fakeExec();
+
+    await expect(prepareWorkspace(dir, { exec })).rejects.toThrow(/EISDIR|illegal operation/i);
+  });
+
   it('preserves existing exclude entries and appends a trailing newline', async () => {
     mkdirSync(join(dir, '.git', 'info'), { recursive: true });
     writeFileSync(join(dir, '.git', 'info', 'exclude'), 'node_modules/');
