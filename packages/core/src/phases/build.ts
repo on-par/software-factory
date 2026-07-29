@@ -240,9 +240,14 @@ spec's Tests section and actually run them — report the exact command and its 
 If the repo has a fast verify path (scripts/verify.sh, npm test), run it and fix
 failures before finishing.
 
-When everything passes, create exactly ONE git commit with a clear, conventional
-message describing the change. Do NOT push, do NOT open a pull request, do NOT
-merge — a separate checker and ship phase handles that next.
+When everything passes, commit your work. Commit atomically: create one commit
+per independently testable functional change, each with a clear, conventional
+message describing what changed and why. Never mix unrelated functional changes
+in the same commit. A small single-slice task still yields exactly ONE commit —
+do not split one functional change across filler commits.
+
+Do NOT push, do NOT open a pull request, do NOT merge — a separate checker and
+ship phase handles that next.
 
 Stay strictly within the spec's scope: no unrelated refactors, no drive-by changes.
 If you get genuinely stuck, commit whatever safely builds/passes so far with a
@@ -277,6 +282,10 @@ A frozen, already-approved spec exists at ${specPath} (written by a separate pla
 issue or block on any plan gate. Auto-fix only high-confidence review findings; for
 uncertain findings apply the conservative default and note the deferral in the PR body.
 Never pause for permission or input — nobody is watching this session.
+
+Commit atomically: one commit per independently testable functional change, each
+with a clear conventional message; never mix unrelated functional changes in the
+same commit. A single-slice task still yields one clear commit.
 
 Stop at a green, ready-for-review PR — do NOT merge (the factory handles merging).
 CRITICAL: your session terminates the moment you end your turn, so NEVER end your
