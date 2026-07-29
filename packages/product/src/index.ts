@@ -1,5 +1,6 @@
-// packages/product/src/index.ts — @on-par/product public surface (#469, #470, #471, #472, #473, #474, #475, #476).
+// packages/product/src/index.ts — @on-par/product public surface (#469, #470, #471, #472, #473, #474, #475, #476, #477).
 export * from './adr-home.js';
+export * from './architecture/index.js';
 export * from './cli/program.js';
 export * from './cli/prompter.js';
 export * from './decompose/index.js';

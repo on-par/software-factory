@@ -36,7 +36,7 @@ software-factory/
 ```
 
 Dependency direction: `contracts ← core ← cli`, `config ← core ← cli`, `config ← core ← server`,
-`adr-kit ← product`, `adr-kit ← core`, and `repo-context ← core` — the ADR writer and
+`adr-kit ← product`, `adr-kit ← core`, `repo-context ← core`, and `repo-context ← product` — the ADR writer and
 readiness-conformance checker named in epic #464 consume them in later stories.
 
 ### What lives in `packages/core/src`
