@@ -67,10 +67,13 @@ const PUBLIC_API_KEYS = [
   'validateQueue',
   // Work requests
   'createDefaultWorkSourceRegistry',
+  'createFsBriefReader',
   'createGithubIssueAdapter',
+  'createLocalBriefAdapter',
   'createOctokitIssueClient',
   'GITHUB_ISSUE_SOURCE',
   'InvalidWorkRequestInputError',
+  'LOCAL_BRIEF_SOURCE',
   'UnsupportedWorkSourceError',
   'WorkSourceRegistry',
   // Events

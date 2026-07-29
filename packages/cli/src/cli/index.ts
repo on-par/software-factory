@@ -17,6 +17,7 @@ import type {
   KpiHistoryRecord,
   LaneProxy,
   LeaseHealth,
+  LocalBriefParams,
   ModelDiagnosis,
   QueueDiagnostic,
   ReadinessInfo,
@@ -25,6 +26,7 @@ import type {
   SandboxPolicy,
   UsageReading,
   WorkRequest,
+  WorkRequestSourceKind,
 } from '@on-par/factory-core';
 import {
   acquirePortLease,
@@ -65,6 +67,7 @@ import {
   loadModelsConfig,
   loadRepoConfig,
   loadRoutesConfig,
+  LOCAL_BRIEF_SOURCE,
   ModelRegistry,
   ModelRouter,
   parseKpiHistory,
@@ -265,6 +268,12 @@ export function parseIssueArg(raw: string): number {
     throw new CliExitError(`factory: invalid issue argument '${raw}' — expected a positive integer issue number`, 2);
   }
   return Number(trimmed);
+}
+
+/** Deterministic run number for a brief, derived from its content digest.
+ *  Reserved 9,000,000+ range keeps brief branches/worktrees clear of real issue numbers. */
+function briefRunNumber(sha256Hex: string): number {
+  return 9_000_000 + (Number.parseInt(sha256Hex.slice(0, 8), 16) % 1_000_000);
 }
 
 // Product names become a filename in the constitutions dir; keep them to a safe,
@@ -825,7 +834,14 @@ export function resolveLaneBaseUrl(
 export async function shipIssue(
   issueNum: number,
   opts: { product?: string; autoRework?: boolean; interactive?: boolean; sandbox?: boolean; approvePlan?: boolean },
-  ctx?: { repoRoot: string; ghRepo: string; lane?: string; workRequest?: WorkRequest },
+  ctx?: {
+    repoRoot: string;
+    ghRepo: string;
+    lane?: string;
+    workRequest?: WorkRequest;
+    /** Input source for planPhase to resolve; defaults inside planPhase to this run's GitHub issue. */
+    workSource?: { kind: WorkRequestSourceKind; params: unknown };
+  },
 ) {
   const repoRoot = ctx?.repoRoot ?? (await getRepoRoot());
   const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo());
@@ -1028,6 +1044,7 @@ export async function shipIssue(
         : undefined,
       drainSteering: planApprovalEnabled ? () => drainSteering(paths.steering, issueNum, worktree) : undefined,
       codexDisabled: codexOff,
+      workSource: ctx?.workSource,
     });
     route = plan.route;
     if (!plan.ok) {
@@ -1149,6 +1166,7 @@ export async function shipIssue(
       startedAt: runStartedAt,
       logsDir: paths.logs,
       reworkRounds: check.reworkRounds,
+      work: ctx?.workRequest,
     });
     if (!ship.ok) {
       throw new LaneParkError(
@@ -1311,6 +1329,59 @@ async function cmdRunIssue(
     await shipIssue(issueNum, opts, { repoRoot, ghRepo, workRequest: work });
   } catch (err: any) {
     throw new CliExitError(`Run failed for issue #${issueNum}: ${err.message}`, 1);
+  }
+}
+
+async function cmdRunBrief(
+  briefPath: string,
+  opts: { product?: string; autoRework?: boolean; interactive?: boolean; sandbox?: boolean; approvePlan?: boolean },
+) {
+  if (!isCommandAvailable('claude')) {
+    throw new CliExitError(`factory: ${missingClaudeCliMessage()}`, 2);
+  }
+  const repoRoot = await getRepoRoot();
+  const paths = getFactoryPaths(repoRoot);
+  if (!existsSync(paths.state)) {
+    throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
+  }
+  const ghRepo = await getGitHubRepo();
+
+  // Pre-flight: resolve the brief through the canonical work-request seam
+  // BEFORE any worktree or PR exists — a malformed brief exits here, so BUILD never starts.
+  const workSources = createDefaultWorkSourceRegistry({ octokit: getOctokit() });
+  let work: WorkRequest;
+  try {
+    work = await workSources.resolve(LOCAL_BRIEF_SOURCE, { path: briefPath } satisfies LocalBriefParams);
+  } catch (err) {
+    if (err instanceof InvalidWorkRequestInputError) {
+      throw new CliExitError(`factory: ${err.message}`, 2);
+    }
+    throw new CliExitError(
+      `factory: could not resolve brief at ${briefPath} (${errorDetail(err)}) — no worktree or PR was created`,
+      2,
+    );
+  }
+  const digest = work.reference?.externalId ?? '';
+  const runNum = briefRunNumber(digest);
+  console.log(chalk.cyan(`one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
+  logEvent(paths.events, 'work-source', runNum, `inline local brief ${briefPath} (sha256 ${digest})`);
+
+  const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
+  if (hasUnresolvedPark(priorEvents, String(runNum))) {
+    logEvent(paths.events, 'human-restarted', runNum, 'manual retry of a previously parked/failed run', {
+      actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
+    });
+  }
+
+  try {
+    await shipIssue(runNum, opts, {
+      repoRoot,
+      ghRepo,
+      workRequest: work,
+      workSource: { kind: LOCAL_BRIEF_SOURCE, params: { path: briefPath } satisfies LocalBriefParams },
+    });
+  } catch (err: any) {
+    throw new CliExitError(`Run failed for brief ${briefPath}: ${err.message}`, 1);
   }
 }
 
@@ -2758,6 +2829,20 @@ export async function main() {
     .option('--no-sandbox', 'Disable the containment sandbox for agent runs (dangerous)')
     .action(async (issueNum, opts) => {
       await cmdRunIssue(parseIssueArg(issueNum), opts);
+    });
+
+  program
+    .command('run-brief <file>')
+    .description(
+      'One-shot: resolve a local Markdown brief through the canonical work-request seam and run plan → build → check → ship (queue untouched)',
+    )
+    .option('--product <name>', 'Override active product constitution')
+    .option('--no-auto-rework', 'Disable automatic rework loop')
+    .option('--interactive', 'Pause before opening the PR and wait for approval from the TUI')
+    .option('--approve-plan', 'Pause after PLAN freezes the spec and wait for approval before BUILD')
+    .option('--no-sandbox', 'Disable the containment sandbox for agent runs (dangerous)')
+    .action(async (file, opts) => {
+      await cmdRunBrief(file, opts);
     });
 
   program

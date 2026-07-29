@@ -13,6 +13,8 @@ import { gatherEvidencePack } from '../reports/evidence-pack.js';
 import type { CheckSummary } from '../types/index.js';
 import { watchChecks } from '../utils/ci-watch.js';
 import { shellEscape } from '../utils/index.js';
+import { GITHUB_ISSUE_SOURCE } from '../work/github-issue.js';
+import type { WorkRequest } from '../work/index.js';
 
 const exec = promisify(execCb);
 type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<{ stdout: string }>;
@@ -41,6 +43,9 @@ export async function shipPhase(opts: {
   logsDir?: string;
   reworkRounds?: number;
   today?: string;
+  /** The run's resolved work request; when its kind is not 'github-issue', the PR
+   *  title/body come from it instead of fetching the (nonexistent) issue (#507). */
+  work?: Pick<WorkRequest, 'id' | 'kind' | 'title'>;
 }): Promise<ShipResult> {
   const { issue, repo, worktree, branch, octokit, watchCI = true, log, run = exec, approvalGate, checkSummary } = opts;
   const [owner, repoName] = repo.split('/');
@@ -107,12 +112,19 @@ export async function shipPhase(opts: {
       log('ship', 'push failed — trying to continue');
     }
 
-    // Get title from issue
-    const { data: issueData } = await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issue });
-    const title = issueData.title;
+    const inlineWork = opts.work && opts.work.kind !== GITHUB_ISSUE_SOURCE ? opts.work : undefined;
+
+    // Get title from issue (skipped for a non-github work source — no such issue exists)
+    const title = inlineWork
+      ? inlineWork.title
+      : (await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issue })).data.title;
 
     // Get diff stats (reuse the approval gate's diff stat when already computed)
     const stat = diffStat ?? (await computeDiffStat(run, worktree));
+
+    const summaryLine = inlineWork
+      ? `Implements local brief \`${inlineWork.id}\`. Built by the Software Factory (PLAN → BUILD → CHECK → SHIP).`
+      : `Implements #${issue}. Built by the Software Factory (PLAN → BUILD → CHECK → SHIP).`;
 
     // Create PR
     const { data: pr } = await octokit.rest.pulls.create({
@@ -120,9 +132,9 @@ export async function shipPhase(opts: {
       repo: repoName,
       head: branch,
       base: 'main',
-      title: `${title} (#${issue})`,
+      title: inlineWork ? title : `${title} (#${issue})`,
       body: `## Summary
-Implements #${issue}. Built by the Software Factory (PLAN → BUILD → CHECK → SHIP).
+${summaryLine}
 
 ## Changes
 \`\`\`
@@ -130,9 +142,7 @@ ${stat}
 \`\`\`
 
 ## Verification
-This PR passed independent verification by checker agents before shipping.
-
-Closes #${issue}`,
+This PR passed independent verification by checker agents before shipping.${inlineWork ? '' : `\n\nCloses #${issue}`}`,
     });
 
     prNumber = pr.number;

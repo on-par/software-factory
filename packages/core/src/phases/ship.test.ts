@@ -386,6 +386,75 @@ describe('shipPhase self-healing', () => {
   });
 });
 
+describe('shipPhase inline work source (#507)', () => {
+  it('titles and bodies the PR from a non-github work request without fetching the issue', async () => {
+    const { octokit, calls } = createOctokit();
+    octokit.rest.issues.get = async () => {
+      throw new Error('issues.get should never be called for an inline work source');
+    };
+    const run = async (command: string) => {
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' brief.ts | 3 +++\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 9000123,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-9000123',
+      branch: 'ship-it/9000123-add-a-widget',
+      octokit: octokit as any,
+      watchCI: false,
+      log: () => {},
+      run,
+      work: { id: 'local-brief:brief.md#abc123def456', kind: 'local-brief', title: 'Add a widget' },
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 123 });
+    expect(calls).toContainEqual([
+      'pulls.create',
+      expect.objectContaining({
+        title: 'Add a widget',
+        body: expect.stringContaining('Implements local brief `local-brief:brief.md#abc123def456`'),
+      }),
+    ]);
+    const [, createArgs] = calls.find(([name]) => name === 'pulls.create') as [string, any];
+    expect(createArgs.body).not.toContain('Closes #');
+  });
+
+  it('behaves exactly like today when work is a github-issue request (run-issue passthrough is inert)', async () => {
+    const { octokit, calls } = createOctokit();
+    const run = async (command: string) => {
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: () => {},
+      run,
+      work: { id: 'github-issue:on-par/software-factory#23', kind: 'github-issue', title: 'Self-heal committed work' },
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 123 });
+    expect(calls).toContainEqual([
+      'pulls.create',
+      expect.objectContaining({
+        title: 'Self-heal committed work (#23)',
+        body: expect.stringContaining('Closes #23'),
+      }),
+    ]);
+  });
+});
+
 describe('shipPhase CI watch', () => {
   it('logs CI green and stops polling once all checks complete successfully', async () => {
     const { octokit, callCount } = createWatchOctokit([pending, pending, allSuccess]);
