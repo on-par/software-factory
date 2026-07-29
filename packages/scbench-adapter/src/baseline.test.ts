@@ -35,10 +35,16 @@ const VALID_CONFIG = {
   baselineId: 'test-baseline',
   factory: { repo: 'https://example.com/repo', commit: 'a'.repeat(40), packageVersion: '2.0.0' },
   scbench: { repo: 'https://example.com/scbench', commit: 'b'.repeat(40), pinnedAt: '2026-07-28' },
+  problemCatalog: {
+    repo: 'https://example.com/problems',
+    version: 'v1.0',
+    commit: 'c'.repeat(40),
+    pinnedAt: '2026-07-29',
+  },
   modelConfig: { source: 'models.json', env: { FACTORY_LOCAL_ONLY: 'unset' } },
   promptInputs: 'briefs from materializeBrief',
   environment: { node: '>=20', requiredBinaries: ['git'], hostClass: 'test', scbenchHarness: 'python' },
-  problems: { selection: 'deterministic', smoke: 'first', suite: 'first three' },
+  problems: { resolvedFrom: 'resolved from the catalog commit', smoke: 'alpha', suite: ['alpha', 'beta', 'gamma'] },
   trials: { smokeRuns: 2, suiteTrialsPerProblem: 3 },
   comparisonThreshold: 10,
   passPolicy: { id: 'core-cases' as const, description: 'Core-group tests must all pass.' },
@@ -66,6 +72,9 @@ describe('loadBaselineConfig', () => {
       id: 'core-cases',
       description: expect.stringContaining('PassPolicy.CORE_CASES'),
     });
+    expect(config.problemCatalog.commit).toBe('4d38d300059667d57e43c31969bc455f5c338b52');
+    expect(config.problems.smoke).toBe('cfgpipe');
+    expect(config.problems.suite).toEqual(['cfgpipe', 'circuit_eval', 'code_search']);
   });
 
   it('accepts a well-formed synthetic config', () => {
@@ -126,6 +135,61 @@ describe('loadBaselineConfig', () => {
       /passPolicy\.description/,
     );
   });
+
+  it('rejects a malformed problemCatalog.commit', () => {
+    expect(() =>
+      loadBaselineConfig(
+        JSON.stringify({ ...VALID_CONFIG, problemCatalog: { ...VALID_CONFIG.problemCatalog, commit: 'short' } }),
+      ),
+    ).toThrow(/problemCatalog\.commit/);
+  });
+
+  it('rejects an empty problemCatalog.version', () => {
+    expect(() =>
+      loadBaselineConfig(
+        JSON.stringify({ ...VALID_CONFIG, problemCatalog: { ...VALID_CONFIG.problemCatalog, version: '' } }),
+      ),
+    ).toThrow(/problemCatalog\.version/);
+  });
+
+  it('rejects problems.smoke as a prose selection rule instead of an exact id', () => {
+    expect(() =>
+      loadBaselineConfig(
+        JSON.stringify({
+          ...VALID_CONFIG,
+          problems: { ...VALID_CONFIG.problems, smoke: 'the lexicographically first problem id' },
+        }),
+      ),
+    ).toThrow(/problems\.smoke/);
+  });
+
+  it('rejects problems.suite as a string instead of an array', () => {
+    expect(() =>
+      loadBaselineConfig(
+        JSON.stringify({ ...VALID_CONFIG, problems: { ...VALID_CONFIG.problems, suite: 'first three' } }),
+      ),
+    ).toThrow(/problems\.suite/);
+  });
+
+  it('rejects an empty problems.suite array', () => {
+    expect(() =>
+      loadBaselineConfig(JSON.stringify({ ...VALID_CONFIG, problems: { ...VALID_CONFIG.problems, suite: [] } })),
+    ).toThrow(/problems\.suite/);
+  });
+
+  it('rejects duplicate ids in problems.suite', () => {
+    expect(() =>
+      loadBaselineConfig(
+        JSON.stringify({ ...VALID_CONFIG, problems: { ...VALID_CONFIG.problems, suite: ['alpha', 'alpha'] } }),
+      ),
+    ).toThrow(/problems\.suite/);
+  });
+
+  it('rejects an empty problems.resolvedFrom', () => {
+    expect(() =>
+      loadBaselineConfig(JSON.stringify({ ...VALID_CONFIG, problems: { ...VALID_CONFIG.problems, resolvedFrom: '' } })),
+    ).toThrow(/problems\.resolvedFrom/);
+  });
 });
 
 describe('baseline.config.json pin-drift guard', () => {
@@ -133,7 +197,8 @@ describe('baseline.config.json pin-drift guard', () => {
     const config = loadBaselineConfig(readFileSync(BASELINE_CONFIG_PATH, 'utf-8'));
     const pin = JSON.parse(readFileSync(PIN_PATH, 'utf-8'));
 
-    expect(config.scbench).toEqual(pin);
+    expect(config.scbench).toEqual({ repo: pin.repo, commit: pin.commit, pinnedAt: pin.pinnedAt });
+    expect(config.problemCatalog).toEqual(pin.problems);
     expect(config.factory.commit).toMatch(/^[0-9a-f]{40}$/);
   });
 });

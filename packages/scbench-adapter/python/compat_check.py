@@ -60,6 +60,56 @@ def check_pin() -> Path:
     return checkout
 
 
+def check_problem_catalog():
+    """Refuses to proceed unless SCBENCH_PROBLEMS_PATH points at a checkout of
+    the pinned scb-problems catalog commit, and verifies the baseline's
+    resolved problem ids each have a config.yaml directory there. Baseline
+    runs never use the auto-synced ~/.cache/scbench catalog."""
+    import subprocess
+
+    pin = json.loads(PIN_PATH.read_text())
+    pinned_sha = pin["problems"]["commit"]
+
+    override = os.environ.get("SCBENCH_PROBLEMS_PATH")
+    if not override:
+        raise SystemExit(
+            "error: SCBENCH_PROBLEMS_PATH must point to a checkout of the pinned scb-problems "
+            "catalog — baseline runs never use the auto-synced ~/.cache/scbench catalog"
+        )
+    catalog = Path(override)
+    if not catalog.is_dir():
+        raise SystemExit(f"error: SCBENCH_PROBLEMS_PATH {catalog} is not an existing directory")
+
+    result = subprocess.run(
+        ["git", "-C", str(catalog), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    actual_sha = result.stdout.strip()
+    if actual_sha != pinned_sha:
+        message = (
+            f"SCBENCH_PROBLEMS_PATH checkout HEAD {actual_sha} does not match pinned problem "
+            f"catalog commit {pinned_sha} (scbench.pin.json problems.commit)"
+        )
+        if os.environ.get("SCBENCH_PIN_ALLOW_DRIFT") == "1":
+            print(f"warning: {message}")
+        else:
+            raise SystemExit(f"error: {message}")
+
+    baseline_config_path = ADAPTER_ROOT.parent.parent / "evals" / "scbench-baseline" / "baseline.config.json"
+    baseline_config = json.loads(baseline_config_path.read_text())
+    problem_ids = [baseline_config["problems"]["smoke"], *baseline_config["problems"]["suite"]]
+    for problem_id in problem_ids:
+        if not (catalog / problem_id / "config.yaml").exists():
+            raise SystemExit(
+                f"error: problem id {problem_id!r} (from {baseline_config_path}) has no "
+                f"config.yaml directory in the catalog checkout at {catalog}"
+            )
+
+    print(f"ok: resolved problem ids verified against catalog checkout: {', '.join(problem_ids)}")
+
+
 def check_registration():
     """Imports the shim and asserts it registered against the real registries."""
     import software_factory
@@ -219,6 +269,7 @@ def check_agent_lifecycle(software_factory, cfg2, checkout: Path):
 
 def main():
     checkout = check_pin()
+    check_problem_catalog()
     software_factory = check_registration()
     adapter_cli = check_adapter_cli()
     factory_bin = write_stub_factory_bin()

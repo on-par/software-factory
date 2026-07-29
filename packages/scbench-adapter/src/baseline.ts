@@ -12,10 +12,11 @@ export interface BaselineConfig {
   baselineId: string;
   factory: { repo: string; commit: string; packageVersion: string };
   scbench: { repo: string; commit: string; pinnedAt: string };
+  problemCatalog: { repo: string; version: string; commit: string; pinnedAt: string };
   modelConfig: { source: string; env: Record<string, string> };
   promptInputs: string;
   environment: { node: string; requiredBinaries: string[]; hostClass: string; scbenchHarness: string };
-  problems: { selection: string; smoke: string; suite: string };
+  problems: { resolvedFrom: string; smoke: string; suite: string[] };
   trials: { smokeRuns: number; suiteTrialsPerProblem: number };
   comparisonThreshold: number;
   passPolicy: { id: 'core-cases'; description: string };
@@ -25,6 +26,7 @@ const REQUIRED_KEYS = [
   'baselineId',
   'factory',
   'scbench',
+  'problemCatalog',
   'modelConfig',
   'promptInputs',
   'environment',
@@ -35,6 +37,7 @@ const REQUIRED_KEYS = [
 ] as const;
 
 const FULL_SHA_RE = /^[0-9a-f]{40}$/;
+const PROBLEM_ID_RE = /^[a-z0-9][a-z0-9_-]*$/;
 
 /** Parse + structurally validate a baseline config: every required
  *  top-level field present, a positive comparisonThreshold, and
@@ -68,6 +71,45 @@ export function loadBaselineConfig(raw: string): BaselineConfig {
   const scbench = config.scbench as { commit?: unknown } | null;
   if (typeof scbench?.commit !== 'string' || !FULL_SHA_RE.test(scbench.commit)) {
     throw new AdapterError('baseline config field "scbench.commit" must be a full-length (40 hex char) git SHA');
+  }
+
+  const problemCatalog = config.problemCatalog as {
+    repo?: unknown;
+    version?: unknown;
+    commit?: unknown;
+    pinnedAt?: unknown;
+  } | null;
+  if (typeof problemCatalog?.commit !== 'string' || !FULL_SHA_RE.test(problemCatalog.commit)) {
+    throw new AdapterError('baseline config field "problemCatalog.commit" must be a full-length (40 hex char) git SHA');
+  }
+  if (typeof problemCatalog.repo !== 'string' || problemCatalog.repo.length === 0) {
+    throw new AdapterError('baseline config field "problemCatalog.repo" must be a non-empty string');
+  }
+  if (typeof problemCatalog.version !== 'string' || problemCatalog.version.length === 0) {
+    throw new AdapterError('baseline config field "problemCatalog.version" must be a non-empty string');
+  }
+  if (typeof problemCatalog.pinnedAt !== 'string' || problemCatalog.pinnedAt.length === 0) {
+    throw new AdapterError('baseline config field "problemCatalog.pinnedAt" must be a non-empty string');
+  }
+
+  const problems = config.problems as { resolvedFrom?: unknown; smoke?: unknown; suite?: unknown } | null;
+  if (typeof problems?.smoke !== 'string' || !PROBLEM_ID_RE.test(problems.smoke)) {
+    throw new AdapterError(
+      'baseline config field "problems.smoke" must be an exact problem id from the pinned catalog (a selection rule is not reproducible)',
+    );
+  }
+  if (
+    !Array.isArray(problems.suite) ||
+    problems.suite.length === 0 ||
+    !problems.suite.every((id): id is string => typeof id === 'string' && PROBLEM_ID_RE.test(id)) ||
+    new Set(problems.suite).size !== problems.suite.length
+  ) {
+    throw new AdapterError(
+      'baseline config field "problems.suite" must be a non-empty array of unique exact problem ids from the pinned catalog',
+    );
+  }
+  if (typeof problems.resolvedFrom !== 'string' || problems.resolvedFrom.length === 0) {
+    throw new AdapterError('baseline config field "problems.resolvedFrom" must be a non-empty string');
   }
 
   const passPolicy = config.passPolicy as { id?: unknown; description?: unknown } | null;
@@ -310,7 +352,8 @@ function renderPinnedInputs(config: BaselineConfig): string {
     `- Model config: ${config.modelConfig.source}; env: ${formatEnv(config.modelConfig.env)}`,
     `- Prompt inputs: ${config.promptInputs}`,
     `- Environment: node ${config.environment.node}; binaries: ${config.environment.requiredBinaries.join(', ')}; host: ${config.environment.hostClass}; harness: ${config.environment.scbenchHarness}`,
-    `- Problem selection: ${config.problems.selection}; smoke: ${config.problems.smoke}; suite: ${config.problems.suite}`,
+    `- Problem catalog: \`${config.problemCatalog.repo}\` @ \`${config.problemCatalog.commit}\` (release ${config.problemCatalog.version}, pinned ${config.problemCatalog.pinnedAt}) — every run sets SCBENCH_PROBLEMS_PATH to a checkout of this revision`,
+    `- Problems: smoke \`${config.problems.smoke}\`; suite ${config.problems.suite.map((p) => `\`${p}\``).join(', ')} (${config.problems.resolvedFrom})`,
     `- Trial plan: ${config.trials.smokeRuns} smoke run(s), ${config.trials.suiteTrialsPerProblem} suite trial(s) per problem`,
     `- Pass policy: \`${config.passPolicy.id}\` — ${config.passPolicy.description}`,
   ].join('\n');
@@ -494,7 +537,7 @@ export function generateBaselineReport(config: BaselineConfig, trials: BaselineT
   const statusLines = [`**Trial count:** ${trials.length} (comparison threshold: ${config.comparisonThreshold})`];
   if (trials.length < config.comparisonThreshold) {
     statusLines.push(
-      `**Status: PRELIMINARY** — only ${trials.length} of the required ${config.comparisonThreshold} trials per configuration have been recorded. Configuration scope: baseline \`${config.baselineId}\`, factory commit \`${config.factory.commit}\`, scbench commit \`${config.scbench.commit}\`, model config env: ${formatEnv(config.modelConfig.env)}.`,
+      `**Status: PRELIMINARY** — only ${trials.length} of the required ${config.comparisonThreshold} trials per configuration have been recorded. Configuration scope: baseline \`${config.baselineId}\`, factory commit \`${config.factory.commit}\`, scbench commit \`${config.scbench.commit}\`, problem catalog commit \`${config.problemCatalog.commit}\`, model config env: ${formatEnv(config.modelConfig.env)}.`,
     );
   } else {
     statusLines.push('**Status: comparison-ready** — the trial count meets the comparison threshold.');

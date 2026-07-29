@@ -59,6 +59,9 @@ describe('python shim conformance (pinned SCBench API)', () => {
     expect(runConfig).toContain('type: software_factory');
     expect(runConfig).toContain('cost_limits');
     expect(runConfig).toContain('environment: local-py');
+    expect(runConfig).toContain('prompt: just-solve');
+    expect(runConfig).toContain('thinking: none');
+    expect(runConfig).toContain('pass_policy: core-cases');
   });
 
   it('wires the launcher to register the shim before invoking slop-code', () => {
@@ -68,6 +71,7 @@ describe('python shim conformance (pinned SCBench API)', () => {
 
   it('pins the compat check to the committed pin file', () => {
     expect(compatCheck).toContain('scbench.pin.json');
+    expect(compatCheck).toContain('SCBENCH_PROBLEMS_PATH');
   });
 
   it('is syntactically valid Python (skipped when python3 is unavailable)', async () => {

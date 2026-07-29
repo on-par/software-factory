@@ -31,14 +31,28 @@ publishing in the CLI.
    git checkout "$(node -p "require('../software-factory/packages/scbench-adapter/scbench.pin.json').commit")"
    ```
 
-2. Build the adapter from the Software Factory repo root:
+2. Clone the problem catalog at its pinned commit (`scbench.pin.json`'s `problems` block) and
+   export it. The pinned SCBench commit does not contain the benchmark problems — its
+   `problem_catalog.py` loads them from the separate
+   [`gabeorlanski/scb-problems`](https://github.com/gabeorlanski/scb-problems) repo,
+   auto-downloading the mutable _latest_ release into `~/.cache/scbench` unless
+   `SCBENCH_PROBLEMS_PATH` is set:
+
+   ```bash
+   git clone https://github.com/gabeorlanski/scb-problems.git
+   cd scb-problems
+   git checkout "$(node -p "require('../software-factory/packages/scbench-adapter/scbench.pin.json').problems.commit")"
+   export SCBENCH_PROBLEMS_PATH="$PWD"
+   ```
+
+3. Build the adapter from the Software Factory repo root:
 
    ```bash
    npm ci
    npm run build --workspace @on-par/scbench-adapter
    ```
 
-3. Register the custom agent by running it through the committed launcher.
+4. Register the custom agent by running it through the committed launcher.
    At the pinned commit, SCBench has **no custom-agent discovery mechanism**
    (`slop_code/agent_runner/agents/__init__.py` imports a hardcoded list), so
    the previously documented "copy/symlink into SCBench's agents directory"
@@ -70,10 +84,19 @@ publishing in the CLI.
    `scbench.run.yaml` if your environment needs them (e.g. a non-PATH
    `factory` binary via `factory_bin`, or `FACTORY_BIN`).
 
+   `scbench.run.yaml` also sets `thinking: none` and `pass_policy:
+core-cases` explicitly — both are real `RunConfig` fields (upstream
+   defaults `thinking` to `none` already, but `pass_policy` defaults to
+   `any`) — so the resolved run config carries no implicit inputs and stays
+   aligned with `baseline.config.json`'s pinned `passPolicy.id`.
+
 ## Prerequisites
 
 - `git`, and `uv` with a Python ≥ 3.12 environment (per upstream's
   `pyproject.toml`) for the pinned SCBench checkout.
+- `SCBENCH_PROBLEMS_PATH` set to a checkout of the pinned problem catalog
+  (`scbench.pin.json`'s `problems.commit`) — see step 2 above. Required for
+  every run; the auto-synced `~/.cache/scbench` catalog is never used.
 - The `claude` CLI on `PATH` (required by `factory run-brief`).
 - Node.js ≥ 20, with the adapter built (`dist/cli.js` present).
 - A `factory` binary on `PATH` (or set via `FACTORY_BIN`/`agent.factory_bin`
@@ -94,8 +117,14 @@ a real `Session`, two `run()` invocations through the real `dist/cli.js`
 workspace persistence across checkpoints, and that `cleanup()` never deletes
 the SCBench workspace. It refuses to run unless the checkout's git HEAD
 matches `scbench.pin.json`'s pinned commit (set `SCBENCH_PIN_ALLOW_DRIFT=1`
-to downgrade that to a warning during forward-porting work). Run it inside
-the pinned checkout's `uv` environment:
+to downgrade that to a warning during forward-porting work). It also
+validates the problem catalog: `SCBENCH_PROBLEMS_PATH` must be set and point
+at an existing checkout whose git HEAD matches `scbench.pin.json`'s
+`problems.commit` (missing or drifted checkouts are refused the same way,
+also downgradable with `SCBENCH_PIN_ALLOW_DRIFT=1`), and every resolved
+problem id in `evals/scbench-baseline/baseline.config.json` must have a
+`config.yaml` directory in that checkout. Run it inside the pinned
+checkout's `uv` environment:
 
 ```bash
 uv run --project "$SCBENCH_CHECKOUT" python packages/scbench-adapter/python/compat_check.py
