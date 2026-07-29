@@ -208,7 +208,13 @@ describe('utils', () => {
     const eventsFile = join(tmpDir, 'events.ndjson');
 
     logEvent(eventsFile, 'rework', 77, 'msg', {
-      rework: { round: 1, failingChecks: ['tests'], cause: 'factory-fault' },
+      rework: {
+        round: 1,
+        failingChecks: ['tests'],
+        cause: 'factory-fault',
+        failingTests: ['src/phases/build.test.ts > buildPhase > uses the Codex route'],
+        failureOutput: 'FAIL  src/phases/build.test.ts > buildPhase > uses the Codex route',
+      },
     });
 
     const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter(Boolean);
@@ -218,7 +224,13 @@ describe('utils', () => {
       issue: '77',
       msg: 'msg',
       level: 'warn',
-      rework: { round: 1, failingChecks: ['tests'], cause: 'factory-fault' },
+      rework: {
+        round: 1,
+        failingChecks: ['tests'],
+        cause: 'factory-fault',
+        failingTests: ['src/phases/build.test.ts > buildPhase > uses the Codex route'],
+        failureOutput: 'FAIL  src/phases/build.test.ts > buildPhase > uses the Codex route',
+      },
     });
   });
 

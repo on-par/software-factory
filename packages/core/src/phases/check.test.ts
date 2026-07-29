@@ -8,7 +8,7 @@ import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
-import type { Constitution } from '../types/index.js';
+import type { Constitution, ReworkInfo } from '../types/index.js';
 import { checkPhase, disputeResolution } from './check.js';
 
 const models: ModelsConfig = {
@@ -115,13 +115,7 @@ describe('checkPhase auto rework', () => {
     async () => {
       const { worktree, specPath } = await makeFailingWorktree();
       const { router } = makeRouter();
-      const logCalls: Array<
-        [
-          string,
-          string,
-          ({ rework?: { round: number; failingChecks: string[]; cause: string; stuck?: boolean } } | undefined)?,
-        ]
-      > = [];
+      const logCalls: Array<[string, string, ({ rework?: ReworkInfo } | undefined)?]> = [];
 
       await checkPhase({
         issue: 77,
@@ -146,9 +140,7 @@ describe('checkPhase auto rework', () => {
   it('emits a rework event carrying structured cause metadata', { timeout: 120_000 }, async () => {
     const { worktree, specPath } = await makeFailingWorktree();
     const { router } = makeRouter();
-    const logCalls: Array<
-      [string, string, ({ rework?: { round: number; failingChecks: string[]; cause: string } } | undefined)?]
-    > = [];
+    const logCalls: Array<[string, string, ({ rework?: ReworkInfo } | undefined)?]> = [];
 
     await checkPhase({
       issue: 77,
@@ -169,12 +161,65 @@ describe('checkPhase auto rework', () => {
     expect(first[2]?.rework?.failingChecks.length).toBeGreaterThan(0);
   });
 
+  it('captures bounded test identifiers and output in rework and stuck events', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeTestFailureEvidenceWorktree();
+    const { router } = makeRouter();
+    const logCalls: Array<[string, string, { rework?: ReworkInfo } | undefined]> = [];
+
+    await checkPhase({
+      issue: 491,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      log: (type, msg, extra) => {
+        logCalls.push([type, msg, extra]);
+      },
+    });
+
+    const rework = logCalls.find(([type]) => type === 'rework')?.[2]?.rework;
+    expect(rework).toMatchObject({
+      cause: 'factory-fault',
+      failingTests: [
+        'src/phases/build.test.ts > buildPhase > uses the Codex route',
+        'reports the fallback warning',
+        'restores the inherited environment',
+      ],
+    });
+    expect(rework?.failureOutput).toContain('FAIL  src/phases/build.test.ts > buildPhase > uses the Codex route');
+    expect(rework?.failureOutput?.length).toBeLessThanOrEqual(400);
+
+    const stuck = logCalls.find(([type]) => type === 'stuck')?.[2]?.rework;
+    expect(stuck?.failingTests).toEqual(rework?.failingTests);
+    expect(stuck?.failureOutput).toBe(rework?.failureOutput);
+  });
+
+  it('does not invent test evidence for non-test checker failures', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeLintFailingWorktree();
+    const { router } = makeRouter();
+    const logCalls: Array<[string, string, { rework?: ReworkInfo } | undefined]> = [];
+
+    await checkPhase({
+      issue: 492,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      log: (type, msg, extra) => {
+        logCalls.push([type, msg, extra]);
+      },
+    });
+
+    const rework = logCalls.find(([type]) => type === 'rework')?.[2]?.rework;
+    expect(rework).toMatchObject({ cause: 'factory-fault', failingChecks: ['lint'] });
+    expect(rework?.failingTests).toBeUndefined();
+    expect(rework?.failureOutput).toBeUndefined();
+  });
+
   it('classifies the rework cause as direction-change when steering was applied', { timeout: 120_000 }, async () => {
     const { worktree, specPath } = await makeFailingWorktree();
     const { router } = makeRouter();
-    const logCalls: Array<
-      [string, string, ({ rework?: { round: number; failingChecks: string[]; cause: string } } | undefined)?]
-    > = [];
+    const logCalls: Array<[string, string, ({ rework?: ReworkInfo } | undefined)?]> = [];
     const drainSteering = () => ({
       messages: [{ id: 'steer-1', issue: 77, text: 'change the spec', queuedAt: '2026-01-01T00:00:00.000Z' }],
       attachments: [],
@@ -1181,6 +1226,37 @@ async function makeFailingWorktree(): Promise<{ worktree: string; specPath: stri
   const specPath = join(worktree, 'issue-77.md');
   await writeFixture(worktree, 'issue-77.md', '# Spec: failing checks\n');
 
+  return { worktree, specPath };
+}
+
+async function makeTestFailureEvidenceWorktree(): Promise<{ worktree: string; specPath: string }> {
+  const worktree = await mkdtemp(join(tmpdir(), 'check-phase-test-evidence-'));
+  tempDirs.add(worktree);
+  const diagnostic = 'diagnostic output '.repeat(100);
+
+  await writeFixture(
+    worktree,
+    'package.json',
+    JSON.stringify({
+      scripts: {
+        test: `node -e "console.error('FAIL  src/phases/build.test.ts > buildPhase > uses the Codex route\\nnot ok 2 - reports the fallback warning\\nFAIL  restores the inherited environment\\nFAIL  fourth identifier is excluded\\n${diagnostic}'); process.exit(1)"`,
+      },
+    }),
+  );
+
+  const specPath = join(worktree, 'issue-491.md');
+  await writeFixture(worktree, 'issue-491.md', '# Spec: capture test failure evidence\n');
+  return { worktree, specPath };
+}
+
+async function makeLintFailingWorktree(): Promise<{ worktree: string; specPath: string }> {
+  const worktree = await mkdtemp(join(tmpdir(), 'check-phase-lint-failure-'));
+  tempDirs.add(worktree);
+
+  await writeFixture(worktree, 'package.json', JSON.stringify({ scripts: { test: 'exit 0', lint: 'exit 1' } }));
+
+  const specPath = join(worktree, 'issue-492.md');
+  await writeFixture(worktree, 'issue-492.md', '# Spec: non-test failure evidence\n');
   return { worktree, specPath };
 }
 

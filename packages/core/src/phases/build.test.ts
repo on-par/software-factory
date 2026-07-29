@@ -61,10 +61,18 @@ const routes: RoutesConfig = {
 };
 
 const tempDirs = new Set<string>();
+let inheritedFactoryCodex: string | undefined;
+
+beforeEach(() => {
+  inheritedFactoryCodex = process.env.FACTORY_CODEX;
+  delete process.env.FACTORY_CODEX;
+});
 
 afterEach(async () => {
   await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
   tempDirs.clear();
+  if (inheritedFactoryCodex === undefined) delete process.env.FACTORY_CODEX;
+  else process.env.FACTORY_CODEX = inheritedFactoryCodex;
 });
 
 describe('buildPhase FACTORY_CODEX kill-switch', () => {

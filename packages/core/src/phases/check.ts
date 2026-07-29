@@ -53,6 +53,28 @@ function failingCheckerNames(summary: CheckSummary): string[] {
   return summary.results.filter((r) => r.result === 'FAIL').map((r) => r.checker);
 }
 
+const MAX_FAILING_TESTS = 3;
+const MAX_FAILURE_OUTPUT_LENGTH = 400;
+
+/** Bounded test-failure evidence for rework events; absent unless the tests checker failed. */
+function testFailureEvidence(summary: CheckSummary): Pick<ReworkInfo, 'failingTests' | 'failureOutput'> {
+  const testsFailure = summary.results.find((result) => result.checker === 'tests' && result.result === 'FAIL');
+  if (!testsFailure) return {};
+
+  const details = testsFailure.details.slice(0, MAX_FAILURE_OUTPUT_LENGTH);
+  const failingTests = details
+    .split(/\r?\n/)
+    .flatMap((line) => line.match(/(?:\bFAIL|[×✕●])\s+(.+)/)?.[1] ?? line.match(/\bnot ok \d+\s*-\s*(.+)/i)?.[1] ?? [])
+    .map((identifier) => identifier.trim())
+    .filter((identifier) => identifier !== '')
+    .slice(0, MAX_FAILING_TESTS);
+
+  return {
+    ...(failingTests.length > 0 ? { failingTests } : {}),
+    ...(details !== '' ? { failureOutput: details } : {}),
+  };
+}
+
 const PLAYWRIGHT_CONFIG_FILES = [
   'playwright.config.ts',
   'playwright.config.js',
@@ -207,6 +229,7 @@ export async function checkPhase(opts: {
     reworkRounds++;
     const signatureBefore = failureSignature(summary);
     const failingChecks = failingCheckerNames(summary);
+    const evidence = testFailureEvidence(summary);
 
     const steering = drainSteering?.();
 
@@ -230,7 +253,7 @@ export async function checkPhase(opts: {
     log(
       'rework',
       `round ${reworkRounds}/${maxRounds}: ${summary.failures} failing (${failingChecks.join(', ')}) — cause=${cause}`,
-      { rework: { round: reworkRounds, failingChecks, cause } },
+      { rework: { round: reworkRounds, failingChecks, cause, ...evidence } },
     );
     if (steering && steering.messages.length > 0) {
       log('steering_applied', describeSteering(steering));
@@ -256,6 +279,7 @@ export async function checkPhase(opts: {
             failingChecks: failingCheckerNames(summary),
             cause: 'factory-fault',
             stuck: true,
+            ...testFailureEvidence(summary),
           },
         },
       );
