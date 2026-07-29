@@ -435,6 +435,121 @@ describe('buildPhase disablePublish', () => {
   });
 });
 
+describe('buildPhase atomic commit policy', () => {
+  it('codex route renders the atomic policy', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-538-codex.md');
+    await writeFile(specPath, '# Frozen spec 538\nDo the thing.\n');
+    const stub = new StubModelExecutor({ scripts: { build_codex: [{ output: 'committed' }] } });
+    const router = new ModelRouter(models, routes, false, stub);
+
+    const result = await buildPhase({
+      issue: 538,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/538-atomic-codex',
+      route: 'codex',
+      router,
+      constitution: null,
+      log: () => {},
+    });
+
+    expect(result.ok).toBe(true);
+    const prompt = stub.calls[stub.calls.length - 1].prompt;
+    expect(prompt).toContain('Commit atomically');
+    expect(prompt).toContain('independently testable functional change');
+    expect(prompt).toContain('unrelated functional changes');
+    expect(prompt).toContain('exactly ONE commit');
+  });
+
+  it('claude route + disablePublish renders the atomic policy', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-538-claude-disable-publish.md');
+    await writeFile(specPath, '# Frozen spec 538\nDo the thing.\n');
+    const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'committed' }] } });
+    const router = new ModelRouter(models, routes, false, stub);
+
+    const result = await buildPhase({
+      issue: 538,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/538-atomic-claude-disable-publish',
+      route: 'claude',
+      router,
+      constitution: null,
+      log: () => {},
+      disablePublish: true,
+    });
+
+    expect(result.ok).toBe(true);
+    const prompt = stub.calls[stub.calls.length - 1].prompt;
+    expect(prompt).toContain('Commit atomically');
+    expect(prompt).toContain('independently testable functional change');
+  });
+
+  it('claude publish route renders the atomic policy', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-538-claude-publish.md');
+    const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'ready for review' }] } });
+    const router = new ModelRouter(models, routes, false, stub);
+
+    const result = await buildPhase({
+      issue: 538,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/538-atomic-claude-publish',
+      route: 'claude',
+      router,
+      constitution: null,
+      log: () => {},
+    });
+
+    expect(result.ok).toBe(true);
+    const prompt = stub.calls[stub.calls.length - 1].prompt;
+    expect(prompt).toContain('/ship-it');
+    expect(prompt).toContain('Commit atomically');
+  });
+
+  it('local-small prompt keeps single-slice one-commit behavior', async () => {
+    const prevLocalOnly = process.env.FACTORY_LOCAL_ONLY;
+    process.env.FACTORY_LOCAL_ONLY = '1';
+    try {
+      const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-538-local-small.md');
+      await writeFile(specPath, '# Frozen spec 538\nDo the small thing.\n');
+      const stub = new StubModelExecutor({ scripts: { build_codex: [{ output: 'codex output' }] } });
+      const router = new ModelRouter(models, routes, false, stub, false, false);
+
+      const result = await buildPhase({
+        issue: 538,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        branch: 'ship-it/538-atomic-local-small',
+        route: 'codex',
+        router,
+        constitution: null,
+        log: () => {},
+      });
+
+      expect(result.ok).toBe(true);
+      const prompt = stub.calls[stub.calls.length - 1].prompt;
+      expect(prompt).toContain('Create exactly one git commit.');
+      expect(prompt).not.toContain('Commit atomically');
+    } finally {
+      if (prevLocalOnly === undefined) delete process.env.FACTORY_LOCAL_ONLY;
+      else process.env.FACTORY_LOCAL_ONLY = prevLocalOnly;
+    }
+  });
+});
+
 describe('buildPhase modelOverride', () => {
   it('uses the default tier-order model when no modelOverride is given', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
