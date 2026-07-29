@@ -20,15 +20,20 @@ export interface WorkspaceDeps {
   exec: ExecFn;
 }
 
-/** Real, argv-based (no shell) execa runner — never throws on non-zero exit. */
+/** Real, argv-based (no shell) execa runner — never throws on non-zero exit.
+ *  On a spawn failure (e.g. the binary is missing) execa's own stdout/stderr
+ *  are left undefined; fall back to its shortMessage so the failure reason
+ *  isn't silently dropped. */
 export function createExecaExec(): ExecFn {
   return async (argv, opts) => {
     const [cmd, ...args] = argv;
     const result = await execa(cmd, args, { cwd: opts.cwd, reject: false });
+    const rawStderr = typeof result.stderr === 'string' ? result.stderr : '';
+    const isSpawnFailure = result.failed && typeof result.exitCode !== 'number';
     return {
       exitCode: typeof result.exitCode === 'number' ? result.exitCode : -1,
       stdout: typeof result.stdout === 'string' ? result.stdout : '',
-      stderr: typeof result.stderr === 'string' ? result.stderr : '',
+      stderr: rawStderr.length === 0 && isSpawnFailure ? (result.shortMessage ?? '') : rawStderr,
     };
   };
 }
@@ -54,7 +59,14 @@ function readIfPresent(path: string): string {
  *  state never pollutes SCBench's evaluation or diffs. */
 export async function prepareWorkspace(dir: string, deps: WorkspaceDeps): Promise<void> {
   if (!existsSync(join(dir, '.git'))) {
-    await deps.exec(['git', 'init'], { cwd: dir });
+    const init = await deps.exec(['git', 'init'], { cwd: dir });
+    if (init.exitCode !== 0) {
+      // Fail fast rather than falling through to the .factory/.git/info
+      // setup below, which would mkdirSync a `.git` directory of its own and
+      // fool the existsSync check above on every later call — permanently
+      // masking a workspace that was never actually a git repo.
+      throw new AdapterError(`git init failed for workspace ${dir}: ${init.stderr || init.stdout}`);
+    }
     await deps.exec(['git', 'add', '-A'], { cwd: dir });
     await deps.exec(['git', ...GIT_USER_ARGS, 'commit', '--allow-empty', '-m', 'scbench: initial workspace'], {
       cwd: dir,

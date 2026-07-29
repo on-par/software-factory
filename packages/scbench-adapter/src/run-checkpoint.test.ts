@@ -2,33 +2,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { BenchmarkManifest } from '@on-par/factory-core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ScbenchCheckpoint } from './checkpoint.js';
+import { minimalManifest } from './manifest-fixture.js';
 import { runCheckpoint } from './run-checkpoint.js';
 import { createExecaExec, type ExecFn } from './workspace.js';
-
-function minimalManifest(overrides: Partial<BenchmarkManifest> = {}): BenchmarkManifest {
-  return {
-    manifestVersion: 1,
-    run: {
-      issue: 9_000_001,
-      profile: 'local-only',
-      outcome: 'ready',
-      startedAt: '2026-07-28T00:00:00.000Z',
-      endedAt: '2026-07-28T00:01:00.000Z',
-      elapsedMs: 60_000,
-      workspace: '/tmp/ws',
-    },
-    phases: { plan: 'ok', build: 'ok', check: 'ok', ship: 'skipped' },
-    modelAttempts: [],
-    cost: { totalUsd: 0, inputTokens: 0, outputTokens: 0, entries: [] },
-    git: { changedFiles: [], diffStat: '', diffBase: 'HEAD' },
-    artifacts: { manifest: 'manifest.json', request: 'request.json', events: 'events.ndjson', diff: 'diff.patch' },
-    ...overrides,
-  };
-}
 
 function writeFactoryArtifacts(dir: string) {
   mkdirSync(dir, { recursive: true });
@@ -144,9 +123,101 @@ describe('runCheckpoint (2-checkpoint smoke)', () => {
 
     expect(result.outcome).toBe('error');
     expect(result.detail).toMatch(/no manifest\.json found/);
+    // The underlying factory process's own stderr is folded in, not dropped.
+    expect(result.detail).toMatch(/factory exited 1: crashed before manifest/);
 
     // The workspace still gets committed even on an adapter-level failure.
     const log = await realExec(['git', 'log', '--format=%s'], { cwd: workspace });
     expect(log.stdout).toContain('scbench: checkpoint 1');
+  });
+
+  it('keeps an already-successful result when the post-run commit fails', async () => {
+    const exec: ExecFn = async (argv, opts) => {
+      const [bin, ...rest] = argv;
+      if (bin === 'git') {
+        const isCheckpointCommit = rest.includes('commit') && rest.some((a) => a.includes('scbench: checkpoint'));
+        if (isCheckpointCommit) return { exitCode: 1, stdout: '', stderr: 'fatal: unable to write new_index file' };
+        return realExec(argv, opts);
+      }
+      if (bin === 'stub-factory') {
+        writeFactoryArtifacts(rest[5]);
+        return { exitCode: 0, stdout: '', stderr: '' };
+      }
+      throw new Error(`unexpected command: ${argv.join(' ')}`);
+    };
+
+    const checkpoint: ScbenchCheckpoint = { problemId: 'calculator', checkpointId: '1', index: 0, task: 'Do it.' };
+
+    const result = await runCheckpoint(checkpoint, { workspace, artifactsRoot, factoryBin: 'stub-factory' }, { exec });
+
+    // The successful Factory outcome must not be discarded by a bookkeeping
+    // (git commit) failure that happens after the run already succeeded.
+    expect(result.outcome).toBe('ready');
+    expect(result.detail).toMatch(/workspace commit failed/);
+  });
+
+  it('omits the factory-exit detail when factory exited 0 but still wrote no manifest', async () => {
+    const exec: ExecFn = async (argv, opts) => {
+      const [bin] = argv;
+      if (bin === 'git') return realExec(argv, opts);
+      if (bin === 'stub-factory') return { exitCode: 0, stdout: '', stderr: '' };
+      throw new Error(`unexpected command: ${argv.join(' ')}`);
+    };
+
+    const checkpoint: ScbenchCheckpoint = { problemId: 'calculator', checkpointId: '1', index: 0, task: 'Do it.' };
+
+    const result = await runCheckpoint(checkpoint, { workspace, artifactsRoot, factoryBin: 'stub-factory' }, { exec });
+
+    expect(result.outcome).toBe('error');
+    expect(result.detail).toBe(
+      'no manifest.json found at ' + join(artifactsRoot, 'calculator', '1') + ' — Factory did not complete a run',
+    );
+  });
+
+  it('falls back to factory stdout, then a fixed placeholder, when stderr is empty', async () => {
+    const exec: ExecFn = async (argv, opts) => {
+      const [bin] = argv;
+      if (bin === 'git') return realExec(argv, opts);
+      if (bin === 'stub-factory') return { exitCode: 1, stdout: 'factory stdout only', stderr: '' };
+      throw new Error(`unexpected command: ${argv.join(' ')}`);
+    };
+    const checkpoint: ScbenchCheckpoint = { problemId: 'calculator', checkpointId: '1', index: 0, task: 'Do it.' };
+
+    const result = await runCheckpoint(checkpoint, { workspace, artifactsRoot, factoryBin: 'stub-factory' }, { exec });
+    expect(result.detail).toMatch(/factory exited 1: factory stdout only/);
+  });
+
+  it('falls back to a fixed placeholder when factory produced no output at all', async () => {
+    const exec: ExecFn = async (argv, opts) => {
+      const [bin] = argv;
+      if (bin === 'git') return realExec(argv, opts);
+      if (bin === 'stub-factory') return { exitCode: 1, stdout: '', stderr: '' };
+      throw new Error(`unexpected command: ${argv.join(' ')}`);
+    };
+    const checkpoint: ScbenchCheckpoint = { problemId: 'calculator', checkpointId: '1', index: 0, task: 'Do it.' };
+
+    const result = await runCheckpoint(checkpoint, { workspace, artifactsRoot, factoryBin: 'stub-factory' }, { exec });
+    expect(result.detail).toMatch(/factory exited 1: no output/);
+  });
+
+  it('appends a commit failure to an already-present adapter-error detail', async () => {
+    const exec: ExecFn = async (argv, opts) => {
+      const [bin, ...rest] = argv;
+      if (bin === 'git') {
+        const isCheckpointCommit = rest.includes('commit') && rest.some((a) => a.includes('scbench: checkpoint'));
+        if (isCheckpointCommit) return { exitCode: 1, stdout: '', stderr: 'fatal: unable to write new_index file' };
+        return realExec(argv, opts);
+      }
+      if (bin === 'stub-factory') return { exitCode: 1, stdout: '', stderr: 'boom' };
+      throw new Error(`unexpected command: ${argv.join(' ')}`);
+    };
+
+    const checkpoint: ScbenchCheckpoint = { problemId: 'calculator', checkpointId: '1', index: 0, task: 'Do it.' };
+
+    const result = await runCheckpoint(checkpoint, { workspace, artifactsRoot, factoryBin: 'stub-factory' }, { exec });
+
+    expect(result.outcome).toBe('error');
+    expect(result.detail).toMatch(/no manifest\.json found/);
+    expect(result.detail).toMatch(/; workspace commit failed/);
   });
 });

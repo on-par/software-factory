@@ -41,7 +41,7 @@ export async function runCheckpoint(
   writeFileSync(briefPath, materializeBrief(checkpoint));
 
   const args = buildRunBriefArgs({ briefPath, workspace: opts.workspace, artifactsDir: checkpointDir });
-  await runFactory(args, { cwd: opts.workspace, factoryBin: opts.factoryBin }, deps);
+  const factoryResult = await runFactory(args, { cwd: opts.workspace, factoryBin: opts.factoryBin }, deps);
 
   let result: CheckpointResult;
   try {
@@ -55,16 +55,29 @@ export async function runCheckpoint(
     };
   } catch (err) {
     if (!(err instanceof AdapterError)) throw err;
+    const factoryDetail =
+      factoryResult.exitCode !== 0
+        ? ` (factory exited ${factoryResult.exitCode}: ${factoryResult.stderr || factoryResult.stdout || 'no output'})`
+        : '';
     result = {
       outcome: 'error',
       workspace: opts.workspace,
       artifactsDir: checkpointDir,
       briefPath,
-      detail: err.message,
+      detail: `${err.message}${factoryDetail}`,
     };
   }
 
-  await commitCheckpoint(opts.workspace, checkpoint.checkpointId, deps);
+  // A commit failure is a bookkeeping problem, not a Factory-run outcome —
+  // it must never discard an already-resolved CheckpointResult (ready/failed/
+  // parked/escalated/error). Fold it into `detail` instead of throwing.
+  try {
+    await commitCheckpoint(opts.workspace, checkpoint.checkpointId, deps);
+  } catch (err) {
+    if (!(err instanceof AdapterError)) throw err;
+    const commitDetail = `workspace commit failed: ${err.message}`;
+    result = { ...result, detail: result.detail ? `${result.detail}; ${commitDetail}` : commitDetail };
+  }
 
   return result;
 }

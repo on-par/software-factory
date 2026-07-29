@@ -42,6 +42,28 @@ describe('prepareWorkspace', () => {
     expect(exclude).toContain('.factory/');
   });
 
+  it('throws AdapterError when git init fails, without creating a fake .git', async () => {
+    const exec: ExecFn = async (argv) => {
+      if (argv[1] === 'init') return { exitCode: 1, stdout: '', stderr: 'git: command not found' };
+      return { exitCode: 0, stdout: '', stderr: '' };
+    };
+
+    await expect(prepareWorkspace(dir, { exec })).rejects.toThrow(AdapterError);
+
+    // No .factory/.git/info/exclude setup should have happened — a failed
+    // `git init` must not leave the idempotency check fooled on a later call.
+    expect(existsSync(join(dir, '.factory'))).toBe(false);
+  });
+
+  it('falls back to stdout in the git-init failure message when stderr is empty', async () => {
+    const exec: ExecFn = async (argv) => {
+      if (argv[1] === 'init') return { exitCode: 1, stdout: 'permission denied', stderr: '' };
+      return { exitCode: 0, stdout: '', stderr: '' };
+    };
+
+    await expect(prepareWorkspace(dir, { exec })).rejects.toThrow(/permission denied/);
+  });
+
   it('does not re-init git when .git already exists (idempotent)', async () => {
     mkdirSync(join(dir, '.git'), { recursive: true });
     const { exec, calls } = fakeExec();
@@ -121,6 +143,15 @@ describe('commitCheckpoint', () => {
 
     await expect(commitCheckpoint(dir, '3', { exec })).rejects.toThrow(AdapterError);
   });
+
+  it('falls back to stdout in the failure message when stderr is empty', async () => {
+    const exec: ExecFn = async (argv) => {
+      if (argv.includes('commit')) return { exitCode: 128, stdout: 'index locked', stderr: '' };
+      return { exitCode: 0, stdout: '', stderr: '' };
+    };
+
+    await expect(commitCheckpoint(dir, '3', { exec })).rejects.toThrow(/index locked/);
+  });
 });
 
 describe('createExecaExec', () => {
@@ -142,5 +173,14 @@ describe('createExecaExec', () => {
 
     const failed = await exec([process.execPath, '-e', 'process.exit(3)'], { cwd: dir });
     expect(failed.exitCode).toBe(3);
+  });
+
+  it("falls back to execa's shortMessage on a spawn failure (missing binary)", async () => {
+    const exec = createExecaExec();
+
+    const result = await exec(['definitely-not-a-real-binary-xyz'], { cwd: dir });
+
+    expect(result.exitCode).toBe(-1);
+    expect(result.stderr.length).toBeGreaterThan(0);
   });
 });
