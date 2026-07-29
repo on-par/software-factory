@@ -563,6 +563,12 @@ export class ModelRouter {
       outputTokens,
       cost,
       estimated: usage === undefined,
+      ...(usage?.rawInputTokens !== undefined ? { rawInputTokens: usage.rawInputTokens } : {}),
+      ...(usage?.cacheReadTokens !== undefined ? { cacheReadTokens: usage.cacheReadTokens } : {}),
+      ...(usage?.cacheCreationTokens !== undefined ? { cacheCreationTokens: usage.cacheCreationTokens } : {}),
+      ...(usage?.numTurns !== undefined ? { numTurns: usage.numTurns } : {}),
+      ...(usage?.durationMs !== undefined ? { durationMs: usage.durationMs } : {}),
+      ...(usage?.durationApiMs !== undefined ? { durationApiMs: usage.durationApiMs } : {}),
       ...(failoverReason ? { failoverReason } : {}),
       ...(retryCause ? { retryCause } : {}),
     });

@@ -55,6 +55,16 @@ export interface HarnessUsage {
   /** All input-side tokens: input_tokens + cache_creation_input_tokens + cache_read_input_tokens. */
   inputTokens: number;
   outputTokens: number;
+  /** Uncached input tokens (the envelope's raw input_tokens), when reported (#490). */
+  rawInputTokens?: number;
+  /** Cache split, when the provider reports it (#490). */
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
+  /** Agentic-loop turn count from the CLI result envelope (#490). */
+  numTurns?: number;
+  /** Wall-clock and API-time durations from the CLI result envelope, in ms (#490). */
+  durationMs?: number;
+  durationApiMs?: number;
   /** Provider-reported total cost in USD, when the CLI reports one. */
   costUsd?: number;
 }
