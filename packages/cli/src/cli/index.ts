@@ -1243,7 +1243,10 @@ export async function shipIssue(
       }
     }
 
-    log('ready', `PR #${ship.prNumber} ready for review`);
+    const readyMsg = ship.alreadyDelivered
+      ? `already delivered${ship.prNumber !== undefined ? ` by merged PR #${ship.prNumber}` : ' — branch already landed on main'}`
+      : `PR #${ship.prNumber} ready for review`;
+    log('ready', readyMsg);
     await maybeWriteLocalRunReport({
       issueNum,
       paths,
@@ -1254,7 +1257,7 @@ export async function shipIssue(
       specPath,
       route,
     });
-    console.log(chalk.green(`✅ Issue #${issueNum} → PR #${ship.prNumber} ready for review`));
+    console.log(chalk.green(`✅ Issue #${issueNum} → ${readyMsg}`));
     return branch;
   } catch (err: any) {
     for (const e of parkEvents(err)) log(e.type, e.msg);

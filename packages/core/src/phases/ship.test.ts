@@ -123,6 +123,7 @@ describe('shipPhase self-healing', () => {
       commands.push(command);
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
       if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
       return { stdout: '' };
     };
@@ -140,8 +141,10 @@ describe('shipPhase self-healing', () => {
 
     expect(result).toEqual({ ok: true, prNumber: 123 });
     expect(commands).toEqual([
+      'git fetch origin main',
       'git status --porcelain',
       'git rev-list --count origin/main..HEAD',
+      'git diff --quiet origin/main..HEAD',
       "git push -u origin 'ship-it/23-self-heal'",
       'git diff --stat origin/main...HEAD',
     ]);
@@ -167,6 +170,7 @@ describe('shipPhase self-healing', () => {
     const run = async (command: string) => {
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
       if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
       return { stdout: '' };
     };
@@ -195,6 +199,7 @@ describe('shipPhase self-healing', () => {
       commands.push(command);
       if (command === 'git status --porcelain') return { stdout: ' M packages/core/src/phases/ship.ts\n' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
       return { stdout: '' };
     };
 
@@ -210,7 +215,12 @@ describe('shipPhase self-healing', () => {
     });
 
     expect(result).toEqual({ ok: false });
-    expect(commands).toEqual(['git status --porcelain', 'git rev-list --count origin/main..HEAD']);
+    expect(commands).toEqual([
+      'git fetch origin main',
+      'git status --porcelain',
+      'git rev-list --count origin/main..HEAD',
+      'git diff --quiet origin/main..HEAD',
+    ]);
     expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
     expect(logs).toContainEqual(['ship', 'not recovering ship-it/23-self-heal: worktree has uncommitted changes']);
   });
@@ -223,6 +233,7 @@ describe('shipPhase self-healing', () => {
       commands.push(command);
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '0\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
       return { stdout: '' };
     };
 
@@ -238,7 +249,13 @@ describe('shipPhase self-healing', () => {
     });
 
     expect(result).toEqual({ ok: false });
-    expect(commands).toEqual(['git status --porcelain', 'git rev-list --count origin/main..HEAD']);
+    expect(commands).toEqual([
+      'git fetch origin main',
+      'git status --porcelain',
+      'git rev-list --count origin/main..HEAD',
+      'git diff --quiet origin/main..HEAD',
+    ]);
+    expect(calls).toContainEqual(['pulls.list', expect.objectContaining({ state: 'closed' })]);
     expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
     expect(logs).toContainEqual(['ship', 'not recovering ship-it/23-self-heal: no commits ahead of origin/main']);
   });
@@ -249,6 +266,7 @@ describe('shipPhase self-healing', () => {
     const run = async (command: string) => {
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
       if (command.startsWith('git push')) throw new Error('remote rejected');
       if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
       return { stdout: '' };
@@ -280,6 +298,7 @@ describe('shipPhase self-healing', () => {
     const run = async (command: string) => {
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
       if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
       return { stdout: '' };
     };
@@ -305,6 +324,7 @@ describe('shipPhase self-healing', () => {
     const run = async (command: string) => {
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
       if (command === 'git diff --stat origin/main...HEAD') throw new Error('diff failed');
       return { stdout: '' };
     };
@@ -337,6 +357,7 @@ describe('shipPhase self-healing', () => {
     const run = async (command: string) => {
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
       if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
       return { stdout: '' };
     };
@@ -366,6 +387,7 @@ describe('shipPhase self-healing', () => {
     const run = async (command: string) => {
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
       if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
       return { stdout: '' };
     };
@@ -395,6 +417,7 @@ describe('shipPhase inline work source (#507)', () => {
     const run = async (command: string) => {
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
       if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' brief.ts | 3 +++\n' };
       return { stdout: '' };
     };
@@ -428,6 +451,7 @@ describe('shipPhase inline work source (#507)', () => {
     const run = async (command: string) => {
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
       if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
       return { stdout: '' };
     };
@@ -577,6 +601,7 @@ describe('shipPhase evidence pack', () => {
     const run = async (command: string) => {
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
       if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
       return { stdout: '' };
     };
@@ -618,6 +643,7 @@ describe('shipPhase evidence pack', () => {
     const run = async (command: string) => {
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
       if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
       return { stdout: '' };
     };
@@ -652,6 +678,7 @@ describe('shipPhase evidence pack', () => {
     const run = async (command: string) => {
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
       if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
       return { stdout: '' };
     };
@@ -681,6 +708,7 @@ describe('shipPhase approval gate', () => {
     const run = async (command: string) => {
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
       if (command === 'git diff --stat origin/main...HEAD') {
         diffStatCalls.push(command);
         return { stdout: ' ship.ts | 12 ++++++++++++\n' };
@@ -796,6 +824,7 @@ describe('shipPhase approval gate', () => {
     const run = async (command: string) => {
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
       if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
       return { stdout: '' };
     };
@@ -866,6 +895,7 @@ describe('ADR writer (#482)', () => {
       void options;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
       if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
       return { stdout: '' };
     };
@@ -947,6 +977,7 @@ describe('ADR writer (#482)', () => {
       commands.push(command);
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
       if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
       return { stdout: '' };
     };
@@ -987,6 +1018,7 @@ describe('ADR writer (#482)', () => {
       }
       if (command.startsWith('git status --porcelain -- .')) return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
       if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
       return { stdout: '' };
     };
@@ -1022,6 +1054,7 @@ describe('ADR writer (#482)', () => {
     const run = async (command: string) => {
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
       if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
       return { stdout: '' };
     };
@@ -1060,6 +1093,7 @@ describe('ADR writer (#482)', () => {
       commands.push(command);
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
       if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
       return { stdout: '' };
     };
@@ -1083,5 +1117,223 @@ describe('ADR writer (#482)', () => {
     expect(commitCommand).toContain('ADR-002');
     expect(commitCommand).not.toContain('ADR-0002');
     expect(logs.find((l) => l[0] === 'adr_written')?.[1]).toContain('ADR-002');
+  });
+});
+
+describe('shipPhase duplicate-PR guard (#520)', () => {
+  function createMergedPROctokit(closedPRs: any[] = [{ number: 518, merged_at: '2026-07-29T05:39:10Z' }]) {
+    const calls: any[] = [];
+    const octokit = {
+      graphql: async (query: string, vars: any) => {
+        calls.push(['graphql', query, vars]);
+        return { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } };
+      },
+      rest: {
+        pulls: {
+          list: async (args: any) => {
+            calls.push(['pulls.list', args]);
+            return { data: args.state === 'closed' ? closedPRs : [] };
+          },
+          create: async (args: any) => {
+            calls.push(['pulls.create', args]);
+            return { data: { number: 123 } };
+          },
+          get: async (args: any) => {
+            calls.push(['pulls.get', args]);
+            return { data: { draft: true, node_id: 'PR_1' } };
+          },
+        },
+        issues: {
+          get: async (args: any) => {
+            calls.push(['issues.get', args]);
+            return { data: { title: 'Self-heal committed work' } };
+          },
+          createComment: async (args: any) => {
+            calls.push(['issues.createComment', args]);
+            return { data: { id: 1 } };
+          },
+        },
+        checks: {
+          listForRef: async (args: any) => {
+            calls.push(['checks.listForRef', args]);
+            return { data: { check_runs: [] } };
+          },
+        },
+      },
+    };
+    return { octokit, calls };
+  }
+
+  it('returns already-delivered without pushing when a squash-merge retry lands on an identical tree (the reported bug)', async () => {
+    const { octokit, calls } = createMergedPROctokit();
+    const commands: string[] = [];
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      commands.push(command);
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '2\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') return { stdout: '' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 511,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-511',
+      branch: 'ship-it/511-baseline',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 518, alreadyDelivered: true });
+    expect(commands).toContain('git fetch origin main');
+    expect(commands.some((c) => c.startsWith('git push'))).toBe(false);
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
+    expect(logs).toContainEqual(['ship', expect.stringContaining('already delivered by merged PR #518')]);
+  });
+
+  it('refreshes the stale remote-tracking ref before the landed check, so a fresh fetch is what reveals delivery', async () => {
+    const { octokit, calls } = createMergedPROctokit();
+    let fetched = false;
+    const run = async (command: string) => {
+      if (command === 'git fetch origin main') {
+        fetched = true;
+        return { stdout: '' };
+      }
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '2\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') {
+        if (fetched) return { stdout: '' };
+        throw new Error('stale ref shows differences');
+      }
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 511,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-511',
+      branch: 'ship-it/511-baseline',
+      octokit: octokit as any,
+      watchCI: false,
+      log: () => {},
+      run,
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 518, alreadyDelivered: true });
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
+  });
+
+  it('still refuses to duplicate when the tree is landed but no merged PR is found', async () => {
+    const { octokit, calls } = createMergedPROctokit([]);
+    const commands: string[] = [];
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      commands.push(command);
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '2\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') return { stdout: '' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 511,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-511',
+      branch: 'ship-it/511-baseline',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: true, alreadyDelivered: true });
+    expect(result.prNumber).toBeUndefined();
+    expect(commands.some((c) => c.startsWith('git push'))).toBe(false);
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
+    expect(logs).toContainEqual(['ship', expect.stringContaining('HEAD tree matches origin/main')]);
+  });
+
+  it('reports delivered for a merge-commit merge (ahead-count 0 after fetch) with a prior merged PR', async () => {
+    const { octokit, calls } = createMergedPROctokit();
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '0\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 511,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-511',
+      branch: 'ship-it/511-baseline',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 518, alreadyDelivered: true });
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
+  });
+
+  it('still opens a new PR for genuinely new commits even when an older merged PR exists for the branch', async () => {
+    const { octokit, calls } = createMergedPROctokit();
+    const commands: string[] = [];
+    const run = async (command: string) => {
+      commands.push(command);
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 3 +++\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 511,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-511',
+      branch: 'ship-it/511-baseline',
+      octokit: octokit as any,
+      watchCI: false,
+      log: () => {},
+      run,
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 123 });
+    expect(commands).toContainEqual("git push -u origin 'ship-it/511-baseline'");
+    expect(calls).toContainEqual(['pulls.create', expect.anything()]);
+  });
+
+  it('degrades gracefully when git fetch origin main fails, still recovering normally', async () => {
+    const { octokit, calls } = createMergedPROctokit();
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command === 'git fetch origin main') throw new Error('network unreachable');
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 3 +++\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 511,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-511',
+      branch: 'ship-it/511-baseline',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 123 });
+    expect(calls).toContainEqual(['pulls.create', expect.anything()]);
+    expect(logs).toContainEqual(['ship', expect.stringContaining('git fetch origin main failed')]);
   });
 });
