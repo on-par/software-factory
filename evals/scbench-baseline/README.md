@@ -50,14 +50,28 @@ cd ../software-factory
 npm ci
 npm run build --workspace @on-par/scbench-adapter
 
-# 3. Register the custom agent per SCBench's docs (see
-#    packages/scbench-adapter/README.md's Setup section), pointing
-#    adapter_cli at packages/scbench-adapter/dist/cli.js.
+# 3. Sync the pinned checkout's Python environment and run the preflight
+#    compatibility check (see packages/scbench-adapter/README.md's
+#    "Pinned-upstream compatibility check" section) before spending any
+#    model budget.
+(cd "$SCBENCH_CHECKOUT" && uv sync)
+uv run --project "$SCBENCH_CHECKOUT" python packages/scbench-adapter/python/compat_check.py
 
-# 4. Run the smoke problem (baseline.config.json's `problems.smoke`) twice,
-#    collecting artifacts under evals/scbench-baseline/runs/<problem>/<checkpoint>/<trial-n>/
-#    for each run — repeat with a fresh workspace/artifacts root per trial.
+# 4. Run the smoke problem (baseline.config.json's `problems.smoke`) twice
+#    through the committed launcher, which registers the software_factory
+#    agent by import before handing off to SCBench's own `slop-code` CLI —
+#    use a fresh workspace/artifacts root per trial:
+uv run --project "$SCBENCH_CHECKOUT" python packages/scbench-adapter/python/run_scbench.py \
+  run --config packages/scbench-adapter/scbench.run.yaml --problem <problems.smoke>
+
+# 5. Copy each trial's Factory artifacts (manifest.json, request.json,
+#    events.ndjson, diff.patch, brief.md) into
+#    evals/scbench-baseline/runs/<problem>/<checkpoint>/<trial-n>/.
 ```
+
+Required tools: `git`, `uv` (Python ≥ 3.12 environment per upstream's
+`pyproject.toml`), Node.js ≥ 20, the `claude` CLI, and a `factory` binary on
+`PATH` (or `FACTORY_BIN`/`agent.factory_bin` in `scbench.run.yaml`).
 
 ## Reproducing the live small suite
 
