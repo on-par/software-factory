@@ -137,6 +137,8 @@ describe('loadModelsConfig', () => {
         'gemma4:12b',
         'gpt-5.1-codex',
         'gpt-5.6-sol',
+        'gpt-5.6-terra-high',
+        'gpt-5.6-terra-medium',
         'qwen2.5-coder:14b',
         'qwen3.5:9b',
         'qwen3:8b',
@@ -153,20 +155,47 @@ describe('loadModelsConfig', () => {
     expect(spike?.codex).toBe(true);
   });
 
-  it('pins -m on every non-experimental codex-cli model so failover changes models (#415)', () => {
+  it('pins -m explicitly on every non-experimental codex-cli model so failover always changes the effective provider config (#415)', () => {
     const config = loadModelsConfig();
     const codexCliModels = Object.entries(config.models).filter(
       ([, def]) => def.harness === 'codex-cli' && !def.experimental,
     );
     expect(codexCliModels.length).toBeGreaterThanOrEqual(2);
     for (const [id, def] of codexCliModels) {
-      expect(def.codexFlag).toContain(`-m ${id}`);
+      const flagModel = def.codexFlag?.match(/(?:^|\s)-m (\S+)/)?.[1];
+      expect(flagModel, `${id}: codexFlag must pin -m`).toBeDefined();
+      // The -m value must be the model's own registry id, or a shared family
+      // base that the id extends (e.g. gpt-5.6-terra-high/-medium both pin
+      // -m gpt-5.6-terra) — never an unrelated/mistyped model id.
+      expect(
+        id === flagModel || id.startsWith(`${flagModel}-`),
+        `${id}: -m ${flagModel} does not match or extend its own registry id`,
+      ).toBe(true);
     }
+    const flags = codexCliModels.map(([, def]) => def.codexFlag);
+    expect(new Set(flags).size).toBe(flags.length);
   });
 
   it('pins gpt-5.1-codex explicitly via -m (#415)', () => {
     const config = loadModelsConfig();
     expect(config.models['gpt-5.1-codex']?.codexFlag).toBe('-m gpt-5.1-codex -c model_reasoning_effort=high');
+  });
+
+  it('registers default Codex GPT phase profiles: Terra high for plan, Terra medium for build (#529)', () => {
+    const config = loadModelsConfig();
+    expect(config.models['gpt-5.6-terra-high']?.codexFlag).toBe('-m gpt-5.6-terra -c model_reasoning_effort=high');
+    expect(config.models['gpt-5.6-terra-medium']?.codexFlag).toBe('-m gpt-5.6-terra -c model_reasoning_effort=medium');
+  });
+
+  it('orders tiers so Terra profiles sit ahead of the generic GPT failover chain without disturbing Claude defaults (#529)', () => {
+    const config = loadModelsConfig();
+    expect(config.tiers.boss[0]).toBe('claude-opus-5');
+    expect(config.tiers.boss).toContain('gpt-5.6-terra-high');
+
+    const workerIdx = (id: string) => config.tiers.worker.indexOf(id);
+    expect(workerIdx('gpt-5.6-terra-medium')).toBeGreaterThanOrEqual(0);
+    expect(workerIdx('gpt-5.6-terra-medium')).toBeLessThan(workerIdx('gpt-5.6-sol'));
+    expect(workerIdx('gpt-5.6-sol')).toBeLessThan(workerIdx('gpt-5.1-codex'));
   });
 });
 

@@ -17,7 +17,7 @@ Honest snapshot of what works today vs. what is experimental. Statuses reflect t
 | Codex worker builds (`codex exec`)                    | ✅ Working      | Used for the `build_codex` route                                                                                                                                                |
 | Claude models via the Claude CLI (`claude -p`)        | ✅ Working      | TRIAGE always shells out to `claude -p`; PLAN routes through the boss tier (local models first, Claude as failover)                                                             |
 | Harness dispatch (per-model provider adapters)        | ✅ Working      | Each model declares a `harness` in `models.json`: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, `opencode`                                                        |
-| GPT worker models via the Codex CLI                   | ✅ Working      | `gpt-5.6-sol` → `gpt-5.1-codex`, dispatched through the `codex-cli` harness                                                                                                     |
+| GPT worker models via the Codex CLI                   | ✅ Working      | `gpt-5.6-terra` (plan=high / build=medium) → `gpt-5.6-sol` → `gpt-5.1-codex`, dispatched through the `codex-cli` harness                                                        |
 | Local Ollama + OpenCode models                        | ⚠️ Experimental | Harnesses are contract-tested, but real-run behavior is unverified — expect failover to a cloud model                                                                           |
 | DeepSeek / gpt-4.1-mini via `claude --model ...`      | ⚠️ Experimental | The Claude CLI only serves Anthropic models; this wiring is unproven                                                                                                            |
 | Prompt evals (`npm run eval`)                         | ✅ Working      | Deterministic stub subset runs in CI on every PR; weekly real run checks prompt/constitution/skill regressions under pinned model IDs                                           |
@@ -137,14 +137,16 @@ factory resume                      Resume after stop
 
 Each task type maps to a tier, and each tier is a hand-ordered priority list in `models.json` — free local models first, then cloud models ranked by capability. The router takes the first available model in the list; when a model hits a usage limit, rate limit, or error, it automatically fails over to the next one. (`models.json` is the source of truth; the snapshot below can drift.)
 
-| Tier    | Priority order (experimental models excluded)                                                                       | Cloud cost $/M output | Use                     |
-| ------- | ------------------------------------------------------------------------------------------------------------------- | --------------------- | ----------------------- |
-| boss    | qwen2.5-coder:14b → gemma4:12b → claude-fable-5 → claude-opus-4-8 → claude-sonnet-5                                 | $40 → $25 → $15       | Specs, design, disputes |
-| worker  | codex-ollama-qwen3.5:9b → qwen2.5-coder:14b → qwen3.5:9b → qwen3:8b → gpt-5.6-sol → gpt-5.1-codex → claude-sonnet-5 | $10 → $10 → $15       | Implementation          |
-| checker | qwen3.5:9b → gemma4:12b → qwen2.5-coder:14b → qwen3:8b → claude-sonnet-5                                            | $15                   | Verification            |
-| triage  | qwen2.5-coder:14b → claude-sonnet-5                                                                                 | $15                   | Issue triage            |
+| Tier    | Priority order (experimental models excluded)                                                                                              | Cloud cost $/M output | Use                     |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------- | ----------------------- |
+| boss    | qwen2.5-coder:14b → gemma4:12b → claude-fable-5 → claude-opus-4-8 → claude-sonnet-5 → gpt-5.6-terra-high                                   | $40 → $25 → $15       | Specs, design, disputes |
+| worker  | codex-ollama-qwen3.5:9b → qwen2.5-coder:14b → qwen3.5:9b → qwen3:8b → gpt-5.6-terra-medium → gpt-5.6-sol → gpt-5.1-codex → claude-sonnet-5 | $10 → $10 → $15       | Implementation          |
+| checker | qwen3.5:9b → gemma4:12b → qwen2.5-coder:14b → qwen3:8b → claude-sonnet-5                                                                   | $15                   | Verification            |
+| triage  | qwen2.5-coder:14b → claude-sonnet-5                                                                                                        | $15                   | Issue triage            |
 
 Local Ollama models cost $0 and lead every tier. `FACTORY_LOCAL_ONLY=1` restricts routing to local models entirely. Experimental models (glm-5.2, deepseek-v3, qwen-3.5-coder, gpt-4.1-mini, opencode-sonnet) exist in `models.json` but are only routed when `FACTORY_EXPERIMENTAL=1`.
+
+**Codex GPT phase profiles.** Whenever Codex GPT is the selected provider path (e.g. `providers.anthropic`/`providers.ollama` disabled, or an explicit pin), PLAN defaults to `gpt-5.6-terra-high` (`model_reasoning_effort=high`) and BUILD (`build_codex`) defaults to `gpt-5.6-terra-medium` (`model_reasoning_effort=medium`); the generic `gpt-5.6-sol` → `gpt-5.1-codex` profiles remain as failover. Override per repo with `.factory/config.json` (`models.plan` / `models.build`) or per run with `FACTORY_PLAN_MODEL` / `FACTORY_BUILD_MODEL`; the repo file wins over env.
 
 Every model declares a **harness** — the provider adapter that executes it: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, or `opencode`. Build tasks require an agentic (file-editing) harness; prompt-only harnesses like `ollama-http` are rejected for builds. Per-task tokens and cost are logged to `.factory/costs.jsonl` (`factory cost` to inspect).
 

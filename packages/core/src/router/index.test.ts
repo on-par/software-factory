@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { loadModelsConfig, loadRoutesConfig, type ModelsConfig, type RoutesConfig } from '../config/index.js';
+import { applyRepoConfig } from '../config/repo.js';
 import { HarnessError } from '../harness/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import type { ExecFn, ModelExecutorContext } from './index.js';
@@ -1176,5 +1177,46 @@ describe('ModelRouter cost sink', () => {
 
     expect(rows).toHaveLength(1);
     expect('retryCause' in rows[0]).toBe(false);
+  });
+});
+
+describe('default Codex GPT phase profiles (#529)', () => {
+  const shippedModels = loadModelsConfig();
+  const shippedRoutes = loadRoutesConfig();
+  const stub = new StubModelExecutor({ scripts: {} });
+
+  it('resolves build_codex to Terra medium first, generic profiles as failover', () => {
+    const router = new ModelRouter(shippedModels, shippedRoutes, false, stub, false, false);
+    expect(router.resolveAll('build_codex')).toEqual(['gpt-5.6-terra-medium', 'gpt-5.6-sol', 'gpt-5.1-codex']);
+  });
+
+  it('resolves plan to Terra high under the Codex GPT provider path', () => {
+    // triage is pinned because the shipped triage tier is entirely
+    // anthropic/ollama models — disabling both providers would otherwise
+    // empty that unrelated tier and applyRepoConfig throws eagerly for
+    // every tier, not just the one under test (plan/boss).
+    const codexOnlyModels = applyRepoConfig(shippedModels, {
+      version: 1,
+      providers: { anthropic: false, ollama: false },
+      models: { triage: 'gpt-5.1-codex' },
+    });
+    const router = new ModelRouter(codexOnlyModels, shippedRoutes, false, stub, false, false);
+
+    expect(router.resolve('plan')).toBe('gpt-5.6-terra-high');
+    expect(router.registryRef.getCodexFlag('gpt-5.6-terra-high')).toContain('model_reasoning_effort=high');
+  });
+
+  it('leaves the Claude plan default unchanged (regression guard)', () => {
+    const router = new ModelRouter(shippedModels, shippedRoutes, false, stub, false, false);
+    expect(router.resolve('plan')).toBe('claude-opus-5');
+  });
+
+  it('lets an explicit modelOverride win over the default build_codex chain', async () => {
+    const overrideStub = new StubModelExecutor({ scripts: { build_codex: [{ output: 'FROM SOL' }] } });
+    const router = new ModelRouter(shippedModels, shippedRoutes, false, overrideStub, false, false);
+
+    const result = await router.run('build_codex', 'do it', { modelOverride: 'gpt-5.6-sol' });
+
+    expect(result.model).toBe('gpt-5.6-sol');
   });
 });

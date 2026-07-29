@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ModelRegistry } from '../models/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
-import type { ModelsConfig, RoutesConfig } from './index.js';
+import { loadModelsConfig, type ModelsConfig, type RoutesConfig } from './index.js';
 import {
   applyRepoConfig,
   describeEffectiveConfig,
@@ -246,6 +246,35 @@ describe('resolveEffectiveModelPins', () => {
     expect(() => resolveEffectiveModelPins(registry, { version: 1, models: { build: 'no-such-model' } }, {})).toThrow(
       /no-such-model/,
     );
+  });
+});
+
+describe('terra default overrides (#529)', () => {
+  const shippedRegistry = new ModelRegistry(loadModelsConfig());
+
+  it('accepts the new terra ids as env pin targets', () => {
+    const result = resolveEffectiveModelPins(shippedRegistry, null, {
+      FACTORY_PLAN_MODEL: 'gpt-5.6-terra-high',
+      FACTORY_BUILD_MODEL: 'gpt-5.6-terra-medium',
+    });
+    expect(result).toEqual({
+      plan: 'gpt-5.6-terra-high',
+      build: 'gpt-5.6-terra-medium',
+      sources: { plan: 'env', build: 'env' },
+    });
+  });
+
+  it('lets a repo pin beat both an env pin and the terra defaults', () => {
+    const result = resolveEffectiveModelPins(
+      shippedRegistry,
+      { version: 1, models: { plan: 'claude-opus-5', build: 'gpt-5.6-sol' } },
+      { FACTORY_PLAN_MODEL: 'gpt-5.6-terra-high' },
+    );
+    expect(result).toEqual({
+      plan: 'claude-opus-5',
+      build: 'gpt-5.6-sol',
+      sources: { plan: 'repo', build: 'repo' },
+    });
   });
 });
 
