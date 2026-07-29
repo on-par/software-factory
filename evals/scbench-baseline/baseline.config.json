@@ -27,5 +27,9 @@
     "suite": "the lexicographically first three problem ids in the pinned SCBench commit's problem directory"
   },
   "trials": { "smokeRuns": 2, "suiteTrialsPerProblem": 3 },
-  "comparisonThreshold": 10
+  "comparisonThreshold": 10,
+  "passPolicy": {
+    "id": "core-cases",
+    "description": "Upstream PassPolicy.CORE_CASES at the pinned SCBench commit: a checkpoint passes iff every Core-group test in its native evaluation.json passes (pass_counts.Core === total_counts.Core). Evidence guards: infrastructure_failure === true or missing evaluation.json is never a pass."
+  }
 }

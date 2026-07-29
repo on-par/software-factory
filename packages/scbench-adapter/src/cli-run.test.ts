@@ -23,6 +23,7 @@ const VALID_CONFIG_JSON = JSON.stringify({
   problems: { selection: 'deterministic', smoke: 'first', suite: 'first three' },
   trials: { smokeRuns: 2, suiteTrialsPerProblem: 3 },
   comparisonThreshold: 10,
+  passPolicy: { id: 'core-cases', description: 'Core-group tests must all pass.' },
 });
 
 function fakeDeps(overrides: Partial<CliDeps> = {}): CliDeps {
@@ -287,6 +288,7 @@ describe('baseline-report subcommand', () => {
       id: 'smoke/trial-1',
       manifestPath: '/tmp/runs/smoke/trial-1/manifest.json',
       manifest: minimalManifest(),
+      evidence: { runInfoPresent: false },
     };
     const deps = fakeDeps({ collectBaselineTrials: vi.fn(() => [trial]) });
 

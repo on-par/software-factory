@@ -8,14 +8,32 @@ Software Factory harness driven through `@on-par/scbench-adapter`
   Factory revision, the SCBench revision (must match
   [`packages/scbench-adapter/scbench.pin.json`](../../packages/scbench-adapter/scbench.pin.json)),
   the model-config posture, environment assumptions, a deterministic
-  problem-set selection rule, trial counts, and the comparison threshold
-  (10 trials per configuration) below which a report is labeled preliminary.
+  problem-set selection rule, trial counts, the comparison threshold
+  (10 trials per configuration) below which a report is labeled preliminary,
+  and the pinned `passPolicy` (see "Pass policy" below).
 - [`runs/`](./runs) — committed trial artifact sets, one directory per trial,
   each containing `brief.md`, `manifest.json`, `request.json`,
-  `events.ndjson`, and `diff.patch`.
+  `events.ndjson`, and `diff.patch`. A trial directory additionally retains,
+  verbatim from the SCBench run output, the native evidence files
+  `evaluation.json` (from the SCBench checkpoint output directory),
+  `checkpoint_results.jsonl` (from the SCBench run root), and `run_info.yaml`
+  (resolved run spec + execution summary) whenever a live run has produced
+  them. **Benchmark pass rate and erosion in `report.md` derive only from
+  these native evidence files** — trials without them (like the committed
+  stub trials below) count as missing-evidence, never as benchmark passes.
 - [`report.md`](./report.md) — generated from `baseline.config.json` +
   `runs/` by the `baseline-report` CLI subcommand below. **Never hand-edit
   it** — regenerate it after new trials land.
+
+## Pass policy
+
+`baseline.config.json`'s `passPolicy` pins the exact benchmark-correctness
+rule: `core-cases`, mirroring upstream SCBench's `PassPolicy.CORE_CASES` at
+the pinned commit — a checkpoint passes iff every Core-group test in its
+native `evaluation.json` passes (`pass_counts.Core === total_counts.Core`).
+A trial with `infrastructure_failure: true` or with no retained
+`evaluation.json` is never counted as a pass, regardless of Factory's own
+`manifest.run.outcome`.
 
 ## Status
 
@@ -66,7 +84,13 @@ uv run --project "$SCBENCH_CHECKOUT" python packages/scbench-adapter/python/run_
 
 # 5. Copy each trial's Factory artifacts (manifest.json, request.json,
 #    events.ndjson, diff.patch, brief.md) into
-#    evals/scbench-baseline/runs/<problem>/<checkpoint>/<trial-n>/.
+#    evals/scbench-baseline/runs/<problem>/<checkpoint>/<trial-n>/, and
+#    additionally copy that trial's native SCBench evidence — evaluation.json
+#    (from SCBench's checkpoint output directory), checkpoint_results.jsonl
+#    (from SCBench's run root), and run_info.yaml (resolved run spec +
+#    execution summary) — into the same trial directory, alongside the
+#    Factory artifacts. Benchmark pass rate and erosion in report.md are
+#    derived only from these native evidence files.
 ```
 
 Required tools: `git`, `uv` (Python ≥ 3.12 environment per upstream's

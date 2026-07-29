@@ -30,6 +30,12 @@ export interface CollectArtifactsResult {
 
 const FIXED_FILES = ['manifest.json', 'request.json', 'events.ndjson', 'diff.patch'];
 
+/** Native SCBench evidence files retained verbatim in each baseline trial
+ *  directory (colocated with manifest.json). Names match the pinned SCBench
+ *  commit's constants: EVALUATION_FILENAME, CHECKPOINT_RESULTS_FILENAME,
+ *  RUN_INFO_FILENAME. */
+export const NATIVE_EVIDENCE_FILES = ['evaluation.json', 'checkpoint_results.jsonl', 'run_info.yaml'] as const;
+
 /** Read + validate manifest.json (throws AdapterError when missing, unparsable,
  *  or version-mismatched against core's BENCHMARK_MANIFEST_VERSION), then
  *  copy the fixed artifact files plus any optional report/spec referenced by

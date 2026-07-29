@@ -13,19 +13,24 @@
 - Environment: node >=24; binaries: git, claude, node; host: macOS arm64 (Darwin 25.x) — record actual host in each live run's manifest; harness: Python per upstream README at the pinned SCBench commit
 - Problem selection: deterministic given scbench.commit — no host or curated state; smoke: the lexicographically first problem id in the pinned SCBench commit's problem directory; suite: the lexicographically first three problem ids in the pinned SCBench commit's problem directory
 - Trial plan: 2 smoke run(s), 3 suite trial(s) per problem
+- Pass policy: `core-cases` — Upstream PassPolicy.CORE_CASES at the pinned SCBench commit: a checkpoint passes iff every Core-group test in its native evaluation.json passes (pass_counts.Core === total_counts.Core). Evidence guards: infrastructure_failure === true or missing evaluation.json is never a pass.
 
 ## Trials
 
-- `smoke/trial-1`: outcome `ready`, elapsed 60000ms, manifest `evals/scbench-baseline/runs/smoke/trial-1/manifest.json`
-- `smoke/trial-2`: outcome `ready`, elapsed 60000ms, manifest `evals/scbench-baseline/runs/smoke/trial-2/manifest.json`
+- `smoke/trial-1`: outcome `ready`, elapsed 60000ms, manifest `evals/scbench-baseline/runs/smoke/trial-1/manifest.json`, native evidence: none
+- `smoke/trial-2`: outcome `ready`, elapsed 60000ms, manifest `evals/scbench-baseline/runs/smoke/trial-2/manifest.json`, native evidence: none
 
-## Checkpoint pass rate
+## Benchmark pass rate (native SCBench evaluation)
 
-2/2 (100.0%)
+Not measurable — none of the 2 recorded trial(s) carries native SCBench evaluation evidence (`evaluation.json`). Factory run outcomes are reported separately under harness health and are never counted as benchmark passes.
 
-## Erosion trajectory
+## Erosion trajectory (native SCBench evaluation)
 
-Not yet measurable — requires the live multi-checkpoint suite run.
+Not yet measurable — requires native SCBench evaluation evidence from the live multi-checkpoint suite run.
+
+## Factory run outcomes (harness health)
+
+2/2 (100.0%) of Factory runs ended `ready`. This is harness health — a `ready` manifest means the PLAN → BUILD → CHECK pipeline completed, not that SCBench's checkpoint evaluation passed; benchmark correctness above is derived only from native SCBench evidence.
 
 ## Elapsed time
 

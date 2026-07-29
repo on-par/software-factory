@@ -11,7 +11,7 @@ export type { BuildRunBriefArgsOptions, RunFactoryOptions } from './invoke.js';
 export { buildRunBriefArgs, runFactory } from './invoke.js';
 
 export type { ArtifactsFsDeps, CollectArtifactsOptions, CollectArtifactsResult } from './artifacts.js';
-export { collectArtifacts } from './artifacts.js';
+export { collectArtifacts, NATIVE_EVIDENCE_FILES } from './artifacts.js';
 
 export type { RunCheckpointDeps, RunCheckpointOptions } from './run-checkpoint.js';
 export { runCheckpoint } from './run-checkpoint.js';
@@ -19,5 +19,13 @@ export { runCheckpoint } from './run-checkpoint.js';
 export type { CliDeps } from './cli-run.js';
 export { defaultCliDeps, main as runCli } from './cli-run.js';
 
-export type { BaselineConfig, BaselineFsDeps, BaselineTrial } from './baseline.js';
-export { collectBaselineTrials, generateBaselineReport, loadBaselineConfig } from './baseline.js';
+export type {
+  BaselineConfig,
+  BaselineFsDeps,
+  BaselineTrial,
+  BaselineTrialEvidence,
+  ScbenchEvaluation,
+  ScbenchRunRecord,
+  TrialVerdict,
+} from './baseline.js';
+export { collectBaselineTrials, evaluateTrialVerdict, generateBaselineReport, loadBaselineConfig } from './baseline.js';

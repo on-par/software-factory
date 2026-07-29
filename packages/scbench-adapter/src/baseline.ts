@@ -5,6 +5,7 @@ import { dirname, join, relative, sep } from 'node:path';
 
 import { BENCHMARK_MANIFEST_VERSION, type BenchmarkManifest } from '@on-par/factory-core';
 
+import { NATIVE_EVIDENCE_FILES } from './artifacts.js';
 import { AdapterError } from './checkpoint.js';
 
 export interface BaselineConfig {
@@ -17,6 +18,7 @@ export interface BaselineConfig {
   problems: { selection: string; smoke: string; suite: string };
   trials: { smokeRuns: number; suiteTrialsPerProblem: number };
   comparisonThreshold: number;
+  passPolicy: { id: 'core-cases'; description: string };
 }
 
 const REQUIRED_KEYS = [
@@ -29,6 +31,7 @@ const REQUIRED_KEYS = [
   'problems',
   'trials',
   'comparisonThreshold',
+  'passPolicy',
 ] as const;
 
 const FULL_SHA_RE = /^[0-9a-f]{40}$/;
@@ -67,14 +70,53 @@ export function loadBaselineConfig(raw: string): BaselineConfig {
     throw new AdapterError('baseline config field "scbench.commit" must be a full-length (40 hex char) git SHA');
   }
 
+  const passPolicy = config.passPolicy as { id?: unknown; description?: unknown } | null;
+  if (typeof passPolicy !== 'object' || passPolicy === null || passPolicy.id !== 'core-cases') {
+    throw new AdapterError('baseline config field "passPolicy.id" must be "core-cases" — the only pinned pass policy');
+  }
+  if (typeof passPolicy.description !== 'string' || passPolicy.description.length === 0) {
+    throw new AdapterError('baseline config field "passPolicy.description" must be a non-empty string');
+  }
+
   return config as unknown as BaselineConfig;
 }
+
+/** Parsed subset of SCBench's native per-checkpoint evaluation.json
+ *  (CorrectnessResults at the pinned commit). Extra fields are ignored. */
+export interface ScbenchEvaluation {
+  problem_name: string;
+  checkpoint_name: string;
+  pass_counts: Record<string, number>;
+  total_counts: Record<string, number>;
+  pytest_exit_code: number;
+  infrastructure_failure: boolean;
+}
+
+/** One line of SCBench's run-level checkpoint_results.jsonl. Extra fields
+ *  are ignored. */
+export interface ScbenchRunRecord {
+  problem: string;
+  checkpoint: string;
+  state: string;
+  core_passed: number;
+  core_total: number;
+}
+
+/** Native SCBench evidence found colocated with a trial's manifest.json. */
+export interface BaselineTrialEvidence {
+  evaluation?: ScbenchEvaluation;
+  runRecords?: ScbenchRunRecord[];
+  runInfoPresent: boolean;
+}
+
+export type TrialVerdict = 'pass' | 'fail' | 'infrastructure-failure' | 'missing-evidence';
 
 export interface BaselineTrial {
   /** Manifest's directory path, relative to the runs root (e.g. "smoke/trial-1"). */
   id: string;
   manifestPath: string;
   manifest: BenchmarkManifest;
+  evidence: BaselineTrialEvidence;
 }
 
 export interface BaselineFsDeps {
@@ -106,6 +148,103 @@ function toTrialId(runsDir: string, manifestPath: string): string {
   return relative(runsDir, dirname(manifestPath)).split(sep).join('/');
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isRecordOfNumbers(value: unknown): value is Record<string, number> {
+  return isPlainObject(value) && Object.values(value).every((v) => typeof v === 'number');
+}
+
+/** Parse + structurally validate a single trial's native evaluation.json.
+ *  Throws AdapterError naming `path` and the offending field. */
+function parseEvaluation(raw: string, path: string): ScbenchEvaluation {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new AdapterError(`could not parse ${path}: ${(err as Error).message}`);
+  }
+  if (!isPlainObject(parsed)) {
+    throw new AdapterError(`invalid evaluation evidence at ${path}: must be a JSON object`);
+  }
+  const invalid = (field: string, expectation: string): never => {
+    throw new AdapterError(`invalid evaluation evidence at ${path}: field "${field}" must be ${expectation}`);
+  };
+  if (typeof parsed.problem_name !== 'string' || parsed.problem_name.length === 0) {
+    invalid('problem_name', 'a non-empty string');
+  }
+  if (typeof parsed.checkpoint_name !== 'string' || parsed.checkpoint_name.length === 0) {
+    invalid('checkpoint_name', 'a non-empty string');
+  }
+  if (!isRecordOfNumbers(parsed.pass_counts)) {
+    invalid('pass_counts', 'an object whose values are numbers');
+  }
+  if (!isRecordOfNumbers(parsed.total_counts)) {
+    invalid('total_counts', 'an object whose values are numbers');
+  }
+  if (typeof parsed.pytest_exit_code !== 'number') {
+    invalid('pytest_exit_code', 'a number');
+  }
+  if (typeof parsed.infrastructure_failure !== 'boolean') {
+    invalid('infrastructure_failure', 'a boolean');
+  }
+  return parsed as unknown as ScbenchEvaluation;
+}
+
+/** Parse + structurally validate SCBench's run-level
+ *  checkpoint_results.jsonl (one JSON object per non-blank line). Throws
+ *  AdapterError naming `path` and the 1-based line number. */
+function parseRunRecords(raw: string, path: string): ScbenchRunRecord[] {
+  const invalid = (line: number, field: string, expectation: string): never => {
+    throw new AdapterError(`invalid run record at ${path} line ${line}: field "${field}" must be ${expectation}`);
+  };
+  const records: ScbenchRunRecord[] = [];
+  const lines = raw.split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (line.trim().length === 0) continue;
+    const lineNumber = i + 1;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch (err) {
+      throw new AdapterError(`could not parse ${path} line ${lineNumber}: ${(err as Error).message}`);
+    }
+    if (!isPlainObject(parsed)) {
+      throw new AdapterError(`invalid run record at ${path} line ${lineNumber}: must be a JSON object`);
+    }
+    if (typeof parsed.problem !== 'string') invalid(lineNumber, 'problem', 'a string');
+    if (typeof parsed.checkpoint !== 'string') invalid(lineNumber, 'checkpoint', 'a string');
+    if (typeof parsed.state !== 'string') invalid(lineNumber, 'state', 'a string');
+    if (typeof parsed.core_passed !== 'number') invalid(lineNumber, 'core_passed', 'a number');
+    if (typeof parsed.core_total !== 'number') invalid(lineNumber, 'core_total', 'a number');
+    records.push(parsed as unknown as ScbenchRunRecord);
+  }
+  return records;
+}
+
+/** Load the native SCBench evidence colocated with a trial's manifest.json,
+ *  if present. SCBench writes this evidence after the adapter returns, so
+ *  the adapter never produces it — retention is an operator copy step
+ *  (see evals/scbench-baseline/README.md). */
+function loadEvidence(dir: string, deps: BaselineFsDeps): BaselineTrialEvidence {
+  const [evaluationFile, runRecordsFile, runInfoFile] = NATIVE_EVIDENCE_FILES;
+  const evaluationPath = join(dir, evaluationFile);
+  const runRecordsPath = join(dir, runRecordsFile);
+  const runInfoPath = join(dir, runInfoFile);
+
+  const evaluation = deps.existsSync(evaluationPath)
+    ? parseEvaluation(deps.readFileSync(evaluationPath), evaluationPath)
+    : undefined;
+  const runRecords = deps.existsSync(runRecordsPath)
+    ? parseRunRecords(deps.readFileSync(runRecordsPath), runRecordsPath)
+    : undefined;
+  const runInfoPresent = deps.existsSync(runInfoPath);
+
+  return { evaluation, runRecords, runInfoPresent };
+}
+
 /** Recursively scan `runsDir` for manifest.json files, validate each against
  *  BENCHMARK_MANIFEST_VERSION, and return them sorted by trial id for
  *  deterministic report output. An empty (but existing) directory is valid —
@@ -128,10 +267,29 @@ export function collectBaselineTrials(runsDir: string, deps: BaselineFsDeps = RE
         `manifest version mismatch at ${manifestPath}: expected ${BENCHMARK_MANIFEST_VERSION}, got ${manifest.manifestVersion}`,
       );
     }
-    return { id: toTrialId(runsDir, manifestPath), manifestPath, manifest };
+    const evidence = loadEvidence(dirname(manifestPath), deps);
+    return { id: toTrialId(runsDir, manifestPath), manifestPath, manifest, evidence };
   });
   trials.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   return trials;
+}
+
+/** Core-group pass/total, defaulting an absent 'Core' key to 0 (vacuous
+ *  0/0 counts as equal, matching upstream's PassPolicy.CORE_CASES). Single
+ *  source of truth so the verdict and every render of it agree. */
+function coreCounts(evaluation: ScbenchEvaluation): { passed: number; total: number } {
+  return { passed: evaluation.pass_counts.Core ?? 0, total: evaluation.total_counts.Core ?? 0 };
+}
+
+/** Pinned pass policy 'core-cases' — mirrors upstream PassPolicy.CORE_CASES
+ *  at the pinned SCBench commit (pass_counts.Core === total_counts.Core),
+ *  fail-closed on missing evidence or infrastructure failure. */
+export function evaluateTrialVerdict(trial: BaselineTrial): TrialVerdict {
+  const evaluation = trial.evidence.evaluation;
+  if (!evaluation) return 'missing-evidence';
+  if (evaluation.infrastructure_failure) return 'infrastructure-failure';
+  const { passed, total } = coreCounts(evaluation);
+  return passed === total ? 'pass' : 'fail';
 }
 
 function formatEnv(env: Record<string, string>): string {
@@ -154,7 +312,23 @@ function renderPinnedInputs(config: BaselineConfig): string {
     `- Environment: node ${config.environment.node}; binaries: ${config.environment.requiredBinaries.join(', ')}; host: ${config.environment.hostClass}; harness: ${config.environment.scbenchHarness}`,
     `- Problem selection: ${config.problems.selection}; smoke: ${config.problems.smoke}; suite: ${config.problems.suite}`,
     `- Trial plan: ${config.trials.smokeRuns} smoke run(s), ${config.trials.suiteTrialsPerProblem} suite trial(s) per problem`,
+    `- Pass policy: \`${config.passPolicy.id}\` — ${config.passPolicy.description}`,
   ].join('\n');
+}
+
+function hasEvaluation(
+  t: BaselineTrial,
+): t is BaselineTrial & { evidence: BaselineTrialEvidence & { evaluation: ScbenchEvaluation } } {
+  return t.evidence.evaluation !== undefined;
+}
+
+function evidencePresent(evidence: BaselineTrialEvidence): string {
+  const present = [
+    evidence.evaluation ? NATIVE_EVIDENCE_FILES[0] : undefined,
+    evidence.runRecords ? NATIVE_EVIDENCE_FILES[1] : undefined,
+    evidence.runInfoPresent ? NATIVE_EVIDENCE_FILES[2] : undefined,
+  ].filter((f): f is (typeof NATIVE_EVIDENCE_FILES)[number] => f !== undefined);
+  return present.length > 0 ? present.join(', ') : 'none';
 }
 
 function renderTrials(trials: BaselineTrial[]): string {
@@ -162,41 +336,92 @@ function renderTrials(trials: BaselineTrial[]): string {
   return trials
     .map(
       (t) =>
-        `- \`${t.id}\`: outcome \`${t.manifest.run.outcome}\`, elapsed ${t.manifest.run.elapsedMs}ms, manifest \`${t.manifestPath}\``,
+        `- \`${t.id}\`: outcome \`${t.manifest.run.outcome}\`, elapsed ${t.manifest.run.elapsedMs}ms, manifest \`${t.manifestPath}\`, native evidence: ${evidencePresent(t.evidence)}`,
     )
     .join('\n');
 }
 
-function renderPassRate(trials: BaselineTrial[]): string {
+function renderFactoryOutcomes(trials: BaselineTrial[]): string {
   const ready = trials.filter((t) => t.manifest.run.outcome === 'ready').length;
-  return formatPassRate(ready, trials.length);
+  if (trials.length === 0) return formatPassRate(ready, trials.length);
+  return `${formatPassRate(ready, trials.length)} of Factory runs ended \`ready\`. This is harness health — a \`ready\` manifest means the PLAN → BUILD → CHECK pipeline completed, not that SCBench's checkpoint evaluation passed; benchmark correctness above is derived only from native SCBench evidence.`;
 }
 
-function problemGroupOf(trialId: string): string | undefined {
-  const parts = trialId.split('/');
-  return parts.length >= 3 ? parts[1] : undefined;
+function renderBenchmarkPassRate(config: BaselineConfig, trials: BaselineTrial[]): string {
+  if (trials.length === 0) return 'no trials recorded';
+
+  const withEvidence = trials.filter(hasEvaluation);
+  if (withEvidence.length === 0) {
+    return `Not measurable — none of the ${trials.length} recorded trial(s) carries native SCBench evaluation evidence (\`evaluation.json\`). Factory run outcomes are reported separately under harness health and are never counted as benchmark passes.`;
+  }
+
+  const verdicts = trials.map((t) => ({ trial: t, verdict: evaluateTrialVerdict(t) }));
+  const passes = verdicts.filter((v) => v.verdict === 'pass').length;
+  const fails = verdicts.filter((v) => v.verdict === 'fail').length;
+  const infra = verdicts.filter((v) => v.verdict === 'infrastructure-failure').length;
+  const missing = verdicts.filter((v) => v.verdict === 'missing-evidence').length;
+
+  const lines = verdicts.map(({ trial, verdict }) => {
+    if ((verdict === 'pass' || verdict === 'fail') && hasEvaluation(trial)) {
+      const evaluation = trial.evidence.evaluation;
+      const { passed, total } = coreCounts(evaluation);
+      return `- \`${trial.id}\`: ${verdict} — Core ${passed}/${total} (${evaluation.problem_name} / ${evaluation.checkpoint_name})`;
+    }
+    if (verdict === 'infrastructure-failure') {
+      return `- \`${trial.id}\`: infrastructure failure — native evaluation reports infrastructure_failure`;
+    }
+    return `- \`${trial.id}\`: missing evidence — no evaluation.json in the trial directory`;
+  });
+
+  const headline = `${formatPassRate(passes, trials.length)} under pass policy \`${config.passPolicy.id}\` — ${passes} pass, ${fails} fail, ${infra} infrastructure failure, ${missing} missing evidence. A trial without native evaluation evidence never counts as a pass.`;
+
+  return [headline, '', ...lines].join('\n');
+}
+
+function checkpointSortKey(checkpointName: string): { n: number | undefined; name: string } {
+  const match = /(\d+)$/.exec(checkpointName);
+  return { n: match ? Number(match[1]) : undefined, name: checkpointName };
 }
 
 function renderErosion(trials: BaselineTrial[]): string {
-  const groups = new Map<string, BaselineTrial[]>();
-  for (const trial of trials) {
-    const problem = problemGroupOf(trial.id);
-    if (problem === undefined) continue;
+  const withEvidence = trials.filter(hasEvaluation);
+  if (withEvidence.length === 0) {
+    return 'Not yet measurable — requires native SCBench evaluation evidence from the live multi-checkpoint suite run.';
+  }
+
+  const groups = new Map<string, (typeof withEvidence)[number][]>();
+  for (const trial of withEvidence) {
+    const problem = trial.evidence.evaluation.problem_name;
     const list = groups.get(problem) ?? [];
     list.push(trial);
     groups.set(problem, list);
   }
-  if (groups.size === 0) {
-    return 'Not yet measurable — requires the live multi-checkpoint suite run.';
-  }
+
   return [...groups.keys()]
     .sort()
     .map((problem) => {
-      const outcomes = groups
+      const entries = groups
         .get(problem)!
-        .map((t) => `\`${t.id}\`: ${t.manifest.run.outcome}`)
+        .slice()
+        .sort((a, b) => {
+          const ak = checkpointSortKey(a.evidence.evaluation.checkpoint_name);
+          const bk = checkpointSortKey(b.evidence.evaluation.checkpoint_name);
+          if (ak.n !== undefined && bk.n !== undefined) {
+            if (ak.n !== bk.n) return ak.n - bk.n;
+          } else if (ak.name !== bk.name) {
+            return ak.name < bk.name ? -1 : 1;
+          }
+          return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+        })
+        .map((t) => {
+          const evaluation = t.evidence.evaluation;
+          const verdict = evaluateTrialVerdict(t);
+          const verdictLabel = verdict === 'infrastructure-failure' ? 'infrastructure failure' : verdict;
+          const { passed, total } = coreCounts(evaluation);
+          return `${evaluation.checkpoint_name} \`${t.id}\`: ${verdictLabel} (Core ${passed}/${total})`;
+        })
         .join(', ');
-      return `- ${problem}: ${outcomes}`;
+      return `- ${problem}: ${entries}`;
     })
     .join('\n');
 }
@@ -280,8 +505,9 @@ export function generateBaselineReport(config: BaselineConfig, trials: BaselineT
     statusLines.join('\n\n'),
     ['## Pinned inputs', '', renderPinnedInputs(config)].join('\n'),
     ['## Trials', '', renderTrials(trials)].join('\n'),
-    ['## Checkpoint pass rate', '', renderPassRate(trials)].join('\n'),
-    ['## Erosion trajectory', '', renderErosion(trials)].join('\n'),
+    ['## Benchmark pass rate (native SCBench evaluation)', '', renderBenchmarkPassRate(config, trials)].join('\n'),
+    ['## Erosion trajectory (native SCBench evaluation)', '', renderErosion(trials)].join('\n'),
+    ['## Factory run outcomes (harness health)', '', renderFactoryOutcomes(trials)].join('\n'),
     ['## Elapsed time', '', renderElapsed(trials)].join('\n'),
     ['## Cost', '', renderCost(trials)].join('\n'),
     ['## Routing and failover', '', renderRouting(trials)].join('\n'),

@@ -7,11 +7,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   collectBaselineTrials,
+  evaluateTrialVerdict,
   generateBaselineReport,
   loadBaselineConfig,
   type BaselineConfig,
   type BaselineFsDeps,
   type BaselineTrial,
+  type BaselineTrialEvidence,
+  type ScbenchEvaluation,
 } from './baseline.js';
 import { AdapterError, type ScbenchCheckpoint } from './checkpoint.js';
 import { minimalManifest } from './manifest-fixture.js';
@@ -38,7 +41,20 @@ const VALID_CONFIG = {
   problems: { selection: 'deterministic', smoke: 'first', suite: 'first three' },
   trials: { smokeRuns: 2, suiteTrialsPerProblem: 3 },
   comparisonThreshold: 10,
+  passPolicy: { id: 'core-cases' as const, description: 'Core-group tests must all pass.' },
 };
+
+function minimalEvaluation(overrides: Partial<ScbenchEvaluation> = {}): ScbenchEvaluation {
+  return {
+    problem_name: 'calculator',
+    checkpoint_name: 'checkpoint_1',
+    pass_counts: { Core: 3, Functionality: 2 },
+    total_counts: { Core: 3, Functionality: 2 },
+    pytest_exit_code: 0,
+    infrastructure_failure: false,
+    ...overrides,
+  };
+}
 
 describe('loadBaselineConfig', () => {
   it('accepts the committed baseline config', () => {
@@ -46,6 +62,10 @@ describe('loadBaselineConfig', () => {
     const config = loadBaselineConfig(raw);
     expect(config.baselineId).toBe('scbench-baseline-2026-07');
     expect(config.comparisonThreshold).toBe(10);
+    expect(config.passPolicy).toEqual({
+      id: 'core-cases',
+      description: expect.stringContaining('PassPolicy.CORE_CASES'),
+    });
   });
 
   it('accepts a well-formed synthetic config', () => {
@@ -86,6 +106,26 @@ describe('loadBaselineConfig', () => {
       loadBaselineConfig(JSON.stringify({ ...VALID_CONFIG, scbench: { ...VALID_CONFIG.scbench, commit: 'nope' } })),
     ).toThrow(/scbench\.commit/);
   });
+
+  it('rejects a config missing passPolicy', () => {
+    const { passPolicy: _passPolicy, ...missingPassPolicy } = VALID_CONFIG;
+    expect(() => loadBaselineConfig(JSON.stringify(missingPassPolicy))).toThrow(/missing required field "passPolicy"/);
+  });
+
+  it('rejects a passPolicy.id other than "core-cases"', () => {
+    expect(() =>
+      loadBaselineConfig(JSON.stringify({ ...VALID_CONFIG, passPolicy: { id: 'all-cases', description: 'x' } })),
+    ).toThrow(/passPolicy\.id/);
+  });
+
+  it('rejects a missing or empty passPolicy.description', () => {
+    expect(() =>
+      loadBaselineConfig(JSON.stringify({ ...VALID_CONFIG, passPolicy: { id: 'core-cases', description: '' } })),
+    ).toThrow(/passPolicy\.description/);
+    expect(() => loadBaselineConfig(JSON.stringify({ ...VALID_CONFIG, passPolicy: { id: 'core-cases' } }))).toThrow(
+      /passPolicy\.description/,
+    );
+  });
 });
 
 describe('baseline.config.json pin-drift guard', () => {
@@ -102,34 +142,57 @@ function fakeEntry(name: string, isDir: boolean) {
   return { name, isDirectory: () => isDir } as Dirent;
 }
 
+/** Fake fs deps for collectBaselineTrials tests: `paths` is the exhaustive
+ *  set of paths that exist (runsDir, manifest.json files, and any evidence
+ *  files under test) — any other existsSync check answers false, so a trial
+ *  dir with no evidence entries never attempts to read one. */
+function fakeDeps(
+  tree: Record<string, ReturnType<typeof fakeEntry>[]>,
+  files: Record<string, string>,
+  extraExists: string[] = [],
+): BaselineFsDeps {
+  const exists = new Set([...Object.keys(tree), ...Object.keys(files), ...extraExists]);
+  return {
+    existsSync: (path) => exists.has(path),
+    readdirSync: (dir) => tree[dir] ?? [],
+    readFileSync: (path) => {
+      if (!(path in files)) throw new Error(`ENOENT: ${path}`);
+      return files[path];
+    },
+  };
+}
+
 describe('collectBaselineTrials', () => {
   it('recursively finds manifests, sorts by id, and returns [] for an empty dir', () => {
     const manifestA = JSON.stringify(minimalManifest({ run: { ...minimalManifest().run, outcome: 'failed' } }));
     const manifestB = JSON.stringify(minimalManifest());
+    const manifestC = JSON.stringify(minimalManifest());
     const tree: Record<string, ReturnType<typeof fakeEntry>[]> = {
-      '/runs': [fakeEntry('z-problem', true), fakeEntry('a-problem', true), fakeEntry('notes.txt', false)],
+      '/runs': [
+        fakeEntry('z-problem', true),
+        fakeEntry('m-problem', true),
+        fakeEntry('a-problem', true),
+        fakeEntry('notes.txt', false),
+      ],
       '/runs/z-problem': [fakeEntry('manifest.json', false)],
+      '/runs/m-problem': [fakeEntry('manifest.json', false)],
       '/runs/a-problem': [fakeEntry('nested', true)],
       '/runs/a-problem/nested': [fakeEntry('manifest.json', false)],
     };
     const files: Record<string, string> = {
       '/runs/z-problem/manifest.json': manifestA,
+      '/runs/m-problem/manifest.json': manifestC,
       '/runs/a-problem/nested/manifest.json': manifestB,
     };
-    const deps: BaselineFsDeps = {
-      existsSync: () => true,
-      readdirSync: (dir) => tree[dir] ?? [],
-      readFileSync: (path) => {
-        if (!(path in files)) throw new Error(`ENOENT: ${path}`);
-        return files[path];
-      },
-    };
+    const deps = fakeDeps(tree, files, ['/runs']);
 
     const trials = collectBaselineTrials('/runs', deps);
 
-    expect(trials.map((t) => t.id)).toEqual(['a-problem/nested', 'z-problem']);
+    expect(trials.map((t) => t.id)).toEqual(['a-problem/nested', 'm-problem', 'z-problem']);
     expect(trials[0].manifest.run.outcome).toBe('ready');
-    expect(trials[1].manifest.run.outcome).toBe('failed');
+    expect(trials[2].manifest.run.outcome).toBe('failed');
+    expect(trials[0].evidence).toEqual({ runInfoPresent: false });
+    expect(trials[2].evidence).toEqual({ runInfoPresent: false });
   });
 
   it('returns [] for an empty directory', () => {
@@ -150,32 +213,272 @@ describe('collectBaselineTrials', () => {
   });
 
   it('rejects a manifest with the wrong manifestVersion', () => {
-    const deps: BaselineFsDeps = {
-      existsSync: () => true,
-      readdirSync: (dir) => (dir === '/runs' ? [fakeEntry('manifest.json', false)] : []),
-      readFileSync: () => JSON.stringify(minimalManifest({ manifestVersion: 999 })),
-    };
+    const deps = fakeDeps(
+      { '/runs': [fakeEntry('manifest.json', false)] },
+      { '/runs/manifest.json': JSON.stringify(minimalManifest({ manifestVersion: 999 })) },
+      ['/runs'],
+    );
     expect(() => collectBaselineTrials('/runs', deps)).toThrow(/manifest version mismatch/);
   });
 
   it('wraps an unparsable manifest in an AdapterError', () => {
-    const deps: BaselineFsDeps = {
-      existsSync: () => true,
-      readdirSync: (dir) => (dir === '/runs' ? [fakeEntry('manifest.json', false)] : []),
-      readFileSync: () => '{not json',
-    };
+    const deps = fakeDeps({ '/runs': [fakeEntry('manifest.json', false)] }, { '/runs/manifest.json': '{not json' }, [
+      '/runs',
+    ]);
     expect(() => collectBaselineTrials('/runs', deps)).toThrow(AdapterError);
+  });
+
+  it('loads all three native evidence files when present', () => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = {
+      '/runs/manifest.json': JSON.stringify(minimalManifest()),
+      '/runs/evaluation.json': JSON.stringify(minimalEvaluation()),
+      '/runs/checkpoint_results.jsonl': `${JSON.stringify({
+        problem: 'calculator',
+        checkpoint: 'checkpoint_1',
+        state: 'passed',
+        core_passed: 3,
+        core_total: 3,
+      })}\n\n`,
+    };
+    const deps = fakeDeps(tree, files, ['/runs', '/runs/run_info.yaml']);
+
+    const [trial] = collectBaselineTrials('/runs', deps);
+
+    expect(trial.evidence.evaluation).toEqual(minimalEvaluation());
+    expect(trial.evidence.runRecords).toEqual([
+      { problem: 'calculator', checkpoint: 'checkpoint_1', state: 'passed', core_passed: 3, core_total: 3 },
+    ]);
+    expect(trial.evidence.runInfoPresent).toBe(true);
+  });
+
+  it('records no evidence when none of the three files are present', () => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = { '/runs/manifest.json': JSON.stringify(minimalManifest()) };
+    const deps = fakeDeps(tree, files, ['/runs']);
+
+    const [trial] = collectBaselineTrials('/runs', deps);
+
+    expect(trial.evidence).toEqual({ runInfoPresent: false });
+  });
+
+  it('wraps an unparsable evaluation.json in an AdapterError naming the path', () => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = {
+      '/runs/manifest.json': JSON.stringify(minimalManifest()),
+      '/runs/evaluation.json': '{not json',
+    };
+    const deps = fakeDeps(tree, files, ['/runs']);
+    expect(() => collectBaselineTrials('/runs', deps)).toThrow(AdapterError);
+    expect(() => collectBaselineTrials('/runs', deps)).toThrow(/evaluation\.json/);
+  });
+
+  it('rejects a valid-JSON evaluation.json that is not an object', () => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = {
+      '/runs/manifest.json': JSON.stringify(minimalManifest()),
+      '/runs/evaluation.json': '[1,2,3]',
+    };
+    const deps = fakeDeps(tree, files, ['/runs']);
+    expect(() => collectBaselineTrials('/runs', deps)).toThrow(/evaluation evidence at .*must be a JSON object/);
+  });
+
+  it('rejects evaluation.json with a missing/empty problem_name', () => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = {
+      '/runs/manifest.json': JSON.stringify(minimalManifest()),
+      '/runs/evaluation.json': JSON.stringify(minimalEvaluation({ problem_name: '' })),
+    };
+    const deps = fakeDeps(tree, files, ['/runs']);
+    expect(() => collectBaselineTrials('/runs', deps)).toThrow(/field "problem_name" must be a non-empty string/);
+  });
+
+  it('rejects evaluation.json with a missing/empty checkpoint_name', () => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = {
+      '/runs/manifest.json': JSON.stringify(minimalManifest()),
+      '/runs/evaluation.json': JSON.stringify(minimalEvaluation({ checkpoint_name: '' })),
+    };
+    const deps = fakeDeps(tree, files, ['/runs']);
+    expect(() => collectBaselineTrials('/runs', deps)).toThrow(/field "checkpoint_name" must be a non-empty string/);
+  });
+
+  it('rejects evaluation.json with a non-boolean infrastructure_failure', () => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = {
+      '/runs/manifest.json': JSON.stringify(minimalManifest()),
+      '/runs/evaluation.json': JSON.stringify(
+        minimalEvaluation({ infrastructure_failure: 'no' as unknown as boolean }),
+      ),
+    };
+    const deps = fakeDeps(tree, files, ['/runs']);
+    expect(() => collectBaselineTrials('/runs', deps)).toThrow(/field "infrastructure_failure" must be a boolean/);
+  });
+
+  it('rejects evaluation.json with a non-numeric pass_counts value', () => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = {
+      '/runs/manifest.json': JSON.stringify(minimalManifest()),
+      '/runs/evaluation.json': JSON.stringify(
+        minimalEvaluation({ pass_counts: { Core: 'three' as unknown as number } }),
+      ),
+    };
+    const deps = fakeDeps(tree, files, ['/runs']);
+    expect(() => collectBaselineTrials('/runs', deps)).toThrow(/field "pass_counts" must be/);
+  });
+
+  it('rejects evaluation.json with a non-numeric total_counts value', () => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = {
+      '/runs/manifest.json': JSON.stringify(minimalManifest()),
+      '/runs/evaluation.json': JSON.stringify(
+        minimalEvaluation({ total_counts: { Core: 'three' as unknown as number } }),
+      ),
+    };
+    const deps = fakeDeps(tree, files, ['/runs']);
+    expect(() => collectBaselineTrials('/runs', deps)).toThrow(/field "total_counts" must be/);
+  });
+
+  it('rejects evaluation.json with a non-numeric pytest_exit_code', () => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = {
+      '/runs/manifest.json': JSON.stringify(minimalManifest()),
+      '/runs/evaluation.json': JSON.stringify(minimalEvaluation({ pytest_exit_code: 'zero' as unknown as number })),
+    };
+    const deps = fakeDeps(tree, files, ['/runs']);
+    expect(() => collectBaselineTrials('/runs', deps)).toThrow(/field "pytest_exit_code" must be a number/);
+  });
+
+  it('wraps an unparsable checkpoint_results.jsonl line in an AdapterError naming path and line number', () => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = {
+      '/runs/manifest.json': JSON.stringify(minimalManifest()),
+      '/runs/checkpoint_results.jsonl': 'not json at all',
+    };
+    const deps = fakeDeps(tree, files, ['/runs']);
+    expect(() => collectBaselineTrials('/runs', deps)).toThrow(/checkpoint_results\.jsonl line 1/);
+  });
+
+  it('rejects a valid-JSON checkpoint_results.jsonl line that is not an object', () => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = {
+      '/runs/manifest.json': JSON.stringify(minimalManifest()),
+      '/runs/checkpoint_results.jsonl': '[1,2,3]',
+    };
+    const deps = fakeDeps(tree, files, ['/runs']);
+    expect(() => collectBaselineTrials('/runs', deps)).toThrow(/run record at .*line 1: must be a JSON object/);
+  });
+
+  it('rejects a checkpoint_results.jsonl record missing core_total', () => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = {
+      '/runs/manifest.json': JSON.stringify(minimalManifest()),
+      '/runs/checkpoint_results.jsonl': JSON.stringify({
+        problem: 'calculator',
+        checkpoint: 'checkpoint_1',
+        state: 'passed',
+        core_passed: 3,
+      }),
+    };
+    const deps = fakeDeps(tree, files, ['/runs']);
+    expect(() => collectBaselineTrials('/runs', deps)).toThrow(/field "core_total" must be a number/);
+  });
+
+  const RUN_RECORD_FIELD_CASES: [string, Record<string, unknown>, RegExp][] = [
+    [
+      'problem',
+      { checkpoint: 'checkpoint_1', state: 'passed', core_passed: 3, core_total: 3 },
+      /field "problem" must be a string/,
+    ],
+    [
+      'checkpoint',
+      { problem: 'calculator', state: 'passed', core_passed: 3, core_total: 3 },
+      /field "checkpoint" must be a string/,
+    ],
+    [
+      'state',
+      { problem: 'calculator', checkpoint: 'checkpoint_1', core_passed: 3, core_total: 3 },
+      /field "state" must be a string/,
+    ],
+    [
+      'core_passed',
+      { problem: 'calculator', checkpoint: 'checkpoint_1', state: 'passed', core_total: 3 },
+      /field "core_passed" must be a number/,
+    ],
+  ];
+
+  it.each(RUN_RECORD_FIELD_CASES)('rejects a checkpoint_results.jsonl record missing %s', (_field, record, re) => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = {
+      '/runs/manifest.json': JSON.stringify(minimalManifest()),
+      '/runs/checkpoint_results.jsonl': JSON.stringify(record),
+    };
+    const deps = fakeDeps(tree, files, ['/runs']);
+    expect(() => collectBaselineTrials('/runs', deps)).toThrow(re);
   });
 
   it('collects the committed smoke evidence from the real filesystem', () => {
     const trials = collectBaselineTrials(RUNS_DIR);
     expect(trials.map((t) => t.id)).toEqual(['smoke/trial-1', 'smoke/trial-2']);
+    for (const trial of trials) {
+      expect(trial.evidence).toEqual({ runInfoPresent: false });
+    }
   });
 });
 
-function trialAt(id: string, overrides: Parameters<typeof minimalManifest>[0] = {}): BaselineTrial {
-  return { id, manifestPath: `evals/scbench-baseline/runs/${id}/manifest.json`, manifest: minimalManifest(overrides) };
+function trialAt(
+  id: string,
+  overrides: Parameters<typeof minimalManifest>[0] = {},
+  evidence: BaselineTrialEvidence = { runInfoPresent: false },
+): BaselineTrial {
+  return {
+    id,
+    manifestPath: `evals/scbench-baseline/runs/${id}/manifest.json`,
+    manifest: minimalManifest(overrides),
+    evidence,
+  };
 }
+
+describe('evaluateTrialVerdict', () => {
+  it('returns missing-evidence when there is no native evaluation', () => {
+    expect(evaluateTrialVerdict(trialAt('a'))).toBe('missing-evidence');
+  });
+
+  it('returns infrastructure-failure when the evaluation reports one', () => {
+    const trial = trialAt(
+      'a',
+      {},
+      { evaluation: minimalEvaluation({ infrastructure_failure: true }), runInfoPresent: false },
+    );
+    expect(evaluateTrialVerdict(trial)).toBe('infrastructure-failure');
+  });
+
+  it('returns pass when Core pass_counts equals total_counts', () => {
+    const trial = trialAt('a', {}, { evaluation: minimalEvaluation(), runInfoPresent: false });
+    expect(evaluateTrialVerdict(trial)).toBe('pass');
+  });
+
+  it('returns fail when Core pass_counts is less than total_counts', () => {
+    const trial = trialAt(
+      'a',
+      {},
+      { evaluation: minimalEvaluation({ pass_counts: { Core: 2 }, total_counts: { Core: 3 } }), runInfoPresent: false },
+    );
+    expect(evaluateTrialVerdict(trial)).toBe('fail');
+  });
+
+  it('treats a missing Core key in pass_counts/total_counts as 0/0 (upstream vacuous pass)', () => {
+    const trial = trialAt(
+      'a',
+      {},
+      {
+        evaluation: minimalEvaluation({ pass_counts: { Functionality: 2 }, total_counts: { Functionality: 2 } }),
+        runInfoPresent: false,
+      },
+    );
+    expect(evaluateTrialVerdict(trial)).toBe('pass');
+  });
+});
 
 describe('generateBaselineReport', () => {
   const config: BaselineConfig = VALID_CONFIG;
@@ -185,20 +488,10 @@ describe('generateBaselineReport', () => {
     expect(report).toContain('**Trial count:** 0 (comparison threshold: 10)');
     expect(report).toContain('**Status: PRELIMINARY**');
     expect(report).toContain('no trials recorded');
-    expect(report).toContain('Not yet measurable — requires the live multi-checkpoint suite run.');
+    expect(report).toContain('Not yet measurable — requires native SCBench evaluation evidence');
     expect(report).toContain('No trials recorded.');
     expect(report).toContain('No routing or failover events recorded.');
     expect(report).toContain('No failures recorded.');
-  });
-
-  it('computes checkpoint pass rate from a ready/failed mix', () => {
-    const trials = [
-      trialAt('a', { run: { ...minimalManifest().run, outcome: 'ready' } }),
-      trialAt('b', { run: { ...minimalManifest().run, outcome: 'failed' } }),
-      trialAt('c', { run: { ...minimalManifest().run, outcome: 'ready' } }),
-    ];
-    const report = generateBaselineReport(config, trials);
-    expect(report).toContain('2/3 (66.7%)');
   });
 
   it('shows the PRELIMINARY banner (with trial count + config scope) below threshold, and omits it at/above threshold', () => {
@@ -212,23 +505,6 @@ describe('generateBaselineReport', () => {
     const atThreshold = generateBaselineReport({ ...config, comparisonThreshold: 1 }, [trialAt('a')]);
     expect(atThreshold).not.toContain('PRELIMINARY');
     expect(atThreshold).toContain('**Status: comparison-ready**');
-  });
-
-  it('renders per-problem erosion sequences when multi-checkpoint trial ids are present', () => {
-    const trials = [
-      trialAt('suite/calculator/1', { run: { ...minimalManifest().run, outcome: 'ready' } }),
-      trialAt('suite/calculator/2', { run: { ...minimalManifest().run, outcome: 'failed' } }),
-      trialAt('suite/other/1', { run: { ...minimalManifest().run, outcome: 'ready' } }),
-    ];
-    const report = generateBaselineReport(config, trials);
-    expect(report).toContain('- calculator: `suite/calculator/1`: ready, `suite/calculator/2`: failed');
-    expect(report).toContain('- other: `suite/other/1`: ready');
-    expect(report).not.toContain('Not yet measurable');
-  });
-
-  it('states the not-yet-measurable sentence when no trial id has problem-grouping depth', () => {
-    const report = generateBaselineReport(config, [trialAt('smoke/trial-1'), trialAt('smoke/trial-2')]);
-    expect(report).toContain('Not yet measurable — requires the live multi-checkpoint suite run.');
   });
 
   it('sums elapsed time and cost across trials', () => {
@@ -255,11 +531,17 @@ describe('generateBaselineReport', () => {
           { model: 'claude', task: 'plan', attempt: '2', reason: 'rate_limit' },
         ],
       }),
-      trialAt('b', { modelAttempts: [{ model: 'codex', task: 'build', attempt: '1' }] }),
+      trialAt('b', {
+        modelAttempts: [
+          { model: 'codex', task: 'build', attempt: '1' },
+          { model: 'aardvark', task: 'setup', attempt: '1' },
+        ],
+      }),
     ];
     const report = generateBaselineReport(config, trials);
     expect(report).toContain('claude / plan: 2 attempt(s); failover reasons: rate_limit');
     expect(report).toContain('codex / build: 1 attempt(s)');
+    expect(report).toContain('aardvark / setup: 1 attempt(s)');
   });
 
   it('renders checker outcomes for trials with and without a checker summary', () => {
@@ -285,6 +567,177 @@ describe('generateBaselineReport', () => {
   it('is deterministic across repeated calls with the same inputs (no wall-clock or random state)', () => {
     const trials = [trialAt('a'), trialAt('b')];
     expect(generateBaselineReport(config, trials)).toBe(generateBaselineReport(config, trials));
+  });
+
+  it('renders native evidence presence in the Trials section', () => {
+    const trials = [
+      trialAt('a', {}, { evaluation: minimalEvaluation(), runRecords: [], runInfoPresent: true }),
+      trialAt('b', {}, { runInfoPresent: false }),
+    ];
+    const report = generateBaselineReport(config, trials);
+    expect(report).toContain('`a`: outcome `ready`, elapsed 60000ms');
+    expect(report).toContain('native evidence: evaluation.json, checkpoint_results.jsonl, run_info.yaml');
+    expect(report).toContain('`b`: outcome `ready`, elapsed 60000ms, manifest');
+    expect(report).toContain('native evidence: none');
+  });
+
+  it('a ready manifest with no native evidence cannot render as a benchmark pass', () => {
+    const trials = [
+      trialAt('a', { run: { ...minimalManifest().run, outcome: 'ready' } }),
+      trialAt('b', { run: { ...minimalManifest().run, outcome: 'ready' } }),
+    ];
+    const report = generateBaselineReport(config, trials);
+
+    expect(report).toContain(
+      'Not measurable — none of the 2 recorded trial(s) carries native SCBench evaluation evidence (`evaluation.json`)',
+    );
+    expect(report).not.toMatch(/`a`: pass/);
+    expect(report).not.toMatch(/`b`: pass/);
+    expect(report).toContain('2/2 (100.0%) of Factory runs ended `ready`');
+    expect(report).toContain("not that SCBench's checkpoint evaluation passed");
+  });
+
+  it('renders pass/fail/infrastructure-failure verdicts with mixed denominators', () => {
+    const trials = [
+      trialAt('a', {}, { evaluation: minimalEvaluation(), runInfoPresent: false }),
+      trialAt(
+        'b',
+        {},
+        {
+          evaluation: minimalEvaluation({ pass_counts: { Core: 2 }, total_counts: { Core: 3 } }),
+          runInfoPresent: false,
+        },
+      ),
+      trialAt('c', {}, { evaluation: minimalEvaluation({ infrastructure_failure: true }), runInfoPresent: false }),
+      trialAt('d'),
+    ];
+    const report = generateBaselineReport(config, trials);
+
+    expect(report).toContain(
+      '1/4 (25.0%) under pass policy `core-cases` — 1 pass, 1 fail, 1 infrastructure failure, 1 missing evidence.',
+    );
+    expect(report).toContain('- `a`: pass — Core 3/3 (calculator / checkpoint_1)');
+    expect(report).toContain('- `b`: fail — Core 2/3 (calculator / checkpoint_1)');
+    expect(report).toContain('- `c`: infrastructure failure — native evaluation reports infrastructure_failure');
+    expect(report).toContain('- `d`: missing evidence — no evaluation.json in the trial directory');
+  });
+
+  it('renders "Core 0/0" when the Core key is absent from pass_counts/total_counts', () => {
+    const trials = [
+      trialAt(
+        'a',
+        {},
+        {
+          evaluation: minimalEvaluation({ pass_counts: { Functionality: 2 }, total_counts: { Functionality: 2 } }),
+          runInfoPresent: false,
+        },
+      ),
+    ];
+    const report = generateBaselineReport(config, trials);
+    expect(report).toContain('- `a`: pass — Core 0/0 (calculator / checkpoint_1)');
+  });
+
+  it('groups erosion by evaluation.problem_name, ordering checkpoints numerically', () => {
+    const trials = [
+      trialAt(
+        'suite/calculator/1',
+        {},
+        {
+          evaluation: minimalEvaluation({ problem_name: 'calculator', checkpoint_name: 'checkpoint_1' }),
+          runInfoPresent: false,
+        },
+      ),
+      trialAt(
+        'suite/calculator/2',
+        {},
+        {
+          evaluation: minimalEvaluation({
+            problem_name: 'calculator',
+            checkpoint_name: 'checkpoint_2',
+            pass_counts: { Core: 1 },
+            total_counts: { Core: 3 },
+          }),
+          runInfoPresent: false,
+        },
+      ),
+      trialAt(
+        'suite/calculator/10',
+        {},
+        {
+          evaluation: minimalEvaluation({ problem_name: 'calculator', checkpoint_name: 'checkpoint_10' }),
+          runInfoPresent: false,
+        },
+      ),
+      trialAt(
+        'suite/other/1',
+        {},
+        {
+          evaluation: minimalEvaluation({ problem_name: 'other', checkpoint_name: 'checkpoint_1' }),
+          runInfoPresent: false,
+        },
+      ),
+    ];
+    const report = generateBaselineReport(config, trials);
+
+    expect(report).toContain(
+      '- calculator: checkpoint_1 `suite/calculator/1`: pass (Core 3/3), checkpoint_2 `suite/calculator/2`: fail (Core 1/3), checkpoint_10 `suite/calculator/10`: pass (Core 3/3)',
+    );
+    expect(report).toContain('- other: checkpoint_1 `suite/other/1`: pass (Core 3/3)');
+    expect(report).not.toContain('Not yet measurable');
+  });
+
+  it('falls back to lexicographic checkpoint_name ordering when neither checkpoint has a trailing integer', () => {
+    const trials = [
+      trialAt(
+        'suite/calculator/final',
+        {},
+        {
+          evaluation: minimalEvaluation({ problem_name: 'calculator', checkpoint_name: 'checkpoint_final' }),
+          runInfoPresent: false,
+        },
+      ),
+      trialAt(
+        'suite/calculator/alpha',
+        {},
+        {
+          evaluation: minimalEvaluation({ problem_name: 'calculator', checkpoint_name: 'checkpoint_alpha' }),
+          runInfoPresent: false,
+        },
+      ),
+    ];
+    const report = generateBaselineReport(config, trials);
+    expect(report).toContain(
+      '- calculator: checkpoint_alpha `suite/calculator/alpha`: pass (Core 3/3), checkpoint_final `suite/calculator/final`: pass (Core 3/3)',
+    );
+  });
+
+  it('tiebreaks by trial id when checkpoint_name is identical across trials in a problem', () => {
+    const sameCheckpoint = (id: string) =>
+      trialAt(
+        id,
+        {},
+        {
+          evaluation: minimalEvaluation({
+            problem_name: 'dup',
+            checkpoint_name: 'checkpoint_shared',
+            pass_counts: { Functionality: 1 },
+            total_counts: { Functionality: 1 },
+          }),
+          runInfoPresent: false,
+        },
+      );
+    const trials = [sameCheckpoint('suite/dup/c'), sameCheckpoint('suite/dup/a'), sameCheckpoint('suite/dup/b')];
+    const report = generateBaselineReport(config, trials);
+    expect(report).toContain(
+      '- dup: checkpoint_shared `suite/dup/a`: pass (Core 0/0), checkpoint_shared `suite/dup/b`: pass (Core 0/0), checkpoint_shared `suite/dup/c`: pass (Core 0/0)',
+    );
+  });
+
+  it('states the not-yet-measurable erosion sentence when no trial carries native evaluation evidence', () => {
+    const report = generateBaselineReport(config, [trialAt('smoke/trial-1'), trialAt('smoke/trial-2')]);
+    expect(report).toContain(
+      'Not yet measurable — requires native SCBench evaluation evidence from the live multi-checkpoint suite run.',
+    );
   });
 });
 
