@@ -48,6 +48,7 @@ export default defineConfig({
         'packages/dashboard/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
         'packages/product/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 98, statements: 99 },
         'packages/server/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
+        'packages/scbench-adapter/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 91, statements: 97 },
       },
     },
   },
