@@ -161,8 +161,16 @@ describe('loadModelsConfig', () => {
       ([, def]) => def.harness === 'codex-cli' && !def.experimental,
     );
     expect(codexCliModels.length).toBeGreaterThanOrEqual(2);
-    for (const [, def] of codexCliModels) {
-      expect(def.codexFlag).toMatch(/(^|\s)-m \S+/);
+    for (const [id, def] of codexCliModels) {
+      const flagModel = def.codexFlag?.match(/(?:^|\s)-m (\S+)/)?.[1];
+      expect(flagModel, `${id}: codexFlag must pin -m`).toBeDefined();
+      // The -m value must be the model's own registry id, or a shared family
+      // base that the id extends (e.g. gpt-5.6-terra-high/-medium both pin
+      // -m gpt-5.6-terra) — never an unrelated/mistyped model id.
+      expect(
+        id === flagModel || id.startsWith(`${flagModel}-`),
+        `${id}: -m ${flagModel} does not match or extend its own registry id`,
+      ).toBe(true);
     }
     const flags = codexCliModels.map(([, def]) => def.codexFlag);
     expect(new Set(flags).size).toBe(flags.length);
