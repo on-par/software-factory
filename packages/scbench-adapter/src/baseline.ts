@@ -1,6 +1,6 @@
 // packages/scbench-adapter/src/baseline.ts — pinned SlopCodeBench baseline
 // config loader + report generator (#511).
-import { readdirSync, readFileSync, type Dirent } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, type Dirent } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 
 import { BENCHMARK_MANIFEST_VERSION, type BenchmarkManifest } from '@on-par/factory-core';
@@ -78,11 +78,13 @@ export interface BaselineTrial {
 }
 
 export interface BaselineFsDeps {
+  existsSync: (path: string) => boolean;
   readdirSync: (dir: string) => Dirent[];
   readFileSync: (path: string) => string;
 }
 
 const REAL_FS: BaselineFsDeps = {
+  existsSync,
   readdirSync: (dir) => readdirSync(dir, { withFileTypes: true }),
   readFileSync: (path) => readFileSync(path, 'utf-8'),
 };
@@ -106,9 +108,14 @@ function toTrialId(runsDir: string, manifestPath: string): string {
 
 /** Recursively scan `runsDir` for manifest.json files, validate each against
  *  BENCHMARK_MANIFEST_VERSION, and return them sorted by trial id for
- *  deterministic report output. An empty (or nonexistent-content) directory
- *  is valid — the caller renders "no trials" rather than failing. */
+ *  deterministic report output. An empty (but existing) directory is valid —
+ *  the caller renders "no trials" rather than failing. A missing `runsDir`
+ *  throws AdapterError instead of letting readdirSync's raw ENOENT escape. */
 export function collectBaselineTrials(runsDir: string, deps: BaselineFsDeps = REAL_FS): BaselineTrial[] {
+  if (!deps.existsSync(runsDir)) {
+    throw new AdapterError(`no such directory: ${runsDir} — pass an existing --runs directory`);
+  }
+
   const trials = findManifestPaths(runsDir, deps).map((manifestPath) => {
     let manifest: BenchmarkManifest;
     try {

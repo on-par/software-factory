@@ -117,6 +117,7 @@ describe('collectBaselineTrials', () => {
       '/runs/a-problem/nested/manifest.json': manifestB,
     };
     const deps: BaselineFsDeps = {
+      existsSync: () => true,
       readdirSync: (dir) => tree[dir] ?? [],
       readFileSync: (path) => {
         if (!(path in files)) throw new Error(`ENOENT: ${path}`);
@@ -132,12 +133,25 @@ describe('collectBaselineTrials', () => {
   });
 
   it('returns [] for an empty directory', () => {
-    const deps: BaselineFsDeps = { readdirSync: () => [], readFileSync: () => '' };
+    const deps: BaselineFsDeps = { existsSync: () => true, readdirSync: () => [], readFileSync: () => '' };
     expect(collectBaselineTrials('/empty', deps)).toEqual([]);
+  });
+
+  it('rejects a missing --runs directory with an AdapterError instead of a raw ENOENT', () => {
+    const deps: BaselineFsDeps = {
+      existsSync: () => false,
+      readdirSync: () => {
+        throw new Error('ENOENT: should never be reached');
+      },
+      readFileSync: () => '',
+    };
+    expect(() => collectBaselineTrials('/does/not/exist', deps)).toThrow(AdapterError);
+    expect(() => collectBaselineTrials('/does/not/exist', deps)).toThrow(/no such directory/);
   });
 
   it('rejects a manifest with the wrong manifestVersion', () => {
     const deps: BaselineFsDeps = {
+      existsSync: () => true,
       readdirSync: (dir) => (dir === '/runs' ? [fakeEntry('manifest.json', false)] : []),
       readFileSync: () => JSON.stringify(minimalManifest({ manifestVersion: 999 })),
     };
@@ -146,6 +160,7 @@ describe('collectBaselineTrials', () => {
 
   it('wraps an unparsable manifest in an AdapterError', () => {
     const deps: BaselineFsDeps = {
+      existsSync: () => true,
       readdirSync: (dir) => (dir === '/runs' ? [fakeEntry('manifest.json', false)] : []),
       readFileSync: () => '{not json',
     };
