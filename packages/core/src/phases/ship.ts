@@ -24,6 +24,9 @@ export interface ShipResult {
   prNumber?: number;
   denied?: boolean;
   deniedReason?: string;
+  /** True when the branch's content had already landed on main (e.g. a retry after a
+   *  squash merge) — nothing was pushed and no PR was created (#520). */
+  alreadyDelivered?: boolean;
 }
 
 export async function shipPhase(opts: {
@@ -93,6 +96,14 @@ export async function shipPhase(opts: {
   }
 
   if (!prNumber) {
+    // Recovery decisions must compare against the *current* remote — a stale
+    // remote-tracking ref makes already-delivered work look like recovery work (#520).
+    try {
+      await run('git fetch origin main', { cwd: worktree });
+    } catch {
+      log('ship', 'git fetch origin main failed — recovery may compare against a stale origin/main');
+    }
+
     // A failed ADR commit leaves its files on disk uncommitted (see materializeAdrDrafts) —
     // never let that alone make the worktree look dirty and abort the whole ship.
     const recoveryState = await inspectRecoveryState(worktree, run, adr.committed ? [] : adr.paths);
@@ -100,7 +111,17 @@ export async function shipPhase(opts: {
       log('ship', `not recovering ${branch}: worktree has uncommitted changes`);
       return { ok: false };
     }
-    if (!recoveryState.ahead) {
+    if (recoveryState.landed || !recoveryState.ahead) {
+      // The branch's content is already on main: identical trees (squash merge) or an
+      // empty ahead-count (merge commit / fast-forward). That is delivery, not recovery.
+      const mergedPr = await findMergedPR(octokit, owner, repoName, branch);
+      if (mergedPr !== undefined || recoveryState.landed) {
+        log(
+          'ship',
+          `not recovering ${branch}: already delivered${mergedPr !== undefined ? ` by merged PR #${mergedPr}` : ' (HEAD tree matches origin/main)'}`,
+        );
+        return { ok: true, prNumber: mergedPr, alreadyDelivered: true };
+      }
       log('ship', `not recovering ${branch}: no commits ahead of origin/main`);
       return { ok: false };
     }
@@ -222,22 +243,48 @@ async function findOpenPR(octokit: Octokit, owner: string, repo: string, branch:
   }
 }
 
+async function findMergedPR(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  branch: string,
+): Promise<number | undefined> {
+  try {
+    const { data: prs } = await octokit.rest.pulls.list({
+      owner,
+      repo,
+      state: 'closed',
+      head: `${owner}:${branch}`,
+    });
+    return prs.find((pr) => pr.merged_at != null)?.number;
+  } catch {
+    return undefined;
+  }
+}
+
 async function inspectRecoveryState(
   worktree: string,
   run: CommandRunner,
   ignorePaths: string[] = [],
-): Promise<{ clean: boolean; ahead: boolean }> {
+): Promise<{ clean: boolean; ahead: boolean; landed: boolean }> {
   const statusCommand =
     ignorePaths.length > 0
       ? `git status --porcelain -- . ${ignorePaths.map((p) => shellEscape(`:!${p}`)).join(' ')}`
       : 'git status --porcelain';
-  const [{ stdout: status }, { stdout: ahead }] = await Promise.all([
+  const [{ stdout: status }, { stdout: ahead }, landed] = await Promise.all([
     run(statusCommand, { cwd: worktree }),
     run('git rev-list --count origin/main..HEAD', { cwd: worktree }),
+    // A squash merge leaves origin/main..HEAD nonzero forever even though the branch's
+    // tree is byte-identical to main — exit 0 here is the reliable "already landed" signal.
+    run('git diff --quiet origin/main..HEAD', { cwd: worktree }).then(
+      () => true,
+      () => false,
+    ),
   ]);
   return {
     clean: status.trim() === '',
     ahead: Number.parseInt(ahead.trim(), 10) > 0,
+    landed,
   };
 }
 

@@ -1385,6 +1385,14 @@ bash scripts/verify.sh
       expect(logged()).toContain('PR #99 ready for review');
     });
 
+    it('reports already-delivered instead of "ready for review" when SHIP recovery finds a prior merged PR (#520)', async () => {
+      h.shipResult = { ok: true, prNumber: 518, alreadyDelivered: true };
+      const res = await runMain('ship', '5');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('already delivered by merged PR #518');
+      expect(logged()).not.toContain('PR #518 ready for review');
+    });
+
     it('prints a yellow SKIP line for a skipped checker while the run still succeeds', async () => {
       h.checkResult = {
         passed: true,
