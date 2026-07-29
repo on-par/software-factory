@@ -38,26 +38,75 @@ publishing in the CLI.
    npm run build --workspace @on-par/scbench-adapter
    ```
 
-3. Register the custom agent per SCBench's
-   [custom-agent docs](https://github.com/SprocketLab/slop-code-bench/blob/main/docs/agents/agent-class.md):
-   copy or symlink [`python/software_factory.py`](./python/software_factory.py)
-   into SCBench's agents directory, then reference it in your run config:
+3. Register the custom agent by running it through the committed launcher.
+   At the pinned commit, SCBench has **no custom-agent discovery mechanism**
+   (`slop_code/agent_runner/agents/__init__.py` imports a hardcoded list), so
+   the previously documented "copy/symlink into SCBench's agents directory"
+   step can never work — a dropped-in file is never imported, so its
+   `register_agent()` side effect never runs. Instead,
+   [`python/run_scbench.py`](./python/run_scbench.py) imports the shim (which
+   registers the `software_factory` agent type) and then hands off to
+   SCBench's own `slop-code` CLI:
 
-   ```yaml
-   agent:
-     type: software_factory
-     adapter_cli: /absolute/path/to/software-factory/packages/scbench-adapter/dist/cli.js
-     # factory_bin: /absolute/path/to/factory   # optional; defaults to `factory` on PATH
+   ```bash
+   # From the pinned SCBench checkout's uv environment, invoked from the
+   # Software Factory repo root:
+   uv run --project "$SCBENCH_CHECKOUT" python packages/scbench-adapter/python/run_scbench.py \
+     run --config packages/scbench-adapter/scbench.run.yaml --problem <problem-id>
    ```
+
+   The run config is [`scbench.run.yaml`](./scbench.run.yaml), committed at
+   the adapter root. Its `agent.adapter_cli` is intentionally omitted — the
+   shim derives `packages/scbench-adapter/dist/cli.js` from its own file
+   location, so the run config never needs a machine-specific absolute path.
+   `agent.cost_limits` is `0` (unlimited) for every field because Factory
+   enforces its own cost/step budgets independently. SCBench also requires a
+   `model`/credential block for its own harness bookkeeping even though the
+   Factory adapter ignores it (Factory routes its own models per
+   `packages/config`) — the committed config sets a placeholder
+   `model.provider`/`model.name` to satisfy that requirement.
+
+   Override `node_bin`, `adapter_cli`, or `factory_bin` in a copy of
+   `scbench.run.yaml` if your environment needs them (e.g. a non-PATH
+   `factory` binary via `factory_bin`, or `FACTORY_BIN`).
 
 ## Prerequisites
 
+- `git`, and `uv` with a Python ≥ 3.12 environment (per upstream's
+  `pyproject.toml`) for the pinned SCBench checkout.
 - The `claude` CLI on `PATH` (required by `factory run-brief`).
 - Node.js ≥ 20, with the adapter built (`dist/cli.js` present).
+- A `factory` binary on `PATH` (or set via `FACTORY_BIN`/`agent.factory_bin`
+  in `scbench.run.yaml`).
 - Model policy is the evaluator's choice — the adapter never forces one. Set
   `FACTORY_LOCAL_ONLY=1` in the SCBench process environment for an
   all-local model policy, or leave routing as configured in
   `packages/config/src/routes.json`.
+
+## Pinned-upstream compatibility check
+
+[`python/compat_check.py`](./python/compat_check.py) is a committed,
+automated check that proves the shim actually works against the pinned
+SCBench checkout — registration, config loading from the committed
+`scbench.run.yaml`, agent construction via `_from_config`, `setup()` against
+a real `Session`, two `run()` invocations through the real `dist/cli.js`
+(with a stub `factory` binary), artifact handoff via `save_artifacts`,
+workspace persistence across checkpoints, and that `cleanup()` never deletes
+the SCBench workspace. It refuses to run unless the checkout's git HEAD
+matches `scbench.pin.json`'s pinned commit (set `SCBENCH_PIN_ALLOW_DRIFT=1`
+to downgrade that to a warning during forward-porting work). Run it inside
+the pinned checkout's `uv` environment:
+
+```bash
+uv run --project "$SCBENCH_CHECKOUT" python packages/scbench-adapter/python/compat_check.py
+```
+
+This requires network (to have cloned the pinned checkout) and a Python
+toolchain, so it is intentionally **not** wired into `scripts/verify.sh` or
+CI — the same posture as the live-baseline commands below. CI instead runs
+`src/python-shim.test.ts`, a static conformance test that catches drift in
+the shim's import surface, lifecycle methods, and CLI flags without needing
+Python installed.
 
 ## Smoke test
 

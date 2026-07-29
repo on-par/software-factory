@@ -1,0 +1,23 @@
+# SCBench run configuration for the Software Factory agent (#521).
+# Launch via python/run_scbench.py (which registers the agent) inside the
+# uv environment of the SCBench checkout pinned in scbench.pin.json:
+#   uv run --project "$SCBENCH_CHECKOUT" python packages/scbench-adapter/python/run_scbench.py \
+#     run --config packages/scbench-adapter/scbench.run.yaml --problem <problem-id>
+agent:
+  type: software_factory
+  # adapter_cli is intentionally omitted: the shim derives
+  # <repo>/packages/scbench-adapter/dist/cli.js from its own location.
+  # factory_bin defaults to `factory` on PATH (or FACTORY_BIN).
+  cost_limits:
+    cost_limit: 0 # 0 = unlimited; Factory enforces its own budgets
+    step_limit: 0
+    net_cost_limit: 0
+environment: local-py # upstream configs/environments/local-py.yaml — no Docker
+prompt: just-solve
+# SCBench requires a model/provider for its harness bookkeeping; the Factory
+# adapter ignores it (model routing lives in packages/config). See README for
+# the credential note.
+model:
+  provider: anthropic
+  name: sonnet-4.5
+save_dir: outputs
