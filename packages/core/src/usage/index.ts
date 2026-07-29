@@ -244,7 +244,13 @@ function isValidCostEntry(value: unknown): value is CostEntry {
     (v.inputTokens === undefined || Number.isFinite(v.inputTokens)) &&
     (v.outputTokens === undefined || Number.isFinite(v.outputTokens)) &&
     (v.failoverReason === undefined || typeof v.failoverReason === 'string') &&
-    (v.estimated === undefined || typeof v.estimated === 'boolean')
+    (v.estimated === undefined || typeof v.estimated === 'boolean') &&
+    (v.rawInputTokens === undefined || Number.isFinite(v.rawInputTokens)) &&
+    (v.cacheReadTokens === undefined || Number.isFinite(v.cacheReadTokens)) &&
+    (v.cacheCreationTokens === undefined || Number.isFinite(v.cacheCreationTokens)) &&
+    (v.numTurns === undefined || Number.isFinite(v.numTurns)) &&
+    (v.durationMs === undefined || Number.isFinite(v.durationMs)) &&
+    (v.durationApiMs === undefined || Number.isFinite(v.durationApiMs))
   );
 }
 

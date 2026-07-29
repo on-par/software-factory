@@ -76,6 +76,9 @@ const envelope = (over: Record<string, unknown> = {}) =>
     is_error: false,
     result: 'CLAUDE OUTPUT',
     total_cost_usd: 0.0123,
+    num_turns: 42,
+    duration_ms: 2030000,
+    duration_api_ms: 1900000,
     usage: { input_tokens: 12, cache_creation_input_tokens: 4500, cache_read_input_tokens: 230000, output_tokens: 890 },
     ...over,
   });
@@ -190,7 +193,49 @@ describe('ClaudeCliHarness result-envelope usage parsing', () => {
     const result = await harness.run(makeContractRequest({ model: 'claude-model', registry }));
 
     expect(result.output).toBe('CLAUDE OUTPUT');
-    expect(result.usage).toEqual({ inputTokens: 12 + 4500 + 230000, outputTokens: 890, costUsd: 0.0123 });
+    expect(result.usage).toEqual({
+      inputTokens: 12 + 4500 + 230000,
+      outputTokens: 890,
+      rawInputTokens: 12,
+      cacheReadTokens: 230000,
+      cacheCreationTokens: 4500,
+      numTurns: 42,
+      durationMs: 2030000,
+      durationApiMs: 1900000,
+      costUsd: 0.0123,
+    });
+  });
+
+  it('omits numTurns/durationMs/durationApiMs when the envelope lacks them, but still parses tokens', async () => {
+    const rec = recordingExec({
+      stdout: envelope({ num_turns: undefined, duration_ms: undefined, duration_api_ms: undefined }),
+    });
+    const harness = new ClaudeCliHarness(rec.fn);
+
+    const result = await harness.run(makeContractRequest({ model: 'claude-model', registry }));
+
+    expect(result.usage).toEqual({
+      inputTokens: 12 + 4500 + 230000,
+      outputTokens: 890,
+      rawInputTokens: 12,
+      cacheReadTokens: 230000,
+      cacheCreationTokens: 4500,
+      costUsd: 0.0123,
+    });
+    expect(result.usage).not.toHaveProperty('numTurns');
+    expect(result.usage).not.toHaveProperty('durationMs');
+    expect(result.usage).not.toHaveProperty('durationApiMs');
+  });
+
+  it('omits non-finite telemetry fields while still parsing tokens', async () => {
+    const rec = recordingExec({ stdout: envelope({ num_turns: 'lots' }) });
+    const harness = new ClaudeCliHarness(rec.fn);
+
+    const result = await harness.run(makeContractRequest({ model: 'claude-model', registry }));
+
+    expect(result.usage).not.toHaveProperty('numTurns');
+    expect(result.usage?.durationMs).toBe(2030000);
+    expect(result.usage?.durationApiMs).toBe(1900000);
   });
 
   it('falls back to the older cost_usd field when total_cost_usd is absent', async () => {

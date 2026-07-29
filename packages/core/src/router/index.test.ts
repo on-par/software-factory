@@ -1003,6 +1003,12 @@ describe('ModelRouter cost sink', () => {
     expect(rows[0].outputTokens).toBeGreaterThan(0);
     expect(rows[0].cost).toBeGreaterThan(0);
     expect(rows[0].estimated).toBe(true);
+    expect(rows[0].numTurns).toBeUndefined();
+    expect(rows[0].durationMs).toBeUndefined();
+    expect(rows[0].durationApiMs).toBeUndefined();
+    expect(rows[0].rawInputTokens).toBeUndefined();
+    expect(rows[0].cacheReadTokens).toBeUndefined();
+    expect(rows[0].cacheCreationTokens).toBeUndefined();
   });
 
   it('records real usage and marks estimated false when the harness reports it', async () => {
@@ -1011,7 +1017,18 @@ describe('ModelRouter cost sink', () => {
         plan: [
           {
             output: 'SCRIPTED PLAN',
-            effect: (ctx) => ctx.onUsage?.({ inputTokens: 1200, outputTokens: 340, costUsd: 0.05 }),
+            effect: (ctx) =>
+              ctx.onUsage?.({
+                inputTokens: 1200,
+                outputTokens: 340,
+                costUsd: 0.05,
+                rawInputTokens: 100,
+                cacheReadTokens: 1000,
+                cacheCreationTokens: 100,
+                numTurns: 7,
+                durationMs: 60000,
+                durationApiMs: 55000,
+              }),
           },
         ],
       },
@@ -1027,6 +1044,12 @@ describe('ModelRouter cost sink', () => {
     expect(rows[0].outputTokens).toBe(340);
     expect(rows[0].cost).toBe(0.05);
     expect(rows[0].estimated).toBe(false);
+    expect(rows[0].rawInputTokens).toBe(100);
+    expect(rows[0].cacheReadTokens).toBe(1000);
+    expect(rows[0].cacheCreationTokens).toBe(100);
+    expect(rows[0].numTurns).toBe(7);
+    expect(rows[0].durationMs).toBe(60000);
+    expect(rows[0].durationApiMs).toBe(55000);
   });
 
   it('falls back to registry cost estimation when real usage lacks costUsd', async () => {

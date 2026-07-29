@@ -239,6 +239,15 @@ export interface CostEntry {
   /** False when inputTokens/outputTokens came from the provider's own usage
    *  report; true when they are the character-count heuristic (#424). */
   estimated?: boolean;
+  /** Uncached input tokens; inputTokens minus the cache split (#490). */
+  rawInputTokens?: number;
+  /** Cache split for the invocation, when the provider reported it (#490). */
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
+  /** Agentic-loop turns / wall-clock ms / API-time ms from the CLI envelope (#490). */
+  numTurns?: number;
+  durationMs?: number;
+  durationApiMs?: number;
 }
 
 // ---------- Dispute ----------

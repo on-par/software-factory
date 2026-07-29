@@ -43,9 +43,18 @@ function parseResultEnvelope(stdout: string): {
       : Number.isFinite(env.cost_usd)
         ? (env.cost_usd as number)
         : undefined;
+    const numTurns = Number.isFinite(env.num_turns) ? (env.num_turns as number) : undefined;
+    const durationMs = Number.isFinite(env.duration_ms) ? (env.duration_ms as number) : undefined;
+    const durationApiMs = Number.isFinite(env.duration_api_ms) ? (env.duration_api_ms as number) : undefined;
     usage = {
       inputTokens: (u.input_tokens as number) + cacheCreation + cacheRead,
       outputTokens: u.output_tokens as number,
+      rawInputTokens: u.input_tokens as number,
+      cacheReadTokens: cacheRead,
+      cacheCreationTokens: cacheCreation,
+      ...(numTurns !== undefined ? { numTurns } : {}),
+      ...(durationMs !== undefined ? { durationMs } : {}),
+      ...(durationApiMs !== undefined ? { durationApiMs } : {}),
       ...(costUsd !== undefined ? { costUsd } : {}),
     };
   }

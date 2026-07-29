@@ -322,6 +322,41 @@ describe('readCostsFile', () => {
     expect(result.entries).toEqual([withEstimated]);
     expect(result.skipped).toBe(1);
   });
+
+  it('accepts a line with all six telemetry fields and skips one with a non-numeric numTurns', () => {
+    const dir = mkdtemp();
+    const file = join(dir, 'costs.jsonl');
+    const withTelemetry: CostEntry = {
+      ts: '2026-07-10T11:30:00Z',
+      issue: '61',
+      task: 'build',
+      model: 'claude-sonnet-5',
+      inputTokens: 100,
+      outputTokens: 50,
+      cost: 0.01,
+      rawInputTokens: 12,
+      cacheReadTokens: 60,
+      cacheCreationTokens: 28,
+      numTurns: 7,
+      durationMs: 60000,
+      durationApiMs: 55000,
+    };
+    const badTelemetry = {
+      ts: '2026-07-10T11:31:00Z',
+      issue: '62',
+      task: 'build',
+      model: 'claude-sonnet-5',
+      inputTokens: 100,
+      outputTokens: 50,
+      cost: 0.01,
+      numTurns: 'seven',
+    };
+    writeFileSync(file, [JSON.stringify(withTelemetry), JSON.stringify(badTelemetry)].join('\n') + '\n');
+
+    const result = readCostsFile(file);
+    expect(result.entries).toEqual([withTelemetry]);
+    expect(result.skipped).toBe(1);
+  });
 });
 
 describe('aggregateCosts', () => {

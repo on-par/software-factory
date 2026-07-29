@@ -202,7 +202,16 @@ describe('CliModelExecutor', () => {
     });
 
     expect(output).toBe('CLAUDE OUTPUT');
-    expect(usages).toEqual([{ inputTokens: 12 + 4500 + 230000, outputTokens: 890, costUsd: 0.0123 }]);
+    expect(usages).toEqual([
+      {
+        inputTokens: 12 + 4500 + 230000,
+        outputTokens: 890,
+        rawInputTokens: 12,
+        cacheReadTokens: 230000,
+        cacheCreationTokens: 4500,
+        costUsd: 0.0123,
+      },
+    ]);
   });
 
   it('runs Claude without a model flag when none is configured', async () => {
