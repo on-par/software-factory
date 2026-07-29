@@ -1393,6 +1393,14 @@ bash scripts/verify.sh
       expect(logged()).not.toContain('PR #518 ready for review');
     });
 
+    it('reports the branch as already landed on main when SHIP recovery finds no merged PR for it (#520)', async () => {
+      h.shipResult = { ok: true, alreadyDelivered: true };
+      const res = await runMain('ship', '5');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('already delivered — branch already landed on main');
+      expect(logged()).not.toContain('PR #undefined');
+    });
+
     it('prints a yellow SKIP line for a skipped checker while the run still succeeds', async () => {
       h.checkResult = {
         passed: true,
