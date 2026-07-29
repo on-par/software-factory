@@ -316,6 +316,12 @@ function renderPinnedInputs(config: BaselineConfig): string {
   ].join('\n');
 }
 
+function hasEvaluation(
+  t: BaselineTrial,
+): t is BaselineTrial & { evidence: BaselineTrialEvidence & { evaluation: ScbenchEvaluation } } {
+  return t.evidence.evaluation !== undefined;
+}
+
 function evidencePresent(evidence: BaselineTrialEvidence): string {
   const present = [
     evidence.evaluation ? NATIVE_EVIDENCE_FILES[0] : undefined,
@@ -344,7 +350,7 @@ function renderFactoryOutcomes(trials: BaselineTrial[]): string {
 function renderBenchmarkPassRate(config: BaselineConfig, trials: BaselineTrial[]): string {
   if (trials.length === 0) return 'no trials recorded';
 
-  const withEvidence = trials.filter((t) => t.evidence.evaluation);
+  const withEvidence = trials.filter(hasEvaluation);
   if (withEvidence.length === 0) {
     return `Not measurable — none of the ${trials.length} recorded trial(s) carries native SCBench evaluation evidence (\`evaluation.json\`). Factory run outcomes are reported separately under harness health and are never counted as benchmark passes.`;
   }
@@ -356,10 +362,10 @@ function renderBenchmarkPassRate(config: BaselineConfig, trials: BaselineTrial[]
   const missing = verdicts.filter((v) => v.verdict === 'missing-evidence').length;
 
   const lines = verdicts.map(({ trial, verdict }) => {
-    const evaluation = trial.evidence.evaluation;
-    if (verdict === 'pass' || verdict === 'fail') {
-      const { passed, total } = coreCounts(evaluation!);
-      return `- \`${trial.id}\`: ${verdict} — Core ${passed}/${total} (${evaluation!.problem_name} / ${evaluation!.checkpoint_name})`;
+    if ((verdict === 'pass' || verdict === 'fail') && hasEvaluation(trial)) {
+      const evaluation = trial.evidence.evaluation;
+      const { passed, total } = coreCounts(evaluation);
+      return `- \`${trial.id}\`: ${verdict} — Core ${passed}/${total} (${evaluation.problem_name} / ${evaluation.checkpoint_name})`;
     }
     if (verdict === 'infrastructure-failure') {
       return `- \`${trial.id}\`: infrastructure failure — native evaluation reports infrastructure_failure`;
@@ -378,14 +384,14 @@ function checkpointSortKey(checkpointName: string): { n: number | undefined; nam
 }
 
 function renderErosion(trials: BaselineTrial[]): string {
-  const withEvidence = trials.filter((t) => t.evidence.evaluation);
+  const withEvidence = trials.filter(hasEvaluation);
   if (withEvidence.length === 0) {
     return 'Not yet measurable — requires native SCBench evaluation evidence from the live multi-checkpoint suite run.';
   }
 
-  const groups = new Map<string, BaselineTrial[]>();
+  const groups = new Map<string, (typeof withEvidence)[number][]>();
   for (const trial of withEvidence) {
-    const problem = trial.evidence.evaluation!.problem_name;
+    const problem = trial.evidence.evaluation.problem_name;
     const list = groups.get(problem) ?? [];
     list.push(trial);
     groups.set(problem, list);
@@ -398,8 +404,8 @@ function renderErosion(trials: BaselineTrial[]): string {
         .get(problem)!
         .slice()
         .sort((a, b) => {
-          const ak = checkpointSortKey(a.evidence.evaluation!.checkpoint_name);
-          const bk = checkpointSortKey(b.evidence.evaluation!.checkpoint_name);
+          const ak = checkpointSortKey(a.evidence.evaluation.checkpoint_name);
+          const bk = checkpointSortKey(b.evidence.evaluation.checkpoint_name);
           if (ak.n !== undefined && bk.n !== undefined) {
             if (ak.n !== bk.n) return ak.n - bk.n;
           } else if (ak.name !== bk.name) {
@@ -408,7 +414,7 @@ function renderErosion(trials: BaselineTrial[]): string {
           return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
         })
         .map((t) => {
-          const evaluation = t.evidence.evaluation!;
+          const evaluation = t.evidence.evaluation;
           const verdict = evaluateTrialVerdict(t);
           const verdictLabel = verdict === 'infrastructure-failure' ? 'infrastructure failure' : verdict;
           const { passed, total } = coreCounts(evaluation);
