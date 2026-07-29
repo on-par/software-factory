@@ -1,0 +1,20 @@
+// packages/scbench-adapter/src/index.ts — public API of @on-par/scbench-adapter.
+export type { CheckpointResult, ScbenchCheckpoint } from './checkpoint.js';
+export { AdapterError } from './checkpoint.js';
+
+export { materializeBrief } from './brief.js';
+
+export type { ExecFn, ExecResult, WorkspaceDeps } from './workspace.js';
+export { commitCheckpoint, createExecaExec, prepareWorkspace } from './workspace.js';
+
+export type { BuildRunBriefArgsOptions, RunFactoryOptions } from './invoke.js';
+export { buildRunBriefArgs, runFactory } from './invoke.js';
+
+export type { ArtifactsFsDeps, CollectArtifactsOptions, CollectArtifactsResult } from './artifacts.js';
+export { collectArtifacts } from './artifacts.js';
+
+export type { RunCheckpointDeps, RunCheckpointOptions } from './run-checkpoint.js';
+export { runCheckpoint } from './run-checkpoint.js';
+
+export type { CliDeps } from './cli-run.js';
+export { defaultCliDeps, main as runCli } from './cli-run.js';
