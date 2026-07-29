@@ -1,4 +1,4 @@
-// packages/product/src/index.test.ts — public surface (#469, #470, #471).
+// packages/product/src/index.test.ts — public surface (#469, #470, #471, #474).
 
 import { describe, expect, it } from 'vitest';
 
@@ -37,5 +37,15 @@ describe('index', () => {
     expect(typeof api.renderIntentDoc).toBe('function');
     expect(typeof api.extractStatements).toBe('function');
     expect(typeof api.splitStatements).toBe('function');
+  });
+
+  it('re-exports the judge surface', () => {
+    expect(typeof api.judgeStory).toBe('function');
+    expect(typeof api.judgeDecomposition).toBe('function');
+    expect(typeof api.judgeStoryAgainstIntent).toBe('function');
+    expect(typeof api.reworkStoryMechanically).toBe('function');
+    expect(typeof api.renderJudgeReport).toBe('function');
+    expect(typeof api.DEFAULT_JUDGE_THRESHOLD).toBe('number');
+    expect(typeof api.DEFAULT_MAX_REWORK_ITERATIONS).toBe('number');
   });
 });
