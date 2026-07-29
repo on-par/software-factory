@@ -187,6 +187,10 @@ export interface ReworkInfo {
   /** Checker names that failed this round (e.g. ['tests','lint']). */
   failingChecks: string[];
   cause: ReworkCause;
+  /** Test identifiers parsed from a failed tests checker, when available. */
+  failingTests?: string[];
+  /** Bounded diagnostic excerpt from a failed tests checker, when available. */
+  failureOutput?: string;
   /** True when this round marks the lane stuck (identical failures repeated). */
   stuck?: boolean;
 }
