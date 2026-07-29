@@ -325,6 +325,7 @@ beforeEach(() => {
   delete process.env.FACTORY_MERGE;
   delete process.env.FACTORY_MERGE_ADMIN;
   delete process.env.FACTORY_SANDBOX;
+  delete process.env.FACTORY_USAGE_WATCH;
   delete process.env.GITHUB_TOKEN;
   process.env.GH_TOKEN = 'test-token';
   process.exitCode = undefined;
@@ -1512,6 +1513,120 @@ bash scripts/verify.sh
         .split('\n')
         .map((line) => JSON.parse(line));
       expect(events.some((e: any) => e.type === 'sandbox-disabled' && e.msg.includes('--no-sandbox'))).toBe(false);
+    });
+  });
+
+  describe('run-issue (one-shot)', () => {
+    it('resolves the issue through the canonical work-request seam and ships it through all phases', async () => {
+      const core = await import('@on-par/factory-core');
+      const res = await runMain('run-issue', '5');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('PR #99 ready for review');
+      expect(logged()).toContain(`github-issue:${h.ghRepo}#5`);
+      expect(vi.mocked(core.planPhase)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(core.buildPhase)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(core.checkPhase)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(core.shipPhase)).toHaveBeenCalledTimes(1);
+      expect(h.octokit.rest.issues.get).toHaveBeenCalledWith(expect.objectContaining({ issue_number: 5 }));
+    });
+
+    it('leaves the queue file untouched', async () => {
+      writeFileSync(paths().queue, 'app 7\ndocs 9\n');
+      const res = await runMain('run-issue', '5');
+      expect(res.exited).toBe(false);
+      expect(readFileSync(paths().queue, 'utf-8')).toBe('app 7\ndocs 9\n');
+    });
+
+    it('rejects a non-numeric identifier before any work', async () => {
+      const core = await import('@on-par/factory-core');
+      const { setupWorktree } = await import('@on-par/factory-core/internal');
+      const res = await runMain('run-issue', 'abc');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('invalid issue argument');
+      expect(vi.mocked(setupWorktree)).not.toHaveBeenCalled();
+      expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
+      expect(vi.mocked(core.shipPhase)).not.toHaveBeenCalled();
+      expect(h.octokit.rest.issues.get).not.toHaveBeenCalled();
+    });
+
+    it('rejects a zero identifier before any work', async () => {
+      const res = await runMain('run-issue', '0');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('invalid issue argument');
+    });
+
+    it('fails pre-flight with exit 2 when the issue is unreachable — no worktree, no PR', async () => {
+      const core = await import('@on-par/factory-core');
+      const { setupWorktree } = await import('@on-par/factory-core/internal');
+      h.octokit.rest.issues.get = vi.fn(async () => {
+        throw new Error('Not Found');
+      });
+      const res = await runMain('run-issue', '5');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('could not resolve issue #5');
+      expect(errored()).toContain('no worktree or PR was created');
+      expect(vi.mocked(setupWorktree)).not.toHaveBeenCalled();
+      expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
+      expect(vi.mocked(core.shipPhase)).not.toHaveBeenCalled();
+    });
+
+    it('maps a pipeline failure to exit 1, not a pre-flight error', async () => {
+      h.checkResult = {
+        passed: false,
+        summary: { results: [{ checker: 'lint', result: 'FAIL', details: 'bad' }], failures: 1 },
+        reworkRounds: 2,
+      };
+      const res = await runMain('run-issue', '5');
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('Run failed for issue #5');
+    });
+
+    it('exits 2 with the missing-claude message and never invokes the phase mocks when claude is unavailable', async () => {
+      h.claudeAvailable = false;
+      const core = await import('@on-par/factory-core');
+      const res = await runMain('run-issue', '5');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('claude CLI not found — install Claude Code first:');
+      expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
+      expect(vi.mocked(core.buildPhase)).not.toHaveBeenCalled();
+      expect(vi.mocked(core.checkPhase)).not.toHaveBeenCalled();
+      expect(vi.mocked(core.shipPhase)).not.toHaveBeenCalled();
+    });
+
+    it('exits 2 with the not-initialized message when .factory/ is missing', async () => {
+      rmSync(paths().state, { recursive: true, force: true });
+      const res = await runMain('run-issue', '5');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('factory not initialized — run `factory init` first');
+    });
+
+    it('reports invalid work-request input as a pre-flight error, not a generic resolve failure', async () => {
+      const core = await import('@on-par/factory-core');
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) return 'not-a-valid-repo-slug';
+        return '';
+      };
+      const res = await runMain('run-issue', '5');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('invalid input for work-request source');
+      expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
+      expect(vi.mocked(core.shipPhase)).not.toHaveBeenCalled();
+    });
+
+    it('logs a human-restarted event when a prior run for the issue was parked', async () => {
+      writeFileSync(
+        paths().events,
+        [
+          JSON.stringify({ ts: '2026-07-01T00:00:00.000Z', type: 'fail', issue: '5', msg: 'checker failures' }),
+          '',
+        ].join('\n'),
+      );
+      const res = await runMain('run-issue', '5');
+      expect(res.exited).toBe(false);
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('human-restarted');
+      expect(events).toContain('manual retry of a previously parked/failed run');
     });
   });
 
