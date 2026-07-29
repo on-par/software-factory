@@ -1,4 +1,4 @@
-// packages/product/src/cli/program.ts — `product <command>` wiring (#469, #470, #471, #472, #473).
+// packages/product/src/cli/program.ts — `product <command>` wiring (#469, #470, #471, #472, #473, #474).
 
 import { execSync } from 'node:child_process';
 import { readFile as readFileFs } from 'node:fs/promises';
@@ -13,6 +13,12 @@ import type { IntentDoc } from '../intent/index.js';
 import { approveIntentDoc, buildIntentDoc, renderIntentDoc } from '../intent/index.js';
 import type { InterviewResult } from '../interview/index.js';
 import { DEFAULT_QUESTION_BUDGET, formatQuestion, renderInterviewSummary, runInterview } from '../interview/index.js';
+import {
+  DEFAULT_JUDGE_THRESHOLD,
+  DEFAULT_MAX_REWORK_ITERATIONS,
+  judgeDecomposition,
+  renderJudgeReport,
+} from '../judge/index.js';
 import { renderPersonaPanel, runPersonaPanel } from '../persona/index.js';
 import type { Prompter } from './prompter.js';
 import { createStdinPrompter } from './prompter.js';
@@ -64,6 +70,22 @@ function parseBudget(raw: string, command: string): number {
     throw new Error(`product ${command}: --budget must be a non-negative integer`);
   }
   return questionBudget;
+}
+
+function parseThreshold(raw: string, command: string): number {
+  const threshold = Number(raw);
+  if (!Number.isFinite(threshold) || threshold < 0 || threshold > 100) {
+    throw new Error(`product ${command}: --threshold must be a number between 0 and 100`);
+  }
+  return threshold;
+}
+
+function parseMaxIterations(raw: string, command: string): number {
+  const maxIterations = Number.parseInt(raw, 10);
+  if (!Number.isInteger(maxIterations) || maxIterations < 0) {
+    throw new Error(`product ${command}: --max-iterations must be a non-negative integer`);
+  }
+  return maxIterations;
 }
 
 /** Shared by `decompose` and `personas`: brain-dump -> approved doc -> decomposition, or throw. */
@@ -239,6 +261,45 @@ export function buildProgram(deps: ProgramDeps = defaultDeps()): Command {
         deps.write(line);
       }
     });
+
+  program
+    .command('judge')
+    .description('Judge each story against the intent doc; rework below-threshold stories (bounded)')
+    .option('-t, --text <text>', 'the brain-dump as an inline string')
+    .option('-f, --file <path>', 'read the brain-dump from a file')
+    .option('-b, --budget <n>', 'max clarifying questions', String(DEFAULT_QUESTION_BUDGET))
+    .requiredOption('-a, --approve <approver>', 'approve the intent doc as <approver> (human gate #1)')
+    .option('--threshold <n>', 'minimum passing score (0-100)', String(DEFAULT_JUDGE_THRESHOLD))
+    .option('--max-iterations <n>', 'max rework iterations per story', String(DEFAULT_MAX_REWORK_ITERATIONS))
+    // Scoped to this command only: a missing --approve throws a catchable CommanderError
+    // instead of calling process.exit, matching every other command's error handling
+    // (main()'s caller decides whether to exit) without changing --help/--version
+    // behavior for the rest of the CLI.
+    .exitOverride()
+    .action(
+      async (opts: {
+        text?: string;
+        file?: string;
+        budget: string;
+        approve: string;
+        threshold: string;
+        maxIterations: string;
+      }) => {
+        const { doc, decomposition } = await decomposeFromDump(opts, deps, 'judge');
+        const report = await judgeDecomposition(
+          decomposition,
+          doc,
+          {},
+          {
+            threshold: parseThreshold(opts.threshold, 'judge'),
+            maxIterations: parseMaxIterations(opts.maxIterations, 'judge'),
+          },
+        );
+        for (const line of renderJudgeReport(report)) {
+          deps.write(line);
+        }
+      },
+    );
 
   return program;
 }

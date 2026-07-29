@@ -63,6 +63,7 @@ describe('buildProgram', () => {
     expect(help).toContain('intent');
     expect(help).toContain('decompose');
     expect(help).toContain('personas');
+    expect(help).toContain('judge');
   });
 });
 
@@ -316,6 +317,102 @@ describe('main: personas', () => {
     await expect(
       main(['node', 'product', 'personas', '--text', BLOCKED_DUMP, '--budget', '0', '--approve', 'Pat'], deps),
     ).rejects.toThrow(/^product personas: /);
+  });
+});
+
+describe('main: judge', () => {
+  it('approves the intent doc, decomposes it, judges each story, and writes the rendered report', async () => {
+    const deps = stubDeps();
+    await main(['node', 'product', 'judge', '--text', FULL_DUMP, '--budget', '0', '--approve', 'Pat'], deps);
+
+    expect(deps.write).toHaveBeenCalledWith('# Judge Report');
+    expect(deps.write).toHaveBeenCalledWith(expect.stringMatching(/^Threshold: \d+ · Max rework iterations: \d+$/));
+  });
+
+  it('reads the brain-dump from --file', async () => {
+    const readFile = vi.fn(async () => FULL_DUMP);
+    const deps = stubDeps({ readFile });
+    await main(['node', 'product', 'judge', '--file', 'notes.md', '--budget', '0', '--approve', 'Pat'], deps);
+
+    expect(readFile).toHaveBeenCalledWith('notes.md');
+  });
+
+  it('rejects without --approve, without creating a prompter', async () => {
+    const createPrompter = vi.fn(() => stubPrompter());
+    const deps = stubDeps({ createPrompter });
+    await expect(main(['node', 'product', 'judge', '--text', FULL_DUMP, '--budget', '0'], deps)).rejects.toThrow(
+      /required option/,
+    );
+    expect(createPrompter).not.toHaveBeenCalled();
+  });
+
+  it('rejects with cannot approve and still writes the draft lines when gaps remain', async () => {
+    const deps = stubDeps();
+    await expect(
+      main(['node', 'product', 'judge', '--text', SPARSE_DUMP, '--budget', '0', '--approve', 'Pat'], deps),
+    ).rejects.toThrow(/^product judge: cannot approve — /);
+
+    expect(deps.write).toHaveBeenCalledWith('# Intent Doc');
+    expect(deps.write).toHaveBeenCalledWith(expect.stringMatching(/^Status: draft$/));
+  });
+
+  it('rejects with the decomposition blockers when a scope statement is horizontal', async () => {
+    const deps = stubDeps();
+    await expect(
+      main(['node', 'product', 'judge', '--text', BLOCKED_DUMP, '--budget', '0', '--approve', 'Pat'], deps),
+    ).rejects.toThrow(/^product judge: /);
+  });
+
+  it('rejects an out-of-range --threshold', async () => {
+    const deps = stubDeps();
+    await expect(
+      main(
+        ['node', 'product', 'judge', '--text', FULL_DUMP, '--budget', '0', '--approve', 'Pat', '--threshold', '150'],
+        deps,
+      ),
+    ).rejects.toThrow(/^product judge: --threshold must be a number between 0 and 100/);
+  });
+
+  it('rejects a non-numeric --threshold', async () => {
+    const deps = stubDeps();
+    await expect(
+      main(
+        ['node', 'product', 'judge', '--text', FULL_DUMP, '--budget', '0', '--approve', 'Pat', '--threshold', 'abc'],
+        deps,
+      ),
+    ).rejects.toThrow(/^product judge: --threshold must be a number between 0 and 100/);
+  });
+
+  it('rejects a negative --max-iterations', async () => {
+    const deps = stubDeps();
+    await expect(
+      main(
+        [
+          'node',
+          'product',
+          'judge',
+          '--text',
+          FULL_DUMP,
+          '--budget',
+          '0',
+          '--approve',
+          'Pat',
+          '--max-iterations',
+          '-1',
+        ],
+        deps,
+      ),
+    ).rejects.toThrow(/^product judge: --max-iterations must be a non-negative integer/);
+  });
+
+  it('rejects a non-numeric --max-iterations', async () => {
+    const deps = stubDeps();
+    await expect(
+      main(
+        ['node', 'product', 'judge', '--text', FULL_DUMP, '--budget', '0', '--approve', 'Pat', '--max-iterations', 'x'],
+        deps,
+      ),
+    ).rejects.toThrow(/^product judge: --max-iterations must be a non-negative integer/);
   });
 });
 
