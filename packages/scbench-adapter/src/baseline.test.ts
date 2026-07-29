@@ -195,10 +195,13 @@ describe('loadBaselineConfig', () => {
 describe('baseline.config.json pin-drift guard', () => {
   it('matches the committed scbench.pin.json exactly and pins a full-length factory commit SHA', () => {
     const config = loadBaselineConfig(readFileSync(BASELINE_CONFIG_PATH, 'utf-8'));
-    const pin = JSON.parse(readFileSync(PIN_PATH, 'utf-8'));
+    const { problems: pinProblems, ...pinScbench } = JSON.parse(readFileSync(PIN_PATH, 'utf-8'));
 
-    expect(config.scbench).toEqual({ repo: pin.repo, commit: pin.commit, pinnedAt: pin.pinnedAt });
-    expect(config.problemCatalog).toEqual(pin.problems);
+    // Whole-object equality (minus the nested `problems` block, mirrored separately
+    // below) so any future top-level field added to scbench.pin.json must also be
+    // mirrored into baseline.config.json's `scbench` block or this test fails.
+    expect(config.scbench).toEqual(pinScbench);
+    expect(config.problemCatalog).toEqual(pinProblems);
     expect(config.factory.commit).toMatch(/^[0-9a-f]{40}$/);
   });
 });

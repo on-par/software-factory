@@ -27,16 +27,13 @@ RUN_CONFIG_PATH = ADAPTER_ROOT / "scbench.run.yaml"
 sys.path.insert(0, str(HERE))
 
 
-def check_pin() -> Path:
-    """Loads the pin file and returns the pinned checkout's root, failing
-    unless the checkout's git HEAD matches the pinned commit."""
+def _check_git_pin(checkout: Path, pinned_sha: str, label: str) -> None:
+    """Fails unless `checkout`'s git HEAD matches `pinned_sha`, naming `label`
+    in the error/warning message. Shared by check_pin() and
+    check_problem_catalog() — both pin a git checkout to a commit recorded in
+    scbench.pin.json and both downgrade drift to a warning under the same
+    SCBENCH_PIN_ALLOW_DRIFT=1 escape hatch."""
     import subprocess
-
-    import slop_code
-
-    pin = json.loads(PIN_PATH.read_text())
-    # src layout: <checkout>/src/slop_code/__init__.py
-    checkout = Path(slop_code.__file__).resolve().parents[2]
 
     result = subprocess.run(
         ["git", "-C", str(checkout), "rev-parse", "HEAD"],
@@ -45,17 +42,25 @@ def check_pin() -> Path:
         check=True,
     )
     actual_sha = result.stdout.strip()
-    pinned_sha = pin["commit"]
     if actual_sha != pinned_sha:
-        message = (
-            f"checkout HEAD {actual_sha} does not match pinned commit {pinned_sha} "
-            f"(scbench.pin.json); compat_check.py results are only valid at the pinned revision"
-        )
+        message = f"{label} HEAD {actual_sha} does not match pinned commit {pinned_sha} (scbench.pin.json)"
         if os.environ.get("SCBENCH_PIN_ALLOW_DRIFT") == "1":
             print(f"warning: {message}")
         else:
             raise SystemExit(f"error: {message}")
 
+
+def check_pin() -> Path:
+    """Loads the pin file and returns the pinned checkout's root, failing
+    unless the checkout's git HEAD matches the pinned commit."""
+    import slop_code
+
+    pin = json.loads(PIN_PATH.read_text())
+    # src layout: <checkout>/src/slop_code/__init__.py
+    checkout = Path(slop_code.__file__).resolve().parents[2]
+
+    pinned_sha = pin["commit"]
+    _check_git_pin(checkout, pinned_sha, "checkout")
     print(f"ok: checkout HEAD matches pinned commit {pinned_sha}")
     return checkout
 
@@ -65,8 +70,6 @@ def check_problem_catalog():
     the pinned scb-problems catalog commit, and verifies the baseline's
     resolved problem ids each have a config.yaml directory there. Baseline
     runs never use the auto-synced ~/.cache/scbench catalog."""
-    import subprocess
-
     pin = json.loads(PIN_PATH.read_text())
     pinned_sha = pin["problems"]["commit"]
 
@@ -80,22 +83,7 @@ def check_problem_catalog():
     if not catalog.is_dir():
         raise SystemExit(f"error: SCBENCH_PROBLEMS_PATH {catalog} is not an existing directory")
 
-    result = subprocess.run(
-        ["git", "-C", str(catalog), "rev-parse", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    actual_sha = result.stdout.strip()
-    if actual_sha != pinned_sha:
-        message = (
-            f"SCBENCH_PROBLEMS_PATH checkout HEAD {actual_sha} does not match pinned problem "
-            f"catalog commit {pinned_sha} (scbench.pin.json problems.commit)"
-        )
-        if os.environ.get("SCBENCH_PIN_ALLOW_DRIFT") == "1":
-            print(f"warning: {message}")
-        else:
-            raise SystemExit(f"error: {message}")
+    _check_git_pin(catalog, pinned_sha, "SCBENCH_PROBLEMS_PATH checkout")
 
     baseline_config_path = ADAPTER_ROOT.parent.parent / "evals" / "scbench-baseline" / "baseline.config.json"
     baseline_config = json.loads(baseline_config_path.read_text())

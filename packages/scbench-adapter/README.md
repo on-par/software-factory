@@ -39,6 +39,7 @@ publishing in the CLI.
    `SCBENCH_PROBLEMS_PATH` is set:
 
    ```bash
+   cd ..
    git clone https://github.com/gabeorlanski/scb-problems.git
    cd scb-problems
    git checkout "$(node -p "require('../software-factory/packages/scbench-adapter/scbench.pin.json').problems.commit")"
