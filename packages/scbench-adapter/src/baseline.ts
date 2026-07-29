@@ -274,6 +274,13 @@ export function collectBaselineTrials(runsDir: string, deps: BaselineFsDeps = RE
   return trials;
 }
 
+/** Core-group pass/total, defaulting an absent 'Core' key to 0 (vacuous
+ *  0/0 counts as equal, matching upstream's PassPolicy.CORE_CASES). Single
+ *  source of truth so the verdict and every render of it agree. */
+function coreCounts(evaluation: ScbenchEvaluation): { passed: number; total: number } {
+  return { passed: evaluation.pass_counts.Core ?? 0, total: evaluation.total_counts.Core ?? 0 };
+}
+
 /** Pinned pass policy 'core-cases' — mirrors upstream PassPolicy.CORE_CASES
  *  at the pinned SCBench commit (pass_counts.Core === total_counts.Core),
  *  fail-closed on missing evidence or infrastructure failure. */
@@ -281,7 +288,8 @@ export function evaluateTrialVerdict(trial: BaselineTrial): TrialVerdict {
   const evaluation = trial.evidence.evaluation;
   if (!evaluation) return 'missing-evidence';
   if (evaluation.infrastructure_failure) return 'infrastructure-failure';
-  return (evaluation.pass_counts.Core ?? 0) === (evaluation.total_counts.Core ?? 0) ? 'pass' : 'fail';
+  const { passed, total } = coreCounts(evaluation);
+  return passed === total ? 'pass' : 'fail';
 }
 
 function formatEnv(env: Record<string, string>): string {
@@ -346,13 +354,11 @@ function renderBenchmarkPassRate(config: BaselineConfig, trials: BaselineTrial[]
   const fails = verdicts.filter((v) => v.verdict === 'fail').length;
   const infra = verdicts.filter((v) => v.verdict === 'infrastructure-failure').length;
   const missing = verdicts.filter((v) => v.verdict === 'missing-evidence').length;
-  const pct = ((passes / trials.length) * 100).toFixed(1);
 
   const lines = verdicts.map(({ trial, verdict }) => {
     const evaluation = trial.evidence.evaluation;
     if (verdict === 'pass' || verdict === 'fail') {
-      const passed = evaluation!.pass_counts.Core ?? 0;
-      const total = evaluation!.total_counts.Core ?? 0;
+      const { passed, total } = coreCounts(evaluation!);
       return `- \`${trial.id}\`: ${verdict} — Core ${passed}/${total} (${evaluation!.problem_name} / ${evaluation!.checkpoint_name})`;
     }
     if (verdict === 'infrastructure-failure') {
@@ -361,7 +367,7 @@ function renderBenchmarkPassRate(config: BaselineConfig, trials: BaselineTrial[]
     return `- \`${trial.id}\`: missing evidence — no evaluation.json in the trial directory`;
   });
 
-  const headline = `${passes}/${trials.length} (${pct}%) under pass policy \`${config.passPolicy.id}\` — ${passes} pass, ${fails} fail, ${infra} infrastructure failure, ${missing} missing evidence. A trial without native evaluation evidence never counts as a pass.`;
+  const headline = `${formatPassRate(passes, trials.length)} under pass policy \`${config.passPolicy.id}\` — ${passes} pass, ${fails} fail, ${infra} infrastructure failure, ${missing} missing evidence. A trial without native evaluation evidence never counts as a pass.`;
 
   return [headline, '', ...lines].join('\n');
 }
@@ -405,8 +411,7 @@ function renderErosion(trials: BaselineTrial[]): string {
           const evaluation = t.evidence.evaluation!;
           const verdict = evaluateTrialVerdict(t);
           const verdictLabel = verdict === 'infrastructure-failure' ? 'infrastructure failure' : verdict;
-          const passed = evaluation.pass_counts.Core ?? 0;
-          const total = evaluation.total_counts.Core ?? 0;
+          const { passed, total } = coreCounts(evaluation);
           return `${evaluation.checkpoint_name} \`${t.id}\`: ${verdictLabel} (Core ${passed}/${total})`;
         })
         .join(', ');
