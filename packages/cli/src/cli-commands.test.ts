@@ -325,6 +325,7 @@ beforeEach(() => {
   delete process.env.FACTORY_MERGE;
   delete process.env.FACTORY_MERGE_ADMIN;
   delete process.env.FACTORY_SANDBOX;
+  delete process.env.FACTORY_USAGE_WATCH;
   delete process.env.GITHUB_TOKEN;
   process.env.GH_TOKEN = 'test-token';
   process.exitCode = undefined;
