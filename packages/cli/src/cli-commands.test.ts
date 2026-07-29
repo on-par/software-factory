@@ -1598,6 +1598,35 @@ bash scripts/verify.sh
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('factory not initialized — run `factory init` first');
     });
+
+    it('reports invalid work-request input as a pre-flight error, not a generic resolve failure', async () => {
+      const core = await import('@on-par/factory-core');
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) return 'not-a-valid-repo-slug';
+        return '';
+      };
+      const res = await runMain('run-issue', '5');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('invalid input for work-request source');
+      expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
+      expect(vi.mocked(core.shipPhase)).not.toHaveBeenCalled();
+    });
+
+    it('logs a human-restarted event when a prior run for the issue was parked', async () => {
+      writeFileSync(
+        paths().events,
+        [
+          JSON.stringify({ ts: '2026-07-01T00:00:00.000Z', type: 'fail', issue: '5', msg: 'checker failures' }),
+          '',
+        ].join('\n'),
+      );
+      const res = await runMain('run-issue', '5');
+      expect(res.exited).toBe(false);
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('human-restarted');
+      expect(events).toContain('manual retry of a previously parked/failed run');
+    });
   });
 
   describe('doctor', () => {
