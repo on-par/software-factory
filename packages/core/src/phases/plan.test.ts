@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
+import { UnsupportedWorkSourceError, WorkSourceRegistry } from '../work/index.js';
 import { buildPlanPrompt, planPhase } from './plan.js';
 
 const models: ModelsConfig = {
@@ -1565,6 +1566,131 @@ describe('planPhase', () => {
       const archived = await readdir(join(worktree, '.archive'));
       expect(archived.some((f) => f.endsWith('.adr.json'))).toBe(true);
       expect(existsSync(`${specPath.replace(/\.md$/, '')}.adr.json`)).toBe(false);
+    });
+  });
+
+  describe('work request resolution (#505)', () => {
+    it('fails before any phase work when the source kind is unsupported', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-505.md');
+      const stub = new StubModelExecutor({
+        scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: {
+          issues: {
+            get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+          },
+        },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      let error: unknown;
+      try {
+        await planPhase({
+          issue: 505,
+          repo: 'on-par/software-factory',
+          worktree,
+          specPath,
+          router,
+          constitution: null,
+          octokit,
+          log: (type, msg) => logs.push({ type, msg }),
+          workSource: { kind: 'jira', params: {} },
+        });
+      } catch (err) {
+        error = err;
+      }
+
+      expect(error).toBeInstanceOf(UnsupportedWorkSourceError);
+      expect((error as Error).message).toContain('jira');
+      expect(stub.calls.length).toBe(0);
+      expect(existsSync(specPath)).toBe(false);
+      expect(logs.some((l) => l.type === 'plan')).toBe(false);
+    });
+
+    it('resolves a GitHub issue to a canonical work request and preserves the existing prompt mapping', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-505.md');
+      const stub = new StubModelExecutor({
+        scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: {
+          issues: {
+            get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+          },
+        },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      await planPhase({
+        issue: 505,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: (type, msg) => logs.push({ type, msg }),
+      });
+
+      expect(stub.calls[0].prompt).toContain('Add eval runner');
+      expect(stub.calls[0].prompt).toContain('Measure the current prompt.');
+      const workRequestLog = logs.find((l) => l.type === 'work_request');
+      expect(workRequestLog?.msg).toContain('github-issue:on-par/software-factory#505');
+    });
+
+    it('uses an injected workSources registry instead of octokit', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-505.md');
+      const stub = new StubModelExecutor({
+        scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      let issuesGetCalled = false;
+      const octokit: any = {
+        rest: {
+          issues: {
+            get: async () => {
+              issuesGetCalled = true;
+              return { data: { title: 'Should not be used', body: 'Should not be used.' } };
+            },
+          },
+        },
+      };
+      const workSources = new WorkSourceRegistry().register({
+        kind: 'local-brief',
+        resolve: async () => ({
+          id: 'local-brief:1',
+          kind: 'local-brief',
+          title: 'Local brief title',
+          brief: 'Local brief body.',
+          acceptanceCriteria: [],
+        }),
+      });
+
+      await planPhase({
+        issue: 505,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: () => {},
+        workSources,
+        workSource: { kind: 'local-brief', params: {} },
+      });
+
+      expect(stub.calls[0].prompt).toContain('Local brief title');
+      expect(stub.calls[0].prompt).toContain('Local brief body.');
+      expect(issuesGetCalled).toBe(false);
     });
   });
 });

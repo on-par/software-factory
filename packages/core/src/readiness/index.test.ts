@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { scoreIssueReadiness } from './index.js';
+import { extractIssueSections, scoreIssueReadiness } from './index.js';
 
 const COMPLETE_FACTORY_TASK_BODY = `
 ### Problem statement
@@ -219,5 +219,30 @@ Fix it.
     const result = scoreIssueReadiness({ title: 'Fix widget flicker', body });
     expect(result.pass).toBe(true);
     expect(result.missing).toEqual([]);
+  });
+});
+
+describe('extractIssueSections', () => {
+  it('keys sections by lowercased heading and ignores headings inside a fence', () => {
+    const body = [
+      '### Problem statement',
+      '',
+      'Something is wrong.',
+      '',
+      '### Acceptance criteria',
+      '',
+      '```py',
+      '# not a heading',
+      '```',
+      '',
+      '- [ ] it works',
+      '',
+    ].join('\n');
+
+    const sections = extractIssueSections(body);
+
+    expect(sections.get('problem statement')).toBe('Something is wrong.');
+    expect(sections.get('acceptance criteria')).toBe('```py\n# not a heading\n```\n\n- [ ] it works');
+    expect(sections.has('not a heading')).toBe(false);
   });
 });

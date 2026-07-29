@@ -92,6 +92,17 @@ export type {
 } from './queue/index.js';
 export { parseQueue, readQueue, validateQueue } from './queue/index.js';
 
+// Work requests
+export type { WorkRequest, WorkRequestReference, WorkRequestSourceKind, WorkSourceAdapter } from './work/index.js';
+export {
+  createDefaultWorkSourceRegistry,
+  InvalidWorkRequestInputError,
+  UnsupportedWorkSourceError,
+  WorkSourceRegistry,
+} from './work/index.js';
+export type { GithubIssueParams, WorkIssueClient } from './work/github-issue.js';
+export { createGithubIssueAdapter, createOctokitIssueClient, GITHUB_ISSUE_SOURCE } from './work/github-issue.js';
+
 // Events
 export type { FollowEventsOptions } from './events/index.js';
 export { followEvents, readEvents } from './events/index.js';
