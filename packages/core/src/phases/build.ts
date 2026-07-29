@@ -34,6 +34,9 @@ export async function buildPhase(opts: {
   ) => void;
   timeoutSeconds?: number;
   skipCI?: boolean;
+  /** Local-only workspace runs (#508): use the commit-only prompt on every
+   *  route — never instruct the worker to push, open a PR, or watch CI. */
+  disablePublish?: boolean;
   modelOverride?: string;
   sandbox?: SandboxPolicy;
   steering?: ConsumedSteering;
@@ -58,6 +61,7 @@ export async function buildPhase(opts: {
     log,
     timeoutSeconds,
     skipCI,
+    disablePublish,
     modelOverride,
     sandbox,
     steering,
@@ -109,44 +113,21 @@ Rules:
 Frozen spec:
 ${compactForLocalModel(spec)}
 `
-      : `Implement issue #${issue} exactly per the frozen spec at ${specPath} in this repository.
-Read the full spec before writing any code — it is the approved plan; do not deviate.
-
-${constitutionCtx}
-
-## Spec
-${spec}
-
-Match surrounding code style and idioms. Add or update the tests described in the
-spec's Tests section and actually run them — report the exact command and its output.
-If the repo has a fast verify path (scripts/verify.sh, npm test), run it and fix
-failures before finishing.
-
-When everything passes, create exactly ONE git commit with a clear, conventional
-message describing the change. Do NOT push, do NOT open a pull request, do NOT
-merge — a separate checker and ship phase handles that next.
-
-Stay strictly within the spec's scope: no unrelated refactors, no drive-by changes.
-If you get genuinely stuck, commit whatever safely builds/passes so far with a
-message explaining what's blocked, and stop there.
-
-Keep sub-agent/parallel-task usage modest: only fan out when a piece of work is
-genuinely independent and parallelizable. Prefer doing the work directly over
-spawning sub-agents for a single small issue — this keeps token usage efficient.
-
-${headlessNote()}${appPort ? `\n\n${appPortNote(appPort, appBaseUrl)}` : ''}${designGrounding ? `\n\n${designGrounding}` : ''}`;
+      : buildCommitOnlyPrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding });
   } else {
     taskType = 'build_claude';
-    prompt = buildClaudePrompt({
-      issue,
-      branch,
-      specPath,
-      constitutionCtx,
-      skipCI,
-      appPort,
-      appBaseUrl,
-      designGrounding,
-    });
+    prompt = disablePublish
+      ? buildCommitOnlyPrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding })
+      : buildClaudePrompt({
+          issue,
+          branch,
+          specPath,
+          constitutionCtx,
+          skipCI,
+          appPort,
+          appBaseUrl,
+          designGrounding,
+        });
   }
 
   prompt = applySteering(prompt, steering);
@@ -208,7 +189,9 @@ ${headlessNote()}${appPort ? `\n\n${appPortNote(appPort, appBaseUrl)}` : ''}${de
     route = 'claude';
     taskType = 'build_claude';
     const claudePrompt = applySteering(
-      buildClaudePrompt({ issue, branch, specPath, constitutionCtx, skipCI, appPort, appBaseUrl, designGrounding }),
+      disablePublish
+        ? buildCommitOnlyPrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding })
+        : buildClaudePrompt({ issue, branch, specPath, constitutionCtx, skipCI, appPort, appBaseUrl, designGrounding }),
       steering,
     );
     result = await router.run('build_claude', claudePrompt, {
@@ -232,6 +215,44 @@ ${headlessNote()}${appPort ? `\n\n${appPortNote(appPort, appBaseUrl)}` : ''}${de
 
   log('build', `Build complete with model ${result.model}`, { model: result.model });
   return { ok: true, model: result.model };
+}
+
+function buildCommitOnlyPrompt(opts: {
+  issue: number;
+  specPath: string;
+  constitutionCtx: string;
+  spec: string;
+  appPort?: number;
+  appBaseUrl?: string;
+  designGrounding?: string;
+}): string {
+  const { issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding } = opts;
+  return `Implement issue #${issue} exactly per the frozen spec at ${specPath} in this repository.
+Read the full spec before writing any code — it is the approved plan; do not deviate.
+
+${constitutionCtx}
+
+## Spec
+${spec}
+
+Match surrounding code style and idioms. Add or update the tests described in the
+spec's Tests section and actually run them — report the exact command and its output.
+If the repo has a fast verify path (scripts/verify.sh, npm test), run it and fix
+failures before finishing.
+
+When everything passes, create exactly ONE git commit with a clear, conventional
+message describing the change. Do NOT push, do NOT open a pull request, do NOT
+merge — a separate checker and ship phase handles that next.
+
+Stay strictly within the spec's scope: no unrelated refactors, no drive-by changes.
+If you get genuinely stuck, commit whatever safely builds/passes so far with a
+message explaining what's blocked, and stop there.
+
+Keep sub-agent/parallel-task usage modest: only fan out when a piece of work is
+genuinely independent and parallelizable. Prefer doing the work directly over
+spawning sub-agents for a single small issue — this keeps token usage efficient.
+
+${headlessNote()}${appPort ? `\n\n${appPortNote(appPort, appBaseUrl)}` : ''}${designGrounding ? `\n\n${designGrounding}` : ''}`;
 }
 
 function buildClaudePrompt(opts: {
