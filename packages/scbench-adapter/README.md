@@ -80,6 +80,16 @@ proves the wiring without needing real models. The full stubbed
 two-checkpoint variant (including workspace reuse across checkpoints) is
 automated in `src/run-checkpoint.test.ts`.
 
+## Baseline
+
+[`evals/scbench-baseline/`](../../evals/scbench-baseline/) holds the pinned,
+reproducible SlopCodeBench baseline for this adapter: a committed
+configuration pinning every input (Factory revision, SCBench revision, model
+config, environment, problem set, trial counts), preserved trial evidence,
+a generated report (`report.md`, labeled PRELIMINARY until 10+ trials per
+configuration land), and the exact commands to reproduce or extend it. See
+[`evals/scbench-baseline/README.md`](../../evals/scbench-baseline/README.md).
+
 ## Isolation guarantees
 
 - No GitHub issue, queue file, pull request, merge, or production checkout

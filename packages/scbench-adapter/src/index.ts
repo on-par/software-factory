@@ -18,3 +18,6 @@ export { runCheckpoint } from './run-checkpoint.js';
 
 export type { CliDeps } from './cli-run.js';
 export { defaultCliDeps, main as runCli } from './cli-run.js';
+
+export type { BaselineConfig, BaselineFsDeps, BaselineTrial } from './baseline.js';
+export { collectBaselineTrials, generateBaselineReport, loadBaselineConfig } from './baseline.js';
