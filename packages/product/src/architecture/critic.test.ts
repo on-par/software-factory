@@ -113,6 +113,27 @@ function buildArchitectureMissingContractLines(): EpicArchitecture {
   return { ...CONFORMING_ARCHITECTURE, artifact: { ...CONFORMING_ARCHITECTURE.artifact, behaviorContract: [] } };
 }
 
+/**
+ * CONFORMING_ARCHITECTURE with its ADR-0004 constraint removed from BOTH constraints and
+ * behaviorContract — unlike buildArchitectureMissingAdr, behaviorContract never carried the
+ * ADR-0004 line, so only adrs-honored fails and the fix genuinely has to extend behaviorContract
+ * rather than happening to already agree with it.
+ */
+function buildArchitectureNeverHadAdr(): EpicArchitecture {
+  const adrConstraint = CONFORMING_ARCHITECTURE.constraints.find((c) => c.adr === 'ADR-0004');
+  if (adrConstraint === undefined) {
+    throw new Error('fixture missing the ADR-0004 constraint');
+  }
+  return {
+    ...CONFORMING_ARCHITECTURE,
+    constraints: CONFORMING_ARCHITECTURE.constraints.filter((c) => c.adr !== 'ADR-0004'),
+    artifact: {
+      ...CONFORMING_ARCHITECTURE.artifact,
+      behaviorContract: CONFORMING_ARCHITECTURE.artifact.behaviorContract.filter((t) => t !== adrConstraint.text),
+    },
+  };
+}
+
 function checkById(verdict: DesignCriticVerdict, id: string): RubricCheck {
   const check = verdict.checks.find((c) => c.id === id);
   if (check === undefined) {
@@ -280,6 +301,23 @@ describe('reworkEpicArchitectureMechanically', () => {
     const reCritiqued = critiqueEpicDesignAgainstAdrs(reworked, APPROVED_DOC, [ADR_0004]);
     expect(reCritiqued.verdict).toBe('pass');
   });
+
+  it('rebuilds the behavior contract when adding a missing ADR constraint, even when contract-mirrors-constraints did not originally fail', () => {
+    const broken = buildArchitectureNeverHadAdr();
+    const verdict = critiqueEpicDesignAgainstAdrs(broken, APPROVED_DOC, [ADR_0004]);
+    expect(verdict.checks.filter((c) => !c.passed).map((c) => c.id)).toEqual(['adrs-honored']);
+
+    const reworked = reworkEpicArchitectureMechanically(broken, verdict, APPROVED_DOC, [ADR_0004]);
+
+    const addedConstraint = reworked.constraints.find((c) => c.adr === 'ADR-0004');
+    if (addedConstraint === undefined) {
+      throw new Error('rework did not add the ADR-0004 constraint');
+    }
+    expect(reworked.artifact.behaviorContract).toContain(addedConstraint.text);
+
+    const reCritiqued = critiqueEpicDesignAgainstAdrs(reworked, APPROVED_DOC, [ADR_0004]);
+    expect(reCritiqued.verdict).toBe('pass');
+  });
 });
 
 describe('critiqueEpicDesign', () => {
@@ -291,6 +329,16 @@ describe('critiqueEpicDesign', () => {
     expect(result.stopReason).toBe('passed');
     expect(result.iterations).toBe(1);
     expect(result.failedCheckHistory).toEqual([1, 0]);
+    expect(result.verdict.verdict).toBe('pass');
+  });
+
+  it('does not discard the adrs-honored fix as no-improvement when behaviorContract never carried the missing ADR line', async () => {
+    const broken = buildArchitectureNeverHadAdr();
+
+    const result = await critiqueEpicDesign(broken, APPROVED_DOC, [ADR_0004]);
+
+    expect(result.stopReason).toBe('passed');
+    expect(result.iterations).toBe(1);
     expect(result.verdict.verdict).toBe('pass');
   });
 

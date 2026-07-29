@@ -171,6 +171,7 @@ export function reworkEpicArchitectureMechanically(
   let deviations = architecture.deviations;
   let openQuestions = architecture.artifact.openQuestions;
   let fixed = false;
+  let constraintsChanged = false;
 
   if (failedIds.has('adrs-honored')) {
     const missingAdrs = adrs.filter((adr) => !constraints.some((c) => c.adr === adr.label));
@@ -180,6 +181,7 @@ export function reworkEpicArchitectureMechanically(
     }));
     constraints = [...newConstraints, ...constraints];
     fixed = true;
+    constraintsChanged = true;
   }
 
   if (failedIds.has('adr-citations-active')) {
@@ -202,6 +204,7 @@ export function reworkEpicArchitectureMechanically(
     deviations = newDeviations;
     openQuestions = newOpenQuestions;
     fixed = true;
+    constraintsChanged = true;
   }
 
   if (failedIds.has('deviations-disclosed')) {
@@ -214,8 +217,12 @@ export function reworkEpicArchitectureMechanically(
     fixed = true;
   }
 
+  // Rebuild whenever the fixes above changed constraints, not just when this check
+  // originally failed — otherwise a newly-added/rewritten constraint's text would be
+  // absent from behaviorContract, turning a fix into a fresh contract-mirrors-constraints
+  // failure the bounded loop can't tell apart from no progress at all.
   let behaviorContract = architecture.artifact.behaviorContract;
-  if (failedIds.has('contract-mirrors-constraints')) {
+  if (failedIds.has('contract-mirrors-constraints') || constraintsChanged) {
     behaviorContract = constraints.map((c) => c.text);
     fixed = true;
   }
