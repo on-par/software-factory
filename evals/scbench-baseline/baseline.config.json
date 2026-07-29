@@ -10,6 +10,12 @@
     "commit": "13de1a7a6b8b3dc5cc532a0c322a0997afa5bec7",
     "pinnedAt": "2026-07-28"
   },
+  "problemCatalog": {
+    "repo": "https://github.com/gabeorlanski/scb-problems",
+    "version": "v1.0",
+    "commit": "4d38d300059667d57e43c31969bc455f5c338b52",
+    "pinnedAt": "2026-07-29"
+  },
   "modelConfig": {
     "source": "packages/config/src/models.json and packages/config/src/routes.json at factory.commit",
     "env": { "FACTORY_LOCAL_ONLY": "unset", "FACTORY_EXPERIMENTAL": "unset" }
@@ -22,9 +28,9 @@
     "scbenchHarness": "Python per upstream README at the pinned SCBench commit"
   },
   "problems": {
-    "selection": "deterministic given scbench.commit — no host or curated state",
-    "smoke": "the lexicographically first problem id in the pinned SCBench commit's problem directory",
-    "suite": "the lexicographically first three problem ids in the pinned SCBench commit's problem directory"
+    "resolvedFrom": "problemCatalog.commit — the lexicographically first (smoke) and first three (suite) problem ids among the catalog checkout's direct child directories containing config.yaml, resolved 2026-07-29 and frozen here as literals",
+    "smoke": "cfgpipe",
+    "suite": ["cfgpipe", "circuit_eval", "code_search"]
   },
   "trials": { "smokeRuns": 2, "suiteTrialsPerProblem": 3 },
   "comparisonThreshold": 10,

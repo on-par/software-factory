@@ -13,4 +13,15 @@ describe('scbench.pin.json', () => {
     expect(pin.commit).toMatch(/^[0-9a-f]{40}$/);
     expect(typeof pin.pinnedAt).toBe('string');
   });
+
+  it('pins the problem catalog repo + full-length commit SHA', () => {
+    const pin = JSON.parse(readFileSync(PIN_PATH, 'utf-8'));
+
+    expect(pin.problems.repo).toBe('https://github.com/gabeorlanski/scb-problems');
+    expect(pin.problems.commit).toMatch(/^[0-9a-f]{40}$/);
+    expect(typeof pin.problems.version).toBe('string');
+    expect(pin.problems.version.length).toBeGreaterThan(0);
+    expect(typeof pin.problems.pinnedAt).toBe('string');
+    expect(pin.problems.pinnedAt.length).toBeGreaterThan(0);
+  });
 });

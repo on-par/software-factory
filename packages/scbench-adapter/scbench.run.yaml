@@ -14,6 +14,8 @@ agent:
     net_cost_limit: 0
 environment: local-py # upstream configs/environments/local-py.yaml — no Docker
 prompt: just-solve
+thinking: none # explicit — upstream default, recorded so the resolved run config has no implicit inputs
+pass_policy: core-cases # mirrors baseline.config.json passPolicy.id; upstream's default is `any`
 # SCBench requires a model/provider for its harness bookkeeping; the Factory
 # adapter ignores it (model routing lives in packages/config). See README for
 # the credential note.

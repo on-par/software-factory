@@ -27,16 +27,13 @@ RUN_CONFIG_PATH = ADAPTER_ROOT / "scbench.run.yaml"
 sys.path.insert(0, str(HERE))
 
 
-def check_pin() -> Path:
-    """Loads the pin file and returns the pinned checkout's root, failing
-    unless the checkout's git HEAD matches the pinned commit."""
+def _check_git_pin(checkout: Path, pinned_sha: str, label: str) -> None:
+    """Fails unless `checkout`'s git HEAD matches `pinned_sha`, naming `label`
+    in the error/warning message. Shared by check_pin() and
+    check_problem_catalog() — both pin a git checkout to a commit recorded in
+    scbench.pin.json and both downgrade drift to a warning under the same
+    SCBENCH_PIN_ALLOW_DRIFT=1 escape hatch."""
     import subprocess
-
-    import slop_code
-
-    pin = json.loads(PIN_PATH.read_text())
-    # src layout: <checkout>/src/slop_code/__init__.py
-    checkout = Path(slop_code.__file__).resolve().parents[2]
 
     result = subprocess.run(
         ["git", "-C", str(checkout), "rev-parse", "HEAD"],
@@ -45,19 +42,60 @@ def check_pin() -> Path:
         check=True,
     )
     actual_sha = result.stdout.strip()
-    pinned_sha = pin["commit"]
     if actual_sha != pinned_sha:
-        message = (
-            f"checkout HEAD {actual_sha} does not match pinned commit {pinned_sha} "
-            f"(scbench.pin.json); compat_check.py results are only valid at the pinned revision"
-        )
+        message = f"{label} HEAD {actual_sha} does not match pinned commit {pinned_sha} (scbench.pin.json)"
         if os.environ.get("SCBENCH_PIN_ALLOW_DRIFT") == "1":
             print(f"warning: {message}")
         else:
             raise SystemExit(f"error: {message}")
 
+
+def check_pin() -> Path:
+    """Loads the pin file and returns the pinned checkout's root, failing
+    unless the checkout's git HEAD matches the pinned commit."""
+    import slop_code
+
+    pin = json.loads(PIN_PATH.read_text())
+    # src layout: <checkout>/src/slop_code/__init__.py
+    checkout = Path(slop_code.__file__).resolve().parents[2]
+
+    pinned_sha = pin["commit"]
+    _check_git_pin(checkout, pinned_sha, "checkout")
     print(f"ok: checkout HEAD matches pinned commit {pinned_sha}")
     return checkout
+
+
+def check_problem_catalog():
+    """Refuses to proceed unless SCBENCH_PROBLEMS_PATH points at a checkout of
+    the pinned scb-problems catalog commit, and verifies the baseline's
+    resolved problem ids each have a config.yaml directory there. Baseline
+    runs never use the auto-synced ~/.cache/scbench catalog."""
+    pin = json.loads(PIN_PATH.read_text())
+    pinned_sha = pin["problems"]["commit"]
+
+    override = os.environ.get("SCBENCH_PROBLEMS_PATH")
+    if not override:
+        raise SystemExit(
+            "error: SCBENCH_PROBLEMS_PATH must point to a checkout of the pinned scb-problems "
+            "catalog — baseline runs never use the auto-synced ~/.cache/scbench catalog"
+        )
+    catalog = Path(override)
+    if not catalog.is_dir():
+        raise SystemExit(f"error: SCBENCH_PROBLEMS_PATH {catalog} is not an existing directory")
+
+    _check_git_pin(catalog, pinned_sha, "SCBENCH_PROBLEMS_PATH checkout")
+
+    baseline_config_path = ADAPTER_ROOT.parent.parent / "evals" / "scbench-baseline" / "baseline.config.json"
+    baseline_config = json.loads(baseline_config_path.read_text())
+    problem_ids = [baseline_config["problems"]["smoke"], *baseline_config["problems"]["suite"]]
+    for problem_id in problem_ids:
+        if not (catalog / problem_id / "config.yaml").exists():
+            raise SystemExit(
+                f"error: problem id {problem_id!r} (from {baseline_config_path}) has no "
+                f"config.yaml directory in the catalog checkout at {catalog}"
+            )
+
+    print(f"ok: resolved problem ids verified against catalog checkout: {', '.join(problem_ids)}")
 
 
 def check_registration():
@@ -219,6 +257,7 @@ def check_agent_lifecycle(software_factory, cfg2, checkout: Path):
 
 def main():
     checkout = check_pin()
+    check_problem_catalog()
     software_factory = check_registration()
     adapter_cli = check_adapter_cli()
     factory_bin = write_stub_factory_bin()

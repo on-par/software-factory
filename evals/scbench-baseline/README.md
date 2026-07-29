@@ -7,10 +7,14 @@ Software Factory harness driven through `@on-par/scbench-adapter`
 - [`baseline.config.json`](./baseline.config.json) — every pinned input: the
   Factory revision, the SCBench revision (must match
   [`packages/scbench-adapter/scbench.pin.json`](../../packages/scbench-adapter/scbench.pin.json)),
-  the model-config posture, environment assumptions, a deterministic
-  problem-set selection rule, trial counts, the comparison threshold
-  (10 trials per configuration) below which a report is labeled preliminary,
-  and the pinned `passPolicy` (see "Pass policy" below).
+  the problem catalog revision (`problemCatalog` — the separate
+  `gabeorlanski/scb-problems` repo the pinned SCBench commit loads problem
+  definitions from; must also match `scbench.pin.json`'s `problems` block),
+  the model-config posture, environment assumptions, the exact resolved
+  problem ids (not a selection rule — see "Problem catalog" below), trial
+  counts, the comparison threshold (10 trials per configuration) below which
+  a report is labeled preliminary, and the pinned `passPolicy` (see "Pass
+  policy" below).
 - [`runs/`](./runs) — committed trial artifact sets, one directory per trial,
   each containing `brief.md`, `manifest.json`, `request.json`,
   `events.ndjson`, and `diff.patch`. A trial directory additionally retains,
@@ -24,6 +28,21 @@ Software Factory harness driven through `@on-par/scbench-adapter`
 - [`report.md`](./report.md) — generated from `baseline.config.json` +
   `runs/` by the `baseline-report` CLI subcommand below. **Never hand-edit
   it** — regenerate it after new trials land.
+
+## Problem catalog
+
+The pinned SCBench harness commit does not itself contain the benchmark
+problems — its `problem_catalog.py` loads them from a separate repository,
+[`gabeorlanski/scb-problems`](https://github.com/gabeorlanski/scb-problems),
+auto-downloading the mutable *latest* GitHub release into `~/.cache/scbench`
+unless overridden. `baseline.config.json`'s `problemCatalog` block pins that
+catalog's repo, release (`v1.0`), and full commit SHA — identical to
+`scbench.pin.json`'s `problems` block — and `problems.smoke`/`problems.suite`
+record the exact resolved problem ids (`cfgpipe`; `cfgpipe`, `circuit_eval`,
+`code_search`), never a selection rule to be re-evaluated at run time. Every
+baseline invocation must export `SCBENCH_PROBLEMS_PATH` to a checkout of the
+catalog at the pinned commit; no step reads the auto-synced
+`~/.cache/scbench` cache.
 
 ## Pass policy
 
@@ -63,24 +82,37 @@ git clone https://github.com/SprocketLab/slop-code-bench.git
 cd slop-code-bench
 git checkout "$(node -p "require('../software-factory/packages/scbench-adapter/scbench.pin.json').commit")"
 
+# 1b. Clone the problem catalog at its pinned commit and export it —
+#     SCBench otherwise auto-installs the mutable latest release into
+#     ~/.cache/scbench, which is forbidden for baseline runs.
+cd ..
+git clone https://github.com/gabeorlanski/scb-problems.git
+cd scb-problems
+git checkout "$(node -p "require('../software-factory/packages/scbench-adapter/scbench.pin.json').problems.commit")"
+export SCBENCH_PROBLEMS_PATH="$PWD"
+cd ..
+
 # 2. Build the adapter from the Software Factory repo root.
-cd ../software-factory
+cd software-factory
 npm ci
 npm run build --workspace @on-par/scbench-adapter
 
 # 3. Sync the pinned checkout's Python environment and run the preflight
 #    compatibility check (see packages/scbench-adapter/README.md's
 #    "Pinned-upstream compatibility check" section) before spending any
-#    model budget.
+#    model budget. This also validates SCBENCH_PROBLEMS_PATH and the
+#    resolved problem ids against the catalog checkout.
 (cd "$SCBENCH_CHECKOUT" && uv sync)
 uv run --project "$SCBENCH_CHECKOUT" python packages/scbench-adapter/python/compat_check.py
 
-# 4. Run the smoke problem (baseline.config.json's `problems.smoke`) twice
-#    through the committed launcher, which registers the software_factory
-#    agent by import before handing off to SCBench's own `slop-code` CLI —
-#    use a fresh workspace/artifacts root per trial:
+# 4. Run the smoke problem (baseline.config.json's `problems.smoke`, the
+#    literal id `cfgpipe`) twice through the committed launcher, which
+#    registers the software_factory agent by import before handing off to
+#    SCBench's own `slop-code` CLI — use a fresh workspace/artifacts root
+#    per trial. SCBENCH_PROBLEMS_PATH (exported in step 1b) must remain set;
+#    compat_check.py refuses to proceed otherwise.
 uv run --project "$SCBENCH_CHECKOUT" python packages/scbench-adapter/python/run_scbench.py \
-  run --config packages/scbench-adapter/scbench.run.yaml --problem <problems.smoke>
+  run --config packages/scbench-adapter/scbench.run.yaml --problem cfgpipe
 
 # 5. Copy each trial's Factory artifacts (manifest.json, request.json,
 #    events.ndjson, diff.patch, brief.md) into
@@ -99,10 +131,16 @@ Required tools: `git`, `uv` (Python ≥ 3.12 environment per upstream's
 
 ## Reproducing the live small suite
 
-Run the three problems named by `baseline.config.json`'s `problems.suite`
-through SCBench with `trials.suiteTrialsPerProblem` trials per problem,
-collecting artifacts the same way, under
-`evals/scbench-baseline/runs/<problem>/<checkpoint>/<trial-n>/`.
+Run the three problems named by `baseline.config.json`'s `problems.suite` —
+the literal ids `cfgpipe`, `circuit_eval`, and `code_search` — through
+SCBench with `trials.suiteTrialsPerProblem` trials per problem, collecting
+artifacts the same way, under
+`evals/scbench-baseline/runs/<problem>/<checkpoint>/<trial-n>/`. As with the
+smoke run, `SCBENCH_PROBLEMS_PATH` must be exported to the pinned catalog
+checkout for every invocation.
+
+No step in this baseline reads `~/.cache/scbench`; the baseline never
+depends on an untracked catalog cache or upstream "latest" defaults.
 
 ## Regenerating the report
 
