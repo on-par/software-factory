@@ -6,6 +6,10 @@
       "tier": "boss",
       "description": "Spec writing, architecture, route selection — needs judgment"
     },
+    "readiness_enrich": {
+      "tier": "triage",
+      "description": "Create a complete factory-task issue body before PLAN"
+    },
     "build_codex": {
       "tier": "worker",
       "description": "Codex CLI implementation from frozen spec",

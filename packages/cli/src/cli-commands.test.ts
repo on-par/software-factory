@@ -1479,6 +1479,7 @@ bash scripts/verify.sh
       expect(res.exited).toBe(false);
       const call = vi.mocked(core.planPhase).mock.calls.at(-1)?.[0] as any;
       expect(call.approvalGate).toBeUndefined();
+      expect(call.enforceReadiness).toBe(true);
       expect(call.drainSteering).toBeUndefined();
     });
 
