@@ -18,6 +18,7 @@ import type {
   LaneProxy,
   LeaseHealth,
   LocalBriefParams,
+  LocalOnlyPolicy,
   ModelDiagnosis,
   QueueDiagnostic,
   ReadinessInfo,
@@ -56,6 +57,7 @@ import {
   GITHUB_ISSUE_SOURCE,
   hasUnresolvedPark,
   InvalidWorkRequestInputError,
+  InvalidWorkspaceError,
   inspectPortLeases,
   isCommandAvailable,
   isProxyRunning,
@@ -91,6 +93,7 @@ import {
   resolveEnvironmentPorts,
   resolveEnvironmentProxy,
   resolveIngestConfig,
+  resolveLocalOnlyPolicy,
   resolvePlanApproval,
   resolveProcessGroupGraceMs,
   resolveSandboxPolicy,
@@ -841,6 +844,9 @@ export async function shipIssue(
     workRequest?: WorkRequest;
     /** Input source for planPhase to resolve; defaults inside planPhase to this run's GitHub issue. */
     workSource?: { kind: WorkRequestSourceKind; params: unknown };
+    /** Local-only policy (#508): run in this caller-provided workspace, skip
+     *  worktree creation, disable publishing, and skip the SHIP phase. */
+    localOnly?: LocalOnlyPolicy;
   },
 ) {
   const repoRoot = ctx?.repoRoot ?? (await getRepoRoot());
@@ -866,7 +872,7 @@ export async function shipIssue(
 
   const issueTitle = ctx?.workRequest?.title ?? (await getIssueTitle(octokit, ghRepo, issueNum));
   const branch = branchFor(issueNum, issueTitle);
-  const worktree = worktreePathFor(repoRoot, issueNum);
+  const worktree = ctx?.localOnly ? ctx.localOnly.workspace : worktreePathFor(repoRoot, issueNum);
   const specPath = resolve(paths.plans, `issue-${issueNum}.md`);
   const runStartedAt = new Date().toISOString();
   let route: 'codex' | 'claude' | undefined;
@@ -897,17 +903,21 @@ export async function shipIssue(
   }
 
   // Setup worktree FIRST — plan phase needs cwd=worktree to run claude
-  await withGitLock(repoRoot, () =>
-    withFileLock(
-      paths.gitLock,
-      async () => {
-        await gitFetch(repoRoot);
-        await setupWorktree(repoRoot, branch, worktree);
-      },
-      { onSteal: (pid) => log('lock-stolen', `stole ${paths.gitLock} from dead holder pid ${pid ?? 'unknown'}`) },
-    ),
-  );
-  log('worktree', `Worktree ready at ${worktree}`);
+  if (!ctx?.localOnly) {
+    await withGitLock(repoRoot, () =>
+      withFileLock(
+        paths.gitLock,
+        async () => {
+          await gitFetch(repoRoot);
+          await setupWorktree(repoRoot, branch, worktree);
+        },
+        { onSteal: (pid) => log('lock-stolen', `stole ${paths.gitLock} from dead holder pid ${pid ?? 'unknown'}`) },
+      ),
+    );
+    log('worktree', `Worktree ready at ${worktree}`);
+  } else {
+    log('workspace', `local-only: using caller-provided workspace ${worktree} (no factory worktree created)`);
+  }
 
   // Resolve standards ONCE against the fresh worktree: repo instruction files
   // (CLAUDE.md/AGENTS.md/copilot-instructions.md) win the standards body, a
@@ -1087,6 +1097,7 @@ export async function shipIssue(
       log: mkLog('build'),
       timeoutSeconds: timeouts.build,
       skipCI,
+      disablePublish: Boolean(ctx?.localOnly),
       modelOverride: modelPins.build,
       sandbox: activeSandboxPolicy,
       steering: buildSteering,
@@ -1145,6 +1156,22 @@ export async function shipIssue(
           : `${check.summary.failures} check failures after ${check.reworkRounds} rework rounds`,
         check.stuck ? 'escalate' : 'fail',
       );
+    }
+
+    if (ctx?.localOnly) {
+      log('local-only-complete', `local-only run complete in ${worktree} — publishing disabled, no PR created`);
+      await maybeWriteLocalRunReport({
+        issueNum,
+        paths,
+        startedAt: runStartedAt,
+        outcome: 'ready',
+        branch,
+        worktree,
+        specPath,
+        route,
+      });
+      console.log(chalk.green(`✅ Local-only run complete in ${worktree} (no PR — publishing disabled)`));
+      return branch;
     }
 
     // SHIP
@@ -1334,7 +1361,14 @@ async function cmdRunIssue(
 
 async function cmdRunBrief(
   briefPath: string,
-  opts: { product?: string; autoRework?: boolean; interactive?: boolean; sandbox?: boolean; approvePlan?: boolean },
+  opts: {
+    product?: string;
+    autoRework?: boolean;
+    interactive?: boolean;
+    sandbox?: boolean;
+    approvePlan?: boolean;
+    workspace?: string;
+  },
 ) {
   if (!isCommandAvailable('claude')) {
     throw new CliExitError(`factory: ${missingClaudeCliMessage()}`, 2);
@@ -1344,7 +1378,19 @@ async function cmdRunBrief(
   if (!existsSync(paths.state)) {
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
-  const ghRepo = await getGitHubRepo();
+
+  let localOnly: LocalOnlyPolicy | undefined;
+  if (opts.workspace !== undefined) {
+    try {
+      localOnly = resolveLocalOnlyPolicy(opts.workspace);
+    } catch (err) {
+      if (err instanceof InvalidWorkspaceError) throw new CliExitError(`factory: ${err.message}`, 2);
+      throw err;
+    }
+  }
+
+  // Local-only runs never touch GitHub — no remote required, no mutation possible.
+  const ghRepo = localOnly ? 'local/workspace' : await getGitHubRepo();
 
   // Pre-flight: resolve the brief through the canonical work-request seam
   // BEFORE any worktree or PR exists — a malformed brief exits here, so BUILD never starts.
@@ -1365,6 +1411,15 @@ async function cmdRunBrief(
   const runNum = briefRunNumber(digest);
   console.log(chalk.cyan(`one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
   logEvent(paths.events, 'work-source', runNum, `inline local brief ${briefPath} (sha256 ${digest})`);
+  if (localOnly) {
+    console.log(chalk.cyan(`local-only: workspace ${localOnly.workspace} — publishing disabled`));
+    logEvent(
+      paths.events,
+      'local-only',
+      runNum,
+      `caller-provided workspace ${localOnly.workspace} — publishing disabled`,
+    );
+  }
 
   const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
   if (hasUnresolvedPark(priorEvents, String(runNum))) {
@@ -1379,6 +1434,7 @@ async function cmdRunBrief(
       ghRepo,
       workRequest: work,
       workSource: { kind: LOCAL_BRIEF_SOURCE, params: { path: briefPath } satisfies LocalBriefParams },
+      localOnly,
     });
   } catch (err: any) {
     throw new CliExitError(`Run failed for brief ${briefPath}: ${err.message}`, 1);
@@ -2841,6 +2897,10 @@ export async function main() {
     .option('--interactive', 'Pause before opening the PR and wait for approval from the TUI')
     .option('--approve-plan', 'Pause after PLAN freezes the spec and wait for approval before BUILD')
     .option('--no-sandbox', 'Disable the containment sandbox for agent runs (dangerous)')
+    .option(
+      '--workspace <dir>',
+      'Local-only: run PLAN/BUILD/CHECK in this caller-provided git workspace and disable PR creation, merging, queue polling, and GitHub mutations',
+    )
     .action(async (file, opts) => {
       await cmdRunBrief(file, opts);
     });

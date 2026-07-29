@@ -73,7 +73,9 @@ const PUBLIC_API_KEYS = [
   'createOctokitIssueClient',
   'GITHUB_ISSUE_SOURCE',
   'InvalidWorkRequestInputError',
+  'InvalidWorkspaceError',
   'LOCAL_BRIEF_SOURCE',
+  'resolveLocalOnlyPolicy',
   'UnsupportedWorkSourceError',
   'WorkSourceRegistry',
   // Events

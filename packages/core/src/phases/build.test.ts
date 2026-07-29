@@ -350,6 +350,83 @@ describe('buildPhase escalation', () => {
   });
 });
 
+describe('buildPhase disablePublish', () => {
+  it('claude route + disablePublish: true sends the commit-only prompt, never the publish prompt', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-508.md');
+    await writeFile(specPath, '# Frozen spec 508\nDo the thing.\n');
+    const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'committed' }] } });
+    const router = new ModelRouter(models, routes, false, stub);
+
+    const result = await buildPhase({
+      issue: 508,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/508-local-only',
+      route: 'claude',
+      router,
+      constitution: null,
+      log: () => {},
+      disablePublish: true,
+    });
+
+    expect(result.ok).toBe(true);
+    const prompt = stub.calls[stub.calls.length - 1].prompt;
+    expect(prompt).toContain('Do NOT push, do NOT open a pull request');
+    expect(prompt).not.toContain('/ship-it');
+    expect(prompt).not.toContain('ready-for-review PR');
+  });
+
+  it('claude route without disablePublish still sends the publish prompt (regression pin)', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-509.md');
+    const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'ready for review' }] } });
+    const router = new ModelRouter(models, routes, false, stub);
+
+    const result = await buildPhase({
+      issue: 509,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/509-normal',
+      route: 'claude',
+      router,
+      constitution: null,
+      log: () => {},
+    });
+
+    expect(result.ok).toBe(true);
+    expect(stub.calls[stub.calls.length - 1].prompt).toContain('/ship-it');
+  });
+
+  it('codex route + disablePublish: true keeps the already commit-only prompt unchanged', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-510.md');
+    const stub = new StubModelExecutor({ scripts: { build_codex: [{ output: 'committed' }] } });
+    const router = new ModelRouter(models, routes, false, stub);
+
+    const result = await buildPhase({
+      issue: 510,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/510-codex-local-only',
+      route: 'codex',
+      router,
+      constitution: null,
+      log: () => {},
+      disablePublish: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(stub.calls[stub.calls.length - 1].prompt).toContain('Do NOT push, do NOT open a pull request');
+  });
+});
+
 describe('buildPhase modelOverride', () => {
   it('uses the default tier-order model when no modelOverride is given', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
@@ -1195,6 +1272,39 @@ describe('buildPhase cross-harness failover', () => {
       ),
       { failoverReason: 'usage_cap' },
     ]);
+  });
+
+  it('codex→claude quota failover with disablePublish: true sends the commit-only prompt, not /ship-it', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-508.md');
+    await writeFile(specPath, '# Frozen spec 508\nDo the thing.\n');
+    const stub = new StubModelExecutor({
+      scripts: {
+        build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
+        build_claude: [{ output: 'claude output' }],
+      },
+    });
+    const router = new ModelRouter(failoverModels, failoverRoutes, false, stub);
+
+    const result = await buildPhase({
+      issue: 508,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/508-local-only-failover',
+      route: 'codex',
+      router,
+      constitution: null,
+      log: () => {},
+      disablePublish: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.model).toBe('claude-sonnet-5');
+    const claudeCall = stub.calls.find((c) => c.task === 'build_claude');
+    expect(claudeCall?.prompt).toContain('Do NOT push, do NOT open a pull request');
+    expect(claudeCall?.prompt).not.toContain('/ship-it');
   });
 
   it('tags the claude fallback run with retryCause: failover on the cost row', async () => {

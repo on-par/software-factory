@@ -1654,8 +1654,22 @@ Please add a widget that does the thing.
         .map((l) => JSON.parse(l));
     }
 
+    const workspaceDirs: string[] = [];
+
+    function writeWorkspace(): string {
+      const ws = mkdtempSync(join(tmpdir(), 'factory-ws-'));
+      mkdirSync(join(ws, '.git'));
+      workspaceDirs.push(ws);
+      return ws;
+    }
+
+    afterEach(() => {
+      for (const ws of workspaceDirs.splice(0)) rmSync(ws, { recursive: true, force: true });
+    });
+
     it('resolves the brief through the canonical work-request seam and ships it through all phases', async () => {
       const core = await import('@on-par/factory-core');
+      const { setupWorktree } = await import('@on-par/factory-core/internal');
       const briefPath = writeBrief();
       const digest = createHash('sha256').update(VALID_BRIEF).digest('hex');
 
@@ -1669,9 +1683,13 @@ Please add a widget that does the thing.
       expect(vi.mocked(core.checkPhase)).toHaveBeenCalledTimes(1);
       expect(vi.mocked(core.shipPhase)).toHaveBeenCalledTimes(1);
       expect(h.octokit.rest.issues.get).not.toHaveBeenCalled();
+      expect(vi.mocked(setupWorktree)).toHaveBeenCalled();
 
       const planArgs = vi.mocked(core.planPhase).mock.calls.at(-1)?.[0] as any;
       expect(planArgs.workSource).toEqual({ kind: 'local-brief', params: { path: briefPath } });
+
+      const buildArgs = vi.mocked(core.buildPhase).mock.calls.at(-1)?.[0] as any;
+      expect(buildArgs.disablePublish).toBeFalsy();
 
       const shipArgs = vi.mocked(core.shipPhase).mock.calls.at(-1)?.[0] as any;
       expect(shipArgs.work).toMatchObject({ kind: 'local-brief' });
@@ -1784,6 +1802,95 @@ Please add a widget that does the thing.
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('human-restarted');
       expect(events).toContain('manual retry of a previously parked/failed run');
+    });
+
+    describe('--workspace (local-only)', () => {
+      it('runs PLAN/BUILD/CHECK in the caller workspace, disables publish, and skips SHIP', async () => {
+        const core = await import('@on-par/factory-core');
+        const { setupWorktree } = await import('@on-par/factory-core/internal');
+        const ws = writeWorkspace();
+        const briefPath = writeBrief();
+
+        const res = await runMain('run-brief', briefPath, '--workspace', ws);
+
+        expect(res.exited).toBe(false);
+        expect(logged()).toContain('Local-only run complete');
+        expect(logged()).toContain('publishing disabled');
+        expect(vi.mocked(setupWorktree)).not.toHaveBeenCalled();
+        expect(vi.mocked(core.shipPhase)).not.toHaveBeenCalled();
+
+        expect(vi.mocked(core.planPhase)).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(core.buildPhase)).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(core.checkPhase)).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(core.planPhase).mock.calls.at(-1)?.[0]).toMatchObject({ worktree: ws });
+        expect(vi.mocked(core.buildPhase).mock.calls.at(-1)?.[0]).toMatchObject({
+          worktree: ws,
+          disablePublish: true,
+        });
+        expect(vi.mocked(core.checkPhase).mock.calls.at(-1)?.[0]).toMatchObject({ worktree: ws });
+
+        expect(h.octokit.rest.issues.get).not.toHaveBeenCalled();
+
+        const events = readFileSync(paths().events, 'utf-8');
+        expect(events).toContain('local-only');
+        expect(events).toContain(ws);
+      });
+
+      it('needs no GitHub remote — getGitHubRepo is never called', async () => {
+        const ws = writeWorkspace();
+        const briefPath = writeBrief();
+        h.execImpl = (cmd: string) => {
+          if (cmd.includes('rev-parse')) return h.repoRoot;
+          if (cmd.includes('gh repo view')) throw new Error('no GitHub remote configured');
+          return '';
+        };
+
+        const res = await runMain('run-brief', briefPath, '--workspace', ws);
+
+        expect(res.exited).toBe(false);
+        expect(logged()).toContain('Local-only run complete');
+      });
+
+      it('leaves the queue file byte-identical', async () => {
+        writeFileSync(paths().queue, 'app 7\ndocs 9\n');
+        const ws = writeWorkspace();
+        const briefPath = writeBrief();
+
+        const res = await runMain('run-brief', briefPath, '--workspace', ws);
+
+        expect(res.exited).toBe(false);
+        expect(readFileSync(paths().queue, 'utf-8')).toBe('app 7\ndocs 9\n');
+      });
+
+      it('exits 2 before any pipeline call when the workspace is missing', async () => {
+        const core = await import('@on-par/factory-core');
+        const { setupWorktree } = await import('@on-par/factory-core/internal');
+        const missing = join(tmpdir(), 'factory-ws-does-not-exist-xyz');
+        const briefPath = writeBrief();
+
+        const res = await runMain('run-brief', briefPath, '--workspace', missing);
+
+        expect(res).toEqual({ exited: true, code: 2 });
+        expect(errored()).toContain('invalid local-only workspace');
+        expect(vi.mocked(setupWorktree)).not.toHaveBeenCalled();
+        expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
+        expect(vi.mocked(core.buildPhase)).not.toHaveBeenCalled();
+      });
+
+      it('exits 2 before any pipeline call when the workspace has no .git', async () => {
+        const core = await import('@on-par/factory-core');
+        const { setupWorktree } = await import('@on-par/factory-core/internal');
+        const ws = mkdtempSync(join(tmpdir(), 'factory-ws-'));
+        workspaceDirs.push(ws);
+        const briefPath = writeBrief();
+
+        const res = await runMain('run-brief', briefPath, '--workspace', ws);
+
+        expect(res).toEqual({ exited: true, code: 2 });
+        expect(errored()).toContain('not an initialized git repository');
+        expect(vi.mocked(setupWorktree)).not.toHaveBeenCalled();
+        expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
+      });
     });
   });
 
