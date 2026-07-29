@@ -1,4 +1,4 @@
-// packages/product/src/index.test.ts — public surface (#469, #470, #471, #474).
+// packages/product/src/index.test.ts — public surface (#469, #470, #471, #474, #475).
 
 import { describe, expect, it } from 'vitest';
 
@@ -47,5 +47,15 @@ describe('index', () => {
     expect(typeof api.renderJudgeReport).toBe('function');
     expect(typeof api.DEFAULT_JUDGE_THRESHOLD).toBe('number');
     expect(typeof api.DEFAULT_MAX_REWORK_ITERATIONS).toBe('number');
+  });
+
+  it('re-exports the readiness surface', () => {
+    expect(typeof api.classifyArtifact).toBe('function');
+    expect(typeof api.assessReadiness).toBe('function');
+    expect(typeof api.gateHandoff).toBe('function');
+    expect(typeof api.renderReadinessReport).toBe('function');
+    expect(Array.isArray(api.PROPOSER_ARTIFACT_KINDS)).toBe(true);
+    expect(Array.isArray(api.WRITER_ARTIFACT_KINDS)).toBe(true);
+    expect(Array.isArray(api.READINESS_DIMENSION_IDS)).toBe(true);
   });
 });
