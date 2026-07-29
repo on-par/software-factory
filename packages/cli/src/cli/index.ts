@@ -11,6 +11,7 @@ import { Octokit } from '@octokit/rest';
 import type {
   EnvironmentProxySettings,
   FailoverReason,
+  GithubIssueParams,
   HealthKpis,
   IngestSettings,
   KpiHistoryRecord,
@@ -23,6 +24,7 @@ import type {
   RepoFactoryConfig,
   SandboxPolicy,
   UsageReading,
+  WorkRequest,
 } from '@on-par/factory-core';
 import {
   acquirePortLease,
@@ -33,6 +35,7 @@ import {
   clearProxyState,
   computeHealthKpis,
   ConstitutionLoader,
+  createDefaultWorkSourceRegistry,
   createFileApprovalGate,
   createLaneProxy,
   defaultFindPortListeners,
@@ -48,7 +51,9 @@ import {
   gateBuildOnBreaker,
   getConstitutionsDir,
   getFactoryPaths,
+  GITHUB_ISSUE_SOURCE,
   hasUnresolvedPark,
+  InvalidWorkRequestInputError,
   inspectPortLeases,
   isCommandAvailable,
   isProxyRunning,
@@ -820,7 +825,7 @@ export function resolveLaneBaseUrl(
 export async function shipIssue(
   issueNum: number,
   opts: { product?: string; autoRework?: boolean; interactive?: boolean; sandbox?: boolean; approvePlan?: boolean },
-  ctx?: { repoRoot: string; ghRepo: string; lane?: string },
+  ctx?: { repoRoot: string; ghRepo: string; lane?: string; workRequest?: WorkRequest },
 ) {
   const repoRoot = ctx?.repoRoot ?? (await getRepoRoot());
   const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo());
@@ -843,7 +848,7 @@ export async function shipIssue(
   const product = opts.product ?? readActiveProduct(paths.product);
   const autoRework = opts.autoRework ?? true;
 
-  const issueTitle = await getIssueTitle(octokit, ghRepo, issueNum);
+  const issueTitle = ctx?.workRequest?.title ?? (await getIssueTitle(octokit, ghRepo, issueNum));
   const branch = branchFor(issueNum, issueTitle);
   const worktree = worktreePathFor(repoRoot, issueNum);
   const specPath = resolve(paths.plans, `issue-${issueNum}.md`);
@@ -1258,6 +1263,54 @@ async function cmdShip(
     return await shipIssue(issueNum, opts);
   } catch (err: any) {
     throw new CliExitError(`Ship failed for issue #${issueNum}: ${err.message}`, 1);
+  }
+}
+
+async function cmdRunIssue(
+  issueNum: number,
+  opts: { product?: string; autoRework?: boolean; interactive?: boolean; sandbox?: boolean; approvePlan?: boolean },
+) {
+  if (!isCommandAvailable('claude')) {
+    throw new CliExitError(`factory: ${missingClaudeCliMessage()}`, 2);
+  }
+  const repoRoot = await getRepoRoot();
+  const paths = getFactoryPaths(repoRoot);
+  if (!existsSync(paths.state)) {
+    throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
+  }
+  const ghRepo = await getGitHubRepo();
+
+  // Pre-flight: resolve the issue through the canonical work-request seam
+  // BEFORE any worktree or PR exists — a bad issue exits here.
+  const workSources = createDefaultWorkSourceRegistry({ octokit: getOctokit() });
+  let work: WorkRequest;
+  try {
+    work = await workSources.resolve(GITHUB_ISSUE_SOURCE, {
+      repo: ghRepo,
+      issue: issueNum,
+    } satisfies GithubIssueParams);
+  } catch (err) {
+    if (err instanceof InvalidWorkRequestInputError) {
+      throw new CliExitError(`factory: ${err.message}`, 2);
+    }
+    throw new CliExitError(
+      `factory: could not resolve issue #${issueNum} in ${ghRepo} (${errorDetail(err)}) — no worktree or PR was created`,
+      2,
+    );
+  }
+  console.log(chalk.cyan(`one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
+
+  const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
+  if (hasUnresolvedPark(priorEvents, String(issueNum))) {
+    logEvent(paths.events, 'human-restarted', issueNum, 'manual retry of a previously parked/failed run', {
+      actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
+    });
+  }
+
+  try {
+    await shipIssue(issueNum, opts, { repoRoot, ghRepo, workRequest: work });
+  } catch (err: any) {
+    throw new CliExitError(`Run failed for issue #${issueNum}: ${err.message}`, 1);
   }
 }
 
@@ -2691,6 +2744,20 @@ export async function main() {
     .option('--no-sandbox', 'Disable the containment sandbox for agent runs (dangerous)')
     .action(async (issueNum, opts) => {
       await cmdShip(parseIssueArg(issueNum), opts);
+    });
+
+  program
+    .command('run-issue <issue>')
+    .description(
+      'One-shot: resolve one GitHub issue through the canonical work-request seam and run plan → build → check → ship (queue untouched)',
+    )
+    .option('--product <name>', 'Override active product constitution')
+    .option('--no-auto-rework', 'Disable automatic rework loop')
+    .option('--interactive', 'Pause before opening the PR and wait for approval from the TUI')
+    .option('--approve-plan', 'Pause after PLAN freezes the spec and wait for approval before BUILD')
+    .option('--no-sandbox', 'Disable the containment sandbox for agent runs (dangerous)')
+    .action(async (issueNum, opts) => {
+      await cmdRunIssue(parseIssueArg(issueNum), opts);
     });
 
   program
