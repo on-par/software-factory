@@ -203,6 +203,19 @@ export type { EvidencePackGatherInput, EvidencePackRenderInput } from './reports
 export { gatherEvidencePack, renderEvidencePack } from './reports/evidence-pack.js';
 export type { LocalRunOutcome, LocalRunReport, LocalRunReportDeps, LocalRunReportInput } from './reports/local-run.js';
 export { readIssueEvents, renderLocalRunReport, writeLocalRunReport } from './reports/local-run.js';
+export type {
+  BenchmarkArtifactsInput,
+  BenchmarkManifest,
+  BenchmarkModelAttempt,
+  BenchmarkRunFailure,
+} from './reports/benchmark-artifacts.js';
+export {
+  BENCHMARK_MANIFEST_VERSION,
+  buildBenchmarkManifest,
+  InvalidArtifactsDirError,
+  resolveArtifactsDir,
+  writeBenchmarkArtifacts,
+} from './reports/benchmark-artifacts.js';
 
 // KPIs
 export type { CommitSource, HealthKpis, HumanSourceClient, KpiHistoryRecord, PrSource } from './kpis/index.js';

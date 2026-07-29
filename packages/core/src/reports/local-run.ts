@@ -174,7 +174,7 @@ async function readDiffStat(worktree?: string, run: ReportRun = exec): Promise<s
   }
 }
 
-function parseModelAttempts(
+export function parseModelAttempts(
   events: FactoryEvent[],
 ): { model: string; task: string; attempt: string; reason?: string }[] {
   const attempts: { model: string; task: string; attempt: string; reason?: string }[] = [];
