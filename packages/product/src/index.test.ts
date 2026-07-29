@@ -58,4 +58,15 @@ describe('index', () => {
     expect(Array.isArray(api.WRITER_ARTIFACT_KINDS)).toBe(true);
     expect(Array.isArray(api.READINESS_DIMENSION_IDS)).toBe(true);
   });
+
+  it('re-exports the export surface', () => {
+    expect(typeof api.renderEpicIssue).toBe('function');
+    expect(typeof api.renderStoryIssue).toBe('function');
+    expect(typeof api.buildDesignBundle).toBe('function');
+    expect(typeof api.renderEpicArchitecture).toBe('function');
+    expect(typeof api.adrDraftFile).toBe('function');
+    expect(typeof api.planExport).toBe('function');
+    expect(typeof api.exportToGitHub).toBe('function');
+    expect(typeof api.renderExportResult).toBe('function');
+  });
 });
