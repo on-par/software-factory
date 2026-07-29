@@ -1,11 +1,12 @@
-// packages/product/src/architecture/design.ts — the pure epic-level architecture designer (#477, #478).
+// packages/product/src/architecture/design.ts — the pure epic-level architecture designer (#477, #478, #479).
 import type { DesignArtifact } from '@on-par/contracts';
 import { DesignArtifactSchema } from '@on-par/contracts';
 
 import type { Decomposition } from '../decompose/index.js';
 import type { IntentDoc } from '../intent/index.js';
 import type { EpicAdr } from './adrs.js';
-import type { RepoComponent, RepoSurvey } from './survey.js';
+import type { DesignContext } from './context.js';
+import type { RepoComponent } from './survey.js';
 
 /** An epic-level decision the designer made; `subject` is the lower-cased term ADR backing is checked against. */
 export interface ArchitectureDecision {
@@ -53,7 +54,7 @@ export function adrConstraintOf(adr: EpicAdr): ArchitectureConstraint {
 export function designEpicArchitecture(
   decomposition: Decomposition,
   doc: IntentDoc,
-  context: { adrs: readonly EpicAdr[]; survey: RepoSurvey },
+  context: DesignContext,
 ): EpicArchitectureResult {
   const blockers: string[] = [];
 
