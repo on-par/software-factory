@@ -104,6 +104,15 @@ const twoModels: ModelsConfig = {
   routingRules: {},
 };
 
+const providerModels: ModelsConfig = {
+  ...twoModels,
+  models: {
+    'claude-preferred': { ...twoModels.models['model-a'], provider: 'anthropic' },
+    'gpt-fallback': { ...twoModels.models['model-b'], provider: 'openai', codex: true },
+  },
+  tiers: { boss: ['claude-preferred', 'gpt-fallback'] },
+};
+
 describe('ModelRouter with StubModelExecutor', () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -121,6 +130,23 @@ describe('ModelRouter with StubModelExecutor', () => {
     expect(result.failoverReason).toBeUndefined();
     expect(stub.calls).toHaveLength(1);
     expect('cost' in result).toBe(false);
+  });
+
+  it('opens a failed provider to the caller and continues with an explicit cross-provider fallback', async () => {
+    const stub = new StubModelExecutor({ scripts: { plan: [{ fail: 'usage_cap' }, { output: 'FROM GPT' }] } });
+    const router = new ModelRouter(providerModels, routes, false, stub);
+    const failures: Array<{ provider: string; reason: string }> = [];
+
+    const result = await router.run('plan', 'do it', {
+      modelOverride: 'claude-preferred',
+      modelFallbacks: ['gpt-fallback'],
+      onProviderFailure: async ({ provider, reason }) => {
+        failures.push({ provider, reason });
+      },
+    });
+
+    expect(result.model).toBe('gpt-fallback');
+    expect(failures).toEqual([{ provider: 'anthropic', reason: 'usage_cap' }]);
   });
 
   it('retries a simulated rate limit and then succeeds', async () => {

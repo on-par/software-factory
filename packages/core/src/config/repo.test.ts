@@ -99,6 +99,24 @@ describe('loadRepoConfig', () => {
     expect(loadRepoConfig(repoRoot)).toEqual({ version: 1, models: { plan: 'claude-model' } });
   });
 
+  it('parses explicit provider fallback preferences for PLAN and BUILD', async () => {
+    const repoRoot = await tempRepoRoot();
+    await writeRepoConfig(repoRoot, {
+      models: {
+        plan: 'claude-model',
+        planFallback: 'gpt-model-a',
+        build: 'gpt-model-a',
+        buildFallback: 'claude-model',
+      },
+    });
+    expect(loadRepoConfig(repoRoot)?.models).toMatchObject({
+      plan: 'claude-model',
+      planFallback: 'gpt-model-a',
+      build: 'gpt-model-a',
+      buildFallback: 'claude-model',
+    });
+  });
+
   it('parses a valid empty object as a no-op', async () => {
     const repoRoot = await tempRepoRoot();
     await writeRepoConfig(repoRoot, {});
@@ -236,6 +254,21 @@ describe('resolveEffectiveModelPins', () => {
   it('resolves repo-only pins', () => {
     const result = resolveEffectiveModelPins(registry, { version: 1, models: { plan: 'claude-model' } }, {});
     expect(result).toEqual({ plan: 'claude-model', build: undefined, sources: { plan: 'repo' } });
+  });
+
+  it('resolves the configured fallback alongside a preferred pin', () => {
+    const result = resolveEffectiveModelPins(
+      registry,
+      { version: 1, models: { plan: 'claude-model', planFallback: 'gpt-model-a' } },
+      {},
+    );
+    expect(result).toMatchObject({ plan: 'claude-model', planFallback: 'gpt-model-a' });
+  });
+
+  it('rejects a non-Codex build fallback', () => {
+    expect(() =>
+      resolveEffectiveModelPins(registry, { version: 1, models: { buildFallback: 'claude-model' } }, {}),
+    ).toThrow(/buildFallback must be a Codex-capable model/);
   });
 
   it('repo pins win over env pins', () => {

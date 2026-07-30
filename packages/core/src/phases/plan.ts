@@ -165,6 +165,8 @@ export async function planPhase(opts: {
   ) => void;
   timeoutSeconds?: number;
   modelOverride?: string;
+  modelFallbacks?: string[];
+  onProviderFailure?: (info: { provider: string; reason: FailoverReason }) => void | Promise<void>;
   branch?: string;
   approvalGate?: ApprovalGate;
   drainSteering?: () => ConsumedSteering;
@@ -190,6 +192,8 @@ export async function planPhase(opts: {
     log,
     timeoutSeconds,
     modelOverride,
+    modelFallbacks,
+    onProviderFailure,
     branch,
     approvalGate,
     drainSteering,
@@ -330,6 +334,8 @@ export async function planPhase(opts: {
       worktree,
       timeoutSeconds: timeoutSeconds ?? 1800,
       modelOverride,
+      modelFallbacks,
+      onProviderFailure,
       onLog: (msg) => log('router', msg),
     });
 
