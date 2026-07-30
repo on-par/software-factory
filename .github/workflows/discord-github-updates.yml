@@ -37,16 +37,16 @@ jobs:
           case "$EVENT_NAME" in
             pull_request)
               if [[ "$EVENT_ACTION" == "closed" && "$PR_MERGED" == "true" ]]; then
-                message="✅ PR #$PR_NUMBER merged: $PR_TITLE\n$PR_URL"
+                message="✅ PR #$PR_NUMBER merged: $PR_TITLE"$'\n'"$PR_URL"
               else
-                message="🔀 PR #$PR_NUMBER $EVENT_ACTION: $PR_TITLE\n$PR_URL"
+                message="🔀 PR #$PR_NUMBER $EVENT_ACTION: $PR_TITLE"$'\n'"$PR_URL"
               fi
               ;;
             pull_request_review)
-              message="📝 Review $REVIEW_STATE from @$REVIEWER on PR #$PR_NUMBER: $PR_TITLE\n$PR_URL"
+              message="📝 Review $REVIEW_STATE from @$REVIEWER on PR #$PR_NUMBER: $PR_TITLE"$'\n'"$PR_URL"
               ;;
             check_suite)
-              message="${CHECK_CONCLUSION^^} CI: $CHECK_NAME\n$CHECK_URL"
+              message="${CHECK_CONCLUSION^^} CI: $CHECK_NAME"$'\n'"$CHECK_URL"
               ;;
           esac
           {
