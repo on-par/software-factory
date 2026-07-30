@@ -32,6 +32,7 @@ const PUBLIC_API_KEYS = [
   'describeEffectiveConfig',
   'loadRepoConfig',
   'resolveCodexDisabled',
+  'resolveEfficiencyPolicy',
   'resolveEffectiveModelPins',
   'resolveUsageCap',
   // Environment

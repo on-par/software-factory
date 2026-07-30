@@ -170,6 +170,8 @@ export async function checkPhase(opts: {
   router: ModelRouter;
   log: LogFn;
   autoRework?: boolean;
+  /** Hard cap for checker repair attempts. Defaults to one to avoid full-session retry loops. */
+  maxReworkRounds?: number;
   buildTimeoutSeconds?: number;
   checkTimeoutSeconds?: number;
   sandbox?: SandboxPolicy;
@@ -187,6 +189,7 @@ export async function checkPhase(opts: {
     router,
     log,
     autoRework = true,
+    maxReworkRounds = MAX_REWORK_ROUNDS,
     buildTimeoutSeconds,
     checkTimeoutSeconds,
     sandbox,
@@ -220,7 +223,7 @@ export async function checkPhase(opts: {
 
   let summary = await runAllCheckers(ctx, router, constitution, checkTimeoutSeconds);
   let reworkRounds = 0;
-  const maxRounds = autoRework ? MAX_REWORK_ROUNDS : 0;
+  const maxRounds = autoRework ? Math.min(maxReworkRounds, MAX_REWORK_ROUNDS) : 0;
 
   let stuck = false;
   let noProgressStreak = 0;
@@ -337,12 +340,10 @@ ${constitutionCtx}
 ${failureDetails}
 
 ## Instructions
-1. Read each failure carefully. The checker verified your work independently —
-   do not argue with the checkers. Fix the issues.
-2. Re-read the spec and constitution if needed to understand the standard.
-3. Fix each failure in the worktree.
-4. Re-run any tests/builds to confirm your fixes work.
-5. Commit your fixes with a clear message.
+1. Make one focused repair pass. Change only files necessary to address the listed failures.
+2. Do not re-plan, refactor unrelated code, or investigate outside these failures.
+3. Re-run only the failing command or the smallest relevant verification command.
+4. Commit the repair with a clear message.
 
 Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`;
 
