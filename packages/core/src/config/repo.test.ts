@@ -14,6 +14,7 @@ import {
   loadRepoConfig,
   resolveCodexDisabled,
   resolveEffectiveModelPins,
+  resolveEfficiencyPolicy,
   resolveUsageCap,
 } from './repo.js';
 
@@ -127,6 +128,30 @@ describe('loadRepoConfig', () => {
     const repoRoot = await tempRepoRoot();
     await writeRepoConfig(repoRoot, { usage: { capUsd: -5 } });
     expect(() => loadRepoConfig(repoRoot)).toThrow();
+  });
+
+  it('parses bounded fast-path and per-issue budget controls', async () => {
+    const repoRoot = await tempRepoRoot();
+    await writeRepoConfig(repoRoot, {
+      efficiency: { fastPath: true, maxReworkRounds: 1, perIssueCapUsd: 8 },
+    });
+
+    expect(loadRepoConfig(repoRoot)).toEqual({
+      version: 1,
+      efficiency: { fastPath: true, maxReworkRounds: 1, perIssueCapUsd: 8 },
+    });
+  });
+});
+
+describe('resolveEfficiencyPolicy', () => {
+  it('uses conservative defaults when a repo has no efficiency policy', () => {
+    expect(resolveEfficiencyPolicy(null)).toEqual({ fastPath: false, maxReworkRounds: 1, perIssueCapUsd: undefined });
+  });
+
+  it('exposes the repo efficiency policy to the pipeline', () => {
+    expect(
+      resolveEfficiencyPolicy({ version: 1, efficiency: { fastPath: true, maxReworkRounds: 1, perIssueCapUsd: 8 } }),
+    ).toEqual({ fastPath: true, maxReworkRounds: 1, perIssueCapUsd: 8 });
   });
 });
 

@@ -88,6 +88,25 @@ describe('checkPhase auto rework', () => {
     expect(stub.calls).toHaveLength(0);
   });
 
+  it('stops after the configured single targeted repair pass', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router, stub } = makeRouter();
+
+    const check = await checkPhase({
+      issue: 77,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      log: () => {},
+      maxReworkRounds: 1,
+    });
+
+    expect(check.passed).toBe(false);
+    expect(check.reworkRounds).toBe(1);
+    expect(stub.calls).toHaveLength(1);
+  });
+
   it('keeps the existing rework behavior by default', { timeout: 120_000 }, async () => {
     const { worktree, specPath } = await makeFailingWorktree();
     const { router, stub } = makeRouter();
