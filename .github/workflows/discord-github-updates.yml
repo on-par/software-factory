@@ -30,9 +30,9 @@ jobs:
           PR_MERGED: ${{ github.event.pull_request.merged }}
           REVIEW_STATE: ${{ github.event.review.state }}
           REVIEWER: ${{ github.event.review.user.login }}
-          CHECK_NAME: ${{ github.event.check_suite.name }}
+          CHECK_BRANCH: ${{ github.event.check_suite.head_branch }}
           CHECK_CONCLUSION: ${{ github.event.check_suite.conclusion }}
-          CHECK_URL: ${{ github.event.check_suite.html_url }}
+          CHECK_SHA: ${{ github.event.check_suite.head_sha }}
         run: |
           case "$EVENT_NAME" in
             pull_request)
@@ -46,13 +46,20 @@ jobs:
               message="📝 Review $REVIEW_STATE from @$REVIEWER on PR #$PR_NUMBER: $PR_TITLE"$'\n'"$PR_URL"
               ;;
             check_suite)
-              message="${CHECK_CONCLUSION^^} CI: $CHECK_NAME"$'\n'"$CHECK_URL"
+              # check_suite payloads carry no `name` and no `html_url`, so the old
+              # message rendered as "SUCCESS CI:" with an empty second line. Build
+              # both halves from fields that do exist.
+              conclusion=$(printf '%s' "$CHECK_CONCLUSION" | tr '[:lower:]' '[:upper:]')
+              message="$conclusion CI on $CHECK_BRANCH"$'\n'"https://github.com/$REPOSITORY/commit/$CHECK_SHA/checks"
               ;;
           esac
+          # Random delimiter: a PR titled exactly "EOF" would close a fixed heredoc
+          # early and let arbitrary text into the step outputs.
+          delimiter="msg-$(openssl rand -hex 16)"
           {
-            echo 'message<<EOF'
+            echo "message<<$delimiter"
             echo "$message"
-            echo EOF
+            echo "$delimiter"
           } >> "$GITHUB_OUTPUT"
 
       - name: Post to Discord
@@ -60,6 +67,10 @@ jobs:
         env:
           MESSAGE: ${{ steps.notification.outputs.message }}
         run: |
+          if [[ -z "${MESSAGE//[[:space:]]/}" ]]; then
+            echo "No message built for this event; nothing to post."
+            exit 0
+          fi
           payload=$(jq -nc --arg content "$MESSAGE" '{content: $content}')
           curl --fail --silent --show-error \
             --header 'Content-Type: application/json' \
