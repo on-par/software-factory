@@ -38,10 +38,35 @@ const RepoFactoryConfigSchema = z
       .strict()
       .optional(),
     usage: z.object({ capUsd: z.number().positive().optional() }).strict().optional(),
+    /** Opt-in controls that trade expensive exploration/retries for bounded work. */
+    efficiency: z
+      .object({
+        fastPath: z.boolean().optional(),
+        maxReworkRounds: z.number().int().min(0).max(3).optional(),
+        perIssueCapUsd: z.number().positive().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
 export type RepoFactoryConfig = z.infer<typeof RepoFactoryConfigSchema>;
+
+export interface EfficiencyPolicy {
+  fastPath: boolean;
+  maxReworkRounds: number;
+  perIssueCapUsd?: number;
+}
+
+/** Resolve bounded-work defaults. Fast path remains opt-in so existing repos retain
+ * their PLAN behavior, while checker rework is capped at one retry by default. */
+export function resolveEfficiencyPolicy(repo: RepoFactoryConfig | null): EfficiencyPolicy {
+  return {
+    fastPath: repo?.efficiency?.fastPath ?? false,
+    maxReworkRounds: repo?.efficiency?.maxReworkRounds ?? 1,
+    perIssueCapUsd: repo?.efficiency?.perIssueCapUsd,
+  };
+}
 
 // ---------- Loading ----------
 

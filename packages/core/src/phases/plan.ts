@@ -14,6 +14,7 @@ import type { ApprovalGate } from '../approvals/index.js';
 import { PLAN_SPEC_PREVIEW_BYTES } from '../approvals/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { designArtifactPaths, parseDesignArtifact, renderDesignArtifact } from '../design/index.js';
+import { buildFastPathSpec, isFastPathEligible } from '../efficiency/fast-path.js';
 import { buildReadinessEnrichmentPrompt } from '../readiness/enrich.js';
 import { scoreIssueReadiness } from '../readiness/index.js';
 import type { ModelRouter } from '../router/index.js';
@@ -175,6 +176,8 @@ export async function planPhase(opts: {
   workSources?: WorkSourceRegistry;
   /** Enrich incomplete GitHub factory-task issues before calling the boss PLAN task. */
   enforceReadiness?: boolean;
+  /** Skip the model PLAN call only for a complete, explicitly bounded issue. */
+  fastPath?: boolean;
 }): Promise<PlanResult> {
   const {
     issue,
@@ -260,6 +263,22 @@ export async function planPhase(opts: {
         designArtifact: null,
       };
     }
+  }
+
+  if (opts.fastPath && !isCodexDisabled && isFastPathEligible({ issueBody, readinessPassed: readiness.pass })) {
+    const fastPath = buildFastPathSpec({ issue, title: issueTitle, issueBody });
+    await writeFile(specPath, matter.stringify(fastPath.markdown, fastPath.frontmatter));
+    const paths = designArtifactPaths(specPath);
+    await writeFile(paths.json, JSON.stringify(fastPath.frontmatter.design, null, 2));
+    await writeFile(paths.markdown, renderDesignArtifact(fastPath.frontmatter.design, issue));
+    log('fast_path', 'complete bounded issue bypassed model PLAN and emitted a compact Codex spec');
+    return {
+      ok: true,
+      route: 'codex',
+      specPath,
+      model: 'fast-path',
+      designArtifact: fastPath.frontmatter.design,
+    };
   }
 
   log('plan', `Starting plan phase`);

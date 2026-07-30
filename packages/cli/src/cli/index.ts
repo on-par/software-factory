@@ -94,6 +94,7 @@ import {
   resolveAutoFailover,
   resolveCodexDisabled,
   resolveEffectiveModelPins,
+  resolveEfficiencyPolicy,
   resolveEnvironmentPorts,
   resolveEnvironmentProxy,
   resolveArtifactsDir,
@@ -870,7 +871,12 @@ export async function shipIssue(
   const failoverSettings = resolveAutoFailover(factoryConfig);
   const breaker = new ProviderBreaker(paths.breaker);
   const router = new ModelRouter(modelsConfig, routesConfig);
-  router.setCostSink((entry) => logCost(paths.costs, { ...entry, issue: String(issueNum) }));
+  const efficiency = resolveEfficiencyPolicy(repoConfig);
+  let issueSpend = 0;
+  router.setCostSink((entry) => {
+    issueSpend += entry.cost;
+    logCost(paths.costs, { ...entry, issue: String(issueNum) });
+  });
   const modelPins = resolveEffectiveModelPins(router.registryRef, repoConfig);
   const codexOff = resolveCodexDisabled(repoConfig);
   const constitutionLoader = new ConstitutionLoader();
@@ -903,6 +909,12 @@ export async function shipIssue(
     ) =>
       logEvent(paths.events, type, issueNum, msg, { ...extra, lane, phase });
   const log = mkLog();
+  const assertWithinIssueBudget = (phase: string): void => {
+    if (efficiency.perIssueCapUsd === undefined || issueSpend <= efficiency.perIssueCapUsd) return;
+    const reason = `per-issue budget exceeded after ${phase}: $${issueSpend.toFixed(2)} > $${efficiency.perIssueCapUsd.toFixed(2)}`;
+    log('budget_exceeded', reason);
+    throw new LaneParkError(reason, 'fail');
+  };
   log('issue-title', issueTitle);
   if (modelPins.plan) {
     const source = modelPins.sources.plan === 'repo' ? '.factory/config.json' : 'FACTORY_PLAN_MODEL';
@@ -1067,11 +1079,13 @@ export async function shipIssue(
       codexDisabled: codexOff,
       workSource: ctx?.workSource,
       enforceReadiness: true,
+      fastPath: efficiency.fastPath,
     });
     route = plan.route;
     if (!plan.ok) {
       throw new LaneParkError(`plan escalated: ${plan.escalate ?? 'unknown'}`, 'escalate');
     }
+    assertWithinIssueBudget('PLAN');
 
     const skipCI = resolveSkipCI(factoryConfig);
 
@@ -1137,6 +1151,7 @@ export async function shipIssue(
     if (!build.ok) {
       throw new LaneParkError(`build escalated: ${build.escalate ?? 'unknown'}`, 'escalate');
     }
+    assertWithinIssueBudget('BUILD');
 
     // CHECK
     failurePhase = 'check';
@@ -1148,6 +1163,7 @@ export async function shipIssue(
       router,
       log: mkLog('check'),
       autoRework,
+      maxReworkRounds: efficiency.maxReworkRounds,
       buildTimeoutSeconds: timeouts.build,
       checkTimeoutSeconds: timeouts.check,
       sandbox: activeSandboxPolicy,
@@ -1158,6 +1174,7 @@ export async function shipIssue(
     });
     checkSummary = check.summary;
     reworkRounds = check.reworkRounds;
+    assertWithinIssueBudget('CHECK');
     for (const s of check.summary.results.filter((r) => r.result === 'SKIP')) {
       console.error(chalk.yellow(`  SKIP: ${s.checker} — ${s.details}`));
     }

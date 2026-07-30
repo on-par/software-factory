@@ -151,6 +151,42 @@ describe('buildPlanPrompt', () => {
 });
 
 describe('planPhase', () => {
+  it('bypasses the boss model only for a ready, bounded fast-path issue', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-493.md');
+    const body = `## Problem statement
+Status output has an extra blank line.
+## In scope
+- Update packages/cli/src/status.ts and its test.
+## Out of scope
+- Changing output format.
+## Acceptance criteria
+- [ ] Status has no blank line.
+## Verification
+npm test`;
+    const stub = new StubModelExecutor({ scripts: {} });
+    const router = new ModelRouter(models, routes, false, stub);
+
+    const result = await planPhase({
+      issue: 493,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit: { rest: { issues: { get: async () => ({ data: { title: 'Fix status output', body } }) } } } as any,
+      log: () => {},
+      enforceReadiness: true,
+      fastPath: true,
+    });
+
+    expect(result).toMatchObject({ ok: true, route: 'codex', model: 'fast-path' });
+    expect(stub.calls).toHaveLength(0);
+    expect(await readFile(specPath, 'utf8')).toContain('compact, deterministic PLAN artifact');
+    expect(existsSync(specPath.replace(/\.md$/, '.design.json'))).toBe(true);
+  });
+
   it('enriches an incomplete GitHub factory task before a single PLAN call', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
     tempDirs.add(worktree);
