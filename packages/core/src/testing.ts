@@ -8,6 +8,15 @@ export { loadInjectionFixtures } from './harness/injection-fixtures.js';
 export type { StubCodingHarnessOptions, StubHarnessStep } from './harness/stub.js';
 export { StubCodingHarness } from './harness/stub.js';
 export type {
+  MonteCarloBreach,
+  MonteCarloCliArgs,
+  MonteCarloCliDeps,
+  MonteCarloFormat,
+  MonteCarloOptions,
+  MonteCarloRates,
+  MonteCarloReport,
+  MonteCarloRunSummary,
+  MonteCarloThresholds,
   SimClock,
   SimFailureMode,
   SimIssueOutcome,
@@ -33,14 +42,21 @@ export type {
   SimWorkspace,
 } from './sim/index.js';
 export {
+  aggregateMonteCarlo,
   applyLatency,
   createSeededRandom,
   createSimOctokit,
   createSimWorkspace,
   deriveSimSeed,
   failOnCall,
+  MONTE_CARLO_CLI_USAGE,
+  monteCarloExitCode,
+  parseMonteCarloArgs,
   realSimClock,
+  renderMonteCarloTable,
   resolveLatencyMs,
+  runMonteCarlo,
+  runMonteCarloCli,
   runSimulation,
   SIM_FAILURE_MODES,
   SIM_MALFORMED_OUTPUT,
@@ -50,8 +66,10 @@ export {
   SimJitterExecutor,
   SimModelExecutor,
   simModelsConfig,
+  simMonteCarloIssues,
   simRoutesConfig,
   simSpecContent,
+  summarizeSimulationRun,
   withSimJitter,
 } from './sim/index.js';
 export type { StubModelExecutorOptions } from './router/stub.js';

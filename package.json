@@ -19,6 +19,7 @@
     "coverage-ratchet": "tsx scripts/coverage-ratchet.ts",
     "eval": "tsx scripts/eval.ts",
     "local-small-scoreboard": "tsx scripts/local-small-scoreboard.ts",
+    "sim-monte-carlo": "tsx scripts/sim-monte-carlo.ts",
     "eval-history": "tsx scripts/eval-history.ts",
     "regression-issue": "tsx scripts/regression-issue.ts",
     "knip": "knip",

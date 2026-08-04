@@ -14,6 +14,28 @@ export type { SimClock, SimLatency } from './latency.js';
 export { applyLatency, realSimClock, resolveLatencyMs } from './latency.js';
 export type { SimModelCall, SimModelExecutorOptions, SimModelStep } from './model.js';
 export { failOnCall, SimModelExecutor } from './model.js';
+export type {
+  MonteCarloBreach,
+  MonteCarloOptions,
+  MonteCarloRates,
+  MonteCarloReport,
+  MonteCarloRunSummary,
+  MonteCarloThresholds,
+} from './monte-carlo.js';
+export {
+  aggregateMonteCarlo,
+  monteCarloExitCode,
+  renderMonteCarloTable,
+  runMonteCarlo,
+  summarizeSimulationRun,
+} from './monte-carlo.js';
+export type { MonteCarloCliArgs, MonteCarloCliDeps, MonteCarloFormat } from './monte-carlo-cli.js';
+export {
+  MONTE_CARLO_CLI_USAGE,
+  parseMonteCarloArgs,
+  runMonteCarloCli,
+  simMonteCarloIssues,
+} from './monte-carlo-cli.js';
 export type { SimOctokit, SimOctokitEndpoint, SimOctokitOptions, SimOctokitStep, SimRecordedCall } from './octokit.js';
 export { createSimOctokit } from './octokit.js';
 export type {
