@@ -15,6 +15,7 @@ import { checkPhase } from '../phases/check.js';
 import { planPhase } from '../phases/plan.js';
 import { shipPhase } from '../phases/ship.js';
 import { ModelRouter } from '../router/index.js';
+import type { DesignArtifact } from '../types/index.js';
 import { branchFor, cleanupWorktree, setupWorktree } from '../utils/index.js';
 import { withGitLock } from '../utils/lock.js';
 import {
@@ -50,6 +51,8 @@ export interface SimIssueSpec {
   autoRework?: boolean;
   /** Passed straight to checkPhase when set. */
   maxReworkRounds?: number;
+  /** Passed straight to planPhase. Enables the pre-PLAN readiness-enrichment path. */
+  enforceReadiness?: boolean;
 }
 
 export interface SimIssueOutcome {
@@ -70,6 +73,8 @@ export interface SimIssueOutcome {
   /** Every jitter draw this run made, in call order. Empty when no jitter is configured. */
   jitterDraws: SimJitterDraw[];
   events: SimPipelineEvent[];
+  /** The design artifact PLAN produced, or null when the spec frontmatter had no valid one. */
+  designArtifact: DesignArtifact | null;
 }
 
 export interface SimulationReport {
@@ -133,6 +138,7 @@ export function simRoutesConfig(): RoutesConfig {
     version: 1,
     routes: {
       plan: { tier: 'boss', description: 'sim' },
+      readiness_enrich: { tier: 'boss', description: 'sim' },
       build_claude: { tier: 'boss', description: 'sim' },
       build_codex: { tier: 'boss', description: 'sim' },
     },
@@ -273,6 +279,7 @@ async function runSimIssue(
   const router = new ModelRouter(simModelsConfig(), simRoutesConfig(), false, routedExecutor);
   let route: 'codex' | 'claude' = 'claude';
   let reworkRounds = 0;
+  let designArtifact: DesignArtifact | null = null;
 
   // Terminal-state mapping mirrors packages/cli/src/cli/index.ts's LaneParkError /
   // ParkReason classification — core cannot import from cli, so this is a deliberate
@@ -291,6 +298,7 @@ async function runSimIssue(
       githubCalls,
       jitterDraws: jitter?.draws ?? [],
       events,
+      designArtifact,
     };
   }
 
@@ -304,8 +312,10 @@ async function runSimIssue(
       constitution: null,
       octokit: routedOctokit as unknown as Octokit,
       log: log('plan'),
+      ...(spec.enforceReadiness !== undefined ? { enforceReadiness: spec.enforceReadiness } : {}),
     });
     route = plan.route;
+    designArtifact = plan.designArtifact;
     if (!plan.ok) return finish('escalated', 'plan', plan.escalate ?? 'plan escalated');
 
     phase = 'build';

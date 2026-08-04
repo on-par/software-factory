@@ -46,6 +46,13 @@ export type {
   SimulationReport,
 } from './pipeline.js';
 export { runSimulation, simDefaultScripts, simModelsConfig, simRoutesConfig, simSpecContent } from './pipeline.js';
+export type { SimRegressionFixture } from './regressions.js';
+export {
+  SIM_FENCED_ENRICHMENT_OUTPUT,
+  SIM_REGRESSION_FIXTURES,
+  simRegressionFixture,
+  simSpecWithObjectInterface,
+} from './regressions.js';
 export type { SimPhaseName, SimTerminalState } from './types.js';
 export type { SimWorkspace } from './workspace.js';
 export { createSimWorkspace, simCommitAll } from './workspace.js';

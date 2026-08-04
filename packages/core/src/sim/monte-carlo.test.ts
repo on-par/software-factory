@@ -32,6 +32,7 @@ function fakeReport(
         githubCalls: [],
         jitterDraws: [],
         events: [],
+        designArtifact: null,
       });
     }
   }
