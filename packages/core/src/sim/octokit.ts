@@ -5,7 +5,8 @@ import { applyLatency, realSimClock, type SimClock, type SimLatency } from './la
 
 export type SimRecordedCall = [string, ...unknown[]];
 
-export type SimOctokitEndpoint = 'issues.get' | 'pulls.list' | 'pulls.create' | 'pulls.get' | 'checks.listForRef' | 'graphql';
+export type SimOctokitEndpoint =
+  'issues.get' | 'pulls.list' | 'pulls.create' | 'pulls.get' | 'checks.listForRef' | 'graphql';
 
 export interface SimOctokitStep {
   /** The EXACT resolved value of the call — REST scripts must include their own `{ data }` wrapper. */
@@ -86,7 +87,8 @@ export function createSimOctokit(options: SimOctokitOptions = {}): {
           })),
       },
       checks: {
-        listForRef: (args: any) => invoke('checks.listForRef', ['checks.listForRef', args], () => ({ data: { check_runs: [] } })),
+        listForRef: (args: any) =>
+          invoke('checks.listForRef', ['checks.listForRef', args], () => ({ data: { check_runs: [] } })),
       },
     },
   };

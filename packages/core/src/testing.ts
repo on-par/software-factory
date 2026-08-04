@@ -19,6 +19,13 @@ export type {
   SimOctokitStep,
   SimRecordedCall,
 } from './sim/index.js';
-export { applyLatency, createSimOctokit, failOnCall, realSimClock, resolveLatencyMs, SimModelExecutor } from './sim/index.js';
+export {
+  applyLatency,
+  createSimOctokit,
+  failOnCall,
+  realSimClock,
+  resolveLatencyMs,
+  SimModelExecutor,
+} from './sim/index.js';
 export type { StubModelExecutorOptions } from './router/stub.js';
 export { StubModelExecutor } from './router/stub.js';
