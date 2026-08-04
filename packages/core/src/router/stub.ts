@@ -35,6 +35,16 @@ export class StubModelExecutor implements ModelExecutor {
 
   async runModel(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string> {
     this.calls.push({ model, prompt, task: ctx.task });
-    return this.sim.runModel(model, prompt, ctx);
+    try {
+      return await this.sim.runModel(model, prompt, ctx);
+    } catch (err) {
+      if (
+        err instanceof Error &&
+        err.message === `SimModelExecutor: no scripted step or defaultStep for task '${ctx.task}'`
+      ) {
+        throw new Error(`StubModelExecutor: no scripted step or defaultOutput for task '${ctx.task}'`);
+      }
+      throw err;
+    }
   }
 }
