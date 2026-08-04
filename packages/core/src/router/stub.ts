@@ -1,6 +1,6 @@
 import type { TaskType } from '../types/index.js';
-import { ModelExecutorError } from './executor-error.js';
 import type { FailoverReason, ModelExecutor, ModelExecutorContext } from './index.js';
+import { SimModelExecutor, type SimModelStep } from '../sim/index.js';
 
 type StubStep =
   | { output: string; effect?: (ctx: ModelExecutorContext) => Promise<void> | void }
@@ -13,28 +13,38 @@ export interface StubModelExecutorOptions {
   defaultOutput?: string;
 }
 
+function toSimStep(step: StubStep): SimModelStep {
+  if ('fail' in step) return { fail: step.fail, effect: step.effect, message: `stub failure: ${step.fail}` };
+  return { output: step.output, effect: step.effect };
+}
+
 export class StubModelExecutor implements ModelExecutor {
   readonly calls: { model: string; prompt: string; task: TaskType }[] = [];
-  private queues = new Map<TaskType, StubStep[]>();
+  private sim: SimModelExecutor;
 
-  constructor(private options: StubModelExecutorOptions = {}) {
+  constructor(options: StubModelExecutorOptions = {}) {
+    const scripts: Partial<Record<TaskType, SimModelStep[]>> = {};
     for (const [task, steps] of Object.entries(options.scripts ?? {})) {
-      this.queues.set(task as TaskType, [...(steps as StubStep[])]);
+      scripts[task as TaskType] = (steps as StubStep[]).map(toSimStep);
     }
+    this.sim = new SimModelExecutor({
+      scripts,
+      defaultStep: options.defaultOutput !== undefined ? { output: options.defaultOutput } : undefined,
+    });
   }
 
   async runModel(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string> {
     this.calls.push({ model, prompt, task: ctx.task });
-    const step = this.queues.get(ctx.task)?.shift();
-    if (step && 'fail' in step) {
-      await step.effect?.(ctx);
-      throw new ModelExecutorError(`stub failure: ${step.fail}`, step.fail, { exitCode: 1 });
+    try {
+      return await this.sim.runModel(model, prompt, ctx);
+    } catch (err) {
+      if (
+        err instanceof Error &&
+        err.message === `SimModelExecutor: no scripted step or defaultStep for task '${ctx.task}'`
+      ) {
+        throw new Error(`StubModelExecutor: no scripted step or defaultOutput for task '${ctx.task}'`);
+      }
+      throw err;
     }
-    if (step && 'output' in step) {
-      await step.effect?.(ctx);
-      return step.output;
-    }
-    if (this.options.defaultOutput !== undefined) return this.options.defaultOutput;
-    throw new Error(`StubModelExecutor: no scripted step or defaultOutput for task '${ctx.task}'`);
   }
 }
