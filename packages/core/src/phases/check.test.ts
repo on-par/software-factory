@@ -128,6 +128,34 @@ describe('checkPhase auto rework', () => {
     expect(check.stuck).toBe(true);
   });
 
+  it('logs rework_failed instead of silently treating an exhausted rework attempt as a real fix (#569)', async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const stub = new StubModelExecutor({
+      scripts: { build_claude: [{ fail: 'error' }, { fail: 'error' }, { fail: 'error' }] },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const logs: Array<{ type: string; msg: string }> = [];
+
+    await checkPhase({
+      issue: 77,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      maxReworkRounds: 1,
+      log: (type, msg) => {
+        logs.push({ type, msg });
+      },
+    });
+
+    expect(logs).toContainEqual(
+      expect.objectContaining({
+        type: 'rework_failed',
+        msg: expect.stringContaining('the repair attempt itself did not run'),
+      }),
+    );
+  });
+
   it(
     'emits a stuck event once identical failures repeat across consecutive rework rounds',
     { timeout: 120_000 },

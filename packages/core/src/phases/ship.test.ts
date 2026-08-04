@@ -1336,4 +1336,31 @@ describe('shipPhase duplicate-PR guard (#520)', () => {
     expect(calls).toContainEqual(['pulls.create', expect.anything()]);
     expect(logs).toContainEqual(['ship', expect.stringContaining('git fetch origin main failed')]);
   });
+
+  it('fails explicitly instead of throwing uncaught when the recovery state check itself errors (#569)', async () => {
+    const { octokit, calls } = createOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command === 'git status --porcelain') throw new Error('spawn /bin/sh ENOENT');
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 511,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-511',
+      branch: 'ship-it/511-baseline',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
+    expect(logs).toContainEqual([
+      'ship',
+      expect.stringContaining('recovery state check failed for ship-it/511-baseline'),
+    ]);
+  });
 });

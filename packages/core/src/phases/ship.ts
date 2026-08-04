@@ -106,7 +106,17 @@ export async function shipPhase(opts: {
 
     // A failed ADR commit leaves its files on disk uncommitted (see materializeAdrDrafts) —
     // never let that alone make the worktree look dirty and abort the whole ship.
-    const recoveryState = await inspectRecoveryState(worktree, run, adr.committed ? [] : adr.paths);
+    let recoveryState: { clean: boolean; ahead: boolean; landed: boolean };
+    try {
+      recoveryState = await inspectRecoveryState(worktree, run, adr.committed ? [] : adr.paths);
+    } catch (err) {
+      // #569: an exec failure here (e.g. a transient worktree hiccup) used to propagate
+      // uncaught, surfacing as an opaque "spawn ENOENT" fail with no indication that the
+      // recovery check — not the actual delivery — is what broke. Fail explicitly instead.
+      const message = err instanceof Error ? err.message : String(err);
+      log('ship', `recovery state check failed for ${branch}: ${message} — parking for manual inspection`);
+      return { ok: false };
+    }
     if (!recoveryState.clean) {
       log('ship', `not recovering ${branch}: worktree has uncommitted changes`);
       return { ok: false };
