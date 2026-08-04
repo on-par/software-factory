@@ -51,7 +51,7 @@ readiness-conformance checker named in epic #464 consume them in later stories.
 - `environment/` — port-lease registry for parallel lanes (`.factory/ports.json`) + `leaseEnv()`/`laneEnv()`, the `PORT`/`FACTORY_APP_PORT`/`FACTORY_BASE_URL` + `FACTORY_HEADLESS`/`PLAYWRIGHT_HEADLESS` contract injected into build agents and all checker commands
 - `logger/` — structured leveled logger (`createLogger`) over the `.factory/events.ndjson` sink (ADR-0002)
 - `eval/` — the eval harness (runner, judge, scoring, golden loader, baseline/trend/regression reports)
-- `sim/` — headless simulator harness (fake model/octokit, throwaway git workspace, jitter injection, Monte Carlo runner)
+- `sim/` — headless simulator harness (fake model/octokit, throwaway git workspace, jitter injection, Monte Carlo runner), and regression fixtures for known production faults
 - `usage/`, `reports/`, `local-small/`, `utils/` (incl. `lock.ts`, `ci-watch.ts`), `config/`, `types/`
 
 ## Key commands

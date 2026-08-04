@@ -344,6 +344,10 @@ const TESTING_API_KEYS = [
   'parseMonteCarloArgs',
   'runMonteCarloCli',
   'simMonteCarloIssues',
+  'SIM_FENCED_ENRICHMENT_OUTPUT',
+  'SIM_REGRESSION_FIXTURES',
+  'simRegressionFixture',
+  'simSpecWithObjectInterface',
 ];
 
 describe('public API surface (ADR-0004)', () => {
