@@ -43,7 +43,7 @@
   },
   "license": "MIT",
   "devDependencies": {
-    "@types/node": "^24.0.0",
+    "@types/node": "^26.1.2",
     "@types/react": "^19.0.0",
     "ink-testing-library": "^4.0.0"
   }
