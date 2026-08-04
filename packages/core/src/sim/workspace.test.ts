@@ -1,12 +1,12 @@
 import { exec as execCb } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 
 import { describe, expect, it } from 'vitest';
 
-import { createSimWorkspace } from './workspace.js';
+import { createSimWorkspace, simCommitAll } from './workspace.js';
 
 const exec = promisify(execCb);
 
@@ -38,5 +38,17 @@ describe('createSimWorkspace', () => {
     expect(existsSync(ws.plansDir)).toBe(false);
 
     await expect(ws.dispose()).resolves.toBeUndefined();
+  });
+
+  it('simCommitAll shell-escapes a commit message containing a single quote', async () => {
+    const ws = await createSimWorkspace();
+    try {
+      await writeFile(`${ws.repoRoot}/quoted.txt`, 'content\n');
+      await simCommitAll(ws.repoRoot, "fix: don't break on quotes");
+      const { stdout } = await exec('git log -1 --format=%s', { cwd: ws.repoRoot });
+      expect(stdout.trim()).toBe("fix: don't break on quotes");
+    } finally {
+      await ws.dispose();
+    }
   });
 });

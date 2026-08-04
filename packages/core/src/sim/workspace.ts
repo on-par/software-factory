@@ -8,6 +8,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
+import { shellEscape } from '../utils/index.js';
+
 const exec = promisify(execCb);
 
 export interface SimWorkspace {
@@ -23,7 +25,7 @@ export interface SimWorkspace {
 
 export async function simCommitAll(cwd: string, message: string): Promise<void> {
   await exec('git add -A', { cwd });
-  await exec(`git commit -m '${message}'`, { cwd });
+  await exec(`git commit -m ${shellEscape(message)}`, { cwd });
 }
 
 export async function createSimWorkspace(): Promise<SimWorkspace> {
@@ -34,7 +36,7 @@ export async function createSimWorkspace(): Promise<SimWorkspace> {
   await mkdir(plansDir, { recursive: true });
 
   await exec('git -c init.defaultBranch=main init --bare', { cwd: origin });
-  await exec(`git clone '${origin}' '${repoRoot}'`);
+  await exec(`git clone ${shellEscape(origin)} ${shellEscape(repoRoot)}`);
   await exec('git config user.name factory-test', { cwd: repoRoot });
   await exec('git config user.email factory@test', { cwd: repoRoot });
   await exec('git checkout -b main', { cwd: repoRoot });
