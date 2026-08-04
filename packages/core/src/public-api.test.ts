@@ -328,6 +328,13 @@ const TESTING_API_KEYS = [
   'simModelsConfig',
   'simRoutesConfig',
   'simSpecContent',
+  'SIM_FAILURE_MODES',
+  'SIM_MALFORMED_OUTPUT',
+  'SimJitter',
+  'SimJitterExecutor',
+  'createSeededRandom',
+  'deriveSimSeed',
+  'withSimJitter',
 ];
 
 describe('public API surface (ADR-0004)', () => {

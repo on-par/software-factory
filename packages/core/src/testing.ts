@@ -9,8 +9,12 @@ export type { StubCodingHarnessOptions, StubHarnessStep } from './harness/stub.j
 export { StubCodingHarness } from './harness/stub.js';
 export type {
   SimClock,
+  SimFailureMode,
   SimIssueOutcome,
   SimIssueSpec,
+  SimJitterConfig,
+  SimJitterDraw,
+  SimJitterSeam,
   SimLatency,
   SimModelCall,
   SimModelExecutorOptions,
@@ -19,6 +23,7 @@ export type {
   SimOctokitEndpoint,
   SimOctokitOptions,
   SimOctokitStep,
+  SimPhaseJitter,
   SimPhaseName,
   SimPipelineEvent,
   SimRecordedCall,
@@ -29,18 +34,25 @@ export type {
 } from './sim/index.js';
 export {
   applyLatency,
+  createSeededRandom,
   createSimOctokit,
   createSimWorkspace,
+  deriveSimSeed,
   failOnCall,
   realSimClock,
   resolveLatencyMs,
   runSimulation,
+  SIM_FAILURE_MODES,
+  SIM_MALFORMED_OUTPUT,
   simCommitAll,
   simDefaultScripts,
+  SimJitter,
+  SimJitterExecutor,
   SimModelExecutor,
   simModelsConfig,
   simRoutesConfig,
   simSpecContent,
+  withSimJitter,
 } from './sim/index.js';
 export type { StubModelExecutorOptions } from './router/stub.js';
 export { StubModelExecutor } from './router/stub.js';

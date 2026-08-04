@@ -9,11 +9,14 @@ import {
   runSimulation,
   simCommitAll,
   simSpecContent,
+  type SimJitterConfig,
   type SimPipelineEvent,
   type SimulationReport,
   type SimWorkspace,
 } from './index.js';
 import { createSimWorkspace } from './workspace.js';
+
+const NON_SLEEPING_CLOCK = { sleep: async () => {}, random: () => 0.5 };
 
 describe('runSimulation', () => {
   let sharedWorkspace: SimWorkspace;
@@ -217,4 +220,83 @@ describe('runSimulation', () => {
       expect(report.totals.shipped).toBe(1);
     },
   );
+
+  it('deterministic jitter replays the identical delay/failure sequence (AC1)', { timeout: 180_000 }, async () => {
+    const jitter: SimJitterConfig = {
+      seed: 20260804,
+      phases: {
+        plan: { delay: { minMs: 5, maxMs: 40 }, failureRate: 0.4 },
+        build: { delay: { minMs: 5, maxMs: 40 }, failureRate: 0.4 },
+        check: { failureRate: 0.2 },
+        ship: { failureRate: 0.2 },
+      },
+    };
+    const issues = [{ issue: 9020, title: 'Sim deterministic jitter' }];
+
+    const wsA = await createSimWorkspace();
+    const runA = await runSimulation({ workspace: wsA, issues, jitter, clock: NON_SLEEPING_CLOCK });
+    await wsA.dispose();
+
+    const wsB = await createSimWorkspace();
+    const runB = await runSimulation({ workspace: wsB, issues, jitter, clock: NON_SLEEPING_CLOCK });
+    await wsB.dispose();
+
+    expect(runA.outcomes[0]?.jitterDraws).toEqual(runB.outcomes[0]?.jitterDraws);
+    expect(runA.outcomes[0]?.jitterDraws.length).toBeGreaterThan(0);
+    expect(runA.outcomes[0]?.jitterDraws.some((d) => d.failure !== null)).toBe(true);
+    expect(runA.outcomes[0]?.state).toBe(runB.outcomes[0]?.state);
+    expect(runA.outcomes[0]?.phase).toBe(runB.outcomes[0]?.phase);
+    expect(runA.outcomes[0]?.reworkRounds).toBe(runB.outcomes[0]?.reworkRounds);
+  });
+
+  it('100% BUILD failure parks or escalates every issue (AC2)', { timeout: 180_000 }, async () => {
+    const jitter: SimJitterConfig = { seed: 4242, phases: { build: { failureRate: 1 } } };
+    const ws = await createSimWorkspace();
+    const report = await runSimulation({
+      workspace: ws,
+      issues: [
+        { issue: 9021, title: 'Sim 100pct build failure one' },
+        { issue: 9022, title: 'Sim 100pct build failure two' },
+      ],
+      jitter,
+      clock: NON_SLEEPING_CLOCK,
+    });
+    await ws.dispose();
+
+    expect(report.totals.shipped).toBe(0);
+    for (const outcome of report.outcomes) {
+      expect(['parked', 'escalated']).toContain(outcome.state);
+      expect(outcome.prNumber).toBeUndefined();
+    }
+    expect(report.injectedFailures).toBeGreaterThan(0);
+  });
+
+  it('zero jitter matches the clean-path baseline (AC3)', { timeout: 180_000 }, async () => {
+    const ws = await createSimWorkspace();
+    const report = await runSimulation({
+      workspace: ws,
+      issues: [
+        { issue: 9001, title: 'Sim clean issue one' },
+        { issue: 9002, title: 'Sim clean issue two' },
+        { issue: 9003, title: 'Sim clean issue three' },
+      ],
+      jitter: { seed: 99, default: { failureRate: 0, delay: 0 } },
+      clock: NON_SLEEPING_CLOCK,
+    });
+    await ws.dispose();
+
+    expect(report.totals).toEqual(cleanReport.totals);
+    report.outcomes.forEach((outcome, i) => {
+      const clean = cleanReport.outcomes[i];
+      expect({
+        state: outcome.state,
+        phase: outcome.phase,
+        route: outcome.route,
+        reworkRounds: outcome.reworkRounds,
+      }).toEqual({ state: clean?.state, phase: clean?.phase, route: clean?.route, reworkRounds: clean?.reworkRounds });
+      expect(outcome.prNumber).toBeDefined();
+    });
+    expect(report.injectedFailures).toBe(0);
+    expect(report.outcomes[0]?.jitterDraws.length).toBeGreaterThan(0);
+  });
 });

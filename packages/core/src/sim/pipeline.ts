@@ -17,13 +17,19 @@ import { shipPhase } from '../phases/ship.js';
 import { ModelRouter } from '../router/index.js';
 import { branchFor, cleanupWorktree, setupWorktree } from '../utils/index.js';
 import { withGitLock } from '../utils/lock.js';
-import type { SimClock, SimLatency } from './latency.js';
+import {
+  deriveSimSeed,
+  SimJitter,
+  type SimJitterConfig,
+  type SimJitterDraw,
+  SimJitterExecutor,
+  withSimJitter,
+} from './jitter.js';
+import { realSimClock, type SimClock, type SimLatency } from './latency.js';
 import { type SimModelCall, SimModelExecutor, type SimModelExecutorOptions, type SimModelStep } from './model.js';
 import { createSimOctokit, type SimOctokitOptions, type SimRecordedCall } from './octokit.js';
+import type { SimPhaseName, SimTerminalState } from './types.js';
 import { createSimWorkspace, simCommitAll, type SimWorkspace } from './workspace.js';
-
-export type SimTerminalState = 'shipped' | 'parked' | 'escalated';
-export type SimPhaseName = 'plan' | 'build' | 'check' | 'ship';
 
 export interface SimPipelineEvent {
   phase: SimPhaseName;
@@ -61,6 +67,8 @@ export interface SimIssueOutcome {
   modelCalls: SimModelCall[];
   /** Every fake GitHub call this run made — the audit trail for "no GitHub calls". */
   githubCalls: SimRecordedCall[];
+  /** Every jitter draw this run made, in call order. Empty when no jitter is configured. */
+  jitterDraws: SimJitterDraw[];
   events: SimPipelineEvent[];
 }
 
@@ -72,6 +80,8 @@ export interface SimulationReport {
   modelCalls: number;
   /** Total fake GitHub calls across the batch. */
   githubCalls: number;
+  /** Total injected failures across the batch (draws whose `failure` is non-null). */
+  injectedFailures: number;
 }
 
 export interface SimulationOptions {
@@ -84,6 +94,9 @@ export interface SimulationOptions {
   latency?: SimLatency;
   /** Injectable sleep/random so callers can keep runs deterministic. */
   clock?: SimClock;
+  /** Per-phase delay + failure-rate injection. Omit for the clean path (the default).
+   *  A config with 0 rate and 0 delay is behaviourally identical to omitting it. */
+  jitter?: SimJitterConfig;
   /** Streamed as each phase logs, in addition to being collected on the outcome. */
   onEvent?: (issue: number, event: SimPipelineEvent) => void;
 }
@@ -195,8 +208,8 @@ export async function runSimulation(options: SimulationOptions): Promise<Simulat
 
   try {
     for (const spec of options.issues) {
-      // Sequential, on purpose — determinism is the point of this simulator;
-      // jitter/concurrency belong to the Monte Carlo runner (#565/#566).
+      // Sequential, on purpose — determinism is the point of this simulator; concurrency
+      // belongs to the Monte Carlo runner (#566).
       outcomes.push(await runSimIssue(spec, workspace, repo, options));
     }
   } finally {
@@ -206,13 +219,15 @@ export async function runSimulation(options: SimulationOptions): Promise<Simulat
   const totals: Record<SimTerminalState, number> = { shipped: 0, parked: 0, escalated: 0 };
   let modelCalls = 0;
   let githubCalls = 0;
+  let injectedFailures = 0;
   for (const outcome of outcomes) {
     totals[outcome.state]++;
     modelCalls += outcome.modelCalls.length;
     githubCalls += outcome.githubCalls.length;
+    injectedFailures += outcome.jitterDraws.filter((d) => d.failure !== null).length;
   }
 
-  return { outcomes, totals, modelCalls, githubCalls };
+  return { outcomes, totals, modelCalls, githubCalls, injectedFailures };
 }
 
 async function runSimIssue(
@@ -243,12 +258,19 @@ async function runSimIssue(
     latency: options.latency,
     clock: options.clock,
   });
-  const router = new ModelRouter(simModelsConfig(), simRoutesConfig(), false, executor);
   const branch = branchFor(spec.issue, spec.title);
   const specPath = join(workspace.plansDir, `issue-${spec.issue}.md`);
   const worktree = `${workspace.repoRoot}-wt-${spec.issue}`;
 
   let phase: SimPhaseName = 'plan';
+  const phaseOf = (): SimPhaseName => phase;
+  const clock = options.clock ?? realSimClock;
+  const jitter = options.jitter
+    ? new SimJitter(options.jitter, deriveSimSeed(options.jitter.seed, spec.issue))
+    : undefined;
+  const routedExecutor = jitter ? new SimJitterExecutor(executor, jitter, phaseOf, clock) : executor;
+  const routedOctokit = jitter ? withSimJitter(octokit, jitter, phaseOf, clock) : octokit;
+  const router = new ModelRouter(simModelsConfig(), simRoutesConfig(), false, routedExecutor);
   let route: 'codex' | 'claude' = 'claude';
   let reworkRounds = 0;
 
@@ -267,6 +289,7 @@ async function runSimIssue(
       ...(reason !== undefined ? { reason } : {}),
       modelCalls: executor.calls,
       githubCalls,
+      jitterDraws: jitter?.draws ?? [],
       events,
     };
   }
@@ -279,7 +302,7 @@ async function runSimIssue(
       specPath,
       router,
       constitution: null,
-      octokit: octokit as unknown as Octokit,
+      octokit: routedOctokit as unknown as Octokit,
       log: log('plan'),
     });
     route = plan.route;
@@ -324,11 +347,15 @@ async function runSimIssue(
       repo,
       worktree,
       branch,
-      octokit: octokit as unknown as Octokit,
+      octokit: routedOctokit as unknown as Octokit,
       watchCI: false,
       log: log('ship'),
     });
     if (!ship.ok) return finish('parked', 'ship', 'ship phase failed');
+    // `shipped` means a PR was opened. shipPhase also returns ok for the alreadyDelivered
+    // path (branch has no commits ahead of origin/main) — reachable here when an injected
+    // BUILD failure left the worktree unchanged. That is not a ship.
+    if (ship.prNumber === undefined) return finish('parked', 'ship', 'ship phase produced no PR');
 
     return finish('shipped', 'ship', undefined, ship.prNumber);
   } catch (err) {
