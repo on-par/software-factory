@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { createSimOctokit, type SimOctokit, type SimRecordedCall } from '../sim/index.js';
 import { cleanupWorktree } from '../utils/index.js';
 import { withGitLock } from '../utils/lock.js';
 
@@ -69,64 +70,14 @@ export async function commitAll(cwd: string, message: string): Promise<void> {
   await exec(`git commit -m '${message}'`, { cwd });
 }
 
-export type RecordedCall = [string, ...unknown[]];
-
-export interface FakeOctokit {
-  graphql: (query: string, vars: unknown) => Promise<any>;
-  rest: {
-    issues: { get: (args: any) => Promise<any> };
-    pulls: {
-      list: (args: any) => Promise<any>;
-      create: (args: any) => Promise<any>;
-      get: (args: any) => Promise<any>;
-    };
-    checks: { listForRef: (args: any) => Promise<any> };
-  };
-}
+export type RecordedCall = SimRecordedCall;
+export type FakeOctokit = SimOctokit;
 
 export function makeFakeOctokit(
   titles: Record<number, string>,
   bodies: Record<number, string> = {},
 ): { octokit: FakeOctokit; calls: RecordedCall[] } {
-  const calls: RecordedCall[] = [];
-  let nextPr = 101;
-
-  const octokit: FakeOctokit = {
-    graphql: async (query: string, vars: unknown) => {
-      calls.push(['graphql', query, vars]);
-      return { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } };
-    },
-    rest: {
-      issues: {
-        get: async (args: any) => {
-          calls.push(['issues.get', args]);
-          return { data: { title: titles[args.issue_number], body: bodies[args.issue_number] ?? 'stub issue body' } };
-        },
-      },
-      pulls: {
-        list: async (args: any) => {
-          calls.push(['pulls.list', args]);
-          return { data: [] };
-        },
-        create: async (args: any) => {
-          calls.push(['pulls.create', args]);
-          return { data: { number: nextPr++ } };
-        },
-        get: async (args: any) => {
-          calls.push(['pulls.get', args]);
-          return { data: { draft: true, node_id: `PR_${args.pull_number}` } };
-        },
-      },
-      checks: {
-        listForRef: async (args: any) => {
-          calls.push(['checks.listForRef', args]);
-          return { data: { check_runs: [] } };
-        },
-      },
-    },
-  };
-
-  return { octokit, calls };
+  return createSimOctokit({ titles, bodies });
 }
 
 export class PipelineTestKit {
