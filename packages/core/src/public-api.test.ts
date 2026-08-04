@@ -315,6 +315,12 @@ const TESTING_API_KEYS = [
   'codingHarnessContractCases',
   'makeContractRequest',
   'loadInjectionFixtures',
+  'SimModelExecutor',
+  'createSimOctokit',
+  'failOnCall',
+  'realSimClock',
+  'resolveLatencyMs',
+  'applyLatency',
 ];
 
 describe('public API surface (ADR-0004)', () => {

@@ -7,5 +7,18 @@ export type { InjectionFixture, InjectionSurface } from './harness/injection-fix
 export { loadInjectionFixtures } from './harness/injection-fixtures.js';
 export type { StubCodingHarnessOptions, StubHarnessStep } from './harness/stub.js';
 export { StubCodingHarness } from './harness/stub.js';
+export type {
+  SimClock,
+  SimLatency,
+  SimModelCall,
+  SimModelExecutorOptions,
+  SimModelStep,
+  SimOctokit,
+  SimOctokitEndpoint,
+  SimOctokitOptions,
+  SimOctokitStep,
+  SimRecordedCall,
+} from './sim/index.js';
+export { applyLatency, createSimOctokit, failOnCall, realSimClock, resolveLatencyMs, SimModelExecutor } from './sim/index.js';
 export type { StubModelExecutorOptions } from './router/stub.js';
 export { StubModelExecutor } from './router/stub.js';
