@@ -1,16 +1,19 @@
-import { exec as execCb } from 'node:child_process';
 import { realpathSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
-import { createSimOctokit, type SimOctokit, type SimRecordedCall } from '../sim/index.js';
+import {
+  createSimOctokit,
+  createSimWorkspace,
+  simCommitAll,
+  type SimOctokit,
+  type SimRecordedCall,
+  type SimWorkspace,
+} from '../sim/index.js';
 import { cleanupWorktree } from '../utils/index.js';
 import { withGitLock } from '../utils/lock.js';
-
-const exec = promisify(execCb);
 
 export function makeStubModelsConfig(): ModelsConfig {
   return {
@@ -66,8 +69,7 @@ No network calls.
 }
 
 export async function commitAll(cwd: string, message: string): Promise<void> {
-  await exec('git add -A', { cwd });
-  await exec(`git commit -m '${message}'`, { cwd });
+  return simCommitAll(cwd, message);
 }
 
 export type RecordedCall = SimRecordedCall;
@@ -83,23 +85,12 @@ export function makeFakeOctokit(
 export class PipelineTestKit {
   private cleanupTargets: Array<{ repoRoot: string; worktree: string }> = [];
   private tempDirs = new Set<string>();
+  private workspaces: SimWorkspace[] = [];
 
   async makeThrowawayRepo(): Promise<{ origin: string; repoRoot: string }> {
-    const origin = realpathSync(await mkdtemp(join(tmpdir(), 'factory-origin-')));
-    const repoRoot = realpathSync(await mkdtemp(join(tmpdir(), 'factory-repo-')));
-    this.tempDirs.add(origin);
-    this.tempDirs.add(repoRoot);
-
-    await exec('git -c init.defaultBranch=main init --bare', { cwd: origin });
-    await exec(`git clone '${origin}' '${repoRoot}'`);
-    await exec('git config user.name factory-test', { cwd: repoRoot });
-    await exec('git config user.email factory@test', { cwd: repoRoot });
-    await exec('git checkout -b main', { cwd: repoRoot });
-    await writeFile(join(repoRoot, 'README.md'), '# Throwaway\n');
-    await commitAll(repoRoot, 'chore: initial commit');
-    await exec('git push -u origin main', { cwd: repoRoot });
-
-    return { origin, repoRoot };
+    const ws = await createSimWorkspace();
+    this.workspaces.push(ws);
+    return { origin: ws.origin, repoRoot: ws.repoRoot };
   }
 
   async makeSpecPath(issue: number): Promise<string> {
@@ -129,5 +120,8 @@ export class PipelineTestKit {
 
     await Promise.all([...this.tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
     this.tempDirs.clear();
+
+    await Promise.all(this.workspaces.map((w) => w.dispose()));
+    this.workspaces.length = 0;
   }
 }

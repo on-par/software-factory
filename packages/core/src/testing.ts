@@ -9,6 +9,8 @@ export type { StubCodingHarnessOptions, StubHarnessStep } from './harness/stub.j
 export { StubCodingHarness } from './harness/stub.js';
 export type {
   SimClock,
+  SimIssueOutcome,
+  SimIssueSpec,
   SimLatency,
   SimModelCall,
   SimModelExecutorOptions,
@@ -17,15 +19,28 @@ export type {
   SimOctokitEndpoint,
   SimOctokitOptions,
   SimOctokitStep,
+  SimPhaseName,
+  SimPipelineEvent,
   SimRecordedCall,
+  SimTerminalState,
+  SimulationOptions,
+  SimulationReport,
+  SimWorkspace,
 } from './sim/index.js';
 export {
   applyLatency,
   createSimOctokit,
+  createSimWorkspace,
   failOnCall,
   realSimClock,
   resolveLatencyMs,
+  runSimulation,
+  simCommitAll,
+  simDefaultScripts,
   SimModelExecutor,
+  simModelsConfig,
+  simRoutesConfig,
+  simSpecContent,
 } from './sim/index.js';
 export type { StubModelExecutorOptions } from './router/stub.js';
 export { StubModelExecutor } from './router/stub.js';

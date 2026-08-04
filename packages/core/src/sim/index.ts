@@ -6,3 +6,15 @@ export type { SimModelCall, SimModelExecutorOptions, SimModelStep } from './mode
 export { failOnCall, SimModelExecutor } from './model.js';
 export type { SimOctokit, SimOctokitEndpoint, SimOctokitOptions, SimOctokitStep, SimRecordedCall } from './octokit.js';
 export { createSimOctokit } from './octokit.js';
+export type {
+  SimIssueOutcome,
+  SimIssueSpec,
+  SimPhaseName,
+  SimPipelineEvent,
+  SimTerminalState,
+  SimulationOptions,
+  SimulationReport,
+} from './pipeline.js';
+export { runSimulation, simDefaultScripts, simModelsConfig, simRoutesConfig, simSpecContent } from './pipeline.js';
+export type { SimWorkspace } from './workspace.js';
+export { createSimWorkspace, simCommitAll } from './workspace.js';

@@ -317,10 +317,17 @@ const TESTING_API_KEYS = [
   'loadInjectionFixtures',
   'SimModelExecutor',
   'createSimOctokit',
+  'createSimWorkspace',
   'failOnCall',
   'realSimClock',
   'resolveLatencyMs',
   'applyLatency',
+  'runSimulation',
+  'simCommitAll',
+  'simDefaultScripts',
+  'simModelsConfig',
+  'simRoutesConfig',
+  'simSpecContent',
 ];
 
 describe('public API surface (ADR-0004)', () => {
