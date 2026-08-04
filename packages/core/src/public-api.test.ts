@@ -335,6 +335,15 @@ const TESTING_API_KEYS = [
   'createSeededRandom',
   'deriveSimSeed',
   'withSimJitter',
+  'aggregateMonteCarlo',
+  'monteCarloExitCode',
+  'renderMonteCarloTable',
+  'runMonteCarlo',
+  'summarizeSimulationRun',
+  'MONTE_CARLO_CLI_USAGE',
+  'parseMonteCarloArgs',
+  'runMonteCarloCli',
+  'simMonteCarloIssues',
 ];
 
 describe('public API surface (ADR-0004)', () => {

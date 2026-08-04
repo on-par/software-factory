@@ -51,6 +51,7 @@ readiness-conformance checker named in epic #464 consume them in later stories.
 - `environment/` — port-lease registry for parallel lanes (`.factory/ports.json`) + `leaseEnv()`/`laneEnv()`, the `PORT`/`FACTORY_APP_PORT`/`FACTORY_BASE_URL` + `FACTORY_HEADLESS`/`PLAYWRIGHT_HEADLESS` contract injected into build agents and all checker commands
 - `logger/` — structured leveled logger (`createLogger`) over the `.factory/events.ndjson` sink (ADR-0002)
 - `eval/` — the eval harness (runner, judge, scoring, golden loader, baseline/trend/regression reports)
+- `sim/` — headless simulator harness (fake model/octokit, throwaway git workspace, jitter injection, Monte Carlo runner)
 - `usage/`, `reports/`, `local-small/`, `utils/` (incl. `lock.ts`, `ci-watch.ts`), `config/`, `types/`
 
 ## Key commands
@@ -71,6 +72,7 @@ Run from the repo root unless noted. Node.js **≥ 20** required.
 | Coverage ratchet drift check   | `npm run coverage-ratchet`               |
 | Eval (deterministic stub)      | `npm run eval -- --stub`                 |
 | Eval (full harness)            | `npm run eval`                           |
+| Simulator Monte Carlo batch    | `npm run sim-monte-carlo -- --runs 20`   |
 | Full verify (all of the above) | `bash scripts/verify.sh`                 |
 
 `scripts/verify.sh` runs, in order: `npm ci` → `npm run format:check` → `npm run build` → `npm run typecheck` → `npm run lint` → `npm run knip` → `npm run test` → `npm run coverage-ratchet` → `npm run eval -- --stub`. This mirrors the CI workflow in `.github/workflows/ci.yml`.

@@ -29,6 +29,13 @@ export {
   runMonteCarlo,
   summarizeSimulationRun,
 } from './monte-carlo.js';
+export type { MonteCarloCliArgs, MonteCarloCliDeps, MonteCarloFormat } from './monte-carlo-cli.js';
+export {
+  MONTE_CARLO_CLI_USAGE,
+  parseMonteCarloArgs,
+  runMonteCarloCli,
+  simMonteCarloIssues,
+} from './monte-carlo-cli.js';
 export type { SimOctokit, SimOctokitEndpoint, SimOctokitOptions, SimOctokitStep, SimRecordedCall } from './octokit.js';
 export { createSimOctokit } from './octokit.js';
 export type {
