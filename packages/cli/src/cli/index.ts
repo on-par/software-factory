@@ -1781,7 +1781,7 @@ async function landIssue(
               skipCI,
             });
           } catch (err) {
-            if (err instanceof AwaitingReviewError) {
+            if (err instanceof AwaitingReviewError || err instanceof CiFailedError) {
               await cleanupWorktree(repoRoot, worktree, log);
             }
             throw err;
@@ -1793,7 +1793,7 @@ async function landIssue(
       ),
     );
   } catch (err: any) {
-    if (err instanceof LandConflictError || err instanceof AwaitingReviewError) throw err;
+    if (err instanceof LandConflictError || err instanceof AwaitingReviewError || err instanceof CiFailedError) throw err;
     log('fail', `merge failed: ${err.message}`);
     throw new LandFailureError(`merge failed for issue #${issueNum}: ${err.message}`, 5);
   }
@@ -2320,6 +2320,18 @@ export class LandFailureError extends Error {
   }
 }
 
+/** Thrown when watchChecks reports a confirmed CI failure. Distinct from a watch
+ *  timeout/transport error — those are ambiguous and fall through to a merge-state
+ *  check, but a confirmed failing check must never be merged, admin override or not. */
+export class CiFailedError extends Error {
+  constructor(
+    message: string,
+    readonly prNumber: number,
+  ) {
+    super(message);
+  }
+}
+
 const MAX_MERGE_ATTEMPTS = 5;
 const MERGE_RETRY_BASE_MS = 5_000;
 
@@ -2434,10 +2446,16 @@ export async function landOpenPullRequest(opts: {
   const watchCi = async () => {
     try {
       const outcome = await watchChecks({ octokit, owner, repo: repoName, ref: branch });
+      if (outcome === 'failure') {
+        const msg = `CI failed for PR #${prNumber} on ${branch} — refusing to merge with a failing required check`;
+        log('fail', msg);
+        throw new CiFailedError(msg, prNumber);
+      }
       if (outcome !== 'success') {
         log('warn', `CI watch for ${branch} ended ${outcome} — proceeding to merge state check`);
       }
     } catch (err) {
+      if (err instanceof CiFailedError) throw err;
       log('warn', `CI watch for ${branch} failed: ${errorDetail(err)} — proceeding to merge state check`);
     }
   };
