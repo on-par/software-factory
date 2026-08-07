@@ -1793,7 +1793,8 @@ async function landIssue(
       ),
     );
   } catch (err: any) {
-    if (err instanceof LandConflictError || err instanceof AwaitingReviewError || err instanceof CiFailedError) throw err;
+    if (err instanceof LandConflictError || err instanceof AwaitingReviewError || err instanceof CiFailedError)
+      throw err;
     log('fail', `merge failed: ${err.message}`);
     throw new LandFailureError(`merge failed for issue #${issueNum}: ${err.message}`, 5);
   }
