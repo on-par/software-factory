@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   assertValidProduct,
   AwaitingReviewError,
+  CiFailedError,
   ConstitutionExistsError,
   createIngestHook,
   createSuperviseRunQueue,
@@ -1394,7 +1395,7 @@ describe('cli', () => {
     ]);
   });
 
-  it('logs a warn when CI ends in failure and still proceeds to merge', async () => {
+  it('refuses to merge and throws CiFailedError when CI ends in failure (regression: on-par/sound-buddy#707 merged with a failing e2e check)', async () => {
     const calls: any[] = [];
     const octokit: any = {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
@@ -1418,31 +1419,78 @@ describe('cli', () => {
       calls.push(['run', command, options]);
     };
 
-    await landOpenPullRequest({
-      octokit,
-      owner: 'on-par',
-      repoName: 'software-factory',
-      ghRepo: 'on-par/software-factory',
-      repoRoot: '/repo',
-      issue: 20,
-      branch: 'ship-it/20-ci-failed',
-      worktree: '/repo-factory-20',
-      prNumber: 123,
-      log: (type, msg) => calls.push(['log', type, msg]),
-      run,
-      pathExists: () => true,
-      sleep: async () => {
-        throw new Error('sleep should not be called');
-      },
-    });
+    await expect(
+      landOpenPullRequest({
+        octokit,
+        owner: 'on-par',
+        repoName: 'software-factory',
+        ghRepo: 'on-par/software-factory',
+        repoRoot: '/repo',
+        issue: 20,
+        branch: 'ship-it/20-ci-failed',
+        worktree: '/repo-factory-20',
+        prNumber: 123,
+        log: (type, msg) => calls.push(['log', type, msg]),
+        run,
+        pathExists: () => true,
+        sleep: async () => {
+          throw new Error('sleep should not be called');
+        },
+      }),
+    ).rejects.toThrow(CiFailedError);
 
-    const warnCall = calls.find((c) => c[0] === 'log' && c[1] === 'warn');
-    expect(warnCall).toBeDefined();
-    expect(warnCall[2]).toContain('ended failure');
-    expect(calls).toContainEqual([
-      'merge',
-      { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash' },
-    ]);
+    const failCall = calls.find((c) => c[0] === 'log' && c[1] === 'ci-failed');
+    expect(failCall).toBeDefined();
+    expect(failCall[2]).toContain('refusing to merge');
+    expect(calls.some((c) => c[0] === 'merge')).toBe(false);
+  });
+
+  it('refuses to merge on a confirmed CI failure even with adminMerge (FACTORY_MERGE_ADMIN=1) set — the exact on-par/sound-buddy#707 scenario', async () => {
+    const calls: any[] = [];
+    const octokit: any = {
+      graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
+      rest: {
+        pulls: {
+          merge: async (args: any) => {
+            calls.push(['merge', args]);
+          },
+        },
+        git: {
+          deleteRef: async (args: any) => {
+            calls.push(['deleteRef', args]);
+          },
+        },
+        checks: {
+          listForRef: async () => ({ data: { check_runs: [{ status: 'completed', conclusion: 'failure' }] } }),
+        },
+      },
+    };
+    const run = async (command: string, options: any) => {
+      calls.push(['run', command, options]);
+    };
+
+    await expect(
+      landOpenPullRequest({
+        octokit,
+        owner: 'on-par',
+        repoName: 'software-factory',
+        ghRepo: 'on-par/software-factory',
+        repoRoot: '/repo',
+        issue: 20,
+        branch: 'ship-it/20-ci-failed-admin',
+        worktree: '/repo-factory-20',
+        prNumber: 707,
+        log: (type, msg) => calls.push(['log', type, msg]),
+        run,
+        pathExists: () => true,
+        adminMerge: true,
+        sleep: async () => {
+          throw new Error('sleep should not be called');
+        },
+      }),
+    ).rejects.toThrow(CiFailedError);
+
+    expect(calls.some((c) => c[0] === 'merge')).toBe(false);
   });
 
   it('logs a warn when the ready-for-review flip fails but still merges', async () => {
@@ -1879,6 +1927,10 @@ describe('cli', () => {
 
     it('maps a LandConflictError to conflict', () => {
       expect(parkReasonFor(new LandConflictError('x'))).toBe('conflict');
+    });
+
+    it('maps a CiFailedError to ci-failed', () => {
+      expect(parkReasonFor(new CiFailedError('x', 707))).toBe('ci-failed');
     });
 
     it('maps an error carrying reason: timeout to timeout', () => {

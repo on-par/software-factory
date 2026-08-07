@@ -787,7 +787,7 @@ async function cmdTui() {
   });
 }
 
-export type ParkReason = 'escalate' | 'timeout' | 'fail' | 'conflict';
+export type ParkReason = 'escalate' | 'timeout' | 'fail' | 'conflict' | 'ci-failed';
 
 export class LaneParkError extends Error {
   constructor(
@@ -801,6 +801,7 @@ export class LaneParkError extends Error {
 export function parkReasonFor(err: unknown): ParkReason {
   if (err instanceof LaneParkError) return err.reason;
   if (err instanceof LandConflictError) return 'conflict';
+  if (err instanceof CiFailedError) return 'ci-failed';
   if ((err as any)?.reason === 'timeout') return 'timeout';
   return 'fail';
 }
@@ -1709,6 +1710,12 @@ export async function cmdLand(issueNum: number) {
       console.log(chalk.yellow(`⏸ PR #${err.prNumber} for issue #${issueNum} awaiting human review — left open`));
       return;
     }
+    if (err instanceof CiFailedError) {
+      console.log(
+        chalk.yellow(`⏸ PR #${err.prNumber} for issue #${issueNum} has a failing CI check — left open, not merged`),
+      );
+      return;
+    }
     if (err instanceof LandConflictError) {
       throw new CliExitError(`factory: ${err.message}`, 3);
     }
@@ -1781,7 +1788,7 @@ async function landIssue(
               skipCI,
             });
           } catch (err) {
-            if (err instanceof AwaitingReviewError) {
+            if (err instanceof AwaitingReviewError || err instanceof CiFailedError) {
               await cleanupWorktree(repoRoot, worktree, log);
             }
             throw err;
@@ -1793,7 +1800,8 @@ async function landIssue(
       ),
     );
   } catch (err: any) {
-    if (err instanceof LandConflictError || err instanceof AwaitingReviewError) throw err;
+    if (err instanceof LandConflictError || err instanceof AwaitingReviewError || err instanceof CiFailedError)
+      throw err;
     log('fail', `merge failed: ${err.message}`);
     throw new LandFailureError(`merge failed for issue #${issueNum}: ${err.message}`, 5);
   }
@@ -2320,6 +2328,18 @@ export class LandFailureError extends Error {
   }
 }
 
+/** Thrown when watchChecks reports a confirmed CI failure. Distinct from a watch
+ *  timeout/transport error — those are ambiguous and fall through to a merge-state
+ *  check, but a confirmed failing check must never be merged, admin override or not. */
+export class CiFailedError extends Error {
+  constructor(
+    message: string,
+    readonly prNumber: number,
+  ) {
+    super(message);
+  }
+}
+
 const MAX_MERGE_ATTEMPTS = 5;
 const MERGE_RETRY_BASE_MS = 5_000;
 
@@ -2434,10 +2454,16 @@ export async function landOpenPullRequest(opts: {
   const watchCi = async () => {
     try {
       const outcome = await watchChecks({ octokit, owner, repo: repoName, ref: branch });
+      if (outcome === 'failure') {
+        const msg = `CI failed for PR #${prNumber} on ${branch} — refusing to merge with a failing check`;
+        log('ci-failed', msg);
+        throw new CiFailedError(msg, prNumber);
+      }
       if (outcome !== 'success') {
         log('warn', `CI watch for ${branch} ended ${outcome} — proceeding to merge state check`);
       }
     } catch (err) {
+      if (err instanceof CiFailedError) throw err;
       log('warn', `CI watch for ${branch} failed: ${errorDetail(err)} — proceeding to merge state check`);
     }
   };

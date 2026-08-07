@@ -189,7 +189,13 @@ vi.mock('@on-par/factory-core/internal', async (importOriginal) => {
   };
 });
 
-import { cleanupWorktree, formatGcReport, sweepWorktrees, withGitLock } from '@on-par/factory-core/internal';
+import {
+  cleanupWorktree,
+  formatGcReport,
+  sweepWorktrees,
+  watchChecks,
+  withGitLock,
+} from '@on-par/factory-core/internal';
 
 import { CliExitError, cmdConstitution, cmdLand, cmdUsage, main, parseIssueArg, shipIssue } from './cli/index.js';
 
@@ -2709,6 +2715,23 @@ describe('CliExitError (direct command invocation)', () => {
       .split('\n')
       .map((line) => JSON.parse(line));
     expect(events.some((e) => e.type === 'awaiting-review')).toBe(true);
+  });
+
+  it('cmdLand(5) resolves cleanly and leaves the PR open when CI reports a confirmed failure (regression: on-par/sound-buddy#707 merged with a failing e2e check)', async () => {
+    vi.mocked(watchChecks).mockResolvedValueOnce('failure');
+
+    await expect(cmdLand(5)).resolves.toBeUndefined();
+
+    expect(logged()).toContain('failing CI check');
+    expect(logged()).toContain('left open, not merged');
+    expect(h.octokit.rest.pulls.merge).not.toHaveBeenCalled();
+    expect(cleanupWorktree).toHaveBeenCalled();
+
+    const events = readFileSync(paths().events, 'utf-8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(events.some((e) => e.type === 'ci-failed')).toBe(true);
   });
 });
 
