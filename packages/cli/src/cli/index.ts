@@ -787,7 +787,7 @@ async function cmdTui() {
   });
 }
 
-export type ParkReason = 'escalate' | 'timeout' | 'fail' | 'conflict';
+export type ParkReason = 'escalate' | 'timeout' | 'fail' | 'conflict' | 'ci-failed';
 
 export class LaneParkError extends Error {
   constructor(
@@ -801,6 +801,7 @@ export class LaneParkError extends Error {
 export function parkReasonFor(err: unknown): ParkReason {
   if (err instanceof LaneParkError) return err.reason;
   if (err instanceof LandConflictError) return 'conflict';
+  if (err instanceof CiFailedError) return 'ci-failed';
   if ((err as any)?.reason === 'timeout') return 'timeout';
   return 'fail';
 }
@@ -1709,6 +1710,12 @@ export async function cmdLand(issueNum: number) {
       console.log(chalk.yellow(`⏸ PR #${err.prNumber} for issue #${issueNum} awaiting human review — left open`));
       return;
     }
+    if (err instanceof CiFailedError) {
+      console.log(
+        chalk.yellow(`⏸ PR #${err.prNumber} for issue #${issueNum} has a failing CI check — left open, not merged`),
+      );
+      return;
+    }
     if (err instanceof LandConflictError) {
       throw new CliExitError(`factory: ${err.message}`, 3);
     }
@@ -2448,8 +2455,8 @@ export async function landOpenPullRequest(opts: {
     try {
       const outcome = await watchChecks({ octokit, owner, repo: repoName, ref: branch });
       if (outcome === 'failure') {
-        const msg = `CI failed for PR #${prNumber} on ${branch} — refusing to merge with a failing required check`;
-        log('fail', msg);
+        const msg = `CI failed for PR #${prNumber} on ${branch} — refusing to merge with a failing check`;
+        log('ci-failed', msg);
         throw new CiFailedError(msg, prNumber);
       }
       if (outcome !== 'success') {
