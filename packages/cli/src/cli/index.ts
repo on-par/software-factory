@@ -1737,6 +1737,14 @@ export async function cmdLand(issueNum: number) {
   }
 }
 
+/** Land-path errors that leave the PR open in a terminal, human-reviewable
+ *  state (awaiting review, a confirmed CI failure, or an inconclusive CI
+ *  watch) rather than a hard failure — callers re-throw these untranslated
+ *  instead of wrapping them in LandFailureError. */
+function isParkableLandError(err: unknown): boolean {
+  return err instanceof AwaitingReviewError || err instanceof CiFailedError || err instanceof CiInconclusiveError;
+}
+
 async function landIssue(
   issueNum: number,
   repoRoot: string,
@@ -1799,11 +1807,7 @@ async function landIssue(
               skipCI,
             });
           } catch (err) {
-            if (
-              err instanceof AwaitingReviewError ||
-              err instanceof CiFailedError ||
-              err instanceof CiInconclusiveError
-            ) {
+            if (isParkableLandError(err)) {
               await cleanupWorktree(repoRoot, worktree, log);
             }
             throw err;
@@ -1815,13 +1819,7 @@ async function landIssue(
       ),
     );
   } catch (err: any) {
-    if (
-      err instanceof LandConflictError ||
-      err instanceof AwaitingReviewError ||
-      err instanceof CiFailedError ||
-      err instanceof CiInconclusiveError
-    )
-      throw err;
+    if (err instanceof LandConflictError || isParkableLandError(err)) throw err;
     log('fail', `merge failed: ${err.message}`);
     throw new LandFailureError(`merge failed for issue #${issueNum}: ${err.message}`, 5);
   }
