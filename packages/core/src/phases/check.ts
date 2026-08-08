@@ -236,7 +236,7 @@ export async function checkPhase(opts: {
 
     const steering = drainSteering?.();
 
-    const { failovers } = await reworkWorker(
+    const { failovers, attempted } = await reworkWorker(
       issue,
       worktree,
       specPath,
@@ -260,6 +260,15 @@ export async function checkPhase(opts: {
     );
     if (steering && steering.messages.length > 0) {
       log('steering_applied', describeSteering(steering));
+    }
+    if (!attempted) {
+      // #569: router.run() exhausted every model for build_claude and rejected — no repair
+      // was applied this round. Say so explicitly; otherwise a checker result that happens
+      // to change on its own (e.g. a flaky/SKIPped checker) reads as "rework fixed it."
+      log(
+        'rework_failed',
+        `round ${reworkRounds}/${maxRounds}: the repair attempt itself did not run (all models failed) — any change below is not from a real fix`,
+      );
     }
 
     summary = await runAllCheckers(ctx, router, constitution, checkTimeoutSeconds);
@@ -322,7 +331,7 @@ async function reworkWorker(
   appPort?: number,
   appBaseUrl?: string,
   onPgid?: (pgid: number) => void,
-): Promise<{ failovers: { model: string; reason: FailoverReason; detail?: string }[] }> {
+): Promise<{ failovers: { model: string; reason: FailoverReason; detail?: string }[]; attempted: boolean }> {
   const constitutionCtx = buildConstitutionContext(constitution);
   const failures = summary.results.filter((r) => r.result === 'FAIL');
   const failureDetails = failures.map((f) => `### ${f.checker}\n${f.details}`).join('\n\n');
@@ -369,7 +378,7 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
     });
   }
 
-  return { failovers };
+  return { failovers, attempted: reworkResult !== null };
 }
 
 export async function disputeResolution(opts: {
