@@ -489,6 +489,8 @@ describe('buildPhase atomic commit policy', () => {
     const prompt = stub.calls[stub.calls.length - 1].prompt;
     expect(prompt).toContain('Commit atomically');
     expect(prompt).toContain('independently testable functional change');
+    expect(prompt).toContain('unrelated functional changes');
+    expect(prompt).toContain('exactly ONE commit');
   });
 
   it('claude publish route renders the atomic policy', async () => {
@@ -514,6 +516,9 @@ describe('buildPhase atomic commit policy', () => {
     const prompt = stub.calls[stub.calls.length - 1].prompt;
     expect(prompt).toContain('/ship-it');
     expect(prompt).toContain('Commit atomically');
+    expect(prompt).toContain('independently testable functional change');
+    expect(prompt).toContain('unrelated functional changes');
+    expect(prompt).toContain('single-slice task still yields one clear commit');
   });
 
   it('local-small prompt keeps single-slice one-commit behavior', async () => {
