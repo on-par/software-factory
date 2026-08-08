@@ -335,6 +335,144 @@ describe('withFileLock', () => {
 
     expect(existsSync(lockDir)).toBe(true);
   });
+
+  it('does not delete a live lock when the observed dead holder was replaced mid-steal (#597)', async () => {
+    const lockDir = makeLockDir();
+    mkdirSync(lockDir);
+    writeFileSync(join(lockDir, 'pid'), '999999');
+    const onSteal = vi.fn();
+    const fn = vi.fn();
+
+    let calls = 0;
+    const isPidAlive = vi.fn(() => {
+      calls++;
+      if (calls === 1) {
+        rmSync(lockDir, { recursive: true, force: true });
+        mkdirSync(lockDir);
+        writeFileSync(join(lockDir, 'pid'), '4242');
+        return false;
+      }
+      return true;
+    });
+
+    await expect(withFileLock(lockDir, fn, { pollMs: 10, timeoutMs: 50, isPidAlive, onSteal })).rejects.toThrow(
+      /stuck/,
+    );
+
+    expect(fn).not.toHaveBeenCalled();
+    expect(onSteal).not.toHaveBeenCalled();
+    expect(existsSync(lockDir)).toBe(true);
+    expect(readFileSync(join(lockDir, 'pid'), 'utf-8')).toBe('4242');
+  });
+
+  it('re-observes and steals on the next pass when the stale dir was recreated with the same pid', async () => {
+    const lockDir = makeLockDir();
+    mkdirSync(lockDir);
+    writeFileSync(join(lockDir, 'pid'), '999999');
+    const onSteal = vi.fn();
+    let ran = false;
+
+    let calls = 0;
+    const isPidAlive = vi.fn(() => {
+      calls++;
+      if (calls === 1) {
+        rmSync(lockDir, { recursive: true, force: true });
+        mkdirSync(lockDir);
+        writeFileSync(join(lockDir, 'pid'), '999999');
+        const past = new Date(Date.now() - 1_000);
+        utimesSync(lockDir, past, past);
+      }
+      return false;
+    });
+
+    await withFileLock(
+      lockDir,
+      async () => {
+        ran = true;
+      },
+      { pollMs: 10, timeoutMs: 500, graceMs: 10, isPidAlive, onSteal },
+    );
+
+    expect(ran).toBe(true);
+    expect(onSteal).toHaveBeenCalledTimes(1);
+    expect(onSteal).toHaveBeenCalledWith(999999);
+  });
+
+  it('backs off instead of stealing while another stealer holds the steal arbiter', async () => {
+    const lockDir = makeLockDir();
+    mkdirSync(lockDir);
+    writeFileSync(join(lockDir, 'pid'), '999999');
+    mkdirSync(`${lockDir}.steal`);
+    const onSteal = vi.fn();
+    const fn = vi.fn();
+
+    await expect(
+      withFileLock(lockDir, fn, {
+        pollMs: 10,
+        timeoutMs: 50,
+        graceMs: 10_000,
+        isPidAlive: () => false,
+        onSteal,
+      }),
+    ).rejects.toThrow(/stuck/);
+
+    expect(fn).not.toHaveBeenCalled();
+    expect(onSteal).not.toHaveBeenCalled();
+    expect(existsSync(lockDir)).toBe(true);
+    expect(existsSync(`${lockDir}.steal`)).toBe(true);
+  });
+
+  it('reaps a steal arbiter left behind by a dead stealer, then steals', async () => {
+    const lockDir = makeLockDir();
+    mkdirSync(lockDir);
+    writeFileSync(join(lockDir, 'pid'), '999999');
+    mkdirSync(`${lockDir}.steal`);
+    const past = new Date(Date.now() - 1_000);
+    utimesSync(`${lockDir}.steal`, past, past);
+    const onSteal = vi.fn();
+    let ran = false;
+
+    await withFileLock(
+      lockDir,
+      async () => {
+        ran = true;
+      },
+      { pollMs: 10, timeoutMs: 500, graceMs: 10, isPidAlive: () => false, onSteal },
+    );
+
+    expect(ran).toBe(true);
+    expect(onSteal).toHaveBeenCalledWith(999999);
+    expect(existsSync(`${lockDir}.steal`)).toBe(false);
+    expect(existsSync(lockDir)).toBe(false);
+  });
+
+  it('retries without stealing when the lock dir disappears during the steal', async () => {
+    const lockDir = makeLockDir();
+    mkdirSync(lockDir);
+    writeFileSync(join(lockDir, 'pid'), '999999');
+    const onSteal = vi.fn();
+    let ran = false;
+
+    let calls = 0;
+    const isPidAlive = vi.fn(() => {
+      calls++;
+      if (calls === 1) {
+        rmSync(lockDir, { recursive: true, force: true });
+      }
+      return false;
+    });
+
+    await withFileLock(
+      lockDir,
+      async () => {
+        ran = true;
+      },
+      { pollMs: 10, timeoutMs: 200, isPidAlive, onSteal },
+    );
+
+    expect(ran).toBe(true);
+    expect(onSteal).not.toHaveBeenCalled();
+  });
 });
 
 describe('withFileLockSync', () => {
@@ -450,5 +588,80 @@ describe('withFileLockSync', () => {
 
     expect(ran).toBe(true);
     expect(onSteal).toHaveBeenCalledWith(null);
+  });
+
+  it('does not delete a live lock when the observed dead holder was replaced mid-steal (#597)', () => {
+    const lockDir = makeLockDir();
+    mkdirSync(lockDir);
+    writeFileSync(join(lockDir, 'pid'), '999999');
+    const onSteal = vi.fn();
+    const fn = vi.fn();
+
+    let calls = 0;
+    const isPidAlive = vi.fn(() => {
+      calls++;
+      if (calls === 1) {
+        rmSync(lockDir, { recursive: true, force: true });
+        mkdirSync(lockDir);
+        writeFileSync(join(lockDir, 'pid'), '4242');
+        return false;
+      }
+      return true;
+    });
+
+    expect(() => withFileLockSync(lockDir, fn, { pollMs: 5, timeoutMs: 25, isPidAlive, onSteal })).toThrow(/stuck/);
+
+    expect(fn).not.toHaveBeenCalled();
+    expect(onSteal).not.toHaveBeenCalled();
+    expect(existsSync(lockDir)).toBe(true);
+    expect(readFileSync(join(lockDir, 'pid'), 'utf-8')).toBe('4242');
+  });
+
+  it('backs off while another stealer holds the steal arbiter', () => {
+    const lockDir = makeLockDir();
+    mkdirSync(lockDir);
+    writeFileSync(join(lockDir, 'pid'), '999999');
+    mkdirSync(`${lockDir}.steal`);
+    const onSteal = vi.fn();
+    const fn = vi.fn();
+
+    expect(() =>
+      withFileLockSync(lockDir, fn, {
+        pollMs: 5,
+        timeoutMs: 25,
+        graceMs: 10_000,
+        isPidAlive: () => false,
+        onSteal,
+      }),
+    ).toThrow(/stuck/);
+
+    expect(fn).not.toHaveBeenCalled();
+    expect(onSteal).not.toHaveBeenCalled();
+    expect(existsSync(lockDir)).toBe(true);
+    expect(existsSync(`${lockDir}.steal`)).toBe(true);
+  });
+
+  it('reaps a stale steal arbiter and then steals', () => {
+    const lockDir = makeLockDir();
+    mkdirSync(lockDir);
+    writeFileSync(join(lockDir, 'pid'), '999999');
+    mkdirSync(`${lockDir}.steal`);
+    const past = new Date(Date.now() - 1_000);
+    utimesSync(`${lockDir}.steal`, past, past);
+    const onSteal = vi.fn();
+    let ran = false;
+
+    withFileLockSync(
+      lockDir,
+      () => {
+        ran = true;
+      },
+      { pollMs: 5, timeoutMs: 200, graceMs: 10, isPidAlive: () => false, onSteal },
+    );
+
+    expect(ran).toBe(true);
+    expect(onSteal).toHaveBeenCalledWith(999999);
+    expect(existsSync(`${lockDir}.steal`)).toBe(false);
+    expect(existsSync(lockDir)).toBe(false);
   });
 });
