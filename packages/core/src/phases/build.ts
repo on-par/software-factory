@@ -38,6 +38,9 @@ export async function buildPhase(opts: {
    *  route — never instruct the worker to push, open a PR, or watch CI. */
   disablePublish?: boolean;
   modelOverride?: string;
+  /** Cross-provider Codex fallback used when a Claude worker is capped or unavailable. */
+  codexFallbackModel?: string;
+  onProviderFailure?: (info: { provider: string; reason: FailoverReason }) => void | Promise<void>;
   sandbox?: SandboxPolicy;
   steering?: ConsumedSteering;
   appPort?: number;
@@ -63,6 +66,8 @@ export async function buildPhase(opts: {
     skipCI,
     disablePublish,
     modelOverride,
+    codexFallbackModel,
+    onProviderFailure,
     sandbox,
     steering,
     appPort,
@@ -149,6 +154,7 @@ ${compactForLocalModel(spec)}
     onLog: (msg: string) => log('router', msg),
     env: laneEnv(appPort, process.env, appBaseUrl),
     onPgid,
+    onProviderFailure,
   };
 
   let result: RouterResult;
@@ -157,48 +163,76 @@ ${compactForLocalModel(spec)}
   } catch (err) {
     const reason = (err as { reason?: FailoverReason }).reason;
     const attempts = (err as { attempts?: RouterResult['attempts'] }).attempts;
-    const quota = reason === 'usage_cap' || reason === 'rate_limit';
+    // These all indicate a provider problem rather than a bad task. Preserve
+    // the frozen spec and continue on the other provider when one is available.
+    const providerFailure =
+      reason === 'usage_cap' || reason === 'rate_limit' || reason === 'timeout' || reason === 'unavailable';
     // Only swap when we actually ran the codex route and it was exhausted on a
     // quota reason. The router only throws after trying every eligible codex
     // worker, so reaching here already means "no Codex-harness worker remains".
-    if (taskType !== 'build_codex' || !quota) throw err;
-    if (opts.autoFailover && !opts.autoFailover.enabled) throw err;
-    const fromModel = attempts?.at(-1)?.model ?? 'unknown';
-    const provider = router.registryRef.get(fromModel)?.provider ?? 'openai';
-    const fallback = opts.autoFailover?.fallbackModel;
-    const toModel =
-      fallback && router.resolveAll('build_claude').includes(fallback)
-        ? fallback
-        : router.resolveAll('build_claude')[0];
-    if (!toModel) throw err; // no claude fallback available — park as today
-    log(
-      'worker_failover',
-      `Codex build workers exhausted (${reason}) — continuing on claude: ` +
-        `from_model=${fromModel} to_model=${toModel} ` +
-        `from_route=build_codex to_route=build_claude reason=${reason}`,
-      { failoverReason: reason },
-    );
-    try {
-      await opts.autoFailover?.onQuotaExhausted?.({ provider, reason });
-    } catch (breakerErr) {
-      // Best-effort circuit-breaker bookkeeping — a write failure here must
-      // never turn a successful codex→claude failover into a hard build
-      // failure.
-      log('warn', `provider breaker callback failed (non-fatal): ${(breakerErr as Error).message}`);
+    if (taskType === 'build_claude' && providerFailure) {
+      if (opts.autoFailover && !opts.autoFailover.enabled) throw err;
+      const fallback = codexFallbackModel ?? router.resolveAll('build_codex')[0];
+      if (!fallback) throw err;
+      log('worker_failover', `Claude build workers exhausted (${reason}) — continuing on Codex: to_model=${fallback}`, {
+        failoverReason: reason,
+      });
+      route = 'codex';
+      taskType = 'build_codex';
+      result = await router.run(
+        'build_codex',
+        buildCommitOnlyPrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding }),
+        { ...runOpts, retryCause: 'failover', modelOverride: fallback },
+      );
+    } else if (taskType !== 'build_codex' || !providerFailure) throw err;
+    else {
+      if (opts.autoFailover && !opts.autoFailover.enabled) throw err;
+      const fromModel = attempts?.at(-1)?.model ?? 'unknown';
+      const provider = router.registryRef.get(fromModel)?.provider ?? 'openai';
+      const fallback = opts.autoFailover?.fallbackModel;
+      const toModel =
+        fallback && router.resolveAll('build_claude').includes(fallback)
+          ? fallback
+          : router.resolveAll('build_claude')[0];
+      if (!toModel) throw err;
+      log(
+        'worker_failover',
+        `Codex build workers exhausted (${reason}) — continuing on claude: ` +
+          `from_model=${fromModel} to_model=${toModel} ` +
+          `from_route=build_codex to_route=build_claude reason=${reason}`,
+        { failoverReason: reason },
+      );
+      try {
+        await opts.autoFailover?.onQuotaExhausted?.({ provider, reason });
+      } catch (breakerErr) {
+        // Best-effort circuit-breaker bookkeeping — a write failure here must
+        // never turn a successful codex→claude failover into a hard build
+        // failure.
+        log('warn', `provider breaker callback failed (non-fatal): ${(breakerErr as Error).message}`);
+      }
+      route = 'claude';
+      taskType = 'build_claude';
+      const claudePrompt = applySteering(
+        disablePublish
+          ? buildCommitOnlyPrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding })
+          : buildClaudePrompt({
+              issue,
+              branch,
+              specPath,
+              constitutionCtx,
+              skipCI,
+              appPort,
+              appBaseUrl,
+              designGrounding,
+            }),
+        steering,
+      );
+      result = await router.run('build_claude', claudePrompt, {
+        ...runOpts,
+        retryCause: 'failover',
+        ...(toModel === fallback ? { modelOverride: fallback } : {}),
+      });
     }
-    route = 'claude';
-    taskType = 'build_claude';
-    const claudePrompt = applySteering(
-      disablePublish
-        ? buildCommitOnlyPrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding })
-        : buildClaudePrompt({ issue, branch, specPath, constitutionCtx, skipCI, appPort, appBaseUrl, designGrounding }),
-      steering,
-    );
-    result = await router.run('build_claude', claudePrompt, {
-      ...runOpts,
-      retryCause: 'failover',
-      ...(toModel === fallback ? { modelOverride: fallback } : {}),
-    });
   }
 
   for (const f of failoversFrom(result.attempts)) {

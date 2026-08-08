@@ -29,7 +29,7 @@ function makeTwoModelStubConfig(): ModelsConfig {
     version: 1,
     models: {
       'model-a': { ...base },
-      'model-b': { ...base },
+      'model-b': { ...base, provider: 'openai' },
     },
     tiers: { boss: ['model-a', 'model-b'] },
     failover: {

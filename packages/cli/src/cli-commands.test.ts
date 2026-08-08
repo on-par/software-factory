@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type * as FactoryCore from '@on-par/factory-core';
+import * as FactoryCore from '@on-par/factory-core';
 import type * as FactoryCoreInternal from '@on-par/factory-core/internal';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -26,6 +26,8 @@ const h = vi.hoisted(() => {
     // configurable core behaviour
     constitutionResolve: (_worktree: string, _product?: string): any => null,
     modelOverrides: {} as Record<string, string>,
+    modelProviders: {} as Record<string, string>,
+    triggerPlanProviderFailure: null as { provider: string; reason: any } | null,
     planResult: { ok: true, route: 'claude' } as any,
     buildResult: { ok: true } as any,
     checkResult: { passed: true, summary: { results: [], failures: 0 }, reworkRounds: 0 } as any,
@@ -111,7 +113,9 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
     getConstitutionsDir: vi.fn(() => h.constitutionsDir),
     resolveEffectiveModelPins: vi.fn(() => ({
       plan: h.modelOverrides.plan,
+      planFallback: h.modelOverrides.planFallback,
       build: h.modelOverrides.build,
+      buildFallback: h.modelOverrides.buildFallback,
       sources: {},
     })),
     isCommandAvailable: vi.fn(() => h.claudeAvailable ?? true),
@@ -128,7 +132,9 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
         registryRef: {
           getClaudeFlag: () => '--flag',
           getModelsInTier: () => ['m'],
-          get: () => undefined,
+          get: (id: string) => (h.modelProviders[id] ? { provider: h.modelProviders[id] } : undefined),
+          getHarnessId: (id: string) => (h.modelProviders[id] === 'anthropic' ? 'claude-cli' : 'codex-cli'),
+          isCodexModel: (id: string) => h.modelProviders[id] === 'openai',
         },
         setCostSink: vi.fn(),
       };
@@ -150,7 +156,10 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
       };
     }),
     // Phases.
-    planPhase: vi.fn(async () => h.planResult),
+    planPhase: vi.fn(async (opts: any) => {
+      if (h.triggerPlanProviderFailure) await opts.onProviderFailure?.(h.triggerPlanProviderFailure);
+      return h.planResult;
+    }),
     buildPhase: vi.fn(async () => h.buildResult),
     checkPhase: vi.fn(async () => h.checkResult),
     shipPhase: vi.fn(async () => h.shipResult),
@@ -289,6 +298,8 @@ beforeEach(() => {
   h.octokit = defaultOctokit();
   h.constitutionResolve = () => null;
   h.modelOverrides = {};
+  h.modelProviders = {};
+  h.triggerPlanProviderFailure = null;
   h.planResult = { ok: true, route: 'claude' };
   h.buildResult = { ok: true };
   h.checkResult = { passed: true, summary: { results: [], failures: 0 }, reworkRounds: 0 };
@@ -2224,6 +2235,41 @@ describe('shipIssue (direct)', () => {
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('plan-x');
     expect(events).toContain('build-y');
+  });
+
+  it('remembers a capped planning provider and uses the configured fallback on the next issue', async () => {
+    h.modelOverrides = { plan: 'claude-plan', planFallback: 'gpt-plan' };
+    h.modelProviders = { 'claude-plan': 'anthropic', 'gpt-plan': 'openai' };
+    h.triggerPlanProviderFailure = { provider: 'anthropic', reason: 'usage_cap' };
+
+    await shipIssue(5, {}, ctx());
+    expect(readFileSync(paths().events, 'utf-8')).toContain('provider_breaker_open');
+
+    h.triggerPlanProviderFailure = null;
+    await shipIssue(6, {}, ctx());
+    expect(vi.mocked(FactoryCore.planPhase).mock.calls.at(-1)?.[0]).toMatchObject({ modelOverride: 'gpt-plan' });
+  });
+
+  it('skips a cooled-down Claude build provider and starts the frozen build on its Codex fallback', async () => {
+    h.modelOverrides = { build: 'claude-build', buildFallback: 'gpt-build' };
+    h.modelProviders = { 'claude-build': 'anthropic', 'gpt-build': 'openai' };
+    writeFileSync(
+      paths().breaker,
+      JSON.stringify({
+        version: 1,
+        providers: {
+          anthropic: { reason: 'timeout', openedAt: new Date().toISOString(), cooldownMs: 60_000 },
+        },
+      }),
+    );
+
+    await shipIssue(5, {}, ctx());
+
+    expect(vi.mocked(FactoryCore.buildPhase).mock.calls.at(-1)?.[0]).toMatchObject({
+      route: 'codex',
+      modelOverride: 'gpt-build',
+      codexFallbackModel: 'gpt-build',
+    });
   });
 
   it('logs standards source when a repo constitution resolves', async () => {
