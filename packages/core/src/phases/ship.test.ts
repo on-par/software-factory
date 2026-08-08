@@ -504,7 +504,9 @@ describe('shipPhase CI watch', () => {
       expect(logs).toContainEqual(['ship', 'CI green for PR #123']);
       expect(logs.some(([, msg]) => msg.includes('CI failed'))).toBe(false);
       expect(logs).toContainEqual(['ready', 'PR #123 ready for review']);
-      expect(callCount()).toBe(3);
+      // 2 backoff polls to reach the completed set, plus one settle re-poll to
+      // confirm the check-run set is unchanged before declaring it green (#596).
+      expect(callCount()).toBe(4);
     } finally {
       vi.useRealTimers();
     }

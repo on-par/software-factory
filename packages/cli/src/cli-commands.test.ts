@@ -2733,6 +2733,29 @@ describe('CliExitError (direct command invocation)', () => {
       .map((line) => JSON.parse(line));
     expect(events.some((e) => e.type === 'ci-failed')).toBe(true);
   });
+
+  it('cmdLand(5) resolves cleanly and leaves the PR open when the CI watch times out under admin merge', async () => {
+    const originalAdminMerge = process.env.FACTORY_MERGE_ADMIN;
+    process.env.FACTORY_MERGE_ADMIN = '1';
+    try {
+      vi.mocked(watchChecks).mockResolvedValueOnce('timeout');
+
+      await expect(cmdLand(5)).resolves.toBeUndefined();
+
+      expect(logged()).toContain('left open, not merged');
+      expect(h.octokit.rest.pulls.merge).not.toHaveBeenCalled();
+      expect(cleanupWorktree).toHaveBeenCalled();
+
+      const events = readFileSync(paths().events, 'utf-8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      expect(events.some((e) => e.type === 'ci-timeout')).toBe(true);
+    } finally {
+      if (originalAdminMerge === undefined) delete process.env.FACTORY_MERGE_ADMIN;
+      else process.env.FACTORY_MERGE_ADMIN = originalAdminMerge;
+    }
+  });
 });
 
 // ===========================================================================
