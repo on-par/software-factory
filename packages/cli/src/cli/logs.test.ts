@@ -125,6 +125,15 @@ describe('runLogs (non-follow)', () => {
     runLogs(file, { issue: '296' }, { out, env: {} });
     expect(written).toEqual(['[factory] plan #296: a\n']);
   });
+
+  it('colorizes output when color is forced on and json is not requested', () => {
+    writeFileSync(file, line({ type: 'plan', issue: '1', msg: 'hi' }));
+    const { written, out } = outStub();
+    runLogs(file, {}, { out, env: { FORCE_COLOR: '1' } });
+    expect(written).toHaveLength(1);
+    expect(written[0]).not.toBe('[factory] plan #1: hi\n');
+    expect(written[0]).toContain('#1');
+  });
 });
 
 describe('runLogs (follow)', () => {
@@ -140,6 +149,13 @@ describe('runLogs (follow)', () => {
   afterEach(() => {
     while (stops.length) stops.pop()!();
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('defaults the follow poll interval when pollMs is not provided', () => {
+    const { out } = outStub();
+    const stop = runLogs(file, { follow: true }, { out, env: {} });
+    stops.push(stop);
+    expect(() => stop()).not.toThrow();
   });
 
   it('tails a file created after following starts', async () => {
