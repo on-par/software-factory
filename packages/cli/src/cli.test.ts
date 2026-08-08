@@ -10,6 +10,7 @@ import {
   assertValidProduct,
   AwaitingReviewError,
   CiFailedError,
+  CiInconclusiveError,
   ConstitutionExistsError,
   createIngestHook,
   createSuperviseRunQueue,
@@ -1328,6 +1329,7 @@ describe('cli', () => {
       log: (type, msg) => calls.push(['log', type, msg]),
       run,
       pathExists: () => true,
+      watch: async () => 'success',
       sleep: async () => {
         throw new Error('sleep should not be called');
       },
@@ -1380,6 +1382,9 @@ describe('cli', () => {
       log: (type, msg) => calls.push(['log', type, msg]),
       run,
       pathExists: () => true,
+      watch: async () => {
+        throw new Error('api down');
+      },
       sleep: async () => {
         throw new Error('sleep should not be called');
       },
@@ -1433,6 +1438,7 @@ describe('cli', () => {
         log: (type, msg) => calls.push(['log', type, msg]),
         run,
         pathExists: () => true,
+        watch: async () => 'failure',
         sleep: async () => {
           throw new Error('sleep should not be called');
         },
@@ -1484,6 +1490,7 @@ describe('cli', () => {
         run,
         pathExists: () => true,
         adminMerge: true,
+        watch: async () => 'failure',
         sleep: async () => {
           throw new Error('sleep should not be called');
         },
@@ -1491,6 +1498,144 @@ describe('cli', () => {
     ).rejects.toThrow(CiFailedError);
 
     expect(calls.some((c) => c[0] === 'merge')).toBe(false);
+  });
+
+  it('refuses to merge and throws CiInconclusiveError when the CI watch times out with adminMerge set', async () => {
+    const calls: any[] = [];
+    const octokit: any = {
+      graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
+      rest: {
+        pulls: {
+          merge: async (args: any) => {
+            calls.push(['merge', args]);
+          },
+        },
+        git: { deleteRef: async (args: any) => calls.push(['deleteRef', args]) },
+      },
+    };
+    const run = async (command: string, options: any) => {
+      calls.push(['run', command, options]);
+    };
+
+    await expect(
+      landOpenPullRequest({
+        octokit,
+        owner: 'on-par',
+        repoName: 'software-factory',
+        ghRepo: 'on-par/software-factory',
+        repoRoot: '/repo',
+        issue: 20,
+        branch: 'ship-it/20-ci-timeout-admin',
+        worktree: '/repo-factory-20',
+        prNumber: 707,
+        log: (type, msg) => calls.push(['log', type, msg]),
+        run,
+        pathExists: () => true,
+        adminMerge: true,
+        watch: async () => 'timeout',
+        sleep: async () => {
+          throw new Error('sleep should not be called');
+        },
+      }),
+    ).rejects.toThrow(CiInconclusiveError);
+
+    const timeoutCall = calls.find((c) => c[0] === 'log' && c[1] === 'ci-timeout');
+    expect(timeoutCall).toBeDefined();
+    expect(timeoutCall[2]).toContain('refusing an admin merge');
+    expect(calls.some((c) => c[0] === 'merge')).toBe(false);
+    expect(calls.some((c) => c[0] === 'run' && String(c[1]).includes('gh pr merge'))).toBe(false);
+  });
+
+  it('refuses to merge and throws CiInconclusiveError when the CI watch throws with adminMerge set', async () => {
+    const calls: any[] = [];
+    const octokit: any = {
+      graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
+      rest: {
+        pulls: {
+          merge: async (args: any) => {
+            calls.push(['merge', args]);
+          },
+        },
+        git: { deleteRef: async (args: any) => calls.push(['deleteRef', args]) },
+      },
+    };
+    const run = async (command: string, options: any) => {
+      calls.push(['run', command, options]);
+    };
+
+    let caught: unknown;
+    await landOpenPullRequest({
+      octokit,
+      owner: 'on-par',
+      repoName: 'software-factory',
+      ghRepo: 'on-par/software-factory',
+      repoRoot: '/repo',
+      issue: 20,
+      branch: 'ship-it/20-ci-error-admin',
+      worktree: '/repo-factory-20',
+      prNumber: 708,
+      log: (type, msg) => calls.push(['log', type, msg]),
+      run,
+      pathExists: () => true,
+      adminMerge: true,
+      watch: async () => {
+        throw new Error('network down');
+      },
+      sleep: async () => {
+        throw new Error('sleep should not be called');
+      },
+    }).catch((err) => {
+      caught = err;
+    });
+
+    expect(caught).toBeInstanceOf(CiInconclusiveError);
+    expect((caught as CiInconclusiveError).outcome).toBe('error');
+    expect(calls.some((c) => c[0] === 'merge')).toBe(false);
+  });
+
+  it('falls through to the merge state check when the CI watch times out without adminMerge set', async () => {
+    const calls: any[] = [];
+    const octokit: any = {
+      graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
+      rest: {
+        pulls: {
+          merge: async (args: any) => {
+            calls.push(['merge', args]);
+          },
+        },
+        git: { deleteRef: async (args: any) => calls.push(['deleteRef', args]) },
+      },
+    };
+    const run = async (command: string, options: any) => {
+      calls.push(['run', command, options]);
+    };
+
+    await landOpenPullRequest({
+      octokit,
+      owner: 'on-par',
+      repoName: 'software-factory',
+      ghRepo: 'on-par/software-factory',
+      repoRoot: '/repo',
+      issue: 20,
+      branch: 'ship-it/20-ci-timeout-nonadmin',
+      worktree: '/repo-factory-20',
+      prNumber: 123,
+      log: (type, msg) => calls.push(['log', type, msg]),
+      run,
+      pathExists: () => true,
+      watch: async () => 'timeout',
+      sleep: async () => {
+        throw new Error('sleep should not be called');
+      },
+    });
+
+    const warnCall = calls.find((c) => c[0] === 'log' && c[1] === 'warn');
+    expect(warnCall).toBeDefined();
+    expect(warnCall[2]).toContain('proceeding to merge state check');
+    expect(calls).toContainEqual([
+      'merge',
+      { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash' },
+    ]);
   });
 
   it('logs a warn when the ready-for-review flip fails but still merges', async () => {
@@ -1531,6 +1676,7 @@ describe('cli', () => {
       log: (type, msg) => calls.push(['log', type, msg]),
       run: async () => {},
       pathExists: () => true,
+      watch: async () => 'success',
       sleep: async () => {
         throw new Error('sleep should not be called');
       },
@@ -1580,6 +1726,7 @@ describe('cli', () => {
         log: (type, msg) => calls.push(['log', type, msg]),
         run,
         pathExists: () => true,
+        watch: async () => 'success',
         sleep: async () => {
           throw new Error('sleep should not be called');
         },
@@ -1627,6 +1774,7 @@ describe('cli', () => {
         log: (type, msg) => calls.push(['log', type, msg]),
         run,
         pathExists: () => false,
+        watch: async () => 'success',
         sleep: async () => {
           throw new Error('sleep should not be called');
         },
@@ -1677,6 +1825,7 @@ describe('cli', () => {
       log: (type, msg) => calls.push(['log', type, msg]),
       run: async () => {},
       pathExists: () => true,
+      watch: async () => 'success',
       sleep: async (ms) => {
         sleeps.push(ms);
       },
@@ -1730,6 +1879,7 @@ describe('cli', () => {
       log: () => {},
       run: async () => {},
       pathExists: () => true,
+      watch: async () => 'success',
       sleep: async (ms) => {
         sleeps.push(ms);
       },
@@ -1778,6 +1928,7 @@ describe('cli', () => {
       log: () => {},
       run: async () => {},
       pathExists: () => true,
+      watch: async () => 'success',
       sleep: async (ms) => {
         sleeps.push(ms);
       },
@@ -1824,6 +1975,7 @@ describe('cli', () => {
         log: () => {},
         run: async () => {},
         pathExists: () => true,
+        watch: async () => 'success',
         sleep: async (ms) => {
           sleeps.push(ms);
         },
@@ -1871,6 +2023,7 @@ describe('cli', () => {
       log: (type, msg) => logs.push([type, msg]),
       run: async () => {},
       pathExists: () => true,
+      watch: async () => 'success',
       sleep: async (ms) => {
         sleeps.push(ms);
       },
@@ -1931,6 +2084,10 @@ describe('cli', () => {
 
     it('maps a CiFailedError to ci-failed', () => {
       expect(parkReasonFor(new CiFailedError('x', 707))).toBe('ci-failed');
+    });
+
+    it('maps a CiInconclusiveError to ci-timeout', () => {
+      expect(parkReasonFor(new CiInconclusiveError('x', 707, 'timeout'))).toBe('ci-timeout');
     });
 
     it('maps an error carrying reason: timeout to timeout', () => {

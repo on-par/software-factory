@@ -116,10 +116,12 @@ import {
   writeProxyState,
 } from '@on-par/factory-core';
 import type {
+  CiOutcome,
   OvernightItemOutcome,
   OvernightPreflightResult,
   OvernightQueueDeps,
   OvernightStateItem,
+  WatchChecksOptions,
 } from '@on-par/factory-core/internal';
 import {
   branchFor,
@@ -787,7 +789,7 @@ async function cmdTui() {
   });
 }
 
-export type ParkReason = 'escalate' | 'timeout' | 'fail' | 'conflict' | 'ci-failed';
+export type ParkReason = 'escalate' | 'timeout' | 'fail' | 'conflict' | 'ci-failed' | 'ci-timeout';
 
 export class LaneParkError extends Error {
   constructor(
@@ -802,6 +804,7 @@ export function parkReasonFor(err: unknown): ParkReason {
   if (err instanceof LaneParkError) return err.reason;
   if (err instanceof LandConflictError) return 'conflict';
   if (err instanceof CiFailedError) return 'ci-failed';
+  if (err instanceof CiInconclusiveError) return 'ci-timeout';
   if ((err as any)?.reason === 'timeout') return 'timeout';
   return 'fail';
 }
@@ -1716,6 +1719,14 @@ export async function cmdLand(issueNum: number) {
       );
       return;
     }
+    if (err instanceof CiInconclusiveError) {
+      console.log(
+        chalk.yellow(
+          `⏸ PR #${err.prNumber} for issue #${issueNum}: CI watch ended ${err.outcome} — left open, not merged (admin merge would bypass branch protection)`,
+        ),
+      );
+      return;
+    }
     if (err instanceof LandConflictError) {
       throw new CliExitError(`factory: ${err.message}`, 3);
     }
@@ -1788,7 +1799,11 @@ async function landIssue(
               skipCI,
             });
           } catch (err) {
-            if (err instanceof AwaitingReviewError || err instanceof CiFailedError) {
+            if (
+              err instanceof AwaitingReviewError ||
+              err instanceof CiFailedError ||
+              err instanceof CiInconclusiveError
+            ) {
               await cleanupWorktree(repoRoot, worktree, log);
             }
             throw err;
@@ -1800,7 +1815,12 @@ async function landIssue(
       ),
     );
   } catch (err: any) {
-    if (err instanceof LandConflictError || err instanceof AwaitingReviewError || err instanceof CiFailedError)
+    if (
+      err instanceof LandConflictError ||
+      err instanceof AwaitingReviewError ||
+      err instanceof CiFailedError ||
+      err instanceof CiInconclusiveError
+    )
       throw err;
     log('fail', `merge failed: ${err.message}`);
     throw new LandFailureError(`merge failed for issue #${issueNum}: ${err.message}`, 5);
@@ -2340,6 +2360,19 @@ export class CiFailedError extends Error {
   }
 }
 
+/** Thrown when the CI watch produced no verdict — it hit its deadline or the
+ *  checks API threw — while admin bypass is active. Admin merges skip branch
+ *  protection, so "no evidence" must park the PR, not merge it (#596). */
+export class CiInconclusiveError extends Error {
+  constructor(
+    message: string,
+    readonly prNumber: number,
+    readonly outcome: 'timeout' | 'error',
+  ) {
+    super(message);
+  }
+}
+
 const MAX_MERGE_ATTEMPTS = 5;
 const MERGE_RETRY_BASE_MS = 5_000;
 
@@ -2434,6 +2467,7 @@ export async function landOpenPullRequest(opts: {
   sleep?: (ms: number) => Promise<void>;
   skipCI?: boolean;
   adminMerge?: boolean;
+  watch?: (opts: WatchChecksOptions) => Promise<CiOutcome>;
 }): Promise<void> {
   const {
     octokit,
@@ -2449,23 +2483,34 @@ export async function landOpenPullRequest(opts: {
     sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
     skipCI = false,
     adminMerge = process.env.FACTORY_MERGE_ADMIN === '1',
+    watch = watchChecks,
   } = opts;
 
   const watchCi = async () => {
+    let outcome: CiOutcome | 'error';
     try {
-      const outcome = await watchChecks({ octokit, owner, repo: repoName, ref: branch });
-      if (outcome === 'failure') {
-        const msg = `CI failed for PR #${prNumber} on ${branch} — refusing to merge with a failing check`;
-        log('ci-failed', msg);
-        throw new CiFailedError(msg, prNumber);
-      }
-      if (outcome !== 'success') {
-        log('warn', `CI watch for ${branch} ended ${outcome} — proceeding to merge state check`);
-      }
+      outcome = await watch({ octokit, owner, repo: repoName, ref: branch });
     } catch (err) {
-      if (err instanceof CiFailedError) throw err;
-      log('warn', `CI watch for ${branch} failed: ${errorDetail(err)} — proceeding to merge state check`);
+      outcome = 'error';
+      log('warn', `CI watch for ${branch} failed: ${errorDetail(err)}`);
     }
+
+    if (outcome === 'success') return;
+
+    if (outcome === 'failure') {
+      const msg = `CI failed for PR #${prNumber} on ${branch} — refusing to merge with a failing check`;
+      log('ci-failed', msg);
+      throw new CiFailedError(msg, prNumber);
+    }
+
+    // timeout / transport error: no verdict. Under admin bypass there is no
+    // branch protection behind us, so an unverified merge is unacceptable.
+    if (adminMerge) {
+      const msg = `CI watch for PR #${prNumber} on ${branch} ended ${outcome} — refusing an admin merge on an unverified check set; parked for review`;
+      log('ci-timeout', msg);
+      throw new CiInconclusiveError(msg, prNumber, outcome === 'error' ? 'error' : 'timeout');
+    }
+    log('warn', `CI watch for ${branch} ended ${outcome} — proceeding to merge state check`);
   };
 
   if (!skipCI) {
