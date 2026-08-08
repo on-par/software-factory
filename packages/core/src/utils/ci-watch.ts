@@ -41,6 +41,18 @@ function checkSetSignature(runs: CheckRunLike[]): string {
     .join('|');
 }
 
+/** Fetches every check run for `ref`, paging past the 100-per-page ceiling so
+ *  a repo with more than one page of checks is never judged from a partial
+ *  set — a full page is a signal there may be more, not proof there isn't. */
+async function fetchAllCheckRuns(octokit: Octokit, owner: string, repo: string, ref: string): Promise<CheckRunLike[]> {
+  const runs: CheckRunLike[] = [];
+  for (let page = 1; ; page++) {
+    const { data: checks } = await octokit.rest.checks.listForRef({ owner, repo, ref, per_page: 100, page });
+    runs.push(...checks.check_runs);
+    if (checks.check_runs.length < 100) return runs;
+  }
+}
+
 export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> {
   const {
     octokit,
@@ -60,8 +72,7 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
   let settledSignature: string | undefined;
 
   while (now() < deadline) {
-    const { data: checks } = await octokit.rest.checks.listForRef({ owner, repo, ref, per_page: 100 });
-    const runs: CheckRunLike[] = checks.check_runs;
+    const runs = await fetchAllCheckRuns(octokit, owner, repo, ref);
 
     // A confirmed failure is final — never wait for a settle.
     if (runs.some(isFailedRun)) return 'failure';

@@ -228,4 +228,35 @@ describe('watchChecks', () => {
       per_page: 100,
     });
   });
+
+  it('pages past a full 100-run first page instead of judging from a truncated set', async () => {
+    const firstPage = Array.from({ length: 100 }, (_, i) => ({
+      id: i,
+      name: `check-${i}`,
+      status: 'completed',
+      conclusion: 'success',
+    }));
+    const secondPage = [{ id: 100, name: 'check-100', status: 'completed', conclusion: 'timed_out' }];
+    const requestedPages: number[] = [];
+    const listForRef = async (args: any) => {
+      requestedPages.push(args.page);
+      return { data: { check_runs: args.page === 1 ? firstPage : secondPage } };
+    };
+    const { now, sleep } = createClock();
+    const octokit = { rest: { checks: { listForRef } } };
+
+    const outcome = await watchChecks({
+      octokit: octokit as any,
+      owner: 'on-par',
+      repo: 'software-factory',
+      ref: 'ship-it/123-ci-poll',
+      sleep,
+      now,
+    });
+
+    // The failing run only exists on page 2 — a watcher that stopped at the
+    // full first page would have missed it and reported 'success'.
+    expect(outcome).toBe('failure');
+    expect(requestedPages).toEqual([1, 2]);
+  });
 });
