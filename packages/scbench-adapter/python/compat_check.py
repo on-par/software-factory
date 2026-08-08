@@ -27,27 +27,59 @@ RUN_CONFIG_PATH = ADAPTER_ROOT / "scbench.run.yaml"
 sys.path.insert(0, str(HERE))
 
 
+def _refuse_or_warn(message: str) -> None:
+    """Shared by both _check_git_pin refusals: downgrades to a warning under
+    SCBENCH_PIN_ALLOW_DRIFT=1, otherwise raises a clean SystemExit."""
+    if os.environ.get("SCBENCH_PIN_ALLOW_DRIFT") == "1":
+        print(f"warning: {message}")
+    else:
+        raise SystemExit(f"error: {message}")
+
+
 def _check_git_pin(checkout: Path, pinned_sha: str, label: str) -> None:
-    """Fails unless `checkout`'s git HEAD matches `pinned_sha`, naming `label`
-    in the error/warning message. Shared by check_pin() and
-    check_problem_catalog() — both pin a git checkout to a commit recorded in
-    scbench.pin.json and both downgrade drift to a warning under the same
-    SCBENCH_PIN_ALLOW_DRIFT=1 escape hatch."""
+    """Fails unless `checkout` is a git checkout, its HEAD matches
+    `pinned_sha`, and its working tree is clean — naming `label` in the
+    error/warning message. Shared by check_pin() and check_problem_catalog()
+    — both pin a git checkout to a commit recorded in scbench.pin.json and
+    both downgrade drift (wrong SHA or a dirty working tree) to a warning
+    under the same SCBENCH_PIN_ALLOW_DRIFT=1 escape hatch."""
     import subprocess
 
-    result = subprocess.run(
-        ["git", "-C", str(checkout), "rev-parse", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        raise SystemExit(
+            f"error: {label} at {checkout} is not a git checkout — the pinned catalog must be "
+            "a git clone at the pinned commit"
+        ) from None
+
     actual_sha = result.stdout.strip()
     if actual_sha != pinned_sha:
-        message = f"{label} HEAD {actual_sha} does not match pinned commit {pinned_sha} (scbench.pin.json)"
-        if os.environ.get("SCBENCH_PIN_ALLOW_DRIFT") == "1":
-            print(f"warning: {message}")
-        else:
-            raise SystemExit(f"error: {message}")
+        _refuse_or_warn(f"{label} HEAD {actual_sha} does not match pinned commit {pinned_sha} (scbench.pin.json)")
+
+    try:
+        status = subprocess.run(
+            ["git", "-C", str(checkout), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        raise SystemExit(
+            f"error: {label} at {checkout} is not a git checkout — the pinned catalog must be "
+            "a git clone at the pinned commit"
+        ) from None
+
+    if status.stdout.strip():
+        _refuse_or_warn(
+            f"{label} at {checkout} has uncommitted changes — a dirty checkout is mutable and "
+            "cannot serve as the pinned input"
+        )
 
 
 def check_pin() -> Path:
