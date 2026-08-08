@@ -61,6 +61,68 @@ function readHolderPid(pidPath: string): number | null {
   }
 }
 
+interface LockObservation {
+  /** Parsed contents of the lock dir's `pid` file, or null when missing/unparseable. */
+  pid: number | null;
+  ino: number;
+  mtimeMs: number;
+}
+
+/** One atomic-enough snapshot of who holds `lockDir`. Returns null when the dir is gone. */
+function observeLock(lockDir: string): LockObservation | null {
+  try {
+    const stat = statSync(lockDir);
+    return { pid: readHolderPid(join(lockDir, 'pid')), ino: stat.ino, mtimeMs: stat.mtimeMs };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw err;
+  }
+}
+
+/** Suffix of the sibling directory that arbitrates a steal (see ADR-0009). */
+const STEAL_ARBITER_SUFFIX = '.steal';
+
+/**
+ * Removes `lockDir` only if it is still the exact stale holder described by `observed`.
+ * The check-and-remove is serialized across processes by an atomically created sibling
+ * arbiter dir, so of N concurrent stealers exactly one can remove the lock. Returns true
+ * when this caller removed it; false when another stealer holds the arbiter, or when the
+ * lock changed identity under us (it was already stolen and re-acquired) — in both cases
+ * the caller must back off and re-observe, never assume it holds the lock.
+ */
+function stealStaleLock(lockDir: string, observed: LockObservation, graceMs: number): boolean {
+  const arbiterDir = `${lockDir}${STEAL_ARBITER_SUFFIX}`;
+
+  try {
+    mkdirSync(arbiterDir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    // A stealer that died mid-steal would otherwise wedge this lock forever: reap the
+    // arbiter once it is older than the grace window and let the caller retry.
+    const arbiter = observeLock(arbiterDir);
+    if (arbiter !== null && Date.now() - arbiter.mtimeMs > graceMs) {
+      rmSync(arbiterDir, { recursive: true, force: true });
+    }
+    return false;
+  }
+
+  try {
+    const current = observeLock(lockDir);
+    if (
+      current === null ||
+      current.pid !== observed.pid ||
+      current.ino !== observed.ino ||
+      current.mtimeMs !== observed.mtimeMs
+    ) {
+      return false;
+    }
+    rmSync(lockDir, { recursive: true, force: true });
+    return true;
+  } finally {
+    rmSync(arbiterDir, { recursive: true, force: true });
+  }
+}
+
 function lockTimeoutError(lockDir: string): Error & { reason: string } {
   return Object.assign(new Error(`lock ${lockDir} stuck >30m`), { reason: 'timeout' });
 }
@@ -124,32 +186,14 @@ export function withFileLockSync<T>(lockDir: string, fn: () => T, opts: SyncFile
       }
     }
 
-    const holderPid = readHolderPid(pidPath);
-    if (holderPid !== null) {
-      if (!isPidAlive(holderPid)) {
-        rmSync(lockDir, { recursive: true, force: true });
-        opts.onSteal?.(holderPid);
-        continue;
-      }
+    const observed = observeLock(lockDir);
+    if (observed === null) continue; // holder released between our mkdir and our stat
 
-      if (waitedMs >= timeoutMs) {
-        throw lockTimeoutError(lockDir);
-      }
-      sleepSync(pollMs);
-      waitedMs += pollMs;
+    const stale = observed.pid !== null ? !isPidAlive(observed.pid) : Date.now() - observed.mtimeMs > graceMs;
+
+    if (stale && stealStaleLock(lockDir, observed, graceMs)) {
+      opts.onSteal?.(observed.pid);
       continue;
-    }
-
-    try {
-      const stat = statSync(lockDir);
-      if (Date.now() - stat.mtimeMs > graceMs) {
-        rmSync(lockDir, { recursive: true, force: true });
-        opts.onSteal?.(null);
-        continue;
-      }
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
-      throw err;
     }
 
     if (waitedMs >= timeoutMs) {
@@ -197,32 +241,14 @@ export async function withFileLock<T>(lockDir: string, fn: () => Promise<T>, opt
       }
     }
 
-    const holderPid = readHolderPid(pidPath);
-    if (holderPid !== null) {
-      if (!isPidAlive(holderPid)) {
-        rmSync(lockDir, { recursive: true, force: true });
-        opts.onSteal?.(holderPid);
-        continue;
-      }
+    const observed = observeLock(lockDir);
+    if (observed === null) continue; // holder released between our mkdir and our stat
 
-      if (waitedMs >= timeoutMs) {
-        throw lockTimeoutError(lockDir);
-      }
-      await sleep(pollMs);
-      waitedMs += pollMs;
+    const stale = observed.pid !== null ? !isPidAlive(observed.pid) : Date.now() - observed.mtimeMs > graceMs;
+
+    if (stale && stealStaleLock(lockDir, observed, graceMs)) {
+      opts.onSteal?.(observed.pid);
       continue;
-    }
-
-    try {
-      const stat = statSync(lockDir);
-      if (Date.now() - stat.mtimeMs > graceMs) {
-        rmSync(lockDir, { recursive: true, force: true });
-        opts.onSteal?.(null);
-        continue;
-      }
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
-      throw err;
     }
 
     if (waitedMs >= timeoutMs) {
