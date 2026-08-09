@@ -48,6 +48,7 @@ const routes: RoutesConfig = {
   routes: {
     plan: { tier: 'boss', description: 'stub' },
     readiness_enrich: { tier: 'boss', description: 'stub' },
+    decompose: { tier: 'boss', description: 'stub' },
   },
 };
 
@@ -1923,5 +1924,368 @@ npm run test`;
       expect(stub.calls[0].prompt).toContain('Local brief body.');
       expect(issuesGetCalled).toBe(false);
     });
+  });
+});
+
+function oversizedFactoryTaskBody(): string {
+  const inScopeItems = Array.from({ length: 7 }, (_, i) => `- item ${i + 1}`).join('\n');
+  const acceptanceCriteria = Array.from({ length: 8 }, (_, i) => `- [ ] criterion ${i + 1}`).join('\n');
+  return `## Problem statement
+The export breaks weekly.
+## In scope
+${inScopeItems}
+## Out of scope
+- Redesigning the export.
+## Acceptance criteria
+${acceptanceCriteria}
+## Verification
+npm test`;
+}
+
+function validDecompositionStory(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    kind: 'story',
+    title: 'Build the retry button',
+    role: 'ops team member',
+    want: 'a retry button on failed exports',
+    soThat: 'fewer support tickets',
+    problemStatement: 'The export breaks weekly.',
+    inScope: ['Add a retry button to the export panel'],
+    outOfScope: ['Automated retries'],
+    acceptanceCriteria: [
+      { name: 'Retry works', given: ['a failed export'], when: ['I click retry'], then: ['the export retries'] },
+    ],
+    verification: [{ command: 'npm test', passWhen: 'retry tests pass' }],
+    filesLikelyTouched: [],
+    labels: [],
+    tracesTo: ['INT-SCOPE-01'],
+    ...overrides,
+  };
+}
+
+function validDecompositionJson(): string {
+  const stories = [
+    validDecompositionStory({ title: 'Build the retry button' }),
+    validDecompositionStory({ title: 'Wire retry telemetry', soThat: 'we can measure flakiness' }),
+  ];
+  return JSON.stringify({
+    epic: {
+      kind: 'epic',
+      title: 'Retry flow',
+      why: 'Fewer support tickets.',
+      doneWhen: ['Both stories ship.'],
+      children: stories.map((s) => s.title),
+      labels: [],
+    },
+    stories,
+  });
+}
+
+describe('planPhase decomposition', () => {
+  it('fires on sizeOk: false and posts exactly one comment', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-606.md');
+    const body = oversizedFactoryTaskBody();
+    const stub = new StubModelExecutor({
+      scripts: {
+        decompose: [{ output: validDecompositionJson() }],
+        plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const comments: { body: string }[] = [];
+    let updateCalls = 0;
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 'Fix flaky export', body } }),
+          listComments: async () => ({ data: [] }),
+          createComment: async ({ body: commentBody }: { body: string }) => {
+            comments.push({ body: commentBody });
+          },
+          update: async () => {
+            updateCalls++;
+          },
+        },
+      },
+    };
+
+    const result = await planPhase({
+      issue: 606,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit,
+      log: () => {},
+      decomposeOversized: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(comments).toHaveLength(1);
+    expect(comments[0].body).toContain('<!-- factory:decomposition -->');
+    expect(updateCalls).toBe(0);
+    expect(stub.calls.map((c) => c.task)).toEqual(['decompose', 'plan']);
+  });
+
+  it('skips decomposition when a comment already carries the marker', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-606.md');
+    const body = oversizedFactoryTaskBody();
+    const stub = new StubModelExecutor({
+      scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const logs: { type: string; msg: string }[] = [];
+    let createCommentCalled = false;
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 'Fix flaky export', body } }),
+          listComments: async () => ({ data: [{ body: '<!-- factory:decomposition -->\nold proposal' }] }),
+          createComment: async () => {
+            createCommentCalled = true;
+          },
+        },
+      },
+    };
+
+    const result = await planPhase({
+      issue: 606,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit,
+      log: (type, msg) => logs.push({ type, msg }),
+      decomposeOversized: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(createCommentCalled).toBe(false);
+    expect(stub.calls.map((c) => c.task)).toEqual(['plan']);
+    expect(logs.some((l) => l.type === 'decomposition_skipped')).toBe(true);
+  });
+
+  it('is a no-op when decomposeOversized is unset', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-606.md');
+    const body = oversizedFactoryTaskBody();
+    const stub = new StubModelExecutor({
+      scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    let listCommentsCalled = false;
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 'Fix flaky export', body } }),
+          listComments: async () => {
+            listCommentsCalled = true;
+            return { data: [] };
+          },
+        },
+      },
+    };
+
+    const result = await planPhase({
+      issue: 606,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit,
+      log: () => {},
+    });
+
+    expect(result.ok).toBe(true);
+    expect(stub.calls.map((c) => c.task)).toEqual(['plan']);
+    expect(listCommentsCalled).toBe(false);
+  });
+
+  it('does not decompose an oversized-looking epic body (sizeOk is always true for epics)', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-606.md');
+    const body = `
+### Why
+
+Because.
+
+### Children
+
+${Array.from({ length: 9 }, (_, i) => `- [ ] #${i + 1}`).join('\n')}
+
+### Done when
+
+All children close.
+`;
+    const stub = new StubModelExecutor({
+      scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    let listCommentsCalled = false;
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: '[EPIC] Ship the thing', body } }),
+          listComments: async () => {
+            listCommentsCalled = true;
+            return { data: [] };
+          },
+        },
+      },
+    };
+
+    const result = await planPhase({
+      issue: 606,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit,
+      log: () => {},
+      decomposeOversized: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(stub.calls.map((c) => c.task)).toEqual(['plan']);
+    expect(listCommentsCalled).toBe(false);
+  });
+
+  it('is non-fatal when the decompose output is invalid', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-606.md');
+    const body = oversizedFactoryTaskBody();
+    const stub = new StubModelExecutor({
+      scripts: {
+        decompose: [{ output: 'not json' }],
+        plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const logs: { type: string; msg: string }[] = [];
+    let createCommentCalled = false;
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 'Fix flaky export', body } }),
+          listComments: async () => ({ data: [] }),
+          createComment: async () => {
+            createCommentCalled = true;
+          },
+        },
+      },
+    };
+
+    const result = await planPhase({
+      issue: 606,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit,
+      log: (type, msg) => logs.push({ type, msg }),
+      decomposeOversized: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(createCommentCalled).toBe(false);
+    expect(logs.some((l) => l.type === 'decomposition_failed')).toBe(true);
+    expect(stub.calls.map((c) => c.task)).toEqual(['decompose', 'plan']);
+    expect(result.route).toBe('codex');
+  });
+
+  it('is non-fatal when creating the GitHub comment throws', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-606.md');
+    const body = oversizedFactoryTaskBody();
+    const stub = new StubModelExecutor({
+      scripts: {
+        decompose: [{ output: validDecompositionJson() }],
+        plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const logs: { type: string; msg: string }[] = [];
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 'Fix flaky export', body } }),
+          listComments: async () => ({ data: [] }),
+          createComment: async () => {
+            throw new Error('GitHub unavailable');
+          },
+        },
+      },
+    };
+
+    const result = await planPhase({
+      issue: 606,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit,
+      log: (type, msg) => logs.push({ type, msg }),
+      decomposeOversized: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(logs.some((l) => l.type === 'decomposition_failed')).toBe(true);
+  });
+
+  it('runs after enrichment and decomposes the enriched body, not the original', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-606.md');
+    const enrichedOversizedBody = oversizedFactoryTaskBody();
+    const stub = new StubModelExecutor({
+      scripts: {
+        readiness_enrich: [{ output: enrichedOversizedBody }],
+        decompose: [{ output: validDecompositionJson() }],
+        plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 'Fix flaky export', body: '' } }),
+          update: async () => {},
+          listComments: async () => ({ data: [] }),
+          createComment: async () => {},
+        },
+      },
+    };
+
+    const result = await planPhase({
+      issue: 606,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit,
+      log: () => {},
+      enforceReadiness: true,
+      decomposeOversized: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(stub.calls.map((c) => c.task)).toEqual(['readiness_enrich', 'decompose', 'plan']);
+    const decomposeCall = stub.calls.find((c) => c.task === 'decompose');
+    expect(decomposeCall?.prompt).toContain(enrichedOversizedBody);
   });
 });

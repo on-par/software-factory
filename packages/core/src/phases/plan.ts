@@ -13,6 +13,9 @@ import { adrDraftsPath, parseAdrDrafts } from '../adr/write.js';
 import type { ApprovalGate } from '../approvals/index.js';
 import { PLAN_SPEC_PREVIEW_BYTES } from '../approvals/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
+import { buildDecompositionPrompt } from '../decompose/prompt.js';
+import { parseDecomposition } from '../decompose/parse.js';
+import { DECOMPOSITION_MARKER, renderDecompositionComment } from '../decompose/render.js';
 import { designArtifactPaths, parseDesignArtifact, renderDesignArtifact } from '../design/index.js';
 import { buildFastPathSpec, isFastPathEligible } from '../efficiency/fast-path.js';
 import { buildReadinessEnrichmentPrompt } from '../readiness/enrich.js';
@@ -176,6 +179,8 @@ export async function planPhase(opts: {
   workSources?: WorkSourceRegistry;
   /** Enrich incomplete GitHub factory-task issues before calling the boss PLAN task. */
   enforceReadiness?: boolean;
+  /** Propose an epic + INVEST-sized stories on GitHub factory-task issues the size gate rejects. */
+  decomposeOversized?: boolean;
   /** Skip the model PLAN call only for a complete, explicitly bounded issue. */
   fastPath?: boolean;
 }): Promise<PlanResult> {
@@ -262,6 +267,58 @@ export async function planPhase(opts: {
         escalate: `readiness enrichment failed: ${reason}`,
         designArtifact: null,
       };
+    }
+  }
+
+  if (
+    opts.decomposeOversized &&
+    source.kind === GITHUB_ISSUE_SOURCE &&
+    readiness.template === 'factory-task' &&
+    readiness.sizeOk === false
+  ) {
+    const params = source.params as GithubIssueParams;
+    const [owner, name] = params.repo.split('/');
+    const sizeReason = readiness.sizeReason ?? 'oversized';
+    try {
+      const existing = await octokit.rest.issues.listComments({
+        owner,
+        repo: name,
+        issue_number: params.issue,
+        per_page: 100,
+      });
+      if (existing.data.some((comment) => (comment.body ?? '').includes(DECOMPOSITION_MARKER))) {
+        log('decomposition_skipped', `issue #${params.issue} already has a proposed decomposition`);
+      } else {
+        log('decomposition_started', `decomposing oversized factory-task issue #${params.issue} (${sizeReason})`);
+        const proposal = await router.run(
+          'decompose',
+          buildDecompositionPrompt({ title: issueTitle, body: issueBody, sizeReason }),
+          {
+            worktree,
+            timeoutSeconds: Math.min(timeoutSeconds ?? 1800, 600),
+            onLog: (msg) => log('router', msg),
+          },
+        );
+        const parsed = parseDecomposition(proposal.output);
+        if (!parsed.ok) {
+          log('decomposition_failed', `decomposition output rejected: ${parsed.errors.join('; ')}`);
+        } else {
+          await octokit.rest.issues.createComment({
+            owner,
+            repo: name,
+            issue_number: params.issue,
+            body: renderDecompositionComment({ issue: params.issue, sizeReason, decomposition: parsed.decomposition }),
+          });
+          log(
+            'decomposition_proposed',
+            `proposed 1 epic and ${parsed.decomposition.stories.length} INVEST stories on issue #${params.issue}`,
+            { model: proposal.model },
+          );
+        }
+      }
+    } catch (error) {
+      // Advisory pass: never let it park a lane (see ADR "PLAN's decomposition proposes ... never files").
+      log('decomposition_failed', `decomposition failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

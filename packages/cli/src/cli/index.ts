@@ -1080,6 +1080,7 @@ export async function shipIssue(
       codexDisabled: codexOff,
       workSource: ctx?.workSource,
       enforceReadiness: true,
+      decomposeOversized: true,
       fastPath: efficiency.fastPath,
     });
     route = plan.route;

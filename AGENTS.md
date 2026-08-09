@@ -47,6 +47,7 @@ readiness-conformance checker named in epic #464 consume them in later stories.
 - `phases/` — the four pipeline phases (`plan`, `build`, `check`, `ship`) plus integration tests (`pipeline.integration.test.ts`, `pipeline.concurrent.integration.test.ts`)
 - `checkers/` — the checker framework (compile/tests/lint/links/accessibility + agent-based custom checkers)
 - `constitutions/` — constitution loader
+- `decompose/` — proposes an epic + INVEST-sized child stories for issues the readiness size gate rejects, as a comment (never a filing)
 - `adr/` — reads the checkout's `docs/adr` through a `RepoContextReader` and renders Accepted ADRs as PLAN constraints
 - `environment/` — port-lease registry for parallel lanes (`.factory/ports.json`) + `leaseEnv()`/`laneEnv()`, the `PORT`/`FACTORY_APP_PORT`/`FACTORY_BASE_URL` + `FACTORY_HEADLESS`/`PLAYWRIGHT_HEADLESS` contract injected into build agents and all checker commands
 - `logger/` — structured leveled logger (`createLogger`) over the `.factory/events.ndjson` sink (ADR-0002)

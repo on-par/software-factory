@@ -139,6 +139,7 @@ export function simRoutesConfig(): RoutesConfig {
     routes: {
       plan: { tier: 'boss', description: 'sim' },
       readiness_enrich: { tier: 'boss', description: 'sim' },
+      decompose: { tier: 'boss', description: 'sim' },
       build_claude: { tier: 'boss', description: 'sim' },
       build_codex: { tier: 'boss', description: 'sim' },
     },
