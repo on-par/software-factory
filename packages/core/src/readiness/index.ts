@@ -4,6 +4,7 @@
 // outcomes (see kpis/index.ts). No I/O — templates.test.ts keeps this coupled to the
 // actual template files.
 
+import { checkIssueSize } from './size.js';
 import type { ReadinessInfo, ReadinessTemplate } from '../types/index.js';
 
 export const FACTORY_TASK_REQUIRED_FIELDS = [
@@ -108,10 +109,20 @@ export function scoreIssueReadiness(input: { title: string; body: string }): Rea
     present++;
   }
 
+  const size =
+    template === 'factory-task'
+      ? checkIssueSize({
+          inScope: sections.get('in scope') ?? '',
+          acceptanceCriteria: sections.get('acceptance criteria') ?? '',
+        })
+      : { sizeOk: true };
+
   return {
     template,
     score: present / requiredFields.length,
     pass: missing.length === 0,
     missing,
+    sizeOk: size.sizeOk,
+    ...(size.reason === undefined ? {} : { sizeReason: size.reason }),
   };
 }

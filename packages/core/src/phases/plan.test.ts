@@ -243,7 +243,9 @@ npm run test`;
     expect(updatedBodies).toEqual([completeBody]);
     expect(stub.calls.map((call) => call.task)).toEqual(['readiness_enrich', 'plan']);
     expect(costs.map((entry) => entry.task)).toEqual(['readiness_enrich', 'plan']);
-    expect(readinessEvents).toEqual([{ readiness: { template: 'factory-task', score: 1, pass: true, missing: [] } }]);
+    expect(readinessEvents).toEqual([
+      { readiness: { template: 'factory-task', score: 1, pass: true, missing: [], sizeOk: true } },
+    ]);
   });
 
   it('does not call PLAN or overwrite the issue when enrichment is invalid', async () => {

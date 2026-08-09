@@ -40,6 +40,7 @@ describe('scoreIssueReadiness', () => {
     expect(result.score).toBe(1);
     expect(result.pass).toBe(true);
     expect(result.missing).toEqual([]);
+    expect(result.sizeOk).toBe(true);
   });
 
   it('reports a missing Verification section', () => {
@@ -219,6 +220,108 @@ Fix it.
     const result = scoreIssueReadiness({ title: 'Fix widget flicker', body });
     expect(result.pass).toBe(true);
     expect(result.missing).toEqual([]);
+  });
+
+  it('flags an oversized factory-task body as sizeOk: false even though all fields are present', () => {
+    const inScopeItems = Array.from({ length: 7 }, (_, i) => `- item ${i + 1}`).join('\n');
+    const acceptanceCriteria = Array.from({ length: 8 }, (_, i) => `- [ ] criterion ${i + 1}`).join('\n');
+    const body = COMPLETE_FACTORY_TASK_BODY.replace(
+      '### In scope\n\nFix the flicker in the widget renderer.\n',
+      `### In scope\n\n${inScopeItems}\n`,
+    ).replace(
+      '### Acceptance criteria\n\n- [ ] Widget no longer flickers on load\n- [x] Regression test added\n',
+      `### Acceptance criteria\n\n${acceptanceCriteria}\n`,
+    );
+    const result = scoreIssueReadiness({ title: 'Fix widget flicker', body });
+    expect(result.score).toBe(1);
+    expect(result.missing).toEqual([]);
+    expect(result.sizeOk).toBe(false);
+    expect(result.sizeReason).toMatch(/too big: 7 in-scope items, 8 acceptance criteria/);
+  });
+
+  it('reports sizeOk: true with no sizeReason at exactly 5 in-scope items and 5 criteria', () => {
+    const inScopeItems = Array.from({ length: 5 }, (_, i) => `- item ${i + 1}`).join('\n');
+    const acceptanceCriteria = Array.from({ length: 5 }, (_, i) => `- [ ] criterion ${i + 1}`).join('\n');
+    const body = COMPLETE_FACTORY_TASK_BODY.replace(
+      '### In scope\n\nFix the flicker in the widget renderer.\n',
+      `### In scope\n\n${inScopeItems}\n`,
+    ).replace(
+      '### Acceptance criteria\n\n- [ ] Widget no longer flickers on load\n- [x] Regression test added\n',
+      `### Acceptance criteria\n\n${acceptanceCriteria}\n`,
+    );
+    const result = scoreIssueReadiness({ title: 'Fix widget flicker', body });
+    expect(result.score).toBe(1);
+    expect(result.pass).toBe(true);
+    expect(result.sizeOk).toBe(true);
+    expect(result.sizeReason).toBeUndefined();
+  });
+
+  it('fails the size gate on in-scope count alone', () => {
+    const inScopeItems = Array.from({ length: 6 }, (_, i) => `- item ${i + 1}`).join('\n');
+    const acceptanceCriteria = Array.from({ length: 3 }, (_, i) => `- [ ] criterion ${i + 1}`).join('\n');
+    const body = COMPLETE_FACTORY_TASK_BODY.replace(
+      '### In scope\n\nFix the flicker in the widget renderer.\n',
+      `### In scope\n\n${inScopeItems}\n`,
+    ).replace(
+      '### Acceptance criteria\n\n- [ ] Widget no longer flickers on load\n- [x] Regression test added\n',
+      `### Acceptance criteria\n\n${acceptanceCriteria}\n`,
+    );
+    const result = scoreIssueReadiness({ title: 'Fix widget flicker', body });
+    expect(result.sizeOk).toBe(false);
+  });
+
+  it('fails the size gate on acceptance criteria count alone', () => {
+    const inScopeItems = Array.from({ length: 3 }, (_, i) => `- item ${i + 1}`).join('\n');
+    const acceptanceCriteria = Array.from({ length: 6 }, (_, i) => `- [ ] criterion ${i + 1}`).join('\n');
+    const body = COMPLETE_FACTORY_TASK_BODY.replace(
+      '### In scope\n\nFix the flicker in the widget renderer.\n',
+      `### In scope\n\n${inScopeItems}\n`,
+    ).replace(
+      '### Acceptance criteria\n\n- [ ] Widget no longer flickers on load\n- [x] Regression test added\n',
+      `### Acceptance criteria\n\n${acceptanceCriteria}\n`,
+    );
+    const result = scoreIssueReadiness({ title: 'Fix widget flicker', body });
+    expect(result.sizeOk).toBe(false);
+  });
+
+  it('reports sizeOk: true with no sizeReason for an epic body with 9 bullets under Children', () => {
+    const body = `
+### Why
+
+Because.
+
+### Children
+
+${Array.from({ length: 9 }, (_, i) => `- [ ] #${i + 1}`).join('\n')}
+
+### Done when
+
+All children close.
+`;
+    const result = scoreIssueReadiness({ title: '[EPIC] Ship the thing', body });
+    expect(result.template).toBe('epic');
+    expect(result.sizeOk).toBe(true);
+    expect(result.sizeReason).toBeUndefined();
+  });
+
+  it('reports sizeOk: true with no sizeReason for a factory-bug body with 9 bullets under Reproduction steps', () => {
+    const body = `
+### Observed behavior
+
+It crashes.
+
+### Expected behavior
+
+It should not crash.
+
+### Reproduction steps
+
+${Array.from({ length: 9 }, (_, i) => `- step ${i + 1}`).join('\n')}
+`;
+    const result = scoreIssueReadiness({ title: 'Crash on click', body });
+    expect(result.template).toBe('factory-bug');
+    expect(result.sizeOk).toBe(true);
+    expect(result.sizeReason).toBeUndefined();
   });
 });
 
