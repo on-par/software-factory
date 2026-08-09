@@ -1,7 +1,7 @@
 // src/decompose/parse.ts — validates a decompose model response into an epic +
 // INVEST-clean child stories, or a list of human-readable errors. Never throws (#606).
 
-import { checkInvest, EpicSchema, StorySchema, tryDeserialize } from '@on-par/contracts';
+import { checkInvest, EpicSchema, formatIntentStatementId, StorySchema, tryDeserialize } from '@on-par/contracts';
 import type { Epic, Story } from '@on-par/contracts';
 import { z } from 'zod';
 
@@ -48,7 +48,14 @@ export function parseDecomposition(raw: string): DecompositionParseResult {
     return { ok: false, errors: decoded.errors.map((e) => `schema: ${e}`) };
   }
 
-  const { epic, stories } = decoded.value;
+  const { epic } = decoded.value;
+
+  // The decompose pass has no IntentDoc to trace to (unlike the proposer flow), and the prompt
+  // tells the model to omit tracesTo since it's schema-defaulted. Without this, checkInvest's
+  // "valuable" rule (tracesTo.length > 0) would reject every prompt-conformant story.
+  const stories = decoded.value.stories.map((story, i) =>
+    story.tracesTo.length > 0 ? story : { ...story, tracesTo: [formatIntentStatementId('decompose', i + 1)] },
+  );
 
   const investErrors = stories.flatMap((story) =>
     checkInvest(story).violations.map(

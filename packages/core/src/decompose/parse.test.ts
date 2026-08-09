@@ -197,6 +197,23 @@ describe('parseDecomposition', () => {
     });
   });
 
+  it("synthesizes a tracesTo when the model omits it, per the prompt's own instruction", () => {
+    const decomposition = validDecomposition();
+    for (const story of decomposition.stories as Record<string, unknown>[]) {
+      delete story.tracesTo;
+    }
+
+    const result = parseDecomposition(JSON.stringify(decomposition));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      for (const story of result.decomposition.stories) {
+        expect(story.tracesTo.length).toBeGreaterThan(0);
+        expect(checkInvest(story).ok).toBe(true);
+      }
+    }
+  });
+
   it('feeds a known-oversized fixture through the scorer and parser and confirms checkInvest passes every story', () => {
     const readiness = scoreIssueReadiness({ title: 'Fix widget flicker', body: oversizedFactoryTaskBody() });
     expect(readiness.sizeOk).toBe(false);
