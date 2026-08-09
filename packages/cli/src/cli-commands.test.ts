@@ -325,6 +325,8 @@ beforeEach(() => {
     'FACTORY_USAGE_WATCH',
     'FACTORY_USAGE_ESTIMATOR',
     'FACTORY_SANDBOX',
+    'FACTORY_PLAN_MODEL',
+    'FACTORY_BUILD_MODEL',
     'GITHUB_TOKEN',
     'GH_TOKEN',
   ].forEach((k) => trackEnv(k));
@@ -333,6 +335,8 @@ beforeEach(() => {
   delete process.env.FACTORY_MERGE_ADMIN;
   delete process.env.FACTORY_SANDBOX;
   delete process.env.FACTORY_USAGE_WATCH;
+  delete process.env.FACTORY_PLAN_MODEL;
+  delete process.env.FACTORY_BUILD_MODEL;
   delete process.env.GITHUB_TOKEN;
   process.env.GH_TOKEN = 'test-token';
   process.exitCode = undefined;
