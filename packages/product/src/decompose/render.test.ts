@@ -97,4 +97,13 @@ describe('renderDecomposition', () => {
     const acceptanceIndex = lines.indexOf('- App boots');
     expect(lines[acceptanceIndex + 1]).toBe('  When the process starts');
   });
+
+  it('renders an empty traces-to line when tracesTo is undefined', () => {
+    const epicWithoutTracesTo = { ...EPIC, tracesTo: undefined } as unknown as Epic;
+    const decomposition: Decomposition = { epic: epicWithoutTracesTo, stories: [STORY_WITH_GIVEN] };
+
+    const lines = renderDecomposition(decomposition);
+
+    expect(lines).toContain('Traces to: ');
+  });
 });

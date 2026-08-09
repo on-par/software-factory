@@ -1,8 +1,8 @@
 // packages/product/src/judge/rubric.ts — the deterministic default judge + reworker (#474).
 
 import type { Story } from '@on-par/contracts';
+import { checkInvest } from '@on-par/contracts';
 
-import { checkInvest } from '../decompose/index.js';
 import type { IntentDoc } from '../intent/index.js';
 import type { IntentDimension } from '../interview/index.js';
 import type { JudgeVerdict, RubricCheck } from './verdict.js';

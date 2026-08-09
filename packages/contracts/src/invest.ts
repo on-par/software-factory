@@ -1,6 +1,6 @@
-// packages/product/src/decompose/invest.ts — the INVEST gate (#472).
+// src/invest.ts — The INVEST gate for a Story (#472, moved from @on-par/product in #606).
 
-import type { Story } from '@on-par/contracts';
+import type { Story } from './issue.js';
 
 export type InvestLetter = 'independent' | 'negotiable' | 'valuable' | 'estimable' | 'small' | 'testable';
 

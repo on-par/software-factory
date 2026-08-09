@@ -1,10 +1,9 @@
 // packages/product/src/decompose/decompose.ts — the intent-to-artifacts transform (#472).
 
 import type { Epic, Story, Traceable } from '@on-par/contracts';
-import { CONTRACTS_SCHEMA_VERSION } from '@on-par/contracts';
+import { checkInvest, CONTRACTS_SCHEMA_VERSION } from '@on-par/contracts';
 
 import type { IntentDoc } from '../intent/index.js';
-import { checkInvest } from './invest.js';
 import { isVerticalSlice, planSlices } from './slices.js';
 
 export interface Decomposition {

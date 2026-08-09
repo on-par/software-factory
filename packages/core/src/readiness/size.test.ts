@@ -1,6 +1,7 @@
+import { MAX_ACCEPTANCE_CRITERIA, MAX_IN_SCOPE } from '@on-par/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { checkIssueSize } from './size.js';
+import { checkIssueSize, MAX_ACCEPTANCE_CRITERIA_ITEMS, MAX_IN_SCOPE_ITEMS } from './size.js';
 
 const items = (n: number) => Array.from({ length: n }, (_, i) => `- item ${i + 1}`).join('\n');
 const checkboxes = (n: number) => Array.from({ length: n }, (_, i) => `- [ ] criterion ${i + 1}`).join('\n');
@@ -73,5 +74,10 @@ describe('checkIssueSize', () => {
     const result = checkIssueSize({ inScope, acceptanceCriteria: '' });
     expect(result.sizeOk).toBe(false);
     expect(result.reason).toBe('too big: 6 in-scope items, 0 acceptance criteria');
+  });
+
+  it('keeps its thresholds equal to the contracts INVEST gate (ADR-0010)', () => {
+    expect(MAX_IN_SCOPE_ITEMS).toBe(MAX_IN_SCOPE);
+    expect(MAX_ACCEPTANCE_CRITERIA_ITEMS).toBe(MAX_ACCEPTANCE_CRITERIA);
   });
 });

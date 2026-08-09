@@ -1,9 +1,9 @@
 // packages/core/src/readiness/size.ts — the INVEST "small" rule, applied to a raw
 // factory-task issue body (#605). Deliberately duplicates the thresholds in
-// packages/product/src/decompose/invest.ts (MAX_IN_SCOPE / MAX_ACCEPTANCE_CRITERIA):
-// core must not depend on the private @on-par/product package, and checkInvest()
-// needs a parsed Story that does not exist at readiness-scoring time. Change both
-// files together. Pure — no I/O.
+// @on-par/contracts's invest.ts (MAX_IN_SCOPE / MAX_ACCEPTANCE_CRITERIA): checkInvest()
+// needs a parsed Story, which does not exist at readiness-scoring time. size.test.ts
+// asserts these constants stay equal to the contracts ones. Change both files together.
+// Pure — no I/O.
 
 /** More in-scope bullets than this and the issue has stopped being one slice. */
 export const MAX_IN_SCOPE_ITEMS = 5;

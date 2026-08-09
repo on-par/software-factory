@@ -1,9 +1,9 @@
-// packages/product/src/decompose/invest.test.ts (#472).
+// packages/contracts/src/invest.test.ts (#472, moved from @on-par/product in #606).
 
-import type { Story } from '@on-par/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { checkInvest, MAX_ACCEPTANCE_CRITERIA, MAX_IN_SCOPE } from './invest.js';
+import type { Story } from './issue.js';
 
 function cleanStory(overrides: Partial<Story> = {}): Story {
   return {
