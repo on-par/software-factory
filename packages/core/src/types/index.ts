@@ -206,6 +206,13 @@ export interface ReadinessInfo {
   pass: boolean;
   /** Labels of missing required fields, e.g. ['Verification']. */
   missing: string[];
+  /** INVEST "small" verdict for factory-task bodies (#605); true for other
+   *  templates, and absent on events logged before #605. Independent of
+   *  `score`/`pass`, which remain the field-presence verdict. */
+  sizeOk?: boolean;
+  /** Why the size gate failed, e.g. 'too big: 7 in-scope items, 8 acceptance
+   *  criteria'; absent when `sizeOk` is true. */
+  sizeReason?: string;
 }
 
 export interface FactoryEvent {
