@@ -1,4 +1,4 @@
-import type { QueueSnapshot } from '@on-par/factory-core';
+import type { EventKind, QueueSnapshot } from '@on-par/factory-core';
 import { cleanup, render } from 'ink-testing-library';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -7,7 +7,7 @@ import { QueueTab } from './QueueTab.js';
 
 afterEach(cleanup);
 
-function laneFor(issue: string, events: Array<{ type: string; msg: string }>): LaneState {
+function laneFor(issue: string, events: Array<{ type: EventKind; msg: string }>): LaneState {
   let state = initialDashboard();
   for (const e of events) {
     state = reduceDashboard(state, { ts: '2026-01-01T00:00:00.000Z', type: e.type, issue, msg: e.msg });

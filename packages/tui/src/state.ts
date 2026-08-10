@@ -1,4 +1,4 @@
-import type { FactoryEvent } from '@on-par/factory-core';
+import { severityOf, type FactoryEvent } from '@on-par/factory-core';
 
 export const PHASES = ['PLAN', 'BUILD', 'CHECK', 'SHIP'] as const;
 export type PhaseName = (typeof PHASES)[number];
@@ -37,11 +37,11 @@ const MODEL_TRAILING_RE = /with model (\S+)$/;
 const ROUTE_RE = /route: (\S+?)\)?$/;
 
 const FAILOVER_MSG_RE = /failing over|failed \(|Rate limited|timed out/;
-const FAILOVER_TYPES = new Set(['warn', 'escalate', 'fail']);
 
 export function isFailoverEvent(e: FactoryEvent): boolean {
   if (e.type === 'router' && FAILOVER_MSG_RE.test(e.msg)) return true;
-  return FAILOVER_TYPES.has(e.type);
+  const severity = severityOf(e.type);
+  return severity === 'warn' || severity === 'error';
 }
 
 function extractModel(e: FactoryEvent): string | undefined {

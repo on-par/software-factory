@@ -5,6 +5,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 
+import type { EventKind } from '../events/kinds.js';
 import { createLogger } from '../logger/index.js';
 import type { CostEntry, FailoverReason, LogLevel, ReadinessInfo, ReworkInfo } from '../types/index.js';
 import { levelForType } from './format.js';
@@ -17,7 +18,7 @@ const exec = promisify(execCb);
 
 export function logEvent(
   eventsFile: string,
-  type: string,
+  type: EventKind,
   issue: string | number,
   msg: string,
   extra?: {
@@ -94,7 +95,7 @@ export async function setupWorktree(repoRoot: string, branch: string, worktreePa
 export async function cleanupWorktree(
   repoRoot: string,
   worktreePath: string,
-  log: (type: string, msg: string) => void = () => {},
+  log: (type: EventKind, msg: string) => void = () => {},
 ): Promise<void> {
   await exec(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot }).catch((err: any) =>
     log(

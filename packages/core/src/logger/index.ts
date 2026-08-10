@@ -6,6 +6,7 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import type { EventKind } from '../events/kinds.js';
 import type {
   EvidencePack,
   FactoryEvent,
@@ -42,10 +43,10 @@ export interface LoggerOptions {
 }
 
 export interface FactoryLogger {
-  debug(type: string, msg: string, extra?: LogExtra): void;
-  info(type: string, msg: string, extra?: LogExtra): void;
-  warn(type: string, msg: string, extra?: LogExtra): void;
-  error(type: string, msg: string, extra?: LogExtra): void;
+  debug(type: EventKind, msg: string, extra?: LogExtra): void;
+  info(type: EventKind, msg: string, extra?: LogExtra): void;
+  warn(type: EventKind, msg: string, extra?: LogExtra): void;
+  error(type: EventKind, msg: string, extra?: LogExtra): void;
   child(ctx: LogContext): FactoryLogger;
 }
 
@@ -81,7 +82,7 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
   const out = opts.out ?? process.stdout;
   const env = opts.env ?? process.env;
 
-  function write(level: LogLevel, type: string, msg: string, extra?: LogExtra): void {
+  function write(level: LogLevel, type: EventKind, msg: string, extra?: LogExtra): void {
     const event: FactoryEvent = {
       ts: new Date().toISOString(),
       type,

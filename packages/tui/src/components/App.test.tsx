@@ -1,4 +1,4 @@
-import type { ApprovalRequest, CostsRead, FactoryEvent, QueueSnapshot } from '@on-par/factory-core';
+import type { ApprovalRequest, CostsRead, EventKind, FactoryEvent, QueueSnapshot } from '@on-par/factory-core';
 import { cleanup, render } from 'ink-testing-library';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -23,7 +23,7 @@ function makeFakeFollow() {
   };
 }
 
-function ev(type: string, msg: string, issue = '192', ts = new Date().toISOString()): FactoryEvent {
+function ev(type: EventKind, msg: string, issue = '192', ts = new Date().toISOString()): FactoryEvent {
   return { ts, type, issue, msg };
 }
 

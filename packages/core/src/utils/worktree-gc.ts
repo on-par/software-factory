@@ -6,6 +6,7 @@ import { existsSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:f
 import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
+import type { EventKind } from '../events/kinds.js';
 import { shellEscape } from './index.js';
 
 const exec = promisify(execCb);
@@ -35,7 +36,7 @@ export interface GcReport {
 export interface SweepDeps {
   runCommand?: (cmd: string, opts?: { cwd?: string }) => Promise<{ stdout: string }>;
   now?: () => number;
-  log?: (type: string, msg: string) => void;
+  log?: (type: EventKind, msg: string) => void;
 }
 
 const CREDENTIAL_BASENAMES = new Set(['.git-credentials', '.npmrc']);

@@ -277,10 +277,10 @@ describe('cycle time KPIs', () => {
   it('computes cycle time, phase durations, and queue wait for a single run', () => {
     const events: FactoryEvent[] = [
       event({ issue: '1', type: 'issue-title', ts: at(0) }),
-      event({ issue: '1', type: 'phase-start', phase: 'plan', ts: at(5) }),
-      event({ issue: '1', type: 'phase-end', phase: 'plan', ts: at(65) }),
-      event({ issue: '1', type: 'phase-start', phase: 'build', ts: at(65) }),
-      event({ issue: '1', type: 'phase-end', phase: 'build', ts: at(365) }),
+      event({ issue: '1', type: 'build', phase: 'plan', ts: at(5) }),
+      event({ issue: '1', type: 'ship', phase: 'plan', ts: at(65) }),
+      event({ issue: '1', type: 'build', phase: 'build', ts: at(65) }),
+      event({ issue: '1', type: 'ship', phase: 'build', ts: at(365) }),
       event({ issue: '1', type: 'merged', ts: at(400) }),
     ];
 
@@ -326,8 +326,8 @@ describe('cycle time KPIs', () => {
   it('formats cycle time, phase medians, and queue wait lines, including hour-scale durations', () => {
     const events: FactoryEvent[] = [
       event({ issue: '1', type: 'issue-title', ts: at(0) }),
-      event({ issue: '1', type: 'phase-start', phase: 'plan', ts: at(5) }),
-      event({ issue: '1', type: 'phase-end', phase: 'plan', ts: at(65) }),
+      event({ issue: '1', type: 'build', phase: 'plan', ts: at(5) }),
+      event({ issue: '1', type: 'ship', phase: 'plan', ts: at(65) }),
       event({ issue: '1', type: 'merged', ts: new Date(Date.UTC(2026, 6, 20, 2, 0, 0)).toISOString() }),
     ];
 
@@ -524,20 +524,20 @@ describe('phase-level cost and time attribution (#614)', () => {
   it('runs a fixture pipeline through PLAN/BUILD/CHECK/SHIP with known synthetic durations and persists a snapshot whose per-phase entries sum to the total cycle time', () => {
     const events: FactoryEvent[] = [
       event({ issue: '1', type: 'issue-title', ts: at(0) }),
-      event({ issue: '1', type: 'phase-start', phase: 'plan', ts: at(0) }),
-      event({ issue: '1', type: 'phase-end', phase: 'plan', ts: at(60) }),
-      event({ issue: '1', type: 'phase-start', phase: 'build', ts: at(60) }),
-      event({ issue: '1', type: 'phase-end', phase: 'build', ts: at(360) }),
-      event({ issue: '1', type: 'phase-start', phase: 'check', ts: at(360) }),
+      event({ issue: '1', type: 'build', phase: 'plan', ts: at(0) }),
+      event({ issue: '1', type: 'ship', phase: 'plan', ts: at(60) }),
+      event({ issue: '1', type: 'build', phase: 'build', ts: at(60) }),
+      event({ issue: '1', type: 'ship', phase: 'build', ts: at(360) }),
+      event({ issue: '1', type: 'build', phase: 'check', ts: at(360) }),
       event({
         issue: '1',
         type: 'rework',
         ts: at(400),
         rework: { round: 1, failingChecks: ['tests'], cause: 'factory-fault' },
       }),
-      event({ issue: '1', type: 'phase-end', phase: 'check', ts: at(420) }),
-      event({ issue: '1', type: 'phase-start', phase: 'ship', ts: at(420) }),
-      event({ issue: '1', type: 'phase-end', phase: 'ship', ts: at(450) }),
+      event({ issue: '1', type: 'ship', phase: 'check', ts: at(420) }),
+      event({ issue: '1', type: 'build', phase: 'ship', ts: at(420) }),
+      event({ issue: '1', type: 'ship', phase: 'ship', ts: at(450) }),
       event({ issue: '1', type: 'merged', ts: at(450) }),
     ];
     const costs: CostEntry[] = [

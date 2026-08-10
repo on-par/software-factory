@@ -31,37 +31,37 @@ describe('createLogger', () => {
     const out: string[] = [];
     const logger = createLogger(eventsFile, {}, { out: { write: (s) => out.push(s) } });
 
-    logger.debug('debug-type', 'a debug message');
-    logger.info('info-type', 'an info message');
-    logger.warn('warn-type', 'a warn message');
-    logger.error('error-type', 'an error message');
+    logger.debug('plan', 'a debug message');
+    logger.info('build', 'an info message');
+    logger.warn('warn', 'a warn message');
+    logger.error('fail', 'an error message');
 
     const events = readEvents(eventsFile);
     expect(events).toHaveLength(4);
     expect(events[0]).toEqual({
       ts: expect.any(String),
-      type: 'debug-type',
+      type: 'plan',
       issue: '-',
       msg: 'a debug message',
       level: 'debug',
     });
     expect(events[1]).toEqual({
       ts: expect.any(String),
-      type: 'info-type',
+      type: 'build',
       issue: '-',
       msg: 'an info message',
       level: 'info',
     });
     expect(events[2]).toEqual({
       ts: expect.any(String),
-      type: 'warn-type',
+      type: 'warn',
       issue: '-',
       msg: 'a warn message',
       level: 'warn',
     });
     expect(events[3]).toEqual({
       ts: expect.any(String),
-      type: 'error-type',
+      type: 'fail',
       issue: '-',
       msg: 'an error message',
       level: 'error',
@@ -236,7 +236,7 @@ describe('createLogger', () => {
       const out: string[] = [];
       const logger = createLogger(eventsFile, {}, { out: { write: (s) => out.push(s) }, env: {} });
 
-      logger.debug('debug-type', 'hidden from console');
+      logger.debug('plan', 'hidden from console');
 
       expect(out).toHaveLength(0);
       expect(readEvents(eventsFile)).toHaveLength(1);
@@ -252,7 +252,7 @@ describe('createLogger', () => {
         { out: { write: (s) => out.push(s) }, env: { FACTORY_LOG_LEVEL: 'debug' } },
       );
 
-      logger.debug('debug-type', 'now visible');
+      logger.debug('plan', 'now visible');
 
       expect(out).toHaveLength(1);
     });
@@ -267,7 +267,7 @@ describe('createLogger', () => {
         { out: { write: (s) => out.push(s) }, env: { FACTORY_LOG_LEVEL: 'error' } },
       );
 
-      logger.info('info-type', 'quiet on console');
+      logger.info('build', 'quiet on console');
 
       expect(out).toHaveLength(0);
       expect(readEvents(eventsFile)).toHaveLength(1);
@@ -283,8 +283,8 @@ describe('createLogger', () => {
         { out: { write: (s) => out.push(s) }, env: { FACTORY_LOG_LEVEL: 'not-a-level' } },
       );
 
-      logger.debug('debug-type', 'hidden');
-      logger.info('info-type', 'visible');
+      logger.debug('plan', 'hidden');
+      logger.info('build', 'visible');
 
       expect(out).toHaveLength(1);
     });

@@ -1,4 +1,4 @@
-import type { FactoryEvent } from '@on-par/factory-core';
+import type { EventKind, FactoryEvent } from '@on-par/factory-core';
 import { cleanup, render } from 'ink-testing-library';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -7,7 +7,7 @@ import { Dashboard } from './Dashboard.js';
 
 afterEach(cleanup);
 
-function ev(type: string, issue: string, msg: string, ts = '2026-01-01T00:00:00.000Z'): FactoryEvent {
+function ev(type: EventKind, issue: string, msg: string, ts = '2026-01-01T00:00:00.000Z'): FactoryEvent {
   return { ts, type, issue, msg };
 }
 

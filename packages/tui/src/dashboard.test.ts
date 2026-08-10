@@ -1,4 +1,4 @@
-import type { FactoryEvent } from '@on-par/factory-core';
+import type { EventKind, FactoryEvent } from '@on-par/factory-core';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -10,7 +10,7 @@ import {
   reduceDashboard,
 } from './dashboard.js';
 
-function ev(type: string, issue: string, msg: string, ts = '2026-01-01T00:00:00.000Z'): FactoryEvent {
+function ev(type: EventKind, issue: string, msg: string, ts = '2026-01-01T00:00:00.000Z'): FactoryEvent {
   return { ts, type, issue, msg };
 }
 
@@ -95,7 +95,7 @@ describe('reduceDashboard — lifecycle events', () => {
     expect(state.lanes[0].finishedAt).toBe('2026-01-01T00:10:00.000Z');
   });
 
-  it.each(['fail', 'escalate', 'timeout', 'conflict', 'parked', 'ship_denied'])(
+  it.each(['fail', 'escalate', 'timeout', 'conflict', 'parked', 'ship_denied', 'ci-failed'] as const)(
     '%s sets status failed with the phase active at failure and preserves the reason',
     (type) => {
       const state = reduceAll([

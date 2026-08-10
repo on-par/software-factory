@@ -112,6 +112,15 @@ export { InvalidWorkspaceError, resolveLocalOnlyPolicy } from './work/local-only
 // Events
 export type { FollowEventsOptions } from './events/index.js';
 export { followEvents, readEvents } from './events/index.js';
+export type { EventKind, EventTraits, LaneStatus } from './events/kinds.js';
+export {
+  eventTraitsFor,
+  EVENT_TRAITS,
+  isParkKind,
+  laneStatusOf,
+  severityOf,
+  UNKNOWN_EVENT_TRAITS,
+} from './events/kinds.js';
 
 // Models
 export type { DoctorProbes, ModelDiagnosis, ModelOverrides } from './models/index.js';

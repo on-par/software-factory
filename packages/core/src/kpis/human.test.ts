@@ -35,7 +35,13 @@ function prSource(overrides: Partial<PrSource> = {}): PrSource {
 describe('HUMAN_EVENT_TYPES / isHumanEvent', () => {
   it('recognizes all five human-* event types', () => {
     expect(HUMAN_EVENT_TYPES.size).toBe(5);
-    for (const type of ['human-approved', 'human-edited', 'human-restarted', 'human-merged', 'human-abandoned']) {
+    for (const type of [
+      'human-approved',
+      'human-edited',
+      'human-restarted',
+      'human-merged',
+      'human-abandoned',
+    ] as const) {
       expect(isHumanEvent(event({ type }))).toBe(true);
     }
   });
@@ -48,8 +54,8 @@ describe('HUMAN_EVENT_TYPES / isHumanEvent', () => {
 describe('reconstructHumanEvents', () => {
   it('emits human-edited for a commit after the factory work window', () => {
     const logEvents = [
-      event({ issue: '1', type: 'phase-start', phase: 'build', ts: '2026-07-20T00:00:00.000Z' }),
-      event({ issue: '1', type: 'phase-end', phase: 'build', ts: '2026-07-20T00:10:00.000Z' }),
+      event({ issue: '1', type: 'build', phase: 'build', ts: '2026-07-20T00:00:00.000Z' }),
+      event({ issue: '1', type: 'ship', phase: 'build', ts: '2026-07-20T00:10:00.000Z' }),
     ];
     const source = prSource({
       commits: [{ sha: 'abcdef1234567', author: 'alice', ts: '2026-07-20T00:20:00.000Z' }],
@@ -68,8 +74,8 @@ describe('reconstructHumanEvents', () => {
 
   it('emits nothing for a commit inside the factory work window', () => {
     const logEvents = [
-      event({ issue: '1', type: 'phase-start', phase: 'build', ts: '2026-07-20T00:00:00.000Z' }),
-      event({ issue: '1', type: 'phase-end', phase: 'build', ts: '2026-07-20T00:10:00.000Z' }),
+      event({ issue: '1', type: 'build', phase: 'build', ts: '2026-07-20T00:00:00.000Z' }),
+      event({ issue: '1', type: 'ship', phase: 'build', ts: '2026-07-20T00:10:00.000Z' }),
     ];
     const source = prSource({
       commits: [{ sha: 'abcdef1234567', author: 'alice', ts: '2026-07-20T00:05:00.000Z' }],
@@ -191,6 +197,15 @@ describe('hasUnresolvedPark', () => {
     expect(hasUnresolvedPark([event({ issue: '1', type: 'conflict', ts: '2026-07-20T00:00:00.000Z' })], '1')).toBe(
       true,
     );
+  });
+
+  // Regression (#663): 'ci-failed' is a ParkReason a single-issue `factory ship <issue>`
+  // run logs directly (see ParkReason/parkReasonFor in cli/index.ts) but was absent from
+  // the old hand-maintained PARK_ISH_TYPES set, so a CI-blocked land never counted as an
+  // unresolved park for human-intervention KPIs.
+  it('is true for a ci-failed event with no later merge', () => {
+    const events = [event({ issue: '1', type: 'ci-failed', ts: '2026-07-20T00:00:00.000Z' })];
+    expect(hasUnresolvedPark(events, '1')).toBe(true);
   });
 });
 

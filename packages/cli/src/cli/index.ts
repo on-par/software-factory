@@ -12,6 +12,7 @@ import type {
   BenchmarkRunFailure,
   CheckSummary,
   EnvironmentProxySettings,
+  EventKind,
   FailoverReason,
   FailurePhase,
   GithubIssueParams,
@@ -811,7 +812,7 @@ async function cmdTui() {
   });
 }
 
-export type ParkReason = 'escalate' | 'timeout' | 'fail' | 'conflict' | 'ci-failed';
+export type ParkReason = Extract<EventKind, 'escalate' | 'timeout' | 'fail' | 'conflict' | 'ci-failed'>;
 
 export class LaneParkError extends Error {
   constructor(
@@ -834,10 +835,10 @@ export function parkReasonFor(err: unknown): ParkReason {
  *  an explicit 'stuck' event so stuckRate observes runs that exceeded their
  *  phase timeout (#428). The other stuck condition — identical checker failures
  *  across consecutive rework rounds — is emitted by the check phase itself. */
-export function parkEvents(err: unknown): { type: string; msg: string }[] {
+export function parkEvents(err: unknown): { type: EventKind; msg: string }[] {
   const reason = parkReasonFor(err);
   const msg = err instanceof Error ? err.message : String(err);
-  const events: { type: string; msg: string }[] = [{ type: reason, msg }];
+  const events: { type: EventKind; msg: string }[] = [{ type: reason, msg }];
   if (reason === 'timeout') {
     events.push({ type: 'stuck', msg: `run exceeded its phase timeout without progressing — ${msg}` });
   }
@@ -923,7 +924,7 @@ export async function shipIssue(
   const mkLog =
     (phase?: string) =>
     (
-      type: string,
+      type: EventKind,
       msg: string,
       extra?: {
         failoverReason?: FailoverReason;
@@ -1389,7 +1390,7 @@ async function maybeWriteBenchmarkArtifacts(opts: {
   reworkRounds?: number;
   failure?: BenchmarkRunFailure;
   reportPath?: string;
-  log: (type: string, msg: string) => void;
+  log: (type: EventKind, msg: string) => void;
 }): Promise<void> {
   if (!opts.ctx?.localOnly || !opts.ctx.artifactsDir) return;
   try {
@@ -1673,7 +1674,7 @@ async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }) 
       `${item.status}: ${item.reason ?? 'unknown'} — see ${paths.reports}`,
     );
   };
-  const log = (type: string, msg: string) => logEvent(paths.events, type, '-', msg);
+  const log = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
 
   const deps: OvernightQueueDeps = { preflight, processItem, report, log };
   const result = await runOvernightQueue({ issues: entries.map((e) => e.issue), statePath }, deps);
@@ -1712,7 +1713,7 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }
   if (!Number.isFinite(ttlDays) || ttlDays < 0) {
     throw new CliExitError('factory: --ttl-days must be a non-negative number', 2);
   }
-  const log = (type: string, msg: string) => logEvent(paths.events, type, '-', msg);
+  const log = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
   const run = () => sweepWorktrees({ repoRoot, ttlDays, dryRun: opts.dryRun }, { log });
   const report = opts.dryRun ? await run() : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
   console.log(formatGcReport(report));
@@ -1759,7 +1760,7 @@ async function landIssue(
   skipCI?: boolean,
 ): Promise<{ branch: string; prNumber: number }> {
   const [owner, repoName] = ghRepo.split('/');
-  const log = (type: string, msg: string, extra?: { failoverReason?: FailoverReason }) =>
+  const log = (type: EventKind, msg: string, extra?: { failoverReason?: FailoverReason }) =>
     logEvent(paths.events, type, issueNum, msg, extra);
 
   // The issue title may have been edited since the PR was opened, so a
@@ -2039,7 +2040,7 @@ async function cmdRun() {
   const factoryConfig = loadFactoryConfig();
   if (factoryConfig.worktree.autoGcOnRun) {
     try {
-      const gcLog = (type: string, msg: string) => logEvent(paths.events, type, '-', msg);
+      const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
       const report = await withGitLock(repoRoot, () =>
         withFileLock(paths.gitLock, () =>
           sweepWorktrees({ repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays }, { log: gcLog }),
@@ -2418,7 +2419,7 @@ export async function rebaseDirtyPullRequest(opts: {
   branch: string;
   worktree: string;
   prNumber: number;
-  log: (type: string, msg: string) => void;
+  log: (type: EventKind, msg: string) => void;
   run?: CommandRunner;
   pathExists?: (path: string) => boolean;
 }): Promise<void> {
@@ -2452,7 +2453,7 @@ export async function landOpenPullRequest(opts: {
   branch: string;
   worktree: string;
   prNumber: number;
-  log: (type: string, msg: string) => void;
+  log: (type: EventKind, msg: string) => void;
   run?: CommandRunner;
   pathExists?: (path: string) => boolean;
   sleep?: (ms: number) => Promise<void>;
