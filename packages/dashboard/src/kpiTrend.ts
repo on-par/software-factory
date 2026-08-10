@@ -1,71 +1,19 @@
 // src/kpiTrend.ts — shapes KpiHistoryRecord[] into per-metric time series for the trend view.
 //
-// This is a browser bundle: @on-par/factory-core's runtime (router/harness/checkers) pulls in
-// Node-only deps (execa, @octokit/rest) that don't resolve for a client build, so only the
-// KpiHistoryRecord *type* is imported from it. parseKpiHistory and the rolling drift-window
-// check below are faithful, pure ports of the same-named logic in
-// packages/core/src/kpis/index.ts (#612, #613, #614) — no new KPI computation is introduced,
-// this just makes the existing derivation runnable client-side.
+// This is a browser bundle: @on-par/factory-core's root runtime (router/harness/checkers)
+// pulls in Node-only deps (execa, @octokit/rest) that don't resolve for a client build. The
+// ./kpis subpath (mirroring the existing ./internal and ./testing pattern) re-exports only
+// the pure packages/core/src/kpis/index.ts module, so parseKpiHistory and computeKpiDrift
+// can be imported and run for real here instead of being re-implemented client-side.
 
+import { computeKpiDrift, parseKpiHistory } from '@on-par/factory-core/kpis';
 import type { KpiHistoryRecord } from '@on-par/factory-core';
+
+export { parseKpiHistory };
 
 export interface TrendPoint {
   date: string;
   value: number | null;
-}
-
-export function parseKpiHistory(jsonl: string): KpiHistoryRecord[] {
-  return jsonl
-    .split('\n')
-    .filter((line) => line.trim())
-    .map((line) => JSON.parse(line) as KpiHistoryRecord);
-}
-
-const KPI_DRIFT_WINDOW_SIZE = 20;
-const KPI_DRIFT_THRESHOLD_RATIO = 0.25;
-
-function mean(values: number[]): number | null {
-  if (values.length === 0) return null;
-  return values.reduce((sum, v) => sum + v, 0) / values.length;
-}
-
-function numericValues(values: (number | null | undefined)[]): number[] {
-  return values.filter((v): v is number => typeof v === 'number');
-}
-
-function driftDetected(baselineValues: number[], recentValues: number[]): boolean {
-  const baseline = mean(baselineValues);
-  const recent = mean(recentValues);
-  if (baseline === null || recent === null) return false;
-  if (baseline === 0) return recent > 0;
-  return (recent - baseline) / baseline > KPI_DRIFT_THRESHOLD_RATIO;
-}
-
-/** Whether the rolling window (reworkRate, costPerMergedPr, medianCycleTimeMs) is ready
- *  and flags drift, using only history up to and including `records[records.length - 1]`. */
-function isDriftFlagged(records: KpiHistoryRecord[]): { ready: boolean; drift: boolean } {
-  if (records.length < KPI_DRIFT_WINDOW_SIZE * 2) return { ready: false, drift: false };
-  const recentWindow = records.slice(records.length - KPI_DRIFT_WINDOW_SIZE);
-  const baselineWindow = records.slice(
-    records.length - KPI_DRIFT_WINDOW_SIZE * 2,
-    records.length - KPI_DRIFT_WINDOW_SIZE,
-  );
-
-  const drift =
-    driftDetected(
-      numericValues(baselineWindow.map((r) => r.reworkRate)),
-      numericValues(recentWindow.map((r) => r.reworkRate)),
-    ) ||
-    driftDetected(
-      numericValues(baselineWindow.map((r) => r.costPerMergedPr)),
-      numericValues(recentWindow.map((r) => r.costPerMergedPr)),
-    ) ||
-    driftDetected(
-      numericValues(baselineWindow.map((r) => r.medianCycleTimeMs)),
-      numericValues(recentWindow.map((r) => r.medianCycleTimeMs)),
-    );
-
-  return { ready: true, drift };
 }
 
 export function buildDefectRateSeries(records: KpiHistoryRecord[]): TrendPoint[] {
@@ -76,7 +24,7 @@ export function buildDefectRateSeries(records: KpiHistoryRecord[]): TrendPoint[]
  *  history up to that snapshot. Null until enough history has accumulated to be ready. */
 export function buildDriftFlagSeries(records: KpiHistoryRecord[]): TrendPoint[] {
   return records.map((record, index) => {
-    const { ready, drift } = isDriftFlagged(records.slice(0, index + 1));
+    const { ready, drift } = computeKpiDrift(records.slice(0, index + 1));
     return { date: record.date, value: ready ? (drift ? 1 : 0) : null };
   });
 }

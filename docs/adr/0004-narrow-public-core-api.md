@@ -47,6 +47,16 @@ Two new subpath exports split off everything else:
   generator (`codingHarnessContractCases`, `makeContractRequest`). Consumers
   who want to exercise the factory (or their own harness implementation
   against the contract) without real model CLIs import from here.
+- **`@on-par/factory-core/kpis`** (added #616) — the same KPI functions
+  documented as part of the root public API (`computeKpiDrift`,
+  `parseKpiHistory`, `computeHealthKpis`, and the rest of the "KPIs" block),
+  re-exported standalone from `kpis-entry.ts`. The root entry point (`.`)
+  transitively pulls in Node-only harness/router deps (`execa`,
+  `@octokit/rest`) that don't resolve in a browser bundle; this subpath lets
+  browser consumers (the `dashboard` package) import real KPI derivation
+  instead of hand-porting it. It adds no new surface — every export here is
+  already public via `.`; the split exists only to make that surface
+  reachable without the Node-only baggage.
 
 `src/test-support/` (fixture kit used by this repo's own integration tests)
 stays package-private and is not re-exported from any entry point.
@@ -57,7 +67,7 @@ do not move — only which entry file re-exports them changes; `internal.ts`
 and `testing.ts` are re-export-only files alongside `index.ts`.
 
 `packages/core/src/public-api.test.ts` pins the exact runtime export set of
-all three entry points (via `Object.keys(...).sort()` equality against a
+all four entry points (via `Object.keys(...).sort()` equality against a
 literal allowlist) and the shape of `package.json`'s `exports` map, so this
 boundary is enforced by a test, not just documentation.
 

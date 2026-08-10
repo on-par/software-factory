@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import * as publicApi from './index.js';
 import * as internalApi from './internal.js';
+import * as kpisApi from './kpis-entry.js';
 import * as testingApi from './testing.js';
 
 // Pins the exact export surface of each @on-par/factory-core entry point
@@ -360,6 +361,33 @@ const TESTING_API_KEYS = [
   'simSpecWithObjectInterface',
 ];
 
+// The same KPI functions the root export documents (see the "// KPIs" block in
+// PUBLIC_API_KEYS above), re-exported standalone from a Node-dep-free entry point so
+// browser bundlers can import them without pulling in the root's harness/router deps.
+const KPIS_API_KEYS = [
+  'appendKpiHistoryLine',
+  'computeHealthKpis',
+  'computeKpiDrift',
+  'DEFAULT_DEFECT_WINDOW_DAYS',
+  'detectPostMergeDefects',
+  'fetchDefectSources',
+  'fetchHumanEventSources',
+  'formatKpiLines',
+  'hasUnresolvedPark',
+  'HUMAN_EVENT_TYPES',
+  'isDefectWindowClosed',
+  'isHumanEvent',
+  'KPI_DRIFT_THRESHOLD_RATIO',
+  'KPI_DRIFT_WINDOW_SIZE',
+  'kpisToHistoryRecord',
+  'mergedPrRefs',
+  'parseKpiHistory',
+  'reconstructHumanEvents',
+  'renderKpiDriftLine',
+  'renderKpiReport',
+  'renderKpiTrend',
+];
+
 describe('public API surface (ADR-0004)', () => {
   it('root export exposes exactly the documented public API', () => {
     expect(Object.keys(publicApi).sort()).toEqual([...PUBLIC_API_KEYS].sort());
@@ -390,12 +418,19 @@ describe('public API surface (ADR-0004)', () => {
     expect(Object.keys(testingApi).sort()).toEqual([...TESTING_API_KEYS].sort());
   });
 
-  it('package.json declares exactly the three documented entry points', () => {
+  it('./kpis exposes exactly the documented KPI subset, and nothing beyond the root API', () => {
+    expect(Object.keys(kpisApi).sort()).toEqual([...KPIS_API_KEYS].sort());
+    for (const key of KPIS_API_KEYS) {
+      expect(Object.keys(publicApi)).toContain(key);
+    }
+  });
+
+  it('package.json declares exactly the four documented entry points', () => {
     const pkgPath = fileURLToPath(new URL('../package.json', import.meta.url));
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as {
       exports: Record<string, { development: string; import: string; types: string }>;
     };
-    expect(Object.keys(pkg.exports).sort()).toEqual(['.', './internal', './testing'].sort());
+    expect(Object.keys(pkg.exports).sort()).toEqual(['.', './internal', './kpis', './testing'].sort());
     for (const entry of Object.values(pkg.exports)) {
       expect(Object.keys(entry).sort()).toEqual(['development', 'import', 'types']);
     }

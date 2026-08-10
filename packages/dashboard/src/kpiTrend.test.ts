@@ -1,4 +1,5 @@
 import type { KpiHistoryRecord } from '@on-par/factory-core';
+import { KPI_DRIFT_WINDOW_SIZE } from '@on-par/factory-core/kpis';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -7,9 +8,6 @@ import {
   buildPhaseBreakdownSeries,
   buildReworkSplitSeries,
 } from './kpiTrend.js';
-
-// Mirrors the rolling-window size baked into kpiTrend.ts's local port of computeKpiDrift.
-const KPI_DRIFT_WINDOW_SIZE = 20;
 
 function record(overrides: Partial<KpiHistoryRecord> = {}): KpiHistoryRecord {
   return {
