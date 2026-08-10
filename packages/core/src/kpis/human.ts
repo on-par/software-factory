@@ -33,6 +33,9 @@ export interface PrSource {
   mergedBy?: string | null;
   /** closed_at when the PR was closed WITHOUT merge, else null. */
   closedAt: string | null;
+  /** pr.merge_commit_sha at list time; null/absent when unknown or not merged.
+   *  Used by the post-merge defect detector to match `This reverts commit <sha>` (#612). */
+  mergeCommitSha?: string | null;
 }
 
 // 'parked'/'stuck' are lane-lifecycle wrapper events (runLane, multi-issue queues);
@@ -227,6 +230,7 @@ export async function fetchHumanEventSources(
         mergedAt,
         mergedBy,
         closedAt,
+        mergeCommitSha: pr.merge_commit_sha ?? null,
       };
     }),
   );

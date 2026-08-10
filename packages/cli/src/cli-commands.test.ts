@@ -790,6 +790,83 @@ bash scripts/verify.sh
       expect(errored()).toContain('KPI snapshot failed');
       expect(existsSync(paths().kpiHistory)).toBe(false);
     });
+
+    it('records postMergeDefectRate when a merged PR has a closed window and a matching revert commit (#612)', async () => {
+      writeFileSync(paths().events, JSON.stringify({ type: 'issue-title', issue: '1', msg: 'title' }));
+      writeFileSync(paths().costs, '');
+      const mergedAt = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const revertAt = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString();
+      h.octokit.rest.pulls.list = vi.fn(async ({ state }: any) =>
+        state === 'all'
+          ? {
+              data: [
+                {
+                  number: 77,
+                  head: { ref: 'ship-it/1-fix-the-bug' },
+                  state: 'closed',
+                  merged_at: mergedAt,
+                  merge_commit_sha: 'abcdef1234567',
+                  closed_at: null,
+                },
+              ],
+            }
+          : { data: [] },
+      );
+      h.octokit.rest.pulls.listCommits = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.pulls.listReviews = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.pulls.get = vi.fn(async () => ({ data: { merged_by: { login: 'patrob' } } }));
+      h.octokit.rest.repos = {
+        listCommits: vi.fn(async () => ({
+          data: [{ sha: 'deadbeef1234', commit: { message: 'Revert "fix thing" (#77)', author: { date: revertAt } } }],
+        })),
+      };
+      h.octokit.rest.issues.listForRepo = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.issues.listComments = vi.fn(async () => ({ data: [] }));
+
+      await runMain('kpis');
+      const out = logged();
+      expect(out).toContain('Post-merge defects:');
+      const record = JSON.parse(readFileSync(paths().kpiHistory, 'utf-8').trim().split('\n')[0]);
+      expect(record.defectWindowClosedRuns).toBe(1);
+      expect(record.postMergeDefectRate).toBe(1);
+    });
+
+    it('omits postMergeDefectRate and warns when the post-merge defect fetch fails (#612)', async () => {
+      writeFileSync(paths().events, JSON.stringify({ type: 'issue-title', issue: '1', msg: 'title' }));
+      writeFileSync(paths().costs, '');
+      const mergedAt = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      h.octokit.rest.pulls.list = vi.fn(async ({ state }: any) =>
+        state === 'all'
+          ? {
+              data: [
+                {
+                  number: 77,
+                  head: { ref: 'ship-it/1-fix-the-bug' },
+                  state: 'closed',
+                  merged_at: mergedAt,
+                  merge_commit_sha: 'abcdef1234567',
+                  closed_at: null,
+                },
+              ],
+            }
+          : { data: [] },
+      );
+      h.octokit.rest.pulls.listCommits = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.pulls.listReviews = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.pulls.get = vi.fn(async () => ({ data: { merged_by: { login: 'patrob' } } }));
+      h.octokit.rest.repos = {
+        listCommits: vi.fn(async () => {
+          throw new Error('rate limited');
+        }),
+      };
+
+      await runMain('kpis');
+      const out = logged();
+      expect(out).toContain('## Health KPIs');
+      expect(errored()).toContain('post-merge defect signals unavailable');
+      const record = JSON.parse(readFileSync(paths().kpiHistory, 'utf-8').trim().split('\n')[0]);
+      expect(record.postMergeDefectRate).toBeNull();
+    });
   });
 
   describe('tui', () => {

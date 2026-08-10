@@ -42,6 +42,10 @@
     "log_file": ".factory/costs.jsonl",
     "comment": "Per-task token usage and cost logged for analysis"
   },
+  "kpis": {
+    "defectWindowDays": 14,
+    "comment": "Post-merge defect window (#612): after a factory PR merges, follow-up signals (revert commits, new issues back-referencing the PR/issue/merge commit, non-bot post-merge comments raising concerns) are watched for this many days. A run is only scored once its window has closed. Override with FACTORY_DEFECT_WINDOW_DAYS."
+  },
   "ci": {
     "skip": false,
     "comment": "Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging"

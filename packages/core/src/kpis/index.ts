@@ -11,6 +11,21 @@ export {
   isHumanEvent,
   reconstructHumanEvents,
 } from './human.js';
+export type {
+  DefectSourceClient,
+  DefectSources,
+  MergedPrRef,
+  PrCommentSource,
+  RepoCommitSource,
+  RepoIssueSource,
+} from './defects.js';
+export {
+  DEFAULT_DEFECT_WINDOW_DAYS,
+  detectPostMergeDefects,
+  fetchDefectSources,
+  isDefectWindowClosed,
+  mergedPrRefs,
+} from './defects.js';
 
 function isRealIssue(issue: string): boolean {
   return /^\d+$/.test(issue);
@@ -110,6 +125,17 @@ export interface HealthKpis {
   /** Mean per-run size score over sizeScoredRuns — 1 for an in-budget issue, 0 for an
    *  over-budget one; null when sizeScoredRuns === 0 (#608). */
   meanSizeScore: number | null;
+  /** Merged runs whose post-merge defect window has closed — the only cohort that can be
+   *  scored (#612). Runs still inside their window are excluded, not counted as clean. */
+  defectWindowClosedRuns: number;
+  /** Window-closed runs with at least one post-merge defect signal (#612). */
+  postMergeDefectRuns: number;
+  /** Total defect signals across those runs — a run can attract several (#612). */
+  postMergeDefectSignals: number;
+  /** postMergeDefectRuns / defectWindowClosedRuns; null when the cohort is empty (#612).
+   *  Deliberately NOT on the `runs` denominator every other rate here uses — a run merged
+   *  yesterday has no verdict yet. See ADR-0012. */
+  postMergeDefectRate: number | null;
 }
 
 interface RunStats {
@@ -123,6 +149,8 @@ interface RunStats {
   phaseWindows: Map<string, { first: number; last: number }>;
   retries: number;
   readiness: ReadinessInfo | null;
+  defectWindowClosed: boolean;
+  defectSignals: number;
 }
 
 /** Attribute one event to a retry-cause bucket, or null if it is not a retry.
@@ -155,6 +183,8 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
       phaseWindows: new Map<string, { first: number; last: number }>(),
       retries: 0,
       readiness: null,
+      defectWindowClosed: false,
+      defectSignals: 0,
     };
 
     if (event.type === 'merged' || event.type === 'human-merged') stats.merged = true;
@@ -162,6 +192,8 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     if (event.type === 'stuck' || event.rework?.stuck === true) stats.stuck = true;
     if (isHumanEvent(event)) stats.humanEvents++;
     if (event.readiness) stats.readiness = event.readiness;
+    if (event.type === 'defect-window-closed') stats.defectWindowClosed = true;
+    if (event.type === 'post-merge-defect') stats.defectSignals++;
 
     const retryCause = retryCauseOf(event);
     if (retryCause) {
@@ -206,6 +238,9 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
   const notReadyCycleTimes: number[] = [];
   const sizeScores: number[] = [];
   let sizeGateEscalatedRuns = 0;
+  let defectWindowClosedRuns = 0;
+  let postMergeDefectRuns = 0;
+  let postMergeDefectSignals = 0;
 
   for (const stats of runsByIssue.values()) {
     if (stats.merged) merged++;
@@ -239,6 +274,14 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     if (stats.readiness?.sizeOk !== undefined) {
       sizeScores.push(stats.readiness.sizeOk ? 1 : 0);
       if (!stats.readiness.sizeOk) sizeGateEscalatedRuns++;
+    }
+
+    if (stats.defectWindowClosed) {
+      defectWindowClosedRuns++;
+      if (stats.defectSignals > 0) {
+        postMergeDefectRuns++;
+        postMergeDefectSignals += stats.defectSignals;
+      }
     }
   }
 
@@ -305,6 +348,10 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     sizeGateEscalatedRuns,
     sizeGateEscalationRate: runs === 0 ? 0 : sizeGateEscalatedRuns / runs,
     meanSizeScore: mean(sizeScores),
+    defectWindowClosedRuns,
+    postMergeDefectRuns,
+    postMergeDefectSignals,
+    postMergeDefectRate: defectWindowClosedRuns === 0 ? null : postMergeDefectRuns / defectWindowClosedRuns,
   };
 }
 
@@ -358,6 +405,12 @@ export function formatKpiLines(kpis: HealthKpis): string[] {
     );
   }
 
+  if (kpis.defectWindowClosedRuns > 0) {
+    lines.push(
+      `Post-merge defects: ${formatPercent(kpis.postMergeDefectRate ?? 0)} (${kpis.postMergeDefectRuns}/${kpis.defectWindowClosedRuns} runs with a closed defect window, ${kpis.postMergeDefectSignals} signal${kpis.postMergeDefectSignals === 1 ? '' : 's'})`,
+    );
+  }
+
   return lines;
 }
 
@@ -389,6 +442,11 @@ export interface KpiHistoryRecord {
   /** Mean size score at snapshot time; null when no run carried a size verdict (#608).
    *  Absent in legacy rows. */
   meanSizeScore?: number | null;
+  /** Post-merge defect rate at snapshot time; null when no run's window had closed (#612).
+   *  Absent in legacy rows. */
+  postMergeDefectRate?: number | null;
+  /** Denominator behind postMergeDefectRate at snapshot time (#612). Absent in legacy rows. */
+  defectWindowClosedRuns?: number;
 }
 
 export function kpisToHistoryRecord(
@@ -409,6 +467,8 @@ export function kpisToHistoryRecord(
     p90CycleTimeMs: kpis.p90CycleTimeMs,
     sizeGateEscalationRate: kpis.sizeGateEscalationRate,
     meanSizeScore: kpis.meanSizeScore,
+    postMergeDefectRate: kpis.postMergeDefectRate,
+    defectWindowClosedRuns: kpis.defectWindowClosedRuns,
     ...(meta.commitSha !== undefined ? { commitSha: meta.commitSha } : {}),
     ...(meta.models !== undefined ? { models: meta.models } : {}),
     ...(kpis.meanReadinessScore !== undefined ? { meanReadinessScore: kpis.meanReadinessScore } : {}),

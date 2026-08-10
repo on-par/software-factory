@@ -109,6 +109,12 @@ const FactoryConfigSchema = z.object({
       comment: z.string().optional(),
     })
     .default({ enabled: false }),
+  kpis: z
+    .object({
+      defectWindowDays: z.number().int().positive().default(14),
+      comment: z.string().optional(),
+    })
+    .default({ defectWindowDays: 14 }),
   sandbox: z
     .object({
       enabled: z.boolean().default(true),
@@ -261,6 +267,12 @@ export function resolvePlanApproval(config: FactoryConfig, env: NodeJS.ProcessEn
   if (env.FACTORY_APPROVE_PLAN === '1') return true;
   if (env.FACTORY_APPROVE_PLAN === '0') return false;
   return config.plan_approval?.enabled ?? false;
+}
+
+export function resolveDefectWindowDays(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number(env.FACTORY_DEFECT_WINDOW_DAYS);
+  if (Number.isFinite(n) && n > 0) return n;
+  return config.kpis?.defectWindowDays ?? 14;
 }
 
 export interface IngestSettings {
