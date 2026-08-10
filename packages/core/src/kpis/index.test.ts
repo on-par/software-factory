@@ -517,6 +517,126 @@ describe('issue readiness KPIs (#421)', () => {
   });
 });
 
+describe('size gate KPIs (#608)', () => {
+  const sizedEvents: FactoryEvent[] = [
+    event({ issue: '1', type: 'issue-title' }),
+    event({
+      issue: '1',
+      type: 'readiness',
+      readiness: { template: 'factory-task', score: 1, pass: true, missing: [], sizeOk: true },
+    }),
+    event({ issue: '2', type: 'issue-title' }),
+    event({
+      issue: '2',
+      type: 'readiness',
+      readiness: {
+        template: 'factory-task',
+        score: 1,
+        pass: true,
+        missing: [],
+        sizeOk: false,
+        sizeReason: 'too big: 7 in-scope items, 8 acceptance criteria',
+      },
+    }),
+    event({ issue: '3', type: 'issue-title' }),
+  ];
+
+  it('computes the four fields', () => {
+    const kpis = computeHealthKpis(sizedEvents, []);
+
+    expect(kpis.runs).toBe(3);
+    expect(kpis.sizeScoredRuns).toBe(2);
+    expect(kpis.sizeGateEscalatedRuns).toBe(1);
+    expect(kpis.sizeGateEscalationRate).toBeCloseTo(1 / 3);
+    expect(kpis.meanSizeScore).toBe(0.5);
+  });
+
+  it('excludes legacy readiness events with no size verdict', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title' }),
+      event({
+        issue: '1',
+        type: 'readiness',
+        readiness: { template: 'factory-task', score: 1, pass: true, missing: [] },
+      }),
+    ];
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.sizeScoredRuns).toBe(0);
+    expect(kpis.meanSizeScore).toBeNull();
+    expect(kpis.sizeGateEscalationRate).toBe(0);
+    expect(kpis.readinessScoredRuns).toBe(1);
+  });
+
+  it('renders the size-gate line', () => {
+    const kpis = computeHealthKpis(sizedEvents, []);
+    const lines = formatKpiLines(kpis);
+
+    expect(lines).toContain('Size gate: escalated 33% (1/3) · mean size score 50% (2/3 runs size-scored)');
+  });
+
+  it('omits the line when nothing is size-scored', () => {
+    const kpis = computeHealthKpis([event({ issue: '1', type: 'issue-title' })], []);
+    const lines = formatKpiLines(kpis);
+
+    expect(lines.some((line) => line.startsWith('Size gate'))).toBe(false);
+    expect(renderKpiReport(kpis)).not.toContain('Size gate');
+  });
+
+  it('all runs escalated', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title' }),
+      event({
+        issue: '1',
+        type: 'readiness',
+        readiness: { template: 'factory-task', score: 1, pass: true, missing: [], sizeOk: false },
+      }),
+      event({ issue: '2', type: 'issue-title' }),
+      event({
+        issue: '2',
+        type: 'readiness',
+        readiness: { template: 'factory-task', score: 1, pass: true, missing: [], sizeOk: false },
+      }),
+    ];
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.sizeGateEscalationRate).toBe(1);
+    expect(kpis.meanSizeScore).toBe(0);
+  });
+
+  it('round-trips through kpi-history', () => {
+    const kpis = computeHealthKpis(sizedEvents, []);
+    const record = kpisToHistoryRecord(kpis, '2026-08-10');
+    const jsonl = appendKpiHistoryLine('', record);
+    const [parsed] = parseKpiHistory(jsonl);
+
+    expect(parsed.sizeGateEscalationRate).toBeCloseTo(1 / 3);
+    expect(parsed.meanSizeScore).toBe(0.5);
+  });
+
+  it('legacy history rows still parse', () => {
+    const legacy: KpiHistoryRecord = {
+      date: '2026-07-17',
+      runs: 3,
+      mergeRate: 1,
+      reworkRate: 0,
+      stuckRate: 0,
+      humanInterventionRate: 0,
+      fullyAutonomousRate: 0,
+      costPerMergedPr: null,
+      medianCycleTimeMs: null,
+      p90CycleTimeMs: null,
+    };
+
+    const jsonl = appendKpiHistoryLine('', legacy);
+    const [parsed] = parseKpiHistory(jsonl);
+
+    expect(parsed.sizeGateEscalationRate).toBeUndefined();
+    expect(parsed.meanSizeScore).toBeUndefined();
+    expect(() => renderKpiTrend([parsed])).not.toThrow();
+  });
+});
+
 describe('renderKpiReport', () => {
   it('renders a markdown block with the Health KPIs heading', () => {
     const kpis = computeHealthKpis(
@@ -616,6 +736,8 @@ describe('KPI trend', () => {
       medianCycleTimeMs: 0,
       p90CycleTimeMs: 0,
       meanReadinessScore: null,
+      sizeGateEscalationRate: 0,
+      meanSizeScore: null,
     });
   });
 

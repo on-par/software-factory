@@ -97,6 +97,19 @@ export interface HealthKpis {
     ready: { runs: number; meanRetries: number | null; medianCycleTimeMs: number | null };
     notReady: { runs: number; meanRetries: number | null; medianCycleTimeMs: number | null };
   } | null;
+  /** Runs whose readiness event carries an INVEST size verdict (`sizeOk` set, #605).
+   *  Readiness events logged before #605 have no verdict and are excluded, not
+   *  counted as passing. */
+  sizeScoredRuns: number;
+  /** Size-scored runs the gate flagged as too big (`sizeOk === false`) (#608). */
+  sizeGateEscalatedRuns: number;
+  /** sizeGateEscalatedRuns / runs — escalated issues over issues attempted (#608);
+   *  0 when runs === 0. Denominator is `runs`, like every other rate here, so it is
+   *  deliberately NOT the complement of meanSizeScore. */
+  sizeGateEscalationRate: number;
+  /** Mean per-run size score over sizeScoredRuns — 1 for an in-budget issue, 0 for an
+   *  over-budget one; null when sizeScoredRuns === 0 (#608). */
+  meanSizeScore: number | null;
 }
 
 interface RunStats {
@@ -191,6 +204,8 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
   const readyCycleTimes: number[] = [];
   const notReadyRetries: number[] = [];
   const notReadyCycleTimes: number[] = [];
+  const sizeScores: number[] = [];
+  let sizeGateEscalatedRuns = 0;
 
   for (const stats of runsByIssue.values()) {
     if (stats.merged) merged++;
@@ -219,6 +234,11 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
       const cohortCycleTimes = stats.readiness.pass ? readyCycleTimes : notReadyCycleTimes;
       cohortRetries.push(stats.retries);
       if (runCycleTime !== null) cohortCycleTimes.push(runCycleTime);
+    }
+
+    if (stats.readiness?.sizeOk !== undefined) {
+      sizeScores.push(stats.readiness.sizeOk ? 1 : 0);
+      if (!stats.readiness.sizeOk) sizeGateEscalatedRuns++;
     }
   }
 
@@ -281,6 +301,10 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
               medianCycleTimeMs: percentile(notReadyCycleTimes, 0.5),
             },
           },
+    sizeScoredRuns: sizeScores.length,
+    sizeGateEscalatedRuns,
+    sizeGateEscalationRate: runs === 0 ? 0 : sizeGateEscalatedRuns / runs,
+    meanSizeScore: mean(sizeScores),
   };
 }
 
@@ -328,6 +352,12 @@ export function formatKpiLines(kpis: HealthKpis): string[] {
     lines.push(`Readiness vs outcomes: ready ${describeCohort(ready)} · not-ready ${describeCohort(notReady)}`);
   }
 
+  if (kpis.sizeScoredRuns > 0) {
+    lines.push(
+      `Size gate: escalated ${formatPercent(kpis.sizeGateEscalationRate)} (${kpis.sizeGateEscalatedRuns}/${kpis.runs}) · mean size score ${formatPercent(kpis.meanSizeScore ?? 0)} (${kpis.sizeScoredRuns}/${kpis.runs} runs size-scored)`,
+    );
+  }
+
   return lines;
 }
 
@@ -353,6 +383,12 @@ export interface KpiHistoryRecord {
   models?: Record<string, string[]>;
   /** Mean issue readiness score at snapshot time; null when no runs were scored. Absent in legacy rows. */
   meanReadinessScore?: number | null;
+  /** Share of runs the INVEST size gate flagged as too big at snapshot time (#608).
+   *  Absent in legacy rows. */
+  sizeGateEscalationRate?: number;
+  /** Mean size score at snapshot time; null when no run carried a size verdict (#608).
+   *  Absent in legacy rows. */
+  meanSizeScore?: number | null;
 }
 
 export function kpisToHistoryRecord(
@@ -371,6 +407,8 @@ export function kpisToHistoryRecord(
     costPerMergedPr: kpis.costPerMergedPr,
     medianCycleTimeMs: kpis.medianCycleTimeMs,
     p90CycleTimeMs: kpis.p90CycleTimeMs,
+    sizeGateEscalationRate: kpis.sizeGateEscalationRate,
+    meanSizeScore: kpis.meanSizeScore,
     ...(meta.commitSha !== undefined ? { commitSha: meta.commitSha } : {}),
     ...(meta.models !== undefined ? { models: meta.models } : {}),
     ...(kpis.meanReadinessScore !== undefined ? { meanReadinessScore: kpis.meanReadinessScore } : {}),
