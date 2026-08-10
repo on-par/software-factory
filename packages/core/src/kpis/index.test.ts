@@ -959,6 +959,116 @@ describe('collision-caused rework KPIs (#615)', () => {
   });
 });
 
+describe('parallel throughput and concurrency KPIs (#657)', () => {
+  it('reports achievedConcurrency of 2 while two lane windows overlap', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title', lane: 'a', ts: at(0) }),
+      event({ issue: '1', type: 'merged', lane: 'a', ts: at(100) }),
+      event({ issue: '2', type: 'issue-title', lane: 'b', ts: at(50) }),
+      event({ issue: '2', type: 'merged', lane: 'b', ts: at(150) }),
+    ];
+
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.configuredLanes).toBe(2);
+    expect(kpis.achievedConcurrency.max).toBe(2);
+    // [0,50) 1 lane, [50,100) 2 lanes, [100,150] 1 lane, over a 150s span.
+    expect(kpis.achievedConcurrency.mean).toBeCloseTo(200 / 150, 5);
+    expect(kpis.parallelEfficiency).toBeCloseTo(200 / 150 / 2, 5);
+  });
+
+  it('reports achievedConcurrency of 1 outside any overlap, for sequential lane windows', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title', lane: 'a', ts: at(0) }),
+      event({ issue: '1', type: 'merged', lane: 'a', ts: at(100) }),
+      event({ issue: '2', type: 'issue-title', lane: 'b', ts: at(100) }),
+      event({ issue: '2', type: 'merged', lane: 'b', ts: at(200) }),
+    ];
+
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.achievedConcurrency.max).toBe(1);
+    expect(kpis.achievedConcurrency.mean).toBe(1);
+    expect(kpis.parallelEfficiency).toBe(0.5);
+  });
+
+  it('is null/0 when no run carries a lane and a complete start/merge window', () => {
+    const kpis = computeHealthKpis([event({ issue: '1', type: 'issue-title' })], []);
+
+    expect(kpis.configuredLanes).toBe(0);
+    expect(kpis.achievedConcurrency).toEqual({ mean: null, max: 0 });
+    expect(kpis.parallelEfficiency).toBe(0);
+  });
+
+  it('computes prsPerHour from a known wall-clock span and merge count', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title', ts: at(0) }),
+      event({ issue: '1', type: 'merged', ts: at(600) }),
+      event({ issue: '2', type: 'issue-title', ts: at(0) }),
+      event({ issue: '2', type: 'merged', ts: at(1200) }),
+      event({ issue: '3', type: 'issue-title', ts: at(0) }),
+      event({ issue: '3', type: 'merged', ts: at(7200) }),
+    ];
+
+    const kpis = computeHealthKpis(events, []);
+
+    // 3 merged runs over a 2-hour span (0 -> 7200s).
+    expect(kpis.prsPerHour).toBe(1.5);
+  });
+
+  it('is null when there are no merges', () => {
+    const kpis = computeHealthKpis([event({ issue: '1', type: 'issue-title' })], []);
+    expect(kpis.prsPerHour).toBeNull();
+  });
+
+  it('includes the throughput and concurrency line in formatKpiLines', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title', lane: 'a', ts: at(0) }),
+      event({ issue: '1', type: 'merged', lane: 'a', ts: at(3600) }),
+    ];
+    const kpis = computeHealthKpis(events, []);
+    const line = formatKpiLines(kpis).find((l) => l.startsWith('Throughput:'));
+
+    expect(line).toBe(
+      'Throughput: 1.00 PRs/hour · achieved concurrency: mean 1.00, max 1 (of 1 configured lane) · parallel efficiency 100%',
+    );
+  });
+
+  it('persists prsPerHour, configuredLanes, achievedConcurrency, and parallelEfficiency to kpi-history', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title', lane: 'a', ts: at(0) }),
+      event({ issue: '1', type: 'merged', lane: 'a', ts: at(3600) }),
+    ];
+    const kpis = computeHealthKpis(events, []);
+    const record = kpisToHistoryRecord(kpis, '2026-08-10');
+    const jsonl = appendKpiHistoryLine('', record);
+    const [parsed] = parseKpiHistory(jsonl);
+
+    expect(parsed.prsPerHour).toBe(1);
+    expect(parsed.configuredLanes).toBe(1);
+    expect(parsed.achievedConcurrencyMean).toBe(1);
+    expect(parsed.achievedConcurrencyMax).toBe(1);
+    expect(parsed.parallelEfficiency).toBe(1);
+
+    const legacy: KpiHistoryRecord = {
+      date: '2026-07-17',
+      runs: 3,
+      mergeRate: 1,
+      reworkRate: 0,
+      stuckRate: 0,
+      humanInterventionRate: 0,
+      fullyAutonomousRate: 0,
+      costPerMergedPr: null,
+      medianCycleTimeMs: null,
+      p90CycleTimeMs: null,
+    };
+    const legacyJsonl = appendKpiHistoryLine('', legacy);
+    const [parsedLegacy] = parseKpiHistory(legacyJsonl);
+    expect(parsedLegacy.prsPerHour).toBeUndefined();
+    expect(parsedLegacy.achievedConcurrencyMean).toBeUndefined();
+  });
+});
+
 describe('renderKpiReport', () => {
   it('renders a markdown block with the Health KPIs heading', () => {
     const kpis = computeHealthKpis(
@@ -1066,6 +1176,11 @@ describe('KPI trend', () => {
       phaseDurationsMs: {},
       phaseCosts: {},
       retriesByCause: { checker: 0, failover: 0, timeout: 0, other: 0 },
+      prsPerHour: null,
+      configuredLanes: 0,
+      achievedConcurrencyMean: null,
+      achievedConcurrencyMax: 0,
+      parallelEfficiency: 0,
     });
   });
 

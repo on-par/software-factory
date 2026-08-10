@@ -146,6 +146,20 @@ export interface HealthKpis {
    *  Deliberately NOT on the `runs` denominator every other rate here uses — a run merged
    *  yesterday has no verdict yet. See ADR-0012. */
   postMergeDefectRate: number | null;
+  /** Merged runs per wall-clock hour, from the earliest run start to the latest merge
+   *  observed (#657); null when there are no merges or the span can't be computed. */
+  prsPerHour: number | null;
+  /** Distinct lanes observed across all events in the window (#657) — the denominator
+   *  behind parallelEfficiency. */
+  configuredLanes: number;
+  /** Mean/max number of distinct lanes with an overlapping `[firstTs, mergedTs]` window
+   *  at any moment, time-weighted across the observed window (#657). `mean` is null when
+   *  no run has both a lane and complete start/merge timestamps. */
+  achievedConcurrency: { mean: number | null; max: number };
+  /** achievedConcurrency.mean / configuredLanes — surfaces starvation (lanes configured
+   *  but not actually running in parallel) even when raw throughput looks fine (#657).
+   *  0 when configuredLanes is 0 or achievedConcurrency.mean is null. */
+  parallelEfficiency: number;
 }
 
 interface RunStats {
@@ -162,6 +176,7 @@ interface RunStats {
   readiness: ReadinessInfo | null;
   defectWindowClosed: boolean;
   defectSignals: number;
+  lane: string | null;
 }
 
 /** Maps a CostEntry's `task` to the pipeline phase it billed against (#614). */
@@ -216,11 +231,54 @@ export function reworkCauseTagOf(event: FactoryEvent): ReworkCauseTag | null {
   return null;
 }
 
+/** Time-weighted mean and peak number of distinct lanes with an overlapping
+ *  `[start, end]` window at any moment (#657), via a sweep line over lane
+ *  start/end events. `mean` is null when there are no windows to sweep. */
+function computeAchievedConcurrency(windows: { lane: string; start: number; end: number }[]): {
+  mean: number | null;
+  max: number;
+} {
+  if (windows.length === 0) return { mean: null, max: 0 };
+
+  const sweepEvents = windows
+    .flatMap((w) => [
+      { ts: w.start, lane: w.lane, delta: 1 },
+      { ts: w.end, lane: w.lane, delta: -1 },
+    ])
+    .sort((a, b) => a.ts - b.ts);
+
+  const laneActiveCount = new Map<string, number>();
+  let max = 0;
+  let weightedSum = 0;
+  let totalSpan = 0;
+  let i = 0;
+  while (i < sweepEvents.length) {
+    const currentTs = sweepEvents[i].ts;
+    while (i < sweepEvents.length && sweepEvents[i].ts === currentTs) {
+      const ev = sweepEvents[i];
+      const next = (laneActiveCount.get(ev.lane) ?? 0) + ev.delta;
+      if (next <= 0) laneActiveCount.delete(ev.lane);
+      else laneActiveCount.set(ev.lane, next);
+      i++;
+    }
+    const concurrency = laneActiveCount.size;
+    if (concurrency > max) max = concurrency;
+    const nextTs = i < sweepEvents.length ? sweepEvents[i].ts : currentTs;
+    const segment = nextTs - currentTs;
+    weightedSum += concurrency * segment;
+    totalSpan += segment;
+  }
+
+  return { mean: totalSpan > 0 ? weightedSum / totalSpan : max, max };
+}
+
 export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): HealthKpis {
   const runsByIssue = new Map<string, RunStats>();
   const retriesByCause: Record<RetryCause, number> = { checker: 0, failover: 0, timeout: 0, other: 0 };
+  const allLanes = new Set<string>();
 
   for (const event of events) {
+    if (event.lane) allLanes.add(event.lane);
     if (!isRealIssue(event.issue)) continue;
 
     const stats = runsByIssue.get(event.issue) ?? {
@@ -237,6 +295,7 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
       readiness: null,
       defectWindowClosed: false,
       defectSignals: 0,
+      lane: null,
     };
 
     if (event.type === 'merged' || event.type === 'human-merged') stats.merged = true;
@@ -247,6 +306,7 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     if (event.readiness) stats.readiness = event.readiness;
     if (event.type === 'defect-window-closed') stats.defectWindowClosed = true;
     if (event.type === 'post-merge-defect') stats.defectSignals++;
+    if (event.lane && stats.lane === null) stats.lane = event.lane;
 
     const retryCause = retryCauseOf(event);
     if (retryCause) {
@@ -295,6 +355,9 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
   let defectWindowClosedRuns = 0;
   let postMergeDefectRuns = 0;
   let postMergeDefectSignals = 0;
+  const laneWindows: { lane: string; start: number; end: number }[] = [];
+  let windowStartTs: number | null = null;
+  let windowEndTs: number | null = null;
 
   for (const stats of runsByIssue.values()) {
     if (stats.merged) merged++;
@@ -338,6 +401,16 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
         postMergeDefectSignals += stats.defectSignals;
       }
     }
+
+    if (stats.firstTs !== null && (windowStartTs === null || stats.firstTs < windowStartTs)) {
+      windowStartTs = stats.firstTs;
+    }
+    if (stats.mergedTs !== null && (windowEndTs === null || stats.mergedTs > windowEndTs)) {
+      windowEndTs = stats.mergedTs;
+    }
+    if (stats.lane !== null && stats.firstTs !== null && stats.mergedTs !== null && stats.mergedTs >= stats.firstTs) {
+      laneWindows.push({ lane: stats.lane, start: stats.firstTs, end: stats.mergedTs });
+    }
   }
 
   const totalCost = costs.reduce((sum, entry) => sum + (entry.cost ?? 0), 0);
@@ -363,6 +436,15 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
   for (const phase of orderedPhases) {
     phaseDurations[phase] = percentile(phaseSamples.get(phase)!, 0.5)!;
   }
+
+  const configuredLanes = allLanes.size;
+  const achievedConcurrency = computeAchievedConcurrency(laneWindows);
+  const prsPerHour =
+    merged === 0 || windowStartTs === null || windowEndTs === null || windowEndTs <= windowStartTs
+      ? null
+      : merged / ((windowEndTs - windowStartTs) / 3_600_000);
+  const parallelEfficiency =
+    configuredLanes === 0 || achievedConcurrency.mean === null ? 0 : achievedConcurrency.mean / configuredLanes;
 
   return {
     runs,
@@ -416,6 +498,10 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     postMergeDefectRuns,
     postMergeDefectSignals,
     postMergeDefectRate: defectWindowClosedRuns === 0 ? null : postMergeDefectRuns / defectWindowClosedRuns,
+    prsPerHour,
+    configuredLanes,
+    achievedConcurrency,
+    parallelEfficiency,
   };
 }
 
@@ -453,6 +539,10 @@ export function formatKpiLines(kpis: HealthKpis): string[] {
     lines.push(`Phase medians: ${phaseEntries.map(([p, ms]) => `${p} ${formatDurationMs(ms)}`).join(' · ')}`);
   }
   lines.push(`Queue wait (median): ${kpis.queueWaitMs === null ? 'n/a' : formatDurationMs(kpis.queueWaitMs)}`);
+
+  lines.push(
+    `Throughput: ${kpis.prsPerHour === null ? 'n/a' : `${kpis.prsPerHour.toFixed(2)} PRs/hour`} · achieved concurrency: mean ${kpis.achievedConcurrency.mean === null ? 'n/a' : kpis.achievedConcurrency.mean.toFixed(2)}, max ${kpis.achievedConcurrency.max} (of ${kpis.configuredLanes} configured lane${kpis.configuredLanes === 1 ? '' : 's'}) · parallel efficiency ${formatPercent(kpis.parallelEfficiency)}`,
+  );
 
   if (kpis.readinessScoredRuns > 0 && kpis.readinessSplit) {
     const { ready, notReady } = kpis.readinessSplit;
@@ -524,6 +614,22 @@ export interface KpiHistoryRecord {
   /** Retry counts by cause (checker/failover/timeout/other) at snapshot time (#614).
    *  Absent in legacy rows. */
   retriesByCause?: Record<RetryCause, number>;
+  /** Merged runs per wall-clock hour at snapshot time (#657); null when no merges or
+   *  span. Absent in legacy rows. */
+  prsPerHour?: number | null;
+  /** Distinct lanes observed at snapshot time (#657) — denominator behind
+   *  parallelEfficiency. Absent in legacy rows. */
+  configuredLanes?: number;
+  /** Time-weighted mean number of lanes running concurrently at snapshot time (#657);
+   *  null when no run has both a lane and complete start/merge timestamps. Absent in
+   *  legacy rows. */
+  achievedConcurrencyMean?: number | null;
+  /** Peak number of lanes running concurrently at snapshot time (#657). Absent in
+   *  legacy rows. */
+  achievedConcurrencyMax?: number;
+  /** achievedConcurrencyMean / configuredLanes at snapshot time (#657). Absent in
+   *  legacy rows. */
+  parallelEfficiency?: number;
 }
 
 export function kpisToHistoryRecord(
@@ -550,6 +656,11 @@ export function kpisToHistoryRecord(
     phaseDurationsMs: kpis.phaseDurations,
     phaseCosts: kpis.phaseCosts,
     retriesByCause: kpis.retriesByCause,
+    prsPerHour: kpis.prsPerHour,
+    configuredLanes: kpis.configuredLanes,
+    achievedConcurrencyMean: kpis.achievedConcurrency.mean,
+    achievedConcurrencyMax: kpis.achievedConcurrency.max,
+    parallelEfficiency: kpis.parallelEfficiency,
     ...(meta.commitSha !== undefined ? { commitSha: meta.commitSha } : {}),
     ...(meta.models !== undefined ? { models: meta.models } : {}),
     ...(kpis.meanReadinessScore !== undefined ? { meanReadinessScore: kpis.meanReadinessScore } : {}),
