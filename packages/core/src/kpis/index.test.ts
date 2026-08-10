@@ -4,10 +4,14 @@ import type { CostEntry, FactoryEvent } from '../types/index.js';
 import {
   appendKpiHistoryLine,
   computeHealthKpis,
+  computeKpiDrift,
   formatKpiLines,
+  KPI_DRIFT_THRESHOLD_RATIO,
+  KPI_DRIFT_WINDOW_SIZE,
   type KpiHistoryRecord,
   kpisToHistoryRecord,
   parseKpiHistory,
+  renderKpiDriftLine,
   renderKpiReport,
   renderKpiTrend,
   retryCauseOf,
@@ -923,5 +927,120 @@ describe('KPI trend', () => {
     expect(deltaLine).toContain('auto —');
     expect(deltaLine).toContain('cycle p50 —');
     expect(deltaLine).toContain('cycle p90 —');
+  });
+});
+
+describe('KPI drift detection (#613)', () => {
+  function driftRecord(date: string, overrides: Partial<KpiHistoryRecord> = {}): KpiHistoryRecord {
+    return {
+      date,
+      runs: 5,
+      mergeRate: 1,
+      reworkRate: 0.1,
+      stuckRate: 0,
+      humanInterventionRate: 0,
+      fullyAutonomousRate: 1,
+      costPerMergedPr: 1,
+      medianCycleTimeMs: 100_000,
+      p90CycleTimeMs: 150_000,
+      ...overrides,
+    };
+  }
+
+  function window(count: number, overrides: Partial<KpiHistoryRecord> = {}): KpiHistoryRecord[] {
+    return Array.from({ length: count }, (_, i) => driftRecord(`2026-07-${String(i + 1).padStart(2, '0')}`, overrides));
+  }
+
+  it('exposes the window size and threshold as named, tunable constants', () => {
+    expect(KPI_DRIFT_WINDOW_SIZE).toBe(20);
+    expect(KPI_DRIFT_THRESHOLD_RATIO).toBe(0.25);
+  });
+
+  it('fires drift when the second half is visibly worse on rework rate, cost, and cycle time', () => {
+    const baseline = window(20, { reworkRate: 0.1, costPerMergedPr: 1, medianCycleTimeMs: 100_000 });
+    const recent = window(20, { reworkRate: 0.2, costPerMergedPr: 1.5, medianCycleTimeMs: 200_000 });
+    const records = [...baseline, ...recent];
+
+    const report = computeKpiDrift(records);
+    expect(report.ready).toBe(true);
+    expect(report.drift).toBe(true);
+    expect(report.reworkRate.drift).toBe(true);
+    expect(report.costPerMergedPr.drift).toBe(true);
+    expect(report.medianCycleTimeMs.drift).toBe(true);
+    expect(report.reworkRate.deltaRatio).toBeCloseTo(1);
+    expect(report.reworkRate.baseline).toBeCloseTo(0.1);
+    expect(report.reworkRate.recent).toBeCloseTo(0.2);
+
+    const line = renderKpiDriftLine(report);
+    expect(line).toContain('⚠ Drift detected');
+    expect(line).toContain('rework rate +100%');
+
+    const trend = renderKpiTrend(records);
+    expect(trend).toContain('⚠ Drift detected');
+  });
+
+  it('does not fire drift on a flat or improving series', () => {
+    const flat = window(20, { reworkRate: 0.1, costPerMergedPr: 1, medianCycleTimeMs: 100_000 });
+    const improving = window(20, { reworkRate: 0.05, costPerMergedPr: 0.8, medianCycleTimeMs: 80_000 });
+    const records = [...flat, ...improving];
+
+    const report = computeKpiDrift(records);
+    expect(report.ready).toBe(true);
+    expect(report.drift).toBe(false);
+    expect(report.reworkRate.drift).toBe(false);
+    expect(report.costPerMergedPr.drift).toBe(false);
+    expect(report.medianCycleTimeMs.drift).toBe(false);
+
+    const trend = renderKpiTrend(records);
+    expect(trend).toContain('No drift');
+  });
+
+  it('does not evaluate drift with fewer than two full windows of history', () => {
+    const records = window(10);
+
+    const report = computeKpiDrift(records);
+    expect(report.ready).toBe(false);
+    expect(report.drift).toBe(false);
+
+    const trend = renderKpiTrend(records);
+    expect(trend).not.toContain('Drift');
+  });
+
+  it('never triggers on a metric where both windows are entirely null', () => {
+    const records = window(40, { costPerMergedPr: null });
+
+    const report = computeKpiDrift(records);
+    expect(report.ready).toBe(true);
+    expect(report.drift).toBe(false);
+    expect(report.costPerMergedPr).toEqual({ baseline: null, recent: null, deltaRatio: null, drift: false });
+    expect(renderKpiDriftLine(report)).toContain('cost/merged PR n/a');
+  });
+
+  it('treats a baseline mean of zero with a non-zero recent mean as drift', () => {
+    const baseline = window(20, { reworkRate: 0 });
+    const recent = window(20, { reworkRate: 0.1 });
+    const records = [...baseline, ...recent];
+
+    const report = computeKpiDrift(records);
+    expect(report.reworkRate.baseline).toBe(0);
+    expect(report.reworkRate.recent).toBeCloseTo(0.1);
+    expect(report.reworkRate.deltaRatio).toBeNull();
+    expect(report.reworkRate.drift).toBe(true);
+    expect(report.drift).toBe(true);
+    expect(renderKpiDriftLine(report)).toContain('rework rate n/a (baseline 0% → recent 10%) ⚠');
+  });
+
+  it('supports a configurable window size and threshold', () => {
+    const baseline = window(5, { reworkRate: 0.1 });
+    const recent = window(5, { reworkRate: 0.2 });
+    const records = [...baseline, ...recent];
+
+    const lenient = computeKpiDrift(records, { windowSize: 5, thresholdRatio: 2 });
+    expect(lenient.ready).toBe(true);
+    expect(lenient.reworkRate.deltaRatio).toBeCloseTo(1);
+    expect(lenient.reworkRate.drift).toBe(false);
+
+    const strict = computeKpiDrift(records, { windowSize: 5, thresholdRatio: 0.1 });
+    expect(strict.reworkRate.drift).toBe(true);
   });
 });

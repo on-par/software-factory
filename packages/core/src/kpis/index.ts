@@ -488,6 +488,137 @@ export function appendKpiHistoryLine(existing: string, record: KpiHistoryRecord)
   return `${existing.endsWith('\n') ? existing : `${existing}\n`}${line}`;
 }
 
+/** Rolling-window size for drift detection: last N snapshots vs the preceding N (#613). */
+export const KPI_DRIFT_WINDOW_SIZE = 20;
+/** Drift threshold: a metric drifts when the recent window is worse than the baseline
+ *  window by more than this ratio. Named/exported so it can be tuned without touching
+ *  the detection logic (#613). */
+export const KPI_DRIFT_THRESHOLD_RATIO = 0.25;
+
+export interface KpiDriftMetricResult {
+  baseline: number | null;
+  recent: number | null;
+  /** (recent - baseline) / baseline; null when a ratio cannot be computed. */
+  deltaRatio: number | null;
+  drift: boolean;
+}
+
+export interface KpiDriftReport {
+  /** False when history has fewer than 2 * windowSize snapshots — too little data
+   *  to fill both windows, so no metric can be evaluated. */
+  ready: boolean;
+  windowSize: number;
+  thresholdRatio: number;
+  reworkRate: KpiDriftMetricResult;
+  costPerMergedPr: KpiDriftMetricResult;
+  medianCycleTimeMs: KpiDriftMetricResult;
+  /** True when any of the three metrics above drifted. Detection only — no
+   *  remediation is triggered by this flag (#613). */
+  drift: boolean;
+}
+
+function numericValues(values: (number | null | undefined)[]): number[] {
+  return values.filter((v): v is number => typeof v === 'number');
+}
+
+function driftMetric(baselineValues: number[], recentValues: number[], thresholdRatio: number): KpiDriftMetricResult {
+  const baseline = mean(baselineValues);
+  const recent = mean(recentValues);
+  if (baseline === null || recent === null) {
+    return { baseline, recent, deltaRatio: null, drift: false };
+  }
+  if (baseline === 0) {
+    return { baseline, recent, deltaRatio: recent === 0 ? 0 : null, drift: recent > 0 };
+  }
+  const deltaRatio = (recent - baseline) / baseline;
+  return { baseline, recent, deltaRatio, drift: deltaRatio > thresholdRatio };
+}
+
+/** Compares the last `windowSize` KPI history snapshots against the `windowSize`
+ *  preceding them, for reworkRate, costPerMergedPr, and medianCycleTimeMs — surfacing
+ *  a `drift` flag when any metric got worse by more than `thresholdRatio` (#613).
+ *  Detection only: this never triggers remediation, it only reports. */
+export function computeKpiDrift(
+  records: KpiHistoryRecord[],
+  opts: { windowSize?: number; thresholdRatio?: number } = {},
+): KpiDriftReport {
+  const windowSize = opts.windowSize ?? KPI_DRIFT_WINDOW_SIZE;
+  const thresholdRatio = opts.thresholdRatio ?? KPI_DRIFT_THRESHOLD_RATIO;
+  const notReady: KpiDriftMetricResult = { baseline: null, recent: null, deltaRatio: null, drift: false };
+
+  if (records.length < windowSize * 2) {
+    return {
+      ready: false,
+      windowSize,
+      thresholdRatio,
+      reworkRate: notReady,
+      costPerMergedPr: notReady,
+      medianCycleTimeMs: notReady,
+      drift: false,
+    };
+  }
+
+  const recentWindow = records.slice(records.length - windowSize);
+  const baselineWindow = records.slice(records.length - windowSize * 2, records.length - windowSize);
+
+  const reworkRate = driftMetric(
+    numericValues(baselineWindow.map((r) => r.reworkRate)),
+    numericValues(recentWindow.map((r) => r.reworkRate)),
+    thresholdRatio,
+  );
+  const costPerMergedPr = driftMetric(
+    numericValues(baselineWindow.map((r) => r.costPerMergedPr)),
+    numericValues(recentWindow.map((r) => r.costPerMergedPr)),
+    thresholdRatio,
+  );
+  const medianCycleTimeMs = driftMetric(
+    numericValues(baselineWindow.map((r) => r.medianCycleTimeMs)),
+    numericValues(recentWindow.map((r) => r.medianCycleTimeMs)),
+    thresholdRatio,
+  );
+
+  return {
+    ready: true,
+    windowSize,
+    thresholdRatio,
+    reworkRate,
+    costPerMergedPr,
+    medianCycleTimeMs,
+    drift: reworkRate.drift || costPerMergedPr.drift || medianCycleTimeMs.drift,
+  };
+}
+
+function formatDriftDelta(metric: KpiDriftMetricResult): string {
+  if (metric.deltaRatio === null) return 'n/a';
+  const pct = Math.round(metric.deltaRatio * 100);
+  return `${pct > 0 ? '+' : ''}${pct}%`;
+}
+
+function formatDriftMetricLine(
+  label: string,
+  metric: KpiDriftMetricResult,
+  formatValue: (v: number) => string,
+): string {
+  if (metric.baseline === null || metric.recent === null) return `${label} n/a`;
+  const marker = metric.drift ? ' ⚠' : '';
+  return `${label} ${formatDriftDelta(metric)} (baseline ${formatValue(metric.baseline)} → recent ${formatValue(metric.recent)})${marker}`;
+}
+
+export function renderKpiDriftLine(report: KpiDriftReport): string {
+  if (!report.ready) {
+    return `Drift: not enough history yet (need ${report.windowSize * 2} snapshots for a rolling ${report.windowSize}-vs-${report.windowSize} window).`;
+  }
+  const headline = report.drift
+    ? `⚠ Drift detected (rolling ${report.windowSize}-vs-${report.windowSize}, threshold +${Math.round(report.thresholdRatio * 100)}%)`
+    : `No drift (rolling ${report.windowSize}-vs-${report.windowSize}, threshold +${Math.round(report.thresholdRatio * 100)}%)`;
+  const parts = [
+    formatDriftMetricLine('rework rate', report.reworkRate, formatPercent),
+    formatDriftMetricLine('cost/merged PR', report.costPerMergedPr, formatCost),
+    formatDriftMetricLine('cycle time p50', report.medianCycleTimeMs, formatDurationMs),
+  ];
+  return `${headline}: ${parts.join(' · ')}`;
+}
+
 function formatSignedPp(curr: number | undefined, prev: number | undefined): string {
   if (typeof curr !== 'number' || typeof prev !== 'number') return '—';
   const delta = Math.round((curr - prev) * 100);
@@ -564,6 +695,11 @@ export function renderKpiTrend(records: KpiHistoryRecord[], opts: { window?: num
     const prev = records[records.length - 2];
     const curr = records[records.length - 1];
     lines.push('', renderKpiDeltaLine(prev, curr));
+  }
+
+  const drift = computeKpiDrift(records);
+  if (drift.ready) {
+    lines.push('', renderKpiDriftLine(drift));
   }
 
   return `${lines.join('\n')}\n`;

@@ -152,6 +152,7 @@ const PUBLIC_API_KEYS = [
   // KPIs
   'appendKpiHistoryLine',
   'computeHealthKpis',
+  'computeKpiDrift',
   'DEFAULT_DEFECT_WINDOW_DAYS',
   'detectPostMergeDefects',
   'fetchDefectSources',
@@ -161,10 +162,13 @@ const PUBLIC_API_KEYS = [
   'HUMAN_EVENT_TYPES',
   'isDefectWindowClosed',
   'isHumanEvent',
+  'KPI_DRIFT_THRESHOLD_RATIO',
+  'KPI_DRIFT_WINDOW_SIZE',
   'kpisToHistoryRecord',
   'mergedPrRefs',
   'parseKpiHistory',
   'reconstructHumanEvents',
+  'renderKpiDriftLine',
   'renderKpiReport',
   'renderKpiTrend',
   // Discovery
