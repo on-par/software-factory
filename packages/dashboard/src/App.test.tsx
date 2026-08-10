@@ -39,4 +39,10 @@ describe('App', () => {
     expect(nav.closest('aside')?.className).toContain('bg-navy-950');
     expect(screen.getByRole('main').className).toContain('bg-canvas');
   });
+
+  it('renders the KPI trend view in the main content', () => {
+    render(<App />);
+    expect(screen.getByText('KPI trends')).toBeDefined();
+    expect(screen.getByText('No KPI history yet.')).toBeDefined();
+  });
 });

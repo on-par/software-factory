@@ -16,6 +16,7 @@
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@on-par/factory-core": "^2.0.0",
     "@tailwindcss/vite": "^4.0.0",
     "@testing-library/react": "^16.1.0",
     "@types/react": "^19.0.0",

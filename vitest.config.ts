@@ -34,7 +34,7 @@ export default defineConfig({
         // in the same PR when it fires.
         lines: 97,
         functions: 95,
-        branches: 89,
+        branches: 90,
         statements: 96,
         // RATCHET per package: each metric set at the measured floor. Vitest 4
         // rebaselines the V8 mapping results, so these values are reset once
