@@ -91,6 +91,10 @@ export interface HealthKpis {
   medianCycleTimeMs: number | null;
   p90CycleTimeMs: number | null;
   phaseDurations: Record<string, number>;
+  /** Total model-call cost per phase (plan/build/check/ship), from CostEntry rows
+   *  mapped via phaseOfCostEntry() (#614). Only keys with at least one matching
+   *  cost row are present. */
+  phaseCosts: Record<string, number>;
   queueWaitMs: number | null;
   cycleTimeExcludedRuns: number;
   /** Total retry attempts across all runs, from retryCauseOf() over events. */
@@ -151,6 +155,33 @@ interface RunStats {
   readiness: ReadinessInfo | null;
   defectWindowClosed: boolean;
   defectSignals: number;
+}
+
+/** Maps a CostEntry's `task` to the pipeline phase it billed against (#614). */
+const TASK_PHASE: Record<string, string> = {
+  plan: 'plan',
+  triage: 'plan',
+  build_codex: 'build',
+  build_claude: 'build',
+  check_compile: 'check',
+  check_tests: 'check',
+  check_lint: 'check',
+  check_accessibility: 'check',
+  check_links: 'check',
+  check_custom: 'check',
+  check_design: 'check',
+  dispute_resolution: 'check',
+  review_pr: 'ship',
+  security_review: 'ship',
+};
+
+/** Attributes one CostEntry to a phase, or null if the task isn't mapped.
+ *  CHECK's rework-repair calls reuse the `build_claude` task (they run the
+ *  same worker harness) but are tagged `retryCause: 'checker'`, so that
+ *  signal — not the task name — decides they belong to `check` (#614). */
+export function phaseOfCostEntry(entry: CostEntry): string | null {
+  if (entry.retryCause === 'checker') return 'check';
+  return TASK_PHASE[entry.task] ?? null;
 }
 
 /** Attribute one event to a retry-cause bucket, or null if it is not a retry.
@@ -290,6 +321,12 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     (sum, entry) => sum + (entry.retryCause || entry.failoverReason ? (entry.cost ?? 0) : 0),
     0,
   );
+  const phaseCosts: Record<string, number> = {};
+  for (const entry of costs) {
+    const phase = phaseOfCostEntry(entry);
+    if (!phase) continue;
+    phaseCosts[phase] = (phaseCosts[phase] ?? 0) + (entry.cost ?? 0);
+  }
   const totalRetries = retriesByCause.checker + retriesByCause.failover + retriesByCause.timeout + retriesByCause.other;
   const sortedCycleTimes = [...cycleTimes].sort((a, b) => a - b);
 
@@ -321,6 +358,7 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     medianCycleTimeMs: percentileFromSorted(sortedCycleTimes, 0.5),
     p90CycleTimeMs: percentileFromSorted(sortedCycleTimes, 0.9),
     phaseDurations,
+    phaseCosts,
     queueWaitMs: percentile(queueWaits, 0.5),
     cycleTimeExcludedRuns: runs - cycleTimes.length,
     totalRetries,
@@ -447,6 +485,15 @@ export interface KpiHistoryRecord {
   postMergeDefectRate?: number | null;
   /** Denominator behind postMergeDefectRate at snapshot time (#612). Absent in legacy rows. */
   defectWindowClosedRuns?: number;
+  /** Per-phase (plan/build/check/ship) duration medians at snapshot time, ms (#614).
+   *  Absent in legacy rows. */
+  phaseDurationsMs?: Record<string, number>;
+  /** Per-phase model-call cost at snapshot time (#614). Only phases with at least
+   *  one matching cost row are present. Absent in legacy rows. */
+  phaseCosts?: Record<string, number>;
+  /** Retry counts by cause (checker/failover/timeout/other) at snapshot time (#614).
+   *  Absent in legacy rows. */
+  retriesByCause?: Record<RetryCause, number>;
 }
 
 export function kpisToHistoryRecord(
@@ -469,6 +516,9 @@ export function kpisToHistoryRecord(
     meanSizeScore: kpis.meanSizeScore,
     postMergeDefectRate: kpis.postMergeDefectRate,
     defectWindowClosedRuns: kpis.defectWindowClosedRuns,
+    phaseDurationsMs: kpis.phaseDurations,
+    phaseCosts: kpis.phaseCosts,
+    retriesByCause: kpis.retriesByCause,
     ...(meta.commitSha !== undefined ? { commitSha: meta.commitSha } : {}),
     ...(meta.models !== undefined ? { models: meta.models } : {}),
     ...(kpis.meanReadinessScore !== undefined ? { meanReadinessScore: kpis.meanReadinessScore } : {}),

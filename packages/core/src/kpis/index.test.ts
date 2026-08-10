@@ -460,6 +460,101 @@ describe('retry KPIs', () => {
   });
 });
 
+describe('phase-level cost and time attribution (#614)', () => {
+  it('attributes cost per phase, mapping CHECK rework-repair cost via retryCause, not task', () => {
+    const costs: CostEntry[] = [
+      cost({ task: 'plan', cost: 0.1 }),
+      cost({ task: 'build_claude', cost: 0.5 }),
+      // CHECK's rework-repair call reuses the build_claude task but is tagged
+      // retryCause: 'checker' — that must win over the task-based mapping.
+      cost({ task: 'build_claude', cost: 0.2, retryCause: 'checker' }),
+      cost({ task: 'check_tests', cost: 0.05 }),
+      cost({ task: 'review_pr', cost: 0.02 }),
+    ];
+
+    const kpis = computeHealthKpis([event({ issue: '1', type: 'issue-title' })], costs);
+
+    expect(kpis.phaseCosts).toEqual({ plan: 0.1, build: 0.5, check: 0.25, ship: 0.02 });
+  });
+
+  it('drops cost rows whose task has no known phase mapping', () => {
+    const kpis = computeHealthKpis([event({ issue: '1', type: 'issue-title' })], [cost({ task: 'unmapped', cost: 1 })]);
+
+    expect(kpis.phaseCosts).toEqual({});
+  });
+
+  it('runs a fixture pipeline through PLAN/BUILD/CHECK/SHIP with known synthetic durations and persists a snapshot whose per-phase entries sum to the total cycle time', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title', ts: at(0) }),
+      event({ issue: '1', type: 'phase-start', phase: 'plan', ts: at(0) }),
+      event({ issue: '1', type: 'phase-end', phase: 'plan', ts: at(60) }),
+      event({ issue: '1', type: 'phase-start', phase: 'build', ts: at(60) }),
+      event({ issue: '1', type: 'phase-end', phase: 'build', ts: at(360) }),
+      event({ issue: '1', type: 'phase-start', phase: 'check', ts: at(360) }),
+      event({
+        issue: '1',
+        type: 'rework',
+        ts: at(400),
+        rework: { round: 1, failingChecks: ['tests'], cause: 'factory-fault' },
+      }),
+      event({ issue: '1', type: 'phase-end', phase: 'check', ts: at(420) }),
+      event({ issue: '1', type: 'phase-start', phase: 'ship', ts: at(420) }),
+      event({ issue: '1', type: 'phase-end', phase: 'ship', ts: at(450) }),
+      event({ issue: '1', type: 'merged', ts: at(450) }),
+    ];
+    const costs: CostEntry[] = [
+      cost({ task: 'plan', cost: 0.1 }),
+      cost({ task: 'build_claude', cost: 0.5 }),
+      cost({ task: 'build_claude', cost: 0.2, retryCause: 'checker' }),
+      cost({ task: 'check_tests', cost: 0.05 }),
+      cost({ task: 'review_pr', cost: 0.02 }),
+    ];
+
+    const kpis = computeHealthKpis(events, costs);
+
+    expect(kpis.phaseDurations).toEqual({ plan: 60_000, build: 300_000, check: 60_000, ship: 30_000 });
+    expect(kpis.phaseCosts).toEqual({ plan: 0.1, build: 0.5, check: 0.25, ship: 0.02 });
+    expect(kpis.retriesByCause).toEqual({ checker: 1, failover: 0, timeout: 0, other: 0 });
+    expect(kpis.medianCycleTimeMs).toBe(450_000);
+
+    const record = kpisToHistoryRecord(kpis, '2026-08-10');
+    const jsonl = appendKpiHistoryLine('', record);
+    const [snapshot] = parseKpiHistory(jsonl);
+
+    for (const phase of ['plan', 'build', 'check', 'ship']) {
+      expect(snapshot.phaseDurationsMs?.[phase]).toBeGreaterThan(0);
+    }
+    expect(snapshot.phaseCosts).toEqual({ plan: 0.1, build: 0.5, check: 0.25, ship: 0.02 });
+    expect(snapshot.retriesByCause).toEqual({ checker: 1, failover: 0, timeout: 0, other: 0 });
+
+    const summedPhaseDurations = Object.values(snapshot.phaseDurationsMs ?? {}).reduce((a, b) => a + b, 0);
+    expect(summedPhaseDurations).toBe(snapshot.medianCycleTimeMs);
+  });
+
+  it('legacy history rows without phase attribution still parse', () => {
+    const legacy: KpiHistoryRecord = {
+      date: '2026-07-17',
+      runs: 3,
+      mergeRate: 1,
+      reworkRate: 0,
+      stuckRate: 0,
+      humanInterventionRate: 0,
+      fullyAutonomousRate: 0,
+      costPerMergedPr: null,
+      medianCycleTimeMs: null,
+      p90CycleTimeMs: null,
+    };
+
+    const jsonl = appendKpiHistoryLine('', legacy);
+    const [parsed] = parseKpiHistory(jsonl);
+
+    expect(parsed.phaseDurationsMs).toBeUndefined();
+    expect(parsed.phaseCosts).toBeUndefined();
+    expect(parsed.retriesByCause).toBeUndefined();
+    expect(() => renderKpiTrend([parsed])).not.toThrow();
+  });
+});
+
 describe('issue readiness KPIs (#421)', () => {
   const readyEvents: FactoryEvent[] = [
     event({ issue: '1', type: 'issue-title', ts: at(0) }),
@@ -847,6 +942,9 @@ describe('KPI trend', () => {
       meanSizeScore: null,
       postMergeDefectRate: null,
       defectWindowClosedRuns: 0,
+      phaseDurationsMs: {},
+      phaseCosts: {},
+      retriesByCause: { checker: 0, failover: 0, timeout: 0, other: 0 },
     });
   });
 
