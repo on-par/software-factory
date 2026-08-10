@@ -39,7 +39,7 @@ Positive: both metrics fall out of data already on the event log, with no change
 human-readable string. The two denominators differ, so the pair genuinely reports two
 things — how oversized the scored issues were, and how much of the whole backlog the
 gate even saw. Legacy rows and legacy events keep parsing unchanged.
-Negative: `meanSizeScore` has no resolution on *how far* over budget an issue was — a
+Negative: `meanSizeScore` has no resolution on _how far_ over budget an issue was — a
 6-item issue and a 20-item issue score the same 0. `sizeGateEscalationRate` is diluted
 by runs that carry no size verdict (fast-path runs, which return before the readiness
 event is logged, and any run predating #605), so it reads low while the log is mostly
