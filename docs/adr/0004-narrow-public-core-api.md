@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-07-17
+- Amended by: [ADR-0013](0013-kpis-subpath-export-for-browser-safe-kpi-consumers.md) (added a fourth subpath export, `./kpis`)
 
 ## Context
 

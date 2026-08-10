@@ -1,3 +1,5 @@
+import { KpiTrendView } from './KpiTrendView.js';
+
 const NAV_ITEMS = ['Runs', 'Issues', 'Models', 'Settings'];
 
 export function App() {
@@ -29,6 +31,10 @@ export function App() {
         </header>
         <main className="flex-1 overflow-auto bg-canvas p-3">
           <p className="text-sm text-ink-400">No runs yet.</p>
+          <h3 className="mt-4 text-sm font-semibold text-ink-900">KPI trends</h3>
+          <div className="mt-2">
+            <KpiTrendView kpiHistoryJsonl="" />
+          </div>
         </main>
       </div>
     </div>

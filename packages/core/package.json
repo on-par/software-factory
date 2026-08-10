@@ -20,6 +20,11 @@
       "development": "./src/testing.ts",
       "import": "./dist/testing.js",
       "types": "./dist/testing.d.ts"
+    },
+    "./kpis": {
+      "development": "./src/kpis-entry.ts",
+      "import": "./dist/kpis-entry.js",
+      "types": "./dist/kpis-entry.d.ts"
     }
   },
   "files": [
