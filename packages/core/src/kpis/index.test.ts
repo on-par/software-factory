@@ -15,6 +15,7 @@ import {
   renderKpiReport,
   renderKpiTrend,
   retryCauseOf,
+  reworkCauseTagOf,
 } from './index.js';
 
 function event(overrides: Partial<FactoryEvent> = {}): FactoryEvent {
@@ -372,6 +373,43 @@ describe('retryCauseOf', () => {
 
   it('returns null for a plain, non-retry event', () => {
     expect(retryCauseOf(event({ type: 'issue-title' }))).toBeNull();
+  });
+});
+
+describe('reworkCauseTagOf (#615)', () => {
+  it('tags a conflict event (branch collided with a file another lane had already merged) as merge-conflict', () => {
+    expect(reworkCauseTagOf(event({ type: 'conflict', msg: 'rebase conflict on the-branch — parked' }))).toBe(
+      'merge-conflict',
+    );
+  });
+
+  it('tags a rework event with failing checkers as checker-failure', () => {
+    expect(
+      reworkCauseTagOf(
+        event({ type: 'rework', rework: { round: 1, failingChecks: ['tests'], cause: 'factory-fault' } }),
+      ),
+    ).toBe('checker-failure');
+  });
+
+  it('tags a stuck event with failing checkers as checker-failure', () => {
+    expect(
+      reworkCauseTagOf(
+        event({
+          type: 'stuck',
+          rework: { round: 2, failingChecks: ['lint'], cause: 'factory-fault', stuck: true },
+        }),
+      ),
+    ).toBe('checker-failure');
+  });
+
+  it('tags a rework event with no failing checkers recorded as other', () => {
+    expect(
+      reworkCauseTagOf(event({ type: 'rework', rework: { round: 1, failingChecks: [], cause: 'factory-fault' } })),
+    ).toBe('other');
+  });
+
+  it('returns null for a plain, non-rework event', () => {
+    expect(reworkCauseTagOf(event({ type: 'issue-title' }))).toBeNull();
   });
 });
 
@@ -839,6 +877,88 @@ describe('post-merge defect KPIs (#612)', () => {
   });
 });
 
+describe('collision-caused rework KPIs (#615)', () => {
+  it('counts a run whose rework was caused by a merge conflict toward collisionReworkRuns/Rate', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title' }),
+      event({ issue: '1', type: 'conflict', msg: 'rebase conflict on issue-1-branch — parked' }),
+      event({ issue: '2', type: 'issue-title' }),
+      event({ issue: '2', type: 'rework', rework: { round: 1, failingChecks: ['tests'], cause: 'factory-fault' } }),
+      event({ issue: '3', type: 'issue-title' }),
+      event({ issue: '3', type: 'merged' }),
+      event({ issue: '4', type: 'issue-title' }),
+    ];
+
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.reworkRuns).toBe(1);
+    expect(kpis.reworkRate).toBe(0.25);
+    expect(kpis.collisionReworkRuns).toBe(1);
+    expect(kpis.collisionReworkRate).toBe(0.25);
+  });
+
+  it('does not count a checker-caused rework toward collisionReworkRuns', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title' }),
+      event({ issue: '1', type: 'rework', rework: { round: 1, failingChecks: ['tests'], cause: 'factory-fault' } }),
+    ];
+
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.reworkRuns).toBe(1);
+    expect(kpis.collisionReworkRuns).toBe(0);
+    expect(kpis.collisionReworkRate).toBe(0);
+  });
+
+  it('is 0, not an error, for an empty log', () => {
+    const kpis = computeHealthKpis([], []);
+    expect(kpis.collisionReworkRuns).toBe(0);
+    expect(kpis.collisionReworkRate).toBe(0);
+  });
+
+  it('includes the collision-caused rework line in formatKpiLines', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title' }),
+      event({ issue: '1', type: 'conflict', msg: 'rebase conflict — parked' }),
+      event({ issue: '2', type: 'issue-title' }),
+    ];
+    const kpis = computeHealthKpis(events, []);
+    expect(formatKpiLines(kpis)).toContain('Collision-caused rework rate: 50% (1/2)');
+  });
+
+  it('computes and writes collisionReworkRate to kpi-history alongside reworkRate, and legacy rows still parse', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title' }),
+      event({ issue: '1', type: 'conflict', msg: 'rebase conflict — parked' }),
+      event({ issue: '2', type: 'issue-title' }),
+      event({ issue: '2', type: 'merged' }),
+    ];
+    const kpis = computeHealthKpis(events, []);
+    const record = kpisToHistoryRecord(kpis, '2026-08-10');
+    const jsonl = appendKpiHistoryLine('', record);
+    const [parsed] = parseKpiHistory(jsonl);
+
+    expect(parsed.reworkRate).toBe(0);
+    expect(parsed.collisionReworkRate).toBe(0.5);
+
+    const legacy: KpiHistoryRecord = {
+      date: '2026-07-17',
+      runs: 3,
+      mergeRate: 1,
+      reworkRate: 0,
+      stuckRate: 0,
+      humanInterventionRate: 0,
+      fullyAutonomousRate: 0,
+      costPerMergedPr: null,
+      medianCycleTimeMs: null,
+      p90CycleTimeMs: null,
+    };
+    const legacyJsonl = appendKpiHistoryLine('', legacy);
+    const [parsedLegacy] = parseKpiHistory(legacyJsonl);
+    expect(parsedLegacy.collisionReworkRate).toBeUndefined();
+  });
+});
+
 describe('renderKpiReport', () => {
   it('renders a markdown block with the Health KPIs heading', () => {
     const kpis = computeHealthKpis(
@@ -931,6 +1051,7 @@ describe('KPI trend', () => {
       runs: 1,
       mergeRate: 1,
       reworkRate: 0,
+      collisionReworkRate: 0,
       stuckRate: 0,
       humanInterventionRate: 0,
       fullyAutonomousRate: 1,
