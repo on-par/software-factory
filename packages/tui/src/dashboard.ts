@@ -1,4 +1,4 @@
-import type { FactoryEvent } from '@on-par/factory-core';
+import { laneStatusOf, type FactoryEvent } from '@on-par/factory-core';
 
 import { initialState, type PhaseName, reduceEvent, type RunState } from './state.js';
 
@@ -32,9 +32,6 @@ export function isLaneEvent(e: FactoryEvent): boolean {
   return /^\d+$/.test(e.issue);
 }
 
-const PHASE_EVENT_TYPES = new Set(['plan', 'build', 'check', 'rework', 'ship']);
-const FAILURE_TYPES = new Set(['fail', 'escalate', 'timeout', 'conflict', 'parked', 'ship_denied']);
-
 function newLane(e: FactoryEvent): LaneState {
   return { issue: e.issue, run: initialState(), status: 'running', startedAt: e.ts };
 }
@@ -52,7 +49,7 @@ export function reduceDashboard(state: DashboardState, e: FactoryEvent): Dashboa
 
   let lane: LaneState = { ...prevLane, run: reduceEvent(prevLane.run, e) };
 
-  if (PHASE_EVENT_TYPES.has(e.type) && prevStatus !== 'running') {
+  if (laneStatusOf(e.type) === 'running' && prevStatus !== 'running') {
     lane = {
       ...lane,
       status: 'running',
@@ -72,7 +69,7 @@ export function reduceDashboard(state: DashboardState, e: FactoryEvent): Dashboa
     lane = { ...lane, status: 'waiting-merge', waitingSince: lane.waitingSince ?? e.ts };
   } else if (e.type === 'landed') {
     lane = { ...lane, status: 'merged', finishedAt: e.ts };
-  } else if (FAILURE_TYPES.has(e.type)) {
+  } else if (laneStatusOf(e.type) === 'failed') {
     lane = {
       ...lane,
       status: 'failed',

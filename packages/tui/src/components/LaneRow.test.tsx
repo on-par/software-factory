@@ -1,3 +1,4 @@
+import type { EventKind } from '@on-par/factory-core';
 import { cleanup, render } from 'ink-testing-library';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -6,7 +7,7 @@ import { LaneRow } from './LaneRow.js';
 
 afterEach(cleanup);
 
-function laneFor(events: Array<{ type: string; msg: string; ts?: string }>, issue = '296'): LaneState {
+function laneFor(events: Array<{ type: EventKind; msg: string; ts?: string }>, issue = '296'): LaneState {
   let state = initialDashboard();
   for (const e of events) {
     state = reduceDashboard(state, { ts: e.ts ?? '2026-01-01T00:00:00.000Z', type: e.type, issue, msg: e.msg });

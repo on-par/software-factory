@@ -9,6 +9,7 @@ import { createFsReader } from '@on-par/repo-context';
 
 import { applyAdrWritePlan, planAdrWrites, readAdrDrafts } from '../adr/write.js';
 import type { ApprovalGate } from '../approvals/index.js';
+import type { EventKind } from '../events/kinds.js';
 import { gatherEvidencePack } from '../reports/evidence-pack.js';
 import type { CheckSummary } from '../types/index.js';
 import { watchChecks } from '../utils/ci-watch.js';
@@ -36,7 +37,7 @@ export async function shipPhase(opts: {
   branch: string;
   octokit: Octokit;
   watchCI?: boolean;
-  log: (type: string, msg: string) => void;
+  log: (type: EventKind, msg: string) => void;
   run?: CommandRunner;
   approvalGate?: ApprovalGate;
   checkSummary?: CheckSummary;
@@ -302,7 +303,7 @@ async function materializeAdrDrafts(o: {
   worktree: string;
   specPath?: string;
   run: CommandRunner;
-  log: (type: string, msg: string) => void;
+  log: (type: EventKind, msg: string) => void;
   today: string;
 }): Promise<{ committed: boolean; paths: string[] }> {
   if (!o.specPath) return { committed: false, paths: [] };

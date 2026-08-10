@@ -5,9 +5,10 @@ import { readFile } from 'node:fs/promises';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { readDesignArtifact, renderDesignGrounding } from '../design/index.js';
 import { laneEnv } from '../environment/index.js';
+import type { EventKind } from '../events/kinds.js';
 import type { ModelRouter, RouterResult } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
-import type { SandboxPolicy } from '../sandbox/index.js';
+import type { SandboxEventType, SandboxPolicy } from '../sandbox/index.js';
 import { applySteering, type ConsumedSteering } from '../steering/index.js';
 import type { Constitution, FailoverReason } from '../types/index.js';
 import { codexDisabled, escalationLine, isEscalation } from '../utils/index.js';
@@ -28,7 +29,7 @@ export async function buildPhase(opts: {
   route: 'codex' | 'claude';
   router: ModelRouter;
   log: (
-    type: string,
+    type: EventKind,
     msg: string,
     extra?: { failoverReason?: FailoverReason; model?: string; tokens?: { input: number; output: number } },
   ) => void;
@@ -145,7 +146,7 @@ ${compactForLocalModel(spec)}
     timeoutSeconds: timeoutSeconds ?? 7200,
     modelOverride,
     sandbox,
-    onSandboxEvent: (type: string, detail: string) => log(type, detail),
+    onSandboxEvent: (type: SandboxEventType, detail: string) => log(type, detail),
     onLog: (msg: string) => log('router', msg),
     env: laneEnv(appPort, process.env, appBaseUrl),
     onPgid,

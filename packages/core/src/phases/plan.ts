@@ -15,6 +15,7 @@ import { PLAN_SPEC_PREVIEW_BYTES } from '../approvals/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { designArtifactPaths, parseDesignArtifact, renderDesignArtifact } from '../design/index.js';
 import { buildFastPathSpec, isFastPathEligible } from '../efficiency/fast-path.js';
+import type { EventKind } from '../events/kinds.js';
 import { buildReadinessEnrichmentPrompt } from '../readiness/enrich.js';
 import { scoreIssueReadiness } from '../readiness/index.js';
 import type { ModelRouter } from '../router/index.js';
@@ -154,7 +155,7 @@ export async function planPhase(opts: {
   router: ModelRouter;
   octokit: Octokit;
   log: (
-    type: string,
+    type: EventKind,
     msg: string,
     extra?: {
       failoverReason?: FailoverReason;
@@ -486,7 +487,7 @@ export async function planPhase(opts: {
   }
 }
 
-async function archiveExistingSpec(specPath: string, log: (type: string, msg: string) => void): Promise<void> {
+async function archiveExistingSpec(specPath: string, log: (type: EventKind, msg: string) => void): Promise<void> {
   if (!existsSync(specPath)) return;
 
   const archiveDir = join(dirname(specPath), '.archive');

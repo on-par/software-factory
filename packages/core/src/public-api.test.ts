@@ -84,6 +84,12 @@ const PUBLIC_API_KEYS = [
   // Events
   'followEvents',
   'readEvents',
+  'eventTraitsFor',
+  'EVENT_TRAITS',
+  'isParkKind',
+  'laneStatusOf',
+  'severityOf',
+  'UNKNOWN_EVENT_TRAITS',
   // Models
   'diagnoseModels',
   'isCommandAvailable',

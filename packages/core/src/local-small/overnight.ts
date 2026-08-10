@@ -1,6 +1,8 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
+import type { EventKind } from '../events/kinds.js';
+
 export type OvernightPreflightResult = { ok: true } | { ok: false; reason: string };
 
 export type OvernightItemStatus = 'ready' | 'parked' | 'failed';
@@ -36,7 +38,7 @@ export interface OvernightQueueDeps {
   processItem: (issue: number) => Promise<OvernightItemOutcome>;
   /** Invoked for every parked or failed item so the caller can surface a report. */
   report?: (item: OvernightStateItem) => Promise<void> | void;
-  log?: (type: string, msg: string) => void;
+  log?: (type: EventKind, msg: string) => void;
 }
 
 export interface OvernightQueueResult {

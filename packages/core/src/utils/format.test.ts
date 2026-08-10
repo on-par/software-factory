@@ -69,6 +69,9 @@ describe('formatEventLine — color mode', () => {
     ['fail', '✗', `${BOLD}${RED}`, 'error'],
     ['escalate', '✗', `${BOLD}${RED}`, 'error'],
     ['ship_denied', '✗', `${BOLD}${RED}`, 'error'],
+    // Regression (#663): 'ci-failed' used to fall into the 'other' bucket (dim, info)
+    // because it was absent from the old hand-maintained ERROR_TYPES set.
+    ['ci-failed', '✗', `${BOLD}${RED}`, 'error'],
     ['router', '→', DIM, 'router'],
     ['worktree-gc', '•', DIM, 'other'],
   ])('renders %s as the %s category', (type, symbol, color) => {
@@ -139,6 +142,8 @@ describe('levelForType', () => {
     ['escalate', 'error'],
     ['ship_denied', 'error'],
     ['parked', 'error'],
+    // Regression (#663): see the formatEventLine color-mode case above.
+    ['ci-failed', 'error'],
     ['plan', 'info'],
     ['ready', 'info'],
     ['lane-start', 'info'],

@@ -1,6 +1,7 @@
 // src/utils/format.ts — Hand-rolled ANSI formatter for the live `[factory]` log stream.
 // No new dependency: keep core's dep list (execa, @octokit/rest, gray-matter, zod) stable.
 
+import { severityOf } from '../events/kinds.js';
 import type { LogLevel } from '../types/index.js';
 
 const RESET = '\x1b[0m';
@@ -26,41 +27,26 @@ export function colorEnabled(
 
 type Category = 'phase' | 'ok' | 'warn' | 'error' | 'router' | 'other';
 
+// Rendering-only groupings: which "info"-severity kinds get the phase (▶) vs
+// ok (✓) symbol. Not part of the shared EVENT_TRAITS vocabulary (#663) — the
+// distinction is cosmetic to this console renderer, not a severity/park/lane
+// classification other consumers need.
 const PHASE_TYPES = new Set(['plan', 'build', 'check', 'ship', 'triage']);
 const OK_TYPES = new Set(['ready', 'recovered', 'approval_granted', 'run-done', 'lane-start']);
-const WARN_TYPES = new Set([
-  'warn',
-  'rework',
-  'approval_requested',
-  'stopped',
-  'sandbox_violation',
-  'resource_limit',
-  'sandbox-unavailable',
-  'sandbox-degraded',
-  'sandbox-disabled',
-  'environment_warning',
-  'environment_orphan',
-  'environment_conflict',
-  'design_open_questions',
-  'design_artifact_invalid',
-]);
-const ERROR_TYPES = new Set(['fail', 'escalate', 'ship_denied', 'parked']);
 
 function categorize(type: string): Category {
   if (PHASE_TYPES.has(type)) return 'phase';
   if (OK_TYPES.has(type)) return 'ok';
-  if (WARN_TYPES.has(type)) return 'warn';
-  if (ERROR_TYPES.has(type)) return 'error';
+  const severity = severityOf(type);
+  if (severity === 'warn') return 'warn';
+  if (severity === 'error') return 'error';
   if (type === 'router') return 'router';
   return 'other';
 }
 
-/** Maps an event `type` to its log severity, reusing the console category sets above. */
+/** Maps an event `type` to its log severity, via the shared EVENT_TRAITS table (#663). */
 export function levelForType(type: string): LogLevel {
-  const category = categorize(type);
-  if (category === 'warn') return 'warn';
-  if (category === 'error') return 'error';
-  return 'info';
+  return severityOf(type);
 }
 
 const ROUTER_HIGHLIGHT = /failed|failing over|rate limited|usage cap|timed out|cooldown|non-retryable/i;

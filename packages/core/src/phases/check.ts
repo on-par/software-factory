@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { type CheckerContext, fileExists, runAllCheckers } from '../checkers/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { laneEnv } from '../environment/index.js';
+import type { EventKind } from '../events/kinds.js';
 import type { ModelRouter } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
@@ -19,7 +20,7 @@ import type {
   ReworkInfo,
 } from '../types/index.js';
 
-type LogFn = (type: string, msg: string, extra?: { failoverReason?: FailoverReason; rework?: ReworkInfo }) => void;
+type LogFn = (type: EventKind, msg: string, extra?: { failoverReason?: FailoverReason; rework?: ReworkInfo }) => void;
 
 export interface CheckPhaseResult {
   passed: boolean;

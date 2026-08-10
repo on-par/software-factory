@@ -5,6 +5,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
+import type { EventKind } from '../events/kinds.js';
 import type { FailoverReason } from '../types/index.js';
 
 export interface BreakerEntry {
@@ -92,7 +93,7 @@ export class ProviderBreaker {
 export async function gateBuildOnBreaker(opts: {
   breaker: ProviderBreaker;
   providers: string[];
-  log: (type: string, msg: string) => void;
+  log: (type: EventKind, msg: string) => void;
 }): Promise<{ codexBlocked: boolean }> {
   const { breaker, providers, log } = opts;
   let codexBlocked = false;

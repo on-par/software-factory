@@ -1,5 +1,6 @@
 // src/kpis/human.ts — Reconstruct explicit human-intervention events (#420)
 
+import { isParkKind } from '../events/kinds.js';
 import type { FactoryEvent, HumanEventType } from '../types/index.js';
 
 export const HUMAN_EVENT_TYPES: ReadonlySet<string> = new Set<HumanEventType>([
@@ -37,12 +38,6 @@ export interface PrSource {
    *  Used by the post-merge defect detector to match `This reverts commit <sha>` (#612). */
   mergeCommitSha?: string | null;
 }
-
-// 'parked'/'stuck' are lane-lifecycle wrapper events (runLane, multi-issue queues);
-// 'escalate'/'timeout'/'fail'/'conflict' are the ParkReason values a single-issue
-// `factory ship <issue>` run logs directly (see ParkReason/parkReasonFor in cli/index.ts).
-// Both sets are checked so a retry is detected regardless of which path produced the park.
-const PARK_ISH_TYPES = new Set(['parked', 'stuck', 'fail', 'escalate', 'timeout', 'conflict']);
 
 export function reconstructHumanEvents(sources: PrSource[], logEvents: FactoryEvent[]): FactoryEvent[] {
   const eventsByIssue = new Map<string, FactoryEvent[]>();
@@ -132,7 +127,7 @@ export function hasUnresolvedPark(events: FactoryEvent[], issue: string): boolea
     if (event.issue !== issue) continue;
     const ts = Date.parse(event.ts);
     if (Number.isNaN(ts)) continue;
-    if (PARK_ISH_TYPES.has(event.type)) {
+    if (isParkKind(event.type)) {
       if (lastParkTs === null || ts > lastParkTs) lastParkTs = ts;
     }
     if (event.type === 'merged') {

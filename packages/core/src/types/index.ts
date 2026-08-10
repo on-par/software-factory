@@ -1,5 +1,7 @@
 // src/types/index.ts — Core type definitions for the Software Factory
 
+import type { EventKind } from '../events/kinds.js';
+
 // ---------- Models ----------
 
 export type ModelProvider = 'anthropic' | 'openai' | 'ollama' | 'deepseek' | 'custom' | (string & {});
@@ -222,7 +224,7 @@ export interface ReadinessInfo {
 
 export interface FactoryEvent {
   ts: string;
-  type: string;
+  type: EventKind;
   issue: string;
   msg: string;
   level?: LogLevel;
