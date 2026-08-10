@@ -175,6 +175,11 @@ export type ReworkCause = 'factory-fault' | 'direction-change' | 'external';
  *  other = unclassifiable. */
 export type RetryCause = 'checker' | 'failover' | 'timeout' | 'other';
 
+/** Cause tag for a rework-triggering event (#615): merge-conflict = the branch
+ *  collided with a file another lane had already merged, checker-failure = a
+ *  legitimate quality/test issue caused the rework, other = not determinable. */
+export type ReworkCauseTag = 'merge-conflict' | 'checker-failure' | 'other';
+
 /** Explicit human-action event types (#420). Each event carries issue, actor, ts, msg.
  *  'human-restarted' is emitted live by the CLI; the other four are reconstructed
  *  from the GitHub API at report time by reconstructHumanEvents(). */

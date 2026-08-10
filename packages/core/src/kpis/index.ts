@@ -1,6 +1,6 @@
 // src/kpis/index.ts — Pure aggregation of factory health KPIs from events + cost rows
 
-import type { CostEntry, FactoryEvent, ReadinessInfo, RetryCause } from '../types/index.js';
+import type { CostEntry, FactoryEvent, ReadinessInfo, ReworkCauseTag, RetryCause } from '../types/index.js';
 import { isHumanEvent } from './human.js';
 
 export type { CommitSource, HumanSourceClient, PrSource } from './human.js';
@@ -75,6 +75,12 @@ export interface HealthKpis {
   /** Share of runs that looped at all (breadth). Distinct from retries, which
    *  count how many times and why — both are kept intentionally. */
   reworkRate: number;
+  /** Runs with at least one rework-triggering event tagged `merge-conflict` (#615). */
+  collisionReworkRuns: number;
+  /** collisionReworkRuns / runs; 0 when runs === 0 (#615). Tracked alongside
+   *  reworkRate to measure how much rework is attributable to parallel-lane
+   *  collisions, as opposed to legitimate checker failures. */
+  collisionReworkRate: number;
   stuckRate: number;
   /** Share of runs with at least one explicit human-* event (#420). */
   humanInterventionRate: number;
@@ -145,6 +151,7 @@ export interface HealthKpis {
 interface RunStats {
   merged: boolean;
   reworked: boolean;
+  collisionReworked: boolean;
   stuck: boolean;
   humanEvents: number;
   firstTs: number | null;
@@ -196,6 +203,19 @@ export function retryCauseOf(event: FactoryEvent): RetryCause | null {
   return null;
 }
 
+/** Tags a rework-triggering event's cause from the run's recorded failure/merge-state
+ *  data (#615): a `conflict` event is the lane's branch colliding with a file another
+ *  lane had already merged (a land-time rebase conflict, see rebaseDirtyPullRequest in
+ *  the CLI); a `rework`/`stuck` event with failing checkers is a legitimate quality/test
+ *  issue. Returns null for events that are not rework-triggering at all. */
+export function reworkCauseTagOf(event: FactoryEvent): ReworkCauseTag | null {
+  if (event.type === 'conflict') return 'merge-conflict';
+  if (event.type === 'rework' || event.type === 'stuck' || event.rework) {
+    return event.rework && event.rework.failingChecks.length > 0 ? 'checker-failure' : 'other';
+  }
+  return null;
+}
+
 export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): HealthKpis {
   const runsByIssue = new Map<string, RunStats>();
   const retriesByCause: Record<RetryCause, number> = { checker: 0, failover: 0, timeout: 0, other: 0 };
@@ -206,6 +226,7 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     const stats = runsByIssue.get(event.issue) ?? {
       merged: false,
       reworked: false,
+      collisionReworked: false,
       stuck: false,
       humanEvents: 0,
       firstTs: null,
@@ -220,6 +241,7 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
 
     if (event.type === 'merged' || event.type === 'human-merged') stats.merged = true;
     if (event.type === 'rework' || event.rework) stats.reworked = true;
+    if (reworkCauseTagOf(event) === 'merge-conflict') stats.collisionReworked = true;
     if (event.type === 'stuck' || event.rework?.stuck === true) stats.stuck = true;
     if (isHumanEvent(event)) stats.humanEvents++;
     if (event.readiness) stats.readiness = event.readiness;
@@ -254,6 +276,7 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
   const runs = runsByIssue.size;
   let merged = 0;
   let reworkRuns = 0;
+  let collisionReworkRuns = 0;
   let stuckRuns = 0;
   let humanTouchedRuns = 0;
   let fullyAutonomousRuns = 0;
@@ -276,6 +299,7 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
   for (const stats of runsByIssue.values()) {
     if (stats.merged) merged++;
     if (stats.reworked) reworkRuns++;
+    if (stats.collisionReworked) collisionReworkRuns++;
     if (stats.stuck) stuckRuns++;
     if (stats.humanEvents > 0) humanTouchedRuns++;
     if (stats.merged && stats.humanEvents === 0) fullyAutonomousRuns++;
@@ -344,9 +368,11 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     runs,
     merged,
     reworkRuns,
+    collisionReworkRuns,
     stuckRuns,
     mergeRate: runs === 0 ? 0 : merged / runs,
     reworkRate: runs === 0 ? 0 : reworkRuns / runs,
+    collisionReworkRate: runs === 0 ? 0 : collisionReworkRuns / runs,
     stuckRate: runs === 0 ? 0 : stuckRuns / runs,
     humanInterventionRate: runs === 0 ? 0 : humanTouchedRuns / runs,
     humanTouchedRuns,
@@ -408,6 +434,7 @@ export function formatKpiLines(kpis: HealthKpis): string[] {
     `Runs: ${kpis.runs}`,
     `Merge rate: ${formatPercent(kpis.mergeRate)} (${kpis.merged}/${kpis.runs})`,
     `Rework rate: ${formatPercent(kpis.reworkRate)} (${kpis.reworkRuns}/${kpis.runs})`,
+    `Collision-caused rework rate: ${formatPercent(kpis.collisionReworkRate)} (${kpis.collisionReworkRuns}/${kpis.runs})`,
     `Stuck rate: ${formatPercent(kpis.stuckRate)} (${kpis.stuckRuns}/${kpis.runs})`,
     `Human-touched runs: ${formatPercent(kpis.humanInterventionRate)} (${kpis.humanTouchedRuns}/${kpis.runs}, ${kpis.humanEventsPerRun === null ? 'n/a' : kpis.humanEventsPerRun.toFixed(2)} human events/run)`,
     `Fully autonomous: ${formatPercent(kpis.fullyAutonomousRate)} (${kpis.fullyAutonomousRuns}/${kpis.runs} merged with zero human events)`,
@@ -462,6 +489,9 @@ export interface KpiHistoryRecord {
   runs: number;
   mergeRate: number;
   reworkRate: number;
+  /** Share of runs whose rework was tagged merge-conflict at snapshot time (#615).
+   *  Absent in legacy rows. */
+  collisionReworkRate?: number;
   stuckRate: number;
   humanInterventionRate: number;
   fullyAutonomousRate: number;
@@ -506,6 +536,7 @@ export function kpisToHistoryRecord(
     runs: kpis.runs,
     mergeRate: kpis.mergeRate,
     reworkRate: kpis.reworkRate,
+    collisionReworkRate: kpis.collisionReworkRate,
     stuckRate: kpis.stuckRate,
     humanInterventionRate: kpis.humanInterventionRate,
     fullyAutonomousRate: kpis.fullyAutonomousRate,
