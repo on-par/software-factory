@@ -11,6 +11,7 @@ import {
   loadModelsConfig,
   loadRoutesConfig,
   resolveAutoFailover,
+  resolveDefectWindowDays,
   resolveEnvironmentPorts,
   resolveEnvironmentProxy,
   resolveFilingPolicy,
@@ -213,6 +214,11 @@ describe('loadFactoryConfig', () => {
   it('shipped config sets a 1800s approval timeout', () => {
     const config = loadFactoryConfig();
     expect(config.timeouts.approval_seconds).toBe(1800);
+  });
+
+  it('shipped config has a 14-day post-merge defect window', () => {
+    const config = loadFactoryConfig();
+    expect(config.kpis.defectWindowDays).toBe(14);
   });
 
   it('applies worktree gc defaults when the config omits them', async () => {
@@ -534,6 +540,25 @@ describe('resolveSkipCI', () => {
     const { ci: _ci, ...withoutCi } = config;
 
     expect(resolveSkipCI(withoutCi as typeof config, {})).toBe(false);
+  });
+});
+
+describe('resolveDefectWindowDays', () => {
+  it('defaults to config.kpis.defectWindowDays (14) when the env var is unset', () => {
+    const config = loadFactoryConfig();
+    expect(resolveDefectWindowDays(config, {})).toBe(14);
+  });
+
+  it('is overridden by a positive FACTORY_DEFECT_WINDOW_DAYS', () => {
+    const config = loadFactoryConfig();
+    expect(resolveDefectWindowDays(config, { FACTORY_DEFECT_WINDOW_DAYS: '3' })).toBe(3);
+  });
+
+  it('falls back to the config value for "0", "-1", or non-numeric overrides', () => {
+    const config = loadFactoryConfig();
+    expect(resolveDefectWindowDays(config, { FACTORY_DEFECT_WINDOW_DAYS: '0' })).toBe(14);
+    expect(resolveDefectWindowDays(config, { FACTORY_DEFECT_WINDOW_DAYS: '-1' })).toBe(14);
+    expect(resolveDefectWindowDays(config, { FACTORY_DEFECT_WINDOW_DAYS: 'abc' })).toBe(14);
   });
 });
 

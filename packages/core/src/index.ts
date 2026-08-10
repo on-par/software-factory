@@ -21,6 +21,7 @@ export {
   loadModelsConfig,
   loadRoutesConfig,
   resolveAutoFailover,
+  resolveDefectWindowDays,
   resolveEnvironmentPorts,
   resolveEnvironmentProxy,
   resolveIngestConfig,
@@ -219,16 +220,33 @@ export {
 } from './reports/benchmark-artifacts.js';
 
 // KPIs
-export type { CommitSource, HealthKpis, HumanSourceClient, KpiHistoryRecord, PrSource } from './kpis/index.js';
+export type {
+  CommitSource,
+  DefectSourceClient,
+  DefectSources,
+  HealthKpis,
+  HumanSourceClient,
+  KpiHistoryRecord,
+  MergedPrRef,
+  PrCommentSource,
+  PrSource,
+  RepoCommitSource,
+  RepoIssueSource,
+} from './kpis/index.js';
 export {
   appendKpiHistoryLine,
   computeHealthKpis,
+  DEFAULT_DEFECT_WINDOW_DAYS,
+  detectPostMergeDefects,
+  fetchDefectSources,
   fetchHumanEventSources,
   formatKpiLines,
   hasUnresolvedPark,
   HUMAN_EVENT_TYPES,
+  isDefectWindowClosed,
   isHumanEvent,
   kpisToHistoryRecord,
+  mergedPrRefs,
   parseKpiHistory,
   reconstructHumanEvents,
   renderKpiReport,

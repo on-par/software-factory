@@ -637,6 +637,109 @@ describe('size gate KPIs (#608)', () => {
   });
 });
 
+describe('post-merge defect KPIs (#612)', () => {
+  it('is null (not 0) when no run has a closed defect window', () => {
+    const kpis = computeHealthKpis([event({ issue: '1', type: 'merged' })], []);
+
+    expect(kpis.defectWindowClosedRuns).toBe(0);
+    expect(kpis.postMergeDefectRuns).toBe(0);
+    expect(kpis.postMergeDefectSignals).toBe(0);
+    expect(kpis.postMergeDefectRate).toBeNull();
+  });
+
+  it('scores window-closed runs, ignoring a merged run whose window has not closed', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'merged' }),
+      event({ issue: '1', type: 'defect-window-closed', msg: 'PR #1 post-merge defect window closed (14d)' }),
+      event({ issue: '1', type: 'post-merge-defect', msg: 'revert commit abcdef1 reverts PR #1' }),
+      event({ issue: '1', type: 'post-merge-defect', msg: 'comment on PR #1 raises a post-merge concern' }),
+      event({ issue: '2', type: 'merged' }),
+      event({ issue: '2', type: 'defect-window-closed', msg: 'PR #2 post-merge defect window closed (14d)' }),
+      event({ issue: '3', type: 'merged' }),
+    ];
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.defectWindowClosedRuns).toBe(2);
+    expect(kpis.postMergeDefectRuns).toBe(1);
+    expect(kpis.postMergeDefectSignals).toBe(2);
+    expect(kpis.postMergeDefectRate).toBe(0.5);
+  });
+
+  it('ignores a post-merge-defect event on a run with no defect-window-closed event', () => {
+    const kpis = computeHealthKpis(
+      [event({ issue: '1', type: 'merged' }), event({ issue: '1', type: 'post-merge-defect', msg: 'stray signal' })],
+      [],
+    );
+
+    expect(kpis.defectWindowClosedRuns).toBe(0);
+    expect(kpis.postMergeDefectRuns).toBe(0);
+    expect(kpis.postMergeDefectSignals).toBe(0);
+    expect(kpis.postMergeDefectRate).toBeNull();
+  });
+
+  it('omits the report line when the cohort is empty, and renders it with correct pluralization when non-empty', () => {
+    const emptyKpis = computeHealthKpis([event({ issue: '1', type: 'merged' })], []);
+    expect(formatKpiLines(emptyKpis).some((line) => line.startsWith('Post-merge defects'))).toBe(false);
+
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'merged' }),
+      event({ issue: '1', type: 'defect-window-closed', msg: 'a' }),
+      event({ issue: '1', type: 'post-merge-defect', msg: 'b' }),
+      event({ issue: '1', type: 'post-merge-defect', msg: 'c' }),
+      event({ issue: '2', type: 'merged' }),
+      event({ issue: '2', type: 'defect-window-closed', msg: 'd' }),
+    ];
+    const kpis = computeHealthKpis(events, []);
+    expect(formatKpiLines(kpis)).toContain('Post-merge defects: 50% (1/2 runs with a closed defect window, 2 signals)');
+
+    const singularKpis = computeHealthKpis(
+      [
+        event({ issue: '1', type: 'merged' }),
+        event({ issue: '1', type: 'defect-window-closed', msg: 'a' }),
+        event({ issue: '1', type: 'post-merge-defect', msg: 'b' }),
+      ],
+      [],
+    );
+    expect(formatKpiLines(singularKpis)).toContain(
+      'Post-merge defects: 100% (1/1 runs with a closed defect window, 1 signal)',
+    );
+  });
+
+  it('round-trips postMergeDefectRate and defectWindowClosedRuns through kpi-history, and legacy rows still parse', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'merged' }),
+      event({ issue: '1', type: 'defect-window-closed', msg: 'a' }),
+      event({ issue: '1', type: 'post-merge-defect', msg: 'b' }),
+      event({ issue: '2', type: 'merged' }),
+      event({ issue: '2', type: 'defect-window-closed', msg: 'c' }),
+    ];
+    const kpis = computeHealthKpis(events, []);
+    const record = kpisToHistoryRecord(kpis, '2026-08-10');
+    const jsonl = appendKpiHistoryLine('', record);
+    const [parsed] = parseKpiHistory(jsonl);
+
+    expect(parsed.postMergeDefectRate).toBe(0.5);
+    expect(parsed.defectWindowClosedRuns).toBe(2);
+
+    const legacy: KpiHistoryRecord = {
+      date: '2026-07-17',
+      runs: 3,
+      mergeRate: 1,
+      reworkRate: 0,
+      stuckRate: 0,
+      humanInterventionRate: 0,
+      fullyAutonomousRate: 0,
+      costPerMergedPr: null,
+      medianCycleTimeMs: null,
+      p90CycleTimeMs: null,
+    };
+    const legacyJsonl = appendKpiHistoryLine('', legacy);
+    const [parsedLegacy] = parseKpiHistory(legacyJsonl);
+    expect(parsedLegacy.postMergeDefectRate).toBeUndefined();
+    expect(parsedLegacy.defectWindowClosedRuns).toBeUndefined();
+  });
+});
+
 describe('renderKpiReport', () => {
   it('renders a markdown block with the Health KPIs heading', () => {
     const kpis = computeHealthKpis(
@@ -738,6 +841,8 @@ describe('KPI trend', () => {
       meanReadinessScore: null,
       sizeGateEscalationRate: 0,
       meanSizeScore: null,
+      postMergeDefectRate: null,
+      defectWindowClosedRuns: 0,
     });
   });
 

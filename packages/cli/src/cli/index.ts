@@ -23,6 +23,7 @@ import type {
   LocalBriefParams,
   LocalOnlyPolicy,
   ModelDiagnosis,
+  PrSource,
   QueueDiagnostic,
   ReadinessInfo,
   ReapedLease,
@@ -47,9 +48,11 @@ import {
   defaultFindPortListeners,
   describeEffectiveConfig,
   describeSteering,
+  detectPostMergeDefects,
   diagnoseModels,
   drainSteering,
   estimateTrailingSpend,
+  fetchDefectSources,
   fetchHumanEventSources,
   fetchSubscriptionUsage,
   formatKpiLines,
@@ -74,6 +77,7 @@ import {
   loadRepoConfig,
   loadRoutesConfig,
   LOCAL_BRIEF_SOURCE,
+  mergedPrRefs,
   ModelRegistry,
   ModelRouter,
   parseKpiHistory,
@@ -93,6 +97,7 @@ import {
   renderKpiTrend,
   resolveAutoFailover,
   resolveCodexDisabled,
+  resolveDefectWindowDays,
   resolveEffectiveModelPins,
   resolveEfficiencyPolicy,
   resolveEnvironmentPorts,
@@ -588,18 +593,37 @@ async function cmdKpis() {
   const costs = existsSync(paths.costs) ? readCosts(paths.costs) : [];
 
   let allEvents = events;
+  let prSources: PrSource[] = [];
+  let owner = '';
+  let repoName = '';
   try {
     const ghRepo = await getGitHubRepo();
-    const [owner, repoName] = ghRepo.split('/');
+    [owner, repoName] = ghRepo.split('/');
     const issues = new Set(events.map((e) => e.issue).filter((i) => /^\d+$/.test(i)));
-    const sources = await fetchHumanEventSources(getOctokit(), owner, repoName, issues);
-    allEvents = [...events, ...reconstructHumanEvents(sources, events)];
+    prSources = await fetchHumanEventSources(getOctokit(), owner, repoName, issues);
+    allEvents = [...events, ...reconstructHumanEvents(prSources, events)];
   } catch (err: any) {
     console.error(
       chalk.yellow(
         `factory: GitHub human-event reconstruction unavailable (${err?.message ?? err}) — KPIs use the local log only`,
       ),
     );
+  }
+
+  if (prSources.length > 0) {
+    try {
+      const windowDays = resolveDefectWindowDays(loadFactoryConfig());
+      const now = new Date().toISOString();
+      const merged = mergedPrRefs(prSources);
+      const sources = await fetchDefectSources(getOctokit(), owner, repoName, merged, { now, windowDays });
+      allEvents = [...allEvents, ...detectPostMergeDefects(sources, allEvents, { now, windowDays })];
+    } catch (err: any) {
+      console.error(
+        chalk.yellow(
+          `factory: post-merge defect signals unavailable (${err?.message ?? err}) — postMergeDefectRate omitted from this snapshot`,
+        ),
+      );
+    }
   }
 
   const kpis = computeHealthKpis(allEvents, costs);
