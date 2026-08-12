@@ -126,7 +126,7 @@ describe('watchChecks', () => {
     expect(outcome).toBe('success');
   });
 
-  it.each(['failure', 'cancelled', 'timed_out', 'action_required', 'stale'])(
+  it.each(['failure', 'cancelled', 'timed_out', 'action_required', 'stale', 'startup_failure'])(
     'treats a completed %s conclusion as blocking',
     async (conclusion) => {
       const { listForRef } = scriptChecks([[{ status: 'completed', conclusion }]]);
