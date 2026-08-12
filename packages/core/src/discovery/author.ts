@@ -37,6 +37,7 @@ export interface AuthorDraftEpicDeps {
 export type AuthorDraftEpicResult =
   | { created: true; issueNumber: number; issueUrl: string; labels: string[]; commentPosted: boolean }
   | { created: false; reason: 'duplicate'; duplicateOf: number }
+  | { created: false; reason: 'list-failed'; detail: string }
   | { created: false; reason: 'create-failed'; detail: string };
 
 // ---------- Pure helpers ----------
@@ -166,14 +167,18 @@ export async function authorDraftEpic(
     ],
     { cwd: repoDir },
   );
-  let existing: Array<{ number: number; title: string; body: string }> = [];
+  if (!listResult.ok) {
+    return { created: false, reason: 'list-failed', detail: listResult.stdout || 'gh issue list failed' };
+  }
+  let existing: Array<{ number: number; title: string; body: string }>;
   try {
     const parsed: unknown = JSON.parse(listResult.stdout);
-    if (Array.isArray(parsed)) {
-      existing = parsed as Array<{ number: number; title: string; body: string }>;
+    if (!Array.isArray(parsed)) {
+      return { created: false, reason: 'list-failed', detail: 'unparseable gh issue list output' };
     }
+    existing = parsed as Array<{ number: number; title: string; body: string }>;
   } catch {
-    existing = [];
+    return { created: false, reason: 'list-failed', detail: 'unparseable gh issue list output' };
   }
 
   const dup = findDuplicate(existing, candidate, title);

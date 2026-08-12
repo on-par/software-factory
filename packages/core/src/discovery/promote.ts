@@ -317,14 +317,18 @@ export async function advanceDraftEpic(
       ],
       { cwd: repoDir },
     );
-    let existingChildren: Array<{ number: number; title: string; body: string }> = [];
+    if (!listResult.ok) {
+      return { action: 'error', detail: listResult.stdout || 'gh issue list failed' };
+    }
+    let existingChildren: Array<{ number: number; title: string; body: string }>;
     try {
       const parsed: unknown = JSON.parse(listResult.stdout);
-      if (Array.isArray(parsed)) {
-        existingChildren = parsed as Array<{ number: number; title: string; body: string }>;
+      if (!Array.isArray(parsed)) {
+        return { action: 'error', detail: 'unparseable gh issue list output' };
       }
+      existingChildren = parsed as Array<{ number: number; title: string; body: string }>;
     } catch {
-      existingChildren = [];
+      return { action: 'error', detail: 'unparseable gh issue list output' };
     }
 
     const storyNumbers: number[] = [];
