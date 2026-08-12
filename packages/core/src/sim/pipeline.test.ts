@@ -153,9 +153,14 @@ describe('runSimulation', () => {
                   await simCommitAll(ctx.worktree, 'feat: sim work with failing verify');
                 },
               },
-              // No further build_claude steps — the executor's defaultStep ({ output: '' },
-              // no effect) never repairs scripts/verify.sh, so the failure signature repeats
-              // and CHECK's rework loop declares the lane stuck.
+              // Two more scripted rework rounds with non-empty output and no effect: the
+              // worker genuinely runs each round but never repairs scripts/verify.sh, so the
+              // failure signature repeats and CHECK's rework loop declares the lane stuck.
+              // (Non-empty output matters (#642): the router treats an empty response as a
+              // model-side failure and fails over/exhausts, which now correctly leaves
+              // no-progress accounting untouched rather than simulating a stuck worker.)
+              { output: 'attempted repair, verify still failing' },
+              { output: 'attempted repair again, verify still failing' },
             ],
           },
         },
