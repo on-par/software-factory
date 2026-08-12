@@ -361,6 +361,14 @@ describe('parseDesignSmellVerdict', () => {
     expect(verdict).toBeNull();
     expect(reason).toContain('malformed verdict');
   });
+
+  it('rejects a non-object smells element without a stray leading colon', () => {
+    const { rejected } = parseDesignSmellVerdict('{"checker":"design_smells","result":"FAIL","smells":[42]}');
+
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]!.errors[0]).not.toMatch(/^:/);
+    expect(rejected[0]!.errors[0]).toContain('expected object');
+  });
 });
 
 describe('renderSmellDetails', () => {

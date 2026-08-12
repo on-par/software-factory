@@ -249,7 +249,9 @@ export function parseDesignSmellVerdict(output: string): {
     }
     rejected.push({
       index,
-      errors: result.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`),
+      errors: result.error.issues.map((issue) =>
+        issue.path.length > 0 ? `${issue.path.join('.')}: ${issue.message}` : issue.message,
+      ),
     });
   });
 
