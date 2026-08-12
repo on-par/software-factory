@@ -151,6 +151,8 @@ export {
 } from './utils/index.js';
 export type { FileLockOptions, SyncFileLockOptions } from './utils/lock.js';
 export { withFileLock, withFileLockSync, withGitLock } from './utils/lock.js';
+export type { RunLockHolder, RunLockOptions } from './utils/run-lock.js';
+export { readRunLockHolder, RunLockHeldError, withRunLock } from './utils/run-lock.js';
 export type { GcCandidate, GcReason, GcReport, SweepDeps, WorktreeListEntry } from './utils/worktree-gc.js';
 export {
   findCredentialFiles,

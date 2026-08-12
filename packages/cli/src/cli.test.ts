@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { ModelDiagnosis } from '@on-par/factory-core';
+import { getFactoryPaths } from '@on-par/factory-core';
+import { RunLockHeldError } from '@on-par/factory-core/internal';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -11,6 +13,7 @@ import {
   AwaitingReviewError,
   CiFailedError,
   CiUnverifiedError,
+  CliExitError,
   ConstitutionExistsError,
   createIngestHook,
   createSuperviseRunQueue,
@@ -49,6 +52,7 @@ import {
   triageNoProposalError,
   triageProposalMessage,
   waitForMerge,
+  withRepoRunLock,
 } from './cli/index.js';
 
 describe('cli', () => {
@@ -2648,5 +2652,77 @@ More prose here.
         expect(summary[2]).toBe('sweep: 1 landed, 0 skipped, 1 failed of 2 open factory PRs');
       });
     });
+  });
+});
+
+describe('withRepoRunLock', () => {
+  const paths = getFactoryPaths('/repo');
+
+  it('returns the wrapped function value when the lock is free', async () => {
+    const result = await withRepoRunLock(paths, 'factory run', async () => 'ok', {
+      runLock: async (_dir, fn) => fn(),
+    });
+
+    expect(result).toBe('ok');
+  });
+
+  it('maps RunLockHeldError to a CliExitError(2) naming the holder and remedy, and records run_lock_conflict', async () => {
+    const events: any[] = [];
+    const holder = { pid: 4321, command: 'factory run', startedAt: '2026-01-01T00:00:00.000Z', host: 'other-host' };
+
+    let rejection: unknown;
+    try {
+      await withRepoRunLock(paths, 'factory run-issue', async () => 'unreachable', {
+        runLock: async () => {
+          throw new RunLockHeldError(paths.runLock, holder);
+        },
+        emitEvent: (eventsFile, type, issue, msg) => {
+          events.push({ eventsFile, type, issue, msg });
+        },
+      });
+    } catch (err) {
+      rejection = err;
+    }
+
+    expect(rejection).toBeInstanceOf(CliExitError);
+    const exitErr = rejection as CliExitError;
+    expect(exitErr.code).toBe(2);
+    expect(exitErr.message).toContain('4321');
+    expect(exitErr.message).toContain('stop that run');
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ eventsFile: paths.events, type: 'run_lock_conflict' });
+  });
+
+  it('passes through a non-RunLockHeldError failure unchanged, without emitting an event', async () => {
+    const emitEvent = vi.fn();
+
+    await expect(
+      withRepoRunLock(paths, 'factory run', async () => 'unreachable', {
+        runLock: async () => {
+          throw new Error('boom');
+        },
+        emitEvent,
+      }),
+    ).rejects.toThrow('boom');
+
+    expect(emitEvent).not.toHaveBeenCalled();
+  });
+
+  it('emits lock-stolen through emitEvent when the injected runLock reclaims a dead holder', async () => {
+    const events: any[] = [];
+
+    await withRepoRunLock(paths, 'factory supervise', async () => 'ok', {
+      runLock: async (_dir, fn, opts: any) => {
+        opts.onReclaim(4321);
+        return fn();
+      },
+      emitEvent: (eventsFile, type, issue, msg) => {
+        events.push({ eventsFile, type, issue, msg });
+      },
+    });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ eventsFile: paths.events, type: 'lock-stolen' });
+    expect(events[0].msg).toContain('4321');
   });
 });

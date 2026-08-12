@@ -99,6 +99,7 @@ export type EventKind =
   | 'resumed'
   | 'rework'
   | 'router'
+  | 'run_lock_conflict'
   | 'run-done'
   | 'sandbox'
   | 'sandbox-degraded'
@@ -234,6 +235,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   resumed: { severity: 'info', isPark: false, isTerminal: false },
   rework: { severity: 'warn', isPark: false, isTerminal: false, laneStatus: 'running' },
   router: { severity: 'info', isPark: false, isTerminal: false },
+  run_lock_conflict: { severity: 'warn', isPark: false, isTerminal: false },
   'run-done': { severity: 'info', isPark: false, isTerminal: true },
   sandbox: { severity: 'info', isPark: false, isTerminal: false },
   'sandbox-degraded': { severity: 'warn', isPark: false, isTerminal: false },

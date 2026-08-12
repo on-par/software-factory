@@ -99,3 +99,11 @@ describe('ci-failed classification (#663 regression)', () => {
     });
   });
 });
+
+// A refused run-lock acquisition (#598) is a warning the operator should notice,
+// but it neither parks a lane (nothing started) nor ends one (nothing was running).
+describe('run_lock_conflict classification (#598)', () => {
+  it('is warn severity, not park, not terminal', () => {
+    expect(EVENT_TRAITS.run_lock_conflict).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
+  });
+});
