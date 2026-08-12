@@ -258,7 +258,7 @@ describe('watchChecks', () => {
     });
 
     expect(outcome).toBe('success');
-    expect(sleeps).toEqual([15_000]);
+    expect(sleeps).toEqual([15_000, 30_000]);
   });
 
   it('recovers from transient errors and still succeeds', async () => {
@@ -281,7 +281,7 @@ describe('watchChecks', () => {
     });
 
     expect(outcome).toBe('success');
-    expect(sleeps).toEqual([15_000, 30_000]);
+    expect(sleeps).toEqual([15_000, 30_000, 60_000]);
   });
 
   it('gives up as timeout, without rejecting, after maxPollErrors consecutive failures', async () => {
@@ -346,5 +346,163 @@ describe('watchChecks', () => {
 
     expect(outcome).toBe('timeout');
     expect(sleeps.length).toBeGreaterThan(0);
+  });
+
+  it('does not return success from a check-run set that is still growing (#602)', async () => {
+    const lintSuccess = { status: 'completed', conclusion: 'success' };
+    const integrationInProgress = { status: 'in_progress', conclusion: null };
+    const integrationSuccess = { status: 'completed', conclusion: 'success' };
+    const { listForRef, callCount } = scriptChecks([
+      [lintSuccess],
+      [lintSuccess, integrationInProgress],
+      [lintSuccess, integrationSuccess],
+    ]);
+    const { now, sleep } = createClock();
+    const octokit = { rest: { checks: { listForRef } } };
+
+    const outcome = await watchChecks({
+      octokit: octokit as any,
+      owner: 'on-par',
+      repo: 'software-factory',
+      ref: 'x',
+      sleep,
+      now,
+    });
+
+    expect(outcome).toBe('success');
+    expect(callCount()).toBeGreaterThanOrEqual(3);
+  });
+
+  it(
+    'returns failure when a check that registers late reports a non-passing conclusion, ' +
+      'even though the one-element set was already green (#602)',
+    async () => {
+      const lintSuccess = { status: 'completed', conclusion: 'success' };
+      const integrationInProgress = { status: 'in_progress', conclusion: null };
+      const integrationFailure = { status: 'completed', conclusion: 'failure' };
+      const { listForRef } = scriptChecks([
+        [lintSuccess],
+        [lintSuccess, integrationInProgress],
+        [lintSuccess, integrationFailure],
+      ]);
+      const { now, sleep } = createClock();
+      const octokit = { rest: { checks: { listForRef } } };
+
+      const outcome = await watchChecks({
+        octokit: octokit as any,
+        owner: 'on-par',
+        repo: 'software-factory',
+        ref: 'x',
+        sleep,
+        now,
+      });
+
+      expect(outcome).toBe('failure');
+    },
+  );
+
+  it('restarts the settle window when the observed check-run count changes', async () => {
+    const a = { status: 'completed', conclusion: 'success' };
+    const b = { status: 'completed', conclusion: 'success' };
+    const { listForRef } = scriptChecks([[a], [a, b]]);
+    const { now, sleep, sleeps } = createClock();
+    const octokit = { rest: { checks: { listForRef } } };
+
+    const outcome = await watchChecks({
+      octokit: octokit as any,
+      owner: 'on-par',
+      repo: 'software-factory',
+      ref: 'x',
+      sleep,
+      now,
+    });
+
+    expect(outcome).toBe('success');
+    expect(sleeps.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('settleMs: 0 restores first-poll-completes behaviour', async () => {
+    const { listForRef } = scriptChecks([allSuccess]);
+    const { now, sleep, sleeps } = createClock();
+    const octokit = { rest: { checks: { listForRef } } };
+
+    const outcome = await watchChecks({
+      octokit: octokit as any,
+      owner: 'on-par',
+      repo: 'software-factory',
+      ref: 'x',
+      sleep,
+      now,
+      settleMs: 0,
+    });
+
+    expect(outcome).toBe('success');
+    expect(sleeps).toEqual([]);
+  });
+
+  it('minChecks met bypasses the settle window entirely', async () => {
+    const { listForRef } = scriptChecks([
+      [
+        { status: 'completed', conclusion: 'success' },
+        { status: 'completed', conclusion: 'success' },
+      ],
+    ]);
+    const { now, sleep, sleeps } = createClock();
+    const octokit = { rest: { checks: { listForRef } } };
+
+    const outcome = await watchChecks({
+      octokit: octokit as any,
+      owner: 'on-par',
+      repo: 'software-factory',
+      ref: 'x',
+      sleep,
+      now,
+      minChecks: 2,
+    });
+
+    expect(outcome).toBe('success');
+    expect(sleeps).toEqual([]);
+  });
+
+  it('minChecks unmet never returns success, even if the settle window would otherwise elapse', async () => {
+    const { listForRef } = scriptChecks([allSuccess]);
+    const { now, sleep } = createClock();
+    const octokit = { rest: { checks: { listForRef } } };
+
+    const outcome = await watchChecks({
+      octokit: octokit as any,
+      owner: 'on-par',
+      repo: 'software-factory',
+      ref: 'x',
+      sleep,
+      now,
+      minChecks: 3,
+    });
+
+    expect(outcome).toBe('timeout');
+  });
+
+  it('minChecks unmet still fails fast on a red conclusion', async () => {
+    const { listForRef } = scriptChecks([
+      [
+        { status: 'completed', conclusion: 'success' },
+        { status: 'completed', conclusion: 'failure' },
+      ],
+    ]);
+    const { now, sleep, sleeps } = createClock();
+    const octokit = { rest: { checks: { listForRef } } };
+
+    const outcome = await watchChecks({
+      octokit: octokit as any,
+      owner: 'on-par',
+      repo: 'software-factory',
+      ref: 'x',
+      sleep,
+      now,
+      minChecks: 5,
+    });
+
+    expect(outcome).toBe('failure');
+    expect(sleeps).toEqual([]);
   });
 });
