@@ -96,6 +96,24 @@ describe('withRunLock / readRunLockHolder', () => {
     expect(existsSync(lockDir)).toBe(false);
   });
 
+  it('propagates a fn() error carrying reason "timeout" unchanged, never reclassifying it as a lock conflict', async () => {
+    const lockDir = makeLockDir();
+    const timeoutErr = Object.assign(new Error('provider timed out'), { reason: 'timeout' });
+
+    let rejection: unknown;
+    try {
+      await withRunLock(lockDir, async () => {
+        throw timeoutErr;
+      });
+    } catch (err) {
+      rejection = err;
+    }
+
+    expect(rejection).toBe(timeoutErr);
+    expect(rejection).not.toBeInstanceOf(RunLockHeldError);
+    expect(existsSync(lockDir)).toBe(false);
+  });
+
   it('releases the lock when fn throws, and a subsequent call succeeds', async () => {
     const lockDir = makeLockDir();
 

@@ -117,6 +117,12 @@ export async function withRunLock<T>(lockDir: string, fn: () => Promise<T>, opts
   }
 
   held.add(lockDir);
+  // Tracks whether `fn` itself was reached, so the catch below can tell "our own lock
+  // acquisition timed out" (thrown by withFileLock without ever calling this callback)
+  // apart from "fn threw an error that happens to carry a `.reason === 'timeout'` field
+  // of its own" (e.g. a harness/provider timeout) — the latter must propagate unchanged,
+  // never be reclassified as a lock conflict.
+  let calledFn = false;
   try {
     return await withFileLock(
       lockDir,
@@ -130,6 +136,7 @@ export async function withRunLock<T>(lockDir: string, fn: () => Promise<T>, opts
             command: opts.command,
           }) + '\n',
         );
+        calledFn = true;
         return fn();
       },
       {
@@ -144,7 +151,7 @@ export async function withRunLock<T>(lockDir: string, fn: () => Promise<T>, opts
       },
     );
   } catch (err) {
-    if ((err as { reason?: string }).reason === 'timeout') {
+    if (!calledFn && (err as { reason?: string }).reason === 'timeout') {
       throw new RunLockHeldError(lockDir, readRunLockHolder(lockDir));
     }
     throw err;

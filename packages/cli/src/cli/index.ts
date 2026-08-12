@@ -1436,18 +1436,20 @@ async function cmdShip(
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
 
-  const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
-  if (hasUnresolvedPark(priorEvents, String(issueNum))) {
-    logEvent(paths.events, 'human-restarted', issueNum, 'manual retry of a previously parked/failed run', {
-      actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
-    });
-  }
+  return withRepoRunLock(paths, 'factory ship', async () => {
+    const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
+    if (hasUnresolvedPark(priorEvents, String(issueNum))) {
+      logEvent(paths.events, 'human-restarted', issueNum, 'manual retry of a previously parked/failed run', {
+        actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
+      });
+    }
 
-  try {
-    return await shipIssue(issueNum, opts);
-  } catch (err: any) {
-    throw new CliExitError(`Ship failed for issue #${issueNum}: ${err.message}`, 1);
-  }
+    try {
+      return await shipIssue(issueNum, opts);
+    } catch (err: any) {
+      throw new CliExitError(`Ship failed for issue #${issueNum}: ${err.message}`, 1);
+    }
+  });
 }
 
 async function cmdRunIssue(
@@ -1626,7 +1628,6 @@ async function cmdLocalSmallDryRun(issueNum: number, opts: { spec?: string; outp
 
 async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }) {
   const repoRoot = await getRepoRoot();
-  const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
   const queueFile = resolve(repoRoot, opts.queue ?? resolve(paths.state, 'local-small', 'overnight-queue'));
   const statePath = resolve(repoRoot, opts.state ?? resolve(paths.state, 'local-small', 'overnight-state.json'));
@@ -1644,64 +1645,67 @@ async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }) 
     throw new CliExitError(`factory: overnight queue at ${queueFile} has no valid entries`, 2);
   }
 
-  process.env.FACTORY_LOCAL_ONLY = '1';
+  await withRepoRunLock(paths, 'factory local-small-overnight', async () => {
+    const ghRepo = await getGitHubRepo();
+    process.env.FACTORY_LOCAL_ONLY = '1';
 
-  const preflight = async (): Promise<OvernightPreflightResult> => {
-    if (!isCommandAvailable('claude')) return { ok: false, reason: missingClaudeCliMessage() };
-    const registry = new ModelRegistry(applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot)));
-    const ollamaModels = ollamaModelSet();
-    const diagnoses = diagnoseModels(
-      registry,
-      { ollamaModelPresent: ollamaModels ? (m: string) => ollamaModels.has(m) : undefined },
-      process.env.FACTORY_EXPERIMENTAL === '1',
-      true, // localOnly
-    );
-    if (!hasReachableWorker(diagnoses)) {
-      const reasons = diagnoses.filter((d) => !d.reachable).map((d) => `${d.model}: ${d.reason}`);
-      return { ok: false, reason: `no reachable local worker model — ${reasons.join('; ')}` };
+    const preflight = async (): Promise<OvernightPreflightResult> => {
+      if (!isCommandAvailable('claude')) return { ok: false, reason: missingClaudeCliMessage() };
+      const registry = new ModelRegistry(applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot)));
+      const ollamaModels = ollamaModelSet();
+      const diagnoses = diagnoseModels(
+        registry,
+        { ollamaModelPresent: ollamaModels ? (m: string) => ollamaModels.has(m) : undefined },
+        process.env.FACTORY_EXPERIMENTAL === '1',
+        true, // localOnly
+      );
+      if (!hasReachableWorker(diagnoses)) {
+        const reasons = diagnoses.filter((d) => !d.reachable).map((d) => `${d.model}: ${d.reason}`);
+        return { ok: false, reason: `no reachable local worker model — ${reasons.join('; ')}` };
+      }
+      return { ok: true };
+    };
+
+    const processItem = async (issue: number): Promise<OvernightItemOutcome> => {
+      try {
+        await shipIssue(issue, { autoRework: true, interactive: false }, { repoRoot, ghRepo, lane: 'overnight' });
+        return { status: 'ready' };
+      } catch (err: any) {
+        return parkReasonFor(err) === 'escalate'
+          ? { status: 'parked', reason: err.message }
+          : { status: 'failed', reason: err.message };
+      }
+    };
+
+    const report = (item: OvernightStateItem) => {
+      console.log(chalk.yellow(`factory: issue #${item.issue} ${item.status} — ${item.reason ?? 'unknown'}`));
+      logEvent(
+        paths.events,
+        'overnight-park',
+        item.issue,
+        `${item.status}: ${item.reason ?? 'unknown'} — see ${paths.reports}`,
+      );
+    };
+    const log = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
+
+    const deps: OvernightQueueDeps = { preflight, processItem, report, log };
+    const result = await runOvernightQueue({ issues: entries.map((e) => e.issue), statePath }, deps);
+
+    const ready = result.processed.filter((item) => item.status === 'ready');
+    const parked = result.processed.filter((item) => item.status === 'parked');
+    const failed = result.processed.filter((item) => item.status === 'failed');
+    console.log(chalk.green(`overnight ready: ${ready.length}`));
+    console.log(chalk.yellow(`overnight parked: ${parked.length}`));
+    console.log(chalk.red(`overnight failed: ${failed.length}`));
+    console.log(chalk.yellow(`overnight skipped (already resumed): ${result.skipped.length}`));
+
+    if (result.halted) {
+      throw new CliExitError(
+        `factory: overnight halted before issue #${result.halted.issue}: ${result.halted.reason} — fix the environment and re-run to resume`,
+        4,
+      );
     }
-    return { ok: true };
-  };
-
-  const processItem = async (issue: number): Promise<OvernightItemOutcome> => {
-    try {
-      await shipIssue(issue, { autoRework: true, interactive: false }, { repoRoot, ghRepo, lane: 'overnight' });
-      return { status: 'ready' };
-    } catch (err: any) {
-      return parkReasonFor(err) === 'escalate'
-        ? { status: 'parked', reason: err.message }
-        : { status: 'failed', reason: err.message };
-    }
-  };
-
-  const report = (item: OvernightStateItem) => {
-    console.log(chalk.yellow(`factory: issue #${item.issue} ${item.status} — ${item.reason ?? 'unknown'}`));
-    logEvent(
-      paths.events,
-      'overnight-park',
-      item.issue,
-      `${item.status}: ${item.reason ?? 'unknown'} — see ${paths.reports}`,
-    );
-  };
-  const log = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
-
-  const deps: OvernightQueueDeps = { preflight, processItem, report, log };
-  const result = await runOvernightQueue({ issues: entries.map((e) => e.issue), statePath }, deps);
-
-  const ready = result.processed.filter((item) => item.status === 'ready');
-  const parked = result.processed.filter((item) => item.status === 'parked');
-  const failed = result.processed.filter((item) => item.status === 'failed');
-  console.log(chalk.green(`overnight ready: ${ready.length}`));
-  console.log(chalk.yellow(`overnight parked: ${parked.length}`));
-  console.log(chalk.red(`overnight failed: ${failed.length}`));
-  console.log(chalk.yellow(`overnight skipped (already resumed): ${result.skipped.length}`));
-
-  if (result.halted) {
-    throw new CliExitError(
-      `factory: overnight halted before issue #${result.halted.issue}: ${result.halted.reason} — fix the environment and re-run to resume`,
-      4,
-    );
-  }
+  });
 }
 
 async function getIssueTitle(octokit: Octokit, repo: string, issue: number): Promise<string> {
@@ -2082,7 +2086,6 @@ async function cmdProxy() {
 
 async function cmdRun() {
   const repoRoot = await getRepoRoot();
-  const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
 
   if (!existsSync(paths.queue)) {
@@ -2090,6 +2093,7 @@ async function cmdRun() {
   }
 
   return withRepoRunLock(paths, 'factory run', async () => {
+    const ghRepo = await getGitHubRepo();
     const factoryConfig = loadFactoryConfig();
     if (factoryConfig.worktree.autoGcOnRun) {
       try {
