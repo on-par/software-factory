@@ -1336,6 +1336,7 @@ describe('cli', () => {
       sleep: async () => {
         throw new Error('sleep should not be called');
       },
+      watch: async () => 'success' as const,
     });
 
     expect(calls).toEqual([
@@ -1631,6 +1632,7 @@ describe('cli', () => {
       sleep: async () => {
         throw new Error('sleep should not be called');
       },
+      watch: async () => 'success' as const,
     });
 
     const warnCall = calls.find((c) => c[0] === 'log' && c[1] === 'warn');
@@ -1680,6 +1682,7 @@ describe('cli', () => {
         sleep: async () => {
           throw new Error('sleep should not be called');
         },
+        watch: async () => 'success' as const,
       }),
     ).rejects.toBeInstanceOf(LandConflictError);
 
@@ -1727,6 +1730,7 @@ describe('cli', () => {
         sleep: async () => {
           throw new Error('sleep should not be called');
         },
+        watch: async () => 'success' as const,
       }),
     ).rejects.toBeInstanceOf(LandConflictError);
 
@@ -1777,6 +1781,7 @@ describe('cli', () => {
       sleep: async (ms) => {
         sleeps.push(ms);
       },
+      watch: async () => 'success' as const,
     });
 
     expect(calls.findIndex((c) => c[0] === 'mutation')).toBeLessThan(calls.findIndex((c) => c[0] === 'merge'));
@@ -1830,6 +1835,7 @@ describe('cli', () => {
       sleep: async (ms) => {
         sleeps.push(ms);
       },
+      watch: async () => 'success' as const,
     });
 
     expect(mergeCalls).toBe(2);
@@ -1878,6 +1884,7 @@ describe('cli', () => {
       sleep: async (ms) => {
         sleeps.push(ms);
       },
+      watch: async () => 'success' as const,
     });
 
     expect(mergeCalls).toBe(3);
@@ -1924,6 +1931,7 @@ describe('cli', () => {
         sleep: async (ms) => {
           sleeps.push(ms);
         },
+        watch: async () => 'success' as const,
       }),
     ).rejects.toBe(mergeError);
 
@@ -1971,6 +1979,7 @@ describe('cli', () => {
       sleep: async (ms) => {
         sleeps.push(ms);
       },
+      watch: async () => 'success' as const,
     }).then(
       () => undefined,
       (e) => e,
