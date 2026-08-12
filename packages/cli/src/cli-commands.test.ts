@@ -169,7 +169,7 @@ vi.mock('@on-par/factory-core/internal', async (importOriginal) => {
   const actual = await importOriginal<typeof FactoryCoreInternal>();
   return {
     ...actual,
-    watchChecks: vi.fn(async () => {}),
+    watchChecks: vi.fn(async () => 'success'),
     createLocalSmallDryRun: vi.fn(async () => ({ planPath: '/tmp/plan.md', contextPath: '/tmp/ctx.md' })),
     // Cost.
     readCosts: vi.fn(() => h.costs),
@@ -2804,6 +2804,22 @@ describe('CliExitError (direct command invocation)', () => {
     await expect(cmdLand(5)).resolves.toBeUndefined();
 
     expect(logged()).toContain('failing CI check');
+    expect(logged()).toContain('left open, not merged');
+    expect(h.octokit.rest.pulls.merge).not.toHaveBeenCalled();
+    expect(cleanupWorktree).toHaveBeenCalled();
+
+    const events = readFileSync(paths().events, 'utf-8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(events.some((e) => e.type === 'ci-failed')).toBe(true);
+  });
+
+  it('cmdLand(5) resolves cleanly and leaves the PR open when CI never reaches a green verdict (timeout)', async () => {
+    vi.mocked(watchChecks).mockResolvedValueOnce('timeout');
+
+    await expect(cmdLand(5)).resolves.toBeUndefined();
+
     expect(logged()).toContain('left open, not merged');
     expect(h.octokit.rest.pulls.merge).not.toHaveBeenCalled();
     expect(cleanupWorktree).toHaveBeenCalled();

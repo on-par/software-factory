@@ -10,6 +10,7 @@ import {
   assertValidProduct,
   AwaitingReviewError,
   CiFailedError,
+  CiUnverifiedError,
   ConstitutionExistsError,
   createIngestHook,
   createSuperviseRunQueue,
@@ -1341,7 +1342,7 @@ describe('cli', () => {
     ]);
   });
 
-  it('logs a warn and still merges when the CI watch call throws', async () => {
+  it('fails closed when the CI watch throws', async () => {
     const calls: any[] = [];
     const octokit: any = {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
@@ -1356,9 +1357,56 @@ describe('cli', () => {
             calls.push(['deleteRef', args]);
           },
         },
-        checks: {
-          listForRef: async () => {
-            throw new Error('api down');
+      },
+    };
+    const run = async (command: string, options: any) => {
+      calls.push(['run', command, options]);
+    };
+
+    await expect(
+      landOpenPullRequest({
+        octokit,
+        owner: 'on-par',
+        repoName: 'software-factory',
+        ghRepo: 'on-par/software-factory',
+        repoRoot: '/repo',
+        issue: 20,
+        branch: 'ship-it/20-ci-down',
+        worktree: '/repo-factory-20',
+        prNumber: 123,
+        log: (type, msg) => calls.push(['log', type, msg]),
+        run,
+        pathExists: () => true,
+        sleep: async () => {
+          throw new Error('sleep should not be called');
+        },
+        watch: async () => {
+          throw new Error('api down');
+        },
+      }),
+    ).rejects.toThrow(CiUnverifiedError);
+
+    const failCall = calls.find((c) => c[0] === 'log' && c[1] === 'ci-failed');
+    expect(failCall).toBeDefined();
+    expect(failCall[2]).toContain('CI watch');
+    expect(failCall[2]).toContain('api down');
+    expect(calls.some((c) => c[0] === 'merge')).toBe(false);
+    expect(calls.some((c) => c[0] === 'deleteRef')).toBe(false);
+  });
+
+  it('fails closed on a timeout outcome from the CI watch', async () => {
+    const calls: any[] = [];
+    const octokit: any = {
+      graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
+      rest: {
+        pulls: {
+          merge: async (args: any) => {
+            calls.push(['merge', args]);
+          },
+        },
+        git: {
+          deleteRef: async (args: any) => {
+            calls.push(['deleteRef', args]);
           },
         },
       },
@@ -1367,32 +1415,77 @@ describe('cli', () => {
       calls.push(['run', command, options]);
     };
 
-    await landOpenPullRequest({
-      octokit,
-      owner: 'on-par',
-      repoName: 'software-factory',
-      ghRepo: 'on-par/software-factory',
-      repoRoot: '/repo',
-      issue: 20,
-      branch: 'ship-it/20-ci-down',
-      worktree: '/repo-factory-20',
-      prNumber: 123,
-      log: (type, msg) => calls.push(['log', type, msg]),
-      run,
-      pathExists: () => true,
-      sleep: async () => {
-        throw new Error('sleep should not be called');
-      },
-    });
+    await expect(
+      landOpenPullRequest({
+        octokit,
+        owner: 'on-par',
+        repoName: 'software-factory',
+        ghRepo: 'on-par/software-factory',
+        repoRoot: '/repo',
+        issue: 20,
+        branch: 'ship-it/20-ci-timeout',
+        worktree: '/repo-factory-20',
+        prNumber: 123,
+        log: (type, msg) => calls.push(['log', type, msg]),
+        run,
+        pathExists: () => true,
+        sleep: async () => {
+          throw new Error('sleep should not be called');
+        },
+        watch: async () => 'timeout',
+      }),
+    ).rejects.toThrow(CiUnverifiedError);
 
-    const warnCall = calls.find((c) => c[0] === 'log' && c[1] === 'warn');
-    expect(warnCall).toBeDefined();
-    expect(warnCall[2]).toContain('CI watch');
-    expect(warnCall[2]).toContain('api down');
-    expect(calls).toContainEqual([
-      'merge',
-      { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash' },
-    ]);
+    const failCall = calls.find((c) => c[0] === 'log' && c[1] === 'ci-failed');
+    expect(failCall).toBeDefined();
+    expect(calls.some((c) => c[0] === 'merge')).toBe(false);
+  });
+
+  it('fails closed on a timeout outcome even with adminMerge (FACTORY_MERGE_ADMIN=1) set', async () => {
+    const calls: any[] = [];
+    const octokit: any = {
+      graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
+      rest: {
+        pulls: {
+          merge: async (args: any) => {
+            calls.push(['merge', args]);
+          },
+        },
+        git: {
+          deleteRef: async (args: any) => {
+            calls.push(['deleteRef', args]);
+          },
+        },
+      },
+    };
+    const run = async (command: string, options: any) => {
+      calls.push(['run', command, options]);
+    };
+
+    await expect(
+      landOpenPullRequest({
+        octokit,
+        owner: 'on-par',
+        repoName: 'software-factory',
+        ghRepo: 'on-par/software-factory',
+        repoRoot: '/repo',
+        issue: 20,
+        branch: 'ship-it/20-ci-timeout-admin',
+        worktree: '/repo-factory-20',
+        prNumber: 707,
+        log: (type, msg) => calls.push(['log', type, msg]),
+        run,
+        pathExists: () => true,
+        adminMerge: true,
+        sleep: async () => {
+          throw new Error('sleep should not be called');
+        },
+        watch: async () => 'timeout',
+      }),
+    ).rejects.toThrow(CiUnverifiedError);
+
+    expect(calls.some((c) => c[0] === 'run' && typeof c[1] === 'string' && c[1].includes('--admin'))).toBe(false);
+    expect(calls.some((c) => c[0] === 'merge')).toBe(false);
   });
 
   it('refuses to merge and throws CiFailedError when CI ends in failure (regression: on-par/sound-buddy#707 merged with a failing e2e check)', async () => {
@@ -1931,6 +2024,10 @@ describe('cli', () => {
 
     it('maps a CiFailedError to ci-failed', () => {
       expect(parkReasonFor(new CiFailedError('x', 707))).toBe('ci-failed');
+    });
+
+    it('maps a CiUnverifiedError to ci-failed', () => {
+      expect(parkReasonFor(new CiUnverifiedError('x', 707))).toBe('ci-failed');
     });
 
     it('maps an error carrying reason: timeout to timeout', () => {
