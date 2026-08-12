@@ -1,6 +1,10 @@
 // src/utils/ci-watch.ts — shared CI watcher with exponential backoff
 import type { Octokit } from '@octokit/rest';
 
+/** watchChecks reports exactly one of three outcomes: 'success' (every check run passed),
+ *  'failure' (a completed check run reported a non-passing conclusion), or 'timeout' (no
+ *  verdict was reached — the deadline elapsed, no check runs ever registered, or repeated
+ *  API failures exhausted the retry budget). It never rejects. */
 export type CiOutcome = 'success' | 'failure' | 'timeout';
 
 export interface WatchChecksOptions {
@@ -11,8 +15,39 @@ export interface WatchChecksOptions {
   deadlineMs?: number; // default 600_000 (10 min)
   initialIntervalMs?: number; // default 15_000
   maxIntervalMs?: number; // default 60_000
+  perPage?: number; // default 100
+  maxPages?: number; // default 10
+  maxPollErrors?: number; // default 3
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
+}
+
+/** Conclusions that count as a passing check. These are the three GitHub itself accepts for a
+ *  required status check; `skipped` is the normal result of a path-filtered job. Anything not in
+ *  this set blocks the merge — see ADR "The CI merge gate is fail-closed…". */
+const PASSING_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
+const DEFAULT_PER_PAGE = 100;
+const DEFAULT_MAX_PAGES = 10;
+const DEFAULT_MAX_POLL_ERRORS = 3;
+
+type CheckRunLike = { status?: string | null; conclusion?: string | null };
+
+async function listAllCheckRuns(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  ref: string,
+  perPage: number,
+  maxPages: number,
+): Promise<CheckRunLike[]> {
+  const runs: CheckRunLike[] = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const { data } = await octokit.rest.checks.listForRef({ owner, repo, ref, per_page: perPage, page });
+    const pageRuns = data.check_runs ?? [];
+    runs.push(...pageRuns);
+    if (pageRuns.length < perPage) break;
+  }
+  return runs;
 }
 
 export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> {
@@ -24,18 +59,32 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
     deadlineMs = 600_000,
     initialIntervalMs = 15_000,
     maxIntervalMs = 60_000,
+    perPage = DEFAULT_PER_PAGE,
+    maxPages = DEFAULT_MAX_PAGES,
+    maxPollErrors = DEFAULT_MAX_POLL_ERRORS,
     sleep = (ms) => new Promise<void>((r) => setTimeout(r, ms)),
     now = () => Date.now(),
   } = opts;
 
   const deadline = now() + deadlineMs;
   let interval = initialIntervalMs;
+  let consecutiveErrors = 0;
   while (now() < deadline) {
-    const { data: checks } = await octokit.rest.checks.listForRef({ owner, repo, ref });
-    if (checks.check_runs.length > 0) {
-      const allDone = checks.check_runs.every((r) => r.status === 'completed');
-      const anyFailed = checks.check_runs.some((r) => r.conclusion === 'failure');
-      if (allDone) return anyFailed ? 'failure' : 'success';
+    try {
+      const runs = await listAllCheckRuns(octokit, owner, repo, ref, perPage, maxPages);
+      consecutiveErrors = 0;
+      if (runs.length > 0 && runs.every((r) => r.status === 'completed')) {
+        // Fail closed: only an explicitly passing conclusion counts as green. `cancelled`,
+        // `timed_out`, `action_required`, `stale`, a null conclusion on a completed run, and any
+        // conclusion GitHub adds later all block the merge.
+        const allPassed = runs.every((r) => PASSING_CONCLUSIONS.has(r.conclusion ?? ''));
+        return allPassed ? 'success' : 'failure';
+      }
+    } catch {
+      // A failed poll observes nothing this iteration rather than aborting the watch; give up
+      // (as "no verdict", never as success) only after maxPollErrors consecutive failures.
+      consecutiveErrors++;
+      if (consecutiveErrors >= maxPollErrors) return 'timeout';
     }
     await sleep(interval);
     interval = Math.min(interval * 2, maxIntervalMs);
