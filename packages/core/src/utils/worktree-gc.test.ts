@@ -148,8 +148,14 @@ describe('sweepWorktrees', () => {
           stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/5-feature\n\n`,
         };
       }
+      if (cmd === 'git rev-parse --verify origin/main') {
+        return { stdout: 'aaa\n' };
+      }
       if (cmd.startsWith('git merge-base --is-ancestor')) {
         return { stdout: '' }; // exit 0 => ancestor => merged
+      }
+      if (cmd.includes('rev-parse --verify --quiet')) {
+        return { stdout: 'bbb\n' }; // prior-push evidence
       }
       return { stdout: '' };
     };
@@ -183,6 +189,9 @@ describe('sweepWorktrees', () => {
       }
       if (cmd.startsWith('git ls-remote')) {
         return { stdout: '' }; // empty => remote gone
+      }
+      if (cmd.includes('rev-parse --verify --quiet')) {
+        return { stdout: 'bbb\n' }; // prior-push evidence
       }
       return { stdout: '' };
     };
@@ -284,8 +293,14 @@ describe('sweepWorktrees', () => {
           stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/10-feature\n\n`,
         };
       }
+      if (cmd === 'git rev-parse --verify origin/main') {
+        return { stdout: 'aaa\n' };
+      }
       if (cmd.startsWith('git merge-base --is-ancestor')) {
         return { stdout: '' };
+      }
+      if (cmd.includes('rev-parse --verify --quiet')) {
+        return { stdout: 'bbb\n' }; // prior-push evidence
       }
       return { stdout: '' };
     };
@@ -310,8 +325,14 @@ describe('sweepWorktrees', () => {
           stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/11-feature\n\n`,
         };
       }
+      if (cmd === 'git rev-parse --verify origin/main') {
+        return { stdout: 'aaa\n' };
+      }
       if (cmd.startsWith('git merge-base --is-ancestor')) {
         return { stdout: '' };
+      }
+      if (cmd.includes('rev-parse --verify --quiet')) {
+        return { stdout: 'bbb\n' }; // prior-push evidence
       }
       if (cmd.includes('worktree remove')) {
         throw new Error('remove failed');
@@ -322,6 +343,253 @@ describe('sweepWorktrees', () => {
     const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand });
     expect(report.removed).toHaveLength(1);
     expect(existsSync(wt)).toBe(false);
+  });
+
+  it('keeps a fresh worktree whose HEAD is still origin/main even when --is-ancestor succeeds', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-12`;
+    const wt = makeWorktree(wtName);
+
+    const commands: string[] = [];
+    const runCommand = async (cmd: string) => {
+      commands.push(cmd);
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD aaa\nbranch refs/heads/ship-it/12-feature\n\n`,
+        };
+      }
+      if (cmd === 'git rev-parse --verify origin/main') {
+        return { stdout: 'aaa\n' };
+      }
+      if (cmd.startsWith('git merge-base --is-ancestor')) {
+        return { stdout: '' }; // would resolve as ancestor, but HEAD === tip so this must not fire
+      }
+      if (cmd.startsWith('git ls-remote')) {
+        return { stdout: '' };
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand });
+    expect(report.removed).toHaveLength(0);
+    expect(report.kept).toBe(1);
+    expect(existsSync(wt)).toBe(true);
+    expect(commands.some((c) => c.includes('worktree remove'))).toBe(false);
+  });
+
+  it('keeps a never-pushed lane created from an older origin/main that is an ancestor of the current tip', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-13`;
+    const wt = makeWorktree(wtName);
+
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/13-feature\n\n`,
+        };
+      }
+      if (cmd === 'git rev-parse --verify origin/main') {
+        return { stdout: 'ccc\n' };
+      }
+      if (cmd.startsWith('git merge-base --is-ancestor')) {
+        return { stdout: '' }; // bbb is an ancestor of ccc — still true, but no push evidence
+      }
+      if (cmd.startsWith('git ls-remote')) {
+        return { stdout: '' };
+      }
+      return { stdout: '' }; // all evidence probes empty
+    };
+
+    const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand });
+    expect(report.removed).toHaveLength(0);
+    expect(report.kept).toBe(1);
+    expect(existsSync(wt)).toBe(true);
+  });
+
+  it('keeps every worktree when origin/main cannot be resolved', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-14`;
+    const wt = makeWorktree(wtName);
+
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/14-feature\n\n`,
+        };
+      }
+      if (cmd === 'git rev-parse --verify origin/main') {
+        throw new Error('no origin/main');
+      }
+      if (cmd.startsWith('git merge-base --is-ancestor')) {
+        return { stdout: '' };
+      }
+      if (cmd.startsWith('git ls-remote')) {
+        return { stdout: '' };
+      }
+      return { stdout: '' }; // evidence probes empty
+    };
+
+    const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand });
+    expect(report.removed).toHaveLength(0);
+    expect(report.kept).toBe(1);
+    expect(existsSync(wt)).toBe(true);
+  });
+
+  it('keeps a worktree whose .git cannot be stat-ed and logs a warning', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-15`;
+    const wt = join(parentDir, wtName);
+    mkdirSync(wt, { recursive: true }); // no .git file written — statSync will throw ENOENT
+
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/15-feature\n\n`,
+        };
+      }
+      if (cmd === 'git rev-parse --verify origin/main') {
+        return { stdout: 'aaa\n' };
+      }
+      if (cmd.startsWith('git merge-base --is-ancestor')) {
+        throw new Error('exit 1');
+      }
+      if (cmd.startsWith('git ls-remote')) {
+        return { stdout: 'bbb\trefs/heads/ship-it/15-feature\n' }; // live remote branch
+      }
+      return { stdout: '' };
+    };
+
+    const logs: Array<[string, string]> = [];
+    const report = await sweepWorktrees(
+      { repoRoot: root, ttlDays: 7 },
+      { runCommand, log: (type, msg) => logs.push([type, msg]) },
+    );
+    expect(report.removed).toHaveLength(0);
+    expect(report.kept).toBe(1);
+    expect(existsSync(wt)).toBe(true);
+    expect(logs.some(([type, msg]) => type === 'warn' && msg.includes(join(wt, '.git')))).toBe(true);
+  });
+
+  it('keeps a lane parked before SHIP that has commits but was never pushed', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-16`;
+    const wt = makeWorktree(wtName);
+
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/16-feature\n\n`,
+        };
+      }
+      if (cmd === 'git rev-parse --verify origin/main') {
+        return { stdout: 'aaa\n' };
+      }
+      if (cmd.startsWith('git merge-base --is-ancestor')) {
+        throw new Error('exit 1'); // real commits, not an ancestor
+      }
+      if (cmd.startsWith('git ls-remote')) {
+        return { stdout: '' };
+      }
+      return { stdout: '' }; // all evidence probes empty
+    };
+
+    const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand });
+    expect(report.removed).toHaveLength(0);
+    expect(report.kept).toBe(1);
+    expect(existsSync(wt)).toBe(true);
+  });
+
+  it('still removes a merged lane whose branch was pushed', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-17`;
+    const wt = makeWorktree(wtName);
+
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/17-feature\n\n`,
+        };
+      }
+      if (cmd === 'git rev-parse --verify origin/main') {
+        return { stdout: 'aaa\n' };
+      }
+      if (cmd.startsWith('git merge-base --is-ancestor')) {
+        return { stdout: '' };
+      }
+      if (cmd.includes('rev-parse --verify --quiet')) {
+        return { stdout: 'bbb\n' };
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand });
+    expect(report.removed).toHaveLength(1);
+    expect(report.removed[0].reason).toBe('merged');
+  });
+
+  it('accepts an origin-ref reflog entry as prior-push evidence for remote-gone', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-18`;
+    const wt = makeWorktree(wtName);
+
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/18-feature\n\n`,
+        };
+      }
+      if (cmd.startsWith('git merge-base --is-ancestor')) {
+        throw new Error('exit 1');
+      }
+      if (cmd.startsWith('git ls-remote')) {
+        return { stdout: '' };
+      }
+      if (cmd.includes('rev-parse --verify --quiet')) {
+        throw new Error('no tracking ref');
+      }
+      if (cmd.startsWith('git reflog show')) {
+        return { stdout: 'bbb refs/remotes/origin/ship-it/18-feature@{0}: fetch\n' };
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand });
+    expect(report.removed).toHaveLength(1);
+    expect(report.removed[0].reason).toBe('remote-gone');
+  });
+
+  it('accepts a configured upstream as prior-push evidence for remote-gone', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-19`;
+    const wt = makeWorktree(wtName);
+
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/19-feature\n\n`,
+        };
+      }
+      if (cmd.startsWith('git merge-base --is-ancestor')) {
+        throw new Error('exit 1');
+      }
+      if (cmd.startsWith('git ls-remote')) {
+        return { stdout: '' };
+      }
+      if (cmd.includes('rev-parse --verify --quiet')) {
+        throw new Error('no tracking ref');
+      }
+      if (cmd.startsWith('git reflog show')) {
+        return { stdout: '' };
+      }
+      if (cmd.startsWith('git config --get')) {
+        return { stdout: 'refs/heads/ship-it/19-feature\n' };
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand });
+    expect(report.removed).toHaveLength(1);
+    expect(report.removed[0].reason).toBe('remote-gone');
   });
 });
 

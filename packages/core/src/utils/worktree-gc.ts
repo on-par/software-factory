@@ -142,6 +142,40 @@ function safeExec(
   return runCommand(cmd, opts).catch(() => null);
 }
 
+async function resolveMainTip(
+  runCommand: NonNullable<SweepDeps['runCommand']>,
+  repoRoot: string,
+): Promise<string | null> {
+  const result = await safeExec(runCommand, 'git rev-parse --verify origin/main', { cwd: repoRoot });
+  const sha = result?.stdout.trim() ?? '';
+  return sha === '' ? null : sha;
+}
+
+async function hasPriorPushEvidence(
+  runCommand: NonNullable<SweepDeps['runCommand']>,
+  repoRoot: string,
+  branch: string,
+): Promise<boolean> {
+  const trackingRef = await safeExec(
+    runCommand,
+    `git rev-parse --verify --quiet ${shellEscape(`refs/remotes/origin/${branch}`)}`,
+    { cwd: repoRoot },
+  );
+  if (trackingRef !== null && trackingRef.stdout.trim() !== '') return true;
+
+  const reflog = await safeExec(
+    runCommand,
+    `git reflog show --no-abbrev ${shellEscape(`refs/remotes/origin/${branch}`)}`,
+    { cwd: repoRoot },
+  );
+  if (reflog !== null && reflog.stdout.trim() !== '') return true;
+
+  const upstream = await safeExec(runCommand, `git config --get ${shellEscape(`branch.${branch}.merge`)}`, {
+    cwd: repoRoot,
+  });
+  return upstream !== null && upstream.stdout.trim() !== '';
+}
+
 export async function sweepWorktrees(
   opts: { repoRoot: string; ttlDays: number; dryRun?: boolean },
   deps: SweepDeps = {},
@@ -165,19 +199,34 @@ export async function sweepWorktrees(
   const removed: GcCandidate[] = [];
   let kept = 0;
 
+  const mainTip = await resolveMainTip(runCommand, repoRoot);
+
   for (const entry of candidates) {
-    const ageDays = computeAgeDays(entry.path, now);
+    const ageDays = computeAgeDays(entry.path, now, log);
+
+    let pushEvidence: boolean | undefined;
+    const priorPush = async (): Promise<boolean> => {
+      if (!entry.branch) return false;
+      if (pushEvidence === undefined) {
+        pushEvidence = await hasPriorPushEvidence(runCommand, repoRoot, entry.branch);
+      }
+      return pushEvidence;
+    };
 
     let reason: GcReason | null = null;
     if (ageDays > ttlDays) {
       reason = 'ttl-expired';
-    } else if (entry.head) {
+    } else if (entry.head && mainTip !== null && entry.head !== mainTip) {
       const ancestorResult = await safeExec(
         runCommand,
         `git merge-base --is-ancestor ${shellEscape(entry.head)} origin/main`,
         { cwd: repoRoot },
       );
-      if (ancestorResult !== null) {
+      // An ancestor HEAD alone is not proof of a merge: every lane worktree starts life at
+      // origin/main (setupWorktree: `git worktree add -b <branch> <path> origin/main`), so a lane
+      // that has not committed yet is trivially an ancestor. Require evidence the branch was
+      // actually pushed before calling it merged.
+      if (ancestorResult !== null && (await priorPush())) {
         reason = 'merged';
       }
     }
@@ -186,7 +235,9 @@ export async function sweepWorktrees(
       const lsRemote = await safeExec(runCommand, `git ls-remote --heads origin ${shellEscape(entry.branch)}`, {
         cwd: repoRoot,
       });
-      if (lsRemote !== null && lsRemote.stdout.trim() === '') {
+      // An empty ls-remote is ambiguous — "merged and deleted upstream" or "never pushed". Only the
+      // former is garbage, and only a prior push distinguishes them.
+      if (lsRemote !== null && lsRemote.stdout.trim() === '' && (await priorPush())) {
         reason = 'remote-gone';
       }
     }
@@ -239,12 +290,16 @@ export async function sweepWorktrees(
   return { removed, kept, dryRun: false };
 }
 
-function computeAgeDays(worktreePath: string, now: () => number): number {
+function computeAgeDays(worktreePath: string, now: () => number, log: (type: EventKind, msg: string) => void): number {
+  const gitPath = join(worktreePath, '.git');
   try {
-    const mtimeMs = statSync(join(worktreePath, '.git')).mtimeMs;
+    const mtimeMs = statSync(gitPath).mtimeMs;
     return (now() - mtimeMs) / (24 * 60 * 60 * 1000);
-  } catch {
-    return Infinity;
+  } catch (err: any) {
+    // An inconclusive probe must never mean "delete" — this directory may hold the only copy of
+    // uncommitted work.
+    log('warn', `worktree-gc: cannot stat ${gitPath} (${err?.message ?? String(err)}) — treating as age 0 (keeping)`);
+    return 0;
   }
 }
 
