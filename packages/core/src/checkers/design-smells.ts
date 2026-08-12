@@ -53,17 +53,32 @@ export const DesignSmellSchema = z.object({
   suggestion: z.string().min(1),
 });
 
+/**
+ * Envelope-only validation. Elements are validated one at a time in
+ * `parseDesignSmellVerdict` so one malformed smell cannot discard its valid siblings (#643).
+ */
 export const DesignSmellVerdictSchema = z.object({
   checker: z.literal(DESIGN_SMELLS_CHECKER),
   result: z.enum(['PASS', 'FAIL']),
   smells: z
-    .array(DesignSmellSchema)
+    .array(z.unknown())
     .nullish()
     .transform((v) => v ?? []),
 });
 
 export type DesignSmell = z.infer<typeof DesignSmellSchema>;
-export type DesignSmellVerdict = z.infer<typeof DesignSmellVerdictSchema>;
+
+export interface DesignSmellVerdict {
+  checker: typeof DESIGN_SMELLS_CHECKER;
+  result: 'PASS' | 'FAIL';
+  smells: DesignSmell[];
+}
+
+/** A `smells` element that failed validation: its array index and the zod issues. */
+export interface RejectedSmell {
+  index: number;
+  errors: string[];
+}
 
 export type DiffRunner = (argv: readonly string[], cwd: string) => Promise<{ ok: boolean; stdout: string }>;
 
@@ -197,7 +212,11 @@ export function buildDesignSmellPrompt(input: {
   return lines.join('\n');
 }
 
-export function parseDesignSmellVerdict(output: string): { verdict: DesignSmellVerdict | null; reason?: string } {
+export function parseDesignSmellVerdict(output: string): {
+  verdict: DesignSmellVerdict | null;
+  rejected: RejectedSmell[];
+  reason?: string;
+} {
   const candidates = extractJsonObjects(output);
   const verdictCandidate = candidates.find(
     (c) =>
@@ -208,15 +227,33 @@ export function parseDesignSmellVerdict(output: string): { verdict: DesignSmellV
   );
 
   if (!verdictCandidate) {
-    return { verdict: null, reason: `critic produced no valid JSON: ${output.slice(0, 200)}` };
+    return { verdict: null, rejected: [], reason: `critic produced no valid JSON: ${output.slice(0, 200)}` };
   }
 
   const parsed = DesignSmellVerdictSchema.safeParse(verdictCandidate.value);
   if (!parsed.success) {
-    return { verdict: null, reason: `critic returned a malformed verdict: ${verdictCandidate.text.slice(0, 200)}` };
+    return {
+      verdict: null,
+      rejected: [],
+      reason: `critic returned a malformed verdict: ${verdictCandidate.text.slice(0, 200)}`,
+    };
   }
 
-  return { verdict: parsed.data };
+  const smells: DesignSmell[] = [];
+  const rejected: RejectedSmell[] = [];
+  parsed.data.smells.forEach((entry, index) => {
+    const result = DesignSmellSchema.safeParse(entry);
+    if (result.success) {
+      smells.push(result.data);
+      return;
+    }
+    rejected.push({
+      index,
+      errors: result.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`),
+    });
+  });
+
+  return { verdict: { checker: DESIGN_SMELLS_CHECKER, result: parsed.data.result, smells }, rejected };
 }
 
 function truncateField(text: string): string {
@@ -234,6 +271,15 @@ export function renderSmellDetails(smells: DesignSmell[]): string {
   const suffix = more > 0 ? `; (${more} more)` : '';
 
   return `${smells.length} program-design smell(s): ${rendered.join('; ')}${suffix}`;
+}
+
+/** Renders the dropped elements so a malformed finding is visible, not silent (#643). */
+export function renderRejectedSmells(rejected: RejectedSmell[]): string {
+  const shown = rejected.slice(0, MAX_SMELLS_RENDERED);
+  const rendered = shown.map((r) => `[${r.index}] ${truncateField(r.errors.join(', '))}`);
+  const more = rejected.length - shown.length;
+  const suffix = more > 0 ? `; (${more} more)` : '';
+  return `${rejected.length} malformed smell element(s) dropped: ${rendered.join('; ')}${suffix}`;
 }
 
 export async function designSmellsChecker(
@@ -303,19 +349,31 @@ export async function designSmellsChecker(
     };
   }
 
-  const { verdict, reason } = parseDesignSmellVerdict(output);
+  const { verdict, rejected, reason } = parseDesignSmellVerdict(output);
   if (verdict === null) {
-    return { checker: DESIGN_SMELLS_CHECKER, result: 'SKIP', details: reason ?? 'critic produced no valid JSON' };
+    // Fail closed: an unreadable verdict is not evidence of a clean diff (#643),
+    // matching runCustomChecker in ./index.ts.
+    return { checker: DESIGN_SMELLS_CHECKER, result: 'FAIL', details: reason ?? 'critic produced no valid JSON' };
   }
 
+  const truncationNote = diff.truncated
+    ? ` (diff was truncated — critique covers the first ${MAX_DIFF_CHARS} characters)`
+    : '';
+  const rejectionNote = rejected.length > 0 ? `; ${renderRejectedSmells(rejected)}` : '';
+
   if (verdict.smells.length > 0) {
-    const truncationNote = diff.truncated
-      ? ` (diff was truncated — critique covers the first ${MAX_DIFF_CHARS} characters)`
-      : '';
     return {
       checker: DESIGN_SMELLS_CHECKER,
       result: 'FAIL',
-      details: `${renderSmellDetails(verdict.smells)}${truncationNote}`,
+      details: `${renderSmellDetails(verdict.smells)}${rejectionNote}${truncationNote}`,
+    };
+  }
+
+  if (rejected.length > 0) {
+    return {
+      checker: DESIGN_SMELLS_CHECKER,
+      result: 'FAIL',
+      details: `no usable findings — ${renderRejectedSmells(rejected)}${truncationNote}`,
     };
   }
 

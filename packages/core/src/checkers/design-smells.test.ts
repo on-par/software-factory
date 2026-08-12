@@ -21,6 +21,8 @@ import {
   MAX_DIFF_CHARS,
   MAX_SMELLS_RENDERED,
   parseDesignSmellVerdict,
+  type RejectedSmell,
+  renderRejectedSmells,
   renderSmellDetails,
   SMELL_KINDS,
 } from './design-smells.js';
@@ -260,9 +262,12 @@ describe('buildDesignSmellPrompt', () => {
 
 describe('parseDesignSmellVerdict', () => {
   it('parses a valid verdict', () => {
-    const { verdict, reason } = parseDesignSmellVerdict('{"checker":"design_smells","result":"PASS","smells":[]}');
+    const { verdict, rejected, reason } = parseDesignSmellVerdict(
+      '{"checker":"design_smells","result":"PASS","smells":[]}',
+    );
 
     expect(reason).toBeUndefined();
+    expect(rejected).toEqual([]);
     expect(verdict?.result).toBe('PASS');
     expect(verdict?.smells).toEqual([]);
   });
@@ -284,9 +289,12 @@ describe('parseDesignSmellVerdict', () => {
   });
 
   it('returns null with a reason on a wrong checker value', () => {
-    const { verdict, reason } = parseDesignSmellVerdict('{"checker":"not_design_smells","result":"PASS","smells":[]}');
+    const { verdict, rejected, reason } = parseDesignSmellVerdict(
+      '{"checker":"not_design_smells","result":"PASS","smells":[]}',
+    );
 
     expect(verdict).toBeNull();
+    expect(rejected).toEqual([]);
     expect(reason).toContain('malformed verdict');
   });
 
@@ -295,6 +303,63 @@ describe('parseDesignSmellVerdict', () => {
 
     expect(verdict).toBeNull();
     expect(reason).toContain('no valid JSON');
+  });
+
+  it('salvages valid elements and reports invalid ones when the array is mixed', () => {
+    const output = JSON.stringify({
+      checker: 'design_smells',
+      result: 'FAIL',
+      smells: [
+        smell({ file: 'a.ts' }),
+        { kind: 'cast_to_pass', file: 'b.ts', evidence: 'e', suggestion: 's' },
+        smell({ file: 'c.ts', suggestion: '' }),
+      ],
+    });
+
+    const { verdict, rejected } = parseDesignSmellVerdict(output);
+
+    expect(verdict).not.toBeNull();
+    expect(verdict?.result).toBe('FAIL');
+    expect(verdict?.smells.map((s) => s.file)).toEqual(['a.ts']);
+    expect(rejected).toHaveLength(2);
+    expect(rejected[0]).toMatchObject({ index: 1 });
+    expect(rejected[0]!.errors.join(' ')).toContain('kind');
+    expect(rejected[1]).toMatchObject({ index: 2 });
+    expect(rejected[1]!.errors.join(' ')).toContain('suggestion');
+  });
+
+  it('salvages nothing but still returns a verdict when every element is invalid', () => {
+    const output = JSON.stringify({
+      checker: 'design_smells',
+      result: 'FAIL',
+      smells: [
+        { kind: 'cast_to_pass', file: 'a.ts', evidence: 'e', suggestion: 's' },
+        { kind: 'cast-to-pass', file: '', evidence: 'e', suggestion: 's' },
+      ],
+    });
+
+    const { verdict, rejected } = parseDesignSmellVerdict(output);
+
+    expect(verdict).not.toBeNull();
+    expect(verdict?.smells).toEqual([]);
+    expect(rejected).toHaveLength(2);
+  });
+
+  it('treats an omitted or null smells field as empty with nothing rejected', () => {
+    const omitted = parseDesignSmellVerdict('{"checker":"design_smells","result":"PASS"}');
+    const nulled = parseDesignSmellVerdict('{"checker":"design_smells","result":"PASS","smells":null}');
+
+    for (const { verdict, rejected } of [omitted, nulled]) {
+      expect(verdict?.smells).toEqual([]);
+      expect(rejected).toEqual([]);
+    }
+  });
+
+  it('fails closed when smells is present but not an array', () => {
+    const { verdict, reason } = parseDesignSmellVerdict('{"checker":"design_smells","result":"PASS","smells":"lots"}');
+
+    expect(verdict).toBeNull();
+    expect(reason).toContain('malformed verdict');
   });
 });
 
@@ -327,6 +392,28 @@ describe('renderSmellDetails', () => {
     const rendered = renderSmellDetails(smells);
 
     expect(rendered).toContain(`${smells.length} program-design smell(s)`);
+    expect(rendered).toContain('(3 more)');
+  });
+});
+
+describe('renderRejectedSmells', () => {
+  function rejectedSmell(overrides: Partial<RejectedSmell> = {}): RejectedSmell {
+    return { index: 0, errors: ['kind: Invalid enum value'], ...overrides };
+  }
+
+  it('renders the dropped count, index and zod message', () => {
+    const rendered = renderRejectedSmells([rejectedSmell({ index: 2, errors: ['kind: Invalid enum value'] })]);
+
+    expect(rendered).toContain('1 malformed smell element(s) dropped');
+    expect(rendered).toContain('[2] kind: Invalid enum value');
+  });
+
+  it('caps at MAX_SMELLS_RENDERED and reports (N more)', () => {
+    const rejected = Array.from({ length: MAX_SMELLS_RENDERED + 3 }, (_, i) => rejectedSmell({ index: i }));
+
+    const rendered = renderRejectedSmells(rejected);
+
+    expect(rendered).toContain(`${rejected.length} malformed smell element(s) dropped`);
     expect(rendered).toContain('(3 more)');
   });
 });
@@ -414,7 +501,7 @@ describe('designSmellsChecker', () => {
     expect(result.details).toContain('error');
   });
 
-  it('skips when the critic output is unparsable', async () => {
+  it('fails closed when the critic output is unparsable', async () => {
     const worktree = await makeWorktree();
     const { router } = makeRouter('I could not determine anything.');
 
@@ -422,7 +509,89 @@ describe('designSmellsChecker', () => {
       collectDiff: async () => cleanDiff,
     });
 
-    expect(result.result).toBe('SKIP');
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain('no valid JSON');
+  });
+
+  it('fails closed when the verdict envelope is malformed', async () => {
+    const worktree = await makeWorktree();
+    const { router } = makeRouter('{"checker":"not_design_smells","result":"PASS","smells":[]}');
+
+    const result = await designSmellsChecker(makeContext(worktree), router, undefined, {
+      collectDiff: async () => cleanDiff,
+    });
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain('malformed verdict');
+  });
+
+  it('fails and salvages valid findings when the smells array is mixed valid/invalid (headline case)', async () => {
+    const worktree = await makeWorktree();
+    const output = JSON.stringify({
+      checker: 'design_smells',
+      result: 'FAIL',
+      smells: [
+        smell({ file: 'packages/core/src/a.ts', suggestion: 'widen the parameter type instead' }),
+        { kind: 'cast_to_pass', file: 'b.ts', evidence: 'e', suggestion: 's' },
+      ],
+    });
+    const { router } = makeRouter(output);
+
+    const result = await designSmellsChecker(makeContext(worktree), router, undefined, {
+      collectDiff: async () => cleanDiff,
+    });
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain('packages/core/src/a.ts');
+    expect(result.details).toContain('widen the parameter type instead');
+    expect(result.details).toContain('malformed smell element(s) dropped');
+  });
+
+  it('fails with "no usable findings" when every smell element is invalid', async () => {
+    const worktree = await makeWorktree();
+    const output = JSON.stringify({
+      checker: 'design_smells',
+      result: 'FAIL',
+      smells: [{ kind: 'cast_to_pass', file: 'a.ts', evidence: 'e', suggestion: 's' }],
+    });
+    const { router } = makeRouter(output);
+
+    const result = await designSmellsChecker(makeContext(worktree), router, undefined, {
+      collectDiff: async () => cleanDiff,
+    });
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain('no usable findings');
+  });
+
+  it('still fails when a rejected element accompanies a PASS verdict', async () => {
+    const worktree = await makeWorktree();
+    const output = JSON.stringify({
+      checker: 'design_smells',
+      result: 'PASS',
+      smells: [{ kind: 'cast_to_pass', file: 'a.ts', evidence: 'e', suggestion: 's' }],
+    });
+    const { router } = makeRouter(output);
+
+    const result = await designSmellsChecker(makeContext(worktree), router, undefined, {
+      collectDiff: async () => cleanDiff,
+    });
+
+    expect(result.result).toBe('FAIL');
+  });
+
+  it('all-valid smells still fail with no rejection note in details', async () => {
+    const worktree = await makeWorktree();
+    const { router } = makeRouter(
+      '{"checker":"design_smells","result":"FAIL","smells":[{"kind":"cast-to-pass","file":"a.ts","evidence":"e","suggestion":"s"}]}',
+    );
+
+    const result = await designSmellsChecker(makeContext(worktree), router, undefined, {
+      collectDiff: async () => cleanDiff,
+    });
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).not.toContain('malformed');
   });
 
   it('passes with a mismatch note when result is FAIL but smells is empty', async () => {
