@@ -173,7 +173,11 @@ async function hasPriorPushEvidence(
   const upstream = await safeExec(runCommand, `git config --get ${shellEscape(`branch.${branch}.merge`)}`, {
     cwd: repoRoot,
   });
-  return upstream !== null && upstream.stdout.trim() !== '';
+  // git sets branch.<name>.merge automatically at worktree-creation time from the start point
+  // (e.g. `git worktree add -b <branch> <path> origin/main` sets it to refs/heads/main), so a
+  // non-empty value alone is not proof of a push. Only `git push -u origin <branch>` points it at
+  // the branch's own ref — require that exact match.
+  return upstream !== null && upstream.stdout.trim() === `refs/heads/${branch}`;
 }
 
 export async function sweepWorktrees(
