@@ -132,6 +132,8 @@ describe('sweepWorktrees', () => {
     expect(report.removed).toHaveLength(0);
     expect(report.kept).toBe(0);
     expect(commands.some((c) => c.includes('worktree remove'))).toBe(false);
+    // no factory-managed candidates means resolving origin/main's tip is unnecessary work
+    expect(commands.some((c) => c === 'git rev-parse --verify origin/main')).toBe(false);
   });
 
   it('removes a merged worktree, scrubbing credentials before the remove command runs', async () => {

@@ -203,7 +203,7 @@ export async function sweepWorktrees(
   const removed: GcCandidate[] = [];
   let kept = 0;
 
-  const mainTip = await resolveMainTip(runCommand, repoRoot);
+  const mainTip = candidates.length > 0 ? await resolveMainTip(runCommand, repoRoot) : null;
 
   for (const entry of candidates) {
     const ageDays = computeAgeDays(entry.path, now, log);
