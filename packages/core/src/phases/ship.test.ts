@@ -570,7 +570,7 @@ describe('shipPhase CI watch', () => {
     }
   });
 
-  it('still logs ready when watching CI throws', async () => {
+  it('still logs ready when watching CI throws on every poll (fail-closed retry exhausts as timeout, never rejects)', async () => {
     const { octokit } = createWatchOctokit([allSuccess]);
     octokit.rest.checks.listForRef = async () => {
       throw new Error('checks API unavailable');
@@ -578,19 +578,26 @@ describe('shipPhase CI watch', () => {
     const logs: Array<[string, string]> = [];
     const run = async () => ({ stdout: '' });
 
-    const result = await shipPhase({
-      issue: 123,
-      repo: 'on-par/software-factory',
-      worktree: '/repo-factory-123',
-      branch: 'ship-it/123-ci-poll',
-      octokit: octokit as any,
-      watchCI: true,
-      log: (type, msg) => logs.push([type, msg]),
-      run,
-    });
+    vi.useFakeTimers();
+    try {
+      const promise = shipPhase({
+        issue: 123,
+        repo: 'on-par/software-factory',
+        worktree: '/repo-factory-123',
+        branch: 'ship-it/123-ci-poll',
+        octokit: octokit as any,
+        watchCI: true,
+        log: (type, msg) => logs.push([type, msg]),
+        run,
+      });
+      await vi.runAllTimersAsync();
+      const result = await promise;
 
-    expect(result).toEqual({ ok: true, prNumber: 123 });
-    expect(logs).toContainEqual(['ready', 'PR #123 ready for review']);
+      expect(result).toEqual({ ok: true, prNumber: 123 });
+      expect(logs).toContainEqual(['ready', 'PR #123 ready for review']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

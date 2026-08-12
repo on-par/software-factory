@@ -122,10 +122,12 @@ import {
   writeProxyState,
 } from '@on-par/factory-core';
 import type {
+  CiOutcome,
   OvernightItemOutcome,
   OvernightPreflightResult,
   OvernightQueueDeps,
   OvernightStateItem,
+  WatchChecksOptions,
 } from '@on-par/factory-core/internal';
 import {
   branchFor,
@@ -1735,6 +1737,14 @@ export async function cmdLand(issueNum: number) {
       console.log(chalk.yellow(`⏸ PR #${err.prNumber} for issue #${issueNum} awaiting human review — left open`));
       return;
     }
+    if (err instanceof CiUnverifiedError) {
+      console.log(
+        chalk.yellow(
+          `⏸ PR #${err.prNumber} for issue #${issueNum} — CI never reached a green verdict — left open, not merged`,
+        ),
+      );
+      return;
+    }
     if (err instanceof CiFailedError) {
       console.log(
         chalk.yellow(`⏸ PR #${err.prNumber} for issue #${issueNum} has a failing CI check — left open, not merged`),
@@ -2353,9 +2363,9 @@ export class LandFailureError extends Error {
   }
 }
 
-/** Thrown when watchChecks reports a confirmed CI failure. Distinct from a watch
- *  timeout/transport error — those are ambiguous and fall through to a merge-state
- *  check, but a confirmed failing check must never be merged, admin override or not. */
+/** Thrown when watchChecks reports a confirmed CI failure — a completed check run with a
+ *  non-passing conclusion. A confirmed failing check must never be merged, admin override
+ *  or not. See CiUnverifiedError for the no-verdict case. */
 export class CiFailedError extends Error {
   constructor(
     message: string,
@@ -2364,6 +2374,12 @@ export class CiFailedError extends Error {
     super(message);
   }
 }
+
+/** Thrown when the CI watch never reached a green verdict — a deadline timeout, no check runs ever
+ *  registering, or repeated API failures. A subclass of CiFailedError so every existing guard
+ *  (parkReasonFor → 'ci-failed', worktree cleanup, cmdLand's exit-0 path) treats "we don't know"
+ *  exactly like "we know it's red": never merge. */
+export class CiUnverifiedError extends CiFailedError {}
 
 const MAX_MERGE_ATTEMPTS = 5;
 const MERGE_RETRY_BASE_MS = 5_000;
@@ -2459,6 +2475,7 @@ export async function landOpenPullRequest(opts: {
   sleep?: (ms: number) => Promise<void>;
   skipCI?: boolean;
   adminMerge?: boolean;
+  watch?: (opts: WatchChecksOptions) => Promise<CiOutcome>;
 }): Promise<void> {
   const {
     octokit,
@@ -2474,23 +2491,27 @@ export async function landOpenPullRequest(opts: {
     sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
     skipCI = false,
     adminMerge = process.env.FACTORY_MERGE_ADMIN === '1',
+    watch = watchChecks,
   } = opts;
 
   const watchCi = async () => {
+    let outcome: CiOutcome;
     try {
-      const outcome = await watchChecks({ octokit, owner, repo: repoName, ref: branch });
-      if (outcome === 'failure') {
-        const msg = `CI failed for PR #${prNumber} on ${branch} — refusing to merge with a failing check`;
-        log('ci-failed', msg);
-        throw new CiFailedError(msg, prNumber);
-      }
-      if (outcome !== 'success') {
-        log('warn', `CI watch for ${branch} ended ${outcome} — proceeding to merge state check`);
-      }
+      outcome = await watch({ octokit, owner, repo: repoName, ref: branch });
     } catch (err) {
-      if (err instanceof CiFailedError) throw err;
-      log('warn', `CI watch for ${branch} failed: ${errorDetail(err)} — proceeding to merge state check`);
+      const msg = `CI watch for ${branch} failed: ${errorDetail(err)} — refusing to merge without a green verdict`;
+      log('ci-failed', msg);
+      throw new CiUnverifiedError(msg, prNumber);
     }
+    if (outcome === 'success') return;
+    if (outcome === 'failure') {
+      const msg = `CI failed for PR #${prNumber} on ${branch} — refusing to merge with a failing check`;
+      log('ci-failed', msg);
+      throw new CiFailedError(msg, prNumber);
+    }
+    const msg = `CI watch for ${branch} ended ${outcome} — refusing to merge without a green verdict`;
+    log('ci-failed', msg);
+    throw new CiUnverifiedError(msg, prNumber);
   };
 
   if (!skipCI) {
