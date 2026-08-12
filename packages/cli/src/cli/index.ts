@@ -2745,6 +2745,34 @@ export async function cmdResumeApproved() {
   }
 }
 
+/** Consecutive merged-state check failures tolerated before waitForMerge parks the lane.
+ *  At the shipped 120s poll that is ~20 minutes of 100% failure (ADR: sustained-failure park). */
+export const MERGE_CHECK_MAX_CONSECUTIVE_FAILURES = 10;
+
+/** Wall-clock backstop: continuous merged-state check failure for this long parks the lane even
+ *  if fewer than MERGE_CHECK_MAX_CONSECUTIVE_FAILURES attempts were made (slower poll cadence). */
+export const MERGE_CHECK_FAILURE_BUDGET_MS = 2 * 60 * 60 * 1000;
+
+/** GitHub signals both primary and secondary rate limits with 403 — the same status it uses for a
+ *  token that genuinely lacks the scope. Only a 403 with no rate-limit evidence is permanent. */
+function looksRateLimited(err: unknown): boolean {
+  const headers = (err as { response?: { headers?: Record<string, unknown> } } | null)?.response?.headers ?? {};
+  const remaining = headers['x-ratelimit-remaining'];
+  if (typeof remaining === 'string' && remaining.trim() === '0') return true;
+  if (typeof remaining === 'number' && remaining === 0) return true;
+  if (headers['retry-after'] !== undefined) return true;
+  return /rate limit|secondary rate|abuse detection/i.test(errorDetail(err));
+}
+
+/** True when a merged-state check failure cannot recover by retrying: an expired/revoked token
+ *  (401) or a token missing `pulls:read` (403 with no rate-limit evidence). */
+export function isPermanentMergeCheckError(err: unknown): boolean {
+  const status = (err as { status?: unknown } | null)?.status;
+  if (status === 401) return true;
+  if (status !== 403) return false;
+  return !looksRateLimited(err);
+}
+
 type WaitForMergeDeps = {
   createOctokit?: () => Octokit;
   pathExists?: (path: string) => boolean;
@@ -2762,6 +2790,8 @@ type WaitForMergeDeps = {
   emitEvent?: typeof logEvent;
   mergeEnabled?: () => boolean;
   writeLine?: (line: string) => void;
+  /** Injectable clock so the wall-clock failure budget is testable. Default `() => Date.now()`. */
+  now?: () => number;
 };
 
 async function defaultListIssueLabels(octokit: Octokit, owner: string, repo: string, issue: number): Promise<string[]> {
@@ -2776,7 +2806,7 @@ export async function waitForMerge(
   ghRepo: string,
   paths: ReturnType<typeof getFactoryPaths>,
   deps: WaitForMergeDeps = {},
-) {
+): Promise<void> {
   const {
     createOctokit = getOctokit,
     pathExists = existsSync,
@@ -2788,6 +2818,7 @@ export async function waitForMerge(
     emitEvent = logEvent,
     mergeEnabled,
     writeLine = (line) => console.log(line),
+    now = () => Date.now(),
   } = deps;
   const factoryConfig = loadConfig();
   const isMergeEnabled = mergeEnabled ?? (() => factoryConfig.merge.auto || process.env.FACTORY_MERGE === '1');
@@ -2797,12 +2828,32 @@ export async function waitForMerge(
   const [owner, repoName] = ghRepo.split('/');
 
   emitEvent(paths.events, 'await-merge', issue, `waiting to merge ${branch}`);
+  let consecutiveFailures = 0;
+  let firstFailureAt: number | null = null;
   while (!pathExists(paths.stop)) {
     let merged = false;
     try {
       merged = await checkMerged(octokit, owner, repoName, branch);
+      consecutiveFailures = 0;
+      firstFailureAt = null;
     } catch (err) {
-      emitEvent(paths.events, 'warn', issue, `merged-state check failed (treating as not merged): ${errorDetail(err)}`);
+      consecutiveFailures++;
+      firstFailureAt ??= now();
+      const detail = errorDetail(err);
+      emitEvent(paths.events, 'warn', issue, `merged-state check failed (treating as not merged): ${detail}`);
+
+      const permanent = isPermanentMergeCheckError(err);
+      const elapsedMs = now() - firstFailureAt;
+      const budgetSpent = elapsedMs >= MERGE_CHECK_FAILURE_BUDGET_MS;
+      const streakSpent = consecutiveFailures >= MERGE_CHECK_MAX_CONSECUTIVE_FAILURES;
+      if (permanent || streakSpent || budgetSpent) {
+        const trigger = permanent
+          ? 'permanent error (auth/scope — retrying cannot help)'
+          : `${consecutiveFailures} consecutive failures over ${Math.round(elapsedMs / 1000)}s`;
+        const msg = `merged-state check for ${branch} is not recovering — parking lane after ${trigger}: ${detail}`;
+        emitEvent(paths.events, 'escalate', issue, msg);
+        throw new LaneParkError(msg, 'escalate');
+      }
     }
     if (merged) {
       emitEvent(paths.events, 'landed', issue, 'PR merged');

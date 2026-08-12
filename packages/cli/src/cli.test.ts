@@ -26,6 +26,7 @@ import {
   hasReachableWorker,
   initConstitution,
   InvalidProductNameError,
+  isPermanentMergeCheckError,
   isPrMerged,
   isReviewRequiredMergeError,
   issueFromFactoryBranch,
@@ -36,6 +37,8 @@ import {
   listOpenFactoryPRs,
   main,
   markPullRequestReady,
+  MERGE_CHECK_FAILURE_BUDGET_MS,
+  MERGE_CHECK_MAX_CONSECUTIVE_FAILURES,
   parkEvents,
   parkReasonFor,
   PREREQUISITES_TEXT,
@@ -1188,6 +1191,264 @@ describe('cli', () => {
     expect(calls).toContainEqual(['event', 'await-merge', 21, 'waiting to merge ship-it/21-self-merge']);
     expect(calls).toContainEqual(['writeLine', '[factory] #21 awaiting human merge (poll 120s)']);
     expect(calls).toContainEqual(['sleep', 120_000]);
+  });
+
+  it('does not escalate a transient merged-state failure that recovers on the next poll', async () => {
+    const calls: any[] = [];
+    const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
+    let attempt = 0;
+
+    await waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
+      createOctokit: () => ({}) as any,
+      pathExists: () => false,
+      checkMerged: async () => {
+        attempt++;
+        if (attempt === 1) throw new Error('rate limited');
+        return true;
+      },
+      loadConfig: () => fakeFactoryConfig(false),
+      land: async () => {
+        throw new Error('land should not be called');
+      },
+      emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) =>
+        calls.push(['event', type, issue, msg]),
+      writeLine: (line) => calls.push(['writeLine', line]),
+      sleep: async () => {
+        calls.push(['sleep']);
+      },
+    });
+
+    expect(calls.some((c) => c[0] === 'event' && c[1] === 'warn')).toBe(true);
+    expect(calls.some((c) => c[0] === 'event' && c[1] === 'escalate')).toBe(false);
+    expect(calls).toContainEqual(['event', 'landed', 21, 'PR merged']);
+  });
+
+  it('resets the failure streak on any successful merged-state check so it never escalates', async () => {
+    const calls: any[] = [];
+    const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
+    const totalAttempts = 2 * MERGE_CHECK_MAX_CONSECUTIVE_FAILURES + 5;
+    let attempt = 0;
+    let stopped = false;
+
+    await waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
+      createOctokit: () => ({}) as any,
+      pathExists: () => stopped,
+      checkMerged: async () => {
+        attempt++;
+        if (attempt >= totalAttempts) stopped = true;
+        if (attempt % 2 === 0) throw new Error('blip');
+        return false;
+      },
+      loadConfig: () => fakeFactoryConfig(false),
+      land: async () => {
+        throw new Error('land should not be called');
+      },
+      emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) =>
+        calls.push(['event', type, issue, msg]),
+      writeLine: () => {},
+      sleep: async () => {},
+    });
+
+    expect(calls.some((c) => c[0] === 'event' && c[1] === 'escalate')).toBe(false);
+  });
+
+  it('parks the lane once consecutive failures reach the streak threshold', async () => {
+    const calls: any[] = [];
+    const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
+    let checkMergedCalls = 0;
+
+    await expect(
+      waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
+        createOctokit: () => ({}) as any,
+        pathExists: () => false,
+        checkMerged: async () => {
+          checkMergedCalls++;
+          throw new Error('boom');
+        },
+        loadConfig: () => fakeFactoryConfig(false),
+        land: async () => {
+          throw new Error('land should not be called');
+        },
+        emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) =>
+          calls.push(['event', type, issue, msg]),
+        writeLine: () => {},
+        sleep: async () => {},
+      }),
+    ).rejects.toMatchObject({ reason: 'escalate' });
+
+    expect(checkMergedCalls).toBe(MERGE_CHECK_MAX_CONSECUTIVE_FAILURES);
+    const escalateEvents = calls.filter((c) => c[0] === 'event' && c[1] === 'escalate');
+    expect(escalateEvents).toHaveLength(1);
+    expect(escalateEvents[0][3]).toContain('boom');
+    expect(escalateEvents[0][3]).toContain('ship-it/21-self-merge');
+  });
+
+  it('parks the lane once the wall-clock failure budget is spent, even under the streak threshold', async () => {
+    const calls: any[] = [];
+    const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
+    let checkMergedCalls = 0;
+    let nowCalls = 0;
+
+    await expect(
+      waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
+        createOctokit: () => ({}) as any,
+        pathExists: () => false,
+        checkMerged: async () => {
+          checkMergedCalls++;
+          throw new Error('boom');
+        },
+        loadConfig: () => fakeFactoryConfig(false),
+        land: async () => {
+          throw new Error('land should not be called');
+        },
+        emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) =>
+          calls.push(['event', type, issue, msg]),
+        writeLine: () => {},
+        sleep: async () => {},
+        now: () => {
+          nowCalls++;
+          return nowCalls === 1 ? 0 : MERGE_CHECK_FAILURE_BUDGET_MS;
+        },
+      }),
+    ).rejects.toMatchObject({ reason: 'escalate' });
+
+    expect(checkMergedCalls).toBeLessThan(MERGE_CHECK_MAX_CONSECUTIVE_FAILURES);
+    const escalateEvents = calls.filter((c) => c[0] === 'event' && c[1] === 'escalate');
+    expect(escalateEvents).toHaveLength(1);
+    expect(escalateEvents[0][3]).toContain('boom');
+  });
+
+  it('parks the lane immediately on a 401 without waiting out the streak or budget', async () => {
+    const calls: any[] = [];
+    const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
+    let checkMergedCalls = 0;
+
+    await expect(
+      waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
+        createOctokit: () => ({}) as any,
+        pathExists: () => false,
+        checkMerged: async () => {
+          checkMergedCalls++;
+          throw Object.assign(new Error('Bad credentials'), { status: 401 });
+        },
+        loadConfig: () => fakeFactoryConfig(false),
+        land: async () => {
+          throw new Error('land should not be called');
+        },
+        emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) =>
+          calls.push(['event', type, issue, msg]),
+        writeLine: () => {},
+        sleep: async () => {},
+      }),
+    ).rejects.toMatchObject({ reason: 'escalate' });
+
+    expect(checkMergedCalls).toBe(1);
+    const escalateEvents = calls.filter((c) => c[0] === 'event' && c[1] === 'escalate');
+    expect(escalateEvents).toHaveLength(1);
+    expect(escalateEvents[0][3]).toContain('Bad credentials');
+    const warnIndex = calls.findIndex((c) => c[0] === 'event' && c[1] === 'warn');
+    const escalateIndex = calls.findIndex((c) => c[0] === 'event' && c[1] === 'escalate');
+    expect(warnIndex).toBeGreaterThanOrEqual(0);
+    expect(warnIndex).toBeLessThan(escalateIndex);
+  });
+
+  it('parks the lane immediately on a 403 with no rate-limit evidence', async () => {
+    const calls: any[] = [];
+    const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
+    let checkMergedCalls = 0;
+
+    await expect(
+      waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
+        createOctokit: () => ({}) as any,
+        pathExists: () => false,
+        checkMerged: async () => {
+          checkMergedCalls++;
+          throw Object.assign(new Error('Resource not accessible by integration'), { status: 403 });
+        },
+        loadConfig: () => fakeFactoryConfig(false),
+        land: async () => {
+          throw new Error('land should not be called');
+        },
+        emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) =>
+          calls.push(['event', type, issue, msg]),
+        writeLine: () => {},
+        sleep: async () => {},
+      }),
+    ).rejects.toMatchObject({ reason: 'escalate' });
+
+    expect(checkMergedCalls).toBe(1);
+    expect(calls.filter((c) => c[0] === 'event' && c[1] === 'escalate')).toHaveLength(1);
+  });
+
+  it('treats a rate-limited 403 as transient and keeps polling instead of parking', async () => {
+    const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
+    let stopped = false;
+    const calls: any[] = [];
+
+    await waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
+      createOctokit: () => ({}) as any,
+      pathExists: () => stopped,
+      checkMerged: async () => {
+        stopped = true;
+        throw Object.assign(new Error('API rate limit exceeded'), { status: 403 });
+      },
+      loadConfig: () => fakeFactoryConfig(false),
+      land: async () => {
+        throw new Error('land should not be called');
+      },
+      emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) =>
+        calls.push(['event', type, issue, msg]),
+      writeLine: () => {},
+      sleep: async () => {},
+    });
+
+    expect(calls.some((c) => c[0] === 'event' && c[1] === 'escalate')).toBe(false);
+
+    stopped = false;
+    const calls2: any[] = [];
+    await waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
+      createOctokit: () => ({}) as any,
+      pathExists: () => stopped,
+      checkMerged: async () => {
+        stopped = true;
+        throw Object.assign(new Error('access denied'), {
+          status: 403,
+          response: { headers: { 'x-ratelimit-remaining': '0' } },
+        });
+      },
+      loadConfig: () => fakeFactoryConfig(false),
+      land: async () => {
+        throw new Error('land should not be called');
+      },
+      emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) =>
+        calls2.push(['event', type, issue, msg]),
+      writeLine: () => {},
+      sleep: async () => {},
+    });
+
+    expect(calls2.some((c) => c[0] === 'event' && c[1] === 'escalate')).toBe(false);
+  });
+
+  it('classifies permanent vs transient merged-state check errors', () => {
+    expect(isPermanentMergeCheckError(Object.assign(new Error('x'), { status: 401 }))).toBe(true);
+    expect(isPermanentMergeCheckError(Object.assign(new Error('x'), { status: 403 }))).toBe(true);
+    expect(isPermanentMergeCheckError(Object.assign(new Error('API rate limit exceeded'), { status: 403 }))).toBe(
+      false,
+    );
+    expect(
+      isPermanentMergeCheckError(
+        Object.assign(new Error('x'), { status: 403, response: { headers: { 'x-ratelimit-remaining': '0' } } }),
+      ),
+    ).toBe(false);
+    expect(
+      isPermanentMergeCheckError(
+        Object.assign(new Error('x'), { status: 403, response: { headers: { 'retry-after': '30' } } }),
+      ),
+    ).toBe(false);
+    expect(isPermanentMergeCheckError(Object.assign(new Error('x'), { status: 500 }))).toBe(false);
+    expect(isPermanentMergeCheckError(new Error('network'))).toBe(false);
+    expect(isPermanentMergeCheckError(undefined)).toBe(false);
+    expect(isPermanentMergeCheckError(null)).toBe(false);
   });
 
   it('squash-merges a PR and deletes its branch', async () => {
