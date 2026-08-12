@@ -24,7 +24,8 @@ export interface WatchChecksOptions {
 
 /** Conclusions that count as a passing check. These are the three GitHub itself accepts for a
  *  required status check; `skipped` is the normal result of a path-filtered job. Anything not in
- *  this set blocks the merge — see ADR "The CI merge gate is fail-closed…". */
+ *  this set blocks the merge — see ADR-0014
+ *  (docs/adr/0014-ci-merge-gate-fails-closed-on-non-allow-listed-check-conclusions.md). */
 const PASSING_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
 const DEFAULT_PER_PAGE = 100;
 const DEFAULT_MAX_PAGES = 10;
