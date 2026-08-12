@@ -62,6 +62,7 @@ describe('getFactoryPaths', () => {
     expect(paths.queueProposed).toBe(resolve(repoRoot, '.factory', 'queue.proposed'));
     expect(paths.mergeLock).toBe(resolve(repoRoot, '.factory', 'merge.lock'));
     expect(paths.gitLock).toBe(resolve(repoRoot, '.factory', 'git.lock'));
+    expect(paths.runLock).toBe(resolve(repoRoot, '.factory', 'run.lock'));
     expect(paths.approvals).toBe(resolve(repoRoot, '.factory', 'approvals'));
     expect(paths.kpiHistory).toBe(resolve(repoRoot, '.factory', 'kpi-history.jsonl'));
     expect(paths.ingestWatermark).toBe(resolve(repoRoot, '.factory', 'ingest-watermark'));

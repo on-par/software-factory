@@ -142,6 +142,7 @@ import {
   logEvent,
   readCosts,
   resolveFilingPolicy,
+  RunLockHeldError,
   runOvernightQueue,
   setupWorktree,
   shellEscape,
@@ -149,6 +150,7 @@ import {
   watchChecks,
   withFileLock,
   withGitLock,
+  withRunLock,
 } from '@on-par/factory-core/internal';
 import { runTui } from '@on-par/factory-tui';
 import chalk from 'chalk';
@@ -1434,18 +1436,20 @@ async function cmdShip(
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
 
-  const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
-  if (hasUnresolvedPark(priorEvents, String(issueNum))) {
-    logEvent(paths.events, 'human-restarted', issueNum, 'manual retry of a previously parked/failed run', {
-      actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
-    });
-  }
+  return withRepoRunLock(paths, 'factory ship', async () => {
+    const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
+    if (hasUnresolvedPark(priorEvents, String(issueNum))) {
+      logEvent(paths.events, 'human-restarted', issueNum, 'manual retry of a previously parked/failed run', {
+        actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
+      });
+    }
 
-  try {
-    return await shipIssue(issueNum, opts);
-  } catch (err: any) {
-    throw new CliExitError(`Ship failed for issue #${issueNum}: ${err.message}`, 1);
-  }
+    try {
+      return await shipIssue(issueNum, opts);
+    } catch (err: any) {
+      throw new CliExitError(`Ship failed for issue #${issueNum}: ${err.message}`, 1);
+    }
+  });
 }
 
 async function cmdRunIssue(
@@ -1460,40 +1464,43 @@ async function cmdRunIssue(
   if (!existsSync(paths.state)) {
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
-  const ghRepo = await getGitHubRepo();
 
-  // Pre-flight: resolve the issue through the canonical work-request seam
-  // BEFORE any worktree or PR exists — a bad issue exits here.
-  const workSources = createDefaultWorkSourceRegistry({ octokit: getOctokit() });
-  let work: WorkRequest;
-  try {
-    work = await workSources.resolve(GITHUB_ISSUE_SOURCE, {
-      repo: ghRepo,
-      issue: issueNum,
-    } satisfies GithubIssueParams);
-  } catch (err) {
-    if (err instanceof InvalidWorkRequestInputError) {
-      throw new CliExitError(`factory: ${err.message}`, 2);
+  await withRepoRunLock(paths, 'factory run-issue', async () => {
+    const ghRepo = await getGitHubRepo();
+
+    // Pre-flight: resolve the issue through the canonical work-request seam
+    // BEFORE any worktree or PR exists — a bad issue exits here.
+    const workSources = createDefaultWorkSourceRegistry({ octokit: getOctokit() });
+    let work: WorkRequest;
+    try {
+      work = await workSources.resolve(GITHUB_ISSUE_SOURCE, {
+        repo: ghRepo,
+        issue: issueNum,
+      } satisfies GithubIssueParams);
+    } catch (err) {
+      if (err instanceof InvalidWorkRequestInputError) {
+        throw new CliExitError(`factory: ${err.message}`, 2);
+      }
+      throw new CliExitError(
+        `factory: could not resolve issue #${issueNum} in ${ghRepo} (${errorDetail(err)}) — no worktree or PR was created`,
+        2,
+      );
     }
-    throw new CliExitError(
-      `factory: could not resolve issue #${issueNum} in ${ghRepo} (${errorDetail(err)}) — no worktree or PR was created`,
-      2,
-    );
-  }
-  console.log(chalk.cyan(`one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
+    console.log(chalk.cyan(`one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
 
-  const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
-  if (hasUnresolvedPark(priorEvents, String(issueNum))) {
-    logEvent(paths.events, 'human-restarted', issueNum, 'manual retry of a previously parked/failed run', {
-      actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
-    });
-  }
+    const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
+    if (hasUnresolvedPark(priorEvents, String(issueNum))) {
+      logEvent(paths.events, 'human-restarted', issueNum, 'manual retry of a previously parked/failed run', {
+        actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
+      });
+    }
 
-  try {
-    await shipIssue(issueNum, opts, { repoRoot, ghRepo, workRequest: work });
-  } catch (err: any) {
-    throw new CliExitError(`Run failed for issue #${issueNum}: ${err.message}`, 1);
-  }
+    try {
+      await shipIssue(issueNum, opts, { repoRoot, ghRepo, workRequest: work });
+    } catch (err: any) {
+      throw new CliExitError(`Run failed for issue #${issueNum}: ${err.message}`, 1);
+    }
+  });
 }
 
 async function cmdRunBrief(
@@ -1517,81 +1524,83 @@ async function cmdRunBrief(
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
 
-  let localOnly: LocalOnlyPolicy | undefined;
-  if (opts.workspace !== undefined) {
+  await withRepoRunLock(paths, 'factory run-brief', async () => {
+    let localOnly: LocalOnlyPolicy | undefined;
+    if (opts.workspace !== undefined) {
+      try {
+        localOnly = resolveLocalOnlyPolicy(opts.workspace);
+      } catch (err) {
+        if (err instanceof InvalidWorkspaceError) throw new CliExitError(`factory: ${err.message}`, 2);
+        throw err;
+      }
+    }
+
+    let artifactsDir: string | undefined;
+    if (opts.artifacts !== undefined) {
+      if (!localOnly) {
+        throw new CliExitError('factory: --artifacts requires --workspace (local-only runs only)', 2);
+      }
+      try {
+        artifactsDir = resolveArtifactsDir(opts.artifacts);
+      } catch (err) {
+        if (err instanceof InvalidArtifactsDirError) throw new CliExitError(`factory: ${err.message}`, 2);
+        throw err;
+      }
+      console.log(chalk.cyan(`local-only: benchmark artifacts will be written to ${artifactsDir}`));
+    }
+
+    // Local-only runs never touch GitHub — no remote required, no mutation possible.
+    const ghRepo = localOnly ? 'local/workspace' : await getGitHubRepo();
+
+    // Pre-flight: resolve the brief through the canonical work-request seam
+    // BEFORE any worktree or PR exists — a malformed brief exits here, so BUILD never starts.
+    const workSources = createDefaultWorkSourceRegistry({ octokit: getOctokit() });
+    let work: WorkRequest;
     try {
-      localOnly = resolveLocalOnlyPolicy(opts.workspace);
+      work = await workSources.resolve(LOCAL_BRIEF_SOURCE, { path: briefPath } satisfies LocalBriefParams);
     } catch (err) {
-      if (err instanceof InvalidWorkspaceError) throw new CliExitError(`factory: ${err.message}`, 2);
-      throw err;
+      if (err instanceof InvalidWorkRequestInputError) {
+        throw new CliExitError(`factory: ${err.message}`, 2);
+      }
+      throw new CliExitError(
+        `factory: could not resolve brief at ${briefPath} (${errorDetail(err)}) — no worktree or PR was created`,
+        2,
+      );
     }
-  }
+    const digest = work.reference?.externalId ?? '';
+    const runNum = briefRunNumber(digest);
+    console.log(chalk.cyan(`one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
+    logEvent(paths.events, 'work-source', runNum, `inline local brief ${briefPath} (sha256 ${digest})`);
+    if (localOnly) {
+      console.log(chalk.cyan(`local-only: workspace ${localOnly.workspace} — publishing disabled`));
+      logEvent(
+        paths.events,
+        'local-only',
+        runNum,
+        `caller-provided workspace ${localOnly.workspace} — publishing disabled`,
+      );
+    }
 
-  let artifactsDir: string | undefined;
-  if (opts.artifacts !== undefined) {
-    if (!localOnly) {
-      throw new CliExitError('factory: --artifacts requires --workspace (local-only runs only)', 2);
+    const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
+    if (hasUnresolvedPark(priorEvents, String(runNum))) {
+      logEvent(paths.events, 'human-restarted', runNum, 'manual retry of a previously parked/failed run', {
+        actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
+      });
     }
+
     try {
-      artifactsDir = resolveArtifactsDir(opts.artifacts);
-    } catch (err) {
-      if (err instanceof InvalidArtifactsDirError) throw new CliExitError(`factory: ${err.message}`, 2);
-      throw err;
+      await shipIssue(runNum, opts, {
+        repoRoot,
+        ghRepo,
+        workRequest: work,
+        workSource: { kind: LOCAL_BRIEF_SOURCE, params: { path: briefPath } satisfies LocalBriefParams },
+        localOnly,
+        artifactsDir,
+      });
+    } catch (err: any) {
+      throw new CliExitError(`Run failed for brief ${briefPath}: ${err.message}`, 1);
     }
-    console.log(chalk.cyan(`local-only: benchmark artifacts will be written to ${artifactsDir}`));
-  }
-
-  // Local-only runs never touch GitHub — no remote required, no mutation possible.
-  const ghRepo = localOnly ? 'local/workspace' : await getGitHubRepo();
-
-  // Pre-flight: resolve the brief through the canonical work-request seam
-  // BEFORE any worktree or PR exists — a malformed brief exits here, so BUILD never starts.
-  const workSources = createDefaultWorkSourceRegistry({ octokit: getOctokit() });
-  let work: WorkRequest;
-  try {
-    work = await workSources.resolve(LOCAL_BRIEF_SOURCE, { path: briefPath } satisfies LocalBriefParams);
-  } catch (err) {
-    if (err instanceof InvalidWorkRequestInputError) {
-      throw new CliExitError(`factory: ${err.message}`, 2);
-    }
-    throw new CliExitError(
-      `factory: could not resolve brief at ${briefPath} (${errorDetail(err)}) — no worktree or PR was created`,
-      2,
-    );
-  }
-  const digest = work.reference?.externalId ?? '';
-  const runNum = briefRunNumber(digest);
-  console.log(chalk.cyan(`one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
-  logEvent(paths.events, 'work-source', runNum, `inline local brief ${briefPath} (sha256 ${digest})`);
-  if (localOnly) {
-    console.log(chalk.cyan(`local-only: workspace ${localOnly.workspace} — publishing disabled`));
-    logEvent(
-      paths.events,
-      'local-only',
-      runNum,
-      `caller-provided workspace ${localOnly.workspace} — publishing disabled`,
-    );
-  }
-
-  const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
-  if (hasUnresolvedPark(priorEvents, String(runNum))) {
-    logEvent(paths.events, 'human-restarted', runNum, 'manual retry of a previously parked/failed run', {
-      actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
-    });
-  }
-
-  try {
-    await shipIssue(runNum, opts, {
-      repoRoot,
-      ghRepo,
-      workRequest: work,
-      workSource: { kind: LOCAL_BRIEF_SOURCE, params: { path: briefPath } satisfies LocalBriefParams },
-      localOnly,
-      artifactsDir,
-    });
-  } catch (err: any) {
-    throw new CliExitError(`Run failed for brief ${briefPath}: ${err.message}`, 1);
-  }
+  });
 }
 
 async function cmdLocalSmallDryRun(issueNum: number, opts: { spec?: string; output?: string }) {
@@ -1619,7 +1628,6 @@ async function cmdLocalSmallDryRun(issueNum: number, opts: { spec?: string; outp
 
 async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }) {
   const repoRoot = await getRepoRoot();
-  const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
   const queueFile = resolve(repoRoot, opts.queue ?? resolve(paths.state, 'local-small', 'overnight-queue'));
   const statePath = resolve(repoRoot, opts.state ?? resolve(paths.state, 'local-small', 'overnight-state.json'));
@@ -1637,64 +1645,67 @@ async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }) 
     throw new CliExitError(`factory: overnight queue at ${queueFile} has no valid entries`, 2);
   }
 
-  process.env.FACTORY_LOCAL_ONLY = '1';
+  await withRepoRunLock(paths, 'factory local-small-overnight', async () => {
+    const ghRepo = await getGitHubRepo();
+    process.env.FACTORY_LOCAL_ONLY = '1';
 
-  const preflight = async (): Promise<OvernightPreflightResult> => {
-    if (!isCommandAvailable('claude')) return { ok: false, reason: missingClaudeCliMessage() };
-    const registry = new ModelRegistry(applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot)));
-    const ollamaModels = ollamaModelSet();
-    const diagnoses = diagnoseModels(
-      registry,
-      { ollamaModelPresent: ollamaModels ? (m: string) => ollamaModels.has(m) : undefined },
-      process.env.FACTORY_EXPERIMENTAL === '1',
-      true, // localOnly
-    );
-    if (!hasReachableWorker(diagnoses)) {
-      const reasons = diagnoses.filter((d) => !d.reachable).map((d) => `${d.model}: ${d.reason}`);
-      return { ok: false, reason: `no reachable local worker model — ${reasons.join('; ')}` };
+    const preflight = async (): Promise<OvernightPreflightResult> => {
+      if (!isCommandAvailable('claude')) return { ok: false, reason: missingClaudeCliMessage() };
+      const registry = new ModelRegistry(applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot)));
+      const ollamaModels = ollamaModelSet();
+      const diagnoses = diagnoseModels(
+        registry,
+        { ollamaModelPresent: ollamaModels ? (m: string) => ollamaModels.has(m) : undefined },
+        process.env.FACTORY_EXPERIMENTAL === '1',
+        true, // localOnly
+      );
+      if (!hasReachableWorker(diagnoses)) {
+        const reasons = diagnoses.filter((d) => !d.reachable).map((d) => `${d.model}: ${d.reason}`);
+        return { ok: false, reason: `no reachable local worker model — ${reasons.join('; ')}` };
+      }
+      return { ok: true };
+    };
+
+    const processItem = async (issue: number): Promise<OvernightItemOutcome> => {
+      try {
+        await shipIssue(issue, { autoRework: true, interactive: false }, { repoRoot, ghRepo, lane: 'overnight' });
+        return { status: 'ready' };
+      } catch (err: any) {
+        return parkReasonFor(err) === 'escalate'
+          ? { status: 'parked', reason: err.message }
+          : { status: 'failed', reason: err.message };
+      }
+    };
+
+    const report = (item: OvernightStateItem) => {
+      console.log(chalk.yellow(`factory: issue #${item.issue} ${item.status} — ${item.reason ?? 'unknown'}`));
+      logEvent(
+        paths.events,
+        'overnight-park',
+        item.issue,
+        `${item.status}: ${item.reason ?? 'unknown'} — see ${paths.reports}`,
+      );
+    };
+    const log = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
+
+    const deps: OvernightQueueDeps = { preflight, processItem, report, log };
+    const result = await runOvernightQueue({ issues: entries.map((e) => e.issue), statePath }, deps);
+
+    const ready = result.processed.filter((item) => item.status === 'ready');
+    const parked = result.processed.filter((item) => item.status === 'parked');
+    const failed = result.processed.filter((item) => item.status === 'failed');
+    console.log(chalk.green(`overnight ready: ${ready.length}`));
+    console.log(chalk.yellow(`overnight parked: ${parked.length}`));
+    console.log(chalk.red(`overnight failed: ${failed.length}`));
+    console.log(chalk.yellow(`overnight skipped (already resumed): ${result.skipped.length}`));
+
+    if (result.halted) {
+      throw new CliExitError(
+        `factory: overnight halted before issue #${result.halted.issue}: ${result.halted.reason} — fix the environment and re-run to resume`,
+        4,
+      );
     }
-    return { ok: true };
-  };
-
-  const processItem = async (issue: number): Promise<OvernightItemOutcome> => {
-    try {
-      await shipIssue(issue, { autoRework: true, interactive: false }, { repoRoot, ghRepo, lane: 'overnight' });
-      return { status: 'ready' };
-    } catch (err: any) {
-      return parkReasonFor(err) === 'escalate'
-        ? { status: 'parked', reason: err.message }
-        : { status: 'failed', reason: err.message };
-    }
-  };
-
-  const report = (item: OvernightStateItem) => {
-    console.log(chalk.yellow(`factory: issue #${item.issue} ${item.status} — ${item.reason ?? 'unknown'}`));
-    logEvent(
-      paths.events,
-      'overnight-park',
-      item.issue,
-      `${item.status}: ${item.reason ?? 'unknown'} — see ${paths.reports}`,
-    );
-  };
-  const log = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
-
-  const deps: OvernightQueueDeps = { preflight, processItem, report, log };
-  const result = await runOvernightQueue({ issues: entries.map((e) => e.issue), statePath }, deps);
-
-  const ready = result.processed.filter((item) => item.status === 'ready');
-  const parked = result.processed.filter((item) => item.status === 'parked');
-  const failed = result.processed.filter((item) => item.status === 'failed');
-  console.log(chalk.green(`overnight ready: ${ready.length}`));
-  console.log(chalk.yellow(`overnight parked: ${parked.length}`));
-  console.log(chalk.red(`overnight failed: ${failed.length}`));
-  console.log(chalk.yellow(`overnight skipped (already resumed): ${result.skipped.length}`));
-
-  if (result.halted) {
-    throw new CliExitError(
-      `factory: overnight halted before issue #${result.halted.issue}: ${result.halted.reason} — fix the environment and re-run to resume`,
-      4,
-    );
-  }
+  });
 }
 
 async function getIssueTitle(octokit: Octokit, repo: string, issue: number): Promise<string> {
@@ -1705,6 +1716,41 @@ async function getIssueTitle(octokit: Octokit, repo: string, issue: number): Pro
 
 function worktreePathFor(repoRoot: string, issueNum: number): string {
   return resolve(dirname(repoRoot), `${basename(repoRoot)}-factory-${branchPrefixSlug()}-${issueNum}`);
+}
+
+/** Fences a whole run behind the checkout's `.factory/run.lock` (#598). A live holder is
+ *  refused immediately — never queued behind a multi-hour run — and a dead holder's lock is
+ *  reclaimed by withRunLock. Nested acquisition inside one process is a pass-through, so
+ *  `factory supervise` can hold this across its loop. */
+export async function withRepoRunLock<T>(
+  paths: ReturnType<typeof getFactoryPaths>,
+  command: string,
+  fn: () => Promise<T>,
+  deps: { runLock?: typeof withRunLock; emitEvent?: typeof logEvent } = {},
+): Promise<T> {
+  const { runLock = withRunLock, emitEvent = logEvent } = deps;
+  try {
+    return await runLock(paths.runLock, fn, {
+      command,
+      onReclaim: (pid) =>
+        emitEvent(
+          paths.events,
+          'lock-stolen',
+          '-',
+          `reclaimed ${paths.runLock} from dead holder pid ${pid ?? 'unknown'}`,
+        ),
+    });
+  } catch (err) {
+    if (err instanceof RunLockHeldError) {
+      emitEvent(paths.events, 'run_lock_conflict', '-', `${command} refused: ${err.message}`);
+      throw new CliExitError(
+        `factory: ${err.message} — stop that run (or wait for it to finish) before starting another. ` +
+          `A dead run's lock is reclaimed automatically; remove ${paths.runLock} only if you are sure no factory run is live.`,
+        2,
+      );
+    }
+    throw err;
+  }
 }
 
 export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }) {
@@ -2040,94 +2086,96 @@ async function cmdProxy() {
 
 async function cmdRun() {
   const repoRoot = await getRepoRoot();
-  const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
 
   if (!existsSync(paths.queue)) {
     throw new CliExitError('queue empty — run factory init + triage first', 2);
   }
 
-  const factoryConfig = loadFactoryConfig();
-  if (factoryConfig.worktree.autoGcOnRun) {
+  return withRepoRunLock(paths, 'factory run', async () => {
+    const ghRepo = await getGitHubRepo();
+    const factoryConfig = loadFactoryConfig();
+    if (factoryConfig.worktree.autoGcOnRun) {
+      try {
+        const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
+        const report = await withGitLock(repoRoot, () =>
+          withFileLock(paths.gitLock, () =>
+            sweepWorktrees({ repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays }, { log: gcLog }),
+          ),
+        );
+        logEvent(
+          paths.events,
+          'worktree-gc',
+          'all',
+          `removed ${report.removed.length} stale worktree(s), kept ${report.kept}`,
+        );
+        console.log(formatGcReport(report));
+      } catch (err: any) {
+        logEvent(paths.events, 'warn', 'all', `worktree gc failed: ${err.message}`);
+      }
+    }
+
+    // Read queue
+    const { entries, diagnostics } = parseQueue(readFileSync(paths.queue, 'utf-8'));
+    warnQueueDiagnostics(diagnostics);
+
+    // Group by lane
+    const lanes = new Map<string, number[]>();
+    for (const e of entries) {
+      if (!lanes.has(e.lane)) lanes.set(e.lane, []);
+      lanes.get(e.lane)!.push(e.issue);
+    }
+
+    const knobs = resolveUsageKnobs(process.env, loadRepoConfig(repoRoot));
+    const controller = new AbortController();
+    const watchdog = knobs.watch
+      ? watchUsage({
+          cap: knobs.cap,
+          stopAt: knobs.stopAt,
+          pollMs: knobs.pollMs,
+          stopFile: paths.stop,
+          eventsFile: paths.events,
+          signal: controller.signal,
+          estimator: knobs.estimator,
+        }).catch((err: any) => {
+          // a watchdog crash must never take down the run
+          logEvent(paths.events, 'warn', '-', `usage watchdog crashed: ${err.message}`);
+        })
+      : Promise.resolve();
+
+    const { proxy } = await startLaneProxy(paths, resolveEnvironmentProxy(factoryConfig));
+
     try {
-      const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
-      const report = await withGitLock(repoRoot, () =>
-        withFileLock(paths.gitLock, () =>
-          sweepWorktrees({ repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays }, { log: gcLog }),
-        ),
-      );
-      logEvent(
-        paths.events,
-        'worktree-gc',
-        'all',
-        `removed ${report.removed.length} stale worktree(s), kept ${report.kept}`,
-      );
-      console.log(formatGcReport(report));
-    } catch (err: any) {
-      logEvent(paths.events, 'warn', 'all', `worktree gc failed: ${err.message}`);
-    }
-  }
+      // Run lanes in parallel
+      const pids: Promise<void>[] = [];
+      for (const [lane, issues] of lanes) {
+        logEvent(paths.events, 'lane-start', '-', `lane '${lane}' started (${issues.length} issues)`, { lane });
+        pids.push(runLane(lane, issues, repoRoot, ghRepo, paths));
+      }
 
-  // Read queue
-  const { entries, diagnostics } = parseQueue(readFileSync(paths.queue, 'utf-8'));
-  warnQueueDiagnostics(diagnostics);
-
-  // Group by lane
-  const lanes = new Map<string, number[]>();
-  for (const e of entries) {
-    if (!lanes.has(e.lane)) lanes.set(e.lane, []);
-    lanes.get(e.lane)!.push(e.issue);
-  }
-
-  const knobs = resolveUsageKnobs(process.env, loadRepoConfig(repoRoot));
-  const controller = new AbortController();
-  const watchdog = knobs.watch
-    ? watchUsage({
-        cap: knobs.cap,
-        stopAt: knobs.stopAt,
-        pollMs: knobs.pollMs,
-        stopFile: paths.stop,
-        eventsFile: paths.events,
-        signal: controller.signal,
-        estimator: knobs.estimator,
-      }).catch((err: any) => {
-        // a watchdog crash must never take down the run
-        logEvent(paths.events, 'warn', '-', `usage watchdog crashed: ${err.message}`);
-      })
-    : Promise.resolve();
-
-  const { proxy } = await startLaneProxy(paths, resolveEnvironmentProxy(factoryConfig));
-
-  try {
-    // Run lanes in parallel
-    const pids: Promise<void>[] = [];
-    for (const [lane, issues] of lanes) {
-      logEvent(paths.events, 'lane-start', '-', `lane '${lane}' started (${issues.length} issues)`, { lane });
-      pids.push(runLane(lane, issues, repoRoot, ghRepo, paths));
+      await Promise.allSettled(pids);
+      controller.abort();
+      await watchdog;
+      logEvent(paths.events, 'run-done', 'all', 'all lanes finished');
+    } finally {
+      if (proxy) {
+        await proxy.stop();
+        clearProxyState(paths.proxyState);
+      }
     }
 
-    await Promise.allSettled(pids);
-    controller.abort();
-    await watchdog;
-    logEvent(paths.events, 'run-done', 'all', 'all lanes finished');
-  } finally {
-    if (proxy) {
-      await proxy.stop();
-      clearProxyState(paths.proxyState);
+    if (entries.length > 0) {
+      try {
+        const events = existsSync(paths.events) ? readEvents(paths.events) : [];
+        const costs = existsSync(paths.costs) ? readCosts(paths.costs) : [];
+        const kpis = computeHealthKpis(events, costs);
+        await appendKpiSnapshot(paths, repoRoot, kpis);
+        logEvent(paths.events, 'kpi-snapshot', 'all', `KPI snapshot appended to ${paths.kpiHistory}`);
+      } catch (err: any) {
+        logEvent(paths.events, 'warn', 'all', `kpi snapshot failed: ${err.message}`);
+      }
     }
-  }
-
-  if (entries.length > 0) {
-    try {
-      const events = existsSync(paths.events) ? readEvents(paths.events) : [];
-      const costs = existsSync(paths.costs) ? readCosts(paths.costs) : [];
-      const kpis = computeHealthKpis(events, costs);
-      await appendKpiSnapshot(paths, repoRoot, kpis);
-      logEvent(paths.events, 'kpi-snapshot', 'all', `KPI snapshot appended to ${paths.kpiHistory}`);
-    } catch (err: any) {
-      logEvent(paths.events, 'warn', 'all', `kpi snapshot failed: ${err.message}`);
-    }
-  }
+  });
 }
 
 /** Wraps cmdRun so an empty queue is a no-op (not a throw) while auto-ingest is enabled and watching. */
@@ -2204,18 +2252,20 @@ async function cmdSupervise(opts: { now?: boolean }) {
     throw new CliExitError(`factory: ${err.message}`, 2);
   }
 
-  await superviseLoop({
-    cap: knobs.cap,
-    resumeAt: knobs.resumeAt,
-    pollMs: knobs.pollMs,
-    watch: knobs.watch,
-    estimator: knobs.estimator,
-    stopFile: paths.stop,
-    eventsFile: paths.events,
-    now: opts.now,
-    runQueue: createSuperviseRunQueue(paths, ingestCfg),
-    ingest: ingestCfg.enabled ? createIngestHook(repoRoot, paths, ingestCfg) : undefined,
-  });
+  await withRepoRunLock(paths, 'factory supervise', () =>
+    superviseLoop({
+      cap: knobs.cap,
+      resumeAt: knobs.resumeAt,
+      pollMs: knobs.pollMs,
+      watch: knobs.watch,
+      estimator: knobs.estimator,
+      stopFile: paths.stop,
+      eventsFile: paths.events,
+      now: opts.now,
+      runQueue: createSuperviseRunQueue(paths, ingestCfg),
+      ingest: ingestCfg.enabled ? createIngestHook(repoRoot, paths, ingestCfg) : undefined,
+    }),
+  );
 }
 
 type RunLaneDeps = {
