@@ -6,8 +6,8 @@
 ## Context
 
 `watchChecks` (`packages/core/src/utils/ci-watch.ts`) is the single gate that decides whether
-a factory-produced PR is green enough to merge. ADR-0014 hardened *which conclusions* count
-as passing, but left untouched the prior question of *when the set of check runs is complete*.
+a factory-produced PR is green enough to merge. ADR-0014 hardened _which conclusions_ count
+as passing, but left untouched the prior question of _when the set of check runs is complete_.
 
 GitHub's check-run list for a ref is not a fixed roster that fills in — it grows as workflows
 register. A workflow that starts late, is queued behind a concurrency group, or is triggered
