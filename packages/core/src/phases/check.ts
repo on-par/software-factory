@@ -7,7 +7,7 @@ import { type CheckerContext, fileExists, runAllCheckers } from '../checkers/ind
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { laneEnv } from '../environment/index.js';
 import type { EventKind } from '../events/kinds.js';
-import type { ModelRouter } from '../router/index.js';
+import type { ModelRouter, RouterResult } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
@@ -157,9 +157,12 @@ async function detectHeadedModeSignals(worktree: string): Promise<string[]> {
 function classifyReworkCause(opts: {
   steering?: ConsumedSteering;
   failovers: { reason: FailoverReason }[];
+  /** Reason from a router error when the call threw before any model produced output (#642). */
+  failureReason?: FailoverReason;
 }): ReworkCause {
   if (opts.steering && opts.steering.messages.length > 0) return 'direction-change';
   if (opts.failovers.some((f) => EXTERNAL_REASONS.has(f.reason))) return 'external';
+  if (opts.failureReason !== undefined && EXTERNAL_REASONS.has(opts.failureReason)) return 'external';
   return 'factory-fault';
 }
 
@@ -237,7 +240,7 @@ export async function checkPhase(opts: {
 
     const steering = drainSteering?.();
 
-    const { failovers } = await reworkWorker(
+    const { failovers, modelCompleted, failureReason } = await reworkWorker(
       issue,
       worktree,
       specPath,
@@ -253,7 +256,7 @@ export async function checkPhase(opts: {
       onPgid,
     );
 
-    const cause = classifyReworkCause({ steering, failovers });
+    const cause = classifyReworkCause({ steering, failovers, failureReason });
     log(
       'rework',
       `round ${reworkRounds}/${maxRounds}: ${summary.failures} failing (${failingChecks.join(', ')}) — cause=${cause}`,
@@ -266,10 +269,15 @@ export async function checkPhase(opts: {
     summary = await runAllCheckers(ctx, router, constitution, checkTimeoutSeconds);
     log('check', `Rework round ${reworkRounds}: ${summary.failures} failures remaining`);
 
-    if (summary.failures > 0 && failureSignature(summary) === signatureBefore) {
-      noProgressStreak++;
-    } else {
-      noProgressStreak = 0;
+    // When no model ran this round (modelCompleted === false), an unchanged failure
+    // signature is not evidence of a stuck worker — leave the streak untouched
+    // (neither advanced nor reset) rather than treat a provider outage as no-progress (#642).
+    if (modelCompleted) {
+      if (summary.failures > 0 && failureSignature(summary) === signatureBefore) {
+        noProgressStreak++;
+      } else {
+        noProgressStreak = 0;
+      }
     }
 
     if (noProgressStreak >= STUCK_THRESHOLD) {
@@ -323,7 +331,12 @@ async function reworkWorker(
   appPort?: number,
   appBaseUrl?: string,
   onPgid?: (pgid: number) => void,
-): Promise<{ failovers: { model: string; reason: FailoverReason; detail?: string }[] }> {
+): Promise<{
+  failovers: { model: string; reason: FailoverReason; detail?: string }[];
+  /** False when router.run threw — no model produced output for this round (#642). */
+  modelCompleted: boolean;
+  failureReason?: FailoverReason;
+}> {
   const constitutionCtx = buildConstitutionContext(constitution);
   const failures = summary.results.filter((r) => r.result === 'FAIL');
   const failureDetails = failures.map((f) => `### ${f.checker}\n${f.details}`).join('\n\n');
@@ -350,8 +363,12 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
 
   prompt = applySteering(prompt, steering);
 
-  const reworkResult = await router
-    .run('build_claude', prompt, {
+  let reworkResult: RouterResult | null = null;
+  let failureReason: FailoverReason | undefined;
+  let attempts: RouterResult['attempts'] = [];
+
+  try {
+    reworkResult = await router.run('build_claude', prompt, {
       worktree,
       timeoutSeconds: timeoutSeconds ?? 7200,
       sandbox,
@@ -360,17 +377,35 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
       env: laneEnv(appPort, process.env, appBaseUrl),
       onPgid,
       retryCause: 'checker',
-    })
-    .catch(() => null);
+    });
+    attempts = reworkResult.attempts;
+  } catch (err) {
+    // ModelRouter.run only throws once every eligible model is exhausted, and the
+    // error carries the reason + attempts. Swallowing it made a provider outage
+    // look like a factory fault (#642).
+    failureReason = (err as { reason?: FailoverReason }).reason;
+    attempts = (err as { attempts?: RouterResult['attempts'] }).attempts ?? [];
+    const attemptSummary =
+      attempts.map((a) => `${a.model}(${a.reason ?? 'ok'}${a.detail ? `: ${a.detail}` : ''})`).join(', ') || 'none';
+    log(
+      'rework_model_failed',
+      `rework worker never ran: router exhausted every eligible model (${failureReason ?? 'unknown'}) — attempts: ${attemptSummary}`,
+      failureReason ? { failoverReason: failureReason } : undefined,
+    );
+  }
 
-  const failovers = reworkResult ? failoversFrom(reworkResult.attempts) : [];
+  const failovers = failoversFrom(attempts);
   for (const f of failovers) {
     log('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, {
       failoverReason: f.reason,
     });
   }
 
-  return { failovers };
+  return {
+    failovers,
+    modelCompleted: reworkResult !== null,
+    ...(failureReason ? { failureReason } : {}),
+  };
 }
 
 export async function disputeResolution(opts: {

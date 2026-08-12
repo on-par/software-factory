@@ -292,6 +292,109 @@ describe('checkPhase auto rework', () => {
   );
 
   it(
+    'classifies usage_cap router exhaustion as external and never produces a false stuck',
+    { timeout: 120_000 },
+    async () => {
+      const { worktree, specPath } = await makeFailingWorktree();
+      const stub = new StubModelExecutor({
+        scripts: { build_claude: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }, { fail: 'usage_cap' }] },
+        defaultOutput: 'rework complete',
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const logCalls: Array<[string, string, ({ failoverReason?: string; rework?: ReworkInfo } | undefined)?]> = [];
+
+      const check = await checkPhase({
+        issue: 642,
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        log: (type, msg, extra) => {
+          logCalls.push([type, msg, extra]);
+        },
+      });
+
+      const failedCalls = logCalls.filter(([type]) => type === 'rework_model_failed');
+      expect(failedCalls.length).toBeGreaterThan(0);
+      expect(failedCalls[0][1]).toContain('usage_cap');
+      expect(failedCalls[0][2]).toEqual({ failoverReason: 'usage_cap' });
+
+      const reworkCalls = logCalls.filter(([type]) => type === 'rework');
+      expect(reworkCalls.length).toBeGreaterThan(0);
+      for (const call of reworkCalls) {
+        expect(call[2]?.rework?.cause).toBe('external');
+      }
+
+      expect(logCalls.some(([type]) => type === 'stuck')).toBe(false);
+      expect(check.stuck).toBeFalsy();
+      expect(check.reworkRounds).toBe(3);
+    },
+  );
+
+  it('classifies a non-external router exhaustion reason as factory-fault', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const stub = new StubModelExecutor({
+      scripts: { build_claude: [{ fail: 'error' }, { fail: 'error' }] },
+      defaultOutput: 'rework complete',
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const logCalls: Array<[string, string, ({ failoverReason?: string; rework?: ReworkInfo } | undefined)?]> = [];
+
+    await checkPhase({
+      issue: 642,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      log: (type, msg, extra) => {
+        logCalls.push([type, msg, extra]);
+      },
+      maxReworkRounds: 1,
+    });
+
+    const failedCalls = logCalls.filter(([type]) => type === 'rework_model_failed');
+    expect(failedCalls.length).toBeGreaterThan(0);
+    expect(failedCalls[0][2]).toEqual({ failoverReason: 'error' });
+
+    const reworkCalls = logCalls.filter(([type]) => type === 'rework');
+    expect(reworkCalls.length).toBeGreaterThan(0);
+    expect(reworkCalls[0][2]?.rework?.cause).toBe('factory-fault');
+  });
+
+  it(
+    'still emits failover events for real model switches recorded on a failed rework run',
+    { timeout: 120_000 },
+    async () => {
+      const { worktree, specPath } = await makeFailingWorktree();
+      const stub = new StubModelExecutor({
+        scripts: { build_claude: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }] },
+        defaultOutput: 'rework complete',
+      });
+      const router = new ModelRouter(twoModels, routes, false, stub);
+      const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
+
+      await checkPhase({
+        issue: 642,
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        log: (type, msg, extra) => {
+          logCalls.push([type, msg, extra]);
+        },
+        maxReworkRounds: 1,
+      });
+
+      expect(logCalls).toContainEqual([
+        'failover',
+        expect.stringContaining('usage_cap'),
+        { failoverReason: 'usage_cap' },
+      ]);
+      expect(logCalls.some(([type]) => type === 'rework_model_failed')).toBe(true);
+    },
+  );
+
+  it(
     'omits the detail suffix from the rework failover log when the failed attempt carries no detail',
     { timeout: 120_000 },
     async () => {

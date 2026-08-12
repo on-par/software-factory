@@ -98,6 +98,7 @@ export type EventKind =
   | 'resume-approved'
   | 'resumed'
   | 'rework'
+  | 'rework_model_failed'
   | 'router'
   | 'run_lock_conflict'
   | 'run-done'
@@ -234,6 +235,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'resume-approved': { severity: 'info', isPark: false, isTerminal: false },
   resumed: { severity: 'info', isPark: false, isTerminal: false },
   rework: { severity: 'warn', isPark: false, isTerminal: false, laneStatus: 'running' },
+  rework_model_failed: { severity: 'warn', isPark: false, isTerminal: false },
   router: { severity: 'info', isPark: false, isTerminal: false },
   run_lock_conflict: { severity: 'warn', isPark: false, isTerminal: false },
   'run-done': { severity: 'info', isPark: false, isTerminal: true },

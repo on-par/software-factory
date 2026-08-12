@@ -107,3 +107,11 @@ describe('run_lock_conflict classification (#598)', () => {
     expect(EVENT_TRAITS.run_lock_conflict).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
   });
 });
+
+// A rework round where the router threw before any model produced output (#642) is a
+// warning the operator should notice, but the bounded rework loop keeps running.
+describe('rework_model_failed classification (#642)', () => {
+  it('is warn severity, not park, not terminal', () => {
+    expect(EVENT_TRAITS.rework_model_failed).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
+  });
+});
