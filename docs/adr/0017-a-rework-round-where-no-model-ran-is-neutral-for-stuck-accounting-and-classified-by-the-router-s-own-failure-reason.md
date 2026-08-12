@@ -11,7 +11,7 @@ discarded that error with `.catch(() => null)` (`packages/core/src/phases/check.
 collapsed two very different situations into one: "the worker ran and failed to fix the
 failures" and "no worker model ever ran". Because `classifyReworkCause` could only see the
 `failovers` list — empty when a single-model tier is exhausted, since `failoversFrom` records
-only attempts followed by a *different* model — a provider quota outage was recorded as
+only attempts followed by a _different_ model — a provider quota outage was recorded as
 `cause: 'factory-fault'`. The round still counted, the checkers still re-ran, the failure
 signature was necessarily identical, and after `STUCK_THRESHOLD` (2) rounds the lane logged
 `'stuck'` with `cause: 'factory-fault'`. The `stuckRate` and rework-cause KPIs the factory
