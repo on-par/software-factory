@@ -31,6 +31,8 @@ interface FakeRunOpts {
   existingLabels?: string[];
   createOk?: boolean;
   createUrl?: string;
+  listOk?: boolean;
+  listStdout?: string;
 }
 
 function fakeRun(opts: FakeRunOpts) {
@@ -63,6 +65,8 @@ function fakeRun(opts: FakeRunOpts) {
       return { stdout: '', ok: true };
     }
     if (argv[1] === 'issue' && argv[2] === 'list') {
+      if (opts.listOk === false) return { stdout: opts.listStdout ?? 'rate limit exceeded', ok: false };
+      if (opts.listStdout !== undefined) return { stdout: opts.listStdout, ok: true };
       return { stdout: JSON.stringify(opts.existingChildren ?? []), ok: true };
     }
     if (argv[1] === 'issue' && argv[2] === 'create') {
@@ -401,6 +405,54 @@ describe('advanceDraftEpic — promote', () => {
     expect(result).toEqual({ action: 'already-promoted', issueNumber: 20 });
     expect(findCall(calls, 'issue', 'create')).toBeUndefined();
     expect(findCall(calls, 'issue', 'edit')).toBeUndefined();
+  });
+});
+
+describe('advanceDraftEpic — story listing failure', () => {
+  const oneStory: DraftStory = {
+    title: 'Ship the smallest slice',
+    role: 'product owner',
+    want: 'a minimal slice',
+    soThat: 'we validate the idea',
+    scenarios: [{ name: 'Ships', given: ['a validated Epic'], when: ['built'], then: ['it merges'], tracesTo: [] }],
+  };
+
+  it('gh issue list fails: error action, no writes', async () => {
+    const { run, calls } = fakeRun({
+      view: { number: 20, title: 'Draft Epic: X', body: '## Hypothesis\nX', labels: ['validated'] },
+      listOk: false,
+    });
+
+    const result = await advanceDraftEpic({ repoDir: '/repo', issueNumber: 20, stories: [oneStory] }, { run });
+
+    expect(result).toEqual({ action: 'error', detail: 'rate limit exceeded' });
+    expect(findCall(calls, 'issue', 'create')).toBeUndefined();
+    expect(findCall(calls, 'issue', 'edit')).toBeUndefined();
+  });
+
+  it('unparseable stdout on an ok call: error action, no writes', async () => {
+    const { run, calls } = fakeRun({
+      view: { number: 20, title: 'Draft Epic: X', body: '## Hypothesis\nX', labels: ['validated'] },
+      listStdout: 'not json',
+    });
+
+    const result = await advanceDraftEpic({ repoDir: '/repo', issueNumber: 20, stories: [oneStory] }, { run });
+
+    expect(result).toEqual({ action: 'error', detail: 'unparseable gh issue list output' });
+    expect(findCall(calls, 'issue', 'create')).toBeUndefined();
+    expect(findCall(calls, 'issue', 'edit')).toBeUndefined();
+  });
+
+  it('non-array JSON: error action, no writes', async () => {
+    const { run, calls } = fakeRun({
+      view: { number: 20, title: 'Draft Epic: X', body: '## Hypothesis\nX', labels: ['validated'] },
+      listStdout: '{"message":"Bad credentials"}',
+    });
+
+    const result = await advanceDraftEpic({ repoDir: '/repo', issueNumber: 20, stories: [oneStory] }, { run });
+
+    expect(result).toEqual({ action: 'error', detail: 'unparseable gh issue list output' });
+    expect(findCall(calls, 'issue', 'create')).toBeUndefined();
   });
 });
 

@@ -19,11 +19,15 @@ function fakeRun(opts: {
   createOk?: boolean;
   createUrl?: string;
   commentOk?: boolean;
+  listOk?: boolean;
+  listStdout?: string;
 }) {
   const calls: (readonly string[])[] = [];
   const run = async (argv: readonly string[]) => {
     calls.push(argv);
     if (argv[1] === 'issue' && argv[2] === 'list') {
+      if (opts.listOk === false) return { stdout: opts.listStdout ?? 'rate limit exceeded', ok: false };
+      if (opts.listStdout !== undefined) return { stdout: opts.listStdout, ok: true };
       return { stdout: JSON.stringify(opts.existingIssues ?? []), ok: true };
     }
     if (argv[1] === 'label' && argv[2] === 'list') {
@@ -159,6 +163,31 @@ describe('authorDraftEpic', () => {
     const result = await authorDraftEpic({ repoDir: '/repo', candidate }, { run });
 
     expect(result).toEqual({ created: false, reason: 'create-failed', detail: 'not-a-url' });
+  });
+
+  it('list-failed: gh issue list fails, nothing written', async () => {
+    const { run, calls } = fakeRun({ listOk: false });
+    const result = await authorDraftEpic({ repoDir: '/repo', candidate }, { run });
+
+    expect(result).toEqual({ created: false, reason: 'list-failed', detail: 'rate limit exceeded' });
+    expect(findCall(calls, 'issue', 'create')).toBeUndefined();
+    expect(findCall(calls, 'issue', 'comment')).toBeUndefined();
+    expect(findCall(calls, 'label', 'create')).toBeUndefined();
+  });
+
+  it('list-failed: unparseable stdout on an ok call', async () => {
+    const { run, calls } = fakeRun({ listStdout: 'not json' });
+    const result = await authorDraftEpic({ repoDir: '/repo', candidate }, { run });
+
+    expect(result).toEqual({ created: false, reason: 'list-failed', detail: 'unparseable gh issue list output' });
+    expect(findCall(calls, 'issue', 'create')).toBeUndefined();
+  });
+
+  it('list-failed: non-array JSON', async () => {
+    const { run } = fakeRun({ listStdout: '{"message":"Bad credentials"}' });
+    const result = await authorDraftEpic({ repoDir: '/repo', candidate }, { run });
+
+    expect(result).toEqual({ created: false, reason: 'list-failed', detail: 'unparseable gh issue list output' });
   });
 
   it('commentPosted is false when the comment call fails', async () => {
