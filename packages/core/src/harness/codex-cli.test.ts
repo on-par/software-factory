@@ -135,7 +135,7 @@ describe('CodexCliHarness command shape', () => {
     expect(result.output).toBe('CODEX OUTPUT');
     expect(rec.calls).toHaveLength(1);
     const { cmd, opts } = rec.calls[0];
-    expect(cmd).toMatch(/^codex exec --sandbox workspace-write -c approval_policy=never -C '/);
+    expect(cmd).toMatch(/^codex exec --json --sandbox workspace-write -c approval_policy=never -C '/);
     expect(cmd).toContain("-C '/tmp/factory worktree'");
     expect(cmd).toContain('--model gpt-5-codex');
     expect(cmd).toMatch(/ -o '\/.*factory-codex-out-[^']+' - </);
@@ -152,7 +152,7 @@ describe('CodexCliHarness command shape', () => {
     await harness.run(makeContractRequest({ model: 'codex-no-flag', registry, prompt: 'build it' }));
 
     expect(rec.calls).toHaveLength(1);
-    expect(rec.calls[0].cmd).toMatch(/^codex exec --sandbox workspace-write -c approval_policy=never -C '/);
+    expect(rec.calls[0].cmd).toMatch(/^codex exec --json --sandbox workspace-write -c approval_policy=never -C '/);
     expect(rec.calls[0].cmd).not.toContain('--model');
   });
 
@@ -205,7 +205,148 @@ describe('CodexCliHarness command shape', () => {
 
     expect(rec.calls).toHaveLength(1);
     expect(rec.calls[0].cmd.startsWith('sandbox-exec -p ')).toBe(true);
-    expect(rec.calls[0].cmd).toContain('codex exec --sandbox workspace-write');
+    expect(rec.calls[0].cmd).toContain('codex exec --json --sandbox workspace-write');
+  });
+});
+
+describe('CodexCliHarness usage parsing', () => {
+  it('parses usage from a real turn.completed event (AC 1)', async () => {
+    const stdout = [
+      '{"type":"thread.started","thread_id":"019ff914-ffab-7d32-9e8d-2b202a31c34f"}',
+      '{"type":"turn.started"}',
+      '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"ok"}}',
+      '{"type":"turn.completed","usage":{"input_tokens":15785,"cached_input_tokens":9984,"output_tokens":5,"reasoning_output_tokens":0}}',
+    ].join('\n');
+    const rec = recordingExec({ stdout }, async (cmd) => {
+      await realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT');
+    });
+    const harness = new CodexCliHarness(rec.fn);
+
+    const result = await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
+
+    expect(result.output).toBe('CODEX OUTPUT');
+    expect(result.usage).toEqual({
+      inputTokens: 15785,
+      outputTokens: 5,
+      rawInputTokens: 5801,
+      cacheReadTokens: 9984,
+    });
+    expect(result.usage).not.toHaveProperty('cacheCreationTokens');
+    expect(result.usage).not.toHaveProperty('costUsd');
+    expect(result.usage).not.toHaveProperty('numTurns');
+  });
+
+  it('sums usage across multiple turn.completed events', async () => {
+    const stdout = [
+      '{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":10,"cached_input_tokens":40}}',
+      '{"type":"turn.completed","usage":{"input_tokens":200,"output_tokens":20,"cached_input_tokens":60}}',
+    ].join('\n');
+    const rec = recordingExec({ stdout }, async (cmd) => {
+      await realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT');
+    });
+    const harness = new CodexCliHarness(rec.fn);
+
+    const result = await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
+
+    expect(result.usage).toEqual({
+      inputTokens: 300,
+      outputTokens: 30,
+      rawInputTokens: 200,
+      cacheReadTokens: 100,
+    });
+  });
+
+  it('resolves normally with no usage when stdout has no turn.completed event (AC 3)', async () => {
+    const stdout = [
+      '{"type":"thread.started","thread_id":"019ff914-ffab-7d32-9e8d-2b202a31c34f"}',
+      '{"type":"turn.started"}',
+      '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"ok"}}',
+    ].join('\n');
+    const rec = recordingExec({ stdout }, async (cmd) => {
+      await realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT');
+    });
+    const harness = new CodexCliHarness(rec.fn);
+
+    const result = await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
+
+    expect(result.output).toBe('CODEX OUTPUT');
+    expect(result.usage).toBeUndefined();
+  });
+
+  it('resolves with no usage when counts are malformed (AC 3)', async () => {
+    const stdout = '{"type":"turn.completed","usage":{"input_tokens":"many","output_tokens":5}}';
+    const rec = recordingExec({ stdout }, async (cmd) => {
+      await realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT');
+    });
+    const harness = new CodexCliHarness(rec.fn);
+
+    const result = await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
+
+    expect(result.usage).toBeUndefined();
+  });
+
+  it('tolerates non-JSON noise interleaved with the usage line', async () => {
+    const stdout = [
+      'warning: running inside sandbox wrapper',
+      '{"type":"turn.completed","usage":{"input_tokens":15785,"cached_input_tokens":9984,"output_tokens":5}}',
+      'not json at all {{{',
+    ].join('\n');
+    const rec = recordingExec({ stdout }, async (cmd) => {
+      await realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT');
+    });
+    const harness = new CodexCliHarness(rec.fn);
+
+    const result = await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
+
+    expect(result.usage).toEqual({
+      inputTokens: 15785,
+      outputTokens: 5,
+      rawInputTokens: 5801,
+      cacheReadTokens: 9984,
+    });
+  });
+
+  it('treats absent cached_input_tokens as zero', async () => {
+    const stdout = '{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":10}}';
+    const rec = recordingExec({ stdout }, async (cmd) => {
+      await realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT');
+    });
+    const harness = new CodexCliHarness(rec.fn);
+
+    const result = await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
+
+    expect(result.usage).toEqual({
+      inputTokens: 100,
+      outputTokens: 10,
+      rawInputTokens: 100,
+      cacheReadTokens: 0,
+    });
+  });
+
+  it('clamps rawInputTokens to zero when cached_input_tokens exceeds input_tokens', async () => {
+    const stdout = '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":80,"output_tokens":10}}';
+    const rec = recordingExec({ stdout }, async (cmd) => {
+      await realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT');
+    });
+    const harness = new CodexCliHarness(rec.fn);
+
+    const result = await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
+
+    expect(result.usage).toEqual({
+      inputTokens: 50,
+      outputTokens: 10,
+      rawInputTokens: 0,
+      cacheReadTokens: 80,
+    });
+  });
+
+  it('resolves with no usage on empty stdout', async () => {
+    const rec = successExec();
+    const harness = new CodexCliHarness(rec.fn);
+
+    const result = await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
+
+    expect(result.usage).toBeUndefined();
   });
 });
 
@@ -322,5 +463,31 @@ describe('CodexCliHarness failure classification', () => {
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('timeout');
+  });
+
+  it('classifies from the JSONL error stream when stderr is empty', async () => {
+    const stdout = '{"type":"turn.failed","error":{"message":"stream error: rate limit exceeded"}}';
+    const harness = new CodexCliHarness(async () => {
+      throw Object.assign(new Error('boom'), { stderr: '', code: 1, stdout });
+    });
+
+    const err: any = await harness.run(makeContractRequest({ model: 'codex-model', registry })).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('rate_limit');
+    expect(err.details.stdout).toContain('stream error: rate limit exceeded');
+  });
+
+  it('does not misclassify agent prose mentioning limit-like words', async () => {
+    const stdout =
+      '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"we should check the quota and rate limit code"}}';
+    const harness = new CodexCliHarness(async () => {
+      throw Object.assign(new Error('boom'), { stderr: '', code: 1, stdout });
+    });
+
+    const err: any = await harness.run(makeContractRequest({ model: 'codex-model', registry })).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('unknown');
   });
 });

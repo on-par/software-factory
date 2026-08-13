@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile as realWriteFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -142,13 +142,23 @@ afterEach(async () => {
   }
 });
 
-function recordingExec(result: { stdout?: string; stderr?: string } = {}) {
+function recordingExec(
+  result: { stdout?: string; stderr?: string } = {},
+  onCmd?: (cmd: string) => Promise<void> | void,
+) {
   const calls: { cmd: string; opts: any }[] = [];
   const fn = async (cmd: string, opts: any) => {
     calls.push({ cmd, opts });
+    if (onCmd) await onCmd(cmd);
     return { stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
   };
   return { fn, calls };
+}
+
+function outFileFromCmd(cmd: string): string {
+  const match = cmd.match(/-o '([^']+)'/);
+  if (!match) throw new Error(`could not find outFile in cmd: ${cmd}`);
+  return match[1];
 }
 
 describe('CliModelExecutor', () => {
@@ -288,13 +298,46 @@ describe('CliModelExecutor', () => {
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('empty_response');
     expect(rec.calls).toHaveLength(1);
-    expect(rec.calls[0].cmd).toMatch(/^codex exec --sandbox workspace-write -c approval_policy=never -C '/);
+    expect(rec.calls[0].cmd).toMatch(/^codex exec --json --sandbox workspace-write -c approval_policy=never -C '/);
     expect(rec.calls[0].cmd).toContain(`-C '${worktree}'`);
     expect(rec.calls[0].cmd).toContain('--model gpt-5-codex');
     expect(rec.calls[0].cmd).toContain(' -o ');
     expect(rec.calls[0].cmd).toMatch(/ - < '\/.*factory-codex-[^']+'$/);
     expect(rec.calls[0].cmd).toMatch(/ -o '\/.*factory-codex-out-[^']+' - </);
     expect(rec.calls[0].opts.timeoutMs).toBe(timeoutSeconds * 1000);
+  });
+
+  it('reports parsed HarnessUsage to ctx.onUsage on the codex route (AC 1, failover attribution)', async () => {
+    const stdout = [
+      '{"type":"thread.started","thread_id":"019ff914-ffab-7d32-9e8d-2b202a31c34f"}',
+      '{"type":"turn.started"}',
+      '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"ok"}}',
+      '{"type":"turn.completed","usage":{"input_tokens":15785,"cached_input_tokens":9984,"output_tokens":5,"reasoning_output_tokens":0}}',
+    ].join('\n');
+    const rec = recordingExec({ stdout }, async (cmd) => {
+      await realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT');
+    });
+    const executor = new CliModelExecutor(rec.fn);
+    const usages: unknown[] = [];
+
+    const output = await executor.runModel('codex-model', 'build it', {
+      worktree,
+      timeoutSeconds,
+      task: 'build_codex',
+      registry,
+      routesConfig,
+      onUsage: (u) => usages.push(u),
+    });
+
+    expect(output).toBe('CODEX OUTPUT');
+    expect(usages).toEqual([
+      {
+        inputTokens: 15785,
+        outputTokens: 5,
+        rawInputTokens: 5801,
+        cacheReadTokens: 9984,
+      },
+    ]);
   });
 
   it('runs Ollama through the native chat API with provider options', async () => {
