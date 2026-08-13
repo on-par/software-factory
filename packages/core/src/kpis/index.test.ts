@@ -5,6 +5,7 @@ import {
   appendKpiHistoryLine,
   computeHealthKpis,
   computeKpiDrift,
+  costRouteOf,
   formatKpiLines,
   KPI_DRIFT_THRESHOLD_RATIO,
   KPI_DRIFT_WINDOW_SIZE,
@@ -173,7 +174,9 @@ describe('computeHealthKpis', () => {
 
     expect(kpis.merged).toBe(0);
     expect(kpis.costPerMergedPr).toBeNull();
-    expect(formatKpiLines(kpis)).toContain('Cost per merged PR: n/a');
+    expect(formatKpiLines(kpis)).toContain(
+      'Cost per merged PR: unknown (cost coverage 100%: 1/1 invocations with a cost row)',
+    );
   });
 
   it('returns all-zero rates and a null cost with zero runs, and never emits NaN', () => {
@@ -457,7 +460,7 @@ describe('retry KPIs', () => {
 
     const lines = formatKpiLines(kpis);
     expect(lines).toContain('Retries: total 0, median 0/run (checker 0 · failover 0 · timeout 0 · other 0)');
-    expect(lines).toContain('Retry cost share: 0% of total spend');
+    expect(lines).toContain('Retry cost share: 0% of total spend (cost coverage: unknown — no cost rows recorded)');
   });
 
   it('yields a null median retries per run for an empty log', () => {
@@ -589,7 +592,178 @@ describe('phase-level cost and time attribution (#614)', () => {
     expect(parsed.phaseDurationsMs).toBeUndefined();
     expect(parsed.phaseCosts).toBeUndefined();
     expect(parsed.retriesByCause).toBeUndefined();
+    expect(parsed.medianCostPerMergedPr).toBeUndefined();
+    expect(parsed.costScoredMergedRuns).toBeUndefined();
+    expect(parsed.costRows).toBeUndefined();
+    expect(parsed.costCoverage).toBeUndefined();
+    expect(parsed.estimatedCostShare).toBeUndefined();
+    expect(parsed.costByRoute).toBeUndefined();
     expect(() => renderKpiTrend([parsed])).not.toThrow();
+  });
+});
+
+describe('cost aggregation and coverage (#426)', () => {
+  it('reads no cost rows as unknown, not zero', () => {
+    const events: FactoryEvent[] = [event({ issue: '1', type: 'issue-title' }), event({ issue: '1', type: 'merged' })];
+
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.costRows).toBe(0);
+    expect(kpis.costPerMergedPr).toBeNull();
+    expect(kpis.medianCostPerMergedPr).toBeNull();
+    expect(kpis.costScoredMergedRuns).toBe(0);
+    expect(kpis.estimatedCostShare).toBeNull();
+    expect(kpis.costCoverage).toBeNull();
+    expect(kpis.costByRoute).toEqual({});
+
+    const lines = formatKpiLines(kpis);
+    expect(lines).toContain('Cost per merged PR: unknown (cost coverage: unknown — no cost rows recorded)');
+    expect(lines.join('\n')).not.toContain('$');
+  });
+
+  it('scores median and mean cost per merged PR over the merged cohort only, excluding a non-merged run', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title' }),
+      event({ issue: '1', type: 'merged' }),
+      event({ issue: '2', type: 'issue-title' }),
+      event({ issue: '2', type: 'merged' }),
+      event({ issue: '3', type: 'issue-title' }),
+      event({ issue: '3', type: 'merged' }),
+      event({ issue: '4', type: 'issue-title' }),
+    ];
+    const costs: CostEntry[] = [
+      cost({ issue: '1', cost: 0.1 }),
+      cost({ issue: '2', cost: 0.2 }),
+      cost({ issue: '3', cost: 1.0 }),
+      cost({ issue: '3', cost: 2.0 }),
+      cost({ issue: '4', cost: 5.0 }),
+    ];
+
+    const kpis = computeHealthKpis(events, costs);
+
+    expect(kpis.totalCost).toBeCloseTo(8.3);
+    expect(kpis.costScoredMergedRuns).toBe(3);
+    expect(kpis.costPerMergedPr).toBeCloseTo(1.1);
+    expect(kpis.medianCostPerMergedPr).toBeCloseTo(0.2);
+  });
+
+  it('excludes a merged run with no cost row rather than counting it as free', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title' }),
+      event({ issue: '1', type: 'merged' }),
+      event({ issue: '2', type: 'issue-title' }),
+      event({ issue: '2', type: 'merged' }),
+    ];
+    const costs: CostEntry[] = [cost({ issue: '1', cost: 0.4 })];
+
+    const kpis = computeHealthKpis(events, costs);
+
+    expect(kpis.merged).toBe(2);
+    expect(kpis.costScoredMergedRuns).toBe(1);
+    expect(kpis.costPerMergedPr).toBeCloseTo(0.4);
+    expect(formatKpiLines(kpis).join('\n')).toContain('1/2 merged runs with cost rows');
+  });
+
+  it('computes partial coverage from cost rows plus failover events', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title' }),
+      event({ issue: '1', type: 'failover', failoverReason: 'timeout' }),
+      event({ issue: '1', type: 'failover', failoverReason: 'timeout' }),
+    ];
+    const costs: CostEntry[] = [
+      cost({ issue: '1', cost: 0.1 }),
+      cost({ issue: '1', cost: 0.2 }),
+      cost({ issue: '1', cost: 0.3 }),
+    ];
+
+    const kpis = computeHealthKpis(events, costs);
+
+    expect(kpis.observedInvocations).toBe(5);
+    expect(kpis.costCoverage).toBeCloseTo(0.6);
+    expect(formatKpiLines(kpis).join('\n')).toContain('(cost coverage 60%: 3/5 invocations with a cost row)');
+  });
+
+  it('does not double-count rework_model_failed alongside its failover event', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '1', type: 'issue-title' }),
+      event({ issue: '1', type: 'failover', failoverReason: 'unavailable' }),
+      event({ issue: '1', type: 'rework_model_failed', failoverReason: 'unavailable' }),
+    ];
+    const costs: CostEntry[] = [cost({ issue: '1', cost: 0.1 })];
+
+    const kpis = computeHealthKpis(events, costs);
+
+    expect(kpis.observedInvocations).toBe(2);
+    expect(kpis.costCoverage).toBeCloseTo(0.5);
+  });
+
+  it('computes estimatedCostShare: all-estimated, mixed, and zero-cost-but-rows-exist', () => {
+    const events: FactoryEvent[] = [event({ issue: '1', type: 'issue-title' })];
+
+    const allEstimated = computeHealthKpis(events, [
+      cost({ issue: '1', cost: 0.5, estimated: true }),
+      cost({ issue: '1', cost: 0.5, estimated: true }),
+    ]);
+    expect(allEstimated.estimatedCostShare).toBe(1);
+    expect(formatKpiLines(allEstimated).join('\n')).toContain('Estimated cost share: 100% of total spend');
+
+    const mixed = computeHealthKpis(events, [
+      cost({ issue: '1', cost: 0.25, estimated: true }),
+      cost({ issue: '1', cost: 0.75, estimated: false }),
+    ]);
+    expect(mixed.estimatedCostShare).toBeCloseTo(0.25);
+
+    const zeroCost = computeHealthKpis(events, [cost({ issue: '1', cost: 0, estimated: true })]);
+    expect(zeroCost.estimatedCostShare).toBe(0);
+  });
+
+  it('splits spend into codex/claude/other buckets, task wins over model, and both phase and route lines print', () => {
+    const events: FactoryEvent[] = [event({ issue: '1', type: 'issue-title' })];
+    const costs: CostEntry[] = [
+      cost({ issue: '1', task: 'build_codex', model: 'gpt-5.1-codex', cost: 10 }),
+      cost({ issue: '1', task: 'build_claude', model: 'claude-opus-5', cost: 20 }),
+      cost({ issue: '1', task: 'plan', model: 'claude-sonnet-5', cost: 30 }),
+      cost({ issue: '1', task: 'check_tests', model: 'gpt-5.6-sol', cost: 40 }),
+      cost({ issue: '1', task: 'plan', model: 'qwen3:8b', cost: 50 }),
+    ];
+
+    const kpis = computeHealthKpis(events, costs);
+
+    expect(kpis.costByRoute).toEqual({ codex: 50, claude: 50, other: 50 });
+    expect(Object.keys(kpis.costByRoute)).toEqual(['codex', 'claude', 'other']);
+
+    const lines = formatKpiLines(kpis).join('\n');
+    expect(lines).toContain('Cost by phase:');
+    expect(lines).toContain('Cost by route:');
+  });
+
+  it('costRouteOf: task mapping wins over model family, then model-family prefix rules apply', () => {
+    expect(costRouteOf(cost({ task: 'build_codex', model: 'claude-opus-5' }))).toBe('codex');
+    expect(costRouteOf(cost({ task: 'build_claude', model: 'gpt-5.1-codex' }))).toBe('claude');
+    expect(costRouteOf(cost({ task: 'plan', model: 'gpt-4.1-mini' }))).toBe('codex');
+    expect(costRouteOf(cost({ task: 'plan', model: 'codex-ollama-qwen3.5:9b' }))).toBe('codex');
+    expect(costRouteOf(cost({ task: 'plan', model: 'qwen3:8b' }))).toBe('other');
+    expect(costRouteOf(cost({ task: 'plan', model: 'claude-fable-5' }))).toBe('claude');
+  });
+
+  it('round-trips the new cost fields through kpi-history, and a legacy row still parses with them undefined', () => {
+    const events: FactoryEvent[] = [event({ issue: '1', type: 'issue-title' }), event({ issue: '1', type: 'merged' })];
+    const costs: CostEntry[] = [
+      cost({ issue: '1', task: 'build_codex', model: 'gpt-5.1-codex', cost: 0.3, estimated: true }),
+      cost({ issue: '1', task: 'build_claude', model: 'claude-opus-5', cost: 0.7 }),
+    ];
+    const kpis = computeHealthKpis(events, costs);
+
+    const record = kpisToHistoryRecord(kpis, '2026-08-12');
+    const jsonl = appendKpiHistoryLine('', record);
+    const [snapshot] = parseKpiHistory(jsonl);
+
+    expect(snapshot.medianCostPerMergedPr).toBeCloseTo(kpis.medianCostPerMergedPr!);
+    expect(snapshot.costScoredMergedRuns).toBe(kpis.costScoredMergedRuns);
+    expect(snapshot.costRows).toBe(kpis.costRows);
+    expect(snapshot.costCoverage).toBeCloseTo(kpis.costCoverage!);
+    expect(snapshot.estimatedCostShare).toBeCloseTo(kpis.estimatedCostShare!);
+    expect(snapshot.costByRoute).toEqual(kpis.costByRoute);
   });
 });
 
@@ -1165,7 +1339,7 @@ describe('KPI trend', () => {
       stuckRate: 0,
       humanInterventionRate: 0,
       fullyAutonomousRate: 1,
-      costPerMergedPr: 0,
+      costPerMergedPr: null,
       medianCycleTimeMs: 0,
       p90CycleTimeMs: 0,
       meanReadinessScore: null,
@@ -1181,6 +1355,12 @@ describe('KPI trend', () => {
       achievedConcurrencyMean: null,
       achievedConcurrencyMax: 0,
       parallelEfficiency: 0,
+      medianCostPerMergedPr: null,
+      costScoredMergedRuns: 0,
+      costRows: 0,
+      costCoverage: null,
+      estimatedCostShare: null,
+      costByRoute: {},
     });
   });
 

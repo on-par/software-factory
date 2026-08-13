@@ -93,13 +93,37 @@ export interface HealthKpis {
   /** fullyAutonomousRuns / runs; 0 when runs === 0. */
   fullyAutonomousRate: number;
   totalCost: number;
+  /** Cost rows aggregated from .factory/costs.jsonl (#426). 0 means "no cost data",
+   *  and every cost figure below then reports unknown (null), never $0.00. */
+  costRows: number;
+  /** Merged runs carrying at least one cost row — the cohort cost per merged PR is
+   *  scored on (#426). Merged runs with no cost row are excluded, not counted as free. */
+  costScoredMergedRuns: number;
+  /** Mean per-run cost over costScoredMergedRuns; null when that cohort is empty (#426).
+   *  Deliberately NOT totalCost / merged — spend on runs that never merged is not
+   *  charged to the ones that did. */
   costPerMergedPr: number | null;
+  /** Median per-run cost over the same cohort; null when empty (#426). Reported next to
+   *  the mean so one runaway run cannot set the headline figure alone. */
+  medianCostPerMergedPr: number | null;
+  /** Model invocations this report knows about: one per cost row, plus one per `failover`
+   *  event (an attempt that burned tokens and never produced a row) (#426). */
+  observedInvocations: number;
+  /** costRows / observedInvocations — the share of known invocations that produced a cost
+   *  row; null when neither was observed (#426). Printed alongside every cost figure. */
+  costCoverage: number | null;
+  /** Share of totalCost from rows marked `estimated: true`; null when costRows === 0,
+   *  0 when rows exist but totalCost is 0 (#426). */
+  estimatedCostShare: number | null;
+  /** codex/claude/other spend split (#426), via costRouteOf(). Only observed buckets are
+   *  present, exactly like phaseCosts. */
+  costByRoute: Record<string, number>;
   medianCycleTimeMs: number | null;
   p90CycleTimeMs: number | null;
   phaseDurations: Record<string, number>;
   /** Total model-call cost per phase (plan/build/check/ship), from CostEntry rows
    *  mapped via phaseOfCostEntry() (#614). Only keys with at least one matching
-   *  cost row are present. */
+   *  cost row are present. Rendered by formatKpiLines since #426. */
   phaseCosts: Record<string, number>;
   queueWaitMs: number | null;
   cycleTimeExcludedRuns: number;
@@ -206,6 +230,29 @@ export function phaseOfCostEntry(entry: CostEntry): string | null {
   return TASK_PHASE[entry.task] ?? null;
 }
 
+/** Which provider's bill a cost row lands on (#426). Deliberately a *spend* split,
+ *  not a harness split: `gpt-4.1-mini` dispatches through the claude-cli harness but
+ *  is billed by OpenAI, so it buckets as `codex`. See ADR (this PR). */
+export type CostRoute = 'codex' | 'claude' | 'other';
+
+/** Task names that name their route outright; checked before the model-family rule. */
+const TASK_ROUTE: Record<string, CostRoute> = {
+  build_codex: 'codex',
+  build_claude: 'claude',
+};
+
+/** Fixed render order for costByRoute buckets (#426). */
+const ROUTE_ORDER: CostRoute[] = ['codex', 'claude', 'other'];
+
+export function costRouteOf(entry: CostEntry): CostRoute {
+  const byTask = TASK_ROUTE[entry.task];
+  if (byTask) return byTask;
+  const model = entry.model.toLowerCase();
+  if (model.startsWith('claude')) return 'claude';
+  if (model.startsWith('gpt') || model.includes('codex')) return 'codex';
+  return 'other';
+}
+
 /** Attribute one event to a retry-cause bucket, or null if it is not a retry.
  *  'rework' events are one checker retry per round; 'stuck' events repeat the
  *  same round's payload and must NOT count. Any event carrying failoverReason
@@ -276,9 +323,11 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
   const runsByIssue = new Map<string, RunStats>();
   const retriesByCause: Record<RetryCause, number> = { checker: 0, failover: 0, timeout: 0, other: 0 };
   const allLanes = new Set<string>();
+  let failoverEventCount = 0;
 
   for (const event of events) {
     if (event.lane) allLanes.add(event.lane);
+    if (event.type === 'failover') failoverEventCount++;
     if (!isRealIssue(event.issue)) continue;
 
     const stats = runsByIssue.get(event.issue) ?? {
@@ -413,17 +462,38 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     }
   }
 
-  const totalCost = costs.reduce((sum, entry) => sum + (entry.cost ?? 0), 0);
-  const retryCost = costs.reduce(
-    (sum, entry) => sum + (entry.retryCause || entry.failoverReason ? (entry.cost ?? 0) : 0),
-    0,
-  );
+  let totalCost = 0;
+  let retryCost = 0;
+  let estimatedCost = 0;
   const phaseCosts: Record<string, number> = {};
+  const costByIssue = new Map<string, number>();
+  const rawCostByRoute: Record<string, number> = {};
   for (const entry of costs) {
+    const entryCost = entry.cost ?? 0;
+    totalCost += entryCost;
+    if (entry.retryCause || entry.failoverReason) retryCost += entryCost;
     const phase = phaseOfCostEntry(entry);
-    if (!phase) continue;
-    phaseCosts[phase] = (phaseCosts[phase] ?? 0) + (entry.cost ?? 0);
+    if (phase) phaseCosts[phase] = (phaseCosts[phase] ?? 0) + entryCost;
+    costByIssue.set(entry.issue, (costByIssue.get(entry.issue) ?? 0) + entryCost);
+    const route = costRouteOf(entry);
+    rawCostByRoute[route] = (rawCostByRoute[route] ?? 0) + entryCost;
+    if (entry.estimated === true) estimatedCost += entryCost;
   }
+  const costRows = costs.length;
+  const costByRoute = Object.fromEntries(
+    ROUTE_ORDER.filter((route) => route in rawCostByRoute).map((route) => [route, rawCostByRoute[route]]),
+  );
+
+  const mergedRunCosts: number[] = [];
+  for (const [issue, stats] of runsByIssue) {
+    if (!stats.merged) continue;
+    const runCost = costByIssue.get(issue);
+    if (runCost === undefined) continue; // merged but never instrumented — no verdict, not free
+    mergedRunCosts.push(runCost);
+  }
+
+  const observedInvocations = costRows + failoverEventCount;
+
   const totalRetries = retriesByCause.checker + retriesByCause.failover + retriesByCause.timeout + retriesByCause.other;
   const sortedCycleTimes = [...cycleTimes].sort((a, b) => a - b);
 
@@ -462,7 +532,14 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     humanEventsPerRun: runs === 0 ? null : totalHumanEvents / runs,
     fullyAutonomousRate: runs === 0 ? 0 : fullyAutonomousRuns / runs,
     totalCost,
-    costPerMergedPr: merged === 0 ? null : totalCost / merged,
+    costRows,
+    costScoredMergedRuns: mergedRunCosts.length,
+    costPerMergedPr: mean(mergedRunCosts),
+    medianCostPerMergedPr: percentile(mergedRunCosts, 0.5),
+    observedInvocations,
+    costCoverage: observedInvocations === 0 ? null : costRows / observedInvocations,
+    estimatedCostShare: costRows === 0 ? null : totalCost === 0 ? 0 : estimatedCost / totalCost,
+    costByRoute,
     medianCycleTimeMs: percentileFromSorted(sortedCycleTimes, 0.5),
     p90CycleTimeMs: percentileFromSorted(sortedCycleTimes, 0.9),
     phaseDurations,
@@ -513,8 +590,17 @@ function formatCost(value: number): string {
   return `$${value.toFixed(4)}`;
 }
 
+function formatCostCoverage(kpis: HealthKpis): string {
+  if (kpis.costCoverage === null) return ' (cost coverage: unknown — no cost rows recorded)';
+  return ` (cost coverage ${formatPercent(kpis.costCoverage)}: ${kpis.costRows}/${kpis.observedInvocations} invocations with a cost row)`;
+}
+
 export function formatKpiLines(kpis: HealthKpis): string[] {
   if (kpis.runs === 0) return ['No factory runs recorded yet.'];
+
+  const coverageSuffix = formatCostCoverage(kpis);
+  const phaseCostEntries = Object.entries(kpis.phaseCosts);
+  const routeCostEntries = Object.entries(kpis.costByRoute);
 
   const lines = [
     `Runs: ${kpis.runs}`,
@@ -525,8 +611,19 @@ export function formatKpiLines(kpis: HealthKpis): string[] {
     `Human-touched runs: ${formatPercent(kpis.humanInterventionRate)} (${kpis.humanTouchedRuns}/${kpis.runs}, ${kpis.humanEventsPerRun === null ? 'n/a' : kpis.humanEventsPerRun.toFixed(2)} human events/run)`,
     `Fully autonomous: ${formatPercent(kpis.fullyAutonomousRate)} (${kpis.fullyAutonomousRuns}/${kpis.runs} merged with zero human events)`,
     `Retries: total ${kpis.totalRetries}, median ${kpis.retriesPerRun}/run (checker ${kpis.retriesByCause.checker} · failover ${kpis.retriesByCause.failover} · timeout ${kpis.retriesByCause.timeout} · other ${kpis.retriesByCause.other})`,
-    `Retry cost share: ${formatPercent(kpis.retryCostShare)} of total spend`,
-    `Cost per merged PR: ${kpis.costPerMergedPr === null ? 'n/a' : formatCost(kpis.costPerMergedPr)}`,
+    kpis.costPerMergedPr === null
+      ? `Cost per merged PR: unknown${coverageSuffix}`
+      : `Cost per merged PR: median ${formatCost(kpis.medianCostPerMergedPr!)}, mean ${formatCost(kpis.costPerMergedPr)} (${kpis.costScoredMergedRuns}/${kpis.merged} merged runs with cost rows)${coverageSuffix}`,
+    phaseCostEntries.length === 0
+      ? `Cost by phase: unknown${coverageSuffix}`
+      : `Cost by phase: ${phaseCostEntries.map(([p, c]) => `${p} ${formatCost(c)}`).join(' · ')}${coverageSuffix}`,
+    routeCostEntries.length === 0
+      ? `Cost by route: unknown${coverageSuffix}`
+      : `Cost by route: ${routeCostEntries.map(([r, c]) => `${r} ${formatCost(c)}`).join(' · ')}${coverageSuffix}`,
+    kpis.estimatedCostShare === null
+      ? `Estimated cost share: unknown${coverageSuffix}`
+      : `Estimated cost share: ${formatPercent(kpis.estimatedCostShare)} of total spend${coverageSuffix}`,
+    `Retry cost share: ${formatPercent(kpis.retryCostShare)} of total spend${coverageSuffix}`,
   ];
 
   lines.push(
@@ -630,6 +727,22 @@ export interface KpiHistoryRecord {
   /** achievedConcurrencyMean / configuredLanes at snapshot time (#657). Absent in
    *  legacy rows. */
   parallelEfficiency?: number;
+  /** Median per-run cost over costScoredMergedRuns at snapshot time (#426). Absent in
+   *  legacy rows. */
+  medianCostPerMergedPr?: number | null;
+  /** Merged runs carrying at least one cost row at snapshot time (#426). Absent in
+   *  legacy rows. */
+  costScoredMergedRuns?: number;
+  /** Cost rows aggregated at snapshot time (#426). Absent in legacy rows. */
+  costRows?: number;
+  /** costRows / observedInvocations at snapshot time (#426); null when neither was
+   *  observed. Absent in legacy rows. */
+  costCoverage?: number | null;
+  /** Share of totalCost from estimated rows at snapshot time (#426); null when
+   *  costRows was 0. Absent in legacy rows. */
+  estimatedCostShare?: number | null;
+  /** codex/claude/other spend split at snapshot time (#426). Absent in legacy rows. */
+  costByRoute?: Record<string, number>;
 }
 
 export function kpisToHistoryRecord(
@@ -661,6 +774,12 @@ export function kpisToHistoryRecord(
     achievedConcurrencyMean: kpis.achievedConcurrency.mean,
     achievedConcurrencyMax: kpis.achievedConcurrency.max,
     parallelEfficiency: kpis.parallelEfficiency,
+    medianCostPerMergedPr: kpis.medianCostPerMergedPr,
+    costScoredMergedRuns: kpis.costScoredMergedRuns,
+    costRows: kpis.costRows,
+    costCoverage: kpis.costCoverage,
+    estimatedCostShare: kpis.estimatedCostShare,
+    costByRoute: kpis.costByRoute,
     ...(meta.commitSha !== undefined ? { commitSha: meta.commitSha } : {}),
     ...(meta.models !== undefined ? { models: meta.models } : {}),
     ...(kpis.meanReadinessScore !== undefined ? { meanReadinessScore: kpis.meanReadinessScore } : {}),
