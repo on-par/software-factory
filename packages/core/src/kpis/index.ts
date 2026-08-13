@@ -323,9 +323,11 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
   const runsByIssue = new Map<string, RunStats>();
   const retriesByCause: Record<RetryCause, number> = { checker: 0, failover: 0, timeout: 0, other: 0 };
   const allLanes = new Set<string>();
+  let failoverEventCount = 0;
 
   for (const event of events) {
     if (event.lane) allLanes.add(event.lane);
+    if (event.type === 'failover') failoverEventCount++;
     if (!isRealIssue(event.issue)) continue;
 
     const stats = runsByIssue.get(event.issue) ?? {
@@ -460,29 +462,24 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     }
   }
 
-  const totalCost = costs.reduce((sum, entry) => sum + (entry.cost ?? 0), 0);
-  const retryCost = costs.reduce(
-    (sum, entry) => sum + (entry.retryCause || entry.failoverReason ? (entry.cost ?? 0) : 0),
-    0,
-  );
+  let totalCost = 0;
+  let retryCost = 0;
+  let estimatedCost = 0;
   const phaseCosts: Record<string, number> = {};
-  for (const entry of costs) {
-    const phase = phaseOfCostEntry(entry);
-    if (!phase) continue;
-    phaseCosts[phase] = (phaseCosts[phase] ?? 0) + (entry.cost ?? 0);
-  }
-
-  const costRows = costs.length;
   const costByIssue = new Map<string, number>();
   const rawCostByRoute: Record<string, number> = {};
-  let estimatedCost = 0;
   for (const entry of costs) {
     const entryCost = entry.cost ?? 0;
+    totalCost += entryCost;
+    if (entry.retryCause || entry.failoverReason) retryCost += entryCost;
+    const phase = phaseOfCostEntry(entry);
+    if (phase) phaseCosts[phase] = (phaseCosts[phase] ?? 0) + entryCost;
     costByIssue.set(entry.issue, (costByIssue.get(entry.issue) ?? 0) + entryCost);
     const route = costRouteOf(entry);
     rawCostByRoute[route] = (rawCostByRoute[route] ?? 0) + entryCost;
     if (entry.estimated === true) estimatedCost += entryCost;
   }
+  const costRows = costs.length;
   const costByRoute = Object.fromEntries(
     ROUTE_ORDER.filter((route) => route in rawCostByRoute).map((route) => [route, rawCostByRoute[route]]),
   );
@@ -495,8 +492,7 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     mergedRunCosts.push(runCost);
   }
 
-  const failoverEvents = events.filter((evt) => evt.type === 'failover').length;
-  const observedInvocations = costRows + failoverEvents;
+  const observedInvocations = costRows + failoverEventCount;
 
   const totalRetries = retriesByCause.checker + retriesByCause.failover + retriesByCause.timeout + retriesByCause.other;
   const sortedCycleTimes = [...cycleTimes].sort((a, b) => a - b);
