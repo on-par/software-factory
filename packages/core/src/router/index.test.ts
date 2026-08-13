@@ -1,9 +1,15 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { loadModelsConfig, loadRoutesConfig, type ModelsConfig, type RoutesConfig } from '../config/index.js';
 import { applyRepoConfig } from '../config/repo.js';
 import { HarnessError } from '../harness/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
+import type { CostEntry } from '../types/index.js';
+import { aggregateCosts, readCostsFile } from '../usage/index.js';
 import type { ExecFn, ModelExecutorContext } from './index.js';
 import { failoversFrom, ModelExecutorError, ModelRouter } from './index.js';
 import { StubModelExecutor } from './stub.js';
@@ -1133,6 +1139,40 @@ describe('ModelRouter cost sink', () => {
     expect(rows[0].estimated).toBe(false);
   });
 
+  it('records estimated false with the failoverReason when the winning attempt reports codex-shaped usage (AC 1 + verification bullet 3)', async () => {
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [
+          { fail: 'usage_cap' },
+          {
+            output: 'FROM B',
+            effect: (ctx) =>
+              ctx.onUsage?.({
+                inputTokens: 15785,
+                outputTokens: 5,
+                rawInputTokens: 5801,
+                cacheReadTokens: 9984,
+              }),
+          },
+        ],
+      },
+    });
+    const router = new ModelRouter(costTwoModels, routes, false, stub);
+    const rows: Parameters<Parameters<ModelRouter['setCostSink']>[0]>[0][] = [];
+    router.setCostSink((entry) => rows.push(entry));
+
+    const result = await router.run('plan', 'do it');
+
+    expect(result.model).toBe('model-b');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].failoverReason).toBe('usage_cap');
+    expect(rows[0].estimated).toBe(false);
+    expect(rows[0].inputTokens).toBe(15785);
+    expect(rows[0].outputTokens).toBe(5);
+    expect(rows[0].rawInputTokens).toBe(5801);
+    expect(rows[0].cacheReadTokens).toBe(9984);
+  });
+
   it('does not leak usage reported by a failed attempt onto the next attempt row', async () => {
     const stub = new StubModelExecutor({
       scripts: {
@@ -1177,6 +1217,52 @@ describe('ModelRouter cost sink', () => {
 
     expect(rows).toHaveLength(1);
     expect('retryCause' in rows[0]).toBe(false);
+  });
+
+  it('reads and aggregates claude-shaped and codex-shaped cost rows through one schema, no route branch (AC 2)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'factory-costs-'));
+    const file = join(dir, 'costs.jsonl');
+    try {
+      const claudeRow: CostEntry = {
+        ts: '2026-08-12T00:00:00.000Z',
+        issue: '425',
+        task: 'plan',
+        model: 'claude-model',
+        inputTokens: 12 + 4500 + 230000,
+        outputTokens: 890,
+        cost: 0.0123,
+        estimated: false,
+        rawInputTokens: 12,
+        cacheReadTokens: 230000,
+        cacheCreationTokens: 4500,
+      };
+      const codexRow: CostEntry = {
+        ts: '2026-08-12T00:00:01.000Z',
+        issue: '425',
+        task: 'build_codex',
+        model: 'codex-model',
+        inputTokens: 15785,
+        outputTokens: 5,
+        cost: 0.02,
+        estimated: false,
+        rawInputTokens: 5801,
+        cacheReadTokens: 9984,
+      };
+      await writeFile(file, `${JSON.stringify(claudeRow)}\n${JSON.stringify(codexRow)}\n`);
+
+      const { entries, skipped } = readCostsFile(file);
+
+      expect(skipped).toBe(0);
+      expect(entries).toHaveLength(2);
+
+      const summary = aggregateCosts(entries);
+
+      expect(summary.total.inputTokens).toBe(claudeRow.inputTokens + codexRow.inputTokens);
+      expect(summary.total.outputTokens).toBe(claudeRow.outputTokens + codexRow.outputTokens);
+      expect(summary.total.cost).toBeCloseTo(claudeRow.cost + codexRow.cost, 10);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 
