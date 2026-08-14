@@ -77,6 +77,7 @@ export type EventKind =
   | 'merge-gated'
   | 'merged'
   | 'model-override'
+  | 'model_override_ignored'
   | 'overnight-fail'
   | 'overnight-park'
   | 'overnight-preflight'
@@ -218,6 +219,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'merge-gated': { severity: 'info', isPark: false, isTerminal: false },
   merged: { severity: 'info', isPark: false, isTerminal: true },
   'model-override': { severity: 'info', isPark: false, isTerminal: false },
+  model_override_ignored: { severity: 'warn', isPark: false, isTerminal: false },
   'overnight-fail': { severity: 'info', isPark: false, isTerminal: false },
   'overnight-park': { severity: 'info', isPark: false, isTerminal: false },
   'overnight-preflight': { severity: 'info', isPark: false, isTerminal: false },
