@@ -11,11 +11,14 @@ import {
   loadModelsConfig,
   loadRoutesConfig,
   resolveAutoFailover,
+  resolveBranchPrefix,
   resolveDefectWindowDays,
   resolveEnvironmentPorts,
   resolveEnvironmentProxy,
+  resolveExperimental,
   resolveFilingPolicy,
   resolveIngestConfig,
+  resolveLocalOnly,
   resolvePlanApproval,
   resolveProcessGroupGraceMs,
   resolveSkipCI,
@@ -990,6 +993,49 @@ describe('resolveAutoFailover', () => {
   it('lets FACTORY_FAILOVER_MODEL win over the config fallback', () => {
     const config = loadFactoryConfig();
     expect(resolveAutoFailover(config, { FACTORY_FAILOVER_MODEL: 'gpt-5.1' }).fallbackModel).toBe('gpt-5.1');
+  });
+});
+
+describe('resolveLocalOnly', () => {
+  it('is true when FACTORY_LOCAL_ONLY is exactly "1"', () => {
+    expect(resolveLocalOnly({ FACTORY_LOCAL_ONLY: '1' })).toBe(true);
+  });
+
+  it('is false when FACTORY_LOCAL_ONLY is exactly "0"', () => {
+    expect(resolveLocalOnly({ FACTORY_LOCAL_ONLY: '0' })).toBe(false);
+  });
+
+  it('is false when FACTORY_LOCAL_ONLY is unset or any other value', () => {
+    expect(resolveLocalOnly({})).toBe(false);
+    expect(resolveLocalOnly({ FACTORY_LOCAL_ONLY: 'true' })).toBe(false);
+    expect(resolveLocalOnly({ FACTORY_LOCAL_ONLY: '' })).toBe(false);
+  });
+});
+
+describe('resolveExperimental', () => {
+  it('is true when FACTORY_EXPERIMENTAL is exactly "1"', () => {
+    expect(resolveExperimental({ FACTORY_EXPERIMENTAL: '1' })).toBe(true);
+  });
+
+  it('is false when FACTORY_EXPERIMENTAL is exactly "0"', () => {
+    expect(resolveExperimental({ FACTORY_EXPERIMENTAL: '0' })).toBe(false);
+  });
+
+  it('is false when FACTORY_EXPERIMENTAL is unset or any other value', () => {
+    expect(resolveExperimental({})).toBe(false);
+    expect(resolveExperimental({ FACTORY_EXPERIMENTAL: 'yes' })).toBe(false);
+    expect(resolveExperimental({ FACTORY_EXPERIMENTAL: '' })).toBe(false);
+  });
+});
+
+describe('resolveBranchPrefix', () => {
+  it('uses a custom FACTORY_BRANCH_PREFIX', () => {
+    expect(resolveBranchPrefix({ FACTORY_BRANCH_PREFIX: 'compare-local' })).toBe('compare-local');
+  });
+
+  it('falls back to the ship-it default when unset or empty', () => {
+    expect(resolveBranchPrefix({})).toBe('ship-it');
+    expect(resolveBranchPrefix({ FACTORY_BRANCH_PREFIX: '' })).toBe('ship-it');
   });
 });
 

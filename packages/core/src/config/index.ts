@@ -257,16 +257,21 @@ export function resolveTimeouts(
   };
 }
 
+/** Single '1'/'0'/unset toggle evaluation shared by every boolean resolver. An
+ *  explicit '1' wins, an explicit '0' loses, and anything else (unset, empty,
+ *  'true') falls back to the caller's default. */
+function resolveEnabledFlag(env: NodeJS.ProcessEnv, envVar: string, fallback: boolean): boolean {
+  if (env[envVar] === '1') return true;
+  if (env[envVar] === '0') return false;
+  return fallback;
+}
+
 export function resolveSkipCI(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
-  if (env.FACTORY_SKIP_CI === '1') return true;
-  if (env.FACTORY_SKIP_CI === '0') return false;
-  return config.ci?.skip ?? false;
+  return resolveEnabledFlag(env, 'FACTORY_SKIP_CI', config.ci?.skip ?? false);
 }
 
 export function resolvePlanApproval(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
-  if (env.FACTORY_APPROVE_PLAN === '1') return true;
-  if (env.FACTORY_APPROVE_PLAN === '0') return false;
-  return config.plan_approval?.enabled ?? false;
+  return resolveEnabledFlag(env, 'FACTORY_APPROVE_PLAN', config.plan_approval?.enabled ?? false);
 }
 
 export function resolveDefectWindowDays(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): number {
@@ -284,11 +289,8 @@ export interface IngestSettings {
 
 export function resolveIngestConfig(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): IngestSettings {
   const i = config.ingest;
-  let enabled = i?.enabled ?? false;
-  if (env.FACTORY_AUTO_INGEST === '1') enabled = true;
-  if (env.FACTORY_AUTO_INGEST === '0') enabled = false;
   return {
-    enabled,
+    enabled: resolveEnabledFlag(env, 'FACTORY_AUTO_INGEST', i?.enabled ?? false),
     label: i?.label ?? 'ready',
     lane: i?.lane ?? 'auto',
     maxPerCycle: i?.maxPerCycle ?? 20,
@@ -304,10 +306,10 @@ export function resolveEnvironmentPorts(
   config: FactoryConfig,
   env: NodeJS.ProcessEnv = process.env,
 ): EnvironmentPortsSettings {
-  let enabled = config.environment?.ports?.enabled ?? true;
-  if (env.FACTORY_ENV_PORTS === '1') enabled = true;
-  if (env.FACTORY_ENV_PORTS === '0') enabled = false;
-  return { enabled, range: config.environment?.ports?.range ?? [3100, 3999] };
+  return {
+    enabled: resolveEnabledFlag(env, 'FACTORY_ENV_PORTS', config.environment?.ports?.enabled ?? true),
+    range: config.environment?.ports?.range ?? [3100, 3999],
+  };
 }
 
 export interface EnvironmentProxySettings {
@@ -320,11 +322,8 @@ export function resolveEnvironmentProxy(
   config: FactoryConfig,
   env: NodeJS.ProcessEnv = process.env,
 ): EnvironmentProxySettings {
-  let enabled = config.environment?.proxy?.enabled ?? false;
-  if (env.FACTORY_PROXY === '1') enabled = true;
-  if (env.FACTORY_PROXY === '0') enabled = false;
   return {
-    enabled,
+    enabled: resolveEnabledFlag(env, 'FACTORY_PROXY', config.environment?.proxy?.enabled ?? false),
     port: config.environment?.proxy?.port ?? 80,
     domain: config.environment?.proxy?.domain ?? 'factory.localhost',
   };
@@ -337,14 +336,30 @@ export interface AutoFailoverSettings {
 }
 
 export function resolveAutoFailover(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): AutoFailoverSettings {
-  let enabled = config.auto_failover?.enabled ?? true;
-  if (env.FACTORY_AUTO_FAILOVER === '1') enabled = true;
-  if (env.FACTORY_AUTO_FAILOVER === '0') enabled = false;
+  const enabled = resolveEnabledFlag(env, 'FACTORY_AUTO_FAILOVER', config.auto_failover?.enabled ?? true);
   const envMinutes = Number(env.FACTORY_FAILOVER_COOLDOWN_MINUTES);
   const minutes =
     Number.isFinite(envMinutes) && envMinutes > 0 ? envMinutes : (config.auto_failover?.cooldown_minutes ?? 30);
   const fallbackModel = env.FACTORY_FAILOVER_MODEL ?? config.auto_failover?.fallback_model ?? 'claude-sonnet-5';
   return { enabled, cooldownMs: minutes * 60_000, fallbackModel };
+}
+
+/** Local-only mode: restrict routing to local worker models and force the
+ *  build route to codex (FACTORY_LOCAL_ONLY=1). */
+export function resolveLocalOnly(env: NodeJS.ProcessEnv = process.env): boolean {
+  return resolveEnabledFlag(env, 'FACTORY_LOCAL_ONLY', false);
+}
+
+/** Experimental models: make experimental-tier models eligible for routing
+ *  (FACTORY_EXPERIMENTAL=1). */
+export function resolveExperimental(env: NodeJS.ProcessEnv = process.env): boolean {
+  return resolveEnabledFlag(env, 'FACTORY_EXPERIMENTAL', false);
+}
+
+/** Branch-name prefix shared by ship, land, and ingest so they agree on which
+ *  factory branches/worktrees belong to this run (FACTORY_BRANCH_PREFIX). */
+export function resolveBranchPrefix(env: NodeJS.ProcessEnv = process.env): string {
+  return env.FACTORY_BRANCH_PREFIX || 'ship-it';
 }
 
 /** Grace period (ms) between SIGTERM and SIGKILL when sweeping a lane's

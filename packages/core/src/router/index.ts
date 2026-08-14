@@ -526,8 +526,8 @@ export class ModelRouter {
     private routesConfig: RoutesConfig,
     private byok = false,
     private executor: ModelExecutor = new CliModelExecutor(),
-    private allowExperimental = process.env.FACTORY_EXPERIMENTAL === '1',
-    private localOnly = process.env.FACTORY_LOCAL_ONLY === '1',
+    private allowExperimental = false,
+    private localOnly = false,
     private gitExecFn: ExecFn = defaultExecFn,
     private sleepFn: SleepFn = sleep,
   ) {

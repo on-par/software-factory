@@ -13,6 +13,7 @@ import {
   describeEffectiveConfig,
   loadRepoConfig,
   resolveCodexDisabled,
+  resolveEffectiveConfig,
   resolveEffectiveModelPins,
   resolveEfficiencyPolicy,
   resolveUsageCap,
@@ -329,6 +330,46 @@ describe('resolveCodexDisabled', () => {
   });
 });
 
+describe('resolveEffectiveConfig', () => {
+  it('repo providers.openai=false beats FACTORY_CODEX=1 and keeps the env toggles', () => {
+    const repo = { version: 1 as const, providers: { openai: false } };
+    const effective = resolveEffectiveConfig(repo, {
+      FACTORY_CODEX: '1',
+      FACTORY_LOCAL_ONLY: '1',
+      FACTORY_EXPERIMENTAL: '1',
+      FACTORY_BRANCH_PREFIX: 'compare-local',
+    });
+    expect(effective).toEqual({
+      localOnly: true,
+      allowExperimental: true,
+      codexDisabled: true,
+      branchPrefix: 'compare-local',
+    });
+  });
+
+  it('absent repo falls back to env for all four values', () => {
+    const effective = resolveEffectiveConfig(null, {
+      FACTORY_CODEX: '0',
+      FACTORY_BRANCH_PREFIX: 'compare-local',
+    });
+    expect(effective).toEqual({
+      localOnly: false,
+      allowExperimental: false,
+      codexDisabled: true,
+      branchPrefix: 'compare-local',
+    });
+  });
+
+  it('uses conservative defaults when nothing is set', () => {
+    expect(resolveEffectiveConfig(null, {})).toEqual({
+      localOnly: false,
+      allowExperimental: false,
+      codexDisabled: false,
+      branchPrefix: 'ship-it',
+    });
+  });
+});
+
 describe('resolveUsageCap', () => {
   it('uses the repo cap over the env cap', () => {
     expect(resolveUsageCap({ version: 1, usage: { capUsd: 50 } }, { FACTORY_USAGE_CAP: '100' })).toEqual({
@@ -395,5 +436,30 @@ describe('describeEffectiveConfig', () => {
     expect(lines).toContainEqual(expect.stringContaining('Plan model: claude-model (default)'));
     expect(lines).toContainEqual(expect.stringContaining('Usage cap: $227 (default)'));
     expect(lines).toContainEqual(expect.stringContaining('Provider openai: on (default)'));
+  });
+
+  it('reports local-only, experimental, and branch prefix from env with source labels', () => {
+    const stub = new StubModelExecutor({ scripts: {} });
+    const router = new ModelRouter(models, routes, false, stub);
+    const lines = describeEffectiveConfig({
+      router,
+      repo: null,
+      env: { FACTORY_LOCAL_ONLY: '1', FACTORY_EXPERIMENTAL: '1', FACTORY_BRANCH_PREFIX: 'compare-local' },
+      repoConfigPath: '.factory/config.json',
+    });
+
+    expect(lines).toContainEqual(expect.stringContaining('Local only: on (env: FACTORY_LOCAL_ONLY)'));
+    expect(lines).toContainEqual(expect.stringContaining('Experimental models: on (env: FACTORY_EXPERIMENTAL)'));
+    expect(lines).toContainEqual(expect.stringContaining('Branch prefix: compare-local (env: FACTORY_BRANCH_PREFIX)'));
+  });
+
+  it('reports local-only/experimental off and the default branch prefix when unset', () => {
+    const stub = new StubModelExecutor({ scripts: {} });
+    const router = new ModelRouter(models, routes, false, stub);
+    const lines = describeEffectiveConfig({ router, repo: null, env: {}, repoConfigPath: '.factory/config.json' });
+
+    expect(lines).toContainEqual(expect.stringContaining('Local only: off (default)'));
+    expect(lines).toContainEqual(expect.stringContaining('Experimental models: off (default)'));
+    expect(lines).toContainEqual(expect.stringContaining('Branch prefix: ship-it (default)'));
   });
 });

@@ -124,12 +124,12 @@ export function slugify(s: string): string {
     .replace(/-$/, '');
 }
 
-export function branchPrefixSlug(): string {
-  return slugify(process.env.FACTORY_BRANCH_PREFIX || 'ship-it') || 'ship-it';
+export function branchPrefixSlug(prefix?: string): string {
+  return slugify(prefix || 'ship-it') || 'ship-it';
 }
 
-export function branchFor(issue: number, title: string): string {
-  return `${branchPrefixSlug()}/${issue}-${slugify(title)}`;
+export function branchFor(issue: number, title: string, prefix?: string): string {
+  return `${branchPrefixSlug(prefix)}/${issue}-${slugify(title)}`;
 }
 
 export async function getIssueTitle(repo: string, issue: number, octokit: any): Promise<string> {
@@ -177,9 +177,4 @@ export function isEscalation(output: string): boolean {
 /** The first `ESCALATE:`-prefixed line, or undefined when the output is not an escalation. */
 export function escalationLine(output: string): string | undefined {
   return output.split('\n').find((line) => line.startsWith('ESCALATE:'));
-}
-
-/** FACTORY_CODEX=0 kill-switch: force all work onto the Claude route. */
-export function codexDisabled(): boolean {
-  return process.env.FACTORY_CODEX === '0';
 }

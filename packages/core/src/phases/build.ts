@@ -11,7 +11,7 @@ import { failoversFrom } from '../router/index.js';
 import type { SandboxEventType, SandboxPolicy } from '../sandbox/index.js';
 import { applySteering, type ConsumedSteering } from '../steering/index.js';
 import type { Constitution, FailoverReason } from '../types/index.js';
-import { codexDisabled, escalationLine, isEscalation } from '../utils/index.js';
+import { escalationLine, isEscalation } from '../utils/index.js';
 
 export interface BuildResult {
   ok: boolean;
@@ -51,6 +51,8 @@ export async function buildPhase(opts: {
     onQuotaExhausted?: (info: { provider: string; reason: FailoverReason }) => void | Promise<void>;
   };
   onPgid?: (pgid: number) => void;
+  /** Local-only mode: use the compact local-small prompt on the codex route. */
+  localOnly?: boolean;
 }): Promise<BuildResult> {
   const {
     issue,
@@ -85,8 +87,8 @@ export async function buildPhase(opts: {
         `call edges: ${designArtifact.callGraph.length})`,
     );
   }
-  const localOnly = process.env.FACTORY_LOCAL_ONLY === '1';
-  const isCodexDisabled = opts.codexDisabled ?? codexDisabled();
+  const localOnly = opts.localOnly ?? false;
+  const isCodexDisabled = opts.codexDisabled ?? false;
 
   let prompt: string;
   let taskType: 'build_codex' | 'build_claude';

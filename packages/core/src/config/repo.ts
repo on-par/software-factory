@@ -12,7 +12,13 @@ import { z } from 'zod';
 import type { ModelRegistry } from '../models/index.js';
 import { resolveModelOverrides } from '../models/index.js';
 import type { ModelRouter } from '../router/index.js';
-import { getFactoryPaths, type ModelsConfig } from './index.js';
+import {
+  getFactoryPaths,
+  resolveBranchPrefix,
+  resolveExperimental,
+  resolveLocalOnly,
+  type ModelsConfig,
+} from './index.js';
 
 // ---------- Schema ----------
 
@@ -208,13 +214,38 @@ export function resolveEffectiveModelPins(
 // ---------- Codex kill-switch ----------
 
 /** Whether Codex/OpenAI routes should be disabled. Repo `providers.openai`, when
- *  explicitly set, wins; otherwise falls back to the FACTORY_CODEX=0 kill-switch
- *  (mirroring `codexDisabled()` in utils/index.ts). */
+ *  explicitly set, wins; otherwise falls back to the FACTORY_CODEX=0 kill-switch. */
 export function resolveCodexDisabled(repo: RepoFactoryConfig | null, env: NodeJS.ProcessEnv = process.env): boolean {
   if (repo?.providers?.openai !== undefined) {
     return !repo.providers.openai;
   }
   return env.FACTORY_CODEX === '0';
+}
+
+// ---------- Effective config (FACTORY_* env seam) ----------
+
+/** The four model/routing env toggles resolved exactly once per run so the
+ *  router, the phases, branch naming, and describeEffectiveConfig all agree
+ *  within a single lane. Env precedence lives entirely in this record: repo
+ *  `providers.openai` beats FACTORY_CODEX (via resolveCodexDisabled), and the
+ *  three remaining values are plain FACTORY_* env reads with safe defaults. */
+export interface EffectiveConfig {
+  localOnly: boolean;
+  allowExperimental: boolean;
+  codexDisabled: boolean;
+  branchPrefix: string;
+}
+
+export function resolveEffectiveConfig(
+  repo: RepoFactoryConfig | null,
+  env: NodeJS.ProcessEnv = process.env,
+): EffectiveConfig {
+  return {
+    localOnly: resolveLocalOnly(env),
+    allowExperimental: resolveExperimental(env),
+    codexDisabled: resolveCodexDisabled(repo, env),
+    branchPrefix: resolveBranchPrefix(env),
+  };
 }
 
 // ---------- Usage cap ----------
@@ -296,6 +327,17 @@ export function describeEffectiveConfig(opts: DescribeEffectiveConfigOpts): stri
   );
   lines.push(
     `Provider ollama: ${repo?.providers?.ollama === false ? 'off' : 'on'} ${sourceLabel(repo?.providers?.ollama !== undefined ? 'repo' : 'default', repoConfigPath, '')}`,
+  );
+
+  const effective = resolveEffectiveConfig(repo, env);
+  lines.push(
+    `Local only: ${effective.localOnly ? 'on' : 'off'} ${sourceLabel(env.FACTORY_LOCAL_ONLY !== undefined ? 'env' : 'default', repoConfigPath, 'FACTORY_LOCAL_ONLY')}`,
+  );
+  lines.push(
+    `Experimental models: ${effective.allowExperimental ? 'on' : 'off'} ${sourceLabel(env.FACTORY_EXPERIMENTAL !== undefined ? 'env' : 'default', repoConfigPath, 'FACTORY_EXPERIMENTAL')}`,
+  );
+  lines.push(
+    `Branch prefix: ${effective.branchPrefix} ${sourceLabel(env.FACTORY_BRANCH_PREFIX !== undefined ? 'env' : 'default', repoConfigPath, 'FACTORY_BRANCH_PREFIX')}`,
   );
 
   const usage = resolveUsageCap(repo, env);

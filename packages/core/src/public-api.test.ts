@@ -252,6 +252,10 @@ const INTERNAL_API_KEYS = [
   'touchesSensitiveScope',
   // Config
   'resolveFilingPolicy',
+  'resolveBranchPrefix',
+  'resolveEffectiveConfig',
+  'resolveExperimental',
+  'resolveLocalOnly',
   // Design artifact (#422)
   'DesignArtifactSchema',
   'parseDesignArtifact',
@@ -291,7 +295,6 @@ const INTERNAL_API_KEYS = [
   'branchFor',
   'branchPrefixSlug',
   'cleanupWorktree',
-  'codexDisabled',
   'colorEnabled',
   'ensureDir',
   'escalationLine',
