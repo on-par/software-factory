@@ -17,6 +17,7 @@ import { designArtifactPaths, parseDesignArtifact, renderDesignArtifact } from '
 import { buildFastPathSpec, isFastPathEligible } from '../efficiency/fast-path.js';
 import type { EventKind } from '../events/kinds.js';
 import { buildReadinessEnrichmentPrompt } from '../readiness/enrich.js';
+import { decomposeOversizedIssue } from '../readiness/decompose.js';
 import { scoreIssueReadiness } from '../readiness/index.js';
 import type { ModelRouter } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
@@ -179,6 +180,8 @@ export async function planPhase(opts: {
   enforceReadiness?: boolean;
   /** Skip the model PLAN call only for a complete, explicitly bounded issue. */
   fastPath?: boolean;
+  /** Run a bounded LLM decomposition pass on oversized factory-task issues (#606). */
+  decomposeOversized?: boolean;
 }): Promise<PlanResult> {
   const {
     issue,
@@ -264,6 +267,26 @@ export async function planPhase(opts: {
         designArtifact: null,
       };
     }
+  }
+
+  if (
+    opts.decomposeOversized &&
+    source.kind === GITHUB_ISSUE_SOURCE &&
+    readiness.template === 'factory-task' &&
+    readiness.sizeOk === false
+  ) {
+    const params = source.params as GithubIssueParams;
+    await decomposeOversizedIssue({
+      issue: params.issue,
+      repo: params.repo,
+      title: issueTitle,
+      body: issueBody,
+      worktree,
+      router,
+      octokit,
+      log: (type, msg) => log(type, msg),
+      timeoutSeconds: Math.min(timeoutSeconds ?? 1800, 300),
+    });
   }
 
   if (opts.fastPath && !isCodexDisabled && isFastPathEligible({ issueBody, readinessPassed: readiness.pass })) {
