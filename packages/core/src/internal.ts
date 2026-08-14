@@ -50,6 +50,9 @@ export {
 
 // Config
 export { resolveFilingPolicy } from './config/index.js';
+export type { EffectiveConfig } from './config/repo.js';
+export { resolveEffectiveConfig } from './config/repo.js';
+export { resolveExperimental, resolveLocalOnly, resolveBranchPrefix } from './config/index.js';
 
 // Design artifact (#422)
 export { DesignArtifactSchema, parseDesignArtifact, readDesignArtifact, renderDesignArtifact } from './design/index.js';
@@ -128,7 +131,6 @@ export {
   branchFor,
   branchPrefixSlug,
   cleanupWorktree,
-  codexDisabled,
   colorEnabled,
   ensureDir,
   escalationLine,

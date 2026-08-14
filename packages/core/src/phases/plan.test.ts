@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
@@ -54,16 +54,8 @@ const routes: RoutesConfig = {
 };
 
 const tempDirs = new Set<string>();
-let prevFactoryCodex: string | undefined;
-
-beforeEach(() => {
-  prevFactoryCodex = process.env.FACTORY_CODEX;
-  delete process.env.FACTORY_CODEX;
-});
 
 afterEach(async () => {
-  if (prevFactoryCodex === undefined) delete process.env.FACTORY_CODEX;
-  else process.env.FACTORY_CODEX = prevFactoryCodex;
   await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
   tempDirs.clear();
 });
@@ -1080,10 +1072,7 @@ npm run test`;
   });
 
   describe('FACTORY_CODEX kill-switch', () => {
-    it('forces route to codex when FACTORY_LOCAL_ONLY=1 so builds use the local agent harness', async () => {
-      const prevLocalOnly = process.env.FACTORY_LOCAL_ONLY;
-      process.env.FACTORY_LOCAL_ONLY = '1';
-
+    it('forces route to codex when localOnly is set so builds use the local agent harness', async () => {
       const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
       tempDirs.add(worktree);
       const specPath = join(worktree, 'issue-79.md');
@@ -1106,38 +1095,32 @@ npm run test`;
       };
       const logs: Array<{ type: string; msg: string }> = [];
 
-      try {
-        const result = await planPhase({
-          issue: 79,
-          repo: 'on-par/software-factory',
-          worktree,
-          specPath,
-          router,
-          constitution: null,
-          octokit,
-          log: (type, msg) => {
-            logs.push({ type, msg });
-          },
-        });
+      const result = await planPhase({
+        issue: 79,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: (type, msg) => {
+          logs.push({ type, msg });
+        },
+        localOnly: true,
+      });
 
-        expect(result.route).toBe('codex');
-        expect(logs).toContainEqual({
-          type: 'warn',
-          msg: 'local-only mode requires a local Codex harness — forcing route to codex',
-        });
+      expect(result.route).toBe('codex');
+      expect(logs).toContainEqual({
+        type: 'warn',
+        msg: 'local-only mode requires a local Codex harness — forcing route to codex',
+      });
 
-        const persisted = await readFile(specPath, 'utf-8');
-        expect(persisted).toContain('route: codex');
-        expect(persisted).not.toContain('route: claude');
-      } finally {
-        if (prevLocalOnly === undefined) delete process.env.FACTORY_LOCAL_ONLY;
-        else process.env.FACTORY_LOCAL_ONLY = prevLocalOnly;
-      }
+      const persisted = await readFile(specPath, 'utf-8');
+      expect(persisted).toContain('route: codex');
+      expect(persisted).not.toContain('route: claude');
     });
 
-    it('forces route to claude and logs a warn when FACTORY_CODEX=0', async () => {
-      process.env.FACTORY_CODEX = '0';
-
+    it('forces route to claude and logs a warn when codex is disabled', async () => {
       const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
       tempDirs.add(worktree);
       const specPath = join(worktree, 'issue-79.md');
@@ -1171,6 +1154,7 @@ npm run test`;
         log: (type, msg) => {
           logs.push({ type, msg });
         },
+        codexDisabled: true,
       });
 
       expect(result.route).toBe('claude');
@@ -1181,9 +1165,7 @@ npm run test`;
       expect(persisted).not.toContain('route: codex');
     });
 
-    it('keeps route codex when FACTORY_CODEX is unset', async () => {
-      delete process.env.FACTORY_CODEX;
-
+    it('keeps route codex when neither the env nor the opt disables codex', async () => {
       const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
       tempDirs.add(worktree);
       const specPath = join(worktree, 'issue-79.md');
@@ -1219,9 +1201,7 @@ npm run test`;
       expect(result.route).toBe('codex');
     });
 
-    it('forces route to claude via the codexDisabled opt with no env var set', async () => {
-      delete process.env.FACTORY_CODEX;
-
+    it('forces route to claude via the codexDisabled opt', async () => {
       const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
       tempDirs.add(worktree);
       const specPath = join(worktree, 'issue-79.md');
@@ -1256,40 +1236,6 @@ npm run test`;
 
       expect(result.route).toBe('claude');
       expect(logs).toContainEqual({ type: 'warn', msg: 'codex unavailable — falling back to claude' });
-    });
-
-    it('preserves FACTORY_CODEX=0 behavior when the codexDisabled opt is omitted', async () => {
-      process.env.FACTORY_CODEX = '0';
-
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
-      const specPath = join(worktree, 'issue-79.md');
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: {
-          issues: {
-            get: async () => ({ data: { title: 'Add kill-switch', body: 'Add FACTORY_CODEX=0.' } }),
-          },
-        },
-      };
-
-      const result = await planPhase({
-        issue: 79,
-        repo: 'on-par/software-factory',
-        worktree,
-        specPath,
-        router,
-        constitution: null,
-        octokit,
-        log: () => {},
-      });
-
-      expect(result.route).toBe('claude');
     });
   });
 

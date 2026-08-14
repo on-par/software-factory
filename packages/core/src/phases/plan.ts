@@ -22,7 +22,7 @@ import { failoversFrom } from '../router/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
 import { archiveSpec, readSpec, updateSpecRoute, writeSpec } from '../spec/index.js';
 import type { Constitution, DesignArtifact, FailoverReason, ReadinessInfo } from '../types/index.js';
-import { codexDisabled, escalationLine, isEscalation } from '../utils/index.js';
+import { escalationLine, isEscalation } from '../utils/index.js';
 import { GITHUB_ISSUE_SOURCE, type GithubIssueParams } from '../work/github-issue.js';
 import { createDefaultWorkSourceRegistry, type WorkRequestSourceKind, type WorkSourceRegistry } from '../work/index.js';
 
@@ -181,6 +181,8 @@ export async function planPhase(opts: {
   fastPath?: boolean;
   /** Park oversized factory-task issues (sizeOk: false) instead of proceeding. Default true. */
   enforceSizeGate?: boolean;
+  /** Local-only mode: force the route to codex so builds use a local harness. */
+  localOnly?: boolean;
 }): Promise<PlanResult> {
   const {
     issue,
@@ -199,7 +201,8 @@ export async function planPhase(opts: {
   } = opts;
   const maxReplans = opts.maxReplans ?? 3;
   const enforceSizeGate = opts.enforceSizeGate ?? true;
-  const isCodexDisabled = opts.codexDisabled ?? codexDisabled();
+  const localOnly = opts.localOnly ?? false;
+  const isCodexDisabled = opts.codexDisabled ?? false;
 
   const workSources = opts.workSources ?? createDefaultWorkSourceRegistry({ octokit });
   const source = opts.workSource ?? {
@@ -395,7 +398,7 @@ export async function planPhase(opts: {
     const parsed = await readSpec(specPath);
     let route: 'codex' | 'claude' = parsed.route ?? 'claude';
 
-    if (process.env.FACTORY_LOCAL_ONLY === '1' && route !== 'codex') {
+    if (localOnly && route !== 'codex') {
       log('warn', 'local-only mode requires a local Codex harness — forcing route to codex');
       route = 'codex';
       await updateSpecRoute(specPath, 'codex', 'local-only');

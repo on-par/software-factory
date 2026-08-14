@@ -61,36 +61,14 @@ const routes: RoutesConfig = {
 };
 
 const tempDirs = new Set<string>();
-let inheritedFactoryCodex: string | undefined;
-
-beforeEach(() => {
-  inheritedFactoryCodex = process.env.FACTORY_CODEX;
-  delete process.env.FACTORY_CODEX;
-});
 
 afterEach(async () => {
   await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
   tempDirs.clear();
-  if (inheritedFactoryCodex === undefined) delete process.env.FACTORY_CODEX;
-  else process.env.FACTORY_CODEX = inheritedFactoryCodex;
 });
 
 describe('buildPhase FACTORY_CODEX kill-switch', () => {
-  let prevFactoryCodex: string | undefined;
-
-  beforeEach(() => {
-    prevFactoryCodex = process.env.FACTORY_CODEX;
-    delete process.env.FACTORY_CODEX;
-  });
-
-  afterEach(() => {
-    if (prevFactoryCodex === undefined) delete process.env.FACTORY_CODEX;
-    else process.env.FACTORY_CODEX = prevFactoryCodex;
-  });
-
-  it('falls back to build_claude and logs a warn when FACTORY_CODEX=0', async () => {
-    process.env.FACTORY_CODEX = '0';
-
+  it('falls back to build_claude and logs a warn when codex is disabled via the opt', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);
     const specPath = join(worktree, 'issue-79.md');
@@ -115,6 +93,7 @@ describe('buildPhase FACTORY_CODEX kill-switch', () => {
       log: (type, msg) => {
         logs.push({ type, msg });
       },
+      codexDisabled: true,
     });
 
     expect(result.ok).toBe(true);
@@ -122,7 +101,7 @@ describe('buildPhase FACTORY_CODEX kill-switch', () => {
     expect(logs).toContainEqual({ type: 'warn', msg: 'codex unavailable — falling back to claude' });
   });
 
-  it('uses build_codex and logs no warn when FACTORY_CODEX is unset', async () => {
+  it('uses build_codex and logs no warn when codex is not disabled', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);
     const specPath = join(worktree, 'issue-79.md');
@@ -154,7 +133,7 @@ describe('buildPhase FACTORY_CODEX kill-switch', () => {
     expect(logs.some((l) => l.type === 'warn')).toBe(false);
   });
 
-  it('forces build_claude via the codexDisabled opt with no env var set', async () => {
+  it('forces build_claude via the codexDisabled opt', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);
     const specPath = join(worktree, 'issue-79.md');
@@ -186,55 +165,9 @@ describe('buildPhase FACTORY_CODEX kill-switch', () => {
     expect(stub.calls[stub.calls.length - 1].task).toBe('build_claude');
     expect(logs).toContainEqual({ type: 'warn', msg: 'codex unavailable — falling back to claude' });
   });
-
-  it('preserves FACTORY_CODEX=0 behavior when the codexDisabled opt is omitted', async () => {
-    process.env.FACTORY_CODEX = '0';
-
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
-    const specPath = join(worktree, 'issue-79.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        build_codex: [{ output: 'codex output' }],
-        build_claude: [{ output: 'claude output' }],
-      },
-    });
-    const router = new ModelRouter(models, routes, false, stub);
-    const logs: Array<{ type: string; msg: string }> = [];
-
-    const result = await buildPhase({
-      issue: 79,
-      repo: 'on-par/software-factory',
-      worktree,
-      specPath,
-      branch: 'ship-it/79-add-factory-codex-0-kill-switch',
-      route: 'codex',
-      router,
-      constitution: null,
-      log: (type, msg) => {
-        logs.push({ type, msg });
-      },
-    });
-
-    expect(result.ok).toBe(true);
-    expect(stub.calls[stub.calls.length - 1].task).toBe('build_claude');
-    expect(logs).toContainEqual({ type: 'warn', msg: 'codex unavailable — falling back to claude' });
-  });
 });
 
 describe('buildPhase local-only codex prompt', () => {
-  let prevLocalOnly: string | undefined;
-
-  beforeEach(() => {
-    prevLocalOnly = process.env.FACTORY_LOCAL_ONLY;
-    process.env.FACTORY_LOCAL_ONLY = '1';
-  });
-
-  afterEach(() => {
-    if (prevLocalOnly === undefined) delete process.env.FACTORY_LOCAL_ONLY;
-    else process.env.FACTORY_LOCAL_ONLY = prevLocalOnly;
-  });
-
   it('sends the compact local-small prompt with the trimmed spec', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);
@@ -242,8 +175,6 @@ describe('buildPhase local-only codex prompt', () => {
     await writeFile(specPath, '   # Frozen spec 82\nDo the small thing.   \n');
 
     const stub = new StubModelExecutor({ scripts: { build_codex: [{ output: 'codex output' }] } });
-    // Force the router itself out of local-only mode so the stub models still
-    // resolve; buildPhase reads FACTORY_LOCAL_ONLY directly for prompt shaping.
     const router = new ModelRouter(models, routes, false, stub, false, false);
 
     const result = await buildPhase({
@@ -256,6 +187,7 @@ describe('buildPhase local-only codex prompt', () => {
       router,
       constitution: null,
       log: () => {},
+      localOnly: true,
     });
 
     expect(result.ok).toBe(true);
@@ -288,6 +220,7 @@ describe('buildPhase local-only codex prompt', () => {
       router,
       constitution: null,
       log: () => {},
+      localOnly: true,
     });
 
     expect(result.ok).toBe(true);
@@ -517,36 +450,30 @@ describe('buildPhase atomic commit policy', () => {
   });
 
   it('local-small prompt keeps single-slice one-commit behavior', async () => {
-    const prevLocalOnly = process.env.FACTORY_LOCAL_ONLY;
-    process.env.FACTORY_LOCAL_ONLY = '1';
-    try {
-      const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-      tempDirs.add(worktree);
-      const specPath = join(worktree, 'issue-538-local-small.md');
-      await writeFile(specPath, '# Frozen spec 538\nDo the small thing.\n');
-      const stub = new StubModelExecutor({ scripts: { build_codex: [{ output: 'codex output' }] } });
-      const router = new ModelRouter(models, routes, false, stub, false, false);
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-538-local-small.md');
+    await writeFile(specPath, '# Frozen spec 538\nDo the small thing.\n');
+    const stub = new StubModelExecutor({ scripts: { build_codex: [{ output: 'codex output' }] } });
+    const router = new ModelRouter(models, routes, false, stub, false, false);
 
-      const result = await buildPhase({
-        issue: 538,
-        repo: 'on-par/software-factory',
-        worktree,
-        specPath,
-        branch: 'ship-it/538-atomic-local-small',
-        route: 'codex',
-        router,
-        constitution: null,
-        log: () => {},
-      });
+    const result = await buildPhase({
+      issue: 538,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/538-atomic-local-small',
+      route: 'codex',
+      router,
+      constitution: null,
+      log: () => {},
+      localOnly: true,
+    });
 
-      expect(result.ok).toBe(true);
-      const prompt = stub.calls[stub.calls.length - 1].prompt;
-      expect(prompt).toContain('Create exactly one git commit.');
-      expect(prompt).not.toContain('Commit atomically');
-    } finally {
-      if (prevLocalOnly === undefined) delete process.env.FACTORY_LOCAL_ONLY;
-      else process.env.FACTORY_LOCAL_ONLY = prevLocalOnly;
-    }
+    expect(result.ok).toBe(true);
+    const prompt = stub.calls[stub.calls.length - 1].prompt;
+    expect(prompt).toContain('Create exactly one git commit.');
+    expect(prompt).not.toContain('Commit atomically');
   });
 });
 
