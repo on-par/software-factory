@@ -90,7 +90,7 @@ export async function shipPhase(opts: {
 
   if (prNumber && adr.committed) {
     try {
-      await run(`git push origin ${shellEscape(branch)}`, { cwd: worktree });
+      await run(`git push -u origin ${shellEscape(branch)}`, { cwd: worktree });
     } catch {
       log('ship', 'pushing the ADR commit failed — the open PR may not include it');
     }

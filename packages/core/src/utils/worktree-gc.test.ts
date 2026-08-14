@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, uti
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   findCredentialFiles,
@@ -12,6 +12,7 @@ import {
   sweepWorktrees,
   zeroFill,
 } from './worktree-gc.js';
+import type { SweepDeps } from './worktree-gc.js';
 
 describe('parseWorktreeList', () => {
   it('parses main, branch, and detached worktree entries', () => {
@@ -666,6 +667,397 @@ describe('sweepWorktrees', () => {
           c.includes('rev-parse --verify --quiet') || c.includes('git config --get') || c.startsWith('git reflog show'),
       ),
     ).toBe(false);
+  });
+});
+
+describe('sweepWorktrees with GitHub PR evidence', () => {
+  let repoRoot: string;
+  let parentDir: string;
+
+  function makeWorktree(name: string): string {
+    const path = join(parentDir, name);
+    mkdirSync(path, { recursive: true });
+    writeFileSync(join(path, '.git'), 'gitdir: /somewhere');
+    return path;
+  }
+
+  function setup() {
+    parentDir = mkdtempSync(join(tmpdir(), 'gc-parent-'));
+    repoRoot = join(parentDir, 'repo');
+    mkdirSync(repoRoot, { recursive: true });
+    return { parentDir, repoRoot };
+  }
+
+  afterEach(() => {
+    if (parentDir) rmSync(parentDir, { recursive: true, force: true });
+  });
+
+  function fakeOctokit(
+    result: () => Promise<{ data: Array<Record<string, unknown>> }> | { data: Array<Record<string, unknown>> },
+  ) {
+    const pullsList = vi.fn(async (_params: unknown) => result());
+    const octokit = { rest: { pulls: { list: pullsList } } } as unknown as SweepDeps['octokit'];
+    return { octokit, pullsList };
+  }
+
+  it('removes a worktree whose branch has a merged PR on GitHub with zero local push evidence', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-21`;
+    const wt = makeWorktree(wtName);
+
+    const { octokit, pullsList } = fakeOctokit(async () => ({
+      data: [{ number: 1, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }],
+    }));
+    const commands: string[] = [];
+    const runCommand = async (cmd: string) => {
+      commands.push(cmd);
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/21-merged\n\n`,
+        };
+      }
+      if (cmd === 'git rev-parse --verify origin/main') {
+        return { stdout: 'aaa\n' };
+      }
+      if (
+        cmd.includes('rev-parse --verify --quiet') ||
+        cmd.startsWith('git reflog show') ||
+        cmd.startsWith('git config --get')
+      ) {
+        throw new Error('no local evidence'); // today's sound-buddy state: no ref, no reflog, merge stuck on refs/heads/main
+      }
+      return { stdout: '' }; // git status --porcelain --untracked-files=no => clean
+    };
+
+    const report = await sweepWorktrees(
+      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { runCommand, octokit },
+    );
+    expect(report.removed).toHaveLength(1);
+    expect(report.removed[0].reason).toBe('merged');
+    expect(pullsList).toHaveBeenCalledWith({
+      owner: 'on-par',
+      repo: 'sound-buddy',
+      state: 'all',
+      head: 'on-par:ship-it/21-merged',
+    });
+    expect(
+      commands.some(
+        (c) =>
+          c.includes('rev-parse --verify --quiet') ||
+          c.startsWith('git reflog show') ||
+          c.startsWith('git config --get'),
+      ),
+    ).toBe(false);
+  });
+
+  it('keeps a worktree whose branch has an open PR even when local evidence would say merged', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-22`;
+    const wt = makeWorktree(wtName);
+
+    const { octokit } = fakeOctokit(async () => ({ data: [{ number: 1, state: 'open' }] }));
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/22-open\n\n`,
+        };
+      }
+      if (cmd === 'git rev-parse --verify origin/main') {
+        return { stdout: 'aaa\n' };
+      }
+      if (cmd.includes('rev-parse --verify --quiet')) {
+        return { stdout: 'bbb\n' }; // tracking-ref evidence present — the old code would have removed
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees(
+      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { runCommand, octokit },
+    );
+    expect(report.removed).toHaveLength(0);
+    expect(report.kept).toBe(1);
+    expect(existsSync(wt)).toBe(true);
+  });
+
+  it('removes a closed-not-merged PR worktree when the remote branch is gone', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-23`;
+    const wt = makeWorktree(wtName);
+
+    const { octokit } = fakeOctokit(async () => ({ data: [{ number: 1, state: 'closed', merged_at: null }] }));
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/23-closed\n\n`,
+        };
+      }
+      if (cmd.startsWith('git merge-base --is-ancestor')) {
+        throw new Error('exit 1'); // not an ancestor
+      }
+      if (cmd.startsWith('git ls-remote')) {
+        return { stdout: '' }; // empty => remote gone
+      }
+      return { stdout: '' }; // status probe => clean
+    };
+
+    const report = await sweepWorktrees(
+      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { runCommand, octokit },
+    );
+    expect(report.removed).toHaveLength(1);
+    expect(report.removed[0].reason).toBe('remote-gone');
+  });
+
+  it('keeps a closed-not-merged PR worktree while the remote branch is still live', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-24`;
+    const wt = makeWorktree(wtName);
+
+    const { octokit } = fakeOctokit(async () => ({ data: [{ number: 1, state: 'closed', merged_at: null }] }));
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/24-live\n\n`,
+        };
+      }
+      if (cmd.startsWith('git merge-base --is-ancestor')) {
+        throw new Error('exit 1');
+      }
+      if (cmd.startsWith('git ls-remote')) {
+        return { stdout: 'xxx\trefs/heads/ship-it/24-live\n' }; // live upstream
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees(
+      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { runCommand, octokit },
+    );
+    expect(report.removed).toHaveLength(0);
+    expect(report.kept).toBe(1);
+    expect(existsSync(wt)).toBe(true);
+  });
+
+  it('removes a closed-not-merged PR worktree whose HEAD is an ancestor of origin/main', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-25`;
+    const wt = makeWorktree(wtName);
+
+    const { octokit } = fakeOctokit(async () => ({ data: [{ number: 1, state: 'closed', merged_at: null }] }));
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/25-delivered\n\n`,
+        };
+      }
+      if (cmd === 'git rev-parse --verify origin/main') {
+        return { stdout: 'bbb\n' }; // HEAD bbb is the tip — delivered
+      }
+      if (cmd.startsWith('git merge-base --is-ancestor')) {
+        return { stdout: '' }; // ancestor => delivered
+      }
+      return { stdout: '' }; // status probe => clean
+    };
+
+    const report = await sweepWorktrees(
+      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { runCommand, octokit },
+    );
+    expect(report.removed).toHaveLength(1);
+    expect(report.removed[0].reason).toBe('merged');
+  });
+
+  it('falls back to local evidence and still removes merged when the GitHub query throws', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-26`;
+    const wt = makeWorktree(wtName);
+
+    const { octokit } = fakeOctokit(async () => {
+      throw new Error('rate limited');
+    });
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/26-x\n\n`,
+        };
+      }
+      if (cmd === 'git rev-parse --verify origin/main') {
+        return { stdout: 'aaa\n' };
+      }
+      if (cmd.startsWith('git merge-base --is-ancestor')) {
+        return { stdout: '' }; // ancestor
+      }
+      if (cmd.includes('rev-parse --verify --quiet')) {
+        return { stdout: 'bbb\n' }; // tracking-ref evidence
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees(
+      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { runCommand, octokit },
+    );
+    expect(report.removed).toHaveLength(1);
+    expect(report.removed[0].reason).toBe('merged');
+  });
+
+  it('falls back to local evidence when no PR exists for the branch', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-27`;
+    const wt = makeWorktree(wtName);
+
+    const { octokit } = fakeOctokit(async () => ({ data: [] }));
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/27-x\n\n`,
+        };
+      }
+      if (cmd === 'git rev-parse --verify origin/main') {
+        return { stdout: 'aaa\n' };
+      }
+      if (cmd.startsWith('git merge-base --is-ancestor')) {
+        return { stdout: '' };
+      }
+      if (cmd.includes('rev-parse --verify --quiet')) {
+        return { stdout: 'bbb\n' };
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees(
+      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { runCommand, octokit },
+    );
+    expect(report.removed).toHaveLength(1);
+    expect(report.removed[0].reason).toBe('merged');
+  });
+
+  it('keeps a GitHub-merged worktree with uncommitted tracked changes', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-28`;
+    const wt = makeWorktree(wtName);
+
+    const { octokit } = fakeOctokit(async () => ({
+      data: [{ number: 1, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }],
+    }));
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/28-dirty\n\n`,
+        };
+      }
+      if (cmd === 'git rev-parse --verify origin/main') {
+        return { stdout: 'aaa\n' };
+      }
+      if (cmd.startsWith('git status --porcelain')) {
+        return { stdout: ' M ship.ts\n' }; // dirty — live work
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees(
+      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { runCommand, octokit },
+    );
+    expect(report.removed).toHaveLength(0);
+    expect(report.kept).toBe(1);
+    expect(existsSync(wt)).toBe(true);
+  });
+
+  it('keeps a GitHub-merged worktree when the cleanliness probe itself fails', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-28b`;
+    const wt = makeWorktree(wtName);
+
+    const { octokit } = fakeOctokit(async () => ({
+      data: [{ number: 1, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }],
+    }));
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/28b-x\n\n`,
+        };
+      }
+      if (cmd.startsWith('git status --porcelain')) {
+        throw new Error('probe failed'); // cannot prove clean ⇒ keep
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees(
+      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { runCommand, octokit },
+    );
+    expect(report.removed).toHaveLength(0);
+    expect(report.kept).toBe(1);
+    expect(existsSync(wt)).toBe(true);
+  });
+
+  it('uses local evidence when octokit is present but no repo is given', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-28c`;
+    const wt = makeWorktree(wtName);
+
+    const { octokit, pullsList } = fakeOctokit(async () => ({
+      data: [{ number: 1, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }],
+    }));
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/28c-x\n\n`,
+        };
+      }
+      if (cmd === 'git rev-parse --verify origin/main') {
+        return { stdout: 'aaa\n' };
+      }
+      if (cmd.startsWith('git merge-base --is-ancestor')) {
+        return { stdout: '' }; // ancestor
+      }
+      if (cmd.includes('rev-parse --verify --quiet')) {
+        return { stdout: 'bbb\n' }; // tracking-ref evidence
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand, octokit });
+    expect(pullsList).not.toHaveBeenCalled();
+    expect(report.removed).toHaveLength(1);
+    expect(report.removed[0].reason).toBe('merged');
+  });
+
+  it('keeps a dirty worktree on the local fallback path', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-29`;
+    const wt = makeWorktree(wtName);
+
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/29-dirty\n\n`,
+        };
+      }
+      if (cmd === 'git rev-parse --verify origin/main') {
+        return { stdout: 'aaa\n' };
+      }
+      if (cmd.startsWith('git merge-base --is-ancestor')) {
+        return { stdout: '' }; // ancestor
+      }
+      if (cmd.includes('rev-parse --verify --quiet')) {
+        return { stdout: 'bbb\n' }; // tracking-ref evidence
+      }
+      if (cmd.startsWith('git status --porcelain')) {
+        return { stdout: ' M ship.ts\n' }; // dirty — live work
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand });
+    expect(report.removed).toHaveLength(0);
+    expect(report.kept).toBe(1);
+    expect(existsSync(wt)).toBe(true);
   });
 });
 

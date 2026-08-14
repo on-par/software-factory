@@ -1031,8 +1031,8 @@ bash scripts/verify.sh
       const res = await runMain('run');
       expect(res.exited).toBe(false);
       expect(sweepWorktrees).toHaveBeenCalledWith(
-        expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7 }),
-        expect.anything(),
+        expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7, repo: h.ghRepo }),
+        expect.objectContaining({ octokit: expect.anything() }),
       );
       expect(formatGcReport).toHaveBeenCalled();
     });

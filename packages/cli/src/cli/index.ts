@@ -1787,7 +1787,10 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }
     throw new CliExitError('factory: --ttl-days must be a non-negative number', 2);
   }
   const log = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
-  const run = () => sweepWorktrees({ repoRoot, ttlDays, dryRun: opts.dryRun }, { log });
+  // Best-effort GitHub evidence: tokenless/local-only repos keep today's pure-local behavior.
+  const ghRepo = await getGitHubRepo().catch(() => undefined);
+  const octokit = ghRepo ? (hasGitHubToken() ? getOctokit() : undefined) : undefined;
+  const run = () => sweepWorktrees({ repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo }, { log, octokit });
   const report = opts.dryRun ? await run() : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
   console.log(formatGcReport(report));
 }
@@ -2135,7 +2138,10 @@ async function cmdRun() {
         const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
-            sweepWorktrees({ repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays }, { log: gcLog }),
+            sweepWorktrees(
+              { repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays, repo: ghRepo },
+              { log: gcLog, octokit: getOctokit() },
+            ),
           ),
         );
         logEvent(
