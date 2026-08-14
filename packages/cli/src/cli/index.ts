@@ -2373,10 +2373,21 @@ export async function isPrMerged(octokit: Octokit, owner: string, repoName: stri
   const { data: prs } = await octokit.rest.pulls.list({
     owner,
     repo: repoName,
-    state: 'closed',
+    state: 'all',
     head: `${owner}:${branch}`,
   });
-  return prs.some((pr: any) => Boolean(pr.merged_at));
+  if (prs.length === 0) return false;
+  // Ship-it branch names get reused across separate runs for the same issue
+  // (e.g. a "verify-and-close" pass recreates the exact branch name an
+  // earlier, already-merged PR used) — GitHub PR numbers only increase, so
+  // the highest-numbered PR under this head is always the current one.
+  // Checking "was ANY PR ever merged under this branch name" (the old
+  // `state: 'closed'` + `.some()` behavior) matched the stale prior PR and
+  // falsely reported a brand-new, still-open PR under the same name as
+  // merged — waitForMerge then logged "landed" and skipped calling land(),
+  // leaving the real PR open forever while the lane believed it was done.
+  const latest = prs.reduce((newest: any, pr: any) => (pr.number > newest.number ? pr : newest));
+  return Boolean(latest.merged_at);
 }
 
 export async function findOpenPRNumber(
