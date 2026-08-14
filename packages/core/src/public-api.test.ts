@@ -275,7 +275,6 @@ const INTERNAL_API_KEYS = [
   // Router
   'CliModelExecutor',
   // Phase helpers
-  'disputeResolution',
   'buildPlanPrompt',
   // Local-small harness
   'applyLocalSmallPatchStep',

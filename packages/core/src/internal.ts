@@ -75,7 +75,6 @@ export { OpenCodeHarness } from './harness/opencode.js';
 export { CliModelExecutor } from './router/index.js';
 
 // Phase helpers
-export { disputeResolution } from './phases/check.js';
 export type { PlanPromptOpts } from './phases/plan.js';
 export { buildPlanPrompt } from './phases/plan.js';
 

@@ -1,4 +1,4 @@
-// src/phases/check.ts — CHECK phase: independent checkers verify output, rework loop, dispute resolution
+// src/phases/check.ts — CHECK phase: independent checkers verify output, rework loop
 
 import { type CheckerContext, probeWorktree, runAllCheckers, type WorktreeProbe } from '../checkers/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
@@ -8,14 +8,7 @@ import type { ModelRouter, RouterResult } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
-import type {
-  CheckSummary,
-  Constitution,
-  DisputeResult,
-  FailoverReason,
-  ReworkCause,
-  ReworkInfo,
-} from '../types/index.js';
+import type { CheckSummary, Constitution, FailoverReason, ReworkCause, ReworkInfo } from '../types/index.js';
 
 type LogFn = (type: EventKind, msg: string, extra?: { failoverReason?: FailoverReason; rework?: ReworkInfo }) => void;
 
@@ -199,7 +192,7 @@ export async function checkPhase(opts: {
 
     const steering = drainSteering?.();
 
-    const { failovers, modelCompleted, failureReason } = await reworkWorker(
+    const { failovers, modelCompleted, failureReason } = await reworkWorker({
       issue,
       worktree,
       specPath,
@@ -213,7 +206,7 @@ export async function checkPhase(opts: {
       appPort,
       appBaseUrl,
       onPgid,
-    );
+    });
 
     const cause = classifyReworkCause({ steering, failovers, failureReason });
     log(
@@ -277,26 +270,43 @@ export async function checkPhase(opts: {
   return { passed: summary.failures === 0, summary, reworkRounds, stuck };
 }
 
-async function reworkWorker(
-  issue: number,
-  worktree: string,
-  specPath: string,
-  summary: CheckSummary,
-  constitution: Constitution | null,
-  router: ModelRouter,
-  log: LogFn,
-  timeoutSeconds?: number,
-  sandbox?: SandboxPolicy,
-  steering?: ConsumedSteering,
-  appPort?: number,
-  appBaseUrl?: string,
-  onPgid?: (pgid: number) => void,
-): Promise<{
+interface ReworkWorkerOptions {
+  issue: number;
+  worktree: string;
+  specPath: string;
+  summary: CheckSummary;
+  constitution: Constitution | null;
+  router: ModelRouter;
+  log: LogFn;
+  buildTimeoutSeconds?: number;
+  sandbox?: SandboxPolicy;
+  steering?: ConsumedSteering;
+  appPort?: number;
+  appBaseUrl?: string;
+  onPgid?: (pgid: number) => void;
+}
+
+async function reworkWorker(opts: ReworkWorkerOptions): Promise<{
   failovers: { model: string; reason: FailoverReason; detail?: string }[];
   /** False when router.run threw — no model produced output for this round (#642). */
   modelCompleted: boolean;
   failureReason?: FailoverReason;
 }> {
+  const {
+    issue,
+    worktree,
+    specPath,
+    summary,
+    constitution,
+    router,
+    log,
+    buildTimeoutSeconds,
+    sandbox,
+    steering,
+    appPort,
+    appBaseUrl,
+    onPgid,
+  } = opts;
   const constitutionCtx = buildConstitutionContext(constitution);
   const failures = summary.results.filter((r) => r.result === 'FAIL');
   const failureDetails = failures.map((f) => `### ${f.checker}\n${f.details}`).join('\n\n');
@@ -330,7 +340,7 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
   try {
     reworkResult = await router.run('build_claude', prompt, {
       worktree,
-      timeoutSeconds: timeoutSeconds ?? 7200,
+      timeoutSeconds: buildTimeoutSeconds ?? 7200,
       sandbox,
       onSandboxEvent: (type, detail) => log(type, detail),
       onLog: (msg) => log('router', msg),
@@ -365,69 +375,5 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
     failovers,
     modelCompleted: reworkResult !== null,
     ...(failureReason ? { failureReason } : {}),
-  };
-}
-
-export async function disputeResolution(opts: {
-  issue: number;
-  worktree: string;
-  specPath: string;
-  checkerName: string;
-  checkerDetails: string;
-  constitution: Constitution | null;
-  router: ModelRouter;
-  timeoutSeconds?: number;
-  log?: LogFn;
-}): Promise<DisputeResult> {
-  const { issue, worktree, specPath, checkerName, checkerDetails, constitution, router, timeoutSeconds, log } = opts;
-  const constitutionCtx = buildConstitutionContext(constitution);
-
-  const prompt = `You are the BOSS in a software factory. A worker agent is disputing
-a checker agent's failure. You must arbitrate by re-reading the constitution —
-standards outrank both the worker and the checker.
-
-ISSUE: #${issue}
-WORKTREE: ${worktree}
-SPEC: ${specPath}
-
-${constitutionCtx}
-
-## Checker Finding
-Checker: ${checkerName}
-Details: ${checkerDetails}
-
-## Your Job
-1. Read the constitution's standards and dispute rules carefully.
-2. Inspect the actual work in the worktree.
-3. Decide: Is the checker correct (upheld) or is the worker correct (overruled)?
-4. Return JSON (and ONLY the JSON):
-{"verdict":"upheld" or "overruled","reasoning":"<one paragraph citing the standard>","action":"<what happens next>"}`;
-
-  const result = await router
-    .run('dispute_resolution', prompt, {
-      worktree,
-      timeoutSeconds: timeoutSeconds ?? 1800,
-    })
-    .catch(() => null);
-
-  if (!result) {
-    return { verdict: 'upheld', reasoning: 'dispute agent failed', action: 'worker must fix' };
-  }
-
-  for (const f of failoversFrom(result.attempts)) {
-    log?.('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, {
-      failoverReason: f.reason,
-    });
-  }
-
-  const match = result.output.match(/"verdict"\s*:\s*"(upheld|overruled)"/);
-  const verdict = (match?.[1] as 'upheld' | 'overruled') ?? 'upheld';
-  const reasoningMatch = result.output.match(/"reasoning"\s*:\s*"([^"]*)"/);
-  const actionMatch = result.output.match(/"action"\s*:\s*"([^"]*)"/);
-
-  return {
-    verdict,
-    reasoning: reasoningMatch?.[1] ?? '',
-    action: actionMatch?.[1] ?? '',
   };
 }
