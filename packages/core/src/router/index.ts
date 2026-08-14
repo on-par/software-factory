@@ -662,6 +662,14 @@ export class ModelRouter {
     const maxRetries = this.registry.failover.maxRetries;
     const cooldownMs = this.registry.failover.cooldownMs;
     const attempts: RouterResult['attempts'] = [];
+    // Harness-bound routes (build_codex/build_claude's `requires`) resolve every
+    // model in the tier to the SAME underlying provider account — once that
+    // provider is out, no other model in the list can plausibly help, so skip
+    // straight to the caller's cross-harness fallback instead of burning
+    // through the rest of the tier. Plain tiered routes (e.g. plan) mix
+    // independently-quota'd models under a shared provider label and must keep
+    // trying them.
+    const blockSameProviderModels = Boolean(this.routesConfig.routes[task]?.requires);
     const blockedProviders = new Set<string>();
 
     const snapshot = taskRequiresAgenticHarness(task)
@@ -670,7 +678,7 @@ export class ModelRouter {
 
     for (const model of models) {
       const modelProvider = this.registry.get(model)?.provider;
-      if (modelProvider && blockedProviders.has(modelProvider)) {
+      if (blockSameProviderModels && modelProvider && blockedProviders.has(modelProvider)) {
         onLog(`Skipping ${model} for ${task}: provider ${modelProvider} is on cooldown`);
         continue;
       }
@@ -704,7 +712,7 @@ export class ModelRouter {
           const provider = this.registry.get(model)?.provider;
           const blockProvider = async (): Promise<void> => {
             if (!provider || !isProviderLevelFailure(reason)) return;
-            blockedProviders.add(provider);
+            if (blockSameProviderModels) blockedProviders.add(provider);
             try {
               await onProviderFailure?.({ provider, reason });
             } catch (callbackErr) {
