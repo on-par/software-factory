@@ -113,6 +113,7 @@ export type EventKind =
   | 'ship'
   | 'ship_denied'
   | 'skip-ci'
+  | 'size-gate-escalated'
   | 'steering_applied'
   | 'steering_unconsumed'
   | 'stopped'
@@ -253,6 +254,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   ship: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
   ship_denied: { severity: 'error', isPark: false, isTerminal: true, laneStatus: 'failed' },
   'skip-ci': { severity: 'info', isPark: false, isTerminal: false },
+  'size-gate-escalated': { severity: 'warn', isPark: false, isTerminal: false },
   steering_applied: { severity: 'info', isPark: false, isTerminal: false },
   steering_unconsumed: { severity: 'info', isPark: false, isTerminal: false },
   stopped: { severity: 'warn', isPark: false, isTerminal: true, laneStatus: 'stopped' },

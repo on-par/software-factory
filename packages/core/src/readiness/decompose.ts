@@ -1,12 +1,12 @@
 // packages/core/src/readiness/decompose.ts — PLAN-side decomposition of an oversized
 // factory-task issue into a proposed epic + INVEST-compliant child stories (#606).
 //
-// When the readiness size gate flags a factory-task issue as oversized (sizeOk: false)
-// and the lane opts in (CLI passes decomposeOversized: true), PLAN runs a bounded LLM
-// pass that proposes an epic plus small child stories and posts the breakdown as a
-// comment on the original issue — without filing anything or mutating the issue body.
-// The pass is strictly advisory and non-fatal: a failure logs decompose_failed and PLAN
-// continues; the driver never throws to its caller.
+// When the readiness size gate flags a factory-task issue as oversized (sizeOk: false),
+// PLAN runs a bounded LLM pass that proposes an epic plus small child stories and posts
+// the breakdown as a comment on the original issue — without filing anything or mutating
+// the issue body. It runs as part of the enforced size gate (#607): the pass is strictly
+// advisory and non-fatal (a failure logs decompose_failed), but the issue is always
+// parked for decomposition afterwards; the driver never throws to its caller.
 //
 // The INVEST gate is owned by core because core must not depend on the private
 // @on-par/product leaf (ADR-0010 already settled this for the size gate). checkStoryInvest
