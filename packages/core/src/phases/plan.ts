@@ -180,8 +180,8 @@ export async function planPhase(opts: {
   enforceReadiness?: boolean;
   /** Skip the model PLAN call only for a complete, explicitly bounded issue. */
   fastPath?: boolean;
-  /** Run a bounded LLM decomposition pass on oversized factory-task issues (#606). */
-  decomposeOversized?: boolean;
+  /** Park oversized factory-task issues (sizeOk: false) instead of proceeding. Default true. */
+  enforceSizeGate?: boolean;
 }): Promise<PlanResult> {
   const {
     issue,
@@ -199,6 +199,7 @@ export async function planPhase(opts: {
     drainSteering,
   } = opts;
   const maxReplans = opts.maxReplans ?? 3;
+  const enforceSizeGate = opts.enforceSizeGate ?? true;
   const isCodexDisabled = opts.codexDisabled ?? codexDisabled();
 
   const workSources = opts.workSources ?? createDefaultWorkSourceRegistry({ octokit });
@@ -270,7 +271,7 @@ export async function planPhase(opts: {
   }
 
   if (
-    opts.decomposeOversized &&
+    enforceSizeGate &&
     source.kind === GITHUB_ISSUE_SOURCE &&
     readiness.template === 'factory-task' &&
     readiness.sizeOk === false
@@ -287,6 +288,9 @@ export async function planPhase(opts: {
       log: (type, msg) => log(type, msg),
       timeoutSeconds: Math.min(timeoutSeconds ?? 1800, 300),
     });
+    const reason = `issue exceeds the size gate (${readiness.sizeReason ?? 'too big'}) — parked for decomposition`;
+    log('size-gate-escalated', reason, { readiness });
+    return { ok: false, route: 'claude', specPath, model: '', escalate: reason, designArtifact: null };
   }
 
   if (opts.fastPath && !isCodexDisabled && isFastPathEligible({ issueBody, readinessPassed: readiness.pass })) {

@@ -355,7 +355,7 @@ npm run test`;
     expect(updates).toBe(0);
   });
 
-  describe('decomposition of oversized issues (#606)', () => {
+  describe('enforced size gate for oversized issues (#607)', () => {
     const oversizedBody = `## Problem statement
 The import queue stalls under load and loses jobs.
 
@@ -428,14 +428,13 @@ npm run test`;
       ],
     });
 
-    it('posts a decomposition comment when a complete oversized factory-task is flagged sizeOk: false', async () => {
+    it('decomposes and parks a complete oversized factory-task by default', async () => {
       const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
       tempDirs.add(worktree);
-      const specPath = join(worktree, 'issue-606.md');
+      const specPath = join(worktree, 'issue-607.md');
       const stub = new StubModelExecutor({
         scripts: {
           decompose: [{ output: validDecomposition }],
-          plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }],
         },
       });
       const router = new ModelRouter(models, routes, false, stub);
@@ -443,7 +442,7 @@ npm run test`;
       const events: string[] = [];
 
       const result = await planPhase({
-        issue: 606,
+        issue: 607,
         repo: 'on-par/software-factory',
         worktree,
         specPath,
@@ -458,29 +457,30 @@ npm run test`;
           },
         } as any,
         log: (type) => events.push(type),
-        decomposeOversized: true,
       });
 
-      expect(result.ok).toBe(true);
-      expect(stub.calls.map((call) => call.task)).toEqual(['decompose', 'plan']);
+      expect(result.ok).toBe(false);
+      expect(result.escalate).toMatch(/size gate/);
+      expect(result.route).toBe('claude');
+      expect(stub.calls.map((call) => call.task)).toEqual(['decompose']);
       expect(createComment).toHaveBeenCalledTimes(1);
       expect(createComment).toHaveBeenCalledWith({
         owner: 'on-par',
         repo: 'software-factory',
-        issue_number: 606,
+        issue_number: 607,
         body: expect.stringContaining('## Proposed epic: Harden the import queue'),
       });
+      expect(events).toContain('size-gate-escalated');
       expect(events).toContain('decompose_comment_posted');
     });
 
-    it('does not post and still calls PLAN when the decomposition fails INVEST', async () => {
+    it('parks with size-gate-escalated even when the decomposition fails INVEST', async () => {
       const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
       tempDirs.add(worktree);
-      const specPath = join(worktree, 'issue-606.md');
+      const specPath = join(worktree, 'issue-607.md');
       const stub = new StubModelExecutor({
         scripts: {
           decompose: [{ output: investFailingDecomposition }, { output: investFailingDecomposition }],
-          plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }],
         },
       });
       const router = new ModelRouter(models, routes, false, stub);
@@ -488,7 +488,7 @@ npm run test`;
       const events: string[] = [];
 
       const result = await planPhase({
-        issue: 606,
+        issue: 607,
         repo: 'on-par/software-factory',
         worktree,
         specPath,
@@ -503,13 +503,53 @@ npm run test`;
           },
         } as any,
         log: (type) => events.push(type),
-        decomposeOversized: true,
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.escalate).toMatch(/size gate/);
+      expect(stub.calls.map((call) => call.task)).toEqual(['decompose', 'decompose']);
+      expect(createComment).not.toHaveBeenCalled();
+      expect(events).toContain('decompose_failed');
+      expect(events).toContain('size-gate-escalated');
+    });
+
+    it('proceeds to PLAN when enforceSizeGate is false', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-607.md');
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const createComment = vi.fn().mockResolvedValue({});
+      const events: string[] = [];
+
+      const result = await planPhase({
+        issue: 607,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit: {
+          rest: {
+            issues: {
+              get: async () => ({ data: { title: 'Harden the import queue', body: oversizedBody } }),
+              createComment,
+            },
+          },
+        } as any,
+        log: (type) => events.push(type),
+        enforceSizeGate: false,
       });
 
       expect(result.ok).toBe(true);
-      expect(stub.calls.map((call) => call.task)).toEqual(['decompose', 'decompose', 'plan']);
+      expect(result.route).toBe('codex');
+      expect(stub.calls.map((call) => call.task)).toEqual(['plan']);
       expect(createComment).not.toHaveBeenCalled();
-      expect(events).toContain('decompose_failed');
+      expect(events).not.toContain('size-gate-escalated');
     });
   });
 

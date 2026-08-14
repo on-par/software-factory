@@ -115,3 +115,12 @@ describe('rework_model_failed classification (#642)', () => {
     expect(EVENT_TRAITS.rework_model_failed).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
   });
 });
+
+// An oversized factory-task issue parked by the enforced size gate (#607) is a warning
+// the operator should notice, but the terminal park is still logged as 'escalate' by the
+// CLI's parkEvents — so this event must not double-count as its own park.
+describe('size-gate-escalated classification (#607)', () => {
+  it('is warn severity, not park, not terminal', () => {
+    expect(EVENT_TRAITS['size-gate-escalated']).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
+  });
+});
