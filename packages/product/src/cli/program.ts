@@ -234,7 +234,10 @@ export function buildProgram(deps: ProgramDeps = defaultDeps()): Command {
     // Scoped to this command only: a missing --approve throws a catchable CommanderError
     // instead of calling process.exit, matching every other command's error handling
     // (main()'s caller decides whether to exit) without changing --help/--version
-    // behavior for the rest of the CLI.
+    // behavior for the rest of the CLI. Output is suppressed too: main()'s caller
+    // (packages/product/src/cli.ts) already prints err.message, so Commander's own
+    // writeErr would otherwise duplicate the "error: ..." line on stderr.
+    .configureOutput({ writeErr: () => {} })
     .exitOverride()
     .action(async (opts: { text?: string; file?: string; budget: string; approve: string }) => {
       const { decomposition } = await decomposeFromDump(opts, deps, 'decompose');
@@ -253,7 +256,10 @@ export function buildProgram(deps: ProgramDeps = defaultDeps()): Command {
     // Scoped to this command only: a missing --approve throws a catchable CommanderError
     // instead of calling process.exit, matching every other command's error handling
     // (main()'s caller decides whether to exit) without changing --help/--version
-    // behavior for the rest of the CLI.
+    // behavior for the rest of the CLI. Output is suppressed too: main()'s caller
+    // (packages/product/src/cli.ts) already prints err.message, so Commander's own
+    // writeErr would otherwise duplicate the "error: ..." line on stderr.
+    .configureOutput({ writeErr: () => {} })
     .exitOverride()
     .action(async (opts: { text?: string; file?: string; budget: string; approve: string }) => {
       const { doc, decomposition } = await decomposeFromDump(opts, deps, 'personas');
@@ -274,7 +280,10 @@ export function buildProgram(deps: ProgramDeps = defaultDeps()): Command {
     // Scoped to this command only: a missing --approve throws a catchable CommanderError
     // instead of calling process.exit, matching every other command's error handling
     // (main()'s caller decides whether to exit) without changing --help/--version
-    // behavior for the rest of the CLI.
+    // behavior for the rest of the CLI. Output is suppressed too: main()'s caller
+    // (packages/product/src/cli.ts) already prints err.message, so Commander's own
+    // writeErr would otherwise duplicate the "error: ..." line on stderr.
+    .configureOutput({ writeErr: () => {} })
     .exitOverride()
     .action(
       async (opts: {
