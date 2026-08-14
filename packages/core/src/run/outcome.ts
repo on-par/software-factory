@@ -16,10 +16,11 @@ export type ParkReason = Extract<EventKind, 'escalate' | 'timeout' | 'fail' | 'c
 export type RunOutcome =
   | { state: 'shipped'; route: Route; branch: string; reworkRounds: number; prNumber: number }
   | { state: 'ready'; route: Route; branch: string; reworkRounds: number; prNumber?: number }
-  | { state: 'parked'; route?: Route; branch?: string; reworkRounds?: number; reason: ParkReason };
+  | { state: 'parked'; route?: Route; branch?: string; reworkRounds?: number; reason: ParkReason }
+  | { state: 'escalated'; route?: Route; branch?: string; reworkRounds?: number; reason: ParkReason };
 
-/** A parked run. Escalated-ness is not a separate axis — it's `reason === 'escalate'`. */
-export type ParkOutcome = Extract<RunOutcome, { state: 'parked' }>;
+/** A parked-or-escalated run — the two terminal states that carry a ParkReason. */
+export type ParkOutcome = Extract<RunOutcome, { state: 'parked' | 'escalated' }>;
 
 /** A land/merge attempt hit a rebase conflict that needs a human to resolve. */
 export class LandConflictError extends Error {}
@@ -45,7 +46,7 @@ export class CiUnverifiedError extends CiFailedError {}
  *  then a plain `'fail'` default. */
 export function parkReasonFor(err: unknown): ParkReason {
   const outcome = (err as { outcome?: RunOutcome } | null)?.outcome;
-  if (outcome && outcome.state === 'parked') return outcome.reason;
+  if (outcome && (outcome.state === 'parked' || outcome.state === 'escalated')) return outcome.reason;
   if (err instanceof LandConflictError) return 'conflict';
   if (err instanceof CiFailedError) return 'ci-failed';
   if ((err as { reason?: unknown } | null)?.reason === 'timeout') return 'timeout';

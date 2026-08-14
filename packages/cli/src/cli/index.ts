@@ -1130,7 +1130,7 @@ export async function shipIssue(
     route = plan.route;
     if (!plan.ok) {
       throw new LaneParkError(`plan escalated: ${plan.escalate ?? 'unknown'}`, {
-        state: 'parked',
+        state: 'escalated',
         route,
         branch,
         reason: 'escalate',
@@ -1202,7 +1202,7 @@ export async function shipIssue(
     });
     if (!build.ok) {
       throw new LaneParkError(`build escalated: ${build.escalate ?? 'unknown'}`, {
-        state: 'parked',
+        state: 'escalated',
         route,
         branch,
         reason: 'escalate',
@@ -1245,7 +1245,7 @@ export async function shipIssue(
           ? `lane stuck after ${check.reworkRounds} rework rounds (identical failures) — escalated`
           : `${check.summary.failures} check failures after ${check.reworkRounds} rework rounds`,
         {
-          state: 'parked',
+          state: check.stuck ? 'escalated' : 'parked',
           route,
           branch,
           reworkRounds,
@@ -1308,7 +1308,7 @@ export async function shipIssue(
     });
     if (!ship.ok) {
       throw new LaneParkError(ship.denied ? `ship denied: ${ship.deniedReason}` : 'ship phase failed', {
-        state: 'parked',
+        state: ship.denied ? 'escalated' : 'parked',
         route,
         branch,
         reason: ship.denied ? 'escalate' : 'fail',
@@ -2878,7 +2878,7 @@ export async function waitForMerge(
           : `${consecutiveFailures} consecutive failures over ${Math.round(elapsedMs / 1000)}s`;
         const msg = `merged-state check for ${branch} is not recovering — parking lane after ${trigger}: ${detail}`;
         emitEvent(paths.events, 'escalate', issue, msg);
-        throw new LaneParkError(msg, { state: 'parked', branch, reason: 'escalate' });
+        throw new LaneParkError(msg, { state: 'escalated', branch, reason: 'escalate' });
       }
     }
     if (merged) {
