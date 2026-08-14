@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import type { ModelDiagnosis } from '@on-par/factory-core';
 import { getFactoryPaths } from '@on-par/factory-core';
-import { RunLockHeldError } from '@on-par/factory-core/internal';
+import { RunLockHeldError, resolveBranchPrefix } from '@on-par/factory-core/internal';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -680,6 +680,7 @@ describe('cli', () => {
             label: 'ready',
             lane: 'auto',
             maxPerCycle: 20,
+            branchPrefix: resolveBranchPrefix(),
           });
           return {
             scannedAt: '2026-07-20T00:00:00.000Z',

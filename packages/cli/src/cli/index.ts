@@ -141,7 +141,11 @@ import {
   logCost,
   logEvent,
   readCosts,
+  resolveBranchPrefix,
+  resolveEffectiveConfig,
+  resolveExperimental,
   resolveFilingPolicy,
+  resolveLocalOnly,
   RunLockHeldError,
   runOvernightQueue,
   setupWorktree,
@@ -440,8 +444,8 @@ async function cmdModels(opts: { doctor?: boolean } = {}) {
   const modelsConfig = applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot));
   const { ModelRegistry } = await import('@on-par/factory-core');
   const registry = new ModelRegistry(modelsConfig);
-  const allowExperimental = process.env.FACTORY_EXPERIMENTAL === '1';
-  const localOnly = process.env.FACTORY_LOCAL_ONLY === '1';
+  const allowExperimental = resolveExperimental();
+  const localOnly = resolveLocalOnly();
 
   if (opts.doctor) {
     const ollamaModels = ollamaModelSet();
@@ -732,7 +736,15 @@ export async function cmdStatus() {
   const repoConfig = loadRepoConfig(repoRoot);
   const modelsConfig = applyRepoConfig(loadModelsConfig(), repoConfig);
   const routesConfig = loadRoutesConfig();
-  const router = new ModelRouter(modelsConfig, routesConfig);
+  const effective = resolveEffectiveConfig(repoConfig);
+  const router = new ModelRouter(
+    modelsConfig,
+    routesConfig,
+    false,
+    undefined,
+    effective.allowExperimental,
+    effective.localOnly,
+  );
   const product = readActiveProduct(paths.product) ?? '(none)';
 
   console.log(chalk.bold(`== ${ghRepo} ==`));
@@ -900,7 +912,15 @@ export async function shipIssue(
   const timeouts = resolveTimeouts(factoryConfig);
   const failoverSettings = resolveAutoFailover(factoryConfig);
   const breaker = new ProviderBreaker(paths.breaker);
-  const router = new ModelRouter(modelsConfig, routesConfig);
+  const effective = resolveEffectiveConfig(repoConfig);
+  const router = new ModelRouter(
+    modelsConfig,
+    routesConfig,
+    false,
+    undefined,
+    effective.allowExperimental,
+    effective.localOnly,
+  );
   const efficiency = resolveEfficiencyPolicy(repoConfig);
   let issueSpend = 0;
   router.setCostSink((entry) => {
@@ -915,8 +935,10 @@ export async function shipIssue(
   const autoRework = opts.autoRework ?? true;
 
   const issueTitle = ctx?.workRequest?.title ?? (await getIssueTitle(octokit, ghRepo, issueNum));
-  const branch = branchFor(issueNum, issueTitle);
-  const worktree = ctx?.localOnly ? ctx.localOnly.workspace : worktreePathFor(repoRoot, issueNum);
+  const branch = branchFor(issueNum, issueTitle, effective.branchPrefix);
+  const worktree = ctx?.localOnly
+    ? ctx.localOnly.workspace
+    : worktreePathFor(repoRoot, issueNum, effective.branchPrefix);
   const specPath = resolve(paths.plans, `issue-${issueNum}.md`);
   const runStartedAt = new Date().toISOString();
   let route: 'codex' | 'claude' | undefined;
@@ -1107,6 +1129,7 @@ export async function shipIssue(
         : undefined,
       drainSteering: planApprovalEnabled ? () => drainSteering(paths.steering, issueNum, worktree) : undefined,
       codexDisabled: codexOff,
+      localOnly: effective.localOnly,
       workSource: ctx?.workSource,
       enforceReadiness: true,
       fastPath: efficiency.fastPath,
@@ -1162,6 +1185,7 @@ export async function shipIssue(
       appPort,
       appBaseUrl,
       codexDisabled: codexOff || breakerBlocked,
+      localOnly: effective.localOnly,
       autoFailover: {
         enabled: failoverSettings.enabled,
         fallbackModel: failoverSettings.fallbackModel,
@@ -1657,7 +1681,7 @@ async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }) 
       const diagnoses = diagnoseModels(
         registry,
         { ollamaModelPresent: ollamaModels ? (m: string) => ollamaModels.has(m) : undefined },
-        process.env.FACTORY_EXPERIMENTAL === '1',
+        resolveExperimental(),
         true, // localOnly
       );
       if (!hasReachableWorker(diagnoses)) {
@@ -1715,8 +1739,8 @@ async function getIssueTitle(octokit: Octokit, repo: string, issue: number): Pro
   return data.title;
 }
 
-function worktreePathFor(repoRoot: string, issueNum: number): string {
-  return resolve(dirname(repoRoot), `${basename(repoRoot)}-factory-${branchPrefixSlug()}-${issueNum}`);
+function worktreePathFor(repoRoot: string, issueNum: number, prefix?: string): string {
+  return resolve(dirname(repoRoot), `${basename(repoRoot)}-factory-${branchPrefixSlug(prefix)}-${issueNum}`);
 }
 
 /** Fences a whole run behind the checkout's `.factory/run.lock` (#598). A live holder is
@@ -1825,8 +1849,9 @@ async function landIssue(
   // lives on (same failure mode fixed for waitForMerge in #51). Guess the
   // branch from the current title first, but fall back to matching the open
   // PR that references this issue directly and use its real head branch.
-  const guessedBranch = branchFor(issueNum, await getIssueTitle(octokit, ghRepo, issueNum));
-  const worktree = worktreePathFor(repoRoot, issueNum);
+  const branchPrefix = resolveEffectiveConfig(loadRepoConfig(repoRoot)).branchPrefix;
+  const guessedBranch = branchFor(issueNum, await getIssueTitle(octokit, ghRepo, issueNum), branchPrefix);
+  const worktree = worktreePathFor(repoRoot, issueNum, branchPrefix);
 
   let branch = guessedBranch;
   let prNumber: number | undefined;
@@ -1904,9 +1929,18 @@ async function cmdTriage(opts: { product?: string }) {
   }
   const product = opts.product ?? readActiveProduct(paths.product);
 
-  const modelsConfig = applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot));
+  const repoConfig = loadRepoConfig(repoRoot);
+  const modelsConfig = applyRepoConfig(loadModelsConfig(), repoConfig);
   const routesConfig = loadRoutesConfig();
-  const router = new ModelRouter(modelsConfig, routesConfig);
+  const effective = resolveEffectiveConfig(repoConfig);
+  const router = new ModelRouter(
+    modelsConfig,
+    routesConfig,
+    false,
+    undefined,
+    effective.allowExperimental,
+    effective.localOnly,
+  );
   const model = router.resolve('triage') ?? 'claude-sonnet-5';
   const flag = router.registryRef.getClaudeFlag(model);
 
@@ -2217,6 +2251,7 @@ export function createIngestHook(
         label: ingestCfg.label,
         lane: ingestCfg.lane,
         maxPerCycle: ingestCfg.maxPerCycle,
+        branchPrefix: resolveBranchPrefix(),
       });
       if (result.appended.length) {
         emitEvent(
