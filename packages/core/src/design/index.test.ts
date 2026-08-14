@@ -4,14 +4,9 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { specPaths } from '../spec/index.js';
 import type { DesignArtifact } from '../types/index.js';
-import {
-  designArtifactPaths,
-  parseDesignArtifact,
-  readDesignArtifact,
-  renderDesignArtifact,
-  renderDesignGrounding,
-} from './index.js';
+import { parseDesignArtifact, readDesignArtifact, renderDesignArtifact, renderDesignGrounding } from './index.js';
 
 const validDesign = {
   restatedProblem: 'PLAN output is unstructured markdown.',
@@ -192,22 +187,13 @@ describe('renderDesignGrounding', () => {
   });
 });
 
-describe('designArtifactPaths', () => {
-  it('derives .design.json and .design.md next to the spec', () => {
-    expect(designArtifactPaths('/x/plans/issue-422.md')).toEqual({
-      json: '/x/plans/issue-422.design.json',
-      markdown: '/x/plans/issue-422.design.md',
-    });
-  });
-});
-
 describe('readDesignArtifact', () => {
   it('round-trips a written valid JSON artifact', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'design-artifact-test-'));
     tempDirs.add(dir);
     const specPath = join(dir, 'issue-422.md');
-    const { json } = designArtifactPaths(specPath);
-    await writeFile(json, JSON.stringify(artifact, null, 2));
+    const { designJson } = specPaths(specPath);
+    await writeFile(designJson, JSON.stringify(artifact, null, 2));
 
     await expect(readDesignArtifact(specPath)).resolves.toEqual(artifact);
   });
@@ -224,8 +210,8 @@ describe('readDesignArtifact', () => {
     const dir = await mkdtemp(join(tmpdir(), 'design-artifact-test-'));
     tempDirs.add(dir);
     const specPath = join(dir, 'issue-422.md');
-    const { json } = designArtifactPaths(specPath);
-    await writeFile(json, '{ not valid json');
+    const { designJson } = specPaths(specPath);
+    await writeFile(designJson, '{ not valid json');
 
     await expect(readDesignArtifact(specPath)).resolves.toBeNull();
   });
@@ -234,8 +220,8 @@ describe('readDesignArtifact', () => {
     const dir = await mkdtemp(join(tmpdir(), 'design-artifact-test-'));
     tempDirs.add(dir);
     const specPath = join(dir, 'issue-422.md');
-    const { json } = designArtifactPaths(specPath);
-    await writeFile(json, JSON.stringify({ foo: 'bar' }));
+    const { designJson } = specPaths(specPath);
+    await writeFile(designJson, JSON.stringify({ foo: 'bar' }));
 
     await expect(readDesignArtifact(specPath)).resolves.toBeNull();
   });

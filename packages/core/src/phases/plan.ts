@@ -1,19 +1,17 @@
 // src/phases/plan.ts — PLAN phase: boss model reads issue, explores repo, freezes spec, picks route
 
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { readFile } from 'node:fs/promises';
 
 import type { Octokit } from '@octokit/rest';
 import { createFsReader } from '@on-par/repo-context';
-import matter from 'gray-matter';
 
 import { adrLabel, readAdrContext, renderAdrConstraints } from '../adr/index.js';
-import { adrDraftsPath, parseAdrDrafts } from '../adr/write.js';
+import { parseAdrDrafts } from '../adr/write.js';
 import type { ApprovalGate } from '../approvals/index.js';
 import { PLAN_SPEC_PREVIEW_BYTES } from '../approvals/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
-import { designArtifactPaths, parseDesignArtifact, renderDesignArtifact } from '../design/index.js';
+import { parseDesignArtifact, renderDesignArtifact } from '../design/index.js';
 import { buildFastPathSpec, isFastPathEligible } from '../efficiency/fast-path.js';
 import type { EventKind } from '../events/kinds.js';
 import { buildReadinessEnrichmentPrompt } from '../readiness/enrich.js';
@@ -22,6 +20,7 @@ import { scoreIssueReadiness } from '../readiness/index.js';
 import type { ModelRouter } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
+import { archiveSpec, readSpec, updateSpecRoute, writeSpec } from '../spec/index.js';
 import type { Constitution, DesignArtifact, FailoverReason, ReadinessInfo } from '../types/index.js';
 import { codexDisabled, escalationLine, isEscalation } from '../utils/index.js';
 import { GITHUB_ISSUE_SOURCE, type GithubIssueParams } from '../work/github-issue.js';
@@ -291,10 +290,12 @@ export async function planPhase(opts: {
 
   if (opts.fastPath && !isCodexDisabled && isFastPathEligible({ issueBody, readinessPassed: readiness.pass })) {
     const fastPath = buildFastPathSpec({ issue, title: issueTitle, issueBody });
-    await writeFile(specPath, matter.stringify(fastPath.markdown, fastPath.frontmatter));
-    const paths = designArtifactPaths(specPath);
-    await writeFile(paths.json, JSON.stringify(fastPath.frontmatter.design, null, 2));
-    await writeFile(paths.markdown, renderDesignArtifact(fastPath.frontmatter.design, issue));
+    await writeSpec(specPath, {
+      body: fastPath.markdown,
+      data: fastPath.frontmatter,
+      designJson: JSON.stringify(fastPath.frontmatter.design, null, 2),
+      designMd: renderDesignArtifact(fastPath.frontmatter.design, issue),
+    });
     log('fast_path', 'complete bounded issue bypassed model PLAN and emitted a compact Codex spec');
     return {
       ok: true,
@@ -348,7 +349,10 @@ export async function planPhase(opts: {
     if (replans > 0) {
       log('plan', `Re-planning after operator redirect (attempt ${replans + 1})`);
     }
-    await archiveExistingSpec(specPath, log);
+    const archived = await archiveSpec(specPath);
+    if (archived.length > 0) {
+      log('plan', `Archived existing spec before planning: ${archived.join(', ')}`);
+    }
 
     const result = await router.run('plan', prompt, {
       worktree,
@@ -380,28 +384,17 @@ export async function planPhase(opts: {
     // Check spec file was created. If the model is chat-only, the output is the
     // spec content; if it has file tools, it may have written specPath directly.
     if (!existsSync(specPath)) {
-      await writeFile(specPath, result.output);
+      await writeSpec(specPath, { body: result.output });
     }
 
-    // Read route from spec frontmatter
-    const specContent = await readFile(specPath, 'utf-8');
-    let route: 'codex' | 'claude' = 'claude';
-    let parsedSpec: ReturnType<typeof matter> | undefined;
-    try {
-      parsedSpec = matter(specContent);
-      const rawRoute = parsedSpec.data.route;
-      const trimmedRoute = typeof rawRoute === 'string' ? rawRoute.trim() : rawRoute;
-      if (trimmedRoute === 'codex' || trimmedRoute === 'claude') route = trimmedRoute;
-    } catch {
-      // malformed frontmatter -> keep default 'claude'
-    }
+    // Read route from spec frontmatter (single normalization site: parseSpec)
+    const parsed = await readSpec(specPath);
+    let route: 'codex' | 'claude' = parsed.route ?? 'claude';
 
     if (process.env.FACTORY_LOCAL_ONLY === '1' && route !== 'codex') {
       log('warn', 'local-only mode requires a local Codex harness — forcing route to codex');
       route = 'codex';
-      if (parsedSpec) {
-        await writeFile(specPath, matter.stringify(parsedSpec.content, { ...parsedSpec.data, route: 'codex' }));
-      }
+      await updateSpecRoute(specPath, 'codex', 'local-only');
     }
 
     if (route === 'codex' && isCodexDisabled) {
@@ -409,16 +402,15 @@ export async function planPhase(opts: {
       route = 'claude';
       // Keep the persisted spec's frontmatter in sync with the actual route,
       // since it's the frozen artifact downstream consumers (eval scoring, PR review) read.
-      if (parsedSpec) {
-        await writeFile(specPath, matter.stringify(parsedSpec.content, { ...parsedSpec.data, route: 'claude' }));
-      }
+      await updateSpecRoute(specPath, 'claude', 'codex-disabled');
     }
 
-    const { artifact: designArtifact, errors: designErrors } = parseDesignArtifact(parsedSpec?.data ?? {});
+    const { artifact: designArtifact, errors: designErrors } = parseDesignArtifact(parsed.data);
     if (designArtifact) {
-      const paths = designArtifactPaths(specPath);
-      await writeFile(paths.json, JSON.stringify(designArtifact, null, 2));
-      await writeFile(paths.markdown, renderDesignArtifact(designArtifact, issue));
+      await writeSpec(specPath, {
+        designJson: JSON.stringify(designArtifact, null, 2),
+        designMd: renderDesignArtifact(designArtifact, issue),
+      });
       log(
         'design_artifact_emitted',
         `design artifact validated and written (open questions: ${designArtifact.openQuestions.length}, ` +
@@ -445,12 +437,12 @@ export async function planPhase(opts: {
       log('design_artifact_invalid', `spec frontmatter has no valid design artifact: ${designErrors.join('; ')}`);
     }
 
-    const { drafts: adrDrafts, rejected: adrRejected } = parseAdrDrafts(parsedSpec?.data ?? {});
+    const { drafts: adrDrafts, rejected: adrRejected } = parseAdrDrafts(parsed.data);
     for (const r of adrRejected) {
       log('adr_draft_rejected', `ADR draft "${r.title}" refused: ${r.errors.join('; ')}`);
     }
     if (adrDrafts.length > 0) {
-      await writeFile(adrDraftsPath(specPath), JSON.stringify(adrDrafts, null, 2));
+      await writeSpec(specPath, { adrDrafts: JSON.stringify(adrDrafts, null, 2) });
       log(
         'adr_drafts',
         `${adrDrafts.length} ADR draft(s) frozen for SHIP: ${adrDrafts.map((d) => d.title).join(', ')}`,
@@ -507,23 +499,5 @@ export async function planPhase(opts: {
       escalate: `plan rejected: ${reason}`,
       designArtifact: null,
     };
-  }
-}
-
-async function archiveExistingSpec(specPath: string, log: (type: EventKind, msg: string) => void): Promise<void> {
-  if (!existsSync(specPath)) return;
-
-  const archiveDir = join(dirname(specPath), '.archive');
-  const timestamp = Date.now();
-  const archivedPath = join(archiveDir, `${timestamp}-${specPath.split('/').pop() ?? 'spec.md'}`);
-  await mkdir(archiveDir, { recursive: true });
-  await rename(specPath, archivedPath);
-  log('plan', `Archived existing spec before planning: ${archivedPath}`);
-
-  const { json, markdown } = designArtifactPaths(specPath);
-  for (const designPath of [json, markdown, adrDraftsPath(specPath)]) {
-    if (!existsSync(designPath)) continue;
-    const archivedDesignPath = join(archiveDir, `${timestamp}-${designPath.split('/').pop() ?? 'spec.design'}`);
-    await rename(designPath, archivedDesignPath);
   }
 }

@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 
-import { designArtifactPaths } from '../design/index.js';
+import { specPaths } from '../spec/index.js';
 import type { CheckSummary, FactoryEvent } from '../types/index.js';
 import { readIssueEvents } from './local-run.js';
 
@@ -120,9 +120,9 @@ function readSpecSummary(specPath?: string): string | undefined {
 function readDesignMarkdown(specPath?: string): string | undefined {
   if (!specPath) return undefined;
   try {
-    const { markdown } = designArtifactPaths(specPath);
-    if (!existsSync(markdown)) return undefined;
-    return readFileSync(markdown, 'utf-8');
+    const { designMd } = specPaths(specPath);
+    if (!existsSync(designMd)) return undefined;
+    return readFileSync(designMd, 'utf-8');
   } catch {
     return undefined;
   }

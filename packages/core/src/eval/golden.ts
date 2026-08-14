@@ -1,8 +1,7 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
-import matter from 'gray-matter';
-
+import { readSpec } from '../spec/index.js';
 import type { ExpectedRoute, GoldenCase } from './types.js';
 
 const EXPECTED_ROUTES = new Set<ExpectedRoute>(['codex', 'claude', 'escalate', 'any']);
@@ -13,23 +12,22 @@ export async function loadGoldenCases(dir: string): Promise<GoldenCase[]> {
   return Promise.all(
     files.map(async (file) => {
       const path = join(dir, file);
-      const raw = await readFile(path, 'utf-8');
-      const { data, content } = matter(raw);
+      const { data, body } = await readSpec(path);
 
       const expectedRoute = (data.expectedRoute ?? 'any') as ExpectedRoute;
       if (!EXPECTED_ROUTES.has(expectedRoute)) {
         throw new Error(`${path}: invalid expectedRoute '${String(data.expectedRoute)}'`);
       }
 
-      const { content: contentWithoutStub, stubOutput } = extractStubOutput(content);
-      const { title, body } = extractTitleAndBody(contentWithoutStub, path);
+      const { content: contentWithoutStub, stubOutput } = extractStubOutput(body);
+      const { title, body: issueBody } = extractTitleAndBody(contentWithoutStub, path);
 
       return {
         id: typeof data.id === 'string' && data.id.trim() ? data.id : basename(file, '.md'),
         title,
-        body,
+        body: issueBody,
         expectedRoute,
-        deterministicOnly: data.deterministicOnly ?? false,
+        deterministicOnly: typeof data.deterministicOnly === 'boolean' ? data.deterministicOnly : false,
         rubric: Array.isArray(data.rubric) ? data.rubric.map(String) : [],
         minRubricScore: typeof data.minRubricScore === 'number' ? data.minRubricScore : 7,
         ...(stubOutput !== undefined ? { stubOutput } : {}),
