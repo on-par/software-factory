@@ -2343,6 +2343,16 @@ describe('shipIssue (direct)', () => {
     await expect(shipIssue(5, {}, ctx())).rejects.toMatchObject({ reason: 'escalate' });
   });
 
+  it('throws a LaneParkError with reason escalate when the check phase reports a stuck lane', async () => {
+    h.checkResult = {
+      passed: false,
+      summary: { results: [{ checker: 'tests', result: 'FAIL', details: 'identical across rounds' }], failures: 1 },
+      reworkRounds: 3,
+      stuck: true,
+    };
+    await expect(shipIssue(5, {}, ctx())).rejects.toMatchObject({ reason: 'escalate' });
+  });
+
   it('throws a LaneParkError with reason fail when the ship phase fails', async () => {
     h.shipResult = { ok: false };
     await expect(shipIssue(5, {}, ctx())).rejects.toMatchObject({ reason: 'fail' });

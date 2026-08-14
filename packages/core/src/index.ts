@@ -377,5 +377,9 @@ export {
 export type { SubscriptionUsage, SubscriptionUsageDeps } from './usage/subscription.js';
 export { fetchSubscriptionUsage } from './usage/subscription.js';
 
+// Run outcomes
+export type { ParkOutcome, ParkReason, Route, RunOutcome } from './run/outcome.js';
+export { CiFailedError, CiUnverifiedError, LandConflictError, parkEvents, parkReasonFor } from './run/outcome.js';
+
 // Types
 export type * from './types/index.js';

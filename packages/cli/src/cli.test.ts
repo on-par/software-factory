@@ -2289,8 +2289,8 @@ describe('cli', () => {
 
   describe('parkReasonFor', () => {
     it('maps a LaneParkError to its own reason', () => {
-      expect(parkReasonFor(new LaneParkError('x', 'escalate'))).toBe('escalate');
-      expect(parkReasonFor(new LaneParkError('x', 'fail'))).toBe('fail');
+      expect(parkReasonFor(new LaneParkError('x', { state: 'escalated', reason: 'escalate' }))).toBe('escalate');
+      expect(parkReasonFor(new LaneParkError('x', { state: 'parked', reason: 'fail' }))).toBe('fail');
     });
 
     it('maps a LandConflictError to conflict', () => {
@@ -2327,7 +2327,9 @@ describe('cli', () => {
     });
 
     it('emits only the terminal event for non-timeout park reasons', () => {
-      expect(parkEvents(new LaneParkError('x', 'escalate'))).toEqual([{ type: 'escalate', msg: 'x' }]);
+      expect(parkEvents(new LaneParkError('x', { state: 'escalated', reason: 'escalate' }))).toEqual([
+        { type: 'escalate', msg: 'x' },
+      ]);
       expect(parkEvents(new Error('boom'))).toEqual([{ type: 'fail', msg: 'boom' }]);
       expect(parkEvents(new LandConflictError('rebase conflict'))).toEqual([
         { type: 'conflict', msg: 'rebase conflict' },
@@ -2348,7 +2350,7 @@ describe('cli', () => {
       await runLane('app', [7, 8], '/repo', 'on-par/software-factory', paths, {
         ship: async (issue) => {
           calls.push(['ship', issue]);
-          throw new LaneParkError('plan escalated: needs a human decision', 'escalate');
+          throw new LaneParkError('plan escalated: needs a human decision', { state: 'escalated', reason: 'escalate' });
         },
         waitMerge: async () => {
           throw new Error('waitMerge should not be called');

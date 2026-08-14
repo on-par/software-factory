@@ -24,6 +24,8 @@ import type {
   LocalBriefParams,
   LocalOnlyPolicy,
   ModelDiagnosis,
+  ParkOutcome,
+  ParkReason,
   PrSource,
   QueueDiagnostic,
   ReadinessInfo,
@@ -40,6 +42,8 @@ import {
   applyRepoConfig,
   buildPhase,
   checkPhase,
+  CiFailedError,
+  CiUnverifiedError,
   clearProxyState,
   computeHealthKpis,
   ConstitutionLoader,
@@ -70,6 +74,7 @@ import {
   isCommandAvailable,
   isProxyRunning,
   kpisToHistoryRecord,
+  LandConflictError,
   laneBaseUrl,
   laneHostLabel,
   listQueuedSteering,
@@ -81,6 +86,8 @@ import {
   mergedPrRefs,
   ModelRegistry,
   ModelRouter,
+  parkEvents,
+  parkReasonFor,
   parseKpiHistory,
   parseQueue,
   planPhase,
@@ -828,37 +835,22 @@ async function cmdTui() {
   });
 }
 
-export type ParkReason = Extract<EventKind, 'escalate' | 'timeout' | 'fail' | 'conflict' | 'ci-failed'>;
+// Park classification moved into core (#672): re-export the moved symbols so
+// consumers of this module (cli.test.ts) keep resolving the same core-owned
+// identities, and keep the LaneParkError re-raise wrapper the supervisor's
+// catch-based flow keys on (it carries a core ParkOutcome and derives reason).
+export { CiFailedError, CiUnverifiedError, LandConflictError, parkEvents, parkReasonFor } from '@on-par/factory-core';
+export type { ParkOutcome, ParkReason } from '@on-par/factory-core';
 
 export class LaneParkError extends Error {
+  readonly reason: ParkReason;
   constructor(
     message: string,
-    readonly reason: ParkReason,
+    readonly outcome: ParkOutcome,
   ) {
     super(message);
+    this.reason = outcome.reason;
   }
-}
-
-export function parkReasonFor(err: unknown): ParkReason {
-  if (err instanceof LaneParkError) return err.reason;
-  if (err instanceof LandConflictError) return 'conflict';
-  if (err instanceof CiFailedError) return 'ci-failed';
-  if ((err as any)?.reason === 'timeout') return 'timeout';
-  return 'fail';
-}
-
-/** Terminal events to emit when a run parks. A timeout park additionally emits
- *  an explicit 'stuck' event so stuckRate observes runs that exceeded their
- *  phase timeout (#428). The other stuck condition — identical checker failures
- *  across consecutive rework rounds — is emitted by the check phase itself. */
-export function parkEvents(err: unknown): { type: EventKind; msg: string }[] {
-  const reason = parkReasonFor(err);
-  const msg = err instanceof Error ? err.message : String(err);
-  const events: { type: EventKind; msg: string }[] = [{ type: reason, msg }];
-  if (reason === 'timeout') {
-    events.push({ type: 'stuck', msg: `run exceeded its phase timeout without progressing — ${msg}` });
-  }
-  return events;
 }
 
 /** Resolves the stable lane URL a build/check agent should use, by probing whether
@@ -965,7 +957,7 @@ export async function shipIssue(
     if (efficiency.perIssueCapUsd === undefined || issueSpend <= efficiency.perIssueCapUsd) return;
     const reason = `per-issue budget exceeded after ${phase}: $${issueSpend.toFixed(2)} > $${efficiency.perIssueCapUsd.toFixed(2)}`;
     log('budget_exceeded', reason);
-    throw new LaneParkError(reason, 'fail');
+    throw new LaneParkError(reason, { state: 'parked', route, branch, reason: 'fail' });
   };
   log('issue-title', issueTitle);
   if (modelPins.plan) {
@@ -1137,7 +1129,12 @@ export async function shipIssue(
     });
     route = plan.route;
     if (!plan.ok) {
-      throw new LaneParkError(`plan escalated: ${plan.escalate ?? 'unknown'}`, 'escalate');
+      throw new LaneParkError(`plan escalated: ${plan.escalate ?? 'unknown'}`, {
+        state: 'escalated',
+        route,
+        branch,
+        reason: 'escalate',
+      });
     }
     assertWithinIssueBudget('PLAN');
 
@@ -1204,7 +1201,12 @@ export async function shipIssue(
       onPgid,
     });
     if (!build.ok) {
-      throw new LaneParkError(`build escalated: ${build.escalate ?? 'unknown'}`, 'escalate');
+      throw new LaneParkError(`build escalated: ${build.escalate ?? 'unknown'}`, {
+        state: 'escalated',
+        route,
+        branch,
+        reason: 'escalate',
+      });
     }
     assertWithinIssueBudget('BUILD');
 
@@ -1242,7 +1244,13 @@ export async function shipIssue(
         check.stuck
           ? `lane stuck after ${check.reworkRounds} rework rounds (identical failures) — escalated`
           : `${check.summary.failures} check failures after ${check.reworkRounds} rework rounds`,
-        check.stuck ? 'escalate' : 'fail',
+        {
+          state: check.stuck ? 'escalated' : 'parked',
+          route,
+          branch,
+          reworkRounds,
+          reason: check.stuck ? 'escalate' : 'fail',
+        },
       );
     }
 
@@ -1299,10 +1307,12 @@ export async function shipIssue(
       work: ctx?.workRequest,
     });
     if (!ship.ok) {
-      throw new LaneParkError(
-        ship.denied ? `ship denied: ${ship.deniedReason}` : 'ship phase failed',
-        ship.denied ? 'escalate' : 'fail',
-      );
+      throw new LaneParkError(ship.denied ? `ship denied: ${ship.deniedReason}` : 'ship phase failed', {
+        state: ship.denied ? 'escalated' : 'parked',
+        route,
+        branch,
+        reason: ship.denied ? 'escalate' : 'fail',
+      });
     }
 
     if (skipCI) {
@@ -2429,8 +2439,6 @@ export async function squashMergeAndDelete(
   await octokit.rest.git.deleteRef({ owner, repo: repoName, ref: `heads/${branch}` }).catch(() => {});
 }
 
-export class LandConflictError extends Error {}
-
 export class AwaitingReviewError extends Error {
   constructor(
     message: string,
@@ -2448,24 +2456,6 @@ export class LandFailureError extends Error {
     super(message);
   }
 }
-
-/** Thrown when watchChecks reports a confirmed CI failure — a completed check run with a
- *  non-passing conclusion. A confirmed failing check must never be merged, admin override
- *  or not. See CiUnverifiedError for the no-verdict case. */
-export class CiFailedError extends Error {
-  constructor(
-    message: string,
-    readonly prNumber: number,
-  ) {
-    super(message);
-  }
-}
-
-/** Thrown when the CI watch never reached a green verdict — a deadline timeout, no check runs ever
- *  registering, or repeated API failures. A subclass of CiFailedError so every existing guard
- *  (parkReasonFor → 'ci-failed', worktree cleanup, cmdLand's exit-0 path) treats "we don't know"
- *  exactly like "we know it's red": never merge. */
-export class CiUnverifiedError extends CiFailedError {}
 
 const MAX_MERGE_ATTEMPTS = 5;
 const MERGE_RETRY_BASE_MS = 5_000;
@@ -2888,7 +2878,7 @@ export async function waitForMerge(
           : `${consecutiveFailures} consecutive failures over ${Math.round(elapsedMs / 1000)}s`;
         const msg = `merged-state check for ${branch} is not recovering — parking lane after ${trigger}: ${detail}`;
         emitEvent(paths.events, 'escalate', issue, msg);
-        throw new LaneParkError(msg, 'escalate');
+        throw new LaneParkError(msg, { state: 'escalated', branch, reason: 'escalate' });
       }
     }
     if (merged) {

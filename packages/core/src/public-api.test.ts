@@ -223,6 +223,12 @@ const PUBLIC_API_KEYS = [
   'readUsage',
   'watchUsage',
   'fetchSubscriptionUsage',
+  // Run outcomes
+  'CiFailedError',
+  'CiUnverifiedError',
+  'LandConflictError',
+  'parkEvents',
+  'parkReasonFor',
 ];
 
 const INTERNAL_API_KEYS = [
