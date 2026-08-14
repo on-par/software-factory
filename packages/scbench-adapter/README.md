@@ -70,6 +70,11 @@ publishing in the CLI.
      run --config packages/scbench-adapter/scbench.run.yaml --problem <problem-id>
    ```
 
+   The launcher itself validates `SCBENCH_PROBLEMS_PATH` before any `run`
+   invocation — a missing, wrong-commit, dirty, or non-git catalog checkout
+   is refused at invocation time, without relying on the operator having run
+   the `compat_check.py` preflight below.
+
    The run config is [`scbench.run.yaml`](./scbench.run.yaml), committed at
    the adapter root. Its `agent.adapter_cli` is intentionally omitted — the
    shim derives `packages/scbench-adapter/dist/cli.js` from its own file
@@ -116,16 +121,18 @@ SCBench checkout — registration, config loading from the committed
 a real `Session`, two `run()` invocations through the real `dist/cli.js`
 (with a stub `factory` binary), artifact handoff via `save_artifacts`,
 workspace persistence across checkpoints, and that `cleanup()` never deletes
-the SCBench workspace. It refuses to run unless the checkout's git HEAD
-matches `scbench.pin.json`'s pinned commit (set `SCBENCH_PIN_ALLOW_DRIFT=1`
-to downgrade that to a warning during forward-porting work). It also
-validates the problem catalog: `SCBENCH_PROBLEMS_PATH` must be set and point
-at an existing checkout whose git HEAD matches `scbench.pin.json`'s
-`problems.commit` (missing or drifted checkouts are refused the same way,
-also downgradable with `SCBENCH_PIN_ALLOW_DRIFT=1`), and every resolved
-problem id in `evals/scbench-baseline/baseline.config.json` must have a
-`config.yaml` directory in that checkout. Run it inside the pinned
-checkout's `uv` environment:
+the SCBench workspace. It refuses to run unless the checkout is a real git checkout, its HEAD
+matches `scbench.pin.json`'s pinned commit, and its working tree is clean
+(set `SCBENCH_PIN_ALLOW_DRIFT=1` to downgrade the SHA-mismatch and
+dirty-checkout refusals to warnings during forward-porting work). It also
+validates the problem catalog the same way: `SCBENCH_PROBLEMS_PATH` must be
+set and point at an existing, clean git checkout whose HEAD matches
+`scbench.pin.json`'s `problems.commit` (missing, wrong-commit, dirty, or
+non-git checkouts are all refused, also downgradable with
+`SCBENCH_PIN_ALLOW_DRIFT=1`), and every resolved problem id in
+`evals/scbench-baseline/baseline.config.json` must have a `config.yaml`
+directory in that checkout. Run it inside the pinned checkout's `uv`
+environment:
 
 ```bash
 uv run --project "$SCBENCH_CHECKOUT" python packages/scbench-adapter/python/compat_check.py

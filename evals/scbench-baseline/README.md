@@ -42,7 +42,9 @@ record the exact resolved problem ids (`cfgpipe`; `cfgpipe`, `circuit_eval`,
 `code_search`), never a selection rule to be re-evaluated at run time. Every
 baseline invocation must export `SCBENCH_PROBLEMS_PATH` to a checkout of the
 catalog at the pinned commit; no step reads the auto-synced
-`~/.cache/scbench` cache.
+`~/.cache/scbench` cache. The launcher (`python/run_scbench.py`) refuses a
+`run` invocation whose catalog checkout is missing, at the wrong commit,
+dirty (uncommitted changes), or not a git checkout at all.
 
 ## Pass policy
 
@@ -110,7 +112,9 @@ uv run --project "$SCBENCH_CHECKOUT" python packages/scbench-adapter/python/comp
 #    registers the software_factory agent by import before handing off to
 #    SCBench's own `slop-code` CLI — use a fresh workspace/artifacts root
 #    per trial. SCBENCH_PROBLEMS_PATH (exported in step 1b) must remain set;
-#    compat_check.py refuses to proceed otherwise.
+#    the launcher itself refuses `run` invocations whose SCBENCH_PROBLEMS_PATH
+#    is missing, at the wrong commit, dirty, or not a git checkout — the
+#    compat_check.py preflight in step 3 is defense in depth, not the only gate.
 uv run --project "$SCBENCH_CHECKOUT" python packages/scbench-adapter/python/run_scbench.py \
   run --config packages/scbench-adapter/scbench.run.yaml --problem cfgpipe
 
