@@ -6,12 +6,19 @@ import { existsSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:f
 import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
+import type { Octokit } from '@octokit/rest';
+
 import type { EventKind } from '../events/kinds.js';
 import { shellEscape } from './index.js';
 
 const exec = promisify(execCb);
 
 export type GcReason = 'merged' | 'remote-gone' | 'ttl-expired';
+
+/** GitHub's verdict on a candidate branch's PR(s), read via pulls.list (state=all,
+ *  head=owner:branch). `null` means "no verdict" (no client/repo, or the query failed) —
+ *  which must always fall back to the #639 local-evidence rules. */
+export type GcHeadPrState = 'open' | 'merged' | 'closed' | 'none';
 
 export interface WorktreeListEntry {
   path: string;
@@ -37,6 +44,8 @@ export interface SweepDeps {
   runCommand?: (cmd: string, opts?: { cwd?: string }) => Promise<{ stdout: string }>;
   now?: () => number;
   log?: (type: EventKind, msg: string) => void;
+  /** When present (with opts.repo), merged/close status is sourced from GitHub; absent or failing ⇒ local evidence only. */
+  octokit?: Pick<Octokit, 'rest'>;
 }
 
 const CREDENTIAL_BASENAMES = new Set(['.git-credentials', '.npmrc']);
@@ -180,12 +189,54 @@ async function hasPriorPushEvidence(
   return upstream !== null && upstream.stdout.trim() === `refs/heads/${branch}`;
 }
 
+/** GitHub's verdict on the branch's PRs. `null` when no client/repo is available or the query
+ *  fails — the caller must then fall back to local evidence (fail-safe: keep on doubt). */
+async function resolvePrState(
+  octokit: SweepDeps['octokit'],
+  repo: string | undefined,
+  branch: string,
+  log: (type: EventKind, msg: string) => void,
+): Promise<GcHeadPrState | null> {
+  if (!octokit || !repo) return null;
+  const [owner, repoName] = repo.split('/');
+  try {
+    const { data } = await octokit.rest.pulls.list({
+      owner,
+      repo: repoName,
+      state: 'all',
+      head: `${owner}:${branch}`,
+    });
+    if (data.some((pr) => pr.state === 'open')) return 'open';
+    const merged = data.find((pr) => pr.merged_at != null);
+    if (merged) return 'merged';
+    if (data.some((pr) => pr.state === 'closed')) return 'closed';
+    return 'none';
+  } catch (err: any) {
+    log(
+      'warn',
+      `worktree-gc: GitHub PR query failed for ${branch} (${err?.message ?? String(err)}) — using local evidence only`,
+    );
+    return null;
+  }
+}
+
+/** A worktree is clean when it has no modified tracked files. `--untracked-files=no` deliberately
+ *  ignores untracked build residue (node_modules, artifacts) — the "live work" signal is tracked-file
+ *  modifications. A probe failure (`safeExec` null) ⇒ false ⇒ keep. */
+async function isWorktreeClean(
+  runCommand: NonNullable<SweepDeps['runCommand']>,
+  worktreePath: string,
+): Promise<boolean> {
+  const result = await safeExec(runCommand, 'git status --porcelain --untracked-files=no', { cwd: worktreePath });
+  return result !== null && result.stdout.trim() === '';
+}
+
 export async function sweepWorktrees(
-  opts: { repoRoot: string; ttlDays: number; dryRun?: boolean },
+  opts: { repoRoot: string; ttlDays: number; dryRun?: boolean; repo?: string },
   deps: SweepDeps = {},
 ): Promise<GcReport> {
-  const { runCommand = defaultRunCommand, now = () => Date.now(), log = () => {} } = deps;
-  const { repoRoot, ttlDays, dryRun = false } = opts;
+  const { runCommand = defaultRunCommand, now = () => Date.now(), log = () => {}, octokit } = deps;
+  const { repoRoot, ttlDays, dryRun = false, repo } = opts;
 
   const { stdout } = await runCommand('git worktree list --porcelain', { cwd: repoRoot });
   const entries = parseWorktreeList(stdout);
@@ -205,6 +256,17 @@ export async function sweepWorktrees(
 
   const mainTip = candidates.length > 0 ? await resolveMainTip(runCommand, repoRoot) : null;
 
+  // Per-branch GitHub verdicts, memoized across the sweep (one pulls.list per candidate branch).
+  const prStateCache = new Map<string, Promise<GcHeadPrState | null>>();
+  const prStateFor = (branch: string): Promise<GcHeadPrState | null> => {
+    let state = prStateCache.get(branch);
+    if (!state) {
+      state = resolvePrState(octokit, repo, branch, log);
+      prStateCache.set(branch, state);
+    }
+    return state;
+  };
+
   for (const entry of candidates) {
     const ageDays = computeAgeDays(entry.path, now, log);
 
@@ -220,29 +282,60 @@ export async function sweepWorktrees(
     let reason: GcReason | null = null;
     if (ageDays > ttlDays) {
       reason = 'ttl-expired';
-    } else if (entry.head && mainTip !== null && entry.head !== mainTip) {
-      const ancestorResult = await safeExec(
-        runCommand,
-        `git merge-base --is-ancestor ${shellEscape(entry.head)} origin/main`,
-        { cwd: repoRoot },
-      );
-      // An ancestor HEAD alone is not proof of a merge: every lane worktree starts life at
-      // origin/main (setupWorktree: `git worktree add -b <branch> <path> origin/main`), so a lane
-      // that has not committed yet is trivially an ancestor. Require evidence the branch was
-      // actually pushed before calling it merged.
-      if (ancestorResult !== null && (await priorPush())) {
-        reason = 'merged';
-      }
-    }
-
-    if (!reason && entry.branch) {
-      const lsRemote = await safeExec(runCommand, `git ls-remote --heads origin ${shellEscape(entry.branch)}`, {
-        cwd: repoRoot,
-      });
-      // An empty ls-remote is ambiguous — "merged and deleted upstream" or "never pushed". Only the
-      // former is garbage, and only a prior push distinguishes them.
-      if (lsRemote !== null && lsRemote.stdout.trim() === '' && (await priorPush())) {
-        reason = 'remote-gone';
+    } else if (entry.branch) {
+      const prState = await prStateFor(entry.branch);
+      if (prState === 'open') {
+        // A live PR is authoritative: the branch is still being worked on — never remove.
+        reason = null;
+      } else if (prState === 'merged') {
+        // GitHub decided the branch is merged — authoritative on its own, no ancestry/push requirement.
+        if (await isWorktreeClean(runCommand, entry.path)) reason = 'merged';
+      } else if (prState === 'closed') {
+        if (await isWorktreeClean(runCommand, entry.path)) {
+          const delivered =
+            entry.head !== null &&
+            mainTip !== null &&
+            (await safeExec(runCommand, `git merge-base --is-ancestor ${shellEscape(entry.head)} origin/main`, {
+              cwd: repoRoot,
+            })) !== null;
+          if (delivered) {
+            // Closed-not-merged PR whose content reached main — delivered, removable.
+            reason = 'merged';
+          } else {
+            const lsRemote = await safeExec(runCommand, `git ls-remote --heads origin ${shellEscape(entry.branch)}`, {
+              cwd: repoRoot,
+            });
+            if (lsRemote !== null && lsRemote.stdout.trim() === '') reason = 'remote-gone';
+          }
+        }
+      } else {
+        // prState is 'none' or null (no PR / GitHub unreachable / no client) — no GitHub verdict.
+        // Fall back to the exact #639 local-evidence rules; every inconclusive probe keeps.
+        const clean = await isWorktreeClean(runCommand, entry.path);
+        if (clean && entry.head && mainTip !== null && entry.head !== mainTip) {
+          const ancestorResult = await safeExec(
+            runCommand,
+            `git merge-base --is-ancestor ${shellEscape(entry.head)} origin/main`,
+            { cwd: repoRoot },
+          );
+          // An ancestor HEAD alone is not proof of a merge: every lane worktree starts life at
+          // origin/main (setupWorktree: `git worktree add -b <branch> <path> origin/main`), so a lane
+          // that has not committed yet is trivially an ancestor. Require evidence the branch was
+          // actually pushed before calling it merged.
+          if (ancestorResult !== null && (await priorPush())) {
+            reason = 'merged';
+          }
+        }
+        if (!reason && clean) {
+          const lsRemote = await safeExec(runCommand, `git ls-remote --heads origin ${shellEscape(entry.branch)}`, {
+            cwd: repoRoot,
+          });
+          // An empty ls-remote is ambiguous — "merged and deleted upstream" or "never pushed". Only the
+          // former is garbage, and only a prior push distinguishes them.
+          if (lsRemote !== null && lsRemote.stdout.trim() === '' && (await priorPush())) {
+            reason = 'remote-gone';
+          }
+        }
       }
     }
 
