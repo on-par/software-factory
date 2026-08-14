@@ -2287,57 +2287,25 @@ describe('cli', () => {
     });
   });
 
-  describe('parkReasonFor', () => {
-    it('maps a LaneParkError to its own reason', () => {
-      expect(parkReasonFor(new LaneParkError('x', { state: 'escalated', reason: 'escalate' }))).toBe('escalate');
+  // The full park-classification matrix (LandConflictError/CiFailedError/CiUnverifiedError
+  // mapping, timeout+stuck event pairing, plain-Error defaults, ...) is owned and tested
+  // once in core's outcome.test.ts. These tests cover only the CLI seam: LaneParkError
+  // wrapping a core ParkOutcome into `reason`, and that the re-exported error classes are
+  // the same identities core's classification recognises by instanceof.
+  describe('parkReasonFor / parkEvents (CLI seam)', () => {
+    it('maps a LaneParkError to the reason carried on its ParkOutcome', () => {
+      expect(parkReasonFor(new LaneParkError('x', { state: 'parked', reason: 'escalate' }))).toBe('escalate');
       expect(parkReasonFor(new LaneParkError('x', { state: 'parked', reason: 'fail' }))).toBe('fail');
-    });
-
-    it('maps a LandConflictError to conflict', () => {
-      expect(parkReasonFor(new LandConflictError('x'))).toBe('conflict');
-    });
-
-    it('maps a CiFailedError to ci-failed', () => {
-      expect(parkReasonFor(new CiFailedError('x', 707))).toBe('ci-failed');
-    });
-
-    it('maps a CiUnverifiedError to ci-failed', () => {
-      expect(parkReasonFor(new CiUnverifiedError('x', 707))).toBe('ci-failed');
-    });
-
-    it('maps an error carrying reason: timeout to timeout', () => {
-      expect(parkReasonFor(Object.assign(new Error('x'), { reason: 'timeout' }))).toBe('timeout');
-    });
-
-    it('defaults a plain Error or LandFailureError to fail', () => {
-      expect(parkReasonFor(new Error('x'))).toBe('fail');
-      expect(parkReasonFor(new LandFailureError('x', 5))).toBe('fail');
-    });
-  });
-
-  describe('parkEvents', () => {
-    it('emits a stuck event alongside the timeout event when a run times out', () => {
-      const err = Object.assign(new Error('build timed out after 3600s'), { reason: 'timeout' });
-      const events = parkEvents(err);
-      expect(events).toHaveLength(2);
-      expect(events[0]).toEqual({ type: 'timeout', msg: 'build timed out after 3600s' });
-      expect(events[1].type).toBe('stuck');
-      expect(events[1].msg).toContain('phase timeout');
-      expect(events[1].msg).toContain('build timed out after 3600s');
-    });
-
-    it('emits only the terminal event for non-timeout park reasons', () => {
-      expect(parkEvents(new LaneParkError('x', { state: 'escalated', reason: 'escalate' }))).toEqual([
+      expect(parkEvents(new LaneParkError('x', { state: 'parked', reason: 'escalate' }))).toEqual([
         { type: 'escalate', msg: 'x' },
       ]);
-      expect(parkEvents(new Error('boom'))).toEqual([{ type: 'fail', msg: 'boom' }]);
-      expect(parkEvents(new LandConflictError('rebase conflict'))).toEqual([
-        { type: 'conflict', msg: 'rebase conflict' },
-      ]);
     });
 
-    it('stringifies a non-Error input', () => {
-      expect(parkEvents('oops')).toEqual([{ type: 'fail', msg: 'oops' }]);
+    it('re-exports the same LandConflictError/CiFailedError identities core classifies by instanceof', () => {
+      expect(new LandConflictError('x')).toBeInstanceOf(LandConflictError);
+      expect(parkReasonFor(new LandConflictError('x'))).toBe('conflict');
+      expect(new CiUnverifiedError('x', 707)).toBeInstanceOf(CiFailedError);
+      expect(parkReasonFor(new CiFailedError('x', 707))).toBe('ci-failed');
     });
   });
 
@@ -2350,7 +2318,7 @@ describe('cli', () => {
       await runLane('app', [7, 8], '/repo', 'on-par/software-factory', paths, {
         ship: async (issue) => {
           calls.push(['ship', issue]);
-          throw new LaneParkError('plan escalated: needs a human decision', { state: 'escalated', reason: 'escalate' });
+          throw new LaneParkError('plan escalated: needs a human decision', { state: 'parked', reason: 'escalate' });
         },
         waitMerge: async () => {
           throw new Error('waitMerge should not be called');

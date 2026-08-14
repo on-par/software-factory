@@ -35,14 +35,14 @@ describe('parkReasonFor', () => {
     expect(parkReasonFor(new FakeLaneParkError('x', { state: 'parked', reason: 'conflict' }))).toBe('conflict');
   });
 
-  it('maps a carried escalated outcome to its reason', () => {
-    expect(parkReasonFor(new FakeLaneParkError('x', { state: 'escalated', reason: 'escalate' }))).toBe('escalate');
-    expect(parkReasonFor(new FakeLaneParkError('x', { state: 'escalated', reason: 'ci-failed' }))).toBe('ci-failed');
+  it('maps a carried escalate outcome to its reason', () => {
+    expect(parkReasonFor(new FakeLaneParkError('x', { state: 'parked', reason: 'escalate' }))).toBe('escalate');
+    expect(parkReasonFor(new FakeLaneParkError('x', { state: 'parked', reason: 'ci-failed' }))).toBe('ci-failed');
   });
 
   it('prefers a carried outcome over a marker error and a reason field', () => {
     const err = new LandConflictError('conflict, but outcome wins');
-    (err as { outcome?: ParkOutcome }).outcome = { state: 'escalated', reason: 'escalate' };
+    (err as { outcome?: ParkOutcome }).outcome = { state: 'parked', reason: 'escalate' };
     expect(parkReasonFor(err)).toBe('escalate');
   });
 
@@ -85,7 +85,7 @@ describe('parkEvents', () => {
   });
 
   it('emits only the terminal event for non-timeout park reasons', () => {
-    expect(parkEvents(new FakeLaneParkError('x', { state: 'escalated', reason: 'escalate' }))).toEqual([
+    expect(parkEvents(new FakeLaneParkError('x', { state: 'parked', reason: 'escalate' }))).toEqual([
       { type: 'escalate', msg: 'x' },
     ]);
     expect(parkEvents(new Error('boom'))).toEqual([{ type: 'fail', msg: 'boom' }]);
