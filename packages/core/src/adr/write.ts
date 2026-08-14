@@ -20,6 +20,7 @@ import type { AdrDraft } from '@on-par/contracts';
 import { AdrDraftSchema } from '@on-par/contracts';
 import type { RepoContextReader } from '@on-par/repo-context';
 
+import { specPaths } from '../spec/index.js';
 import { DEFAULT_ADR_DIR, isNonAdrFile } from './index.js';
 
 /** The index table lives in the ADR home's README.md — see docs/adr/README.md. */
@@ -117,16 +118,11 @@ export function parseAdrDrafts(frontmatter: unknown): { drafts: AdrDraft[]; reje
   return { drafts, rejected };
 }
 
-/** Mirrors `designArtifactPaths` in `packages/core/src/design/index.ts`. */
-export function adrDraftsPath(specPath: string): string {
-  return `${specPath.replace(/\.md$/, '')}.adr.json`;
-}
-
 /** Reads the frozen drafts off disk. Never throws — `[]` for any failure. */
 export async function readAdrDrafts(specPath: string): Promise<AdrDraft[]> {
   let raw: string;
   try {
-    raw = await readFile(adrDraftsPath(specPath), 'utf-8');
+    raw = await readFile(specPaths(specPath).adr, 'utf-8');
   } catch {
     return [];
   }

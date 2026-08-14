@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
+import { specPaths } from '../spec/index.js';
 import { UnsupportedWorkSourceError, WorkSourceRegistry } from '../work/index.js';
 import { buildPlanPrompt, planPhase } from './plan.js';
 
@@ -1906,7 +1907,7 @@ npm run test`;
         log: (type, msg) => logs.push({ type, msg }),
       });
 
-      const adrDraftsPath = `${specPath.replace(/\.md$/, '')}.adr.json`;
+      const adrDraftsPath = specPaths(specPath).adr;
       const written = JSON.parse(await readFile(adrDraftsPath, 'utf-8'));
       expect(written).toEqual([
         {
@@ -1955,7 +1956,7 @@ npm run test`;
       });
 
       expect(result.ok).toBe(true);
-      const adrDraftsPath = `${specPath.replace(/\.md$/, '')}.adr.json`;
+      const adrDraftsPath = specPaths(specPath).adr;
       expect(existsSync(adrDraftsPath)).toBe(false);
       const rejectedLog = logs.find((l) => l.type === 'adr_draft_rejected');
       expect(rejectedLog?.msg).toMatch(/'why'\) is required/);

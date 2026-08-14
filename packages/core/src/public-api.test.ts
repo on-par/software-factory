@@ -254,7 +254,6 @@ const INTERNAL_API_KEYS = [
   'resolveFilingPolicy',
   // Design artifact (#422)
   'DesignArtifactSchema',
-  'designArtifactPaths',
   'parseDesignArtifact',
   'readDesignArtifact',
   'renderDesignArtifact',

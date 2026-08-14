@@ -3,8 +3,7 @@
 // still open; when the fault lands, flip the assertion in regressions.test.ts (and update
 // the `historicalSignature` line here) rather than deleting the fixture.
 
-import matter from 'gray-matter';
-
+import { parseSpec, stringifySpec } from '../spec/index.js';
 import { simDefaultScripts, simSpecContent, type SimIssueSpec } from './pipeline.js';
 
 export interface SimRegressionFixture {
@@ -45,10 +44,10 @@ export const SIM_FENCED_ENRICHMENT_OUTPUT = '```markdown\n' + COMPLETE_FACTORY_T
 /** #551: the frozen PLAN spec, but with one object-shaped element in `interfacesTouched` —
  *  the shape a model emits when it mirrors the sibling object lists in the PLAN prompt. */
 export function simSpecWithObjectInterface(issue: number, title: string): string {
-  const parsed = matter(simSpecContent(issue, title));
+  const parsed = parseSpec(simSpecContent(issue, title));
   const design = parsed.data.design as { interfacesTouched: unknown[] };
   design.interfacesTouched = [`feature-${issue}.txt`, { file: `feature-${issue}.txt`, symbol: `simFeature${issue}` }];
-  return matter.stringify(parsed.content, parsed.data);
+  return stringifySpec(parsed.body, parsed.data);
 }
 
 const FIXTURE_550_TITLE = 'Sim regression #550: fenced enrichment output';

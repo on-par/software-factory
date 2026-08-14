@@ -52,13 +52,7 @@ export {
 export { resolveFilingPolicy } from './config/index.js';
 
 // Design artifact (#422)
-export {
-  designArtifactPaths,
-  DesignArtifactSchema,
-  parseDesignArtifact,
-  readDesignArtifact,
-  renderDesignArtifact,
-} from './design/index.js';
+export { DesignArtifactSchema, parseDesignArtifact, readDesignArtifact, renderDesignArtifact } from './design/index.js';
 
 // Concrete coding harnesses
 export { classifyFailure } from './harness/classify.js';

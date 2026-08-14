@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { AdrDraft } from '@on-par/contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { adrDraftsPath } from '../adr/write.js';
+import { specPaths } from '../spec/index.js';
 import { shipPhase } from './ship.js';
 
 function createOctokit(prDraft = true) {
@@ -892,7 +892,7 @@ describe('ADR writer (#482)', () => {
   it('writes docs/adr/0002-*.md, updates the index, and commits it before opening the PR', async () => {
     const worktree = await makeWorktree();
     const specPath = join(worktree, 'issue-482.md');
-    await writeFile(adrDraftsPath(specPath), JSON.stringify([goodDraft], null, 2));
+    await writeFile(specPaths(specPath).adr, JSON.stringify([goodDraft], null, 2));
 
     const { octokit, calls } = createOctokit();
     const commands: string[] = [];
@@ -944,7 +944,7 @@ describe('ADR writer (#482)', () => {
   it('pushes the ADR commit to an already-open PR', async () => {
     const worktree = await makeWorktree();
     const specPath = join(worktree, 'issue-482.md');
-    await writeFile(adrDraftsPath(specPath), JSON.stringify([goodDraft], null, 2));
+    await writeFile(specPaths(specPath).adr, JSON.stringify([goodDraft], null, 2));
 
     const { octokit } = createOctokit();
     (octokit.rest.pulls.list as any) = async () => {
@@ -1010,7 +1010,7 @@ describe('ADR writer (#482)', () => {
   it('logs adr_commit_skipped and still ships when git commit rejects, without the leftover ADR files aborting recovery', async () => {
     const worktree = await makeWorktree();
     const specPath = join(worktree, 'issue-482.md');
-    await writeFile(adrDraftsPath(specPath), JSON.stringify([goodDraft], null, 2));
+    await writeFile(specPaths(specPath).adr, JSON.stringify([goodDraft], null, 2));
 
     const { octokit } = createOctokit();
     const logs: Array<[string, string]> = [];
@@ -1051,7 +1051,7 @@ describe('ADR writer (#482)', () => {
   it('reads and logs adr_read_degraded for a real read failure instead of swallowing it', async () => {
     const worktree = await makeWorktree();
     const specPath = join(worktree, 'issue-482.md');
-    await writeFile(adrDraftsPath(specPath), JSON.stringify([goodDraft], null, 2));
+    await writeFile(specPaths(specPath).adr, JSON.stringify([goodDraft], null, 2));
     // A file too large to read degrades with reason 'too-large', which must surface as a log
     // — unlike a missing docs/adr dir (reason 'not-found'), which stays silent.
     await writeFile(join(worktree, 'docs', 'adr', '0002-oversized.md'), 'x'.repeat(2_000_000));
@@ -1091,7 +1091,7 @@ describe('ADR writer (#482)', () => {
       '# ADR-001: First decision\n\n- Status: Accepted\n- Date: 2026-01-01\n\n## Context\n\nC.\n\n## Decision\n\nD.\n\n## Consequences\n\nCq.\n',
     );
     const specPath = join(worktree, 'issue-482.md');
-    await writeFile(adrDraftsPath(specPath), JSON.stringify([goodDraft], null, 2));
+    await writeFile(specPaths(specPath).adr, JSON.stringify([goodDraft], null, 2));
 
     const { octokit } = createOctokit();
     const commands: string[] = [];

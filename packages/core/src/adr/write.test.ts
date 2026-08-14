@@ -7,9 +7,9 @@ import type { AdrDraft } from '@on-par/contracts';
 import { createInMemoryReader } from '@on-par/repo-context';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { specPaths } from '../spec/index.js';
 import {
   adrDraftErrors,
-  adrDraftsPath,
   applyAdrWritePlan,
   MAX_ADR_DRAFTS,
   parseAdrDrafts,
@@ -126,7 +126,7 @@ describe('parseAdrDrafts', () => {
   });
 });
 
-describe('adrDraftsPath / readAdrDrafts', () => {
+describe('specPaths().adr / readAdrDrafts', () => {
   const tempDirs = new Set<string>();
   afterEach(async () => {
     await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
@@ -134,14 +134,14 @@ describe('adrDraftsPath / readAdrDrafts', () => {
   });
 
   it('derives <spec>.adr.json next to the spec', () => {
-    expect(adrDraftsPath('/x/plans/issue-482.md')).toBe('/x/plans/issue-482.adr.json');
+    expect(specPaths('/x/plans/issue-482.md').adr).toBe('/x/plans/issue-482.adr.json');
   });
 
   it('round-trips written JSON', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'adr-write-test-'));
     tempDirs.add(dir);
     const specPath = join(dir, 'issue-482.md');
-    await writeFile(adrDraftsPath(specPath), JSON.stringify([goodDraft], null, 2));
+    await writeFile(specPaths(specPath).adr, JSON.stringify([goodDraft], null, 2));
 
     await expect(readAdrDrafts(specPath)).resolves.toEqual([goodDraft]);
   });
@@ -156,7 +156,7 @@ describe('adrDraftsPath / readAdrDrafts', () => {
     const dir = await mkdtemp(join(tmpdir(), 'adr-write-test-'));
     tempDirs.add(dir);
     const specPath = join(dir, 'issue-482.md');
-    await writeFile(adrDraftsPath(specPath), '{ not json');
+    await writeFile(specPaths(specPath).adr, '{ not json');
 
     await expect(readAdrDrafts(specPath)).resolves.toEqual([]);
   });
@@ -165,7 +165,7 @@ describe('adrDraftsPath / readAdrDrafts', () => {
     const dir = await mkdtemp(join(tmpdir(), 'adr-write-test-'));
     tempDirs.add(dir);
     const specPath = join(dir, 'issue-482.md');
-    await writeFile(adrDraftsPath(specPath), JSON.stringify([{ foo: 'bar' }]));
+    await writeFile(specPaths(specPath).adr, JSON.stringify([{ foo: 'bar' }]));
 
     await expect(readAdrDrafts(specPath)).resolves.toEqual([]);
   });

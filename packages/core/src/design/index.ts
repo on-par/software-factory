@@ -6,6 +6,7 @@ import { readFile } from 'node:fs/promises';
 
 import { DesignArtifactSchema } from '@on-par/contracts';
 
+import { specPaths } from '../spec/index.js';
 import type { DesignArtifact } from '../types/index.js';
 
 export { DesignArtifactSchema };
@@ -126,16 +127,11 @@ export function renderDesignGrounding(artifact: DesignArtifact): string {
   return lines.join('\n');
 }
 
-export function designArtifactPaths(specPath: string): { json: string; markdown: string } {
-  const base = specPath.replace(/\.md$/, '');
-  return { json: `${base}.design.json`, markdown: `${base}.design.md` };
-}
-
 export async function readDesignArtifact(specPath: string): Promise<DesignArtifact | null> {
-  const { json } = designArtifactPaths(specPath);
+  const { designJson } = specPaths(specPath);
   let raw: string;
   try {
-    raw = await readFile(json, 'utf-8');
+    raw = await readFile(designJson, 'utf-8');
   } catch {
     return null;
   }
