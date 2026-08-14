@@ -26,6 +26,12 @@ import { captureWorktreeState, resetWorktreeState } from './worktree-state.js';
 export type { ExecFn } from '../utils/exec.js';
 export { ModelExecutorError } from './executor-error.js';
 
+const PROVIDER_LEVEL_FAILURES = new Set<FailoverReason>(['usage_cap', 'rate_limit', 'timeout', 'unavailable']);
+
+function isProviderLevelFailure(reason: FailoverReason): boolean {
+  return PROVIDER_LEVEL_FAILURES.has(reason);
+}
+
 export type SleepFn = (ms: number) => Promise<void>;
 
 export type FetchFn = (
@@ -621,6 +627,10 @@ export class ModelRouter {
       worktree?: string;
       timeoutSeconds?: number;
       modelOverride?: string;
+      /** Explicit ordered alternates, normally from a repo's provider policy. */
+      modelFallbacks?: string[];
+      /** Called when a provider-level failure should temporarily remove that provider from rotation. */
+      onProviderFailure?: (info: { provider: string; reason: FailoverReason }) => void | Promise<void>;
       onLog?: (msg: string) => void;
       sandbox?: SandboxPolicy;
       onSandboxEvent?: (type: SandboxEventType, detail: string) => void;
@@ -633,6 +643,8 @@ export class ModelRouter {
       worktree = process.cwd(),
       timeoutSeconds = 1800,
       modelOverride,
+      modelFallbacks = [],
+      onProviderFailure,
       onLog = () => {},
       sandbox,
       env,
@@ -640,7 +652,9 @@ export class ModelRouter {
       retryCause,
     } = options;
 
-    const models = modelOverride ? [modelOverride] : this.resolveAll(task);
+    const models = modelOverride
+      ? [modelOverride, ...modelFallbacks.filter((id) => id !== modelOverride)]
+      : this.resolveAll(task);
     if (models.length === 0) {
       throw new Error(`No available models for task '${task}'`);
     }
@@ -648,12 +662,18 @@ export class ModelRouter {
     const maxRetries = this.registry.failover.maxRetries;
     const cooldownMs = this.registry.failover.cooldownMs;
     const attempts: RouterResult['attempts'] = [];
+    const blockedProviders = new Set<string>();
 
     const snapshot = taskRequiresAgenticHarness(task)
       ? await captureWorktreeState(this.gitExecFn, worktree, onLog)
       : null;
 
     for (const model of models) {
+      const modelProvider = this.registry.get(model)?.provider;
+      if (modelProvider && blockedProviders.has(modelProvider)) {
+        onLog(`Skipping ${model} for ${task}: provider ${modelProvider} is on cooldown`);
+        continue;
+      }
       let retries = 0;
 
       while (retries <= maxRetries) {
@@ -681,6 +701,20 @@ export class ModelRouter {
             if (sandboxEvent) options.onSandboxEvent?.(sandboxEvent.type, sandboxEvent.detail);
           }
           const reason = extractFailoverReason(err) ?? this.classifyFailure(errStderr(err), errExitCode(err));
+          const provider = this.registry.get(model)?.provider;
+          const blockProvider = async (): Promise<void> => {
+            if (!provider || !isProviderLevelFailure(reason)) return;
+            blockedProviders.add(provider);
+            try {
+              await onProviderFailure?.({ provider, reason });
+            } catch (callbackErr) {
+              onLog(
+                `Provider breaker bookkeeping failed for ${provider} (${reason}); continuing failover: ${
+                  callbackErr instanceof Error ? callbackErr.message : String(callbackErr)
+                }`,
+              );
+            }
+          };
           const detail = describeFailureDetail(err);
           attempts.push(detail ? { model, reason, ok: false, detail } : { model, reason, ok: false });
           onLog(`${model} failed (${reason}) on ${task}`);
@@ -689,6 +723,7 @@ export class ModelRouter {
           // Deterministic failure — another model cannot plausibly help; do not
           // burn the next tier. Reason + attempts are preserved for event logs.
           if (!isRetryableFailure(reason)) {
+            await blockProvider();
             onLog(`${model} failed (${reason}) on ${task} — non-retryable, not failing over`);
             const error = new Error(
               `Non-retryable failure (${reason}) from ${model} for task '${task}'${detail ? `: ${detail}` : ''}`,
@@ -726,12 +761,14 @@ export class ModelRouter {
 
           // Usage cap → failover immediately
           if (reason === 'usage_cap') {
+            await blockProvider();
             onLog(`Usage cap hit on ${model} — failing over to next model`);
             break;
           }
 
           // Timeout → failover
           if (reason === 'timeout') {
+            await blockProvider();
             onLog(`${model} timed out on ${task} — failing over`);
             break;
           }
@@ -741,6 +778,8 @@ export class ModelRouter {
             retries++;
             continue;
           }
+
+          await blockProvider();
 
           // This is the documented empty-output path: a harness throws
           // HarnessError('empty_response'), the executor propagates it

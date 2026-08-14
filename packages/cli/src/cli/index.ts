@@ -961,6 +961,35 @@ export async function shipIssue(
     ) =>
       logEvent(paths.events, type, issueNum, msg, { ...extra, lane, phase });
   const log = mkLog();
+  const rememberProviderFailure = async ({
+    provider,
+    reason,
+  }: {
+    provider: string;
+    reason: FailoverReason;
+  }): Promise<void> => {
+    await breaker.open(provider, reason, failoverSettings.cooldownMs);
+    log('provider_breaker_open', `breaker opened for ${provider} (${reason}) — provider skipped until cooldown ends`, {
+      failoverReason: reason,
+    });
+  };
+  const preferFallbackWhenProviderIsOpen = async (
+    primary: string | undefined,
+    fallback: string | undefined,
+    phase: string,
+  ): Promise<string | undefined> => {
+    if (!primary || !fallback) return primary;
+    const provider = router.registryRef.get(primary)?.provider;
+    if (!provider) return primary;
+    const status = await breaker.status(provider);
+    if (!status.open) return primary;
+    const minutes = Math.ceil(status.remainingMs / 60_000);
+    log(
+      'provider_breaker_skip',
+      `breaker open for ${provider} (${status.entry.reason}) — using ${fallback} for ${phase}, ${minutes}m remaining`,
+    );
+    return fallback;
+  };
   const assertWithinIssueBudget = (phase: string): void => {
     if (efficiency.perIssueCapUsd === undefined || issueSpend <= efficiency.perIssueCapUsd) return;
     const reason = `per-issue budget exceeded after ${phase}: $${issueSpend.toFixed(2)} > $${efficiency.perIssueCapUsd.toFixed(2)}`;
@@ -1112,6 +1141,7 @@ export async function shipIssue(
 
   try {
     // PLAN
+    const planModel = await preferFallbackWhenProviderIsOpen(modelPins.plan, modelPins.planFallback, 'PLAN');
     const plan = await planPhase({
       issue: issueNum,
       repo: ghRepo,
@@ -1122,7 +1152,9 @@ export async function shipIssue(
       octokit,
       log: mkLog('plan'),
       timeoutSeconds: timeouts.plan,
-      modelOverride: modelPins.plan,
+      modelOverride: planModel,
+      modelFallbacks: planModel === modelPins.plan && modelPins.planFallback ? [modelPins.planFallback] : undefined,
+      onProviderFailure: rememberProviderFailure,
       branch,
       approvalGate: planApprovalEnabled
         ? createFileApprovalGate({ dir: paths.approvals, timeoutMs: timeouts.approval * 1000 })
@@ -1165,6 +1197,34 @@ export async function shipIssue(
       breakerBlocked = gate.codexBlocked;
     }
 
+    // A Claude-selected frozen plan must get the same cooldown treatment as
+    // the Codex route above. Switch routes before the worker begins so a
+    // provider that failed earlier in this run is not called again.
+    let buildRoute = plan.route;
+    let buildModel = modelPins.build;
+    if (failoverSettings.enabled && plan.route === 'claude') {
+      const primaryClaude = buildModel ?? router.resolveAll('build_claude')[0];
+      const fallbackCodex = modelPins.buildFallback ?? router.resolveAll('build_codex')[0];
+      const selected = await preferFallbackWhenProviderIsOpen(primaryClaude, fallbackCodex, 'BUILD');
+      if (selected && selected !== primaryClaude) {
+        buildRoute = 'codex';
+        buildModel = selected;
+      }
+    }
+    if (buildModel) {
+      const compatible =
+        buildRoute === 'codex'
+          ? router.registryRef.isCodexModel(buildModel)
+          : router.registryRef.getHarnessId(buildModel) === 'claude-cli';
+      if (!compatible) {
+        log(
+          'model_override_ignored',
+          `build model ${buildModel} is incompatible with the ${buildRoute} route — using that route's default worker`,
+        );
+        buildModel = undefined;
+      }
+    }
+
     failurePhase = 'build';
     const build = await buildPhase({
       issue: issueNum,
@@ -1173,13 +1233,15 @@ export async function shipIssue(
       specPath,
       branch,
       constitution,
-      route: plan.route,
+      route: buildRoute,
       router,
       log: mkLog('build'),
       timeoutSeconds: timeouts.build,
       skipCI,
       disablePublish: Boolean(ctx?.localOnly),
-      modelOverride: modelPins.build,
+      modelOverride: buildModel,
+      codexFallbackModel: modelPins.buildFallback ?? router.resolveAll('build_codex')[0],
+      onProviderFailure: rememberProviderFailure,
       sandbox: activeSandboxPolicy,
       steering: buildSteering,
       appPort,
@@ -1189,17 +1251,6 @@ export async function shipIssue(
       autoFailover: {
         enabled: failoverSettings.enabled,
         fallbackModel: failoverSettings.fallbackModel,
-        onQuotaExhausted: async ({ provider, reason }) => {
-          await breaker.open(provider, reason, failoverSettings.cooldownMs);
-          // No failoverReason metadata here: the build's own worker_failover
-          // event already carries it for this same quota trip, and KPI retry
-          // counting (retryCauseOf) treats any failoverReason-bearing event as
-          // a distinct retry — attaching it here would double-count one retry.
-          mkLog('build')(
-            'provider_breaker_open',
-            `breaker opened for ${provider} (${reason}) — cooldown ${Math.round(failoverSettings.cooldownMs / 60_000)}m`,
-          );
-        },
       },
       onPgid,
     });

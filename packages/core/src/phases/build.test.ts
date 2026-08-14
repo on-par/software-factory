@@ -1312,17 +1312,59 @@ describe('buildPhase cross-harness failover', () => {
     expect(result.model).toBe('claude-sonnet-5');
     expect(stub.calls.map((c) => ({ model: c.model, task: c.task }))).toEqual([
       { model: 'codex-a', task: 'build_codex' },
-      { model: 'codex-b', task: 'build_codex' },
       { model: 'claude-sonnet-5', task: 'build_claude' },
     ]);
     expect(logCalls).toContainEqual([
       'worker_failover',
       expect.stringMatching(
-        /^Codex build workers exhausted \(usage_cap\) — continuing on claude: from_model=codex-b to_model=claude-sonnet-5 from_route=build_codex to_route=build_claude reason=usage_cap$/,
+        /^Codex build workers exhausted \(usage_cap\) — continuing on claude: from_model=codex-a to_model=claude-sonnet-5 from_route=build_codex to_route=build_claude reason=usage_cap$/,
       ),
       { failoverReason: 'usage_cap' },
     ]);
   });
+
+  it.each(['usage_cap', 'rate_limit', 'timeout', 'unavailable'] as const)(
+    'continues a Claude build on Codex when the Claude provider fails with %s',
+    async (failure) => {
+      const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-368.md');
+      await writeFile(specPath, '# Frozen spec\nImplement the bounded change.\n');
+      const stub = new StubModelExecutor({
+        scripts: {
+          build_claude:
+            failure === 'rate_limit' ? [{ fail: failure }, { fail: failure }, { fail: failure }] : [{ fail: failure }],
+          build_codex: [{ output: 'codex output' }],
+        },
+      });
+      const router = new ModelRouter(failoverModels, failoverRoutes, false, stub);
+
+      const result = await buildPhase({
+        issue: 368,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        branch: 'ship-it/368-cross-harness-build-failover',
+        route: 'claude',
+        router,
+        constitution: null,
+        log: () => {},
+        codexFallbackModel: 'codex-a',
+      });
+
+      expect(result).toMatchObject({ ok: true, model: 'codex-a' });
+      expect(stub.calls.map((call) => ({ model: call.model, task: call.task }))).toEqual([
+        ...(failure === 'rate_limit'
+          ? [
+              { model: 'claude-sonnet-5', task: 'build_claude' },
+              { model: 'claude-sonnet-5', task: 'build_claude' },
+              { model: 'claude-sonnet-5', task: 'build_claude' },
+            ]
+          : [{ model: 'claude-sonnet-5', task: 'build_claude' }]),
+        { model: 'codex-a', task: 'build_codex' },
+      ]);
+    },
+  );
 
   it('codex→claude quota failover with disablePublish: true sends the commit-only prompt, not /ship-it', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));

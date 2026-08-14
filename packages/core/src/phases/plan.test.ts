@@ -1248,7 +1248,14 @@ npm run test`;
         plan: [{ fail: 'usage_cap' }, { output: '---\nroute: codex\n---\n# Spec\n' }],
       },
     });
-    const router = new ModelRouter(models, routes, false, stub);
+    const failoverModels: ModelsConfig = {
+      ...models,
+      models: {
+        ...models.models,
+        'pinned-model': { ...models.models['pinned-model'], provider: 'openai' },
+      },
+    };
+    const router = new ModelRouter(failoverModels, routes, false, stub);
     const octokit: any = {
       rest: {
         issues: {

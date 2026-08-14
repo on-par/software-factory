@@ -28,7 +28,9 @@ const RepoFactoryConfigSchema = z
     models: z
       .object({
         plan: z.string().optional(),
+        planFallback: z.string().optional(),
         build: z.string().optional(),
+        buildFallback: z.string().optional(),
         checker: z.string().optional(),
         triage: z.string().optional(),
       })
@@ -170,8 +172,10 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
 
 export interface EffectiveModelPins {
   plan?: string;
+  planFallback?: string;
   build?: string;
-  sources: { plan?: 'repo' | 'env'; build?: 'repo' | 'env' };
+  buildFallback?: string;
+  sources: { plan?: 'repo' | 'env'; planFallback?: 'repo'; build?: 'repo' | 'env'; buildFallback?: 'repo' };
 }
 
 /** Resolve plan/build model pins: repo file overrides env vars
@@ -198,6 +202,16 @@ export function resolveEffectiveModelPins(
     plan = repo.models.plan;
     sources.plan = 'repo';
   }
+  let planFallback: string | undefined;
+  if (repo?.models?.planFallback) {
+    if (!registry.get(repo.models.planFallback)) {
+      throw new Error(
+        `.factory/config.json: models.planFallback references unknown model '${repo.models.planFallback}' (known models: ${registry.list().join(', ')})`,
+      );
+    }
+    planFallback = repo.models.planFallback;
+    sources.planFallback = 'repo';
+  }
   if (repo?.models?.build) {
     if (!registry.get(repo.models.build)) {
       throw new Error(
@@ -207,8 +221,29 @@ export function resolveEffectiveModelPins(
     build = repo.models.build;
     sources.build = 'repo';
   }
+  let buildFallback: string | undefined;
+  if (repo?.models?.buildFallback) {
+    if (!registry.get(repo.models.buildFallback)) {
+      throw new Error(
+        `.factory/config.json: models.buildFallback references unknown model '${repo.models.buildFallback}' (known models: ${registry.list().join(', ')})`,
+      );
+    }
+    if (!registry.isCodexModel(repo.models.buildFallback)) {
+      throw new Error(
+        `.factory/config.json: models.buildFallback must be a Codex-capable model because it is used after Claude build failure`,
+      );
+    }
+    buildFallback = repo.models.buildFallback;
+    sources.buildFallback = 'repo';
+  }
 
-  return { plan, build, sources };
+  return {
+    ...(plan ? { plan } : {}),
+    ...(planFallback ? { planFallback } : {}),
+    ...(build ? { build } : {}),
+    ...(buildFallback ? { buildFallback } : {}),
+    sources,
+  };
 }
 
 // ---------- Codex kill-switch ----------
@@ -302,9 +337,11 @@ export function describeEffectiveConfig(opts: DescribeEffectiveConfigOpts): stri
 
   const planModel = pins.plan ?? router.resolve('plan') ?? 'none';
   lines.push(`Plan model: ${planModel} ${sourceLabel(pins.sources.plan, repoConfigPath, 'FACTORY_PLAN_MODEL')}`);
+  if (pins.planFallback) lines.push(`Plan fallback: ${pins.planFallback} (${repoConfigPath})`);
 
   const buildModel = pins.build ?? router.resolve('build_claude') ?? 'none';
   lines.push(`Build model: ${buildModel} ${sourceLabel(pins.sources.build, repoConfigPath, 'FACTORY_BUILD_MODEL')}`);
+  if (pins.buildFallback) lines.push(`Build fallback: ${pins.buildFallback} (${repoConfigPath})`);
 
   const checkerModel = repo?.models?.checker ?? router.resolve('check_tests') ?? 'none';
   lines.push(
