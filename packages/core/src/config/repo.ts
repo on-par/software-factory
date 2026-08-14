@@ -19,6 +19,7 @@ import {
   resolveLocalOnly,
   type ModelsConfig,
 } from './index.js';
+import { parseConfigV2 } from './v2.js';
 
 // ---------- Schema ----------
 
@@ -90,6 +91,13 @@ export function loadRepoConfig(repoRoot: string): RepoFactoryConfig | null {
     raw = JSON.parse(readFileSync(path, 'utf-8'));
   } catch (err: any) {
     throw new Error(`Failed to parse ${path}: ${err.message}`);
+  }
+
+  if (typeof raw === 'object' && raw !== null && (raw as { version?: unknown }).version === 2) {
+    // v2 files are validated loudly but not yet consumed here — the v2→v1
+    // in-memory adapter is a separate issue. Null = "no v1 repo overrides".
+    parseConfigV2(raw, path);
+    return null;
   }
 
   const result = RepoFactoryConfigSchema.safeParse(raw);

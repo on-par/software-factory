@@ -160,6 +160,19 @@ describe('loadRepoConfig', () => {
       efficiency: { fastPath: true, maxReworkRounds: 1, perIssueCapUsd: 8 },
     });
   });
+
+  it('tolerates a version-2 file, returning null so v1 consumers see no overrides', async () => {
+    const repoRoot = await tempRepoRoot();
+    await writeRepoConfig(repoRoot, { version: 2 });
+    expect(loadRepoConfig(repoRoot)).toBeNull();
+  });
+
+  it('still fails loudly on an invalid version-2 file', async () => {
+    const repoRoot = await tempRepoRoot();
+    await writeRepoConfig(repoRoot, { version: 2, bogus: true });
+    expect(() => loadRepoConfig(repoRoot)).toThrow(/\.factory[/\\]config\.json/);
+    expect(() => loadRepoConfig(repoRoot)).toThrow(/bogus/);
+  });
 });
 
 describe('resolveEfficiencyPolicy', () => {

@@ -40,6 +40,8 @@ export {
   resolveEfficiencyPolicy,
   resolveUsageCap,
 } from './config/repo.js';
+export type { FactoryConfigV2 } from './config/v2.js';
+export { factoryConfigV2JsonSchema, FactoryConfigV2Schema, loadConfigV2, loadRepoConfigV2 } from './config/v2.js';
 
 // Environment
 export type {

@@ -37,6 +37,11 @@ const PUBLIC_API_KEYS = [
   'resolveEfficiencyPolicy',
   'resolveEffectiveModelPins',
   'resolveUsageCap',
+  // Config v2 (unified sparse-overlay config)
+  'factoryConfigV2JsonSchema',
+  'FactoryConfigV2Schema',
+  'loadConfigV2',
+  'loadRepoConfigV2',
   // Environment
   'acquirePortLease',
   'defaultFindPortListeners',
