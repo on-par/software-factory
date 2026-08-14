@@ -765,7 +765,12 @@ describe('cli', () => {
         pulls: {
           list: async ({ head }: any) =>
             head === 'on-par:ship-it/28-x'
-              ? { data: [{ number: 41, merged_at: '2026-08-10T00:00:00Z' }, { number: 44, merged_at: null }] }
+              ? {
+                  data: [
+                    { number: 41, merged_at: '2026-08-10T00:00:00Z' },
+                    { number: 44, merged_at: null },
+                  ],
+                }
               : { data: [] },
         },
       },
