@@ -10,6 +10,10 @@
       "tier": "triage",
       "description": "Create a complete factory-task issue body before PLAN"
     },
+    "decompose": {
+      "tier": "triage",
+      "description": "Decompose an oversized factory-task issue into an epic + INVEST-sized stories (proposed as a comment, not filed)"
+    },
     "build_codex": {
       "tier": "worker",
       "description": "Codex CLI implementation from frozen spec",

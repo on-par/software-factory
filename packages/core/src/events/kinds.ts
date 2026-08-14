@@ -33,6 +33,9 @@ export type EventKind =
   | 'ci-failed'
   | 'conflict'
   | 'constitution'
+  | 'decompose_comment_posted'
+  | 'decompose_failed'
+  | 'decompose_started'
   | 'defect-window-closed'
   | 'design_artifact_emitted'
   | 'design_artifact_invalid'
@@ -170,6 +173,9 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'ci-failed': { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   conflict: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   constitution: { severity: 'info', isPark: false, isTerminal: false },
+  decompose_comment_posted: { severity: 'info', isPark: false, isTerminal: false },
+  decompose_failed: { severity: 'warn', isPark: false, isTerminal: false },
+  decompose_started: { severity: 'info', isPark: false, isTerminal: false },
   'defect-window-closed': { severity: 'info', isPark: false, isTerminal: false },
   design_artifact_emitted: { severity: 'info', isPark: false, isTerminal: false },
   design_artifact_invalid: { severity: 'warn', isPark: false, isTerminal: false },
