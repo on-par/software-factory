@@ -754,6 +754,41 @@ describe('cli', () => {
     expect(await isPrMerged(octokit, 'on-par', 'software-factory', 'ship-it/22-x')).toBe(false);
   });
 
+  it('does not report a fresh, still-open PR as merged when an older PR reused the same branch name', async () => {
+    // Regression for the chronica debt-lane bug: a verify-and-close pass
+    // recreates the exact head branch an earlier, already-merged PR used.
+    // The old logic ("was ANY closed PR ever merged under this branch")
+    // matched the stale #41 and made waitForMerge believe #44 had landed
+    // while #44 sat open forever.
+    const octokit: any = {
+      rest: {
+        pulls: {
+          list: async ({ head }: any) =>
+            head === 'on-par:ship-it/28-x'
+              ? { data: [{ number: 41, merged_at: '2026-08-10T00:00:00Z' }, { number: 44, merged_at: null }] }
+              : { data: [] },
+        },
+      },
+    };
+    expect(await isPrMerged(octokit, 'on-par', 'software-factory', 'ship-it/28-x')).toBe(false);
+  });
+
+  it('reports the reused branch merged once the newest PR under it is the one that landed', async () => {
+    const octokit: any = {
+      rest: {
+        pulls: {
+          list: async () => ({
+            data: [
+              { number: 41, merged_at: '2026-08-10T00:00:00Z' },
+              { number: 44, merged_at: '2026-08-14T00:00:00Z' },
+            ],
+          }),
+        },
+      },
+    };
+    expect(await isPrMerged(octokit, 'on-par', 'software-factory', 'ship-it/28-x')).toBe(true);
+  });
+
   it('propagates API failures from isPrMerged instead of treating them as not-merged', async () => {
     const octokit: any = {
       rest: {
