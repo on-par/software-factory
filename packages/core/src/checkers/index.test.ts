@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ConstitutionLoader } from '../constitutions/index.js';
@@ -20,6 +20,7 @@ import {
   runAllCheckers,
   runCustomChecker,
   testsChecker,
+  type WorktreeProbe,
 } from './index.js';
 
 const models: ModelsConfig = {
@@ -978,6 +979,43 @@ describe('runAllCheckers', () => {
       expect(output?.result).toBe('FAIL');
     }
   });
+
+  it(
+    'probes the worktree exactly once per round even when several checkers consume the probe facts',
+    { timeout: 60000 },
+    async () => {
+      // The worktree has three HTML files but the probe reports only one — a
+      // linksChecker that walked the disk instead of consuming probe.htmlFiles
+      // would see all three and report linksChecked = 3.
+      const worktree = await makeWorktree({
+        'a.html': '<a href="https://example.com">ok</a>',
+        'b.html': '<a href="https://example.com/b">ok</a>',
+        'c.html': '<a href="https://example.com/c">ok</a>',
+      });
+      const probe: WorktreeProbe = {
+        packageJson: { status: 'loaded', value: { scripts: {} } },
+        htmlFiles: ['a.html'],
+        playwrightConfigFiles: [],
+        playwrightConfigContents: {},
+        scripts: {},
+      };
+      const probeWorktreeMock = vi.fn(async () => probe);
+      const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
+
+      const summary = await runAllCheckers(
+        { ...makeContext(worktree), probeWorktree: probeWorktreeMock },
+        router,
+        null,
+      );
+
+      expect(probeWorktreeMock).toHaveBeenCalledTimes(1);
+      const links = summary.results.find((r) => r.checker === 'links');
+      const accessibility = summary.results.find((r) => r.checker === 'accessibility');
+      expect(links?.result).toBe('PASS');
+      expect(links?.linksChecked).toBe(1);
+      expect(accessibility?.result).toBe('PASS');
+    },
+  );
 });
 
 describe('fileExists', () => {

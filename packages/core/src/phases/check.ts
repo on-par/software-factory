@@ -1,9 +1,6 @@
 // src/phases/check.ts — CHECK phase: independent checkers verify output, rework loop, dispute resolution
 
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
-
-import { type CheckerContext, fileExists, runAllCheckers } from '../checkers/index.js';
+import { type CheckerContext, probeWorktree, runAllCheckers, type WorktreeProbe } from '../checkers/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { laneEnv } from '../environment/index.js';
 import type { EventKind } from '../events/kinds.js';
@@ -76,35 +73,11 @@ function testFailureEvidence(summary: CheckSummary): Pick<ReworkInfo, 'failingTe
   };
 }
 
-const PLAYWRIGHT_CONFIG_FILES = [
-  'playwright.config.ts',
-  'playwright.config.js',
-  'playwright.config.mjs',
-  'playwright.config.cjs',
-];
-
 /** Human-readable e2e signal ("playwright.config.ts", "package.json script 'e2e'"), or null when the worktree shows no live-app testing. */
-async function detectLiveAppSignal(worktree: string): Promise<string | null> {
-  for (const f of PLAYWRIGHT_CONFIG_FILES) {
-    if (await fileExists(join(worktree, f))) return f;
-  }
+function detectLiveAppSignal(probe: WorktreeProbe): string | null {
+  if (probe.playwrightConfigFiles.length > 0) return probe.playwrightConfigFiles[0];
 
-  const raw = await readFile(join(worktree, 'package.json'), 'utf-8').catch(() => null);
-  if (raw === null) return null;
-
-  let pkg: unknown;
-  try {
-    pkg = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  if (typeof pkg !== 'object' || pkg === null) return null;
-
-  const scripts = (pkg as { scripts?: unknown }).scripts;
-  if (typeof scripts !== 'object' || scripts === null) return null;
-
-  for (const [name, script] of Object.entries(scripts as Record<string, unknown>)) {
-    if (typeof script !== 'string') continue;
+  for (const [name, script] of Object.entries(probe.scripts)) {
     if (script.includes('playwright') || name === 'e2e' || name.includes('e2e')) {
       return `package.json script '${name}'`;
     }
@@ -115,39 +88,24 @@ async function detectLiveAppSignal(worktree: string): Promise<string | null> {
 
 /** Human-readable headed-mode signals ("playwright.config.ts forces headless: false",
  *  "package.json script 'e2e' passes --headed"), empty when nothing forces a headed browser. */
-async function detectHeadedModeSignals(worktree: string): Promise<string[]> {
+function detectHeadedModeSignals(probe: WorktreeProbe): string[] {
   const signals: string[] = [];
 
-  for (const f of PLAYWRIGHT_CONFIG_FILES) {
-    const content = await readFile(join(worktree, f), 'utf-8').catch(() => null);
-    if (content !== null && /headless\s*:\s*false/.test(content)) {
+  for (const f of probe.playwrightConfigFiles) {
+    const content = probe.playwrightConfigContents[f] ?? '';
+    if (/headless\s*:\s*false/.test(content)) {
       signals.push(`${f} forces headless: false`);
     }
   }
 
-  const raw = await readFile(join(worktree, 'package.json'), 'utf-8').catch(() => null);
-  if (raw !== null) {
-    let pkg: unknown;
-    try {
-      pkg = JSON.parse(raw);
-    } catch {
-      pkg = null;
+  for (const [name, script] of Object.entries(probe.scripts)) {
+    if (/(^|\s)--headed\b/.test(script)) {
+      signals.push(`package.json script '${name}' passes --headed`);
+    } else if (/(^|\s)--ui\b/.test(script)) {
+      signals.push(`package.json script '${name}' passes --ui`);
     }
-    if (typeof pkg === 'object' && pkg !== null) {
-      const scripts = (pkg as { scripts?: unknown }).scripts;
-      if (typeof scripts === 'object' && scripts !== null) {
-        for (const [name, script] of Object.entries(scripts as Record<string, unknown>)) {
-          if (typeof script !== 'string') continue;
-          if (/(^|\s)--headed\b/.test(script)) {
-            signals.push(`package.json script '${name}' passes --headed`);
-          } else if (/(^|\s)--ui\b/.test(script)) {
-            signals.push(`package.json script '${name}' passes --ui`);
-          }
-          if (/\bcypress\s+open\b/.test(script)) {
-            signals.push(`package.json script '${name}' runs 'cypress open' (interactive UI runner)`);
-          }
-        }
-      }
+    if (/\bcypress\s+open\b/.test(script)) {
+      signals.push(`package.json script '${name}' runs 'cypress open' (interactive UI runner)`);
     }
   }
 
@@ -203,10 +161,11 @@ export async function checkPhase(opts: {
     onPgid,
   } = opts;
 
-  const ctx: CheckerContext = { worktree, specPath, env: laneEnv(appPort, process.env, appBaseUrl), onPgid };
+  let probe = await probeWorktree(worktree);
+  const ctx: CheckerContext = { worktree, specPath, env: laneEnv(appPort, process.env, appBaseUrl), onPgid, probe };
 
   if (appPort === undefined) {
-    const signal = await detectLiveAppSignal(worktree);
+    const signal = detectLiveAppSignal(probe);
     if (signal) {
       log(
         'environment_warning',
@@ -215,7 +174,7 @@ export async function checkPhase(opts: {
     }
   }
 
-  const headedSignals = await detectHeadedModeSignals(worktree);
+  const headedSignals = detectHeadedModeSignals(probe);
   for (const signal of headedSignals) {
     log(
       'environment_warning',
@@ -266,9 +225,10 @@ export async function checkPhase(opts: {
       log('steering_applied', describeSteering(steering));
     }
 
+    probe = await probeWorktree(worktree);
+    ctx.probe = probe;
     summary = await runAllCheckers(ctx, router, constitution, checkTimeoutSeconds);
     log('check', `Rework round ${reworkRounds}: ${summary.failures} failures remaining`);
-
     // When no model ran this round (modelCompleted === false), an unchanged failure
     // signature is not evidence of a stuck worker — leave the streak untouched
     // (neither advanced nor reset) rather than treat a provider outage as no-progress (#642).
@@ -309,7 +269,7 @@ export async function checkPhase(opts: {
     log('check', summary.skips > 0 ? `All checkers passed (${summary.skips} skipped)` : 'All checkers passed');
   }
 
-  const finalHeadedSignals = reworkRounds > 0 ? await detectHeadedModeSignals(worktree) : headedSignals;
+  const finalHeadedSignals = reworkRounds > 0 ? detectHeadedModeSignals(probe) : headedSignals;
   if (finalHeadedSignals.length > 0) {
     summary = { ...summary, warnings: finalHeadedSignals };
   }
