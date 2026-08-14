@@ -8,14 +8,7 @@ import type { CheckerOutput, CheckSummary, Constitution } from '../types/index.j
 import { describeCommandFailure, runCommand } from '../utils/command-runner.js';
 import { extractJsonObjects } from '../utils/json.js';
 import { DESIGN_SMELLS_CHECKER, designSmellsChecker } from './design-smells.js';
-import {
-  countPlaceholderLinks,
-  fileExists,
-  findHtmlFiles,
-  type PackageJsonProbe,
-  probeWorktree,
-  type WorktreeProbe,
-} from './probe.js';
+import { countPlaceholderLinks, fileExists, findHtmlFiles, probeWorktree, type WorktreeProbe } from './probe.js';
 
 export type { PackageJsonProbe, WorktreeProbe } from './probe.js';
 export { countPlaceholderLinks, fileExists, findHtmlFiles, probeWorktree } from './probe.js';
@@ -31,9 +24,6 @@ export interface CheckerContext {
   /** Set by runAllCheckers from the resolved constitution — the single source of the standards text */
   constitutionBody?: string;
   packageJson?: PackageJson | null;
-  /** The probe-time error when package.json was unreadable — re-thrown by getPackageJson so
-   *  checkers surface it without re-reading. Set by runAllCheckers from a WorktreeProbe. */
-  packageJsonError?: unknown;
   /** Set by runAllCheckers from constitution.requireTests — missing test command becomes FAIL instead of SKIP */
   testsRequired?: boolean;
   /** Once-per-round worktree facts (package.json, HTML files, Playwright configs) — set by checkPhase
@@ -418,18 +408,6 @@ function buildCheckers(constitution: Constitution | null): Checker[] {
   return [...checkers.values()];
 }
 
-/** Maps the probe tri-state onto the checkers' packageJson/packageJsonError contract. */
-function packageJsonFacts(probe: PackageJsonProbe): Pick<CheckerContext, 'packageJson' | 'packageJsonError'> {
-  switch (probe.status) {
-    case 'loaded':
-      return { packageJson: probe.value };
-    case 'absent':
-      return { packageJson: null };
-    case 'unreadable':
-      return { packageJson: undefined, packageJsonError: probe.error };
-  }
-}
-
 export async function runAllCheckers(
   ctx: CheckerContext,
   router: ModelRouter,
@@ -443,7 +421,6 @@ export async function runAllCheckers(
   const runCtx: CheckerRunCtx = {
     ...ctx,
     probe,
-    ...packageJsonFacts(probe.packageJson),
     constitutionBody: constitution?.body ?? '',
     testsRequired: constitution?.requireTests === true,
     router,
@@ -494,6 +471,16 @@ async function loadPackageJson(worktree: string): Promise<PackageJson | null> {
 
 async function getPackageJson(ctx: CheckerContext): Promise<PackageJson | null> {
   if (ctx.packageJson !== undefined) return ctx.packageJson;
-  if (ctx.packageJsonError !== undefined) throw ctx.packageJsonError;
+  const p = ctx.probe?.packageJson;
+  if (p) {
+    switch (p.status) {
+      case 'loaded':
+        return p.value;
+      case 'absent':
+        return null;
+      case 'unreadable':
+        throw p.error;
+    }
+  }
   return loadPackageJson(ctx.worktree);
 }
