@@ -1,0 +1,159 @@
+// src/checkers/probe.test.ts — Once-per-round worktree probing shared by the CHECK phase and checkers
+
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
+
+import {
+  countPlaceholderLinks,
+  fileExists,
+  findHtmlFiles,
+  type PackageJsonProbe,
+  probeWorktree,
+  type WorktreeProbe,
+} from './index.js';
+
+const tempDirs = new Set<string>();
+
+afterEach(async () => {
+  await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
+  tempDirs.clear();
+});
+
+async function makeWorktree(files: Record<string, string> = {}): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'checker-probe-test-'));
+  tempDirs.add(dir);
+
+  for (const [path, contents] of Object.entries(files)) {
+    const fullPath = join(dir, path);
+    await mkdir(dirname(fullPath), { recursive: true });
+    await writeFile(fullPath, contents);
+  }
+
+  return dir;
+}
+
+describe('probeWorktree', () => {
+  it('captures package.json scripts, an ordered HTML walk, and Playwright config facts', async () => {
+    const worktree = await makeWorktree({
+      'package.json': JSON.stringify({
+        scripts: { build: 'tsc', e2e: 'playwright test', lint: 42 },
+        version: '1.0.0',
+      }),
+      'a.html': '<a href="https://example.com">ok</a>',
+      'nested/b.html': '<a href="#">x</a>',
+      'playwright.config.ts': 'export default { use: { headless: false } };\n',
+      'coverage/skipped.html': '<a href="#">y</a>',
+      'dist/index.html': '<a href="#">z</a>',
+    });
+
+    const probe: WorktreeProbe = await probeWorktree(worktree);
+    const pkg: PackageJsonProbe = probe.packageJson;
+
+    expect(pkg).toEqual({ status: 'loaded', value: expect.any(Object) });
+    expect(probe.htmlFiles).toEqual(['a.html', 'nested/b.html']);
+    expect(probe.playwrightConfigFiles).toEqual(['playwright.config.ts']);
+    expect(probe.playwrightConfigContents).toEqual({
+      'playwright.config.ts': 'export default { use: { headless: false } };\n',
+    });
+    expect(probe.scripts).toEqual({ build: 'tsc', e2e: 'playwright test' });
+  });
+
+  it('reports absent package.json with no scripts', async () => {
+    const worktree = await makeWorktree({ 'index.html': '<main>clean</main>' });
+
+    const probe = await probeWorktree(worktree);
+
+    expect(probe.packageJson).toEqual({ status: 'absent' });
+    expect(probe.scripts).toEqual({});
+  });
+
+  it('reports an unreadable package.json (directory) with the recorded error', async () => {
+    const worktree = await makeWorktree();
+    await mkdir(join(worktree, 'package.json'));
+
+    const probe = await probeWorktree(worktree);
+
+    expect(probe.packageJson.status).toBe('unreadable');
+    if (probe.packageJson.status === 'unreadable') {
+      expect(probe.packageJson.error).toBeDefined();
+    }
+    expect(probe.scripts).toEqual({});
+  });
+
+  it('reports an unreadable package.json (parse error) and still walks HTML files', async () => {
+    const worktree = await makeWorktree({ 'package.json': '{not json', 'a.html': '<main>clean</main>' });
+
+    const probe = await probeWorktree(worktree);
+
+    expect(probe.packageJson.status).toBe('unreadable');
+    expect(probe.htmlFiles).toEqual(['a.html']);
+    expect(probe.scripts).toEqual({});
+  });
+
+  it('detects the first existing Playwright config file in canonical order', async () => {
+    const worktree = await makeWorktree({
+      'playwright.config.js': 'export default {};\n',
+      'playwright.config.ts': 'export default { use: { headless: false } };\n',
+    });
+
+    const probe = await probeWorktree(worktree);
+
+    expect(probe.playwrightConfigFiles).toEqual(['playwright.config.ts', 'playwright.config.js']);
+    expect(probe.playwrightConfigContents['playwright.config.ts']).toContain('headless: false');
+    expect(probe.playwrightConfigContents['playwright.config.js']).toContain('export default');
+  });
+});
+
+describe('countPlaceholderLinks', () => {
+  it('returns 0 for empty and placeholder-free HTML', () => {
+    expect(countPlaceholderLinks('')).toBe(0);
+    expect(countPlaceholderLinks('<a href="https://example.com">ok</a>')).toBe(0);
+  });
+
+  it('counts placeholder links, including multiple on one line and across lines', () => {
+    expect(countPlaceholderLinks('<a href="#">x</a>')).toBe(1);
+    expect(countPlaceholderLinks('<a href="#">x</a>\n<a href="#">y</a>\n<a href="https://e.com">ok</a>')).toBe(2);
+  });
+});
+
+describe('findHtmlFiles', () => {
+  it('returns sorted relative paths, skipping generated-output directories', async () => {
+    const worktree = await makeWorktree({
+      'z.html': '<main>z</main>',
+      'a/nested.html': '<main>nested</main>',
+      'node_modules/lib.html': '<a href="#">x</a>',
+      'coverage/report.html': '<a href="#">y</a>',
+      'dist/out.html': '<a href="#">z</a>',
+    });
+
+    const files = await findHtmlFiles(worktree);
+
+    expect(files).toEqual(['a/nested.html', 'z.html']);
+  });
+
+  it('returns an empty list for a worktree with no HTML files', async () => {
+    const worktree = await makeWorktree({ 'index.ts': 'export {};' });
+
+    expect(await findHtmlFiles(worktree)).toEqual([]);
+  });
+});
+
+describe('fileExists', () => {
+  it('returns true for an existing regular file', async () => {
+    const worktree = await makeWorktree({ 'scripts/verify.sh': 'exit 0' });
+    expect(await fileExists(join(worktree, 'scripts/verify.sh'))).toBe(true);
+  });
+
+  it('returns false for a missing path', async () => {
+    const worktree = await makeWorktree();
+    expect(await fileExists(join(worktree, 'no-such-file'))).toBe(false);
+  });
+
+  it('returns false for a directory', async () => {
+    const worktree = await makeWorktree({ 'scripts/verify.sh': 'exit 0' });
+    expect(await fileExists(join(worktree, 'scripts'))).toBe(false);
+  });
+});

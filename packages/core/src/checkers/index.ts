@@ -1,13 +1,17 @@
 // src/checkers/index.ts — Checker framework: built-in + custom checkers
 
-import { readdir, readFile, stat } from 'node:fs/promises';
-import { join, relative } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
 import type { ModelRouter } from '../router/index.js';
 import type { CheckerOutput, CheckSummary, Constitution } from '../types/index.js';
 import { describeCommandFailure, runCommand } from '../utils/command-runner.js';
 import { extractJsonObjects } from '../utils/json.js';
 import { DESIGN_SMELLS_CHECKER, designSmellsChecker } from './design-smells.js';
+import { countPlaceholderLinks, fileExists, findHtmlFiles, probeWorktree, type WorktreeProbe } from './probe.js';
+
+export type { PackageJsonProbe, WorktreeProbe } from './probe.js';
+export { countPlaceholderLinks, fileExists, findHtmlFiles, probeWorktree } from './probe.js';
 
 interface PackageJson {
   scripts?: Record<string, string>;
@@ -22,6 +26,11 @@ export interface CheckerContext {
   packageJson?: PackageJson | null;
   /** Set by runAllCheckers from constitution.requireTests — missing test command becomes FAIL instead of SKIP */
   testsRequired?: boolean;
+  /** Once-per-round worktree facts (package.json, HTML files, Playwright configs) — set by checkPhase
+   *  each round; runAllCheckers probes and attaches these when it is absent. */
+  probe?: WorktreeProbe;
+  /** Injection seam for tests: overrides the default probeWorktree implementation. */
+  probeWorktree?: (worktree: string) => Promise<WorktreeProbe>;
   /** Lane environment (FACTORY_HEADLESS, PLAYWRIGHT_HEADLESS, and PORT/FACTORY_APP_PORT/FACTORY_BASE_URL when a port is leased) merged into every checker command — set by checkPhase */
   env?: Record<string, string>;
   /** When set, every checker command is spawned detached (its own process
@@ -31,6 +40,18 @@ export interface CheckerContext {
 }
 
 export type CheckerFn = (ctx: CheckerContext) => Promise<CheckerOutput>;
+
+/** A runnable checker in the single unified registry — one shape for every world. */
+export interface Checker {
+  name: string;
+  run(ctx: CheckerRunCtx): Promise<CheckerOutput>;
+}
+
+/** CheckerContext bound by runAllCheckers with the router + custom-checker timeout. */
+export interface CheckerRunCtx extends CheckerContext {
+  router: ModelRouter;
+  timeoutSeconds?: number;
+}
 
 // ---------- Built-in Checkers ----------
 
@@ -186,7 +207,7 @@ export const lintChecker: CheckerFn = async (ctx) => {
 };
 
 export const linksChecker: CheckerFn = async (ctx) => {
-  const files = await findHtmlFiles(ctx.worktree);
+  const files = ctx.probe?.htmlFiles ?? (await findHtmlFiles(ctx.worktree));
 
   if (files.length === 0) {
     return { checker: 'links', result: 'PASS', details: 'no HTML files — skipped' };
@@ -204,7 +225,7 @@ export const linksChecker: CheckerFn = async (ctx) => {
       urls.add(url);
     }
 
-    broken += html.split(/\r?\n/).filter((l) => l.includes('href="#"')).length;
+    broken += countPlaceholderLinks(html);
   }
 
   const checked = urls.size;
@@ -221,7 +242,7 @@ export const linksChecker: CheckerFn = async (ctx) => {
 const MAX_ACCESSIBILITY_FILES = 20;
 
 export const accessibilityChecker: CheckerFn = async (ctx) => {
-  const allFiles = await findHtmlFiles(ctx.worktree);
+  const allFiles = ctx.probe?.htmlFiles ?? (await findHtmlFiles(ctx.worktree));
 
   if (allFiles.length === 0) {
     return { checker: 'accessibility', result: 'PASS', details: 'no HTML files — skipped' };
@@ -244,7 +265,7 @@ export const accessibilityChecker: CheckerFn = async (ctx) => {
     }
 
     // Placeholder links
-    const ph = html.split(/\r?\n/).filter((l) => l.includes('href="#"')).length;
+    const ph = countPlaceholderLinks(html);
     if (ph > 0) {
       issues += ph;
       details.push(`${rel}: ${ph} placeholder links`);
@@ -348,20 +369,44 @@ Steps:
 
 // ---------- Runner: run all checkers for a product ----------
 
-const BUILT_IN_CHECKERS: Record<string, CheckerFn> = {
-  compile: compileChecker,
-  tests: testsChecker,
-  lint: lintChecker,
-  links: linksChecker,
-  accessibility: accessibilityChecker,
-};
+/** The unified registry: every checker — built-in, agent-backed, custom, unknown — runs through the same fail-closed path. */
+const BUILT_IN_CHECKERS: readonly Checker[] = [
+  { name: 'compile', run: (ctx) => compileChecker(ctx) },
+  { name: 'tests', run: (ctx) => testsChecker(ctx) },
+  { name: 'lint', run: (ctx) => lintChecker(ctx) },
+  { name: 'links', run: (ctx) => linksChecker(ctx) },
+  { name: 'accessibility', run: (ctx) => accessibilityChecker(ctx) },
+  { name: DESIGN_SMELLS_CHECKER, run: (ctx) => designSmellsChecker(ctx, ctx.router, ctx.timeoutSeconds) },
+];
 
-/** Checkers that need the router (agent-backed) but ship as built-ins, not constitution opt-ins. */
-type AgentCheckerFn = (ctx: CheckerContext, router: ModelRouter, timeoutSeconds?: number) => Promise<CheckerOutput>;
+const STANDARD_CHECKER_NAMES = BUILT_IN_CHECKERS.map((c) => c.name);
 
-const AGENT_CHECKERS: Record<string, AgentCheckerFn> = {
-  [DESIGN_SMELLS_CHECKER]: designSmellsChecker,
-};
+/** Fail closed: a declared standard we can't run must not vanish from the summary. */
+function unknownCheckerOutput(name: string): CheckerOutput {
+  return {
+    checker: name,
+    result: 'FAIL',
+    details: `unknown checker '${name}' — not a built-in (${STANDARD_CHECKER_NAMES.join(', ')}) and not a custom_* agent checker; failing closed so the declared standard is not silently skipped`,
+  };
+}
+
+/** Built-ins first (current order), then constitution checkers not already registered, in constitution order. */
+function buildCheckers(constitution: Constitution | null): Checker[] {
+  const checkers = new Map<string, Checker>();
+  for (const checker of BUILT_IN_CHECKERS) checkers.set(checker.name, checker);
+
+  for (const name of constitution?.checkers ?? []) {
+    if (checkers.has(name)) continue;
+    checkers.set(
+      name,
+      name.startsWith('custom_')
+        ? { name, run: (ctx) => runCustomChecker(ctx, name, ctx.router, ctx.timeoutSeconds) }
+        : { name, run: async () => unknownCheckerOutput(name) },
+    );
+  }
+
+  return [...checkers.values()];
+}
 
 export async function runAllCheckers(
   ctx: CheckerContext,
@@ -369,62 +414,32 @@ export async function runAllCheckers(
   constitution: Constitution | null,
   customCheckerTimeoutSeconds?: number,
 ): Promise<CheckSummary> {
-  const results: CheckerOutput[] = [];
-  const standardNames = [...Object.keys(BUILT_IN_CHECKERS), ...Object.keys(AGENT_CHECKERS)];
-  const productCheckers = constitution?.checkers ?? [];
+  const probe = ctx.probe ?? (await (ctx.probeWorktree ?? probeWorktree)(ctx.worktree));
 
-  const allCheckers = [...standardNames, ...productCheckers.filter((c) => !standardNames.includes(c))];
-  let packageJson: PackageJson | null | undefined;
-  try {
-    packageJson = await loadPackageJson(ctx.worktree);
-  } catch {
-    packageJson = undefined; // let each checker surface the read error through its own error handling
-  }
   // the constitution is the single source of truth for the standards body —
   // custom checkers must be graded against the same text that declared them
-  const sharedCtx: CheckerContext = {
+  const runCtx: CheckerRunCtx = {
     ...ctx,
-    packageJson,
+    probe,
     constitutionBody: constitution?.body ?? '',
     testsRequired: constitution?.requireTests === true,
+    router,
+    timeoutSeconds: customCheckerTimeoutSeconds,
   };
 
-  for (const name of allCheckers) {
+  const results: CheckerOutput[] = [];
+  for (const checker of buildCheckers(constitution)) {
     let output: CheckerOutput;
-
-    if (BUILT_IN_CHECKERS[name]) {
-      try {
-        output = await BUILT_IN_CHECKERS[name](sharedCtx);
-      } catch (e: any) {
-        // Fail closed: a checker that crashes must not vanish from the summary
-        output = {
-          checker: name,
-          result: 'FAIL',
-          details: `checker crashed: ${(e?.message ?? String(e)).slice(0, 500)}`,
-        };
-      }
-    } else if (AGENT_CHECKERS[name]) {
-      try {
-        output = await AGENT_CHECKERS[name](sharedCtx, router, customCheckerTimeoutSeconds);
-      } catch (e: any) {
-        // Fail closed: a checker that crashes must not vanish from the summary
-        output = {
-          checker: name,
-          result: 'FAIL',
-          details: `checker crashed: ${(e?.message ?? String(e)).slice(0, 500)}`,
-        };
-      }
-    } else if (name.startsWith('custom_')) {
-      output = await runCustomChecker(sharedCtx, name, router, customCheckerTimeoutSeconds);
-    } else {
-      // Fail closed: a declared standard we can't run must not vanish from the summary
+    try {
+      output = await checker.run(runCtx);
+    } catch (e: any) {
+      // Fail closed: a checker that crashes must not vanish from the summary
       output = {
-        checker: name,
+        checker: checker.name,
         result: 'FAIL',
-        details: `unknown checker '${name}' — not a built-in (${standardNames.join(', ')}) and not a custom_* agent checker; failing closed so the declared standard is not silently skipped`,
+        details: `checker crashed: ${(e?.message ?? String(e)).slice(0, 500)}`,
       };
     }
-
     results.push(output);
   }
 
@@ -455,45 +470,17 @@ async function loadPackageJson(worktree: string): Promise<PackageJson | null> {
 }
 
 async function getPackageJson(ctx: CheckerContext): Promise<PackageJson | null> {
-  return ctx.packageJson !== undefined ? ctx.packageJson : loadPackageJson(ctx.worktree);
-}
-
-// Generated output, not product source — scanning these produces false
-// positives (e.g. a coverage HTML report embeds source text like `href="#"`
-// literals from the checkers themselves as syntax-highlighted code, not markup).
-const GENERATED_DIRS = new Set(['node_modules', '.git', 'coverage', 'dist', 'build', '.next', 'out']);
-
-async function findHtmlFiles(worktree: string): Promise<string[]> {
-  const results: string[] = [];
-
-  async function walk(dir: string): Promise<void> {
-    let entries;
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        if (GENERATED_DIRS.has(entry.name)) continue;
-        await walk(join(dir, entry.name));
-      } else if (entry.isFile() && entry.name.endsWith('.html')) {
-        results.push(relative(worktree, join(dir, entry.name)));
-      }
+  if (ctx.packageJson !== undefined) return ctx.packageJson;
+  const p = ctx.probe?.packageJson;
+  if (p) {
+    switch (p.status) {
+      case 'loaded':
+        return p.value;
+      case 'absent':
+        return null;
+      case 'unreadable':
+        throw p.error;
     }
   }
-
-  await walk(worktree);
-  results.sort();
-  return results;
-}
-
-/** True when the path exists and is a regular file — directories and missing paths return false. */
-export async function fileExists(path: string): Promise<boolean> {
-  try {
-    return (await stat(path)).isFile();
-  } catch {
-    return false;
-  }
+  return loadPackageJson(ctx.worktree);
 }
