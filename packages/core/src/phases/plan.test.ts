@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
@@ -48,6 +48,7 @@ const routes: RoutesConfig = {
   routes: {
     plan: { tier: 'boss', description: 'stub' },
     readiness_enrich: { tier: 'boss', description: 'stub' },
+    decompose: { tier: 'boss', description: 'stub' },
   },
 };
 
@@ -352,6 +353,164 @@ npm run test`;
     expect(result.ok).toBe(true);
     expect(stub.calls.map((call) => call.task)).toEqual(['plan']);
     expect(updates).toBe(0);
+  });
+
+  describe('decomposition of oversized issues (#606)', () => {
+    const oversizedBody = `## Problem statement
+The import queue stalls under load and loses jobs.
+
+## In scope
+- Item 1
+- Item 2
+- Item 3
+- Item 4
+- Item 5
+- Item 6
+
+## Out of scope
+Changing the queue API.
+
+## Acceptance criteria
+- [ ] Criterion 1
+- [ ] Criterion 2
+- [ ] Criterion 3
+- [ ] Criterion 4
+- [ ] Criterion 5
+- [ ] Criterion 6
+
+## Verification
+npm run test`;
+
+    const validDecomposition = JSON.stringify({
+      epic: {
+        title: 'Harden the import queue',
+        why: 'The import queue stalls under load and loses jobs.',
+        doneWhen: ['Imports complete without stalls'],
+        children: ['Retry failed import jobs'],
+      },
+      stories: [
+        {
+          title: 'Retry failed import jobs',
+          role: 'operator',
+          want: 'failed import jobs retry automatically',
+          soThat: 'transient failures do not lose work',
+          problemStatement: 'The import queue loses jobs on transient failure.',
+          inScope: ['Add a bounded retry with backoff'],
+          outOfScope: ['Persistent queue storage'],
+          acceptanceCriteria: [
+            {
+              name: 'Failed jobs retry',
+              given: ['a job fails'],
+              when: ['the job fails transiently'],
+              then: ['the job retries up to 3 times'],
+            },
+          ],
+          verification: [{ command: 'npm test', passWhen: 'the retry suite passes' }],
+          tracesTo: ['INT-PROBLEM-01'],
+        },
+      ],
+    });
+
+    const investFailingDecomposition = JSON.stringify({
+      epic: { title: 'Epic', why: 'why', doneWhen: ['done'], children: ['Story one'] },
+      stories: [
+        {
+          title: 'Story one',
+          role: 'operator',
+          want: 'the thing works',
+          soThat: 'value',
+          problemStatement: 'problem',
+          inScope: ['in scope item'],
+          outOfScope: ['persistent storage'],
+          acceptanceCriteria: [{ name: 'works', given: [], when: ['run'], then: ['works'] }],
+          verification: [{ command: 'npm test', passWhen: 'passes' }],
+        },
+      ],
+    });
+
+    it('posts a decomposition comment when a complete oversized factory-task is flagged sizeOk: false', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-606.md');
+      const stub = new StubModelExecutor({
+        scripts: {
+          decompose: [{ output: validDecomposition }],
+          plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const createComment = vi.fn().mockResolvedValue({});
+      const events: string[] = [];
+
+      const result = await planPhase({
+        issue: 606,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit: {
+          rest: {
+            issues: {
+              get: async () => ({ data: { title: 'Harden the import queue', body: oversizedBody } }),
+              createComment,
+            },
+          },
+        } as any,
+        log: (type) => events.push(type),
+        decomposeOversized: true,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(stub.calls.map((call) => call.task)).toEqual(['decompose', 'plan']);
+      expect(createComment).toHaveBeenCalledTimes(1);
+      expect(createComment).toHaveBeenCalledWith({
+        owner: 'on-par',
+        repo: 'software-factory',
+        issue_number: 606,
+        body: expect.stringContaining('## Proposed epic: Harden the import queue'),
+      });
+      expect(events).toContain('decompose_comment_posted');
+    });
+
+    it('does not post and still calls PLAN when the decomposition fails INVEST', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-606.md');
+      const stub = new StubModelExecutor({
+        scripts: {
+          decompose: [{ output: investFailingDecomposition }, { output: investFailingDecomposition }],
+          plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const createComment = vi.fn().mockResolvedValue({});
+      const events: string[] = [];
+
+      const result = await planPhase({
+        issue: 606,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit: {
+          rest: {
+            issues: {
+              get: async () => ({ data: { title: 'Harden the import queue', body: oversizedBody } }),
+              createComment,
+            },
+          },
+        } as any,
+        log: (type) => events.push(type),
+        decomposeOversized: true,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(stub.calls.map((call) => call.task)).toEqual(['decompose', 'decompose', 'plan']);
+      expect(createComment).not.toHaveBeenCalled();
+      expect(events).toContain('decompose_failed');
+    });
   });
 
   it('stops before PLAN when the enrichment router fails', async () => {

@@ -1110,6 +1110,7 @@ export async function shipIssue(
       workSource: ctx?.workSource,
       enforceReadiness: true,
       fastPath: efficiency.fastPath,
+      decomposeOversized: true,
     });
     route = plan.route;
     if (!plan.ok) {
