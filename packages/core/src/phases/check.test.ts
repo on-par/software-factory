@@ -9,7 +9,7 @@ import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import type { Constitution, ReworkInfo } from '../types/index.js';
-import { checkPhase, disputeResolution } from './check.js';
+import { checkPhase } from './check.js';
 
 const models: ModelsConfig = {
   version: 1,
@@ -38,7 +38,6 @@ const routes: RoutesConfig = {
   version: 1,
   routes: {
     build_claude: { tier: 'boss', description: 'stub' },
-    dispute_resolution: { tier: 'boss', description: 'stub' },
   },
 };
 
@@ -593,6 +592,30 @@ describe('checkPhase appPort', () => {
     expect(captured[0].options.onPgid).toBe(onPgid);
   });
 
+  it('forwards buildTimeoutSeconds to the rework router.run options as timeoutSeconds', async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const captured: { options: any }[] = [];
+    const fakeRouter = {
+      run: async (_task: string, _prompt: string, options: any) => {
+        captured.push({ options });
+        return { model: 'fake-model', output: 'reworked', exitCode: 0, attempts: [] };
+      },
+    } as any;
+
+    await checkPhase({
+      issue: 105,
+      worktree,
+      specPath,
+      router: fakeRouter,
+      constitution: null,
+      log: () => {},
+      buildTimeoutSeconds: 1234,
+    });
+
+    expect(captured.length).toBeGreaterThan(0);
+    expect(captured[0].options.timeoutSeconds).toBe(1234);
+  });
+
   it('threads the lane env into the checker ctx so checker commands see it', { timeout: 30_000 }, async () => {
     const worktree = await makeEnvAssertingWorktree(101);
     const { router, stub } = makeRouter();
@@ -1123,186 +1146,6 @@ describe('checkPhase steering', () => {
       expect(logs.some((l) => l.type === 'steering_applied')).toBe(false);
     },
   );
-});
-
-describe('disputeResolution', () => {
-  const constitution: Constitution = {
-    product: 'demo',
-    version: 1,
-    checkers: [],
-    body: '## Standards\nAll code must be reviewed.',
-    path: '/tmp/wt/constitution.md',
-    source: 'repo',
-  };
-
-  function disputeRouter(output: string | { fail: 'timeout' }): { router: ModelRouter } {
-    const step = typeof output === 'string' ? { output } : output;
-    const stub = new StubModelExecutor({ scripts: { dispute_resolution: [step] } });
-    return { router: new ModelRouter(models, routes, false, stub) };
-  }
-
-  it('parses an overruled verdict with reasoning and action from the agent JSON', async () => {
-    const { router } = disputeRouter(
-      '{"verdict":"overruled","reasoning":"the standard permits this pattern","action":"merge as-is"}',
-    );
-
-    const result = await disputeResolution({
-      issue: 90,
-      worktree: '/tmp/wt',
-      specPath: '/tmp/wt/spec.md',
-      checkerName: 'custom_style',
-      checkerDetails: 'naming disagreement',
-      constitution,
-      router,
-    });
-
-    expect(result).toEqual({
-      verdict: 'overruled',
-      reasoning: 'the standard permits this pattern',
-      action: 'merge as-is',
-    });
-  });
-
-  it('upholds and yields empty reasoning/action when the output has no JSON verdict', async () => {
-    const { router } = disputeRouter('the agent rambled without emitting any verdict json');
-
-    const result = await disputeResolution({
-      issue: 91,
-      worktree: '/tmp/wt',
-      specPath: '/tmp/wt/spec.md',
-      checkerName: 'custom_style',
-      checkerDetails: 'naming disagreement',
-      constitution: null,
-      router,
-    });
-
-    expect(result).toEqual({ verdict: 'upheld', reasoning: '', action: '' });
-  });
-
-  it('extracts an upheld verdict and reasoning while defaulting a missing action', async () => {
-    const { router } = disputeRouter('{"verdict":"upheld","reasoning":"the standard is explicit"}');
-
-    const result = await disputeResolution({
-      issue: 92,
-      worktree: '/tmp/wt',
-      specPath: '/tmp/wt/spec.md',
-      checkerName: 'custom_style',
-      checkerDetails: 'naming disagreement',
-      constitution,
-      router,
-    });
-
-    expect(result.verdict).toBe('upheld');
-    expect(result.reasoning).toBe('the standard is explicit');
-    expect(result.action).toBe('');
-  });
-
-  it('falls back to upheld when the dispute agent fails entirely', async () => {
-    const { router } = disputeRouter({ fail: 'timeout' });
-
-    const result = await disputeResolution({
-      issue: 93,
-      worktree: '/tmp/wt',
-      specPath: '/tmp/wt/spec.md',
-      checkerName: 'custom_style',
-      checkerDetails: 'naming disagreement',
-      constitution: null,
-      router,
-      timeoutSeconds: 5,
-    });
-
-    expect(result).toEqual({
-      verdict: 'upheld',
-      reasoning: 'dispute agent failed',
-      action: 'worker must fix',
-    });
-  });
-
-  it('emits a structured failover event when a log callback is provided and the dispute router fails over', async () => {
-    const stub = new StubModelExecutor({
-      scripts: {
-        dispute_resolution: [{ fail: 'usage_cap' }, { output: '{"verdict":"upheld","reasoning":"r","action":"a"}' }],
-      },
-    });
-    const router = new ModelRouter(twoModels, routes, false, stub);
-    const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
-
-    const result = await disputeResolution({
-      issue: 94,
-      worktree: '/tmp/wt',
-      specPath: '/tmp/wt/spec.md',
-      checkerName: 'custom_style',
-      checkerDetails: 'naming disagreement',
-      constitution: null,
-      router,
-      log: (type, msg, extra) => {
-        logCalls.push([type, msg, extra]);
-      },
-    });
-
-    expect(result.verdict).toBe('upheld');
-    expect(logCalls).toContainEqual([
-      'failover',
-      expect.stringContaining('usage_cap'),
-      { failoverReason: 'usage_cap' },
-    ]);
-  });
-
-  it('omits the detail suffix from the dispute failover log when the failed attempt carries no detail', async () => {
-    const fakeRouter = {
-      run: async () => ({
-        model: 'stub-model',
-        output: '{"verdict":"upheld","reasoning":"r","action":"a"}',
-        exitCode: 0,
-        attempts: [
-          { model: 'first-model', reason: 'timeout' as const, ok: false },
-          { model: 'stub-model', reason: null, ok: true },
-        ],
-      }),
-    } as any;
-    const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
-
-    const result = await disputeResolution({
-      issue: 97,
-      worktree: '/tmp/wt',
-      specPath: '/tmp/wt/spec.md',
-      checkerName: 'custom_style',
-      checkerDetails: 'naming disagreement',
-      constitution: null,
-      router: fakeRouter,
-      log: (type, msg, extra) => {
-        logCalls.push([type, msg, extra]);
-      },
-    });
-
-    expect(result.verdict).toBe('upheld');
-    expect(logCalls).toContainEqual([
-      'failover',
-      'first-model failed (timeout) — failed over',
-      { failoverReason: 'timeout' },
-    ]);
-  });
-
-  it('does not throw when no log callback is provided and the dispute router fails over', async () => {
-    const stub = new StubModelExecutor({
-      scripts: {
-        dispute_resolution: [{ fail: 'usage_cap' }, { output: '{"verdict":"upheld","reasoning":"r","action":"a"}' }],
-      },
-    });
-    const router = new ModelRouter(twoModels, routes, false, stub);
-
-    await expect(
-      disputeResolution({
-        issue: 95,
-        worktree: '/tmp/wt',
-        specPath: '/tmp/wt/spec.md',
-        checkerName: 'custom_style',
-        checkerDetails: 'naming disagreement',
-        constitution: null,
-        router,
-      }),
-    ).resolves.toMatchObject({ verdict: 'upheld' });
-  });
 });
 
 async function makePassingWorktree(): Promise<{ worktree: string; specPath: string }> {
