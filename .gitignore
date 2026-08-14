@@ -14,5 +14,9 @@ dist/
 coverage/
 *.tsbuildinfo
 
+# Python
+__pycache__/
+*.pyc
+
 # Logs
 *.log
