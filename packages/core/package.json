@@ -57,7 +57,7 @@
     "@on-par/factory-config": "^2.0.0",
     "@on-par/repo-context": "^2.0.0",
     "@octokit/rest": "^22.0.0",
-    "execa": "^9.0.0",
+    "execa": "^10.0.1",
     "gray-matter": "^4.0.3",
     "zod": "^4.4.3"
   },
