@@ -302,7 +302,7 @@ export interface IssueRunState {
   worktree: string;
   specPath: string;
   model: string;
-  route: 'codex' | 'claude';
+  route: 'codex' | 'claude' | 'opencode';
   attempts: number;
   startedAt: string;
   updatedAt: string;

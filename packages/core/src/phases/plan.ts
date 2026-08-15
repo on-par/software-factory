@@ -28,7 +28,7 @@ import { createDefaultWorkSourceRegistry, type WorkRequestSourceKind, type WorkS
 
 export interface PlanResult {
   ok: boolean;
-  route: 'codex' | 'claude';
+  route: 'codex' | 'claude' | 'opencode';
   specPath: string;
   model: string;
   escalate?: string;
@@ -68,6 +68,8 @@ Steps:
      (known-repro fixes, well-scoped features, refactors, test writing, CI/tooling)
    - route: claude — when the work needs UX, design, or architecture judgment; naming/API
      design calls; is a tiny diff (<20 lines); or needs session tools
+   - route: opencode — when the repo's pinned build worker is an opencode-harness model
+     (e.g. opencode-deepseek-v4-flash in .factory/config.json); bounded mechanical work
    Default to route: claude when genuinely unsure.
 ${constitutionCtx ? '4. The constitution above defines the standards for this product. Your spec MUST satisfy every standard.' : '4. No constitution loaded — use your best judgment.'}
 
@@ -402,7 +404,7 @@ export async function planPhase(opts: {
 
     // Read route from spec frontmatter (single normalization site: parseSpec)
     const parsed = await readSpec(specPath);
-    let route: 'codex' | 'claude' = parsed.route ?? 'claude';
+    let route: 'codex' | 'claude' | 'opencode' = parsed.route ?? 'claude';
 
     if (localOnly && route !== 'codex') {
       log('warn', 'local-only mode requires a local Codex harness — forcing route to codex');

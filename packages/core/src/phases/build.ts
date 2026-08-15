@@ -26,7 +26,7 @@ export async function buildPhase(opts: {
   specPath: string;
   branch: string;
   constitution: Constitution | null;
-  route: 'codex' | 'claude';
+  route: 'codex' | 'claude' | 'opencode';
   router: ModelRouter;
   log: (
     type: EventKind,
@@ -96,7 +96,7 @@ export async function buildPhase(opts: {
   const isCodexDisabled = opts.codexDisabled ?? false;
 
   let prompt: string;
-  let taskType: 'build_codex' | 'build_claude';
+  let taskType: 'build_codex' | 'build_claude' | 'build_opencode';
 
   if (route === 'codex' && isCodexDisabled) {
     log('warn', 'codex unavailable — falling back to claude');
@@ -122,6 +122,9 @@ Frozen spec:
 ${compactForLocalModel(spec)}
 `
       : buildCommitOnlyPrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding });
+  } else if (route === 'opencode') {
+    taskType = 'build_opencode';
+    prompt = buildOpencodePrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding });
   } else {
     taskType = 'build_claude';
     prompt = disablePublish
@@ -252,6 +255,49 @@ ${compactForLocalModel(spec)}
 
   log('build', `Build complete with model ${result.model}`, { model: result.model });
   return { ok: true, model: result.model };
+}
+
+function buildOpencodePrompt(opts: {
+  issue: number;
+  specPath: string;
+  constitutionCtx: string;
+  spec: string;
+  appPort?: number;
+  appBaseUrl?: string;
+  designGrounding?: string;
+}): string {
+  const { issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding } = opts;
+  return `Implement issue #${issue} exactly per the frozen spec at ${specPath} in this repository.
+Read the full spec before writing any code — it is the approved plan; do not deviate.
+
+${constitutionCtx}
+
+## Spec
+${spec}
+
+Match surrounding code style and idioms. Add or update the tests described in the
+spec's Tests section and actually run them — report the exact command and its output.
+If the repo has a fast verify path (scripts/verify.sh, npm test), run it and fix
+failures before finishing.
+
+When everything passes, commit your work. Commit atomically: create one commit
+per independently testable functional change, each with a clear, conventional
+message describing what changed and why. Never mix unrelated functional changes
+in the same commit. A small single-slice task still yields exactly ONE commit —
+do not split one functional change across filler commits.
+
+Do NOT push, do NOT open a pull request, do NOT merge — a separate checker and
+ship phase handles that next.
+
+Stay strictly within the spec's scope: no unrelated refactors, no drive-by changes.
+If you get genuinely stuck, commit whatever safely builds/passes so far with a
+message explaining what's blocked, and stop there.
+
+Keep sub-agent/parallel-task usage modest: only fan out when a piece of work is
+genuinely independent and parallelizable. Prefer doing the work directly over
+spawning sub-agents for a single small issue — this keeps token usage efficient.
+
+${headlessNote()}${appPort ? `\n\n${appPortNote(appPort, appBaseUrl)}` : ''}${designGrounding ? `\n\n${designGrounding}` : ''}`;
 }
 
 function buildCommitOnlyPrompt(opts: {

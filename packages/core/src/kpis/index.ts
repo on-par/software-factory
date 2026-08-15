@@ -233,16 +233,17 @@ export function phaseOfCostEntry(entry: CostEntry): string | null {
 /** Which provider's bill a cost row lands on (#426). Deliberately a *spend* split,
  *  not a harness split: `gpt-4.1-mini` dispatches through the claude-cli harness but
  *  is billed by OpenAI, so it buckets as `codex`. See ADR (this PR). */
-export type CostRoute = 'codex' | 'claude' | 'other';
+export type CostRoute = 'codex' | 'claude' | 'opencode' | 'other';
 
 /** Task names that name their route outright; checked before the model-family rule. */
 const TASK_ROUTE: Record<string, CostRoute> = {
   build_codex: 'codex',
   build_claude: 'claude',
+  build_opencode: 'opencode',
 };
 
 /** Fixed render order for costByRoute buckets (#426). */
-const ROUTE_ORDER: CostRoute[] = ['codex', 'claude', 'other'];
+const ROUTE_ORDER: CostRoute[] = ['codex', 'claude', 'opencode', 'other'];
 
 export function costRouteOf(entry: CostEntry): CostRoute {
   const byTask = TASK_ROUTE[entry.task];

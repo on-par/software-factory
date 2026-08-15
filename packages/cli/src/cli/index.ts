@@ -941,7 +941,7 @@ export async function shipIssue(
     : worktreePathFor(repoRoot, issueNum, effective.branchPrefix);
   const specPath = resolve(paths.plans, `issue-${issueNum}.md`);
   const runStartedAt = new Date().toISOString();
-  let route: 'codex' | 'claude' | undefined;
+  let route: 'codex' | 'claude' | 'opencode' | undefined;
   let failurePhase: FailurePhase = 'plan';
   let checkSummary: CheckSummary | undefined;
   let reworkRounds: number | undefined;
@@ -1212,10 +1212,13 @@ export async function shipIssue(
       }
     }
     if (buildModel) {
+      const harnessId = router.registryRef.getHarnessId(buildModel);
       const compatible =
         buildRoute === 'codex'
           ? router.registryRef.isCodexModel(buildModel)
-          : router.registryRef.getHarnessId(buildModel) === 'claude-cli';
+          : buildRoute === 'opencode'
+            ? harnessId === 'opencode'
+            : harnessId === 'claude-cli';
       if (!compatible) {
         log(
           'model_override_ignored',

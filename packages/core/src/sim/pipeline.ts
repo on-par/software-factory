@@ -60,7 +60,7 @@ export interface SimIssueOutcome {
   state: SimTerminalState;
   /** The phase the run ended in. 'ship' for a shipped run. */
   phase: SimPhaseName;
-  route: 'codex' | 'claude';
+  route: 'codex' | 'claude' | 'opencode';
   branch: string;
   prNumber?: number;
   reworkRounds: number;
@@ -277,7 +277,7 @@ async function runSimIssue(
   const routedExecutor = jitter ? new SimJitterExecutor(executor, jitter, phaseOf, clock) : executor;
   const routedOctokit = jitter ? withSimJitter(octokit, jitter, phaseOf, clock) : octokit;
   const router = new ModelRouter(simModelsConfig(), simRoutesConfig(), false, routedExecutor);
-  let route: 'codex' | 'claude' = 'claude';
+  let route: 'codex' | 'claude' | 'opencode' = 'claude';
   let reworkRounds = 0;
   let designArtifact: DesignArtifact | null = null;
 

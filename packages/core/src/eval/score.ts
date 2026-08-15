@@ -2,7 +2,7 @@ import { parseSpec } from '../spec/index.js';
 import { isEscalation } from '../utils/index.js';
 import type { DeterministicCheck, ExpectedRoute } from './types.js';
 
-type ScoredRoute = 'codex' | 'claude' | 'escalate' | 'unparseable';
+type ScoredRoute = 'codex' | 'claude' | 'opencode' | 'escalate' | 'unparseable';
 
 export function scoreSpec(
   specContent: string,
