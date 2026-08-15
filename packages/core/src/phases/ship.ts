@@ -89,10 +89,12 @@ export async function shipPhase(opts: {
   let prNumber = await findOpenPR(octokit, owner, repoName, branch);
 
   if (prNumber && adr.committed) {
-    try {
-      await run(`git push -u origin ${shellEscape(branch)}`, { cwd: worktree });
-    } catch {
-      log('ship', 'pushing the ADR commit failed — the open PR may not include it');
+    if (!(await pushBranchVerified(run, worktree, branch, log))) {
+      log(
+        'fail',
+        `ADR commit push failed and origin/${branch} does not match local HEAD — not updating PR #${prNumber}`,
+      );
+      return { ok: false };
     }
   }
 
@@ -127,11 +129,10 @@ export async function shipPhase(opts: {
       return { ok: false };
     }
 
-    // Push branch
-    try {
-      await run(`git push -u origin ${shellEscape(branch)}`, { cwd: worktree });
-    } catch {
-      log('ship', 'push failed — trying to continue');
+    // Push branch — fail closed: never open a PR against an unverified remote head (#640)
+    if (!(await pushBranchVerified(run, worktree, branch, log))) {
+      log('fail', `push to origin/${branch} failed and remote head does not match local HEAD — not opening a PR`);
+      return { ok: false };
     }
 
     const inlineWork = opts.work && opts.work.kind !== GITHUB_ISSUE_SOURCE ? opts.work : undefined;
@@ -219,6 +220,55 @@ This PR passed independent verification by checker agents before shipping.${inli
 
   log('ready', `PR #${prNumber} ready for review`);
   return { ok: true, prNumber };
+}
+
+/** Renders a failed CommandRunner rejection, preferring git's stderr (the rejection
+ *  reason — non-fast-forward vs network) over the generic exec message. */
+function describeRunError(err: unknown): string {
+  if (err && typeof err === 'object') {
+    const stderr = (err as { stderr?: unknown }).stderr;
+    if (typeof stderr === 'string' && stderr.trim() !== '') return stderr.trim();
+    const message = (err as { message?: unknown }).message;
+    if (typeof message === 'string' && message !== '') return message;
+  }
+  return String(err);
+}
+
+/** True only when origin/<branch> provably equals local HEAD. Any ls-remote failure,
+ *  missing remote ref, or SHA mismatch is false — "cannot verify" is never "verified". */
+async function remoteHeadMatchesLocal(run: CommandRunner, worktree: string, branch: string): Promise<boolean> {
+  try {
+    const [{ stdout: local }, { stdout: remote }] = await Promise.all([
+      run('git rev-parse HEAD', { cwd: worktree }),
+      run(`git ls-remote origin ${shellEscape(`refs/heads/${branch}`)}`, { cwd: worktree }),
+    ]);
+    const localSha = local.trim();
+    const remoteSha = remote.trim().split(/\s+/)[0] ?? '';
+    return localSha !== '' && remoteSha === localSha;
+  } catch {
+    return false;
+  }
+}
+
+/** Pushes the branch; on failure logs the real error and returns true only if the
+ *  remote head already matches local HEAD (recovered), false otherwise (#640). */
+async function pushBranchVerified(
+  run: CommandRunner,
+  worktree: string,
+  branch: string,
+  log: (type: EventKind, msg: string) => void,
+): Promise<boolean> {
+  try {
+    await run(`git push -u origin ${shellEscape(branch)}`, { cwd: worktree });
+    return true;
+  } catch (err) {
+    log('warn', `git push of ${branch} failed: ${describeRunError(err)}`);
+    if (await remoteHeadMatchesLocal(run, worktree, branch)) {
+      log('ship', `origin/${branch} already matches local HEAD — continuing after failed push`);
+      return true;
+    }
+    return false;
+  }
 }
 
 async function computeDiffStat(run: CommandRunner, worktree: string): Promise<string> {

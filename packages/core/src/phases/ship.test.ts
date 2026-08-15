@@ -260,34 +260,6 @@ describe('shipPhase self-healing', () => {
     expect(logs).toContainEqual(['ship', 'not recovering ship-it/23-self-heal: no commits ahead of origin/main']);
   });
 
-  it('logs and continues when git push fails instead of aborting the recovery', async () => {
-    const { octokit, calls } = createOctokit();
-    const logs: Array<[string, string]> = [];
-    const run = async (command: string) => {
-      if (command === 'git status --porcelain') return { stdout: '' };
-      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
-      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
-      if (command.startsWith('git push')) throw new Error('remote rejected');
-      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
-      return { stdout: '' };
-    };
-
-    const result = await shipPhase({
-      issue: 23,
-      repo: 'on-par/software-factory',
-      worktree: '/repo-factory-23',
-      branch: 'ship-it/23-self-heal',
-      octokit: octokit as any,
-      watchCI: false,
-      log: (type, msg) => logs.push([type, msg]),
-      run,
-    });
-
-    expect(result).toEqual({ ok: true, prNumber: 123 });
-    expect(logs).toContainEqual(['ship', 'push failed — trying to continue']);
-    expect(calls).toContainEqual(['pulls.create', expect.anything()]);
-  });
-
   it('falls through to pulls.create when findOpenPR throws', async () => {
     const { octokit, calls } = createOctokit();
     octokit.rest.pulls.list = async (args: any) => {
@@ -405,6 +377,114 @@ describe('shipPhase self-healing', () => {
 
     expect(result).toEqual({ ok: false });
     expect(logs).toContainEqual(['fail', 'Could not create or find PR for ship-it/23-self-heal']);
+  });
+});
+
+describe('shipPhase push verification (#640)', () => {
+  it('does not open a PR on a non-fast-forward rejection with an unverifiable remote head', async () => {
+    const { octokit, calls } = createOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      if (command.startsWith('git push')) {
+        throw Object.assign(new Error('Command failed: git push'), {
+          stderr:
+            ' ! [rejected]        ship-it/23-self-heal -> ship-it/23-self-heal (non-fast-forward)\nerror: failed to push some refs',
+        });
+      }
+      if (command === 'git rev-parse HEAD') return { stdout: 'aaa111\n' };
+      if (command === "git ls-remote origin 'refs/heads/ship-it/23-self-heal'") {
+        return { stdout: 'bbb222\trefs/heads/ship-it/23-self-heal\n' };
+      }
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
+    expect(logs.some((l) => l[0] === 'ready')).toBe(false);
+    expect(logs.some((l) => l[0] === 'warn' && l[1].includes('non-fast-forward'))).toBe(true);
+    expect(logs.some((l) => l[0] === 'fail' && l[1].includes('does not match local HEAD'))).toBe(true);
+  });
+
+  it('does not open a PR when the push fails and the remote head cannot be verified (network failure)', async () => {
+    const { octokit, calls } = createOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      if (command.startsWith('git push')) {
+        throw Object.assign(new Error('push failed'), {
+          stderr: 'fatal: unable to access https://github.com/...: Could not resolve host: github.com',
+        });
+      }
+      if (command === 'git rev-parse HEAD') return { stdout: 'aaa111\n' };
+      if (command === "git ls-remote origin 'refs/heads/ship-it/23-self-heal'") {
+        throw new Error('Could not resolve host: github.com');
+      }
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
+    expect(logs.some((l) => l[0] === 'warn' && l[1].includes('Could not resolve host'))).toBe(true);
+    expect(logs.some((l) => l[0] === 'fail' && l[1].includes('does not match local HEAD'))).toBe(true);
+  });
+
+  it('recovers and proceeds when the push errors but the remote head already matches local HEAD', async () => {
+    const { octokit, calls } = createOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      if (command.startsWith('git push')) throw new Error('reported failure but actually landed');
+      if (command === 'git rev-parse HEAD') return { stdout: 'aaa111\n' };
+      if (command === "git ls-remote origin 'refs/heads/ship-it/23-self-heal'") {
+        return { stdout: 'aaa111\trefs/heads/ship-it/23-self-heal\n' };
+      }
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 123 });
+    expect(calls).toContainEqual(['pulls.create', expect.anything()]);
+    expect(logs.some((l) => l[0] === 'ship' && l[1].includes('already matches local HEAD'))).toBe(true);
   });
 });
 
@@ -971,6 +1051,51 @@ describe('ADR writer (#482)', () => {
 
     expect(result).toEqual({ ok: true, prNumber: 555 });
     expect(commands).toContainEqual("git push -u origin 'ship-it/482-adr-writer'");
+  });
+
+  it('fails the ship when pushing the ADR commit to an already-open PR cannot be verified (#640)', async () => {
+    const worktree = await makeWorktree();
+    const specPath = join(worktree, 'issue-482.md');
+    await writeFile(specPaths(specPath).adr, JSON.stringify([goodDraft], null, 2));
+
+    const { octokit, calls } = createOctokit();
+    (octokit.rest.pulls.list as any) = async () => {
+      return { data: [{ number: 555 }] };
+    };
+    const commands: string[] = [];
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      commands.push(command);
+      if (command.startsWith('git push')) {
+        throw Object.assign(new Error('Command failed: git push'), {
+          stderr: 'error: failed to push some refs to origin',
+        });
+      }
+      if (command === 'git rev-parse HEAD') return { stdout: 'aaa111\n' };
+      if (command === "git ls-remote origin 'refs/heads/ship-it/482-adr-writer'") {
+        return { stdout: 'bbb222\trefs/heads/ship-it/482-adr-writer\n' };
+      }
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 482,
+      repo: 'on-par/software-factory',
+      worktree,
+      branch: 'ship-it/482-adr-writer',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+      specPath,
+      today: '2026-07-25',
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(logs.some((l) => l[0] === 'ready')).toBe(false);
+    expect(calls.some((c) => c[0] === 'issues.createComment')).toBe(false);
+    expect(calls.some((c) => c[0] === 'pulls.get')).toBe(false);
+    expect(logs.some((l) => l[0] === 'warn' && l[1].includes('failed to push some refs'))).toBe(true);
   });
 
   it('is a byte-identical no-op with no <spec>.adr.json — no git add/commit, no adr_* logs', async () => {
