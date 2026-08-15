@@ -257,7 +257,7 @@ describe('parseConfigV2', () => {
 describe('factoryConfigV2JsonSchema', () => {
   it('emits a draft 2020-12 JSON Schema with descriptions and no comment fields', () => {
     const js = factoryConfigV2JsonSchema();
-    expect(js.$schema).toMatch(/json-schema\.org/);
+    expect(js.$schema).toMatch(/^https:\/\/json-schema\.org\//);
     const serialized = JSON.stringify(js);
     expect(serialized).toContain('usage cap');
     expect(serialized).not.toContain('"comment"');
