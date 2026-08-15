@@ -63,7 +63,7 @@ The JSON must match exactly this schema:
       "verification": [
         { "command": string, "passWhen": string }
       ] (at least 1 step),
-      "tracesTo": string[] (intent IDs, optional),
+      "tracesTo": string[] (intent IDs, optional — each MUST match ^INT-[A-Z]+-\d{2,}$, e.g. "INT-PROBLEM-01"; omit the field when no intent exists)
       "sequencing": string (optional)
     }
   ]
@@ -181,41 +181,47 @@ export function parseDecompositionOutput(
   }
 
   const { epic: epicInput, stories: storyInputs } = parsed.data;
-  const epic = EpicSchema.parse({
-    schemaVersion: CONTRACTS_SCHEMA_VERSION,
-    kind: 'epic',
-    title: epicInput.title,
-    why: epicInput.why,
-    doneWhen: epicInput.doneWhen,
-    children: epicInput.children,
-    labels: [],
-  });
-  const stories = storyInputs.map((story) =>
-    StorySchema.parse({
+  try {
+    const epic = EpicSchema.parse({
       schemaVersion: CONTRACTS_SCHEMA_VERSION,
-      kind: 'story',
-      title: story.title,
-      role: story.role,
-      want: story.want,
-      soThat: story.soThat,
-      problemStatement: story.problemStatement,
-      inScope: story.inScope,
-      outOfScope: story.outOfScope,
-      acceptanceCriteria: story.acceptanceCriteria.map((criterion) => ({
-        name: criterion.name,
-        given: criterion.given,
-        when: criterion.when,
-        then: criterion.then,
-      })),
-      verification: story.verification,
-      filesLikelyTouched: [],
+      kind: 'epic',
+      title: epicInput.title,
+      why: epicInput.why,
+      doneWhen: epicInput.doneWhen,
+      children: epicInput.children,
       labels: [],
-      tracesTo: story.tracesTo,
-      ...(story.sequencing !== undefined ? { investNote: story.sequencing } : {}),
-    }),
-  );
-
-  return { ok: true, decomposition: { epic, stories } };
+    });
+    const stories = storyInputs.map((story) =>
+      StorySchema.parse({
+        schemaVersion: CONTRACTS_SCHEMA_VERSION,
+        kind: 'story',
+        title: story.title,
+        role: story.role,
+        want: story.want,
+        soThat: story.soThat,
+        problemStatement: story.problemStatement,
+        inScope: story.inScope,
+        outOfScope: story.outOfScope,
+        acceptanceCriteria: story.acceptanceCriteria.map((criterion) => ({
+          name: criterion.name,
+          given: criterion.given,
+          when: criterion.when,
+          then: criterion.then,
+        })),
+        verification: story.verification,
+        filesLikelyTouched: [],
+        labels: [],
+        tracesTo: story.tracesTo,
+        ...(story.sequencing !== undefined ? { investNote: story.sequencing } : {}),
+      }),
+    );
+    return { ok: true, decomposition: { epic, stories } };
+  } catch (error) {
+    // Strict contracts-schema rejections (e.g. tracesTo must look like INT-PROBLEM-01)
+    // must return as a retryable failure, not throw — a throw skips the bounded retry
+    // loop in decomposeOversizedIssue and the decompose dies after one attempt.
+    return { ok: false, reason: `output fails the contracts schema: ${error instanceof Error ? error.message : String(error)}` };
+  }
 }
 
 // ---------------------------------------------------------------------------
