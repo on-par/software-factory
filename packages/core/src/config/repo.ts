@@ -56,6 +56,10 @@ const RepoFactoryConfigSchema = z
       })
       .strict()
       .optional(),
+    /** Repo pins the build route for every issue (e.g. "opencode"). The plan
+     *  phase still writes the spec, but the pinned route wins over the model's
+     *  route choice so deepseek workers are actually used when pinned. */
+    route: z.enum(['codex', 'claude', 'opencode']).optional(),
   })
   .strict();
 

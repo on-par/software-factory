@@ -603,6 +603,9 @@ export class ModelRouter {
       // own commits). Running a codex-cli model here "succeeds" but leaves the
       // worktree with no commits, so the ship phase fails and parks the lane.
       models = models.filter((model) => this.registry.getHarnessId(model) === 'claude-cli');
+    } else if (requires === 'opencode') {
+      // build_opencode runs through the opencode CLI harness (e.g. deepseek).
+      models = models.filter((model) => this.registry.getHarnessId(model) === 'opencode');
     }
     if (taskRequiresAgenticHarness(task)) {
       models = models.filter((model) => isAgenticHarness(this.registry.getHarnessId(model) ?? ''));

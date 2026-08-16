@@ -208,6 +208,19 @@ describe('parseDecompositionOutput', () => {
     const result = parseDecompositionOutput(oversized);
     expect(result.ok).toBe(false);
   });
+
+  it('returns a retryable failure (not a throw) when tracesTo violates the contracts schema format', () => {
+    // The contracts StorySchema requires intent IDs to look like INT-PROBLEM-01.
+    // A model emitting a raw issue number must surface as {ok:false} so the
+    // bounded retry loop can re-prompt — a throw would skip the retry entirely.
+    const badTracesTo = VALID_DECOMPOSITION_JSON.replace('"tracesTo": ["INT-PROBLEM-01"]', '"tracesTo": ["#375"]');
+    let result: ReturnType<typeof parseDecompositionOutput>;
+    expect(() => {
+      result = parseDecompositionOutput(badTracesTo);
+    }).not.toThrow();
+    expect(result!.ok).toBe(false);
+    if (!result!.ok) expect(result!.reason).toContain('contracts schema');
+  });
 });
 
 describe('checkStoryInvest', () => {

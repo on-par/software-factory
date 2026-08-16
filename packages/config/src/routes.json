@@ -24,6 +24,11 @@
       "description": "Claude implementation from frozen spec (design/UX tasks) - requires the claude-cli harness, which drives its own commits",
       "requires": "claude"
     },
+    "build_opencode": {
+      "tier": "worker",
+      "description": "OpenCode CLI implementation from frozen spec - requires the opencode harness (e.g. opencode-deepseek-v4-flash)",
+      "requires": "opencode"
+    },
     "check_compile": {
       "tier": "checker",
       "description": "Build/compile verification"
