@@ -187,6 +187,9 @@ export async function planPhase(opts: {
   enforceSizeGate?: boolean;
   /** Local-only mode: force the route to codex so builds use a local harness. */
   localOnly?: boolean;
+  /** Repo config pins the build route (`.factory/config.json` → `route`). Forced
+   *  after plan so the spec frontmatter stays the frozen truth. */
+  preferredRoute?: 'codex' | 'claude' | 'opencode';
 }): Promise<PlanResult> {
   const {
     issue,
@@ -418,6 +421,12 @@ export async function planPhase(opts: {
       // Keep the persisted spec's frontmatter in sync with the actual route,
       // since it's the frozen artifact downstream consumers (eval scoring, PR review) read.
       await updateSpecRoute(specPath, 'claude', 'codex-disabled');
+    }
+
+    if (opts.preferredRoute && route !== opts.preferredRoute) {
+      log('model-override', `repo config pins build route to ${opts.preferredRoute} — overriding plan's ${route}`);
+      route = opts.preferredRoute;
+      await updateSpecRoute(specPath, opts.preferredRoute, 'repo-config-pin');
     }
 
     const { artifact: designArtifact, errors: designErrors } = parseDesignArtifact(parsed.data);

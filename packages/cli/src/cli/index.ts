@@ -1166,6 +1166,7 @@ export async function shipIssue(
       enforceReadiness: true,
       fastPath: efficiency.fastPath,
       enforceSizeGate: true,
+      preferredRoute: repoConfig?.route,
     });
     route = plan.route;
     if (!plan.ok) {
