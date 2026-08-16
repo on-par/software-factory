@@ -16,6 +16,7 @@ import { buildFastPathSpec, isFastPathEligible } from '../efficiency/fast-path.j
 import type { EventKind } from '../events/kinds.js';
 import { buildReadinessEnrichmentPrompt } from '../readiness/enrich.js';
 import { decomposeOversizedIssue } from '../readiness/decompose.js';
+import { MAX_BUILD_CALL_EDGES, MAX_BUILD_SIGNATURES, MAX_BUILD_TARGET_TYPES } from '../readiness/size.js';
 import { scoreIssueReadiness } from '../readiness/index.js';
 import type { ModelRouter } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
@@ -71,7 +72,14 @@ Steps:
    - route: opencode — when the repo's pinned build worker is an opencode-harness model
      (e.g. opencode-deepseek-v4-flash in .factory/config.json); bounded mechanical work
    Default to route: claude when genuinely unsure.
-${constitutionCtx ? '4. The constitution above defines the standards for this product. Your spec MUST satisfy every standard.' : '4. No constitution loaded — use your best judgment.'}
+4. RIGHT-SIZE THE SLICE. A single BUILD pass must be bounded: aim for roughly
+   5-15 minutes of agent work, a handful of files, at most ~6 target types /
+   ~8 signatures / ~10 call edges in the design block. If the issue genuinely
+   needs more surface than that, do NOT write a mega-spec — instead print a line
+   starting with ESCALATE: asking to split the issue into smaller slices first,
+   and do not write the spec file. A slice that takes 40 minutes to build is a
+   planning failure, not a build problem.
+${constitutionCtx ? '5. The constitution above defines the standards for this product. Your spec MUST satisfy every standard.' : '5. No constitution loaded — use your best judgment.'}
 
 Write EXACTLY ONE file, at ${specPath}, in this shape:
 ---
@@ -456,6 +464,38 @@ export async function planPhase(opts: {
         const summary = designArtifact.openQuestions.join('; ');
         const truncated = summary.length > 300 ? `${summary.slice(0, 300)}…` : summary;
         log('design_open_questions', `plan has ${designArtifact.openQuestions.length} open question(s): ${truncated}`);
+      }
+
+      // Build-scope gate: a plan whose declared surface is large enough to take
+      // ~40 min of agent churn is a planning failure, not a build problem.
+      // Decompose the issue instead of handing a mega-slice to BUILD (Patrick,
+      // 2026-08-15: "40 minutes is too long... fix the planning part to detect
+      // complexity and reduce the time the build needs to work").
+      if (
+        enforceSizeGate &&
+        source.kind === GITHUB_ISSUE_SOURCE &&
+        (designArtifact.targetTypes.length > MAX_BUILD_TARGET_TYPES ||
+          designArtifact.signatures.length > MAX_BUILD_SIGNATURES ||
+          designArtifact.callGraph.length > MAX_BUILD_CALL_EDGES)
+      ) {
+        const params = source.params as GithubIssueParams;
+        await decomposeOversizedIssue({
+          issue: params.issue,
+          repo: params.repo,
+          title: issueTitle,
+          body: issueBody,
+          worktree,
+          router,
+          octokit,
+          log: (type, msg) => log(type, msg),
+          timeoutSeconds: Math.min(timeoutSeconds ?? 1800, 300),
+        });
+        const reason =
+          `plan scope exceeds the bounded-build budget ` +
+          `(${designArtifact.targetTypes.length} target types, ${designArtifact.signatures.length} signatures, ` +
+          `${designArtifact.callGraph.length} call edges) — parked for decomposition`;
+        log('size-gate-escalated', reason);
+        return { ok: false, route, specPath, model: result.model, escalate: reason, designArtifact: null };
       }
     } else {
       log('design_artifact_invalid', `spec frontmatter has no valid design artifact: ${designErrors.join('; ')}`);
