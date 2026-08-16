@@ -29,7 +29,7 @@ export interface DeterministicCheck {
 export interface CaseResult {
   id: string;
   pass: boolean;
-  route: 'codex' | 'claude' | 'escalate' | 'unparseable';
+  route: 'codex' | 'claude' | 'opencode' | 'escalate' | 'unparseable';
   expectedRoute: ExpectedRoute;
   routeCorrect: boolean;
   checks: DeterministicCheck[];
