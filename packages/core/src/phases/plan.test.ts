@@ -359,17 +359,26 @@ npm run test`;
     - packages/b.ts
     - packages/c.ts
   targetTypes:
-${Array.from({ length: 7 }, (_, i) => `    - name: Type${i}
+${Array.from(
+  { length: 7 },
+  (_, i) => `    - name: Type${i}
       file: packages/t${i}.ts
-      kind: changed`).join('\n')}
+      kind: changed`,
+).join('\n')}
   signatures:
-${Array.from({ length: 7 }, (_, i) => `    - symbol: fn${i}
+${Array.from(
+  { length: 7 },
+  (_, i) => `    - symbol: fn${i}
       file: packages/f${i}.ts
-      signature: '(x: string) => void'`).join('\n')}
+      signature: '(x: string) => void'`,
+).join('\n')}
   callGraph:
-${Array.from({ length: 7 }, (_, i) => `    - from: caller
+${Array.from(
+  { length: 7 },
+  (_, i) => `    - from: caller
       to: fn${i}
-      note: edge`).join('\n')}
+      note: edge`,
+).join('\n')}
   behaviorContract:
     - Everything changes.
   verificationPlan:
@@ -395,9 +404,7 @@ ${Array.from({ length: 7 }, (_, i) => `    - from: caller
           problemStatement: 'The slice is too big.',
           inScope: ['One file'],
           outOfScope: ['Everything else'],
-          acceptanceCriteria: [
-            { name: 'Works', given: [], when: ['run'], then: ['works'] },
-          ],
+          acceptanceCriteria: [{ name: 'Works', given: [], when: ['run'], then: ['works'] }],
           verification: [{ command: 'npm test', passWhen: 'passes' }],
           tracesTo: ['INT-PROBLEM-01'],
         },
@@ -428,7 +435,12 @@ ${Array.from({ length: 7 }, (_, i) => `    - from: caller
         octokit: {
           rest: {
             issues: {
-              get: async () => ({ data: { title: 'Mega slice', body: '## Problem statement\nToo big.\n## In scope\n- one\n## Out of scope\n- rest\n## Acceptance criteria\n- [ ] works\n## Verification\nnpm test' } }),
+              get: async () => ({
+                data: {
+                  title: 'Mega slice',
+                  body: '## Problem statement\nToo big.\n## In scope\n- one\n## Out of scope\n- rest\n## Acceptance criteria\n- [ ] works\n## Verification\nnpm test',
+                },
+              }),
               createComment,
             },
           },
@@ -494,7 +506,12 @@ ${Array.from({ length: 7 }, (_, i) => `    - from: caller
         octokit: {
           rest: {
             issues: {
-              get: async () => ({ data: { title: 'Small slice', body: '## Problem statement\nSmall.\n## In scope\n- one\n## Out of scope\n- rest\n## Acceptance criteria\n- [ ] works\n## Verification\nnpm test' } }),
+              get: async () => ({
+                data: {
+                  title: 'Small slice',
+                  body: '## Problem statement\nSmall.\n## In scope\n- one\n## Out of scope\n- rest\n## Acceptance criteria\n- [ ] works\n## Verification\nnpm test',
+                },
+              }),
               createComment,
             },
           },

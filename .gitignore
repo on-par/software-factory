@@ -1,6 +1,12 @@
 # Runtime state (per-repo, created by the factory)
 .factory/
 
+# Scratch worktrees/clones for manual conflict resolution etc. — never
+# belongs inside the repo tree (2026-08-16: an abandoned .tmp/wt-711
+# worktree sat here untracked and got picked up by `prettier --check .`,
+# breaking format:check for every unrelated verify.sh run until removed).
+.tmp/
+
 # OS files
 .DS_Store
 

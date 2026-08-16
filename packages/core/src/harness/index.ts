@@ -8,7 +8,11 @@ import type { FailoverReason, TaskType } from '../types/index.js';
 /** Router's FailoverReason is a type alias of HarnessFailureReason (see
  *  ../router/index.ts) so the two unions can never drift. */
 /** Tasks that edit files in a worktree and therefore require an agentic harness. */
-export const AGENTIC_BUILD_TASKS = ['build_codex', 'build_claude', 'build_opencode'] as const satisfies readonly TaskType[];
+export const AGENTIC_BUILD_TASKS = [
+  'build_codex',
+  'build_claude',
+  'build_opencode',
+] as const satisfies readonly TaskType[];
 
 /** Single source of truth for whether a task requires a file-editing (agentic) harness. */
 export function taskRequiresAgenticHarness(task: TaskType): boolean {

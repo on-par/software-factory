@@ -2,6 +2,7 @@ node_modules/
 dist/
 coverage/
 .factory/
+.tmp/
 package-lock.json
 *.tsbuildinfo
 evals/

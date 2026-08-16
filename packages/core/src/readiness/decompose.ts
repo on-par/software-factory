@@ -63,7 +63,7 @@ The JSON must match exactly this schema:
       "verification": [
         { "command": string, "passWhen": string }
       ] (at least 1 step),
-      "tracesTo": string[] (intent IDs, optional — each MUST match ^INT-[A-Z]+-\d{2,}$, e.g. "INT-PROBLEM-01"; omit the field when no intent exists)
+      "tracesTo": string[] (intent IDs, optional — each MUST match ^INT-[A-Z]+-\\d{2,}$, e.g. "INT-PROBLEM-01"; omit the field when no intent exists)
       "sequencing": string (optional)
     }
   ]
@@ -220,7 +220,10 @@ export function parseDecompositionOutput(
     // Strict contracts-schema rejections (e.g. tracesTo must look like INT-PROBLEM-01)
     // must return as a retryable failure, not throw — a throw skips the bounded retry
     // loop in decomposeOversizedIssue and the decompose dies after one attempt.
-    return { ok: false, reason: `output fails the contracts schema: ${error instanceof Error ? error.message : String(error)}` };
+    return {
+      ok: false,
+      reason: `output fails the contracts schema: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
 }
 
