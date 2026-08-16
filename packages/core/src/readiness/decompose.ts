@@ -63,7 +63,7 @@ The JSON must match exactly this schema:
       "verification": [
         { "command": string, "passWhen": string }
       ] (at least 1 step),
-      "tracesTo": string[] (intent IDs, optional — each MUST match ^INT-[A-Z]+-\d{2,}$, e.g. "INT-PROBLEM-01"; omit the field when no intent exists)
+      "tracesTo": string[] (intent IDs, optional — each MUST match ^INT-[A-Z]+-\\d{2,}$, e.g. "INT-PROBLEM-01"; omit the field when no intent exists)
       "sequencing": string (optional)
     }
   ]
