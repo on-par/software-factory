@@ -112,6 +112,7 @@ import {
   resolveSkipCI,
   resolveTimeouts,
   resolveUsageCap,
+  ReworkHistory,
   runAutoIngest,
   scoreIssueReadiness,
   shipPhase,
@@ -828,7 +829,7 @@ async function cmdTui() {
   });
 }
 
-export type ParkReason = Extract<EventKind, 'escalate' | 'timeout' | 'fail' | 'conflict' | 'ci-failed'>;
+export type ParkReason = Extract<EventKind, 'escalate' | 'timeout' | 'fail' | 'conflict' | 'ci-failed' | 'held'>;
 
 export class LaneParkError extends Error {
   constructor(
@@ -912,6 +913,7 @@ export async function shipIssue(
   const timeouts = resolveTimeouts(factoryConfig);
   const failoverSettings = resolveAutoFailover(factoryConfig);
   const breaker = new ProviderBreaker(paths.breaker);
+  const reworkHistory = new ReworkHistory(paths.reworkHistory);
   const effective = resolveEffectiveConfig(repoConfig);
   const router = new ModelRouter(
     modelsConfig,
@@ -1265,6 +1267,10 @@ export async function shipIssue(
 
     // CHECK
     failurePhase = 'check';
+    // #740: the signature this issue parked/got stuck on in a prior run (if any) — a
+    // watchdog that relaunches a dead session sees no memory of it otherwise, and
+    // walks straight back into the same rework budget against an unfixed root cause.
+    const priorFailureSignature = await reworkHistory.priorSignature(issueNum);
     const check = await checkPhase({
       issue: issueNum,
       worktree,
@@ -1281,6 +1287,7 @@ export async function shipIssue(
       appPort,
       appBaseUrl,
       onPgid,
+      priorFailureSignature,
     });
     checkSummary = check.summary;
     reworkRounds = check.reworkRounds;
@@ -1293,13 +1300,26 @@ export async function shipIssue(
       for (const f of failures) {
         console.error(chalk.red(`  FAIL: ${f.checker} — ${f.details}`));
       }
+      if (check.failureSignature !== undefined) {
+        await reworkHistory.record(
+          issueNum,
+          check.failureSignature,
+          failures.map((f) => f.checker),
+        );
+      }
       throw new LaneParkError(
-        check.stuck
-          ? `lane stuck after ${check.reworkRounds} rework rounds (identical failures) — escalated`
-          : `${check.summary.failures} check failures after ${check.reworkRounds} rework rounds`,
-        check.stuck ? 'escalate' : 'fail',
+        check.crossRunStuck
+          ? `issue held: identical failure signature parked this lane in a prior run too (${check.reworkRounds} rework rounds burned there, 0 here) — needs a human decision`
+          : check.stuck
+            ? `lane stuck after ${check.reworkRounds} rework rounds (identical failures) — escalated`
+            : `${check.summary.failures} check failures after ${check.reworkRounds} rework rounds`,
+        check.crossRunStuck ? 'held' : check.stuck ? 'escalate' : 'fail',
       );
     }
+    // Clean check (first try or after rework fixed it) — clear any stale history
+    // for this issue so a future, genuinely different failure isn't mistaken for
+    // a repeat of one that's already resolved.
+    await reworkHistory.clear(issueNum);
 
     if (ctx?.localOnly) {
       log('local-only-complete', `local-only run complete in ${worktree} — publishing disabled, no PR created`);

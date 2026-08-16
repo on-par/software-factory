@@ -73,6 +73,7 @@ describe('getFactoryPaths', () => {
     expect(paths.portsLock).toBe(resolve(repoRoot, '.factory', 'ports.lock'));
     expect(paths.proxyState).toBe(resolve(repoRoot, '.factory', 'proxy.json'));
     expect(paths.breaker).toBe(resolve(repoRoot, '.factory', 'breaker.json'));
+    expect(paths.reworkHistory).toBe(resolve(repoRoot, '.factory', 'rework-history.json'));
   });
 });
 

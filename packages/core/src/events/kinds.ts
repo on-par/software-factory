@@ -58,6 +58,7 @@ export type EventKind =
   | 'fail'
   | 'failover'
   | 'fast_path'
+  | 'held'
   | 'human-abandoned'
   | 'human-approved'
   | 'human-edited'
@@ -200,6 +201,11 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   fail: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   failover: { severity: 'info', isPark: false, isTerminal: false },
   fast_path: { severity: 'info', isPark: false, isTerminal: false },
+  // A lane parked on the exact same checker-failure signature it parked on in
+  // a prior run (ReworkHistory, #740) — distinct from 'escalate'/'fail' so a
+  // watchdog or human scanning events.ndjson can tell "already tried and
+  // failed identically once, needs a decision" apart from a fresh park.
+  held: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   'human-abandoned': { severity: 'info', isPark: false, isTerminal: true },
   'human-approved': { severity: 'info', isPark: false, isTerminal: false },
   'human-edited': { severity: 'info', isPark: false, isTerminal: false },

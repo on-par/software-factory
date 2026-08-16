@@ -17,6 +17,15 @@ export interface CheckPhaseResult {
   summary: CheckSummary;
   reworkRounds: number;
   stuck?: boolean;
+  /** True when round one's failure signature already matched `priorFailureSignature`
+   *  (#740) — the rework loop was skipped entirely (0 rounds burned) rather than
+   *  re-running a full budget against a root cause a prior run already exhausted
+   *  its rework budget on without fixing. Always implies `stuck: true`. */
+  crossRunStuck?: boolean;
+  /** Deterministic signature of the final failing checks, for the caller to persist
+   *  via ReworkHistory so a future run can detect a repeat. Present whenever the
+   *  phase ends with `summary.failures > 0`; absent when it passes clean. */
+  failureSignature?: string;
 }
 
 const MAX_REWORK_ROUNDS = 3;
@@ -135,6 +144,10 @@ export async function checkPhase(opts: {
   /** Stable lane URL from the factory proxy (e.g. http://<lane>.factory.localhost), when running. */
   appBaseUrl?: string;
   onPgid?: (pgid: number) => void;
+  /** Failure signature this issue parked/got stuck on in a prior run (ReworkHistory,
+   *  #740). When round one's signature matches, the rework loop is skipped entirely
+   *  instead of re-burning a full budget against an unfixed root cause. */
+  priorFailureSignature?: string;
 }): Promise<CheckPhaseResult> {
   const {
     issue,
@@ -152,6 +165,7 @@ export async function checkPhase(opts: {
     appPort,
     appBaseUrl,
     onPgid,
+    priorFailureSignature,
   } = opts;
 
   let probe = await probeWorktree(worktree);
@@ -180,6 +194,32 @@ export async function checkPhase(opts: {
   let summary = await runAllCheckers(ctx, router, constitution, checkTimeoutSeconds);
   let reworkRounds = 0;
   const maxRounds = autoRework ? Math.min(maxReworkRounds, MAX_REWORK_ROUNDS) : 0;
+
+  // Cross-run stuck (#740): round one already reproduces the exact failure a
+  // prior run parked on. Skip the rework loop entirely rather than re-burning
+  // a full budget against a root cause nothing has fixed since — a watchdog
+  // relaunching a dead session every ~10 minutes would otherwise walk straight
+  // back into the same 3 rework rounds indefinitely.
+  if (
+    summary.failures > 0 &&
+    priorFailureSignature !== undefined &&
+    failureSignature(summary) === priorFailureSignature
+  ) {
+    const failingChecks = failingCheckerNames(summary);
+    log(
+      'held',
+      `issue already parked on this exact failure signature in a prior run (${failingChecks.join(', ')}) — holding for a human decision instead of burning another rework budget`,
+      { rework: { round: 0, failingChecks, cause: 'factory-fault', stuck: true, ...testFailureEvidence(summary) } },
+    );
+    return {
+      passed: false,
+      summary,
+      reworkRounds: 0,
+      stuck: true,
+      crossRunStuck: true,
+      failureSignature: priorFailureSignature,
+    };
+  }
 
   let stuck = false;
   let noProgressStreak = 0;
@@ -267,7 +307,13 @@ export async function checkPhase(opts: {
     summary = { ...summary, warnings: finalHeadedSignals };
   }
 
-  return { passed: summary.failures === 0, summary, reworkRounds, stuck };
+  return {
+    passed: summary.failures === 0,
+    summary,
+    reworkRounds,
+    stuck,
+    failureSignature: summary.failures > 0 ? failureSignature(summary) : undefined,
+  };
 }
 
 interface ReworkWorkerOptions {

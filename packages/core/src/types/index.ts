@@ -189,7 +189,9 @@ export type HumanEventType = 'human-approved' | 'human-edited' | 'human-restarte
 
 /** Structured payload carried on `rework`/`stuck` events for later metrics (#386). */
 export interface ReworkInfo {
-  /** 1-based rework round number. */
+  /** 1-based rework round number, or 0 for a cross-run 'held' pre-empt (#740)
+   *  where round one already matched a prior run's failure signature and no
+   *  rework round actually ran. */
   round: number;
   /** Checker names that failed this round (e.g. ['tests','lint']). */
   failingChecks: string[];

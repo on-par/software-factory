@@ -155,6 +155,79 @@ describe('checkPhase auto rework', () => {
     },
   );
 
+  it(
+    "skips the rework loop entirely and reports crossRunStuck when round one matches a prior run's failure signature (#740)",
+    { timeout: 120_000 },
+    async () => {
+      // First run establishes what signature this fixture produces (no priorFailureSignature yet).
+      const first = await makeFailingWorktree();
+      const baseline = await checkPhase({
+        issue: 77,
+        worktree: first.worktree,
+        specPath: first.specPath,
+        router: makeRouter().router,
+        constitution: null,
+        log: () => {},
+        maxReworkRounds: 1,
+      });
+      expect(baseline.failureSignature).toBeDefined();
+
+      // A fresh "run" (fresh worktree, fresh router/stub) hits the identical failure
+      // on round one — simulates a watchdog relaunch walking back into the same lane.
+      const second = await makeFailingWorktree();
+      const { router, stub } = makeRouter();
+      const logCalls: Array<[string, string, ({ rework?: ReworkInfo } | undefined)?]> = [];
+
+      const check = await checkPhase({
+        issue: 77,
+        worktree: second.worktree,
+        specPath: second.specPath,
+        router,
+        constitution: null,
+        log: (type, msg, extra) => {
+          logCalls.push([type, msg, extra]);
+        },
+        priorFailureSignature: baseline.failureSignature,
+      });
+
+      expect(check.passed).toBe(false);
+      expect(check.stuck).toBe(true);
+      expect(check.crossRunStuck).toBe(true);
+      expect(check.reworkRounds).toBe(0);
+      // No rework budget burned: the worker was never invoked this run.
+      expect(stub.calls).toHaveLength(0);
+
+      const heldCalls = logCalls.filter(([type]) => type === 'held');
+      expect(heldCalls).toHaveLength(1);
+      expect(heldCalls[0][2]?.rework?.round).toBe(0);
+      expect(heldCalls[0][2]?.rework?.stuck).toBe(true);
+      expect(heldCalls[0][2]?.rework?.failingChecks.length).toBeGreaterThan(0);
+    },
+  );
+
+  it(
+    "runs the normal rework loop when priorFailureSignature does not match this run's failure (#740)",
+    { timeout: 120_000 },
+    async () => {
+      const { worktree, specPath } = await makeFailingWorktree();
+      const { router, stub } = makeRouter();
+
+      const check = await checkPhase({
+        issue: 77,
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        log: () => {},
+        priorFailureSignature: 'a-signature-this-run-does-not-produce',
+      });
+
+      expect(check.crossRunStuck).toBeFalsy();
+      expect(check.reworkRounds).toBeGreaterThan(0);
+      expect(stub.calls.length).toBeGreaterThan(0);
+    },
+  );
+
   it('emits a rework event carrying structured cause metadata', { timeout: 120_000 }, async () => {
     const { worktree, specPath } = await makeFailingWorktree();
     const { router } = makeRouter();
