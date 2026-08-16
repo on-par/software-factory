@@ -141,6 +141,10 @@ export { failoversFrom, ModelRouter } from './router/index.js';
 export type { BreakerEntry, BreakerStatus } from './router/breaker.js';
 export { gateBuildOnBreaker, ProviderBreaker } from './router/breaker.js';
 
+// Cross-run failure-signature memory (#740)
+export type { ReworkHistoryEntry } from './checkers/rework-history.js';
+export { ReworkHistory } from './checkers/rework-history.js';
+
 // Coding harness contract
 export type {
   CodingHarness,

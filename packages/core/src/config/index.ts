@@ -410,6 +410,7 @@ export function getFactoryPaths(repoRoot: string) {
     proxyState: resolve(state, 'proxy.json'),
     config: resolve(state, 'config.json'),
     breaker: resolve(state, 'breaker.json'),
+    reworkHistory: resolve(state, 'rework-history.json'),
   };
 }
 
