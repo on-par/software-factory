@@ -15,7 +15,7 @@ const models: ModelsConfig = {
   version: 1,
   models: {
     'stub-model': {
-      provider: 'custom',
+      provider: 'openai',
       tier: 'boss',
       costPerMtokInput: 0,
       costPerMtokOutput: 0,

@@ -348,6 +348,167 @@ npm run test`;
     expect(updates).toBe(0);
   });
 
+  describe('enforced build-scope budget (2026-08-15)', () => {
+    const megaSliceYaml = `design:
+  restatedProblem: A slice that is really five slices.
+  approach:
+    chosen: Do all of it.
+    rejected: []
+  interfacesTouched:
+    - packages/a.ts
+    - packages/b.ts
+    - packages/c.ts
+  targetTypes:
+${Array.from({ length: 7 }, (_, i) => `    - name: Type${i}
+      file: packages/t${i}.ts
+      kind: changed`).join('\n')}
+  signatures:
+${Array.from({ length: 7 }, (_, i) => `    - symbol: fn${i}
+      file: packages/f${i}.ts
+      signature: '(x: string) => void'`).join('\n')}
+  callGraph:
+${Array.from({ length: 7 }, (_, i) => `    - from: caller
+      to: fn${i}
+      note: edge`).join('\n')}
+  behaviorContract:
+    - Everything changes.
+  verificationPlan:
+    - command: npm test
+      passWhen: tests pass
+  riskBlastRadius: Everything.
+  openQuestions: []
+`;
+
+    const validDecomposition = JSON.stringify({
+      epic: {
+        title: 'Split the mega slice',
+        why: 'One slice is too big for one build pass.',
+        doneWhen: ['The mega slice is split'],
+        children: ['Small slice one'],
+      },
+      stories: [
+        {
+          title: 'Small slice one',
+          role: 'engineer',
+          want: 'a bounded slice',
+          soThat: 'builds stay short',
+          problemStatement: 'The slice is too big.',
+          inScope: ['One file'],
+          outOfScope: ['Everything else'],
+          acceptanceCriteria: [
+            { name: 'Works', given: [], when: ['run'], then: ['works'] },
+          ],
+          verification: [{ command: 'npm test', passWhen: 'passes' }],
+          tracesTo: ['INT-PROBLEM-01'],
+        },
+      ],
+    });
+
+    it('parks a plan whose design artifact exceeds the bounded-build budget, decomposing instead of building', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-901.md');
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{ output: `---\nroute: codex\n${megaSliceYaml}---\n# Spec\n` }],
+          decompose: [{ output: validDecomposition }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const createComment = vi.fn().mockResolvedValue({});
+      const events: string[] = [];
+
+      const result = await planPhase({
+        issue: 901,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit: {
+          rest: {
+            issues: {
+              get: async () => ({ data: { title: 'Mega slice', body: '## Problem statement\nToo big.\n## In scope\n- one\n## Out of scope\n- rest\n## Acceptance criteria\n- [ ] works\n## Verification\nnpm test' } }),
+              createComment,
+            },
+          },
+        } as any,
+        log: (type) => events.push(type),
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.escalate).toMatch(/bounded-build budget/);
+      expect(stub.calls.map((call) => call.task)).toContain('decompose');
+      expect(createComment).toHaveBeenCalledTimes(1);
+      expect(events).toContain('size-gate-escalated');
+      expect(events).toContain('decompose_comment_posted');
+    });
+
+    it('leaves a bounded design artifact alone (no decompose, plan proceeds)', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-902.md');
+      const smallYaml = `design:
+  restatedProblem: Small.
+  approach:
+    chosen: Do the small thing.
+    rejected: []
+  interfacesTouched:
+    - packages/a.ts
+  targetTypes:
+    - name: Type0
+      file: packages/t0.ts
+      kind: changed
+  signatures:
+    - symbol: fn0
+      file: packages/f0.ts
+      signature: '(x: string) => void'
+  callGraph:
+    - from: caller
+      to: fn0
+      note: edge
+  behaviorContract:
+    - One thing changes.
+  verificationPlan:
+    - command: npm test
+      passWhen: tests pass
+  riskBlastRadius: One file.
+  openQuestions: []
+`;
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{ output: `---\nroute: codex\n${smallYaml}---\n# Spec\n` }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const createComment = vi.fn().mockResolvedValue({});
+      const events: string[] = [];
+
+      const result = await planPhase({
+        issue: 902,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit: {
+          rest: {
+            issues: {
+              get: async () => ({ data: { title: 'Small slice', body: '## Problem statement\nSmall.\n## In scope\n- one\n## Out of scope\n- rest\n## Acceptance criteria\n- [ ] works\n## Verification\nnpm test' } }),
+              createComment,
+            },
+          },
+        } as any,
+        log: (type) => events.push(type),
+      });
+
+      expect(result.ok).toBe(true);
+      expect(stub.calls.map((call) => call.task)).not.toContain('decompose');
+      expect(createComment).not.toHaveBeenCalled();
+      expect(events).not.toContain('size-gate-escalated');
+    });
+  });
+
   describe('enforced size gate for oversized issues (#607)', () => {
     const oversizedBody = `## Problem statement
 The import queue stalls under load and loses jobs.
@@ -1248,7 +1409,14 @@ npm run test`;
         plan: [{ fail: 'usage_cap' }, { output: '---\nroute: codex\n---\n# Spec\n' }],
       },
     });
-    const router = new ModelRouter(models, routes, false, stub);
+    const failoverModels: ModelsConfig = {
+      ...models,
+      models: {
+        ...models.models,
+        'pinned-model': { ...models.models['pinned-model'], provider: 'openai' },
+      },
+    };
+    const router = new ModelRouter(failoverModels, routes, false, stub);
     const octokit: any = {
       rest: {
         issues: {

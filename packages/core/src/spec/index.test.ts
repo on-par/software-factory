@@ -40,6 +40,8 @@ describe('parseSpec', () => {
     ['route:  codex ', 'codex'],
     ['route: claude', 'claude'],
     ['route: "claude"', 'claude'],
+    ['route: opencode', 'opencode'],
+    ['route: "opencode"', 'opencode'],
   ])('normalizes %s to route %s', (yaml, expected) => {
     const parsed = parseSpec(`---\n${yaml}\n---\n# Spec\n`);
     expect(parsed.route).toBe(expected);

@@ -970,7 +970,7 @@ describe('ADR writer (#482)', () => {
     });
 
     expect(result).toEqual({ ok: true, prNumber: 555 });
-    expect(commands).toContainEqual("git push origin 'ship-it/482-adr-writer'");
+    expect(commands).toContainEqual("git push -u origin 'ship-it/482-adr-writer'");
   });
 
   it('is a byte-identical no-op with no <spec>.adr.json — no git add/commit, no adr_* logs', async () => {

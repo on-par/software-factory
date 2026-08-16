@@ -26,7 +26,7 @@ export async function buildPhase(opts: {
   specPath: string;
   branch: string;
   constitution: Constitution | null;
-  route: 'codex' | 'claude';
+  route: 'codex' | 'claude' | 'opencode';
   router: ModelRouter;
   log: (
     type: EventKind,
@@ -39,6 +39,9 @@ export async function buildPhase(opts: {
    *  route — never instruct the worker to push, open a PR, or watch CI. */
   disablePublish?: boolean;
   modelOverride?: string;
+  /** Cross-provider Codex fallback used when a Claude worker is capped or unavailable. */
+  codexFallbackModel?: string;
+  onProviderFailure?: (info: { provider: string; reason: FailoverReason }) => void | Promise<void>;
   sandbox?: SandboxPolicy;
   steering?: ConsumedSteering;
   appPort?: number;
@@ -66,6 +69,8 @@ export async function buildPhase(opts: {
     skipCI,
     disablePublish,
     modelOverride,
+    codexFallbackModel,
+    onProviderFailure,
     sandbox,
     steering,
     appPort,
@@ -91,7 +96,7 @@ export async function buildPhase(opts: {
   const isCodexDisabled = opts.codexDisabled ?? false;
 
   let prompt: string;
-  let taskType: 'build_codex' | 'build_claude';
+  let taskType: 'build_codex' | 'build_claude' | 'build_opencode';
 
   if (route === 'codex' && isCodexDisabled) {
     log('warn', 'codex unavailable — falling back to claude');
@@ -117,6 +122,9 @@ Frozen spec:
 ${compactForLocalModel(spec)}
 `
       : buildCommitOnlyPrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding });
+  } else if (route === 'opencode') {
+    taskType = 'build_opencode';
+    prompt = buildOpencodePrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding });
   } else {
     taskType = 'build_claude';
     prompt = disablePublish
@@ -152,6 +160,7 @@ ${compactForLocalModel(spec)}
     onLog: (msg: string) => log('router', msg),
     env: laneEnv(appPort, process.env, appBaseUrl),
     onPgid,
+    onProviderFailure,
   };
 
   let result: RouterResult;
@@ -160,48 +169,76 @@ ${compactForLocalModel(spec)}
   } catch (err) {
     const reason = (err as { reason?: FailoverReason }).reason;
     const attempts = (err as { attempts?: RouterResult['attempts'] }).attempts;
-    const quota = reason === 'usage_cap' || reason === 'rate_limit';
+    // These all indicate a provider problem rather than a bad task. Preserve
+    // the frozen spec and continue on the other provider when one is available.
+    const providerFailure =
+      reason === 'usage_cap' || reason === 'rate_limit' || reason === 'timeout' || reason === 'unavailable';
     // Only swap when we actually ran the codex route and it was exhausted on a
     // quota reason. The router only throws after trying every eligible codex
     // worker, so reaching here already means "no Codex-harness worker remains".
-    if (taskType !== 'build_codex' || !quota) throw err;
-    if (opts.autoFailover && !opts.autoFailover.enabled) throw err;
-    const fromModel = attempts?.at(-1)?.model ?? 'unknown';
-    const provider = router.registryRef.get(fromModel)?.provider ?? 'openai';
-    const fallback = opts.autoFailover?.fallbackModel;
-    const toModel =
-      fallback && router.resolveAll('build_claude').includes(fallback)
-        ? fallback
-        : router.resolveAll('build_claude')[0];
-    if (!toModel) throw err; // no claude fallback available — park as today
-    log(
-      'worker_failover',
-      `Codex build workers exhausted (${reason}) — continuing on claude: ` +
-        `from_model=${fromModel} to_model=${toModel} ` +
-        `from_route=build_codex to_route=build_claude reason=${reason}`,
-      { failoverReason: reason },
-    );
-    try {
-      await opts.autoFailover?.onQuotaExhausted?.({ provider, reason });
-    } catch (breakerErr) {
-      // Best-effort circuit-breaker bookkeeping — a write failure here must
-      // never turn a successful codex→claude failover into a hard build
-      // failure.
-      log('warn', `provider breaker callback failed (non-fatal): ${(breakerErr as Error).message}`);
+    if (taskType === 'build_claude' && providerFailure) {
+      if (opts.autoFailover && !opts.autoFailover.enabled) throw err;
+      const fallback = codexFallbackModel ?? router.resolveAll('build_codex')[0];
+      if (!fallback) throw err;
+      log('worker_failover', `Claude build workers exhausted (${reason}) — continuing on Codex: to_model=${fallback}`, {
+        failoverReason: reason,
+      });
+      route = 'codex';
+      taskType = 'build_codex';
+      result = await router.run(
+        'build_codex',
+        buildCommitOnlyPrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding }),
+        { ...runOpts, retryCause: 'failover', modelOverride: fallback },
+      );
+    } else if (taskType !== 'build_codex' || !providerFailure) throw err;
+    else {
+      if (opts.autoFailover && !opts.autoFailover.enabled) throw err;
+      const fromModel = attempts?.at(-1)?.model ?? 'unknown';
+      const provider = router.registryRef.get(fromModel)?.provider ?? 'openai';
+      const fallback = opts.autoFailover?.fallbackModel;
+      const toModel =
+        fallback && router.resolveAll('build_claude').includes(fallback)
+          ? fallback
+          : router.resolveAll('build_claude')[0];
+      if (!toModel) throw err;
+      log(
+        'worker_failover',
+        `Codex build workers exhausted (${reason}) — continuing on claude: ` +
+          `from_model=${fromModel} to_model=${toModel} ` +
+          `from_route=build_codex to_route=build_claude reason=${reason}`,
+        { failoverReason: reason },
+      );
+      try {
+        await opts.autoFailover?.onQuotaExhausted?.({ provider, reason });
+      } catch (breakerErr) {
+        // Best-effort circuit-breaker bookkeeping — a write failure here must
+        // never turn a successful codex→claude failover into a hard build
+        // failure.
+        log('warn', `provider breaker callback failed (non-fatal): ${(breakerErr as Error).message}`);
+      }
+      route = 'claude';
+      taskType = 'build_claude';
+      const claudePrompt = applySteering(
+        disablePublish
+          ? buildCommitOnlyPrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding })
+          : buildClaudePrompt({
+              issue,
+              branch,
+              specPath,
+              constitutionCtx,
+              skipCI,
+              appPort,
+              appBaseUrl,
+              designGrounding,
+            }),
+        steering,
+      );
+      result = await router.run('build_claude', claudePrompt, {
+        ...runOpts,
+        retryCause: 'failover',
+        ...(toModel === fallback ? { modelOverride: fallback } : {}),
+      });
     }
-    route = 'claude';
-    taskType = 'build_claude';
-    const claudePrompt = applySteering(
-      disablePublish
-        ? buildCommitOnlyPrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding })
-        : buildClaudePrompt({ issue, branch, specPath, constitutionCtx, skipCI, appPort, appBaseUrl, designGrounding }),
-      steering,
-    );
-    result = await router.run('build_claude', claudePrompt, {
-      ...runOpts,
-      retryCause: 'failover',
-      ...(toModel === fallback ? { modelOverride: fallback } : {}),
-    });
   }
 
   for (const f of failoversFrom(result.attempts)) {
@@ -218,6 +255,49 @@ ${compactForLocalModel(spec)}
 
   log('build', `Build complete with model ${result.model}`, { model: result.model });
   return { ok: true, model: result.model };
+}
+
+function buildOpencodePrompt(opts: {
+  issue: number;
+  specPath: string;
+  constitutionCtx: string;
+  spec: string;
+  appPort?: number;
+  appBaseUrl?: string;
+  designGrounding?: string;
+}): string {
+  const { issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding } = opts;
+  return `Implement issue #${issue} exactly per the frozen spec at ${specPath} in this repository.
+Read the full spec before writing any code — it is the approved plan; do not deviate.
+
+${constitutionCtx}
+
+## Spec
+${spec}
+
+Match surrounding code style and idioms. Add or update the tests described in the
+spec's Tests section and actually run them — report the exact command and its output.
+If the repo has a fast verify path (scripts/verify.sh, npm test), run it and fix
+failures before finishing.
+
+When everything passes, commit your work. Commit atomically: create one commit
+per independently testable functional change, each with a clear, conventional
+message describing what changed and why. Never mix unrelated functional changes
+in the same commit. A small single-slice task still yields exactly ONE commit —
+do not split one functional change across filler commits.
+
+Do NOT push, do NOT open a pull request, do NOT merge — a separate checker and
+ship phase handles that next.
+
+Stay strictly within the spec's scope: no unrelated refactors, no drive-by changes.
+If you get genuinely stuck, commit whatever safely builds/passes so far with a
+message explaining what's blocked, and stop there.
+
+Keep sub-agent/parallel-task usage modest: only fan out when a piece of work is
+genuinely independent and parallelizable. Prefer doing the work directly over
+spawning sub-agents for a single small issue — this keeps token usage efficient.
+
+${headlessNote()}${appPort ? `\n\n${appPortNote(appPort, appBaseUrl)}` : ''}${designGrounding ? `\n\n${designGrounding}` : ''}`;
 }
 
 function buildCommitOnlyPrompt(opts: {

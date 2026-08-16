@@ -12,6 +12,9 @@ const SHIM_PATH = fileURLToPath(new URL('../python/software_factory.py', import.
 const LAUNCHER_PATH = fileURLToPath(new URL('../python/run_scbench.py', import.meta.url));
 const COMPAT_CHECK_PATH = fileURLToPath(new URL('../python/compat_check.py', import.meta.url));
 const RUN_CONFIG_PATH = fileURLToPath(new URL('../scbench.run.yaml', import.meta.url));
+const BASELINE_CONFIG_PATH = fileURLToPath(
+  new URL('../../../evals/scbench-baseline/baseline.config.json', import.meta.url),
+);
 
 const shim = readFileSync(SHIM_PATH, 'utf-8');
 const launcher = readFileSync(LAUNCHER_PATH, 'utf-8');
@@ -69,9 +72,28 @@ describe('python shim conformance (pinned SCBench API)', () => {
     expect(launcher).toContain('from slop_code.entrypoints.cli import app');
   });
 
+  it('keeps scbench.run.yaml pass_policy in lockstep with baseline.config.json', () => {
+    const baseline = JSON.parse(readFileSync(BASELINE_CONFIG_PATH, 'utf-8')) as {
+      passPolicy: { id: string };
+    };
+    expect(runConfig).toContain(`pass_policy: ${baseline.passPolicy.id}`);
+  });
+
   it('pins the compat check to the committed pin file', () => {
     expect(compatCheck).toContain('scbench.pin.json');
     expect(compatCheck).toContain('SCBENCH_PROBLEMS_PATH');
+  });
+
+  it('enforces the catalog guard at invocation time before any run', () => {
+    expect(launcher).toContain('from compat_check import check_problem_catalog');
+    expect(launcher).toContain('check_problem_catalog()');
+    expect(launcher).toContain('sys.argv[1] == "run"');
+  });
+
+  it('refuses dirty or non-git catalog/harness checkouts', () => {
+    expect(compatCheck).toContain('--porcelain');
+    expect(compatCheck).toContain('SCBENCH_PIN_ALLOW_DRIFT');
+    expect(compatCheck).toContain('from None');
   });
 
   it('is syntactically valid Python (skipped when python3 is unavailable)', async () => {

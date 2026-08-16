@@ -933,7 +933,7 @@ export async function shipIssue(
     : worktreePathFor(repoRoot, issueNum, effective.branchPrefix);
   const specPath = resolve(paths.plans, `issue-${issueNum}.md`);
   const runStartedAt = new Date().toISOString();
-  let route: 'codex' | 'claude' | undefined;
+  let route: 'codex' | 'claude' | 'opencode' | undefined;
   let failurePhase: FailurePhase = 'plan';
   let checkSummary: CheckSummary | undefined;
   let reworkRounds: number | undefined;
@@ -953,6 +953,35 @@ export async function shipIssue(
     ) =>
       logEvent(paths.events, type, issueNum, msg, { ...extra, lane, phase });
   const log = mkLog();
+  const rememberProviderFailure = async ({
+    provider,
+    reason,
+  }: {
+    provider: string;
+    reason: FailoverReason;
+  }): Promise<void> => {
+    await breaker.open(provider, reason, failoverSettings.cooldownMs);
+    log('provider_breaker_open', `breaker opened for ${provider} (${reason}) — provider skipped until cooldown ends`, {
+      failoverReason: reason,
+    });
+  };
+  const preferFallbackWhenProviderIsOpen = async (
+    primary: string | undefined,
+    fallback: string | undefined,
+    phase: string,
+  ): Promise<string | undefined> => {
+    if (!primary || !fallback) return primary;
+    const provider = router.registryRef.get(primary)?.provider;
+    if (!provider) return primary;
+    const status = await breaker.status(provider);
+    if (!status.open) return primary;
+    const minutes = Math.ceil(status.remainingMs / 60_000);
+    log(
+      'provider_breaker_skip',
+      `breaker open for ${provider} (${status.entry.reason}) — using ${fallback} for ${phase}, ${minutes}m remaining`,
+    );
+    return fallback;
+  };
   const assertWithinIssueBudget = (phase: string): void => {
     if (efficiency.perIssueCapUsd === undefined || issueSpend <= efficiency.perIssueCapUsd) return;
     const reason = `per-issue budget exceeded after ${phase}: $${issueSpend.toFixed(2)} > $${efficiency.perIssueCapUsd.toFixed(2)}`;
@@ -1104,6 +1133,7 @@ export async function shipIssue(
 
   try {
     // PLAN
+    const planModel = await preferFallbackWhenProviderIsOpen(modelPins.plan, modelPins.planFallback, 'PLAN');
     const plan = await planPhase({
       issue: issueNum,
       repo: ghRepo,
@@ -1114,7 +1144,9 @@ export async function shipIssue(
       octokit,
       log: mkLog('plan'),
       timeoutSeconds: timeouts.plan,
-      modelOverride: modelPins.plan,
+      modelOverride: planModel,
+      modelFallbacks: planModel === modelPins.plan && modelPins.planFallback ? [modelPins.planFallback] : undefined,
+      onProviderFailure: rememberProviderFailure,
       branch,
       approvalGate: planApprovalEnabled
         ? createFileApprovalGate({ dir: paths.approvals, timeoutMs: timeouts.approval * 1000 })
@@ -1126,6 +1158,7 @@ export async function shipIssue(
       enforceReadiness: true,
       fastPath: efficiency.fastPath,
       enforceSizeGate: true,
+      preferredRoute: repoConfig?.route,
     });
     route = plan.route;
     if (!plan.ok) {
@@ -1162,6 +1195,37 @@ export async function shipIssue(
       breakerBlocked = gate.codexBlocked;
     }
 
+    // A Claude-selected frozen plan must get the same cooldown treatment as
+    // the Codex route above. Switch routes before the worker begins so a
+    // provider that failed earlier in this run is not called again.
+    let buildRoute = plan.route;
+    let buildModel = modelPins.build;
+    if (failoverSettings.enabled && plan.route === 'claude') {
+      const primaryClaude = buildModel ?? router.resolveAll('build_claude')[0];
+      const fallbackCodex = modelPins.buildFallback ?? router.resolveAll('build_codex')[0];
+      const selected = await preferFallbackWhenProviderIsOpen(primaryClaude, fallbackCodex, 'BUILD');
+      if (selected && selected !== primaryClaude) {
+        buildRoute = 'codex';
+        buildModel = selected;
+      }
+    }
+    if (buildModel) {
+      const harnessId = router.registryRef.getHarnessId(buildModel);
+      const compatible =
+        buildRoute === 'codex'
+          ? router.registryRef.isCodexModel(buildModel)
+          : buildRoute === 'opencode'
+            ? harnessId === 'opencode'
+            : harnessId === 'claude-cli';
+      if (!compatible) {
+        log(
+          'model_override_ignored',
+          `build model ${buildModel} is incompatible with the ${buildRoute} route — using that route's default worker`,
+        );
+        buildModel = undefined;
+      }
+    }
+
     failurePhase = 'build';
     const build = await buildPhase({
       issue: issueNum,
@@ -1170,13 +1234,15 @@ export async function shipIssue(
       specPath,
       branch,
       constitution,
-      route: plan.route,
+      route: buildRoute,
       router,
       log: mkLog('build'),
       timeoutSeconds: timeouts.build,
       skipCI,
       disablePublish: Boolean(ctx?.localOnly),
-      modelOverride: modelPins.build,
+      modelOverride: buildModel,
+      codexFallbackModel: modelPins.buildFallback ?? router.resolveAll('build_codex')[0],
+      onProviderFailure: rememberProviderFailure,
       sandbox: activeSandboxPolicy,
       steering: buildSteering,
       appPort,
@@ -1186,17 +1252,6 @@ export async function shipIssue(
       autoFailover: {
         enabled: failoverSettings.enabled,
         fallbackModel: failoverSettings.fallbackModel,
-        onQuotaExhausted: async ({ provider, reason }) => {
-          await breaker.open(provider, reason, failoverSettings.cooldownMs);
-          // No failoverReason metadata here: the build's own worker_failover
-          // event already carries it for this same quota trip, and KPI retry
-          // counting (retryCauseOf) treats any failoverReason-bearing event as
-          // a distinct retry — attaching it here would double-count one retry.
-          mkLog('build')(
-            'provider_breaker_open',
-            `breaker opened for ${provider} (${reason}) — cooldown ${Math.round(failoverSettings.cooldownMs / 60_000)}m`,
-          );
-        },
       },
       onPgid,
     });
@@ -1797,7 +1852,10 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }
     throw new CliExitError('factory: --ttl-days must be a non-negative number', 2);
   }
   const log = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
-  const run = () => sweepWorktrees({ repoRoot, ttlDays, dryRun: opts.dryRun }, { log });
+  // Best-effort GitHub evidence: tokenless/local-only repos keep today's pure-local behavior.
+  const ghRepo = await getGitHubRepo().catch(() => undefined);
+  const octokit = ghRepo ? (hasGitHubToken() ? getOctokit() : undefined) : undefined;
+  const run = () => sweepWorktrees({ repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo }, { log, octokit });
   const report = opts.dryRun ? await run() : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
   console.log(formatGcReport(report));
 }
@@ -2145,7 +2203,10 @@ async function cmdRun() {
         const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
-            sweepWorktrees({ repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays }, { log: gcLog }),
+            sweepWorktrees(
+              { repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays, repo: ghRepo },
+              { log: gcLog, octokit: getOctokit() },
+            ),
           ),
         );
         logEvent(
@@ -2377,10 +2438,21 @@ export async function isPrMerged(octokit: Octokit, owner: string, repoName: stri
   const { data: prs } = await octokit.rest.pulls.list({
     owner,
     repo: repoName,
-    state: 'closed',
+    state: 'all',
     head: `${owner}:${branch}`,
   });
-  return prs.some((pr: any) => Boolean(pr.merged_at));
+  if (prs.length === 0) return false;
+  // Ship-it branch names get reused across separate runs for the same issue
+  // (e.g. a "verify-and-close" pass recreates the exact branch name an
+  // earlier, already-merged PR used) — GitHub PR numbers only increase, so
+  // the highest-numbered PR under this head is always the current one.
+  // Checking "was ANY PR ever merged under this branch name" (the old
+  // `state: 'closed'` + `.some()` behavior) matched the stale prior PR and
+  // falsely reported a brand-new, still-open PR under the same name as
+  // merged — waitForMerge then logged "landed" and skipped calling land(),
+  // leaving the real PR open forever while the lane believed it was done.
+  const latest = prs.reduce((newest: any, pr: any) => (pr.number > newest.number ? pr : newest));
+  return Boolean(latest.merged_at);
 }
 
 export async function findOpenPRNumber(
