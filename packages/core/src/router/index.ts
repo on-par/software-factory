@@ -632,8 +632,10 @@ export class ModelRouter {
       modelOverride?: string;
       /** Explicit ordered alternates, normally from a repo's provider policy. */
       modelFallbacks?: string[];
-      /** Called when a provider-level failure should temporarily remove that provider from rotation. */
-      onProviderFailure?: (info: { provider: string; reason: FailoverReason }) => void | Promise<void>;
+      /** Called when a provider-level failure should temporarily remove that provider from rotation.
+       *  `detail` is the sanitized failure detail (see describeFailureDetail), forwarded so callers
+       *  can extract provider-reported cooldown hints (e.g. "Resets in 3hr 17min"). */
+      onProviderFailure?: (info: { provider: string; reason: FailoverReason; detail?: string }) => void | Promise<void>;
       onLog?: (msg: string) => void;
       sandbox?: SandboxPolicy;
       onSandboxEvent?: (type: SandboxEventType, detail: string) => void;
@@ -705,11 +707,12 @@ export class ModelRouter {
           }
           const reason = extractFailoverReason(err) ?? this.classifyFailure(errStderr(err), errExitCode(err));
           const provider = this.registry.get(model)?.provider;
+          const detail = describeFailureDetail(err);
           const blockProvider = async (): Promise<void> => {
             if (!provider || !isProviderLevelFailure(reason)) return;
             blockedProviders.add(provider);
             try {
-              await onProviderFailure?.({ provider, reason });
+              await onProviderFailure?.({ provider, reason, detail: detail || undefined });
             } catch (callbackErr) {
               onLog(
                 `Provider breaker bookkeeping failed for ${provider} (${reason}); continuing failover: ${
@@ -718,7 +721,6 @@ export class ModelRouter {
               );
             }
           };
-          const detail = describeFailureDetail(err);
           attempts.push(detail ? { model, reason, ok: false, detail } : { model, reason, ok: false });
           onLog(`${model} failed (${reason}) on ${task}`);
           if (detail) onLog(`${model} failure detail on ${task}: ${detail}`);

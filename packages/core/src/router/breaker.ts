@@ -22,6 +22,24 @@ interface BreakerFile {
   providers: Record<string, BreakerEntry>;
 }
 
+const RESET_HINT_PATTERN = /resets?\s+in\s+(?:(\d+)\s*hr)?\s*(?:(\d+)\s*min)?/i;
+
+/** Extracts a provider-reported reset time (e.g. "Resets in 3hr 17min", from
+ *  opencode.ai's weekly-usage-cap error) so the breaker can cool down for as
+ *  long as the provider actually says, instead of the flat default cooldown
+ *  meant for transient rate limits. Returns null when the text has no
+ *  parseable hint (both hour and minute groups absent or zero), so the
+ *  caller falls back to its own default. `bufferMs` pads the parsed duration
+ *  so the breaker doesn't reopen a few seconds before the real reset. */
+export function parseResetCooldownMs(text: string, bufferMs = 2 * 60_000): number | null {
+  const match = RESET_HINT_PATTERN.exec(text);
+  if (!match) return null;
+  const hours = match[1] ? Number(match[1]) : 0;
+  const minutes = match[2] ? Number(match[2]) : 0;
+  if (hours === 0 && minutes === 0) return null;
+  return (hours * 60 + minutes) * 60_000 + bufferMs;
+}
+
 export class ProviderBreaker {
   constructor(
     private file: string,
