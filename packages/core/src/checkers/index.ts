@@ -106,6 +106,53 @@ export const compileChecker: CheckerFn = async (ctx) => {
   }
 };
 
+const COMMANDER_REQUIRED_OPTION_PATTERN = /^error: required option '.+' not specified$/gm;
+
+function stripAnsi(text: string): string {
+  return text
+    .split(String.fromCharCode(27))
+    .map((part, index) => (index === 0 ? part : part.replace(/^\[[0-9;]*m/, '')))
+    .join('');
+}
+
+function stripIncidentalCommanderNoise(text: string): string {
+  return text
+    .replace(COMMANDER_REQUIRED_OPTION_PATTERN, '')
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim() !== '')
+    .join('\n');
+}
+
+function extractFailedTestEvidence(output: string): string | null {
+  const lines = output.split(/\r?\n/);
+  const failLine = lines.findIndex((line) => /\bFAIL\s+.+\s+>/.test(stripAnsi(line)));
+  if (failLine >= 0) {
+    return lines
+      .slice(failLine, failLine + 12)
+      .join('\n')
+      .trim();
+  }
+
+  const suiteLine = lines.findIndex((line) => /^\s*\S+\s+.+\(\d+ tests?\s+\|\s+\d+ failed\)/.test(stripAnsi(line)));
+  if (suiteLine >= 0) {
+    return lines
+      .slice(suiteLine, suiteLine + 8)
+      .join('\n')
+      .trim();
+  }
+
+  return null;
+}
+
+function describeVerificationFailure(r: Awaited<ReturnType<typeof runCommand>>): string {
+  const testEvidence = extractFailedTestEvidence(r.stdout);
+  if (!testEvidence) return describeCommandFailure(r);
+
+  const stderr = stripIncidentalCommanderNoise(r.stderr);
+  return stderr ? `${testEvidence}\nstderr:\n${stderr}` : testEvidence;
+}
+
 export const testsChecker: CheckerFn = async (ctx) => {
   try {
     if (await fileExists(join(ctx.worktree, 'scripts/verify.sh'))) {
@@ -119,7 +166,7 @@ export const testsChecker: CheckerFn = async (ctx) => {
       return {
         checker: 'tests',
         result: 'FAIL',
-        details: `verify.sh failed: ${describeCommandFailure(r).slice(0, 500)}`,
+        details: `verify.sh failed: ${describeVerificationFailure(r).slice(0, 500)}`,
       };
     }
 

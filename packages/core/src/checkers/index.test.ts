@@ -294,6 +294,31 @@ describe('testsChecker', () => {
     expect(result.result).toBe('FAIL');
   });
 
+  it('prefers failed-test evidence over incidental stderr noise from passing CLI error-path tests', async () => {
+    const worktree = await makeWorktree({
+      'scripts/verify.sh': `#!/bin/bash
+cat <<'STDOUT'
+ RUN  v4.1.10 /repo
+
+ > packages/core/src/public-api.test.ts (6 tests | 1 failed) 15ms
+     x root export exposes exactly the documented public API 10ms
+
+ FAIL  packages/core/src/public-api.test.ts > public API surface (ADR-0004) > root export exposes exactly the documented public API
+ AssertionError: expected [ 'ARCHIVED_LABEL' ] to deeply equal [ 'ARCHIVED_LABEL', 'ReworkHistory' ]
+STDOUT
+echo "error: required option '-a, --approve <approver>' not specified" >&2
+exit 1
+`,
+    });
+
+    const result = await testsChecker(makeContext(worktree));
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain('packages/core/src/public-api.test.ts');
+    expect(result.details).toContain('root export exposes exactly the documented public API');
+    expect(result.details).not.toMatch(/^verify\.sh failed: error: required option/);
+  });
+
   it('uses shared package.json from context instead of re-reading from disk', async () => {
     const worktree = await makeWorktree({
       'package.json': '{"name":"fixture","version":"1.0.0","scripts":{"test":"node -e \\"process.exit(1)\\""}}',
