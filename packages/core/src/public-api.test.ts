@@ -101,6 +101,8 @@ const PUBLIC_API_KEYS = [
   // Provider circuit breaker
   'gateBuildOnBreaker',
   'ProviderBreaker',
+  // Cross-run failure-signature memory
+  'ReworkHistory',
   // Harness contract
   'HARNESS_CATALOG',
   'HarnessError',
