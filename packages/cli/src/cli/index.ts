@@ -83,6 +83,7 @@ import {
   ModelRouter,
   parseKpiHistory,
   parseQueue,
+  parseResetCooldownMs,
   planPhase,
   ProcessGroupTracker,
   ProviderBreaker,
@@ -966,14 +967,25 @@ export async function shipIssue(
   const rememberProviderFailure = async ({
     provider,
     reason,
+    detail,
   }: {
     provider: string;
     reason: FailoverReason;
+    detail?: string;
   }): Promise<void> => {
-    await breaker.open(provider, reason, failoverSettings.cooldownMs);
-    log('provider_breaker_open', `breaker opened for ${provider} (${reason}) — provider skipped until cooldown ends`, {
-      failoverReason: reason,
-    });
+    // Weekly/usage-cap errors often report their own reset time (e.g. opencode.ai's
+    // "Resets in 3hr 17min"); honor that instead of the flat default cooldown, which
+    // is tuned for transient rate limits and reopens the breaker far too early for a
+    // multi-hour cap — see #743 (repeated usage_cap trips every ~30min overnight).
+    const reportedMs = parseResetCooldownMs(detail ?? '');
+    const cooldownMs = reportedMs ?? failoverSettings.cooldownMs;
+    await breaker.open(provider, reason, cooldownMs);
+    const cooldownNote = reportedMs !== null ? 'provider-reported reset time' : 'default cooldown';
+    log(
+      'provider_breaker_open',
+      `breaker opened for ${provider} (${reason}) — provider skipped until cooldown ends (${cooldownNote}, ${Math.ceil(cooldownMs / 60_000)}m)`,
+      { failoverReason: reason },
+    );
   };
   const preferFallbackWhenProviderIsOpen = async (
     primary: string | undefined,

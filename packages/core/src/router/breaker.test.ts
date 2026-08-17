@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { gateBuildOnBreaker, ProviderBreaker } from './breaker.js';
+import { gateBuildOnBreaker, parseResetCooldownMs, ProviderBreaker } from './breaker.js';
 
 const tempDirs = new Set<string>();
 
@@ -161,5 +161,35 @@ describe('gateBuildOnBreaker', () => {
 
     expect(result.codexBlocked).toBe(false);
     expect(logs).toEqual([]);
+  });
+});
+
+describe('parseResetCooldownMs', () => {
+  it('parses "Xhr Ymin" and pads with the buffer', () => {
+    const text =
+      'AI_APICallError: Weekly usage limit reached. Resets in 3hr 17min. To continue using this model now, enable usage from your available balance: https://opencode.ai/workspace/wrk_x/go';
+    expect(parseResetCooldownMs(text)).toBe((3 * 60 + 17) * 60_000 + 2 * 60_000);
+  });
+
+  it('parses minutes-only durations', () => {
+    expect(parseResetCooldownMs('Weekly usage limit reached. Resets in 50min.')).toBe(50 * 60_000 + 2 * 60_000);
+    expect(parseResetCooldownMs('Weekly usage limit reached. Resets in 10min.')).toBe(10 * 60_000 + 2 * 60_000);
+  });
+
+  it('parses odd but real provider output like "1hr 60min" as its literal total', () => {
+    expect(parseResetCooldownMs('Resets in 1hr 60min.')).toBe((1 * 60 + 60) * 60_000 + 2 * 60_000);
+  });
+
+  it('honors a custom buffer', () => {
+    expect(parseResetCooldownMs('Resets in 10min.', 0)).toBe(10 * 60_000);
+  });
+
+  it('returns null when there is no reset hint', () => {
+    expect(parseResetCooldownMs('AI_APICallError: Service Unavailable')).toBeNull();
+    expect(parseResetCooldownMs('')).toBeNull();
+  });
+
+  it('returns null when "resets in" appears without a parseable duration', () => {
+    expect(parseResetCooldownMs('Your quota resets in a little while.')).toBeNull();
   });
 });

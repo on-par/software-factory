@@ -27,7 +27,7 @@ const h = vi.hoisted(() => {
     constitutionResolve: (_worktree: string, _product?: string): any => null,
     modelOverrides: {} as Record<string, string>,
     modelProviders: {} as Record<string, string>,
-    triggerPlanProviderFailure: null as { provider: string; reason: any } | null,
+    triggerPlanProviderFailure: null as { provider: string; reason: any; detail?: string } | null,
     planResult: { ok: true, route: 'claude' } as any,
     buildResult: { ok: true } as any,
     checkResult: { passed: true, summary: { results: [], failures: 0 }, reworkRounds: 0 } as any,
@@ -2330,6 +2330,21 @@ describe('shipIssue (direct)', () => {
     h.triggerPlanProviderFailure = null;
     await shipIssue(6, {}, ctx());
     expect(vi.mocked(FactoryCore.planPhase).mock.calls.at(-1)?.[0]).toMatchObject({ modelOverride: 'gpt-plan' });
+  });
+
+  it('cools down a weekly-usage-cap provider for the reported reset time, not the flat default', async () => {
+    h.modelOverrides = { plan: 'claude-plan', planFallback: 'gpt-plan' };
+    h.modelProviders = { 'claude-plan': 'anthropic', 'gpt-plan': 'openai' };
+    h.triggerPlanProviderFailure = {
+      provider: 'anthropic',
+      reason: 'usage_cap',
+      detail: 'msg="AI_APICallError: Weekly usage limit reached. Resets in 3hr 17min. To continue..."',
+    };
+
+    await shipIssue(5, {}, ctx());
+
+    const breakerFile = JSON.parse(readFileSync(paths().breaker, 'utf-8'));
+    expect(breakerFile.providers.anthropic.cooldownMs).toBe((3 * 60 + 17) * 60_000 + 2 * 60_000);
   });
 
   it('skips a cooled-down Claude build provider and starts the frozen build on its Codex fallback', async () => {

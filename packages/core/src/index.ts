@@ -139,7 +139,7 @@ export { failoversFrom, ModelRouter } from './router/index.js';
 
 // Provider circuit breaker
 export type { BreakerEntry, BreakerStatus } from './router/breaker.js';
-export { gateBuildOnBreaker, ProviderBreaker } from './router/breaker.js';
+export { gateBuildOnBreaker, parseResetCooldownMs, ProviderBreaker } from './router/breaker.js';
 
 // Cross-run failure-signature memory (#740)
 export type { ReworkHistoryEntry } from './checkers/rework-history.js';
