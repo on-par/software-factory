@@ -177,7 +177,7 @@ export async function planPhase(opts: {
   timeoutSeconds?: number;
   modelOverride?: string;
   modelFallbacks?: string[];
-  onProviderFailure?: (info: { provider: string; reason: FailoverReason }) => void | Promise<void>;
+  onProviderFailure?: (info: { provider: string; reason: FailoverReason; detail?: string }) => void | Promise<void>;
   branch?: string;
   approvalGate?: ApprovalGate;
   drainSteering?: () => ConsumedSteering;
@@ -306,6 +306,7 @@ export async function planPhase(opts: {
       octokit,
       log: (type, msg) => log(type, msg),
       timeoutSeconds: Math.min(timeoutSeconds ?? 1800, 300),
+      onProviderFailure,
     });
     const reason = `issue exceeds the size gate (${readiness.sizeReason ?? 'too big'}) — parked for decomposition`;
     log('size-gate-escalated', reason, { readiness });
@@ -489,6 +490,7 @@ export async function planPhase(opts: {
           octokit,
           log: (type, msg) => log(type, msg),
           timeoutSeconds: Math.min(timeoutSeconds ?? 1800, 300),
+          onProviderFailure,
         });
         const reason =
           `plan scope exceeds the bounded-build budget ` +

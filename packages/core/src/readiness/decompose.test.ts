@@ -474,6 +474,34 @@ describe('decomposeOversizedIssue', () => {
     expect(events.some((e) => e.type === 'decompose_failed')).toBe(true);
   });
 
+  it('reports a provider-level failure to onProviderFailure so the breaker opens (#745)', async () => {
+    const stub = new StubModelExecutor({
+      scripts: { decompose: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }] },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const { octokit } = makeOctokit();
+    const { log } = makeLog();
+    const failures: { provider: string; reason: string; detail?: string }[] = [];
+
+    await decomposeOversizedIssue({
+      issue: 606,
+      repo,
+      title: 't',
+      body: 'b',
+      worktree: '/tmp/wt',
+      router,
+      octokit,
+      log,
+      maxAttempts: 1,
+      onProviderFailure: async (info) => {
+        failures.push(info);
+      },
+    });
+
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toMatchObject({ provider: 'custom', reason: 'usage_cap' });
+  });
+
   it('returns { posted: false } when posting the comment throws a non-Error', async () => {
     const stub = new StubModelExecutor({ scripts: { decompose: [{ output: VALID_DECOMPOSITION_JSON }] } });
     const router = new ModelRouter(models, routes, false, stub);

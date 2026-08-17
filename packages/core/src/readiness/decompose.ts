@@ -21,6 +21,7 @@ import { z } from 'zod';
 
 import type { EventKind } from '../events/kinds.js';
 import type { ModelRouter } from '../router/index.js';
+import type { FailoverReason } from '../types/index.js';
 import { MAX_ACCEPTANCE_CRITERIA_ITEMS, MAX_IN_SCOPE_ITEMS } from './size.js';
 
 // ---------------------------------------------------------------------------
@@ -384,6 +385,11 @@ export interface DecomposeDriverDeps {
   timeoutSeconds?: number;
   /** Bounded LLM attempts (including the INVEST-violations retry). Default 2. */
   maxAttempts?: number;
+  /** Forwarded to router.run so a provider-level decompose failure opens the
+   *  circuit breaker the same way plan/build failures do (#745) — without this,
+   *  decompose never reports into the breaker, so a lane keeps re-attempting a
+   *  known-capped provider on every relaunch cycle with no gating at all. */
+  onProviderFailure?: (info: { provider: string; reason: FailoverReason; detail?: string }) => void | Promise<void>;
 }
 
 /**
@@ -393,7 +399,7 @@ export interface DecomposeDriverDeps {
  * caller and never files issues or mutates the issue body.
  */
 export async function decomposeOversizedIssue(deps: DecomposeDriverDeps): Promise<{ posted: boolean }> {
-  const { issue, repo, title, body, worktree, router, octokit, log } = deps;
+  const { issue, repo, title, body, worktree, router, octokit, log, onProviderFailure } = deps;
   const timeoutSeconds = deps.timeoutSeconds;
   const maxAttempts = deps.maxAttempts ?? 2;
   const [owner, name] = repo.split('/');
@@ -408,7 +414,7 @@ export async function decomposeOversizedIssue(deps: DecomposeDriverDeps): Promis
           ? buildDecompositionPrompt({ title, body })
           : buildDecompositionRetryPrompt({ title, body }, violations);
 
-      const result = await router.run('decompose', prompt, { worktree, timeoutSeconds });
+      const result = await router.run('decompose', prompt, { worktree, timeoutSeconds, onProviderFailure });
       const parsed = parseDecompositionOutput(result.output);
       if (!parsed.ok) {
         violations = [`decomposition did not parse: ${parsed.reason}`];
