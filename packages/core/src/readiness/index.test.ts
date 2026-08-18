@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { extractIssueSections, scoreIssueReadiness } from './index.js';
+import { extractIssueSections, findSection, scoreIssueReadiness } from './index.js';
 
 const COMPLETE_FACTORY_TASK_BODY = `
 ### Problem statement
@@ -104,6 +104,30 @@ bash scripts/verify.sh
     const result = scoreIssueReadiness({ title: 'Freeform', body });
     expect(result.template).toBe('factory-task');
     expect(result.pass).toBe(true);
+  });
+
+  it('accepts a heading with a parenthetical suffix, like "Acceptance criteria (Gherkin)"', () => {
+    const body = COMPLETE_FACTORY_TASK_BODY.replace(
+      '### Acceptance criteria',
+      '### Acceptance criteria (Gherkin)',
+    );
+    const result = scoreIssueReadiness({ title: 'Fix widget flicker', body });
+    expect(result.pass).toBe(true);
+    expect(result.missing).toEqual([]);
+  });
+
+  it('findSection prefers an exact heading match over a prefix match when both exist', () => {
+    const body = `
+### Acceptance criteria
+
+- [ ] exact section wins
+
+### Acceptance criteria (Gherkin)
+
+- [ ] this one should be ignored
+`;
+    const sections = extractIssueSections(body);
+    expect(findSection(sections, 'Acceptance criteria')).toContain('exact section wins');
   });
 
   it('detects an epic from a [EPIC]-prefixed title', () => {
