@@ -28,6 +28,10 @@ async function writeConfig(contents: unknown): Promise<string> {
   return path;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 describe('zero-config: { version: 2 }', () => {
   it('validates and fills every section with defaults', () => {
     const cfg = parseV2Config({ version: 2 });
@@ -296,12 +300,12 @@ describe('validation errors', () => {
   it('names the file path when a file is malformed', async () => {
     const path = join(dir, 'config.json');
     await writeFile(path, '{ not json');
-    expect(() => loadV2Config(path)).toThrow(new RegExp(`Failed to parse ${path.replace(/[.]/g, '\\.')}`));
+    expect(() => loadV2Config(path)).toThrow(new RegExp(`Failed to parse ${escapeRegExp(path)}`));
   });
 
   it('names the file path on a schema violation', async () => {
     const path = await writeConfig({ version: 3 });
-    expect(() => loadV2Config(path)).toThrow(new RegExp(`Invalid ${path.replace(/[.]/g, '\\.')}`));
+    expect(() => loadV2Config(path)).toThrow(new RegExp(`Invalid ${escapeRegExp(path)}`));
   });
 });
 
