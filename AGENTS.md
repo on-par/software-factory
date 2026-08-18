@@ -106,7 +106,15 @@ Run from the repo root unless noted. Node.js **≥ 20** required.
 Run the full verification gate and make sure everything is green:
 
 ```bash
-bash scripts/verify.sh
+bash scripts/verify.sh --no-e2e
 ```
 
-Build, typecheck, lint, test (with coverage thresholds), and the stub eval must **all** pass — this is exactly what CI enforces. Do not commit with a failing or reduced coverage gate.
+Build, typecheck, lint, test (with coverage thresholds), and the stub eval must **all** pass — this is what CI enforces on every PR. Use `--no-e2e` for your local loop: the bare (no-flag) path also runs the pipeline integration/simulation tests, which have a known intermittent multi-hour deadlock (#739) — `--no-e2e` is the fast, reliable path and is what CI's own quick checks and the CHECK phase both use. Real CI still runs the full suite including integration tests on the PR, so this doesn't skip anything that matters getting merged. Do not commit with a failing or reduced coverage gate.
+
+## Merge policy: main must always be green
+
+`main` must never carry a genuinely failing test, type error, or lint violation. Concretely:
+
+- **Never use `gh pr merge --admin` (or any merge that bypasses required status checks) to get past a check that is actually `FAILURE`.** Admin/bypass merges exist only for two legitimate cases: (1) the factory's own auto-merge, which bypasses the _review-approval_ requirement a bot can't obtain — but its `watchCi()` gate already refuses to merge unless CI reported a real `success`, never on failure or an unresolved/hung outcome (see `packages/cli/src/cli/index.ts`, `waitForMerge`); and (2) a human confirming a required check is _hung/stuck_, not failed (e.g. the #739 CI deadlock), after running an equivalent verification pass locally (`bash scripts/verify.sh --no-e2e` green, plus targeted checks for anything the fast path skips) — and saying so explicitly in the merge/PR comment.
+- If you bypass a check for reason (2), that is a workaround for a known infra bug, not a norm. The actual fix is closing that bug (#739 / #755 — moving the deadlock-prone integration tests off the required check and adding a subprocess timeout), which removes the need for bypass merges entirely.
+- If a `main`-red test is discovered (e.g. it slipped through during a CI-hang period), fix it immediately as the top-priority task — a red `main` blocks everyone and every future PR's diff against it.
