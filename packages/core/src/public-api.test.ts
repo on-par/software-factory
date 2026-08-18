@@ -100,6 +100,7 @@ const PUBLIC_API_KEYS = [
   'ModelRouter',
   // Provider circuit breaker
   'gateBuildOnBreaker',
+  'parseResetCooldownMs',
   'ProviderBreaker',
   // Cross-run failure-signature memory
   'ReworkHistory',
