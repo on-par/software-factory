@@ -277,8 +277,10 @@ ${spec}
 
 Match surrounding code style and idioms. Add or update the tests described in the
 spec's Tests section and actually run them — report the exact command and its output.
-If the repo has a fast verify path (scripts/verify.sh, npm test), run it and fix
-failures before finishing.
+If the repo has a fast verify path, run \`scripts/verify.sh --no-e2e\` (NOT bare
+\`scripts/verify.sh\` or \`npm test\` — those run the full integration suite, which
+has a known intermittent multi-hour hang; see #739) and fix failures before
+finishing. Real CI still runs the full suite on the PR, so this is safe.
 
 When everything passes, commit your work. Commit atomically: create one commit
 per independently testable functional change, each with a clear, conventional
@@ -320,8 +322,10 @@ ${spec}
 
 Match surrounding code style and idioms. Add or update the tests described in the
 spec's Tests section and actually run them — report the exact command and its output.
-If the repo has a fast verify path (scripts/verify.sh, npm test), run it and fix
-failures before finishing.
+If the repo has a fast verify path, run \`scripts/verify.sh --no-e2e\` (NOT bare
+\`scripts/verify.sh\` or \`npm test\` — those run the full integration suite, which
+has a known intermittent multi-hour hang; see #739) and fix failures before
+finishing. Real CI still runs the full suite on the PR, so this is safe.
 
 When everything passes, commit your work. Commit atomically: create one commit
 per independently testable functional change, each with a clear, conventional
