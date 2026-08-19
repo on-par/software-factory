@@ -1,0 +1,76 @@
+name: Nightly Integration
+
+# The pipeline integration suites (packages/core/src/phases/*.integration.test.ts)
+# drive whole plan->build->check->ship cycles against real git worktrees on disk.
+# They are deliberately NOT part of the required `ci` check: they are the only
+# suites that shell out to git, so a wedged subprocess there would otherwise
+# strand every open PR behind a red (or, worse, hung) required check (#755).
+# They run here instead, where a failure is loud but blocks nobody.
+
+on:
+  schedule:
+    - cron: '0 7 * * *' # nightly, 07:00 UTC
+  workflow_dispatch:
+
+jobs:
+  integration:
+    name: pipeline-integration
+    runs-on: ubuntu-latest
+    # Hard ceiling. Vitest's own test timeouts are timer-based, so they cannot
+    # fire if a worker starves the event loop; only the runner can stop that.
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Pipeline integration suites (real git worktrees)
+        id: integration
+        continue-on-error: true
+        run: npm run test:integration
+
+      - name: File or update the failure issue
+        if: steps.integration.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Nightly integration suite failing"
+          body=$(printf '%s\n' \
+            "The scheduled pipeline integration run failed." \
+            "" \
+            "Run: $RUN_URL" \
+            "Commit: $GITHUB_SHA" \
+            "" \
+            "These suites exercise real git worktrees (setupWorktree / gitFetch /" \
+            "withGitLock) end to end. They are not part of the required \`ci\`" \
+            "check, so nothing is blocked — but a failure here means concurrent" \
+            "lane behavior is broken and should be triaged." \
+            "" \
+            "Reproduce locally with: \`npm run test:integration\`")
+          existing=$(gh issue list --state open --label ci \
+            --json number,title --jq "[.[] | select(.title == \"$title\")][0].number // empty")
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --body "$body"
+            gh issue comment "$existing" --body "Still failing as of $RUN_URL"
+          else
+            gh issue create --label ci --title "$title" --body "$body"
+          fi
+
+      - name: Fail the job when the integration suites failed
+        if: steps.integration.outcome == 'failure'
+        run: |
+          echo "::error::pipeline integration suites failed — see the filed issue"
+          exit 1
