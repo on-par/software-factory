@@ -28,12 +28,14 @@ export function extractStatements(result: InterviewResult): IntentStatementDraft
   const dumpStatements = splitStatements(result.brainDump);
 
   for (const dimension of INTENT_DIMENSIONS) {
-    const exchange = result.transcript.find(
+    const exchanges = result.transcript.filter(
       (candidate) => candidate.question.dimension === dimension && candidate.pinned,
     );
-    if (exchange !== undefined) {
-      for (const text of splitStatements(exchange.answer)) {
-        drafts.push({ dimension, text, source: 'answer' });
+    if (exchanges.length > 0) {
+      for (const exchange of exchanges) {
+        for (const text of splitStatements(exchange.answer)) {
+          drafts.push({ dimension, text, source: 'answer' });
+        }
       }
       continue;
     }
