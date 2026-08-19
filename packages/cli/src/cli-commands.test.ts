@@ -207,6 +207,7 @@ import {
   formatGcReport,
   sweepWorktrees,
   watchChecks,
+  withFileLock,
   withGitLock,
 } from '@on-par/factory-core/internal';
 
@@ -1512,6 +1513,52 @@ bash scripts/verify.sh
       expect(res).toEqual({ exited: true, code: 5 });
       expect(errored()).toContain('merge failed for issue #5');
       expect(errored()).toContain('issue vanished');
+    });
+
+    it('scopes the git/merge locks to mutations, not the CI watch (#645)', async () => {
+      const trace: string[] = [];
+      let mergeLockAcquisitions = 0;
+      vi.mocked(withGitLock).mockImplementation(async (_root: any, fn: any) => {
+        trace.push('git-lock:acquire');
+        try {
+          return await fn();
+        } finally {
+          trace.push('git-lock:release');
+        }
+      });
+      vi.mocked(withFileLock).mockImplementation(async (lock: any, fn: any) => {
+        const isMerge = String(lock).endsWith('merge.lock');
+        if (isMerge) mergeLockAcquisitions++;
+        trace.push(`file-lock:acquire:${isMerge ? 'merge' : 'git'}`);
+        try {
+          return await fn();
+        } finally {
+          trace.push('file-lock:release');
+        }
+      });
+      vi.mocked(watchChecks).mockImplementation(async () => {
+        trace.push('watch');
+        return 'success' as const;
+      });
+
+      try {
+        const res = await runMain('land', '5');
+        expect(res.exited).toBe(false);
+
+        let depth = 0;
+        for (const entry of trace) {
+          if (entry === 'git-lock:acquire') depth++;
+          else if (entry === 'git-lock:release') depth--;
+          else if (entry === 'watch') expect(depth).toBe(0);
+        }
+        expect(mergeLockAcquisitions).toBeGreaterThanOrEqual(2);
+      } finally {
+        vi.mocked(withGitLock).mockImplementation(async (_root: string, fn: () => Promise<unknown>) => fn());
+        vi.mocked(withFileLock).mockImplementation(async (_lock: string, fn: () => Promise<unknown>, _opts?: unknown) =>
+          fn(),
+        );
+        vi.mocked(watchChecks).mockImplementation(async () => 'success');
+      }
     });
   });
 

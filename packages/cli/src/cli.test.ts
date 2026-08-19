@@ -2295,6 +2295,230 @@ describe('cli', () => {
     expect(logs.some(([type, msg]) => type === 'awaiting-review' && msg.includes('555'))).toBe(true);
   });
 
+  it('releases the lock for the CI watch on the CLEAN path', async () => {
+    const trace: string[] = [];
+    const withLock = async <T>(fn: () => Promise<T>): Promise<T> => {
+      trace.push('lock:acquire');
+      try {
+        return await fn();
+      } finally {
+        trace.push('lock:release');
+      }
+    };
+    const watch = async () => {
+      trace.push('watch');
+      return 'success' as const;
+    };
+    const octokit: any = {
+      graphql: async () => ({
+        repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } },
+      }),
+      rest: {
+        pulls: {
+          merge: async () => {
+            trace.push('merge');
+          },
+        },
+        git: { deleteRef: async () => {} },
+      },
+    };
+
+    await landOpenPullRequest({
+      octokit,
+      owner: 'on-par',
+      repoName: 'software-factory',
+      ghRepo: 'on-par/software-factory',
+      repoRoot: '/repo',
+      issue: 20,
+      branch: 'ship-it/20-clean',
+      worktree: '/repo-factory-20',
+      prNumber: 123,
+      log: () => {},
+      run: async () => {},
+      pathExists: () => true,
+      sleep: async () => {
+        throw new Error('sleep should not be called');
+      },
+      watch,
+      withLock,
+    });
+
+    expect(trace).toEqual(['watch', 'lock:acquire', 'merge', 'lock:release']);
+  });
+
+  it('releases the lock for the re-watch on the DIRTY path', async () => {
+    const trace: string[] = [];
+    const withLock = async <T>(fn: () => Promise<T>): Promise<T> => {
+      trace.push('lock:acquire');
+      try {
+        return await fn();
+      } finally {
+        trace.push('lock:release');
+      }
+    };
+    const watch = async () => {
+      trace.push('watch');
+      return 'success' as const;
+    };
+    const octokit: any = {
+      graphql: async () => ({
+        repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' } },
+      }),
+      rest: {
+        pulls: {
+          merge: async () => {
+            trace.push('merge');
+          },
+        },
+        git: { deleteRef: async () => {} },
+      },
+    };
+    const run = async (command: string) => {
+      if (command === 'git rebase origin/main') trace.push('rebase');
+      else if (command.startsWith('git push')) trace.push('push');
+    };
+
+    await landOpenPullRequest({
+      octokit,
+      owner: 'on-par',
+      repoName: 'software-factory',
+      ghRepo: 'on-par/software-factory',
+      repoRoot: '/repo',
+      issue: 20,
+      branch: 'ship-it/20-dirty-lock',
+      worktree: '/repo-factory-20',
+      prNumber: 123,
+      log: () => {},
+      run,
+      pathExists: () => true,
+      sleep: async () => {
+        throw new Error('sleep should not be called');
+      },
+      watch,
+      withLock,
+    });
+
+    expect(trace).toEqual([
+      'watch',
+      'lock:acquire',
+      'rebase',
+      'push',
+      'lock:release',
+      'watch',
+      'lock:acquire',
+      'merge',
+      'lock:release',
+    ]);
+  });
+
+  it('does not rebase when the DIRTY verdict resolves before the lock is acquired', async () => {
+    const trace: string[] = [];
+    const withLock = async <T>(fn: () => Promise<T>): Promise<T> => fn();
+    let watchCalls = 0;
+    const watch = async () => {
+      watchCalls++;
+      return 'success' as const;
+    };
+    let queryCalls = 0;
+    const octokit: any = {
+      graphql: async () => {
+        queryCalls++;
+        return {
+          repository: {
+            pullRequest:
+              queryCalls === 1
+                ? { id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' }
+                : { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' },
+          },
+        };
+      },
+      rest: {
+        pulls: {
+          merge: async () => {
+            trace.push('merge');
+          },
+        },
+        git: { deleteRef: async () => {} },
+      },
+    };
+    const run = async () => {
+      throw new Error('run should not be called');
+    };
+
+    await landOpenPullRequest({
+      octokit,
+      owner: 'on-par',
+      repoName: 'software-factory',
+      ghRepo: 'on-par/software-factory',
+      repoRoot: '/repo',
+      issue: 20,
+      branch: 'ship-it/20-resolved',
+      worktree: '/repo-factory-20',
+      prNumber: 123,
+      log: () => {},
+      run,
+      pathExists: () => true,
+      sleep: async () => {
+        throw new Error('sleep should not be called');
+      },
+      watch,
+      withLock,
+    });
+
+    expect(trace).toEqual(['merge']);
+    expect(watchCalls).toBe(1);
+  });
+
+  it('sleeps outside the lock between merge retry attempts', async () => {
+    const trace: string[] = [];
+    const withLock = async <T>(fn: () => Promise<T>): Promise<T> => {
+      trace.push('lock:acquire');
+      try {
+        return await fn();
+      } finally {
+        trace.push('lock:release');
+      }
+    };
+    let mergeCalls = 0;
+    const octokit: any = {
+      graphql: async () => ({
+        repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } },
+      }),
+      rest: {
+        pulls: {
+          merge: async () => {
+            mergeCalls++;
+            trace.push('merge');
+            if (mergeCalls === 1) throw new Error('Pull Request is not mergeable');
+          },
+        },
+        git: { deleteRef: async () => {} },
+      },
+    };
+
+    await landOpenPullRequest({
+      octokit,
+      owner: 'on-par',
+      repoName: 'software-factory',
+      ghRepo: 'on-par/software-factory',
+      repoRoot: '/repo',
+      issue: 20,
+      branch: 'ship-it/20-backoff',
+      worktree: '/repo-factory-20',
+      prNumber: 123,
+      log: () => {},
+      run: async () => {},
+      pathExists: () => true,
+      sleep: async () => {
+        trace.push('sleep');
+      },
+      watch: async () => 'success' as const,
+      withLock,
+    });
+
+    expect(trace).toEqual(['lock:acquire', 'merge', 'lock:release', 'sleep', 'lock:acquire', 'merge', 'lock:release']);
+  });
+
   describe('isReviewRequiredMergeError', () => {
     it('matches the GitHub REST 405 approving-review message regardless of state', () => {
       expect(

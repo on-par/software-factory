@@ -1990,37 +1990,37 @@ async function landIssue(
     throw new LandFailureError(`no open PR for issue #${issueNum} (${guessedBranch})`, 1);
   }
 
-  try {
-    await withGitLock(repoRoot, () =>
-      withFileLock(
-        paths.mergeLock,
-        async () => {
-          try {
-            await landOpenPullRequest({
-              octokit,
-              owner,
-              repoName,
-              ghRepo,
-              repoRoot,
-              issue: issueNum,
-              branch,
-              worktree,
-              prNumber: prNumber!,
-              log,
-              skipCI,
-            });
-          } catch (err) {
-            if (err instanceof AwaitingReviewError || err instanceof CiFailedError) {
-              await cleanupWorktree(repoRoot, worktree, log);
-            }
-            throw err;
-          }
-          log('merged', `squash-merged PR #${prNumber}`);
-          await cleanupWorktree(repoRoot, worktree, log);
-        },
-        { onSteal: (pid) => log('lock-stolen', `stole ${paths.mergeLock} from dead holder pid ${pid ?? 'unknown'}`) },
-      ),
+  const withLandLock: LandLock = (fn) =>
+    withGitLock(repoRoot, () =>
+      withFileLock(paths.mergeLock, fn, {
+        onSteal: (pid) => log('lock-stolen', `stole ${paths.mergeLock} from dead holder pid ${pid ?? 'unknown'}`),
+      }),
     );
+
+  try {
+    try {
+      await landOpenPullRequest({
+        octokit,
+        owner,
+        repoName,
+        ghRepo,
+        repoRoot,
+        issue: issueNum,
+        branch,
+        worktree,
+        prNumber: prNumber!,
+        log,
+        skipCI,
+        withLock: withLandLock,
+      });
+    } catch (err) {
+      if (err instanceof AwaitingReviewError || err instanceof CiFailedError) {
+        await withLandLock(() => cleanupWorktree(repoRoot, worktree, log));
+      }
+      throw err;
+    }
+    log('merged', `squash-merged PR #${prNumber}`);
+    await withLandLock(() => cleanupWorktree(repoRoot, worktree, log));
   } catch (err: any) {
     if (err instanceof LandConflictError || err instanceof AwaitingReviewError || err instanceof CiFailedError)
       throw err;
@@ -2725,6 +2725,10 @@ export async function rebaseDirtyPullRequest(opts: {
   }
 }
 
+/** A critical section runner: the land path takes this instead of owning lock composition,
+ *  so the locks can be scoped to git mutations and stubbed in tests (#645). */
+export type LandLock = <T>(fn: () => Promise<T>) => Promise<T>;
+
 export async function landOpenPullRequest(opts: {
   octokit: Octokit;
   owner: string;
@@ -2742,6 +2746,7 @@ export async function landOpenPullRequest(opts: {
   skipCI?: boolean;
   adminMerge?: boolean;
   watch?: (opts: WatchChecksOptions) => Promise<CiOutcome>;
+  withLock?: LandLock;
 }): Promise<void> {
   const {
     octokit,
@@ -2758,6 +2763,7 @@ export async function landOpenPullRequest(opts: {
     skipCI = false,
     adminMerge = process.env.FACTORY_MERGE_ADMIN === '1',
     watch = watchChecks,
+    withLock = (fn) => fn(),
   } = opts;
 
   const watchCi = async () => {
@@ -2780,28 +2786,44 @@ export async function landOpenPullRequest(opts: {
     throw new CiUnverifiedError(msg, prNumber);
   };
 
+  // The CI watch is a 10-20 minute wait, not a mutation: it must never run under the land
+  // locks, or every other lane's setupWorktree serializes behind it (#645).
   if (!skipCI) {
     await watchCi();
   }
   let state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
 
   if (state.mergeStateStatus === 'DIRTY') {
-    await rebaseDirtyPullRequest({ issue, branch, worktree, prNumber, log, run, pathExists });
-    if (!skipCI) {
-      await watchCi();
+    const rebased = await withLock(async () => {
+      // Re-check under the lock: a sibling lane may have landed (or rebased this branch)
+      // while we waited for it, so the DIRTY verdict read above can be stale.
+      state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
+      if (state.mergeStateStatus !== 'DIRTY') return false;
+      await rebaseDirtyPullRequest({ issue, branch, worktree, prNumber, log, run, pathExists });
+      return true;
+    });
+    if (rebased) {
+      if (!skipCI) {
+        await watchCi();
+      }
+      state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
     }
-    state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
   }
 
   for (let attempt = 1; ; attempt++) {
-    if (state.isDraft && state.id) {
-      log('land', `PR #${prNumber} still a draft — re-issuing ready-for-review (attempt ${attempt})`);
-      await markPullRequestReady(octokit, state.id).catch((err: unknown) =>
-        log('warn', `ready-for-review flip failed for PR #${prNumber}: ${errorDetail(err)}`),
-      );
-    }
     try {
-      await squashMergeAndDelete(octokit, owner, repoName, branch, prNumber, { admin: adminMerge, run });
+      await withLock(async () => {
+        // Same rule as the rebase section: whatever we read before taking the lock (or before
+        // the backoff sleep) may be stale, so the attempt decides from a fresh read.
+        state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
+        if (state.isDraft && state.id) {
+          log('land', `PR #${prNumber} still a draft — re-issuing ready-for-review (attempt ${attempt})`);
+          await markPullRequestReady(octokit, state.id).catch((err: unknown) =>
+            log('warn', `ready-for-review flip failed for PR #${prNumber}: ${errorDetail(err)}`),
+          );
+        }
+        await squashMergeAndDelete(octokit, owner, repoName, branch, prNumber, { admin: adminMerge, run });
+      });
       return;
     } catch (err: any) {
       if (isReviewRequiredMergeError(err, state)) {
@@ -2813,8 +2835,8 @@ export async function landOpenPullRequest(opts: {
         'land',
         `merge attempt ${attempt}/${MAX_MERGE_ATTEMPTS} failed (${err.message}); mergeStateStatus=${state.mergeStateStatus ?? 'unknown'} — retrying with backoff`,
       );
+      // Backoff outside the lock: waiting is not a mutation (#645).
       await sleep(MERGE_RETRY_BASE_MS * 2 ** (attempt - 1));
-      state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
     }
   }
 }
