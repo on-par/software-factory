@@ -47,6 +47,16 @@ describe('reduceLaneEvent', () => {
     expect(state.lanes.map((lane) => lane.laneId)).toEqual(['lane-a', 'lane-b']);
   });
 
+  it('updating one lane among several leaves the others untouched', () => {
+    let state = reduceLaneEvent(emptyLaneBoard(), makeEvent({ laneId: 'lane-a' }));
+    state = reduceLaneEvent(state, makeEvent({ laneId: 'lane-b' }));
+    const laneBBefore = state.lanes.find((lane) => lane.laneId === 'lane-b');
+
+    state = reduceLaneEvent(state, makeEvent({ laneId: 'lane-a', status: 'done' }));
+
+    expect(state.lanes.find((lane) => lane.laneId === 'lane-b')).toBe(laneBBefore);
+  });
+
   const statusToSegment: Array<[LaneLifecycleStatus, string]> = [
     ['started', 'active'],
     ['progress', 'active'],

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createBrowserEventSource, useLaneEvents, type EventSourceLike } from './useLaneEvents.js';
 
@@ -112,20 +112,26 @@ describe('useLaneEvents', () => {
 });
 
 describe('createBrowserEventSource', () => {
+  let originalEventSource: typeof globalThis.EventSource;
+
+  beforeEach(() => {
+    originalEventSource = globalThis.EventSource;
+  });
+
+  afterEach(() => {
+    globalThis.EventSource = originalEventSource;
+  });
+
   it('returns an inert no-op source when globalThis.EventSource is undefined', () => {
-    const original = globalThis.EventSource;
     // @ts-expect-error -- deliberately simulating a non-browser host for this assertion
     delete globalThis.EventSource;
 
     const source = createBrowserEventSource('/events');
     expect(() => source.addEventListener('lifecycle', () => {})).not.toThrow();
     expect(() => source.close()).not.toThrow();
-
-    globalThis.EventSource = original;
   });
 
   it('returns a real instance when globalThis.EventSource is defined', () => {
-    const original = globalThis.EventSource;
     let constructedUrl: string | undefined;
 
     class StubEventSource {
@@ -142,7 +148,5 @@ describe('createBrowserEventSource', () => {
     const source = createBrowserEventSource('/events');
     expect(source).toBeInstanceOf(StubEventSource);
     expect(constructedUrl).toBe('/events');
-
-    globalThis.EventSource = original;
   });
 });

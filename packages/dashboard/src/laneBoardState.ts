@@ -53,7 +53,10 @@ function emptySegments(): Record<LaneLifecyclePhase, PhaseSegmentState> {
 
 export function reduceLaneEvent(state: LaneBoardState, event: LaneLifecycleEvent): LaneBoardState {
   const existing = state.lanes.find((lane) => lane.laneId === event.laneId);
-  const base = existing ?? {
+  const previousSegments = existing?.segments ?? emptySegments();
+  const previousLog = existing?.log ?? [];
+
+  const nextCard: LaneCard = {
     laneId: event.laneId,
     issueId: event.issueId,
     worktreePath: event.worktreePath,
@@ -61,20 +64,8 @@ export function reduceLaneEvent(state: LaneBoardState, event: LaneLifecycleEvent
     status: event.status,
     detail: event.detail,
     updatedAt: event.ts,
-    segments: emptySegments(),
-    log: [],
-  };
-
-  const nextCard: LaneCard = {
-    ...base,
-    issueId: event.issueId,
-    worktreePath: event.worktreePath,
-    phase: event.phase,
-    status: event.status,
-    detail: event.detail,
-    updatedAt: event.ts,
-    segments: { ...base.segments, [event.phase]: SEGMENT_BY_STATUS[event.status] },
-    log: [...base.log, { ts: event.ts, phase: event.phase, status: event.status, detail: event.detail }].slice(
+    segments: { ...previousSegments, [event.phase]: SEGMENT_BY_STATUS[event.status] },
+    log: [...previousLog, { ts: event.ts, phase: event.phase, status: event.status, detail: event.detail }].slice(
       -LOG_TAIL_LIMIT,
     ),
   };
