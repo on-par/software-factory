@@ -2,8 +2,10 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+import { LaneLifecycleEventSchema } from '@on-par/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createLifecycleBus } from '../bus/index.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
@@ -1219,6 +1221,65 @@ describe('checkPhase steering', () => {
       expect(logs.some((l) => l.type === 'steering_applied')).toBe(false);
     },
   );
+});
+
+describe('checkPhase lifecycle events', () => {
+  it(
+    'emits started then done on the success path, validated against the shared schema',
+    { timeout: 120_000 },
+    async () => {
+      const { worktree, specPath } = await makePassingWorktree();
+      const { router } = makeRouter();
+      const bus = createLifecycleBus();
+      const received: any[] = [];
+      bus.on((e) => received.push(e));
+
+      await checkPhase({
+        issue: 591,
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        log: () => {},
+        bus,
+        laneId: 'lane-1',
+      });
+
+      expect(received.map((e) => ({ phase: e.phase, status: e.status }))).toEqual([
+        { phase: 'check', status: 'started' },
+        { phase: 'check', status: 'done' },
+      ]);
+      expect(received.every((e) => e.laneId === 'lane-1')).toBe(true);
+      expect(received.every((e) => e.issueId === '591')).toBe(true);
+      expect(received.every((e) => e.worktreePath === worktree)).toBe(true);
+      for (const event of received) {
+        expect(() => LaneLifecycleEventSchema.parse(event)).not.toThrow();
+      }
+    },
+  );
+
+  it('emits started then failed on the failure path, with a non-empty detail', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router } = makeRouter();
+    const bus = createLifecycleBus();
+    const received: any[] = [];
+    bus.on((e) => received.push(e));
+
+    await checkPhase({
+      issue: 592,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      log: () => {},
+      autoRework: false,
+      bus,
+      laneId: 'lane-1',
+    });
+
+    expect(received.map((e) => e.status)).toEqual(['started', 'failed']);
+    expect(received[1].detail.length).toBeGreaterThan(0);
+  });
 });
 
 async function makePassingWorktree(): Promise<{ worktree: string; specPath: string }> {

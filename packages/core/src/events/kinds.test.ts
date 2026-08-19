@@ -124,3 +124,16 @@ describe('size-gate-escalated classification (#607)', () => {
     expect(EVENT_TRAITS['size-gate-escalated']).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
   });
 });
+
+// A run refused before any resource was committed because the target issue was already
+// closed (#681) is a clean terminal outcome, not a park — human-intervention KPIs must
+// never count it, and isParkKind must agree.
+describe('skipped-already-closed classification (#681)', () => {
+  it('is info severity, not park, terminal', () => {
+    expect(EVENT_TRAITS['skipped-already-closed']).toEqual({ severity: 'info', isPark: false, isTerminal: true });
+  });
+
+  it('isParkKind is false — a skip must never count as human intervention', () => {
+    expect(isParkKind('skipped-already-closed')).toBe(false);
+  });
+});

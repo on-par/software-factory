@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  closedWorkSkipReason,
   createDefaultWorkSourceRegistry,
   InvalidWorkRequestInputError,
   UnsupportedWorkSourceError,
@@ -119,5 +120,31 @@ describe('InvalidWorkRequestInputError', () => {
     expect(err.name).toBe('InvalidWorkRequestInputError');
     expect(err.kind).toBe('github-issue');
     expect(err.message).toBe('invalid input for work-request source "github-issue": bad shape');
+  });
+});
+
+describe('closedWorkSkipReason', () => {
+  function work(overrides: Partial<WorkRequest> = {}): WorkRequest {
+    return {
+      id: 'github-issue:on-par/software-factory#681',
+      kind: 'github-issue',
+      title: 'T',
+      brief: 'B',
+      acceptanceCriteria: [],
+      ...overrides,
+    };
+  }
+
+  it('returns a message naming the work id when state is closed', () => {
+    const reason = closedWorkSkipReason(work({ state: 'closed' }));
+    expect(reason).toContain('github-issue:on-par/software-factory#681');
+  });
+
+  it('returns null when state is open', () => {
+    expect(closedWorkSkipReason(work({ state: 'open' }))).toBeNull();
+  });
+
+  it('returns null when state is absent (e.g. a local brief)', () => {
+    expect(closedWorkSkipReason(work())).toBeNull();
   });
 });

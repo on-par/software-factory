@@ -3,7 +3,12 @@
 import type { Octokit } from '@octokit/rest';
 
 import { extractAcceptanceCriteria } from './acceptance.js';
-import { InvalidWorkRequestInputError, type WorkRequest, type WorkSourceAdapter } from './index.js';
+import {
+  InvalidWorkRequestInputError,
+  type WorkRequest,
+  type WorkRequestState,
+  type WorkSourceAdapter,
+} from './index.js';
 
 export const GITHUB_ISSUE_SOURCE = 'github-issue';
 
@@ -18,6 +23,7 @@ export interface WorkIssueClient {
     title: string;
     body: string | null;
     htmlUrl?: string;
+    state?: WorkRequestState;
   }>;
 }
 
@@ -25,7 +31,12 @@ export function createOctokitIssueClient(octokit: Octokit): WorkIssueClient {
   return {
     async fetchIssue({ owner, repo, issue_number }) {
       const { data } = await octokit.rest.issues.get({ owner, repo, issue_number });
-      return { title: data.title, body: data.body ?? null, htmlUrl: data.html_url };
+      return {
+        title: data.title,
+        body: data.body ?? null,
+        htmlUrl: data.html_url,
+        state: data.state === 'closed' ? 'closed' : 'open',
+      };
     },
   };
 }
@@ -58,6 +69,7 @@ export function createGithubIssueAdapter(client: WorkIssueClient): WorkSourceAda
         title: data.title,
         brief,
         acceptanceCriteria: extractAcceptanceCriteria(brief),
+        state: data.state,
         reference: {
           externalId: String(params.issue),
           repo: params.repo,

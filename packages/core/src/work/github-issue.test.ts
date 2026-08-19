@@ -19,7 +19,12 @@ Then it does not flicker
 - [x] Regression test added
 `;
 
-function fakeClient(response: { title: string; body: string | null; htmlUrl?: string }): WorkIssueClient {
+function fakeClient(response: {
+  title: string;
+  body: string | null;
+  htmlUrl?: string;
+  state?: 'open' | 'closed';
+}): WorkIssueClient {
   return { fetchIssue: async () => response };
 }
 
@@ -100,6 +105,24 @@ describe('createGithubIssueAdapter', () => {
     expect(request.reference?.url).toBe('https://github.com/on-par/software-factory/issues/42');
   });
 
+  it('puts the client-reported state on the resolved WorkRequest', async () => {
+    const client = fakeClient({ title: 'Closed issue', body: 'Body', state: 'closed' });
+    const adapter = createGithubIssueAdapter(client);
+
+    const request = await adapter.resolve({ repo: 'on-par/software-factory', issue: 505 });
+
+    expect(request.state).toBe('closed');
+  });
+
+  it('leaves state undefined when the client omits it (fail-open)', async () => {
+    const client = fakeClient({ title: 'No state', body: 'Body' });
+    const adapter = createGithubIssueAdapter(client);
+
+    const request = await adapter.resolve({ repo: 'on-par/software-factory', issue: 505 });
+
+    expect(request.state).toBeUndefined();
+  });
+
   it.each([
     ['empty object', {}],
     ['no-slash repo', { repo: 'noslash', issue: 1 }],
@@ -130,7 +153,7 @@ describe('createOctokitIssueClient', () => {
         issues: {
           get: async (input: { owner: string; repo: string; issue_number: number }) => {
             captured = input;
-            return { data: { title: 'A title', body: 'A body', html_url: 'https://x' } };
+            return { data: { title: 'A title', body: 'A body', html_url: 'https://x', state: 'open' } };
           },
         },
       },
@@ -140,7 +163,7 @@ describe('createOctokitIssueClient', () => {
     const result = await client.fetchIssue({ owner: 'on-par', repo: 'software-factory', issue_number: 505 });
 
     expect(captured).toEqual({ owner: 'on-par', repo: 'software-factory', issue_number: 505 });
-    expect(result).toEqual({ title: 'A title', body: 'A body', htmlUrl: 'https://x' });
+    expect(result).toEqual({ title: 'A title', body: 'A body', htmlUrl: 'https://x', state: 'open' });
   });
 
   it('turns a body of undefined into null', async () => {
@@ -156,5 +179,35 @@ describe('createOctokitIssueClient', () => {
     const result = await client.fetchIssue({ owner: 'o', repo: 'r', issue_number: 1 });
 
     expect(result.body).toBeNull();
+  });
+
+  it('maps data.state "closed" to state "closed"', async () => {
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 'A title', body: 'A body', state: 'closed' } }),
+        },
+      },
+    };
+
+    const client = createOctokitIssueClient(octokit);
+    const result = await client.fetchIssue({ owner: 'o', repo: 'r', issue_number: 1 });
+
+    expect(result.state).toBe('closed');
+  });
+
+  it('maps any non-"closed" data.state (including absent) to state "open" — fail-open', async () => {
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 'A title', body: 'A body' } }),
+        },
+      },
+    };
+
+    const client = createOctokitIssueClient(octokit);
+    const result = await client.fetchIssue({ owner: 'o', repo: 'r', issue_number: 1 });
+
+    expect(result.state).toBe('open');
   });
 });

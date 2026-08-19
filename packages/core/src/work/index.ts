@@ -8,6 +8,9 @@ import { type BriefFileReader, createFsBriefReader, createLocalBriefAdapter } fr
 /** Registered input sources. Open-ended by design — adapters register by string key. */
 export type WorkRequestSourceKind = 'github-issue' | 'local-brief' | (string & {});
 
+/** Source-native lifecycle state, for sources that have one. */
+export type WorkRequestState = 'open' | 'closed';
+
 /** Where the request came from, for traceability back to the native artifact. */
 export interface WorkRequestReference {
   /** Source-native id, e.g. the GitHub issue number as a string. */
@@ -28,6 +31,9 @@ export interface WorkRequest {
   brief: string;
   /** Acceptance-criteria lines lifted from the brief; empty when the source has none. */
   acceptanceCriteria: string[];
+  /** Source-native lifecycle state when the source reports one; undefined for
+   *  stateless sources (a local Markdown brief) and when the source omitted it. */
+  state?: WorkRequestState;
   reference?: WorkRequestReference;
 }
 
@@ -97,4 +103,12 @@ export function createDefaultWorkSourceRegistry(deps: {
   return new WorkSourceRegistry()
     .register(createGithubIssueAdapter(createOctokitIssueClient(deps.octokit)))
     .register(createLocalBriefAdapter(deps.briefReader ?? createFsBriefReader()));
+}
+
+/** The reason to refuse this work before committing any resource, or null to proceed.
+ *  Deliberately fails open: only the literal 'closed' skips, so an absent or unknown
+ *  state is handled exactly as it is today. */
+export function closedWorkSkipReason(work: WorkRequest): string | null {
+  if (work.state !== 'closed') return null;
+  return `${work.id} is already closed — skipping before PLAN (no worktree, no port lease, no model call)`;
 }
