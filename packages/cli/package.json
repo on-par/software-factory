@@ -34,9 +34,11 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
+    "@octokit/plugin-retry": "^8.1.1",
+    "@octokit/plugin-throttling": "^11.0.5",
+    "@octokit/rest": "^22.0.0",
     "@on-par/factory-core": "^2.0.0",
     "@on-par/factory-tui": "^2.0.0",
-    "@octokit/rest": "^22.0.0",
     "chalk": "^6.0.0",
     "commander": "^15.0.0"
   },

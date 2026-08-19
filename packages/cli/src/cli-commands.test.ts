@@ -78,11 +78,15 @@ vi.mock('node:child_process', () => {
   return { exec, execSync, default: { exec, execSync } };
 });
 
-vi.mock('@octokit/rest', () => ({
-  Octokit: vi.fn(function () {
+vi.mock('@octokit/rest', () => {
+  const Octokit: any = vi.fn(function () {
     return h.octokit;
-  }),
-}));
+  });
+  // createFactoryOctokit (packages/cli/src/cli/octokit.ts) calls Octokit.plugin(...) at module
+  // load time to attach retry/throttling — the mocked constructor must expose it too.
+  Octokit.plugin = () => Octokit;
+  return { Octokit };
+});
 
 vi.mock('@on-par/factory-tui', () => ({
   runTui: vi.fn(
