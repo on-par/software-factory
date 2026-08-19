@@ -1,13 +1,19 @@
 // packages/core/src/config/index.ts — Configuration loaders with Zod validation
 //
-// Config files live in @on-par/factory-config (a separate workspace package
-// that ships the JSON configs + constitution markdown). This module loads
-// them by resolving the config package's exports, or by explicit path.
+// The shipped defaults live in @on-par/factory-config (a separate workspace
+// package that ships typed TS defaults + constitution markdown). This module
+// validates those defaults when called with no path, or reads and validates
+// an explicit JSON file path.
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { resolveConfigPath } from '@on-par/factory-config';
+import {
+  defaultFactoryConfig,
+  defaultModelsConfig,
+  defaultRoutesConfig,
+  resolveConfigPath,
+} from '@on-par/factory-config';
 import { z } from 'zod';
 
 import type { FilingPolicy } from '../filing/policy.js';
@@ -223,20 +229,17 @@ export type FactoryConfig = z.infer<typeof FactoryConfigSchema>;
 // ---------- Loaders ----------
 
 export function loadModelsConfig(path?: string): ModelsConfig {
-  const p = path ?? resolveConfigPath('models.json');
-  const raw = JSON.parse(readFileSync(p, 'utf-8'));
+  const raw = path === undefined ? defaultModelsConfig : JSON.parse(readFileSync(path, 'utf-8'));
   return ModelsConfigSchema.parse(raw);
 }
 
 export function loadRoutesConfig(path?: string): RoutesConfig {
-  const p = path ?? resolveConfigPath('routes.json');
-  const raw = JSON.parse(readFileSync(p, 'utf-8'));
+  const raw = path === undefined ? defaultRoutesConfig : JSON.parse(readFileSync(path, 'utf-8'));
   return RoutesConfigSchema.parse(raw);
 }
 
 export function loadFactoryConfig(path?: string): FactoryConfig {
-  const p = path ?? resolveConfigPath('factory.json');
-  const raw = JSON.parse(readFileSync(p, 'utf-8'));
+  const raw = path === undefined ? defaultFactoryConfig : JSON.parse(readFileSync(path, 'utf-8'));
   return FactoryConfigSchema.parse(raw);
 }
 
