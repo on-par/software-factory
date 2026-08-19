@@ -78,11 +78,16 @@ const experimentalFirstModels: ModelsConfig = {
   routingRules: {},
 };
 
+// The two models sit on different providers deliberately. Cross-provider
+// failover (#554) blocks a whole provider once one of its models reports a
+// provider-level failure (rate_limit/usage_cap/timeout/unavailable), so a
+// same-provider pair can no longer exercise failover at all — the second model
+// is correctly skipped rather than tried.
 const twoModels: ModelsConfig = {
   version: 1,
   models: {
     'model-a': {
-      provider: 'custom',
+      provider: 'anthropic',
       tier: 'boss',
       costPerMtokInput: 0,
       costPerMtokOutput: 0,
@@ -91,7 +96,7 @@ const twoModels: ModelsConfig = {
       envKey: null,
     },
     'model-b': {
-      provider: 'custom',
+      provider: 'openai',
       tier: 'boss',
       costPerMtokInput: 0,
       costPerMtokOutput: 0,
@@ -118,6 +123,21 @@ const providerModels: ModelsConfig = {
   },
   tiers: { boss: ['claude-preferred', 'gpt-fallback'] },
 };
+
+/**
+ * Drains the microtask queue, then yields once to the event loop.
+ *
+ * The trailing `setTimeout` is the load-bearing part. A microtask-only drain
+ * (`for (…) await Promise.resolve()`) never returns to libuv, so a loop built
+ * on one starves the event loop: no timer can fire, which means Vitest's own
+ * test timeout can never trigger. A worker that enters such a loop spins at
+ * 100% CPU with zero output until the CI job is killed — that is what hung
+ * `ci` for six hours in #739/#755.
+ */
+async function drainMicrotasksAndYield(): Promise<void> {
+  for (let i = 0; i < 100; i++) await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 describe('ModelRouter with StubModelExecutor', () => {
   afterEach(() => {
@@ -250,21 +270,40 @@ describe('ModelRouter with StubModelExecutor', () => {
     const router = new ModelRouter(modelsWithCooldown, routes, false, stub, undefined, undefined, undefined, sleepFn);
     let settled = false;
 
-    const promise = router.run('plan', 'do it').then((result) => {
-      settled = true;
-      return result;
-    });
+    const promise = router.run('plan', 'do it');
+    // Settle on rejection too. Watching only the fulfilled branch is what made
+    // the release loop below unbounded once cross-provider failover (#554)
+    // turned this scenario into a rejection (#755).
+    void promise.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
 
     // Flush every pending microtask without resolving the injected sleep: if the
     // cooldown were not actually awaited, the retry loop would race through on
     // microtasks alone and this promise would already be settled.
-    for (let i = 0; i < 100; i++) await Promise.resolve();
+    await drainMicrotasksAndYield();
     expect(settled).toBe(false);
     expect(stub.calls).toHaveLength(1);
 
+    // Bounded, and it yields to the event loop on every pass. The run needs one
+    // release per injected cooldown; the cap only exists so that a future change
+    // which stops settling fails this test in milliseconds instead of pinning a
+    // CI worker at 100% CPU forever.
+    const maxReleases = 10;
+    let releases = 0;
     while (!settled) {
+      if (releases++ >= maxReleases) {
+        throw new Error(
+          `router.run did not settle after ${maxReleases} cooldown releases (sleeps=${JSON.stringify(sleepCalls)})`,
+        );
+      }
       releaseSleep();
-      for (let i = 0; i < 100; i++) await Promise.resolve();
+      await drainMicrotasksAndYield();
     }
     const result = await promise;
 
@@ -989,11 +1028,13 @@ describe('ModelRouter cost sink', () => {
     routingRules: {},
   };
 
+  // Two providers, for the same reason twoModels above uses two: a failover
+  // assertion cannot be written against a same-provider pair since #554.
   const costTwoModels: ModelsConfig = {
     version: 1,
     models: {
       'model-a': {
-        provider: 'custom',
+        provider: 'anthropic',
         tier: 'boss',
         costPerMtokInput: 3,
         costPerMtokOutput: 15,
@@ -1002,7 +1043,7 @@ describe('ModelRouter cost sink', () => {
         envKey: null,
       },
       'model-b': {
-        provider: 'custom',
+        provider: 'openai',
         tier: 'boss',
         costPerMtokInput: 3,
         costPerMtokOutput: 15,

@@ -1,18 +1,15 @@
 // src/utils/index.ts — Shared utilities: logging, git ops, cost tracking, shell helpers
 
-import { exec as execCb } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { promisify } from 'node:util';
 
 import type { EventKind } from '../events/kinds.js';
 import { createLogger } from '../logger/index.js';
 import type { CostEntry, FailoverReason, LogLevel, ReadinessInfo, ReworkInfo } from '../types/index.js';
 import { levelForType } from './format.js';
+import { execGit } from './git-exec.js';
 
 export { colorEnabled, formatEventLine, levelForType } from './format.js';
-
-const exec = promisify(execCb);
 
 // ---------- Event Logging ----------
 
@@ -82,14 +79,19 @@ export function readCosts(costsFile: string): CostEntry[] {
 
 // ---------- Git Operations ----------
 
+// Every git call below runs through execGit, which imposes a hard deadline and
+// kills the child on expiry. Without one, a wedged worktree op hangs its caller
+// forever with no output — the failure mode #755 was opened for.
 export async function gitFetch(repoRoot: string): Promise<void> {
-  await exec('git fetch origin -q', { cwd: repoRoot });
+  await execGit('git fetch origin -q', { cwd: repoRoot });
 }
 
 export async function setupWorktree(repoRoot: string, branch: string, worktreePath: string): Promise<void> {
-  await exec(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot }).catch(() => {});
-  await exec(`git branch -D ${shellEscape(branch)}`, { cwd: repoRoot }).catch(() => {});
-  await exec(`git worktree add -b ${shellEscape(branch)} ${shellEscape(worktreePath)} origin/main`, { cwd: repoRoot });
+  await execGit(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot }).catch(() => {});
+  await execGit(`git branch -D ${shellEscape(branch)}`, { cwd: repoRoot }).catch(() => {});
+  await execGit(`git worktree add -b ${shellEscape(branch)} ${shellEscape(worktreePath)} origin/main`, {
+    cwd: repoRoot,
+  });
 }
 
 export async function cleanupWorktree(
@@ -97,13 +99,13 @@ export async function cleanupWorktree(
   worktreePath: string,
   log: (type: EventKind, msg: string) => void = () => {},
 ): Promise<void> {
-  await exec(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot }).catch((err: any) =>
+  await execGit(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot }).catch((err: any) =>
     log(
       'warn',
       `git worktree remove failed for ${worktreePath}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`,
     ),
   );
-  await exec('git worktree prune', { cwd: repoRoot }).catch((err: any) =>
+  await execGit('git worktree prune', { cwd: repoRoot }).catch((err: any) =>
     log(
       'warn',
       `git worktree prune failed in ${repoRoot}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`,

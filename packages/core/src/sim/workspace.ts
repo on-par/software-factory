@@ -1,16 +1,13 @@
 // packages/core/src/sim/workspace.ts — throwaway local git workspace for simulated runs:
 // a bare "origin" plus a clone, both under the OS temp dir, so pushes never leave the machine.
 
-import { exec as execCb } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
 
+import { execGit as exec } from '../utils/git-exec.js';
 import { shellEscape } from '../utils/index.js';
-
-const exec = promisify(execCb);
 
 export interface SimWorkspace {
   /** Bare repo standing in for the GitHub remote — a local path, so pushes never touch the network. */

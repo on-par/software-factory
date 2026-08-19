@@ -3,12 +3,16 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-# --no-e2e: skip the full-suite coverage run and the pipeline
-# integration/simulation tests (each spins up real git worktrees and runs
-# whole plan->build->check->ship cycles). Used by the CHECK-phase checker
+# --no-e2e: skip the full-suite coverage run. Used by the CHECK-phase checker
 # for a fast agent-facing pass; real CI (.github/workflows/ci.yml) runs
-# `npm run test` directly, unaffected by this flag, so full coverage and
-# the integration suites still run on every PR.
+# `npm run test` directly, unaffected by this flag, so full coverage still
+# runs on every PR.
+#
+# The pipeline integration suites (real git worktrees, whole
+# plan->build->check->ship cycles) are excluded from BOTH paths now: vitest's
+# default include skips them, and they run on a schedule instead
+# (.github/workflows/nightly-integration.yml). Run them on demand with
+# `npm run test:integration`.
 NO_E2E=0
 for arg in "$@"; do
   if [ "$arg" = "--no-e2e" ]; then
@@ -23,7 +27,7 @@ npm run typecheck
 npm run lint
 npm run knip
 if [ "$NO_E2E" = "1" ]; then
-  npx vitest run --exclude '**/*.integration.test.{ts,tsx}'
+  npx vitest run
 else
   npm run test
   npm run coverage-ratchet
