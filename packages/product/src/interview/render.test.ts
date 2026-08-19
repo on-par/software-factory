@@ -44,4 +44,28 @@ describe('renderInterviewSummary', () => {
     expect(lines[1]).toBe('Pinned: (none)');
     expect(lines[2]).toBe('Open gaps: problem, audience, outcome, scope, nonGoals, constraints');
   });
+
+  it('appends the follow-up count when the transcript contains follow-up exchanges', () => {
+    const result = baseResult({
+      pinned: ['problem', 'audience', 'outcome', 'scope', 'nonGoals', 'constraints'],
+      questionsAsked: 6,
+      questionBudget: 6,
+      stopReason: 'pinned',
+      transcript: [
+        { question: { index: 1, dimension: 'problem', text: 'x?' }, answer: 'a', pinned: true },
+        {
+          question: { index: 2, dimension: 'problem', text: 'y?', followUpDepth: 1 },
+          answer: 'b',
+          pinned: true,
+        },
+        {
+          question: { index: 3, dimension: 'problem', text: 'z?', followUpDepth: 2 },
+          answer: 'c',
+          pinned: true,
+        },
+      ],
+    });
+    const lines = renderInterviewSummary(result);
+    expect(lines[0]).toBe('Asked 6 of 6 question(s) plus 2 follow-up(s); stopped: pinned');
+  });
 });

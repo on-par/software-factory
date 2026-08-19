@@ -85,6 +85,30 @@ describe('extractStatements', () => {
     ]);
   });
 
+  it('collects statements from every pinned exchange of a dimension, including follow-ups, in transcript order', () => {
+    const result = buildResult({
+      transcript: [
+        {
+          question: { index: 1, dimension: 'problem', text: 'x?' },
+          answer: 'The export breaks weekly.',
+          pinned: true,
+        },
+        {
+          question: { index: 2, dimension: 'problem', text: 'y?', followUpDepth: 1 },
+          answer: 'It costs an afternoon of manual rework.',
+          pinned: true,
+        },
+      ],
+      gaps: ['audience', 'outcome', 'scope', 'nonGoals', 'constraints'],
+    });
+
+    const drafts = extractStatements(result);
+    expect(drafts).toEqual([
+      { dimension: 'problem', text: 'The export breaks weekly.', source: 'answer' },
+      { dimension: 'problem', text: 'It costs an afternoon of manual rework.', source: 'answer' },
+    ]);
+  });
+
   it('contributes nothing for a declined exchange', () => {
     const result = buildResult({
       transcript: [{ question: { index: 1, dimension: 'problem', text: 'x?' }, answer: "I don't know", pinned: false }],
