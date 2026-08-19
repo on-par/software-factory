@@ -95,8 +95,15 @@ export type {
 export { parseQueue, readQueue, validateQueue } from './queue/index.js';
 
 // Work requests
-export type { WorkRequest, WorkRequestReference, WorkRequestSourceKind, WorkSourceAdapter } from './work/index.js';
+export type {
+  WorkRequest,
+  WorkRequestReference,
+  WorkRequestSourceKind,
+  WorkRequestState,
+  WorkSourceAdapter,
+} from './work/index.js';
 export {
+  closedWorkSkipReason,
   createDefaultWorkSourceRegistry,
   InvalidWorkRequestInputError,
   UnsupportedWorkSourceError,
@@ -121,6 +128,16 @@ export {
   severityOf,
   UNKNOWN_EVENT_TRAITS,
 } from './events/kinds.js';
+
+// Lifecycle bus (#591)
+export type {
+  LaneLifecycleEvent,
+  LaneLifecycleListener,
+  LaneLifecyclePhase,
+  LaneLifecycleStatus,
+  LifecycleBus,
+} from './bus/index.js';
+export { createLifecycleBus, lifecycleBus } from './bus/index.js';
 
 // Models
 export type { DoctorProbes, ModelDiagnosis, ModelOverrides } from './models/index.js';

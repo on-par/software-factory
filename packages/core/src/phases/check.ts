@@ -1,5 +1,6 @@
 // src/phases/check.ts — CHECK phase: independent checkers verify output, rework loop
 
+import { type LifecycleBus, withLifecycle } from '../bus/index.js';
 import { type CheckerContext, probeWorktree, runAllCheckers, type WorktreeProbe } from '../checkers/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { laneEnv } from '../environment/index.js';
@@ -126,7 +127,18 @@ function classifyReworkCause(opts: {
   return 'factory-fault';
 }
 
-export async function checkPhase(opts: {
+export async function checkPhase(opts: Parameters<typeof checkPhaseImpl>[0]): Promise<CheckPhaseResult> {
+  return withLifecycle(
+    { bus: opts.bus, phase: 'check', laneId: opts.laneId, issueId: opts.issue, worktreePath: opts.worktree },
+    () => checkPhaseImpl(opts),
+    (r) => r.passed,
+    (r) =>
+      `check ${r.passed ? 'passed' : 'failed'} (${r.summary.passes} pass, ${r.summary.failures} fail, ` +
+      `${r.reworkRounds} rework round${r.reworkRounds === 1 ? '' : 's'})`,
+  );
+}
+
+async function checkPhaseImpl(opts: {
   issue: number;
   worktree: string;
   specPath: string;
@@ -148,6 +160,10 @@ export async function checkPhase(opts: {
    *  #740). When round one's signature matches, the rework loop is skipped entirely
    *  instead of re-burning a full budget against an unfixed root cause. */
   priorFailureSignature?: string;
+  /** Lane id stamped onto emitted lifecycle events; defaults to `issue-<issue>` (#591). */
+  laneId?: string;
+  /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
+  bus?: LifecycleBus;
 }): Promise<CheckPhaseResult> {
   const {
     issue,

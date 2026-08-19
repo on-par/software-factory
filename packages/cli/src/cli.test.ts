@@ -27,6 +27,7 @@ import {
   initConstitution,
   InvalidProductNameError,
   isPermanentMergeCheckError,
+  IssueSkippedError,
   isPrMerged,
   isReviewRequiredMergeError,
   issueFromFactoryBranch,
@@ -2507,7 +2508,7 @@ describe('cli', () => {
         'event',
         'lane-done',
         'app',
-        'lane complete (2 merged, 0 awaiting review)',
+        'lane complete (2 merged, 0 awaiting review, 0 skipped)',
         { lane: 'app' },
       ]);
     });
@@ -2539,7 +2540,39 @@ describe('cli', () => {
         'event',
         'lane-done',
         'app',
-        'lane complete (1 merged, 1 awaiting review)',
+        'lane complete (1 merged, 1 awaiting review, 0 skipped)',
+        { lane: 'app' },
+      ]);
+    });
+
+    it('continues to the next issue on an IssueSkippedError instead of parking, and counts it as skipped', async () => {
+      const calls: any[] = [];
+      await runLane('app', [1, 2], '/repo', 'on-par/software-factory', paths, {
+        ship: async (issue) => {
+          calls.push(['ship', issue]);
+          if (issue === 1) throw new IssueSkippedError('#1 already closed', 'already-closed');
+          return `ship-it/${issue}-x`;
+        },
+        waitMerge: async (issue) => {
+          calls.push(['waitMerge', issue]);
+        },
+        pathExists: () => false,
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
+          calls.push(['event', type, issue, msg, extra]),
+      });
+
+      expect(calls.filter((c) => c[0] === 'ship')).toEqual([
+        ['ship', 1],
+        ['ship', 2],
+      ]);
+      expect(calls.filter((c) => c[0] === 'waitMerge')).toEqual([['waitMerge', 2]]);
+      const events = calls.filter((c) => c[0] === 'event');
+      expect(events.some((e) => e[1] === 'parked')).toBe(false);
+      expect(events.at(-1)).toEqual([
+        'event',
+        'lane-done',
+        'app',
+        'lane complete (1 merged, 0 awaiting review, 1 skipped)',
         { lane: 'app' },
       ]);
     });

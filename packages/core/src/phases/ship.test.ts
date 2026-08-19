@@ -3,8 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { AdrDraft } from '@on-par/contracts';
+import { LaneLifecycleEventSchema } from '@on-par/contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { createLifecycleBus } from '../bus/index.js';
 import { specPaths } from '../spec/index.js';
 import { shipPhase } from './ship.js';
 
@@ -2029,5 +2031,76 @@ describe('shipPhase duplicate-PR guard (#520)', () => {
     expect(result).toEqual({ ok: true, prNumber: 123 });
     expect(calls).toContainEqual(['pulls.create', expect.anything()]);
     expect(logs).toContainEqual(['ship', expect.stringContaining('git fetch origin main failed')]);
+  });
+});
+
+describe('shipPhase lifecycle events', () => {
+  it('emits started then done on the success path, validated against the shared schema', async () => {
+    const { octokit } = createOctokit();
+    const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+    const bus = createLifecycleBus();
+    const received: any[] = [];
+    bus.on((e) => received.push(e));
+
+    await shipPhase({
+      issue: 591,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-591',
+      branch: 'ship-it/591-lifecycle',
+      octokit: octokit as any,
+      watchCI: false,
+      log: () => {},
+      run,
+      bus,
+      laneId: 'lane-1',
+    });
+
+    expect(received.map((e) => ({ phase: e.phase, status: e.status }))).toEqual([
+      { phase: 'ship', status: 'started' },
+      { phase: 'ship', status: 'done' },
+    ]);
+    expect(received.every((e) => e.laneId === 'lane-1')).toBe(true);
+    expect(received.every((e) => e.issueId === '591')).toBe(true);
+    expect(received.every((e) => e.worktreePath === '/repo-factory-591')).toBe(true);
+    for (const event of received) {
+      expect(() => LaneLifecycleEventSchema.parse(event)).not.toThrow();
+    }
+  });
+
+  it('emits started then failed when there are no commits ahead of origin/main', async () => {
+    const { octokit } = createOctokit();
+    const run = async (command: string) => {
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '0\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      return { stdout: '' };
+    };
+    const bus = createLifecycleBus();
+    const received: any[] = [];
+    bus.on((e) => received.push(e));
+
+    await shipPhase({
+      issue: 592,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-592',
+      branch: 'ship-it/592-lifecycle',
+      octokit: octokit as any,
+      watchCI: false,
+      log: () => {},
+      run,
+      bus,
+      laneId: 'lane-1',
+    });
+
+    expect(received.map((e) => e.status)).toEqual(['started', 'failed']);
+    expect(received[1].detail.length).toBeGreaterThan(0);
   });
 });

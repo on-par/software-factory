@@ -206,7 +206,16 @@ import {
   withGitLock,
 } from '@on-par/factory-core/internal';
 
-import { CliExitError, cmdConstitution, cmdLand, cmdUsage, main, parseIssueArg, shipIssue } from './cli/index.js';
+import {
+  CliExitError,
+  cmdConstitution,
+  cmdLand,
+  cmdUsage,
+  IssueSkippedError,
+  main,
+  parseIssueArg,
+  shipIssue,
+} from './cli/index.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1384,6 +1393,28 @@ bash scripts/verify.sh
       const state = JSON.parse(readFileSync(join(queueDir, 'overnight-state.json'), 'utf-8'));
       expect(state.items).toEqual([expect.objectContaining({ issue: 5, status: 'parked' })]);
     });
+
+    // Regression (#681): the curated overnight queue needs a human to prune it —
+    // a closed issue maps to 'parked', not 'ready' or 'failed'.
+    it('parks a closed issue for a human, reports it, and logs overnight-park', async () => {
+      h.diagnoses = [
+        { model: 'w', provider: 'openai', tiers: ['worker'], reachable: true, experimental: false, reason: 'ok' },
+      ];
+      h.octokit.rest.issues.get = vi.fn(async () => ({ data: { title: 'Fix the bug', state: 'closed' } }));
+      const queueDir = join(paths().state, 'local-small');
+      mkdirSync(queueDir, { recursive: true });
+      writeFileSync(join(queueDir, 'overnight-queue'), 'overnight 5\n');
+
+      const res = await runMain('local-small-overnight');
+
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('overnight parked: 1');
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('skipped-already-closed');
+
+      const state = JSON.parse(readFileSync(join(queueDir, 'overnight-state.json'), 'utf-8'));
+      expect(state.items).toEqual([expect.objectContaining({ issue: 5, status: 'parked' })]);
+    });
   });
 
   describe('land', () => {
@@ -1481,6 +1512,14 @@ bash scripts/verify.sh
       const res = await runMain('ship', '5');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('PR #99 ready for review');
+    });
+
+    // Regression (#681): a closed issue exits 0 (not 1) through the CLI command.
+    it('exits 0 on a closed issue instead of failing', async () => {
+      h.octokit.rest.issues.get = vi.fn(async () => ({ data: { title: 'Fix the bug', state: 'closed' } }));
+      const res = await runMain('ship', '5');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('skipped:');
     });
 
     it('reports already-delivered instead of "ready for review" when SHIP recovery finds a prior merged PR (#520)', async () => {
@@ -1645,6 +1684,16 @@ bash scripts/verify.sh
       expect(vi.mocked(core.checkPhase)).toHaveBeenCalledTimes(1);
       expect(vi.mocked(core.shipPhase)).toHaveBeenCalledTimes(1);
       expect(h.octokit.rest.issues.get).toHaveBeenCalledWith(expect.objectContaining({ issue_number: 5 }));
+    });
+
+    // Regression (#681): a closed issue exits 0 (not 1) through the CLI command,
+    // reusing the ctx.workRequest resolved by this command's own preflight.
+    it('exits 0 on a closed issue instead of failing', async () => {
+      h.octokit.rest.issues.get = vi.fn(async () => ({ data: { title: 'Fix the bug', state: 'closed' } }));
+      const res = await runMain('run-issue', '5');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('skipped:');
+      expect(h.octokit.rest.issues.get).toHaveBeenCalledTimes(1);
     });
 
     it('leaves the queue file untouched', async () => {
@@ -2300,6 +2349,21 @@ describe('shipIssue (direct)', () => {
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('ready');
     expect(events).toContain('worktree');
+  });
+
+  // Regression (#681): a closed issue must be refused before any resource is
+  // committed — no worktree, no port lease, no model call.
+  it('refuses a closed issue before any resource is committed', async () => {
+    h.octokit.rest.issues.get = vi.fn(async () => ({ data: { title: 'Fix the bug', state: 'closed' } }));
+
+    await expect(shipIssue(5, {}, ctx())).rejects.toBeInstanceOf(IssueSkippedError);
+
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('skipped-already-closed');
+    expect(events).not.toContain('"type":"worktree"');
+    expect(events).not.toContain('"type":"environment_lease"');
+    expect(events).not.toContain('"type":"plan"');
+    expect(events).not.toContain('"type":"ready"');
   });
 
   it('logs an issue-title event with the fetched title before any other events', async () => {

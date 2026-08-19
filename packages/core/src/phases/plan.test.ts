@@ -3,8 +3,10 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { LaneLifecycleEventSchema } from '@on-par/contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { createLifecycleBus } from '../bus/index.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
@@ -2253,6 +2255,80 @@ npm run test`;
       expect(stub.calls[0].prompt).toContain('Local brief title');
       expect(stub.calls[0].prompt).toContain('Local brief body.');
       expect(issuesGetCalled).toBe(false);
+    });
+  });
+
+  describe('lifecycle events', () => {
+    it('emits started then done on the success path, validated against the shared schema', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-591.md');
+      const stub = new StubModelExecutor({
+        scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: { issues: { get: async () => ({ data: { title: 'Add eval runner', body: 'Body.' } }) } },
+      };
+      const bus = createLifecycleBus();
+      const received: any[] = [];
+      bus.on((e) => received.push(e));
+
+      await planPhase({
+        issue: 591,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: () => {},
+        bus,
+        laneId: 'lane-1',
+      });
+
+      expect(received.map((e) => ({ phase: e.phase, status: e.status }))).toEqual([
+        { phase: 'plan', status: 'started' },
+        { phase: 'plan', status: 'done' },
+      ]);
+      expect(received.every((e) => e.laneId === 'lane-1')).toBe(true);
+      expect(received.every((e) => e.issueId === '591')).toBe(true);
+      expect(received.every((e) => e.worktreePath === worktree)).toBe(true);
+      for (const event of received) {
+        expect(() => LaneLifecycleEventSchema.parse(event)).not.toThrow();
+      }
+    });
+
+    it('emits started then failed on the escalation path, with a non-empty detail', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-592.md');
+      const stub = new StubModelExecutor({
+        scripts: { plan: [{ output: 'notes\nESCALATE: which auth provider should we use?\nmore text' }] },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: { issues: { get: async () => ({ data: { title: 'Add auth', body: 'Add authentication.' } }) } },
+      };
+      const bus = createLifecycleBus();
+      const received: any[] = [];
+      bus.on((e) => received.push(e));
+
+      await planPhase({
+        issue: 592,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: () => {},
+        bus,
+        laneId: 'lane-1',
+      });
+
+      expect(received.map((e) => e.status)).toEqual(['started', 'failed']);
+      expect(received[1].detail.length).toBeGreaterThan(0);
     });
   });
 });

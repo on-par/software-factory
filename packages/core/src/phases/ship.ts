@@ -9,6 +9,7 @@ import { createFsReader } from '@on-par/repo-context';
 
 import { applyAdrWritePlan, planAdrWrites, readAdrDrafts } from '../adr/write.js';
 import type { ApprovalGate } from '../approvals/index.js';
+import { type LifecycleBus, withLifecycle } from '../bus/index.js';
 import type { EventKind } from '../events/kinds.js';
 import { gatherEvidencePack } from '../reports/evidence-pack.js';
 import type { CheckSummary } from '../types/index.js';
@@ -33,7 +34,19 @@ export interface ShipResult {
   adrPushFailed?: boolean;
 }
 
-export async function shipPhase(opts: {
+export async function shipPhase(opts: Parameters<typeof shipPhaseImpl>[0]): Promise<ShipResult> {
+  return withLifecycle(
+    { bus: opts.bus, phase: 'ship', laneId: opts.laneId, issueId: opts.issue, worktreePath: opts.worktree },
+    () => shipPhaseImpl(opts),
+    (r) => r.ok,
+    (r) =>
+      r.ok
+        ? `ship complete${r.prNumber === undefined ? '' : ` (PR #${r.prNumber})`}`
+        : `ship failed${r.deniedReason === undefined ? '' : `: ${r.deniedReason}`}`,
+  );
+}
+
+async function shipPhaseImpl(opts: {
   issue: number;
   repo: string;
   worktree: string;
@@ -53,6 +66,10 @@ export async function shipPhase(opts: {
   /** The run's resolved work request; when its kind is not 'github-issue', the PR
    *  title/body come from it instead of fetching the (nonexistent) issue (#507). */
   work?: Pick<WorkRequest, 'id' | 'kind' | 'title'>;
+  /** Lane id stamped onto emitted lifecycle events; defaults to `issue-<issue>` (#591). */
+  laneId?: string;
+  /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
+  bus?: LifecycleBus;
 }): Promise<ShipResult> {
   const { issue, repo, worktree, branch, octokit, watchCI = true, log, run = exec, approvalGate, checkSummary } = opts;
   const [owner, repoName] = repo.split('/');

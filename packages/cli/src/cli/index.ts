@@ -41,6 +41,7 @@ import {
   buildPhase,
   checkPhase,
   clearProxyState,
+  closedWorkSkipReason,
   computeHealthKpis,
   ConstitutionLoader,
   createDefaultWorkSourceRegistry,
@@ -937,7 +938,13 @@ export async function shipIssue(
   const product = opts.product ?? readActiveProduct(paths.product);
   const autoRework = opts.autoRework ?? true;
 
-  const issueTitle = ctx?.workRequest?.title ?? (await getIssueTitle(octokit, ghRepo, issueNum));
+  const work =
+    ctx?.workRequest ??
+    (await createDefaultWorkSourceRegistry({ octokit }).resolve(GITHUB_ISSUE_SOURCE, {
+      repo: ghRepo,
+      issue: issueNum,
+    } satisfies GithubIssueParams));
+  const issueTitle = work.title;
   const branch = branchFor(issueNum, issueTitle, effective.branchPrefix);
   const worktree = ctx?.localOnly
     ? ctx.localOnly.workspace
@@ -1018,6 +1025,13 @@ export async function shipIssue(
   if (modelPins.build) {
     const source = modelPins.sources.build === 'repo' ? '.factory/config.json' : 'FACTORY_BUILD_MODEL';
     log('model-override', `build model pinned to ${modelPins.build} (${source})`);
+  }
+
+  const skipReason = closedWorkSkipReason(work);
+  if (skipReason) {
+    log('skipped-already-closed', skipReason);
+    console.log(chalk.yellow(`skipped: ${skipReason}`));
+    throw new IssueSkippedError(skipReason, 'already-closed');
   }
 
   // Setup worktree FIRST — plan phase needs cwd=worktree to run claude
@@ -1176,6 +1190,7 @@ export async function shipIssue(
       drainSteering: planApprovalEnabled ? () => drainSteering(paths.steering, issueNum, worktree) : undefined,
       codexDisabled: codexOff,
       localOnly: effective.localOnly,
+      laneId: lane,
       workSource: ctx?.workSource,
       enforceReadiness: true,
       fastPath: efficiency.fastPath,
@@ -1271,6 +1286,7 @@ export async function shipIssue(
         fallbackModel: failoverSettings.fallbackModel,
       },
       onPgid,
+      laneId: lane,
     });
     if (!build.ok) {
       throw new LaneParkError(`build escalated: ${build.escalate ?? 'unknown'}`, 'escalate');
@@ -1300,6 +1316,7 @@ export async function shipIssue(
       appBaseUrl,
       onPgid,
       priorFailureSignature,
+      laneId: lane,
     });
     checkSummary = check.summary;
     reworkRounds = check.reworkRounds;
@@ -1384,6 +1401,7 @@ export async function shipIssue(
       logsDir: paths.logs,
       reworkRounds: check.reworkRounds,
       work: ctx?.workRequest,
+      laneId: lane,
     });
     if (!ship.ok) {
       throw new LaneParkError(
@@ -1559,6 +1577,7 @@ async function cmdShip(
     try {
       return await shipIssue(issueNum, opts);
     } catch (err: any) {
+      if (err instanceof IssueSkippedError) return;
       throw new CliExitError(`Ship failed for issue #${issueNum}: ${err.message}`, 1);
     }
   });
@@ -1610,6 +1629,7 @@ async function cmdRunIssue(
     try {
       await shipIssue(issueNum, opts, { repoRoot, ghRepo, workRequest: work });
     } catch (err: any) {
+      if (err instanceof IssueSkippedError) return;
       throw new CliExitError(`Run failed for issue #${issueNum}: ${err.message}`, 1);
     }
   });
@@ -1783,6 +1803,7 @@ async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }) 
         await shipIssue(issue, { autoRework: true, interactive: false }, { repoRoot, ghRepo, lane: 'overnight' });
         return { status: 'ready' };
       } catch (err: any) {
+        if (err instanceof IssueSkippedError) return { status: 'parked', reason: err.message };
         return parkReasonFor(err) === 'escalate'
           ? { status: 'parked', reason: err.message }
           : { status: 'failed', reason: err.message };
@@ -2419,6 +2440,7 @@ export async function runLane(
   const { ship = shipIssue, waitMerge = waitForMerge, pathExists = existsSync, emitEvent = logEvent } = deps;
   let merged = 0;
   let awaitingReview = 0;
+  let skipped = 0;
   for (let i = 0; i < issues.length; i++) {
     const issue = issues[i];
     if (pathExists(paths.stop)) {
@@ -2436,6 +2458,11 @@ export async function runLane(
         awaitingReview++;
         continue;
       }
+      if (err instanceof IssueSkippedError) {
+        // shipIssue already emitted skipped-already-closed; nothing was attempted.
+        skipped++;
+        continue;
+      }
       const reason = parkReasonFor(err);
       // Terminal reason events (escalate/timeout/fail/conflict) are emitted exactly
       // once by the layer that detects the failure — shipIssue for pipeline failures,
@@ -2451,9 +2478,13 @@ export async function runLane(
       return;
     }
   }
-  emitEvent(paths.events, 'lane-done', lane, `lane complete (${merged} merged, ${awaitingReview} awaiting review)`, {
+  emitEvent(
+    paths.events,
+    'lane-done',
     lane,
-  });
+    `lane complete (${merged} merged, ${awaitingReview} awaiting review, ${skipped} skipped)`,
+    { lane },
+  );
 }
 
 export async function isPrMerged(octokit: Octokit, owner: string, repoName: string, branch: string): Promise<boolean> {
@@ -2534,6 +2565,17 @@ export async function squashMergeAndDelete(
 }
 
 export class LandConflictError extends Error {}
+
+/** The target issue was already resolved before the run started — a clean skip,
+ *  not a park. Callers advance to the next queue entry. (#681) */
+export class IssueSkippedError extends Error {
+  constructor(
+    message: string,
+    readonly reason: 'already-closed',
+  ) {
+    super(message);
+  }
+}
 
 export class AwaitingReviewError extends Error {
   constructor(
