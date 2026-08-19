@@ -3,3 +3,4 @@ export * from './decompose.js';
 export * from './invest.js';
 export * from './render.js';
 export * from './slices.js';
+export * from './story-map.js';

@@ -92,6 +92,27 @@ describe('decomposeIntent', () => {
     expect(decomposeIntent(FULL_DOC)).toEqual(decomposeIntent(FULL_DOC));
   });
 
+  it('names each story release or the walking skeleton, plus its backbone step label, in investNote', () => {
+    const result = decomposeIntent(FULL_DOC);
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+    const [skeletonStory, otherStory] = result.decomposition.stories;
+    expect(skeletonStory.investNote).toMatch(/^Walking skeleton — /);
+    expect(otherStory.investNote).toMatch(/^Release \d+ — /);
+  });
+
+  it('emits the walking-skeleton story first, matching epic.children[0]', () => {
+    const result = decomposeIntent(FULL_DOC);
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+    expect(result.decomposition.stories[0].investNote).toMatch(/^Walking skeleton — /);
+    expect(result.decomposition.epic.children[0]).toBe(result.decomposition.stories[0].title);
+  });
+
   it('blocks on a draft (unapproved) doc and emits no artifacts', () => {
     const draft = buildIntentDoc(buildResult({ transcript: FULL_TRANSCRIPT, gaps: [] }));
     const result = decomposeIntent(draft);
