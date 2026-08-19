@@ -25,12 +25,11 @@ const DOC: IntentDoc = {
 };
 
 describe('planSlices', () => {
-  it('plans one slice per scope statement, in doc order, sharing the context arrays', () => {
+  it('plans one slice per scope statement, sharing the context arrays', () => {
     const slices = planSlices(DOC);
 
     expect(slices).toHaveLength(2);
-    expect(slices[0].scope.id).toBe('INT-SCOPE-01');
-    expect(slices[1].scope.id).toBe('INT-SCOPE-02');
+    expect(slices.map((s) => s.scope.id).sort()).toEqual(['INT-SCOPE-01', 'INT-SCOPE-02']);
 
     for (const slice of slices) {
       expect(slice.audience.map((s) => s.id)).toEqual(['INT-AUDIENCE-01']);
@@ -43,6 +42,105 @@ describe('planSlices', () => {
   it('returns an empty array for a doc with no scope statements', () => {
     const doc: IntentDoc = { ...DOC, statements: DOC.statements.filter((s) => s.dimension !== 'scope') };
     expect(planSlices(doc)).toEqual([]);
+  });
+
+  const JOURNEY_DOC: IntentDoc = {
+    brainDump: 'x',
+    statements: [
+      statement('INT-PROBLEM-01', 'problem', 'Fulfillment is scattered across tools.'),
+      statement('INT-AUDIENCE-01', 'audience', 'the fulfillment team'),
+      statement('INT-OUTCOME-01', 'outcome', 'faster fulfillment'),
+      // Deliberately NOT in backbone order (access, discover, capture, process, deliver).
+      statement('INT-SCOPE-01', 'scope', 'export the finished summary'),
+      statement('INT-SCOPE-02', 'scope', 'sign in with sso'),
+      statement('INT-SCOPE-03', 'scope', 'add a new record'),
+      statement('INT-SCOPE-04', 'scope', 'search for open items'),
+      statement('INT-SCOPE-05', 'scope', 'review the pending report'),
+      statement('INT-SCOPE-06', 'scope', 'upload another attachment'),
+    ],
+    gaps: [],
+    status: 'approved',
+  };
+
+  it('orders slices along the story-map backbone, not raw doc order', () => {
+    const slices = planSlices(JOURNEY_DOC);
+    const docOrder = JOURNEY_DOC.statements.filter((s) => s.dimension === 'scope').map((s) => s.id);
+    const backboneOrder = slices.map((s) => s.scope.id);
+
+    expect(backboneOrder).toEqual([
+      'INT-SCOPE-05',
+      'INT-SCOPE-02',
+      'INT-SCOPE-04',
+      'INT-SCOPE-03',
+      'INT-SCOPE-06',
+      'INT-SCOPE-01',
+    ]);
+    expect(backboneOrder).not.toEqual(docOrder);
+  });
+
+  it('gives every slice a release >= 1 and a step with rank >= 1', () => {
+    for (const slice of planSlices(JOURNEY_DOC)) {
+      expect(slice.release).toBeGreaterThanOrEqual(1);
+      expect(slice.step.rank).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('flags exactly one walking skeleton, first in the array, at release 1', () => {
+    const slices = planSlices(JOURNEY_DOC);
+    const skeletons = slices.filter((s) => s.walkingSkeleton);
+    expect(skeletons).toHaveLength(1);
+    expect(slices[0].walkingSkeleton).toBe(true);
+    expect(slices[0].release).toBe(1);
+  });
+
+  it('picks the walking skeleton by stage span, beating an earlier-ranked single-stage slice', () => {
+    const [skeleton] = planSlices(JOURNEY_DOC);
+    // 'review the pending report' spans process + learn; 'sign in with sso' ranks earlier
+    // on the backbone (access) but only spans one stage.
+    expect(skeleton.scope.id).toBe('INT-SCOPE-05');
+  });
+
+  it('groups non-skeleton slices on the same backbone step into one release, releases increasing with rank', () => {
+    const slices = planSlices(JOURNEY_DOC);
+    const byId = new Map(slices.map((s) => [s.scope.id, s]));
+
+    const capture1 = byId.get('INT-SCOPE-03')!;
+    const capture2 = byId.get('INT-SCOPE-06')!;
+    expect(capture1.step.stage.id).toBe('capture');
+    expect(capture2.step.stage.id).toBe('capture');
+    expect(capture1.release).toBe(capture2.release);
+
+    const access = byId.get('INT-SCOPE-02')!;
+    const discover = byId.get('INT-SCOPE-04')!;
+    const deliver = byId.get('INT-SCOPE-01')!;
+    expect(access.release).toBeLessThan(discover.release);
+    expect(discover.release).toBeLessThan(capture1.release);
+    expect(capture1.release).toBeLessThan(deliver.release);
+  });
+
+  it('still shares the doc context arrays on every slice of the journey fixture', () => {
+    for (const slice of planSlices(JOURNEY_DOC)) {
+      expect(slice.audience.map((s) => s.id)).toEqual(['INT-AUDIENCE-01']);
+      expect(slice.outcome.map((s) => s.id)).toEqual(['INT-OUTCOME-01']);
+    }
+  });
+
+  it('breaks a span-and-step tie in the skeleton comparator by fewest words', () => {
+    const doc: IntentDoc = {
+      brainDump: 'x',
+      statements: [
+        statement('INT-PROBLEM-01', 'problem', 'Onboarding is slow.'),
+        statement('INT-AUDIENCE-01', 'audience', 'new users'),
+        statement('INT-OUTCOME-01', 'outcome', 'faster onboarding'),
+        statement('INT-SCOPE-01', 'scope', 'add x'),
+        statement('INT-SCOPE-02', 'scope', 'add many extra words to fully describe this task in detail'),
+      ],
+      gaps: [],
+      status: 'approved',
+    };
+
+    const [skeleton] = planSlices(doc);
+    expect(skeleton.scope.id).toBe('INT-SCOPE-01');
   });
 });
 
