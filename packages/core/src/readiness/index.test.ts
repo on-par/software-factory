@@ -107,10 +107,7 @@ bash scripts/verify.sh
   });
 
   it('accepts a heading with a parenthetical suffix, like "Acceptance criteria (Gherkin)"', () => {
-    const body = COMPLETE_FACTORY_TASK_BODY.replace(
-      '### Acceptance criteria',
-      '### Acceptance criteria (Gherkin)',
-    );
+    const body = COMPLETE_FACTORY_TASK_BODY.replace('### Acceptance criteria', '### Acceptance criteria (Gherkin)');
     const result = scoreIssueReadiness({ title: 'Fix widget flicker', body });
     expect(result.pass).toBe(true);
     expect(result.missing).toEqual([]);
