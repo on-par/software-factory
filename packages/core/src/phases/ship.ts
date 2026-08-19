@@ -29,6 +29,9 @@ export interface ShipResult {
   /** True when the branch's content had already landed on main (e.g. a retry after a
    *  squash merge) — nothing was pushed and no PR was created (#520). */
   alreadyDelivered?: boolean;
+  /** True when the ADR commit could not be verified onto the remote branch, so the open PR
+   *  does not carry the ADR this run recorded (#736). Always accompanies `ok: false`. */
+  adrPushFailed?: boolean;
 }
 
 export async function shipPhase(opts: Parameters<typeof shipPhaseImpl>[0]): Promise<ShipResult> {
@@ -105,12 +108,13 @@ async function shipPhaseImpl(opts: {
   // Check if a PR already exists (claude route may have created one)
   let prNumber = await findOpenPR(octokit, owner, repoName, branch);
 
+  // The ADR commit exists in this branch's local history, so a push that does not reach the
+  // remote leaves the open PR misrepresenting the branch and merges the recorded decision
+  // away. Same verified-push rule as the main-branch push site (#733/#734/#735), applied
+  // here per #736 — the site ADR-0028 deferred.
   if (prNumber && adr.committed) {
-    try {
-      await run(`git push -u origin ${shellEscape(branch)}`, { cwd: worktree });
-    } catch {
-      log('ship', 'pushing the ADR commit failed — the open PR may not include it');
-    }
+    const pushed = await pushAdrCommit({ run, worktree, branch, prNumber, log });
+    if (!pushed) return { ok: false, prNumber, adrPushFailed: true };
   }
 
   if (!prNumber) {
@@ -392,6 +396,52 @@ async function materializeAdrDrafts(o: {
   }
   o.log('adr_written', `recorded ${plan.writes.length} ADR(s) in ${plan.dir}: ${labels}`);
   return { committed: true, paths: written };
+}
+
+/**
+ * Push the ADR commit onto an already-open PR's branch, under the same verified-push rule the
+ * main-branch push site uses: git's own failure text is logged (#733), and a zero-exit push is
+ * not trusted until the remote head is confirmed to match local HEAD (#735). Returns false when
+ * the ADR commit is not provably on the remote, in which case the caller fails the ship (#736).
+ */
+async function pushAdrCommit(o: {
+  run: CommandRunner;
+  worktree: string;
+  branch: string;
+  prNumber: number;
+  log: (type: EventKind, msg: string) => void;
+}): Promise<boolean> {
+  try {
+    await o.run(`git push -u origin ${shellEscape(o.branch)}`, { cwd: o.worktree });
+  } catch (err) {
+    const { kind, detail } = describePushFailure(err);
+    o.log(
+      'adr_push_failed',
+      `pushing the ADR commit for PR #${o.prNumber} failed (${kind}): ${detail} — aborting the ship`,
+    );
+    return false;
+  }
+
+  const remoteHead = await verifyRemoteHead(o.run, o.worktree, o.branch);
+  if (remoteHead.status === 'mismatch') {
+    o.log(
+      'adr_push_failed',
+      `remote head ${remoteHead.remoteSha} does not match local HEAD ${remoteHead.localSha} after the ADR push for ${o.branch} — aborting the ship`,
+    );
+    return false;
+  }
+  if (remoteHead.status === 'unreadable') {
+    o.log(
+      'adr_push_failed',
+      `could not verify the remote head after the ADR push for ${o.branch} (${remoteHead.detail}); local HEAD ${remoteHead.localSha ?? 'unknown'} — aborting the ship`,
+    );
+    return false;
+  }
+  o.log(
+    'ship',
+    `remote head ${remoteHead.remoteSha} matches local HEAD ${remoteHead.localSha} after the ADR push for ${o.branch}`,
+  );
+  return true;
 }
 
 /** Why a `git push` was refused, as far as git's own stderr says (#733). */
