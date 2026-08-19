@@ -54,7 +54,8 @@ export function parseRemoteSlug(remoteUrl: string): string | null {
     return null;
   }
 
-  pathPart = pathPart.replace(/\/+$/, '').replace(/\.git$/, '');
+  while (pathPart.endsWith('/')) pathPart = pathPart.slice(0, -1);
+  if (pathPart.endsWith('.git')) pathPart = pathPart.slice(0, -4);
   const segments = pathPart.split('/').filter((s) => s.length > 0);
   if (segments.length !== 2) return null;
   return `${segments[0]}/${segments[1]}`;
