@@ -24,8 +24,8 @@ software-factory/
 │   ├── dashboard/ @on-par/factory-dashboard — Vite + React + Tailwind dashboard (walking skeleton, private).
 │   ├── product/  @on-par/product           — Product (proposer) app: brain-dump →
 │   │                                        engineering-ready issues. Read-only, private.
-│   └── server/   @on-par/factory-server    — Phase-2 SaaS server STUB. createServer()
-│                                             throws; marked private, never published.
+│   └── server/   @on-par/factory-server    — Local HTTP server: GET /events relays the
+│                                             lane lifecycle bus as SSE. Private.
 ├── scripts/      Root tooling: verify.sh, eval.ts, eval-history.ts,
 │                 regression-issue.ts, local-small-scoreboard.ts,
 │                 coverage-ratchet.ts
@@ -85,7 +85,7 @@ Run from the repo root unless noted. Node.js **≥ 20** required.
 - **Dependencies:** keep `config` zero-dependency. Core depends on `execa`, `@octokit/rest`, `gray-matter`, `zod`.
 - **Config as source of truth:** model routing lives in `packages/config/src/models.json` + `routes.json`; do not hard-code model lists in `core`.
 - **`core`'s root export is the narrow public API** — implementation details live behind `@on-par/factory-core/internal`, test helpers behind `@on-par/factory-core/testing` (ADR-0004).
-- **The `server` package is a stub** — do not build features on it; `createServer()` intentionally throws.
+- **`packages/server` is a real but deliberately narrow local server** — it binds loopback, exposes only `GET /events` (SSE over the lane lifecycle bus), takes the bus as an injected port, and depends on `@on-par/contracts` only — no auth and no control endpoints yet (#583).
 - **Lint:** Oxlint with the TS 7-native `oxlint-tsgolint` type-aware backend. Configuration lives in `.oxlintrc.json`; run `npm run lint`, which denies warnings.
 
 ## Testing
