@@ -87,6 +87,28 @@ describe('computeHealthKpis', () => {
     expect(kpis.humanInterventionRate).toBe(0.5);
   });
 
+  // A skip means no run was attempted — it must not enter any KPI denominator (#681).
+  it('excludes an issue whose only event is skipped-already-closed from runs', () => {
+    const events: FactoryEvent[] = [event({ issue: '7', type: 'skipped-already-closed' })];
+
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.runs).toBe(0);
+  });
+
+  it('still counts an issue that was skipped once and later genuinely run, in the same events file', () => {
+    const events: FactoryEvent[] = [
+      event({ issue: '7', type: 'skipped-already-closed' }),
+      event({ issue: '7', type: 'plan', phase: 'plan' }),
+      event({ issue: '7', type: 'merged' }),
+    ];
+
+    const kpis = computeHealthKpis(events, []);
+
+    expect(kpis.runs).toBe(1);
+    expect(kpis.merged).toBe(1);
+  });
+
   it('detects stuck runs via type: stuck and via rework.stuck', () => {
     const events: FactoryEvent[] = [
       event({ issue: '1', type: 'stuck' }),

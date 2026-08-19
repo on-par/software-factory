@@ -201,6 +201,7 @@ interface RunStats {
   defectWindowClosed: boolean;
   defectSignals: number;
   lane: string | null;
+  skipped: boolean;
 }
 
 /** Maps a CostEntry's `task` to the pipeline phase it billed against (#614). */
@@ -346,9 +347,11 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
       defectWindowClosed: false,
       defectSignals: 0,
       lane: null,
+      skipped: false,
     };
 
     if (event.type === 'merged' || event.type === 'human-merged') stats.merged = true;
+    if (event.type === 'skipped-already-closed') stats.skipped = true;
     if (event.type === 'rework' || event.rework) stats.reworked = true;
     if (reworkCauseTagOf(event) === 'merge-conflict') stats.collisionReworked = true;
     if (event.type === 'stuck' || event.rework?.stuck === true) stats.stuck = true;
@@ -381,6 +384,13 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     }
 
     runsByIssue.set(event.issue, stats);
+  }
+
+  // A skip means no run was attempted — it must not enter any KPI denominator.
+  // Guarded on firstPhaseTs so an issue that was skipped once and genuinely run
+  // later (same events file) still counts.
+  for (const [issue, stats] of runsByIssue) {
+    if (stats.skipped && stats.firstPhaseTs === null) runsByIssue.delete(issue);
   }
 
   const runs = runsByIssue.size;
