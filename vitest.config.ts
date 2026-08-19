@@ -4,6 +4,12 @@ export default defineConfig({
   test: {
     // Discover tests across all workspaces in one run so coverage aggregates.
     include: ['packages/*/src/**/*.test.{ts,tsx}'],
+    // Integration tests spin up real git worktrees; a git-lock race between them can
+    // hang a subprocess indefinitely (#739/#755). Excluding them from the default run
+    // is what makes `npm run test` (the required CI check) safe to run unattended —
+    // they run instead on a schedule via .github/workflows/nightly-integration.yml,
+    // where a hang trips that workflow's own timeout-minutes instead of CI's.
+    exclude: [...configDefaults.exclude, '**/*.integration.test.{ts,tsx}'],
     coverage: {
       provider: 'v8',
       // 'text' prints the per-file table; 'text-summary' prints the totals line.

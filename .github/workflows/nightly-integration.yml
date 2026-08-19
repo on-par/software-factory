@@ -1,0 +1,52 @@
+name: Nightly Integration Tests
+
+# Pipeline integration/simulation tests spin up real git worktrees and run whole
+# plan->build->check->ship cycles. They are excluded from the required `ci` workflow's
+# `npm run test` (see vitest.config.ts) because a git-lock race between them can hang a
+# subprocess indefinitely (#739/#755) — that must never be able to block a PR merge.
+# This workflow runs them on a schedule instead, with a hard job timeout so a hang here
+# fails loudly within minutes instead of burning hours of Actions time unnoticed.
+
+on:
+  schedule:
+    - cron: '0 9 * * *' # nightly, 09:00 UTC
+  workflow_dispatch:
+
+jobs:
+  integration:
+    name: integration-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Integration tests
+        run: npx vitest run --coverage=false --testTimeout=120000 --hookTimeout=120000 'packages/*/src/**/*.integration.test.{ts,tsx}'
+
+      - name: File issue on hang or failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing=$(gh issue list --state open --label ci-integration \
+            --json number,title \
+            --jq '[.[] | select(.title == "Nightly integration test failure")][0].number // empty')
+          body="Nightly integration test run failed or timed out: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --label ci-integration \
+              --title "Nightly integration test failure" \
+              --body "$body"
+          fi

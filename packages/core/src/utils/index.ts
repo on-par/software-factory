@@ -82,14 +82,27 @@ export function readCosts(costsFile: string): CostEntry[] {
 
 // ---------- Git Operations ----------
 
+// git subprocesses here run inside withGitLock's in-process promise chain (see
+// utils/lock.ts), which has no timeout of its own — a hung `git worktree` call (e.g.
+// racing another worker on git's own worktree-metadata lock) previously wedged that
+// chain forever with zero output, the root cause of #739/#755. A bounded timeout turns
+// that into a fast, visible failure instead of an unbounded hang.
+const GIT_OP_TIMEOUT_MS = 60_000;
+
 export async function gitFetch(repoRoot: string): Promise<void> {
-  await exec('git fetch origin -q', { cwd: repoRoot });
+  await exec('git fetch origin -q', { cwd: repoRoot, timeout: GIT_OP_TIMEOUT_MS });
 }
 
 export async function setupWorktree(repoRoot: string, branch: string, worktreePath: string): Promise<void> {
-  await exec(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot }).catch(() => {});
-  await exec(`git branch -D ${shellEscape(branch)}`, { cwd: repoRoot }).catch(() => {});
-  await exec(`git worktree add -b ${shellEscape(branch)} ${shellEscape(worktreePath)} origin/main`, { cwd: repoRoot });
+  await exec(`git worktree remove --force ${shellEscape(worktreePath)}`, {
+    cwd: repoRoot,
+    timeout: GIT_OP_TIMEOUT_MS,
+  }).catch(() => {});
+  await exec(`git branch -D ${shellEscape(branch)}`, { cwd: repoRoot, timeout: GIT_OP_TIMEOUT_MS }).catch(() => {});
+  await exec(`git worktree add -b ${shellEscape(branch)} ${shellEscape(worktreePath)} origin/main`, {
+    cwd: repoRoot,
+    timeout: GIT_OP_TIMEOUT_MS,
+  });
 }
 
 export async function cleanupWorktree(
@@ -97,13 +110,16 @@ export async function cleanupWorktree(
   worktreePath: string,
   log: (type: EventKind, msg: string) => void = () => {},
 ): Promise<void> {
-  await exec(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot }).catch((err: any) =>
+  await exec(`git worktree remove --force ${shellEscape(worktreePath)}`, {
+    cwd: repoRoot,
+    timeout: GIT_OP_TIMEOUT_MS,
+  }).catch((err: any) =>
     log(
       'warn',
       `git worktree remove failed for ${worktreePath}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`,
     ),
   );
-  await exec('git worktree prune', { cwd: repoRoot }).catch((err: any) =>
+  await exec('git worktree prune', { cwd: repoRoot, timeout: GIT_OP_TIMEOUT_MS }).catch((err: any) =>
     log(
       'warn',
       `git worktree prune failed in ${repoRoot}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`,
