@@ -69,6 +69,7 @@ const PUBLIC_API_KEYS = [
   'readQueue',
   'validateQueue',
   // Work requests
+  'closedWorkSkipReason',
   'createDefaultWorkSourceRegistry',
   'createFsBriefReader',
   'createGithubIssueAdapter',

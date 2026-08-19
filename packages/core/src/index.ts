@@ -95,8 +95,15 @@ export type {
 export { parseQueue, readQueue, validateQueue } from './queue/index.js';
 
 // Work requests
-export type { WorkRequest, WorkRequestReference, WorkRequestSourceKind, WorkSourceAdapter } from './work/index.js';
+export type {
+  WorkRequest,
+  WorkRequestReference,
+  WorkRequestSourceKind,
+  WorkRequestState,
+  WorkSourceAdapter,
+} from './work/index.js';
 export {
+  closedWorkSkipReason,
   createDefaultWorkSourceRegistry,
   InvalidWorkRequestInputError,
   UnsupportedWorkSourceError,
