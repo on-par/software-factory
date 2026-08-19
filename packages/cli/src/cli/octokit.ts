@@ -35,5 +35,5 @@ export function createFactoryOctokit(token?: string): Octokit {
   return new FactoryOctokit({
     auth: token,
     throttle: { onRateLimit, onSecondaryRateLimit },
-  }) as unknown as Octokit;
+  });
 }
