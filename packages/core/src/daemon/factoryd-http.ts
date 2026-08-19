@@ -5,7 +5,7 @@
 
 import http from 'node:http';
 
-import { defaultRegistryPath, listRepos, loadRegistry } from './registry.js';
+import { defaultRegistryPath, listRepos, loadRegistry, type RepoRegistryListing } from './registry.js';
 
 /** Default TCP port for the foreground factoryd listener. */
 export const DEFAULT_FACTORYD_PORT = 8787;
@@ -58,7 +58,7 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
         return;
       }
       const registry = await loadRegistry(registryFile);
-      send(res, req, 200, { repos: listRepos(registry) });
+      send(res, req, 200, { repos: listRepos(registry) satisfies RepoRegistryListing[] });
       return;
     }
 
@@ -71,6 +71,7 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
         send(res, req, 500, { error: 'internal error' });
       } else {
         res.end();
+        log(`${req.method ?? '-'} ${parsePathname(req.url)} ${res.statusCode}`);
       }
     });
   });
