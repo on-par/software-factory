@@ -305,6 +305,9 @@ const INTERNAL_API_KEYS = [
   'loadRegistry',
   'upsertRepo',
   'writeRegistry',
+  // Daemon control-plane HTTP server (#777)
+  'createFactorydServer',
+  'DEFAULT_FACTORYD_PORT',
   // Utils
   'branchFor',
   'branchPrefixSlug',

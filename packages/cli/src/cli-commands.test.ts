@@ -1245,6 +1245,43 @@ bash scripts/verify.sh
     });
   });
 
+  describe('daemon', () => {
+    it('starts the foreground factoryd, serves the registry, and shuts down cleanly on SIGINT', async () => {
+      const registryFile = join(paths().state, 'registry.json');
+      writeFileSync(
+        registryFile,
+        JSON.stringify({
+          version: 1,
+          repos: {
+            'on-par/software-factory': {
+              path: h.repoRoot,
+              attachedAt: '2026-01-01T00:00:00.000Z',
+              state: 'active',
+            },
+          },
+        }),
+      );
+
+      const runPromise = runMain('daemon', '--port', '0', '--registry', registryFile);
+      while (!logged().includes('listening on 127.0.0.1:')) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      expect(logged()).toContain(registryFile);
+      process.emit('SIGINT');
+      const res = await runPromise;
+
+      expect(res.exited).toBe(true);
+      expect(res.code).toBe(0);
+    });
+
+    it('exits with code 2 on an invalid --port and never binds', async () => {
+      const res = await runMain('daemon', '--port', 'abc');
+      expect(res.exited).toBe(true);
+      expect(res.code).toBe(2);
+      expect(logged()).not.toContain('listening on');
+    });
+  });
+
   describe('worktree gc', () => {
     it('dry-run calls sweepWorktrees with dryRun: true and takes no lock', async () => {
       h.gcReport = { removed: [], kept: 3, dryRun: true };

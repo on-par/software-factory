@@ -136,7 +136,10 @@ import {
   branchFor,
   branchPrefixSlug,
   cleanupWorktree,
+  createFactorydServer,
   createLocalSmallDryRun,
+  DEFAULT_FACTORYD_PORT,
+  defaultRegistryPath,
   ensureDir,
   formatGcReport,
   gitFetch,
@@ -2230,6 +2233,36 @@ async function cmdProxy() {
   process.exit(0);
 }
 
+/** Runs factoryd in the foreground: a loopback-only HTTP server over the repo
+ *  registry (~/.factory/registry.json). Read-only today — GET /repos is the whole
+ *  API (#777). Daemon supervision (launchd) is a sibling story; this command is
+ *  the process. */
+async function cmdFactoryd(opts: { port?: string; registry?: string }) {
+  const registryFile = opts.registry ?? defaultRegistryPath();
+  const port = opts.port === undefined ? DEFAULT_FACTORYD_PORT : Number(opts.port);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    throw new CliExitError(`invalid --port "${opts.port}" — expected an integer 0-65535`, 2);
+  }
+
+  const daemon = createFactorydServer({ registryFile, port, log: (line) => console.log(chalk.dim(line)) });
+  const boundPort = await daemon.start();
+  console.log(chalk.green(`factoryd: listening on 127.0.0.1:${boundPort}`));
+  console.log(`  registry: ${registryFile}`);
+  console.log(`  GET http://127.0.0.1:${boundPort}/repos`);
+
+  await new Promise<void>((resolveShutdown) => {
+    const shutdown = () => {
+      void daemon
+        .stop()
+        .catch(() => {})
+        .then(() => resolveShutdown());
+    };
+    process.once('SIGINT', shutdown);
+    process.once('SIGTERM', shutdown);
+  });
+  process.exit(0);
+}
+
 async function cmdRun() {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
@@ -3431,6 +3464,13 @@ export async function main() {
       'Run the opt-in lane reverse proxy in the foreground (manual use; `factory run`/`supervise` host it in-process)',
     )
     .action(cmdProxy);
+
+  program
+    .command('daemon')
+    .description('Run factoryd in the foreground: a localhost-only HTTP API over the repo registry')
+    .option('--port <n>', `port to bind on 127.0.0.1 (default ${DEFAULT_FACTORYD_PORT})`)
+    .option('--registry <file>', 'registry file to serve (default ~/.factory/registry.json)')
+    .action((opts: { port?: string; registry?: string }) => cmdFactoryd(opts));
 
   const worktreeCmd = program.command('worktree').description('Worktree maintenance');
   worktreeCmd
