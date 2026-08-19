@@ -114,6 +114,19 @@ function createWatchOctokit(sequence: any[][]) {
   return { octokit, calls, callCount };
 }
 
+const STUB_HEAD_SHA = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+
+/** stdout for the two remote-head verification commands the recovery path runs before opening a
+ *  PR (#735); returns undefined for any other command so callers keep their own handling. The
+ *  branch is pulled out of the `git ls-remote --heads origin '<branch>'` command text itself, so
+ *  callers don't need to pass it in. */
+function remoteHeadStub(command: string, remoteSha = STUB_HEAD_SHA): { stdout: string } | undefined {
+  if (command === 'git rev-parse HEAD') return { stdout: `${STUB_HEAD_SHA}\n` };
+  const match = /^git ls-remote --heads origin '(.+)'$/.exec(command);
+  if (match) return { stdout: `${remoteSha}\trefs/heads/${match[1]}\n` };
+  return undefined;
+}
+
 describe('shipPhase self-healing', () => {
   it('pushes and opens a house-format PR when committed work is clean and ahead', async () => {
     const { octokit, calls } = createOctokit();
@@ -121,6 +134,8 @@ describe('shipPhase self-healing', () => {
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
       commands.push(command);
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -146,6 +161,8 @@ describe('shipPhase self-healing', () => {
       'git rev-list --count origin/main..HEAD',
       'git diff --quiet origin/main..HEAD',
       "git push -u origin 'ship-it/23-self-heal'",
+      'git rev-parse HEAD',
+      "git ls-remote --heads origin 'ship-it/23-self-heal'",
       'git diff --stat origin/main...HEAD',
     ]);
     expect(calls).toContainEqual([
@@ -168,6 +185,8 @@ describe('shipPhase self-healing', () => {
     const { octokit, calls } = createOctokit(false);
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -457,6 +476,8 @@ describe('shipPhase self-healing', () => {
     };
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -483,6 +504,8 @@ describe('shipPhase self-healing', () => {
     const { octokit, calls } = createOctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -516,6 +539,8 @@ describe('shipPhase self-healing', () => {
     };
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -546,6 +571,8 @@ describe('shipPhase self-healing', () => {
     };
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -569,6 +596,197 @@ describe('shipPhase self-healing', () => {
   });
 });
 
+describe('shipPhase remote head verification (#735)', () => {
+  function recoveryRun(handleExtra: (command: string) => { stdout: string } | undefined) {
+    return async (command: string) => {
+      const extra = handleExtra(command);
+      if (extra) return extra;
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+  }
+
+  it('matches → PR is created and both SHAs are logged', async () => {
+    const { octokit, calls } = createOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = recoveryRun(() => undefined);
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 123 });
+    expect(calls).toContainEqual(['pulls.create', expect.anything()]);
+    expect(logs).toContainEqual([
+      'ship',
+      `remote head ${STUB_HEAD_SHA} matches local HEAD ${STUB_HEAD_SHA} for ship-it/23-self-heal`,
+    ]);
+  });
+
+  it('mismatch → no PR, non-success, both SHAs logged', async () => {
+    const { octokit, calls } = createOctokit();
+    const logs: Array<[string, string]> = [];
+    const mismatchedSha = 'ffffffffffffffffffffffffffffffffffffffff';
+    const run = recoveryRun((command) => {
+      if (command === "git ls-remote --heads origin 'ship-it/23-self-heal'") {
+        return { stdout: `${mismatchedSha}\trefs/heads/ship-it/23-self-heal\n` };
+      }
+      return undefined;
+    });
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
+    expect(logs).toContainEqual([
+      'ship',
+      `remote head ${mismatchedSha} does not match local HEAD ${STUB_HEAD_SHA} for ship-it/23-self-heal — aborting before PR creation`,
+    ]);
+    expect(logs.map(([type]) => type)).not.toContain('ready');
+  });
+
+  it('git ls-remote throws → abort', async () => {
+    const { octokit, calls } = createOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = recoveryRun((command) => {
+      if (command === "git ls-remote --heads origin 'ship-it/23-self-heal'") {
+        throw Object.assign(new Error('Command failed: git ls-remote'), {
+          stderr: 'fatal: could not read from remote repository\n',
+        });
+      }
+      return undefined;
+    });
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
+    expect(
+      logs.some(
+        ([type, msg]) =>
+          type === 'ship' &&
+          msg.includes('could not verify the remote head for ship-it/23-self-heal') &&
+          msg.includes('fatal: could not read from remote repository'),
+      ),
+    ).toBe(true);
+  });
+
+  it('git ls-remote returns no matching ref → abort', async () => {
+    const { octokit, calls } = createOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = recoveryRun((command) => {
+      if (command === "git ls-remote --heads origin 'ship-it/23-self-heal'") return { stdout: '' };
+      return undefined;
+    });
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
+    expect(
+      logs.some(([type, msg]) => type === 'ship' && msg.includes('no refs/heads/ship-it/23-self-heal on origin')),
+    ).toBe(true);
+  });
+
+  it('git rev-parse HEAD throws → abort before ls-remote is even run', async () => {
+    const { octokit, calls } = createOctokit();
+    const logs: Array<[string, string]> = [];
+    const commands: string[] = [];
+    const run = async (command: string) => {
+      commands.push(command);
+      if (command === 'git rev-parse HEAD') throw new Error('fatal: not a git repository');
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
+    expect(commands.some((c) => c.startsWith('git ls-remote'))).toBe(false);
+  });
+
+  it('an unrelated ref in the ls-remote listing does not fool the comparison', async () => {
+    const { octokit, calls } = createOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = recoveryRun((command) => {
+      if (command === "git ls-remote --heads origin 'ship-it/23-self-heal'") {
+        return {
+          stdout: `deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\trefs/heads/other/ship-it/23-self-heal\n${STUB_HEAD_SHA}\trefs/heads/ship-it/23-self-heal\n`,
+        };
+      }
+      return undefined;
+    });
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 123 });
+    expect(calls).toContainEqual(['pulls.create', expect.anything()]);
+  });
+});
+
 describe('shipPhase inline work source (#507)', () => {
   it('titles and bodies the PR from a non-github work request without fetching the issue', async () => {
     const { octokit, calls } = createOctokit();
@@ -576,6 +794,8 @@ describe('shipPhase inline work source (#507)', () => {
       throw new Error('issues.get should never be called for an inline work source');
     };
     const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -610,6 +830,8 @@ describe('shipPhase inline work source (#507)', () => {
   it('behaves exactly like today when work is a github-issue request (run-issue passthrough is inert)', async () => {
     const { octokit, calls } = createOctokit();
     const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -767,6 +989,8 @@ describe('shipPhase evidence pack', () => {
     const { octokit, calls } = createOctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -809,6 +1033,8 @@ describe('shipPhase evidence pack', () => {
     const { octokit, calls } = createOctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -844,6 +1070,8 @@ describe('shipPhase evidence pack', () => {
     };
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -874,6 +1102,8 @@ describe('shipPhase approval gate', () => {
     const logs: Array<[string, string]> = [];
     const diffStatCalls: string[] = [];
     const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -930,6 +1160,8 @@ describe('shipPhase approval gate', () => {
     const commands: string[] = [];
     const run = async (command: string) => {
       commands.push(command);
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
       return { stdout: '' };
     };
@@ -964,6 +1196,8 @@ describe('shipPhase approval gate', () => {
     const { octokit, calls } = createOctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
       return { stdout: '' };
     };
@@ -990,6 +1224,8 @@ describe('shipPhase approval gate', () => {
     const { octokit } = createOctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -1061,6 +1297,8 @@ describe('ADR writer (#482)', () => {
     const run = async (command: string, options?: { cwd?: string }) => {
       commands.push(command);
       void options;
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -1143,6 +1381,8 @@ describe('ADR writer (#482)', () => {
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
       commands.push(command);
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -1178,6 +1418,8 @@ describe('ADR writer (#482)', () => {
     const commands: string[] = [];
     const run = async (command: string) => {
       commands.push(command);
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command.startsWith('git commit')) throw new Error('nothing to commit');
       // Bare status looks dirty because of the leftover staged ADR files — proves that
       // without path-exclusion this scenario would wrongly abort the self-heal recovery.
@@ -1220,6 +1462,8 @@ describe('ADR writer (#482)', () => {
     const { octokit } = createOctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -1259,6 +1503,8 @@ describe('ADR writer (#482)', () => {
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
       commands.push(command);
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -1338,6 +1584,8 @@ describe('shipPhase duplicate-PR guard (#520)', () => {
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
       commands.push(command);
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '2\n' };
       if (command === 'git diff --quiet origin/main..HEAD') return { stdout: '' };
@@ -1366,6 +1614,8 @@ describe('shipPhase duplicate-PR guard (#520)', () => {
     const { octokit, calls } = createMergedPROctokit();
     let fetched = false;
     const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git fetch origin main') {
         fetched = true;
         return { stdout: '' };
@@ -1400,6 +1650,8 @@ describe('shipPhase duplicate-PR guard (#520)', () => {
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
       commands.push(command);
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '2\n' };
       if (command === 'git diff --quiet origin/main..HEAD') return { stdout: '' };
@@ -1428,6 +1680,8 @@ describe('shipPhase duplicate-PR guard (#520)', () => {
     const { octokit, calls } = createMergedPROctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '0\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -1454,6 +1708,8 @@ describe('shipPhase duplicate-PR guard (#520)', () => {
     const commands: string[] = [];
     const run = async (command: string) => {
       commands.push(command);
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -1481,6 +1737,8 @@ describe('shipPhase duplicate-PR guard (#520)', () => {
     const { octokit, calls } = createMergedPROctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       if (command === 'git fetch origin main') throw new Error('network unreachable');
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
