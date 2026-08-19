@@ -1,12 +1,15 @@
 // src/daemon/factoryd-http.ts — The factoryd control-plane HTTP server: a
 // loopback-only origin server over the repo registry (~/.factory/registry.json).
 // GET /repos lists it (#777); POST /repos attaches a local checkout through the
-// attachRepo precondition gate (#778, epic #761). Binding to 127.0.0.1 IS the
-// authorization model; see the ADR shipped with this change.
+// attachRepo precondition gate (#778); POST /repos/<owner>/<name>/pause|resume
+// toggle an attached entry's state through setRepoState (#779, epic #761).
+// Binding to 127.0.0.1 IS the authorization model; see the ADR shipped with
+// this change.
 
 import http from 'node:http';
 
 import { type AttachRepoDeps, attachRepo } from './repos-attach.js';
+import { setRepoState } from './repos-pause-resume.js';
 import { defaultRegistryPath, listRepos, loadRegistry, type RepoRegistryListing } from './registry.js';
 
 /** Default TCP port for the foreground factoryd listener. */
@@ -90,9 +93,15 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
   const host = opts.host ?? '127.0.0.1';
   const log = opts.log ?? ((line: string) => console.log(line));
 
-  function send(res: http.ServerResponse, req: http.IncomingMessage, status: number, payload: unknown): void {
+  function send(
+    res: http.ServerResponse,
+    req: http.IncomingMessage,
+    status: number,
+    payload: unknown,
+    allow = 'GET, POST',
+  ): void {
     const headers: Record<string, string> = { 'content-type': 'application/json' };
-    if (status === 405) headers.allow = 'GET, POST';
+    if (status === 405) headers.allow = allow;
     res.writeHead(status, headers);
     res.end(JSON.stringify(payload));
     log(`${req.method ?? '-'} ${parsePathname(req.url)} ${status}`);
@@ -127,6 +136,22 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
       }
 
       send(res, req, 405, { error: 'method not allowed' });
+      return;
+    }
+
+    const segments = pathname.split('/').filter((s) => s.length > 0);
+    if (segments.length === 4 && segments[0] === 'repos' && (segments[3] === 'pause' || segments[3] === 'resume')) {
+      if (req.method !== 'POST') {
+        send(res, req, 405, { error: 'method not allowed' }, 'POST');
+        return;
+      }
+      const slug = `${segments[1]}/${segments[2]}`;
+      const result = await setRepoState(registryFile, slug, segments[3] === 'pause' ? 'paused' : 'active');
+      if (!result.ok) {
+        send(res, req, result.reason === 'detached' ? 409 : 404, { error: result.detail, reason: result.reason });
+        return;
+      }
+      send(res, req, 200, { repo: result.entry });
       return;
     }
 

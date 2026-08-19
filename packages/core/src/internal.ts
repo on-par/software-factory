@@ -175,6 +175,7 @@ export type {
 } from './daemon/registry.js';
 export {
   defaultRegistryPath,
+  dispatchableRepos,
   emptyRegistry,
   getRepo,
   listRepos,
@@ -195,3 +196,7 @@ export type {
   AttachRepoResult,
 } from './daemon/repos-attach.js';
 export { attachRepo, parseRemoteSlug, readOriginUrl } from './daemon/repos-attach.js';
+
+// Daemon pause/resume gate (#779)
+export type { SetRepoStateFailureReason, SetRepoStateResult, SettableRepoState } from './daemon/repos-pause-resume.js';
+export { setRepoState } from './daemon/repos-pause-resume.js';

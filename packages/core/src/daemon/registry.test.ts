@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   defaultRegistryPath,
+  dispatchableRepos,
   emptyRegistry,
   getRepo,
   listRepos,
@@ -200,6 +201,22 @@ describe('upsertRepo', () => {
     expect(getRepo(withNew, 'on-par/sound-buddy')).toEqual(updatedEntry);
     expect(getRepo(withNew, 'on-par/second')).toEqual(goodEntry);
     expect(getRepo(original, 'on-par/sound-buddy')).toEqual(goodEntry);
+  });
+});
+
+describe('dispatchableRepos', () => {
+  it('returns only active entries, sorted ascending by slug', () => {
+    let registry = emptyRegistry();
+    registry = upsertRepo(registry, 'z/active', { ...goodEntry, state: 'active' });
+    registry = upsertRepo(registry, 'a/active', { ...goodEntry, state: 'active' });
+    registry = upsertRepo(registry, 'b/paused', { ...goodEntry, state: 'paused' });
+    registry = upsertRepo(registry, 'c/detached', { ...goodEntry, state: 'detached' });
+
+    expect(dispatchableRepos(registry).map((row) => row.slug)).toEqual(['a/active', 'z/active']);
+  });
+
+  it('returns an empty array for an empty registry', () => {
+    expect(dispatchableRepos(emptyRegistry())).toEqual([]);
   });
 });
 
