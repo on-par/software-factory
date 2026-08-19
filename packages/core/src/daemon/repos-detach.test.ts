@@ -1,12 +1,12 @@
-import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
+import { existsSync } from 'node:fs';
 
 import { dispatchableRepos, emptyRegistry, loadRegistry, upsertRepo, writeRegistry } from './registry.js';
-import { detachRepo, isSafeDetachBoundary, SAFE_DETACH_STATUSES } from './repos-detach.js';
+import { beginDetach, drainAndDetach, isDrainSafe } from './repos-detach.js';
 import type { RunStatus } from '../types/index.js';
 
 const tmpDirs: string[] = [];
@@ -21,172 +21,97 @@ afterEach(async () => {
   await Promise.all(tmpDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
-const SAFE_STATUSES: RunStatus[] = ['ready', 'awaiting-review', 'parked', 'escalated', 'merged', 'failed'];
-const UNSAFE_STATUSES: RunStatus[] = ['pending', 'planning', 'building', 'checking', 'reworking', 'shipping'];
+const SAFE_STATUSES: RunStatus[] = ['pending', 'ready', 'awaiting-review', 'parked', 'escalated', 'merged', 'failed'];
+const BLOCKING_STATUSES: RunStatus[] = ['planning', 'building', 'checking', 'reworking', 'shipping'];
 
-describe('isSafeDetachBoundary / SAFE_DETACH_STATUSES', () => {
-  it('names exactly the six safe statuses', () => {
-    expect([...SAFE_DETACH_STATUSES].sort()).toEqual([...SAFE_STATUSES].sort());
+describe('isDrainSafe', () => {
+  it('is true for an empty list', () => {
+    expect(isDrainSafe([])).toBe(true);
   });
 
   for (const status of SAFE_STATUSES) {
-    it(`treats ${status} as a safe boundary`, () => {
-      expect(isSafeDetachBoundary(status)).toBe(true);
+    it(`is true for [${status}]`, () => {
+      expect(isDrainSafe([status])).toBe(true);
     });
   }
 
-  for (const status of UNSAFE_STATUSES) {
-    it(`treats ${status} as unsafe (in-flight)`, () => {
-      expect(isSafeDetachBoundary(status)).toBe(false);
+  for (const status of BLOCKING_STATUSES) {
+    it(`is false for [${status}]`, () => {
+      expect(isDrainSafe([status])).toBe(false);
     });
   }
+
+  it('is false for a mixed list with one blocking status', () => {
+    expect(isDrainSafe(['merged', 'building'])).toBe(false);
+  });
 });
 
-describe('detachRepo', () => {
-  it('drains before tombstoning (acceptance criterion 1)', async () => {
+describe('beginDetach', () => {
+  it('writes draining for an active repo (force: false) and dispatchableRepos excludes it (acceptance criterion 1)', async () => {
     const registryFile = await tmpFile();
-    const registry = upsertRepo(emptyRegistry(), 'on-par/software-factory', {
-      path: '/repos/software-factory',
-      attachedAt: '2026-08-19T12:00:00.000Z',
-      state: 'active',
-    });
-    await writeRegistry(registryFile, registry);
+    await writeRegistry(
+      registryFile,
+      upsertRepo(emptyRegistry(), 'on-par/software-factory', {
+        path: '/repos/software-factory',
+        attachedAt: '2026-08-19T12:00:00.000Z',
+        state: 'active',
+      }),
+    );
 
-    let call = 0;
-    const readLaneStatuses = async (): Promise<RunStatus[]> => {
-      call += 1;
-      if (call === 1) return ['building'];
-      if (call === 2) return ['checking'];
-      return ['merged'];
-    };
-    const sleepCalls: number[] = [];
-    const sleep = async (ms: number) => {
-      sleepCalls.push(ms);
-    };
-
-    const result = await detachRepo(registryFile, 'on-par/software-factory', { readLaneStatuses, sleep });
+    const result = await beginDetach(registryFile, 'on-par/software-factory', false);
 
     expect(result).toEqual({
       ok: true,
-      forced: false,
+      draining: true,
       entry: {
         slug: 'on-par/software-factory',
         path: '/repos/software-factory',
         attachedAt: '2026-08-19T12:00:00.000Z',
-        state: 'detached',
+        state: 'draining',
       },
     });
-    expect(call).toBe(3);
-    expect(sleepCalls.length).toBe(2);
 
     const loaded = await loadRegistry(registryFile);
     expect(loaded.repos['on-par/software-factory']).toEqual({
       path: '/repos/software-factory',
       attachedAt: '2026-08-19T12:00:00.000Z',
-      state: 'detached',
+      state: 'draining',
     });
+    expect(dispatchableRepos(loaded)).toEqual([]);
   });
 
-  it('writes draining before it waits (the stop-claiming guarantee)', async () => {
+  it('writes draining for a paused repo', async () => {
     const registryFile = await tmpFile();
-    const registry = upsertRepo(emptyRegistry(), 'on-par/software-factory', {
-      path: '/repos/software-factory',
-      attachedAt: '2026-08-19T12:00:00.000Z',
-      state: 'active',
-    });
-    await writeRegistry(registryFile, registry);
+    await writeRegistry(
+      registryFile,
+      upsertRepo(emptyRegistry(), 'on-par/software-factory', {
+        path: '/repos/software-factory',
+        attachedAt: '2026-08-19T12:00:00.000Z',
+        state: 'paused',
+      }),
+    );
 
-    let firstCall = true;
-    const readLaneStatuses = async (slug: string): Promise<RunStatus[]> => {
-      if (firstCall) {
-        firstCall = false;
-        const loaded = await loadRegistry(registryFile);
-        expect(loaded.repos[slug]?.state).toBe('draining');
-        expect(dispatchableRepos(loaded).map((r) => r.slug)).not.toContain(slug);
-      }
-      return ['merged'];
-    };
-
-    const result = await detachRepo(registryFile, 'on-par/software-factory', { readLaneStatuses });
+    const result = await beginDetach(registryFile, 'on-par/software-factory', false);
     expect(result.ok).toBe(true);
+    if (result.ok) expect(result.entry.state).toBe('draining');
   });
 
-  for (const status of SAFE_STATUSES) {
-    it(`detaches on the first poll when the only lane is ${status}, without sleeping`, async () => {
-      const registryFile = await tmpFile();
-      const registry = upsertRepo(emptyRegistry(), 'on-par/software-factory', {
-        path: '/repos/software-factory',
-        attachedAt: '2026-08-19T12:00:00.000Z',
-        state: 'active',
-      });
-      await writeRegistry(registryFile, registry);
-
-      const sleep = async () => {
-        throw new Error('must not sleep for a safe boundary');
-      };
-      const result = await detachRepo(registryFile, 'on-par/software-factory', {
-        readLaneStatuses: async () => [status],
-        sleep,
-      });
-
-      expect(result.ok).toBe(true);
-      if (result.ok) expect(result.entry.state).toBe('detached');
-    });
-  }
-
-  for (const status of ['pending', 'shipping'] as RunStatus[]) {
-    it(`blocks the drain on unsafe status ${status} until timeout`, async () => {
-      const registryFile = await tmpFile();
-      const registry = upsertRepo(emptyRegistry(), 'on-par/software-factory', {
-        path: '/repos/software-factory',
-        attachedAt: '2026-08-19T12:00:00.000Z',
-        state: 'active',
-      });
-      await writeRegistry(registryFile, registry);
-
-      let now = 0;
-      const result = await detachRepo(registryFile, 'on-par/software-factory', {
-        readLaneStatuses: async () => [status],
-        now: () => {
-          const value = now;
-          now += 600;
-          return value;
-        },
-        sleep: async () => {},
-        drainTimeoutMs: 1_000,
-        pollIntervalMs: 1,
-      });
-
-      expect(result.ok).toBe(false);
-      if (!result.ok) {
-        expect(result.reason).toBe('drain-timeout');
-        expect(result.detail).toContain('?force=true');
-      }
-
-      const loaded = await loadRegistry(registryFile);
-      expect(loaded.repos['on-par/software-factory']?.state).toBe('draining');
-    });
-  }
-
-  it('force skips the drain (acceptance criterion 2)', async () => {
+  it('force: true tombstones an active repo immediately (acceptance criterion 2)', async () => {
     const registryFile = await tmpFile();
-    const registry = upsertRepo(emptyRegistry(), 'on-par/software-factory', {
-      path: '/repos/software-factory',
-      attachedAt: '2026-08-19T12:00:00.000Z',
-      state: 'active',
-    });
-    await writeRegistry(registryFile, registry);
+    await writeRegistry(
+      registryFile,
+      upsertRepo(emptyRegistry(), 'on-par/software-factory', {
+        path: '/repos/software-factory',
+        attachedAt: '2026-08-19T12:00:00.000Z',
+        state: 'active',
+      }),
+    );
 
-    const result = await detachRepo(registryFile, 'on-par/software-factory', {
-      force: true,
-      readLaneStatuses: async () => {
-        throw new Error('must not be called');
-      },
-    });
+    const result = await beginDetach(registryFile, 'on-par/software-factory', true);
 
     expect(result).toEqual({
       ok: true,
-      forced: true,
+      draining: false,
       entry: {
         slug: 'on-par/software-factory',
         path: '/repos/software-factory',
@@ -194,59 +119,32 @@ describe('detachRepo', () => {
         state: 'detached',
       },
     });
-
     const loaded = await loadRegistry(registryFile);
     expect(loaded.repos['on-par/software-factory']?.state).toBe('detached');
   });
 
-  it('leaves the target repo checkout .factory/ directory untouched (both acceptance criteria)', async () => {
-    const checkoutDir = await mkdtemp(join(tmpdir(), 'repos-detach-checkout-'));
-    tmpDirs.push(checkoutDir);
-    const factoryDir = join(checkoutDir, '.factory');
-    const plansDir = join(factoryDir, 'plans');
-    await mkdir(plansDir, { recursive: true });
-    await writeFile(join(factoryDir, 'config.json'), '{"repo":"on-par/x"}\n');
-    await writeFile(join(plansDir, 'x.md'), '# plan\n');
-
-    const files = [join(factoryDir, 'config.json'), join(plansDir, 'x.md')];
-    const before = await Promise.all(
-      files.map(async (f) => ({ file: f, content: await readFile(f, 'utf-8'), mtimeMs: (await stat(f)).mtimeMs })),
-    );
-
-    // Default drain path
-    const registryFile1 = await tmpFile();
+  it('force: true on a draining entry tombstones it (the stuck-drain escape)', async () => {
+    const registryFile = await tmpFile();
     await writeRegistry(
-      registryFile1,
-      upsertRepo(emptyRegistry(), 'on-par/x', {
-        path: checkoutDir,
+      registryFile,
+      upsertRepo(emptyRegistry(), 'on-par/software-factory', {
+        path: '/repos/software-factory',
         attachedAt: '2026-08-19T12:00:00.000Z',
-        state: 'active',
+        state: 'draining',
       }),
     );
-    await detachRepo(registryFile1, 'on-par/x', { readLaneStatuses: async () => ['merged'] });
 
-    // Forced path
-    const registryFile2 = await tmpFile();
-    await writeRegistry(
-      registryFile2,
-      upsertRepo(emptyRegistry(), 'on-par/x', {
-        path: checkoutDir,
-        attachedAt: '2026-08-19T12:00:00.000Z',
-        state: 'active',
-      }),
-    );
-    await detachRepo(registryFile2, 'on-par/x', { force: true });
-
-    const after = await Promise.all(
-      files.map(async (f) => ({ file: f, content: await readFile(f, 'utf-8'), mtimeMs: (await stat(f)).mtimeMs })),
-    );
-    expect(after).toEqual(before);
+    const result = await beginDetach(registryFile, 'on-par/software-factory', true);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.entry.state).toBe('detached');
+    const loaded = await loadRegistry(registryFile);
+    expect(loaded.repos['on-par/software-factory']?.state).toBe('detached');
   });
 
   it('returns unknown-repo and creates no file when the registry did not exist', async () => {
     const registryFile = await tmpFile();
 
-    const result = await detachRepo(registryFile, 'on-par/software-factory');
+    const result = await beginDetach(registryFile, 'on-par/software-factory', false);
 
     expect(result).toEqual({
       ok: false,
@@ -266,7 +164,7 @@ describe('detachRepo', () => {
     });
     await writeFile(registryFile, preSeeded);
 
-    const result = await detachRepo(registryFile, 'on-par/software-factory');
+    const result = await beginDetach(registryFile, 'on-par/software-factory', false);
 
     expect(result).toEqual({
       ok: false,
@@ -278,19 +176,21 @@ describe('detachRepo', () => {
 
   it('is idempotent for an already-detached tombstone and leaves the file unchanged', async () => {
     const registryFile = await tmpFile();
-    const registry = upsertRepo(emptyRegistry(), 'on-par/software-factory', {
-      path: '/repos/software-factory',
-      attachedAt: '2026-08-19T12:00:00.000Z',
-      state: 'detached',
-    });
-    await writeRegistry(registryFile, registry);
+    await writeRegistry(
+      registryFile,
+      upsertRepo(emptyRegistry(), 'on-par/software-factory', {
+        path: '/repos/software-factory',
+        attachedAt: '2026-08-19T12:00:00.000Z',
+        state: 'detached',
+      }),
+    );
     const before = await readFile(registryFile, 'utf-8');
 
-    const result = await detachRepo(registryFile, 'on-par/software-factory');
+    const result = await beginDetach(registryFile, 'on-par/software-factory', false);
 
     expect(result).toEqual({
       ok: true,
-      forced: false,
+      draining: false,
       entry: {
         slug: 'on-par/software-factory',
         path: '/repos/software-factory',
@@ -301,49 +201,7 @@ describe('detachRepo', () => {
     await expect(readFile(registryFile, 'utf-8')).resolves.toBe(before);
   });
 
-  it('detaches a paused entry normally', async () => {
-    const registryFile = await tmpFile();
-    const registry = upsertRepo(emptyRegistry(), 'on-par/software-factory', {
-      path: '/repos/software-factory',
-      attachedAt: '2026-08-19T12:00:00.000Z',
-      state: 'paused',
-    });
-    await writeRegistry(registryFile, registry);
-
-    const result = await detachRepo(registryFile, 'on-par/software-factory', {
-      readLaneStatuses: async () => ['merged'],
-    });
-
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.entry.state).toBe('detached');
-  });
-
-  it('resumes an interrupted drain: an entry already draining detaches without a second interim write', async () => {
-    const registryFile = await tmpFile();
-    const registry = upsertRepo(emptyRegistry(), 'on-par/software-factory', {
-      path: '/repos/software-factory',
-      attachedAt: '2026-08-19T12:00:00.000Z',
-      state: 'draining',
-    });
-    await writeRegistry(registryFile, registry);
-
-    const result = await detachRepo(registryFile, 'on-par/software-factory', {
-      readLaneStatuses: async () => ['merged'],
-    });
-
-    expect(result).toEqual({
-      ok: true,
-      forced: false,
-      entry: {
-        slug: 'on-par/software-factory',
-        path: '/repos/software-factory',
-        attachedAt: '2026-08-19T12:00:00.000Z',
-        state: 'detached',
-      },
-    });
-  });
-
-  it('leaves a sibling entry untouched after a detach', async () => {
+  it('leaves a sibling entry untouched', async () => {
     const registryFile = await tmpFile();
     let registry = upsertRepo(emptyRegistry(), 'on-par/software-factory', {
       path: '/repos/software-factory',
@@ -357,7 +215,7 @@ describe('detachRepo', () => {
     });
     await writeRegistry(registryFile, registry);
 
-    await detachRepo(registryFile, 'on-par/software-factory', { force: true });
+    await beginDetach(registryFile, 'on-par/software-factory', true);
 
     const loaded = await loadRegistry(registryFile);
     expect(loaded.repos['on-par/sibling']).toEqual({
@@ -366,15 +224,193 @@ describe('detachRepo', () => {
       state: 'active',
     });
   });
+});
 
-  it('a third repo attached mid-drain survives the post-drain re-load and final write', async () => {
+describe('drainAndDetach', () => {
+  it('detaches only after the reader clears a blocking status (acceptance criterion 1)', async () => {
     const registryFile = await tmpFile();
-    const registry = upsertRepo(emptyRegistry(), 'on-par/software-factory', {
-      path: '/repos/software-factory',
-      attachedAt: '2026-08-19T12:00:00.000Z',
-      state: 'active',
+    await writeRegistry(
+      registryFile,
+      upsertRepo(emptyRegistry(), 'on-par/software-factory', {
+        path: '/repos/software-factory',
+        attachedAt: '2026-08-19T12:00:00.000Z',
+        state: 'draining',
+      }),
+    );
+
+    let call = 0;
+    const readLaneStatuses = async (): Promise<RunStatus[]> => {
+      call += 1;
+      if (call === 1) return ['building'];
+      if (call === 2) return ['building'];
+      return ['merged'];
+    };
+
+    const outcome = await drainAndDetach(registryFile, 'on-par/software-factory', {
+      readLaneStatuses,
+      sleep: async () => {},
+      pollIntervalMs: 0,
     });
-    await writeRegistry(registryFile, registry);
+
+    expect(outcome).toBe('detached');
+    expect(call).toBe(3);
+    const loaded = await loadRegistry(registryFile);
+    expect(loaded.repos['on-par/software-factory']?.state).toBe('detached');
+  });
+
+  it('calls readLaneStatuses with the entry path', async () => {
+    const registryFile = await tmpFile();
+    await writeRegistry(
+      registryFile,
+      upsertRepo(emptyRegistry(), 'on-par/software-factory', {
+        path: '/repos/software-factory',
+        attachedAt: '2026-08-19T12:00:00.000Z',
+        state: 'draining',
+      }),
+    );
+
+    const seenPaths: string[] = [];
+    await drainAndDetach(registryFile, 'on-par/software-factory', {
+      readLaneStatuses: async (repoPath) => {
+        seenPaths.push(repoPath);
+        return ['merged'];
+      },
+    });
+
+    expect(seenPaths).toEqual(['/repos/software-factory']);
+  });
+
+  it('detaches on the first pass with the production default (no lanes)', async () => {
+    const registryFile = await tmpFile();
+    await writeRegistry(
+      registryFile,
+      upsertRepo(emptyRegistry(), 'on-par/software-factory', {
+        path: '/repos/software-factory',
+        attachedAt: '2026-08-19T12:00:00.000Z',
+        state: 'draining',
+      }),
+    );
+
+    const outcome = await drainAndDetach(registryFile, 'on-par/software-factory');
+    expect(outcome).toBe('detached');
+  });
+
+  it('times out when a lane never clears a blocking status', async () => {
+    const registryFile = await tmpFile();
+    await writeRegistry(
+      registryFile,
+      upsertRepo(emptyRegistry(), 'on-par/software-factory', {
+        path: '/repos/software-factory',
+        attachedAt: '2026-08-19T12:00:00.000Z',
+        state: 'draining',
+      }),
+    );
+
+    let now = 0;
+    const outcome = await drainAndDetach(registryFile, 'on-par/software-factory', {
+      readLaneStatuses: async () => ['building'],
+      now: () => {
+        const value = now;
+        now += 600;
+        return value;
+      },
+      sleep: async () => {},
+      drainTimeoutMs: 1_000,
+      pollIntervalMs: 1,
+    });
+
+    expect(outcome).toBe('timed-out');
+    const loaded = await loadRegistry(registryFile);
+    expect(loaded.repos['on-par/software-factory']?.state).toBe('draining');
+  });
+
+  it('aborts immediately when the signal is already aborted, never calling the reader', async () => {
+    const registryFile = await tmpFile();
+    await writeRegistry(
+      registryFile,
+      upsertRepo(emptyRegistry(), 'on-par/software-factory', {
+        path: '/repos/software-factory',
+        attachedAt: '2026-08-19T12:00:00.000Z',
+        state: 'draining',
+      }),
+    );
+
+    const readLaneStatuses = async (): Promise<RunStatus[]> => {
+      throw new Error('must not be called when aborted');
+    };
+
+    const outcome = await drainAndDetach(registryFile, 'on-par/software-factory', {
+      readLaneStatuses,
+      signal: { aborted: true },
+    });
+
+    expect(outcome).toBe('aborted');
+    const loaded = await loadRegistry(registryFile);
+    expect(loaded.repos['on-par/software-factory']?.state).toBe('draining');
+  });
+
+  it('is superseded when the entry is not draining, without calling the reader', async () => {
+    const registryFile = await tmpFile();
+    await writeRegistry(
+      registryFile,
+      upsertRepo(emptyRegistry(), 'on-par/software-factory', {
+        path: '/repos/software-factory',
+        attachedAt: '2026-08-19T12:00:00.000Z',
+        state: 'detached',
+      }),
+    );
+    const before = await readFile(registryFile, 'utf-8');
+
+    const readLaneStatuses = async (): Promise<RunStatus[]> => {
+      throw new Error('must not be called when superseded');
+    };
+
+    const outcome = await drainAndDetach(registryFile, 'on-par/software-factory', { readLaneStatuses });
+
+    expect(outcome).toBe('superseded');
+    await expect(readFile(registryFile, 'utf-8')).resolves.toBe(before);
+  });
+
+  it('is superseded when a force-detach races ahead mid-drain', async () => {
+    const registryFile = await tmpFile();
+    await writeRegistry(
+      registryFile,
+      upsertRepo(emptyRegistry(), 'on-par/software-factory', {
+        path: '/repos/software-factory',
+        attachedAt: '2026-08-19T12:00:00.000Z',
+        state: 'draining',
+      }),
+    );
+
+    let firstCall = true;
+    const readLaneStatuses = async (): Promise<RunStatus[]> => {
+      if (firstCall) {
+        firstCall = false;
+        await beginDetach(registryFile, 'on-par/software-factory', true);
+        return ['building'];
+      }
+      throw new Error('must not be called again after superseded');
+    };
+
+    const outcome = await drainAndDetach(registryFile, 'on-par/software-factory', {
+      readLaneStatuses,
+      sleep: async () => {},
+      pollIntervalMs: 0,
+    });
+
+    expect(outcome).toBe('superseded');
+  });
+
+  it('survives a third repo attached mid-drain and does not clobber it on the terminal write', async () => {
+    const registryFile = await tmpFile();
+    await writeRegistry(
+      registryFile,
+      upsertRepo(emptyRegistry(), 'on-par/software-factory', {
+        path: '/repos/software-factory',
+        attachedAt: '2026-08-19T12:00:00.000Z',
+        state: 'draining',
+      }),
+    );
 
     let firstCall = true;
     const readLaneStatuses = async (): Promise<RunStatus[]> => {
@@ -394,7 +430,11 @@ describe('detachRepo', () => {
       return ['merged'];
     };
 
-    await detachRepo(registryFile, 'on-par/software-factory', { readLaneStatuses });
+    await drainAndDetach(registryFile, 'on-par/software-factory', {
+      readLaneStatuses,
+      sleep: async () => {},
+      pollIntervalMs: 0,
+    });
 
     const loaded = await loadRegistry(registryFile);
     expect(loaded.repos['on-par/late-arrival']).toEqual({
@@ -404,22 +444,52 @@ describe('detachRepo', () => {
     });
     expect(loaded.repos['on-par/software-factory']?.state).toBe('detached');
   });
+});
 
-  it('uses the default seams (no lanes, real sleep, real clock) when none are injected', async () => {
-    const registryFile = await tmpFile();
-    const registry = upsertRepo(emptyRegistry(), 'on-par/software-factory', {
-      path: '/repos/software-factory',
-      attachedAt: '2026-08-19T12:00:00.000Z',
-      state: 'active',
-    });
-    await writeRegistry(registryFile, registry);
+describe('detach leaves the repo checkout .factory/ directory untouched', () => {
+  it('is identical after a full drain and after a force detach (both acceptance criteria)', async () => {
+    const checkoutDir = await mkdtemp(join(tmpdir(), 'repos-detach-checkout-'));
+    tmpDirs.push(checkoutDir);
+    const factoryDir = join(checkoutDir, '.factory');
+    const plansDir = join(factoryDir, 'plans');
+    await mkdir(plansDir, { recursive: true });
+    await writeFile(join(factoryDir, 'config.json'), '{"repo":"on-par/x"}\n');
+    await writeFile(join(factoryDir, 'events.ndjson'), '{"type":"noop"}\n');
+    await writeFile(join(plansDir, 'issue-1.md'), '# plan\n');
 
-    const result = await detachRepo(registryFile, 'on-par/software-factory');
+    const files = [join(factoryDir, 'config.json'), join(factoryDir, 'events.ndjson'), join(plansDir, 'issue-1.md')];
+    const before = await Promise.all(
+      files.map(async (f) => ({ file: f, content: await readFile(f, 'utf-8'), mtimeMs: (await stat(f)).mtimeMs })),
+    );
 
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.entry.state).toBe('detached');
-      expect(result.forced).toBe(false);
-    }
+    // Default drain path.
+    const registryFile1 = await tmpFile();
+    await writeRegistry(
+      registryFile1,
+      upsertRepo(emptyRegistry(), 'on-par/x', {
+        path: checkoutDir,
+        attachedAt: '2026-08-19T12:00:00.000Z',
+        state: 'active',
+      }),
+    );
+    await beginDetach(registryFile1, 'on-par/x', false);
+    await drainAndDetach(registryFile1, 'on-par/x', { readLaneStatuses: async () => ['merged'] });
+
+    // Forced path.
+    const registryFile2 = await tmpFile();
+    await writeRegistry(
+      registryFile2,
+      upsertRepo(emptyRegistry(), 'on-par/x', {
+        path: checkoutDir,
+        attachedAt: '2026-08-19T12:00:00.000Z',
+        state: 'active',
+      }),
+    );
+    await beginDetach(registryFile2, 'on-par/x', true);
+
+    const after = await Promise.all(
+      files.map(async (f) => ({ file: f, content: await readFile(f, 'utf-8'), mtimeMs: (await stat(f)).mtimeMs })),
+    );
+    expect(after).toEqual(before);
   });
 });
