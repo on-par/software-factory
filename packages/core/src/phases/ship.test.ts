@@ -216,8 +216,6 @@ describe('shipPhase self-healing', () => {
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
       commands.push(command);
-      const remote = remoteHeadStub(command);
-      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: ' M packages/core/src/phases/ship.ts\n' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -252,8 +250,6 @@ describe('shipPhase self-healing', () => {
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
       commands.push(command);
-      const remote = remoteHeadStub(command);
-      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '0\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -287,8 +283,6 @@ describe('shipPhase self-healing', () => {
     const { octokit, calls } = createOctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
-      const remote = remoteHeadStub(command);
-      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -317,8 +311,6 @@ describe('shipPhase self-healing', () => {
     const { octokit, calls } = createOctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
-      const remote = remoteHeadStub(command);
-      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -351,8 +343,6 @@ describe('shipPhase self-healing', () => {
     const { octokit, calls } = createOctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
-      const remote = remoteHeadStub(command);
-      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -390,8 +380,6 @@ describe('shipPhase self-healing', () => {
     const { octokit, calls } = createOctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
-      const remote = remoteHeadStub(command);
-      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -428,8 +416,6 @@ describe('shipPhase self-healing', () => {
     const { octokit, calls } = createOctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
-      const remote = remoteHeadStub(command);
-      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
@@ -458,8 +444,6 @@ describe('shipPhase self-healing', () => {
     const { octokit, calls } = createOctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
-      const remote = remoteHeadStub(command);
-      if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
