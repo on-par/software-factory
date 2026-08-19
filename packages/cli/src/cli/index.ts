@@ -1176,6 +1176,7 @@ export async function shipIssue(
       drainSteering: planApprovalEnabled ? () => drainSteering(paths.steering, issueNum, worktree) : undefined,
       codexDisabled: codexOff,
       localOnly: effective.localOnly,
+      laneId: lane,
       workSource: ctx?.workSource,
       enforceReadiness: true,
       fastPath: efficiency.fastPath,
@@ -1271,6 +1272,7 @@ export async function shipIssue(
         fallbackModel: failoverSettings.fallbackModel,
       },
       onPgid,
+      laneId: lane,
     });
     if (!build.ok) {
       throw new LaneParkError(`build escalated: ${build.escalate ?? 'unknown'}`, 'escalate');
@@ -1300,6 +1302,7 @@ export async function shipIssue(
       appBaseUrl,
       onPgid,
       priorFailureSignature,
+      laneId: lane,
     });
     checkSummary = check.summary;
     reworkRounds = check.reworkRounds;
@@ -1384,6 +1387,7 @@ export async function shipIssue(
       logsDir: paths.logs,
       reworkRounds: check.reworkRounds,
       work: ctx?.workRequest,
+      laneId: lane,
     });
     if (!ship.ok) {
       throw new LaneParkError(
