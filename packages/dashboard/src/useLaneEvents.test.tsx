@@ -41,10 +41,10 @@ function validEventJson(overrides: Record<string, unknown> = {}): string {
 }
 
 function Probe({ source }: { source: FakeEventSource }) {
-  const { board, connected } = useLaneEvents({ createEventSource: () => source });
+  const { board, connection } = useLaneEvents({ createEventSource: () => source });
   return (
     <div>
-      <span data-testid="connected">{String(connected)}</span>
+      <span data-testid="connection">{connection}</span>
       <span data-testid="lane-count">{board.lanes.length}</span>
     </div>
   );
@@ -90,15 +90,17 @@ describe('useLaneEvents', () => {
     expect(screen.getByTestId('lane-count').textContent).toBe('0');
   });
 
-  it('sets connected true on open and false on a subsequent error', () => {
+  it('reports connecting before open, live after open, and disconnected after an error', () => {
     const source = new FakeEventSource();
     render(<Probe source={source} />);
 
+    expect(screen.getByTestId('connection').textContent).toBe('connecting');
+
     act(() => source.emit('open'));
-    expect(screen.getByTestId('connected').textContent).toBe('true');
+    expect(screen.getByTestId('connection').textContent).toBe('live');
 
     act(() => source.emit('error'));
-    expect(screen.getByTestId('connected').textContent).toBe('false');
+    expect(screen.getByTestId('connection').textContent).toBe('disconnected');
   });
 
   it('closes the source exactly once on unmount', () => {

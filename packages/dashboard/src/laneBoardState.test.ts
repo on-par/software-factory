@@ -1,7 +1,14 @@
-import type { LaneLifecycleEvent, LaneLifecyclePhase, LaneLifecycleStatus } from '@on-par/contracts';
+import type { LaneLifecycleEvent, LaneLifecycleStatus } from '@on-par/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { LOG_TAIL_LIMIT, emptyLaneBoard, laneChipLabel, reduceLaneEvent, type LaneCard } from './laneBoardState.js';
+import {
+  LOG_TAIL_LIMIT,
+  emptyLaneBoard,
+  formatLogLine,
+  laneStatusChip,
+  reduceLaneEvent,
+  type LaneCard,
+} from './laneBoardState.js';
 
 function makeEvent(overrides: Partial<LaneLifecycleEvent> = {}): LaneLifecycleEvent {
   return {
@@ -41,10 +48,10 @@ describe('reduceLaneEvent', () => {
     expect(state.lanes[0]?.detail).toBe('still planning');
   });
 
-  it('keeps lanes sorted by laneId regardless of arrival order', () => {
+  it('preserves first-seen lane order regardless of laneId lexical order', () => {
     let state = reduceLaneEvent(emptyLaneBoard(), makeEvent({ laneId: 'lane-b' }));
     state = reduceLaneEvent(state, makeEvent({ laneId: 'lane-a' }));
-    expect(state.lanes.map((lane) => lane.laneId)).toEqual(['lane-a', 'lane-b']);
+    expect(state.lanes.map((lane) => lane.laneId)).toEqual(['lane-b', 'lane-a']);
   });
 
   it('updating one lane among several leaves the others untouched', () => {
@@ -82,7 +89,7 @@ describe('reduceLaneEvent', () => {
     }
     const log = state.lanes[0]?.log ?? [];
     expect(log).toHaveLength(LOG_TAIL_LIMIT);
-    expect(log.at(-1)?.detail).toBe('line-24');
+    expect(log.at(-1)).toContain('line-24');
   });
 
   it('does not mutate the previous state', () => {
@@ -99,17 +106,42 @@ describe('reduceLaneEvent', () => {
   });
 });
 
-describe('laneChipLabel', () => {
-  const phase: LaneLifecyclePhase = 'build';
+describe('formatLogLine', () => {
+  it('renders HH:MM:SS phase status — detail from an ISO ts', () => {
+    expect(formatLogLine(makeEvent())).toBe('00:00:00 plan started — planning');
+  });
+});
 
-  it.each([
-    ['started', 'BUILD · running'],
-    ['progress', 'BUILD · running'],
-    ['done', 'BUILD · done'],
-    ['failed', 'BUILD · failed'],
-  ] as const)('formats status %s as %s', (status, expected) => {
-    const state = reduceLaneEvent(emptyLaneBoard(), makeEvent({ phase, status }));
-    const card = state.lanes[0] as LaneCard;
-    expect(laneChipLabel(card)).toBe(expected);
+describe('laneStatusChip', () => {
+  it('returns the failed chip when status is failed', () => {
+    const state = reduceLaneEvent(emptyLaneBoard(), makeEvent({ phase: 'check', status: 'failed' }));
+    expect(laneStatusChip(state.lanes[0] as LaneCard)).toEqual({
+      label: 'failed',
+      className: 'bg-status-failed text-white',
+    });
+  });
+
+  it('returns the shipped chip when ship is done', () => {
+    const state = reduceLaneEvent(emptyLaneBoard(), makeEvent({ phase: 'ship', status: 'done' }));
+    expect(laneStatusChip(state.lanes[0] as LaneCard)).toEqual({
+      label: 'shipped',
+      className: 'bg-status-shipped text-white',
+    });
+  });
+
+  it('returns the checking chip when another phase is done', () => {
+    const state = reduceLaneEvent(emptyLaneBoard(), makeEvent({ phase: 'check', status: 'done' }));
+    expect(laneStatusChip(state.lanes[0] as LaneCard)).toEqual({
+      label: 'check done',
+      className: 'bg-status-checking text-navy-950',
+    });
+  });
+
+  it('returns the building chip otherwise', () => {
+    const state = reduceLaneEvent(emptyLaneBoard(), makeEvent({ phase: 'build', status: 'progress' }));
+    expect(laneStatusChip(state.lanes[0] as LaneCard)).toEqual({
+      label: 'build…',
+      className: 'bg-status-building text-navy-950',
+    });
   });
 });

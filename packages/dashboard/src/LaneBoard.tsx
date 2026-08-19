@@ -1,21 +1,22 @@
 import {
   BOARD_PHASES,
-  laneChipLabel,
+  laneStatusChip,
   type LaneBoardState,
   type LaneCard,
   type PhaseSegmentState,
 } from './laneBoardState.js';
 
+export type ConnectionState = 'connecting' | 'live' | 'disconnected';
+
 export interface LaneBoardProps {
   board: LaneBoardState;
-  connected: boolean;
+  connection: ConnectionState;
 }
 
-const CHIP_CLASS_BY_STATUS: Record<LaneCard['status'], string> = {
-  started: 'bg-status-building text-white',
-  progress: 'bg-status-building text-white',
-  done: 'bg-status-shipped text-white',
-  failed: 'bg-status-failed text-white',
+const CONNECTION_CHIP: Record<ConnectionState, { label: string; className: string }> = {
+  connecting: { label: 'Connecting…', className: 'bg-status-queued' },
+  live: { label: 'Live', className: 'bg-teal-500' },
+  disconnected: { label: 'Disconnected', className: 'bg-status-failed' },
 };
 
 const BAR_CLASS_BY_SEGMENT: Record<PhaseSegmentState, string> = {
@@ -38,9 +39,9 @@ function LaneCardView({ card }: { card: LaneCard }) {
         </div>
         <span
           role="status"
-          className={`shrink-0 rounded-sm px-1.5 py-0.5 text-[11px] font-medium ${CHIP_CLASS_BY_STATUS[card.status]}`}
+          className={`shrink-0 rounded-sm px-1.5 py-0.5 text-[11px] font-medium ${laneStatusChip(card).className}`}
         >
-          {laneChipLabel(card)}
+          {laneStatusChip(card).label}
         </span>
       </div>
       <ol aria-label="Pipeline progress" className="flex gap-0.5">
@@ -62,8 +63,8 @@ function LaneCardView({ card }: { card: LaneCard }) {
         className="max-h-24 overflow-y-auto rounded-sm bg-canvas p-1 font-mono text-[11px] text-ink-600"
       >
         {card.log.map((line, index) => (
-          <li key={`${line.ts}-${index}`} className="break-words">
-            {line.phase} {line.status} — {line.detail}
+          <li key={index} className="break-words">
+            {line}
           </li>
         ))}
       </ul>
@@ -71,16 +72,15 @@ function LaneCardView({ card }: { card: LaneCard }) {
   );
 }
 
-export function LaneBoard({ board, connected }: LaneBoardProps) {
+export function LaneBoard({ board, connection }: LaneBoardProps) {
+  const chip = CONNECTION_CHIP[connection];
+
   return (
     <section aria-label="Lane status board" className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-ink-900">Lanes</h3>
-        <span
-          role="status"
-          className={`rounded-sm px-1.5 py-0.5 text-[11px] font-medium text-white ${connected ? 'bg-teal-500' : 'bg-status-queued'}`}
-        >
-          {connected ? 'Live' : 'Connecting…'}
+        <span role="status" className={`rounded-sm px-1.5 py-0.5 text-[11px] font-medium text-white ${chip.className}`}>
+          {chip.label}
         </span>
       </div>
       {board.lanes.length === 0 ? (

@@ -12,6 +12,8 @@ export interface EventSourceLike {
 
 export type EventSourceFactory = (url: string) => EventSourceLike;
 
+export type ConnectionState = 'connecting' | 'live' | 'disconnected';
+
 export interface UseLaneEventsOptions {
   url?: string;
   createEventSource?: EventSourceFactory;
@@ -19,7 +21,7 @@ export interface UseLaneEventsOptions {
 
 export interface UseLaneEventsResult {
   board: LaneBoardState;
-  connected: boolean;
+  connection: ConnectionState;
 }
 
 export function createBrowserEventSource(url: string): EventSourceLike {
@@ -34,15 +36,15 @@ export function createBrowserEventSource(url: string): EventSourceLike {
 
 export function useLaneEvents(options: UseLaneEventsOptions = {}): UseLaneEventsResult {
   const [board, setBoard] = useState<LaneBoardState>(emptyLaneBoard);
-  const [connected, setConnected] = useState(false);
+  const [connection, setConnection] = useState<ConnectionState>('connecting');
   const url = options.url ?? DEFAULT_EVENTS_URL;
   const factory = options.createEventSource ?? createBrowserEventSource;
 
   useEffect(() => {
     const source = factory(url);
 
-    source.addEventListener('open', () => setConnected(true));
-    source.addEventListener('error', () => setConnected(false));
+    source.addEventListener('open', () => setConnection('live'));
+    source.addEventListener('error', () => setConnection('disconnected'));
     source.addEventListener('lifecycle', (event) => {
       let raw: unknown;
       try {
@@ -58,5 +60,5 @@ export function useLaneEvents(options: UseLaneEventsOptions = {}): UseLaneEvents
     return () => source.close();
   }, [url, factory]);
 
-  return { board, connected };
+  return { board, connection };
 }

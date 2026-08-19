@@ -20,7 +20,7 @@ its sole input and be honest about what that means.
 ## Decision
 
 The board's lane set is a fold of observed lifecycle events and nothing else. `reduceLaneEvent` in
-`packages/dashboard/src/laneBoard.ts` is the only way a lane enters, leaves, or changes on the
+`packages/dashboard/src/laneBoardState.ts` is the only way a lane enters, leaves, or changes on the
 board; `useLaneEvents` opens exactly one `EventSource` and the dashboard performs no other network
 read — no snapshot fetch, no polling timer, no second source. A phase segment is `pending` until an
 event names that phase, and the reducer never back-fills an earlier phase it did not observe. The

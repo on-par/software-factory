@@ -1,16 +1,18 @@
-import type { LaneLifecycleEvent, LaneLifecyclePhase, LaneLifecycleStatus } from '@on-par/contracts';
+import {
+  LANE_LIFECYCLE_PHASES,
+  type LaneLifecycleEvent,
+  type LaneLifecyclePhase,
+  type LaneLifecycleStatus,
+} from '@on-par/contracts';
 
-export const BOARD_PHASES = ['plan', 'build', 'check', 'ship'] as const satisfies readonly LaneLifecyclePhase[];
+export const BOARD_PHASES = LANE_LIFECYCLE_PHASES;
 
-export const LOG_TAIL_LIMIT = 20;
+export const LOG_TAIL_LIMIT = 8;
 
 export type PhaseSegmentState = 'pending' | 'active' | 'done' | 'failed';
 
-export interface LaneLogLine {
-  ts: string;
-  phase: LaneLifecyclePhase;
-  status: LaneLifecycleStatus;
-  detail: string;
+export function formatLogLine(event: Pick<LaneLifecycleEvent, 'ts' | 'phase' | 'status' | 'detail'>): string {
+  return `${event.ts.slice(11, 19)} ${event.phase} ${event.status} — ${event.detail}`;
 }
 
 export interface LaneCard {
@@ -22,7 +24,7 @@ export interface LaneCard {
   detail: string;
   updatedAt: string;
   segments: Record<LaneLifecyclePhase, PhaseSegmentState>;
-  log: LaneLogLine[];
+  log: string[];
 }
 
 export interface LaneBoardState {
@@ -32,13 +34,6 @@ export interface LaneBoardState {
 const SEGMENT_BY_STATUS: Record<LaneLifecycleStatus, PhaseSegmentState> = {
   started: 'active',
   progress: 'active',
-  done: 'done',
-  failed: 'failed',
-};
-
-const CHIP_VERB_BY_STATUS: Record<LaneLifecycleStatus, string> = {
-  started: 'running',
-  progress: 'running',
   done: 'done',
   failed: 'failed',
 };
@@ -65,18 +60,23 @@ export function reduceLaneEvent(state: LaneBoardState, event: LaneLifecycleEvent
     detail: event.detail,
     updatedAt: event.ts,
     segments: { ...previousSegments, [event.phase]: SEGMENT_BY_STATUS[event.status] },
-    log: [...previousLog, { ts: event.ts, phase: event.phase, status: event.status, detail: event.detail }].slice(
-      -LOG_TAIL_LIMIT,
-    ),
+    log: [...previousLog, formatLogLine(event)].slice(-LOG_TAIL_LIMIT),
   };
 
   if (existing) {
     return { lanes: state.lanes.map((lane) => (lane.laneId === event.laneId ? nextCard : lane)) };
   }
 
-  return { lanes: [...state.lanes, nextCard].sort((a, b) => a.laneId.localeCompare(b.laneId)) };
+  return { lanes: [...state.lanes, nextCard] };
 }
 
-export function laneChipLabel(card: LaneCard): string {
-  return `${card.phase.toUpperCase()} · ${CHIP_VERB_BY_STATUS[card.status]}`;
+export function laneStatusChip(card: LaneCard): { label: string; className: string } {
+  if (card.status === 'failed') return { label: 'failed', className: 'bg-status-failed text-white' };
+  if (card.status === 'done' && card.phase === 'ship') {
+    return { label: 'shipped', className: 'bg-status-shipped text-white' };
+  }
+  if (card.status === 'done') {
+    return { label: `${card.phase} done`, className: 'bg-status-checking text-navy-950' };
+  }
+  return { label: `${card.phase}…`, className: 'bg-status-building text-navy-950' };
 }

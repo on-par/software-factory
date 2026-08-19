@@ -22,20 +22,20 @@ function boardWithLane(overrides: Record<string, unknown> = {}): LaneBoardState 
 
 describe('LaneBoard', () => {
   it('renders "Waiting for lane events…" and no article when the board is empty', () => {
-    render(<LaneBoard board={emptyLaneBoard()} connected={false} />);
+    render(<LaneBoard board={emptyLaneBoard()} connection="connecting" />);
     expect(screen.getByText('Waiting for lane events…')).toBeDefined();
     expect(screen.queryByRole('article')).toBeNull();
   });
 
   it('renders one card per lane, found by label', () => {
     const board = boardWithLane();
-    render(<LaneBoard board={board} connected={true} />);
+    render(<LaneBoard board={board} connection="live" />);
     expect(screen.getByLabelText('Lane lane-1')).toBeDefined();
   });
 
   it('renders exactly four stepper segments in plan/build/check/ship order', () => {
     const board = boardWithLane();
-    render(<LaneBoard board={board} connected={true} />);
+    render(<LaneBoard board={board} connection="live" />);
     const stepper = screen.getByRole('list', { name: 'Pipeline progress' });
     const items = within(stepper).getAllByRole('listitem');
     expect(items).toHaveLength(4);
@@ -44,7 +44,7 @@ describe('LaneBoard', () => {
 
   it('marks the active phase list item with aria-current="step"', () => {
     const board = boardWithLane({ phase: 'build', status: 'started' });
-    render(<LaneBoard board={board} connected={true} />);
+    render(<LaneBoard board={board} connection="live" />);
     const stepper = screen.getByRole('list', { name: 'Pipeline progress' });
     const items = within(stepper).getAllByRole('listitem');
     expect(items[1]?.getAttribute('aria-current')).toBe('step');
@@ -74,7 +74,7 @@ describe('LaneBoard', () => {
       worktreePath: '/tmp/lane-1',
     });
 
-    render(<LaneBoard board={board} connected={true} />);
+    render(<LaneBoard board={board} connection="live" />);
     const stepper = screen.getByRole('list', { name: 'Pipeline progress' });
 
     expect(within(stepper).getByLabelText('plan done').className).toContain('bg-status-shipped');
@@ -83,11 +83,11 @@ describe('LaneBoard', () => {
     expect(within(stepper).getByLabelText('ship pending').className).toContain('bg-hairline');
   });
 
-  it('renders the chip text from laneChipLabel, and a failed card carries the failed chip class', () => {
+  it('renders the chip text from laneStatusChip, and a failed card carries the failed chip class', () => {
     const board = boardWithLane({ phase: 'check', status: 'failed' });
-    render(<LaneBoard board={board} connected={true} />);
+    render(<LaneBoard board={board} connection="live" />);
     const chip = screen.getByLabelText('Lane lane-1').querySelector('[role="status"]');
-    expect(chip?.textContent).toBe('CHECK · failed');
+    expect(chip?.textContent).toBe('failed');
     expect(chip?.className).toContain('bg-status-failed');
   });
 
@@ -103,7 +103,7 @@ describe('LaneBoard', () => {
       worktreePath: '/tmp/lane-1',
     });
 
-    render(<LaneBoard board={board} connected={true} />);
+    render(<LaneBoard board={board} connection="live" />);
     const log = screen.getByRole('list', { name: 'Log tail' });
     const lines = within(log).getAllByRole('listitem');
     expect(lines).toHaveLength(2);
@@ -113,18 +113,19 @@ describe('LaneBoard', () => {
 
   it('applies responsive grid classes to the card container', () => {
     const board = boardWithLane();
-    render(<LaneBoard board={board} connected={true} />);
+    render(<LaneBoard board={board} connection="live" />);
     const grid = screen.getByLabelText('Lane lane-1').closest('ul');
     expect(grid?.className).toContain('grid-cols-1');
     expect(grid?.className).toContain('sm:grid-cols-2');
   });
 
-  it('shows "Live" when connected and "Connecting…" when not', () => {
+  it.each([
+    ['connecting', 'Connecting…'],
+    ['live', 'Live'],
+    ['disconnected', 'Disconnected'],
+  ] as const)('shows the connection chip text for %s', (connection, expectedText) => {
     const board = boardWithLane();
-    const { rerender } = render(<LaneBoard board={board} connected={true} />);
-    expect(screen.getByText('Live')).toBeDefined();
-
-    rerender(<LaneBoard board={board} connected={false} />);
-    expect(screen.getByText('Connecting…')).toBeDefined();
+    render(<LaneBoard board={board} connection={connection} />);
+    expect(screen.getByText(expectedText)).toBeDefined();
   });
 });

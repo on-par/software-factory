@@ -5,7 +5,7 @@ import { useLaneEvents } from './useLaneEvents.js';
 const NAV_ITEMS = ['Runs', 'Issues', 'Models', 'Settings'];
 
 export function App() {
-  const { board, connected } = useLaneEvents();
+  const { board, connection } = useLaneEvents();
 
   return (
     <div className="flex h-screen bg-canvas font-sans text-ink-900">
@@ -33,8 +33,8 @@ export function App() {
         <header className="h-7 flex items-center border-b border-hairline bg-white px-3">
           <h2 className="text-sm font-semibold">Overview</h2>
         </header>
-        <main className="flex-1 overflow-auto bg-canvas p-3">
-          <LaneBoard board={board} connected={connected} />
+        <main className="flex-1 overflow-y-auto overflow-x-hidden bg-canvas p-2 sm:p-3">
+          <LaneBoard board={board} connection={connection} />
           <h3 className="mt-4 text-sm font-semibold text-ink-900">KPI trends</h3>
           <div className="mt-2">
             <KpiTrendView kpiHistoryJsonl="" />

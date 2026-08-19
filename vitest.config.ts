@@ -42,10 +42,6 @@ export default defineConfig({
         // integration suites; it is scaffolding, not product code, and its fake
         // branches would only dilute the gate.
         'packages/core/src/test-support/**',
-        // Dev-only harness (starts a real HTTP server on a fixed port and emits
-        // synthetic events on a timer) — not exercisable in unit tests, and the
-        // server it starts is already covered by index.test.ts.
-        'packages/server/src/dev-server.ts',
       ],
       thresholds: {
         // RATCHET: global catch-all. Files matched by the per-package globs below
