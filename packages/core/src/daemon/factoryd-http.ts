@@ -2,13 +2,15 @@
 // loopback-only origin server over the repo registry (~/.factory/registry.json).
 // GET /repos lists it (#777); POST /repos attaches a local checkout through the
 // attachRepo precondition gate (#778); POST /repos/<owner>/<name>/pause|resume
-// toggle an attached entry's state through setRepoState (#779, epic #761).
-// Binding to 127.0.0.1 IS the authorization model; see the ADR shipped with
-// this change.
+// toggle an attached entry's state through setRepoState (#779); DELETE
+// /repos/<owner>/<name> drains and detaches through detachRepo, with
+// ?force=true skipping the wait (#780, epic #761). Binding to 127.0.0.1 IS the
+// authorization model; see the ADR shipped with this change.
 
 import http from 'node:http';
 
 import { type AttachRepoDeps, attachRepo } from './repos-attach.js';
+import { type DetachRepoOptions, detachRepo } from './repos-detach.js';
 import { setRepoState } from './repos-pause-resume.js';
 import { defaultRegistryPath, listRepos, loadRegistry, type RepoRegistryListing } from './registry.js';
 
@@ -30,6 +32,8 @@ export interface FactorydOptions {
   log?: (line: string) => void;
   /** Seams passed through to attachRepo for POST /repos. Test-only. */
   attachDeps?: AttachRepoDeps;
+  /** Seams passed through to detachRepo for DELETE /repos/<owner>/<name>. Test-only. */
+  detachDeps?: Omit<DetachRepoOptions, 'force'>;
 }
 
 type ReadJsonBodyResult = { ok: true; value: unknown } | { ok: false; tooLarge: boolean };
@@ -85,6 +89,16 @@ function parsePathname(url: string | undefined): string {
   const raw = (url ?? '/').split('?')[0] ?? '/';
   if (raw.length > 1 && raw.endsWith('/')) return raw.slice(0, -1);
   return raw;
+}
+
+/** `?force=true` (and the bare `?force`) enable the force path; every other
+ *  value — absent, `false`, `0`, `1` — is a normal drain, so the safe default
+ *  is what an unrecognized value gets. */
+function parseForce(url: string | undefined): boolean {
+  const query = (url ?? '').split('?')[1];
+  if (query === undefined) return false;
+  const value = new URLSearchParams(query).get('force');
+  return value !== null && (value === '' || value.toLowerCase() === 'true');
 }
 
 export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer {
@@ -152,6 +166,21 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
         return;
       }
       send(res, req, 200, { repo: result.entry });
+      return;
+    }
+
+    if (segments.length === 3 && segments[0] === 'repos') {
+      if (req.method !== 'DELETE') {
+        send(res, req, 405, { error: 'method not allowed' }, 'DELETE');
+        return;
+      }
+      const slug = `${segments[1]}/${segments[2]}`;
+      const result = await detachRepo(registryFile, slug, { ...opts.detachDeps, force: parseForce(req.url) });
+      if (!result.ok) {
+        send(res, req, result.reason === 'unknown-repo' ? 404 : 409, { error: result.detail, reason: result.reason });
+        return;
+      }
+      send(res, req, 200, { repo: result.entry, forced: result.forced });
       return;
     }
 

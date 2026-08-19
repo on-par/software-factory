@@ -155,6 +155,48 @@ describe('setRepoState', () => {
     await expect(readFile(registryFile, 'utf-8')).resolves.toBe(before);
   });
 
+  it('returns draining and leaves the file unchanged when resuming a draining entry', async () => {
+    const registryFile = await tmpFile();
+    const registry = upsertRepo(emptyRegistry(), 'on-par/software-factory', {
+      path: '/repos/software-factory',
+      attachedAt: '2026-08-19T12:00:00.000Z',
+      state: 'draining',
+    });
+    await writeRegistry(registryFile, registry);
+    const before = await readFile(registryFile, 'utf-8');
+
+    const result = await setRepoState(registryFile, 'on-par/software-factory', 'active');
+
+    expect(result).toEqual({
+      ok: false,
+      reason: 'draining',
+      detail:
+        'on-par/software-factory is draining; wait for the detach to finish or force it with DELETE /repos/on-par/software-factory?force=true',
+    });
+    await expect(readFile(registryFile, 'utf-8')).resolves.toBe(before);
+  });
+
+  it('returns draining and leaves the file unchanged when pausing a draining entry', async () => {
+    const registryFile = await tmpFile();
+    const registry = upsertRepo(emptyRegistry(), 'on-par/software-factory', {
+      path: '/repos/software-factory',
+      attachedAt: '2026-08-19T12:00:00.000Z',
+      state: 'draining',
+    });
+    await writeRegistry(registryFile, registry);
+    const before = await readFile(registryFile, 'utf-8');
+
+    const result = await setRepoState(registryFile, 'on-par/software-factory', 'paused');
+
+    expect(result).toEqual({
+      ok: false,
+      reason: 'draining',
+      detail:
+        'on-par/software-factory is draining; wait for the detach to finish or force it with DELETE /repos/on-par/software-factory?force=true',
+    });
+    await expect(readFile(registryFile, 'utf-8')).resolves.toBe(before);
+  });
+
   it('leaves sibling entries untouched when one repo is paused', async () => {
     const registryFile = await tmpFile();
     let registry = upsertRepo(emptyRegistry(), 'on-par/software-factory', {
