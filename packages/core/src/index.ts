@@ -122,6 +122,16 @@ export {
   UNKNOWN_EVENT_TRAITS,
 } from './events/kinds.js';
 
+// Lifecycle bus (#591)
+export type {
+  LaneLifecycleEvent,
+  LaneLifecycleListener,
+  LaneLifecyclePhase,
+  LaneLifecycleStatus,
+  LifecycleBus,
+} from './bus/index.js';
+export { createLifecycleBus, lifecycleBus } from './bus/index.js';
+
 // Models
 export type { DoctorProbes, ModelDiagnosis, ModelOverrides } from './models/index.js';
 export { diagnoseModels, isCommandAvailable, ModelRegistry, resolveModelOverrides } from './models/index.js';

@@ -2,6 +2,7 @@
 
 import { readFile } from 'node:fs/promises';
 
+import { type LifecycleBus, withLifecycle } from '../bus/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { readDesignArtifact, renderDesignGrounding } from '../design/index.js';
 import { laneEnv } from '../environment/index.js';
@@ -19,7 +20,16 @@ export interface BuildResult {
   escalate?: string;
 }
 
-export async function buildPhase(opts: {
+export async function buildPhase(opts: Parameters<typeof buildPhaseImpl>[0]): Promise<BuildResult> {
+  return withLifecycle(
+    { bus: opts.bus, phase: 'build', laneId: opts.laneId, issueId: opts.issue, worktreePath: opts.worktree },
+    () => buildPhaseImpl(opts),
+    (r) => r.ok,
+    (r) => (r.ok ? `build complete (model ${r.model})` : `build escalated: ${r.escalate ?? 'unknown'}`),
+  );
+}
+
+async function buildPhaseImpl(opts: {
   issue: number;
   repo: string;
   worktree: string;
@@ -56,6 +66,10 @@ export async function buildPhase(opts: {
   onPgid?: (pgid: number) => void;
   /** Local-only mode: use the compact local-small prompt on the codex route. */
   localOnly?: boolean;
+  /** Lane id stamped onto emitted lifecycle events; defaults to `issue-<issue>` (#591). */
+  laneId?: string;
+  /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
+  bus?: LifecycleBus;
 }): Promise<BuildResult> {
   const {
     issue,

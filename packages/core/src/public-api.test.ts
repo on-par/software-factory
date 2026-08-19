@@ -90,6 +90,9 @@ const PUBLIC_API_KEYS = [
   'laneStatusOf',
   'severityOf',
   'UNKNOWN_EVENT_TRAITS',
+  // Lifecycle bus (#591)
+  'createLifecycleBus',
+  'lifecycleBus',
   // Models
   'diagnoseModels',
   'isCommandAvailable',

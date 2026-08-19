@@ -2,8 +2,10 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { LaneLifecycleEventSchema } from '@on-par/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createLifecycleBus } from '../bus/index.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
@@ -1731,5 +1733,77 @@ describe('buildPhase cross-harness failover', () => {
     expect(result.ok).toBe(true);
     expect(result.model).toBe('claude-sonnet-5');
     expect(stub.calls.at(-1)).toMatchObject({ model: 'claude-sonnet-5', task: 'build_claude' });
+  });
+});
+
+describe('buildPhase lifecycle events', () => {
+  it('emits started then done on the success path, validated against the shared schema', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-591.md');
+    const stub = new StubModelExecutor({
+      scripts: { build_claude: [{ output: 'build output' }] },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const bus = createLifecycleBus();
+    const received: any[] = [];
+    bus.on((e) => received.push(e));
+
+    await buildPhase({
+      issue: 591,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/591-lifecycle',
+      route: 'claude',
+      router,
+      constitution: null,
+      log: () => {},
+      bus,
+      laneId: 'lane-1',
+    });
+
+    expect(received.map((e) => ({ phase: e.phase, status: e.status }))).toEqual([
+      { phase: 'build', status: 'started' },
+      { phase: 'build', status: 'done' },
+    ]);
+    expect(received.every((e) => e.laneId === 'lane-1')).toBe(true);
+    expect(received.every((e) => e.issueId === '591')).toBe(true);
+    expect(received.every((e) => e.worktreePath === worktree)).toBe(true);
+    for (const event of received) {
+      expect(() => LaneLifecycleEventSchema.parse(event)).not.toThrow();
+    }
+  });
+
+  it('emits started then failed on the escalation path, with a non-empty detail', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-592.md');
+    const stub = new StubModelExecutor({
+      scripts: {
+        build_claude: [{ output: 'progress line\nESCALATE: the acceptance criteria are ambiguous\nmore text' }],
+      },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const bus = createLifecycleBus();
+    const received: any[] = [];
+    bus.on((e) => received.push(e));
+
+    await buildPhase({
+      issue: 592,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/592-lifecycle',
+      route: 'claude',
+      router,
+      constitution: null,
+      log: () => {},
+      bus,
+      laneId: 'lane-1',
+    });
+
+    expect(received.map((e) => e.status)).toEqual(['started', 'failed']);
+    expect(received[1].detail.length).toBeGreaterThan(0);
   });
 });

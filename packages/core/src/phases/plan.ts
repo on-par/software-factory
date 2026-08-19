@@ -10,6 +10,7 @@ import { adrLabel, readAdrContext, renderAdrConstraints } from '../adr/index.js'
 import { parseAdrDrafts } from '../adr/write.js';
 import type { ApprovalGate } from '../approvals/index.js';
 import { PLAN_SPEC_PREVIEW_BYTES } from '../approvals/index.js';
+import { type LifecycleBus, withLifecycle } from '../bus/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { parseDesignArtifact, renderDesignArtifact } from '../design/index.js';
 import { buildFastPathSpec, isFastPathEligible } from '../efficiency/fast-path.js';
@@ -156,7 +157,16 @@ can make, print a line starting exactly with "ESCALATE:" followed by the questio
 and do NOT write ${specPath}.`;
 }
 
-export async function planPhase(opts: {
+export async function planPhase(opts: Parameters<typeof planPhaseImpl>[0]): Promise<PlanResult> {
+  return withLifecycle(
+    { bus: opts.bus, phase: 'plan', laneId: opts.laneId, issueId: opts.issue, worktreePath: opts.worktree },
+    () => planPhaseImpl(opts),
+    (r) => r.ok,
+    (r) => (r.ok ? `plan complete (route ${r.route}, model ${r.model})` : `plan escalated: ${r.escalate ?? 'unknown'}`),
+  );
+}
+
+async function planPhaseImpl(opts: {
   issue: number;
   repo: string;
   worktree: string;
@@ -198,6 +208,10 @@ export async function planPhase(opts: {
   /** Repo config pins the build route (`.factory/config.json` → `route`). Forced
    *  after plan so the spec frontmatter stays the frozen truth. */
   preferredRoute?: 'codex' | 'claude' | 'opencode';
+  /** Lane id stamped onto emitted lifecycle events; defaults to `issue-<issue>` (#591). */
+  laneId?: string;
+  /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
+  bus?: LifecycleBus;
 }): Promise<PlanResult> {
   const {
     issue,
