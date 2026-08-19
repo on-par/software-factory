@@ -1354,6 +1354,8 @@ describe('ADR writer (#482)', () => {
     const commands: string[] = [];
     const run = async (command: string) => {
       commands.push(command);
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
       return { stdout: '' };
     };
 
@@ -1533,6 +1535,272 @@ describe('ADR writer (#482)', () => {
     expect(commitCommand).toContain('ADR-002');
     expect(commitCommand).not.toContain('ADR-0002');
     expect(logs.find((l) => l[0] === 'adr_written')?.[1]).toContain('ADR-002');
+  });
+});
+
+describe('ADR push verification (#736)', () => {
+  const tempDirs = new Set<string>();
+  afterEach(async () => {
+    await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
+    tempDirs.clear();
+  });
+
+  const goodDraft: AdrDraft = {
+    title: 'Record ADR drafts during PLAN',
+    context: 'Decisions made during PLAN evaporate into spec prose.',
+    decision: 'SHIP materializes drafts as Accepted ADRs.',
+    consequences: 'Future PLAN runs can read prior decisions back.',
+    status: 'proposed',
+    references: [],
+  };
+
+  const README_WITH_TABLE = `# Architecture Decision Records
+
+## Index
+
+| Number                 | Title           | Status   |
+| ----------------------- | ---------------- | -------- |
+| [0001](0001-first.md)  | First decision  | Accepted |
+`;
+
+  async function makeWorktree(): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'ship-adr-push-test-'));
+    tempDirs.add(dir);
+    await mkdir(join(dir, 'docs', 'adr'), { recursive: true });
+    await writeFile(
+      join(dir, 'docs', 'adr', '0001-first.md'),
+      '# ADR-0001: First decision\n\n- Status: Accepted\n- Date: 2026-01-01\n\n## Context\n\nC.\n\n## Decision\n\nD.\n\n## Consequences\n\nCq.\n',
+    );
+    await writeFile(join(dir, 'docs', 'adr', 'README.md'), README_WITH_TABLE);
+    return dir;
+  }
+
+  async function makeOpenPrOctokit() {
+    const { octokit, calls } = createOctokit();
+    (octokit.rest.pulls.list as any) = async (args: any) => {
+      calls.push(['pulls.list', args]);
+      return { data: [{ number: 555 }] };
+    };
+    return { octokit, calls };
+  }
+
+  it('rejected push: non-success, git stderr logged', async () => {
+    const worktree = await makeWorktree();
+    const specPath = join(worktree, 'issue-482.md');
+    await writeFile(specPaths(specPath).adr, JSON.stringify([goodDraft], null, 2));
+
+    const { octokit } = await makeOpenPrOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command.startsWith('git push')) {
+        throw Object.assign(new Error('Command failed: git push'), {
+          stderr:
+            ' ! [rejected]        ship-it/482-adr-writer -> ship-it/482-adr-writer (non-fast-forward)\nerror: failed to push some refs to origin\n',
+        });
+      }
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 482,
+      repo: 'on-par/software-factory',
+      worktree,
+      branch: 'ship-it/482-adr-writer',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+      specPath,
+      today: '2026-07-25',
+    });
+
+    expect(result).toEqual({ ok: false, prNumber: 555, adrPushFailed: true });
+    const failLog = logs.find((l) => l[0] === 'adr_push_failed');
+    expect(failLog).toBeDefined();
+    expect(failLog?.[1]).toMatch(/^pushing the ADR commit for PR #555 failed \(non-fast-forward\): ! \[rejected\]/);
+    expect(failLog?.[1]).toContain('failed to push some refs');
+    expect(failLog?.[1]).toMatch(/— aborting the ship$/);
+    expect(failLog?.[1]).not.toContain('\n');
+  });
+
+  it('rejected push: no evidence pack, no ready flip, no ready event', async () => {
+    const worktree = await makeWorktree();
+    const specPath = join(worktree, 'issue-482.md');
+    await writeFile(specPaths(specPath).adr, JSON.stringify([goodDraft], null, 2));
+
+    const { octokit, calls } = await makeOpenPrOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command.startsWith('git push')) {
+        throw Object.assign(new Error('Command failed: git push'), {
+          stderr: ' ! [rejected] (non-fast-forward)\nerror: failed to push some refs\n',
+        });
+      }
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
+      return { stdout: '' };
+    };
+
+    await shipPhase({
+      issue: 482,
+      repo: 'on-par/software-factory',
+      worktree,
+      branch: 'ship-it/482-adr-writer',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+      specPath,
+      today: '2026-07-25',
+    });
+
+    expect(calls.some((call) => call[0] === 'issues.createComment')).toBe(false);
+    expect(calls.some((call) => call[0] === 'graphql')).toBe(false);
+    expect(logs.some((l) => l[0] === 'ready')).toBe(false);
+    expect(logs.some((l) => l[0] === 'evidence')).toBe(false);
+  });
+
+  it('network-classified rejection', async () => {
+    const worktree = await makeWorktree();
+    const specPath = join(worktree, 'issue-482.md');
+    await writeFile(specPaths(specPath).adr, JSON.stringify([goodDraft], null, 2));
+
+    const { octokit } = await makeOpenPrOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command.startsWith('git push')) {
+        throw Object.assign(new Error('Command failed: git push'), {
+          stderr:
+            "fatal: unable to access 'https://github.com/on-par/software-factory.git/': Could not resolve host: github.com\n",
+        });
+      }
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 482,
+      repo: 'on-par/software-factory',
+      worktree,
+      branch: 'ship-it/482-adr-writer',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+      specPath,
+      today: '2026-07-25',
+    });
+
+    expect(result).toEqual({ ok: false, prNumber: 555, adrPushFailed: true });
+    const failLog = logs.find((l) => l[0] === 'adr_push_failed');
+    expect(failLog?.[1]).toContain('(network)');
+    expect(failLog?.[1]).toContain('Could not resolve host');
+  });
+
+  it('zero-exit push, remote head mismatch: non-success', async () => {
+    const worktree = await makeWorktree();
+    const specPath = join(worktree, 'issue-482.md');
+    await writeFile(specPaths(specPath).adr, JSON.stringify([goodDraft], null, 2));
+
+    const { octokit } = await makeOpenPrOctokit();
+    const logs: Array<[string, string]> = [];
+    const mismatchedSha = 'f'.repeat(40);
+    const run = async (command: string) => {
+      const remote = remoteHeadStub(command, mismatchedSha);
+      if (remote) return remote;
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 482,
+      repo: 'on-par/software-factory',
+      worktree,
+      branch: 'ship-it/482-adr-writer',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+      specPath,
+      today: '2026-07-25',
+    });
+
+    expect(result).toEqual({ ok: false, prNumber: 555, adrPushFailed: true });
+    const failLog = logs.find((l) => l[0] === 'adr_push_failed');
+    expect(failLog?.[1]).toMatch(
+      /^remote head f{40} does not match local HEAD [0-9a-f]{40} after the ADR push for ship-it\/482-adr-writer — aborting the ship$/,
+    );
+  });
+
+  it('zero-exit push, remote head unreadable: non-success', async () => {
+    const worktree = await makeWorktree();
+    const specPath = join(worktree, 'issue-482.md');
+    await writeFile(specPaths(specPath).adr, JSON.stringify([goodDraft], null, 2));
+
+    const { octokit } = await makeOpenPrOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command.startsWith('git ls-remote')) {
+        throw Object.assign(new Error('boom'), { stderr: 'fatal: could not read Username' });
+      }
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 482,
+      repo: 'on-par/software-factory',
+      worktree,
+      branch: 'ship-it/482-adr-writer',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+      specPath,
+      today: '2026-07-25',
+    });
+
+    expect(result).toEqual({ ok: false, prNumber: 555, adrPushFailed: true });
+    const failLog = logs.find((l) => l[0] === 'adr_push_failed');
+    expect(failLog?.[1]).toContain('could not verify the remote head after the ADR push');
+    expect(failLog?.[1]).toContain('fatal: could not read Username');
+  });
+
+  it('verified push: ship succeeds and logs the match line', async () => {
+    const worktree = await makeWorktree();
+    const specPath = join(worktree, 'issue-482.md');
+    await writeFile(specPaths(specPath).adr, JSON.stringify([goodDraft], null, 2));
+
+    const { octokit } = await makeOpenPrOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 482,
+      repo: 'on-par/software-factory',
+      worktree,
+      branch: 'ship-it/482-adr-writer',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+      specPath,
+      today: '2026-07-25',
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 555 });
+    expect(logs).toContainEqual([
+      'ship',
+      `remote head ${STUB_HEAD_SHA} matches local HEAD ${STUB_HEAD_SHA} after the ADR push for ship-it/482-adr-writer`,
+    ]);
+    expect(logs.some((l) => l[0] === 'ready')).toBe(true);
   });
 });
 
