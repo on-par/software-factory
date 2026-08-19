@@ -41,10 +41,13 @@ export function isUsableFollowUp(text: string | undefined, asked: readonly strin
   return !asked.some((question) => normalize(question) === key);
 }
 
+const TRAILING_PUNCTUATION = new Set(['?', '.', '!']);
+
 function normalize(text: string): string {
-  return text
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .replace(/[?.!]+$/, '');
+  const collapsed = text.trim().toLowerCase().replace(/\s+/g, ' ');
+  let end = collapsed.length;
+  while (end > 0 && TRAILING_PUNCTUATION.has(collapsed[end - 1]!)) {
+    end -= 1;
+  }
+  return collapsed.slice(0, end);
 }
