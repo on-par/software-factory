@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createFactorydServer, DEFAULT_FACTORYD_PORT, type FactorydServer } from './factoryd-http.js';
-import type { RepoRegistry } from './registry.js';
+import { dispatchableRepos, loadRegistry, type RepoRegistry } from './registry.js';
 
 function writeRegistry(file: string, registry: RepoRegistry): Promise<void> {
   return writeFile(file, JSON.stringify(registry));
@@ -294,6 +294,181 @@ describe('createFactorydServer', () => {
 
       await get(factoryd.port, '/repos', 'POST', JSON.stringify({ repo: 'on-par/software-factory', path: '/tmp/x' }));
       expect(lines).toEqual(['POST /repos 400']);
+    });
+  });
+
+  describe('POST /repos/<owner>/<name>/pause|resume', () => {
+    it('pauses an active repo, excludes it from dispatchableRepos, and GET /repos agrees (acceptance criterion 1)', async () => {
+      await writeRegistry(registryFile, {
+        version: 1,
+        repos: {
+          'on-par/software-factory': {
+            path: '/repos/software-factory',
+            attachedAt: '2026-08-19T12:00:00.000Z',
+            state: 'active',
+          },
+        },
+      });
+      factoryd = createFactorydServer({ registryFile, port: 0 });
+      await factoryd.start();
+
+      const { status, body } = await get(factoryd.port, '/repos/on-par/software-factory/pause', 'POST');
+      expect(status).toBe(200);
+      expect(JSON.parse(body)).toEqual({
+        repo: {
+          slug: 'on-par/software-factory',
+          path: '/repos/software-factory',
+          attachedAt: '2026-08-19T12:00:00.000Z',
+          state: 'paused',
+        },
+      });
+
+      const listing = await get(factoryd.port, '/repos');
+      expect(JSON.parse(listing.body)).toEqual({
+        repos: [
+          {
+            slug: 'on-par/software-factory',
+            path: '/repos/software-factory',
+            attachedAt: '2026-08-19T12:00:00.000Z',
+            state: 'paused',
+          },
+        ],
+      });
+      expect(dispatchableRepos(await loadRegistry(registryFile))).toEqual([]);
+    });
+
+    it('resumes a paused repo back to active and it reappears in dispatchableRepos (acceptance criterion 2)', async () => {
+      await writeRegistry(registryFile, {
+        version: 1,
+        repos: {
+          'on-par/software-factory': {
+            path: '/repos/software-factory',
+            attachedAt: '2026-08-19T12:00:00.000Z',
+            state: 'paused',
+          },
+        },
+      });
+      factoryd = createFactorydServer({ registryFile, port: 0 });
+      await factoryd.start();
+
+      const { status, body } = await get(factoryd.port, '/repos/on-par/software-factory/resume', 'POST');
+      expect(status).toBe(200);
+      expect(JSON.parse(body)).toEqual({
+        repo: {
+          slug: 'on-par/software-factory',
+          path: '/repos/software-factory',
+          attachedAt: '2026-08-19T12:00:00.000Z',
+          state: 'active',
+        },
+      });
+
+      const listing = await get(factoryd.port, '/repos');
+      expect(JSON.parse(listing.body)).toEqual({
+        repos: [
+          {
+            slug: 'on-par/software-factory',
+            path: '/repos/software-factory',
+            attachedAt: '2026-08-19T12:00:00.000Z',
+            state: 'active',
+          },
+        ],
+      });
+      expect(dispatchableRepos(await loadRegistry(registryFile)).map((r) => r.slug)).toEqual([
+        'on-par/software-factory',
+      ]);
+    });
+
+    it('returns 404 unknown-repo for a slug not in the registry', async () => {
+      factoryd = createFactorydServer({ registryFile, port: 0 });
+      await factoryd.start();
+
+      const { status, body } = await get(factoryd.port, '/repos/on-par/nope/pause', 'POST');
+      expect(status).toBe(404);
+      expect(JSON.parse(body)).toEqual({ error: 'on-par/nope is not attached', reason: 'unknown-repo' });
+    });
+
+    it('returns 409 detached for a detached tombstone', async () => {
+      await writeRegistry(registryFile, {
+        version: 1,
+        repos: {
+          'on-par/software-factory': {
+            path: '/repos/software-factory',
+            attachedAt: '2026-08-19T12:00:00.000Z',
+            state: 'detached',
+          },
+        },
+      });
+      factoryd = createFactorydServer({ registryFile, port: 0 });
+      await factoryd.start();
+
+      const { status, body } = await get(factoryd.port, '/repos/on-par/software-factory/resume', 'POST');
+      expect(status).toBe(409);
+      expect(JSON.parse(body)).toEqual({
+        error: 'on-par/software-factory is detached; re-attach it with POST /repos',
+        reason: 'detached',
+      });
+    });
+
+    it('rejects a non-POST method with 405 and Allow: POST', async () => {
+      await writeRegistry(registryFile, {
+        version: 1,
+        repos: {
+          'on-par/software-factory': {
+            path: '/repos/software-factory',
+            attachedAt: '2026-08-19T12:00:00.000Z',
+            state: 'active',
+          },
+        },
+      });
+      factoryd = createFactorydServer({ registryFile, port: 0 });
+      await factoryd.start();
+
+      const { status, headers, body } = await get(factoryd.port, '/repos/on-par/software-factory/pause', 'GET');
+      expect(status).toBe(405);
+      expect(headers.allow).toBe('POST');
+      expect(JSON.parse(body)).toEqual({ error: 'method not allowed' });
+    });
+
+    it('returns 404 for an unknown action segment', async () => {
+      factoryd = createFactorydServer({ registryFile, port: 0 });
+      await factoryd.start();
+
+      const { status, body } = await get(factoryd.port, '/repos/on-par/x/bogus', 'POST');
+      expect(status).toBe(404);
+      expect(JSON.parse(body)).toEqual({ error: 'not found' });
+    });
+
+    it('treats a trailing slash and a query string the same as the bare path', async () => {
+      await writeRegistry(registryFile, {
+        version: 1,
+        repos: {
+          'on-par/x': { path: '/repos/x', attachedAt: '2026-08-19T12:00:00.000Z', state: 'active' },
+        },
+      });
+      factoryd = createFactorydServer({ registryFile, port: 0 });
+      await factoryd.start();
+
+      expect((await get(factoryd.port, '/repos/on-par/x/pause/', 'POST')).status).toBe(200);
+      expect((await get(factoryd.port, '/repos/on-par/x/pause?foo=1', 'POST')).status).toBe(200);
+    });
+
+    it('emits exactly one log line per pause/resume request', async () => {
+      await writeRegistry(registryFile, {
+        version: 1,
+        repos: {
+          'on-par/software-factory': {
+            path: '/repos/software-factory',
+            attachedAt: '2026-08-19T12:00:00.000Z',
+            state: 'active',
+          },
+        },
+      });
+      const lines: string[] = [];
+      factoryd = createFactorydServer({ registryFile, port: 0, log: (line) => lines.push(line) });
+      await factoryd.start();
+
+      await get(factoryd.port, '/repos/on-par/software-factory/pause', 'POST');
+      expect(lines).toEqual(['POST /repos/on-par/software-factory/pause 200']);
     });
   });
 });

@@ -299,6 +299,7 @@ const INTERNAL_API_KEYS = [
   'readClaudeAccessToken',
   // Daemon repo registry (#781)
   'defaultRegistryPath',
+  'dispatchableRepos',
   'emptyRegistry',
   'getRepo',
   'listRepos',
@@ -312,6 +313,8 @@ const INTERNAL_API_KEYS = [
   'attachRepo',
   'parseRemoteSlug',
   'readOriginUrl',
+  // Daemon pause/resume gate (#779)
+  'setRepoState',
   // Utils
   'branchFor',
   'branchPrefixSlug',

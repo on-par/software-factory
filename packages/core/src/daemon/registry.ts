@@ -105,6 +105,13 @@ export function upsertRepo(registry: RepoRegistry, slug: string, entry: RepoRegi
   return { version: 1, repos: { ...registry.repos, [slug]: entry } };
 }
 
+/** The dispatch gate: the repos a claiming loop may start new work for. Only
+ *  `active` entries are eligible — `paused` repos are held back until a resume,
+ *  and `detached` tombstones are never dispatched to. Sorted like listRepos. */
+export function dispatchableRepos(registry: RepoRegistry): RepoRegistryListing[] {
+  return listRepos(registry).filter((entry) => entry.state === 'active');
+}
+
 /** Atomic write: mkdir the parent, serialize to `${file}.tmp`, then rename it
  *  onto `file`. The rename is the commit point — a crash before it leaves any
  *  previously written `file` byte-for-byte intact, and a crash during it leaves
