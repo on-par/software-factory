@@ -284,7 +284,136 @@ describe('shipPhase self-healing', () => {
     });
 
     expect(result).toEqual({ ok: true, prNumber: 123 });
-    expect(logs).toContainEqual(['ship', 'push failed — trying to continue']);
+    expect(logs).toContainEqual(['ship', 'git push failed (unknown): remote rejected — trying to continue']);
+    expect(calls).toContainEqual(['pulls.create', expect.anything()]);
+  });
+
+  it('names a non-fast-forward push rejection and logs its stderr', async () => {
+    const { octokit, calls } = createOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      if (command.startsWith('git push')) {
+        throw Object.assign(new Error('Command failed: git push'), {
+          stderr:
+            " ! [rejected]        main -> main (non-fast-forward)\nerror: failed to push some refs to 'https://github.com/on-par/software-factory'\nhint: Updates were rejected because the tip of your current branch is behind\n",
+        });
+      }
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 123 });
+    const shipLog = logs.find(([, msg]) => msg.startsWith('git push failed'));
+    expect(shipLog?.[1]).toMatch(/^git push failed \(non-fast-forward\): ! \[rejected\]/);
+    expect(shipLog?.[1]).toContain('failed to push some refs');
+    expect(shipLog?.[1]).toMatch(/— trying to continue$/);
+    expect(shipLog?.[1]).not.toContain('\n');
+    expect(calls).toContainEqual(['pulls.create', expect.anything()]);
+  });
+
+  it('distinguishes a network push failure from non-fast-forward', async () => {
+    const { octokit, calls } = createOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      if (command.startsWith('git push')) {
+        throw Object.assign(new Error('Command failed: git push'), {
+          stderr:
+            "fatal: unable to access 'https://github.com/on-par/software-factory/': Could not resolve host: github.com",
+        });
+      }
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 123 });
+    const shipLog = logs.find(([, msg]) => msg.startsWith('git push failed'));
+    expect(shipLog?.[1]).toContain('git push failed (network):');
+    expect(shipLog?.[1]).toContain('Could not resolve host');
+    expect(shipLog?.[1]).not.toContain('non-fast-forward');
+    expect(calls).toContainEqual(['pulls.create', expect.anything()]);
+  });
+
+  it('handles a non-Error throw from git push', async () => {
+    const { octokit, calls } = createOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      if (command.startsWith('git push')) throw 'boom';
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 123 });
+    expect(logs).toContainEqual(['ship', 'git push failed (unknown): boom — trying to continue']);
+    expect(calls).toContainEqual(['pulls.create', expect.anything()]);
+  });
+
+  it('falls back to "no error output" when the push failure carries no text', async () => {
+    const { octokit, calls } = createOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      if (command.startsWith('git push')) throw new Error('');
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 123 });
+    expect(logs).toContainEqual(['ship', 'git push failed (unknown): no error output — trying to continue']);
     expect(calls).toContainEqual(['pulls.create', expect.anything()]);
   });
 
