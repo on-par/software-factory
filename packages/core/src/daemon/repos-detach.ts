@@ -1,69 +1,64 @@
 // src/daemon/repos-detach.ts — The detach gate for factoryd's repo registry:
-// takes a repo out of the dispatch set immediately by writing `draining`, waits
-// for any in-flight lane to reach a safe RunStatus boundary, then writes the
-// `detached` tombstone into ~/.factory/registry.json. `force` skips the wait
-// and tombstones the entry at once, accepting that a running lane and its
-// worktree may be orphaned. Neither path touches the target repo's own
-// `.factory/` directory (#780, epic #761).
+// beginDetach performs the synchronous registry transition (immediately
+// ineligible for new claims), and drainAndDetach is the background loop that
+// waits for any in-flight lane to reach a safe RunStatus boundary before
+// writing the `detached` tombstone. `force` skips the wait and tombstones the
+// entry at once, accepting that a running lane and its worktree may be
+// orphaned. Neither function touches the target repo's own `.factory/`
+// directory (#780, epic #761).
 
 import { getRepo, loadRegistry, type RepoRegistryListing, upsertRepo, writeRegistry } from './registry.js';
 import type { RunStatus } from '../types/index.js';
 
-/** The RunStatuses a lane may be stopped at without corrupting in-flight work.
- *  Deliberately an allow-list: any status not named here — including any added
- *  to RunStatus later — counts as in-flight and blocks a drain. */
-export const SAFE_DETACH_STATUSES: ReadonlySet<RunStatus> = new Set<RunStatus>([
-  'ready',
-  'awaiting-review',
-  'parked',
-  'escalated',
-  'merged',
-  'failed',
+/** A lane in one of these statuses is actively mutating the checkout and must
+ *  not be interrupted. Everything else in RunStatus — pending, ready,
+ *  awaiting-review, parked, escalated, merged, failed — is a safe drain
+ *  boundary. */
+export const DRAIN_BLOCKING_STATUSES: ReadonlySet<RunStatus> = new Set<RunStatus>([
+  'planning',
+  'building',
+  'checking',
+  'reworking',
+  'shipping',
 ]);
 
-export function isSafeDetachBoundary(status: RunStatus): boolean {
-  return SAFE_DETACH_STATUSES.has(status);
+export function isDrainSafe(statuses: readonly RunStatus[]): boolean {
+  return !statuses.some((s) => DRAIN_BLOCKING_STATUSES.has(s));
 }
 
-export type DetachFailureReason = 'unknown-repo' | 'drain-timeout';
+export type BeginDetachResult =
+  { ok: true; entry: RepoRegistryListing; draining: boolean } | { ok: false; reason: 'unknown-repo'; detail: string };
 
-export type DetachRepoResult =
-  | { ok: true; entry: RepoRegistryListing; forced: boolean }
-  | { ok: false; reason: DetachFailureReason; detail: string };
+/** 'detached' — tombstone written. 'timed-out' — drainTimeoutMs elapsed with a
+ *  lane still blocking. 'aborted' — the server stopped mid-drain.
+ *  'superseded' — the entry was no longer 'draining' when the loop looked (a
+ *  force detach or a re-attach raced ahead). Only 'detached' writes. */
+export type DrainOutcome = 'detached' | 'timed-out' | 'aborted' | 'superseded';
 
-export interface DetachRepoOptions {
-  /** Skip the drain wait and tombstone the entry immediately. May orphan a
-   *  running lane and its worktree — that is the documented contract. */
-  force?: boolean;
-  /** The RunStatus of every lane currently running for `slug`. Defaults to
-   *  reporting none: factoryd does not yet run a dispatch loop in-process, so
-   *  the loop story injects the real reader here. */
-  readLaneStatuses?: (slug: string) => Promise<RunStatus[]>;
-  /** Injectable clock/sleep so the poll is deterministic in tests. */
-  now?: () => number;
+/** Injectable seams — production callers pass nothing. */
+export interface DetachRepoDeps {
+  /** Reports the in-flight lane statuses for the checkout at `repoPath`. The
+   *  default reports none, so an unwired factoryd drains immediately; the
+   *  daemon engine story injects the real reader. Never writes, and never
+   *  touches the checkout's .factory/ directory. */
+  readLaneStatuses?: (repoPath: string) => Promise<readonly RunStatus[]>;
   sleep?: (ms: number) => Promise<void>;
-  /** Default 2_000. */
+  now?: () => number;
   pollIntervalMs?: number;
-  /** Default 1_800_000 (30 minutes). */
   drainTimeoutMs?: number;
+  /** Cooperative cancellation; the loop checks `.aborted` before each poll and
+   *  each sleep. */
+  signal?: { aborted: boolean };
 }
 
-const DEFAULT_POLL_INTERVAL_MS = 2_000;
-const DEFAULT_DRAIN_TIMEOUT_MS = 30 * 60 * 1_000;
-const noLanes = async (): Promise<RunStatus[]> => [];
-const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+export const DEFAULT_DRAIN_POLL_INTERVAL_MS = 5_000;
+export const DEFAULT_DRAIN_TIMEOUT_MS = 30 * 60_000;
 
-/** The detach gate: takes `slug` out of the dispatch set and, unless forced,
- *  waits for its in-flight lanes to reach a safe boundary before writing the
- *  `detached` tombstone. A slug absent from the registry is `unknown-repo`
- *  with no write; an already-`detached` slug is idempotent with no write.
- *  Neither path reads or writes anything under the target repo's own
- *  `.factory/` directory — the only file written is `registryFile`. */
-export async function detachRepo(
-  registryFile: string,
-  slug: string,
-  opts: DetachRepoOptions = {},
-): Promise<DetachRepoResult> {
+/** The synchronous half of a detach: takes `slug` out of the dispatch set at
+ *  once. An unknown slug is `unknown-repo` with no write; an already-detached
+ *  slug is idempotent with no write; otherwise writes `detached` (forced) or
+ *  `draining` (the default, awaiting drainAndDetach). */
+export async function beginDetach(registryFile: string, slug: string, force: boolean): Promise<BeginDetachResult> {
   const registry = await loadRegistry(registryFile);
   const existing = getRepo(registry, slug);
 
@@ -72,45 +67,45 @@ export async function detachRepo(
   }
 
   if (existing.state === 'detached') {
-    return { ok: true, entry: { slug, ...existing }, forced: false };
+    return { ok: true, entry: { slug, ...existing }, draining: false };
   }
 
-  if (opts.force === true) {
-    const entry = { ...existing, state: 'detached' as const };
-    await writeRegistry(registryFile, upsertRepo(registry, slug, entry));
-    return { ok: true, entry: { slug, ...entry }, forced: true };
-  }
+  const state = force ? ('detached' as const) : ('draining' as const);
+  const entry = { ...existing, state };
+  await writeRegistry(registryFile, upsertRepo(registry, slug, entry));
+  return { ok: true, entry: { slug, ...entry }, draining: !force };
+}
 
-  if (existing.state !== 'draining') {
-    const draining = { ...existing, state: 'draining' as const };
-    await writeRegistry(registryFile, upsertRepo(registry, slug, draining));
-  }
+/** The background half of a detach: polls `deps.readLaneStatuses` until the
+ *  in-flight lane clears a safe boundary, then writes the `detached`
+ *  tombstone. Re-reads the registry every pass so a racing force-detach or
+ *  re-attach safely supersedes the loop instead of being overwritten. */
+export async function drainAndDetach(
+  registryFile: string,
+  slug: string,
+  deps: DetachRepoDeps = {},
+): Promise<DrainOutcome> {
+  const read = deps.readLaneStatuses ?? (async () => []);
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const now = deps.now ?? Date.now;
+  const pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_DRAIN_POLL_INTERVAL_MS;
+  const drainTimeoutMs = deps.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS;
+  const deadline = now() + drainTimeoutMs;
 
-  const read = opts.readLaneStatuses ?? noLanes;
-  const now = opts.now ?? (() => Date.now());
-  const sleep = opts.sleep ?? realSleep;
-  const pollMs = opts.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
-  const timeoutMs = opts.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS;
-  const startedAt = now();
   for (;;) {
-    const inFlight = (await read(slug)).filter((s) => !isSafeDetachBoundary(s));
-    if (inFlight.length === 0) break;
-    if (now() - startedAt >= timeoutMs) {
-      return {
-        ok: false,
-        reason: 'drain-timeout',
-        detail:
-          `${slug} still has ${inFlight.length} in-flight lane(s) (${inFlight.join(', ')}) ` +
-          `after ${timeoutMs}ms; retry with ?force=true to detach without draining`,
-      };
+    if (deps.signal?.aborted === true) return 'aborted';
+
+    const registry = await loadRegistry(registryFile);
+    const entry = getRepo(registry, slug);
+    if (entry === undefined || entry.state !== 'draining') return 'superseded';
+
+    const statuses = await read(entry.path);
+    if (isDrainSafe(statuses)) {
+      await writeRegistry(registryFile, upsertRepo(registry, slug, { ...entry, state: 'detached' }));
+      return 'detached';
     }
-    await sleep(pollMs);
+
+    if (now() >= deadline) return 'timed-out';
+    await sleep(pollIntervalMs);
   }
-
-  const fresh = await loadRegistry(registryFile);
-  const current = getRepo(fresh, slug) ?? { ...existing, state: 'draining' as const };
-  const entry = { ...current, state: 'detached' as const };
-  await writeRegistry(registryFile, upsertRepo(fresh, slug, entry));
-
-  return { ok: true, entry: { slug, ...entry }, forced: false };
 }

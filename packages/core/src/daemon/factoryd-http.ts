@@ -3,14 +3,15 @@
 // GET /repos lists it (#777); POST /repos attaches a local checkout through the
 // attachRepo precondition gate (#778); POST /repos/<owner>/<name>/pause|resume
 // toggle an attached entry's state through setRepoState (#779); DELETE
-// /repos/<owner>/<name> drains and detaches through detachRepo, with
-// ?force=true skipping the wait (#780, epic #761). Binding to 127.0.0.1 IS the
-// authorization model; see the ADR shipped with this change.
+// /repos/<owner>/<name>[?force=true] begins a drain-based detach through
+// beginDetach + the background drainAndDetach loop (#780, epic #761). Binding
+// to 127.0.0.1 IS the authorization model; see the ADR shipped with this
+// change.
 
 import http from 'node:http';
 
 import { type AttachRepoDeps, attachRepo } from './repos-attach.js';
-import { type DetachRepoOptions, detachRepo } from './repos-detach.js';
+import { beginDetach, type DetachRepoDeps, drainAndDetach } from './repos-detach.js';
 import { setRepoState } from './repos-pause-resume.js';
 import { defaultRegistryPath, listRepos, loadRegistry, type RepoRegistryListing } from './registry.js';
 
@@ -32,8 +33,8 @@ export interface FactorydOptions {
   log?: (line: string) => void;
   /** Seams passed through to attachRepo for POST /repos. Test-only. */
   attachDeps?: AttachRepoDeps;
-  /** Seams passed through to detachRepo for DELETE /repos/<owner>/<name>. Test-only. */
-  detachDeps?: Omit<DetachRepoOptions, 'force'>;
+  /** Seams passed through to drainAndDetach for DELETE /repos/<owner>/<name>. Test-only. */
+  detachDeps?: DetachRepoDeps;
 }
 
 type ReadJsonBodyResult = { ok: true; value: unknown } | { ok: false; tooLarge: boolean };
@@ -107,6 +108,12 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
   const host = opts.host ?? '127.0.0.1';
   const log = opts.log ?? ((line: string) => console.log(line));
 
+  // Server-scoped drain bookkeeping: the signal lets stop() cooperatively
+  // abort every in-flight drainAndDetach loop, and pendingDrains is what
+  // stop() awaits so no poll timer outlives the server.
+  const drainSignal = { aborted: false };
+  const pendingDrains = new Set<Promise<unknown>>();
+
   function send(
     res: http.ServerResponse,
     req: http.IncomingMessage,
@@ -175,12 +182,21 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
         return;
       }
       const slug = `${segments[1]}/${segments[2]}`;
-      const result = await detachRepo(registryFile, slug, { ...opts.detachDeps, force: parseForce(req.url) });
+      const force = parseForce(req.url);
+      const result = await beginDetach(registryFile, slug, force);
       if (!result.ok) {
-        send(res, req, result.reason === 'unknown-repo' ? 404 : 409, { error: result.detail, reason: result.reason });
+        send(res, req, 404, { error: result.detail, reason: result.reason });
         return;
       }
-      send(res, req, 200, { repo: result.entry, forced: result.forced });
+      if (result.draining) {
+        const drain = drainAndDetach(registryFile, slug, { ...opts.detachDeps, signal: drainSignal })
+          .catch(() => undefined)
+          .finally(() => pendingDrains.delete(drain));
+        pendingDrains.add(drain);
+        send(res, req, 202, { repo: result.entry });
+        return;
+      }
+      send(res, req, 200, { repo: result.entry });
       return;
     }
 
@@ -218,8 +234,10 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
         server.listen({ port: desiredPort, host, exclusive: true });
       });
     },
-    stop(): Promise<void> {
-      return new Promise((resolvePromise) => {
+    async stop(): Promise<void> {
+      drainSignal.aborted = true;
+      await Promise.allSettled([...pendingDrains]);
+      await new Promise<void>((resolvePromise) => {
         server.closeAllConnections();
         server.close(() => resolvePromise());
       });

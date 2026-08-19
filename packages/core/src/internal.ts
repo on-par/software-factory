@@ -297,5 +297,12 @@ export type {
 } from './queue/project-board-status-writer.js';
 export { createProjectBoardStatusWriter } from './queue/project-board-status-writer.js';
 // Daemon detach gate (#780)
-export type { DetachFailureReason, DetachRepoOptions, DetachRepoResult } from './daemon/repos-detach.js';
-export { detachRepo, isSafeDetachBoundary, SAFE_DETACH_STATUSES } from './daemon/repos-detach.js';
+export type { BeginDetachResult, DetachRepoDeps, DrainOutcome } from './daemon/repos-detach.js';
+export {
+  beginDetach,
+  DEFAULT_DRAIN_POLL_INTERVAL_MS,
+  DEFAULT_DRAIN_TIMEOUT_MS,
+  DRAIN_BLOCKING_STATUSES,
+  drainAndDetach,
+  isDrainSafe,
+} from './daemon/repos-detach.js';
