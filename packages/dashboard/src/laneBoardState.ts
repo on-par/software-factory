@@ -1,4 +1,4 @@
-import type { LaneLifecycleEvent, LaneLifecyclePhase, LaneLifecycleStatus } from '@on-par/factory-core';
+import type { LaneLifecycleEvent, LaneLifecyclePhase, LaneLifecycleStatus } from '@on-par/contracts';
 
 export const BOARD_PHASES = ['plan', 'build', 'check', 'ship'] as const satisfies readonly LaneLifecyclePhase[];
 

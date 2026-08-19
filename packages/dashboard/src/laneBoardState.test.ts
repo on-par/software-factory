@@ -1,4 +1,4 @@
-import type { LaneLifecycleEvent, LaneLifecyclePhase, LaneLifecycleStatus } from '@on-par/factory-core';
+import type { LaneLifecycleEvent, LaneLifecyclePhase, LaneLifecycleStatus } from '@on-par/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { LOG_TAIL_LIMIT, emptyLaneBoard, laneChipLabel, reduceLaneEvent, type LaneCard } from './laneBoardState.js';
