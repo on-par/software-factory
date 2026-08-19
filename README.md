@@ -16,14 +16,14 @@ Honest snapshot of what works today vs. what is experimental. Statuses reflect t
 | Usage-cap watchdog (`factory usage`, stop-at-cap)     | ✅ Working      | Trailing-5h cost-weighted usage vs. cap (Claude models only); lanes stop at the cap                                                                                             |
 | Codex worker builds (`codex exec`)                    | ✅ Working      | Used for the `build_codex` route                                                                                                                                                |
 | Claude models via the Claude CLI (`claude -p`)        | ✅ Working      | TRIAGE always shells out to `claude -p`; PLAN routes through the boss tier (local models first, Claude as failover)                                                             |
-| Harness dispatch (per-model provider adapters)        | ✅ Working      | Each model declares a `harness` in `models.json`: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, `opencode`                                                        |
+| Harness dispatch (per-model provider adapters)        | ✅ Working      | Each model declares a `harness` in `defaults.ts`: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, `opencode`                                                        |
 | GPT worker models via the Codex CLI                   | ✅ Working      | `gpt-5.6-terra` (plan=high / build=medium) → `gpt-5.6-sol` → `gpt-5.1-codex`, dispatched through the `codex-cli` harness                                                        |
 | Local Ollama + OpenCode models                        | ⚠️ Experimental | Harnesses are contract-tested, but real-run behavior is unverified — expect failover to a cloud model                                                                           |
 | DeepSeek / gpt-4.1-mini via `claude --model ...`      | ⚠️ Experimental | The Claude CLI only serves Anthropic models; this wiring is unproven                                                                                                            |
 | Prompt evals (`npm run eval`)                         | ✅ Working      | Deterministic stub subset runs in CI on every PR; weekly real run checks prompt/constitution/skill regressions under pinned model IDs                                           |
 | Cost tracking (`factory cost`)                        | ✅ Working      | Per-task tokens and cost logged to `.factory/costs.jsonl`                                                                                                                       |
 | Constitutions + checker rework loop                   | ✅ Working      | Up to 3 rework rounds with dispute resolution                                                                                                                                   |
-| Server (`packages/server`)                            | 🚧 Stub         | Exports config types only; `createServer()` throws — Phase 2 of the roadmap                                                                                                     |
+| Server (`packages/server`)                            | ✅ Working      | Loopback `GET /events` relays the lane lifecycle bus as SSE, `Last-Event-ID` resume via a bounded replay ring — no auth, no control endpoints yet                               |
 
 ## Monorepo Structure
 
@@ -36,7 +36,7 @@ software-factory/
 │   ├── contracts/    @on-par/contracts        — Shared typed seam: Issue/Epic/Story/DesignArtifact schemas
 │   ├── adr-kit/      @on-par/adr-kit          — Pure ADR kernel: parse/serialize/template/numbering, zero deps
 │   ├── repo-context/ @on-par/repo-context     — Read-only repo reader port: GitHub contents-API + in-memory, zero deps
-│   └── server/       @on-par/factory-server   — SaaS server (stub — Phase 2 of roadmap)
+│   └── server/       @on-par/factory-server   — Local HTTP server: GET /events relays the lane lifecycle bus as SSE
 ├── tsconfig.base.json
 └── package.json      (npm workspaces root)
 ```
@@ -48,11 +48,11 @@ config      ←  core  ←  cli
 contracts   ←  core  ←  server
 ```
 
-- **@on-par/factory-config** — Zero dependencies. Ships `models.json`, `routes.json`, `factory.json`, and constitution markdown files.
+- **@on-par/factory-config** — Zero dependencies. Ships `defaults.ts` (typed model registry, route table, and factory defaults) and constitution markdown files.
 - **@on-par/contracts** — Zero dependencies besides zod. Zod schemas + inferred types for the engineering-ready Issue/Epic/Story, Gherkin AcceptanceCriterion, and DesignArtifact shapes PLAN emits and BUILD consumes.
 - **@on-par/factory-core** — The engine. Model registry, router with failover, constitution loader, checker framework, and the four pipeline phases (PLAN → BUILD → CHECK → SHIP). Imports config and contracts.
 - **@on-par/factory-cli** — The `factory` CLI. Imports core.
-- **@on-par/factory-server** — Future SaaS server. Imports core. Currently a stub.
+- **@on-par/factory-server** — Local HTTP server. `GET /events` relays the lane lifecycle bus as SSE, with `Last-Event-ID` resume via a bounded replay ring. Depends only on `@on-par/contracts` — no auth, loopback-only.
 - **@on-par/adr-kit** — Zero runtime dependencies. Pure, no-I/O ADR kernel: parses ADR markdown into a typed record, serializes it back byte-stably, models the repo's ADR convention (Nygard fallback, or inferred/reused when the repo already has ADRs), and provides next-number and index-table helpers. Not yet imported anywhere — the ADR reader, ADR writer, and readiness-conformance checker consume it in later stories of epic #464.
 - **@on-par/repo-context** — Zero runtime dependencies. Defines the `RepoContextReader` port (`readFile`, `readDir`, `exists`) that every repo-reading consumer shares, plus a GitHub contents-API implementation (for the proposer, which holds only a read-only token) and an in-memory implementation (for tests, and proof the port is backend-independent). Degrades to an empty result instead of throwing on a missing path, auth failure, or rate limit. Not yet imported anywhere — later stories of epic #464 wire it into the proposer and writer.
 
@@ -135,7 +135,7 @@ factory resume                      Resume after stop
 
 ## Model Routing
 
-Each task type maps to a tier, and each tier is a hand-ordered priority list in `models.json` — free local models first, then cloud models ranked by capability. The router takes the first available model in the list; when a model hits a usage limit, rate limit, or error, it automatically fails over to the next one. (`models.json` is the source of truth; the snapshot below can drift.)
+Each task type maps to a tier, and each tier is a hand-ordered priority list in `defaults.ts` — free local models first, then cloud models ranked by capability. The router takes the first available model in the list; when a model hits a usage limit, rate limit, or error, it automatically fails over to the next one. (`defaults.ts` is the source of truth; the snapshot below can drift.)
 
 | Tier    | Priority order (experimental models excluded)                                                                                              | Cloud cost $/M output | Use                     |
 | ------- | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------- | ----------------------- |
@@ -144,7 +144,7 @@ Each task type maps to a tier, and each tier is a hand-ordered priority list in 
 | checker | qwen3.5:9b → gemma4:12b → qwen2.5-coder:14b → qwen3:8b → claude-sonnet-5                                                                   | $15                   | Verification            |
 | triage  | qwen2.5-coder:14b → claude-sonnet-5                                                                                                        | $15                   | Issue triage            |
 
-Local Ollama models cost $0 and lead every tier. `FACTORY_LOCAL_ONLY=1` restricts routing to local models entirely. Experimental models (glm-5.2, deepseek-v3, qwen-3.5-coder, gpt-4.1-mini, opencode-sonnet) exist in `models.json` but are only routed when `FACTORY_EXPERIMENTAL=1`.
+Local Ollama models cost $0 and lead every tier. `FACTORY_LOCAL_ONLY=1` restricts routing to local models entirely. Experimental models (glm-5.2, deepseek-v3, qwen-3.5-coder, gpt-4.1-mini, opencode-sonnet) exist in `defaults.ts` but are only routed when `FACTORY_EXPERIMENTAL=1`.
 
 **Codex GPT phase profiles.** Whenever Codex GPT is the selected provider path (e.g. `providers.anthropic`/`providers.ollama` disabled, or an explicit pin), PLAN defaults to `gpt-5.6-terra-high` (`model_reasoning_effort=high`) and BUILD (`build_codex`) defaults to `gpt-5.6-terra-medium` (`model_reasoning_effort=medium`); the generic `gpt-5.6-sol` → `gpt-5.1-codex` profiles remain as failover. Override per repo with `.factory/config.json` (`models.plan` / `models.build`) or per run with `FACTORY_PLAN_MODEL` / `FACTORY_BUILD_MODEL`; the repo file wins over env.
 
@@ -196,7 +196,7 @@ runs are an explicit human opt-in outside the factory, or
 
 **What's OSS (this repo):** `packages/cli`, `packages/core`, and `packages/config` are the open-source core — the full local pipeline (router, constitutions, checkers, phases) runs from this repo alone, MIT-licensed.
 
-**What isn't:** the hosted control plane (web dashboard, multi-tenant orchestration) lives in a separate repo and is not part of this codebase. `packages/server` here is a stub that reserves the integration point — it exports config types and a `createServer()` that throws.
+**What isn't:** the hosted control plane (web dashboard, multi-tenant orchestration) lives in a separate repo and is not part of this codebase. `packages/server` here is a real, narrow local server — its only route is `GET /events`, an SSE relay of the lane lifecycle bus, unauthenticated and loopback-only.
 
 **Safety note:** to run unattended, the factory invokes agent CLIs with permission checks disabled — `claude -p ... --dangerously-skip-permissions` and `codex exec --sandbox workspace-write --ask-for-approval never`. Every build runs inside an isolated git worktree (created as a sibling of your repo under the `ship-it/` branch prefix), never in your main checkout. The factory defaults to review mode: pipelines end at a green, ready-for-review PR and merging stays with you unless you explicitly opt in with `FACTORY_MERGE=1`. Admin bypass is separate: set `FACTORY_MERGE_ADMIN=1` only when the active GitHub token should use administrator privileges to merge through unmet requirements. Only run the factory against repos where you accept agent-authored code executing in that worktree (builds run tests, install dependencies, etc.).
 

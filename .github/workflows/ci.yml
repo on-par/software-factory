@@ -34,6 +34,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Config JSON guard
+        run: bash scripts/check-config-json.sh
+
       - name: Typecheck
         run: npm run typecheck
 

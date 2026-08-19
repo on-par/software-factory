@@ -23,6 +23,7 @@ done
 npm ci
 npm run format:check
 npm run build
+bash scripts/check-config-json.sh
 npm run typecheck
 npm run lint
 npm run knip

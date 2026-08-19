@@ -1,4 +1,4 @@
-# ADR-0031: factoryd's HTTP API is authorized by its loopback binding alone
+# ADR-0034: factoryd's HTTP API is authorized by its loopback binding alone
 
 - Status: Accepted
 - Date: 2026-08-19

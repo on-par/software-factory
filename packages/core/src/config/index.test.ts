@@ -87,7 +87,7 @@ describe('loadModelsConfig', () => {
     }
   });
 
-  it('parses the shipped models.json without throwing', () => {
+  it('parses the shipped model defaults without throwing', () => {
     expect(() => loadModelsConfig()).not.toThrow();
   });
 
@@ -206,7 +206,7 @@ describe('loadModelsConfig', () => {
 });
 
 describe('loadFactoryConfig', () => {
-  it('parses the shipped factory.json without throwing', () => {
+  it('parses the shipped factory defaults without throwing', () => {
     expect(() => loadFactoryConfig()).not.toThrow();
   });
 
@@ -495,7 +495,7 @@ describe('loadRoutesConfig', () => {
     }
   });
 
-  it('parses the shipped routes.json without throwing', () => {
+  it('parses the shipped route defaults without throwing', () => {
     expect(() => loadRoutesConfig()).not.toThrow();
   });
 
