@@ -65,7 +65,6 @@ describe('loadRegistry', () => {
     expect(registry).toEqual(emptyRegistry());
   });
 
-  it('daemon registry drops malformed entries while keeping well-formed siblings', async () => {
   it('retains an entry with state draining', async () => {
     const file = await tmpFile();
     await writeFile(
@@ -79,7 +78,7 @@ describe('loadRegistry', () => {
     expect(registry.repos['on-par/software-factory']).toEqual({ ...goodEntry, state: 'draining' });
   });
 
-  it('drops malformed entries while keeping well-formed siblings', async () => {
+  it('daemon registry drops malformed entries while keeping well-formed siblings', async () => {
     const file = await tmpFile();
     await writeFile(
       file,
