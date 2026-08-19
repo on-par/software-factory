@@ -297,6 +297,14 @@ const INTERNAL_API_KEYS = [
   'priceFor',
   'TRAILING_WINDOW_MS',
   'readClaudeAccessToken',
+  // Daemon repo registry (#781)
+  'defaultRegistryPath',
+  'emptyRegistry',
+  'getRepo',
+  'listRepos',
+  'loadRegistry',
+  'upsertRepo',
+  'writeRegistry',
   // Utils
   'branchFor',
   'branchPrefixSlug',
