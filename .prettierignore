@@ -7,3 +7,4 @@ package-lock.json
 *.tsbuildinfo
 evals/
 packages/dashboard/src/index.css
+.claude/skills/architecture-map/

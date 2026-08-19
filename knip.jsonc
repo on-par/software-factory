@@ -3,6 +3,9 @@
   // Exports referenced within their own module are internal helpers, not
   // dead code — don't force export-keyword churn on them (#143).
   "ignoreExportsUsedInFile": true,
+  // Vendored third-party skill (see .claude/skills/architecture-map/PROVENANCE.md);
+  // its assets are templates the skill copies into a target package on demand.
+  "ignore": [".claude/skills/architecture-map/**"],
   "workspaces": {
     "packages/cli": {
       // `ollama` is an external runtime binary the CLI shells out to;
