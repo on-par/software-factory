@@ -190,7 +190,10 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
       }
       if (result.draining) {
         const drain = drainAndDetach(registryFile, slug, { ...opts.detachDeps, signal: drainSignal })
-          .catch(() => undefined)
+          .catch((err: unknown) => {
+            log(`drain failed for ${slug}: ${err instanceof Error ? err.message : String(err)}`);
+            return undefined;
+          })
           .finally(() => pendingDrains.delete(drain));
         pendingDrains.add(drain);
         send(res, req, 202, { repo: result.entry });
