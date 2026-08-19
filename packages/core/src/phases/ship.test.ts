@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createLifecycleBus } from '../bus/index.js';
 import { specPaths } from '../spec/index.js';
-import { shipPhase } from './ship.js';
+import { findMergedPR, findOpenPR, shipPhase } from './ship.js';
 
 function createOctokit(prDraft = true) {
   const calls: any[] = [];
@@ -470,7 +470,7 @@ describe('shipPhase self-healing', () => {
     expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
   });
 
-  it('falls through to pulls.create when findOpenPR throws', async () => {
+  it('fails closed without creating a PR when the open-PR lookup errors', async () => {
     const { octokit, calls } = createOctokit();
     octokit.rest.pulls.list = async (args: any) => {
       calls.push(['pulls.list', args]);
@@ -498,8 +498,16 @@ describe('shipPhase self-healing', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: true, prNumber: 123 });
-    expect(calls).toContainEqual(['pulls.create', expect.anything()]);
+    expect(result).toEqual({ ok: false });
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
+    expect(
+      logs.some(
+        ([type, msg]) =>
+          type === 'ship' &&
+          msg.includes('could not determine whether an open PR exists') &&
+          msg.includes('list failed'),
+      ),
+    ).toBe(true);
   });
 
   it('builds the PR body with an empty diff stat when computeDiffStat throws', async () => {
@@ -2031,6 +2039,267 @@ describe('shipPhase duplicate-PR guard (#520)', () => {
     expect(result).toEqual({ ok: true, prNumber: 123 });
     expect(calls).toContainEqual(['pulls.create', expect.anything()]);
     expect(logs).toContainEqual(['ship', expect.stringContaining('git fetch origin main failed')]);
+  });
+});
+
+describe('findOpenPR / findMergedPR (#641)', () => {
+  it('findOpenPR: found', async () => {
+    const { octokit } = createOctokit();
+    octokit.rest.pulls.list = (async () => ({ data: [{ number: 7 }] })) as any;
+    const result = await findOpenPR(octokit as any, 'on-par', 'software-factory', 'ship-it/23-x');
+    expect(result).toEqual({ status: 'found', prNumber: 7 });
+  });
+
+  it('findOpenPR: absent', async () => {
+    const { octokit } = createOctokit();
+    octokit.rest.pulls.list = async () => ({ data: [] });
+    const result = await findOpenPR(octokit as any, 'on-par', 'software-factory', 'ship-it/23-x');
+    expect(result).toEqual({ status: 'absent' });
+  });
+
+  it('findOpenPR: error is never reported as absent', async () => {
+    const { octokit } = createOctokit();
+    octokit.rest.pulls.list = async () => {
+      throw new Error('boom');
+    };
+    const result = await findOpenPR(octokit as any, 'on-par', 'software-factory', 'ship-it/23-x');
+    expect(result).toEqual({ status: 'error', detail: expect.stringContaining('boom') });
+    expect(result).not.toEqual({ status: 'absent' });
+  });
+
+  it('findMergedPR: found', async () => {
+    const { octokit } = createOctokit();
+    octokit.rest.pulls.list = (async () => ({ data: [{ number: 9, merged_at: '2026-08-01T00:00:00Z' }] })) as any;
+    const result = await findMergedPR(octokit as any, 'on-par', 'software-factory', 'ship-it/23-x');
+    expect(result).toEqual({ status: 'found', prNumber: 9 });
+  });
+
+  it('findMergedPR: absent (closed but not merged)', async () => {
+    const { octokit } = createOctokit();
+    octokit.rest.pulls.list = (async () => ({ data: [{ number: 9, merged_at: null }] })) as any;
+    const result = await findMergedPR(octokit as any, 'on-par', 'software-factory', 'ship-it/23-x');
+    expect(result).toEqual({ status: 'absent' });
+  });
+
+  it('findMergedPR: error', async () => {
+    const { octokit } = createOctokit();
+    octokit.rest.pulls.list = async () => {
+      throw new Error('boom');
+    };
+    const result = await findMergedPR(octokit as any, 'on-par', 'software-factory', 'ship-it/23-x');
+    expect(result).toEqual({ status: 'error', detail: expect.stringContaining('boom') });
+  });
+});
+
+describe('shipPhase ambiguous-lookup fail-closed (#641)', () => {
+  it('fails closed when the merged-PR lookup errors and git has not proven the branch landed', async () => {
+    const { octokit, calls } = createOctokit();
+    let listCalls = 0;
+    octokit.rest.pulls.list = async (args: any) => {
+      calls.push(['pulls.list', args]);
+      listCalls++;
+      if (listCalls === 1) return { data: [] };
+      throw new Error('list failed');
+    };
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '0\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(
+      logs.some(([type, msg]) => type === 'ship' && msg.includes('could not determine whether it was already merged')),
+    ).toBe(true);
+  });
+
+  it('a proven-landed tree overrides a merged-PR lookup error', async () => {
+    const { octokit, calls } = createOctokit();
+    let listCalls = 0;
+    octokit.rest.pulls.list = async (args: any) => {
+      calls.push(['pulls.list', args]);
+      listCalls++;
+      if (listCalls === 1) return { data: [] };
+      throw new Error('list failed');
+    };
+    const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '0\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') return { stdout: '' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: () => {},
+      run,
+    });
+
+    expect(result).toEqual({ ok: true, alreadyDelivered: true });
+    expect(result.prNumber).toBeUndefined();
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
+  });
+});
+
+describe('shipPhase pulls.create 422 already-exists recovery (#641)', () => {
+  it('re-queries and reuses the existing PR when pulls.create 422s as already-exists', async () => {
+    const { octokit, calls } = createOctokit();
+    let listCalls = 0;
+    octokit.rest.pulls.list = (async (args: any) => {
+      calls.push(['pulls.list', args]);
+      listCalls++;
+      return listCalls === 1 ? { data: [] } : { data: [{ number: 456 }] };
+    }) as any;
+    octokit.rest.pulls.create = async (args: any) => {
+      calls.push(['pulls.create', args]);
+      throw Object.assign(new Error('Validation Failed'), {
+        status: 422,
+        response: { data: { errors: [{ message: 'A pull request already exists for on-par:ship-it/23-x.' }] } },
+      });
+    };
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 3 +++\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 456 });
+    expect(logs.some(([type, msg]) => type === 'recovered' && msg.includes('already existed for'))).toBe(true);
+  });
+
+  it('propagates a non-422 pulls.create rejection unchanged', async () => {
+    const { octokit } = createOctokit();
+    octokit.rest.pulls.create = async () => {
+      throw Object.assign(new Error('Internal Server Error'), { status: 500 });
+    };
+    const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 3 +++\n' };
+      return { stdout: '' };
+    };
+
+    await expect(
+      shipPhase({
+        issue: 23,
+        repo: 'on-par/software-factory',
+        worktree: '/repo-factory-23',
+        branch: 'ship-it/23-self-heal',
+        octokit: octokit as any,
+        watchCI: false,
+        log: () => {},
+        run,
+      }),
+    ).rejects.toThrow('Internal Server Error');
+  });
+
+  it('propagates a 422 whose message is not an already-exists case', async () => {
+    const { octokit } = createOctokit();
+    octokit.rest.pulls.create = async () => {
+      throw Object.assign(new Error('No commits between main and ship-it/23-x'), { status: 422 });
+    };
+    const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 3 +++\n' };
+      return { stdout: '' };
+    };
+
+    await expect(
+      shipPhase({
+        issue: 23,
+        repo: 'on-par/software-factory',
+        worktree: '/repo-factory-23',
+        branch: 'ship-it/23-self-heal',
+        octokit: octokit as any,
+        watchCI: false,
+        log: () => {},
+        run,
+      }),
+    ).rejects.toThrow('No commits between main and ship-it/23-x');
+  });
+
+  it('fails closed when re-querying after a 422 already-exists finds nothing', async () => {
+    const { octokit, calls } = createOctokit();
+    octokit.rest.pulls.list = async (args: any) => {
+      calls.push(['pulls.list', args]);
+      return { data: [] };
+    };
+    octokit.rest.pulls.create = async (args: any) => {
+      calls.push(['pulls.create', args]);
+      throw Object.assign(new Error('Validation Failed'), {
+        status: 422,
+        response: { data: { errors: [{ message: 'A pull request already exists for on-par:ship-it/23-x.' }] } },
+      });
+    };
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 3 +++\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(logs.some(([type, msg]) => type === 'ship' && msg.includes('re-querying did not find it'))).toBe(true);
   });
 });
 

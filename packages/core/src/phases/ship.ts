@@ -106,7 +106,15 @@ async function shipPhaseImpl(opts: {
   }
 
   // Check if a PR already exists (claude route may have created one)
-  let prNumber = await findOpenPR(octokit, owner, repoName, branch);
+  const openLookup = await findOpenPR(octokit, owner, repoName, branch);
+  if (openLookup.status === 'error') {
+    log(
+      'ship',
+      `could not determine whether an open PR exists for ${branch} (${openLookup.detail}) — aborting before PR creation`,
+    );
+    return { ok: false };
+  }
+  let prNumber: number | undefined = openLookup.status === 'found' ? openLookup.prNumber : undefined;
 
   // The ADR commit exists in this branch's local history, so a push that does not reach the
   // remote leaves the open PR misrepresenting the branch and merges the recorded decision
@@ -136,7 +144,15 @@ async function shipPhaseImpl(opts: {
     if (recoveryState.landed || !recoveryState.ahead) {
       // The branch's content is already on main: identical trees (squash merge) or an
       // empty ahead-count (merge commit / fast-forward). That is delivery, not recovery.
-      const mergedPr = await findMergedPR(octokit, owner, repoName, branch);
+      const mergedLookup = await findMergedPR(octokit, owner, repoName, branch);
+      if (mergedLookup.status === 'error' && !recoveryState.landed) {
+        log(
+          'ship',
+          `not recovering ${branch}: could not determine whether it was already merged (${mergedLookup.detail})`,
+        );
+        return { ok: false };
+      }
+      const mergedPr = mergedLookup.status === 'found' ? mergedLookup.prNumber : undefined;
       if (mergedPr !== undefined || recoveryState.landed) {
         log(
           'ship',
@@ -195,13 +211,14 @@ async function shipPhaseImpl(opts: {
       : `Implements #${issue}. Built by the Software Factory (PLAN → BUILD → CHECK → SHIP).`;
 
     // Create PR
-    const { data: pr } = await octokit.rest.pulls.create({
-      owner,
-      repo: repoName,
-      head: branch,
-      base: 'main',
-      title: inlineWork ? title : `${title} (#${issue})`,
-      body: `## Summary
+    try {
+      const { data: pr } = await octokit.rest.pulls.create({
+        owner,
+        repo: repoName,
+        head: branch,
+        base: 'main',
+        title: inlineWork ? title : `${title} (#${issue})`,
+        body: `## Summary
 ${summaryLine}
 
 ## Changes
@@ -211,10 +228,23 @@ ${stat}
 
 ## Verification
 This PR passed independent verification by checker agents before shipping.${inlineWork ? '' : `\n\nCloses #${issue}`}`,
-    });
+      });
 
-    prNumber = pr.number;
-    log('recovered', `opened PR #${prNumber} for committed work on ${branch}`);
+      prNumber = pr.number;
+      log('recovered', `opened PR #${prNumber} for committed work on ${branch}`);
+    } catch (err) {
+      if (!isPullAlreadyExistsError(err)) throw err;
+      const existing = await findOpenPR(octokit, owner, repoName, branch);
+      if (existing.status !== 'found') {
+        log(
+          'ship',
+          `pulls.create reported an existing PR for ${branch} but re-querying did not find it (${existing.status === 'error' ? existing.detail : 'no open PR listed'}) — aborting`,
+        );
+        return { ok: false };
+      }
+      prNumber = existing.prNumber;
+      log('recovered', `PR #${prNumber} already existed for ${branch}; reusing it`);
+    }
   }
 
   if (!prNumber) {
@@ -276,7 +306,7 @@ async function computeDiffStat(run: CommandRunner, worktree: string): Promise<st
   }
 }
 
-async function findOpenPR(octokit: Octokit, owner: string, repo: string, branch: string): Promise<number | undefined> {
+export async function findOpenPR(octokit: Octokit, owner: string, repo: string, branch: string): Promise<PrLookup> {
   try {
     const { data: prs } = await octokit.rest.pulls.list({
       owner,
@@ -284,18 +314,14 @@ async function findOpenPR(octokit: Octokit, owner: string, repo: string, branch:
       state: 'open',
       head: `${owner}:${branch}`,
     });
-    return prs[0]?.number;
-  } catch {
-    return undefined;
+    const prNumber = prs[0]?.number;
+    return prNumber === undefined ? { status: 'absent' } : { status: 'found', prNumber };
+  } catch (err) {
+    return { status: 'error', detail: shortDetail(err) };
   }
 }
 
-async function findMergedPR(
-  octokit: Octokit,
-  owner: string,
-  repo: string,
-  branch: string,
-): Promise<number | undefined> {
+export async function findMergedPR(octokit: Octokit, owner: string, repo: string, branch: string): Promise<PrLookup> {
   try {
     const { data: prs } = await octokit.rest.pulls.list({
       owner,
@@ -303,10 +329,24 @@ async function findMergedPR(
       state: 'closed',
       head: `${owner}:${branch}`,
     });
-    return prs.find((pr) => pr.merged_at != null)?.number;
-  } catch {
-    return undefined;
+    const prNumber = prs.find((pr) => pr.merged_at != null)?.number;
+    return prNumber === undefined ? { status: 'absent' } : { status: 'found', prNumber };
+  } catch (err) {
+    return { status: 'error', detail: shortDetail(err) };
   }
+}
+
+/** A `pulls.create` 422 whose message says the PR already exists — recoverable by re-querying,
+ *  unlike every other 422 (e.g. "No commits between ..."), which still propagates (#641). */
+function isPullAlreadyExistsError(err: unknown): boolean {
+  const e = err as {
+    status?: number;
+    message?: string;
+    response?: { data?: { errors?: Array<{ message?: string }> } };
+  } | null;
+  if (e?.status !== 422) return false;
+  const messages = [e.message ?? '', ...(e.response?.data?.errors ?? []).map((x) => x?.message ?? '')];
+  return messages.some((m) => /already exists/i.test(m));
 }
 
 async function inspectRecoveryState(
@@ -491,6 +531,12 @@ type RemoteHeadCheck =
   | { status: 'match'; localSha: string; remoteSha: string }
   | { status: 'mismatch'; localSha: string; remoteSha: string }
   | { status: 'unreadable'; localSha?: string; remoteSha?: string; detail: string };
+
+/** The result of asking GitHub whether a PR exists for a branch. `error` is never collapsed
+ *  into `absent` — an unanswered lookup makes ship fail closed rather than open a duplicate
+ *  PR (#641). */
+export type PrLookup =
+  { status: 'found'; prNumber: number } | { status: 'absent' } | { status: 'error'; detail: string };
 
 /** Same flatten-and-bound shaping as {@link describePushFailure}, kept separate so that
  *  function's asserted output never changes. */

@@ -7,7 +7,7 @@ import { userInfo } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
-import { Octokit } from '@octokit/rest';
+import type { Octokit } from '@octokit/rest';
 import type {
   BenchmarkRunFailure,
   CheckSummary,
@@ -178,6 +178,7 @@ import {
 } from './doctor.js';
 import { formatOverview, missingClaudeCliMessage, missingTokenMessage, notInitializedMessage } from './first-run.js';
 import { cmdLogs } from './logs.js';
+import { createFactoryOctokit } from './octokit.js';
 import { distFreshnessProbe, runStalenessGuard } from './staleness.js';
 
 const exec = promisify(execCb);
@@ -218,7 +219,7 @@ function getOctokit(): Octokit {
       token = out.trim() || undefined;
     } catch {}
   }
-  return new Octokit({ auth: token });
+  return createFactoryOctokit(token);
 }
 
 export function errorDetail(err: unknown): string {
