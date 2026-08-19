@@ -79,9 +79,9 @@ vi.mock('node:child_process', () => {
 });
 
 vi.mock('@octokit/rest', () => {
-  const Octokit: any = vi.fn(function () {
+  const Octokit = vi.fn(function () {
     return h.octokit;
-  });
+  }) as unknown as { new (): unknown; plugin: () => unknown };
   // createFactoryOctokit (packages/cli/src/cli/octokit.ts) calls Octokit.plugin(...) at module
   // load time to attach retry/throttling — the mocked constructor must expose it too.
   Octokit.plugin = () => Octokit;
