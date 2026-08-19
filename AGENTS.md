@@ -17,8 +17,8 @@ software-factory/
 │   │                                        types for Issue/Epic/Story/DesignArtifact.
 │   ├── repo-context/ @on-par/repo-context  — Read-only repo reader port: GitHub
 │   │                                        contents-API and in-memory impls, zero deps.
-│   ├── config/   @on-par/factory-config  — Zero-dep. Ships models.json, routes.json,
-│   │                                        factory.json, and constitution markdown.
+│   ├── config/   @on-par/factory-config  — Zero-dep. Ships typed defaults (defaults.ts)
+│   │                                        and constitution markdown. No JSON.
 │   ├── core/     @on-par/factory-core     — The engine (imports config).
 │   ├── cli/      @on-par/factory-cli       — The `factory` CLI (imports core).
 │   ├── dashboard/ @on-par/factory-dashboard — Vite + React + Tailwind dashboard (walking skeleton, private).
@@ -42,7 +42,7 @@ readiness-conformance checker named in epic #464 consume them in later stories.
 ### What lives in `packages/core/src`
 
 - `router/` — `ModelRouter` failover state machine + CLI executor
-- `models/` — `ModelRegistry` (reads `models.json`)
+- `models/` — `ModelRegistry` (reads the model registry from `@on-par/factory-config`)
 - `harness/` — provider adapters: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, `opencode`, plus a `stub` and a contract test suite
 - `phases/` — the four pipeline phases (`plan`, `build`, `check`, `ship`) plus integration tests (`pipeline.integration.test.ts`, `pipeline.concurrent.integration.test.ts`). The `*.integration.test.ts` files are excluded from the default vitest run and from the required `ci` check; run them with `npm run test:integration` (they also run nightly).
 - `checkers/` — the checker framework (compile/tests/lint/links/accessibility + agent-based custom checkers)
@@ -83,7 +83,7 @@ Run from the repo root unless noted. Node.js **≥ 20** required.
 - **Runtime:** Node.js ≥ 20 (`engines.node: ">=20.0.0"`).
 - **Monorepo:** npm workspaces (`packages/*`) with TypeScript composite project references (`tsc -b`). Cross-package imports use the published names (`@on-par/factory-core`, `@on-par/factory-config`), not relative paths across package boundaries.
 - **Dependencies:** keep `config` zero-dependency. Core depends on `execa`, `@octokit/rest`, `gray-matter`, `zod`.
-- **Config as source of truth:** model routing lives in `packages/config/src/models.json` + `routes.json`; do not hard-code model lists in `core`.
+- **Config as source of truth:** model routing lives in `packages/config/src/defaults.ts`; do not hard-code model lists in `core`.
 - **`core`'s root export is the narrow public API** — implementation details live behind `@on-par/factory-core/internal`, test helpers behind `@on-par/factory-core/testing` (ADR-0004).
 - **The `server` package is a stub** — do not build features on it; `createServer()` intentionally throws.
 - **Lint:** Oxlint with the TS 7-native `oxlint-tsgolint` type-aware backend. Configuration lives in `.oxlintrc.json`; run `npm run lint`, which denies warnings.

@@ -1,7 +1,8 @@
 // packages/config/src/index.ts — Config package: resolve paths to shared config files
 //
-// Other packages import `resolveConfigPath` to find the JSON configs and
-// constitution markdown files shipped by this package.
+// Other packages import `resolveConfigPath` to find the constitution markdown
+// files shipped by this package, and the default config objects from
+// ./defaults.ts.
 
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,7 +23,4 @@ export function resolveConfigPath(filename: string): string {
 /** Directory containing constitution markdown files */
 export const constitutionsDir = resolveConfigPath('constitutions');
 
-/** Re-export the raw JSON for direct import if needed */
-export { default as factoryConfig } from './factory.json' with { type: 'json' };
-export { default as modelsConfig } from './models.json' with { type: 'json' };
-export { default as routesConfig } from './routes.json' with { type: 'json' };
+export { defaultFactoryConfig, defaultModelsConfig, defaultRoutesConfig } from './defaults.js';

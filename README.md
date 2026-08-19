@@ -16,7 +16,7 @@ Honest snapshot of what works today vs. what is experimental. Statuses reflect t
 | Usage-cap watchdog (`factory usage`, stop-at-cap)     | ✅ Working      | Trailing-5h cost-weighted usage vs. cap (Claude models only); lanes stop at the cap                                                                                             |
 | Codex worker builds (`codex exec`)                    | ✅ Working      | Used for the `build_codex` route                                                                                                                                                |
 | Claude models via the Claude CLI (`claude -p`)        | ✅ Working      | TRIAGE always shells out to `claude -p`; PLAN routes through the boss tier (local models first, Claude as failover)                                                             |
-| Harness dispatch (per-model provider adapters)        | ✅ Working      | Each model declares a `harness` in `models.json`: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, `opencode`                                                        |
+| Harness dispatch (per-model provider adapters)        | ✅ Working      | Each model declares a `harness` in `defaults.ts`: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, `opencode`                                                        |
 | GPT worker models via the Codex CLI                   | ✅ Working      | `gpt-5.6-terra` (plan=high / build=medium) → `gpt-5.6-sol` → `gpt-5.1-codex`, dispatched through the `codex-cli` harness                                                        |
 | Local Ollama + OpenCode models                        | ⚠️ Experimental | Harnesses are contract-tested, but real-run behavior is unverified — expect failover to a cloud model                                                                           |
 | DeepSeek / gpt-4.1-mini via `claude --model ...`      | ⚠️ Experimental | The Claude CLI only serves Anthropic models; this wiring is unproven                                                                                                            |
@@ -48,7 +48,7 @@ config      ←  core  ←  cli
 contracts   ←  core  ←  server
 ```
 
-- **@on-par/factory-config** — Zero dependencies. Ships `models.json`, `routes.json`, `factory.json`, and constitution markdown files.
+- **@on-par/factory-config** — Zero dependencies. Ships `defaults.ts` (typed model registry, route table, and factory defaults) and constitution markdown files.
 - **@on-par/contracts** — Zero dependencies besides zod. Zod schemas + inferred types for the engineering-ready Issue/Epic/Story, Gherkin AcceptanceCriterion, and DesignArtifact shapes PLAN emits and BUILD consumes.
 - **@on-par/factory-core** — The engine. Model registry, router with failover, constitution loader, checker framework, and the four pipeline phases (PLAN → BUILD → CHECK → SHIP). Imports config and contracts.
 - **@on-par/factory-cli** — The `factory` CLI. Imports core.
@@ -135,7 +135,7 @@ factory resume                      Resume after stop
 
 ## Model Routing
 
-Each task type maps to a tier, and each tier is a hand-ordered priority list in `models.json` — free local models first, then cloud models ranked by capability. The router takes the first available model in the list; when a model hits a usage limit, rate limit, or error, it automatically fails over to the next one. (`models.json` is the source of truth; the snapshot below can drift.)
+Each task type maps to a tier, and each tier is a hand-ordered priority list in `defaults.ts` — free local models first, then cloud models ranked by capability. The router takes the first available model in the list; when a model hits a usage limit, rate limit, or error, it automatically fails over to the next one. (`defaults.ts` is the source of truth; the snapshot below can drift.)
 
 | Tier    | Priority order (experimental models excluded)                                                                                              | Cloud cost $/M output | Use                     |
 | ------- | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------- | ----------------------- |
@@ -144,7 +144,7 @@ Each task type maps to a tier, and each tier is a hand-ordered priority list in 
 | checker | qwen3.5:9b → gemma4:12b → qwen2.5-coder:14b → qwen3:8b → claude-sonnet-5                                                                   | $15                   | Verification            |
 | triage  | qwen2.5-coder:14b → claude-sonnet-5                                                                                                        | $15                   | Issue triage            |
 
-Local Ollama models cost $0 and lead every tier. `FACTORY_LOCAL_ONLY=1` restricts routing to local models entirely. Experimental models (glm-5.2, deepseek-v3, qwen-3.5-coder, gpt-4.1-mini, opencode-sonnet) exist in `models.json` but are only routed when `FACTORY_EXPERIMENTAL=1`.
+Local Ollama models cost $0 and lead every tier. `FACTORY_LOCAL_ONLY=1` restricts routing to local models entirely. Experimental models (glm-5.2, deepseek-v3, qwen-3.5-coder, gpt-4.1-mini, opencode-sonnet) exist in `defaults.ts` but are only routed when `FACTORY_EXPERIMENTAL=1`.
 
 **Codex GPT phase profiles.** Whenever Codex GPT is the selected provider path (e.g. `providers.anthropic`/`providers.ollama` disabled, or an explicit pin), PLAN defaults to `gpt-5.6-terra-high` (`model_reasoning_effort=high`) and BUILD (`build_codex`) defaults to `gpt-5.6-terra-medium` (`model_reasoning_effort=medium`); the generic `gpt-5.6-sol` → `gpt-5.1-codex` profiles remain as failover. Override per repo with `.factory/config.json` (`models.plan` / `models.build`) or per run with `FACTORY_PLAN_MODEL` / `FACTORY_BUILD_MODEL`; the repo file wins over env.
 

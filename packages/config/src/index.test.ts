@@ -6,10 +6,10 @@ import { constitutionsDir, resolveConfigPath } from './index.js';
 
 describe('config paths', () => {
   it('resolves shared config paths', () => {
-    const modelsPath = resolveConfigPath('models.json');
+    const constitutionsPath = resolveConfigPath('constitutions');
 
-    expect(isAbsolute(modelsPath)).toBe(true);
-    expect(modelsPath.endsWith('models.json')).toBe(true);
+    expect(isAbsolute(constitutionsPath)).toBe(true);
+    expect(constitutionsPath.endsWith('constitutions')).toBe(true);
     expect(constitutionsDir.endsWith('constitutions')).toBe(true);
   });
 });
