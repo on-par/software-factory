@@ -115,6 +115,7 @@ export type EventKind =
   | 'ship'
   | 'ship_denied'
   | 'skip-ci'
+  | 'skipped-already-closed'
   | 'size-gate-escalated'
   | 'steering_applied'
   | 'steering_unconsumed'
@@ -262,6 +263,9 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   ship: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
   ship_denied: { severity: 'error', isPark: false, isTerminal: true, laneStatus: 'failed' },
   'skip-ci': { severity: 'info', isPark: false, isTerminal: false },
+  // The target issue was already closed when the run started — no work was
+  // attempted, so this is a clean terminal outcome, never a park (#681).
+  'skipped-already-closed': { severity: 'info', isPark: false, isTerminal: true },
   'size-gate-escalated': { severity: 'warn', isPark: false, isTerminal: false },
   steering_applied: { severity: 'info', isPark: false, isTerminal: false },
   steering_unconsumed: { severity: 'info', isPark: false, isTerminal: false },

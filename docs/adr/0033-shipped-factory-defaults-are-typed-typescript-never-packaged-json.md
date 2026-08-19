@@ -1,4 +1,4 @@
-# ADR-0031: Shipped factory defaults are typed TypeScript, never packaged JSON
+# ADR-0033: Shipped factory defaults are typed TypeScript, never packaged JSON
 
 - Status: Accepted
 - Date: 2026-08-19

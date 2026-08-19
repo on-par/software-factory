@@ -164,3 +164,21 @@ export {
   sweepWorktrees,
   zeroFill,
 } from './utils/worktree-gc.js';
+
+// Daemon repo registry (~/.factory/registry.json) (#781)
+export type {
+  RepoRegistry,
+  RepoRegistryEntry,
+  RepoRegistryListing,
+  RepoState,
+  WriteRegistryOptions,
+} from './daemon/registry.js';
+export {
+  defaultRegistryPath,
+  emptyRegistry,
+  getRepo,
+  listRepos,
+  loadRegistry,
+  upsertRepo,
+  writeRegistry,
+} from './daemon/registry.js';

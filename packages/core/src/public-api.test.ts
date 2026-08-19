@@ -69,6 +69,7 @@ const PUBLIC_API_KEYS = [
   'readQueue',
   'validateQueue',
   // Work requests
+  'closedWorkSkipReason',
   'createDefaultWorkSourceRegistry',
   'createFsBriefReader',
   'createGithubIssueAdapter',
@@ -296,6 +297,14 @@ const INTERNAL_API_KEYS = [
   'priceFor',
   'TRAILING_WINDOW_MS',
   'readClaudeAccessToken',
+  // Daemon repo registry (#781)
+  'defaultRegistryPath',
+  'emptyRegistry',
+  'getRepo',
+  'listRepos',
+  'loadRegistry',
+  'upsertRepo',
+  'writeRegistry',
   // Utils
   'branchFor',
   'branchPrefixSlug',
