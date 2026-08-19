@@ -23,4 +23,13 @@ export function resolveConfigPath(filename: string): string {
 /** Directory containing constitution markdown files */
 export const constitutionsDir = resolveConfigPath('constitutions');
 
-export { defaultFactoryConfig, defaultModelsConfig, defaultRoutesConfig } from './defaults.js';
+export {
+  defaultFactoryConfig,
+  defaultModelsConfig,
+  defaultRoutesConfig,
+  type FactoryDefaults,
+  type ModelDefaults,
+  type ModelsDefaults,
+  type RouteDefaults,
+  type RoutesDefaults,
+} from './defaults.js';

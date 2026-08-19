@@ -4,9 +4,98 @@
 // routes.json / factory.json (#716): tsc used to emit a second copy of those
 // into dist/, and the two load paths could disagree about which was
 // authoritative. Do not add JSON back to this package.
+//
+// Declares its own structural interfaces rather than importing zod or
+// @on-par/factory-core: this package is zero-dependency and config <- core
+// is the dependency direction (AGENTS.md), so the zod schemas in
+// packages/core/src/config/index.ts stay the single runtime shape authority.
+
+export interface ModelDefaults {
+  provider: 'anthropic' | 'openai' | 'ollama' | 'deepseek' | 'custom';
+  tier: string | string[];
+  costPerMtokInput: number;
+  costPerMtokOutput: number;
+  contextWindow: number;
+  capabilities: string[];
+  envKey: string | null;
+  claudeFlag?: string;
+  providerModel?: string;
+  providerOptions?: Record<string, unknown>;
+  codex?: boolean;
+  codexFlag?: string;
+  harness?: string;
+  experimental?: boolean;
+}
+
+export interface ModelsDefaults {
+  version: number;
+  models: Record<string, ModelDefaults>;
+  tiers: Record<string, string[]>;
+  failover: { triggers: string[]; maxRetries: number; cooldownMs: number; escalateAfterTierExhausted: boolean };
+  routingRules: Record<string, unknown>;
+}
+
+export interface RouteDefaults {
+  tier: string;
+  description: string;
+  requires?: string;
+}
+
+export interface RoutesDefaults {
+  version: number;
+  routes: Record<string, RouteDefaults>;
+}
+
+export interface FactoryDefaults {
+  version: number;
+  paths: { constitutions: string; checkers: string; plans: string; logs: string; events: string };
+  timeouts: {
+    plan_seconds: number;
+    build_seconds: number;
+    check_seconds: number;
+    merge_poll_seconds: number;
+    approval_seconds: number;
+  };
+  merge: { auto: boolean; comment: string };
+  worktree: { prefix: string; parent: string; comment: string; gcTtlDays: number; autoGcOnRun: boolean };
+  byok: { enabled: boolean; comment: string };
+  notifications: Record<string, boolean>;
+  cost_tracking: { enabled: boolean; log_file: string; comment: string };
+  // ci/plan_approval/kpis/sandbox/discovery/filing/ingest/environment.*/auto_failover.comment are
+  // schema-optional (FactoryConfigSchema declares them `z.string().optional()`), but this package
+  // keeps them as data anyway: dropping them would desync loadFactoryConfig()'s no-path output from
+  // what the deleted factory.json produced, breaking the byte-identical behavior contract (#716).
+  kpis: { defectWindowDays: number; comment?: string };
+  ci: { skip: boolean; comment?: string };
+  plan_approval: { enabled: boolean; comment?: string };
+  sandbox: {
+    enabled: boolean;
+    network: { allow: string[] };
+    resources: { cpuMs: number; memMb: number };
+    comment?: string;
+  };
+  discovery: { enabled: boolean; schedule: 'weekly' | 'daily' | 'manual'; maxCandidates: number; comment?: string };
+  filing: {
+    enabled: boolean;
+    excludeReasons: string[];
+    repeatThreshold: number;
+    maxPerRun: number;
+    maxPerDay: number;
+    selfFixLabel: string;
+    bugLabels: string[];
+    sensitivePaths: string[];
+    comment?: string;
+  };
+  ingest: { enabled: boolean; label: string; lane: string; maxPerCycle: number; comment?: string };
+  environment: {
+    ports: { enabled: boolean; range: [number, number]; comment?: string };
+    proxy: { enabled: boolean; port: number; domain: string; comment?: string };
+  };
+  auto_failover: { enabled: boolean; cooldown_minutes: number; fallback_model: string; comment?: string };
+}
 
 /** Model registry: providers, costs, capabilities, tiers and failover chains. */
-export const defaultModelsConfig = {
+export const defaultModelsConfig: ModelsDefaults = {
   version: 1,
   models: {
     // Claude Fable 5 — most capable model, uses claude CLI subscription auth. Falls back to opus on rate-limit/usage-cap.
@@ -374,7 +463,7 @@ export const defaultModelsConfig = {
 };
 
 /** Task-type → model-tier routing. The router resolves a tier to the first available model. */
-export const defaultRoutesConfig = {
+export const defaultRoutesConfig: RoutesDefaults = {
   version: 1,
   routes: {
     plan: {
@@ -459,7 +548,7 @@ export const defaultRoutesConfig = {
 };
 
 /** Global factory configuration: paths, timeouts, merge/worktree/budget/intake defaults. */
-export const defaultFactoryConfig = {
+export const defaultFactoryConfig: FactoryDefaults = {
   version: 1,
   paths: {
     constitutions: 'constitutions/',
