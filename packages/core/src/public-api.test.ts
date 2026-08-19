@@ -315,6 +315,10 @@ const INTERNAL_API_KEYS = [
   'readOriginUrl',
   // Daemon pause/resume gate (#779)
   'setRepoState',
+  // Daemon detach gate (#780)
+  'detachRepo',
+  'isSafeDetachBoundary',
+  'SAFE_DETACH_STATUSES',
   // Utils
   'branchFor',
   'branchPrefixSlug',

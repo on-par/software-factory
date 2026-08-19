@@ -2,7 +2,9 @@
 // factoryd's repo registry: flips an existing entry's `state` between
 // `active` and `paused` in ~/.factory/registry.json, preserving `path` and
 // `attachedAt`. A `detached` tombstone is never revived here — re-entering
-// dispatch after a detach requires a fresh POST /repos (#779, epic #761).
+// dispatch after a detach requires a fresh POST /repos. ADR-0036's
+// live-entries-only rule also covers `draining`: a resume must never re-open
+// dispatch while a detach is in progress (#779, #780, epic #761).
 
 import {
   getRepo,
@@ -17,7 +19,7 @@ import {
  *  tombstone written by detach, never reachable from these routes. */
 export type SettableRepoState = Extract<RepoState, 'active' | 'paused'>;
 
-export type SetRepoStateFailureReason = 'unknown-repo' | 'detached';
+export type SetRepoStateFailureReason = 'unknown-repo' | 'detached' | 'draining';
 
 export type SetRepoStateResult =
   { ok: true; entry: RepoRegistryListing } | { ok: false; reason: SetRepoStateFailureReason; detail: string };
@@ -40,6 +42,14 @@ export async function setRepoState(
 
   if (existing.state === 'detached') {
     return { ok: false, reason: 'detached', detail: `${slug} is detached; re-attach it with POST /repos` };
+  }
+
+  if (existing.state === 'draining') {
+    return {
+      ok: false,
+      reason: 'draining',
+      detail: `${slug} is draining; wait for the detach to finish or force it with DELETE /repos/${slug}?force=true`,
+    };
   }
 
   const entry = { ...existing, state };

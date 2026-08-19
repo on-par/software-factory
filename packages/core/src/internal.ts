@@ -200,3 +200,7 @@ export { attachRepo, parseRemoteSlug, readOriginUrl } from './daemon/repos-attac
 // Daemon pause/resume gate (#779)
 export type { SetRepoStateFailureReason, SetRepoStateResult, SettableRepoState } from './daemon/repos-pause-resume.js';
 export { setRepoState } from './daemon/repos-pause-resume.js';
+
+// Daemon detach gate (#780)
+export type { DetachFailureReason, DetachRepoOptions, DetachRepoResult } from './daemon/repos-detach.js';
+export { detachRepo, isSafeDetachBoundary, SAFE_DETACH_STATUSES } from './daemon/repos-detach.js';
