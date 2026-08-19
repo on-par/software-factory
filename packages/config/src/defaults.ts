@@ -61,10 +61,10 @@ export interface FactoryDefaults {
   byok: { enabled: boolean; comment: string };
   notifications: Record<string, boolean>;
   cost_tracking: { enabled: boolean; log_file: string; comment: string };
-  // ci/plan_approval/kpis/sandbox/discovery/filing/ingest/environment.*/auto_failover.comment are
-  // schema-optional (FactoryConfigSchema declares them `z.string().optional()`), but this package
-  // keeps them as data anyway: dropping them would desync loadFactoryConfig()'s no-path output from
-  // what the deleted factory.json produced, breaking the byte-identical behavior contract (#716).
+  // ci/plan_approval/kpis/sandbox/discovery/filing/ingest/environment ports+proxy/auto_failover.comment are
+  // schema-optional (FactoryConfigSchema declares them z.string().optional()), but this package keeps them as
+  // data anyway: dropping them would desync loadFactoryConfig()'s no-path output from what the deleted
+  // factory.json produced, breaking the byte-identical behavior contract (#716).
   kpis: { defectWindowDays: number; comment?: string };
   ci: { skip: boolean; comment?: string };
   plan_approval: { enabled: boolean; comment?: string };
@@ -98,7 +98,7 @@ export interface FactoryDefaults {
 export const defaultModelsConfig: ModelsDefaults = {
   version: 1,
   models: {
-    // Claude Fable 5 — most capable model, uses claude CLI subscription auth. Falls back to opus on rate-limit/usage-cap.
+    /** Claude Fable 5 — most capable model, uses claude CLI subscription auth. Falls back to opus on rate-limit/usage-cap. */
     'claude-fable-5': {
       provider: 'anthropic',
       tier: 'boss',
@@ -110,7 +110,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       harness: 'claude-cli',
       claudeFlag: 'fable',
     },
-    // Claude Opus 5 — boss/plan model, uses claude CLI subscription auth.
+    /** Claude Opus 5 — boss/plan model, uses claude CLI subscription auth. */
     'claude-opus-5': {
       provider: 'anthropic',
       tier: 'boss',
@@ -122,7 +122,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       harness: 'claude-cli',
       claudeFlag: 'claude-opus-5',
     },
-    // Uses claude CLI subscription auth, no API key needed.
+    /** Uses claude CLI subscription auth, no API key needed. */
     'claude-opus-4-8': {
       provider: 'anthropic',
       tier: 'boss',
@@ -134,7 +134,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       harness: 'claude-cli',
       claudeFlag: 'claude-opus-4-8',
     },
-    // Uses claude CLI subscription auth, no API key needed.
+    /** Uses claude CLI subscription auth, no API key needed. */
     'claude-sonnet-5': {
       provider: 'anthropic',
       tier: ['checker', 'boss_fallback', 'worker_fallback'],
@@ -146,8 +146,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       harness: 'claude-cli',
       claudeFlag: 'claude-sonnet-5',
     },
-    // Codex CLI subscription auth (ChatGPT/OAuth), not an API key — do not gate availability on OPENAI_API_KEY.
-    // Explicitly pins -m gpt-5.6-sol instead of silently riding ~/.codex/config.toml's default model.
+    /** Codex CLI subscription auth (ChatGPT/OAuth), not an API key — do not gate availability on OPENAI_API_KEY. Explicitly pins -m gpt-5.6-sol instead of silently riding ~/.codex/config.toml's default model. */
     'gpt-5.6-sol': {
       provider: 'openai',
       tier: ['worker'],
@@ -160,9 +159,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       codex: true,
       codexFlag: '-m gpt-5.6-sol -c model_reasoning_effort=medium',
     },
-    // Codex CLI subscription auth (ChatGPT/OAuth), not an API key — do not gate availability on OPENAI_API_KEY.
-    // Explicitly pins -m gpt-5.1-codex so failover from gpt-5.6-sol actually changes models (#415). Kept as
-    // fallback behind gpt-5.6-sol.
+    /** Codex CLI subscription auth (ChatGPT/OAuth), not an API key — do not gate availability on OPENAI_API_KEY. Explicitly pins -m gpt-5.1-codex so failover from gpt-5.6-sol actually changes models (#415). Kept as fallback behind gpt-5.6-sol. */
     'gpt-5.1-codex': {
       provider: 'openai',
       tier: ['worker'],
@@ -175,11 +172,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       codex: true,
       codexFlag: '-m gpt-5.1-codex -c model_reasoning_effort=high',
     },
-    // Default Codex GPT PLAN profile (#529): GPT 5.6 Terra at high reasoning effort. Codex CLI subscription
-    // auth (ChatGPT/OAuth) — do not gate on OPENAI_API_KEY. Kept at the END of tiers.boss so Claude/Ollama
-    // plan defaults are unchanged; it is the plan model whenever the GPT provider path is selected (provider
-    // filtering or an explicit pin). Distinct model_reasoning_effort per profile keeps the #415
-    // failover-changes-config invariant.
+    /** Default Codex GPT PLAN profile (#529): GPT 5.6 Terra at high reasoning effort. Codex CLI subscription auth (ChatGPT/OAuth) — do not gate on OPENAI_API_KEY. Kept at the END of tiers.boss so Claude/Ollama plan defaults are unchanged; it is the plan model whenever the GPT provider path is selected (provider filtering or an explicit pin). Distinct model_reasoning_effort per profile keeps the #415 failover-changes-config invariant. */
     'gpt-5.6-terra-high': {
       provider: 'openai',
       tier: ['boss'],
@@ -192,9 +185,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       codex: true,
       codexFlag: '-m gpt-5.6-terra -c model_reasoning_effort=high',
     },
-    // Default Codex GPT BUILD profile (#529): GPT 5.6 Terra at medium reasoning effort. Codex CLI subscription
-    // auth (ChatGPT/OAuth) — do not gate on OPENAI_API_KEY. First in the build_codex chain; gpt-5.6-sol and
-    // gpt-5.1-codex remain as failovers.
+    /** Default Codex GPT BUILD profile (#529): GPT 5.6 Terra at medium reasoning effort. Codex CLI subscription auth (ChatGPT/OAuth) — do not gate on OPENAI_API_KEY. First in the build_codex chain; gpt-5.6-sol and gpt-5.1-codex remain as failovers. */
     'gpt-5.6-terra-medium': {
       provider: 'openai',
       tier: ['worker'],
@@ -207,7 +198,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       codex: true,
       codexFlag: '-m gpt-5.6-terra -c model_reasoning_effort=medium',
     },
-    // claude-CLI wiring is unproven — the Claude CLI only serves Anthropic models
+    /** claude-CLI wiring is unproven — the Claude CLI only serves Anthropic models */
     'gpt-4.1-mini': {
       provider: 'openai',
       tier: 'checker',
@@ -220,7 +211,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       claudeFlag: 'gpt-4.1-mini',
       experimental: true,
     },
-    // speculative — opt in with FACTORY_EXPERIMENTAL=1
+    /** speculative — opt in with FACTORY_EXPERIMENTAL=1 */
     'glm-5.2': {
       provider: 'ollama',
       tier: 'worker',
@@ -233,7 +224,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       claudeFlag: 'ollama/glm-5.2:cloud',
       experimental: true,
     },
-    // Local-only Ollama coding model for 16GB Macs. Slow is acceptable; keep concurrency low.
+    /** Local-only Ollama coding model for 16GB Macs. Slow is acceptable; keep concurrency low. */
     'qwen2.5-coder:14b': {
       provider: 'ollama',
       tier: ['boss', 'worker', 'checker', 'triage'],
@@ -249,10 +240,7 @@ export const defaultModelsConfig: ModelsDefaults = {
         temperature: 0.1,
       },
     },
-    // EXPERIMENTAL quarantined spike (ADR-0003): local-only worker driving Ollama qwen3.5:9b through the
-    // schema-bound ollama-agentic harness. codex: true only marks build_codex eligibility — this model never
-    // runs 'codex exec --local-provider'; there is no codexFlag. Opt in with FACTORY_EXPERIMENTAL=1. Retire or
-    // keep after the #170 bounded-retry test and the first green local fixture run (epic #163).
+    /** EXPERIMENTAL quarantined spike (ADR-0003): local-only worker driving Ollama qwen3.5:9b through the schema-bound ollama-agentic harness. codex: true only marks build_codex eligibility — this model never runs 'codex exec --local-provider'; there is no codexFlag. Opt in with FACTORY_EXPERIMENTAL=1. Retire or keep after the #170 bounded-retry test and the first green local fixture run (epic #163). */
     'codex-ollama-qwen3.5:9b': {
       provider: 'ollama',
       tier: ['worker'],
@@ -270,7 +258,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       codex: true,
       experimental: true,
     },
-    // Local Ollama fallback/second-opinion model; supports tools/thinking in Ollama.
+    /** Local Ollama fallback/second-opinion model; supports tools/thinking in Ollama. */
     'qwen3.5:9b': {
       provider: 'ollama',
       tier: ['worker', 'checker'],
@@ -286,7 +274,7 @@ export const defaultModelsConfig: ModelsDefaults = {
         temperature: 0.1,
       },
     },
-    // Smaller local Ollama fallback for memory-constrained runs.
+    /** Smaller local Ollama fallback for memory-constrained runs. */
     'qwen3:8b': {
       provider: 'ollama',
       tier: ['worker', 'checker'],
@@ -302,7 +290,7 @@ export const defaultModelsConfig: ModelsDefaults = {
         temperature: 0.2,
       },
     },
-    // Local Ollama planning/review alternative; expect model swaps on 16GB hosts.
+    /** Local Ollama planning/review alternative; expect model swaps on 16GB hosts. */
     'gemma4:12b': {
       provider: 'ollama',
       tier: ['boss', 'checker'],
@@ -318,7 +306,7 @@ export const defaultModelsConfig: ModelsDefaults = {
         temperature: 0.2,
       },
     },
-    // speculative — opt in with FACTORY_EXPERIMENTAL=1
+    /** speculative — opt in with FACTORY_EXPERIMENTAL=1 */
     'deepseek-v3': {
       provider: 'deepseek',
       tier: 'worker',
@@ -331,7 +319,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       claudeFlag: 'deepseek/deepseek-chat',
       experimental: true,
     },
-    // speculative — opt in with FACTORY_EXPERIMENTAL=1
+    /** speculative — opt in with FACTORY_EXPERIMENTAL=1 */
     'qwen-3.5-coder': {
       provider: 'ollama',
       tier: 'worker',
@@ -344,9 +332,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       claudeFlag: 'ollama/qwen3.5-coder:cloud',
       experimental: true,
     },
-    // First provider added via the generic harness seam (#188). OpenCode CLI (opencode run) with
-    // provider/model id; opt in with FACTORY_EXPERIMENTAL=1. Doctor reports 'opencode CLI not found on PATH'
-    // when the CLI is missing.
+    /** First provider added via the generic harness seam (#188). OpenCode CLI (opencode run) with provider/model id; opt in with FACTORY_EXPERIMENTAL=1. Doctor reports 'opencode CLI not found on PATH' when the CLI is missing. */
     'opencode-sonnet': {
       provider: 'custom',
       tier: ['worker'],
@@ -359,11 +345,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       providerModel: 'anthropic/claude-sonnet-5',
       experimental: true,
     },
-    // Added 2026-08-12 per Patrick's OpenCode Go subscription (OPENCODE_API_KEY env var). Served via OpenCode
-    // Go (https://opencode.ai/zen/go/v1) — distinct provider from OpenCode Zen (opencode/... prefix,
-    // pay-per-use, $0 balance when this was set up; do not confuse the two, same env var backs both).
-    // Confirmed working live: `opencode run --model opencode-go/deepseek-v4-flash "..."` returns real output.
-    // opt in with FACTORY_EXPERIMENTAL=1.
+    /** Added 2026-08-12 per Patrick's OpenCode Go subscription (OPENCODE_API_KEY env var). Served via OpenCode Go (https://opencode.ai/zen/go/v1) — distinct provider from OpenCode Zen (opencode/... prefix, pay-per-use, $0 balance when this was set up; do not confuse the two, same env var backs both). Confirmed working live: `opencode run --model opencode-go/deepseek-v4-flash "..."` returns real output. opt in with FACTORY_EXPERIMENTAL=1. */
     'opencode-deepseek-v4-flash': {
       provider: 'custom',
       tier: ['worker'],
@@ -376,16 +358,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       providerModel: 'opencode-go/deepseek-v4-flash',
       experimental: true,
     },
-    // Added 2026-08-17: OpenCode Go's monthly usage cap ($60/mo) hit 100% and doesn't reset until 2026-09-13,
-    // blocking opencode-deepseek-v4-flash. This is OpenCode Zen's (not Go's) promo-period free tier for the
-    // same model, opencode/... prefix, no balance or subscription quota involved. Anoma.ly's privacy notice:
-    // during the free promo, request data may be used to improve the model (not the zero-retention terms
-    // Go/paid Zen get) — acceptable for skunkworks throwaway prototypes, reconsider before using on anything
-    // with real user/client data. Free tier may be pulled without notice; if
-    // `opencode/deepseek-v4-flash-free` starts erroring, check https://opencode.ai/docs/zen/ for current
-    // free-tier availability. Confirmed working live:
-    // `opencode run --model opencode/deepseek-v4-flash-free "..."` returns real output. opt in with
-    // FACTORY_EXPERIMENTAL=1.
+    /** Added 2026-08-17: OpenCode Go's monthly usage cap ($60/mo) hit 100% and doesn't reset until 2026-09-13, blocking opencode-deepseek-v4-flash. This is OpenCode Zen's (not Go's) promo-period free tier for the same model, opencode/... prefix, no balance or subscription quota involved. Anoma.ly's privacy notice: during the free promo, request data may be used to improve the model (not the zero-retention terms Go/paid Zen get) — acceptable for skunkworks throwaway prototypes, reconsider before using on anything with real user/client data. Free tier may be pulled without notice; if `opencode/deepseek-v4-flash-free` starts erroring, check https://opencode.ai/docs/zen/ for current free-tier availability. Confirmed working live: `opencode run --model opencode/deepseek-v4-flash-free "..."` returns real output. opt in with FACTORY_EXPERIMENTAL=1. */
     'opencode-deepseek-v4-flash-free': {
       provider: 'custom',
       tier: ['worker'],

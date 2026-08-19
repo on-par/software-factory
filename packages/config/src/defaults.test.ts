@@ -10,6 +10,20 @@ describe('shipped defaults', () => {
     const modelIds = Object.keys(defaultModelsConfig.models);
     expect(modelIds).toHaveLength(20);
 
+    for (const id of [
+      'claude-opus-5',
+      'claude-fable-5',
+      'claude-sonnet-5',
+      'gpt-5.6-terra-high',
+      'gpt-5.6-terra-medium',
+      'gpt-5.6-sol',
+      'gpt-5.1-codex',
+      'opencode-deepseek-v4-flash-free',
+      'qwen2.5-coder:14b',
+    ]) {
+      expect(modelIds, `missing model ${id}`).toContain(id);
+    }
+
     expect(defaultModelsConfig.models['claude-fable-5'].harness).toBe('claude-cli');
     expect(defaultModelsConfig.models['gpt-5.6-terra-high'].harness).toBe('codex-cli');
     expect(defaultModelsConfig.models['qwen3.5:9b'].harness).toBe('ollama-http');
@@ -30,6 +44,15 @@ describe('shipped defaults', () => {
     expect(defaultModelsConfig.tiers.worker).toHaveLength(13);
     expect(defaultModelsConfig.tiers.checker).toHaveLength(7);
     expect(defaultModelsConfig.tiers.triage).toHaveLength(3);
+  });
+
+  it('preserves tier order invariants the router depends on', () => {
+    expect(defaultModelsConfig.tiers.boss[0]).toBe('claude-opus-5');
+
+    const workerIdx = (id: string) => defaultModelsConfig.tiers.worker.indexOf(id);
+    expect(workerIdx('gpt-5.6-terra-medium')).toBeGreaterThanOrEqual(0);
+    expect(workerIdx('gpt-5.6-terra-medium')).toBeLessThan(workerIdx('gpt-5.6-sol'));
+    expect(workerIdx('gpt-5.6-sol')).toBeLessThan(workerIdx('gpt-5.1-codex'));
   });
 
   it('has the expected failover policy', () => {
@@ -59,6 +82,64 @@ describe('shipped defaults', () => {
     expect(defaultFactoryConfig.worktree.gcTtlDays).toBe(7);
     expect(defaultFactoryConfig.filing.maxPerDay).toBe(20);
     expect(defaultFactoryConfig.ingest.maxPerCycle).toBe(20);
+  });
+});
+
+describe('docs live as JSDoc, not as note/comment data', () => {
+  // Every model's `note` and the top-level `description` were dropped as data and moved to JSDoc,
+  // since ModelDefSchema/ModelsConfigSchema/RoutesConfigSchema strip both at parse time (#716) — so
+  // this walk asserts no stray `note` key survives outside the one place it must: `routingRules`
+  // entries validate as `z.unknown()`, which does NOT strip unrecognized keys, so dropping `note`
+  // there would desync loadModelsConfig()'s no-path output from what the deleted models.json
+  // produced. Likewise `comment` is allowed only at the four paths FactoryConfigSchema requires it
+  // (merge/worktree/byok/cost_tracking) plus the nine schema-optional-but-not-stripped paths this
+  // package deliberately keeps for byte-identical loadFactoryConfig() output (see the comment above
+  // `kpis` in defaults.ts).
+  const REQUIRED_COMMENT_PATHS = new Set(['merge', 'worktree', 'byok', 'cost_tracking']);
+  const OPTIONAL_PRESERVED_COMMENT_PATHS = new Set([
+    'kpis',
+    'ci',
+    'plan_approval',
+    'sandbox',
+    'discovery',
+    'filing',
+    'ingest',
+    'environment.ports',
+    'environment.proxy',
+    'auto_failover',
+  ]);
+  const ALLOWED_COMMENT_PATHS = new Set([...REQUIRED_COMMENT_PATHS, ...OPTIONAL_PRESERVED_COMMENT_PATHS]);
+
+  function walk(value: unknown, path: string[], allowNote: boolean) {
+    if (value === null || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      value.forEach((item, i) => walk(item, [...path, String(i)], allowNote));
+      return;
+    }
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      const childPath = [...path, key];
+      if (key === 'note' && !allowNote) {
+        expect.fail(`unexpected 'note' data field at ${childPath.join('.')} — should be JSDoc, not data`);
+      }
+      if (key === 'comment') {
+        expect(
+          ALLOWED_COMMENT_PATHS.has(path.join('.')),
+          `unexpected 'comment' data field at ${childPath.join('.')}`,
+        ).toBe(true);
+      }
+      // Once inside routingRules, note is data by design — stop enforcing note-freedom below it.
+      const nextAllowNote = allowNote || (path.length === 0 && key === 'routingRules');
+      walk(child, childPath, nextAllowNote);
+    }
+  }
+
+  it('carries model/route docs as JSDoc, never as a note data field (routingRules.*.note is the documented exception)', () => {
+    walk(defaultModelsConfig, [], false);
+    walk(defaultRoutesConfig, [], false);
+  });
+
+  it('only carries a comment data field at the four required plus nine byte-identical-preserved paths', () => {
+    walk(defaultFactoryConfig, [], true);
   });
 });
 
