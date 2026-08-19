@@ -186,3 +186,12 @@ export {
 // Daemon control-plane HTTP server (#777)
 export type { FactorydOptions, FactorydServer } from './daemon/factoryd-http.js';
 export { createFactorydServer, DEFAULT_FACTORYD_PORT } from './daemon/factoryd-http.js';
+
+// Daemon attach gate (#778)
+export type {
+  AttachFailureReason,
+  AttachRepoDeps,
+  AttachRepoRequest,
+  AttachRepoResult,
+} from './daemon/repos-attach.js';
+export { attachRepo, parseRemoteSlug, readOriginUrl } from './daemon/repos-attach.js';

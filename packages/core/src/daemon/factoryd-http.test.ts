@@ -16,14 +16,21 @@ function get(
   port: number,
   path: string,
   method = 'GET',
+  body?: string,
 ): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: string }> {
   return new Promise((resolvePromise, reject) => {
-    const req = http.request({ host: '127.0.0.1', port, path, method }, (res) => {
-      let body = '';
-      res.on('data', (chunk) => (body += chunk));
-      res.on('end', () => resolvePromise({ status: res.statusCode ?? 0, headers: res.headers, body }));
+    const headers: Record<string, string> = {};
+    if (body !== undefined) {
+      headers['content-type'] = 'application/json';
+      headers['content-length'] = String(Buffer.byteLength(body));
+    }
+    const req = http.request({ host: '127.0.0.1', port, path, method, headers }, (res) => {
+      let responseBody = '';
+      res.on('data', (chunk) => (responseBody += chunk));
+      res.on('end', () => resolvePromise({ status: res.statusCode ?? 0, headers: res.headers, body: responseBody }));
     });
     req.on('error', reject);
+    if (body !== undefined) req.write(body);
     req.end();
   });
 }
@@ -121,16 +128,16 @@ describe('createFactorydServer', () => {
     expect(lines).toEqual(['GET /repos 200']);
   });
 
-  it('rejects a non-GET method on /repos with 405 and an Allow: GET header', async () => {
+  it('rejects a non-GET/POST method on /repos with 405 and an Allow: GET, POST header', async () => {
     const lines: string[] = [];
     factoryd = createFactorydServer({ registryFile, port: 0, log: (line) => lines.push(line) });
     await factoryd.start();
 
-    const { status, headers, body } = await get(factoryd.port, '/repos', 'POST');
+    const { status, headers, body } = await get(factoryd.port, '/repos', 'DELETE');
     expect(status).toBe(405);
-    expect(headers.allow).toBe('GET');
+    expect(headers.allow).toBe('GET, POST');
     expect(JSON.parse(body)).toEqual({ error: 'method not allowed' });
-    expect(lines).toEqual(['POST /repos 405']);
+    expect(lines).toEqual(['DELETE /repos 405']);
   });
 
   it('returns 404 for an unknown path', async () => {
@@ -158,5 +165,135 @@ describe('createFactorydServer', () => {
     await factoryd.stop();
     expect(factoryd.server.listening).toBe(false);
     await expect(get(port, '/repos')).rejects.toThrow();
+  });
+
+  describe('POST /repos', () => {
+    it('attaches a valid checkout, returns 201, and the entry then shows up via GET (acceptance criterion 1)', async () => {
+      const lines: string[] = [];
+      factoryd = createFactorydServer({
+        registryFile,
+        port: 0,
+        log: (line) => lines.push(line),
+        attachDeps: {
+          readOrigin: async () => 'git@github.com:on-par/software-factory.git',
+          fileExists: async () => true,
+          now: () => new Date('2026-08-19T12:00:00.000Z'),
+        },
+      });
+      await factoryd.start();
+
+      const { status, body } = await get(
+        factoryd.port,
+        '/repos',
+        'POST',
+        JSON.stringify({ repo: 'on-par/software-factory', path: '/tmp/checkout' }),
+      );
+      expect(status).toBe(201);
+      expect(JSON.parse(body)).toEqual({
+        repo: {
+          slug: 'on-par/software-factory',
+          path: '/tmp/checkout',
+          attachedAt: '2026-08-19T12:00:00.000Z',
+          state: 'active',
+        },
+      });
+
+      const listing = await get(factoryd.port, '/repos');
+      expect(JSON.parse(listing.body)).toEqual({
+        repos: [
+          {
+            slug: 'on-par/software-factory',
+            path: '/tmp/checkout',
+            attachedAt: '2026-08-19T12:00:00.000Z',
+            state: 'active',
+          },
+        ],
+      });
+      expect(lines).toEqual(['POST /repos 201', 'GET /repos 200']);
+    });
+
+    it('rejects an origin mismatch with 400 and leaves the registry unchanged (acceptance criterion 2)', async () => {
+      factoryd = createFactorydServer({
+        registryFile,
+        port: 0,
+        attachDeps: { readOrigin: async () => 'git@github.com:on-par/other-repo.git' },
+      });
+      await factoryd.start();
+
+      const { status, body } = await get(
+        factoryd.port,
+        '/repos',
+        'POST',
+        JSON.stringify({ repo: 'on-par/software-factory', path: '/tmp/checkout' }),
+      );
+      expect(status).toBe(400);
+      expect(JSON.parse(body)).toEqual({
+        error: 'origin is on-par/other-repo, not on-par/software-factory',
+        reason: 'origin-mismatch',
+      });
+
+      const listing = await get(factoryd.port, '/repos');
+      expect(JSON.parse(listing.body)).toEqual({ repos: [] });
+    });
+
+    it('rejects a missing .factory/config.json with 400 (acceptance criterion 3)', async () => {
+      factoryd = createFactorydServer({
+        registryFile,
+        port: 0,
+        attachDeps: {
+          readOrigin: async () => 'git@github.com:on-par/software-factory.git',
+          fileExists: async () => false,
+        },
+      });
+      await factoryd.start();
+
+      const { status, body } = await get(
+        factoryd.port,
+        '/repos',
+        'POST',
+        JSON.stringify({ repo: 'on-par/software-factory', path: '/tmp/checkout' }),
+      );
+      expect(status).toBe(400);
+      expect(JSON.parse(body)).toEqual({
+        error: expect.stringContaining('.factory/config.json not found'),
+        reason: 'missing-factory-config',
+      });
+
+      const listing = await get(factoryd.port, '/repos');
+      expect(JSON.parse(listing.body)).toEqual({ repos: [] });
+    });
+
+    it('rejects a non-JSON body with 400 invalid-request', async () => {
+      factoryd = createFactorydServer({ registryFile, port: 0 });
+      await factoryd.start();
+
+      const { status, body } = await get(factoryd.port, '/repos', 'POST', 'not json{{{');
+      expect(status).toBe(400);
+      expect(JSON.parse(body)).toEqual({ error: 'invalid JSON body', reason: 'invalid-request' });
+    });
+
+    it('rejects a body over 64 KiB with 413', async () => {
+      factoryd = createFactorydServer({ registryFile, port: 0 });
+      await factoryd.start();
+
+      const oversized = JSON.stringify({ repo: 'on-par/software-factory', path: '/tmp/' + 'x'.repeat(70 * 1024) });
+      const { status, body } = await get(factoryd.port, '/repos', 'POST', oversized);
+      expect(status).toBe(413);
+      expect(JSON.parse(body)).toEqual({ error: 'request body too large', reason: 'invalid-request' });
+    });
+
+    it('emits exactly one log line per POST', async () => {
+      const lines: string[] = [];
+      factoryd = createFactorydServer({
+        registryFile,
+        port: 0,
+        log: (line) => lines.push(line),
+        attachDeps: { readOrigin: async () => 'git@github.com:on-par/other-repo.git' },
+      });
+      await factoryd.start();
+
+      await get(factoryd.port, '/repos', 'POST', JSON.stringify({ repo: 'on-par/software-factory', path: '/tmp/x' }));
+      expect(lines).toEqual(['POST /repos 400']);
+    });
   });
 });
