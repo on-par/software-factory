@@ -182,3 +182,7 @@ export {
   upsertRepo,
   writeRegistry,
 } from './daemon/registry.js';
+
+// Daemon control-plane HTTP server (#777)
+export type { FactorydOptions, FactorydServer } from './daemon/factoryd-http.js';
+export { createFactorydServer, DEFAULT_FACTORYD_PORT } from './daemon/factoryd-http.js';
