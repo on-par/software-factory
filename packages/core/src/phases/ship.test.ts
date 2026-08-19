@@ -260,7 +260,7 @@ describe('shipPhase self-healing', () => {
     expect(logs).toContainEqual(['ship', 'not recovering ship-it/23-self-heal: no commits ahead of origin/main']);
   });
 
-  it('logs and continues when git push fails instead of aborting the recovery', async () => {
+  it('aborts before PR creation when git push fails', async () => {
     const { octokit, calls } = createOctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
@@ -283,9 +283,41 @@ describe('shipPhase self-healing', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: true, prNumber: 123 });
-    expect(logs).toContainEqual(['ship', 'git push failed (unknown): remote rejected — trying to continue']);
-    expect(calls).toContainEqual(['pulls.create', expect.anything()]);
+    expect(result).toEqual({ ok: false });
+    expect(logs).toContainEqual(['ship', 'git push failed (unknown): remote rejected — aborting before PR creation']);
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
+  });
+
+  it('does not emit the ready log line or touch the PR when the push fails', async () => {
+    const { octokit, calls } = createOctokit();
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      if (command.startsWith('git push')) throw new Error('remote rejected');
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(logs.map(([type]) => type)).not.toContain('ready');
+    expect(logs.map(([type]) => type)).not.toContain('recovered');
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
+    expect(calls).not.toContainEqual(['issues.createComment', expect.anything()]);
+    expect(calls).not.toContainEqual(['pulls.get', expect.anything()]);
+    expect(calls).not.toContainEqual(['issues.get', expect.anything()]);
   });
 
   it('names a non-fast-forward push rejection and logs its stderr', async () => {
@@ -316,13 +348,13 @@ describe('shipPhase self-healing', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: true, prNumber: 123 });
+    expect(result).toEqual({ ok: false });
     const shipLog = logs.find(([, msg]) => msg.startsWith('git push failed'));
     expect(shipLog?.[1]).toMatch(/^git push failed \(non-fast-forward\): ! \[rejected\]/);
     expect(shipLog?.[1]).toContain('failed to push some refs');
-    expect(shipLog?.[1]).toMatch(/— trying to continue$/);
+    expect(shipLog?.[1]).toMatch(/— aborting before PR creation$/);
     expect(shipLog?.[1]).not.toContain('\n');
-    expect(calls).toContainEqual(['pulls.create', expect.anything()]);
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
   });
 
   it('distinguishes a network push failure from non-fast-forward', async () => {
@@ -353,12 +385,12 @@ describe('shipPhase self-healing', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: true, prNumber: 123 });
+    expect(result).toEqual({ ok: false });
     const shipLog = logs.find(([, msg]) => msg.startsWith('git push failed'));
     expect(shipLog?.[1]).toContain('git push failed (network):');
     expect(shipLog?.[1]).toContain('Could not resolve host');
     expect(shipLog?.[1]).not.toContain('non-fast-forward');
-    expect(calls).toContainEqual(['pulls.create', expect.anything()]);
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
   });
 
   it('handles a non-Error throw from git push', async () => {
@@ -384,9 +416,9 @@ describe('shipPhase self-healing', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: true, prNumber: 123 });
-    expect(logs).toContainEqual(['ship', 'git push failed (unknown): boom — trying to continue']);
-    expect(calls).toContainEqual(['pulls.create', expect.anything()]);
+    expect(result).toEqual({ ok: false });
+    expect(logs).toContainEqual(['ship', 'git push failed (unknown): boom — aborting before PR creation']);
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
   });
 
   it('falls back to "no error output" when the push failure carries no text', async () => {
@@ -412,9 +444,9 @@ describe('shipPhase self-healing', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: true, prNumber: 123 });
-    expect(logs).toContainEqual(['ship', 'git push failed (unknown): no error output — trying to continue']);
-    expect(calls).toContainEqual(['pulls.create', expect.anything()]);
+    expect(result).toEqual({ ok: false });
+    expect(logs).toContainEqual(['ship', 'git push failed (unknown): no error output — aborting before PR creation']);
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
   });
 
   it('falls through to pulls.create when findOpenPR throws', async () => {

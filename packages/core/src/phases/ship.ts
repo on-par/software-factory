@@ -127,12 +127,15 @@ export async function shipPhase(opts: {
       return { ok: false };
     }
 
-    // Push branch
+    // Push branch. A rejected push means the remote head does not contain this run's
+    // commits — opening a PR against it would advertise work that is not there, so the
+    // ship fails closed here rather than continuing to PR creation (#734).
     try {
       await run(`git push -u origin ${shellEscape(branch)}`, { cwd: worktree });
     } catch (err) {
       const { kind, detail } = describePushFailure(err);
-      log('ship', `git push failed (${kind}): ${detail} — trying to continue`);
+      log('ship', `git push failed (${kind}): ${detail} — aborting before PR creation`);
+      return { ok: false };
     }
 
     const inlineWork = opts.work && opts.work.kind !== GITHUB_ISSUE_SOURCE ? opts.work : undefined;
