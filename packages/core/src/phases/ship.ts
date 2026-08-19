@@ -130,8 +130,9 @@ export async function shipPhase(opts: {
     // Push branch
     try {
       await run(`git push -u origin ${shellEscape(branch)}`, { cwd: worktree });
-    } catch {
-      log('ship', 'push failed — trying to continue');
+    } catch (err) {
+      const { kind, detail } = describePushFailure(err);
+      log('ship', `git push failed (${kind}): ${detail} — trying to continue`);
     }
 
     const inlineWork = opts.work && opts.work.kind !== GITHUB_ISSUE_SOURCE ? opts.work : undefined;
@@ -350,4 +351,43 @@ async function materializeAdrDrafts(o: {
   }
   o.log('adr_written', `recorded ${plan.writes.length} ADR(s) in ${plan.dir}: ${labels}`);
   return { committed: true, paths: written };
+}
+
+/** Why a `git push` was refused, as far as git's own stderr says (#733). */
+type PushFailureKind = 'non-fast-forward' | 'network' | 'unknown';
+
+/** Bound on the failure text copied into one NDJSON event row. */
+const MAX_PUSH_ERROR_DETAIL = 400;
+
+const NON_FAST_FORWARD_MARKERS = ['non-fast-forward', '! [rejected]', 'fetch first', 'updates were rejected'];
+
+const NETWORK_MARKERS = [
+  'could not resolve host',
+  'failed to connect',
+  'connection timed out',
+  'connection refused',
+  'network is unreachable',
+  'operation timed out',
+  'the remote end hung up unexpectedly',
+];
+
+function classifyPushFailure(text: string): PushFailureKind {
+  const t = text.toLowerCase();
+  if (NON_FAST_FORWARD_MARKERS.some((m) => t.includes(m))) return 'non-fast-forward';
+  if (NETWORK_MARKERS.some((m) => t.includes(m))) return 'network';
+  return 'unknown';
+}
+
+/**
+ * The real reason a push failed, from git's own stderr when the runner exposes it
+ * (node's promisified `exec` rejection carries `stderr`), else the Error message, else the
+ * value's string form. Flattened to one line and bounded so a single event row stays
+ * greppable in `.factory/events.ndjson`.
+ */
+function describePushFailure(err: unknown): { kind: PushFailureKind; detail: string } {
+  const raw = (err as { stderr?: unknown } | null | undefined)?.stderr;
+  const stderr = typeof raw === 'string' ? raw : '';
+  const text = stderr.trim() || (err instanceof Error ? err.message : String(err));
+  const detail = text.replace(/\s+/g, ' ').trim().slice(0, MAX_PUSH_ERROR_DETAIL);
+  return { kind: classifyPushFailure(detail), detail: detail || 'no error output' };
 }
