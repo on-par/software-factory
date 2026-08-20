@@ -134,7 +134,7 @@ export class CliModelExecutor implements ModelExecutor {
 
   constructor(
     private execFn: ExecFn = defaultExecFn,
-    fetchFn: FetchFn = globalThis.fetch as unknown as FetchFn,
+    fetchFn: FetchFn = globalThis.fetch,
     harnessOverrides: Record<string, ExecutorHarness> = {},
   ) {
     this.claudeHarness = new ClaudeCliHarness(execFn);
