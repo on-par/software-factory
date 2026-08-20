@@ -94,12 +94,10 @@ describe('fetchSubscriptionUsage', () => {
   }
 
   it('returns utilization and resets_at on the happy path, sending the expected headers', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ five_hour: { utilization: 42, resets_at: '2026-07-15T18:00:00Z' } }),
-    });
+    const fetchImpl = vi.fn<typeof fetch>();
+    fetchImpl.mockResolvedValue(Response.json({ five_hour: { utilization: 42, resets_at: '2026-07-15T18:00:00Z' } }));
 
-    const result = await fetchSubscriptionUsage(deps({ fetchImpl: fetchImpl as unknown as typeof fetch }));
+    const result = await fetchSubscriptionUsage(deps({ fetchImpl }));
 
     expect(result).toEqual({ fiveHourUtilization: 42, fiveHourResetsAt: '2026-07-15T18:00:00Z' });
     expect(fetchImpl).toHaveBeenCalledWith(
@@ -114,53 +112,57 @@ describe('fetchSubscriptionUsage', () => {
   });
 
   it('returns null and never calls fetchImpl when the token is unavailable', async () => {
-    const fetchImpl = vi.fn();
+    const fetchImpl = vi.fn<typeof fetch>();
     const readCredentialsFile = vi.fn().mockImplementation(() => {
       throw new Error('ENOENT');
     });
 
-    const result = await fetchSubscriptionUsage(
-      deps({ readCredentialsFile, fetchImpl: fetchImpl as unknown as typeof fetch }),
-    );
+    const result = await fetchSubscriptionUsage(deps({ readCredentialsFile, fetchImpl }));
 
     expect(result).toBeNull();
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('returns null on a 401 response', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({}) });
+    const fetchImpl = vi.fn<typeof fetch>();
+    fetchImpl.mockResolvedValue(new Response(null, { status: 401 }));
 
-    await expect(fetchSubscriptionUsage(deps({ fetchImpl: fetchImpl as unknown as typeof fetch }))).resolves.toBeNull();
+    await expect(fetchSubscriptionUsage(deps({ fetchImpl }))).resolves.toBeNull();
   });
 
   it('returns null on a 500 response', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+    const fetchImpl = vi.fn<typeof fetch>();
+    fetchImpl.mockResolvedValue(new Response(null, { status: 500 }));
 
-    await expect(fetchSubscriptionUsage(deps({ fetchImpl: fetchImpl as unknown as typeof fetch }))).resolves.toBeNull();
+    await expect(fetchSubscriptionUsage(deps({ fetchImpl }))).resolves.toBeNull();
   });
 
   it('returns null when the body is missing five_hour.utilization', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ five_hour: { resets_at: 'x' } }) });
+    const fetchImpl = vi.fn<typeof fetch>();
+    fetchImpl.mockResolvedValue(Response.json({ five_hour: { resets_at: 'x' } }));
 
-    await expect(fetchSubscriptionUsage(deps({ fetchImpl: fetchImpl as unknown as typeof fetch }))).resolves.toBeNull();
+    await expect(fetchSubscriptionUsage(deps({ fetchImpl }))).resolves.toBeNull();
   });
 
   it('returns null when the body is malformed JSON-shaped garbage', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ nope: true }) });
+    const fetchImpl = vi.fn<typeof fetch>();
+    fetchImpl.mockResolvedValue(Response.json({ nope: true }));
 
-    await expect(fetchSubscriptionUsage(deps({ fetchImpl: fetchImpl as unknown as typeof fetch }))).resolves.toBeNull();
+    await expect(fetchSubscriptionUsage(deps({ fetchImpl }))).resolves.toBeNull();
   });
 
   it('returns null when fetchImpl rejects (network error / timeout)', async () => {
-    const fetchImpl = vi.fn().mockRejectedValue(new Error('network down'));
+    const fetchImpl = vi.fn<typeof fetch>();
+    fetchImpl.mockRejectedValue(new Error('network down'));
 
-    await expect(fetchSubscriptionUsage(deps({ fetchImpl: fetchImpl as unknown as typeof fetch }))).resolves.toBeNull();
+    await expect(fetchSubscriptionUsage(deps({ fetchImpl }))).resolves.toBeNull();
   });
 
   it('defaults fiveHourResetsAt to null when resets_at is absent', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ five_hour: { utilization: 10 } }) });
+    const fetchImpl = vi.fn<typeof fetch>();
+    fetchImpl.mockResolvedValue(Response.json({ five_hour: { utilization: 10 } }));
 
-    const result = await fetchSubscriptionUsage(deps({ fetchImpl: fetchImpl as unknown as typeof fetch }));
+    const result = await fetchSubscriptionUsage(deps({ fetchImpl }));
 
     expect(result).toEqual({ fiveHourUtilization: 10, fiveHourResetsAt: null });
   });

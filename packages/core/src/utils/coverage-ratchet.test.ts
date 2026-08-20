@@ -11,7 +11,15 @@ import {
   renderRatchetReport,
 } from './coverage-ratchet.js';
 
-function summaryJson(metrics: Record<keyof CoverageMetrics, { total: number; covered: number; pct: number }>): string {
+/** The metric block as it appears in a v8 coverage-summary.json on disk: `pct` may be absent or
+ *  non-numeric, which is exactly what parseCoverageSummary's field guards exist to reject. */
+interface RawCoverageMetricBlock {
+  total: number;
+  covered: number;
+  pct?: number | string;
+}
+
+function summaryJson(metrics: Record<keyof CoverageMetrics, RawCoverageMetricBlock>): string {
   return JSON.stringify({ total: metrics });
 }
 
@@ -45,20 +53,18 @@ describe('parseCoverageSummary', () => {
       lines: { total: 100, covered: 95, pct: 95.31 },
       functions: { total: 50, covered: 46, pct: 92 },
       branches: { total: 40, covered: 35, pct: 87.5 },
-      statements: { total: 100, covered: 95, pct: undefined as unknown as number },
+      statements: { total: 100, covered: 95, pct: undefined },
     });
 
     expect(() => parseCoverageSummary(json)).toThrow(/statements\.pct/);
   });
 
   it('throws when a metric has a non-numeric pct', () => {
-    const json = JSON.stringify({
-      total: {
-        lines: { total: 100, covered: 95, pct: 95.31 },
-        functions: { total: 50, covered: 46, pct: 92 },
-        branches: { total: 40, covered: 35, pct: 87.5 },
-        statements: { total: 100, covered: 95, pct: 'oops' },
-      },
+    const json = summaryJson({
+      lines: { total: 100, covered: 95, pct: 95.31 },
+      functions: { total: 50, covered: 46, pct: 92 },
+      branches: { total: 40, covered: 35, pct: 87.5 },
+      statements: { total: 100, covered: 95, pct: 'oops' },
     });
 
     expect(() => parseCoverageSummary(json)).toThrow(/statements\.pct/);
