@@ -1,0 +1,26 @@
+import { defineConfig } from 'oxlint';
+
+export default defineConfig({
+  ignorePatterns: ['**/dist/**', 'coverage/**', '.factory/**'],
+  plugins: ['typescript'],
+  options: {
+    typeAware: true,
+  },
+  rules: {
+    'no-empty': ['error', { allowEmptyCatch: true }],
+    'no-unused-vars': [
+      'error',
+      {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+      },
+    ],
+    'typescript/consistent-type-imports': ['error', { prefer: 'type-imports', fixStyle: 'separate-type-imports' }],
+    'typescript/no-floating-promises': 'error',
+    'typescript/no-base-to-string': 'off',
+    'typescript/no-misused-spread': 'off',
+    'typescript/require-array-sort-compare': 'off',
+    'typescript/unbound-method': 'off',
+  },
+});
