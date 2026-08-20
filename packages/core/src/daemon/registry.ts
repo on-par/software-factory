@@ -8,9 +8,11 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-/** Attachment state of a repo in the daemon registry. `detached` entries are
- *  retained as tombstones rather than deleted, so a detach is auditable. */
-export type RepoState = 'active' | 'paused' | 'detached';
+/** Attachment state of a repo in the daemon registry. `draining` is the
+ *  interim state a detach writes before it waits for in-flight lanes;
+ *  `detached` entries are retained as tombstones rather than deleted, so a
+ *  detach is auditable. */
+export type RepoState = 'active' | 'paused' | 'draining' | 'detached';
 
 export interface RepoRegistryEntry {
   /** Absolute path to the local checkout. */
@@ -39,7 +41,7 @@ export interface WriteRegistryOptions {
   rename?: (from: string, to: string) => Promise<void>;
 }
 
-const REPO_STATES = new Set<string>(['active', 'paused', 'detached']);
+const REPO_STATES = new Set<string>(['active', 'paused', 'draining', 'detached']);
 
 function isEntry(value: unknown): value is RepoRegistryEntry {
   if (!value || typeof value !== 'object') return false;
@@ -107,7 +109,9 @@ export function upsertRepo(registry: RepoRegistry, slug: string, entry: RepoRegi
 
 /** The dispatch gate: the repos a claiming loop may start new work for. Only
  *  `active` entries are eligible — `paused` repos are held back until a resume,
- *  and `detached` tombstones are never dispatched to. Sorted like listRepos. */
+ *  `draining` repos are mid-detach and excluded so a detach's stop-claiming
+ *  guarantee is durable, and `detached` tombstones are never dispatched to.
+ *  Sorted like listRepos. */
 export function dispatchableRepos(registry: RepoRegistry): RepoRegistryListing[] {
   return listRepos(registry).filter((entry) => entry.state === 'active');
 }

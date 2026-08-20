@@ -2,13 +2,16 @@
 // loopback-only origin server over the repo registry (~/.factory/registry.json).
 // GET /repos lists it (#777); POST /repos attaches a local checkout through the
 // attachRepo precondition gate (#778); POST /repos/<owner>/<name>/pause|resume
-// toggle an attached entry's state through setRepoState (#779, epic #761).
-// Binding to 127.0.0.1 IS the authorization model; see the ADR shipped with
-// this change.
+// toggle an attached entry's state through setRepoState (#779); DELETE
+// /repos/<owner>/<name>[?force=true] begins a drain-based detach through
+// beginDetach + the background drainAndDetach loop (#780, epic #761). Binding
+// to 127.0.0.1 IS the authorization model; see the ADR shipped with this
+// change.
 
 import http from 'node:http';
 
 import { type AttachRepoDeps, attachRepo } from './repos-attach.js';
+import { beginDetach, type DetachRepoDeps, drainAndDetach } from './repos-detach.js';
 import { setRepoState } from './repos-pause-resume.js';
 import { defaultRegistryPath, listRepos, loadRegistry, type RepoRegistryListing } from './registry.js';
 
@@ -30,6 +33,8 @@ export interface FactorydOptions {
   log?: (line: string) => void;
   /** Seams passed through to attachRepo for POST /repos. Test-only. */
   attachDeps?: AttachRepoDeps;
+  /** Seams passed through to drainAndDetach for DELETE /repos/<owner>/<name>. Test-only. */
+  detachDeps?: DetachRepoDeps;
 }
 
 type ReadJsonBodyResult = { ok: true; value: unknown } | { ok: false; tooLarge: boolean };
@@ -87,11 +92,27 @@ function parsePathname(url: string | undefined): string {
   return raw;
 }
 
+/** `?force=true` (and the bare `?force`) enable the force path; every other
+ *  value — absent, `false`, `0`, `1` — is a normal drain, so the safe default
+ *  is what an unrecognized value gets. */
+function parseForce(url: string | undefined): boolean {
+  const query = (url ?? '').split('?')[1];
+  if (query === undefined) return false;
+  const value = new URLSearchParams(query).get('force');
+  return value !== null && (value === '' || value.toLowerCase() === 'true');
+}
+
 export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer {
   const registryFile = opts.registryFile ?? defaultRegistryPath();
   const desiredPort = opts.port ?? DEFAULT_FACTORYD_PORT;
   const host = opts.host ?? '127.0.0.1';
   const log = opts.log ?? ((line: string) => console.log(line));
+
+  // Server-scoped drain bookkeeping: the signal lets stop() cooperatively
+  // abort every in-flight drainAndDetach loop, and pendingDrains is what
+  // stop() awaits so no poll timer outlives the server.
+  const drainSignal = { aborted: false };
+  const pendingDrains = new Set<Promise<unknown>>();
 
   function send(
     res: http.ServerResponse,
@@ -155,6 +176,33 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
       return;
     }
 
+    if (segments.length === 3 && segments[0] === 'repos') {
+      if (req.method !== 'DELETE') {
+        send(res, req, 405, { error: 'method not allowed' }, 'DELETE');
+        return;
+      }
+      const slug = `${segments[1]}/${segments[2]}`;
+      const force = parseForce(req.url);
+      const result = await beginDetach(registryFile, slug, force);
+      if (!result.ok) {
+        send(res, req, 404, { error: result.detail, reason: result.reason });
+        return;
+      }
+      if (result.draining) {
+        const drain = drainAndDetach(registryFile, slug, { ...opts.detachDeps, signal: drainSignal })
+          .catch((err: unknown) => {
+            log(`drain failed for ${slug}: ${err instanceof Error ? err.message : String(err)}`);
+            return undefined;
+          })
+          .finally(() => pendingDrains.delete(drain));
+        pendingDrains.add(drain);
+        send(res, req, 202, { repo: result.entry });
+        return;
+      }
+      send(res, req, 200, { repo: result.entry });
+      return;
+    }
+
     send(res, req, 404, { error: 'not found' });
   }
 
@@ -189,8 +237,10 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
         server.listen({ port: desiredPort, host, exclusive: true });
       });
     },
-    stop(): Promise<void> {
-      return new Promise((resolvePromise) => {
+    async stop(): Promise<void> {
+      drainSignal.aborted = true;
+      await Promise.allSettled([...pendingDrains]);
+      await new Promise<void>((resolvePromise) => {
         server.closeAllConnections();
         server.close(() => resolvePromise());
       });
