@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { EVENT_TRAITS, eventTraitsFor, isParkKind, laneStatusOf, severityOf, UNKNOWN_EVENT_TRAITS } from './kinds.js';
 
 const VALID_SEVERITIES = new Set(['debug', 'info', 'warn', 'error']);
-const VALID_LANE_STATUSES = new Set(['running', 'waiting-merge', 'ready', 'merged', 'failed', 'stopped']);
+const VALID_LANE_STATUSES = new Set(['running', 'waiting-merge', 'ready', 'merged', 'failed', 'parked', 'stopped']);
 
 describe('EVENT_TRAITS', () => {
   it('gives every EventKind member a well-formed traits entry', () => {
@@ -72,9 +72,19 @@ describe('laneStatusOf', () => {
     }
   });
 
-  it('maps terminal-failure kinds to failed, including the ci-failed regression (#663)', () => {
-    for (const kind of ['fail', 'escalate', 'parked', 'ship_denied', 'timeout', 'conflict', 'ci-failed']) {
+  it('maps genuine-error kinds to failed, including the ci-failed regression (#663)', () => {
+    for (const kind of ['fail', 'ship_denied', 'timeout', 'conflict', 'ci-failed']) {
       expect(laneStatusOf(kind), kind).toBe('failed');
+    }
+  });
+
+  // A lane that self-parks on ambiguity (an oversized issue, a conflicting PR, a
+  // decision it can't make alone) stopped safely, not because anything broke — it
+  // must read differently from a real error in the TUI (Patrick, 2026-08-20: "if
+  // it's parked then we want to use the word park").
+  it('maps self-parked kinds to parked, distinct from a genuine failure', () => {
+    for (const kind of ['escalate', 'parked', 'held']) {
+      expect(laneStatusOf(kind), kind).toBe('parked');
     }
   });
 

@@ -139,7 +139,7 @@ export type EventKind =
 
 /** Lane state an event kind drives in the TUI/queue dashboard reducers; absent
  *  when the kind doesn't itself change lane status. */
-export type LaneStatus = 'running' | 'waiting-merge' | 'ready' | 'merged' | 'failed' | 'stopped';
+export type LaneStatus = 'running' | 'waiting-merge' | 'ready' | 'merged' | 'failed' | 'parked' | 'stopped';
 
 /** `severity` is widened to `'unknown'` only on the sentinel `UNKNOWN_EVENT_TRAITS`
  *  returned by `eventTraitsFor` for a string outside `EventKind` — every real
@@ -199,7 +199,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   environment_release: { severity: 'info', isPark: false, isTerminal: false },
   environment_release_failed: { severity: 'info', isPark: false, isTerminal: false },
   environment_warning: { severity: 'warn', isPark: false, isTerminal: false },
-  escalate: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
+  escalate: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },
   evidence: { severity: 'info', isPark: false, isTerminal: false },
   fail: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   failover: { severity: 'info', isPark: false, isTerminal: false },
@@ -208,7 +208,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   // a prior run (ReworkHistory, #740) — distinct from 'escalate'/'fail' so a
   // watchdog or human scanning events.ndjson can tell "already tried and
   // failed identically once, needs a decision" apart from a fresh park.
-  held: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
+  held: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },
   'human-abandoned': { severity: 'info', isPark: false, isTerminal: true },
   'human-approved': { severity: 'info', isPark: false, isTerminal: false },
   'human-edited': { severity: 'info', isPark: false, isTerminal: false },
@@ -233,7 +233,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'overnight-park': { severity: 'info', isPark: false, isTerminal: false },
   'overnight-preflight': { severity: 'info', isPark: false, isTerminal: false },
   'overnight-ready': { severity: 'info', isPark: false, isTerminal: false },
-  parked: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
+  parked: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },
   plan: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
   plan_approval_granted: { severity: 'info', isPark: false, isTerminal: false },
   plan_approval_requested: { severity: 'info', isPark: false, isTerminal: false },

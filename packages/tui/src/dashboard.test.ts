@@ -95,7 +95,7 @@ describe('reduceDashboard — lifecycle events', () => {
     expect(state.lanes[0].finishedAt).toBe('2026-01-01T00:10:00.000Z');
   });
 
-  it.each(['fail', 'escalate', 'timeout', 'conflict', 'parked', 'ship_denied', 'ci-failed'] as const)(
+  it.each(['fail', 'timeout', 'conflict', 'ship_denied', 'ci-failed'] as const)(
     '%s sets status failed with the phase active at failure and preserves the reason',
     (type) => {
       const state = reduceAll([
@@ -111,11 +111,27 @@ describe('reduceDashboard — lifecycle events', () => {
     },
   );
 
+  it.each(['escalate', 'parked', 'held'] as const)(
+    '%s sets status parked (not failed) with the phase active at the park and preserves the reason',
+    (type) => {
+      const state = reduceAll([
+        ev('plan', '296', 'Starting plan phase'),
+        ev('build', '296', 'Starting build phase (route: claude)'),
+        ev(type, '296', 'needs a human', '2026-01-01T00:07:00.000Z'),
+      ]);
+      const lane = state.lanes[0];
+      expect(lane.status).toBe('parked');
+      expect(lane.failedPhase).toBe('BUILD');
+      expect(lane.failReason).toBe('needs a human');
+      expect(lane.finishedAt).toBe('2026-01-01T00:07:00.000Z');
+    },
+  );
+
   it('does not overwrite failedPhase/failReason when a second failure event follows', () => {
     const state = reduceAll([
       ev('plan', '296', 'Starting plan phase'),
       ev('fail', '296', 'first failure', '2026-01-01T00:07:00.000Z'),
-      ev('parked', '296', 'lane parked', '2026-01-01T00:08:00.000Z'),
+      ev('timeout', '296', 'second failure', '2026-01-01T00:08:00.000Z'),
     ]);
     const lane = state.lanes[0];
     expect(lane.status).toBe('failed');

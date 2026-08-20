@@ -38,6 +38,8 @@ function StatusCell({
       return <Text color="green">✔ merged PR #{lane.prNumber ?? '?'}</Text>;
     case 'failed':
       return <Text color="red">✖ {lane.failedPhase ?? 'FAILED'}</Text>;
+    case 'parked':
+      return <Text color="yellow">⏸ parked{lane.failedPhase ? ` (${lane.failedPhase})` : ''}</Text>;
     case 'stopped':
       return <Text dimColor>■ stopped</Text>;
   }

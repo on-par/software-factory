@@ -16,6 +16,7 @@ const STATUS_COLOR: Record<LaneStatus | 'queued', string | undefined> = {
   'waiting-merge': 'yellow',
   merged: 'green',
   failed: 'red',
+  parked: 'yellow',
   stopped: undefined,
   queued: undefined,
 };
