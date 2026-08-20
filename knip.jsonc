@@ -3,6 +3,11 @@
   // Exports referenced within their own module are internal helpers, not
   // dead code — don't force export-keyword churn on them (#143).
   "ignoreExportsUsedInFile": true,
+  // The anti-slop plugin is vendored, not authored here (#795): its files are loaded by
+  // oxlint through a config specifier string, which knip cannot follow, and @oxlint/plugins
+  // is imported only from inside that vendored tree.
+  "ignore": ["tools/oxlint/anti-slop/**"],
+  "ignoreDependencies": ["@oxlint/plugins"],
   "workspaces": {
     "packages/cli": {
       // `ollama` is an external runtime binary the CLI shells out to;
