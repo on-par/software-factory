@@ -212,37 +212,36 @@ function parseEvaluation(raw: string, path: string): ScbenchEvaluation {
   if (!isPlainObject(parsed)) {
     throw new AdapterError(`invalid evaluation evidence at ${path}: must be a JSON object`);
   }
-  const invalid = (field: string, expectation: string): never => {
-    throw new AdapterError(`invalid evaluation evidence at ${path}: field "${field}" must be ${expectation}`);
-  };
-  if (typeof parsed.problem_name !== 'string' || parsed.problem_name.length === 0) {
-    invalid('problem_name', 'a non-empty string');
+  const invalid = (field: string, expectation: string): AdapterError =>
+    new AdapterError(`invalid evaluation evidence at ${path}: field "${field}" must be ${expectation}`);
+  const { problem_name, checkpoint_name, pass_counts, total_counts, pytest_exit_code, infrastructure_failure } = parsed;
+  if (typeof problem_name !== 'string' || problem_name.length === 0) {
+    throw invalid('problem_name', 'a non-empty string');
   }
-  if (typeof parsed.checkpoint_name !== 'string' || parsed.checkpoint_name.length === 0) {
-    invalid('checkpoint_name', 'a non-empty string');
+  if (typeof checkpoint_name !== 'string' || checkpoint_name.length === 0) {
+    throw invalid('checkpoint_name', 'a non-empty string');
   }
-  if (!isRecordOfNumbers(parsed.pass_counts)) {
-    invalid('pass_counts', 'an object whose values are numbers');
+  if (!isRecordOfNumbers(pass_counts)) {
+    throw invalid('pass_counts', 'an object whose values are numbers');
   }
-  if (!isRecordOfNumbers(parsed.total_counts)) {
-    invalid('total_counts', 'an object whose values are numbers');
+  if (!isRecordOfNumbers(total_counts)) {
+    throw invalid('total_counts', 'an object whose values are numbers');
   }
-  if (typeof parsed.pytest_exit_code !== 'number') {
-    invalid('pytest_exit_code', 'a number');
+  if (typeof pytest_exit_code !== 'number') {
+    throw invalid('pytest_exit_code', 'a number');
   }
-  if (typeof parsed.infrastructure_failure !== 'boolean') {
-    invalid('infrastructure_failure', 'a boolean');
+  if (typeof infrastructure_failure !== 'boolean') {
+    throw invalid('infrastructure_failure', 'a boolean');
   }
-  return parsed as unknown as ScbenchEvaluation;
+  return { problem_name, checkpoint_name, pass_counts, total_counts, pytest_exit_code, infrastructure_failure };
 }
 
 /** Parse + structurally validate SCBench's run-level
  *  checkpoint_results.jsonl (one JSON object per non-blank line). Throws
  *  AdapterError naming `path` and the 1-based line number. */
 function parseRunRecords(raw: string, path: string): ScbenchRunRecord[] {
-  const invalid = (line: number, field: string, expectation: string): never => {
-    throw new AdapterError(`invalid run record at ${path} line ${line}: field "${field}" must be ${expectation}`);
-  };
+  const invalid = (line: number, field: string, expectation: string): AdapterError =>
+    new AdapterError(`invalid run record at ${path} line ${line}: field "${field}" must be ${expectation}`);
   const records: ScbenchRunRecord[] = [];
   const lines = raw.split('\n');
   for (let i = 0; i < lines.length; i += 1) {
@@ -258,12 +257,13 @@ function parseRunRecords(raw: string, path: string): ScbenchRunRecord[] {
     if (!isPlainObject(parsed)) {
       throw new AdapterError(`invalid run record at ${path} line ${lineNumber}: must be a JSON object`);
     }
-    if (typeof parsed.problem !== 'string') invalid(lineNumber, 'problem', 'a string');
-    if (typeof parsed.checkpoint !== 'string') invalid(lineNumber, 'checkpoint', 'a string');
-    if (typeof parsed.state !== 'string') invalid(lineNumber, 'state', 'a string');
-    if (typeof parsed.core_passed !== 'number') invalid(lineNumber, 'core_passed', 'a number');
-    if (typeof parsed.core_total !== 'number') invalid(lineNumber, 'core_total', 'a number');
-    records.push(parsed as unknown as ScbenchRunRecord);
+    const { problem, checkpoint, state, core_passed, core_total } = parsed;
+    if (typeof problem !== 'string') throw invalid(lineNumber, 'problem', 'a string');
+    if (typeof checkpoint !== 'string') throw invalid(lineNumber, 'checkpoint', 'a string');
+    if (typeof state !== 'string') throw invalid(lineNumber, 'state', 'a string');
+    if (typeof core_passed !== 'number') throw invalid(lineNumber, 'core_passed', 'a number');
+    if (typeof core_total !== 'number') throw invalid(lineNumber, 'core_total', 'a number');
+    records.push({ problem, checkpoint, state, core_passed, core_total });
   }
   return records;
 }

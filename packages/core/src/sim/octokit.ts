@@ -1,6 +1,8 @@
 // packages/core/src/sim/octokit.ts — reusable fake octokit covering the REST/graphql
 // surface core calls, with per-endpoint scripted response/latency/failure.
 
+import type { Octokit } from '@octokit/rest';
+
 import { applyLatency, realSimClock, type SimClock, type SimLatency } from './latency.js';
 
 export type SimRecordedCall = [string, ...unknown[]];
@@ -94,4 +96,13 @@ export function createSimOctokit(options: SimOctokitOptions = {}): {
   };
 
   return { octokit, calls };
+}
+
+/** Widens the simulator's fake to the `Octokit` type `planPhase`/`shipPhase` declare.
+ *  Invariant, checked by construction: `SimOctokit` implements every endpoint those two
+ *  phases reach for — graphql, issues.get, issues.createComment, pulls.list/create/get and
+ *  checks.listForRef — and the sim pipeline suites fail loudly if one goes missing. A single
+ *  assertion, never a chain: the fake is a real subset of Octokit, not an unrelated value. */
+export function asPhaseOctokit(octokit: SimOctokit): Octokit {
+  return octokit as Octokit;
 }

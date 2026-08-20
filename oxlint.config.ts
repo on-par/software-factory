@@ -35,5 +35,18 @@ export default defineConfig({
     'anti-slop/no-shape-in-symbol-names': 'error',
     'anti-slop/no-unknown-type-aliases': 'error',
     'anti-slop/no-widen-then-assert': 'error',
+    // #796: the one anti-slop rule that found real defects here. Production is clean;
+    // test files are exempted below until the follow-up clears their ~28 chains.
+    'anti-slop/no-chained-type-assertions': 'error',
   },
+  overrides: [
+    {
+      // Test files still carry ~28 chained assertions (mostly around fetch/octokit doubles).
+      // Exempted here so #796 stays small and its production risk is isolated; cleared by #797.
+      files: ['**/*.test.ts', '**/*.test.tsx'],
+      rules: {
+        'anti-slop/no-chained-type-assertions': 'off',
+      },
+    },
+  ],
 });
