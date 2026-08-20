@@ -86,7 +86,7 @@ Run from the repo root unless noted. Node.js **≥ 20** required.
 - **Config as source of truth:** model routing lives in `packages/config/src/defaults.ts`; do not hard-code model lists in `core`.
 - **`core`'s root export is the narrow public API** — implementation details live behind `@on-par/factory-core/internal`, test helpers behind `@on-par/factory-core/testing` (ADR-0004).
 - **`packages/server` is a real but deliberately narrow local server** — it binds loopback, exposes only `GET /events` (SSE over the lane lifecycle bus), takes the bus as an injected port, and depends on `@on-par/contracts` only — no auth and no control endpoints yet (#583).
-- **Lint:** Oxlint with the TS 7-native `oxlint-tsgolint` type-aware backend. Configuration lives in `.oxlintrc.json`; run `npm run lint`, which denies warnings.
+- **Lint:** Oxlint with the TS 7-native `oxlint-tsgolint` type-aware backend. Configuration lives in `oxlint.config.ts`; run `npm run lint`, which denies warnings.
 
 ## Testing
 
