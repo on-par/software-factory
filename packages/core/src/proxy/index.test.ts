@@ -309,13 +309,13 @@ describe('createLaneProxy', () => {
 
   it('treats a lease with a corrupted/out-of-range port as not running (never dials it)', async () => {
     const worktreeId = join(dir, 'ship-it-bad-port');
-    const lease = {
+    const lease: PortLease = {
       worktreeId,
       branch: 'ship-it/bad-port',
       port: 999999,
       pid: process.pid,
       acquiredAt: new Date().toISOString(),
-    } as unknown as PortLease;
+    };
     await writeRegistry(registryFile, [lease]);
 
     proxy = createLaneProxy({ registryFile, port: 0 });

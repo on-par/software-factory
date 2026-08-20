@@ -62,6 +62,12 @@ function minimalEvaluation(overrides: Partial<ScbenchEvaluation> = {}): ScbenchE
   };
 }
 
+/** evaluation.json is untrusted input read off disk; these overrides are typed as `unknown` per
+ *  field precisely so the validation-failure cases can express values the schema must reject. */
+function malformedEvaluationJson(overrides: { [K in keyof ScbenchEvaluation]?: unknown }): string {
+  return JSON.stringify({ ...minimalEvaluation(), ...overrides });
+}
+
 describe('loadBaselineConfig', () => {
   it('accepts the committed baseline config', () => {
     const raw = readFileSync(BASELINE_CONFIG_PATH, 'utf-8');
@@ -456,9 +462,7 @@ describe('collectBaselineTrials', () => {
     const tree = { '/runs': [fakeEntry('manifest.json', false)] };
     const files = {
       '/runs/manifest.json': JSON.stringify(minimalManifest()),
-      '/runs/evaluation.json': JSON.stringify(
-        minimalEvaluation({ infrastructure_failure: 'no' as unknown as boolean }),
-      ),
+      '/runs/evaluation.json': malformedEvaluationJson({ infrastructure_failure: 'no' }),
     };
     const deps = fakeDeps(tree, files, ['/runs']);
     expect(() => collectBaselineTrials('/runs', deps)).toThrow(/field "infrastructure_failure" must be a boolean/);
@@ -468,9 +472,7 @@ describe('collectBaselineTrials', () => {
     const tree = { '/runs': [fakeEntry('manifest.json', false)] };
     const files = {
       '/runs/manifest.json': JSON.stringify(minimalManifest()),
-      '/runs/evaluation.json': JSON.stringify(
-        minimalEvaluation({ pass_counts: { Core: 'three' as unknown as number } }),
-      ),
+      '/runs/evaluation.json': malformedEvaluationJson({ pass_counts: { Core: 'three' } }),
     };
     const deps = fakeDeps(tree, files, ['/runs']);
     expect(() => collectBaselineTrials('/runs', deps)).toThrow(/field "pass_counts" must be/);
@@ -480,9 +482,7 @@ describe('collectBaselineTrials', () => {
     const tree = { '/runs': [fakeEntry('manifest.json', false)] };
     const files = {
       '/runs/manifest.json': JSON.stringify(minimalManifest()),
-      '/runs/evaluation.json': JSON.stringify(
-        minimalEvaluation({ total_counts: { Core: 'three' as unknown as number } }),
-      ),
+      '/runs/evaluation.json': malformedEvaluationJson({ total_counts: { Core: 'three' } }),
     };
     const deps = fakeDeps(tree, files, ['/runs']);
     expect(() => collectBaselineTrials('/runs', deps)).toThrow(/field "total_counts" must be/);
@@ -492,7 +492,7 @@ describe('collectBaselineTrials', () => {
     const tree = { '/runs': [fakeEntry('manifest.json', false)] };
     const files = {
       '/runs/manifest.json': JSON.stringify(minimalManifest()),
-      '/runs/evaluation.json': JSON.stringify(minimalEvaluation({ pytest_exit_code: 'zero' as unknown as number })),
+      '/runs/evaluation.json': malformedEvaluationJson({ pytest_exit_code: 'zero' }),
     };
     const deps = fakeDeps(tree, files, ['/runs']);
     expect(() => collectBaselineTrials('/runs', deps)).toThrow(/field "pytest_exit_code" must be a number/);
