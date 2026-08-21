@@ -1006,6 +1006,38 @@ describe('cli', () => {
     ]);
   });
 
+  it('self-merges via .factory/config.json merge.auto with FACTORY_MERGE unset', async () => {
+    const calls: any[] = [];
+    const octokit: any = {};
+    const paths: any = {
+      events: '/repo/.factory/events.ndjson',
+      stop: '/repo/.factory/STOP',
+      config: '/repo/.factory/config.json',
+    };
+
+    expect(process.env.FACTORY_MERGE).toBeUndefined();
+
+    await waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
+      createOctokit: () => octokit,
+      pathExists: () => false,
+      checkMerged: async () => false,
+      loadConfig: (configPath: string) => {
+        calls.push(['loadConfig', configPath]);
+        return fakeFactoryConfig(true);
+      },
+      listIssueLabels: async () => ['bug'],
+      land: async (...args: any[]) => {
+        calls.push(['land', args]);
+        return { branch: 'ship-it/21-self-merge', prNumber: 321 };
+      },
+      emitEvent: () => {},
+      sleep: async () => {},
+    });
+
+    expect(calls).toContainEqual(['loadConfig', '/repo/.factory/config.json']);
+    expect(calls.some((call) => call[0] === 'land')).toBe(true);
+  });
+
   it('falls back to the GitHub API for issue labels when no listIssueLabels override is provided', async () => {
     const calls: any[] = [];
     const octokit: any = {

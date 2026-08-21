@@ -13,6 +13,7 @@ import type {
   CheckSummary,
   EnvironmentProxySettings,
   EventKind,
+  FactoryConfig,
   FailoverReason,
   FailurePhase,
   GithubIssueParams,
@@ -74,7 +75,7 @@ import {
   laneBaseUrl,
   laneHostLabel,
   listQueuedSteering,
-  loadFactoryConfig,
+  loadFactoryConfigForRepo,
   loadModelsConfig,
   loadRepoConfig,
   loadRoutesConfig,
@@ -628,7 +629,7 @@ async function cmdKpis() {
 
   if (prSources.length > 0) {
     try {
-      const windowDays = resolveDefectWindowDays(loadFactoryConfig());
+      const windowDays = resolveDefectWindowDays(loadFactoryConfigForRepo(paths.config));
       const now = new Date().toISOString();
       const merged = mergedPrRefs(prSources);
       const sources = await fetchDefectSources(getOctokit(), owner, repoName, merged, { now, windowDays });
@@ -915,7 +916,7 @@ export async function shipIssue(
   const repoConfig = loadRepoConfig(repoRoot);
   const modelsConfig = applyRepoConfig(loadModelsConfig(), repoConfig);
   const routesConfig = loadRoutesConfig();
-  const factoryConfig = loadFactoryConfig();
+  const factoryConfig = loadFactoryConfigForRepo(paths.config);
   const timeouts = resolveTimeouts(factoryConfig);
   const failoverSettings = resolveAutoFailover(factoryConfig);
   const breaker = new ProviderBreaker(paths.breaker);
@@ -1893,7 +1894,7 @@ export async function withRepoRunLock<T>(
 export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  const factoryConfig = loadFactoryConfig();
+  const factoryConfig = loadFactoryConfigForRepo(paths.config);
   const ttlDays = opts.ttlDays !== undefined ? Number(opts.ttlDays) : factoryConfig.worktree.gcTtlDays;
   if (!Number.isFinite(ttlDays) || ttlDays < 0) {
     throw new CliExitError('factory: --ttl-days must be a non-negative number', 2);
@@ -1912,7 +1913,7 @@ export async function cmdLand(issueNum: number) {
   const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
   const octokit = getOctokit();
-  const factoryConfig = loadFactoryConfig();
+  const factoryConfig = loadFactoryConfigForRepo(paths.config);
   const skipCI = resolveSkipCI(factoryConfig);
 
   try {
@@ -2181,7 +2182,7 @@ export async function startLaneProxy(
 async function cmdProxy() {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  const factoryConfig = loadFactoryConfig();
+  const factoryConfig = loadFactoryConfigForRepo(paths.config);
   const settings = resolveEnvironmentProxy(factoryConfig);
 
   if (!settings.enabled) {
@@ -2274,7 +2275,7 @@ async function cmdRun() {
 
   return withRepoRunLock(paths, 'factory run', async () => {
     const ghRepo = await getGitHubRepo();
-    const factoryConfig = loadFactoryConfig();
+    const factoryConfig = loadFactoryConfigForRepo(paths.config);
     if (factoryConfig.worktree.autoGcOnRun) {
       try {
         const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
@@ -2420,7 +2421,7 @@ export function createIngestHook(
 async function cmdSupervise(opts: { now?: boolean }) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  const ingestCfg = resolveIngestConfig(loadFactoryConfig());
+  const ingestCfg = resolveIngestConfig(loadFactoryConfigForRepo(paths.config));
 
   const content = existsSync(paths.queue) ? readFileSync(paths.queue, 'utf-8') : '';
   const { entries, diagnostics } = parseQueue(content);
@@ -2895,7 +2896,7 @@ export async function listOpenFactoryPRs(
 
 export interface SweepDeps {
   createOctokit?: () => Octokit;
-  loadConfig?: typeof loadFactoryConfig;
+  loadConfig?: (configPath: string) => FactoryConfig;
   listPRs?: typeof listOpenFactoryPRs;
   land?: typeof landIssue;
   emitEvent?: typeof logEvent;
@@ -2914,7 +2915,7 @@ export async function sweepApprovedPRs(
 }> {
   const {
     createOctokit = getOctokit,
-    loadConfig = loadFactoryConfig,
+    loadConfig = loadFactoryConfigForRepo,
     listPRs = listOpenFactoryPRs,
     land = landIssue,
     emitEvent = logEvent,
@@ -2923,7 +2924,7 @@ export async function sweepApprovedPRs(
 
   const [owner, repoName] = ghRepo.split('/');
   const octokit = createOctokit();
-  const skipCI = resolveSkipCI(loadConfig());
+  const skipCI = resolveSkipCI(loadConfig(paths.config));
   const prs = await listPRs(octokit, owner, repoName);
 
   const landed: number[] = [];
@@ -3015,7 +3016,7 @@ type WaitForMergeDeps = {
   createOctokit?: () => Octokit;
   pathExists?: (path: string) => boolean;
   checkMerged?: typeof isPrMerged;
-  loadConfig?: typeof loadFactoryConfig;
+  loadConfig?: (configPath: string) => FactoryConfig;
   land?: (
     issueNum: number,
     repoRoot: string,
@@ -3049,7 +3050,7 @@ export async function waitForMerge(
     createOctokit = getOctokit,
     pathExists = existsSync,
     checkMerged = isPrMerged,
-    loadConfig = loadFactoryConfig,
+    loadConfig = loadFactoryConfigForRepo,
     land = landIssue,
     listIssueLabels = defaultListIssueLabels,
     sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
@@ -3058,7 +3059,7 @@ export async function waitForMerge(
     writeLine = (line) => console.log(line),
     now = () => Date.now(),
   } = deps;
-  const factoryConfig = loadConfig();
+  const factoryConfig = loadConfig(paths.config);
   const isMergeEnabled = mergeEnabled ?? (() => factoryConfig.merge.auto || process.env.FACTORY_MERGE === '1');
   const skipCI = resolveSkipCI(factoryConfig);
   const filingPolicy = resolveFilingPolicy(factoryConfig);
@@ -3284,7 +3285,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
       console.log(formatReconcileReport(reaped));
 
       if (reaped.length > 0) {
-        const graceMs = resolveProcessGroupGraceMs(loadFactoryConfig());
+        const graceMs = resolveProcessGroupGraceMs(loadFactoryConfigForRepo(paths.config));
         const orphanEvents = await reapOrphanProcesses({ reaped, graceMs });
         for (const e of orphanEvents) {
           console.log(

@@ -5,7 +5,7 @@
 // validates those defaults when called with no path, or reads and validates
 // an explicit JSON file path.
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import {
@@ -241,6 +241,84 @@ export function loadRoutesConfig(path?: string): RoutesConfig {
 export function loadFactoryConfig(path?: string): FactoryConfig {
   const raw = path === undefined ? defaultFactoryConfig : JSON.parse(readFileSync(path, 'utf-8'));
   return FactoryConfigSchema.parse(raw);
+}
+
+/** Top-level keys of `.factory/config.json` owned by FactoryConfigSchema (runtime policy).
+ *  The rest of the file belongs to RepoFactoryConfigSchema's model-routing namespace in
+ *  ./repo.ts, and each loader ignores the other's keys. `version` is deliberately absent:
+ *  it is the repo namespace's literal, and FactoryConfig's version comes from the defaults.
+ *  Adding a new top-level section to FactoryConfigSchema means adding it here too. */
+export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
+  'paths',
+  'timeouts',
+  'merge',
+  'worktree',
+  'byok',
+  'notifications',
+  'cost_tracking',
+  'ci',
+  'plan_approval',
+  'kpis',
+  'sandbox',
+  'discovery',
+  'filing',
+  'ingest',
+  'environment',
+  'auto_failover',
+];
+
+export function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Narrow a known-object value to a plain record via the isPlainObject type guard rather than a
+ *  type assertion — `defaultFactoryConfig` has no index signature, so it cannot be cast directly. */
+function asRecord(value: unknown): Record<string, unknown> {
+  if (!isPlainObject(value)) throw new Error('expected a plain object');
+  return value;
+}
+
+/** Recursive merge of plain objects only — arrays and tuples (e.g. environment.ports.range)
+ *  replace wholesale rather than merging element-wise. */
+function deepMergeConfig(base: Record<string, unknown>, overlay: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(overlay)) {
+    const current = out[key];
+    out[key] = isPlainObject(current) && isPlainObject(value) ? deepMergeConfig(current, value) : value;
+  }
+  return out;
+}
+
+/** Load the effective FactoryConfig for a repo: the shipped defaults, with the runtime-policy
+ *  keys of `<repoRoot>/.factory/config.json` (i.e. `getFactoryPaths(repoRoot).config`) merged
+ *  over them. Returns the shipped defaults untouched when the file does not exist. A partial
+ *  section is legal — `{"merge": {"auto": true}}` overrides only `merge.auto`. The file's
+ *  model-routing keys are ignored here; `loadRepoConfig` owns them. */
+export function loadFactoryConfigForRepo(configPath: string): FactoryConfig {
+  if (!existsSync(configPath)) return loadFactoryConfig();
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(configPath, 'utf-8'));
+  } catch (err) {
+    throw new Error(`Failed to parse ${configPath}: ${(err as Error).message}`);
+  }
+  if (!isPlainObject(raw)) {
+    throw new Error(`Invalid ${configPath}: expected a JSON object`);
+  }
+
+  const overlay: Record<string, unknown> = {};
+  for (const key of FACTORY_RUNTIME_CONFIG_KEYS) {
+    if (key in raw) overlay[key] = raw[key];
+  }
+
+  const merged = deepMergeConfig(asRecord(defaultFactoryConfig), overlay);
+  const result = FactoryConfigSchema.safeParse(merged);
+  if (!result.success) {
+    const issues = result.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
+    throw new Error(`Invalid ${configPath}: ${issues}`);
+  }
+  return result.data;
 }
 
 export function resolveTimeouts(
