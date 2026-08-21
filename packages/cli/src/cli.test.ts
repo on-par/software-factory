@@ -27,6 +27,7 @@ import {
   initConstitution,
   InvalidProductNameError,
   isPermanentMergeCheckError,
+  IssueDecomposedError,
   IssueSkippedError,
   isPrMerged,
   isReviewRequiredMergeError,
@@ -2764,7 +2765,7 @@ describe('cli', () => {
         'event',
         'lane-done',
         'app',
-        'lane complete (2 merged, 0 awaiting review, 0 skipped)',
+        'lane complete (2 merged, 0 awaiting review, 0 skipped, 0 decomposed)',
         { lane: 'app' },
       ]);
     });
@@ -2796,7 +2797,7 @@ describe('cli', () => {
         'event',
         'lane-done',
         'app',
-        'lane complete (1 merged, 1 awaiting review, 0 skipped)',
+        'lane complete (1 merged, 1 awaiting review, 0 skipped, 0 decomposed)',
         { lane: 'app' },
       ]);
     });
@@ -2828,7 +2829,75 @@ describe('cli', () => {
         'event',
         'lane-done',
         'app',
-        'lane complete (1 merged, 0 awaiting review, 1 skipped)',
+        'lane complete (1 merged, 0 awaiting review, 1 skipped, 0 decomposed)',
+        { lane: 'app' },
+      ]);
+    });
+
+    it('splices the decomposed children in after the current issue and ships them in this same lane run, instead of parking', async () => {
+      const calls: any[] = [];
+      await runLane('app', [1, 2], '/repo', 'on-par/software-factory', paths, {
+        ship: async (issue) => {
+          calls.push(['ship', issue]);
+          if (issue === 1) throw new IssueDecomposedError('issue #1 decomposed into #10, #11', [10, 11]);
+          return `ship-it/${issue}-x`;
+        },
+        waitMerge: async (issue) => {
+          calls.push(['waitMerge', issue]);
+        },
+        pathExists: () => false,
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
+          calls.push(['event', type, issue, msg, extra]),
+      });
+
+      expect(calls.filter((c) => c[0] === 'ship')).toEqual([
+        ['ship', 1],
+        ['ship', 10],
+        ['ship', 11],
+        ['ship', 2],
+      ]);
+      expect(calls.filter((c) => c[0] === 'waitMerge')).toEqual([
+        ['waitMerge', 10],
+        ['waitMerge', 11],
+        ['waitMerge', 2],
+      ]);
+      const events = calls.filter((c) => c[0] === 'event');
+      expect(events.some((e) => e[1] === 'parked')).toBe(false);
+      expect(events.some((e) => e[1] === 'decompose_filed' && e[2] === 1)).toBe(true);
+      expect(events.at(-1)).toEqual([
+        'event',
+        'lane-done',
+        'app',
+        'lane complete (3 merged, 0 awaiting review, 0 skipped, 1 decomposed)',
+        { lane: 'app' },
+      ]);
+    });
+
+    it('does not enqueue a decomposed child that is already in the lane list', async () => {
+      const calls: any[] = [];
+      await runLane('app', [1, 2], '/repo', 'on-par/software-factory', paths, {
+        ship: async (issue) => {
+          calls.push(['ship', issue]);
+          if (issue === 1) throw new IssueDecomposedError('issue #1 decomposed into #2', [2]);
+          return `ship-it/${issue}-x`;
+        },
+        waitMerge: async (issue) => {
+          calls.push(['waitMerge', issue]);
+        },
+        pathExists: () => false,
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
+          calls.push(['event', type, issue, msg, extra]),
+      });
+
+      expect(calls.filter((c) => c[0] === 'ship')).toEqual([
+        ['ship', 1],
+        ['ship', 2],
+      ]);
+      expect(calls.at(-1)).toEqual([
+        'event',
+        'lane-done',
+        'app',
+        'lane complete (1 merged, 0 awaiting review, 0 skipped, 1 decomposed)',
         { lane: 'app' },
       ]);
     });

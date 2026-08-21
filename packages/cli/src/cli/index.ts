@@ -116,6 +116,7 @@ import {
   resolveTimeouts,
   resolveUsageCap,
   ReworkHistory,
+  rewriteQueueForDecomposition,
   runAutoIngest,
   scoreIssueReadiness,
   shipPhase,
@@ -1204,6 +1205,32 @@ export async function shipIssue(
     });
     route = plan.route;
     if (!plan.ok) {
+      const decomposedChildren = plan.decomposed?.childIssues ?? [];
+      if (decomposedChildren.length > 0) {
+        const planLog = mkLog('plan');
+        try {
+          const before = existsSync(paths.queue) ? readFileSync(paths.queue, 'utf-8') : '';
+          const rewrite = rewriteQueueForDecomposition(before, { issue: issueNum, childIssues: decomposedChildren });
+          if (rewrite.changed) {
+            writeFileSync(paths.queue, rewrite.content);
+            planLog(
+              'decompose_filed',
+              `queue entry for #${issueNum} replaced with ${decomposedChildren.map((n) => `#${n}`).join(', ')}`,
+            );
+          } else {
+            planLog(
+              'decompose_filed',
+              `#${issueNum} had no queue entry to replace — continuing the lane with ${decomposedChildren.map((n) => `#${n}`).join(', ')}`,
+            );
+          }
+        } catch (err) {
+          planLog('decompose_file_failed', `queue rewrite for #${issueNum} failed: ${errorDetail(err)}`);
+        }
+        throw new IssueDecomposedError(
+          `issue #${issueNum} decomposed into ${decomposedChildren.map((n) => `#${n}`).join(', ')}`,
+          decomposedChildren,
+        );
+      }
       throw new LaneParkError(`plan escalated: ${plan.escalate ?? 'unknown'}`, 'escalate');
     }
     assertWithinIssueBudget('PLAN');
@@ -1443,6 +1470,7 @@ export async function shipIssue(
     console.log(chalk.green(`✅ Issue #${issueNum} → ${readyMsg}`));
     return branch;
   } catch (err: any) {
+    if (err instanceof IssueDecomposedError) throw err;
     for (const e of parkEvents(err)) log(e.type, e.msg);
     const reportPath = await maybeWriteLocalRunReport({
       issueNum,
@@ -2476,6 +2504,8 @@ export async function runLane(
   let merged = 0;
   let awaitingReview = 0;
   let skipped = 0;
+  let decomposed = 0;
+  const seen = new Set(issues);
   for (let i = 0; i < issues.length; i++) {
     const issue = issues[i];
     if (pathExists(paths.stop)) {
@@ -2498,6 +2528,22 @@ export async function runLane(
         skipped++;
         continue;
       }
+      if (err instanceof IssueDecomposedError) {
+        // shipIssue already rewrote the queue — splice the children in after the
+        // current issue so this same lane run ships them, deduping ones already queued.
+        const fresh = err.childIssues.filter((n) => !seen.has(n));
+        for (const n of fresh) seen.add(n);
+        issues.splice(i + 1, 0, ...fresh);
+        decomposed++;
+        emitEvent(
+          paths.events,
+          'decompose_filed',
+          issue,
+          `lane '${lane}' continuing with ${fresh.length} child issue(s) in place of #${issue}`,
+          { lane },
+        );
+        continue;
+      }
       const reason = parkReasonFor(err);
       // Terminal reason events (escalate/timeout/fail/conflict) are emitted exactly
       // once by the layer that detects the failure — shipIssue for pipeline failures,
@@ -2517,7 +2563,7 @@ export async function runLane(
     paths.events,
     'lane-done',
     lane,
-    `lane complete (${merged} merged, ${awaitingReview} awaiting review, ${skipped} skipped)`,
+    `lane complete (${merged} merged, ${awaitingReview} awaiting review, ${skipped} skipped, ${decomposed} decomposed)`,
     { lane },
   );
 }
@@ -2616,6 +2662,18 @@ export class AwaitingReviewError extends Error {
   constructor(
     message: string,
     readonly prNumber: number,
+  ) {
+    super(message);
+  }
+}
+
+/** The target issue tripped the PLAN pre-flight size gate and was decomposed into real
+ *  filed sub-issues; the queue was rewritten. Not a park — the lane continues with the
+ *  children in place of the oversized issue. (#823) */
+export class IssueDecomposedError extends Error {
+  constructor(
+    message: string,
+    readonly childIssues: number[],
   ) {
     super(message);
   }
