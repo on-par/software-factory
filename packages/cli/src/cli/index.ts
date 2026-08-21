@@ -1207,29 +1207,24 @@ export async function shipIssue(
     if (!plan.ok) {
       const decomposedChildren = plan.decomposed?.childIssues ?? [];
       if (decomposedChildren.length > 0) {
+        const childList = decomposedChildren.map((n) => `#${n}`).join(', ');
         const planLog = mkLog('plan');
         try {
           const before = existsSync(paths.queue) ? readFileSync(paths.queue, 'utf-8') : '';
           const rewrite = rewriteQueueForDecomposition(before, { issue: issueNum, childIssues: decomposedChildren });
           if (rewrite.changed) {
             writeFileSync(paths.queue, rewrite.content);
-            planLog(
-              'decompose_filed',
-              `queue entry for #${issueNum} replaced with ${decomposedChildren.map((n) => `#${n}`).join(', ')}`,
-            );
+            planLog('decompose_filed', `queue entry for #${issueNum} replaced with ${childList}`);
           } else {
             planLog(
               'decompose_filed',
-              `#${issueNum} had no queue entry to replace — continuing the lane with ${decomposedChildren.map((n) => `#${n}`).join(', ')}`,
+              `#${issueNum} had no queue entry to replace — continuing the lane with ${childList}`,
             );
           }
         } catch (err) {
           planLog('decompose_file_failed', `queue rewrite for #${issueNum} failed: ${errorDetail(err)}`);
         }
-        throw new IssueDecomposedError(
-          `issue #${issueNum} decomposed into ${decomposedChildren.map((n) => `#${n}`).join(', ')}`,
-          decomposedChildren,
-        );
+        throw new IssueDecomposedError(`issue #${issueNum} decomposed into ${childList}`, decomposedChildren);
       }
       throw new LaneParkError(`plan escalated: ${plan.escalate ?? 'unknown'}`, 'escalate');
     }

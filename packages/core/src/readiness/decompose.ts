@@ -225,7 +225,7 @@ export function parseDecompositionOutput(
     // loop in decomposeOversizedIssue and the decompose dies after one attempt.
     return {
       ok: false,
-      reason: `output fails the contracts schema: ${error instanceof Error ? error.message : String(error)}`,
+      reason: `output fails the contracts schema: ${errorDetail(error)}`,
     };
   }
 }

@@ -452,6 +452,7 @@ ${Array.from(
 
       expect(result.ok).toBe(false);
       expect(result.escalate).toMatch(/bounded-build budget/);
+      expect(result.decomposed).toBeUndefined();
       expect(stub.calls.map((call) => call.task)).toContain('decompose');
       expect(createComment).toHaveBeenCalledTimes(1);
       expect(events).toContain('size-gate-escalated');
