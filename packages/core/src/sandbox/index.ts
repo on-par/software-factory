@@ -85,6 +85,7 @@ export function resolveSandboxPolicy(
     tmp,
     resolve(home, '.claude'),
     resolve(home, '.codex'),
+    resolve(home, '.openclaw'),
     resolve(home, '.npm'),
     resolve(home, '.cache'),
     resolve(home, '.config'),
