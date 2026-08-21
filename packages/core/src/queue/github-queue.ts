@@ -163,14 +163,17 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     ensuredLanes.add(lane);
   }
 
+  async function candidatesFor(lane: string): Promise<QueueIssue[]> {
+    return client.listOpenIssuesWithLabels({ owner, repo, labels: [QUEUED_LABEL, laneLabel(lane)] });
+  }
+
   async function list(lane: string): Promise<number[]> {
-    const issues = await client.listOpenIssuesWithLabels({ owner, repo, labels: [QUEUED_LABEL, laneLabel(lane)] });
+    const issues = await candidatesFor(lane);
     return issues.map((i) => i.number).sort((a, b) => a - b);
   }
 
   async function claimNext(lane: string): Promise<number | null> {
-    const laneName = laneLabel(lane);
-    const candidates = (await client.listOpenIssuesWithLabels({ owner, repo, labels: [QUEUED_LABEL, laneName] }))
+    const candidates = (await candidatesFor(lane))
       .filter((i) => !i.labels.includes(IN_PROGRESS_LABEL))
       .sort((a, b) => a.number - b.number);
     if (candidates.length === 0) return null;
