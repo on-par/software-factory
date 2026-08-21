@@ -1210,7 +1210,7 @@ export async function shipIssue(
         const childList = decomposedChildren.map((n) => `#${n}`).join(', ');
         const planLog = mkLog('plan');
         try {
-          const before = existsSync(paths.queue) ? readFileSync(paths.queue, 'utf-8') : '';
+          const before = readTextFileOrEmpty(paths.queue);
           const rewrite = rewriteQueueForDecomposition(before, { issue: issueNum, childIssues: decomposedChildren });
           if (rewrite.changed) {
             writeFileSync(paths.queue, rewrite.content);
