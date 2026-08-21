@@ -24,6 +24,8 @@ import type { ModelRouter } from '../router/index.js';
 import type { FailoverReason } from '../types/index.js';
 import { MAX_ACCEPTANCE_CRITERIA_ITEMS, MAX_IN_SCOPE_ITEMS } from './size.js';
 
+const errorDetail = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
 // ---------------------------------------------------------------------------
 // Prompt builder
 // ---------------------------------------------------------------------------
@@ -368,9 +370,116 @@ export function renderDecompositionComment(decomposition: DecompositionOutput): 
   return lines.join('\n').trim();
 }
 
+/** Renders a filed child issue's body with exactly the five factory-task headings
+ *  (`FACTORY_TASK_REQUIRED_FIELDS`) so it scores as a ready factory-task on its own —
+ *  and, deliberately, no `## Children` heading, which would classify it as an epic. */
+export function renderChildIssueBody(story: Story, parentIssue: number): string {
+  const lines: string[] = [
+    '## Problem statement',
+    '',
+    story.problemStatement,
+    '',
+    '## In scope',
+    '',
+    ...story.inScope.map((item) => `- ${item}`),
+    '',
+    '## Out of scope',
+    '',
+    ...story.outOfScope.map((item) => `- ${item}`),
+    '',
+    '## Acceptance criteria',
+    '',
+    ...story.acceptanceCriteria.map(
+      (criterion) =>
+        `- [ ] ${criterion.name} (When: ${criterion.when.join(', ')} — Then: ${criterion.then.join(', ')})`,
+    ),
+    '',
+    '## Verification',
+    '',
+    ...story.verification.map((step) => `- ${step.command} — passes when: ${step.passWhen}`),
+    '',
+    '---',
+    '',
+    `Decomposed from #${parentIssue} by the factory size gate.`,
+  ];
+
+  return lines.join('\n').trim();
+}
+
+/**
+ * Files one factory-task-shaped GitHub issue per story and links each as a native
+ * sub-issue of the original issue. A create failure aborts the whole batch (a partially
+ * filed decomposition must never read as success) and returns []; a link failure keeps
+ * going since the child issue already exists and is still queueable on its own.
+ */
+export async function fileDecomposition(deps: {
+  decomposition: DecompositionOutput;
+  issue: number;
+  repo: string;
+  octokit: Octokit;
+  log: (type: EventKind, msg: string) => void;
+}): Promise<number[]> {
+  const { decomposition, issue, repo, octokit, log } = deps;
+  const [owner, name] = repo.split('/');
+  const childIssues: number[] = [];
+
+  for (const story of decomposition.stories) {
+    let created: { number: number; id: number };
+    try {
+      const response = await octokit.rest.issues.create({
+        owner,
+        repo: name,
+        title: story.title,
+        body: renderChildIssueBody(story, issue),
+      });
+      created = { number: response.data.number, id: response.data.id };
+    } catch (error) {
+      const already =
+        childIssues.length > 0
+          ? `created ${childIssues.map((n) => `#${n}`).join(', ')} before failing — they remain open under #${issue}`
+          : 'no child issues created before failing';
+      log(
+        'decompose_file_failed',
+        `filing child issue "${story.title}" for #${issue} failed: ${errorDetail(error)} (${already})`,
+      );
+      return [];
+    }
+
+    childIssues.push(created.number);
+
+    try {
+      await octokit.request('POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues', {
+        owner,
+        repo: name,
+        issue_number: issue,
+        sub_issue_id: created.id,
+      });
+    } catch (error) {
+      log(
+        'decompose_file_failed',
+        `failed to link #${created.number} as a sub-issue of #${issue}: ${errorDetail(error)}`,
+      );
+    }
+  }
+
+  log(
+    'decompose_filed',
+    `filed ${childIssues.length} child issue(s) under #${issue}: ${childIssues.map((n) => `#${n}`).join(', ')}`,
+  );
+  return childIssues;
+}
+
 // ---------------------------------------------------------------------------
 // Driver
 // ---------------------------------------------------------------------------
+
+export interface DecomposeResult {
+  /** The rendered breakdown was posted as a comment on the original issue. */
+  posted: boolean;
+  /** Numbers of the child issues filed under the original issue, in build order.
+   *  Empty unless deps.fileSubIssues was set AND every child was filed successfully. */
+  childIssues: number[];
+}
 
 export interface DecomposeDriverDeps {
   issue: number;
@@ -390,15 +499,20 @@ export interface DecomposeDriverDeps {
    *  decompose never reports into the breaker, so a lane keeps re-attempting a
    *  known-capped provider on every relaunch cycle with no gating at all. */
   onProviderFailure?: (info: { provider: string; reason: FailoverReason; detail?: string }) => void | Promise<void>;
+  /** File the decomposition as real GitHub issues linked as native sub-issues of the
+   *  original issue, instead of only commenting. Off by default: only the PLAN
+   *  pre-flight size gate opts in — the post-plan build-scope gate stays advisory (#823). */
+  fileSubIssues?: boolean;
 }
 
 /**
  * Runs the bounded decomposition pass: up to maxAttempts model calls (retrying with the
  * INVEST violations), then — only when every story passes the core-owned INVEST gate —
- * posts the rendered breakdown as a comment on the original issue. Never throws to the
- * caller and never files issues or mutates the issue body.
+ * posts the rendered breakdown as a comment on the original issue, and, when
+ * `fileSubIssues` is set, files the stories as real linked sub-issues. Never throws to
+ * the caller.
  */
-export async function decomposeOversizedIssue(deps: DecomposeDriverDeps): Promise<{ posted: boolean }> {
+export async function decomposeOversizedIssue(deps: DecomposeDriverDeps): Promise<DecomposeResult> {
   const { issue, repo, title, body, worktree, router, octokit, log, onProviderFailure } = deps;
   const timeoutSeconds = deps.timeoutSeconds;
   const maxAttempts = deps.maxAttempts ?? 2;
@@ -438,17 +552,20 @@ export async function decomposeOversizedIssue(deps: DecomposeDriverDeps): Promis
         'decompose_comment_posted',
         `posted proposed epic + ${parsed.decomposition.stories.length} INVEST-compliant stories as a comment on issue #${issue}`,
       );
-      return { posted: true };
+
+      const childIssues = deps.fileSubIssues
+        ? await fileDecomposition({ decomposition: parsed.decomposition, issue, repo, octokit, log })
+        : [];
+      return { posted: true, childIssues };
     }
 
     log(
       'decompose_failed',
       `decomposition of issue #${issue} failed after ${maxAttempts} attempt(s): ${violations.join('; ')}`,
     );
-    return { posted: false };
+    return { posted: false, childIssues: [] };
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    log('decompose_failed', `decomposition of issue #${issue} failed: ${reason}`);
-    return { posted: false };
+    log('decompose_failed', `decomposition of issue #${issue} failed: ${errorDetail(error)}`);
+    return { posted: false, childIssues: [] };
   }
 }
