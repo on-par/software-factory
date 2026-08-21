@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import type { ModelDiagnosis } from '@on-par/factory-core';
 import { getFactoryPaths } from '@on-par/factory-core';
+import type { GithubQueue } from '@on-par/factory-core/internal';
 import { RunLockHeldError, resolveBranchPrefix } from '@on-par/factory-core/internal';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -34,6 +35,7 @@ import {
   issueFromFactoryBranch,
   LandConflictError,
   LandFailureError,
+  laneQueueDeps,
   landOpenPullRequest,
   LaneParkError,
   listOpenFactoryPRs,
@@ -43,6 +45,7 @@ import {
   MERGE_CHECK_MAX_CONSECUTIVE_FAILURES,
   parkEvents,
   parkReasonFor,
+  planRunLanes,
   PREREQUISITES_TEXT,
   prLookupFailure,
   readActiveProduct,
@@ -531,6 +534,45 @@ describe('cli', () => {
             cmdRunCalls++;
           },
           readQueueFile: () => '',
+        },
+      );
+
+      await runQueue();
+
+      expect(cmdRunCalls).toBe(1);
+    });
+
+    it('an injected pendingCount returning 0 with ingest enabled emits idle and skips cmdRunFn', async () => {
+      let cmdRunCalls = 0;
+      const events: any[] = [];
+      const runQueue = createSuperviseRunQueue(
+        paths,
+        { enabled: true, label: 'ready', lane: 'auto', maxPerCycle: 20 },
+        {
+          cmdRunFn: async () => {
+            cmdRunCalls++;
+          },
+          pendingCount: async () => 0,
+          emitEvent: (...args: any[]) => events.push(args),
+        },
+      );
+
+      await runQueue();
+
+      expect(cmdRunCalls).toBe(0);
+      expect(events).toEqual([[paths.events, 'idle', 'auto', 'queue empty — waiting for ready issues']]);
+    });
+
+    it('an injected pendingCount returning a nonzero count calls cmdRunFn', async () => {
+      let cmdRunCalls = 0;
+      const runQueue = createSuperviseRunQueue(
+        paths,
+        { enabled: true, label: 'ready', lane: 'auto', maxPerCycle: 20 },
+        {
+          cmdRunFn: async () => {
+            cmdRunCalls++;
+          },
+          pendingCount: async () => 2,
         },
       );
 
@@ -2916,6 +2958,303 @@ describe('cli', () => {
       expect(seen).toEqual([
         { opts: {}, ctx: { repoRoot: '/repo', ghRepo: 'on-par/software-factory', lane: 'app' } },
         { opts: {}, ctx: { repoRoot: '/repo', ghRepo: 'on-par/software-factory', lane: 'app' } },
+      ]);
+    });
+
+    it('claims issues one at a time from claimNext and releases each as done on the green path', async () => {
+      const calls: any[] = [];
+      const toClaim = [1, 2];
+      await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
+        ship: async (issue) => {
+          calls.push(['ship', issue]);
+          return `ship-it/${issue}-x`;
+        },
+        waitMerge: async (issue) => {
+          calls.push(['waitMerge', issue]);
+        },
+        pathExists: () => false,
+        emitEvent: () => {},
+        claimNext: async () => toClaim.shift() ?? null,
+        releaseIssue: async (issue, outcome) => {
+          calls.push(['release', issue, outcome]);
+        },
+      });
+
+      expect(calls.filter((c) => c[0] === 'ship')).toEqual([
+        ['ship', 1],
+        ['ship', 2],
+      ]);
+      expect(calls.filter((c) => c[0] === 'release')).toEqual([
+        ['release', 1, 'done'],
+        ['release', 2, 'done'],
+      ]);
+    });
+
+    it('releases as parked and claims no further ahead when a park happens', async () => {
+      const calls: any[] = [];
+      const toClaim = [1, 2];
+      await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
+        ship: async (issue) => {
+          calls.push(['ship', issue]);
+          if (issue === 1) throw new LaneParkError('boom', 'fail');
+          return `ship-it/${issue}-x`;
+        },
+        waitMerge: async () => {},
+        pathExists: () => false,
+        emitEvent: () => {},
+        claimNext: async () => {
+          calls.push(['claimNext']);
+          return toClaim.shift() ?? null;
+        },
+        releaseIssue: async (issue, outcome) => {
+          calls.push(['release', issue, outcome]);
+        },
+      });
+
+      expect(calls.filter((c) => c[0] === 'claimNext')).toHaveLength(1);
+      expect(calls.filter((c) => c[0] === 'release')).toEqual([['release', 1, 'parked']]);
+    });
+
+    it('releases as done on skip, continuing to claim further issues', async () => {
+      const calls: any[] = [];
+      const toClaim = [1, 2];
+      await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
+        ship: async (issue) => {
+          calls.push(['ship', issue]);
+          if (issue === 1) throw new IssueSkippedError('#1 already closed', 'already-closed');
+          return `ship-it/${issue}-x`;
+        },
+        waitMerge: async () => {},
+        pathExists: () => false,
+        emitEvent: () => {},
+        claimNext: async () => toClaim.shift() ?? null,
+        releaseIssue: async (issue, outcome) => {
+          calls.push(['release', issue, outcome]);
+        },
+      });
+
+      expect(calls.filter((c) => c[0] === 'release')).toEqual([
+        ['release', 1, 'done'],
+        ['release', 2, 'done'],
+      ]);
+    });
+
+    it('releases as done on an awaiting-review outcome', async () => {
+      const calls: any[] = [];
+      const toClaim = [1, 2];
+      await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
+        ship: async (issue) => {
+          calls.push(['ship', issue]);
+          return `ship-it/${issue}-x`;
+        },
+        waitMerge: async (issue) => {
+          if (issue === 1) throw new AwaitingReviewError('PR #101 awaiting review', 101);
+        },
+        pathExists: () => false,
+        emitEvent: () => {},
+        claimNext: async () => toClaim.shift() ?? null,
+        releaseIssue: async (issue, outcome) => {
+          calls.push(['release', issue, outcome]);
+        },
+      });
+
+      expect(calls.filter((c) => c[0] === 'release')).toEqual([
+        ['release', 1, 'done'],
+        ['release', 2, 'done'],
+      ]);
+    });
+
+    it('releases as queued (returning it to the pool) when STOP aborts a claimed-but-unstarted issue', async () => {
+      const calls: any[] = [];
+      await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
+        ship: async () => {
+          throw new Error('ship should not be called');
+        },
+        waitMerge: async () => {},
+        pathExists: () => true,
+        emitEvent: (_events, type, issue, msg, extra) => calls.push(['event', type, issue, msg, extra]),
+        claimNext: async () => 1,
+        releaseIssue: async (issue, outcome) => {
+          calls.push(['release', issue, outcome]);
+        },
+      });
+
+      expect(calls.filter((c) => c[0] === 'event' && c[1] === 'stopped')).toHaveLength(1);
+      expect(calls.filter((c) => c[0] === 'release')).toEqual([['release', 1, 'queued']]);
+    });
+
+    it('releases decompose children as done and claims further only once children are exhausted', async () => {
+      const calls: any[] = [];
+      const toClaim = [1];
+      await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
+        ship: async (issue) => {
+          calls.push(['ship', issue]);
+          if (issue === 1) throw new IssueDecomposedError('issue #1 decomposed into #10, #11', [10, 11]);
+          return `ship-it/${issue}-x`;
+        },
+        waitMerge: async () => {},
+        pathExists: () => false,
+        emitEvent: () => {},
+        claimNext: async () => {
+          calls.push(['claimNext']);
+          return toClaim.shift() ?? null;
+        },
+        releaseIssue: async (issue, outcome) => {
+          calls.push(['release', issue, outcome]);
+        },
+      });
+
+      expect(calls.filter((c) => c[0] === 'ship')).toEqual([
+        ['ship', 1],
+        ['ship', 10],
+        ['ship', 11],
+      ]);
+      expect(calls.filter((c) => c[0] === 'release')).toEqual([
+        ['release', 1, 'done'],
+        ['release', 10, 'done'],
+        ['release', 11, 'done'],
+      ]);
+      expect(calls.filter((c) => c[0] === 'claimNext')).toHaveLength(2);
+    });
+
+    it('performs no release calls when no queue deps are provided', async () => {
+      const calls: any[] = [];
+      await runLane('app', [1], '/repo', 'on-par/software-factory', paths, {
+        ship: async (issue) => {
+          calls.push(['ship', issue]);
+          return `ship-it/${issue}-x`;
+        },
+        waitMerge: async () => {},
+        pathExists: () => false,
+        emitEvent: () => {},
+      });
+
+      expect(calls).toEqual([['ship', 1]]);
+    });
+  });
+
+  describe('planRunLanes', () => {
+    it('local mode groups queue file entries by lane without invoking the GitHub queue factory', async () => {
+      const result = await planRunLanes({
+        localQueue: true,
+        readLocalQueue: () => 'app 5\napp 6\ninfra 7\n',
+        queue: () => {
+          throw new Error('queue() should not be called in local mode');
+        },
+      });
+
+      expect(result.diagnostics).toEqual([]);
+      expect(result.lanes).toEqual([
+        { lane: 'app', issues: [5, 6], deps: {} },
+        { lane: 'infra', issues: [7], deps: {} },
+      ]);
+    });
+
+    it('local mode throws CliExitError(2) when the queue file does not exist', async () => {
+      await expect(
+        planRunLanes({
+          localQueue: true,
+          readLocalQueue: () => null,
+          queue: () => {
+            throw new Error('should not be called');
+          },
+        }),
+      ).rejects.toMatchObject({ message: expect.stringContaining('queue empty'), code: 2 });
+    });
+
+    it('local mode returns diagnostics for malformed lines while keeping the good entries', async () => {
+      const result = await planRunLanes({
+        localQueue: true,
+        readLocalQueue: () => 'app 5\nnot-a-valid-line\n',
+        queue: () => {
+          throw new Error('should not be called');
+        },
+      });
+
+      expect(result.diagnostics.length).toBeGreaterThan(0);
+      expect(result.lanes).toEqual([{ lane: 'app', issues: [5], deps: {} }]);
+    });
+
+    it('GitHub mode builds one planned lane per discovered lane, wired to that lane via the queue', async () => {
+      const calls: any[] = [];
+      const fakeQueue: GithubQueue = {
+        claimNext: async (lane) => {
+          calls.push(['claimNext', lane]);
+          return 42;
+        },
+        release: async (issue, outcome) => {
+          calls.push(['release', issue, outcome]);
+        },
+        list: async () => [],
+        lanes: async () => ['app', 'infra'],
+      };
+
+      const result = await planRunLanes({
+        localQueue: false,
+        readLocalQueue: () => {
+          throw new Error('should not be called');
+        },
+        queue: () => fakeQueue,
+      });
+
+      expect(result.diagnostics).toEqual([]);
+      expect(result.lanes.map((l) => ({ lane: l.lane, issues: l.issues }))).toEqual([
+        { lane: 'app', issues: [] },
+        { lane: 'infra', issues: [] },
+      ]);
+
+      await result.lanes[0].deps.claimNext!();
+      expect(calls).toEqual([['claimNext', 'app']]);
+
+      await result.lanes[0].deps.releaseIssue!(9, 'parked');
+      expect(calls).toEqual([
+        ['claimNext', 'app'],
+        ['release', 9, 'parked'],
+      ]);
+    });
+
+    it('GitHub mode returns no lanes when nothing is queued', async () => {
+      const fakeQueue: GithubQueue = {
+        claimNext: async () => null,
+        release: async () => {},
+        list: async () => [],
+        lanes: async () => [],
+      };
+
+      const result = await planRunLanes({
+        localQueue: false,
+        readLocalQueue: () => {
+          throw new Error('should not be called');
+        },
+        queue: () => fakeQueue,
+      });
+
+      expect(result).toEqual({ lanes: [], diagnostics: [] });
+    });
+  });
+
+  describe('laneQueueDeps', () => {
+    it('binds claimNext and releaseIssue to the given lane through the queue', async () => {
+      const calls: any[] = [];
+      const fakeQueue: GithubQueue = {
+        claimNext: async (lane) => {
+          calls.push(['claimNext', lane]);
+          return 3;
+        },
+        release: async (issue, outcome) => {
+          calls.push(['release', issue, outcome]);
+        },
+        list: async () => [],
+        lanes: async () => [],
+      };
+
+      const deps = laneQueueDeps(fakeQueue, 'app');
+      expect(await deps.claimNext!()).toBe(3);
+      await deps.releaseIssue!(3, 'done');
+
+      expect(calls).toEqual([
+        ['claimNext', 'app'],
+        ['release', 3, 'done'],
       ]);
     });
   });

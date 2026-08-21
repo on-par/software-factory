@@ -128,10 +128,12 @@ import {
 } from '@on-par/factory-core';
 import type {
   CiOutcome,
+  GithubQueue,
   OvernightItemOutcome,
   OvernightPreflightResult,
   OvernightQueueDeps,
   OvernightStateItem,
+  QueueReleaseOutcome,
   WatchChecksOptions,
 } from '@on-par/factory-core/internal';
 import {
@@ -139,7 +141,9 @@ import {
   branchPrefixSlug,
   cleanupWorktree,
   createFactorydServer,
+  createGithubQueue,
   createLocalSmallDryRun,
+  createOctokitQueueClient,
   DEFAULT_FACTORYD_PORT,
   defaultRegistryPath,
   ensureDir,
@@ -2288,13 +2292,9 @@ async function cmdFactoryd(opts: { port?: string; registry?: string }) {
   process.exit(0);
 }
 
-async function cmdRun() {
+async function cmdRun(opts: { localQueue?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-
-  if (!existsSync(paths.queue)) {
-    throw new CliExitError('queue empty — run factory init + triage first', 2);
-  }
 
   return withRepoRunLock(paths, 'factory run', async () => {
     const ghRepo = await getGitHubRepo();
@@ -2322,16 +2322,15 @@ async function cmdRun() {
       }
     }
 
-    // Read queue
-    const { entries, diagnostics } = parseQueue(readFileSync(paths.queue, 'utf-8'));
+    const { lanes, diagnostics } = await planRunLanes({
+      localQueue: opts.localQueue === true,
+      readLocalQueue: () => (existsSync(paths.queue) ? readFileSync(paths.queue, 'utf-8') : null),
+      queue: () => {
+        const [owner, repo] = ghRepo.split('/');
+        return createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo });
+      },
+    });
     warnQueueDiagnostics(diagnostics);
-
-    // Group by lane
-    const lanes = new Map<string, number[]>();
-    for (const e of entries) {
-      if (!lanes.has(e.lane)) lanes.set(e.lane, []);
-      lanes.get(e.lane)!.push(e.issue);
-    }
 
     const knobs = resolveUsageKnobs(process.env, loadRepoConfig(repoRoot));
     const controller = new AbortController();
@@ -2355,9 +2354,15 @@ async function cmdRun() {
     try {
       // Run lanes in parallel
       const pids: Promise<void>[] = [];
-      for (const [lane, issues] of lanes) {
-        logEvent(paths.events, 'lane-start', '-', `lane '${lane}' started (${issues.length} issues)`, { lane });
-        pids.push(runLane(lane, issues, repoRoot, ghRepo, paths));
+      for (const planned of lanes) {
+        logEvent(
+          paths.events,
+          'lane-start',
+          '-',
+          `lane '${planned.lane}' started${planned.issues.length ? ` (${planned.issues.length} issues)` : ''}`,
+          { lane: planned.lane },
+        );
+        pids.push(runLane(planned.lane, planned.issues, repoRoot, ghRepo, paths, planned.deps));
       }
 
       await Promise.allSettled(pids);
@@ -2371,7 +2376,7 @@ async function cmdRun() {
       }
     }
 
-    if (entries.length > 0) {
+    if (lanes.length > 0) {
       try {
         const events = existsSync(paths.events) ? readEvents(paths.events) : [];
         const costs = existsSync(paths.costs) ? readCosts(paths.costs) : [];
@@ -2389,16 +2394,21 @@ async function cmdRun() {
 export function createSuperviseRunQueue(
   paths: ReturnType<typeof getFactoryPaths>,
   ingestCfg: IngestSettings,
-  deps: { cmdRunFn?: () => Promise<void>; readQueueFile?: () => string; emitEvent?: typeof logEvent } = {},
+  deps: {
+    cmdRunFn?: () => Promise<void>;
+    readQueueFile?: () => string;
+    pendingCount?: () => Promise<number>;
+    emitEvent?: typeof logEvent;
+  } = {},
 ): () => Promise<void> {
   const {
     cmdRunFn = cmdRun,
     readQueueFile = () => (existsSync(paths.queue) ? readFileSync(paths.queue, 'utf-8') : ''),
+    pendingCount = async () => parseQueue(readQueueFile()).entries.length,
     emitEvent = logEvent,
   } = deps;
   return async () => {
-    const queueContent = readQueueFile();
-    if (parseQueue(queueContent).entries.length === 0 && ingestCfg.enabled) {
+    if ((await pendingCount()) === 0 && ingestCfg.enabled) {
       emitEvent(paths.events, 'idle', 'auto', 'queue empty — waiting for ready issues');
       return;
     }
@@ -2441,15 +2451,26 @@ export function createIngestHook(
   };
 }
 
-async function cmdSupervise(opts: { now?: boolean }) {
+async function cmdSupervise(opts: { now?: boolean; localQueue?: boolean }) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   const ingestCfg = resolveIngestConfig(loadFactoryConfigForRepo(paths.config));
 
-  const content = existsSync(paths.queue) ? readFileSync(paths.queue, 'utf-8') : '';
-  const { entries, diagnostics } = parseQueue(content);
-  warnQueueDiagnostics(diagnostics);
-  if (entries.length === 0 && !ingestCfg.enabled) {
+  const countPending = async (): Promise<number> => {
+    if (opts.localQueue === true) {
+      const content = existsSync(paths.queue) ? readFileSync(paths.queue, 'utf-8') : '';
+      const parsed = parseQueue(content);
+      warnQueueDiagnostics(parsed.diagnostics);
+      return parsed.entries.length;
+    }
+    const [owner, repo] = (await getGitHubRepo()).split('/');
+    const gq = createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo });
+    const lanes = await gq.lanes();
+    const counts = await Promise.all(lanes.map((lane) => gq.list(lane)));
+    return counts.reduce((total, issues) => total + issues.length, 0);
+  };
+
+  if ((await countPending()) === 0 && !ingestCfg.enabled) {
     throw new CliExitError('queue empty — run factory init + triage first', 2);
   }
 
@@ -2470,7 +2491,10 @@ async function cmdSupervise(opts: { now?: boolean }) {
       stopFile: paths.stop,
       eventsFile: paths.events,
       now: opts.now,
-      runQueue: createSuperviseRunQueue(paths, ingestCfg),
+      runQueue: createSuperviseRunQueue(paths, ingestCfg, {
+        cmdRunFn: () => cmdRun({ localQueue: opts.localQueue }),
+        pendingCount: countPending,
+      }),
       ingest: ingestCfg.enabled ? createIngestHook(repoRoot, paths, ingestCfg) : undefined,
     }),
   );
@@ -2485,7 +2509,55 @@ type RunLaneDeps = {
   waitMerge?: typeof waitForMerge;
   pathExists?: (path: string) => boolean;
   emitEvent?: typeof logEvent;
+  claimNext?: () => Promise<number | null>;
+  releaseIssue?: (issue: number, outcome: QueueReleaseOutcome) => Promise<void>;
 };
+
+export interface PlannedLane {
+  lane: string;
+  /** Seed issues to work before claiming. Always empty in GitHub-queue mode. */
+  issues: number[];
+  deps: Pick<RunLaneDeps, 'claimNext' | 'releaseIssue'>;
+}
+
+export function laneQueueDeps(queue: GithubQueue, lane: string): Pick<RunLaneDeps, 'claimNext' | 'releaseIssue'> {
+  return {
+    claimNext: () => queue.claimNext(lane),
+    releaseIssue: (issue, outcome) => queue.release(issue, outcome),
+  };
+}
+
+export async function planRunLanes(input: {
+  localQueue: boolean;
+  /** `null` when `.factory/queue` does not exist. */
+  readLocalQueue: () => string | null;
+  /** Lazy so the octokit client is never built under --local-queue. */
+  queue: () => GithubQueue;
+}): Promise<{ lanes: PlannedLane[]; diagnostics: QueueDiagnostic[] }> {
+  if (input.localQueue) {
+    const content = input.readLocalQueue();
+    if (content === null) {
+      throw new CliExitError('queue empty — run factory init + triage first', 2);
+    }
+    const { entries, diagnostics } = parseQueue(content);
+    const byLane = new Map<string, number[]>();
+    for (const e of entries) {
+      if (!byLane.has(e.lane)) byLane.set(e.lane, []);
+      byLane.get(e.lane)!.push(e.issue);
+    }
+    return {
+      lanes: [...byLane].map(([lane, issues]) => ({ lane, issues, deps: {} })),
+      diagnostics,
+    };
+  }
+
+  const gq = input.queue();
+  const lanes = await gq.lanes();
+  return {
+    lanes: lanes.map((lane) => ({ lane, issues: [], deps: laneQueueDeps(gq, lane) })),
+    diagnostics: [],
+  };
+}
 
 export async function runLane(
   lane: string,
@@ -2495,32 +2567,50 @@ export async function runLane(
   paths: ReturnType<typeof getFactoryPaths>,
   deps: RunLaneDeps = {},
 ) {
-  const { ship = shipIssue, waitMerge = waitForMerge, pathExists = existsSync, emitEvent = logEvent } = deps;
+  const {
+    ship = shipIssue,
+    waitMerge = waitForMerge,
+    pathExists = existsSync,
+    emitEvent = logEvent,
+    claimNext = async () => null,
+    releaseIssue = async () => {},
+  } = deps;
   let merged = 0;
   let awaitingReview = 0;
   let skipped = 0;
   let decomposed = 0;
+  const pending = [...issues];
   const seen = new Set(issues);
-  for (let i = 0; i < issues.length; i++) {
-    const issue = issues[i];
+  for (let i = 0; ; i++) {
+    if (i >= pending.length) {
+      const claimed = await claimNext();
+      if (claimed === null) break;
+      seen.add(claimed);
+      pending.push(claimed);
+    }
+    const issue = pending[i];
     if (pathExists(paths.stop)) {
       emitEvent(paths.events, 'stopped', issue, 'STOP file present', { lane });
+      await releaseIssue(issue, 'queued');
       return;
     }
     try {
       const branch = await ship(issue, {}, { repoRoot, ghRepo, lane });
       await waitMerge(issue, branch, repoRoot, ghRepo, paths);
       merged++;
+      await releaseIssue(issue, 'done');
     } catch (err: any) {
       if (err instanceof AwaitingReviewError) {
         // The land path already emitted the awaiting-review event and cleaned the
         // worktree — this is a clean outcome, not a park; move to the next issue.
         awaitingReview++;
+        await releaseIssue(issue, 'done');
         continue;
       }
       if (err instanceof IssueSkippedError) {
         // shipIssue already emitted skipped-already-closed; nothing was attempted.
         skipped++;
+        await releaseIssue(issue, 'done');
         continue;
       }
       if (err instanceof IssueDecomposedError) {
@@ -2528,7 +2618,7 @@ export async function runLane(
         // current issue so this same lane run ships them, deduping ones already queued.
         const fresh = err.childIssues.filter((n) => !seen.has(n));
         for (const n of fresh) seen.add(n);
-        issues.splice(i + 1, 0, ...fresh);
+        pending.splice(i + 1, 0, ...fresh);
         decomposed++;
         emitEvent(
           paths.events,
@@ -2537,6 +2627,7 @@ export async function runLane(
           `lane '${lane}' continuing with ${fresh.length} child issue(s) in place of #${issue}`,
           { lane },
         );
+        await releaseIssue(issue, 'done');
         continue;
       }
       const reason = parkReasonFor(err);
@@ -2548,9 +2639,10 @@ export async function runLane(
         paths.events,
         'parked',
         issue,
-        `lane '${lane}' parked (${reason}); ${issues.length - i - 1} issues remaining`,
+        `lane '${lane}' parked (${reason}); ${pending.length - i - 1} issues remaining`,
         { lane },
       );
+      await releaseIssue(issue, 'parked');
       return;
     }
   }
@@ -3533,7 +3625,11 @@ export async function main() {
       await cmdResumeApproved();
     });
 
-  program.command('run').description('Process the whole queue (lanes in parallel)').action(cmdRun);
+  program
+    .command('run')
+    .description('Process the whole queue (lanes in parallel)')
+    .option('--local-queue', 'Read .factory/queue instead of claiming issues from GitHub Issues')
+    .action((opts: { localQueue?: boolean }) => cmdRun(opts));
 
   program
     .command('proxy')
@@ -3561,6 +3657,7 @@ export async function main() {
     .command('supervise')
     .description('Multi-window loop: wait for usage headroom, run the queue, repeat until drained')
     .option('--now', 'Skip the initial headroom wait')
+    .option('--local-queue', 'Read .factory/queue instead of claiming issues from GitHub Issues')
     .action(async (opts) => {
       await cmdSupervise(opts);
     });

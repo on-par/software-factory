@@ -133,7 +133,7 @@ export function createOctokitQueueClient(octokit: Octokit): QueueGitHubClient {
   };
 }
 
-export type QueueReleaseOutcome = 'queued' | 'parked';
+export type QueueReleaseOutcome = 'queued' | 'parked' | 'done';
 
 export interface GithubQueueOptions {
   client: QueueGitHubClient;
@@ -147,6 +147,7 @@ export interface GithubQueue {
   claimNext(lane: string): Promise<number | null>;
   release(issue: number, outcome?: QueueReleaseOutcome): Promise<void>;
   list(lane: string): Promise<number[]>;
+  lanes(): Promise<string[]>;
 }
 
 export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
@@ -201,11 +202,13 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
       (name) =>
         name === IN_PROGRESS_LABEL ||
         name.startsWith(CLAIMED_BY_LABEL_PREFIX) ||
-        (outcome === 'parked' && name === QUEUED_LABEL),
+        (outcome !== 'queued' && name === QUEUED_LABEL),
     );
     for (const name of toRemove) {
       await client.removeLabel({ owner, repo, issue_number: issue, name });
     }
+
+    if (outcome === 'done') return;
 
     const target = outcome === 'parked' ? PARKED_LABEL : QUEUED_LABEL;
     if (!current.includes(target)) {
@@ -217,5 +220,19 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     }
   }
 
-  return { claimNext, release, list };
+  async function lanes(): Promise<string[]> {
+    const issues = await client.listOpenIssuesWithLabels({ owner, repo, labels: [QUEUED_LABEL] });
+    const found = new Set<string>();
+    for (const issue of issues) {
+      for (const label of issue.labels) {
+        if (label.startsWith(LANE_LABEL_PREFIX)) {
+          const slug = label.slice(LANE_LABEL_PREFIX.length);
+          if (slug !== '') found.add(slug);
+        }
+      }
+    }
+    return [...found].sort();
+  }
+
+  return { claimNext, release, list, lanes };
 }
