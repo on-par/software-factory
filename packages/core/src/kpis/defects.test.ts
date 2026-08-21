@@ -362,14 +362,14 @@ describe('fetchDefectSources', () => {
   function client(overrides: Partial<DefectSourceClient['rest']> = {}): DefectSourceClient {
     return {
       rest: {
-        repos: { listCommits: vi.fn(async () => ({ data: [] })) },
+        repos: { listCommits: vi.fn(async () => ({ data: [] })), ...overrides.repos },
         issues: {
           listForRepo: vi.fn(async () => ({ data: [] })),
           listComments: vi.fn(async () => ({ data: [] })),
+          ...overrides.issues,
         },
-        ...overrides,
       },
-    } as unknown as DefectSourceClient;
+    };
   }
 
   it('makes zero API calls when no merged PR has a closed window', async () => {

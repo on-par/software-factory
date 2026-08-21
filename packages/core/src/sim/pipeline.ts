@@ -6,7 +6,6 @@
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import type { Octokit } from '@octokit/rest';
 import matter from 'gray-matter';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
@@ -28,7 +27,7 @@ import {
 } from './jitter.js';
 import { realSimClock, type SimClock, type SimLatency } from './latency.js';
 import { type SimModelCall, SimModelExecutor, type SimModelExecutorOptions, type SimModelStep } from './model.js';
-import { createSimOctokit, type SimOctokitOptions, type SimRecordedCall } from './octokit.js';
+import { asPhaseOctokit, createSimOctokit, type SimOctokitOptions, type SimRecordedCall } from './octokit.js';
 import type { SimPhaseName, SimTerminalState } from './types.js';
 import { createSimWorkspace, simCommitAll, type SimWorkspace } from './workspace.js';
 
@@ -310,7 +309,7 @@ async function runSimIssue(
       specPath,
       router,
       constitution: null,
-      octokit: routedOctokit as unknown as Octokit,
+      octokit: asPhaseOctokit(routedOctokit),
       log: log('plan'),
       ...(spec.enforceReadiness !== undefined ? { enforceReadiness: spec.enforceReadiness } : {}),
     });
@@ -357,7 +356,7 @@ async function runSimIssue(
       repo,
       worktree,
       branch,
-      octokit: routedOctokit as unknown as Octokit,
+      octokit: asPhaseOctokit(routedOctokit),
       watchCI: false,
       log: log('ship'),
     });

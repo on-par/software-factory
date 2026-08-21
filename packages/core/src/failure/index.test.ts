@@ -40,7 +40,10 @@ describe('normalizeFailureMessage', () => {
 
   it('is safe for empty and undefined input', () => {
     expect(normalizeFailureMessage('')).toBe('');
-    expect(normalizeFailureMessage(undefined as unknown as string)).toBe('');
+    /** normalizeFailureMessage's `message ?? ''` defends against callers outside the type system
+     *  (JSON, JS consumers). This view calls it the way such a caller would; one assertion, no chain. */
+    const normalizeUnchecked = normalizeFailureMessage as (message: string | undefined) => string;
+    expect(normalizeUnchecked(undefined)).toBe('');
   });
 });
 

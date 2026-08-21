@@ -329,7 +329,7 @@ describe('@on-par/factory-server', () => {
 
     const res = { writeHead: vi.fn(), end: vi.fn() };
     const req = { url: undefined, method: 'GET', headers: {} };
-    server.server.emit('request', req as unknown as http.IncomingMessage, res as unknown as http.ServerResponse);
+    server.server.emit('request', asServerRequest(req), asServerResponse(res));
     expect(res.writeHead).toHaveBeenCalledWith(404, { 'content-type': 'application/json' });
   });
 
@@ -348,13 +348,31 @@ describe('@on-par/factory-server', () => {
       end(): void {}
     }
     const res = new FakeResponse();
-    const req = new EventEmitter() as unknown as http.IncomingMessage;
-    Object.assign(req, { headers: {}, method: 'GET', url: '/events' });
+    const req = Object.assign(new EventEmitter(), { headers: {}, method: 'GET', url: '/events' });
 
-    server.server.emit('request', req, res as unknown as http.ServerResponse);
+    server.server.emit('request', asServerRequest(req), asServerResponse(res));
     expect(() => res.emit('error', new Error('boom'))).not.toThrow();
   });
 });
+
+interface FakeServerRequest {
+  url: string | undefined;
+  method: string;
+  headers: Record<string, string>;
+}
+interface FakeServerResponse {
+  writeHead: (...args: any[]) => any;
+  write?: (...args: any[]) => any;
+  end: (...args: any[]) => any;
+}
+/** createServer's request handler only reads url/method/headers and calls writeHead/write/end;
+ *  these doubles implement exactly that surface, so widening each costs one assertion. */
+function asServerRequest(double: FakeServerRequest): http.IncomingMessage {
+  return double as http.IncomingMessage;
+}
+function asServerResponse(double: FakeServerResponse): http.ServerResponse {
+  return double as http.ServerResponse;
+}
 
 function readBody(res: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {

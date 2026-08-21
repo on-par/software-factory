@@ -3,6 +3,7 @@ dist/
 coverage/
 .factory/
 .tmp/
+tools/oxlint/anti-slop/
 package-lock.json
 *.tsbuildinfo
 evals/
