@@ -266,7 +266,10 @@ function paths() {
 function defaultOctokit() {
   return {
     rest: {
-      issues: { get: vi.fn(async () => ({ data: { title: 'Fix the bug' } })) },
+      issues: {
+        get: vi.fn(async () => ({ data: { title: 'Fix the bug' } })),
+        listForRepo: vi.fn(async () => ({ data: [] })),
+      },
       pulls: {
         list: vi.fn(async ({ state }: any) =>
           state === 'open'
@@ -1040,14 +1043,14 @@ bash scripts/verify.sh
   describe('run', () => {
     it('exits 2 when the queue file is missing', async () => {
       rmSync(paths().queue, { force: true });
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res).toEqual({ exited: true, code: 2 });
     });
 
     it('reads the queue, starts lanes, and stops immediately when STOP is present', async () => {
       writeFileSync(paths().queue, '# header\napp 1\napp 2\ndocs 3\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('stopped');
@@ -1058,7 +1061,7 @@ bash scripts/verify.sh
       h.factoryConfig = { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: true } };
       writeFileSync(paths().queue, '# header\napp 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       expect(sweepWorktrees).toHaveBeenCalledWith(
         expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7, repo: h.ghRepo }),
@@ -1071,7 +1074,7 @@ bash scripts/verify.sh
       h.factoryConfig = { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: false } };
       writeFileSync(paths().queue, '# header\napp 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       expect(sweepWorktrees).not.toHaveBeenCalled();
     });
@@ -1081,7 +1084,7 @@ bash scripts/verify.sh
       (sweepWorktrees as any).mockRejectedValueOnce(new Error('gc boom'));
       writeFileSync(paths().queue, '# header\napp 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('gc boom');
@@ -1091,7 +1094,7 @@ bash scripts/verify.sh
     it('skips malformed queue lines, starts lanes only for valid entries, and warns', async () => {
       writeFileSync(paths().queue, '# header\napp 1\napp abc\ndocs 3\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       const err = errored();
       expect(err).toContain('malformed');
@@ -1107,7 +1110,7 @@ bash scripts/verify.sh
       process.env.FACTORY_USAGE_WATCH = '0';
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('run-done');
@@ -1118,7 +1121,7 @@ bash scripts/verify.sh
       vi.mocked(core.watchUsage).mockRejectedValueOnce(new Error('watchdog exploded'));
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('usage watchdog crashed');
@@ -1134,7 +1137,7 @@ bash scripts/verify.sh
       };
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
 
       expect(existsSync(paths().kpiHistory)).toBe(true);
@@ -1151,8 +1154,8 @@ bash scripts/verify.sh
     it('appends a second KPI snapshot on a second run', async () => {
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
-      await runMain('run');
-      await runMain('run');
+      await runMain('run', '--local-queue');
+      await runMain('run', '--local-queue');
 
       const lines = readFileSync(paths().kpiHistory, 'utf-8').trim().split('\n').filter(Boolean);
       expect(lines).toHaveLength(2);
@@ -1161,7 +1164,7 @@ bash scripts/verify.sh
     it('does not create a KPI snapshot when the queue has no entries', async () => {
       writeFileSync(paths().queue, '# header\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
 
       const events = readFileSync(paths().events, 'utf-8');
@@ -1179,7 +1182,7 @@ bash scripts/verify.sh
       };
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
 
       const events = readFileSync(paths().events, 'utf-8');
@@ -1195,12 +1198,22 @@ bash scripts/verify.sh
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
       mkdirSync(paths().kpiHistory);
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
 
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('run-done');
       expect(events).toContain('kpi snapshot failed');
+    });
+
+    it('without --local-queue, discovers lanes from GitHub Issues instead of the queue file, and finishes cleanly when nothing is queued', async () => {
+      rmSync(paths().queue, { force: true });
+      const res = await runMain('run');
+      expect(res.exited).toBe(false);
+      expect(h.octokit.rest.issues.listForRepo).toHaveBeenCalled();
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('run-done');
+      expect(events).not.toContain('kpi-snapshot');
     });
   });
 
@@ -1321,21 +1334,21 @@ bash scripts/verify.sh
   describe('supervise', () => {
     it('exits 2 when the queue is empty', async () => {
       writeFileSync(paths().queue, '# just comments\n');
-      const res = await runMain('supervise', '--now');
+      const res = await runMain('supervise', '--now', '--local-queue');
       expect(res).toEqual({ exited: true, code: 2 });
     });
 
     it('exits 2 on invalid usage knobs', async () => {
       writeFileSync(paths().queue, 'app 1\n');
       process.env.FACTORY_USAGE_CAP = 'abc';
-      const res = await runMain('supervise', '--now');
+      const res = await runMain('supervise', '--now', '--local-queue');
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('FACTORY_USAGE_CAP');
     });
 
     it('exits 2 when the queue contains only malformed lines, and warns why', async () => {
       writeFileSync(paths().queue, 'app abc\n');
-      const res = await runMain('supervise', '--now');
+      const res = await runMain('supervise', '--now', '--local-queue');
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('malformed');
     });
@@ -1343,12 +1356,19 @@ bash scripts/verify.sh
     it('--now runs the queue once end-to-end and finishes once the queue drains without STOP', async () => {
       process.env.FACTORY_MERGE = '1';
       writeFileSync(paths().queue, 'app 1\n');
-      const res = await runMain('supervise', '--now');
+      const res = await runMain('supervise', '--now', '--local-queue');
       expect(res.exited).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('supervisor-done');
       expect(events).toContain('run-done');
     }, 20_000);
+
+    it('without --local-queue, counts pending work via GitHub Issues and exits 2 when nothing is queued', async () => {
+      rmSync(paths().queue, { force: true });
+      const res = await runMain('supervise', '--now');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(h.octokit.rest.issues.listForRepo).toHaveBeenCalled();
+    });
   });
 
   describe('local-small-dry-run', () => {
