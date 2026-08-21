@@ -93,7 +93,7 @@ export type {
   QueueSnapshotEntry,
   QueueValidationResult,
 } from './queue/index.js';
-export { parseQueue, readQueue, validateQueue } from './queue/index.js';
+export { parseQueue, readQueue, rewriteQueueForDecomposition, validateQueue } from './queue/index.js';
 
 // Work requests
 export type {

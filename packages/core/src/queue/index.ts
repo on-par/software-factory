@@ -60,6 +60,51 @@ export function parseQueue(content: string): ParsedQueue {
   return { entries, diagnostics };
 }
 
+/**
+ * Replaces the queue entry for a decomposed issue with one entry per child issue, on
+ * the same lane as the entry it replaces. Pure and line-preserving: every other entry,
+ * comment, and blank line is left byte-identical. Children already queued elsewhere are
+ * not duplicated, and any further (malformed-duplicate) entry line for `opts.issue` is
+ * dropped — the decomposed parent must not survive in the queue.
+ */
+export function rewriteQueueForDecomposition(
+  content: string,
+  opts: { issue: number; childIssues: readonly number[] },
+): { content: string; changed: boolean } {
+  const { issue, childIssues } = opts;
+  if (childIssues.length === 0) return { content, changed: false };
+
+  const lines = content.split('\n');
+  const queuedIssues = new Set(parseQueue(content).entries.map((entry) => entry.issue));
+
+  let replaced = false;
+  const result: string[] = [];
+
+  for (const line of lines) {
+    const match = ENTRY_RE.exec(line.trim());
+    const lineIssue = match ? parseInt(match[2], 10) : NaN;
+
+    if (match && lineIssue === issue) {
+      if (!replaced) {
+        const lane = match[1];
+        for (const child of childIssues) {
+          if (queuedIssues.has(child)) continue;
+          result.push(`${lane} ${child}`);
+          queuedIssues.add(child);
+        }
+        replaced = true;
+      }
+      continue; // drop this line (the original entry, or a malformed duplicate of it)
+    }
+
+    result.push(line);
+  }
+
+  if (!replaced) return { content, changed: false };
+
+  return { content: result.join('\n'), changed: true };
+}
+
 export function validateQueue(content: string): QueueValidationResult {
   const lines = content.split('\n');
 

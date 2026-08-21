@@ -36,6 +36,8 @@ export type EventKind =
   | 'constitution'
   | 'decompose_comment_posted'
   | 'decompose_failed'
+  | 'decompose_file_failed'
+  | 'decompose_filed'
   | 'decompose_started'
   | 'defect-window-closed'
   | 'design_artifact_emitted'
@@ -181,6 +183,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   constitution: { severity: 'info', isPark: false, isTerminal: false },
   decompose_comment_posted: { severity: 'info', isPark: false, isTerminal: false },
   decompose_failed: { severity: 'warn', isPark: false, isTerminal: false },
+  decompose_file_failed: { severity: 'warn', isPark: false, isTerminal: false },
+  decompose_filed: { severity: 'info', isPark: false, isTerminal: false },
   decompose_started: { severity: 'info', isPark: false, isTerminal: false },
   'defect-window-closed': { severity: 'info', isPark: false, isTerminal: false },
   design_artifact_emitted: { severity: 'info', isPark: false, isTerminal: false },

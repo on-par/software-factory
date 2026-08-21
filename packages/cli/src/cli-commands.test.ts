@@ -220,6 +220,7 @@ import {
   cmdConstitution,
   cmdLand,
   cmdUsage,
+  IssueDecomposedError,
   IssueSkippedError,
   main,
   parseIssueArg,
@@ -2553,6 +2554,41 @@ describe('shipIssue (direct)', () => {
       .map((line) => JSON.parse(line));
     const escalateEvents = events.filter((e: any) => e.type === 'escalate' && e.issue === '5');
     expect(escalateEvents).toHaveLength(1);
+  });
+
+  it('rewrites the queue entry and throws IssueDecomposedError (not a park) when the plan decomposed the issue', async () => {
+    writeFileSync(paths().queue, 'app 5\n');
+    h.planResult = { ok: false, route: 'claude', escalate: 'decomposed', decomposed: { childIssues: [10, 11] } };
+
+    const err = await shipIssue(5, {}, ctx()).catch((e) => e);
+
+    expect(err).toBeInstanceOf(IssueDecomposedError);
+    expect(err.childIssues).toEqual([10, 11]);
+    expect(readFileSync(paths().queue, 'utf-8')).toBe('app 10\napp 11\n');
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('queue entry for #5 replaced with #10, #11');
+    expect(events).not.toContain('"type":"escalate"');
+    expect(events).not.toContain('"type":"fail"');
+  });
+
+  it('logs decompose_filed without rewriting when the decomposed issue has no queue entry', async () => {
+    h.planResult = { ok: false, route: 'claude', escalate: 'decomposed', decomposed: { childIssues: [10, 11] } };
+
+    await expect(shipIssue(5, {}, ctx())).rejects.toBeInstanceOf(IssueDecomposedError);
+
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('#5 had no queue entry to replace — continuing the lane with #10, #11');
+  });
+
+  it('logs decompose_file_failed but still throws IssueDecomposedError when the queue rewrite errors', async () => {
+    mkdirSync(paths().queue); // a directory at the queue path makes readFileSync throw
+    h.planResult = { ok: false, route: 'claude', escalate: 'decomposed', decomposed: { childIssues: [10] } };
+
+    await expect(shipIssue(5, {}, ctx())).rejects.toBeInstanceOf(IssueDecomposedError);
+
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('decompose_file_failed');
+    expect(events).toContain('queue rewrite for #5 failed');
   });
 
   it('throws a LaneParkError with reason escalate when the build escalates', async () => {

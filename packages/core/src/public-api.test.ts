@@ -68,6 +68,7 @@ const PUBLIC_API_KEYS = [
   // Queue
   'parseQueue',
   'readQueue',
+  'rewriteQueueForDecomposition',
   'validateQueue',
   // Work requests
   'closedWorkSkipReason',
