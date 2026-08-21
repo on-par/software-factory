@@ -8,6 +8,7 @@ import {
   getConstitutionsDir,
   getFactoryPaths,
   loadFactoryConfig,
+  loadFactoryConfigForRepo,
   loadModelsConfig,
   loadRoutesConfig,
   resolveAutoFailover,
@@ -482,6 +483,88 @@ describe('loadFactoryConfig', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('loadFactoryConfigForRepo', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'factory-config-repo-'));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('returns the shipped defaults, deep-equal to loadFactoryConfig(), when the path does not exist', () => {
+    const path = join(dir, 'does-not-exist.json');
+    expect(loadFactoryConfigForRepo(path)).toEqual(loadFactoryConfig());
+  });
+
+  it('applies a partial merge.auto override while preserving merge.comment from the defaults', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ merge: { auto: true } }));
+    const config = loadFactoryConfigForRepo(path);
+    expect(config.merge.auto).toBe(true);
+    expect(config.merge.comment).toBe(loadFactoryConfig().merge.comment);
+  });
+
+  it('deep-equals the shipped defaults for a repo-namespace-only file', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(
+      path,
+      JSON.stringify({ version: 1, models: { plan: 'claude-opus-5' }, providers: { openai: false } }),
+    );
+    expect(loadFactoryConfigForRepo(path)).toEqual(loadFactoryConfig());
+  });
+
+  it('merges a mixed file: worktree.gcTtlDays overrides while worktree.prefix stays default', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(
+      path,
+      JSON.stringify({
+        version: 1,
+        models: { plan: 'claude-opus-5' },
+        worktree: { gcTtlDays: 30 },
+      }),
+    );
+    const config = loadFactoryConfigForRepo(path);
+    expect(config.worktree.gcTtlDays).toBe(30);
+    expect(config.worktree.prefix).toBe(loadFactoryConfig().worktree.prefix);
+  });
+
+  it('replaces array/tuple fields wholesale rather than merging element-wise', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ environment: { ports: { range: [4000, 4100] } } }));
+    const config = loadFactoryConfigForRepo(path);
+    expect(config.environment.ports.range).toEqual([4000, 4100]);
+  });
+
+  it('throws an error naming the file path on malformed JSON', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, '{ not valid json');
+    expect(() => loadFactoryConfigForRepo(path)).toThrow(/Failed to parse/);
+    expect(() => loadFactoryConfigForRepo(path)).toThrow(path);
+  });
+
+  it('throws an error naming the file path and the offending field on a runtime-namespace type violation', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ merge: { auto: 'yes' } }));
+    expect(() => loadFactoryConfigForRepo(path)).toThrow(path);
+    expect(() => loadFactoryConfigForRepo(path)).toThrow(/merge\.auto/);
+  });
+
+  it('throws "expected a JSON object" when the top level is an array', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify([1, 2, 3]));
+    expect(() => loadFactoryConfigForRepo(path)).toThrow(/expected a JSON object/);
+  });
+
+  it('throws "expected a JSON object" when the top level is a string', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify('nope'));
+    expect(() => loadFactoryConfigForRepo(path)).toThrow(/expected a JSON object/);
   });
 });
 

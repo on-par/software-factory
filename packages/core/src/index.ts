@@ -18,6 +18,7 @@ export {
   getConstitutionsDir,
   getFactoryPaths,
   loadFactoryConfig,
+  loadFactoryConfigForRepo,
   loadModelsConfig,
   loadRoutesConfig,
   resolveAutoFailover,

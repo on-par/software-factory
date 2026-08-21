@@ -143,6 +143,22 @@ describe('loadRepoConfig', () => {
     expect(() => loadRepoConfig(repoRoot)).toThrow();
   });
 
+  it('parses a file carrying both namespaces — model pins intact, runtime keys ignored, no throw', async () => {
+    const repoRoot = await tempRepoRoot();
+    await writeRepoConfig(repoRoot, {
+      models: { plan: 'claude-model' },
+      merge: { auto: true },
+      worktree: { gcTtlDays: 30 },
+    });
+    expect(loadRepoConfig(repoRoot)).toEqual({ version: 1, models: { plan: 'claude-model' } });
+  });
+
+  it('still rejects a genuine root-level typo with the file path in the message', async () => {
+    const repoRoot = await tempRepoRoot();
+    await writeRepoConfig(repoRoot, { modles: {} });
+    expect(() => loadRepoConfig(repoRoot)).toThrow(/\.factory[/\\]config\.json/);
+  });
+
   it('rejects a non-positive usage.capUsd', async () => {
     const repoRoot = await tempRepoRoot();
     await writeRepoConfig(repoRoot, { usage: { capUsd: -5 } });

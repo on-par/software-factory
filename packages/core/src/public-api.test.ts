@@ -18,6 +18,7 @@ const PUBLIC_API_KEYS = [
   'getConstitutionsDir',
   'getFactoryPaths',
   'loadFactoryConfig',
+  'loadFactoryConfigForRepo',
   'loadModelsConfig',
   'loadRoutesConfig',
   'resolveAutoFailover',

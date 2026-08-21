@@ -115,7 +115,7 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
     // Config loaders — return inert values.
     loadModelsConfig: vi.fn(() => ({}) as any),
     loadRoutesConfig: vi.fn(() => ({}) as any),
-    loadFactoryConfig: vi.fn(() => h.factoryConfig),
+    loadFactoryConfigForRepo: vi.fn(() => h.factoryConfig),
     resolveTimeouts: vi.fn(() => ({ plan: 1, build: 1, check: 1, approval: 1 })),
     resolveSkipCI: vi.fn(() => false),
     getConstitutionsDir: vi.fn(() => h.constitutionsDir),
