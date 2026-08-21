@@ -12,10 +12,10 @@ processes can both `POST /issues/{n}/labels` and both succeed, because adding a 
 idempotent and unconditional. There is no ETag-guarded label write, no transaction, and no
 queue primitive on the issues API to lean on.
 
-Two constraints shaped the answer. First, the resolution has to be *deterministic* — the
+Two constraints shaped the answer. First, the resolution has to be _deterministic_ — the
 losing caller must be able to work out that it lost from the same evidence the winner sees,
 with no coordinator, no clock comparison, and no extra round of negotiation. Second, the
-claimant identity has to be unique per *claimer*, not per machine: the factory routinely runs
+claimant identity has to be unique per _claimer_, not per machine: the factory routinely runs
 several lanes concurrently on one host, and if two of them compute the same
 `factory:claimed-by:<host>` label, both would read back exactly one claim label, find it equal
 to their own, and both believe they won. The factory already has a holder identity of exactly
@@ -30,7 +30,7 @@ issue's labels and inspects every `factory:claimed-by:*` label present. The call
 when the lexicographically smallest such label is its own; a caller whose own label is absent
 from the read-back, or whose label is not the smallest, has lost. A loser removes only its own
 `factory:claimed-by:<id>` label — never `factory:in-progress`, which the winner also added —
-and advances to the next candidate. `factory:queued` is removed *after* the read-back confirms
+and advances to the next candidate. `factory:queued` is removed _after_ the read-back confirms
 the win, never before, so a crashed or abandoned attempt always leaves the issue claimable.
 
 The claimant id is `slug(hostname())-<pid>`, reusing the `(host, pid)` holder identity
