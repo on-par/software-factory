@@ -15,6 +15,7 @@ import type { ModelRouter } from '../router/index.js';
 import {
   FACTORY_RUNTIME_CONFIG_KEYS,
   getFactoryPaths,
+  isPlainObject,
   resolveBranchPrefix,
   resolveExperimental,
   resolveLocalOnly,
@@ -106,10 +107,7 @@ export function loadRepoConfig(repoRoot: string): RepoFactoryConfig | null {
     throw new Error(`Failed to parse ${path}: ${err.message}`);
   }
 
-  const toParse =
-    typeof raw === 'object' && raw !== null && !Array.isArray(raw)
-      ? stripRuntimeKeys(raw as Record<string, unknown>)
-      : raw;
+  const toParse = isPlainObject(raw) ? stripRuntimeKeys(raw) : raw;
   const result = RepoFactoryConfigSchema.safeParse(toParse);
   if (!result.success) {
     const issues = result.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
