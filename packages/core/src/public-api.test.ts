@@ -355,6 +355,19 @@ const INTERNAL_API_KEYS = [
   'parseCoverageSummary',
   'parseCoverageSummaryScopes',
   'renderRatchetReport',
+  // GitHub-label-backed work queue (#824)
+  'claimedByLabel',
+  'CLAIMED_BY_LABEL_PREFIX',
+  'createGithubQueue',
+  'createOctokitQueueClient',
+  'defaultClaimantId',
+  'IN_PROGRESS_LABEL',
+  'LANE_LABEL_PREFIX',
+  'laneLabel',
+  'MAX_LABEL_NAME_LENGTH',
+  'PARKED_LABEL',
+  'QUEUED_LABEL',
+  'queueLabelSpecs',
 ];
 
 const TESTING_API_KEYS = [

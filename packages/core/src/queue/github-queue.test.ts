@@ -1,0 +1,457 @@
+// packages/core/src/queue/github-queue.test.ts — Claim/release/list over the factory:* label taxonomy (#824).
+
+import { describe, expect, it } from 'vitest';
+
+import {
+  CLAIMED_BY_LABEL_PREFIX,
+  claimedByLabel,
+  createGithubQueue,
+  createOctokitQueueClient,
+  defaultClaimantId,
+  IN_PROGRESS_LABEL,
+  LANE_LABEL_PREFIX,
+  laneLabel,
+  MAX_LABEL_NAME_LENGTH,
+  PARKED_LABEL,
+  QUEUED_LABEL,
+  queueLabelSpecs,
+  type QueueGitHubClient,
+  type QueueIssue,
+} from './github-queue.js';
+
+function createFakeStore(issues: Array<{ number: number; labels: string[] }>) {
+  const state = new Map<number, Set<string>>(issues.map((i) => [i.number, new Set(i.labels)]));
+  const createdLabels = new Set<string>();
+  const calls: string[] = [];
+
+  const client: QueueGitHubClient = {
+    async listOpenIssuesWithLabels({ labels }) {
+      calls.push('listOpenIssuesWithLabels');
+      const result: QueueIssue[] = [];
+      for (const [number, labelSet] of state) {
+        if (labels.every((l) => labelSet.has(l))) {
+          result.push({ number, labels: [...labelSet] });
+        }
+      }
+      return result;
+    },
+    async getIssueLabels({ issue_number }) {
+      calls.push('getIssueLabels');
+      return [...(state.get(issue_number) ?? new Set<string>())];
+    },
+    async addLabels({ issue_number, labels }) {
+      calls.push('addLabels');
+      // Yield before mutating so concurrent claimNext calls can interleave — this is
+      // what makes the simulated-race tests below an actual race, not a fixed order.
+      await Promise.resolve();
+      const set = state.get(issue_number) ?? new Set<string>();
+      for (const label of labels) set.add(label);
+      state.set(issue_number, set);
+    },
+    async removeLabel({ issue_number, name }) {
+      calls.push('removeLabel');
+      state.get(issue_number)?.delete(name);
+    },
+    async ensureLabel({ name }) {
+      calls.push('ensureLabel');
+      createdLabels.add(name);
+    },
+  };
+
+  return { state, createdLabels, calls, client };
+}
+
+describe('label taxonomy', () => {
+  it('exposes the taxonomy constants', () => {
+    expect(QUEUED_LABEL).toBe('factory:queued');
+    expect(IN_PROGRESS_LABEL).toBe('factory:in-progress');
+    expect(PARKED_LABEL).toBe('factory:parked');
+    expect(LANE_LABEL_PREFIX).toBe('factory:lane:');
+    expect(CLAIMED_BY_LABEL_PREFIX).toBe('factory:claimed-by:');
+  });
+
+  it('laneLabel builds the parameterised lane label', () => {
+    expect(laneLabel('build')).toBe('factory:lane:build');
+  });
+
+  it('laneLabel slugifies an arbitrary lane name', () => {
+    expect(laneLabel('Feature/Big Lane')).toBe('factory:lane:feature-big-lane');
+  });
+
+  it('laneLabel truncates a very long lane name to fit the label limit', () => {
+    expect(laneLabel('x'.repeat(200)).length).toBeLessThanOrEqual(MAX_LABEL_NAME_LENGTH);
+  });
+
+  it('claimedByLabel truncates a very long claimant id to fit the label limit', () => {
+    expect(claimedByLabel('y'.repeat(200)).length).toBeLessThanOrEqual(MAX_LABEL_NAME_LENGTH);
+  });
+
+  it('falls back to "unknown" when nothing survives slugification', () => {
+    expect(laneLabel('!!!')).toBe('factory:lane:unknown');
+    expect(claimedByLabel('!!!')).toBe('factory:claimed-by:unknown');
+  });
+});
+
+describe('defaultClaimantId', () => {
+  it('combines a slugified host with the pid', () => {
+    expect(defaultClaimantId('My Host.local', 4242)).toBe('my-host-local-4242');
+  });
+
+  it('defaults to the real hostname/pid and stays within the label limit', () => {
+    const id = defaultClaimantId();
+    expect(id.length).toBeGreaterThan(0);
+    expect(claimedByLabel(id).length).toBeLessThanOrEqual(MAX_LABEL_NAME_LENGTH);
+  });
+});
+
+describe('queueLabelSpecs', () => {
+  it('returns the five taxonomy specs for a lane/claimant, in order', () => {
+    const specs = queueLabelSpecs('build', 'aaa-1');
+    expect(specs.map((s) => s.name)).toEqual([
+      QUEUED_LABEL,
+      'factory:lane:build',
+      IN_PROGRESS_LABEL,
+      'factory:claimed-by:aaa-1',
+      PARKED_LABEL,
+    ]);
+  });
+});
+
+describe('list', () => {
+  it('returns matching queued issue numbers ascending, without mutating state', async () => {
+    const { client, calls } = createFakeStore([
+      { number: 5, labels: [QUEUED_LABEL, laneLabel('build')] },
+      { number: 2, labels: [QUEUED_LABEL, laneLabel('build')] },
+      { number: 3, labels: [QUEUED_LABEL, laneLabel('other')] },
+    ]);
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    const result = await queue.list('build');
+
+    expect(result).toEqual([2, 5]);
+    expect(calls).toEqual(['listOpenIssuesWithLabels']);
+  });
+
+  it('returns an empty array when nothing matches', async () => {
+    const { client } = createFakeStore([]);
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    expect(await queue.list('build')).toEqual([]);
+  });
+});
+
+describe('claimNext', () => {
+  it('claims the lowest-numbered candidate', async () => {
+    const { client, state } = createFakeStore([
+      { number: 7, labels: [QUEUED_LABEL, laneLabel('build')] },
+      { number: 3, labels: [QUEUED_LABEL, laneLabel('build')] },
+    ]);
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    const claimed = await queue.claimNext('build');
+
+    expect(claimed).toBe(3);
+    const labels = state.get(3);
+    expect(labels?.has(IN_PROGRESS_LABEL)).toBe(true);
+    expect(labels?.has(claimedByLabel('aaa-1'))).toBe(true);
+    expect(labels?.has(QUEUED_LABEL)).toBe(false);
+  });
+
+  it('creates every taxonomy label on first claim and memoises on the next claim for the same lane', async () => {
+    const { client, createdLabels, calls } = createFakeStore([
+      { number: 1, labels: [QUEUED_LABEL, laneLabel('build')] },
+      { number: 2, labels: [QUEUED_LABEL, laneLabel('build')] },
+    ]);
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    await queue.claimNext('build');
+    const specs = queueLabelSpecs('build', 'aaa-1');
+    for (const spec of specs) {
+      expect(createdLabels.has(spec.name)).toBe(true);
+    }
+    const ensureCallsAfterFirst = calls.filter((c) => c === 'ensureLabel').length;
+    expect(ensureCallsAfterFirst).toBe(specs.length);
+
+    await queue.claimNext('build');
+    expect(calls.filter((c) => c === 'ensureLabel').length).toBe(ensureCallsAfterFirst);
+  });
+
+  it('skips a candidate already in progress and claims the next one', async () => {
+    const { client, state } = createFakeStore([
+      { number: 1, labels: [QUEUED_LABEL, laneLabel('build'), IN_PROGRESS_LABEL] },
+      { number: 2, labels: [QUEUED_LABEL, laneLabel('build')] },
+    ]);
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    const claimed = await queue.claimNext('build');
+
+    expect(claimed).toBe(2);
+    expect(state.get(1)?.has(claimedByLabel('aaa-1'))).toBe(false);
+  });
+
+  it('returns null when there are no queued issues for the lane', async () => {
+    const { client } = createFakeStore([{ number: 1, labels: [QUEUED_LABEL, laneLabel('other')] }]);
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    expect(await queue.claimNext('build')).toBeNull();
+  });
+
+  it('returns null when the only candidate is lost to another claimant', async () => {
+    const { client } = createFakeStore([{ number: 1, labels: [QUEUED_LABEL, laneLabel('build')] }]);
+    const wrapped: QueueGitHubClient = {
+      ...client,
+      async getIssueLabels(input) {
+        const labels = await client.getIssueLabels(input);
+        // Simulate a smaller-sorting claimant having also landed its label.
+        return [...labels, 'factory:claimed-by:aaa-0'];
+      },
+    };
+    const queue = createGithubQueue({ client: wrapped, owner: 'o', repo: 'r', claimantId: 'zzz-1' });
+
+    expect(await queue.claimNext('build')).toBeNull();
+  });
+
+  it('advances to the next candidate without removing when its own claim label is absent from the read-back', async () => {
+    const { client } = createFakeStore([
+      { number: 1, labels: [QUEUED_LABEL, laneLabel('build')] },
+      { number: 2, labels: [QUEUED_LABEL, laneLabel('build')] },
+    ]);
+    let getIssueLabelsCalls = 0;
+    const removedNames: string[] = [];
+    const wrapped: QueueGitHubClient = {
+      ...client,
+      async getIssueLabels(input) {
+        getIssueLabelsCalls += 1;
+        // A concurrent release stripped our own claim label before we could read it back.
+        if (getIssueLabelsCalls === 1) return [];
+        return client.getIssueLabels(input);
+      },
+      async removeLabel(input) {
+        removedNames.push(input.name);
+        return client.removeLabel(input);
+      },
+    };
+    const queue = createGithubQueue({ client: wrapped, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    const claimed = await queue.claimNext('build');
+
+    expect(claimed).toBe(2);
+    expect(removedNames).not.toContain(claimedByLabel('aaa-1'));
+  });
+});
+
+describe('simulated concurrent claimNext (race)', () => {
+  it('never lets two concurrent claimants win the same issue — the lexicographically smallest claim wins', async () => {
+    const { client, state } = createFakeStore([
+      { number: 1, labels: [QUEUED_LABEL, laneLabel('build')] },
+      { number: 2, labels: [QUEUED_LABEL, laneLabel('build')] },
+    ]);
+    const queueA = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+    const queueB = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'zzz-2' });
+
+    const [resultA, resultB] = await Promise.all([queueA.claimNext('build'), queueB.claimNext('build')]);
+
+    expect(resultA).not.toBe(resultB);
+    expect(resultA).toBe(1);
+    expect([2, null]).toContain(resultB);
+    const claimsOnOne = [...(state.get(1) ?? [])].filter((l) => l.startsWith(CLAIMED_BY_LABEL_PREFIX));
+    expect(claimsOnOne).toEqual([claimedByLabel('aaa-1')]);
+  });
+
+  it('exactly one caller wins when a single issue is contended by two claimants', async () => {
+    const { client, state } = createFakeStore([{ number: 1, labels: [QUEUED_LABEL, laneLabel('build')] }]);
+    const queueA = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+    const queueB = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'zzz-2' });
+
+    const [resultA, resultB] = await Promise.all([queueA.claimNext('build'), queueB.claimNext('build')]);
+
+    expect(resultA).toBe(1);
+    expect(resultB).toBeNull();
+    const claimsOnOne = [...(state.get(1) ?? [])].filter((l) => l.startsWith(CLAIMED_BY_LABEL_PREFIX));
+    expect(claimsOnOne).toEqual([claimedByLabel('aaa-1')]);
+  });
+});
+
+describe('release', () => {
+  it('restores factory:queued after a claim, and the issue becomes claimable again', async () => {
+    const { client, state } = createFakeStore([{ number: 1, labels: [QUEUED_LABEL, laneLabel('build')] }]);
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+    await queue.claimNext('build');
+
+    await queue.release(1);
+
+    const labels = state.get(1) ?? new Set<string>();
+    expect(labels.has(QUEUED_LABEL)).toBe(true);
+    expect(labels.has(IN_PROGRESS_LABEL)).toBe(false);
+    expect([...labels].some((l) => l.startsWith(CLAIMED_BY_LABEL_PREFIX))).toBe(false);
+
+    expect(await queue.claimNext('build')).toBe(1);
+  });
+
+  it("release(issue, 'parked') leaves factory:parked and removes queued/in-progress/claim labels", async () => {
+    const { client, state } = createFakeStore([{ number: 1, labels: [QUEUED_LABEL, laneLabel('build')] }]);
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+    await queue.claimNext('build');
+
+    await queue.release(1, 'parked');
+
+    const labels = state.get(1) ?? new Set<string>();
+    expect(labels.has(PARKED_LABEL)).toBe(true);
+    expect(labels.has(QUEUED_LABEL)).toBe(false);
+    expect(labels.has(IN_PROGRESS_LABEL)).toBe(false);
+    expect([...labels].some((l) => l.startsWith(CLAIMED_BY_LABEL_PREFIX))).toBe(false);
+
+    expect(await queue.claimNext('build')).toBeNull();
+  });
+
+  it('never removes a label that is not present, and issues no redundant add', async () => {
+    const { client, calls } = createFakeStore([{ number: 1, labels: [QUEUED_LABEL] }]);
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    await queue.release(1);
+
+    expect(calls.filter((c) => c === 'removeLabel')).toEqual([]);
+    expect(calls.filter((c) => c === 'addLabels')).toEqual([]);
+  });
+});
+
+describe('createOctokitQueueClient', () => {
+  it('lists open issues with the given labels, dropping pull requests and normalising label shapes', async () => {
+    const octokit: any = {
+      rest: {
+        issues: {
+          listForRepo: async (input: unknown) => {
+            captured.listForRepo = input;
+            return {
+              data: [
+                { number: 1, labels: ['factory:queued', { name: 'factory:lane:build' }] },
+                { number: 2, labels: [{ name: '' }, { name: undefined }], pull_request: {} },
+              ],
+            };
+          },
+        },
+      },
+    };
+    const captured: Record<string, unknown> = {};
+
+    const client = createOctokitQueueClient(octokit);
+    const result = await client.listOpenIssuesWithLabels({ owner: 'o', repo: 'r', labels: ['factory:queued'] });
+
+    expect(captured.listForRepo).toEqual({
+      owner: 'o',
+      repo: 'r',
+      state: 'open',
+      labels: 'factory:queued',
+      per_page: 100,
+    });
+    expect(result).toEqual([{ number: 1, labels: ['factory:queued', 'factory:lane:build'] }]);
+  });
+
+  it("reads back an issue's current label names", async () => {
+    const octokit: any = {
+      rest: {
+        issues: {
+          listLabelsOnIssue: async (input: { issue_number: number }) => {
+            expect(input.issue_number).toBe(9);
+            return { data: [{ name: 'factory:queued' }, { name: 'factory:in-progress' }] };
+          },
+        },
+      },
+    };
+
+    const client = createOctokitQueueClient(octokit);
+    const labels = await client.getIssueLabels({ owner: 'o', repo: 'r', issue_number: 9 });
+
+    expect(labels).toEqual(['factory:queued', 'factory:in-progress']);
+  });
+
+  it('adds labels through octokit.rest.issues.addLabels', async () => {
+    let captured: unknown;
+    const octokit: any = {
+      rest: {
+        issues: {
+          addLabels: async (input: unknown) => {
+            captured = input;
+          },
+        },
+      },
+    };
+
+    const client = createOctokitQueueClient(octokit);
+    await client.addLabels({ owner: 'o', repo: 'r', issue_number: 3, labels: ['factory:in-progress'] });
+
+    expect(captured).toEqual({ owner: 'o', repo: 'r', issue_number: 3, labels: ['factory:in-progress'] });
+  });
+
+  it('removes a label through octokit.rest.issues.removeLabel', async () => {
+    let captured: unknown;
+    const octokit: any = {
+      rest: {
+        issues: {
+          removeLabel: async (input: unknown) => {
+            captured = input;
+          },
+        },
+      },
+    };
+
+    const client = createOctokitQueueClient(octokit);
+    await client.removeLabel({ owner: 'o', repo: 'r', issue_number: 3, name: 'factory:queued' });
+
+    expect(captured).toEqual({ owner: 'o', repo: 'r', issue_number: 3, name: 'factory:queued' });
+  });
+
+  it('ensureLabel creates the label when missing', async () => {
+    let captured: unknown;
+    const octokit: any = {
+      rest: {
+        issues: {
+          createLabel: async (input: unknown) => {
+            captured = input;
+          },
+        },
+      },
+    };
+
+    const client = createOctokitQueueClient(octokit);
+    await client.ensureLabel({ owner: 'o', repo: 'r', name: 'factory:queued', color: '0e8a16', description: 'desc' });
+
+    expect(captured).toEqual({ owner: 'o', repo: 'r', name: 'factory:queued', color: '0e8a16', description: 'desc' });
+  });
+
+  it('ensureLabel swallows an already-exists (422) error', async () => {
+    const octokit: any = {
+      rest: {
+        issues: {
+          createLabel: async () => {
+            throw { status: 422 };
+          },
+        },
+      },
+    };
+
+    const client = createOctokitQueueClient(octokit);
+
+    await expect(
+      client.ensureLabel({ owner: 'o', repo: 'r', name: 'factory:queued', color: '0e8a16', description: 'desc' }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('ensureLabel rethrows a non-422 error', async () => {
+    const octokit: any = {
+      rest: {
+        issues: {
+          createLabel: async () => {
+            throw { status: 500 };
+          },
+        },
+      },
+    };
+
+    const client = createOctokitQueueClient(octokit);
+
+    await expect(
+      client.ensureLabel({ owner: 'o', repo: 'r', name: 'factory:queued', color: '0e8a16', description: 'desc' }),
+    ).rejects.toEqual({ status: 500 });
+  });
+});

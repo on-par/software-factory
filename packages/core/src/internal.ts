@@ -200,3 +200,27 @@ export { attachRepo, parseRemoteSlug, readOriginUrl } from './daemon/repos-attac
 // Daemon pause/resume gate (#779)
 export type { SetRepoStateFailureReason, SetRepoStateResult, SettableRepoState } from './daemon/repos-pause-resume.js';
 export { setRepoState } from './daemon/repos-pause-resume.js';
+
+// GitHub-label-backed work queue (#824)
+export type {
+  GithubQueue,
+  GithubQueueOptions,
+  QueueGitHubClient,
+  QueueIssue,
+  QueueLabelSpec,
+  QueueReleaseOutcome,
+} from './queue/github-queue.js';
+export {
+  claimedByLabel,
+  CLAIMED_BY_LABEL_PREFIX,
+  createGithubQueue,
+  createOctokitQueueClient,
+  defaultClaimantId,
+  IN_PROGRESS_LABEL,
+  LANE_LABEL_PREFIX,
+  laneLabel,
+  MAX_LABEL_NAME_LENGTH,
+  PARKED_LABEL,
+  QUEUED_LABEL,
+  queueLabelSpecs,
+} from './queue/github-queue.js';
