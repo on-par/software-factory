@@ -313,6 +313,66 @@ describe('release', () => {
     expect(calls.filter((c) => c === 'removeLabel')).toEqual([]);
     expect(calls.filter((c) => c === 'addLabels')).toEqual([]);
   });
+
+  it("release(issue, 'done') strips queue-state labels, keeps the lane label, and adds nothing", async () => {
+    const { client, state, calls } = createFakeStore([
+      {
+        number: 1,
+        labels: [QUEUED_LABEL, IN_PROGRESS_LABEL, claimedByLabel('aaa-1'), laneLabel('app')],
+      },
+    ]);
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    await queue.release(1, 'done');
+
+    const labels = state.get(1) ?? new Set<string>();
+    expect(labels.has(QUEUED_LABEL)).toBe(false);
+    expect(labels.has(IN_PROGRESS_LABEL)).toBe(false);
+    expect([...labels].some((l) => l.startsWith(CLAIMED_BY_LABEL_PREFIX))).toBe(false);
+    expect(labels.has(laneLabel('app'))).toBe(true);
+    expect(calls.filter((c) => c === 'addLabels')).toEqual([]);
+  });
+
+  it("release(issue, 'done') on an issue with no factory labels is a total no-op", async () => {
+    const { client, state, calls } = createFakeStore([{ number: 1, labels: [] }]);
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    await queue.release(1, 'done');
+
+    expect(state.get(1)).toEqual(new Set());
+    expect(calls.filter((c) => c === 'removeLabel')).toEqual([]);
+    expect(calls.filter((c) => c === 'addLabels')).toEqual([]);
+  });
+});
+
+describe('lanes', () => {
+  it('returns sorted distinct lane slugs from queued issues', async () => {
+    const { client } = createFakeStore([
+      { number: 1, labels: [QUEUED_LABEL, laneLabel('infra')] },
+      { number: 2, labels: [QUEUED_LABEL, laneLabel('app')] },
+      { number: 3, labels: [QUEUED_LABEL, laneLabel('app')] },
+    ]);
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    expect(await queue.lanes()).toEqual(['app', 'infra']);
+  });
+
+  it('omits a queued issue that carries no lane label', async () => {
+    const { client } = createFakeStore([
+      { number: 1, labels: [QUEUED_LABEL] },
+      { number: 2, labels: [QUEUED_LABEL, laneLabel('app')] },
+    ]);
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    expect(await queue.lanes()).toEqual(['app']);
+  });
+
+  it('returns an empty array when nothing is queued', async () => {
+    const { client } = createFakeStore([]);
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    expect(await queue.lanes()).toEqual([]);
+  });
 });
 
 describe('createOctokitQueueClient', () => {
