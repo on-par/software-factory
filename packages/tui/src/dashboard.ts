@@ -2,7 +2,7 @@ import { laneStatusOf, type FactoryEvent } from '@on-par/factory-core';
 
 import { initialState, type PhaseName, reduceEvent, type RunState } from './state.js';
 
-export type LaneStatus = 'running' | 'waiting-merge' | 'ready' | 'merged' | 'failed' | 'stopped';
+export type LaneStatus = 'running' | 'waiting-merge' | 'ready' | 'merged' | 'failed' | 'parked' | 'stopped';
 
 export interface LaneState {
   issue: string;
@@ -69,10 +69,10 @@ export function reduceDashboard(state: DashboardState, e: FactoryEvent): Dashboa
     lane = { ...lane, status: 'waiting-merge', waitingSince: lane.waitingSince ?? e.ts };
   } else if (e.type === 'landed') {
     lane = { ...lane, status: 'merged', finishedAt: e.ts };
-  } else if (laneStatusOf(e.type) === 'failed') {
+  } else if (laneStatusOf(e.type) === 'failed' || laneStatusOf(e.type) === 'parked') {
     lane = {
       ...lane,
-      status: 'failed',
+      status: laneStatusOf(e.type) as 'failed' | 'parked',
       failedPhase: lane.failedPhase ?? lane.run.activePhase,
       failReason: lane.failReason ?? e.msg,
       finishedAt: e.ts,
