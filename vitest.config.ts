@@ -19,6 +19,10 @@ const integrationOnly = process.env.FACTORY_INTEGRATION_TESTS === '1';
 
 export default defineConfig({
   test: {
+    // Coverage instrumentation across the monorepo is memory-intensive. Keep
+    // files serial so the required full-suite check stays within CI's heap
+    // limit instead of loading several instrumented workspace graphs at once.
+    fileParallelism: false,
     // Discover tests across all workspaces in one run so coverage aggregates.
     include: [integrationOnly ? `packages/*/src/${INTEGRATION_GLOB}` : 'packages/*/src/**/*.test.{ts,tsx}'],
     exclude: integrationOnly ? configDefaults.exclude : [...configDefaults.exclude, INTEGRATION_GLOB],
