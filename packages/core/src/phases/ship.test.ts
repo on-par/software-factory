@@ -893,7 +893,7 @@ describe('shipPhase CI watch', () => {
       await vi.runAllTimersAsync();
       const result = await promise;
 
-      expect(result).toEqual({ ok: true, prNumber: 123 });
+      expect(result).toEqual({ ok: true, prNumber: 123, ciOutcome: 'success' });
       expect(logs).toContainEqual(['ship', 'CI green for PR #123']);
       expect(logs.some(([, msg]) => msg.includes('CI failed'))).toBe(false);
       expect(logs).toContainEqual(['ready', 'PR #123 ready for review']);
@@ -903,8 +903,8 @@ describe('shipPhase CI watch', () => {
     }
   });
 
-  it('logs CI failed and stops polling once a check run fails', async () => {
-    const { octokit, callCount } = createWatchOctokit([pending, oneFailure]);
+  it('fails and leaves the PR unready once a check run fails', async () => {
+    const { octokit, calls, callCount } = createWatchOctokit([pending, oneFailure]);
     const logs: Array<[string, string]> = [];
     const run = async () => ({ stdout: '' });
 
@@ -923,9 +923,17 @@ describe('shipPhase CI watch', () => {
       await vi.runAllTimersAsync();
       const result = await promise;
 
-      expect(result).toEqual({ ok: true, prNumber: 123 });
+      expect(result).toEqual({
+        ok: false,
+        prNumber: 123,
+        reason: 'CI failed for PR #123',
+        ciOutcome: 'failure',
+      });
       expect(logs).toContainEqual(['ship', 'CI failed for PR #123']);
       expect(logs.some(([, msg]) => msg.includes('CI green'))).toBe(false);
+      expect(logs).not.toContainEqual(['ready', 'PR #123 ready for review']);
+      expect(calls.some(([name]) => name === 'pulls.get')).toBe(false);
+      expect(calls.some(([name]) => name === 'graphql')).toBe(false);
       expect(callCount()).toBe(2);
     } finally {
       vi.useRealTimers();
@@ -952,7 +960,7 @@ describe('shipPhase CI watch', () => {
       await vi.runAllTimersAsync();
       const result = await promise;
 
-      expect(result).toEqual({ ok: true, prNumber: 123 });
+      expect(result).toEqual({ ok: true, prNumber: 123, ciOutcome: 'timeout' });
       expect(logs.some(([, msg]) => msg.includes('CI green'))).toBe(false);
       expect(logs.some(([, msg]) => msg.includes('CI failed'))).toBe(false);
       expect(logs).toContainEqual(['ready', 'PR #123 ready for review']);
@@ -986,7 +994,7 @@ describe('shipPhase CI watch', () => {
       await vi.runAllTimersAsync();
       const result = await promise;
 
-      expect(result).toEqual({ ok: true, prNumber: 123 });
+      expect(result).toEqual({ ok: true, prNumber: 123, ciOutcome: 'timeout' });
       expect(logs).toContainEqual(['ready', 'PR #123 ready for review']);
     } finally {
       vi.useRealTimers();
