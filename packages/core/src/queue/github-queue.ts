@@ -79,11 +79,7 @@ export interface QueueIssue {
 
 /** A no-model classification made before a queue candidate is claimed. */
 export type QueuePreflightDecision =
-  | { kind: 'build' }
-  | { kind: 'adopt'; branch: string }
-  | { kind: 'park'; reason: string }
-  | { kind: 'defer' }
-  | { kind: 'drop' };
+  { kind: 'build' } | { kind: 'adopt'; branch: string } | { kind: 'park'; reason: string } | { kind: 'defer' };
 
 export type QueuePreflight = (candidate: QueueIssue) => Promise<QueuePreflightDecision>;
 
@@ -192,16 +188,6 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     return issues.map((i) => i.number).sort((a, b) => a - b);
   }
 
-  async function dropUnownedCandidate(candidate: QueueIssue, lane: string): Promise<void> {
-    const current = await client.getIssueLabels({ owner, repo, issue_number: candidate.number });
-    if (current.includes(IN_PROGRESS_LABEL) || current.some((name) => name.startsWith(CLAIMED_BY_LABEL_PREFIX))) return;
-    for (const name of [QUEUED_LABEL, laneLabel(lane)]) {
-      if (current.includes(name)) {
-        await client.removeLabel({ owner, repo, issue_number: candidate.number, name });
-      }
-    }
-  }
-
   async function claimNext(lane: string): Promise<QueueClaim | null> {
     const candidates = (await candidatesFor(lane)).sort((a, b) => a.number - b.number);
     if (candidates.length === 0) return null;
@@ -216,10 +202,6 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
       const decision = (await options.preflight?.(candidate)) ?? { kind: 'build' as const };
       if (decision.kind === 'defer') {
         deferred.add(candidate.number);
-        continue;
-      }
-      if (decision.kind === 'drop') {
-        await dropUnownedCandidate(candidate, lane);
         continue;
       }
       await client.addLabels({ owner, repo, issue_number: candidate.number, labels: [IN_PROGRESS_LABEL, myLabel] });

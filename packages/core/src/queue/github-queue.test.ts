@@ -296,31 +296,6 @@ describe('claimNext', () => {
     });
   });
 
-  it('does not drop queue labels when a claimant appears before the unowned drop', async () => {
-    const { client, state } = createFakeStore([{ number: 1, labels: [QUEUED_LABEL, laneLabel('build')] }]);
-    const wrapped: QueueGitHubClient = {
-      ...client,
-      async getIssueLabels(input) {
-        const labels = state.get(input.issue_number)!;
-        labels.add(claimedByLabel('other-1'));
-        labels.add(IN_PROGRESS_LABEL);
-        return client.getIssueLabels(input);
-      },
-    };
-    const queue = createGithubQueue({
-      client: wrapped,
-      owner: 'o',
-      repo: 'r',
-      claimantId: 'aaa-1',
-      preflight: async () => ({ kind: 'drop' }),
-    });
-
-    expect(await queue.claimNext('build')).toBeNull();
-    expect(state.get(1)).toEqual(
-      new Set([QUEUED_LABEL, laneLabel('build'), IN_PROGRESS_LABEL, claimedByLabel('other-1')]),
-    );
-  });
-
   it('does not remove another claimant when a parked decision loses the CAS', async () => {
     const { client, state } = createFakeStore([{ number: 1, labels: [QUEUED_LABEL, laneLabel('build')] }]);
     const wrapped: QueueGitHubClient = {

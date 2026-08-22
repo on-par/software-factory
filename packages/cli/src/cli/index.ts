@@ -2032,11 +2032,6 @@ async function landIssue(
 
   try {
     try {
-      await withLandLock(async () => {
-        if (!existsSync(worktree)) {
-          await setupWorktree(repoRoot, branch, worktree, `origin/${branch}`);
-        }
-      });
       await landOpenPullRequest({
         octokit,
         owner,
@@ -2050,6 +2045,11 @@ async function landIssue(
         log,
         skipCI,
         withLock: withLandLock,
+        ensureWorktree: async () => {
+          if (!existsSync(worktree)) {
+            await setupWorktree(repoRoot, branch, worktree, `origin/${branch}`);
+          }
+        },
       });
     } catch (err) {
       if (err instanceof AwaitingReviewError || err instanceof CiFailedError) {
@@ -2650,7 +2650,8 @@ export async function runLane(
   let awaitingReview = 0;
   let skipped = 0;
   let decomposed = 0;
-  const pending = issues.map((issue) => ({ issue, decision: { kind: 'build' } as QueuePreflightDecision }));
+  const buildClaim = (issue: number): QueueClaim => ({ issue, decision: { kind: 'build' } });
+  const pending: QueueClaim[] = issues.map(buildClaim);
   const seen = new Set(issues);
   for (let i = 0; ; i++) {
     if (i >= pending.length) {
@@ -2701,11 +2702,7 @@ export async function runLane(
         // current issue so this same lane run ships them, deduping ones already queued.
         const fresh = err.childIssues.filter((n) => !seen.has(n));
         for (const n of fresh) seen.add(n);
-        pending.splice(
-          i + 1,
-          0,
-          ...fresh.map((child) => ({ issue: child, decision: { kind: 'build' } as QueuePreflightDecision })),
-        );
+        pending.splice(i + 1, 0, ...fresh.map(buildClaim));
         decomposed++;
         emitEvent(
           paths.events,
@@ -2980,6 +2977,8 @@ export async function landOpenPullRequest(opts: {
   adminMerge?: boolean;
   watch?: (opts: WatchChecksOptions) => Promise<CiOutcome>;
   withLock?: LandLock;
+  /** Materializes an adopted branch only after its locked state re-read confirms it needs rebasing. */
+  ensureWorktree?: () => Promise<void>;
 }): Promise<void> {
   const {
     octokit,
@@ -2997,6 +2996,7 @@ export async function landOpenPullRequest(opts: {
     adminMerge = process.env.FACTORY_MERGE_ADMIN === '1',
     watch = watchChecks,
     withLock = (fn) => fn(),
+    ensureWorktree,
   } = opts;
 
   const watchCi = async () => {
@@ -3032,6 +3032,7 @@ export async function landOpenPullRequest(opts: {
       // while we waited for it, so the DIRTY verdict read above can be stale.
       state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
       if (state.mergeStateStatus !== 'DIRTY') return false;
+      await ensureWorktree?.();
       await rebaseDirtyPullRequest({ issue, branch, worktree, prNumber, log, run, pathExists });
       return true;
     });
