@@ -86,10 +86,15 @@ export async function gitFetch(repoRoot: string): Promise<void> {
   await execGit('git fetch origin -q', { cwd: repoRoot });
 }
 
-export async function setupWorktree(repoRoot: string, branch: string, worktreePath: string): Promise<void> {
+export async function setupWorktree(
+  repoRoot: string,
+  branch: string,
+  worktreePath: string,
+  startPoint: string = 'origin/main',
+): Promise<void> {
   await execGit(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot }).catch(() => {});
   await execGit(`git branch -D ${shellEscape(branch)}`, { cwd: repoRoot }).catch(() => {});
-  await execGit(`git worktree add -b ${shellEscape(branch)} ${shellEscape(worktreePath)} origin/main`, {
+  await execGit(`git worktree add -b ${shellEscape(branch)} ${shellEscape(worktreePath)} ${shellEscape(startPoint)}`, {
     cwd: repoRoot,
   });
 }

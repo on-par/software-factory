@@ -252,9 +252,14 @@ describe('main: decompose', () => {
   it('rejects without --approve, without creating a prompter', async () => {
     const createPrompter = vi.fn(() => stubPrompter());
     const deps = stubDeps({ createPrompter });
-    await expect(main(['node', 'product', 'decompose', '--text', FULL_DUMP, '--budget', '0'], deps)).rejects.toThrow(
-      /required option/,
-    );
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      await expect(main(['node', 'product', 'decompose', '--text', FULL_DUMP, '--budget', '0'], deps)).rejects.toThrow(
+        /required option/,
+      );
+    } finally {
+      stderr.mockRestore();
+    }
     expect(createPrompter).not.toHaveBeenCalled();
   });
 
@@ -296,9 +301,14 @@ describe('main: personas', () => {
   it('rejects without --approve, without creating a prompter', async () => {
     const createPrompter = vi.fn(() => stubPrompter());
     const deps = stubDeps({ createPrompter });
-    await expect(main(['node', 'product', 'personas', '--text', FULL_DUMP, '--budget', '0'], deps)).rejects.toThrow(
-      /required option/,
-    );
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      await expect(main(['node', 'product', 'personas', '--text', FULL_DUMP, '--budget', '0'], deps)).rejects.toThrow(
+        /required option/,
+      );
+    } finally {
+      stderr.mockRestore();
+    }
     expect(createPrompter).not.toHaveBeenCalled();
   });
 
@@ -340,9 +350,14 @@ describe('main: judge', () => {
   it('rejects without --approve, without creating a prompter', async () => {
     const createPrompter = vi.fn(() => stubPrompter());
     const deps = stubDeps({ createPrompter });
-    await expect(main(['node', 'product', 'judge', '--text', FULL_DUMP, '--budget', '0'], deps)).rejects.toThrow(
-      /required option/,
-    );
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      await expect(main(['node', 'product', 'judge', '--text', FULL_DUMP, '--budget', '0'], deps)).rejects.toThrow(
+        /required option/,
+      );
+    } finally {
+      stderr.mockRestore();
+    }
     expect(createPrompter).not.toHaveBeenCalled();
   });
 

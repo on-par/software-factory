@@ -150,7 +150,7 @@ describe('claimNext', () => {
 
     const claimed = await queue.claimNext('build');
 
-    expect(claimed).toBe(3);
+    expect(claimed).toEqual({ issue: 3, decision: { kind: 'build' } });
     const labels = state.get(3);
     expect(labels?.has(IN_PROGRESS_LABEL)).toBe(true);
     expect(labels?.has(claimedByLabel('aaa-1'))).toBe(true);
@@ -185,7 +185,7 @@ describe('claimNext', () => {
 
     const claimed = await queue.claimNext('build');
 
-    expect(claimed).toBe(2);
+    expect(claimed).toEqual({ issue: 2, decision: { kind: 'build' } });
     expect(state.get(1)?.has(claimedByLabel('aaa-1'))).toBe(false);
   });
 
@@ -235,8 +235,113 @@ describe('claimNext', () => {
 
     const claimed = await queue.claimNext('build');
 
-    expect(claimed).toBe(2);
+    expect(claimed).toEqual({ issue: 2, decision: { kind: 'build' } });
     expect(removedNames).not.toContain(claimedByLabel('aaa-1'));
+  });
+
+  it('runs preflight before mutating candidate claim labels', async () => {
+    const { client, calls } = createFakeStore([{ number: 1, labels: [QUEUED_LABEL, laneLabel('build')] }]);
+    const queue = createGithubQueue({
+      client,
+      owner: 'o',
+      repo: 'r',
+      claimantId: 'aaa-1',
+      preflight: async () => {
+        expect(calls).not.toContain('addLabels');
+        return { kind: 'build' };
+      },
+    });
+
+    await queue.claimNext('build');
+
+    expect(calls.indexOf('addLabels')).toBeGreaterThan(calls.indexOf('listOpenIssuesWithLabels'));
+  });
+
+  it('holds deferred work out for this queue instance without retrying or claiming it', async () => {
+    const { client, state } = createFakeStore([
+      { number: 1, labels: [QUEUED_LABEL, laneLabel('build')] },
+      { number: 2, labels: [QUEUED_LABEL, laneLabel('build')] },
+    ]);
+    const preflightCalls: number[] = [];
+    const queue = createGithubQueue({
+      client,
+      owner: 'o',
+      repo: 'r',
+      claimantId: 'aaa-1',
+      preflight: async (candidate) => {
+        preflightCalls.push(candidate.number);
+        return candidate.number === 1 ? { kind: 'defer' } : { kind: 'build' };
+      },
+    });
+
+    expect(await queue.claimNext('build')).toEqual({ issue: 2, decision: { kind: 'build' } });
+    expect(await queue.claimNext('build')).toBeNull();
+    expect(preflightCalls).toEqual([1, 2]);
+    expect(state.get(1)).toEqual(new Set([QUEUED_LABEL, laneLabel('build')]));
+  });
+
+  it('keeps an adopt decision in the CAS-verified claim record', async () => {
+    const { client } = createFakeStore([{ number: 1, labels: [QUEUED_LABEL, laneLabel('build')] }]);
+    const queue = createGithubQueue({
+      client,
+      owner: 'o',
+      repo: 'r',
+      claimantId: 'aaa-1',
+      preflight: async () => ({ kind: 'adopt', branch: 'contributor/finished-work' }),
+    });
+
+    expect(await queue.claimNext('build')).toEqual({
+      issue: 1,
+      decision: { kind: 'adopt', branch: 'contributor/finished-work' },
+    });
+  });
+
+  it('does not remove another claimant when a parked decision loses the CAS', async () => {
+    const { client, state } = createFakeStore([{ number: 1, labels: [QUEUED_LABEL, laneLabel('build')] }]);
+    let readCount = 0;
+    const wrapped: QueueGitHubClient = {
+      ...client,
+      async getIssueLabels(input) {
+        readCount += 1;
+        const labels = state.get(input.issue_number)!;
+        if (readCount === 2) {
+          labels.add(claimedByLabel('aaa-0'));
+        }
+        return client.getIssueLabels(input);
+      },
+    };
+    const queue = createGithubQueue({
+      client: wrapped,
+      owner: 'o',
+      repo: 'r',
+      claimantId: 'zzz-1',
+      preflight: async () => ({ kind: 'park', reason: 'CI verdict unavailable' }),
+    });
+
+    expect(await queue.claimNext('build')).toBeNull();
+    expect(state.get(1)).toEqual(
+      new Set([QUEUED_LABEL, laneLabel('build'), IN_PROGRESS_LABEL, claimedByLabel('aaa-0')]),
+    );
+  });
+
+  it('rechecks eligibility after preflight before claiming', async () => {
+    const { client, state } = createFakeStore([{ number: 1, labels: [QUEUED_LABEL, laneLabel('build')] }]);
+    const queue = createGithubQueue({
+      client,
+      owner: 'o',
+      repo: 'r',
+      claimantId: 'zzz-1',
+      preflight: async () => {
+        state.get(1)?.add(IN_PROGRESS_LABEL);
+        state.get(1)?.add(claimedByLabel('aaa-0'));
+        return { kind: 'build' };
+      },
+    });
+
+    expect(await queue.claimNext('build')).toBeNull();
+    expect(state.get(1)).toEqual(
+      new Set([QUEUED_LABEL, laneLabel('build'), IN_PROGRESS_LABEL, claimedByLabel('aaa-0')]),
+    );
   });
 });
 
@@ -252,8 +357,8 @@ describe('simulated concurrent claimNext (race)', () => {
     const [resultA, resultB] = await Promise.all([queueA.claimNext('build'), queueB.claimNext('build')]);
 
     expect(resultA).not.toBe(resultB);
-    expect(resultA).toBe(1);
-    expect([2, null]).toContain(resultB);
+    expect(resultA).toEqual({ issue: 1, decision: { kind: 'build' } });
+    expect([2, null]).toContain(resultB?.issue ?? null);
     const claimsOnOne = [...(state.get(1) ?? [])].filter((l) => l.startsWith(CLAIMED_BY_LABEL_PREFIX));
     expect(claimsOnOne).toEqual([claimedByLabel('aaa-1')]);
   });
@@ -265,7 +370,7 @@ describe('simulated concurrent claimNext (race)', () => {
 
     const [resultA, resultB] = await Promise.all([queueA.claimNext('build'), queueB.claimNext('build')]);
 
-    expect(resultA).toBe(1);
+    expect(resultA).toEqual({ issue: 1, decision: { kind: 'build' } });
     expect(resultB).toBeNull();
     const claimsOnOne = [...(state.get(1) ?? [])].filter((l) => l.startsWith(CLAIMED_BY_LABEL_PREFIX));
     expect(claimsOnOne).toEqual([claimedByLabel('aaa-1')]);
@@ -285,7 +390,7 @@ describe('release', () => {
     expect(labels.has(IN_PROGRESS_LABEL)).toBe(false);
     expect([...labels].some((l) => l.startsWith(CLAIMED_BY_LABEL_PREFIX))).toBe(false);
 
-    expect(await queue.claimNext('build')).toBe(1);
+    expect(await queue.claimNext('build')).toEqual({ issue: 1, decision: { kind: 'build' } });
   });
 
   it("release(issue, 'parked') leaves factory:parked and removes queued/in-progress/claim labels", async () => {

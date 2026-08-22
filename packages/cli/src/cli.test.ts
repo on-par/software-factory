@@ -16,6 +16,7 @@ import {
   CiUnverifiedError,
   CliExitError,
   ConstitutionExistsError,
+  createQueuePreflightOps,
   createIngestHook,
   createSuperviseRunQueue,
   errorDetail,
@@ -46,6 +47,7 @@ import {
   parkEvents,
   parkReasonFor,
   planRunLanes,
+  preflightQueuedIssue,
   PREREQUISITES_TEXT,
   prLookupFailure,
   readActiveProduct,
@@ -894,8 +896,20 @@ describe('cli', () => {
         pulls: {
           list: async () => ({
             data: [
-              { number: 1, body: 'Closes #7', head: { ref: 'ship-it/1-unrelated' } },
-              { number: 42, body: 'Fixes some things.\n\nCloses #19', head: { ref: 'ship-it/19-renamed-title' } },
+              {
+                number: 1,
+                body: 'Closes #7',
+                head: { ref: 'ship-it/1-unrelated', sha: 'sha-1', repo: { full_name: 'on-par/software-factory' } },
+              },
+              {
+                number: 42,
+                body: 'Fixes some things.\n\nCloses #19',
+                head: {
+                  ref: 'ship-it/19-renamed-title',
+                  sha: 'sha-42',
+                  repo: { full_name: 'on-par/software-factory' },
+                },
+              },
             ],
           }),
         },
@@ -905,6 +919,8 @@ describe('cli', () => {
     expect(await findOpenPRForIssue(octokit, 'on-par', 'software-factory', 19)).toEqual({
       number: 42,
       branch: 'ship-it/19-renamed-title',
+      headSha: 'sha-42',
+      headRepoFullName: 'on-par/software-factory',
     });
   });
 
@@ -949,7 +965,15 @@ describe('cli', () => {
               return {
                 data: Array.from({ length: 30 }, (_, i) => {
                   if (i === 19) {
-                    return { number: 999, body: 'Closes #19', head: { ref: 'ship-it/19-renamed-title' } };
+                    return {
+                      number: 999,
+                      body: 'Closes #19',
+                      head: {
+                        ref: 'ship-it/19-renamed-title',
+                        sha: 'sha-999',
+                        repo: { full_name: 'on-par/software-factory' },
+                      },
+                    };
                   }
                   return { number: 100 + i + 1, body: 'Closes #7', head: { ref: `ship-it/${100 + i + 1}-unrelated` } };
                 }),
@@ -964,6 +988,8 @@ describe('cli', () => {
     expect(await findOpenPRForIssue(octokit, 'on-par', 'software-factory', 19)).toEqual({
       number: 999,
       branch: 'ship-it/19-renamed-title',
+      headSha: 'sha-999',
+      headRepoFullName: 'on-par/software-factory',
     });
     expect(calledPages).toEqual([1, 2]);
   });
@@ -2679,8 +2705,211 @@ describe('cli', () => {
     });
   });
 
+  describe('queue PR preflight', () => {
+    const baseDeps = {
+      expectedHeadRepoFullName: 'on-par/software-factory',
+      findOpenPR: async () => undefined,
+      getLandState: async () => ({ isDraft: false, mergeStateStatus: 'CLEAN' }),
+      watch: async () => 'success' as const,
+    };
+
+    it('creates GitHub-backed preflight operations with PR identity and head-SHA CI checks', async () => {
+      const calls: any[] = [];
+      const octokit: any = {
+        graphql: async (_query: string, vars: any) => {
+          calls.push(['graphql', vars]);
+          return {
+            repository: {
+              pullRequest: {
+                id: 'PR_kwDO',
+                isDraft: false,
+                mergeStateStatus: 'CLEAN',
+                reviewDecision: 'APPROVED',
+              },
+            },
+          };
+        },
+        rest: {
+          checks: {
+            listForRef: async (opts: any) => {
+              calls.push(['checks', opts]);
+              return { data: { check_runs: [{ status: 'completed', conclusion: 'failure' }] } };
+            },
+          },
+          pulls: {
+            list: async (opts: any) => {
+              calls.push(['pulls', opts]);
+              return {
+                data: [
+                  {
+                    number: 71,
+                    body: 'Closes #7',
+                    head: {
+                      ref: 'ship-it/7-real-branch',
+                      sha: 'head-sha-7',
+                      repo: { full_name: 'on-par/software-factory' },
+                    },
+                  },
+                ],
+              };
+            },
+          },
+        },
+      };
+
+      const ops = createQueuePreflightOps(octokit, 'on-par', 'software-factory');
+
+      await expect(ops.findOpenPR(7)).resolves.toEqual({
+        number: 71,
+        branch: 'ship-it/7-real-branch',
+        headSha: 'head-sha-7',
+        headRepoFullName: 'on-par/software-factory',
+      });
+      await expect(ops.getLandState(71)).resolves.toEqual({
+        id: 'PR_kwDO',
+        isDraft: false,
+        mergeStateStatus: 'CLEAN',
+        reviewDecision: 'APPROVED',
+      });
+      await expect(ops.watch('head-sha-7')).resolves.toBe('failure');
+      expect(ops.expectedHeadRepoFullName).toBe('on-par/software-factory');
+      expect(calls).toEqual([
+        ['pulls', { owner: 'on-par', repo: 'software-factory', state: 'open', per_page: 100, page: 1 }],
+        ['graphql', { owner: 'on-par', repo: 'software-factory', number: 71 }],
+        ['checks', { owner: 'on-par', repo: 'software-factory', ref: 'head-sha-7', per_page: 100, page: 1 }],
+      ]);
+    });
+
+    it('builds when no linked open PR exists', async () => {
+      await expect(
+        preflightQueuedIssue({ number: 7, labels: [] }, { ...baseDeps, findOpenPR: async () => undefined }),
+      ).resolves.toEqual({ kind: 'build' });
+    });
+
+    it('adopts only a green, non-draft PR and preserves its actual head branch', async () => {
+      await expect(
+        preflightQueuedIssue(
+          { number: 7, labels: [] },
+          {
+            ...baseDeps,
+            findOpenPR: async () => ({
+              number: 71,
+              branch: 'contributor/real-head',
+              headSha: 'abc123',
+              headRepoFullName: 'on-par/software-factory',
+            }),
+            getLandState: async () => ({ isDraft: false, mergeStateStatus: 'CLEAN' }),
+            watch: async (ref) => {
+              expect(ref).toBe('abc123');
+              return 'success';
+            },
+          },
+        ),
+      ).resolves.toEqual({ kind: 'adopt', branch: 'contributor/real-head' });
+    });
+
+    it('fails closed to park for red, timeout, draft, lookup-error, and unresolvable PR evidence', async () => {
+      const pr = async () => ({
+        number: 71,
+        branch: 'contributor/real-head',
+        headSha: 'abc123',
+        headRepoFullName: 'on-par/software-factory',
+      });
+      const cases = [
+        { watch: async () => 'failure' as const },
+        { watch: async () => 'timeout' as const },
+        { getLandState: async () => ({ isDraft: true, mergeStateStatus: 'CLEAN' }) },
+        { findOpenPR: async () => Promise.reject(new Error('rate limited')) },
+        { getLandState: async () => ({ isDraft: false, mergeStateStatus: 'UNKNOWN' }) },
+        {
+          findOpenPR: async () => ({
+            number: 71,
+            branch: 'fork-head',
+            headSha: 'def456',
+            headRepoFullName: 'fork/repo',
+          }),
+        },
+      ];
+
+      for (const overrides of cases) {
+        const result = await preflightQueuedIssue(
+          { number: 7, labels: [] },
+          {
+            ...baseDeps,
+            findOpenPR: pr,
+            getLandState: async () => ({ isDraft: false, mergeStateStatus: 'CLEAN' }),
+            watch: async () => 'success' as const,
+            ...overrides,
+          },
+        );
+        expect(result.kind).toBe('park');
+      }
+    });
+
+    it('defers an already factory-owned candidate', async () => {
+      await expect(preflightQueuedIssue({ number: 7, labels: ['factory:in-progress'] }, baseDeps)).resolves.toEqual({
+        kind: 'defer',
+      });
+    });
+  });
+
   describe('runLane', () => {
     const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
+    const buildClaim = (issue: number | undefined) =>
+      issue === undefined ? null : { issue, decision: { kind: 'build' as const } };
+
+    it('lands an adopted claim through its real branch without calling shipIssue', async () => {
+      const calls: any[] = [];
+      const claims = [{ issue: 7, decision: { kind: 'adopt' as const, branch: 'contributor/real-head' } }];
+      await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
+        claimNext: async () => claims.shift() ?? null,
+        ship: async () => {
+          throw new Error('shipIssue must not run for an adopted PR');
+        },
+        waitMerge: async (issue, branch) => {
+          calls.push(['waitMerge', issue, branch]);
+        },
+        releaseIssue: async (issue, outcome) => {
+          calls.push(['release', issue, outcome]);
+        },
+        pathExists: () => false,
+        emitEvent: () => {},
+      });
+
+      expect(calls).toEqual([
+        ['waitMerge', 7, 'contributor/real-head'],
+        ['release', 7, 'done'],
+      ]);
+    });
+
+    it('parks a preflight claim without invoking shipIssue and leaves another lane independent', async () => {
+      const parked: any[] = [];
+      const finished: any[] = [];
+      await Promise.allSettled([
+        runLane('parked', [], '/repo', 'on-par/software-factory', paths, {
+          claimNext: async () => ({ issue: 7, decision: { kind: 'park', reason: 'CI for PR #71 ended timeout' } }),
+          ship: async () => {
+            throw new Error('shipIssue must not run for a parked preflight');
+          },
+          releaseIssue: async (issue, outcome) => {
+            parked.push(['release', issue, outcome]);
+          },
+          pathExists: () => false,
+          emitEvent: (_events, type) => parked.push(['event', type]),
+        }),
+        runLane('healthy', [8], '/repo', 'on-par/software-factory', paths, {
+          ship: async () => 'ship-it/8-healthy',
+          waitMerge: async () => {
+            finished.push('merged');
+          },
+          pathExists: () => false,
+          emitEvent: () => {},
+        }),
+      ]);
+
+      expect(parked).toContainEqual(['release', 7, 'parked']);
+      expect(finished).toEqual(['merged']);
+    });
 
     it('parks the lane without re-emitting the terminal event (shipIssue owns it) on an escalate error', async () => {
       const calls: any[] = [];
@@ -2974,7 +3203,7 @@ describe('cli', () => {
         },
         pathExists: () => false,
         emitEvent: () => {},
-        claimNext: async () => toClaim.shift() ?? null,
+        claimNext: async () => buildClaim(toClaim.shift()),
         releaseIssue: async (issue, outcome) => {
           calls.push(['release', issue, outcome]);
         },
@@ -3004,7 +3233,7 @@ describe('cli', () => {
         emitEvent: () => {},
         claimNext: async () => {
           calls.push(['claimNext']);
-          return toClaim.shift() ?? null;
+          return buildClaim(toClaim.shift());
         },
         releaseIssue: async (issue, outcome) => {
           calls.push(['release', issue, outcome]);
@@ -3027,7 +3256,7 @@ describe('cli', () => {
         waitMerge: async () => {},
         pathExists: () => false,
         emitEvent: () => {},
-        claimNext: async () => toClaim.shift() ?? null,
+        claimNext: async () => buildClaim(toClaim.shift()),
         releaseIssue: async (issue, outcome) => {
           calls.push(['release', issue, outcome]);
         },
@@ -3052,7 +3281,7 @@ describe('cli', () => {
         },
         pathExists: () => false,
         emitEvent: () => {},
-        claimNext: async () => toClaim.shift() ?? null,
+        claimNext: async () => buildClaim(toClaim.shift()),
         releaseIssue: async (issue, outcome) => {
           calls.push(['release', issue, outcome]);
         },
@@ -3073,7 +3302,7 @@ describe('cli', () => {
         waitMerge: async () => {},
         pathExists: () => true,
         emitEvent: (_events, type, issue, msg, extra) => calls.push(['event', type, issue, msg, extra]),
-        claimNext: async () => 1,
+        claimNext: async () => buildClaim(1),
         releaseIssue: async (issue, outcome) => {
           calls.push(['release', issue, outcome]);
         },
@@ -3097,7 +3326,7 @@ describe('cli', () => {
         emitEvent: () => {},
         claimNext: async () => {
           calls.push(['claimNext']);
-          return toClaim.shift() ?? null;
+          return buildClaim(toClaim.shift());
         },
         releaseIssue: async (issue, outcome) => {
           calls.push(['release', issue, outcome]);
@@ -3180,7 +3409,7 @@ describe('cli', () => {
       const fakeQueue: GithubQueue = {
         claimNext: async (lane) => {
           calls.push(['claimNext', lane]);
-          return 42;
+          return { issue: 42, decision: { kind: 'build' } };
         },
         release: async (issue, outcome) => {
           calls.push(['release', issue, outcome]);
@@ -3239,7 +3468,7 @@ describe('cli', () => {
       const fakeQueue: GithubQueue = {
         claimNext: async (lane) => {
           calls.push(['claimNext', lane]);
-          return 3;
+          return { issue: 3, decision: { kind: 'build' } };
         },
         release: async (issue, outcome) => {
           calls.push(['release', issue, outcome]);
@@ -3249,7 +3478,7 @@ describe('cli', () => {
       };
 
       const deps = laneQueueDeps(fakeQueue, 'app');
-      expect(await deps.claimNext!()).toBe(3);
+      expect(await deps.claimNext!()).toEqual({ issue: 3, decision: { kind: 'build' } });
       await deps.releaseIssue!(3, 'done');
 
       expect(calls).toEqual([

@@ -1,7 +1,9 @@
+import { execFile as execFileCb } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -25,6 +27,7 @@ import {
 } from './index.js';
 
 let tmpDir: string | undefined;
+const execFile = promisify(execFileCb);
 
 describe('utils', () => {
   beforeEach(() => {
@@ -487,6 +490,23 @@ describe('gitFetch / setupWorktree', () => {
     await setupWorktree(repoRoot, branch, worktree);
 
     expect(existsSync(join(worktree, 'README.md'))).toBe(true);
+  });
+
+  it('creates a worktree from an explicitly supplied remote start point', async () => {
+    const { repoRoot } = await kit.makeThrowawayRepo();
+    const worktree = kit.trackWorktree(repoRoot, 203);
+    const branch = 'contributor/adopted-pr';
+
+    await execFile('git', ['checkout', '-b', branch], { cwd: repoRoot });
+    writeFileSync(join(repoRoot, 'ADOPTED.txt'), 'remote head\n');
+    await execFile('git', ['add', 'ADOPTED.txt'], { cwd: repoRoot });
+    await execFile('git', ['commit', '-m', 'test: adopted branch'], { cwd: repoRoot });
+    await execFile('git', ['push', '-u', 'origin', branch], { cwd: repoRoot });
+    await execFile('git', ['checkout', 'main'], { cwd: repoRoot });
+
+    await setupWorktree(repoRoot, branch, worktree, `origin/${branch}`);
+
+    expect(readFileSync(join(worktree, 'ADOPTED.txt'), 'utf-8')).toBe('remote head\n');
   });
 });
 

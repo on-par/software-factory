@@ -133,6 +133,9 @@ import type {
   OvernightPreflightResult,
   OvernightQueueDeps,
   OvernightStateItem,
+  QueueClaim,
+  QueueIssue,
+  QueuePreflightDecision,
   QueueReleaseOutcome,
   WatchChecksOptions,
 } from '@on-par/factory-core/internal';
@@ -2042,6 +2045,11 @@ async function landIssue(
         log,
         skipCI,
         withLock: withLandLock,
+        ensureWorktree: async () => {
+          if (!existsSync(worktree)) {
+            await setupWorktree(repoRoot, branch, worktree, `origin/${branch}`);
+          }
+        },
       });
     } catch (err) {
       if (err instanceof AwaitingReviewError || err instanceof CiFailedError) {
@@ -2329,7 +2337,13 @@ async function cmdRun(opts: { localQueue?: boolean } = {}) {
       readLocalQueue: () => (existsSync(paths.queue) ? readFileSync(paths.queue, 'utf-8') : null),
       queue: () => {
         const [owner, repo] = ghRepo.split('/');
-        return createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo });
+        const octokit = getOctokit();
+        return createGithubQueue({
+          client: createOctokitQueueClient(octokit),
+          owner,
+          repo,
+          preflight: (issue) => preflightQueuedIssue(issue, createQueuePreflightOps(octokit, owner, repo)),
+        });
       },
     });
     warnQueueDiagnostics(diagnostics);
@@ -2511,7 +2525,7 @@ type RunLaneDeps = {
   waitMerge?: typeof waitForMerge;
   pathExists?: (path: string) => boolean;
   emitEvent?: typeof logEvent;
-  claimNext?: () => Promise<number | null>;
+  claimNext?: () => Promise<QueueClaim | null>;
   releaseIssue?: (issue: number, outcome: QueueReleaseOutcome) => Promise<void>;
 };
 
@@ -2527,6 +2541,70 @@ export function laneQueueDeps(queue: GithubQueue, lane: string): Pick<RunLaneDep
     claimNext: () => queue.claimNext(lane),
     releaseIssue: (issue, outcome) => queue.release(issue, outcome),
   };
+}
+
+export interface OpenPullRequestEvidence {
+  number: number;
+  branch: string;
+  headSha: string;
+  headRepoFullName: string | null;
+}
+
+export interface QueuePreflightOps {
+  expectedHeadRepoFullName: string;
+  findOpenPR(issue: number): Promise<OpenPullRequestEvidence | undefined>;
+  getLandState(prNumber: number): ReturnType<typeof getPullRequestLandState>;
+  watch(ref: string): Promise<CiOutcome>;
+}
+
+export function createQueuePreflightOps(octokit: Octokit, owner: string, repo: string): QueuePreflightOps {
+  return {
+    expectedHeadRepoFullName: `${owner}/${repo}`,
+    findOpenPR: (issue) => findOpenPRForIssue(octokit, owner, repo, issue),
+    getLandState: (prNumber) => getPullRequestLandState(octokit, owner, repo, prNumber),
+    watch: (ref) => watchChecks({ octokit, owner, repo, ref }),
+  };
+}
+
+/** Resolve queued work from GitHub evidence without consuming model or worktree resources. */
+export async function preflightQueuedIssue(
+  issue: QueueIssue,
+  deps: QueuePreflightOps,
+): Promise<QueuePreflightDecision> {
+  if (issue.labels.includes('factory:in-progress')) return { kind: 'defer' };
+
+  let pr: OpenPullRequestEvidence | undefined;
+  try {
+    pr = await deps.findOpenPR(issue.number);
+  } catch (err) {
+    return { kind: 'park', reason: `PR lookup failed: ${errorDetail(err)}` };
+  }
+  if (!pr) return { kind: 'build' };
+  if (pr.headRepoFullName !== deps.expectedHeadRepoFullName) {
+    return { kind: 'park', reason: `PR #${pr.number} head is not in ${deps.expectedHeadRepoFullName}` };
+  }
+
+  let state: Awaited<ReturnType<typeof getPullRequestLandState>>;
+  try {
+    state = await deps.getLandState(pr.number);
+  } catch (err) {
+    return { kind: 'park', reason: `PR #${pr.number} merge-state lookup failed: ${errorDetail(err)}` };
+  }
+  if (state.isDraft !== false) {
+    return { kind: 'park', reason: `PR #${pr.number} is draft or its draft state is unavailable` };
+  }
+  if (!state.mergeStateStatus || state.mergeStateStatus === 'UNKNOWN') {
+    return { kind: 'park', reason: `PR #${pr.number} merge state is unavailable` };
+  }
+
+  let outcome: CiOutcome;
+  try {
+    outcome = await deps.watch(pr.headSha);
+  } catch (err) {
+    return { kind: 'park', reason: `CI watch for PR #${pr.number} failed: ${errorDetail(err)}` };
+  }
+  if (outcome !== 'success') return { kind: 'park', reason: `CI for PR #${pr.number} ended ${outcome}` };
+  return { kind: 'adopt', branch: pr.branch };
 }
 
 export async function planRunLanes(input: {
@@ -2581,23 +2659,36 @@ export async function runLane(
   let awaitingReview = 0;
   let skipped = 0;
   let decomposed = 0;
-  const pending = [...issues];
+  const buildClaim = (issue: number): QueueClaim => ({ issue, decision: { kind: 'build' } });
+  const pending: QueueClaim[] = issues.map(buildClaim);
   const seen = new Set(issues);
   for (let i = 0; ; i++) {
     if (i >= pending.length) {
       const claimed = await claimNext();
       if (claimed === null) break;
-      seen.add(claimed);
+      seen.add(claimed.issue);
       pending.push(claimed);
     }
-    const issue = pending[i];
+    const { issue, decision } = pending[i];
     if (pathExists(paths.stop)) {
       emitEvent(paths.events, 'stopped', issue, 'STOP file present', { lane });
       await releaseIssue(issue, 'queued');
       return;
     }
+    if (decision.kind === 'park') {
+      emitEvent(paths.events, 'escalate', issue, decision.reason, { lane });
+      emitEvent(
+        paths.events,
+        'parked',
+        issue,
+        `lane '${lane}' parked (${decision.reason}); ${pending.length - i - 1} issues remaining`,
+        { lane },
+      );
+      await releaseIssue(issue, 'parked');
+      return;
+    }
     try {
-      const branch = await ship(issue, {}, { repoRoot, ghRepo, lane });
+      const branch = decision.kind === 'adopt' ? decision.branch : await ship(issue, {}, { repoRoot, ghRepo, lane });
       await waitMerge(issue, branch, repoRoot, ghRepo, paths);
       merged++;
       await releaseIssue(issue, 'done');
@@ -2620,7 +2711,7 @@ export async function runLane(
         // current issue so this same lane run ships them, deduping ones already queued.
         const fresh = err.childIssues.filter((n) => !seen.has(n));
         for (const n of fresh) seen.add(n);
-        pending.splice(i + 1, 0, ...fresh);
+        pending.splice(i + 1, 0, ...fresh.map(buildClaim));
         decomposed++;
         emitEvent(
           paths.events,
@@ -2698,7 +2789,7 @@ export async function findOpenPRForIssue(
   owner: string,
   repoName: string,
   issueNum: number,
-): Promise<{ number: number; branch: string } | undefined> {
+): Promise<OpenPullRequestEvidence | undefined> {
   const perPage = 100;
   const matches = new RegExp(`\\bcloses\\s+#${issueNum}\\b`, 'i');
   for (let page = 1; ; page++) {
@@ -2710,7 +2801,18 @@ export async function findOpenPRForIssue(
       page,
     });
     const pr = prs.find((p: any) => matches.test(p.body ?? ''));
-    if (pr) return { number: pr.number, branch: pr.head.ref };
+    if (pr) {
+      const headRepoFullName = pr.head.repo?.full_name ?? null;
+      if (headRepoFullName !== `${owner}/${repoName}`) {
+        return {
+          number: pr.number,
+          branch: pr.head.ref,
+          headSha: pr.head.sha,
+          headRepoFullName,
+        };
+      }
+      return { number: pr.number, branch: pr.head.ref, headSha: pr.head.sha, headRepoFullName };
+    }
     if (prs.length < perPage) return undefined;
   }
 }
@@ -2895,6 +2997,8 @@ export async function landOpenPullRequest(opts: {
   adminMerge?: boolean;
   watch?: (opts: WatchChecksOptions) => Promise<CiOutcome>;
   withLock?: LandLock;
+  /** Materializes an adopted branch only after its locked state re-read confirms it needs rebasing. */
+  ensureWorktree?: () => Promise<void>;
 }): Promise<void> {
   const {
     octokit,
@@ -2912,6 +3016,7 @@ export async function landOpenPullRequest(opts: {
     adminMerge = process.env.FACTORY_MERGE_ADMIN === '1',
     watch = watchChecks,
     withLock = (fn) => fn(),
+    ensureWorktree,
   } = opts;
 
   const watchCi = async () => {
@@ -2947,6 +3052,7 @@ export async function landOpenPullRequest(opts: {
       // while we waited for it, so the DIRTY verdict read above can be stale.
       state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
       if (state.mergeStateStatus !== 'DIRTY') return false;
+      await ensureWorktree?.();
       await rebaseDirtyPullRequest({ issue, branch, worktree, prNumber, log, run, pathExists });
       return true;
     });
