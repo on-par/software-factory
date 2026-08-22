@@ -131,6 +131,7 @@ describe('buildPhase FACTORY_CODEX kill-switch', () => {
     });
 
     expect(result.ok).toBe(true);
+    expect(result.route).toBe('codex');
     expect(stub.calls[stub.calls.length - 1].task).toBe('build_codex');
     expect(logs.some((l) => l.type === 'warn')).toBe(false);
   });
@@ -1312,6 +1313,7 @@ describe('buildPhase cross-harness failover', () => {
 
     expect(result.ok).toBe(true);
     expect(result.model).toBe('claude-sonnet-5');
+    expect(result.route).toBe('claude');
     expect(stub.calls.map((c) => ({ model: c.model, task: c.task }))).toEqual([
       { model: 'codex-a', task: 'build_codex' },
       { model: 'claude-sonnet-5', task: 'build_claude' },

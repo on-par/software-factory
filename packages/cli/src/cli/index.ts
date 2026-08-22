@@ -1347,6 +1347,8 @@ export async function shipIssue(
       appBaseUrl,
       onPgid,
       priorFailureSignature,
+      reworkRoute: build.route,
+      reworkModel: build.model,
       laneId: lane,
     });
     checkSummary = check.summary;

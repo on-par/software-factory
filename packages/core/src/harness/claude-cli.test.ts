@@ -307,6 +307,26 @@ describe('ClaudeCliHarness result-envelope usage parsing', () => {
     expect(err.details.exitCode).toBe(0);
     expect(err.details.stdout).toBe('partial output before max turns');
   });
+
+  it('classifies a zero-token, zero-API-duration error envelope as unavailable', async () => {
+    const rec = recordingExec({
+      stdout: envelope({
+        is_error: true,
+        subtype: 'error_during_execution',
+        result: 'provider did not start',
+        duration_api_ms: 0,
+        usage: { input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 },
+      }),
+    });
+    const harness = new ClaudeCliHarness(rec.fn);
+
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('unavailable');
+    expect(err.message).toContain('zero-token');
+    expect(err.details.stdout).toBe('provider did not start');
+  });
 });
 
 describe('ClaudeCliHarness failure classification', () => {

@@ -17,6 +17,7 @@ import { escalationLine, isEscalation } from '../utils/index.js';
 export interface BuildResult {
   ok: boolean;
   model: string;
+  route: 'codex' | 'claude' | 'opencode';
   escalate?: string;
 }
 
@@ -264,11 +265,11 @@ ${compactForLocalModel(spec)}
   if (isEscalation(result.output)) {
     const escalateLine = escalationLine(result.output);
     log('escalate', escalateLine ?? 'build escalated');
-    return { ok: false, model: result.model, escalate: escalateLine };
+    return { ok: false, model: result.model, route, escalate: escalateLine };
   }
 
   log('build', `Build complete with model ${result.model}`, { model: result.model });
-  return { ok: true, model: result.model };
+  return { ok: true, model: result.model, route };
 }
 
 function buildOpencodePrompt(opts: {
