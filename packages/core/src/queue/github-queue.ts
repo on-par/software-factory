@@ -168,20 +168,30 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     return client.listOpenIssuesWithLabels({ owner, repo, labels: [QUEUED_LABEL, laneLabel(lane)] });
   }
 
+  async function laneIssuesFor(lane: string): Promise<QueueIssue[]> {
+    return client.listOpenIssuesWithLabels({ owner, repo, labels: [laneLabel(lane)] });
+  }
+
   async function list(lane: string): Promise<number[]> {
     const issues = await candidatesFor(lane);
     return issues.map((i) => i.number).sort((a, b) => a - b);
   }
 
   async function claimNext(lane: string): Promise<number | null> {
-    const candidates = (await candidatesFor(lane))
-      .filter((i) => !i.labels.includes(IN_PROGRESS_LABEL))
-      .sort((a, b) => a.number - b.number);
-    if (candidates.length === 0) return null;
-
     await ensureLabels(lane);
 
+    const laneIssues = (await laneIssuesFor(lane)).sort((a, b) => a.number - b.number);
+    const candidates = laneIssues.filter((i) => i.labels.includes(QUEUED_LABEL));
+    if (candidates.length === 0) return null;
+
     for (const candidate of candidates) {
+      const earlierBlocked = laneIssues.some(
+        (issue) => issue.number < candidate.number && issue.labels.includes(IN_PROGRESS_LABEL),
+      );
+      if (earlierBlocked) return null;
+
+      if (candidate.labels.includes(IN_PROGRESS_LABEL)) return null;
+
       await client.addLabels({ owner, repo, issue_number: candidate.number, labels: [IN_PROGRESS_LABEL, myLabel] });
       const after = await client.getIssueLabels({ owner, repo, issue_number: candidate.number });
       const claims = after.filter((name) => name.startsWith(CLAIMED_BY_LABEL_PREFIX)).sort();
@@ -192,6 +202,7 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
       if (after.includes(myLabel)) {
         await client.removeLabel({ owner, repo, issue_number: candidate.number, name: myLabel });
       }
+      return null;
     }
     return null;
   }

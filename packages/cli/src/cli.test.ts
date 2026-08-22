@@ -54,6 +54,7 @@ import {
   runLane,
   scaffoldConstitution,
   squashMergeAndDelete,
+  type ShipIssueOutcome,
   startLaneProxy,
   superviseLoop,
   sweepApprovedPRs,
@@ -2804,6 +2805,38 @@ describe('cli', () => {
       expect(calls.some((c) => c[0] === 'event' && c[1] === 'parked')).toBe(false);
       const lastEvent = calls.filter((c) => c[0] === 'event').at(-1);
       expect(lastEvent).toEqual([
+        'event',
+        'lane-done',
+        'app',
+        'lane complete (2 merged, 0 awaiting review, 0 skipped, 0 decomposed)',
+        { lane: 'app' },
+      ]);
+    });
+
+    it('does not wait for a merge when ship reports the issue is already delivered', async () => {
+      const calls: any[] = [];
+      await runLane('app', [1055, 1056], '/repo', 'on-par/software-factory', paths, {
+        ship: async (issue): Promise<ShipIssueOutcome> => {
+          calls.push(['ship', issue]);
+          return issue === 1055
+            ? { branch: 'ship-it/1055-render-basic-track-header-controls', alreadyDelivered: true }
+            : { branch: 'ship-it/1056-apply-mute-and-solo-to-monitor-presentation' };
+        },
+        waitMerge: async (issue) => {
+          calls.push(['waitMerge', issue]);
+        },
+        pathExists: () => false,
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
+          calls.push(['event', type, issue, msg, extra]),
+      });
+
+      expect(calls.filter((c) => c[0] === 'ship')).toEqual([
+        ['ship', 1055],
+        ['ship', 1056],
+      ]);
+      expect(calls.filter((c) => c[0] === 'waitMerge')).toEqual([['waitMerge', 1056]]);
+      expect(calls.some((c) => c[0] === 'event' && c[1] === 'parked')).toBe(false);
+      expect(calls.filter((c) => c[0] === 'event').at(-1)).toEqual([
         'event',
         'lane-done',
         'app',

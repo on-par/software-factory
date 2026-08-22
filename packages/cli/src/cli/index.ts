@@ -874,6 +874,15 @@ export function parkEvents(err: unknown): { type: EventKind; msg: string }[] {
   return events;
 }
 
+export interface ShipIssueOutcome {
+  branch: string;
+  alreadyDelivered?: boolean;
+}
+
+function normalizeShipOutcome(outcome: string | ShipIssueOutcome): ShipIssueOutcome {
+  return typeof outcome === 'string' ? { branch: outcome } : outcome;
+}
+
 /** Resolves the stable lane URL a build/check agent should use, by probing whether
  *  a factory proxy (started by `factory run`/`supervise` or `factory proxy`) is
  *  currently alive for the configured domain. Never throws — an absent/dead proxy
@@ -1340,6 +1349,7 @@ export async function shipIssue(
       autoRework,
       maxReworkRounds: efficiency.maxReworkRounds,
       buildTimeoutSeconds: timeouts.build,
+      route: buildRoute,
       checkTimeoutSeconds: timeouts.check,
       sandbox: activeSandboxPolicy,
       drainSteering: opts.interactive ? () => drainSteering(paths.steering, issueNum, worktree) : undefined,
@@ -1467,7 +1477,7 @@ export async function shipIssue(
       route,
     });
     console.log(chalk.green(`✅ Issue #${issueNum} → ${readyMsg}`));
-    return branch;
+    return { branch, alreadyDelivered: Boolean(ship.alreadyDelivered) };
   } catch (err: any) {
     if (err instanceof IssueDecomposedError) throw err;
     for (const e of parkEvents(err)) log(e.type, e.msg);
@@ -2505,7 +2515,7 @@ type RunLaneDeps = {
     issue: number,
     opts: { product?: string; autoRework?: boolean; interactive?: boolean; approvePlan?: boolean },
     ctx?: { repoRoot: string; ghRepo: string; lane?: string },
-  ) => Promise<string>;
+  ) => Promise<string | ShipIssueOutcome>;
   waitMerge?: typeof waitForMerge;
   pathExists?: (path: string) => boolean;
   emitEvent?: typeof logEvent;
@@ -2595,7 +2605,13 @@ export async function runLane(
       return;
     }
     try {
-      const branch = await ship(issue, {}, { repoRoot, ghRepo, lane });
+      const outcome = normalizeShipOutcome(await ship(issue, {}, { repoRoot, ghRepo, lane }));
+      if (outcome.alreadyDelivered) {
+        merged++;
+        await releaseIssue(issue, 'done');
+        continue;
+      }
+      const branch = outcome.branch;
       await waitMerge(issue, branch, repoRoot, ghRepo, paths);
       merged++;
       await releaseIssue(issue, 'done');

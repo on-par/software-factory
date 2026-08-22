@@ -176,7 +176,7 @@ describe('claimNext', () => {
     expect(calls.filter((c) => c === 'ensureLabel').length).toBe(ensureCallsAfterFirst);
   });
 
-  it('skips a candidate already in progress and claims the next one', async () => {
+  it('does not skip past a queued candidate that is already in progress', async () => {
     const { client, state } = createFakeStore([
       { number: 1, labels: [QUEUED_LABEL, laneLabel('build'), IN_PROGRESS_LABEL] },
       { number: 2, labels: [QUEUED_LABEL, laneLabel('build')] },
@@ -185,8 +185,22 @@ describe('claimNext', () => {
 
     const claimed = await queue.claimNext('build');
 
-    expect(claimed).toBe(2);
+    expect(claimed).toBeNull();
     expect(state.get(1)?.has(claimedByLabel('aaa-1'))).toBe(false);
+  });
+
+  it('does not claim a later queued issue while an earlier lane issue is already in progress', async () => {
+    const { client, state } = createFakeStore([
+      { number: 1, labels: [laneLabel('build'), IN_PROGRESS_LABEL, claimedByLabel('other-1')] },
+      { number: 2, labels: [QUEUED_LABEL, laneLabel('build')] },
+    ]);
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    const claimed = await queue.claimNext('build');
+
+    expect(claimed).toBeNull();
+    expect(state.get(2)?.has(IN_PROGRESS_LABEL)).toBe(false);
+    expect(state.get(2)?.has(claimedByLabel('aaa-1'))).toBe(false);
   });
 
   it('returns null when there are no queued issues for the lane', async () => {
@@ -211,7 +225,7 @@ describe('claimNext', () => {
     expect(await queue.claimNext('build')).toBeNull();
   });
 
-  it('advances to the next candidate without removing when its own claim label is absent from the read-back', async () => {
+  it('does not skip ahead when its own claim label is absent from the read-back', async () => {
     const { client } = createFakeStore([
       { number: 1, labels: [QUEUED_LABEL, laneLabel('build')] },
       { number: 2, labels: [QUEUED_LABEL, laneLabel('build')] },
@@ -235,7 +249,7 @@ describe('claimNext', () => {
 
     const claimed = await queue.claimNext('build');
 
-    expect(claimed).toBe(2);
+    expect(claimed).toBeNull();
     expect(removedNames).not.toContain(claimedByLabel('aaa-1'));
   });
 });

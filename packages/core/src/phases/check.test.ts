@@ -40,6 +40,7 @@ const routes: RoutesConfig = {
   version: 1,
   routes: {
     build_claude: { tier: 'boss', description: 'stub' },
+    build_codex: { tier: 'boss', description: 'stub' },
   },
 };
 
@@ -404,6 +405,32 @@ describe('checkPhase auto rework', () => {
       expect(check.reworkRounds).toBe(3);
     },
   );
+
+  it('uses the Codex build task for rework when the checked build route is codex', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const stub = new StubModelExecutor({
+      scripts: {
+        build_codex: [{ output: 'codex rework attempted' }],
+        build_claude: [{ fail: 'usage_cap' }],
+      },
+      defaultOutput: 'rework complete',
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+
+    await checkPhase({
+      issue: 833,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      route: 'codex',
+      log: () => {},
+      maxReworkRounds: 1,
+    });
+
+    expect(stub.calls.some((call) => call.task === 'build_codex')).toBe(true);
+    expect(stub.calls.some((call) => call.task === 'build_claude')).toBe(false);
+  });
 
   it('classifies a non-external router exhaustion reason as factory-fault', { timeout: 120_000 }, async () => {
     const { worktree, specPath } = await makeFailingWorktree();

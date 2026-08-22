@@ -9,7 +9,7 @@ import type { ModelRouter, RouterResult } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
-import type { CheckSummary, Constitution, FailoverReason, ReworkCause, ReworkInfo } from '../types/index.js';
+import type { CheckSummary, Constitution, FailoverReason, ReworkCause, ReworkInfo, TaskType } from '../types/index.js';
 
 type LogFn = (type: EventKind, msg: string, extra?: { failoverReason?: FailoverReason; rework?: ReworkInfo }) => void;
 
@@ -149,6 +149,7 @@ async function checkPhaseImpl(opts: {
   /** Hard cap for checker repair attempts. Defaults to one to avoid full-session retry loops. */
   maxReworkRounds?: number;
   buildTimeoutSeconds?: number;
+  route?: 'codex' | 'claude' | 'opencode';
   checkTimeoutSeconds?: number;
   sandbox?: SandboxPolicy;
   drainSteering?: () => ConsumedSteering;
@@ -175,6 +176,7 @@ async function checkPhaseImpl(opts: {
     autoRework = true,
     maxReworkRounds = MAX_REWORK_ROUNDS,
     buildTimeoutSeconds,
+    route = 'claude',
     checkTimeoutSeconds,
     sandbox,
     drainSteering,
@@ -257,6 +259,7 @@ async function checkPhaseImpl(opts: {
       router,
       log,
       buildTimeoutSeconds,
+      route,
       sandbox,
       steering,
       appPort,
@@ -341,6 +344,7 @@ interface ReworkWorkerOptions {
   router: ModelRouter;
   log: LogFn;
   buildTimeoutSeconds?: number;
+  route?: 'codex' | 'claude' | 'opencode';
   sandbox?: SandboxPolicy;
   steering?: ConsumedSteering;
   appPort?: number;
@@ -363,6 +367,7 @@ async function reworkWorker(opts: ReworkWorkerOptions): Promise<{
     router,
     log,
     buildTimeoutSeconds,
+    route = 'claude',
     sandbox,
     steering,
     appPort,
@@ -398,9 +403,10 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
   let reworkResult: RouterResult | null = null;
   let failureReason: FailoverReason | undefined;
   let attempts: RouterResult['attempts'] = [];
+  const task: TaskType = route === 'codex' ? 'build_codex' : 'build_claude';
 
   try {
-    reworkResult = await router.run('build_claude', prompt, {
+    reworkResult = await router.run(task, prompt, {
       worktree,
       timeoutSeconds: buildTimeoutSeconds ?? 7200,
       sandbox,

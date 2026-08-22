@@ -12,7 +12,7 @@ import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { specPaths } from '../spec/index.js';
 import { UnsupportedWorkSourceError, WorkSourceRegistry } from '../work/index.js';
-import { buildPlanPrompt, planPhase } from './plan.js';
+import { buildPlanPrompt, isBlockedNoopPlanArtifact, planPhase } from './plan.js';
 
 const models: ModelsConfig = {
   version: 1,
@@ -1803,6 +1803,55 @@ npm run test`;
 
     expect(result.ok).toBe(true);
     await expect(readFile(specPath, 'utf-8')).resolves.toBe(output);
+  });
+
+  it('rejects a Codex blocked/no-op artifact instead of treating it as a valid plan', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-47.md');
+    const output = `---
+route: codex
+---
+Blocked: the required destination is outside this worktree and the sandbox rejects writes:
+
+\`${specPath}\`
+
+No files were changed and no tests were run.
+`;
+    const stub = new StubModelExecutor({
+      scripts: { plan: [{ output }] },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 'Add eval runner', body: 'Measure the current prompt.' } }),
+        },
+      },
+    };
+    const logs: Array<{ type: string; msg: string }> = [];
+
+    const result = await planPhase({
+      issue: 47,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit,
+      log: (type, msg) => logs.push({ type, msg }),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.escalate).toContain('blocked/no-op spec');
+    expect(logs).toContainEqual({ type: 'escalate', msg: expect.stringContaining('blocked/no-op spec') });
+  });
+
+  it('recognizes the blocked/no-op plan artifact written by the Codex harness', () => {
+    expect(
+      isBlockedNoopPlanArtifact('Blocked: sandbox rejects writes.\n\nNo files were changed and no tests were run.'),
+    ).toBe(true);
+    expect(isBlockedNoopPlanArtifact('---\nroute: codex\n---\n# Spec\nNo files were changed by this issue.')).toBe(false);
   });
 
   describe('plan-approval gate', () => {
