@@ -133,6 +133,9 @@ import type {
   OvernightPreflightResult,
   OvernightQueueDeps,
   OvernightStateItem,
+  QueueClaim,
+  QueueIssue,
+  QueuePreflightDecision,
   QueueReleaseOutcome,
   WatchChecksOptions,
 } from '@on-par/factory-core/internal';
@@ -2029,6 +2032,11 @@ async function landIssue(
 
   try {
     try {
+      await withLandLock(async () => {
+        if (!existsSync(worktree)) {
+          await setupWorktree(repoRoot, branch, worktree, `origin/${branch}`);
+        }
+      });
       await landOpenPullRequest({
         octokit,
         owner,
@@ -2329,7 +2337,13 @@ async function cmdRun(opts: { localQueue?: boolean } = {}) {
       readLocalQueue: () => (existsSync(paths.queue) ? readFileSync(paths.queue, 'utf-8') : null),
       queue: () => {
         const [owner, repo] = ghRepo.split('/');
-        return createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo });
+        const octokit = getOctokit();
+        return createGithubQueue({
+          client: createOctokitQueueClient(octokit),
+          owner,
+          repo,
+          preflight: (issue) => preflightQueuedIssue(issue, { octokit, owner, repo }),
+        });
       },
     });
     warnQueueDiagnostics(diagnostics);
@@ -2511,7 +2525,7 @@ type RunLaneDeps = {
   waitMerge?: typeof waitForMerge;
   pathExists?: (path: string) => boolean;
   emitEvent?: typeof logEvent;
-  claimNext?: () => Promise<number | null>;
+  claimNext?: () => Promise<QueueClaim | null>;
   releaseIssue?: (issue: number, outcome: QueueReleaseOutcome) => Promise<void>;
 };
 
@@ -2527,6 +2541,61 @@ export function laneQueueDeps(queue: GithubQueue, lane: string): Pick<RunLaneDep
     claimNext: () => queue.claimNext(lane),
     releaseIssue: (issue, outcome) => queue.release(issue, outcome),
   };
+}
+
+export interface QueuePreflightDeps {
+  octokit: Octokit;
+  owner: string;
+  repo: string;
+  findOpenPR?: typeof findOpenPRForIssue;
+  getLandState?: typeof getPullRequestLandState;
+  watch?: typeof watchChecks;
+}
+
+/** Resolve queued work from GitHub evidence without consuming model or worktree resources. */
+export async function preflightQueuedIssue(
+  issue: QueueIssue,
+  deps: QueuePreflightDeps,
+): Promise<QueuePreflightDecision> {
+  const {
+    octokit,
+    owner,
+    repo,
+    findOpenPR = findOpenPRForIssue,
+    getLandState = getPullRequestLandState,
+    watch = watchChecks,
+  } = deps;
+  if (issue.labels.includes('factory:in-progress')) return { kind: 'defer' };
+
+  let pr: { number: number; branch: string } | undefined;
+  try {
+    pr = await findOpenPR(octokit, owner, repo, issue.number);
+  } catch (err) {
+    return { kind: 'park', reason: `PR lookup failed: ${errorDetail(err)}` };
+  }
+  if (!pr) return { kind: 'build' };
+
+  let state: Awaited<ReturnType<typeof getPullRequestLandState>>;
+  try {
+    state = await getLandState(octokit, owner, repo, pr.number);
+  } catch (err) {
+    return { kind: 'park', reason: `PR #${pr.number} merge-state lookup failed: ${errorDetail(err)}` };
+  }
+  if (state.isDraft !== false) {
+    return { kind: 'park', reason: `PR #${pr.number} is draft or its draft state is unavailable` };
+  }
+  if (!state.mergeStateStatus || state.mergeStateStatus === 'UNKNOWN') {
+    return { kind: 'park', reason: `PR #${pr.number} merge state is unavailable` };
+  }
+
+  let outcome: CiOutcome;
+  try {
+    outcome = await watch({ octokit, owner, repo, ref: pr.branch });
+  } catch (err) {
+    return { kind: 'park', reason: `CI watch for PR #${pr.number} failed: ${errorDetail(err)}` };
+  }
+  if (outcome !== 'success') return { kind: 'park', reason: `CI for PR #${pr.number} ended ${outcome}` };
+  return { kind: 'adopt', branch: pr.branch };
 }
 
 export async function planRunLanes(input: {
@@ -2581,23 +2650,35 @@ export async function runLane(
   let awaitingReview = 0;
   let skipped = 0;
   let decomposed = 0;
-  const pending = [...issues];
+  const pending = issues.map((issue) => ({ issue, decision: { kind: 'build' } as QueuePreflightDecision }));
   const seen = new Set(issues);
   for (let i = 0; ; i++) {
     if (i >= pending.length) {
       const claimed = await claimNext();
       if (claimed === null) break;
-      seen.add(claimed);
+      seen.add(claimed.issue);
       pending.push(claimed);
     }
-    const issue = pending[i];
+    const { issue, decision } = pending[i];
     if (pathExists(paths.stop)) {
       emitEvent(paths.events, 'stopped', issue, 'STOP file present', { lane });
       await releaseIssue(issue, 'queued');
       return;
     }
+    if (decision.kind === 'park') {
+      emitEvent(paths.events, 'escalate', issue, decision.reason, { lane });
+      emitEvent(
+        paths.events,
+        'parked',
+        issue,
+        `lane '${lane}' parked (${decision.reason}); ${pending.length - i - 1} issues remaining`,
+        { lane },
+      );
+      await releaseIssue(issue, 'parked');
+      return;
+    }
     try {
-      const branch = await ship(issue, {}, { repoRoot, ghRepo, lane });
+      const branch = decision.kind === 'adopt' ? decision.branch : await ship(issue, {}, { repoRoot, ghRepo, lane });
       await waitMerge(issue, branch, repoRoot, ghRepo, paths);
       merged++;
       await releaseIssue(issue, 'done');
@@ -2620,7 +2701,11 @@ export async function runLane(
         // current issue so this same lane run ships them, deduping ones already queued.
         const fresh = err.childIssues.filter((n) => !seen.has(n));
         for (const n of fresh) seen.add(n);
-        pending.splice(i + 1, 0, ...fresh);
+        pending.splice(
+          i + 1,
+          0,
+          ...fresh.map((child) => ({ issue: child, decision: { kind: 'build' } as QueuePreflightDecision })),
+        );
         decomposed++;
         emitEvent(
           paths.events,

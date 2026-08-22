@@ -46,6 +46,7 @@ import {
   parkEvents,
   parkReasonFor,
   planRunLanes,
+  preflightQueuedIssue,
   PREREQUISITES_TEXT,
   prLookupFailure,
   readActiveProduct,
@@ -2679,8 +2680,121 @@ describe('cli', () => {
     });
   });
 
+  describe('queue PR preflight', () => {
+    const baseDeps = {
+      octokit: {} as any,
+      owner: 'on-par',
+      repo: 'software-factory',
+    };
+
+    it('builds when no linked open PR exists', async () => {
+      await expect(
+        preflightQueuedIssue({ number: 7, labels: [] }, { ...baseDeps, findOpenPR: async () => undefined }),
+      ).resolves.toEqual({ kind: 'build' });
+    });
+
+    it('adopts only a green, non-draft PR and preserves its actual head branch', async () => {
+      await expect(
+        preflightQueuedIssue(
+          { number: 7, labels: [] },
+          {
+            ...baseDeps,
+            findOpenPR: async () => ({ number: 71, branch: 'contributor/real-head' }),
+            getLandState: async () => ({ isDraft: false, mergeStateStatus: 'CLEAN' }),
+            watch: async () => 'success',
+          },
+        ),
+      ).resolves.toEqual({ kind: 'adopt', branch: 'contributor/real-head' });
+    });
+
+    it('fails closed to park for red, timeout, draft, lookup-error, and unresolvable PR evidence', async () => {
+      const pr = async () => ({ number: 71, branch: 'contributor/real-head' });
+      const cases = [
+        { watch: async () => 'failure' as const },
+        { watch: async () => 'timeout' as const },
+        { getLandState: async () => ({ isDraft: true, mergeStateStatus: 'CLEAN' }) },
+        { findOpenPR: async () => Promise.reject(new Error('rate limited')) },
+        { getLandState: async () => ({ isDraft: false, mergeStateStatus: 'UNKNOWN' }) },
+      ];
+
+      for (const overrides of cases) {
+        const result = await preflightQueuedIssue(
+          { number: 7, labels: [] },
+          {
+            ...baseDeps,
+            findOpenPR: pr,
+            getLandState: async () => ({ isDraft: false, mergeStateStatus: 'CLEAN' }),
+            watch: async () => 'success' as const,
+            ...overrides,
+          },
+        );
+        expect(result.kind).toBe('park');
+      }
+    });
+
+    it('defers an already factory-owned candidate', async () => {
+      await expect(preflightQueuedIssue({ number: 7, labels: ['factory:in-progress'] }, baseDeps)).resolves.toEqual({
+        kind: 'defer',
+      });
+    });
+  });
+
   describe('runLane', () => {
     const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
+    const buildClaim = (issue: number | undefined) =>
+      issue === undefined ? null : { issue, decision: { kind: 'build' as const } };
+
+    it('lands an adopted claim through its real branch without calling shipIssue', async () => {
+      const calls: any[] = [];
+      await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
+        claimNext: async () => ({ issue: 7, decision: { kind: 'adopt', branch: 'contributor/real-head' } }),
+        ship: async () => {
+          throw new Error('shipIssue must not run for an adopted PR');
+        },
+        waitMerge: async (issue, branch) => {
+          calls.push(['waitMerge', issue, branch]);
+        },
+        releaseIssue: async (issue, outcome) => {
+          calls.push(['release', issue, outcome]);
+        },
+        pathExists: () => false,
+        emitEvent: () => {},
+      });
+
+      expect(calls).toEqual([
+        ['waitMerge', 7, 'contributor/real-head'],
+        ['release', 7, 'done'],
+      ]);
+    });
+
+    it('parks a preflight claim without invoking shipIssue and leaves another lane independent', async () => {
+      const parked: any[] = [];
+      const finished: any[] = [];
+      await Promise.allSettled([
+        runLane('parked', [], '/repo', 'on-par/software-factory', paths, {
+          claimNext: async () => ({ issue: 7, decision: { kind: 'park', reason: 'CI for PR #71 ended timeout' } }),
+          ship: async () => {
+            throw new Error('shipIssue must not run for a parked preflight');
+          },
+          releaseIssue: async (issue, outcome) => {
+            parked.push(['release', issue, outcome]);
+          },
+          pathExists: () => false,
+          emitEvent: (_events, type) => parked.push(['event', type]),
+        }),
+        runLane('healthy', [8], '/repo', 'on-par/software-factory', paths, {
+          ship: async () => 'ship-it/8-healthy',
+          waitMerge: async () => {
+            finished.push('merged');
+          },
+          pathExists: () => false,
+          emitEvent: () => {},
+        }),
+      ]);
+
+      expect(parked).toContainEqual(['release', 7, 'parked']);
+      expect(finished).toEqual(['merged']);
+    });
 
     it('parks the lane without re-emitting the terminal event (shipIssue owns it) on an escalate error', async () => {
       const calls: any[] = [];
@@ -2974,7 +3088,7 @@ describe('cli', () => {
         },
         pathExists: () => false,
         emitEvent: () => {},
-        claimNext: async () => toClaim.shift() ?? null,
+        claimNext: async () => buildClaim(toClaim.shift()),
         releaseIssue: async (issue, outcome) => {
           calls.push(['release', issue, outcome]);
         },
@@ -3004,7 +3118,7 @@ describe('cli', () => {
         emitEvent: () => {},
         claimNext: async () => {
           calls.push(['claimNext']);
-          return toClaim.shift() ?? null;
+          return buildClaim(toClaim.shift());
         },
         releaseIssue: async (issue, outcome) => {
           calls.push(['release', issue, outcome]);
@@ -3027,7 +3141,7 @@ describe('cli', () => {
         waitMerge: async () => {},
         pathExists: () => false,
         emitEvent: () => {},
-        claimNext: async () => toClaim.shift() ?? null,
+        claimNext: async () => buildClaim(toClaim.shift()),
         releaseIssue: async (issue, outcome) => {
           calls.push(['release', issue, outcome]);
         },
@@ -3052,7 +3166,7 @@ describe('cli', () => {
         },
         pathExists: () => false,
         emitEvent: () => {},
-        claimNext: async () => toClaim.shift() ?? null,
+        claimNext: async () => buildClaim(toClaim.shift()),
         releaseIssue: async (issue, outcome) => {
           calls.push(['release', issue, outcome]);
         },
@@ -3073,7 +3187,7 @@ describe('cli', () => {
         waitMerge: async () => {},
         pathExists: () => true,
         emitEvent: (_events, type, issue, msg, extra) => calls.push(['event', type, issue, msg, extra]),
-        claimNext: async () => 1,
+        claimNext: async () => buildClaim(1),
         releaseIssue: async (issue, outcome) => {
           calls.push(['release', issue, outcome]);
         },
@@ -3097,7 +3211,7 @@ describe('cli', () => {
         emitEvent: () => {},
         claimNext: async () => {
           calls.push(['claimNext']);
-          return toClaim.shift() ?? null;
+          return buildClaim(toClaim.shift());
         },
         releaseIssue: async (issue, outcome) => {
           calls.push(['release', issue, outcome]);
@@ -3180,7 +3294,7 @@ describe('cli', () => {
       const fakeQueue: GithubQueue = {
         claimNext: async (lane) => {
           calls.push(['claimNext', lane]);
-          return 42;
+          return { issue: 42, decision: { kind: 'build' } };
         },
         release: async (issue, outcome) => {
           calls.push(['release', issue, outcome]);
@@ -3239,7 +3353,7 @@ describe('cli', () => {
       const fakeQueue: GithubQueue = {
         claimNext: async (lane) => {
           calls.push(['claimNext', lane]);
-          return 3;
+          return { issue: 3, decision: { kind: 'build' } };
         },
         release: async (issue, outcome) => {
           calls.push(['release', issue, outcome]);
@@ -3249,7 +3363,7 @@ describe('cli', () => {
       };
 
       const deps = laneQueueDeps(fakeQueue, 'app');
-      expect(await deps.claimNext!()).toBe(3);
+      expect(await deps.claimNext!()).toEqual({ issue: 3, decision: { kind: 'build' } });
       await deps.releaseIssue!(3, 'done');
 
       expect(calls).toEqual([

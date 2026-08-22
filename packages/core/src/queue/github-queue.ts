@@ -77,6 +77,22 @@ export interface QueueIssue {
   labels: string[];
 }
 
+/** A no-model classification made before a queue candidate is claimed. */
+export type QueuePreflightDecision =
+  | { kind: 'build' }
+  | { kind: 'adopt'; branch: string }
+  | { kind: 'park'; reason: string }
+  | { kind: 'defer' }
+  | { kind: 'drop' };
+
+export type QueuePreflight = (candidate: QueueIssue) => Promise<QueuePreflightDecision>;
+
+/** A successfully claimed issue and the preflight decision that led to the claim. */
+export interface QueueClaim {
+  issue: number;
+  decision: Extract<QueuePreflightDecision, { kind: 'build' | 'adopt' | 'park' }>;
+}
+
 export interface QueueGitHubClient {
   /** Open issues carrying ALL of `labels`. Pull requests must be excluded. */
   listOpenIssuesWithLabels(input: { owner: string; repo: string; labels: string[] }): Promise<QueueIssue[]>;
@@ -141,10 +157,12 @@ export interface GithubQueueOptions {
   repo: string;
   /** Defaults to defaultClaimantId(). Injectable so tests can simulate distinct claimants. */
   claimantId?: string;
+  /** Cheap GitHub/git evidence gathered before the label-CAS claim. */
+  preflight?: QueuePreflight;
 }
 
 export interface GithubQueue {
-  claimNext(lane: string): Promise<number | null>;
+  claimNext(lane: string): Promise<QueueClaim | null>;
   release(issue: number, outcome?: QueueReleaseOutcome): Promise<void>;
   list(lane: string): Promise<number[]>;
   lanes(): Promise<string[]>;
@@ -155,6 +173,7 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
   const claimantId = options.claimantId ?? defaultClaimantId();
   const myLabel = claimedByLabel(claimantId);
   const ensuredLanes = new Set<string>();
+  const deferred = new Set<number>();
 
   async function ensureLabels(lane: string): Promise<void> {
     if (ensuredLanes.has(lane)) return;
@@ -173,21 +192,42 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     return issues.map((i) => i.number).sort((a, b) => a - b);
   }
 
-  async function claimNext(lane: string): Promise<number | null> {
-    const candidates = (await candidatesFor(lane))
-      .filter((i) => !i.labels.includes(IN_PROGRESS_LABEL))
-      .sort((a, b) => a.number - b.number);
+  async function dropUnownedCandidate(candidate: QueueIssue, lane: string): Promise<void> {
+    const current = await client.getIssueLabels({ owner, repo, issue_number: candidate.number });
+    if (current.includes(IN_PROGRESS_LABEL) || current.some((name) => name.startsWith(CLAIMED_BY_LABEL_PREFIX))) return;
+    for (const name of [QUEUED_LABEL, laneLabel(lane)]) {
+      if (current.includes(name)) {
+        await client.removeLabel({ owner, repo, issue_number: candidate.number, name });
+      }
+    }
+  }
+
+  async function claimNext(lane: string): Promise<QueueClaim | null> {
+    const candidates = (await candidatesFor(lane)).sort((a, b) => a.number - b.number);
     if (candidates.length === 0) return null;
 
     await ensureLabels(lane);
 
     for (const candidate of candidates) {
+      if (deferred.has(candidate.number) || candidate.labels.includes(IN_PROGRESS_LABEL)) {
+        deferred.add(candidate.number);
+        continue;
+      }
+      const decision = (await options.preflight?.(candidate)) ?? { kind: 'build' as const };
+      if (decision.kind === 'defer') {
+        deferred.add(candidate.number);
+        continue;
+      }
+      if (decision.kind === 'drop') {
+        await dropUnownedCandidate(candidate, lane);
+        continue;
+      }
       await client.addLabels({ owner, repo, issue_number: candidate.number, labels: [IN_PROGRESS_LABEL, myLabel] });
       const after = await client.getIssueLabels({ owner, repo, issue_number: candidate.number });
       const claims = after.filter((name) => name.startsWith(CLAIMED_BY_LABEL_PREFIX)).sort();
       if (claims.length > 0 && claims[0] === myLabel) {
         await client.removeLabel({ owner, repo, issue_number: candidate.number, name: QUEUED_LABEL });
-        return candidate.number;
+        return { issue: candidate.number, decision };
       }
       if (after.includes(myLabel)) {
         await client.removeLabel({ owner, repo, issue_number: candidate.number, name: myLabel });

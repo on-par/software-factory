@@ -58,6 +58,7 @@ const h = vi.hoisted(() => {
       costsFile?: string;
       steeringDir?: string;
     }>,
+    setupWorktreeImpl: async (_repoRoot: string, _branch: string, _worktree: string, _startPoint?: string) => {},
   };
 });
 
@@ -191,7 +192,7 @@ vi.mock('@on-par/factory-core/internal', async (importOriginal) => {
     // Cost.
     readCosts: vi.fn(() => h.costs),
     // Git / worktree side-effects — no-ops.
-    setupWorktree: vi.fn(async () => {}),
+    setupWorktree: vi.fn(async (...args: [string, string, string, string?]) => h.setupWorktreeImpl(...args)),
     cleanupWorktree: vi.fn(async () => {}),
     gitFetch: vi.fn(async () => {}),
     withGitLock: vi.fn(async (_root: string, fn: () => Promise<unknown>) => fn()),
@@ -209,6 +210,7 @@ vi.mock('@on-par/factory-core/internal', async (importOriginal) => {
 import {
   cleanupWorktree,
   formatGcReport,
+  setupWorktree,
   sweepWorktrees,
   watchChecks,
   withFileLock,
@@ -342,6 +344,7 @@ beforeEach(() => {
   };
   h.gcReport = { removed: [], kept: 0, dryRun: false };
   h.runTuiCalls = [];
+  h.setupWorktreeImpl = async () => {};
   h.claudeAvailable = undefined;
   h.orphanEvents = [];
   h.portListeners = [];
@@ -3039,6 +3042,45 @@ describe('CliExitError (direct command invocation)', () => {
       message: expect.stringContaining('no open PR'),
     });
     expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('materializes a missing adopted PR worktree from its remote head, rebases it, and rechecks CI', async () => {
+    const branch = 'contributor/adopted-pr';
+    const worktree = `${h.repoRoot}-factory-ship-it-5`;
+    const commands: string[] = [];
+    const originalExec = h.execImpl;
+    h.execImpl = (command) => {
+      commands.push(command);
+      return originalExec(command);
+    };
+    h.octokit.rest.pulls.list = vi.fn(async ({ head }: { head?: string }) =>
+      head ? { data: [] } : { data: [{ number: 77, head: { ref: branch }, body: 'Closes #5' }] },
+    );
+    h.octokit.graphql = vi.fn(async (query: string) =>
+      query.trimStart().startsWith('query')
+        ? { repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' } } }
+        : {},
+    );
+    h.setupWorktreeImpl = async (_repoRoot, _branch, path) => {
+      mkdirSync(path, { recursive: true });
+    };
+    vi.mocked(watchChecks).mockResolvedValue('success');
+
+    try {
+      await expect(cmdLand(5)).resolves.toBeUndefined();
+      expect(setupWorktree).toHaveBeenCalledWith(h.repoRoot, branch, worktree, `origin/${branch}`);
+      expect(commands).toContain('git rebase origin/main');
+      expect(commands).toContain("git push --force-with-lease origin 'contributor/adopted-pr'");
+      expect(watchChecks).toHaveBeenCalledTimes(2);
+      expect(h.octokit.rest.pulls.merge).toHaveBeenCalledWith({
+        owner: 'on-par',
+        repo: 'software-factory',
+        pull_number: 77,
+        merge_method: 'squash',
+      });
+    } finally {
+      rmSync(worktree, { recursive: true, force: true });
+    }
   });
 
   it('cmdLand(5) resolves cleanly and leaves the PR open when the merge is blocked on a required review', async () => {

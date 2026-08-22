@@ -205,9 +205,12 @@ export { setRepoState } from './daemon/repos-pause-resume.js';
 export type {
   GithubQueue,
   GithubQueueOptions,
+  QueueClaim,
   QueueGitHubClient,
   QueueIssue,
   QueueLabelSpec,
+  QueuePreflight,
+  QueuePreflightDecision,
   QueueReleaseOutcome,
 } from './queue/github-queue.js';
 export {
