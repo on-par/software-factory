@@ -161,6 +161,15 @@ can make, print a line starting exactly with "ESCALATE:" followed by the questio
 and do NOT write ${specPath}.`;
 }
 
+export function isBlockedNoopPlanArtifact(spec: string): boolean {
+  const normalized = spec.toLowerCase();
+  return (
+    normalized.includes('blocked:') &&
+    normalized.includes('no files were changed') &&
+    normalized.includes('sandbox')
+  );
+}
+
 export async function planPhase(opts: Parameters<typeof planPhaseImpl>[0]): Promise<PlanResult> {
   return withLifecycle(
     { bus: opts.bus, phase: 'plan', laneId: opts.laneId, issueId: opts.issue, worktreePath: opts.worktree },
@@ -442,6 +451,20 @@ async function planPhaseImpl(opts: {
     // spec content; if it has file tools, it may have written specPath directly.
     if (!existsSync(specPath)) {
       await writeSpec(specPath, { body: result.output });
+    }
+
+    const rawSpec = await readFile(specPath, 'utf-8');
+    if (isBlockedNoopPlanArtifact(rawSpec)) {
+      const reason = 'PLAN produced a blocked/no-op spec instead of an implementation plan';
+      log('escalate', reason);
+      return {
+        ok: false,
+        route: 'claude',
+        specPath,
+        model: result.model,
+        escalate: reason,
+        designArtifact: null,
+      };
     }
 
     // Read route from spec frontmatter (single normalization site: parseSpec)

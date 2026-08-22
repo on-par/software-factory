@@ -1922,7 +1922,7 @@ describe('shipPhase duplicate-PR guard (#520)', () => {
     expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
   });
 
-  it('still refuses to duplicate when the tree is landed but no merged PR is found', async () => {
+  it('fails closed when the tree is landed but no merged PR is found', async () => {
     const { octokit, calls } = createMergedPROctokit([]);
     const commands: string[] = [];
     const logs: Array<[string, string]> = [];
@@ -1947,11 +1947,10 @@ describe('shipPhase duplicate-PR guard (#520)', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: true, alreadyDelivered: true });
-    expect(result.prNumber).toBeUndefined();
+    expect(result).toEqual({ ok: false });
     expect(commands.some((c) => c.startsWith('git push'))).toBe(false);
     expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
-    expect(logs).toContainEqual(['ship', expect.stringContaining('HEAD tree matches origin/main')]);
+    expect(logs).toContainEqual(['ship', expect.stringContaining('no commits ahead of origin/main')]);
   });
 
   it('reports delivered for a merge-commit merge (ahead-count 0 after fetch) with a prior merged PR', async () => {
@@ -2128,14 +2127,11 @@ describe('shipPhase ambiguous-lookup fail-closed (#641)', () => {
     ).toBe(true);
   });
 
-  it('a proven-landed tree overrides a merged-PR lookup error', async () => {
+  it('fails closed when an identical tree has no merged PR evidence', async () => {
     const { octokit, calls } = createOctokit();
-    let listCalls = 0;
     octokit.rest.pulls.list = async (args: any) => {
       calls.push(['pulls.list', args]);
-      listCalls++;
-      if (listCalls === 1) return { data: [] };
-      throw new Error('list failed');
+      return { data: [] };
     };
     const run = async (command: string) => {
       const remote = remoteHeadStub(command);
@@ -2157,8 +2153,7 @@ describe('shipPhase ambiguous-lookup fail-closed (#641)', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: true, alreadyDelivered: true });
-    expect(result.prNumber).toBeUndefined();
+    expect(result).toEqual({ ok: false });
     expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
   });
 });

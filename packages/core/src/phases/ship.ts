@@ -142,8 +142,8 @@ async function shipPhaseImpl(opts: {
       return { ok: false };
     }
     if (recoveryState.landed || !recoveryState.ahead) {
-      // The branch's content is already on main: identical trees (squash merge) or an
-      // empty ahead-count (merge commit / fast-forward). That is delivery, not recovery.
+      // Empty ahead-counts are delivery only when GitHub still shows a merged PR
+      // for this branch. An identical tree without that evidence is usually a no-op build.
       const mergedLookup = await findMergedPR(octokit, owner, repoName, branch);
       if (mergedLookup.status === 'error' && !recoveryState.landed) {
         log(
@@ -153,10 +153,10 @@ async function shipPhaseImpl(opts: {
         return { ok: false };
       }
       const mergedPr = mergedLookup.status === 'found' ? mergedLookup.prNumber : undefined;
-      if (mergedPr !== undefined || recoveryState.landed) {
+      if (mergedPr !== undefined) {
         log(
           'ship',
-          `not recovering ${branch}: already delivered${mergedPr !== undefined ? ` by merged PR #${mergedPr}` : ' (HEAD tree matches origin/main)'}`,
+          `not recovering ${branch}: already delivered by merged PR #${mergedPr}`,
         );
         return { ok: true, prNumber: mergedPr, alreadyDelivered: true };
       }
