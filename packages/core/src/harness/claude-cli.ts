@@ -104,10 +104,17 @@ export class ClaudeCliHarness implements CodingHarness {
 
     const { output, usage, isError, subtype } = parseResultEnvelope(stdout);
     if (isError) {
-      throw new HarnessError(`claude CLI returned an error result${subtype ? ` (${subtype})` : ''}`, 'error', {
-        exitCode: 0,
-        stdout: output,
-      });
+      const unavailable = usage?.inputTokens === 0 && usage.outputTokens === 0 && usage.durationApiMs === 0;
+      throw new HarnessError(
+        unavailable
+          ? 'claude CLI returned a zero-token, zero-API-duration error result — provider unavailable'
+          : `claude CLI returned an error result${subtype ? ` (${subtype})` : ''}`,
+        unavailable ? 'unavailable' : 'error',
+        {
+          exitCode: 0,
+          stdout: output,
+        },
+      );
     }
     if (output.trim().length === 0) {
       throw new HarnessError('claude CLI returned empty output', 'empty_response', { exitCode: 0 });

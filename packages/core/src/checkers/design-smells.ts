@@ -14,6 +14,7 @@ import { extractJsonObjects } from '../utils/json.js';
 import type { CheckerContext } from './index.js';
 
 export const DESIGN_SMELLS_CHECKER = 'design_smells';
+export const WORKER_OUTPUT_CHECKER = 'worker_output';
 
 /** Smell taxonomy from #483 — the four maintainability failures binary gates cannot see. */
 export const SMELL_KINDS = ['cast-to-pass', 'swallowed-error', 'shotgun-surgery', 'boundary-violation'] as const;
@@ -135,6 +136,25 @@ export async function collectDesignDiff(worktree: string, run: DiffRunner = defa
   }
 
   return { text, baseRef, truncated };
+}
+
+/** Verifies that the worker changed a product file before repairs can begin. */
+export async function workerOutputChecker(
+  ctx: CheckerContext,
+  deps?: { collectDiff?: typeof collectDesignDiff },
+): Promise<CheckerOutput> {
+  const diff = await (deps?.collectDiff ?? collectDesignDiff)(ctx.worktree);
+  if (diff.skipReason) {
+    return { checker: WORKER_OUTPUT_CHECKER, result: 'SKIP', details: diff.skipReason };
+  }
+  if (diff.text === '') {
+    return {
+      checker: WORKER_OUTPUT_CHECKER,
+      result: 'FAIL',
+      details: `worker produced no diff against ${diff.baseRef}; no implementation was produced`,
+    };
+  }
+  return { checker: WORKER_OUTPUT_CHECKER, result: 'PASS', details: `worker produced a diff against ${diff.baseRef}` };
 }
 
 /** Operators disable the critic per-run with FACTORY_DESIGN_SMELLS=0. */
