@@ -298,11 +298,15 @@ describe('claimNext', () => {
 
   it('does not remove another claimant when a parked decision loses the CAS', async () => {
     const { client, state } = createFakeStore([{ number: 1, labels: [QUEUED_LABEL, laneLabel('build')] }]);
+    let readCount = 0;
     const wrapped: QueueGitHubClient = {
       ...client,
       async getIssueLabels(input) {
+        readCount += 1;
         const labels = state.get(input.issue_number)!;
-        labels.add(claimedByLabel('aaa-0'));
+        if (readCount === 2) {
+          labels.add(claimedByLabel('aaa-0'));
+        }
         return client.getIssueLabels(input);
       },
     };
@@ -312,6 +316,26 @@ describe('claimNext', () => {
       repo: 'r',
       claimantId: 'zzz-1',
       preflight: async () => ({ kind: 'park', reason: 'CI verdict unavailable' }),
+    });
+
+    expect(await queue.claimNext('build')).toBeNull();
+    expect(state.get(1)).toEqual(
+      new Set([QUEUED_LABEL, laneLabel('build'), IN_PROGRESS_LABEL, claimedByLabel('aaa-0')]),
+    );
+  });
+
+  it('rechecks eligibility after preflight before claiming', async () => {
+    const { client, state } = createFakeStore([{ number: 1, labels: [QUEUED_LABEL, laneLabel('build')] }]);
+    const queue = createGithubQueue({
+      client,
+      owner: 'o',
+      repo: 'r',
+      claimantId: 'zzz-1',
+      preflight: async () => {
+        state.get(1)?.add(IN_PROGRESS_LABEL);
+        state.get(1)?.add(claimedByLabel('aaa-0'));
+        return { kind: 'build' };
+      },
     });
 
     expect(await queue.claimNext('build')).toBeNull();

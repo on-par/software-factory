@@ -189,6 +189,7 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
   }
 
   async function claimNext(lane: string): Promise<QueueClaim | null> {
+    const routeLabel = laneLabel(lane);
     const candidates = (await candidatesFor(lane)).sort((a, b) => a.number - b.number);
     if (candidates.length === 0) return null;
 
@@ -201,6 +202,16 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
       }
       const decision = (await options.preflight?.(candidate)) ?? { kind: 'build' as const };
       if (decision.kind === 'defer') {
+        deferred.add(candidate.number);
+        continue;
+      }
+      const latest = await client.getIssueLabels({ owner, repo, issue_number: candidate.number });
+      const stillEligible =
+        latest.includes(QUEUED_LABEL) &&
+        latest.includes(routeLabel) &&
+        !latest.includes(IN_PROGRESS_LABEL) &&
+        !latest.some((name) => name.startsWith(CLAIMED_BY_LABEL_PREFIX));
+      if (!stillEligible) {
         deferred.add(candidate.number);
         continue;
       }

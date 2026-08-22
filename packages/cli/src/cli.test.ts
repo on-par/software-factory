@@ -16,6 +16,7 @@ import {
   CiUnverifiedError,
   CliExitError,
   ConstitutionExistsError,
+  createQueuePreflightOps,
   createIngestHook,
   createSuperviseRunQueue,
   errorDetail,
@@ -895,8 +896,20 @@ describe('cli', () => {
         pulls: {
           list: async () => ({
             data: [
-              { number: 1, body: 'Closes #7', head: { ref: 'ship-it/1-unrelated' } },
-              { number: 42, body: 'Fixes some things.\n\nCloses #19', head: { ref: 'ship-it/19-renamed-title' } },
+              {
+                number: 1,
+                body: 'Closes #7',
+                head: { ref: 'ship-it/1-unrelated', sha: 'sha-1', repo: { full_name: 'on-par/software-factory' } },
+              },
+              {
+                number: 42,
+                body: 'Fixes some things.\n\nCloses #19',
+                head: {
+                  ref: 'ship-it/19-renamed-title',
+                  sha: 'sha-42',
+                  repo: { full_name: 'on-par/software-factory' },
+                },
+              },
             ],
           }),
         },
@@ -906,6 +919,8 @@ describe('cli', () => {
     expect(await findOpenPRForIssue(octokit, 'on-par', 'software-factory', 19)).toEqual({
       number: 42,
       branch: 'ship-it/19-renamed-title',
+      headSha: 'sha-42',
+      headRepoFullName: 'on-par/software-factory',
     });
   });
 
@@ -950,7 +965,15 @@ describe('cli', () => {
               return {
                 data: Array.from({ length: 30 }, (_, i) => {
                   if (i === 19) {
-                    return { number: 999, body: 'Closes #19', head: { ref: 'ship-it/19-renamed-title' } };
+                    return {
+                      number: 999,
+                      body: 'Closes #19',
+                      head: {
+                        ref: 'ship-it/19-renamed-title',
+                        sha: 'sha-999',
+                        repo: { full_name: 'on-par/software-factory' },
+                      },
+                    };
                   }
                   return { number: 100 + i + 1, body: 'Closes #7', head: { ref: `ship-it/${100 + i + 1}-unrelated` } };
                 }),
@@ -965,6 +988,8 @@ describe('cli', () => {
     expect(await findOpenPRForIssue(octokit, 'on-par', 'software-factory', 19)).toEqual({
       number: 999,
       branch: 'ship-it/19-renamed-title',
+      headSha: 'sha-999',
+      headRepoFullName: 'on-par/software-factory',
     });
     expect(calledPages).toEqual([1, 2]);
   });
@@ -2682,10 +2707,78 @@ describe('cli', () => {
 
   describe('queue PR preflight', () => {
     const baseDeps = {
-      octokit: {} as any,
-      owner: 'on-par',
-      repo: 'software-factory',
+      expectedHeadRepoFullName: 'on-par/software-factory',
+      findOpenPR: async () => undefined,
+      getLandState: async () => ({ isDraft: false, mergeStateStatus: 'CLEAN' }),
+      watch: async () => 'success' as const,
     };
+
+    it('creates GitHub-backed preflight operations with PR identity and head-SHA CI checks', async () => {
+      const calls: any[] = [];
+      const octokit: any = {
+        graphql: async (_query: string, vars: any) => {
+          calls.push(['graphql', vars]);
+          return {
+            repository: {
+              pullRequest: {
+                id: 'PR_kwDO',
+                isDraft: false,
+                mergeStateStatus: 'CLEAN',
+                reviewDecision: 'APPROVED',
+              },
+            },
+          };
+        },
+        rest: {
+          checks: {
+            listForRef: async (opts: any) => {
+              calls.push(['checks', opts]);
+              return { data: { check_runs: [{ status: 'completed', conclusion: 'failure' }] } };
+            },
+          },
+          pulls: {
+            list: async (opts: any) => {
+              calls.push(['pulls', opts]);
+              return {
+                data: [
+                  {
+                    number: 71,
+                    body: 'Closes #7',
+                    head: {
+                      ref: 'ship-it/7-real-branch',
+                      sha: 'head-sha-7',
+                      repo: { full_name: 'on-par/software-factory' },
+                    },
+                  },
+                ],
+              };
+            },
+          },
+        },
+      };
+
+      const ops = createQueuePreflightOps(octokit, 'on-par', 'software-factory');
+
+      await expect(ops.findOpenPR(7)).resolves.toEqual({
+        number: 71,
+        branch: 'ship-it/7-real-branch',
+        headSha: 'head-sha-7',
+        headRepoFullName: 'on-par/software-factory',
+      });
+      await expect(ops.getLandState(71)).resolves.toEqual({
+        id: 'PR_kwDO',
+        isDraft: false,
+        mergeStateStatus: 'CLEAN',
+        reviewDecision: 'APPROVED',
+      });
+      await expect(ops.watch('head-sha-7')).resolves.toBe('failure');
+      expect(ops.expectedHeadRepoFullName).toBe('on-par/software-factory');
+      expect(calls).toEqual([
+        ['pulls', { owner: 'on-par', repo: 'software-factory', state: 'open', per_page: 100, page: 1 }],
+        ['graphql', { owner: 'on-par', repo: 'software-factory', number: 71 }],
+        ['checks', { owner: 'on-par', repo: 'software-factory', ref: 'head-sha-7', per_page: 100, page: 1 }],
+      ]);
+    });
 
     it('builds when no linked open PR exists', async () => {
       await expect(
@@ -2699,22 +2792,43 @@ describe('cli', () => {
           { number: 7, labels: [] },
           {
             ...baseDeps,
-            findOpenPR: async () => ({ number: 71, branch: 'contributor/real-head' }),
+            findOpenPR: async () => ({
+              number: 71,
+              branch: 'contributor/real-head',
+              headSha: 'abc123',
+              headRepoFullName: 'on-par/software-factory',
+            }),
             getLandState: async () => ({ isDraft: false, mergeStateStatus: 'CLEAN' }),
-            watch: async () => 'success',
+            watch: async (ref) => {
+              expect(ref).toBe('abc123');
+              return 'success';
+            },
           },
         ),
       ).resolves.toEqual({ kind: 'adopt', branch: 'contributor/real-head' });
     });
 
     it('fails closed to park for red, timeout, draft, lookup-error, and unresolvable PR evidence', async () => {
-      const pr = async () => ({ number: 71, branch: 'contributor/real-head' });
+      const pr = async () => ({
+        number: 71,
+        branch: 'contributor/real-head',
+        headSha: 'abc123',
+        headRepoFullName: 'on-par/software-factory',
+      });
       const cases = [
         { watch: async () => 'failure' as const },
         { watch: async () => 'timeout' as const },
         { getLandState: async () => ({ isDraft: true, mergeStateStatus: 'CLEAN' }) },
         { findOpenPR: async () => Promise.reject(new Error('rate limited')) },
         { getLandState: async () => ({ isDraft: false, mergeStateStatus: 'UNKNOWN' }) },
+        {
+          findOpenPR: async () => ({
+            number: 71,
+            branch: 'fork-head',
+            headSha: 'def456',
+            headRepoFullName: 'fork/repo',
+          }),
+        },
       ];
 
       for (const overrides of cases) {
@@ -2746,8 +2860,9 @@ describe('cli', () => {
 
     it('lands an adopted claim through its real branch without calling shipIssue', async () => {
       const calls: any[] = [];
+      const claims = [{ issue: 7, decision: { kind: 'adopt' as const, branch: 'contributor/real-head' } }];
       await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
-        claimNext: async () => ({ issue: 7, decision: { kind: 'adopt', branch: 'contributor/real-head' } }),
+        claimNext: async () => claims.shift() ?? null,
         ship: async () => {
           throw new Error('shipIssue must not run for an adopted PR');
         },

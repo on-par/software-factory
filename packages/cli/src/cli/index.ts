@@ -2342,7 +2342,7 @@ async function cmdRun(opts: { localQueue?: boolean } = {}) {
           client: createOctokitQueueClient(octokit),
           owner,
           repo,
-          preflight: (issue) => preflightQueuedIssue(issue, { octokit, owner, repo }),
+          preflight: (issue) => preflightQueuedIssue(issue, createQueuePreflightOps(octokit, owner, repo)),
         });
       },
     });
@@ -2543,41 +2543,50 @@ export function laneQueueDeps(queue: GithubQueue, lane: string): Pick<RunLaneDep
   };
 }
 
-export interface QueuePreflightDeps {
-  octokit: Octokit;
-  owner: string;
-  repo: string;
-  findOpenPR?: typeof findOpenPRForIssue;
-  getLandState?: typeof getPullRequestLandState;
-  watch?: typeof watchChecks;
+export interface OpenPullRequestEvidence {
+  number: number;
+  branch: string;
+  headSha: string;
+  headRepoFullName: string | null;
+}
+
+export interface QueuePreflightOps {
+  expectedHeadRepoFullName: string;
+  findOpenPR(issue: number): Promise<OpenPullRequestEvidence | undefined>;
+  getLandState(prNumber: number): ReturnType<typeof getPullRequestLandState>;
+  watch(ref: string): Promise<CiOutcome>;
+}
+
+export function createQueuePreflightOps(octokit: Octokit, owner: string, repo: string): QueuePreflightOps {
+  return {
+    expectedHeadRepoFullName: `${owner}/${repo}`,
+    findOpenPR: (issue) => findOpenPRForIssue(octokit, owner, repo, issue),
+    getLandState: (prNumber) => getPullRequestLandState(octokit, owner, repo, prNumber),
+    watch: (ref) => watchChecks({ octokit, owner, repo, ref }),
+  };
 }
 
 /** Resolve queued work from GitHub evidence without consuming model or worktree resources. */
 export async function preflightQueuedIssue(
   issue: QueueIssue,
-  deps: QueuePreflightDeps,
+  deps: QueuePreflightOps,
 ): Promise<QueuePreflightDecision> {
-  const {
-    octokit,
-    owner,
-    repo,
-    findOpenPR = findOpenPRForIssue,
-    getLandState = getPullRequestLandState,
-    watch = watchChecks,
-  } = deps;
   if (issue.labels.includes('factory:in-progress')) return { kind: 'defer' };
 
-  let pr: { number: number; branch: string } | undefined;
+  let pr: OpenPullRequestEvidence | undefined;
   try {
-    pr = await findOpenPR(octokit, owner, repo, issue.number);
+    pr = await deps.findOpenPR(issue.number);
   } catch (err) {
     return { kind: 'park', reason: `PR lookup failed: ${errorDetail(err)}` };
   }
   if (!pr) return { kind: 'build' };
+  if (pr.headRepoFullName !== deps.expectedHeadRepoFullName) {
+    return { kind: 'park', reason: `PR #${pr.number} head is not in ${deps.expectedHeadRepoFullName}` };
+  }
 
   let state: Awaited<ReturnType<typeof getPullRequestLandState>>;
   try {
-    state = await getLandState(octokit, owner, repo, pr.number);
+    state = await deps.getLandState(pr.number);
   } catch (err) {
     return { kind: 'park', reason: `PR #${pr.number} merge-state lookup failed: ${errorDetail(err)}` };
   }
@@ -2590,7 +2599,7 @@ export async function preflightQueuedIssue(
 
   let outcome: CiOutcome;
   try {
-    outcome = await watch({ octokit, owner, repo, ref: pr.branch });
+    outcome = await deps.watch(pr.headSha);
   } catch (err) {
     return { kind: 'park', reason: `CI watch for PR #${pr.number} failed: ${errorDetail(err)}` };
   }
@@ -2780,7 +2789,7 @@ export async function findOpenPRForIssue(
   owner: string,
   repoName: string,
   issueNum: number,
-): Promise<{ number: number; branch: string } | undefined> {
+): Promise<OpenPullRequestEvidence | undefined> {
   const perPage = 100;
   const matches = new RegExp(`\\bcloses\\s+#${issueNum}\\b`, 'i');
   for (let page = 1; ; page++) {
@@ -2792,7 +2801,18 @@ export async function findOpenPRForIssue(
       page,
     });
     const pr = prs.find((p: any) => matches.test(p.body ?? ''));
-    if (pr) return { number: pr.number, branch: pr.head.ref };
+    if (pr) {
+      const headRepoFullName = pr.head.repo?.full_name ?? null;
+      if (headRepoFullName !== `${owner}/${repoName}`) {
+        return {
+          number: pr.number,
+          branch: pr.head.ref,
+          headSha: pr.head.sha,
+          headRepoFullName,
+        };
+      }
+      return { number: pr.number, branch: pr.head.ref, headSha: pr.head.sha, headRepoFullName };
+    }
     if (prs.length < perPage) return undefined;
   }
 }
