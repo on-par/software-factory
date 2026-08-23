@@ -235,6 +235,8 @@ const PUBLIC_API_KEYS = [
 ];
 
 const INTERNAL_API_KEYS = [
+  // Coarse ProjectV2 status writing (#849)
+  'createProjectBoardStatusWriter',
   // Failure fingerprint & evidence
   'captureFailure',
   'fingerprintFailure',
