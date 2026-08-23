@@ -368,6 +368,9 @@ const INTERNAL_API_KEYS = [
   'PARKED_LABEL',
   'QUEUED_LABEL',
   'queueLabelSpecs',
+  // Read-only GitHub ProjectV2 queue-intent polling (#847)
+  'createProjectBoardPoller',
+  'DEFAULT_PROJECT_BOARD_POLL_MS',
 ];
 
 const TESTING_API_KEYS = [
