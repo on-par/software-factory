@@ -74,7 +74,8 @@ describe('buildPlanPrompt', () => {
 
     expect(prompt).toContain('## Issue #36: Add eval runner');
     expect(prompt).toContain('Measure the current prompt.');
-    expect(prompt).toContain('Write EXACTLY ONE file, at /tmp/spec.md');
+    expect(prompt).toContain('Produce EXACTLY ONE frozen spec for /tmp/spec.md');
+    expect(prompt).toContain('return the full spec content as your final');
     expect(prompt).toContain('route: codex');
   });
 

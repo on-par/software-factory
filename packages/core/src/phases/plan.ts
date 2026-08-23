@@ -86,7 +86,7 @@ Steps:
    planning failure, not a build problem.
 ${constitutionCtx ? '5. The constitution above defines the standards for this product. Your spec MUST satisfy every standard.' : '5. No constitution loaded — use your best judgment.'}
 
-Write EXACTLY ONE file, at ${specPath}, in this shape:
+Produce EXACTLY ONE frozen spec for ${specPath}, in this shape:
 ---
 route: codex
 design:
@@ -155,10 +155,14 @@ would be expensive to reverse, or looks arbitrary from the code alone. Reversibl
 implementation details (names, a helper's internal structure) are NOT ADRs. SHIP writes
 each entry into \`docs/adr/\` as an Accepted, next-numbered ADR in the same PR as the code,
 and updates the ADR index — so write it as the permanent record, not as notes to yourself.
+If your tools can write ${specPath} directly, write it there. If ${specPath}
+is outside your writable sandbox, return the full spec content as your final
+answer instead; the factory process will write it. Do not return a blocked
+note when the only blocker is writing ${specPath}.
 Do not run tests, do not write or edit any other file, do not touch git.
 If the issue is genuinely too vague to plan without a product decision only a human
 can make, print a line starting exactly with "ESCALATE:" followed by the question,
-and do NOT write ${specPath}.`;
+and do NOT write or return the spec.`;
 }
 
 export async function planPhase(opts: Parameters<typeof planPhaseImpl>[0]): Promise<PlanResult> {
