@@ -1305,6 +1305,49 @@ npm run test`;
       expect(existsSync(`${specPath.replace(/\.md$/, '')}.design.json`)).toBe(false);
     });
 
+    it('escalates a blocked no-change note instead of treating it as a frozen spec', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-844.md');
+      const blockedSpec = [
+        '---',
+        'route: codex',
+        '---',
+        'Blocked: sandbox policy prevents writing the required file outside this worktree:',
+        '',
+        '`/Users/moltbot/repos/on-par/software-factory/.factory/plans/issue-844.md`',
+        '',
+        'No files were changed.',
+        '',
+      ].join('\n');
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{ output: blockedSpec }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: { issues: { get: async () => ({ data: { title: 'Blocked spec', body: 'Body.' } }) } },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      const result = await planPhase({
+        issue: 844,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: (type, msg) => logs.push({ type, msg }),
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.escalate).toBe('PLAN returned a blocked/no-change note instead of a frozen spec');
+      expect(logs.some((l) => l.type === 'escalate' && l.msg === result.escalate)).toBe(true);
+      expect(logs.some((l) => l.type === 'design_artifact_invalid')).toBe(false);
+    });
+
     it('archives a pre-existing design artifact alongside a replanned spec', async () => {
       const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
       tempDirs.add(worktree);
