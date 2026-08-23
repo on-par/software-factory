@@ -227,3 +227,14 @@ export {
   QUEUED_LABEL,
   queueLabelSpecs,
 } from './queue/github-queue.js';
+
+// Read-only GitHub ProjectV2 queue-intent polling (#847)
+export type {
+  ProjectBoardConfig,
+  ProjectBoardPoller,
+  ProjectBoardPollerOptions,
+  QueueIntentItem,
+  QueueIntentSnapshot,
+  QueueIntentStatus,
+} from './queue/project-board-poller.js';
+export { createProjectBoardPoller, DEFAULT_PROJECT_BOARD_POLL_MS } from './queue/project-board-poller.js';
