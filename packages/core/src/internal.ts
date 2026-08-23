@@ -247,3 +247,14 @@ export type {
   QueueIntentStatus,
 } from './queue/project-board-poller.js';
 export { createProjectBoardPoller, DEFAULT_PROJECT_BOARD_POLL_MS } from './queue/project-board-poller.js';
+
+// Coarse ProjectV2 status writing (#849)
+export type {
+  ProjectBoardCoarseStatus,
+  ProjectBoardStatusConfig,
+  ProjectBoardStatusItem,
+  ProjectBoardStatusValues,
+  ProjectBoardStatusWriter,
+  ProjectBoardStatusWriterOptions,
+} from './queue/project-board-status-writer.js';
+export { createProjectBoardStatusWriter } from './queue/project-board-status-writer.js';
