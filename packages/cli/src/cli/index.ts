@@ -4,7 +4,7 @@ import { exec as execCb, execSync } from 'node:child_process';
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { userInfo } from 'node:os';
-import { basename, dirname, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
@@ -1059,6 +1059,7 @@ export async function shipIssue(
         { onSteal: (pid) => log('lock-stolen', `stole ${paths.gitLock} from dead holder pid ${pid ?? 'unknown'}`) },
       ),
     );
+    await prepareWorktreeDependencies(worktree, log);
     log('worktree', `Worktree ready at ${worktree}`);
   } else {
     log('workspace', `local-only: using caller-provided workspace ${worktree} (no factory worktree created)`);
@@ -1886,6 +1887,26 @@ async function getIssueTitle(octokit: Octokit, repo: string, issue: number): Pro
 
 function worktreePathFor(repoRoot: string, issueNum: number, prefix?: string): string {
   return resolve(dirname(repoRoot), `${basename(repoRoot)}-factory-${branchPrefixSlug(prefix)}-${issueNum}`);
+}
+
+async function prepareWorktreeDependencies(
+  worktree: string,
+  log: (type: EventKind, msg: string) => void,
+): Promise<void> {
+  if (!existsSync(join(worktree, 'package-lock.json'))) return;
+  if (existsSync(join(worktree, 'node_modules', '.package-lock.json'))) return;
+
+  log('worktree', 'installing npm dependencies for fresh worktree');
+  try {
+    await exec('npm install --ignore-scripts --no-audit --no-fund', {
+      cwd: worktree,
+      timeout: 180_000,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    log('worktree', 'npm dependencies ready');
+  } catch (err) {
+    log('worktree', `npm dependency install failed: ${errorDetail(err)}`);
+  }
 }
 
 /** Fences a whole run behind the checkout's `.factory/run.lock` (#598). A live holder is
