@@ -170,6 +170,18 @@ export async function planPhase(opts: Parameters<typeof planPhaseImpl>[0]): Prom
   );
 }
 
+function blockedNoChangeSpecReason(body: string): string | null {
+  const looksBlocked = /^\s*Blocked(?::|\s+by\b)/im.test(body);
+  if (!looksBlocked) return null;
+
+  const saysNoChanges = /\bno files? (?:were )?changed\b/i.test(body) || /\bno changes? (?:were )?made\b/i.test(body);
+  const pointsAtSandbox =
+    /\bsandbox\b/i.test(body) || /\boutside (?:the )?(?:worktree|workspace|checkout)\b/i.test(body);
+  if (!saysNoChanges && !pointsAtSandbox) return null;
+
+  return 'PLAN returned a blocked/no-change note instead of a frozen spec';
+}
+
 async function planPhaseImpl(opts: {
   issue: number;
   repo: string;
@@ -530,6 +542,11 @@ async function planPhaseImpl(opts: {
         return { ok: false, route, specPath, model: result.model, escalate: reason, designArtifact: null };
       }
     } else {
+      const blockedReason = blockedNoChangeSpecReason(parsed.body);
+      if (blockedReason) {
+        log('escalate', blockedReason);
+        return { ok: false, route, specPath, model: result.model, escalate: blockedReason, designArtifact: null };
+      }
       log('design_artifact_invalid', `spec frontmatter has no valid design artifact: ${designErrors.join('; ')}`);
     }
 

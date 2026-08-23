@@ -1,5 +1,5 @@
 ---
-product: "camp-somewhere-cli"
+product: 'camp-somewhere-cli'
 version: 1
 checkers: []
 enforced_on: [plan, build, check]
