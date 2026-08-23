@@ -21,12 +21,13 @@ import { defaultExecFn } from '../utils/exec.js';
 import { shellEscape } from '../utils/index.js';
 import { extractFailoverReason, ModelExecutorError } from './executor-error.js';
 import { describeFailureDetail } from './failure-detail.js';
-import { captureWorktreeState, resetWorktreeState } from './worktree-state.js';
+import { captureWorktreeState, type GitExecFn, resetWorktreeState } from './worktree-state.js';
 
 export type { ExecFn } from '../utils/exec.js';
 export { ModelExecutorError } from './executor-error.js';
 
 const PROVIDER_LEVEL_FAILURES = new Set<FailoverReason>(['usage_cap', 'rate_limit', 'timeout', 'unavailable']);
+const GIT_OPTS = { timeoutMs: 30_000, maxBuffer: 10 * 1024 * 1024 };
 
 function isProviderLevelFailure(reason: FailoverReason): boolean {
   return PROVIDER_LEVEL_FAILURES.has(reason);
@@ -795,6 +796,10 @@ export class ModelRouter {
         }
 
         if (output.trim().length > 0) {
+          if (snapshot) {
+            await autoCommitAgenticChanges(this.gitExecFn, worktree, onLog);
+          }
+
           // Success
           attempts.push({ model, reason: null, ok: true });
           const failovers = failoversFrom(attempts);
@@ -850,6 +855,15 @@ export class ModelRouter {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function autoCommitAgenticChanges(gitExecFn: GitExecFn, worktree: string, onLog: (msg: string) => void): Promise<void> {
+  const { stdout: statusText } = await gitExecFn('git status --porcelain', { cwd: worktree, ...GIT_OPTS });
+  if (statusText.trim().length === 0) return;
+
+  await gitExecFn('git add --all', { cwd: worktree, ...GIT_OPTS });
+  await gitExecFn(`git commit -m ${shellEscape('feat: implement factory issue')}`, { cwd: worktree, ...GIT_OPTS });
+  onLog('Auto-committed successful agentic worktree changes');
 }
 
 function errStderr(err: unknown): string {
