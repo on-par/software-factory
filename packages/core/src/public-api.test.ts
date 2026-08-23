@@ -371,6 +371,8 @@ const INTERNAL_API_KEYS = [
   // Read-only GitHub ProjectV2 queue-intent polling (#847)
   'createProjectBoardPoller',
   'DEFAULT_PROJECT_BOARD_POLL_MS',
+  // Board-constrained local lane dispatch (#848)
+  'createBoardQueueDispatcher',
 ];
 
 const TESTING_API_KEYS = [

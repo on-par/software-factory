@@ -78,6 +78,15 @@ export { CliModelExecutor } from './router/index.js';
 export type { PlanPromptOpts } from './phases/plan.js';
 export { buildPlanPrompt } from './phases/plan.js';
 
+// Board-constrained local lane dispatch (#848)
+export type {
+  BoardQueueDispatcher,
+  BoardQueueOrdering,
+  LocalLaneCandidate,
+  QueueIntentReader,
+} from './phases/board-queue-dispatch.js';
+export { createBoardQueueDispatcher } from './phases/board-queue-dispatch.js';
+
 // Local-small harness
 export type {
   OvernightItemOutcome,
