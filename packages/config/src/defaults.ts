@@ -198,6 +198,19 @@ export const defaultModelsConfig: ModelsDefaults = {
       codex: true,
       codexFlag: '-m gpt-5.6-terra -c model_reasoning_effort=medium',
     },
+    /** Codex GPT BUILD/CHECK profile: GPT 5.6 Luna at high reasoning effort. Codex CLI subscription auth (ChatGPT/OAuth) — do not gate on OPENAI_API_KEY. Intended for fast worker/checker lanes when the repo explicitly pins it. */
+    'gpt-5.6-luna-high': {
+      provider: 'openai',
+      tier: ['worker', 'checker'],
+      costPerMtokInput: 1.25,
+      costPerMtokOutput: 10.0,
+      contextWindow: 272000,
+      capabilities: ['implementation', 'verification', 'codex'],
+      envKey: null,
+      harness: 'codex-cli',
+      codex: true,
+      codexFlag: '-m gpt-5.6-luna -c model_reasoning_effort=high',
+    },
     /** claude-CLI wiring is unproven — the Claude CLI only serves Anthropic models */
     'gpt-4.1-mini': {
       provider: 'openai',
