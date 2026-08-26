@@ -2,6 +2,7 @@
 export * from './adr.js';
 export * from './design.js';
 export * from './gherkin.js';
+export * from './hosted.js';
 export * from './issue.js';
 export * from './lifecycle.js';
 export * from './serde.js';
