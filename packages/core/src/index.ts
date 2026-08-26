@@ -125,8 +125,6 @@ export type {
   PreparedWorkspace,
 } from './hosted/container.js';
 export { runContainerJob } from './hosted/container.js';
-export type { DockerEngineOptions } from './hosted/docker.js';
-export { createDockerEngine } from './hosted/docker.js';
 
 // Work requests
 export type {

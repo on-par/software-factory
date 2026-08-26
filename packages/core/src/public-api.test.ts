@@ -71,7 +71,6 @@ const PUBLIC_API_KEYS = [
   'rewriteQueueForDecomposition',
   'validateQueue',
   // Hosted execution (control plane)
-  'createDockerEngine',
   'createHostedJobStore',
   'runContainerJob',
   'runFakeRunner',
@@ -295,6 +294,8 @@ const INTERNAL_API_KEYS = [
   'PATCH_PROPOSAL_SCHEMA',
   'OllamaHttpHarness',
   'OpenCodeHarness',
+  // Hosted execution: Docker container engine adapter (#899)
+  'createDockerEngine',
   // Router
   'CliModelExecutor',
   // Phase helpers
