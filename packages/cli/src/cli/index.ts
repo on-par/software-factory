@@ -306,13 +306,24 @@ async function cmdInit(opts: { force?: boolean } = {}) {
   const constitutionPath = resolve(paths.state, 'constitution.md');
   const gitignorePath = resolve(paths.state, '.gitignore');
 
+  // Uses an atomic exclusive-create write (flag 'wx') rather than existsSync-then-writeFileSync,
+  // so there is no check-then-act window where a concurrent writer could race this one.
   const writeIfAbsent = (path: string, content: string, label: string) => {
-    if (existsSync(path) && !force) {
-      console.log(chalk.yellow(`${label} exists — leaving as-is (use --force to overwrite)`));
+    if (force) {
+      writeFileSync(path, content);
+      console.log(chalk.green(`Wrote ${path}`));
       return;
     }
-    writeFileSync(path, content);
-    console.log(chalk.green(`Wrote ${path}`));
+    try {
+      writeFileSync(path, content, { flag: 'wx' });
+      console.log(chalk.green(`Wrote ${path}`));
+    } catch (err: any) {
+      if (err.code === 'EEXIST') {
+        console.log(chalk.yellow(`${label} exists — leaving as-is (use --force to overwrite)`));
+        return;
+      }
+      throw err;
+    }
   };
 
   writeIfAbsent(configPath, buildInitConfig(), '.factory/config.json');
