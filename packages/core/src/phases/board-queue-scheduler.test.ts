@@ -34,6 +34,19 @@ function mutableReader(initial: ProjectQueueProjection | null) {
 }
 
 describe('createBoardQueueScheduler', () => {
+  it('exposes the latest projection through its read-only snapshot seam', () => {
+    const initial = projection(queueItem(1));
+    const updated = projection(queueItem(2));
+    const { reader, setSnapshot } = mutableReader(initial);
+    const scheduler = createBoardQueueScheduler({ projectionReader: reader, dispatchableStatuses: ['ready'] });
+
+    expect(scheduler.snapshot()).toBe(initial);
+
+    setSnapshot(updated);
+    expect(scheduler.snapshot()).toBe(updated);
+    expect(reader.snapshot).toHaveBeenCalledTimes(2);
+  });
+
   it('fails closed without a projection, groups original local candidates, and observes lane refreshes', () => {
     const first = Object.freeze({ issueNumber: 1, localState: 'first' });
     const second = Object.freeze({ issueNumber: 2, localState: 'second' });

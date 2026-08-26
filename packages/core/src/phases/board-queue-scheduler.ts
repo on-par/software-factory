@@ -17,6 +17,7 @@ export interface BoardQueueSchedulerOptions {
 
 /** Groups locally-authoritative candidates by their current projected lane. */
 export interface BoardQueueScheduler {
+  snapshot(): ProjectQueueProjection | null;
   select(candidates: readonly LocalLaneCandidate[]): ReadonlyMap<string, readonly LocalLaneCandidate[]>;
 }
 
@@ -53,6 +54,9 @@ export function createBoardQueueScheduler(options: BoardQueueSchedulerOptions): 
   const dispatchableStatuses = new Set(options.dispatchableStatuses);
 
   return {
+    snapshot() {
+      return options.projectionReader.snapshot();
+    },
     select(candidates) {
       const projection = options.projectionReader.snapshot();
       if (projection === null) return new Map();
