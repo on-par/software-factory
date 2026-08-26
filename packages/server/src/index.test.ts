@@ -174,7 +174,7 @@ describe('@on-par/factory-server', () => {
     const framesPromise = readFrames(res, 1);
 
     const [frame] = await framesPromise;
-    expect(frameId(frame)).toBe(2);
+    expect(frameId(frame)).toBe(1);
     expect(frameEvent(frame)).toEqual({ ...makeEvent({ detail: 'sound buddy replay' }), repo: SOUND_BUDDY_REPO });
 
     const live = readFrames(res, 1);
@@ -204,9 +204,103 @@ describe('@on-par/factory-server', () => {
     soundBuddy.emit(makeEvent({ detail: 'sound buddy' }));
     otherApp.emit(makeEvent({ detail: 'other app' }));
 
-    expect((await framesPromise).map(frameEvent)).toEqual([
+    const frames = await framesPromise;
+    expect(frames.map(frameId)).toEqual([1, 1]);
+    expect(frames.map(frameEvent)).toEqual([
       { ...makeEvent({ detail: 'sound buddy' }), repo: SOUND_BUDDY_REPO },
       { ...makeEvent({ detail: 'other app' }), repo: OTHER_APP_REPO },
+    ]);
+  });
+
+  it('resumes a filtered repository stream without unrelated traffic advancing its cursor', async () => {
+    const soundBuddy = createFakeBus();
+    const otherApp = createFakeBus();
+    server = createServer({
+      repositories: [
+        { repo: SOUND_BUDDY_REPO, source: soundBuddy },
+        { repo: OTHER_APP_REPO, source: otherApp },
+      ],
+      port: 0,
+    });
+    await server.start();
+
+    const { req: req1, res: res1 } = await openRequest(server.port, `/events?repo=${SOUND_BUDDY_REPO}`);
+    const first = readFrames(res1, 1);
+    soundBuddy.emit(makeEvent({ detail: 'sound buddy 1' }));
+    expect((await first).map(frameId)).toEqual([1]);
+    req1.destroy();
+
+    otherApp.emit(makeEvent({ detail: 'other app 1' }));
+    otherApp.emit(makeEvent({ detail: 'other app 2' }));
+    soundBuddy.emit(makeEvent({ detail: 'sound buddy 2' }));
+
+    const { res: res2 } = await openRequest(server.port, `/events?repo=${SOUND_BUDDY_REPO}`, {
+      headers: { 'last-event-id': '1' },
+    });
+    const frames = await readFrames(res2, 1);
+    expect(frames.map(frameId)).toEqual([2]);
+    expect(frames.map(frameEvent)).toEqual([{ ...makeEvent({ detail: 'sound buddy 2' }), repo: SOUND_BUDDY_REPO }]);
+  });
+
+  it('resumes a firehose stream with the cursor applied independently to every repository', async () => {
+    const soundBuddy = createFakeBus();
+    const otherApp = createFakeBus();
+    server = createServer({
+      repositories: [
+        { repo: SOUND_BUDDY_REPO, source: soundBuddy },
+        { repo: OTHER_APP_REPO, source: otherApp },
+      ],
+      port: 0,
+    });
+    await server.start();
+
+    const { req: req1, res: res1 } = await openRequest(server.port, '/events');
+    const first = readFrames(res1, 1);
+    soundBuddy.emit(makeEvent({ detail: 'sound buddy 1' }));
+    expect((await first).map(frameId)).toEqual([1]);
+    req1.destroy();
+
+    otherApp.emit(makeEvent({ detail: 'other app 1' }));
+    soundBuddy.emit(makeEvent({ detail: 'sound buddy 2' }));
+    otherApp.emit(makeEvent({ detail: 'other app 2' }));
+
+    const { res: res2 } = await openRequest(server.port, '/events', { headers: { 'last-event-id': '1' } });
+    const frames = await readFrames(res2, 2);
+    expect(frames.map(frameId)).toEqual([2, 2]);
+    expect(frames.map(frameEvent)).toEqual([
+      { ...makeEvent({ detail: 'sound buddy 2' }), repo: SOUND_BUDDY_REPO },
+      { ...makeEvent({ detail: 'other app 2' }), repo: OTHER_APP_REPO },
+    ]);
+  });
+
+  it('uses a filtered cursor when reconnecting to the firehose', async () => {
+    const soundBuddy = createFakeBus();
+    const otherApp = createFakeBus();
+    server = createServer({
+      repositories: [
+        { repo: SOUND_BUDDY_REPO, source: soundBuddy },
+        { repo: OTHER_APP_REPO, source: otherApp },
+      ],
+      port: 0,
+    });
+    await server.start();
+
+    const { req: req1, res: res1 } = await openRequest(server.port, `/events?repo=${SOUND_BUDDY_REPO}`);
+    const first = readFrames(res1, 1);
+    soundBuddy.emit(makeEvent({ detail: 'sound buddy 1' }));
+    expect((await first).map(frameId)).toEqual([1]);
+    req1.destroy();
+
+    otherApp.emit(makeEvent({ detail: 'other app 1' }));
+    soundBuddy.emit(makeEvent({ detail: 'sound buddy 2' }));
+    otherApp.emit(makeEvent({ detail: 'other app 2' }));
+
+    const { res: res2 } = await openRequest(server.port, '/events', { headers: { 'last-event-id': '1' } });
+    const frames = await readFrames(res2, 2);
+    expect(frames.map(frameId)).toEqual([2, 2]);
+    expect(frames.map(frameEvent)).toEqual([
+      { ...makeEvent({ detail: 'sound buddy 2' }), repo: SOUND_BUDDY_REPO },
+      { ...makeEvent({ detail: 'other app 2' }), repo: OTHER_APP_REPO },
     ]);
   });
 

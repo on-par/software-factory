@@ -47,7 +47,7 @@ export function createServer(config: ServerConfig): FactoryServer {
   const ring = createReplayRing(config.replayBufferSize ?? 256);
   const heartbeatMs = config.heartbeatMs ?? 15_000;
 
-  let seq = 0;
+  const sequences = new Map<string, number>();
   const clients = new Set<{ response: http.ServerResponse; repo: string | undefined }>();
   const timers = new Map<http.ServerResponse, NodeJS.Timeout>();
   let unsubscribes: Array<() => void> = [];
@@ -128,7 +128,8 @@ export function createServer(config: ServerConfig): FactoryServer {
           unsubscribes = config.repositories.map(({ repo, source }) =>
             source.on((event) => {
               const taggedEvent = { ...event, repo };
-              const id = ++seq;
+              const id = (sequences.get(repo) ?? 0) + 1;
+              sequences.set(repo, id);
               ring.push(id, taggedEvent);
               const frame = formatSseFrame(id, taggedEvent);
               for (const client of clients) {
