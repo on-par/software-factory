@@ -4,6 +4,7 @@ import {
   HOSTED_EXEC_FLAG,
   HostedJobEventSchema,
   HostedJobRequestSchema,
+  HostedJobResultSchema,
   RunnerLeaseSchema,
   hostedExecEnabled,
   runHostedContractDemo,
@@ -34,6 +35,13 @@ const baseLease = {
   jobId: 'job-1',
   expiresAt: '2026-08-19T01:00:00.000Z',
   heartbeatIntervalMs: 30_000,
+};
+
+const baseResult = {
+  jobId: 'job-1',
+  outcome: 'completed',
+  summary: 'hosted job completed',
+  finishedAt: '2026-08-19T01:00:00.000Z',
 };
 
 describe('HostedJobRequestSchema', () => {
@@ -97,6 +105,26 @@ describe('HostedJobEventSchema', () => {
   it('round-trips through serialize/deserialize', () => {
     const raw = serialize(HostedJobEventSchema, baseEvent);
     expect(deserialize(HostedJobEventSchema, raw)).toEqual(baseEvent);
+  });
+});
+
+describe('HostedJobResultSchema', () => {
+  it('parses a full result', () => {
+    expect(HostedJobResultSchema.parse(baseResult)).toEqual(baseResult);
+  });
+
+  it('rejects a missing summary', () => {
+    const { summary: _summary, ...withoutSummary } = baseResult;
+    expect(() => HostedJobResultSchema.parse(withoutSummary)).toThrow();
+  });
+
+  it('rejects an unknown outcome', () => {
+    expect(() => HostedJobResultSchema.parse({ ...baseResult, outcome: 'exploded' })).toThrow();
+  });
+
+  it('round-trips through serialize/deserialize', () => {
+    const raw = serialize(HostedJobResultSchema, baseResult);
+    expect(deserialize(HostedJobResultSchema, raw)).toEqual(baseResult);
   });
 });
 

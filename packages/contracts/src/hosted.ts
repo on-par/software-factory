@@ -19,7 +19,7 @@ export const HostedJobRequestSchema = z.object({
   createdAt: z.string(),
 });
 
-export const HostedJobEventTypeSchema = z.enum(['requested', 'leased', 'heartbeat', 'completed', 'failed']);
+export const HostedJobEventTypeSchema = z.enum(['requested', 'leased', 'heartbeat', 'completed', 'failed', 'expired']);
 export const HostedJobEventSeveritySchema = z.enum(['info', 'warn', 'error']);
 
 export const HostedJobEventSchema = z.object({
@@ -41,10 +41,21 @@ export const RunnerLeaseSchema = z.object({
   heartbeatIntervalMs: z.number().int().positive(),
 });
 
+export const HostedJobOutcomeSchema = z.enum(['completed', 'failed']);
+export const HostedJobResultSchema = z.object({
+  jobId: z.string().min(1),
+  outcome: HostedJobOutcomeSchema,
+  summary: z.string().min(1),
+  /** ISO-8601. */
+  finishedAt: z.string(),
+});
+
 export type HostedJobStatus = z.infer<typeof HostedJobStatusSchema>;
 export type HostedJobRequest = z.infer<typeof HostedJobRequestSchema>;
 export type HostedJobEvent = z.infer<typeof HostedJobEventSchema>;
 export type RunnerLease = z.infer<typeof RunnerLeaseSchema>;
+export type HostedJobOutcome = z.infer<typeof HostedJobOutcomeSchema>;
+export type HostedJobResult = z.infer<typeof HostedJobResultSchema>;
 
 /** True only when the flag is exactly '1' — every other/absent value is off (default off). */
 export function hostedExecEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
