@@ -3416,6 +3416,7 @@ describe('cli', () => {
         },
         list: async () => [],
         lanes: async () => ['app', 'infra'],
+        migrateLocalQueue: async () => {},
       };
 
       const result = await planRunLanes({
@@ -3448,6 +3449,7 @@ describe('cli', () => {
         release: async () => {},
         list: async () => [],
         lanes: async () => [],
+        migrateLocalQueue: async () => {},
       };
 
       const result = await planRunLanes({
@@ -3475,6 +3477,7 @@ describe('cli', () => {
         },
         list: async () => [],
         lanes: async () => [],
+        migrateLocalQueue: async () => {},
       };
 
       const deps = laneQueueDeps(fakeQueue, 'app');

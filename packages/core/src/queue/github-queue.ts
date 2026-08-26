@@ -4,10 +4,13 @@ import { hostname } from 'node:os';
 
 import type { Octokit } from '@octokit/rest';
 
+import type { QueueEntry } from './index.js';
+
 export const QUEUED_LABEL = 'factory:queued';
 export const IN_PROGRESS_LABEL = 'factory:in-progress';
 export const PARKED_LABEL = 'factory:parked';
 export const LANE_LABEL_PREFIX = 'factory:lane:';
+export const QUEUE_ORDER_LABEL_PREFIX = 'factory:order:';
 export const CLAIMED_BY_LABEL_PREFIX = 'factory:claimed-by:';
 
 /** GitHub's hard limit on a label name. */
@@ -15,6 +18,7 @@ export const MAX_LABEL_NAME_LENGTH = 50;
 
 const QUEUED_LABEL_COLOR = '0e8a16';
 const LANE_LABEL_COLOR = '1d76db';
+const QUEUE_ORDER_LABEL_COLOR = '0052cc';
 const IN_PROGRESS_LABEL_COLOR = 'fbca04';
 const CLAIMED_BY_LABEL_COLOR = '5319e7';
 const PARKED_LABEL_COLOR = 'b60205';
@@ -39,6 +43,14 @@ function slugSegment(raw: string, maxLen: number): string {
 
 export function laneLabel(lane: string): string {
   return LANE_LABEL_PREFIX + slugSegment(lane, MAX_LABEL_NAME_LENGTH - LANE_LABEL_PREFIX.length);
+}
+
+/** Renders one-based queue ordering metadata as a GitHub-safe factory label. */
+export function queueOrderLabel(position: number): string {
+  if (!Number.isSafeInteger(position) || position < 1) {
+    throw new RangeError(`queue position must be a positive safe integer, got ${position}`);
+  }
+  return `${QUEUE_ORDER_LABEL_PREFIX}${position}`;
 }
 
 export function claimedByLabel(claimantId: string): string {
@@ -105,6 +117,49 @@ function labelExistsError(err: unknown): boolean {
   return view.status === 422;
 }
 
+function queueOrderLabelSpec(position: number): QueueLabelSpec {
+  return {
+    name: queueOrderLabel(position),
+    color: QUEUE_ORDER_LABEL_COLOR,
+    description: `Factory queue position ${position}`,
+  };
+}
+
+function orderedCandidates(lane: string, issues: QueueIssue[]): QueueIssue[] {
+  const positions = new Map<number, number>();
+  const candidates = issues.map((issue) => {
+    const orderLabels = issue.labels.filter((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX));
+    if (orderLabels.length !== 1) {
+      throw new Error(
+        `invalid GitHub queue state for lane ${lane}: issue #${issue.number} must have exactly one queue order label`,
+      );
+    }
+
+    const positionText = orderLabels[0].slice(QUEUE_ORDER_LABEL_PREFIX.length);
+    if (!/^[1-9]\d*$/.test(positionText)) {
+      throw new Error(
+        `invalid GitHub queue state for lane ${lane}: issue #${issue.number} has malformed queue order label ${orderLabels[0]}`,
+      );
+    }
+    const position = Number(positionText);
+    if (!Number.isSafeInteger(position)) {
+      throw new Error(
+        `invalid GitHub queue state for lane ${lane}: issue #${issue.number} has malformed queue order label ${orderLabels[0]}`,
+      );
+    }
+    const priorIssue = positions.get(position);
+    if (priorIssue !== undefined) {
+      throw new Error(
+        `invalid GitHub queue state for lane ${lane}: issues #${priorIssue} and #${issue.number} both have position ${position}`,
+      );
+    }
+    positions.set(position, issue.number);
+    return { issue, position };
+  });
+
+  return candidates.sort((a, b) => a.position - b.position).map(({ issue }) => issue);
+}
+
 export function createOctokitQueueClient(octokit: Octokit): QueueGitHubClient {
   return {
     async listOpenIssuesWithLabels({ owner, repo, labels }) {
@@ -162,6 +217,7 @@ export interface GithubQueue {
   release(issue: number, outcome?: QueueReleaseOutcome): Promise<void>;
   list(lane: string): Promise<number[]>;
   lanes(): Promise<string[]>;
+  migrateLocalQueue(entries: readonly QueueEntry[]): Promise<void>;
 }
 
 export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
@@ -185,12 +241,12 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
 
   async function list(lane: string): Promise<number[]> {
     const issues = await candidatesFor(lane);
-    return issues.map((i) => i.number).sort((a, b) => a - b);
+    return orderedCandidates(lane, issues).map((issue) => issue.number);
   }
 
   async function claimNext(lane: string): Promise<QueueClaim | null> {
     const routeLabel = laneLabel(lane);
-    const candidates = (await candidatesFor(lane)).sort((a, b) => a.number - b.number);
+    const candidates = orderedCandidates(lane, await candidatesFor(lane));
     if (candidates.length === 0) return null;
 
     await ensureLabels(lane);
@@ -235,7 +291,7 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
       (name) =>
         name === IN_PROGRESS_LABEL ||
         name.startsWith(CLAIMED_BY_LABEL_PREFIX) ||
-        (outcome !== 'queued' && name === QUEUED_LABEL),
+        (outcome !== 'queued' && (name === QUEUED_LABEL || name.startsWith(QUEUE_ORDER_LABEL_PREFIX))),
     );
     for (const name of toRemove) {
       await client.removeLabel({ owner, repo, issue_number: issue, name });
@@ -267,5 +323,29 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     return [...found].sort();
   }
 
-  return { claimNext, release, list, lanes };
+  async function migrateLocalQueue(entries: readonly QueueEntry[]): Promise<void> {
+    const positionsByLane = new Map<string, number>();
+    for (const entry of entries) {
+      const routeLabel = laneLabel(entry.lane);
+      const position = (positionsByLane.get(routeLabel) ?? 0) + 1;
+      positionsByLane.set(routeLabel, position);
+
+      const specs: QueueLabelSpec[] = [
+        { name: QUEUED_LABEL, color: QUEUED_LABEL_COLOR, description: 'Eligible to be claimed by a factory lane' },
+        { name: routeLabel, color: LANE_LABEL_COLOR, description: `Routed to factory lane ${entry.lane}` },
+        queueOrderLabelSpec(position),
+      ];
+      for (const spec of specs) {
+        await client.ensureLabel({ owner, repo, ...spec });
+      }
+      await client.addLabels({
+        owner,
+        repo,
+        issue_number: entry.issue,
+        labels: specs.map((spec) => spec.name),
+      });
+    }
+  }
+
+  return { claimNext, release, list, lanes, migrateLocalQueue };
 }

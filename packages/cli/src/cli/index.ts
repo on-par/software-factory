@@ -2167,6 +2167,31 @@ export async function cmdTriageAccept(opts: { force?: boolean }) {
   console.log(chalk.green(`queue accepted — ${result.issues.length} issue(s) promoted to ${paths.queue}`));
 }
 
+export async function cmdQueueMigrate() {
+  const repoRoot = await getRepoRoot();
+  const paths = getFactoryPaths(repoRoot);
+
+  if (!existsSync(paths.queue)) {
+    throw new CliExitError(`factory: queue not found at ${paths.queue} — run factory init + triage first`, 2);
+  }
+
+  const content = readFileSync(paths.queue, 'utf-8');
+  const validation = validateQueue(content);
+  if (!validation.ok) {
+    throw new CliExitError(
+      `factory: queue is invalid — ${paths.queue} left unchanged\n` +
+        validation.errors.map((error) => `  - ${error}`).join('\n'),
+      1,
+    );
+  }
+
+  const entries = parseQueue(content).entries;
+  const [owner, repo] = (await getGitHubRepo()).split('/');
+  const queue = createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo });
+  await queue.migrateLocalQueue(entries);
+  console.log(chalk.green(`queue migrated — ${entries.length} issue(s) labelled from ${paths.queue}`));
+}
+
 export function triageNoProposalError(plannerError: unknown): CliExitError {
   const detail = plannerError ? ` — planner failed: ${errorDetail(plannerError)}` : '';
   return new CliExitError(`triage produced no proposal${detail}`, 1);
@@ -3645,6 +3670,12 @@ export async function main() {
     .action(async (opts) => {
       await cmdTriageAccept(opts);
     });
+
+  const queue = program.command('queue').description('Manage the GitHub-backed work queue');
+  queue
+    .command('migrate')
+    .description('Copy valid .factory/queue lane order into GitHub issue labels')
+    .action(cmdQueueMigrate);
 
   program
     .command('ready <issue>')
