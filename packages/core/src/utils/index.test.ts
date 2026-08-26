@@ -1,13 +1,14 @@
 import { execFile as execFileCb } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PipelineTestKit } from '../test-support/index.js';
+import { getFactoryPaths } from '../config/index.js';
 import {
   branchFor,
   branchPrefixSlug,
@@ -479,6 +480,24 @@ describe('gitFetch / setupWorktree', () => {
     await setupWorktree(repoRoot, 'ship-it/201-fresh-worktree', worktree);
 
     expect(existsSync(join(worktree, 'README.md'))).toBe(true);
+  });
+
+  it('keeps worktrees adjacent when factory state uses an external root', async () => {
+    const { repoRoot } = await kit.makeThrowawayRepo();
+    const stateRoot = await mkdtemp(join(tmpdir(), 'factory-external-state-'));
+    const paths = getFactoryPaths(repoRoot, stateRoot);
+    const worktree = kit.trackWorktree(repoRoot, 845);
+
+    try {
+      await setupWorktree(repoRoot, 'ship-it/845-adjacent-worktree', worktree);
+
+      expect(resolve(worktree, '..')).toBe(resolve(repoRoot, '..'));
+      expect(existsSync(join(worktree, 'README.md'))).toBe(true);
+      expect(worktree.startsWith(`${paths.state}/`)).toBe(false);
+      await expect(readdir(paths.state)).resolves.toEqual([]);
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
   });
 
   it('removes and recreates an existing worktree and branch on a second setup call', async () => {
