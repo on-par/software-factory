@@ -84,6 +84,7 @@ const FactoryConfigSchema = z.object({
     plans: z.string(),
     logs: z.string(),
     events: z.string(),
+    constitution: z.string().default('.factory/constitution.md'),
   }),
   timeouts: z.object({
     plan_seconds: z.number(),

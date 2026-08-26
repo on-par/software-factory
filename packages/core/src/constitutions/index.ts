@@ -1,7 +1,7 @@
 // src/constitutions/index.ts — Constitution loading and enforcement
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 
 import matter from 'gray-matter';
 
@@ -14,6 +14,9 @@ import type { Constitution } from '../types/index.js';
  * <product>.md is only a fallback for repos that have none.
  */
 export const REPO_INSTRUCTION_FILES = ['CLAUDE.md', 'AGENTS.md', '.github/copilot-instructions.md'] as const;
+
+/** Default path, relative to a consumer repo's root, of its committed constitution instance. */
+export const DEFAULT_REPO_CONSTITUTION_PATH = '.factory/constitution.md';
 
 export class ConstitutionLoader {
   constructor(private dir: string = getConstitutionsDir()) {}
@@ -32,6 +35,34 @@ export class ConstitutionLoader {
     const { data, content } = matter(raw);
     return {
       product: data.product ?? product,
+      version: data.version ?? 1,
+      checkers: data.checkers ?? [],
+      requireTests: data.requireTests === true,
+      body: content,
+      path,
+      source: 'bundled',
+    };
+  }
+
+  /**
+   * Load a consumer repo's own committed constitution instance
+   * (`.factory/constitution.md` by default), if one exists. It is parsed
+   * exactly like a package-bundled `<product>.md` — only its location
+   * differs — so a valid instance is returned with `source: 'bundled'`.
+   */
+  loadRepoConstitution(repoDir: string, relPath: string = DEFAULT_REPO_CONSTITUTION_PATH): Constitution | null {
+    const path = resolve(repoDir, relPath);
+    let raw: string;
+    try {
+      raw = readFileSync(path, 'utf-8');
+    } catch {
+      return null;
+    }
+    if (!raw.trim()) return null;
+    const { data, content } = matter(raw);
+    const fallbackProduct = basename(relPath).replace(/\.md$/, '');
+    return {
+      product: data.product ?? fallbackProduct,
       version: data.version ?? 1,
       checkers: data.checkers ?? [],
       requireTests: data.requireTests === true,
@@ -78,12 +109,21 @@ export class ConstitutionLoader {
    *   still contributes its custom checkers — the operator asked for them
    *   explicitly, and repo files can't declare checkers.
    * - No repo files → the bundled <product>.md.
+   * - A committed repo constitution instance (`.factory/constitution.md` by
+   *   default) takes the "bundled" slot when present, preferring it over the
+   *   package `--product` lookup — the repo instance is authoritative.
    * - A configured product whose bundled file is missing throws (fail fast:
-   *   an unattended run must not silently drop the standards it was given).
+   *   an unattended run must not silently drop the standards it was given) —
+   *   but only when no repo constitution instance exists.
    * - No product and no repo files → null.
    */
-  resolve(repoDir: string, product?: string): Constitution | null {
-    const bundled = product ? this.load(product) : null;
+  resolve(
+    repoDir: string,
+    product?: string,
+    constitutionPath: string = DEFAULT_REPO_CONSTITUTION_PATH,
+  ): Constitution | null {
+    const repoConstitution = this.loadRepoConstitution(repoDir, constitutionPath);
+    const bundled = repoConstitution ?? (product ? this.load(product) : null);
     const fromRepo = this.loadFromRepo(repoDir);
     if (fromRepo && bundled) {
       // Repo files lead, but the configured constitution rides along: it is
