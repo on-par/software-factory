@@ -108,6 +108,7 @@ export type {
   LeaseRejectionReason,
   PollForLeaseInput,
   PollResult,
+  ReclaimJobResult,
   RegisterRunnerInput,
   StoredHostedJob,
   StoredRunner,

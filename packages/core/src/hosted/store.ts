@@ -85,6 +85,9 @@ export type JobUpdateResult =
 
 export type RecordCleanupResult = { ok: true; job: StoredHostedJob } | { ok: false; reason: 'job-not-found' };
 
+export type ReclaimJobResult =
+  { ok: true; job: StoredHostedJob } | { ok: false; reason: 'job-not-found' | 'not-leased' | 'job-terminal' };
+
 /** Optional structured observability recorded alongside a job's terminal result. */
 export interface HostedJobResultDetail {
   exitCode?: number;
@@ -108,13 +111,15 @@ export interface HostedJobStore {
   pollForLease(input: PollForLeaseInput): PollResult;
   reclaimExpired(): StoredHostedJob[];
   recordCleanup(jobId: string, evidence: string): RecordCleanupResult;
+  cancel(jobId: string, reason: string): JobUpdateResult;
+  reclaimJob(jobId: string, reason: string): ReclaimJobResult;
 }
 
 type HostedJobEventType = z.infer<typeof HostedJobEventTypeSchema>;
 type HostedJobEventSeverity = z.infer<typeof HostedJobEventSeveritySchema>;
 
 function isTerminal(status: HostedJobRequest['status']): boolean {
-  return status === 'done' || status === 'failed';
+  return status === 'done' || status === 'failed' || status === 'canceled';
 }
 
 function isLeaseActive(job: StoredHostedJob, leaseId: string, nowMs: number): boolean {
@@ -182,7 +187,9 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
       return { result: { ok: false, reason: 'job-not-found' } };
     }
     if (isTerminal(job.request.status)) {
-      appendEvent(job, job.request.status === 'done' ? 'completed' : 'failed', 'warn', 'ignored: job already terminal');
+      const terminalEventType =
+        job.request.status === 'done' ? 'completed' : job.request.status === 'canceled' ? 'canceled' : 'failed';
+      appendEvent(job, terminalEventType, 'warn', 'ignored: job already terminal');
       return { result: { ok: true, job, alreadyTerminal: true } };
     }
     if (job.lease?.leaseId !== leaseId) {
@@ -366,6 +373,41 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
         return { ok: false, reason: 'job-not-found' };
       }
       appendEvent(job, 'cleaned', 'info', `cleanup proof: ${evidence}`);
+      return { ok: true, job };
+    },
+
+    cancel(jobId, reason) {
+      const job = jobs.get(jobId);
+      if (!job) {
+        return { ok: false, reason: 'job-not-found' };
+      }
+      if (isTerminal(job.request.status)) {
+        appendEvent(job, 'canceled', 'warn', 'ignored: job already terminal');
+        return { ok: true, job, alreadyTerminal: true };
+      }
+      job.request.status = 'canceled';
+      appendEvent(job, 'canceled', 'warn', `hosted job canceled: ${reason}`);
+      recordResult(job, 'canceled', reason);
+      releaseLease(job);
+      return { ok: true, job, alreadyTerminal: false };
+    },
+
+    reclaimJob(jobId, reason) {
+      const job = jobs.get(jobId);
+      if (!job) {
+        return { ok: false, reason: 'job-not-found' };
+      }
+      if (isTerminal(job.request.status)) {
+        return { ok: false, reason: 'job-terminal' };
+      }
+      if (!job.lease) {
+        return { ok: false, reason: 'not-leased' };
+      }
+      const runnerId = job.lease.runnerId;
+      job.request.status = 'requested';
+      job.lease = null;
+      setRunnerAvailable(runnerId, true);
+      appendEvent(job, 'watchdog', 'warn', `reclaimed for relaunch: ${reason}`);
       return { ok: true, job };
     },
   };
