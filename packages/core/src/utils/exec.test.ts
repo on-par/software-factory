@@ -56,6 +56,19 @@ describe('defaultExecFn', () => {
     expect(stdout.trim()).toBe('3142:string');
   });
 
+  it('allows opts.env to remove inherited env vars', async () => {
+    process.env.FACTORY_REMOVE_ME = 'present';
+    try {
+      const { stdout } = await defaultExecFn('node -p "process.env.FACTORY_REMOVE_ME ?? \'missing\'"', {
+        env: { FACTORY_REMOVE_ME: undefined },
+      });
+
+      expect(stdout.trim()).toBe('missing');
+    } finally {
+      delete process.env.FACTORY_REMOVE_ME;
+    }
+  });
+
   it('leaves the environment unchanged when opts.env is omitted', async () => {
     const { stdout } = await defaultExecFn('node -p "typeof process.env.PATH"', {});
 

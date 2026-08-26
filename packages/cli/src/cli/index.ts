@@ -1,7 +1,7 @@
 // packages/cli/src/cli/index.ts — CLI entry point: factory <command> [options]
 
 import { exec as execCb, execSync } from 'node:child_process';
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { userInfo } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -116,7 +116,6 @@ import {
   resolveTimeouts,
   resolveUsageCap,
   ReworkHistory,
-  rewriteQueueForDecomposition,
   runAutoIngest,
   scoreIssueReadiness,
   shipPhase,
@@ -153,8 +152,11 @@ import {
   formatGcReport,
   gitFetch,
   isAutoMergeBlocked,
+  laneLabel,
   logCost,
   logEvent,
+  QUEUED_LABEL,
+  queueLabelSpecs,
   readCosts,
   resolveBranchPrefix,
   resolveEffectiveConfig,
@@ -267,20 +269,6 @@ async function cmdInit() {
   const excludeContent = existsSync(excludeFile) ? readFileSync(excludeFile, 'utf-8') : '';
   if (!excludeContent.includes('.factory/')) {
     writeFileSync(excludeFile, excludeContent + (excludeContent.endsWith('\n') ? '' : '\n') + '.factory/\n');
-  }
-
-  // Create sample queue if not exists
-  if (!existsSync(paths.queue)) {
-    writeFileSync(
-      paths.queue,
-      `# factory queue — "<lane> <issue#>", priority-ordered.
-# Lanes run in parallel; issues within a lane run serially.
-# Put issues that touch the same files in the same lane.
-# Example:
-#   app 61
-#   docs 66
-`,
-    );
   }
 
   console.log(chalk.green(`Initialized ${paths.state}`));
@@ -786,16 +774,20 @@ export async function cmdStatus() {
   }
 
   console.log(chalk.bold('\n== Queue =='));
-  if (existsSync(paths.queue)) {
-    const { entries, diagnostics } = parseQueue(readFileSync(paths.queue, 'utf-8'));
-    if (entries.length > 0) {
-      for (const e of entries) console.log(`  ${e.lane} ${e.issue}`);
-    } else if (diagnostics.length === 0) {
-      console.log('  (empty)');
-    }
-    warnQueueDiagnostics(diagnostics);
+  const [owner, repo] = ghRepo.split('/');
+  const queue = createGithubQueue({
+    client: createOctokitQueueClient(getOctokit()),
+    owner,
+    repo,
+  });
+  const lanes = await queue.lanes();
+  if (lanes.length === 0) {
+    console.log('  (empty)');
   } else {
-    console.log('  (no queue file)');
+    for (const lane of lanes) {
+      const issues = await queue.list(lane);
+      for (const issue of issues) console.log(`  ${lane} ${issue}`);
+    }
   }
 
   console.log(chalk.bold('\n== Last Events =='));
@@ -836,7 +828,6 @@ async function cmdTui() {
     eventsFile: paths.events,
     repo,
     stopFile: paths.stop,
-    queueFile: paths.queue,
     queueProposedFile: paths.queueProposed,
     costsFile: paths.costs,
     approvalsDir: paths.approvals,
@@ -1216,22 +1207,7 @@ export async function shipIssue(
       const decomposedChildren = plan.decomposed?.childIssues ?? [];
       if (decomposedChildren.length > 0) {
         const childList = decomposedChildren.map((n) => `#${n}`).join(', ');
-        const planLog = mkLog('plan');
-        try {
-          const before = readTextFileOrEmpty(paths.queue);
-          const rewrite = rewriteQueueForDecomposition(before, { issue: issueNum, childIssues: decomposedChildren });
-          if (rewrite.changed) {
-            writeFileSync(paths.queue, rewrite.content);
-            planLog('decompose_filed', `queue entry for #${issueNum} replaced with ${childList}`);
-          } else {
-            planLog(
-              'decompose_filed',
-              `#${issueNum} had no queue entry to replace — continuing the lane with ${childList}`,
-            );
-          }
-        } catch (err) {
-          planLog('decompose_file_failed', `queue rewrite for #${issueNum} failed: ${errorDetail(err)}`);
-        }
+        mkLog('plan')('decompose_filed', `#${issueNum} decomposed — continuing the lane with ${childList}`);
         throw new IssueDecomposedError(`issue #${issueNum} decomposed into ${childList}`, decomposedChildren);
       }
       throw new LaneParkError(`plan escalated: ${plan.escalate ?? 'unknown'}`, 'escalate');
@@ -2137,7 +2113,7 @@ explaining exclusions.`;
   });
 
   const proposed = existsSync(paths.queueProposed) ? readFileSync(paths.queueProposed, 'utf-8') : '';
-  const message = triageProposalMessage(proposed, paths.queueProposed, paths.queue);
+  const message = triageProposalMessage(proposed, paths.queueProposed);
   if (message) {
     console.log(message);
   } else {
@@ -2145,13 +2121,14 @@ explaining exclusions.`;
   }
 }
 
-export function triageProposalMessage(proposed: string, proposedPath: string, queuePath: string): string | null {
+export function triageProposalMessage(proposed: string, proposedPath: string): string | null {
   if (!proposed.trim()) return null;
-  return `${proposed}\n---\nreview and run: factory triage accept   (promotes ${proposedPath} -> ${queuePath})`;
+  return `${proposed}\n---\nreview and run: factory triage accept   (labels proposed issues from ${proposedPath})`;
 }
 
 export async function cmdTriageAccept(opts: { force?: boolean }) {
   const repoRoot = await getRepoRoot();
+  const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
 
   if (!existsSync(paths.queueProposed)) {
@@ -2161,6 +2138,7 @@ export async function cmdTriageAccept(opts: { force?: boolean }) {
 
   const content = readFileSync(paths.queueProposed, 'utf-8');
   const result = validateQueue(content);
+  const parsed = parseQueue(content);
 
   if (!opts.force && !result.ok) {
     throw new CliExitError(
@@ -2170,7 +2148,25 @@ export async function cmdTriageAccept(opts: { force?: boolean }) {
     );
   }
 
-  renameSync(paths.queueProposed, paths.queue); // same dir → atomic
+  const [owner, repo] = ghRepo.split('/');
+  const queueClient = createOctokitQueueClient(getOctokit());
+  const ensuredLanes = new Set<string>();
+  for (const entry of parsed.entries) {
+    if (!ensuredLanes.has(entry.lane)) {
+      for (const spec of queueLabelSpecs(entry.lane, 'triage-accept')) {
+        await queueClient.ensureLabel({ owner, repo, ...spec });
+      }
+      ensuredLanes.add(entry.lane);
+    }
+    await queueClient.addLabels({
+      owner,
+      repo,
+      issue_number: entry.issue,
+      labels: [QUEUED_LABEL, laneLabel(entry.lane)],
+    });
+  }
+
+  unlinkSync(paths.queueProposed);
 
   let acceptedBy = 'unknown';
   try {
@@ -2183,9 +2179,9 @@ export async function cmdTriageAccept(opts: { force?: boolean }) {
     paths.events,
     'triage_accepted',
     '-',
-    `accepted ${result.issues.length} issue(s) [${result.issues.join(', ')}] by ${acceptedBy}${suffix}`,
+    `accepted ${parsed.entries.length} issue(s) [${parsed.entries.map((entry) => entry.issue).join(', ')}] by ${acceptedBy}${suffix}`,
   );
-  console.log(chalk.green(`queue accepted — ${result.issues.length} issue(s) promoted to ${paths.queue}`));
+  console.log(chalk.green(`queue accepted — ${parsed.entries.length} issue(s) labeled in ${ghRepo}`));
 }
 
 export function triageNoProposalError(plannerError: unknown): CliExitError {
@@ -2324,6 +2320,9 @@ async function cmdFactoryd(opts: { port?: string; registry?: string }) {
 }
 
 async function cmdRun(opts: { localQueue?: boolean } = {}) {
+  if (opts.localQueue === true) {
+    throw new CliExitError('factory: --local-queue has been retired; queue issues with GitHub factory:* labels', 2);
+  }
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
 
@@ -2354,8 +2353,6 @@ async function cmdRun(opts: { localQueue?: boolean } = {}) {
     }
 
     const { lanes, diagnostics } = await planRunLanes({
-      localQueue: opts.localQueue === true,
-      readLocalQueue: () => (existsSync(paths.queue) ? readFileSync(paths.queue, 'utf-8') : null),
       queue: () => {
         const [owner, repo] = ghRepo.split('/');
         const octokit = getOctokit();
@@ -2433,17 +2430,11 @@ export function createSuperviseRunQueue(
   ingestCfg: IngestSettings,
   deps: {
     cmdRunFn?: () => Promise<void>;
-    readQueueFile?: () => string;
     pendingCount?: () => Promise<number>;
     emitEvent?: typeof logEvent;
   } = {},
 ): () => Promise<void> {
-  const {
-    cmdRunFn = cmdRun,
-    readQueueFile = () => (existsSync(paths.queue) ? readFileSync(paths.queue, 'utf-8') : ''),
-    pendingCount = async () => parseQueue(readQueueFile()).entries.length,
-    emitEvent = logEvent,
-  } = deps;
+  const { cmdRunFn = cmdRun, pendingCount = async () => 0, emitEvent = logEvent } = deps;
   return async () => {
     if ((await pendingCount()) === 0 && ingestCfg.enabled) {
       emitEvent(paths.events, 'idle', 'auto', 'queue empty — waiting for ready issues');
@@ -2465,7 +2456,6 @@ export function createIngestHook(
     try {
       const result = await runAutoIngestFn({
         repoDir: repoRoot,
-        queueFile: paths.queue,
         watermarkFile: paths.ingestWatermark,
         label: ingestCfg.label,
         lane: ingestCfg.lane,
@@ -2489,17 +2479,14 @@ export function createIngestHook(
 }
 
 async function cmdSupervise(opts: { now?: boolean; localQueue?: boolean }) {
+  if (opts.localQueue === true) {
+    throw new CliExitError('factory: --local-queue has been retired; queue issues with GitHub factory:* labels', 2);
+  }
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   const ingestCfg = resolveIngestConfig(loadFactoryConfigForRepo(paths.config));
 
   const countPending = async (): Promise<number> => {
-    if (opts.localQueue === true) {
-      const content = existsSync(paths.queue) ? readFileSync(paths.queue, 'utf-8') : '';
-      const parsed = parseQueue(content);
-      warnQueueDiagnostics(parsed.diagnostics);
-      return parsed.entries.length;
-    }
     const [owner, repo] = (await getGitHubRepo()).split('/');
     const gq = createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo });
     const lanes = await gq.lanes();
@@ -2508,7 +2495,7 @@ async function cmdSupervise(opts: { now?: boolean; localQueue?: boolean }) {
   };
 
   if ((await countPending()) === 0 && !ingestCfg.enabled) {
-    throw new CliExitError('queue empty — run factory init + triage first', 2);
+    throw new CliExitError('GitHub queue empty — run factory init + triage first', 2);
   }
 
   let knobs: UsageKnobs;
@@ -2529,7 +2516,7 @@ async function cmdSupervise(opts: { now?: boolean; localQueue?: boolean }) {
       eventsFile: paths.events,
       now: opts.now,
       runQueue: createSuperviseRunQueue(paths, ingestCfg, {
-        cmdRunFn: () => cmdRun({ localQueue: opts.localQueue }),
+        cmdRunFn: () => cmdRun(),
         pendingCount: countPending,
       }),
       ingest: ingestCfg.enabled ? createIngestHook(repoRoot, paths, ingestCfg) : undefined,
@@ -2552,7 +2539,7 @@ type RunLaneDeps = {
 
 export interface PlannedLane {
   lane: string;
-  /** Seed issues to work before claiming. Always empty in GitHub-queue mode. */
+  /** Seed issues to work before claiming. Always empty because GitHub labels own scheduling. */
   issues: number[];
   deps: Pick<RunLaneDeps, 'claimNext' | 'releaseIssue'>;
 }
@@ -2629,29 +2616,9 @@ export async function preflightQueuedIssue(
 }
 
 export async function planRunLanes(input: {
-  localQueue: boolean;
-  /** `null` when `.factory/queue` does not exist. */
-  readLocalQueue: () => string | null;
-  /** Lazy so the octokit client is never built under --local-queue. */
+  /** Lazy so the octokit client is only built once the run needs queue state. */
   queue: () => GithubQueue;
 }): Promise<{ lanes: PlannedLane[]; diagnostics: QueueDiagnostic[] }> {
-  if (input.localQueue) {
-    const content = input.readLocalQueue();
-    if (content === null) {
-      throw new CliExitError('queue empty — run factory init + triage first', 2);
-    }
-    const { entries, diagnostics } = parseQueue(content);
-    const byLane = new Map<string, number[]>();
-    for (const e of entries) {
-      if (!byLane.has(e.lane)) byLane.set(e.lane, []);
-      byLane.get(e.lane)!.push(e.issue);
-    }
-    return {
-      lanes: [...byLane].map(([lane, issues]) => ({ lane, issues, deps: {} })),
-      diagnostics,
-    };
-  }
-
   const gq = input.queue();
   const lanes = await gq.lanes();
   return {
@@ -2728,8 +2695,7 @@ export async function runLane(
         continue;
       }
       if (err instanceof IssueDecomposedError) {
-        // shipIssue already rewrote the queue — splice the children in after the
-        // current issue so this same lane run ships them, deduping ones already queued.
+        // Continue this lane with newly filed children without touching queue storage.
         const fresh = err.childIssues.filter((n) => !seen.has(n));
         for (const n of fresh) seen.add(n);
         pending.splice(i + 1, 0, ...fresh.map(buildClaim));
@@ -3661,8 +3627,8 @@ export async function main() {
 
   triage
     .command('accept')
-    .description('Validate and atomically promote .factory/queue.proposed to .factory/queue')
-    .option('--force', 'Skip validation and promote as-is')
+    .description('Validate .factory/queue.proposed and apply GitHub queue labels')
+    .option('--force', 'Skip validation and apply labels as-is')
     .action(async (opts) => {
       await cmdTriageAccept(opts);
     });
@@ -3757,7 +3723,7 @@ export async function main() {
   program
     .command('run')
     .description('Process the whole queue (lanes in parallel)')
-    .option('--local-queue', 'Read .factory/queue instead of claiming issues from GitHub Issues')
+    .option('--local-queue', 'Retired: GitHub issue labels are now the only supported queue')
     .action((opts: { localQueue?: boolean }) => cmdRun(opts));
 
   program
@@ -3786,7 +3752,7 @@ export async function main() {
     .command('supervise')
     .description('Multi-window loop: wait for usage headroom, run the queue, repeat until drained')
     .option('--now', 'Skip the initial headroom wait')
-    .option('--local-queue', 'Read .factory/queue instead of claiming issues from GitHub Issues')
+    .option('--local-queue', 'Retired: GitHub issue labels are now the only supported queue')
     .action(async (opts) => {
       await cmdSupervise(opts);
     });

@@ -266,11 +266,50 @@ function paths() {
 }
 
 function defaultOctokit() {
+  const labelsByIssue = new Map<number, Set<string>>();
+  const loadQueueFixture = () => {
+    if (labelsByIssue.size > 0) return;
+    const queue = paths().queue;
+    if (!existsSync(queue)) return;
+    for (const line of readFileSync(queue, 'utf-8').split('\n')) {
+      const match = /^(\S+)\s+(\d+)\s*$/.exec(line.trim());
+      if (!match) continue;
+      labelsByIssue.set(Number(match[2]), new Set(['factory:queued', `factory:lane:${match[1]}`]));
+    }
+  };
+  const issueLabels = (issue: number) => {
+    loadQueueFixture();
+    const labels = labelsByIssue.get(issue) ?? new Set<string>();
+    labelsByIssue.set(issue, labels);
+    return labels;
+  };
   return {
     rest: {
       issues: {
         get: vi.fn(async () => ({ data: { title: 'Fix the bug' } })),
-        listForRepo: vi.fn(async () => ({ data: [] })),
+        listForRepo: vi.fn(async ({ labels }: any = {}) => {
+          loadQueueFixture();
+          const required = typeof labels === 'string' && labels.length > 0 ? labels.split(',') : [];
+          const data = [...labelsByIssue]
+            .filter(([, issueLabels]) => required.every((label) => issueLabels.has(label)))
+            .map(([number, issueLabels]) => ({
+              number,
+              labels: [...issueLabels].map((name) => ({ name })),
+            }));
+          return { data };
+        }),
+        listLabelsOnIssue: vi.fn(async ({ issue_number }: any) => ({
+          data: [...issueLabels(issue_number)].map((name) => ({ name })),
+        })),
+        addLabels: vi.fn(async ({ issue_number, labels }: any) => {
+          for (const label of labels ?? []) issueLabels(issue_number).add(label);
+          return {};
+        }),
+        removeLabel: vi.fn(async ({ issue_number, name }: any) => {
+          issueLabels(issue_number).delete(name);
+          return {};
+        }),
+        createLabel: vi.fn(async () => ({})),
       },
       pulls: {
         list: vi.fn(async ({ state }: any) =>
@@ -418,16 +457,16 @@ describe('cli commands (via main dispatch)', () => {
   });
 
   describe('init', () => {
-    it('creates .factory dirs, the git exclude entry, and a sample queue', async () => {
+    it('creates .factory dirs and the git exclude entry without creating a queue file', async () => {
       const res = await runMain('init');
       expect(res.exited).toBe(false);
-      expect(existsSync(paths().queue)).toBe(true);
+      expect(existsSync(paths().queue)).toBe(false);
       const exclude = readFileSync(join(h.repoRoot, '.git/info/exclude'), 'utf-8');
       expect(exclude).toContain('.factory/');
       expect(logged()).toContain('Initialized');
     });
 
-    it('does not duplicate the exclude entry or clobber an existing queue', async () => {
+    it('does not duplicate the exclude entry or clobber an existing legacy queue', async () => {
       writeFileSync(join(h.repoRoot, '.git/info/exclude'), '.factory/\n');
       writeFileSync(paths().queue, 'app 1\n');
       await runMain('init');
@@ -528,12 +567,22 @@ describe('cli commands (via main dispatch)', () => {
     });
 
     it('doctor prints the report and returns when a worker is reachable', async () => {
+      h.execSyncImpl = (cmd: string) => {
+        if (cmd === 'ollama list') return 'NAME ID SIZE MODIFIED\nqwen3.5:9b abc 1GB today\n';
+        throw new Error('unexpected execSync');
+      };
       h.diagnoses = [
         { model: 'w', provider: 'openai', tiers: ['worker'], reachable: true, experimental: false, reason: 'ok' },
       ];
       const res = await runMain('models', '--doctor');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('Model Doctor');
+      const diagnoseCall = vi.mocked(FactoryCore.diagnoseModels).mock.calls.at(-1);
+      expect(diagnoseCall).toBeDefined();
+      const ollamaModelPresent = diagnoseCall?.[1]?.ollamaModelPresent;
+      expect(ollamaModelPresent).toBeDefined();
+      expect(ollamaModelPresent?.('qwen3.5:9b')).toBe(true);
+      expect(ollamaModelPresent?.('missing-model')).toBe(false);
     });
 
     it('doctor exits 1 when no worker is reachable', async () => {
@@ -690,8 +739,7 @@ bash scripts/verify.sh
       expect(logged() + errored()).toContain('STOP file present');
     });
 
-    it('handles an empty queue and no events gracefully', async () => {
-      writeFileSync(paths().queue, '# only comments\n');
+    it('handles an empty GitHub queue and no events gracefully', async () => {
       await runMain('status');
       const out = logged();
       expect(out).toContain('(empty)');
@@ -700,20 +748,20 @@ bash scripts/verify.sh
       expect(out).toContain('No factory runs recorded yet.');
     });
 
-    it('warns on malformed queue lines and never renders NaN', async () => {
+    it('ignores malformed legacy queue lines and never renders NaN', async () => {
       writeFileSync(paths().queue, 'app 1\napp abc\n');
       await runMain('status');
       expect(logged()).toContain('app 1');
       const err = errored();
-      expect(err).toContain('malformed');
-      expect(err).toContain('line 2');
+      expect(err).not.toContain('malformed');
+      expect(err).not.toContain('line 2');
       expect(logged() + err).not.toContain('NaN');
     });
 
-    it('prints "(no queue file)" when the queue does not exist', async () => {
+    it('prints "(empty)" when the GitHub queue has no queued issues', async () => {
       const res = await runMain('status');
       expect(res.exited).toBe(false);
-      expect(logged()).toContain('(no queue file)');
+      expect(logged()).toContain('(empty)');
     });
 
     it('shows an open provider breaker without mutating the breaker file', async () => {
@@ -913,7 +961,7 @@ bash scripts/verify.sh
       expect(h.runTuiCalls[0].eventsFile.endsWith(join('.factory', 'events.ndjson'))).toBe(true);
       expect(h.runTuiCalls[0].repo).toBe(h.ghRepo);
       expect(h.runTuiCalls[0].stopFile?.endsWith(join('.factory', 'STOP'))).toBe(true);
-      expect(h.runTuiCalls[0].queueFile?.endsWith(join('.factory', 'queue'))).toBe(true);
+      expect(h.runTuiCalls[0].queueFile).toBeUndefined();
       expect(h.runTuiCalls[0].queueProposedFile?.endsWith(join('.factory', 'queue.proposed'))).toBe(true);
       expect(h.runTuiCalls[0].costsFile?.endsWith(join('.factory', 'costs.jsonl'))).toBe(true);
       expect(h.runTuiCalls[0].steeringDir?.endsWith(join('.factory', 'steering'))).toBe(true);
@@ -987,7 +1035,13 @@ bash scripts/verify.sh
       writeFileSync(paths().queueProposed, 'app 5\napp 6\n');
       await runMain('triage', 'accept');
       expect(existsSync(paths().queueProposed)).toBe(false);
-      expect(readFileSync(paths().queue, 'utf-8')).toBe('app 5\napp 6\n');
+      expect(existsSync(paths().queue)).toBe(false);
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenCalledWith(
+        expect.objectContaining({ issue_number: 5, labels: ['factory:queued', 'factory:lane:app'] }),
+      );
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenCalledWith(
+        expect.objectContaining({ issue_number: 6, labels: ['factory:queued', 'factory:lane:app'] }),
+      );
       expect(logged()).toContain('queue accepted');
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('"type":"triage_accepted"');
@@ -1016,7 +1070,7 @@ bash scripts/verify.sh
       writeFileSync(paths().queueProposed, 'app notanumber\n');
       await runMain('triage', 'accept', '--force');
       expect(existsSync(paths().queueProposed)).toBe(false);
-      expect(readFileSync(paths().queue, 'utf-8')).toBe('app notanumber\n');
+      expect(existsSync(paths().queue)).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('triage_accepted');
       expect(events).toContain('--force');
@@ -1044,16 +1098,24 @@ bash scripts/verify.sh
   });
 
   describe('run', () => {
-    it('exits 2 when the queue file is missing', async () => {
-      rmSync(paths().queue, { force: true });
+    it('rejects the retired --local-queue scheduler', async () => {
       const res = await runMain('run', '--local-queue');
       expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('--local-queue has been retired');
+    });
+
+    it('finishes cleanly when GitHub has no queued issues, regardless of queue file presence', async () => {
+      rmSync(paths().queue, { force: true });
+      const res = await runMain('run');
+      expect(res.exited).toBe(false);
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('run-done');
     });
 
     it('reads the queue, starts lanes, and stops immediately when STOP is present', async () => {
       writeFileSync(paths().queue, '# header\napp 1\napp 2\ndocs 3\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run', '--local-queue');
+      const res = await runMain('run');
       expect(res.exited).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('stopped');
@@ -1064,7 +1126,7 @@ bash scripts/verify.sh
       h.factoryConfig = { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: true } };
       writeFileSync(paths().queue, '# header\napp 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run', '--local-queue');
+      const res = await runMain('run');
       expect(res.exited).toBe(false);
       expect(sweepWorktrees).toHaveBeenCalledWith(
         expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7, repo: h.ghRepo }),
@@ -1077,7 +1139,7 @@ bash scripts/verify.sh
       h.factoryConfig = { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: false } };
       writeFileSync(paths().queue, '# header\napp 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run', '--local-queue');
+      const res = await runMain('run');
       expect(res.exited).toBe(false);
       expect(sweepWorktrees).not.toHaveBeenCalled();
     });
@@ -1087,23 +1149,23 @@ bash scripts/verify.sh
       (sweepWorktrees as any).mockRejectedValueOnce(new Error('gc boom'));
       writeFileSync(paths().queue, '# header\napp 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run', '--local-queue');
+      const res = await runMain('run');
       expect(res.exited).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('gc boom');
       expect(events).toContain('run-done');
     });
 
-    it('skips malformed queue lines, starts lanes only for valid entries, and warns', async () => {
+    it('ignores malformed legacy queue fixture lines while using valid GitHub queue labels', async () => {
       writeFileSync(paths().queue, '# header\napp 1\napp abc\ndocs 3\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run', '--local-queue');
+      const res = await runMain('run');
       expect(res.exited).toBe(false);
       const err = errored();
-      expect(err).toContain('malformed');
+      expect(err).not.toContain('malformed');
       const events = readFileSync(paths().events, 'utf-8');
-      expect(events).toContain(`lane 'app' started (1 issues)`);
-      expect(events).toContain(`lane 'docs' started (1 issues)`);
+      expect(events).toContain(`lane 'app' started`);
+      expect(events).toContain(`lane 'docs' started`);
       expect(events).toContain('run-done');
       expect(events + err).not.toContain('NaN');
     });
@@ -1113,7 +1175,7 @@ bash scripts/verify.sh
       process.env.FACTORY_USAGE_WATCH = '0';
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run', '--local-queue');
+      const res = await runMain('run');
       expect(res.exited).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('run-done');
@@ -1124,7 +1186,7 @@ bash scripts/verify.sh
       vi.mocked(core.watchUsage).mockRejectedValueOnce(new Error('watchdog exploded'));
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run', '--local-queue');
+      const res = await runMain('run');
       expect(res.exited).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('usage watchdog crashed');
@@ -1140,7 +1202,7 @@ bash scripts/verify.sh
       };
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run', '--local-queue');
+      const res = await runMain('run');
       expect(res.exited).toBe(false);
 
       expect(existsSync(paths().kpiHistory)).toBe(true);
@@ -1157,8 +1219,8 @@ bash scripts/verify.sh
     it('appends a second KPI snapshot on a second run', async () => {
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
-      await runMain('run', '--local-queue');
-      await runMain('run', '--local-queue');
+      await runMain('run');
+      await runMain('run');
 
       const lines = readFileSync(paths().kpiHistory, 'utf-8').trim().split('\n').filter(Boolean);
       expect(lines).toHaveLength(2);
@@ -1167,7 +1229,7 @@ bash scripts/verify.sh
     it('does not create a KPI snapshot when the queue has no entries', async () => {
       writeFileSync(paths().queue, '# header\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run', '--local-queue');
+      const res = await runMain('run');
       expect(res.exited).toBe(false);
 
       const events = readFileSync(paths().events, 'utf-8');
@@ -1185,7 +1247,7 @@ bash scripts/verify.sh
       };
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run', '--local-queue');
+      const res = await runMain('run');
       expect(res.exited).toBe(false);
 
       const events = readFileSync(paths().events, 'utf-8');
@@ -1201,7 +1263,7 @@ bash scripts/verify.sh
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
       mkdirSync(paths().kpiHistory);
-      const res = await runMain('run', '--local-queue');
+      const res = await runMain('run');
       expect(res.exited).toBe(false);
 
       const events = readFileSync(paths().events, 'utf-8');
@@ -1335,31 +1397,37 @@ bash scripts/verify.sh
   });
 
   describe('supervise', () => {
+    it('rejects the retired --local-queue scheduler', async () => {
+      const res = await runMain('supervise', '--now', '--local-queue');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('--local-queue has been retired');
+    });
+
     it('exits 2 when the queue is empty', async () => {
       writeFileSync(paths().queue, '# just comments\n');
-      const res = await runMain('supervise', '--now', '--local-queue');
+      const res = await runMain('supervise', '--now');
       expect(res).toEqual({ exited: true, code: 2 });
     });
 
     it('exits 2 on invalid usage knobs', async () => {
       writeFileSync(paths().queue, 'app 1\n');
       process.env.FACTORY_USAGE_CAP = 'abc';
-      const res = await runMain('supervise', '--now', '--local-queue');
+      const res = await runMain('supervise', '--now');
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('FACTORY_USAGE_CAP');
     });
 
-    it('exits 2 when the queue contains only malformed lines, and warns why', async () => {
+    it('exits 2 when GitHub has no queued issues, even if the legacy queue file has malformed lines', async () => {
       writeFileSync(paths().queue, 'app abc\n');
-      const res = await runMain('supervise', '--now', '--local-queue');
+      const res = await runMain('supervise', '--now');
       expect(res).toEqual({ exited: true, code: 2 });
-      expect(errored()).toContain('malformed');
+      expect(errored()).toContain('queue empty');
     });
 
     it('--now runs the queue once end-to-end and finishes once the queue drains without STOP', async () => {
       process.env.FACTORY_MERGE = '1';
       writeFileSync(paths().queue, 'app 1\n');
-      const res = await runMain('supervise', '--now', '--local-queue');
+      const res = await runMain('supervise', '--now');
       expect(res.exited).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('supervisor-done');
@@ -1628,6 +1696,25 @@ bash scripts/verify.sh
       const res = await runMain('ship', '5');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('PR #99 ready for review');
+    });
+
+    it('installs npm dependencies in a fresh package-lock worktree before planning', async () => {
+      const commands: string[] = [];
+      h.execImpl = (cmd: string) => {
+        commands.push(cmd);
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) return h.ghRepo;
+        return '';
+      };
+      h.setupWorktreeImpl = async (_repoRoot, _branch, worktree) => {
+        mkdirSync(worktree, { recursive: true });
+        writeFileSync(join(worktree, 'package-lock.json'), '{}\n');
+      };
+
+      const res = await runMain('ship', '5');
+
+      expect(res.exited).toBe(false);
+      expect(commands).toContain('npm install --ignore-scripts --no-audit --no-fund');
     });
 
     // Regression (#681): a closed issue exits 0 (not 1) through the CLI command.
@@ -2579,7 +2666,7 @@ describe('shipIssue (direct)', () => {
     expect(escalateEvents).toHaveLength(1);
   });
 
-  it('rewrites the queue entry and throws IssueDecomposedError (not a park) when the plan decomposed the issue', async () => {
+  it('leaves the legacy queue file alone and throws IssueDecomposedError (not a park) when the plan decomposes the issue', async () => {
     writeFileSync(paths().queue, 'app 5\n');
     h.planResult = { ok: false, route: 'claude', escalate: 'decomposed', decomposed: { childIssues: [10, 11] } };
 
@@ -2587,31 +2674,31 @@ describe('shipIssue (direct)', () => {
 
     expect(err).toBeInstanceOf(IssueDecomposedError);
     expect(err.childIssues).toEqual([10, 11]);
-    expect(readFileSync(paths().queue, 'utf-8')).toBe('app 10\napp 11\n');
+    expect(readFileSync(paths().queue, 'utf-8')).toBe('app 5\n');
     const events = readFileSync(paths().events, 'utf-8');
-    expect(events).toContain('queue entry for #5 replaced with #10, #11');
+    expect(events).toContain('#5 decomposed — continuing the lane with #10, #11');
     expect(events).not.toContain('"type":"escalate"');
     expect(events).not.toContain('"type":"fail"');
   });
 
-  it('logs decompose_filed without rewriting when the decomposed issue has no queue entry', async () => {
+  it('logs decompose_filed without reading the legacy queue when the decomposed issue has no queue entry', async () => {
     h.planResult = { ok: false, route: 'claude', escalate: 'decomposed', decomposed: { childIssues: [10, 11] } };
 
     await expect(shipIssue(5, {}, ctx())).rejects.toBeInstanceOf(IssueDecomposedError);
 
     const events = readFileSync(paths().events, 'utf-8');
-    expect(events).toContain('#5 had no queue entry to replace — continuing the lane with #10, #11');
+    expect(events).toContain('#5 decomposed — continuing the lane with #10, #11');
   });
 
-  it('logs decompose_file_failed but still throws IssueDecomposedError when the queue rewrite errors', async () => {
-    mkdirSync(paths().queue); // a directory at the queue path makes readFileSync throw
+  it('does not touch the legacy queue path when decomposition is filed', async () => {
+    mkdirSync(paths().queue);
     h.planResult = { ok: false, route: 'claude', escalate: 'decomposed', decomposed: { childIssues: [10] } };
 
     await expect(shipIssue(5, {}, ctx())).rejects.toBeInstanceOf(IssueDecomposedError);
 
     const events = readFileSync(paths().events, 'utf-8');
-    expect(events).toContain('decompose_file_failed');
-    expect(events).toContain('queue rewrite for #5 failed');
+    expect(events).toContain('#5 decomposed — continuing the lane with #10');
+    expect(events).not.toContain('decompose_file_failed');
   });
 
   it('throws a LaneParkError with reason escalate when the build escalates', async () => {

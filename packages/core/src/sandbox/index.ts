@@ -54,6 +54,14 @@ function dedupeAbsolutePaths(paths: string[]): string[] {
   return [...new Set(paths.filter((p) => p.length > 0))];
 }
 
+function isOpenClawPath(path: string): boolean {
+  return /(^|\/)\.openclaw(\/|$)/.test(path);
+}
+
+function sandboxTmpdir(path: string): string {
+  return isOpenClawPath(path) ? '/tmp' : path;
+}
+
 /** Resolves the containment policy for one agentic run, or undefined when the
  *  sandbox is off (explicit opt-out, env kill-switch, or config). */
 export function resolveSandboxPolicy(
@@ -75,7 +83,7 @@ export function resolveSandboxPolicy(
   const platform = opts.platform ?? process.platform;
   const isAvailable = opts.isAvailable ?? isCommandAvailable;
   const home = opts.homedir ?? homedir();
-  const tmp = opts.tmpdir ?? tmpdir();
+  const tmp = sandboxTmpdir(opts.tmpdir ?? tmpdir());
 
   const runtime = detectSandboxRuntime(platform, isAvailable);
 
@@ -91,6 +99,14 @@ export function resolveSandboxPolicy(
     resolve(home, '.local'),
     ...(platform === 'darwin'
       ? ['/tmp', '/private/tmp', '/private/var/folders', resolve(home, 'Library/Caches'), resolve(home, 'Library/Logs')]
+      : []),
+    ...(platform === 'darwin'
+      ? [
+          resolve(home, 'Library/Application Support/Codex'),
+          resolve(home, 'Library/Application Support/OpenAI'),
+          resolve(home, 'Library/Application Support/com.openai.codex'),
+          resolve(home, 'Library/HTTPStorages/com.openai.codex'),
+        ]
       : []),
   ]);
 

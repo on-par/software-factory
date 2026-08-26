@@ -143,6 +143,7 @@ describe('loadModelsConfig', () => {
         'claude-sonnet-5',
         'gemma4:12b',
         'gpt-5.1-codex',
+        'gpt-5.6-luna-high',
         'gpt-5.6-sol',
         'gpt-5.6-terra-high',
         'gpt-5.6-terra-medium',

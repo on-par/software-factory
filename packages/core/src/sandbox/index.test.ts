@@ -98,6 +98,17 @@ describe('resolveSandboxPolicy', () => {
     expect(count).toBe(1);
   });
 
+  it('uses /tmp instead of inherited OpenClaw temp dirs', () => {
+    const policy = resolveSandboxPolicy(defaultSandboxCfg, {
+      ...baseOpts,
+      tmpdir: '/home/factory/.openclaw/tmp',
+      env: {},
+    });
+
+    expect(policy?.writablePaths).toContain('/tmp');
+    expect(policy?.writablePaths).not.toContain('/home/factory/.openclaw/tmp');
+  });
+
   it('detects the runtime using the injected platform/isAvailable probes', () => {
     const policy = resolveSandboxPolicy(defaultSandboxCfg, {
       ...baseOpts,

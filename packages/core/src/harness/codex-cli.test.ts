@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { writeFile as realWriteFile } from 'node:fs/promises';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig } from '../config/index.js';
 import { ModelRegistry } from '../models/index.js';
@@ -98,6 +98,10 @@ const modelsConfig: ModelsConfig = {
 
 const registry = new ModelRegistry(modelsConfig);
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 function recordingExec(
   result: { stdout?: string; stderr?: string } = {},
   onCmd?: (cmd: string) => Promise<void> | void,
@@ -156,7 +160,7 @@ describe('CodexCliHarness command shape', () => {
     expect(rec.calls[0].cmd).not.toContain('--model');
   });
 
-  it('forwards request.env verbatim to the execFn opts', async () => {
+  it('forwards lane env while removing inherited OpenClaw/Codex session state', async () => {
     const rec = successExec();
     const harness = new CodexCliHarness(rec.fn);
 
@@ -165,14 +169,24 @@ describe('CodexCliHarness command shape', () => {
         model: 'codex-model',
         registry,
         prompt: 'build it',
-        env: { PORT: '3142', FACTORY_APP_PORT: '3142', FACTORY_BASE_URL: 'http://127.0.0.1:3142' },
+        env: {
+          PORT: '3142',
+          FACTORY_APP_PORT: '3142',
+          FACTORY_BASE_URL: 'http://127.0.0.1:3142',
+          CODEX_HOME: '/tmp/should-not-survive',
+          CODEX_THREAD_ID: 'thread-from-parent',
+          OPENCLAW_SERVICE_MARKER: 'openclaw',
+        },
       }),
     );
 
-    expect(rec.calls[0].opts.env).toEqual({
+    expect(rec.calls[0].opts.env).toMatchObject({
       PORT: '3142',
       FACTORY_APP_PORT: '3142',
       FACTORY_BASE_URL: 'http://127.0.0.1:3142',
+      CODEX_HOME: undefined,
+      CODEX_THREAD_ID: undefined,
+      OPENCLAW_SERVICE_MARKER: undefined,
     });
   });
 
@@ -186,13 +200,29 @@ describe('CodexCliHarness command shape', () => {
     expect(rec.calls[0].opts.onPgid).toBe(onPgid);
   });
 
-  it('leaves opts.env undefined when the request has no env', async () => {
+  it('passes a scrub env when the request has no env', async () => {
     const rec = successExec();
     const harness = new CodexCliHarness(rec.fn);
 
     await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
 
-    expect(rec.calls[0].opts.env).toBeUndefined();
+    expect(rec.calls[0].opts.env).toMatchObject({
+      CODEX_HOME: undefined,
+      CODEX_THREAD_ID: undefined,
+    });
+  });
+
+  it('uses /tmp for prompt and output files when TMPDIR points under .openclaw', async () => {
+    vi.stubEnv('TMPDIR', '/Users/factory/.openclaw/tmp');
+    const rec = successExec();
+    const harness = new CodexCliHarness(rec.fn);
+
+    await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
+
+    const { outFile, tmpFile } = tempPathsFromCmd(rec.calls[0].cmd);
+    expect(outFile).toMatch(/^\/tmp\/factory-codex-out-/);
+    expect(tmpFile).toMatch(/^\/tmp\/factory-codex-/);
+    expect(rec.calls[0].opts.env.TMPDIR).toBe('/tmp');
   });
 
   it('wraps the invocation in sandbox-exec when request.sandbox is set', async () => {
@@ -205,7 +235,8 @@ describe('CodexCliHarness command shape', () => {
 
     expect(rec.calls).toHaveLength(1);
     expect(rec.calls[0].cmd.startsWith('sandbox-exec -p ')).toBe(true);
-    expect(rec.calls[0].cmd).toContain('codex exec --json --sandbox workspace-write');
+    expect(rec.calls[0].cmd).toContain('codex exec --json --sandbox danger-full-access');
+    expect(rec.calls[0].cmd).not.toContain('codex exec --json --sandbox workspace-write');
   });
 });
 

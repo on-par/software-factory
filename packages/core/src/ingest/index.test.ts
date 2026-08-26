@@ -1,10 +1,9 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { validateQueue } from '../queue/index.js';
 import * as commandRunner from '../utils/command-runner.js';
 import type { AutoIngestDeps } from './index.js';
 import { issueFromFactoryBranch, runAutoIngest } from './index.js';
@@ -13,6 +12,7 @@ interface FakeIssue {
   number: number;
   title: string;
   updatedAt: string;
+  labels?: string[];
 }
 
 interface FakeRunOpts {
@@ -25,12 +25,24 @@ interface FakeRunOpts {
 
 function fakeRun(opts: FakeRunOpts) {
   const calls: (readonly string[])[] = [];
+  const labelsByIssue = new Map<number, Set<string>>();
+  for (const issue of opts.issues ?? []) {
+    labelsByIssue.set(issue.number, new Set(issue.labels ?? []));
+  }
   const run = async (argv: readonly string[], _cwdOpts?: { cwd: string }) => {
     calls.push(argv);
     if (argv[1] === 'issue' && argv[2] === 'list') {
       if (opts.issueListOk === false) return { stdout: opts.issueListStdout ?? 'boom', ok: false };
       if (opts.issueListStdout !== undefined) return { stdout: opts.issueListStdout, ok: true };
-      return { stdout: JSON.stringify(opts.issues ?? []), ok: true };
+      return {
+        stdout: JSON.stringify(
+          (opts.issues ?? []).map((issue) => ({
+            ...issue,
+            labels: [...(labelsByIssue.get(issue.number) ?? [])],
+          })),
+        ),
+        ok: true,
+      };
     }
     if (argv[1] === 'pr' && argv[2] === 'list') {
       if (opts.prListOk === false) return { stdout: 'boom', ok: false };
@@ -39,35 +51,49 @@ function fakeRun(opts: FakeRunOpts) {
         ok: true,
       };
     }
+    if (argv[1] === 'label' && argv[2] === 'create') {
+      return { stdout: '', ok: true };
+    }
+    if (argv[1] === 'issue' && argv[2] === 'edit') {
+      const issue = Number(argv[3]);
+      const addLabelAt = argv.indexOf('--add-label');
+      if (Number.isInteger(issue) && addLabelAt >= 0) {
+        const labels = String(argv[addLabelAt + 1] ?? '')
+          .split(',')
+          .filter(Boolean);
+        const current = labelsByIssue.get(issue) ?? new Set<string>();
+        for (const label of labels) current.add(label);
+        labelsByIssue.set(issue, current);
+      }
+      return { stdout: '', ok: true };
+    }
     throw new Error(`unexpected argv: ${argv.join(' ')}`);
   };
   return { run, calls };
 }
 
-function makeDeps(opts: {
-  runOpts: FakeRunOpts;
-  queueContent?: string | null;
-  watermarkContent?: string | null;
-  now?: Date;
-}): { deps: AutoIngestDeps; writes: Record<string, string>; run: ReturnType<typeof fakeRun>['run'] } {
-  const { run } = fakeRun(opts.runOpts);
+function makeDeps(opts: { runOpts: FakeRunOpts; watermarkContent?: string | null; now?: Date }): {
+  deps: AutoIngestDeps;
+  writes: Record<string, string>;
+  run: ReturnType<typeof fakeRun>['run'];
+  calls: (readonly string[])[];
+} {
+  const fake = fakeRun(opts.runOpts);
   const writes: Record<string, string> = {};
   const files: Record<string, string | null> = {
-    '/repo/.factory/queue': opts.queueContent ?? null,
     '/repo/.factory/ingest-watermark': opts.watermarkContent ?? null,
   };
   const deps: AutoIngestDeps = {
     now: () => opts.now ?? new Date('2026-07-20T00:00:00.000Z'),
-    run,
+    run: fake.run,
     readFile: (path: string) => files[path] ?? null,
     writeFile: (path: string, content: string) => {
       writes[path] = content;
     },
   };
-  return { deps, writes, run };
+  return { deps, writes, run: fake.run, calls: fake.calls };
 }
 
-const QUEUE_FILE = '/repo/.factory/queue';
 const WATERMARK_FILE = '/repo/.factory/ingest-watermark';
 
 describe('issueFromFactoryBranch', () => {
@@ -87,38 +113,39 @@ describe('issueFromFactoryBranch', () => {
 });
 
 describe('runAutoIngest', () => {
-  it('appends a new ready issue not in the queue or in flight', async () => {
-    const { deps, writes } = makeDeps({
+  it('marks a new ready issue queued when it is not already queued or in flight', async () => {
+    const { calls, deps, writes } = makeDeps({
       runOpts: { issues: [{ number: 100, title: 'Do the thing', updatedAt: '2026-07-19T00:00:00.000Z' }] },
-      queueContent: '',
     });
 
-    const result = await runAutoIngest(
-      { repoDir: '/repo', queueFile: QUEUE_FILE, watermarkFile: WATERMARK_FILE },
-      deps,
-    );
+    const result = await runAutoIngest({ repoDir: '/repo', watermarkFile: WATERMARK_FILE }, deps);
 
     expect(result.appended).toEqual([100]);
     expect(result.candidates).toBe(1);
-    expect(writes[QUEUE_FILE]).toBe('auto 100\n');
+    expect(calls).toContainEqual(['gh', 'issue', 'edit', '100', '--add-label', 'factory:queued,factory:lane:auto']);
     expect(writes[WATERMARK_FILE]).toBe('2026-07-19T00:00:00.000Z\n');
     expect(result.watermark).toBe('2026-07-19T00:00:00.000Z');
   });
 
-  it('skips an issue already present in the queue file', async () => {
+  it('skips an issue already carrying the GitHub queue label', async () => {
     const { deps, writes } = makeDeps({
-      runOpts: { issues: [{ number: 100, title: 'Already queued', updatedAt: '2026-07-19T00:00:00.000Z' }] },
-      queueContent: 'auto 100\n',
+      runOpts: {
+        issues: [
+          {
+            number: 100,
+            title: 'Already queued',
+            updatedAt: '2026-07-19T00:00:00.000Z',
+            labels: ['factory:queued'],
+          },
+        ],
+      },
     });
 
-    const result = await runAutoIngest(
-      { repoDir: '/repo', queueFile: QUEUE_FILE, watermarkFile: WATERMARK_FILE },
-      deps,
-    );
+    const result = await runAutoIngest({ repoDir: '/repo', watermarkFile: WATERMARK_FILE }, deps);
 
     expect(result.appended).toEqual([]);
     expect(result.skippedInQueue).toEqual([100]);
-    expect(writes[QUEUE_FILE]).toBeUndefined();
+    expect(writes[WATERMARK_FILE]).toBe('2026-07-19T00:00:00.000Z\n');
   });
 
   it('skips an issue with an open ship-it/<n>-... PR', async () => {
@@ -127,13 +154,9 @@ describe('runAutoIngest', () => {
         issues: [{ number: 200, title: 'In flight', updatedAt: '2026-07-19T00:00:00.000Z' }],
         prHeadRefs: ['ship-it/200-in-flight'],
       },
-      queueContent: '',
     });
 
-    const result = await runAutoIngest(
-      { repoDir: '/repo', queueFile: QUEUE_FILE, watermarkFile: WATERMARK_FILE },
-      deps,
-    );
+    const result = await runAutoIngest({ repoDir: '/repo', watermarkFile: WATERMARK_FILE }, deps);
 
     expect(result.appended).toEqual([]);
     expect(result.skippedInFlight).toEqual([200]);
@@ -147,14 +170,10 @@ describe('runAutoIngest', () => {
           { number: 2, title: 'Fresh', updatedAt: '2026-07-19T12:00:00.000Z' },
         ],
       },
-      queueContent: '',
       watermarkContent: '2026-07-18T00:00:00.000Z',
     });
 
-    const result = await runAutoIngest(
-      { repoDir: '/repo', queueFile: QUEUE_FILE, watermarkFile: WATERMARK_FILE },
-      deps,
-    );
+    const result = await runAutoIngest({ repoDir: '/repo', watermarkFile: WATERMARK_FILE }, deps);
 
     expect(result.skippedStale).toEqual([1]);
     expect(result.appended).toEqual([2]);
@@ -167,14 +186,10 @@ describe('runAutoIngest', () => {
       runOpts: {
         issues: [{ number: 1, title: 'Older than watermark', updatedAt: '2026-07-01T00:00:00.000Z' }],
       },
-      queueContent: '',
       watermarkContent: '2026-07-19T00:00:00.000Z',
     });
 
-    const result = await runAutoIngest(
-      { repoDir: '/repo', queueFile: QUEUE_FILE, watermarkFile: WATERMARK_FILE },
-      deps,
-    );
+    const result = await runAutoIngest({ repoDir: '/repo', watermarkFile: WATERMARK_FILE }, deps);
 
     expect(result.watermark).toBe('2026-07-19T00:00:00.000Z');
     expect(result.skippedStale).toEqual([1]);
@@ -185,13 +200,9 @@ describe('runAutoIngest', () => {
       runOpts: { issues: [{ number: 5, title: 'First ever', updatedAt: '2026-07-19T00:00:00.000Z' }] },
     });
 
-    const result = await runAutoIngest(
-      { repoDir: '/repo', queueFile: QUEUE_FILE, watermarkFile: WATERMARK_FILE },
-      deps,
-    );
+    const result = await runAutoIngest({ repoDir: '/repo', watermarkFile: WATERMARK_FILE }, deps);
 
     expect(result.appended).toEqual([5]);
-    expect(writes[QUEUE_FILE]).toBe('auto 5\n');
     expect(writes[WATERMARK_FILE]).toBe('2026-07-19T00:00:00.000Z\n');
   });
 
@@ -199,10 +210,7 @@ describe('runAutoIngest', () => {
     const now = new Date('2026-07-20T00:00:00.000Z');
     const { deps, writes } = makeDeps({ runOpts: { issues: [] }, now });
 
-    const result = await runAutoIngest(
-      { repoDir: '/repo', queueFile: QUEUE_FILE, watermarkFile: WATERMARK_FILE },
-      deps,
-    );
+    const result = await runAutoIngest({ repoDir: '/repo', watermarkFile: WATERMARK_FILE }, deps);
 
     expect(result.appended).toEqual([]);
     expect(result.watermark).toBe('2026-07-20T00:00:00.000Z');
@@ -212,31 +220,22 @@ describe('runAutoIngest', () => {
   it('does not append and does not regress the watermark when gh issue list fails', async () => {
     const { deps, writes } = makeDeps({
       runOpts: { issueListOk: false },
-      queueContent: '',
       watermarkContent: '2026-07-18T00:00:00.000Z',
     });
 
-    const result = await runAutoIngest(
-      { repoDir: '/repo', queueFile: QUEUE_FILE, watermarkFile: WATERMARK_FILE },
-      deps,
-    );
+    const result = await runAutoIngest({ repoDir: '/repo', watermarkFile: WATERMARK_FILE }, deps);
 
     expect(result.appended).toEqual([]);
     expect(result.watermark).toBe('2026-07-18T00:00:00.000Z');
     expect(writes[WATERMARK_FILE]).toBeUndefined();
-    expect(writes[QUEUE_FILE]).toBeUndefined();
   });
 
   it('does not append and does not throw when gh issue list returns unparseable stdout', async () => {
     const { deps } = makeDeps({
       runOpts: { issueListStdout: 'not json' },
-      queueContent: '',
     });
 
-    const result = await runAutoIngest(
-      { repoDir: '/repo', queueFile: QUEUE_FILE, watermarkFile: WATERMARK_FILE },
-      deps,
-    );
+    const result = await runAutoIngest({ repoDir: '/repo', watermarkFile: WATERMARK_FILE }, deps);
 
     expect(result.appended).toEqual([]);
   });
@@ -247,29 +246,12 @@ describe('runAutoIngest', () => {
         issues: [{ number: 300, title: 'Still appends', updatedAt: '2026-07-19T00:00:00.000Z' }],
         prListOk: false,
       },
-      queueContent: '',
     });
 
-    const result = await runAutoIngest(
-      { repoDir: '/repo', queueFile: QUEUE_FILE, watermarkFile: WATERMARK_FILE },
-      deps,
-    );
+    const result = await runAutoIngest({ repoDir: '/repo', watermarkFile: WATERMARK_FILE }, deps);
 
     expect(result.appended).toEqual([300]);
     expect(result.skippedInFlight).toEqual([]);
-  });
-
-  it('appends a trailing newline before new entries when the existing queue lacks one, keeping the queue valid', async () => {
-    const { deps, writes } = makeDeps({
-      runOpts: { issues: [{ number: 400, title: 'No trailing newline', updatedAt: '2026-07-19T00:00:00.000Z' }] },
-      queueContent: 'manual 1',
-    });
-
-    await runAutoIngest({ repoDir: '/repo', queueFile: QUEUE_FILE, watermarkFile: WATERMARK_FILE }, deps);
-
-    const newContent = writes[QUEUE_FILE];
-    expect(newContent).toBe('manual 1\nauto 400\n');
-    expect(validateQueue(newContent).ok).toBe(true);
   });
 
   it('caps the number of appended issues to maxPerCycle', async () => {
@@ -278,15 +260,11 @@ describe('runAutoIngest', () => {
       title: `Issue ${i + 1}`,
       updatedAt: '2026-07-19T00:00:00.000Z',
     }));
-    const { deps, writes } = makeDeps({ runOpts: { issues }, queueContent: '' });
+    const { deps } = makeDeps({ runOpts: { issues } });
 
-    const result = await runAutoIngest(
-      { repoDir: '/repo', queueFile: QUEUE_FILE, watermarkFile: WATERMARK_FILE, maxPerCycle: 2 },
-      deps,
-    );
+    const result = await runAutoIngest({ repoDir: '/repo', watermarkFile: WATERMARK_FILE, maxPerCycle: 2 }, deps);
 
     expect(result.appended).toEqual([1, 2]);
-    expect(writes[QUEUE_FILE]).toBe('auto 1\nauto 2\n');
   });
 
   it('does not permanently drop issues deferred by maxPerCycle, even when a deferred issue is older than an appended one', async () => {
@@ -300,7 +278,7 @@ describe('runAutoIngest', () => {
       { number: 4, title: 'Deferred', updatedAt: '2026-07-19T02:00:00.000Z' },
       { number: 5, title: 'Deferred', updatedAt: '2026-07-19T03:00:00.000Z' },
     ];
-    const files: Record<string, string | null> = { [QUEUE_FILE]: '', [WATERMARK_FILE]: null };
+    const files: Record<string, string | null> = { [WATERMARK_FILE]: null };
     const deps: AutoIngestDeps = {
       now: () => new Date('2026-07-20T00:00:00.000Z'),
       run: fakeRun({ issues }).run,
@@ -310,19 +288,13 @@ describe('runAutoIngest', () => {
       },
     };
 
-    const cycle1 = await runAutoIngest(
-      { repoDir: '/repo', queueFile: QUEUE_FILE, watermarkFile: WATERMARK_FILE, maxPerCycle: 2 },
-      deps,
-    );
+    const cycle1 = await runAutoIngest({ repoDir: '/repo', watermarkFile: WATERMARK_FILE, maxPerCycle: 2 }, deps);
 
     expect(cycle1.appended).toEqual([1, 2]);
     // The watermark must stay behind every deferred issue's updatedAt (issue 3 is earliest at 01:00).
     expect(cycle1.watermark < '2026-07-19T01:00:00.000Z').toBe(true);
 
-    const cycle2 = await runAutoIngest(
-      { repoDir: '/repo', queueFile: QUEUE_FILE, watermarkFile: WATERMARK_FILE, maxPerCycle: 2 },
-      deps,
-    );
+    const cycle2 = await runAutoIngest({ repoDir: '/repo', watermarkFile: WATERMARK_FILE, maxPerCycle: 2 }, deps);
 
     // Deferred issues 3-5 are picked up (capped to 2 again) — none of them were dropped as stale.
     // Issue 1 (already appended in cycle 1) is the only one at/behind the new watermark.
@@ -330,10 +302,9 @@ describe('runAutoIngest', () => {
     expect(cycle2.appended).toEqual([3, 4]);
   });
 
-  it('honors a custom label (passed to gh issue list) and lane (written into the queue line)', async () => {
-    const { deps, writes, run } = makeDeps({
+  it('honors a custom label for ready discovery and lane for queue labels', async () => {
+    const { deps, run } = makeDeps({
       runOpts: { issues: [{ number: 9, title: 'Custom', updatedAt: '2026-07-19T00:00:00.000Z' }] },
-      queueContent: '',
     });
     const calls: (readonly string[])[] = [];
     const spiedRun: AutoIngestDeps['run'] = async (argv, opts) => {
@@ -344,7 +315,6 @@ describe('runAutoIngest', () => {
     const result = await runAutoIngest(
       {
         repoDir: '/repo',
-        queueFile: QUEUE_FILE,
         watermarkFile: WATERMARK_FILE,
         label: 'triaged',
         lane: 'nightly',
@@ -353,15 +323,15 @@ describe('runAutoIngest', () => {
     );
 
     expect(result.appended).toEqual([9]);
-    expect(writes[QUEUE_FILE]).toBe('nightly 9\n');
     expect(calls.some((argv) => argv.includes('--label') && argv.includes('triaged'))).toBe(true);
+    expect(
+      calls.some((argv) => argv.includes('--add-label') && argv.includes('factory:queued,factory:lane:nightly')),
+    ).toBe(true);
   });
 
   it('falls back to production defaults (real fs readFile/writeFile, real now, runCommand) when deps are omitted', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'factory-ingest-'));
-    const queueFile = join(dir, 'queue');
     const watermarkFile = join(dir, 'ingest-watermark');
-    writeFileSync(queueFile, 'manual 1\n');
     const runCommandSpy = vi.spyOn(commandRunner, 'runCommand').mockImplementation(async (argv) => {
       const stdout =
         argv[1] === 'issue' && argv[2] === 'list'
@@ -371,10 +341,9 @@ describe('runAutoIngest', () => {
     });
 
     try {
-      const result = await runAutoIngest({ repoDir: dir, queueFile, watermarkFile });
+      const result = await runAutoIngest({ repoDir: dir, watermarkFile });
 
       expect(result.appended).toEqual([7]);
-      expect(readFileSync(queueFile, 'utf-8')).toBe('manual 1\nauto 7\n');
       expect(readFileSync(watermarkFile, 'utf-8')).toBe('2026-07-19T00:00:00.000Z\n');
       expect(new Date(result.scannedAt).getTime()).not.toBeNaN();
       expect(runCommandSpy).toHaveBeenCalled();
@@ -386,7 +355,6 @@ describe('runAutoIngest', () => {
 
   it('production defaultReadFile returns null for a missing file (no queue/watermark on disk yet)', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'factory-ingest-'));
-    const queueFile = join(dir, 'queue');
     const watermarkFile = join(dir, 'ingest-watermark');
     const runCommandSpy = vi.spyOn(commandRunner, 'runCommand').mockResolvedValue({
       command: [],
@@ -399,7 +367,7 @@ describe('runAutoIngest', () => {
     });
 
     try {
-      const result = await runAutoIngest({ repoDir: dir, queueFile, watermarkFile });
+      const result = await runAutoIngest({ repoDir: dir, watermarkFile });
 
       expect(result.appended).toEqual([]);
     } finally {

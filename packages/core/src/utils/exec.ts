@@ -15,7 +15,7 @@ export type ExecFn = (
     cwd?: string;
     timeoutMs?: number;
     maxBuffer?: number;
-    env?: Record<string, string>;
+    env?: Record<string, string | undefined>;
     /** When set, the child is spawned detached (its own process group) and
      *  its pid is reported here so a lane can track and later kill the
      *  whole group. */
@@ -28,6 +28,16 @@ export type ExecFn = (
 interface ChildResult {
   stdout: string;
   stderr: string;
+}
+
+function mergeEnv(overrides?: Record<string, string | undefined>): NodeJS.ProcessEnv | undefined {
+  if (!overrides) return undefined;
+  const merged: NodeJS.ProcessEnv = { ...process.env };
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === undefined) delete merged[key];
+    else merged[key] = value;
+  }
+  return merged;
 }
 
 /** `node:child_process.exec`'s `detached` option is silently dropped (it
@@ -47,14 +57,14 @@ interface ChildResult {
  *  direct child and settle immediately, independent of pipe state. */
 function execDetached(
   cmd: string,
-  opts: { cwd?: string; timeoutMs?: number; maxBuffer?: number; env?: Record<string, string> },
+  opts: { cwd?: string; timeoutMs?: number; maxBuffer?: number; env?: Record<string, string | undefined> },
 ): Promise<ChildResult> & { child: ReturnType<typeof spawn> } {
   const maxBuffer = opts.maxBuffer ?? DEFAULT_MAX_BUFFER;
   const child = spawn(cmd, {
     shell: true,
     detached: true,
     cwd: opts.cwd,
-    env: opts.env ? { ...process.env, ...opts.env } : undefined,
+    env: mergeEnv(opts.env),
   });
 
   let stdoutLen = 0;
@@ -138,7 +148,7 @@ export const defaultExecFn: ExecFn = async (cmd, opts) => {
       cwd: opts.cwd,
       timeout: opts.timeoutMs,
       maxBuffer: opts.maxBuffer,
-      ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
+      ...(opts.env ? { env: mergeEnv(opts.env) } : {}),
     });
   }
 

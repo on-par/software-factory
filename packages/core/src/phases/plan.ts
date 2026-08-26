@@ -165,6 +165,24 @@ can make, print a line starting exactly with "ESCALATE:" followed by the questio
 and do NOT write or return the spec.`;
 }
 
+function blockedNoChangeSpecReason(body: string): string | null {
+  const normalized = body.toLowerCase();
+  const saysBlocked = /^\s*blocked(?: by sandbox policy)?:/im.test(body);
+  const saysNoFilesChanged =
+    /\bno (?:repository )?files? (?:were )?changed\b/i.test(body) ||
+    /\bno files or tests were changed\/run\b/i.test(body);
+  const sandboxOnly =
+    normalized.includes('outside this worktree') ||
+    normalized.includes('writable sandbox') ||
+    normalized.includes('sandbox policy') ||
+    normalized.includes('outside your writable sandbox');
+
+  if (saysBlocked && (saysNoFilesChanged || sandboxOnly)) {
+    return 'PLAN returned a blocked/no-change note instead of a frozen spec';
+  }
+  return null;
+}
+
 export async function planPhase(opts: Parameters<typeof planPhaseImpl>[0]): Promise<PlanResult> {
   return withLifecycle(
     { bus: opts.bus, phase: 'plan', laneId: opts.laneId, issueId: opts.issue, worktreePath: opts.worktree },
@@ -534,6 +552,11 @@ async function planPhaseImpl(opts: {
         return { ok: false, route, specPath, model: result.model, escalate: reason, designArtifact: null };
       }
     } else {
+      const blockedReason = blockedNoChangeSpecReason(parsed.body);
+      if (blockedReason) {
+        log('escalate', blockedReason);
+        return { ok: false, route, specPath, model: result.model, escalate: blockedReason, designArtifact: null };
+      }
       log('design_artifact_invalid', `spec frontmatter has no valid design artifact: ${designErrors.join('; ')}`);
     }
 

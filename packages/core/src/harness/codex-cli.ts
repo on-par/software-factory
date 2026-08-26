@@ -15,7 +15,7 @@ import { HarnessError } from './index.js';
 export type CodexExecFn = ExecFn;
 
 /** Runs a model via the Codex CLI:
- *  codex exec --json --sandbox workspace-write -c approval_policy=never -C <worktree> [flags] -o <output> - < <prompt> */
+ *  codex exec --json --sandbox <mode> -c approval_policy=never -C <worktree> [flags] -o <output> - < <prompt> */
 export class CodexCliHarness implements CodingHarness {
   readonly id = 'codex-cli';
   readonly agentic = true;
@@ -25,12 +25,15 @@ export class CodexCliHarness implements CodingHarness {
   async run(request: HarnessRequest): Promise<HarnessResult> {
     const { model, prompt, worktree, timeoutSeconds, registry, sandbox, env, onPgid } = request;
     const extraFlag = registry.getCodexFlag(model) ?? '';
+    const childEnv = codexChildEnv(env);
 
-    const tmpFile = await mktemp(join(tmpdir(), 'factory-codex-'));
-    const outFile = await mktemp(join(tmpdir(), 'factory-codex-out-'));
+    const tmpBase = codexTmpdir(childEnv);
+    const tmpFile = await mktemp(join(tmpBase, 'factory-codex-'));
+    const outFile = await mktemp(join(tmpBase, 'factory-codex-out-'));
     await writeFile(tmpFile, prompt);
 
-    const cmd = `codex exec --json --sandbox workspace-write -c approval_policy=never -C ${shellEscape(worktree)} ${extraFlag} -o ${shellEscape(outFile)} - < ${shellEscape(tmpFile)}`;
+    const codexSandbox = sandbox ? 'danger-full-access' : 'workspace-write';
+    const cmd = `codex exec --json --sandbox ${codexSandbox} -c approval_policy=never -C ${shellEscape(worktree)} ${extraFlag} -o ${shellEscape(outFile)} - < ${shellEscape(tmpFile)}`;
     const finalCmd = sandbox ? wrapCommandInSandbox(cmd, sandbox) : cmd;
 
     try {
@@ -39,7 +42,7 @@ export class CodexCliHarness implements CodingHarness {
         execResult = await this.execFn(finalCmd, {
           timeoutMs: timeoutSeconds * 1000,
           maxBuffer: 10 * 1024 * 1024,
-          env,
+          env: childEnv,
           onPgid,
         });
       } catch (err: any) {
@@ -68,6 +71,31 @@ export class CodexCliHarness implements CodingHarness {
       await unlink(outFile).catch(() => {});
     }
   }
+}
+
+function isOpenClawPath(path: string | undefined): boolean {
+  return path !== undefined && /(^|\/)\.openclaw(\/|$)/.test(path);
+}
+
+function codexTmpdir(env: Record<string, string | undefined>): string {
+  return isOpenClawPath(env.TMPDIR) || isOpenClawPath(tmpdir()) ? '/tmp' : tmpdir();
+}
+
+function codexChildEnv(env: Record<string, string> | undefined): Record<string, string | undefined> {
+  const childEnv: Record<string, string | undefined> = { ...(env ?? {}) };
+
+  for (const key of Object.keys(process.env)) {
+    if (key.startsWith('OPENCLAW_')) childEnv[key] = undefined;
+  }
+  for (const key of Object.keys(childEnv)) {
+    if (key.startsWith('OPENCLAW_')) childEnv[key] = undefined;
+  }
+
+  childEnv.CODEX_HOME = undefined;
+  childEnv.CODEX_THREAD_ID = undefined;
+  if (isOpenClawPath(childEnv.TMPDIR) || isOpenClawPath(process.env.TMPDIR)) childEnv.TMPDIR = '/tmp';
+
+  return childEnv;
 }
 
 async function mktemp(prefix: string): Promise<string> {

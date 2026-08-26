@@ -832,6 +832,8 @@ describe('ModelRouter worktree reset guard', () => {
         return { stdout: '', stderr: '' };
       }
       if (/git clean -fd/.test(cmd)) return { stdout: '', stderr: '' };
+      if (/git add --all/.test(cmd)) return { stdout: '', stderr: '' };
+      if (/git commit -m/.test(cmd)) return { stdout: '', stderr: '' };
       throw new Error(`unhandled fake git command: ${cmd}`);
     };
     return { execFn, calls };

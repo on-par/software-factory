@@ -91,19 +91,28 @@ describe('cli', () => {
     expect(typeof main).toBe('function');
   });
 
+  it('prints the overview and returns when invoked without arguments', async () => {
+    const originalArgv = process.argv;
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    process.argv = ['node', 'factory'];
+    try {
+      await main();
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('factory — ship verified GitHub issues autonomously'));
+    } finally {
+      process.argv = originalArgv;
+      log.mockRestore();
+    }
+  });
+
   it('formats the triage proposal message with an accept hint for non-empty content', () => {
-    const message = triageProposalMessage(
-      'lane-a 1\nlane-b 2\n',
-      '/repo/.factory/queue.proposed',
-      '/repo/.factory/queue',
-    );
+    const message = triageProposalMessage('lane-a 1\nlane-b 2\n', '/repo/.factory/queue.proposed');
     expect(message).toContain('lane-a 1\nlane-b 2');
     expect(message).toContain('factory triage accept');
   });
 
   it('returns null for empty or whitespace-only triage proposals', () => {
-    expect(triageProposalMessage('', '/repo/.factory/queue.proposed', '/repo/.factory/queue')).toBeNull();
-    expect(triageProposalMessage('   \n  ', '/repo/.factory/queue.proposed', '/repo/.factory/queue')).toBeNull();
+    expect(triageProposalMessage('', '/repo/.factory/queue.proposed')).toBeNull();
+    expect(triageProposalMessage('   \n  ', '/repo/.factory/queue.proposed')).toBeNull();
   });
 
   describe('errorDetail', () => {
@@ -484,7 +493,7 @@ describe('cli', () => {
   describe('createSuperviseRunQueue', () => {
     const paths = { queue: '/repo/.factory/queue', events: '/repo/.factory/events.ndjson' } as any;
 
-    it('runs cmdRun when the queue is non-empty', async () => {
+    it('runs cmdRun when the injected pending count is non-empty', async () => {
       let cmdRunCalls = 0;
       const events: any[] = [];
       const runQueue = createSuperviseRunQueue(
@@ -494,7 +503,7 @@ describe('cli', () => {
           cmdRunFn: async () => {
             cmdRunCalls++;
           },
-          readQueueFile: () => 'auto 1\n',
+          pendingCount: async () => 1,
           emitEvent: (...args: any[]) => events.push(args),
         },
       );
@@ -505,7 +514,7 @@ describe('cli', () => {
       expect(events).toHaveLength(0);
     });
 
-    it('is a no-op and logs idle when the queue is empty and ingest is enabled', async () => {
+    it('is a no-op and logs idle when the injected pending count is empty and ingest is enabled', async () => {
       let cmdRunCalls = 0;
       const events: any[] = [];
       const runQueue = createSuperviseRunQueue(
@@ -515,7 +524,7 @@ describe('cli', () => {
           cmdRunFn: async () => {
             cmdRunCalls++;
           },
-          readQueueFile: () => '',
+          pendingCount: async () => 0,
           emitEvent: (...args: any[]) => events.push(args),
         },
       );
@@ -526,7 +535,7 @@ describe('cli', () => {
       expect(events).toEqual([[paths.events, 'idle', 'auto', 'queue empty — waiting for ready issues']]);
     });
 
-    it('runs cmdRun even on an empty queue when ingest is disabled', async () => {
+    it('runs cmdRun when ingest is disabled without checking pending work', async () => {
       let cmdRunCalls = 0;
       const runQueue = createSuperviseRunQueue(
         paths,
@@ -535,7 +544,6 @@ describe('cli', () => {
           cmdRunFn: async () => {
             cmdRunCalls++;
           },
-          readQueueFile: () => '',
         },
       );
 
@@ -721,7 +729,6 @@ describe('cli', () => {
         runAutoIngestFn: async (opts) => {
           expect(opts).toEqual({
             repoDir: '/repo',
-            queueFile: paths.queue,
             watermarkFile: paths.ingestWatermark,
             label: 'ready',
             lane: 'auto',
@@ -3363,48 +3370,7 @@ describe('cli', () => {
   });
 
   describe('planRunLanes', () => {
-    it('local mode groups queue file entries by lane without invoking the GitHub queue factory', async () => {
-      const result = await planRunLanes({
-        localQueue: true,
-        readLocalQueue: () => 'app 5\napp 6\ninfra 7\n',
-        queue: () => {
-          throw new Error('queue() should not be called in local mode');
-        },
-      });
-
-      expect(result.diagnostics).toEqual([]);
-      expect(result.lanes).toEqual([
-        { lane: 'app', issues: [5, 6], deps: {} },
-        { lane: 'infra', issues: [7], deps: {} },
-      ]);
-    });
-
-    it('local mode throws CliExitError(2) when the queue file does not exist', async () => {
-      await expect(
-        planRunLanes({
-          localQueue: true,
-          readLocalQueue: () => null,
-          queue: () => {
-            throw new Error('should not be called');
-          },
-        }),
-      ).rejects.toMatchObject({ message: expect.stringContaining('queue empty'), code: 2 });
-    });
-
-    it('local mode returns diagnostics for malformed lines while keeping the good entries', async () => {
-      const result = await planRunLanes({
-        localQueue: true,
-        readLocalQueue: () => 'app 5\nnot-a-valid-line\n',
-        queue: () => {
-          throw new Error('should not be called');
-        },
-      });
-
-      expect(result.diagnostics.length).toBeGreaterThan(0);
-      expect(result.lanes).toEqual([{ lane: 'app', issues: [5], deps: {} }]);
-    });
-
-    it('GitHub mode builds one planned lane per discovered lane, wired to that lane via the queue', async () => {
+    it('builds one planned lane per discovered GitHub queue lane, wired to that lane via the queue', async () => {
       const calls: any[] = [];
       const fakeQueue: GithubQueue = {
         claimNext: async (lane) => {
@@ -3419,10 +3385,6 @@ describe('cli', () => {
       };
 
       const result = await planRunLanes({
-        localQueue: false,
-        readLocalQueue: () => {
-          throw new Error('should not be called');
-        },
         queue: () => fakeQueue,
       });
 
@@ -3442,7 +3404,7 @@ describe('cli', () => {
       ]);
     });
 
-    it('GitHub mode returns no lanes when nothing is queued', async () => {
+    it('returns no lanes when nothing is queued in GitHub', async () => {
       const fakeQueue: GithubQueue = {
         claimNext: async () => null,
         release: async () => {},
@@ -3451,10 +3413,6 @@ describe('cli', () => {
       };
 
       const result = await planRunLanes({
-        localQueue: false,
-        readLocalQueue: () => {
-          throw new Error('should not be called');
-        },
         queue: () => fakeQueue,
       });
 

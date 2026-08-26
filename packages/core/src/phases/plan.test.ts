@@ -1306,6 +1306,53 @@ npm run test`;
       expect(existsSync(`${specPath.replace(/\.md$/, '')}.design.json`)).toBe(false);
     });
 
+    it('returns not-ok when the planner returns a blocked no-change note instead of a spec', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-426.md');
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [
+            {
+              output: `---
+route: codex
+---
+Blocked: sandbox policy prevents writing the required file outside this worktree.
+
+\`/repo/.factory/plans/issue-426.md\`
+
+No files were changed.
+`,
+            },
+          ],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: { issues: { get: async () => ({ data: { title: 'Blocked planner', body: 'Body.' } }) } },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      const result = await planPhase({
+        issue: 426,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: (type, msg) => logs.push({ type, msg }),
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.escalate).toBe('PLAN returned a blocked/no-change note instead of a frozen spec');
+      expect(logs).toContainEqual({
+        type: 'escalate',
+        msg: 'PLAN returned a blocked/no-change note instead of a frozen spec',
+      });
+      expect(logs.some((l) => l.type === 'design_artifact_invalid')).toBe(false);
+    });
+
     it('archives a pre-existing design artifact alongside a replanned spec', async () => {
       const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
       tempDirs.add(worktree);

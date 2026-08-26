@@ -1,7 +1,7 @@
-// src/ingest/index.ts — Always-on auto-ingest: poll for "ready" issues and append them to the queue
+// src/ingest/index.ts — Always-on auto-ingest: poll for "ready" issues and mark them queued in GitHub.
 import { readFileSync, writeFileSync } from 'node:fs';
 
-import { parseQueue } from '../queue/index.js';
+import { laneLabel, QUEUED_LABEL } from '../queue/github-queue.js';
 import type { CommandResult } from '../utils/command-runner.js';
 import { runCommand } from '../utils/command-runner.js';
 import { branchPrefixSlug } from '../utils/index.js';
@@ -23,7 +23,6 @@ export function issueFromFactoryBranch(branch: string, prefix: string): number |
 
 export interface AutoIngestOptions {
   repoDir: string;
-  queueFile: string;
   watermarkFile: string;
   /** Ready-signal label. Defaults to 'ready'. */
   label?: string;
@@ -40,7 +39,7 @@ type Runner = (argv: readonly string[], opts: { cwd: string }) => Promise<Pick<C
 export interface AutoIngestDeps {
   now?: () => Date;
   run?: Runner;
-  /** Returns null when the file is missing or unreadable. */
+  /** Returns null when the file is missing or unreadable. Used only for the ingest watermark. */
   readFile?: (path: string) => string | null;
   writeFile?: (path: string, content: string) => void;
 }
@@ -63,6 +62,7 @@ interface ReadyIssue {
   number: number;
   title: string;
   updatedAt: string;
+  labels: string[];
 }
 
 // ---------- Default deps ----------
@@ -95,7 +95,7 @@ async function listReadyIssues(
       '--limit',
       String(limit),
       '--json',
-      'number,title,updatedAt',
+      'number,title,updatedAt,labels',
     ],
     { cwd: repoDir },
   );
@@ -103,16 +103,39 @@ async function listReadyIssues(
   try {
     const parsed: unknown = JSON.parse(result.stdout);
     if (!Array.isArray(parsed)) return { ok: false, issues: [] };
-    const issues = (parsed as Array<{ number?: unknown; title?: unknown; updatedAt?: unknown }>)
+    const issues = (parsed as Array<{ number?: unknown; title?: unknown; updatedAt?: unknown; labels?: unknown }>)
       .filter(
-        (item): item is { number: number; title: string; updatedAt: string } =>
+        (item): item is { number: number; title: string; updatedAt: string; labels?: unknown } =>
           typeof item.number === 'number' && typeof item.title === 'string' && typeof item.updatedAt === 'string',
       )
-      .map((item) => ({ number: item.number, title: item.title, updatedAt: item.updatedAt }));
+      .map((item) => ({
+        number: item.number,
+        title: item.title,
+        updatedAt: item.updatedAt,
+        labels: Array.isArray(item.labels)
+          ? item.labels
+              .map((label) => (typeof label === 'string' ? label : (label as { name?: unknown }).name))
+              .filter((name): name is string => typeof name === 'string' && name !== '')
+          : [],
+      }));
     return { ok: true, issues };
   } catch {
     return { ok: false, issues: [] };
   }
+}
+
+async function ensureQueueLabel(run: Runner, repoDir: string, name: string, color: string, description: string) {
+  await run(['gh', 'label', 'create', name, '--color', color, '--description', description], { cwd: repoDir });
+}
+
+async function markIssueQueued(run: Runner, repoDir: string, issue: number, lane: string): Promise<boolean> {
+  const labels = [QUEUED_LABEL, laneLabel(lane)];
+  await Promise.all([
+    ensureQueueLabel(run, repoDir, QUEUED_LABEL, '0e8a16', 'Eligible to be claimed by a factory lane'),
+    ensureQueueLabel(run, repoDir, laneLabel(lane), '1d76db', `Routed to factory lane ${lane}`),
+  ]);
+  const result = await run(['gh', 'issue', 'edit', String(issue), '--add-label', labels.join(',')], { cwd: repoDir });
+  return result.ok;
 }
 
 async function listInFlightIssues(run: Runner, repoDir: string, branchPrefix: string): Promise<Set<number>> {
@@ -143,7 +166,7 @@ export async function runAutoIngest(options: AutoIngestOptions, deps: AutoIngest
   const readFile = deps.readFile ?? defaultReadFile;
   const writeFile = deps.writeFile ?? writeFileSync;
 
-  const { repoDir, queueFile, watermarkFile } = options;
+  const { repoDir, watermarkFile } = options;
   const label = options.label ?? DEFAULT_LABEL;
   const lane = options.lane ?? DEFAULT_LANE;
   const maxPerCycle = options.maxPerCycle ?? DEFAULT_MAX_PER_CYCLE;
@@ -169,9 +192,6 @@ export async function runAutoIngest(options: AutoIngestOptions, deps: AutoIngest
     };
   }
 
-  const queueContent = readFile(queueFile) ?? '';
-  const inQueue = new Set(parseQueue(queueContent).entries.map((e) => e.issue));
-
   const appended: number[] = [];
   const skippedInQueue: number[] = [];
   const skippedInFlight: number[] = [];
@@ -183,7 +203,7 @@ export async function runAutoIngest(options: AutoIngestOptions, deps: AutoIngest
       skippedStale.push(issue.number);
       continue;
     }
-    if (inQueue.has(issue.number)) {
+    if (issue.labels.includes(QUEUED_LABEL)) {
       skippedInQueue.push(issue.number);
       continue;
     }
@@ -198,11 +218,11 @@ export async function runAutoIngest(options: AutoIngestOptions, deps: AutoIngest
   const deferred = toAppend.slice(maxPerCycle);
 
   if (capped.length > 0) {
-    const needsNewline = queueContent.length > 0 && !queueContent.endsWith('\n');
-    const appendedLines = capped.map((issue) => `${lane} ${issue.number}\n`).join('');
-    const newContent = (needsNewline ? `${queueContent}\n` : queueContent) + appendedLines;
-    writeFile(queueFile, newContent);
-    appended.push(...capped.map((issue) => issue.number));
+    for (const issue of capped) {
+      if (await markIssueQueued(run, repoDir, issue.number, lane)) {
+        appended.push(issue.number);
+      }
+    }
   }
 
   // Never advance the watermark up to or past an issue the maxPerCycle cap deferred this
