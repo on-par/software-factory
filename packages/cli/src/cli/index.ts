@@ -2451,7 +2451,7 @@ export function clearStaleStopFile(paths: { stop: string; events: string }, deps
     now = Date.now,
     clear = (p: string) => rmSync(p, { force: true }),
     emitEvent = logEvent,
-    warn = (msg: string) => console.log(chalk.yellow(msg)),
+    warn = (msg: string) => console.error(chalk.yellow(msg)),
   } = deps;
 
   if (!pathExists(paths.stop)) return false;
