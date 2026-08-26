@@ -18,6 +18,20 @@ export const REPO_INSTRUCTION_FILES = ['CLAUDE.md', 'AGENTS.md', '.github/copilo
 /** Default path, relative to a consumer repo's root, of its committed constitution instance. */
 export const DEFAULT_REPO_CONSTITUTION_PATH = '.factory/constitution.md';
 
+/** Build a Constitution from a bundled/repo-instance file's raw text and frontmatter. */
+function parseConstitution(raw: string, path: string, fallbackProduct: string): Constitution {
+  const { data, content } = matter(raw);
+  return {
+    product: data.product ?? fallbackProduct,
+    version: data.version ?? 1,
+    checkers: data.checkers ?? [],
+    requireTests: data.requireTests === true,
+    body: content,
+    path,
+    source: 'bundled',
+  };
+}
+
 export class ConstitutionLoader {
   constructor(private dir: string = getConstitutionsDir()) {}
 
@@ -32,16 +46,7 @@ export class ConstitutionLoader {
       throw new Error(`No constitution for '${product}' at ${path}`);
     }
     const raw = readFileSync(path, 'utf-8');
-    const { data, content } = matter(raw);
-    return {
-      product: data.product ?? product,
-      version: data.version ?? 1,
-      checkers: data.checkers ?? [],
-      requireTests: data.requireTests === true,
-      body: content,
-      path,
-      source: 'bundled',
-    };
+    return parseConstitution(raw, path, product);
   }
 
   /**
@@ -59,17 +64,8 @@ export class ConstitutionLoader {
       return null;
     }
     if (!raw.trim()) return null;
-    const { data, content } = matter(raw);
     const fallbackProduct = basename(relPath).replace(/\.md$/, '');
-    return {
-      product: data.product ?? fallbackProduct,
-      version: data.version ?? 1,
-      checkers: data.checkers ?? [],
-      requireTests: data.requireTests === true,
-      body: content,
-      path,
-      source: 'bundled',
-    };
+    return parseConstitution(raw, path, fallbackProduct);
   }
 
   /** Load standards from the target repo's own agent instruction files, if any */
