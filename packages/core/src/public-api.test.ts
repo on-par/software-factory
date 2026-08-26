@@ -369,6 +369,8 @@ const INTERNAL_API_KEYS = [
   'MAX_LABEL_NAME_LENGTH',
   'PARKED_LABEL',
   'QUEUED_LABEL',
+  'QUEUE_ORDER_LABEL_PREFIX',
+  'queueOrderLabel',
   'queueLabelSpecs',
   // Read-only GitHub ProjectV2 queue-intent polling (#847)
   'createProjectBoardPoller',

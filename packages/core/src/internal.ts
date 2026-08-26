@@ -234,8 +234,11 @@ export {
   MAX_LABEL_NAME_LENGTH,
   PARKED_LABEL,
   QUEUED_LABEL,
+  QUEUE_ORDER_LABEL_PREFIX,
+  queueOrderLabel,
   queueLabelSpecs,
 } from './queue/github-queue.js';
+export type { QueueEntry } from './queue/index.js';
 
 // Read-only GitHub ProjectV2 queue-intent polling (#847)
 export type {
