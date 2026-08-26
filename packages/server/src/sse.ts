@@ -2,8 +2,11 @@
 // frame formatting, Last-Event-ID header parsing, and a bounded replay ring.
 import type { LaneLifecycleEvent } from '@on-par/contracts';
 
+/** Lifecycle event annotated with its attached repository at the server boundary. */
+export type RepositoryLifecycleEvent = LaneLifecycleEvent & { repo: string };
+
 /** SSE frame: `id:`, `event:`, one `data:` line of JSON, terminated by a blank line. */
-export function formatSseFrame(id: number, event: LaneLifecycleEvent): string {
+export function formatSseFrame(id: number, event: RepositoryLifecycleEvent): string {
   return `id: ${id}\nevent: lifecycle\ndata: ${JSON.stringify(event)}\n\n`;
 }
 
@@ -21,8 +24,8 @@ export function parseLastEventId(header: string | string[] | undefined): number 
 }
 
 export interface ReplayRing {
-  push(id: number, event: LaneLifecycleEvent): void;
-  since(lastId: number | undefined): Array<{ id: number; event: LaneLifecycleEvent }>;
+  push(id: number, event: RepositoryLifecycleEvent): void;
+  since(lastId: number | undefined): Array<{ id: number; event: RepositoryLifecycleEvent }>;
   /** Number of retained entries — test/introspection only. */
   readonly size: number;
 }
@@ -30,7 +33,7 @@ export interface ReplayRing {
 /** Ids arrive already sorted and increasing, so `since` is a plain id comparison. */
 export function createReplayRing(capacity: number): ReplayRing {
   const cap = Math.max(1, capacity);
-  const entries: Array<{ id: number; event: LaneLifecycleEvent }> = [];
+  const entries: Array<{ id: number; event: RepositoryLifecycleEvent }> = [];
 
   return {
     push(id, event) {
