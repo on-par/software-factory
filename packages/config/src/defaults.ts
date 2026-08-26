@@ -48,7 +48,7 @@ export interface RoutesDefaults {
 
 export interface FactoryDefaults {
   version: number;
-  paths: { constitutions: string; checkers: string; plans: string; logs: string; events: string };
+  paths: { constitutions: string; checkers: string; plans: string; logs: string; events: string; constitution: string };
   timeouts: {
     plan_seconds: number;
     build_seconds: number;
@@ -542,6 +542,7 @@ export const defaultFactoryConfig: FactoryDefaults = {
     plans: '.factory/plans/',
     logs: '.factory/logs/',
     events: '.factory/events.ndjson',
+    constitution: '.factory/constitution.md',
   },
   timeouts: {
     plan_seconds: 1800,

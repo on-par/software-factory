@@ -1132,7 +1132,7 @@ export async function shipIssue(
   // bundled <product>.md is the fallback, and a configured product still
   // contributes its custom checkers. Resolving again later would let the
   // build worker author the standards it is graded by.
-  const constitution = constitutionLoader.resolve(worktree, product);
+  const constitution = constitutionLoader.resolve(worktree, product, factoryConfig.paths?.constitution);
   if (constitution) {
     log(
       'constitution',

@@ -277,6 +277,39 @@ describe('loadFactoryConfig', () => {
     expect(config.kpis.defectWindowDays).toBe(14);
   });
 
+  it('shipped config defaults paths.constitution to .factory/constitution.md', () => {
+    const config = loadFactoryConfig();
+    expect(config.paths.constitution).toBe('.factory/constitution.md');
+  });
+
+  it('applies the paths.constitution default when a minimal config omits it', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
+    try {
+      const path = join(dir, 'factory.json');
+      const minimal = {
+        version: 1,
+        paths: {
+          constitutions: 'constitutions/',
+          checkers: 'lib/checkers/',
+          plans: '.factory/plans/',
+          logs: '.factory/logs/',
+          events: '.factory/events.ndjson',
+        },
+        timeouts: { plan_seconds: 1800, build_seconds: 7200, check_seconds: 1800, merge_poll_seconds: 120 },
+        merge: { auto: false, comment: '' },
+        worktree: { prefix: 'ship-it/', parent: '../', comment: '' },
+        byok: { enabled: false, comment: '' },
+        notifications: {},
+        cost_tracking: { enabled: true, log_file: '.factory/costs.jsonl', comment: '' },
+      };
+      await writeFile(path, JSON.stringify(minimal));
+      const config = loadFactoryConfig(path);
+      expect(config.paths.constitution).toBe('.factory/constitution.md');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('applies worktree gc defaults when the config omits them', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
     try {
