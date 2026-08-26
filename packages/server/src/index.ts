@@ -14,10 +14,16 @@ export interface LifecycleEventSource {
   on(listener: (event: LaneLifecycleEvent) => void): () => void;
 }
 
-/** A repository and the lifecycle source the server relays on its behalf. */
+/** Structural port for repository-scoped lane controls. */
+export interface LaneController {
+  pause(laneId: string): void | Promise<void>;
+}
+
+/** A repository, its lifecycle source, and its scoped lane controller. */
 export interface AttachedRepository {
   repo: string;
   source: LifecycleEventSource;
+  controller: LaneController;
 }
 
 export interface ServerConfig {
@@ -53,10 +59,14 @@ export function createServer(config: ServerConfig): FactoryServer {
   let unsubscribes: Array<() => void> = [];
   let stopped = false;
 
+  function repositoryNotAttached(res: http.ServerResponse): void {
+    res.writeHead(404, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'repository not attached' }));
+  }
+
   function handleEvents(req: http.IncomingMessage, res: http.ServerResponse, repo: string | undefined): void {
     if (repo !== undefined && !config.repositories.some((repository) => repository.repo === repo)) {
-      res.writeHead(404, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: 'repository not attached' }));
+      repositoryNotAttached(res);
       return;
     }
 
@@ -99,13 +109,28 @@ export function createServer(config: ServerConfig): FactoryServer {
     });
   }
 
-  function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
+  async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const pathname = url.pathname;
     if (pathname === '/events' && (req.method === 'GET' || req.method === 'HEAD')) {
       handleEvents(req, res, url.searchParams.get('repo') ?? undefined);
       return;
     }
+
+    const pauseRoute = /^\/repos\/([^/]+)\/([^/]+)\/lanes\/([^/]+)\/pause$/.exec(pathname);
+    if (req.method === 'POST' && pauseRoute) {
+      const [, owner, name, laneId] = pauseRoute;
+      const repository = config.repositories.find(({ repo }) => repo === `${owner}/${name}`);
+      if (!repository) {
+        repositoryNotAttached(res);
+        return;
+      }
+      await repository.controller.pause(laneId);
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
     res.writeHead(404, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ error: 'not found' }));
   }

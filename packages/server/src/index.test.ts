@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createServer,
   type FactoryServer,
+  type LaneController,
   type LifecycleEventSource,
   type ServerConfig,
   SERVER_VERSION,
@@ -19,6 +20,10 @@ const OTHER_APP_REPO = 'on-par/other-app';
 
 interface FakeBus extends LifecycleEventSource {
   emit(event: LaneLifecycleEvent): void;
+}
+
+interface FakeLaneController extends LaneController {
+  pauseCalls: string[];
 }
 
 function createFakeBus(): FakeBus {
@@ -36,11 +41,25 @@ function createFakeBus(): FakeBus {
   };
 }
 
+function createFakeLaneController(): FakeLaneController {
+  const pauseCalls: string[] = [];
+  return {
+    pauseCalls,
+    pause(laneId) {
+      pauseCalls.push(laneId);
+    },
+  };
+}
+
+function attachRepository(repo: string, source: LifecycleEventSource, controller = createFakeLaneController()) {
+  return { repo, source, controller };
+}
+
 function createTestServer(
   bus: LifecycleEventSource,
   overrides: Omit<ServerConfig, 'repositories'> = {},
 ): FactoryServer {
-  return createServer({ repositories: [{ repo: SOUND_BUDDY_REPO, source: bus }], ...overrides });
+  return createServer({ repositories: [attachRepository(SOUND_BUDDY_REPO, bus)], ...overrides });
 }
 
 function makeEvent(overrides: Partial<LaneLifecycleEvent> = {}): LaneLifecycleEvent {
@@ -156,10 +175,7 @@ describe('@on-par/factory-server', () => {
     const soundBuddy = createFakeBus();
     const otherApp = createFakeBus();
     server = createServer({
-      repositories: [
-        { repo: SOUND_BUDDY_REPO, source: soundBuddy },
-        { repo: OTHER_APP_REPO, source: otherApp },
-      ],
+      repositories: [attachRepository(SOUND_BUDDY_REPO, soundBuddy), attachRepository(OTHER_APP_REPO, otherApp)],
       port: 0,
     });
     await server.start();
@@ -190,10 +206,7 @@ describe('@on-par/factory-server', () => {
     const soundBuddy = createFakeBus();
     const otherApp = createFakeBus();
     server = createServer({
-      repositories: [
-        { repo: SOUND_BUDDY_REPO, source: soundBuddy },
-        { repo: OTHER_APP_REPO, source: otherApp },
-      ],
+      repositories: [attachRepository(SOUND_BUDDY_REPO, soundBuddy), attachRepository(OTHER_APP_REPO, otherApp)],
       port: 0,
     });
     await server.start();
@@ -216,10 +229,7 @@ describe('@on-par/factory-server', () => {
     const soundBuddy = createFakeBus();
     const otherApp = createFakeBus();
     server = createServer({
-      repositories: [
-        { repo: SOUND_BUDDY_REPO, source: soundBuddy },
-        { repo: OTHER_APP_REPO, source: otherApp },
-      ],
+      repositories: [attachRepository(SOUND_BUDDY_REPO, soundBuddy), attachRepository(OTHER_APP_REPO, otherApp)],
       port: 0,
     });
     await server.start();
@@ -246,10 +256,7 @@ describe('@on-par/factory-server', () => {
     const soundBuddy = createFakeBus();
     const otherApp = createFakeBus();
     server = createServer({
-      repositories: [
-        { repo: SOUND_BUDDY_REPO, source: soundBuddy },
-        { repo: OTHER_APP_REPO, source: otherApp },
-      ],
+      repositories: [attachRepository(SOUND_BUDDY_REPO, soundBuddy), attachRepository(OTHER_APP_REPO, otherApp)],
       port: 0,
     });
     await server.start();
@@ -277,10 +284,7 @@ describe('@on-par/factory-server', () => {
     const soundBuddy = createFakeBus();
     const otherApp = createFakeBus();
     server = createServer({
-      repositories: [
-        { repo: SOUND_BUDDY_REPO, source: soundBuddy },
-        { repo: OTHER_APP_REPO, source: otherApp },
-      ],
+      repositories: [attachRepository(SOUND_BUDDY_REPO, soundBuddy), attachRepository(OTHER_APP_REPO, otherApp)],
       port: 0,
     });
     await server.start();
@@ -308,10 +312,7 @@ describe('@on-par/factory-server', () => {
     const soundBuddy = createFakeBus();
     const otherApp = createFakeBus();
     server = createServer({
-      repositories: [
-        { repo: SOUND_BUDDY_REPO, source: soundBuddy },
-        { repo: OTHER_APP_REPO, source: otherApp },
-      ],
+      repositories: [attachRepository(SOUND_BUDDY_REPO, soundBuddy), attachRepository(OTHER_APP_REPO, otherApp)],
       port: 0,
     });
     await server.start();
@@ -322,6 +323,53 @@ describe('@on-par/factory-server', () => {
     expect(res.headers['x-accel-buffering']).toBeUndefined();
     expect(await readBody(res)).toBe(JSON.stringify({ error: 'repository not attached' }));
     expect(res.complete).toBe(true);
+  });
+
+  it('pauses a lane through only the controller attached to the named repository', async () => {
+    const soundBuddy = createFakeBus();
+    const otherApp = createFakeBus();
+    const soundBuddyController = createFakeLaneController();
+    const otherAppController = createFakeLaneController();
+    server = createServer({
+      repositories: [
+        attachRepository(SOUND_BUDDY_REPO, soundBuddy, soundBuddyController),
+        attachRepository(OTHER_APP_REPO, otherApp, otherAppController),
+      ],
+      port: 0,
+    });
+    await server.start();
+
+    const { res } = await openRequest(server.port, '/repos/on-par/sound-buddy/lanes/lane-1/pause', {
+      method: 'POST',
+    });
+
+    expect(res.statusCode).toBe(204);
+    expect(await readBody(res)).toBe('');
+    expect(soundBuddyController.pauseCalls).toEqual(['lane-1']);
+    expect(otherAppController.pauseCalls).toEqual([]);
+  });
+
+  it('rejects a pause request for an unattached repository without calling a controller', async () => {
+    const soundBuddy = createFakeBus();
+    const otherApp = createFakeBus();
+    const soundBuddyController = createFakeLaneController();
+    const otherAppController = createFakeLaneController();
+    server = createServer({
+      repositories: [
+        attachRepository(SOUND_BUDDY_REPO, soundBuddy, soundBuddyController),
+        attachRepository(OTHER_APP_REPO, otherApp, otherAppController),
+      ],
+      port: 0,
+    });
+    await server.start();
+
+    const { res } = await openRequest(server.port, '/repos/on-par/nope/lanes/lane-1/pause', { method: 'POST' });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.headers['content-type']).toBe('application/json');
+    expect(await readBody(res)).toBe(JSON.stringify({ error: 'repository not attached' }));
+    expect(soundBuddyController.pauseCalls).toEqual([]);
+    expect(otherAppController.pauseCalls).toEqual([]);
   });
 
   it('resumes from Last-Event-ID after a disconnect', async () => {
