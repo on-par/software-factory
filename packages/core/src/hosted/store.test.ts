@@ -470,4 +470,108 @@ describe('createHostedJobStore', () => {
     const store = createHostedJobStore({ now: () => 1_000 });
     expect(store.recordCleanup('missing', 'evidence')).toEqual({ ok: false, reason: 'job-not-found' });
   });
+
+  it('cancels a leased job: canceled terminal status, canceled outcome, released lease, canceled event (#903)', () => {
+    const store = createHostedJobStore({ now: () => 1_000 });
+    store.create(baseJobInput());
+    store.registerRunner({ runnerId: 'r', capabilities: ['git', 'node'] });
+    store.acquireLease({
+      jobId: 'job-1',
+      runnerId: 'r',
+      leaseId: 'lease-1',
+      ttlMs: 60_000,
+      heartbeatIntervalMs: 5_000,
+    });
+
+    const result = store.cancel('job-1', 'operator request');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.alreadyTerminal).toBe(false);
+      expect(result.job.request.status).toBe('canceled');
+      expect(result.job.lease).toBeNull();
+      expect(result.job.result).toMatchObject({ outcome: 'canceled', summary: 'operator request' });
+      expect(result.job.events.at(-1)).toMatchObject({
+        type: 'canceled',
+        severity: 'warn',
+        message: 'hosted job canceled: operator request',
+      });
+    }
+    expect(store.getRunner('r')?.available).toBe(true);
+  });
+
+  it('cancel is idempotent and does not overwrite the canceled result; a stale lease holder cannot finalize after cancel (#903)', () => {
+    const store = createHostedJobStore({ now: () => 1_000 });
+    store.create(baseJobInput());
+    store.acquireLease({
+      jobId: 'job-1',
+      runnerId: 'r',
+      leaseId: 'lease-1',
+      ttlMs: 60_000,
+      heartbeatIntervalMs: 5_000,
+    });
+    store.cancel('job-1', 'first cancel');
+
+    const secondCancel = store.cancel('job-1', 'second cancel');
+    expect(secondCancel).toMatchObject({ ok: true, alreadyTerminal: true });
+
+    const staleComplete = store.complete('job-1', 'lease-1', 'late completion');
+    expect(staleComplete).toMatchObject({ ok: true, alreadyTerminal: true });
+
+    const staleFail = store.fail('job-1', 'lease-1', 'late failure');
+    expect(staleFail).toMatchObject({ ok: true, alreadyTerminal: true });
+
+    const staleHeartbeat = store.heartbeat('job-1', 'lease-1');
+    expect(staleHeartbeat).toMatchObject({ ok: true, alreadyTerminal: true });
+
+    expect(store.get('job-1')?.result).toMatchObject({ outcome: 'canceled', summary: 'first cancel' });
+  });
+
+  it('cancel on an unknown job returns job-not-found (#903)', () => {
+    const store = createHostedJobStore({ now: () => 1_000 });
+    expect(store.cancel('missing', 'reason')).toEqual({ ok: false, reason: 'job-not-found' });
+  });
+
+  it('reclaimJob voids a live lease back to requested, frees the runner, and appends a watchdog event (#903)', () => {
+    const store = createHostedJobStore({ now: () => 1_000 });
+    store.create(baseJobInput());
+    store.registerRunner({ runnerId: 'r', capabilities: ['git', 'node'] });
+    store.acquireLease({
+      jobId: 'job-1',
+      runnerId: 'r',
+      leaseId: 'lease-1',
+      ttlMs: 60_000,
+      heartbeatIntervalMs: 5_000,
+    });
+
+    const result = store.reclaimJob('job-1', 'runner heartbeat stale');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.job.request.status).toBe('requested');
+      expect(result.job.lease).toBeNull();
+      expect(result.job.events.at(-1)).toMatchObject({
+        type: 'watchdog',
+        severity: 'warn',
+        message: 'reclaimed for relaunch: runner heartbeat stale',
+      });
+    }
+    expect(store.getRunner('r')?.available).toBe(true);
+  });
+
+  it('reclaimJob returns not-leased, job-terminal, and job-not-found for the corresponding cases (#903)', () => {
+    const store = createHostedJobStore({ now: () => 1_000 });
+    store.create(baseJobInput());
+    store.create(baseJobInput({ jobId: 'job-2' }));
+    store.acquireLease({
+      jobId: 'job-2',
+      runnerId: 'r',
+      leaseId: 'lease-2',
+      ttlMs: 60_000,
+      heartbeatIntervalMs: 5_000,
+    });
+    store.complete('job-2', 'lease-2');
+
+    expect(store.reclaimJob('job-1', 'reason')).toEqual({ ok: false, reason: 'not-leased' });
+    expect(store.reclaimJob('job-2', 'reason')).toEqual({ ok: false, reason: 'job-terminal' });
+    expect(store.reclaimJob('missing', 'reason')).toEqual({ ok: false, reason: 'job-not-found' });
+  });
 });

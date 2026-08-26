@@ -4,7 +4,7 @@ import { z } from 'zod';
 
 export const HOSTED_EXEC_FLAG = 'FACTORY_HOSTED_EXEC';
 
-export const HostedJobStatusSchema = z.enum(['requested', 'leased', 'running', 'done', 'failed']);
+export const HostedJobStatusSchema = z.enum(['requested', 'leased', 'running', 'done', 'failed', 'canceled']);
 
 export const HostedJobRequestSchema = z.object({
   jobId: z.string().min(1),
@@ -27,6 +27,8 @@ export const HostedJobEventTypeSchema = z.enum([
   'failed',
   'expired',
   'cleaned',
+  'canceled',
+  'watchdog',
 ]);
 export const HostedJobEventSeveritySchema = z.enum(['info', 'warn', 'error']);
 
@@ -66,7 +68,7 @@ export const HostedArtifactRefSchema = z.object({
 });
 export type HostedArtifactRef = z.infer<typeof HostedArtifactRefSchema>;
 
-export const HostedJobOutcomeSchema = z.enum(['completed', 'failed']);
+export const HostedJobOutcomeSchema = z.enum(['completed', 'failed', 'canceled']);
 export const HostedJobResultSchema = z.object({
   jobId: z.string().min(1),
   outcome: HostedJobOutcomeSchema,
