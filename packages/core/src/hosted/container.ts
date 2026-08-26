@@ -5,7 +5,7 @@
 // docker-CLI adapter lives in docker.ts.
 import type { HostedJobResult } from '@on-par/contracts';
 
-import type { HostedJobStore } from './store.js';
+import type { HostedJobStore, JobUpdateResult } from './store.js';
 
 export interface PreparedWorkspace {
   /** Absolute host path mounted into the container. */
@@ -88,6 +88,7 @@ export async function runContainerJob(
 
   let run: ContainerRunResult | undefined;
   let cleanup: ContainerCleanupProof;
+  let finalizeResult: JobUpdateResult | undefined;
   try {
     try {
       run = await engine.run({
@@ -100,14 +101,14 @@ export async function runContainerJob(
       });
       const success = run.exitCode === 0 && !run.timedOut;
       if (success) {
-        store.complete(config.jobId, config.leaseId, `container exited 0 (${run.containerName})`);
+        finalizeResult = store.complete(config.jobId, config.leaseId, `container exited 0 (${run.containerName})`);
       } else {
         const why = run.timedOut ? `timed out after ${config.timeoutMs}ms` : `exit ${run.exitCode}`;
-        store.fail(config.jobId, config.leaseId, `container ${why}: ${run.logs.slice(0, 500)}`);
+        finalizeResult = store.fail(config.jobId, config.leaseId, `container ${why}: ${run.logs.slice(0, 500)}`);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      store.fail(config.jobId, config.leaseId, `container run error: ${message}`);
+      finalizeResult = store.fail(config.jobId, config.leaseId, `container run error: ${message}`);
     }
   } finally {
     cleanup = await engine.remove(config.jobId, workspace.hostPath);
@@ -116,6 +117,7 @@ export async function runContainerJob(
 
   const finalJob = store.get(config.jobId);
   const outcome = finalJob?.result?.outcome;
+  const finalizeNote = finalizeResult && !finalizeResult.ok ? ` (finalize rejected: ${finalizeResult.reason})` : '';
   return {
     jobId: config.jobId,
     ranContainer: run !== undefined,
@@ -124,6 +126,6 @@ export async function runContainerJob(
     outcome,
     result: finalJob?.result ?? undefined,
     cleanup,
-    trace: `leased -> ${run ? `ran ${run.containerName} exit ${run.exitCode}` : 'run error'} -> ${outcome ?? 'unknown'} -> cleaned`,
+    trace: `leased -> ${run ? `ran ${run.containerName} exit ${run.exitCode}` : 'run error'} -> ${outcome ?? 'unknown'}${finalizeNote} -> cleaned`,
   };
 }
