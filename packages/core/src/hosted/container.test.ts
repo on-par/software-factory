@@ -34,6 +34,7 @@ interface FakeEngineScript {
   logs?: string;
   runError?: Error;
   clone?: CloneOutcome;
+  artifacts?: ContainerRunResult['artifacts'];
 }
 
 interface FakeEngineCalls {
@@ -63,6 +64,7 @@ function createFakeEngine(script: FakeEngineScript, calls: FakeEngineCalls): Con
         exitCode: script.exitCode ?? 0,
         logs: script.logs ?? '',
         timedOut: script.timedOut ?? false,
+        artifacts: script.artifacts,
       };
     },
     async remove(jobId, _workspaceHostPath): Promise<ContainerCleanupProof> {
@@ -136,6 +138,26 @@ describe('runContainerJob', () => {
     expect(outcome.cleanup?.removed).toBe(true);
   });
 
+  it('records exitCode, a bounded logsTail, and artifacts on success (#902)', async () => {
+    const { store, leaseId } = leasedStore();
+    const calls: FakeEngineCalls = { preparedJobIds: [], removedJobIds: [], repoSlugs: [] };
+    const artifacts = [{ name: 'build.log', ref: '/artifacts/job-1/build.log', kind: 'log' }];
+    const engine = createFakeEngine({ exitCode: 0, logs: 'a'.repeat(2500), artifacts }, calls);
+
+    const outcome = await runContainerJob(store, engine, {
+      jobId: 'job-1',
+      leaseId,
+      image: 'alpine:3.20',
+      command: ['true'],
+      timeoutMs: 5_000,
+    });
+
+    expect(outcome.result?.exitCode).toBe(0);
+    expect(outcome.result?.artifacts).toEqual(artifacts);
+    expect(outcome.result?.logsTail).toHaveLength(2000);
+    expect(outcome.result?.logsTail).toBe('a'.repeat(2000));
+  });
+
   it('marks the job failed with an exit-code reason and still removes the container on non-zero exit (AC#4)', async () => {
     const { store, leaseId } = leasedStore();
     const calls: FakeEngineCalls = { preparedJobIds: [], removedJobIds: [], repoSlugs: [] };
@@ -153,6 +175,9 @@ describe('runContainerJob', () => {
     expect(outcome.outcome).toBe('failed');
     expect(outcome.result?.summary).toContain('exit 2');
     expect(outcome.result?.summary).toContain('boom');
+    expect(outcome.result?.failurePhase).toBe('run');
+    expect(outcome.result?.exitCode).toBe(2);
+    expect(outcome.result?.logsTail).toBe('boom');
     expect(calls.removedJobIds).toEqual(['job-1']);
   });
 
@@ -207,6 +232,7 @@ describe('runContainerJob', () => {
 
     expect(store.get('job-1')?.request.status).toBe('failed');
     expect(outcome.result?.summary).toContain('docker daemon unreachable');
+    expect(outcome.result?.failurePhase).toBe('run');
     expect(outcome.ranContainer).toBe(false);
     expect(calls.removedJobIds).toEqual(['job-1']);
   });
@@ -227,6 +253,7 @@ describe('runContainerJob', () => {
     expect(store.get('job-1')?.request.status).toBe('failed');
     expect(outcome.result?.summary).toContain('repo clone failed:');
     expect(outcome.result?.summary).toContain('fatal: repository not found');
+    expect(outcome.result?.failurePhase).toBe('clone');
     expect(outcome.ranContainer).toBe(false);
     expect(outcome.workspaceCommit).toBeUndefined();
     expect(calls.removedJobIds).toEqual(['job-1']);

@@ -3,9 +3,13 @@
 // workspace-fs effects sit behind the injected ContainerEngine port so the
 // orchestrator is hermetic and testable with a fake engine; the real
 // docker-CLI adapter lives in docker.ts.
-import type { HostedJobResult } from '@on-par/contracts';
+import type { HostedArtifactRef, HostedJobResult } from '@on-par/contracts';
 
 import type { HostedJobStore, JobUpdateResult } from './store.js';
+
+/** Bound on the retained log tail — enough for diagnosis without unbounded growth. */
+const LOG_TAIL_LIMIT = 2000;
+const logTail = (logs: string): string => logs.slice(-LOG_TAIL_LIMIT);
 
 export interface CloneOutcome {
   /** True when the fresh clone succeeded. */
@@ -42,6 +46,8 @@ export interface ContainerRunResult {
   exitCode: number;
   logs: string;
   timedOut: boolean;
+  /** Metadata for artifacts the engine produced; never inline content or secrets. */
+  artifacts?: HostedArtifactRef[];
 }
 
 export interface ContainerCleanupProof {
@@ -109,6 +115,7 @@ export async function runContainerJob(
         config.jobId,
         config.leaseId,
         `repo clone failed: ${workspace.clone.error ?? 'unknown error'}`,
+        { failurePhase: 'clone' },
       );
     } else {
       try {
@@ -122,14 +129,24 @@ export async function runContainerJob(
         });
         const success = run.exitCode === 0 && !run.timedOut;
         if (success) {
-          finalizeResult = store.complete(config.jobId, config.leaseId, `container exited 0 (${run.containerName})`);
+          finalizeResult = store.complete(config.jobId, config.leaseId, `container exited 0 (${run.containerName})`, {
+            exitCode: run.exitCode,
+            logsTail: logTail(run.logs),
+            artifacts: run.artifacts,
+          });
         } else {
           const why = run.timedOut ? `timed out after ${config.timeoutMs}ms` : `exit ${run.exitCode}`;
-          finalizeResult = store.fail(config.jobId, config.leaseId, `container ${why}: ${run.logs.slice(0, 500)}`);
+          finalizeResult = store.fail(config.jobId, config.leaseId, `container ${why}: ${run.logs.slice(0, 500)}`, {
+            failurePhase: 'run',
+            exitCode: run.exitCode,
+            logsTail: logTail(run.logs),
+          });
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        finalizeResult = store.fail(config.jobId, config.leaseId, `container run error: ${message}`);
+        finalizeResult = store.fail(config.jobId, config.leaseId, `container run error: ${message}`, {
+          failurePhase: 'run',
+        });
       }
     }
   } finally {

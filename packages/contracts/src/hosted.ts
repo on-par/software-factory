@@ -49,6 +49,23 @@ export const RunnerLeaseSchema = z.object({
   heartbeatIntervalMs: z.number().int().positive(),
 });
 
+export const HostedJobPhaseSchema = z.enum(['clone', 'run', 'cleanup']);
+export type HostedJobPhase = z.infer<typeof HostedJobPhaseSchema>;
+
+/** Metadata-only reference to a produced artifact — never inline content or a
+ * secret value. `ref` is an opaque retained handle (a path or store handle). */
+export const HostedArtifactRefSchema = z.object({
+  /** Display/logical name, e.g. 'build.log', 'coverage'. */
+  name: z.string().min(1),
+  /** Opaque retained reference — a path or store handle. NEVER inline content. */
+  ref: z.string().min(1),
+  /** e.g. 'log', 'report', 'patch'. */
+  kind: z.string().min(1),
+  sizeBytes: z.number().int().nonnegative().optional(),
+  sha256: z.string().optional(),
+});
+export type HostedArtifactRef = z.infer<typeof HostedArtifactRefSchema>;
+
 export const HostedJobOutcomeSchema = z.enum(['completed', 'failed']);
 export const HostedJobResultSchema = z.object({
   jobId: z.string().min(1),
@@ -56,6 +73,14 @@ export const HostedJobResultSchema = z.object({
   summary: z.string().min(1),
   /** ISO-8601. */
   finishedAt: z.string(),
+  /** Container/process exit code when a process ran. */
+  exitCode: z.number().int().optional(),
+  /** Phase reached when the job failed — diagnosis aid. */
+  failurePhase: HostedJobPhaseSchema.optional(),
+  /** Bounded tail of recent logs; MUST already be secret-redacted by the caller. */
+  logsTail: z.string().optional(),
+  /** Metadata for produced artifacts; never inline content or secret values. */
+  artifacts: z.array(HostedArtifactRefSchema).optional(),
 });
 
 export const ProviderKindSchema = z.enum(['codex-oauth', 'claude-code-oauth', 'opencode-go-oauth', 'pi-dev']);

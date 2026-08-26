@@ -8,10 +8,12 @@ import {
   HostedJobRequestSchema,
   HostedJobResultSchema,
   RunnerLeaseSchema,
+  type HostedArtifactRef,
   type HostedJobEvent,
   type HostedJobEventSeveritySchema,
   type HostedJobEventTypeSchema,
   type HostedJobOutcome,
+  type HostedJobPhase,
   type HostedJobRequest,
   type HostedJobResult,
   type RunnerLease,
@@ -83,14 +85,22 @@ export type JobUpdateResult =
 
 export type RecordCleanupResult = { ok: true; job: StoredHostedJob } | { ok: false; reason: 'job-not-found' };
 
+/** Optional structured observability recorded alongside a job's terminal result. */
+export interface HostedJobResultDetail {
+  exitCode?: number;
+  failurePhase?: HostedJobPhase;
+  logsTail?: string;
+  artifacts?: HostedArtifactRef[];
+}
+
 export interface HostedJobStore {
   create(input: CreateHostedJobInput): StoredHostedJob;
   get(jobId: string): StoredHostedJob | undefined;
   list(): StoredHostedJob[];
   acquireLease(input: AcquireLeaseInput): JobLeaseResult;
   heartbeat(jobId: string, leaseId: string): JobUpdateResult;
-  complete(jobId: string, leaseId: string, summary?: string): JobUpdateResult;
-  fail(jobId: string, leaseId: string, reason: string): JobUpdateResult;
+  complete(jobId: string, leaseId: string, summary?: string, detail?: HostedJobResultDetail): JobUpdateResult;
+  fail(jobId: string, leaseId: string, reason: string, detail?: HostedJobResultDetail): JobUpdateResult;
   registerRunner(input: RegisterRunnerInput): StoredRunner;
   getRunner(runnerId: string): StoredRunner | undefined;
   listRunners(): StoredRunner[];
@@ -124,12 +134,21 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
     }
   }
 
-  function recordResult(job: StoredHostedJob, outcome: HostedJobOutcome, summary: string): void {
+  function recordResult(
+    job: StoredHostedJob,
+    outcome: HostedJobOutcome,
+    summary: string,
+    detail?: HostedJobResultDetail,
+  ): void {
     job.result = HostedJobResultSchema.parse({
       jobId: job.request.jobId,
       outcome,
       summary,
       finishedAt: iso(now()),
+      exitCode: detail?.exitCode,
+      failurePhase: detail?.failurePhase,
+      logsTail: detail?.logsTail,
+      artifacts: detail?.artifacts,
     });
   }
 
@@ -259,7 +278,7 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
       return { ok: true, job, alreadyTerminal: false };
     },
 
-    complete(jobId, leaseId, summary) {
+    complete(jobId, leaseId, summary, detail) {
       const resolved = resolveMutableJob(jobId, leaseId);
       if ('result' in resolved) {
         return resolved.result;
@@ -267,12 +286,12 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
       const { job } = resolved;
       job.request.status = 'done';
       appendEvent(job, 'completed', 'info', 'hosted job completed');
-      recordResult(job, 'completed', summary ?? 'hosted job completed');
+      recordResult(job, 'completed', summary ?? 'hosted job completed', detail);
       releaseLease(job);
       return { ok: true, job, alreadyTerminal: false };
     },
 
-    fail(jobId, leaseId, reason) {
+    fail(jobId, leaseId, reason, detail) {
       const resolved = resolveMutableJob(jobId, leaseId);
       if ('result' in resolved) {
         return resolved.result;
@@ -280,7 +299,7 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
       const { job } = resolved;
       job.request.status = 'failed';
       appendEvent(job, 'failed', 'error', `hosted job failed: ${reason}`);
-      recordResult(job, 'failed', reason);
+      recordResult(job, 'failed', reason, detail);
       releaseLease(job);
       return { ok: true, job, alreadyTerminal: false };
     },
