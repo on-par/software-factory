@@ -12,6 +12,7 @@ import type {
   FactoryEvent,
   FailoverReason,
   LogLevel,
+  QueueReprioritizationRecord,
   ReadinessInfo,
   ReworkInfo,
 } from '../types/index.js';
@@ -30,6 +31,7 @@ export interface LogExtra {
   evidence?: EvidencePack;
   rework?: ReworkInfo;
   readiness?: ReadinessInfo;
+  queueReprioritization?: QueueReprioritizationRecord;
   actor?: string;
   model?: string;
   tokens?: { input: number; output: number };
@@ -97,6 +99,7 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(extra?.evidence ? { evidence: extra.evidence } : {}),
       ...(extra?.rework ? { rework: extra.rework } : {}),
       ...(extra?.readiness ? { readiness: extra.readiness } : {}),
+      ...(extra?.queueReprioritization !== undefined ? { queueReprioritization: extra.queueReprioritization } : {}),
       ...(extra?.model ? { model: extra.model } : {}),
       ...(extra?.tokens ? { tokens: extra.tokens } : {}),
     };
