@@ -228,7 +228,7 @@ export interface ReadinessInfo {
 export interface QueueReprioritizationRecord {
   issueId: string;
   issueNumber: number;
-  field: 'order';
+  field: 'lane' | 'order';
   priorValue: string | number;
   newValue: string | number;
   actorType: 'human' | 'daemon';

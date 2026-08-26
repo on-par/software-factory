@@ -273,8 +273,8 @@ export { createProjectQueuePoller, DEFAULT_PROJECT_QUEUE_POLL_MS } from './proje
 
 // Local queue reprioritization audit records (#869)
 export type { QueueReprioritizationRecord } from './types/index.js';
-export type { QueueRationaleAuditor } from './projects/queue-rationale-audit.js';
-export { createQueueRationaleAuditor } from './projects/queue-rationale-audit.js';
+export type { QueueRationaleAuditor } from './queue/reprioritization-audit.js';
+export { createQueueRationaleAuditor } from './queue/reprioritization-audit.js';
 
 // Publish only coarse daemon lifecycle status to configured ProjectV2 items (#868)
 export type { ProjectStatusWriter, ProjectStatusWriterOptions } from './projects/project-status-writer.js';
