@@ -8,7 +8,7 @@ import type { RepoRegistryListing } from './registry.js';
 const attachedAt = '2026-08-25T12:00:00.000Z';
 
 describe('daemon state lane context', () => {
-  it('keeps each checkout root while resolving state paths from its registered external root', () => {
+  it('keeps each selected checkout root while resolving every factory path from its registered external root', () => {
     const alphaStateRoot = '/var/lib/factory-state/alpha';
     const betaStateRoot = '/var/lib/factory-state/beta';
     const alpha: RepoRegistryListing = {
@@ -49,7 +49,7 @@ describe('daemon state lane context', () => {
     expect(Object.values(betaContext.paths).every((path) => !path.startsWith(resolve(alphaStateRoot)))).toBe(true);
   });
 
-  it('uses the checkout-local .factory path when stateRoot is omitted', () => {
+  it('keeps daemon compatibility checkout-local when stateRoot is omitted', () => {
     const entry: RepoRegistryListing = {
       slug: 'on-par/legacy',
       path: '/worktrees/legacy',
@@ -63,5 +63,6 @@ describe('daemon state lane context', () => {
     expect(context.paths.state).toBe(resolve(entry.path, '.factory'));
     expect(context.paths.plans).toBe(resolve(entry.path, '.factory', 'plans'));
     expect(context.paths.events).toBe(resolve(entry.path, '.factory', 'events.ndjson'));
+    expect(Object.values(context.paths).every((path) => path.startsWith(resolve(entry.path, '.factory')))).toBe(true);
   });
 });

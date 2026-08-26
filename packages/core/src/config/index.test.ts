@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -88,6 +88,33 @@ describe('getFactoryPaths', () => {
   it('uses the repository-local state root by default', () => {
     const repoRoot = '/tmp/some-repo';
     expect(getFactoryPaths(repoRoot)).toEqual(expectedPaths(resolve(repoRoot, '.factory')));
+  });
+
+  it('keeps standalone queue, event, plan, and report artifacts beneath the checkout-local .factory directory', async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), 'factory-standalone-state-'));
+    const paths = getFactoryPaths(repoRoot);
+    const stateRoot = resolve(repoRoot, '.factory');
+    const artifacts = {
+      queue: paths.queue,
+      events: paths.events,
+      plan: join(paths.plans, 'issue-845.md'),
+      report: join(paths.reports, 'issue-845.md'),
+    };
+
+    try {
+      await mkdir(paths.plans, { recursive: true });
+      await mkdir(paths.reports, { recursive: true });
+      await Promise.all(Object.entries(artifacts).map(async ([name, path]) => writeFile(path, `${name} artifact\n`)));
+
+      await expect(readFile(artifacts.queue, 'utf8')).resolves.toBe('queue artifact\n');
+      await expect(readFile(artifacts.events, 'utf8')).resolves.toBe('events artifact\n');
+      await expect(readFile(artifacts.plan, 'utf8')).resolves.toBe('plan artifact\n');
+      await expect(readFile(artifacts.report, 'utf8')).resolves.toBe('report artifact\n');
+      expect(paths.state).toBe(stateRoot);
+      expect(Object.values(artifacts).every((path) => path.startsWith(`${stateRoot}/`))).toBe(true);
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+    }
   });
 
   it('uses an explicit external state root for every orchestration path', () => {
