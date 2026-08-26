@@ -5,6 +5,12 @@
 // docker-CLI adapter lives in docker.ts.
 import type { HostedArtifactRef, HostedJobResult } from '@on-par/contracts';
 
+import {
+  redactGitHubCredential,
+  resolveHostedAuthority,
+  type GitHubAuthorityBrokerOptions,
+  type GitHubCredentialBundle,
+} from './github-authority.js';
 import type { HostedJobStore, JobUpdateResult } from './store.js';
 
 /** Bound on the retained log tail — enough for diagnosis without unbounded growth. */
@@ -54,12 +60,19 @@ export interface ContainerCleanupProof {
   containerName: string;
   removed: boolean;
   workspaceRemoved: boolean;
+  /** True when a GitHub credential mount was removed with the workspace (#901). */
+  credentialRemoved?: boolean;
   /** Human/audit evidence string, e.g. 'removed sf-job-job-1; no container matches name'. */
   evidence: string;
 }
 
 export interface ContainerEngine {
-  prepareWorkspace(jobId: string, payload: string, repoSlug: string): Promise<PreparedWorkspace>;
+  prepareWorkspace(
+    jobId: string,
+    payload: string,
+    repoSlug: string,
+    credential?: GitHubCredentialBundle,
+  ): Promise<PreparedWorkspace>;
   run(spec: ContainerRunSpec): Promise<ContainerRunResult>;
   remove(jobId: string, workspaceHostPath: string): Promise<ContainerCleanupProof>;
 }
@@ -72,6 +85,10 @@ export interface ContainerJobConfig {
   /** default '/workspace' */
   mountPath?: string;
   timeoutMs: number;
+  /** When set, brokers a per-job GitHub credential (#901) gated by FACTORY_HOSTED_EXEC. */
+  authority?: GitHubAuthorityBrokerOptions;
+  /** Injectable for tests; defaults to process.env. */
+  env?: NodeJS.ProcessEnv;
 }
 
 export interface ContainerJobOutcome {
@@ -103,7 +120,16 @@ export async function runContainerJob(
   }
 
   const mountPath = config.mountPath ?? '/workspace';
-  const workspace = await engine.prepareWorkspace(config.jobId, job.request.taskPayload, job.request.repoSlug);
+  const credential = config.authority
+    ? await resolveHostedAuthority(config.env ?? process.env, job, config.authority)
+    : null;
+  const redact = (text: string): string => (credential ? redactGitHubCredential(text, credential) : text);
+  const workspace = await engine.prepareWorkspace(
+    config.jobId,
+    job.request.taskPayload,
+    job.request.repoSlug,
+    credential ?? undefined,
+  );
   store.heartbeat(config.jobId, config.leaseId);
 
   let run: ContainerRunResult | undefined;
@@ -114,7 +140,7 @@ export async function runContainerJob(
       finalizeResult = store.fail(
         config.jobId,
         config.leaseId,
-        `repo clone failed: ${workspace.clone.error ?? 'unknown error'}`,
+        redact(`repo clone failed: ${workspace.clone.error ?? 'unknown error'}`),
         { failurePhase: 'clone' },
       );
     } else {
@@ -136,22 +162,27 @@ export async function runContainerJob(
           });
         } else {
           const why = run.timedOut ? `timed out after ${config.timeoutMs}ms` : `exit ${run.exitCode}`;
-          finalizeResult = store.fail(config.jobId, config.leaseId, `container ${why}: ${run.logs.slice(0, 500)}`, {
-            failurePhase: 'run',
-            exitCode: run.exitCode,
-            logsTail: logTail(run.logs),
-          });
+          finalizeResult = store.fail(
+            config.jobId,
+            config.leaseId,
+            redact(`container ${why}: ${run.logs.slice(0, 500)}`),
+            {
+              failurePhase: 'run',
+              exitCode: run.exitCode,
+              logsTail: logTail(run.logs),
+            },
+          );
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        finalizeResult = store.fail(config.jobId, config.leaseId, `container run error: ${message}`, {
+        finalizeResult = store.fail(config.jobId, config.leaseId, redact(`container run error: ${message}`), {
           failurePhase: 'run',
         });
       }
     }
   } finally {
     cleanup = await engine.remove(config.jobId, workspace.hostPath);
-    store.recordCleanup(config.jobId, cleanup.evidence);
+    store.recordCleanup(config.jobId, redact(cleanup.evidence));
   }
 
   const finalJob = store.get(config.jobId);
@@ -165,6 +196,7 @@ export async function runContainerJob(
     : workspace.clone.ok
       ? 'run error'
       : 'skipped run';
+  const authorityNote = credential ? ` -> authority: ${credential.kind}` : '';
   return {
     jobId: config.jobId,
     ranContainer: run !== undefined,
@@ -174,6 +206,8 @@ export async function runContainerJob(
     result: finalJob?.result ?? undefined,
     cleanup,
     workspaceCommit: workspace.clone.commit,
-    trace: `leased -> ${cloneNote} -> ${runNote} -> ${outcome ?? 'unknown'}${finalizeNote} -> cleaned`,
+    trace: redact(
+      `leased -> ${cloneNote} -> ${runNote} -> ${outcome ?? 'unknown'}${finalizeNote}${authorityNote} -> cleaned`,
+    ),
   };
 }

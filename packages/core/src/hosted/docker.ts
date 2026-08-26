@@ -4,7 +4,7 @@
 // tests never touch a real docker daemon.
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { defaultExecFn, type ExecFn } from '../utils/exec.js';
 import type {
@@ -15,6 +15,7 @@ import type {
   ContainerRunSpec,
   PreparedWorkspace,
 } from './container.js';
+import { redactGitHubCredential, type GitHubCredentialBundle } from './github-authority.js';
 
 export interface DockerEngineOptions {
   /** Injectable for tests; defaults to defaultExecFn. */
@@ -49,20 +50,29 @@ export function createDockerEngine(options: DockerEngineOptions): ContainerEngin
   const cloneUrlFor = options.cloneUrlFor ?? ((slug: string) => `https://github.com/${slug}.git`);
 
   return {
-    async prepareWorkspace(_jobId, payload, repoSlug): Promise<PreparedWorkspace> {
+    async prepareWorkspace(_jobId, payload, repoSlug, credential?: GitHubCredentialBundle): Promise<PreparedWorkspace> {
       const dir = await mkdtemp(join(options.rootDir ?? tmpdir(), 'sf-job-'));
       await writeFile(join(dir, payloadFilename), payload, 'utf-8');
 
       const repoPath = join(dir, repoDirname);
-      const cloneUrl = cloneUrlFor(repoSlug);
+      const cloneUrl = credential ? credential.remoteUrl : cloneUrlFor(repoSlug);
       let clone: CloneOutcome;
       try {
         await exec(`git clone --depth 1 ${quote(cloneUrl)} ${quote(repoPath)}`, {});
+        if (credential) {
+          const credentialFile = join(dir, basename(credential.containerCredentialPath));
+          await writeFile(credentialFile, `${credential.credentialLine}\n`, 'utf-8');
+          await exec(
+            `git -C ${quote(repoPath)} config credential.helper ${quote(`store --file=${credential.containerCredentialPath}`)}`,
+            {},
+          );
+        }
         const { stdout } = await exec(`git -C ${quote(repoPath)} rev-parse HEAD`, {});
         clone = { ok: true, commit: stdout.trim() };
       } catch (err) {
         const execErr = err as PromisifiedExecError;
-        clone = { ok: false, error: execErr.stderr ?? (err instanceof Error ? err.message : String(err)) };
+        const rawMessage = execErr.stderr ?? (err instanceof Error ? err.message : String(err));
+        clone = { ok: false, error: credential ? redactGitHubCredential(rawMessage, credential) : rawMessage };
       }
 
       return {
@@ -130,8 +140,8 @@ export function createDockerEngine(options: DockerEngineOptions): ContainerEngin
       const psCheckResult = psCheckError
         ? `ps -a check failed: ${psCheckError}`
         : `ps -a ${removed ? 'empty' : 'still shows a match'}`;
-      const evidence = `${removeEvidence}; ${psCheckResult}; workspace ${workspaceRemoved ? 'removed' : 'removal failed'}`;
-      return { containerName: name, removed, workspaceRemoved, evidence };
+      const evidence = `${removeEvidence}; ${psCheckResult}; workspace ${workspaceRemoved ? 'removed' : 'removal failed'}; credential ${workspaceRemoved ? 'removed' : 'removal failed'}`;
+      return { containerName: name, removed, workspaceRemoved, credentialRemoved: workspaceRemoved, evidence };
     },
   };
 }

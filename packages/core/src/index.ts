@@ -140,6 +140,20 @@ export type {
   ResolvedSecret,
 } from './hosted/authority.js';
 export { AUTHORITY_REDACTION_MASK, redactSecrets, withAuthority } from './hosted/authority.js';
+export type {
+  GitHubAuthorityBrokerOptions,
+  GitHubCredentialBundle,
+  GitHubTokenKind,
+  MintGitHubToken,
+  MintGitHubTokenInput,
+  MintedGitHubToken,
+} from './hosted/github-authority.js';
+export {
+  prepareGitHubAuthority,
+  prototypeFallbackMint,
+  redactGitHubCredential,
+  resolveHostedAuthority,
+} from './hosted/github-authority.js';
 
 // Work requests
 export type {

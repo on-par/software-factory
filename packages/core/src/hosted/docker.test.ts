@@ -6,6 +6,20 @@ import { describe, expect, it } from 'vitest';
 
 import type { ExecFn } from '../utils/exec.js';
 import { createDockerEngine } from './docker.js';
+import { prepareGitHubAuthority, prototypeFallbackMint } from './github-authority.js';
+import { createHostedJobStore } from './store.js';
+
+async function fakeCredential(token = 'super-secret-tok') {
+  const store = createHostedJobStore({ now: () => 1_000 });
+  const job = store.create({
+    jobId: 'job-1',
+    repoSlug: 'on-par/sound-buddy',
+    taskPayload: 'run the build',
+    requiredCapabilities: ['git', 'node'],
+    requiredAuthority: 'repo:write',
+  });
+  return prepareGitHubAuthority(job, { mint: prototypeFallbackMint(token), now: () => 1_000 });
+}
 
 interface ExecCall {
   cmd: string;
@@ -86,6 +100,52 @@ describe('createDockerEngine.prepareWorkspace', () => {
     expect(workspace.clone.ok).toBe(false);
     expect(workspace.clone.error).toContain('repository not found');
   });
+
+  it('clones through the credential remoteUrl and writes a .git-credentials mount when a bundle is given (#901)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sf-docker-test-'));
+    const { exec, calls } = fakeExec(() => ({ stdout: 'abc123\n', stderr: '' }));
+    const engine = createDockerEngine({ exec, rootDir: root });
+    const credential = await fakeCredential();
+
+    const workspace = await engine.prepareWorkspace('job-1', 'the payload', 'on-par/sound-buddy', credential);
+
+    expect(calls[0]?.cmd).toBe(`git clone --depth 1 '${credential.remoteUrl}' '${join(workspace.hostPath, 'repo')}'`);
+    expect(calls[0]?.cmd).not.toContain('https://github.com/on-par/sound-buddy.git');
+    const credentialFile = join(workspace.hostPath, '.git-credentials');
+    const written = await readFile(credentialFile, 'utf-8');
+    expect(written).toBe(`${credential.credentialLine}\n`);
+  });
+
+  it('redacts the token from a clone-error message when a credential bundle is given (#901)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sf-docker-test-'));
+    const credential = await fakeCredential();
+    const { exec } = fakeExec((call) => {
+      if (call.cmd.startsWith('git clone')) {
+        rejects({ stderr: `fatal: could not authenticate to ${credential.remoteUrl}` });
+      }
+      return { stdout: '', stderr: '' };
+    });
+    const engine = createDockerEngine({ exec, rootDir: root });
+
+    const workspace = await engine.prepareWorkspace('job-1', 'the payload', 'on-par/sound-buddy', credential);
+
+    expect(workspace.clone.ok).toBe(false);
+    expect(workspace.clone.error).not.toContain(credential.token);
+    expect(workspace.clone.error).toContain('[redacted]');
+  });
+
+  it('keeps the exact unauthenticated cloneUrlFor path when no credential is given', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sf-docker-test-'));
+    const { exec, calls } = fakeExec(() => ({ stdout: 'abc123\n', stderr: '' }));
+    const engine = createDockerEngine({ exec, rootDir: root });
+
+    const workspace = await engine.prepareWorkspace('job-1', 'the payload', 'on-par/sound-buddy');
+
+    expect(calls[0]?.cmd).toBe(
+      `git clone --depth 1 'https://github.com/on-par/sound-buddy.git' '${join(workspace.hostPath, 'repo')}'`,
+    );
+    await expect(stat(join(workspace.hostPath, '.git-credentials'))).rejects.toThrow();
+  });
 });
 
 describe('createDockerEngine.run', () => {
@@ -160,6 +220,7 @@ describe('createDockerEngine.remove', () => {
     expect(calls[1]?.cmd).toBe("docker ps -a --filter 'name=sf-job-job-1' --format '{{.ID}}'");
     expect(proof.removed).toBe(true);
     expect(proof.workspaceRemoved).toBe(true);
+    expect(proof.credentialRemoved).toBe(true);
     expect(proof.containerName).toBe('sf-job-job-1');
 
     await expect(stat(workspace.hostPath)).rejects.toThrow();
