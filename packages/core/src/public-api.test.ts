@@ -382,6 +382,8 @@ const INTERNAL_API_KEYS = [
   'DEFAULT_PROJECT_BOARD_POLL_MS',
   // Board-constrained local lane dispatch (#848)
   'createBoardQueueDispatcher',
+  // ProjectV2 queue-intent scheduler (#867)
+  'createBoardQueueScheduler',
 ];
 
 const TESTING_API_KEYS = [
