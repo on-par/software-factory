@@ -72,6 +72,7 @@ const PUBLIC_API_KEYS = [
   'validateQueue',
   // Hosted execution (control plane)
   'createHostedJobStore',
+  'runFakeRunner',
   // Work requests
   'closedWorkSkipReason',
   'createDefaultWorkSourceRegistry',

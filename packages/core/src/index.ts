@@ -105,10 +105,16 @@ export type {
   JobLeaseResult,
   JobUpdateResult,
   LeaseRejectionReason,
+  PollForLeaseInput,
+  PollResult,
+  RegisterRunnerInput,
   StoredHostedJob,
+  StoredRunner,
   UpdateRejectionReason,
 } from './hosted/store.js';
 export { createHostedJobStore } from './hosted/store.js';
+export type { FakeRunnerConfig, FakeRunnerOutcome } from './hosted/runner.js';
+export { runFakeRunner } from './hosted/runner.js';
 
 // Work requests
 export type {
