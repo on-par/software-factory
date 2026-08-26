@@ -1,6 +1,6 @@
 # ADR-0031: SSE resume is a bounded in-process replay ring, not durable event history
 
-- Status: Accepted
+- Status: Superseded by ADR-0046
 - Date: 2026-08-19
 
 ## Context

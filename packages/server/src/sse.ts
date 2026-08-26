@@ -30,7 +30,7 @@ export interface ReplayRing {
   readonly size: number;
 }
 
-/** Ids arrive already sorted and increasing, so `since` is a plain id comparison. */
+/** Entries retain push order; ids need not be globally ordered because they are repository-local. */
 export function createReplayRing(capacity: number): ReplayRing {
   const cap = Math.max(1, capacity);
   const entries: Array<{ id: number; event: RepositoryLifecycleEvent }> = [];

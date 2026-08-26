@@ -85,6 +85,18 @@ describe('createReplayRing', () => {
     expect(ring.since(1).map((e) => e.id)).toEqual([2, 3]);
   });
 
+  it('compares each interleaved repository-local id to the cursor', () => {
+    const ring = createReplayRing(5);
+    ring.push(1, { ...makeRepositoryEvent({ detail: 'sound buddy 1' }), repo: 'on-par/sound-buddy' });
+    ring.push(2, { ...makeRepositoryEvent({ detail: 'sound buddy 2' }), repo: 'on-par/sound-buddy' });
+    ring.push(1, { ...makeRepositoryEvent({ detail: 'other app 1' }), repo: 'on-par/other-app' });
+    ring.push(2, { ...makeRepositoryEvent({ detail: 'other app 2' }), repo: 'on-par/other-app' });
+
+    const replay = ring.since(1);
+    expect(replay.map((entry) => entry.id)).toEqual([2, 2]);
+    expect(replay.map((entry) => entry.event.repo)).toEqual(['on-par/sound-buddy', 'on-par/other-app']);
+  });
+
   it('since(<huge>) returns nothing', () => {
     const ring = createReplayRing(5);
     ring.push(1, makeRepositoryEvent());
