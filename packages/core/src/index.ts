@@ -116,6 +116,7 @@ export { createHostedJobStore } from './hosted/store.js';
 export type { FakeRunnerConfig, FakeRunnerOutcome } from './hosted/runner.js';
 export { runFakeRunner } from './hosted/runner.js';
 export type {
+  CloneOutcome,
   ContainerCleanupProof,
   ContainerEngine,
   ContainerJobConfig,

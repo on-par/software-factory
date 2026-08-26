@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   runContainerJob,
+  type CloneOutcome,
   type ContainerCleanupProof,
   type ContainerEngine,
   type ContainerRunResult,
@@ -32,18 +33,26 @@ interface FakeEngineScript {
   timedOut?: boolean;
   logs?: string;
   runError?: Error;
+  clone?: CloneOutcome;
 }
 
 interface FakeEngineCalls {
   preparedJobIds: string[];
   removedJobIds: string[];
+  repoSlugs: string[];
 }
 
 function createFakeEngine(script: FakeEngineScript, calls: FakeEngineCalls): ContainerEngine {
   return {
-    async prepareWorkspace(jobId, _payload) {
+    async prepareWorkspace(jobId, _payload, repoSlug) {
       calls.preparedJobIds.push(jobId);
-      return { hostPath: `/tmp/${jobId}`, containerPayloadPath: '/workspace/payload' };
+      calls.repoSlugs.push(repoSlug);
+      return {
+        hostPath: `/tmp/${jobId}`,
+        containerPayloadPath: '/workspace/payload',
+        containerRepoPath: '/workspace/repo',
+        clone: script.clone ?? { ok: true, commit: 'deadbeef' },
+      };
     },
     async run(spec): Promise<ContainerRunResult> {
       if (script.runError) {
@@ -71,7 +80,7 @@ function createFakeEngine(script: FakeEngineScript, calls: FakeEngineCalls): Con
 describe('runContainerJob', () => {
   it('prepares the workspace with the job payload and runs exactly one container (AC#1 + AC#2)', async () => {
     const { store, leaseId } = leasedStore();
-    const calls: FakeEngineCalls = { preparedJobIds: [], removedJobIds: [] };
+    const calls: FakeEngineCalls = { preparedJobIds: [], removedJobIds: [], repoSlugs: [] };
     const engine = createFakeEngine({ exitCode: 0 }, calls);
 
     const outcome = await runContainerJob(store, engine, {
@@ -87,9 +96,28 @@ describe('runContainerJob', () => {
     expect(outcome.containerName).toBe('sf-job-job-1');
   });
 
+  it("clones the job's own repo, never the host checkout (AC#1/#3)", async () => {
+    const store = createHostedJobStore({ now: () => 1_000 });
+    store.create(baseJobInput({ repoSlug: 'on-par/sound-buddy' }));
+    const leaseId = 'lease-1';
+    store.acquireLease({ jobId: 'job-1', runnerId: 'r1', leaseId, ttlMs: 60_000, heartbeatIntervalMs: 5_000 });
+    const calls: FakeEngineCalls = { preparedJobIds: [], removedJobIds: [], repoSlugs: [] };
+    const engine = createFakeEngine({ exitCode: 0 }, calls);
+
+    await runContainerJob(store, engine, {
+      jobId: 'job-1',
+      leaseId,
+      image: 'alpine:3.20',
+      command: ['true'],
+      timeoutMs: 5_000,
+    });
+
+    expect(calls.repoSlugs).toEqual(['on-par/sound-buddy']);
+  });
+
   it('marks the job done and removes the container on exit 0 (AC#3)', async () => {
     const { store, leaseId } = leasedStore();
-    const calls: FakeEngineCalls = { preparedJobIds: [], removedJobIds: [] };
+    const calls: FakeEngineCalls = { preparedJobIds: [], removedJobIds: [], repoSlugs: [] };
     const engine = createFakeEngine({ exitCode: 0 }, calls);
 
     const outcome = await runContainerJob(store, engine, {
@@ -103,13 +131,14 @@ describe('runContainerJob', () => {
     expect(store.get('job-1')?.request.status).toBe('done');
     expect(outcome.outcome).toBe('completed');
     expect(outcome.result?.outcome).toBe('completed');
+    expect(outcome.workspaceCommit).toBe('deadbeef');
     expect(calls.removedJobIds).toEqual(['job-1']);
     expect(outcome.cleanup?.removed).toBe(true);
   });
 
   it('marks the job failed with an exit-code reason and still removes the container on non-zero exit (AC#4)', async () => {
     const { store, leaseId } = leasedStore();
-    const calls: FakeEngineCalls = { preparedJobIds: [], removedJobIds: [] };
+    const calls: FakeEngineCalls = { preparedJobIds: [], removedJobIds: [], repoSlugs: [] };
     const engine = createFakeEngine({ exitCode: 2, logs: 'boom' }, calls);
 
     const outcome = await runContainerJob(store, engine, {
@@ -129,7 +158,7 @@ describe('runContainerJob', () => {
 
   it('marks the job failed with a timeout reason and still removes the container on timeout (AC#4)', async () => {
     const { store, leaseId } = leasedStore();
-    const calls: FakeEngineCalls = { preparedJobIds: [], removedJobIds: [] };
+    const calls: FakeEngineCalls = { preparedJobIds: [], removedJobIds: [], repoSlugs: [] };
     const engine = createFakeEngine({ exitCode: 0, timedOut: true }, calls);
 
     const outcome = await runContainerJob(store, engine, {
@@ -147,7 +176,7 @@ describe('runContainerJob', () => {
 
   it('records a cleaned event with cleanup evidence after a terminal outcome (AC#5)', async () => {
     const { store, leaseId } = leasedStore();
-    const calls: FakeEngineCalls = { preparedJobIds: [], removedJobIds: [] };
+    const calls: FakeEngineCalls = { preparedJobIds: [], removedJobIds: [], repoSlugs: [] };
     const engine = createFakeEngine({ exitCode: 0 }, calls);
 
     await runContainerJob(store, engine, {
@@ -165,7 +194,7 @@ describe('runContainerJob', () => {
 
   it('marks the job failed and still removes the container when engine.run throws', async () => {
     const { store, leaseId } = leasedStore();
-    const calls: FakeEngineCalls = { preparedJobIds: [], removedJobIds: [] };
+    const calls: FakeEngineCalls = { preparedJobIds: [], removedJobIds: [], repoSlugs: [] };
     const engine = createFakeEngine({ runError: new Error('docker daemon unreachable') }, calls);
 
     const outcome = await runContainerJob(store, engine, {
@@ -182,9 +211,30 @@ describe('runContainerJob', () => {
     expect(calls.removedJobIds).toEqual(['job-1']);
   });
 
+  it('fails the job cleanly with a clear reason and skips the container run when the clone fails (AC#3)', async () => {
+    const { store, leaseId } = leasedStore();
+    const calls: FakeEngineCalls = { preparedJobIds: [], removedJobIds: [], repoSlugs: [] };
+    const engine = createFakeEngine({ exitCode: 0, clone: { ok: false, error: 'fatal: repository not found' } }, calls);
+
+    const outcome = await runContainerJob(store, engine, {
+      jobId: 'job-1',
+      leaseId,
+      image: 'alpine:3.20',
+      command: ['true'],
+      timeoutMs: 5_000,
+    });
+
+    expect(store.get('job-1')?.request.status).toBe('failed');
+    expect(outcome.result?.summary).toContain('repo clone failed:');
+    expect(outcome.result?.summary).toContain('fatal: repository not found');
+    expect(outcome.ranContainer).toBe(false);
+    expect(outcome.workspaceCommit).toBeUndefined();
+    expect(calls.removedJobIds).toEqual(['job-1']);
+  });
+
   it('does not create a container and leaves the job unchanged when the lease does not match', async () => {
     const { store } = leasedStore();
-    const calls: FakeEngineCalls = { preparedJobIds: [], removedJobIds: [] };
+    const calls: FakeEngineCalls = { preparedJobIds: [], removedJobIds: [], repoSlugs: [] };
     const engine = createFakeEngine({ exitCode: 0 }, calls);
     const before = store.get('job-1');
 
@@ -204,7 +254,7 @@ describe('runContainerJob', () => {
 
   it('returns ranContainer: false for an unknown job', async () => {
     const store = createHostedJobStore({ now: () => 1_000 });
-    const calls: FakeEngineCalls = { preparedJobIds: [], removedJobIds: [] };
+    const calls: FakeEngineCalls = { preparedJobIds: [], removedJobIds: [], repoSlugs: [] };
     const engine = createFakeEngine({ exitCode: 0 }, calls);
 
     const outcome = await runContainerJob(store, engine, {
