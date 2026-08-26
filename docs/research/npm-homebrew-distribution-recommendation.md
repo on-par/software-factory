@@ -56,7 +56,7 @@ demand from users without a Node toolchain (section 5).
 
 - **Publish-set gap (highest priority).** `.github/workflows/publish.yml`'s
   final step publishes only `@on-par/factory-config`, `@on-par/factory-core`,
-  and `@on-par/factory-cli` (`.github/workflows/publish.yml:33`). But the
+  and `@on-par/factory-cli` (`.github/workflows/publish.yml:37`). But the
   CLI's runtime closure needs all seven packages — it also requires
   `@on-par/factory-tui`, `@on-par/adr-kit`, `@on-par/contracts`, and
   `@on-par/repo-context`. As written, a registry install of
@@ -64,7 +64,7 @@ demand from users without a Node toolchain (section 5).
   dependencies. The follow-up ticket must extend the publish workflow's
   `npm publish --workspace ...` list to the same seven-package set that
   `scripts/quickstart-smoke.sh` already packs
-  (`scripts/quickstart-smoke.sh:19-27`), and keep the two lists in sync going
+  (`scripts/quickstart-smoke.sh:21-29`), and keep the two lists in sync going
   forward.
 - **Release-gate confirmation.** Publishing is blocked until issues #195 and
   #151 are CLOSED (`.github/workflows/publish.yml:24-30`). The follow-up work
