@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   HOSTED_EXEC_FLAG,
+  HostedArtifactRefSchema,
   HostedJobEventSchema,
   HostedJobRequestSchema,
   HostedJobResultSchema,
@@ -130,6 +131,44 @@ describe('HostedJobResultSchema', () => {
   it('round-trips through serialize/deserialize', () => {
     const raw = serialize(HostedJobResultSchema, baseResult);
     expect(deserialize(HostedJobResultSchema, raw)).toEqual(baseResult);
+  });
+
+  it('parses a result with exitCode, failurePhase, logsTail, and artifacts (back-compat additive)', () => {
+    const richResult = {
+      ...baseResult,
+      outcome: 'failed',
+      exitCode: 1,
+      failurePhase: 'run',
+      logsTail: 'last 2000 chars of logs',
+      artifacts: [{ name: 'build.log', ref: '/artifacts/job-1/build.log', kind: 'log', sizeBytes: 128 }],
+    };
+    expect(HostedJobResultSchema.parse(richResult)).toEqual(richResult);
+  });
+
+  it('rejects an unknown failurePhase', () => {
+    expect(() => HostedJobResultSchema.parse({ ...baseResult, failurePhase: 'deploy' })).toThrow();
+  });
+});
+
+describe('HostedArtifactRefSchema', () => {
+  const baseArtifact = { name: 'build.log', ref: '/artifacts/job-1/build.log', kind: 'log' };
+
+  it('parses a minimal artifact ref', () => {
+    expect(HostedArtifactRefSchema.parse(baseArtifact)).toEqual(baseArtifact);
+  });
+
+  it('parses an artifact ref with sizeBytes and sha256', () => {
+    const full = { ...baseArtifact, sizeBytes: 42, sha256: 'deadbeef' };
+    expect(HostedArtifactRefSchema.parse(full)).toEqual(full);
+  });
+
+  it('rejects a missing ref', () => {
+    const { ref: _ref, ...withoutRef } = baseArtifact;
+    expect(() => HostedArtifactRefSchema.parse(withoutRef)).toThrow();
+  });
+
+  it('rejects a negative sizeBytes', () => {
+    expect(() => HostedArtifactRefSchema.parse({ ...baseArtifact, sizeBytes: -1 })).toThrow();
   });
 });
 

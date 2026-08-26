@@ -311,6 +311,61 @@ describe('createHostedJobStore', () => {
     }
   });
 
+  it('complete retains exitCode, logsTail, and artifacts from an optional detail (#902)', () => {
+    const store = createHostedJobStore({ now: () => 1_000 });
+    store.create(baseJobInput());
+    store.acquireLease({
+      jobId: 'job-1',
+      runnerId: 'runner-1',
+      leaseId: 'lease-1',
+      ttlMs: 60_000,
+      heartbeatIntervalMs: 5_000,
+    });
+
+    const artifacts = [{ name: 'build.log', ref: '/artifacts/job-1/build.log', kind: 'log' }];
+    const completed = store.complete('job-1', 'lease-1', 'done summary', {
+      exitCode: 0,
+      logsTail: 'tail of logs',
+      artifacts,
+    });
+    expect(completed.ok).toBe(true);
+    if (completed.ok) {
+      expect(completed.job.result).toMatchObject({
+        outcome: 'completed',
+        exitCode: 0,
+        logsTail: 'tail of logs',
+        artifacts,
+      });
+    }
+  });
+
+  it('fail retains failurePhase, exitCode, and logsTail from an optional detail (#902)', () => {
+    const store = createHostedJobStore({ now: () => 1_000 });
+    store.create(baseJobInput());
+    store.acquireLease({
+      jobId: 'job-1',
+      runnerId: 'runner-1',
+      leaseId: 'lease-1',
+      ttlMs: 60_000,
+      heartbeatIntervalMs: 5_000,
+    });
+
+    const failed = store.fail('job-1', 'lease-1', 'boom', {
+      failurePhase: 'run',
+      exitCode: 2,
+      logsTail: 'tail of logs',
+    });
+    expect(failed.ok).toBe(true);
+    if (failed.ok) {
+      expect(failed.job.result).toMatchObject({
+        outcome: 'failed',
+        failurePhase: 'run',
+        exitCode: 2,
+        logsTail: 'tail of logs',
+      });
+    }
+  });
+
   it('flips the lease-holder runner back to available on a terminal transition', () => {
     const store = createHostedJobStore({ now: () => 1_000 });
     store.create(baseJobInput());

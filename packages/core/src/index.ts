@@ -100,6 +100,7 @@ export type {
   AcquireLeaseInput,
   CreateHostedJobInput,
   HostedClock,
+  HostedJobResultDetail,
   HostedJobStore,
   HostedJobStoreOptions,
   JobLeaseResult,
@@ -126,6 +127,8 @@ export type {
   PreparedWorkspace,
 } from './hosted/container.js';
 export { runContainerJob } from './hosted/container.js';
+export type { HostedJobSummary } from './hosted/summary.js';
+export { summarizeHostedJob, summarizeHostedJobs } from './hosted/summary.js';
 export type {
   AuthorityBroker,
   AuthorityCleanupProof,
