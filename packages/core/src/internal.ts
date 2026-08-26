@@ -271,6 +271,10 @@ export type {
 } from './projects/project-queue-poller.js';
 export { createProjectQueuePoller, DEFAULT_PROJECT_QUEUE_POLL_MS } from './projects/project-queue-poller.js';
 
+// Publish only coarse daemon lifecycle status to configured ProjectV2 items (#868)
+export type { ProjectStatusWriter, ProjectStatusWriterOptions } from './projects/project-status-writer.js';
+export { createProjectStatusWriter } from './projects/project-status-writer.js';
+
 // Coarse ProjectV2 status writing (#849)
 export type {
   ProjectBoardCoarseStatus,
