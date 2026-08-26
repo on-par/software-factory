@@ -583,8 +583,8 @@ async function currentCommitSha(): Promise<string | null> {
   }
 }
 
-function resolvedModelTiers(repoRoot: string): Record<string, string[]> {
-  const modelsConfig = applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot));
+function resolvedModelTiers(repoRoot: string, stateRoot?: string): Record<string, string[]> {
+  const modelsConfig = applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot, stateRoot));
   return modelsConfig.tiers ?? {};
 }
 
@@ -604,7 +604,7 @@ async function appendKpiSnapshot(
 ): Promise<{ record: KpiHistoryRecord; history: KpiHistoryRecord[] }> {
   const record = kpisToHistoryRecord(kpis, new Date().toISOString().slice(0, 10), {
     commitSha: await currentCommitSha(),
-    models: resolvedModelTiers(repoRoot),
+    models: resolvedModelTiers(repoRoot, paths.state),
   });
   const updated = appendKpiHistoryLine(readTextFileOrEmpty(paths.kpiHistory), record);
   writeFileSync(paths.kpiHistory, updated);
@@ -905,6 +905,8 @@ export async function shipIssue(
   ctx?: {
     repoRoot: string;
     ghRepo: string;
+    /** Resolved factory state paths, supplied by daemon lanes with an external state root. */
+    paths?: ReturnType<typeof getFactoryPaths>;
     lane?: string;
     workRequest?: WorkRequest;
     /** Input source for planPhase to resolve; defaults inside planPhase to this run's GitHub issue. */
@@ -918,10 +920,10 @@ export async function shipIssue(
 ) {
   const repoRoot = ctx?.repoRoot ?? (await getRepoRoot());
   const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo());
-  const paths = getFactoryPaths(repoRoot);
+  const paths = ctx?.paths ?? getFactoryPaths(repoRoot);
   const octokit = getOctokit();
 
-  const repoConfig = loadRepoConfig(repoRoot);
+  const repoConfig = loadRepoConfig(repoRoot, paths.state);
   const modelsConfig = applyRepoConfig(loadModelsConfig(), repoConfig);
   const routesConfig = loadRoutesConfig();
   const factoryConfig = loadFactoryConfigForRepo(paths.config);
@@ -2545,7 +2547,7 @@ type RunLaneDeps = {
   ship?: (
     issue: number,
     opts: { product?: string; autoRework?: boolean; interactive?: boolean; approvePlan?: boolean },
-    ctx?: { repoRoot: string; ghRepo: string; lane?: string },
+    ctx?: { repoRoot: string; ghRepo: string; paths: ReturnType<typeof getFactoryPaths>; lane?: string },
   ) => Promise<string>;
   waitMerge?: typeof waitForMerge;
   pathExists?: (path: string) => boolean;
@@ -2713,7 +2715,8 @@ export async function runLane(
       return;
     }
     try {
-      const branch = decision.kind === 'adopt' ? decision.branch : await ship(issue, {}, { repoRoot, ghRepo, lane });
+      const branch =
+        decision.kind === 'adopt' ? decision.branch : await ship(issue, {}, { repoRoot, ghRepo, paths, lane });
       await waitMerge(issue, branch, repoRoot, ghRepo, paths);
       merged++;
       await releaseIssue(issue, 'done');

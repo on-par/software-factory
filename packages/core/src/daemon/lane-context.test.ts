@@ -7,7 +7,7 @@ import type { RepoRegistryListing } from './registry.js';
 
 const attachedAt = '2026-08-25T12:00:00.000Z';
 
-describe('daemon lane context', () => {
+describe('daemon state lane context', () => {
   it('keeps each checkout root while resolving state paths from its registered external root', () => {
     const alphaStateRoot = '/var/lib/factory-state/alpha';
     const betaStateRoot = '/var/lib/factory-state/beta';
@@ -37,6 +37,14 @@ describe('daemon lane context', () => {
     expect(betaContext.paths.state).toBe(resolve(betaStateRoot));
     expect(betaContext.paths.plans).toBe(resolve(betaStateRoot, 'plans'));
     expect(betaContext.paths.events).toBe(resolve(betaStateRoot, 'events.ndjson'));
+    expect(Object.values(alphaContext.paths).every((path) => path.startsWith(resolve(alphaStateRoot)))).toBe(true);
+    expect(Object.values(betaContext.paths).every((path) => path.startsWith(resolve(betaStateRoot)))).toBe(true);
+    expect(Object.values(alphaContext.paths).every((path) => !path.startsWith(resolve(alpha.path, '.factory')))).toBe(
+      true,
+    );
+    expect(Object.values(betaContext.paths).every((path) => !path.startsWith(resolve(beta.path, '.factory')))).toBe(
+      true,
+    );
     expect(Object.values(alphaContext.paths).every((path) => !path.startsWith(resolve(betaStateRoot)))).toBe(true);
     expect(Object.values(betaContext.paths).every((path) => !path.startsWith(resolve(alphaStateRoot)))).toBe(true);
   });
