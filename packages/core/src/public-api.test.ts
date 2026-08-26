@@ -313,6 +313,8 @@ const INTERNAL_API_KEYS = [
   // Daemon control-plane HTTP server (#777)
   'createFactorydServer',
   'DEFAULT_FACTORYD_PORT',
+  // Daemon lane state resolution (#843)
+  'createDaemonLaneContext',
   // Daemon attach gate (#778)
   'attachRepo',
   'parseRemoteSlug',
