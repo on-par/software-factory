@@ -235,6 +235,9 @@ const PUBLIC_API_KEYS = [
 ];
 
 const INTERNAL_API_KEYS = [
+  // Daemon-ready ProjectV2 queue intent projection (#866)
+  'createProjectQueuePoller',
+  'DEFAULT_PROJECT_QUEUE_POLL_MS',
   // Coarse ProjectV2 status writing (#849)
   'createProjectBoardStatusWriter',
   // Failure fingerprint & evidence

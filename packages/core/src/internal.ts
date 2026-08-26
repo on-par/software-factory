@@ -255,6 +255,14 @@ export type {
 } from './queue/project-board-poller.js';
 export { createProjectBoardPoller, DEFAULT_PROJECT_BOARD_POLL_MS } from './queue/project-board-poller.js';
 
+// Daemon-ready ProjectV2 queue intent projection (#866)
+export type {
+  ProjectQueuePoller,
+  ProjectQueuePollerOptions,
+  ProjectQueueProjection,
+} from './projects/project-queue-poller.js';
+export { createProjectQueuePoller, DEFAULT_PROJECT_QUEUE_POLL_MS } from './projects/project-queue-poller.js';
+
 // Coarse ProjectV2 status writing (#849)
 export type {
   ProjectBoardCoarseStatus,
