@@ -72,6 +72,7 @@ const PUBLIC_API_KEYS = [
   'validateQueue',
   // Hosted execution (control plane)
   'createHostedJobStore',
+  'runContainerJob',
   'runFakeRunner',
   // Work requests
   'closedWorkSkipReason',
@@ -293,6 +294,8 @@ const INTERNAL_API_KEYS = [
   'PATCH_PROPOSAL_SCHEMA',
   'OllamaHttpHarness',
   'OpenCodeHarness',
+  // Hosted execution: Docker container engine adapter (#899)
+  'createDockerEngine',
   // Router
   'CliModelExecutor',
   // Phase helpers

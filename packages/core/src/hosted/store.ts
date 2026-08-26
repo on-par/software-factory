@@ -81,6 +81,8 @@ export type JobUpdateResult =
   | { ok: true; job: StoredHostedJob; alreadyTerminal: boolean }
   | { ok: false; reason: UpdateRejectionReason; job?: StoredHostedJob };
 
+export type RecordCleanupResult = { ok: true; job: StoredHostedJob } | { ok: false; reason: 'job-not-found' };
+
 export interface HostedJobStore {
   create(input: CreateHostedJobInput): StoredHostedJob;
   get(jobId: string): StoredHostedJob | undefined;
@@ -95,6 +97,7 @@ export interface HostedJobStore {
   runnerHeartbeat(runnerId: string): StoredRunner | undefined;
   pollForLease(input: PollForLeaseInput): PollResult;
   reclaimExpired(): StoredHostedJob[];
+  recordCleanup(jobId: string, evidence: string): RecordCleanupResult;
 }
 
 type HostedJobEventType = z.infer<typeof HostedJobEventTypeSchema>;
@@ -336,6 +339,15 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
 
     reclaimExpired() {
       return reclaimExpiredImpl();
+    },
+
+    recordCleanup(jobId, evidence) {
+      const job = jobs.get(jobId);
+      if (!job) {
+        return { ok: false, reason: 'job-not-found' };
+      }
+      appendEvent(job, 'cleaned', 'info', `cleanup proof: ${evidence}`);
+      return { ok: true, job };
     },
   };
 }

@@ -98,6 +98,10 @@ describe('HostedJobEventSchema', () => {
     expect(() => HostedJobEventSchema.parse({ ...baseEvent, type: 'unknown' })).toThrow();
   });
 
+  it('parses a cleaned event', () => {
+    expect(HostedJobEventSchema.parse({ ...baseEvent, type: 'cleaned' })).toEqual({ ...baseEvent, type: 'cleaned' });
+  });
+
   it('rejects an unknown severity', () => {
     expect(() => HostedJobEventSchema.parse({ ...baseEvent, severity: 'critical' })).toThrow();
   });

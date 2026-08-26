@@ -70,6 +70,8 @@ export type { OllamaFetchFn } from './harness/ollama-http.js';
 export { OllamaHttpHarness } from './harness/ollama-http.js';
 export type { OpenCodeExecFn } from './harness/opencode.js';
 export { OpenCodeHarness } from './harness/opencode.js';
+export type { DockerEngineOptions } from './hosted/docker.js';
+export { createDockerEngine } from './hosted/docker.js';
 
 // Router
 export { CliModelExecutor } from './router/index.js';
