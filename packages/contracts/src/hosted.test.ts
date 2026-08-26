@@ -64,6 +64,11 @@ describe('HostedJobRequestSchema', () => {
   it('rejects an unknown status', () => {
     expect(() => HostedJobRequestSchema.parse({ ...baseRequest, status: 'exploded' })).toThrow();
   });
+
+  it('parses a canceled status (#903)', () => {
+    const canceled = { ...baseRequest, status: 'canceled' };
+    expect(HostedJobRequestSchema.parse(canceled)).toEqual(canceled);
+  });
 });
 
 describe('RunnerLeaseSchema', () => {
@@ -102,6 +107,14 @@ describe('HostedJobEventSchema', () => {
 
   it('parses a cleaned event', () => {
     expect(HostedJobEventSchema.parse({ ...baseEvent, type: 'cleaned' })).toEqual({ ...baseEvent, type: 'cleaned' });
+  });
+
+  it('parses a canceled event', () => {
+    expect(HostedJobEventSchema.parse({ ...baseEvent, type: 'canceled' })).toEqual({ ...baseEvent, type: 'canceled' });
+  });
+
+  it('parses a watchdog event', () => {
+    expect(HostedJobEventSchema.parse({ ...baseEvent, type: 'watchdog' })).toEqual({ ...baseEvent, type: 'watchdog' });
   });
 
   it('rejects an unknown severity', () => {
@@ -147,6 +160,11 @@ describe('HostedJobResultSchema', () => {
 
   it('rejects an unknown failurePhase', () => {
     expect(() => HostedJobResultSchema.parse({ ...baseResult, failurePhase: 'deploy' })).toThrow();
+  });
+
+  it('parses a canceled outcome (#903)', () => {
+    const canceledResult = { ...baseResult, outcome: 'canceled', summary: 'hosted job canceled: operator request' };
+    expect(HostedJobResultSchema.parse(canceledResult)).toEqual(canceledResult);
   });
 });
 
