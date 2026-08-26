@@ -117,6 +117,8 @@ export type {
 export { createHostedJobStore } from './hosted/store.js';
 export type { FakeRunnerConfig, FakeRunnerOutcome } from './hosted/runner.js';
 export { runFakeRunner } from './hosted/runner.js';
+export type { WatchdogEscalation, WatchdogPolicy, WatchdogReport } from './hosted/watchdog.js';
+export { runWatchdogSweep } from './hosted/watchdog.js';
 export type {
   CloneOutcome,
   ContainerCleanupProof,
