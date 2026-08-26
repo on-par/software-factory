@@ -14,6 +14,7 @@ import {
   AwaitingReviewError,
   CiFailedError,
   CiUnverifiedError,
+  clearStaleStopFile,
   CliExitError,
   ConstitutionExistsError,
   createQueuePreflightOps,
@@ -2850,6 +2851,77 @@ describe('cli', () => {
       await expect(preflightQueuedIssue({ number: 7, labels: ['factory:in-progress'] }, baseDeps)).resolves.toEqual({
         kind: 'defer',
       });
+    });
+  });
+
+  describe('clearStaleStopFile', () => {
+    const paths = { stop: '/repo/.factory/STOP', events: '/repo/.factory/events.ndjson' };
+
+    it('clears a stale STOP, warns, and emits stop-file-cleared with the age', () => {
+      const threeHoursMs = 3 * 3600_000;
+      const clear = vi.fn();
+      const emitEvent = vi.fn();
+      const warn = vi.fn();
+
+      const result = clearStaleStopFile(paths, {
+        pathExists: () => true,
+        statMtimeMs: () => 1000,
+        now: () => 1000 + threeHoursMs,
+        clear,
+        emitEvent,
+        warn,
+      });
+
+      expect(result).toBe(true);
+      expect(clear).toHaveBeenCalledWith(paths.stop);
+      expect(emitEvent).toHaveBeenCalledTimes(1);
+      const [eventsFile, type, issue, msg] = emitEvent.mock.calls[0];
+      expect(eventsFile).toBe(paths.events);
+      expect(type).toBe('stop-file-cleared');
+      expect(issue).toBe('all');
+      expect(msg).toContain('3h');
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toContain('STOP');
+    });
+
+    it('no-ops when no STOP file is present', () => {
+      const clear = vi.fn();
+      const emitEvent = vi.fn();
+      const warn = vi.fn();
+
+      const result = clearStaleStopFile(paths, {
+        pathExists: () => false,
+        clear,
+        emitEvent,
+        warn,
+      });
+
+      expect(result).toBe(false);
+      expect(clear).not.toHaveBeenCalled();
+      expect(emitEvent).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('still clears the STOP file when stat fails, reporting the age as unknown', () => {
+      const clear = vi.fn();
+      const emitEvent = vi.fn();
+      const warn = vi.fn();
+
+      const result = clearStaleStopFile(paths, {
+        pathExists: () => true,
+        statMtimeMs: () => {
+          throw new Error('gone');
+        },
+        clear,
+        emitEvent,
+        warn,
+      });
+
+      expect(result).toBe(true);
+      expect(clear).toHaveBeenCalledWith(paths.stop);
+      const msg = emitEvent.mock.calls[0][3];
+      expect(msg).toContain('unknown');
+      expect(warn).toHaveBeenCalledTimes(1);
     });
   });
 

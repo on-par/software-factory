@@ -1,7 +1,7 @@
 // packages/cli/src/cli/index.ts — CLI entry point: factory <command> [options]
 
 import { exec as execCb, execSync } from 'node:child_process';
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { userInfo } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
@@ -2477,11 +2477,70 @@ async function cmdFactoryd(opts: { port?: string; registry?: string }) {
   process.exit(0);
 }
 
+export interface ClearStaleStopDeps {
+  pathExists?: (p: string) => boolean;
+  statMtimeMs?: (p: string) => number;
+  now?: () => number;
+  clear?: (p: string) => void;
+  emitEvent?: typeof logEvent;
+  warn?: (msg: string) => void;
+}
+
+/** Human-readable age like "3h 12m", "45s", or "820ms". */
+function formatStopFileAge(ms: number): string {
+  if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+}
+
+/**
+ * A fresh `factory run` is an explicit intent to run, so a STOP sentinel left over
+ * from a prior graceful halt is stale: clear it loudly (event + console warning with
+ * the file's age) rather than silently no-opping the whole run. Returns true when a
+ * stale STOP was found and cleared. runLane still honors a STOP written mid-run (#811).
+ */
+export function clearStaleStopFile(paths: { stop: string; events: string }, deps: ClearStaleStopDeps = {}): boolean {
+  const {
+    pathExists = existsSync,
+    statMtimeMs = (p: string) => statSync(p).mtimeMs,
+    now = Date.now,
+    clear = (p: string) => rmSync(p, { force: true }),
+    emitEvent = logEvent,
+    warn = (msg: string) => console.error(chalk.yellow(msg)),
+  } = deps;
+
+  if (!pathExists(paths.stop)) return false;
+
+  let ageMs = 0;
+  let mtimeIso = 'unknown';
+  try {
+    const mtimeMs = statMtimeMs(paths.stop);
+    ageMs = Math.max(0, now() - mtimeMs);
+    mtimeIso = new Date(mtimeMs).toISOString();
+  } catch {
+    // If we cannot stat it we still clear it; age is reported as unknown.
+  }
+
+  clear(paths.stop);
+
+  const msg =
+    `Cleared a stale STOP file (age ${formatStopFileAge(ageMs)}, written ${mtimeIso}) ` +
+    `left over from a prior halt — 'factory run' is a fresh intent to run, so the queue will proceed.`;
+  warn(`!! ${msg}`);
+  emitEvent(paths.events, 'stop-file-cleared', 'all', msg);
+  return true;
+}
+
 async function cmdRun(opts: { localQueue?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
 
   return withRepoRunLock(paths, 'factory run', async () => {
+    clearStaleStopFile(paths);
     const ghRepo = await getGitHubRepo();
     const factoryConfig = loadFactoryConfigForRepo(paths.config);
     if (factoryConfig.worktree.autoGcOnRun) {
