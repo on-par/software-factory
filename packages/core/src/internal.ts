@@ -224,6 +224,8 @@ export { setRepoState } from './daemon/repos-pause-resume.js';
 
 // GitHub-label-backed work queue (#824)
 export type {
+  EnqueueOutcome,
+  EnqueueResult,
   GithubQueue,
   GithubQueueOptions,
   QueueClaim,

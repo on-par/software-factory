@@ -202,6 +202,17 @@ export function createOctokitQueueClient(octokit: Octokit): QueueGitHubClient {
 
 export type QueueReleaseOutcome = 'queued' | 'parked' | 'done';
 
+export type EnqueueOutcome = 'queued' | 'already-queued' | 'failed';
+
+export interface EnqueueResult {
+  issue: number;
+  outcome: EnqueueOutcome;
+  /** One-based order position assigned; set only when outcome === 'queued'. */
+  position?: number;
+  /** Failure detail; set only when outcome === 'failed'. */
+  detail?: string;
+}
+
 export interface GithubQueueOptions {
   client: QueueGitHubClient;
   owner: string;
@@ -218,6 +229,7 @@ export interface GithubQueue {
   list(lane: string): Promise<number[]>;
   lanes(): Promise<string[]>;
   migrateLocalQueue(entries: readonly QueueEntry[]): Promise<void>;
+  enqueue(lane: string, issues: readonly number[]): Promise<EnqueueResult[]>;
 }
 
 export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
@@ -347,5 +359,46 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     }
   }
 
-  return { claimNext, release, list, lanes, migrateLocalQueue };
+  async function enqueue(lane: string, issues: readonly number[]): Promise<EnqueueResult[]> {
+    const routeLabel = laneLabel(lane);
+    const members = await client.listOpenIssuesWithLabels({ owner, repo, labels: [QUEUED_LABEL, routeLabel] });
+    // Tolerant max-position scan: ignore malformed/missing order labels rather than throwing.
+    let maxPos = 0;
+    for (const member of members) {
+      for (const label of member.labels) {
+        if (!label.startsWith(QUEUE_ORDER_LABEL_PREFIX)) continue;
+        const n = Number(label.slice(QUEUE_ORDER_LABEL_PREFIX.length));
+        if (Number.isSafeInteger(n) && n > maxPos) maxPos = n;
+      }
+    }
+    let next = maxPos + 1;
+
+    const results: EnqueueResult[] = [];
+    for (const issue of issues) {
+      try {
+        const current = await client.getIssueLabels({ owner, repo, issue_number: issue });
+        if (current.some((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX))) {
+          results.push({ issue, outcome: 'already-queued' });
+          continue;
+        }
+        const specs: QueueLabelSpec[] = [
+          { name: QUEUED_LABEL, color: QUEUED_LABEL_COLOR, description: 'Eligible to be claimed by a factory lane' },
+          { name: routeLabel, color: LANE_LABEL_COLOR, description: `Routed to factory lane ${lane}` },
+          queueOrderLabelSpec(next),
+        ];
+        for (const spec of specs) {
+          await client.ensureLabel({ owner, repo, ...spec });
+        }
+        await client.addLabels({ owner, repo, issue_number: issue, labels: specs.map((s) => s.name) });
+        results.push({ issue, outcome: 'queued', position: next });
+        next += 1;
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        results.push({ issue, outcome: 'failed', detail });
+      }
+    }
+    return results;
+  }
+
+  return { claimNext, release, list, lanes, migrateLocalQueue, enqueue };
 }

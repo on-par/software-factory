@@ -128,6 +128,7 @@ import {
 } from '@on-par/factory-core';
 import type {
   CiOutcome,
+  EnqueueResult,
   GithubQueue,
   OvernightItemOutcome,
   OvernightPreflightResult,
@@ -2194,6 +2195,38 @@ export async function cmdQueueMigrate() {
   console.log(chalk.green(`queue migrated — ${entries.length} issue(s) labelled from ${paths.queue}`));
 }
 
+export async function cmdQueueAdd(lane: string, issueArgs: string[]): Promise<void> {
+  // Validate + dedupe BEFORE any GitHub call. parseIssueArg throws CliExitError(2) on bad input.
+  const seen = new Set<number>();
+  const issues: number[] = [];
+  for (const raw of issueArgs) {
+    const n = parseIssueArg(raw);
+    if (!seen.has(n)) {
+      seen.add(n);
+      issues.push(n);
+    }
+  }
+
+  const [owner, repo] = (await getGitHubRepo()).split('/');
+  const queue = createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo });
+  const results: EnqueueResult[] = await queue.enqueue(lane, issues);
+
+  for (const r of results) {
+    if (r.outcome === 'queued') {
+      console.log(chalk.green(`#${r.issue} queued → lane ${lane}, position ${r.position}`));
+    } else if (r.outcome === 'already-queued') {
+      console.log(`#${r.issue} already queued — skipped`);
+    } else {
+      console.error(chalk.red(`#${r.issue} failed — ${r.detail}`));
+    }
+  }
+
+  const failed = results.filter((r) => r.outcome === 'failed');
+  if (failed.length > 0) {
+    throw new CliExitError(`factory: ${failed.length} issue(s) failed to queue`, 1);
+  }
+}
+
 export function triageNoProposalError(plannerError: unknown): CliExitError {
   const detail = plannerError ? ` — planner failed: ${errorDetail(plannerError)}` : '';
   return new CliExitError(`triage produced no proposal${detail}`, 1);
@@ -3679,6 +3712,14 @@ export async function main() {
     .command('migrate')
     .description('Copy valid .factory/queue lane order into GitHub issue labels')
     .action(cmdQueueMigrate);
+  queue
+    .command('add <lane> <issues...>')
+    .description(
+      'Queue explicit GitHub issues into a lane — applies factory:queued + factory:lane:<lane> (and an order label), creating any missing factory labels idempotently',
+    )
+    .action(async (lane: string, issues: string[]) => {
+      await cmdQueueAdd(lane, issues);
+    });
 
   program
     .command('ready <issue>')
