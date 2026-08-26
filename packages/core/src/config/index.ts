@@ -468,9 +468,12 @@ export function resolveFilingPolicy(config: FactoryConfig): FilingPolicy {
 // ---------- Factory state paths ----------
 
 export function getFactoryPaths(repoRoot: string, stateRoot?: string) {
-  const state = stateRoot === undefined ? resolve(repoRoot, '.factory') : resolve(stateRoot);
+  const root = stateRoot === undefined ? resolve(repoRoot, '.factory') : resolve(stateRoot);
+  const state = resolve(root, 'state');
   return {
+    root,
     state,
+    config: resolve(root, 'config.json'),
     queue: resolve(state, 'queue'),
     queueProposed: resolve(state, 'queue.proposed'),
     events: resolve(state, 'events.ndjson'),
@@ -490,7 +493,6 @@ export function getFactoryPaths(repoRoot: string, stateRoot?: string) {
     ports: resolve(state, 'ports.json'),
     portsLock: resolve(state, 'ports.lock'),
     proxyState: resolve(state, 'proxy.json'),
-    config: resolve(state, 'config.json'),
     breaker: resolve(state, 'breaker.json'),
     reworkHistory: resolve(state, 'rework-history.json'),
   };

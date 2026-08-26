@@ -285,7 +285,7 @@ async function cmdInit(opts: { force?: boolean } = {}) {
     process.exit(2);
   }
   const paths = getFactoryPaths(repoRoot);
-  ensureDir(paths.state);
+  ensureDir(paths.root);
   ensureDir(paths.logs);
   ensureDir(paths.plans);
 
@@ -313,8 +313,8 @@ async function cmdInit(opts: { force?: boolean } = {}) {
   // Write onboarding files. Idempotent: never clobber an existing file unless --force.
   const force = opts.force === true;
   const configPath = paths.config;
-  const constitutionPath = resolve(paths.state, 'constitution.md');
-  const gitignorePath = resolve(paths.state, '.gitignore');
+  const constitutionPath = resolve(paths.root, 'constitution.md');
+  const gitignorePath = resolve(paths.root, '.gitignore');
 
   // Uses an atomic exclusive-create write (flag 'wx') rather than existsSync-then-writeFileSync,
   // so there is no check-then-act window where a concurrent writer could race this one.
@@ -354,7 +354,7 @@ async function cmdInit(opts: { force?: boolean } = {}) {
     console.log(chalk.yellow('No worker model reachable yet — see `factory doctor` and `factory models --doctor`.'));
   }
 
-  console.log(chalk.green(`Initialized ${paths.state}`));
+  console.log(chalk.green(`Initialized ${paths.root}`));
   console.log(`Next: factory constitution --product <name>, then factory triage`);
 }
 
@@ -489,6 +489,7 @@ export async function cmdConstitution(opts: { list?: boolean; product?: string; 
     }
     const repoRoot = await getRepoRoot();
     const paths = getFactoryPaths(repoRoot);
+    ensureDir(paths.state);
     writeFileSync(paths.product, opts.product);
     console.log(chalk.green(`Active product: ${opts.product}`));
     return;
@@ -675,9 +676,10 @@ async function appendKpiSnapshot(
 ): Promise<{ record: KpiHistoryRecord; history: KpiHistoryRecord[] }> {
   const record = kpisToHistoryRecord(kpis, new Date().toISOString().slice(0, 10), {
     commitSha: await currentCommitSha(),
-    models: resolvedModelTiers(repoRoot, paths.state),
+    models: resolvedModelTiers(repoRoot, paths.root),
   });
   const updated = appendKpiHistoryLine(readTextFileOrEmpty(paths.kpiHistory), record);
+  ensureDir(paths.state);
   writeFileSync(paths.kpiHistory, updated);
   return { record, history: parseKpiHistory(updated) };
 }
@@ -1414,7 +1416,7 @@ async function cmdShip(
   }
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  if (!existsSync(paths.state)) {
+  if (!existsSync(paths.root)) {
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
 
@@ -1444,7 +1446,7 @@ async function cmdRunIssue(
   }
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  if (!existsSync(paths.state)) {
+  if (!existsSync(paths.root)) {
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
 
@@ -1504,7 +1506,7 @@ async function cmdRunBrief(
   }
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  if (!existsSync(paths.state)) {
+  if (!existsSync(paths.root)) {
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
 
@@ -1892,7 +1894,7 @@ async function cmdTriage(opts: { product?: string }) {
   const repoRoot = await getRepoRoot();
   const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
-  if (!existsSync(paths.state)) {
+  if (!existsSync(paths.root)) {
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
   const product = opts.product ?? readActiveProduct(paths.product);
@@ -3847,6 +3849,7 @@ export async function main() {
     .action(async () => {
       const repoRoot = await getRepoRoot();
       const paths = getFactoryPaths(repoRoot);
+      ensureDir(paths.state);
       writeFileSync(paths.stop, '');
       console.log('STOP set — lanes halt between issues');
     });
