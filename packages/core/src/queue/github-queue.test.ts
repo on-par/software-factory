@@ -558,6 +558,78 @@ describe('release', () => {
   });
 });
 
+describe('enqueue', () => {
+  it("appends after the lane's current max order position", async () => {
+    const { client, state, createdLabels } = createFakeStore([
+      { number: 5, labels: [QUEUED_LABEL, laneLabel('daw'), queueOrderLabel(2)] },
+    ]);
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    const results = await queue.enqueue('daw', [10, 11]);
+
+    expect(results).toEqual([
+      { issue: 10, outcome: 'queued', position: 3 },
+      { issue: 11, outcome: 'queued', position: 4 },
+    ]);
+    expect(state.get(10)).toEqual(new Set([QUEUED_LABEL, laneLabel('daw'), queueOrderLabel(3)]));
+    expect(state.get(11)).toEqual(new Set([QUEUED_LABEL, laneLabel('daw'), queueOrderLabel(4)]));
+    expect(createdLabels).toEqual(new Set([QUEUED_LABEL, laneLabel('daw'), queueOrderLabel(3), queueOrderLabel(4)]));
+  });
+
+  it('starts at position 1 for an empty lane', async () => {
+    const { client } = createFakeStore([{ number: 5, labels: [] }]);
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    const results = await queue.enqueue('docs', [5]);
+
+    expect(results).toEqual([{ issue: 5, outcome: 'queued', position: 1 }]);
+  });
+
+  it('skips an already-ordered issue and leaves its labels unchanged', async () => {
+    const { client, state } = createFakeStore([
+      { number: 7, labels: [QUEUED_LABEL, laneLabel('daw'), queueOrderLabel(1)] },
+    ]);
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    const results = await queue.enqueue('daw', [7]);
+
+    expect(results).toEqual([{ issue: 7, outcome: 'already-queued' }]);
+    expect(state.get(7)).toEqual(new Set([QUEUED_LABEL, laneLabel('daw'), queueOrderLabel(1)]));
+  });
+
+  it('creates every label via ensureLabel before applying it with addLabels', async () => {
+    const { client, calls } = createFakeStore([{ number: 1, labels: [] }]);
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    await queue.enqueue('daw', [1]);
+
+    expect(calls.indexOf('ensureLabel')).toBeLessThan(calls.indexOf('addLabels'));
+  });
+
+  it('isolates a per-issue failure without aborting the rest of the batch', async () => {
+    const { client, state } = createFakeStore([
+      { number: 99, labels: [] },
+      { number: 100, labels: [] },
+    ]);
+    const wrapped: QueueGitHubClient = {
+      ...client,
+      async addLabels(input) {
+        if (input.issue_number === 99) throw new Error('boom');
+        return client.addLabels(input);
+      },
+    };
+    const queue = createGithubQueue({ client: wrapped, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    const results = await queue.enqueue('daw', [99, 100]);
+
+    expect(results).toEqual([
+      { issue: 99, outcome: 'failed', detail: 'boom' },
+      { issue: 100, outcome: 'queued', position: 1 },
+    ]);
+    expect(state.get(100)).toEqual(new Set([QUEUED_LABEL, laneLabel('daw'), queueOrderLabel(1)]));
+  });
+});
+
 describe('lanes', () => {
   it('returns sorted distinct lane slugs from queued issues', async () => {
     const { client } = createFakeStore([

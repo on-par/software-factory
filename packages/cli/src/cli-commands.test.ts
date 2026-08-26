@@ -1085,6 +1085,75 @@ bash scripts/verify.sh
     });
   });
 
+  describe('queue add', () => {
+    beforeEach(() => {
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) return h.ghRepo;
+        return '';
+      };
+      h.octokit.rest.issues.createLabel = vi.fn(async () => ({}));
+      h.octokit.rest.issues.addLabels = vi.fn(async () => ({}));
+      h.octokit.rest.issues.listForRepo = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.issues.listLabelsOnIssue = vi.fn(async () => ({ data: [] }));
+    });
+
+    it('queues explicit issues into a lane, applying queued/lane/order labels in order', async () => {
+      const res = await runMain('queue', 'add', 'daw', '10', '11');
+
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('#10 queued');
+      expect(logged()).toContain('#11 queued');
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenNthCalledWith(1, {
+        owner: 'on-par',
+        repo: 'software-factory',
+        issue_number: 10,
+        labels: ['factory:queued', 'factory:lane:daw', 'factory:order:1'],
+      });
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenNthCalledWith(2, {
+        owner: 'on-par',
+        repo: 'software-factory',
+        issue_number: 11,
+        labels: ['factory:queued', 'factory:lane:daw', 'factory:order:2'],
+      });
+    });
+
+    it('creates missing factory labels idempotently before applying them', async () => {
+      await runMain('queue', 'add', 'daw', '10');
+
+      expect(h.octokit.rest.issues.createLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'factory:queued' }),
+      );
+      expect(h.octokit.rest.issues.createLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'factory:lane:daw' }),
+      );
+      expect(h.octokit.rest.issues.createLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'factory:order:1' }),
+      );
+    });
+
+    it('exits nonzero and reports a per-issue failure without dropping the successful issue', async () => {
+      h.octokit.rest.issues.addLabels = vi.fn(async ({ issue_number }: any) => {
+        if (issue_number === 10) throw new Error('label API down');
+        return {};
+      });
+
+      const res = await runMain('queue', 'add', 'daw', '10', '11');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('#10 failed');
+      expect(logged()).toContain('#11 queued');
+    });
+
+    it('exits 2 for an invalid issue argument before any GitHub call', async () => {
+      const res = await runMain('queue', 'add', 'daw', 'notanumber');
+
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(h.octokit.rest.issues.createLabel).not.toHaveBeenCalled();
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+    });
+  });
+
   describe('stop / resume', () => {
     it('stop writes the STOP file', async () => {
       await runMain('stop');
