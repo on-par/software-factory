@@ -156,6 +156,7 @@ import {
   isAutoMergeBlocked,
   logCost,
   logEvent,
+  planQueueMigration,
   readCosts,
   resolveBranchPrefix,
   resolveEffectiveConfig,
@@ -2170,29 +2171,84 @@ export async function cmdTriageAccept(opts: { force?: boolean }) {
   console.log(chalk.green(`queue accepted — ${result.issues.length} issue(s) promoted to ${paths.queue}`));
 }
 
-export async function cmdQueueMigrate() {
+export async function cmdQueueMigrate(opts: { file?: string; dryRun?: boolean } = {}): Promise<void> {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
+  const queueFile = opts.file ? resolve(repoRoot, opts.file) : paths.queue;
 
-  if (!existsSync(paths.queue)) {
-    throw new CliExitError(`factory: queue not found at ${paths.queue} — run factory init + triage first`, 2);
+  if (!existsSync(queueFile)) {
+    throw new CliExitError(
+      `factory: queue not found at ${queueFile} — run factory init + triage first, or pass --file`,
+      2,
+    );
   }
 
-  const content = readFileSync(paths.queue, 'utf-8');
-  const validation = validateQueue(content);
-  if (!validation.ok) {
+  const { entries, diagnostics } = parseQueue(readFileSync(queueFile, 'utf-8'));
+
+  // Stage 1 — structural problems, reported before any GitHub call.
+  const structural: string[] = diagnostics.map((d) => d.message);
+  const firstLineFor = new Map<number, number>();
+  for (const entry of entries) {
+    const first = firstLineFor.get(entry.issue);
+    if (first !== undefined) {
+      structural.push(`line ${entry.lineNo}: duplicate issue #${entry.issue} (already queued at line ${first})`);
+    } else {
+      firstLineFor.set(entry.issue, entry.lineNo);
+    }
+  }
+  if (entries.length === 0 && structural.length === 0) {
+    structural.push('queue has no issue entries');
+  }
+  if (structural.length > 0) {
     throw new CliExitError(
-      `factory: queue is invalid — ${paths.queue} left unchanged\n` +
-        validation.errors.map((error) => `  - ${error}`).join('\n'),
+      `factory: queue is invalid — ${queueFile} left unchanged\n` + structural.map((p) => `  - ${p}`).join('\n'),
       1,
     );
   }
 
-  const entries = parseQueue(content).entries;
+  // Stage 2 — GitHub preflight (read-only). Any closed/PR/inaccessible entry aborts all.
   const [owner, repo] = (await getGitHubRepo()).split('/');
-  const queue = createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo });
-  await queue.migrateLocalQueue(entries);
-  console.log(chalk.green(`queue migrated — ${entries.length} issue(s) labelled from ${paths.queue}`));
+  const octokit = getOctokit();
+  const unreachable: string[] = [];
+  for (const entry of entries) {
+    try {
+      const { data } = await octokit.rest.issues.get({ owner, repo, issue_number: entry.issue });
+      if (data.pull_request) {
+        unreachable.push(`line ${entry.lineNo}: #${entry.issue} is a pull request, not an issue`);
+      } else if (data.state === 'closed') {
+        unreachable.push(`line ${entry.lineNo}: issue #${entry.issue} is closed — cannot queue`);
+      }
+    } catch (err) {
+      unreachable.push(`line ${entry.lineNo}: issue #${entry.issue} is inaccessible — ${errorDetail(err)}`);
+    }
+  }
+  if (unreachable.length > 0) {
+    throw new CliExitError(
+      `factory: queue migration aborted — ${unreachable.length} issue(s) cannot be migrated; no labels applied\n` +
+        unreachable.map((p) => `  - ${p}`).join('\n'),
+      1,
+    );
+  }
+
+  const plan = planQueueMigration(entries);
+
+  if (opts.dryRun) {
+    console.log(
+      chalk.cyan(`dry run — ${plan.length} issue(s) would be labelled from ${queueFile}; no GitHub changes made`),
+    );
+    for (const step of plan) {
+      console.log(`  #${step.issue} → lane ${step.lane}, position ${step.position} [${step.labels.join(', ')}]`);
+    }
+    return;
+  }
+
+  const queue = createGithubQueue({ client: createOctokitQueueClient(octokit), owner, repo });
+  try {
+    await queue.migrateLocalQueue(entries);
+  } catch (err) {
+    throw new CliExitError(`factory: queue migration failed — ${errorDetail(err)}`, 1);
+  }
+  console.log(chalk.green(`queue migrated — ${entries.length} issue(s) labelled from ${queueFile}`));
 }
 
 export async function cmdQueueAdd(lane: string, issueArgs: string[]): Promise<void> {
@@ -3711,7 +3767,9 @@ export async function main() {
   queue
     .command('migrate')
     .description('Copy valid .factory/queue lane order into GitHub issue labels')
-    .action(cmdQueueMigrate);
+    .option('--file <path>', 'Read the legacy queue from an explicit path instead of .factory/queue')
+    .option('--dry-run', 'Print the intended label updates without mutating GitHub')
+    .action((opts: { file?: string; dryRun?: boolean }) => cmdQueueMigrate(opts));
   queue
     .command('add <lane> <issues...>')
     .description(

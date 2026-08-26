@@ -13,6 +13,7 @@ import {
   laneLabel,
   MAX_LABEL_NAME_LENGTH,
   PARKED_LABEL,
+  planQueueMigration,
   QUEUED_LABEL,
   QUEUE_ORDER_LABEL_PREFIX,
   queueOrderLabel,
@@ -230,6 +231,47 @@ describe('migrateLocalQueue', () => {
 
     expect(state.get(1055)).toEqual(new Set([QUEUED_LABEL, laneLabel('daw'), queueOrderLabel(1)]));
     expect(state.get(993)).toEqual(new Set([QUEUED_LABEL, laneLabel('daw'), queueOrderLabel(2)]));
+  });
+});
+
+describe('planQueueMigration', () => {
+  it('assigns one-based per-lane positions and matching label/spec order', () => {
+    const steps = planQueueMigration([
+      { lane: 'daw', issue: 1055, lineNo: 1 },
+      { lane: 'docs', issue: 200, lineNo: 2 },
+      { lane: 'daw', issue: 993, lineNo: 3 },
+    ]);
+
+    expect(steps).toEqual([
+      {
+        issue: 1055,
+        lane: 'daw',
+        position: 1,
+        labels: [QUEUED_LABEL, laneLabel('daw'), queueOrderLabel(1)],
+        specs: steps[0]?.specs,
+      },
+      {
+        issue: 200,
+        lane: 'docs',
+        position: 1,
+        labels: [QUEUED_LABEL, laneLabel('docs'), queueOrderLabel(1)],
+        specs: steps[1]?.specs,
+      },
+      {
+        issue: 993,
+        lane: 'daw',
+        position: 2,
+        labels: [QUEUED_LABEL, laneLabel('daw'), queueOrderLabel(2)],
+        specs: steps[2]?.specs,
+      },
+    ]);
+    for (const step of steps) {
+      expect(step.specs.map((s) => s.name)).toEqual(step.labels);
+    }
+  });
+
+  it('returns an empty plan for an empty input', () => {
+    expect(planQueueMigration([])).toEqual([]);
   });
 });
 

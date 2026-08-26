@@ -377,6 +377,7 @@ const INTERNAL_API_KEYS = [
   'laneLabel',
   'MAX_LABEL_NAME_LENGTH',
   'PARKED_LABEL',
+  'planQueueMigration',
   'QUEUED_LABEL',
   'QUEUE_ORDER_LABEL_PREFIX',
   'queueOrderLabel',
