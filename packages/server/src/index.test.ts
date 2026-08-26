@@ -5,7 +5,17 @@ import type net from 'node:net';
 import type { LaneLifecycleEvent } from '@on-par/contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createServer, type FactoryServer, type LifecycleEventSource, SERVER_VERSION } from './index.js';
+import {
+  createServer,
+  type FactoryServer,
+  type LifecycleEventSource,
+  type ServerConfig,
+  SERVER_VERSION,
+} from './index.js';
+import type { RepositoryLifecycleEvent } from './sse.js';
+
+const SOUND_BUDDY_REPO = 'on-par/sound-buddy';
+const OTHER_APP_REPO = 'on-par/other-app';
 
 interface FakeBus extends LifecycleEventSource {
   emit(event: LaneLifecycleEvent): void;
@@ -24,6 +34,13 @@ function createFakeBus(): FakeBus {
       for (const listener of listeners) listener(event);
     },
   };
+}
+
+function createTestServer(
+  bus: LifecycleEventSource,
+  overrides: Omit<ServerConfig, 'repositories'> = {},
+): FactoryServer {
+  return createServer({ repositories: [{ repo: SOUND_BUDDY_REPO, source: bus }], ...overrides });
 }
 
 function makeEvent(overrides: Partial<LaneLifecycleEvent> = {}): LaneLifecycleEvent {
@@ -83,7 +100,7 @@ function frameId(frame: string): number {
   return Number(frame.match(/^id: (\d+)/)?.[1]);
 }
 
-function frameEvent(frame: string): LaneLifecycleEvent {
+function frameEvent(frame: string): RepositoryLifecycleEvent {
   const dataLine = frame.split('\n').find((line) => line.startsWith('data: '));
   return JSON.parse(dataLine!.slice('data: '.length));
 }
@@ -120,7 +137,7 @@ describe('@on-par/factory-server', () => {
 
   it('relays live events in order with strictly increasing ids', async () => {
     const bus = createFakeBus();
-    server = createServer({ bus, port: 0 });
+    server = createTestServer(bus, { port: 0 });
     await server.start();
 
     const { res } = await openRequest(server.port, '/events');
@@ -132,12 +149,90 @@ describe('@on-par/factory-server', () => {
 
     const frames = await framesPromise;
     expect(frames.map(frameId)).toEqual([1, 2, 3]);
-    expect(frames.map(frameEvent)).toEqual(events);
+    expect(frames.map(frameEvent)).toEqual(events.map((event) => ({ ...event, repo: SOUND_BUDDY_REPO })));
+  });
+
+  it('filters replay and live events to the selected attached repository', async () => {
+    const soundBuddy = createFakeBus();
+    const otherApp = createFakeBus();
+    server = createServer({
+      repositories: [
+        { repo: SOUND_BUDDY_REPO, source: soundBuddy },
+        { repo: OTHER_APP_REPO, source: otherApp },
+      ],
+      port: 0,
+    });
+    await server.start();
+
+    otherApp.emit(makeEvent({ detail: 'other replay' }));
+    soundBuddy.emit(makeEvent({ detail: 'sound buddy replay' }));
+
+    const { res } = await openRequest(server.port, `/events?repo=${SOUND_BUDDY_REPO}`, {
+      headers: { 'last-event-id': '0' },
+    });
+    expect(res.statusCode).toBe(200);
+    const framesPromise = readFrames(res, 1);
+
+    const [frame] = await framesPromise;
+    expect(frameId(frame)).toBe(2);
+    expect(frameEvent(frame)).toEqual({ ...makeEvent({ detail: 'sound buddy replay' }), repo: SOUND_BUDDY_REPO });
+
+    const live = readFrames(res, 1);
+    otherApp.emit(makeEvent({ detail: 'other live' }));
+    soundBuddy.emit(makeEvent({ detail: 'sound buddy live' }));
+    expect(frameEvent((await live)[0])).toEqual({
+      ...makeEvent({ detail: 'sound buddy live' }),
+      repo: SOUND_BUDDY_REPO,
+    });
+  });
+
+  it('relays every attached repository on an unfiltered stream', async () => {
+    const soundBuddy = createFakeBus();
+    const otherApp = createFakeBus();
+    server = createServer({
+      repositories: [
+        { repo: SOUND_BUDDY_REPO, source: soundBuddy },
+        { repo: OTHER_APP_REPO, source: otherApp },
+      ],
+      port: 0,
+    });
+    await server.start();
+
+    const { res } = await openRequest(server.port, '/events');
+    expect(res.statusCode).toBe(200);
+    const framesPromise = readFrames(res, 2);
+    soundBuddy.emit(makeEvent({ detail: 'sound buddy' }));
+    otherApp.emit(makeEvent({ detail: 'other app' }));
+
+    expect((await framesPromise).map(frameEvent)).toEqual([
+      { ...makeEvent({ detail: 'sound buddy' }), repo: SOUND_BUDDY_REPO },
+      { ...makeEvent({ detail: 'other app' }), repo: OTHER_APP_REPO },
+    ]);
+  });
+
+  it('rejects an unattached repository selector before opening an SSE stream', async () => {
+    const soundBuddy = createFakeBus();
+    const otherApp = createFakeBus();
+    server = createServer({
+      repositories: [
+        { repo: SOUND_BUDDY_REPO, source: soundBuddy },
+        { repo: OTHER_APP_REPO, source: otherApp },
+      ],
+      port: 0,
+    });
+    await server.start();
+
+    const { res } = await openRequest(server.port, '/events?repo=on-par/nope');
+    expect(res.statusCode).toBe(404);
+    expect(res.headers['content-type']).toBe('application/json');
+    expect(res.headers['x-accel-buffering']).toBeUndefined();
+    expect(await readBody(res)).toBe(JSON.stringify({ error: 'repository not attached' }));
+    expect(res.complete).toBe(true);
   });
 
   it('resumes from Last-Event-ID after a disconnect', async () => {
     const bus = createFakeBus();
-    server = createServer({ bus, port: 0 });
+    server = createTestServer(bus, { port: 0 });
     await server.start();
 
     const { req: req1, res: res1 } = await openRequest(server.port, '/events');
@@ -164,7 +259,7 @@ describe('@on-par/factory-server', () => {
 
   it('replays the whole ring for a cursor older than the oldest retained id', async () => {
     const bus = createFakeBus();
-    server = createServer({ bus, port: 0, replayBufferSize: 2 });
+    server = createTestServer(bus, { port: 0, replayBufferSize: 2 });
     await server.start();
 
     for (let i = 0; i < 5; i++) bus.emit(makeEvent({ detail: String(i) }));
@@ -177,7 +272,7 @@ describe('@on-par/factory-server', () => {
 
   it('treats a malformed Last-Event-ID as no replay and keeps the stream live', async () => {
     const bus = createFakeBus();
-    server = createServer({ bus, port: 0 });
+    server = createTestServer(bus, { port: 0 });
     await server.start();
 
     const { res } = await openRequest(server.port, '/events', {
@@ -193,14 +288,14 @@ describe('@on-par/factory-server', () => {
 
   it('binds 127.0.0.1 by default, and explicitly, never 0.0.0.0', async () => {
     const bus = createFakeBus();
-    server = createServer({ bus, port: 0 });
+    server = createTestServer(bus, { port: 0 });
     await server.start();
     const addr = server.server.address() as net.AddressInfo;
     expect(addr.address).toBe('127.0.0.1');
     expect(addr.address).not.toBe('0.0.0.0');
     await server.stop();
 
-    const explicit = createServer({ bus, port: 0, host: '127.0.0.1' });
+    const explicit = createTestServer(bus, { port: 0, host: '127.0.0.1' });
     await explicit.start();
     const explicitAddr = explicit.server.address() as net.AddressInfo;
     expect(explicitAddr.address).toBe('127.0.0.1');
@@ -209,7 +304,7 @@ describe('@on-par/factory-server', () => {
 
   it('answers unknown routes and non-GET/HEAD methods on /events with 404 JSON', async () => {
     const bus = createFakeBus();
-    server = createServer({ bus, port: 0 });
+    server = createTestServer(bus, { port: 0 });
     await server.start();
 
     const { res: nope } = await openRequest(server.port, '/nope');
@@ -223,7 +318,7 @@ describe('@on-par/factory-server', () => {
 
   it('answers HEAD /events with headers only and no body frames', async () => {
     const bus = createFakeBus();
-    server = createServer({ bus, port: 0 });
+    server = createTestServer(bus, { port: 0 });
     await server.start();
 
     const { res } = await openRequest(server.port, '/events', { method: 'HEAD' });
@@ -235,7 +330,7 @@ describe('@on-par/factory-server', () => {
 
   it('writes a heartbeat comment on an idle stream when heartbeatMs > 0', async () => {
     const bus = createFakeBus();
-    server = createServer({ bus, port: 0, heartbeatMs: 10 });
+    server = createTestServer(bus, { port: 0, heartbeatMs: 10 });
     await server.start();
 
     const { res } = await openRequest(server.port, '/events');
@@ -252,7 +347,7 @@ describe('@on-par/factory-server', () => {
 
   it('writes no heartbeat when heartbeatMs is 0', async () => {
     const bus = createFakeBus();
-    server = createServer({ bus, port: 0, heartbeatMs: 0 });
+    server = createTestServer(bus, { port: 0, heartbeatMs: 0 });
     await server.start();
 
     const { res } = await openRequest(server.port, '/events');
@@ -267,7 +362,7 @@ describe('@on-par/factory-server', () => {
 
   it('stop() is idempotent, ends open connections, and unsubscribes from the bus', async () => {
     const bus = createFakeBus();
-    server = createServer({ bus, port: 0 });
+    server = createTestServer(bus, { port: 0 });
     await server.start();
 
     const { res } = await openRequest(server.port, '/events');
@@ -283,7 +378,7 @@ describe('@on-par/factory-server', () => {
 
   it('start() resolves with the actually bound port, matching server.port', async () => {
     const bus = createFakeBus();
-    server = createServer({ bus, port: 0 });
+    server = createTestServer(bus, { port: 0 });
     const resolvedPort = await server.start();
     expect(resolvedPort).toBeGreaterThan(0);
     expect(Number.isInteger(resolvedPort)).toBe(true);
@@ -292,22 +387,22 @@ describe('@on-par/factory-server', () => {
 
   it('start() rejects when the port is already bound', async () => {
     const bus = createFakeBus();
-    server = createServer({ bus, port: 0 });
+    server = createTestServer(bus, { port: 0 });
     await server.start();
 
-    const conflicting = createServer({ bus, port: server.port });
+    const conflicting = createTestServer(bus, { port: server.port });
     await expect(conflicting.start()).rejects.toThrow();
   });
 
   it('defaults to port 8787 when none is configured', () => {
     const bus = createFakeBus();
-    server = createServer({ bus });
+    server = createTestServer(bus);
     expect(server.port).toBe(8787);
   });
 
   it('falls back to the desired port when server.address() is not an AddressInfo', async () => {
     const bus = createFakeBus();
-    server = createServer({ bus, port: 0 });
+    server = createTestServer(bus, { port: 0 });
     vi.spyOn(server.server, 'address').mockReturnValueOnce(null);
     const port = await server.start();
     expect(port).toBe(0);
@@ -316,7 +411,7 @@ describe('@on-par/factory-server', () => {
 
   it('falls back to the desired port when server.address() returns a pipe string', async () => {
     const bus = createFakeBus();
-    server = createServer({ bus, port: 0 });
+    server = createTestServer(bus, { port: 0 });
     vi.spyOn(server.server, 'address').mockReturnValueOnce('/tmp/factory.sock');
     const port = await server.start();
     expect(port).toBe(0);
@@ -324,7 +419,7 @@ describe('@on-par/factory-server', () => {
 
   it('falls back to "/" when req.url is undefined', async () => {
     const bus = createFakeBus();
-    server = createServer({ bus, port: 0 });
+    server = createTestServer(bus, { port: 0 });
     await server.start();
 
     const res = { writeHead: vi.fn(), end: vi.fn() };
@@ -335,7 +430,7 @@ describe('@on-par/factory-server', () => {
 
   it('swallows write errors on a response after it has disconnected', async () => {
     const bus = createFakeBus();
-    server = createServer({ bus, port: 0 });
+    server = createTestServer(bus, { port: 0 });
     await server.start();
 
     class FakeResponse extends EventEmitter {
