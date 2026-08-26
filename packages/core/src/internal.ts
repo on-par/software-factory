@@ -87,6 +87,14 @@ export type {
 } from './phases/board-queue-dispatch.js';
 export { createBoardQueueDispatcher } from './phases/board-queue-dispatch.js';
 
+// ProjectV2 queue-intent scheduler (#867)
+export type {
+  BoardQueueScheduler,
+  BoardQueueSchedulerOptions,
+  ProjectQueueProjectionReader,
+} from './phases/board-queue-scheduler.js';
+export { createBoardQueueScheduler } from './phases/board-queue-scheduler.js';
+
 // Local-small harness
 export type {
   OvernightItemOutcome,
