@@ -74,6 +74,9 @@ const PUBLIC_API_KEYS = [
   'createHostedJobStore',
   'runContainerJob',
   'runFakeRunner',
+  'AUTHORITY_REDACTION_MASK',
+  'redactSecrets',
+  'withAuthority',
   // Work requests
   'closedWorkSkipReason',
   'createDefaultWorkSourceRegistry',

@@ -126,6 +126,17 @@ export type {
   PreparedWorkspace,
 } from './hosted/container.js';
 export { runContainerJob } from './hosted/container.js';
+export type {
+  AuthorityBroker,
+  AuthorityCleanupProof,
+  AuthorityFailure,
+  AuthorityMount,
+  AuthorityMountEngine,
+  AuthorityRunOutcome,
+  PrepareAuthorityConfig,
+  ResolvedSecret,
+} from './hosted/authority.js';
+export { AUTHORITY_REDACTION_MASK, redactSecrets, withAuthority } from './hosted/authority.js';
 
 // Work requests
 export type {

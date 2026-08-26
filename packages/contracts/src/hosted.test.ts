@@ -5,6 +5,7 @@ import {
   HostedJobEventSchema,
   HostedJobRequestSchema,
   HostedJobResultSchema,
+  ProviderSessionBundleSchema,
   RunnerLeaseSchema,
   hostedExecEnabled,
   runHostedContractDemo,
@@ -129,6 +130,40 @@ describe('HostedJobResultSchema', () => {
   it('round-trips through serialize/deserialize', () => {
     const raw = serialize(HostedJobResultSchema, baseResult);
     expect(deserialize(HostedJobResultSchema, raw)).toEqual(baseResult);
+  });
+});
+
+describe('ProviderSessionBundleSchema', () => {
+  const baseBundle = {
+    provider: 'codex-oauth',
+    jobId: 'job-1',
+    mountPath: '/root/.codex',
+    secrets: [{ name: 'oauth_token', handle: 'handle-1' }],
+  };
+
+  it.each(['codex-oauth', 'claude-code-oauth', 'opencode-go-oauth', 'pi-dev'] as const)(
+    'parses a fully-populated bundle for provider %s',
+    (provider) => {
+      const bundle = { ...baseBundle, provider };
+      expect(ProviderSessionBundleSchema.parse(bundle)).toEqual(bundle);
+    },
+  );
+
+  it('rejects an unknown provider kind', () => {
+    expect(() => ProviderSessionBundleSchema.parse({ ...baseBundle, provider: 'nope' })).toThrow();
+  });
+
+  it('rejects an empty secrets array', () => {
+    expect(() => ProviderSessionBundleSchema.parse({ ...baseBundle, secrets: [] })).toThrow();
+  });
+
+  it('rejects a secret ref missing handle', () => {
+    expect(() => ProviderSessionBundleSchema.parse({ ...baseBundle, secrets: [{ name: 'oauth_token' }] })).toThrow();
+  });
+
+  it('round-trips through serialize/deserialize', () => {
+    const raw = serialize(ProviderSessionBundleSchema, baseBundle);
+    expect(deserialize(ProviderSessionBundleSchema, raw)).toEqual(baseBundle);
   });
 });
 

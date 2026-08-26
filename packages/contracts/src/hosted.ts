@@ -58,6 +58,32 @@ export const HostedJobResultSchema = z.object({
   finishedAt: z.string(),
 });
 
+export const ProviderKindSchema = z.enum(['codex-oauth', 'claude-code-oauth', 'opencode-go-oauth', 'pi-dev']);
+export type ProviderKind = z.infer<typeof ProviderKindSchema>;
+
+/** A single piece of provider session material referenced by an opaque handle —
+ * never the raw secret. The broker resolves `handle` to real material at mount
+ * time; the handle is safe to persist in a job record. */
+export const ProviderSecretRefSchema = z.object({
+  /** Logical name inside the provider's session, e.g. 'oauth_token', 'refresh_token'. */
+  name: z.string().min(1),
+  /** Opaque broker handle; NEVER the secret value. */
+  handle: z.string().min(1),
+});
+export type ProviderSecretRef = z.infer<typeof ProviderSecretRefSchema>;
+
+/** A job-scoped bundle of provider session material. Scoped to exactly one job
+ * (`jobId`) so it is never ambient/shared runner state, and holds only opaque
+ * secret refs so raw OAuth material is never persisted. */
+export const ProviderSessionBundleSchema = z.object({
+  provider: ProviderKindSchema,
+  jobId: z.string().min(1),
+  /** Where the provider CLI expects its session dir inside the container, e.g. '/root/.codex'. */
+  mountPath: z.string().min(1),
+  secrets: z.array(ProviderSecretRefSchema).min(1),
+});
+export type ProviderSessionBundle = z.infer<typeof ProviderSessionBundleSchema>;
+
 export type HostedJobStatus = z.infer<typeof HostedJobStatusSchema>;
 export type HostedJobRequest = z.infer<typeof HostedJobRequestSchema>;
 export type HostedJobEvent = z.infer<typeof HostedJobEventSchema>;
