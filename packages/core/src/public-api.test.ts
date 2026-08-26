@@ -79,6 +79,10 @@ const PUBLIC_API_KEYS = [
   'AUTHORITY_REDACTION_MASK',
   'redactSecrets',
   'withAuthority',
+  'prepareGitHubAuthority',
+  'prototypeFallbackMint',
+  'redactGitHubCredential',
+  'resolveHostedAuthority',
   // Work requests
   'closedWorkSkipReason',
   'createDefaultWorkSourceRegistry',
