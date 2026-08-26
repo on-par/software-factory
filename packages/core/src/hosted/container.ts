@@ -3,7 +3,7 @@
 // workspace-fs effects sit behind the injected ContainerEngine port so the
 // orchestrator is hermetic and testable with a fake engine; the real
 // docker-CLI adapter lives in docker.ts.
-import type { HostedArtifactRef, HostedJobResult } from '@on-par/contracts';
+import type { HostedArtifactRef, HostedJobOutcome, HostedJobResult } from '@on-par/contracts';
 
 import {
   redactGitHubCredential,
@@ -96,7 +96,7 @@ export interface ContainerJobOutcome {
   ranContainer: boolean;
   containerName?: string;
   exitCode?: number;
-  outcome?: 'completed' | 'failed';
+  outcome?: HostedJobOutcome;
   result?: HostedJobResult;
   cleanup?: ContainerCleanupProof;
   workspaceCommit?: string;
@@ -130,7 +130,21 @@ export async function runContainerJob(
     job.request.repoSlug,
     credential ?? undefined,
   );
-  store.heartbeat(config.jobId, config.leaseId);
+  const hb = store.heartbeat(config.jobId, config.leaseId);
+  if (hb.ok && hb.alreadyTerminal) {
+    const cleanup = await engine.remove(config.jobId, workspace.hostPath);
+    store.recordCleanup(config.jobId, redact(cleanup.evidence));
+    const finalJob = store.get(config.jobId);
+    return {
+      jobId: config.jobId,
+      ranContainer: false,
+      outcome: finalJob?.result?.outcome,
+      result: finalJob?.result ?? undefined,
+      cleanup,
+      workspaceCommit: workspace.clone.commit,
+      trace: 'leased -> canceled before run -> cleaned',
+    };
+  }
 
   let run: ContainerRunResult | undefined;
   let cleanup: ContainerCleanupProof;

@@ -287,6 +287,46 @@ describe('runContainerJob', () => {
     expect(store.get('job-1')).toEqual(before);
   });
 
+  it('skips engine.run and cleans up when the job is canceled before the run (cooperative cancel, #903)', async () => {
+    const { store, leaseId } = leasedStore();
+    const calls: FakeEngineCalls = { preparedJobIds: [], removedJobIds: [], repoSlugs: [], credentials: [] };
+    const engine = createFakeEngine({ exitCode: 0 }, calls);
+    let ranEngineRun = false;
+    engine.run = async (spec) => {
+      ranEngineRun = true;
+      return {
+        containerName: `sf-job-${spec.jobId}`,
+        exitCode: 0,
+        logs: '',
+        timedOut: false,
+      };
+    };
+    // Simulate a control-plane cancel arriving during the async workspace-prep
+    // gap, before the runner's next cooperative heartbeat checkpoint.
+    const originalPrepareWorkspace = engine.prepareWorkspace.bind(engine);
+    engine.prepareWorkspace = async (jobId, payload, repoSlug) => {
+      const prepared = await originalPrepareWorkspace(jobId, payload, repoSlug);
+      store.cancel(jobId, 'operator request');
+      return prepared;
+    };
+
+    const outcome = await runContainerJob(store, engine, {
+      jobId: 'job-1',
+      leaseId,
+      image: 'alpine:3.20',
+      command: ['true'],
+      timeoutMs: 5_000,
+    });
+
+    expect(ranEngineRun).toBe(false);
+    expect(outcome.ranContainer).toBe(false);
+    expect(outcome.outcome).toBe('canceled');
+    expect(outcome.result?.outcome).toBe('canceled');
+    expect(outcome.trace).toBe('leased -> canceled before run -> cleaned');
+    expect(calls.removedJobIds).toEqual(['job-1']);
+    expect(store.get('job-1')?.events.some((event) => event.type === 'cleaned')).toBe(true);
+  });
+
   it('returns ranContainer: false for an unknown job', async () => {
     const store = createHostedJobStore({ now: () => 1_000 });
     const calls: FakeEngineCalls = { preparedJobIds: [], removedJobIds: [], repoSlugs: [], credentials: [] };
