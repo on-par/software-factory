@@ -1,7 +1,7 @@
-import { readFileSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { existsSync, readFileSync } from 'node:fs';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import type { ModelDiagnosis } from '@on-par/factory-core';
 import { getFactoryPaths } from '@on-par/factory-core';
@@ -3173,7 +3173,7 @@ describe('cli', () => {
       ]);
     });
 
-    it('threads ship options plus the run repoRoot, ghRepo, and lane into ship', async () => {
+    it('threads ship options plus the run repoRoot, resolved paths, ghRepo, and lane into ship', async () => {
       const seen: any[] = [];
       await runLane('app', [1, 2], '/repo', 'on-par/software-factory', paths, {
         ship: async (_issue, opts, ctx) => {
@@ -3185,9 +3185,53 @@ describe('cli', () => {
         emitEvent: () => {},
       });
       expect(seen).toEqual([
-        { opts: {}, ctx: { repoRoot: '/repo', ghRepo: 'on-par/software-factory', lane: 'app' } },
-        { opts: {}, ctx: { repoRoot: '/repo', ghRepo: 'on-par/software-factory', lane: 'app' } },
+        { opts: {}, ctx: { repoRoot: '/repo', ghRepo: 'on-par/software-factory', paths, lane: 'app' } },
+        { opts: {}, ctx: { repoRoot: '/repo', ghRepo: 'on-par/software-factory', paths, lane: 'app' } },
       ]);
+    });
+
+    it('keeps daemon state artifacts in the supplied external state root', async () => {
+      const tempRoot = await mkdtemp(join(tmpdir(), 'cli-daemon-state-test-'));
+      const repoRoot = join(tempRoot, 'checkout');
+      const stateRoot = join(tempRoot, 'daemon-state');
+      const daemonPaths = getFactoryPaths(repoRoot, stateRoot);
+      const artifacts = (receivedPaths: typeof daemonPaths) => [
+        receivedPaths.queue,
+        receivedPaths.config,
+        receivedPaths.events,
+        receivedPaths.costs,
+        join(receivedPaths.plans, 'issue-1.md'),
+        join(receivedPaths.reports, 'issue-1.md'),
+        receivedPaths.breaker,
+        receivedPaths.mergeLock,
+        receivedPaths.gitLock,
+        receivedPaths.runLock,
+        receivedPaths.portsLock,
+      ];
+
+      try {
+        await runLane('daemon', [1], repoRoot, 'on-par/software-factory', daemonPaths, {
+          ship: async (_issue, _opts, ctx) => {
+            if (!ctx) throw new Error('runLane did not provide a ship context');
+            for (const artifact of artifacts(ctx.paths)) {
+              await mkdir(dirname(artifact), { recursive: true });
+              await writeFile(artifact, 'external state');
+            }
+            return 'ship-it/1-external-state';
+          },
+          waitMerge: async () => {},
+          pathExists: () => false,
+          emitEvent: () => {},
+        });
+
+        for (const artifact of artifacts(daemonPaths)) {
+          expect(existsSync(artifact)).toBe(true);
+          expect(artifact.startsWith(stateRoot)).toBe(true);
+        }
+        expect(existsSync(join(repoRoot, '.factory'))).toBe(false);
+      } finally {
+        await rm(tempRoot, { recursive: true, force: true });
+      }
     });
 
     it('claims issues one at a time from claimNext and releases each as done on the green path', async () => {

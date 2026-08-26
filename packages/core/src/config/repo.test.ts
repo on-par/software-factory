@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -98,6 +99,15 @@ describe('loadRepoConfig', () => {
     const repoRoot = await tempRepoRoot();
     await writeRepoConfig(repoRoot, { version: 1, models: { plan: 'claude-model' } });
     expect(loadRepoConfig(repoRoot)).toEqual({ version: 1, models: { plan: 'claude-model' } });
+  });
+
+  it('loads configuration from an external state root without creating checkout-local state', async () => {
+    const repoRoot = await tempRepoRoot();
+    const stateRoot = await tempRepoRoot();
+    await writeFile(join(stateRoot, 'config.json'), JSON.stringify({ version: 1, models: { plan: 'claude-model' } }));
+
+    expect(loadRepoConfig(repoRoot, stateRoot)).toEqual({ version: 1, models: { plan: 'claude-model' } });
+    expect(existsSync(join(repoRoot, '.factory'))).toBe(false);
   });
 
   it('parses explicit provider fallback preferences for PLAN and BUILD', async () => {

@@ -93,11 +93,11 @@ function stripRuntimeKeys(raw: Record<string, unknown>): Record<string, unknown>
   return out;
 }
 
-/** Read `<repoRoot>/.factory/config.json`. Returns `null` when the file does not
- *  exist. Throws a descriptive error naming the file path on malformed JSON or a
+/** Read the resolved factory-state `config.json`. Returns `null` when the file does
+ *  not exist. Throws a descriptive error naming the file path on malformed JSON or a
  *  schema violation (typos are rejected loudly via `.strict()` at every level). */
-export function loadRepoConfig(repoRoot: string): RepoFactoryConfig | null {
-  const path = getFactoryPaths(repoRoot).config;
+export function loadRepoConfig(repoRoot: string, stateRoot?: string): RepoFactoryConfig | null {
+  const path = getFactoryPaths(repoRoot, stateRoot).config;
   if (!existsSync(path)) return null;
 
   let raw: unknown;
