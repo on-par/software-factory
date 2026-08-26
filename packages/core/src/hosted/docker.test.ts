@@ -146,4 +146,22 @@ describe('createDockerEngine.remove', () => {
     expect(proof.removed).toBe(true);
     expect(proof.evidence).toContain('no such container');
   });
+
+  it('reports removed: false and surfaces the error when docker ps -a itself fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sf-docker-test-'));
+    const { exec } = fakeExec((call) => {
+      if (call.cmd.startsWith('docker ps -a')) {
+        rejects({ stderr: 'docker daemon not running' });
+      }
+      return { stdout: '', stderr: '' };
+    });
+    const engine = createDockerEngine({ exec, rootDir: root });
+    const workspace = await engine.prepareWorkspace('job-1', 'payload');
+
+    const proof = await engine.remove('job-1', workspace.hostPath);
+
+    expect(proof.removed).toBe(false);
+    expect(proof.evidence).toContain('ps -a check failed');
+    expect(proof.evidence).toContain('docker daemon not running');
+  });
 });

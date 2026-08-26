@@ -84,11 +84,14 @@ export function createDockerEngine(options: DockerEngineOptions): ContainerEngin
       }
 
       let removed = false;
+      let psCheckError: string | undefined;
       try {
         const { stdout } = await exec(`docker ps -a --filter ${quote(`name=${name}`)} --format '{{.ID}}'`, {});
         removed = stdout.trim() === '';
-      } catch {
+      } catch (err) {
+        const execErr = err as PromisifiedExecError;
         removed = false;
+        psCheckError = execErr.stderr ?? String(err);
       }
 
       let workspaceRemoved: boolean;
@@ -99,7 +102,10 @@ export function createDockerEngine(options: DockerEngineOptions): ContainerEngin
         workspaceRemoved = false;
       }
 
-      const evidence = `${removeEvidence}; ps -a ${removed ? 'empty' : 'still shows a match'}; workspace ${workspaceRemoved ? 'removed' : 'removal failed'}`;
+      const psCheckResult = psCheckError
+        ? `ps -a check failed: ${psCheckError}`
+        : `ps -a ${removed ? 'empty' : 'still shows a match'}`;
+      const evidence = `${removeEvidence}; ${psCheckResult}; workspace ${workspaceRemoved ? 'removed' : 'removal failed'}`;
       return { containerName: name, removed, workspaceRemoved, evidence };
     },
   };
