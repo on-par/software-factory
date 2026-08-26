@@ -1,8 +1,8 @@
-// packages/core/src/projects/queue-rationale-audit.ts — Local queue reprioritization audit records (#869).
+// packages/core/src/queue/reprioritization-audit.ts — Local queue reprioritization audit records (#850).
 
 import type { FactoryLogger } from '../logger/index.js';
+import type { ProjectQueueProjection } from '../projects/project-queue-poller.js';
 import type { QueueReprioritizationRecord } from '../types/index.js';
-import type { ProjectQueueProjection } from './project-queue-poller.js';
 
 export interface QueueRationaleAuditor {
   observeAcceptedProjection(projection: ProjectQueueProjection): void;
@@ -12,7 +12,7 @@ export interface QueueRationaleAuditor {
 function logReprioritization(logger: FactoryLogger, record: QueueReprioritizationRecord): void {
   logger
     .child({ issue: record.issueNumber })
-    .info('queue_reprioritized', `Queue order changed from ${record.priorValue} to ${record.newValue}`, {
+    .info('queue_reprioritized', `Queue ${record.field} changed from ${record.priorValue} to ${record.newValue}`, {
       queueReprioritization: record,
     });
 }
@@ -25,17 +25,24 @@ export function createQueueRationaleAuditor(logger: FactoryLogger): QueueRationa
       const priorItemsByIssueId = new Map(priorProjection.items.map((item) => [item.issue.id, item]));
       for (const item of projection.items) {
         const priorItem = priorItemsByIssueId.get(item.issue.id);
-        if (priorItem === undefined || priorItem.order === item.order) continue;
+        if (priorItem === undefined) continue;
 
-        logReprioritization(logger, {
-          issueId: item.issue.id,
-          issueNumber: item.issue.number,
-          field: 'order',
-          priorValue: priorItem.order,
-          newValue: item.order,
-          actorType: 'human',
-          rationale: null,
-        });
+        const changedValues = [
+          ['lane', priorItem.lane, item.lane],
+          ['order', priorItem.order, item.order],
+        ] as const;
+        for (const [field, priorValue, newValue] of changedValues) {
+          if (priorValue === newValue) continue;
+          logReprioritization(logger, {
+            issueId: item.issue.id,
+            issueNumber: item.issue.number,
+            field,
+            priorValue,
+            newValue,
+            actorType: 'human',
+            rationale: null,
+          });
+        }
       }
     }
     priorProjection = projection;

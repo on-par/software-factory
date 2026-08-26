@@ -2,8 +2,8 @@
 
 import type { FactoryLogger } from '../logger/index.js';
 import type { QueueReprioritizationRecord } from '../types/index.js';
+import { createQueueRationaleAuditor } from '../queue/reprioritization-audit.js';
 import type { ProjectQueueIntentItem, ProjectQueueReadDiagnostic, ProjectQueueReader } from './project-queue-reader.js';
-import { createQueueRationaleAuditor } from './queue-rationale-audit.js';
 
 export const DEFAULT_PROJECT_QUEUE_POLL_MS = 30_000;
 
