@@ -125,6 +125,36 @@ function queueOrderLabelSpec(position: number): QueueLabelSpec {
   };
 }
 
+export interface QueueMigrationStep {
+  issue: number;
+  lane: string;
+  /** One-based position within its lane, in queue order. */
+  position: number;
+  /** Label names to apply, in order: [queued, lane, order]. */
+  labels: string[];
+  /** Full specs (name/color/description) for create-if-missing, same order as `labels`. */
+  specs: QueueLabelSpec[];
+}
+
+/** Pure per-lane label/position plan for a legacy-queue migration. First occurrence of a
+ *  lane starts at position 1; identical to the order labels claimNext/list expect. */
+export function planQueueMigration(entries: readonly QueueEntry[]): QueueMigrationStep[] {
+  const positionsByLane = new Map<string, number>();
+  const steps: QueueMigrationStep[] = [];
+  for (const entry of entries) {
+    const routeLabel = laneLabel(entry.lane);
+    const position = (positionsByLane.get(routeLabel) ?? 0) + 1;
+    positionsByLane.set(routeLabel, position);
+    const specs: QueueLabelSpec[] = [
+      { name: QUEUED_LABEL, color: QUEUED_LABEL_COLOR, description: 'Eligible to be claimed by a factory lane' },
+      { name: routeLabel, color: LANE_LABEL_COLOR, description: `Routed to factory lane ${entry.lane}` },
+      queueOrderLabelSpec(position),
+    ];
+    steps.push({ issue: entry.issue, lane: entry.lane, position, labels: specs.map((s) => s.name), specs });
+  }
+  return steps;
+}
+
 function orderedCandidates(lane: string, issues: QueueIssue[]): QueueIssue[] {
   const positions = new Map<number, number>();
   const candidates = issues.map((issue) => {
@@ -336,26 +366,11 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
   }
 
   async function migrateLocalQueue(entries: readonly QueueEntry[]): Promise<void> {
-    const positionsByLane = new Map<string, number>();
-    for (const entry of entries) {
-      const routeLabel = laneLabel(entry.lane);
-      const position = (positionsByLane.get(routeLabel) ?? 0) + 1;
-      positionsByLane.set(routeLabel, position);
-
-      const specs: QueueLabelSpec[] = [
-        { name: QUEUED_LABEL, color: QUEUED_LABEL_COLOR, description: 'Eligible to be claimed by a factory lane' },
-        { name: routeLabel, color: LANE_LABEL_COLOR, description: `Routed to factory lane ${entry.lane}` },
-        queueOrderLabelSpec(position),
-      ];
-      for (const spec of specs) {
+    for (const step of planQueueMigration(entries)) {
+      for (const spec of step.specs) {
         await client.ensureLabel({ owner, repo, ...spec });
       }
-      await client.addLabels({
-        owner,
-        repo,
-        issue_number: entry.issue,
-        labels: specs.map((spec) => spec.name),
-      });
+      await client.addLabels({ owner, repo, issue_number: step.issue, labels: step.labels });
     }
   }
 
