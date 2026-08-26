@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -526,6 +526,15 @@ describe('cli commands (via main dispatch)', () => {
       writeFileSync(paths().config, '{"version":2,"models":{"plan":"x"}}');
       await runMain('init', '--force');
       expect(readFileSync(paths().config, 'utf-8')).toBe(buildInitConfig());
+    });
+
+    it('leaves .factory/ git-clean except the committed config, constitution, .gitignore, and the state/ directory', async () => {
+      await runMain('init');
+      writeFileSync(paths().queue, 'app 1\n');
+
+      expect(readdirSync(paths().root).sort()).toEqual(
+        ['.gitignore', 'config.json', 'constitution.md', 'state'].sort(),
+      );
     });
   });
 
