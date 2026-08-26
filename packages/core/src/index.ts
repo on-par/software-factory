@@ -115,6 +115,18 @@ export type {
 export { createHostedJobStore } from './hosted/store.js';
 export type { FakeRunnerConfig, FakeRunnerOutcome } from './hosted/runner.js';
 export { runFakeRunner } from './hosted/runner.js';
+export type {
+  ContainerCleanupProof,
+  ContainerEngine,
+  ContainerJobConfig,
+  ContainerJobOutcome,
+  ContainerRunResult,
+  ContainerRunSpec,
+  PreparedWorkspace,
+} from './hosted/container.js';
+export { runContainerJob } from './hosted/container.js';
+export type { DockerEngineOptions } from './hosted/docker.js';
+export { createDockerEngine } from './hosted/docker.js';
 
 // Work requests
 export type {

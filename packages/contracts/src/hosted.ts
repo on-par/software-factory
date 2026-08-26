@@ -19,7 +19,15 @@ export const HostedJobRequestSchema = z.object({
   createdAt: z.string(),
 });
 
-export const HostedJobEventTypeSchema = z.enum(['requested', 'leased', 'heartbeat', 'completed', 'failed', 'expired']);
+export const HostedJobEventTypeSchema = z.enum([
+  'requested',
+  'leased',
+  'heartbeat',
+  'completed',
+  'failed',
+  'expired',
+  'cleaned',
+]);
 export const HostedJobEventSeveritySchema = z.enum(['info', 'warn', 'error']);
 
 export const HostedJobEventSchema = z.object({

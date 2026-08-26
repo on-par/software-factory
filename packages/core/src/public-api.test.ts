@@ -71,7 +71,9 @@ const PUBLIC_API_KEYS = [
   'rewriteQueueForDecomposition',
   'validateQueue',
   // Hosted execution (control plane)
+  'createDockerEngine',
   'createHostedJobStore',
+  'runContainerJob',
   'runFakeRunner',
   // Work requests
   'closedWorkSkipReason',

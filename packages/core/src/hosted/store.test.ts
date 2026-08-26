@@ -386,4 +386,33 @@ describe('createHostedJobStore', () => {
     expect(store.get('job-1')?.request.status).toBe('leased');
     expect(store.get('job-2')?.request.status).toBe('done');
   });
+
+  it('records cleanup proof as a lease-free "cleaned" event on a known job', () => {
+    const store = createHostedJobStore({ now: () => 1_000 });
+    store.create(baseJobInput());
+    store.acquireLease({
+      jobId: 'job-1',
+      runnerId: 'r',
+      leaseId: 'lease-1',
+      ttlMs: 60_000,
+      heartbeatIntervalMs: 5_000,
+    });
+    store.complete('job-1', 'lease-1');
+
+    const result = store.recordCleanup('job-1', 'docker rm -f sf-job-job-1 ok');
+    expect(result.ok).toBe(true);
+    const job = store.get('job-1');
+    expect(job?.events.at(-1)).toEqual({
+      jobId: 'job-1',
+      type: 'cleaned',
+      ts: new Date(1_000).toISOString(),
+      severity: 'info',
+      message: 'cleanup proof: docker rm -f sf-job-job-1 ok',
+    });
+  });
+
+  it('returns job-not-found for recordCleanup on an unknown job', () => {
+    const store = createHostedJobStore({ now: () => 1_000 });
+    expect(store.recordCleanup('missing', 'evidence')).toEqual({ ok: false, reason: 'job-not-found' });
+  });
 });
