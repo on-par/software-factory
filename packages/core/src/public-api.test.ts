@@ -235,6 +235,8 @@ const PUBLIC_API_KEYS = [
 ];
 
 const INTERNAL_API_KEYS = [
+  // Local queue reprioritization audit records (#869)
+  'createQueueRationaleAuditor',
   // Daemon-ready ProjectV2 queue intent projection (#866)
   'createProjectQueuePoller',
   'DEFAULT_PROJECT_QUEUE_POLL_MS',
