@@ -70,6 +70,8 @@ const PUBLIC_API_KEYS = [
   'readQueue',
   'rewriteQueueForDecomposition',
   'validateQueue',
+  // Hosted execution (control plane)
+  'createHostedJobStore',
   // Work requests
   'closedWorkSkipReason',
   'createDefaultWorkSourceRegistry',
