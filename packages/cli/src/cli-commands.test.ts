@@ -1275,13 +1275,15 @@ bash scripts/verify.sh
       expect(res).toEqual({ exited: true, code: 2 });
     });
 
-    it('reads the queue, starts lanes, and stops immediately when STOP is present', async () => {
+    it('loudly clears a stale STOP file left over from a prior halt and proceeds through the queue (#811)', async () => {
       writeFileSync(paths().queue, '# header\napp 1\napp 2\ndocs 3\n');
       writeFileSync(paths().stop, '');
       const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
+      expect(existsSync(paths().stop)).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
-      expect(events).toContain('stopped');
+      expect(events).toContain('stop-file-cleared');
+      expect(events).not.toContain('"type":"stopped"');
       expect(events).toContain('run-done');
     });
 

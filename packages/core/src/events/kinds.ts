@@ -125,6 +125,7 @@ export type EventKind =
   | 'size-gate-escalated'
   | 'steering_applied'
   | 'steering_unconsumed'
+  | 'stop-file-cleared'
   | 'stopped'
   | 'stuck'
   | 'supervisor-done'
@@ -281,6 +282,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'size-gate-escalated': { severity: 'warn', isPark: false, isTerminal: false },
   steering_applied: { severity: 'info', isPark: false, isTerminal: false },
   steering_unconsumed: { severity: 'info', isPark: false, isTerminal: false },
+  'stop-file-cleared': { severity: 'warn', isPark: false, isTerminal: false },
   stopped: { severity: 'warn', isPark: false, isTerminal: true, laneStatus: 'stopped' },
   stuck: { severity: 'warn', isPark: true, isTerminal: false },
   'supervisor-done': { severity: 'info', isPark: false, isTerminal: false },
