@@ -162,11 +162,16 @@ export async function runContainerJob(
           });
         } else {
           const why = run.timedOut ? `timed out after ${config.timeoutMs}ms` : `exit ${run.exitCode}`;
-          finalizeResult = store.fail(config.jobId, config.leaseId, redact(`container ${why}: ${run.logs.slice(0, 500)}`), {
-            failurePhase: 'run',
-            exitCode: run.exitCode,
-            logsTail: logTail(run.logs),
-          });
+          finalizeResult = store.fail(
+            config.jobId,
+            config.leaseId,
+            redact(`container ${why}: ${run.logs.slice(0, 500)}`),
+            {
+              failurePhase: 'run',
+              exitCode: run.exitCode,
+              logsTail: logTail(run.logs),
+            },
+          );
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
