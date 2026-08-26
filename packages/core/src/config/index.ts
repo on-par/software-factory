@@ -466,8 +466,8 @@ export function resolveFilingPolicy(config: FactoryConfig): FilingPolicy {
 
 // ---------- Factory state paths ----------
 
-export function getFactoryPaths(repoRoot: string) {
-  const state = resolve(repoRoot, '.factory');
+export function getFactoryPaths(repoRoot: string, stateRoot?: string) {
+  const state = stateRoot === undefined ? resolve(repoRoot, '.factory') : resolve(stateRoot);
   return {
     state,
     queue: resolve(state, 'queue'),

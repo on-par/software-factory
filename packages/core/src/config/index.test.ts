@@ -59,22 +59,44 @@ function writeModelsConfig(dir: string, harness?: string) {
 }
 
 describe('getFactoryPaths', () => {
-  it('stages triage output alongside the live queue path', () => {
+  const expectedPaths = (state: string) => ({
+    state,
+    queue: resolve(state, 'queue'),
+    queueProposed: resolve(state, 'queue.proposed'),
+    events: resolve(state, 'events.ndjson'),
+    logs: resolve(state, 'logs'),
+    plans: resolve(state, 'plans'),
+    reports: resolve(state, 'reports'),
+    mergeLock: resolve(state, 'merge.lock'),
+    gitLock: resolve(state, 'git.lock'),
+    runLock: resolve(state, 'run.lock'),
+    product: resolve(state, 'product'),
+    stop: resolve(state, 'STOP'),
+    costs: resolve(state, 'costs.jsonl'),
+    approvals: resolve(state, 'approvals'),
+    steering: resolve(state, 'steering'),
+    kpiHistory: resolve(state, 'kpi-history.jsonl'),
+    ingestWatermark: resolve(state, 'ingest-watermark'),
+    ports: resolve(state, 'ports.json'),
+    portsLock: resolve(state, 'ports.lock'),
+    proxyState: resolve(state, 'proxy.json'),
+    config: resolve(state, 'config.json'),
+    breaker: resolve(state, 'breaker.json'),
+    reworkHistory: resolve(state, 'rework-history.json'),
+  });
+
+  it('uses the repository-local state root by default', () => {
     const repoRoot = '/tmp/some-repo';
-    const paths = getFactoryPaths(repoRoot);
-    expect(paths.queue).toBe(resolve(repoRoot, '.factory', 'queue'));
-    expect(paths.queueProposed).toBe(resolve(repoRoot, '.factory', 'queue.proposed'));
-    expect(paths.mergeLock).toBe(resolve(repoRoot, '.factory', 'merge.lock'));
-    expect(paths.gitLock).toBe(resolve(repoRoot, '.factory', 'git.lock'));
-    expect(paths.runLock).toBe(resolve(repoRoot, '.factory', 'run.lock'));
-    expect(paths.approvals).toBe(resolve(repoRoot, '.factory', 'approvals'));
-    expect(paths.kpiHistory).toBe(resolve(repoRoot, '.factory', 'kpi-history.jsonl'));
-    expect(paths.ingestWatermark).toBe(resolve(repoRoot, '.factory', 'ingest-watermark'));
-    expect(paths.ports).toBe(resolve(repoRoot, '.factory', 'ports.json'));
-    expect(paths.portsLock).toBe(resolve(repoRoot, '.factory', 'ports.lock'));
-    expect(paths.proxyState).toBe(resolve(repoRoot, '.factory', 'proxy.json'));
-    expect(paths.breaker).toBe(resolve(repoRoot, '.factory', 'breaker.json'));
-    expect(paths.reworkHistory).toBe(resolve(repoRoot, '.factory', 'rework-history.json'));
+    expect(getFactoryPaths(repoRoot)).toEqual(expectedPaths(resolve(repoRoot, '.factory')));
+  });
+
+  it('uses an explicit external state root for every orchestration path', () => {
+    const repoRoot = '/tmp/some-repo';
+    const stateRoot = '/var/lib/factory-state/../factory-state';
+    const paths = getFactoryPaths(repoRoot, stateRoot);
+
+    expect(paths).toEqual(expectedPaths(resolve(stateRoot)));
+    expect(Object.values(paths).every((path) => !path.startsWith(resolve(repoRoot, '.factory')))).toBe(true);
   });
 });
 
