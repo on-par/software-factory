@@ -193,6 +193,10 @@ export {
   writeRegistry,
 } from './daemon/registry.js';
 
+// Daemon lane state resolution (#843)
+export type { DaemonLaneContext } from './daemon/lane-context.js';
+export { createDaemonLaneContext } from './daemon/lane-context.js';
+
 // Daemon control-plane HTTP server (#777)
 export type { FactorydOptions, FactorydServer } from './daemon/factoryd-http.js';
 export { createFactorydServer, DEFAULT_FACTORYD_PORT } from './daemon/factoryd-http.js';
