@@ -29,15 +29,62 @@ function rejects(props: { code?: number; killed?: boolean; stdout?: string; stde
 describe('createDockerEngine.prepareWorkspace', () => {
   it('writes the payload to a temp dir and reports the container path', async () => {
     const root = await mkdtemp(join(tmpdir(), 'sf-docker-test-'));
-    const { exec } = fakeExec(() => ({ stdout: '', stderr: '' }));
+    const { exec } = fakeExec(() => ({ stdout: 'abc123\n', stderr: '' }));
     const engine = createDockerEngine({ exec, rootDir: root });
 
-    const workspace = await engine.prepareWorkspace('job-1', 'the payload');
+    const workspace = await engine.prepareWorkspace('job-1', 'the payload', 'on-par/sound-buddy');
 
     expect(workspace.containerPayloadPath).toBe('/workspace/payload');
     expect(workspace.hostPath.startsWith(root)).toBe(true);
     const written = await readFile(join(workspace.hostPath, 'payload'), 'utf-8');
     expect(written).toBe('the payload');
+  });
+
+  it('clones the repo and resolves the HEAD commit as workspace identity', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sf-docker-test-'));
+    const { exec, calls } = fakeExec((call) =>
+      call.cmd.startsWith('git -C') ? { stdout: 'abc123\n', stderr: '' } : { stdout: '', stderr: '' },
+    );
+    const engine = createDockerEngine({ exec, rootDir: root });
+
+    const workspace = await engine.prepareWorkspace('job-1', 'the payload', 'on-par/sound-buddy');
+
+    expect(calls[0]?.cmd).toBe(
+      `git clone --depth 1 'https://github.com/on-par/sound-buddy.git' '${join(workspace.hostPath, 'repo')}'`,
+    );
+    expect(calls[1]?.cmd).toBe(`git -C '${join(workspace.hostPath, 'repo')}' rev-parse HEAD`);
+    expect(workspace.clone).toEqual({ ok: true, commit: 'abc123' });
+    expect(workspace.containerRepoPath).toBe('/workspace/repo');
+  });
+
+  it('builds the clone URL from an injected cloneUrlFor (auth-injection seam)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sf-docker-test-'));
+    const { exec, calls } = fakeExec(() => ({ stdout: 'abc123\n', stderr: '' }));
+    const engine = createDockerEngine({
+      exec,
+      rootDir: root,
+      cloneUrlFor: (slug) => `git@host:${slug}.git`,
+    });
+
+    await engine.prepareWorkspace('job-1', 'the payload', 'on-par/sound-buddy');
+
+    expect(calls[0]?.cmd).toContain("'git@host:on-par/sound-buddy.git'");
+  });
+
+  it('reports a clone failure as data instead of throwing', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sf-docker-test-'));
+    const { exec } = fakeExec((call) => {
+      if (call.cmd.startsWith('git clone')) {
+        rejects({ stderr: 'fatal: repository not found' });
+      }
+      return { stdout: '', stderr: '' };
+    });
+    const engine = createDockerEngine({ exec, rootDir: root });
+
+    const workspace = await engine.prepareWorkspace('job-1', 'the payload', 'on-par/sound-buddy');
+
+    expect(workspace.clone.ok).toBe(false);
+    expect(workspace.clone.error).toContain('repository not found');
   });
 });
 
@@ -98,8 +145,9 @@ describe('createDockerEngine.run', () => {
 describe('createDockerEngine.remove', () => {
   it('force-removes by name, checks ps -a, and deletes the workspace dir', async () => {
     const root = await mkdtemp(join(tmpdir(), 'sf-docker-test-'));
-    const engine = createDockerEngine({});
-    const workspace = await engine.prepareWorkspace('job-1', 'payload');
+    const { exec: prepExec } = fakeExec(() => ({ stdout: '', stderr: '' }));
+    const engine = createDockerEngine({ exec: prepExec, rootDir: root });
+    const workspace = await engine.prepareWorkspace('job-1', 'payload', 'on-par/sound-buddy');
 
     const { exec, calls } = fakeExec((call) =>
       call.cmd.startsWith('docker ps -a') ? { stdout: '', stderr: '' } : { stdout: '', stderr: '' },
@@ -123,7 +171,7 @@ describe('createDockerEngine.remove', () => {
       call.cmd.startsWith('docker ps -a') ? { stdout: 'abc123', stderr: '' } : { stdout: '', stderr: '' },
     );
     const engine = createDockerEngine({ exec, rootDir: root });
-    const workspace = await engine.prepareWorkspace('job-1', 'payload');
+    const workspace = await engine.prepareWorkspace('job-1', 'payload', 'on-par/sound-buddy');
 
     const proof = await engine.remove('job-1', workspace.hostPath);
 
@@ -139,7 +187,7 @@ describe('createDockerEngine.remove', () => {
       return { stdout: '', stderr: '' };
     });
     const engine = createDockerEngine({ exec, rootDir: root });
-    const workspace = await engine.prepareWorkspace('job-1', 'payload');
+    const workspace = await engine.prepareWorkspace('job-1', 'payload', 'on-par/sound-buddy');
 
     const proof = await engine.remove('job-1', workspace.hostPath);
 
@@ -156,7 +204,7 @@ describe('createDockerEngine.remove', () => {
       return { stdout: '', stderr: '' };
     });
     const engine = createDockerEngine({ exec, rootDir: root });
-    const workspace = await engine.prepareWorkspace('job-1', 'payload');
+    const workspace = await engine.prepareWorkspace('job-1', 'payload', 'on-par/sound-buddy');
 
     const proof = await engine.remove('job-1', workspace.hostPath);
 

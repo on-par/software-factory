@@ -7,11 +7,24 @@ import type { HostedJobResult } from '@on-par/contracts';
 
 import type { HostedJobStore, JobUpdateResult } from './store.js';
 
+export interface CloneOutcome {
+  /** True when the fresh clone succeeded. */
+  ok: boolean;
+  /** Resolved HEAD commit SHA when ok — recorded workspace identity. */
+  commit?: string;
+  /** Failure reason (git stderr / message) when !ok. */
+  error?: string;
+}
+
 export interface PreparedWorkspace {
   /** Absolute host path mounted into the container. */
   hostPath: string;
   /** Path the payload is readable at inside the container, e.g. /workspace/payload. */
   containerPayloadPath: string;
+  /** Path inside the container where the fresh repo clone lives, e.g. /workspace/repo. */
+  containerRepoPath: string;
+  /** Result of cloning repoSlug into the workspace. */
+  clone: CloneOutcome;
 }
 
 export interface ContainerRunSpec {
@@ -40,7 +53,7 @@ export interface ContainerCleanupProof {
 }
 
 export interface ContainerEngine {
-  prepareWorkspace(jobId: string, payload: string): Promise<PreparedWorkspace>;
+  prepareWorkspace(jobId: string, payload: string, repoSlug: string): Promise<PreparedWorkspace>;
   run(spec: ContainerRunSpec): Promise<ContainerRunResult>;
   remove(jobId: string, workspaceHostPath: string): Promise<ContainerCleanupProof>;
 }
@@ -63,6 +76,7 @@ export interface ContainerJobOutcome {
   outcome?: 'completed' | 'failed';
   result?: HostedJobResult;
   cleanup?: ContainerCleanupProof;
+  workspaceCommit?: string;
   trace: string;
 }
 
@@ -83,32 +97,40 @@ export async function runContainerJob(
   }
 
   const mountPath = config.mountPath ?? '/workspace';
-  const workspace = await engine.prepareWorkspace(config.jobId, job.request.taskPayload);
+  const workspace = await engine.prepareWorkspace(config.jobId, job.request.taskPayload, job.request.repoSlug);
   store.heartbeat(config.jobId, config.leaseId);
 
   let run: ContainerRunResult | undefined;
   let cleanup: ContainerCleanupProof;
   let finalizeResult: JobUpdateResult | undefined;
   try {
-    try {
-      run = await engine.run({
-        jobId: config.jobId,
-        image: config.image,
-        command: config.command,
-        workspaceHostPath: workspace.hostPath,
-        mountPath,
-        timeoutMs: config.timeoutMs,
-      });
-      const success = run.exitCode === 0 && !run.timedOut;
-      if (success) {
-        finalizeResult = store.complete(config.jobId, config.leaseId, `container exited 0 (${run.containerName})`);
-      } else {
-        const why = run.timedOut ? `timed out after ${config.timeoutMs}ms` : `exit ${run.exitCode}`;
-        finalizeResult = store.fail(config.jobId, config.leaseId, `container ${why}: ${run.logs.slice(0, 500)}`);
+    if (!workspace.clone.ok) {
+      finalizeResult = store.fail(
+        config.jobId,
+        config.leaseId,
+        `repo clone failed: ${workspace.clone.error ?? 'unknown error'}`,
+      );
+    } else {
+      try {
+        run = await engine.run({
+          jobId: config.jobId,
+          image: config.image,
+          command: config.command,
+          workspaceHostPath: workspace.hostPath,
+          mountPath,
+          timeoutMs: config.timeoutMs,
+        });
+        const success = run.exitCode === 0 && !run.timedOut;
+        if (success) {
+          finalizeResult = store.complete(config.jobId, config.leaseId, `container exited 0 (${run.containerName})`);
+        } else {
+          const why = run.timedOut ? `timed out after ${config.timeoutMs}ms` : `exit ${run.exitCode}`;
+          finalizeResult = store.fail(config.jobId, config.leaseId, `container ${why}: ${run.logs.slice(0, 500)}`);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        finalizeResult = store.fail(config.jobId, config.leaseId, `container run error: ${message}`);
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      finalizeResult = store.fail(config.jobId, config.leaseId, `container run error: ${message}`);
     }
   } finally {
     cleanup = await engine.remove(config.jobId, workspace.hostPath);
@@ -118,6 +140,14 @@ export async function runContainerJob(
   const finalJob = store.get(config.jobId);
   const outcome = finalJob?.result?.outcome;
   const finalizeNote = finalizeResult && !finalizeResult.ok ? ` (finalize rejected: ${finalizeResult.reason})` : '';
+  const cloneNote = workspace.clone.ok
+    ? `cloned ${job.request.repoSlug}@${workspace.clone.commit ?? 'none'}`
+    : 'clone failed';
+  const runNote = run
+    ? `ran ${run.containerName} exit ${run.exitCode}`
+    : workspace.clone.ok
+      ? 'run error'
+      : 'skipped run';
   return {
     jobId: config.jobId,
     ranContainer: run !== undefined,
@@ -126,6 +156,7 @@ export async function runContainerJob(
     outcome,
     result: finalJob?.result ?? undefined,
     cleanup,
-    trace: `leased -> ${run ? `ran ${run.containerName} exit ${run.exitCode}` : 'run error'} -> ${outcome ?? 'unknown'}${finalizeNote} -> cleaned`,
+    workspaceCommit: workspace.clone.commit,
+    trace: `leased -> ${cloneNote} -> ${runNote} -> ${outcome ?? 'unknown'}${finalizeNote} -> cleaned`,
   };
 }

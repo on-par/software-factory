@@ -8,6 +8,7 @@ import { join } from 'node:path';
 
 import { defaultExecFn, type ExecFn } from '../utils/exec.js';
 import type {
+  CloneOutcome,
   ContainerCleanupProof,
   ContainerEngine,
   ContainerRunResult,
@@ -22,6 +23,10 @@ export interface DockerEngineOptions {
   rootDir?: string;
   /** Filename for the payload inside the workspace; default 'payload'. */
   payloadFilename?: string;
+  /** Builds the clone URL for a repo slug; defaults to https://github.com/<slug>.git. */
+  cloneUrlFor?: (repoSlug: string) => string;
+  /** Subdir under the workspace the repo is cloned into; default 'repo'. */
+  repoDirname?: string;
 }
 
 interface PromisifiedExecError {
@@ -40,12 +45,32 @@ function quote(arg: string): string {
 export function createDockerEngine(options: DockerEngineOptions): ContainerEngine {
   const exec = options.exec ?? defaultExecFn;
   const payloadFilename = options.payloadFilename ?? 'payload';
+  const repoDirname = options.repoDirname ?? 'repo';
+  const cloneUrlFor = options.cloneUrlFor ?? ((slug: string) => `https://github.com/${slug}.git`);
 
   return {
-    async prepareWorkspace(_jobId, payload): Promise<PreparedWorkspace> {
+    async prepareWorkspace(_jobId, payload, repoSlug): Promise<PreparedWorkspace> {
       const dir = await mkdtemp(join(options.rootDir ?? tmpdir(), 'sf-job-'));
       await writeFile(join(dir, payloadFilename), payload, 'utf-8');
-      return { hostPath: dir, containerPayloadPath: `/workspace/${payloadFilename}` };
+
+      const repoPath = join(dir, repoDirname);
+      const cloneUrl = cloneUrlFor(repoSlug);
+      let clone: CloneOutcome;
+      try {
+        await exec(`git clone --depth 1 ${quote(cloneUrl)} ${quote(repoPath)}`, {});
+        const { stdout } = await exec(`git -C ${quote(repoPath)} rev-parse HEAD`, {});
+        clone = { ok: true, commit: stdout.trim() };
+      } catch (err) {
+        const execErr = err as PromisifiedExecError;
+        clone = { ok: false, error: execErr.stderr ?? (err instanceof Error ? err.message : String(err)) };
+      }
+
+      return {
+        hostPath: dir,
+        containerPayloadPath: `/workspace/${payloadFilename}`,
+        containerRepoPath: `/workspace/${repoDirname}`,
+        clone,
+      };
     },
 
     async run(spec: ContainerRunSpec): Promise<ContainerRunResult> {
