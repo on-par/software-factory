@@ -114,7 +114,7 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
   return {
     ...actual,
     // Config loaders — return inert values.
-    loadModelsConfig: vi.fn(() => ({}) as any),
+    loadModelsConfig: vi.fn(() => ({ models: {}, tiers: {} }) as any),
     loadRoutesConfig: vi.fn(() => ({}) as any),
     loadFactoryConfigForRepo: vi.fn(() => h.factoryConfig),
     resolveTimeouts: vi.fn(() => ({ plan: 1, build: 1, check: 1, approval: 1 })),
@@ -218,10 +218,13 @@ import {
 } from '@on-par/factory-core/internal';
 
 import {
+  buildInitConfig,
   CliExitError,
   cmdConstitution,
   cmdLand,
   cmdUsage,
+  FACTORY_CONFIG_SCHEMA_URL,
+  formatInitReachability,
   IssueDecomposedError,
   IssueSkippedError,
   main,
@@ -262,6 +265,9 @@ function paths() {
     steering: join(state, 'steering'),
     kpiHistory: join(state, 'kpi-history.jsonl'),
     breaker: join(state, 'breaker.json'),
+    config: join(state, 'config.json'),
+    constitution: join(state, 'constitution.md'),
+    gitignore: join(state, '.gitignore'),
   };
 }
 
@@ -418,6 +424,13 @@ describe('cli commands (via main dispatch)', () => {
   });
 
   describe('init', () => {
+    beforeEach(() => {
+      writeFileSync(
+        join(h.constitutionsDir, '_template.md'),
+        '```markdown\n---\nproduct: <product-name>\n---\n# <Product> Constitution\n```\n',
+      );
+    });
+
     it('creates .factory dirs, the git exclude entry, and a sample queue', async () => {
       const res = await runMain('init');
       expect(res.exited).toBe(false);
@@ -454,6 +467,62 @@ describe('cli commands (via main dispatch)', () => {
       const res = await runMain('init');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('Initialized');
+    });
+
+    it('writes config.json, constitution.md, and .gitignore, then prints a reachability summary', async () => {
+      h.diagnoses = [
+        { reachable: true, tiers: ['worker'] } as any,
+        { reachable: true, tiers: ['worker'] } as any,
+        { reachable: false, tiers: ['worker'] } as any,
+      ];
+      const res = await runMain('init');
+      expect(res.exited).toBe(false);
+
+      expect(existsSync(paths().config)).toBe(true);
+      const config = JSON.parse(readFileSync(paths().config, 'utf-8'));
+      expect(config).toEqual({ $schema: FACTORY_CONFIG_SCHEMA_URL, version: 2 });
+      expect(config.models).toBeUndefined();
+
+      expect(existsSync(paths().constitution)).toBe(true);
+      const constitution = readFileSync(paths().constitution, 'utf-8');
+      const repoName = h.repoRoot.split('/').pop();
+      expect(constitution).toContain(JSON.stringify(repoName));
+
+      expect(existsSync(paths().gitignore)).toBe(true);
+      expect(readFileSync(paths().gitignore, 'utf-8')).toContain('state/');
+
+      expect(logged()).toContain('policy=auto,');
+      expect(logged()).toContain('models reachable');
+    });
+
+    it('is idempotent: a second run without --force leaves an existing config untouched', async () => {
+      const sentinel = '{"version":2,"models":{"plan":"x"}}';
+      writeFileSync(paths().config, sentinel);
+      await runMain('init');
+      expect(readFileSync(paths().config, 'utf-8')).toBe(sentinel);
+      expect(logged()).toContain('leaving as-is');
+    });
+
+    it('--force overwrites an existing config', async () => {
+      writeFileSync(paths().config, '{"version":2,"models":{"plan":"x"}}');
+      await runMain('init', '--force');
+      expect(readFileSync(paths().config, 'utf-8')).toBe(buildInitConfig());
+    });
+  });
+
+  describe('buildInitConfig', () => {
+    it('returns valid pin-free version-2 JSON', () => {
+      const parsed = JSON.parse(buildInitConfig());
+      expect(parsed).toEqual({ $schema: FACTORY_CONFIG_SCHEMA_URL, version: 2 });
+      expect(parsed.models).toBeUndefined();
+      expect(parsed.tiers).toBeUndefined();
+    });
+  });
+
+  describe('formatInitReachability', () => {
+    it('renders policy=auto, K/N models reachable', () => {
+      const diagnoses = [{ reachable: true } as any, { reachable: true } as any, { reachable: false } as any];
+      expect(formatInitReachability(diagnoses)).toBe('policy=auto, 2/3 models reachable');
     });
   });
 

@@ -26,7 +26,8 @@ import {
 
 const RepoFactoryConfigSchema = z
   .object({
-    version: z.literal(1).default(1),
+    $schema: z.string().optional(),
+    version: z.union([z.literal(1), z.literal(2)]).default(1),
     models: z
       .object({
         plan: z.string().optional(),

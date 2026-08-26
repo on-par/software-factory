@@ -186,6 +186,30 @@ describe('loadRepoConfig', () => {
       efficiency: { fastPath: true, maxReworkRounds: 1, perIssueCapUsd: 8 },
     });
   });
+
+  it('accepts a version-2 file with $schema — the shape `factory init` writes — with no pins', async () => {
+    const repoRoot = await tempRepoRoot();
+    await writeRepoConfig(repoRoot, { $schema: 'http://x', version: 2 });
+    expect(loadRepoConfig(repoRoot)).toEqual({ $schema: 'http://x', version: 2 });
+  });
+
+  it('still round-trips a version-1 file unchanged', async () => {
+    const repoRoot = await tempRepoRoot();
+    await writeRepoConfig(repoRoot, { version: 1, models: { plan: 'claude-model' } });
+    expect(loadRepoConfig(repoRoot)).toEqual({ version: 1, models: { plan: 'claude-model' } });
+  });
+
+  it('rejects an unsupported version number', async () => {
+    const repoRoot = await tempRepoRoot();
+    await writeRepoConfig(repoRoot, { version: 3 });
+    expect(() => loadRepoConfig(repoRoot)).toThrow(/\.factory[/\\]config\.json/);
+  });
+
+  it('a zero-file repo (no .factory/config.json) returns null — the factory run zero-file regression guard', async () => {
+    const repoRoot = await tempRepoRoot();
+    expect(existsSync(join(repoRoot, '.factory', 'config.json'))).toBe(false);
+    expect(loadRepoConfig(repoRoot)).toBeNull();
+  });
 });
 
 describe('resolveEfficiencyPolicy', () => {

@@ -253,7 +253,22 @@ export function hasGitHubToken(env: NodeJS.ProcessEnv = process.env, tryToken?: 
 
 // ---------- commands ----------
 
-async function cmdInit() {
+export const FACTORY_CONFIG_SCHEMA_URL =
+  'https://raw.githubusercontent.com/on-par/software-factory/main/packages/config/schema/factory.config.schema.json';
+
+/** The minimal, pin-free repo config `factory init` writes. No model pins → routing
+ *  stays on packaged defaults (policy=auto). Two-space JSON + trailing newline. */
+export function buildInitConfig(): string {
+  return JSON.stringify({ $schema: FACTORY_CONFIG_SCHEMA_URL, version: 2 }, null, 2) + '\n';
+}
+
+/** One-line onboarding reachability summary, e.g. "policy=auto, 3/7 models reachable". */
+export function formatInitReachability(diagnoses: ModelDiagnosis[]): string {
+  const reachable = diagnoses.filter((d) => d.reachable).length;
+  return `policy=auto, ${reachable}/${diagnoses.length} models reachable`;
+}
+
+async function cmdInit(opts: { force?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
   if (!hasGitHubToken()) {
     console.error(chalk.red(`factory: ${missingTokenMessage()}`));
@@ -283,6 +298,50 @@ async function cmdInit() {
 #   docs 66
 `,
     );
+  }
+
+  // Write onboarding files. Idempotent: never clobber an existing file unless --force.
+  const force = opts.force === true;
+  const configPath = paths.config;
+  const constitutionPath = resolve(paths.state, 'constitution.md');
+  const gitignorePath = resolve(paths.state, '.gitignore');
+
+  // Uses an atomic exclusive-create write (flag 'wx') rather than existsSync-then-writeFileSync,
+  // so there is no check-then-act window where a concurrent writer could race this one.
+  const writeIfAbsent = (path: string, content: string, label: string) => {
+    if (force) {
+      writeFileSync(path, content);
+      console.log(chalk.green(`Wrote ${path}`));
+      return;
+    }
+    try {
+      writeFileSync(path, content, { flag: 'wx' });
+      console.log(chalk.green(`Wrote ${path}`));
+    } catch (err: any) {
+      if (err.code === 'EEXIST') {
+        console.log(chalk.yellow(`${label} exists — leaving as-is (use --force to overwrite)`));
+        return;
+      }
+      throw err;
+    }
+  };
+
+  writeIfAbsent(configPath, buildInitConfig(), '.factory/config.json');
+
+  // Constitution scaffold: repo directory basename fills <product-name>/<Product>.
+  const repoName = basename(repoRoot);
+  const template = readFileSync(resolve(getConstitutionsDir(), '_template.md'), 'utf-8');
+  writeIfAbsent(constitutionPath, scaffoldConstitution(template, repoName), '.factory/constitution.md');
+
+  writeIfAbsent(gitignorePath, 'state/\n', '.factory/.gitignore');
+
+  // Doctor-style validation (policy=auto, N models reachable) — informational, never fails init.
+  const modelsConfig = applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot));
+  const registry = new ModelRegistry(modelsConfig);
+  const diagnoses = diagnoseModels(registry, {}, resolveExperimental(), resolveLocalOnly());
+  console.log(formatInitReachability(diagnoses));
+  if (!hasReachableWorker(diagnoses)) {
+    console.log(chalk.yellow('No worker model reachable yet — see `factory doctor` and `factory models --doctor`.'));
   }
 
   console.log(chalk.green(`Initialized ${paths.state}`));
@@ -3698,7 +3757,11 @@ export async function main() {
     .version(getCliVersion())
     .addHelpText('before', PREREQUISITES_TEXT);
 
-  program.command('init').description('Initialize .factory in this repo').action(cmdInit);
+  program
+    .command('init')
+    .description('Initialize .factory in this repo (config, constitution, .gitignore) and validate reachability')
+    .option('--force', 'Overwrite an existing .factory config, constitution, and .gitignore')
+    .action((opts: { force?: boolean }) => cmdInit(opts));
 
   program
     .command('constitution')
