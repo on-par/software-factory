@@ -95,6 +95,21 @@ export type {
 } from './queue/index.js';
 export { parseQueue, readQueue, rewriteQueueForDecomposition, validateQueue } from './queue/index.js';
 
+// Hosted execution (control plane)
+export type {
+  AcquireLeaseInput,
+  CreateHostedJobInput,
+  HostedClock,
+  HostedJobStore,
+  HostedJobStoreOptions,
+  JobLeaseResult,
+  JobUpdateResult,
+  LeaseRejectionReason,
+  StoredHostedJob,
+  UpdateRejectionReason,
+} from './hosted/store.js';
+export { createHostedJobStore } from './hosted/store.js';
+
 // Work requests
 export type {
   WorkRequest,
