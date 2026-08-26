@@ -221,4 +221,169 @@ describe('createHostedJobStore', () => {
       expect(completed.job.request.status).toBe('done');
     }
   });
+
+  it('registers runners and reads them back, refreshing heartbeat (AC#1 registry)', () => {
+    let clock = 1_000;
+    const store = createHostedJobStore({ now: () => clock });
+
+    const registered = store.registerRunner({ runnerId: 'runner-1', capabilities: ['git', 'node'] });
+    expect(registered).toEqual({
+      runnerId: 'runner-1',
+      capabilities: ['git', 'node'],
+      lastHeartbeatAt: new Date(1_000).toISOString(),
+      available: true,
+    });
+    expect(store.getRunner('runner-1')).toEqual(registered);
+    expect(store.listRunners()).toEqual([registered]);
+
+    clock = 2_000;
+    const heartbeat = store.runnerHeartbeat('runner-1');
+    expect(heartbeat?.lastHeartbeatAt).toBe(new Date(2_000).toISOString());
+
+    expect(store.runnerHeartbeat('missing-runner')).toBeUndefined();
+  });
+
+  it('polls only for a capability-compatible job and prevents a second active lease (AC#2 poll)', () => {
+    const store = createHostedJobStore({ now: () => 1_000 });
+    store.create(baseJobInput({ jobId: 'job-needs-docker', requiredCapabilities: ['docker'] }));
+    store.create(baseJobInput({ jobId: 'job-needs-git', requiredCapabilities: ['git'] }));
+    store.registerRunner({ runnerId: 'runner-1', capabilities: ['git', 'node'] });
+
+    const poll = store.pollForLease({
+      runnerId: 'runner-1',
+      capabilities: ['git', 'node'],
+      leaseId: 'lease-1',
+      ttlMs: 60_000,
+      heartbeatIntervalMs: 5_000,
+    });
+    expect(poll.ok).toBe(true);
+    if (poll.ok) {
+      expect(poll.job.request.jobId).toBe('job-needs-git');
+      expect(poll.job.events.some((e) => e.type === 'leased')).toBe(true);
+    }
+    expect(store.getRunner('runner-1')?.available).toBe(false);
+
+    const second = store.pollForLease({
+      runnerId: 'runner-1',
+      capabilities: ['git', 'node'],
+      leaseId: 'lease-2',
+      ttlMs: 60_000,
+      heartbeatIntervalMs: 5_000,
+    });
+    expect(second).toEqual({ ok: false, reason: 'no-match' });
+  });
+
+  it('records a structured result and releases the lease on complete/fail (AC#3 result + release)', () => {
+    const store = createHostedJobStore({ now: () => 1_000 });
+    store.create(baseJobInput());
+    store.acquireLease({
+      jobId: 'job-1',
+      runnerId: 'runner-1',
+      leaseId: 'lease-1',
+      ttlMs: 60_000,
+      heartbeatIntervalMs: 5_000,
+    });
+
+    const completed = store.complete('job-1', 'lease-1', 'done summary');
+    expect(completed.ok).toBe(true);
+    if (completed.ok) {
+      expect(completed.job.result).toMatchObject({
+        jobId: 'job-1',
+        outcome: 'completed',
+        summary: 'done summary',
+      });
+      expect(completed.job.lease).toBeNull();
+    }
+
+    store.create(baseJobInput({ jobId: 'job-2' }));
+    store.acquireLease({
+      jobId: 'job-2',
+      runnerId: 'runner-2',
+      leaseId: 'lease-2',
+      ttlMs: 60_000,
+      heartbeatIntervalMs: 5_000,
+    });
+    const failed = store.fail('job-2', 'lease-2', 'boom');
+    expect(failed.ok).toBe(true);
+    if (failed.ok) {
+      expect(failed.job.result).toMatchObject({ jobId: 'job-2', outcome: 'failed', summary: 'boom' });
+      expect(failed.job.lease).toBeNull();
+    }
+  });
+
+  it('flips the lease-holder runner back to available on a terminal transition', () => {
+    const store = createHostedJobStore({ now: () => 1_000 });
+    store.create(baseJobInput());
+    store.registerRunner({ runnerId: 'runner-1', capabilities: ['git', 'node'] });
+    const poll = store.pollForLease({
+      runnerId: 'runner-1',
+      capabilities: ['git', 'node'],
+      leaseId: 'lease-1',
+      ttlMs: 60_000,
+      heartbeatIntervalMs: 5_000,
+    });
+    expect(poll.ok).toBe(true);
+    expect(store.getRunner('runner-1')?.available).toBe(false);
+
+    store.complete('job-1', 'lease-1');
+    expect(store.getRunner('runner-1')?.available).toBe(true);
+  });
+
+  it('reclaims an expired lease back to requested and makes it leaseable again (AC#5 reclaim)', () => {
+    let clock = 1_000;
+    const store = createHostedJobStore({ now: () => clock });
+    store.create(baseJobInput());
+    store.registerRunner({ runnerId: 'runner-1', capabilities: ['git', 'node'] });
+    store.pollForLease({
+      runnerId: 'runner-1',
+      capabilities: ['git', 'node'],
+      leaseId: 'lease-1',
+      ttlMs: 1_000,
+      heartbeatIntervalMs: 500,
+    });
+
+    clock += 2_000; // past expiresAt
+
+    const reclaimed = store.reclaimExpired();
+    expect(reclaimed).toHaveLength(1);
+    expect(reclaimed[0]?.request.status).toBe('requested');
+    expect(reclaimed[0]?.lease).toBeNull();
+    expect(reclaimed[0]?.events.some((e) => e.type === 'expired' && e.severity === 'warn')).toBe(true);
+    expect(store.getRunner('runner-1')?.available).toBe(true);
+
+    store.registerRunner({ runnerId: 'runner-2', capabilities: ['git', 'node'] });
+    const repoll = store.pollForLease({
+      runnerId: 'runner-2',
+      capabilities: ['git', 'node'],
+      leaseId: 'lease-2',
+      ttlMs: 60_000,
+      heartbeatIntervalMs: 5_000,
+    });
+    expect(repoll.ok).toBe(true);
+  });
+
+  it('leaves a still-valid or terminal lease untouched by reclaimExpired', () => {
+    const store = createHostedJobStore({ now: () => 1_000 });
+    store.create(baseJobInput());
+    store.create(baseJobInput({ jobId: 'job-2' }));
+    store.acquireLease({
+      jobId: 'job-1',
+      runnerId: 'r',
+      leaseId: 'lease-1',
+      ttlMs: 60_000,
+      heartbeatIntervalMs: 5_000,
+    });
+    store.acquireLease({
+      jobId: 'job-2',
+      runnerId: 'r2',
+      leaseId: 'lease-2',
+      ttlMs: 60_000,
+      heartbeatIntervalMs: 5_000,
+    });
+    store.complete('job-2', 'lease-2');
+
+    expect(store.reclaimExpired()).toEqual([]);
+    expect(store.get('job-1')?.request.status).toBe('leased');
+    expect(store.get('job-2')?.request.status).toBe('done');
+  });
 });

@@ -6,11 +6,14 @@
 import {
   HostedJobEventSchema,
   HostedJobRequestSchema,
+  HostedJobResultSchema,
   RunnerLeaseSchema,
   type HostedJobEvent,
   type HostedJobEventSeveritySchema,
   type HostedJobEventTypeSchema,
+  type HostedJobOutcome,
   type HostedJobRequest,
+  type HostedJobResult,
   type RunnerLease,
 } from '@on-par/contracts';
 import type { z } from 'zod';
@@ -25,8 +28,32 @@ export interface StoredHostedJob {
   request: HostedJobRequest;
   lease: RunnerLease | null;
   events: HostedJobEvent[];
+  result: HostedJobResult | null;
   updatedAt: string;
 }
+
+export interface RegisterRunnerInput {
+  runnerId: string;
+  capabilities: string[];
+}
+
+export interface StoredRunner {
+  runnerId: string;
+  capabilities: string[];
+  /** ISO-8601. */
+  lastHeartbeatAt: string;
+  available: boolean;
+}
+
+export interface PollForLeaseInput {
+  runnerId: string;
+  capabilities: string[];
+  leaseId: string;
+  ttlMs: number;
+  heartbeatIntervalMs: number;
+}
+
+export type PollResult = { ok: true; lease: RunnerLease; job: StoredHostedJob } | { ok: false; reason: 'no-match' };
 
 export interface CreateHostedJobInput {
   jobId: string;
@@ -60,8 +87,14 @@ export interface HostedJobStore {
   list(): StoredHostedJob[];
   acquireLease(input: AcquireLeaseInput): JobLeaseResult;
   heartbeat(jobId: string, leaseId: string): JobUpdateResult;
-  complete(jobId: string, leaseId: string): JobUpdateResult;
+  complete(jobId: string, leaseId: string, summary?: string): JobUpdateResult;
   fail(jobId: string, leaseId: string, reason: string): JobUpdateResult;
+  registerRunner(input: RegisterRunnerInput): StoredRunner;
+  getRunner(runnerId: string): StoredRunner | undefined;
+  listRunners(): StoredRunner[];
+  runnerHeartbeat(runnerId: string): StoredRunner | undefined;
+  pollForLease(input: PollForLeaseInput): PollResult;
+  reclaimExpired(): StoredHostedJob[];
 }
 
 type HostedJobEventType = z.infer<typeof HostedJobEventTypeSchema>;
@@ -78,7 +111,31 @@ function isLeaseActive(job: StoredHostedJob, leaseId: string, nowMs: number): bo
 export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobStore {
   const { now } = options;
   const jobs = new Map<string, StoredHostedJob>();
+  const runners = new Map<string, StoredRunner>();
   const iso = (ms: number) => new Date(ms).toISOString();
+
+  function setRunnerAvailable(runnerId: string, available: boolean): void {
+    const runner = runners.get(runnerId);
+    if (runner) {
+      runner.available = available;
+    }
+  }
+
+  function recordResult(job: StoredHostedJob, outcome: HostedJobOutcome, summary: string): void {
+    job.result = HostedJobResultSchema.parse({
+      jobId: job.request.jobId,
+      outcome,
+      summary,
+      finishedAt: iso(now()),
+    });
+  }
+
+  function releaseLease(job: StoredHostedJob): void {
+    if (job.lease) {
+      setRunnerAvailable(job.lease.runnerId, true);
+    }
+    job.lease = null;
+  }
 
   function appendEvent(
     job: StoredHostedJob,
@@ -115,6 +172,49 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
     return { job };
   }
 
+  function acquireLeaseImpl(input: AcquireLeaseInput): JobLeaseResult {
+    const job = jobs.get(input.jobId);
+    if (!job) {
+      return { ok: false, reason: 'job-not-found' };
+    }
+    if (isTerminal(job.request.status)) {
+      return { ok: false, reason: 'job-terminal', job };
+    }
+    if (job.lease !== null && isLeaseActive(job, job.lease.leaseId, now())) {
+      return { ok: false, reason: 'lease-held', job };
+    }
+    const lease = RunnerLeaseSchema.parse({
+      runnerId: input.runnerId,
+      leaseId: input.leaseId,
+      jobId: input.jobId,
+      expiresAt: iso(now() + input.ttlMs),
+      heartbeatIntervalMs: input.heartbeatIntervalMs,
+    });
+    job.lease = lease;
+    job.request.status = 'leased';
+    appendEvent(job, 'leased', 'info', 'lease acquired');
+    return { ok: true, lease, job };
+  }
+
+  function reclaimExpiredImpl(): StoredHostedJob[] {
+    const reclaimed: StoredHostedJob[] = [];
+    for (const job of jobs.values()) {
+      if (isTerminal(job.request.status) || !job.lease) {
+        continue;
+      }
+      if (now() < Date.parse(job.lease.expiresAt)) {
+        continue;
+      }
+      const runnerId = job.lease.runnerId;
+      job.request.status = 'requested';
+      job.lease = null;
+      setRunnerAvailable(runnerId, true);
+      appendEvent(job, 'expired', 'warn', 'lease expired — job returned to retryable state');
+      reclaimed.push(job);
+    }
+    return reclaimed;
+  }
+
   return {
     create(input) {
       if (jobs.has(input.jobId)) {
@@ -125,7 +225,7 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
         status: 'requested',
         createdAt: iso(now()),
       });
-      const job: StoredHostedJob = { request, lease: null, events: [], updatedAt: request.createdAt };
+      const job: StoredHostedJob = { request, lease: null, events: [], result: null, updatedAt: request.createdAt };
       appendEvent(job, 'requested', 'info', 'hosted job requested');
       jobs.set(input.jobId, job);
       return job;
@@ -140,27 +240,7 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
     },
 
     acquireLease(input) {
-      const job = jobs.get(input.jobId);
-      if (!job) {
-        return { ok: false, reason: 'job-not-found' };
-      }
-      if (isTerminal(job.request.status)) {
-        return { ok: false, reason: 'job-terminal', job };
-      }
-      if (job.lease !== null && isLeaseActive(job, job.lease.leaseId, now())) {
-        return { ok: false, reason: 'lease-held', job };
-      }
-      const lease = RunnerLeaseSchema.parse({
-        runnerId: input.runnerId,
-        leaseId: input.leaseId,
-        jobId: input.jobId,
-        expiresAt: iso(now() + input.ttlMs),
-        heartbeatIntervalMs: input.heartbeatIntervalMs,
-      });
-      job.lease = lease;
-      job.request.status = 'leased';
-      appendEvent(job, 'leased', 'info', 'lease acquired');
-      return { ok: true, lease, job };
+      return acquireLeaseImpl(input);
     },
 
     heartbeat(jobId, leaseId) {
@@ -176,7 +256,7 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
       return { ok: true, job, alreadyTerminal: false };
     },
 
-    complete(jobId, leaseId) {
+    complete(jobId, leaseId, summary) {
       const resolved = resolveMutableJob(jobId, leaseId);
       if ('result' in resolved) {
         return resolved.result;
@@ -184,6 +264,8 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
       const { job } = resolved;
       job.request.status = 'done';
       appendEvent(job, 'completed', 'info', 'hosted job completed');
+      recordResult(job, 'completed', summary ?? 'hosted job completed');
+      releaseLease(job);
       return { ok: true, job, alreadyTerminal: false };
     },
 
@@ -195,7 +277,65 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
       const { job } = resolved;
       job.request.status = 'failed';
       appendEvent(job, 'failed', 'error', `hosted job failed: ${reason}`);
+      recordResult(job, 'failed', reason);
+      releaseLease(job);
       return { ok: true, job, alreadyTerminal: false };
+    },
+
+    registerRunner(input) {
+      const runner: StoredRunner = {
+        runnerId: input.runnerId,
+        capabilities: [...input.capabilities],
+        lastHeartbeatAt: iso(now()),
+        available: true,
+      };
+      runners.set(input.runnerId, runner);
+      return runner;
+    },
+
+    getRunner(runnerId) {
+      return runners.get(runnerId);
+    },
+
+    listRunners() {
+      return [...runners.values()];
+    },
+
+    runnerHeartbeat(runnerId) {
+      const runner = runners.get(runnerId);
+      if (!runner) {
+        return undefined;
+      }
+      runner.lastHeartbeatAt = iso(now());
+      return runner;
+    },
+
+    pollForLease(input) {
+      reclaimExpiredImpl();
+      const job = [...jobs.values()].find(
+        (candidate) =>
+          candidate.request.status === 'requested' &&
+          candidate.request.requiredCapabilities.every((capability) => input.capabilities.includes(capability)),
+      );
+      if (!job) {
+        return { ok: false, reason: 'no-match' };
+      }
+      const acquired = acquireLeaseImpl({
+        jobId: job.request.jobId,
+        runnerId: input.runnerId,
+        leaseId: input.leaseId,
+        ttlMs: input.ttlMs,
+        heartbeatIntervalMs: input.heartbeatIntervalMs,
+      });
+      if (!acquired.ok) {
+        return { ok: false, reason: 'no-match' };
+      }
+      setRunnerAvailable(input.runnerId, false);
+      return { ok: true, lease: acquired.lease, job: acquired.job };
+    },
+
+    reclaimExpired() {
+      return reclaimExpiredImpl();
     },
   };
 }
