@@ -1,12 +1,13 @@
 import type { Octokit } from '@octokit/rest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import type { BuildResult } from '../phases/build.js';
 import type { CheckPhaseResult } from '../phases/check.js';
 import type { PlanResult } from '../phases/plan.js';
 import type { ShipResult } from '../phases/ship.js';
 import { ProviderBreaker } from '../router/breaker.js';
-import type { ModelRouter } from '../router/index.js';
+import { ModelRouter } from '../router/index.js';
 import type { CheckSummary, Constitution } from '../types/index.js';
 import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
@@ -58,29 +59,53 @@ function baseRequest(overrides: Partial<RunRequest> = {}): RunRequest {
   };
 }
 
-function fakeRouter(
-  opts: {
-    resolveAll?: (route: string) => string[];
-    providers?: Record<string, string>;
-    harnessId?: string;
-    isCodexModel?: (id: string) => boolean;
-  } = {},
-): ModelRouter {
-  return {
-    resolveAll: opts.resolveAll ?? (() => []),
-    registryRef: {
-      get: (id: string) => (opts.providers?.[id] ? { provider: opts.providers[id] } : undefined),
-      getHarnessId: () => opts.harnessId ?? 'claude-cli',
-      isCodexModel: opts.isCodexModel ?? (() => false),
-    },
-  } as unknown as ModelRouter;
+const ROUTES: RoutesConfig = {
+  version: 1,
+  routes: {
+    build_claude: { tier: 'worker', description: 'stub', requires: 'claude' },
+    build_codex: { tier: 'worker', description: 'stub', requires: 'codex' },
+  },
+};
+
+/** A real ModelRouter (matching the rest of core's tests, e.g. phases/build.test.ts)
+ *  over a minimal in-memory model set — avoids hand-rolling a partial ModelRouter
+ *  double, which the codebase's structural-typing lint forbids for a class this shaped. */
+function fakeRouter(modelDefs: Record<string, { provider: string; codex?: boolean }> = {}): ModelRouter {
+  const models: ModelsConfig = {
+    version: 1,
+    models: Object.fromEntries(
+      Object.entries(modelDefs).map(([id, def]) => [
+        id,
+        {
+          provider: def.provider as ModelsConfig['models'][string]['provider'],
+          tier: 'worker',
+          costPerMtokInput: 0,
+          costPerMtokOutput: 0,
+          contextWindow: 1000,
+          capabilities: [],
+          envKey: null,
+          ...(def.codex ? { codex: true } : {}),
+        },
+      ]),
+    ),
+    tiers: { worker: Object.keys(modelDefs) },
+    failover: { triggers: [], maxRetries: 0, cooldownMs: 0, escalateAfterTierExhausted: false },
+    routingRules: {},
+  };
+  return new ModelRouter(models, ROUTES);
 }
 
 function basePolicy(overrides: Partial<RunPolicy> = {}): RunPolicy {
   return {
-    models: {} as RunPolicy['models'],
-    routes: {} as RunPolicy['routes'],
-    sandbox: undefined as unknown as RunPolicy['sandbox'],
+    models: {
+      version: 1,
+      models: {},
+      tiers: {},
+      failover: { triggers: [], maxRetries: 0, cooldownMs: 0, escalateAfterTierExhausted: false },
+      routingRules: {},
+    },
+    routes: ROUTES,
+    sandbox: { enabled: false, network: { allow: [] }, resources: { cpuMs: 0, memMb: 0 } },
     budget: {},
     effective: {} as RunPolicy['effective'],
     ...overrides,
@@ -125,7 +150,11 @@ describe('runIssue — invariant 1: constitution resolved exactly once', () => {
 
     expect(resolveConstitution).toHaveBeenCalledTimes(1);
     expect(outcome.state).toBe('ready');
-    for (const call of [vi.mocked(planPhase).mock.calls[0], vi.mocked(buildPhase).mock.calls[0], vi.mocked(checkPhase).mock.calls[0]]) {
+    for (const call of [
+      vi.mocked(planPhase).mock.calls[0],
+      vi.mocked(buildPhase).mock.calls[0],
+      vi.mocked(checkPhase).mock.calls[0],
+    ]) {
       expect(call[0].constitution).toBe(constitution);
     }
   });
@@ -173,7 +202,11 @@ describe('runIssue — invariant 2: budget asserted after each phase', () => {
   });
 
   it('never parks when no cap is configured, regardless of spend', async () => {
-    const outcome = await runIssue(baseRequest(), basePolicy({ budget: {} }), basePorts({ getIssueSpend: () => 1_000_000 }));
+    const outcome = await runIssue(
+      baseRequest(),
+      basePolicy({ budget: {} }),
+      basePorts({ getIssueSpend: () => 1_000_000 }),
+    );
     expect(outcome.state).toBe('ready');
   });
 });
@@ -229,7 +262,10 @@ describe('runIssue — invariant 4: a failed lease degrades instead of parking',
     );
 
     expect(outcome.state).toBe('ready');
-    expect(events).toContainEqual(['environment_lease_failed', 'port lease unavailable (port exhausted) — running without injected PORT']);
+    expect(events).toContainEqual([
+      'environment_lease_failed',
+      'port lease unavailable (port exhausted) — running without injected PORT',
+    ]);
     expect(vi.mocked(buildPhase).mock.calls[0][0].appPort).toBeUndefined();
   });
 
@@ -246,9 +282,9 @@ describe('runIssue — invariant 5: one terminal event sequence matching the out
     const log = vi.fn((type: string) => events.push(type));
     const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ events: () => log }));
     expect(outcome.state).toBe('ready');
-    expect(events.filter((t) => ['ready', 'fail', 'escalate', 'held', 'conflict', 'ci-failed', 'timeout'].includes(t))).toEqual([
-      'ready',
-    ]);
+    expect(
+      events.filter((t) => ['ready', 'fail', 'escalate', 'held', 'conflict', 'ci-failed', 'timeout'].includes(t)),
+    ).toEqual(['ready']);
   });
 
   it('emits a single fail event for a parked (check-failed) run', async () => {
@@ -353,7 +389,9 @@ describe('runIssue — reporting hooks', () => {
     const writeBenchmarkArtifacts = vi.fn().mockResolvedValue(undefined);
     await runIssue(baseRequest(), basePolicy(), basePorts({ writeLocalRunReport, writeBenchmarkArtifacts }));
     expect(writeLocalRunReport).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed' }));
-    expect(writeBenchmarkArtifacts).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed', reportPath: '/tmp/report.md' }));
+    expect(writeBenchmarkArtifacts).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'failed', reportPath: '/tmp/report.md' }),
+    );
   });
 
   it('records and clears rework history around a passing CHECK', async () => {
@@ -418,16 +456,24 @@ describe('runIssue — interactive steering, proxy, and pgid tracking', () => {
 
   it('tracks a pgid reported through onPgid in both the tracker and the environment', async () => {
     const recordPgid = vi.fn();
-    const environment: Environment = { port: 4100, env: () => ({}), recordPgid, release: vi.fn().mockResolvedValue(undefined) };
+    const environment: Environment = {
+      port: 4100,
+      env: () => ({}),
+      recordPgid,
+      release: vi.fn().mockResolvedValue(undefined),
+    };
     vi.mocked(buildPhase).mockImplementation(async (opts) => {
       opts.onPgid?.(4321);
       return BUILD_OK;
     });
-    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ acquireEnvironment: async () => environment }));
+    const outcome = await runIssue(
+      baseRequest(),
+      basePolicy(),
+      basePorts({ acquireEnvironment: async () => environment }),
+    );
     expect(outcome.state).toBe('ready');
     expect(recordPgid).toHaveBeenCalledWith(4321);
   });
-
 });
 
 describe('runIssue — provider breaker and failover', () => {
@@ -456,7 +502,11 @@ describe('runIssue — provider breaker and failover', () => {
       return PLAN_OK;
     });
     const breaker = new ProviderBreaker(`/tmp/run-issue-test-breaker-reset-hint.json`);
-    await runIssue(baseRequest({ failover: { enabled: false, cooldownMs: 999, fallbackModel: 'x' } }), basePolicy(), basePorts({ breaker }));
+    await runIssue(
+      baseRequest({ failover: { enabled: false, cooldownMs: 999, fallbackModel: 'x' } }),
+      basePolicy(),
+      basePorts({ breaker }),
+    );
     const status = await breaker.status('anthropic');
     expect(status.open).toBe(true);
     if (status.open) expect(status.remainingMs).toBeGreaterThan(3 * 60 * 60_000);
@@ -467,9 +517,8 @@ describe('runIssue — provider breaker and failover', () => {
     const breaker = new ProviderBreaker(`/tmp/run-issue-test-breaker-gate.json`);
     await breaker.open('anthropic', 'usage_cap', 60_000);
     const router = fakeRouter({
-      resolveAll: (route) => (route === 'build_codex' ? ['gpt-build'] : route === 'build_claude' ? ['claude-build'] : []),
-      providers: { 'claude-build': 'anthropic', 'gpt-build': 'openai' },
-      isCodexModel: (id) => id === 'gpt-build',
+      'claude-build': { provider: 'anthropic' },
+      'gpt-build': { provider: 'openai', codex: true },
     });
     const request = baseRequest({
       failover: { enabled: true, cooldownMs: 60_000, fallbackModel: 'claude-sonnet-5' },
@@ -481,7 +530,7 @@ describe('runIssue — provider breaker and failover', () => {
   it('ignores an override model incompatible with its route and logs model_override_ignored', async () => {
     const events: Array<[string, string]> = [];
     const log = vi.fn((type: string, msg: string) => events.push([type, msg]));
-    const router = fakeRouter({ harnessId: 'claude-cli', isCodexModel: () => false });
+    const router = fakeRouter({ 'claude-only-model': { provider: 'anthropic' } });
     const request = baseRequest({ modelPins: { build: 'claude-only-model', sources: {} } });
     await runIssue(request, basePolicy(), basePorts({ events: () => log, router }));
     expect(events.some(([t, m]) => t === 'model_override_ignored' && m.includes('claude-only-model'))).toBe(true);

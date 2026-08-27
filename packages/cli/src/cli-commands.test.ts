@@ -179,7 +179,11 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
         return fallback;
       };
 
-      const planModel = await preferFallbackWhenProviderIsOpen(request.modelPins.plan, request.modelPins.planFallback, 'PLAN');
+      const planModel = await preferFallbackWhenProviderIsOpen(
+        request.modelPins.plan,
+        request.modelPins.planFallback,
+        'PLAN',
+      );
       const plan = await planPhaseMock({
         issue: request.issue,
         repo: request.repo,
@@ -304,7 +308,9 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
       }
       if (!check.passed) {
         if (check.failureSignature !== undefined) {
-          const failingChecks = check.summary.results.filter((r: any) => r.result === 'FAIL').map((r: any) => r.checker);
+          const failingChecks = check.summary.results
+            .filter((r: any) => r.result === 'FAIL')
+            .map((r: any) => r.checker);
           await ports.reworkHistory?.record(request.issue, check.failureSignature, failingChecks);
         }
         const reason = check.crossRunStuck ? 'held' : check.stuck ? 'escalate' : 'fail';
@@ -330,12 +336,21 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
           checkSummary: check.summary,
           failure: { phase: 'check', reason, message },
         });
-        return { state: 'parked', reason, route: build.route, branch: request.branch, reworkRounds: check.reworkRounds };
+        return {
+          state: 'parked',
+          reason,
+          route: build.route,
+          branch: request.branch,
+          reworkRounds: check.reworkRounds,
+        };
       }
       await ports.reworkHistory?.clear(request.issue);
 
       if (request.localOnly) {
-        log('local-only-complete', `local-only run complete in ${ports.workspace.path} — publishing disabled, no PR created`);
+        log(
+          'local-only-complete',
+          `local-only run complete in ${ports.workspace.path} — publishing disabled, no PR created`,
+        );
         const reportPath = await ports.writeLocalRunReport?.({
           outcome: 'ready',
           route: build.route,
@@ -395,7 +410,13 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
           checkSummary: check.summary,
           failure: { phase: 'ship', reason, message },
         });
-        return { state: 'parked', reason, route: build.route, branch: request.branch, reworkRounds: check.reworkRounds };
+        return {
+          state: 'parked',
+          reason,
+          route: build.route,
+          branch: request.branch,
+          reworkRounds: check.reworkRounds,
+        };
       }
 
       const readyMsg = ship.alreadyDelivered

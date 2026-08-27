@@ -172,9 +172,14 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
   // Every escalated/parked exit reports the same way a thrown park did before the lift:
   // one terminal event (plus a 'stuck' companion for timeouts) and, when hooks are wired,
   // a local run report + benchmark artifacts (Invariant 5).
-  const reportOutcomeFor = (reason: ParkReason): 'failed' | 'escalated' => (reason === 'escalate' ? 'escalated' : 'failed');
+  const reportOutcomeFor = (reason: ParkReason): 'failed' | 'escalated' =>
+    reason === 'escalate' ? 'escalated' : 'failed';
 
-  const writeReports = async (reportOutcome: 'failed' | 'escalated', reason: ParkReason, message: string): Promise<void> => {
+  const writeReports = async (
+    reportOutcome: 'failed' | 'escalated',
+    reason: ParkReason,
+    message: string,
+  ): Promise<void> => {
     const reportPath = await ports.writeLocalRunReport?.({
       outcome: reportOutcome,
       route,
@@ -260,7 +265,10 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       try {
         environment = await ports.acquireEnvironment();
       } catch (err) {
-        log('environment_lease_failed', `port lease unavailable (${errorMessage(err)}) — running without injected PORT`);
+        log(
+          'environment_lease_failed',
+          `port lease unavailable (${errorMessage(err)}) — running without injected PORT`,
+        );
       }
     }
     const appPort = environment?.port;
@@ -286,7 +294,11 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     }
 
     // PLAN
-    const planModel = await preferFallbackWhenProviderIsOpen(request.modelPins.plan, request.modelPins.planFallback, 'PLAN');
+    const planModel = await preferFallbackWhenProviderIsOpen(
+      request.modelPins.plan,
+      request.modelPins.planFallback,
+      'PLAN',
+    );
     const plan = await planPhase({
       issue: request.issue,
       repo: request.repo,
@@ -299,7 +311,9 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       timeoutSeconds: request.timeouts.plan,
       modelOverride: planModel,
       modelFallbacks:
-        planModel === request.modelPins.plan && request.modelPins.planFallback ? [request.modelPins.planFallback] : undefined,
+        planModel === request.modelPins.plan && request.modelPins.planFallback
+          ? [request.modelPins.planFallback]
+          : undefined,
       onProviderFailure: rememberProviderFailure,
       branch: request.branch,
       approvalGate: request.options.approvePlan ? ports.createApprovalGate?.() : undefined,
@@ -456,8 +470,16 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     if (checkBudget) return checkBudget;
 
     if (request.localOnly) {
-      log('local-only-complete', `local-only run complete in ${ports.workspace.path} — publishing disabled, no PR created`);
-      const reportPath = await ports.writeLocalRunReport?.({ outcome: 'ready', route, branch: request.branch, reworkRounds });
+      log(
+        'local-only-complete',
+        `local-only run complete in ${ports.workspace.path} — publishing disabled, no PR created`,
+      );
+      const reportPath = await ports.writeLocalRunReport?.({
+        outcome: 'ready',
+        route,
+        branch: request.branch,
+        reworkRounds,
+      });
       await ports.writeBenchmarkArtifacts?.({
         outcome: 'ready',
         route,

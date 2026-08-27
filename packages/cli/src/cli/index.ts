@@ -1025,7 +1025,15 @@ export async function shipIssue(
   // escalate/held/conflict/ci-failed/timeout) so the LaneParkError this adapter
   // raises below carries the same diagnostic text shipIssue used to throw with —
   // RunOutcome's parked variant carries only the ParkReason enum, not free text.
-  const TERMINAL_EVENT_KINDS = new Set<EventKind>(['ready', 'fail', 'escalate', 'held', 'conflict', 'ci-failed', 'timeout']);
+  const TERMINAL_EVENT_KINDS = new Set<EventKind>([
+    'ready',
+    'fail',
+    'escalate',
+    'held',
+    'conflict',
+    'ci-failed',
+    'timeout',
+  ]);
   let terminalMessage: string | undefined;
   const mkLog =
     (phase?: string) =>
@@ -1176,9 +1184,12 @@ export async function shipIssue(
           port: lease.port,
           env: () => laneEnv(lease.port, process.env),
           recordPgid(pgid: number): void {
-            void recordLeasePgid({ registryFile: paths.ports, lockDir: paths.portsLock, worktreeId: worktree, pgid }).catch(
-              () => {},
-            );
+            void recordLeasePgid({
+              registryFile: paths.ports,
+              lockDir: paths.portsLock,
+              worktreeId: worktree,
+              pgid,
+            }).catch(() => {});
           },
           async release(): Promise<void> {
             await releasePortLease({ registryFile: paths.ports, lockDir: paths.portsLock, worktreeId: worktree });
@@ -1246,7 +1257,10 @@ export async function shipIssue(
           writeFileSync(paths.queue, rewrite.content);
           planLog('decompose_filed', `queue entry for #${issueNum} replaced with ${childList}`);
         } else {
-          planLog('decompose_filed', `#${issueNum} had no queue entry to replace — continuing the lane with ${childList}`);
+          planLog(
+            'decompose_filed',
+            `#${issueNum} had no queue entry to replace — continuing the lane with ${childList}`,
+          );
         }
       } catch (err) {
         planLog('decompose_file_failed', `queue rewrite for #${issueNum} failed: ${errorDetail(err)}`);
