@@ -58,13 +58,20 @@ function baseRequest(overrides: Partial<RunRequest> = {}): RunRequest {
   };
 }
 
-function fakeRouter(): ModelRouter {
+function fakeRouter(
+  opts: {
+    resolveAll?: (route: string) => string[];
+    providers?: Record<string, string>;
+    harnessId?: string;
+    isCodexModel?: (id: string) => boolean;
+  } = {},
+): ModelRouter {
   return {
-    resolveAll: () => [],
+    resolveAll: opts.resolveAll ?? (() => []),
     registryRef: {
-      get: () => undefined,
-      getHarnessId: () => 'claude-cli',
-      isCodexModel: () => false,
+      get: (id: string) => (opts.providers?.[id] ? { provider: opts.providers[id] } : undefined),
+      getHarnessId: () => opts.harnessId ?? 'claude-cli',
+      isCodexModel: opts.isCodexModel ?? (() => false),
     },
   } as unknown as ModelRouter;
 }
@@ -80,13 +87,16 @@ function basePolicy(overrides: Partial<RunPolicy> = {}): RunPolicy {
   };
 }
 
+let breakerFileCounter = 0;
+
 function basePorts(overrides: Partial<RunPorts> = {}): RunPorts {
+  breakerFileCounter += 1;
   return {
     router: fakeRouter(),
     octokit: {} as Octokit,
     workspace: { path: '/tmp/wt', dispose: async () => {} } as Workspace,
     events: () => vi.fn(),
-    breaker: new ProviderBreaker('/tmp/does-not-exist-breaker.json'),
+    breaker: new ProviderBreaker(`/tmp/run-issue-test-breaker-${breakerFileCounter}.json`),
     resolveConstitution: () => null,
     ...overrides,
   };
@@ -373,5 +383,108 @@ describe('runIssue — reporting hooks', () => {
     await runIssue(baseRequest(), basePolicy(), basePorts({ reworkHistory: reworkHistory as never }));
     expect(reworkHistory.record).toHaveBeenCalledWith(1, 'sig-1', ['tests']);
     expect(reworkHistory.clear).not.toHaveBeenCalled();
+  });
+});
+
+describe('runIssue — interactive steering, proxy, and pgid tracking', () => {
+  it('drains steering during BUILD and logs steering_applied when messages are present', async () => {
+    const events: Array<[string, string]> = [];
+    const log = vi.fn((type: string, msg: string) => events.push([type, msg]));
+    const drainSteering = vi.fn(() => ({
+      messages: [{ id: 's1', issue: 1, text: 'do X', queuedAt: '2026-01-01T00:00:00.000Z' }],
+      attachments: [],
+    }));
+    const outcome = await runIssue(
+      baseRequest({ options: { interactive: true, autoRework: true, approvePlan: false, sandboxDisabled: false } }),
+      basePolicy(),
+      basePorts({ events: () => log, drainSteering }),
+    );
+    expect(outcome.state).toBe('ready');
+    expect(drainSteering).toHaveBeenCalled();
+    expect(events.some(([t, m]) => t === 'steering_applied' && m.includes('s1'))).toBe(true);
+    expect(vi.mocked(buildPhase).mock.calls[0][0].steering?.messages).toEqual([
+      { id: 's1', issue: 1, text: 'do X', queuedAt: '2026-01-01T00:00:00.000Z' },
+    ]);
+  });
+
+  it('logs the resolved proxy note when resolveBaseUrl returns one', async () => {
+    const events: Array<[string, string]> = [];
+    const log = vi.fn((type: string, msg: string) => events.push([type, msg]));
+    const resolveBaseUrl = vi.fn(() => ({ baseUrl: 'https://lane.example.test', note: 'stable lane URL' }));
+    await runIssue(baseRequest(), basePolicy(), basePorts({ events: () => log, resolveBaseUrl }));
+    expect(events).toContainEqual(['environment_proxy', 'stable lane URL']);
+    expect(vi.mocked(buildPhase).mock.calls[0][0].appBaseUrl).toBe('https://lane.example.test');
+  });
+
+  it('tracks a pgid reported through onPgid in both the tracker and the environment', async () => {
+    const recordPgid = vi.fn();
+    const environment: Environment = { port: 4100, env: () => ({}), recordPgid, release: vi.fn().mockResolvedValue(undefined) };
+    vi.mocked(buildPhase).mockImplementation(async (opts) => {
+      opts.onPgid?.(4321);
+      return BUILD_OK;
+    });
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ acquireEnvironment: async () => environment }));
+    expect(outcome.state).toBe('ready');
+    expect(recordPgid).toHaveBeenCalledWith(4321);
+  });
+
+});
+
+describe('runIssue — provider breaker and failover', () => {
+  it('opens the breaker and logs provider_breaker_open when a phase reports a provider failure', async () => {
+    const events: Array<[string, string]> = [];
+    const log = vi.fn((type: string, msg: string) => events.push([type, msg]));
+    vi.mocked(planPhase).mockImplementation(async (opts) => {
+      await opts.onProviderFailure?.({ provider: 'anthropic', reason: 'usage_cap' });
+      return PLAN_OK;
+    });
+    const breaker = new ProviderBreaker(`/tmp/run-issue-test-breaker-provider-fail.json`);
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ events: () => log, breaker }));
+    expect(outcome.state).toBe('ready');
+    expect(events.some(([t, m]) => t === 'provider_breaker_open' && m.includes('anthropic'))).toBe(true);
+    const status = await breaker.status('anthropic');
+    expect(status.open).toBe(true);
+  });
+
+  it('honors a provider-reported reset time over the default cooldown', async () => {
+    vi.mocked(planPhase).mockImplementation(async (opts) => {
+      await opts.onProviderFailure?.({
+        provider: 'anthropic',
+        reason: 'usage_cap',
+        detail: 'Resets in 3hr 17min.',
+      });
+      return PLAN_OK;
+    });
+    const breaker = new ProviderBreaker(`/tmp/run-issue-test-breaker-reset-hint.json`);
+    await runIssue(baseRequest({ failover: { enabled: false, cooldownMs: 999, fallbackModel: 'x' } }), basePolicy(), basePorts({ breaker }));
+    const status = await breaker.status('anthropic');
+    expect(status.open).toBe(true);
+    if (status.open) expect(status.remainingMs).toBeGreaterThan(3 * 60 * 60_000);
+  });
+
+  it('gates BUILD on an open codex breaker and reroutes a claude plan to its codex fallback', async () => {
+    vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, route: 'claude' });
+    const breaker = new ProviderBreaker(`/tmp/run-issue-test-breaker-gate.json`);
+    await breaker.open('anthropic', 'usage_cap', 60_000);
+    const router = fakeRouter({
+      resolveAll: (route) => (route === 'build_codex' ? ['gpt-build'] : route === 'build_claude' ? ['claude-build'] : []),
+      providers: { 'claude-build': 'anthropic', 'gpt-build': 'openai' },
+      isCodexModel: (id) => id === 'gpt-build',
+    });
+    const request = baseRequest({
+      failover: { enabled: true, cooldownMs: 60_000, fallbackModel: 'claude-sonnet-5' },
+    });
+    await runIssue(request, basePolicy(), basePorts({ breaker, router }));
+    expect(vi.mocked(buildPhase).mock.calls[0][0]).toMatchObject({ route: 'codex', modelOverride: 'gpt-build' });
+  });
+
+  it('ignores an override model incompatible with its route and logs model_override_ignored', async () => {
+    const events: Array<[string, string]> = [];
+    const log = vi.fn((type: string, msg: string) => events.push([type, msg]));
+    const router = fakeRouter({ harnessId: 'claude-cli', isCodexModel: () => false });
+    const request = baseRequest({ modelPins: { build: 'claude-only-model', sources: {} } });
+    await runIssue(request, basePolicy(), basePorts({ events: () => log, router }));
+    expect(events.some(([t, m]) => t === 'model_override_ignored' && m.includes('claude-only-model'))).toBe(true);
+    expect(vi.mocked(buildPhase).mock.calls[0][0].modelOverride).toBeUndefined();
   });
 });
