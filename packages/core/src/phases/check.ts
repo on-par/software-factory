@@ -326,6 +326,13 @@ async function checkPhaseImpl(opts: {
     log('check', `SKIPPED: ${s.checker} — ${s.details}`);
   }
 
+  // Each failing checker is logged individually, the same way SKIPs are: the parked
+  // outcome only carries an aggregate count, so without this the checker/details pairs
+  // that name WHY a run parked are never surfaced to the operator (#675).
+  for (const f of summary.results.filter((r) => r.result === 'FAIL')) {
+    log('check', `FAILED: ${f.checker} — ${f.details}`);
+  }
+
   if (summary.failures > 0) {
     log('fail', `${summary.failures} check failures after ${reworkRounds} rework rounds — parking`);
   } else {

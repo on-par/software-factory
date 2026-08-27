@@ -1057,6 +1057,11 @@ export async function shipIssue(
       if (type === 'check' && msg.startsWith('SKIPPED: ')) {
         console.error(chalk.yellow(`  SKIP: ${msg.slice('SKIPPED: '.length)}`));
       }
+      // Likewise for each failing checker, so a parked run still names which checker
+      // failed and why — the parked RunOutcome carries only an aggregate count (#675).
+      if (type === 'check' && msg.startsWith('FAILED: ')) {
+        console.error(chalk.red(`  FAIL: ${msg.slice('FAILED: '.length)}`));
+      }
       logEvent(paths.events, type, issueNum, msg, { ...extra, lane, phase });
     };
   const log = mkLog();
