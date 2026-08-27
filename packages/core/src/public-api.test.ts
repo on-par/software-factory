@@ -117,6 +117,10 @@ const PUBLIC_API_KEYS = [
   // Run outcome
   'parkEvents',
   'parkReasonFor',
+  // Run ports (#674)
+  'acquireLaneEnvironment',
+  'localOnlyWorkspace',
+  'worktreeWorkspace',
   // Lifecycle bus (#591)
   'createLifecycleBus',
   'lifecycleBus',
@@ -426,6 +430,7 @@ const TESTING_API_KEYS = [
   'SimModelExecutor',
   'createSimOctokit',
   'createSimWorkspace',
+  'simWorkspace',
   'failOnCall',
   'realSimClock',
   'resolveLatencyMs',
