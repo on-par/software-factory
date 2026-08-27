@@ -112,11 +112,13 @@ function createDeferred<T>(): Deferred<T> {
 interface FakeEngineScript {
   clone?: CloneOutcome;
   run: Promise<ContainerRunResult>;
+  cleanupError?: Error;
 }
 
 interface FakeEngineCalls {
   preparedJobIds: string[];
   credentials: (GitHubCredentialBundle | undefined)[];
+  removed: { jobId: string; workspaceHostPath: string }[];
 }
 
 function createFakeEngine(script: FakeEngineScript, calls: FakeEngineCalls): ContainerEngine {
@@ -132,7 +134,11 @@ function createFakeEngine(script: FakeEngineScript, calls: FakeEngineCalls): Con
       };
     },
     run: () => script.run,
-    async remove(jobId, _workspaceHostPath): Promise<ContainerCleanupProof> {
+    async remove(jobId, workspaceHostPath): Promise<ContainerCleanupProof> {
+      calls.removed.push({ jobId, workspaceHostPath });
+      if (script.cleanupError) {
+        throw script.cleanupError;
+      }
       return {
         containerName: `sf-job-${jobId}`,
         removed: true,
@@ -149,13 +155,13 @@ describe('runDockerRunner', () => {
     vi.useRealTimers();
   });
 
-  it('posts periodic running-state heartbeats while the container is active, then stops without finalizing', async () => {
+  it('posts periodic running-state heartbeats while the container is active, finalizes, then stops', async () => {
     vi.useFakeTimers();
     const store = createHostedJobStore({ now: () => 1_000 });
     store.create(baseJobInput());
 
     const deferred = createDeferred<ContainerRunResult>();
-    const calls: FakeEngineCalls = { preparedJobIds: [], credentials: [] };
+    const calls: FakeEngineCalls = { preparedJobIds: [], credentials: [], removed: [] };
     const engine = createFakeEngine({ run: deferred.promise }, calls);
 
     const outcomePromise = runDockerRunner(store, engine, {
@@ -186,22 +192,31 @@ describe('runDockerRunner', () => {
     expect(outcome.exitCode).toBe(0);
     expect(outcome.logsTail).toBe('ok');
     expect(outcome.heartbeats).toBe(3);
-    expect(outcome.trace).toContain('awaiting terminal report');
+    expect(outcome.terminalReported).toBe(true);
+    expect(outcome.outcome).toBe('completed');
+    expect(outcome.result).toMatchObject({ jobId: 'job-1', outcome: 'completed', exitCode: 0, logsTail: 'ok' });
+    expect(outcome.cleanup).toMatchObject({ removed: true, workspaceRemoved: true });
+    expect(outcome.trace).toContain('completed -> cleaned');
 
     // No further heartbeats after the run resolves and the interval is cleared.
     await vi.advanceTimersByTimeAsync(20_000);
     expect(store.get('job-1')?.events.filter((e) => e.type === 'heartbeat')).toHaveLength(3);
 
-    // The runner never finalizes the job.
     const job = store.get('job-1');
-    expect(job?.request.status).toBe('running');
-    expect(job?.result).toBeNull();
+    expect(job?.request.status).toBe('done');
+    expect(job?.lease).toBeNull();
+    expect(job?.result).toMatchObject({ jobId: 'job-1', outcome: 'completed', exitCode: 0, logsTail: 'ok' });
+    expect(job?.events.at(-1)).toMatchObject({
+      type: 'cleaned',
+      message: 'cleanup proof: removed sf-job-job-1; no container matches name',
+    });
+    expect(calls.removed).toEqual([{ jobId: 'job-1', workspaceHostPath: '/tmp/job-1' }]);
   });
 
-  it('captures a non-zero exit code and timeout flag without finalizing', async () => {
+  it('reports a non-zero exit code and timeout flag as terminal failure', async () => {
     const store = createHostedJobStore({ now: () => 1_000 });
     store.create(baseJobInput());
-    const calls: FakeEngineCalls = { preparedJobIds: [], credentials: [] };
+    const calls: FakeEngineCalls = { preparedJobIds: [], credentials: [], removed: [] };
     const engine = createFakeEngine(
       { run: Promise.resolve({ containerName: 'sf-job-job-1', exitCode: 137, logs: 'boom', timedOut: true }) },
       calls,
@@ -221,14 +236,23 @@ describe('runDockerRunner', () => {
     expect(outcome.exitCode).toBe(137);
     expect(outcome.timedOut).toBe(true);
     expect(outcome.logsTail).toBe('boom');
-    expect(store.get('job-1')?.request.status).toBe('running');
-    expect(store.get('job-1')?.result).toBeNull();
+    expect(outcome.terminalReported).toBe(true);
+    expect(outcome.outcome).toBe('failed');
+    expect(store.get('job-1')?.request.status).toBe('failed');
+    expect(store.get('job-1')?.lease).toBeNull();
+    expect(store.get('job-1')?.result).toMatchObject({
+      outcome: 'failed',
+      failurePhase: 'run',
+      exitCode: 137,
+      logsTail: 'boom',
+    });
+    expect(store.get('job-1')?.events.some((e) => e.type === 'cleaned')).toBe(true);
   });
 
   it('returns leased:false and never touches the container engine when no compatible job exists', async () => {
     const store = createHostedJobStore({ now: () => 1_000 });
     store.create(baseJobInput({ requiredCapabilities: ['docker'] }));
-    const calls: FakeEngineCalls = { preparedJobIds: [], credentials: [] };
+    const calls: FakeEngineCalls = { preparedJobIds: [], credentials: [], removed: [] };
     const engine = createFakeEngine(
       { run: Promise.resolve({ containerName: 'x', exitCode: 0, logs: '', timedOut: false }) },
       calls,
@@ -248,13 +272,15 @@ describe('runDockerRunner', () => {
     expect(outcome.leased).toBe(false);
     expect(outcome.ranContainer).toBe(false);
     expect(outcome.heartbeats).toBe(0);
+    expect(outcome.terminalReported).toBe(false);
     expect(calls.preparedJobIds).toEqual([]);
+    expect(calls.removed).toEqual([]);
   });
 
-  it('reports a redacted clone error and skips running the container when the workspace clone fails', async () => {
+  it('reports a redacted clone error as terminal failure and skips running the container', async () => {
     const store = createHostedJobStore({ now: () => 1_000 });
     store.create(baseJobInput());
-    const calls: FakeEngineCalls = { preparedJobIds: [], credentials: [] };
+    const calls: FakeEngineCalls = { preparedJobIds: [], credentials: [], removed: [] };
     const engine = createFakeEngine(
       {
         clone: { ok: false, error: 'fatal: could not read from remote repository' },
@@ -277,15 +303,165 @@ describe('runDockerRunner', () => {
     expect(outcome.ranContainer).toBe(false);
     expect(outcome.cloneError).toBe('fatal: could not read from remote repository');
     expect(outcome.heartbeats).toBe(1);
+    expect(outcome.terminalReported).toBe(true);
+    expect(outcome.outcome).toBe('failed');
     expect(outcome.trace).toContain('clone failed');
-    expect(store.get('job-1')?.request.status).toBe('running');
-    expect(store.get('job-1')?.result).toBeNull();
+    expect(store.get('job-1')?.request.status).toBe('failed');
+    expect(store.get('job-1')?.lease).toBeNull();
+    expect(store.get('job-1')?.result).toMatchObject({ outcome: 'failed', failurePhase: 'clone' });
+    expect(store.get('job-1')?.events.some((e) => e.type === 'cleaned')).toBe(true);
+    expect(calls.removed).toEqual([{ jobId: 'job-1', workspaceHostPath: '/tmp/job-1' }]);
+  });
+
+  it('reports artifact references on a successful container run', async () => {
+    const store = createHostedJobStore({ now: () => 1_000 });
+    store.create(baseJobInput());
+    const calls: FakeEngineCalls = { preparedJobIds: [], credentials: [], removed: [] };
+    const artifact = { name: 'build.log', ref: '/workspace/build.log', kind: 'log' };
+    const engine = createFakeEngine(
+      {
+        run: Promise.resolve({
+          containerName: 'sf-job-job-1',
+          exitCode: 0,
+          logs: 'ok',
+          timedOut: false,
+          artifacts: [artifact],
+        }),
+      },
+      calls,
+    );
+
+    const outcome = await runDockerRunner(store, engine, {
+      runnerId: 'runner-1',
+      capabilities: ['git', 'node'],
+      leaseId: 'lease-1',
+      ttlMs: 60_000,
+      heartbeatIntervalMs: 5_000,
+      image: 'alpine:3.20',
+      command: ['true'],
+      timeoutMs: 30_000,
+    });
+
+    expect(outcome.result?.artifacts).toEqual([artifact]);
+    expect(store.get('job-1')?.result?.artifacts).toEqual([artifact]);
+  });
+
+  it('records cleanup proof in the outcome and job events', async () => {
+    const store = createHostedJobStore({ now: () => 1_000 });
+    store.create(baseJobInput());
+    const calls: FakeEngineCalls = { preparedJobIds: [], credentials: [], removed: [] };
+    const engine = createFakeEngine(
+      { run: Promise.resolve({ containerName: 'sf-job-job-1', exitCode: 0, logs: 'ok', timedOut: false }) },
+      calls,
+    );
+
+    const outcome = await runDockerRunner(store, engine, {
+      runnerId: 'runner-1',
+      capabilities: ['git', 'node'],
+      leaseId: 'lease-1',
+      ttlMs: 60_000,
+      heartbeatIntervalMs: 5_000,
+      image: 'alpine:3.20',
+      command: ['true'],
+      timeoutMs: 30_000,
+    });
+
+    expect(outcome.cleanup).toMatchObject({
+      containerName: 'sf-job-job-1',
+      removed: true,
+      workspaceRemoved: true,
+      credentialRemoved: true,
+    });
+    expect(store.get('job-1')?.events.at(-1)?.message).toContain('removed sf-job-job-1; no container matches name');
+  });
+
+  it('returns a clean terminal outcome and releases the lease after one successful job', async () => {
+    const store = createHostedJobStore({ now: () => 1_000 });
+    store.create(baseJobInput());
+    const calls: FakeEngineCalls = { preparedJobIds: [], credentials: [], removed: [] };
+    const engine = createFakeEngine(
+      { run: Promise.resolve({ containerName: 'sf-job-job-1', exitCode: 0, logs: 'ok', timedOut: false }) },
+      calls,
+    );
+
+    const outcome = await runDockerRunner(store, engine, {
+      runnerId: 'runner-1',
+      capabilities: ['git', 'node'],
+      leaseId: 'lease-1',
+      ttlMs: 60_000,
+      heartbeatIntervalMs: 5_000,
+      image: 'alpine:3.20',
+      command: ['true'],
+      timeoutMs: 30_000,
+    });
+
+    expect(outcome.terminalReported).toBe(true);
+    expect(outcome.outcome).toBe('completed');
+    expect(store.get('job-1')?.lease).toBeNull();
+    expect(outcome.runner.available).toBe(true);
+  });
+
+  it('fails and records cleanup when the container run rejects', async () => {
+    const store = createHostedJobStore({ now: () => 1_000 });
+    store.create(baseJobInput());
+    const calls: FakeEngineCalls = { preparedJobIds: [], credentials: [], removed: [] };
+    const engine = createFakeEngine({ run: Promise.reject(new Error('docker daemon unavailable')) }, calls);
+
+    const outcome = await runDockerRunner(store, engine, {
+      runnerId: 'runner-1',
+      capabilities: ['git', 'node'],
+      leaseId: 'lease-1',
+      ttlMs: 60_000,
+      heartbeatIntervalMs: 5_000,
+      image: 'alpine:3.20',
+      command: ['true'],
+      timeoutMs: 30_000,
+    });
+
+    expect(outcome.ranContainer).toBe(false);
+    expect(outcome.terminalReported).toBe(true);
+    expect(outcome.outcome).toBe('failed');
+    expect(store.get('job-1')?.request.status).toBe('failed');
+    expect(store.get('job-1')?.result).toMatchObject({ outcome: 'failed', failurePhase: 'run' });
+    expect(store.get('job-1')?.events.at(-1)?.type).toBe('cleaned');
+  });
+
+  it('exits cleanly after terminal reporting when cleanup throws', async () => {
+    const store = createHostedJobStore({ now: () => 1_000 });
+    store.create(baseJobInput());
+    const calls: FakeEngineCalls = { preparedJobIds: [], credentials: [], removed: [] };
+    const engine = createFakeEngine(
+      {
+        run: Promise.resolve({ containerName: 'sf-job-job-1', exitCode: 0, logs: 'ok', timedOut: false }),
+        cleanupError: new Error('docker remove failed'),
+      },
+      calls,
+    );
+
+    const outcome = await runDockerRunner(store, engine, {
+      runnerId: 'runner-1',
+      capabilities: ['git', 'node'],
+      leaseId: 'lease-1',
+      ttlMs: 60_000,
+      heartbeatIntervalMs: 5_000,
+      image: 'alpine:3.20',
+      command: ['true'],
+      timeoutMs: 30_000,
+    });
+
+    expect(outcome.terminalReported).toBe(true);
+    expect(outcome.outcome).toBe('completed');
+    expect(outcome.cleanup).toBeUndefined();
+    expect(outcome.cleanupError).toBe('docker remove failed');
+    expect(outcome.trace).toContain('completed -> cleanup failed: docker remove failed');
+    expect(store.get('job-1')?.request.status).toBe('done');
+    expect(store.get('job-1')?.events.some((e) => e.type === 'cleaned')).toBe(false);
   });
 
   it('brokers and redacts a GitHub credential when authority is configured', async () => {
     const store = createHostedJobStore({ now: () => 1_000 });
     store.create(baseJobInput());
-    const calls: FakeEngineCalls = { preparedJobIds: [], credentials: [] };
+    const calls: FakeEngineCalls = { preparedJobIds: [], credentials: [], removed: [] };
     const engine = createFakeEngine(
       {
         run: Promise.resolve({
@@ -314,5 +490,7 @@ describe('runDockerRunner', () => {
     expect(calls.credentials[0]?.token).toBe('super-secret-token');
     expect(outcome.logsTail).not.toContain('super-secret-token');
     expect(outcome.logsTail).toContain('[redacted]');
+    expect(store.get('job-1')?.result?.logsTail).not.toContain('super-secret-token');
+    expect(store.get('job-1')?.events.at(-1)?.message).not.toContain('super-secret-token');
   });
 });
