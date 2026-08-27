@@ -14,6 +14,7 @@ import { checkPhase } from '../phases/check.js';
 import { planPhase } from '../phases/plan.js';
 import { shipPhase } from '../phases/ship.js';
 import { ModelRouter } from '../router/index.js';
+import type { RunPolicy } from '../run/policy.js';
 import type { DesignArtifact } from '../types/index.js';
 import { branchFor, cleanupWorktree, setupWorktree } from '../utils/index.js';
 import { withGitLock } from '../utils/lock.js';
@@ -275,7 +276,14 @@ async function runSimIssue(
     : undefined;
   const routedExecutor = jitter ? new SimJitterExecutor(executor, jitter, phaseOf, clock) : executor;
   const routedOctokit = jitter ? withSimJitter(octokit, jitter, phaseOf, clock) : octokit;
-  const router = new ModelRouter(simModelsConfig(), simRoutesConfig(), false, routedExecutor);
+  const policy: RunPolicy = {
+    models: simModelsConfig(),
+    routes: simRoutesConfig(),
+    sandbox: { enabled: false, network: { allow: [] }, resources: { cpuMs: 300_000, memMb: 4096 } },
+    budget: {},
+    effective: { localOnly: false, allowExperimental: false, codexDisabled: false, branchPrefix: 'ship-it' },
+  };
+  const router = new ModelRouter(policy.models, policy.routes, false, routedExecutor);
   let route: 'codex' | 'claude' | 'opencode' = 'claude';
   let reworkRounds = 0;
   let designArtifact: DesignArtifact | null = null;
