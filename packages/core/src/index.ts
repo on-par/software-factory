@@ -214,6 +214,10 @@ export {
   UNKNOWN_EVENT_TRAITS,
 } from './events/kinds.js';
 
+// Run outcome
+export type { BuildRoute, ParkReason, RunOutcome } from './run/outcome.js';
+export { parkEvents, parkReasonFor } from './run/outcome.js';
+
 // Lifecycle bus (#591)
 export type {
   LaneLifecycleEvent,

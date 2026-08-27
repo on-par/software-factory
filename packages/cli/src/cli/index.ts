@@ -26,10 +26,12 @@ import type {
   LocalOnlyPolicy,
   ModelDiagnosis,
   PrSource,
+  ParkReason,
   QueueDiagnostic,
   ReadinessInfo,
   ReapedLease,
   RepoFactoryConfig,
+  RunOutcome,
   SandboxPolicy,
   UsageReading,
   WorkRequest,
@@ -83,6 +85,8 @@ import {
   mergedPrRefs,
   ModelRegistry,
   ModelRouter,
+  parkEvents,
+  parkReasonFor,
   parseKpiHistory,
   parseQueue,
   parseResetCooldownMs,
@@ -907,37 +911,20 @@ async function cmdTui() {
   });
 }
 
-export type ParkReason = Extract<EventKind, 'escalate' | 'timeout' | 'fail' | 'conflict' | 'ci-failed' | 'held'>;
+export type { ParkReason, RunOutcome } from '@on-par/factory-core';
+export { parkEvents, parkReasonFor } from '@on-par/factory-core';
 
 export class LaneParkError extends Error {
-  constructor(
-    message: string,
-    readonly reason: ParkReason,
-  ) {
+  readonly outcome: Extract<RunOutcome, { state: 'parked' }>;
+
+  constructor(message: string, reason: ParkReason) {
     super(message);
+    this.outcome = { state: 'parked', reason };
   }
-}
 
-export function parkReasonFor(err: unknown): ParkReason {
-  if (err instanceof LaneParkError) return err.reason;
-  if (err instanceof LandConflictError) return 'conflict';
-  if (err instanceof CiFailedError) return 'ci-failed';
-  if ((err as any)?.reason === 'timeout') return 'timeout';
-  return 'fail';
-}
-
-/** Terminal events to emit when a run parks. A timeout park additionally emits
- *  an explicit 'stuck' event so stuckRate observes runs that exceeded their
- *  phase timeout (#428). The other stuck condition — identical checker failures
- *  across consecutive rework rounds — is emitted by the check phase itself. */
-export function parkEvents(err: unknown): { type: EventKind; msg: string }[] {
-  const reason = parkReasonFor(err);
-  const msg = err instanceof Error ? err.message : String(err);
-  const events: { type: EventKind; msg: string }[] = [{ type: reason, msg }];
-  if (reason === 'timeout') {
-    events.push({ type: 'stuck', msg: `run exceeded its phase timeout without progressing — ${msg}` });
+  get reason(): ParkReason {
+    return this.outcome.reason;
   }
-  return events;
 }
 
 /** Resolves the stable lane URL a build/check agent should use, by probing whether
@@ -3073,7 +3060,9 @@ export async function squashMergeAndDelete(
   await octokit.rest.git.deleteRef({ owner, repo: repoName, ref: `heads/${branch}` }).catch(() => {});
 }
 
-export class LandConflictError extends Error {}
+export class LandConflictError extends Error {
+  readonly parkReason: ParkReason = 'conflict';
+}
 
 /** The target issue was already resolved before the run started — a clean skip,
  *  not a park. Callers advance to the next queue entry. (#681) */
@@ -3120,6 +3109,8 @@ export class LandFailureError extends Error {
  *  non-passing conclusion. A confirmed failing check must never be merged, admin override
  *  or not. See CiUnverifiedError for the no-verdict case. */
 export class CiFailedError extends Error {
+  readonly parkReason: ParkReason = 'ci-failed';
+
   constructor(
     message: string,
     readonly prNumber: number,
