@@ -162,6 +162,12 @@ export {
   redactGitHubCredential,
   resolveHostedAuthority,
 } from './hosted/github-authority.js';
+export type {
+  ControlPlaneResponse,
+  HostedControlPlaneOptions,
+  HostedControlPlaneServer,
+} from './hosted/control-plane.js';
+export { createHostedControlPlaneServer, handleHostedControlPlaneRequest } from './hosted/control-plane.js';
 
 // Work requests
 export type {

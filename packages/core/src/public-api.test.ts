@@ -86,6 +86,8 @@ const PUBLIC_API_KEYS = [
   'prototypeFallbackMint',
   'redactGitHubCredential',
   'resolveHostedAuthority',
+  'createHostedControlPlaneServer',
+  'handleHostedControlPlaneRequest',
   // Work requests
   'closedWorkSkipReason',
   'createDefaultWorkSourceRegistry',
