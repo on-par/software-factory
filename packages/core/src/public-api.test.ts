@@ -74,6 +74,7 @@ const PUBLIC_API_KEYS = [
   'createHostedJobStore',
   'runContainerJob',
   'runFakeRunner',
+  'runHostedSmoke',
   'runWatchdogSweep',
   'summarizeHostedJob',
   'summarizeHostedJobs',

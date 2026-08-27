@@ -132,6 +132,8 @@ export type {
 export { runContainerJob } from './hosted/container.js';
 export type { HostedJobSummary } from './hosted/summary.js';
 export { summarizeHostedJob, summarizeHostedJobs } from './hosted/summary.js';
+export type { HostedSmokeConfig, HostedSmokeOutcome } from './hosted/smoke.js';
+export { runHostedSmoke } from './hosted/smoke.js';
 export type {
   AuthorityBroker,
   AuthorityCleanupProof,
