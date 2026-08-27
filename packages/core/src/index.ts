@@ -218,6 +218,9 @@ export {
 export type { BuildRoute, ParkReason, RunOutcome } from './run/outcome.js';
 export { parkEvents, parkReasonFor } from './run/outcome.js';
 
+// Run policy
+export type { RunBudget, RunPolicy } from './run/policy.js';
+
 // Lifecycle bus (#591)
 export type {
   LaneLifecycleEvent,

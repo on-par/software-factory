@@ -32,6 +32,7 @@ import type {
   ReapedLease,
   RepoFactoryConfig,
   RunOutcome,
+  RunPolicy,
   SandboxPolicy,
   UsageReading,
   WorkRequest,
@@ -974,23 +975,27 @@ export async function shipIssue(
   const octokit = getOctokit();
 
   const repoConfig = loadRepoConfig(repoRoot, paths.state);
-  const modelsConfig = applyRepoConfig(loadModelsConfig(), repoConfig);
-  const routesConfig = loadRoutesConfig();
   const factoryConfig = loadFactoryConfigForRepo(paths.config);
   const timeouts = resolveTimeouts(factoryConfig);
   const failoverSettings = resolveAutoFailover(factoryConfig);
   const breaker = new ProviderBreaker(paths.breaker);
   const reworkHistory = new ReworkHistory(paths.reworkHistory);
-  const effective = resolveEffectiveConfig(repoConfig);
+  const efficiency = resolveEfficiencyPolicy(repoConfig);
+  const policy: RunPolicy = {
+    models: applyRepoConfig(loadModelsConfig(), repoConfig),
+    routes: loadRoutesConfig(),
+    sandbox: factoryConfig.sandbox,
+    budget: { perIssueCapUsd: efficiency.perIssueCapUsd },
+    effective: resolveEffectiveConfig(repoConfig),
+  };
   const router = new ModelRouter(
-    modelsConfig,
-    routesConfig,
+    policy.models,
+    policy.routes,
     false,
     undefined,
-    effective.allowExperimental,
-    effective.localOnly,
+    policy.effective.allowExperimental,
+    policy.effective.localOnly,
   );
-  const efficiency = resolveEfficiencyPolicy(repoConfig);
   let issueSpend = 0;
   router.setCostSink((entry) => {
     issueSpend += entry.cost;
@@ -1010,10 +1015,10 @@ export async function shipIssue(
       issue: issueNum,
     } satisfies GithubIssueParams));
   const issueTitle = work.title;
-  const branch = branchFor(issueNum, issueTitle, effective.branchPrefix);
+  const branch = branchFor(issueNum, issueTitle, policy.effective.branchPrefix);
   const worktree = ctx?.localOnly
     ? ctx.localOnly.workspace
-    : worktreePathFor(repoRoot, issueNum, effective.branchPrefix);
+    : worktreePathFor(repoRoot, issueNum, policy.effective.branchPrefix);
   const specPath = resolve(paths.plans, `issue-${issueNum}.md`);
   const runStartedAt = new Date().toISOString();
   let route: 'codex' | 'claude' | 'opencode' | undefined;
@@ -1077,8 +1082,8 @@ export async function shipIssue(
     return fallback;
   };
   const assertWithinIssueBudget = (phase: string): void => {
-    if (efficiency.perIssueCapUsd === undefined || issueSpend <= efficiency.perIssueCapUsd) return;
-    const reason = `per-issue budget exceeded after ${phase}: $${issueSpend.toFixed(2)} > $${efficiency.perIssueCapUsd.toFixed(2)}`;
+    if (policy.budget.perIssueCapUsd === undefined || issueSpend <= policy.budget.perIssueCapUsd) return;
+    const reason = `per-issue budget exceeded after ${phase}: $${issueSpend.toFixed(2)} > $${policy.budget.perIssueCapUsd.toFixed(2)}`;
     log('budget_exceeded', reason);
     throw new LaneParkError(reason, 'fail');
   };
@@ -1133,7 +1138,7 @@ export async function shipIssue(
     log('constitution', 'No standards found (no repo instruction files, no constitution) — proceeding without');
   }
 
-  const sandboxPolicy = resolveSandboxPolicy(factoryConfig.sandbox, {
+  const sandboxPolicy = resolveSandboxPolicy(policy.sandbox, {
     worktree,
     repoRoot,
     cliDisabled: opts.sandbox === false,
@@ -1254,7 +1259,7 @@ export async function shipIssue(
         : undefined,
       drainSteering: planApprovalEnabled ? () => drainSteering(paths.steering, issueNum, worktree) : undefined,
       codexDisabled: codexOff,
-      localOnly: effective.localOnly,
+      localOnly: policy.effective.localOnly,
       laneId: lane,
       workSource: ctx?.workSource,
       enforceReadiness: true,
@@ -1366,7 +1371,7 @@ export async function shipIssue(
       appPort,
       appBaseUrl,
       codexDisabled: codexOff || breakerBlocked,
-      localOnly: effective.localOnly,
+      localOnly: policy.effective.localOnly,
       autoFailover: {
         enabled: failoverSettings.enabled,
         fallbackModel: failoverSettings.fallbackModel,
