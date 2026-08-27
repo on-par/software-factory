@@ -3162,7 +3162,12 @@ describe('shipIssue (direct)', () => {
   it('writes a failed local-only run report and logs the park reason on error', async () => {
     trackEnv('FACTORY_LOCAL_ONLY');
     process.env.FACTORY_LOCAL_ONLY = '1';
-    h.checkResult = { passed: false, summary: { results: [], failures: 1 }, reworkRounds: 0 };
+    h.checkResult = {
+      passed: false,
+      summary: { results: [], failures: 1 },
+      reworkRounds: 0,
+      failureSignature: 'sig-1',
+    };
     const core = await import('@on-par/factory-core');
     await expect(shipIssue(5, {}, ctx())).rejects.toBeTruthy();
     const report = vi.mocked(core.writeLocalRunReport).mock.calls.at(-1)?.[0] as any;

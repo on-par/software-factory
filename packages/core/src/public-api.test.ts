@@ -114,6 +114,9 @@ const PUBLIC_API_KEYS = [
   'laneStatusOf',
   'severityOf',
   'UNKNOWN_EVENT_TRAITS',
+  // Run outcome
+  'parkEvents',
+  'parkReasonFor',
   // Lifecycle bus (#591)
   'createLifecycleBus',
   'lifecycleBus',
