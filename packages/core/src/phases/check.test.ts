@@ -450,12 +450,12 @@ describe('checkPhase auto rework', () => {
   );
 
   it(
-    'classifies usage_cap router exhaustion as external and never produces a false stuck',
+    'classifies local auth router exhaustion as external and never produces a false stuck',
     { timeout: 120_000 },
     async () => {
       const { worktree, specPath } = await makeFailingWorktree();
       const stub = new StubModelExecutor({
-        scripts: { build_claude: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }, { fail: 'usage_cap' }] },
+        scripts: { build_claude: [{ fail: 'local_auth' }, { fail: 'local_auth' }, { fail: 'local_auth' }] },
         defaultOutput: 'rework complete',
       });
       const router = new ModelRouter(models, routes, false, stub);
@@ -474,8 +474,8 @@ describe('checkPhase auto rework', () => {
 
       const failedCalls = logCalls.filter(([type]) => type === 'rework_model_failed');
       expect(failedCalls.length).toBeGreaterThan(0);
-      expect(failedCalls[0][1]).toContain('usage_cap');
-      expect(failedCalls[0][2]).toEqual({ failoverReason: 'usage_cap' });
+      expect(failedCalls[0][1]).toContain('local_auth');
+      expect(failedCalls[0][2]).toEqual({ failoverReason: 'local_auth' });
 
       const reworkCalls = logCalls.filter(([type]) => type === 'rework');
       expect(reworkCalls.length).toBeGreaterThan(0);

@@ -187,7 +187,11 @@ ${compactForLocalModel(spec)}
     // These all indicate a provider problem rather than a bad task. Preserve
     // the frozen spec and continue on the other provider when one is available.
     const providerFailure =
-      reason === 'usage_cap' || reason === 'rate_limit' || reason === 'timeout' || reason === 'unavailable';
+      reason === 'usage_cap' ||
+      reason === 'rate_limit' ||
+      reason === 'timeout' ||
+      reason === 'unavailable' ||
+      reason === 'local_auth';
     // Only swap when we actually ran the codex route and it was exhausted on a
     // quota reason. The router only throws after trying every eligible codex
     // worker, so reaching here already means "no Codex-harness worker remains".

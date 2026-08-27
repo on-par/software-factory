@@ -112,6 +112,7 @@ export type FailoverReason =
   | 'error'
   | 'empty_response'
   | 'unavailable'
+  | 'local_auth'
   | 'schema_invalid'
   | 'apply_failed'
   | 'verify_failed'

@@ -26,10 +26,16 @@ describe('isRetryableFailure', () => {
     expect(isRetryableFailure(reason)).toBe(false);
   });
 
-  it.each(['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response', 'unknown'] as const)(
-    'returns true for %s',
-    (reason) => {
-      expect(isRetryableFailure(reason)).toBe(true);
-    },
-  );
+  it.each([
+    'rate_limit',
+    'usage_cap',
+    'timeout',
+    'error',
+    'empty_response',
+    'unavailable',
+    'local_auth',
+    'unknown',
+  ] as const)('returns true for %s', (reason) => {
+    expect(isRetryableFailure(reason)).toBe(true);
+  });
 });
