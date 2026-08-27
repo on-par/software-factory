@@ -1,9 +1,17 @@
 // packages/cli/src/cli/hosted.test.ts
 
 import type { ContainerCleanupProof, ContainerEngine, ContainerRunResult, CloneOutcome } from '@on-par/factory-core';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { cmdHostedSmoke, formatHostedSmokeSummary, runHostedSmokeCli } from './hosted.js';
+import {
+  applyExitCode,
+  cmdHostedSmoke,
+  exitProcess,
+  formatHostedSmokeSummary,
+  resolveDockerAvailable,
+  resolveEngine,
+  runHostedSmokeCli,
+} from './hosted.js';
 
 const FIXED_NOW = () => Date.parse('2026-01-01T00:00:00.000Z');
 
@@ -17,6 +25,7 @@ interface FakeEngineScript {
   logs?: string;
   clone?: CloneOutcome;
   evidence?: string;
+  artifacts?: ContainerRunResult['artifacts'];
 }
 
 interface FakeEngineCalls {
@@ -43,6 +52,7 @@ function createFakeEngine(script: FakeEngineScript, calls: FakeEngineCalls): Con
         exitCode: script.exitCode ?? 0,
         logs: script.logs ?? '',
         timedOut: false,
+        artifacts: script.artifacts,
       };
     },
     async remove(jobId): Promise<ContainerCleanupProof> {
@@ -89,7 +99,14 @@ describe('runHostedSmokeCli', () => {
   it('runs the full smoke path and prints job id, repo, lease id, exit code, log tail, artifact ref, cleanup proof', async () => {
     const { written, out } = outStub();
     const calls: FakeEngineCalls = { prepared: false, ran: false, removed: false };
-    const engine = createFakeEngine({ exitCode: 0, logs: 'hosted-exec-smoke-ok' }, calls);
+    const engine = createFakeEngine(
+      {
+        exitCode: 0,
+        logs: 'hosted-exec-smoke-ok',
+        artifacts: [{ name: 'build.log', kind: 'log', ref: 'artifact-ref-1' }],
+      },
+      calls,
+    );
 
     const result = await runHostedSmokeCli(
       { repo: 'on-par/software-factory', image: 'node:20-alpine' },
@@ -103,8 +120,23 @@ describe('runHostedSmokeCli', () => {
     expect(printed).toContain('smoke-lease-1');
     expect(printed).toContain('exit:     0');
     expect(printed).toContain('hosted-exec-smoke-ok');
+    expect(printed).toContain('artifact-ref-1');
     expect(printed).toContain('cleanup');
     expect(calls).toEqual({ prepared: true, ran: true, removed: true });
+  });
+
+  it('defaults the clock to Date.now when none is injected', async () => {
+    const { written, out } = outStub();
+    const calls: FakeEngineCalls = { prepared: false, ran: false, removed: false };
+    const engine = createFakeEngine({ exitCode: 0 }, calls);
+
+    const result = await runHostedSmokeCli(
+      {},
+      { out, env: { FACTORY_HOSTED_EXEC: '1' }, dockerAvailable: () => true, engine },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(written.join('')).toContain('smoke-job-1');
   });
 
   it('exits 1 when the smoke run fails', async () => {
@@ -152,6 +184,46 @@ describe('formatHostedSmokeSummary', () => {
     const rendered = formatHostedSmokeSummary({ enabled: false, trace: 'hosted execution disabled — x' });
     expect(rendered).toContain('hosted execution disabled');
   });
+
+  it('renders the trace when enabled but no summary was produced (e.g. lease failure)', () => {
+    const rendered = formatHostedSmokeSummary({
+      enabled: true,
+      jobId: 'smoke-job-1',
+      trace: 'lease failed: lease-held',
+    });
+    expect(rendered).toContain('lease failed: lease-held');
+  });
+
+  it('falls back to placeholders for every unset summary/outcome field', () => {
+    const rendered = formatHostedSmokeSummary({
+      enabled: true,
+      trace: 'smoke: leased -> canceled before run -> cleaned',
+      summary: {
+        jobId: 'summary-job-1',
+        repoSlug: 'on-par/software-factory',
+        status: 'leased',
+        outcome: null,
+        summary: null,
+        exitCode: null,
+        failurePhase: null,
+        eventCount: 1,
+        lastEvent: null,
+        artifacts: [],
+        artifactCount: 0,
+        logsTail: null,
+        cleanupProof: null,
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    });
+
+    expect(rendered).toContain('job:      summary-job-1');
+    expect(rendered).toContain('lease:    (none)');
+    expect(rendered).toContain('outcome:  leased');
+    expect(rendered).toContain('exit:     (none)');
+    expect(rendered).toContain('logs:     (none)');
+    expect(rendered).toContain('artifacts: (none)');
+    expect(rendered).toContain('cleanup:  (none)');
+  });
 });
 
 describe('cmdHostedSmoke', () => {
@@ -174,5 +246,57 @@ describe('cmdHostedSmoke', () => {
     }
 
     expect(written.join('')).toContain('FACTORY_HOSTED_EXEC');
+  });
+});
+
+describe('resolveDockerAvailable', () => {
+  it('returns the injected probe when provided', () => {
+    const probe = () => true;
+    expect(resolveDockerAvailable({ dockerAvailable: probe })).toBe(probe);
+  });
+
+  it('falls back to a real isCommandAvailable("docker") probe when none is injected', () => {
+    const probe = resolveDockerAvailable({});
+    expect(typeof probe()).toBe('boolean');
+  });
+});
+
+describe('resolveEngine', () => {
+  it('returns the injected engine when provided', () => {
+    const engine = {} as ContainerEngine;
+    expect(resolveEngine({ engine })).toBe(engine);
+  });
+
+  it('falls back to a real docker-CLI engine when none is injected', () => {
+    const engine = resolveEngine({});
+    expect(typeof engine.prepareWorkspace).toBe('function');
+    expect(typeof engine.run).toBe('function');
+    expect(typeof engine.remove).toBe('function');
+  });
+});
+
+describe('exitProcess', () => {
+  it('calls process.exit with the given code', () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    try {
+      exitProcess(1);
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    } finally {
+      exitSpy.mockRestore();
+    }
+  });
+});
+
+describe('applyExitCode', () => {
+  it('does not call exit for a zero exit code', () => {
+    const exit = vi.fn();
+    applyExitCode(0, exit);
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  it('calls exit with the code for a non-zero exit code', () => {
+    const exit = vi.fn();
+    applyExitCode(1, exit);
+    expect(exit).toHaveBeenCalledWith(1);
   });
 });

@@ -60,6 +60,16 @@ export function formatHostedSmokeSummary(outcome: HostedSmokeOutcome): string {
   return lines.join('\n') + '\n';
 }
 
+/** Default docker-availability probe, injectable for tests. */
+export function resolveDockerAvailable(deps: HostedSmokeCliDeps): () => boolean {
+  return deps.dockerAvailable ?? (() => isCommandAvailable('docker'));
+}
+
+/** Default real docker-CLI engine, injectable for tests. */
+export function resolveEngine(deps: HostedSmokeCliDeps): ContainerEngine {
+  return deps.engine ?? createDockerEngine({});
+}
+
 /** Testable core of the command: gate on the flag, gate on docker availability, run the
  * smoke, print the result. Returns the exit code the CLI wrapper should use. */
 export async function runHostedSmokeCli(
@@ -74,13 +84,13 @@ export async function runHostedSmokeCli(
     return { exitCode: 0 };
   }
 
-  const dockerAvailable = deps.dockerAvailable ?? (() => isCommandAvailable('docker'));
+  const dockerAvailable = resolveDockerAvailable(deps);
   if (!dockerAvailable()) {
     out.write('docker not available — skipping hosted-exec smoke\n');
     return { exitCode: 0 };
   }
 
-  const engine = deps.engine ?? createDockerEngine({});
+  const engine = resolveEngine(deps);
   const outcome = await runHostedSmoke(engine, {
     repoSlug: opts.repo ?? 'on-par/software-factory',
     image: opts.image ?? 'node:20-alpine',
@@ -93,8 +103,18 @@ export async function runHostedSmokeCli(
   return { exitCode: outcome.summary?.outcome === 'completed' ? 0 : 1 };
 }
 
+/** Testable seam for the process exit — defaults to the real process.exit. */
+export function exitProcess(exitCode: number): void {
+  process.exit(exitCode);
+}
+
+/** Applies the CLI exit code, calling `exit` only when it is non-zero. */
+export function applyExitCode(exitCode: number, exit: (code: number) => void = exitProcess): void {
+  if (exitCode !== 0) exit(exitCode);
+}
+
 /** Command entry point wired up to commander. */
 export async function cmdHostedSmoke(opts: HostedSmokeCliOptions): Promise<void> {
   const { exitCode } = await runHostedSmokeCli(opts);
-  if (exitCode !== 0) process.exit(exitCode);
+  applyExitCode(exitCode);
 }
