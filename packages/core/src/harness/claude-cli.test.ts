@@ -314,6 +314,18 @@ describe('ClaudeCliHarness result-envelope usage parsing', () => {
     expect(err.details.exitCode).toBe(0);
   });
 
+  it('rejects unknown command result envelopes as worker errors', async () => {
+    const rec = recordingExec({ stdout: envelope({ result: 'Unknown command: /ship-it' }) });
+    const harness = new ClaudeCliHarness(rec.fn);
+
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('error');
+    expect(err.message).toContain('unknown command');
+    expect(err.details).toMatchObject({ exitCode: 0, stdout: 'Unknown command: /ship-it' });
+  });
+
   it('rejects with reason error when the envelope reports is_error: true, even with a non-empty result', async () => {
     const rec = recordingExec({
       stdout: envelope({ is_error: true, subtype: 'error_max_turns', result: 'partial output before max turns' }),

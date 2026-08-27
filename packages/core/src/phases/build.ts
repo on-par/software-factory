@@ -377,7 +377,7 @@ function buildClaudePrompt(opts: {
   designGrounding?: string;
 }): string {
   const { issue, branch, specPath, constitutionCtx, skipCI, appPort, appBaseUrl, designGrounding } = opts;
-  return `/ship-it ${issue} — Run fully autonomously in headless mode, BUILD phase.
+  return `Run fully autonomously in headless mode for issue #${issue}, BUILD phase.
 You are ALREADY inside the isolated git worktree for issue ${issue} (branch ${branch},
 cwd is this worktree), so SKIP ship-it's worktree-creation step.
 
