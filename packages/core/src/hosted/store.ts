@@ -20,8 +20,6 @@ import {
 } from '@on-par/contracts';
 import type { z } from 'zod';
 
-import { createSqliteHostedJobStore } from './store-sqlite.js';
-
 export type HostedClock = () => number;
 
 export interface HostedJobStoreOptions {
@@ -479,22 +477,4 @@ export function createHostedJobStoreOverPersistence(
 
 export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobStore {
   return createHostedJobStoreOverPersistence(createMemoryPersistence(), options);
-}
-
-export type HostedJobStoreBackend = 'memory' | 'sqlite';
-
-export interface ResolveHostedJobStoreOptions extends HostedJobStoreOptions {
-  /** Storage backend to use. Defaults to 'memory'. */
-  backend?: HostedJobStoreBackend;
-  /** SQLite only. Defaults to ':memory:'. */
-  databasePath?: string;
-}
-
-/** Config-driven adapter selection (#939). Defaults to the in-memory store. */
-export function resolveHostedJobStore(options: ResolveHostedJobStoreOptions): HostedJobStore {
-  const { backend, databasePath, ...storeOptions } = options;
-  if (backend === 'sqlite') {
-    return createSqliteHostedJobStore({ ...storeOptions, databasePath: databasePath ?? ':memory:' });
-  }
-  return createHostedJobStore(storeOptions);
 }

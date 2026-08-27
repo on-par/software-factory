@@ -5,8 +5,8 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { resolveHostedJobStore } from './store.js';
 import { describeHostedJobStoreContract } from './store-contract.js';
+import { resolveHostedJobStore } from './store-resolve.js';
 import { createSqliteHostedJobStore } from './store-sqlite.js';
 
 describeHostedJobStoreContract('sqlite', (options) => createSqliteHostedJobStore(options));
@@ -204,6 +204,6 @@ describe('resolveHostedJobStore (#939)', () => {
       requiredAuthority: 'repo:write',
     });
     expect(store.get('job-1')).toBeDefined();
-    (store as ReturnType<typeof createSqliteHostedJobStore>).close();
+    store.close();
   });
 });

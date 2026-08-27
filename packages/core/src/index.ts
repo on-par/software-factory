@@ -102,7 +102,6 @@ export type {
   HostedClock,
   HostedJobResultDetail,
   HostedJobStore,
-  HostedJobStoreBackend,
   HostedJobStoreOptions,
   JobLeaseResult,
   JobUpdateResult,
@@ -111,14 +110,15 @@ export type {
   PollResult,
   ReclaimJobResult,
   RegisterRunnerInput,
-  ResolveHostedJobStoreOptions,
   StoredHostedJob,
   StoredRunner,
   UpdateRejectionReason,
 } from './hosted/store.js';
-export { createHostedJobStore, resolveHostedJobStore } from './hosted/store.js';
+export { createHostedJobStore } from './hosted/store.js';
 export type { SqliteHostedJobStore, SqliteHostedJobStoreOptions } from './hosted/store-sqlite.js';
 export { createSqliteHostedJobStore } from './hosted/store-sqlite.js';
+export type { HostedJobStoreBackend, ResolveHostedJobStoreOptions } from './hosted/store-resolve.js';
+export { resolveHostedJobStore } from './hosted/store-resolve.js';
 export type { DockerRunnerConfig, DockerRunnerOutcome, FakeRunnerConfig, FakeRunnerOutcome } from './hosted/runner.js';
 export { runDockerRunner, runFakeRunner } from './hosted/runner.js';
 export type { WatchdogEscalation, WatchdogPolicy, WatchdogReport } from './hosted/watchdog.js';
