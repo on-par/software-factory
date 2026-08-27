@@ -1327,7 +1327,7 @@ describe('buildPhase cross-harness failover', () => {
     ]);
   });
 
-  it.each(['usage_cap', 'rate_limit', 'timeout', 'unavailable'] as const)(
+  it.each(['usage_cap', 'rate_limit', 'timeout', 'unavailable', 'local_auth'] as const)(
     'continues a Claude build on Codex when the Claude provider fails with %s',
     async (failure) => {
       const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));

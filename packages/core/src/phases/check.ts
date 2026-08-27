@@ -35,7 +35,7 @@ const MAX_REWORK_ROUNDS = 3;
 const STUCK_THRESHOLD = 2;
 
 /** Provider/CI-level reasons that point away from a factory fault. */
-const EXTERNAL_REASONS = new Set<FailoverReason>(['rate_limit', 'usage_cap', 'timeout', 'unavailable']);
+const EXTERNAL_REASONS = new Set<FailoverReason>(['rate_limit', 'usage_cap', 'timeout', 'unavailable', 'local_auth']);
 
 /** Deterministic signature of the failing checks: name + volatility-stripped detail. */
 function failureSignature(summary: CheckSummary): string {
