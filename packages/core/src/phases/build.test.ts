@@ -323,7 +323,7 @@ describe('buildPhase disablePublish', () => {
     expect(prompt).not.toContain('ready-for-review PR');
   });
 
-  it('claude route without disablePublish still sends the publish prompt (regression pin)', async () => {
+  it('claude route without disablePublish still sends the publish prompt without a slash command prefix', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);
     const specPath = join(worktree, 'issue-509.md');
@@ -343,7 +343,10 @@ describe('buildPhase disablePublish', () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(stub.calls[stub.calls.length - 1].prompt).toContain('/ship-it');
+    const prompt = stub.calls[stub.calls.length - 1].prompt;
+    expect(prompt).toContain('Run fully autonomously in headless mode for issue #509, BUILD phase.');
+    expect(prompt).toContain('open PR exists');
+    expect(prompt).not.toContain('/ship-it');
   });
 
   it('codex route + disablePublish: true keeps the already commit-only prompt unchanged', async () => {
@@ -448,8 +451,9 @@ describe('buildPhase atomic commit policy', () => {
 
     expect(result.ok).toBe(true);
     const prompt = stub.calls[stub.calls.length - 1].prompt;
-    expect(prompt).toContain('/ship-it');
+    expect(prompt).toContain('Run fully autonomously in headless mode for issue #538, BUILD phase.');
     expect(prompt).toContain('Commit atomically');
+    expect(prompt).not.toContain('/ship-it');
   });
 
   it('local-small prompt keeps single-slice one-commit behavior', async () => {

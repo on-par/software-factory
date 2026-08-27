@@ -143,6 +143,12 @@ export class ClaudeCliHarness implements CodingHarness {
     if (output.trim().length === 0) {
       throw new HarnessError('claude CLI returned empty output', 'empty_response', { exitCode: 0 });
     }
+    if (/^Unknown command:/i.test(output.trim())) {
+      throw new HarnessError('claude CLI returned an unknown command response', 'error', {
+        exitCode: 0,
+        stdout: output,
+      });
+    }
     return { output, ...(usage ? { usage } : {}) };
   }
 }
