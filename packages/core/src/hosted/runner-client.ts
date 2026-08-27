@@ -18,6 +18,16 @@ export interface RegisteredRunner {
   lastHeartbeatAt: string;
 }
 
+/** Linear-time trim (no regex) — baseUrl is caller-supplied library input, so a
+ * `/\/+$/`-style pattern would flag as a polynomial-regex-on-untrusted-input risk. */
+function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === '/') {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
+
 export type PollForLeaseResult =
   { ok: true; lease: RunnerLease; job: HostedJobSummary } | { ok: false; reason: 'no-match' };
 
@@ -51,7 +61,7 @@ export interface HttpHostedControlPlaneClientOptions {
 export function createHttpHostedControlPlaneClient(
   options: HttpHostedControlPlaneClientOptions,
 ): HostedControlPlaneClient {
-  const baseUrl = options.baseUrl.replace(/\/+$/, '');
+  const baseUrl = trimTrailingSlashes(options.baseUrl);
   const fetchImpl: HostedControlPlaneFetchFn = options.fetchImpl ?? globalThis.fetch;
 
   async function post(path: string, body: unknown): Promise<unknown> {

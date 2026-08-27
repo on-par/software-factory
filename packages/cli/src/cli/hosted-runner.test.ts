@@ -3,7 +3,7 @@
 import type { HostedControlPlaneClient, OneJobRunnerOutcome } from '@on-par/factory-core';
 import { describe, expect, it, vi } from 'vitest';
 
-import { formatHostedRunnerOutcome, runHostedRunnerCli } from './hosted-runner.js';
+import { cmdHostedRunner, formatHostedRunnerOutcome, runHostedRunnerCli } from './hosted-runner.js';
 
 function outStub() {
   const written: string[] = [];
@@ -94,6 +94,53 @@ describe('runHostedRunnerCli', () => {
 
     expect(exitCode).toBe(0);
     expect(written.join('')).toMatch(/no compatible job/);
+  });
+
+  it('falls back to defaults when numeric option values are invalid or non-positive', async () => {
+    const { out } = outStub();
+    const client = fakeClient();
+
+    let now = 0;
+    const { exitCode } = await runHostedRunnerCli(
+      { timeout: '0', pollInterval: 'nope', leaseTtl: '-5', heartbeatInterval: '0' },
+      {
+        env: { FACTORY_HOSTED_EXEC: '1' },
+        out,
+        client,
+        now: () => now,
+        sleep: async (ms) => {
+          now += ms;
+        },
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(client.pollForLease).toHaveBeenCalledWith(
+      expect.objectContaining({ ttlMs: 300_000, heartbeatIntervalMs: 30_000 }),
+    );
+  });
+});
+
+describe('cmdHostedRunner', () => {
+  it('does not call process.exit when the flag is off (real deps, default exit path)', async () => {
+    const originalEnv = process.env.FACTORY_HOSTED_EXEC;
+    delete process.env.FACTORY_HOSTED_EXEC;
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    const written: string[] = [];
+    process.stdout.write = ((chunk: unknown) => {
+      written.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+
+    try {
+      await cmdHostedRunner({});
+    } finally {
+      process.stdout.write = originalWrite;
+      if (originalEnv === undefined) delete process.env.FACTORY_HOSTED_EXEC;
+      else process.env.FACTORY_HOSTED_EXEC = originalEnv;
+    }
+
+    expect(written.join('')).toContain('FACTORY_HOSTED_EXEC');
   });
 });
 
