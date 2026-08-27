@@ -201,6 +201,21 @@ describe('runIssue — invariant 2: budget asserted after each phase', () => {
     expect(shipPhase).not.toHaveBeenCalled();
   });
 
+  it('reports the budget breach (not the check failure) when both occur after CHECK', async () => {
+    let spend = 0;
+    vi.mocked(checkPhase).mockImplementation(async () => {
+      spend = 2;
+      return { passed: false, summary: CHECK_SUMMARY, reworkRounds: 1, stuck: true };
+    });
+    const outcome = await runIssue(
+      baseRequest(),
+      basePolicy({ budget: { perIssueCapUsd: 1 } }),
+      basePorts({ getIssueSpend: () => spend }),
+    );
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
+    expect(shipPhase).not.toHaveBeenCalled();
+  });
+
   it('never parks when no cap is configured, regardless of spend', async () => {
     const outcome = await runIssue(
       baseRequest(),

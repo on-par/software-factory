@@ -450,6 +450,8 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     });
     checkSummary = check.summary;
     reworkRounds = check.reworkRounds;
+    const checkBudget = await assertBudget('CHECK');
+    if (checkBudget) return checkBudget;
     if (!check.passed) {
       if (check.failureSignature !== undefined) {
         const failingChecks = check.summary.results.filter((r) => r.result === 'FAIL').map((r) => r.checker);
@@ -466,8 +468,6 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     // Clean check — clear stale cross-run history so a future, genuinely different
     // failure is not mistaken for a repeat of one already resolved.
     await ports.reworkHistory?.clear(request.issue);
-    const checkBudget = await assertBudget('CHECK');
-    if (checkBudget) return checkBudget;
 
     if (request.localOnly) {
       log(
