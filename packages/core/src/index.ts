@@ -221,6 +221,10 @@ export { parkEvents, parkReasonFor } from './run/outcome.js';
 // Run policy
 export type { RunBudget, RunPolicy } from './run/policy.js';
 
+// Run ports (#674)
+export type { Environment, Workspace } from './run/ports.js';
+export { acquireLaneEnvironment, localOnlyWorkspace, worktreeWorkspace } from './run/ports.js';
+
 // Lifecycle bus (#591)
 export type {
   LaneLifecycleEvent,
