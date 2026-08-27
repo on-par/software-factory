@@ -188,6 +188,7 @@ import {
   runDoctorChecks,
 } from './doctor.js';
 import { formatOverview, missingClaudeCliMessage, missingTokenMessage, notInitializedMessage } from './first-run.js';
+import { cmdHostedSmoke } from './hosted.js';
 import { cmdLogs } from './logs.js';
 import { createFactoryOctokit } from './octokit.js';
 import { distFreshnessProbe, runStalenessGuard } from './staleness.js';
@@ -3899,6 +3900,18 @@ export async function main() {
     )
     .action(async (lane: string, issues: string[]) => {
       await cmdQueueAdd(lane, issues);
+    });
+
+  const hosted = program
+    .command('hosted')
+    .description('Hosted (remote-runner) execution — experimental, gated by FACTORY_HOSTED_EXEC=1');
+  hosted
+    .command('smoke')
+    .description('Local end-to-end hosted-exec smoke: create → lease → Docker run → result → cleanup')
+    .option('--repo <slug>', 'owner/repo to clone and run against', 'on-par/software-factory')
+    .option('--image <image>', 'container image for the smoke run', 'node:20-alpine')
+    .action(async (opts: { repo?: string; image?: string }) => {
+      await cmdHostedSmoke(opts);
     });
 
   program

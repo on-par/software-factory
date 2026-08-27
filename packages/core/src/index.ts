@@ -132,6 +132,11 @@ export type {
 export { runContainerJob } from './hosted/container.js';
 export type { HostedJobSummary } from './hosted/summary.js';
 export { summarizeHostedJob, summarizeHostedJobs } from './hosted/summary.js';
+export type { HostedSmokeConfig, HostedSmokeOutcome } from './hosted/smoke.js';
+export { runHostedSmoke } from './hosted/smoke.js';
+// Re-exported so consumers gating on the hosted-exec flag (e.g. the CLI) go through
+// core rather than reaching past it to `@on-par/contracts` directly.
+export { hostedExecEnabled } from '@on-par/contracts';
 export type {
   AuthorityBroker,
   AuthorityCleanupProof,
