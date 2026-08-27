@@ -121,6 +121,8 @@ const PUBLIC_API_KEYS = [
   'acquireLaneEnvironment',
   'localOnlyWorkspace',
   'worktreeWorkspace',
+  // Run composition (#675)
+  'runIssue',
   // Lifecycle bus (#591)
   'createLifecycleBus',
   'lifecycleBus',

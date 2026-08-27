@@ -1136,13 +1136,16 @@ describe('checkPhase success paths', () => {
         source: 'bundled',
       };
 
+      const logs: Array<{ type: string; msg: string }> = [];
       const check = await checkPhase({
         issue: 95,
         worktree,
         specPath,
         router,
         constitution,
-        log: () => {},
+        log: (type, msg) => {
+          logs.push({ type, msg });
+        },
         autoRework: false,
       });
 
@@ -1150,6 +1153,9 @@ describe('checkPhase success paths', () => {
       const testsFailure = check.summary.results.find((r) => r.checker === 'tests');
       expect(testsFailure?.result).toBe('FAIL');
       expect(testsFailure?.details).toContain('no verification command was run');
+      // Each failing checker is named individually — the parked outcome carries only an
+      // aggregate count, so this is the operator's only view of WHY a run parked (#675).
+      expect(logs.some((l) => l.type === 'check' && l.msg.startsWith('FAILED: tests — '))).toBe(true);
     },
   );
 

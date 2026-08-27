@@ -111,6 +111,25 @@ vi.mock('@on-par/factory-tui', () => ({
 
 vi.mock('@on-par/factory-core', async (importOriginal) => {
   const actual = await importOriginal<typeof FactoryCore>();
+
+  // Phases. shipIssue no longer sequences PLAN->BUILD->CHECK->SHIP itself (#675) — it
+  // builds ports and calls the real runIssue in @on-par/factory-core, which now takes
+  // planPhase/buildPhase/checkPhase/shipPhase as overridable ports (ADR-0004). So this
+  // double only stubs the four phase functions and lets the real runIssue drive
+  // sequencing, the breaker, budget assertions, and constitution logging.
+  const planPhaseMock = vi.fn(async (opts: any) => {
+    if (h.triggerPlanProviderFailure) await opts.onProviderFailure?.(h.triggerPlanProviderFailure);
+    return h.planResult;
+  });
+  const buildPhaseMock = vi.fn(async (_opts: any) => h.buildResult);
+  const checkPhaseMock = vi.fn(async (opts: any) => {
+    for (const s of h.checkResult.summary.results.filter((r: any) => r.result === 'SKIP')) {
+      opts.log?.('check', `SKIPPED: ${s.checker} — ${s.details}`);
+    }
+    return h.checkResult;
+  });
+  const shipPhaseMock = vi.fn(async (_opts: any) => h.shipResult);
+
   return {
     ...actual,
     // Config loaders — return inert values.
@@ -164,14 +183,12 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
         getModelsInTier: () => ['claude-model'],
       };
     }),
-    // Phases.
-    planPhase: vi.fn(async (opts: any) => {
-      if (h.triggerPlanProviderFailure) await opts.onProviderFailure?.(h.triggerPlanProviderFailure);
-      return h.planResult;
-    }),
-    buildPhase: vi.fn(async () => h.buildResult),
-    checkPhase: vi.fn(async () => h.checkResult),
-    shipPhase: vi.fn(async () => h.shipResult),
+    // Phases are stubbed here; the real runIssue (from `actual`) sequences them (#675).
+    planPhase: planPhaseMock,
+    buildPhase: buildPhaseMock,
+    checkPhase: checkPhaseMock,
+    shipPhase: shipPhaseMock,
+    runIssue: actual.runIssue,
     // Usage / reports.
     estimateTrailingSpend: vi.fn(() => h.trailingSpend),
     formatUsageReport: vi.fn(() => 'USAGE REPORT'),
