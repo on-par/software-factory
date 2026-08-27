@@ -5,9 +5,8 @@
 // FACTORY_HOSTED_EXEC=1 — refuses to run and leaves the local factory path
 // unchanged when the flag is off, and cleanly skips when Docker is unavailable.
 
-import { hostedExecEnabled } from '@on-par/contracts';
 import type { ContainerEngine, HostedClock, HostedSmokeOutcome } from '@on-par/factory-core';
-import { isCommandAvailable, runHostedSmoke } from '@on-par/factory-core';
+import { hostedExecEnabled, isCommandAvailable, runHostedSmoke } from '@on-par/factory-core';
 import { createDockerEngine } from '@on-par/factory-core/internal';
 
 export interface HostedSmokeCliOptions {
