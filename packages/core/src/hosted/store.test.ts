@@ -187,6 +187,13 @@ describe('createHostedJobStore', () => {
 
     expect(store.complete('job-1', 'wrong-lease')).toMatchObject({ ok: false, reason: 'lease-mismatch' });
     expect(store.complete('missing-job', 'lease-1')).toMatchObject({ ok: false, reason: 'job-not-found' });
+    const job = store.get('job-1');
+    expect(job?.result).toBeNull();
+    expect(job?.events.at(-1)).toMatchObject({
+      type: 'expired',
+      severity: 'warn',
+      message: 'ignored: stale finalize attempt (lease not held)',
+    });
   });
 
   it('rejects mutation by an expired lease and allows safe re-lease (AC#5)', () => {
@@ -201,6 +208,17 @@ describe('createHostedJobStore', () => {
     expect(store.fail('job-1', 'lease-1', 'x')).toMatchObject({ ok: false, reason: 'lease-expired' });
     expect(store.heartbeat('job-1', 'lease-1')).toMatchObject({ ok: false, reason: 'lease-expired' });
     expect(store.get('job-1')?.request.status).toBe('leased');
+    expect(store.get('job-1')?.result).toBeNull();
+    expect(
+      store
+        .get('job-1')
+        ?.events.filter(
+          (event) =>
+            event.type === 'expired' &&
+            event.severity === 'warn' &&
+            event.message === 'ignored: stale finalize attempt (lease expired)',
+        ),
+    ).toHaveLength(2);
 
     const release = store.acquireLease({
       jobId: 'job-1',
@@ -220,6 +238,30 @@ describe('createHostedJobStore', () => {
     if (completed.ok) {
       expect(completed.job.request.status).toBe('done');
     }
+  });
+
+  it('logs an expired lease finalize attempt after the job was reclaimed', () => {
+    let clock = 1_000;
+    const store = createHostedJobStore({ now: () => clock });
+    store.create(baseJobInput());
+    store.acquireLease({ jobId: 'job-1', runnerId: 'r', leaseId: 'lease-1', ttlMs: 1_000, heartbeatIntervalMs: 500 });
+
+    clock += 2_000;
+    const reclaimed = store.reclaimExpired();
+    expect(reclaimed).toHaveLength(1);
+    expect(store.get('job-1')?.request.status).toBe('requested');
+    expect(store.get('job-1')?.lease).toBeNull();
+
+    const staleComplete = store.complete('job-1', 'lease-1');
+
+    expect(staleComplete).toMatchObject({ ok: false, reason: 'lease-mismatch' });
+    expect(store.get('job-1')?.request.status).toBe('requested');
+    expect(store.get('job-1')?.result).toBeNull();
+    expect(store.get('job-1')?.events.at(-1)).toMatchObject({
+      type: 'expired',
+      severity: 'warn',
+      message: 'ignored: stale finalize attempt (lease not held)',
+    });
   });
 
   it('registers runners and reads them back, refreshing heartbeat (AC#1 registry)', () => {

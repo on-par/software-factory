@@ -181,7 +181,11 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
     job.updatedAt = iso(now());
   }
 
-  function resolveMutableJob(jobId: string, leaseId: string): { job: StoredHostedJob } | { result: JobUpdateResult } {
+  function resolveMutableJob(
+    jobId: string,
+    leaseId: string,
+    options: { auditStaleFinalize?: boolean } = {},
+  ): { job: StoredHostedJob } | { result: JobUpdateResult } {
     const job = jobs.get(jobId);
     if (!job) {
       return { result: { ok: false, reason: 'job-not-found' } };
@@ -193,9 +197,15 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
       return { result: { ok: true, job, alreadyTerminal: true } };
     }
     if (job.lease?.leaseId !== leaseId) {
+      if (options.auditStaleFinalize) {
+        appendEvent(job, 'expired', 'warn', 'ignored: stale finalize attempt (lease not held)');
+      }
       return { result: { ok: false, reason: 'lease-mismatch', job } };
     }
     if (!isLeaseActive(job, leaseId, now())) {
+      if (options.auditStaleFinalize) {
+        appendEvent(job, 'expired', 'warn', 'ignored: stale finalize attempt (lease expired)');
+      }
       return { result: { ok: false, reason: 'lease-expired', job } };
     }
     return { job };
@@ -286,7 +296,7 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
     },
 
     complete(jobId, leaseId, summary, detail) {
-      const resolved = resolveMutableJob(jobId, leaseId);
+      const resolved = resolveMutableJob(jobId, leaseId, { auditStaleFinalize: true });
       if ('result' in resolved) {
         return resolved.result;
       }
@@ -299,7 +309,7 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
     },
 
     fail(jobId, leaseId, reason, detail) {
-      const resolved = resolveMutableJob(jobId, leaseId);
+      const resolved = resolveMutableJob(jobId, leaseId, { auditStaleFinalize: true });
       if ('result' in resolved) {
         return resolved.result;
       }
