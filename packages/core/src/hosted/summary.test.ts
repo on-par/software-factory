@@ -39,6 +39,8 @@ describe('summarizeHostedJob', () => {
       jobId: 'job-1',
       repoSlug: 'on-par/software-factory',
       status: 'done',
+      // Lease is released on terminal completion — no longer owned by any runner.
+      leasedBy: null,
       outcome: 'completed',
       summary: 'all green',
       exitCode: 0,
@@ -102,6 +104,7 @@ describe('summarizeHostedJob', () => {
 
     expect(summary).toMatchObject({
       status: 'leased',
+      leasedBy: 'runner-1',
       outcome: null,
       summary: null,
       exitCode: null,

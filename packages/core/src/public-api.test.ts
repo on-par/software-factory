@@ -88,6 +88,8 @@ const PUBLIC_API_KEYS = [
   'resolveHostedAuthority',
   'createHostedControlPlaneServer',
   'handleHostedControlPlaneRequest',
+  'createHttpHostedControlPlaneClient',
+  'runOneJobRunner',
   // Work requests
   'closedWorkSkipReason',
   'createDefaultWorkSourceRegistry',

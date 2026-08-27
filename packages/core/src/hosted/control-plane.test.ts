@@ -229,6 +229,98 @@ describe('handleHostedControlPlaneRequest', () => {
     expect(fetched.body).not.toHaveProperty('job.lease');
     expect(Object.keys((fetched.body as { job: object }).job)).not.toContain('lease');
   });
+
+  it('registers a runner on POST /runners and rejects an invalid body with 400', () => {
+    const store = newStore();
+    const registered = handleHostedControlPlaneRequest(store, {
+      method: 'POST',
+      pathname: '/runners',
+      body: { runnerId: 'runner-1', capabilities: ['git', 'node'] },
+      generateJobId: GENERATE_JOB_ID,
+    });
+    expect(registered.status).toBe(201);
+    expect(registered.body).toMatchObject({
+      runner: { runnerId: 'runner-1', capabilities: ['git', 'node'], available: true },
+    });
+
+    const invalid = handleHostedControlPlaneRequest(store, {
+      method: 'POST',
+      pathname: '/runners',
+      body: { runnerId: '' },
+      generateJobId: GENERATE_JOB_ID,
+    });
+    expect(invalid.status).toBe(400);
+
+    expect(
+      handleHostedControlPlaneRequest(store, {
+        method: 'GET',
+        pathname: '/runners',
+        body: undefined,
+        generateJobId: GENERATE_JOB_ID,
+      }).status,
+    ).toBe(405);
+  });
+
+  it('leases a compatible job on POST /runners/:id/poll and surfaces it as owned by the runner', () => {
+    const store = newStore();
+    handleHostedControlPlaneRequest(store, {
+      method: 'POST',
+      pathname: '/jobs',
+      body: VALID_BODY,
+      generateJobId: GENERATE_JOB_ID,
+    });
+
+    const poll = handleHostedControlPlaneRequest(store, {
+      method: 'POST',
+      pathname: '/runners/runner-1/poll',
+      body: { capabilities: ['git', 'node'], leaseId: 'lease-1', ttlMs: 60_000, heartbeatIntervalMs: 5_000 },
+      generateJobId: GENERATE_JOB_ID,
+    });
+    expect(poll.status).toBe(200);
+    expect(poll.body).toMatchObject({
+      ok: true,
+      lease: { runnerId: 'runner-1', leaseId: 'lease-1', jobId: 'job-1' },
+      job: { jobId: 'job-1', status: 'leased', leasedBy: 'runner-1' },
+    });
+
+    const fetched = handleHostedControlPlaneRequest(store, {
+      method: 'GET',
+      pathname: '/jobs/job-1',
+      body: undefined,
+      generateJobId: GENERATE_JOB_ID,
+    });
+    expect(fetched.body).toMatchObject({ job: { leasedBy: 'runner-1' } });
+  });
+
+  it('returns ok:false no-match on POST /runners/:id/poll with no compatible job, and 400/405 for bad requests', () => {
+    const store = newStore();
+    const poll = handleHostedControlPlaneRequest(store, {
+      method: 'POST',
+      pathname: '/runners/runner-1/poll',
+      body: { capabilities: ['git'], leaseId: 'lease-1', ttlMs: 60_000, heartbeatIntervalMs: 5_000 },
+      generateJobId: GENERATE_JOB_ID,
+    });
+    expect(poll.status).toBe(200);
+    expect(poll.body).toEqual({ ok: false, reason: 'no-match' });
+
+    expect(
+      handleHostedControlPlaneRequest(store, {
+        method: 'POST',
+        pathname: '/runners/runner-1/poll',
+        body: { capabilities: ['git'] },
+        generateJobId: GENERATE_JOB_ID,
+      }).status,
+    ).toBe(400);
+
+    expect(
+      handleHostedControlPlaneRequest(store, {
+        method: 'GET',
+        pathname: '/runners/runner-1/poll',
+        body: undefined,
+        generateJobId: GENERATE_JOB_ID,
+      }).status,
+    ).toBe(405);
+  });
 });
 
 describe('createHostedControlPlaneServer', () => {
@@ -272,6 +364,37 @@ describe('createHostedControlPlaneServer', () => {
 
       const malformed = await request(port, 'POST', '/jobs', undefined, '{not json');
       expect(malformed.status).toBe(400);
+    } finally {
+      await controlPlane?.stop();
+    }
+  });
+
+  it('round-trips runner registration and poll-for-lease over a real socket', async () => {
+    const store = newStore();
+    let controlPlane: HostedControlPlaneServer | undefined;
+    try {
+      controlPlane = createHostedControlPlaneServer({
+        store,
+        env: { FACTORY_HOSTED_EXEC: '1' },
+        port: 0,
+        generateJobId: GENERATE_JOB_ID,
+      });
+      const port = await controlPlane.start();
+
+      await request(port, 'POST', '/jobs', VALID_BODY);
+
+      const registered = await request(port, 'POST', '/runners', { runnerId: 'runner-1', capabilities: ['git'] });
+      expect(registered.status).toBe(201);
+      expect(JSON.parse(registered.body)).toMatchObject({ runner: { runnerId: 'runner-1' } });
+
+      const leased = await request(port, 'POST', '/runners/runner-1/poll', {
+        capabilities: ['git'],
+        leaseId: 'lease-1',
+        ttlMs: 60_000,
+        heartbeatIntervalMs: 5_000,
+      });
+      expect(leased.status).toBe(200);
+      expect(JSON.parse(leased.body)).toMatchObject({ ok: true, job: { jobId: 'job-1', leasedBy: 'runner-1' } });
     } finally {
       await controlPlane?.stop();
     }

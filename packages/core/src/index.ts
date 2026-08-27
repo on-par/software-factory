@@ -168,6 +168,16 @@ export type {
   HostedControlPlaneServer,
 } from './hosted/control-plane.js';
 export { createHostedControlPlaneServer, handleHostedControlPlaneRequest } from './hosted/control-plane.js';
+export type {
+  HostedControlPlaneClient,
+  HostedControlPlaneFetchFn,
+  HttpHostedControlPlaneClientOptions,
+  OneJobRunnerConfig,
+  OneJobRunnerOutcome,
+  PollForLeaseResult,
+  RegisteredRunner,
+} from './hosted/runner-client.js';
+export { createHttpHostedControlPlaneClient, runOneJobRunner } from './hosted/runner-client.js';
 
 // Work requests
 export type {
