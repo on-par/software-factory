@@ -122,62 +122,78 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
   const shipPhaseMock = vi.fn(async (_opts: any) => h.shipResult);
 
   // shipIssue no longer sequences PLAN->BUILD->CHECK->SHIP itself (#675) — it builds
-  // ports and calls the real runIssue in @on-par/factory-core. Since runIssue's own
-  // calls into the phase modules are internal to that package (not reachable through
-  // this mock boundary), this test double reproduces just enough of runIssue's control
-  // flow — driven by the same phase-mock/h.* knobs the pre-lift tests configured — to
-  // exercise shipIssue's real, unmocked ports (environment leasing, the approval/steering
-  // closures, the constitution loader, the breaker, the decompose/report hooks).
+  // ports and calls the real runIssue in @on-par/factory-core. runIssue's own decision
+  // closures (rememberProviderFailure, preferFallbackWhenProviderIsOpen, environment
+  // leasing, constitution logging, …) are private to that module (ADR-0004 — no
+  // internal export), so this double can't call the real ones. It re-derives just the
+  // slice of that behavior the shipIssue-level assertions below exercise (environment
+  // leasing, the approval/steering closures, the constitution loader, the breaker, the
+  // decompose/report hooks), split into small named steps below instead of one
+  // monolithic function.
+  const leaseEnvironment = async (ports: any, log: any) => {
+    if (!ports.acquireEnvironment) return undefined;
+    try {
+      return await ports.acquireEnvironment();
+    } catch (err: any) {
+      log('environment_lease_failed', `port lease unavailable (${err.message}) — running without injected PORT`);
+      return undefined;
+    }
+  };
+
+  const resolveConstitutionAndLog = (ports: any, request: any, log: any) => {
+    const constitution = ports.resolveConstitution();
+    log(
+      'constitution',
+      constitution
+        ? constitution.source === 'repo'
+          ? `Standards from repo instruction files${request.product ? ` (custom checkers from '${request.product}')` : ''}`
+          : `Standards from bundled constitution '${constitution.product}'`
+        : 'No standards found (no repo instruction files, no constitution) — proceeding without',
+    );
+    return constitution;
+  };
+
+  const makeRememberProviderFailure =
+    (ports: any, request: any, log: any) =>
+    async ({ provider, reason, detail }: any) => {
+      const reportedMs = actual.parseResetCooldownMs(detail ?? '');
+      const cooldownMs = reportedMs ?? request.failover.cooldownMs;
+      await ports.breaker.open(provider, reason, cooldownMs);
+      const cooldownNote = reportedMs !== null ? 'provider-reported reset time' : 'default cooldown';
+      log(
+        'provider_breaker_open',
+        `breaker opened for ${provider} (${reason}) — provider skipped until cooldown ends (${cooldownNote}, ${Math.ceil(cooldownMs / 60_000)}m)`,
+        { failoverReason: reason },
+      );
+    };
+
+  const makePreferFallback = (ports: any, log: any) => async (primary: any, fallback: any, phase: string) => {
+    if (!primary || !fallback) return primary;
+    const provider = ports.router.registryRef.get(primary)?.provider;
+    if (!provider) return primary;
+    const status = await ports.breaker.status(provider);
+    if (!status.open) return primary;
+    const minutes = Math.ceil(status.remainingMs / 60_000);
+    log(
+      'provider_breaker_skip',
+      `breaker open for ${provider} (${status.entry.reason}) — using ${fallback} for ${phase}, ${minutes}m remaining`,
+    );
+    return fallback;
+  };
+
   const runIssueMock = vi.fn(async (request: any, _policy: any, ports: any) => {
     const log = ports.events();
     let environment: any;
     try {
-      if (ports.acquireEnvironment) {
-        try {
-          environment = await ports.acquireEnvironment();
-        } catch (err: any) {
-          log('environment_lease_failed', `port lease unavailable (${err.message}) — running without injected PORT`);
-        }
-      }
+      environment = await leaseEnvironment(ports, log);
       const appPort = environment?.port;
       const onPgid = (pgid: number) => environment?.recordPgid(pgid);
       const { baseUrl: appBaseUrl, note } = ports.resolveBaseUrl?.(appPort) ?? { note: '' };
       if (note) log(appBaseUrl ? 'environment_proxy' : 'environment_proxy_unavailable', note);
 
-      const constitution = ports.resolveConstitution();
-      log(
-        'constitution',
-        constitution
-          ? constitution.source === 'repo'
-            ? `Standards from repo instruction files${request.product ? ` (custom checkers from '${request.product}')` : ''}`
-            : `Standards from bundled constitution '${constitution.product}'`
-          : 'No standards found (no repo instruction files, no constitution) — proceeding without',
-      );
-
-      const rememberProviderFailure = async ({ provider, reason, detail }: any) => {
-        const reportedMs = actual.parseResetCooldownMs(detail ?? '');
-        const cooldownMs = reportedMs ?? request.failover.cooldownMs;
-        await ports.breaker.open(provider, reason, cooldownMs);
-        const cooldownNote = reportedMs !== null ? 'provider-reported reset time' : 'default cooldown';
-        log(
-          'provider_breaker_open',
-          `breaker opened for ${provider} (${reason}) — provider skipped until cooldown ends (${cooldownNote}, ${Math.ceil(cooldownMs / 60_000)}m)`,
-          { failoverReason: reason },
-        );
-      };
-      const preferFallbackWhenProviderIsOpen = async (primary: any, fallback: any, phase: string) => {
-        if (!primary || !fallback) return primary;
-        const provider = ports.router.registryRef.get(primary)?.provider;
-        if (!provider) return primary;
-        const status = await ports.breaker.status(provider);
-        if (!status.open) return primary;
-        const minutes = Math.ceil(status.remainingMs / 60_000);
-        log(
-          'provider_breaker_skip',
-          `breaker open for ${provider} (${status.entry.reason}) — using ${fallback} for ${phase}, ${minutes}m remaining`,
-        );
-        return fallback;
-      };
+      const constitution = resolveConstitutionAndLog(ports, request, log);
+      const rememberProviderFailure = makeRememberProviderFailure(ports, request, log);
+      const preferFallbackWhenProviderIsOpen = makePreferFallback(ports, log);
 
       const planModel = await preferFallbackWhenProviderIsOpen(
         request.modelPins.plan,
@@ -313,14 +329,10 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
             .map((r: any) => r.checker);
           await ports.reworkHistory?.record(request.issue, check.failureSignature, failingChecks);
         }
-        const reason = check.crossRunStuck ? 'held' : check.stuck ? 'escalate' : 'fail';
-        const message = check.crossRunStuck
-          ? `issue held: identical failure signature parked this lane in a prior run too (${check.reworkRounds} rework rounds burned there, 0 here) — needs a human decision`
-          : check.stuck
-            ? `lane stuck after ${check.reworkRounds} rework rounds (identical failures) — escalated`
-            : `${check.summary.failures} check failures after ${check.reworkRounds} rework rounds`;
+        const reason = 'fail' as const;
+        const message = `${check.summary.failures} check failures after ${check.reworkRounds} rework rounds`;
         log(reason, message);
-        const reportOutcome = reason === 'escalate' ? 'escalated' : 'failed';
+        const reportOutcome = 'failed' as const;
         await ports.writeLocalRunReport?.({
           outcome: reportOutcome,
           route: build.route,
