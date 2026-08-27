@@ -72,7 +72,9 @@ const PUBLIC_API_KEYS = [
   'validateQueue',
   // Hosted execution (control plane)
   'createHostedJobStore',
+  'createSqliteHostedJobStore',
   'hostedExecEnabled',
+  'resolveHostedJobStore',
   'runContainerJob',
   'runDockerRunner',
   'runFakeRunner',
