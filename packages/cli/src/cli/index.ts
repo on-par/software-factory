@@ -45,6 +45,8 @@ import {
   acquirePortLease,
   appendKpiHistoryLine,
   applyRepoConfig,
+  buildPhase,
+  checkPhase,
   clearProxyState,
   closedWorkSkipReason,
   computeHealthKpis,
@@ -90,6 +92,7 @@ import {
   parkReasonFor,
   parseKpiHistory,
   parseQueue,
+  planPhase,
   ProviderBreaker,
   readEvents,
   readPortLeases,
@@ -122,6 +125,7 @@ import {
   runAutoIngest,
   runIssue,
   scoreIssueReadiness,
+  shipPhase,
   validateQueue,
   watchUsage,
   worktreeWorkspace,
@@ -1240,6 +1244,10 @@ export async function shipIssue(
     resolveBaseUrl,
     getIssueSpend: () => issueSpend,
     breaker,
+    planPhase,
+    buildPhase,
+    checkPhase,
+    shipPhase,
     resolveConstitution: () =>
       // Resolved once here — runIssue calls this exactly once and reuses the value for
       // every phase, so the build worker can never author the standards it is graded by.

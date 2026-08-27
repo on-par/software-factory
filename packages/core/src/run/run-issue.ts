@@ -15,10 +15,10 @@
 import type { Octokit } from '@octokit/rest';
 
 import type { ApprovalGate } from '../approvals/index.js';
-import { buildPhase } from '../phases/build.js';
-import { checkPhase } from '../phases/check.js';
-import { planPhase } from '../phases/plan.js';
-import { shipPhase } from '../phases/ship.js';
+import { buildPhase as buildPhaseDefault } from '../phases/build.js';
+import { checkPhase as checkPhaseDefault } from '../phases/check.js';
+import { planPhase as planPhaseDefault } from '../phases/plan.js';
+import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
 import type { ReworkHistory } from '../checkers/rework-history.js';
 import type { AutoFailoverSettings } from '../config/index.js';
 import type { EffectiveModelPins } from '../config/repo.js';
@@ -127,6 +127,13 @@ export interface RunPorts {
   onDecomposed?: (childIssues: number[]) => void | Promise<void>;
   writeLocalRunReport?: (info: RunReportInfo) => Promise<string | undefined>;
   writeBenchmarkArtifacts?: (info: RunReportInfo) => Promise<void>;
+  /** Phase implementations. Default to the real PLAN/BUILD/CHECK/SHIP phases; overridable
+   *  so callers (notably the CLI's test double, per ADR-0004) can stub the phases and drive
+   *  the real runIssue sequencing/breaker/budget/constitution logic instead of reimplementing it. */
+  planPhase?: typeof planPhaseDefault;
+  buildPhase?: typeof buildPhaseDefault;
+  checkPhase?: typeof checkPhaseDefault;
+  shipPhase?: typeof shipPhaseDefault;
 }
 
 function errorMessage(err: unknown): string {
@@ -140,6 +147,10 @@ function isDecomposeSignal(err: unknown): boolean {
 }
 
 export async function runIssue(request: RunRequest, policy: RunPolicy, ports: RunPorts): Promise<RunOutcome> {
+  const planPhase = ports.planPhase ?? planPhaseDefault;
+  const buildPhase = ports.buildPhase ?? buildPhaseDefault;
+  const checkPhase = ports.checkPhase ?? checkPhaseDefault;
+  const shipPhase = ports.shipPhase ?? shipPhaseDefault;
   const log = ports.events();
   const tracker = new ProcessGroupTracker();
   let environment: Environment | undefined;
