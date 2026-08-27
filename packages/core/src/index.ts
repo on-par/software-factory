@@ -225,6 +225,10 @@ export type { RunBudget, RunPolicy } from './run/policy.js';
 export type { Environment, Workspace } from './run/ports.js';
 export { acquireLaneEnvironment, localOnlyWorkspace, worktreeWorkspace } from './run/ports.js';
 
+// Run composition (#675)
+export type { RunPorts, RunRequest } from './run/run-issue.js';
+export { runIssue } from './run/run-issue.js';
+
 // Lifecycle bus (#591)
 export type {
   LaneLifecycleEvent,
