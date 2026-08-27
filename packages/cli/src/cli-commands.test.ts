@@ -111,6 +111,315 @@ vi.mock('@on-par/factory-tui', () => ({
 
 vi.mock('@on-par/factory-core', async (importOriginal) => {
   const actual = await importOriginal<typeof FactoryCore>();
+
+  // Phases.
+  const planPhaseMock = vi.fn(async (opts: any) => {
+    if (h.triggerPlanProviderFailure) await opts.onProviderFailure?.(h.triggerPlanProviderFailure);
+    return h.planResult;
+  });
+  const buildPhaseMock = vi.fn(async (_opts: any) => h.buildResult);
+  const checkPhaseMock = vi.fn(async (_opts: any) => h.checkResult);
+  const shipPhaseMock = vi.fn(async (_opts: any) => h.shipResult);
+
+  // shipIssue no longer sequences PLAN->BUILD->CHECK->SHIP itself (#675) — it builds
+  // ports and calls the real runIssue in @on-par/factory-core. Since runIssue's own
+  // calls into the phase modules are internal to that package (not reachable through
+  // this mock boundary), this test double reproduces just enough of runIssue's control
+  // flow — driven by the same phase-mock/h.* knobs the pre-lift tests configured — to
+  // exercise shipIssue's real, unmocked ports (environment leasing, the approval/steering
+  // closures, the constitution loader, the breaker, the decompose/report hooks).
+  const runIssueMock = vi.fn(async (request: any, _policy: any, ports: any) => {
+    const log = ports.events();
+    let environment: any;
+    try {
+      if (ports.acquireEnvironment) {
+        try {
+          environment = await ports.acquireEnvironment();
+        } catch (err: any) {
+          log('environment_lease_failed', `port lease unavailable (${err.message}) — running without injected PORT`);
+        }
+      }
+      const appPort = environment?.port;
+      const onPgid = (pgid: number) => environment?.recordPgid(pgid);
+      const { baseUrl: appBaseUrl, note } = ports.resolveBaseUrl?.(appPort) ?? { note: '' };
+      if (note) log(appBaseUrl ? 'environment_proxy' : 'environment_proxy_unavailable', note);
+
+      const constitution = ports.resolveConstitution();
+      log(
+        'constitution',
+        constitution
+          ? constitution.source === 'repo'
+            ? `Standards from repo instruction files${request.product ? ` (custom checkers from '${request.product}')` : ''}`
+            : `Standards from bundled constitution '${constitution.product}'`
+          : 'No standards found (no repo instruction files, no constitution) — proceeding without',
+      );
+
+      const rememberProviderFailure = async ({ provider, reason, detail }: any) => {
+        const reportedMs = actual.parseResetCooldownMs(detail ?? '');
+        const cooldownMs = reportedMs ?? request.failover.cooldownMs;
+        await ports.breaker.open(provider, reason, cooldownMs);
+        const cooldownNote = reportedMs !== null ? 'provider-reported reset time' : 'default cooldown';
+        log(
+          'provider_breaker_open',
+          `breaker opened for ${provider} (${reason}) — provider skipped until cooldown ends (${cooldownNote}, ${Math.ceil(cooldownMs / 60_000)}m)`,
+          { failoverReason: reason },
+        );
+      };
+      const preferFallbackWhenProviderIsOpen = async (primary: any, fallback: any, phase: string) => {
+        if (!primary || !fallback) return primary;
+        const provider = ports.router.registryRef.get(primary)?.provider;
+        if (!provider) return primary;
+        const status = await ports.breaker.status(provider);
+        if (!status.open) return primary;
+        const minutes = Math.ceil(status.remainingMs / 60_000);
+        log(
+          'provider_breaker_skip',
+          `breaker open for ${provider} (${status.entry.reason}) — using ${fallback} for ${phase}, ${minutes}m remaining`,
+        );
+        return fallback;
+      };
+
+      const planModel = await preferFallbackWhenProviderIsOpen(request.modelPins.plan, request.modelPins.planFallback, 'PLAN');
+      const plan = await planPhaseMock({
+        issue: request.issue,
+        repo: request.repo,
+        worktree: ports.workspace.path,
+        specPath: request.specPath,
+        constitution,
+        router: ports.router,
+        octokit: ports.octokit,
+        log: ports.events('plan'),
+        modelOverride: planModel,
+        onProviderFailure: rememberProviderFailure,
+        branch: request.branch,
+        approvalGate: request.options.approvePlan ? ports.createApprovalGate?.() : undefined,
+        drainSteering: request.options.approvePlan ? ports.drainSteering : undefined,
+        codexDisabled: request.codexDisabled,
+        localOnly: request.localOnly,
+        laneId: request.lane,
+        workSource: request.workSource,
+        enforceReadiness: true,
+        fastPath: request.efficiency.fastPath,
+        enforceSizeGate: true,
+        preferredRoute: request.preferredRoute,
+      });
+      if (!plan.ok) {
+        const decomposedChildren = plan.decomposed?.childIssues ?? [];
+        if (decomposedChildren.length > 0) {
+          await ports.onDecomposed?.(decomposedChildren);
+          return { state: 'escalated', reason: `issue #${request.issue} decomposed`, route: plan.route };
+        }
+        const message = `plan escalated: ${plan.escalate ?? 'unknown'}`;
+        log('escalate', message);
+        return { state: 'escalated', reason: message, route: plan.route };
+      }
+
+      let buildSteering: any;
+      if (request.options.interactive) {
+        buildSteering = ports.drainSteering?.();
+        if (buildSteering && buildSteering.messages.length > 0) {
+          ports.events('build')('steering_applied', actual.describeSteering(buildSteering));
+        }
+      }
+
+      let breakerBlocked = false;
+      if (request.failover.enabled) {
+        const providers: string[] = [
+          ...new Set(
+            ports.router
+              .resolveAll('build_codex')
+              .map((m: string) => ports.router.registryRef.get(m)?.provider)
+              .filter((p: unknown): p is string => Boolean(p)) as string[],
+          ),
+        ];
+        const gate = await actual.gateBuildOnBreaker({ breaker: ports.breaker, providers, log: ports.events('build') });
+        breakerBlocked = gate.codexBlocked;
+      }
+
+      let buildRoute = plan.route;
+      let buildModel = request.modelPins.build;
+      if (request.failover.enabled && plan.route === 'claude') {
+        const primaryClaude = buildModel ?? ports.router.resolveAll('build_claude')[0];
+        const fallbackCodex = request.modelPins.buildFallback ?? ports.router.resolveAll('build_codex')[0];
+        const selected = await preferFallbackWhenProviderIsOpen(primaryClaude, fallbackCodex, 'BUILD');
+        if (selected && selected !== primaryClaude) {
+          buildRoute = 'codex';
+          buildModel = selected;
+        }
+      }
+
+      const build = await buildPhaseMock({
+        issue: request.issue,
+        repo: request.repo,
+        worktree: ports.workspace.path,
+        specPath: request.specPath,
+        branch: request.branch,
+        constitution,
+        route: buildRoute,
+        router: ports.router,
+        log: ports.events('build'),
+        skipCI: request.skipCI,
+        disablePublish: Boolean(request.localOnly),
+        modelOverride: buildModel,
+        codexFallbackModel: request.modelPins.buildFallback ?? ports.router.resolveAll('build_codex')[0],
+        onProviderFailure: rememberProviderFailure,
+        sandbox: request.sandboxPolicy,
+        steering: buildSteering,
+        appPort,
+        appBaseUrl,
+        codexDisabled: request.codexDisabled || breakerBlocked,
+        localOnly: request.localOnly,
+        autoFailover: { enabled: request.failover.enabled, fallbackModel: request.failover.fallbackModel },
+        onPgid,
+        laneId: request.lane,
+      });
+      if (!build.ok) {
+        const message = `build escalated: ${build.escalate ?? 'unknown'}`;
+        log('escalate', message);
+        return { state: 'escalated', reason: message, route: build.route, branch: request.branch };
+      }
+
+      const priorFailureSignature = await ports.reworkHistory?.priorSignature(request.issue);
+      const check = await checkPhaseMock({
+        issue: request.issue,
+        worktree: ports.workspace.path,
+        specPath: request.specPath,
+        constitution,
+        router: ports.router,
+        log: ports.events('check'),
+        autoRework: request.options.autoRework,
+        maxReworkRounds: request.efficiency.maxReworkRounds,
+        sandbox: request.sandboxPolicy,
+        drainSteering: request.options.interactive ? ports.drainSteering : undefined,
+        appPort,
+        appBaseUrl,
+        onPgid,
+        priorFailureSignature,
+        reworkRoute: build.route,
+        reworkModel: build.model,
+        laneId: request.lane,
+      });
+      for (const s of check.summary.results.filter((r: any) => r.result === 'SKIP')) {
+        ports.events('check')('check', `SKIPPED: ${s.checker} — ${s.details}`);
+      }
+      if (!check.passed) {
+        if (check.failureSignature !== undefined) {
+          const failingChecks = check.summary.results.filter((r: any) => r.result === 'FAIL').map((r: any) => r.checker);
+          await ports.reworkHistory?.record(request.issue, check.failureSignature, failingChecks);
+        }
+        const reason = check.crossRunStuck ? 'held' : check.stuck ? 'escalate' : 'fail';
+        const message = check.crossRunStuck
+          ? `issue held: identical failure signature parked this lane in a prior run too (${check.reworkRounds} rework rounds burned there, 0 here) — needs a human decision`
+          : check.stuck
+            ? `lane stuck after ${check.reworkRounds} rework rounds (identical failures) — escalated`
+            : `${check.summary.failures} check failures after ${check.reworkRounds} rework rounds`;
+        log(reason, message);
+        const reportOutcome = reason === 'escalate' ? 'escalated' : 'failed';
+        await ports.writeLocalRunReport?.({
+          outcome: reportOutcome,
+          route: build.route,
+          branch: request.branch,
+          reworkRounds: check.reworkRounds,
+          reason: message,
+        });
+        await ports.writeBenchmarkArtifacts?.({
+          outcome: reportOutcome,
+          route: build.route,
+          branch: request.branch,
+          reworkRounds: check.reworkRounds,
+          checkSummary: check.summary,
+          failure: { phase: 'check', reason, message },
+        });
+        return { state: 'parked', reason, route: build.route, branch: request.branch, reworkRounds: check.reworkRounds };
+      }
+      await ports.reworkHistory?.clear(request.issue);
+
+      if (request.localOnly) {
+        log('local-only-complete', `local-only run complete in ${ports.workspace.path} — publishing disabled, no PR created`);
+        const reportPath = await ports.writeLocalRunReport?.({
+          outcome: 'ready',
+          route: build.route,
+          branch: request.branch,
+          reworkRounds: check.reworkRounds,
+        });
+        await ports.writeBenchmarkArtifacts?.({
+          outcome: 'ready',
+          route: build.route,
+          branch: request.branch,
+          reworkRounds: check.reworkRounds,
+          checkSummary: check.summary,
+          reportPath,
+        });
+        return { state: 'ready', route: build.route, branch: request.branch, reworkRounds: check.reworkRounds };
+      }
+
+      if (request.skipCI) {
+        log('skip-ci', `skipping CI watch (FACTORY_SKIP_CI=1) — merging on local verify`);
+      }
+
+      const ship = await shipPhaseMock({
+        issue: request.issue,
+        repo: request.repo,
+        worktree: ports.workspace.path,
+        branch: request.branch,
+        octokit: ports.octokit,
+        watchCI: !request.skipCI,
+        log: ports.events('ship'),
+        approvalGate: request.options.interactive ? ports.createApprovalGate?.() : undefined,
+        checkSummary: check.summary,
+        specPath: request.specPath,
+        eventsFile: request.eventsFile,
+        startedAt: request.startedAt,
+        logsDir: request.logsDir,
+        reworkRounds: check.reworkRounds,
+        work: request.work,
+        laneId: request.lane,
+      });
+      if (!ship.ok) {
+        const reason = ship.denied ? 'escalate' : 'fail';
+        const message = ship.denied ? `ship denied: ${ship.deniedReason}` : 'ship phase failed';
+        log(reason, message);
+        const reportOutcome = reason === 'escalate' ? 'escalated' : 'failed';
+        await ports.writeLocalRunReport?.({
+          outcome: reportOutcome,
+          route: build.route,
+          branch: request.branch,
+          reworkRounds: check.reworkRounds,
+          reason: message,
+        });
+        await ports.writeBenchmarkArtifacts?.({
+          outcome: reportOutcome,
+          route: build.route,
+          branch: request.branch,
+          reworkRounds: check.reworkRounds,
+          checkSummary: check.summary,
+          failure: { phase: 'ship', reason, message },
+        });
+        return { state: 'parked', reason, route: build.route, branch: request.branch, reworkRounds: check.reworkRounds };
+      }
+
+      const readyMsg = ship.alreadyDelivered
+        ? `already delivered${ship.prNumber !== undefined ? ` by merged PR #${ship.prNumber}` : ' — branch already landed on main'}`
+        : `PR #${ship.prNumber} ready for review`;
+      log('ready', readyMsg);
+      await ports.writeLocalRunReport?.({
+        outcome: 'ready',
+        route: build.route,
+        branch: request.branch,
+        reworkRounds: check.reworkRounds,
+      });
+      return {
+        state: 'ready',
+        route: build.route,
+        branch: request.branch,
+        reworkRounds: check.reworkRounds,
+        prNumber: ship.prNumber,
+      };
+    } finally {
+      if (environment) await environment.release();
+    }
+  });
+
   return {
     ...actual,
     // Config loaders — return inert values.
@@ -164,14 +473,12 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
         getModelsInTier: () => ['claude-model'],
       };
     }),
-    // Phases.
-    planPhase: vi.fn(async (opts: any) => {
-      if (h.triggerPlanProviderFailure) await opts.onProviderFailure?.(h.triggerPlanProviderFailure);
-      return h.planResult;
-    }),
-    buildPhase: vi.fn(async () => h.buildResult),
-    checkPhase: vi.fn(async () => h.checkResult),
-    shipPhase: vi.fn(async () => h.shipResult),
+    // Phases + the runIssue seam that now sequences them (#675).
+    planPhase: planPhaseMock,
+    buildPhase: buildPhaseMock,
+    checkPhase: checkPhaseMock,
+    shipPhase: shipPhaseMock,
+    runIssue: runIssueMock,
     // Usage / reports.
     estimateTrailingSpend: vi.fn(() => h.trailingSpend),
     formatUsageReport: vi.fn(() => 'USAGE REPORT'),

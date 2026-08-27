@@ -11,11 +11,11 @@ import type { Octokit } from '@octokit/rest';
 import type {
   BenchmarkRunFailure,
   CheckSummary,
+  Environment,
   EnvironmentProxySettings,
   EventKind,
   FactoryConfig,
   FailoverReason,
-  FailurePhase,
   GithubIssueParams,
   HealthKpis,
   IngestSettings,
@@ -33,8 +33,11 @@ import type {
   RepoFactoryConfig,
   RunOutcome,
   RunPolicy,
+  RunPorts,
+  RunRequest,
   SandboxPolicy,
   UsageReading,
+  Workspace,
   WorkRequest,
   WorkRequestSourceKind,
 } from '@on-par/factory-core';
@@ -42,8 +45,6 @@ import {
   acquirePortLease,
   appendKpiHistoryLine,
   applyRepoConfig,
-  buildPhase,
-  checkPhase,
   clearProxyState,
   closedWorkSkipReason,
   computeHealthKpis,
@@ -53,7 +54,6 @@ import {
   createLaneProxy,
   defaultFindPortListeners,
   describeEffectiveConfig,
-  describeSteering,
   detectPostMergeDefects,
   diagnoseModels,
   drainSteering,
@@ -63,7 +63,6 @@ import {
   fetchSubscriptionUsage,
   formatKpiLines,
   formatUsageReport,
-  gateBuildOnBreaker,
   getConstitutionsDir,
   getFactoryPaths,
   GITHUB_ISSUE_SOURCE,
@@ -76,6 +75,7 @@ import {
   isProxyRunning,
   kpisToHistoryRecord,
   laneBaseUrl,
+  laneEnv,
   laneHostLabel,
   listQueuedSteering,
   loadFactoryConfigForRepo,
@@ -83,16 +83,13 @@ import {
   loadRepoConfig,
   loadRoutesConfig,
   LOCAL_BRIEF_SOURCE,
+  localOnlyWorkspace,
   mergedPrRefs,
   ModelRegistry,
   ModelRouter,
-  parkEvents,
   parkReasonFor,
   parseKpiHistory,
   parseQueue,
-  parseResetCooldownMs,
-  planPhase,
-  ProcessGroupTracker,
   ProviderBreaker,
   readEvents,
   readPortLeases,
@@ -123,10 +120,11 @@ import {
   ReworkHistory,
   rewriteQueueForDecomposition,
   runAutoIngest,
+  runIssue,
   scoreIssueReadiness,
-  shipPhase,
   validateQueue,
   watchUsage,
+  worktreeWorkspace,
   writeBenchmarkArtifacts,
   writeLocalRunReport,
   writeProxyState,
@@ -968,7 +966,7 @@ export async function shipIssue(
     /** Benchmark artifact directory (#509) — only set for local-only runs. */
     artifactsDir?: string;
   },
-) {
+): Promise<string> {
   const repoRoot = ctx?.repoRoot ?? (await getRepoRoot());
   const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo());
   const paths = ctx?.paths ?? getFactoryPaths(repoRoot);
@@ -1021,12 +1019,14 @@ export async function shipIssue(
     : worktreePathFor(repoRoot, issueNum, policy.effective.branchPrefix);
   const specPath = resolve(paths.plans, `issue-${issueNum}.md`);
   const runStartedAt = new Date().toISOString();
-  let route: 'codex' | 'claude' | 'opencode' | undefined;
-  let failurePhase: FailurePhase = 'plan';
-  let checkSummary: CheckSummary | undefined;
-  let reworkRounds: number | undefined;
 
   const lane = ctx?.lane;
+  // Captures the message of the last terminal event runIssue emits (ready/fail/
+  // escalate/held/conflict/ci-failed/timeout) so the LaneParkError this adapter
+  // raises below carries the same diagnostic text shipIssue used to throw with —
+  // RunOutcome's parked variant carries only the ParkReason enum, not free text.
+  const TERMINAL_EVENT_KINDS = new Set<EventKind>(['ready', 'fail', 'escalate', 'held', 'conflict', 'ci-failed', 'timeout']);
+  let terminalMessage: string | undefined;
   const mkLog =
     (phase?: string) =>
     (
@@ -1038,55 +1038,17 @@ export async function shipIssue(
         tokens?: { input: number; output: number };
         readiness?: ReadinessInfo;
       },
-    ) =>
+    ) => {
+      if (TERMINAL_EVENT_KINDS.has(type)) terminalMessage = msg;
+      // checkPhase logs each skipped checker as a 'check' event prefixed "SKIPPED: " —
+      // echo it to the terminal the way shipIssue used to print it directly.
+      if (type === 'check' && msg.startsWith('SKIPPED: ')) {
+        console.error(chalk.yellow(`  SKIP: ${msg.slice('SKIPPED: '.length)}`));
+      }
       logEvent(paths.events, type, issueNum, msg, { ...extra, lane, phase });
+    };
   const log = mkLog();
-  const rememberProviderFailure = async ({
-    provider,
-    reason,
-    detail,
-  }: {
-    provider: string;
-    reason: FailoverReason;
-    detail?: string;
-  }): Promise<void> => {
-    // Weekly/usage-cap errors often report their own reset time (e.g. opencode.ai's
-    // "Resets in 3hr 17min"); honor that instead of the flat default cooldown, which
-    // is tuned for transient rate limits and reopens the breaker far too early for a
-    // multi-hour cap — see #743 (repeated usage_cap trips every ~30min overnight).
-    const reportedMs = parseResetCooldownMs(detail ?? '');
-    const cooldownMs = reportedMs ?? failoverSettings.cooldownMs;
-    await breaker.open(provider, reason, cooldownMs);
-    const cooldownNote = reportedMs !== null ? 'provider-reported reset time' : 'default cooldown';
-    log(
-      'provider_breaker_open',
-      `breaker opened for ${provider} (${reason}) — provider skipped until cooldown ends (${cooldownNote}, ${Math.ceil(cooldownMs / 60_000)}m)`,
-      { failoverReason: reason },
-    );
-  };
-  const preferFallbackWhenProviderIsOpen = async (
-    primary: string | undefined,
-    fallback: string | undefined,
-    phase: string,
-  ): Promise<string | undefined> => {
-    if (!primary || !fallback) return primary;
-    const provider = router.registryRef.get(primary)?.provider;
-    if (!provider) return primary;
-    const status = await breaker.status(provider);
-    if (!status.open) return primary;
-    const minutes = Math.ceil(status.remainingMs / 60_000);
-    log(
-      'provider_breaker_skip',
-      `breaker open for ${provider} (${status.entry.reason}) — using ${fallback} for ${phase}, ${minutes}m remaining`,
-    );
-    return fallback;
-  };
-  const assertWithinIssueBudget = (phase: string): void => {
-    if (policy.budget.perIssueCapUsd === undefined || issueSpend <= policy.budget.perIssueCapUsd) return;
-    const reason = `per-issue budget exceeded after ${phase}: $${issueSpend.toFixed(2)} > $${policy.budget.perIssueCapUsd.toFixed(2)}`;
-    log('budget_exceeded', reason);
-    throw new LaneParkError(reason, 'fail');
-  };
+
   log('issue-title', issueTitle);
   if (modelPins.plan) {
     const source = modelPins.sources.plan === 'repo' ? '.factory/config.json' : 'FACTORY_PLAN_MODEL';
@@ -1104,38 +1066,32 @@ export async function shipIssue(
     throw new IssueSkippedError(skipReason, 'already-closed');
   }
 
-  // Setup worktree FIRST — plan phase needs cwd=worktree to run claude
+  // Setup worktree FIRST — PLAN needs cwd=worktree to run claude. Worktree cleanup
+  // stays a CLI concern (not called here, matching today — a worktree persists past
+  // a successful run for GC/sweep commands to reclaim later).
+  let workspace: Workspace;
   if (!ctx?.localOnly) {
-    await withGitLock(repoRoot, () =>
-      withFileLock(
-        paths.gitLock,
-        async () => {
-          await gitFetch(repoRoot);
-          await setupWorktree(repoRoot, branch, worktree);
-        },
-        { onSteal: (pid) => log('lock-stolen', `stole ${paths.gitLock} from dead holder pid ${pid ?? 'unknown'}`) },
-      ),
-    );
+    workspace = await worktreeWorkspace({
+      repoRoot,
+      branch,
+      worktreePath: worktree,
+      log,
+      setup: (root, br, wt) =>
+        withGitLock(root, () =>
+          withFileLock(
+            paths.gitLock,
+            async () => {
+              await gitFetch(root);
+              await setupWorktree(root, br, wt);
+            },
+            { onSteal: (pid) => log('lock-stolen', `stole ${paths.gitLock} from dead holder pid ${pid ?? 'unknown'}`) },
+          ),
+        ),
+    });
     log('worktree', `Worktree ready at ${worktree}`);
   } else {
+    workspace = localOnlyWorkspace(ctx.localOnly);
     log('workspace', `local-only: using caller-provided workspace ${worktree} (no factory worktree created)`);
-  }
-
-  // Resolve standards ONCE against the fresh worktree: repo instruction files
-  // (CLAUDE.md/AGENTS.md/copilot-instructions.md) win the standards body, a
-  // bundled <product>.md is the fallback, and a configured product still
-  // contributes its custom checkers. Resolving again later would let the
-  // build worker author the standards it is graded by.
-  const constitution = constitutionLoader.resolve(worktree, product, factoryConfig.paths?.constitution);
-  if (constitution) {
-    log(
-      'constitution',
-      constitution.source === 'repo'
-        ? `Standards from repo instruction files${product ? ` (custom checkers from '${product}')` : ''}`
-        : `Standards from bundled constitution '${constitution.product}'`,
-    );
-  } else {
-    log('constitution', 'No standards found (no repo instruction files, no constitution) — proceeding without');
   }
 
   const sandboxPolicy = resolveSandboxPolicy(policy.sandbox, {
@@ -1162,418 +1118,192 @@ export async function shipIssue(
   }
 
   const planApprovalEnabled = opts.approvePlan ?? resolvePlanApproval(factoryConfig);
-
   const processGroupGraceMs = resolveProcessGroupGraceMs(factoryConfig);
-  const tracker = new ProcessGroupTracker();
-  const onPgid = (pgid: number) => {
-    tracker.track(pgid);
-    if (appPort !== undefined) {
-      void recordLeasePgid({ registryFile: paths.ports, lockDir: paths.portsLock, worktreeId: worktree, pgid }).catch(
-        () => {},
-      );
-    }
-  };
 
   const portsSettings = resolveEnvironmentPorts(factoryConfig);
-  let appPort: number | undefined;
-  if (portsSettings.enabled) {
-    try {
-      const reaped: ReapedLease[] = [];
-      const lease = await acquirePortLease({
-        registryFile: paths.ports,
-        lockDir: paths.portsLock,
-        worktreeId: worktree,
-        branch,
-        range: portsSettings.range,
-        onReap: (r) => {
-          reaped.push(r);
-          log(
-            'environment_lease_reaped',
-            `reaped stale lease: port ${r.lease.port}, pid ${r.lease.pid}, worktree ${r.lease.worktreeId} — reason: ${r.reason}`,
-          );
-        },
-        onPortConflict: (port) => {
-          void defaultFindPortListeners(port)
-            .then((listeners) => {
-              const detail =
-                listeners.length > 0
-                  ? listeners.map((l) => `pid ${l.pid} (${l.command})`).join(', ')
-                  : 'no listener details available';
-              log(
-                'environment_conflict',
-                `port ${port} busy but unleased — reported as conflict, not terminated: ${detail}`,
-              );
-            })
-            .catch(() => {
-              log('environment_conflict', `port ${port} busy but unleased — reported as conflict, not terminated`);
-            });
-        },
-      });
-      appPort = lease.port;
-      log('environment_lease', `leased port ${lease.port} for worktree ${worktree}`);
-
-      if (reaped.length > 0) {
-        await reapOrphanProcesses({
-          reaped,
-          graceMs: processGroupGraceMs,
-          onEvent: (e) =>
-            log(
-              'environment_orphan',
-              `${e.action === 'killed' ? 'killed' : 'found'} pid ${e.pid} (pgid ${e.pgid}, ${e.command}) squatting port ${e.port} of dead lane ${e.worktreeId}${e.action === 'reported' ? ' — not factory-started, left running' : ''}`,
-            ),
-        });
-      }
-    } catch (err: any) {
-      // Port collision is no worse than today — never park a lane over a lease.
-      log('environment_lease_failed', `port lease unavailable (${err.message}) — running without injected PORT`);
-    }
-  } else {
+  if (!portsSettings.enabled) {
     log('environment_lease', 'port leasing disabled (environment.ports.enabled=false or FACTORY_ENV_PORTS=0)');
   }
+  // acquireEnvironment.recordPgid/release only persist/deallocate the lease — process-
+  // group tracking and killing is runIssue's own unconditional tracker (Invariant 3),
+  // so a lease-disabled/failed run still tears down every spawned agent process.
+  const acquireEnvironment = portsSettings.enabled
+    ? async (): Promise<Environment> => {
+        const reaped: ReapedLease[] = [];
+        const lease = await acquirePortLease({
+          registryFile: paths.ports,
+          lockDir: paths.portsLock,
+          worktreeId: worktree,
+          branch,
+          range: portsSettings.range,
+          onReap: (r) => {
+            reaped.push(r);
+            log(
+              'environment_lease_reaped',
+              `reaped stale lease: port ${r.lease.port}, pid ${r.lease.pid}, worktree ${r.lease.worktreeId} — reason: ${r.reason}`,
+            );
+          },
+          onPortConflict: (port) => {
+            void defaultFindPortListeners(port)
+              .then((listeners) => {
+                const detail =
+                  listeners.length > 0
+                    ? listeners.map((l) => `pid ${l.pid} (${l.command})`).join(', ')
+                    : 'no listener details available';
+                log(
+                  'environment_conflict',
+                  `port ${port} busy but unleased — reported as conflict, not terminated: ${detail}`,
+                );
+              })
+              .catch(() => {
+                log('environment_conflict', `port ${port} busy but unleased — reported as conflict, not terminated`);
+              });
+          },
+        });
+        log('environment_lease', `leased port ${lease.port} for worktree ${worktree}`);
+        if (reaped.length > 0) {
+          await reapOrphanProcesses({
+            reaped,
+            graceMs: processGroupGraceMs,
+            onEvent: (e) =>
+              log(
+                'environment_orphan',
+                `${e.action === 'killed' ? 'killed' : 'found'} pid ${e.pid} (pgid ${e.pgid}, ${e.command}) squatting port ${e.port} of dead lane ${e.worktreeId}${e.action === 'reported' ? ' — not factory-started, left running' : ''}`,
+              ),
+          });
+        }
+        return {
+          port: lease.port,
+          env: () => laneEnv(lease.port, process.env),
+          recordPgid(pgid: number): void {
+            void recordLeasePgid({ registryFile: paths.ports, lockDir: paths.portsLock, worktreeId: worktree, pgid }).catch(
+              () => {},
+            );
+          },
+          async release(): Promise<void> {
+            await releasePortLease({ registryFile: paths.ports, lockDir: paths.portsLock, worktreeId: worktree });
+          },
+        };
+      }
+    : undefined;
 
   const proxySettings = resolveEnvironmentProxy(factoryConfig);
-  const { baseUrl: appBaseUrl, note: proxyNote } = resolveLaneBaseUrl(paths, proxySettings, worktree, appPort);
-  if (proxySettings.enabled && appPort !== undefined) {
-    log(appBaseUrl ? 'environment_proxy' : 'environment_proxy_unavailable', proxyNote);
-  }
+  const resolveBaseUrl = (appPort: number | undefined) => resolveLaneBaseUrl(paths, proxySettings, worktree, appPort);
 
-  try {
-    // PLAN
-    const planModel = await preferFallbackWhenProviderIsOpen(modelPins.plan, modelPins.planFallback, 'PLAN');
-    const plan = await planPhase({
-      issue: issueNum,
-      repo: ghRepo,
-      worktree,
-      specPath,
-      constitution,
-      router,
-      octokit,
-      log: mkLog('plan'),
-      timeoutSeconds: timeouts.plan,
-      modelOverride: planModel,
-      modelFallbacks: planModel === modelPins.plan && modelPins.planFallback ? [modelPins.planFallback] : undefined,
-      onProviderFailure: rememberProviderFailure,
-      branch,
-      approvalGate: planApprovalEnabled
-        ? createFileApprovalGate({ dir: paths.approvals, timeoutMs: timeouts.approval * 1000 })
-        : undefined,
-      drainSteering: planApprovalEnabled ? () => drainSteering(paths.steering, issueNum, worktree) : undefined,
-      codexDisabled: codexOff,
-      localOnly: policy.effective.localOnly,
-      laneId: lane,
-      workSource: ctx?.workSource,
-      enforceReadiness: true,
-      fastPath: efficiency.fastPath,
-      enforceSizeGate: true,
-      preferredRoute: repoConfig?.route,
-    });
-    route = plan.route;
-    if (!plan.ok) {
-      const decomposedChildren = plan.decomposed?.childIssues ?? [];
-      if (decomposedChildren.length > 0) {
-        const childList = decomposedChildren.map((n) => `#${n}`).join(', ');
-        const planLog = mkLog('plan');
-        try {
-          const before = readTextFileOrEmpty(paths.queue);
-          const rewrite = rewriteQueueForDecomposition(before, { issue: issueNum, childIssues: decomposedChildren });
-          if (rewrite.changed) {
-            writeFileSync(paths.queue, rewrite.content);
-            planLog('decompose_filed', `queue entry for #${issueNum} replaced with ${childList}`);
-          } else {
-            planLog(
-              'decompose_filed',
-              `#${issueNum} had no queue entry to replace — continuing the lane with ${childList}`,
-            );
-          }
-        } catch (err) {
-          planLog('decompose_file_failed', `queue rewrite for #${issueNum} failed: ${errorDetail(err)}`);
-        }
-        throw new IssueDecomposedError(`issue #${issueNum} decomposed into ${childList}`, decomposedChildren);
-      }
-      throw new LaneParkError(`plan escalated: ${plan.escalate ?? 'unknown'}`, 'escalate');
-    }
-    assertWithinIssueBudget('PLAN');
-
-    const skipCI = resolveSkipCI(factoryConfig);
-
-    // BUILD
-    let buildSteering;
-    if (opts.interactive) {
-      buildSteering = drainSteering(paths.steering, issueNum, worktree);
-      if (buildSteering.messages.length > 0) {
-        mkLog('build')('steering_applied', describeSteering(buildSteering));
-      }
-    }
-    let breakerBlocked = false;
-    if (failoverSettings.enabled) {
-      const providers = [
-        ...new Set(
-          router
-            .resolveAll('build_codex')
-            .map((m) => router.registryRef.get(m)?.provider)
-            .filter((p): p is string => Boolean(p)),
-        ),
-      ];
-      const gate = await gateBuildOnBreaker({ breaker, providers, log: mkLog('build') });
-      breakerBlocked = gate.codexBlocked;
-    }
-
-    // A Claude-selected frozen plan must get the same cooldown treatment as
-    // the Codex route above. Switch routes before the worker begins so a
-    // provider that failed earlier in this run is not called again.
-    let buildRoute = plan.route;
-    let buildModel = modelPins.build;
-    if (failoverSettings.enabled && plan.route === 'claude') {
-      const primaryClaude = buildModel ?? router.resolveAll('build_claude')[0];
-      const fallbackCodex = modelPins.buildFallback ?? router.resolveAll('build_codex')[0];
-      const selected = await preferFallbackWhenProviderIsOpen(primaryClaude, fallbackCodex, 'BUILD');
-      if (selected && selected !== primaryClaude) {
-        buildRoute = 'codex';
-        buildModel = selected;
-      }
-    }
-    if (buildModel) {
-      const harnessId = router.registryRef.getHarnessId(buildModel);
-      const compatible =
-        buildRoute === 'codex'
-          ? router.registryRef.isCodexModel(buildModel)
-          : buildRoute === 'opencode'
-            ? harnessId === 'opencode'
-            : harnessId === 'claude-cli';
-      if (!compatible) {
-        log(
-          'model_override_ignored',
-          `build model ${buildModel} is incompatible with the ${buildRoute} route — using that route's default worker`,
-        );
-        buildModel = undefined;
-      }
-    }
-
-    failurePhase = 'build';
-    const build = await buildPhase({
-      issue: issueNum,
-      repo: ghRepo,
-      worktree,
-      specPath,
-      branch,
-      constitution,
-      route: buildRoute,
-      router,
-      log: mkLog('build'),
-      timeoutSeconds: timeouts.build,
-      skipCI,
-      disablePublish: Boolean(ctx?.localOnly),
-      modelOverride: buildModel,
-      codexFallbackModel: modelPins.buildFallback ?? router.resolveAll('build_codex')[0],
-      onProviderFailure: rememberProviderFailure,
-      sandbox: activeSandboxPolicy,
-      steering: buildSteering,
-      appPort,
-      appBaseUrl,
-      codexDisabled: codexOff || breakerBlocked,
-      localOnly: policy.effective.localOnly,
-      autoFailover: {
-        enabled: failoverSettings.enabled,
-        fallbackModel: failoverSettings.fallbackModel,
-      },
-      onPgid,
-      laneId: lane,
-    });
-    if (!build.ok) {
-      throw new LaneParkError(`build escalated: ${build.escalate ?? 'unknown'}`, 'escalate');
-    }
-    assertWithinIssueBudget('BUILD');
-
-    // CHECK
-    failurePhase = 'check';
-    // #740: the signature this issue parked/got stuck on in a prior run (if any) — a
-    // watchdog that relaunches a dead session sees no memory of it otherwise, and
-    // walks straight back into the same rework budget against an unfixed root cause.
-    const priorFailureSignature = await reworkHistory.priorSignature(issueNum);
-    const check = await checkPhase({
-      issue: issueNum,
-      worktree,
-      specPath,
-      constitution,
-      router,
-      log: mkLog('check'),
+  const request: RunRequest = {
+    issue: issueNum,
+    repo: ghRepo,
+    branch,
+    specPath,
+    work,
+    workSource: ctx?.workSource,
+    product,
+    startedAt: runStartedAt,
+    lane,
+    options: {
+      interactive: Boolean(opts.interactive),
       autoRework,
-      maxReworkRounds: efficiency.maxReworkRounds,
-      buildTimeoutSeconds: timeouts.build,
-      checkTimeoutSeconds: timeouts.check,
-      sandbox: activeSandboxPolicy,
-      drainSteering: opts.interactive ? () => drainSteering(paths.steering, issueNum, worktree) : undefined,
-      appPort,
-      appBaseUrl,
-      onPgid,
-      priorFailureSignature,
-      reworkRoute: build.route,
-      reworkModel: build.model,
-      laneId: lane,
-    });
-    checkSummary = check.summary;
-    reworkRounds = check.reworkRounds;
-    assertWithinIssueBudget('CHECK');
-    for (const s of check.summary.results.filter((r) => r.result === 'SKIP')) {
-      console.error(chalk.yellow(`  SKIP: ${s.checker} — ${s.details}`));
-    }
-    if (!check.passed) {
-      const failures = check.summary.results.filter((r) => r.result === 'FAIL');
-      for (const f of failures) {
-        console.error(chalk.red(`  FAIL: ${f.checker} — ${f.details}`));
-      }
-      if (check.failureSignature !== undefined) {
-        await reworkHistory.record(
-          issueNum,
-          check.failureSignature,
-          failures.map((f) => f.checker),
-        );
-      }
-      throw new LaneParkError(
-        check.crossRunStuck
-          ? `issue held: identical failure signature parked this lane in a prior run too (${check.reworkRounds} rework rounds burned there, 0 here) — needs a human decision`
-          : check.stuck
-            ? `lane stuck after ${check.reworkRounds} rework rounds (identical failures) — escalated`
-            : `${check.summary.failures} check failures after ${check.reworkRounds} rework rounds`,
-        check.crossRunStuck ? 'held' : check.stuck ? 'escalate' : 'fail',
-      );
-    }
-    // Clean check (first try or after rework fixed it) — clear any stale history
-    // for this issue so a future, genuinely different failure isn't mistaken for
-    // a repeat of one that's already resolved.
-    await reworkHistory.clear(issueNum);
+      approvePlan: planApprovalEnabled,
+      sandboxDisabled: opts.sandbox === false,
+    },
+    localOnly: Boolean(ctx?.localOnly),
+    timeouts,
+    modelPins,
+    codexDisabled: codexOff,
+    skipCI: resolveSkipCI(factoryConfig),
+    failover: failoverSettings,
+    efficiency: { maxReworkRounds: efficiency.maxReworkRounds, fastPath: efficiency.fastPath },
+    sandboxPolicy: activeSandboxPolicy,
+    processGroupGraceMs,
+    preferredRoute: repoConfig?.route,
+    eventsFile: paths.events,
+    logsDir: paths.logs,
+  };
 
-    if (ctx?.localOnly) {
-      log('local-only-complete', `local-only run complete in ${worktree} — publishing disabled, no PR created`);
-      const reportPath = await maybeWriteLocalRunReport({
+  const ports: RunPorts = {
+    router,
+    octokit,
+    workspace,
+    events: mkLog,
+    acquireEnvironment,
+    resolveBaseUrl,
+    getIssueSpend: () => issueSpend,
+    breaker,
+    resolveConstitution: () =>
+      // Resolved once here — runIssue calls this exactly once and reuses the value for
+      // every phase, so the build worker can never author the standards it is graded by.
+      constitutionLoader.resolve(worktree, product, factoryConfig.paths?.constitution),
+    createApprovalGate: () => createFileApprovalGate({ dir: paths.approvals, timeoutMs: timeouts.approval * 1000 }),
+    drainSteering: () => drainSteering(paths.steering, issueNum, worktree),
+    reworkHistory,
+    onDecomposed: (childIssues) => {
+      const childList = childIssues.map((n) => `#${n}`).join(', ');
+      const planLog = mkLog('plan');
+      try {
+        const before = readTextFileOrEmpty(paths.queue);
+        const rewrite = rewriteQueueForDecomposition(before, { issue: issueNum, childIssues });
+        if (rewrite.changed) {
+          writeFileSync(paths.queue, rewrite.content);
+          planLog('decompose_filed', `queue entry for #${issueNum} replaced with ${childList}`);
+        } else {
+          planLog('decompose_filed', `#${issueNum} had no queue entry to replace — continuing the lane with ${childList}`);
+        }
+      } catch (err) {
+        planLog('decompose_file_failed', `queue rewrite for #${issueNum} failed: ${errorDetail(err)}`);
+      }
+      throw new IssueDecomposedError(`issue #${issueNum} decomposed into ${childList}`, childIssues);
+    },
+    writeLocalRunReport: (info) =>
+      maybeWriteLocalRunReport({
         issueNum,
         paths,
         startedAt: runStartedAt,
-        outcome: 'ready',
-        branch,
+        outcome: info.outcome,
+        branch: info.branch,
         worktree,
         specPath,
-        route,
-      });
-      await maybeWriteBenchmarkArtifacts({
+        route: info.route,
+        reason: info.reason,
+      }),
+    writeBenchmarkArtifacts: (info) =>
+      maybeWriteBenchmarkArtifacts({
         issueNum,
         paths,
         ctx,
         startedAt: runStartedAt,
-        outcome: 'ready',
-        branch,
+        outcome: info.outcome === 'parked' ? 'failed' : info.outcome,
+        branch: info.branch,
         specPath,
-        route,
-        checkSummary,
-        reworkRounds,
-        reportPath,
+        route: info.route,
+        checkSummary: info.checkSummary,
+        reworkRounds: info.reworkRounds,
+        failure: info.failure,
+        reportPath: info.reportPath,
         log,
-      });
-      console.log(chalk.green(`✅ Local-only run complete in ${worktree} (no PR — publishing disabled)`));
-      return branch;
-    }
+      }),
+  };
 
-    // SHIP
-    failurePhase = 'ship';
-    const approvalGate = opts.interactive
-      ? createFileApprovalGate({ dir: paths.approvals, timeoutMs: timeouts.approval * 1000 })
-      : undefined;
-    const ship = await shipPhase({
-      issue: issueNum,
-      repo: ghRepo,
-      worktree,
-      branch,
-      octokit,
-      watchCI: !skipCI,
-      log: mkLog('ship'),
-      approvalGate,
-      checkSummary: check.summary,
-      specPath,
-      eventsFile: paths.events,
-      startedAt: runStartedAt,
-      logsDir: paths.logs,
-      reworkRounds: check.reworkRounds,
-      work: ctx?.workRequest,
-      laneId: lane,
-    });
-    if (!ship.ok) {
-      throw new LaneParkError(
-        ship.denied ? `ship denied: ${ship.deniedReason}` : 'ship phase failed',
-        ship.denied ? 'escalate' : 'fail',
-      );
-    }
+  const outcome = await runIssue(request, policy, ports);
 
-    if (skipCI) {
-      log('skip-ci', `skipping CI watch (FACTORY_SKIP_CI=1) — merging on local verify`);
-    }
-
-    if (opts.interactive) {
-      const leftover = listQueuedSteering(paths.steering, issueNum);
-      if (leftover.length > 0) {
-        log('steering_unconsumed', `${leftover.length} steering message(s) not consumed (no worker phase remained)`);
-      }
-    }
-
-    const readyMsg = ship.alreadyDelivered
-      ? `already delivered${ship.prNumber !== undefined ? ` by merged PR #${ship.prNumber}` : ' — branch already landed on main'}`
-      : `PR #${ship.prNumber} ready for review`;
-    log('ready', readyMsg);
-    await maybeWriteLocalRunReport({
-      issueNum,
-      paths,
-      startedAt: runStartedAt,
-      outcome: 'ready',
-      branch,
-      worktree,
-      specPath,
-      route,
-    });
-    console.log(chalk.green(`✅ Issue #${issueNum} → ${readyMsg}`));
-    return branch;
-  } catch (err: any) {
-    if (err instanceof IssueDecomposedError) throw err;
-    for (const e of parkEvents(err)) log(e.type, e.msg);
-    const reportPath = await maybeWriteLocalRunReport({
-      issueNum,
-      paths,
-      startedAt: runStartedAt,
-      outcome: parkReasonFor(err) === 'escalate' ? 'escalated' : 'failed',
-      branch,
-      worktree,
-      specPath,
-      route,
-      reason: err.message,
-    });
-    await maybeWriteBenchmarkArtifacts({
-      issueNum,
-      paths,
-      ctx,
-      startedAt: runStartedAt,
-      outcome: parkReasonFor(err) === 'escalate' ? 'escalated' : 'failed',
-      branch,
-      specPath,
-      route,
-      checkSummary,
-      reworkRounds,
-      failure: { phase: failurePhase, reason: parkReasonFor(err), message: err.message },
-      reportPath,
-      log,
-    });
-    throw err;
-  } finally {
-    const outcomes = await tracker.killAll({ graceMs: processGroupGraceMs });
-    if (outcomes.length > 0) {
-      log(
-        'environment_cleanup',
-        `terminated ${outcomes.length} process group(s)${outcomes.some((o) => o.forced) ? ' (SIGKILL escalation used)' : ''}`,
-      );
-    }
-    if (appPort !== undefined) {
-      await releasePortLease({ registryFile: paths.ports, lockDir: paths.portsLock, worktreeId: worktree })
-        .then(() => log('environment_release', `released port ${appPort} for worktree ${worktree}`))
-        .catch((e: any) => log('environment_release_failed', `port release failed: ${e.message}`));
+  if (opts.interactive && !ctx?.localOnly && (outcome.state === 'ready' || outcome.state === 'shipped')) {
+    const leftover = listQueuedSteering(paths.steering, issueNum);
+    if (leftover.length > 0) {
+      log('steering_unconsumed', `${leftover.length} steering message(s) not consumed (no worker phase remained)`);
     }
   }
+
+  if (outcome.state === 'ready' || outcome.state === 'shipped') {
+    if (ctx?.localOnly) {
+      console.log(chalk.green(`✅ Local-only run complete in ${worktree} (no PR — publishing disabled)`));
+    } else {
+      console.log(chalk.green(`✅ Issue #${issueNum} → ${terminalMessage ?? 'ready'}`));
+    }
+    return outcome.branch;
+  }
+
+  const reason: ParkReason = outcome.state === 'escalated' ? 'escalate' : outcome.reason;
+  const message = outcome.state === 'escalated' ? outcome.reason : (terminalMessage ?? `run parked: ${outcome.reason}`);
+  throw new LaneParkError(message, reason);
 }
 
 async function maybeWriteLocalRunReport(opts: {
