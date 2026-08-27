@@ -16,6 +16,8 @@ export interface HostedJobSummary {
   jobId: string;
   repoSlug: string;
   status: HostedJobStatus;
+  /** runnerId currently holding the active lease, else null. */
+  leasedBy: string | null;
   outcome: HostedJobOutcome | null;
   summary: string | null;
   exitCode: number | null;
@@ -39,6 +41,7 @@ export function summarizeHostedJob(job: StoredHostedJob): HostedJobSummary {
     jobId: job.request.jobId,
     repoSlug: job.request.repoSlug,
     status: job.request.status,
+    leasedBy: job.lease?.runnerId ?? null,
     outcome: job.result?.outcome ?? null,
     summary: job.result?.summary ?? null,
     exitCode: job.result?.exitCode ?? null,

@@ -189,6 +189,7 @@ import {
 } from './doctor.js';
 import { formatOverview, missingClaudeCliMessage, missingTokenMessage, notInitializedMessage } from './first-run.js';
 import { cmdHostedSmoke } from './hosted.js';
+import { cmdHostedRunner } from './hosted-runner.js';
 import { cmdLogs } from './logs.js';
 import { createFactoryOctokit } from './octokit.js';
 import { distFreshnessProbe, runStalenessGuard } from './staleness.js';
@@ -3913,6 +3914,29 @@ export async function main() {
     .action(async (opts: { repo?: string; image?: string }) => {
       await cmdHostedSmoke(opts);
     });
+  hosted
+    .command('runner')
+    .description('Register capabilities with the local control plane and lease one compatible job, then exit')
+    .option('--url <url>', 'control-plane base URL', 'http://127.0.0.1:8799')
+    .option('--runner-id <id>', 'runner identity (default runner-<pid>)')
+    .option('--capabilities <csv>', 'comma-separated capability list', 'git,node')
+    .option('--timeout <ms>', 'bounded wait window for a compatible job, in ms', '30000')
+    .option('--poll-interval <ms>', 'delay between poll attempts, in ms', '2000')
+    .option('--lease-ttl <ms>', 'lease TTL, in ms', '300000')
+    .option('--heartbeat-interval <ms>', 'expected heartbeat interval, in ms', '30000')
+    .action(
+      async (opts: {
+        url?: string;
+        runnerId?: string;
+        capabilities?: string;
+        timeout?: string;
+        pollInterval?: string;
+        leaseTtl?: string;
+        heartbeatInterval?: string;
+      }) => {
+        await cmdHostedRunner(opts);
+      },
+    );
 
   program
     .command('ready <issue>')

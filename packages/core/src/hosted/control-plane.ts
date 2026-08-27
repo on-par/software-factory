@@ -27,6 +27,18 @@ const CreateJobBodySchema = z.object({
   requiredAuthority: z.string().min(1),
 });
 
+const RegisterRunnerBodySchema = z.object({
+  runnerId: z.string().min(1),
+  capabilities: z.array(z.string().min(1)),
+});
+
+const PollForLeaseBodySchema = z.object({
+  capabilities: z.array(z.string().min(1)),
+  leaseId: z.string().min(1),
+  ttlMs: z.number().int().positive(),
+  heartbeatIntervalMs: z.number().int().positive(),
+});
+
 export interface ControlPlaneResponse {
   status: number;
   body: unknown;
@@ -60,6 +72,7 @@ interface HostedControlPlaneRequest {
 }
 
 const JOB_PATH_PATTERN = /^\/jobs\/([^/]+)(?:\/(events|result|cancel))?$/;
+const RUNNER_POLL_PATH_PATTERN = /^\/runners\/([^/]+)\/poll$/;
 
 /** Pure router: no I/O, no clock — everything comes from the injected store
  * and request shape. Responses only ever contain summarizeHostedJob output
@@ -85,6 +98,35 @@ export function handleHostedControlPlaneRequest(
     } catch (error) {
       return { status: 409, body: { error: (error as Error).message } };
     }
+  }
+
+  if (pathname === '/runners') {
+    if (method !== 'POST') {
+      return { status: 405, body: { error: 'method not allowed' } };
+    }
+    const parsed = RegisterRunnerBodySchema.safeParse(body);
+    if (!parsed.success) {
+      return { status: 400, body: { error: parsed.error.message } };
+    }
+    const runner = store.registerRunner(parsed.data);
+    return { status: 201, body: { runner } };
+  }
+
+  const pollMatch = RUNNER_POLL_PATH_PATTERN.exec(pathname);
+  if (pollMatch) {
+    if (method !== 'POST') {
+      return { status: 405, body: { error: 'method not allowed' } };
+    }
+    const parsed = PollForLeaseBodySchema.safeParse(body);
+    if (!parsed.success) {
+      return { status: 400, body: { error: parsed.error.message } };
+    }
+    const runnerId = pollMatch[1];
+    const result = store.pollForLease({ runnerId, ...parsed.data });
+    if (!result.ok) {
+      return { status: 200, body: { ok: false, reason: result.reason } };
+    }
+    return { status: 200, body: { ok: true, lease: result.lease, job: summarizeHostedJob(result.job) } };
   }
 
   const match = JOB_PATH_PATTERN.exec(pathname);

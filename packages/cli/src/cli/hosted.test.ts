@@ -202,6 +202,7 @@ describe('formatHostedSmokeSummary', () => {
         jobId: 'summary-job-1',
         repoSlug: 'on-par/software-factory',
         status: 'leased',
+        leasedBy: null,
         outcome: null,
         summary: null,
         exitCode: null,
