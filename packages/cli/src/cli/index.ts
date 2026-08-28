@@ -199,6 +199,7 @@ import { cmdHostedSmoke } from './hosted.js';
 import { cmdHostedQueue } from './hosted-queue.js';
 import { cmdHostedRunner } from './hosted-runner.js';
 import { cmdLogs } from './logs.js';
+import { mergeScopeNotice } from './merge-scope.js';
 import { createFactoryOctokit } from './octokit.js';
 import { distFreshnessProbe, runStalenessGuard } from './staleness.js';
 
@@ -1418,6 +1419,12 @@ async function cmdShip(
   const paths = getFactoryPaths(repoRoot);
   if (!existsSync(paths.root)) {
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
+  }
+
+  const mergeNotice = mergeScopeNotice(process.env, issueNum);
+  if (mergeNotice) {
+    console.error(chalk.yellow(mergeNotice));
+    logEvent(paths.events, 'warn', issueNum, mergeNotice);
   }
 
   return withRepoRunLock(paths, 'factory ship', async () => {
@@ -3726,7 +3733,9 @@ export async function main() {
 
   program
     .command('ship <issue>')
-    .description('Plan → build → check → ship one issue')
+    .description(
+      'Plan → build → check → ship one issue; stops at a ready-for-review PR (FACTORY_MERGE / FACTORY_MERGE_ADMIN are honored by "factory run" and "factory land", not by ship)',
+    )
     .option('--product <name>', 'Override active product constitution')
     .option('--no-auto-rework', 'Disable automatic rework loop')
     .option('--interactive', 'Pause before opening the PR and wait for approval from the TUI')

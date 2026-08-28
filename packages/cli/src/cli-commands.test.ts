@@ -2110,6 +2110,46 @@ bash scripts/verify.sh
         .map((line) => JSON.parse(line));
       expect(events.some((e: any) => e.type === 'sandbox-disabled' && e.msg.includes('--no-sandbox'))).toBe(false);
     });
+
+    it('warns that FACTORY_MERGE does not apply to ship and names factory land/run (#978)', async () => {
+      process.env.FACTORY_MERGE = '1';
+      const res = await runMain('ship', '5');
+      expect(res.exited).toBe(false);
+      expect(errored()).toContain('FACTORY_MERGE=1 ignored');
+      expect(errored()).toContain('factory land 5');
+      expect(errored()).toContain('factory run');
+      expect(logged()).toContain('PR #99 ready for review');
+    });
+
+    it('records the ignored-merge notice as a warn event (#978)', async () => {
+      process.env.FACTORY_MERGE = '1';
+      const res = await runMain('ship', '5');
+      expect(res.exited).toBe(false);
+      const events = readFileSync(paths().events, 'utf-8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      const warnEvents = events.filter((e: any) => e.type === 'warn' && e.issue === '5' && e.msg.includes('ignored'));
+      expect(warnEvents).toHaveLength(1);
+    });
+
+    it('warns for FACTORY_MERGE_ADMIN alone (#978)', async () => {
+      process.env.FACTORY_MERGE_ADMIN = '1';
+      const res = await runMain('ship', '5');
+      expect(res.exited).toBe(false);
+      expect(errored()).toContain('FACTORY_MERGE_ADMIN=1 ignored');
+    });
+
+    it('prints no merge notice when neither variable is set (#978)', async () => {
+      const res = await runMain('ship', '5');
+      expect(res.exited).toBe(false);
+      expect(errored()).not.toContain('ignored —');
+      const events = readFileSync(paths().events, 'utf-8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      expect(events.some((e: any) => e.type === 'warn' && e.msg.includes('ignored'))).toBe(false);
+    });
   });
 
   describe('run-issue (one-shot)', () => {
