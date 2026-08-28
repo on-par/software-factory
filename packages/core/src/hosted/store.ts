@@ -126,16 +126,53 @@ function isLeaseActive(job: StoredHostedJob, leaseId: string, nowMs: number): bo
   return job.lease !== null && job.lease.leaseId === leaseId && nowMs < Date.parse(job.lease.expiresAt);
 }
 
-export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobStore {
-  const { now } = options;
+/** Storage seam behind {@link createHostedJobStoreOverPersistence}; memory and SQLite are the two implementations. */
+export interface HostedStorePersistence {
+  hasJob(jobId: string): boolean;
+  getJob(jobId: string): StoredHostedJob | undefined;
+  putJob(job: StoredHostedJob): void;
+  jobs(): StoredHostedJob[];
+  getRunner(runnerId: string): StoredRunner | undefined;
+  putRunner(runner: StoredRunner): void;
+  runners(): StoredRunner[];
+}
+
+function createMemoryPersistence(): HostedStorePersistence {
   const jobs = new Map<string, StoredHostedJob>();
   const runners = new Map<string, StoredRunner>();
+  return {
+    hasJob: (jobId) => jobs.has(jobId),
+    getJob: (jobId) => jobs.get(jobId),
+    putJob: (job) => {
+      jobs.set(job.request.jobId, job);
+    },
+    jobs: () => [...jobs.values()],
+    getRunner: (runnerId) => runners.get(runnerId),
+    putRunner: (runner) => {
+      runners.set(runner.runnerId, runner);
+    },
+    runners: () => [...runners.values()],
+  };
+}
+
+/**
+ * Holds every idempotency/lease invariant (ADR-0048) exactly once. Both the
+ * memory adapter (`createHostedJobStore`) and the SQLite adapter
+ * (`createSqliteHostedJobStore`) delegate here over a `HostedStorePersistence`
+ * so the two backends cannot drift.
+ */
+export function createHostedJobStoreOverPersistence(
+  persistence: HostedStorePersistence,
+  options: HostedJobStoreOptions,
+): HostedJobStore {
+  const { now } = options;
   const iso = (ms: number) => new Date(ms).toISOString();
 
   function setRunnerAvailable(runnerId: string, available: boolean): void {
-    const runner = runners.get(runnerId);
+    const runner = persistence.getRunner(runnerId);
     if (runner) {
       runner.available = available;
+      persistence.putRunner(runner);
     }
   }
 
@@ -186,7 +223,7 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
     leaseId: string,
     options: { auditStaleFinalize?: boolean } = {},
   ): { job: StoredHostedJob } | { result: JobUpdateResult } {
-    const job = jobs.get(jobId);
+    const job = persistence.getJob(jobId);
     if (!job) {
       return { result: { ok: false, reason: 'job-not-found' } };
     }
@@ -194,17 +231,20 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
       const terminalEventType =
         job.request.status === 'done' ? 'completed' : job.request.status === 'canceled' ? 'canceled' : 'failed';
       appendEvent(job, terminalEventType, 'warn', 'ignored: job already terminal');
+      persistence.putJob(job);
       return { result: { ok: true, job, alreadyTerminal: true } };
     }
     if (job.lease?.leaseId !== leaseId) {
       if (options.auditStaleFinalize) {
         appendEvent(job, 'expired', 'warn', 'ignored: stale finalize attempt (lease not held)');
+        persistence.putJob(job);
       }
       return { result: { ok: false, reason: 'lease-mismatch', job } };
     }
     if (!isLeaseActive(job, leaseId, now())) {
       if (options.auditStaleFinalize) {
         appendEvent(job, 'expired', 'warn', 'ignored: stale finalize attempt (lease expired)');
+        persistence.putJob(job);
       }
       return { result: { ok: false, reason: 'lease-expired', job } };
     }
@@ -212,7 +252,7 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
   }
 
   function acquireLeaseImpl(input: AcquireLeaseInput): JobLeaseResult {
-    const job = jobs.get(input.jobId);
+    const job = persistence.getJob(input.jobId);
     if (!job) {
       return { ok: false, reason: 'job-not-found' };
     }
@@ -232,12 +272,13 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
     job.lease = lease;
     job.request.status = 'leased';
     appendEvent(job, 'leased', 'info', 'lease acquired');
+    persistence.putJob(job);
     return { ok: true, lease, job };
   }
 
   function reclaimExpiredImpl(): StoredHostedJob[] {
     const reclaimed: StoredHostedJob[] = [];
-    for (const job of jobs.values()) {
+    for (const job of persistence.jobs()) {
       if (isTerminal(job.request.status) || !job.lease) {
         continue;
       }
@@ -249,6 +290,7 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
       job.lease = null;
       setRunnerAvailable(runnerId, true);
       appendEvent(job, 'expired', 'warn', 'lease expired — job returned to retryable state');
+      persistence.putJob(job);
       reclaimed.push(job);
     }
     return reclaimed;
@@ -256,7 +298,7 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
 
   return {
     create(input) {
-      if (jobs.has(input.jobId)) {
+      if (persistence.hasJob(input.jobId)) {
         throw new Error(`hosted job already exists: ${input.jobId}`);
       }
       const request = HostedJobRequestSchema.parse({
@@ -266,16 +308,16 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
       });
       const job: StoredHostedJob = { request, lease: null, events: [], result: null, updatedAt: request.createdAt };
       appendEvent(job, 'requested', 'info', 'hosted job requested');
-      jobs.set(input.jobId, job);
+      persistence.putJob(job);
       return job;
     },
 
     get(jobId) {
-      return jobs.get(jobId);
+      return persistence.getJob(jobId);
     },
 
     list() {
-      return [...jobs.values()];
+      return persistence.jobs();
     },
 
     acquireLease(input) {
@@ -292,6 +334,7 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
         job.request.status = 'running';
       }
       appendEvent(job, 'heartbeat', 'info', 'heartbeat received');
+      persistence.putJob(job);
       return { ok: true, job, alreadyTerminal: false };
     },
 
@@ -305,6 +348,7 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
       appendEvent(job, 'completed', 'info', 'hosted job completed');
       recordResult(job, 'completed', summary ?? 'hosted job completed', detail);
       releaseLease(job);
+      persistence.putJob(job);
       return { ok: true, job, alreadyTerminal: false };
     },
 
@@ -318,6 +362,7 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
       appendEvent(job, 'failed', 'error', `hosted job failed: ${reason}`);
       recordResult(job, 'failed', reason, detail);
       releaseLease(job);
+      persistence.putJob(job);
       return { ok: true, job, alreadyTerminal: false };
     },
 
@@ -328,34 +373,37 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
         lastHeartbeatAt: iso(now()),
         available: true,
       };
-      runners.set(input.runnerId, runner);
+      persistence.putRunner(runner);
       return runner;
     },
 
     getRunner(runnerId) {
-      return runners.get(runnerId);
+      return persistence.getRunner(runnerId);
     },
 
     listRunners() {
-      return [...runners.values()];
+      return persistence.runners();
     },
 
     runnerHeartbeat(runnerId) {
-      const runner = runners.get(runnerId);
+      const runner = persistence.getRunner(runnerId);
       if (!runner) {
         return undefined;
       }
       runner.lastHeartbeatAt = iso(now());
+      persistence.putRunner(runner);
       return runner;
     },
 
     pollForLease(input) {
       reclaimExpiredImpl();
-      const job = [...jobs.values()].find(
-        (candidate) =>
-          candidate.request.status === 'requested' &&
-          candidate.request.requiredCapabilities.every((capability) => input.capabilities.includes(capability)),
-      );
+      const job = persistence
+        .jobs()
+        .find(
+          (candidate) =>
+            candidate.request.status === 'requested' &&
+            candidate.request.requiredCapabilities.every((capability) => input.capabilities.includes(capability)),
+        );
       if (!job) {
         return { ok: false, reason: 'no-match' };
       }
@@ -378,32 +426,35 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
     },
 
     recordCleanup(jobId, evidence) {
-      const job = jobs.get(jobId);
+      const job = persistence.getJob(jobId);
       if (!job) {
         return { ok: false, reason: 'job-not-found' };
       }
       appendEvent(job, 'cleaned', 'info', `cleanup proof: ${evidence}`);
+      persistence.putJob(job);
       return { ok: true, job };
     },
 
     cancel(jobId, reason) {
-      const job = jobs.get(jobId);
+      const job = persistence.getJob(jobId);
       if (!job) {
         return { ok: false, reason: 'job-not-found' };
       }
       if (isTerminal(job.request.status)) {
         appendEvent(job, 'canceled', 'warn', 'ignored: job already terminal');
+        persistence.putJob(job);
         return { ok: true, job, alreadyTerminal: true };
       }
       job.request.status = 'canceled';
       appendEvent(job, 'canceled', 'warn', `hosted job canceled: ${reason}`);
       recordResult(job, 'canceled', reason);
       releaseLease(job);
+      persistence.putJob(job);
       return { ok: true, job, alreadyTerminal: false };
     },
 
     reclaimJob(jobId, reason) {
-      const job = jobs.get(jobId);
+      const job = persistence.getJob(jobId);
       if (!job) {
         return { ok: false, reason: 'job-not-found' };
       }
@@ -418,7 +469,12 @@ export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobS
       job.lease = null;
       setRunnerAvailable(runnerId, true);
       appendEvent(job, 'watchdog', 'warn', `reclaimed for relaunch: ${reason}`);
+      persistence.putJob(job);
       return { ok: true, job };
     },
   };
+}
+
+export function createHostedJobStore(options: HostedJobStoreOptions): HostedJobStore {
+  return createHostedJobStoreOverPersistence(createMemoryPersistence(), options);
 }
