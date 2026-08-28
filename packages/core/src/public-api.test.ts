@@ -93,6 +93,8 @@ const PUBLIC_API_KEYS = [
   'handleHostedControlPlaneRequest',
   'createHttpHostedControlPlaneClient',
   'runOneJobRunner',
+  'createHttpHostedJobClient',
+  'queueAndTailJob',
   // Work requests
   'closedWorkSkipReason',
   'createDefaultWorkSourceRegistry',

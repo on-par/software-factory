@@ -182,6 +182,8 @@ export type {
   RegisteredRunner,
 } from './hosted/runner-client.js';
 export { createHttpHostedControlPlaneClient, runOneJobRunner } from './hosted/runner-client.js';
+export type { HostedJobClient, QueueAndTailConfig, QueueAndTailOutcome } from './hosted/queue-client.js';
+export { createHttpHostedJobClient, queueAndTailJob } from './hosted/queue-client.js';
 
 // Work requests
 export type {

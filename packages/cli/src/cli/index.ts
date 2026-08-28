@@ -196,6 +196,7 @@ import {
 } from './doctor.js';
 import { formatOverview, missingClaudeCliMessage, missingTokenMessage, notInitializedMessage } from './first-run.js';
 import { cmdHostedSmoke } from './hosted.js';
+import { cmdHostedQueue } from './hosted-queue.js';
 import { cmdHostedRunner } from './hosted-runner.js';
 import { cmdLogs } from './logs.js';
 import { createFactoryOctokit } from './octokit.js';
@@ -3688,6 +3689,31 @@ export async function main() {
         heartbeatInterval?: string;
       }) => {
         await cmdHostedRunner(opts);
+      },
+    );
+  hosted
+    .command('queue')
+    .description('Queue one job to the local control plane, tail it to terminal, print the result')
+    .option('--url <url>', 'control-plane base URL', 'http://127.0.0.1:8799')
+    .option('--repo <slug>', 'owner/repo the job runs against', 'on-par/software-factory')
+    .option('--task <text>', 'opaque task payload')
+    .option('--capabilities <csv>', 'comma-separated required capabilities', 'git,node')
+    .option('--authority <authority>', 'required authority', 'repo:read')
+    .option('--timeout <ms>', 'bounded wait for a terminal result, in ms', '120000')
+    .option('--poll-interval <ms>', 'delay between summary polls, in ms', '1000')
+    .option('--job-id <id>', 'explicit job id (default server-generated)')
+    .action(
+      async (opts: {
+        url?: string;
+        repo?: string;
+        task?: string;
+        capabilities?: string;
+        authority?: string;
+        timeout?: string;
+        pollInterval?: string;
+        jobId?: string;
+      }) => {
+        await cmdHostedQueue(opts);
       },
     );
 
