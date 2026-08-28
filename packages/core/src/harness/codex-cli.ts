@@ -15,7 +15,7 @@ import { HarnessError } from './index.js';
 export type CodexExecFn = ExecFn;
 
 /** Runs a model via the Codex CLI:
- *  codex exec --json --sandbox workspace-write -c approval_policy=never -C <worktree> [flags] -o <output> - < <prompt> */
+ *  codex exec --json --sandbox <mode> -c approval_policy=never -C <worktree> [flags] -o <output> - < <prompt> */
 export class CodexCliHarness implements CodingHarness {
   readonly id = 'codex-cli';
   readonly agentic = true;
@@ -30,7 +30,11 @@ export class CodexCliHarness implements CodingHarness {
     const outFile = await mktemp(join(tmpdir(), 'factory-codex-out-'));
     await writeFile(tmpFile, prompt);
 
-    const cmd = `codex exec --json --sandbox workspace-write -c approval_policy=never -C ${shellEscape(worktree)} ${extraFlag} -o ${shellEscape(outFile)} - < ${shellEscape(tmpFile)}`;
+    // With an outer containment sandbox, codex runs workspace-write inside it. Without one,
+    // workspace-write is codex's own restriction and blocks legitimate writes, so the run
+    // produces a blocked no-op spec instead of an implementation (#834).
+    const codexSandbox = sandbox ? 'workspace-write' : 'danger-full-access';
+    const cmd = `codex exec --json --sandbox ${codexSandbox} -c approval_policy=never -C ${shellEscape(worktree)} ${extraFlag} -o ${shellEscape(outFile)} - < ${shellEscape(tmpFile)}`;
     const finalCmd = sandbox ? wrapCommandInSandbox(cmd, sandbox) : cmd;
 
     try {

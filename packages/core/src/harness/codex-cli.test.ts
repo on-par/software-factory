@@ -135,7 +135,7 @@ describe('CodexCliHarness command shape', () => {
     expect(result.output).toBe('CODEX OUTPUT');
     expect(rec.calls).toHaveLength(1);
     const { cmd, opts } = rec.calls[0];
-    expect(cmd).toMatch(/^codex exec --json --sandbox workspace-write -c approval_policy=never -C '/);
+    expect(cmd).toMatch(/^codex exec --json --sandbox danger-full-access -c approval_policy=never -C '/);
     expect(cmd).toContain("-C '/tmp/factory worktree'");
     expect(cmd).toContain('--model gpt-5-codex');
     expect(cmd).toMatch(/ -o '\/.*factory-codex-out-[^']+' - </);
@@ -152,7 +152,7 @@ describe('CodexCliHarness command shape', () => {
     await harness.run(makeContractRequest({ model: 'codex-no-flag', registry, prompt: 'build it' }));
 
     expect(rec.calls).toHaveLength(1);
-    expect(rec.calls[0].cmd).toMatch(/^codex exec --json --sandbox workspace-write -c approval_policy=never -C '/);
+    expect(rec.calls[0].cmd).toMatch(/^codex exec --json --sandbox danger-full-access -c approval_policy=never -C '/);
     expect(rec.calls[0].cmd).not.toContain('--model');
   });
 
