@@ -484,6 +484,7 @@ export function getFactoryPaths(repoRoot: string, stateRoot?: string) {
     logs: resolve(state, 'logs'),
     plans: resolve(state, 'plans'),
     reports: resolve(state, 'reports'),
+    runs: resolve(state, 'runs'),
     mergeLock: resolve(state, 'merge.lock'),
     gitLock: resolve(state, 'git.lock'),
     runLock: resolve(state, 'run.lock'),
