@@ -131,21 +131,7 @@ async function buildPhaseImpl(opts: {
   if (route === 'codex') {
     taskType = 'build_codex';
     prompt = localOnly
-      ? `Local-small build for issue #${issue}.
-You are in the isolated worktree for branch ${branch}.
-Do one small implementation pass from this frozen spec, then commit.
-
-Rules:
-- Prefer one or two files.
-- Inspect only the files you need.
-- Make the smallest change that satisfies the acceptance criteria.
-- Run one cheap verification command if available.
-- Create exactly one git commit.
-- Do not push, open a PR, or merge.
-
-Frozen spec:
-${compactForLocalModel(spec)}
-`
+      ? buildLocalSmallPrompt({ issue, branch, spec })
       : buildCommitOnlyPrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding });
   } else if (route === 'opencode') {
     taskType = 'build_opencode';
@@ -295,7 +281,26 @@ ${compactForLocalModel(spec)}
   return { ok: true, model: result.model, route };
 }
 
-function buildOpencodePrompt(opts: {
+export function buildLocalSmallPrompt(opts: { issue: number; branch: string; spec: string }): string {
+  const { issue, branch, spec } = opts;
+  return `Local-small build for issue #${issue}.
+You are in the isolated worktree for branch ${branch}.
+Do one small implementation pass from this frozen spec, then commit.
+
+Rules:
+- Prefer one or two files.
+- Inspect only the files you need.
+- Make the smallest change that satisfies the acceptance criteria.
+- Run one cheap verification command if available.
+- Create exactly one git commit.
+- Do not push, open a PR, or merge.
+
+Frozen spec:
+${compactForLocalModel(spec)}
+`;
+}
+
+export function buildOpencodePrompt(opts: {
   issue: number;
   specPath: string;
   constitutionCtx: string;
@@ -340,7 +345,7 @@ spawning sub-agents for a single small issue — this keeps token usage efficien
 ${headlessNote()}${appPort ? `\n\n${appPortNote(appPort, appBaseUrl)}` : ''}${designGrounding ? `\n\n${designGrounding}` : ''}`;
 }
 
-function buildCommitOnlyPrompt(opts: {
+export function buildCommitOnlyPrompt(opts: {
   issue: number;
   specPath: string;
   constitutionCtx: string;
@@ -385,7 +390,7 @@ spawning sub-agents for a single small issue — this keeps token usage efficien
 ${headlessNote()}${appPort ? `\n\n${appPortNote(appPort, appBaseUrl)}` : ''}${designGrounding ? `\n\n${designGrounding}` : ''}`;
 }
 
-function buildClaudePrompt(opts: {
+export function buildClaudePrompt(opts: {
   issue: number;
   branch: string;
   specPath: string;
@@ -398,7 +403,7 @@ function buildClaudePrompt(opts: {
   const { issue, branch, specPath, constitutionCtx, skipCI, appPort, appBaseUrl, designGrounding } = opts;
   return `Run fully autonomously in headless mode for issue #${issue}, BUILD phase.
 You are ALREADY inside the isolated git worktree for issue ${issue} (branch ${branch},
-cwd is this worktree), so SKIP ship-it's worktree-creation step.
+cwd is this worktree).
 
 ${constitutionCtx}
 
