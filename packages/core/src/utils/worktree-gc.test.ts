@@ -692,11 +692,21 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     if (parentDir) rmSync(parentDir, { recursive: true, force: true });
   });
 
+  /** The only endpoint sweepWorktrees reaches (resolvePrState → rest.pulls.list). A structural
+   *  supertype of Pick<Octokit,'rest'>, so widening it costs one assertion, never a chain. */
+  interface SweepOctokitDouble {
+    rest: { pulls: { list: (args: any) => Promise<any> } };
+  }
+
+  function asSweepOctokit(double: SweepOctokitDouble): NonNullable<SweepDeps['octokit']> {
+    return double as NonNullable<SweepDeps['octokit']>;
+  }
+
   function fakeOctokit(
     result: () => Promise<{ data: Array<Record<string, unknown>> }> | { data: Array<Record<string, unknown>> },
   ) {
     const pullsList = vi.fn(async (_params: unknown) => result());
-    const octokit = { rest: { pulls: { list: pullsList } } } as unknown as SweepDeps['octokit'];
+    const octokit = asSweepOctokit({ rest: { pulls: { list: pullsList } } });
     return { octokit, pullsList };
   }
 

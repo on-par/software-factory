@@ -65,7 +65,7 @@ describe('loadRegistry', () => {
     expect(registry).toEqual(emptyRegistry());
   });
 
-  it('drops malformed entries while keeping well-formed siblings', async () => {
+  it('daemon registry drops malformed entries while keeping well-formed siblings', async () => {
     const file = await tmpFile();
     await writeFile(
       file,
@@ -76,12 +76,39 @@ describe('loadRegistry', () => {
           'on-par/numeric-path': { path: 42, attachedAt: '2026-08-19T12:00:00.000Z', state: 'active' },
           'on-par/bogus-state': { path: '/tmp/x', attachedAt: '2026-08-19T12:00:00.000Z', state: 'bogus' },
           'on-par/missing-attached-at': { path: '/tmp/x', state: 'active' },
+          'on-par/numeric-state-root': {
+            ...goodEntry,
+            stateRoot: 42,
+          },
         },
       }),
     );
     const registry = await loadRegistry(file);
     expect(Object.keys(registry.repos)).toEqual(['on-par/good']);
     expect(registry.repos['on-par/good']).toEqual(goodEntry);
+  });
+
+  it('daemon registry preserves a valid external state root while legacy entries remain valid', async () => {
+    const file = await tmpFile();
+    const entryWithStateRoot: RepoRegistryEntry = {
+      ...goodEntry,
+      stateRoot: '/var/lib/factory-state/sound-buddy',
+    };
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        repos: {
+          'on-par/legacy': goodEntry,
+          'on-par/sound-buddy': entryWithStateRoot,
+        },
+      }),
+    );
+
+    const registry = await loadRegistry(file);
+
+    expect(registry.repos['on-par/legacy']).toEqual(goodEntry);
+    expect(registry.repos['on-par/sound-buddy']).toEqual(entryWithStateRoot);
   });
 });
 

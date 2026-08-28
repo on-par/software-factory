@@ -14,9 +14,21 @@ export interface LifecycleEventSource {
   on(listener: (event: LaneLifecycleEvent) => void): () => void;
 }
 
+/** Structural port for repository-scoped lane controls. */
+export interface LaneController {
+  pause(laneId: string): void | Promise<void>;
+}
+
+/** A repository, its lifecycle source, and its scoped lane controller. */
+export interface AttachedRepository {
+  repo: string;
+  source: LifecycleEventSource;
+  controller: LaneController;
+}
+
 export interface ServerConfig {
-  /** The lane lifecycle bus to relay — pass core's `lifecycleBus` or `createLifecycleBus()`. */
-  bus: LifecycleEventSource;
+  /** Named lifecycle sources to relay — each source is tagged with its repository slug. */
+  repositories: readonly AttachedRepository[];
   /** Default 8787; pass 0 in tests for an ephemeral port. */
   port?: number;
   /** Default '127.0.0.1' — never anything else in production code paths. */
@@ -41,13 +53,23 @@ export function createServer(config: ServerConfig): FactoryServer {
   const ring = createReplayRing(config.replayBufferSize ?? 256);
   const heartbeatMs = config.heartbeatMs ?? 15_000;
 
-  let seq = 0;
-  const clients = new Set<http.ServerResponse>();
+  const sequences = new Map<string, number>();
+  const clients = new Set<{ response: http.ServerResponse; repo: string | undefined }>();
   const timers = new Map<http.ServerResponse, NodeJS.Timeout>();
-  let unsubscribe: (() => void) | undefined;
+  let unsubscribes: Array<() => void> = [];
   let stopped = false;
 
-  function handleEvents(req: http.IncomingMessage, res: http.ServerResponse): void {
+  function repositoryNotAttached(res: http.ServerResponse): void {
+    res.writeHead(404, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'repository not attached' }));
+  }
+
+  function handleEvents(req: http.IncomingMessage, res: http.ServerResponse, repo: string | undefined): void {
+    if (repo !== undefined && !config.repositories.some((repository) => repository.repo === repo)) {
+      repositoryNotAttached(res);
+      return;
+    }
+
     res.writeHead(200, {
       'content-type': 'text/event-stream',
       'cache-control': 'no-cache',
@@ -63,13 +85,15 @@ export function createServer(config: ServerConfig): FactoryServer {
     res.write('retry: 2000\n\n');
 
     for (const entry of ring.since(parseLastEventId(req.headers['last-event-id']))) {
+      if (repo !== undefined && entry.event.repo !== repo) continue;
       res.write(formatSseFrame(entry.id, entry.event));
     }
 
     // A disconnected client's socket can still receive a write() queued before the
     // 'close' event lands; an unhandled 'error' there would crash the process.
     res.on('error', () => {});
-    clients.add(res);
+    const client = { response: res, repo };
+    clients.add(client);
 
     if (heartbeatMs > 0) {
       const t = setInterval(() => res.write(': ping\n\n'), heartbeatMs);
@@ -81,16 +105,32 @@ export function createServer(config: ServerConfig): FactoryServer {
       const t = timers.get(res);
       if (t) clearInterval(t);
       timers.delete(res);
-      clients.delete(res);
+      clients.delete(client);
     });
   }
 
-  function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
-    const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
+  async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const pathname = url.pathname;
     if (pathname === '/events' && (req.method === 'GET' || req.method === 'HEAD')) {
-      handleEvents(req, res);
+      handleEvents(req, res, url.searchParams.get('repo') ?? undefined);
       return;
     }
+
+    const pauseRoute = /^\/repos\/([^/]+)\/([^/]+)\/lanes\/([^/]+)\/pause$/.exec(pathname);
+    if (req.method === 'POST' && pauseRoute) {
+      const [, owner, name, laneId] = pauseRoute;
+      const repository = config.repositories.find(({ repo }) => repo === `${owner}/${name}`);
+      if (!repository) {
+        repositoryNotAttached(res);
+        return;
+      }
+      await repository.controller.pause(laneId);
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
     res.writeHead(404, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ error: 'not found' }));
   }
@@ -110,12 +150,18 @@ export function createServer(config: ServerConfig): FactoryServer {
           server.off('error', onError);
           const addr = server.address();
           factoryServer.port = addr && typeof addr === 'object' ? addr.port : desiredPort;
-          unsubscribe = config.bus.on((event) => {
-            const id = ++seq;
-            ring.push(id, event);
-            const frame = formatSseFrame(id, event);
-            for (const res of clients) res.write(frame);
-          });
+          unsubscribes = config.repositories.map(({ repo, source }) =>
+            source.on((event) => {
+              const taggedEvent = { ...event, repo };
+              const id = (sequences.get(repo) ?? 0) + 1;
+              sequences.set(repo, id);
+              ring.push(id, taggedEvent);
+              const frame = formatSseFrame(id, taggedEvent);
+              for (const client of clients) {
+                if (client.repo === undefined || client.repo === repo) client.response.write(frame);
+              }
+            }),
+          );
           resolvePromise(factoryServer.port);
         };
         server.once('error', onError);
@@ -126,10 +172,11 @@ export function createServer(config: ServerConfig): FactoryServer {
     async stop(): Promise<void> {
       if (stopped) return;
       stopped = true;
-      unsubscribe?.();
+      for (const unsubscribe of unsubscribes) unsubscribe();
+      unsubscribes = [];
       for (const t of timers.values()) clearInterval(t);
       timers.clear();
-      for (const res of clients) res.end();
+      for (const client of clients) client.response.end();
       clients.clear();
       server.closeAllConnections();
       await new Promise<void>((resolvePromise) => {

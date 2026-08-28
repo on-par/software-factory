@@ -1,9 +1,21 @@
+import type { render } from 'ink';
+import type { ReactElement, ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { AppProps } from './components/App.js';
 import { runTui } from './run-tui.js';
 
+/** runTui only reads stdout.isTTY and forwards stdout to followPlainFn; one assertion is enough. */
 function fakeStdout(isTTY: boolean): NodeJS.WriteStream {
-  return { isTTY } as unknown as NodeJS.WriteStream;
+  return { isTTY } as NodeJS.WriteStream;
+}
+
+/** runTui renders exactly one element and it is always <App/>; ink's `render` types its tree as
+ *  the broader ReactNode, so one assertion narrows it to the concrete element the call site
+ *  passed, recovering its AppProps directly (deviates from the frozen plan's `ReactElement`
+ *  parameter, which does not match ink's actual `render(node: ReactNode, ...)` signature). */
+function appPropsOf(node: ReactNode): AppProps {
+  return (node as ReactElement<AppProps>).props;
 }
 
 describe('runTui', () => {
@@ -41,7 +53,7 @@ describe('runTui', () => {
   it('resolves via the Ink app exiting on a TTY stdout', async () => {
     const stdout = fakeStdout(true);
     const waitUntilExit = vi.fn().mockResolvedValue(undefined);
-    const renderFn = vi.fn(() => ({
+    const renderFn = vi.fn<typeof render>(() => ({
       rerender: vi.fn(),
       unmount: vi.fn(),
       waitUntilExit,
@@ -51,7 +63,7 @@ describe('runTui', () => {
     const followPlainFn = vi.fn(() => vi.fn());
 
     await expect(
-      runTui({ eventsFile: 'events.ndjson', stdout, render: renderFn as any, followPlainFn }),
+      runTui({ eventsFile: 'events.ndjson', stdout, render: renderFn, followPlainFn }),
     ).resolves.toBeUndefined();
 
     expect(renderFn).toHaveBeenCalled();
@@ -62,7 +74,7 @@ describe('runTui', () => {
   it('forwards stopFile through to the rendered App', async () => {
     const stdout = fakeStdout(true);
     const waitUntilExit = vi.fn().mockResolvedValue(undefined);
-    const renderFn = vi.fn(() => ({
+    const renderFn = vi.fn<typeof render>(() => ({
       rerender: vi.fn(),
       unmount: vi.fn(),
       waitUntilExit,
@@ -75,19 +87,20 @@ describe('runTui', () => {
       eventsFile: 'events.ndjson',
       stopFile: '/repo/.factory/STOP',
       stdout,
-      render: renderFn as any,
+      render: renderFn,
       followPlainFn,
     });
 
     expect(renderFn).toHaveBeenCalled();
-    const [element] = renderFn.mock.calls[0] as unknown as [any, any];
-    expect(element.props.stopFile).toBe('/repo/.factory/STOP');
+    const call = renderFn.mock.calls[0];
+    expect(call).toBeDefined();
+    expect(appPropsOf(call?.[0]).stopFile).toBe('/repo/.factory/STOP');
   });
 
   it('forwards queueFile, queueProposedFile, and costsFile through to the rendered App', async () => {
     const stdout = fakeStdout(true);
     const waitUntilExit = vi.fn().mockResolvedValue(undefined);
-    const renderFn = vi.fn(() => ({
+    const renderFn = vi.fn<typeof render>(() => ({
       rerender: vi.fn(),
       unmount: vi.fn(),
       waitUntilExit,
@@ -102,20 +115,22 @@ describe('runTui', () => {
       queueProposedFile: '/repo/.factory/queue.proposed',
       costsFile: '/repo/.factory/costs.jsonl',
       stdout,
-      render: renderFn as any,
+      render: renderFn,
       followPlainFn,
     });
 
-    const [element] = renderFn.mock.calls[0] as unknown as [any, any];
-    expect(element.props.queueFile).toBe('/repo/.factory/queue');
-    expect(element.props.queueProposedFile).toBe('/repo/.factory/queue.proposed');
-    expect(element.props.costsFile).toBe('/repo/.factory/costs.jsonl');
+    const call = renderFn.mock.calls[0];
+    expect(call).toBeDefined();
+    const props = appPropsOf(call?.[0]);
+    expect(props.queueFile).toBe('/repo/.factory/queue');
+    expect(props.queueProposedFile).toBe('/repo/.factory/queue.proposed');
+    expect(props.costsFile).toBe('/repo/.factory/costs.jsonl');
   });
 
   it('forwards approvalsDir through to the rendered App', async () => {
     const stdout = fakeStdout(true);
     const waitUntilExit = vi.fn().mockResolvedValue(undefined);
-    const renderFn = vi.fn(() => ({
+    const renderFn = vi.fn<typeof render>(() => ({
       rerender: vi.fn(),
       unmount: vi.fn(),
       waitUntilExit,
@@ -128,18 +143,19 @@ describe('runTui', () => {
       eventsFile: 'events.ndjson',
       approvalsDir: '/repo/.factory/approvals',
       stdout,
-      render: renderFn as any,
+      render: renderFn,
       followPlainFn,
     });
 
-    const [element] = renderFn.mock.calls[0] as unknown as [any, any];
-    expect(element.props.approvalsDir).toBe('/repo/.factory/approvals');
+    const call = renderFn.mock.calls[0];
+    expect(call).toBeDefined();
+    expect(appPropsOf(call?.[0]).approvalsDir).toBe('/repo/.factory/approvals');
   });
 
   it('forwards steeringDir through to the rendered App', async () => {
     const stdout = fakeStdout(true);
     const waitUntilExit = vi.fn().mockResolvedValue(undefined);
-    const renderFn = vi.fn(() => ({
+    const renderFn = vi.fn<typeof render>(() => ({
       rerender: vi.fn(),
       unmount: vi.fn(),
       waitUntilExit,
@@ -152,11 +168,12 @@ describe('runTui', () => {
       eventsFile: 'events.ndjson',
       steeringDir: '/repo/.factory/steering',
       stdout,
-      render: renderFn as any,
+      render: renderFn,
       followPlainFn,
     });
 
-    const [element] = renderFn.mock.calls[0] as unknown as [any, any];
-    expect(element.props.steeringDir).toBe('/repo/.factory/steering');
+    const call = renderFn.mock.calls[0];
+    expect(call).toBeDefined();
+    expect(appPropsOf(call?.[0]).steeringDir).toBe('/repo/.factory/steering');
   });
 });

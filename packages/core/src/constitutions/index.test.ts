@@ -4,7 +4,12 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { buildConstitutionContext, ConstitutionLoader, REPO_INSTRUCTION_FILES } from './index.js';
+import {
+  buildConstitutionContext,
+  ConstitutionLoader,
+  DEFAULT_REPO_CONSTITUTION_PATH,
+  REPO_INSTRUCTION_FILES,
+} from './index.js';
 
 const BUNDLED = `---
 product: acme-app
@@ -180,6 +185,97 @@ describe('ConstitutionLoader repo-first resolution', () => {
     const c = loader.load('noname');
     expect(c.product).toBe('noname');
     expect(c.version).toBe(3);
+  });
+
+  describe('loadRepoConstitution', () => {
+    it('returns null when the repo has no constitution instance', () => {
+      expect(loader.loadRepoConstitution(repoDir)).toBeNull();
+    });
+
+    it('returns null for an empty constitution instance', async () => {
+      await mkdir(join(repoDir, '.factory'), { recursive: true });
+      await writeFile(join(repoDir, DEFAULT_REPO_CONSTITUTION_PATH), '   \n');
+      expect(loader.loadRepoConstitution(repoDir)).toBeNull();
+    });
+
+    it('parses product/checkers/requireTests/body from .factory/constitution.md', async () => {
+      await mkdir(join(repoDir, '.factory'), { recursive: true });
+      await writeFile(
+        join(repoDir, DEFAULT_REPO_CONSTITUTION_PATH),
+        '---\nproduct: consumer-app\nrequireTests: true\ncheckers:\n  - compile\n---\nConsumer body.\n',
+      );
+
+      const c = loader.loadRepoConstitution(repoDir)!;
+      expect(c.product).toBe('consumer-app');
+      expect(c.requireTests).toBe(true);
+      expect(c.checkers).toEqual(['compile']);
+      expect(c.body).toContain('Consumer body.');
+      expect(c.source).toBe('bundled');
+    });
+
+    it('honors a non-default relPath argument', async () => {
+      await writeFile(join(repoDir, 'custom-constitution.md'), '---\nproduct: custom\n---\nCustom body.\n');
+      const c = loader.loadRepoConstitution(repoDir, 'custom-constitution.md')!;
+      expect(c.product).toBe('custom');
+      expect(c.body).toContain('Custom body.');
+    });
+  });
+
+  describe('resolve() with a repo constitution instance', () => {
+    it('yields source: bundled with the instance checkers and body when no other product is configured', async () => {
+      await mkdir(join(repoDir, '.factory'), { recursive: true });
+      await writeFile(
+        join(repoDir, DEFAULT_REPO_CONSTITUTION_PATH),
+        '---\nproduct: consumer-app\ncheckers:\n  - compile\n---\nConsumer body.\n',
+      );
+
+      const c = loader.resolve(repoDir)!;
+      expect(c.source).toBe('bundled');
+      expect(c.checkers).toEqual(['compile']);
+      expect(c.body).toContain('Consumer body.');
+    });
+
+    it('prefers the repo instance over a --product package file when both exist', async () => {
+      await writeFile(join(bundledDir, 'acme-app.md'), BUNDLED);
+      await mkdir(join(repoDir, '.factory'), { recursive: true });
+      await writeFile(
+        join(repoDir, DEFAULT_REPO_CONSTITUTION_PATH),
+        '---\nproduct: consumer-app\ncheckers:\n  - custom_x\n---\nConsumer wins.\n',
+      );
+
+      const c = loader.resolve(repoDir, 'acme-app')!;
+      expect(c.source).toBe('bundled');
+      expect(c.product).toBe('consumer-app');
+      expect(c.checkers).toEqual(['custom_x']);
+      expect(c.body).toContain('Consumer wins.');
+    });
+
+    it('honors a non-default constitutionPath argument', async () => {
+      await writeFile(join(repoDir, 'custom-constitution.md'), '---\nproduct: custom\n---\nCustom body.\n');
+      const c = loader.resolve(repoDir, undefined, 'custom-constitution.md')!;
+      expect(c.product).toBe('custom');
+      expect(c.body).toContain('Custom body.');
+    });
+
+    it('repo instruction files lead with the repo constitution checkers riding along', async () => {
+      await mkdir(join(repoDir, '.factory'), { recursive: true });
+      await writeFile(
+        join(repoDir, DEFAULT_REPO_CONSTITUTION_PATH),
+        '---\nproduct: consumer-app\ncheckers:\n  - compile\n---\nConsumer body.\n',
+      );
+      await writeFile(join(repoDir, 'CLAUDE.md'), 'repo instructions win');
+
+      const c = loader.resolve(repoDir)!;
+      expect(c.source).toBe('repo');
+      expect(c.checkers).toEqual(['compile']);
+      expect(c.body.indexOf('repo instructions win')).toBeGreaterThanOrEqual(0);
+      expect(c.body).toContain('<standards source="constitution:consumer-app">');
+      expect(c.body).toContain('Consumer body.');
+    });
+
+    it('still fails fast on a typo product when no repo constitution instance exists', () => {
+      expect(() => loader.resolve(repoDir, 'no-such-product')).toThrow(/No constitution for 'no-such-product'/);
+    });
   });
 });
 

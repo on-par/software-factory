@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -8,6 +8,7 @@ import {
   getConstitutionsDir,
   getFactoryPaths,
   loadFactoryConfig,
+  loadFactoryConfigForRepo,
   loadModelsConfig,
   loadRoutesConfig,
   resolveAutoFailover,
@@ -58,22 +59,71 @@ function writeModelsConfig(dir: string, harness?: string) {
 }
 
 describe('getFactoryPaths', () => {
-  it('stages triage output alongside the live queue path', () => {
+  const expectedPaths = (state: string) => ({
+    state,
+    queue: resolve(state, 'queue'),
+    queueProposed: resolve(state, 'queue.proposed'),
+    events: resolve(state, 'events.ndjson'),
+    logs: resolve(state, 'logs'),
+    plans: resolve(state, 'plans'),
+    reports: resolve(state, 'reports'),
+    mergeLock: resolve(state, 'merge.lock'),
+    gitLock: resolve(state, 'git.lock'),
+    runLock: resolve(state, 'run.lock'),
+    product: resolve(state, 'product'),
+    stop: resolve(state, 'STOP'),
+    costs: resolve(state, 'costs.jsonl'),
+    approvals: resolve(state, 'approvals'),
+    steering: resolve(state, 'steering'),
+    kpiHistory: resolve(state, 'kpi-history.jsonl'),
+    ingestWatermark: resolve(state, 'ingest-watermark'),
+    ports: resolve(state, 'ports.json'),
+    portsLock: resolve(state, 'ports.lock'),
+    proxyState: resolve(state, 'proxy.json'),
+    config: resolve(state, 'config.json'),
+    breaker: resolve(state, 'breaker.json'),
+    reworkHistory: resolve(state, 'rework-history.json'),
+  });
+
+  it('uses the repository-local state root by default', () => {
     const repoRoot = '/tmp/some-repo';
+    expect(getFactoryPaths(repoRoot)).toEqual(expectedPaths(resolve(repoRoot, '.factory')));
+  });
+
+  it('keeps standalone queue, event, plan, and report artifacts beneath the checkout-local .factory directory', async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), 'factory-standalone-state-'));
     const paths = getFactoryPaths(repoRoot);
-    expect(paths.queue).toBe(resolve(repoRoot, '.factory', 'queue'));
-    expect(paths.queueProposed).toBe(resolve(repoRoot, '.factory', 'queue.proposed'));
-    expect(paths.mergeLock).toBe(resolve(repoRoot, '.factory', 'merge.lock'));
-    expect(paths.gitLock).toBe(resolve(repoRoot, '.factory', 'git.lock'));
-    expect(paths.runLock).toBe(resolve(repoRoot, '.factory', 'run.lock'));
-    expect(paths.approvals).toBe(resolve(repoRoot, '.factory', 'approvals'));
-    expect(paths.kpiHistory).toBe(resolve(repoRoot, '.factory', 'kpi-history.jsonl'));
-    expect(paths.ingestWatermark).toBe(resolve(repoRoot, '.factory', 'ingest-watermark'));
-    expect(paths.ports).toBe(resolve(repoRoot, '.factory', 'ports.json'));
-    expect(paths.portsLock).toBe(resolve(repoRoot, '.factory', 'ports.lock'));
-    expect(paths.proxyState).toBe(resolve(repoRoot, '.factory', 'proxy.json'));
-    expect(paths.breaker).toBe(resolve(repoRoot, '.factory', 'breaker.json'));
-    expect(paths.reworkHistory).toBe(resolve(repoRoot, '.factory', 'rework-history.json'));
+    const stateRoot = resolve(repoRoot, '.factory');
+    const artifacts = {
+      queue: paths.queue,
+      events: paths.events,
+      plan: join(paths.plans, 'issue-845.md'),
+      report: join(paths.reports, 'issue-845.md'),
+    };
+
+    try {
+      await mkdir(paths.plans, { recursive: true });
+      await mkdir(paths.reports, { recursive: true });
+      await Promise.all(Object.entries(artifacts).map(async ([name, path]) => writeFile(path, `${name} artifact\n`)));
+
+      await expect(readFile(artifacts.queue, 'utf8')).resolves.toBe('queue artifact\n');
+      await expect(readFile(artifacts.events, 'utf8')).resolves.toBe('events artifact\n');
+      await expect(readFile(artifacts.plan, 'utf8')).resolves.toBe('plan artifact\n');
+      await expect(readFile(artifacts.report, 'utf8')).resolves.toBe('report artifact\n');
+      expect(paths.state).toBe(stateRoot);
+      expect(Object.values(artifacts).every((path) => path.startsWith(`${stateRoot}/`))).toBe(true);
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('uses an explicit external state root for every orchestration path', () => {
+    const repoRoot = '/tmp/some-repo';
+    const stateRoot = '/var/lib/factory-state/../factory-state';
+    const paths = getFactoryPaths(repoRoot, stateRoot);
+
+    expect(paths).toEqual(expectedPaths(resolve(stateRoot)));
+    expect(Object.values(paths).every((path) => !path.startsWith(resolve(repoRoot, '.factory')))).toBe(true);
   });
 });
 
@@ -142,6 +192,7 @@ describe('loadModelsConfig', () => {
         'claude-sonnet-5',
         'gemma4:12b',
         'gpt-5.1-codex',
+        'gpt-5.6-luna-high',
         'gpt-5.6-sol',
         'gpt-5.6-terra-high',
         'gpt-5.6-terra-medium',
@@ -224,6 +275,39 @@ describe('loadFactoryConfig', () => {
   it('shipped config has a 14-day post-merge defect window', () => {
     const config = loadFactoryConfig();
     expect(config.kpis.defectWindowDays).toBe(14);
+  });
+
+  it('shipped config defaults paths.constitution to .factory/constitution.md', () => {
+    const config = loadFactoryConfig();
+    expect(config.paths.constitution).toBe('.factory/constitution.md');
+  });
+
+  it('applies the paths.constitution default when a minimal config omits it', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
+    try {
+      const path = join(dir, 'factory.json');
+      const minimal = {
+        version: 1,
+        paths: {
+          constitutions: 'constitutions/',
+          checkers: 'lib/checkers/',
+          plans: '.factory/plans/',
+          logs: '.factory/logs/',
+          events: '.factory/events.ndjson',
+        },
+        timeouts: { plan_seconds: 1800, build_seconds: 7200, check_seconds: 1800, merge_poll_seconds: 120 },
+        merge: { auto: false, comment: '' },
+        worktree: { prefix: 'ship-it/', parent: '../', comment: '' },
+        byok: { enabled: false, comment: '' },
+        notifications: {},
+        cost_tracking: { enabled: true, log_file: '.factory/costs.jsonl', comment: '' },
+      };
+      await writeFile(path, JSON.stringify(minimal));
+      const config = loadFactoryConfig(path);
+      expect(config.paths.constitution).toBe('.factory/constitution.md');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('applies worktree gc defaults when the config omits them', async () => {
@@ -482,6 +566,88 @@ describe('loadFactoryConfig', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('loadFactoryConfigForRepo', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'factory-config-repo-'));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('returns the shipped defaults, deep-equal to loadFactoryConfig(), when the path does not exist', () => {
+    const path = join(dir, 'does-not-exist.json');
+    expect(loadFactoryConfigForRepo(path)).toEqual(loadFactoryConfig());
+  });
+
+  it('applies a partial merge.auto override while preserving merge.comment from the defaults', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ merge: { auto: true } }));
+    const config = loadFactoryConfigForRepo(path);
+    expect(config.merge.auto).toBe(true);
+    expect(config.merge.comment).toBe(loadFactoryConfig().merge.comment);
+  });
+
+  it('deep-equals the shipped defaults for a repo-namespace-only file', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(
+      path,
+      JSON.stringify({ version: 1, models: { plan: 'claude-opus-5' }, providers: { openai: false } }),
+    );
+    expect(loadFactoryConfigForRepo(path)).toEqual(loadFactoryConfig());
+  });
+
+  it('merges a mixed file: worktree.gcTtlDays overrides while worktree.prefix stays default', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(
+      path,
+      JSON.stringify({
+        version: 1,
+        models: { plan: 'claude-opus-5' },
+        worktree: { gcTtlDays: 30 },
+      }),
+    );
+    const config = loadFactoryConfigForRepo(path);
+    expect(config.worktree.gcTtlDays).toBe(30);
+    expect(config.worktree.prefix).toBe(loadFactoryConfig().worktree.prefix);
+  });
+
+  it('replaces array/tuple fields wholesale rather than merging element-wise', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ environment: { ports: { range: [4000, 4100] } } }));
+    const config = loadFactoryConfigForRepo(path);
+    expect(config.environment.ports.range).toEqual([4000, 4100]);
+  });
+
+  it('throws an error naming the file path on malformed JSON', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, '{ not valid json');
+    expect(() => loadFactoryConfigForRepo(path)).toThrow(/Failed to parse/);
+    expect(() => loadFactoryConfigForRepo(path)).toThrow(path);
+  });
+
+  it('throws an error naming the file path and the offending field on a runtime-namespace type violation', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ merge: { auto: 'yes' } }));
+    expect(() => loadFactoryConfigForRepo(path)).toThrow(path);
+    expect(() => loadFactoryConfigForRepo(path)).toThrow(/merge\.auto/);
+  });
+
+  it('throws "expected a JSON object" when the top level is an array', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify([1, 2, 3]));
+    expect(() => loadFactoryConfigForRepo(path)).toThrow(/expected a JSON object/);
+  });
+
+  it('throws "expected a JSON object" when the top level is a string', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify('nope'));
+    expect(() => loadFactoryConfigForRepo(path)).toThrow(/expected a JSON object/);
   });
 });
 

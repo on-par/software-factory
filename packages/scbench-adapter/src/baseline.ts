@@ -4,45 +4,108 @@ import { existsSync, readdirSync, readFileSync, type Dirent } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 
 import { BENCHMARK_MANIFEST_VERSION, type BenchmarkManifest } from '@on-par/factory-core';
+import { z } from 'zod';
 
 import { NATIVE_EVIDENCE_FILES } from './artifacts.js';
 import { AdapterError } from './checkpoint.js';
 
-export interface BaselineConfig {
-  baselineId: string;
-  factory: { repo: string; commit: string; packageVersion: string };
-  scbench: { repo: string; commit: string; pinnedAt: string };
-  problemCatalog: { repo: string; version: string; commit: string; pinnedAt: string };
-  modelConfig: { source: string; env: Record<string, string> };
-  promptInputs: string;
-  environment: { node: string; requiredBinaries: string[]; hostClass: string; scbenchHarness: string };
-  problems: { resolvedFrom: string; smoke: string; suite: string[] };
-  trials: { smokeRuns: number; suiteTrialsPerProblem: number };
-  comparisonThreshold: number;
-  passPolicy: { id: 'core-cases'; description: string };
-}
-
-const REQUIRED_KEYS = [
-  'baselineId',
-  'factory',
-  'scbench',
-  'problemCatalog',
-  'modelConfig',
-  'promptInputs',
-  'environment',
-  'problems',
-  'trials',
-  'comparisonThreshold',
-  'passPolicy',
-] as const;
-
 const FULL_SHA_RE = /^[0-9a-f]{40}$/;
 const PROBLEM_ID_RE = /^[a-z0-9][a-z0-9_-]*$/;
 
-/** Parse + structurally validate a baseline config: every required
- *  top-level field present, a positive comparisonThreshold, and
- *  full-length git SHAs for factory.commit/scbench.commit. Throws
- *  AdapterError naming the offending field. */
+const SHA_EXPECTATION = 'a full-length (40 hex char) git SHA';
+const PROBLEM_ID_EXPECTATION = 'an exact problem id from the pinned catalog (a selection rule is not reproducible)';
+const SUITE_EXPECTATION = 'a non-empty array of unique exact problem ids from the pinned catalog';
+
+/** A required, non-empty string. The same expectation is used for the
+ *  missing/wrong-type case and the empty-string case so the rendered
+ *  AdapterError message never depends on which one fired. */
+function nonEmptyString(expectation = 'a non-empty string') {
+  return z.string(expectation).min(1, expectation);
+}
+
+function fullSha() {
+  return z.string(SHA_EXPECTATION).regex(FULL_SHA_RE, SHA_EXPECTATION);
+}
+
+function problemId(expectation: string) {
+  return z.string(expectation).regex(PROBLEM_ID_RE, expectation);
+}
+
+/** Single source of truth for a pinned SlopCodeBench baseline config: the
+ *  `BaselineConfig` type below is inferred from it, so the declared shape and
+ *  the validation cannot drift (#793). Key order matters — zod reports issues
+ *  in shape order and `loadBaselineConfig` renders the first one, so this
+ *  mirrors the field order of the committed baseline.config.json. */
+export const BaselineConfigSchema = z.object({
+  baselineId: nonEmptyString(),
+  factory: z.object({ repo: nonEmptyString(), commit: fullSha(), packageVersion: nonEmptyString() }, 'an object'),
+  scbench: z.object({ repo: nonEmptyString(), commit: fullSha(), pinnedAt: nonEmptyString() }, 'an object'),
+  problemCatalog: z.object(
+    { repo: nonEmptyString(), version: nonEmptyString(), commit: fullSha(), pinnedAt: nonEmptyString() },
+    'an object',
+  ),
+  modelConfig: z.object(
+    { source: nonEmptyString(), env: z.record(z.string(), z.string(), 'an object of string values') },
+    'an object',
+  ),
+  promptInputs: nonEmptyString(),
+  environment: z.object(
+    {
+      node: nonEmptyString(),
+      requiredBinaries: z.array(nonEmptyString(), 'an array of non-empty strings'),
+      hostClass: nonEmptyString(),
+      scbenchHarness: nonEmptyString(),
+    },
+    'an object',
+  ),
+  problems: z.object(
+    {
+      resolvedFrom: nonEmptyString(),
+      smoke: problemId(PROBLEM_ID_EXPECTATION),
+      suite: z
+        .array(problemId(SUITE_EXPECTATION), SUITE_EXPECTATION)
+        .min(1, SUITE_EXPECTATION)
+        .refine((ids) => new Set(ids).size === ids.length, SUITE_EXPECTATION),
+    },
+    'an object',
+  ),
+  trials: z.object(
+    {
+      smokeRuns: z.int('a positive integer').positive('a positive integer'),
+      suiteTrialsPerProblem: z.int('a positive integer').positive('a positive integer'),
+    },
+    'an object',
+  ),
+  comparisonThreshold: z.number('a positive number').positive('a positive number'),
+  passPolicy: z.object(
+    {
+      id: z.literal('core-cases', '"core-cases" — the only pinned pass policy'),
+      description: nonEmptyString(),
+    },
+    'an object',
+  ),
+});
+
+/** The declared shape of a pinned baseline config, derived from — never
+ *  declared alongside — `BaselineConfigSchema`. */
+export type BaselineConfig = z.infer<typeof BaselineConfigSchema>;
+
+/** Render one zod issue as the AdapterError message this loader has always
+ *  thrown. An absent top-level key keeps the "missing required field" wording;
+ *  everything else names the dotted path and the expectation string carried on
+ *  the schema node. The issue is typed structurally so this does not depend on
+ *  zod's exported issue-type name. */
+function describeConfigIssue(issue: { path: PropertyKey[]; message: string }, config: Record<string, unknown>): string {
+  const path = issue.path.join('.');
+  if (issue.path.length === 1 && !(String(issue.path[0]) in config)) {
+    return `baseline config missing required field "${path}"`;
+  }
+  return `baseline config field "${path}" must be ${issue.message}`;
+}
+
+/** Parse + validate a baseline config against `BaselineConfigSchema`, the single
+ *  source of truth for its shape. Throws AdapterError naming the first offending
+ *  field. */
 export function loadBaselineConfig(raw: string): BaselineConfig {
   let parsed: unknown;
   try {
@@ -55,72 +118,11 @@ export function loadBaselineConfig(raw: string): BaselineConfig {
   }
   const config = parsed as Record<string, unknown>;
 
-  for (const key of REQUIRED_KEYS) {
-    if (!(key in config)) {
-      throw new AdapterError(`baseline config missing required field "${key}"`);
-    }
+  const result = BaselineConfigSchema.safeParse(config);
+  if (!result.success) {
+    throw new AdapterError(describeConfigIssue(result.error.issues[0], config));
   }
-  if (typeof config.comparisonThreshold !== 'number' || config.comparisonThreshold <= 0) {
-    throw new AdapterError('baseline config field "comparisonThreshold" must be a positive number');
-  }
-
-  const factory = config.factory as { commit?: unknown } | null;
-  if (typeof factory?.commit !== 'string' || !FULL_SHA_RE.test(factory.commit)) {
-    throw new AdapterError('baseline config field "factory.commit" must be a full-length (40 hex char) git SHA');
-  }
-  const scbench = config.scbench as { commit?: unknown } | null;
-  if (typeof scbench?.commit !== 'string' || !FULL_SHA_RE.test(scbench.commit)) {
-    throw new AdapterError('baseline config field "scbench.commit" must be a full-length (40 hex char) git SHA');
-  }
-
-  const problemCatalog = config.problemCatalog as {
-    repo?: unknown;
-    version?: unknown;
-    commit?: unknown;
-    pinnedAt?: unknown;
-  } | null;
-  if (typeof problemCatalog?.commit !== 'string' || !FULL_SHA_RE.test(problemCatalog.commit)) {
-    throw new AdapterError('baseline config field "problemCatalog.commit" must be a full-length (40 hex char) git SHA');
-  }
-  if (typeof problemCatalog.repo !== 'string' || problemCatalog.repo.length === 0) {
-    throw new AdapterError('baseline config field "problemCatalog.repo" must be a non-empty string');
-  }
-  if (typeof problemCatalog.version !== 'string' || problemCatalog.version.length === 0) {
-    throw new AdapterError('baseline config field "problemCatalog.version" must be a non-empty string');
-  }
-  if (typeof problemCatalog.pinnedAt !== 'string' || problemCatalog.pinnedAt.length === 0) {
-    throw new AdapterError('baseline config field "problemCatalog.pinnedAt" must be a non-empty string');
-  }
-
-  const problems = config.problems as { resolvedFrom?: unknown; smoke?: unknown; suite?: unknown } | null;
-  if (typeof problems?.smoke !== 'string' || !PROBLEM_ID_RE.test(problems.smoke)) {
-    throw new AdapterError(
-      'baseline config field "problems.smoke" must be an exact problem id from the pinned catalog (a selection rule is not reproducible)',
-    );
-  }
-  if (
-    !Array.isArray(problems.suite) ||
-    problems.suite.length === 0 ||
-    !problems.suite.every((id): id is string => typeof id === 'string' && PROBLEM_ID_RE.test(id)) ||
-    new Set(problems.suite).size !== problems.suite.length
-  ) {
-    throw new AdapterError(
-      'baseline config field "problems.suite" must be a non-empty array of unique exact problem ids from the pinned catalog',
-    );
-  }
-  if (typeof problems.resolvedFrom !== 'string' || problems.resolvedFrom.length === 0) {
-    throw new AdapterError('baseline config field "problems.resolvedFrom" must be a non-empty string');
-  }
-
-  const passPolicy = config.passPolicy as { id?: unknown; description?: unknown } | null;
-  if (typeof passPolicy !== 'object' || passPolicy === null || passPolicy.id !== 'core-cases') {
-    throw new AdapterError('baseline config field "passPolicy.id" must be "core-cases" — the only pinned pass policy');
-  }
-  if (typeof passPolicy.description !== 'string' || passPolicy.description.length === 0) {
-    throw new AdapterError('baseline config field "passPolicy.description" must be a non-empty string');
-  }
-
-  return config as unknown as BaselineConfig;
+  return result.data;
 }
 
 /** Parsed subset of SCBench's native per-checkpoint evaluation.json
@@ -210,37 +212,36 @@ function parseEvaluation(raw: string, path: string): ScbenchEvaluation {
   if (!isPlainObject(parsed)) {
     throw new AdapterError(`invalid evaluation evidence at ${path}: must be a JSON object`);
   }
-  const invalid = (field: string, expectation: string): never => {
-    throw new AdapterError(`invalid evaluation evidence at ${path}: field "${field}" must be ${expectation}`);
-  };
-  if (typeof parsed.problem_name !== 'string' || parsed.problem_name.length === 0) {
-    invalid('problem_name', 'a non-empty string');
+  const invalid = (field: string, expectation: string): AdapterError =>
+    new AdapterError(`invalid evaluation evidence at ${path}: field "${field}" must be ${expectation}`);
+  const { problem_name, checkpoint_name, pass_counts, total_counts, pytest_exit_code, infrastructure_failure } = parsed;
+  if (typeof problem_name !== 'string' || problem_name.length === 0) {
+    throw invalid('problem_name', 'a non-empty string');
   }
-  if (typeof parsed.checkpoint_name !== 'string' || parsed.checkpoint_name.length === 0) {
-    invalid('checkpoint_name', 'a non-empty string');
+  if (typeof checkpoint_name !== 'string' || checkpoint_name.length === 0) {
+    throw invalid('checkpoint_name', 'a non-empty string');
   }
-  if (!isRecordOfNumbers(parsed.pass_counts)) {
-    invalid('pass_counts', 'an object whose values are numbers');
+  if (!isRecordOfNumbers(pass_counts)) {
+    throw invalid('pass_counts', 'an object whose values are numbers');
   }
-  if (!isRecordOfNumbers(parsed.total_counts)) {
-    invalid('total_counts', 'an object whose values are numbers');
+  if (!isRecordOfNumbers(total_counts)) {
+    throw invalid('total_counts', 'an object whose values are numbers');
   }
-  if (typeof parsed.pytest_exit_code !== 'number') {
-    invalid('pytest_exit_code', 'a number');
+  if (typeof pytest_exit_code !== 'number') {
+    throw invalid('pytest_exit_code', 'a number');
   }
-  if (typeof parsed.infrastructure_failure !== 'boolean') {
-    invalid('infrastructure_failure', 'a boolean');
+  if (typeof infrastructure_failure !== 'boolean') {
+    throw invalid('infrastructure_failure', 'a boolean');
   }
-  return parsed as unknown as ScbenchEvaluation;
+  return { problem_name, checkpoint_name, pass_counts, total_counts, pytest_exit_code, infrastructure_failure };
 }
 
 /** Parse + structurally validate SCBench's run-level
  *  checkpoint_results.jsonl (one JSON object per non-blank line). Throws
  *  AdapterError naming `path` and the 1-based line number. */
 function parseRunRecords(raw: string, path: string): ScbenchRunRecord[] {
-  const invalid = (line: number, field: string, expectation: string): never => {
-    throw new AdapterError(`invalid run record at ${path} line ${line}: field "${field}" must be ${expectation}`);
-  };
+  const invalid = (line: number, field: string, expectation: string): AdapterError =>
+    new AdapterError(`invalid run record at ${path} line ${line}: field "${field}" must be ${expectation}`);
   const records: ScbenchRunRecord[] = [];
   const lines = raw.split('\n');
   for (let i = 0; i < lines.length; i += 1) {
@@ -256,12 +257,13 @@ function parseRunRecords(raw: string, path: string): ScbenchRunRecord[] {
     if (!isPlainObject(parsed)) {
       throw new AdapterError(`invalid run record at ${path} line ${lineNumber}: must be a JSON object`);
     }
-    if (typeof parsed.problem !== 'string') invalid(lineNumber, 'problem', 'a string');
-    if (typeof parsed.checkpoint !== 'string') invalid(lineNumber, 'checkpoint', 'a string');
-    if (typeof parsed.state !== 'string') invalid(lineNumber, 'state', 'a string');
-    if (typeof parsed.core_passed !== 'number') invalid(lineNumber, 'core_passed', 'a number');
-    if (typeof parsed.core_total !== 'number') invalid(lineNumber, 'core_total', 'a number');
-    records.push(parsed as unknown as ScbenchRunRecord);
+    const { problem, checkpoint, state, core_passed, core_total } = parsed;
+    if (typeof problem !== 'string') throw invalid(lineNumber, 'problem', 'a string');
+    if (typeof checkpoint !== 'string') throw invalid(lineNumber, 'checkpoint', 'a string');
+    if (typeof state !== 'string') throw invalid(lineNumber, 'state', 'a string');
+    if (typeof core_passed !== 'number') throw invalid(lineNumber, 'core_passed', 'a number');
+    if (typeof core_total !== 'number') throw invalid(lineNumber, 'core_total', 'a number');
+    records.push({ problem, checkpoint, state, core_passed, core_total });
   }
   return records;
 }

@@ -70,6 +70,8 @@ export type { OllamaFetchFn } from './harness/ollama-http.js';
 export { OllamaHttpHarness } from './harness/ollama-http.js';
 export type { OpenCodeExecFn } from './harness/opencode.js';
 export { OpenCodeHarness } from './harness/opencode.js';
+export type { DockerEngineOptions } from './hosted/docker.js';
+export { createDockerEngine } from './hosted/docker.js';
 
 // Router
 export { CliModelExecutor } from './router/index.js';
@@ -77,6 +79,23 @@ export { CliModelExecutor } from './router/index.js';
 // Phase helpers
 export type { PlanPromptOpts } from './phases/plan.js';
 export { buildPlanPrompt } from './phases/plan.js';
+
+// Board-constrained local lane dispatch (#848)
+export type {
+  BoardQueueDispatcher,
+  BoardQueueOrdering,
+  LocalLaneCandidate,
+  QueueIntentReader,
+} from './phases/board-queue-dispatch.js';
+export { createBoardQueueDispatcher } from './phases/board-queue-dispatch.js';
+
+// ProjectV2 queue-intent scheduler (#867)
+export type {
+  BoardQueueScheduler,
+  BoardQueueSchedulerOptions,
+  ProjectQueueProjectionReader,
+} from './phases/board-queue-scheduler.js';
+export { createBoardQueueScheduler } from './phases/board-queue-scheduler.js';
 
 // Local-small harness
 export type {
@@ -184,6 +203,10 @@ export {
   writeRegistry,
 } from './daemon/registry.js';
 
+// Daemon lane state resolution (#843)
+export type { DaemonLaneContext } from './daemon/lane-context.js';
+export { createDaemonLaneContext } from './daemon/lane-context.js';
+
 // Daemon control-plane HTTP server (#777)
 export type { FactorydOptions, FactorydServer } from './daemon/factoryd-http.js';
 export { createFactorydServer, DEFAULT_FACTORYD_PORT } from './daemon/factoryd-http.js';
@@ -200,3 +223,76 @@ export { attachRepo, parseRemoteSlug, readOriginUrl } from './daemon/repos-attac
 // Daemon pause/resume gate (#779)
 export type { SetRepoStateFailureReason, SetRepoStateResult, SettableRepoState } from './daemon/repos-pause-resume.js';
 export { setRepoState } from './daemon/repos-pause-resume.js';
+
+// GitHub-label-backed work queue (#824)
+export type {
+  EnqueueOutcome,
+  EnqueueResult,
+  GithubQueue,
+  GithubQueueOptions,
+  QueueClaim,
+  QueueGitHubClient,
+  QueueIssue,
+  QueueLabelSpec,
+  QueueMigrationStep,
+  QueuePreflight,
+  QueuePreflightDecision,
+  QueueReleaseOutcome,
+} from './queue/github-queue.js';
+export {
+  claimedByLabel,
+  CLAIMED_BY_LABEL_PREFIX,
+  createGithubQueue,
+  createOctokitQueueClient,
+  defaultClaimantId,
+  IN_PROGRESS_LABEL,
+  LANE_LABEL_PREFIX,
+  laneLabel,
+  MAX_LABEL_NAME_LENGTH,
+  PARKED_LABEL,
+  planQueueMigration,
+  QUEUED_LABEL,
+  QUEUE_ORDER_LABEL_PREFIX,
+  queueOrderLabel,
+  queueLabelSpecs,
+} from './queue/github-queue.js';
+export type { QueueEntry } from './queue/index.js';
+
+// Read-only GitHub ProjectV2 queue-intent polling (#847)
+export type {
+  ProjectBoardConfig,
+  ProjectBoardPoller,
+  ProjectBoardPollerOptions,
+  QueueIntentItem,
+  QueueIntentSnapshot,
+  QueueIntentStatus,
+} from './queue/project-board-poller.js';
+export { createProjectBoardPoller, DEFAULT_PROJECT_BOARD_POLL_MS } from './queue/project-board-poller.js';
+
+// Daemon-ready ProjectV2 queue intent projection (#866)
+export type {
+  ProjectQueuePoller,
+  ProjectQueuePollerOptions,
+  ProjectQueueProjection,
+} from './projects/project-queue-poller.js';
+export { createProjectQueuePoller, DEFAULT_PROJECT_QUEUE_POLL_MS } from './projects/project-queue-poller.js';
+
+// Local queue reprioritization audit records (#869)
+export type { QueueReprioritizationRecord } from './types/index.js';
+export type { QueueRationaleAuditor } from './queue/reprioritization-audit.js';
+export { createQueueRationaleAuditor } from './queue/reprioritization-audit.js';
+
+// Publish only coarse daemon lifecycle status to configured ProjectV2 items (#868)
+export type { ProjectStatusWriter, ProjectStatusWriterOptions } from './projects/project-status-writer.js';
+export { createProjectStatusWriter } from './projects/project-status-writer.js';
+
+// Coarse ProjectV2 status writing (#849)
+export type {
+  ProjectBoardCoarseStatus,
+  ProjectBoardStatusConfig,
+  ProjectBoardStatusItem,
+  ProjectBoardStatusValues,
+  ProjectBoardStatusWriter,
+  ProjectBoardStatusWriterOptions,
+} from './queue/project-board-status-writer.js';
+export { createProjectBoardStatusWriter } from './queue/project-board-status-writer.js';

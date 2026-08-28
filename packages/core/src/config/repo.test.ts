@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -100,6 +101,15 @@ describe('loadRepoConfig', () => {
     expect(loadRepoConfig(repoRoot)).toEqual({ version: 1, models: { plan: 'claude-model' } });
   });
 
+  it('loads configuration from an external state root without creating checkout-local state', async () => {
+    const repoRoot = await tempRepoRoot();
+    const stateRoot = await tempRepoRoot();
+    await writeFile(join(stateRoot, 'config.json'), JSON.stringify({ version: 1, models: { plan: 'claude-model' } }));
+
+    expect(loadRepoConfig(repoRoot, stateRoot)).toEqual({ version: 1, models: { plan: 'claude-model' } });
+    expect(existsSync(join(repoRoot, '.factory'))).toBe(false);
+  });
+
   it('parses explicit provider fallback preferences for PLAN and BUILD', async () => {
     const repoRoot = await tempRepoRoot();
     await writeRepoConfig(repoRoot, {
@@ -143,6 +153,22 @@ describe('loadRepoConfig', () => {
     expect(() => loadRepoConfig(repoRoot)).toThrow();
   });
 
+  it('parses a file carrying both namespaces — model pins intact, runtime keys ignored, no throw', async () => {
+    const repoRoot = await tempRepoRoot();
+    await writeRepoConfig(repoRoot, {
+      models: { plan: 'claude-model' },
+      merge: { auto: true },
+      worktree: { gcTtlDays: 30 },
+    });
+    expect(loadRepoConfig(repoRoot)).toEqual({ version: 1, models: { plan: 'claude-model' } });
+  });
+
+  it('still rejects a genuine root-level typo with the file path in the message', async () => {
+    const repoRoot = await tempRepoRoot();
+    await writeRepoConfig(repoRoot, { modles: {} });
+    expect(() => loadRepoConfig(repoRoot)).toThrow(/\.factory[/\\]config\.json/);
+  });
+
   it('rejects a non-positive usage.capUsd', async () => {
     const repoRoot = await tempRepoRoot();
     await writeRepoConfig(repoRoot, { usage: { capUsd: -5 } });
@@ -159,6 +185,30 @@ describe('loadRepoConfig', () => {
       version: 1,
       efficiency: { fastPath: true, maxReworkRounds: 1, perIssueCapUsd: 8 },
     });
+  });
+
+  it('accepts a version-2 file with $schema — the shape `factory init` writes — with no pins', async () => {
+    const repoRoot = await tempRepoRoot();
+    await writeRepoConfig(repoRoot, { $schema: 'http://x', version: 2 });
+    expect(loadRepoConfig(repoRoot)).toEqual({ $schema: 'http://x', version: 2 });
+  });
+
+  it('still round-trips a version-1 file unchanged', async () => {
+    const repoRoot = await tempRepoRoot();
+    await writeRepoConfig(repoRoot, { version: 1, models: { plan: 'claude-model' } });
+    expect(loadRepoConfig(repoRoot)).toEqual({ version: 1, models: { plan: 'claude-model' } });
+  });
+
+  it('rejects an unsupported version number', async () => {
+    const repoRoot = await tempRepoRoot();
+    await writeRepoConfig(repoRoot, { version: 3 });
+    expect(() => loadRepoConfig(repoRoot)).toThrow(/\.factory[/\\]config\.json/);
+  });
+
+  it('a zero-file repo (no .factory/config.json) returns null — the factory run zero-file regression guard', async () => {
+    const repoRoot = await tempRepoRoot();
+    expect(existsSync(join(repoRoot, '.factory', 'config.json'))).toBe(false);
+    expect(loadRepoConfig(repoRoot)).toBeNull();
   });
 });
 

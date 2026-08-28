@@ -3,6 +3,7 @@
 import { readFile } from 'node:fs/promises';
 
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
+import { collectDesignDiff } from '../checkers/design-smells.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { readDesignArtifact, renderDesignGrounding } from '../design/index.js';
 import { laneEnv } from '../environment/index.js';
@@ -17,7 +18,10 @@ import { escalationLine, isEscalation } from '../utils/index.js';
 export interface BuildResult {
   ok: boolean;
   model: string;
+  route: 'codex' | 'claude' | 'opencode';
   escalate?: string;
+  /** Set on a non-escalation build failure; 'no_diff' = worker produced no diff. */
+  reason?: 'no_diff';
 }
 
 export async function buildPhase(opts: Parameters<typeof buildPhaseImpl>[0]): Promise<BuildResult> {
@@ -25,7 +29,12 @@ export async function buildPhase(opts: Parameters<typeof buildPhaseImpl>[0]): Pr
     { bus: opts.bus, phase: 'build', laneId: opts.laneId, issueId: opts.issue, worktreePath: opts.worktree },
     () => buildPhaseImpl(opts),
     (r) => r.ok,
-    (r) => (r.ok ? `build complete (model ${r.model})` : `build escalated: ${r.escalate ?? 'unknown'}`),
+    (r) =>
+      r.ok
+        ? `build complete (model ${r.model})`
+        : r.reason === 'no_diff'
+          ? 'build failed: worker produced no diff'
+          : `build escalated: ${r.escalate ?? 'unknown'}`,
   );
 }
 
@@ -70,6 +79,8 @@ async function buildPhaseImpl(opts: {
   laneId?: string;
   /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
   bus?: LifecycleBus;
+  /** Injectable for tests; defaults to collectDesignDiff. */
+  collectDiff?: typeof collectDesignDiff;
 }): Promise<BuildResult> {
   const {
     issue,
@@ -120,21 +131,7 @@ async function buildPhaseImpl(opts: {
   if (route === 'codex') {
     taskType = 'build_codex';
     prompt = localOnly
-      ? `Local-small build for issue #${issue}.
-You are in the isolated worktree for branch ${branch}.
-Do one small implementation pass from this frozen spec, then commit.
-
-Rules:
-- Prefer one or two files.
-- Inspect only the files you need.
-- Make the smallest change that satisfies the acceptance criteria.
-- Run one cheap verification command if available.
-- Create exactly one git commit.
-- Do not push, open a PR, or merge.
-
-Frozen spec:
-${compactForLocalModel(spec)}
-`
+      ? buildLocalSmallPrompt({ issue, branch, spec })
       : buildCommitOnlyPrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding });
   } else if (route === 'opencode') {
     taskType = 'build_opencode';
@@ -186,7 +183,11 @@ ${compactForLocalModel(spec)}
     // These all indicate a provider problem rather than a bad task. Preserve
     // the frozen spec and continue on the other provider when one is available.
     const providerFailure =
-      reason === 'usage_cap' || reason === 'rate_limit' || reason === 'timeout' || reason === 'unavailable';
+      reason === 'usage_cap' ||
+      reason === 'rate_limit' ||
+      reason === 'timeout' ||
+      reason === 'unavailable' ||
+      reason === 'local_auth';
     // Only swap when we actually ran the codex route and it was exhausted on a
     // quota reason. The router only throws after trying every eligible codex
     // worker, so reaching here already means "no Codex-harness worker remains".
@@ -264,14 +265,42 @@ ${compactForLocalModel(spec)}
   if (isEscalation(result.output)) {
     const escalateLine = escalationLine(result.output);
     log('escalate', escalateLine ?? 'build escalated');
-    return { ok: false, model: result.model, escalate: escalateLine };
+    return { ok: false, model: result.model, route, escalate: escalateLine };
+  }
+
+  const diff = await (opts.collectDiff ?? collectDesignDiff)(worktree);
+  if (diff.skipReason) {
+    log('build', `diff post-condition skipped — ${diff.skipReason}`);
+  } else if (diff.text === '') {
+    const detail = `worker produced no diff against ${diff.baseRef}; no implementation was produced`;
+    log('fail', detail);
+    return { ok: false, model: result.model, route, reason: 'no_diff' };
   }
 
   log('build', `Build complete with model ${result.model}`, { model: result.model });
-  return { ok: true, model: result.model };
+  return { ok: true, model: result.model, route };
 }
 
-function buildOpencodePrompt(opts: {
+export function buildLocalSmallPrompt(opts: { issue: number; branch: string; spec: string }): string {
+  const { issue, branch, spec } = opts;
+  return `Local-small build for issue #${issue}.
+You are in the isolated worktree for branch ${branch}.
+Do one small implementation pass from this frozen spec, then commit.
+
+Rules:
+- Prefer one or two files.
+- Inspect only the files you need.
+- Make the smallest change that satisfies the acceptance criteria.
+- Run one cheap verification command if available.
+- Create exactly one git commit.
+- Do not push, open a PR, or merge.
+
+Frozen spec:
+${compactForLocalModel(spec)}
+`;
+}
+
+export function buildOpencodePrompt(opts: {
   issue: number;
   specPath: string;
   constitutionCtx: string;
@@ -316,7 +345,7 @@ spawning sub-agents for a single small issue — this keeps token usage efficien
 ${headlessNote()}${appPort ? `\n\n${appPortNote(appPort, appBaseUrl)}` : ''}${designGrounding ? `\n\n${designGrounding}` : ''}`;
 }
 
-function buildCommitOnlyPrompt(opts: {
+export function buildCommitOnlyPrompt(opts: {
   issue: number;
   specPath: string;
   constitutionCtx: string;
@@ -361,7 +390,7 @@ spawning sub-agents for a single small issue — this keeps token usage efficien
 ${headlessNote()}${appPort ? `\n\n${appPortNote(appPort, appBaseUrl)}` : ''}${designGrounding ? `\n\n${designGrounding}` : ''}`;
 }
 
-function buildClaudePrompt(opts: {
+export function buildClaudePrompt(opts: {
   issue: number;
   branch: string;
   specPath: string;
@@ -372,9 +401,9 @@ function buildClaudePrompt(opts: {
   designGrounding?: string;
 }): string {
   const { issue, branch, specPath, constitutionCtx, skipCI, appPort, appBaseUrl, designGrounding } = opts;
-  return `/ship-it ${issue} — Run fully autonomously in headless mode, BUILD phase.
+  return `Run fully autonomously in headless mode for issue #${issue}, BUILD phase.
 You are ALREADY inside the isolated git worktree for issue ${issue} (branch ${branch},
-cwd is this worktree), so SKIP ship-it's worktree-creation step.
+cwd is this worktree).
 
 ${constitutionCtx}
 

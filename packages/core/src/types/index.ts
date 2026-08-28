@@ -112,6 +112,7 @@ export type FailoverReason =
   | 'error'
   | 'empty_response'
   | 'unavailable'
+  | 'local_auth'
   | 'schema_invalid'
   | 'apply_failed'
   | 'verify_failed'
@@ -164,6 +165,12 @@ export interface FingerprintedFailure {
   fingerprint: string;
   evidence: EvidencePack;
 }
+
+// ---------- Repo (#969) ----------
+
+/** A GitHub repository slug in `owner/name` form (e.g. `on-par/sound-buddy`).
+ *  The same shape parseRemoteSlug() resolves from a git origin remote. */
+export type RepoSlug = string;
 
 // ---------- Events ----------
 
@@ -224,6 +231,17 @@ export interface ReadinessInfo {
   sizeReason?: string;
 }
 
+/** Structured payload carried on `queue_reprioritized` events (#869). */
+export interface QueueReprioritizationRecord {
+  issueId: string;
+  issueNumber: number;
+  field: 'lane' | 'order';
+  priorValue: string | number;
+  newValue: string | number;
+  actorType: 'human' | 'daemon';
+  rationale: string | null;
+}
+
 export interface FactoryEvent {
   ts: string;
   type: EventKind;
@@ -239,6 +257,7 @@ export interface FactoryEvent {
   evidence?: EvidencePack;
   rework?: ReworkInfo;
   readiness?: ReadinessInfo;
+  queueReprioritization?: QueueReprioritizationRecord;
   model?: string;
   tokens?: { input: number; output: number };
 }

@@ -1,5 +1,9 @@
 // src/harness/claude-cli.ts — CodingHarness adapter for the Claude CLI.
 
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { wrapCommandInSandbox } from '../sandbox/index.js';
 import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
@@ -25,7 +29,20 @@ function parseResultEnvelope(stdout: string): {
   try {
     parsed = JSON.parse(stdout.trim());
   } catch {
-    return { output: stdout };
+    const resultLine = stdout
+      .trim()
+      .split('\n')
+      .reverse()
+      .find((line) => {
+        try {
+          const event = JSON.parse(line) as Record<string, unknown>;
+          return event.type === 'result' && typeof event.result === 'string';
+        } catch {
+          return false;
+        }
+      });
+    if (!resultLine) return { output: stdout };
+    parsed = JSON.parse(resultLine);
   }
   if (typeof parsed !== 'object' || parsed === null) return { output: stdout };
   const env = parsed as Record<string, unknown>;
@@ -67,7 +84,7 @@ function parseResultEnvelope(stdout: string): {
 }
 
 /** Runs a model via the Claude CLI:
- *  claude -p <prompt> [--model <claudeFlag>] --output-format json --dangerously-skip-permissions */
+ *  claude -p [--model <claudeFlag>] --output-format stream-json --verbose --safe-mode --permission-mode bypassPermissions < prompt-file */
 export class ClaudeCliHarness implements CodingHarness {
   readonly id = 'claude-cli';
   readonly agentic = true;
@@ -78,7 +95,10 @@ export class ClaudeCliHarness implements CodingHarness {
     const { model, prompt, worktree, timeoutSeconds, registry, sandbox, env, onPgid } = request;
     const flag = registry.getClaudeFlag(model);
     const modelArg = flag ? `--model ${flag}` : '';
-    const cmd = `claude -p ${shellEscape(prompt)} ${modelArg} --output-format json --dangerously-skip-permissions < /dev/null`;
+    const promptDir = await mkdtemp(join(tmpdir(), 'factory-claude-prompt-'));
+    const promptPath = join(promptDir, 'prompt.txt');
+    await writeFile(promptPath, prompt, 'utf8');
+    const cmd = `claude -p ${modelArg} --output-format stream-json --include-partial-messages --verbose --safe-mode --permission-mode bypassPermissions < ${shellEscape(promptPath)}`;
     const finalCmd = sandbox ? wrapCommandInSandbox(cmd, sandbox) : cmd;
 
     let stdout: string;
@@ -91,26 +111,43 @@ export class ClaudeCliHarness implements CodingHarness {
         onPgid,
       }));
     } catch (err: any) {
-      const reason = err.killed ? 'timeout' : classifyFailure(err.stderr ?? '', err.code ?? 1);
+      const stdout = typeof err.stdout === 'string' && err.stdout.length > 0 ? err.stdout : undefined;
+      const diagnosticText = [err.stderr, stdout].filter((text) => typeof text === 'string').join('\n');
+      const reason = err.killed ? 'timeout' : classifyFailure(diagnosticText, err.code ?? 1);
       throw new HarnessError(err.message ?? String(err), reason, {
         exitCode: typeof err.code === 'number' ? err.code : undefined,
         stderr: err.stderr,
-        stdout: typeof err.stdout === 'string' && err.stdout.length > 0 ? err.stdout : undefined,
+        stdout,
         code: typeof err.code === 'string' || typeof err.code === 'number' ? err.code : undefined,
         signal: typeof err.signal === 'string' ? err.signal : undefined,
         killed: err.killed === true ? true : undefined,
       });
+    } finally {
+      await rm(promptDir, { recursive: true, force: true });
     }
 
     const { output, usage, isError, subtype } = parseResultEnvelope(stdout);
     if (isError) {
-      throw new HarnessError(`claude CLI returned an error result${subtype ? ` (${subtype})` : ''}`, 'error', {
-        exitCode: 0,
-        stdout: output,
-      });
+      const unavailable = usage?.inputTokens === 0 && usage.outputTokens === 0 && usage.durationApiMs === 0;
+      throw new HarnessError(
+        unavailable
+          ? 'claude CLI returned a zero-token, zero-API-duration error result — provider unavailable'
+          : `claude CLI returned an error result${subtype ? ` (${subtype})` : ''}`,
+        unavailable ? 'unavailable' : 'error',
+        {
+          exitCode: 0,
+          stdout: output,
+        },
+      );
     }
     if (output.trim().length === 0) {
       throw new HarnessError('claude CLI returned empty output', 'empty_response', { exitCode: 0 });
+    }
+    if (/^Unknown command:/i.test(output.trim())) {
+      throw new HarnessError('claude CLI returned an unknown command response', 'error', {
+        exitCode: 0,
+        stdout: output,
+      });
     }
     return { output, ...(usage ? { usage } : {}) };
   }

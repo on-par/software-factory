@@ -20,6 +20,10 @@ dist/
 coverage/
 *.tsbuildinfo
 
+# Stryker mutation-testing HTML/JSON output (#884). Anchored to repo root —
+# unanchored `reports/` would also shadow the tracked packages/core/src/reports/.
+/reports/
+
 # Python
 __pycache__/
 *.pyc
