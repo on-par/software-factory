@@ -1813,3 +1813,111 @@ describe('buildPhase lifecycle events', () => {
     expect(received[1].detail.length).toBeGreaterThan(0);
   });
 });
+
+describe('buildPhase no-diff post-condition', () => {
+  const fakeRouter = (output = 'done') =>
+    ({
+      run: async () => ({ model: 'fake-model', output, exitCode: 0, attempts: [] }),
+    }) as any;
+
+  it('fails the build when the diff collector reports an empty diff', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-961-empty.md');
+    const logs: Array<{ type: string; msg: string }> = [];
+
+    const result = await buildPhase({
+      issue: 961,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/961-no-diff',
+      route: 'claude',
+      router: fakeRouter(),
+      constitution: null,
+      log: (type, msg) => logs.push({ type, msg }),
+      collectDiff: async () => ({ text: '', baseRef: 'origin/main', truncated: false }),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('no_diff');
+    expect(logs).toContainEqual({
+      type: 'fail',
+      msg: 'worker produced no diff against origin/main; no implementation was produced',
+    });
+  });
+
+  it('succeeds when the diff collector reports a real diff', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-961-real.md');
+
+    const result = await buildPhase({
+      issue: 961,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/961-real-diff',
+      route: 'claude',
+      router: fakeRouter(),
+      constitution: null,
+      log: () => {},
+      collectDiff: async () => ({ text: 'diff --git a/x b/x', baseRef: 'origin/main', truncated: false }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.reason).toBeUndefined();
+  });
+
+  it('treats an uncollectable diff (skipReason) as a pass, not a worker failure', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-961-skip.md');
+    const logs: Array<{ type: string; msg: string }> = [];
+    const skipReason = 'no base ref (tried origin/main, origin/master) — not a git checkout or no remote base';
+
+    const result = await buildPhase({
+      issue: 961,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/961-skip-reason',
+      route: 'claude',
+      router: fakeRouter(),
+      constitution: null,
+      log: (type, msg) => logs.push({ type, msg }),
+      collectDiff: async () => ({ text: '', baseRef: null, truncated: false, skipReason }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(logs.some((l) => l.msg.includes(skipReason))).toBe(true);
+  });
+
+  it('lets escalation win over no_diff and never calls the diff collector', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-961-escalate.md');
+    let collectDiffCalled = false;
+
+    const result = await buildPhase({
+      issue: 961,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/961-escalate-wins',
+      route: 'claude',
+      router: fakeRouter('progress line\nESCALATE: the acceptance criteria are ambiguous\nmore text'),
+      constitution: null,
+      log: () => {},
+      collectDiff: async () => {
+        collectDiffCalled = true;
+        return { text: '', baseRef: 'origin/main', truncated: false };
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.escalate).toBe('ESCALATE: the acceptance criteria are ambiguous');
+    expect(result.reason).not.toBe('no_diff');
+    expect(collectDiffCalled).toBe(false);
+  });
+});

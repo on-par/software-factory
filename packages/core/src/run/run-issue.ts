@@ -430,6 +430,9 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     });
     route = build.route;
     if (!build.ok) {
+      if (build.reason === 'no_diff') {
+        return terminalParked('fail', 'build produced no diff against the base ref — no implementation was produced');
+      }
       return terminalEscalated(`build escalated: ${build.escalate ?? 'unknown'}`);
     }
     const buildBudget = await assertBudget('BUILD');
