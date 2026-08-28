@@ -72,6 +72,20 @@ describe('LaneRow', () => {
     expect(frame).toContain('BUILD');
   });
 
+  it('renders a parked lane distinctly from a failed one', () => {
+    const lane = laneFor([
+      { type: 'plan', msg: 'Starting plan phase' },
+      { type: 'build', msg: 'Starting build phase (route: claude)' },
+      { type: 'escalate', msg: 'needs a human' },
+    ]);
+    const { lastFrame } = render(<LaneRow lane={lane} selected={false} now={NOW} />);
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('⏸');
+    expect(frame).toContain('parked');
+    expect(frame).toContain('BUILD');
+    expect(frame).not.toContain('✖');
+  });
+
   it('renders a stopped lane', () => {
     const lane = laneFor([
       { type: 'plan', msg: 'Starting plan phase' },
