@@ -18,6 +18,7 @@ const PUBLIC_API_KEYS = [
   'getConstitutionsDir',
   'getFactoryPaths',
   'loadFactoryConfig',
+  'loadFactoryConfigForRepo',
   'loadModelsConfig',
   'loadRoutesConfig',
   'resolveAutoFailover',
@@ -67,7 +68,33 @@ const PUBLIC_API_KEYS = [
   // Queue
   'parseQueue',
   'readQueue',
+  'rewriteQueueForDecomposition',
   'validateQueue',
+  // Hosted execution (control plane)
+  'createHostedJobStore',
+  'createSqliteHostedJobStore',
+  'hostedExecEnabled',
+  'resolveHostedJobStore',
+  'runContainerJob',
+  'runDockerRunner',
+  'runFakeRunner',
+  'runHostedSmoke',
+  'runWatchdogSweep',
+  'summarizeHostedJob',
+  'summarizeHostedJobs',
+  'AUTHORITY_REDACTION_MASK',
+  'redactSecrets',
+  'withAuthority',
+  'prepareGitHubAuthority',
+  'prototypeFallbackMint',
+  'redactGitHubCredential',
+  'resolveHostedAuthority',
+  'createHostedControlPlaneServer',
+  'handleHostedControlPlaneRequest',
+  'createHttpHostedControlPlaneClient',
+  'runOneJobRunner',
+  'createHttpHostedJobClient',
+  'queueAndTailJob',
   // Work requests
   'closedWorkSkipReason',
   'createDefaultWorkSourceRegistry',
@@ -91,6 +118,15 @@ const PUBLIC_API_KEYS = [
   'laneStatusOf',
   'severityOf',
   'UNKNOWN_EVENT_TRAITS',
+  // Run outcome
+  'parkEvents',
+  'parkReasonFor',
+  // Run ports (#674)
+  'acquireLaneEnvironment',
+  'localOnlyWorkspace',
+  'worktreeWorkspace',
+  // Run composition (#675)
+  'runIssue',
   // Lifecycle bus (#591)
   'createLifecycleBus',
   'lifecycleBus',
@@ -233,6 +269,15 @@ const PUBLIC_API_KEYS = [
 ];
 
 const INTERNAL_API_KEYS = [
+  // Local queue reprioritization audit records (#869)
+  'createQueueRationaleAuditor',
+  // Daemon-ready ProjectV2 queue intent projection (#866)
+  'createProjectQueuePoller',
+  'DEFAULT_PROJECT_QUEUE_POLL_MS',
+  // Coarse ProjectV2 status publishing (#868)
+  'createProjectStatusWriter',
+  // Coarse ProjectV2 status writing (#849)
+  'createProjectBoardStatusWriter',
   // Failure fingerprint & evidence
   'captureFailure',
   'fingerprintFailure',
@@ -279,6 +324,8 @@ const INTERNAL_API_KEYS = [
   'PATCH_PROPOSAL_SCHEMA',
   'OllamaHttpHarness',
   'OpenCodeHarness',
+  // Hosted execution: Docker container engine adapter (#899)
+  'createDockerEngine',
   // Router
   'CliModelExecutor',
   // Phase helpers
@@ -309,6 +356,8 @@ const INTERNAL_API_KEYS = [
   // Daemon control-plane HTTP server (#777)
   'createFactorydServer',
   'DEFAULT_FACTORYD_PORT',
+  // Daemon lane state resolution (#843)
+  'createDaemonLaneContext',
   // Daemon attach gate (#778)
   'attachRepo',
   'parseRemoteSlug',
@@ -353,6 +402,29 @@ const INTERNAL_API_KEYS = [
   'parseCoverageSummary',
   'parseCoverageSummaryScopes',
   'renderRatchetReport',
+  // GitHub-label-backed work queue (#824)
+  'claimedByLabel',
+  'CLAIMED_BY_LABEL_PREFIX',
+  'createGithubQueue',
+  'createOctokitQueueClient',
+  'defaultClaimantId',
+  'IN_PROGRESS_LABEL',
+  'LANE_LABEL_PREFIX',
+  'laneLabel',
+  'MAX_LABEL_NAME_LENGTH',
+  'PARKED_LABEL',
+  'planQueueMigration',
+  'QUEUED_LABEL',
+  'QUEUE_ORDER_LABEL_PREFIX',
+  'queueOrderLabel',
+  'queueLabelSpecs',
+  // Read-only GitHub ProjectV2 queue-intent polling (#847)
+  'createProjectBoardPoller',
+  'DEFAULT_PROJECT_BOARD_POLL_MS',
+  // Board-constrained local lane dispatch (#848)
+  'createBoardQueueDispatcher',
+  // ProjectV2 queue-intent scheduler (#867)
+  'createBoardQueueScheduler',
 ];
 
 const TESTING_API_KEYS = [
@@ -364,6 +436,7 @@ const TESTING_API_KEYS = [
   'SimModelExecutor',
   'createSimOctokit',
   'createSimWorkspace',
+  'simWorkspace',
   'failOnCall',
   'realSimClock',
   'resolveLatencyMs',

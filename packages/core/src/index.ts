@@ -18,6 +18,7 @@ export {
   getConstitutionsDir,
   getFactoryPaths,
   loadFactoryConfig,
+  loadFactoryConfigForRepo,
   loadModelsConfig,
   loadRoutesConfig,
   resolveAutoFailover,
@@ -92,7 +93,97 @@ export type {
   QueueSnapshotEntry,
   QueueValidationResult,
 } from './queue/index.js';
-export { parseQueue, readQueue, validateQueue } from './queue/index.js';
+export { parseQueue, readQueue, rewriteQueueForDecomposition, validateQueue } from './queue/index.js';
+
+// Hosted execution (control plane)
+export type {
+  AcquireLeaseInput,
+  CreateHostedJobInput,
+  HostedClock,
+  HostedJobResultDetail,
+  HostedJobStore,
+  HostedJobStoreOptions,
+  JobLeaseResult,
+  JobUpdateResult,
+  LeaseRejectionReason,
+  PollForLeaseInput,
+  PollResult,
+  ReclaimJobResult,
+  RegisterRunnerInput,
+  StoredHostedJob,
+  StoredRunner,
+  UpdateRejectionReason,
+} from './hosted/store.js';
+export { createHostedJobStore } from './hosted/store.js';
+export type { SqliteHostedJobStore, SqliteHostedJobStoreOptions } from './hosted/store-sqlite.js';
+export { createSqliteHostedJobStore } from './hosted/store-sqlite.js';
+export type { HostedJobStoreBackend, ResolveHostedJobStoreOptions } from './hosted/store-resolve.js';
+export { resolveHostedJobStore } from './hosted/store-resolve.js';
+export type { DockerRunnerConfig, DockerRunnerOutcome, FakeRunnerConfig, FakeRunnerOutcome } from './hosted/runner.js';
+export { runDockerRunner, runFakeRunner } from './hosted/runner.js';
+export type { WatchdogEscalation, WatchdogPolicy, WatchdogReport } from './hosted/watchdog.js';
+export { runWatchdogSweep } from './hosted/watchdog.js';
+export type {
+  CloneOutcome,
+  ContainerCleanupProof,
+  ContainerEngine,
+  ContainerJobConfig,
+  ContainerJobOutcome,
+  ContainerRunResult,
+  ContainerRunSpec,
+  PreparedWorkspace,
+} from './hosted/container.js';
+export { runContainerJob } from './hosted/container.js';
+export type { HostedJobSummary } from './hosted/summary.js';
+export { summarizeHostedJob, summarizeHostedJobs } from './hosted/summary.js';
+export type { HostedSmokeConfig, HostedSmokeOutcome } from './hosted/smoke.js';
+export { runHostedSmoke } from './hosted/smoke.js';
+// Re-exported so consumers gating on the hosted-exec flag (e.g. the CLI) go through
+// core rather than reaching past it to `@on-par/contracts` directly.
+export { hostedExecEnabled } from '@on-par/contracts';
+export type {
+  AuthorityBroker,
+  AuthorityCleanupProof,
+  AuthorityFailure,
+  AuthorityMount,
+  AuthorityMountEngine,
+  AuthorityRunOutcome,
+  PrepareAuthorityConfig,
+  ResolvedSecret,
+} from './hosted/authority.js';
+export { AUTHORITY_REDACTION_MASK, redactSecrets, withAuthority } from './hosted/authority.js';
+export type {
+  GitHubAuthorityBrokerOptions,
+  GitHubCredentialBundle,
+  GitHubTokenKind,
+  MintGitHubToken,
+  MintGitHubTokenInput,
+  MintedGitHubToken,
+} from './hosted/github-authority.js';
+export {
+  prepareGitHubAuthority,
+  prototypeFallbackMint,
+  redactGitHubCredential,
+  resolveHostedAuthority,
+} from './hosted/github-authority.js';
+export type {
+  ControlPlaneResponse,
+  HostedControlPlaneOptions,
+  HostedControlPlaneServer,
+} from './hosted/control-plane.js';
+export { createHostedControlPlaneServer, handleHostedControlPlaneRequest } from './hosted/control-plane.js';
+export type {
+  HostedControlPlaneClient,
+  HostedControlPlaneFetchFn,
+  HttpHostedControlPlaneClientOptions,
+  OneJobRunnerConfig,
+  OneJobRunnerOutcome,
+  PollForLeaseResult,
+  RegisteredRunner,
+} from './hosted/runner-client.js';
+export { createHttpHostedControlPlaneClient, runOneJobRunner } from './hosted/runner-client.js';
+export type { HostedJobClient, QueueAndTailConfig, QueueAndTailOutcome } from './hosted/queue-client.js';
+export { createHttpHostedJobClient, queueAndTailJob } from './hosted/queue-client.js';
 
 // Work requests
 export type {
@@ -128,6 +219,21 @@ export {
   severityOf,
   UNKNOWN_EVENT_TRAITS,
 } from './events/kinds.js';
+
+// Run outcome
+export type { BuildRoute, ParkReason, RunOutcome } from './run/outcome.js';
+export { parkEvents, parkReasonFor } from './run/outcome.js';
+
+// Run policy
+export type { RunBudget, RunPolicy } from './run/policy.js';
+
+// Run ports (#674)
+export type { Environment, Workspace } from './run/ports.js';
+export { acquireLaneEnvironment, localOnlyWorkspace, worktreeWorkspace } from './run/ports.js';
+
+// Run composition (#675)
+export type { RunPorts, RunRequest } from './run/run-issue.js';
+export { runIssue } from './run/run-issue.js';
 
 // Lifecycle bus (#591)
 export type {

@@ -1,0 +1,11 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "vitest",
+  "plugins": ["@stryker-mutator/vitest-runner"],
+  "tsconfigFile": "stryker-tsconfig-rewrite-disabled.json",
+  "mutate": [
+    "packages/scbench-adapter/src/**/*.ts",
+    "!packages/scbench-adapter/src/**/*.test.ts",
+    "!packages/scbench-adapter/src/manifest-fixture.ts"
+  ]
+}

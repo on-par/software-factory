@@ -35,7 +35,7 @@ const MAX_REWORK_ROUNDS = 3;
 const STUCK_THRESHOLD = 2;
 
 /** Provider/CI-level reasons that point away from a factory fault. */
-const EXTERNAL_REASONS = new Set<FailoverReason>(['rate_limit', 'usage_cap', 'timeout', 'unavailable']);
+const EXTERNAL_REASONS = new Set<FailoverReason>(['rate_limit', 'usage_cap', 'timeout', 'unavailable', 'local_auth']);
 
 /** Deterministic signature of the failing checks: name + volatility-stripped detail. */
 function failureSignature(summary: CheckSummary): string {
@@ -160,6 +160,10 @@ async function checkPhaseImpl(opts: {
    *  #740). When round one's signature matches, the rework loop is skipped entirely
    *  instead of re-burning a full budget against an unfixed root cause. */
   priorFailureSignature?: string;
+  /** Worker route that completed BUILD; direct callers retain Claude rework by default. */
+  reworkRoute?: 'codex' | 'claude' | 'opencode';
+  /** Worker model that completed BUILD, retained as the compatible rework override. */
+  reworkModel?: string;
   /** Lane id stamped onto emitted lifecycle events; defaults to `issue-<issue>` (#591). */
   laneId?: string;
   /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
@@ -182,6 +186,8 @@ async function checkPhaseImpl(opts: {
     appBaseUrl,
     onPgid,
     priorFailureSignature,
+    reworkRoute,
+    reworkModel,
   } = opts;
 
   let probe = await probeWorktree(worktree);
@@ -210,6 +216,12 @@ async function checkPhaseImpl(opts: {
   let summary = await runAllCheckers(ctx, router, constitution, checkTimeoutSeconds);
   let reworkRounds = 0;
   const maxRounds = autoRework ? Math.min(maxReworkRounds, MAX_REWORK_ROUNDS) : 0;
+
+  if (summary.results.some((result) => result.checker === 'worker_output' && result.result === 'FAIL')) {
+    const signature = failureSignature(summary);
+    log('fail', 'worker produced no implementation diff — parking before rework');
+    return { passed: false, summary, reworkRounds: 0, failureSignature: signature };
+  }
 
   // Cross-run stuck (#740): round one already reproduces the exact failure a
   // prior run parked on. Skip the rework loop entirely rather than re-burning
@@ -262,6 +274,8 @@ async function checkPhaseImpl(opts: {
       appPort,
       appBaseUrl,
       onPgid,
+      reworkRoute,
+      reworkModel,
     });
 
     const cause = classifyReworkCause({ steering, failovers, failureReason });
@@ -312,6 +326,13 @@ async function checkPhaseImpl(opts: {
     log('check', `SKIPPED: ${s.checker} — ${s.details}`);
   }
 
+  // Each failing checker is logged individually, the same way SKIPs are: the parked
+  // outcome only carries an aggregate count, so without this the checker/details pairs
+  // that name WHY a run parked are never surfaced to the operator (#675).
+  for (const f of summary.results.filter((r) => r.result === 'FAIL')) {
+    log('check', `FAILED: ${f.checker} — ${f.details}`);
+  }
+
   if (summary.failures > 0) {
     log('fail', `${summary.failures} check failures after ${reworkRounds} rework rounds — parking`);
   } else {
@@ -346,6 +367,8 @@ interface ReworkWorkerOptions {
   appPort?: number;
   appBaseUrl?: string;
   onPgid?: (pgid: number) => void;
+  reworkRoute?: 'codex' | 'claude' | 'opencode';
+  reworkModel?: string;
 }
 
 async function reworkWorker(opts: ReworkWorkerOptions): Promise<{
@@ -368,6 +391,8 @@ async function reworkWorker(opts: ReworkWorkerOptions): Promise<{
     appPort,
     appBaseUrl,
     onPgid,
+    reworkRoute = 'claude',
+    reworkModel,
   } = opts;
   const constitutionCtx = buildConstitutionContext(constitution);
   const failures = summary.results.filter((r) => r.result === 'FAIL');
@@ -400,7 +425,7 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
   let attempts: RouterResult['attempts'] = [];
 
   try {
-    reworkResult = await router.run('build_claude', prompt, {
+    reworkResult = await router.run(`build_${reworkRoute}`, prompt, {
       worktree,
       timeoutSeconds: buildTimeoutSeconds ?? 7200,
       sandbox,
@@ -409,6 +434,7 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
       env: laneEnv(appPort, process.env, appBaseUrl),
       onPgid,
       retryCause: 'checker',
+      modelOverride: reworkModel,
     });
     attempts = reworkResult.attempts;
   } catch (err) {

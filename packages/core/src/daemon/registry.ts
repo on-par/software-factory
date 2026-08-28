@@ -15,6 +15,8 @@ export type RepoState = 'active' | 'paused' | 'detached';
 export interface RepoRegistryEntry {
   /** Absolute path to the local checkout. */
   path: string;
+  /** Optional external root for this repository's factory state. */
+  stateRoot?: string;
   /** ISO-8601 timestamp of the attach that created this entry. */
   attachedAt: string;
   state: RepoState;
@@ -44,7 +46,12 @@ const REPO_STATES = new Set<string>(['active', 'paused', 'detached']);
 function isEntry(value: unknown): value is RepoRegistryEntry {
   if (!value || typeof value !== 'object') return false;
   const e = value as Partial<RepoRegistryEntry>;
-  return typeof e.path === 'string' && typeof e.attachedAt === 'string' && REPO_STATES.has(e.state as string);
+  return (
+    typeof e.path === 'string' &&
+    (e.stateRoot === undefined || typeof e.stateRoot === 'string') &&
+    typeof e.attachedAt === 'string' &&
+    REPO_STATES.has(e.state as string)
+  );
 }
 
 /** `<home>/.factory/registry.json`. `home` defaults to os.homedir() and is
@@ -79,7 +86,14 @@ export async function loadRegistry(file: string): Promise<RepoRegistry> {
   const candidates = (parsed as { repos?: unknown }).repos;
   if (candidates && typeof candidates === 'object') {
     for (const [slug, entry] of Object.entries(candidates as Record<string, unknown>)) {
-      if (isEntry(entry)) repos[slug] = { path: entry.path, attachedAt: entry.attachedAt, state: entry.state };
+      if (isEntry(entry)) {
+        repos[slug] = {
+          path: entry.path,
+          ...(entry.stateRoot === undefined ? {} : { stateRoot: entry.stateRoot }),
+          attachedAt: entry.attachedAt,
+          state: entry.state,
+        };
+      }
     }
   }
   return { version: 1, repos };
@@ -90,8 +104,8 @@ export function getRepo(registry: RepoRegistry, slug: string): RepoRegistryEntry
   return registry.repos[slug];
 }
 
-/** Every entry as a `{ slug, path, attachedAt, state }` row, sorted ascending
- *  by slug so callers (and tests) see a deterministic order. */
+/** Every entry as a `{ slug, ...entry }` row, sorted ascending by slug so
+ *  callers (and tests) see a deterministic order. */
 export function listRepos(registry: RepoRegistry): RepoRegistryListing[] {
   return Object.entries(registry.repos)
     .map(([slug, entry]) => ({ slug, ...entry }))

@@ -452,6 +452,7 @@ ${Array.from(
 
       expect(result.ok).toBe(false);
       expect(result.escalate).toMatch(/bounded-build budget/);
+      expect(result.decomposed).toBeUndefined();
       expect(stub.calls.map((call) => call.task)).toContain('decompose');
       expect(createComment).toHaveBeenCalledTimes(1);
       expect(events).toContain('size-gate-escalated');
@@ -723,6 +724,93 @@ npm run test`;
       expect(stub.calls.map((call) => call.task)).toEqual(['plan']);
       expect(createComment).not.toHaveBeenCalled();
       expect(events).not.toContain('size-gate-escalated');
+    });
+
+    it('files real sub-issues and returns them on decomposed.childIssues when filing succeeds (#823)', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-607.md');
+      const stub = new StubModelExecutor({
+        scripts: {
+          decompose: [{ output: validDecomposition }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const createComment = vi.fn().mockResolvedValue({});
+      let nextIssue = 700;
+      const create = vi.fn().mockImplementation(() => {
+        nextIssue += 1;
+        return Promise.resolve({ data: { number: nextIssue, id: 6000 + nextIssue } });
+      });
+      const request = vi.fn().mockResolvedValue({});
+      const events: string[] = [];
+
+      const result = await planPhase({
+        issue: 607,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit: {
+          rest: {
+            issues: {
+              get: async () => ({ data: { title: 'Harden the import queue', body: oversizedBody } }),
+              createComment,
+              create,
+            },
+          },
+          request,
+        } as any,
+        log: (type) => events.push(type),
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.decomposed).toEqual({ childIssues: [701] });
+      expect(result.escalate).toMatch(/decomposed into #701/);
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(events).toContain('decompose_filed');
+      expect(events).toContain('size-gate-escalated');
+    });
+
+    it('leaves decomposed unset and keeps the parked-for-decomposition message when filing yields no children', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-607.md');
+      const stub = new StubModelExecutor({
+        scripts: {
+          decompose: [{ output: validDecomposition }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const createComment = vi.fn().mockResolvedValue({});
+      const events: string[] = [];
+
+      const result = await planPhase({
+        issue: 607,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit: {
+          rest: {
+            issues: {
+              get: async () => ({ data: { title: 'Harden the import queue', body: oversizedBody } }),
+              createComment,
+              // no `create` — filing fails, degrading to the park-and-comment path
+            },
+          },
+        } as any,
+        log: (type) => events.push(type),
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.decomposed).toBeUndefined();
+      expect(result.escalate).toMatch(/parked for decomposition/);
+      expect(events).toContain('decompose_file_failed');
+      expect(events).toContain('size-gate-escalated');
     });
   });
 
@@ -1215,6 +1303,49 @@ npm run test`;
       expect(result.designArtifact).toBeNull();
       expect(logs.some((l) => l.type === 'design_artifact_invalid')).toBe(true);
       expect(existsSync(`${specPath.replace(/\.md$/, '')}.design.json`)).toBe(false);
+    });
+
+    it('escalates a blocked no-change note instead of treating it as a frozen spec', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-844.md');
+      const blockedSpec = [
+        '---',
+        'route: codex',
+        '---',
+        'Blocked: sandbox policy prevents writing the required file outside this worktree:',
+        '',
+        '`/Users/moltbot/repos/on-par/software-factory/.factory/plans/issue-844.md`',
+        '',
+        'No files were changed.',
+        '',
+      ].join('\n');
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{ output: blockedSpec }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: { issues: { get: async () => ({ data: { title: 'Blocked spec', body: 'Body.' } }) } },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      const result = await planPhase({
+        issue: 844,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: (type, msg) => logs.push({ type, msg }),
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.escalate).toBe('PLAN returned a blocked/no-change note instead of a frozen spec');
+      expect(logs.some((l) => l.type === 'escalate' && l.msg === result.escalate)).toBe(true);
+      expect(logs.some((l) => l.type === 'design_artifact_invalid')).toBe(false);
     });
 
     it('archives a pre-existing design artifact alongside a replanned spec', async () => {

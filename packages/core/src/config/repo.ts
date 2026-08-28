@@ -13,7 +13,9 @@ import type { ModelRegistry } from '../models/index.js';
 import { resolveModelOverrides } from '../models/index.js';
 import type { ModelRouter } from '../router/index.js';
 import {
+  FACTORY_RUNTIME_CONFIG_KEYS,
   getFactoryPaths,
+  isPlainObject,
   resolveBranchPrefix,
   resolveExperimental,
   resolveLocalOnly,
@@ -24,7 +26,8 @@ import {
 
 const RepoFactoryConfigSchema = z
   .object({
-    version: z.literal(1).default(1),
+    $schema: z.string().optional(),
+    version: z.union([z.literal(1), z.literal(2)]).default(1),
     models: z
       .object({
         plan: z.string().optional(),
@@ -82,11 +85,20 @@ export function resolveEfficiencyPolicy(repo: RepoFactoryConfig | null): Efficie
 
 // ---------- Loading ----------
 
-/** Read `<repoRoot>/.factory/config.json`. Returns `null` when the file does not
- *  exist. Throws a descriptive error naming the file path on malformed JSON or a
+/** The same file carries FactoryConfigSchema's runtime-policy namespace (see
+ *  FACTORY_RUNTIME_CONFIG_KEYS). Drop those keys before the strict parse so they are not
+ *  reported as typos, while genuine typos in the model namespace still fail loudly. */
+function stripRuntimeKeys(raw: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...raw };
+  for (const key of FACTORY_RUNTIME_CONFIG_KEYS) delete out[key];
+  return out;
+}
+
+/** Read the resolved factory-state `config.json`. Returns `null` when the file does
+ *  not exist. Throws a descriptive error naming the file path on malformed JSON or a
  *  schema violation (typos are rejected loudly via `.strict()` at every level). */
-export function loadRepoConfig(repoRoot: string): RepoFactoryConfig | null {
-  const path = getFactoryPaths(repoRoot).config;
+export function loadRepoConfig(repoRoot: string, stateRoot?: string): RepoFactoryConfig | null {
+  const path = getFactoryPaths(repoRoot, stateRoot).config;
   if (!existsSync(path)) return null;
 
   let raw: unknown;
@@ -96,7 +108,8 @@ export function loadRepoConfig(repoRoot: string): RepoFactoryConfig | null {
     throw new Error(`Failed to parse ${path}: ${err.message}`);
   }
 
-  const result = RepoFactoryConfigSchema.safeParse(raw);
+  const toParse = isPlainObject(raw) ? stripRuntimeKeys(raw) : raw;
+  const result = RepoFactoryConfigSchema.safeParse(toParse);
   if (!result.success) {
     const issues = result.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
     throw new Error(`Invalid ${path}: ${issues}`);

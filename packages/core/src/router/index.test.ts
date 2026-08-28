@@ -175,6 +175,24 @@ describe('ModelRouter with StubModelExecutor', () => {
     expect(failures).toEqual([{ provider: 'anthropic', reason: 'usage_cap' }]);
   });
 
+  it('does not open provider breaker bookkeeping for local auth failures', async () => {
+    const stub = new StubModelExecutor({ scripts: { plan: [{ fail: 'local_auth' }, { output: 'FROM GPT' }] } });
+    const router = new ModelRouter(providerModels, routes, false, stub);
+    const failures: Array<{ provider: string; reason: string }> = [];
+
+    const result = await router.run('plan', 'do it', {
+      modelOverride: 'claude-preferred',
+      modelFallbacks: ['gpt-fallback'],
+      onProviderFailure: async ({ provider, reason }) => {
+        failures.push({ provider, reason });
+      },
+    });
+
+    expect(result.model).toBe('gpt-fallback');
+    expect(result.failoverReason).toBe('local_auth');
+    expect(failures).toEqual([]);
+  });
+
   it('retries a simulated rate limit and then succeeds', async () => {
     const stub = new StubModelExecutor({
       scripts: { plan: [{ fail: 'rate_limit' }, { output: 'RECOVERED' }] },
@@ -218,6 +236,7 @@ describe('ModelRouter with StubModelExecutor', () => {
     ['mysterious', 1, 'unknown'],
     ['rate limit hit', 1, 'rate_limit'],
     ['insufficient credit', 1, 'usage_cap'],
+    ['Failed to authenticate: OAuth session expired and could not be refreshed', 1, 'local_auth'],
     ['schema_invalid: proposal must be an object', 1, 'schema_invalid'],
     ['apply_failed: file could not be read', 1, 'apply_failed'],
     ['verification failed: exit 1', 1, 'verify_failed'],

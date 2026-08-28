@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { parseQueue, readQueue, validateQueue } from './index.js';
+import { parseQueue, readQueue, rewriteQueueForDecomposition, validateQueue } from './index.js';
 
 const tempDirs: string[] = [];
 
@@ -179,5 +179,53 @@ describe('readQueue', () => {
         { lane: 'infra', issue: 6 },
       ],
     });
+  });
+});
+
+describe('rewriteQueueForDecomposition', () => {
+  it('replaces the target entry with one line per child, on the same lane', () => {
+    const result = rewriteQueueForDecomposition('app 5\n', { issue: 5, childIssues: [10, 11] });
+    expect(result).toEqual({ content: 'app 10\napp 11\n', changed: true });
+  });
+
+  it('leaves other lanes entries, comments, and blank lines byte-identical', () => {
+    const content = '# plan\napp 5\ninfra 7\n\n# trailer\n';
+    const result = rewriteQueueForDecomposition(content, { issue: 5, childIssues: [10, 11] });
+    expect(result).toEqual({ content: '# plan\napp 10\napp 11\ninfra 7\n\n# trailer\n', changed: true });
+  });
+
+  it('preserves a file with no trailing newline', () => {
+    const result = rewriteQueueForDecomposition('app 5', { issue: 5, childIssues: [10] });
+    expect(result).toEqual({ content: 'app 10', changed: true });
+  });
+
+  it('dedups a child already queued elsewhere', () => {
+    const content = 'app 5\ninfra 10\n';
+    const result = rewriteQueueForDecomposition(content, { issue: 5, childIssues: [10, 11] });
+    expect(result).toEqual({ content: 'app 11\ninfra 10\n', changed: true });
+  });
+
+  it('still removes the oversized entry when every child is already queued', () => {
+    const content = 'app 5\ninfra 10\n';
+    const result = rewriteQueueForDecomposition(content, { issue: 5, childIssues: [10] });
+    expect(result).toEqual({ content: 'infra 10\n', changed: true });
+  });
+
+  it('removes a duplicate entry for the target issue', () => {
+    const content = 'app 5\ninfra 5\n';
+    const result = rewriteQueueForDecomposition(content, { issue: 5, childIssues: [10] });
+    expect(result).toEqual({ content: 'app 10\n', changed: true });
+  });
+
+  it('returns changed: false for an issue absent from the queue', () => {
+    const content = 'app 6\n';
+    const result = rewriteQueueForDecomposition(content, { issue: 5, childIssues: [10] });
+    expect(result).toEqual({ content, changed: false });
+  });
+
+  it('returns changed: false for an empty childIssues list', () => {
+    const content = 'app 5\n';
+    const result = rewriteQueueForDecomposition(content, { issue: 5, childIssues: [] });
+    expect(result).toEqual({ content, changed: false });
   });
 });

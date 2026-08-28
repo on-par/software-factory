@@ -75,6 +75,7 @@ const SUSPECTED_CAUSE_BY_REASON: Record<FailoverReason, string> = {
   error: 'The harness reported an execution error.',
   empty_response: 'The model returned an empty response.',
   unavailable: 'The model or provider was unavailable.',
+  local_auth: 'The local provider CLI was not authenticated in the launch context.',
   schema_invalid: 'The model response did not match the expected schema.',
   apply_failed: 'The proposed patch failed to apply.',
   verify_failed: 'Implementation did not pass the verification gate.',

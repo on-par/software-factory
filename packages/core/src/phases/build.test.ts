@@ -131,6 +131,7 @@ describe('buildPhase FACTORY_CODEX kill-switch', () => {
     });
 
     expect(result.ok).toBe(true);
+    expect(result.route).toBe('codex');
     expect(stub.calls[stub.calls.length - 1].task).toBe('build_codex');
     expect(logs.some((l) => l.type === 'warn')).toBe(false);
   });
@@ -322,7 +323,7 @@ describe('buildPhase disablePublish', () => {
     expect(prompt).not.toContain('ready-for-review PR');
   });
 
-  it('claude route without disablePublish still sends the publish prompt (regression pin)', async () => {
+  it('claude route without disablePublish still sends the publish prompt without a slash command prefix', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);
     const specPath = join(worktree, 'issue-509.md');
@@ -342,7 +343,10 @@ describe('buildPhase disablePublish', () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(stub.calls[stub.calls.length - 1].prompt).toContain('/ship-it');
+    const prompt = stub.calls[stub.calls.length - 1].prompt;
+    expect(prompt).toContain('Run fully autonomously in headless mode for issue #509, BUILD phase.');
+    expect(prompt).toContain('open PR exists');
+    expect(prompt).not.toContain('/ship-it');
   });
 
   it('codex route + disablePublish: true keeps the already commit-only prompt unchanged', async () => {
@@ -447,8 +451,9 @@ describe('buildPhase atomic commit policy', () => {
 
     expect(result.ok).toBe(true);
     const prompt = stub.calls[stub.calls.length - 1].prompt;
-    expect(prompt).toContain('/ship-it');
+    expect(prompt).toContain('Run fully autonomously in headless mode for issue #538, BUILD phase.');
     expect(prompt).toContain('Commit atomically');
+    expect(prompt).not.toContain('/ship-it');
   });
 
   it('local-small prompt keeps single-slice one-commit behavior', async () => {
@@ -1312,6 +1317,7 @@ describe('buildPhase cross-harness failover', () => {
 
     expect(result.ok).toBe(true);
     expect(result.model).toBe('claude-sonnet-5');
+    expect(result.route).toBe('claude');
     expect(stub.calls.map((c) => ({ model: c.model, task: c.task }))).toEqual([
       { model: 'codex-a', task: 'build_codex' },
       { model: 'claude-sonnet-5', task: 'build_claude' },
@@ -1325,7 +1331,7 @@ describe('buildPhase cross-harness failover', () => {
     ]);
   });
 
-  it.each(['usage_cap', 'rate_limit', 'timeout', 'unavailable'] as const)(
+  it.each(['usage_cap', 'rate_limit', 'timeout', 'unavailable', 'local_auth'] as const)(
     'continues a Claude build on Codex when the Claude provider fails with %s',
     async (failure) => {
       const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
@@ -1805,5 +1811,113 @@ describe('buildPhase lifecycle events', () => {
 
     expect(received.map((e) => e.status)).toEqual(['started', 'failed']);
     expect(received[1].detail.length).toBeGreaterThan(0);
+  });
+});
+
+describe('buildPhase no-diff post-condition', () => {
+  const fakeRouter = (output = 'done') =>
+    ({
+      run: async () => ({ model: 'fake-model', output, exitCode: 0, attempts: [] }),
+    }) as any;
+
+  it('fails the build when the diff collector reports an empty diff', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-961-empty.md');
+    const logs: Array<{ type: string; msg: string }> = [];
+
+    const result = await buildPhase({
+      issue: 961,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/961-no-diff',
+      route: 'claude',
+      router: fakeRouter(),
+      constitution: null,
+      log: (type, msg) => logs.push({ type, msg }),
+      collectDiff: async () => ({ text: '', baseRef: 'origin/main', truncated: false }),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('no_diff');
+    expect(logs).toContainEqual({
+      type: 'fail',
+      msg: 'worker produced no diff against origin/main; no implementation was produced',
+    });
+  });
+
+  it('succeeds when the diff collector reports a real diff', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-961-real.md');
+
+    const result = await buildPhase({
+      issue: 961,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/961-real-diff',
+      route: 'claude',
+      router: fakeRouter(),
+      constitution: null,
+      log: () => {},
+      collectDiff: async () => ({ text: 'diff --git a/x b/x', baseRef: 'origin/main', truncated: false }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.reason).toBeUndefined();
+  });
+
+  it('treats an uncollectable diff (skipReason) as a pass, not a worker failure', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-961-skip.md');
+    const logs: Array<{ type: string; msg: string }> = [];
+    const skipReason = 'no base ref (tried origin/main, origin/master) — not a git checkout or no remote base';
+
+    const result = await buildPhase({
+      issue: 961,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/961-skip-reason',
+      route: 'claude',
+      router: fakeRouter(),
+      constitution: null,
+      log: (type, msg) => logs.push({ type, msg }),
+      collectDiff: async () => ({ text: '', baseRef: null, truncated: false, skipReason }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(logs.some((l) => l.msg.includes(skipReason))).toBe(true);
+  });
+
+  it('lets escalation win over no_diff and never calls the diff collector', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-961-escalate.md');
+    let collectDiffCalled = false;
+
+    const result = await buildPhase({
+      issue: 961,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/961-escalate-wins',
+      route: 'claude',
+      router: fakeRouter('progress line\nESCALATE: the acceptance criteria are ambiguous\nmore text'),
+      constitution: null,
+      log: () => {},
+      collectDiff: async () => {
+        collectDiffCalled = true;
+        return { text: '', baseRef: 'origin/main', truncated: false };
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.escalate).toBe('ESCALATE: the acceptance criteria are ambiguous');
+    expect(result.reason).not.toBe('no_diff');
+    expect(collectDiffCalled).toBe(false);
   });
 });

@@ -25,6 +25,8 @@ import {
   renderRejectedSmells,
   renderSmellDetails,
   SMELL_KINDS,
+  WORKER_OUTPUT_CHECKER,
+  workerOutputChecker,
 } from './design-smells.js';
 import type { CheckerContext } from './index.js';
 
@@ -213,6 +215,47 @@ describe('designSmellsEnabled', () => {
 
   it('is true when FACTORY_DESIGN_SMELLS=1', () => {
     expect(designSmellsEnabled({ FACTORY_DESIGN_SMELLS: '1' })).toBe(true);
+  });
+});
+
+describe('workerOutputChecker', () => {
+  it('fails when a collectable diff is empty', async () => {
+    const result = await workerOutputChecker(makeContext('/worktree'), {
+      collectDiff: async () => ({ text: '', baseRef: 'origin/main', truncated: false }),
+    });
+
+    expect(result).toEqual({
+      checker: WORKER_OUTPUT_CHECKER,
+      result: 'FAIL',
+      details: 'worker produced no diff against origin/main; no implementation was produced',
+    });
+  });
+
+  it('passes when a collectable diff has product changes', async () => {
+    const result = await workerOutputChecker(makeContext('/worktree'), {
+      collectDiff: async () => ({
+        text: 'diff --git a/a.ts b/a.ts\n+export const changed = true;\n',
+        baseRef: 'origin/main',
+        truncated: false,
+      }),
+    });
+
+    expect(result.checker).toBe(WORKER_OUTPUT_CHECKER);
+    expect(result.result).toBe('PASS');
+  });
+
+  it('skips when no supported remote baseline can be collected', async () => {
+    const result = await workerOutputChecker(makeContext('/worktree'), {
+      collectDiff: async () => ({
+        text: '',
+        baseRef: null,
+        truncated: false,
+        skipReason: 'no base ref (tried origin/main, origin/master) — not a git checkout or no remote base',
+      }),
+    });
+
+    expect(result.checker).toBe(WORKER_OUTPUT_CHECKER);
+    expect(result.result).toBe('SKIP');
   });
 });
 

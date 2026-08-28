@@ -58,6 +58,7 @@ const h = vi.hoisted(() => {
       costsFile?: string;
       steeringDir?: string;
     }>,
+    setupWorktreeImpl: async (_repoRoot: string, _branch: string, _worktree: string, _startPoint?: string) => {},
   };
 });
 
@@ -110,12 +111,31 @@ vi.mock('@on-par/factory-tui', () => ({
 
 vi.mock('@on-par/factory-core', async (importOriginal) => {
   const actual = await importOriginal<typeof FactoryCore>();
+
+  // Phases. shipIssue no longer sequences PLAN->BUILD->CHECK->SHIP itself (#675) — it
+  // builds ports and calls the real runIssue in @on-par/factory-core, which now takes
+  // planPhase/buildPhase/checkPhase/shipPhase as overridable ports (ADR-0004). So this
+  // double only stubs the four phase functions and lets the real runIssue drive
+  // sequencing, the breaker, budget assertions, and constitution logging.
+  const planPhaseMock = vi.fn(async (opts: any) => {
+    if (h.triggerPlanProviderFailure) await opts.onProviderFailure?.(h.triggerPlanProviderFailure);
+    return h.planResult;
+  });
+  const buildPhaseMock = vi.fn(async (_opts: any) => h.buildResult);
+  const checkPhaseMock = vi.fn(async (opts: any) => {
+    for (const s of h.checkResult.summary.results.filter((r: any) => r.result === 'SKIP')) {
+      opts.log?.('check', `SKIPPED: ${s.checker} — ${s.details}`);
+    }
+    return h.checkResult;
+  });
+  const shipPhaseMock = vi.fn(async (_opts: any) => h.shipResult);
+
   return {
     ...actual,
     // Config loaders — return inert values.
-    loadModelsConfig: vi.fn(() => ({}) as any),
+    loadModelsConfig: vi.fn(() => ({ models: {}, tiers: {} }) as any),
     loadRoutesConfig: vi.fn(() => ({}) as any),
-    loadFactoryConfig: vi.fn(() => h.factoryConfig),
+    loadFactoryConfigForRepo: vi.fn(() => h.factoryConfig),
     resolveTimeouts: vi.fn(() => ({ plan: 1, build: 1, check: 1, approval: 1 })),
     resolveSkipCI: vi.fn(() => false),
     getConstitutionsDir: vi.fn(() => h.constitutionsDir),
@@ -163,14 +183,12 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
         getModelsInTier: () => ['claude-model'],
       };
     }),
-    // Phases.
-    planPhase: vi.fn(async (opts: any) => {
-      if (h.triggerPlanProviderFailure) await opts.onProviderFailure?.(h.triggerPlanProviderFailure);
-      return h.planResult;
-    }),
-    buildPhase: vi.fn(async () => h.buildResult),
-    checkPhase: vi.fn(async () => h.checkResult),
-    shipPhase: vi.fn(async () => h.shipResult),
+    // Phases are stubbed here; the real runIssue (from `actual`) sequences them (#675).
+    planPhase: planPhaseMock,
+    buildPhase: buildPhaseMock,
+    checkPhase: checkPhaseMock,
+    shipPhase: shipPhaseMock,
+    runIssue: actual.runIssue,
     // Usage / reports.
     estimateTrailingSpend: vi.fn(() => h.trailingSpend),
     formatUsageReport: vi.fn(() => 'USAGE REPORT'),
@@ -191,7 +209,7 @@ vi.mock('@on-par/factory-core/internal', async (importOriginal) => {
     // Cost.
     readCosts: vi.fn(() => h.costs),
     // Git / worktree side-effects — no-ops.
-    setupWorktree: vi.fn(async () => {}),
+    setupWorktree: vi.fn(async (...args: [string, string, string, string?]) => h.setupWorktreeImpl(...args)),
     cleanupWorktree: vi.fn(async () => {}),
     gitFetch: vi.fn(async () => {}),
     withGitLock: vi.fn(async (_root: string, fn: () => Promise<unknown>) => fn()),
@@ -209,6 +227,7 @@ vi.mock('@on-par/factory-core/internal', async (importOriginal) => {
 import {
   cleanupWorktree,
   formatGcReport,
+  setupWorktree,
   sweepWorktrees,
   watchChecks,
   withFileLock,
@@ -216,10 +235,14 @@ import {
 } from '@on-par/factory-core/internal';
 
 import {
+  buildInitConfig,
   CliExitError,
   cmdConstitution,
   cmdLand,
   cmdUsage,
+  FACTORY_CONFIG_SCHEMA_URL,
+  formatInitReachability,
+  IssueDecomposedError,
   IssueSkippedError,
   main,
   parseIssueArg,
@@ -259,13 +282,19 @@ function paths() {
     steering: join(state, 'steering'),
     kpiHistory: join(state, 'kpi-history.jsonl'),
     breaker: join(state, 'breaker.json'),
+    config: join(state, 'config.json'),
+    constitution: join(state, 'constitution.md'),
+    gitignore: join(state, '.gitignore'),
   };
 }
 
 function defaultOctokit() {
   return {
     rest: {
-      issues: { get: vi.fn(async () => ({ data: { title: 'Fix the bug' } })) },
+      issues: {
+        get: vi.fn(async () => ({ data: { title: 'Fix the bug' } })),
+        listForRepo: vi.fn(async () => ({ data: [] })),
+      },
       pulls: {
         list: vi.fn(async ({ state }: any) =>
           state === 'open'
@@ -338,6 +367,7 @@ beforeEach(() => {
   };
   h.gcReport = { removed: [], kept: 0, dryRun: false };
   h.runTuiCalls = [];
+  h.setupWorktreeImpl = async () => {};
   h.claudeAvailable = undefined;
   h.orphanEvents = [];
   h.portListeners = [];
@@ -411,6 +441,13 @@ describe('cli commands (via main dispatch)', () => {
   });
 
   describe('init', () => {
+    beforeEach(() => {
+      writeFileSync(
+        join(h.constitutionsDir, '_template.md'),
+        '```markdown\n---\nproduct: <product-name>\n---\n# <Product> Constitution\n```\n',
+      );
+    });
+
     it('creates .factory dirs, the git exclude entry, and a sample queue', async () => {
       const res = await runMain('init');
       expect(res.exited).toBe(false);
@@ -447,6 +484,62 @@ describe('cli commands (via main dispatch)', () => {
       const res = await runMain('init');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('Initialized');
+    });
+
+    it('writes config.json, constitution.md, and .gitignore, then prints a reachability summary', async () => {
+      h.diagnoses = [
+        { reachable: true, tiers: ['worker'] } as any,
+        { reachable: true, tiers: ['worker'] } as any,
+        { reachable: false, tiers: ['worker'] } as any,
+      ];
+      const res = await runMain('init');
+      expect(res.exited).toBe(false);
+
+      expect(existsSync(paths().config)).toBe(true);
+      const config = JSON.parse(readFileSync(paths().config, 'utf-8'));
+      expect(config).toEqual({ $schema: FACTORY_CONFIG_SCHEMA_URL, version: 2 });
+      expect(config.models).toBeUndefined();
+
+      expect(existsSync(paths().constitution)).toBe(true);
+      const constitution = readFileSync(paths().constitution, 'utf-8');
+      const repoName = h.repoRoot.split('/').pop();
+      expect(constitution).toContain(JSON.stringify(repoName));
+
+      expect(existsSync(paths().gitignore)).toBe(true);
+      expect(readFileSync(paths().gitignore, 'utf-8')).toContain('state/');
+
+      expect(logged()).toContain('policy=auto,');
+      expect(logged()).toContain('models reachable');
+    });
+
+    it('is idempotent: a second run without --force leaves an existing config untouched', async () => {
+      const sentinel = '{"version":2,"models":{"plan":"x"}}';
+      writeFileSync(paths().config, sentinel);
+      await runMain('init');
+      expect(readFileSync(paths().config, 'utf-8')).toBe(sentinel);
+      expect(logged()).toContain('leaving as-is');
+    });
+
+    it('--force overwrites an existing config', async () => {
+      writeFileSync(paths().config, '{"version":2,"models":{"plan":"x"}}');
+      await runMain('init', '--force');
+      expect(readFileSync(paths().config, 'utf-8')).toBe(buildInitConfig());
+    });
+  });
+
+  describe('buildInitConfig', () => {
+    it('returns valid pin-free version-2 JSON', () => {
+      const parsed = JSON.parse(buildInitConfig());
+      expect(parsed).toEqual({ $schema: FACTORY_CONFIG_SCHEMA_URL, version: 2 });
+      expect(parsed.models).toBeUndefined();
+      expect(parsed.tiers).toBeUndefined();
+    });
+  });
+
+  describe('formatInitReachability', () => {
+    it('renders policy=auto, K/N models reachable', () => {
+      const diagnoses = [{ reachable: true } as any, { reachable: true } as any, { reachable: false } as any];
+      expect(formatInitReachability(diagnoses)).toBe('policy=auto, 2/3 models reachable');
     });
   });
 
@@ -1016,6 +1109,231 @@ bash scripts/verify.sh
     });
   });
 
+  describe('queue migrate', () => {
+    beforeEach(() => {
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) return h.ghRepo;
+        return '';
+      };
+      h.octokit.rest.issues.createLabel = vi.fn(async () => ({}));
+      h.octokit.rest.issues.addLabels = vi.fn(async () => ({}));
+    });
+
+    it('migrates valid local queue entries in per-lane order without rewriting the source queue', async () => {
+      const source = 'daw 1055\ndocs 200\ndaw 993\n';
+      writeFileSync(paths().queue, source);
+
+      const res = await runMain('queue', 'migrate');
+
+      expect(res.exited).toBe(false);
+      expect(readFileSync(paths().queue, 'utf-8')).toBe(source);
+      expect(logged()).toContain('queue migrated — 3 issue(s)');
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenNthCalledWith(1, {
+        owner: 'on-par',
+        repo: 'software-factory',
+        issue_number: 1055,
+        labels: ['factory:queued', 'factory:lane:daw', 'factory:order:1'],
+      });
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenNthCalledWith(2, {
+        owner: 'on-par',
+        repo: 'software-factory',
+        issue_number: 200,
+        labels: ['factory:queued', 'factory:lane:docs', 'factory:order:1'],
+      });
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenNthCalledWith(3, {
+        owner: 'on-par',
+        repo: 'software-factory',
+        issue_number: 993,
+        labels: ['factory:queued', 'factory:lane:daw', 'factory:order:2'],
+      });
+      expect(h.octokit.rest.issues.createLabel).toHaveBeenCalled();
+    });
+
+    it('rejects a missing local queue before creating or applying labels', async () => {
+      const res = await runMain('queue', 'migrate');
+
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('queue not found');
+      expect(h.octokit.rest.issues.createLabel).not.toHaveBeenCalled();
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+    });
+
+    it('rejects an invalid local queue before creating or applying labels', async () => {
+      writeFileSync(paths().queue, 'daw 1055\ndaw invalid\n');
+
+      const res = await runMain('queue', 'migrate');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('queue is invalid');
+      expect(h.octokit.rest.issues.createLabel).not.toHaveBeenCalled();
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+    });
+
+    it('rejects a queue with a duplicate issue number before any GitHub call', async () => {
+      writeFileSync(paths().queue, 'daw 1055\ndocs 1055\n');
+
+      const res = await runMain('queue', 'migrate');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('duplicate issue #1055');
+      expect(h.octokit.rest.issues.get).not.toHaveBeenCalled();
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+    });
+
+    it('rejects an empty queue with no issue entries', async () => {
+      writeFileSync(paths().queue, '\n# nothing queued yet\n');
+
+      const res = await runMain('queue', 'migrate');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('no issue entries');
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+    });
+
+    it('aborts the whole migration when an entry is a pull request, not an issue', async () => {
+      writeFileSync(paths().queue, 'daw 1055\n');
+      h.octokit.rest.issues.get = vi.fn(async () => ({ data: { title: 'x', pull_request: {} } }));
+
+      const res = await runMain('queue', 'migrate');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('is a pull request');
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+    });
+
+    it('previews the migration plan without mutating GitHub in --dry-run', async () => {
+      const source = 'daw 1055\ndocs 200\n';
+      writeFileSync(paths().queue, source);
+
+      const res = await runMain('queue', 'migrate', '--dry-run');
+
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('dry run');
+      expect(logged()).toContain('#1055 → lane daw, position 1');
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+      expect(h.octokit.rest.issues.createLabel).not.toHaveBeenCalled();
+      expect(readFileSync(paths().queue, 'utf-8')).toBe(source);
+    });
+
+    it('aborts the whole migration when an entry is a closed issue', async () => {
+      writeFileSync(paths().queue, 'daw 1055\n');
+      h.octokit.rest.issues.get = vi.fn(async () => ({ data: { title: 'x', state: 'closed' } }));
+
+      const res = await runMain('queue', 'migrate');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('closed');
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+    });
+
+    it('aborts the whole migration when an entry is inaccessible', async () => {
+      writeFileSync(paths().queue, 'daw 1055\n');
+      h.octokit.rest.issues.get = vi.fn(async () => {
+        throw Object.assign(new Error('Not Found'), { status: 404 });
+      });
+
+      const res = await runMain('queue', 'migrate');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('inaccessible');
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+    });
+
+    it('surfaces a GitHub failure during apply as a CliExitError', async () => {
+      writeFileSync(paths().queue, 'daw 1055\n');
+      h.octokit.rest.issues.addLabels = vi.fn(async () => {
+        throw new Error('label API down');
+      });
+
+      const res = await runMain('queue', 'migrate');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('queue migration failed');
+    });
+
+    it('migrates from an explicit --file path, leaving the default queue untouched', async () => {
+      const legacyFile = join(paths().state, 'legacy-queue');
+      writeFileSync(legacyFile, 'daw 1055\n');
+
+      const res = await runMain('queue', 'migrate', '--file', '.factory/legacy-queue');
+
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('labelled from');
+      expect(logged()).toContain(legacyFile);
+      expect(existsSync(paths().queue)).toBe(false);
+    });
+  });
+
+  describe('queue add', () => {
+    beforeEach(() => {
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) return h.ghRepo;
+        return '';
+      };
+      h.octokit.rest.issues.createLabel = vi.fn(async () => ({}));
+      h.octokit.rest.issues.addLabels = vi.fn(async () => ({}));
+      h.octokit.rest.issues.listForRepo = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.issues.listLabelsOnIssue = vi.fn(async () => ({ data: [] }));
+    });
+
+    it('queues explicit issues into a lane, applying queued/lane/order labels in order', async () => {
+      const res = await runMain('queue', 'add', 'daw', '10', '11');
+
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('#10 queued');
+      expect(logged()).toContain('#11 queued');
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenNthCalledWith(1, {
+        owner: 'on-par',
+        repo: 'software-factory',
+        issue_number: 10,
+        labels: ['factory:queued', 'factory:lane:daw', 'factory:order:1'],
+      });
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenNthCalledWith(2, {
+        owner: 'on-par',
+        repo: 'software-factory',
+        issue_number: 11,
+        labels: ['factory:queued', 'factory:lane:daw', 'factory:order:2'],
+      });
+    });
+
+    it('creates missing factory labels idempotently before applying them', async () => {
+      await runMain('queue', 'add', 'daw', '10');
+
+      expect(h.octokit.rest.issues.createLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'factory:queued' }),
+      );
+      expect(h.octokit.rest.issues.createLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'factory:lane:daw' }),
+      );
+      expect(h.octokit.rest.issues.createLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'factory:order:1' }),
+      );
+    });
+
+    it('exits nonzero and reports a per-issue failure without dropping the successful issue', async () => {
+      h.octokit.rest.issues.addLabels = vi.fn(async ({ issue_number }: any) => {
+        if (issue_number === 10) throw new Error('label API down');
+        return {};
+      });
+
+      const res = await runMain('queue', 'add', 'daw', '10', '11');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('#10 failed');
+      expect(logged()).toContain('#11 queued');
+    });
+
+    it('exits 2 for an invalid issue argument before any GitHub call', async () => {
+      const res = await runMain('queue', 'add', 'daw', 'notanumber');
+
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(h.octokit.rest.issues.createLabel).not.toHaveBeenCalled();
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+    });
+  });
+
   describe('stop / resume', () => {
     it('stop writes the STOP file', async () => {
       await runMain('stop');
@@ -1039,17 +1357,19 @@ bash scripts/verify.sh
   describe('run', () => {
     it('exits 2 when the queue file is missing', async () => {
       rmSync(paths().queue, { force: true });
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res).toEqual({ exited: true, code: 2 });
     });
 
-    it('reads the queue, starts lanes, and stops immediately when STOP is present', async () => {
+    it('loudly clears a stale STOP file left over from a prior halt and proceeds through the queue (#811)', async () => {
       writeFileSync(paths().queue, '# header\napp 1\napp 2\ndocs 3\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
+      expect(existsSync(paths().stop)).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
-      expect(events).toContain('stopped');
+      expect(events).toContain('stop-file-cleared');
+      expect(events).not.toContain('"type":"stopped"');
       expect(events).toContain('run-done');
     });
 
@@ -1057,7 +1377,7 @@ bash scripts/verify.sh
       h.factoryConfig = { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: true } };
       writeFileSync(paths().queue, '# header\napp 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       expect(sweepWorktrees).toHaveBeenCalledWith(
         expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7, repo: h.ghRepo }),
@@ -1070,7 +1390,7 @@ bash scripts/verify.sh
       h.factoryConfig = { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: false } };
       writeFileSync(paths().queue, '# header\napp 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       expect(sweepWorktrees).not.toHaveBeenCalled();
     });
@@ -1080,7 +1400,7 @@ bash scripts/verify.sh
       (sweepWorktrees as any).mockRejectedValueOnce(new Error('gc boom'));
       writeFileSync(paths().queue, '# header\napp 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('gc boom');
@@ -1090,7 +1410,7 @@ bash scripts/verify.sh
     it('skips malformed queue lines, starts lanes only for valid entries, and warns', async () => {
       writeFileSync(paths().queue, '# header\napp 1\napp abc\ndocs 3\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       const err = errored();
       expect(err).toContain('malformed');
@@ -1106,7 +1426,7 @@ bash scripts/verify.sh
       process.env.FACTORY_USAGE_WATCH = '0';
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('run-done');
@@ -1117,7 +1437,7 @@ bash scripts/verify.sh
       vi.mocked(core.watchUsage).mockRejectedValueOnce(new Error('watchdog exploded'));
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('usage watchdog crashed');
@@ -1133,7 +1453,7 @@ bash scripts/verify.sh
       };
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
 
       expect(existsSync(paths().kpiHistory)).toBe(true);
@@ -1150,8 +1470,8 @@ bash scripts/verify.sh
     it('appends a second KPI snapshot on a second run', async () => {
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
-      await runMain('run');
-      await runMain('run');
+      await runMain('run', '--local-queue');
+      await runMain('run', '--local-queue');
 
       const lines = readFileSync(paths().kpiHistory, 'utf-8').trim().split('\n').filter(Boolean);
       expect(lines).toHaveLength(2);
@@ -1160,7 +1480,7 @@ bash scripts/verify.sh
     it('does not create a KPI snapshot when the queue has no entries', async () => {
       writeFileSync(paths().queue, '# header\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
 
       const events = readFileSync(paths().events, 'utf-8');
@@ -1178,7 +1498,7 @@ bash scripts/verify.sh
       };
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
 
       const events = readFileSync(paths().events, 'utf-8');
@@ -1194,12 +1514,22 @@ bash scripts/verify.sh
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
       mkdirSync(paths().kpiHistory);
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
 
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('run-done');
       expect(events).toContain('kpi snapshot failed');
+    });
+
+    it('without --local-queue, discovers lanes from GitHub Issues instead of the queue file, and finishes cleanly when nothing is queued', async () => {
+      rmSync(paths().queue, { force: true });
+      const res = await runMain('run');
+      expect(res.exited).toBe(false);
+      expect(h.octokit.rest.issues.listForRepo).toHaveBeenCalled();
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('run-done');
+      expect(events).not.toContain('kpi-snapshot');
     });
   });
 
@@ -1320,21 +1650,21 @@ bash scripts/verify.sh
   describe('supervise', () => {
     it('exits 2 when the queue is empty', async () => {
       writeFileSync(paths().queue, '# just comments\n');
-      const res = await runMain('supervise', '--now');
+      const res = await runMain('supervise', '--now', '--local-queue');
       expect(res).toEqual({ exited: true, code: 2 });
     });
 
     it('exits 2 on invalid usage knobs', async () => {
       writeFileSync(paths().queue, 'app 1\n');
       process.env.FACTORY_USAGE_CAP = 'abc';
-      const res = await runMain('supervise', '--now');
+      const res = await runMain('supervise', '--now', '--local-queue');
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('FACTORY_USAGE_CAP');
     });
 
     it('exits 2 when the queue contains only malformed lines, and warns why', async () => {
       writeFileSync(paths().queue, 'app abc\n');
-      const res = await runMain('supervise', '--now');
+      const res = await runMain('supervise', '--now', '--local-queue');
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('malformed');
     });
@@ -1342,12 +1672,19 @@ bash scripts/verify.sh
     it('--now runs the queue once end-to-end and finishes once the queue drains without STOP', async () => {
       process.env.FACTORY_MERGE = '1';
       writeFileSync(paths().queue, 'app 1\n');
-      const res = await runMain('supervise', '--now');
+      const res = await runMain('supervise', '--now', '--local-queue');
       expect(res.exited).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('supervisor-done');
       expect(events).toContain('run-done');
     }, 20_000);
+
+    it('without --local-queue, counts pending work via GitHub Issues and exits 2 when nothing is queued', async () => {
+      rmSync(paths().queue, { force: true });
+      const res = await runMain('supervise', '--now');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(h.octokit.rest.issues.listForRepo).toHaveBeenCalled();
+    });
   });
 
   describe('local-small-dry-run', () => {
@@ -2555,6 +2892,41 @@ describe('shipIssue (direct)', () => {
     expect(escalateEvents).toHaveLength(1);
   });
 
+  it('rewrites the queue entry and throws IssueDecomposedError (not a park) when the plan decomposed the issue', async () => {
+    writeFileSync(paths().queue, 'app 5\n');
+    h.planResult = { ok: false, route: 'claude', escalate: 'decomposed', decomposed: { childIssues: [10, 11] } };
+
+    const err = await shipIssue(5, {}, ctx()).catch((e) => e);
+
+    expect(err).toBeInstanceOf(IssueDecomposedError);
+    expect(err.childIssues).toEqual([10, 11]);
+    expect(readFileSync(paths().queue, 'utf-8')).toBe('app 10\napp 11\n');
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('queue entry for #5 replaced with #10, #11');
+    expect(events).not.toContain('"type":"escalate"');
+    expect(events).not.toContain('"type":"fail"');
+  });
+
+  it('logs decompose_filed without rewriting when the decomposed issue has no queue entry', async () => {
+    h.planResult = { ok: false, route: 'claude', escalate: 'decomposed', decomposed: { childIssues: [10, 11] } };
+
+    await expect(shipIssue(5, {}, ctx())).rejects.toBeInstanceOf(IssueDecomposedError);
+
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('#5 had no queue entry to replace — continuing the lane with #10, #11');
+  });
+
+  it('logs decompose_file_failed but still throws IssueDecomposedError when the queue rewrite errors', async () => {
+    mkdirSync(paths().queue); // a directory at the queue path makes readFileSync throw
+    h.planResult = { ok: false, route: 'claude', escalate: 'decomposed', decomposed: { childIssues: [10] } };
+
+    await expect(shipIssue(5, {}, ctx())).rejects.toBeInstanceOf(IssueDecomposedError);
+
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('decompose_file_failed');
+    expect(events).toContain('queue rewrite for #5 failed');
+  });
+
   it('throws a LaneParkError with reason escalate when the build escalates', async () => {
     h.buildResult = { ok: false, escalate: 'stuck' };
     await expect(shipIssue(5, {}, ctx())).rejects.toMatchObject({ reason: 'escalate' });
@@ -2807,7 +3179,12 @@ describe('shipIssue (direct)', () => {
   it('writes a failed local-only run report and logs the park reason on error', async () => {
     trackEnv('FACTORY_LOCAL_ONLY');
     process.env.FACTORY_LOCAL_ONLY = '1';
-    h.checkResult = { passed: false, summary: { results: [], failures: 1 }, reworkRounds: 0 };
+    h.checkResult = {
+      passed: false,
+      summary: { results: [], failures: 1 },
+      reworkRounds: 0,
+      failureSignature: 'sig-1',
+    };
     const core = await import('@on-par/factory-core');
     await expect(shipIssue(5, {}, ctx())).rejects.toBeTruthy();
     const report = vi.mocked(core.writeLocalRunReport).mock.calls.at(-1)?.[0] as any;
@@ -2983,6 +3360,45 @@ describe('CliExitError (direct command invocation)', () => {
       message: expect.stringContaining('no open PR'),
     });
     expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('materializes a missing adopted PR worktree from its remote head, rebases it, and rechecks CI', async () => {
+    const branch = 'contributor/adopted-pr';
+    const worktree = `${h.repoRoot}-factory-ship-it-5`;
+    const commands: string[] = [];
+    const originalExec = h.execImpl;
+    h.execImpl = (command) => {
+      commands.push(command);
+      return originalExec(command);
+    };
+    h.octokit.rest.pulls.list = vi.fn(async ({ head }: { head?: string }) =>
+      head ? { data: [] } : { data: [{ number: 77, head: { ref: branch }, body: 'Closes #5' }] },
+    );
+    h.octokit.graphql = vi.fn(async (query: string) =>
+      query.trimStart().startsWith('query')
+        ? { repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' } } }
+        : {},
+    );
+    h.setupWorktreeImpl = async (_repoRoot, _branch, path) => {
+      mkdirSync(path, { recursive: true });
+    };
+    vi.mocked(watchChecks).mockResolvedValue('success');
+
+    try {
+      await expect(cmdLand(5)).resolves.toBeUndefined();
+      expect(setupWorktree).toHaveBeenCalledWith(h.repoRoot, branch, worktree, `origin/${branch}`);
+      expect(commands).toContain('git rebase origin/main');
+      expect(commands).toContain("git push --force-with-lease origin 'contributor/adopted-pr'");
+      expect(watchChecks).toHaveBeenCalledTimes(2);
+      expect(h.octokit.rest.pulls.merge).toHaveBeenCalledWith({
+        owner: 'on-par',
+        repo: 'software-factory',
+        pull_number: 77,
+        merge_method: 'squash',
+      });
+    } finally {
+      rmSync(worktree, { recursive: true, force: true });
+    }
   });
 
   it('cmdLand(5) resolves cleanly and leaves the PR open when the merge is blocked on a required review', async () => {

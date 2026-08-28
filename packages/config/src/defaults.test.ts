@@ -6,9 +6,9 @@ import { describe, expect, it } from 'vitest';
 import { defaultFactoryConfig, defaultModelsConfig, defaultRoutesConfig } from './defaults.js';
 
 describe('shipped defaults', () => {
-  it('has 20 models with the expected harness-bearing spot checks', () => {
+  it('has 21 models with the expected harness-bearing spot checks', () => {
     const modelIds = Object.keys(defaultModelsConfig.models);
-    expect(modelIds).toHaveLength(20);
+    expect(modelIds).toHaveLength(21);
 
     for (const id of [
       'claude-opus-5',
@@ -16,6 +16,7 @@ describe('shipped defaults', () => {
       'claude-sonnet-5',
       'gpt-5.6-terra-high',
       'gpt-5.6-terra-medium',
+      'gpt-5.6-luna-high',
       'gpt-5.6-sol',
       'gpt-5.1-codex',
       'opencode-deepseek-v4-flash-free',
@@ -26,6 +27,7 @@ describe('shipped defaults', () => {
 
     expect(defaultModelsConfig.models['claude-fable-5'].harness).toBe('claude-cli');
     expect(defaultModelsConfig.models['gpt-5.6-terra-high'].harness).toBe('codex-cli');
+    expect(defaultModelsConfig.models['gpt-5.6-luna-high'].harness).toBe('codex-cli');
     expect(defaultModelsConfig.models['qwen3.5:9b'].harness).toBe('ollama-http');
     expect(defaultModelsConfig.models['codex-ollama-qwen3.5:9b'].harness).toBe('ollama-agentic');
     expect(defaultModelsConfig.models['opencode-deepseek-v4-flash-free'].harness).toBe('opencode');

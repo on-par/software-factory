@@ -2,10 +2,12 @@
 
 import type { HarnessFailureReason } from './index.js';
 
-/** Classify a failure from stderr/exit code. Shared by harnesses and the router. */
+/** Classify a failure from provider output/exit code. Shared by harnesses and the router. */
 export function classifyFailure(stderr: string, exitCode: number): HarnessFailureReason {
   if (exitCode === 124) return 'timeout';
   const text = stderr.toLowerCase();
+  if (/failed to authenticate|oauth session expired|could not be refreshed|please (run )?\/?login/.test(text))
+    return 'local_auth';
   // Codex/ChatGPT limit patterns below target Codex CLI (ChatGPT plan/usage-cap) output.
   // Codex CLI version: 0.144.6 as of 2026-07-20. Revisit when Codex changes its wording;
   // real samples can be harvested from .factory/events.ndjson (failoverReason/stderr fields).

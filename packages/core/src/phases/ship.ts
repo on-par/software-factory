@@ -13,7 +13,7 @@ import { type LifecycleBus, withLifecycle } from '../bus/index.js';
 import type { EventKind } from '../events/kinds.js';
 import { gatherEvidencePack } from '../reports/evidence-pack.js';
 import type { CheckSummary } from '../types/index.js';
-import { watchChecks } from '../utils/ci-watch.js';
+import { type CiOutcome, watchChecks } from '../utils/ci-watch.js';
 import { shellEscape } from '../utils/index.js';
 import { GITHUB_ISSUE_SOURCE } from '../work/github-issue.js';
 import type { WorkRequest } from '../work/index.js';
@@ -26,6 +26,8 @@ export interface ShipResult {
   prNumber?: number;
   denied?: boolean;
   deniedReason?: string;
+  reason?: string;
+  ciOutcome?: CiOutcome;
   /** True when the branch's content had already landed on main (e.g. a retry after a
    *  squash merge) — nothing was pushed and no PR was created (#520). */
   alreadyDelivered?: boolean;
@@ -42,7 +44,7 @@ export async function shipPhase(opts: Parameters<typeof shipPhaseImpl>[0]): Prom
     (r) =>
       r.ok
         ? `ship complete${r.prNumber === undefined ? '' : ` (PR #${r.prNumber})`}`
-        : `ship failed${r.deniedReason === undefined ? '' : `: ${r.deniedReason}`}`,
+        : `ship failed${(r.deniedReason ?? r.reason) === undefined ? '' : `: ${r.deniedReason ?? r.reason}`}`,
   );
 }
 
@@ -218,6 +220,7 @@ async function shipPhaseImpl(opts: {
         head: branch,
         base: 'main',
         title: inlineWork ? title : `${title} (#${issue})`,
+        draft: true,
         body: `## Summary
 ${summaryLine}
 
@@ -266,6 +269,23 @@ This PR passed independent verification by checker agents before shipping.${inli
     log('evidence', `posted evidence pack to PR #${prNumber}`);
   } catch {}
 
+  let ciOutcome: CiOutcome | undefined;
+
+  // Watch CI (best-effort)
+  if (watchCI) {
+    log('ship', `Watching CI for PR #${prNumber}`);
+    try {
+      ciOutcome = await watchChecks({ octokit, owner, repo: repoName, ref: branch });
+      if (ciOutcome === 'success') log('ship', `CI green for PR #${prNumber}`);
+      else if (ciOutcome === 'failure') {
+        const reason = `CI failed for PR #${prNumber}`;
+        log('ship', reason);
+        return { ok: false, prNumber, reason, ciOutcome };
+      }
+      // outcome === 'timeout': no log, proceed to ready (unchanged best-effort behavior)
+    } catch {}
+  }
+
   // Mark ready for review (if draft). REST pulls.update ignores `draft`;
   // undrafting requires the markPullRequestReadyForReview GraphQL mutation.
   try {
@@ -282,19 +302,8 @@ This PR passed independent verification by checker agents before shipping.${inli
     }
   } catch {}
 
-  // Watch CI (best-effort)
-  if (watchCI) {
-    log('ship', `Watching CI for PR #${prNumber}`);
-    try {
-      const outcome = await watchChecks({ octokit, owner, repo: repoName, ref: branch });
-      if (outcome === 'success') log('ship', `CI green for PR #${prNumber}`);
-      else if (outcome === 'failure') log('ship', `CI failed for PR #${prNumber}`);
-      // outcome === 'timeout': no log, proceed to ready (unchanged best-effort behavior)
-    } catch {}
-  }
-
   log('ready', `PR #${prNumber} ready for review`);
-  return { ok: true, prNumber };
+  return ciOutcome === undefined ? { ok: true, prNumber } : { ok: true, prNumber, ciOutcome };
 }
 
 async function computeDiffStat(run: CommandRunner, worktree: string): Promise<string> {

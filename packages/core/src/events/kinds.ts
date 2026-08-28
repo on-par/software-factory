@@ -36,6 +36,8 @@ export type EventKind =
   | 'constitution'
   | 'decompose_comment_posted'
   | 'decompose_failed'
+  | 'decompose_file_failed'
+  | 'decompose_filed'
   | 'decompose_started'
   | 'defect-window-closed'
   | 'design_artifact_emitted'
@@ -91,6 +93,9 @@ export type EventKind =
   | 'plan_redirect'
   | 'plan_rejected'
   | 'post-merge-defect'
+  | 'queue_reprioritized'
+  | 'project_queue_refresh_failed'
+  | 'project_queue_refresh_succeeded'
   | 'provider_breaker_close'
   | 'provider_breaker_open'
   | 'provider_breaker_skip'
@@ -120,6 +125,7 @@ export type EventKind =
   | 'size-gate-escalated'
   | 'steering_applied'
   | 'steering_unconsumed'
+  | 'stop-file-cleared'
   | 'stopped'
   | 'stuck'
   | 'supervisor-done'
@@ -181,6 +187,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   constitution: { severity: 'info', isPark: false, isTerminal: false },
   decompose_comment_posted: { severity: 'info', isPark: false, isTerminal: false },
   decompose_failed: { severity: 'warn', isPark: false, isTerminal: false },
+  decompose_file_failed: { severity: 'warn', isPark: false, isTerminal: false },
+  decompose_filed: { severity: 'info', isPark: false, isTerminal: false },
   decompose_started: { severity: 'info', isPark: false, isTerminal: false },
   'defect-window-closed': { severity: 'info', isPark: false, isTerminal: false },
   design_artifact_emitted: { severity: 'info', isPark: false, isTerminal: false },
@@ -240,6 +248,9 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   plan_redirect: { severity: 'info', isPark: false, isTerminal: false },
   plan_rejected: { severity: 'info', isPark: false, isTerminal: false },
   'post-merge-defect': { severity: 'info', isPark: false, isTerminal: false },
+  queue_reprioritized: { severity: 'info', isPark: false, isTerminal: false },
+  project_queue_refresh_failed: { severity: 'warn', isPark: false, isTerminal: false },
+  project_queue_refresh_succeeded: { severity: 'info', isPark: false, isTerminal: false },
   provider_breaker_close: { severity: 'info', isPark: false, isTerminal: false },
   provider_breaker_open: { severity: 'info', isPark: false, isTerminal: false },
   provider_breaker_skip: { severity: 'info', isPark: false, isTerminal: false },
@@ -271,6 +282,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'size-gate-escalated': { severity: 'warn', isPark: false, isTerminal: false },
   steering_applied: { severity: 'info', isPark: false, isTerminal: false },
   steering_unconsumed: { severity: 'info', isPark: false, isTerminal: false },
+  'stop-file-cleared': { severity: 'warn', isPark: false, isTerminal: false },
   stopped: { severity: 'warn', isPark: false, isTerminal: true, laneStatus: 'stopped' },
   stuck: { severity: 'warn', isPark: true, isTerminal: false },
   'supervisor-done': { severity: 'info', isPark: false, isTerminal: false },

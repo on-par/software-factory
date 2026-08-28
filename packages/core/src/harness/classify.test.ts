@@ -18,6 +18,8 @@ describe('classifyFailure', () => {
     ['quota exceeded', 'usage_cap'],
     ['insufficient credit', 'usage_cap'],
     ['billing issue: payment required', 'usage_cap'],
+    ['Failed to authenticate: OAuth session expired and could not be refreshed', 'local_auth'],
+    ['Please run /login to continue', 'local_auth'],
     ['Error: Cannot find module "x"', 'error'],
     ['AssertionError: expected 3 to equal 4', 'error'],
     ['TypeError: undefined is not a function\n    at index.ts:429:10', 'error'],
