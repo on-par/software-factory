@@ -83,13 +83,14 @@ describe('resolveSandboxPolicy', () => {
     expect(policy?.memMb).toBe(4096);
   });
 
-  it('includes worktree, repo .git, tmpdir, ~/.claude, and ~/.codex in writablePaths', () => {
+  it('includes worktree, repo .git, tmpdir, and agent runtime state dirs in writablePaths', () => {
     const policy = resolveSandboxPolicy(defaultSandboxCfg, { ...baseOpts, env: {} });
     expect(policy?.writablePaths).toContain('/tmp/some-worktree');
     expect(policy?.writablePaths).toContain('/tmp/some-repo/.git');
     expect(policy?.writablePaths).toContain('/tmp');
     expect(policy?.writablePaths).toContain('/home/factory/.claude');
     expect(policy?.writablePaths).toContain('/home/factory/.codex');
+    expect(policy?.writablePaths).toContain('/home/factory/.openclaw');
   });
 
   it('dedupes writablePaths', () => {
