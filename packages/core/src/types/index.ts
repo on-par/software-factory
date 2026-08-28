@@ -323,6 +323,11 @@ export type RunStatus =
 export interface IssueRunState {
   issue: number;
   lane: string;
+  /** GitHub slug (`owner/name`) of the checkout this run belongs to (#972).
+   *  Optional for the same reason `FactoryEvent.repo` is (#971): a checkout with no
+   *  readable `origin` remote has no slug to record. Qualifies `lane`, whose meaning
+   *  and format are unchanged. */
+  repo?: string;
   status: RunStatus;
   branch: string;
   worktree: string;
