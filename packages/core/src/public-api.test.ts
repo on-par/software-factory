@@ -364,6 +364,13 @@ const INTERNAL_API_KEYS = [
   'readOriginUrl',
   // Daemon pause/resume gate (#779)
   'setRepoState',
+  // Daemon detach gate (#780)
+  'beginDetach',
+  'DEFAULT_DRAIN_POLL_INTERVAL_MS',
+  'DEFAULT_DRAIN_TIMEOUT_MS',
+  'DRAIN_BLOCKING_STATUSES',
+  'drainAndDetach',
+  'isDrainSafe',
   // Utils
   'branchFor',
   'branchPrefixSlug',

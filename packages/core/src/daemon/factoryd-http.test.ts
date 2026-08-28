@@ -471,4 +471,282 @@ describe('createFactorydServer', () => {
       expect(lines).toEqual(['POST /repos/on-par/software-factory/pause 200']);
     });
   });
+
+  describe('DELETE /repos/<owner>/<name>', () => {
+    async function waitForState(file: string, slug: string, state: string): Promise<void> {
+      for (let i = 0; i < 200; i++) {
+        const loaded = await loadRegistry(file);
+        if (loaded.repos[slug]?.state === state) return;
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      throw new Error(`${slug} never reached state ${state}`);
+    }
+
+    it('immediately moves an active repo to draining, answers 202, and excludes it from dispatchableRepos (acceptance criterion 1)', async () => {
+      await writeRegistry(registryFile, {
+        version: 1,
+        repos: {
+          'on-par/software-factory': {
+            path: '/repos/software-factory',
+            attachedAt: '2026-08-19T12:00:00.000Z',
+            state: 'active',
+          },
+        },
+      });
+      factoryd = createFactorydServer({
+        registryFile,
+        port: 0,
+        detachDeps: { readLaneStatuses: async () => ['building'], sleep: async () => {}, pollIntervalMs: 0 },
+      });
+      await factoryd.start();
+
+      const { status, body } = await get(factoryd.port, '/repos/on-par/software-factory', 'DELETE');
+      expect(status).toBe(202);
+      expect(JSON.parse(body)).toEqual({
+        repo: {
+          slug: 'on-par/software-factory',
+          path: '/repos/software-factory',
+          attachedAt: '2026-08-19T12:00:00.000Z',
+          state: 'draining',
+        },
+      });
+
+      const listing = await get(factoryd.port, '/repos');
+      expect(JSON.parse(listing.body)).toEqual({
+        repos: [
+          {
+            slug: 'on-par/software-factory',
+            path: '/repos/software-factory',
+            attachedAt: '2026-08-19T12:00:00.000Z',
+            state: 'draining',
+          },
+        ],
+      });
+      expect(dispatchableRepos(await loadRegistry(registryFile))).toEqual([]);
+    });
+
+    it('eventually tombstones the repo once the reader clears a blocking status', async () => {
+      await writeRegistry(registryFile, {
+        version: 1,
+        repos: {
+          'on-par/software-factory': {
+            path: '/repos/software-factory',
+            attachedAt: '2026-08-19T12:00:00.000Z',
+            state: 'active',
+          },
+        },
+      });
+      factoryd = createFactorydServer({
+        registryFile,
+        port: 0,
+        detachDeps: { readLaneStatuses: async () => ['merged'], sleep: async () => {}, pollIntervalMs: 0 },
+      });
+      await factoryd.start();
+
+      const { status } = await get(factoryd.port, '/repos/on-par/software-factory', 'DELETE');
+      expect(status).toBe(202);
+
+      await waitForState(registryFile, 'on-par/software-factory', 'detached');
+    });
+
+    it('?force=true tombstones immediately, answers 200, and never calls readLaneStatuses (acceptance criterion 2)', async () => {
+      await writeRegistry(registryFile, {
+        version: 1,
+        repos: {
+          'on-par/software-factory': {
+            path: '/repos/software-factory',
+            attachedAt: '2026-08-19T12:00:00.000Z',
+            state: 'active',
+          },
+        },
+      });
+      factoryd = createFactorydServer({
+        registryFile,
+        port: 0,
+        detachDeps: {
+          readLaneStatuses: async () => {
+            throw new Error('must not be called when forced');
+          },
+        },
+      });
+      await factoryd.start();
+
+      const { status, body } = await get(factoryd.port, '/repos/on-par/software-factory?force=true', 'DELETE');
+      expect(status).toBe(200);
+      expect(JSON.parse(body)).toEqual({
+        repo: {
+          slug: 'on-par/software-factory',
+          path: '/repos/software-factory',
+          attachedAt: '2026-08-19T12:00:00.000Z',
+          state: 'detached',
+        },
+      });
+    });
+
+    it.each(['?force=false', '?force=1', '?force=yes', ''])('takes the drain path for %s', async (query) => {
+      await writeRegistry(registryFile, {
+        version: 1,
+        repos: {
+          'on-par/software-factory': {
+            path: '/repos/software-factory',
+            attachedAt: '2026-08-19T12:00:00.000Z',
+            state: 'active',
+          },
+        },
+      });
+      factoryd = createFactorydServer({
+        registryFile,
+        port: 0,
+        detachDeps: { readLaneStatuses: async () => ['building'], sleep: async () => {}, pollIntervalMs: 0 },
+      });
+      await factoryd.start();
+
+      const { status, body } = await get(factoryd.port, `/repos/on-par/software-factory${query}`, 'DELETE');
+      expect(status).toBe(202);
+      expect(JSON.parse(body).repo.state).toBe('draining');
+    });
+
+    it('a bare ?force query param forces the detach', async () => {
+      await writeRegistry(registryFile, {
+        version: 1,
+        repos: {
+          'on-par/software-factory': {
+            path: '/repos/software-factory',
+            attachedAt: '2026-08-19T12:00:00.000Z',
+            state: 'active',
+          },
+        },
+      });
+      factoryd = createFactorydServer({
+        registryFile,
+        port: 0,
+        detachDeps: {
+          readLaneStatuses: async () => {
+            throw new Error('must not be called when forced');
+          },
+        },
+      });
+      await factoryd.start();
+
+      const { status, body } = await get(factoryd.port, '/repos/on-par/software-factory?force', 'DELETE');
+      expect(status).toBe(200);
+      expect(JSON.parse(body).repo.state).toBe('detached');
+    });
+
+    it('returns 404 unknown-repo for a slug not in the registry', async () => {
+      factoryd = createFactorydServer({ registryFile, port: 0 });
+      await factoryd.start();
+
+      const { status, body } = await get(factoryd.port, '/repos/on-par/nope', 'DELETE');
+      expect(status).toBe(404);
+      expect(JSON.parse(body)).toEqual({ error: 'on-par/nope is not attached', reason: 'unknown-repo' });
+    });
+
+    it('is idempotent for an already-detached slug and answers 200', async () => {
+      await writeRegistry(registryFile, {
+        version: 1,
+        repos: {
+          'on-par/software-factory': {
+            path: '/repos/software-factory',
+            attachedAt: '2026-08-19T12:00:00.000Z',
+            state: 'detached',
+          },
+        },
+      });
+      factoryd = createFactorydServer({ registryFile, port: 0 });
+      await factoryd.start();
+
+      const { status, body } = await get(factoryd.port, '/repos/on-par/software-factory', 'DELETE');
+      expect(status).toBe(200);
+      expect(JSON.parse(body).repo.state).toBe('detached');
+    });
+
+    it('rejects a non-DELETE method with 405 and Allow: DELETE', async () => {
+      await writeRegistry(registryFile, {
+        version: 1,
+        repos: {
+          'on-par/software-factory': {
+            path: '/repos/software-factory',
+            attachedAt: '2026-08-19T12:00:00.000Z',
+            state: 'active',
+          },
+        },
+      });
+      factoryd = createFactorydServer({ registryFile, port: 0 });
+      await factoryd.start();
+
+      const { status, headers, body } = await get(factoryd.port, '/repos/on-par/software-factory', 'GET');
+      expect(status).toBe(405);
+      expect(headers.allow).toBe('DELETE');
+      expect(JSON.parse(body)).toEqual({ error: 'method not allowed' });
+    });
+
+    it('treats a trailing slash and a query string as routing to the same slug', async () => {
+      await writeRegistry(registryFile, {
+        version: 1,
+        repos: {
+          'on-par/x': { path: '/repos/x', attachedAt: '2026-08-19T12:00:00.000Z', state: 'active' },
+        },
+      });
+      factoryd = createFactorydServer({
+        registryFile,
+        port: 0,
+        detachDeps: { readLaneStatuses: async () => ['merged'] },
+      });
+      await factoryd.start();
+
+      expect((await get(factoryd.port, '/repos/on-par/x/', 'DELETE')).status).toBe(202);
+    });
+
+    it('emits exactly one log line per DELETE request', async () => {
+      await writeRegistry(registryFile, {
+        version: 1,
+        repos: {
+          'on-par/software-factory': {
+            path: '/repos/software-factory',
+            attachedAt: '2026-08-19T12:00:00.000Z',
+            state: 'active',
+          },
+        },
+      });
+      const lines: string[] = [];
+      factoryd = createFactorydServer({
+        registryFile,
+        port: 0,
+        log: (line) => lines.push(line),
+        detachDeps: { readLaneStatuses: async () => ['merged'] },
+      });
+      await factoryd.start();
+
+      await get(factoryd.port, '/repos/on-par/software-factory', 'DELETE');
+      expect(lines).toEqual(['DELETE /repos/on-par/software-factory 202']);
+    });
+
+    it('stop() resolves while a drain is pending, aborting it and leaving the entry draining', async () => {
+      await writeRegistry(registryFile, {
+        version: 1,
+        repos: {
+          'on-par/software-factory': {
+            path: '/repos/software-factory',
+            attachedAt: '2026-08-19T12:00:00.000Z',
+            state: 'active',
+          },
+        },
+      });
+      factoryd = createFactorydServer({
+        registryFile,
+        port: 0,
+        detachDeps: { readLaneStatuses: async () => ['building'], sleep: async () => {}, pollIntervalMs: 0 },
+      });
+      await factoryd.start();
+
+      const { status } = await get(factoryd.port, '/repos/on-par/software-factory', 'DELETE');
+      expect(status).toBe(202);
+
+      await factoryd.stop();
+      factoryd = undefined;
+
+      expect((await loadRegistry(registryFile)).repos['on-par/software-factory']?.state).toBe('draining');
+    });
+  });
 });

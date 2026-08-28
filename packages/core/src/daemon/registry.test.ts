@@ -65,6 +65,19 @@ describe('loadRegistry', () => {
     expect(registry).toEqual(emptyRegistry());
   });
 
+  it('retains an entry with state draining', async () => {
+    const file = await tmpFile();
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        repos: { 'on-par/software-factory': { ...goodEntry, state: 'draining' } },
+      }),
+    );
+    const registry = await loadRegistry(file);
+    expect(registry.repos['on-par/software-factory']).toEqual({ ...goodEntry, state: 'draining' });
+  });
+
   it('daemon registry drops malformed entries while keeping well-formed siblings', async () => {
     const file = await tmpFile();
     await writeFile(
@@ -238,6 +251,7 @@ describe('dispatchableRepos', () => {
     registry = upsertRepo(registry, 'a/active', { ...goodEntry, state: 'active' });
     registry = upsertRepo(registry, 'b/paused', { ...goodEntry, state: 'paused' });
     registry = upsertRepo(registry, 'c/detached', { ...goodEntry, state: 'detached' });
+    registry = upsertRepo(registry, 'd/draining', { ...goodEntry, state: 'draining' });
 
     expect(dispatchableRepos(registry).map((row) => row.slug)).toEqual(['a/active', 'z/active']);
   });
