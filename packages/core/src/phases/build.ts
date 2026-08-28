@@ -3,6 +3,7 @@
 import { readFile } from 'node:fs/promises';
 
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
+import { collectDesignDiff } from '../checkers/design-smells.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { readDesignArtifact, renderDesignGrounding } from '../design/index.js';
 import { laneEnv } from '../environment/index.js';
@@ -19,6 +20,8 @@ export interface BuildResult {
   model: string;
   route: 'codex' | 'claude' | 'opencode';
   escalate?: string;
+  /** Set on a non-escalation build failure; 'no_diff' = worker produced no diff. */
+  reason?: 'no_diff';
 }
 
 export async function buildPhase(opts: Parameters<typeof buildPhaseImpl>[0]): Promise<BuildResult> {
@@ -26,7 +29,12 @@ export async function buildPhase(opts: Parameters<typeof buildPhaseImpl>[0]): Pr
     { bus: opts.bus, phase: 'build', laneId: opts.laneId, issueId: opts.issue, worktreePath: opts.worktree },
     () => buildPhaseImpl(opts),
     (r) => r.ok,
-    (r) => (r.ok ? `build complete (model ${r.model})` : `build escalated: ${r.escalate ?? 'unknown'}`),
+    (r) =>
+      r.ok
+        ? `build complete (model ${r.model})`
+        : r.reason === 'no_diff'
+          ? 'build failed: worker produced no diff'
+          : `build escalated: ${r.escalate ?? 'unknown'}`,
   );
 }
 
@@ -71,6 +79,8 @@ async function buildPhaseImpl(opts: {
   laneId?: string;
   /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
   bus?: LifecycleBus;
+  /** Injectable for tests; defaults to collectDesignDiff. */
+  collectDiff?: typeof collectDesignDiff;
 }): Promise<BuildResult> {
   const {
     issue,
@@ -270,6 +280,15 @@ ${compactForLocalModel(spec)}
     const escalateLine = escalationLine(result.output);
     log('escalate', escalateLine ?? 'build escalated');
     return { ok: false, model: result.model, route, escalate: escalateLine };
+  }
+
+  const diff = await (opts.collectDiff ?? collectDesignDiff)(worktree);
+  if (diff.skipReason) {
+    log('build', `diff post-condition skipped — ${diff.skipReason}`);
+  } else if (diff.text === '') {
+    const detail = `worker produced no diff against ${diff.baseRef}; no implementation was produced`;
+    log('fail', detail);
+    return { ok: false, model: result.model, route, reason: 'no_diff' };
   }
 
   log('build', `Build complete with model ${result.model}`, { model: result.model });

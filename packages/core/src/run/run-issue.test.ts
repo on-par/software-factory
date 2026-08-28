@@ -370,6 +370,13 @@ describe('runIssue — outcome mapping', () => {
     expect(outcome).toMatchObject({ state: 'escalated', reason: 'build escalated: bad build' });
   });
 
+  it('maps a no_diff BUILD result to parked/fail and never starts CHECK', async () => {
+    vi.mocked(buildPhase).mockResolvedValue({ ok: false, model: 'm', route: 'codex', reason: 'no_diff' });
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts());
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
+    expect(checkPhase).not.toHaveBeenCalled();
+  });
+
   it('classifies an unexpected thrown error structurally via parkReasonFor', async () => {
     vi.mocked(buildPhase).mockRejectedValue(Object.assign(new Error('timed out'), { reason: 'timeout' }));
     const outcome = await runIssue(baseRequest(), basePolicy(), basePorts());
