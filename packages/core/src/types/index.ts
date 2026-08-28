@@ -249,6 +249,11 @@ export interface FactoryEvent {
   msg: string;
   level?: LogLevel;
   lane?: string;
+  /** GitHub slug (`owner/name`) of the checkout that emitted this event (#971).
+   *  Absent on events logged before #971 and on any checkout whose git `origin`
+   *  remote cannot be read or does not parse to `owner/name`. Qualifies `lane`,
+   *  whose meaning and format are unchanged. */
+  repo?: string;
   phase?: string;
   /** Human who performed the action, for human-* event types (#420). */
   actor?: string;
