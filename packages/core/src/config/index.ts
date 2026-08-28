@@ -467,10 +467,17 @@ export function resolveFilingPolicy(config: FactoryConfig): FilingPolicy {
 
 // ---------- Factory state paths ----------
 
+/** `root` (`.factory/`, or an explicit `stateRoot` override) holds only the committed
+ *  inputs — `config.json`, plus the CLI-written `constitution.md`/`.gitignore` — so a
+ *  consumer repo can gitignore just `state/` and keep those three files tracked. Every
+ *  other runtime path resolves under `<root>/state/`. */
 export function getFactoryPaths(repoRoot: string, stateRoot?: string) {
-  const state = stateRoot === undefined ? resolve(repoRoot, '.factory') : resolve(stateRoot);
+  const root = stateRoot === undefined ? resolve(repoRoot, '.factory') : resolve(stateRoot);
+  const state = resolve(root, 'state');
   return {
+    root,
     state,
+    config: resolve(root, 'config.json'),
     queue: resolve(state, 'queue'),
     queueProposed: resolve(state, 'queue.proposed'),
     events: resolve(state, 'events.ndjson'),
@@ -490,7 +497,6 @@ export function getFactoryPaths(repoRoot: string, stateRoot?: string) {
     ports: resolve(state, 'ports.json'),
     portsLock: resolve(state, 'ports.lock'),
     proxyState: resolve(state, 'proxy.json'),
-    config: resolve(state, 'config.json'),
     breaker: resolve(state, 'breaker.json'),
     reworkHistory: resolve(state, 'rework-history.json'),
   };

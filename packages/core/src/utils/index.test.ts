@@ -493,8 +493,8 @@ describe('gitFetch / setupWorktree', () => {
 
       expect(resolve(worktree, '..')).toBe(resolve(repoRoot, '..'));
       expect(existsSync(join(worktree, 'README.md'))).toBe(true);
-      expect(worktree.startsWith(`${paths.state}/`)).toBe(false);
-      await expect(readdir(paths.state)).resolves.toEqual([]);
+      expect(worktree.startsWith(`${paths.root}/`)).toBe(false);
+      await expect(readdir(paths.root)).resolves.toEqual([]);
     } finally {
       await rm(stateRoot, { recursive: true, force: true });
     }

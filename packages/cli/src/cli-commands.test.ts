@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -268,8 +268,10 @@ function trackEnv(...keys: string[]) {
 }
 
 function paths() {
-  const state = join(h.repoRoot, '.factory');
+  const root = join(h.repoRoot, '.factory');
+  const state = join(root, 'state');
   return {
+    root,
     state,
     queue: join(state, 'queue'),
     queueProposed: join(state, 'queue.proposed'),
@@ -282,9 +284,9 @@ function paths() {
     steering: join(state, 'steering'),
     kpiHistory: join(state, 'kpi-history.jsonl'),
     breaker: join(state, 'breaker.json'),
-    config: join(state, 'config.json'),
-    constitution: join(state, 'constitution.md'),
-    gitignore: join(state, '.gitignore'),
+    config: join(root, 'config.json'),
+    constitution: join(root, 'constitution.md'),
+    gitignore: join(root, '.gitignore'),
   };
 }
 
@@ -524,6 +526,15 @@ describe('cli commands (via main dispatch)', () => {
       writeFileSync(paths().config, '{"version":2,"models":{"plan":"x"}}');
       await runMain('init', '--force');
       expect(readFileSync(paths().config, 'utf-8')).toBe(buildInitConfig());
+    });
+
+    it('leaves .factory/ git-clean except the committed config, constitution, .gitignore, and the state/ directory', async () => {
+      await runMain('init');
+      writeFileSync(paths().queue, 'app 1\n');
+
+      expect(readdirSync(paths().root).sort()).toEqual(
+        ['.gitignore', 'config.json', 'constitution.md', 'state'].sort(),
+      );
     });
   });
 
@@ -901,7 +912,7 @@ bash scripts/verify.sh
     });
 
     it('still renders the report when the KPI snapshot fails (e.g. a malformed repo tier config)', async () => {
-      writeFileSync(join(paths().state, 'config.json'), JSON.stringify({ tiers: { worker: ['no-such-model'] } }));
+      writeFileSync(paths().config, JSON.stringify({ tiers: { worker: ['no-such-model'] } }));
       writeFileSync(paths().events, JSON.stringify({ type: 'issue-title', issue: '1', msg: 'title' }));
 
       const res = await runMain('kpis');
@@ -996,13 +1007,13 @@ bash scripts/verify.sh
       const res = await runMain('tui');
       expect(res.exited).toBe(false);
       expect(h.runTuiCalls).toHaveLength(1);
-      expect(h.runTuiCalls[0].eventsFile.endsWith(join('.factory', 'events.ndjson'))).toBe(true);
+      expect(h.runTuiCalls[0].eventsFile.endsWith(join('.factory', 'state', 'events.ndjson'))).toBe(true);
       expect(h.runTuiCalls[0].repo).toBe(h.ghRepo);
-      expect(h.runTuiCalls[0].stopFile?.endsWith(join('.factory', 'STOP'))).toBe(true);
-      expect(h.runTuiCalls[0].queueFile?.endsWith(join('.factory', 'queue'))).toBe(true);
-      expect(h.runTuiCalls[0].queueProposedFile?.endsWith(join('.factory', 'queue.proposed'))).toBe(true);
-      expect(h.runTuiCalls[0].costsFile?.endsWith(join('.factory', 'costs.jsonl'))).toBe(true);
-      expect(h.runTuiCalls[0].steeringDir?.endsWith(join('.factory', 'steering'))).toBe(true);
+      expect(h.runTuiCalls[0].stopFile?.endsWith(join('.factory', 'state', 'STOP'))).toBe(true);
+      expect(h.runTuiCalls[0].queueFile?.endsWith(join('.factory', 'state', 'queue'))).toBe(true);
+      expect(h.runTuiCalls[0].queueProposedFile?.endsWith(join('.factory', 'state', 'queue.proposed'))).toBe(true);
+      expect(h.runTuiCalls[0].costsFile?.endsWith(join('.factory', 'state', 'costs.jsonl'))).toBe(true);
+      expect(h.runTuiCalls[0].steeringDir?.endsWith(join('.factory', 'state', 'steering'))).toBe(true);
     });
 
     it('calls runTui with repo undefined when gh repo detection fails', async () => {
@@ -1042,7 +1053,7 @@ bash scripts/verify.sh
     });
 
     it('exits 2 with the not-initialized message when .factory/ is missing', async () => {
-      rmSync(paths().state, { recursive: true, force: true });
+      rmSync(paths().root, { recursive: true, force: true });
       const res = await runMain('triage');
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('factory not initialized — run `factory init` first');
@@ -1253,7 +1264,7 @@ bash scripts/verify.sh
     });
 
     it('migrates from an explicit --file path, leaving the default queue untouched', async () => {
-      const legacyFile = join(paths().state, 'legacy-queue');
+      const legacyFile = join(paths().root, 'legacy-queue');
       writeFileSync(legacyFile, 'daw 1055\n');
 
       const res = await runMain('queue', 'migrate', '--file', '.factory/legacy-queue');
@@ -2072,7 +2083,7 @@ bash scripts/verify.sh
     });
 
     it('exits 2 with the not-initialized message when .factory/ is missing', async () => {
-      rmSync(paths().state, { recursive: true, force: true });
+      rmSync(paths().root, { recursive: true, force: true });
       const res = await runMain('ship', '5');
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('factory not initialized — run `factory init` first');
@@ -2189,7 +2200,7 @@ bash scripts/verify.sh
     });
 
     it('exits 2 with the not-initialized message when .factory/ is missing', async () => {
-      rmSync(paths().state, { recursive: true, force: true });
+      rmSync(paths().root, { recursive: true, force: true });
       const res = await runMain('run-issue', '5');
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('factory not initialized — run `factory init` first');
@@ -2350,7 +2361,7 @@ Please add a widget that does the thing.
     });
 
     it('exits 2 with the not-initialized message when .factory/ is missing', async () => {
-      rmSync(paths().state, { recursive: true, force: true });
+      rmSync(paths().root, { recursive: true, force: true });
       const briefPath = writeBrief();
 
       const res = await runMain('run-brief', briefPath);
@@ -2633,7 +2644,7 @@ Please add a widget that does the thing.
 
     it('reports a live and a stale port lease without failing doctor', async () => {
       h.claudeAvailable = true;
-      const portsFile = join(h.repoRoot, '.factory', 'ports.json');
+      const portsFile = join(h.repoRoot, '.factory', 'state', 'ports.json');
       writeFileSync(
         portsFile,
         JSON.stringify({
@@ -2666,7 +2677,7 @@ Please add a widget that does the thing.
 
     it('--reconcile removes stale leases and reports freed ports', async () => {
       h.claudeAvailable = true;
-      const portsFile = join(h.repoRoot, '.factory', 'ports.json');
+      const portsFile = join(h.repoRoot, '.factory', 'state', 'ports.json');
       writeFileSync(
         portsFile,
         JSON.stringify({
@@ -2701,7 +2712,7 @@ Please add a widget that does the thing.
 
     it('--reconcile prints orphan-reaper events for the freed lease', async () => {
       h.claudeAvailable = true;
-      const portsFile = join(h.repoRoot, '.factory', 'ports.json');
+      const portsFile = join(h.repoRoot, '.factory', 'state', 'ports.json');
       writeFileSync(
         portsFile,
         JSON.stringify({
@@ -3013,7 +3024,7 @@ describe('shipIssue (direct)', () => {
   });
 
   it('runs the orphan reaper over a reaped stale lease and logs each event', async () => {
-    const portsFile = join(h.repoRoot, '.factory', 'ports.json');
+    const portsFile = join(h.repoRoot, '.factory', 'state', 'ports.json');
     writeFileSync(
       portsFile,
       JSON.stringify({

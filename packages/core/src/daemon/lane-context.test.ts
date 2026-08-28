@@ -31,12 +31,14 @@ describe('daemon state lane context', () => {
 
     expect(alphaContext.repoRoot).toBe(alpha.path);
     expect(betaContext.repoRoot).toBe(beta.path);
-    expect(alphaContext.paths.state).toBe(resolve(alphaStateRoot));
-    expect(alphaContext.paths.plans).toBe(resolve(alphaStateRoot, 'plans'));
-    expect(alphaContext.paths.events).toBe(resolve(alphaStateRoot, 'events.ndjson'));
-    expect(betaContext.paths.state).toBe(resolve(betaStateRoot));
-    expect(betaContext.paths.plans).toBe(resolve(betaStateRoot, 'plans'));
-    expect(betaContext.paths.events).toBe(resolve(betaStateRoot, 'events.ndjson'));
+    expect(alphaContext.paths.root).toBe(resolve(alphaStateRoot));
+    expect(alphaContext.paths.state).toBe(resolve(alphaStateRoot, 'state'));
+    expect(alphaContext.paths.plans).toBe(resolve(alphaStateRoot, 'state', 'plans'));
+    expect(alphaContext.paths.events).toBe(resolve(alphaStateRoot, 'state', 'events.ndjson'));
+    expect(betaContext.paths.root).toBe(resolve(betaStateRoot));
+    expect(betaContext.paths.state).toBe(resolve(betaStateRoot, 'state'));
+    expect(betaContext.paths.plans).toBe(resolve(betaStateRoot, 'state', 'plans'));
+    expect(betaContext.paths.events).toBe(resolve(betaStateRoot, 'state', 'events.ndjson'));
     expect(Object.values(alphaContext.paths).every((path) => path.startsWith(resolve(alphaStateRoot)))).toBe(true);
     expect(Object.values(betaContext.paths).every((path) => path.startsWith(resolve(betaStateRoot)))).toBe(true);
     expect(Object.values(alphaContext.paths).every((path) => !path.startsWith(resolve(alpha.path, '.factory')))).toBe(
@@ -60,9 +62,10 @@ describe('daemon state lane context', () => {
     const context = createDaemonLaneContext(entry);
 
     expect(context.repoRoot).toBe(entry.path);
-    expect(context.paths.state).toBe(resolve(entry.path, '.factory'));
-    expect(context.paths.plans).toBe(resolve(entry.path, '.factory', 'plans'));
-    expect(context.paths.events).toBe(resolve(entry.path, '.factory', 'events.ndjson'));
+    expect(context.paths.root).toBe(resolve(entry.path, '.factory'));
+    expect(context.paths.state).toBe(resolve(entry.path, '.factory', 'state'));
+    expect(context.paths.plans).toBe(resolve(entry.path, '.factory', 'state', 'plans'));
+    expect(context.paths.events).toBe(resolve(entry.path, '.factory', 'state', 'events.ndjson'));
     expect(Object.values(context.paths).every((path) => path.startsWith(resolve(entry.path, '.factory')))).toBe(true);
   });
 });

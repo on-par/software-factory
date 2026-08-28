@@ -59,41 +59,46 @@ function writeModelsConfig(dir: string, harness?: string) {
 }
 
 describe('getFactoryPaths', () => {
-  const expectedPaths = (state: string) => ({
-    state,
-    queue: resolve(state, 'queue'),
-    queueProposed: resolve(state, 'queue.proposed'),
-    events: resolve(state, 'events.ndjson'),
-    logs: resolve(state, 'logs'),
-    plans: resolve(state, 'plans'),
-    reports: resolve(state, 'reports'),
-    mergeLock: resolve(state, 'merge.lock'),
-    gitLock: resolve(state, 'git.lock'),
-    runLock: resolve(state, 'run.lock'),
-    product: resolve(state, 'product'),
-    stop: resolve(state, 'STOP'),
-    costs: resolve(state, 'costs.jsonl'),
-    approvals: resolve(state, 'approvals'),
-    steering: resolve(state, 'steering'),
-    kpiHistory: resolve(state, 'kpi-history.jsonl'),
-    ingestWatermark: resolve(state, 'ingest-watermark'),
-    ports: resolve(state, 'ports.json'),
-    portsLock: resolve(state, 'ports.lock'),
-    proxyState: resolve(state, 'proxy.json'),
-    config: resolve(state, 'config.json'),
-    breaker: resolve(state, 'breaker.json'),
-    reworkHistory: resolve(state, 'rework-history.json'),
-  });
+  const expectedPaths = (root: string) => {
+    const state = resolve(root, 'state');
+    return {
+      root,
+      state,
+      config: resolve(root, 'config.json'),
+      queue: resolve(state, 'queue'),
+      queueProposed: resolve(state, 'queue.proposed'),
+      events: resolve(state, 'events.ndjson'),
+      logs: resolve(state, 'logs'),
+      plans: resolve(state, 'plans'),
+      reports: resolve(state, 'reports'),
+      mergeLock: resolve(state, 'merge.lock'),
+      gitLock: resolve(state, 'git.lock'),
+      runLock: resolve(state, 'run.lock'),
+      product: resolve(state, 'product'),
+      stop: resolve(state, 'STOP'),
+      costs: resolve(state, 'costs.jsonl'),
+      approvals: resolve(state, 'approvals'),
+      steering: resolve(state, 'steering'),
+      kpiHistory: resolve(state, 'kpi-history.jsonl'),
+      ingestWatermark: resolve(state, 'ingest-watermark'),
+      ports: resolve(state, 'ports.json'),
+      portsLock: resolve(state, 'ports.lock'),
+      proxyState: resolve(state, 'proxy.json'),
+      breaker: resolve(state, 'breaker.json'),
+      reworkHistory: resolve(state, 'rework-history.json'),
+    };
+  };
 
   it('uses the repository-local state root by default', () => {
     const repoRoot = '/tmp/some-repo';
     expect(getFactoryPaths(repoRoot)).toEqual(expectedPaths(resolve(repoRoot, '.factory')));
   });
 
-  it('keeps standalone queue, event, plan, and report artifacts beneath the checkout-local .factory directory', async () => {
+  it('keeps standalone queue, event, plan, and report artifacts beneath the checkout-local .factory/state directory', async () => {
     const repoRoot = await mkdtemp(join(tmpdir(), 'factory-standalone-state-'));
     const paths = getFactoryPaths(repoRoot);
-    const stateRoot = resolve(repoRoot, '.factory');
+    const root = resolve(repoRoot, '.factory');
+    const stateRoot = resolve(root, 'state');
     const artifacts = {
       queue: paths.queue,
       events: paths.events,
@@ -110,6 +115,7 @@ describe('getFactoryPaths', () => {
       await expect(readFile(artifacts.events, 'utf8')).resolves.toBe('events artifact\n');
       await expect(readFile(artifacts.plan, 'utf8')).resolves.toBe('plan artifact\n');
       await expect(readFile(artifacts.report, 'utf8')).resolves.toBe('report artifact\n');
+      expect(paths.root).toBe(root);
       expect(paths.state).toBe(stateRoot);
       expect(Object.values(artifacts).every((path) => path.startsWith(`${stateRoot}/`))).toBe(true);
     } finally {
@@ -123,7 +129,38 @@ describe('getFactoryPaths', () => {
     const paths = getFactoryPaths(repoRoot, stateRoot);
 
     expect(paths).toEqual(expectedPaths(resolve(stateRoot)));
+    expect(paths.root).toBe(resolve(stateRoot));
+    expect(paths.state).toBe(resolve(resolve(stateRoot), 'state'));
     expect(Object.values(paths).every((path) => !path.startsWith(resolve(repoRoot, '.factory')))).toBe(true);
+  });
+
+  it('resolves every runtime path under state/ while config stays at root', () => {
+    const repoRoot = '/tmp/some-repo';
+    const paths = getFactoryPaths(repoRoot);
+    const runtimeKeys = [
+      'ports',
+      'portsLock',
+      'proxyState',
+      'breaker',
+      'reworkHistory',
+      'mergeLock',
+      'gitLock',
+      'runLock',
+      'queue',
+      'queueProposed',
+      'events',
+      'logs',
+      'plans',
+      'reports',
+      'costs',
+      'kpiHistory',
+    ] as const;
+
+    for (const key of runtimeKeys) {
+      expect(paths[key].startsWith(paths.state)).toBe(true);
+    }
+    expect(paths.config.startsWith(paths.root)).toBe(true);
+    expect(paths.config.startsWith(paths.state)).toBe(false);
   });
 });
 
