@@ -110,7 +110,7 @@ mv .factory/queue.proposed .factory/queue
 factory ship 42              # PLAN → BUILD → CHECK → SHIP one issue (use an issue number from your repo)
 ```
 
-`factory ship` ends at a green, ready-for-review PR that closes the issue (it prints `✅ Issue #N → PR #M ready for review`); merging stays with you — review the PR and merge it, or run `factory land <N>` to squash-merge and clean up the worktree. To process the whole triaged queue in parallel lanes instead, run `factory run` (after accepting a triage proposal with the `mv` above).
+`factory ship` ends at a green, ready-for-review PR that closes the issue (it prints `✅ Issue #N → PR #M ready for review`); merging stays with you — review the PR and merge it, or run `factory land <N>` to squash-merge and clean up the worktree. To process the whole triaged queue in parallel lanes instead, run `factory run` (after accepting a triage proposal with the `mv` above). `FACTORY_MERGE` / `FACTORY_MERGE_ADMIN` apply to `factory run` and `factory land` only — `factory ship` warns and ignores them.
 
 ## CLI Commands
 
