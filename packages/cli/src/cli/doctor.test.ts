@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   analyzeEventLog,
+  type ClaudeAuthProbeResult,
   type DoctorEnvProbes,
   doctorFailed,
   eventLogCheck,
@@ -13,6 +14,7 @@ import {
   leaseChecks,
   type LeaseHealthRow,
   runDoctorChecks,
+  sandboxClaudeAuthChecks,
   unmergedGreenPrChecks,
 } from './doctor.js';
 
@@ -441,6 +443,77 @@ describe('unmergedGreenPrChecks', () => {
     expect(checks[0].ok).toBe(false);
     expect(checks[0].optional).toBe(true);
     expect(checks[0].detail).toContain('scan failed — boom');
+    expect(doctorFailed(checks)).toBe(false);
+  });
+});
+
+describe('sandboxClaudeAuthChecks', () => {
+  function result(overrides: Partial<ClaudeAuthProbeResult> = {}): ClaudeAuthProbeResult {
+    return {
+      host: 'ok',
+      sandboxed: 'ok',
+      hostDetail: 'claude -p succeeded on the host',
+      sandboxDetail: 'claude -p succeeded under sandbox-exec',
+      ...overrides,
+    };
+  }
+
+  it('reports two distinct check names, both ok, when host and sandboxed both succeed', () => {
+    const checks = sandboxClaudeAuthChecks(result());
+    expect(checks).toHaveLength(2);
+    expect(new Set(checks.map((c) => c.name)).size).toBe(2);
+    expect(checks.every((c) => c.ok)).toBe(true);
+    expect(doctorFailed(checks)).toBe(false);
+  });
+
+  it('fails closed (hard failure) when host is ok but sandboxed failed, and the fix mentions FACTORY_SANDBOX=0', () => {
+    const checks = sandboxClaudeAuthChecks(
+      result({ sandboxed: 'failed', sandboxDetail: 'claude -p failed under sandbox-exec (local_auth)' }),
+    );
+    const sandboxCheck = checks.find((c) => c.name === 'claude auth (sandboxed)')!;
+    expect(sandboxCheck.ok).toBe(false);
+    expect(sandboxCheck.optional).toBeFalsy();
+    expect(sandboxCheck.fix).toContain('FACTORY_SANDBOX=0');
+    expect(doctorFailed(checks)).toBe(true);
+  });
+
+  it('reports an optional passing check when sandboxed is skipped', () => {
+    const checks = sandboxClaudeAuthChecks(
+      result({ sandboxed: 'skipped', sandboxDetail: 'skipped — sandbox disabled' }),
+    );
+    const sandboxCheck = checks.find((c) => c.name === 'claude auth (sandboxed)')!;
+    expect(sandboxCheck.ok).toBe(true);
+    expect(sandboxCheck.optional).toBe(true);
+    expect(doctorFailed(checks)).toBe(false);
+  });
+
+  it('does not blame the sandbox when the host itself is failing — sandboxed check is optional', () => {
+    const checks = sandboxClaudeAuthChecks(
+      result({
+        host: 'failed',
+        hostDetail: 'claude -p failed on the host',
+        sandboxed: 'failed',
+        sandboxDetail: 'claude -p failed under sandbox-exec (local_auth)',
+      }),
+    );
+    const hostCheck = checks.find((c) => c.name === 'claude auth (host)')!;
+    const sandboxCheck = checks.find((c) => c.name === 'claude auth (sandboxed)')!;
+    expect(hostCheck.ok).toBe(false);
+    expect(hostCheck.optional).toBeFalsy();
+    expect(sandboxCheck.ok).toBe(false);
+    expect(sandboxCheck.optional).toBe(true);
+  });
+
+  it('reports both checks as optional passes when both are skipped, and never fails doctor', () => {
+    const checks = sandboxClaudeAuthChecks(
+      result({
+        host: 'skipped',
+        hostDetail: 'skipped — claude CLI not on PATH',
+        sandboxed: 'skipped',
+        sandboxDetail: 'skipped — host claude auth was not verified',
+      }),
+    );
+    expect(checks.every((c) => c.ok && c.optional)).toBe(true);
     expect(doctorFailed(checks)).toBe(false);
   });
 });

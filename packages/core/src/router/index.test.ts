@@ -746,6 +746,7 @@ describe('ModelRouter sandbox threading', () => {
     runtime: 'sandbox-exec',
     worktree: '/tmp/factory-worktree',
     writablePaths: ['/tmp/factory-worktree'],
+    writableFilePrefixes: [],
     allowHosts: [],
     cpuMs: 300_000,
     memMb: 4096,

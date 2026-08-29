@@ -440,6 +440,8 @@ const INTERNAL_API_KEYS = [
   'createBoardQueueDispatcher',
   // ProjectV2 queue-intent scheduler (#867)
   'createBoardQueueScheduler',
+  // Sandbox command wrapping — used by the CLI's doctor probe (#1008)
+  'wrapCommandInSandbox',
 ];
 
 const TESTING_API_KEYS = [

@@ -108,6 +108,25 @@ describe('resolveSandboxPolicy', () => {
     });
     expect(policy?.runtime).toBe('firejail');
   });
+
+  it('includes ~/.claude.json in writableFilePrefixes', () => {
+    const policy = resolveSandboxPolicy(defaultSandboxCfg, { ...baseOpts, env: {} });
+    expect(policy?.writableFilePrefixes).toContain('/home/factory/.claude.json');
+  });
+
+  it('includes ~/Library/Keychains in writablePaths on darwin', () => {
+    const policy = resolveSandboxPolicy(defaultSandboxCfg, { ...baseOpts, platform: 'darwin', env: {} });
+    expect(policy?.writablePaths).toContain('/home/factory/Library/Keychains');
+  });
+
+  it('does not include ~/Library/Keychains on linux, and never grants a blanket home write', () => {
+    const linuxPolicy = resolveSandboxPolicy(defaultSandboxCfg, { ...baseOpts, platform: 'linux', env: {} });
+    expect(linuxPolicy?.writablePaths).not.toContain('/home/factory/Library/Keychains');
+    expect(linuxPolicy?.writablePaths).not.toContain('/home/factory');
+
+    const darwinPolicy = resolveSandboxPolicy(defaultSandboxCfg, { ...baseOpts, platform: 'darwin', env: {} });
+    expect(darwinPolicy?.writablePaths).not.toContain('/home/factory');
+  });
 });
 
 describe('buildDarwinProfile', () => {
@@ -115,6 +134,7 @@ describe('buildDarwinProfile', () => {
     runtime: 'sandbox-exec' as const,
     worktree: '/tmp/worktree',
     writablePaths: ['/tmp/worktree', '/tmp/repo/.git'],
+    writableFilePrefixes: [] as string[],
     allowHosts: [] as string[],
     cpuMs: 300_000,
     memMb: 4096,
@@ -141,12 +161,33 @@ describe('buildDarwinProfile', () => {
     const withQuote = { ...policy, writablePaths: ['/tmp/we"ird\\path'] };
     expect(buildDarwinProfile(withQuote)).toContain('"/tmp/we\\"ird\\\\path"');
   });
+
+  it('renders an anchored regex rule per writableFilePrefixes entry', () => {
+    const withPrefix = { ...policy, writableFilePrefixes: ['/home/factory/.claude.json'] };
+    const profile = buildDarwinProfile(withPrefix);
+    expect(profile).toContain('(allow file-write* (regex #"^/home/factory/\\\\.claude\\\\.json"))');
+    expect(profile).toContain('(deny file-write*)');
+    expect(profile).not.toContain('(subpath "/home/factory")');
+  });
+
+  it('escapes regex metacharacters and quotes in a writableFilePrefixes entry', () => {
+    const withPrefix = { ...policy, writableFilePrefixes: ['/tmp/we"ird+path'] };
+    const profile = buildDarwinProfile(withPrefix);
+    expect(profile).toContain('(allow file-write* (regex #"^/tmp/we\\"ird\\\\+path"))');
+  });
+
+  it('emits no regex rule and stays a valid profile when writableFilePrefixes is empty', () => {
+    const profile = buildDarwinProfile(policy);
+    expect(profile).not.toContain('(regex ');
+    expect(profile.startsWith('(version 1)')).toBe(true);
+  });
 });
 
 describe('wrapCommandInSandbox', () => {
   const basePolicy = {
     worktree: '/tmp/worktree',
     writablePaths: ['/tmp/worktree'],
+    writableFilePrefixes: [] as string[],
     allowHosts: [] as string[],
     cpuMs: 300_000,
     memMb: 4096,
@@ -190,6 +231,16 @@ describe('wrapCommandInSandbox', () => {
     const wrapped = wrapCommandInSandbox(cmd, policy);
     expect(wrapped).toContain(cmd);
   });
+
+  it('passes writableFilePrefixes as --read-write flags too (firejail)', () => {
+    const policy = {
+      ...basePolicy,
+      runtime: 'firejail' as const,
+      writableFilePrefixes: ['/home/factory/.claude.json'],
+    };
+    const wrapped = wrapCommandInSandbox('echo hi', policy);
+    expect(wrapped).toContain("--read-write='/home/factory/.claude.json'");
+  });
 });
 
 describe('sandboxEventFromError', () => {
@@ -232,5 +283,20 @@ describe('sandboxEventFromError', () => {
 
   it('returns undefined for a non-object error', () => {
     expect(sandboxEventFromError('just a string')).toBeUndefined();
+  });
+
+  it('classifies a HarnessError with reason local_auth as sandbox_auth_denied', () => {
+    const err = new HarnessError('boom', 'local_auth', { stderr: '' });
+    expect(sandboxEventFromError(err)).toMatchObject({ type: 'sandbox_auth_denied' });
+  });
+
+  it('classifies auth wording on stdout (not stderr) as sandbox_auth_denied', () => {
+    const err = new HarnessError('boom', 'error', { stderr: '', stdout: 'Please run /login to continue' });
+    expect(sandboxEventFromError(err)).toMatchObject({ type: 'sandbox_auth_denied' });
+  });
+
+  it('classifies SIGXCPU as resource_limit even when auth wording is also present', () => {
+    const err = new HarnessError('boom', 'local_auth', { signal: 'SIGXCPU', stdout: 'Please run /login to continue' });
+    expect(sandboxEventFromError(err)).toMatchObject({ type: 'resource_limit' });
   });
 });

@@ -22,12 +22,17 @@ export interface SandboxPolicy {
   worktree: string;
   /** Absolute paths the agent may write (worktree, repo .git, tmp, agent state dirs). */
   writablePaths: string[];
+  /** Absolute path PREFIXES the agent may write. Covers a home-root state file plus the
+   *  sibling temp/backup files an atomic write creates — e.g. ~/.claude.json,
+   *  ~/.claude.json.backup, ~/.claude.json.tmp.<pid>.<hash> (#1008). A subpath rule does
+   *  NOT cover those siblings, which is why this is a separate field. */
+  writableFilePrefixes: string[];
   allowHosts: string[];
   cpuMs: number;
   memMb: number;
 }
 
-export type SandboxEventType = 'sandbox_violation' | 'resource_limit';
+export type SandboxEventType = 'sandbox_violation' | 'resource_limit' | 'sandbox_auth_denied';
 
 /** Which sandbox runtime (if any) is usable on this host. */
 export function detectSandboxRuntime(
@@ -91,14 +96,24 @@ export function resolveSandboxPolicy(
     resolve(home, '.config'),
     resolve(home, '.local'),
     ...(platform === 'darwin'
-      ? ['/tmp', '/private/tmp', '/private/var/folders', resolve(home, 'Library/Caches'), resolve(home, 'Library/Logs')]
+      ? [
+          '/tmp',
+          '/private/tmp',
+          '/private/var/folders',
+          resolve(home, 'Library/Caches'),
+          resolve(home, 'Library/Logs'),
+          resolve(home, 'Library/Keychains'),
+        ]
       : []),
   ]);
+
+  const writableFilePrefixes = dedupeAbsolutePaths([resolve(home, '.claude.json')]);
 
   return {
     runtime,
     worktree: opts.worktree,
     writablePaths,
+    writableFilePrefixes,
     allowHosts: cfg.network.allow,
     cpuMs: cfg.resources.cpuMs,
     memMb: cfg.resources.memMb,
@@ -109,15 +124,27 @@ function sbplPath(path: string): string {
   return `"${path.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
+/** Anchored SBPL regex literal for a writable path prefix. Regex-escape first, then
+ *  escape for the SBPL string literal (backslashes are doubled so they survive to the
+ *  regex engine). */
+function sbplRegexPrefix(path: string): string {
+  const escaped = path.replace(/[\\^$.|?*+()[\]{}]/g, '\\$&');
+  return `#"^${escaped.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
 /** Renders the macOS Seatbelt (SBPL) profile for a resolved policy. */
 export function buildDarwinProfile(policy: SandboxPolicy): string {
   const writeRules = policy.writablePaths.map((p) => `(allow file-write* (subpath ${sbplPath(p)}))`).join('\n');
+  const prefixRules = policy.writableFilePrefixes
+    .map((p) => `(allow file-write* (regex ${sbplRegexPrefix(p)}))`)
+    .join('\n');
   const networkDeny = policy.allowHosts.length === 0 ? '\n(deny network-outbound)' : '';
 
   return `(version 1)
 (allow default)
 (deny file-write*)
 ${writeRules}
+${prefixRules}
 (allow file-write* (literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr") (subpath "/dev/fd"))${networkDeny}`;
 }
 
@@ -135,32 +162,48 @@ export function wrapCommandInSandbox(cmd: string, policy: SandboxPolicy): string
     return `sandbox-exec -p ${shellEscape(buildDarwinProfile(policy))} ${inner}`;
   }
 
-  const writeFlags = policy.writablePaths.map((p) => `--read-write=${shellEscape(p)}`).join(' ');
+  const writeFlags = [...policy.writablePaths, ...policy.writableFilePrefixes]
+    .map((p) => `--read-write=${shellEscape(p)}`)
+    .join(' ');
   const netFlag = policy.allowHosts.length === 0 ? ' --net=none' : '';
   return `firejail --quiet --noprofile --private-tmp --read-only=/ ${writeFlags}${netFlag} -- ${inner}`;
 }
 
 const RESOURCE_LIMIT_STDERR = /cpu time limit exceeded/i;
 const SANDBOX_VIOLATION_STDERR = /operation not permitted|read-only file system|sandbox.*deny|deny\(1\) file-write/i;
+const LOCAL_AUTH_TEXT = /failed to authenticate|oauth session expired|could not be refreshed|please (run )?\/?login/i;
 
 /** Classifies a harness failure as a sandbox-caused event, or undefined when
- *  it isn't one. Reads stderr/signal off both plain exec errors and
- *  HarnessError.details. */
+ *  it isn't one. Reads stderr/stdout/signal off both plain exec errors and
+ *  HarnessError.details. This is only ever called by the router when a
+ *  sandbox is active (packages/core/src/router/index.ts, the `if (sandbox)`
+ *  guard), so an auth failure it sees is by construction a failure under
+ *  containment, not a bare provider auth problem. */
 export function sandboxEventFromError(err: unknown): { type: SandboxEventType; detail: string } | undefined {
   let stderr = '';
+  let stdout = '';
   let signal: string | undefined;
+  let reason: string | undefined;
 
   if (err instanceof HarnessError) {
     stderr = err.details.stderr ?? '';
+    stdout = err.details.stdout ?? '';
     signal = err.details.signal;
+    reason = err.reason;
   } else if (err && typeof err === 'object') {
-    const e = err as { stderr?: unknown; signal?: unknown };
+    const e = err as { stderr?: unknown; stdout?: unknown; signal?: unknown };
     stderr = typeof e.stderr === 'string' ? e.stderr : '';
+    stdout = typeof e.stdout === 'string' ? e.stdout : '';
     signal = typeof e.signal === 'string' ? e.signal : undefined;
   }
 
+  const text = [stderr, stdout].filter(Boolean).join('\n');
+
   if (signal === 'SIGXCPU' || RESOURCE_LIMIT_STDERR.test(stderr)) {
     return { type: 'resource_limit', detail: stderr || `signal ${signal}` };
+  }
+  if (reason === 'local_auth' || LOCAL_AUTH_TEXT.test(text)) {
+    return { type: 'sandbox_auth_denied', detail: text || 'claude reported local_auth under the sandbox' };
   }
   if (SANDBOX_VIOLATION_STDERR.test(stderr)) {
     return { type: 'sandbox_violation', detail: stderr };

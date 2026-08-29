@@ -593,6 +593,7 @@ describe('checkPhase sandbox', () => {
       runtime: 'firejail',
       worktree,
       writablePaths: [worktree],
+      writableFilePrefixes: [],
       allowHosts: [],
       cpuMs: 300_000,
       memMb: 4096,

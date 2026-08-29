@@ -117,6 +117,7 @@ export type EventKind =
   | 'sandbox-degraded'
   | 'sandbox-disabled'
   | 'sandbox-unavailable'
+  | 'sandbox_auth_denied'
   | 'sandbox_violation'
   | 'ship'
   | 'ship_denied'
@@ -272,6 +273,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'sandbox-degraded': { severity: 'warn', isPark: false, isTerminal: false },
   'sandbox-disabled': { severity: 'warn', isPark: false, isTerminal: false },
   'sandbox-unavailable': { severity: 'warn', isPark: false, isTerminal: false },
+  sandbox_auth_denied: { severity: 'warn', isPark: false, isTerminal: false },
   sandbox_violation: { severity: 'warn', isPark: false, isTerminal: false },
   ship: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
   ship_denied: { severity: 'error', isPark: false, isTerminal: true, laneStatus: 'failed' },
