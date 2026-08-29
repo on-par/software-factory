@@ -145,6 +145,7 @@ import type {
   QueueIssue,
   QueuePreflightDecision,
   QueueReleaseOutcome,
+  UnmergedGreenPr,
   WatchChecksOptions,
 } from '@on-par/factory-core/internal';
 import {
@@ -154,10 +155,12 @@ import {
   createFactorydServer,
   createGithubQueue,
   createLocalSmallDryRun,
+  createOctokitGreenPrClient,
   createOctokitQueueClient,
   DEFAULT_FACTORYD_PORT,
   defaultRegistryPath,
   ensureDir,
+  findUnmergedGreenPrs,
   formatGcReport,
   gitFetch,
   isAutoMergeBlocked,
@@ -193,9 +196,12 @@ import {
   formatDoctorChecks,
   formatReconcileReport,
   formatWorktreeReconcileReport,
+  type GreenPrScanResult,
   leaseChecks,
   type LeaseHealthRow,
   runDoctorChecks,
+  unmergedGreenPrChecks,
+  type UnmergedGreenPrRow,
 } from './doctor.js';
 import { formatOverview, missingClaudeCliMessage, missingTokenMessage, notInitializedMessage } from './first-run.js';
 import { cmdHostedSmoke } from './hosted.js';
@@ -3502,6 +3508,21 @@ function toLeaseRow(health: LeaseHealth): LeaseHealthRow {
   };
 }
 
+function toGreenPrRow(pr: UnmergedGreenPr): UnmergedGreenPrRow {
+  return { number: pr.number, branch: pr.branch, issue: pr.issue, ageHours: pr.ageHours };
+}
+
+async function scanGreenPrs(ghRepo: string | undefined, octokit: Octokit | undefined): Promise<GreenPrScanResult> {
+  if (!ghRepo || !octokit) return { status: 'skipped', detail: 'skipped — no GitHub repo or token' };
+  const [owner, repoName] = ghRepo.split('/');
+  try {
+    const prs = await findUnmergedGreenPrs({ client: createOctokitGreenPrClient(octokit), owner, repo: repoName });
+    return { status: 'ok', rows: prs.map(toGreenPrRow) };
+  } catch (err: any) {
+    return { status: 'failed', detail: err?.message ?? String(err) };
+  }
+}
+
 async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
   const checks = runDoctorChecks({
     commandAvailable: isCommandAvailable,
@@ -3536,6 +3557,15 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     const eventsContent = existsSync(paths.events) ? readFileSync(paths.events, 'utf-8') : null;
     checks.push(eventLogCheck(eventsContent === null ? null : analyzeEventLog(eventsContent)));
 
+    // Full run-lifecycle reap (#998): dead-run worktrees and their branches. Uses the same
+    // GitHub evidence and the same lock pairing as `factory worktree gc` (cmdWorktreeGc) —
+    // a merged or closed PR is what makes a worktree reapable.
+    const ghRepo = await getGitHubRepo().catch(() => undefined);
+    const octokit = ghRepo && hasGitHubToken() ? getOctokit() : undefined;
+
+    // Green-and-ready PRs with no merge (#1000). Report only — doctor never lands a PR.
+    checks.push(...unmergedGreenPrChecks(await scanGreenPrs(ghRepo, octokit)));
+
     if (opts.reconcile) {
       const factoryConfig = loadFactoryConfigForRepo(paths.config);
 
@@ -3552,11 +3582,6 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
         }
       }
 
-      // Full run-lifecycle reap (#998): dead-run worktrees and their branches. Uses the same
-      // GitHub evidence and the same lock pairing as `factory worktree gc` (cmdWorktreeGc) —
-      // a merged or closed PR is what makes a worktree reapable.
-      const ghRepo = await getGitHubRepo().catch(() => undefined);
-      const octokit = ghRepo && hasGitHubToken() ? getOctokit() : undefined;
       try {
         const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
         const report = await withGitLock(repoRoot, () =>

@@ -429,6 +429,10 @@ const INTERNAL_API_KEYS = [
   'findStaleClaims',
   'localClaimPid',
   'releaseStaleClaims',
+  // Green-and-ready PR reporting (#1000)
+  'createOctokitGreenPrClient',
+  'findUnmergedGreenPrs',
+  'owningIssueForPr',
   // Read-only GitHub ProjectV2 queue-intent polling (#847)
   'createProjectBoardPoller',
   'DEFAULT_PROJECT_BOARD_POLL_MS',
