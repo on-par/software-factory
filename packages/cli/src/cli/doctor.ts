@@ -327,3 +327,47 @@ export function formatClaimReconcileReport(released: ReleasedClaim[]): string {
     )
     .join('\n');
 }
+
+/** One green-and-ready PR nobody merged. Structurally the subset of core's `UnmergedGreenPr`
+ *  the report renders — kept local so `doctor.ts` stays dependency-free and unit-testable. */
+export interface UnmergedGreenPrRow {
+  number: number;
+  branch: string;
+  issue: number | null;
+  ageHours: number;
+}
+
+/** Outcome of the green-PR scan: it ran, it was skipped (no repo/token), or it failed. */
+export type GreenPrScanResult =
+  | { status: 'ok'; rows: UnmergedGreenPrRow[] }
+  | { status: 'skipped'; detail: string }
+  | { status: 'failed'; detail: string };
+
+const GREEN_PR_CHECK = 'green PRs awaiting merge';
+
+export function unmergedGreenPrChecks(result: GreenPrScanResult): DoctorCheck[] {
+  if (result.status === 'skipped') {
+    return [{ name: GREEN_PR_CHECK, ok: true, optional: true, detail: result.detail }];
+  }
+  if (result.status === 'failed') {
+    return [
+      {
+        name: GREEN_PR_CHECK,
+        ok: false,
+        optional: true,
+        detail: `scan failed — ${result.detail}`,
+        fix: 'check `gh auth status` and network access, then re-run `factory doctor`',
+      },
+    ];
+  }
+  if (result.rows.length === 0) {
+    return [{ name: GREEN_PR_CHECK, ok: true, optional: true, detail: 'no green-and-ready PRs awaiting merge' }];
+  }
+  return result.rows.map((row) => ({
+    name: `green PR #${row.number}`,
+    ok: false,
+    optional: true,
+    detail: `${row.issue === null ? 'owning issue unknown' : `issue #${row.issue}`} — green and ready on ${row.branch}, open ${row.ageHours}h, not merged`,
+    fix: `review and merge #${row.number} (or close it) — the factory never auto-merges an orphaned PR`,
+  }));
+}

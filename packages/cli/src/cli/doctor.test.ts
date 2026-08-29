@@ -9,9 +9,11 @@ import {
   formatClaimReconcileReport,
   formatReconcileReport,
   formatWorktreeReconcileReport,
+  type GreenPrScanResult,
   leaseChecks,
   type LeaseHealthRow,
   runDoctorChecks,
+  unmergedGreenPrChecks,
 } from './doctor.js';
 
 function probes(overrides: Partial<DoctorEnvProbes> = {}): DoctorEnvProbes {
@@ -384,5 +386,61 @@ describe('formatClaimReconcileReport', () => {
       'reconcile: released issue #42 back to factory:queued (dead pid 777)\n' +
         'reconcile: failed to release issue #43 (dead pid 778) — boom',
     );
+  });
+});
+
+describe('unmergedGreenPrChecks', () => {
+  it('renders a single passing optional check when there are no rows', () => {
+    const checks = unmergedGreenPrChecks({ status: 'ok', rows: [] });
+    expect(checks).toEqual([
+      {
+        name: 'green PRs awaiting merge',
+        ok: true,
+        optional: true,
+        detail: 'no green-and-ready PRs awaiting merge',
+      },
+    ]);
+    expect(doctorFailed(checks)).toBe(false);
+  });
+
+  it('renders a row with an issue as a non-ok optional check', () => {
+    const result: GreenPrScanResult = {
+      status: 'ok',
+      rows: [{ number: 957, branch: 'ship-it/939-x', issue: 939, ageHours: 9 }],
+    };
+    const checks = unmergedGreenPrChecks(result);
+    expect(checks).toHaveLength(1);
+    expect(checks[0].name).toBe('green PR #957');
+    expect(checks[0].ok).toBe(false);
+    expect(checks[0].optional).toBe(true);
+    expect(checks[0].detail).toContain('issue #939');
+    expect(checks[0].detail).toContain('ship-it/939-x');
+    expect(checks[0].detail).toContain('open 9h');
+    expect(doctorFailed(checks)).toBe(false);
+  });
+
+  it('renders "owning issue unknown" when a row has no issue', () => {
+    const result: GreenPrScanResult = {
+      status: 'ok',
+      rows: [{ number: 1, branch: 'some-branch', issue: null, ageHours: 1 }],
+    };
+    const checks = unmergedGreenPrChecks(result);
+    expect(checks[0].detail).toContain('owning issue unknown');
+  });
+
+  it('renders a passing optional check when skipped', () => {
+    const checks = unmergedGreenPrChecks({ status: 'skipped', detail: 'skipped — no GitHub repo or token' });
+    expect(checks).toEqual([
+      { name: 'green PRs awaiting merge', ok: true, optional: true, detail: 'skipped — no GitHub repo or token' },
+    ]);
+  });
+
+  it('renders a failing optional check when the scan failed, and never fails doctor', () => {
+    const checks = unmergedGreenPrChecks({ status: 'failed', detail: 'boom' });
+    expect(checks).toHaveLength(1);
+    expect(checks[0].ok).toBe(false);
+    expect(checks[0].optional).toBe(true);
+    expect(checks[0].detail).toContain('scan failed — boom');
+    expect(doctorFailed(checks)).toBe(false);
   });
 });

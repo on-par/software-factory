@@ -262,6 +262,15 @@ export type { QueueEntry } from './queue/index.js';
 export type { ReleaseStaleClaimsOptions, StaleClaim, StaleClaimRelease } from './queue/stale-claims.js';
 export { findStaleClaims, localClaimPid, releaseStaleClaims } from './queue/stale-claims.js';
 
+// Green-and-ready PR reporting (#1000)
+export type {
+  FindUnmergedGreenPrsOptions,
+  GreenPrGitHubClient,
+  OpenPullRequestSummary,
+  UnmergedGreenPr,
+} from './utils/green-prs.js';
+export { createOctokitGreenPrClient, findUnmergedGreenPrs, owningIssueForPr } from './utils/green-prs.js';
+
 // Read-only GitHub ProjectV2 queue-intent polling (#847)
 export type {
   ProjectBoardConfig,

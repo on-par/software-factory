@@ -50,6 +50,7 @@ const h = vi.hoisted(() => {
     } as any,
     gcReport: { removed: [], kept: 0, dryRun: false } as any,
     staleClaims: [] as any[],
+    greenPrs: [] as any[],
     runTuiCalls: [] as Array<{
       eventsFile: string;
       repo?: string;
@@ -220,6 +221,8 @@ vi.mock('@on-par/factory-core/internal', async (importOriginal) => {
     sweepWorktrees: vi.fn(async () => h.gcReport),
     // Stale claim reap.
     releaseStaleClaims: vi.fn(async () => h.staleClaims),
+    // Green-and-ready PR report.
+    findUnmergedGreenPrs: vi.fn(async () => h.greenPrs),
     formatGcReport: vi.fn(
       (report: any) =>
         `GC_REPORT:${report.dryRun ? 'dry' : 'real'}:removed=${report.removed.length}:kept=${report.kept}`,
@@ -373,6 +376,7 @@ beforeEach(() => {
   };
   h.gcReport = { removed: [], kept: 0, dryRun: false };
   h.staleClaims = [];
+  h.greenPrs = [];
   h.runTuiCalls = [];
   h.setupWorktreeImpl = async () => {};
   h.claudeAvailable = undefined;
@@ -2878,6 +2882,25 @@ Please add a widget that does the thing.
       await runMain('doctor', '--reconcile');
       expect(logged()).toContain('reconcile: skipping stale claims — no GitHub repo or token');
       expect(releaseStaleClaims).not.toHaveBeenCalled();
+    });
+
+    it('reports a green-and-ready PR with its owning issue', async () => {
+      h.claudeAvailable = true;
+      h.greenPrs = [{ number: 957, branch: 'ship-it/939-x', title: 't', issue: 939, ageHours: 9 }];
+
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('green PR #957');
+      expect(logged()).toContain('issue #939');
+    });
+
+    it('reports no green-and-ready PRs when there are none', async () => {
+      h.claudeAvailable = true;
+      h.greenPrs = [];
+
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('no green-and-ready PRs awaiting merge');
     });
   });
 

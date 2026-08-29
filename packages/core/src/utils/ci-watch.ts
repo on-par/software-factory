@@ -34,6 +34,16 @@ export interface WatchChecksOptions {
  *  this set blocks the merge — see ADR-0014
  *  (docs/adr/0014-ci-merge-gate-fails-closed-on-non-allow-listed-check-conclusions.md). */
 const PASSING_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
+
+/** True when a completed check run's conclusion counts as passing. The three conclusions GitHub
+ *  itself accepts for a required status check; `skipped` is the normal result of a path-filtered
+ *  job. Anything else blocks the merge — see ADR-0014. Exported so the `factory doctor`
+ *  green-PR report (utils/green-prs.ts) decides "green" with the same fail-closed allow-list the
+ *  merge gate uses, instead of re-declaring it. */
+export function isPassingConclusion(conclusion: string | null | undefined): boolean {
+  return PASSING_CONCLUSIONS.has(conclusion ?? '');
+}
+
 const DEFAULT_PER_PAGE = 100;
 const DEFAULT_MAX_PAGES = 10;
 const DEFAULT_MAX_POLL_ERRORS = 3;
@@ -98,7 +108,7 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
         // Fail closed: only an explicitly passing conclusion counts as green. `cancelled`,
         // `timed_out`, `action_required`, `stale`, a null conclusion on a completed run, and any
         // conclusion GitHub adds later all block the merge (ADR-0014).
-        const allPassed = runs.every((r) => PASSING_CONCLUSIONS.has(r.conclusion ?? ''));
+        const allPassed = runs.every((r) => isPassingConclusion(r.conclusion));
         // A red verdict needs no settle: a check run that registers later cannot turn a
         // completed check green.
         if (!allPassed) return 'failure';
