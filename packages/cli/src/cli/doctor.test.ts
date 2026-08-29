@@ -6,6 +6,7 @@ import {
   doctorFailed,
   eventLogCheck,
   formatDoctorChecks,
+  formatClaimReconcileReport,
   formatReconcileReport,
   formatWorktreeReconcileReport,
   leaseChecks,
@@ -355,6 +356,33 @@ describe('formatWorktreeReconcileReport', () => {
     expect(report).toBe(
       'reconcile: removed worktree /wt/a (branch ship-it/5-x, reason merged), deleted branch ship-it/5-x\n' +
         'reconcile: removed worktree /wt/b (branch detached, reason ttl-expired)',
+    );
+  });
+});
+
+describe('formatClaimReconcileReport', () => {
+  it('reports no stale claims when empty', () => {
+    expect(formatClaimReconcileReport([])).toBe('reconcile: no stale claims');
+  });
+
+  it('reports a released claim', () => {
+    const report = formatClaimReconcileReport([{ issue: 42, pid: 777, released: true }]);
+    expect(report).toBe('reconcile: released issue #42 back to factory:queued (dead pid 777)');
+  });
+
+  it('reports a failed release with its detail', () => {
+    const report = formatClaimReconcileReport([{ issue: 42, pid: 777, released: false, detail: 'boom' }]);
+    expect(report).toBe('reconcile: failed to release issue #42 (dead pid 777) — boom');
+  });
+
+  it('joins multiple entries with a single newline', () => {
+    const report = formatClaimReconcileReport([
+      { issue: 42, pid: 777, released: true },
+      { issue: 43, pid: 778, released: false, detail: 'boom' },
+    ]);
+    expect(report).toBe(
+      'reconcile: released issue #42 back to factory:queued (dead pid 777)\n' +
+        'reconcile: failed to release issue #43 (dead pid 778) — boom',
     );
   });
 });

@@ -305,3 +305,25 @@ export function formatWorktreeReconcileReport(removed: ReconciledWorktree[]): st
     })
     .join('\n');
 }
+
+/** One claim the reconcile pass put back in the queue. Structurally the subset of core's
+ *  `StaleClaimRelease` that the report renders — kept local so `doctor.ts` stays
+ *  dependency-free and unit-testable. */
+export interface ReleasedClaim {
+  issue: number;
+  pid: number;
+  released: boolean;
+  detail?: string;
+}
+
+export function formatClaimReconcileReport(released: ReleasedClaim[]): string {
+  if (released.length === 0) return 'reconcile: no stale claims';
+
+  return released
+    .map((c) =>
+      c.released
+        ? `reconcile: released issue #${c.issue} back to factory:queued (dead pid ${c.pid})`
+        : `reconcile: failed to release issue #${c.issue} (dead pid ${c.pid}) — ${c.detail ?? 'unknown error'}`,
+    )
+    .join('\n');
+}

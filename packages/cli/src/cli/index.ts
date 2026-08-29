@@ -165,6 +165,7 @@ import {
   logEvent,
   planQueueMigration,
   readCosts,
+  releaseStaleClaims,
   resolveBranchPrefix,
   resolveEffectiveConfig,
   resolveExperimental,
@@ -188,6 +189,7 @@ import {
   analyzeEventLog,
   doctorFailed,
   eventLogCheck,
+  formatClaimReconcileReport,
   formatDoctorChecks,
   formatReconcileReport,
   formatWorktreeReconcileReport,
@@ -3553,10 +3555,10 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
       // Full run-lifecycle reap (#998): dead-run worktrees and their branches. Uses the same
       // GitHub evidence and the same lock pairing as `factory worktree gc` (cmdWorktreeGc) —
       // a merged or closed PR is what makes a worktree reapable.
+      const ghRepo = await getGitHubRepo().catch(() => undefined);
+      const octokit = ghRepo && hasGitHubToken() ? getOctokit() : undefined;
       try {
         const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
-        const ghRepo = await getGitHubRepo().catch(() => undefined);
-        const octokit = ghRepo && hasGitHubToken() ? getOctokit() : undefined;
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
             sweepWorktrees(
@@ -3568,6 +3570,24 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
         console.log(formatWorktreeReconcileReport(report.removed));
       } catch (err: any) {
         console.log(`reconcile: worktree sweep failed — ${err?.message ?? String(err)}`);
+      }
+
+      // Stale claim reap (#999): factory:in-progress claims naming a dead local pid go back to
+      // factory:queued so the next run can claim them with no manual label surgery.
+      try {
+        if (ghRepo && octokit) {
+          const [owner, repoName] = ghRepo.split('/');
+          const released = await releaseStaleClaims({
+            client: createOctokitQueueClient(octokit),
+            owner,
+            repo: repoName,
+          });
+          console.log(formatClaimReconcileReport(released));
+        } else {
+          console.log('reconcile: skipping stale claims — no GitHub repo or token');
+        }
+      } catch (err: any) {
+        console.log(`reconcile: stale claim release failed — ${err?.message ?? String(err)}`);
       }
     }
   }
@@ -3627,7 +3647,7 @@ export async function main() {
   program
     .command('doctor')
     .description('Preflight-check your environment (claude, gh, token, git, npm, sandbox)')
-    .option('--reconcile', 'Remove stale port leases and report freed ports')
+    .option('--reconcile', 'Reap stale port leases, dead-run worktrees, and stale issue claims')
     .action((opts: { reconcile?: boolean }) => cmdDoctor(opts));
 
   program

@@ -425,6 +425,10 @@ const INTERNAL_API_KEYS = [
   'QUEUE_ORDER_LABEL_PREFIX',
   'queueOrderLabel',
   'queueLabelSpecs',
+  // Stale-claim reaping (#999)
+  'findStaleClaims',
+  'localClaimPid',
+  'releaseStaleClaims',
   // Read-only GitHub ProjectV2 queue-intent polling (#847)
   'createProjectBoardPoller',
   'DEFAULT_PROJECT_BOARD_POLL_MS',

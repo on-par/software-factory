@@ -258,6 +258,10 @@ export {
 } from './queue/github-queue.js';
 export type { QueueEntry } from './queue/index.js';
 
+// Stale-claim reaping (#999)
+export type { ReleaseStaleClaimsOptions, StaleClaim, StaleClaimRelease } from './queue/stale-claims.js';
+export { findStaleClaims, localClaimPid, releaseStaleClaims } from './queue/stale-claims.js';
+
 // Read-only GitHub ProjectV2 queue-intent polling (#847)
 export type {
   ProjectBoardConfig,
