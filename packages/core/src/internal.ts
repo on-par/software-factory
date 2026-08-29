@@ -170,15 +170,20 @@ export { readRunLockHolder, RunLockHeldError, withRunLock } from './utils/run-lo
 export type {
   GcCandidate,
   GcHeadPrState,
+  GcIssueState,
   GcReason,
   GcReport,
+  ReapLaneWorktreeResult,
+  ReapOutcome,
   SweepDeps,
   WorktreeListEntry,
 } from './utils/worktree-gc.js';
 export {
+  factoryWorktreeIssue,
   findCredentialFiles,
   formatGcReport,
   parseWorktreeList,
+  reapLaneWorktree,
   scrubFile,
   sweepWorktrees,
   zeroFill,
