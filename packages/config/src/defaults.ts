@@ -70,6 +70,7 @@ export interface FactoryDefaults {
   plan_approval: { enabled: boolean; comment?: string };
   sandbox: {
     enabled: boolean;
+    runtime: 'auto' | 'sandbox-exec' | 'firejail' | 'docker-sandbox' | 'none';
     network: { allow: string[] };
     resources: { cpuMs: number; memMb: number };
     comment?: string;
@@ -595,10 +596,11 @@ export const defaultFactoryConfig: FactoryDefaults = {
   },
   sandbox: {
     enabled: true,
+    runtime: 'auto',
     network: { allow: ['api.anthropic.com', 'github.com'] },
     resources: { cpuMs: 300000, memMb: 4096 },
     comment:
-      'Containment for agentic build runs. Disable per-run with --no-sandbox or FACTORY_SANDBOX=0. Empty network.allow denies all egress; non-empty leaves egress open (per-host filtering is logged as degraded in v1).',
+      'Containment for agentic build runs. Disable per-run with --no-sandbox or FACTORY_SANDBOX=0. Empty network.allow denies all egress; non-empty leaves egress open (per-host filtering is logged as degraded in v1). Set sandbox.runtime (auto|sandbox-exec|firejail|docker-sandbox|none) or FACTORY_SANDBOX_RUNTIME to pick a runtime; auto probes the host. docker-sandbox is reserved for the microVM runtime and does not contain anything yet (#653).',
   },
   discovery: {
     enabled: true,

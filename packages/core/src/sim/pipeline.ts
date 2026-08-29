@@ -279,7 +279,7 @@ async function runSimIssue(
   const policy: RunPolicy = {
     models: simModelsConfig(),
     routes: simRoutesConfig(),
-    sandbox: { enabled: false, network: { allow: [] }, resources: { cpuMs: 300_000, memMb: 4096 } },
+    sandbox: { enabled: false, runtime: 'auto', network: { allow: [] }, resources: { cpuMs: 300_000, memMb: 4096 } },
     budget: {},
     effective: { localOnly: false, allowExperimental: false, codexDisabled: false, branchPrefix: 'ship-it' },
   };

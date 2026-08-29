@@ -3359,6 +3359,14 @@ describe('shipIssue (direct)', () => {
     expect(events).toContain('sandbox disabled by config/FACTORY_SANDBOX');
   });
 
+  it('logs sandbox-unavailable naming #653 when sandbox.runtime is docker-sandbox', async () => {
+    h.factoryConfig = { ...h.factoryConfig, sandbox: { ...h.factoryConfig.sandbox, runtime: 'docker-sandbox' } };
+    await shipIssue(5, {}, ctx());
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('#653');
+    expect(events).toContain('sandbox-unavailable');
+  });
+
   it('activates the sandbox policy and logs the degraded-egress warning when a sandbox runtime is available', async () => {
     h.execSyncImpl = (cmd: string) => {
       if (cmd.includes('command -v sandbox-exec') || cmd.includes('command -v firejail')) return '/usr/bin/tool';

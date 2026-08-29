@@ -5,7 +5,9 @@
 // worktree + known state dirs and gates network by an allowlist. Per-host
 // network filtering is not expressible in either runtime without a proxy —
 // see resolveSandboxPolicy's caller for the 'sandbox-degraded' warning this
-// implies when the allowlist is non-empty.
+// implies when the allowlist is non-empty. `docker-sandbox` is a selectable
+// runtime name for the future microVM runtime (#653); it is not a command
+// prefix and wraps nothing until that lifecycle lands.
 
 import { homedir, tmpdir } from 'node:os';
 import { resolve } from 'node:path';
@@ -15,7 +17,20 @@ import { HarnessError } from '../harness/index.js';
 import { isCommandAvailable } from '../models/index.js';
 import { shellEscape } from '../utils/index.js';
 
-export type SandboxRuntime = 'sandbox-exec' | 'firejail' | 'none';
+export type SandboxRuntime = 'sandbox-exec' | 'firejail' | 'docker-sandbox' | 'none';
+
+/** The configurable form of SandboxRuntime: the concrete runtimes plus 'auto',
+ *  which defers to host detection. This is what `sandbox.runtime` in
+ *  .factory/config.json and FACTORY_SANDBOX_RUNTIME accept. */
+export type SandboxRuntimeSetting = SandboxRuntime | 'auto';
+
+const SANDBOX_RUNTIME_SETTINGS: readonly SandboxRuntimeSetting[] = [
+  'auto',
+  'sandbox-exec',
+  'firejail',
+  'docker-sandbox',
+  'none',
+];
 
 export interface SandboxPolicy {
   runtime: SandboxRuntime;
@@ -34,14 +49,42 @@ export interface SandboxPolicy {
 
 export type SandboxEventType = 'sandbox_violation' | 'resource_limit' | 'sandbox_auth_denied';
 
-/** Which sandbox runtime (if any) is usable on this host. */
+/** Which sandbox runtime (if any) is usable on this host.
+ *  `includeDockerSandbox` is opt-in and defaults to false: docker-sandbox has no VM
+ *  lifecycle yet (#653), so the `auto` path must never select it — see the ADR. */
 export function detectSandboxRuntime(
   platform: NodeJS.Platform,
   isAvailable: (cmd: string) => boolean = isCommandAvailable,
+  opts: { includeDockerSandbox?: boolean } = {},
 ): SandboxRuntime {
+  if (opts.includeDockerSandbox === true && isAvailable('sbx')) return 'docker-sandbox';
   if (platform === 'darwin' && isAvailable('sandbox-exec')) return 'sandbox-exec';
   if (platform === 'linux' && isAvailable('firejail')) return 'firejail';
   return 'none';
+}
+
+function sandboxRuntimeFromEnv(env: NodeJS.ProcessEnv): SandboxRuntimeSetting | undefined {
+  const raw = env.FACTORY_SANDBOX_RUNTIME;
+  return SANDBOX_RUNTIME_SETTINGS.find((s) => s === raw);
+}
+
+/** Resolves the concrete runtime for one run. FACTORY_SANDBOX_RUNTIME wins over the
+ *  config field (mirroring FACTORY_SANDBOX over `sandbox.enabled`); an unrecognized env
+ *  value is ignored, exactly as FACTORY_SANDBOX ignores anything that is not 0 or 1.
+ *  Only 'auto' probes the host — an explicit runtime is honored verbatim so an operator
+ *  opting into docker-sandbox is never silently downgraded. */
+export function resolveSandboxRuntime(
+  configured: SandboxRuntimeSetting | undefined,
+  opts: {
+    env?: NodeJS.ProcessEnv;
+    platform?: NodeJS.Platform;
+    isAvailable?: (cmd: string) => boolean;
+  } = {},
+): SandboxRuntime {
+  const env = opts.env ?? process.env;
+  const setting = sandboxRuntimeFromEnv(env) ?? configured ?? 'auto';
+  if (setting !== 'auto') return setting;
+  return detectSandboxRuntime(opts.platform ?? process.platform, opts.isAvailable ?? isCommandAvailable);
 }
 
 function sandboxDisabled(
@@ -82,7 +125,7 @@ export function resolveSandboxPolicy(
   const home = opts.homedir ?? homedir();
   const tmp = opts.tmpdir ?? tmpdir();
 
-  const runtime = detectSandboxRuntime(platform, isAvailable);
+  const runtime = resolveSandboxRuntime(cfg.runtime, { env, platform, isAvailable });
 
   const writablePaths = dedupeAbsolutePaths([
     opts.worktree,
@@ -153,7 +196,9 @@ ${prefixRules}
 /** Wraps `cmd` with the platform sandbox + resource-limit prefix. Pure —
  *  runtime 'none' returns cmd unchanged. */
 export function wrapCommandInSandbox(cmd: string, policy: SandboxPolicy): string {
-  if (policy.runtime === 'none') return cmd;
+  // docker-sandbox is a VM runtime, not a command prefix; its lifecycle lands in #653.
+  // Until then it wraps nothing — and must never fall through to the firejail branch below.
+  if (policy.runtime === 'none' || policy.runtime === 'docker-sandbox') return cmd;
 
   const cpuSeconds = Math.ceil(policy.cpuMs / 1000);
   const ulimitPrefix =

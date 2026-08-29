@@ -8,7 +8,7 @@ describe('RunPolicy', () => {
     const policy: RunPolicy = {
       models: simModelsConfig(),
       routes: simRoutesConfig(),
-      sandbox: { enabled: false, network: { allow: [] }, resources: { cpuMs: 1, memMb: 1 } },
+      sandbox: { enabled: false, runtime: 'auto', network: { allow: [] }, resources: { cpuMs: 1, memMb: 1 } },
       budget: { perIssueCapUsd: 5 },
       effective: { localOnly: false, allowExperimental: false, codexDisabled: false, branchPrefix: 'ship-it' },
     };

@@ -6,12 +6,14 @@ import {
   buildDarwinProfile,
   detectSandboxRuntime,
   resolveSandboxPolicy,
+  resolveSandboxRuntime,
   sandboxEventFromError,
   wrapCommandInSandbox,
 } from './index.js';
 
 const defaultSandboxCfg: FactoryConfig['sandbox'] = {
   enabled: true,
+  runtime: 'auto',
   network: { allow: ['api.anthropic.com', 'github.com'] },
   resources: { cpuMs: 300_000, memMb: 4096 },
 };
@@ -35,6 +37,91 @@ describe('detectSandboxRuntime', () => {
 
   it('is none on win32 regardless of probe result', () => {
     expect(detectSandboxRuntime('win32', () => true)).toBe('none');
+  });
+
+  it('picks docker-sandbox when opted in and sbx is on PATH', () => {
+    expect(detectSandboxRuntime('linux', (c) => c === 'sbx', { includeDockerSandbox: true })).toBe('docker-sandbox');
+  });
+
+  it('opting in to docker-sandbox wins over sandbox-exec on darwin', () => {
+    expect(detectSandboxRuntime('darwin', () => true, { includeDockerSandbox: true })).toBe('docker-sandbox');
+  });
+
+  it('never selects docker-sandbox when includeDockerSandbox is absent, even with sbx present', () => {
+    expect(detectSandboxRuntime('darwin', () => true)).toBe('sandbox-exec');
+    expect(detectSandboxRuntime('linux', (c) => c === 'sbx')).toBe('none');
+  });
+});
+
+describe('resolveSandboxRuntime', () => {
+  it('with no configured value and no env, matches detectSandboxRuntime for darwin/linux/win32', () => {
+    expect(resolveSandboxRuntime(undefined, { platform: 'darwin', isAvailable: () => true, env: {} })).toBe(
+      detectSandboxRuntime('darwin', () => true),
+    );
+    expect(resolveSandboxRuntime(undefined, { platform: 'linux', isAvailable: () => true, env: {} })).toBe(
+      detectSandboxRuntime('linux', () => true),
+    );
+    expect(resolveSandboxRuntime(undefined, { platform: 'win32', isAvailable: () => true, env: {} })).toBe(
+      detectSandboxRuntime('win32', () => true),
+    );
+  });
+
+  it("'auto' with sbx present never resolves to docker-sandbox (AC5)", () => {
+    expect(resolveSandboxRuntime('auto', { platform: 'linux', isAvailable: () => true, env: {} })).toBe('firejail');
+  });
+
+  it('an explicit runtime is honored verbatim even when its binary is unavailable', () => {
+    expect(resolveSandboxRuntime('docker-sandbox', { platform: 'linux', isAvailable: () => false, env: {} })).toBe(
+      'docker-sandbox',
+    );
+  });
+
+  it("'none' is honored verbatim even when a runtime binary is present", () => {
+    expect(resolveSandboxRuntime('none', { platform: 'darwin', isAvailable: () => true, env: {} })).toBe('none');
+  });
+
+  it('FACTORY_SANDBOX_RUNTIME overrides the config field; unset falls back to it', () => {
+    expect(
+      resolveSandboxRuntime('auto', {
+        platform: 'darwin',
+        isAvailable: () => true,
+        env: { FACTORY_SANDBOX_RUNTIME: 'docker-sandbox' },
+      }),
+    ).toBe('docker-sandbox');
+    expect(
+      resolveSandboxRuntime('auto', {
+        platform: 'darwin',
+        isAvailable: () => true,
+        env: {},
+      }),
+    ).toBe('sandbox-exec');
+  });
+
+  it("env 'auto' beats a configured explicit runtime, mirroring FACTORY_SANDBOX=1", () => {
+    expect(
+      resolveSandboxRuntime('none', {
+        platform: 'linux',
+        isAvailable: () => true,
+        env: { FACTORY_SANDBOX_RUNTIME: 'auto' },
+      }),
+    ).toBe('firejail');
+  });
+
+  it('ignores unknown FACTORY_SANDBOX_RUNTIME values and falls back to the config field', () => {
+    expect(
+      resolveSandboxRuntime('firejail', {
+        platform: 'linux',
+        isAvailable: () => false,
+        env: { FACTORY_SANDBOX_RUNTIME: 'bogus' },
+      }),
+    ).toBe('firejail');
+    expect(
+      resolveSandboxRuntime('firejail', {
+        platform: 'linux',
+        isAvailable: () => false,
+        env: { FACTORY_SANDBOX_RUNTIME: '' },
+      }),
+    ).toBe('firejail');
   });
 });
 
@@ -126,6 +213,21 @@ describe('resolveSandboxPolicy', () => {
 
     const darwinPolicy = resolveSandboxPolicy(defaultSandboxCfg, { ...baseOpts, platform: 'darwin', env: {} });
     expect(darwinPolicy?.writablePaths).not.toContain('/home/factory');
+  });
+
+  it('honors an explicit docker-sandbox runtime from config', () => {
+    const cfg: FactoryConfig['sandbox'] = { ...defaultSandboxCfg, runtime: 'docker-sandbox' };
+    const policy = resolveSandboxPolicy(cfg, { ...baseOpts, env: {} });
+    expect(policy?.runtime).toBe('docker-sandbox');
+  });
+
+  it('FACTORY_SANDBOX_RUNTIME=none yields a defined policy with runtime none (not sandbox-disabled)', () => {
+    const policy = resolveSandboxPolicy(defaultSandboxCfg, {
+      ...baseOpts,
+      env: { FACTORY_SANDBOX_RUNTIME: 'none' },
+    });
+    expect(policy).toBeDefined();
+    expect(policy?.runtime).toBe('none');
   });
 });
 
@@ -240,6 +342,14 @@ describe('wrapCommandInSandbox', () => {
     };
     const wrapped = wrapCommandInSandbox('echo hi', policy);
     expect(wrapped).toContain("--read-write='/home/factory/.claude.json'");
+  });
+
+  it('returns the command unchanged and never wraps for docker-sandbox', () => {
+    const policy = { ...basePolicy, runtime: 'docker-sandbox' as const };
+    const wrapped = wrapCommandInSandbox('echo hi', policy);
+    expect(wrapped).toBe('echo hi');
+    expect(wrapped).not.toContain('firejail');
+    expect(wrapped).not.toContain('sandbox-exec');
   });
 });
 

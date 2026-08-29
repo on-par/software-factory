@@ -125,6 +125,7 @@ const FactoryConfigSchema = z.object({
   sandbox: z
     .object({
       enabled: z.boolean().default(true),
+      runtime: z.enum(['auto', 'sandbox-exec', 'firejail', 'docker-sandbox', 'none']).default('auto'),
       network: z
         .object({ allow: z.array(z.string()).default(['api.anthropic.com', 'github.com']) })
         .default({ allow: ['api.anthropic.com', 'github.com'] }),
@@ -135,6 +136,7 @@ const FactoryConfigSchema = z.object({
     })
     .default({
       enabled: true,
+      runtime: 'auto',
       network: { allow: ['api.anthropic.com', 'github.com'] },
       resources: { cpuMs: 300_000, memMb: 4096 },
     }),
