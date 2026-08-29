@@ -1128,8 +1128,9 @@ export async function shipIssue(
   } else if (sandboxPolicy.runtime === 'docker-sandbox') {
     // docker-sandbox's containment is the microVM created by worktreeWorkspace below
     // (#653), not a command-prefix wrap — activeSandboxPolicy stays undefined because
-    // wrapCommandInSandbox remains a no-op for this runtime.
-    log('sandbox', 'docker-sandbox microVM active for lane');
+    // wrapCommandInSandbox remains a no-op for this runtime. createMicroVm logs the
+    // actual outcome ('sandbox' on success, 'sandbox-unavailable' on fallback), so no
+    // speculative log is emitted here.
   } else {
     activeSandboxPolicy = sandboxPolicy;
     if (sandboxPolicy.allowHosts.length > 0) {

@@ -3384,11 +3384,17 @@ describe('shipIssue (direct)', () => {
     expect(events).toContain('sandbox disabled by config/FACTORY_SANDBOX');
   });
 
-  it('logs the docker-sandbox microVM as the containment boundary when sandbox.runtime is docker-sandbox', async () => {
+  it('passes the docker-sandbox descriptor to setupWorktree without a speculative sandbox log when sandbox.runtime is docker-sandbox', async () => {
     h.factoryConfig = { ...h.factoryConfig, sandbox: { ...h.factoryConfig.sandbox, runtime: 'docker-sandbox' } };
     await shipIssue(5, {}, ctx());
     const events = readFileSync(paths().events, 'utf-8');
-    expect(events).toContain('docker-sandbox microVM active for lane');
+    // createMicroVm (not the CLI) owns the outcome-driven 'sandbox'/'sandbox-unavailable'
+    // events; setupWorktree is mocked here, so neither fires — the CLI must not log a
+    // premature "active" event before the microVM actually exists.
+    expect(events).not.toContain('docker-sandbox microVM active for lane');
+    expect(vi.mocked(setupWorktree).mock.calls.at(-1)?.[4]).toEqual(
+      expect.objectContaining({ runtime: 'docker-sandbox' }),
+    );
   });
 
   it('activates the sandbox policy and logs the degraded-egress warning when a sandbox runtime is available', async () => {
