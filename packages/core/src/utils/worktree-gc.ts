@@ -1,19 +1,16 @@
 // src/utils/worktree-gc.ts — Stale factory worktree cleanup + credential scrub
 
-import { exec as execCb } from 'node:child_process';
 import type { Dirent } from 'node:fs';
 import { existsSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import { promisify } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
 
 import type { EventKind } from '../events/kinds.js';
 import { PARKED_LABEL } from '../queue/github-queue.js';
+import { execGit } from './git-exec.js';
 import { branchPrefixSlug, shellEscape } from './index.js';
 import { removeMicroVm, type WorktreeSandbox } from './microvm.js';
-
-const exec = promisify(execCb);
 
 export type GcReason = 'merged' | 'remote-gone' | 'ttl-expired' | 'issue-parked' | 'issue-closed';
 
@@ -184,9 +181,12 @@ export function scrubFile(filePath: string): void {
   rmSync(filePath, { force: true });
 }
 
+// Every git call in this module runs through the shared execGit port (deadline-protected,
+// same as setupWorktree/cleanupWorktree in ./index.js) rather than shelling out directly —
+// without it a wedged worktree op hangs its caller forever with no output (#755).
 async function defaultRunCommand(cmd: string, opts?: { cwd?: string }): Promise<{ stdout: string }> {
-  const { stdout } = await exec(cmd, opts);
-  return { stdout: stdout.toString() };
+  const { stdout } = await execGit(cmd, opts);
+  return { stdout };
 }
 
 function safeExec(
