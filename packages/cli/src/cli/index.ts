@@ -56,6 +56,7 @@ import {
   createFileApprovalGate,
   createLaneProxy,
   defaultFindPortListeners,
+  defaultIsPidAlive,
   describeEffectiveConfig,
   detectPostMergeDefects,
   diagnoseModels,
@@ -170,6 +171,7 @@ import {
   logEvent,
   planQueueMigration,
   readCosts,
+  reapLaneWorktree,
   releaseStaleClaims,
   resolveBranchPrefix,
   resolveEffectiveConfig,
@@ -1784,6 +1786,20 @@ function worktreePathFor(repoRoot: string, issueNum: number, prefix?: string): s
   return resolve(dirname(repoRoot), `${basename(repoRoot)}-factory-${branchPrefixSlug(prefix)}-${issueNum}`);
 }
 
+/** True for a worktree path that a port lease still names with a live pid (#1007). The snapshot
+ *  is taken once per sweep so the whole pass sees one consistent view of the lease registry. */
+export function laneLiveProbe(paths: ReturnType<typeof getFactoryPaths>): (worktreePath: string) => boolean {
+  let live: Set<string> | null = null;
+  return (worktreePath: string) => {
+    live ??= new Set(
+      readPortLeases(paths.ports)
+        .filter((lease) => defaultIsPidAlive(lease.pid))
+        .map((lease) => resolve(lease.worktreeId)),
+    );
+    return live.has(resolve(worktreePath));
+  };
+}
+
 /** Fences a whole run behind the checkout's `.factory/run.lock` (#598). A live holder is
  *  refused immediately — never queued behind a multi-hour run — and a dead holder's lock is
  *  reclaimed by withRunLock. Nested acquisition inside one process is a pass-through, so
@@ -1843,7 +1859,12 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }
   const ghRepo = await getGitHubRepo().catch(() => undefined);
   const octokit = ghRepo ? (hasGitHubToken() ? getOctokit() : undefined) : undefined;
   const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
-  const run = () => sweepWorktrees({ repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo }, { log, octokit, sandbox });
+  const branchPrefix = resolveEffectiveConfig(loadRepoConfig(repoRoot)).branchPrefix;
+  const run = () =>
+    sweepWorktrees(
+      { repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo, branchPrefix },
+      { log, octokit, sandbox, isLaneLive: laneLiveProbe(paths) },
+    );
   const report = opts.dryRun ? await run() : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
   console.log(formatGcReport(report));
 }
@@ -2400,11 +2421,12 @@ async function cmdRun(opts: { localQueue?: boolean } = {}) {
       try {
         const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
         const gcSandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
+        const branchPrefix = resolveEffectiveConfig(loadRepoConfig(repoRoot)).branchPrefix;
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
             sweepWorktrees(
-              { repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays, repo: ghRepo },
-              { log: gcLog, octokit: getOctokit(), sandbox: gcSandbox },
+              { repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays, repo: ghRepo, branchPrefix },
+              { log: gcLog, octokit: getOctokit(), sandbox: gcSandbox, isLaneLive: laneLiveProbe(paths) },
             ),
           ),
         );
@@ -2615,6 +2637,9 @@ type RunLaneDeps = {
   emitEvent?: typeof logEvent;
   claimNext?: () => Promise<QueueClaim | null>;
   releaseIssue?: (issue: number, outcome: QueueReleaseOutcome) => Promise<void>;
+  /** Removes the issue's lane worktree at a terminal outcome. Defaults to the
+   *  reapLaneWorktree-backed implementation below. */
+  reapWorktree?: (issue: number) => Promise<void>;
 };
 
 export interface PlannedLane {
@@ -2742,6 +2767,32 @@ export async function runLane(
     emitEvent = logEvent,
     claimNext = async () => null,
     releaseIssue = async () => {},
+    reapWorktree = async (issue: number) => {
+      const branchPrefix = resolveEffectiveConfig(loadRepoConfig(repoRoot)).branchPrefix;
+      const worktreePath = worktreePathFor(repoRoot, issue, branchPrefix);
+      try {
+        const result = await withGitLock(repoRoot, () =>
+          withFileLock(paths.gitLock, () =>
+            reapLaneWorktree(
+              { repoRoot, worktreePath },
+              { log: (type, msg) => emitEvent(paths.events, type, issue, msg, { lane }) },
+            ),
+          ),
+        );
+        const kind: EventKind = result.outcome === 'dirty' || result.outcome === 'failed' ? 'warn' : 'worktree-gc';
+        emitEvent(
+          paths.events,
+          kind,
+          issue,
+          `lane worktree ${worktreePath}: ${result.outcome}${result.branchDeleted ? `, deleted branch ${result.branch}` : ''}`,
+          { lane },
+        );
+      } catch (err: any) {
+        emitEvent(paths.events, 'warn', issue, `lane worktree reap failed for #${issue}: ${errorDetail(err)}`, {
+          lane,
+        });
+      }
+    },
   } = deps;
   let merged = 0;
   let awaitingReview = 0;
@@ -2774,6 +2825,7 @@ export async function runLane(
         { lane },
       );
       await releaseIssue(issue, 'parked');
+      await reapWorktree(issue);
       parked++;
       continue;
     }
@@ -2783,18 +2835,21 @@ export async function runLane(
       await waitMerge(issue, branch, repoRoot, ghRepo, paths);
       merged++;
       await releaseIssue(issue, 'done');
+      await reapWorktree(issue);
     } catch (err: any) {
       if (err instanceof AwaitingReviewError) {
         // The land path already emitted the awaiting-review event and cleaned the
         // worktree — this is a clean outcome, not a park; move to the next issue.
         awaitingReview++;
         await releaseIssue(issue, 'done');
+        await reapWorktree(issue);
         continue;
       }
       if (err instanceof IssueSkippedError) {
         // shipIssue already emitted skipped-already-closed; nothing was attempted.
         skipped++;
         await releaseIssue(issue, 'done');
+        await reapWorktree(issue);
         continue;
       }
       if (err instanceof IssueDecomposedError) {
@@ -2812,6 +2867,7 @@ export async function runLane(
           { lane },
         );
         await releaseIssue(issue, 'done');
+        await reapWorktree(issue);
         continue;
       }
       const reason = parkReasonFor(err);
@@ -2827,6 +2883,7 @@ export async function runLane(
         { lane },
       );
       await releaseIssue(issue, 'parked');
+      await reapWorktree(issue);
       parked++;
       continue;
     }
@@ -3715,11 +3772,12 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
       try {
         const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
         const gcSandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
+        const branchPrefix = resolveEffectiveConfig(loadRepoConfig(repoRoot)).branchPrefix;
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
             sweepWorktrees(
-              { repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays, repo: ghRepo },
-              { log: gcLog, octokit, sandbox: gcSandbox },
+              { repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays, repo: ghRepo, branchPrefix },
+              { log: gcLog, octokit, sandbox: gcSandbox, isLaneLive: laneLiveProbe(paths) },
             ),
           ),
         );

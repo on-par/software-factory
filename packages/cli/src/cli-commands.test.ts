@@ -50,6 +50,13 @@ const h = vi.hoisted(() => {
       },
     } as any,
     gcReport: { removed: [], kept: 0, dryRun: false } as any,
+    reapResult: {
+      path: '/tmp/wt',
+      branch: 'ship-it/5-x',
+      outcome: 'removed',
+      branchDeleted: true,
+      scrubbedFiles: [],
+    } as any,
     staleClaims: [] as any[],
     greenPrs: [] as any[],
     runTuiCalls: [] as Array<{
@@ -227,6 +234,10 @@ vi.mock('@on-par/factory-core/internal', async (importOriginal) => {
     ensureDir: vi.fn((p: string) => mkdirSync(p, { recursive: true })),
     // Worktree GC.
     sweepWorktrees: vi.fn(async () => h.gcReport),
+    reapLaneWorktree: vi.fn(async (_opts: unknown, deps?: { log?: (type: string, msg: string) => void }) => {
+      deps?.log?.('worktree-gc', `reaping ${(_opts as { worktreePath: string }).worktreePath}`);
+      return h.reapResult;
+    }),
     // Stale claim reap.
     releaseStaleClaims: vi.fn(async () => h.staleClaims),
     // Green-and-ready PR report.
@@ -241,6 +252,7 @@ vi.mock('@on-par/factory-core/internal', async (importOriginal) => {
 import {
   cleanupWorktree,
   formatGcReport,
+  reapLaneWorktree,
   releaseStaleClaims,
   setupWorktree,
   sweepWorktrees,
@@ -383,6 +395,7 @@ beforeEach(() => {
     },
   };
   h.gcReport = { removed: [], kept: 0, dryRun: false };
+  h.reapResult = { path: '/tmp/wt', branch: 'ship-it/5-x', outcome: 'removed', branchDeleted: true, scrubbedFiles: [] };
   h.staleClaims = [];
   h.greenPrs = [];
   h.runTuiCalls = [];
@@ -1399,6 +1412,19 @@ bash scripts/verify.sh
       expect(events).toContain('stop-file-cleared');
       expect(events).not.toContain('"type":"stopped"');
       expect(events).toContain('run-done');
+      // #1007: every terminal releaseIssue outcome reaps the lane's own worktree at teardown.
+      expect(reapLaneWorktree).toHaveBeenCalled();
+    });
+
+    it('survives a failing lane worktree reap and still completes the run (#1007)', async () => {
+      writeFileSync(paths().queue, '# header\napp 1\n');
+      (reapLaneWorktree as any).mockRejectedValueOnce(new Error('reap boom'));
+      const res = await runMain('run', '--local-queue');
+      expect(res.exited).toBe(false);
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('lane worktree reap failed');
+      expect(events).toContain('reap boom');
+      expect(events).toContain('run-done');
     });
 
     it('runs worktree gc before lanes when worktree.autoGcOnRun is true', async () => {
@@ -1408,8 +1434,8 @@ bash scripts/verify.sh
       const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       expect(sweepWorktrees).toHaveBeenCalledWith(
-        expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7, repo: h.ghRepo }),
-        expect.objectContaining({ octokit: expect.anything() }),
+        expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7, repo: h.ghRepo, branchPrefix: expect.any(String) }),
+        expect.objectContaining({ octokit: expect.anything(), isLaneLive: expect.any(Function) }),
       );
       expect(formatGcReport).toHaveBeenCalled();
     });
@@ -1655,8 +1681,8 @@ bash scripts/verify.sh
       const res = await runMain('worktree', 'gc', '--dry-run');
       expect(res.exited).toBe(false);
       expect(sweepWorktrees).toHaveBeenCalledWith(
-        expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7, dryRun: true }),
-        expect.anything(),
+        expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7, dryRun: true, branchPrefix: expect.any(String) }),
+        expect.objectContaining({ isLaneLive: expect.any(Function) }),
       );
       expect(withGitLock).not.toHaveBeenCalled();
       expect(logged()).toContain('GC_REPORT:dry:removed=0:kept=3');
@@ -2830,8 +2856,8 @@ Please add a widget that does the thing.
       const res = await runMain('doctor', '--reconcile');
       expect(res.exited).toBe(false);
       expect(sweepWorktrees).toHaveBeenCalledWith(
-        expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7 }),
-        expect.anything(),
+        expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7, branchPrefix: expect.any(String) }),
+        expect.objectContaining({ isLaneLive: expect.any(Function) }),
       );
       expect(logged()).toContain('reconcile: removed worktree /wt/a');
       expect(logged()).toContain('deleted branch ship-it/5-x');

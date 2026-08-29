@@ -39,6 +39,7 @@ import {
   LandFailureError,
   laneQueueDeps,
   landOpenPullRequest,
+  laneLiveProbe,
   LaneParkError,
   listOpenFactoryPRs,
   main,
@@ -2990,6 +2991,127 @@ describe('cli', () => {
     const buildClaim = (issue: number | undefined) =>
       issue === undefined ? null : { issue, decision: { kind: 'build' as const } };
 
+    describe('reapWorktree wiring (#1007)', () => {
+      it('is called once after a park decision', async () => {
+        const reaped: number[] = [];
+        await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
+          claimNext: async () => ({ issue: 7, decision: { kind: 'park', reason: 'CI timeout' } }),
+          releaseIssue: async () => {},
+          pathExists: () => false,
+          emitEvent: () => {},
+          reapWorktree: async (issue) => {
+            reaped.push(issue);
+          },
+        });
+        expect(reaped).toEqual([7]);
+      });
+
+      it('is called once after a thrown park (ship rejects)', async () => {
+        const reaped: number[] = [];
+        await runLane('app', [12], '/repo', 'on-par/software-factory', paths, {
+          ship: async () => {
+            throw new Error('boom');
+          },
+          waitMerge: async () => {
+            throw new Error('waitMerge should not be called');
+          },
+          releaseIssue: async () => {},
+          pathExists: () => false,
+          emitEvent: () => {},
+          reapWorktree: async (issue) => {
+            reaped.push(issue);
+          },
+        });
+        expect(reaped).toEqual([12]);
+      });
+
+      it('is called once after the merged/success path, following waitMerge', async () => {
+        const calls: string[] = [];
+        await runLane('app', [13], '/repo', 'on-par/software-factory', paths, {
+          ship: async () => 'ship-it/13-x',
+          waitMerge: async () => {
+            calls.push('waitMerge');
+          },
+          releaseIssue: async () => {},
+          pathExists: () => false,
+          emitEvent: () => {},
+          reapWorktree: async () => {
+            calls.push('reap');
+          },
+        });
+        expect(calls).toEqual(['waitMerge', 'reap']);
+      });
+
+      it('is called once on an AwaitingReviewError outcome', async () => {
+        const reaped: number[] = [];
+        await runLane('app', [14], '/repo', 'on-par/software-factory', paths, {
+          ship: async () => {
+            throw new AwaitingReviewError('PR #101 awaiting review', 101);
+          },
+          waitMerge: async () => {
+            throw new Error('waitMerge should not be called');
+          },
+          releaseIssue: async () => {},
+          pathExists: () => false,
+          emitEvent: () => {},
+          reapWorktree: async (issue) => {
+            reaped.push(issue);
+          },
+        });
+        expect(reaped).toEqual([14]);
+      });
+
+      it('is called once on an IssueSkippedError outcome', async () => {
+        const reaped: number[] = [];
+        await runLane('app', [15], '/repo', 'on-par/software-factory', paths, {
+          ship: async () => {
+            throw new IssueSkippedError('#15 already closed', 'already-closed');
+          },
+          waitMerge: async () => {
+            throw new Error('waitMerge should not be called');
+          },
+          releaseIssue: async () => {},
+          pathExists: () => false,
+          emitEvent: () => {},
+          reapWorktree: async (issue) => {
+            reaped.push(issue);
+          },
+        });
+        expect(reaped).toEqual([15]);
+      });
+
+      it('is called once on an IssueDecomposedError outcome', async () => {
+        const reaped: number[] = [];
+        await runLane('app', [16], '/repo', 'on-par/software-factory', paths, {
+          ship: async (issue) => {
+            if (issue === 16) throw new IssueDecomposedError('issue #16 decomposed into #17, #18', [17, 18]);
+            return `ship-it/${issue}-x`;
+          },
+          waitMerge: async () => {},
+          releaseIssue: async () => {},
+          pathExists: () => false,
+          emitEvent: () => {},
+          reapWorktree: async (issue) => {
+            reaped.push(issue);
+          },
+        });
+        expect(reaped.filter((n) => n === 16)).toEqual([16]);
+      });
+
+      it('is not called when the STOP file releases the issue back to the queue', async () => {
+        const reaped: number[] = [];
+        await runLane('app', [19], '/repo', 'on-par/software-factory', paths, {
+          releaseIssue: async () => {},
+          pathExists: () => true,
+          emitEvent: () => {},
+          reapWorktree: async (issue) => {
+            reaped.push(issue);
+          },
+        });
+        expect(reaped).toEqual([]);
+      });
+    });
+
     it('lands an adopted claim through its real branch without calling shipIssue', async () => {
       const calls: any[] = [];
       const claims = [{ issue: 7, decision: { kind: 'adopt' as const, branch: 'contributor/real-head' } }];
@@ -3005,6 +3127,7 @@ describe('cli', () => {
           calls.push(['release', issue, outcome]);
         },
         pathExists: () => false,
+        reapWorktree: async () => {},
         emitEvent: () => {},
       });
 
@@ -3032,6 +3155,7 @@ describe('cli', () => {
             parked.push(['release', issue, outcome]);
           },
           pathExists: () => false,
+          reapWorktree: async () => {},
           emitEvent: (_events, type) => parked.push(['event', type]),
         }),
         runLane('healthy', [8], '/repo', 'on-par/software-factory', paths, {
@@ -3040,6 +3164,7 @@ describe('cli', () => {
             finished.push('merged');
           },
           pathExists: () => false,
+          reapWorktree: async () => {},
           emitEvent: () => {},
         }),
       ]);
@@ -3061,6 +3186,7 @@ describe('cli', () => {
           calls.push(['waitMerge', issue]);
         },
         pathExists: () => false,
+        reapWorktree: async () => {},
         emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
           calls.push(['event', type, issue, msg, extra]),
       });
@@ -3095,6 +3221,7 @@ describe('cli', () => {
           throw new Error('waitMerge should not be called');
         },
         pathExists: () => false,
+        reapWorktree: async () => {},
         emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
           calls.push(['event', type, issue, msg, extra]),
       });
@@ -3124,6 +3251,7 @@ describe('cli', () => {
           throw new Error('waitMerge should not be called');
         },
         pathExists: () => false,
+        reapWorktree: async () => {},
         emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
           calls.push(['event', type, issue, msg, extra]),
       });
@@ -3154,6 +3282,7 @@ describe('cli', () => {
           throw new LandConflictError('rebase conflict on ship-it/11-x — parked');
         },
         pathExists: () => false,
+        reapWorktree: async () => {},
         emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
           calls.push(['event', type, issue, msg, extra]),
       });
@@ -3185,6 +3314,7 @@ describe('cli', () => {
           calls.push(['waitMerge', issue]);
         },
         pathExists: () => false,
+        reapWorktree: async () => {},
         emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
           calls.push(['event', type, issue, msg, extra]),
       });
@@ -3220,6 +3350,7 @@ describe('cli', () => {
           if (issue === 1) throw new AwaitingReviewError('PR #101 awaiting review', 101);
         },
         pathExists: () => false,
+        reapWorktree: async () => {},
         emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
           calls.push(['event', type, issue, msg, extra]),
       });
@@ -3252,6 +3383,7 @@ describe('cli', () => {
           calls.push(['waitMerge', issue]);
         },
         pathExists: () => false,
+        reapWorktree: async () => {},
         emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
           calls.push(['event', type, issue, msg, extra]),
       });
@@ -3284,6 +3416,7 @@ describe('cli', () => {
           calls.push(['waitMerge', issue]);
         },
         pathExists: () => false,
+        reapWorktree: async () => {},
         emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
           calls.push(['event', type, issue, msg, extra]),
       });
@@ -3323,6 +3456,7 @@ describe('cli', () => {
           calls.push(['waitMerge', issue]);
         },
         pathExists: () => false,
+        reapWorktree: async () => {},
         emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
           calls.push(['event', type, issue, msg, extra]),
       });
@@ -3386,6 +3520,7 @@ describe('cli', () => {
         },
         waitMerge: async () => {},
         pathExists: () => false,
+        reapWorktree: async () => {},
         emitEvent: () => {},
       });
       expect(seen).toEqual([
@@ -3425,6 +3560,7 @@ describe('cli', () => {
           },
           waitMerge: async () => {},
           pathExists: () => false,
+          reapWorktree: async () => {},
           emitEvent: () => {},
         });
 
@@ -3450,6 +3586,7 @@ describe('cli', () => {
           calls.push(['waitMerge', issue]);
         },
         pathExists: () => false,
+        reapWorktree: async () => {},
         emitEvent: () => {},
         claimNext: async () => buildClaim(toClaim.shift()),
         releaseIssue: async (issue, outcome) => {
@@ -3478,6 +3615,7 @@ describe('cli', () => {
         },
         waitMerge: async () => {},
         pathExists: () => false,
+        reapWorktree: async () => {},
         emitEvent: () => {},
         claimNext: async () => {
           calls.push(['claimNext']);
@@ -3506,6 +3644,7 @@ describe('cli', () => {
         },
         waitMerge: async () => {},
         pathExists: () => false,
+        reapWorktree: async () => {},
         emitEvent: () => {},
         claimNext: async () => buildClaim(toClaim.shift()),
         releaseIssue: async (issue, outcome) => {
@@ -3531,6 +3670,7 @@ describe('cli', () => {
           if (issue === 1) throw new AwaitingReviewError('PR #101 awaiting review', 101);
         },
         pathExists: () => false,
+        reapWorktree: async () => {},
         emitEvent: () => {},
         claimNext: async () => buildClaim(toClaim.shift()),
         releaseIssue: async (issue, outcome) => {
@@ -3574,6 +3714,7 @@ describe('cli', () => {
         },
         waitMerge: async () => {},
         pathExists: () => false,
+        reapWorktree: async () => {},
         emitEvent: () => {},
         claimNext: async () => {
           calls.push(['claimNext']);
@@ -3606,10 +3747,45 @@ describe('cli', () => {
         },
         waitMerge: async () => {},
         pathExists: () => false,
+        reapWorktree: async () => {},
         emitEvent: () => {},
       });
 
       expect(calls).toEqual([['ship', 1]]);
+    });
+  });
+
+  describe('laneLiveProbe', () => {
+    let tempRoot: string;
+
+    afterEach(async () => {
+      if (tempRoot) await rm(tempRoot, { recursive: true, force: true });
+    });
+
+    it('is true only for a worktree path a live-pid lease still names, and caches the snapshot', async () => {
+      tempRoot = await mkdtemp(join(tmpdir(), 'cli-lane-live-'));
+      const registryFile = join(tempRoot, 'ports.json');
+      await writeFile(
+        registryFile,
+        JSON.stringify({
+          version: 1,
+          leases: [
+            { worktreeId: '/wt/live', branch: 'ship-it/1-x', port: 3100, pid: process.pid, acquiredAt: 'now' },
+            { worktreeId: '/wt/dead', branch: 'ship-it/2-x', port: 3101, pid: 999999999, acquiredAt: 'now' },
+          ],
+        }),
+      );
+
+      const paths = getFactoryPaths('/repo');
+      const probe = laneLiveProbe({ ...paths, ports: registryFile });
+      expect(probe('/wt/live')).toBe(true);
+      expect(probe('/wt/dead')).toBe(false);
+      expect(probe('/wt/unknown')).toBe(false);
+
+      // The snapshot is taken once; mutating the registry file after the first call must not
+      // change subsequent answers within the same probe instance.
+      await writeFile(registryFile, JSON.stringify({ version: 1, leases: [] }));
+      expect(probe('/wt/live')).toBe(true);
     });
   });
 
