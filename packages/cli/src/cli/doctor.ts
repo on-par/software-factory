@@ -196,6 +196,60 @@ export function doctorFailed(checks: DoctorCheck[]): boolean {
   return checks.some((c) => !c.ok && !c.optional);
 }
 
+/** Outcome of one `claude -p` probe: it succeeded, it failed, or it was not run. */
+export type ClaudeAuthProbe = 'ok' | 'failed' | 'skipped';
+
+export interface ClaudeAuthProbeResult {
+  host: ClaudeAuthProbe;
+  sandboxed: ClaudeAuthProbe;
+  hostDetail: string;
+  sandboxDetail: string;
+}
+
+const HOST_AUTH_CHECK = 'claude auth (host)';
+const SANDBOX_AUTH_CHECK = 'claude auth (sandboxed)';
+
+/** Reports host and sandboxed Claude auth as two separate checks (#1008). Only the
+ *  differential — host ok, sandboxed failed — is a hard doctor failure; that is the one
+ *  combination that proves the sandbox, not the credentials, is at fault. */
+export function sandboxClaudeAuthChecks(result: ClaudeAuthProbeResult): DoctorCheck[] {
+  const host: DoctorCheck =
+    result.host === 'ok'
+      ? { name: HOST_AUTH_CHECK, ok: true, detail: result.hostDetail }
+      : result.host === 'skipped'
+        ? { name: HOST_AUTH_CHECK, ok: true, optional: true, detail: result.hostDetail }
+        : {
+            name: HOST_AUTH_CHECK,
+            ok: false,
+            detail: result.hostDetail,
+            fix: 'run `claude` and complete /login, then re-run `factory doctor`',
+          };
+
+  let sandboxed: DoctorCheck;
+  if (result.sandboxed === 'ok') {
+    sandboxed = { name: SANDBOX_AUTH_CHECK, ok: true, detail: result.sandboxDetail };
+  } else if (result.sandboxed === 'skipped') {
+    sandboxed = { name: SANDBOX_AUTH_CHECK, ok: true, optional: true, detail: result.sandboxDetail };
+  } else if (result.host === 'ok') {
+    sandboxed = {
+      name: SANDBOX_AUTH_CHECK,
+      ok: false,
+      detail: `${result.sandboxDetail} — host claude auth is healthy, so the sandbox is blocking Claude credential refresh`,
+      fix: 'check the sandbox write allowlist (~/.claude.json*, ~/Library/Keychains); as a stopgap run with FACTORY_SANDBOX=0',
+    };
+  } else {
+    sandboxed = {
+      name: SANDBOX_AUTH_CHECK,
+      ok: false,
+      optional: true,
+      detail: `${result.sandboxDetail} — host claude auth is not healthy either, so this is not attributable to the sandbox`,
+      fix: 'fix host claude auth first, then re-run `factory doctor`',
+    };
+  }
+
+  return [host, sandboxed];
+}
+
 export interface LeaseHealthRow {
   worktreeId: string;
   branch: string;

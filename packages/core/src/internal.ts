@@ -319,3 +319,6 @@ export {
   drainAndDetach,
   isDrainSafe,
 } from './daemon/repos-detach.js';
+
+// Sandbox command wrapping — used by the CLI's doctor probe (#1008)
+export { wrapCommandInSandbox } from './sandbox/index.js';

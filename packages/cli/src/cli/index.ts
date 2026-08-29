@@ -183,6 +183,7 @@ import {
   withFileLock,
   withGitLock,
   withRunLock,
+  wrapCommandInSandbox,
 } from '@on-par/factory-core/internal';
 import { runTui } from '@on-par/factory-tui';
 import chalk from 'chalk';
@@ -190,6 +191,7 @@ import { Command } from 'commander';
 
 import {
   analyzeEventLog,
+  type ClaudeAuthProbe,
   doctorFailed,
   eventLogCheck,
   formatClaimReconcileReport,
@@ -200,6 +202,7 @@ import {
   leaseChecks,
   type LeaseHealthRow,
   runDoctorChecks,
+  sandboxClaudeAuthChecks,
   unmergedGreenPrChecks,
   type UnmergedGreenPrRow,
 } from './doctor.js';
@@ -3548,6 +3551,47 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
   } catch {
     repoRoot = null;
   }
+
+  const CLAUDE_AUTH_PROBE = 'claude -p "reply with exactly: ok"';
+  const probeExec = (cmd: string): string | null => {
+    try {
+      return execSync(cmd, { encoding: 'utf-8', timeout: 120_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    } catch {
+      return null;
+    }
+  };
+
+  let host: ClaudeAuthProbe = 'skipped';
+  let hostDetail = 'skipped — claude CLI not on PATH';
+  if (isCommandAvailable('claude')) {
+    host = probeExec(CLAUDE_AUTH_PROBE) === null ? 'failed' : 'ok';
+    hostDetail = host === 'ok' ? 'claude -p succeeded on the host' : 'claude -p failed on the host';
+  }
+
+  let sandboxed: ClaudeAuthProbe = 'skipped';
+  let sandboxDetail = 'skipped — host claude auth was not verified';
+  if (host === 'ok') {
+    const policy =
+      repoRoot === null
+        ? undefined
+        : resolveSandboxPolicy(loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox, {
+            worktree: repoRoot,
+            repoRoot,
+          });
+    if (!policy) {
+      sandboxDetail = 'skipped — sandbox disabled by config or FACTORY_SANDBOX';
+    } else if (policy.runtime === 'none') {
+      sandboxDetail = 'skipped — no sandbox runtime (sandbox-exec/firejail) on this host';
+    } else {
+      sandboxed = probeExec(wrapCommandInSandbox(CLAUDE_AUTH_PROBE, policy)) === null ? 'failed' : 'ok';
+      sandboxDetail =
+        sandboxed === 'ok'
+          ? `claude -p succeeded under ${policy.runtime}`
+          : `claude -p failed under ${policy.runtime} (local_auth)`;
+    }
+  }
+
+  checks.push(...sandboxClaudeAuthChecks({ host, sandboxed, hostDetail, sandboxDetail }));
 
   if (repoRoot !== null) {
     const paths = getFactoryPaths(repoRoot);

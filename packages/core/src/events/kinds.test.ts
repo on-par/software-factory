@@ -49,6 +49,11 @@ describe('severityOf', () => {
   it('maps an unknown kind to info (matches the historical default)', () => {
     expect(severityOf('some-made-up-legacy-kind')).toBe('info');
   });
+
+  it('maps sandbox_auth_denied to warn and it is never a park kind', () => {
+    expect(severityOf('sandbox_auth_denied')).toBe('warn');
+    expect(isParkKind('sandbox_auth_denied')).toBe(false);
+  });
 });
 
 describe('isParkKind', () => {
