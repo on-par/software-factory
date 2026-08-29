@@ -1140,6 +1140,11 @@ export async function shipIssue(
     log('sandbox-disabled', 'sandbox disabled by config/FACTORY_SANDBOX');
   } else if (sandboxPolicy.runtime === 'none') {
     log('sandbox-unavailable', 'no sandbox runtime found (sandbox-exec/firejail) — running uncontained');
+  } else if (sandboxPolicy.runtime === 'docker-sandbox') {
+    log(
+      'sandbox-unavailable',
+      'docker-sandbox selected but its VM lifecycle is not implemented yet (#653) — running uncontained',
+    );
   } else {
     activeSandboxPolicy = sandboxPolicy;
     if (sandboxPolicy.allowHosts.length > 0) {
@@ -3582,6 +3587,8 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
       sandboxDetail = 'skipped — sandbox disabled by config or FACTORY_SANDBOX';
     } else if (policy.runtime === 'none') {
       sandboxDetail = 'skipped — no sandbox runtime (sandbox-exec/firejail) on this host';
+    } else if (policy.runtime === 'docker-sandbox') {
+      sandboxDetail = 'skipped — docker-sandbox has no command wrapping yet (#653)';
     } else {
       sandboxed = probeExec(wrapCommandInSandbox(CLAUDE_AUTH_PROBE, policy)) === null ? 'failed' : 'ok';
       sandboxDetail =

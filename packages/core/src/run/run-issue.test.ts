@@ -105,7 +105,7 @@ function basePolicy(overrides: Partial<RunPolicy> = {}): RunPolicy {
       routingRules: {},
     },
     routes: ROUTES,
-    sandbox: { enabled: false, network: { allow: [] }, resources: { cpuMs: 0, memMb: 0 } },
+    sandbox: { enabled: false, runtime: 'auto', network: { allow: [] }, resources: { cpuMs: 0, memMb: 0 } },
     budget: {},
     effective: {} as RunPolicy['effective'],
     ...overrides,

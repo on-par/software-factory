@@ -382,6 +382,7 @@ describe('loadFactoryConfig', () => {
   it('shipped config has a default-enabled sandbox block', () => {
     const config = loadFactoryConfig();
     expect(config.sandbox.enabled).toBe(true);
+    expect(config.sandbox.runtime).toBe('auto');
     expect(config.sandbox.network.allow).toEqual(['api.anthropic.com', 'github.com']);
     expect(config.sandbox.resources).toEqual({ cpuMs: 300_000, memMb: 4096 });
   });
@@ -687,6 +688,21 @@ describe('loadFactoryConfigForRepo', () => {
     const path = join(dir, 'config.json');
     await writeFile(path, JSON.stringify('nope'));
     expect(() => loadFactoryConfigForRepo(path)).toThrow(/expected a JSON object/);
+  });
+
+  it('parses a sandbox.runtime override and keeps the other sandbox defaults', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ sandbox: { runtime: 'docker-sandbox' } }));
+    const config = loadFactoryConfigForRepo(path);
+    expect(config.sandbox.runtime).toBe('docker-sandbox');
+    expect(config.sandbox.enabled).toBe(loadFactoryConfig().sandbox.enabled);
+    expect(config.sandbox.network.allow).toEqual(loadFactoryConfig().sandbox.network.allow);
+  });
+
+  it('throws on an invalid sandbox.runtime value', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ sandbox: { runtime: 'podman' } }));
+    expect(() => loadFactoryConfigForRepo(path)).toThrow(/sandbox\.runtime/);
   });
 });
 
