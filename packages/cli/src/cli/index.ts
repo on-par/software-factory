@@ -3,7 +3,7 @@
 import { exec as execCb, execSync } from 'node:child_process';
 import { existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { userInfo } from 'node:os';
+import { homedir, userInfo } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -147,6 +147,7 @@ import type {
   QueueReleaseOutcome,
   UnmergedGreenPr,
   WatchChecksOptions,
+  WorktreeSandbox,
 } from '@on-par/factory-core/internal';
 import {
   branchFor,
@@ -1107,6 +1108,43 @@ export async function shipIssue(
     throw new IssueSkippedError(skipReason, 'already-closed');
   }
 
+  const sandboxPolicy = resolveSandboxPolicy(policy.sandbox, {
+    worktree,
+    repoRoot,
+    cliDisabled: opts.sandbox === false,
+    laneId: lane,
+  });
+  laneSandboxRuntime = sandboxPolicy?.runtime ?? 'none';
+  const worktreeSandbox: WorktreeSandbox | undefined =
+    sandboxPolicy?.runtime === 'docker-sandbox'
+      ? {
+          runtime: 'docker-sandbox',
+          authPaths: [resolve(homedir(), '.claude'), resolve(homedir(), '.codex'), resolve(homedir(), '.npm')],
+        }
+      : undefined;
+  let activeSandboxPolicy: SandboxPolicy | undefined;
+  if (opts.sandbox === false) {
+    console.error(chalk.yellow('factory: sandbox disabled by --no-sandbox — agent runs are UNCONTAINED'));
+    log('sandbox-disabled', 'sandbox disabled by --no-sandbox');
+  } else if (!sandboxPolicy) {
+    log('sandbox-disabled', 'sandbox disabled by config/FACTORY_SANDBOX');
+  } else if (sandboxPolicy.runtime === 'none') {
+    log('sandbox-unavailable', 'no sandbox runtime found (sandbox-exec/firejail) — running uncontained');
+  } else if (sandboxPolicy.runtime === 'docker-sandbox') {
+    // docker-sandbox's containment is the microVM created by worktreeWorkspace below
+    // (#653), not a command-prefix wrap — activeSandboxPolicy stays undefined because
+    // wrapCommandInSandbox remains a no-op for this runtime.
+    log('sandbox', 'docker-sandbox microVM active for lane');
+  } else {
+    activeSandboxPolicy = sandboxPolicy;
+    if (sandboxPolicy.allowHosts.length > 0) {
+      log(
+        'sandbox-degraded',
+        `host-level egress filtering unavailable in v1; intended allowlist: ${sandboxPolicy.allowHosts.join(', ')}`,
+      );
+    }
+  }
+
   // Setup worktree FIRST — PLAN needs cwd=worktree to run claude. Worktree cleanup
   // stays a CLI concern (not called here, matching today — a worktree persists past
   // a successful run for GC/sweep commands to reclaim later).
@@ -1117,13 +1155,14 @@ export async function shipIssue(
       branch,
       worktreePath: worktree,
       log,
-      setup: (root, br, wt) =>
+      sandbox: worktreeSandbox,
+      setup: (root, br, wt, sp, sandbox) =>
         withGitLock(root, () =>
           withFileLock(
             paths.gitLock,
             async () => {
               await gitFetch(root);
-              await setupWorktree(root, br, wt);
+              await setupWorktree(root, br, wt, sp, sandbox);
             },
             { onSteal: (pid) => log('lock-stolen', `stole ${paths.gitLock} from dead holder pid ${pid ?? 'unknown'}`) },
           ),
@@ -1133,36 +1172,6 @@ export async function shipIssue(
   } else {
     workspace = localOnlyWorkspace(ctx.localOnly);
     log('workspace', `local-only: using caller-provided workspace ${worktree} (no factory worktree created)`);
-  }
-
-  const sandboxPolicy = resolveSandboxPolicy(policy.sandbox, {
-    worktree,
-    repoRoot,
-    cliDisabled: opts.sandbox === false,
-    laneId: lane,
-  });
-  laneSandboxRuntime = sandboxPolicy?.runtime ?? 'none';
-  let activeSandboxPolicy: SandboxPolicy | undefined;
-  if (opts.sandbox === false) {
-    console.error(chalk.yellow('factory: sandbox disabled by --no-sandbox — agent runs are UNCONTAINED'));
-    log('sandbox-disabled', 'sandbox disabled by --no-sandbox');
-  } else if (!sandboxPolicy) {
-    log('sandbox-disabled', 'sandbox disabled by config/FACTORY_SANDBOX');
-  } else if (sandboxPolicy.runtime === 'none') {
-    log('sandbox-unavailable', 'no sandbox runtime found (sandbox-exec/firejail) — running uncontained');
-  } else if (sandboxPolicy.runtime === 'docker-sandbox') {
-    log(
-      'sandbox-unavailable',
-      'docker-sandbox selected but its VM lifecycle is not implemented yet (#653) — running uncontained',
-    );
-  } else {
-    activeSandboxPolicy = sandboxPolicy;
-    if (sandboxPolicy.allowHosts.length > 0) {
-      log(
-        'sandbox-degraded',
-        `host-level egress filtering unavailable in v1; intended allowlist: ${sandboxPolicy.allowHosts.join(', ')}`,
-      );
-    }
   }
 
   const planApprovalEnabled = opts.approvePlan ?? resolvePlanApproval(factoryConfig);
@@ -1874,6 +1883,18 @@ async function landIssue(
     throw new LandFailureError(`no open PR for issue #${issueNum} (${guessedBranch})`, 1);
   }
 
+  const landSandboxPolicy = resolveSandboxPolicy(loadFactoryConfigForRepo(paths.config).sandbox, {
+    worktree,
+    repoRoot,
+  });
+  const worktreeSandbox: WorktreeSandbox | undefined =
+    landSandboxPolicy?.runtime === 'docker-sandbox'
+      ? {
+          runtime: 'docker-sandbox',
+          authPaths: [resolve(homedir(), '.claude'), resolve(homedir(), '.codex'), resolve(homedir(), '.npm')],
+        }
+      : undefined;
+
   const withLandLock: LandLock = (fn) =>
     withGitLock(repoRoot, () =>
       withFileLock(paths.mergeLock, fn, {
@@ -1898,18 +1919,18 @@ async function landIssue(
         withLock: withLandLock,
         ensureWorktree: async () => {
           if (!existsSync(worktree)) {
-            await setupWorktree(repoRoot, branch, worktree, `origin/${branch}`);
+            await setupWorktree(repoRoot, branch, worktree, `origin/${branch}`, worktreeSandbox);
           }
         },
       });
     } catch (err) {
       if (err instanceof AwaitingReviewError || err instanceof CiFailedError) {
-        await withLandLock(() => cleanupWorktree(repoRoot, worktree, log));
+        await withLandLock(() => cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
       }
       throw err;
     }
     log('merged', `squash-merged PR #${prNumber}`);
-    await withLandLock(() => cleanupWorktree(repoRoot, worktree, log));
+    await withLandLock(() => cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
   } catch (err: any) {
     if (err instanceof LandConflictError || err instanceof AwaitingReviewError || err instanceof CiFailedError)
       throw err;
@@ -3601,7 +3622,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     } else if (policy.runtime === 'none') {
       sandboxDetail = 'skipped — no sandbox runtime (sandbox-exec/firejail) on this host';
     } else if (policy.runtime === 'docker-sandbox') {
-      sandboxDetail = 'skipped — docker-sandbox has no command wrapping yet (#653)';
+      sandboxDetail = 'skipped — docker-sandbox containment is the microVM, not command wrapping (#653)';
     } else {
       sandboxed = probeExec(wrapCommandInSandbox(CLAUDE_AUTH_PROBE, policy)) === null ? 'failed' : 'ok';
       sandboxDetail =

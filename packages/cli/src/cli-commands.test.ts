@@ -3384,12 +3384,11 @@ describe('shipIssue (direct)', () => {
     expect(events).toContain('sandbox disabled by config/FACTORY_SANDBOX');
   });
 
-  it('logs sandbox-unavailable naming #653 when sandbox.runtime is docker-sandbox', async () => {
+  it('logs the docker-sandbox microVM as the containment boundary when sandbox.runtime is docker-sandbox', async () => {
     h.factoryConfig = { ...h.factoryConfig, sandbox: { ...h.factoryConfig.sandbox, runtime: 'docker-sandbox' } };
     await shipIssue(5, {}, ctx());
     const events = readFileSync(paths().events, 'utf-8');
-    expect(events).toContain('#653');
-    expect(events).toContain('sandbox-unavailable');
+    expect(events).toContain('docker-sandbox microVM active for lane');
   });
 
   it('activates the sandbox policy and logs the degraded-egress warning when a sandbox runtime is available', async () => {
@@ -3595,7 +3594,7 @@ describe('CliExitError (direct command invocation)', () => {
 
     try {
       await expect(cmdLand(5)).resolves.toBeUndefined();
-      expect(setupWorktree).toHaveBeenCalledWith(h.repoRoot, branch, worktree, `origin/${branch}`);
+      expect(setupWorktree).toHaveBeenCalledWith(h.repoRoot, branch, worktree, `origin/${branch}`, undefined);
       expect(commands).toContain('git rebase origin/main');
       expect(commands).toContain("git push --force-with-lease origin 'contributor/adopted-pr'");
       expect(watchChecks).toHaveBeenCalledTimes(2);
