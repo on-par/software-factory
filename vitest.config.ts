@@ -69,7 +69,7 @@ export default defineConfig({
         // branches: measured 88.72 on main both with and without the integration
         // suites — this floor was already unmet before #755 touched anything, and
         // moving the integration suites to nightly does not change any metric here.
-        'packages/cli/src/**/*.{ts,tsx}': { lines: 97, functions: 89, branches: 88, statements: 97 },
+        'packages/cli/src/**/*.{ts,tsx}': { lines: 97, functions: 89, branches: 89, statements: 97 },
         'packages/dashboard/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
         'packages/product/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 98, statements: 99 },
         'packages/server/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },

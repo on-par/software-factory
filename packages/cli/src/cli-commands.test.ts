@@ -49,6 +49,7 @@ const h = vi.hoisted(() => {
       },
     } as any,
     gcReport: { removed: [], kept: 0, dryRun: false } as any,
+    staleClaims: [] as any[],
     runTuiCalls: [] as Array<{
       eventsFile: string;
       repo?: string;
@@ -217,6 +218,8 @@ vi.mock('@on-par/factory-core/internal', async (importOriginal) => {
     ensureDir: vi.fn((p: string) => mkdirSync(p, { recursive: true })),
     // Worktree GC.
     sweepWorktrees: vi.fn(async () => h.gcReport),
+    // Stale claim reap.
+    releaseStaleClaims: vi.fn(async () => h.staleClaims),
     formatGcReport: vi.fn(
       (report: any) =>
         `GC_REPORT:${report.dryRun ? 'dry' : 'real'}:removed=${report.removed.length}:kept=${report.kept}`,
@@ -227,6 +230,7 @@ vi.mock('@on-par/factory-core/internal', async (importOriginal) => {
 import {
   cleanupWorktree,
   formatGcReport,
+  releaseStaleClaims,
   setupWorktree,
   sweepWorktrees,
   watchChecks,
@@ -368,6 +372,7 @@ beforeEach(() => {
     },
   };
   h.gcReport = { removed: [], kept: 0, dryRun: false };
+  h.staleClaims = [];
   h.runTuiCalls = [];
   h.setupWorktreeImpl = async () => {};
   h.claudeAvailable = undefined;
@@ -2833,6 +2838,46 @@ Please add a widget that does the thing.
       const res = await runMain('doctor', '--reconcile');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('reconcile: worktree sweep failed');
+    });
+
+    it('--reconcile releases stale claims and reports them', async () => {
+      h.claudeAvailable = true;
+      h.staleClaims = [{ issue: 42, label: 'factory:claimed-by:test-host-777', pid: 777, released: true }];
+
+      const res = await runMain('doctor', '--reconcile');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('reconcile: released issue #42 back to factory:queued');
+    });
+
+    it('doctor without --reconcile never calls releaseStaleClaims', async () => {
+      h.claudeAvailable = true;
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(releaseStaleClaims).not.toHaveBeenCalled();
+    });
+
+    it('--reconcile survives a rejected releaseStaleClaims', async () => {
+      h.claudeAvailable = true;
+      (releaseStaleClaims as any).mockRejectedValueOnce(new Error('claims boom'));
+      const res = await runMain('doctor', '--reconcile');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('reconcile: stale claim release failed');
+    });
+
+    it('--reconcile skips stale claims when no GitHub token is available', async () => {
+      h.claudeAvailable = true;
+      delete process.env.GITHUB_TOKEN;
+      delete process.env.GH_TOKEN;
+      h.execSyncImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('status --porcelain')) return '';
+        if (cmd.includes('gh auth token')) throw new Error('not logged in');
+        if (cmd.includes('gh auth status')) throw new Error('not logged in');
+        return '';
+      };
+      await runMain('doctor', '--reconcile');
+      expect(logged()).toContain('reconcile: skipping stale claims — no GitHub repo or token');
+      expect(releaseStaleClaims).not.toHaveBeenCalled();
     });
   });
 
