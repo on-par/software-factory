@@ -394,6 +394,7 @@ const INTERNAL_API_KEYS = [
   'createMicroVm',
   'microVmName',
   'removeMicroVm',
+  'worktreeSandboxFor',
   'shellEscape',
   'slugify',
   'watchChecks',

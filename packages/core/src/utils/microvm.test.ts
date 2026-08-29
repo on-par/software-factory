@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ExecFn } from './exec.js';
-import { createMicroVm, type MicroVmLifecycleOptions, microVmName, removeMicroVm } from './microvm.js';
+import {
+  createMicroVm,
+  type MicroVmLifecycleOptions,
+  microVmName,
+  removeMicroVm,
+  worktreeSandboxFor,
+} from './microvm.js';
 
 function makeExec(impl: (cmd: string) => Promise<{ stdout: string; stderr: string }>): ExecFn {
   return vi.fn(impl);
@@ -19,6 +25,22 @@ function baseOpts(overrides: Partial<MicroVmLifecycleOptions> = {}): MicroVmLife
     ...overrides,
   };
 }
+
+describe('worktreeSandboxFor', () => {
+  it('returns undefined for every runtime but docker-sandbox', () => {
+    expect(worktreeSandboxFor('sandbox-exec')).toBeUndefined();
+    expect(worktreeSandboxFor('firejail')).toBeUndefined();
+    expect(worktreeSandboxFor('none')).toBeUndefined();
+    expect(worktreeSandboxFor(undefined)).toBeUndefined();
+  });
+
+  it('builds authPaths for ~/.claude, ~/.codex, ~/.npm under the given home', () => {
+    expect(worktreeSandboxFor('docker-sandbox', { homedir: '/home/user' })).toEqual({
+      runtime: 'docker-sandbox',
+      authPaths: ['/home/user/.claude', '/home/user/.codex', '/home/user/.npm'],
+    });
+  });
+});
 
 describe('microVmName', () => {
   it('is deterministic for the same worktree path', () => {

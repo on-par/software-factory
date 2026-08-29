@@ -3,7 +3,7 @@
 import { exec as execCb, execSync } from 'node:child_process';
 import { existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { homedir, userInfo } from 'node:os';
+import { userInfo } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -172,6 +172,7 @@ import {
   releaseStaleClaims,
   resolveBranchPrefix,
   resolveEffectiveConfig,
+  worktreeSandboxFor,
   resolveExperimental,
   resolveFilingPolicy,
   resolveLocalOnly,
@@ -1114,14 +1115,8 @@ export async function shipIssue(
     cliDisabled: opts.sandbox === false,
     laneId: lane,
   });
-  laneSandboxRuntime = sandboxPolicy?.runtime ?? 'none';
-  const worktreeSandbox: WorktreeSandbox | undefined =
-    sandboxPolicy?.runtime === 'docker-sandbox'
-      ? {
-          runtime: 'docker-sandbox',
-          authPaths: [resolve(homedir(), '.claude'), resolve(homedir(), '.codex'), resolve(homedir(), '.npm')],
-        }
-      : undefined;
+  laneSandboxRuntime = sandboxPolicy?.runtime ?? "none";
+  const worktreeSandbox: WorktreeSandbox | undefined = worktreeSandboxFor(sandboxPolicy?.runtime);
   let activeSandboxPolicy: SandboxPolicy | undefined;
   if (opts.sandbox === false) {
     console.error(chalk.yellow('factory: sandbox disabled by --no-sandbox — agent runs are UNCONTAINED'));
@@ -1887,13 +1882,7 @@ async function landIssue(
     worktree,
     repoRoot,
   });
-  const worktreeSandbox: WorktreeSandbox | undefined =
-    landSandboxPolicy?.runtime === 'docker-sandbox'
-      ? {
-          runtime: 'docker-sandbox',
-          authPaths: [resolve(homedir(), '.claude'), resolve(homedir(), '.codex'), resolve(homedir(), '.npm')],
-        }
-      : undefined;
+  const worktreeSandbox: WorktreeSandbox | undefined = worktreeSandboxFor(landSandboxPolicy?.runtime);
 
   const withLandLock: LandLock = (fn) =>
     withGitLock(repoRoot, () =>

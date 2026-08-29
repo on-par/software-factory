@@ -11,6 +11,7 @@
 // shellQuote is duplicated (mirrors utils/index.ts's shellEscape) rather than imported.
 
 import { createHash } from 'node:crypto';
+import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
 import type { EventKind } from '../events/kinds.js';
@@ -39,6 +40,22 @@ export interface WorktreeSandbox {
   authPaths: string[];
   exec?: ExecFn;
   isAvailable?: (cmd: string) => boolean;
+}
+
+/** Builds the `WorktreeSandbox` descriptor for a resolved sandbox runtime, or
+ *  undefined for every runtime but docker-sandbox — the only one with a microVM
+ *  lifecycle. Shared by shipIssue/landIssue so both derive the same authPaths
+ *  from one place instead of re-deriving them inline (#653). */
+export function worktreeSandboxFor(
+  runtime: SandboxRuntime | undefined,
+  opts: { homedir?: string } = {},
+): WorktreeSandbox | undefined {
+  if (runtime !== 'docker-sandbox') return undefined;
+  const home = opts.homedir ?? homedir();
+  return {
+    runtime: 'docker-sandbox',
+    authPaths: [resolve(home, '.claude'), resolve(home, '.codex'), resolve(home, '.npm')],
+  };
 }
 
 export interface MicroVmLifecycleOptions extends WorktreeSandbox {

@@ -164,7 +164,7 @@ export {
   slugify,
 } from './utils/index.js';
 export type { MicroVmLifecycleOptions, WorktreeSandbox } from './utils/microvm.js';
-export { createMicroVm, microVmName, removeMicroVm } from './utils/microvm.js';
+export { createMicroVm, microVmName, removeMicroVm, worktreeSandboxFor } from './utils/microvm.js';
 export type { FileLockOptions, SyncFileLockOptions } from './utils/lock.js';
 export { withFileLock, withFileLockSync, withGitLock } from './utils/lock.js';
 export type { RunLockHolder, RunLockOptions } from './utils/run-lock.js';
