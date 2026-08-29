@@ -126,10 +126,12 @@ function sbplPath(path: string): string {
 
 /** Anchored SBPL regex literal for a writable path prefix. Regex-escape first, then
  *  escape for the SBPL string literal (backslashes are doubled so they survive to the
- *  regex engine). */
+ *  regex engine) — backslash and quote are escaped in a single pass so the quote step
+ *  can never see (and re-escape) a backslash the backslash step just inserted. */
 function sbplRegexPrefix(path: string): string {
   const escaped = path.replace(/[\\^$.|?*+()[\]{}]/g, '\\$&');
-  return `#"^${escaped.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  const sbplEscaped = escaped.replace(/[\\"]/g, (ch) => (ch === '\\' ? '\\\\' : '\\"'));
+  return `#"^${sbplEscaped}"`;
 }
 
 /** Renders the macOS Seatbelt (SBPL) profile for a resolved policy. */
