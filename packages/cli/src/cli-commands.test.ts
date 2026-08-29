@@ -2792,6 +2792,48 @@ Please add a widget that does the thing.
       expect(logged()).toContain('unparseable');
       expect(logged()).toContain('(20.0%)');
     });
+
+    it('--reconcile sweeps dead-run worktrees and reports them', async () => {
+      h.claudeAvailable = true;
+      h.gcReport = {
+        removed: [
+          {
+            path: '/wt/a',
+            branch: 'ship-it/5-x',
+            ageDays: 1,
+            reason: 'merged',
+            scrubbedFiles: [],
+            branchDeleted: true,
+          },
+        ],
+        kept: 0,
+        dryRun: false,
+      };
+
+      const res = await runMain('doctor', '--reconcile');
+      expect(res.exited).toBe(false);
+      expect(sweepWorktrees).toHaveBeenCalledWith(
+        expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7 }),
+        expect.anything(),
+      );
+      expect(logged()).toContain('reconcile: removed worktree /wt/a');
+      expect(logged()).toContain('deleted branch ship-it/5-x');
+    });
+
+    it('doctor without --reconcile never sweeps worktrees', async () => {
+      h.claudeAvailable = true;
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(sweepWorktrees).not.toHaveBeenCalled();
+    });
+
+    it('--reconcile survives a failing worktree sweep', async () => {
+      h.claudeAvailable = true;
+      (sweepWorktrees as any).mockRejectedValueOnce(new Error('gc boom'));
+      const res = await runMain('doctor', '--reconcile');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('reconcile: worktree sweep failed');
+    });
   });
 
   describe('git/github detection failures', () => {

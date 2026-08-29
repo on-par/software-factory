@@ -668,6 +668,145 @@ describe('sweepWorktrees', () => {
       ),
     ).toBe(false);
   });
+
+  it('deletes the branch of a merged worktree after git worktree prune', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-30`;
+    const wt = makeWorktree(wtName);
+
+    const commands: string[] = [];
+    const runCommand = async (cmd: string) => {
+      commands.push(cmd);
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/30-feature\n\n`,
+        };
+      }
+      if (cmd === 'git rev-parse --verify origin/main') {
+        return { stdout: 'aaa\n' };
+      }
+      if (cmd.startsWith('git merge-base --is-ancestor')) {
+        return { stdout: '' }; // exit 0 => ancestor => merged
+      }
+      if (cmd.includes('rev-parse --verify --quiet')) {
+        return { stdout: 'bbb\n' }; // prior-push evidence
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand });
+    expect(report.removed).toHaveLength(1);
+    expect(report.removed[0].reason).toBe('merged');
+    expect(report.removed[0].branchDeleted).toBe(true);
+
+    const pruneIdx = commands.indexOf('git worktree prune');
+    const branchDeleteIdx = commands.indexOf("git branch -D 'ship-it/30-feature'");
+    expect(pruneIdx).toBeGreaterThan(-1);
+    expect(branchDeleteIdx).toBeGreaterThan(pruneIdx);
+  });
+
+  it('deletes the branch of a remote-gone worktree', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-31`;
+    const wt = makeWorktree(wtName);
+
+    const commands: string[] = [];
+    const runCommand = async (cmd: string) => {
+      commands.push(cmd);
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/31-feature\n\n`,
+        };
+      }
+      if (cmd.startsWith('git merge-base --is-ancestor')) {
+        throw new Error('exit 1'); // not an ancestor
+      }
+      if (cmd.startsWith('git ls-remote')) {
+        return { stdout: '' }; // empty => remote gone
+      }
+      if (cmd.includes('rev-parse --verify --quiet')) {
+        return { stdout: 'bbb\n' }; // prior-push evidence
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand });
+    expect(report.removed).toHaveLength(1);
+    expect(report.removed[0].reason).toBe('remote-gone');
+    expect(report.removed[0].branchDeleted).toBe(true);
+
+    const pruneIdx = commands.indexOf('git worktree prune');
+    const branchDeleteIdx = commands.indexOf("git branch -D 'ship-it/31-feature'");
+    expect(pruneIdx).toBeGreaterThan(-1);
+    expect(branchDeleteIdx).toBeGreaterThan(pruneIdx);
+  });
+
+  it('keeps the branch of a ttl-expired worktree', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-32`;
+    const eightDaysMs = 8 * 24 * 60 * 60 * 1000;
+    const wt = makeWorktree(wtName, eightDaysMs);
+
+    const commands: string[] = [];
+    const runCommand = async (cmd: string) => {
+      commands.push(cmd);
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/32-feature\n\n`,
+        };
+      }
+      if (cmd.startsWith('git merge-base --is-ancestor')) {
+        throw new Error('exit 1');
+      }
+      if (cmd.startsWith('git ls-remote')) {
+        return { stdout: 'bbb\trefs/heads/ship-it/32-feature\n' };
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand, now: () => Date.now() });
+    expect(report.removed).toHaveLength(1);
+    expect(report.removed[0].reason).toBe('ttl-expired');
+    expect(report.removed[0].branchDeleted).toBe(false);
+    expect(commands.some((c) => c.startsWith('git branch -D'))).toBe(false);
+  });
+
+  it('warns and does not fail the sweep when git branch -D fails', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-33`;
+    const wt = makeWorktree(wtName);
+
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/33-feature\n\n`,
+        };
+      }
+      if (cmd === 'git rev-parse --verify origin/main') {
+        return { stdout: 'aaa\n' };
+      }
+      if (cmd.startsWith('git merge-base --is-ancestor')) {
+        return { stdout: '' };
+      }
+      if (cmd.includes('rev-parse --verify --quiet')) {
+        return { stdout: 'bbb\n' };
+      }
+      if (cmd.startsWith('git branch -D')) {
+        throw new Error('branch is checked out');
+      }
+      return { stdout: '' };
+    };
+
+    const logs: Array<[string, string]> = [];
+    const report = await sweepWorktrees(
+      { repoRoot: root, ttlDays: 7 },
+      { runCommand, log: (type, msg) => logs.push([type, msg]) },
+    );
+    expect(report.removed).toHaveLength(1);
+    expect(report.removed[0].reason).toBe('merged');
+    expect(report.removed[0].branchDeleted).toBe(false);
+    expect(logs.some(([type, msg]) => type === 'warn' && /git branch -D failed/.test(msg))).toBe(true);
+  });
 });
 
 describe('sweepWorktrees with GitHub PR evidence', () => {
@@ -1083,6 +1222,7 @@ describe('formatGcReport', () => {
           ageDays: 3.2,
           reason: 'merged',
           scrubbedFiles: [],
+          branchDeleted: false,
         },
       ],
     });
@@ -1101,6 +1241,7 @@ describe('formatGcReport', () => {
           ageDays: 10,
           reason: 'ttl-expired',
           scrubbedFiles: ['/repo/foo-factory-ship-it-2/.env'],
+          branchDeleted: false,
         },
       ],
     });
@@ -1108,5 +1249,41 @@ describe('formatGcReport', () => {
       '/repo/foo-factory-ship-it-2 (detached, 10d old) — ttl-expired, scrubbed 1 credential file(s)',
     );
     expect(text).toContain('removed 1 worktree(s), kept 0');
+  });
+
+  it('renders a deleted-branch suffix when branchDeleted is true', () => {
+    const text = formatGcReport({
+      dryRun: false,
+      kept: 0,
+      removed: [
+        {
+          path: '/repo/foo-factory-ship-it-3',
+          branch: 'ship-it/3-x',
+          ageDays: 1,
+          reason: 'merged',
+          scrubbedFiles: [],
+          branchDeleted: true,
+        },
+      ],
+    });
+    expect(text).toContain('/repo/foo-factory-ship-it-3 (ship-it/3-x, 1d old) — merged, deleted branch ship-it/3-x');
+  });
+
+  it('omits the deleted-branch suffix when branchDeleted is false', () => {
+    const text = formatGcReport({
+      dryRun: false,
+      kept: 0,
+      removed: [
+        {
+          path: '/repo/foo-factory-ship-it-4',
+          branch: 'ship-it/4-x',
+          ageDays: 1,
+          reason: 'ttl-expired',
+          scrubbedFiles: [],
+          branchDeleted: false,
+        },
+      ],
+    });
+    expect(text).not.toContain('deleted branch');
   });
 });

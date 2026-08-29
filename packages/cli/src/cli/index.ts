@@ -190,6 +190,7 @@ import {
   eventLogCheck,
   formatDoctorChecks,
   formatReconcileReport,
+  formatWorktreeReconcileReport,
   leaseChecks,
   type LeaseHealthRow,
   runDoctorChecks,
@@ -3534,17 +3535,39 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     checks.push(eventLogCheck(eventsContent === null ? null : analyzeEventLog(eventsContent)));
 
     if (opts.reconcile) {
+      const factoryConfig = loadFactoryConfigForRepo(paths.config);
+
       const reaped = await reapStalePortLeases({ registryFile: paths.ports, lockDir: paths.portsLock });
       console.log(formatReconcileReport(reaped));
 
       if (reaped.length > 0) {
-        const graceMs = resolveProcessGroupGraceMs(loadFactoryConfigForRepo(paths.config));
+        const graceMs = resolveProcessGroupGraceMs(factoryConfig);
         const orphanEvents = await reapOrphanProcesses({ reaped, graceMs });
         for (const e of orphanEvents) {
           console.log(
             `reconcile: ${e.action === 'killed' ? 'killed' : 'found'} pid ${e.pid} (pgid ${e.pgid}, ${e.command}) squatting port ${e.port} of dead lane ${e.worktreeId}${e.action === 'reported' ? ' — not factory-started, left running' : ''}`,
           );
         }
+      }
+
+      // Full run-lifecycle reap (#998): dead-run worktrees and their branches. Uses the same
+      // GitHub evidence and the same lock pairing as `factory worktree gc` (cmdWorktreeGc) —
+      // a merged or closed PR is what makes a worktree reapable.
+      try {
+        const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
+        const ghRepo = await getGitHubRepo().catch(() => undefined);
+        const octokit = ghRepo && hasGitHubToken() ? getOctokit() : undefined;
+        const report = await withGitLock(repoRoot, () =>
+          withFileLock(paths.gitLock, () =>
+            sweepWorktrees(
+              { repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays, repo: ghRepo },
+              { log: gcLog, octokit },
+            ),
+          ),
+        );
+        console.log(formatWorktreeReconcileReport(report.removed));
+      } catch (err: any) {
+        console.log(`reconcile: worktree sweep failed — ${err?.message ?? String(err)}`);
       }
     }
   }

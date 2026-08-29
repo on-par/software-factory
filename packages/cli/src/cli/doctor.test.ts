@@ -7,6 +7,7 @@ import {
   eventLogCheck,
   formatDoctorChecks,
   formatReconcileReport,
+  formatWorktreeReconcileReport,
   leaseChecks,
   type LeaseHealthRow,
   runDoctorChecks,
@@ -321,6 +322,39 @@ describe('formatReconcileReport', () => {
     expect(report).toBe(
       'reconcile: freed port 3100 (worktree /wt/a, reason dead-pid)\n' +
         'reconcile: freed port 3101 (worktree /wt/b, reason missing-worktree)',
+    );
+  });
+});
+
+describe('formatWorktreeReconcileReport', () => {
+  it('reports no dead-run worktrees when empty', () => {
+    expect(formatWorktreeReconcileReport([])).toBe('reconcile: no dead-run worktrees');
+  });
+
+  it('reports a removed worktree with its deleted branch', () => {
+    const report = formatWorktreeReconcileReport([
+      { path: '/wt/a', branch: 'ship-it/5-x', reason: 'merged', branchDeleted: true },
+    ]);
+    expect(report).toBe(
+      'reconcile: removed worktree /wt/a (branch ship-it/5-x, reason merged), deleted branch ship-it/5-x',
+    );
+  });
+
+  it('renders a detached worktree with no deleted-branch suffix', () => {
+    const report = formatWorktreeReconcileReport([
+      { path: '/wt/b', branch: null, reason: 'ttl-expired', branchDeleted: false },
+    ]);
+    expect(report).toBe('reconcile: removed worktree /wt/b (branch detached, reason ttl-expired)');
+  });
+
+  it('joins multiple entries with a single newline', () => {
+    const report = formatWorktreeReconcileReport([
+      { path: '/wt/a', branch: 'ship-it/5-x', reason: 'merged', branchDeleted: true },
+      { path: '/wt/b', branch: null, reason: 'ttl-expired', branchDeleted: false },
+    ]);
+    expect(report).toBe(
+      'reconcile: removed worktree /wt/a (branch ship-it/5-x, reason merged), deleted branch ship-it/5-x\n' +
+        'reconcile: removed worktree /wt/b (branch detached, reason ttl-expired)',
     );
   });
 });

@@ -32,6 +32,10 @@ export interface GcCandidate {
   ageDays: number;
   reason: GcReason;
   scrubbedFiles: string[];
+  /** True when the candidate's local branch was force-deleted after removal. False when the
+   *  reason was not branch-reapable, when the candidate was detached, when this was a dry run,
+   *  or when `git branch -D` failed (a warn is logged in that last case). */
+  branchDeleted: boolean;
 }
 
 export interface GcReport {
@@ -49,6 +53,11 @@ export interface SweepDeps {
 }
 
 const CREDENTIAL_BASENAMES = new Set(['.git-credentials', '.npmrc']);
+
+/** Removal reasons that prove the work reached the remote — the only ones whose local
+ *  branch is safe to force-delete. `ttl-expired` fires on age alone and is excluded:
+ *  its branch may be the last reachable handle on unpushed commits. See ADR (this PR). */
+const BRANCH_REAPABLE_REASONS: ReadonlySet<GcReason> = new Set<GcReason>(['merged', 'remote-gone']);
 
 export function parseWorktreeList(porcelain: string): WorktreeListEntry[] {
   const entries: WorktreeListEntry[] = [];
@@ -350,6 +359,7 @@ export async function sweepWorktrees(
       ageDays,
       reason,
       scrubbedFiles: [],
+      branchDeleted: false,
     });
   }
 
@@ -384,7 +394,27 @@ export async function sweepWorktrees(
     log('warn', `git worktree prune failed in ${repoRoot}: ${err?.message ?? String(err)}`),
   );
 
+  await deleteReapedBranches(removed, repoRoot, runCommand, log);
+
   return { removed, kept, dryRun: false };
+}
+
+async function deleteReapedBranches(
+  candidates: GcCandidate[],
+  repoRoot: string,
+  runCommand: NonNullable<SweepDeps['runCommand']>,
+  log: (type: EventKind, msg: string) => void,
+): Promise<void> {
+  for (const candidate of candidates) {
+    if (candidate.branch === null) continue;
+    if (!BRANCH_REAPABLE_REASONS.has(candidate.reason)) continue;
+    try {
+      await runCommand(`git branch -D ${shellEscape(candidate.branch)}`, { cwd: repoRoot });
+      candidate.branchDeleted = true;
+    } catch (err: any) {
+      log('warn', `git branch -D failed for ${candidate.branch}: ${err?.message ?? String(err)}`);
+    }
+  }
 }
 
 function computeAgeDays(worktreePath: string, now: () => number, log: (type: EventKind, msg: string) => void): number {
@@ -410,6 +440,9 @@ export function formatGcReport(report: GcReport): string {
     let line = `${candidate.path} (${branchLabel}, ${age}d old) — ${candidate.reason}`;
     if (candidate.scrubbedFiles.length > 0) {
       line += `, scrubbed ${candidate.scrubbedFiles.length} credential file(s)`;
+    }
+    if (candidate.branchDeleted && candidate.branch !== null) {
+      line += `, deleted branch ${candidate.branch}`;
     }
     lines.push(line);
   }

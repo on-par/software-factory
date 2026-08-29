@@ -284,3 +284,24 @@ export function formatReconcileReport(
     .map((r) => `reconcile: freed port ${r.lease.port} (worktree ${r.lease.worktreeId}, reason ${r.reason})`)
     .join('\n');
 }
+
+/** One worktree the reconcile pass removed. Structurally the subset of core's `GcCandidate`
+ *  that the report renders — kept local so `doctor.ts` stays dependency-free and unit-testable. */
+export interface ReconciledWorktree {
+  path: string;
+  branch: string | null;
+  reason: string;
+  branchDeleted: boolean;
+}
+
+export function formatWorktreeReconcileReport(removed: ReconciledWorktree[]): string {
+  if (removed.length === 0) return 'reconcile: no dead-run worktrees';
+
+  return removed
+    .map((w) => {
+      const branchLabel = w.branch ?? 'detached';
+      const deleted = w.branchDeleted ? `, deleted branch ${w.branch}` : '';
+      return `reconcile: removed worktree ${w.path} (branch ${branchLabel}, reason ${w.reason})${deleted}`;
+    })
+    .join('\n');
+}
