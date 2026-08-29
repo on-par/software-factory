@@ -5,9 +5,11 @@ import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  factoryWorktreeIssue,
   findCredentialFiles,
   formatGcReport,
   parseWorktreeList,
+  reapLaneWorktree,
   scrubFile,
   sweepWorktrees,
   zeroFill,
@@ -1279,6 +1281,521 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
   });
 });
 
+describe('sweepWorktrees with issue-state evidence', () => {
+  let repoRoot: string;
+  let parentDir: string;
+
+  function makeWorktree(name: string): string {
+    const path = join(parentDir, name);
+    mkdirSync(path, { recursive: true });
+    writeFileSync(join(path, '.git'), 'gitdir: /somewhere');
+    return path;
+  }
+
+  function setup() {
+    parentDir = mkdtempSync(join(tmpdir(), 'gc-parent-'));
+    repoRoot = join(parentDir, 'repo');
+    mkdirSync(repoRoot, { recursive: true });
+    return { parentDir, repoRoot };
+  }
+
+  afterEach(() => {
+    if (parentDir) rmSync(parentDir, { recursive: true, force: true });
+  });
+
+  interface IssueStateOctokitDouble {
+    rest: {
+      pulls: { list: (args: any) => Promise<any> };
+      issues: { get: (args: any) => Promise<any> };
+    };
+  }
+
+  function asIssueOctokit(double: IssueStateOctokitDouble): NonNullable<SweepDeps['octokit']> {
+    return double as NonNullable<SweepDeps['octokit']>;
+  }
+
+  function fakeOctokit(opts: {
+    pulls?: () => Promise<{ data: Array<Record<string, unknown>> }> | { data: Array<Record<string, unknown>> };
+    issue?: () =>
+      | Promise<{ data: { state: string; labels: Array<string | { name?: string }> } }>
+      | { data: { state: string; labels: Array<string | { name?: string }> } };
+  }) {
+    const pullsList = vi.fn(async (_params: unknown) => (opts.pulls ? opts.pulls() : { data: [] }));
+    const issuesGet = vi.fn(async (_params: unknown) => {
+      if (!opts.issue) throw new Error('unexpected issues.get call');
+      return opts.issue();
+    });
+    const octokit = asIssueOctokit({ rest: { pulls: { list: pullsList }, issues: { get: issuesGet } } });
+    return { octokit, pullsList, issuesGet };
+  }
+
+  it("reaps a parked issue's worktree over an open PR", async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-40`;
+    const wt = makeWorktree(wtName);
+
+    const { octokit, issuesGet } = fakeOctokit({
+      pulls: () => ({ data: [{ number: 1, state: 'open' }] }),
+      issue: () => ({ data: { state: 'open', labels: ['factory:parked'] } }),
+    });
+
+    const commands: string[] = [];
+    const runCommand = async (cmd: string) => {
+      commands.push(cmd);
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/40-feature\n\n`,
+        };
+      }
+      return { stdout: '' }; // status probe => clean, push-evidence probes => none
+    };
+
+    const report = await sweepWorktrees(
+      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { runCommand, octokit },
+    );
+    expect(report.removed).toHaveLength(1);
+    expect(report.removed[0].reason).toBe('issue-parked');
+    expect(issuesGet).toHaveBeenCalledWith({ owner: 'on-par', repo: 'sound-buddy', issue_number: 40 });
+    expect(commands.some((c) => c.includes('worktree remove'))).toBe(true);
+  });
+
+  it("reaps a closed issue's worktree", async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-41`;
+    const wt = makeWorktree(wtName);
+
+    const { octokit } = fakeOctokit({
+      pulls: () => ({ data: [{ number: 1, state: 'open' }] }),
+      issue: () => ({ data: { state: 'closed', labels: [] } }),
+    });
+
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/41-feature\n\n`,
+        };
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees(
+      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { runCommand, octokit },
+    );
+    expect(report.removed).toHaveLength(1);
+    expect(report.removed[0].reason).toBe('issue-closed');
+  });
+
+  it('deletes the branch of a reaped parked worktree only with push evidence', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-42`;
+    const wt = makeWorktree(wtName);
+
+    const { octokit } = fakeOctokit({ issue: () => ({ data: { state: 'closed', labels: [] } }) });
+    const commands: string[] = [];
+    const runCommand = async (cmd: string) => {
+      commands.push(cmd);
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/42-feature\n\n`,
+        };
+      }
+      if (cmd.includes('rev-parse --verify --quiet')) {
+        return { stdout: 'bbb\n' }; // prior-push evidence
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees(
+      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { runCommand, octokit },
+    );
+    expect(report.removed[0].reason).toBe('issue-closed');
+    expect(report.removed[0].branchDeleted).toBe(true);
+    expect(commands.some((c) => c === "git branch -D 'ship-it/42-feature'")).toBe(true);
+  });
+
+  it('does not delete the branch of a reaped closed worktree with zero push evidence', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-43`;
+    const wt = makeWorktree(wtName);
+
+    const { octokit } = fakeOctokit({ issue: () => ({ data: { state: 'closed', labels: [] } }) });
+    const commands: string[] = [];
+    const runCommand = async (cmd: string) => {
+      commands.push(cmd);
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/43-feature\n\n`,
+        };
+      }
+      return { stdout: '' }; // every push-evidence probe empty
+    };
+
+    const report = await sweepWorktrees(
+      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { runCommand, octokit },
+    );
+    expect(report.removed[0].reason).toBe('issue-closed');
+    expect(report.removed[0].branchDeleted).toBe(false);
+    expect(commands.some((c) => c.startsWith('git branch -D'))).toBe(false);
+  });
+
+  it('keeps a dirty parked worktree', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-44`;
+    const wt = makeWorktree(wtName);
+
+    const { octokit, issuesGet } = fakeOctokit({
+      issue: () => ({ data: { state: 'open', labels: ['factory:parked'] } }),
+    });
+    const commands: string[] = [];
+    const logs: Array<[string, string]> = [];
+    const runCommand = async (cmd: string) => {
+      commands.push(cmd);
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/44-feature\n\n`,
+        };
+      }
+      if (cmd.startsWith('git status --porcelain')) {
+        return { stdout: ' M src/a.ts\n' };
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees(
+      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { runCommand, octokit, log: (type, msg) => logs.push([type, msg]) },
+    );
+    expect(issuesGet).toHaveBeenCalled();
+    expect(report.removed).toHaveLength(0);
+    expect(report.kept).toBe(1);
+    expect(commands.some((c) => c.includes('worktree remove'))).toBe(false);
+    expect(logs.some(([type, msg]) => type === 'warn' && msg.includes('uncommitted changes'))).toBe(true);
+    expect(existsSync(wt)).toBe(true);
+  });
+
+  it('keeps a parked worktree held by a live lane', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-45`;
+    const wt = makeWorktree(wtName);
+
+    const { octokit, issuesGet } = fakeOctokit({
+      issue: () => ({ data: { state: 'open', labels: ['factory:parked'] } }),
+    });
+    const logs: Array<[string, string]> = [];
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/45-feature\n\n`,
+        };
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees(
+      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { runCommand, octokit, isLaneLive: () => true, log: (type, msg) => logs.push([type, msg]) },
+    );
+    expect(issuesGet).toHaveBeenCalled();
+    expect(report.removed).toHaveLength(0);
+    expect(report.kept).toBe(1);
+    expect(logs.some(([type, msg]) => type === 'warn' && msg.includes('live lane holds it'))).toBe(true);
+    expect(existsSync(wt)).toBe(true);
+  });
+
+  it("falls back to today's rules with no issue verdict", async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-46`;
+    const wt = makeWorktree(wtName);
+
+    const { octokit } = fakeOctokit({
+      pulls: () => ({ data: [{ number: 1, state: 'open' }] }),
+      issue: () => {
+        throw new Error('rate limited');
+      },
+    });
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/46-feature\n\n`,
+        };
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees(
+      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { runCommand, octokit },
+    );
+    expect(report.removed).toHaveLength(0);
+    expect(report.kept).toBe(1);
+    expect(existsSync(wt)).toBe(true);
+  });
+
+  it('admits the legacy path form', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-ship-it-47`;
+    const wt = makeWorktree(wtName);
+
+    const { octokit } = fakeOctokit({ issue: () => ({ data: { state: 'closed', labels: [] } }) });
+    const commands: string[] = [];
+    const runCommand = async (cmd: string) => {
+      commands.push(cmd);
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/47-feature\n\n`,
+        };
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees(
+      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { runCommand, octokit },
+    );
+    expect(report.removed).toHaveLength(1);
+    expect(report.removed[0].reason).toBe('issue-closed');
+    expect(commands.some((c) => c.includes('worktree remove'))).toBe(true);
+  });
+
+  it('ignores an experiment worktree', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-ship-it-experiment`;
+    makeWorktree(wtName);
+
+    const { octokit, issuesGet } = fakeOctokit({});
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${parentDir}/${wtName}\nHEAD bbb\nbranch refs/heads/experiment\n\n`,
+        };
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand, octokit });
+    expect(report.removed).toHaveLength(0);
+    expect(report.kept).toBe(0);
+    expect(issuesGet).not.toHaveBeenCalled();
+  });
+});
+
+describe('reapLaneWorktree', () => {
+  let repoRoot: string;
+  let parentDir: string;
+
+  function makeWorktree(name: string): string {
+    const path = join(parentDir, name);
+    mkdirSync(path, { recursive: true });
+    writeFileSync(join(path, '.git'), 'gitdir: /somewhere');
+    return path;
+  }
+
+  function setup() {
+    parentDir = mkdtempSync(join(tmpdir(), 'gc-parent-'));
+    repoRoot = join(parentDir, 'repo');
+    mkdirSync(repoRoot, { recursive: true });
+    return { parentDir, repoRoot };
+  }
+
+  afterEach(() => {
+    if (parentDir) rmSync(parentDir, { recursive: true, force: true });
+  });
+
+  it('removes a clean registered worktree, scrubbing credentials before removal and pruning after', async () => {
+    const { repoRoot: root } = setup();
+    const wt = makeWorktree(`${basename(root)}-factory-ship-it-50`);
+    writeFileSync(join(wt, '.env'), 'SECRET=1');
+
+    const commands: string[] = [];
+    const runCommand = async (cmd: string) => {
+      commands.push(cmd);
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/50-feature\n\n`,
+        };
+      }
+      return { stdout: '' }; // status clean, push-evidence probes empty
+    };
+
+    const result = await reapLaneWorktree({ repoRoot: root, worktreePath: wt }, { runCommand });
+    expect(result.outcome).toBe('removed');
+    expect(result.branch).toBe('ship-it/50-feature');
+    expect(result.scrubbedFiles).toEqual([join(wt, '.env')]);
+    expect(existsSync(join(wt, '.env'))).toBe(false);
+
+    const removeIdx = commands.indexOf(`git worktree remove --force '${wt}'`);
+    const pruneIdx = commands.indexOf('git worktree prune');
+    expect(removeIdx).toBeGreaterThan(-1);
+    expect(pruneIdx).toBeGreaterThan(removeIdx);
+  });
+
+  it('reports dirty and leaves the worktree in place', async () => {
+    const { repoRoot: root } = setup();
+    const wt = makeWorktree(`${basename(root)}-factory-ship-it-51`);
+
+    const commands: string[] = [];
+    const logs: Array<[string, string]> = [];
+    const runCommand = async (cmd: string) => {
+      commands.push(cmd);
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/51-feature\n\n`,
+        };
+      }
+      if (cmd.startsWith('git status --porcelain')) {
+        return { stdout: ' M src/a.ts\n' };
+      }
+      return { stdout: '' };
+    };
+
+    const result = await reapLaneWorktree(
+      { repoRoot: root, worktreePath: wt },
+      { runCommand, log: (type, msg) => logs.push([type, msg]) },
+    );
+    expect(result.outcome).toBe('dirty');
+    expect(commands.some((c) => c.includes('worktree remove'))).toBe(false);
+    expect(logs.some(([type, msg]) => type === 'warn' && msg.includes('uncommitted changes'))).toBe(true);
+    expect(existsSync(wt)).toBe(true);
+  });
+
+  it('reports absent when the path is not a registered worktree, running only prune', async () => {
+    const { repoRoot: root } = setup();
+    const wt = join(parentDir, `${basename(root)}-factory-ship-it-52`);
+
+    const commands: string[] = [];
+    const runCommand = async (cmd: string) => {
+      commands.push(cmd);
+      if (cmd === 'git worktree list --porcelain') {
+        return { stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\n` };
+      }
+      return { stdout: '' };
+    };
+
+    const result = await reapLaneWorktree({ repoRoot: root, worktreePath: wt }, { runCommand });
+    expect(result.outcome).toBe('absent');
+    expect(result.branch).toBeNull();
+    expect(commands).toEqual(['git worktree list --porcelain', 'git worktree prune']);
+  });
+
+  it('reports failed and does not rmSync the directory when git worktree remove rejects', async () => {
+    const { repoRoot: root } = setup();
+    const wt = makeWorktree(`${basename(root)}-factory-ship-it-53`);
+
+    const logs: Array<[string, string]> = [];
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/53-feature\n\n`,
+        };
+      }
+      if (cmd.includes('worktree remove')) {
+        throw new Error('remove failed');
+      }
+      return { stdout: '' };
+    };
+
+    const result = await reapLaneWorktree(
+      { repoRoot: root, worktreePath: wt },
+      { runCommand, log: (type, msg) => logs.push([type, msg]) },
+    );
+    expect(result.outcome).toBe('failed');
+    expect(logs.some(([type, msg]) => type === 'warn' && msg.includes('git worktree remove failed'))).toBe(true);
+    expect(existsSync(wt)).toBe(true);
+  });
+
+  it('deletes the branch only with push evidence', async () => {
+    const { repoRoot: root } = setup();
+    const wtPushed = makeWorktree(`${basename(root)}-factory-ship-it-54`);
+    const commandsPushed: string[] = [];
+    const runCommandPushed = async (cmd: string) => {
+      commandsPushed.push(cmd);
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wtPushed}\nHEAD bbb\nbranch refs/heads/ship-it/54-feature\n\n`,
+        };
+      }
+      if (cmd.includes('rev-parse --verify --quiet')) {
+        return { stdout: 'bbb\n' };
+      }
+      return { stdout: '' };
+    };
+    const pushedResult = await reapLaneWorktree(
+      { repoRoot: root, worktreePath: wtPushed },
+      { runCommand: runCommandPushed },
+    );
+    expect(pushedResult.branchDeleted).toBe(true);
+    expect(commandsPushed.some((c) => c === "git branch -D 'ship-it/54-feature'")).toBe(true);
+
+    const wtUnpushed = makeWorktree(`${basename(root)}-factory-ship-it-55`);
+    const commandsUnpushed: string[] = [];
+    const runCommandUnpushed = async (cmd: string) => {
+      commandsUnpushed.push(cmd);
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wtUnpushed}\nHEAD bbb\nbranch refs/heads/ship-it/55-feature\n\n`,
+        };
+      }
+      return { stdout: '' };
+    };
+    const unpushedResult = await reapLaneWorktree(
+      { repoRoot: root, worktreePath: wtUnpushed },
+      { runCommand: runCommandUnpushed },
+    );
+    expect(unpushedResult.branchDeleted).toBe(false);
+    expect(commandsUnpushed.some((c) => c.startsWith('git branch -D'))).toBe(false);
+  });
+
+  it('removes a dirty worktree when force is true', async () => {
+    const { repoRoot: root } = setup();
+    const wt = makeWorktree(`${basename(root)}-factory-ship-it-56`);
+
+    const commands: string[] = [];
+    const runCommand = async (cmd: string) => {
+      commands.push(cmd);
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/56-feature\n\n`,
+        };
+      }
+      if (cmd.startsWith('git status --porcelain')) {
+        return { stdout: ' M src/a.ts\n' };
+      }
+      return { stdout: '' };
+    };
+
+    const result = await reapLaneWorktree({ repoRoot: root, worktreePath: wt, force: true }, { runCommand });
+    expect(result.outcome).toBe('removed');
+    expect(commands.some((c) => c.includes('worktree remove'))).toBe(true);
+    expect(commands.some((c) => c.startsWith('git status --porcelain'))).toBe(false);
+  });
+});
+
+describe('factoryWorktreeIssue', () => {
+  it('matches the current -factory- prefixed form', () => {
+    expect(factoryWorktreeIssue('/x/repo-factory-ship-it-5', 'repo')).toBe(5);
+  });
+
+  it('matches the legacy form without -factory-', () => {
+    expect(factoryWorktreeIssue('/x/repo-ship-it-9', 'repo')).toBe(9);
+  });
+
+  it('rejects a non-numeric suffix', () => {
+    expect(factoryWorktreeIssue('/x/repo-ship-it-experiment', 'repo')).toBeNull();
+  });
+
+  it('rejects an unrelated sibling', () => {
+    expect(factoryWorktreeIssue('/x/some-other-worktree', 'repo')).toBeNull();
+  });
+
+  it('respects a custom branch prefix', () => {
+    expect(factoryWorktreeIssue('/x/repo-factory-custom-3', 'repo', 'custom')).toBe(3);
+  });
+});
+
 describe('formatGcReport', () => {
   it('formats a dry-run report', () => {
     const text = formatGcReport({
@@ -1292,6 +1809,7 @@ describe('formatGcReport', () => {
           reason: 'merged',
           scrubbedFiles: [],
           branchDeleted: false,
+          branchReapable: false,
         },
       ],
     });
@@ -1311,6 +1829,7 @@ describe('formatGcReport', () => {
           reason: 'ttl-expired',
           scrubbedFiles: ['/repo/foo-factory-ship-it-2/.env'],
           branchDeleted: false,
+          branchReapable: false,
         },
       ],
     });
@@ -1332,6 +1851,7 @@ describe('formatGcReport', () => {
           reason: 'merged',
           scrubbedFiles: [],
           branchDeleted: true,
+          branchReapable: false,
         },
       ],
     });
@@ -1350,6 +1870,7 @@ describe('formatGcReport', () => {
           reason: 'ttl-expired',
           scrubbedFiles: [],
           branchDeleted: false,
+          branchReapable: false,
         },
       ],
     });
