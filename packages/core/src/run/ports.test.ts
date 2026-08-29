@@ -64,7 +64,7 @@ describe('worktreeWorkspace', () => {
       log,
     });
 
-    expect(setup).toHaveBeenCalledWith('/repo', 'issue-1', '/repo/.worktrees/issue-1', 'origin/main', undefined);
+    expect(setup).toHaveBeenCalledWith('/repo', 'issue-1', '/repo/.worktrees/issue-1', 'origin/main', undefined, log);
     expect(ws.path).toBe('/repo/.worktrees/issue-1');
 
     await ws.dispose();
@@ -87,7 +87,7 @@ describe('worktreeWorkspace', () => {
       log,
     });
 
-    expect(setup).toHaveBeenCalledWith('/repo', 'issue-3', '/repo/.worktrees/issue-3', 'origin/main', sandbox);
+    expect(setup).toHaveBeenCalledWith('/repo', 'issue-3', '/repo/.worktrees/issue-3', 'origin/main', sandbox, log);
 
     await ws.dispose();
     expect(cleanup).toHaveBeenCalledWith('/repo', '/repo/.worktrees/issue-3', log, sandbox);
@@ -106,7 +106,14 @@ describe('worktreeWorkspace', () => {
       cleanup,
     });
 
-    expect(setup).toHaveBeenCalledWith('/repo', 'issue-2', '/repo/.worktrees/issue-2', 'origin/develop', undefined);
+    expect(setup).toHaveBeenCalledWith(
+      '/repo',
+      'issue-2',
+      '/repo/.worktrees/issue-2',
+      'origin/develop',
+      undefined,
+      undefined,
+    );
   });
 });
 

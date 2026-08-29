@@ -95,6 +95,7 @@ export async function setupWorktree(
   worktreePath: string,
   startPoint: string = 'origin/main',
   sandbox?: WorktreeSandbox,
+  log?: (type: EventKind, msg: string) => void,
 ): Promise<void> {
   await execGit(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot }).catch(() => {});
   await execGit(`git branch -D ${shellEscape(branch)}`, { cwd: repoRoot }).catch(() => {});
@@ -102,7 +103,7 @@ export async function setupWorktree(
     cwd: repoRoot,
   });
   if (sandbox) {
-    await createMicroVm({ ...sandbox, worktreePath });
+    await createMicroVm({ ...sandbox, worktreePath, log });
   }
 }
 

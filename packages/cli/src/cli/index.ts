@@ -1152,13 +1152,13 @@ export async function shipIssue(
       worktreePath: worktree,
       log,
       sandbox: worktreeSandbox,
-      setup: (root, br, wt, sp, sandbox) =>
+      setup: (root, br, wt, sp, sandbox, setupLog) =>
         withGitLock(root, () =>
           withFileLock(
             paths.gitLock,
             async () => {
               await gitFetch(root);
-              await setupWorktree(root, br, wt, sp, sandbox);
+              await setupWorktree(root, br, wt, sp, sandbox, setupLog);
             },
             { onSteal: (pid) => log('lock-stolen', `stole ${paths.gitLock} from dead holder pid ${pid ?? 'unknown'}`) },
           ),
@@ -1779,6 +1779,17 @@ export async function withRepoRunLock<T>(
   }
 }
 
+/** The repo's current docker-sandbox descriptor for worktree-gc sweeps, or undefined for
+ *  every other runtime/config state (including a fixture config with no `sandbox` key). */
+function gcWorktreeSandbox(
+  sandboxCfg: FactoryConfig['sandbox'] | undefined,
+  repoRoot: string,
+): WorktreeSandbox | undefined {
+  if (!sandboxCfg) return undefined;
+  const policy = resolveSandboxPolicy(sandboxCfg, { worktree: repoRoot, repoRoot });
+  return worktreeSandboxFor(policy?.runtime);
+}
+
 export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
@@ -1791,7 +1802,8 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }
   // Best-effort GitHub evidence: tokenless/local-only repos keep today's pure-local behavior.
   const ghRepo = await getGitHubRepo().catch(() => undefined);
   const octokit = ghRepo ? (hasGitHubToken() ? getOctokit() : undefined) : undefined;
-  const run = () => sweepWorktrees({ repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo }, { log, octokit });
+  const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
+  const run = () => sweepWorktrees({ repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo }, { log, octokit, sandbox });
   const report = opts.dryRun ? await run() : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
   console.log(formatGcReport(report));
 }
@@ -1909,7 +1921,7 @@ async function landIssue(
         withLock: withLandLock,
         ensureWorktree: async () => {
           if (!existsSync(worktree)) {
-            await setupWorktree(repoRoot, branch, worktree, `origin/${branch}`, worktreeSandbox);
+            await setupWorktree(repoRoot, branch, worktree, `origin/${branch}`, worktreeSandbox, log);
           }
         },
       });
@@ -2345,11 +2357,12 @@ async function cmdRun(opts: { localQueue?: boolean } = {}) {
     if (factoryConfig.worktree.autoGcOnRun) {
       try {
         const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
+        const gcSandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
             sweepWorktrees(
               { repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays, repo: ghRepo },
-              { log: gcLog, octokit: getOctokit() },
+              { log: gcLog, octokit: getOctokit(), sandbox: gcSandbox },
             ),
           ),
         );
@@ -3659,11 +3672,12 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
 
       try {
         const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
+        const gcSandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
             sweepWorktrees(
               { repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays, repo: ghRepo },
-              { log: gcLog, octokit },
+              { log: gcLog, octokit, sandbox: gcSandbox },
             ),
           ),
         );

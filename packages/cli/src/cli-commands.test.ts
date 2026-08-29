@@ -3600,7 +3600,14 @@ describe('CliExitError (direct command invocation)', () => {
 
     try {
       await expect(cmdLand(5)).resolves.toBeUndefined();
-      expect(setupWorktree).toHaveBeenCalledWith(h.repoRoot, branch, worktree, `origin/${branch}`, undefined);
+      expect(setupWorktree).toHaveBeenCalledWith(
+        h.repoRoot,
+        branch,
+        worktree,
+        `origin/${branch}`,
+        undefined,
+        expect.any(Function),
+      );
       expect(commands).toContain('git rebase origin/main');
       expect(commands).toContain("git push --force-with-lease origin 'contributor/adopted-pr'");
       expect(watchChecks).toHaveBeenCalledTimes(2);

@@ -587,6 +587,24 @@ describe('setupWorktree / cleanupWorktree sandbox lifecycle', () => {
     expect(exec).toHaveBeenCalledWith(expect.stringContaining('sbx create'), expect.anything());
   });
 
+  it('setupWorktree forwards its log callback into createMicroVm so a fallback is observable', async () => {
+    const { repoRoot } = await kit.makeThrowawayRepo();
+    const worktree = kit.trackWorktree(repoRoot, 656);
+    const branch = 'ship-it/656-docker-sandbox-log';
+    const exec: ExecFn = vi.fn().mockRejectedValue(new Error('sbx create boom'));
+    const sandbox: WorktreeSandbox = {
+      runtime: 'docker-sandbox',
+      authPaths: ['/home/user/.claude'],
+      exec,
+      isAvailable: () => true,
+    };
+    const log = vi.fn();
+
+    await setupWorktree(repoRoot, branch, worktree, 'origin/main', sandbox, log);
+
+    expect(log).toHaveBeenCalledWith('sandbox-unavailable', expect.stringContaining('sbx create failed'));
+  });
+
   it('cleanupWorktree with the same descriptor removes the VM and is idempotent on a second call', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 655);
