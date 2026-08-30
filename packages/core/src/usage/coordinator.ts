@@ -1,14 +1,29 @@
-// src/usage/coordinator.ts — Single-poller cached subscription-usage snapshot (#1029).
+// src/usage/coordinator.ts — Single-poller cached subscription-usage snapshot (#1029)
+// and admission-control acquire() API backed by a shared grant ledger (#1030).
 
+import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import type { FactoryLogger } from '../logger/index.js';
+import { withFileLock } from '../utils/lock.js';
+import type { AcquireResult, GrantLedgerEntry, GrantRequest } from './grant-ledger.js';
+import {
+  defaultGrantLedgerPath,
+  DEFAULT_GRANT_TTL_MS,
+  isCappedModel,
+  loadGrantLedger,
+  pruneGrants,
+  USAGE_ADMISSION_CEILING_PCT,
+  USAGE_GRANT_RESERVATION_PCT,
+  writeGrantLedger,
+} from './grant-ledger.js';
+import { DEFAULT_USAGE_POLL_MS } from './constants.js';
 import type { SubscriptionUsage, SubscriptionUsageDeps } from './subscription.js';
 import { fetchSubscriptionUsage } from './subscription.js';
 
-export const DEFAULT_USAGE_POLL_MS = 5 * 60_000; // 5 min; well under the 5-hour account window
+export { DEFAULT_USAGE_POLL_MS };
 
 export interface UsageCoordinatorState {
   version: 1;
@@ -29,6 +44,12 @@ export interface UsageCoordinatorOptions {
   fetchSubscription?: () => Promise<SubscriptionUsage | null>;
   now?: () => number;
   writeState?: (file: string, state: UsageCoordinatorState) => Promise<void>;
+  grantsPath?: string;
+  admissionCeilingPct?: number;
+  grantReservationPct?: number;
+  grantTtlMs?: number;
+  withLock?: <T>(fn: () => Promise<T>) => Promise<T>;
+  randomId?: () => string;
 }
 
 export interface UsageCoordinator {
@@ -36,6 +57,7 @@ export interface UsageCoordinator {
   stop(): void;
   pollNow(): Promise<SubscriptionUsage | null>;
   read(): SubscriptionUsage | null;
+  acquire(request: GrantRequest): Promise<AcquireResult>;
 }
 
 export function defaultUsageStatePath(home?: string): string {
@@ -110,6 +132,12 @@ export function createUsageCoordinator(options: UsageCoordinatorOptions): UsageC
   const fetchSubscription = options.fetchSubscription ?? (() => fetchSubscriptionUsage(options.subscriptionDeps ?? {}));
   const now = options.now ?? options.subscriptionDeps?.now ?? Date.now;
   const writeState = options.writeState ?? ((f: string, s: UsageCoordinatorState) => writeUsageState(f, s));
+  const grantsPath = options.grantsPath ?? defaultGrantLedgerPath();
+  const admissionCeilingPct = options.admissionCeilingPct ?? USAGE_ADMISSION_CEILING_PCT;
+  const grantReservationPct = options.grantReservationPct ?? USAGE_GRANT_RESERVATION_PCT;
+  const grantTtlMs = options.grantTtlMs ?? DEFAULT_GRANT_TTL_MS;
+  const randomId = options.randomId ?? randomUUID;
+  const withLock = options.withLock ?? (<T>(fn: () => Promise<T>) => withFileLock(`${grantsPath}.lock`, fn));
 
   let cachedSnapshot: SubscriptionUsage | null = null;
   let interval: ReturnType<typeof setInterval> | undefined;
@@ -170,5 +198,46 @@ export function createUsageCoordinator(options: UsageCoordinatorOptions): UsageC
     return cachedSnapshot === null ? null : { ...cachedSnapshot };
   }
 
-  return { start, stop, pollNow, read };
+  async function acquire(request: GrantRequest): Promise<AcquireResult> {
+    return withLock(async () => {
+      const snapshot = cachedSnapshot;
+      const at = now();
+      const retryAfter = (): number => {
+        const resetsAt = snapshot?.fiveHourResetsAt;
+        if (!resetsAt) return pollMs;
+        const t = Date.parse(resetsAt);
+        return Number.isNaN(t) ? pollMs : Math.max(0, t - at);
+      };
+
+      // Non-Claude routes are not gated on the subscription cap.
+      if (!isCappedModel(request.model)) return { granted: true };
+
+      // No usage signal yet: deny conservatively rather than admit blind.
+      if (snapshot === null) return { granted: false, retryAfter: pollMs };
+
+      const ledger = await loadGrantLedger(grantsPath);
+      const outstanding = pruneGrants(ledger.grants, at, grantTtlMs);
+      const reserved = outstanding.reduce((sum, g) => sum + g.reservationPct, 0);
+      const projected = snapshot.fiveHourUtilization + reserved + grantReservationPct;
+
+      if (projected > admissionCeilingPct) {
+        await writeGrantLedger(grantsPath, { version: 1, grants: outstanding });
+        return { granted: false, retryAfter: retryAfter() };
+      }
+
+      const entry: GrantLedgerEntry = {
+        id: randomId(),
+        repo: request.repo,
+        lane: request.lane,
+        phase: request.phase,
+        model: request.model,
+        grantedAt: new Date(at).toISOString(),
+        reservationPct: grantReservationPct,
+      };
+      await writeGrantLedger(grantsPath, { version: 1, grants: [...outstanding, entry] });
+      return { granted: true };
+    });
+  }
+
+  return { start, stop, pollNow, read, acquire };
 }

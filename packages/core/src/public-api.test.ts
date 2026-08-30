@@ -284,6 +284,15 @@ const INTERNAL_API_KEYS = [
   'defaultUsageStatePath',
   'loadUsageState',
   'writeUsageState',
+  // UsageCoordinator admission-control acquire() API and grant ledger (#1030)
+  'defaultGrantLedgerPath',
+  'DEFAULT_GRANT_TTL_MS',
+  'isCappedModel',
+  'loadGrantLedger',
+  'pruneGrants',
+  'USAGE_ADMISSION_CEILING_PCT',
+  'USAGE_GRANT_RESERVATION_PCT',
+  'writeGrantLedger',
   // Coarse ProjectV2 status publishing (#868)
   'createProjectStatusWriter',
   // Coarse ProjectV2 status writing (#849)
