@@ -12,7 +12,7 @@ That rule was written for lanes in flight. It is exactly wrong for a parked lane
 the factory parks an issue it leaves the PR open on purpose, for a human to pick up, and
 the lane process exits. The worktree is then pinned forever — `autoGcOnRun` will not take
 it (the worktree is registered, the issue is open, the mtime is fresh), and #998's
-`doctor --reconcile` will not either (it reaps only dead-*run* worktrees). The observed
+`doctor --reconcile` will not either (it reaps only dead-_run_ worktrees). The observed
 consequence (2026-08-28) was one abandoned sibling checkout per parked issue on the Mac
 Mini across three repositories, each carrying a full node_modules tree.
 The counter-pressure is that these directories are the only place some work exists.
