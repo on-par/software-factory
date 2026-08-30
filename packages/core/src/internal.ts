@@ -307,6 +307,19 @@ export {
   writeUsageState,
 } from './usage/coordinator.js';
 
+// UsageCoordinator admission-control acquire() API and grant ledger (#1030)
+export type { AcquireResult, GrantLedger, GrantLedgerEntry, GrantRequest } from './usage/grant-ledger.js';
+export {
+  defaultGrantLedgerPath,
+  DEFAULT_GRANT_TTL_MS,
+  isCappedModel,
+  loadGrantLedger,
+  pruneGrants,
+  USAGE_ADMISSION_CEILING_PCT,
+  USAGE_GRANT_RESERVATION_PCT,
+  writeGrantLedger,
+} from './usage/grant-ledger.js';
+
 // Local queue reprioritization audit records (#869)
 export type { QueueReprioritizationRecord } from './types/index.js';
 export type { QueueRationaleAuditor } from './queue/reprioritization-audit.js';
