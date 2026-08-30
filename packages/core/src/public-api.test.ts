@@ -295,6 +295,9 @@ const INTERNAL_API_KEYS = [
   'writeGrantLedger',
   // Engine lane parks and resumes on acquire denial (#1032)
   'createLaneScheduler',
+  // Standalone local UsageCoordinator fallback (#1033)
+  'createLocalUsageCoordinator',
+  'selectUsageCoordinator',
   // Coarse ProjectV2 status publishing (#868)
   'createProjectStatusWriter',
   // Coarse ProjectV2 status writing (#849)
