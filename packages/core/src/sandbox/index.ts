@@ -87,6 +87,35 @@ export function resolveSandboxRuntime(
   return detectSandboxRuntime(opts.platform ?? process.platform, opts.isAvailable ?? isCommandAvailable);
 }
 
+/** FNV-1a hash of a lane ID reduced to a stable 0..99 bucket. Deterministic across
+ *  processes so the same lane always lands in the same A/B cohort (#655). */
+function laneHashBucket(laneId: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < laneId.length; i++) {
+    h ^= laneId.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0) % 100;
+}
+
+/** Deterministic A/B cohort assignment (#655). Returns 'docker-sandbox' when this lane
+ *  falls in the rollout bucket, else undefined. Only ever *promotes* a lane into the
+ *  docker-sandbox cohort — it never picks another runtime. */
+export function resolveRolloutRuntime(
+  laneId: string | undefined,
+  rolloutPercent: number,
+): 'docker-sandbox' | undefined {
+  if (!laneId) return undefined;
+  if (!(rolloutPercent > 0)) return undefined;
+  return laneHashBucket(laneId) < Math.min(100, rolloutPercent) ? 'docker-sandbox' : undefined;
+}
+
+/** True when the runtime is pinned by env or explicit config (not 'auto'), meaning the
+ *  #655 rollout must not touch it (#655). */
+function isSandboxRuntimePinned(configured: SandboxRuntimeSetting | undefined, env: NodeJS.ProcessEnv): boolean {
+  return sandboxRuntimeFromEnv(env) !== undefined || (configured !== undefined && configured !== 'auto');
+}
+
 function sandboxDisabled(
   cfg: FactoryConfig['sandbox'],
   cliDisabled: boolean | undefined,
@@ -115,6 +144,7 @@ export function resolveSandboxPolicy(
     isAvailable?: (cmd: string) => boolean;
     homedir?: string;
     tmpdir?: string;
+    laneId?: string;
   },
 ): SandboxPolicy | undefined {
   const env = opts.env ?? process.env;
@@ -126,6 +156,10 @@ export function resolveSandboxPolicy(
   const tmp = opts.tmpdir ?? tmpdir();
 
   const runtime = resolveSandboxRuntime(cfg.runtime, { env, platform, isAvailable });
+  const rollout = isSandboxRuntimePinned(cfg.runtime, env)
+    ? undefined
+    : resolveRolloutRuntime(opts.laneId, cfg.docker?.rolloutPercent ?? 0);
+  const effectiveRuntime = rollout ?? runtime;
 
   const writablePaths = dedupeAbsolutePaths([
     opts.worktree,
@@ -153,7 +187,7 @@ export function resolveSandboxPolicy(
   const writableFilePrefixes = dedupeAbsolutePaths([resolve(home, '.claude.json')]);
 
   return {
-    runtime,
+    runtime: effectiveRuntime,
     worktree: opts.worktree,
     writablePaths,
     writableFilePrefixes,

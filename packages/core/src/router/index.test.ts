@@ -1103,6 +1103,8 @@ describe('ModelRouter cost sink', () => {
     expect(rows[0].rawInputTokens).toBeUndefined();
     expect(rows[0].cacheReadTokens).toBeUndefined();
     expect(rows[0].cacheCreationTokens).toBeUndefined();
+    expect(typeof rows[0].duration).toBe('number');
+    expect(rows[0].duration).toBeGreaterThanOrEqual(0);
   });
 
   it('records real usage and marks estimated false when the harness reports it', async () => {

@@ -1015,9 +1015,15 @@ export async function shipIssue(
     policy.effective.localOnly,
   );
   let issueSpend = 0;
+  let laneSandboxRuntime = 'none';
   router.setCostSink((entry) => {
     issueSpend += entry.cost;
-    logCost(paths.costs, { ...entry, issue: String(issueNum) });
+    logCost(paths.costs, {
+      ...entry,
+      issue: String(issueNum),
+      sandboxRuntime: laneSandboxRuntime,
+      reworkRoundCount: laneReworkRounds,
+    });
   });
   const modelPins = resolveEffectiveModelPins(router.registryRef, repoConfig);
   const codexOff = resolveCodexDisabled(repoConfig);
@@ -1055,6 +1061,7 @@ export async function shipIssue(
     'timeout',
   ]);
   let terminalMessage: string | undefined;
+  let laneReworkRounds = 0;
   const mkLog =
     (phase?: string) =>
     (
@@ -1068,6 +1075,7 @@ export async function shipIssue(
       },
     ) => {
       if (TERMINAL_EVENT_KINDS.has(type)) terminalMessage = msg;
+      if (type === 'rework') laneReworkRounds++;
       // checkPhase logs each skipped checker as a 'check' event prefixed "SKIPPED: " —
       // echo it to the terminal the way shipIssue used to print it directly.
       if (type === 'check' && msg.startsWith('SKIPPED: ')) {
@@ -1131,7 +1139,9 @@ export async function shipIssue(
     worktree,
     repoRoot,
     cliDisabled: opts.sandbox === false,
+    laneId: lane,
   });
+  laneSandboxRuntime = sandboxPolicy?.runtime ?? 'none';
   let activeSandboxPolicy: SandboxPolicy | undefined;
   if (opts.sandbox === false) {
     console.error(chalk.yellow('factory: sandbox disabled by --no-sandbox — agent runs are UNCONTAINED'));

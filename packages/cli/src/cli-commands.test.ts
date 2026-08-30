@@ -36,6 +36,7 @@ const h = vi.hoisted(() => {
     shipResult: { ok: true, prNumber: 99 } as any,
     diagnoses: [] as any[],
     costs: [] as any[],
+    costSinkCallback: undefined as ((entry: any) => void) | undefined,
     trailingSpend: 10,
     subscriptionUsage: null as { fiveHourUtilization: number; fiveHourResetsAt: string | null } | null,
     routerResolve: (_route: string): string | undefined => 'claude-model',
@@ -128,6 +129,10 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
     for (const s of h.checkResult.summary.results.filter((r: any) => r.result === 'SKIP')) {
       opts.log?.('check', `SKIPPED: ${s.checker} — ${s.details}`);
     }
+    for (let i = 0; i < (h.checkResult.reworkRounds ?? 0); i++) {
+      opts.log?.('rework', `rework round ${i + 1}`);
+    }
+    h.costSinkCallback?.({ task: 'build', model: 'claude-model', inputTokens: 10, outputTokens: 5, cost: 0.02 });
     return h.checkResult;
   });
   const shipPhaseMock = vi.fn(async (_opts: any) => h.shipResult);
@@ -166,7 +171,9 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
           getHarnessId: (id: string) => (h.modelProviders[id] === 'anthropic' ? 'claude-cli' : 'codex-cli'),
           isCodexModel: (id: string) => h.modelProviders[id] === 'openai',
         },
-        setCostSink: vi.fn(),
+        setCostSink: vi.fn((sink: (entry: any) => void) => {
+          h.costSinkCallback = sink;
+        }),
       };
     }),
     ConstitutionLoader: vi.fn(function () {
@@ -3377,6 +3384,21 @@ describe('shipIssue (direct)', () => {
     expect(events).toContain('sandbox-degraded');
     expect(events).toContain('host-level egress filtering unavailable');
     expect(events).not.toContain('sandbox-unavailable');
+  });
+
+  it('stamps the resolved sandboxRuntime and running reworkRoundCount onto each cost row (#655)', async () => {
+    h.factoryConfig = { ...h.factoryConfig, sandbox: { ...h.factoryConfig.sandbox, runtime: 'docker-sandbox' } };
+    h.checkResult = { passed: true, summary: { results: [], failures: 0 }, reworkRounds: 2 };
+
+    await shipIssue(5, {}, ctx());
+
+    const costs = readFileSync(paths().costs, 'utf-8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(costs).toHaveLength(1);
+    expect(costs[0].sandboxRuntime).toBe('docker-sandbox');
+    expect(costs[0].reworkRoundCount).toBe(2);
   });
 
   it('logs skip-ci when FACTORY_SKIP_CI resolves to true', async () => {

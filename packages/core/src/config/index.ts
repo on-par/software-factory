@@ -132,6 +132,7 @@ const FactoryConfigSchema = z.object({
       resources: z
         .object({ cpuMs: z.number().positive().default(300_000), memMb: z.number().positive().default(4096) })
         .default({ cpuMs: 300_000, memMb: 4096 }),
+      docker: z.object({ rolloutPercent: z.number().min(0).max(100).default(0) }).default({ rolloutPercent: 0 }),
       comment: z.string().optional(),
     })
     .default({
@@ -139,6 +140,7 @@ const FactoryConfigSchema = z.object({
       runtime: 'auto',
       network: { allow: ['api.anthropic.com', 'github.com'] },
       resources: { cpuMs: 300_000, memMb: 4096 },
+      docker: { rolloutPercent: 0 },
     }),
   discovery: z
     .object({

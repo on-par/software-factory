@@ -557,6 +557,7 @@ export class ModelRouter {
     failoverReason?: FailoverReason,
     retryCause?: RetryCause,
     usage?: HarnessUsage,
+    elapsedMs?: number,
   ): void {
     if (!this.costSink) return;
     const inputTokens = usage?.inputTokens ?? estimateTokens(prompt);
@@ -569,6 +570,7 @@ export class ModelRouter {
       outputTokens,
       cost,
       estimated: usage === undefined,
+      duration: elapsedMs ?? 0,
       ...(usage?.rawInputTokens !== undefined ? { rawInputTokens: usage.rawInputTokens } : {}),
       ...(usage?.cacheReadTokens !== undefined ? { cacheReadTokens: usage.cacheReadTokens } : {}),
       ...(usage?.cacheCreationTokens !== undefined ? { cacheCreationTokens: usage.cacheCreationTokens } : {}),
@@ -686,6 +688,7 @@ export class ModelRouter {
 
         let usage: HarnessUsage | undefined;
         let output: string;
+        const attemptStartedAt = Date.now();
         try {
           output = await this.executor.runModel(model, prompt, {
             worktree,
@@ -799,7 +802,16 @@ export class ModelRouter {
           attempts.push({ model, reason: null, ok: true });
           const failovers = failoversFrom(attempts);
           const failoverReason = failovers.at(-1)?.reason;
-          this.recordCost(task, model, prompt, output, failoverReason, retryCause, usage);
+          this.recordCost(
+            task,
+            model,
+            prompt,
+            output,
+            failoverReason,
+            retryCause,
+            usage,
+            Date.now() - attemptStartedAt,
+          );
           return {
             model,
             output: output,
