@@ -293,6 +293,8 @@ const INTERNAL_API_KEYS = [
   'USAGE_ADMISSION_CEILING_PCT',
   'USAGE_GRANT_RESERVATION_PCT',
   'writeGrantLedger',
+  // Engine lane parks and resumes on acquire denial (#1032)
+  'createLaneScheduler',
   // Coarse ProjectV2 status publishing (#868)
   'createProjectStatusWriter',
   // Coarse ProjectV2 status writing (#849)

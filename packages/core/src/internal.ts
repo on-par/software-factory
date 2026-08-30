@@ -320,6 +320,10 @@ export {
   writeGrantLedger,
 } from './usage/grant-ledger.js';
 
+// Engine lane parks and resumes on acquire denial (#1032)
+export type { LaneAcquire, LaneAdmission, LaneScheduler, LaneSchedulerOptions } from './usage/lane-scheduler.js';
+export { createLaneScheduler } from './usage/lane-scheduler.js';
+
 // Local queue reprioritization audit records (#869)
 export type { QueueReprioritizationRecord } from './types/index.js';
 export type { QueueRationaleAuditor } from './queue/reprioritization-audit.js';
