@@ -992,7 +992,7 @@ export async function shipIssue(
   const paths = ctx?.paths ?? getFactoryPaths(repoRoot);
   const octokit = getOctokit();
 
-  const repoConfig = loadRepoConfig(repoRoot, paths.state);
+  const repoConfig = loadRepoConfig(repoRoot, paths.root);
   const factoryConfig = loadFactoryConfigForRepo(paths.config);
   const timeouts = resolveTimeouts(factoryConfig);
   const failoverSettings = resolveAutoFailover(factoryConfig);
