@@ -453,6 +453,52 @@ describe('ClaudeCliHarness failure classification', () => {
     expect(err.details.stdout).toContain('"subtype":"init"');
   });
 
+  it('does not classify non-error Claude stream-json result text as local auth on process failure', async () => {
+    const harness = new ClaudeCliHarness(async () => {
+      throw Object.assign(new Error('Command failed: claude -p'), {
+        stdout: [
+          JSON.stringify({ type: 'system', subtype: 'init', slash_commands: ['login', 'doctor'] }),
+          JSON.stringify({
+            type: 'result',
+            subtype: 'success',
+            terminal_reason: 'completed',
+            is_error: false,
+            result: 'A task note mentioned: please run /login only if auth fails.',
+          }),
+        ].join('\n'),
+        stderr: '',
+        code: 1,
+      });
+    });
+
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).not.toBe('local_auth');
+    expect(err.reason).toBe('unknown');
+  });
+
+  it('classifies Claude stream-json error results as local auth failures', async () => {
+    const harness = new ClaudeCliHarness(async () => {
+      throw Object.assign(new Error('Command failed: claude -p'), {
+        stdout: JSON.stringify({
+          type: 'result',
+          subtype: 'error',
+          terminal_reason: 'failed',
+          is_error: true,
+          result: 'Failed to authenticate: OAuth session expired and could not be refreshed. Please run /login.',
+        }),
+        stderr: '',
+        code: 1,
+      });
+    });
+
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('local_auth');
+  });
+
   it('omits stdout from details when the exec error carries none', async () => {
     const harness = new ClaudeCliHarness(async () => {
       throw Object.assign(new Error('boom'), { stderr: 'rate limit exceeded', code: 1 });
