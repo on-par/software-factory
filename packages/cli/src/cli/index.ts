@@ -1115,7 +1115,7 @@ export async function shipIssue(
     cliDisabled: opts.sandbox === false,
     laneId: lane,
   });
-  laneSandboxRuntime = sandboxPolicy?.runtime ?? "none";
+  laneSandboxRuntime = sandboxPolicy?.runtime ?? 'none';
   const worktreeSandbox: WorktreeSandbox | undefined = worktreeSandboxFor(sandboxPolicy?.runtime);
   let activeSandboxPolicy: SandboxPolicy | undefined;
   if (opts.sandbox === false) {
