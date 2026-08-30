@@ -292,6 +292,16 @@ export interface CostEntry {
   numTurns?: number;
   durationMs?: number;
   durationApiMs?: number;
+  /** Resolved sandbox runtime the lane was assigned, for A/B cohorting (#655).
+   *  The resolved name — a docker-sandbox lane is labeled here even while it runs
+   *  uncontained (#653). */
+  sandboxRuntime?: string;
+  /** Router-measured wall-clock ms of this model invocation (distinct from the
+   *  CLI-reported durationMs) (#655). */
+  duration?: number;
+  /** Rework rounds completed in the run at the moment this row was emitted; the run
+   *  total is the max over its rows (#655). */
+  reworkRoundCount?: number;
 }
 
 // ---------- Dispute ----------

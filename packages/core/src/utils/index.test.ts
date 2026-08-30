@@ -318,6 +318,26 @@ describe('utils', () => {
     expect(readCosts(costsFile)).toEqual([{ ...entry, ts: expect.any(String) }]);
   });
 
+  it('round-trips sandboxRuntime/duration/reworkRoundCount (#655)', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-costs-'));
+    const costsFile = join(tmpDir, 'costs.ndjson');
+    const entry = {
+      issue: '85',
+      task: 'plan',
+      model: 'claude-opus-4-8',
+      inputTokens: 10,
+      outputTokens: 5,
+      cost: 0,
+      sandboxRuntime: 'docker-sandbox',
+      duration: 1234,
+      reworkRoundCount: 2,
+    };
+
+    logCost(costsFile, entry);
+
+    expect(readCosts(costsFile)).toEqual([{ ...entry, ts: expect.any(String) }]);
+  });
+
   it('round-trips costs with timestamps', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-costs-'));
     const costsFile = join(tmpDir, 'costs.ndjson');
