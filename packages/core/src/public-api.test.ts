@@ -278,6 +278,9 @@ const INTERNAL_API_KEYS = [
   // Daemon-ready ProjectV2 queue intent projection (#866)
   'createProjectQueuePoller',
   'DEFAULT_PROJECT_QUEUE_POLL_MS',
+  // gh-authenticated ProjectV2 queue GraphQL client + live poller (#1046)
+  'createGithubProjectQueuePoller',
+  'createOctokitGraphqlClient',
   // Single-poller cached subscription-usage snapshot (#1029)
   'createUsageCoordinator',
   'DEFAULT_USAGE_POLL_MS',

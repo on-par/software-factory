@@ -293,6 +293,11 @@ export type {
   ProjectQueueProjection,
 } from './projects/project-queue-poller.js';
 export { createProjectQueuePoller, DEFAULT_PROJECT_QUEUE_POLL_MS } from './projects/project-queue-poller.js';
+export type { ProjectQueueStatus } from './projects/project-queue-reader.js';
+
+// gh-authenticated ProjectV2 queue GraphQL client + live poller (#1046)
+export type { GithubProjectQueuePollerOptions, ProjectGraphqlClient } from './projects/github-project-graphql.js';
+export { createGithubProjectQueuePoller, createOctokitGraphqlClient } from './projects/github-project-graphql.js';
 
 // Single-poller cached subscription-usage snapshot (#1029)
 export type {
