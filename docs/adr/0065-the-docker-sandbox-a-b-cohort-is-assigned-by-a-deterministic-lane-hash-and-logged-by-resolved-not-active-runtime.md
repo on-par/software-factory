@@ -20,7 +20,8 @@ count is known.
 Each `.factory/costs.jsonl` entry gains `sandboxRuntime` (the resolved runtime name,
 including docker-sandbox even when uncontained), `duration` (router-measured wall-clock
 ms of the model call), and `reworkRoundCount` (rework rounds completed at emission time;
-a run's total is the max over its rows). A new `sandbox.docker.rolloutPercent` (default 0) drives a pure `resolveRolloutRuntime(laneId, rolloutPercent)` that hashes the lane ID
+a run's total is the max over its rows). A new `sandbox.docker.rolloutPercent` (default
+0) drives a pure `resolveRolloutRuntime(laneId, rolloutPercent)` that hashes the lane ID
 (FNV-1a) into a 0..99 bucket and promotes in-bucket lanes to docker-sandbox. The rollout
 only fires when the runtime is unpinned (config runtime is 'auto' and no
 FACTORY_SANDBOX_RUNTIME), so it reallocates only the auto cohort and never overrides an
