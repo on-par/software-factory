@@ -428,6 +428,31 @@ describe('ClaudeCliHarness failure classification', () => {
     expect(err.details.stdout).toContain('OAuth session expired');
   });
 
+  it('does not classify Claude stream-json metadata as local auth on process failure', async () => {
+    const harness = new ClaudeCliHarness(async () => {
+      throw Object.assign(new Error('Command failed: claude -p'), {
+        stdout: [
+          JSON.stringify({
+            type: 'system',
+            subtype: 'init',
+            slash_commands: ['login', 'doctor'],
+            message: 'Use /login if you need to switch accounts.',
+          }),
+          JSON.stringify({ type: 'system', subtype: 'status', status: 'requesting' }),
+        ].join('\n'),
+        stderr: 'Process exited before a result envelope was written',
+        code: 1,
+      });
+    });
+
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).not.toBe('local_auth');
+    expect(err.reason).toBe('unknown');
+    expect(err.details.stdout).toContain('"subtype":"init"');
+  });
+
   it('omits stdout from details when the exec error carries none', async () => {
     const harness = new ClaudeCliHarness(async () => {
       throw Object.assign(new Error('boom'), { stderr: 'rate limit exceeded', code: 1 });

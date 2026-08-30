@@ -83,6 +83,28 @@ function parseResultEnvelope(stdout: string): {
   };
 }
 
+function extractFailureDiagnosticFromStream(stdout: string): string | undefined {
+  const diagnostics: string[] = [];
+  let sawJsonLine = false;
+  for (const line of stdout.trim().split('\n')) {
+    if (line.trim().length === 0) continue;
+    let event: Record<string, unknown>;
+    try {
+      event = JSON.parse(line) as Record<string, unknown>;
+      sawJsonLine = true;
+    } catch {
+      if (!sawJsonLine) diagnostics.push(line);
+      continue;
+    }
+    if (event.type !== 'result') continue;
+    if (typeof event.subtype === 'string') diagnostics.push(event.subtype);
+    if (typeof event.api_error_status === 'string') diagnostics.push(event.api_error_status);
+    if (typeof event.terminal_reason === 'string') diagnostics.push(event.terminal_reason);
+    if (typeof event.result === 'string') diagnostics.push(event.result);
+  }
+  return diagnostics.length > 0 ? diagnostics.join('\n') : sawJsonLine ? '' : undefined;
+}
+
 /** Runs a model via the Claude CLI:
  *  claude -p [--model <claudeFlag>] --output-format stream-json --verbose --safe-mode --permission-mode bypassPermissions < prompt-file */
 export class ClaudeCliHarness implements CodingHarness {
@@ -112,7 +134,10 @@ export class ClaudeCliHarness implements CodingHarness {
       }));
     } catch (err: any) {
       const stdout = typeof err.stdout === 'string' && err.stdout.length > 0 ? err.stdout : undefined;
-      const diagnosticText = [err.stderr, stdout].filter((text) => typeof text === 'string').join('\n');
+      const stdoutDiagnostic = stdout ? extractFailureDiagnosticFromStream(stdout) : undefined;
+      const diagnosticText = [err.stderr, stdoutDiagnostic ?? stdout]
+        .filter((text) => typeof text === 'string')
+        .join('\n');
       const reason = err.killed ? 'timeout' : classifyFailure(diagnosticText, err.code ?? 1);
       throw new HarnessError(err.message ?? String(err), reason, {
         exitCode: typeof err.code === 'number' ? err.code : undefined,
