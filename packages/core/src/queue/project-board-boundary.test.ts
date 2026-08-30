@@ -1,7 +1,16 @@
+// The board-writing code path is a coarse status projection only. Execution state
+// (events.ndjson, cost history, lock files, breaker state) is local-only under
+// ~/.factory/<repo>/ and no phase-level LaneLifecycleEvent field may ever reach a
+// board mutation payload. See docs/adr/0067-execution-state-and-phase-level-events-are-local-only-never-written-to-the-board.md.
+
+import { homedir } from 'node:os';
+import { basename, join, resolve } from 'node:path';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import type { LaneLifecycleEvent } from '@on-par/contracts';
 
+import { getFactoryPaths } from '../config/index.js';
 import type { FactoryLogger } from '../logger/index.js';
 import type { ProjectQueuePoller, ProjectQueueProjection } from '../projects/project-queue-poller.js';
 import { createProjectStatusWriter } from '../projects/project-status-writer.js';
@@ -11,12 +20,15 @@ import {
   type ProjectBoardStatusWriterOptions,
 } from './project-board-status-writer.js';
 
-const localOnlyMarkers = [
-  'LOCAL_LIFECYCLE_MARKER',
-  'LOCAL_COST_MARKER',
-  'LOCAL_LOCK_MARKER',
-  'LOCAL_BREAKER_MARKER',
-] as const;
+// The complete set of fields the board-writing code path (createProjectBoardStatusWriter
+// -> its graphql) may touch. Widening this set is a deliberate act that must update the
+// ADR in the same PR — see docs/adr/0067-...local-only...md.
+const BOARD_MUTATION_ALLOWED_VARIABLE_KEYS = ['fieldId', 'itemId', 'projectId', 'value'] as const;
+const BOARD_MUTATION_ALLOWED_VALUE_KEYS = ['singleSelectOptionId'] as const;
+
+// Every field of a LaneLifecycleEvent that is phase-level execution detail and must never
+// reach the board. issueId is used only to look up the ProjectV2 item, never written.
+const PHASE_LEVEL_FIELDS = ['ts', 'laneId', 'issueId', 'phase', 'status', 'detail', 'worktreePath'] as const;
 
 const board: ProjectBoardStatusConfig = {
   projectId: 'PVT_project',
@@ -54,33 +66,101 @@ function createLogger(): FactoryLogger {
   return logger;
 }
 
+function createBoardWriteHarness() {
+  const graphql = vi.fn<ProjectBoardStatusWriterOptions['graphql']>(async () => ({}));
+  const boardWriter = createProjectBoardStatusWriter({ boards: [board], graphql, logger: createLogger() });
+  const projectionSource: Pick<ProjectQueuePoller, 'snapshot'> = { snapshot: () => projection };
+  const statusWriter = createProjectStatusWriter({ projectionSource, boardWriter });
+  return { graphql, statusWriter };
+}
+
 describe('ProjectV2 status write boundary', () => {
-  it('projects lifecycle events to a coarse status without local operational state', async () => {
-    const graphql = vi.fn<ProjectBoardStatusWriterOptions['graphql']>(async () => ({}));
-    const boardWriter = createProjectBoardStatusWriter({ boards: [board], graphql, logger: createLogger() });
-    const projectionSource: Pick<ProjectQueuePoller, 'snapshot'> = { snapshot: () => projection };
-    const statusWriter = createProjectStatusWriter({ projectionSource, boardWriter });
+  it('allows only the coarse status mutation variable keys', async () => {
+    const { graphql, statusWriter } = createBoardWriteHarness();
     const event: LaneLifecycleEvent = {
       ts: '2026-08-25T12:00:00.000Z',
       laneId: 'issue-42',
       issueId: '42',
       phase: 'plan',
       status: 'started',
-      detail: localOnlyMarkers.join(' | '),
-      worktreePath: `/tmp/${localOnlyMarkers.join('-')}`,
+      detail: 'plan started',
+      worktreePath: '/tmp/issue-42',
+    };
+
+    await statusWriter.handle(event);
+
+    expect(graphql).toHaveBeenCalledOnce();
+    const [, variables] = graphql.mock.calls[0]!;
+    expect(Object.keys(variables).sort()).toEqual([...BOARD_MUTATION_ALLOWED_VARIABLE_KEYS].sort());
+    expect(Object.keys((variables as { value: object }).value).sort()).toEqual([...BOARD_MUTATION_ALLOWED_VALUE_KEYS]);
+  });
+
+  it('never lets a phase-level LaneLifecycleEvent field reach the board payload', async () => {
+    const { graphql, statusWriter } = createBoardWriteHarness();
+    const event: LaneLifecycleEvent = {
+      ts: '2026-08-25T12:00:00.000Z',
+      laneId: 'SENTINEL_LANE',
+      issueId: '42',
+      phase: 'plan',
+      status: 'started',
+      detail: 'SENTINEL_DETAIL',
+      worktreePath: '/tmp/SENTINEL_WORKTREE',
+    };
+    const sentinels: Record<(typeof PHASE_LEVEL_FIELDS)[number], string> = event;
+
+    await statusWriter.handle(event);
+
+    expect(graphql).toHaveBeenCalledOnce();
+    const [mutation, variables] = graphql.mock.calls[0]!;
+    const serialized = JSON.stringify({ mutation, variables });
+
+    // phase/status must stay valid LaneLifecycleEvent enum values (they gate whether a write
+    // happens at all) and issueId must stay a real issue number ('42') so the projection lookup
+    // succeeds — none of the three can hold a unique sentinel, so they're excluded from this check.
+    // issueId in particular legitimately recurs as a substring of the allowed itemId ('PVTI_42').
+    const uncheckableFields = new Set(['phase', 'status', 'issueId']);
+    for (const field of PHASE_LEVEL_FIELDS) {
+      if (uncheckableFields.has(field)) continue;
+      const sentinel = sentinels[field];
+      expect(serialized, `phase-level field "${field}" leaked into board payload`).not.toContain(sentinel);
+    }
+  });
+
+  it('keeps execution-state artifacts under the local state root and out of board payloads', async () => {
+    const { graphql, statusWriter } = createBoardWriteHarness();
+    const event: LaneLifecycleEvent = {
+      ts: '2026-08-25T12:00:00.000Z',
+      laneId: 'issue-42',
+      issueId: '42',
+      phase: 'plan',
+      status: 'started',
+      detail: 'plan started',
+      worktreePath: '/tmp/issue-42',
     };
 
     await statusWriter.handle(event);
 
     expect(graphql).toHaveBeenCalledOnce();
     const [mutation, variables] = graphql.mock.calls[0]!;
-    expect(variables).toEqual({
-      projectId: board.projectId,
-      itemId: 'PVTI_42',
-      fieldId: board.statusFieldId,
-      value: { singleSelectOptionId: board.values.inProgressOptionId },
-    });
-    const serializedMutation = JSON.stringify({ mutation, variables });
-    for (const marker of localOnlyMarkers) expect(serializedMutation).not.toContain(marker);
+    const serialized = JSON.stringify({ mutation, variables });
+
+    const externalRoot = join(homedir(), '.factory', 'on-par', 'software-factory');
+    const paths = getFactoryPaths('/tmp/some-checkout', externalRoot);
+    const executionStateFields = [
+      'events',
+      'costs',
+      'mergeLock',
+      'gitLock',
+      'runLock',
+      'portsLock',
+      'breaker',
+    ] as const;
+
+    for (const field of executionStateFields) {
+      const path = paths[field];
+      expect(path.startsWith(resolve(externalRoot)), `${field} must resolve under the external state root`).toBe(true);
+      expect(serialized, `${field} path leaked into board payload`).not.toContain(path);
+      expect(serialized, `${field} basename leaked into board payload`).not.toContain(basename(path));
+    }
   });
 });
