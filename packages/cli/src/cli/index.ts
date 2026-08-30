@@ -2681,6 +2681,7 @@ export async function runLane(
   let awaitingReview = 0;
   let skipped = 0;
   let decomposed = 0;
+  let parked = 0;
   const buildClaim = (issue: number): QueueClaim => ({ issue, decision: { kind: 'build' } });
   const pending: QueueClaim[] = issues.map(buildClaim);
   const seen = new Set(issues);
@@ -2703,11 +2704,12 @@ export async function runLane(
         paths.events,
         'parked',
         issue,
-        `lane '${lane}' parked (${decision.reason}); ${pending.length - i - 1} issues remaining`,
+        `issue #${issue} parked (${decision.reason}); lane '${lane}' continuing, ${pending.length - i - 1} issue(s) remaining`,
         { lane },
       );
       await releaseIssue(issue, 'parked');
-      return;
+      parked++;
+      continue;
     }
     try {
       const branch =
@@ -2755,18 +2757,19 @@ export async function runLane(
         paths.events,
         'parked',
         issue,
-        `lane '${lane}' parked (${reason}); ${pending.length - i - 1} issues remaining`,
+        `issue #${issue} parked (${reason}); lane '${lane}' continuing, ${pending.length - i - 1} issue(s) remaining`,
         { lane },
       );
       await releaseIssue(issue, 'parked');
-      return;
+      parked++;
+      continue;
     }
   }
   emitEvent(
     paths.events,
     'lane-done',
     lane,
-    `lane complete (${merged} merged, ${awaitingReview} awaiting review, ${skipped} skipped, ${decomposed} decomposed)`,
+    `lane complete (${merged} merged, ${awaitingReview} awaiting review, ${skipped} skipped, ${decomposed} decomposed, ${parked} parked)`,
     { lane },
   );
 }
