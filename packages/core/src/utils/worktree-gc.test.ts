@@ -1208,6 +1208,69 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     expect(report.kept).toBe(1);
     expect(existsSync(wt)).toBe(true);
   });
+
+  it('tears down a candidate microVM via the injected sandbox before removing its worktree', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-8`;
+    const wt = makeWorktree(wtName);
+
+    const runCommand = vi.fn(async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/8-feature\n\n`,
+        };
+      }
+      if (cmd === 'git rev-parse --verify origin/main') {
+        return { stdout: 'aaa\n' };
+      }
+      if (cmd.startsWith('git merge-base --is-ancestor')) {
+        return { stdout: '' }; // ancestor => merged
+      }
+      if (cmd.includes('rev-parse --verify --quiet')) {
+        return { stdout: 'bbb\n' }; // prior-push evidence
+      }
+      return { stdout: '' };
+    });
+    const sbxExec = vi.fn().mockResolvedValue({ stdout: '', stderr: '' });
+    const sandbox = { runtime: 'docker-sandbox' as const, authPaths: [], exec: sbxExec, isAvailable: () => true };
+
+    const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand, sandbox });
+    expect(report.removed).toHaveLength(1);
+    expect(sbxExec).toHaveBeenCalledWith(expect.stringContaining('sbx rm --force'), expect.anything());
+
+    const sbxRmOrder = sbxExec.mock.invocationCallOrder[0];
+    const worktreeRemoveCall = runCommand.mock.calls.findIndex(([cmd]) => cmd.includes('worktree remove'));
+    const worktreeRemoveOrder = runCommand.mock.invocationCallOrder[worktreeRemoveCall];
+    expect(worktreeRemoveCall).toBeGreaterThan(-1);
+    expect(sbxRmOrder).toBeLessThan(worktreeRemoveOrder);
+  });
+
+  it('never touches the sandbox when no sandbox descriptor is injected', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-9`;
+    const wt = makeWorktree(wtName);
+
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/9-feature\n\n`,
+        };
+      }
+      if (cmd === 'git rev-parse --verify origin/main') {
+        return { stdout: 'aaa\n' };
+      }
+      if (cmd.startsWith('git merge-base --is-ancestor')) {
+        return { stdout: '' };
+      }
+      if (cmd.includes('rev-parse --verify --quiet')) {
+        return { stdout: 'bbb\n' };
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand });
+    expect(report.removed).toHaveLength(1);
+  });
 });
 
 describe('formatGcReport', () => {
