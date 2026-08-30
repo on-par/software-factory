@@ -199,6 +199,11 @@ export function createUsageCoordinator(options: UsageCoordinatorOptions): UsageC
   }
 
   async function acquire(request: GrantRequest): Promise<AcquireResult> {
+    // Non-Claude routes (codex, opencode) have no observable subscription signal,
+    // so they pass through ungated — no lock, snapshot, or grant-ledger access,
+    // and never a fabricated retryAfter/utilization figure.
+    if (!isCappedModel(request.model)) return { granted: true };
+
     return withLock(async () => {
       const snapshot = cachedSnapshot;
       const at = now();
@@ -208,9 +213,6 @@ export function createUsageCoordinator(options: UsageCoordinatorOptions): UsageC
         const t = Date.parse(resetsAt);
         return Number.isNaN(t) ? pollMs : Math.max(0, t - at);
       };
-
-      // Non-Claude routes are not gated on the subscription cap.
-      if (!isCappedModel(request.model)) return { granted: true };
 
       // No usage signal yet: deny conservatively rather than admit blind.
       if (snapshot === null) return { granted: false, retryAfter: pollMs };
