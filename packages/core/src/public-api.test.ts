@@ -278,6 +278,12 @@ const INTERNAL_API_KEYS = [
   // Daemon-ready ProjectV2 queue intent projection (#866)
   'createProjectQueuePoller',
   'DEFAULT_PROJECT_QUEUE_POLL_MS',
+  // Single-poller cached subscription-usage snapshot (#1029)
+  'createUsageCoordinator',
+  'DEFAULT_USAGE_POLL_MS',
+  'defaultUsageStatePath',
+  'loadUsageState',
+  'writeUsageState',
   // Coarse ProjectV2 status publishing (#868)
   'createProjectStatusWriter',
   // Coarse ProjectV2 status writing (#849)

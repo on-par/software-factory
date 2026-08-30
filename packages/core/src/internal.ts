@@ -292,6 +292,21 @@ export type {
 } from './projects/project-queue-poller.js';
 export { createProjectQueuePoller, DEFAULT_PROJECT_QUEUE_POLL_MS } from './projects/project-queue-poller.js';
 
+// Single-poller cached subscription-usage snapshot (#1029)
+export type {
+  UsageCoordinator,
+  UsageCoordinatorOptions,
+  UsageCoordinatorState,
+  WriteUsageStateOptions,
+} from './usage/coordinator.js';
+export {
+  createUsageCoordinator,
+  DEFAULT_USAGE_POLL_MS,
+  defaultUsageStatePath,
+  loadUsageState,
+  writeUsageState,
+} from './usage/coordinator.js';
+
 // Local queue reprioritization audit records (#869)
 export type { QueueReprioritizationRecord } from './types/index.js';
 export type { QueueRationaleAuditor } from './queue/reprioritization-audit.js';
