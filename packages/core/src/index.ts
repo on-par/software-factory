@@ -354,6 +354,13 @@ export {
   resolveArtifactsDir,
   writeBenchmarkArtifacts,
 } from './reports/benchmark-artifacts.js';
+export type { SandboxAbCohortMetrics, SandboxAbRecommendation, SandboxAbReport } from './reports/sandbox-ab.js';
+export {
+  computeSandboxAbReport,
+  DOCKER_SANDBOX_RUNTIME,
+  recommendSandboxAb,
+  renderSandboxAbReport,
+} from './reports/sandbox-ab.js';
 
 // KPIs
 export type {

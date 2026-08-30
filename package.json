@@ -21,6 +21,7 @@
     "mutation": "stryker run",
     "eval": "tsx scripts/eval.ts",
     "local-small-scoreboard": "tsx scripts/local-small-scoreboard.ts",
+    "sandbox-ab-report": "tsx scripts/sandbox-ab-report.ts",
     "sim-monte-carlo": "tsx scripts/sim-monte-carlo.ts",
     "eval-history": "tsx scripts/eval-history.ts",
     "regression-issue": "tsx scripts/regression-issue.ts",
