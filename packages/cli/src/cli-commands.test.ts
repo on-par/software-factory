@@ -143,6 +143,7 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
     loadModelsConfig: vi.fn(() => ({ models: {}, tiers: {} }) as any),
     loadRoutesConfig: vi.fn(() => ({}) as any),
     loadFactoryConfigForRepo: vi.fn(() => h.factoryConfig),
+    loadRepoConfig: vi.fn((repoRoot: string, stateRoot?: string) => actual.loadRepoConfig(repoRoot, stateRoot)),
     resolveTimeouts: vi.fn(() => ({ plan: 1, build: 1, check: 1, approval: 1 })),
     resolveSkipCI: vi.fn(() => false),
     getConstitutionsDir: vi.fn(() => h.constitutionsDir),
@@ -2946,6 +2947,23 @@ describe('shipIssue (direct)', () => {
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('ready');
     expect(events).toContain('worktree');
+  });
+
+  it('loads the committed repo config from paths.root, not paths.state', async () => {
+    const core = await import('@on-par/factory-core');
+    await shipIssue(5, {}, ctx());
+    expect(vi.mocked(core.loadRepoConfig)).toHaveBeenCalledWith(h.repoRoot, paths().root);
+  });
+
+  it('reads providers flags from .factory/config.json (no symlink needed)', async () => {
+    const core = await import('@on-par/factory-core');
+    mkdirSync(paths().root, { recursive: true });
+    writeFileSync(paths().config, JSON.stringify({ version: 1, providers: { ollama: false } }));
+    await shipIssue(5, {}, ctx());
+    expect(vi.mocked(core.loadRepoConfig).mock.results.at(-1)?.value).toEqual({
+      version: 1,
+      providers: { ollama: false },
+    });
   });
 
   // Regression (#681): a closed issue must be refused before any resource is
