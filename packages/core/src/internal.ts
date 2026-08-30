@@ -208,6 +208,8 @@ export {
 // Daemon lane state resolution (#843)
 export type { DaemonLaneContext } from './daemon/lane-context.js';
 export { createDaemonLaneContext } from './daemon/lane-context.js';
+export type { DaemonOrchestrator } from './daemon/run-repo.js';
+export { runDaemonRepo } from './daemon/run-repo.js';
 
 // Daemon control-plane HTTP server (#777)
 export type { FactorydOptions, FactorydServer } from './daemon/factoryd-http.js';
