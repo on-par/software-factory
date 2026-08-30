@@ -3,6 +3,7 @@
 
 import type { Octokit } from '@octokit/rest';
 import type { FactoryLogger } from '../logger/index.js';
+import type { QueueRationaleCommentClient } from '../queue/reprioritization-audit.js';
 import { createProjectQueueReader } from './project-queue-reader.js';
 import type { ProjectQueueStatus } from './project-queue-reader.js';
 import { createProjectQueuePoller } from './project-queue-poller.js';
@@ -21,6 +22,25 @@ export function createOctokitGraphqlClient(octokit: Pick<Octokit, 'graphql'>): P
   return (query, variables) => octokit.graphql(query, variables) as Promise<unknown>;
 }
 
+/** Adapts a gh-authenticated Octokit into the injected rationale comment port, binding
+ *  owner/repo (the record carries only the issue number). Mirrors the existing
+ *  `octokit.rest.issues.createComment` call in `readiness/decompose.ts`. */
+export function createOctokitReprioritizationCommentClient(
+  octokit: Pick<Octokit, 'rest'>,
+  ctx: { owner: string; repo: string },
+): QueueRationaleCommentClient {
+  return {
+    async commentOnIssue({ issueNumber, body }) {
+      await octokit.rest.issues.createComment({
+        owner: ctx.owner,
+        repo: ctx.repo,
+        issue_number: issueNumber,
+        body,
+      });
+    },
+  };
+}
+
 export interface GithubProjectQueuePollerOptions {
   readonly octokit: Pick<Octokit, 'graphql'>;
   readonly projectId: string;
@@ -30,6 +50,7 @@ export interface GithubProjectQueuePollerOptions {
   readonly statusValues: Readonly<Record<string, ProjectQueueStatus>>;
   readonly logger: FactoryLogger;
   readonly pollMs?: number;
+  readonly commentClient?: QueueRationaleCommentClient;
 }
 
 /** Assembles a live, gh-authenticated daemon-ready ProjectV2 queue poller by wiring the
@@ -44,5 +65,10 @@ export function createGithubProjectQueuePoller(options: GithubProjectQueuePoller
     statusFieldName: options.statusFieldName,
     statusValues: options.statusValues,
   });
-  return createProjectQueuePoller({ reader, logger: options.logger, pollMs: options.pollMs });
+  return createProjectQueuePoller({
+    reader,
+    logger: options.logger,
+    pollMs: options.pollMs,
+    commentClient: options.commentClient,
+  });
 }

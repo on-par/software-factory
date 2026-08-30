@@ -3,6 +3,7 @@
 import type { FactoryLogger } from '../logger/index.js';
 import type { QueueReprioritizationRecord } from '../types/index.js';
 import { createQueueRationaleAuditor } from '../queue/reprioritization-audit.js';
+import type { QueueRationaleCommentClient } from '../queue/reprioritization-audit.js';
 import type { ProjectQueueIntentItem, ProjectQueueReadDiagnostic, ProjectQueueReader } from './project-queue-reader.js';
 
 export const DEFAULT_PROJECT_QUEUE_POLL_MS = 30_000;
@@ -17,6 +18,7 @@ export interface ProjectQueuePollerOptions {
   readonly reader: ProjectQueueReader;
   readonly logger: FactoryLogger;
   readonly pollMs?: number;
+  readonly commentClient?: QueueRationaleCommentClient;
 }
 
 export interface ProjectQueuePoller {
@@ -24,7 +26,7 @@ export interface ProjectQueuePoller {
   stop(): void;
   pollNow(): Promise<ProjectQueueProjection | null>;
   snapshot(): ProjectQueueProjection | null;
-  recordDaemonReprioritization(input: Omit<QueueReprioritizationRecord, 'actorType'>): void;
+  recordDaemonReprioritization(input: Omit<QueueReprioritizationRecord, 'actorType'>): Promise<void>;
 }
 
 function copyProjection(projection: ProjectQueueProjection | null): ProjectQueueProjection | null {
@@ -67,7 +69,7 @@ function validateOptions(options: ProjectQueuePollerOptions): number {
 
 export function createProjectQueuePoller(options: ProjectQueuePollerOptions): ProjectQueuePoller {
   const pollMs = validateOptions(options);
-  const rationaleAuditor = createQueueRationaleAuditor(options.logger);
+  const rationaleAuditor = createQueueRationaleAuditor(options.logger, { commentClient: options.commentClient });
   let cachedProjection: ProjectQueueProjection | null = null;
   let interval: ReturnType<typeof setInterval> | undefined;
   let started = false;
@@ -77,7 +79,7 @@ export function createProjectQueuePoller(options: ProjectQueuePollerOptions): Pr
     try {
       const result = await options.reader.read();
       cachedProjection = projectionFromRead(result);
-      rationaleAuditor.observeAcceptedProjection(cachedProjection);
+      await rationaleAuditor.observeAcceptedProjection(cachedProjection);
       options.logger.info(
         'project_queue_refresh_succeeded',
         `Project queue refresh succeeded: ${cachedProjection.items.length} items, ${cachedProjection.diagnostics.length} diagnostics`,

@@ -94,6 +94,7 @@ export type EventKind =
   | 'plan_rejected'
   | 'post-merge-defect'
   | 'queue_reprioritized'
+  | 'queue_rationale_comment_failed'
   | 'project_queue_refresh_failed'
   | 'project_queue_refresh_succeeded'
   | 'provider_breaker_close'
@@ -253,6 +254,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   plan_rejected: { severity: 'info', isPark: false, isTerminal: false },
   'post-merge-defect': { severity: 'info', isPark: false, isTerminal: false },
   queue_reprioritized: { severity: 'info', isPark: false, isTerminal: false },
+  queue_rationale_comment_failed: { severity: 'warn', isPark: false, isTerminal: false },
   project_queue_refresh_failed: { severity: 'warn', isPark: false, isTerminal: false },
   project_queue_refresh_succeeded: { severity: 'info', isPark: false, isTerminal: false },
   provider_breaker_close: { severity: 'info', isPark: false, isTerminal: false },

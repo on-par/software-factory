@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { FactoryLogger } from '../logger/index.js';
+import type { QueueRationaleCommentClient } from '../queue/reprioritization-audit.js';
 import type { ProjectQueueReadResult, ProjectQueueReader } from './project-queue-reader.js';
 import { createProjectQueuePoller, DEFAULT_PROJECT_QUEUE_POLL_MS } from './project-queue-poller.js';
 
@@ -183,5 +184,29 @@ describe('createProjectQueuePoller', () => {
     expect(() =>
       createProjectQueuePoller({ reader: { read: async () => result('PVTI_1', 'Build', 1, 'ready') }, logger, pollMs }),
     ).toThrow('Project queue poll interval must be positive');
+  });
+
+  it('threads an injected commentClient to the auditor and awaits it during refresh', async () => {
+    const { logger } = createLogger();
+    const calls: Array<{ issueNumber: number; body: string }> = [];
+    const commentClient: QueueRationaleCommentClient = {
+      commentOnIssue: async (input) => {
+        calls.push(input);
+      },
+    };
+    const reader: ProjectQueueReader = {
+      read: vi
+        .fn()
+        .mockResolvedValueOnce(result('PVTI_1', 'Build', 1, 'ready'))
+        .mockResolvedValueOnce(result('PVTI_1', 'Check', 1, 'ready')),
+    };
+    const poller = createProjectQueuePoller({ reader, logger, commentClient });
+
+    await poller.pollNow();
+    await poller.pollNow();
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ issueNumber: 1 });
+    expect(calls[0].body).toContain('**Field:** lane');
   });
 });

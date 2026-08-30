@@ -2,7 +2,11 @@ import type { Octokit } from '@octokit/rest';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { FactoryLogger } from '../logger/index.js';
-import { createGithubProjectQueuePoller, createOctokitGraphqlClient } from './github-project-graphql.js';
+import {
+  createGithubProjectQueuePoller,
+  createOctokitGraphqlClient,
+  createOctokitReprioritizationCommentClient,
+} from './github-project-graphql.js';
 
 const PROJECT_ID = 'PVT_kwDOA-board';
 
@@ -56,6 +60,21 @@ function fakeOctokit(graphqlMock: (query: string, variables: any) => Promise<unk
   return asGraphqlOctokit({ graphql: graphqlMock });
 }
 
+/** The only member createOctokitReprioritizationCommentClient touches
+ *  (`.rest.issues.createComment(...)`) — same single-assertion-widening rationale as
+ *  asGraphqlOctokit above. */
+interface RestOctokitDouble {
+  rest: { issues: { createComment(args: any): Promise<unknown> } };
+}
+
+function asRestOctokit(double: RestOctokitDouble): Pick<Octokit, 'rest'> {
+  return double as Pick<Octokit, 'rest'>;
+}
+
+function fakeRestOctokit(createComment: (args: any) => Promise<unknown>): Pick<Octokit, 'rest'> {
+  return asRestOctokit({ rest: { issues: { createComment } } });
+}
+
 describe('createOctokitGraphqlClient', () => {
   it('forwards the query and variables to octokit.graphql and resolves its result', async () => {
     const response = { some: 'result' };
@@ -69,6 +88,25 @@ describe('createOctokitGraphqlClient', () => {
       cursor: null,
     });
     expect(result).toBe(response);
+  });
+});
+
+describe('createOctokitReprioritizationCommentClient', () => {
+  it('maps issueNumber/body onto octokit.rest.issues.createComment with the bound owner/repo', async () => {
+    const createComment = vi.fn(async (_args: any) => ({ data: {} }));
+    const client = createOctokitReprioritizationCommentClient(fakeRestOctokit(createComment), {
+      owner: 'on-par',
+      repo: 'software-factory',
+    });
+
+    await client.commentOnIssue({ issueNumber: 1049, body: 'rationale body' });
+
+    expect(createComment).toHaveBeenCalledExactlyOnceWith({
+      owner: 'on-par',
+      repo: 'software-factory',
+      issue_number: 1049,
+      body: 'rationale body',
+    });
   });
 });
 
