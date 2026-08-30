@@ -382,6 +382,8 @@ const INTERNAL_API_KEYS = [
   'DEFAULT_FACTORYD_PORT',
   // Daemon lane state resolution (#843)
   'createDaemonLaneContext',
+  // Daemon per-repo orchestration dispatch (#1041)
+  'runDaemonRepo',
   // Daemon attach gate (#778)
   'attachRepo',
   'parseRemoteSlug',
