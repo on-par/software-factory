@@ -10,6 +10,7 @@ import type { Octokit } from '@octokit/rest';
 
 import type { EventKind } from '../events/kinds.js';
 import { shellEscape } from './index.js';
+import { removeMicroVm, type WorktreeSandbox } from './microvm.js';
 
 const exec = promisify(execCb);
 
@@ -50,6 +51,11 @@ export interface SweepDeps {
   log?: (type: EventKind, msg: string) => void;
   /** When present (with opts.repo), merged/close status is sourced from GitHub; absent or failing ⇒ local evidence only. */
   octokit?: Pick<Octokit, 'rest'>;
+  /** The repo's current docker-sandbox descriptor (runtime + authPaths), or undefined for every
+   *  other runtime. A reaped candidate may have been provisioned under a different runtime than
+   *  today's config, but removeMicroVm is a no-op unless `runtime === 'docker-sandbox'` and the
+   *  named VM exists, so passing today's descriptor for every candidate is safe and idempotent. */
+  sandbox?: WorktreeSandbox;
 }
 
 const CREDENTIAL_BASENAMES = new Set(['.git-credentials', '.npmrc']);
@@ -244,7 +250,7 @@ export async function sweepWorktrees(
   opts: { repoRoot: string; ttlDays: number; dryRun?: boolean; repo?: string },
   deps: SweepDeps = {},
 ): Promise<GcReport> {
-  const { runCommand = defaultRunCommand, now = () => Date.now(), log = () => {}, octokit } = deps;
+  const { runCommand = defaultRunCommand, now = () => Date.now(), log = () => {}, octokit, sandbox } = deps;
   const { repoRoot, ttlDays, dryRun = false, repo } = opts;
 
   const { stdout } = await runCommand('git worktree list --porcelain', { cwd: repoRoot });
@@ -376,6 +382,10 @@ export async function sweepWorktrees(
       } catch (err: any) {
         log('warn', `failed to scrub ${filePath}: ${err?.message ?? String(err)}`);
       }
+    }
+
+    if (sandbox) {
+      await removeMicroVm({ ...sandbox, worktreePath: candidate.path, log });
     }
 
     try {

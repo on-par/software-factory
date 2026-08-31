@@ -163,6 +163,8 @@ export {
   shellEscape,
   slugify,
 } from './utils/index.js';
+export type { MicroVmLifecycleOptions, WorktreeSandbox } from './utils/microvm.js';
+export { createMicroVm, microVmName, removeMicroVm, worktreeSandboxFor } from './utils/microvm.js';
 export type { FileLockOptions, SyncFileLockOptions } from './utils/lock.js';
 export { withFileLock, withFileLockSync, withGitLock } from './utils/lock.js';
 export type { RunLockHolder, RunLockOptions } from './utils/run-lock.js';
@@ -206,6 +208,8 @@ export {
 // Daemon lane state resolution (#843)
 export type { DaemonLaneContext } from './daemon/lane-context.js';
 export { createDaemonLaneContext } from './daemon/lane-context.js';
+export type { DaemonOrchestrator } from './daemon/run-repo.js';
+export { runDaemonRepo } from './daemon/run-repo.js';
 
 // Daemon control-plane HTTP server (#777)
 export type { FactorydOptions, FactorydServer } from './daemon/factoryd-http.js';
@@ -289,6 +293,49 @@ export type {
   ProjectQueueProjection,
 } from './projects/project-queue-poller.js';
 export { createProjectQueuePoller, DEFAULT_PROJECT_QUEUE_POLL_MS } from './projects/project-queue-poller.js';
+export type { ProjectQueueStatus } from './projects/project-queue-reader.js';
+
+// gh-authenticated ProjectV2 queue GraphQL client + live poller (#1046)
+export type { GithubProjectQueuePollerOptions, ProjectGraphqlClient } from './projects/github-project-graphql.js';
+export { createGithubProjectQueuePoller, createOctokitGraphqlClient } from './projects/github-project-graphql.js';
+
+// Single-poller cached subscription-usage snapshot (#1029)
+export type {
+  UsageCoordinator,
+  UsageCoordinatorOptions,
+  UsageCoordinatorState,
+  WriteUsageStateOptions,
+} from './usage/coordinator.js';
+export {
+  createUsageCoordinator,
+  DEFAULT_USAGE_POLL_MS,
+  defaultUsageStatePath,
+  loadUsageState,
+  writeUsageState,
+} from './usage/coordinator.js';
+
+// UsageCoordinator admission-control acquire() API and grant ledger (#1030)
+export type { AcquireResult, GrantLedger, GrantLedgerEntry, GrantRequest } from './usage/grant-ledger.js';
+export {
+  defaultGrantLedgerPath,
+  DEFAULT_GRANT_TTL_MS,
+  isCappedModel,
+  loadGrantLedger,
+  pruneGrants,
+  USAGE_ADMISSION_CEILING_PCT,
+  USAGE_GRANT_RESERVATION_PCT,
+  writeGrantLedger,
+} from './usage/grant-ledger.js';
+
+// Engine lane parks and resumes on acquire denial (#1032)
+export type { LaneAcquire, LaneAdmission, LaneScheduler, LaneSchedulerOptions } from './usage/lane-scheduler.js';
+export { createLaneScheduler } from './usage/lane-scheduler.js';
+
+// Standalone local UsageCoordinator fallback (#1033)
+export type { LocalUsageCoordinatorOptions } from './usage/local-coordinator.js';
+export { createLocalUsageCoordinator } from './usage/local-coordinator.js';
+export type { SelectUsageCoordinatorOptions } from './usage/select-coordinator.js';
+export { selectUsageCoordinator } from './usage/select-coordinator.js';
 
 // Local queue reprioritization audit records (#869)
 export type { QueueReprioritizationRecord } from './types/index.js';

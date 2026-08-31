@@ -147,6 +147,7 @@ import type {
   QueueReleaseOutcome,
   UnmergedGreenPr,
   WatchChecksOptions,
+  WorktreeSandbox,
 } from '@on-par/factory-core/internal';
 import {
   branchFor,
@@ -171,6 +172,7 @@ import {
   releaseStaleClaims,
   resolveBranchPrefix,
   resolveEffectiveConfig,
+  worktreeSandboxFor,
   resolveExperimental,
   resolveFilingPolicy,
   resolveLocalOnly,
@@ -1107,6 +1109,38 @@ export async function shipIssue(
     throw new IssueSkippedError(skipReason, 'already-closed');
   }
 
+  const sandboxPolicy = resolveSandboxPolicy(policy.sandbox, {
+    worktree,
+    repoRoot,
+    cliDisabled: opts.sandbox === false,
+    laneId: lane,
+  });
+  laneSandboxRuntime = sandboxPolicy?.runtime ?? 'none';
+  const worktreeSandbox: WorktreeSandbox | undefined = worktreeSandboxFor(sandboxPolicy?.runtime);
+  let activeSandboxPolicy: SandboxPolicy | undefined;
+  if (opts.sandbox === false) {
+    console.error(chalk.yellow('factory: sandbox disabled by --no-sandbox — agent runs are UNCONTAINED'));
+    log('sandbox-disabled', 'sandbox disabled by --no-sandbox');
+  } else if (!sandboxPolicy) {
+    log('sandbox-disabled', 'sandbox disabled by config/FACTORY_SANDBOX');
+  } else if (sandboxPolicy.runtime === 'none') {
+    log('sandbox-unavailable', 'no sandbox runtime found (sandbox-exec/firejail) — running uncontained');
+  } else if (sandboxPolicy.runtime === 'docker-sandbox') {
+    // docker-sandbox's containment is the microVM created by worktreeWorkspace below
+    // (#653), not a command-prefix wrap — activeSandboxPolicy stays undefined because
+    // wrapCommandInSandbox remains a no-op for this runtime. createMicroVm logs the
+    // actual outcome ('sandbox' on success, 'sandbox-unavailable' on fallback), so no
+    // speculative log is emitted here.
+  } else {
+    activeSandboxPolicy = sandboxPolicy;
+    if (sandboxPolicy.allowHosts.length > 0) {
+      log(
+        'sandbox-degraded',
+        `host-level egress filtering unavailable in v1; intended allowlist: ${sandboxPolicy.allowHosts.join(', ')}`,
+      );
+    }
+  }
+
   // Setup worktree FIRST — PLAN needs cwd=worktree to run claude. Worktree cleanup
   // stays a CLI concern (not called here, matching today — a worktree persists past
   // a successful run for GC/sweep commands to reclaim later).
@@ -1117,13 +1151,14 @@ export async function shipIssue(
       branch,
       worktreePath: worktree,
       log,
-      setup: (root, br, wt) =>
+      sandbox: worktreeSandbox,
+      setup: (root, br, wt, sp, sandbox, setupLog) =>
         withGitLock(root, () =>
           withFileLock(
             paths.gitLock,
             async () => {
               await gitFetch(root);
-              await setupWorktree(root, br, wt);
+              await setupWorktree(root, br, wt, sp, sandbox, setupLog);
             },
             { onSteal: (pid) => log('lock-stolen', `stole ${paths.gitLock} from dead holder pid ${pid ?? 'unknown'}`) },
           ),
@@ -1133,36 +1168,6 @@ export async function shipIssue(
   } else {
     workspace = localOnlyWorkspace(ctx.localOnly);
     log('workspace', `local-only: using caller-provided workspace ${worktree} (no factory worktree created)`);
-  }
-
-  const sandboxPolicy = resolveSandboxPolicy(policy.sandbox, {
-    worktree,
-    repoRoot,
-    cliDisabled: opts.sandbox === false,
-    laneId: lane,
-  });
-  laneSandboxRuntime = sandboxPolicy?.runtime ?? 'none';
-  let activeSandboxPolicy: SandboxPolicy | undefined;
-  if (opts.sandbox === false) {
-    console.error(chalk.yellow('factory: sandbox disabled by --no-sandbox — agent runs are UNCONTAINED'));
-    log('sandbox-disabled', 'sandbox disabled by --no-sandbox');
-  } else if (!sandboxPolicy) {
-    log('sandbox-disabled', 'sandbox disabled by config/FACTORY_SANDBOX');
-  } else if (sandboxPolicy.runtime === 'none') {
-    log('sandbox-unavailable', 'no sandbox runtime found (sandbox-exec/firejail) — running uncontained');
-  } else if (sandboxPolicy.runtime === 'docker-sandbox') {
-    log(
-      'sandbox-unavailable',
-      'docker-sandbox selected but its VM lifecycle is not implemented yet (#653) — running uncontained',
-    );
-  } else {
-    activeSandboxPolicy = sandboxPolicy;
-    if (sandboxPolicy.allowHosts.length > 0) {
-      log(
-        'sandbox-degraded',
-        `host-level egress filtering unavailable in v1; intended allowlist: ${sandboxPolicy.allowHosts.join(', ')}`,
-      );
-    }
   }
 
   const planApprovalEnabled = opts.approvePlan ?? resolvePlanApproval(factoryConfig);
@@ -1774,6 +1779,17 @@ export async function withRepoRunLock<T>(
   }
 }
 
+/** The repo's current docker-sandbox descriptor for worktree-gc sweeps, or undefined for
+ *  every other runtime/config state (including a fixture config with no `sandbox` key). */
+function gcWorktreeSandbox(
+  sandboxCfg: FactoryConfig['sandbox'] | undefined,
+  repoRoot: string,
+): WorktreeSandbox | undefined {
+  if (!sandboxCfg) return undefined;
+  const policy = resolveSandboxPolicy(sandboxCfg, { worktree: repoRoot, repoRoot });
+  return worktreeSandboxFor(policy?.runtime);
+}
+
 export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
@@ -1786,7 +1802,8 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }
   // Best-effort GitHub evidence: tokenless/local-only repos keep today's pure-local behavior.
   const ghRepo = await getGitHubRepo().catch(() => undefined);
   const octokit = ghRepo ? (hasGitHubToken() ? getOctokit() : undefined) : undefined;
-  const run = () => sweepWorktrees({ repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo }, { log, octokit });
+  const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
+  const run = () => sweepWorktrees({ repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo }, { log, octokit, sandbox });
   const report = opts.dryRun ? await run() : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
   console.log(formatGcReport(report));
 }
@@ -1874,6 +1891,12 @@ async function landIssue(
     throw new LandFailureError(`no open PR for issue #${issueNum} (${guessedBranch})`, 1);
   }
 
+  const landSandboxPolicy = resolveSandboxPolicy(loadFactoryConfigForRepo(paths.config).sandbox, {
+    worktree,
+    repoRoot,
+  });
+  const worktreeSandbox: WorktreeSandbox | undefined = worktreeSandboxFor(landSandboxPolicy?.runtime);
+
   const withLandLock: LandLock = (fn) =>
     withGitLock(repoRoot, () =>
       withFileLock(paths.mergeLock, fn, {
@@ -1898,18 +1921,18 @@ async function landIssue(
         withLock: withLandLock,
         ensureWorktree: async () => {
           if (!existsSync(worktree)) {
-            await setupWorktree(repoRoot, branch, worktree, `origin/${branch}`);
+            await setupWorktree(repoRoot, branch, worktree, `origin/${branch}`, worktreeSandbox, log);
           }
         },
       });
     } catch (err) {
       if (err instanceof AwaitingReviewError || err instanceof CiFailedError) {
-        await withLandLock(() => cleanupWorktree(repoRoot, worktree, log));
+        await withLandLock(() => cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
       }
       throw err;
     }
     log('merged', `squash-merged PR #${prNumber}`);
-    await withLandLock(() => cleanupWorktree(repoRoot, worktree, log));
+    await withLandLock(() => cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
   } catch (err: any) {
     if (err instanceof LandConflictError || err instanceof AwaitingReviewError || err instanceof CiFailedError)
       throw err;
@@ -2334,11 +2357,12 @@ async function cmdRun(opts: { localQueue?: boolean } = {}) {
     if (factoryConfig.worktree.autoGcOnRun) {
       try {
         const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
+        const gcSandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
             sweepWorktrees(
               { repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays, repo: ghRepo },
-              { log: gcLog, octokit: getOctokit() },
+              { log: gcLog, octokit: getOctokit(), sandbox: gcSandbox },
             ),
           ),
         );
@@ -3601,7 +3625,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     } else if (policy.runtime === 'none') {
       sandboxDetail = 'skipped — no sandbox runtime (sandbox-exec/firejail) on this host';
     } else if (policy.runtime === 'docker-sandbox') {
-      sandboxDetail = 'skipped — docker-sandbox has no command wrapping yet (#653)';
+      sandboxDetail = 'skipped — docker-sandbox containment is the microVM, not command wrapping (#653)';
     } else {
       sandboxed = probeExec(wrapCommandInSandbox(CLAUDE_AUTH_PROBE, policy)) === null ? 'failed' : 'ok';
       sandboxDetail =
@@ -3648,11 +3672,12 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
 
       try {
         const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
+        const gcSandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
             sweepWorktrees(
               { repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays, repo: ghRepo },
-              { log: gcLog, octokit },
+              { log: gcLog, octokit, sandbox: gcSandbox },
             ),
           ),
         );

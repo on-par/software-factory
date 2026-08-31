@@ -94,6 +94,7 @@ export type EventKind =
   | 'plan_rejected'
   | 'post-merge-defect'
   | 'queue_reprioritized'
+  | 'queue_rationale_comment_failed'
   | 'project_queue_refresh_failed'
   | 'project_queue_refresh_succeeded'
   | 'provider_breaker_close'
@@ -135,6 +136,9 @@ export type EventKind =
   | 'triage_accepted'
   | 'usage-stop'
   | 'usage-unavailable'
+  | 'usage_coordinator_poll_empty'
+  | 'usage_coordinator_poll_failed'
+  | 'usage_coordinator_poll_succeeded'
   | 'warn'
   | 'watchdog'
   | 'work-source'
@@ -250,6 +254,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   plan_rejected: { severity: 'info', isPark: false, isTerminal: false },
   'post-merge-defect': { severity: 'info', isPark: false, isTerminal: false },
   queue_reprioritized: { severity: 'info', isPark: false, isTerminal: false },
+  queue_rationale_comment_failed: { severity: 'warn', isPark: false, isTerminal: false },
   project_queue_refresh_failed: { severity: 'warn', isPark: false, isTerminal: false },
   project_queue_refresh_succeeded: { severity: 'info', isPark: false, isTerminal: false },
   provider_breaker_close: { severity: 'info', isPark: false, isTerminal: false },
@@ -293,6 +298,9 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   triage_accepted: { severity: 'info', isPark: false, isTerminal: false },
   'usage-stop': { severity: 'info', isPark: false, isTerminal: false },
   'usage-unavailable': { severity: 'info', isPark: false, isTerminal: false },
+  usage_coordinator_poll_empty: { severity: 'warn', isPark: false, isTerminal: false },
+  usage_coordinator_poll_failed: { severity: 'warn', isPark: false, isTerminal: false },
+  usage_coordinator_poll_succeeded: { severity: 'info', isPark: false, isTerminal: false },
   warn: { severity: 'warn', isPark: false, isTerminal: false },
   watchdog: { severity: 'info', isPark: false, isTerminal: false },
   'work-source': { severity: 'info', isPark: false, isTerminal: false },
