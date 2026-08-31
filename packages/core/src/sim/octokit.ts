@@ -8,7 +8,7 @@ import { applyLatency, realSimClock, type SimClock, type SimLatency } from './la
 export type SimRecordedCall = [string, ...unknown[]];
 
 export type SimOctokitEndpoint =
-  'issues.get' | 'pulls.list' | 'pulls.create' | 'pulls.get' | 'checks.listForRef' | 'graphql';
+  'issues.get' | 'issues.update' | 'pulls.list' | 'pulls.create' | 'pulls.get' | 'checks.listForRef' | 'graphql';
 
 export interface SimOctokitStep {
   /** The EXACT resolved value of the call — REST scripts must include their own `{ data }` wrapper. */
@@ -33,7 +33,7 @@ export interface SimOctokitOptions {
 export interface SimOctokit {
   graphql: (query: string, vars: unknown) => Promise<any>;
   rest: {
-    issues: { get: (args: any) => Promise<any> };
+    issues: { get: (args: any) => Promise<any>; update: (args: any) => Promise<any> };
     pulls: {
       list: (args: any) => Promise<any>;
       create: (args: any) => Promise<any>;
@@ -79,6 +79,7 @@ export function createSimOctokit(options: SimOctokitOptions = {}): {
               body: options.bodies?.[args.issue_number] ?? 'stub issue body',
             },
           })),
+        update: (args: any) => invoke('issues.update', ['issues.update', args], () => ({ data: {} })),
       },
       pulls: {
         list: (args: any) => invoke('pulls.list', ['pulls.list', args], () => ({ data: [] })),
@@ -100,7 +101,7 @@ export function createSimOctokit(options: SimOctokitOptions = {}): {
 
 /** Widens the simulator's fake to the `Octokit` type `planPhase`/`shipPhase` declare.
  *  Invariant, checked by construction: `SimOctokit` implements every endpoint those two
- *  phases reach for — graphql, issues.get, issues.createComment, pulls.list/create/get and
+ *  phases reach for — graphql, issues.get/update, issues.createComment, pulls.list/create/get and
  *  checks.listForRef — and the sim pipeline suites fail loudly if one goes missing. A single
  *  assertion, never a chain: the fake is a real subset of Octokit, not an unrelated value. */
 export function asPhaseOctokit(octokit: SimOctokit): Octokit {

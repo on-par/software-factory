@@ -15,7 +15,11 @@ import { buildConstitutionContext } from '../constitutions/index.js';
 import { parseDesignArtifact, renderDesignArtifact } from '../design/index.js';
 import { buildFastPathSpec, isFastPathEligible } from '../efficiency/fast-path.js';
 import type { EventKind } from '../events/kinds.js';
-import { buildReadinessEnrichmentPrompt } from '../readiness/enrich.js';
+import {
+  buildReadinessEnrichmentPrompt,
+  buildReadinessEnrichmentRetryPrompt,
+  type ReadinessEnrichmentRetryContext,
+} from '../readiness/enrich.js';
 import { decomposeOversizedIssue } from '../readiness/decompose.js';
 import { MAX_BUILD_CALL_EDGES, MAX_BUILD_SIGNATURES, MAX_BUILD_TARGET_TYPES } from '../readiness/size.js';
 import { scoreIssueReadiness } from '../readiness/index.js';
@@ -275,36 +279,52 @@ async function planPhaseImpl(opts: {
   ) {
     const params = source.params as GithubIssueParams;
     const [owner, name] = params.repo.split('/');
+    const maxEnrichmentAttempts = 2; // one initial call + one retry with the missing headings named (#816)
     log('readiness_enrichment_started', `enriching incomplete factory-task issue #${params.issue}`);
     try {
-      const enrichment = await router.run(
-        'readiness_enrich',
-        buildReadinessEnrichmentPrompt({ title: issueTitle, body: issueBody, missing: readiness.missing }),
-        {
+      let previous: ReadinessEnrichmentRetryContext | null = null;
+      let lastModel = '';
+      let lastReason = '';
+      let enriched = false;
+      for (let attempt = 1; attempt <= maxEnrichmentAttempts; attempt++) {
+        const input = { title: issueTitle, body: issueBody, missing: readiness.missing };
+        const prompt =
+          previous === null
+            ? buildReadinessEnrichmentPrompt(input)
+            : buildReadinessEnrichmentRetryPrompt(input, previous);
+        const enrichment = await router.run('readiness_enrich', prompt, {
           worktree,
           timeoutSeconds: Math.min(timeoutSeconds ?? 1800, 300),
           onLog: (msg) => log('router', msg),
-        },
-      );
-      const candidate = scoreIssueReadiness({ title: issueTitle, body: enrichment.output });
-      if (candidate.template !== 'factory-task' || !candidate.pass) {
-        const reason = `enrichment output failed readiness (${candidate.template}; missing: ${candidate.missing.join(', ') || 'none'})`;
-        log('readiness_enrichment_failed', reason);
-        return {
-          ok: false,
-          route: 'claude',
-          specPath,
-          model: enrichment.model,
-          escalate: reason,
-          designArtifact: null,
-        };
+        });
+        lastModel = enrichment.model;
+        const candidate = scoreIssueReadiness({ title: issueTitle, body: enrichment.output });
+        if (candidate.template === 'factory-task' && candidate.pass) {
+          await octokit.rest.issues.update({ owner, repo: name, issue_number: params.issue, body: enrichment.output });
+          issueBody = enrichment.output;
+          readiness = candidate;
+          log(
+            'readiness_enrichment_succeeded',
+            `enriched factory-task issue #${params.issue} with ${enrichment.model}`,
+            {
+              model: enrichment.model,
+            },
+          );
+          enriched = true;
+          break;
+        }
+        lastReason = `enrichment output failed readiness (${candidate.template}; missing: ${candidate.missing.join(', ') || 'none'})`;
+        log(
+          'readiness_enrichment_failed',
+          attempt < maxEnrichmentAttempts
+            ? `${lastReason} — retrying with the missing heading(s) named (attempt ${attempt}/${maxEnrichmentAttempts})`
+            : `${lastReason} — after ${maxEnrichmentAttempts} attempt(s)`,
+        );
+        previous = { previousOutput: enrichment.output, template: candidate.template, stillMissing: candidate.missing };
       }
-      await octokit.rest.issues.update({ owner, repo: name, issue_number: params.issue, body: enrichment.output });
-      issueBody = enrichment.output;
-      readiness = candidate;
-      log('readiness_enrichment_succeeded', `enriched factory-task issue #${params.issue} with ${enrichment.model}`, {
-        model: enrichment.model,
-      });
+      if (!enriched) {
+        return { ok: false, route: 'claude', specPath, model: lastModel, escalate: lastReason, designArtifact: null };
+      }
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       log('readiness_enrichment_failed', `enrichment failed: ${reason}`);
