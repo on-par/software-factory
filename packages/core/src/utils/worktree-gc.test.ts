@@ -1232,7 +1232,13 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       return { stdout: '' };
     });
     const sbxExec = vi.fn().mockResolvedValue({ stdout: '', stderr: '' });
-    const sandbox = { runtime: 'docker-sandbox' as const, authPaths: [], exec: sbxExec, isAvailable: () => true };
+    const sandbox = {
+      runtime: 'docker-sandbox' as const,
+      authPaths: [],
+      allowHosts: [],
+      exec: sbxExec,
+      isAvailable: () => true,
+    };
 
     const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand, sandbox });
     expect(report.removed).toHaveLength(1);

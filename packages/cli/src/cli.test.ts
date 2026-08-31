@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import type { ModelDiagnosis } from '@on-par/factory-core';
-import { getFactoryPaths } from '@on-par/factory-core';
+import { getFactoryPaths, readPortLeases } from '@on-par/factory-core';
 import type { GithubQueue } from '@on-par/factory-core/internal';
 import { RunLockHeldError, resolveBranchPrefix } from '@on-par/factory-core/internal';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -52,6 +52,7 @@ import {
   PREREQUISITES_TEXT,
   prLookupFailure,
   readActiveProduct,
+  resolveEnvironmentAcquirer,
   resolveLaneBaseUrl,
   resolveUsageKnobs,
   runLane,
@@ -705,6 +706,65 @@ describe('cli', () => {
       });
       expect(result.baseUrl).toBeUndefined();
       expect(result.note).toContain('http://127.0.0.1:3142');
+    });
+  });
+
+  describe('resolveEnvironmentAcquirer', () => {
+    let dir: string;
+    let paths: any;
+    const baseOpts = (overrides: Partial<Parameters<typeof resolveEnvironmentAcquirer>[0]> = {}) => ({
+      laneSandboxRuntime: 'none' as const,
+      paths,
+      worktree: '/repo/.worktrees/654',
+      branch: 'ship-it/654',
+      range: [4000, 4999] as [number, number],
+      processGroupGraceMs: 1000,
+      log: vi.fn(),
+      ...overrides,
+    });
+
+    beforeEach(async () => {
+      dir = await mkdtemp(join(tmpdir(), 'cli-env-acquirer-'));
+      paths = { ports: join(dir, 'ports.json'), portsLock: join(dir, 'ports.lock') };
+    });
+
+    afterEach(async () => {
+      await rm(dir, { recursive: true, force: true });
+    });
+
+    it('returns undefined and logs a skip for a docker-sandbox lane, never reaching acquirePortLease', () => {
+      const log = vi.fn();
+
+      const acquirer = resolveEnvironmentAcquirer(
+        baseOpts({ laneSandboxRuntime: 'docker-sandbox', worktree: '/repo/.worktrees/654', log }),
+      );
+
+      expect(acquirer).toBeUndefined();
+      expect(log).toHaveBeenCalledWith(
+        'environment_lease',
+        expect.stringContaining('docker-sandbox lane /repo/.worktrees/654 binds its port inside its own microVM'),
+      );
+      expect(readPortLeases(paths.ports)).toEqual([]);
+    });
+
+    it('returns an acquirer function for non-docker-sandbox runtimes', () => {
+      for (const laneSandboxRuntime of ['sandbox-exec', 'none'] as const) {
+        const acquirer = resolveEnvironmentAcquirer(baseOpts({ laneSandboxRuntime }));
+        expect(typeof acquirer).toBe('function');
+      }
+    });
+
+    it('leaves .factory/ports.json with no entries for either of two concurrent docker-sandbox lanes', () => {
+      const acquirerA = resolveEnvironmentAcquirer(
+        baseOpts({ laneSandboxRuntime: 'docker-sandbox', worktree: '/repo/.worktrees/654a' }),
+      );
+      const acquirerB = resolveEnvironmentAcquirer(
+        baseOpts({ laneSandboxRuntime: 'docker-sandbox', worktree: '/repo/.worktrees/654b' }),
+      );
+
+      expect(acquirerA).toBeUndefined();
+      expect(acquirerB).toBeUndefined();
+      expect(readPortLeases(paths.ports)).toEqual([]);
     });
   });
 

@@ -36,6 +36,7 @@ import type {
   RunPorts,
   RunRequest,
   SandboxPolicy,
+  SandboxRuntime,
   UsageReading,
   Workspace,
   WorkRequest,
@@ -970,6 +971,94 @@ export function resolveLaneBaseUrl(
   return { note: `proxy enabled but not running — using http://127.0.0.1:${appPort}` };
 }
 
+/** Builds the port-lease acquirer passed to runIssue, or undefined to skip it. A
+ *  docker-sandbox lane runs inside its own microVM network namespace and binds its
+ *  normal port there, so it needs no host port-lease and (since the proxy resolves
+ *  routes solely from the lease registry) no proxy route either — every other
+ *  runtime keeps acquiring a lease exactly as before. */
+export function resolveEnvironmentAcquirer(opts: {
+  laneSandboxRuntime: SandboxRuntime;
+  paths: ReturnType<typeof getFactoryPaths>;
+  worktree: string;
+  branch: string;
+  range: [number, number];
+  processGroupGraceMs: number;
+  log: (type: EventKind, msg: string) => void;
+}): (() => Promise<Environment>) | undefined {
+  if (opts.laneSandboxRuntime === 'docker-sandbox') {
+    opts.log(
+      'environment_lease',
+      `docker-sandbox lane ${opts.worktree} binds its port inside its own microVM — skipping host port-lease`,
+    );
+    return undefined;
+  }
+
+  return async (): Promise<Environment> => {
+    const reaped: ReapedLease[] = [];
+    const lease = await acquirePortLease({
+      registryFile: opts.paths.ports,
+      lockDir: opts.paths.portsLock,
+      worktreeId: opts.worktree,
+      branch: opts.branch,
+      range: opts.range,
+      onReap: (r) => {
+        reaped.push(r);
+        opts.log(
+          'environment_lease_reaped',
+          `reaped stale lease: port ${r.lease.port}, pid ${r.lease.pid}, worktree ${r.lease.worktreeId} — reason: ${r.reason}`,
+        );
+      },
+      onPortConflict: (port) => {
+        void defaultFindPortListeners(port)
+          .then((listeners) => {
+            const detail =
+              listeners.length > 0
+                ? listeners.map((l) => `pid ${l.pid} (${l.command})`).join(', ')
+                : 'no listener details available';
+            opts.log(
+              'environment_conflict',
+              `port ${port} busy but unleased — reported as conflict, not terminated: ${detail}`,
+            );
+          })
+          .catch(() => {
+            opts.log('environment_conflict', `port ${port} busy but unleased — reported as conflict, not terminated`);
+          });
+      },
+    });
+    opts.log('environment_lease', `leased port ${lease.port} for worktree ${opts.worktree}`);
+    if (reaped.length > 0) {
+      await reapOrphanProcesses({
+        reaped,
+        graceMs: opts.processGroupGraceMs,
+        onEvent: (e) =>
+          opts.log(
+            'environment_orphan',
+            `${e.action === 'killed' ? 'killed' : 'found'} pid ${e.pid} (pgid ${e.pgid}, ${e.command}) squatting port ${e.port} of dead lane ${e.worktreeId}${e.action === 'reported' ? ' — not factory-started, left running' : ''}`,
+          ),
+      });
+    }
+    return {
+      port: lease.port,
+      env: () => laneEnv(lease.port, process.env),
+      recordPgid(pgid: number): void {
+        void recordLeasePgid({
+          registryFile: opts.paths.ports,
+          lockDir: opts.paths.portsLock,
+          worktreeId: opts.worktree,
+          pgid,
+        }).catch(() => {});
+      },
+      async release(): Promise<void> {
+        await releasePortLease({
+          registryFile: opts.paths.ports,
+          lockDir: opts.paths.portsLock,
+          worktreeId: opts.worktree,
+        });
+      },
+    };
+  };
+}
+
 export async function shipIssue(
   issueNum: number,
   opts: { product?: string; autoRework?: boolean; interactive?: boolean; sandbox?: boolean; approvePlan?: boolean },
@@ -1116,7 +1205,9 @@ export async function shipIssue(
     laneId: lane,
   });
   laneSandboxRuntime = sandboxPolicy?.runtime ?? 'none';
-  const worktreeSandbox: WorktreeSandbox | undefined = worktreeSandboxFor(sandboxPolicy?.runtime);
+  const worktreeSandbox: WorktreeSandbox | undefined = worktreeSandboxFor(sandboxPolicy?.runtime, {
+    allowHosts: sandboxPolicy?.allowHosts ?? [],
+  });
   let activeSandboxPolicy: SandboxPolicy | undefined;
   if (opts.sandbox === false) {
     console.error(chalk.yellow('factory: sandbox disabled by --no-sandbox — agent runs are UNCONTAINED'));
@@ -1181,66 +1272,15 @@ export async function shipIssue(
   // group tracking and killing is runIssue's own unconditional tracker (Invariant 3),
   // so a lease-disabled/failed run still tears down every spawned agent process.
   const acquireEnvironment = portsSettings.enabled
-    ? async (): Promise<Environment> => {
-        const reaped: ReapedLease[] = [];
-        const lease = await acquirePortLease({
-          registryFile: paths.ports,
-          lockDir: paths.portsLock,
-          worktreeId: worktree,
-          branch,
-          range: portsSettings.range,
-          onReap: (r) => {
-            reaped.push(r);
-            log(
-              'environment_lease_reaped',
-              `reaped stale lease: port ${r.lease.port}, pid ${r.lease.pid}, worktree ${r.lease.worktreeId} — reason: ${r.reason}`,
-            );
-          },
-          onPortConflict: (port) => {
-            void defaultFindPortListeners(port)
-              .then((listeners) => {
-                const detail =
-                  listeners.length > 0
-                    ? listeners.map((l) => `pid ${l.pid} (${l.command})`).join(', ')
-                    : 'no listener details available';
-                log(
-                  'environment_conflict',
-                  `port ${port} busy but unleased — reported as conflict, not terminated: ${detail}`,
-                );
-              })
-              .catch(() => {
-                log('environment_conflict', `port ${port} busy but unleased — reported as conflict, not terminated`);
-              });
-          },
-        });
-        log('environment_lease', `leased port ${lease.port} for worktree ${worktree}`);
-        if (reaped.length > 0) {
-          await reapOrphanProcesses({
-            reaped,
-            graceMs: processGroupGraceMs,
-            onEvent: (e) =>
-              log(
-                'environment_orphan',
-                `${e.action === 'killed' ? 'killed' : 'found'} pid ${e.pid} (pgid ${e.pgid}, ${e.command}) squatting port ${e.port} of dead lane ${e.worktreeId}${e.action === 'reported' ? ' — not factory-started, left running' : ''}`,
-              ),
-          });
-        }
-        return {
-          port: lease.port,
-          env: () => laneEnv(lease.port, process.env),
-          recordPgid(pgid: number): void {
-            void recordLeasePgid({
-              registryFile: paths.ports,
-              lockDir: paths.portsLock,
-              worktreeId: worktree,
-              pgid,
-            }).catch(() => {});
-          },
-          async release(): Promise<void> {
-            await releasePortLease({ registryFile: paths.ports, lockDir: paths.portsLock, worktreeId: worktree });
-          },
-        };
-      }
+    ? resolveEnvironmentAcquirer({
+        laneSandboxRuntime: sandboxPolicy?.runtime ?? 'none',
+        paths,
+        worktree,
+        branch,
+        range: portsSettings.range,
+        processGroupGraceMs,
+        log,
+      })
     : undefined;
 
   const proxySettings = resolveEnvironmentProxy(factoryConfig);
@@ -1895,7 +1935,9 @@ async function landIssue(
     worktree,
     repoRoot,
   });
-  const worktreeSandbox: WorktreeSandbox | undefined = worktreeSandboxFor(landSandboxPolicy?.runtime);
+  const worktreeSandbox: WorktreeSandbox | undefined = worktreeSandboxFor(landSandboxPolicy?.runtime, {
+    allowHosts: landSandboxPolicy?.allowHosts ?? [],
+  });
 
   const withLandLock: LandLock = (fn) =>
     withGitLock(repoRoot, () =>

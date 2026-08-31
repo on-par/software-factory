@@ -19,6 +19,7 @@ function baseOpts(overrides: Partial<MicroVmLifecycleOptions> = {}): MicroVmLife
   return {
     runtime: 'docker-sandbox',
     authPaths: ['/home/user/.claude', '/home/user/.codex', '/home/user/.npm'],
+    allowHosts: ['api.anthropic.com', 'github.com'],
     worktreePath: '/repo/.worktrees/653',
     isAvailable: () => true,
     exec: OK_EXEC,
@@ -34,10 +35,21 @@ describe('worktreeSandboxFor', () => {
     expect(worktreeSandboxFor(undefined)).toBeUndefined();
   });
 
-  it('builds authPaths for ~/.claude, ~/.codex, ~/.npm under the given home', () => {
+  it('builds authPaths for ~/.claude, ~/.codex, ~/.npm under the given home, with an empty allowlist by default', () => {
     expect(worktreeSandboxFor('docker-sandbox', { homedir: '/home/user' })).toEqual({
       runtime: 'docker-sandbox',
       authPaths: ['/home/user/.claude', '/home/user/.codex', '/home/user/.npm'],
+      allowHosts: [],
+    });
+  });
+
+  it('carries the given allowHosts on the descriptor', () => {
+    expect(
+      worktreeSandboxFor('docker-sandbox', { homedir: '/home/user', allowHosts: ['api.anthropic.com', 'github.com'] }),
+    ).toEqual({
+      runtime: 'docker-sandbox',
+      authPaths: ['/home/user/.claude', '/home/user/.codex', '/home/user/.npm'],
+      allowHosts: ['api.anthropic.com', 'github.com'],
     });
   });
 });
@@ -68,9 +80,19 @@ describe('createMicroVm', () => {
     const createCall = (exec as any).mock.calls.find(([cmd]: [string]) => cmd.includes('sbx create'))[0];
     const name = microVmName('/repo/.worktrees/653');
     expect(createCall).toBe(
-      `sbx create --name ${name} --mount '/repo/.worktrees/653':rw --mount '/home/user/.claude':rw --mount '/home/user/.codex':rw --mount '/home/user/.npm':rw`,
+      `sbx create --name ${name} --mount '/repo/.worktrees/653':rw --mount '/home/user/.claude':rw --mount '/home/user/.codex':rw --mount '/home/user/.npm':rw --allow-network 'api.anthropic.com' --allow-network 'github.com'`,
     );
     expect(log).toHaveBeenCalledWith('sandbox', expect.stringContaining(name));
+  });
+
+  it('renders --network none when the allowlist is empty', async () => {
+    const exec = makeExec(async () => ({ stdout: '', stderr: '' }));
+
+    await createMicroVm(baseOpts({ exec, allowHosts: [] }));
+
+    const createCall = (exec as any).mock.calls.find(([cmd]: [string]) => cmd.includes('sbx create'))[0];
+    expect(createCall).toMatch(/--network none$/);
+    expect(createCall).not.toContain('--allow-network');
   });
 
   it('returns false and issues no create when sbx is not installed', async () => {

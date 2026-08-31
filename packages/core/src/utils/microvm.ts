@@ -38,6 +38,9 @@ export function microVmName(worktreePath: string): string {
 export interface WorktreeSandbox {
   runtime: SandboxRuntime;
   authPaths: string[];
+  /** Egress allowlist rendered into the microVM's network policy at create time
+   *  (the resolved sandbox config's `network.allow`). Empty = deny all egress. */
+  allowHosts: string[];
   exec?: ExecFn;
   isAvailable?: (cmd: string) => boolean;
 }
@@ -48,13 +51,14 @@ export interface WorktreeSandbox {
  *  from one place instead of re-deriving them inline (#653). */
 export function worktreeSandboxFor(
   runtime: SandboxRuntime | undefined,
-  opts: { homedir?: string } = {},
+  opts: { homedir?: string; allowHosts?: string[] } = {},
 ): WorktreeSandbox | undefined {
   if (runtime !== 'docker-sandbox') return undefined;
   const home = opts.homedir ?? homedir();
   return {
     runtime: 'docker-sandbox',
     authPaths: [resolve(home, '.claude'), resolve(home, '.codex'), resolve(home, '.npm')],
+    allowHosts: opts.allowHosts ?? [],
   };
 }
 
@@ -85,7 +89,11 @@ export async function createMicroVm(opts: MicroVmLifecycleOptions): Promise<bool
 
   const name = microVmName(opts.worktreePath);
   const mounts = [opts.worktreePath, ...opts.authPaths].map((p) => `--mount ${shellQuote(p)}:rw`).join(' ');
-  const cmd = `sbx create --name ${name} ${mounts}`;
+  const network =
+    opts.allowHosts.length > 0
+      ? opts.allowHosts.map((h) => `--allow-network ${shellQuote(h)}`).join(' ')
+      : '--network none';
+  const cmd = ['sbx create', `--name ${name}`, mounts, network].filter(Boolean).join(' ');
   const exec = opts.exec ?? defaultExecFn;
 
   try {
