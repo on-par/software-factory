@@ -32,6 +32,11 @@ function tempRepo(): string {
   return repoRoot;
 }
 
+function snapshotEntry(path: string): { path: string; content: string | undefined; mtime: number } {
+  const stat = statSync(path);
+  return { path, content: stat.isFile() ? readFileSync(path, 'utf-8') : undefined, mtime: stat.mtimeMs };
+}
+
 function writeV1Fixture(repoRoot: string): void {
   const root = join(repoRoot, '.factory');
   mkdirSync(root, { recursive: true });
@@ -105,21 +110,11 @@ describe('runMigrate', () => {
     await runMigrate(repoRoot);
     const paths = getFactoryPaths(repoRoot);
     const snapshot = [paths.config, paths.state, join(root, 'constitution.md'), join(root, '.gitignore')].map(
-      (path) => ({
-        path,
-        content: existsSync(path) && statSync(path).isFile() ? readFileSync(path, 'utf-8') : undefined,
-        mtime: statSync(path).mtimeMs,
-      }),
+      snapshotEntry,
     );
 
     await runMigrate(repoRoot);
-    expect(
-      snapshot.map(({ path }) => ({
-        path,
-        content: statSync(path).isFile() ? readFileSync(path, 'utf-8') : undefined,
-        mtime: statSync(path).mtimeMs,
-      })),
-    ).toEqual(snapshot);
+    expect(snapshot.map(({ path }) => snapshotEntry(path))).toEqual(snapshot);
 
     const dryRunRoot = tempRepo();
     writeV1Fixture(dryRunRoot);

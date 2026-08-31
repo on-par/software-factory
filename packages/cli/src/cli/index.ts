@@ -398,32 +398,35 @@ export async function runMigrate(repoRoot: string, opts: { dryRun?: boolean } = 
     }
   }
 
-  if (!existsSync(paths.config)) {
+  let rawConfig: { version?: unknown; $schema?: unknown } | undefined;
+  try {
+    rawConfig = JSON.parse(readFileSync(paths.config, 'utf-8'));
+  } catch (err: any) {
+    if (err.code !== 'ENOENT') throw err;
+  }
+  if (!rawConfig) {
     console.log('no .factory/config.json — nothing to rewrite');
+  } else if (rawConfig.version === 2) {
+    console.log('config.json already v2');
   } else {
-    const raw = JSON.parse(readFileSync(paths.config, 'utf-8')) as { version?: unknown; $schema?: unknown };
-    if (raw.version === 2) {
-      console.log('config.json already v2');
+    const v2 = loadRepoConfig(repoRoot);
+    if (!v2) throw new Error(`Expected ${paths.config} to exist`);
+    const { $schema: _schema, version: _version, ...rest } = v2;
+    const content =
+      JSON.stringify(
+        {
+          $schema: typeof rawConfig.$schema === 'string' ? rawConfig.$schema : FACTORY_CONFIG_SCHEMA_URL,
+          version: 2,
+          ...rest,
+        },
+        null,
+        2,
+      ) + '\n';
+    if (dryRun) {
+      console.log('would rewrite .factory/config.json to v2');
     } else {
-      const v2 = loadRepoConfig(repoRoot);
-      if (!v2) throw new Error(`Expected ${paths.config} to exist`);
-      const { $schema: _schema, version: _version, ...rest } = v2;
-      const content =
-        JSON.stringify(
-          {
-            $schema: typeof raw.$schema === 'string' ? raw.$schema : FACTORY_CONFIG_SCHEMA_URL,
-            version: 2,
-            ...rest,
-          },
-          null,
-          2,
-        ) + '\n';
-      if (dryRun) {
-        console.log('would rewrite .factory/config.json to v2');
-      } else {
-        writeFileSync(paths.config, content);
-        console.log('rewrote .factory/config.json to v2');
-      }
+      writeFileSync(paths.config, content);
+      console.log('rewrote .factory/config.json to v2');
     }
   }
 
