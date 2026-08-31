@@ -33,8 +33,14 @@ function tempRepo(): string {
 }
 
 function snapshotEntry(path: string): { path: string; content: string | undefined; mtime: number } {
-  const stat = statSync(path);
-  return { path, content: stat.isFile() ? readFileSync(path, 'utf-8') : undefined, mtime: stat.mtimeMs };
+  const mtime = statSync(path).mtimeMs;
+  let content: string | undefined;
+  try {
+    content = readFileSync(path, 'utf-8');
+  } catch (err: any) {
+    if (err.code !== 'EISDIR') throw err;
+  }
+  return { path, content, mtime };
 }
 
 function writeV1Fixture(repoRoot: string): void {
@@ -64,6 +70,15 @@ function effective(repoRoot: string) {
 }
 
 describe('runMigrate', () => {
+  it('is a no-op when .factory/config.json does not exist', async () => {
+    const repoRoot = tempRepo();
+    mkdirSync(join(repoRoot, '.factory'), { recursive: true });
+
+    await expect(runMigrate(repoRoot)).resolves.toBeUndefined();
+
+    expect(existsSync(join(repoRoot, '.factory', 'config.json'))).toBe(false);
+  });
+
   it('rewrites config, moves runtime state, and writes committed factory inputs', async () => {
     const repoRoot = tempRepo();
     const root = join(repoRoot, '.factory');
