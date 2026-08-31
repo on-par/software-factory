@@ -75,7 +75,7 @@ describe('worktreeWorkspace', () => {
     const setup = vi.fn().mockResolvedValue(undefined);
     const cleanup = vi.fn().mockResolvedValue(undefined);
     const log = vi.fn();
-    const sandbox: WorktreeSandbox = { runtime: 'docker-sandbox', authPaths: ['/home/.claude'] };
+    const sandbox: WorktreeSandbox = { runtime: 'docker-sandbox', authPaths: ['/home/.claude'], allowHosts: [] };
 
     const ws: Workspace = await worktreeWorkspace({
       repoRoot: '/repo',

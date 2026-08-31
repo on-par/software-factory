@@ -578,6 +578,7 @@ describe('setupWorktree / cleanupWorktree sandbox lifecycle', () => {
     const sandbox: WorktreeSandbox = {
       runtime: 'docker-sandbox',
       authPaths: ['/home/user/.claude'],
+      allowHosts: [],
       exec,
       isAvailable: () => true,
     };
@@ -595,6 +596,7 @@ describe('setupWorktree / cleanupWorktree sandbox lifecycle', () => {
     const sandbox: WorktreeSandbox = {
       runtime: 'docker-sandbox',
       authPaths: ['/home/user/.claude'],
+      allowHosts: [],
       exec,
       isAvailable: () => true,
     };
@@ -613,6 +615,7 @@ describe('setupWorktree / cleanupWorktree sandbox lifecycle', () => {
     const sandbox: WorktreeSandbox = {
       runtime: 'docker-sandbox',
       authPaths: ['/home/user/.claude'],
+      allowHosts: [],
       exec,
       isAvailable: () => true,
     };
