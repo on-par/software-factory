@@ -24,10 +24,10 @@ import {
 
 // ---------- Schema ----------
 
-const RepoFactoryConfigSchema = z
+export const RepoFactoryConfigV1Schema = z
   .object({
     $schema: z.string().optional(),
-    version: z.union([z.literal(1), z.literal(2)]).default(1),
+    version: z.literal(1).default(1),
     models: z
       .object({
         plan: z.string().optional(),
@@ -65,7 +65,57 @@ const RepoFactoryConfigSchema = z
   })
   .strict();
 
-export type RepoFactoryConfig = z.infer<typeof RepoFactoryConfigSchema>;
+export const RepoFactoryConfigV2Schema = z
+  .object({
+    $schema: z.string().optional(),
+    version: z.literal(2),
+    models: z
+      .object({
+        pins: z
+          .object({
+            plan: z.string().optional(),
+            planFallback: z.string().optional(),
+            build: z.string().optional(),
+            buildFallback: z.string().optional(),
+            checker: z.string().optional(),
+            triage: z.string().optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
+    policy: z
+      .object({ mode: z.enum(['pinned', 'auto']).optional() })
+      .strict()
+      .optional(),
+    tiers: z.record(z.string(), z.array(z.string())).optional(),
+    providers: z
+      .object({
+        anthropic: z.boolean().optional(),
+        openai: z.boolean().optional(),
+        ollama: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
+    budget: z
+      .object({
+        capUsd: z.number().positive().optional(),
+        fastPath: z.boolean().optional(),
+        maxReworkRounds: z.number().int().min(0).max(3).optional(),
+        perIssueCapUsd: z.number().positive().optional(),
+      })
+      .strict()
+      .optional(),
+    /** Repo pins the build route for every issue (e.g. "opencode"). The plan
+     *  phase still writes the spec, but the pinned route wins over the model's
+     *  route choice so deepseek workers are actually used when pinned. */
+    route: z.enum(['codex', 'claude', 'opencode']).optional(),
+  })
+  .strict();
+
+type RepoFactoryConfigV1Input = z.input<typeof RepoFactoryConfigV1Schema>;
+export type RepoFactoryConfig = z.infer<typeof RepoFactoryConfigV2Schema>;
 
 export interface EfficiencyPolicy {
   fastPath: boolean;
@@ -77,9 +127,9 @@ export interface EfficiencyPolicy {
  * their PLAN behavior, while checker rework is capped at one retry by default. */
 export function resolveEfficiencyPolicy(repo: RepoFactoryConfig | null): EfficiencyPolicy {
   return {
-    fastPath: repo?.efficiency?.fastPath ?? false,
-    maxReworkRounds: repo?.efficiency?.maxReworkRounds ?? 1,
-    perIssueCapUsd: repo?.efficiency?.perIssueCapUsd,
+    fastPath: repo?.budget?.fastPath ?? false,
+    maxReworkRounds: repo?.budget?.maxReworkRounds ?? 1,
+    perIssueCapUsd: repo?.budget?.perIssueCapUsd,
   };
 }
 
@@ -93,6 +143,33 @@ function stripRuntimeKeys(raw: Record<string, unknown>): Record<string, unknown>
   for (const key of FACTORY_RUNTIME_CONFIG_KEYS) delete out[key];
   return out;
 }
+
+/** Convert the legacy repo-overlay shape to the canonical v2 in-memory shape.
+ *  Empty optional sections stay omitted so adapted config has the same semantics
+ *  as a minimal v2 file. */
+export function adaptV1ToV2(v1: RepoFactoryConfigV1Input): RepoFactoryConfig {
+  const pins = v1.models;
+  const budget = {
+    ...(v1.usage?.capUsd !== undefined ? { capUsd: v1.usage.capUsd } : {}),
+    ...(v1.efficiency?.fastPath !== undefined ? { fastPath: v1.efficiency.fastPath } : {}),
+    ...(v1.efficiency?.maxReworkRounds !== undefined ? { maxReworkRounds: v1.efficiency.maxReworkRounds } : {}),
+    ...(v1.efficiency?.perIssueCapUsd !== undefined ? { perIssueCapUsd: v1.efficiency.perIssueCapUsd } : {}),
+  };
+  const hasPins = pins !== undefined && Object.keys(pins).length > 0;
+
+  return {
+    ...(v1.$schema !== undefined ? { $schema: v1.$schema } : {}),
+    version: 2,
+    ...(hasPins ? { models: { pins } } : {}),
+    ...(hasPins ? { policy: { mode: 'pinned' as const } } : {}),
+    ...(v1.tiers !== undefined ? { tiers: v1.tiers } : {}),
+    ...(v1.providers !== undefined ? { providers: v1.providers } : {}),
+    ...(Object.keys(budget).length > 0 ? { budget } : {}),
+    ...(v1.route !== undefined ? { route: v1.route } : {}),
+  };
+}
+
+const warnedV1ConfigPaths = new Set<string>();
 
 /** Read the resolved factory-state `config.json`. Returns `null` when the file does
  *  not exist. Throws a descriptive error naming the file path on malformed JSON or a
@@ -109,12 +186,23 @@ export function loadRepoConfig(repoRoot: string, stateRoot?: string): RepoFactor
   }
 
   const toParse = isPlainObject(raw) ? stripRuntimeKeys(raw) : raw;
-  const result = RepoFactoryConfigSchema.safeParse(toParse);
+  const result =
+    isPlainObject(toParse) && toParse.version === 2
+      ? RepoFactoryConfigV2Schema.safeParse(toParse)
+      : RepoFactoryConfigV1Schema.safeParse(toParse);
   if (!result.success) {
     const issues = result.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
     throw new Error(`Invalid ${path}: ${issues}`);
   }
-  return result.data;
+  if (result.data.version === 2) return result.data;
+
+  if (!warnedV1ConfigPaths.has(path)) {
+    console.warn(
+      `factory: ${path} is v1 — loaded via the v1→v2 compatibility adapter; run \`factory migrate\` to rewrite it (v1 support is removed one release after v2)`,
+    );
+    warnedV1ConfigPaths.add(path);
+  }
+  return adaptV1ToV2(result.data);
 }
 
 // ---------- Applying to ModelsConfig ----------
@@ -156,21 +244,21 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
     }
   }
 
-  if (repo.models?.checker) {
-    if (!models.models[repo.models.checker]) {
+  if (repo.models?.pins?.checker) {
+    if (!models.models[repo.models.pins.checker]) {
       throw new Error(
-        `.factory/config.json: models.checker references unknown model '${repo.models.checker}' (known models: ${knownModels})`,
+        `.factory/config.json: models.pins.checker references unknown model '${repo.models.pins.checker}' (known models: ${knownModels})`,
       );
     }
-    tiers = { ...tiers, checker: [repo.models.checker] };
+    tiers = { ...tiers, checker: [repo.models.pins.checker] };
   }
-  if (repo.models?.triage) {
-    if (!models.models[repo.models.triage]) {
+  if (repo.models?.pins?.triage) {
+    if (!models.models[repo.models.pins.triage]) {
       throw new Error(
-        `.factory/config.json: models.triage references unknown model '${repo.models.triage}' (known models: ${knownModels})`,
+        `.factory/config.json: models.pins.triage references unknown model '${repo.models.pins.triage}' (known models: ${knownModels})`,
       );
     }
-    tiers = { ...tiers, triage: [repo.models.triage] };
+    tiers = { ...tiers, triage: [repo.models.pins.triage] };
   }
 
   for (const [tierName, modelIds] of Object.entries(tiers)) {
@@ -210,47 +298,47 @@ export function resolveEffectiveModelPins(
   let build = envOverrides.build;
   if (build) sources.build = 'env';
 
-  if (repo?.models?.plan) {
-    if (!registry.get(repo.models.plan)) {
+  if (repo?.models?.pins?.plan) {
+    if (!registry.get(repo.models.pins.plan)) {
       throw new Error(
-        `.factory/config.json: models.plan references unknown model '${repo.models.plan}' (known models: ${registry.list().join(', ')})`,
+        `.factory/config.json: models.pins.plan references unknown model '${repo.models.pins.plan}' (known models: ${registry.list().join(', ')})`,
       );
     }
-    plan = repo.models.plan;
+    plan = repo.models.pins.plan;
     sources.plan = 'repo';
   }
   let planFallback: string | undefined;
-  if (repo?.models?.planFallback) {
-    if (!registry.get(repo.models.planFallback)) {
+  if (repo?.models?.pins?.planFallback) {
+    if (!registry.get(repo.models.pins.planFallback)) {
       throw new Error(
-        `.factory/config.json: models.planFallback references unknown model '${repo.models.planFallback}' (known models: ${registry.list().join(', ')})`,
+        `.factory/config.json: models.pins.planFallback references unknown model '${repo.models.pins.planFallback}' (known models: ${registry.list().join(', ')})`,
       );
     }
-    planFallback = repo.models.planFallback;
+    planFallback = repo.models.pins.planFallback;
     sources.planFallback = 'repo';
   }
-  if (repo?.models?.build) {
-    if (!registry.get(repo.models.build)) {
+  if (repo?.models?.pins?.build) {
+    if (!registry.get(repo.models.pins.build)) {
       throw new Error(
-        `.factory/config.json: models.build references unknown model '${repo.models.build}' (known models: ${registry.list().join(', ')})`,
+        `.factory/config.json: models.pins.build references unknown model '${repo.models.pins.build}' (known models: ${registry.list().join(', ')})`,
       );
     }
-    build = repo.models.build;
+    build = repo.models.pins.build;
     sources.build = 'repo';
   }
   let buildFallback: string | undefined;
-  if (repo?.models?.buildFallback) {
-    if (!registry.get(repo.models.buildFallback)) {
+  if (repo?.models?.pins?.buildFallback) {
+    if (!registry.get(repo.models.pins.buildFallback)) {
       throw new Error(
-        `.factory/config.json: models.buildFallback references unknown model '${repo.models.buildFallback}' (known models: ${registry.list().join(', ')})`,
+        `.factory/config.json: models.pins.buildFallback references unknown model '${repo.models.pins.buildFallback}' (known models: ${registry.list().join(', ')})`,
       );
     }
-    if (!registry.isCodexModel(repo.models.buildFallback)) {
+    if (!registry.isCodexModel(repo.models.pins.buildFallback)) {
       throw new Error(
         `.factory/config.json: models.buildFallback must be a Codex-capable model because it is used after Claude build failure`,
       );
     }
-    buildFallback = repo.models.buildFallback;
+    buildFallback = repo.models.pins.buildFallback;
     sources.buildFallback = 'repo';
   }
 
@@ -307,14 +395,14 @@ export interface EffectiveUsageCap {
   source: 'repo' | 'env' | 'default';
 }
 
-/** Resolve the usage cap: repo `usage.capUsd` > `FACTORY_USAGE_CAP` env var > the
+/** Resolve the usage cap: repo `budget.capUsd` > `FACTORY_USAGE_CAP` env var > the
  *  packaged default (227). */
 export function resolveUsageCap(
   repo: RepoFactoryConfig | null,
   env: NodeJS.ProcessEnv = process.env,
 ): EffectiveUsageCap {
-  if (repo?.usage?.capUsd !== undefined) {
-    return { cap: repo.usage.capUsd, source: 'repo' };
+  if (repo?.budget?.capUsd !== undefined) {
+    return { cap: repo.budget.capUsd, source: 'repo' };
   }
   if (env.FACTORY_USAGE_CAP !== undefined) {
     const cap = Number(env.FACTORY_USAGE_CAP);
@@ -360,14 +448,14 @@ export function describeEffectiveConfig(opts: DescribeEffectiveConfigOpts): stri
   lines.push(`Build model: ${buildModel} ${sourceLabel(pins.sources.build, repoConfigPath, 'FACTORY_BUILD_MODEL')}`);
   if (pins.buildFallback) lines.push(`Build fallback: ${pins.buildFallback} (${repoConfigPath})`);
 
-  const checkerModel = repo?.models?.checker ?? router.resolve('check_tests') ?? 'none';
+  const checkerModel = repo?.models?.pins?.checker ?? router.resolve('check_tests') ?? 'none';
   lines.push(
-    `Checker model: ${checkerModel} ${sourceLabel(repo?.models?.checker ? 'repo' : 'default', repoConfigPath, '')}`,
+    `Checker model: ${checkerModel} ${sourceLabel(repo?.models?.pins?.checker ? 'repo' : 'default', repoConfigPath, '')}`,
   );
 
-  const triageModel = repo?.models?.triage ?? router.resolve('triage') ?? 'none';
+  const triageModel = repo?.models?.pins?.triage ?? router.resolve('triage') ?? 'none';
   lines.push(
-    `Triage model: ${triageModel} ${sourceLabel(repo?.models?.triage ? 'repo' : 'default', repoConfigPath, '')}`,
+    `Triage model: ${triageModel} ${sourceLabel(repo?.models?.pins?.triage ? 'repo' : 'default', repoConfigPath, '')}`,
   );
 
   const codexOff = resolveCodexDisabled(repo, env);
