@@ -335,7 +335,7 @@ export function resolveEffectiveModelPins(
     }
     if (!registry.isCodexModel(repo.models.pins.buildFallback)) {
       throw new Error(
-        `.factory/config.json: models.buildFallback must be a Codex-capable model because it is used after Claude build failure`,
+        `.factory/config.json: models.pins.buildFallback must be a Codex-capable model because it is used after Claude build failure`,
       );
     }
     buildFallback = repo.models.pins.buildFallback;
