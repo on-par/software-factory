@@ -17,7 +17,7 @@ const PIN_PREFLIGHT_USAGE = 'usage: scbench-factory-agent pin-preflight [--pin <
 const CATALOG_PREFLIGHT_USAGE = 'usage: scbench-factory-agent catalog-preflight [--config <path>]';
 const LAUNCH_USAGE = 'usage: scbench-factory-agent launch [--pin <path>] [--config <path>] [--dry-run]';
 const COLLECT_TRIAL_USAGE =
-  'usage: scbench-factory-agent collect-trial --output <dir> --problem <id> --checkpoint <id> --trial <n> [--runs <dir>]';
+  'usage: scbench-factory-agent collect-trial --output <dir> --scbench-run <dir> --problem <id> --checkpoint <id> --trial <n> [--runs <dir>]';
 const USAGE = `${RUN_CHECKPOINT_USAGE}\n${BASELINE_REPORT_USAGE}\n${PIN_PREFLIGHT_USAGE}\n${CATALOG_PREFLIGHT_USAGE}\n${LAUNCH_USAGE}\n${COLLECT_TRIAL_USAGE}`;
 
 const LAUNCHER_CONFIG_ARG = 'packages/scbench-adapter/scbench.run.yaml';
@@ -25,7 +25,7 @@ const LAUNCHER_SCRIPT = 'packages/scbench-adapter/python/run_scbench.py';
 
 const REQUIRED_FLAGS = ['--workspace', '--artifacts', '--task-file', '--problem', '--checkpoint'] as const;
 const BASELINE_REPORT_REQUIRED_FLAGS = ['--config', '--runs', '--out'] as const;
-const COLLECT_TRIAL_REQUIRED_FLAGS = ['--output', '--problem', '--checkpoint', '--trial'] as const;
+const COLLECT_TRIAL_REQUIRED_FLAGS = ['--output', '--scbench-run', '--problem', '--checkpoint', '--trial'] as const;
 
 const DEFAULT_PIN_PATH = fileURLToPath(new URL('../scbench.pin.json', import.meta.url));
 const DEFAULT_ADAPTER_CLI_PATH = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
@@ -330,12 +330,14 @@ async function runLaunchCommand(rest: readonly string[], deps: CliDeps): Promise
   return 0;
 }
 
-/** Copies the five Factory artifacts for one trial from the SCBench output
- *  tree's <problem>/<checkpoint>/ directory into
- *  <runs>/<problem>/<checkpoint>/trial-<n>/ (default runs root:
- *  evals/scbench-baseline/runs), creating the trial directory when absent.
- *  Returns 2 on a usage error or AdapterError (missing artifacts, bad
- *  manifest), 0 on success. */
+/** Copies the five Factory artifacts and the three native SCBench evidence
+ *  files for one trial from the SCBench output tree's <problem>/<checkpoint>/
+ *  directory and --scbench-run into <runs>/<problem>/<checkpoint>/trial-<n>/
+ *  (default runs root: evals/scbench-baseline/runs), creating the trial
+ *  directory when absent. Refuses to run without --scbench-run so native
+ *  evidence collection can no longer be forgotten. Returns 2 on a usage error
+ *  or AdapterError (missing artifacts, bad manifest, missing native
+ *  evidence), 0 on success. */
 async function runCollectTrialCommand(rest: readonly string[], deps: CliDeps): Promise<number> {
   const flags = parseFlags(rest);
   const missing = COLLECT_TRIAL_REQUIRED_FLAGS.filter((flag) => flags[flag] === undefined);
@@ -353,6 +355,7 @@ async function runCollectTrialCommand(rest: readonly string[], deps: CliDeps): P
   try {
     const result = deps.collectTrial({
       outputTree: flags['--output'],
+      scbenchRunDir: flags['--scbench-run'],
       problemId: flags['--problem'],
       checkpointId: flags['--checkpoint'],
       trial,

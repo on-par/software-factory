@@ -57,7 +57,16 @@ const ALL_OK_OUTCOME: PinPreflightOutcome = {
 const COLLECT_TRIAL_RESULT: CollectTrialResult = {
   sourceDir: '/tmp/out/calculator/1',
   trialDir: '/runs/calculator/1/trial-1',
-  copied: ['manifest.json', 'request.json', 'events.ndjson', 'diff.patch', 'brief.md'],
+  copied: [
+    'manifest.json',
+    'request.json',
+    'events.ndjson',
+    'diff.patch',
+    'brief.md',
+    'evaluation.json',
+    'checkpoint_results.jsonl',
+    'run_info.yaml',
+  ],
 };
 
 const ALL_OK_CATALOG_OUTCOME: CatalogPreflightOutcome = {
@@ -744,13 +753,26 @@ describe('collect-trial subcommand', () => {
     const deps = fakeDeps();
 
     const code = await main(
-      ['collect-trial', '--output', '/tmp/out', '--problem', 'calculator', '--checkpoint', '1', '--trial', '1'],
+      [
+        'collect-trial',
+        '--output',
+        '/tmp/out',
+        '--scbench-run',
+        '/tmp/scbench-run',
+        '--problem',
+        'calculator',
+        '--checkpoint',
+        '1',
+        '--trial',
+        '1',
+      ],
       deps,
     );
 
     expect(code).toBe(0);
     expect(deps.collectTrial).toHaveBeenCalledWith({
       outputTree: '/tmp/out',
+      scbenchRunDir: '/tmp/scbench-run',
       problemId: 'calculator',
       checkpointId: '1',
       trial: 1,
@@ -769,6 +791,8 @@ describe('collect-trial subcommand', () => {
         'collect-trial',
         '--output',
         '/tmp/out',
+        '--scbench-run',
+        '/tmp/scbench-run',
         '--problem',
         'calculator',
         '--checkpoint',
@@ -783,6 +807,7 @@ describe('collect-trial subcommand', () => {
 
     expect(deps.collectTrial).toHaveBeenCalledWith({
       outputTree: '/tmp/out',
+      scbenchRunDir: '/tmp/scbench-run',
       problemId: 'calculator',
       checkpointId: '1',
       trial: 1,
@@ -797,8 +822,21 @@ describe('collect-trial subcommand', () => {
 
     expect(code).toBe(2);
     expect(deps.logError).toHaveBeenCalledWith(
-      expect.stringContaining('missing required flag(s): --problem, --checkpoint, --trial'),
+      expect.stringContaining('missing required flag(s): --scbench-run, --problem, --checkpoint, --trial'),
     );
+    expect(deps.collectTrial).not.toHaveBeenCalled();
+  });
+
+  it('exits 2 when --scbench-run is missing, without calling collectTrial', async () => {
+    const deps = fakeDeps();
+
+    const code = await main(
+      ['collect-trial', '--output', '/tmp/out', '--problem', 'calculator', '--checkpoint', '1', '--trial', '1'],
+      deps,
+    );
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('missing required flag(s): --scbench-run'));
     expect(deps.collectTrial).not.toHaveBeenCalled();
   });
 
@@ -806,7 +844,19 @@ describe('collect-trial subcommand', () => {
     const deps = fakeDeps();
 
     const code = await main(
-      ['collect-trial', '--output', '/tmp/out', '--problem', 'calculator', '--checkpoint', '1', '--trial', trial],
+      [
+        'collect-trial',
+        '--output',
+        '/tmp/out',
+        '--scbench-run',
+        '/tmp/scbench-run',
+        '--problem',
+        'calculator',
+        '--checkpoint',
+        '1',
+        '--trial',
+        trial,
+      ],
       deps,
     );
 
@@ -823,7 +873,19 @@ describe('collect-trial subcommand', () => {
     });
 
     const code = await main(
-      ['collect-trial', '--output', '/tmp/out', '--problem', 'calculator', '--checkpoint', '1', '--trial', '1'],
+      [
+        'collect-trial',
+        '--output',
+        '/tmp/out',
+        '--scbench-run',
+        '/tmp/scbench-run',
+        '--problem',
+        'calculator',
+        '--checkpoint',
+        '1',
+        '--trial',
+        '1',
+      ],
       deps,
     );
 
@@ -840,7 +902,19 @@ describe('collect-trial subcommand', () => {
 
     await expect(
       main(
-        ['collect-trial', '--output', '/tmp/out', '--problem', 'calculator', '--checkpoint', '1', '--trial', '1'],
+        [
+          'collect-trial',
+          '--output',
+          '/tmp/out',
+          '--scbench-run',
+          '/tmp/scbench-run',
+          '--problem',
+          'calculator',
+          '--checkpoint',
+          '1',
+          '--trial',
+          '1',
+        ],
         deps,
       ),
     ).rejects.toThrow('boom');
