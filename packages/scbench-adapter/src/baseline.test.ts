@@ -647,7 +647,7 @@ describe('collectBaselineTrials', () => {
     expect(() => collectBaselineTrials('/runs', deps)).toThrow(re);
   });
 
-  it('collects the committed smoke evidence from the real filesystem', () => {
+  it('collects the committed smoke stubs and the live cfgpipe evidence from the real filesystem', () => {
     const trials = collectBaselineTrials(RUNS_DIR);
     expect(trials.map((t) => t.id)).toEqual([
       'cfgpipe/checkpoint_1/trial-1',
