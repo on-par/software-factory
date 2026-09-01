@@ -79,10 +79,12 @@ recorded against a comparison threshold of 10, `report.md` is labeled
 ## Reproducing the live smoke run (twice)
 
 ```bash
-# 1. Clone SCBench at the pinned commit.
+# 1. Clone SCBench at the pinned commit and export the checkout path — later
+#    steps (uv sync, npm run scbench, the launcher) all read SCBENCH_CHECKOUT.
 git clone https://github.com/SprocketLab/slop-code-bench.git
 cd slop-code-bench
 git checkout "$(node -p "require('../software-factory/packages/scbench-adapter/scbench.pin.json').commit")"
+export SCBENCH_CHECKOUT="$PWD"
 
 # 1b. Clone the problem catalog at its pinned commit and export it —
 #     SCBench otherwise auto-installs the mutable latest release into

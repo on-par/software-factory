@@ -23,12 +23,15 @@ publishing in the CLI.
 
 ## Setup
 
-1. Clone SCBench at the pinned commit recorded in [`scbench.pin.json`](./scbench.pin.json):
+1. Clone SCBench at the pinned commit recorded in [`scbench.pin.json`](./scbench.pin.json),
+   then export the checkout path — the launch gate below, `uv --project`, and
+   `compat_check.py` all read `SCBENCH_CHECKOUT`:
 
    ```bash
    git clone https://github.com/SprocketLab/slop-code-bench.git
    cd slop-code-bench
    git checkout "$(node -p "require('../software-factory/packages/scbench-adapter/scbench.pin.json').commit")"
+   export SCBENCH_CHECKOUT="$PWD"
    ```
 
 2. Clone the problem catalog at its pinned commit (`scbench.pin.json`'s `problems` block) and
@@ -61,7 +64,14 @@ publishing in the CLI.
    `register_agent()` side effect never runs. Instead,
    [`python/run_scbench.py`](./python/run_scbench.py) imports the shim (which
    registers the `software_factory` agent type) and then hands off to
-   SCBench's own `slop-code` CLI:
+   SCBench's own `slop-code` CLI.
+
+   Before invoking it directly, run
+   [`npm run scbench`](#root-level-launch-gate-npm-run-scbench) from the
+   Software Factory repo root. It validates the pinned checkout/catalog
+   commits and the adapter build + problem catalog, and on success prints
+   this exact launcher command — without invoking SCBench or spending model
+   budget:
 
    ```bash
    # From the pinned SCBench checkout's uv environment, invoked from the
