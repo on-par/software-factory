@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { loadBaselineConfig, type BaselineConfig, collectBaselineTrials, generateBaselineReport } from './baseline.js';
 import { runCatalogPreflight, type CatalogPreflightOutcome, type CatalogPreflightSpec } from './catalog-preflight.js';
 import { AdapterError, type ScbenchCheckpoint } from './checkpoint.js';
+import { collectTrial } from './collect-trial.js';
 import { parsePinFile, runPinPreflight, type PinnedInputSpec, type PinPreflightOutcome } from './pin-preflight.js';
 import { runCheckpoint, type RunCheckpointOptions } from './run-checkpoint.js';
 import { createExecaExec } from './workspace.js';
@@ -15,19 +16,23 @@ const BASELINE_REPORT_USAGE = 'usage: scbench-factory-agent baseline-report --co
 const PIN_PREFLIGHT_USAGE = 'usage: scbench-factory-agent pin-preflight [--pin <path>]';
 const CATALOG_PREFLIGHT_USAGE = 'usage: scbench-factory-agent catalog-preflight [--config <path>]';
 const LAUNCH_USAGE = 'usage: scbench-factory-agent launch [--pin <path>] [--config <path>] [--dry-run]';
-const USAGE = `${RUN_CHECKPOINT_USAGE}\n${BASELINE_REPORT_USAGE}\n${PIN_PREFLIGHT_USAGE}\n${CATALOG_PREFLIGHT_USAGE}\n${LAUNCH_USAGE}`;
+const COLLECT_TRIAL_USAGE =
+  'usage: scbench-factory-agent collect-trial --output <dir> --problem <id> --checkpoint <id> --trial <n> [--runs <dir>]';
+const USAGE = `${RUN_CHECKPOINT_USAGE}\n${BASELINE_REPORT_USAGE}\n${PIN_PREFLIGHT_USAGE}\n${CATALOG_PREFLIGHT_USAGE}\n${LAUNCH_USAGE}\n${COLLECT_TRIAL_USAGE}`;
 
 const LAUNCHER_CONFIG_ARG = 'packages/scbench-adapter/scbench.run.yaml';
 const LAUNCHER_SCRIPT = 'packages/scbench-adapter/python/run_scbench.py';
 
 const REQUIRED_FLAGS = ['--workspace', '--artifacts', '--task-file', '--problem', '--checkpoint'] as const;
 const BASELINE_REPORT_REQUIRED_FLAGS = ['--config', '--runs', '--out'] as const;
+const COLLECT_TRIAL_REQUIRED_FLAGS = ['--output', '--problem', '--checkpoint', '--trial'] as const;
 
 const DEFAULT_PIN_PATH = fileURLToPath(new URL('../scbench.pin.json', import.meta.url));
 const DEFAULT_ADAPTER_CLI_PATH = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
 const DEFAULT_BASELINE_CONFIG_PATH = fileURLToPath(
   new URL('../../../evals/scbench-baseline/baseline.config.json', import.meta.url),
 );
+const DEFAULT_RUNS_DIR = fileURLToPath(new URL('../../../evals/scbench-baseline/runs', import.meta.url));
 
 export interface CliDeps {
   readTaskFile: (path: string) => Promise<string>;
@@ -41,6 +46,7 @@ export interface CliDeps {
   env: Record<string, string | undefined>;
   runPinPreflight: (specs: readonly PinnedInputSpec[]) => Promise<PinPreflightOutcome>;
   runCatalogPreflight: (spec: CatalogPreflightSpec) => CatalogPreflightOutcome;
+  collectTrial: typeof collectTrial;
 }
 
 export function defaultCliDeps(): CliDeps {
@@ -56,6 +62,7 @@ export function defaultCliDeps(): CliDeps {
     env: process.env,
     runPinPreflight: (specs) => runPinPreflight(specs, { exec: createExecaExec() }),
     runCatalogPreflight: (spec) => runCatalogPreflight(spec, {}),
+    collectTrial,
   };
 }
 
@@ -323,9 +330,48 @@ async function runLaunchCommand(rest: readonly string[], deps: CliDeps): Promise
   return 0;
 }
 
+/** Copies the five Factory artifacts for one trial from the SCBench output
+ *  tree's <problem>/<checkpoint>/ directory into
+ *  <runs>/<problem>/<checkpoint>/trial-<n>/ (default runs root:
+ *  evals/scbench-baseline/runs), creating the trial directory when absent.
+ *  Returns 2 on a usage error or AdapterError (missing artifacts, bad
+ *  manifest), 0 on success. */
+async function runCollectTrialCommand(rest: readonly string[], deps: CliDeps): Promise<number> {
+  const flags = parseFlags(rest);
+  const missing = COLLECT_TRIAL_REQUIRED_FLAGS.filter((flag) => flags[flag] === undefined);
+  if (missing.length > 0) {
+    deps.logError(`missing required flag(s): ${missing.join(', ')}\n${COLLECT_TRIAL_USAGE}`);
+    return 2;
+  }
+
+  const trial = Number(flags['--trial']);
+  if (!Number.isInteger(trial) || trial < 1) {
+    deps.logError(`--trial must be a positive integer, got ${flags['--trial']}\n${COLLECT_TRIAL_USAGE}`);
+    return 2;
+  }
+
+  try {
+    const result = deps.collectTrial({
+      outputTree: flags['--output'],
+      problemId: flags['--problem'],
+      checkpointId: flags['--checkpoint'],
+      trial,
+      runsDir: flags['--runs'] ?? DEFAULT_RUNS_DIR,
+    });
+    deps.log(`collect-trial: copied ${result.copied.join(', ')} → ${result.trialDir}`);
+    return 0;
+  } catch (err) {
+    if (err instanceof AdapterError) {
+      deps.logError(err.message);
+      return 2;
+    }
+    throw err;
+  }
+}
+
 /** Hand-rolled argv parsing + dispatch across the `run-checkpoint`,
- *  `baseline-report`, `pin-preflight`, `catalog-preflight`, and `launch`
- *  subcommands. */
+ *  `baseline-report`, `pin-preflight`, `catalog-preflight`, `launch`, and
+ *  `collect-trial` subcommands. */
 export async function main(argv: readonly string[], deps: CliDeps = defaultCliDeps()): Promise<number> {
   const [subcommand, ...rest] = argv;
   if (subcommand === 'run-checkpoint') return runRunCheckpoint(rest, deps);
@@ -333,6 +379,7 @@ export async function main(argv: readonly string[], deps: CliDeps = defaultCliDe
   if (subcommand === 'pin-preflight') return runPinPreflightCommand(rest, deps);
   if (subcommand === 'catalog-preflight') return runCatalogPreflightCommand(rest, deps);
   if (subcommand === 'launch') return runLaunchCommand(rest, deps);
+  if (subcommand === 'collect-trial') return runCollectTrialCommand(rest, deps);
 
   deps.logError(USAGE);
   return 2;

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { BaselineTrial } from './baseline.js';
 import { AdapterError, type CheckpointResult } from './checkpoint.js';
 import { defaultCliDeps, main, type CliDeps } from './cli-run.js';
+import type { CollectTrialResult } from './collect-trial.js';
 import { minimalManifest } from './manifest-fixture.js';
 import type { CatalogPreflightOutcome } from './catalog-preflight.js';
 import type { PinPreflightOutcome } from './pin-preflight.js';
@@ -53,6 +54,12 @@ const ALL_OK_OUTCOME: PinPreflightOutcome = {
   ],
 };
 
+const COLLECT_TRIAL_RESULT: CollectTrialResult = {
+  sourceDir: '/tmp/out/calculator/1',
+  trialDir: '/runs/calculator/1/trial-1',
+  copied: ['manifest.json', 'request.json', 'events.ndjson', 'diff.patch', 'brief.md'],
+};
+
 const ALL_OK_CATALOG_OUTCOME: CatalogPreflightOutcome = {
   ok: true,
   results: [
@@ -78,6 +85,7 @@ function fakeDeps(overrides: Partial<CliDeps> = {}): CliDeps {
     env: { SCBENCH_CHECKOUT: '/tmp/checkout', SCBENCH_PROBLEMS_PATH: '/tmp/problems' },
     runPinPreflight: vi.fn(async () => ALL_OK_OUTCOME),
     runCatalogPreflight: vi.fn(() => ALL_OK_CATALOG_OUTCOME),
+    collectTrial: vi.fn(() => COLLECT_TRIAL_RESULT),
     ...overrides,
   };
 }
@@ -728,6 +736,114 @@ describe('pin-preflight and catalog-preflight subcommands stay byte-identical af
     const code = await main(['catalog-preflight'], deps);
     expect(code).toBe(0);
     expect(deps.log).toHaveBeenCalledWith('catalog-preflight: confirmed problem ids — alpha, beta, gamma');
+  });
+});
+
+describe('collect-trial subcommand', () => {
+  it('parses flags, calls collectTrial, and logs the copied files + trial dir on success', async () => {
+    const deps = fakeDeps();
+
+    const code = await main(
+      ['collect-trial', '--output', '/tmp/out', '--problem', 'calculator', '--checkpoint', '1', '--trial', '1'],
+      deps,
+    );
+
+    expect(code).toBe(0);
+    expect(deps.collectTrial).toHaveBeenCalledWith({
+      outputTree: '/tmp/out',
+      problemId: 'calculator',
+      checkpointId: '1',
+      trial: 1,
+      runsDir: expect.stringContaining('evals/scbench-baseline/runs'),
+    });
+    expect(deps.log).toHaveBeenCalledWith(
+      `collect-trial: copied ${COLLECT_TRIAL_RESULT.copied.join(', ')} → ${COLLECT_TRIAL_RESULT.trialDir}`,
+    );
+  });
+
+  it('passes an explicit --runs through verbatim', async () => {
+    const deps = fakeDeps();
+
+    await main(
+      [
+        'collect-trial',
+        '--output',
+        '/tmp/out',
+        '--problem',
+        'calculator',
+        '--checkpoint',
+        '1',
+        '--trial',
+        '1',
+        '--runs',
+        '/custom/runs',
+      ],
+      deps,
+    );
+
+    expect(deps.collectTrial).toHaveBeenCalledWith({
+      outputTree: '/tmp/out',
+      problemId: 'calculator',
+      checkpointId: '1',
+      trial: 1,
+      runsDir: '/custom/runs',
+    });
+  });
+
+  it('exits 2 when required flags are missing, without calling collectTrial', async () => {
+    const deps = fakeDeps();
+
+    const code = await main(['collect-trial', '--output', '/tmp/out'], deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(
+      expect.stringContaining('missing required flag(s): --problem, --checkpoint, --trial'),
+    );
+    expect(deps.collectTrial).not.toHaveBeenCalled();
+  });
+
+  it.each(['abc', '0', '-1', '1.5'])('exits 2 when --trial is not a positive integer (%s)', async (trial) => {
+    const deps = fakeDeps();
+
+    const code = await main(
+      ['collect-trial', '--output', '/tmp/out', '--problem', 'calculator', '--checkpoint', '1', '--trial', trial],
+      deps,
+    );
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('--trial must be a positive integer'));
+    expect(deps.collectTrial).not.toHaveBeenCalled();
+  });
+
+  it('exits 2 and logs the message when collectTrial throws an AdapterError', async () => {
+    const deps = fakeDeps({
+      collectTrial: vi.fn(() => {
+        throw new AdapterError('missing Factory artifact(s) in /tmp/out/calculator/1: diff.patch');
+      }),
+    });
+
+    const code = await main(
+      ['collect-trial', '--output', '/tmp/out', '--problem', 'calculator', '--checkpoint', '1', '--trial', '1'],
+      deps,
+    );
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith('missing Factory artifact(s) in /tmp/out/calculator/1: diff.patch');
+  });
+
+  it('re-throws unexpected (non-AdapterError) errors from collectTrial', async () => {
+    const deps = fakeDeps({
+      collectTrial: vi.fn(() => {
+        throw new Error('boom');
+      }),
+    });
+
+    await expect(
+      main(
+        ['collect-trial', '--output', '/tmp/out', '--problem', 'calculator', '--checkpoint', '1', '--trial', '1'],
+        deps,
+      ),
+    ).rejects.toThrow('boom');
   });
 });
 

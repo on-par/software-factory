@@ -13,6 +13,9 @@ export { buildRunBriefArgs, runFactory } from './invoke.js';
 export type { ArtifactsFsDeps, CollectArtifactsOptions, CollectArtifactsResult } from './artifacts.js';
 export { collectArtifacts, NATIVE_EVIDENCE_FILES } from './artifacts.js';
 
+export type { CollectTrialOptions, CollectTrialResult } from './collect-trial.js';
+export { collectTrial, FACTORY_TRIAL_FILES } from './collect-trial.js';
+
 export type { RunCheckpointDeps, RunCheckpointOptions } from './run-checkpoint.js';
 export { runCheckpoint } from './run-checkpoint.js';
 
