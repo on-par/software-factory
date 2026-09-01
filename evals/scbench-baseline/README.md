@@ -107,6 +107,13 @@ npm run build --workspace @on-par/scbench-adapter
 (cd "$SCBENCH_CHECKOUT" && uv sync)
 uv run --project "$SCBENCH_CHECKOUT" python packages/scbench-adapter/python/compat_check.py
 
+# 3b. Run the root-level launch gate from the Software Factory repo root —
+#     it re-validates the pinned checkout/catalog commits and the adapter
+#     build + problem catalog, and only when both pass prints the exact
+#     pinned launcher command(s) below. It never invokes SCBench and never
+#     spends model budget; only proceed to step 4 once it exits 0.
+npm run scbench
+
 # 4. Run the smoke problem (baseline.config.json's `problems.smoke`, the
 #    literal id `cfgpipe`) twice through the committed launcher, which
 #    registers the software_factory agent by import before handing off to

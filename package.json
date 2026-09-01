@@ -23,6 +23,7 @@
     "local-small-scoreboard": "tsx scripts/local-small-scoreboard.ts",
     "sandbox-ab-report": "tsx scripts/sandbox-ab-report.ts",
     "sim-monte-carlo": "tsx scripts/sim-monte-carlo.ts",
+    "scbench": "tsx packages/scbench-adapter/src/cli.ts launch",
     "eval-history": "tsx scripts/eval-history.ts",
     "regression-issue": "tsx scripts/regression-issue.ts",
     "knip": "knip",
