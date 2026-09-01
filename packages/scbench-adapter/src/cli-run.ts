@@ -1,17 +1,23 @@
-// packages/scbench-adapter/src/cli-run.ts — scbench-factory-agent argv parsing + execution (#510, #511).
+// packages/scbench-adapter/src/cli-run.ts — scbench-factory-agent argv parsing + execution (#510, #511, #1139).
 import { readFile, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 
 import { collectBaselineTrials, generateBaselineReport, loadBaselineConfig } from './baseline.js';
 import { AdapterError, type ScbenchCheckpoint } from './checkpoint.js';
+import { parsePinFile, runPinPreflight, type PinnedInputSpec, type PinPreflightOutcome } from './pin-preflight.js';
 import { runCheckpoint, type RunCheckpointOptions } from './run-checkpoint.js';
+import { createExecaExec } from './workspace.js';
 
 const RUN_CHECKPOINT_USAGE =
   'usage: scbench-factory-agent run-checkpoint --workspace <dir> --artifacts <dir> --task-file <path> --problem <id> --checkpoint <id> [--index <n>] [--factory-bin <path>]';
 const BASELINE_REPORT_USAGE = 'usage: scbench-factory-agent baseline-report --config <path> --runs <dir> --out <path>';
-const USAGE = `${RUN_CHECKPOINT_USAGE}\n${BASELINE_REPORT_USAGE}`;
+const PIN_PREFLIGHT_USAGE = 'usage: scbench-factory-agent pin-preflight [--pin <path>]';
+const USAGE = `${RUN_CHECKPOINT_USAGE}\n${BASELINE_REPORT_USAGE}\n${PIN_PREFLIGHT_USAGE}`;
 
 const REQUIRED_FLAGS = ['--workspace', '--artifacts', '--task-file', '--problem', '--checkpoint'] as const;
 const BASELINE_REPORT_REQUIRED_FLAGS = ['--config', '--runs', '--out'] as const;
+
+const DEFAULT_PIN_PATH = fileURLToPath(new URL('../scbench.pin.json', import.meta.url));
 
 export interface CliDeps {
   readTaskFile: (path: string) => Promise<string>;
@@ -21,6 +27,9 @@ export interface CliDeps {
   writeReport: (path: string, content: string) => Promise<void>;
   log: (line: string) => void;
   logError: (line: string) => void;
+  readPinFile: (path: string) => Promise<string>;
+  env: Record<string, string | undefined>;
+  runPinPreflight: (specs: readonly PinnedInputSpec[]) => Promise<PinPreflightOutcome>;
 }
 
 export function defaultCliDeps(): CliDeps {
@@ -32,6 +41,9 @@ export function defaultCliDeps(): CliDeps {
     writeReport: (path, content) => writeFile(path, content),
     log: (line) => console.log(line),
     logError: (line) => console.error(line),
+    readPinFile: (path) => readFile(path, 'utf-8'),
+    env: process.env,
+    runPinPreflight: (specs) => runPinPreflight(specs, { exec: createExecaExec() }),
   };
 }
 
@@ -129,12 +141,57 @@ async function runBaselineReport(rest: readonly string[], deps: CliDeps): Promis
   }
 }
 
-/** Hand-rolled argv parsing + dispatch across the `run-checkpoint` and
- *  `baseline-report` subcommands. */
+/** Reads the pin file (defaulting to the package's committed
+ *  scbench.pin.json), validates SCBENCH_CHECKOUT and SCBENCH_PROBLEMS_PATH
+ *  against the pinned commits, and prints one pass/fail line per input.
+ *  Returns 2 on a pin-file read/parse error (a usage-class error, like the
+ *  other subcommands), 1 when the preflight itself finds a failing input,
+ *  0 when every input passes. */
+async function runPinPreflightCommand(rest: readonly string[], deps: CliDeps): Promise<number> {
+  const flags = parseFlags(rest);
+  const pinPath = flags['--pin'] ?? DEFAULT_PIN_PATH;
+
+  let raw: string;
+  try {
+    raw = await deps.readPinFile(pinPath);
+  } catch (err) {
+    deps.logError(`could not read pin file ${pinPath}: ${(err as Error).message}`);
+    return 2;
+  }
+
+  let outcome: PinPreflightOutcome;
+  try {
+    const pin = parsePinFile(raw);
+    const specs: PinnedInputSpec[] = [
+      { input: 'SCBENCH_CHECKOUT', path: deps.env.SCBENCH_CHECKOUT, expectedCommit: pin.commit },
+      { input: 'SCBENCH_PROBLEMS_PATH', path: deps.env.SCBENCH_PROBLEMS_PATH, expectedCommit: pin.problems.commit },
+    ];
+    outcome = await deps.runPinPreflight(specs);
+  } catch (err) {
+    if (err instanceof AdapterError) {
+      deps.logError(err.message);
+      return 2;
+    }
+    throw err;
+  }
+
+  for (const result of outcome.results) {
+    if (result.ok) {
+      deps.log(`pin-preflight: ${result.input} ok — ${result.detail}`);
+    } else {
+      deps.logError(`pin-preflight: ${result.input} FAIL — ${result.detail}`);
+    }
+  }
+  return outcome.ok ? 0 : 1;
+}
+
+/** Hand-rolled argv parsing + dispatch across the `run-checkpoint`,
+ *  `baseline-report`, and `pin-preflight` subcommands. */
 export async function main(argv: readonly string[], deps: CliDeps = defaultCliDeps()): Promise<number> {
   const [subcommand, ...rest] = argv;
   if (subcommand === 'run-checkpoint') return runRunCheckpoint(rest, deps);
   if (subcommand === 'baseline-report') return runBaselineReport(rest, deps);
+  if (subcommand === 'pin-preflight') return runPinPreflightCommand(rest, deps);
 
   deps.logError(USAGE);
   return 2;
