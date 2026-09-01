@@ -6,8 +6,9 @@
 // network filtering is not expressible in either runtime without a proxy —
 // see resolveSandboxPolicy's caller for the 'sandbox-degraded' warning this
 // implies when the allowlist is non-empty. `docker-sandbox` is a selectable
-// runtime name for the future microVM runtime (#653); it is not a command
-// prefix and wraps nothing until that lifecycle lands.
+// runtime backed by a microVM lifecycle (create/mount/teardown, #653) owned by
+// utils/microvm.ts and driven from setupWorktree/cleanupWorktree; the VM itself is
+// the containment boundary, so it is not a command prefix and wraps nothing here.
 
 import { homedir, tmpdir } from 'node:os';
 import { resolve } from 'node:path';
@@ -230,8 +231,9 @@ ${prefixRules}
 /** Wraps `cmd` with the platform sandbox + resource-limit prefix. Pure —
  *  runtime 'none' returns cmd unchanged. */
 export function wrapCommandInSandbox(cmd: string, policy: SandboxPolicy): string {
-  // docker-sandbox is a VM runtime, not a command prefix; its lifecycle lands in #653.
-  // Until then it wraps nothing — and must never fall through to the firejail branch below.
+  // docker-sandbox is a VM runtime, not a command prefix; its create/teardown lifecycle
+  // is owned by utils/microvm.ts (#653). It wraps nothing here — and must never fall
+  // through to the firejail branch below.
   if (policy.runtime === 'none' || policy.runtime === 'docker-sandbox') return cmd;
 
   const cpuSeconds = Math.ceil(policy.cpuMs / 1000);

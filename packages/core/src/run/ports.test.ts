@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { readPortLeases } from '../environment/index.js';
 import { ProcessGroupTracker } from '../environment/process-groups.js';
 import { createSimWorkspace } from '../sim/index.js';
+import type { WorktreeSandbox } from '../utils/microvm.js';
 import type { LocalOnlyPolicy } from '../work/local-only.js';
 import {
   acquireLaneEnvironment,
@@ -63,11 +64,33 @@ describe('worktreeWorkspace', () => {
       log,
     });
 
-    expect(setup).toHaveBeenCalledWith('/repo', 'issue-1', '/repo/.worktrees/issue-1', 'origin/main');
+    expect(setup).toHaveBeenCalledWith('/repo', 'issue-1', '/repo/.worktrees/issue-1', 'origin/main', undefined, log);
     expect(ws.path).toBe('/repo/.worktrees/issue-1');
 
     await ws.dispose();
-    expect(cleanup).toHaveBeenCalledWith('/repo', '/repo/.worktrees/issue-1', log);
+    expect(cleanup).toHaveBeenCalledWith('/repo', '/repo/.worktrees/issue-1', log, undefined);
+  });
+
+  it('forwards the sandbox descriptor to both setup and cleanup', async () => {
+    const setup = vi.fn().mockResolvedValue(undefined);
+    const cleanup = vi.fn().mockResolvedValue(undefined);
+    const log = vi.fn();
+    const sandbox: WorktreeSandbox = { runtime: 'docker-sandbox', authPaths: ['/home/.claude'], allowHosts: [] };
+
+    const ws: Workspace = await worktreeWorkspace({
+      repoRoot: '/repo',
+      branch: 'issue-3',
+      worktreePath: '/repo/.worktrees/issue-3',
+      sandbox,
+      setup,
+      cleanup,
+      log,
+    });
+
+    expect(setup).toHaveBeenCalledWith('/repo', 'issue-3', '/repo/.worktrees/issue-3', 'origin/main', sandbox, log);
+
+    await ws.dispose();
+    expect(cleanup).toHaveBeenCalledWith('/repo', '/repo/.worktrees/issue-3', log, sandbox);
   });
 
   it('passes an explicit startPoint through to setup instead of the origin/main default', async () => {
@@ -83,7 +106,14 @@ describe('worktreeWorkspace', () => {
       cleanup,
     });
 
-    expect(setup).toHaveBeenCalledWith('/repo', 'issue-2', '/repo/.worktrees/issue-2', 'origin/develop');
+    expect(setup).toHaveBeenCalledWith(
+      '/repo',
+      'issue-2',
+      '/repo/.worktrees/issue-2',
+      'origin/develop',
+      undefined,
+      undefined,
+    );
   });
 });
 

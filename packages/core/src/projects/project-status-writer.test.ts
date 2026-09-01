@@ -103,4 +103,45 @@ describe('createProjectStatusWriter', () => {
 
     expect(write).not.toHaveBeenCalled();
   });
+
+  it('does not write when the transition target already matches the board status', async () => {
+    const alreadyActive: ProjectQueueProjection = {
+      ...projection(),
+      items: [
+        {
+          membership,
+          issue: { id: 'I_42', number: 42 },
+          lane: 'Build',
+          order: 1,
+          status: 'in_progress',
+        },
+      ],
+    };
+    const { writer, write } = createWriter(alreadyActive);
+
+    await writer.handle(lifecycleEvent());
+
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('writes at most once for a repeated identical transition', async () => {
+    const { writer, write } = createWriter();
+
+    await writer.handle(lifecycleEvent());
+    await writer.handle(lifecycleEvent());
+
+    expect(write.mock.calls).toEqual([[membership, 'active']]);
+  });
+
+  it('lands exactly one mutation per real change across a full sequence', async () => {
+    const { writer, write } = createWriter();
+
+    await writer.handle(lifecycleEvent());
+    await writer.handle(lifecycleEvent({ phase: 'ship', status: 'done' }));
+
+    expect(write.mock.calls).toEqual([
+      [membership, 'active'],
+      [membership, 'done'],
+    ]);
+  });
 });

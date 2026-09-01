@@ -388,6 +388,22 @@ describe('runIssue — outcome mapping', () => {
     const outcome = await runIssue(baseRequest(), basePolicy(), basePorts());
     expect(outcome).toMatchObject({ state: 'parked', reason: 'timeout' });
   });
+
+  it('emits an environment warning when local_auth parks a run', async () => {
+    const events: Array<[string, string]> = [];
+    const log = vi.fn((type: string, message: string) => events.push([type, message]));
+    vi.mocked(planPhase).mockRejectedValue(
+      Object.assign(new Error('Failed to authenticate: OAuth session expired and could not be refreshed'), {
+        reason: 'local_auth',
+      }),
+    );
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ events: () => log }));
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
+    const warnings = events.filter(([type]) => type === 'environment_warning');
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0][1]).toContain('local_auth');
+    expect(warnings[0][1]).toContain('factory doctor');
+  });
 });
 
 describe('runIssue — decomposition', () => {

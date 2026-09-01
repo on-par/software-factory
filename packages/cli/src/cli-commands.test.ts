@@ -143,6 +143,7 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
     loadModelsConfig: vi.fn(() => ({ models: {}, tiers: {} }) as any),
     loadRoutesConfig: vi.fn(() => ({}) as any),
     loadFactoryConfigForRepo: vi.fn(() => h.factoryConfig),
+    loadRepoConfig: vi.fn((repoRoot: string, stateRoot?: string) => actual.loadRepoConfig(repoRoot, stateRoot)),
     resolveTimeouts: vi.fn(() => ({ plan: 1, build: 1, check: 1, approval: 1 })),
     resolveSkipCI: vi.fn(() => false),
     getConstitutionsDir: vi.fn(() => h.constitutionsDir),
@@ -1558,6 +1559,79 @@ bash scripts/verify.sh
       expect(events).toContain('run-done');
       expect(events).not.toContain('kpi-snapshot');
     });
+
+    describe('macOS keychain preflight (#1014)', () => {
+      let originalPlatform: NodeJS.Platform;
+
+      beforeEach(() => {
+        trackEnv('TMUX', 'ANTHROPIC_API_KEY');
+        originalPlatform = process.platform;
+        Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+        h.claudeAvailable = true;
+        delete process.env.TMUX;
+        delete process.env.ANTHROPIC_API_KEY;
+        writeFileSync(paths().queue, 'app 1\n');
+        writeFileSync(paths().stop, '');
+      });
+
+      afterEach(() => {
+        Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+      });
+
+      it('aborts before claiming any issue when the keychain is unreadable inside tmux', async () => {
+        process.env.TMUX = '/tmp/tmux-1000/default,1234,0';
+        h.execSyncImpl = (cmd: string) => {
+          if (cmd.includes('find-generic-password')) throw new Error('SecKeychainSearchCopyNext: exit 44');
+          return '';
+        };
+        await expect(runMain('run', '--local-queue')).rejects.toThrow(/tmux/);
+        const events = readFileSync(paths().events, 'utf-8');
+        expect(events).toContain('environment_warning');
+        expect(events).toContain('local_auth');
+        expect(events).not.toContain(`lane 'app' started`);
+      });
+
+      it('warns but proceeds when the keychain is unreadable outside tmux', async () => {
+        h.execSyncImpl = (cmd: string) => {
+          if (cmd.includes('find-generic-password')) throw new Error('SecKeychainSearchCopyNext: exit 44');
+          return '';
+        };
+        const res = await runMain('run', '--local-queue');
+        expect(res.exited).toBe(false);
+        const events = readFileSync(paths().events, 'utf-8');
+        expect(events).toContain('run-done');
+      });
+
+      it('proceeds when the login keychain entry is readable', async () => {
+        h.execSyncImpl = () => '';
+        const res = await runMain('run', '--local-queue');
+        expect(res.exited).toBe(false);
+        const events = readFileSync(paths().events, 'utf-8');
+        expect(events).toContain('run-done');
+      });
+
+      it('skips the probe when the claude CLI is not on PATH', async () => {
+        h.claudeAvailable = false;
+        h.execSyncImpl = () => {
+          throw new Error('security should not be invoked when claude is unavailable');
+        };
+        const res = await runMain('run', '--local-queue');
+        expect(res.exited).toBe(false);
+        const events = readFileSync(paths().events, 'utf-8');
+        expect(events).toContain('run-done');
+      });
+
+      it('skips the probe when ANTHROPIC_API_KEY auth is in use', async () => {
+        process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
+        h.execSyncImpl = () => {
+          throw new Error('security should not be invoked when using ANTHROPIC_API_KEY');
+        };
+        const res = await runMain('run', '--local-queue');
+        expect(res.exited).toBe(false);
+        const events = readFileSync(paths().events, 'utf-8');
+        expect(events).toContain('run-done');
+      });
+    });
   });
 
   describe('proxy', () => {
@@ -2948,6 +3022,23 @@ describe('shipIssue (direct)', () => {
     expect(events).toContain('worktree');
   });
 
+  it('loads the committed repo config from paths.root, not paths.state', async () => {
+    const core = await import('@on-par/factory-core');
+    await shipIssue(5, {}, ctx());
+    expect(vi.mocked(core.loadRepoConfig)).toHaveBeenCalledWith(h.repoRoot, paths().root);
+  });
+
+  it('reads providers flags from .factory/config.json (no symlink needed)', async () => {
+    const core = await import('@on-par/factory-core');
+    mkdirSync(paths().root, { recursive: true });
+    writeFileSync(paths().config, JSON.stringify({ version: 1, providers: { ollama: false } }));
+    await shipIssue(5, {}, ctx());
+    expect(vi.mocked(core.loadRepoConfig).mock.results.at(-1)?.value).toEqual({
+      version: 1,
+      providers: { ollama: false },
+    });
+  });
+
   // Regression (#681): a closed issue must be refused before any resource is
   // committed — no worktree, no port lease, no model call.
   it('refuses a closed issue before any resource is committed', async () => {
@@ -3366,12 +3457,17 @@ describe('shipIssue (direct)', () => {
     expect(events).toContain('sandbox disabled by config/FACTORY_SANDBOX');
   });
 
-  it('logs sandbox-unavailable naming #653 when sandbox.runtime is docker-sandbox', async () => {
+  it('passes the docker-sandbox descriptor to setupWorktree without a speculative sandbox log when sandbox.runtime is docker-sandbox', async () => {
     h.factoryConfig = { ...h.factoryConfig, sandbox: { ...h.factoryConfig.sandbox, runtime: 'docker-sandbox' } };
     await shipIssue(5, {}, ctx());
     const events = readFileSync(paths().events, 'utf-8');
-    expect(events).toContain('#653');
-    expect(events).toContain('sandbox-unavailable');
+    // createMicroVm (not the CLI) owns the outcome-driven 'sandbox'/'sandbox-unavailable'
+    // events; setupWorktree is mocked here, so neither fires — the CLI must not log a
+    // premature "active" event before the microVM actually exists.
+    expect(events).not.toContain('docker-sandbox microVM active for lane');
+    expect(vi.mocked(setupWorktree).mock.calls.at(-1)?.[4]).toEqual(
+      expect.objectContaining({ runtime: 'docker-sandbox' }),
+    );
   });
 
   it('activates the sandbox policy and logs the degraded-egress warning when a sandbox runtime is available', async () => {
@@ -3577,7 +3673,14 @@ describe('CliExitError (direct command invocation)', () => {
 
     try {
       await expect(cmdLand(5)).resolves.toBeUndefined();
-      expect(setupWorktree).toHaveBeenCalledWith(h.repoRoot, branch, worktree, `origin/${branch}`);
+      expect(setupWorktree).toHaveBeenCalledWith(
+        h.repoRoot,
+        branch,
+        worktree,
+        `origin/${branch}`,
+        undefined,
+        expect.any(Function),
+      );
       expect(commands).toContain('git rebase origin/main');
       expect(commands).toContain("git push --force-with-lease origin 'contributor/adopted-pr'");
       expect(watchChecks).toHaveBeenCalledTimes(2);

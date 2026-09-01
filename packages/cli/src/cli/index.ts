@@ -36,6 +36,7 @@ import type {
   RunPorts,
   RunRequest,
   SandboxPolicy,
+  SandboxRuntime,
   UsageReading,
   Workspace,
   WorkRequest,
@@ -147,6 +148,7 @@ import type {
   QueueReleaseOutcome,
   UnmergedGreenPr,
   WatchChecksOptions,
+  WorktreeSandbox,
 } from '@on-par/factory-core/internal';
 import {
   branchFor,
@@ -171,6 +173,7 @@ import {
   releaseStaleClaims,
   resolveBranchPrefix,
   resolveEffectiveConfig,
+  worktreeSandboxFor,
   resolveExperimental,
   resolveFilingPolicy,
   resolveLocalOnly,
@@ -192,6 +195,7 @@ import { Command } from 'commander';
 import {
   analyzeEventLog,
   type ClaudeAuthProbe,
+  claudeKeychainCheck,
   doctorFailed,
   eventLogCheck,
   formatClaimReconcileReport,
@@ -200,6 +204,8 @@ import {
   formatWorktreeReconcileReport,
   type GreenPrScanResult,
   leaseChecks,
+  keychainPreflightError,
+  type KeychainProbeStatus,
   type LeaseHealthRow,
   runDoctorChecks,
   sandboxClaudeAuthChecks,
@@ -968,6 +974,94 @@ export function resolveLaneBaseUrl(
   return { note: `proxy enabled but not running — using http://127.0.0.1:${appPort}` };
 }
 
+/** Builds the port-lease acquirer passed to runIssue, or undefined to skip it. A
+ *  docker-sandbox lane runs inside its own microVM network namespace and binds its
+ *  normal port there, so it needs no host port-lease and (since the proxy resolves
+ *  routes solely from the lease registry) no proxy route either — every other
+ *  runtime keeps acquiring a lease exactly as before. */
+export function resolveEnvironmentAcquirer(opts: {
+  laneSandboxRuntime: SandboxRuntime;
+  paths: ReturnType<typeof getFactoryPaths>;
+  worktree: string;
+  branch: string;
+  range: [number, number];
+  processGroupGraceMs: number;
+  log: (type: EventKind, msg: string) => void;
+}): (() => Promise<Environment>) | undefined {
+  if (opts.laneSandboxRuntime === 'docker-sandbox') {
+    opts.log(
+      'environment_lease',
+      `docker-sandbox lane ${opts.worktree} binds its port inside its own microVM — skipping host port-lease`,
+    );
+    return undefined;
+  }
+
+  return async (): Promise<Environment> => {
+    const reaped: ReapedLease[] = [];
+    const lease = await acquirePortLease({
+      registryFile: opts.paths.ports,
+      lockDir: opts.paths.portsLock,
+      worktreeId: opts.worktree,
+      branch: opts.branch,
+      range: opts.range,
+      onReap: (r) => {
+        reaped.push(r);
+        opts.log(
+          'environment_lease_reaped',
+          `reaped stale lease: port ${r.lease.port}, pid ${r.lease.pid}, worktree ${r.lease.worktreeId} — reason: ${r.reason}`,
+        );
+      },
+      onPortConflict: (port) => {
+        void defaultFindPortListeners(port)
+          .then((listeners) => {
+            const detail =
+              listeners.length > 0
+                ? listeners.map((l) => `pid ${l.pid} (${l.command})`).join(', ')
+                : 'no listener details available';
+            opts.log(
+              'environment_conflict',
+              `port ${port} busy but unleased — reported as conflict, not terminated: ${detail}`,
+            );
+          })
+          .catch(() => {
+            opts.log('environment_conflict', `port ${port} busy but unleased — reported as conflict, not terminated`);
+          });
+      },
+    });
+    opts.log('environment_lease', `leased port ${lease.port} for worktree ${opts.worktree}`);
+    if (reaped.length > 0) {
+      await reapOrphanProcesses({
+        reaped,
+        graceMs: opts.processGroupGraceMs,
+        onEvent: (e) =>
+          opts.log(
+            'environment_orphan',
+            `${e.action === 'killed' ? 'killed' : 'found'} pid ${e.pid} (pgid ${e.pgid}, ${e.command}) squatting port ${e.port} of dead lane ${e.worktreeId}${e.action === 'reported' ? ' — not factory-started, left running' : ''}`,
+          ),
+      });
+    }
+    return {
+      port: lease.port,
+      env: () => laneEnv(lease.port, process.env),
+      recordPgid(pgid: number): void {
+        void recordLeasePgid({
+          registryFile: opts.paths.ports,
+          lockDir: opts.paths.portsLock,
+          worktreeId: opts.worktree,
+          pgid,
+        }).catch(() => {});
+      },
+      async release(): Promise<void> {
+        await releasePortLease({
+          registryFile: opts.paths.ports,
+          lockDir: opts.paths.portsLock,
+          worktreeId: opts.worktree,
+        });
+      },
+    };
+  };
+}
+
 export async function shipIssue(
   issueNum: number,
   opts: { product?: string; autoRework?: boolean; interactive?: boolean; sandbox?: boolean; approvePlan?: boolean },
@@ -992,7 +1086,7 @@ export async function shipIssue(
   const paths = ctx?.paths ?? getFactoryPaths(repoRoot);
   const octokit = getOctokit();
 
-  const repoConfig = loadRepoConfig(repoRoot, paths.state);
+  const repoConfig = loadRepoConfig(repoRoot, paths.root);
   const factoryConfig = loadFactoryConfigForRepo(paths.config);
   const timeouts = resolveTimeouts(factoryConfig);
   const failoverSettings = resolveAutoFailover(factoryConfig);
@@ -1107,6 +1201,40 @@ export async function shipIssue(
     throw new IssueSkippedError(skipReason, 'already-closed');
   }
 
+  const sandboxPolicy = resolveSandboxPolicy(policy.sandbox, {
+    worktree,
+    repoRoot,
+    cliDisabled: opts.sandbox === false,
+    laneId: lane,
+  });
+  laneSandboxRuntime = sandboxPolicy?.runtime ?? 'none';
+  const worktreeSandbox: WorktreeSandbox | undefined = worktreeSandboxFor(sandboxPolicy?.runtime, {
+    allowHosts: sandboxPolicy?.allowHosts ?? [],
+  });
+  let activeSandboxPolicy: SandboxPolicy | undefined;
+  if (opts.sandbox === false) {
+    console.error(chalk.yellow('factory: sandbox disabled by --no-sandbox — agent runs are UNCONTAINED'));
+    log('sandbox-disabled', 'sandbox disabled by --no-sandbox');
+  } else if (!sandboxPolicy) {
+    log('sandbox-disabled', 'sandbox disabled by config/FACTORY_SANDBOX');
+  } else if (sandboxPolicy.runtime === 'none') {
+    log('sandbox-unavailable', 'no sandbox runtime found (sandbox-exec/firejail) — running uncontained');
+  } else if (sandboxPolicy.runtime === 'docker-sandbox') {
+    // docker-sandbox's containment is the microVM created by worktreeWorkspace below
+    // (#653), not a command-prefix wrap — activeSandboxPolicy stays undefined because
+    // wrapCommandInSandbox remains a no-op for this runtime. createMicroVm logs the
+    // actual outcome ('sandbox' on success, 'sandbox-unavailable' on fallback), so no
+    // speculative log is emitted here.
+  } else {
+    activeSandboxPolicy = sandboxPolicy;
+    if (sandboxPolicy.allowHosts.length > 0) {
+      log(
+        'sandbox-degraded',
+        `host-level egress filtering unavailable in v1; intended allowlist: ${sandboxPolicy.allowHosts.join(', ')}`,
+      );
+    }
+  }
+
   // Setup worktree FIRST — PLAN needs cwd=worktree to run claude. Worktree cleanup
   // stays a CLI concern (not called here, matching today — a worktree persists past
   // a successful run for GC/sweep commands to reclaim later).
@@ -1117,13 +1245,14 @@ export async function shipIssue(
       branch,
       worktreePath: worktree,
       log,
-      setup: (root, br, wt) =>
+      sandbox: worktreeSandbox,
+      setup: (root, br, wt, sp, sandbox, setupLog) =>
         withGitLock(root, () =>
           withFileLock(
             paths.gitLock,
             async () => {
               await gitFetch(root);
-              await setupWorktree(root, br, wt);
+              await setupWorktree(root, br, wt, sp, sandbox, setupLog);
             },
             { onSteal: (pid) => log('lock-stolen', `stole ${paths.gitLock} from dead holder pid ${pid ?? 'unknown'}`) },
           ),
@@ -1133,36 +1262,6 @@ export async function shipIssue(
   } else {
     workspace = localOnlyWorkspace(ctx.localOnly);
     log('workspace', `local-only: using caller-provided workspace ${worktree} (no factory worktree created)`);
-  }
-
-  const sandboxPolicy = resolveSandboxPolicy(policy.sandbox, {
-    worktree,
-    repoRoot,
-    cliDisabled: opts.sandbox === false,
-    laneId: lane,
-  });
-  laneSandboxRuntime = sandboxPolicy?.runtime ?? 'none';
-  let activeSandboxPolicy: SandboxPolicy | undefined;
-  if (opts.sandbox === false) {
-    console.error(chalk.yellow('factory: sandbox disabled by --no-sandbox — agent runs are UNCONTAINED'));
-    log('sandbox-disabled', 'sandbox disabled by --no-sandbox');
-  } else if (!sandboxPolicy) {
-    log('sandbox-disabled', 'sandbox disabled by config/FACTORY_SANDBOX');
-  } else if (sandboxPolicy.runtime === 'none') {
-    log('sandbox-unavailable', 'no sandbox runtime found (sandbox-exec/firejail) — running uncontained');
-  } else if (sandboxPolicy.runtime === 'docker-sandbox') {
-    log(
-      'sandbox-unavailable',
-      'docker-sandbox selected but its VM lifecycle is not implemented yet (#653) — running uncontained',
-    );
-  } else {
-    activeSandboxPolicy = sandboxPolicy;
-    if (sandboxPolicy.allowHosts.length > 0) {
-      log(
-        'sandbox-degraded',
-        `host-level egress filtering unavailable in v1; intended allowlist: ${sandboxPolicy.allowHosts.join(', ')}`,
-      );
-    }
   }
 
   const planApprovalEnabled = opts.approvePlan ?? resolvePlanApproval(factoryConfig);
@@ -1176,66 +1275,15 @@ export async function shipIssue(
   // group tracking and killing is runIssue's own unconditional tracker (Invariant 3),
   // so a lease-disabled/failed run still tears down every spawned agent process.
   const acquireEnvironment = portsSettings.enabled
-    ? async (): Promise<Environment> => {
-        const reaped: ReapedLease[] = [];
-        const lease = await acquirePortLease({
-          registryFile: paths.ports,
-          lockDir: paths.portsLock,
-          worktreeId: worktree,
-          branch,
-          range: portsSettings.range,
-          onReap: (r) => {
-            reaped.push(r);
-            log(
-              'environment_lease_reaped',
-              `reaped stale lease: port ${r.lease.port}, pid ${r.lease.pid}, worktree ${r.lease.worktreeId} — reason: ${r.reason}`,
-            );
-          },
-          onPortConflict: (port) => {
-            void defaultFindPortListeners(port)
-              .then((listeners) => {
-                const detail =
-                  listeners.length > 0
-                    ? listeners.map((l) => `pid ${l.pid} (${l.command})`).join(', ')
-                    : 'no listener details available';
-                log(
-                  'environment_conflict',
-                  `port ${port} busy but unleased — reported as conflict, not terminated: ${detail}`,
-                );
-              })
-              .catch(() => {
-                log('environment_conflict', `port ${port} busy but unleased — reported as conflict, not terminated`);
-              });
-          },
-        });
-        log('environment_lease', `leased port ${lease.port} for worktree ${worktree}`);
-        if (reaped.length > 0) {
-          await reapOrphanProcesses({
-            reaped,
-            graceMs: processGroupGraceMs,
-            onEvent: (e) =>
-              log(
-                'environment_orphan',
-                `${e.action === 'killed' ? 'killed' : 'found'} pid ${e.pid} (pgid ${e.pgid}, ${e.command}) squatting port ${e.port} of dead lane ${e.worktreeId}${e.action === 'reported' ? ' — not factory-started, left running' : ''}`,
-              ),
-          });
-        }
-        return {
-          port: lease.port,
-          env: () => laneEnv(lease.port, process.env),
-          recordPgid(pgid: number): void {
-            void recordLeasePgid({
-              registryFile: paths.ports,
-              lockDir: paths.portsLock,
-              worktreeId: worktree,
-              pgid,
-            }).catch(() => {});
-          },
-          async release(): Promise<void> {
-            await releasePortLease({ registryFile: paths.ports, lockDir: paths.portsLock, worktreeId: worktree });
-          },
-        };
-      }
+    ? resolveEnvironmentAcquirer({
+        laneSandboxRuntime: sandboxPolicy?.runtime ?? 'none',
+        paths,
+        worktree,
+        branch,
+        range: portsSettings.range,
+        processGroupGraceMs,
+        log,
+      })
     : undefined;
 
   const proxySettings = resolveEnvironmentProxy(factoryConfig);
@@ -1774,6 +1822,17 @@ export async function withRepoRunLock<T>(
   }
 }
 
+/** The repo's current docker-sandbox descriptor for worktree-gc sweeps, or undefined for
+ *  every other runtime/config state (including a fixture config with no `sandbox` key). */
+function gcWorktreeSandbox(
+  sandboxCfg: FactoryConfig['sandbox'] | undefined,
+  repoRoot: string,
+): WorktreeSandbox | undefined {
+  if (!sandboxCfg) return undefined;
+  const policy = resolveSandboxPolicy(sandboxCfg, { worktree: repoRoot, repoRoot });
+  return worktreeSandboxFor(policy?.runtime);
+}
+
 export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
@@ -1786,7 +1845,8 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }
   // Best-effort GitHub evidence: tokenless/local-only repos keep today's pure-local behavior.
   const ghRepo = await getGitHubRepo().catch(() => undefined);
   const octokit = ghRepo ? (hasGitHubToken() ? getOctokit() : undefined) : undefined;
-  const run = () => sweepWorktrees({ repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo }, { log, octokit });
+  const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
+  const run = () => sweepWorktrees({ repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo }, { log, octokit, sandbox });
   const report = opts.dryRun ? await run() : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
   console.log(formatGcReport(report));
 }
@@ -1874,6 +1934,14 @@ async function landIssue(
     throw new LandFailureError(`no open PR for issue #${issueNum} (${guessedBranch})`, 1);
   }
 
+  const landSandboxPolicy = resolveSandboxPolicy(loadFactoryConfigForRepo(paths.config).sandbox, {
+    worktree,
+    repoRoot,
+  });
+  const worktreeSandbox: WorktreeSandbox | undefined = worktreeSandboxFor(landSandboxPolicy?.runtime, {
+    allowHosts: landSandboxPolicy?.allowHosts ?? [],
+  });
+
   const withLandLock: LandLock = (fn) =>
     withGitLock(repoRoot, () =>
       withFileLock(paths.mergeLock, fn, {
@@ -1898,18 +1966,18 @@ async function landIssue(
         withLock: withLandLock,
         ensureWorktree: async () => {
           if (!existsSync(worktree)) {
-            await setupWorktree(repoRoot, branch, worktree, `origin/${branch}`);
+            await setupWorktree(repoRoot, branch, worktree, `origin/${branch}`, worktreeSandbox, log);
           }
         },
       });
     } catch (err) {
       if (err instanceof AwaitingReviewError || err instanceof CiFailedError) {
-        await withLandLock(() => cleanupWorktree(repoRoot, worktree, log));
+        await withLandLock(() => cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
       }
       throw err;
     }
     log('merged', `squash-merged PR #${prNumber}`);
-    await withLandLock(() => cleanupWorktree(repoRoot, worktree, log));
+    await withLandLock(() => cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
   } catch (err: any) {
     if (err instanceof LandConflictError || err instanceof AwaitingReviewError || err instanceof CiFailedError)
       throw err;
@@ -2331,14 +2399,20 @@ async function cmdRun(opts: { localQueue?: boolean } = {}) {
     clearStaleStopFile(paths);
     const ghRepo = await getGitHubRepo();
     const factoryConfig = loadFactoryConfigForRepo(paths.config);
+    const keychainErr = keychainPreflightError(probeClaudeKeychain());
+    if (keychainErr) {
+      logEvent(paths.events, 'environment_warning', 'all', keychainErr);
+      throw new Error(keychainErr);
+    }
     if (factoryConfig.worktree.autoGcOnRun) {
       try {
         const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
+        const gcSandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
             sweepWorktrees(
               { repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays, repo: ghRepo },
-              { log: gcLog, octokit: getOctokit() },
+              { log: gcLog, octokit: getOctokit(), sandbox: gcSandbox },
             ),
           ),
         );
@@ -2681,6 +2755,7 @@ export async function runLane(
   let awaitingReview = 0;
   let skipped = 0;
   let decomposed = 0;
+  let parked = 0;
   const buildClaim = (issue: number): QueueClaim => ({ issue, decision: { kind: 'build' } });
   const pending: QueueClaim[] = issues.map(buildClaim);
   const seen = new Set(issues);
@@ -2703,11 +2778,12 @@ export async function runLane(
         paths.events,
         'parked',
         issue,
-        `lane '${lane}' parked (${decision.reason}); ${pending.length - i - 1} issues remaining`,
+        `issue #${issue} parked (${decision.reason}); lane '${lane}' continuing, ${pending.length - i - 1} issue(s) remaining`,
         { lane },
       );
       await releaseIssue(issue, 'parked');
-      return;
+      parked++;
+      continue;
     }
     try {
       const branch =
@@ -2755,18 +2831,19 @@ export async function runLane(
         paths.events,
         'parked',
         issue,
-        `lane '${lane}' parked (${reason}); ${pending.length - i - 1} issues remaining`,
+        `issue #${issue} parked (${reason}); lane '${lane}' continuing, ${pending.length - i - 1} issue(s) remaining`,
         { lane },
       );
       await releaseIssue(issue, 'parked');
-      return;
+      parked++;
+      continue;
     }
   }
   emitEvent(
     paths.events,
     'lane-done',
     lane,
-    `lane complete (${merged} merged, ${awaitingReview} awaiting review, ${skipped} skipped, ${decomposed} decomposed)`,
+    `lane complete (${merged} merged, ${awaitingReview} awaiting review, ${skipped} skipped, ${decomposed} decomposed, ${parked} parked)`,
     { lane },
   );
 }
@@ -3541,6 +3618,18 @@ async function scanGreenPrs(ghRepo: string | undefined, octokit: Octokit | undef
   }
 }
 
+function probeClaudeKeychain(): KeychainProbeStatus {
+  if (process.platform !== 'darwin') return { status: 'skipped', detail: 'skipped — not macOS' };
+  if (!isCommandAvailable('claude')) return { status: 'skipped', detail: 'skipped — claude CLI not on PATH' };
+  if (process.env.ANTHROPIC_API_KEY) return { status: 'skipped', detail: 'skipped — ANTHROPIC_API_KEY auth in use' };
+  try {
+    execSync('security find-generic-password -s "Claude Code-credentials"', { timeout: 10_000, stdio: 'ignore' });
+    return { status: 'readable' };
+  } catch {
+    return { status: 'unreadable', inTmux: !!process.env.TMUX };
+  }
+}
+
 async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
   const checks = runDoctorChecks({
     commandAvailable: isCommandAvailable,
@@ -3598,7 +3687,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     } else if (policy.runtime === 'none') {
       sandboxDetail = 'skipped — no sandbox runtime (sandbox-exec/firejail) on this host';
     } else if (policy.runtime === 'docker-sandbox') {
-      sandboxDetail = 'skipped — docker-sandbox has no command wrapping yet (#653)';
+      sandboxDetail = 'skipped — docker-sandbox containment is the microVM, not command wrapping (#653)';
     } else {
       sandboxed = probeExec(wrapCommandInSandbox(CLAUDE_AUTH_PROBE, policy)) === null ? 'failed' : 'ok';
       sandboxDetail =
@@ -3608,6 +3697,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     }
   }
 
+  checks.push(claudeKeychainCheck(probeClaudeKeychain()));
   checks.push(...sandboxClaudeAuthChecks({ host, sandboxed, hostDetail, sandboxDetail }));
 
   if (repoRoot !== null) {
@@ -3645,11 +3735,12 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
 
       try {
         const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
+        const gcSandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
             sweepWorktrees(
               { repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays, repo: ghRepo },
-              { log: gcLog, octokit },
+              { log: gcLog, octokit, sandbox: gcSandbox },
             ),
           ),
         );

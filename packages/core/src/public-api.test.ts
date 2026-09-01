@@ -278,6 +278,29 @@ const INTERNAL_API_KEYS = [
   // Daemon-ready ProjectV2 queue intent projection (#866)
   'createProjectQueuePoller',
   'DEFAULT_PROJECT_QUEUE_POLL_MS',
+  // gh-authenticated ProjectV2 queue GraphQL client + live poller (#1046)
+  'createGithubProjectQueuePoller',
+  'createOctokitGraphqlClient',
+  // Single-poller cached subscription-usage snapshot (#1029)
+  'createUsageCoordinator',
+  'DEFAULT_USAGE_POLL_MS',
+  'defaultUsageStatePath',
+  'loadUsageState',
+  'writeUsageState',
+  // UsageCoordinator admission-control acquire() API and grant ledger (#1030)
+  'defaultGrantLedgerPath',
+  'DEFAULT_GRANT_TTL_MS',
+  'isCappedModel',
+  'loadGrantLedger',
+  'pruneGrants',
+  'USAGE_ADMISSION_CEILING_PCT',
+  'USAGE_GRANT_RESERVATION_PCT',
+  'writeGrantLedger',
+  // Engine lane parks and resumes on acquire denial (#1032)
+  'createLaneScheduler',
+  // Standalone local UsageCoordinator fallback (#1033)
+  'createLocalUsageCoordinator',
+  'selectUsageCoordinator',
   // Coarse ProjectV2 status publishing (#868)
   'createProjectStatusWriter',
   // Coarse ProjectV2 status writing (#849)
@@ -362,6 +385,8 @@ const INTERNAL_API_KEYS = [
   'DEFAULT_FACTORYD_PORT',
   // Daemon lane state resolution (#843)
   'createDaemonLaneContext',
+  // Daemon per-repo orchestration dispatch (#1041)
+  'runDaemonRepo',
   // Daemon attach gate (#778)
   'attachRepo',
   'parseRemoteSlug',
@@ -390,6 +415,11 @@ const INTERNAL_API_KEYS = [
   'logEvent',
   'readCosts',
   'setupWorktree',
+  // docker-sandbox microVM lifecycle (#653)
+  'createMicroVm',
+  'microVmName',
+  'removeMicroVm',
+  'worktreeSandboxFor',
   'shellEscape',
   'slugify',
   'watchChecks',

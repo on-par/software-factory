@@ -164,6 +164,47 @@ describe('getFactoryPaths', () => {
     expect(paths.config.startsWith(paths.root)).toBe(true);
     expect(paths.config.startsWith(paths.state)).toBe(false);
   });
+
+  it('roots every issue-named path field under the resolved base directory in both modes', () => {
+    const repoRoot = '/tmp/some-repo';
+    // Field groups the issue enumerates: config lives at root; the rest live under state.
+    const rootRelativeKeys = ['config'] as const;
+    const stateRelativeKeys = [
+      'queue',
+      'events',
+      'costs',
+      'plans',
+      'reports',
+      'breaker',
+      'mergeLock',
+      'gitLock',
+      'runLock',
+    ] as const;
+
+    const assertRooted = (base: string) => {
+      const paths =
+        base === resolve(repoRoot, '.factory') ? getFactoryPaths(repoRoot) : getFactoryPaths(repoRoot, base);
+      expect(paths.root).toBe(base);
+      expect(paths.state).toBe(resolve(base, 'state'));
+      for (const key of rootRelativeKeys) {
+        expect(paths[key].startsWith(`${paths.root}/`)).toBe(true);
+      }
+      for (const key of stateRelativeKeys) {
+        expect(paths[key].startsWith(`${paths.state}/`)).toBe(true);
+      }
+    };
+
+    // Default mode: base is resolve(repoRoot, '.factory').
+    assertRooted(resolve(repoRoot, '.factory'));
+    // Explicit-stateRoot mode: base is an external resolved directory, and nothing leaks
+    // back under the repo-local .factory.
+    const stateRoot = resolve('/var/lib/factory-state');
+    assertRooted(stateRoot);
+    const explicit = getFactoryPaths(repoRoot, stateRoot);
+    expect(
+      [...rootRelativeKeys, ...stateRelativeKeys].every((k) => !explicit[k].startsWith(resolve(repoRoot, '.factory'))),
+    ).toBe(true);
+  });
 });
 
 describe('loadModelsConfig', () => {

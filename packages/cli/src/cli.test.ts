@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import type { ModelDiagnosis } from '@on-par/factory-core';
-import { getFactoryPaths } from '@on-par/factory-core';
+import { getFactoryPaths, readPortLeases } from '@on-par/factory-core';
 import type { GithubQueue } from '@on-par/factory-core/internal';
 import { RunLockHeldError, resolveBranchPrefix } from '@on-par/factory-core/internal';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -52,6 +52,7 @@ import {
   PREREQUISITES_TEXT,
   prLookupFailure,
   readActiveProduct,
+  resolveEnvironmentAcquirer,
   resolveLaneBaseUrl,
   resolveUsageKnobs,
   runLane,
@@ -705,6 +706,65 @@ describe('cli', () => {
       });
       expect(result.baseUrl).toBeUndefined();
       expect(result.note).toContain('http://127.0.0.1:3142');
+    });
+  });
+
+  describe('resolveEnvironmentAcquirer', () => {
+    let dir: string;
+    let paths: any;
+    const baseOpts = (overrides: Partial<Parameters<typeof resolveEnvironmentAcquirer>[0]> = {}) => ({
+      laneSandboxRuntime: 'none' as const,
+      paths,
+      worktree: '/repo/.worktrees/654',
+      branch: 'ship-it/654',
+      range: [4000, 4999] as [number, number],
+      processGroupGraceMs: 1000,
+      log: vi.fn(),
+      ...overrides,
+    });
+
+    beforeEach(async () => {
+      dir = await mkdtemp(join(tmpdir(), 'cli-env-acquirer-'));
+      paths = { ports: join(dir, 'ports.json'), portsLock: join(dir, 'ports.lock') };
+    });
+
+    afterEach(async () => {
+      await rm(dir, { recursive: true, force: true });
+    });
+
+    it('returns undefined and logs a skip for a docker-sandbox lane, never reaching acquirePortLease', () => {
+      const log = vi.fn();
+
+      const acquirer = resolveEnvironmentAcquirer(
+        baseOpts({ laneSandboxRuntime: 'docker-sandbox', worktree: '/repo/.worktrees/654', log }),
+      );
+
+      expect(acquirer).toBeUndefined();
+      expect(log).toHaveBeenCalledWith(
+        'environment_lease',
+        expect.stringContaining('docker-sandbox lane /repo/.worktrees/654 binds its port inside its own microVM'),
+      );
+      expect(readPortLeases(paths.ports)).toEqual([]);
+    });
+
+    it('returns an acquirer function for non-docker-sandbox runtimes', () => {
+      for (const laneSandboxRuntime of ['sandbox-exec', 'none'] as const) {
+        const acquirer = resolveEnvironmentAcquirer(baseOpts({ laneSandboxRuntime }));
+        expect(typeof acquirer).toBe('function');
+      }
+    });
+
+    it('leaves .factory/ports.json with no entries for either of two concurrent docker-sandbox lanes', () => {
+      const acquirerA = resolveEnvironmentAcquirer(
+        baseOpts({ laneSandboxRuntime: 'docker-sandbox', worktree: '/repo/.worktrees/654a' }),
+      );
+      const acquirerB = resolveEnvironmentAcquirer(
+        baseOpts({ laneSandboxRuntime: 'docker-sandbox', worktree: '/repo/.worktrees/654b' }),
+      );
+
+      expect(acquirerA).toBeUndefined();
+      expect(acquirerB).toBeUndefined();
+      expect(readPortLeases(paths.ports)).toEqual([]);
     });
   });
 
@@ -2957,9 +3017,14 @@ describe('cli', () => {
     it('parks a preflight claim without invoking shipIssue and leaves another lane independent', async () => {
       const parked: any[] = [];
       const finished: any[] = [];
+      let claimed = false;
       await Promise.allSettled([
         runLane('parked', [], '/repo', 'on-par/software-factory', paths, {
-          claimNext: async () => ({ issue: 7, decision: { kind: 'park', reason: 'CI for PR #71 ended timeout' } }),
+          claimNext: async () => {
+            if (claimed) return null;
+            claimed = true;
+            return { issue: 7, decision: { kind: 'park' as const, reason: 'CI for PR #71 ended timeout' } };
+          },
           ship: async () => {
             throw new Error('shipIssue must not run for a parked preflight');
           },
@@ -2983,31 +3048,40 @@ describe('cli', () => {
       expect(finished).toEqual(['merged']);
     });
 
-    it('parks the lane without re-emitting the terminal event (shipIssue owns it) on an escalate error', async () => {
+    it('parks issue 7 and continues the lane to issue 8 without re-emitting the terminal event (shipIssue owns it) on an escalate error', async () => {
       const calls: any[] = [];
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       await runLane('app', [7, 8], '/repo', 'on-par/software-factory', paths, {
         ship: async (issue) => {
           calls.push(['ship', issue]);
-          throw new LaneParkError('plan escalated: needs a human decision', 'escalate');
+          if (issue === 7) throw new LaneParkError('plan escalated: needs a human decision', 'escalate');
+          return `ship-it/${issue}-x`;
         },
-        waitMerge: async () => {
-          throw new Error('waitMerge should not be called');
+        waitMerge: async (issue) => {
+          calls.push(['waitMerge', issue]);
         },
         pathExists: () => false,
         emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
           calls.push(['event', type, issue, msg, extra]),
       });
 
-      expect(calls.filter((c) => c[0] === 'ship')).toEqual([['ship', 7]]);
+      expect(calls.filter((c) => c[0] === 'ship')).toEqual([
+        ['ship', 7],
+        ['ship', 8],
+      ]);
       const events = calls.filter((c) => c[0] === 'event');
-      expect(events).toHaveLength(1);
       expect(events[0][1]).toBe('parked');
       expect(events[0][2]).toBe(7);
       expect(events[0][3]).toContain('(escalate)');
       expect(events[0][4]).toEqual({ lane: 'app' });
       expect(events.some((e) => e[1] === 'escalate')).toBe(false);
-      expect(events.some((e) => e[1] === 'lane-done')).toBe(false);
+      expect(events.at(-1)).toEqual([
+        'event',
+        'lane-done',
+        'app',
+        'lane complete (1 merged, 0 awaiting review, 0 skipped, 0 decomposed, 1 parked)',
+        { lane: 'app' },
+      ]);
       expect(errorSpy).not.toHaveBeenCalled();
     });
 
@@ -3026,11 +3100,18 @@ describe('cli', () => {
       });
 
       const events = calls.filter((c) => c[0] === 'event');
-      expect(events).toHaveLength(1);
+      expect(events).toHaveLength(2);
       expect(events[0][1]).toBe('parked');
       expect(events[0][2]).toBe(9);
       expect(events[0][3]).toContain('(timeout)');
       expect(events.some((e) => e[1] === 'timeout')).toBe(false);
+      expect(events.at(-1)).toEqual([
+        'event',
+        'lane-done',
+        'app',
+        'lane complete (0 merged, 0 awaiting review, 0 skipped, 0 decomposed, 1 parked)',
+        { lane: 'app' },
+      ]);
     });
 
     it('parks the lane without re-emitting the terminal event (shipIssue owns it) on a plain fail error', async () => {
@@ -3048,11 +3129,18 @@ describe('cli', () => {
       });
 
       const events = calls.filter((c) => c[0] === 'event');
-      expect(events).toHaveLength(1);
+      expect(events).toHaveLength(2);
       expect(events[0][1]).toBe('parked');
       expect(events[0][2]).toBe(10);
       expect(events[0][3]).toContain('(fail)');
       expect(events.some((e) => e[1] === 'fail')).toBe(false);
+      expect(events.at(-1)).toEqual([
+        'event',
+        'lane-done',
+        'app',
+        'lane complete (0 merged, 0 awaiting review, 0 skipped, 0 decomposed, 1 parked)',
+        { lane: 'app' },
+      ]);
     });
 
     it('parks the lane without re-emitting the terminal event (land path owns it) on a conflict error from waitMerge', async () => {
@@ -3072,11 +3160,18 @@ describe('cli', () => {
 
       expect(calls[0]).toEqual(['ship', 11]);
       const events = calls.filter((c) => c[0] === 'event');
-      expect(events).toHaveLength(1);
+      expect(events).toHaveLength(2);
       expect(events[0][1]).toBe('parked');
       expect(events[0][2]).toBe(11);
       expect(events[0][3]).toContain('(conflict)');
       expect(events.some((e) => e[1] === 'conflict')).toBe(false);
+      expect(events.at(-1)).toEqual([
+        'event',
+        'lane-done',
+        'app',
+        'lane complete (0 merged, 0 awaiting review, 0 skipped, 0 decomposed, 1 parked)',
+        { lane: 'app' },
+      ]);
     });
 
     it('runs both issues and logs lane-done on the green path', async () => {
@@ -3108,7 +3203,7 @@ describe('cli', () => {
         'event',
         'lane-done',
         'app',
-        'lane complete (2 merged, 0 awaiting review, 0 skipped, 0 decomposed)',
+        'lane complete (2 merged, 0 awaiting review, 0 skipped, 0 decomposed, 0 parked)',
         { lane: 'app' },
       ]);
     });
@@ -3140,7 +3235,7 @@ describe('cli', () => {
         'event',
         'lane-done',
         'app',
-        'lane complete (1 merged, 1 awaiting review, 0 skipped, 0 decomposed)',
+        'lane complete (1 merged, 1 awaiting review, 0 skipped, 0 decomposed, 0 parked)',
         { lane: 'app' },
       ]);
     });
@@ -3172,7 +3267,7 @@ describe('cli', () => {
         'event',
         'lane-done',
         'app',
-        'lane complete (1 merged, 0 awaiting review, 1 skipped, 0 decomposed)',
+        'lane complete (1 merged, 0 awaiting review, 1 skipped, 0 decomposed, 0 parked)',
         { lane: 'app' },
       ]);
     });
@@ -3211,7 +3306,7 @@ describe('cli', () => {
         'event',
         'lane-done',
         'app',
-        'lane complete (3 merged, 0 awaiting review, 0 skipped, 1 decomposed)',
+        'lane complete (3 merged, 0 awaiting review, 0 skipped, 1 decomposed, 0 parked)',
         { lane: 'app' },
       ]);
     });
@@ -3240,7 +3335,44 @@ describe('cli', () => {
         'event',
         'lane-done',
         'app',
-        'lane complete (1 merged, 0 awaiting review, 0 skipped, 1 decomposed)',
+        'lane complete (1 merged, 0 awaiting review, 0 skipped, 1 decomposed, 0 parked)',
+        { lane: 'app' },
+      ]);
+    });
+
+    it('continues to the next issue after parking one, and counts it as parked', async () => {
+      const calls: any[] = [];
+      await runLane('app', [1, 2], '/repo', 'on-par/software-factory', paths, {
+        ship: async (issue) => {
+          calls.push(['ship', issue]);
+          if (issue === 1) throw new LaneParkError('plan escalated: needs a human decision', 'escalate');
+          return `ship-it/${issue}-x`;
+        },
+        waitMerge: async (issue) => {
+          calls.push(['waitMerge', issue]);
+        },
+        releaseIssue: async (issue, outcome) => {
+          calls.push(['release', issue, outcome]);
+        },
+        pathExists: () => false,
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
+          calls.push(['event', type, issue, msg, extra]),
+      });
+
+      expect(calls.filter((c) => c[0] === 'ship')).toEqual([
+        ['ship', 1],
+        ['ship', 2],
+      ]);
+      expect(calls.filter((c) => c[0] === 'waitMerge')).toEqual([['waitMerge', 2]]);
+      expect(calls).toContainEqual(['release', 1, 'parked']);
+      expect(calls).toContainEqual(['release', 2, 'done']);
+      const events = calls.filter((c) => c[0] === 'event');
+      expect(events.some((e) => e[1] === 'parked' && e[2] === 1)).toBe(true);
+      expect(events.at(-1)).toEqual([
+        'event',
+        'lane-done',
+        'app',
+        'lane complete (1 merged, 0 awaiting review, 0 skipped, 0 decomposed, 1 parked)',
         { lane: 'app' },
       ]);
     });
@@ -3335,7 +3467,7 @@ describe('cli', () => {
       ]);
     });
 
-    it('releases as parked and claims no further ahead when a park happens', async () => {
+    it('releases as parked and keeps claiming further issues when a park happens', async () => {
       const calls: any[] = [];
       const toClaim = [1, 2];
       await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
@@ -3356,8 +3488,11 @@ describe('cli', () => {
         },
       });
 
-      expect(calls.filter((c) => c[0] === 'claimNext')).toHaveLength(1);
-      expect(calls.filter((c) => c[0] === 'release')).toEqual([['release', 1, 'parked']]);
+      expect(calls.filter((c) => c[0] === 'claimNext')).toHaveLength(3);
+      expect(calls.filter((c) => c[0] === 'release')).toEqual([
+        ['release', 1, 'parked'],
+        ['release', 2, 'done'],
+      ]);
     });
 
     it('releases as done on skip, continuing to claim further issues', async () => {

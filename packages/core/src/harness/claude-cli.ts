@@ -83,6 +83,37 @@ function parseResultEnvelope(stdout: string): {
   };
 }
 
+function extractFailureDiagnosticFromStream(stdout: string): string | undefined {
+  const diagnostics: string[] = [];
+  let sawJsonLine = false;
+  for (const line of stdout.trim().split('\n')) {
+    if (line.trim().length === 0) continue;
+    let event: Record<string, unknown>;
+    try {
+      event = JSON.parse(line) as Record<string, unknown>;
+      sawJsonLine = true;
+    } catch {
+      if (!sawJsonLine) diagnostics.push(line);
+      continue;
+    }
+    if (event.type === 'error' && typeof event.message === 'string') {
+      diagnostics.push(event.message);
+      continue;
+    }
+    if (event.type !== 'result') continue;
+    if (typeof event.subtype === 'string') diagnostics.push(event.subtype);
+    if (typeof event.api_error_status === 'string') diagnostics.push(event.api_error_status);
+    if (typeof event.terminal_reason === 'string') diagnostics.push(event.terminal_reason);
+    if (event.is_error === true && typeof event.result === 'string') diagnostics.push(event.result);
+  }
+  return diagnostics.length > 0 ? diagnostics.join('\n') : sawJsonLine ? '' : undefined;
+}
+
+function stripClaudeStreamMetadata(text: string): string {
+  const diagnostics = extractFailureDiagnosticFromStream(text);
+  return diagnostics !== undefined ? diagnostics : text;
+}
+
 /** Runs a model via the Claude CLI:
  *  claude -p [--model <claudeFlag>] --output-format stream-json --verbose --safe-mode --permission-mode bypassPermissions < prompt-file */
 export class ClaudeCliHarness implements CodingHarness {
@@ -112,11 +143,16 @@ export class ClaudeCliHarness implements CodingHarness {
       }));
     } catch (err: any) {
       const stdout = typeof err.stdout === 'string' && err.stdout.length > 0 ? err.stdout : undefined;
-      const diagnosticText = [err.stderr, stdout].filter((text) => typeof text === 'string').join('\n');
+      const stdoutDiagnostic = stdout ? extractFailureDiagnosticFromStream(stdout) : undefined;
+      const stderrDiagnostic = typeof err.stderr === 'string' ? stripClaudeStreamMetadata(err.stderr) : undefined;
+      const diagnosticText = [stderrDiagnostic, stdoutDiagnostic ?? stdout]
+        .filter((text) => typeof text === 'string')
+        .join('\n');
       const reason = err.killed ? 'timeout' : classifyFailure(diagnosticText, err.code ?? 1);
-      throw new HarnessError(err.message ?? String(err), reason, {
+      const codeText = typeof err.code === 'number' || typeof err.code === 'string' ? ` ${err.code}` : '';
+      throw new HarnessError(`claude CLI process exited${codeText}`.trim(), reason, {
         exitCode: typeof err.code === 'number' ? err.code : undefined,
-        stderr: err.stderr,
+        stderr: typeof err.stderr === 'string' ? err.stderr : undefined,
         stdout,
         code: typeof err.code === 'string' || typeof err.code === 'number' ? err.code : undefined,
         signal: typeof err.signal === 'string' ? err.signal : undefined,

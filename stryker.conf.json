@@ -2,6 +2,11 @@
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "testRunner": "vitest",
   "plugins": ["@stryker-mutator/vitest-runner"],
+  "tsconfigFile_comment": [
+    "TS7 workaround: typescript@7's CJS entry exports only version/versionMajorMinor, so Stryker's sandbox TSConfigPreprocessor crashes calling ts.parseConfigFileTextToJson.",
+    "Pointing tsconfigFile at a path absent from the project makes that rewrite step no-op, which is safe because vitest transpiles this repo without the project references the rewrite exists to fix.",
+    "Revisit when @stryker-mutator/core's TSConfigPreprocessor supports typescript >= 7: then point tsconfigFile at ./tsconfig.json (or delete both keys — but note the option DEFAULTS to 'tsconfig.json', which exists here, so merely deleting tsconfigFile today re-triggers the crash)."
+  ],
   "tsconfigFile": "stryker-tsconfig-rewrite-disabled.json",
   "mutate": [
     "packages/scbench-adapter/src/**/*.ts",
