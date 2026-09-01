@@ -67,6 +67,7 @@ const COLLECT_TRIAL_RESULT: CollectTrialResult = {
     'checkpoint_results.jsonl',
     'run_info.yaml',
   ],
+  alreadyImported: false,
 };
 
 const ALL_OK_CATALOG_OUTCOME: CatalogPreflightOutcome = {
@@ -891,6 +892,34 @@ describe('collect-trial subcommand', () => {
 
     expect(code).toBe(2);
     expect(deps.logError).toHaveBeenCalledWith('missing Factory artifact(s) in /tmp/out/calculator/1: diff.patch');
+  });
+
+  it('logs the already-fully-imported line instead of the copied-files line when alreadyImported is true', async () => {
+    const deps = fakeDeps({
+      collectTrial: vi.fn(() => ({ ...COLLECT_TRIAL_RESULT, copied: [], alreadyImported: true })),
+    });
+
+    const code = await main(
+      [
+        'collect-trial',
+        '--output',
+        '/tmp/out',
+        '--scbench-run',
+        '/tmp/scbench-run',
+        '--problem',
+        'calculator',
+        '--checkpoint',
+        '1',
+        '--trial',
+        '1',
+      ],
+      deps,
+    );
+
+    expect(code).toBe(0);
+    expect(deps.log).toHaveBeenCalledWith(
+      `collect-trial: trial already fully imported at ${COLLECT_TRIAL_RESULT.trialDir} — nothing to copy`,
+    );
   });
 
   it('re-throws unexpected (non-AdapterError) errors from collectTrial', async () => {

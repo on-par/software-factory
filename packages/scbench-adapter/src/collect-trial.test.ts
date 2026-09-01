@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -78,7 +78,12 @@ describe('collectTrial', () => {
     });
 
     const trialDir = join(runsDir, 'calculator', '1', 'trial-1');
-    expect(result).toEqual({ sourceDir, trialDir, copied: [...FACTORY_TRIAL_FILES, ...NATIVE_EVIDENCE_FILES] });
+    expect(result).toEqual({
+      sourceDir,
+      trialDir,
+      copied: [...FACTORY_TRIAL_FILES, ...NATIVE_EVIDENCE_FILES],
+      alreadyImported: false,
+    });
     for (const name of FACTORY_TRIAL_FILES) {
       expect(readFileSync(join(trialDir, name), 'utf-8')).toBe(CONTENTS[name]);
     }
@@ -156,6 +161,7 @@ describe('collectTrial', () => {
         expect(readFileSync(join(trialDir, name), 'utf-8')).toBe(NATIVE_CONTENTS[name]);
       }
       expect(result.copied).toEqual([...FACTORY_TRIAL_FILES, ...NATIVE_EVIDENCE_FILES]);
+      expect(result.alreadyImported).toBe(false);
     });
 
     it('throws before any write when evaluation.json is missing (checkpoint-scoped file)', () => {
@@ -206,6 +212,92 @@ describe('collectTrial', () => {
       }
       expect(message).toContain('missing-evidence');
       expect(existsSync(join(runsDir, 'calculator'))).toBe(false);
+    });
+  });
+
+  describe('idempotent re-run', () => {
+    function runOnce() {
+      return collectTrial({ outputTree, problemId: 'calculator', checkpointId: '1', trial: 1, runsDir, scbenchRunDir });
+    }
+
+    it('idempotent re-run leaves every file byte-identical and adds no entries', () => {
+      const sourceDir = join(outputTree, 'calculator', '1');
+      writeFixture(sourceDir);
+      writeNativeFixture(scbenchRunDir);
+
+      const first = runOnce();
+      const trialDir = first.trialDir;
+      const namesBefore = readdirSync(trialDir).sort();
+      const contentsBefore: Record<string, string> = {};
+      for (const name of namesBefore) {
+        contentsBefore[name] = readFileSync(join(trialDir, name), 'utf-8');
+      }
+
+      const second = runOnce();
+
+      expect(second).toEqual({ sourceDir, trialDir, copied: [], alreadyImported: true });
+      expect(readdirSync(trialDir).sort()).toEqual([...FACTORY_TRIAL_FILES, ...NATIVE_EVIDENCE_FILES].sort());
+      for (const name of namesBefore) {
+        expect(readFileSync(join(trialDir, name), 'utf-8')).toBe(contentsBefore[name]);
+      }
+    });
+
+    it('idempotent re-run does not rewrite a previously imported file from the source', () => {
+      const sourceDir = join(outputTree, 'calculator', '1');
+      writeFixture(sourceDir);
+      writeNativeFixture(scbenchRunDir);
+
+      const first = runOnce();
+      const overwritten = '# overwritten prior import\n';
+      writeFileSync(join(first.trialDir, 'brief.md'), overwritten);
+
+      const second = runOnce();
+
+      expect(second.alreadyImported).toBe(true);
+      expect(readFileSync(join(first.trialDir, 'brief.md'), 'utf-8')).toBe(overwritten);
+    });
+
+    it('repeated idempotent runs succeed (second and third run)', () => {
+      const sourceDir = join(outputTree, 'calculator', '1');
+      writeFixture(sourceDir);
+      writeNativeFixture(scbenchRunDir);
+
+      const first = runOnce();
+      const trialDir = first.trialDir;
+      const namesBefore = readdirSync(trialDir).sort();
+      const contentsBefore: Record<string, string> = {};
+      for (const name of namesBefore) {
+        contentsBefore[name] = readFileSync(join(trialDir, name), 'utf-8');
+      }
+
+      const second = runOnce();
+      expect(second).toEqual({ sourceDir, trialDir, copied: [], alreadyImported: true });
+      expect(readdirSync(trialDir).sort()).toEqual(namesBefore);
+      for (const name of namesBefore) {
+        expect(readFileSync(join(trialDir, name), 'utf-8')).toBe(contentsBefore[name]);
+      }
+
+      const third = runOnce();
+      expect(third).toEqual({ sourceDir, trialDir, copied: [], alreadyImported: true });
+      expect(readdirSync(trialDir).sort()).toEqual(namesBefore);
+      for (const name of namesBefore) {
+        expect(readFileSync(join(trialDir, name), 'utf-8')).toBe(contentsBefore[name]);
+      }
+    });
+
+    it('a partial import is completed, not skipped (idempotent only when fully imported)', () => {
+      const sourceDir = join(outputTree, 'calculator', '1');
+      writeFixture(sourceDir);
+      writeNativeFixture(scbenchRunDir);
+
+      const first = runOnce();
+      rmSync(join(first.trialDir, 'evaluation.json'));
+
+      const second = runOnce();
+
+      expect(second.alreadyImported).toBe(false);
+      expect(second.copied).toEqual([...FACTORY_TRIAL_FILES, ...NATIVE_EVIDENCE_FILES]);
+      expect(readFileSync(join(first.trialDir, 'evaluation.json'), 'utf-8')).toBe(NATIVE_CONTENTS['evaluation.json']);
     });
   });
 });
