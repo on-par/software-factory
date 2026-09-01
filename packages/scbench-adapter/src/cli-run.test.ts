@@ -4,6 +4,7 @@ import type { BaselineTrial } from './baseline.js';
 import { AdapterError, type CheckpointResult } from './checkpoint.js';
 import { defaultCliDeps, main, type CliDeps } from './cli-run.js';
 import { minimalManifest } from './manifest-fixture.js';
+import type { CatalogPreflightOutcome } from './catalog-preflight.js';
 import type { PinPreflightOutcome } from './pin-preflight.js';
 
 const RESULT: CheckpointResult = {
@@ -52,6 +53,18 @@ const ALL_OK_OUTCOME: PinPreflightOutcome = {
   ],
 };
 
+const ALL_OK_CATALOG_OUTCOME: CatalogPreflightOutcome = {
+  ok: true,
+  results: [
+    { subject: 'adapter build', ok: true, detail: 'build output present: /pkg/dist/cli.js' },
+    { subject: 'SCBENCH_PROBLEMS_PATH', ok: true, detail: 'catalog checkout present: /tmp/problems' },
+    { subject: 'problem alpha', ok: true, detail: 'resolves in catalog (alpha/config.yaml)' },
+    { subject: 'problem beta', ok: true, detail: 'resolves in catalog (beta/config.yaml)' },
+    { subject: 'problem gamma', ok: true, detail: 'resolves in catalog (gamma/config.yaml)' },
+  ],
+  confirmedProblemIds: ['alpha', 'beta', 'gamma'],
+};
+
 function fakeDeps(overrides: Partial<CliDeps> = {}): CliDeps {
   return {
     readTaskFile: vi.fn(async () => 'do the thing'),
@@ -64,6 +77,7 @@ function fakeDeps(overrides: Partial<CliDeps> = {}): CliDeps {
     readPinFile: vi.fn(async () => VALID_PIN_JSON),
     env: { SCBENCH_CHECKOUT: '/tmp/checkout', SCBENCH_PROBLEMS_PATH: '/tmp/problems' },
     runPinPreflight: vi.fn(async () => ALL_OK_OUTCOME),
+    runCatalogPreflight: vi.fn(() => ALL_OK_CATALOG_OUTCOME),
     ...overrides,
   };
 }
@@ -465,6 +479,116 @@ describe('pin-preflight subcommand', () => {
   });
 });
 
+describe('catalog-preflight subcommand', () => {
+  it('exits 0, logs an ok line per result, and logs the confirmed problem ids on a passing outcome', async () => {
+    const deps = fakeDeps();
+
+    const code = await main(['catalog-preflight'], deps);
+
+    expect(code).toBe(0);
+    expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('adapter build ok'));
+    expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('SCBENCH_PROBLEMS_PATH ok'));
+    expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('problem alpha ok'));
+    expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('confirmed problem ids — alpha, beta, gamma'));
+  });
+
+  it('passes the deduped smoke+suite ids and SCBENCH_PROBLEMS_PATH to runCatalogPreflight', async () => {
+    const deps = fakeDeps({ env: { SCBENCH_PROBLEMS_PATH: '/opt/problems' } });
+
+    await main(['catalog-preflight'], deps);
+
+    expect(deps.runCatalogPreflight).toHaveBeenCalledWith({
+      adapterCli: expect.stringContaining('cli.js'),
+      catalogPath: '/opt/problems',
+      problemIds: ['alpha', 'beta', 'gamma'],
+    });
+  });
+
+  it('exits 1 and logs a FAIL line naming the missing build artifact, without a confirmed-ids line', async () => {
+    const outcome: CatalogPreflightOutcome = {
+      ok: false,
+      results: [
+        {
+          subject: 'adapter build',
+          ok: false,
+          detail: 'missing build output /pkg/dist/cli.js — run `npm run build` first',
+        },
+        ...ALL_OK_CATALOG_OUTCOME.results.slice(1),
+      ],
+      confirmedProblemIds: [],
+    };
+    const deps = fakeDeps({ runCatalogPreflight: vi.fn(() => outcome) });
+
+    const code = await main(['catalog-preflight'], deps);
+
+    expect(code).toBe(1);
+    expect(deps.logError).toHaveBeenCalledWith(
+      expect.stringContaining('adapter build FAIL — missing build output /pkg/dist/cli.js'),
+    );
+    expect(deps.log).not.toHaveBeenCalledWith(expect.stringContaining('confirmed problem ids'));
+  });
+
+  it('exits 1 and logs a FAIL line naming an unknown problem id', async () => {
+    const outcome: CatalogPreflightOutcome = {
+      ok: false,
+      results: [
+        ...ALL_OK_CATALOG_OUTCOME.results.slice(0, 2),
+        {
+          subject: 'problem not_a_real_problem',
+          ok: false,
+          detail:
+            'unknown problem id not_a_real_problem — no config.yaml at /tmp/problems/not_a_real_problem/config.yaml',
+        },
+      ],
+      confirmedProblemIds: [],
+    };
+    const deps = fakeDeps({ runCatalogPreflight: vi.fn(() => outcome) });
+
+    const code = await main(['catalog-preflight'], deps);
+
+    expect(code).toBe(1);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('problem not_a_real_problem FAIL'));
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('unknown problem id not_a_real_problem'));
+  });
+
+  it('exits 2 with a "could not read --config" message when readBaselineConfig rejects', async () => {
+    const deps = fakeDeps({ readBaselineConfig: vi.fn(async () => Promise.reject(new Error('ENOENT'))) });
+
+    const code = await main(['catalog-preflight'], deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('could not read --config'));
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('ENOENT'));
+  });
+
+  it('exits 2 when the baseline config content is invalid', async () => {
+    const deps = fakeDeps({ readBaselineConfig: vi.fn(async () => '{"not":"valid"}') });
+
+    const code = await main(['catalog-preflight'], deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('missing required field'));
+  });
+
+  it('passes --config through to readBaselineConfig', async () => {
+    const deps = fakeDeps();
+
+    await main(['catalog-preflight', '--config', '/custom/baseline.config.json'], deps);
+
+    expect(deps.readBaselineConfig).toHaveBeenCalledWith('/custom/baseline.config.json');
+  });
+
+  it('re-throws unexpected (non-AdapterError) errors from runCatalogPreflight', async () => {
+    const deps = fakeDeps({
+      runCatalogPreflight: vi.fn(() => {
+        throw new Error('boom');
+      }),
+    });
+
+    await expect(main(['catalog-preflight'], deps)).rejects.toThrow('boom');
+  });
+});
+
 describe('defaultCliDeps', () => {
   it('logs to console.log/console.error and reads real files', async () => {
     const deps = defaultCliDeps();
@@ -545,5 +669,19 @@ describe('defaultCliDeps', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('runs a real catalog preflight against a missing adapter bin and unset catalog path (fails closed, no crash)', () => {
+    const deps = defaultCliDeps();
+
+    const outcome = deps.runCatalogPreflight({
+      adapterCli: '/definitely/does/not/exist/cli.js',
+      catalogPath: undefined,
+      problemIds: ['alpha'],
+    });
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.results.find((r) => r.subject === 'adapter build')?.ok).toBe(false);
+    expect(outcome.results.find((r) => r.subject === 'SCBENCH_PROBLEMS_PATH')?.detail).toBe('is not set');
   });
 });

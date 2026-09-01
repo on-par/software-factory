@@ -32,3 +32,11 @@ export { collectBaselineTrials, evaluateTrialVerdict, generateBaselineReport, lo
 
 export type { PinFile, PinnedInputSpec, PinPreflightOutcome, PinPreflightResult } from './pin-preflight.js';
 export { checkPinnedInput, parsePinFile, runPinPreflight } from './pin-preflight.js';
+
+export type {
+  CatalogPreflightDeps,
+  CatalogPreflightOutcome,
+  CatalogPreflightResult,
+  CatalogPreflightSpec,
+} from './catalog-preflight.js';
+export { runCatalogPreflight } from './catalog-preflight.js';
