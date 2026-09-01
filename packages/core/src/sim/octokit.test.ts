@@ -21,6 +21,7 @@ describe('createSimOctokit', () => {
     await expect(octokit.rest.issues.get({ issue_number: 34 })).resolves.toEqual({
       data: { title: 'Fix the bug', body: 'stub issue body' },
     });
+    await expect(octokit.rest.issues.update({ issue_number: 34, body: 'Updated body' })).resolves.toEqual({ data: {} });
     await expect(octokit.rest.pulls.list({})).resolves.toEqual({ data: [] });
     await expect(octokit.rest.pulls.create({})).resolves.toEqual({ data: { number: 101 } });
     await expect(octokit.rest.pulls.create({})).resolves.toEqual({ data: { number: 102 } });
@@ -34,6 +35,7 @@ describe('createSimOctokit', () => {
 
     expect(calls).toEqual([
       ['issues.get', { issue_number: 34 }],
+      ['issues.update', { issue_number: 34, body: 'Updated body' }],
       ['pulls.list', {}],
       ['pulls.create', {}],
       ['pulls.create', {}],
