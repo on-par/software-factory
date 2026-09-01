@@ -145,6 +145,26 @@ CI — the same posture as the live-baseline commands below. CI instead runs
 the shim's import surface, lifecycle methods, and CLI flags without needing
 Python installed.
 
+## Root-level launch gate (`npm run scbench`)
+
+`npm run scbench` (from the Software Factory repo root) is the single
+discoverable command for the pinned smoke/suite launch path. It runs the two
+preflights above — pinned checkout/catalog commit validation and adapter
+build + problem-catalog validation — against `SCBENCH_CHECKOUT` and
+`SCBENCH_PROBLEMS_PATH`, and only when both pass, prints the confirmed
+problem ids plus the exact pinned launcher command(s) (smoke first, then
+suite). It never invokes SCBench, `uv`, or any model, and it never spends
+model budget — `npm run scbench -- --dry-run` is accepted and behaves
+identically, since the command is inherently a dry run.
+
+Exit codes match the underlying preflights: `0` on success (both preflights
+passed; the launcher command was printed), `1` when either preflight finds a
+failing input (the named failure is printed; no launcher command line is
+ever printed), `2` on a pin-file or baseline-config read/parse error.
+
+Prerequisite: `npm run build` (so the catalog preflight's adapter-build
+check can find `dist/cli.js`).
+
 ## Smoke test
 
 With a stub `factory` binary (no models involved — proves wiring only):

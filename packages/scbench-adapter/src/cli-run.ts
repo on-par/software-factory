@@ -2,7 +2,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
-import { collectBaselineTrials, generateBaselineReport, loadBaselineConfig } from './baseline.js';
+import { loadBaselineConfig, type BaselineConfig, collectBaselineTrials, generateBaselineReport } from './baseline.js';
 import { runCatalogPreflight, type CatalogPreflightOutcome, type CatalogPreflightSpec } from './catalog-preflight.js';
 import { AdapterError, type ScbenchCheckpoint } from './checkpoint.js';
 import { parsePinFile, runPinPreflight, type PinnedInputSpec, type PinPreflightOutcome } from './pin-preflight.js';
@@ -14,7 +14,11 @@ const RUN_CHECKPOINT_USAGE =
 const BASELINE_REPORT_USAGE = 'usage: scbench-factory-agent baseline-report --config <path> --runs <dir> --out <path>';
 const PIN_PREFLIGHT_USAGE = 'usage: scbench-factory-agent pin-preflight [--pin <path>]';
 const CATALOG_PREFLIGHT_USAGE = 'usage: scbench-factory-agent catalog-preflight [--config <path>]';
-const USAGE = `${RUN_CHECKPOINT_USAGE}\n${BASELINE_REPORT_USAGE}\n${PIN_PREFLIGHT_USAGE}\n${CATALOG_PREFLIGHT_USAGE}`;
+const LAUNCH_USAGE = 'usage: scbench-factory-agent launch [--pin <path>] [--config <path>] [--dry-run]';
+const USAGE = `${RUN_CHECKPOINT_USAGE}\n${BASELINE_REPORT_USAGE}\n${PIN_PREFLIGHT_USAGE}\n${CATALOG_PREFLIGHT_USAGE}\n${LAUNCH_USAGE}`;
+
+const LAUNCHER_CONFIG_ARG = 'packages/scbench-adapter/scbench.run.yaml';
+const LAUNCHER_SCRIPT = 'packages/scbench-adapter/python/run_scbench.py';
 
 const REQUIRED_FLAGS = ['--workspace', '--artifacts', '--task-file', '--problem', '--checkpoint'] as const;
 const BASELINE_REPORT_REQUIRED_FLAGS = ['--config', '--runs', '--out'] as const;
@@ -149,6 +153,94 @@ async function runBaselineReport(rest: readonly string[], deps: CliDeps): Promis
   }
 }
 
+type EvaluateResult<T> = { usageError: string } | T;
+
+/** Body shared by `pin-preflight` and `launch`: read the pin file (defaulting
+ *  to the package's committed scbench.pin.json), parse it, and check
+ *  SCBENCH_CHECKOUT / SCBENCH_PROBLEMS_PATH against the pinned commits. */
+async function evaluatePinPreflight(
+  flags: Record<string, string>,
+  deps: CliDeps,
+): Promise<EvaluateResult<{ outcome: PinPreflightOutcome }>> {
+  const pinPath = flags['--pin'] ?? DEFAULT_PIN_PATH;
+
+  let raw: string;
+  try {
+    raw = await deps.readPinFile(pinPath);
+  } catch (err) {
+    return { usageError: `could not read pin file ${pinPath}: ${(err as Error).message}` };
+  }
+
+  try {
+    const pin = parsePinFile(raw);
+    const specs: PinnedInputSpec[] = [
+      { input: 'SCBENCH_CHECKOUT', path: deps.env.SCBENCH_CHECKOUT, expectedCommit: pin.commit },
+      { input: 'SCBENCH_PROBLEMS_PATH', path: deps.env.SCBENCH_PROBLEMS_PATH, expectedCommit: pin.problems.commit },
+    ];
+    return { outcome: await deps.runPinPreflight(specs) };
+  } catch (err) {
+    if (err instanceof AdapterError) {
+      return { usageError: err.message };
+    }
+    throw err;
+  }
+}
+
+/** Body shared by `catalog-preflight` and `launch`: read the baseline config
+ *  (defaulting to the committed evals/scbench-baseline/baseline.config.json),
+ *  and verify the compiled adapter bin plus every selected problem id
+ *  (smoke + suite, deduped) resolves in the catalog checkout at
+ *  SCBENCH_PROBLEMS_PATH. */
+async function evaluateCatalogPreflight(
+  flags: Record<string, string>,
+  deps: CliDeps,
+): Promise<EvaluateResult<{ outcome: CatalogPreflightOutcome; config: BaselineConfig }>> {
+  const configPath = flags['--config'] ?? DEFAULT_BASELINE_CONFIG_PATH;
+
+  let raw: string;
+  try {
+    raw = await deps.readBaselineConfig(configPath);
+  } catch (err) {
+    return { usageError: `could not read --config ${configPath}: ${(err as Error).message}` };
+  }
+
+  try {
+    const config = loadBaselineConfig(raw);
+    const problemIds = [...new Set([config.problems.smoke, ...config.problems.suite])];
+    const outcome = deps.runCatalogPreflight({
+      adapterCli: DEFAULT_ADAPTER_CLI_PATH,
+      catalogPath: deps.env.SCBENCH_PROBLEMS_PATH,
+      problemIds,
+    });
+    return { outcome, config };
+  } catch (err) {
+    if (err instanceof AdapterError) {
+      return { usageError: err.message };
+    }
+    throw err;
+  }
+}
+
+function renderPinResults(outcome: PinPreflightOutcome, deps: CliDeps): void {
+  for (const result of outcome.results) {
+    if (result.ok) {
+      deps.log(`pin-preflight: ${result.input} ok — ${result.detail}`);
+    } else {
+      deps.logError(`pin-preflight: ${result.input} FAIL — ${result.detail}`);
+    }
+  }
+}
+
+function renderCatalogResults(outcome: CatalogPreflightOutcome, deps: CliDeps): void {
+  for (const result of outcome.results) {
+    if (result.ok) {
+      deps.log(`catalog-preflight: ${result.subject} ok — ${result.detail}`);
+    } else {
+      deps.logError(`catalog-preflight: ${result.subject} FAIL — ${result.detail}`);
+    }
+  }
+}
+
 /** Reads the pin file (defaulting to the package's committed
  *  scbench.pin.json), validates SCBENCH_CHECKOUT and SCBENCH_PROBLEMS_PATH
  *  against the pinned commits, and prints one pass/fail line per input.
@@ -157,40 +249,14 @@ async function runBaselineReport(rest: readonly string[], deps: CliDeps): Promis
  *  0 when every input passes. */
 async function runPinPreflightCommand(rest: readonly string[], deps: CliDeps): Promise<number> {
   const flags = parseFlags(rest);
-  const pinPath = flags['--pin'] ?? DEFAULT_PIN_PATH;
-
-  let raw: string;
-  try {
-    raw = await deps.readPinFile(pinPath);
-  } catch (err) {
-    deps.logError(`could not read pin file ${pinPath}: ${(err as Error).message}`);
+  const result = await evaluatePinPreflight(flags, deps);
+  if ('usageError' in result) {
+    deps.logError(result.usageError);
     return 2;
   }
 
-  let outcome: PinPreflightOutcome;
-  try {
-    const pin = parsePinFile(raw);
-    const specs: PinnedInputSpec[] = [
-      { input: 'SCBENCH_CHECKOUT', path: deps.env.SCBENCH_CHECKOUT, expectedCommit: pin.commit },
-      { input: 'SCBENCH_PROBLEMS_PATH', path: deps.env.SCBENCH_PROBLEMS_PATH, expectedCommit: pin.problems.commit },
-    ];
-    outcome = await deps.runPinPreflight(specs);
-  } catch (err) {
-    if (err instanceof AdapterError) {
-      deps.logError(err.message);
-      return 2;
-    }
-    throw err;
-  }
-
-  for (const result of outcome.results) {
-    if (result.ok) {
-      deps.log(`pin-preflight: ${result.input} ok — ${result.detail}`);
-    } else {
-      deps.logError(`pin-preflight: ${result.input} FAIL — ${result.detail}`);
-    }
-  }
-  return outcome.ok ? 0 : 1;
+  renderPinResults(result.outcome, deps);
+  return result.outcome.ok ? 0 : 1;
 }
 
 /** Reads the baseline config (defaulting to the committed
@@ -202,54 +268,71 @@ async function runPinPreflightCommand(rest: readonly string[], deps: CliDeps): P
  *  itself finds a failing subject, 0 when every subject passes. */
 async function runCatalogPreflightCommand(rest: readonly string[], deps: CliDeps): Promise<number> {
   const flags = parseFlags(rest);
-  const configPath = flags['--config'] ?? DEFAULT_BASELINE_CONFIG_PATH;
-
-  let raw: string;
-  try {
-    raw = await deps.readBaselineConfig(configPath);
-  } catch (err) {
-    deps.logError(`could not read --config ${configPath}: ${(err as Error).message}`);
+  const result = await evaluateCatalogPreflight(flags, deps);
+  if ('usageError' in result) {
+    deps.logError(result.usageError);
     return 2;
   }
 
-  let outcome: CatalogPreflightOutcome;
-  try {
-    const config = loadBaselineConfig(raw);
-    const problemIds = [...new Set([config.problems.smoke, ...config.problems.suite])];
-    outcome = deps.runCatalogPreflight({
-      adapterCli: DEFAULT_ADAPTER_CLI_PATH,
-      catalogPath: deps.env.SCBENCH_PROBLEMS_PATH,
-      problemIds,
-    });
-  } catch (err) {
-    if (err instanceof AdapterError) {
-      deps.logError(err.message);
-      return 2;
-    }
-    throw err;
+  renderCatalogResults(result.outcome, deps);
+  if (result.outcome.ok) {
+    deps.log(`catalog-preflight: confirmed problem ids — ${result.outcome.confirmedProblemIds.join(', ')}`);
+  }
+  return result.outcome.ok ? 0 : 1;
+}
+
+function renderLauncherCommand(checkout: string, problemId: string): string {
+  return `uv run --project "${checkout}" python ${LAUNCHER_SCRIPT} run --config ${LAUNCHER_CONFIG_ARG} --problem ${problemId}`;
+}
+
+/** Runs both existing preflights (pin + catalog) and, only when both pass,
+ *  prints the exact pinned launcher command(s) and confirmed problem ids —
+ *  it never invokes SCBench, uv, or any model. Both preflights run before any
+ *  gating (no short-circuit), so a single failing run still reports every
+ *  failing check. `--dry-run` is accepted and ignored — the command is
+ *  inherently a dry run. Returns 2 on a pin-file/config read or parse error,
+ *  1 when either preflight fails (no launcher line is printed), 0 on success. */
+async function runLaunchCommand(rest: readonly string[], deps: CliDeps): Promise<number> {
+  const flags = parseFlags(rest);
+  const pin = await evaluatePinPreflight(flags, deps);
+  if ('usageError' in pin) {
+    deps.logError(pin.usageError);
+    return 2;
+  }
+  const catalog = await evaluateCatalogPreflight(flags, deps);
+  if ('usageError' in catalog) {
+    deps.logError(catalog.usageError);
+    return 2;
   }
 
-  for (const result of outcome.results) {
-    if (result.ok) {
-      deps.log(`catalog-preflight: ${result.subject} ok — ${result.detail}`);
-    } else {
-      deps.logError(`catalog-preflight: ${result.subject} FAIL — ${result.detail}`);
-    }
+  renderPinResults(pin.outcome, deps);
+  renderCatalogResults(catalog.outcome, deps);
+
+  if (!pin.outcome.ok || !catalog.outcome.ok) {
+    return 1;
   }
-  if (outcome.ok) {
-    deps.log(`catalog-preflight: confirmed problem ids — ${outcome.confirmedProblemIds.join(', ')}`);
+
+  const checkout = deps.env.SCBENCH_CHECKOUT!;
+  deps.log(`scbench: confirmed problem ids — ${catalog.outcome.confirmedProblemIds.join(', ')}`);
+  deps.log('scbench: smoke launcher command (preflight passed; NOT invoked):');
+  deps.log(renderLauncherCommand(checkout, catalog.config.problems.smoke));
+  deps.log('scbench: suite launcher commands (preflight passed; NOT invoked):');
+  for (const id of catalog.config.problems.suite) {
+    deps.log(renderLauncherCommand(checkout, id));
   }
-  return outcome.ok ? 0 : 1;
+  return 0;
 }
 
 /** Hand-rolled argv parsing + dispatch across the `run-checkpoint`,
- *  `baseline-report`, `pin-preflight`, and `catalog-preflight` subcommands. */
+ *  `baseline-report`, `pin-preflight`, `catalog-preflight`, and `launch`
+ *  subcommands. */
 export async function main(argv: readonly string[], deps: CliDeps = defaultCliDeps()): Promise<number> {
   const [subcommand, ...rest] = argv;
   if (subcommand === 'run-checkpoint') return runRunCheckpoint(rest, deps);
   if (subcommand === 'baseline-report') return runBaselineReport(rest, deps);
   if (subcommand === 'pin-preflight') return runPinPreflightCommand(rest, deps);
   if (subcommand === 'catalog-preflight') return runCatalogPreflightCommand(rest, deps);
+  if (subcommand === 'launch') return runLaunchCommand(rest, deps);
 
   deps.logError(USAGE);
   return 2;

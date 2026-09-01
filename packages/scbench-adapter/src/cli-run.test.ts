@@ -589,6 +589,148 @@ describe('catalog-preflight subcommand', () => {
   });
 });
 
+describe('launch', () => {
+  const LAUNCHER_SMOKE =
+    'uv run --project "/tmp/checkout" python packages/scbench-adapter/python/run_scbench.py run --config packages/scbench-adapter/scbench.run.yaml --problem alpha';
+  const LAUNCHER_BETA =
+    'uv run --project "/tmp/checkout" python packages/scbench-adapter/python/run_scbench.py run --config packages/scbench-adapter/scbench.run.yaml --problem beta';
+  const LAUNCHER_GAMMA =
+    'uv run --project "/tmp/checkout" python packages/scbench-adapter/python/run_scbench.py run --config packages/scbench-adapter/scbench.run.yaml --problem gamma';
+
+  it('prints the launcher command + confirmed problem ids and exits 0 without invoking anything', async () => {
+    const deps = fakeDeps();
+
+    const code = await main(['launch'], deps);
+
+    expect(code).toBe(0);
+    expect(deps.log).toHaveBeenCalledWith('scbench: confirmed problem ids — alpha, beta, gamma');
+    expect(deps.log).toHaveBeenCalledWith(LAUNCHER_SMOKE);
+    expect(deps.log).toHaveBeenCalledWith(LAUNCHER_BETA);
+    expect(deps.log).toHaveBeenCalledWith(LAUNCHER_GAMMA);
+    expect(deps.runCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it('tolerates a bare --dry-run flag, behaving exactly as a plain launch', async () => {
+    const deps = fakeDeps();
+
+    const code = await main(['launch', '--dry-run'], deps);
+
+    expect(code).toBe(0);
+    expect(deps.log).toHaveBeenCalledWith('scbench: confirmed problem ids — alpha, beta, gamma');
+    expect(deps.log).toHaveBeenCalledWith(LAUNCHER_SMOKE);
+    expect(deps.runCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it('gates the launcher on a pin-preflight failure, printing no uv run line', async () => {
+    const outcome: PinPreflightOutcome = {
+      ok: false,
+      results: [
+        ALL_OK_OUTCOME.results[0],
+        {
+          input: 'SCBENCH_PROBLEMS_PATH',
+          ok: false,
+          detail: `HEAD ${'c'.repeat(40)} does not match pinned commit ${'b'.repeat(40)}`,
+        },
+      ],
+    };
+    const deps = fakeDeps({ runPinPreflight: vi.fn(async () => outcome) });
+
+    const code = await main(['launch'], deps);
+
+    expect(code).toBe(1);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('pin-preflight: SCBENCH_PROBLEMS_PATH FAIL'));
+    expect(deps.log).not.toHaveBeenCalledWith(expect.stringContaining('uv run'));
+    expect(deps.logError).not.toHaveBeenCalledWith(expect.stringContaining('uv run'));
+  });
+
+  it('gates the launcher on a catalog-preflight failure, printing no uv run line', async () => {
+    const outcome: CatalogPreflightOutcome = {
+      ok: false,
+      results: [
+        {
+          subject: 'adapter build',
+          ok: false,
+          detail: 'missing build output /pkg/dist/cli.js — run `npm run build` first',
+        },
+        ...ALL_OK_CATALOG_OUTCOME.results.slice(1),
+      ],
+      confirmedProblemIds: [],
+    };
+    const deps = fakeDeps({ runCatalogPreflight: vi.fn(() => outcome) });
+
+    const code = await main(['launch'], deps);
+
+    expect(code).toBe(1);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('catalog-preflight: adapter build FAIL'));
+    expect(deps.log).not.toHaveBeenCalledWith(expect.stringContaining('uv run'));
+  });
+
+  it('exits 2 with a "could not read pin file" message when readPinFile rejects', async () => {
+    const deps = fakeDeps({ readPinFile: vi.fn(async () => Promise.reject(new Error('ENOENT'))) });
+
+    const code = await main(['launch'], deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('could not read pin file'));
+  });
+
+  it('exits 2 with a "could not read --config" message when readBaselineConfig rejects', async () => {
+    const deps = fakeDeps({ readBaselineConfig: vi.fn(async () => Promise.reject(new Error('ENOENT'))) });
+
+    const code = await main(['launch'], deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('could not read --config'));
+  });
+
+  it('reports both failing preflights in one run — no short-circuit', async () => {
+    const pinOutcome: PinPreflightOutcome = {
+      ok: false,
+      results: [{ input: 'SCBENCH_CHECKOUT', ok: false, detail: 'is not set' }, ALL_OK_OUTCOME.results[1]],
+    };
+    const catalogOutcome: CatalogPreflightOutcome = {
+      ok: false,
+      results: [
+        {
+          subject: 'adapter build',
+          ok: false,
+          detail: 'missing build output /pkg/dist/cli.js — run `npm run build` first',
+        },
+        ...ALL_OK_CATALOG_OUTCOME.results.slice(1),
+      ],
+      confirmedProblemIds: [],
+    };
+    const deps = fakeDeps({
+      runPinPreflight: vi.fn(async () => pinOutcome),
+      runCatalogPreflight: vi.fn(() => catalogOutcome),
+    });
+
+    const code = await main(['launch'], deps);
+
+    expect(code).toBe(1);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('pin-preflight: SCBENCH_CHECKOUT FAIL'));
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('catalog-preflight: adapter build FAIL'));
+  });
+});
+
+describe('pin-preflight and catalog-preflight subcommands stay byte-identical after the launch refactor', () => {
+  it('pin-preflight still exits 0 with the same ok lines', async () => {
+    const deps = fakeDeps();
+    const code = await main(['pin-preflight'], deps);
+    expect(code).toBe(0);
+    expect(deps.log).toHaveBeenCalledWith(
+      'pin-preflight: SCBENCH_CHECKOUT ok — HEAD matches pinned commit ' + 'a'.repeat(40) + ', working tree clean',
+    );
+  });
+
+  it('catalog-preflight still exits 0 with the same confirmed-ids line', async () => {
+    const deps = fakeDeps();
+    const code = await main(['catalog-preflight'], deps);
+    expect(code).toBe(0);
+    expect(deps.log).toHaveBeenCalledWith('catalog-preflight: confirmed problem ids — alpha, beta, gamma');
+  });
+});
+
 describe('defaultCliDeps', () => {
   it('logs to console.log/console.error and reads real files', async () => {
     const deps = defaultCliDeps();
