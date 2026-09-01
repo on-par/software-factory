@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   analyzeEventLog,
   type ClaudeAuthProbeResult,
+  claudeKeychainCheck,
   type DoctorEnvProbes,
   doctorFailed,
   eventLogCheck,
@@ -12,6 +13,7 @@ import {
   formatWorktreeReconcileReport,
   type GreenPrScanResult,
   leaseChecks,
+  keychainPreflightError,
   type LeaseHealthRow,
   runDoctorChecks,
   sandboxClaudeAuthChecks,
@@ -515,5 +517,54 @@ describe('sandboxClaudeAuthChecks', () => {
     );
     expect(checks.every((c) => c.ok && c.optional)).toBe(true);
     expect(doctorFailed(checks)).toBe(false);
+  });
+});
+
+describe('claudeKeychainCheck', () => {
+  it('passes skipped probes as optional and preserves their detail', () => {
+    const check = claudeKeychainCheck({ status: 'skipped', detail: 'skipped — not macOS' });
+    expect(check).toMatchObject({ ok: true, optional: true, detail: 'skipped — not macOS' });
+    expect(doctorFailed([check])).toBe(false);
+  });
+
+  it('passes when the login keychain entry is readable', () => {
+    const check = claudeKeychainCheck({ status: 'readable' });
+    expect(check.ok).toBe(true);
+    expect(check.optional).toBeFalsy();
+    expect(check.detail).toContain("login keychain entry 'Claude Code-credentials' is readable");
+  });
+
+  it('hard-fails when the keychain is unreadable inside tmux', () => {
+    const check = claudeKeychainCheck({ status: 'unreadable', inTmux: true });
+    expect(check.ok).toBe(false);
+    expect(check.optional).toBeFalsy();
+    expect(check.detail).toContain('tmux');
+    expect(check.detail).toContain('SecKeychainSearchCopyNext');
+    expect(check.fix).toContain('gui/$(id -u)');
+    expect(check.fix).toContain('docs/runbooks/macos-keychain-launchagent.md');
+    expect(doctorFailed([check])).toBe(true);
+  });
+
+  it('warns without failing doctor when the keychain is unreadable outside tmux', () => {
+    const check = claudeKeychainCheck({ status: 'unreadable', inTmux: false });
+    expect(check).toMatchObject({ ok: false, optional: true });
+    expect(check.fix).toContain('/login');
+    expect(doctorFailed([check])).toBe(false);
+  });
+});
+
+describe('keychainPreflightError', () => {
+  it('returns null unless the keychain is unreadable inside tmux', () => {
+    expect(keychainPreflightError({ status: 'readable' })).toBeNull();
+    expect(keychainPreflightError({ status: 'skipped', detail: 'skipped — not macOS' })).toBeNull();
+    expect(keychainPreflightError({ status: 'unreadable', inTmux: false })).toBeNull();
+  });
+
+  it('describes the local_auth risk and launchd remediation inside tmux', () => {
+    const error = keychainPreflightError({ status: 'unreadable', inTmux: true });
+    expect(error).toContain('local_auth');
+    expect(error).toContain('tmux');
+    expect(error).toContain('launchctl bootstrap gui/$(id -u)');
+    expect(error).toContain('docs/runbooks/macos-keychain-launchagent.md');
   });
 });

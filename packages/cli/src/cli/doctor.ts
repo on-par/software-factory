@@ -196,6 +196,50 @@ export function doctorFailed(checks: DoctorCheck[]): boolean {
   return checks.some((c) => !c.ok && !c.optional);
 }
 
+/** Result of the macOS login-keychain probe for the Claude Code credential entry (#1014). */
+export type KeychainProbeStatus =
+  { status: 'skipped'; detail: string } | { status: 'readable' } | { status: 'unreadable'; inTmux: boolean };
+
+export function claudeKeychainCheck(probe: KeychainProbeStatus): DoctorCheck {
+  if (probe.status === 'skipped') {
+    return { name: 'claude keychain (macOS)', ok: true, optional: true, detail: probe.detail };
+  }
+
+  if (probe.status === 'readable') {
+    return {
+      name: 'claude keychain (macOS)',
+      ok: true,
+      detail: "login keychain entry 'Claude Code-credentials' is readable in this context",
+    };
+  }
+
+  if (probe.inTmux) {
+    return {
+      name: 'claude keychain (macOS)',
+      ok: false,
+      detail:
+        "security find-generic-password -s 'Claude Code-credentials' failed inside tmux (SecKeychainSearchCopyNext) — Claude OAuth refresh will fail with local_auth",
+      fix: 'run the factory from a context with login-keychain access — a LaunchAgent in the gui domain (launchctl bootstrap gui/$(id -u) …) or a login Terminal, not a raw tmux pane — see docs/runbooks/macos-keychain-launchagent.md',
+    };
+  }
+
+  return {
+    name: 'claude keychain (macOS)',
+    ok: false,
+    optional: true,
+    detail:
+      "security find-generic-password -s 'Claude Code-credentials' failed — either never logged in, or this launch context cannot read the login keychain",
+    fix: 'run `claude` and complete /login (or export ANTHROPIC_API_KEY); if already logged in, see docs/runbooks/macos-keychain-launchagent.md',
+  };
+}
+
+/** Non-null when `factory run` must fail fast instead of claiming issues (#1014).
+ *  Only the tmux-without-keychain differential is certain enough to abort a run on. */
+export function keychainPreflightError(probe: KeychainProbeStatus): string | null {
+  if (probe.status !== 'unreadable' || !probe.inTmux) return null;
+  return "Claude Code credentials are not readable from this tmux session (security find-generic-password -s 'Claude Code-credentials' failed / SecKeychainSearchCopyNext). OAuth refresh will fail and every claimed issue would spuriously park as local_auth. Launch the factory from a context with login-keychain access — a LaunchAgent in the gui domain (launchctl bootstrap gui/$(id -u) …) or a login Terminal — or export ANTHROPIC_API_KEY. See docs/runbooks/macos-keychain-launchagent.md.";
+}
+
 /** Outcome of one `claude -p` probe: it succeeded, it failed, or it was not run. */
 export type ClaudeAuthProbe = 'ok' | 'failed' | 'skipped';
 

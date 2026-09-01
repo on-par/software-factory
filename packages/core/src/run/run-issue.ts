@@ -542,6 +542,14 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     return { state: 'ready', route, branch: request.branch, reworkRounds, prNumber: ship.prNumber };
   } catch (err) {
     if (isDecomposeSignal(err)) throw err;
+    if ((err as { reason?: unknown } | null | undefined)?.reason === 'local_auth') {
+      log(
+        'environment_warning',
+        'provider CLI authentication failed in this launch context (local_auth) — an ops/environment failure, ' +
+          'not a failure of the issue itself; on macOS a launch context without login-keychain access (e.g. tmux) ' +
+          'cannot refresh Claude OAuth — run `factory doctor` (#1014)',
+      );
+    }
     return terminalParked(parkReasonFor(err), errorMessage(err));
   } finally {
     await release();

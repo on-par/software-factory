@@ -195,6 +195,7 @@ import { Command } from 'commander';
 import {
   analyzeEventLog,
   type ClaudeAuthProbe,
+  claudeKeychainCheck,
   doctorFailed,
   eventLogCheck,
   formatClaimReconcileReport,
@@ -203,6 +204,8 @@ import {
   formatWorktreeReconcileReport,
   type GreenPrScanResult,
   leaseChecks,
+  keychainPreflightError,
+  type KeychainProbeStatus,
   type LeaseHealthRow,
   runDoctorChecks,
   sandboxClaudeAuthChecks,
@@ -2396,6 +2399,11 @@ async function cmdRun(opts: { localQueue?: boolean } = {}) {
     clearStaleStopFile(paths);
     const ghRepo = await getGitHubRepo();
     const factoryConfig = loadFactoryConfigForRepo(paths.config);
+    const keychainErr = keychainPreflightError(probeClaudeKeychain());
+    if (keychainErr) {
+      logEvent(paths.events, 'environment_warning', 'all', keychainErr);
+      throw new Error(keychainErr);
+    }
     if (factoryConfig.worktree.autoGcOnRun) {
       try {
         const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
@@ -3610,6 +3618,18 @@ async function scanGreenPrs(ghRepo: string | undefined, octokit: Octokit | undef
   }
 }
 
+function probeClaudeKeychain(): KeychainProbeStatus {
+  if (process.platform !== 'darwin') return { status: 'skipped', detail: 'skipped — not macOS' };
+  if (!isCommandAvailable('claude')) return { status: 'skipped', detail: 'skipped — claude CLI not on PATH' };
+  if (process.env.ANTHROPIC_API_KEY) return { status: 'skipped', detail: 'skipped — ANTHROPIC_API_KEY auth in use' };
+  try {
+    execSync('security find-generic-password -s "Claude Code-credentials"', { timeout: 10_000, stdio: 'ignore' });
+    return { status: 'readable' };
+  } catch {
+    return { status: 'unreadable', inTmux: !!process.env.TMUX };
+  }
+}
+
 async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
   const checks = runDoctorChecks({
     commandAvailable: isCommandAvailable,
@@ -3677,6 +3697,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     }
   }
 
+  checks.push(claudeKeychainCheck(probeClaudeKeychain()));
   checks.push(...sandboxClaudeAuthChecks({ host, sandboxed, hostDetail, sandboxDetail }));
 
   if (repoRoot !== null) {
