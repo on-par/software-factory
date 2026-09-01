@@ -55,8 +55,11 @@ function readIfPresent(path: string): string {
 
 /** Idempotent: git-inits (with an initial commit) only when .git is absent,
  *  ensures .factory/{,logs,plans} exist without requiring `factory init` or
- *  a GitHub token, and excludes .factory/ via .git/info/exclude so Factory
- *  state never pollutes SCBench's evaluation or diffs. */
+ *  a GitHub token, excludes .factory/ via .git/info/exclude so Factory state
+ *  never pollutes SCBench's evaluation or diffs, and pins
+ *  .factory/config.json to providers.ollama=false (when absent) so
+ *  `factory run-brief --workspace` (which runs with cwd=workspace) strips
+ *  local models from routing before any attempt. */
 export async function prepareWorkspace(dir: string, deps: WorkspaceDeps): Promise<void> {
   if (!existsSync(join(dir, '.git'))) {
     const init = await deps.exec(['git', 'init'], { cwd: dir });
@@ -75,6 +78,11 @@ export async function prepareWorkspace(dir: string, deps: WorkspaceDeps): Promis
 
   for (const sub of ['.factory', '.factory/logs', '.factory/plans']) {
     mkdirSync(join(dir, sub), { recursive: true });
+  }
+
+  const configPath = join(dir, '.factory', 'config.json');
+  if (!existsSync(configPath)) {
+    writeFileSync(configPath, `${JSON.stringify({ version: 1, providers: { ollama: false } }, null, 2)}\n`);
   }
 
   const excludeFile = join(dir, '.git', 'info', 'exclude');

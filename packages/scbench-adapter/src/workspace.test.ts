@@ -42,6 +42,37 @@ describe('prepareWorkspace', () => {
     expect(exclude).toContain('.factory/');
   });
 
+  it('writes .factory/config.json pinning providers.ollama=false on a fresh workspace', async () => {
+    const { exec } = fakeExec();
+
+    await prepareWorkspace(dir, { exec });
+
+    const config = JSON.parse(readFileSync(join(dir, '.factory', 'config.json'), 'utf-8'));
+    expect(config).toEqual({ version: 1, providers: { ollama: false } });
+  });
+
+  it('leaves a pre-existing .factory/config.json byte-identical', async () => {
+    mkdirSync(join(dir, '.factory'), { recursive: true });
+    const existing = '{"version":1,"providers":{"ollama":true}}\n';
+    writeFileSync(join(dir, '.factory', 'config.json'), existing);
+    const { exec } = fakeExec();
+
+    await prepareWorkspace(dir, { exec });
+
+    expect(readFileSync(join(dir, '.factory', 'config.json'), 'utf-8')).toBe(existing);
+  });
+
+  it('a second prepareWorkspace call leaves .factory/config.json unchanged (idempotent)', async () => {
+    const { exec } = fakeExec();
+
+    await prepareWorkspace(dir, { exec });
+    const first = readFileSync(join(dir, '.factory', 'config.json'), 'utf-8');
+    await prepareWorkspace(dir, { exec });
+    const second = readFileSync(join(dir, '.factory', 'config.json'), 'utf-8');
+
+    expect(second).toBe(first);
+  });
+
   it('throws AdapterError when git init fails, without creating a fake .git', async () => {
     const exec: ExecFn = async (argv) => {
       if (argv[1] === 'init') return { exitCode: 1, stdout: '', stderr: 'git: command not found' };
