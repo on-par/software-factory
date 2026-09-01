@@ -198,6 +198,23 @@ land under `runs/` — `report.md` is derived output, not hand-authored, and
 `packages/scbench-adapter/src/baseline.test.ts` asserts the committed file
 is byte-identical to a fresh regeneration.
 
+## Comparing a new measured run against this baseline
+
+```bash
+node packages/scbench-adapter/dist/cli.js compare \
+  --baseline evals/scbench-baseline/runs --candidate <new-runs-dir> [--threshold <points>]
+```
+
+Exit codes: `2` on a usage error or missing/invalid runs directory, `1` when
+the worst measured per-problem/checkpoint core-cases pass-rate drop (in
+percentage points) strictly exceeds `--threshold` (default `0`, i.e. any
+measured regression gates), `0` otherwise. As with `report.md`, correctness
+is derived only from each side's retained native SCBench evidence
+(ADR-0007) — a trial with no `evaluation.json` or an infrastructure failure
+never counts as a pass on either side. A problem/checkpoint present in only
+one of the two runs directories is reported but never gates the exit code,
+since an unmeasured group is an unknown, not a measured regression.
+
 ## Artifact location contract
 
 Everything for this baseline — the pinned config, every trial's artifacts,

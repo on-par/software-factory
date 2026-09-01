@@ -951,6 +951,122 @@ describe('collect-trial subcommand', () => {
   });
 });
 
+function passingTrial(id: string): BaselineTrial {
+  return {
+    id,
+    manifestPath: `/runs/${id}/manifest.json`,
+    manifest: minimalManifest(),
+    evidence: {
+      runInfoPresent: false,
+      evaluation: {
+        problem_name: 'cfgpipe',
+        checkpoint_name: 'checkpoint_1',
+        pass_counts: { Core: 3 },
+        total_counts: { Core: 3 },
+        pytest_exit_code: 0,
+        infrastructure_failure: false,
+      },
+    },
+  };
+}
+
+function failingTrial(id: string): BaselineTrial {
+  const trial = passingTrial(id);
+  return {
+    ...trial,
+    evidence: {
+      ...trial.evidence,
+      evaluation: { ...trial.evidence.evaluation!, pass_counts: { Core: 2 } },
+    },
+  };
+}
+
+describe('compare subcommand', () => {
+  const baseTrials = [passingTrial('cfgpipe/checkpoint_1/trial-1')];
+  const candNoChangeTrials = [passingTrial('cfgpipe/checkpoint_1/trial-1')];
+  const candRegressionTrials = [failingTrial('cfgpipe/checkpoint_1/trial-1')];
+
+  function collectFor(byDir: Record<string, BaselineTrial[]>) {
+    return vi.fn((dir: string): BaselineTrial[] => byDir[dir] ?? []);
+  }
+
+  it('exits 2 when required flags are missing', async () => {
+    const deps = fakeDeps();
+
+    const code = await main(['compare'], deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(
+      expect.stringContaining('missing required flag(s): --baseline, --candidate'),
+    );
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('usage: scbench-factory-agent compare'));
+  });
+
+  it.each(['abc', '-1'])('exits 2 when --threshold is not a non-negative number (%s)', async (threshold) => {
+    const deps = fakeDeps();
+
+    const code = await main(['compare', '--baseline', '/base', '--candidate', '/cand', '--threshold', threshold], deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('--threshold must be a non-negative number'));
+  });
+
+  it('exits 1 and reports a regression when the worst drop exceeds the threshold', async () => {
+    const deps = fakeDeps({
+      collectBaselineTrials: collectFor({ '/base': baseTrials, '/cand': candRegressionTrials }),
+    });
+
+    const code = await main(['compare', '--baseline', '/base', '--candidate', '/cand'], deps);
+
+    expect(code).toBe(1);
+    expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('cfgpipe/checkpoint_1'));
+    expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('REGRESSION'));
+  });
+
+  it('exits 0 when there is no measured regression', async () => {
+    const deps = fakeDeps({
+      collectBaselineTrials: collectFor({ '/base': baseTrials, '/cand': candNoChangeTrials }),
+    });
+
+    const code = await main(['compare', '--baseline', '/base', '--candidate', '/cand'], deps);
+
+    expect(code).toBe(0);
+  });
+
+  it('exits 0 when a regression is within the configured threshold', async () => {
+    const deps = fakeDeps({
+      collectBaselineTrials: collectFor({ '/base': baseTrials, '/cand': candRegressionTrials }),
+    });
+
+    const code = await main(['compare', '--baseline', '/base', '--candidate', '/cand', '--threshold', '100'], deps);
+
+    expect(code).toBe(0);
+  });
+
+  it('exits 2 and forwards the message when collectBaselineTrials throws an AdapterError', async () => {
+    const deps = fakeDeps({
+      collectBaselineTrials: vi.fn(() => {
+        throw new AdapterError('no such directory: /base — pass an existing --runs directory');
+      }),
+    });
+
+    const code = await main(['compare', '--baseline', '/base', '--candidate', '/cand'], deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith('no such directory: /base — pass an existing --runs directory');
+  });
+
+  it('re-throws unexpected (non-AdapterError) errors from collectBaselineTrials', async () => {
+    const deps = fakeDeps({
+      collectBaselineTrials: vi.fn(() => {
+        throw new Error('boom');
+      }),
+    });
+
+    await expect(main(['compare', '--baseline', '/base', '--candidate', '/cand'], deps)).rejects.toThrow('boom');
+  });
+});
+
 describe('defaultCliDeps', () => {
   it('logs to console.log/console.error and reads real files', async () => {
     const deps = defaultCliDeps();

@@ -33,6 +33,9 @@ export type {
 } from './baseline.js';
 export { collectBaselineTrials, evaluateTrialVerdict, generateBaselineReport, loadBaselineConfig } from './baseline.js';
 
+export type { ComparisonEntry, ComparisonResult, ComparisonSideStats, ComparisonStatus } from './compare.js';
+export { compareTrialSets, renderComparisonReport } from './compare.js';
+
 export type { PinFile, PinnedInputSpec, PinPreflightOutcome, PinPreflightResult } from './pin-preflight.js';
 export { checkPinnedInput, parsePinFile, runPinPreflight } from './pin-preflight.js';
 
