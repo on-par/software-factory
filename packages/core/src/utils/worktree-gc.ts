@@ -544,7 +544,7 @@ export async function reapLaneWorktree(
   opts: { repoRoot: string; worktreePath: string; force?: boolean },
   deps: SweepDeps = {},
 ): Promise<ReapLaneWorktreeResult> {
-  const { runCommand = defaultRunCommand, log = () => {} } = deps;
+  const { runCommand = defaultRunCommand, log = () => {}, sandbox } = deps;
   const { repoRoot, worktreePath, force = false } = opts;
   const resolvedTarget = resolve(worktreePath);
 
@@ -580,6 +580,10 @@ export async function reapLaneWorktree(
     } catch (err: any) {
       log('warn', `failed to scrub ${filePath}: ${err?.message ?? String(err)}`);
     }
+  }
+
+  if (sandbox) {
+    await removeMicroVm({ ...sandbox, worktreePath, log });
   }
 
   try {

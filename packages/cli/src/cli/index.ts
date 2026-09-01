@@ -2775,7 +2775,10 @@ export async function runLane(
           withFileLock(paths.gitLock, () =>
             reapLaneWorktree(
               { repoRoot, worktreePath },
-              { log: (type, msg) => emitEvent(paths.events, type, issue, msg, { lane }) },
+              {
+                log: (type, msg) => emitEvent(paths.events, type, issue, msg, { lane }),
+                sandbox: gcWorktreeSandbox(loadFactoryConfigForRepo(paths.config).sandbox, repoRoot),
+              },
             ),
           ),
         );
