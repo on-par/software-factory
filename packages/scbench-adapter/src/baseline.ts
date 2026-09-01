@@ -67,6 +67,10 @@ export const BaselineConfigSchema = z.object({
       disabledProviders: z
         .array(nonEmptyString(DISABLED_PROVIDERS_EXPECTATION), DISABLED_PROVIDERS_EXPECTATION)
         .min(1, DISABLED_PROVIDERS_EXPECTATION),
+      providers: z.object(
+        { ollama: z.literal(false, 'false — local models must be disabled for this baseline (providers.ollama)') },
+        'an object',
+      ),
     },
     'an object',
   ),
@@ -173,6 +177,45 @@ export interface BaselineTrialEvidence {
   evaluation?: ScbenchEvaluation;
   runRecords?: ScbenchRunRecord[];
   runInfoPresent: boolean;
+  /** Parsed from the trial's retained events.ndjson; undefined when the file is
+   *  absent or any line is unparsable — unusable evidence never confirms. */
+  factoryEvents?: { githubWriteKinds: string[]; localOnlyComplete: boolean };
+}
+
+/** Event kinds the factory emits only on the GitHub-publishing path (see
+ *  packages/core/src/events/kinds.ts). Deliberately excludes decompose_filed,
+ *  which local-only runs emit for a local queue rewrite. */
+export const GITHUB_WRITE_EVENT_KINDS: readonly string[] = [
+  'ship',
+  'await-merge',
+  'awaiting-review',
+  'landed',
+  'merged',
+  'human-merged',
+];
+
+const GITHUB_WRITE_EVENT_KIND_SET = new Set(GITHUB_WRITE_EVENT_KINDS);
+
+/** Parse a trial's retained events.ndjson into isolation evidence. Skips
+ *  blank lines; returns undefined (unusable evidence) if any non-blank line
+ *  fails to parse as JSON. Lines without a string `type` field are ignored
+ *  rather than treated as a parse failure. */
+function parseFactoryEventKinds(raw: string): { githubWriteKinds: string[]; localOnlyComplete: boolean } | undefined {
+  const githubWriteKinds = new Set<string>();
+  let localOnlyComplete = false;
+  for (const line of raw.split('\n')) {
+    if (line.trim().length === 0) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      return undefined;
+    }
+    if (!isPlainObject(parsed) || typeof parsed.type !== 'string') continue;
+    if (GITHUB_WRITE_EVENT_KIND_SET.has(parsed.type)) githubWriteKinds.add(parsed.type);
+    if (parsed.type === 'local-only-complete') localOnlyComplete = true;
+  }
+  return { githubWriteKinds: [...githubWriteKinds].sort(), localOnlyComplete };
 }
 
 export type TrialVerdict = 'pass' | 'fail' | 'infrastructure-failure' | 'missing-evidence';
@@ -299,6 +342,7 @@ function loadEvidence(dir: string, deps: BaselineFsDeps): BaselineTrialEvidence 
   const evaluationPath = join(dir, evaluationFile);
   const runRecordsPath = join(dir, runRecordsFile);
   const runInfoPath = join(dir, runInfoFile);
+  const eventsPath = join(dir, 'events.ndjson');
 
   const evaluation = deps.existsSync(evaluationPath)
     ? parseEvaluation(deps.readFileSync(evaluationPath), evaluationPath)
@@ -307,8 +351,9 @@ function loadEvidence(dir: string, deps: BaselineFsDeps): BaselineTrialEvidence 
     ? parseRunRecords(deps.readFileSync(runRecordsPath), runRecordsPath)
     : undefined;
   const runInfoPresent = deps.existsSync(runInfoPath);
+  const factoryEvents = deps.existsSync(eventsPath) ? parseFactoryEventKinds(deps.readFileSync(eventsPath)) : undefined;
 
-  return { evaluation, runRecords, runInfoPresent };
+  return { evaluation, runRecords, runInfoPresent, factoryEvents };
 }
 
 /** Recursively scan `runsDir` for manifest.json files, validate each against
@@ -536,9 +581,10 @@ function renderRouting(trials: BaselineTrial[]): string {
 function renderProviderPolicy(config: BaselineConfig, trials: BaselineTrial[]): string {
   const { approvedModels, disabledProviders } = config.providerPolicy;
   const declared = `Declared policy (source: ${config.modelConfig.source}): approved models ${approvedModels.map((m) => `\`${m}\``).join(', ')}; disabled providers: ${disabledProviders.map((p) => `\`${p}\``).join(', ')}`;
+  const runConfig = `Run configuration: providers.ollama: ${config.providerPolicy.providers.ollama} — every benchmark workspace is prepared with .factory/config.json disabling the ollama provider, so local models are stripped from routing before any attempt.`;
 
   if (trials.length === 0) {
-    return [declared, 'No trials recorded.'].join('\n\n');
+    return [declared, runConfig, 'No trials recorded.'].join('\n\n');
   }
 
   const approvedSet = new Set(approvedModels);
@@ -566,7 +612,57 @@ function renderProviderPolicy(config: BaselineConfig, trials: BaselineTrial[]): 
       ? `Ollama disabled: not confirmable from recorded evidence — ${attemptlessCount} trial(s) recorded no model attempts. A trial without recorded attempts never counts as confirmation.`
       : 'Ollama disabled: confirmed — every trial recorded at least one model attempt and every observed model is in the approved set; no disabled-provider model was observed.';
 
-  return [declared, bullets.join('\n'), verdict].join('\n\n');
+  return [declared, runConfig, bullets.join('\n'), verdict].join('\n\n');
+}
+
+/** Isolation evidence clause for a single trial's events.ndjson evidence. */
+function githubIsolationEventsClause(evidence: BaselineTrialEvidence): string {
+  if (!evidence.factoryEvents) return 'events.ndjson evidence unavailable';
+  if (evidence.factoryEvents.githubWriteKinds.length > 0) {
+    return `GITHUB-WRITE EVENTS OBSERVED: ${evidence.factoryEvents.githubWriteKinds.map((k) => `\`${k}\``).join(', ')}`;
+  }
+  if (evidence.factoryEvents.localOnlyComplete) return 'local-only-complete recorded; no GitHub-write events';
+  return 'no GitHub-write events, but no local-only-complete marker';
+}
+
+function renderGithubIsolation(trials: BaselineTrial[]): string {
+  const intro =
+    "Workspace runs use `factory run-brief --workspace`, which disables publishing — SHIP never runs and no GitHub issue, pull request, or merge is created by the run path. Evidence below is derived only from each trial's retained manifest and events.ndjson.";
+
+  if (trials.length === 0) {
+    return [intro, 'No trials recorded.'].join('\n\n');
+  }
+
+  const bullets = trials.map(
+    (trial) =>
+      `- \`${trial.id}\`: run window ${trial.manifest.run.startedAt} → ${trial.manifest.run.endedAt}; profile \`${trial.manifest.run.profile}\`; ship \`${trial.manifest.phases.ship}\`; ${githubIsolationEventsClause(trial.evidence)}`,
+  );
+
+  const anyWrite = trials.some(
+    (t) =>
+      (t.evidence.factoryEvents?.githubWriteKinds.length ?? 0) > 0 ||
+      t.manifest.run.profile !== 'local-only' ||
+      t.manifest.phases.ship !== 'skipped',
+  );
+  const anyIncomplete = trials.some(
+    (t) => t.evidence.factoryEvents === undefined || !t.evidence.factoryEvents.localOnlyComplete,
+  );
+
+  let verdict: string;
+  if (anyWrite) {
+    verdict =
+      'GitHub isolation: NOT CONFIRMED — at least one trial records a GitHub-write event or ran outside the local-only profile.';
+  } else if (anyIncomplete) {
+    const incompleteCount = trials.filter(
+      (t) => t.evidence.factoryEvents === undefined || !t.evidence.factoryEvents.localOnlyComplete,
+    ).length;
+    verdict = `GitHub isolation: not confirmable from recorded evidence — ${incompleteCount} trial(s) lack complete event evidence (a parsable events.ndjson containing local-only-complete). Absent evidence never counts as confirmation.`;
+  } else {
+    verdict =
+      'GitHub isolation: confirmed — every trial ran under the local-only profile with SHIP skipped, recorded local-only-complete, and no GitHub-write event (issue, PR, or merge) appears in any retained events.ndjson.';
+  }
+
+  return [intro, bullets.join('\n'), verdict].join('\n\n');
 }
 
 function renderCheckerOutcomes(trials: BaselineTrial[]): string {
@@ -615,6 +711,7 @@ export function generateBaselineReport(config: BaselineConfig, trials: BaselineT
     ['## Cost', '', renderCost(trials)].join('\n'),
     ['## Routing and failover', '', renderRouting(trials)].join('\n'),
     ['## Provider policy', '', renderProviderPolicy(config, trials)].join('\n'),
+    ['## GitHub isolation', '', renderGithubIsolation(trials)].join('\n'),
     ['## Checker outcomes', '', renderCheckerOutcomes(trials)].join('\n'),
     ['## Failure notes', '', renderFailureNotes(trials)].join('\n'),
     [

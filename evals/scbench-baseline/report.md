@@ -49,10 +49,21 @@ No routing or failover events recorded.
 
 Declared policy (source: packages/config/src/defaults.ts (typed model registry and routes) at factory.commit): approved models `claude-fable-5`, `claude-opus-5`, `claude-opus-4-8`, `claude-sonnet-5`; disabled providers: `ollama`
 
+Run configuration: providers.ollama: false — every benchmark workspace is prepared with .factory/config.json disabling the ollama provider, so local models are stripped from routing before any attempt.
+
 - `smoke/trial-1`: no model attempts recorded — provider evidence unavailable
 - `smoke/trial-2`: no model attempts recorded — provider evidence unavailable
 
 Ollama disabled: not confirmable from recorded evidence — 2 trial(s) recorded no model attempts. A trial without recorded attempts never counts as confirmation.
+
+## GitHub isolation
+
+Workspace runs use `factory run-brief --workspace`, which disables publishing — SHIP never runs and no GitHub issue, pull request, or merge is created by the run path. Evidence below is derived only from each trial's retained manifest and events.ndjson.
+
+- `smoke/trial-1`: run window 2026-07-28T00:00:00.000Z → 2026-07-28T00:01:00.000Z; profile `local-only`; ship `skipped`; no GitHub-write events, but no local-only-complete marker
+- `smoke/trial-2`: run window 2026-07-28T00:00:00.000Z → 2026-07-28T00:01:00.000Z; profile `local-only`; ship `skipped`; no GitHub-write events, but no local-only-complete marker
+
+GitHub isolation: not confirmable from recorded evidence — 2 trial(s) lack complete event evidence (a parsable events.ndjson containing local-only-complete). Absent evidence never counts as confirmation.
 
 ## Checker outcomes
 

@@ -10,6 +10,7 @@ import {
   evaluateTrialVerdict,
   generateBaselineReport,
   loadBaselineConfig,
+  GITHUB_WRITE_EVENT_KINDS,
   type BaselineConfig,
   type BaselineFsDeps,
   type BaselineTrial,
@@ -42,7 +43,11 @@ const VALID_CONFIG = {
     pinnedAt: '2026-07-29',
   },
   modelConfig: { source: 'packages/config/src/defaults.ts at factory.commit', env: { FACTORY_LOCAL_ONLY: 'unset' } },
-  providerPolicy: { approvedModels: ['claude-fable-5', 'claude-sonnet-5'], disabledProviders: ['ollama'] },
+  providerPolicy: {
+    approvedModels: ['claude-fable-5', 'claude-sonnet-5'],
+    disabledProviders: ['ollama'],
+    providers: { ollama: false as const },
+  },
   promptInputs: 'briefs from materializeBrief',
   environment: { node: '>=20', requiredBinaries: ['git'], hostClass: 'test', scbenchHarness: 'python' },
   problems: { resolvedFrom: 'resolved from the catalog commit', smoke: 'alpha', suite: ['alpha', 'beta', 'gamma'] },
@@ -306,6 +311,24 @@ describe('loadBaselineConfig', () => {
     ).toThrow(/providerPolicy\.disabledProviders/);
   });
 
+  it('rejects a config missing providerPolicy.providers', () => {
+    const { providers: _providers, ...restProviderPolicy } = VALID_CONFIG.providerPolicy;
+    expect(() => loadBaselineConfig(JSON.stringify({ ...VALID_CONFIG, providerPolicy: restProviderPolicy }))).toThrow(
+      /providerPolicy\.providers/,
+    );
+  });
+
+  it('rejects providerPolicy.providers.ollama when it is not literally false', () => {
+    expect(() =>
+      loadBaselineConfig(
+        JSON.stringify({
+          ...VALID_CONFIG,
+          providerPolicy: { ...VALID_CONFIG.providerPolicy, providers: { ollama: true } },
+        }),
+      ),
+    ).toThrow(/providerPolicy\.providers\.ollama/);
+  });
+
   it('rejects an environment missing its sub-fields', () => {
     expect(() => loadBaselineConfig(JSON.stringify({ ...VALID_CONFIG, environment: { node: '>=20' } }))).toThrow(
       /environment\.requiredBinaries/,
@@ -488,6 +511,65 @@ describe('collectBaselineTrials', () => {
     expect(trial.evidence.runInfoPresent).toBe(true);
   });
 
+  it('parses events.ndjson into factoryEvents, ignoring blank lines and lines without a string type', () => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = {
+      '/runs/manifest.json': JSON.stringify(minimalManifest()),
+      '/runs/events.ndjson': '{"type":"local-only-complete"}\n\n{"event":"no type field"}\n{"type":"build"}\n',
+    };
+    const deps = fakeDeps(tree, files, ['/runs']);
+
+    const [trial] = collectBaselineTrials('/runs', deps);
+
+    expect(trial.evidence.factoryEvents).toEqual({ githubWriteKinds: [], localOnlyComplete: true });
+  });
+
+  it('collects sorted unique GitHub-write kinds from events.ndjson', () => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = {
+      '/runs/manifest.json': JSON.stringify(minimalManifest()),
+      '/runs/events.ndjson': '{"type":"landed"}\n{"type":"ship"}\n{"type":"landed"}\n',
+    };
+    const deps = fakeDeps(tree, files, ['/runs']);
+
+    const [trial] = collectBaselineTrials('/runs', deps);
+
+    expect(trial.evidence.factoryEvents).toEqual({ githubWriteKinds: ['landed', 'ship'], localOnlyComplete: false });
+  });
+
+  it('leaves factoryEvents undefined when a events.ndjson line is unparsable', () => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = {
+      '/runs/manifest.json': JSON.stringify(minimalManifest()),
+      '/runs/events.ndjson': 'not json at all',
+    };
+    const deps = fakeDeps(tree, files, ['/runs']);
+
+    const [trial] = collectBaselineTrials('/runs', deps);
+
+    expect(trial.evidence.factoryEvents).toBeUndefined();
+  });
+
+  it('leaves factoryEvents undefined when events.ndjson is absent', () => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = { '/runs/manifest.json': JSON.stringify(minimalManifest()) };
+    const deps = fakeDeps(tree, files, ['/runs']);
+
+    const [trial] = collectBaselineTrials('/runs', deps);
+
+    expect(trial.evidence.factoryEvents).toBeUndefined();
+  });
+
+  it('yields empty-but-defined factoryEvents for an empty events.ndjson', () => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = { '/runs/manifest.json': JSON.stringify(minimalManifest()), '/runs/events.ndjson': '' };
+    const deps = fakeDeps(tree, files, ['/runs']);
+
+    const [trial] = collectBaselineTrials('/runs', deps);
+
+    expect(trial.evidence.factoryEvents).toEqual({ githubWriteKinds: [], localOnlyComplete: false });
+  });
+
   it('records no evidence when none of the three files are present', () => {
     const tree = { '/runs': [fakeEntry('manifest.json', false)] };
     const files = { '/runs/manifest.json': JSON.stringify(minimalManifest()) };
@@ -651,7 +733,10 @@ describe('collectBaselineTrials', () => {
     const trials = collectBaselineTrials(RUNS_DIR);
     expect(trials.map((t) => t.id)).toEqual(['smoke/trial-1', 'smoke/trial-2']);
     for (const trial of trials) {
-      expect(trial.evidence).toEqual({ runInfoPresent: false });
+      expect(trial.evidence).toEqual({
+        runInfoPresent: false,
+        factoryEvents: { githubWriteKinds: [], localOnlyComplete: false },
+      });
     }
   });
 });
@@ -1014,6 +1099,103 @@ describe('generateBaselineReport', () => {
       'Declared policy (source: packages/config/src/defaults.ts at factory.commit): approved models `claude-fable-5`, `claude-sonnet-5`; disabled providers: `ollama`',
     );
     expect(report).not.toContain('Ollama disabled:');
+  });
+});
+
+describe('GITHUB_WRITE_EVENT_KINDS', () => {
+  it('pins exactly the six publishing-path event kinds', () => {
+    expect([...GITHUB_WRITE_EVENT_KINDS].sort()).toEqual(
+      ['await-merge', 'awaiting-review', 'human-merged', 'landed', 'merged', 'ship'].sort(),
+    );
+  });
+
+  it('excludes decompose_filed and local-only-complete (local-only-run event kinds)', () => {
+    expect(GITHUB_WRITE_EVENT_KINDS).not.toContain('decompose_filed');
+    expect(GITHUB_WRITE_EVENT_KINDS).not.toContain('local-only-complete');
+  });
+});
+
+describe('generateBaselineReport — GitHub isolation section', () => {
+  const config: BaselineConfig = VALID_CONFIG;
+
+  it('renders the Provider policy section with the literal providers.ollama: false line', () => {
+    const report = generateBaselineReport(config, []);
+    expect(report).toMatch(/providers\.ollama.*false/);
+  });
+
+  it('renders "confirmed" when every trial has local-only-complete and no write events', () => {
+    const trials = [
+      trialAt('a', {}, { runInfoPresent: false, factoryEvents: { githubWriteKinds: [], localOnlyComplete: true } }),
+      trialAt('b', {}, { runInfoPresent: false, factoryEvents: { githubWriteKinds: [], localOnlyComplete: true } }),
+    ];
+    const report = generateBaselineReport(config, trials);
+    expect(report).toContain('## GitHub isolation');
+    expect(report).toContain(
+      '- `a`: run window 2026-07-28T00:00:00.000Z → 2026-07-28T00:01:00.000Z; profile `local-only`; ship `skipped`; local-only-complete recorded; no GitHub-write events',
+    );
+    expect(report).toContain(
+      'GitHub isolation: confirmed — every trial ran under the local-only profile with SHIP skipped, recorded local-only-complete, and no GitHub-write event (issue, PR, or merge) appears in any retained events.ndjson.',
+    );
+  });
+
+  it('renders NOT CONFIRMED and names the observed kind when a trial records a GitHub-write event', () => {
+    const trials = [
+      trialAt(
+        'a',
+        {},
+        { runInfoPresent: false, factoryEvents: { githubWriteKinds: ['landed'], localOnlyComplete: true } },
+      ),
+    ];
+    const report = generateBaselineReport(config, trials);
+    expect(report).toContain('GITHUB-WRITE EVENTS OBSERVED: `landed`');
+    expect(report).toContain(
+      'GitHub isolation: NOT CONFIRMED — at least one trial records a GitHub-write event or ran outside the local-only profile.',
+    );
+  });
+
+  it('renders NOT CONFIRMED when a trial ran outside the local-only profile or SHIP was not skipped', () => {
+    const notLocalOnly = generateBaselineReport(config, [
+      trialAt(
+        'a',
+        { run: { ...minimalManifest().run, profile: 'other' as never } },
+        { runInfoPresent: false, factoryEvents: { githubWriteKinds: [], localOnlyComplete: true } },
+      ),
+    ]);
+    expect(notLocalOnly).toContain('GitHub isolation: NOT CONFIRMED');
+
+    const shipRan = generateBaselineReport(config, [
+      trialAt(
+        'a',
+        { phases: { ...minimalManifest().phases, ship: 'ok' as never } },
+        { runInfoPresent: false, factoryEvents: { githubWriteKinds: [], localOnlyComplete: true } },
+      ),
+    ]);
+    expect(shipRan).toContain('GitHub isolation: NOT CONFIRMED');
+  });
+
+  it('renders "not confirmable" when events.ndjson is absent, empty, or unparsable', () => {
+    const missing = generateBaselineReport(config, [trialAt('a', {}, { runInfoPresent: false })]);
+    expect(missing).toContain('events.ndjson evidence unavailable');
+    expect(missing).toContain('GitHub isolation: not confirmable from recorded evidence');
+
+    const empty = generateBaselineReport(config, [
+      trialAt('a', {}, { runInfoPresent: false, factoryEvents: { githubWriteKinds: [], localOnlyComplete: false } }),
+    ]);
+    expect(empty).toContain('no GitHub-write events, but no local-only-complete marker');
+    expect(empty).toContain('GitHub isolation: not confirmable from recorded evidence');
+
+    const unparsable = generateBaselineReport(config, [
+      trialAt('a', {}, { runInfoPresent: false, factoryEvents: undefined }),
+    ]);
+    expect(unparsable).toContain('GitHub isolation: not confirmable from recorded evidence');
+  });
+
+  it('renders "No trials recorded." with no verdict line for zero trials', () => {
+    const report = generateBaselineReport(config, []);
+    const section = report.split('## GitHub isolation')[1].split('## Checker outcomes')[0];
+    expect(section).toContain('No trials recorded.');
+    expect(section).not.toContain('GitHub isolation: confirmed');
+    expect(section).not.toContain('NOT CONFIRMED');
   });
 });
 
