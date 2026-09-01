@@ -39,18 +39,15 @@ describe('sim regression fixtures (#567)', () => {
 
   afterAll(() => sharedWorkspace.dispose());
 
-  it('#550 park signature: escalates naming all five required fields, with no retry', { timeout: 180_000 }, () => {
-    expect(outcome550.state).toBe('escalated');
-    expect(outcome550.phase).toBe('plan');
-    expect(outcome550.reason).toContain('enrichment output failed readiness');
+  it('#550 fixed behaviour: retries fenced enrichment output and ships', { timeout: 180_000 }, () => {
+    expect(outcome550.state).toBe('shipped');
+    const enrichmentCalls = outcome550.modelCalls.filter((call) => call.task === 'readiness_enrich');
+    expect(enrichmentCalls).toHaveLength(2);
+    expect(enrichmentCalls[1].prompt).toContain('<untrusted-previous-output>');
     for (const field of FACTORY_TASK_REQUIRED_FIELDS) {
-      expect(outcome550.reason).toContain(field);
+      expect(enrichmentCalls[1].prompt).toContain(field);
     }
-    // Encodes the "never retries" half of #550: exactly one enrichment call, no second attempt.
-    expect(outcome550.modelCalls.map((c) => c.task)).toEqual(['readiness_enrich']);
-    expect(outcome550.designArtifact).toBeNull();
-    // When #550 lands: this flips to a shipped run whose modelCalls include a retry, and
-    // createSimOctokit needs an issues.update endpoint (see the comment on the fixture).
+    expect(outcome550.githubCalls.some(([name]) => name === 'issues.update')).toBe(true);
   });
 
   it('#551 silent design-artifact loss: designArtifact is null but the lane still ships', { timeout: 180_000 }, () => {

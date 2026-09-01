@@ -58,11 +58,7 @@ export const SIM_REGRESSION_FIXTURES: readonly SimRegressionFixture[] = [
     fault: 550,
     name: 'fenced-enrichment-output-park',
     historicalSignature:
-      'PLAN escalates with "enrichment output failed readiness" naming all five required ' +
-      'fields as missing, after exactly one readiness_enrich call (no retry).',
-    // Known harness gap (out of scope for #567): createSimOctokit has no issues.update, which
-    // planPhase calls after a *successful* enrichment. Once #550 is fixed and this fixture is
-    // flipped to assert a shipped run, that endpoint must be added to the fake octokit first.
+      '(fixed by #816) PLAN used to escalate after exactly one readiness_enrich call; it now retries with the missing headings named and the run ships.',
     spec: {
       issue: 9550,
       title: FIXTURE_550_TITLE,
@@ -70,7 +66,7 @@ export const SIM_REGRESSION_FIXTURES: readonly SimRegressionFixture[] = [
       enforceReadiness: true,
       scripts: {
         ...simDefaultScripts(9550, FIXTURE_550_TITLE),
-        readiness_enrich: [{ output: SIM_FENCED_ENRICHMENT_OUTPUT }],
+        readiness_enrich: [{ output: SIM_FENCED_ENRICHMENT_OUTPUT }, { output: COMPLETE_FACTORY_TASK_BODY }],
       },
     },
   },

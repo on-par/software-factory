@@ -173,6 +173,10 @@ export function withSimJitter(
           await gate();
           return octokit.rest.issues.get(args);
         },
+        update: async (args) => {
+          await gate();
+          return octokit.rest.issues.update(args);
+        },
       },
       pulls: {
         list: async (args) => {
