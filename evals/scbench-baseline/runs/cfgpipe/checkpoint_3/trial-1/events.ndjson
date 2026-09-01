@@ -1,0 +1,27 @@
+{"ts":"2026-09-01T19:52:25.065Z","type":"issue-title","issue":"9368627","msg":"SCBench cfgpipe — checkpoint cp-3","level":"info"}
+{"ts":"2026-09-01T19:52:25.065Z","type":"model-override","issue":"9368627","msg":"plan model pinned to claude-fable-5 (FACTORY_PLAN_MODEL)","level":"info"}
+{"ts":"2026-09-01T19:52:25.065Z","type":"model-override","issue":"9368627","msg":"build model pinned to claude-sonnet-5 (FACTORY_BUILD_MODEL)","level":"info"}
+{"ts":"2026-09-01T19:52:25.066Z","type":"sandbox-disabled","issue":"9368627","msg":"sandbox disabled by config/FACTORY_SANDBOX","level":"warn"}
+{"ts":"2026-09-01T19:52:25.066Z","type":"workspace","issue":"9368627","msg":"local-only: using caller-provided workspace /var/folders/h2/k9y20r056dq8_9t19212qrdw0000gp/T/tmpzspoer0d (no factory worktree created)","level":"info"}
+{"ts":"2026-09-01T19:52:25.070Z","type":"environment_lease","issue":"9368627","msg":"leased port 3100 for worktree /var/folders/h2/k9y20r056dq8_9t19212qrdw0000gp/T/tmpzspoer0d","level":"info"}
+{"ts":"2026-09-01T19:52:25.070Z","type":"constitution","issue":"9368627","msg":"No standards found (no repo instruction files, no constitution) — proceeding without","level":"info"}
+{"ts":"2026-09-01T19:52:25.071Z","type":"work_request","issue":"9368627","msg":"resolved work request local-brief:/var/folders/h2/k9y20r056dq8_9t19212qrdw0000gp/T/scbench-factory-artifacts-ve2a3uz5/cfgpipe/cp-3/brief.md#54108473e32a (local-brief, 1 acceptance criteria)","level":"info","phase":"plan"}
+{"ts":"2026-09-01T19:52:25.072Z","type":"plan","issue":"9368627","msg":"Starting plan phase","level":"info","phase":"plan"}
+{"ts":"2026-09-01T19:52:25.072Z","type":"readiness","issue":"9368627","msg":"issue readiness 0% (factory-task) — missing: Problem statement, In scope, Out of scope, Acceptance criteria (checkbox list), Verification","level":"info","phase":"plan","readiness":{"template":"factory-task","score":0,"pass":false,"missing":["Problem statement","In scope","Out of scope","Acceptance criteria (checkbox list)","Verification"],"sizeOk":true}}
+{"ts":"2026-09-01T19:52:25.072Z","type":"adr_context_empty","issue":"9368627","msg":"no accepted ADRs found in docs/adr — planning without ADR constraints","level":"info","phase":"plan"}
+{"ts":"2026-09-01T19:52:25.073Z","type":"router","issue":"9368627","msg":"Trying claude-fable-5 for plan (attempt 1)","level":"info","phase":"plan"}
+{"ts":"2026-09-01T19:54:38.786Z","type":"warn","issue":"9368627","msg":"codex unavailable — falling back to claude","level":"warn","phase":"plan"}
+{"ts":"2026-09-01T19:54:38.792Z","type":"design_artifact_emitted","issue":"9368627","msg":"design artifact validated and written (open questions: 0, target types: 1, signatures: 6, call edges: 5)","level":"info","phase":"plan"}
+{"ts":"2026-09-01T19:54:38.793Z","type":"plan","issue":"9368627","msg":"Plan complete with model claude-fable-5, route: claude","level":"info","phase":"plan","model":"claude-fable-5"}
+{"ts":"2026-09-01T19:54:38.794Z","type":"design_artifact_received","issue":"9368627","msg":"design artifact received (open questions: 0, target types: 1, signatures: 6, call edges: 5)","level":"info","phase":"build"}
+{"ts":"2026-09-01T19:54:38.795Z","type":"build","issue":"9368627","msg":"Starting build phase (route: claude)","level":"info","phase":"build"}
+{"ts":"2026-09-01T19:54:38.813Z","type":"router","issue":"9368627","msg":"worktree state guard disabled: /var/folders/h2/k9y20r056dq8_9t19212qrdw0000gp/T/tmpzspoer0d is not a git worktree root","level":"info","phase":"build"}
+{"ts":"2026-09-01T19:54:38.813Z","type":"router","issue":"9368627","msg":"Trying claude-sonnet-5 for build_claude (attempt 1)","level":"info","phase":"build"}
+{"ts":"2026-09-01T19:56:40.937Z","type":"build","issue":"9368627","msg":"diff post-condition skipped — no base ref (tried origin/main, origin/master) — not a git checkout or no remote base","level":"info","phase":"build"}
+{"ts":"2026-09-01T19:56:40.937Z","type":"build","issue":"9368627","msg":"Build complete with model claude-sonnet-5","level":"info","phase":"build","model":"claude-sonnet-5"}
+{"ts":"2026-09-01T19:56:40.946Z","type":"check","issue":"9368627","msg":"Running checkers","level":"info","phase":"check"}
+{"ts":"2026-09-01T19:56:40.983Z","type":"check","issue":"9368627","msg":"SKIPPED: worker_output — no base ref (tried origin/main, origin/master) — not a git checkout or no remote base","level":"info","phase":"check"}
+{"ts":"2026-09-01T19:56:40.983Z","type":"check","issue":"9368627","msg":"SKIPPED: tests — no verification command was run — no scripts/verify.sh and no package.json test script found","level":"info","phase":"check"}
+{"ts":"2026-09-01T19:56:40.983Z","type":"check","issue":"9368627","msg":"SKIPPED: design_smells — no base ref (tried origin/main, origin/master) — not a git checkout or no remote base","level":"info","phase":"check"}
+{"ts":"2026-09-01T19:56:40.984Z","type":"check","issue":"9368627","msg":"All checkers passed (3 skipped)","level":"info","phase":"check"}
+{"ts":"2026-09-01T19:56:40.984Z","type":"local-only-complete","issue":"9368627","msg":"local-only run complete in /var/folders/h2/k9y20r056dq8_9t19212qrdw0000gp/T/tmpzspoer0d — publishing disabled, no PR created","level":"info"}

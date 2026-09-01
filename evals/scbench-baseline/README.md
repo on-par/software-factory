@@ -65,16 +65,43 @@ comes from running the adapter's `runCheckpoint` twice against a **stub**
 adapter → manifest → report wiring end-to-end, deterministically, with no
 models involved.
 
-The **live**, model-backed smoke run (SCBench's actual smoke problem, run
-twice) and the live small-suite run (the first three SCBench problems,
-`trials.suiteTrialsPerProblem` trials each) have **not** been executed here.
-This build environment has no network access to clone the pinned SCBench
-commit and no model/CLI budget to spend — both are required for a live run.
-Those runs are deferred to an operator with network + model access, using the
-exact commands below; the stub wiring evidence is preserved as the partial
-artifact set in the meantime. Because only 2 trials (both stubs) are
+The first **live**, model-backed smoke run has now been executed (#1064):
+one `cfgpipe` run through the pinned SCBench harness and problem catalog,
+committed as `runs/cfgpipe/checkpoint_{1,2,3,4}/trial-1/` — 3 of the 4
+checkpoints pass under `core-cases` (checkpoint_4 fails one Core case; both
+outcomes are legitimate recorded evidence, not a run failure). The second
+required smoke run (`trials.smokeRuns: 2`) and the live small-suite run (the
+first three SCBench problems, `trials.suiteTrialsPerProblem` trials each)
+remain **not** executed — deferred to a follow-up story (#1066/#1022), using
+the exact commands below. Because only 6 trials (4 live + 2 stub) are
 recorded against a comparison threshold of 10, `report.md` is labeled
 **PRELIMINARY** throughout.
+
+Two operational notes from that run, for future reproductions:
+
+- Upstream SCBench's `run_agent.py` resolves a provider credential purely
+  for its own bookkeeping before handing off to the `software_factory` agent
+  (which ignores it entirely — Factory routes its own models per
+  `packages/config`). At the pinned commit this requires a *populated*
+  provider env var, not just `model.provider`/`model.name` in
+  `scbench.run.yaml`. Do **not** export a real `ANTHROPIC_API_KEY` for this —
+  the `claude` CLI treats that env var as an auth override and would stop
+  using its logged-in OAuth session. Instead pass
+  `--provider-api-key-env <harmless-placeholder-var-name>` (a `run_scbench.py
+  run` flag) with that placeholder var set to any non-empty string; the
+  credential module only checks presence, never validates or forwards the
+  value.
+- At the pinned commit, `run_info.yaml` (the per-checkpoint native evidence
+  file) records the resolved run spec (model, pass policy, prompt template,
+  per-checkpoint status) but does **not** itself record the problem-catalog
+  checkout path or commit — that lives in a separate `problem_catalog.json`
+  at the run root, which is outside the 8 files `collectTrial` retains and
+  which the issue's out-of-scope forbids extending the adapter to also copy.
+  The pinned-catalog contract is still enforced and auditable: `npm run
+  scbench`'s catalog-preflight and `compat_check.py` both refuse a
+  missing/wrong-commit/dirty `SCBENCH_PROBLEMS_PATH` before any run, and this
+  run's catalog checkout was verified at `scb-problems@4d38d30` before
+  launch.
 
 ## Reproducing the live smoke run (twice)
 

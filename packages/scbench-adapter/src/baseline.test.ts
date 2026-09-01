@@ -649,9 +649,27 @@ describe('collectBaselineTrials', () => {
 
   it('collects the committed smoke evidence from the real filesystem', () => {
     const trials = collectBaselineTrials(RUNS_DIR);
-    expect(trials.map((t) => t.id)).toEqual(['smoke/trial-1', 'smoke/trial-2']);
-    for (const trial of trials) {
-      expect(trial.evidence).toEqual({ runInfoPresent: false });
+    expect(trials.map((t) => t.id)).toEqual([
+      'cfgpipe/checkpoint_1/trial-1',
+      'cfgpipe/checkpoint_2/trial-1',
+      'cfgpipe/checkpoint_3/trial-1',
+      'cfgpipe/checkpoint_4/trial-1',
+      'smoke/trial-1',
+      'smoke/trial-2',
+    ]);
+    const byId = new Map(trials.map((t) => [t.id, t]));
+    for (const id of ['smoke/trial-1', 'smoke/trial-2']) {
+      expect(byId.get(id)?.evidence).toEqual({ runInfoPresent: false });
+    }
+    for (const id of [
+      'cfgpipe/checkpoint_1/trial-1',
+      'cfgpipe/checkpoint_2/trial-1',
+      'cfgpipe/checkpoint_3/trial-1',
+      'cfgpipe/checkpoint_4/trial-1',
+    ]) {
+      const evidence = byId.get(id)?.evidence;
+      expect(evidence?.evaluation).toBeDefined();
+      expect(evidence?.runInfoPresent).toBe(true);
     }
   });
 });
