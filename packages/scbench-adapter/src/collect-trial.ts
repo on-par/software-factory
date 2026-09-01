@@ -37,6 +37,8 @@ export interface CollectTrialResult {
   sourceDir: string;
   trialDir: string;
   copied: string[];
+  /** True when the trial directory already held all expected files and nothing was written. */
+  alreadyImported: boolean;
 }
 
 const REAL_FS: ArtifactsFsDeps = { existsSync, readFileSync, mkdirSync, copyFileSync };
@@ -64,7 +66,12 @@ function nativeEvidenceSourcePaths(
  *  every missing file before any write — reusing collectArtifacts' same-dir
  *  validation-only mode for manifest existence/parse/version checks, and
  *  failing closed (nothing written) when any native evidence file is absent,
- *  so a trial can never be read as passing without it (ADR-0007). */
+ *  so a trial can never be read as passing without it (ADR-0007). Idempotent:
+ *  when the trial directory already holds all 8 expected files, performs zero
+ *  writes and returns alreadyImported: true — the prior import wins, and
+ *  source-vs-imported divergence is deliberately not reconciled (#1150). A
+ *  partial import (some but not all files present) is completed by the
+ *  existing copy loop below. */
 export function collectTrial(opts: CollectTrialOptions, deps: ArtifactsFsDeps = REAL_FS): CollectTrialResult {
   const sourceDir = join(opts.outputTree, opts.problemId, opts.checkpointId);
 
@@ -86,6 +93,13 @@ export function collectTrial(opts: CollectTrialOptions, deps: ArtifactsFsDeps = 
   }
 
   const trialDir = join(opts.runsDir, opts.problemId, opts.checkpointId, `trial-${opts.trial}`);
+
+  const expectedFiles = [...FACTORY_TRIAL_FILES, ...NATIVE_EVIDENCE_FILES];
+  const alreadyImported = expectedFiles.every((name) => deps.existsSync(join(trialDir, name)));
+  if (alreadyImported) {
+    return { sourceDir, trialDir, copied: [], alreadyImported: true };
+  }
+
   deps.mkdirSync(trialDir, { recursive: true });
 
   const copied: string[] = [];
@@ -98,5 +112,5 @@ export function collectTrial(opts: CollectTrialOptions, deps: ArtifactsFsDeps = 
     copied.push(name);
   }
 
-  return { sourceDir, trialDir, copied };
+  return { sourceDir, trialDir, copied, alreadyImported: false };
 }

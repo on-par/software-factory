@@ -335,9 +335,12 @@ async function runLaunchCommand(rest: readonly string[], deps: CliDeps): Promise
  *  directory and --scbench-run into <runs>/<problem>/<checkpoint>/trial-<n>/
  *  (default runs root: evals/scbench-baseline/runs), creating the trial
  *  directory when absent. Refuses to run without --scbench-run so native
- *  evidence collection can no longer be forgotten. Returns 2 on a usage error
- *  or AdapterError (missing artifacts, bad manifest, missing native
- *  evidence), 0 on success. */
+ *  evidence collection can no longer be forgotten. Idempotent re-run: when
+ *  the trial directory already holds every expected file, collectTrial
+ *  performs zero writes and this logs an "already fully imported" line
+ *  instead of the copied-files line. Returns 2 on a usage error or
+ *  AdapterError (missing artifacts, bad manifest, missing native evidence),
+ *  0 on success. */
 async function runCollectTrialCommand(rest: readonly string[], deps: CliDeps): Promise<number> {
   const flags = parseFlags(rest);
   const missing = COLLECT_TRIAL_REQUIRED_FLAGS.filter((flag) => flags[flag] === undefined);
@@ -361,7 +364,11 @@ async function runCollectTrialCommand(rest: readonly string[], deps: CliDeps): P
       trial,
       runsDir: flags['--runs'] ?? DEFAULT_RUNS_DIR,
     });
-    deps.log(`collect-trial: copied ${result.copied.join(', ')} → ${result.trialDir}`);
+    if (result.alreadyImported) {
+      deps.log(`collect-trial: trial already fully imported at ${result.trialDir} — nothing to copy`);
+    } else {
+      deps.log(`collect-trial: copied ${result.copied.join(', ')} → ${result.trialDir}`);
+    }
     return 0;
   } catch (err) {
     if (err instanceof AdapterError) {
