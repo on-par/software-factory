@@ -14,15 +14,33 @@ export interface ComparisonSideStats {
 
 export type ComparisonStatus = 'regression' | 'no-change' | 'improvement' | 'baseline-only' | 'candidate-only';
 
-export interface ComparisonEntry {
+interface ComparisonEntryBase {
   /** Problem/checkpoint group key: the trial id's parent path, e.g. "cfgpipe/checkpoint_1" or "smoke". */
   key: string;
-  baseline?: ComparisonSideStats;
-  candidate?: ComparisonSideStats;
-  /** candidate rate − baseline rate, in percentage points; undefined when either side is absent. */
-  deltaPoints?: number;
-  status: ComparisonStatus;
 }
+
+/** Both sides recorded trials for this group — comparable, always carries baseline, candidate, and the delta. */
+export interface ComparableComparisonEntry extends ComparisonEntryBase {
+  status: 'regression' | 'no-change' | 'improvement';
+  baseline: ComparisonSideStats;
+  candidate: ComparisonSideStats;
+  /** candidate rate − baseline rate, in percentage points. */
+  deltaPoints: number;
+}
+
+/** Only the baseline run recorded trials for this group — not comparable. */
+export interface BaselineOnlyComparisonEntry extends ComparisonEntryBase {
+  status: 'baseline-only';
+  baseline: ComparisonSideStats;
+}
+
+/** Only the candidate run recorded trials for this group — not comparable. */
+export interface CandidateOnlyComparisonEntry extends ComparisonEntryBase {
+  status: 'candidate-only';
+  candidate: ComparisonSideStats;
+}
+
+export type ComparisonEntry = ComparableComparisonEntry | BaselineOnlyComparisonEntry | CandidateOnlyComparisonEntry;
 
 export interface ComparisonResult {
   entries: ComparisonEntry[];
@@ -70,6 +88,15 @@ function passRate(stats: ComparisonSideStats): number {
   return stats.passes / stats.total;
 }
 
+/** Narrows a possibly-absent map lookup, failing loudly rather than
+ *  silently asserting non-null if an invariant is ever violated. */
+function expectDefined(value: ComparisonSideStats | undefined, key: string, side: string): ComparisonSideStats {
+  if (value === undefined) {
+    throw new Error(`compareTrialSets: invariant violated — group "${key}" missing from ${side} stats`);
+  }
+  return value;
+}
+
 /** Compares two retained measured SCBench runs directories' trials
  *  group-by-group (by problem/checkpoint), deriving correctness exclusively
  *  from validated native evidence via evaluateTrialVerdict. The exit-code
@@ -90,17 +117,20 @@ export function compareTrialSets(
     const base = baselineStats.get(key);
     const cand = candidateStats.get(key);
     if (base === undefined) {
-      return { key, candidate: cand, status: 'candidate-only' };
+      return { key, candidate: expectDefined(cand, key, 'candidate'), status: 'candidate-only' };
     }
     if (cand === undefined) {
       return { key, baseline: base, status: 'baseline-only' };
     }
     const deltaPoints = (passRate(cand) - passRate(base)) * 100;
-    const status: ComparisonStatus = deltaPoints < 0 ? 'regression' : deltaPoints > 0 ? 'improvement' : 'no-change';
+    const status: ComparableComparisonEntry['status'] =
+      deltaPoints < 0 ? 'regression' : deltaPoints > 0 ? 'improvement' : 'no-change';
     return { key, baseline: base, candidate: cand, deltaPoints, status };
   });
 
-  const regressionDrops = entries.filter((e) => e.status === 'regression').map((e) => -(e.deltaPoints as number));
+  const regressionDrops = entries
+    .filter((e): e is ComparableComparisonEntry & { status: 'regression' } => e.status === 'regression')
+    .map((e) => -e.deltaPoints);
   const maxRegressionPoints = regressionDrops.length > 0 ? Math.max(...regressionDrops) : 0;
 
   return {
@@ -134,9 +164,7 @@ function renderEntry(entry: ComparisonEntry): string {
     return `- ${entry.key}: new in candidate — no baseline to compare against`;
   }
 
-  const baseline = entry.baseline!;
-  const candidate = entry.candidate!;
-  const delta = entry.deltaPoints!;
+  const { baseline, candidate, deltaPoints: delta } = entry;
   const detail = `baseline ${formatSideDetail(baseline)}; candidate ${formatSideDetail(candidate)}`;
 
   if (entry.status === 'regression') {

@@ -75,8 +75,8 @@ describe('compareTrialSets', () => {
       0,
     );
     const [entry] = candidateResult.entries;
+    if (entry.status !== 'regression') throw new Error(`expected regression, got ${entry.status}`);
     expect(entry.candidate).toEqual({ passes: 0, fails: 0, infrastructureFailures: 0, missingEvidence: 1, total: 1 });
-    expect(entry.status).toBe('regression');
 
     const baselineResult = compareTrialSets(
       [makeTrial('cfgpipe/checkpoint_1/trial-1'), passingTrial('cfgpipe/checkpoint_1/trial-2')],
@@ -84,6 +84,7 @@ describe('compareTrialSets', () => {
       0,
     );
     const [baselineEntry] = baselineResult.entries;
+    if (baselineEntry.status !== 'improvement') throw new Error(`expected improvement, got ${baselineEntry.status}`);
     expect(baselineEntry.baseline).toEqual({
       passes: 1,
       fails: 0,
@@ -91,7 +92,6 @@ describe('compareTrialSets', () => {
       missingEvidence: 1,
       total: 2,
     });
-    expect(baselineEntry.status).toBe('improvement');
   });
 
   it('never counts an infrastructure failure as a pass', () => {
@@ -102,8 +102,8 @@ describe('compareTrialSets', () => {
     );
 
     const [entry] = result.entries;
+    if (entry.status !== 'regression') throw new Error(`expected regression, got ${entry.status}`);
     expect(entry.candidate).toEqual({ passes: 0, fails: 0, infrastructureFailures: 1, missingEvidence: 0, total: 1 });
-    expect(entry.status).toBe('regression');
   });
 
   it('gates strictly on the threshold boundary', () => {
@@ -125,8 +125,8 @@ describe('compareTrialSets', () => {
       expect.objectContaining({ key: 'cfgpipe/checkpoint_1', status: 'baseline-only' }),
       expect.objectContaining({ key: 'code_search/checkpoint_1', status: 'candidate-only' }),
     ]);
-    expect(result.entries[0].deltaPoints).toBeUndefined();
-    expect(result.entries[1].deltaPoints).toBeUndefined();
+    expect(result.entries[0]).not.toHaveProperty('deltaPoints');
+    expect(result.entries[1]).not.toHaveProperty('deltaPoints');
     expect(result.maxRegressionPoints).toBe(0);
     expect(result.exceedsThreshold).toBe(false);
   });
