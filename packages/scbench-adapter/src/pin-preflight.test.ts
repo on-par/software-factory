@@ -107,6 +107,18 @@ describe('checkPinnedInput', () => {
     expect(result.detail).toContain(dir);
   });
 
+  it('omits the parenthesized detail from "not a git checkout" when stderr is empty', async () => {
+    const { exec } = fakeExec({
+      'rev-parse --git-dir': { exitCode: 128, stderr: '' },
+    });
+    const spec: PinnedInputSpec = { input: 'SCBENCH_CHECKOUT', path: dir, expectedCommit: EXPECTED_SHA };
+
+    const result = await checkPinnedInput(spec, { exec });
+
+    expect(result.ok).toBe(false);
+    expect(result.detail).toBe(`not a git checkout: ${dir}`);
+  });
+
   it('fails with "dirty" and the change count when porcelain is non-empty (modified + untracked)', async () => {
     const { exec } = fakeExec({
       'rev-parse --git-dir': { exitCode: 0, stdout: '.git' },
@@ -164,6 +176,19 @@ describe('checkPinnedInput', () => {
     expect(result.detail).toContain('some git error');
   });
 
+  it('falls back to stdout in "git status failed" when stderr is empty', async () => {
+    const { exec } = fakeExec({
+      'rev-parse --git-dir': { exitCode: 0, stdout: '.git' },
+      'status --porcelain': { exitCode: 1, stdout: 'index locked', stderr: '' },
+    });
+    const spec: PinnedInputSpec = { input: 'SCBENCH_CHECKOUT', path: dir, expectedCommit: EXPECTED_SHA };
+
+    const result = await checkPinnedInput(spec, { exec });
+
+    expect(result.ok).toBe(false);
+    expect(result.detail).toBe('git status failed: index locked');
+  });
+
   it('fails with "could not resolve HEAD" when rev-parse HEAD exits non-zero', async () => {
     const { exec } = fakeExec({
       'rev-parse --git-dir': { exitCode: 0, stdout: '.git' },
@@ -177,6 +202,20 @@ describe('checkPinnedInput', () => {
     expect(result.ok).toBe(false);
     expect(result.detail).toContain('could not resolve HEAD');
     expect(result.detail).toContain('ambiguous argument HEAD');
+  });
+
+  it('falls back to stdout in "could not resolve HEAD" when stderr is empty', async () => {
+    const { exec } = fakeExec({
+      'rev-parse --git-dir': { exitCode: 0, stdout: '.git' },
+      'status --porcelain': { exitCode: 0, stdout: '' },
+      'rev-parse HEAD': { exitCode: 128, stdout: 'no such ref', stderr: '' },
+    });
+    const spec: PinnedInputSpec = { input: 'SCBENCH_CHECKOUT', path: dir, expectedCommit: EXPECTED_SHA };
+
+    const result = await checkPinnedInput(spec, { exec });
+
+    expect(result.ok).toBe(false);
+    expect(result.detail).toBe('could not resolve HEAD: no such ref');
   });
 });
 
@@ -247,13 +286,10 @@ describe('parsePinFile', () => {
     expect(() => parsePinFile('{not json')).toThrow(/not valid JSON/);
   });
 
-  it.each(['42', '"sha"', 'true'])(
-    'throws AdapterError when the parsed JSON is primitive %s, not an object',
-    (raw) => {
-      expect(() => parsePinFile(raw)).toThrow(AdapterError);
-      expect(() => parsePinFile(raw)).toThrow(/must be a JSON object/);
-    },
-  );
+  it.each(['42', '"sha"', 'true'])('throws AdapterError when the parsed JSON is primitive %s, not an object', (raw) => {
+    expect(() => parsePinFile(raw)).toThrow(AdapterError);
+    expect(() => parsePinFile(raw)).toThrow(/must be a JSON object/);
+  });
 
   it('throws AdapterError when the parsed JSON object is missing the nested problems object', () => {
     expect(() => parsePinFile(JSON.stringify({ commit: EXPECTED_SHA }))).toThrow(AdapterError);
