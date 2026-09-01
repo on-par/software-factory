@@ -127,15 +127,17 @@ npm run scbench
 uv run --project "$SCBENCH_CHECKOUT" python packages/scbench-adapter/python/run_scbench.py \
   run --config packages/scbench-adapter/scbench.run.yaml --problem cfgpipe
 
-# 5. Copy each trial's Factory artifacts (manifest.json, request.json,
-#    events.ndjson, diff.patch, brief.md) into
-#    evals/scbench-baseline/runs/<problem>/<checkpoint>/<trial-n>/, and
-#    additionally copy that trial's native SCBench evidence — evaluation.json
-#    (from SCBench's checkpoint output directory), checkpoint_results.jsonl
-#    (from SCBench's run root), and run_info.yaml (resolved run spec +
-#    execution summary) — into the same trial directory, alongside the
-#    Factory artifacts. Benchmark pass rate and erosion in report.md are
-#    derived only from these native evidence files.
+# 5. Collect each trial into the baseline: copies the five Factory artifacts
+#    AND the trial's native SCBench evidence — evaluation.json (checkpoint
+#    output directory), checkpoint_results.jsonl (run root), run_info.yaml
+#    (resolved run spec) — into
+#    evals/scbench-baseline/runs/<problem>/<checkpoint>/trial-<n>/. It
+#    validates all three native evidence files exist BEFORE writing anything
+#    and exits non-zero (trial = missing-evidence, nothing written) when any
+#    is absent — a trial without native evidence can never look passing.
+node packages/scbench-adapter/dist/cli.js collect-trial \
+  --output <factory-artifacts-root> --scbench-run <scbench-run-output-dir> \
+  --problem cfgpipe --checkpoint <checkpoint-id> --trial <n>
 ```
 
 Required tools: `git`, `uv` (Python ≥ 3.12 environment per upstream's

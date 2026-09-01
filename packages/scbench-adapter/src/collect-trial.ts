@@ -1,13 +1,13 @@
-// packages/scbench-adapter/src/collect-trial.ts — copy a trial's Factory artifacts into the baseline runs tree (#1148).
+// packages/scbench-adapter/src/collect-trial.ts — copy a trial's Factory artifacts + native SCBench evidence into the baseline runs tree (#1148, #1149).
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { collectArtifacts, type ArtifactsFsDeps } from './artifacts.js';
+import { collectArtifacts, NATIVE_EVIDENCE_FILES, type ArtifactsFsDeps } from './artifacts.js';
 import { AdapterError } from './checkpoint.js';
 
 /** The five Factory artifacts a baseline trial directory must retain
  *  (evals/scbench-baseline/README.md). Native SCBench evidence
- *  (NATIVE_EVIDENCE_FILES) is out of scope here (#1148). */
+ *  (NATIVE_EVIDENCE_FILES) is collected separately below (#1149). */
 export const FACTORY_TRIAL_FILES = [
   'manifest.json',
   'request.json',
@@ -26,6 +26,11 @@ export interface CollectTrialOptions {
   trial: number;
   /** Baseline runs root, e.g. evals/scbench-baseline/runs. */
   runsDir: string;
+  /** Completed SCBench run output directory (the launcher's save_dir run root).
+   *  At the pinned commit: checkpoint_results.jsonl lives at <scbenchRunDir>/,
+   *  run_info.yaml at <scbenchRunDir>/<problemId>/, and evaluation.json at
+   *  <scbenchRunDir>/<problemId>/<checkpointId>/. */
+  scbenchRunDir: string;
 }
 
 export interface CollectTrialResult {
@@ -36,12 +41,30 @@ export interface CollectTrialResult {
 
 const REAL_FS: ArtifactsFsDeps = { existsSync, readFileSync, mkdirSync, copyFileSync };
 
-/** Copies the five Factory artifacts for one trial from
- *  <outputTree>/<problemId>/<checkpointId>/ into
- *  <runsDir>/<problemId>/<checkpointId>/trial-<trial>/, creating the trial
- *  directory when absent. Throws AdapterError naming every missing file
- *  before any write, and reuses collectArtifacts' same-dir validation-only
- *  mode for manifest existence/parse/version checks. */
+/** Derives the three native-evidence source paths at the pinned SCBench
+ *  commit's run-output layout: checkpoint_results.jsonl at <scbenchRunDir>/,
+ *  run_info.yaml at <scbenchRunDir>/<problemId>/, evaluation.json at
+ *  <scbenchRunDir>/<problemId>/<checkpointId>/. */
+function nativeEvidenceSourcePaths(
+  scbenchRunDir: string,
+  problemId: string,
+  checkpointId: string,
+): Record<(typeof NATIVE_EVIDENCE_FILES)[number], string> {
+  return {
+    'evaluation.json': join(scbenchRunDir, problemId, checkpointId, 'evaluation.json'),
+    'checkpoint_results.jsonl': join(scbenchRunDir, 'checkpoint_results.jsonl'),
+    'run_info.yaml': join(scbenchRunDir, problemId, 'run_info.yaml'),
+  };
+}
+
+/** Copies the five Factory artifacts plus the three native SCBench evidence
+ *  files for one trial from <outputTree>/<problemId>/<checkpointId>/ and
+ *  <scbenchRunDir>/ into <runsDir>/<problemId>/<checkpointId>/trial-<trial>/,
+ *  creating the trial directory when absent. Throws AdapterError naming
+ *  every missing file before any write — reusing collectArtifacts' same-dir
+ *  validation-only mode for manifest existence/parse/version checks, and
+ *  failing closed (nothing written) when any native evidence file is absent,
+ *  so a trial can never be read as passing without it (ADR-0007). */
 export function collectTrial(opts: CollectTrialOptions, deps: ArtifactsFsDeps = REAL_FS): CollectTrialResult {
   const sourceDir = join(opts.outputTree, opts.problemId, opts.checkpointId);
 
@@ -52,12 +75,26 @@ export function collectTrial(opts: CollectTrialOptions, deps: ArtifactsFsDeps = 
 
   collectArtifacts({ artifactsDir: sourceDir, dest: sourceDir }, deps);
 
+  const evidencePaths = nativeEvidenceSourcePaths(opts.scbenchRunDir, opts.problemId, opts.checkpointId);
+  const missingEvidence = NATIVE_EVIDENCE_FILES.filter((f) => !deps.existsSync(evidencePaths[f]));
+  if (missingEvidence.length > 0) {
+    throw new AdapterError(
+      `native SCBench evidence missing for trial ${opts.problemId}/${opts.checkpointId}/trial-${opts.trial}: ` +
+        missingEvidence.map((f) => `${f} (expected at ${evidencePaths[f]})`).join(', ') +
+        ' — trial is missing-evidence; nothing was written (ADR-0007: no passing trial without native evidence)',
+    );
+  }
+
   const trialDir = join(opts.runsDir, opts.problemId, opts.checkpointId, `trial-${opts.trial}`);
   deps.mkdirSync(trialDir, { recursive: true });
 
   const copied: string[] = [];
   for (const name of FACTORY_TRIAL_FILES) {
     deps.copyFileSync(join(sourceDir, name), join(trialDir, name));
+    copied.push(name);
+  }
+  for (const name of NATIVE_EVIDENCE_FILES) {
+    deps.copyFileSync(evidencePaths[name], join(trialDir, name));
     copied.push(name);
   }
 
