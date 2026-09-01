@@ -6,6 +6,7 @@ import { loadBaselineConfig, type BaselineConfig, collectBaselineTrials, generat
 import { runCatalogPreflight, type CatalogPreflightOutcome, type CatalogPreflightSpec } from './catalog-preflight.js';
 import { AdapterError, type ScbenchCheckpoint } from './checkpoint.js';
 import { collectTrial } from './collect-trial.js';
+import { compareTrialSets, renderComparisonReport } from './compare.js';
 import { parsePinFile, runPinPreflight, type PinnedInputSpec, type PinPreflightOutcome } from './pin-preflight.js';
 import { runCheckpoint, type RunCheckpointOptions } from './run-checkpoint.js';
 import { createExecaExec } from './workspace.js';
@@ -18,7 +19,8 @@ const CATALOG_PREFLIGHT_USAGE = 'usage: scbench-factory-agent catalog-preflight 
 const LAUNCH_USAGE = 'usage: scbench-factory-agent launch [--pin <path>] [--config <path>] [--dry-run]';
 const COLLECT_TRIAL_USAGE =
   'usage: scbench-factory-agent collect-trial --output <dir> --scbench-run <dir> --problem <id> --checkpoint <id> --trial <n> [--runs <dir>]';
-const USAGE = `${RUN_CHECKPOINT_USAGE}\n${BASELINE_REPORT_USAGE}\n${PIN_PREFLIGHT_USAGE}\n${CATALOG_PREFLIGHT_USAGE}\n${LAUNCH_USAGE}\n${COLLECT_TRIAL_USAGE}`;
+const COMPARE_USAGE = 'usage: scbench-factory-agent compare --baseline <dir> --candidate <dir> [--threshold <points>]';
+const USAGE = `${RUN_CHECKPOINT_USAGE}\n${BASELINE_REPORT_USAGE}\n${PIN_PREFLIGHT_USAGE}\n${CATALOG_PREFLIGHT_USAGE}\n${LAUNCH_USAGE}\n${COLLECT_TRIAL_USAGE}\n${COMPARE_USAGE}`;
 
 const LAUNCHER_CONFIG_ARG = 'packages/scbench-adapter/scbench.run.yaml';
 const LAUNCHER_SCRIPT = 'packages/scbench-adapter/python/run_scbench.py';
@@ -26,6 +28,7 @@ const LAUNCHER_SCRIPT = 'packages/scbench-adapter/python/run_scbench.py';
 const REQUIRED_FLAGS = ['--workspace', '--artifacts', '--task-file', '--problem', '--checkpoint'] as const;
 const BASELINE_REPORT_REQUIRED_FLAGS = ['--config', '--runs', '--out'] as const;
 const COLLECT_TRIAL_REQUIRED_FLAGS = ['--output', '--scbench-run', '--problem', '--checkpoint', '--trial'] as const;
+const COMPARE_REQUIRED_FLAGS = ['--baseline', '--candidate'] as const;
 
 const DEFAULT_PIN_PATH = fileURLToPath(new URL('../scbench.pin.json', import.meta.url));
 const DEFAULT_ADAPTER_CLI_PATH = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
@@ -379,9 +382,45 @@ async function runCollectTrialCommand(rest: readonly string[], deps: CliDeps): P
   }
 }
 
+/** Compares a retained measured --baseline runs directory against a newer
+ *  measured --candidate runs directory, deriving correctness exclusively
+ *  from validated native SCBench evidence (compareTrialSets/
+ *  evaluateTrialVerdict), and prints the operator-readable report. Returns
+ *  2 on a usage error or AdapterError (e.g. a missing runs directory), 1
+ *  when the worst measured per-group pass-rate drop exceeds --threshold
+ *  (default 0 points), 0 otherwise. */
+async function runCompareCommand(rest: readonly string[], deps: CliDeps): Promise<number> {
+  const flags = parseFlags(rest);
+  const missing = COMPARE_REQUIRED_FLAGS.filter((flag) => flags[flag] === undefined);
+  if (missing.length > 0) {
+    deps.logError(`missing required flag(s): ${missing.join(', ')}\n${COMPARE_USAGE}`);
+    return 2;
+  }
+
+  const threshold = flags['--threshold'] !== undefined ? Number(flags['--threshold']) : 0;
+  if (!Number.isFinite(threshold) || threshold < 0) {
+    deps.logError(`--threshold must be a non-negative number, got ${flags['--threshold']}\n${COMPARE_USAGE}`);
+    return 2;
+  }
+
+  try {
+    const baseline = deps.collectBaselineTrials(flags['--baseline']);
+    const candidate = deps.collectBaselineTrials(flags['--candidate']);
+    const result = compareTrialSets(baseline, candidate, threshold);
+    deps.log(renderComparisonReport(result));
+    return result.exceedsThreshold ? 1 : 0;
+  } catch (err) {
+    if (err instanceof AdapterError) {
+      deps.logError(err.message);
+      return 2;
+    }
+    throw err;
+  }
+}
+
 /** Hand-rolled argv parsing + dispatch across the `run-checkpoint`,
- *  `baseline-report`, `pin-preflight`, `catalog-preflight`, `launch`, and
- *  `collect-trial` subcommands. */
+ *  `baseline-report`, `pin-preflight`, `catalog-preflight`, `launch`,
+ *  `collect-trial`, and `compare` subcommands. */
 export async function main(argv: readonly string[], deps: CliDeps = defaultCliDeps()): Promise<number> {
   const [subcommand, ...rest] = argv;
   if (subcommand === 'run-checkpoint') return runRunCheckpoint(rest, deps);
@@ -390,6 +429,7 @@ export async function main(argv: readonly string[], deps: CliDeps = defaultCliDe
   if (subcommand === 'catalog-preflight') return runCatalogPreflightCommand(rest, deps);
   if (subcommand === 'launch') return runLaunchCommand(rest, deps);
   if (subcommand === 'collect-trial') return runCollectTrialCommand(rest, deps);
+  if (subcommand === 'compare') return runCompareCommand(rest, deps);
 
   deps.logError(USAGE);
   return 2;
