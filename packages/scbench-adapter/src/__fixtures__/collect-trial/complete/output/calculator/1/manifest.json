@@ -1,0 +1,36 @@
+{
+  "manifestVersion": 1,
+  "run": {
+    "issue": 9000001,
+    "profile": "local-only",
+    "outcome": "ready",
+    "startedAt": "2026-07-28T00:00:00.000Z",
+    "endedAt": "2026-07-28T00:01:00.000Z",
+    "elapsedMs": 60000,
+    "workspace": "/tmp/ws"
+  },
+  "phases": {
+    "plan": "ok",
+    "build": "ok",
+    "check": "ok",
+    "ship": "skipped"
+  },
+  "modelAttempts": [],
+  "cost": {
+    "totalUsd": 0,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "entries": []
+  },
+  "git": {
+    "changedFiles": [],
+    "diffStat": "",
+    "diffBase": "HEAD"
+  },
+  "artifacts": {
+    "manifest": "manifest.json",
+    "request": "request.json",
+    "events": "events.ndjson",
+    "diff": "diff.patch"
+  }
+}

@@ -8,3 +8,4 @@ package-lock.json
 *.tsbuildinfo
 evals/
 packages/dashboard/src/index.css
+packages/scbench-adapter/src/__fixtures__/

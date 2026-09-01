@@ -1,11 +1,14 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { NATIVE_EVIDENCE_FILES } from './artifacts.js';
+import { loadBaselineConfig, collectBaselineTrials, generateBaselineReport } from './baseline.js';
 import { AdapterError } from './checkpoint.js';
+import { main, defaultCliDeps } from './cli-run.js';
 import { collectTrial, FACTORY_TRIAL_FILES } from './collect-trial.js';
 import { minimalManifest } from './manifest-fixture.js';
 
@@ -298,6 +301,111 @@ describe('collectTrial', () => {
       expect(second.alreadyImported).toBe(false);
       expect(second.copied).toEqual([...FACTORY_TRIAL_FILES, ...NATIVE_EVIDENCE_FILES]);
       expect(readFileSync(join(first.trialDir, 'evaluation.json'), 'utf-8')).toBe(NATIVE_CONTENTS['evaluation.json']);
+    });
+  });
+
+  describe('fixture-based collection (#1151)', () => {
+    const FIXTURES = fileURLToPath(new URL('./__fixtures__/collect-trial/', import.meta.url));
+    const COMPLETE_OUTPUT = join(FIXTURES, 'complete', 'output');
+    const COMPLETE_SCBENCH_RUN = join(FIXTURES, 'complete', 'scbench-run');
+    const MISSING_OUTPUT = join(FIXTURES, 'missing-evidence', 'output');
+    const MISSING_SCBENCH_RUN = join(FIXTURES, 'missing-evidence', 'scbench-run');
+    const EXPECTED_FILES = [...FACTORY_TRIAL_FILES, ...NATIVE_EVIDENCE_FILES];
+
+    function collectFixtureTrial() {
+      return collectTrial({
+        outputTree: COMPLETE_OUTPUT,
+        problemId: 'calculator',
+        checkpointId: '1',
+        trial: 1,
+        runsDir,
+        scbenchRunDir: COMPLETE_SCBENCH_RUN,
+      });
+    }
+
+    function fixtureSourcePath(name: (typeof EXPECTED_FILES)[number]): string {
+      if ((FACTORY_TRIAL_FILES as readonly string[]).includes(name)) {
+        return join(COMPLETE_OUTPUT, 'calculator', '1', name);
+      }
+      if (name === 'evaluation.json') return join(COMPLETE_SCBENCH_RUN, 'calculator', '1', name);
+      if (name === 'checkpoint_results.jsonl') return join(COMPLETE_SCBENCH_RUN, name);
+      return join(COMPLETE_SCBENCH_RUN, 'calculator', name);
+    }
+
+    it('copies all 8 expected files from the complete-evidence fixture byte-identical into the trial directory', () => {
+      const result = collectFixtureTrial();
+
+      const trialDir = join(runsDir, 'calculator', '1', 'trial-1');
+      expect(result).toEqual({
+        sourceDir: join(COMPLETE_OUTPUT, 'calculator', '1'),
+        trialDir,
+        copied: EXPECTED_FILES,
+        alreadyImported: false,
+      });
+      for (const name of EXPECTED_FILES) {
+        const copiedPath = join(trialDir, name);
+        expect(existsSync(copiedPath)).toBe(true);
+        const copied = readFileSync(copiedPath);
+        const source = readFileSync(fixtureSourcePath(name));
+        expect(copied.equals(source)).toBe(true);
+      }
+    });
+
+    it('the real CLI collect-trial subcommand exits 2 and writes nothing for the missing-evidence fixture', async () => {
+      const deps = { ...defaultCliDeps(), log: vi.fn(), logError: vi.fn() };
+
+      const code = await main(
+        [
+          'collect-trial',
+          '--output',
+          MISSING_OUTPUT,
+          '--scbench-run',
+          MISSING_SCBENCH_RUN,
+          '--problem',
+          'calculator',
+          '--checkpoint',
+          '1',
+          '--trial',
+          '1',
+          '--runs',
+          runsDir,
+        ],
+        deps,
+      );
+
+      expect(code).toBe(2);
+      expect(deps.logError).toHaveBeenCalledWith(expect.stringMatching(/evaluation\.json/));
+      expect(deps.logError).toHaveBeenCalledWith(expect.stringMatching(/missing-evidence/));
+      expect(readdirSync(runsDir)).toEqual([]);
+    });
+
+    it('a second collectTrial run against the already-imported fixture trial is byte-identical and copies nothing', () => {
+      collectFixtureTrial();
+      const trialDir = join(runsDir, 'calculator', '1', 'trial-1');
+      const namesBefore = readdirSync(trialDir).sort();
+      const contentsBefore = new Map(namesBefore.map((name) => [name, readFileSync(join(trialDir, name))]));
+
+      const second = collectFixtureTrial();
+
+      expect(second).toEqual({
+        sourceDir: join(COMPLETE_OUTPUT, 'calculator', '1'),
+        trialDir,
+        copied: [],
+        alreadyImported: true,
+      });
+      expect(readdirSync(trialDir).sort()).toEqual(namesBefore);
+      for (const name of namesBefore) {
+        expect(readFileSync(join(trialDir, name)).equals(contentsBefore.get(name)!)).toBe(true);
+      }
+    });
+
+    it('generateBaselineReport over the imported fixture trials reproduces the committed golden report byte-for-byte', () => {
+      collectFixtureTrial();
+      const config = loadBaselineConfig(readFileSync(join(FIXTURES, 'baseline.config.json'), 'utf-8'));
+      const report = generateBaselineReport(config, collectBaselineTrials(runsDir));
+      const normalized = report.split(runsDir).join('<RUNS>');
+
+      expect(normalized).toBe(readFileSync(join(FIXTURES, 'expected-report.md'), 'utf-8'));
     });
   });
 });

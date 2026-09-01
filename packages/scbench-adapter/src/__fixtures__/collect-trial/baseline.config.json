@@ -1,0 +1,55 @@
+{
+  "baselineId": "scbench-fixture-baseline",
+  "factory": {
+    "repo": "https://github.com/on-par/software-factory",
+    "commit": "6c74eeea2a7b114c86ffd85a3749824c5c6bdd91",
+    "packageVersion": "2.0.0"
+  },
+  "scbench": {
+    "repo": "https://github.com/SprocketLab/slop-code-bench",
+    "commit": "13de1a7a6b8b3dc5cc532a0c322a0997afa5bec7",
+    "pinnedAt": "2026-07-28"
+  },
+  "problemCatalog": {
+    "repo": "https://github.com/gabeorlanski/scb-problems",
+    "version": "v1.0",
+    "commit": "4d38d300059667d57e43c31969bc455f5c338b52",
+    "pinnedAt": "2026-07-29"
+  },
+  "modelConfig": {
+    "source": "packages/config/src/models.json and packages/config/src/routes.json at factory.commit",
+    "env": {
+      "FACTORY_LOCAL_ONLY": "unset",
+      "FACTORY_EXPERIMENTAL": "unset"
+    }
+  },
+  "promptInputs": "Checkpoint briefs are produced by materializeBrief in @on-par/scbench-adapter at factory.commit; phase prompts/constitutions are those shipped in @on-par/factory-config at factory.commit",
+  "environment": {
+    "node": ">=24",
+    "requiredBinaries": [
+      "git",
+      "claude",
+      "node"
+    ],
+    "hostClass": "macOS arm64 (Darwin 25.x) — record actual host in each live run's manifest",
+    "scbenchHarness": "Python per upstream README at the pinned SCBench commit"
+  },
+  "problems": {
+    "resolvedFrom": "problemCatalog.commit — the lexicographically first (smoke) and first three (suite) problem ids among the catalog checkout's direct child directories containing config.yaml, resolved 2026-07-29 and frozen here as literals",
+    "smoke": "cfgpipe",
+    "suite": [
+      "cfgpipe",
+      "circuit_eval",
+      "code_search"
+    ]
+  },
+  "trials": {
+    "smokeRuns": 2,
+    "suiteTrialsPerProblem": 3
+  },
+  "comparisonThreshold": 2,
+  "passPolicy": {
+    "id": "core-cases",
+    "description": "Upstream PassPolicy.CORE_CASES at the pinned SCBench commit: a checkpoint passes iff every Core-group test in its native evaluation.json passes (pass_counts.Core === total_counts.Core). Evidence guards: infrastructure_failure === true or missing evaluation.json is never a pass."
+  }
+}
