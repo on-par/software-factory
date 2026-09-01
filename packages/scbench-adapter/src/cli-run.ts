@@ -159,9 +159,14 @@ async function runPinPreflightCommand(rest: readonly string[], deps: CliDeps): P
     return 2;
   }
 
-  let pin;
+  let outcome: PinPreflightOutcome;
   try {
-    pin = parsePinFile(raw);
+    const pin = parsePinFile(raw);
+    const specs: PinnedInputSpec[] = [
+      { input: 'SCBENCH_CHECKOUT', path: deps.env.SCBENCH_CHECKOUT, expectedCommit: pin.commit },
+      { input: 'SCBENCH_PROBLEMS_PATH', path: deps.env.SCBENCH_PROBLEMS_PATH, expectedCommit: pin.problems.commit },
+    ];
+    outcome = await deps.runPinPreflight(specs);
   } catch (err) {
     if (err instanceof AdapterError) {
       deps.logError(err.message);
@@ -170,12 +175,6 @@ async function runPinPreflightCommand(rest: readonly string[], deps: CliDeps): P
     throw err;
   }
 
-  const specs: PinnedInputSpec[] = [
-    { input: 'SCBENCH_CHECKOUT', path: deps.env.SCBENCH_CHECKOUT, expectedCommit: pin.commit },
-    { input: 'SCBENCH_PROBLEMS_PATH', path: deps.env.SCBENCH_PROBLEMS_PATH, expectedCommit: pin.problems.commit },
-  ];
-
-  const outcome = await deps.runPinPreflight(specs);
   for (const result of outcome.results) {
     if (result.ok) {
       deps.log(`pin-preflight: ${result.input} ok — ${result.detail}`);

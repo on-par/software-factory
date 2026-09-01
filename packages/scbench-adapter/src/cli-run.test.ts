@@ -453,6 +453,16 @@ describe('pin-preflight subcommand', () => {
 
     expect(deps.readPinFile).toHaveBeenCalledWith('/custom/scbench.pin.json');
   });
+
+  it('re-throws unexpected (non-AdapterError) errors from runPinPreflight', async () => {
+    const deps = fakeDeps({
+      runPinPreflight: vi.fn(async () => {
+        throw new Error('boom');
+      }),
+    });
+
+    await expect(main(['pin-preflight'], deps)).rejects.toThrow('boom');
+  });
 });
 
 describe('defaultCliDeps', () => {
