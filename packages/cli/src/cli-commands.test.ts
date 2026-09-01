@@ -405,6 +405,9 @@ beforeEach(() => {
     'FACTORY_SANDBOX',
     'FACTORY_PLAN_MODEL',
     'FACTORY_BUILD_MODEL',
+    'FACTORY_AUTO_FAILOVER',
+    'FACTORY_FAILOVER_COOLDOWN_MINUTES',
+    'FACTORY_FAILOVER_MODEL',
     'GITHUB_TOKEN',
     'GH_TOKEN',
   ].forEach((k) => trackEnv(k));
@@ -415,6 +418,9 @@ beforeEach(() => {
   delete process.env.FACTORY_USAGE_WATCH;
   delete process.env.FACTORY_PLAN_MODEL;
   delete process.env.FACTORY_BUILD_MODEL;
+  delete process.env.FACTORY_AUTO_FAILOVER;
+  delete process.env.FACTORY_FAILOVER_COOLDOWN_MINUTES;
+  delete process.env.FACTORY_FAILOVER_MODEL;
   delete process.env.GITHUB_TOKEN;
   process.env.GH_TOKEN = 'test-token';
   process.exitCode = undefined;
