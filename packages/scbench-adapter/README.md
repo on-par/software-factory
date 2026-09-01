@@ -120,7 +120,7 @@ core-cases` explicitly — both are real `RunConfig` fields (upstream
 - Model policy is the evaluator's choice — the adapter never forces one. Set
   `FACTORY_LOCAL_ONLY=1` in the SCBench process environment for an
   all-local model policy, or leave routing as configured in
-  `packages/config/src/routes.json`.
+  `packages/config/src/defaults.ts`.
 
 ## Pinned-upstream compatibility check
 
