@@ -29,3 +29,6 @@ export type {
   TrialVerdict,
 } from './baseline.js';
 export { collectBaselineTrials, evaluateTrialVerdict, generateBaselineReport, loadBaselineConfig } from './baseline.js';
+
+export type { PinFile, PinnedInputSpec, PinPreflightOutcome, PinPreflightResult } from './pin-preflight.js';
+export { checkPinnedInput, parsePinFile, runPinPreflight } from './pin-preflight.js';

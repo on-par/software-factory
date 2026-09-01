@@ -15,5 +15,8 @@ describe('index exports', () => {
     expect(typeof adapter.defaultCliDeps).toBe('function');
     expect(typeof adapter.runCli).toBe('function');
     expect(adapter.AdapterError).toBeInstanceOf(Function);
+    expect(typeof adapter.parsePinFile).toBe('function');
+    expect(typeof adapter.checkPinnedInput).toBe('function');
+    expect(typeof adapter.runPinPreflight).toBe('function');
   });
 });

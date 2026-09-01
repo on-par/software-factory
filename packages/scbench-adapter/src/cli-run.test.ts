@@ -4,6 +4,7 @@ import type { BaselineTrial } from './baseline.js';
 import { AdapterError, type CheckpointResult } from './checkpoint.js';
 import { defaultCliDeps, main, type CliDeps } from './cli-run.js';
 import { minimalManifest } from './manifest-fixture.js';
+import type { PinPreflightOutcome } from './pin-preflight.js';
 
 const RESULT: CheckpointResult = {
   outcome: 'ready',
@@ -32,6 +33,25 @@ const VALID_CONFIG_JSON = JSON.stringify({
   passPolicy: { id: 'core-cases', description: 'Core-group tests must all pass.' },
 });
 
+const VALID_PIN_JSON = JSON.stringify({
+  repo: 'https://example.com/scbench',
+  commit: 'a'.repeat(40),
+  pinnedAt: '2026-07-28',
+  problems: { repo: 'https://example.com/problems', version: 'v1.0', commit: 'b'.repeat(40), pinnedAt: '2026-07-29' },
+});
+
+const ALL_OK_OUTCOME: PinPreflightOutcome = {
+  ok: true,
+  results: [
+    { input: 'SCBENCH_CHECKOUT', ok: true, detail: `HEAD matches pinned commit ${'a'.repeat(40)}, working tree clean` },
+    {
+      input: 'SCBENCH_PROBLEMS_PATH',
+      ok: true,
+      detail: `HEAD matches pinned commit ${'b'.repeat(40)}, working tree clean`,
+    },
+  ],
+};
+
 function fakeDeps(overrides: Partial<CliDeps> = {}): CliDeps {
   return {
     readTaskFile: vi.fn(async () => 'do the thing'),
@@ -41,6 +61,9 @@ function fakeDeps(overrides: Partial<CliDeps> = {}): CliDeps {
     writeReport: vi.fn(async () => undefined),
     log: vi.fn(),
     logError: vi.fn(),
+    readPinFile: vi.fn(async () => VALID_PIN_JSON),
+    env: { SCBENCH_CHECKOUT: '/tmp/checkout', SCBENCH_PROBLEMS_PATH: '/tmp/problems' },
+    runPinPreflight: vi.fn(async () => ALL_OK_OUTCOME),
     ...overrides,
   };
 }
@@ -358,6 +381,80 @@ describe('baseline-report subcommand', () => {
   });
 });
 
+describe('pin-preflight subcommand', () => {
+  it('exits 0 and logs an ok line per input when the preflight passes', async () => {
+    const deps = fakeDeps();
+
+    const code = await main(['pin-preflight'], deps);
+
+    expect(code).toBe(0);
+    expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('SCBENCH_CHECKOUT ok'));
+    expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('SCBENCH_PROBLEMS_PATH ok'));
+  });
+
+  it('exits 1 and logs a FAIL line naming the failing input on a commit mismatch', async () => {
+    const outcome: PinPreflightOutcome = {
+      ok: false,
+      results: [
+        ALL_OK_OUTCOME.results[0],
+        {
+          input: 'SCBENCH_PROBLEMS_PATH',
+          ok: false,
+          detail: `HEAD ${'c'.repeat(40)} does not match pinned commit ${'b'.repeat(40)}`,
+        },
+      ],
+    };
+    const deps = fakeDeps({ runPinPreflight: vi.fn(async () => outcome) });
+
+    const code = await main(['pin-preflight'], deps);
+
+    expect(code).toBe(1);
+    expect(deps.logError).toHaveBeenCalledWith(
+      expect.stringContaining('SCBENCH_PROBLEMS_PATH FAIL — HEAD ' + 'c'.repeat(40)),
+    );
+  });
+
+  it('exits 2 with a "could not read pin file" message when readPinFile rejects', async () => {
+    const deps = fakeDeps({ readPinFile: vi.fn(async () => Promise.reject(new Error('ENOENT'))) });
+
+    const code = await main(['pin-preflight'], deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('could not read pin file'));
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('ENOENT'));
+  });
+
+  it('exits 2 when the pin file content is malformed', async () => {
+    const deps = fakeDeps({ readPinFile: vi.fn(async () => '{"not":"valid"}') });
+
+    const code = await main(['pin-preflight'], deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('missing required field'));
+  });
+
+  it('wires env values and the pinned commits from the pin file into the specs passed to runPinPreflight', async () => {
+    const deps = fakeDeps({
+      env: { SCBENCH_CHECKOUT: '/opt/checkout', SCBENCH_PROBLEMS_PATH: '/opt/problems' },
+    });
+
+    await main(['pin-preflight'], deps);
+
+    expect(deps.runPinPreflight).toHaveBeenCalledWith([
+      { input: 'SCBENCH_CHECKOUT', path: '/opt/checkout', expectedCommit: 'a'.repeat(40) },
+      { input: 'SCBENCH_PROBLEMS_PATH', path: '/opt/problems', expectedCommit: 'b'.repeat(40) },
+    ]);
+  });
+
+  it('passes --pin through to readPinFile', async () => {
+    const deps = fakeDeps();
+
+    await main(['pin-preflight', '--pin', '/custom/scbench.pin.json'], deps);
+
+    expect(deps.readPinFile).toHaveBeenCalledWith('/custom/scbench.pin.json');
+  });
+});
+
 describe('defaultCliDeps', () => {
   it('logs to console.log/console.error and reads real files', async () => {
     const deps = defaultCliDeps();
@@ -401,6 +498,40 @@ describe('defaultCliDeps', () => {
       expect(await deps.readBaselineConfig(configPath)).toBe(raw);
       await deps.writeReport(outPath, 'report content');
       expect(readFileSync(outPath, 'utf-8')).toBe('report content');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('exposes process.env and reads a real pin file', async () => {
+    const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+
+    const deps = defaultCliDeps();
+    expect(deps.env).toBe(process.env);
+
+    const dir = mkdtempSync(join(tmpdir(), 'scb-cli-pin-'));
+    try {
+      const pinPath = join(dir, 'scbench.pin.json');
+      writeFileSync(pinPath, VALID_PIN_JSON);
+      expect(await deps.readPinFile(pinPath)).toBe(VALID_PIN_JSON);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('runs a real pin preflight against a non-git directory (fails closed, no crash)', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+
+    const deps = defaultCliDeps();
+    const dir = mkdtempSync(join(tmpdir(), 'scb-cli-pin-run-'));
+    try {
+      const outcome = await deps.runPinPreflight([{ input: 'X', path: dir, expectedCommit: 'a'.repeat(40) }]);
+      expect(outcome.ok).toBe(false);
+      expect(outcome.results[0].detail).toContain('not a git checkout');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
