@@ -1559,6 +1559,79 @@ bash scripts/verify.sh
       expect(events).toContain('run-done');
       expect(events).not.toContain('kpi-snapshot');
     });
+
+    describe('macOS keychain preflight (#1014)', () => {
+      let originalPlatform: NodeJS.Platform;
+
+      beforeEach(() => {
+        trackEnv('TMUX', 'ANTHROPIC_API_KEY');
+        originalPlatform = process.platform;
+        Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+        h.claudeAvailable = true;
+        delete process.env.TMUX;
+        delete process.env.ANTHROPIC_API_KEY;
+        writeFileSync(paths().queue, 'app 1\n');
+        writeFileSync(paths().stop, '');
+      });
+
+      afterEach(() => {
+        Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+      });
+
+      it('aborts before claiming any issue when the keychain is unreadable inside tmux', async () => {
+        process.env.TMUX = '/tmp/tmux-1000/default,1234,0';
+        h.execSyncImpl = (cmd: string) => {
+          if (cmd.includes('find-generic-password')) throw new Error('SecKeychainSearchCopyNext: exit 44');
+          return '';
+        };
+        await expect(runMain('run', '--local-queue')).rejects.toThrow(/tmux/);
+        const events = readFileSync(paths().events, 'utf-8');
+        expect(events).toContain('environment_warning');
+        expect(events).toContain('local_auth');
+        expect(events).not.toContain(`lane 'app' started`);
+      });
+
+      it('warns but proceeds when the keychain is unreadable outside tmux', async () => {
+        h.execSyncImpl = (cmd: string) => {
+          if (cmd.includes('find-generic-password')) throw new Error('SecKeychainSearchCopyNext: exit 44');
+          return '';
+        };
+        const res = await runMain('run', '--local-queue');
+        expect(res.exited).toBe(false);
+        const events = readFileSync(paths().events, 'utf-8');
+        expect(events).toContain('run-done');
+      });
+
+      it('proceeds when the login keychain entry is readable', async () => {
+        h.execSyncImpl = () => '';
+        const res = await runMain('run', '--local-queue');
+        expect(res.exited).toBe(false);
+        const events = readFileSync(paths().events, 'utf-8');
+        expect(events).toContain('run-done');
+      });
+
+      it('skips the probe when the claude CLI is not on PATH', async () => {
+        h.claudeAvailable = false;
+        h.execSyncImpl = () => {
+          throw new Error('security should not be invoked when claude is unavailable');
+        };
+        const res = await runMain('run', '--local-queue');
+        expect(res.exited).toBe(false);
+        const events = readFileSync(paths().events, 'utf-8');
+        expect(events).toContain('run-done');
+      });
+
+      it('skips the probe when ANTHROPIC_API_KEY auth is in use', async () => {
+        process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
+        h.execSyncImpl = () => {
+          throw new Error('security should not be invoked when using ANTHROPIC_API_KEY');
+        };
+        const res = await runMain('run', '--local-queue');
+        expect(res.exited).toBe(false);
+        const events = readFileSync(paths().events, 'utf-8');
+        expect(events).toContain('run-done');
+      });
+    });
   });
 
   describe('proxy', () => {
