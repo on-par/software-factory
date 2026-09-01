@@ -647,20 +647,15 @@ describe('collectBaselineTrials', () => {
     expect(() => collectBaselineTrials('/runs', deps)).toThrow(re);
   });
 
-  it('collects the committed smoke stubs and the live cfgpipe evidence from the real filesystem', () => {
+  it('collects the live cfgpipe evidence from the real filesystem', () => {
     const trials = collectBaselineTrials(RUNS_DIR);
     expect(trials.map((t) => t.id)).toEqual([
       'cfgpipe/checkpoint_1/trial-1',
       'cfgpipe/checkpoint_2/trial-1',
       'cfgpipe/checkpoint_3/trial-1',
       'cfgpipe/checkpoint_4/trial-1',
-      'smoke/trial-1',
-      'smoke/trial-2',
     ]);
     const byId = new Map(trials.map((t) => [t.id, t]));
-    for (const id of ['smoke/trial-1', 'smoke/trial-2']) {
-      expect(byId.get(id)?.evidence).toEqual({ runInfoPresent: false });
-    }
     for (const id of [
       'cfgpipe/checkpoint_1/trial-1',
       'cfgpipe/checkpoint_2/trial-1',
@@ -734,7 +729,7 @@ describe('generateBaselineReport', () => {
   it('renders "no trials" fallbacks across every section for zero trials', () => {
     const report = generateBaselineReport(config, []);
     expect(report).toContain('**Trial count:** 0 (comparison threshold: 10)');
-    expect(report).toContain('**Status: PRELIMINARY**');
+    expect(report).toContain('**Status: below comparison threshold**');
     expect(report).toContain('no trials recorded');
     expect(report).toContain('Not yet measurable — requires native SCBench evaluation evidence');
     expect(report).toContain('No trials recorded.');
@@ -742,16 +737,19 @@ describe('generateBaselineReport', () => {
     expect(report).toContain('No failures recorded.');
   });
 
-  it('shows the PRELIMINARY banner (with trial count + config scope) below threshold, and omits it at/above threshold', () => {
+  it('shows the below-comparison-threshold banner (with trial count + config scope) below threshold, and omits it at/above threshold', () => {
     const below = generateBaselineReport({ ...config, comparisonThreshold: 2 }, [trialAt('a')]);
-    expect(below).toContain('**Status: PRELIMINARY**');
-    expect(below).toContain('only 1 of the required 2 trials');
+    expect(below).toContain('**Status: below comparison threshold**');
+    expect(below).toContain('1 of the 2 trials per configuration');
+    // NB: this trial carries no native evidence, so the pass-rate section legitimately renders
+    // its own "Not measurable" fail-closed fallback (ADR-0007) — only the banner is asserted here.
+    expect(below).not.toContain('PRELIMINARY');
     expect(below).toContain(config.baselineId);
     expect(below).toContain(config.factory.commit);
     expect(below).toContain(config.scbench.commit);
 
     const atThreshold = generateBaselineReport({ ...config, comparisonThreshold: 1 }, [trialAt('a')]);
-    expect(atThreshold).not.toContain('PRELIMINARY');
+    expect(atThreshold).not.toContain('below comparison threshold');
     expect(atThreshold).toContain('**Status: comparison-ready**');
   });
 
@@ -1042,6 +1040,13 @@ describe('baseline report drift', () => {
     const regenerated = generateBaselineReport(config, trials);
     const committed = readFileSync(REPORT_PATH, 'utf-8');
     expect(regenerated).toBe(committed);
+  });
+
+  it('the committed report.md is measured: evidence-derived pass rate, no PRELIMINARY or not-measurable language', () => {
+    const committed = readFileSync(REPORT_PATH, 'utf-8');
+    expect(committed).not.toMatch(/PRELIMINARY|not measurable/i);
+    expect(committed).toContain('under pass policy `core-cases`');
+    expect(committed).toContain('evaluation.json');
   });
 });
 

@@ -597,7 +597,7 @@ export function generateBaselineReport(config: BaselineConfig, trials: BaselineT
   const statusLines = [`**Trial count:** ${trials.length} (comparison threshold: ${config.comparisonThreshold})`];
   if (trials.length < config.comparisonThreshold) {
     statusLines.push(
-      `**Status: PRELIMINARY** — only ${trials.length} of the required ${config.comparisonThreshold} trials per configuration have been recorded. Configuration scope: baseline \`${config.baselineId}\`, factory commit \`${config.factory.commit}\`, scbench commit \`${config.scbench.commit}\`, problem catalog commit \`${config.problemCatalog.commit}\`, model config env: ${formatEnv(config.modelConfig.env)}.`,
+      `**Status: below comparison threshold** — ${trials.length} of the ${config.comparisonThreshold} trials per configuration needed for cross-configuration comparison have been recorded. Benchmark pass rate derives solely from native SCBench evaluation evidence under the pinned pass policy, regardless of trial count. Configuration scope: baseline \`${config.baselineId}\`, factory commit \`${config.factory.commit}\`, scbench commit \`${config.scbench.commit}\`, problem catalog commit \`${config.problemCatalog.commit}\`, model config env: ${formatEnv(config.modelConfig.env)}.`,
     );
   } else {
     statusLines.push('**Status: comparison-ready** — the trial count meets the comparison threshold.');

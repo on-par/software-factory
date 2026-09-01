@@ -2,7 +2,7 @@
 
 **Trial count:** 1 (comparison threshold: 2)
 
-**Status: PRELIMINARY** — only 1 of the required 2 trials per configuration have been recorded. Configuration scope: baseline `scbench-fixture-baseline`, factory commit `6c74eeea2a7b114c86ffd85a3749824c5c6bdd91`, scbench commit `13de1a7a6b8b3dc5cc532a0c322a0997afa5bec7`, problem catalog commit `4d38d300059667d57e43c31969bc455f5c338b52`, model config env: FACTORY_LOCAL_ONLY=unset, FACTORY_EXPERIMENTAL=unset.
+**Status: below comparison threshold** — 1 of the 2 trials per configuration needed for cross-configuration comparison have been recorded. Benchmark pass rate derives solely from native SCBench evaluation evidence under the pinned pass policy, regardless of trial count. Configuration scope: baseline `scbench-fixture-baseline`, factory commit `6c74eeea2a7b114c86ffd85a3749824c5c6bdd91`, scbench commit `13de1a7a6b8b3dc5cc532a0c322a0997afa5bec7`, problem catalog commit `4d38d300059667d57e43c31969bc455f5c338b52`, model config env: FACTORY_LOCAL_ONLY=unset, FACTORY_EXPERIMENTAL=unset.
 
 ## Pinned inputs
 
