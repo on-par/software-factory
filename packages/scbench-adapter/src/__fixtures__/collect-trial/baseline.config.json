@@ -17,11 +17,15 @@
     "pinnedAt": "2026-07-29"
   },
   "modelConfig": {
-    "source": "packages/config/src/models.json and packages/config/src/routes.json at factory.commit",
+    "source": "packages/config/src/defaults.ts (typed model registry and routes) at factory.commit",
     "env": {
       "FACTORY_LOCAL_ONLY": "unset",
       "FACTORY_EXPERIMENTAL": "unset"
     }
+  },
+  "providerPolicy": {
+    "approvedModels": ["claude-fable-5", "claude-opus-5", "claude-opus-4-8", "claude-sonnet-5"],
+    "disabledProviders": ["ollama"]
   },
   "promptInputs": "Checkpoint briefs are produced by materializeBrief in @on-par/scbench-adapter at factory.commit; phase prompts/constitutions are those shipped in @on-par/factory-config at factory.commit",
   "environment": {

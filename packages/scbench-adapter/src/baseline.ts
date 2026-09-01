@@ -15,6 +15,10 @@ const PROBLEM_ID_RE = /^[a-z0-9][a-z0-9_-]*$/;
 const SHA_EXPECTATION = 'a full-length (40 hex char) git SHA';
 const PROBLEM_ID_EXPECTATION = 'an exact problem id from the pinned catalog (a selection rule is not reproducible)';
 const SUITE_EXPECTATION = 'a non-empty array of unique exact problem ids from the pinned catalog';
+const MODEL_SOURCE_EXPECTATION =
+  'a source that does not reference the deleted models.json/routes.json (model and route defaults live in packages/config/src/defaults.ts)';
+const APPROVED_MODELS_EXPECTATION = 'a non-empty array of unique model ids';
+const DISABLED_PROVIDERS_EXPECTATION = 'a non-empty array of provider names';
 
 /** A required, non-empty string. The same expectation is used for the
  *  missing/wrong-type case and the empty-string case so the rendered
@@ -45,7 +49,25 @@ export const BaselineConfigSchema = z.object({
     'an object',
   ),
   modelConfig: z.object(
-    { source: nonEmptyString(), env: z.record(z.string(), z.string(), 'an object of string values') },
+    {
+      source: nonEmptyString(MODEL_SOURCE_EXPECTATION).refine(
+        (s) => !/models\.json|routes\.json/.test(s),
+        MODEL_SOURCE_EXPECTATION,
+      ),
+      env: z.record(z.string(), z.string(), 'an object of string values'),
+    },
+    'an object',
+  ),
+  providerPolicy: z.object(
+    {
+      approvedModels: z
+        .array(nonEmptyString(APPROVED_MODELS_EXPECTATION), APPROVED_MODELS_EXPECTATION)
+        .min(1, APPROVED_MODELS_EXPECTATION)
+        .refine((ids) => new Set(ids).size === ids.length, APPROVED_MODELS_EXPECTATION),
+      disabledProviders: z
+        .array(nonEmptyString(DISABLED_PROVIDERS_EXPECTATION), DISABLED_PROVIDERS_EXPECTATION)
+        .min(1, DISABLED_PROVIDERS_EXPECTATION),
+    },
     'an object',
   ),
   promptInputs: nonEmptyString(),
@@ -511,6 +533,42 @@ function renderRouting(trials: BaselineTrial[]): string {
     .join('\n');
 }
 
+function renderProviderPolicy(config: BaselineConfig, trials: BaselineTrial[]): string {
+  const { approvedModels, disabledProviders } = config.providerPolicy;
+  const declared = `Declared policy (source: ${config.modelConfig.source}): approved models ${approvedModels.map((m) => `\`${m}\``).join(', ')}; disabled providers: ${disabledProviders.map((p) => `\`${p}\``).join(', ')}`;
+
+  if (trials.length === 0) {
+    return [declared, 'No trials recorded.'].join('\n\n');
+  }
+
+  const approvedSet = new Set(approvedModels);
+  let anyUnapproved = false;
+  let attemptlessCount = 0;
+
+  const bullets = trials.map((trial) => {
+    const observed = [...new Set(trial.manifest.modelAttempts.map((a) => a.model))].sort();
+    if (observed.length === 0) {
+      attemptlessCount += 1;
+      return `- \`${trial.id}\`: no model attempts recorded — provider evidence unavailable`;
+    }
+    const unapproved = observed.filter((m) => !approvedSet.has(m));
+    const observedList = observed.map((m) => `\`${m}\``).join(', ');
+    if (unapproved.length === 0) {
+      return `- \`${trial.id}\`: observed models ${observedList} — all approved`;
+    }
+    anyUnapproved = true;
+    return `- \`${trial.id}\`: observed models ${observedList} — POLICY VIOLATION: ${unapproved.map((m) => `\`${m}\``).join(', ')} not in the approved model set`;
+  });
+
+  const verdict = anyUnapproved
+    ? 'Ollama disabled: NOT CONFIRMED — at least one recorded model attempt used a model outside the approved set.'
+    : attemptlessCount > 0
+      ? `Ollama disabled: not confirmable from recorded evidence — ${attemptlessCount} trial(s) recorded no model attempts. A trial without recorded attempts never counts as confirmation.`
+      : 'Ollama disabled: confirmed — every trial recorded at least one model attempt and every observed model is in the approved set; no disabled-provider model was observed.';
+
+  return [declared, bullets.join('\n'), verdict].join('\n\n');
+}
+
 function renderCheckerOutcomes(trials: BaselineTrial[]): string {
   if (trials.length === 0) return 'No trials recorded.';
   return trials
@@ -556,6 +614,7 @@ export function generateBaselineReport(config: BaselineConfig, trials: BaselineT
     ['## Elapsed time', '', renderElapsed(trials)].join('\n'),
     ['## Cost', '', renderCost(trials)].join('\n'),
     ['## Routing and failover', '', renderRouting(trials)].join('\n'),
+    ['## Provider policy', '', renderProviderPolicy(config, trials)].join('\n'),
     ['## Checker outcomes', '', renderCheckerOutcomes(trials)].join('\n'),
     ['## Failure notes', '', renderFailureNotes(trials)].join('\n'),
     [

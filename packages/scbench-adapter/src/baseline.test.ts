@@ -41,7 +41,8 @@ const VALID_CONFIG = {
     commit: 'c'.repeat(40),
     pinnedAt: '2026-07-29',
   },
-  modelConfig: { source: 'models.json', env: { FACTORY_LOCAL_ONLY: 'unset' } },
+  modelConfig: { source: 'packages/config/src/defaults.ts at factory.commit', env: { FACTORY_LOCAL_ONLY: 'unset' } },
+  providerPolicy: { approvedModels: ['claude-fable-5', 'claude-sonnet-5'], disabledProviders: ['ollama'] },
   promptInputs: 'briefs from materializeBrief',
   environment: { node: '>=20', requiredBinaries: ['git'], hostClass: 'test', scbenchHarness: 'python' },
   problems: { resolvedFrom: 'resolved from the catalog commit', smoke: 'alpha', suite: ['alpha', 'beta', 'gamma'] },
@@ -202,7 +203,7 @@ describe('loadBaselineConfig', () => {
       ...VALID_CONFIG,
       baselineId: 42,
       promptInputs: ['a'],
-      modelConfig: 'models.json',
+      modelConfig: 'not-an-object',
       environment: { node: '>=20' },
       trials: { smokeRuns: 'three', suiteTrialsPerProblem: 3 },
     };
@@ -238,7 +239,7 @@ describe('loadBaselineConfig', () => {
   });
 
   it('rejects a modelConfig that is not an object', () => {
-    expect(() => loadBaselineConfig(JSON.stringify({ ...VALID_CONFIG, modelConfig: 'models.json' }))).toThrow(
+    expect(() => loadBaselineConfig(JSON.stringify({ ...VALID_CONFIG, modelConfig: 'not-an-object' }))).toThrow(
       /modelConfig/,
     );
   });
@@ -247,6 +248,62 @@ describe('loadBaselineConfig', () => {
     expect(() =>
       loadBaselineConfig(JSON.stringify({ ...VALID_CONFIG, modelConfig: { source: 's', env: { A: 1 } } })),
     ).toThrow(/modelConfig\.env/);
+  });
+
+  it('rejects a modelConfig.source referencing the deleted models.json or routes.json', () => {
+    expect(() =>
+      loadBaselineConfig(
+        JSON.stringify({
+          ...VALID_CONFIG,
+          modelConfig: { ...VALID_CONFIG.modelConfig, source: 'packages/config/src/models.json' },
+        }),
+      ),
+    ).toThrow(/modelConfig\.source/);
+    expect(() =>
+      loadBaselineConfig(
+        JSON.stringify({
+          ...VALID_CONFIG,
+          modelConfig: { ...VALID_CONFIG.modelConfig, source: 'packages/config/src/routes.json' },
+        }),
+      ),
+    ).toThrow(/modelConfig\.source/);
+  });
+
+  it('rejects a config missing providerPolicy', () => {
+    const { providerPolicy: _providerPolicy, ...missingProviderPolicy } = VALID_CONFIG;
+    expect(() => loadBaselineConfig(JSON.stringify(missingProviderPolicy))).toThrow(
+      /missing required field "providerPolicy"/,
+    );
+  });
+
+  it('rejects an empty or duplicate providerPolicy.approvedModels', () => {
+    expect(() =>
+      loadBaselineConfig(
+        JSON.stringify({
+          ...VALID_CONFIG,
+          providerPolicy: { ...VALID_CONFIG.providerPolicy, approvedModels: [] },
+        }),
+      ),
+    ).toThrow(/providerPolicy\.approvedModels/);
+    expect(() =>
+      loadBaselineConfig(
+        JSON.stringify({
+          ...VALID_CONFIG,
+          providerPolicy: { ...VALID_CONFIG.providerPolicy, approvedModels: ['a', 'a'] },
+        }),
+      ),
+    ).toThrow(/providerPolicy\.approvedModels/);
+  });
+
+  it('rejects an empty providerPolicy.disabledProviders', () => {
+    expect(() =>
+      loadBaselineConfig(
+        JSON.stringify({
+          ...VALID_CONFIG,
+          providerPolicy: { ...VALID_CONFIG.providerPolicy, disabledProviders: [] },
+        }),
+      ),
+    ).toThrow(/providerPolicy\.disabledProviders/);
   });
 
   it('rejects an environment missing its sub-fields', () => {
@@ -290,6 +347,30 @@ describe('baseline.config.json pin-drift guard', () => {
     expect(config.scbench).toEqual(pinScbench);
     expect(config.problemCatalog).toEqual(pinProblems);
     expect(config.factory.commit).toMatch(/^[0-9a-f]{40}$/);
+  });
+});
+
+const FIXTURE_CONFIG_PATH = fileURLToPath(
+  new URL('./__fixtures__/collect-trial/baseline.config.json', import.meta.url),
+);
+const FIXTURE_EXPECTED_REPORT_PATH = fileURLToPath(
+  new URL('./__fixtures__/collect-trial/expected-report.md', import.meta.url),
+);
+
+describe('baseline provenance never references the deleted models.json/routes.json', () => {
+  it.each([
+    ['committed baseline.config.json', BASELINE_CONFIG_PATH],
+    ['committed report.md', REPORT_PATH],
+    ['fixture baseline.config.json', FIXTURE_CONFIG_PATH],
+    ['fixture expected-report.md', FIXTURE_EXPECTED_REPORT_PATH],
+  ])('%s does not mention models.json or routes.json', (_label, path) => {
+    const raw = readFileSync(path, 'utf-8');
+    expect(raw).not.toMatch(/models\.json|routes\.json/);
+  });
+
+  it('the committed baseline.config.json names packages/config/src/defaults.ts as the model/route source', () => {
+    const config = loadBaselineConfig(readFileSync(BASELINE_CONFIG_PATH, 'utf-8'));
+    expect(config.modelConfig.source).toContain('packages/config/src/defaults.ts');
   });
 });
 
@@ -887,6 +968,52 @@ describe('generateBaselineReport', () => {
     expect(report).toContain(
       'Not yet measurable — requires native SCBench evaluation evidence from the live multi-checkpoint suite run.',
     );
+  });
+
+  it('renders "confirmed" when every trial has attempts and all observed models are approved', () => {
+    const trials = [
+      trialAt('a', { modelAttempts: [{ model: 'claude-fable-5', task: 'plan', attempt: '1' }] }),
+      trialAt('b', { modelAttempts: [{ model: 'claude-sonnet-5', task: 'build', attempt: '1' }] }),
+    ];
+    const report = generateBaselineReport(config, trials);
+    expect(report).toContain(
+      'Declared policy (source: packages/config/src/defaults.ts at factory.commit): approved models `claude-fable-5`, `claude-sonnet-5`; disabled providers: `ollama`',
+    );
+    expect(report).toContain('- `a`: observed models `claude-fable-5` — all approved');
+    expect(report).toContain(
+      'Ollama disabled: confirmed — every trial recorded at least one model attempt and every observed model is in the approved set; no disabled-provider model was observed.',
+    );
+  });
+
+  it('renders NOT CONFIRMED when a trial observes a model outside the approved set', () => {
+    const trials = [trialAt('a', { modelAttempts: [{ model: 'qwen2.5-coder:14b', task: 'build', attempt: '1' }] })];
+    const report = generateBaselineReport(config, trials);
+    expect(report).toContain(
+      '- `a`: observed models `qwen2.5-coder:14b` — POLICY VIOLATION: `qwen2.5-coder:14b` not in the approved model set',
+    );
+    expect(report).toContain(
+      'Ollama disabled: NOT CONFIRMED — at least one recorded model attempt used a model outside the approved set.',
+    );
+  });
+
+  it('renders "not confirmable" when at least one trial recorded no model attempts', () => {
+    const trials = [
+      trialAt('a', { modelAttempts: [{ model: 'claude-fable-5', task: 'plan', attempt: '1' }] }),
+      trialAt('b', { modelAttempts: [] }),
+    ];
+    const report = generateBaselineReport(config, trials);
+    expect(report).toContain('- `b`: no model attempts recorded — provider evidence unavailable');
+    expect(report).toContain(
+      'Ollama disabled: not confirmable from recorded evidence — 1 trial(s) recorded no model attempts. A trial without recorded attempts never counts as confirmation.',
+    );
+  });
+
+  it('renders the declared policy with "No trials recorded." and no verdict line for zero trials', () => {
+    const report = generateBaselineReport(config, []);
+    expect(report).toContain(
+      'Declared policy (source: packages/config/src/defaults.ts at factory.commit): approved models `claude-fable-5`, `claude-sonnet-5`; disabled providers: `ollama`',
+    );
+    expect(report).not.toContain('Ollama disabled:');
   });
 });
 

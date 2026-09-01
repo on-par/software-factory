@@ -15,7 +15,10 @@
     "check": "ok",
     "ship": "skipped"
   },
-  "modelAttempts": [],
+  "modelAttempts": [
+    { "model": "claude-fable-5", "task": "plan", "attempt": "1" },
+    { "model": "claude-sonnet-5", "task": "build", "attempt": "1" }
+  ],
   "cost": {
     "totalUsd": 0,
     "inputTokens": 0,
