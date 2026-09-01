@@ -247,6 +247,29 @@ describe('parsePinFile', () => {
     expect(() => parsePinFile('{not json')).toThrow(/not valid JSON/);
   });
 
+  it.each(['42', '"sha"', 'true'])(
+    'throws AdapterError when the parsed JSON is primitive %s, not an object',
+    (raw) => {
+      expect(() => parsePinFile(raw)).toThrow(AdapterError);
+      expect(() => parsePinFile(raw)).toThrow(/must be a JSON object/);
+    },
+  );
+
+  it('throws AdapterError when the parsed JSON object is missing the nested problems object', () => {
+    expect(() => parsePinFile(JSON.stringify({ commit: EXPECTED_SHA }))).toThrow(AdapterError);
+    expect(() => parsePinFile(JSON.stringify({ commit: EXPECTED_SHA }))).toThrow(/problems/);
+  });
+
+  it('throws AdapterError when the parsed JSON is null', () => {
+    expect(() => parsePinFile('null')).toThrow(AdapterError);
+    expect(() => parsePinFile('null')).toThrow(/must be a JSON object/);
+  });
+
+  it('throws AdapterError when the parsed JSON is an array', () => {
+    expect(() => parsePinFile('[]')).toThrow(AdapterError);
+    expect(() => parsePinFile('[]')).toThrow(/must be a JSON object/);
+  });
+
   it('throws AdapterError naming the expectation when problems.commit is missing', () => {
     const raw = JSON.stringify({ commit: EXPECTED_SHA, problems: {} });
 
