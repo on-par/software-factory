@@ -32,7 +32,7 @@ export function retrySkipReason(evaluation: ScbenchEvaluation): string | undefin
     return 'infrastructure failure — provider fault, not a code fault';
   }
   if ((evaluation.pass_counts.Core ?? 0) === (evaluation.total_counts.Core ?? 0)) {
-    return 'checkpoint passed under pass policy core-cases — nothing to rework';
+    return `checkpoint passed under pass policy ${RETRY_PASS_POLICY} — nothing to rework`;
   }
   return undefined;
 }
