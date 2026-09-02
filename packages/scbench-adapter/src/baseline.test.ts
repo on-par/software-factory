@@ -10,6 +10,7 @@ import {
   evaluateTrialVerdict,
   generateBaselineReport,
   loadBaselineConfig,
+  parseEvaluation,
   type BaselineConfig,
   type BaselineFsDeps,
   type BaselineTrial,
@@ -68,6 +69,44 @@ function minimalEvaluation(overrides: Partial<ScbenchEvaluation> = {}): ScbenchE
 function malformedEvaluationJson(overrides: { [K in keyof ScbenchEvaluation]?: unknown }): string {
   return JSON.stringify({ ...minimalEvaluation(), ...overrides });
 }
+
+describe('parseEvaluation', () => {
+  const PATH = '/runs/evaluation.json';
+
+  it('still parses an evaluation without tests/stdout/stderr (retained baseline evidence stays valid)', () => {
+    expect(parseEvaluation(JSON.stringify(minimalEvaluation()), PATH)).toEqual(minimalEvaluation());
+  });
+
+  it('accepts an evaluation carrying tests, stdout, and stderr', () => {
+    const evaluation = minimalEvaluation({
+      tests: {
+        'checkpoint_1-Core': { passed: ['test_a'], failed: ['test_b'], skipped: [] },
+      },
+      stdout: 'collected 2 items',
+      stderr: '1 failed',
+    });
+
+    expect(parseEvaluation(JSON.stringify(evaluation), PATH)).toEqual(evaluation);
+  });
+
+  it('rejects a malformed tests value with an AdapterError naming the field', () => {
+    const raw = malformedEvaluationJson({ tests: { 'checkpoint_1-Core': { passed: ['test_a'], failed: 'nope' } } });
+
+    expect(() => parseEvaluation(raw, PATH)).toThrow(AdapterError);
+    expect(() => parseEvaluation(raw, PATH)).toThrow(
+      /field "tests" must be an object of \{passed, failed, skipped\} string arrays/,
+    );
+  });
+
+  it('rejects non-string stdout/stderr values', () => {
+    expect(() => parseEvaluation(malformedEvaluationJson({ stdout: 42 }), PATH)).toThrow(
+      /field "stdout" must be a string/,
+    );
+    expect(() => parseEvaluation(malformedEvaluationJson({ stderr: [] }), PATH)).toThrow(
+      /field "stderr" must be a string/,
+    );
+  });
+});
 
 describe('loadBaselineConfig', () => {
   it('accepts the committed baseline config', () => {

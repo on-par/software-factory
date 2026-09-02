@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { BaselineTrial } from './baseline.js';
+import type { BaselineTrial, ScbenchEvaluation } from './baseline.js';
 import { AdapterError, type CheckpointResult } from './checkpoint.js';
 import { defaultCliDeps, main, type CliDeps } from './cli-run.js';
 import type { CollectTrialResult } from './collect-trial.js';
 import { minimalManifest } from './manifest-fixture.js';
 import type { CatalogPreflightOutcome } from './catalog-preflight.js';
 import type { PinPreflightOutcome } from './pin-preflight.js';
+import type { RetryCheckpointResult } from './retry-checkpoint.js';
 
 const RESULT: CheckpointResult = {
   outcome: 'ready',
@@ -71,6 +72,28 @@ const COLLECT_TRIAL_RESULT: CollectTrialResult = {
   alreadyImported: false,
 };
 
+const FAILED_EVALUATION: ScbenchEvaluation = {
+  problem_name: 'cfgpipe',
+  checkpoint_name: 'checkpoint_1',
+  tests: {
+    'checkpoint_1-Core': { passed: ['test_a'], failed: ['test_b', 'test_c'], skipped: [] },
+  },
+  pass_counts: { Core: 1 },
+  total_counts: { Core: 3 },
+  pytest_exit_code: 1,
+  infrastructure_failure: false,
+  stderr: 'AssertionError: boom',
+};
+
+const RETRY_RESULT: RetryCheckpointResult = {
+  outcome: 'ready',
+  workspace: '/tmp/ws',
+  artifactsDir: '/tmp/artifacts/cfgpipe/checkpoint_1/rework-1',
+  briefPath: '/tmp/artifacts/cfgpipe/checkpoint_1/rework-1/brief.md',
+  manifestPath: '/tmp/artifacts/cfgpipe/checkpoint_1/rework-1/manifest.json',
+  retryContextPath: '/tmp/artifacts/cfgpipe/checkpoint_1/rework-1/retry-context.json',
+};
+
 const ALL_OK_CATALOG_OUTCOME: CatalogPreflightOutcome = {
   ok: true,
   results: [
@@ -97,6 +120,8 @@ function fakeDeps(overrides: Partial<CliDeps> = {}): CliDeps {
     runPinPreflight: vi.fn(async () => ALL_OK_OUTCOME),
     runCatalogPreflight: vi.fn(() => ALL_OK_CATALOG_OUTCOME),
     collectTrial: vi.fn(() => COLLECT_TRIAL_RESULT),
+    readEvaluationFile: vi.fn(async () => JSON.stringify(FAILED_EVALUATION)),
+    retryCheckpoint: vi.fn(async () => RETRY_RESULT),
     ...overrides,
   };
 }
@@ -1067,6 +1092,153 @@ describe('compare subcommand', () => {
   });
 });
 
+describe('retry-checkpoint subcommand', () => {
+  const FULL_ARGS = [
+    'retry-checkpoint',
+    '--workspace',
+    '/tmp/ws',
+    '--artifacts',
+    '/tmp/artifacts',
+    '--task-file',
+    '/tmp/task.md',
+    '--problem',
+    'cfgpipe',
+    '--checkpoint',
+    'checkpoint_1',
+    '--evaluation',
+    '/tmp/evaluation.json',
+  ];
+
+  it('exits 2 with usage when required flags are missing, without calling retryCheckpoint', async () => {
+    const deps = fakeDeps();
+
+    const code = await main(['retry-checkpoint', '--workspace', '/tmp/ws'], deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'missing required flag(s): --artifacts, --task-file, --problem, --checkpoint, --evaluation',
+      ),
+    );
+    expect(deps.logError).toHaveBeenCalledWith(
+      expect.stringContaining('usage: scbench-factory-agent retry-checkpoint'),
+    );
+    expect(deps.retryCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it('exits 2 when the task file cannot be read', async () => {
+    const deps = fakeDeps({ readTaskFile: vi.fn(async () => Promise.reject(new Error('ENOENT'))) });
+
+    const code = await main(FULL_ARGS, deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('could not read --task-file'));
+    expect(deps.retryCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it('exits 2 when --evaluation cannot be read', async () => {
+    const deps = fakeDeps({ readEvaluationFile: vi.fn(async () => Promise.reject(new Error('ENOENT'))) });
+
+    const code = await main(FULL_ARGS, deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(
+      expect.stringContaining('could not read --evaluation /tmp/evaluation.json'),
+    );
+    expect(deps.retryCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it('exits 2 when the evaluation JSON is malformed', async () => {
+    const deps = fakeDeps({ readEvaluationFile: vi.fn(async () => '{not json') });
+
+    const code = await main(FULL_ARGS, deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('could not parse /tmp/evaluation.json'));
+    expect(deps.retryCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it('exits 1 without invoking Factory when the evaluation passed', async () => {
+    const passed: ScbenchEvaluation = {
+      ...FAILED_EVALUATION,
+      pass_counts: { Core: 3 },
+      total_counts: { Core: 3 },
+      pytest_exit_code: 0,
+    };
+    const deps = fakeDeps({ readEvaluationFile: vi.fn(async () => JSON.stringify(passed)) });
+
+    const code = await main(FULL_ARGS, deps);
+
+    expect(code).toBe(1);
+    expect(deps.log).toHaveBeenCalledWith(
+      'retry-checkpoint: not retryable — checkpoint passed under pass policy core-cases — nothing to rework',
+    );
+    expect(deps.retryCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it('exits 1 without invoking Factory on an infrastructure failure', async () => {
+    const infra: ScbenchEvaluation = { ...FAILED_EVALUATION, infrastructure_failure: true };
+    const deps = fakeDeps({ readEvaluationFile: vi.fn(async () => JSON.stringify(infra)) });
+
+    const code = await main(FULL_ARGS, deps);
+
+    expect(code).toBe(1);
+    expect(deps.log).toHaveBeenCalledWith(
+      'retry-checkpoint: not retryable — infrastructure failure — provider fault, not a code fault',
+    );
+    expect(deps.retryCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it('builds the retry context and checkpoint from the flags and prints the result JSON on success', async () => {
+    const deps = fakeDeps();
+
+    const code = await main([...FULL_ARGS, '--index', '2', '--factory-bin', '/opt/factory'], deps);
+
+    expect(code).toBe(0);
+    expect(deps.readTaskFile).toHaveBeenCalledWith('/tmp/task.md');
+    expect(deps.readEvaluationFile).toHaveBeenCalledWith('/tmp/evaluation.json');
+    expect(deps.retryCheckpoint).toHaveBeenCalledWith(
+      { problemId: 'cfgpipe', checkpointId: 'checkpoint_1', index: 2, task: 'do the thing' },
+      {
+        problemId: 'cfgpipe',
+        checkpointId: 'checkpoint_1',
+        passPolicy: 'core-cases',
+        pytestExitCode: 1,
+        failedTests: [
+          { group: 'checkpoint_1-Core', name: 'test_b' },
+          { group: 'checkpoint_1-Core', name: 'test_c' },
+        ],
+        stderrExcerpt: 'AssertionError: boom',
+      },
+      { workspace: '/tmp/ws', artifactsRoot: '/tmp/artifacts', factoryBin: '/opt/factory' },
+    );
+    expect(deps.log).toHaveBeenCalledWith(JSON.stringify(RETRY_RESULT));
+  });
+
+  it('exits 2 and logs the message when retryCheckpoint throws an AdapterError (duplicate rework)', async () => {
+    const deps = fakeDeps({
+      retryCheckpoint: vi.fn(async () => {
+        throw new AdapterError('retry already recorded at /tmp/artifacts/cfgpipe/checkpoint_1/rework-1');
+      }),
+    });
+
+    const code = await main(FULL_ARGS, deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('retry already recorded'));
+  });
+
+  it('re-throws unexpected (non-AdapterError) errors from retryCheckpoint', async () => {
+    const deps = fakeDeps({
+      retryCheckpoint: vi.fn(async () => {
+        throw new Error('boom');
+      }),
+    });
+
+    await expect(main(FULL_ARGS, deps)).rejects.toThrow('boom');
+  });
+});
+
 describe('defaultCliDeps', () => {
   it('logs to console.log/console.error and reads real files', async () => {
     const deps = defaultCliDeps();
@@ -1079,6 +1251,7 @@ describe('defaultCliDeps', () => {
     expect(errorSpy).toHaveBeenCalledWith('oops');
 
     await expect(deps.readTaskFile('/definitely/does/not/exist.md')).rejects.toThrow();
+    await expect(deps.readEvaluationFile('/definitely/does/not/exist.json')).rejects.toThrow();
 
     logSpy.mockRestore();
     errorSpy.mockRestore();
