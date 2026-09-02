@@ -647,26 +647,25 @@ describe('collectBaselineTrials', () => {
     expect(() => collectBaselineTrials('/runs', deps)).toThrow(re);
   });
 
-  it('collects the committed smoke stubs and the live cfgpipe evidence from the real filesystem', () => {
+  it('collects the committed live cfgpipe evidence from the real filesystem', () => {
     const trials = collectBaselineTrials(RUNS_DIR);
-    expect(trials.map((t) => t.id)).toEqual([
+    const ids = [
       'cfgpipe/checkpoint_1/trial-1',
+      'cfgpipe/checkpoint_1/trial-2',
+      'cfgpipe/checkpoint_1/trial-3',
       'cfgpipe/checkpoint_2/trial-1',
+      'cfgpipe/checkpoint_2/trial-2',
+      'cfgpipe/checkpoint_2/trial-3',
       'cfgpipe/checkpoint_3/trial-1',
+      'cfgpipe/checkpoint_3/trial-2',
+      'cfgpipe/checkpoint_3/trial-3',
       'cfgpipe/checkpoint_4/trial-1',
-      'smoke/trial-1',
-      'smoke/trial-2',
-    ]);
+      'cfgpipe/checkpoint_4/trial-2',
+      'cfgpipe/checkpoint_4/trial-3',
+    ];
+    expect(trials.map((t) => t.id)).toEqual(ids);
     const byId = new Map(trials.map((t) => [t.id, t]));
-    for (const id of ['smoke/trial-1', 'smoke/trial-2']) {
-      expect(byId.get(id)?.evidence).toEqual({ runInfoPresent: false });
-    }
-    for (const id of [
-      'cfgpipe/checkpoint_1/trial-1',
-      'cfgpipe/checkpoint_2/trial-1',
-      'cfgpipe/checkpoint_3/trial-1',
-      'cfgpipe/checkpoint_4/trial-1',
-    ]) {
+    for (const id of ids) {
       const evidence = byId.get(id)?.evidence;
       expect(evidence?.evaluation).toBeDefined();
       expect(evidence?.runInfoPresent).toBe(true);
