@@ -173,6 +173,18 @@ Required tools: `git`, `uv` (Python ≥ 3.12 environment per upstream's
 
 ## Reproducing the live small suite
 
+For a complete start-to-finish suite run, use the adapter's `run-suite`
+subcommand (see
+[`packages/scbench-adapter/README.md`](../../packages/scbench-adapter/README.md)'s
+"Complete suite run" section): it runs the same pin + catalog preflights,
+then every configured suite problem through the pinned launcher, continuing
+past failed problems, and prints a summary separating completed, failed,
+and missing problems. After the run, per-problem native evidence is still
+imported per trial with `collect-trial` exactly as in the smoke steps
+above; a `failed` or `missing` problem is never counted as evidence
+(ADR-0007) — pass/fail correctness derives solely from retained native
+`evaluation.json` files.
+
 Run the three problems named by `baseline.config.json`'s `problems.suite` —
 the literal ids `cfgpipe`, `circuit_eval`, and `code_search` — through
 SCBench with `trials.suiteTrialsPerProblem` trials per problem, collecting

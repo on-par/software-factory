@@ -12,6 +12,7 @@ merges itself.
 """
 
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -117,8 +118,14 @@ class SoftwareFactoryAgent(Agent):
         if self._config.factory_bin:
             args += ["--factory-bin", self._config.factory_bin]
 
+        # Strip the leaked parent VIRTUAL_ENV (set by `uv run --project` on
+        # the harness venv) so Factory checkpoints never inherit it — defense
+        # in depth for entrypoints that skipped run_scbench.py's own
+        # sanitization (#1164).
+        env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
+
         try:
-            proc = subprocess.run(args, capture_output=True, text=True)
+            proc = subprocess.run(args, capture_output=True, text=True, env=env)
         finally:
             Path(task_path).unlink(missing_ok=True)
 

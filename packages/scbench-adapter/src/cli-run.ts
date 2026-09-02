@@ -17,6 +17,7 @@ import { parsePinFile, runPinPreflight, type PinnedInputSpec, type PinPreflightO
 import { retryCheckpoint } from './retry-checkpoint.js';
 import { buildRetryContext, retrySkipReason, type ScbenchRetryContext } from './retry-context.js';
 import { runCheckpoint, type RunCheckpointOptions } from './run-checkpoint.js';
+import { renderSuiteSummary, runSuite, summarizeSuite, LAUNCHER_CONFIG_ARG, LAUNCHER_SCRIPT } from './suite.js';
 import { createExecaExec } from './workspace.js';
 
 const RUN_CHECKPOINT_USAGE =
@@ -30,10 +31,8 @@ const COLLECT_TRIAL_USAGE =
 const COMPARE_USAGE = 'usage: scbench-factory-agent compare --baseline <dir> --candidate <dir> [--threshold <points>]';
 const RETRY_CHECKPOINT_USAGE =
   'usage: scbench-factory-agent retry-checkpoint --workspace <dir> --artifacts <dir> --task-file <path> --problem <id> --checkpoint <id> --evaluation <path> [--index <n>] [--factory-bin <path>]';
-const USAGE = `${RUN_CHECKPOINT_USAGE}\n${BASELINE_REPORT_USAGE}\n${PIN_PREFLIGHT_USAGE}\n${CATALOG_PREFLIGHT_USAGE}\n${LAUNCH_USAGE}\n${COLLECT_TRIAL_USAGE}\n${COMPARE_USAGE}\n${RETRY_CHECKPOINT_USAGE}`;
-
-const LAUNCHER_CONFIG_ARG = 'packages/scbench-adapter/scbench.run.yaml';
-const LAUNCHER_SCRIPT = 'packages/scbench-adapter/python/run_scbench.py';
+const RUN_SUITE_USAGE = 'usage: scbench-factory-agent run-suite [--pin <path>] [--config <path>] [--summary <path>]';
+const USAGE = `${RUN_CHECKPOINT_USAGE}\n${BASELINE_REPORT_USAGE}\n${PIN_PREFLIGHT_USAGE}\n${CATALOG_PREFLIGHT_USAGE}\n${LAUNCH_USAGE}\n${COLLECT_TRIAL_USAGE}\n${COMPARE_USAGE}\n${RETRY_CHECKPOINT_USAGE}\n${RUN_SUITE_USAGE}`;
 
 const REQUIRED_FLAGS = ['--workspace', '--artifacts', '--task-file', '--problem', '--checkpoint'] as const;
 const BASELINE_REPORT_REQUIRED_FLAGS = ['--config', '--runs', '--out'] as const;
@@ -67,6 +66,7 @@ export interface CliDeps {
     ctx: ScbenchRetryContext,
     opts: RunCheckpointOptions,
   ) => ReturnType<typeof retryCheckpoint>;
+  runSuite: typeof runSuite;
 }
 
 export function defaultCliDeps(): CliDeps {
@@ -85,6 +85,7 @@ export function defaultCliDeps(): CliDeps {
     collectTrial,
     readEvaluationFile: (path) => readFile(path, 'utf-8'),
     retryCheckpoint,
+    runSuite,
   };
 }
 
@@ -352,6 +353,56 @@ async function runLaunchCommand(rest: readonly string[], deps: CliDeps): Promise
   return 0;
 }
 
+/** Runs both preflights (pin + catalog, no short-circuit — like `launch`)
+ *  and, only when both pass, actually invokes the pinned launcher once per
+ *  configured suite problem via deps.runSuite, which never stops on a failed
+ *  problem. Prints the completed/failed/missing summary (a problem with no
+ *  record — its launcher crashed — is missing, never completed) and, with
+ *  --summary <path>, writes it as JSON. Returns 2 on a pin-file/config
+ *  read or parse error, 1 when a preflight fails (no launcher invoked) or
+ *  when any problem failed/missing, 0 only when every configured suite
+ *  problem completed. */
+async function runRunSuiteCommand(rest: readonly string[], deps: CliDeps): Promise<number> {
+  const flags = parseFlags(rest);
+  const pin = await evaluatePinPreflight(flags, deps);
+  if ('usageError' in pin) {
+    deps.logError(pin.usageError);
+    return 2;
+  }
+  const catalog = await evaluateCatalogPreflight(flags, deps);
+  if ('usageError' in catalog) {
+    deps.logError(catalog.usageError);
+    return 2;
+  }
+
+  renderPinResults(pin.outcome, deps);
+  renderCatalogResults(catalog.outcome, deps);
+
+  if (!pin.outcome.ok || !catalog.outcome.ok) {
+    return 1;
+  }
+
+  // Repo root — the launcher command's --config/script paths are repo-root
+  // relative; resolves correctly from both src/ and dist/ (same pattern as
+  // DEFAULT_RUNS_DIR).
+  const cwd = fileURLToPath(new URL('../../..', import.meta.url));
+  const suiteIds = catalog.config.problems.suite;
+  const records = await deps.runSuite(
+    { checkout: deps.env.SCBENCH_CHECKOUT!, problemIds: suiteIds, cwd },
+    { exec: createExecaExec(), log: deps.log },
+  );
+  const summary = summarizeSuite(suiteIds, records);
+  deps.log(renderSuiteSummary(summary));
+
+  if (flags['--summary'] !== undefined) {
+    const path = flags['--summary'];
+    await deps.writeReport(path, `${JSON.stringify({ configured: suiteIds, records, summary }, null, 2)}\n`);
+    deps.log(`run-suite: wrote summary to ${path}`);
+  }
+
+  return summary.failed.length === 0 && summary.missing.length === 0 ? 0 : 1;
+}
+
 /** Copies the five Factory artifacts and the three native SCBench evidence
  *  files for one trial from the SCBench output tree's <problem>/<checkpoint>/
  *  directory and --scbench-run into <runs>/<problem>/<checkpoint>/trial-<n>/
@@ -501,7 +552,8 @@ async function runRetryCheckpointCommand(rest: readonly string[], deps: CliDeps)
 
 /** Hand-rolled argv parsing + dispatch across the `run-checkpoint`,
  *  `baseline-report`, `pin-preflight`, `catalog-preflight`, `launch`,
- *  `collect-trial`, `compare`, and `retry-checkpoint` subcommands. */
+ *  `collect-trial`, `compare`, `retry-checkpoint`, and `run-suite`
+ *  subcommands. */
 export async function main(argv: readonly string[], deps: CliDeps = defaultCliDeps()): Promise<number> {
   const [subcommand, ...rest] = argv;
   if (subcommand === 'run-checkpoint') return runRunCheckpoint(rest, deps);
@@ -512,6 +564,7 @@ export async function main(argv: readonly string[], deps: CliDeps = defaultCliDe
   if (subcommand === 'collect-trial') return runCollectTrialCommand(rest, deps);
   if (subcommand === 'compare') return runCompareCommand(rest, deps);
   if (subcommand === 'retry-checkpoint') return runRetryCheckpointCommand(rest, deps);
+  if (subcommand === 'run-suite') return runRunSuiteCommand(rest, deps);
 
   deps.logError(USAGE);
   return 2;
