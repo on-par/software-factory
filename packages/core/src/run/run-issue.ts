@@ -464,6 +464,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       appBaseUrl,
       onPgid,
       priorFailureSignature,
+      diffBase: build.diffBase,
       reworkRoute: build.route,
       reworkModel: build.model,
       laneId: request.lane,

@@ -1905,6 +1905,7 @@ describe('buildPhase no-diff post-condition', () => {
 
     expect(result.ok).toBe(true);
     expect(receivedOpts).toEqual({ fallbackBaseRef: 'presha' });
+    expect(result.diffBase).toBe('presha');
   });
 
   it('succeeds when the diff collector reports a real diff', async () => {
