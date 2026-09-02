@@ -1,5 +1,5 @@
 // packages/scbench-adapter/src/baseline.ts — pinned SlopCodeBench baseline
-// config loader + report generator (#511).
+// config loader + report generator (#511, #1163).
 import { existsSync, readdirSync, readFileSync, type Dirent } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 
@@ -147,8 +147,18 @@ export function loadBaselineConfig(raw: string): BaselineConfig {
   return result.data;
 }
 
+/** One group's test outcomes inside evaluation.json's native `tests` map. */
+export interface ScbenchTestGroup {
+  passed: string[];
+  failed: string[];
+  skipped: string[];
+}
+
 /** Parsed subset of SCBench's native per-checkpoint evaluation.json
- *  (CorrectnessResults at the pinned commit). Extra fields are ignored. */
+ *  (CorrectnessResults at the pinned commit). Extra fields are ignored.
+ *  `tests`/`stdout`/`stderr` are optional: real retained evidence at the
+ *  pinned commit carries `tests` but not stdout/stderr, and older synthetic
+ *  fixtures may carry none of the three — all keep parsing (#1163). */
 export interface ScbenchEvaluation {
   problem_name: string;
   checkpoint_name: string;
@@ -156,6 +166,9 @@ export interface ScbenchEvaluation {
   total_counts: Record<string, number>;
   pytest_exit_code: number;
   infrastructure_failure: boolean;
+  tests?: Record<string, ScbenchTestGroup>;
+  stdout?: string;
+  stderr?: string;
 }
 
 /** One line of SCBench's run-level checkpoint_results.jsonl. Extra fields
@@ -222,9 +235,26 @@ function isRecordOfNumbers(value: unknown): value is Record<string, number> {
   return isPlainObject(value) && Object.values(value).every((v) => typeof v === 'number');
 }
 
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((v) => typeof v === 'string');
+}
+
+function isTestGroupMap(value: unknown): value is Record<string, ScbenchTestGroup> {
+  return (
+    isPlainObject(value) &&
+    Object.values(value).every(
+      (group) =>
+        isPlainObject(group) &&
+        isStringArray(group.passed) &&
+        isStringArray(group.failed) &&
+        isStringArray(group.skipped),
+    )
+  );
+}
+
 /** Parse + structurally validate a single trial's native evaluation.json.
  *  Throws AdapterError naming `path` and the offending field. */
-function parseEvaluation(raw: string, path: string): ScbenchEvaluation {
+export function parseEvaluation(raw: string, path: string): ScbenchEvaluation {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -237,6 +267,7 @@ function parseEvaluation(raw: string, path: string): ScbenchEvaluation {
   const invalid = (field: string, expectation: string): AdapterError =>
     new AdapterError(`invalid evaluation evidence at ${path}: field "${field}" must be ${expectation}`);
   const { problem_name, checkpoint_name, pass_counts, total_counts, pytest_exit_code, infrastructure_failure } = parsed;
+  const { tests, stdout, stderr } = parsed;
   if (typeof problem_name !== 'string' || problem_name.length === 0) {
     throw invalid('problem_name', 'a non-empty string');
   }
@@ -255,7 +286,29 @@ function parseEvaluation(raw: string, path: string): ScbenchEvaluation {
   if (typeof infrastructure_failure !== 'boolean') {
     throw invalid('infrastructure_failure', 'a boolean');
   }
-  return { problem_name, checkpoint_name, pass_counts, total_counts, pytest_exit_code, infrastructure_failure };
+  if (tests !== undefined && !isTestGroupMap(tests)) {
+    throw invalid('tests', 'an object of {passed, failed, skipped} string arrays');
+  }
+  if (stdout !== undefined && typeof stdout !== 'string') {
+    throw invalid('stdout', 'a string');
+  }
+  if (stderr !== undefined && typeof stderr !== 'string') {
+    throw invalid('stderr', 'a string');
+  }
+  const evaluation: ScbenchEvaluation = {
+    problem_name,
+    checkpoint_name,
+    pass_counts,
+    total_counts,
+    pytest_exit_code,
+    infrastructure_failure,
+  };
+  // Assign — never spread-with-undefined — so absent optional fields do not
+  // appear as `undefined` keys on the parsed evidence.
+  if (tests !== undefined) evaluation.tests = tests;
+  if (stdout !== undefined) evaluation.stdout = stdout;
+  if (stderr !== undefined) evaluation.stderr = stderr;
+  return evaluation;
 }
 
 /** Parse + structurally validate SCBench's run-level
