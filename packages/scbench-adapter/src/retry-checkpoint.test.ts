@@ -130,6 +130,72 @@ describe('retryCheckpoint', () => {
     expect(result.retryContextPath).toBe(join(checkpointDir, 'rework-1', 'retry-context.json'));
   });
 
+  it('omits the factory-exit detail when factory exited 0 but still wrote no manifest', async () => {
+    const { exec } = stubFactoryExec(() => ({ exitCode: 0, stdout: '', stderr: '' }));
+
+    const result = await retryCheckpoint(
+      CHECKPOINT,
+      CONTEXT,
+      { workspace, artifactsRoot, factoryBin: 'stub-factory' },
+      { exec },
+    );
+
+    expect(result.outcome).toBe('error');
+    expect(result.detail).toBe(
+      'no manifest.json found at ' + join(checkpointDir, 'rework-1') + ' — Factory did not complete a run',
+    );
+  });
+
+  it('falls back to factory stdout, then a fixed placeholder, when stderr is empty', async () => {
+    const { exec } = stubFactoryExec(() => ({ exitCode: 1, stdout: 'factory stdout only', stderr: '' }));
+
+    const result = await retryCheckpoint(
+      CHECKPOINT,
+      CONTEXT,
+      { workspace, artifactsRoot, factoryBin: 'stub-factory' },
+      { exec },
+    );
+
+    expect(result.detail).toMatch(/factory exited 1: factory stdout only/);
+  });
+
+  it('falls back to a fixed placeholder when factory produced no output at all', async () => {
+    const { exec } = stubFactoryExec(() => ({ exitCode: 1, stdout: '', stderr: '' }));
+
+    const result = await retryCheckpoint(
+      CHECKPOINT,
+      CONTEXT,
+      { workspace, artifactsRoot, factoryBin: 'stub-factory' },
+      { exec },
+    );
+
+    expect(result.detail).toMatch(/factory exited 1: no output/);
+  });
+
+  it('appends a commit failure to an already-present adapter-error detail', async () => {
+    const exec: ExecFn = async (argv, opts) => {
+      const [bin, ...rest] = argv;
+      if (bin === 'git') {
+        const isCheckpointCommit = rest.includes('commit') && rest.some((a) => a.includes('scbench: checkpoint'));
+        if (isCheckpointCommit) return { exitCode: 1, stdout: '', stderr: 'fatal: unable to write new_index file' };
+        return realExec(argv, opts);
+      }
+      if (bin === 'stub-factory') return { exitCode: 1, stdout: '', stderr: 'boom' };
+      throw new Error(`unexpected command: ${argv.join(' ')}`);
+    };
+
+    const result = await retryCheckpoint(
+      CHECKPOINT,
+      CONTEXT,
+      { workspace, artifactsRoot, factoryBin: 'stub-factory' },
+      { exec },
+    );
+
+    expect(result.outcome).toBe('error');
+    expect(result.detail).toMatch(/no manifest\.json found/);
+    expect(result.detail).toMatch(/; workspace commit failed/);
+  });
+
   it('keeps an already-successful result when the post-run commit fails', async () => {
     const exec: ExecFn = async (argv, opts) => {
       const [bin, ...rest] = argv;
