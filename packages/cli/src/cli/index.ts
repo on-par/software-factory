@@ -1250,10 +1250,9 @@ export async function shipIssue(
         withGitLock(root, () =>
           withFileLock(
             paths.gitLock,
-            async () => {
-              await gitFetch(root);
-              await setupWorktree(root, br, wt, sp, sandbox, setupLog);
-            },
+            // setupWorktree fetches origin itself before creating the worktree (#1167),
+            // so no explicit gitFetch here — still under the git + file locks.
+            () => setupWorktree(root, br, wt, sp, sandbox, setupLog),
             { onSteal: (pid) => log('lock-stolen', `stole ${paths.gitLock} from dead holder pid ${pid ?? 'unknown'}`) },
           ),
         ),

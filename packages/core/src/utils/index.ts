@@ -86,22 +86,41 @@ export function readCosts(costsFile: string): CostEntry[] {
 // kills the child on expiry. Without one, a wedged worktree op hangs its caller
 // forever with no output — the failure mode #755 was opened for.
 export async function gitFetch(repoRoot: string): Promise<void> {
-  await execGit('git fetch origin -q', { cwd: repoRoot });
+  await execGit('git fetch origin -q --prune', { cwd: repoRoot });
+}
+
+/** The repo default branch's remote-tracking ref (from origin/HEAD), or
+ *  'origin/main' when origin/HEAD is unset (e.g. a clone of an empty bare repo). */
+export async function defaultRemoteBase(repoRoot: string): Promise<string> {
+  try {
+    const { stdout } = await execGit('git symbolic-ref -q refs/remotes/origin/HEAD', { cwd: repoRoot });
+    const m = stdout.trim().match(/^refs\/remotes\/(origin\/.+)$/);
+    if (m) return m[1];
+  } catch {
+    // fall through — origin/HEAD unset or not a repo; caller keeps the historical default
+  }
+  return 'origin/main';
 }
 
 export async function setupWorktree(
   repoRoot: string,
   branch: string,
   worktreePath: string,
-  startPoint: string = 'origin/main',
+  startPoint?: string,
   sandbox?: WorktreeSandbox,
   log?: (type: EventKind, msg: string) => void,
 ): Promise<void> {
+  // The base of record is the freshly fetched remote-tracking ref — never local
+  // branch state, which can be stale, dirty, or ahead (#1167).
+  await gitFetch(repoRoot);
+  const base = startPoint ?? (await defaultRemoteBase(repoRoot));
   await execGit(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot }).catch(() => {});
   await execGit(`git branch -D ${shellEscape(branch)}`, { cwd: repoRoot }).catch(() => {});
-  await execGit(`git worktree add -b ${shellEscape(branch)} ${shellEscape(worktreePath)} ${shellEscape(startPoint)}`, {
+  await execGit(`git worktree add -b ${shellEscape(branch)} ${shellEscape(worktreePath)} ${shellEscape(base)}`, {
     cwd: repoRoot,
   });
+  const { stdout } = await execGit('git rev-parse --verify HEAD', { cwd: worktreePath });
+  log?.('worktree-base', `created from ${base} @ ${stdout.trim()}`);
   if (sandbox) {
     await createMicroVm({ ...sandbox, worktreePath, log });
   }

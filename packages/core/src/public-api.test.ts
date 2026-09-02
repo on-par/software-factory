@@ -405,6 +405,7 @@ const INTERNAL_API_KEYS = [
   'branchPrefixSlug',
   'cleanupWorktree',
   'colorEnabled',
+  'defaultRemoteBase',
   'ensureDir',
   'escalationLine',
   'formatEventLine',
