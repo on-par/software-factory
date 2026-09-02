@@ -3,7 +3,7 @@
 import { readFile } from 'node:fs/promises';
 
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
-import { collectDesignDiff } from '../checkers/design-smells.js';
+import { captureDiffBase, collectDesignDiff } from '../checkers/design-smells.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { readDesignArtifact, renderDesignGrounding } from '../design/index.js';
 import { laneEnv } from '../environment/index.js';
@@ -20,8 +20,9 @@ export interface BuildResult {
   model: string;
   route: 'codex' | 'claude' | 'opencode';
   escalate?: string;
-  /** Set on a non-escalation build failure; 'no_diff' = worker produced no diff. */
-  reason?: 'no_diff';
+  /** Set on a non-escalation build failure; 'no_diff' = worker produced no diff,
+   *  'junk_only_diff' = worker changed only generated/cache files. */
+  reason?: 'no_diff' | 'junk_only_diff';
 }
 
 export async function buildPhase(opts: Parameters<typeof buildPhaseImpl>[0]): Promise<BuildResult> {
@@ -32,9 +33,11 @@ export async function buildPhase(opts: Parameters<typeof buildPhaseImpl>[0]): Pr
     (r) =>
       r.ok
         ? `build complete (model ${r.model})`
-        : r.reason === 'no_diff'
-          ? 'build failed: worker produced no diff'
-          : `build escalated: ${r.escalate ?? 'unknown'}`,
+        : r.reason === 'junk_only_diff'
+          ? 'build failed: worker changed only generated/cache files'
+          : r.reason === 'no_diff'
+            ? 'build failed: worker produced no diff'
+            : `build escalated: ${r.escalate ?? 'unknown'}`,
   );
 }
 
@@ -81,6 +84,8 @@ async function buildPhaseImpl(opts: {
   bus?: LifecycleBus;
   /** Injectable for tests; defaults to collectDesignDiff. */
   collectDiff?: typeof collectDesignDiff;
+  /** Injectable for tests; defaults to captureDiffBase. */
+  captureBase?: typeof captureDiffBase;
 }): Promise<BuildResult> {
   const {
     issue,
@@ -173,6 +178,10 @@ async function buildPhaseImpl(opts: {
     onPgid,
     onProviderFailure,
   };
+
+  // Captured before the worker runs so the post-build diff has a correct base
+  // even in checkouts with no origin/main or origin/master (#1162).
+  const fallbackBaseRef = await (opts.captureBase ?? captureDiffBase)(worktree);
 
   let result: RouterResult;
   try {
@@ -268,13 +277,18 @@ async function buildPhaseImpl(opts: {
     return { ok: false, model: result.model, route, escalate: escalateLine };
   }
 
-  const diff = await (opts.collectDiff ?? collectDesignDiff)(worktree);
+  // Second positional arg stays undefined so injected test stubs with the old
+  // 1-arg shape still typecheck against `typeof collectDesignDiff`.
+  const diff = await (opts.collectDiff ?? collectDesignDiff)(worktree, undefined, { fallbackBaseRef });
   if (diff.skipReason) {
     log('build', `diff post-condition skipped — ${diff.skipReason}`);
   } else if (diff.text === '') {
-    const detail = `worker produced no diff against ${diff.baseRef}; no implementation was produced`;
+    const junkOnly = (diff.excludedPaths?.length ?? 0) > 0;
+    const detail = junkOnly
+      ? `worker changed only generated/cache files against ${diff.baseRef} (${diff.excludedPaths!.slice(0, 10).join(', ')}); no implementation was produced`
+      : `worker produced no diff against ${diff.baseRef}; no implementation was produced`;
     log('fail', detail);
-    return { ok: false, model: result.model, route, reason: 'no_diff' };
+    return { ok: false, model: result.model, route, reason: junkOnly ? 'junk_only_diff' : 'no_diff' };
   }
 
   log('build', `Build complete with model ${result.model}`, { model: result.model });
