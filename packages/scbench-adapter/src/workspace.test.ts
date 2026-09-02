@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { AdapterError } from './checkpoint.js';
+import { WORKSPACE_CONSTITUTION } from './workspace-constitution.js';
 import { commitCheckpoint, createExecaExec, prepareWorkspace, type ExecFn } from './workspace.js';
 
 function fakeExec(): { exec: ExecFn; calls: string[][] } {
@@ -40,6 +41,27 @@ describe('prepareWorkspace', () => {
     expect(existsSync(join(dir, '.factory', 'plans'))).toBe(true);
     const exclude = readFileSync(join(dir, '.git', 'info', 'exclude'), 'utf-8');
     expect(exclude).toContain('.factory/');
+  });
+
+  it('writes the factory-authored constitution into .factory/constitution.md', async () => {
+    const { exec } = fakeExec();
+
+    await prepareWorkspace(dir, { exec });
+
+    const content = readFileSync(join(dir, '.factory', 'constitution.md'), 'utf-8');
+    expect(content).toBe(WORKSPACE_CONSTITUTION);
+  });
+
+  it('refreshes a stale constitution on a repeat call (idempotent overwrite)', async () => {
+    mkdirSync(join(dir, '.git'), { recursive: true });
+    const { exec } = fakeExec();
+    await prepareWorkspace(dir, { exec });
+    writeFileSync(join(dir, '.factory', 'constitution.md'), 'stale');
+
+    await prepareWorkspace(dir, { exec });
+
+    const content = readFileSync(join(dir, '.factory', 'constitution.md'), 'utf-8');
+    expect(content).toBe(WORKSPACE_CONSTITUTION);
   });
 
   it('writes every junk-artifact exclude entry into .git/info/exclude', async () => {
