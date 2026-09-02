@@ -175,6 +175,38 @@ ever printed), `2` on a pin-file or baseline-config read/parse error.
 Prerequisite: `npm run build` (so the catalog preflight's adapter-build
 check can find `dist/cli.js`).
 
+## Complete suite run (`run-suite`)
+
+Where `npm run scbench` stops at printing the launcher commands, the
+`run-suite` subcommand actually runs the whole configured suite
+(`baseline.config.json`'s `problems.suite`) start to finish:
+
+```bash
+SCBENCH_CHECKOUT=/path/to/slop-code-bench \
+SCBENCH_PROBLEMS_PATH=/path/to/scb-problems \
+node packages/scbench-adapter/dist/cli.js run-suite --summary /tmp/suite-summary.json
+```
+
+The same pin + catalog preflights as `launch` gate the run — a failing
+preflight aborts before any launcher invocation. Once they pass, every
+configured suite problem runs independently, in order, through the exact
+pinned launcher command; a problem whose launcher exits non-zero (or
+crashes) **does not stop later problems**. The final summary classifies
+every configured problem as exactly one of `completed` (exit 0), `failed`
+(recorded non-zero exit), or `missing` (no record — the attempt crashed or
+never happened); a missing problem is never rendered as completed
+(ADR-0007). `--summary <path>` additionally writes the records + summary as
+JSON. Exit codes: `0` only when every configured problem completed, `1`
+when any problem failed/missing or a preflight failed, `2` on a
+pin-file/config read or parse error — the launch/compare convention.
+
+Environment hygiene (#1164): the launcher (`run_scbench.py`) and the shim
+(`software_factory.py`) both strip the leaked parent `VIRTUAL_ENV` (set by
+`uv run --project` to the harness venv) before spawning subprocesses, and
+`run-suite` launches each problem with it un-set — so a
+"VIRTUAL_ENV does not match the project environment" warning in evaluation
+stderr now indicates the solution itself, not the harness.
+
 ## Smoke test
 
 With a stub `factory` binary (no models involved — proves wiring only):

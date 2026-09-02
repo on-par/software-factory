@@ -210,6 +210,29 @@ describe('createExecaExec', () => {
     expect(failed.exitCode).toBe(3);
   });
 
+  it('forwards an env overlay, un-setting variables whose value is undefined', async () => {
+    const exec = createExecaExec();
+    const previous = process.env.VIRTUAL_ENV;
+    process.env.VIRTUAL_ENV = '/tmp/fake-venv';
+    try {
+      const printEnv = "process.stdout.write(process.env.VIRTUAL_ENV ?? 'unset')";
+
+      const cleared = await exec([process.execPath, '-e', printEnv], {
+        cwd: dir,
+        env: { VIRTUAL_ENV: undefined },
+      });
+      expect(cleared.stdout).toBe('unset');
+
+      // Omitting env must keep today's inherit-everything behavior — guards
+      // against accidentally switching to extendEnv: false.
+      const inherited = await exec([process.execPath, '-e', printEnv], { cwd: dir });
+      expect(inherited.stdout).toBe('/tmp/fake-venv');
+    } finally {
+      if (previous === undefined) delete process.env.VIRTUAL_ENV;
+      else process.env.VIRTUAL_ENV = previous;
+    }
+  });
+
   it("falls back to execa's shortMessage on a spawn failure (missing binary)", async () => {
     const exec = createExecaExec();
 

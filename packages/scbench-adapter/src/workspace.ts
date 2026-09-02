@@ -13,7 +13,7 @@ export interface ExecResult {
 }
 
 export interface ExecFn {
-  (argv: readonly string[], opts: { cwd: string }): Promise<ExecResult>;
+  (argv: readonly string[], opts: { cwd: string; env?: Record<string, string | undefined> }): Promise<ExecResult>;
 }
 
 export interface WorkspaceDeps {
@@ -23,11 +23,13 @@ export interface WorkspaceDeps {
 /** Real, argv-based (no shell) execa runner — never throws on non-zero exit.
  *  On a spawn failure (e.g. the binary is missing) execa's own stdout/stderr
  *  are left undefined; fall back to its shortMessage so the failure reason
- *  isn't silently dropped. */
+ *  isn't silently dropped. An `env` overlay merges over process.env; an
+ *  undefined value un-sets that variable in the child (Node spawn drops
+ *  undefined-valued env entries). */
 export function createExecaExec(): ExecFn {
   return async (argv, opts) => {
     const [cmd, ...args] = argv;
-    const result = await execa(cmd, args, { cwd: opts.cwd, reject: false });
+    const result = await execa(cmd, args, { cwd: opts.cwd, env: opts.env, reject: false });
     const rawStderr = typeof result.stderr === 'string' ? result.stderr : '';
     const isSpawnFailure = result.failed && typeof result.exitCode !== 'number';
     return {

@@ -90,6 +90,16 @@ describe('python shim conformance (pinned SCBench API)', () => {
     expect(launcher).toContain('sys.argv[1] == "run"');
   });
 
+  it('sanitizes the leaked parent VIRTUAL_ENV at both process boundaries', () => {
+    // Launcher: `uv run --project` sets VIRTUAL_ENV to the harness venv;
+    // evaluated temp projects and Factory checkpoints must not inherit it.
+    expect(launcher).toContain('os.environ.pop("VIRTUAL_ENV", None)');
+    // Shim: the adapter-CLI subprocess env omits it even under entrypoints
+    // that did not go through the launcher's own sanitization.
+    expect(shim).toContain('if k != "VIRTUAL_ENV"');
+    expect(shim).toContain('env=env');
+  });
+
   it('refuses dirty or non-git catalog/harness checkouts', () => {
     expect(compatCheck).toContain('--porcelain');
     expect(compatCheck).toContain('SCBENCH_PIN_ALLOW_DRIFT');

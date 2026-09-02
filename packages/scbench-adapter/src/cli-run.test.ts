@@ -8,6 +8,7 @@ import { minimalManifest } from './manifest-fixture.js';
 import type { CatalogPreflightOutcome } from './catalog-preflight.js';
 import type { PinPreflightOutcome } from './pin-preflight.js';
 import type { RetryCheckpointResult } from './retry-checkpoint.js';
+import { runSuite, type SuiteProblemRecord } from './suite.js';
 
 const RESULT: CheckpointResult = {
   outcome: 'ready',
@@ -122,6 +123,11 @@ function fakeDeps(overrides: Partial<CliDeps> = {}): CliDeps {
     collectTrial: vi.fn(() => COLLECT_TRIAL_RESULT),
     readEvaluationFile: vi.fn(async () => JSON.stringify(FAILED_EVALUATION)),
     retryCheckpoint: vi.fn(async () => RETRY_RESULT),
+    runSuite: vi.fn(async (): Promise<SuiteProblemRecord[]> => [
+      { problemId: 'alpha', exitCode: 0 },
+      { problemId: 'beta', exitCode: 0 },
+      { problemId: 'gamma', exitCode: 0 },
+    ]),
     ...overrides,
   };
 }
@@ -775,6 +781,165 @@ describe('pin-preflight and catalog-preflight subcommands stay byte-identical af
   });
 });
 
+describe('run-suite subcommand', () => {
+  it('runs every configured suite problem through runSuite and exits 0 when all complete', async () => {
+    const deps = fakeDeps();
+
+    const code = await main(['run-suite'], deps);
+
+    expect(code).toBe(0);
+    expect(deps.runSuite).toHaveBeenCalledWith(
+      {
+        checkout: '/tmp/checkout',
+        problemIds: ['alpha', 'beta', 'gamma'],
+        cwd: expect.stringContaining('/'),
+      },
+      { exec: expect.any(Function), log: deps.log },
+    );
+    expect(deps.log).toHaveBeenCalledWith(
+      'suite summary: completed — alpha, beta, gamma\nsuite summary: failed — (none)\nsuite summary: missing — (none)',
+    );
+  });
+
+  it('exits 1 on a failed problem, still separating the classes in the summary', async () => {
+    const deps = fakeDeps({
+      runSuite: vi.fn(async (): Promise<SuiteProblemRecord[]> => [
+        { problemId: 'alpha', exitCode: 0 },
+        { problemId: 'beta', exitCode: 3 },
+        { problemId: 'gamma', exitCode: 0 },
+      ]),
+    });
+
+    const code = await main(['run-suite'], deps);
+
+    expect(code).toBe(1);
+    expect(deps.runSuite).toHaveBeenCalledWith(
+      expect.objectContaining({ problemIds: ['alpha', 'beta', 'gamma'] }),
+      expect.anything(),
+    );
+    expect(deps.log).toHaveBeenCalledWith(
+      'suite summary: completed — alpha, gamma\nsuite summary: failed — beta\nsuite summary: missing — (none)',
+    );
+  });
+
+  it('exits 1 and reports a recordless (crashed) problem as missing, never completed', async () => {
+    const deps = fakeDeps({
+      runSuite: vi.fn(async (): Promise<SuiteProblemRecord[]> => [
+        { problemId: 'alpha', exitCode: 0 },
+        { problemId: 'gamma', exitCode: 0 },
+      ]),
+    });
+
+    const code = await main(['run-suite'], deps);
+
+    expect(code).toBe(1);
+    expect(deps.log).toHaveBeenCalledWith(
+      'suite summary: completed — alpha, gamma\nsuite summary: failed — (none)\nsuite summary: missing — beta',
+    );
+  });
+
+  it('gates on a pin-preflight failure without invoking runSuite', async () => {
+    const outcome: PinPreflightOutcome = {
+      ok: false,
+      results: [
+        ALL_OK_OUTCOME.results[0],
+        {
+          input: 'SCBENCH_PROBLEMS_PATH',
+          ok: false,
+          detail: `HEAD ${'c'.repeat(40)} does not match pinned commit ${'b'.repeat(40)}`,
+        },
+      ],
+    };
+    const deps = fakeDeps({ runPinPreflight: vi.fn(async () => outcome) });
+
+    const code = await main(['run-suite'], deps);
+
+    expect(code).toBe(1);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('pin-preflight: SCBENCH_PROBLEMS_PATH FAIL'));
+    expect(deps.runSuite).not.toHaveBeenCalled();
+  });
+
+  it('gates on a catalog-preflight failure without invoking runSuite', async () => {
+    const outcome: CatalogPreflightOutcome = {
+      ok: false,
+      results: [
+        {
+          subject: 'adapter build',
+          ok: false,
+          detail: 'missing build output /pkg/dist/cli.js — run `npm run build` first',
+        },
+        ...ALL_OK_CATALOG_OUTCOME.results.slice(1),
+      ],
+      confirmedProblemIds: [],
+    };
+    const deps = fakeDeps({ runCatalogPreflight: vi.fn(() => outcome) });
+
+    const code = await main(['run-suite'], deps);
+
+    expect(code).toBe(1);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('catalog-preflight: adapter build FAIL'));
+    expect(deps.runSuite).not.toHaveBeenCalled();
+  });
+
+  it('exits 2 when the pin file cannot be read, without invoking runSuite', async () => {
+    const deps = fakeDeps({ readPinFile: vi.fn(async () => Promise.reject(new Error('ENOENT'))) });
+
+    const code = await main(['run-suite'], deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('could not read pin file'));
+    expect(deps.runSuite).not.toHaveBeenCalled();
+  });
+
+  it('exits 2 when the baseline config cannot be read, without invoking runSuite', async () => {
+    const deps = fakeDeps({ readBaselineConfig: vi.fn(async () => Promise.reject(new Error('ENOENT'))) });
+
+    const code = await main(['run-suite'], deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('could not read --config'));
+    expect(deps.runSuite).not.toHaveBeenCalled();
+  });
+
+  it('writes the machine-readable JSON summary when --summary is passed', async () => {
+    const deps = fakeDeps({
+      runSuite: vi.fn(async (): Promise<SuiteProblemRecord[]> => [
+        { problemId: 'alpha', exitCode: 0 },
+        { problemId: 'beta', exitCode: 3 },
+      ]),
+    });
+
+    const code = await main(['run-suite', '--summary', '/tmp/suite-summary.json'], deps);
+
+    expect(code).toBe(1);
+    expect(deps.writeReport).toHaveBeenCalledWith(
+      '/tmp/suite-summary.json',
+      `${JSON.stringify(
+        {
+          configured: ['alpha', 'beta', 'gamma'],
+          records: [
+            { problemId: 'alpha', exitCode: 0 },
+            { problemId: 'beta', exitCode: 3 },
+          ],
+          summary: { completed: ['alpha'], failed: ['beta'], missing: ['gamma'] },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    expect(deps.log).toHaveBeenCalledWith('run-suite: wrote summary to /tmp/suite-summary.json');
+  });
+
+  it('does not write a summary file when --summary is omitted', async () => {
+    const deps = fakeDeps();
+
+    const code = await main(['run-suite'], deps);
+
+    expect(code).toBe(0);
+    expect(deps.writeReport).not.toHaveBeenCalled();
+  });
+});
+
 describe('collect-trial subcommand', () => {
   it('parses flags, calls collectTrial, and logs the copied files + trial dir on success', async () => {
     const deps = fakeDeps();
@@ -1320,6 +1485,10 @@ describe('defaultCliDeps', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('wires the real runSuite as the run-suite seam', () => {
+    expect(defaultCliDeps().runSuite).toBe(runSuite);
   });
 
   it('runs a real catalog preflight against a missing adapter bin and unset catalog path (fails closed, no crash)', () => {
