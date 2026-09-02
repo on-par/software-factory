@@ -199,7 +199,11 @@ export async function workerOutputChecker(
   ctx: CheckerContext,
   deps?: { collectDiff?: typeof collectDesignDiff },
 ): Promise<CheckerOutput> {
-  const diff = await (deps?.collectDiff ?? collectDesignDiff)(ctx.worktree);
+  // Second positional arg stays undefined so injected test stubs with the old
+  // 1-arg shape still typecheck against `typeof collectDesignDiff`.
+  const diff = await (deps?.collectDiff ?? collectDesignDiff)(ctx.worktree, undefined, {
+    fallbackBaseRef: ctx.diffBase,
+  });
   if (diff.skipReason) {
     return { checker: WORKER_OUTPUT_CHECKER, result: 'SKIP', details: diff.skipReason };
   }

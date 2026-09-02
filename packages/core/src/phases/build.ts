@@ -23,6 +23,9 @@ export interface BuildResult {
   /** Set on a non-escalation build failure; 'no_diff' = worker produced no diff,
    *  'junk_only_diff' = worker changed only generated/cache files. */
   reason?: 'no_diff' | 'junk_only_diff';
+  /** Run-start HEAD SHA captured before the worker ran (#1162) — checkPhase's
+   *  fallback diff base for remote-less checkouts (#1211). */
+  diffBase?: string;
 }
 
 export async function buildPhase(opts: Parameters<typeof buildPhaseImpl>[0]): Promise<BuildResult> {
@@ -292,7 +295,7 @@ async function buildPhaseImpl(opts: {
   }
 
   log('build', `Build complete with model ${result.model}`, { model: result.model });
-  return { ok: true, model: result.model, route };
+  return { ok: true, model: result.model, route, diffBase: fallbackBaseRef };
 }
 
 export function buildLocalSmallPrompt(opts: { issue: number; branch: string; spec: string }): string {

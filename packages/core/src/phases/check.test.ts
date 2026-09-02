@@ -152,6 +152,30 @@ describe('checkPhase auto rework', () => {
     });
   });
 
+  it(
+    'parks before rework in a remote-less checkout when nothing changed since the run-start base',
+    { timeout: 120_000 },
+    async () => {
+      const { worktree, specPath, baseSha } = await makeRemoteLessGitWorktree();
+      const { router, stub } = makeRouter();
+
+      const check = await checkPhase({
+        issue: 1211,
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        log: () => {},
+        diffBase: baseSha,
+      });
+
+      expect(check.passed).toBe(false);
+      expect(check.reworkRounds).toBe(0);
+      expect(check.failureSignature).toContain('worker_output:worker produced no diff');
+      expect(stub.calls).toHaveLength(0);
+    },
+  );
+
   it('does not re-invoke the worker when auto rework is disabled', { timeout: 120_000 }, async () => {
     const { worktree, specPath } = await makeFailingWorktree();
     const { router, stub } = makeRouter();
@@ -1432,6 +1456,23 @@ async function makeCleanGitWorktree(): Promise<{ worktree: string; specPath: str
   await execFile('git', ['commit', '-m', 'initial'], { cwd: worktree });
   await execFile('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: worktree });
   return { worktree, specPath };
+}
+
+/** makeCleanGitWorktree without the origin/main ref — a remote-less checkout whose only
+ *  usable diff base is the run-start SHA buildPhase captured (#1211). */
+async function makeRemoteLessGitWorktree(): Promise<{ worktree: string; specPath: string; baseSha: string }> {
+  const worktree = await mkdtemp(join(tmpdir(), 'check-phase-remoteless-git-'));
+  tempDirs.add(worktree);
+  const specPath = join(worktree, 'issue-1211.md');
+  await writeFixture(worktree, 'package.json', JSON.stringify({ scripts: { test: 'exit 0' } }));
+  await writeFixture(worktree, 'issue-1211.md', '# Spec: empty worker diff, no remote\n');
+  await execFile('git', ['init', '--initial-branch=main'], { cwd: worktree });
+  await execFile('git', ['config', 'user.email', 'tests@example.com'], { cwd: worktree });
+  await execFile('git', ['config', 'user.name', 'Tests'], { cwd: worktree });
+  await execFile('git', ['add', '.'], { cwd: worktree });
+  await execFile('git', ['commit', '-m', 'initial'], { cwd: worktree });
+  const { stdout } = await execFile('git', ['rev-parse', 'HEAD'], { cwd: worktree });
+  return { worktree, specPath, baseSha: stdout.trim() };
 }
 
 async function makeTestFailureEvidenceWorktree(): Promise<{ worktree: string; specPath: string }> {
