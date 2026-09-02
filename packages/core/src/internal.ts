@@ -150,6 +150,7 @@ export {
   branchPrefixSlug,
   cleanupWorktree,
   colorEnabled,
+  defaultRemoteBase,
   ensureDir,
   escalationLine,
   formatEventLine,

@@ -64,7 +64,7 @@ describe('worktreeWorkspace', () => {
       log,
     });
 
-    expect(setup).toHaveBeenCalledWith('/repo', 'issue-1', '/repo/.worktrees/issue-1', 'origin/main', undefined, log);
+    expect(setup).toHaveBeenCalledWith('/repo', 'issue-1', '/repo/.worktrees/issue-1', undefined, undefined, log);
     expect(ws.path).toBe('/repo/.worktrees/issue-1');
 
     await ws.dispose();
@@ -87,13 +87,13 @@ describe('worktreeWorkspace', () => {
       log,
     });
 
-    expect(setup).toHaveBeenCalledWith('/repo', 'issue-3', '/repo/.worktrees/issue-3', 'origin/main', sandbox, log);
+    expect(setup).toHaveBeenCalledWith('/repo', 'issue-3', '/repo/.worktrees/issue-3', undefined, sandbox, log);
 
     await ws.dispose();
     expect(cleanup).toHaveBeenCalledWith('/repo', '/repo/.worktrees/issue-3', log, sandbox);
   });
 
-  it('passes an explicit startPoint through to setup instead of the origin/main default', async () => {
+  it('passes an explicit startPoint through to setup verbatim', async () => {
     const setup = vi.fn().mockResolvedValue(undefined);
     const cleanup = vi.fn().mockResolvedValue(undefined);
 

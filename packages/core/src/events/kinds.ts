@@ -146,6 +146,7 @@ export type EventKind =
   | 'worker_failover'
   | 'workspace'
   | 'worktree'
+  | 'worktree-base'
   | 'worktree-gc';
 
 /** Lane state an event kind drives in the TUI/queue dashboard reducers; absent
@@ -308,6 +309,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   worker_failover: { severity: 'info', isPark: false, isTerminal: false },
   workspace: { severity: 'info', isPark: false, isTerminal: false },
   worktree: { severity: 'info', isPark: false, isTerminal: false },
+  'worktree-base': { severity: 'info', isPark: false, isTerminal: false },
   'worktree-gc': { severity: 'info', isPark: false, isTerminal: false },
 };
 
