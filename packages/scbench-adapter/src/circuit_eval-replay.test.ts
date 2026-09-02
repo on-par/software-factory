@@ -2,8 +2,9 @@
 // but Functionality 66/82 produced no rework brief, and the comparator failure carried
 // through checkpoints 4-8. The committed fixture reproduces that exact shape; the replay
 // proves the rework path (buildRetryContext → retryCheckpoint) turns it into a rework-1/
-// brief naming both comparator tests while leaving first-attempt evidence byte-identical.
-// The retrySkipReason gate for this shape is #1191's scope; the fixture-shape test below asserts it.
+// brief naming both comparator tests while leaving first-attempt evidence byte-identical —
+// both via the composed units and end-to-end through the `retry-checkpoint` CLI subcommand,
+// whose retrySkipReason gate (#1191's fix) must let this shape through (#1193).
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,8 +14,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { parseEvaluation } from './baseline.js';
 import type { ScbenchCheckpoint } from './checkpoint.js';
+import { defaultCliDeps, main, type CliDeps } from './cli-run.js';
 import { minimalManifest } from './manifest-fixture.js';
-import { retryCheckpoint } from './retry-checkpoint.js';
+import { retryCheckpoint, type RetryCheckpointResult } from './retry-checkpoint.js';
 import { buildRetryContext, retrySkipReason } from './retry-context.js';
 import { createExecaExec, type ExecFn } from './workspace.js';
 
@@ -140,6 +142,79 @@ describe('circuit_eval checkpoint-3 fixture replay', () => {
 
       // Every first-attempt evidence file — including the fixture-derived
       // evaluation.json — is byte-identical after the replay.
+      for (const [file, bytes] of firstAttemptBytes) {
+        expect(readFileSync(join(checkpointDir, file), 'utf-8')).toBe(bytes);
+      }
+    });
+
+    it('replays through the retry-checkpoint CLI: gate passes, rework-1/ written, evidence untouched', async () => {
+      const firstAttemptBytes = new Map(
+        FIRST_ATTEMPT_FILES.map((f) => [f, readFileSync(join(checkpointDir, f), 'utf-8')]),
+      );
+      const taskFile = join(artifactsRoot, 'task.md');
+      writeFileSync(taskFile, CHECKPOINT.task);
+
+      const exec: ExecFn = async (argv, opts) => {
+        const [bin, ...rest] = argv;
+        if (bin === 'git') return realExec(argv, opts);
+        if (bin === 'stub-factory') {
+          // rest === ['run-brief', briefPath, '--workspace', ws, '--artifacts', artifactsDir]
+          const artifactsDir = rest[5];
+          mkdirSync(artifactsDir, { recursive: true });
+          writeFileSync(join(artifactsDir, 'manifest.json'), JSON.stringify(minimalManifest()));
+          writeFileSync(join(artifactsDir, 'request.json'), '{}');
+          writeFileSync(join(artifactsDir, 'events.ndjson'), '');
+          writeFileSync(join(artifactsDir, 'diff.patch'), '');
+          return { exitCode: 0, stdout: '', stderr: '' };
+        }
+        throw new Error(`unexpected command: ${argv.join(' ')}`);
+      };
+
+      const lines: string[] = [];
+      const errors: string[] = [];
+      const deps: CliDeps = {
+        ...defaultCliDeps(),
+        log: (line) => lines.push(line),
+        logError: (line) => errors.push(line),
+        retryCheckpoint: (cp, ctx, opts) => retryCheckpoint(cp, ctx, opts, { exec }),
+      };
+
+      const code = await main(
+        [
+          'retry-checkpoint',
+          '--workspace',
+          workspace,
+          '--artifacts',
+          artifactsRoot,
+          '--task-file',
+          taskFile,
+          '--problem',
+          'circuit_eval',
+          '--checkpoint',
+          'checkpoint_3',
+          '--index',
+          '2',
+          '--evaluation',
+          FIXTURE_PATH,
+          '--factory-bin',
+          'stub-factory',
+        ],
+        deps,
+      );
+
+      expect(errors).toEqual([]);
+      expect(code).toBe(0); // exit 1 here would mean retrySkipReason wrongly gated the shape out
+
+      const reworkDir = join(checkpointDir, 'rework-1');
+      const printed = JSON.parse(lines.at(-1)!) as RetryCheckpointResult;
+      expect(printed.outcome).toBe('ready');
+      expect(printed.artifactsDir).toBe(reworkDir);
+      expect(existsSync(join(reworkDir, 'manifest.json'))).toBe(true);
+
+      const brief = readFileSync(join(reworkDir, 'brief.md'), 'utf-8');
+      expect(brief).toContain('test_check_comparator_2bit_circuit');
+      expect(brief).toContain('test_comparator_2bit_exhaustive');
+
       for (const [file, bytes] of firstAttemptBytes) {
         expect(readFileSync(join(checkpointDir, file), 'utf-8')).toBe(bytes);
       }
