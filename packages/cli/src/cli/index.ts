@@ -170,6 +170,7 @@ import {
   logEvent,
   planQueueMigration,
   readCosts,
+  reapLaneWorktree,
   releaseStaleClaims,
   resolveBranchPrefix,
   resolveEffectiveConfig,
@@ -1832,6 +1833,29 @@ function gcWorktreeSandbox(
   return worktreeSandboxFor(policy?.runtime);
 }
 
+/** Eagerly reaps a parked lane's own worktree inside `factory run` (#1007). All the safety
+ *  gates live in reapLaneWorktree; this wrapper resolves the lane's conventional worktree
+ *  path and holds the same git+file lock pairing as every other worktree mutation site. A
+ *  reap failure is logged as a warn and never surfaces — parking must always succeed. */
+export async function reapParkedLaneWorktree(
+  issue: number,
+  repoRoot: string,
+  paths: ReturnType<typeof getFactoryPaths>,
+): Promise<void> {
+  try {
+    const factoryConfig = loadFactoryConfigForRepo(paths.config);
+    const branchPrefix = resolveEffectiveConfig(loadRepoConfig(repoRoot)).branchPrefix;
+    const worktreePath = worktreePathFor(repoRoot, issue, branchPrefix);
+    const log = (type: EventKind, msg: string) => logEvent(paths.events, type, issue, msg);
+    const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
+    await withGitLock(repoRoot, () =>
+      withFileLock(paths.gitLock, () => reapLaneWorktree(repoRoot, worktreePath, { issue, branchPrefix, log, sandbox })),
+    );
+  } catch (err: any) {
+    logEvent(paths.events, 'warn', issue, `parked-lane worktree reap failed: ${err?.message ?? String(err)}`);
+  }
+}
+
 export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
@@ -1845,7 +1869,11 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }
   const ghRepo = await getGitHubRepo().catch(() => undefined);
   const octokit = ghRepo ? (hasGitHubToken() ? getOctokit() : undefined) : undefined;
   const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
-  const run = () => sweepWorktrees({ repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo }, { log, octokit, sandbox });
+  const run = () =>
+    sweepWorktrees(
+      { repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo, branchPrefix: resolveBranchPrefix() },
+      { log, octokit, sandbox },
+    );
   const report = opts.dryRun ? await run() : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
   console.log(formatGcReport(report));
 }
@@ -2410,7 +2438,7 @@ async function cmdRun(opts: { localQueue?: boolean } = {}) {
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
             sweepWorktrees(
-              { repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays, repo: ghRepo },
+              { repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays, repo: ghRepo, branchPrefix: resolveBranchPrefix() },
               { log: gcLog, octokit: getOctokit(), sandbox: gcSandbox },
             ),
           ),
@@ -2473,7 +2501,12 @@ async function cmdRun(opts: { localQueue?: boolean } = {}) {
           `lane '${planned.lane}' started${planned.issues.length ? ` (${planned.issues.length} issues)` : ''}`,
           { lane: planned.lane },
         );
-        pids.push(runLane(planned.lane, planned.issues, repoRoot, ghRepo, paths, planned.deps));
+        pids.push(
+          runLane(planned.lane, planned.issues, repoRoot, ghRepo, paths, {
+            ...planned.deps,
+            reapWorktree: (issue) => reapParkedLaneWorktree(issue, repoRoot, paths),
+          }),
+        );
       }
 
       await Promise.allSettled(pids);
@@ -2622,6 +2655,9 @@ type RunLaneDeps = {
   emitEvent?: typeof logEvent;
   claimNext?: () => Promise<QueueClaim | null>;
   releaseIssue?: (issue: number, outcome: QueueReleaseOutcome) => Promise<void>;
+  /** Eager park-time worktree reap (#1007). Defaults to a no-op so injected-deps callers and
+   *  tests are unaffected; cmdRun wires it to reapParkedLaneWorktree. */
+  reapWorktree?: (issue: number) => Promise<void>;
 };
 
 export interface PlannedLane {
@@ -2749,6 +2785,7 @@ export async function runLane(
     emitEvent = logEvent,
     claimNext = async () => null,
     releaseIssue = async () => {},
+    reapWorktree = async () => {},
   } = deps;
   let merged = 0;
   let awaitingReview = 0;
@@ -2780,6 +2817,9 @@ export async function runLane(
         `issue #${issue} parked (${decision.reason}); lane '${lane}' continuing, ${pending.length - i - 1} issue(s) remaining`,
         { lane },
       );
+      // A preflight-parked issue may still have a stale worktree from a prior run; the reap
+      // is fail-closed and must never change lane flow.
+      await reapWorktree(issue).catch(() => {});
       await releaseIssue(issue, 'parked');
       parked++;
       continue;
@@ -2833,6 +2873,9 @@ export async function runLane(
         `issue #${issue} parked (${reason}); lane '${lane}' continuing, ${pending.length - i - 1} issue(s) remaining`,
         { lane },
       );
+      // Remove the parked lane's own worktree so a parked issue stops leaving a sibling
+      // checkout behind (#1007); fail-closed and never allowed to change lane flow.
+      await reapWorktree(issue).catch(() => {});
       await releaseIssue(issue, 'parked');
       parked++;
       continue;
@@ -3738,7 +3781,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
             sweepWorktrees(
-              { repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays, repo: ghRepo },
+              { repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays, repo: ghRepo, branchPrefix: resolveBranchPrefix() },
               { log: gcLog, octokit, sandbox: gcSandbox },
             ),
           ),

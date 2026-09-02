@@ -3143,6 +3143,78 @@ describe('cli', () => {
       ]);
     });
 
+    it('reaps the parked worktree exactly once when ship throws a LaneParkError', async () => {
+      const reapWorktree = vi.fn(async () => {});
+      await runLane('app', [12], '/repo', 'on-par/software-factory', paths, {
+        ship: async () => {
+          throw new LaneParkError('plan escalated: needs a human decision', 'escalate');
+        },
+        waitMerge: async () => {},
+        pathExists: () => false,
+        emitEvent: () => {},
+        reapWorktree,
+      });
+
+      expect(reapWorktree).toHaveBeenCalledTimes(1);
+      expect(reapWorktree).toHaveBeenCalledWith(12);
+    });
+
+    it('reaps the worktree of a preflight-parked claim', async () => {
+      const reapWorktree = vi.fn(async () => {});
+      const claims = [{ issue: 13, decision: { kind: 'park' as const, reason: 'CI for PR #99 ended failure' } }];
+      await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
+        claimNext: async () => claims.shift() ?? null,
+        ship: async () => {
+          throw new Error('shipIssue must not run for a parked preflight');
+        },
+        pathExists: () => false,
+        emitEvent: () => {},
+        reapWorktree,
+      });
+
+      expect(reapWorktree).toHaveBeenCalledTimes(1);
+      expect(reapWorktree).toHaveBeenCalledWith(13);
+    });
+
+    it('does not reap on merged or awaiting-review outcomes', async () => {
+      const reapWorktree = vi.fn(async () => {});
+      await runLane('app', [14, 15], '/repo', 'on-par/software-factory', paths, {
+        ship: async (issue) => `ship-it/${issue}-x`,
+        waitMerge: async (issue) => {
+          if (issue === 15) throw new AwaitingReviewError('PR #900 awaiting review', 900);
+        },
+        pathExists: () => false,
+        emitEvent: () => {},
+        reapWorktree,
+      });
+
+      expect(reapWorktree).not.toHaveBeenCalled();
+    });
+
+    it('parks normally and keeps event ownership when the injected reapWorktree rejects', async () => {
+      const calls: any[] = [];
+      await runLane('app', [16], '/repo', 'on-par/software-factory', paths, {
+        ship: async () => {
+          throw new LaneParkError('router exhausted', 'timeout');
+        },
+        pathExists: () => false,
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
+          calls.push(['event', type, issue, msg, extra]),
+        releaseIssue: async (issue, outcome) => {
+          calls.push(['release', issue, outcome]);
+        },
+        reapWorktree: async () => {
+          throw new Error('reap exploded');
+        },
+      });
+
+      expect(calls).toContainEqual(['release', 16, 'parked']);
+      const events = calls.filter((c) => c[0] === 'event');
+      expect(events[0][1]).toBe('parked');
+      expect(events.at(-1)?.[1]).toBe('lane-done');
+      expect(events.at(-1)?.[3]).toContain('1 parked');
+    });
+
     it('parks the lane without re-emitting the terminal event (land path owns it) on a conflict error from waitMerge', async () => {
       const calls: any[] = [];
       await runLane('app', [11], '/repo', 'on-par/software-factory', paths, {
