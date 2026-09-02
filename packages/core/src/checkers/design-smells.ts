@@ -374,7 +374,11 @@ export async function designSmellsChecker(
     return { checker: DESIGN_SMELLS_CHECKER, result: 'SKIP', details: 'disabled by FACTORY_DESIGN_SMELLS=0' };
   }
 
-  const diff = await (deps?.collectDiff ?? collectDesignDiff)(ctx.worktree);
+  // Second positional arg stays undefined so injected test stubs with the old
+  // 1-arg shape still typecheck against `typeof collectDesignDiff`.
+  const diff = await (deps?.collectDiff ?? collectDesignDiff)(ctx.worktree, undefined, {
+    fallbackBaseRef: ctx.diffBase,
+  });
   if (diff.skipReason) {
     return { checker: DESIGN_SMELLS_CHECKER, result: 'SKIP', details: diff.skipReason };
   }
