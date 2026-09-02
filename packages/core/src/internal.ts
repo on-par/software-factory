@@ -230,6 +230,16 @@ export {
 export type { FactorydOptions, FactorydServer } from './daemon/factoryd-http.js';
 export { createFactorydServer, DEFAULT_FACTORYD_PORT } from './daemon/factoryd-http.js';
 
+// Daemon runtime state: pid/port/log files under ~/.factory (#1177)
+export type { AcquirePidFileOptions, AcquirePidFileResult, DaemonRuntimePaths } from './daemon/runtime-state.js';
+export {
+  acquirePidFile,
+  createDaemonLogSink,
+  daemonRuntimePaths,
+  releaseRuntimeFiles,
+  writePortFile,
+} from './daemon/runtime-state.js';
+
 // Daemon attach gate (#778)
 export type {
   AttachFailureReason,

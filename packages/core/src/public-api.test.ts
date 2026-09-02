@@ -383,6 +383,12 @@ const INTERNAL_API_KEYS = [
   // Daemon control-plane HTTP server (#777)
   'createFactorydServer',
   'DEFAULT_FACTORYD_PORT',
+  // Daemon runtime state: pid/port/log files (#1177)
+  'acquirePidFile',
+  'createDaemonLogSink',
+  'daemonRuntimePaths',
+  'releaseRuntimeFiles',
+  'writePortFile',
   // Daemon lane state resolution (#843)
   'createDaemonLaneContext',
   // Daemon per-repo orchestration dispatch (#1041)
