@@ -433,6 +433,12 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       if (build.reason === 'no_diff') {
         return terminalParked('fail', 'build produced no diff against the base ref — no implementation was produced');
       }
+      if (build.reason === 'junk_only_diff') {
+        return terminalParked(
+          'fail',
+          'build changed only generated/cache files (e.g. __pycache__) — no implementation was produced',
+        );
+      }
       return terminalEscalated(`build escalated: ${build.escalate ?? 'unknown'}`);
     }
     const buildBudget = await assertBudget('BUILD');

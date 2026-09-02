@@ -22,7 +22,8 @@ export const SMELL_KINDS = ['cast-to-pass', 'swallowed-error', 'shotgun-surgery'
 /** Base refs tried in order; the first that resolves is the merge-base target. */
 export const BASE_REF_CANDIDATES = ['origin/main', 'origin/master'] as const;
 
-/** Generated/vendored paths a design critic must not grade. */
+/** Generated/vendored/cache paths neither the design critic nor the build
+ *  no-op guard should count as implementation (#483, #1162). */
 export const DIFF_EXCLUDES = [
   ':!package-lock.json',
   ':!**/package-lock.json',
@@ -31,6 +32,13 @@ export const DIFF_EXCLUDES = [
   ':!**/dist/**',
   ':!coverage/**',
   ':!**/*.snap',
+  ':!**/__pycache__/**',
+  ':!**/*.pyc',
+  ':!**/.pytest_cache/**',
+  ':!**/.mypy_cache/**',
+  ':!**/.ruff_cache/**',
+  ':!**/.coverage',
+  ':!**/node_modules/**',
 ] as const;
 
 /** Hard cap on diff characters injected into the critic prompt. */
@@ -95,9 +103,16 @@ export interface CollectedDiff {
   truncated: boolean;
   /** Set when the diff could not be collected at all (not a git checkout, no base ref). */
   skipReason?: string;
+  /** Raw changed paths (no excludes) — populated only when the filtered diff is empty,
+   *  so the caller can distinguish "no change at all" from "only generated/cache churn". */
+  excludedPaths?: string[];
 }
 
-export async function collectDesignDiff(worktree: string, run: DiffRunner = defaultDiffRunner): Promise<CollectedDiff> {
+export async function collectDesignDiff(
+  worktree: string,
+  run: DiffRunner = defaultDiffRunner,
+  opts?: { fallbackBaseRef?: string },
+): Promise<CollectedDiff> {
   let baseRef: string | null = null;
   for (const candidate of BASE_REF_CANDIDATES) {
     const check = await run(['git', 'rev-parse', '--verify', '--quiet', `${candidate}^{commit}`], worktree);
@@ -107,12 +122,20 @@ export async function collectDesignDiff(worktree: string, run: DiffRunner = defa
     }
   }
 
+  // Caller-provided checkouts (e.g. factory run-brief --workspace) have no
+  // remote base; the pre-build HEAD captured by buildPhase stands in (#1162).
+  if (baseRef === null && opts?.fallbackBaseRef !== undefined) {
+    const check = await run(['git', 'rev-parse', '--verify', '--quiet', `${opts.fallbackBaseRef}^{commit}`], worktree);
+    if (check.ok) baseRef = opts.fallbackBaseRef;
+  }
+
   if (baseRef === null) {
+    const fallbackNote = opts?.fallbackBaseRef !== undefined ? ', no fallback base' : '';
     return {
       text: '',
       baseRef: null,
       truncated: false,
-      skipReason: 'no base ref (tried origin/main, origin/master) — not a git checkout or no remote base',
+      skipReason: `no base ref (tried origin/main, origin/master) — not a git checkout or no remote base${fallbackNote}`,
     };
   }
 
@@ -135,7 +158,40 @@ export async function collectDesignDiff(worktree: string, run: DiffRunner = defa
     truncated = true;
   }
 
+  if (text === '') {
+    const excludedPaths = await collectRawChangedPaths(worktree, baseRef, run);
+    if (excludedPaths.length > 0) return { text, baseRef, truncated, excludedPaths };
+  }
+
   return { text, baseRef, truncated };
+}
+
+/** Exclude-free changed paths against the base — non-empty when the filtered
+ *  diff was empty only because every change matched DIFF_EXCLUDES. */
+async function collectRawChangedPaths(worktree: string, baseRef: string, run: DiffRunner): Promise<string[]> {
+  const committed = await run(['git', 'diff', '--name-only', `${baseRef}...HEAD`], worktree);
+  const uncommitted = await run(['git', 'diff', '--name-only', 'HEAD'], worktree);
+
+  const paths = new Set<string>();
+  for (const result of [committed, uncommitted]) {
+    if (!result.ok) continue;
+    for (const line of result.stdout.split('\n')) {
+      const path = line.trim();
+      if (path.length > 0) paths.add(path);
+    }
+  }
+  return [...paths].sort();
+}
+
+/** SHA of the worktree's current HEAD, captured before a worker runs, for use as
+ *  collectDesignDiff's fallbackBaseRef in checkouts with no remote base. */
+export async function captureDiffBase(
+  worktree: string,
+  run: DiffRunner = defaultDiffRunner,
+): Promise<string | undefined> {
+  const r = await run(['git', 'rev-parse', 'HEAD'], worktree);
+  const sha = r.stdout.trim();
+  return r.ok && sha.length > 0 ? sha : undefined;
 }
 
 /** Verifies that the worker changed a product file before repairs can begin. */

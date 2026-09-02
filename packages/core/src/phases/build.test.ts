@@ -1849,6 +1849,64 @@ describe('buildPhase no-diff post-condition', () => {
     });
   });
 
+  it('fails with junk_only_diff when the filtered diff is empty but excluded paths exist', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-1162-junk.md');
+    const logs: Array<{ type: string; msg: string }> = [];
+
+    const result = await buildPhase({
+      issue: 1162,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/1162-junk-only',
+      route: 'claude',
+      router: fakeRouter(),
+      constitution: null,
+      log: (type, msg) => logs.push({ type, msg }),
+      collectDiff: async () => ({
+        text: '',
+        baseRef: 'abc123',
+        truncated: false,
+        excludedPaths: ['pkg/__pycache__/mod.cpython-311.pyc'],
+      }),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('junk_only_diff');
+    const fail = logs.find((l) => l.type === 'fail');
+    expect(fail?.msg).toContain('only generated/cache files');
+    expect(fail?.msg).toContain('pkg/__pycache__/mod.cpython-311.pyc');
+  });
+
+  it('passes the captured pre-build base to the diff collector as fallbackBaseRef', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-1162-fallback.md');
+    let receivedOpts: { fallbackBaseRef?: string } | undefined;
+
+    const result = await buildPhase({
+      issue: 1162,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/1162-fallback-base',
+      route: 'claude',
+      router: fakeRouter(),
+      constitution: null,
+      log: () => {},
+      captureBase: async () => 'presha',
+      collectDiff: async (_worktree, _run, opts) => {
+        receivedOpts = opts;
+        return { text: 'diff --git a/x b/x', baseRef: 'presha', truncated: false };
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(receivedOpts).toEqual({ fallbackBaseRef: 'presha' });
+  });
+
   it('succeeds when the diff collector reports a real diff', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);
@@ -1865,6 +1923,34 @@ describe('buildPhase no-diff post-condition', () => {
       constitution: null,
       log: () => {},
       collectDiff: async () => ({ text: 'diff --git a/x b/x', baseRef: 'origin/main', truncated: false }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.reason).toBeUndefined();
+  });
+
+  it('passes when a real source change survives the junk filter (junk alongside real change)', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-1162-mixed.md');
+
+    const result = await buildPhase({
+      issue: 1162,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/1162-mixed-diff',
+      route: 'claude',
+      router: fakeRouter(),
+      constitution: null,
+      log: () => {},
+      // The pycache churn is filtered out by DIFF_EXCLUDES; the surviving
+      // source-file hunk is what makes the filtered text non-empty.
+      collectDiff: async () => ({
+        text: 'diff --git a/src/real.py b/src/real.py\n+implemented\n',
+        baseRef: 'origin/main',
+        truncated: false,
+      }),
     });
 
     expect(result.ok).toBe(true);

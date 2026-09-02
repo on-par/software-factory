@@ -12,6 +12,7 @@ import { StubModelExecutor } from '../router/stub.js';
 import {
   BASE_REF_CANDIDATES,
   buildDesignSmellPrompt,
+  captureDiffBase,
   collectDesignDiff,
   DESIGN_SMELLS_CHECKER,
   type DesignSmell,
@@ -133,9 +134,89 @@ describe('collectDesignDiff', () => {
         ':!**/dist/**',
         ':!coverage/**',
         ':!**/*.snap',
+        ':!**/__pycache__/**',
+        ':!**/*.pyc',
       ]),
     );
     expect(committedCall!.cwd).toBe('/worktree');
+  });
+
+  it('uses the provided fallbackBaseRef when neither remote base resolves', async () => {
+    const calls: { argv: readonly string[]; cwd: string }[] = [];
+    const run: DiffRunner = async (argv, cwd) => {
+      calls.push({ argv, cwd });
+      if (argv[1] === 'rev-parse') {
+        return { ok: argv[4] === 'presha123^{commit}', stdout: '' };
+      }
+      if (argv.includes('presha123...HEAD')) {
+        return { ok: true, stdout: 'diff --git a/x.ts b/x.ts\n+added line\n' };
+      }
+      return { ok: true, stdout: '' };
+    };
+
+    const result = await collectDesignDiff('/worktree', run, { fallbackBaseRef: 'presha123' });
+
+    expect(result.skipReason).toBeUndefined();
+    expect(result.baseRef).toBe('presha123');
+    expect(result.text).toContain('added line');
+    expect(calls.some((c) => c.argv.includes('presha123...HEAD'))).toBe(true);
+  });
+
+  it('returns skipReason when the fallbackBaseRef also fails to verify', async () => {
+    const run: DiffRunner = async () => ({ ok: false, stdout: '' });
+
+    const result = await collectDesignDiff('/worktree', run, { fallbackBaseRef: 'deadbeef' });
+
+    expect(result.baseRef).toBeNull();
+    expect(result.text).toBe('');
+    expect(result.skipReason).toContain('no fallback base');
+  });
+
+  it('reports excludedPaths when the filtered diff is empty but raw changes exist', async () => {
+    const run: DiffRunner = async (argv) => {
+      if (argv[1] === 'rev-parse') return { ok: true, stdout: '' };
+      if (argv.includes('--name-only') && argv.includes('origin/main...HEAD')) {
+        return { ok: true, stdout: 'pkg/__pycache__/mod.cpython-311.pyc\na/first.pyc\n' };
+      }
+      if (argv.includes('--name-only') && argv.includes('HEAD')) {
+        return { ok: true, stdout: 'a/first.pyc\nz/last.pyc\n' };
+      }
+      return { ok: true, stdout: '' };
+    };
+
+    const result = await collectDesignDiff('/worktree', run);
+
+    expect(result.text).toBe('');
+    expect(result.skipReason).toBeUndefined();
+    expect(result.excludedPaths).toEqual(['a/first.pyc', 'pkg/__pycache__/mod.cpython-311.pyc', 'z/last.pyc']);
+  });
+
+  it('leaves excludedPaths unset when the raw name-only diffs are also empty', async () => {
+    const run: DiffRunner = async (argv) => {
+      if (argv[1] === 'rev-parse') return { ok: true, stdout: '' };
+      return { ok: true, stdout: '' };
+    };
+
+    const result = await collectDesignDiff('/worktree', run);
+
+    expect(result.text).toBe('');
+    expect(result.excludedPaths).toBeUndefined();
+  });
+
+  it('does not run the name-only diffs when the filtered diff is non-empty', async () => {
+    const calls: readonly string[][] = [];
+    const run: DiffRunner = async (argv) => {
+      (calls as string[][]).push([...argv]);
+      if (argv[1] === 'rev-parse') return { ok: true, stdout: '' };
+      if (argv.includes('origin/main...HEAD')) return { ok: true, stdout: 'real diff\n' };
+      return { ok: true, stdout: '' };
+    };
+
+    const result = await collectDesignDiff('/worktree', run);
+
+    expect(result.text).toContain('real diff');
+    expect(result.excludedPaths).toBeUndefined();
+    expect(calls.some((argv) => argv.includes('--name-only'))).toBe(false);
   });
 
   it('falls back to origin/master when the first rev-parse fails', async () => {
@@ -201,6 +282,31 @@ describe('collectDesignDiff', () => {
 
     expect(result.text).toBe('');
     expect(result.truncated).toBe(false);
+  });
+});
+
+describe('captureDiffBase', () => {
+  it('returns the trimmed HEAD SHA on success', async () => {
+    const calls: string[][] = [];
+    const run: DiffRunner = async (argv) => {
+      calls.push([...argv]);
+      return { ok: true, stdout: 'abc123def\n' };
+    };
+
+    await expect(captureDiffBase('/worktree', run)).resolves.toBe('abc123def');
+    expect(calls[0]).toEqual(['git', 'rev-parse', 'HEAD']);
+  });
+
+  it('returns undefined when git rev-parse HEAD fails', async () => {
+    const run: DiffRunner = async () => ({ ok: false, stdout: '' });
+
+    await expect(captureDiffBase('/worktree', run)).resolves.toBeUndefined();
+  });
+
+  it('returns undefined when the output is empty despite an ok exit', async () => {
+    const run: DiffRunner = async () => ({ ok: true, stdout: '\n' });
+
+    await expect(captureDiffBase('/worktree', run)).resolves.toBeUndefined();
   });
 });
 

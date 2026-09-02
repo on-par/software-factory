@@ -42,6 +42,25 @@ describe('prepareWorkspace', () => {
     expect(exclude).toContain('.factory/');
   });
 
+  it('writes every junk-artifact exclude entry into .git/info/exclude', async () => {
+    const { exec } = fakeExec();
+
+    await prepareWorkspace(dir, { exec });
+
+    const lines = readFileSync(join(dir, '.git', 'info', 'exclude'), 'utf-8').split('\n');
+    for (const entry of [
+      '.factory/',
+      '__pycache__/',
+      '*.pyc',
+      '.pytest_cache/',
+      '.mypy_cache/',
+      '.ruff_cache/',
+      '.coverage',
+    ]) {
+      expect(lines).toContain(entry);
+    }
+  });
+
   it('throws AdapterError when git init fails, without creating a fake .git', async () => {
     const exec: ExecFn = async (argv) => {
       if (argv[1] === 'init') return { exitCode: 1, stdout: '', stderr: 'git: command not found' };
@@ -74,13 +93,27 @@ describe('prepareWorkspace', () => {
     expect(existsSync(join(dir, '.factory'))).toBe(true);
   });
 
-  it('does not duplicate the exclude entry on a second run', async () => {
+  it('does not duplicate any exclude entry on a second run', async () => {
     const { exec } = fakeExec();
     await prepareWorkspace(dir, { exec });
     await prepareWorkspace(dir, { exec });
 
     const exclude = readFileSync(join(dir, '.git', 'info', 'exclude'), 'utf-8');
     expect(exclude.match(/\.factory\//g)?.length).toBe(1);
+    expect(exclude.match(/__pycache__\//g)?.length).toBe(1);
+  });
+
+  it('adds only the missing junk entries when .factory/ is already excluded', async () => {
+    mkdirSync(join(dir, '.git', 'info'), { recursive: true });
+    writeFileSync(join(dir, '.git', 'info', 'exclude'), 'node_modules/\n.factory/\n');
+    const { exec } = fakeExec();
+
+    await prepareWorkspace(dir, { exec });
+
+    const exclude = readFileSync(join(dir, '.git', 'info', 'exclude'), 'utf-8');
+    expect(exclude).toBe(
+      'node_modules/\n.factory/\n__pycache__/\n*.pyc\n.pytest_cache/\n.mypy_cache/\n.ruff_cache/\n.coverage\n',
+    );
   });
 
   it('propagates a non-ENOENT error reading the exclude file (e.g. it is a directory)', async () => {
@@ -98,7 +131,9 @@ describe('prepareWorkspace', () => {
     await prepareWorkspace(dir, { exec });
 
     const exclude = readFileSync(join(dir, '.git', 'info', 'exclude'), 'utf-8');
-    expect(exclude).toBe('node_modules/\n.factory/\n');
+    expect(exclude).toBe(
+      'node_modules/\n.factory/\n__pycache__/\n*.pyc\n.pytest_cache/\n.mypy_cache/\n.ruff_cache/\n.coverage\n',
+    );
   });
 });
 
