@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "problem_name": "cfgpipe",
+  "problem_version": 2,
+  "checkpoint_name": "checkpoint_1",
+  "checkpoint_version": 2,
+  "duration": 0.91,
+  "entrypoint": "uv run cfgpipe.py",
+  "tests": {
+    "checkpoint_1-Core": {
+      "passed": [
+        "test_file_overrides_env",
+        "test_env_overrides_default",
+        "test_cli_arg_forms[arg_candidates0]",
+        "test_missing_required_param"
+      ],
+      "failed": [],
+      "skipped": []
+    }
+  },
+  "pass_counts": {
+    "Core": 4
+  },
+  "total_counts": {
+    "Core": 4
+  },
+  "pytest_exit_code": 0,
+  "infrastructure_failure": false
+}

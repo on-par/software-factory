@@ -99,8 +99,12 @@ describe('parseEvaluation', () => {
   });
 
   it('rejects non-string stdout/stderr values', () => {
-    expect(() => parseEvaluation(malformedEvaluationJson({ stdout: 42 }), PATH)).toThrow(/field "stdout" must be a string/);
-    expect(() => parseEvaluation(malformedEvaluationJson({ stderr: [] }), PATH)).toThrow(/field "stderr" must be a string/);
+    expect(() => parseEvaluation(malformedEvaluationJson({ stdout: 42 }), PATH)).toThrow(
+      /field "stdout" must be a string/,
+    );
+    expect(() => parseEvaluation(malformedEvaluationJson({ stderr: [] }), PATH)).toThrow(
+      /field "stderr" must be a string/,
+    );
   });
 });
 

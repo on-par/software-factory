@@ -19,5 +19,11 @@ describe('index exports', () => {
     expect(typeof adapter.checkPinnedInput).toBe('function');
     expect(typeof adapter.runPinPreflight).toBe('function');
     expect(typeof adapter.runCatalogPreflight).toBe('function');
+    expect(typeof adapter.parseEvaluation).toBe('function');
+    expect(typeof adapter.buildRetryContext).toBe('function');
+    expect(typeof adapter.retrySkipReason).toBe('function');
+    expect(typeof adapter.materializeRetryBrief).toBe('function');
+    expect(typeof adapter.retryCheckpoint).toBe('function');
+    expect(adapter.RETRY_PASS_POLICY).toBe('core-cases');
   });
 });

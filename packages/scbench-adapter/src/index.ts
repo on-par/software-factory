@@ -2,7 +2,13 @@
 export type { CheckpointResult, ScbenchCheckpoint } from './checkpoint.js';
 export { AdapterError } from './checkpoint.js';
 
-export { materializeBrief } from './brief.js';
+export { materializeBrief, materializeRetryBrief } from './brief.js';
+
+export type { FailedTest, ScbenchRetryContext } from './retry-context.js';
+export { buildRetryContext, retrySkipReason, RETRY_PASS_POLICY } from './retry-context.js';
+
+export type { RetryCheckpointResult } from './retry-checkpoint.js';
+export { retryCheckpoint } from './retry-checkpoint.js';
 
 export type { ExecFn, ExecResult, WorkspaceDeps } from './workspace.js';
 export { commitCheckpoint, createExecaExec, prepareWorkspace } from './workspace.js';
@@ -29,9 +35,16 @@ export type {
   BaselineTrialEvidence,
   ScbenchEvaluation,
   ScbenchRunRecord,
+  ScbenchTestGroup,
   TrialVerdict,
 } from './baseline.js';
-export { collectBaselineTrials, evaluateTrialVerdict, generateBaselineReport, loadBaselineConfig } from './baseline.js';
+export {
+  collectBaselineTrials,
+  evaluateTrialVerdict,
+  generateBaselineReport,
+  loadBaselineConfig,
+  parseEvaluation,
+} from './baseline.js';
 
 export type { ComparisonEntry, ComparisonResult, ComparisonSideStats, ComparisonStatus } from './compare.js';
 export { compareTrialSets, renderComparisonReport } from './compare.js';
