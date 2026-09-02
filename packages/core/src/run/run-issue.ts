@@ -533,7 +533,11 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     });
     if (!ship.ok) {
       const reason: ParkReason = ship.denied ? 'escalate' : 'fail';
-      const message = ship.denied ? `ship denied: ${ship.deniedReason}` : 'ship phase failed';
+      const message = ship.denied
+        ? `ship denied: ${ship.deniedReason}`
+        : ship.reason
+          ? `ship phase failed: ${ship.reason}`
+          : 'ship phase failed';
       return terminalParked(reason, message);
     }
 
