@@ -179,7 +179,20 @@ subcommand (see
 "Complete suite run" section): it runs the same pin + catalog preflights,
 then every configured suite problem through the pinned launcher, continuing
 past failed problems, and prints a summary separating completed, failed,
-and missing problems. After the run, per-problem native evidence is still
+and missing problems:
+
+```bash
+SCBENCH_CHECKOUT=/path/to/slop-code-bench \
+SCBENCH_PROBLEMS_PATH=/path/to/scb-problems \
+SCBENCH_PLACEHOLDER_KEY=x \
+node packages/scbench-adapter/dist/cli.js run-suite \
+  --provider-api-key-env SCBENCH_PLACEHOLDER_KEY \
+  --summary evals/scbench-baseline/suite-summary.json
+```
+
+`--provider-api-key-env` names the harmless placeholder credential var from
+the operational note above — never export a real `ANTHROPIC_API_KEY` for
+this. After the run, per-problem native evidence is still
 imported per trial with `collect-trial` exactly as in the smoke steps
 above; a `failed` or `missing` problem is never counted as evidence
 (ADR-0007) — pass/fail correctness derives solely from retained native

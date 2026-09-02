@@ -801,6 +801,30 @@ describe('run-suite subcommand', () => {
     );
   });
 
+  it('threads --provider-api-key-env into RunSuiteOptions', async () => {
+    const deps = fakeDeps();
+
+    const code = await main(['run-suite', '--provider-api-key-env', 'SCBENCH_PLACEHOLDER_KEY'], deps);
+
+    expect(code).toBe(0);
+    expect(deps.runSuite).toHaveBeenCalledWith(
+      expect.objectContaining({ providerApiKeyEnv: 'SCBENCH_PLACEHOLDER_KEY' }),
+      expect.anything(),
+    );
+  });
+
+  it('passes providerApiKeyEnv as undefined when --provider-api-key-env is omitted', async () => {
+    const deps = fakeDeps();
+
+    const code = await main(['run-suite'], deps);
+
+    expect(code).toBe(0);
+    expect(deps.runSuite).toHaveBeenCalledWith(
+      expect.objectContaining({ providerApiKeyEnv: undefined }),
+      expect.anything(),
+    );
+  });
+
   it('exits 1 on a failed problem, still separating the classes in the summary', async () => {
     const deps = fakeDeps({
       runSuite: vi.fn(async (): Promise<SuiteProblemRecord[]> => [
