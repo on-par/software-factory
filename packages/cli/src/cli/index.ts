@@ -192,7 +192,7 @@ import {
 import { runTui } from '@on-par/factory-tui';
 import chalk from 'chalk';
 import { Command } from 'commander';
-
+import { cmdDaemonLogs, cmdDaemonStart, cmdDaemonStatus, cmdDaemonStop, DaemonCtlError } from './daemon.js';
 import {
   analyzeEventLog,
   type ClaudeAuthProbe,
@@ -2334,8 +2334,8 @@ async function cmdProxy() {
 
 /** Runs factoryd in the foreground: a loopback-only HTTP server over the repo
  *  registry (~/.factory/registry.json). Read-only today — GET /repos is the whole
- *  API (#777). Daemon supervision (launchd) is a sibling story; this command is
- *  the process. */
+ *  API (#777). This command is the process; `factory daemon start|stop|status|logs`
+ *  wrap it in a launchd LaunchAgent (./daemon.ts, #1179). */
 async function cmdFactoryd(opts: { port?: string; registry?: string }) {
   const registryFile = opts.registry ?? defaultRegistryPath();
   const port = opts.port === undefined ? DEFAULT_FACTORYD_PORT : Number(opts.port);
@@ -4102,12 +4102,35 @@ export async function main() {
     )
     .action(cmdProxy);
 
-  program
+  const daemonCmd = program
     .command('daemon')
-    .description('Run factoryd in the foreground: a localhost-only HTTP API over the repo registry')
+    .description('Run factoryd in the foreground, or manage it as a launchd LaunchAgent (start|stop|status|logs)')
     .option('--port <n>', `port to bind on 127.0.0.1 (default ${DEFAULT_FACTORYD_PORT})`)
     .option('--registry <file>', 'registry file to serve (default ~/.factory/registry.json)')
     .action((opts: { port?: string; registry?: string }) => cmdFactoryd(opts));
+  const daemonCtl = (fn: () => Promise<void>) =>
+    fn().catch((err: unknown) => {
+      if (err instanceof DaemonCtlError) throw new CliExitError(err.message, err.code);
+      throw err;
+    });
+  daemonCmd
+    .command('start')
+    .description('Install + load the com.onpar.factoryd LaunchAgent (KeepAlive, RunAtLoad)')
+    .action(() => daemonCtl(() => cmdDaemonStart()));
+  daemonCmd
+    .command('stop')
+    .description('Unload the LaunchAgent (plist stays installed)')
+    .action(() => daemonCtl(() => cmdDaemonStop()));
+  daemonCmd
+    .command('status')
+    .description('Report factoryd pid, uptime, and attached repos')
+    .action(() => daemonCtl(() => cmdDaemonStatus()));
+  daemonCmd
+    .command('logs')
+    .description('Print/tail ~/.factory/daemon.log')
+    .option('-f, --follow', 'keep tailing')
+    .option('-n, --lines <n>', 'lines to print first (default 100)')
+    .action((opts: { follow?: boolean; lines?: string }) => daemonCtl(() => cmdDaemonLogs(opts)));
 
   const worktreeCmd = program.command('worktree').description('Worktree maintenance');
   worktreeCmd
