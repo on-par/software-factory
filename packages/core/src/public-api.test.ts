@@ -435,6 +435,7 @@ const INTERNAL_API_KEYS = [
   'findCredentialFiles',
   'formatGcReport',
   'parseWorktreeList',
+  'reapLaneWorktree',
   'scrubFile',
   'sweepWorktrees',
   'zeroFill',
