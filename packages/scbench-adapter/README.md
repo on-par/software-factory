@@ -184,8 +184,21 @@ Where `npm run scbench` stops at printing the launcher commands, the
 ```bash
 SCBENCH_CHECKOUT=/path/to/slop-code-bench \
 SCBENCH_PROBLEMS_PATH=/path/to/scb-problems \
-node packages/scbench-adapter/dist/cli.js run-suite --summary /tmp/suite-summary.json
+SCBENCH_PLACEHOLDER_KEY=x \
+node packages/scbench-adapter/dist/cli.js run-suite \
+  --provider-api-key-env SCBENCH_PLACEHOLDER_KEY \
+  --summary /tmp/suite-summary.json
 ```
+
+`--provider-api-key-env <var>` is forwarded verbatim to every per-problem
+launcher invocation. Upstream SCBench's `run` command requires a _populated_
+provider credential env var before it will start (presence-checked for its
+own bookkeeping only — the value is never validated or forwarded to
+Factory's models), so a live run names a harmless placeholder var here.
+Never satisfy that gate by exporting a real `ANTHROPIC_API_KEY`: the nested
+`claude` CLI treats that env var as an auth override and abandons its
+logged-in OAuth session (see `evals/scbench-baseline/README.md`'s credential
+note). With the flag omitted, the launcher argv is unchanged.
 
 The same pin + catalog preflights as `launch` gate the run — a failing
 preflight aborts before any launcher invocation. Once they pass, every

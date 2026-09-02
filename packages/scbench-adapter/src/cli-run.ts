@@ -31,7 +31,8 @@ const COLLECT_TRIAL_USAGE =
 const COMPARE_USAGE = 'usage: scbench-factory-agent compare --baseline <dir> --candidate <dir> [--threshold <points>]';
 const RETRY_CHECKPOINT_USAGE =
   'usage: scbench-factory-agent retry-checkpoint --workspace <dir> --artifacts <dir> --task-file <path> --problem <id> --checkpoint <id> --evaluation <path> [--index <n>] [--factory-bin <path>]';
-const RUN_SUITE_USAGE = 'usage: scbench-factory-agent run-suite [--pin <path>] [--config <path>] [--summary <path>]';
+const RUN_SUITE_USAGE =
+  'usage: scbench-factory-agent run-suite [--pin <path>] [--config <path>] [--summary <path>] [--provider-api-key-env <var>]';
 const USAGE = `${RUN_CHECKPOINT_USAGE}\n${BASELINE_REPORT_USAGE}\n${PIN_PREFLIGHT_USAGE}\n${CATALOG_PREFLIGHT_USAGE}\n${LAUNCH_USAGE}\n${COLLECT_TRIAL_USAGE}\n${COMPARE_USAGE}\n${RETRY_CHECKPOINT_USAGE}\n${RUN_SUITE_USAGE}`;
 
 const REQUIRED_FLAGS = ['--workspace', '--artifacts', '--task-file', '--problem', '--checkpoint'] as const;
@@ -388,7 +389,12 @@ async function runRunSuiteCommand(rest: readonly string[], deps: CliDeps): Promi
   const cwd = fileURLToPath(new URL('../../..', import.meta.url));
   const suiteIds = catalog.config.problems.suite;
   const records = await deps.runSuite(
-    { checkout: deps.env.SCBENCH_CHECKOUT!, problemIds: suiteIds, cwd },
+    {
+      checkout: deps.env.SCBENCH_CHECKOUT!,
+      problemIds: suiteIds,
+      cwd,
+      providerApiKeyEnv: flags['--provider-api-key-env'],
+    },
     { exec: createExecaExec(), log: deps.log },
   );
   const summary = summarizeSuite(suiteIds, records);

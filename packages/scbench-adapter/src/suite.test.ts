@@ -27,6 +27,20 @@ describe('buildSuiteLauncherArgv', () => {
       'cfgpipe',
     ]);
   });
+
+  it('appends --provider-api-key-env <var> at the end when a provider api key env var is given', () => {
+    expect(buildSuiteLauncherArgv('/opt/scbench', 'cfgpipe', 'SCBENCH_PLACEHOLDER_KEY')).toEqual([
+      ...buildSuiteLauncherArgv('/opt/scbench', 'cfgpipe'),
+      '--provider-api-key-env',
+      'SCBENCH_PLACEHOLDER_KEY',
+    ]);
+  });
+
+  it('leaves the argv unchanged for an empty provider api key env var', () => {
+    expect(buildSuiteLauncherArgv('/opt/scbench', 'cfgpipe', '')).toEqual(
+      buildSuiteLauncherArgv('/opt/scbench', 'cfgpipe'),
+    );
+  });
 });
 
 describe('runSuite', () => {
@@ -61,6 +75,20 @@ describe('runSuite', () => {
     ]);
     expect(log).toHaveBeenCalledWith('suite: running alpha');
     expect(log).toHaveBeenCalledWith('suite: alpha exited 0');
+  });
+
+  it('threads providerApiKeyEnv into every launcher argv when set', async () => {
+    const { exec, calls } = recordingExec({});
+    const log = vi.fn();
+
+    await runSuite(
+      { checkout: '/opt/scbench', problemIds: ['alpha', 'beta'], cwd: '/repo', providerApiKeyEnv: 'PLACEHOLDER_KEY' },
+      { exec, log },
+    );
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0][0]).toEqual(buildSuiteLauncherArgv('/opt/scbench', 'alpha', 'PLACEHOLDER_KEY'));
+    expect(calls[1][0]).toEqual(buildSuiteLauncherArgv('/opt/scbench', 'beta', 'PLACEHOLDER_KEY'));
   });
 
   it('continues past a failed problem, recording its non-zero exit', async () => {

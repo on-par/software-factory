@@ -25,6 +25,11 @@ export interface RunSuiteOptions {
   checkout: string;
   problemIds: readonly string[];
   cwd: string;
+  /** Name of a harmless placeholder env var to satisfy upstream's provider
+   *  credential presence check (its value is never validated or forwarded).
+   *  Never name ANTHROPIC_API_KEY here — populating that var overrides the
+   *  nested claude CLI's OAuth session (evals/scbench-baseline/README.md). */
+  providerApiKeyEnv?: string;
 }
 
 export interface RunSuiteDeps {
@@ -32,9 +37,12 @@ export interface RunSuiteDeps {
   log: (line: string) => void;
 }
 
-/** The exact pinned launcher command `launch` renders as a string, as argv. */
-export function buildSuiteLauncherArgv(checkout: string, problemId: string): string[] {
-  return [
+/** The exact pinned launcher command `launch` renders as a string, as argv.
+ *  When providerApiKeyEnv is a non-empty string, `--provider-api-key-env
+ *  <var>` is appended (upstream's credential gate reads the named var);
+ *  otherwise the argv is byte-identical to the pinned command. */
+export function buildSuiteLauncherArgv(checkout: string, problemId: string, providerApiKeyEnv?: string): string[] {
+  const argv = [
     'uv',
     'run',
     '--project',
@@ -47,6 +55,10 @@ export function buildSuiteLauncherArgv(checkout: string, problemId: string): str
     '--problem',
     problemId,
   ];
+  if (providerApiKeyEnv !== undefined && providerApiKeyEnv !== '') {
+    argv.push('--provider-api-key-env', providerApiKeyEnv);
+  }
+  return argv;
 }
 
 /** Runs every configured suite problem in order through the pinned launcher,
@@ -58,7 +70,7 @@ export async function runSuite(opts: RunSuiteOptions, deps: RunSuiteDeps): Promi
   for (const problemId of opts.problemIds) {
     deps.log(`suite: running ${problemId}`);
     try {
-      const result = await deps.exec(buildSuiteLauncherArgv(opts.checkout, problemId), {
+      const result = await deps.exec(buildSuiteLauncherArgv(opts.checkout, problemId, opts.providerApiKeyEnv), {
         cwd: opts.cwd,
         env: { VIRTUAL_ENV: undefined },
       });
