@@ -151,14 +151,17 @@ import type {
   WorktreeSandbox,
 } from '@on-par/factory-core/internal';
 import {
+  acquirePidFile,
   branchFor,
   branchPrefixSlug,
   cleanupWorktree,
+  createDaemonLogSink,
   createFactorydServer,
   createGithubQueue,
   createLocalSmallDryRun,
   createOctokitGreenPrClient,
   createOctokitQueueClient,
+  daemonRuntimePaths,
   DEFAULT_FACTORYD_PORT,
   defaultRegistryPath,
   ensureDir,
@@ -171,6 +174,7 @@ import {
   planQueueMigration,
   readCosts,
   reapLaneWorktree,
+  releaseRuntimeFiles,
   releaseStaleClaims,
   resolveBranchPrefix,
   resolveEffectiveConfig,
@@ -188,6 +192,7 @@ import {
   withGitLock,
   withRunLock,
   wrapCommandInSandbox,
+  writePortFile,
 } from '@on-par/factory-core/internal';
 import { runTui } from '@on-par/factory-tui';
 import chalk from 'chalk';
@@ -2333,27 +2338,54 @@ async function cmdProxy() {
 }
 
 /** Runs factoryd in the foreground: a loopback-only HTTP server over the repo
- *  registry (~/.factory/registry.json). Read-only today — GET /repos is the whole
- *  API (#777). Daemon supervision (launchd) is a sibling story; this command is
- *  the process. */
-async function cmdFactoryd(opts: { port?: string; registry?: string }) {
+ *  registry (~/.factory/registry.json) (#777). Owns the daemon runtime state
+ *  next to the registry file — daemon.pid single-instance guard, daemon.port
+ *  bound-address record, daemon.log append sink (#1177). Daemon supervision
+ *  (launchd) and start|stop|status|logs verbs are the next slice; this command
+ *  is the process. */
+async function cmdFactoryd(opts: { port?: string; registry?: string }): Promise<void> {
   const registryFile = opts.registry ?? defaultRegistryPath();
   const port = opts.port === undefined ? DEFAULT_FACTORYD_PORT : Number(opts.port);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     throw new CliExitError(`invalid --port "${opts.port}" — expected an integer 0-65535`, 2);
   }
 
-  const daemon = createFactorydServer({ registryFile, port, log: (line) => console.log(chalk.dim(line)) });
+  const runtime = daemonRuntimePaths(dirname(registryFile));
+  const acquired = await acquirePidFile(runtime);
+  if (!acquired.ok) {
+    throw new CliExitError(
+      `factoryd already running (pid ${acquired.holderPid}) — stop it or remove ${runtime.pidFile}`,
+      2,
+    );
+  }
+  const logSink = createDaemonLogSink(runtime.logFile);
+  const log = (line: string) => {
+    console.log(chalk.dim(line));
+    logSink(line);
+  };
+  if (acquired.stalePid !== null) log(`removed stale pid file (pid ${acquired.stalePid})`);
+
+  const daemon = createFactorydServer({ registryFile, port, log });
   const boundPort = await daemon.start();
-  console.log(chalk.green(`factoryd: listening on 127.0.0.1:${boundPort}`));
-  console.log(`  registry: ${registryFile}`);
-  console.log(`  GET http://127.0.0.1:${boundPort}/repos`);
+  await writePortFile(runtime, boundPort);
+  const banner = [
+    `factoryd: listening on 127.0.0.1:${boundPort}`,
+    `  registry: ${registryFile}`,
+    `  pid file: ${runtime.pidFile} (pid ${process.pid})`,
+    `  port file: ${runtime.portFile}`,
+    `  log file: ${runtime.logFile}`,
+    `  GET http://127.0.0.1:${boundPort}/repos`,
+  ];
+  console.log(chalk.green(banner[0]));
+  for (const line of banner.slice(1)) console.log(line);
+  for (const line of banner) logSink(line);
 
   await new Promise<void>((resolveShutdown) => {
     const shutdown = () => {
       void daemon
         .stop()
         .catch(() => {})
+        .then(() => releaseRuntimeFiles(runtime))
         .then(() => resolveShutdown());
     };
     process.once('SIGINT', shutdown);
@@ -4102,8 +4134,9 @@ export async function main() {
     )
     .action(cmdProxy);
 
-  program
-    .command('daemon')
+  const daemonCmd = program.command('daemon').description('The factoryd daemon (long-running, user-scoped)');
+  daemonCmd
+    .command('run')
     .description('Run factoryd in the foreground: a localhost-only HTTP API over the repo registry')
     .option('--port <n>', `port to bind on 127.0.0.1 (default ${DEFAULT_FACTORYD_PORT})`)
     .option('--registry <file>', 'registry file to serve (default ~/.factory/registry.json)')
