@@ -370,6 +370,15 @@ describe('runIssue — outcome mapping', () => {
     expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
   });
 
+  it("carries a failed SHIP's reason into the parked message", async () => {
+    const events: Array<[string, string]> = [];
+    const log = vi.fn((type: string, message: string) => events.push([type, message]));
+    vi.mocked(shipPhase).mockResolvedValue({ ok: false, reason: 'worktree has merge conflicts in a.ts' });
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ events: () => log }));
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
+    expect(events).toContainEqual(['fail', 'ship phase failed: worktree has merge conflicts in a.ts']);
+  });
+
   it('maps a BUILD escalation to escalated', async () => {
     vi.mocked(buildPhase).mockResolvedValue({ ok: false, model: 'm', route: 'codex', escalate: 'bad build' });
     const outcome = await runIssue(baseRequest(), basePolicy(), basePorts());
