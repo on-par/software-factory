@@ -145,6 +145,7 @@ export {
   parseCoverageSummaryScopes,
   renderRatchetReport,
 } from './utils/coverage-ratchet.js';
+export type { LaneWorktreeReapResult } from './utils/index.js';
 export {
   branchFor,
   branchPrefixSlug,
@@ -160,6 +161,7 @@ export {
   logCost,
   logEvent,
   readCosts,
+  reapLaneWorktree,
   setupWorktree,
   shellEscape,
   slugify,
