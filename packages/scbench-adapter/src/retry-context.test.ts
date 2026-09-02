@@ -72,8 +72,12 @@ describe('retrySkipReason', () => {
 
   it('returns a reason for a passing evaluation', () => {
     expect(retrySkipReason(loadFixture('evaluation-passed.json'))).toBe(
-      'checkpoint passed under pass policy core-cases — nothing to rework',
+      'checkpoint fully green — every test group passed, nothing to rework',
     );
+  });
+
+  it('is rework-eligible when Core is green but Functionality has failures (circuit_eval checkpoint 3)', () => {
+    expect(retrySkipReason(loadFixture('evaluation-circuit-eval-checkpoint3.json'))).toBeUndefined();
   });
 
   it('returns a reason for an infrastructure failure', () => {
@@ -82,10 +86,25 @@ describe('retrySkipReason', () => {
     );
   });
 
-  it('treats vacuous 0/0 Core counts as a pass, matching evaluateTrialVerdict', () => {
-    const evaluation = loadFixture('evaluation-failed.json');
-    const vacuous = { ...evaluation, pass_counts: {}, total_counts: {} };
+  it('does not let a vacuous 0/0 Core mask failures in other groups', () => {
+    const evaluation = loadFixture('evaluation-circuit-eval-checkpoint3.json');
+    const vacuousCore = {
+      ...evaluation,
+      pass_counts: { Functionality: 66 },
+      total_counts: { Functionality: 82 },
+    };
 
-    expect(retrySkipReason(vacuous)).toBe('checkpoint passed under pass policy core-cases — nothing to rework');
+    expect(retrySkipReason(vacuousCore)).toBeUndefined();
+  });
+
+  it('skips a checkpoint green in every group, not just Core', () => {
+    const evaluation = loadFixture('evaluation-passed.json');
+    const allGreen = {
+      ...evaluation,
+      pass_counts: { Core: 4, Functionality: 10 },
+      total_counts: { Core: 4, Functionality: 10 },
+    };
+
+    expect(retrySkipReason(allGreen)).toBe('checkpoint fully green — every test group passed, nothing to rework');
   });
 });

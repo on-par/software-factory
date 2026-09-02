@@ -3,7 +3,7 @@
 // through checkpoints 4-8. The committed fixture reproduces that exact shape; the replay
 // proves the rework path (buildRetryContext → retryCheckpoint) turns it into a rework-1/
 // brief naming both comparator tests while leaving first-attempt evidence byte-identical.
-// Deliberately asserts nothing about retrySkipReason — that gate is sibling #1186's scope.
+// The retrySkipReason gate for this shape is #1191's scope; the fixture-shape test below asserts it.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,7 +15,7 @@ import { parseEvaluation } from './baseline.js';
 import type { ScbenchCheckpoint } from './checkpoint.js';
 import { minimalManifest } from './manifest-fixture.js';
 import { retryCheckpoint } from './retry-checkpoint.js';
-import { buildRetryContext } from './retry-context.js';
+import { buildRetryContext, retrySkipReason } from './retry-context.js';
 import { createExecaExec, type ExecFn } from './workspace.js';
 
 const FIXTURE_PATH = fileURLToPath(
@@ -56,6 +56,8 @@ describe('circuit_eval checkpoint-3 fixture replay', () => {
     expect(functionality.failed.length).toBe(16);
     expect(functionality.failed).toContain('test_check_comparator_2bit_circuit');
     expect(functionality.failed).toContain('test_comparator_2bit_exhaustive');
+
+    expect(retrySkipReason(evaluation)).toBeUndefined();
   });
 
   describe('replaying the fixture through the rework path', () => {
