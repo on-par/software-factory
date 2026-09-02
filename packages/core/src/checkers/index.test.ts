@@ -1024,6 +1024,7 @@ describe('runAllCheckers', () => {
         playwrightConfigFiles: [],
         playwrightConfigContents: {},
         scripts: {},
+        pythonTestSurface: { present: false, sources: [] },
       };
       const probeWorktreeMock = vi.fn(async () => probe);
       const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
