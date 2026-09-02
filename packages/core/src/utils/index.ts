@@ -224,10 +224,16 @@ export async function reapLaneWorktree(
       await execGit(`git branch -D ${shellEscape(branch)}`, { cwd: repoRoot });
       branchDeleted = true;
     } catch (err: any) {
-      log('warn', `git branch -D failed for ${branch}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`);
+      log(
+        'warn',
+        `git branch -D failed for ${branch}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`,
+      );
     }
   } else {
-    log('worktree-gc', `kept branch ${branch} — its content is not on the remote, so it is the only handle to the parked attempt`);
+    log(
+      'worktree-gc',
+      `kept branch ${branch} — its content is not on the remote, so it is the only handle to the parked attempt`,
+    );
   }
 
   log(

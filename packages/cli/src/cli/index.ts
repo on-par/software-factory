@@ -1849,7 +1849,9 @@ export async function reapParkedLaneWorktree(
     const log = (type: EventKind, msg: string) => logEvent(paths.events, type, issue, msg);
     const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
     await withGitLock(repoRoot, () =>
-      withFileLock(paths.gitLock, () => reapLaneWorktree(repoRoot, worktreePath, { issue, branchPrefix, log, sandbox })),
+      withFileLock(paths.gitLock, () =>
+        reapLaneWorktree(repoRoot, worktreePath, { issue, branchPrefix, log, sandbox }),
+      ),
     );
   } catch (err: any) {
     logEvent(paths.events, 'warn', issue, `parked-lane worktree reap failed: ${err?.message ?? String(err)}`);
@@ -2438,7 +2440,12 @@ async function cmdRun(opts: { localQueue?: boolean } = {}) {
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
             sweepWorktrees(
-              { repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays, repo: ghRepo, branchPrefix: resolveBranchPrefix() },
+              {
+                repoRoot,
+                ttlDays: factoryConfig.worktree.gcTtlDays,
+                repo: ghRepo,
+                branchPrefix: resolveBranchPrefix(),
+              },
               { log: gcLog, octokit: getOctokit(), sandbox: gcSandbox },
             ),
           ),
@@ -3781,7 +3788,12 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
             sweepWorktrees(
-              { repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays, repo: ghRepo, branchPrefix: resolveBranchPrefix() },
+              {
+                repoRoot,
+                ttlDays: factoryConfig.worktree.gcTtlDays,
+                repo: ghRepo,
+                branchPrefix: resolveBranchPrefix(),
+              },
               { log: gcLog, octokit, sandbox: gcSandbox },
             ),
           ),
