@@ -15,8 +15,8 @@ import {
 } from './design-smells.js';
 import { countPlaceholderLinks, fileExists, findHtmlFiles, probeWorktree, type WorktreeProbe } from './probe.js';
 
-export type { PackageJsonProbe, WorktreeProbe } from './probe.js';
-export { countPlaceholderLinks, fileExists, findHtmlFiles, probeWorktree } from './probe.js';
+export type { PackageJsonProbe, PythonTestSurface, PythonTestSurfaceSource, WorktreeProbe } from './probe.js';
+export { countPlaceholderLinks, detectPythonTestSurface, fileExists, findHtmlFiles, probeWorktree } from './probe.js';
 
 interface PackageJson {
   scripts?: Record<string, string>;
