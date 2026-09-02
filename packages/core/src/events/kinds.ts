@@ -45,6 +45,7 @@ export type EventKind =
   | 'design_artifact_received'
   | 'design_open_questions'
   | 'design_shallow'
+  | 'engine-restarted'
   | 'environment_cleanup'
   | 'environment_conflict'
   | 'environment_lease'
@@ -202,6 +203,9 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   design_artifact_received: { severity: 'info', isPark: false, isTerminal: false },
   design_open_questions: { severity: 'warn', isPark: false, isTerminal: false },
   design_shallow: { severity: 'info', isPark: false, isTerminal: false },
+  // factoryd restarted a stale in-process engine (#1178) — operational anomaly
+  // worth surfacing, but not a park (no human action needed) and not terminal.
+  'engine-restarted': { severity: 'warn', isPark: false, isTerminal: false },
   environment_cleanup: { severity: 'info', isPark: false, isTerminal: false },
   environment_conflict: { severity: 'warn', isPark: false, isTerminal: false },
   environment_lease: { severity: 'info', isPark: false, isTerminal: false },

@@ -213,6 +213,18 @@ export type { DaemonLaneContext } from './daemon/lane-context.js';
 export { createDaemonLaneContext } from './daemon/lane-context.js';
 export type { DaemonOrchestrator } from './daemon/run-repo.js';
 export { runDaemonRepo } from './daemon/run-repo.js';
+export type {
+  EngineHandle,
+  EngineRunner,
+  EngineSupervisor,
+  EngineSupervisorOptions,
+} from './daemon/engine-supervisor.js';
+export {
+  DEFAULT_STALE_THRESHOLD_MS,
+  DEFAULT_SUPERVISOR_POLL_MS,
+  superviseActiveRepos,
+  superviseEngine,
+} from './daemon/engine-supervisor.js';
 
 // Daemon control-plane HTTP server (#777)
 export type { FactorydOptions, FactorydServer } from './daemon/factoryd-http.js';
