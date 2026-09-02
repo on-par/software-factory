@@ -1360,7 +1360,7 @@ describe('retry-checkpoint subcommand', () => {
 
     expect(code).toBe(1);
     expect(deps.log).toHaveBeenCalledWith(
-      'retry-checkpoint: not retryable — checkpoint passed under pass policy core-cases — nothing to rework',
+      'retry-checkpoint: not retryable — checkpoint fully green — every test group passed, nothing to rework',
     );
     expect(deps.retryCheckpoint).not.toHaveBeenCalled();
   });

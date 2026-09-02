@@ -23,18 +23,22 @@ export interface ScbenchRetryContext {
 }
 
 /** Human-readable reason an evaluation must NOT be retried, or `undefined`
- *  when it is retryable. Mirrors evaluateTrialVerdict: an infrastructure
- *  failure is a provider fault (not a code fault), and a passing Core group
- *  (vacuous 0/0 counts as equal, matching upstream PassPolicy.CORE_CASES)
- *  leaves nothing to rework. */
+ *  when it is retryable. An infrastructure failure is a provider fault (not
+ *  a code fault). Any group with failures — Core, Functionality, Regression,
+ *  or Error — is rework-eligible even when Core alone satisfies the pinned
+ *  core-cases pass policy; only a checkpoint green in every group has
+ *  nothing to rework. */
 export function retrySkipReason(evaluation: ScbenchEvaluation): string | undefined {
   if (evaluation.infrastructure_failure) {
     return 'infrastructure failure — provider fault, not a code fault';
   }
-  if ((evaluation.pass_counts.Core ?? 0) === (evaluation.total_counts.Core ?? 0)) {
-    return `checkpoint passed under pass policy ${RETRY_PASS_POLICY} — nothing to rework`;
+  const groups = new Set([...Object.keys(evaluation.pass_counts), ...Object.keys(evaluation.total_counts)]);
+  for (const group of groups) {
+    if ((evaluation.pass_counts[group] ?? 0) < (evaluation.total_counts[group] ?? 0)) {
+      return undefined;
+    }
   }
-  return undefined;
+  return 'checkpoint fully green — every test group passed, nothing to rework';
 }
 
 /** First EXCERPT_LIMIT chars, with an explicit truncation marker when longer
