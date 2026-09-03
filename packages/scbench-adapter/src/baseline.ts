@@ -542,42 +542,85 @@ function checkpointSortKey(checkpointName: string): { n: number | undefined; nam
   return { n: match ? Number(match[1]) : undefined, name: checkpointName };
 }
 
-function renderErosion(trials: BaselineTrial[]): string {
-  const withEvidence = trials.filter(hasEvaluation);
-  if (withEvidence.length === 0) {
-    return 'Not yet measurable — requires native SCBench evaluation evidence from the live multi-checkpoint suite run.';
-  }
+type TrialWithEvaluation = BaselineTrial & {
+  evidence: BaselineTrialEvidence & { evaluation: ScbenchEvaluation };
+};
 
-  const groups = new Map<string, (typeof withEvidence)[number][]>();
-  for (const trial of withEvidence) {
+/** Bucket evidence-bearing trials by evaluation.problem_name, preserving first-seen insertion
+ *  order within each bucket (callers sort afterwards). Shared by renderErosion and
+ *  renderRegressionTrajectory so both trajectory sections group identically. */
+function groupTrialsByProblem(trials: TrialWithEvaluation[]): Map<string, TrialWithEvaluation[]> {
+  const groups = new Map<string, TrialWithEvaluation[]>();
+  for (const trial of trials) {
     const problem = trial.evidence.evaluation.problem_name;
     const list = groups.get(problem) ?? [];
     list.push(trial);
     groups.set(problem, list);
   }
+  return groups;
+}
 
+/** Order a problem's trials by checkpointSortKey(checkpoint_name) — numeric when both checkpoints
+ *  end in an integer, else lexicographic by name — tiebreaking on trial id. Shared by renderErosion
+ *  and renderRegressionTrajectory. */
+function compareByCheckpointThenId(a: TrialWithEvaluation, b: TrialWithEvaluation): number {
+  const ak = checkpointSortKey(a.evidence.evaluation.checkpoint_name);
+  const bk = checkpointSortKey(b.evidence.evaluation.checkpoint_name);
+  if (ak.n !== undefined && bk.n !== undefined) {
+    if (ak.n !== bk.n) return ak.n - bk.n;
+  } else if (ak.name !== bk.name) {
+    return ak.name < bk.name ? -1 : 1;
+  }
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+function renderErosion(trials: BaselineTrial[]): string {
+  const withEvidence = trials.filter(hasEvaluation);
+  if (withEvidence.length === 0) {
+    return 'Not yet measurable — requires native SCBench evaluation evidence from the live multi-checkpoint suite run.';
+  }
+  const groups = groupTrialsByProblem(withEvidence);
   return [...groups.keys()]
     .sort()
     .map((problem) => {
       const entries = groups
         .get(problem)!
         .slice()
-        .sort((a, b) => {
-          const ak = checkpointSortKey(a.evidence.evaluation.checkpoint_name);
-          const bk = checkpointSortKey(b.evidence.evaluation.checkpoint_name);
-          if (ak.n !== undefined && bk.n !== undefined) {
-            if (ak.n !== bk.n) return ak.n - bk.n;
-          } else if (ak.name !== bk.name) {
-            return ak.name < bk.name ? -1 : 1;
-          }
-          return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-        })
+        .sort(compareByCheckpointThenId)
         .map((t) => {
           const evaluation = t.evidence.evaluation;
           const verdict = evaluateTrialVerdict(t);
           const verdictLabel = verdict === 'infrastructure-failure' ? 'infrastructure failure' : verdict;
           const { passed, total } = coreCounts(evaluation);
           return `${evaluation.checkpoint_name} \`${t.id}\`: ${verdictLabel} (Core ${passed}/${total})`;
+        })
+        .join(', ');
+      return `- ${problem}: ${entries}`;
+    })
+    .join('\n');
+}
+
+/** Per-problem, checkpoint-ordered Regression pass/total trajectory (#1257). Same grouping/sort
+ *  as renderErosion, but reports Regression's own pass/total (via groupCounts) verbatim instead of
+ *  a Core-derived pass/fail verdict — Regression erosion is not implied by the Core verdict. */
+function renderRegressionTrajectory(trials: BaselineTrial[]): string {
+  const withEvidence = trials.filter(hasEvaluation);
+  if (withEvidence.length === 0) {
+    return 'Not yet measurable — requires native SCBench evaluation evidence from the live multi-checkpoint suite run.';
+  }
+  const groups = groupTrialsByProblem(withEvidence);
+  return [...groups.keys()]
+    .sort()
+    .map((problem) => {
+      const entries = groups
+        .get(problem)!
+        .slice()
+        .sort(compareByCheckpointThenId)
+        .map((t) => {
+          const evaluation = t.evidence.evaluation;
+          const { passed, total } = groupCounts(evaluation, 'Regression');
+          const counts = total === 0 ? 'none' : `${passed}/${total}`;
+          return `${evaluation.checkpoint_name} \`${t.id}\`: Regression ${counts}`;
         })
         .join(', ');
       return `- ${problem}: ${entries}`;
@@ -702,6 +745,7 @@ export function generateBaselineReport(config: BaselineConfig, trials: BaselineT
     ['## Trials', '', renderTrials(trials)].join('\n'),
     ['## Benchmark pass rate (native SCBench evaluation)', '', renderBenchmarkPassRate(config, trials)].join('\n'),
     ['## Erosion trajectory (native SCBench evaluation)', '', renderErosion(trials)].join('\n'),
+    ['## Regression-group trajectory (native SCBench evaluation)', '', renderRegressionTrajectory(trials)].join('\n'),
     ['## Factory run outcomes (harness health)', '', renderFactoryOutcomes(trials)].join('\n'),
     ['## Elapsed time', '', renderElapsed(trials)].join('\n'),
     ['## Cost', '', renderCost(trials)].join('\n'),

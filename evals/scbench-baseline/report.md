@@ -52,6 +52,10 @@
 
 - cfgpipe: checkpoint_1 `cfgpipe/checkpoint_1/trial-1`: pass (Core 4/4), checkpoint_1 `cfgpipe/checkpoint_1/trial-2`: pass (Core 4/4), checkpoint_1 `cfgpipe/checkpoint_1/trial-3`: pass (Core 4/4), checkpoint_2 `cfgpipe/checkpoint_2/trial-1`: pass (Core 3/3), checkpoint_2 `cfgpipe/checkpoint_2/trial-2`: pass (Core 3/3), checkpoint_2 `cfgpipe/checkpoint_2/trial-3`: pass (Core 3/3), checkpoint_3 `cfgpipe/checkpoint_3/trial-1`: pass (Core 4/4), checkpoint_3 `cfgpipe/checkpoint_3/trial-2`: pass (Core 4/4), checkpoint_3 `cfgpipe/checkpoint_3/trial-3`: pass (Core 4/4), checkpoint_4 `cfgpipe/checkpoint_4/trial-1`: fail (Core 6/7), checkpoint_4 `cfgpipe/checkpoint_4/trial-2`: fail (Core 6/7), checkpoint_4 `cfgpipe/checkpoint_4/trial-3`: fail (Core 6/7)
 
+## Regression-group trajectory (native SCBench evaluation)
+
+- cfgpipe: checkpoint_1 `cfgpipe/checkpoint_1/trial-1`: Regression none, checkpoint_1 `cfgpipe/checkpoint_1/trial-2`: Regression none, checkpoint_1 `cfgpipe/checkpoint_1/trial-3`: Regression none, checkpoint_2 `cfgpipe/checkpoint_2/trial-1`: Regression 33/37, checkpoint_2 `cfgpipe/checkpoint_2/trial-2`: Regression 33/37, checkpoint_2 `cfgpipe/checkpoint_2/trial-3`: Regression 33/37, checkpoint_3 `cfgpipe/checkpoint_3/trial-1`: Regression 59/68, checkpoint_3 `cfgpipe/checkpoint_3/trial-2`: Regression 60/68, checkpoint_3 `cfgpipe/checkpoint_3/trial-3`: Regression 59/68, checkpoint_4 `cfgpipe/checkpoint_4/trial-1`: Regression 92/107, checkpoint_4 `cfgpipe/checkpoint_4/trial-2`: Regression 94/107, checkpoint_4 `cfgpipe/checkpoint_4/trial-3`: Regression 92/107
+
 ## Factory run outcomes (harness health)
 
 12/12 (100.0%) of Factory runs ended `ready`. This is harness health — a `ready` manifest means the PLAN → BUILD → CHECK pipeline completed, not that SCBench's checkpoint evaluation passed; benchmark correctness above is derived only from native SCBench evidence.
