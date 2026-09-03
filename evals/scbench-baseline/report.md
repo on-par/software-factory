@@ -77,6 +77,8 @@ Total cost: $27.4550; input tokens: 16936768; output tokens: 371878.
 
 Declared policy (source: packages/config/src/defaults.ts (typed model registry and routes) at factory.commit): approved models `claude-fable-5`, `claude-opus-5`, `claude-opus-4-8`, `claude-sonnet-5`; disabled providers: `ollama`
 
+Run configuration: providers.ollama: false — every benchmark workspace is prepared with .factory/config.json disabling the ollama provider, so local models are stripped from routing before any attempt.
+
 - `cfgpipe/checkpoint_1/trial-1`: observed models `claude-fable-5`, `claude-sonnet-5` — all approved
 - `cfgpipe/checkpoint_1/trial-2`: observed models `claude-fable-5`, `claude-sonnet-5` — all approved
 - `cfgpipe/checkpoint_1/trial-3`: observed models `claude-fable-5`, `claude-sonnet-5` — all approved
@@ -91,6 +93,25 @@ Declared policy (source: packages/config/src/defaults.ts (typed model registry a
 - `cfgpipe/checkpoint_4/trial-3`: observed models `claude-fable-5`, `claude-sonnet-5` — all approved
 
 Ollama disabled: confirmed — every trial recorded at least one model attempt and every observed model is in the approved set; no disabled-provider model was observed.
+
+## GitHub isolation
+
+Workspace runs use `factory run-brief --workspace`, which disables publishing — SHIP never runs and no GitHub issue, pull request, or merge is created by the run path. Evidence below is derived only from each trial's retained manifest and events.ndjson.
+
+- `cfgpipe/checkpoint_1/trial-1`: run window 2026-09-01T19:44:15.073Z → 2026-09-01T19:48:23.476Z; profile `local-only`; ship `skipped`; local-only-complete recorded; no GitHub-write events
+- `cfgpipe/checkpoint_1/trial-2`: run window 2026-09-02T00:53:38.756Z → 2026-09-02T00:57:31.619Z; profile `local-only`; ship `skipped`; local-only-complete recorded; no GitHub-write events
+- `cfgpipe/checkpoint_1/trial-3`: run window 2026-09-02T01:26:57.092Z → 2026-09-02T01:30:02.260Z; profile `local-only`; ship `skipped`; local-only-complete recorded; no GitHub-write events
+- `cfgpipe/checkpoint_2/trial-1`: run window 2026-09-01T19:48:29.232Z → 2026-09-01T19:52:06.620Z; profile `local-only`; ship `skipped`; local-only-complete recorded; no GitHub-write events
+- `cfgpipe/checkpoint_2/trial-2`: run window 2026-09-02T00:57:36.569Z → 2026-09-02T01:01:47.589Z; profile `local-only`; ship `skipped`; local-only-complete recorded; no GitHub-write events
+- `cfgpipe/checkpoint_2/trial-3`: run window 2026-09-02T01:30:05.102Z → 2026-09-02T01:33:29.647Z; profile `local-only`; ship `skipped`; local-only-complete recorded; no GitHub-write events
+- `cfgpipe/checkpoint_3/trial-1`: run window 2026-09-01T19:52:25.065Z → 2026-09-01T19:56:40.984Z; profile `local-only`; ship `skipped`; local-only-complete recorded; no GitHub-write events
+- `cfgpipe/checkpoint_3/trial-2`: run window 2026-09-02T01:02:07.345Z → 2026-09-02T01:07:09.421Z; profile `local-only`; ship `skipped`; local-only-complete recorded; no GitHub-write events
+- `cfgpipe/checkpoint_3/trial-3`: run window 2026-09-02T01:33:47.603Z → 2026-09-02T01:37:44.226Z; profile `local-only`; ship `skipped`; local-only-complete recorded; no GitHub-write events
+- `cfgpipe/checkpoint_4/trial-1`: run window 2026-09-01T19:57:01.577Z → 2026-09-01T20:07:21.087Z; profile `local-only`; ship `skipped`; local-only-complete recorded; no GitHub-write events
+- `cfgpipe/checkpoint_4/trial-2`: run window 2026-09-02T01:07:31.589Z → 2026-09-02T01:19:16.170Z; profile `local-only`; ship `skipped`; local-only-complete recorded; no GitHub-write events
+- `cfgpipe/checkpoint_4/trial-3`: run window 2026-09-02T01:38:04.870Z → 2026-09-02T01:49:43.608Z; profile `local-only`; ship `skipped`; local-only-complete recorded; no GitHub-write events
+
+GitHub isolation: confirmed — every trial ran under the local-only profile with SHIP skipped, recorded local-only-complete, and no GitHub-write event (issue, PR, or merge) appears in any retained events.ndjson.
 
 ## Checker outcomes
 

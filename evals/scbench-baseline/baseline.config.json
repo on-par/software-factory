@@ -22,7 +22,8 @@
   },
   "providerPolicy": {
     "approvedModels": ["claude-fable-5", "claude-opus-5", "claude-opus-4-8", "claude-sonnet-5"],
-    "disabledProviders": ["ollama"]
+    "disabledProviders": ["ollama"],
+    "providers": { "ollama": false }
   },
   "promptInputs": "Checkpoint briefs are produced by materializeBrief in @on-par/scbench-adapter at factory.commit; phase prompts/constitutions are those shipped in @on-par/factory-config at factory.commit",
   "environment": {

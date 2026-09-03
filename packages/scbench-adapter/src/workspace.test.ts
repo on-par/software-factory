@@ -43,6 +43,15 @@ describe('prepareWorkspace', () => {
     expect(exclude).toContain('.factory/');
   });
 
+  it('writes .factory/config.json pinning providers.ollama=false on a fresh workspace', async () => {
+    const { exec } = fakeExec();
+
+    await prepareWorkspace(dir, { exec });
+
+    const config = JSON.parse(readFileSync(join(dir, '.factory', 'config.json'), 'utf-8'));
+    expect(config).toEqual({ version: 1, providers: { ollama: false } });
+  });
+
   it('writes the factory-authored constitution into .factory/constitution.md', async () => {
     const { exec } = fakeExec();
 
@@ -50,6 +59,17 @@ describe('prepareWorkspace', () => {
 
     const content = readFileSync(join(dir, '.factory', 'constitution.md'), 'utf-8');
     expect(content).toBe(WORKSPACE_CONSTITUTION);
+  });
+
+  it('leaves a pre-existing .factory/config.json byte-identical', async () => {
+    mkdirSync(join(dir, '.factory'), { recursive: true });
+    const existing = '{"version":1,"providers":{"ollama":true}}\n';
+    writeFileSync(join(dir, '.factory', 'config.json'), existing);
+    const { exec } = fakeExec();
+
+    await prepareWorkspace(dir, { exec });
+
+    expect(readFileSync(join(dir, '.factory', 'config.json'), 'utf-8')).toBe(existing);
   });
 
   it('refreshes a stale constitution on a repeat call (idempotent overwrite)', async () => {
@@ -62,6 +82,17 @@ describe('prepareWorkspace', () => {
 
     const content = readFileSync(join(dir, '.factory', 'constitution.md'), 'utf-8');
     expect(content).toBe(WORKSPACE_CONSTITUTION);
+  });
+
+  it('a second prepareWorkspace call leaves .factory/config.json unchanged (idempotent)', async () => {
+    const { exec } = fakeExec();
+
+    await prepareWorkspace(dir, { exec });
+    const first = readFileSync(join(dir, '.factory', 'config.json'), 'utf-8');
+    await prepareWorkspace(dir, { exec });
+    const second = readFileSync(join(dir, '.factory', 'config.json'), 'utf-8');
+
+    expect(second).toBe(first);
   });
 
   it('writes every junk-artifact exclude entry into .git/info/exclude', async () => {

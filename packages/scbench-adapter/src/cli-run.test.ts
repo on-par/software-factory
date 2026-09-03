@@ -29,7 +29,7 @@ const VALID_CONFIG_JSON = JSON.stringify({
     pinnedAt: '2026-07-29',
   },
   modelConfig: { source: 'packages/config/src/defaults.ts', env: {} },
-  providerPolicy: { approvedModels: ['claude-fable-5'], disabledProviders: ['ollama'] },
+  providerPolicy: { approvedModels: ['claude-fable-5'], disabledProviders: ['ollama'], providers: { ollama: false } },
   promptInputs: 'briefs',
   environment: { node: '>=20', requiredBinaries: [], hostClass: 'test', scbenchHarness: 'python' },
   problems: { resolvedFrom: 'resolved from the catalog commit', smoke: 'alpha', suite: ['alpha', 'beta', 'gamma'] },
