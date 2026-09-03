@@ -33,20 +33,20 @@
 
 ## Benchmark pass rate (native SCBench evaluation)
 
-9/12 (75.0%) under pass policy `core-cases` — 9 pass, 3 fail, 0 infrastructure failure, 0 missing evidence. A trial without native evaluation evidence never counts as a pass.
+9/12 (75.0%) under pass policy `core-cases` — 9 pass, 3 fail, 0 infrastructure failure, 0 missing evidence. A trial without native evaluation evidence never counts as a pass. all-groups: 0/12 — a trial counts only when every test group (Core, Functionality, Regression, Error) passes; missing evidence or an infrastructure failure is never counted as an all-groups pass.
 
-- `cfgpipe/checkpoint_1/trial-1`: pass — Core 4/4, Functionality 20/20, Regression none, Error 9/13 (cfgpipe / checkpoint_1)
-- `cfgpipe/checkpoint_1/trial-2`: pass — Core 4/4, Functionality 20/20, Regression none, Error 9/13 (cfgpipe / checkpoint_1)
-- `cfgpipe/checkpoint_1/trial-3`: pass — Core 4/4, Functionality 20/20, Regression none, Error 9/13 (cfgpipe / checkpoint_1)
-- `cfgpipe/checkpoint_2/trial-1`: pass — Core 3/3, Functionality 15/15, Regression 33/37, Error 8/13 (cfgpipe / checkpoint_2)
-- `cfgpipe/checkpoint_2/trial-2`: pass — Core 3/3, Functionality 15/15, Regression 33/37, Error 9/13 (cfgpipe / checkpoint_2)
-- `cfgpipe/checkpoint_2/trial-3`: pass — Core 3/3, Functionality 15/15, Regression 33/37, Error 8/13 (cfgpipe / checkpoint_2)
-- `cfgpipe/checkpoint_3/trial-1`: pass — Core 4/4, Functionality 11/13, Regression 59/68, Error 18/22 (cfgpipe / checkpoint_3)
-- `cfgpipe/checkpoint_3/trial-2`: pass — Core 4/4, Functionality 11/13, Regression 60/68, Error 19/22 (cfgpipe / checkpoint_3)
-- `cfgpipe/checkpoint_3/trial-3`: pass — Core 4/4, Functionality 11/13, Regression 59/68, Error 18/22 (cfgpipe / checkpoint_3)
-- `cfgpipe/checkpoint_4/trial-1`: fail — Core 6/7, Functionality 16/17, Regression 92/107, Error 4/6 (cfgpipe / checkpoint_4)
-- `cfgpipe/checkpoint_4/trial-2`: fail — Core 6/7, Functionality 16/17, Regression 94/107, Error 4/6 (cfgpipe / checkpoint_4)
-- `cfgpipe/checkpoint_4/trial-3`: fail — Core 6/7, Functionality 17/17, Regression 92/107, Error 4/6 (cfgpipe / checkpoint_4)
+- `cfgpipe/checkpoint_1/trial-1`: pass — Core 4/4, Functionality 20/20, Regression none, Error 9/13 (cfgpipe / checkpoint_1) — all-groups: fail
+- `cfgpipe/checkpoint_1/trial-2`: pass — Core 4/4, Functionality 20/20, Regression none, Error 9/13 (cfgpipe / checkpoint_1) — all-groups: fail
+- `cfgpipe/checkpoint_1/trial-3`: pass — Core 4/4, Functionality 20/20, Regression none, Error 9/13 (cfgpipe / checkpoint_1) — all-groups: fail
+- `cfgpipe/checkpoint_2/trial-1`: pass — Core 3/3, Functionality 15/15, Regression 33/37, Error 8/13 (cfgpipe / checkpoint_2) — all-groups: fail
+- `cfgpipe/checkpoint_2/trial-2`: pass — Core 3/3, Functionality 15/15, Regression 33/37, Error 9/13 (cfgpipe / checkpoint_2) — all-groups: fail
+- `cfgpipe/checkpoint_2/trial-3`: pass — Core 3/3, Functionality 15/15, Regression 33/37, Error 8/13 (cfgpipe / checkpoint_2) — all-groups: fail
+- `cfgpipe/checkpoint_3/trial-1`: pass — Core 4/4, Functionality 11/13, Regression 59/68, Error 18/22 (cfgpipe / checkpoint_3) — all-groups: fail
+- `cfgpipe/checkpoint_3/trial-2`: pass — Core 4/4, Functionality 11/13, Regression 60/68, Error 19/22 (cfgpipe / checkpoint_3) — all-groups: fail
+- `cfgpipe/checkpoint_3/trial-3`: pass — Core 4/4, Functionality 11/13, Regression 59/68, Error 18/22 (cfgpipe / checkpoint_3) — all-groups: fail
+- `cfgpipe/checkpoint_4/trial-1`: fail — Core 6/7, Functionality 16/17, Regression 92/107, Error 4/6 (cfgpipe / checkpoint_4) — all-groups: fail
+- `cfgpipe/checkpoint_4/trial-2`: fail — Core 6/7, Functionality 16/17, Regression 94/107, Error 4/6 (cfgpipe / checkpoint_4) — all-groups: fail
+- `cfgpipe/checkpoint_4/trial-3`: fail — Core 6/7, Functionality 17/17, Regression 92/107, Error 4/6 (cfgpipe / checkpoint_4) — all-groups: fail
 
 ## Erosion trajectory (native SCBench evaluation)
 

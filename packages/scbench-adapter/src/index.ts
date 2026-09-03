@@ -45,6 +45,7 @@ export type {
 } from './baseline.js';
 export {
   collectBaselineTrials,
+  evaluateAllGroupsVerdict,
   evaluateTrialVerdict,
   generateBaselineReport,
   loadBaselineConfig,
