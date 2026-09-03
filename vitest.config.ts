@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url';
+
 import { configDefaults, defineConfig } from 'vitest/config';
 
 /**
@@ -18,6 +20,11 @@ const INTEGRATION_GLOB = '**/*.integration.test.{ts,tsx}';
 const integrationOnly = process.env.FACTORY_INTEGRATION_TESTS === '1';
 
 export default defineConfig({
+  // Pin the project root to this config's directory. Without it, vitest run
+  // from inside a workspace package (npm test --workspace packages/<name>)
+  // resolves the include globs against that package's cwd and finds zero
+  // test files — the packages/core "test script" agent trap in AGENTS.md.
+  root: fileURLToPath(new URL('.', import.meta.url)),
   test: {
     // Coverage instrumentation across the monorepo is memory-intensive. Keep
     // files serial so the required full-suite check stays within CI's heap

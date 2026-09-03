@@ -138,10 +138,40 @@ async function shipPhaseImpl(opts: {
 
     // A failed ADR commit leaves its files on disk uncommitted (see materializeAdrDrafts) —
     // never let that alone make the worktree look dirty and abort the whole ship.
-    const recoveryState = await inspectRecoveryState(worktree, run, adr.committed ? [] : adr.paths);
+    const ignorePaths = adr.committed ? [] : adr.paths;
+    let recoveryState = await inspectRecoveryState(worktree, run, ignorePaths);
     if (!recoveryState.clean) {
-      log('ship', `not recovering ${branch}: worktree has uncommitted changes`);
-      return { ok: false };
+      const conflicts = conflictedPaths(recoveryState.statusLines);
+      if (conflicts.length > 0) {
+        // Committing an unmerged index would put conflict markers on the PR branch —
+        // park with the concrete paths and leave the worktree for a human (#1172).
+        const listed =
+          conflicts.slice(0, 5).join(', ') + (conflicts.length > 5 ? ` (+${conflicts.length - 5} more)` : '');
+        const reason = `worktree has merge conflicts in ${listed}`;
+        log('ship', `not recovering ${branch}: ${reason} — worktree preserved`);
+        return { ok: false, reason };
+      }
+      // CHECK verified this exact working tree, so the dirt IS the green artifact —
+      // commit it and ship rather than parking verified work (#1164/#1172).
+      const committed = await commitLeftoverBuildOutput({
+        run,
+        worktree,
+        branch,
+        issue,
+        ignorePaths,
+        statusLines: recoveryState.statusLines,
+        log,
+      });
+      if (!committed.ok) {
+        log('ship', `not recovering ${branch}: ${committed.reason} — worktree preserved`);
+        return { ok: false, reason: committed.reason };
+      }
+      recoveryState = await inspectRecoveryState(worktree, run, ignorePaths);
+      if (!recoveryState.clean) {
+        const reason = 'worktree still dirty after committing leftover build output';
+        log('ship', `not recovering ${branch}: ${reason} — worktree preserved`);
+        return { ok: false, reason };
+      }
     }
     if (recoveryState.landed || !recoveryState.ahead) {
       // The branch's content is already on main: identical trees (squash merge) or an
@@ -362,7 +392,7 @@ async function inspectRecoveryState(
   worktree: string,
   run: CommandRunner,
   ignorePaths: string[] = [],
-): Promise<{ clean: boolean; ahead: boolean; landed: boolean }> {
+): Promise<{ clean: boolean; ahead: boolean; landed: boolean; statusLines: string[] }> {
   const statusCommand =
     ignorePaths.length > 0
       ? `git status --porcelain -- . ${ignorePaths.map((p) => shellEscape(`:!${p}`)).join(' ')}`
@@ -381,7 +411,55 @@ async function inspectRecoveryState(
     clean: status.trim() === '',
     ahead: Number.parseInt(ahead.trim(), 10) > 0,
     landed,
+    // Porcelain's first two characters are positional XY columns — trim only the right edge.
+    statusLines: status
+      .split('\n')
+      .map((l) => l.trimEnd())
+      .filter((l) => l.trim() !== ''),
   };
+}
+
+/** Paths of porcelain lines that are unmerged (conflict) entries: `U` in either XY column,
+ *  or the both-added/both-deleted codes `AA`/`DD`. Untracked (`??`) and every ordinary code
+ *  are not conflicts. */
+function conflictedPaths(statusLines: string[]): string[] {
+  return statusLines
+    .filter((line) => {
+      const xy = line.slice(0, 2);
+      return xy.includes('U') || xy === 'AA' || xy === 'DD';
+    })
+    .map((line) => line.slice(3));
+}
+
+/**
+ * Commit the dirt a build agent left after a green CHECK onto the ship-it branch — the working
+ * tree is byte-for-byte what the checkers verified, so committing it is what ships the green
+ * artifact instead of parking it (#1164/#1172). The add keeps the same pathspec exclusions the
+ * dirty-check applies, so failed-ADR materialization files still never affect the rest of the ship.
+ */
+async function commitLeftoverBuildOutput(o: {
+  run: CommandRunner;
+  worktree: string;
+  branch: string;
+  issue: number;
+  ignorePaths: string[];
+  statusLines: string[];
+  log: (type: EventKind, msg: string) => void;
+}): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const addCommand =
+    o.ignorePaths.length > 0
+      ? `git add -A -- . ${o.ignorePaths.map((p) => shellEscape(`:!${p}`)).join(' ')}`
+      : 'git add -A';
+  try {
+    await o.run(addCommand, { cwd: o.worktree });
+    await o.run(`git commit -m ${shellEscape(`chore(ship): commit build output left after check (#${o.issue})`)}`, {
+      cwd: o.worktree,
+    });
+  } catch (err) {
+    return { ok: false, reason: `could not commit leftover build output: ${shortDetail(err)}` };
+  }
+  o.log('ship', `committed ${o.statusLines.length} uncommitted path(s) left after check on ${o.branch}`);
+  return { ok: true };
 }
 
 /** The written path's own filename already carries the repo's detected number padding

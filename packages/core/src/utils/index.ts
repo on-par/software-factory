@@ -86,22 +86,41 @@ export function readCosts(costsFile: string): CostEntry[] {
 // kills the child on expiry. Without one, a wedged worktree op hangs its caller
 // forever with no output — the failure mode #755 was opened for.
 export async function gitFetch(repoRoot: string): Promise<void> {
-  await execGit('git fetch origin -q', { cwd: repoRoot });
+  await execGit('git fetch origin -q --prune', { cwd: repoRoot });
+}
+
+/** The repo default branch's remote-tracking ref (from origin/HEAD), or
+ *  'origin/main' when origin/HEAD is unset (e.g. a clone of an empty bare repo). */
+export async function defaultRemoteBase(repoRoot: string): Promise<string> {
+  try {
+    const { stdout } = await execGit('git symbolic-ref -q refs/remotes/origin/HEAD', { cwd: repoRoot });
+    const m = stdout.trim().match(/^refs\/remotes\/(origin\/.+)$/);
+    if (m) return m[1];
+  } catch {
+    // fall through — origin/HEAD unset or not a repo; caller keeps the historical default
+  }
+  return 'origin/main';
 }
 
 export async function setupWorktree(
   repoRoot: string,
   branch: string,
   worktreePath: string,
-  startPoint: string = 'origin/main',
+  startPoint?: string,
   sandbox?: WorktreeSandbox,
   log?: (type: EventKind, msg: string) => void,
 ): Promise<void> {
+  // The base of record is the freshly fetched remote-tracking ref — never local
+  // branch state, which can be stale, dirty, or ahead (#1167).
+  await gitFetch(repoRoot);
+  const base = startPoint ?? (await defaultRemoteBase(repoRoot));
   await execGit(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot }).catch(() => {});
   await execGit(`git branch -D ${shellEscape(branch)}`, { cwd: repoRoot }).catch(() => {});
-  await execGit(`git worktree add -b ${shellEscape(branch)} ${shellEscape(worktreePath)} ${shellEscape(startPoint)}`, {
+  await execGit(`git worktree add -b ${shellEscape(branch)} ${shellEscape(worktreePath)} ${shellEscape(base)}`, {
     cwd: repoRoot,
   });
+  const { stdout } = await execGit('git rev-parse --verify HEAD', { cwd: worktreePath });
+  log?.('worktree-base', `created from ${base} @ ${stdout.trim()}`);
   if (sandbox) {
     await createMicroVm({ ...sandbox, worktreePath, log });
   }
@@ -128,6 +147,100 @@ export async function cleanupWorktree(
       `git worktree prune failed in ${repoRoot}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`,
     ),
   );
+}
+
+export interface LaneWorktreeReapResult {
+  outcome: 'removed' | 'kept-dirty' | 'kept-branch-mismatch' | 'absent';
+  branch: string | null;
+  branchDeleted: boolean;
+}
+
+/**
+ * Eagerly removes a lane's own worktree when the lane parks or fails (#1007), fail-closed:
+ * the checked-out branch must match `<prefix>/<issue>-*` (a human checkout squatting the lane
+ * path is left alone), the tree must have no modified tracked files, and the local branch is
+ * deleted only when its content is provably on the remote — an unpushed parked attempt's
+ * branch survives as its only handle. Every probe failure means keep. A registered-but-deleted
+ * path returns `absent` (pruning it is sweepWorktrees' job).
+ */
+export async function reapLaneWorktree(
+  repoRoot: string,
+  worktreePath: string,
+  opts: {
+    issue: number;
+    branchPrefix?: string;
+    log?: (type: EventKind, msg: string) => void;
+    sandbox?: WorktreeSandbox;
+  },
+): Promise<LaneWorktreeReapResult> {
+  const log = opts.log ?? (() => {});
+  if (!existsSync(worktreePath)) {
+    return { outcome: 'absent', branch: null, branchDeleted: false };
+  }
+
+  const lanePrefix = `${branchPrefixSlug(opts.branchPrefix)}/${opts.issue}-`;
+  const branch = await execGit('git rev-parse --abbrev-ref HEAD', { cwd: worktreePath }).then(
+    (r) => r.stdout.trim(),
+    () => null,
+  );
+  if (branch === null || !branch.startsWith(lanePrefix)) {
+    log(
+      'warn',
+      `worktree at ${worktreePath} is on '${branch ?? 'unknown'}', not a ${lanePrefix}* lane branch — leaving it alone`,
+    );
+    return { outcome: 'kept-branch-mismatch', branch, branchDeleted: false };
+  }
+
+  const status = await execGit('git status --porcelain --untracked-files=no', { cwd: worktreePath }).catch(() => null);
+  if (status === null || status.stdout.trim() !== '') {
+    log(
+      'warn',
+      `parked worktree ${worktreePath} has modified tracked files — kept; review it or run 'factory worktree gc' / 'factory doctor --reconcile'`,
+    );
+    return { outcome: 'kept-dirty', branch, branchDeleted: false };
+  }
+
+  const tip = await execGit('git rev-parse HEAD', { cwd: worktreePath }).then(
+    (r) => r.stdout.trim(),
+    () => null,
+  );
+
+  await cleanupWorktree(repoRoot, worktreePath, log, opts.sandbox);
+
+  const lsRemote = await execGit(`git ls-remote --heads origin ${shellEscape(branch)}`, { cwd: repoRoot }).catch(
+    () => null,
+  );
+  const onRemote =
+    (lsRemote !== null && lsRemote.stdout.trim() !== '') ||
+    (tip !== null &&
+      (await execGit(`git merge-base --is-ancestor ${shellEscape(tip)} origin/main`, { cwd: repoRoot }).then(
+        () => true,
+        () => false,
+      )));
+
+  let branchDeleted = false;
+  if (onRemote) {
+    try {
+      await execGit(`git branch -D ${shellEscape(branch)}`, { cwd: repoRoot });
+      branchDeleted = true;
+    } catch (err: any) {
+      log(
+        'warn',
+        `git branch -D failed for ${branch}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`,
+      );
+    }
+  } else {
+    log(
+      'worktree-gc',
+      `kept branch ${branch} — its content is not on the remote, so it is the only handle to the parked attempt`,
+    );
+  }
+
+  log(
+    'worktree-gc',
+    `removed lane worktree ${worktreePath} for issue #${opts.issue}${branchDeleted ? `, deleted branch ${branch}` : ''}`,
+  );
+  return { outcome: 'removed', branch, branchDeleted };
 }
 
 export function slugify(s: string): string {

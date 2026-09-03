@@ -5,12 +5,15 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { allGroupsPass } from './all-groups-pass.js';
 import {
   collectBaselineTrials,
+  evaluateAllGroupsVerdict,
   evaluateTrialVerdict,
   generateBaselineReport,
   loadBaselineConfig,
   GITHUB_WRITE_EVENT_KINDS,
+  parseEvaluation,
   type BaselineConfig,
   type BaselineFsDeps,
   type BaselineTrial,
@@ -19,6 +22,7 @@ import {
 } from './baseline.js';
 import { AdapterError, type ScbenchCheckpoint } from './checkpoint.js';
 import { minimalManifest } from './manifest-fixture.js';
+import { retrySkipReason } from './retry-context.js';
 import { runCheckpoint } from './run-checkpoint.js';
 import { createExecaExec, type ExecFn } from './workspace.js';
 
@@ -73,6 +77,44 @@ function minimalEvaluation(overrides: Partial<ScbenchEvaluation> = {}): ScbenchE
 function malformedEvaluationJson(overrides: { [K in keyof ScbenchEvaluation]?: unknown }): string {
   return JSON.stringify({ ...minimalEvaluation(), ...overrides });
 }
+
+describe('parseEvaluation', () => {
+  const PATH = '/runs/evaluation.json';
+
+  it('still parses an evaluation without tests/stdout/stderr (retained baseline evidence stays valid)', () => {
+    expect(parseEvaluation(JSON.stringify(minimalEvaluation()), PATH)).toEqual(minimalEvaluation());
+  });
+
+  it('accepts an evaluation carrying tests, stdout, and stderr', () => {
+    const evaluation = minimalEvaluation({
+      tests: {
+        'checkpoint_1-Core': { passed: ['test_a'], failed: ['test_b'], skipped: [] },
+      },
+      stdout: 'collected 2 items',
+      stderr: '1 failed',
+    });
+
+    expect(parseEvaluation(JSON.stringify(evaluation), PATH)).toEqual(evaluation);
+  });
+
+  it('rejects a malformed tests value with an AdapterError naming the field', () => {
+    const raw = malformedEvaluationJson({ tests: { 'checkpoint_1-Core': { passed: ['test_a'], failed: 'nope' } } });
+
+    expect(() => parseEvaluation(raw, PATH)).toThrow(AdapterError);
+    expect(() => parseEvaluation(raw, PATH)).toThrow(
+      /field "tests" must be an object of \{passed, failed, skipped\} string arrays/,
+    );
+  });
+
+  it('rejects non-string stdout/stderr values', () => {
+    expect(() => parseEvaluation(malformedEvaluationJson({ stdout: 42 }), PATH)).toThrow(
+      /field "stdout" must be a string/,
+    );
+    expect(() => parseEvaluation(malformedEvaluationJson({ stderr: [] }), PATH)).toThrow(
+      /field "stderr" must be a string/,
+    );
+  });
+});
 
 describe('loadBaselineConfig', () => {
   it('accepts the committed baseline config', () => {
@@ -729,14 +771,29 @@ describe('collectBaselineTrials', () => {
     expect(() => collectBaselineTrials('/runs', deps)).toThrow(re);
   });
 
-  it('collects the committed smoke evidence from the real filesystem', () => {
+  it('collects the committed live cfgpipe evidence from the real filesystem', () => {
     const trials = collectBaselineTrials(RUNS_DIR);
-    expect(trials.map((t) => t.id)).toEqual(['smoke/trial-1', 'smoke/trial-2']);
-    for (const trial of trials) {
-      expect(trial.evidence).toEqual({
-        runInfoPresent: false,
-        factoryEvents: { githubWriteKinds: [], localOnlyComplete: false },
-      });
+    const ids = [
+      'cfgpipe/checkpoint_1/trial-1',
+      'cfgpipe/checkpoint_1/trial-2',
+      'cfgpipe/checkpoint_1/trial-3',
+      'cfgpipe/checkpoint_2/trial-1',
+      'cfgpipe/checkpoint_2/trial-2',
+      'cfgpipe/checkpoint_2/trial-3',
+      'cfgpipe/checkpoint_3/trial-1',
+      'cfgpipe/checkpoint_3/trial-2',
+      'cfgpipe/checkpoint_3/trial-3',
+      'cfgpipe/checkpoint_4/trial-1',
+      'cfgpipe/checkpoint_4/trial-2',
+      'cfgpipe/checkpoint_4/trial-3',
+    ];
+    expect(trials.map((t) => t.id)).toEqual(ids);
+    const byId = new Map(trials.map((t) => [t.id, t]));
+    for (const id of ids) {
+      const evidence = byId.get(id)?.evidence;
+      expect(evidence?.evaluation).toBeDefined();
+      expect(evidence?.runInfoPresent).toBe(true);
+      expect(evidence?.factoryEvents).toEqual({ githubWriteKinds: [], localOnlyComplete: true });
     }
   });
 });
@@ -792,6 +849,44 @@ describe('evaluateTrialVerdict', () => {
       },
     );
     expect(evaluateTrialVerdict(trial)).toBe('pass');
+  });
+});
+
+describe('evaluateAllGroupsVerdict', () => {
+  it('all-groups verdict matches retrySkipReason', () => {
+    const passingEvaluation = minimalEvaluation({
+      pass_counts: { Core: 3, Functionality: 2 },
+      total_counts: { Core: 3, Functionality: 2 },
+    });
+    const failingEvaluation = minimalEvaluation({
+      pass_counts: { Core: 3, Functionality: 1 },
+      total_counts: { Core: 3, Functionality: 2 },
+    });
+    const passingTrial = trialAt('a', {}, { evaluation: passingEvaluation, runInfoPresent: false });
+    const failingTrial = trialAt('b', {}, { evaluation: failingEvaluation, runInfoPresent: false });
+
+    expect(evaluateAllGroupsVerdict(passingTrial)).toBe('pass');
+    expect(allGroupsPass(passingEvaluation)).toBe(true);
+    expect(retrySkipReason(passingEvaluation)).toBe(
+      'checkpoint fully green — every test group passed, nothing to rework',
+    );
+
+    expect(evaluateAllGroupsVerdict(failingTrial)).toBe('fail');
+    expect(allGroupsPass(failingEvaluation)).toBe(false);
+    expect(retrySkipReason(failingEvaluation)).toBeUndefined();
+  });
+
+  it('never counts missing evidence as all-groups pass', () => {
+    expect(evaluateAllGroupsVerdict(trialAt('a'))).toBe('missing-evidence');
+  });
+
+  it('never counts an infrastructure failure as all-groups pass', () => {
+    const trial = trialAt(
+      'a',
+      {},
+      { evaluation: minimalEvaluation({ infrastructure_failure: true }), runInfoPresent: false },
+    );
+    expect(evaluateAllGroupsVerdict(trial)).toBe('infrastructure-failure');
   });
 });
 
@@ -931,13 +1026,57 @@ describe('generateBaselineReport', () => {
     expect(report).toContain(
       '1/4 (25.0%) under pass policy `core-cases` — 1 pass, 1 fail, 1 infrastructure failure, 1 missing evidence.',
     );
-    expect(report).toContain('- `a`: pass — Core 3/3 (calculator / checkpoint_1)');
-    expect(report).toContain('- `b`: fail — Core 2/3 (calculator / checkpoint_1)');
-    expect(report).toContain('- `c`: infrastructure failure — native evaluation reports infrastructure_failure');
-    expect(report).toContain('- `d`: missing evidence — no evaluation.json in the trial directory');
+    expect(report).toContain('all-groups: 1/4 — a trial counts only when every test group');
+    expect(report).toContain(
+      '- `a`: pass — Core 3/3, Functionality 2/2, Regression none, Error none (calculator / checkpoint_1) — all-groups: pass',
+    );
+    expect(report).toContain(
+      '- `b`: fail — Core 2/3, Functionality none, Regression none, Error none (calculator / checkpoint_1) — all-groups: fail',
+    );
+    expect(report).toContain(
+      '- `c`: infrastructure failure — native evaluation reports infrastructure_failure — all-groups: infrastructure failure',
+    );
+    expect(report).toContain(
+      '- `d`: missing evidence — no evaluation.json in the trial directory — all-groups: missing evidence',
+    );
   });
 
-  it('renders "Core 0/0" when the Core key is absent from pass_counts/total_counts', () => {
+  it('renders per-group counts from pass_counts/total_counts', () => {
+    const trials = [
+      trialAt(
+        'a',
+        {},
+        {
+          evaluation: minimalEvaluation({
+            pass_counts: { Core: 6, Functionality: 16, Regression: 92, Error: 4 },
+            total_counts: { Core: 7, Functionality: 17, Regression: 107, Error: 6 },
+          }),
+          runInfoPresent: false,
+        },
+      ),
+      trialAt(
+        'b',
+        {},
+        {
+          evaluation: minimalEvaluation({
+            pass_counts: { Core: 4, Functionality: 20, Regression: 0, Error: 9 },
+            total_counts: { Core: 4, Functionality: 20, Regression: 0, Error: 13 },
+          }),
+          runInfoPresent: false,
+        },
+      ),
+    ];
+    const report = generateBaselineReport(config, trials);
+
+    expect(report).toContain(
+      '- `a`: fail — Core 6/7, Functionality 16/17, Regression 92/107, Error 4/6 (calculator / checkpoint_1)',
+    );
+    expect(report).toContain(
+      '- `b`: pass — Core 4/4, Functionality 20/20, Regression none, Error 9/13 (calculator / checkpoint_1)',
+    );
+  });
+
+  it('renders "Core none" when the Core key is absent from pass_counts/total_counts', () => {
     const trials = [
       trialAt(
         'a',
@@ -949,7 +1088,9 @@ describe('generateBaselineReport', () => {
       ),
     ];
     const report = generateBaselineReport(config, trials);
-    expect(report).toContain('- `a`: pass — Core 0/0 (calculator / checkpoint_1)');
+    expect(report).toContain(
+      '- `a`: pass — Core none, Functionality 2/2, Regression none, Error none (calculator / checkpoint_1)',
+    );
   });
 
   it('groups erosion by evaluation.problem_name, ordering checkpoints numerically', () => {
@@ -1053,6 +1194,15 @@ describe('generateBaselineReport', () => {
     expect(report).toContain(
       'Not yet measurable — requires native SCBench evaluation evidence from the live multi-checkpoint suite run.',
     );
+  });
+
+  it('renders the Regression trajectory in checkpoint order', () => {
+    const config = loadBaselineConfig(readFileSync(BASELINE_CONFIG_PATH, 'utf-8'));
+    const trials = collectBaselineTrials(RUNS_DIR);
+    const report = generateBaselineReport(config, trials);
+    expect(report).toContain('## Regression-group trajectory (native SCBench evaluation)');
+    expect(report).toContain('checkpoint_3 `cfgpipe/checkpoint_3/trial-1`: Regression 59/68');
+    expect(report).toContain('checkpoint_4 `cfgpipe/checkpoint_4/trial-1`: Regression 92/107');
   });
 
   it('renders "confirmed" when every trial has attempts and all observed models are approved', () => {

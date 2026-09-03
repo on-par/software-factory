@@ -175,6 +175,51 @@ ever printed), `2` on a pin-file or baseline-config read/parse error.
 Prerequisite: `npm run build` (so the catalog preflight's adapter-build
 check can find `dist/cli.js`).
 
+## Complete suite run (`run-suite`)
+
+Where `npm run scbench` stops at printing the launcher commands, the
+`run-suite` subcommand actually runs the whole configured suite
+(`baseline.config.json`'s `problems.suite`) start to finish:
+
+```bash
+SCBENCH_CHECKOUT=/path/to/slop-code-bench \
+SCBENCH_PROBLEMS_PATH=/path/to/scb-problems \
+SCBENCH_PLACEHOLDER_KEY=x \
+node packages/scbench-adapter/dist/cli.js run-suite \
+  --provider-api-key-env SCBENCH_PLACEHOLDER_KEY \
+  --summary /tmp/suite-summary.json
+```
+
+`--provider-api-key-env <var>` is forwarded verbatim to every per-problem
+launcher invocation. Upstream SCBench's `run` command requires a _populated_
+provider credential env var before it will start (presence-checked for its
+own bookkeeping only — the value is never validated or forwarded to
+Factory's models), so a live run names a harmless placeholder var here.
+Never satisfy that gate by exporting a real `ANTHROPIC_API_KEY`: the nested
+`claude` CLI treats that env var as an auth override and abandons its
+logged-in OAuth session (see `evals/scbench-baseline/README.md`'s credential
+note). With the flag omitted, the launcher argv is unchanged.
+
+The same pin + catalog preflights as `launch` gate the run — a failing
+preflight aborts before any launcher invocation. Once they pass, every
+configured suite problem runs independently, in order, through the exact
+pinned launcher command; a problem whose launcher exits non-zero (or
+crashes) **does not stop later problems**. The final summary classifies
+every configured problem as exactly one of `completed` (exit 0), `failed`
+(recorded non-zero exit), or `missing` (no record — the attempt crashed or
+never happened); a missing problem is never rendered as completed
+(ADR-0007). `--summary <path>` additionally writes the records + summary as
+JSON. Exit codes: `0` only when every configured problem completed, `1`
+when any problem failed/missing or a preflight failed, `2` on a
+pin-file/config read or parse error — the launch/compare convention.
+
+Environment hygiene (#1164): the launcher (`run_scbench.py`) and the shim
+(`software_factory.py`) both strip the leaked parent `VIRTUAL_ENV` (set by
+`uv run --project` to the harness venv) before spawning subprocesses, and
+`run-suite` launches each problem with it un-set — so a
+"VIRTUAL_ENV does not match the project environment" warning in evaluation
+stderr now indicates the solution itself, not the harness.
+
 ## Smoke test
 
 With a stub `factory` binary (no models involved — proves wiring only):

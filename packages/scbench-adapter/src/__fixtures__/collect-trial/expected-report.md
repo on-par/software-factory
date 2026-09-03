@@ -22,13 +22,17 @@
 
 ## Benchmark pass rate (native SCBench evaluation)
 
-1/1 (100.0%) under pass policy `core-cases` — 1 pass, 0 fail, 0 infrastructure failure, 0 missing evidence. A trial without native evaluation evidence never counts as a pass.
+1/1 (100.0%) under pass policy `core-cases` — 1 pass, 0 fail, 0 infrastructure failure, 0 missing evidence. A trial without native evaluation evidence never counts as a pass. all-groups: 1/1 — a trial counts only when every test group (Core, Functionality, Regression, Error) passes; missing evidence or an infrastructure failure is never counted as an all-groups pass.
 
-- `calculator/1/trial-1`: pass — Core 3/3 (calculator / 1)
+- `calculator/1/trial-1`: pass — Core 3/3, Functionality none, Regression none, Error none (calculator / 1) — all-groups: pass
 
 ## Erosion trajectory (native SCBench evaluation)
 
 - calculator: 1 `calculator/1/trial-1`: pass (Core 3/3)
+
+## Regression-group trajectory (native SCBench evaluation)
+
+- calculator: 1 `calculator/1/trial-1`: Regression none
 
 ## Factory run outcomes (harness health)
 

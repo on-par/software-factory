@@ -19,7 +19,12 @@
 #   ORG               GitHub org (default: on-par)
 #   REPO_ROOT         local checkout root (default: $HOME/repos/$ORG)
 #   SWEEP_REPOS       space-separated repo names under $ORG / $REPO_ROOT
-#                     (default: sound-buddy software-factory launchblitz)
+#                     (default: sound-buddy software-factory launchblitz).
+#                     A repo whose checkout is missing under $REPO_ROOT is
+#                     skipped with a WARN each preflight, not a fatal error;
+#                     hosts that only run a subset of repos can set SWEEP_REPOS
+#                     to just the repos they have. Preflight still fails fast
+#                     when every configured checkout is missing.
 #   FACTORY_BIN       factory CLI path (default: `factory` on PATH, else
 #                     $HOME/.local/bin/factory)
 #   MERGE_FLAGS       flags passed to `gh pr merge` for standalone PRs
@@ -64,13 +69,22 @@ preflight() {
     echo "FATAL: filter script missing: $SCRIPT_DIR/filter-green-prs.py" >&2
     ok=1
   fi
-  local r
+  # A missing checkout is a per-repo skip, not a sweep-wide fatal: hosts that
+  # only run a subset of repos (see SWEEP_REPOS) still sweep what they have.
+  local r present=()
   for r in "${REPOS[@]}"; do
-    if [ ! -d "$REPO_ROOT/$r" ]; then
-      echo "FATAL: repo dir missing: $REPO_ROOT/$r" >&2
-      ok=1
+    if [ -d "$REPO_ROOT/$r" ]; then
+      present+=("$r")
+    else
+      log "WARN: skipping repo, checkout missing: $REPO_ROOT/$r" >&2
     fi
   done
+  if [ "${#present[@]}" -eq 0 ]; then
+    echo "FATAL: no configured repo checkouts found under $REPO_ROOT (SWEEP_REPOS: ${REPOS[*]})" >&2
+    ok=1
+  else
+    REPOS=("${present[@]}")
+  fi
   return "$ok"
 }
 

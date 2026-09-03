@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "problem_name": "cfgpipe",
+  "problem_version": 2,
+  "checkpoint_name": "checkpoint_1",
+  "checkpoint_version": 2,
+  "duration": 1.0812339782714844,
+  "entrypoint": "uv run cfgpipe.py",
+  "tests": {
+    "checkpoint_1-Functionality": {
+      "passed": [
+        "test_arg_error_stops_resolution",
+        "test_bool_float_formats",
+        "test_empty_env_string_is_present",
+        "test_empty_schema",
+        "test_env_error_stops_resolution",
+        "test_file_value_is_trimmed",
+        "test_integer_string_as_float",
+        "test_missing_file_absent",
+        "test_missing_type_field",
+        "test_negative_integer",
+        "test_no_sources_unresolved",
+        "test_non_string_arg",
+        "test_non_string_env",
+        "test_non_string_file",
+        "test_schema_array_root",
+        "test_undeclared_sources",
+        "test_unmatched_args",
+        "test_unreadable_file_absent",
+        "test_unrecognized_type",
+        "test_whitespace_file_absent"
+      ],
+      "failed": [],
+      "skipped": []
+    },
+    "checkpoint_1-Error": {
+      "passed": [
+        "test_arg_parse_failure",
+        "test_env_parse_failure",
+        "test_invalid_boolean[suffix]",
+        "test_invalid_schema_json",
+        "test_missing_schema_file",
+        "test_non_string_default",
+        "test_parse_failure_halts",
+        "test_unresolved_mixed_sources",
+        "test_unresolved_params_error"
+      ],
+      "failed": [
+        "test_default_parse_error_stops",
+        "test_env_parse_error_priority",
+        "test_file_parse_error_stops",
+        "test_invalid_boolean[whitespace]"
+      ],
+      "skipped": []
+    },
+    "checkpoint_1-Core": {
+      "passed": [
+        "test_cli_arg_forms[arg_candidates0]",
+        "test_cli_arg_forms[arg_candidates1]",
+        "test_file_overrides_env",
+        "test_priority_chain"
+      ],
+      "failed": [],
+      "skipped": []
+    }
+  },
+  "pass_counts": {
+    "Core": 4,
+    "Functionality": 20,
+    "Regression": 0,
+    "Error": 9
+  },
+  "total_counts": {
+    "Core": 4,
+    "Functionality": 20,
+    "Regression": 0,
+    "Error": 13
+  },
+  "pytest_exit_code": 1,
+  "pytest_collected": 37,
+  "test_collection_hash": "6ee2bfc068272a7fbc92599619db56b345cd93ecd3a321e791fa496a6a0f0615",
+  "infrastructure_failure": false
+}

@@ -1,10 +1,10 @@
 // packages/cli/src/cli/index.ts — CLI entry point: factory <command> [options]
 
 import { exec as execCb, execSync } from 'node:child_process';
-import { existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { userInfo } from 'node:os';
-import { basename, dirname, resolve } from 'node:path';
+import { basename, dirname, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
@@ -151,14 +151,17 @@ import type {
   WorktreeSandbox,
 } from '@on-par/factory-core/internal';
 import {
+  acquirePidFile,
   branchFor,
   branchPrefixSlug,
   cleanupWorktree,
+  createDaemonLogSink,
   createFactorydServer,
   createGithubQueue,
   createLocalSmallDryRun,
   createOctokitGreenPrClient,
   createOctokitQueueClient,
+  daemonRuntimePaths,
   DEFAULT_FACTORYD_PORT,
   defaultRegistryPath,
   ensureDir,
@@ -170,6 +173,8 @@ import {
   logEvent,
   planQueueMigration,
   readCosts,
+  reapLaneWorktree,
+  releaseRuntimeFiles,
   releaseStaleClaims,
   resolveBranchPrefix,
   resolveEffectiveConfig,
@@ -187,6 +192,7 @@ import {
   withGitLock,
   withRunLock,
   wrapCommandInSandbox,
+  writePortFile,
 } from '@on-par/factory-core/internal';
 import { runTui } from '@on-par/factory-tui';
 import chalk from 'chalk';
@@ -291,6 +297,26 @@ export function buildInitConfig(): string {
   return JSON.stringify({ $schema: FACTORY_CONFIG_SCHEMA_URL, version: 2 }, null, 2) + '\n';
 }
 
+/** Write content once without a check-then-act race. Callers choose whether an
+ * existing file is preserved or overwritten. */
+function writeIfAbsent(path: string, content: string, label: string, force = false): void {
+  if (force) {
+    writeFileSync(path, content);
+    console.log(chalk.green(`Wrote ${path}`));
+    return;
+  }
+  try {
+    writeFileSync(path, content, { flag: 'wx' });
+    console.log(chalk.green(`Wrote ${path}`));
+  } catch (err: any) {
+    if (err.code === 'EEXIST') {
+      console.log(chalk.yellow(`${label} exists — leaving as-is (use --force to overwrite)`));
+      return;
+    }
+    throw err;
+  }
+}
+
 /** One-line onboarding reachability summary, e.g. "policy=auto, 3/7 models reachable". */
 export function formatInitReachability(diagnoses: ModelDiagnosis[]): string {
   const reachable = diagnoses.filter((d) => d.reachable).length;
@@ -335,34 +361,14 @@ async function cmdInit(opts: { force?: boolean } = {}) {
   const constitutionPath = resolve(paths.root, 'constitution.md');
   const gitignorePath = resolve(paths.root, '.gitignore');
 
-  // Uses an atomic exclusive-create write (flag 'wx') rather than existsSync-then-writeFileSync,
-  // so there is no check-then-act window where a concurrent writer could race this one.
-  const writeIfAbsent = (path: string, content: string, label: string) => {
-    if (force) {
-      writeFileSync(path, content);
-      console.log(chalk.green(`Wrote ${path}`));
-      return;
-    }
-    try {
-      writeFileSync(path, content, { flag: 'wx' });
-      console.log(chalk.green(`Wrote ${path}`));
-    } catch (err: any) {
-      if (err.code === 'EEXIST') {
-        console.log(chalk.yellow(`${label} exists — leaving as-is (use --force to overwrite)`));
-        return;
-      }
-      throw err;
-    }
-  };
-
-  writeIfAbsent(configPath, buildInitConfig(), '.factory/config.json');
+  writeIfAbsent(configPath, buildInitConfig(), '.factory/config.json', force);
 
   // Constitution scaffold: repo directory basename fills <product-name>/<Product>.
   const repoName = basename(repoRoot);
   const template = readFileSync(resolve(getConstitutionsDir(), '_template.md'), 'utf-8');
-  writeIfAbsent(constitutionPath, scaffoldConstitution(template, repoName), '.factory/constitution.md');
+  writeIfAbsent(constitutionPath, scaffoldConstitution(template, repoName), '.factory/constitution.md', force);
 
-  writeIfAbsent(gitignorePath, 'state/\n', '.factory/.gitignore');
+  writeIfAbsent(gitignorePath, 'state/\n', '.factory/.gitignore', force);
 
   // Doctor-style validation (policy=auto, N models reachable) — informational, never fails init.
   const modelsConfig = applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot));
@@ -375,6 +381,101 @@ async function cmdInit(opts: { force?: boolean } = {}) {
 
   console.log(chalk.green(`Initialized ${paths.root}`));
   console.log(`Next: factory constitution --product <name>, then factory triage`);
+}
+
+/** Rewrite a checkout's legacy `.factory/` inputs and runtime files to the v2
+ * layout. Every write is idempotent so it is safe to run this more than once. */
+export async function runMigrate(repoRoot: string, opts: { dryRun?: boolean } = {}): Promise<void> {
+  const dryRun = opts.dryRun === true;
+  const paths = getFactoryPaths(repoRoot);
+  const isRuntimePath = (path: string) => {
+    const fromState = relative(paths.state, path);
+    return fromState !== '' && !fromState.startsWith('..') && !resolve(paths.state, fromState).startsWith('..');
+  };
+
+  if (!dryRun) mkdirSync(paths.state, { recursive: true });
+  const transientLocks = new Set(['merge.lock', 'git.lock', 'run.lock']);
+  for (const path of Object.values(paths)) {
+    if (!isRuntimePath(path) || transientLocks.has(basename(path))) continue;
+    const legacyPath = resolve(paths.root, basename(path));
+    if (!existsSync(legacyPath) || existsSync(path)) continue;
+    if (dryRun) {
+      console.log(`would move ${legacyPath} to ${path}`);
+    } else {
+      renameSync(legacyPath, path);
+      console.log(`moved ${legacyPath} to ${path}`);
+    }
+  }
+
+  let rawConfig: { version?: unknown; $schema?: unknown } | undefined;
+  try {
+    rawConfig = JSON.parse(readFileSync(paths.config, 'utf-8'));
+  } catch (err: any) {
+    if (err.code !== 'ENOENT') throw err;
+  }
+  if (!rawConfig) {
+    console.log('no .factory/config.json — nothing to rewrite');
+  } else if (rawConfig.version === 2) {
+    console.log('config.json already v2');
+  } else {
+    const v2 = loadRepoConfig(repoRoot);
+    if (!v2) throw new Error(`Expected ${paths.config} to exist`);
+    const { $schema: _schema, version: _version, ...rest } = v2;
+    const content =
+      JSON.stringify(
+        {
+          $schema: typeof rawConfig.$schema === 'string' ? rawConfig.$schema : FACTORY_CONFIG_SCHEMA_URL,
+          version: 2,
+          ...rest,
+        },
+        null,
+        2,
+      ) + '\n';
+    if (dryRun) {
+      console.log('would rewrite .factory/config.json to v2');
+    } else {
+      writeFileSync(paths.config, content);
+      console.log('rewrote .factory/config.json to v2');
+    }
+  }
+
+  const constitutionPath = resolve(paths.root, 'constitution.md');
+  if (!existsSync(constitutionPath)) {
+    const product = readActiveProduct(paths.product);
+    const productConstitution = product ? resolve(getConstitutionsDir(), `${product}.md`) : undefined;
+    const content =
+      productConstitution && existsSync(productConstitution)
+        ? readFileSync(productConstitution, 'utf-8')
+        : scaffoldConstitution(
+            readFileSync(resolve(getConstitutionsDir(), '_template.md'), 'utf-8'),
+            basename(repoRoot),
+          );
+    if (dryRun) {
+      console.log('would write .factory/constitution.md');
+    } else {
+      writeIfAbsent(constitutionPath, content, '.factory/constitution.md');
+    }
+  } else {
+    console.log('constitution.md already exists');
+  }
+
+  const gitignorePath = resolve(paths.root, '.gitignore');
+  if (!existsSync(gitignorePath)) {
+    if (dryRun) {
+      console.log('would write .factory/.gitignore');
+    } else {
+      writeIfAbsent(gitignorePath, 'state/\n', '.factory/.gitignore');
+    }
+  } else {
+    console.log('.gitignore already exists');
+  }
+
+  console.log(dryRun ? 'Migration preview complete.' : 'Migrated .factory/ to the v2 layout.');
+  console.log('Verify: factory status');
+}
+
+async function cmdMigrate(opts: { dryRun?: boolean } = {}): Promise<void> {
+  await runMigrate(await getRepoRoot(), opts);
 }
 
 export class ConstitutionExistsError extends Error {}
@@ -1250,10 +1351,9 @@ export async function shipIssue(
         withGitLock(root, () =>
           withFileLock(
             paths.gitLock,
-            async () => {
-              await gitFetch(root);
-              await setupWorktree(root, br, wt, sp, sandbox, setupLog);
-            },
+            // setupWorktree fetches origin itself before creating the worktree (#1167),
+            // so no explicit gitFetch here — still under the git + file locks.
+            () => setupWorktree(root, br, wt, sp, sandbox, setupLog),
             { onSteal: (pid) => log('lock-stolen', `stole ${paths.gitLock} from dead holder pid ${pid ?? 'unknown'}`) },
           ),
         ),
@@ -1385,6 +1485,7 @@ export async function shipIssue(
         reworkRounds: info.reworkRounds,
         failure: info.failure,
         reportPath: info.reportPath,
+        diffBase: info.diffBase,
         log,
       }),
   };
@@ -1454,6 +1555,7 @@ async function maybeWriteBenchmarkArtifacts(opts: {
   reworkRounds?: number;
   failure?: BenchmarkRunFailure;
   reportPath?: string;
+  diffBase?: string;
   log: (type: EventKind, msg: string) => void;
 }): Promise<void> {
   if (!opts.ctx?.localOnly || !opts.ctx.artifactsDir) return;
@@ -1474,6 +1576,7 @@ async function maybeWriteBenchmarkArtifacts(opts: {
       reworkRounds: opts.reworkRounds,
       failure: opts.failure,
       reportPath: opts.reportPath,
+      diffBase: opts.diffBase,
     });
     opts.log('benchmark-artifacts', `manifest written to ${manifestPath}`);
     console.log(chalk.cyan(`benchmark artifacts: ${manifestPath}`));
@@ -1833,6 +1936,31 @@ function gcWorktreeSandbox(
   return worktreeSandboxFor(policy?.runtime);
 }
 
+/** Eagerly reaps a parked lane's own worktree inside `factory run` (#1007). All the safety
+ *  gates live in reapLaneWorktree; this wrapper resolves the lane's conventional worktree
+ *  path and holds the same git+file lock pairing as every other worktree mutation site. A
+ *  reap failure is logged as a warn and never surfaces — parking must always succeed. */
+export async function reapParkedLaneWorktree(
+  issue: number,
+  repoRoot: string,
+  paths: ReturnType<typeof getFactoryPaths>,
+): Promise<void> {
+  try {
+    const factoryConfig = loadFactoryConfigForRepo(paths.config);
+    const branchPrefix = resolveEffectiveConfig(loadRepoConfig(repoRoot)).branchPrefix;
+    const worktreePath = worktreePathFor(repoRoot, issue, branchPrefix);
+    const log = (type: EventKind, msg: string) => logEvent(paths.events, type, issue, msg);
+    const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
+    await withGitLock(repoRoot, () =>
+      withFileLock(paths.gitLock, () =>
+        reapLaneWorktree(repoRoot, worktreePath, { issue, branchPrefix, log, sandbox }),
+      ),
+    );
+  } catch (err: any) {
+    logEvent(paths.events, 'warn', issue, `parked-lane worktree reap failed: ${err?.message ?? String(err)}`);
+  }
+}
+
 export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
@@ -1846,7 +1974,11 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }
   const ghRepo = await getGitHubRepo().catch(() => undefined);
   const octokit = ghRepo ? (hasGitHubToken() ? getOctokit() : undefined) : undefined;
   const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
-  const run = () => sweepWorktrees({ repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo }, { log, octokit, sandbox });
+  const run = () =>
+    sweepWorktrees(
+      { repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo, branchPrefix: resolveBranchPrefix() },
+      { log, octokit, sandbox },
+    );
   const report = opts.dryRun ? await run() : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
   console.log(formatGcReport(report));
 }
@@ -2304,27 +2436,54 @@ async function cmdProxy() {
 }
 
 /** Runs factoryd in the foreground: a loopback-only HTTP server over the repo
- *  registry (~/.factory/registry.json). Read-only today — GET /repos is the whole
- *  API (#777). Daemon supervision (launchd) is a sibling story; this command is
- *  the process. */
-async function cmdFactoryd(opts: { port?: string; registry?: string }) {
+ *  registry (~/.factory/registry.json) (#777). Owns the daemon runtime state
+ *  next to the registry file — daemon.pid single-instance guard, daemon.port
+ *  bound-address record, daemon.log append sink (#1177). Daemon supervision
+ *  (launchd) and start|stop|status|logs verbs are the next slice; this command
+ *  is the process. */
+async function cmdFactoryd(opts: { port?: string; registry?: string }): Promise<void> {
   const registryFile = opts.registry ?? defaultRegistryPath();
   const port = opts.port === undefined ? DEFAULT_FACTORYD_PORT : Number(opts.port);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     throw new CliExitError(`invalid --port "${opts.port}" — expected an integer 0-65535`, 2);
   }
 
-  const daemon = createFactorydServer({ registryFile, port, log: (line) => console.log(chalk.dim(line)) });
+  const runtime = daemonRuntimePaths(dirname(registryFile));
+  const acquired = await acquirePidFile(runtime);
+  if (!acquired.ok) {
+    throw new CliExitError(
+      `factoryd already running (pid ${acquired.holderPid}) — stop it or remove ${runtime.pidFile}`,
+      2,
+    );
+  }
+  const logSink = createDaemonLogSink(runtime.logFile);
+  const log = (line: string) => {
+    console.log(chalk.dim(line));
+    logSink(line);
+  };
+  if (acquired.stalePid !== null) log(`removed stale pid file (pid ${acquired.stalePid})`);
+
+  const daemon = createFactorydServer({ registryFile, port, log });
   const boundPort = await daemon.start();
-  console.log(chalk.green(`factoryd: listening on 127.0.0.1:${boundPort}`));
-  console.log(`  registry: ${registryFile}`);
-  console.log(`  GET http://127.0.0.1:${boundPort}/repos`);
+  await writePortFile(runtime, boundPort);
+  const banner = [
+    `factoryd: listening on 127.0.0.1:${boundPort}`,
+    `  registry: ${registryFile}`,
+    `  pid file: ${runtime.pidFile} (pid ${process.pid})`,
+    `  port file: ${runtime.portFile}`,
+    `  log file: ${runtime.logFile}`,
+    `  GET http://127.0.0.1:${boundPort}/repos`,
+  ];
+  console.log(chalk.green(banner[0]));
+  for (const line of banner.slice(1)) console.log(line);
+  for (const line of banner) logSink(line);
 
   await new Promise<void>((resolveShutdown) => {
     const shutdown = () => {
       void daemon
         .stop()
         .catch(() => {})
+        .then(() => releaseRuntimeFiles(runtime))
         .then(() => resolveShutdown());
     };
     process.once('SIGINT', shutdown);
@@ -2411,7 +2570,12 @@ async function cmdRun(opts: { localQueue?: boolean } = {}) {
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
             sweepWorktrees(
-              { repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays, repo: ghRepo },
+              {
+                repoRoot,
+                ttlDays: factoryConfig.worktree.gcTtlDays,
+                repo: ghRepo,
+                branchPrefix: resolveBranchPrefix(),
+              },
               { log: gcLog, octokit: getOctokit(), sandbox: gcSandbox },
             ),
           ),
@@ -2474,7 +2638,12 @@ async function cmdRun(opts: { localQueue?: boolean } = {}) {
           `lane '${planned.lane}' started${planned.issues.length ? ` (${planned.issues.length} issues)` : ''}`,
           { lane: planned.lane },
         );
-        pids.push(runLane(planned.lane, planned.issues, repoRoot, ghRepo, paths, planned.deps));
+        pids.push(
+          runLane(planned.lane, planned.issues, repoRoot, ghRepo, paths, {
+            ...planned.deps,
+            reapWorktree: (issue) => reapParkedLaneWorktree(issue, repoRoot, paths),
+          }),
+        );
       }
 
       await Promise.allSettled(pids);
@@ -2623,19 +2792,29 @@ type RunLaneDeps = {
   emitEvent?: typeof logEvent;
   claimNext?: () => Promise<QueueClaim | null>;
   releaseIssue?: (issue: number, outcome: QueueReleaseOutcome) => Promise<void>;
+  /** Eager park-time worktree reap (#1007). Defaults to a no-op so injected-deps callers and
+   *  tests are unaffected; cmdRun wires it to reapParkedLaneWorktree. */
+  reapWorktree?: (issue: number) => Promise<void>;
+  /** Number of issues still claimable on this lane's remote queue (#1222). Absent for
+   *  static local lanes, whose pending list is the whole truth. */
+  countRemaining?: () => Promise<number>;
 };
 
 export interface PlannedLane {
   lane: string;
   /** Seed issues to work before claiming. Always empty in GitHub-queue mode. */
   issues: number[];
-  deps: Pick<RunLaneDeps, 'claimNext' | 'releaseIssue'>;
+  deps: Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'countRemaining'>;
 }
 
-export function laneQueueDeps(queue: GithubQueue, lane: string): Pick<RunLaneDeps, 'claimNext' | 'releaseIssue'> {
+export function laneQueueDeps(
+  queue: GithubQueue,
+  lane: string,
+): Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'countRemaining'> {
   return {
     claimNext: () => queue.claimNext(lane),
     releaseIssue: (issue, outcome) => queue.release(issue, outcome),
+    countRemaining: async () => (await queue.list(lane)).length,
   };
 }
 
@@ -2750,6 +2929,8 @@ export async function runLane(
     emitEvent = logEvent,
     claimNext = async () => null,
     releaseIssue = async () => {},
+    reapWorktree = async () => {},
+    countRemaining,
   } = deps;
   let merged = 0;
   let awaitingReview = 0;
@@ -2759,6 +2940,18 @@ export async function runLane(
   const buildClaim = (issue: number): QueueClaim => ({ issue, decision: { kind: 'build' } });
   const pending: QueueClaim[] = issues.map(buildClaim);
   const seen = new Set(issues);
+  // Truthful park-time remaining count (#1222): local pending plus the lane's still-queued
+  // remote issues. Fail-closed — a count lookup may never change the message beyond the
+  // local truth, and never lane flow.
+  const remainingAfter = async (index: number): Promise<number> => {
+    const local = pending.length - index - 1;
+    if (!countRemaining) return local;
+    try {
+      return local + (await countRemaining());
+    } catch {
+      return local;
+    }
+  };
   for (let i = 0; ; i++) {
     if (i >= pending.length) {
       const claimed = await claimNext();
@@ -2778,9 +2971,12 @@ export async function runLane(
         paths.events,
         'parked',
         issue,
-        `issue #${issue} parked (${decision.reason}); lane '${lane}' continuing, ${pending.length - i - 1} issue(s) remaining`,
+        `issue #${issue} parked (${decision.reason}); lane '${lane}' continuing, ${await remainingAfter(i)} issue(s) remaining`,
         { lane },
       );
+      // A preflight-parked issue may still have a stale worktree from a prior run; the reap
+      // is fail-closed and must never change lane flow.
+      await reapWorktree(issue).catch(() => {});
       await releaseIssue(issue, 'parked');
       parked++;
       continue;
@@ -2831,9 +3027,12 @@ export async function runLane(
         paths.events,
         'parked',
         issue,
-        `issue #${issue} parked (${reason}); lane '${lane}' continuing, ${pending.length - i - 1} issue(s) remaining`,
+        `issue #${issue} parked (${reason}); lane '${lane}' continuing, ${await remainingAfter(i)} issue(s) remaining`,
         { lane },
       );
+      // Remove the parked lane's own worktree so a parked issue stops leaving a sibling
+      // checkout behind (#1007); fail-closed and never allowed to change lane flow.
+      await reapWorktree(issue).catch(() => {});
       await releaseIssue(issue, 'parked');
       parked++;
       continue;
@@ -3739,7 +3938,12 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
             sweepWorktrees(
-              { repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays, repo: ghRepo },
+              {
+                repoRoot,
+                ttlDays: factoryConfig.worktree.gcTtlDays,
+                repo: ghRepo,
+                branchPrefix: resolveBranchPrefix(),
+              },
               { log: gcLog, octokit, sandbox: gcSandbox },
             ),
           ),
@@ -3806,6 +4010,14 @@ export async function main() {
     .description('Initialize .factory in this repo (config, constitution, .gitignore) and validate reachability')
     .option('--force', 'Overwrite an existing .factory config, constitution, and .gitignore')
     .action((opts: { force?: boolean }) => cmdInit(opts));
+
+  program
+    .command('migrate')
+    .description(
+      'Rewrite .factory/ to the v2 layout: v2 config.json, constitution.md, .gitignore, runtime state under state/',
+    )
+    .option('--dry-run', 'Print planned changes without writing')
+    .action((opts: { dryRun?: boolean }) => cmdMigrate(opts));
 
   program
     .command('constitution')
@@ -4048,8 +4260,9 @@ export async function main() {
     )
     .action(cmdProxy);
 
-  program
-    .command('daemon')
+  const daemonCmd = program.command('daemon').description('The factoryd daemon (long-running, user-scoped)');
+  daemonCmd
+    .command('run')
     .description('Run factoryd in the foreground: a localhost-only HTTP API over the repo registry')
     .option('--port <n>', `port to bind on 127.0.0.1 (default ${DEFAULT_FACTORYD_PORT})`)
     .option('--registry <file>', 'registry file to serve (default ~/.factory/registry.json)')

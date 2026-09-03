@@ -212,13 +212,56 @@ describe('shipPhase self-healing', () => {
     expect(calls.some((call) => call[0] === 'graphql')).toBe(false);
   });
 
-  it('does not push or open a PR when the worktree has uncommitted changes', async () => {
+  it('commits leftover build output after a green check and proceeds to the PR', async () => {
+    const { octokit, calls } = createOctokit();
+    const commands: string[] = [];
+    const logs: Array<[string, string]> = [];
+    let committed = false;
+    const run = async (command: string) => {
+      commands.push(command);
+      if (command.startsWith('git commit')) committed = true;
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
+      if (command === 'git status --porcelain') {
+        return {
+          stdout: committed ? '' : ' M packages/core/src/phases/ship.ts\n?? packages/core/src/phases/new.test.ts\n',
+        };
+      }
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result).toEqual({ ok: true, prNumber: 123 });
+    expect(commands).toContain('git add -A');
+    const commit = commands.find((c) => c.startsWith('git commit -m'));
+    expect(commit).toContain('chore(ship): commit build output left after check (#23)');
+    expect(calls).toContainEqual(['pulls.create', expect.anything()]);
+    expect(logs).toContainEqual(['ship', 'committed 2 uncommitted path(s) left after check on ship-it/23-self-heal']);
+    expect(logs).not.toContainEqual(['ship', expect.stringContaining('worktree has uncommitted changes')]);
+  });
+
+  it('parks with a conflict-naming reason and touches nothing when the worktree has unmerged entries', async () => {
     const { octokit, calls } = createOctokit();
     const commands: string[] = [];
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
       commands.push(command);
-      if (command === 'git status --porcelain') return { stdout: ' M packages/core/src/phases/ship.ts\n' };
+      if (command === 'git status --porcelain') {
+        return { stdout: 'UU packages/core/src/phases/ship.ts\nM  packages/core/src/other.ts\n' };
+      }
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
       return { stdout: '' };
@@ -235,15 +278,48 @@ describe('shipPhase self-healing', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: false });
-    expect(commands).toEqual([
-      'git fetch origin main',
-      'git status --porcelain',
-      'git rev-list --count origin/main..HEAD',
-      'git diff --quiet origin/main..HEAD',
-    ]);
+    expect(result).toEqual({ ok: false, reason: 'worktree has merge conflicts in packages/core/src/phases/ship.ts' });
+    expect(
+      commands.some((c) => c.startsWith('git add') || c.startsWith('git commit') || c.startsWith('git push')),
+    ).toBe(false);
     expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
-    expect(logs).toContainEqual(['ship', 'not recovering ship-it/23-self-heal: worktree has uncommitted changes']);
+    expect(logs).toContainEqual([
+      'ship',
+      'not recovering ship-it/23-self-heal: worktree has merge conflicts in packages/core/src/phases/ship.ts — worktree preserved',
+    ]);
+  });
+
+  it("parks with git's own error when the auto-commit fails", async () => {
+    const { octokit, calls } = createOctokit();
+    const commands: string[] = [];
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      commands.push(command);
+      if (command.startsWith('git commit')) {
+        throw Object.assign(new Error('commit failed'), { stderr: 'fatal: cannot commit\n' });
+      }
+      if (command === 'git status --porcelain') return { stdout: '?? scratch.txt\n' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/^could not commit leftover build output:/);
+    expect(result.reason).toContain('fatal: cannot commit');
+    expect(commands.some((c) => c.startsWith('git push'))).toBe(false);
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
   });
 
   it('does not push or open a PR when there are no commits ahead of origin/main', async () => {

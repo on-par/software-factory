@@ -831,10 +831,14 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     if (parentDir) rmSync(parentDir, { recursive: true, force: true });
   });
 
-  /** The only endpoint sweepWorktrees reaches (resolvePrState → rest.pulls.list). A structural
-   *  supertype of Pick<Octokit,'rest'>, so widening it costs one assertion, never a chain. */
+  /** The only endpoints sweepWorktrees reaches (resolvePrState → rest.pulls.list,
+   *  resolveIssueDisposition → rest.issues.get). A structural supertype of
+   *  Pick<Octokit,'rest'>, so widening it costs one assertion, never a chain. */
   interface SweepOctokitDouble {
-    rest: { pulls: { list: (args: any) => Promise<any> } };
+    rest: {
+      pulls: { list: (args: any) => Promise<any> };
+      issues: { get: (args: any) => Promise<any> };
+    };
   }
 
   function asSweepOctokit(double: SweepOctokitDouble): NonNullable<SweepDeps['octokit']> {
@@ -843,10 +847,16 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
   function fakeOctokit(
     result: () => Promise<{ data: Array<Record<string, unknown>> }> | { data: Array<Record<string, unknown>> },
+    issueResult: () => Promise<{ data: Record<string, unknown> }> | { data: Record<string, unknown> } = () => ({
+      // Default: an open, unlabeled issue — no issue-disposition verdict beyond 'keep', so the
+      // pre-#1007 PR-state cases exercise exactly the behavior they always did.
+      data: { state: 'open', labels: [] },
+    }),
   ) {
     const pullsList = vi.fn(async (_params: unknown) => result());
-    const octokit = asSweepOctokit({ rest: { pulls: { list: pullsList } } });
-    return { octokit, pullsList };
+    const issuesGet = vi.fn(async (_params: unknown) => issueResult());
+    const octokit = asSweepOctokit({ rest: { pulls: { list: pullsList }, issues: { get: issuesGet } } });
+    return { octokit, pullsList, issuesGet };
   }
 
   it('removes a worktree whose branch has a merged PR on GitHub with zero local push evidence', async () => {
@@ -1276,6 +1286,235 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand });
     expect(report.removed).toHaveLength(1);
+  });
+
+  describe('issue disposition (#1007)', () => {
+    function laneListing(root: string, wt: string, branch: string): string {
+      return `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/${branch}\n\n`;
+    }
+
+    it('reaps a clean parked-issue worktree despite an open PR and deletes the branch on PR evidence', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-41`);
+
+      const { octokit, issuesGet } = fakeOctokit(
+        () => ({ data: [{ number: 9, state: 'open' }] }),
+        () => ({ data: { state: 'open', labels: [{ name: 'factory:parked' }] } }),
+      );
+      const commands: string[] = [];
+      const runCommand = async (cmd: string) => {
+        commands.push(cmd);
+        if (cmd === 'git worktree list --porcelain') {
+          return { stdout: laneListing(root, wt, 'ship-it/41-parked') };
+        }
+        return { stdout: '' }; // status probe => clean
+      };
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+        { runCommand, octokit },
+      );
+      expect(report.removed).toHaveLength(1);
+      expect(report.removed[0].reason).toBe('issue-parked');
+      expect(report.removed[0].branchDeleted).toBe(true);
+      expect(commands).toContain("git branch -D 'ship-it/41-parked'");
+      expect(issuesGet).toHaveBeenCalledWith({ owner: 'on-par', repo: 'sound-buddy', issue_number: 41 });
+    });
+
+    it('reaps a clean closed-issue worktree but keeps its never-pushed branch', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-42`);
+
+      const { octokit } = fakeOctokit(
+        () => ({ data: [] }), // no PR ever existed
+        () => ({ data: { state: 'closed', labels: [] } }),
+      );
+      const commands: string[] = [];
+      const runCommand = async (cmd: string) => {
+        commands.push(cmd);
+        if (cmd === 'git worktree list --porcelain') {
+          return { stdout: laneListing(root, wt, 'ship-it/42-closed') };
+        }
+        if (cmd.startsWith('git ls-remote')) {
+          return { stdout: '' }; // never pushed
+        }
+        if (cmd.startsWith('git merge-base --is-ancestor')) {
+          throw new Error('exit 1'); // committed work not on origin/main
+        }
+        return { stdout: '' };
+      };
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+        { runCommand, octokit },
+      );
+      expect(report.removed).toHaveLength(1);
+      expect(report.removed[0].reason).toBe('issue-closed');
+      expect(report.removed[0].branchDeleted).toBe(false);
+      expect(commands.some((c) => c.startsWith('git branch -D'))).toBe(false);
+    });
+
+    it('keeps a dirty worktree even when its issue is parked', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-43`);
+
+      const { octokit } = fakeOctokit(
+        () => ({ data: [{ number: 9, state: 'open' }] }),
+        () => ({ data: { state: 'open', labels: [{ name: 'factory:parked' }] } }),
+      );
+      const runCommand = async (cmd: string) => {
+        if (cmd === 'git worktree list --porcelain') {
+          return { stdout: laneListing(root, wt, 'ship-it/43-dirty') };
+        }
+        if (cmd.startsWith('git status --porcelain')) {
+          return { stdout: ' M ship.ts\n' }; // live work
+        }
+        return { stdout: '' };
+      };
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+        { runCommand, octokit },
+      );
+      expect(report.removed).toHaveLength(0);
+      expect(report.kept).toBe(1);
+      expect(existsSync(wt)).toBe(true);
+    });
+
+    it('keeps an open unlabeled issue with an open PR (the ADR-0027 rule is preserved)', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-44`);
+
+      const { octokit } = fakeOctokit(() => ({ data: [{ number: 9, state: 'open' }] }));
+      const runCommand = async (cmd: string) => {
+        if (cmd === 'git worktree list --porcelain') {
+          return { stdout: laneListing(root, wt, 'ship-it/44-live') };
+        }
+        return { stdout: '' };
+      };
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+        { runCommand, octokit },
+      );
+      expect(report.removed).toHaveLength(0);
+      expect(report.kept).toBe(1);
+      expect(existsSync(wt)).toBe(true);
+    });
+
+    it('admits a legacy <repo>-ship-it-<n> path on a lane branch but never a manual worktree', async () => {
+      const { repoRoot: root } = setup();
+      const legacy = makeWorktree(`${basename(root)}-ship-it-9`);
+      const manual = makeWorktree(`${basename(root)}-manual-x`);
+
+      const { octokit, issuesGet } = fakeOctokit(
+        () => ({ data: [{ number: 3, state: 'open' }] }),
+        () => ({ data: { state: 'open', labels: [{ name: 'factory:parked' }] } }),
+      );
+      const runCommand = async (cmd: string) => {
+        if (cmd === 'git worktree list --porcelain') {
+          return {
+            stdout:
+              `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\n` +
+              `worktree ${legacy}\nHEAD bbb\nbranch refs/heads/ship-it/9-x\n\n` +
+              `worktree ${manual}\nHEAD ccc\nbranch refs/heads/manual/foo\n\n`,
+          };
+        }
+        return { stdout: '' }; // status probe => clean
+      };
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+        { runCommand, octokit },
+      );
+      expect(report.removed).toHaveLength(1);
+      expect(report.removed[0].path).toBe(legacy);
+      expect(report.removed[0].reason).toBe('issue-parked');
+      expect(report.kept).toBe(0); // the manual worktree was never a candidate at all
+      expect(existsSync(manual)).toBe(true);
+      expect(issuesGet).toHaveBeenCalledTimes(1);
+    });
+
+    it('warns and falls back to the PR-state rules when the issue query throws', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-45`);
+
+      const { octokit } = fakeOctokit(
+        () => ({ data: [{ number: 9, state: 'open' }] }), // open PR ⇒ keep on the fallback path
+        () => {
+          throw new Error('rate limited');
+        },
+      );
+      const runCommand = async (cmd: string) => {
+        if (cmd === 'git worktree list --porcelain') {
+          return { stdout: laneListing(root, wt, 'ship-it/45-x') };
+        }
+        return { stdout: '' };
+      };
+
+      const logs: Array<[string, string]> = [];
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+        { runCommand, octokit, log: (type, msg) => logs.push([type, msg]) },
+      );
+      expect(report.removed).toHaveLength(0);
+      expect(report.kept).toBe(1);
+      expect(existsSync(wt)).toBe(true);
+      expect(logs.some(([type, msg]) => type === 'warn' && /issue query failed for #45/.test(msg))).toBe(true);
+    });
+
+    it('memoizes the issue probe across two worktrees of the same issue', async () => {
+      const { repoRoot: root } = setup();
+      const wtA = makeWorktree(`${basename(root)}-factory-ship-it-46`);
+      const wtB = makeWorktree(`${basename(root)}-ship-it-46`);
+
+      const { octokit, issuesGet } = fakeOctokit(
+        () => ({ data: [{ number: 9, state: 'open' }] }),
+        () => ({ data: { state: 'closed', labels: [] } }),
+      );
+      const runCommand = async (cmd: string) => {
+        if (cmd === 'git worktree list --porcelain') {
+          return {
+            stdout:
+              `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\n` +
+              `worktree ${wtA}\nHEAD bbb\nbranch refs/heads/ship-it/46-x\n\n` +
+              `worktree ${wtB}\nHEAD ccc\nbranch refs/heads/ship-it/46-y\n\n`,
+          };
+        }
+        return { stdout: '' };
+      };
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+        { runCommand, octokit },
+      );
+      expect(report.removed).toHaveLength(2);
+      expect(issuesGet).toHaveBeenCalledTimes(1);
+    });
+
+    it('honors a custom branch prefix when parsing lane issue numbers', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-lane-47`);
+
+      const { octokit, issuesGet } = fakeOctokit(
+        () => ({ data: [{ number: 9, state: 'open' }] }),
+        () => ({ data: { state: 'closed', labels: [] } }),
+      );
+      const runCommand = async (cmd: string) => {
+        if (cmd === 'git worktree list --porcelain') {
+          return { stdout: laneListing(root, wt, 'lane/47-custom') };
+        }
+        return { stdout: '' };
+      };
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy', branchPrefix: 'lane' },
+        { runCommand, octokit },
+      );
+      expect(report.removed).toHaveLength(1);
+      expect(report.removed[0].reason).toBe('issue-closed');
+      expect(issuesGet).toHaveBeenCalledWith({ owner: 'on-par', repo: 'sound-buddy', issue_number: 47 });
+    });
   });
 });
 
