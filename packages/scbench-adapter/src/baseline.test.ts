@@ -896,7 +896,7 @@ describe('generateBaselineReport', () => {
   it('renders "no trials" fallbacks across every section for zero trials', () => {
     const report = generateBaselineReport(config, []);
     expect(report).toContain('**Trial count:** 0 (comparison threshold: 10)');
-    expect(report).toContain('**Status: PRELIMINARY**');
+    expect(report).toContain('**Status: below comparison threshold**');
     expect(report).toContain('no trials recorded');
     expect(report).toContain('Not yet measurable — requires native SCBench evaluation evidence');
     expect(report).toContain('No trials recorded.');
@@ -904,16 +904,16 @@ describe('generateBaselineReport', () => {
     expect(report).toContain('No failures recorded.');
   });
 
-  it('shows the PRELIMINARY banner (with trial count + config scope) below threshold, and omits it at/above threshold', () => {
+  it('shows the below-threshold banner (with trial count + config scope) below threshold, and omits it at/above threshold', () => {
     const below = generateBaselineReport({ ...config, comparisonThreshold: 2 }, [trialAt('a')]);
-    expect(below).toContain('**Status: PRELIMINARY**');
-    expect(below).toContain('only 1 of the required 2 trials');
+    expect(below).toContain('**Status: below comparison threshold**');
+    expect(below).toContain('1 of the 2 trials per configuration needed for cross-configuration comparison');
     expect(below).toContain(config.baselineId);
     expect(below).toContain(config.factory.commit);
     expect(below).toContain(config.scbench.commit);
 
     const atThreshold = generateBaselineReport({ ...config, comparisonThreshold: 1 }, [trialAt('a')]);
-    expect(atThreshold).not.toContain('PRELIMINARY');
+    expect(atThreshold).not.toContain('below comparison threshold');
     expect(atThreshold).toContain('**Status: comparison-ready**');
   });
 
