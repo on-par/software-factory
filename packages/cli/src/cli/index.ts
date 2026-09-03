@@ -2697,19 +2697,26 @@ type RunLaneDeps = {
   /** Eager park-time worktree reap (#1007). Defaults to a no-op so injected-deps callers and
    *  tests are unaffected; cmdRun wires it to reapParkedLaneWorktree. */
   reapWorktree?: (issue: number) => Promise<void>;
+  /** Number of issues still claimable on this lane's remote queue (#1222). Absent for
+   *  static local lanes, whose pending list is the whole truth. */
+  countRemaining?: () => Promise<number>;
 };
 
 export interface PlannedLane {
   lane: string;
   /** Seed issues to work before claiming. Always empty in GitHub-queue mode. */
   issues: number[];
-  deps: Pick<RunLaneDeps, 'claimNext' | 'releaseIssue'>;
+  deps: Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'countRemaining'>;
 }
 
-export function laneQueueDeps(queue: GithubQueue, lane: string): Pick<RunLaneDeps, 'claimNext' | 'releaseIssue'> {
+export function laneQueueDeps(
+  queue: GithubQueue,
+  lane: string,
+): Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'countRemaining'> {
   return {
     claimNext: () => queue.claimNext(lane),
     releaseIssue: (issue, outcome) => queue.release(issue, outcome),
+    countRemaining: async () => (await queue.list(lane)).length,
   };
 }
 
@@ -2825,6 +2832,7 @@ export async function runLane(
     claimNext = async () => null,
     releaseIssue = async () => {},
     reapWorktree = async () => {},
+    countRemaining,
   } = deps;
   let merged = 0;
   let awaitingReview = 0;
@@ -2834,6 +2842,18 @@ export async function runLane(
   const buildClaim = (issue: number): QueueClaim => ({ issue, decision: { kind: 'build' } });
   const pending: QueueClaim[] = issues.map(buildClaim);
   const seen = new Set(issues);
+  // Truthful park-time remaining count (#1222): local pending plus the lane's still-queued
+  // remote issues. Fail-closed — a count lookup may never change the message beyond the
+  // local truth, and never lane flow.
+  const remainingAfter = async (index: number): Promise<number> => {
+    const local = pending.length - index - 1;
+    if (!countRemaining) return local;
+    try {
+      return local + (await countRemaining());
+    } catch {
+      return local;
+    }
+  };
   for (let i = 0; ; i++) {
     if (i >= pending.length) {
       const claimed = await claimNext();
@@ -2853,7 +2873,7 @@ export async function runLane(
         paths.events,
         'parked',
         issue,
-        `issue #${issue} parked (${decision.reason}); lane '${lane}' continuing, ${pending.length - i - 1} issue(s) remaining`,
+        `issue #${issue} parked (${decision.reason}); lane '${lane}' continuing, ${await remainingAfter(i)} issue(s) remaining`,
         { lane },
       );
       // A preflight-parked issue may still have a stale worktree from a prior run; the reap
@@ -2909,7 +2929,7 @@ export async function runLane(
         paths.events,
         'parked',
         issue,
-        `issue #${issue} parked (${reason}); lane '${lane}' continuing, ${pending.length - i - 1} issue(s) remaining`,
+        `issue #${issue} parked (${reason}); lane '${lane}' continuing, ${await remainingAfter(i)} issue(s) remaining`,
         { lane },
       );
       // Remove the parked lane's own worktree so a parked issue stops leaving a sibling
