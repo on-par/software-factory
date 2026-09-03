@@ -1,5 +1,5 @@
 // src/discovery/index.ts — Read-only discovery scan: rank candidate ideas from product signals
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, relative } from 'node:path';
 
 import { z } from 'zod';
@@ -69,6 +69,7 @@ const SOURCE_PRIORITY: Record<DiscoverySignalSource, number> = {
 
 const MAX_SCANNED_FILES = 2000; // guard against huge trees
 const MAX_FILE_BYTES = 512 * 1024; // skip large files
+const OPEN_ISSUES_TIMEOUT_MS = 2_000;
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.factory', 'coverage', '.turbo']);
 const TODO_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.md', '.mjs', '.cjs']);
 const STOPWORDS = new Set([
@@ -357,7 +358,12 @@ export async function runDiscoveryScan(
   deps: DiscoveryScanDeps = {},
 ): Promise<DiscoveryScanResult> {
   const now = deps.now ?? (() => new Date());
-  const run = deps.run ?? ((argv: readonly string[], o: { cwd: string }) => runCommand(argv, { cwd: o.cwd }));
+  const run =
+    deps.run ??
+    ((argv: readonly string[], o: { cwd: string }) =>
+      existsSync(join(o.cwd, '.git'))
+        ? runCommand(argv, { cwd: o.cwd, timeoutMs: OPEN_ISSUES_TIMEOUT_MS })
+        : Promise.resolve({ stdout: '', ok: false }));
   const cap = Math.max(0, Math.floor(options.maxCandidates ?? DEFAULT_MAX_CANDIDATES));
   const { repoDir } = options;
 

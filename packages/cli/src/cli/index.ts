@@ -197,7 +197,7 @@ import {
 import { runTui } from '@on-par/factory-tui';
 import chalk from 'chalk';
 import { Command } from 'commander';
-
+import { cmdDaemonLogs, cmdDaemonStart, cmdDaemonStatus, cmdDaemonStop, DaemonCtlError } from './daemon.js';
 import {
   analyzeEventLog,
   type ClaudeAuthProbe,
@@ -2438,9 +2438,8 @@ async function cmdProxy() {
 /** Runs factoryd in the foreground: a loopback-only HTTP server over the repo
  *  registry (~/.factory/registry.json) (#777). Owns the daemon runtime state
  *  next to the registry file — daemon.pid single-instance guard, daemon.port
- *  bound-address record, daemon.log append sink (#1177). Daemon supervision
- *  (launchd) and start|stop|status|logs verbs are the next slice; this command
- *  is the process. */
+ *  bound-address record, daemon.log append sink (#1177). `factory daemon
+ *  start|stop|status|logs` wrap this process in a launchd LaunchAgent (#1179). */
 async function cmdFactoryd(opts: { port?: string; registry?: string }): Promise<void> {
   const registryFile = opts.registry ?? defaultRegistryPath();
   const port = opts.port === undefined ? DEFAULT_FACTORYD_PORT : Number(opts.port);
@@ -4267,6 +4266,29 @@ export async function main() {
     .option('--port <n>', `port to bind on 127.0.0.1 (default ${DEFAULT_FACTORYD_PORT})`)
     .option('--registry <file>', 'registry file to serve (default ~/.factory/registry.json)')
     .action((opts: { port?: string; registry?: string }) => cmdFactoryd(opts));
+  const daemonCtl = (fn: () => Promise<void>) =>
+    fn().catch((err: unknown) => {
+      if (err instanceof DaemonCtlError) throw new CliExitError(err.message, err.code);
+      throw err;
+    });
+  daemonCmd
+    .command('start')
+    .description('Install + load the com.onpar.factoryd LaunchAgent (KeepAlive, RunAtLoad)')
+    .action(() => daemonCtl(() => cmdDaemonStart()));
+  daemonCmd
+    .command('stop')
+    .description('Unload the LaunchAgent (plist stays installed)')
+    .action(() => daemonCtl(() => cmdDaemonStop()));
+  daemonCmd
+    .command('status')
+    .description('Report factoryd pid, uptime, and attached repos')
+    .action(() => daemonCtl(() => cmdDaemonStatus()));
+  daemonCmd
+    .command('logs')
+    .description('Print/tail ~/.factory/daemon.log')
+    .option('-f, --follow', 'keep tailing')
+    .option('-n, --lines <n>', 'lines to print first (default 100)')
+    .action((opts: { follow?: boolean; lines?: string }) => daemonCtl(() => cmdDaemonLogs(opts)));
 
   const worktreeCmd = program.command('worktree').description('Worktree maintenance');
   worktreeCmd
