@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { execa } from 'execa';
 
 import { AdapterError } from './checkpoint.js';
+import { WORKSPACE_CONSTITUTION } from './workspace-constitution.js';
 
 export interface ExecResult {
   exitCode: number;
@@ -67,9 +68,11 @@ function readIfPresent(path: string): string {
 
 /** Idempotent: git-inits (with an initial commit) only when .git is absent,
  *  ensures .factory/{,logs,plans} exist without requiring `factory init` or
- *  a GitHub token, and excludes .factory/ plus transient benchmark/runtime
- *  artifacts (bytecode, test-tool caches) via .git/info/exclude so neither
- *  Factory state nor cache churn pollutes SCBench's evaluation or diffs. */
+ *  a GitHub token, pins .factory/config.json to providers.ollama=false when
+ *  absent, (re)writes the factory-authored constitution (#1184), and excludes
+ *  .factory/ plus transient benchmark/runtime artifacts via
+ *  .git/info/exclude so neither Factory state nor cache churn pollutes
+ *  SCBench's evaluation or diffs. */
 export async function prepareWorkspace(dir: string, deps: WorkspaceDeps): Promise<void> {
   if (!existsSync(join(dir, '.git'))) {
     const init = await deps.exec(['git', 'init'], { cwd: dir });
@@ -89,6 +92,20 @@ export async function prepareWorkspace(dir: string, deps: WorkspaceDeps): Promis
   for (const sub of ['.factory', '.factory/logs', '.factory/plans']) {
     mkdirSync(join(dir, sub), { recursive: true });
   }
+
+  const configPath = join(dir, '.factory', 'config.json');
+  try {
+    writeFileSync(configPath, `${JSON.stringify({ version: 1, providers: { ollama: false } }, null, 2)}\n`, {
+      flag: 'wx',
+    });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+  }
+
+  // Always (re)write the factory-authored standards so the nested factory
+  // run injects them into every phase (loadRepoConstitution reads this
+  // path); .factory/ is git-excluded, so it never reaches SCBench diffs.
+  writeFileSync(join(dir, '.factory', 'constitution.md'), WORKSPACE_CONSTITUTION);
 
   const excludeFile = join(dir, '.git', 'info', 'exclude');
   const existing = readIfPresent(excludeFile);

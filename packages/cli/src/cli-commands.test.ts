@@ -1,3 +1,4 @@
+import type * as ChildProcess from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -554,7 +555,7 @@ describe('cli commands (via main dispatch)', () => {
     });
 
     it('is idempotent: a second run without --force leaves an existing config untouched', async () => {
-      const sentinel = '{"version":2,"models":{"plan":"x"}}';
+      const sentinel = '{"version":2,"models":{"pins":{"plan":"x"}}}';
       writeFileSync(paths().config, sentinel);
       await runMain('init');
       expect(readFileSync(paths().config, 'utf-8')).toBe(sentinel);
@@ -562,7 +563,7 @@ describe('cli commands (via main dispatch)', () => {
     });
 
     it('--force overwrites an existing config', async () => {
-      writeFileSync(paths().config, '{"version":2,"models":{"plan":"x"}}');
+      writeFileSync(paths().config, '{"version":2,"models":{"pins":{"plan":"x"}}}');
       await runMain('init', '--force');
       expect(readFileSync(paths().config, 'utf-8')).toBe(buildInitConfig());
     });
@@ -1724,20 +1725,36 @@ bash scripts/verify.sh
         }),
       );
 
-      const runPromise = runMain('daemon', '--port', '0', '--registry', registryFile);
+      const runPromise = runMain('daemon', 'run', '--port', '0', '--registry', registryFile);
       while (!logged().includes('listening on 127.0.0.1:')) {
         await new Promise((r) => setTimeout(r, 5));
       }
       expect(logged()).toContain(registryFile);
+
+      // Runtime state lives in dirname(registryFile) while the daemon is up (#1177).
+      const pidFile = join(paths().state, 'daemon.pid');
+      const portFile = join(paths().state, 'daemon.port');
+      const logFile = join(paths().state, 'daemon.log');
+      const boundPort = Number(/listening on 127\.0\.0\.1:(\d+)/.exec(logged())![1]);
+      expect(readFileSync(pidFile, 'utf-8').trim()).toBe(String(process.pid));
+      expect(JSON.parse(readFileSync(portFile, 'utf-8'))).toEqual({
+        pid: process.pid,
+        port: boundPort,
+        host: '127.0.0.1',
+      });
+
       process.emit('SIGINT');
       const res = await runPromise;
 
       expect(res.exited).toBe(true);
       expect(res.code).toBe(0);
+      expect(existsSync(pidFile)).toBe(false);
+      expect(existsSync(portFile)).toBe(false);
+      expect(readFileSync(logFile, 'utf-8')).toContain(`factoryd: listening on 127.0.0.1:${boundPort}`);
     });
 
     it('exits with code 2 on an invalid --port and never binds', async () => {
-      const res = await runMain('daemon', '--port', 'abc');
+      const res = await runMain('daemon', 'run', '--port', 'abc');
       expect(res.exited).toBe(true);
       expect(res.code).toBe(2);
       expect(logged()).not.toContain('listening on');
@@ -1764,6 +1781,44 @@ bash scripts/verify.sh
       const res = await runMain('daemon', 'status');
       expect(res.exited).toBe(true);
       expect(res.code).toBe(2);
+    });
+
+    it('refuses to start when a live daemon holds the pid file, leaving it untouched', async () => {
+      const registryFile = join(paths().state, 'registry.json');
+      const pidFile = join(paths().state, 'daemon.pid');
+      // The test process itself is alive by construction.
+      writeFileSync(pidFile, `${process.pid}\n`);
+
+      const res = await runMain('daemon', 'run', '--port', '0', '--registry', registryFile);
+
+      expect(res.exited).toBe(true);
+      expect(res.code).toBe(2);
+      expect(errored()).toContain(`factoryd already running (pid ${process.pid})`);
+      expect(readFileSync(pidFile, 'utf-8')).toBe(`${process.pid}\n`);
+      expect(logged()).not.toContain('listening on');
+    });
+
+    it('a stale pid file from a killed daemon does not block a restart', async () => {
+      const registryFile = join(paths().state, 'registry.json');
+      writeFileSync(registryFile, JSON.stringify({ version: 1, repos: {} }));
+      const pidFile = join(paths().state, 'daemon.pid');
+      // A real (bypassing the module mock) short-lived child yields a pid that
+      // is guaranteed dead once spawnSync returns.
+      const { spawnSync } = await vi.importActual<typeof ChildProcess>('node:child_process');
+      const deadPid = spawnSync(process.execPath, ['-e', '']).pid;
+      writeFileSync(pidFile, `${deadPid}\n`);
+
+      const runPromise = runMain('daemon', 'run', '--port', '0', '--registry', registryFile);
+      while (!logged().includes('listening on 127.0.0.1:')) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      expect(logged()).toContain(`removed stale pid file (pid ${deadPid})`);
+      expect(readFileSync(pidFile, 'utf-8').trim()).toBe(String(process.pid));
+
+      process.emit('SIGINT');
+      const res = await runPromise;
+      expect(res.exited).toBe(true);
+      expect(res.code).toBe(0);
     });
   });
 
@@ -3079,7 +3134,7 @@ describe('shipIssue (direct)', () => {
     writeFileSync(paths().config, JSON.stringify({ version: 1, providers: { ollama: false } }));
     await shipIssue(5, {}, ctx());
     expect(vi.mocked(core.loadRepoConfig).mock.results.at(-1)?.value).toEqual({
-      version: 1,
+      version: 2,
       providers: { ollama: false },
     });
   });

@@ -1,4 +1,4 @@
-# ADR-0076: factory daemon wraps launchd in the gui domain, and start is a full reinstall
+# ADR-0084: factory daemon wraps launchd in the gui domain, and start is a full reinstall
 
 - Status: Accepted
 - Date: 2026-09-02

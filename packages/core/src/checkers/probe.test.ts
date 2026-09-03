@@ -8,10 +8,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   countPlaceholderLinks,
+  detectPythonTestSurface,
   fileExists,
   findHtmlFiles,
   type PackageJsonProbe,
   probeWorktree,
+  type PythonTestSurface,
+  type PythonTestSurfaceSource,
   type WorktreeProbe,
 } from './index.js';
 
@@ -59,6 +62,18 @@ describe('probeWorktree', () => {
       'playwright.config.ts': 'export default { use: { headless: false } };\n',
     });
     expect(probe.scripts).toEqual({ build: 'tsc', e2e: 'playwright test' });
+    expect(probe.pythonTestSurface).toEqual({ present: false, sources: [] });
+  });
+
+  it('carries the Python test-surface fact when config and convention surfaces exist', async () => {
+    const worktree = await makeWorktree({
+      'pyproject.toml': '[project]\nname = "x"\n\n[tool.pytest.ini_options]\ntestpaths = ["tests"]\n',
+      'tests/test_x.py': 'def test_x(): pass\n',
+    });
+
+    const probe = await probeWorktree(worktree);
+
+    expect(probe.pythonTestSurface).toEqual({ present: true, sources: ['pyproject.toml', 'tests/'] });
   });
 
   it('reports absent package.json with no scripts', async () => {
@@ -104,6 +119,94 @@ describe('probeWorktree', () => {
     expect(probe.playwrightConfigFiles).toEqual(['playwright.config.ts', 'playwright.config.js']);
     expect(probe.playwrightConfigContents['playwright.config.ts']).toContain('headless: false');
     expect(probe.playwrightConfigContents['playwright.config.js']).toContain('export default');
+  });
+});
+
+describe('detectPythonTestSurface', () => {
+  it('detects a pyproject.toml with a [tool.pytest.ini_options] section', async () => {
+    const worktree = await makeWorktree({
+      'pyproject.toml': '[project]\nname = "x"\n\n[tool.pytest.ini_options]\ntestpaths = ["tests"]\n',
+    });
+
+    expect(await detectPythonTestSurface(worktree)).toEqual({ present: true, sources: ['pyproject.toml'] });
+  });
+
+  it('ignores a pyproject.toml without the pytest section', async () => {
+    const worktree = await makeWorktree({ 'pyproject.toml': '[project]\nname = "x"\n' });
+
+    expect(await detectPythonTestSurface(worktree)).toEqual({ present: false, sources: [] });
+  });
+
+  it('detects pytest.ini by existence alone', async () => {
+    const worktree = await makeWorktree({ 'pytest.ini': '[pytest]\n' });
+
+    expect(await detectPythonTestSurface(worktree)).toEqual({ present: true, sources: ['pytest.ini'] });
+  });
+
+  it('detects a setup.cfg with a [tool:pytest] section but not one without it', async () => {
+    const withSection = await makeWorktree({ 'setup.cfg': '[metadata]\nname = x\n\n[tool:pytest]\n' });
+    const withoutSection = await makeWorktree({ 'setup.cfg': '[metadata]\nname = x\n' });
+
+    expect(await detectPythonTestSurface(withSection)).toEqual({ present: true, sources: ['setup.cfg'] });
+    expect(await detectPythonTestSurface(withoutSection)).toEqual({ present: false, sources: [] });
+  });
+
+  it('detects a tox.ini with a [pytest] section but not one without it', async () => {
+    const withSection = await makeWorktree({ 'tox.ini': '[tox]\nenvlist = py312\n\n[pytest]\n' });
+    const withoutSection = await makeWorktree({ 'tox.ini': '[tox]\nenvlist = py312\n' });
+
+    expect(await detectPythonTestSurface(withSection)).toEqual({ present: true, sources: ['tox.ini'] });
+    expect(await detectPythonTestSurface(withoutSection)).toEqual({ present: false, sources: [] });
+  });
+
+  it('detects a tests/ directory with test_*.py files, including nested ones', async () => {
+    const flat = await makeWorktree({ 'tests/test_app.py': 'def test_x(): pass\n' });
+    const nested = await makeWorktree({ 'tests/unit/test_deep.py': 'def test_y(): pass\n' });
+    const noTests = await makeWorktree({ 'tests/helper.py': 'def helper(): pass\n' });
+
+    expect(await detectPythonTestSurface(flat)).toEqual({ present: true, sources: ['tests/'] });
+    expect(await detectPythonTestSurface(nested)).toEqual({ present: true, sources: ['tests/'] });
+    expect(await detectPythonTestSurface(noTests)).toEqual({ present: false, sources: [] });
+  });
+
+  it('detects the ADR-0081-decided .factory/tests/ location as a Python test surface', async () => {
+    const worktree = await makeWorktree({ '.factory/tests/test_x.py': 'def test_x(): pass\n' });
+
+    const surface = await detectPythonTestSurface(worktree);
+
+    expect(surface).toEqual({ present: true, sources: ['.factory/tests/'] });
+  });
+
+  it('detects top-level test_*.py files', async () => {
+    const worktree = await makeWorktree({ 'test_main.py': 'def test_main(): pass\n' });
+
+    expect(await detectPythonTestSurface(worktree)).toEqual({ present: true, sources: ['test_*.py'] });
+  });
+
+  it('reports multiple surfaces in canonical order', async () => {
+    const worktree = await makeWorktree({
+      'pyproject.toml': '[tool.pytest.ini_options]\n',
+      'tests/test_a.py': 'def test_a(): pass\n',
+    });
+
+    const surface: PythonTestSurface = await detectPythonTestSurface(worktree);
+    const expectedSources: PythonTestSurfaceSource[] = ['pyproject.toml', 'tests/'];
+    expect(surface).toEqual({ present: true, sources: expectedSources });
+  });
+
+  it('reports no surface for a plain workspace', async () => {
+    const worktree = await makeWorktree({ 'main.py': 'print(1)\n', 'README.md': '# x' });
+
+    expect(await detectPythonTestSurface(worktree)).toEqual({ present: false, sources: [] });
+  });
+
+  it('skips generated and venv directories when walking tests/', async () => {
+    const worktree = await makeWorktree({
+      'tests/__pycache__/test_cached.py': 'def test_x(): pass\n',
+      'tests/.venv/test_vendored.py': 'def test_y(): pass\n',
+    });
+
+    expect(await detectPythonTestSurface(worktree)).toEqual({ present: false, sources: [] });
   });
 });
 

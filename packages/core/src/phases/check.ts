@@ -160,6 +160,11 @@ async function checkPhaseImpl(opts: {
    *  #740). When round one's signature matches, the rework loop is skipped entirely
    *  instead of re-burning a full budget against an unfixed root cause. */
   priorFailureSignature?: string;
+  /** Fallback diff base for workerOutputChecker and designSmellsChecker in checkouts
+   *  with no remote base ref (#1211, #1212). For localOnly runs this is the run-start
+   *  HEAD captured once in runIssue before PLAN (#1210); otherwise it is buildPhase's
+   *  pre-worker HEAD. */
+  diffBase?: string;
   /** Worker route that completed BUILD; direct callers retain Claude rework by default. */
   reworkRoute?: 'codex' | 'claude' | 'opencode';
   /** Worker model that completed BUILD, retained as the compatible rework override. */
@@ -186,12 +191,20 @@ async function checkPhaseImpl(opts: {
     appBaseUrl,
     onPgid,
     priorFailureSignature,
+    diffBase,
     reworkRoute,
     reworkModel,
   } = opts;
 
   let probe = await probeWorktree(worktree);
-  const ctx: CheckerContext = { worktree, specPath, env: laneEnv(appPort, process.env, appBaseUrl), onPgid, probe };
+  const ctx: CheckerContext = {
+    worktree,
+    specPath,
+    diffBase,
+    env: laneEnv(appPort, process.env, appBaseUrl),
+    onPgid,
+    probe,
+  };
 
   if (appPort === undefined) {
     const signal = detectLiveAppSignal(probe);

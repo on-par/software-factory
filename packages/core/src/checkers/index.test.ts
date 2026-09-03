@@ -10,6 +10,7 @@ import { ConstitutionLoader } from '../constitutions/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import type { Constitution } from '../types/index.js';
+import type { CommandResult } from '../utils/command-runner.js';
 import {
   accessibilityChecker,
   type CheckerContext,
@@ -79,6 +80,25 @@ function makeContext(worktree: string): CheckerContext {
     specPath: join(worktree, 'no-such-spec.md'),
     constitutionBody: 'test constitution',
   };
+}
+
+/** Injected command runner that records argv per call and returns a canned CommandResult. */
+function stubRunner(result: Partial<CommandResult>) {
+  const calls: (readonly string[])[] = [];
+  const run = async (argv: readonly string[]) => {
+    calls.push(argv);
+    return {
+      command: argv,
+      stdout: '',
+      stderr: '',
+      exitCode: 1,
+      killed: false,
+      timedOut: false,
+      ok: false,
+      ...result,
+    };
+  };
+  return { run, calls };
 }
 
 function makeRouter(output: string): { router: ModelRouter; stub: StubModelExecutor } {
@@ -260,6 +280,71 @@ describe('testsChecker', () => {
     expect(result.result).toBe('FAIL');
     expect(result.details).toContain('requireTests');
     expect(result.details).toContain('no verification command was run');
+    expect(result.details).toContain('pytest');
+  });
+
+  it('fails closed when the pytest surface exists but pytest cannot run', async () => {
+    const worktree = await makeWorktree({ 'pytest.ini': '[pytest]\n' });
+    const { run, calls } = stubRunner({ ok: false, exitCode: 1, stderr: '/usr/bin/python3: No module named pytest' });
+
+    const result = await testsChecker({ ...makeContext(worktree), runCommand: run });
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain('No module named pytest');
+    expect(calls[0]).toEqual(['python3', '-m', 'pytest']);
+  });
+
+  it('fails with the stderr excerpt when the pytest suite hits an import error', async () => {
+    const worktree = await makeWorktree({ 'pytest.ini': '[pytest]\n' });
+    const { run } = stubRunner({
+      ok: false,
+      exitCode: 2,
+      stderr: "ImportError: cannot import name 'parse' from 'cfgpipe'",
+    });
+
+    const result = await testsChecker({ ...makeContext(worktree), runCommand: run });
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain('ImportError');
+  });
+
+  it('passes when the pytest run is green', async () => {
+    const worktree = await makeWorktree({ 'pytest.ini': '[pytest]\n' });
+    const { run } = stubRunner({ ok: true, exitCode: 0 });
+
+    const result = await testsChecker({ ...makeContext(worktree), runCommand: run });
+
+    expect(result.result).toBe('PASS');
+    expect(result.details).toContain('pytest');
+  });
+
+  it('detects and runs pytest from the ADR-decided .factory/tests/ location', async () => {
+    const worktree = await makeWorktree({ '.factory/tests/test_x.py': 'def test_x(): pass\n' });
+    const { run, calls } = stubRunner({ ok: true, exitCode: 0 });
+
+    const result = await testsChecker({ ...makeContext(worktree), runCommand: run });
+
+    expect(result.result).toBe('PASS');
+    expect(calls[0]).toEqual(['python3', '-m', 'pytest', '.factory/tests']);
+    expect(result.details).toContain('pytest');
+  });
+
+  it('prefers the probe-time pytest surface over re-walking the disk', async () => {
+    const worktree = await makeWorktree();
+    const probe: WorktreeProbe = {
+      packageJson: { status: 'loaded', value: { scripts: {} } },
+      htmlFiles: [],
+      playwrightConfigFiles: [],
+      playwrightConfigContents: {},
+      scripts: {},
+      pythonTestSurface: { present: true, sources: ['pytest.ini'] },
+    };
+    const { run } = stubRunner({ ok: true, exitCode: 0 });
+
+    const result = await testsChecker({ ...makeContext(worktree), probe, runCommand: run });
+
+    expect(result.result).toBe('PASS');
+    expect(result.details).toContain('pytest');
   });
 
   it('still passes when testsRequired is set and scripts/verify.sh succeeds', async () => {
@@ -1024,6 +1109,7 @@ describe('runAllCheckers', () => {
         playwrightConfigFiles: [],
         playwrightConfigContents: {},
         scripts: {},
+        pythonTestSurface: { present: false, sources: [] },
       };
       const probeWorktreeMock = vi.fn(async () => probe);
       const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { materializeBrief, materializeRetryBrief } from './brief.js';
 import type { ScbenchCheckpoint } from './checkpoint.js';
+import { findLeakedValues } from './leak-guard.js';
 import type { ScbenchRetryContext } from './retry-context.js';
 
 const CHECKPOINT: ScbenchCheckpoint = {
@@ -26,7 +27,21 @@ describe('materializeBrief', () => {
   it('includes a non-empty acceptance criteria section', () => {
     const brief = materializeBrief(CHECKPOINT);
     expect(brief).toContain('## Acceptance criteria');
-    expect(brief).toContain('- The workspace implements the checkpoint specification above');
+    expect(brief).toContain('- Every example in the specification above reproduces exactly.');
+  });
+
+  it('acceptance criteria are generic and spec-derived', () => {
+    const brief = materializeBrief(CHECKPOINT);
+    expect(brief).toContain('## Acceptance criteria');
+    expect(brief).toContain('Every example in the specification above reproduces exactly.');
+    expect(brief).toContain('Behaviour from earlier checkpoints is preserved.');
+    expect(brief).toContain("The workspace's test suite passes.");
+  });
+
+  it('no longer states the tautological hidden-evaluation line', () => {
+    const brief = materializeBrief(CHECKPOINT);
+    expect(brief).not.toMatch(/hidden evaluation for checkpoint/i);
+    expect(brief).not.toContain('SlopCodeBench');
   });
 
   it('round-trips through createLocalBriefAdapter (#507 validation)', async () => {
@@ -38,7 +53,7 @@ describe('materializeBrief', () => {
 
     expect(request.title).toBe('SCBench calculator — checkpoint 2');
     expect(request.brief).toContain(CHECKPOINT.task);
-    expect(request.acceptanceCriteria.length).toBeGreaterThanOrEqual(1);
+    expect(request.acceptanceCriteria.length).toBeGreaterThanOrEqual(3);
   });
 
   it('embeds a task that itself contains an H1 without breaking the title', async () => {
@@ -107,7 +122,28 @@ describe('materializeRetryBrief', () => {
     const brief = materializeRetryBrief(CHECKPOINT, RETRY_CONTEXT);
 
     expect(brief).toContain('## Acceptance criteria');
-    expect(brief).toContain('- The workspace fixes the failing tests listed above');
+    expect(brief).toContain('- Every example in the specification above reproduces exactly.');
+    expect(brief).toContain('- Behaviour from earlier checkpoints is preserved.');
+    expect(brief).toContain("- The workspace's test suite passes.");
+    expect(brief).toContain('- The failing tests listed above pass.');
+  });
+
+  it('retry brief keeps the failing-test list and adds the generic bullets', () => {
+    const brief = materializeRetryBrief(CHECKPOINT, RETRY_CONTEXT);
+
+    // failing-test list unchanged
+    expect(brief).toContain('## Previous attempt failed SCBench evaluation');
+    expect(brief).toContain('Pass policy `core-cases`; pytest exit code 1.');
+    expect(brief).toContain('Failing tests that must pass:');
+    expect(brief).toContain('- checkpoint_2-Core: test_subtract_negative');
+    expect(brief).toContain('- checkpoint_2-Error: test_subtract_type_error');
+
+    // generic bullets added
+    expect(brief).toContain('## Acceptance criteria');
+    expect(brief).toContain('- Every example in the specification above reproduces exactly.');
+    expect(brief).toContain('- Behaviour from earlier checkpoints is preserved.');
+    expect(brief).toContain("- The workspace's test suite passes.");
+    expect(brief).toContain('- The failing tests listed above pass.');
   });
 
   it('round-trips through createLocalBriefAdapter (#507 validation)', async () => {
@@ -119,6 +155,37 @@ describe('materializeRetryBrief', () => {
 
     expect(request.title).toBe('SCBench calculator — checkpoint 2 (rework)');
     expect(request.brief).toContain(CHECKPOINT.task);
-    expect(request.acceptanceCriteria.length).toBeGreaterThanOrEqual(1);
+    expect(request.acceptanceCriteria.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+const HIDDEN_TEST_NAME = 'test_hidden_evaluation_case';
+const HIDDEN_PROBLEM_ID = 'hidden-eval-problem-id';
+const HIDDEN = { testNames: [HIDDEN_TEST_NAME], problemIds: [HIDDEN_PROBLEM_ID] };
+
+const PLACEHOLDER_CHECKPOINT: ScbenchCheckpoint = {
+  problemId: 'placeholder-problem',
+  checkpointId: '1',
+  index: 0,
+  task: 'Placeholder task text for the leak-guard fixture.',
+};
+
+const PLACEHOLDER_RETRY_CONTEXT: ScbenchRetryContext = {
+  problemId: 'placeholder-problem',
+  checkpointId: '1',
+  passPolicy: 'core-cases',
+  pytestExitCode: 1,
+  failedTests: [{ group: 'checkpoint_1-Core', name: 'test_placeholder_visible_failure' }],
+};
+
+describe('brief leak guard', () => {
+  it('materializeBrief templates leak no retained hidden-test name or problem id', () => {
+    const brief = materializeBrief(PLACEHOLDER_CHECKPOINT);
+    expect(findLeakedValues(brief, HIDDEN)).toEqual([]);
+  });
+
+  it('materializeRetryBrief templates leak no retained hidden-test name or problem id', () => {
+    const brief = materializeRetryBrief(PLACEHOLDER_CHECKPOINT, PLACEHOLDER_RETRY_CONTEXT);
+    expect(findLeakedValues(brief, HIDDEN)).toEqual([]);
   });
 });

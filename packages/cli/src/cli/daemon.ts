@@ -254,12 +254,15 @@ export async function cmdDaemonLogs(
     throw new DaemonCtlError(`invalid --lines "${opts.lines}" — expected a non-negative integer`, 2);
   }
 
-  if (!existsSync(logPath)) {
+  let initial: string;
+  try {
+    initial = readFileSync(logPath, 'utf-8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
     d.out.write(`no daemon log yet at ${logPath} — is the daemon started?\n`);
     return;
   }
 
-  const initial = readFileSync(logPath, 'utf-8');
   const tail = lastLines(initial, n);
   if (tail.length > 0) d.out.write(tail.join('\n') + '\n');
   if (!opts.follow) return;
