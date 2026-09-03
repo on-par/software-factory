@@ -318,6 +318,17 @@ describe('testsChecker', () => {
     expect(result.details).toContain('pytest');
   });
 
+  it('detects and runs pytest from the ADR-decided .factory/tests/ location', async () => {
+    const worktree = await makeWorktree({ '.factory/tests/test_x.py': 'def test_x(): pass\n' });
+    const { run, calls } = stubRunner({ ok: true, exitCode: 0 });
+
+    const result = await testsChecker({ ...makeContext(worktree), runCommand: run });
+
+    expect(result.result).toBe('PASS');
+    expect(calls[0]).toEqual(['python3', '-m', 'pytest', '.factory/tests']);
+    expect(result.details).toContain('pytest');
+  });
+
   it('prefers the probe-time pytest surface over re-walking the disk', async () => {
     const worktree = await makeWorktree();
     const probe: WorktreeProbe = {

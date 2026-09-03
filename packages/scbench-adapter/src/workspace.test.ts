@@ -263,4 +263,15 @@ describe('createExecaExec', () => {
     expect(result.exitCode).toBe(-1);
     expect(result.stderr.length).toBeGreaterThan(0);
   });
+
+  it('git check-ignore confirms the existing .factory/ entry already excludes .factory/tests/', async () => {
+    const exec = createExecaExec();
+    await prepareWorkspace(dir, { exec });
+    mkdirSync(join(dir, '.factory', 'tests'), { recursive: true });
+    writeFileSync(join(dir, '.factory', 'tests', 'test_x.py'), 'def test_x(): pass\n');
+
+    const result = await exec(['git', 'check-ignore', '.factory/tests/test_x.py'], { cwd: dir });
+
+    expect(result.exitCode).toBe(0);
+  });
 });

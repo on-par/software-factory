@@ -14,7 +14,7 @@ export type PackageJsonProbe =
 
 /** Where a Python test surface was found — config-declared names are the file, convention names the location. */
 export type PythonTestSurfaceSource =
-  'pyproject.toml' | 'pytest.ini' | 'setup.cfg' | 'tox.ini' | 'tests/' | 'test_*.py';
+  'pyproject.toml' | 'pytest.ini' | 'setup.cfg' | 'tox.ini' | 'tests/' | '.factory/tests/' | 'test_*.py';
 
 /** Probe-time fact: does this workspace have a pytest surface, and where (#1217). */
 export interface PythonTestSurface {
@@ -106,6 +106,8 @@ export async function detectPythonTestSurface(worktree: string): Promise<PythonT
   if (hasIniSection(toxIni, '[pytest]')) sources.push('tox.ini');
 
   if (await containsPythonTestFile(join(worktree, 'tests'))) sources.push('tests/');
+
+  if (await containsPythonTestFile(join(worktree, '.factory/tests'))) sources.push('.factory/tests/');
 
   const topLevel = await readdir(worktree, { withFileTypes: true }).catch(() => []);
   if (topLevel.some((entry) => entry.isFile() && PYTHON_TEST_FILE.test(entry.name))) sources.push('test_*.py');
