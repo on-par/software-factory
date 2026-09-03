@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 
+import { DIFF_EXCLUDES } from '../checkers/design-smells.js';
 import type { CheckSummary, CostEntry, FactoryEvent, FailurePhase } from '../types/index.js';
 import { readCosts } from '../utils/index.js';
 import type { WorkRequest } from '../work/index.js';
@@ -15,6 +16,10 @@ type ReportRun = (
   command: string,
   opts: { cwd: string; timeout: number; maxBuffer: number },
 ) => Promise<{ stdout: string; stderr: string }>;
+
+/** Shell-quoted pathspec suffix that excludes cache/lock-file churn from every
+ *  diff/status invocation feeding diff.patch or changedFiles (#1244). */
+const DIFF_EXCLUDE_PATHSPEC = `-- . ${DIFF_EXCLUDES.map((p) => `'${p}'`).join(' ')}`;
 
 /** Bump when the manifest schema changes in a way #510 needs to detect. */
 export const BENCHMARK_MANIFEST_VERSION = 1;
@@ -231,7 +236,11 @@ function nameStatusPathsFrom(output: string): string[] {
 
 async function readChangedFiles(workspace: string, run: ReportRun): Promise<string[]> {
   try {
-    const result = await run('git status --short', { cwd: workspace, timeout: 30_000, maxBuffer: 1024 * 1024 });
+    const result = await run(`git status --short ${DIFF_EXCLUDE_PATHSPEC}`, {
+      cwd: workspace,
+      timeout: 30_000,
+      maxBuffer: 1024 * 1024,
+    });
     return statusPathsFrom(result.stdout);
   } catch {
     return [];
@@ -244,17 +253,17 @@ async function readDiff(
   capturedDiffBase?: string,
 ): Promise<{ diffStat: string; diffPatch: string; diffBase: string; changedFiles: string[] }> {
   try {
-    const stat = await run('git diff --stat origin/main...HEAD', {
+    const stat = await run(`git diff --stat origin/main...HEAD ${DIFF_EXCLUDE_PATHSPEC}`, {
       cwd: workspace,
       timeout: 30_000,
       maxBuffer: 1024 * 1024,
     });
-    const patch = await run('git diff origin/main...HEAD', {
+    const patch = await run(`git diff origin/main...HEAD ${DIFF_EXCLUDE_PATHSPEC}`, {
       cwd: workspace,
       timeout: 30_000,
       maxBuffer: 1024 * 1024,
     });
-    const nameStatus = await run('git diff --name-status origin/main...HEAD', {
+    const nameStatus = await run(`git diff --name-status origin/main...HEAD ${DIFF_EXCLUDE_PATHSPEC}`, {
       cwd: workspace,
       timeout: 30_000,
       maxBuffer: 1024 * 1024,
@@ -268,17 +277,17 @@ async function readDiff(
   } catch {
     if (capturedDiffBase && /^[0-9a-f]{4,64}$/i.test(capturedDiffBase)) {
       try {
-        const stat = await run(`git diff --stat ${capturedDiffBase}..HEAD`, {
+        const stat = await run(`git diff --stat ${capturedDiffBase}..HEAD ${DIFF_EXCLUDE_PATHSPEC}`, {
           cwd: workspace,
           timeout: 30_000,
           maxBuffer: 1024 * 1024,
         });
-        const patch = await run(`git diff ${capturedDiffBase}..HEAD`, {
+        const patch = await run(`git diff ${capturedDiffBase}..HEAD ${DIFF_EXCLUDE_PATHSPEC}`, {
           cwd: workspace,
           timeout: 30_000,
           maxBuffer: 1024 * 1024,
         });
-        const nameStatus = await run(`git diff --name-status ${capturedDiffBase}..HEAD`, {
+        const nameStatus = await run(`git diff --name-status ${capturedDiffBase}..HEAD ${DIFF_EXCLUDE_PATHSPEC}`, {
           cwd: workspace,
           timeout: 30_000,
           maxBuffer: 1024 * 1024,
@@ -301,7 +310,11 @@ async function readDiff(
  *  captured by the committed-range diff. */
 async function readUncommittedDiff(workspace: string, run: ReportRun): Promise<string> {
   try {
-    const result = await run('git diff', { cwd: workspace, timeout: 30_000, maxBuffer: 1024 * 1024 });
+    const result = await run(`git diff ${DIFF_EXCLUDE_PATHSPEC}`, {
+      cwd: workspace,
+      timeout: 30_000,
+      maxBuffer: 1024 * 1024,
+    });
     return result.stdout;
   } catch {
     return '';
