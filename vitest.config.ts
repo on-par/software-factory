@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url';
+
 import { configDefaults, defineConfig } from 'vitest/config';
 
 /**
@@ -18,7 +20,16 @@ const INTEGRATION_GLOB = '**/*.integration.test.{ts,tsx}';
 const integrationOnly = process.env.FACTORY_INTEGRATION_TESTS === '1';
 
 export default defineConfig({
+  // Pin the project root to this config's directory. Without it, vitest run
+  // from inside a workspace package (npm test --workspace packages/<name>)
+  // resolves the include globs against that package's cwd and finds zero
+  // test files — the packages/core "test script" agent trap in AGENTS.md.
+  root: fileURLToPath(new URL('.', import.meta.url)),
   test: {
+    // Coverage instrumentation across the monorepo is memory-intensive. Keep
+    // files serial so the required full-suite check stays within CI's heap
+    // limit instead of loading several instrumented workspace graphs at once.
+    fileParallelism: false,
     // Discover tests across all workspaces in one run so coverage aggregates.
     include: [integrationOnly ? `packages/*/src/${INTEGRATION_GLOB}` : 'packages/*/src/**/*.test.{ts,tsx}'],
     exclude: integrationOnly ? configDefaults.exclude : [...configDefaults.exclude, INTEGRATION_GLOB],
@@ -65,11 +76,11 @@ export default defineConfig({
         // branches: measured 88.72 on main both with and without the integration
         // suites — this floor was already unmet before #755 touched anything, and
         // moving the integration suites to nightly does not change any metric here.
-        'packages/cli/src/**/*.{ts,tsx}': { lines: 97, functions: 88, branches: 88, statements: 97 },
+        'packages/cli/src/**/*.{ts,tsx}': { lines: 97, functions: 89, branches: 89, statements: 97 },
         'packages/dashboard/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
         'packages/product/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 98, statements: 99 },
         'packages/server/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
-        'packages/scbench-adapter/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 95, statements: 98 },
+        'packages/scbench-adapter/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 96, statements: 98 },
       },
     },
   },

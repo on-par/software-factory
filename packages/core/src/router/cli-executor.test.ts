@@ -177,9 +177,10 @@ describe('CliModelExecutor', () => {
     expect(output).toBe('CLAUDE OUTPUT');
     expect(rec.calls).toHaveLength(1);
     expect(rec.calls[0].cmd).toContain('claude -p');
-    expect(rec.calls[0].cmd).toContain("'draft plan'");
     expect(rec.calls[0].cmd).toContain('--model claude-sonnet-5');
-    expect(rec.calls[0].cmd).toContain('--dangerously-skip-permissions');
+    expect(rec.calls[0].cmd).toContain('--output-format stream-json');
+    expect(rec.calls[0].cmd).toContain('--permission-mode bypassPermissions');
+    expect(rec.calls[0].cmd).toMatch(/< '?[^']*factory-claude-prompt-[^']+\/prompt\.txt'?$/);
     expect(rec.calls[0].opts.cwd).toBe(worktree);
     expect(rec.calls[0].opts.timeoutMs).toBe(timeoutSeconds * 1000);
   });
@@ -239,7 +240,7 @@ describe('CliModelExecutor', () => {
     expect(rec.calls).toHaveLength(1);
     expect(rec.calls[0].cmd).toContain('claude -p');
     expect(rec.calls[0].cmd).not.toMatch(/(^|\s)--model(\s|$)/);
-    expect(rec.calls[0].cmd).toContain('--dangerously-skip-permissions');
+    expect(rec.calls[0].cmd).toContain('--permission-mode bypassPermissions');
   });
 
   it('forwards ctx.env through to the harness request env', async () => {
@@ -298,7 +299,7 @@ describe('CliModelExecutor', () => {
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('empty_response');
     expect(rec.calls).toHaveLength(1);
-    expect(rec.calls[0].cmd).toMatch(/^codex exec --json --sandbox workspace-write -c approval_policy=never -C '/);
+    expect(rec.calls[0].cmd).toMatch(/^codex exec --json --sandbox danger-full-access -c approval_policy=never -C '/);
     expect(rec.calls[0].cmd).toContain(`-C '${worktree}'`);
     expect(rec.calls[0].cmd).toContain('--model gpt-5-codex');
     expect(rec.calls[0].cmd).toContain(' -o ');

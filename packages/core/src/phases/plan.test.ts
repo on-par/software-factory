@@ -3,8 +3,10 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { LaneLifecycleEventSchema } from '@on-par/contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { createLifecycleBus } from '../bus/index.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
@@ -242,14 +244,36 @@ npm run test`;
     ]);
   });
 
-  it('does not call PLAN or overwrite the issue when enrichment is invalid', async () => {
+  it('retries enrichment naming the missing heading(s) and succeeds without parking', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
     tempDirs.add(worktree);
-    const stub = new StubModelExecutor({ scripts: { readiness_enrich: [{ output: 'not a factory task' }] } });
+    const updatedBodies: string[] = [];
+    const incompleteBody = `## Problem statement
+Queue stalls.
+## In scope
+Repair it.
+## Acceptance criteria
+- [ ] Queue works.
+## Verification
+npm run test`;
+    const completeBody = `## Problem statement
+Queue stalls.
+## In scope
+Repair it.
+## Out of scope
+API changes.
+## Acceptance criteria
+- [ ] Queue works.
+## Verification
+npm run test`;
+    const stub = new StubModelExecutor({
+      scripts: {
+        readiness_enrich: [{ output: incompleteBody }, { output: completeBody }],
+        plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }],
+      },
+    });
     const router = new ModelRouter(models, routes, false, stub);
-    const update = async () => {
-      throw new Error('must not update');
-    };
+
     const result = await planPhase({
       issue: 492,
       repo: 'on-par/software-factory',
@@ -258,14 +282,55 @@ npm run test`;
       router,
       constitution: null,
       octokit: {
-        rest: { issues: { get: async () => ({ data: { title: 'Repair import queue', body: '' } }), update } },
+        rest: {
+          issues: {
+            get: async () => ({ data: { title: 'Repair import queue', body: '' } }),
+            update: async ({ body }: { body: string }) => updatedBodies.push(body),
+          },
+        },
+      } as any,
+      log: () => {},
+      enforceReadiness: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(stub.calls.map((call) => call.task)).toEqual(['readiness_enrich', 'readiness_enrich', 'plan']);
+    expect(stub.calls[1].prompt).toContain('Still missing: Out of scope');
+    expect(stub.calls[1].prompt).toContain(incompleteBody);
+    expect(updatedBodies).toEqual([completeBody]);
+  });
+
+  it('escalates only after enrichment retries are exhausted', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const stub = new StubModelExecutor({
+      scripts: { readiness_enrich: [{ output: 'not a factory task' }, { output: 'not a factory task' }] },
+    });
+    const router = new ModelRouter(models, routes, false, stub);
+    let updates = 0;
+    const result = await planPhase({
+      issue: 492,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath: join(worktree, 'issue-492.md'),
+      router,
+      constitution: null,
+      octokit: {
+        rest: {
+          issues: {
+            get: async () => ({ data: { title: 'Repair import queue', body: '' } }),
+            update: async () => updates++,
+          },
+        },
       } as any,
       log: () => {},
       enforceReadiness: true,
     });
 
     expect(result.ok).toBe(false);
-    expect(stub.calls.map((call) => call.task)).toEqual(['readiness_enrich']);
+    expect(result.escalate).toContain('enrichment output failed readiness');
+    expect(stub.calls.map((call) => call.task)).toEqual(['readiness_enrich', 'readiness_enrich']);
+    expect(updates).toBe(0);
   });
 
   it('does not call PLAN when persisting a valid enrichment fails', async () => {
@@ -450,6 +515,7 @@ ${Array.from(
 
       expect(result.ok).toBe(false);
       expect(result.escalate).toMatch(/bounded-build budget/);
+      expect(result.decomposed).toBeUndefined();
       expect(stub.calls.map((call) => call.task)).toContain('decompose');
       expect(createComment).toHaveBeenCalledTimes(1);
       expect(events).toContain('size-gate-escalated');
@@ -721,6 +787,93 @@ npm run test`;
       expect(stub.calls.map((call) => call.task)).toEqual(['plan']);
       expect(createComment).not.toHaveBeenCalled();
       expect(events).not.toContain('size-gate-escalated');
+    });
+
+    it('files real sub-issues and returns them on decomposed.childIssues when filing succeeds (#823)', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-607.md');
+      const stub = new StubModelExecutor({
+        scripts: {
+          decompose: [{ output: validDecomposition }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const createComment = vi.fn().mockResolvedValue({});
+      let nextIssue = 700;
+      const create = vi.fn().mockImplementation(() => {
+        nextIssue += 1;
+        return Promise.resolve({ data: { number: nextIssue, id: 6000 + nextIssue } });
+      });
+      const request = vi.fn().mockResolvedValue({});
+      const events: string[] = [];
+
+      const result = await planPhase({
+        issue: 607,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit: {
+          rest: {
+            issues: {
+              get: async () => ({ data: { title: 'Harden the import queue', body: oversizedBody } }),
+              createComment,
+              create,
+            },
+          },
+          request,
+        } as any,
+        log: (type) => events.push(type),
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.decomposed).toEqual({ childIssues: [701] });
+      expect(result.escalate).toMatch(/decomposed into #701/);
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(events).toContain('decompose_filed');
+      expect(events).toContain('size-gate-escalated');
+    });
+
+    it('leaves decomposed unset and keeps the parked-for-decomposition message when filing yields no children', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-607.md');
+      const stub = new StubModelExecutor({
+        scripts: {
+          decompose: [{ output: validDecomposition }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const createComment = vi.fn().mockResolvedValue({});
+      const events: string[] = [];
+
+      const result = await planPhase({
+        issue: 607,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit: {
+          rest: {
+            issues: {
+              get: async () => ({ data: { title: 'Harden the import queue', body: oversizedBody } }),
+              createComment,
+              // no `create` — filing fails, degrading to the park-and-comment path
+            },
+          },
+        } as any,
+        log: (type) => events.push(type),
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.decomposed).toBeUndefined();
+      expect(result.escalate).toMatch(/parked for decomposition/);
+      expect(events).toContain('decompose_file_failed');
+      expect(events).toContain('size-gate-escalated');
     });
   });
 
@@ -1213,6 +1366,49 @@ npm run test`;
       expect(result.designArtifact).toBeNull();
       expect(logs.some((l) => l.type === 'design_artifact_invalid')).toBe(true);
       expect(existsSync(`${specPath.replace(/\.md$/, '')}.design.json`)).toBe(false);
+    });
+
+    it('escalates a blocked no-change note instead of treating it as a frozen spec', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-844.md');
+      const blockedSpec = [
+        '---',
+        'route: codex',
+        '---',
+        'Blocked: sandbox policy prevents writing the required file outside this worktree:',
+        '',
+        '`/Users/moltbot/repos/on-par/software-factory/.factory/plans/issue-844.md`',
+        '',
+        'No files were changed.',
+        '',
+      ].join('\n');
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{ output: blockedSpec }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: { issues: { get: async () => ({ data: { title: 'Blocked spec', body: 'Body.' } }) } },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+
+      const result = await planPhase({
+        issue: 844,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: (type, msg) => logs.push({ type, msg }),
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.escalate).toBe('PLAN returned a blocked/no-change note instead of a frozen spec');
+      expect(logs.some((l) => l.type === 'escalate' && l.msg === result.escalate)).toBe(true);
+      expect(logs.some((l) => l.type === 'design_artifact_invalid')).toBe(false);
     });
 
     it('archives a pre-existing design artifact alongside a replanned spec', async () => {
@@ -2253,6 +2449,80 @@ npm run test`;
       expect(stub.calls[0].prompt).toContain('Local brief title');
       expect(stub.calls[0].prompt).toContain('Local brief body.');
       expect(issuesGetCalled).toBe(false);
+    });
+  });
+
+  describe('lifecycle events', () => {
+    it('emits started then done on the success path, validated against the shared schema', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-591.md');
+      const stub = new StubModelExecutor({
+        scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: { issues: { get: async () => ({ data: { title: 'Add eval runner', body: 'Body.' } }) } },
+      };
+      const bus = createLifecycleBus();
+      const received: any[] = [];
+      bus.on((e) => received.push(e));
+
+      await planPhase({
+        issue: 591,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: () => {},
+        bus,
+        laneId: 'lane-1',
+      });
+
+      expect(received.map((e) => ({ phase: e.phase, status: e.status }))).toEqual([
+        { phase: 'plan', status: 'started' },
+        { phase: 'plan', status: 'done' },
+      ]);
+      expect(received.every((e) => e.laneId === 'lane-1')).toBe(true);
+      expect(received.every((e) => e.issueId === '591')).toBe(true);
+      expect(received.every((e) => e.worktreePath === worktree)).toBe(true);
+      for (const event of received) {
+        expect(() => LaneLifecycleEventSchema.parse(event)).not.toThrow();
+      }
+    });
+
+    it('emits started then failed on the escalation path, with a non-empty detail', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-592.md');
+      const stub = new StubModelExecutor({
+        scripts: { plan: [{ output: 'notes\nESCALATE: which auth provider should we use?\nmore text' }] },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: { issues: { get: async () => ({ data: { title: 'Add auth', body: 'Add authentication.' } }) } },
+      };
+      const bus = createLifecycleBus();
+      const received: any[] = [];
+      bus.on((e) => received.push(e));
+
+      await planPhase({
+        issue: 592,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: () => {},
+        bus,
+        laneId: 'lane-1',
+      });
+
+      expect(received.map((e) => e.status)).toEqual(['started', 'failed']);
+      expect(received[1].detail.length).toBeGreaterThan(0);
     });
   });
 });

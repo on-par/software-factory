@@ -1,9 +1,13 @@
+import { execFile as execFileCb } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { promisify } from 'node:util';
 
+import { LaneLifecycleEventSchema } from '@on-par/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createLifecycleBus } from '../bus/index.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
@@ -41,6 +45,42 @@ const routes: RoutesConfig = {
   },
 };
 
+const codexModels: ModelsConfig = {
+  ...models,
+  models: {
+    'codex-worker': {
+      provider: 'openai',
+      tier: 'boss',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: ['codex'],
+      envKey: null,
+      codex: true,
+    },
+    'claude-worker': {
+      provider: 'anthropic',
+      tier: 'boss',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: ['claude'],
+      envKey: null,
+    },
+  },
+  tiers: { boss: ['codex-worker', 'claude-worker'] },
+};
+
+const codexRoutes: RoutesConfig = {
+  version: 1,
+  routes: {
+    build_codex: { tier: 'boss', description: 'codex', requires: 'codex' },
+    build_claude: { tier: 'boss', description: 'claude', requires: 'claude' },
+  },
+};
+
+const execFile = promisify(execFileCb);
+
 const twoModels: ModelsConfig = {
   ...models,
   models: {
@@ -66,6 +106,76 @@ afterEach(async () => {
 });
 
 describe('checkPhase auto rework', () => {
+  it('uses the completed Codex route and model for rework', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const stub = new StubModelExecutor({ scripts: { build_codex: [{ output: 'rework complete' }] } });
+    const router = new ModelRouter(codexModels, codexRoutes, false, stub);
+
+    await checkPhase({
+      issue: 817,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      log: () => {},
+      maxReworkRounds: 1,
+      reworkRoute: 'codex',
+      reworkModel: 'codex-worker',
+    });
+
+    expect(stub.calls).toHaveLength(1);
+    expect(stub.calls[0]).toMatchObject({ task: 'build_codex', model: 'codex-worker' });
+    expect(stub.calls.some((call) => call.task === 'build_claude')).toBe(false);
+  });
+
+  it('parks before rework when a collectable worker diff is empty', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeCleanGitWorktree();
+    const { router, stub } = makeRouter();
+    const logs: Array<{ type: string; msg: string }> = [];
+
+    const check = await checkPhase({
+      issue: 817,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      log: (type, msg) => logs.push({ type, msg }),
+    });
+
+    expect(check.passed).toBe(false);
+    expect(check.reworkRounds).toBe(0);
+    expect(check.failureSignature).toContain('worker_output:worker produced no diff');
+    expect(stub.calls).toHaveLength(0);
+    expect(logs).toContainEqual({
+      type: 'fail',
+      msg: 'worker produced no implementation diff — parking before rework',
+    });
+  });
+
+  it(
+    'parks before rework in a remote-less checkout when nothing changed since the run-start base',
+    { timeout: 120_000 },
+    async () => {
+      const { worktree, specPath, baseSha } = await makeRemoteLessGitWorktree();
+      const { router, stub } = makeRouter();
+
+      const check = await checkPhase({
+        issue: 1211,
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        log: () => {},
+        diffBase: baseSha,
+      });
+
+      expect(check.passed).toBe(false);
+      expect(check.reworkRounds).toBe(0);
+      expect(check.failureSignature).toContain('worker_output:worker produced no diff');
+      expect(stub.calls).toHaveLength(0);
+    },
+  );
+
   it('does not re-invoke the worker when auto rework is disabled', { timeout: 120_000 }, async () => {
     const { worktree, specPath } = await makeFailingWorktree();
     const { router, stub } = makeRouter();
@@ -364,12 +474,12 @@ describe('checkPhase auto rework', () => {
   );
 
   it(
-    'classifies usage_cap router exhaustion as external and never produces a false stuck',
+    'classifies local auth router exhaustion as external and never produces a false stuck',
     { timeout: 120_000 },
     async () => {
       const { worktree, specPath } = await makeFailingWorktree();
       const stub = new StubModelExecutor({
-        scripts: { build_claude: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }, { fail: 'usage_cap' }] },
+        scripts: { build_claude: [{ fail: 'local_auth' }, { fail: 'local_auth' }, { fail: 'local_auth' }] },
         defaultOutput: 'rework complete',
       });
       const router = new ModelRouter(models, routes, false, stub);
@@ -388,8 +498,8 @@ describe('checkPhase auto rework', () => {
 
       const failedCalls = logCalls.filter(([type]) => type === 'rework_model_failed');
       expect(failedCalls.length).toBeGreaterThan(0);
-      expect(failedCalls[0][1]).toContain('usage_cap');
-      expect(failedCalls[0][2]).toEqual({ failoverReason: 'usage_cap' });
+      expect(failedCalls[0][1]).toContain('local_auth');
+      expect(failedCalls[0][2]).toEqual({ failoverReason: 'local_auth' });
 
       const reworkCalls = logCalls.filter(([type]) => type === 'rework');
       expect(reworkCalls.length).toBeGreaterThan(0);
@@ -507,6 +617,7 @@ describe('checkPhase sandbox', () => {
       runtime: 'firejail',
       worktree,
       writablePaths: [worktree],
+      writableFilePrefixes: [],
       allowHosts: [],
       cpuMs: 300_000,
       memMb: 4096,
@@ -1007,8 +1118,8 @@ describe('checkPhase success paths', () => {
     expect(check.summary.failures).toBe(0);
     // Worker is never invoked when nothing fails.
     expect(stub.calls).toHaveLength(0);
-    // design_smells fails open (SKIP) in this non-git temp worktree — it has no origin/main to diff against.
-    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (1 skipped)' });
+    // worker_output and design_smells skip in this non-git temp worktree.
+    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (2 skipped)' });
   });
 
   it('passes with a skipped tests checker when the worktree has no test command', { timeout: 120_000 }, async () => {
@@ -1030,8 +1141,8 @@ describe('checkPhase success paths', () => {
     expect(check.passed).toBe(true);
     expect(stub.calls).toHaveLength(0);
     expect(logs.some((l) => l.type === 'check' && l.msg.startsWith('SKIPPED: tests'))).toBe(true);
-    // Also SKIPped: design_smells, fail-open in this non-git temp worktree.
-    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (2 skipped)' });
+    // worker_output and design_smells also skip in this non-git temp worktree.
+    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (3 skipped)' });
   });
 
   it(
@@ -1050,13 +1161,16 @@ describe('checkPhase success paths', () => {
         source: 'bundled',
       };
 
+      const logs: Array<{ type: string; msg: string }> = [];
       const check = await checkPhase({
         issue: 95,
         worktree,
         specPath,
         router,
         constitution,
-        log: () => {},
+        log: (type, msg) => {
+          logs.push({ type, msg });
+        },
         autoRework: false,
       });
 
@@ -1064,6 +1178,9 @@ describe('checkPhase success paths', () => {
       const testsFailure = check.summary.results.find((r) => r.checker === 'tests');
       expect(testsFailure?.result).toBe('FAIL');
       expect(testsFailure?.details).toContain('no verification command was run');
+      // Each failing checker is named individually — the parked outcome carries only an
+      // aggregate count, so this is the operator's only view of WHY a run parked (#675).
+      expect(logs.some((l) => l.type === 'check' && l.msg.startsWith('FAILED: tests — '))).toBe(true);
     },
   );
 
@@ -1102,8 +1219,8 @@ describe('checkPhase success paths', () => {
     // Only one rework round was needed, so the worker was invoked exactly once.
     expect(stub.calls).toHaveLength(1);
     expect(logs).toContainEqual({ type: 'check', msg: 'Rework round 1: 0 failures remaining' });
-    // design_smells fails open (SKIP) in this non-git temp worktree — it has no origin/main to diff against.
-    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (1 skipped)' });
+    // worker_output and design_smells skip in this non-git temp worktree.
+    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (2 skipped)' });
   });
 });
 
@@ -1221,6 +1338,65 @@ describe('checkPhase steering', () => {
   );
 });
 
+describe('checkPhase lifecycle events', () => {
+  it(
+    'emits started then done on the success path, validated against the shared schema',
+    { timeout: 120_000 },
+    async () => {
+      const { worktree, specPath } = await makePassingWorktree();
+      const { router } = makeRouter();
+      const bus = createLifecycleBus();
+      const received: any[] = [];
+      bus.on((e) => received.push(e));
+
+      await checkPhase({
+        issue: 591,
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        log: () => {},
+        bus,
+        laneId: 'lane-1',
+      });
+
+      expect(received.map((e) => ({ phase: e.phase, status: e.status }))).toEqual([
+        { phase: 'check', status: 'started' },
+        { phase: 'check', status: 'done' },
+      ]);
+      expect(received.every((e) => e.laneId === 'lane-1')).toBe(true);
+      expect(received.every((e) => e.issueId === '591')).toBe(true);
+      expect(received.every((e) => e.worktreePath === worktree)).toBe(true);
+      for (const event of received) {
+        expect(() => LaneLifecycleEventSchema.parse(event)).not.toThrow();
+      }
+    },
+  );
+
+  it('emits started then failed on the failure path, with a non-empty detail', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router } = makeRouter();
+    const bus = createLifecycleBus();
+    const received: any[] = [];
+    bus.on((e) => received.push(e));
+
+    await checkPhase({
+      issue: 592,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      log: () => {},
+      autoRework: false,
+      bus,
+      laneId: 'lane-1',
+    });
+
+    expect(received.map((e) => e.status)).toEqual(['started', 'failed']);
+    expect(received[1].detail.length).toBeGreaterThan(0);
+  });
+});
+
 async function makePassingWorktree(): Promise<{ worktree: string; specPath: string }> {
   const worktree = await mkdtemp(join(tmpdir(), 'check-phase-pass-'));
   tempDirs.add(worktree);
@@ -1265,6 +1441,38 @@ async function makeFailingWorktree(): Promise<{ worktree: string; specPath: stri
   await writeFixture(worktree, 'issue-77.md', '# Spec: failing checks\n');
 
   return { worktree, specPath };
+}
+
+async function makeCleanGitWorktree(): Promise<{ worktree: string; specPath: string }> {
+  const worktree = await mkdtemp(join(tmpdir(), 'check-phase-clean-git-'));
+  tempDirs.add(worktree);
+  const specPath = join(worktree, 'issue-817.md');
+  await writeFixture(worktree, 'package.json', JSON.stringify({ scripts: { test: 'exit 0' } }));
+  await writeFixture(worktree, 'issue-817.md', '# Spec: empty worker diff\n');
+  await execFile('git', ['init', '--initial-branch=main'], { cwd: worktree });
+  await execFile('git', ['config', 'user.email', 'tests@example.com'], { cwd: worktree });
+  await execFile('git', ['config', 'user.name', 'Tests'], { cwd: worktree });
+  await execFile('git', ['add', '.'], { cwd: worktree });
+  await execFile('git', ['commit', '-m', 'initial'], { cwd: worktree });
+  await execFile('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: worktree });
+  return { worktree, specPath };
+}
+
+/** makeCleanGitWorktree without the origin/main ref — a remote-less checkout whose only
+ *  usable diff base is the run-start SHA buildPhase captured (#1211). */
+async function makeRemoteLessGitWorktree(): Promise<{ worktree: string; specPath: string; baseSha: string }> {
+  const worktree = await mkdtemp(join(tmpdir(), 'check-phase-remoteless-git-'));
+  tempDirs.add(worktree);
+  const specPath = join(worktree, 'issue-1211.md');
+  await writeFixture(worktree, 'package.json', JSON.stringify({ scripts: { test: 'exit 0' } }));
+  await writeFixture(worktree, 'issue-1211.md', '# Spec: empty worker diff, no remote\n');
+  await execFile('git', ['init', '--initial-branch=main'], { cwd: worktree });
+  await execFile('git', ['config', 'user.email', 'tests@example.com'], { cwd: worktree });
+  await execFile('git', ['config', 'user.name', 'Tests'], { cwd: worktree });
+  await execFile('git', ['add', '.'], { cwd: worktree });
+  await execFile('git', ['commit', '-m', 'initial'], { cwd: worktree });
+  const { stdout } = await execFile('git', ['rev-parse', 'HEAD'], { cwd: worktree });
+  return { worktree, specPath, baseSha: stdout.trim() };
 }
 
 async function makeTestFailureEvidenceWorktree(): Promise<{ worktree: string; specPath: string }> {

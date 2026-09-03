@@ -98,7 +98,7 @@ export function decomposeIntent(doc: IntentDoc): DecomposeResult {
       })),
       filesLikelyTouched: [],
       labels: [],
-      investNote: `Vertical slice ${i + 1} of ${slices.length}: ${slice.scope.text}`,
+      investNote: `${slice.walkingSkeleton ? 'Walking skeleton' : `Release ${slice.release}`} — ${slice.step.stage.label}, vertical slice ${i + 1} of ${slices.length}: ${slice.scope.text}`,
       tracesTo: [slice.scope.id, ...slice.audience.map((s) => s.id), ...slice.outcome.map((s) => s.id)],
     };
 

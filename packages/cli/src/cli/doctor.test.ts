@@ -2,14 +2,22 @@ import { describe, expect, it } from 'vitest';
 
 import {
   analyzeEventLog,
+  type ClaudeAuthProbeResult,
+  claudeKeychainCheck,
   type DoctorEnvProbes,
   doctorFailed,
   eventLogCheck,
   formatDoctorChecks,
+  formatClaimReconcileReport,
   formatReconcileReport,
+  formatWorktreeReconcileReport,
+  type GreenPrScanResult,
   leaseChecks,
+  keychainPreflightError,
   type LeaseHealthRow,
   runDoctorChecks,
+  sandboxClaudeAuthChecks,
+  unmergedGreenPrChecks,
 } from './doctor.js';
 
 function probes(overrides: Partial<DoctorEnvProbes> = {}): DoctorEnvProbes {
@@ -322,5 +330,241 @@ describe('formatReconcileReport', () => {
       'reconcile: freed port 3100 (worktree /wt/a, reason dead-pid)\n' +
         'reconcile: freed port 3101 (worktree /wt/b, reason missing-worktree)',
     );
+  });
+});
+
+describe('formatWorktreeReconcileReport', () => {
+  it('reports no dead-run worktrees when empty', () => {
+    expect(formatWorktreeReconcileReport([])).toBe('reconcile: no dead-run worktrees');
+  });
+
+  it('reports a removed worktree with its deleted branch', () => {
+    const report = formatWorktreeReconcileReport([
+      { path: '/wt/a', branch: 'ship-it/5-x', reason: 'merged', branchDeleted: true },
+    ]);
+    expect(report).toBe(
+      'reconcile: removed worktree /wt/a (branch ship-it/5-x, reason merged), deleted branch ship-it/5-x',
+    );
+  });
+
+  it('renders a detached worktree with no deleted-branch suffix', () => {
+    const report = formatWorktreeReconcileReport([
+      { path: '/wt/b', branch: null, reason: 'ttl-expired', branchDeleted: false },
+    ]);
+    expect(report).toBe('reconcile: removed worktree /wt/b (branch detached, reason ttl-expired)');
+  });
+
+  it('joins multiple entries with a single newline', () => {
+    const report = formatWorktreeReconcileReport([
+      { path: '/wt/a', branch: 'ship-it/5-x', reason: 'merged', branchDeleted: true },
+      { path: '/wt/b', branch: null, reason: 'ttl-expired', branchDeleted: false },
+    ]);
+    expect(report).toBe(
+      'reconcile: removed worktree /wt/a (branch ship-it/5-x, reason merged), deleted branch ship-it/5-x\n' +
+        'reconcile: removed worktree /wt/b (branch detached, reason ttl-expired)',
+    );
+  });
+});
+
+describe('formatClaimReconcileReport', () => {
+  it('reports no stale claims when empty', () => {
+    expect(formatClaimReconcileReport([])).toBe('reconcile: no stale claims');
+  });
+
+  it('reports a released claim', () => {
+    const report = formatClaimReconcileReport([{ issue: 42, pid: 777, released: true }]);
+    expect(report).toBe('reconcile: released issue #42 back to factory:queued (dead pid 777)');
+  });
+
+  it('reports a failed release with its detail', () => {
+    const report = formatClaimReconcileReport([{ issue: 42, pid: 777, released: false, detail: 'boom' }]);
+    expect(report).toBe('reconcile: failed to release issue #42 (dead pid 777) — boom');
+  });
+
+  it('joins multiple entries with a single newline', () => {
+    const report = formatClaimReconcileReport([
+      { issue: 42, pid: 777, released: true },
+      { issue: 43, pid: 778, released: false, detail: 'boom' },
+    ]);
+    expect(report).toBe(
+      'reconcile: released issue #42 back to factory:queued (dead pid 777)\n' +
+        'reconcile: failed to release issue #43 (dead pid 778) — boom',
+    );
+  });
+});
+
+describe('unmergedGreenPrChecks', () => {
+  it('renders a single passing optional check when there are no rows', () => {
+    const checks = unmergedGreenPrChecks({ status: 'ok', rows: [] });
+    expect(checks).toEqual([
+      {
+        name: 'green PRs awaiting merge',
+        ok: true,
+        optional: true,
+        detail: 'no green-and-ready PRs awaiting merge',
+      },
+    ]);
+    expect(doctorFailed(checks)).toBe(false);
+  });
+
+  it('renders a row with an issue as a non-ok optional check', () => {
+    const result: GreenPrScanResult = {
+      status: 'ok',
+      rows: [{ number: 957, branch: 'ship-it/939-x', issue: 939, ageHours: 9 }],
+    };
+    const checks = unmergedGreenPrChecks(result);
+    expect(checks).toHaveLength(1);
+    expect(checks[0].name).toBe('green PR #957');
+    expect(checks[0].ok).toBe(false);
+    expect(checks[0].optional).toBe(true);
+    expect(checks[0].detail).toContain('issue #939');
+    expect(checks[0].detail).toContain('ship-it/939-x');
+    expect(checks[0].detail).toContain('open 9h');
+    expect(doctorFailed(checks)).toBe(false);
+  });
+
+  it('renders "owning issue unknown" when a row has no issue', () => {
+    const result: GreenPrScanResult = {
+      status: 'ok',
+      rows: [{ number: 1, branch: 'some-branch', issue: null, ageHours: 1 }],
+    };
+    const checks = unmergedGreenPrChecks(result);
+    expect(checks[0].detail).toContain('owning issue unknown');
+  });
+
+  it('renders a passing optional check when skipped', () => {
+    const checks = unmergedGreenPrChecks({ status: 'skipped', detail: 'skipped — no GitHub repo or token' });
+    expect(checks).toEqual([
+      { name: 'green PRs awaiting merge', ok: true, optional: true, detail: 'skipped — no GitHub repo or token' },
+    ]);
+  });
+
+  it('renders a failing optional check when the scan failed, and never fails doctor', () => {
+    const checks = unmergedGreenPrChecks({ status: 'failed', detail: 'boom' });
+    expect(checks).toHaveLength(1);
+    expect(checks[0].ok).toBe(false);
+    expect(checks[0].optional).toBe(true);
+    expect(checks[0].detail).toContain('scan failed — boom');
+    expect(doctorFailed(checks)).toBe(false);
+  });
+});
+
+describe('sandboxClaudeAuthChecks', () => {
+  function result(overrides: Partial<ClaudeAuthProbeResult> = {}): ClaudeAuthProbeResult {
+    return {
+      host: 'ok',
+      sandboxed: 'ok',
+      hostDetail: 'claude -p succeeded on the host',
+      sandboxDetail: 'claude -p succeeded under sandbox-exec',
+      ...overrides,
+    };
+  }
+
+  it('reports two distinct check names, both ok, when host and sandboxed both succeed', () => {
+    const checks = sandboxClaudeAuthChecks(result());
+    expect(checks).toHaveLength(2);
+    expect(new Set(checks.map((c) => c.name)).size).toBe(2);
+    expect(checks.every((c) => c.ok)).toBe(true);
+    expect(doctorFailed(checks)).toBe(false);
+  });
+
+  it('fails closed (hard failure) when host is ok but sandboxed failed, and the fix mentions FACTORY_SANDBOX=0', () => {
+    const checks = sandboxClaudeAuthChecks(
+      result({ sandboxed: 'failed', sandboxDetail: 'claude -p failed under sandbox-exec (local_auth)' }),
+    );
+    const sandboxCheck = checks.find((c) => c.name === 'claude auth (sandboxed)')!;
+    expect(sandboxCheck.ok).toBe(false);
+    expect(sandboxCheck.optional).toBeFalsy();
+    expect(sandboxCheck.fix).toContain('FACTORY_SANDBOX=0');
+    expect(doctorFailed(checks)).toBe(true);
+  });
+
+  it('reports an optional passing check when sandboxed is skipped', () => {
+    const checks = sandboxClaudeAuthChecks(
+      result({ sandboxed: 'skipped', sandboxDetail: 'skipped — sandbox disabled' }),
+    );
+    const sandboxCheck = checks.find((c) => c.name === 'claude auth (sandboxed)')!;
+    expect(sandboxCheck.ok).toBe(true);
+    expect(sandboxCheck.optional).toBe(true);
+    expect(doctorFailed(checks)).toBe(false);
+  });
+
+  it('does not blame the sandbox when the host itself is failing — sandboxed check is optional', () => {
+    const checks = sandboxClaudeAuthChecks(
+      result({
+        host: 'failed',
+        hostDetail: 'claude -p failed on the host',
+        sandboxed: 'failed',
+        sandboxDetail: 'claude -p failed under sandbox-exec (local_auth)',
+      }),
+    );
+    const hostCheck = checks.find((c) => c.name === 'claude auth (host)')!;
+    const sandboxCheck = checks.find((c) => c.name === 'claude auth (sandboxed)')!;
+    expect(hostCheck.ok).toBe(false);
+    expect(hostCheck.optional).toBeFalsy();
+    expect(sandboxCheck.ok).toBe(false);
+    expect(sandboxCheck.optional).toBe(true);
+  });
+
+  it('reports both checks as optional passes when both are skipped, and never fails doctor', () => {
+    const checks = sandboxClaudeAuthChecks(
+      result({
+        host: 'skipped',
+        hostDetail: 'skipped — claude CLI not on PATH',
+        sandboxed: 'skipped',
+        sandboxDetail: 'skipped — host claude auth was not verified',
+      }),
+    );
+    expect(checks.every((c) => c.ok && c.optional)).toBe(true);
+    expect(doctorFailed(checks)).toBe(false);
+  });
+});
+
+describe('claudeKeychainCheck', () => {
+  it('passes skipped probes as optional and preserves their detail', () => {
+    const check = claudeKeychainCheck({ status: 'skipped', detail: 'skipped — not macOS' });
+    expect(check).toMatchObject({ ok: true, optional: true, detail: 'skipped — not macOS' });
+    expect(doctorFailed([check])).toBe(false);
+  });
+
+  it('passes when the login keychain entry is readable', () => {
+    const check = claudeKeychainCheck({ status: 'readable' });
+    expect(check.ok).toBe(true);
+    expect(check.optional).toBeFalsy();
+    expect(check.detail).toContain("login keychain entry 'Claude Code-credentials' is readable");
+  });
+
+  it('hard-fails when the keychain is unreadable inside tmux', () => {
+    const check = claudeKeychainCheck({ status: 'unreadable', inTmux: true });
+    expect(check.ok).toBe(false);
+    expect(check.optional).toBeFalsy();
+    expect(check.detail).toContain('tmux');
+    expect(check.detail).toContain('SecKeychainSearchCopyNext');
+    expect(check.fix).toContain('gui/$(id -u)');
+    expect(check.fix).toContain('docs/runbooks/macos-keychain-launchagent.md');
+    expect(doctorFailed([check])).toBe(true);
+  });
+
+  it('warns without failing doctor when the keychain is unreadable outside tmux', () => {
+    const check = claudeKeychainCheck({ status: 'unreadable', inTmux: false });
+    expect(check).toMatchObject({ ok: false, optional: true });
+    expect(check.fix).toContain('/login');
+    expect(doctorFailed([check])).toBe(false);
+  });
+});
+
+describe('keychainPreflightError', () => {
+  it('returns null unless the keychain is unreadable inside tmux', () => {
+    expect(keychainPreflightError({ status: 'readable' })).toBeNull();
+    expect(keychainPreflightError({ status: 'skipped', detail: 'skipped — not macOS' })).toBeNull();
+    expect(keychainPreflightError({ status: 'unreadable', inTmux: false })).toBeNull();
+  });
+
+  it('describes the local_auth risk and launchd remediation inside tmux', () => {
+    const error = keychainPreflightError({ status: 'unreadable', inTmux: true });
+    expect(error).toContain('local_auth');
+    expect(error).toContain('tmux');
+    expect(error).toContain('launchctl bootstrap gui/$(id -u)');
+    expect(error).toContain('docs/runbooks/macos-keychain-launchagent.md');
   });
 });

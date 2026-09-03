@@ -1,5 +1,6 @@
+import type * as ChildProcess from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -36,6 +37,7 @@ const h = vi.hoisted(() => {
     shipResult: { ok: true, prNumber: 99 } as any,
     diagnoses: [] as any[],
     costs: [] as any[],
+    costSinkCallback: undefined as ((entry: any) => void) | undefined,
     trailingSpend: 10,
     subscriptionUsage: null as { fiveHourUtilization: number; fiveHourResetsAt: string | null } | null,
     routerResolve: (_route: string): string | undefined => 'claude-model',
@@ -49,6 +51,8 @@ const h = vi.hoisted(() => {
       },
     } as any,
     gcReport: { removed: [], kept: 0, dryRun: false } as any,
+    staleClaims: [] as any[],
+    greenPrs: [] as any[],
     runTuiCalls: [] as Array<{
       eventsFile: string;
       repo?: string;
@@ -58,6 +62,7 @@ const h = vi.hoisted(() => {
       costsFile?: string;
       steeringDir?: string;
     }>,
+    setupWorktreeImpl: async (_repoRoot: string, _branch: string, _worktree: string, _startPoint?: string) => {},
   };
 });
 
@@ -78,11 +83,19 @@ vi.mock('node:child_process', () => {
   return { exec, execSync, default: { exec, execSync } };
 });
 
-vi.mock('@octokit/rest', () => ({
-  Octokit: vi.fn(function () {
-    return h.octokit;
-  }),
-}));
+vi.mock('@octokit/rest', () => {
+  // createFactoryOctokit (packages/cli/src/cli/octokit.ts) calls Octokit.plugin(...) at module load
+  // time to attach retry/throttling — the double must expose it as a static too.
+  class Octokit {
+    constructor() {
+      return h.octokit;
+    }
+    static plugin(): typeof Octokit {
+      return Octokit;
+    }
+  }
+  return { Octokit };
+});
 
 vi.mock('@on-par/factory-tui', () => ({
   runTui: vi.fn(
@@ -102,12 +115,36 @@ vi.mock('@on-par/factory-tui', () => ({
 
 vi.mock('@on-par/factory-core', async (importOriginal) => {
   const actual = await importOriginal<typeof FactoryCore>();
+
+  // Phases. shipIssue no longer sequences PLAN->BUILD->CHECK->SHIP itself (#675) — it
+  // builds ports and calls the real runIssue in @on-par/factory-core, which now takes
+  // planPhase/buildPhase/checkPhase/shipPhase as overridable ports (ADR-0004). So this
+  // double only stubs the four phase functions and lets the real runIssue drive
+  // sequencing, the breaker, budget assertions, and constitution logging.
+  const planPhaseMock = vi.fn(async (opts: any) => {
+    if (h.triggerPlanProviderFailure) await opts.onProviderFailure?.(h.triggerPlanProviderFailure);
+    return h.planResult;
+  });
+  const buildPhaseMock = vi.fn(async (_opts: any) => h.buildResult);
+  const checkPhaseMock = vi.fn(async (opts: any) => {
+    for (const s of h.checkResult.summary.results.filter((r: any) => r.result === 'SKIP')) {
+      opts.log?.('check', `SKIPPED: ${s.checker} — ${s.details}`);
+    }
+    for (let i = 0; i < (h.checkResult.reworkRounds ?? 0); i++) {
+      opts.log?.('rework', `rework round ${i + 1}`);
+    }
+    h.costSinkCallback?.({ task: 'build', model: 'claude-model', inputTokens: 10, outputTokens: 5, cost: 0.02 });
+    return h.checkResult;
+  });
+  const shipPhaseMock = vi.fn(async (_opts: any) => h.shipResult);
+
   return {
     ...actual,
     // Config loaders — return inert values.
-    loadModelsConfig: vi.fn(() => ({}) as any),
+    loadModelsConfig: vi.fn(() => ({ models: {}, tiers: {} }) as any),
     loadRoutesConfig: vi.fn(() => ({}) as any),
-    loadFactoryConfig: vi.fn(() => h.factoryConfig),
+    loadFactoryConfigForRepo: vi.fn(() => h.factoryConfig),
+    loadRepoConfig: vi.fn((repoRoot: string, stateRoot?: string) => actual.loadRepoConfig(repoRoot, stateRoot)),
     resolveTimeouts: vi.fn(() => ({ plan: 1, build: 1, check: 1, approval: 1 })),
     resolveSkipCI: vi.fn(() => false),
     getConstitutionsDir: vi.fn(() => h.constitutionsDir),
@@ -136,7 +173,9 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
           getHarnessId: (id: string) => (h.modelProviders[id] === 'anthropic' ? 'claude-cli' : 'codex-cli'),
           isCodexModel: (id: string) => h.modelProviders[id] === 'openai',
         },
-        setCostSink: vi.fn(),
+        setCostSink: vi.fn((sink: (entry: any) => void) => {
+          h.costSinkCallback = sink;
+        }),
       };
     }),
     ConstitutionLoader: vi.fn(function () {
@@ -155,14 +194,12 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
         getModelsInTier: () => ['claude-model'],
       };
     }),
-    // Phases.
-    planPhase: vi.fn(async (opts: any) => {
-      if (h.triggerPlanProviderFailure) await opts.onProviderFailure?.(h.triggerPlanProviderFailure);
-      return h.planResult;
-    }),
-    buildPhase: vi.fn(async () => h.buildResult),
-    checkPhase: vi.fn(async () => h.checkResult),
-    shipPhase: vi.fn(async () => h.shipResult),
+    // Phases are stubbed here; the real runIssue (from `actual`) sequences them (#675).
+    planPhase: planPhaseMock,
+    buildPhase: buildPhaseMock,
+    checkPhase: checkPhaseMock,
+    shipPhase: shipPhaseMock,
+    runIssue: actual.runIssue,
     // Usage / reports.
     estimateTrailingSpend: vi.fn(() => h.trailingSpend),
     formatUsageReport: vi.fn(() => 'USAGE REPORT'),
@@ -183,7 +220,7 @@ vi.mock('@on-par/factory-core/internal', async (importOriginal) => {
     // Cost.
     readCosts: vi.fn(() => h.costs),
     // Git / worktree side-effects — no-ops.
-    setupWorktree: vi.fn(async () => {}),
+    setupWorktree: vi.fn(async (...args: [string, string, string, string?]) => h.setupWorktreeImpl(...args)),
     cleanupWorktree: vi.fn(async () => {}),
     gitFetch: vi.fn(async () => {}),
     withGitLock: vi.fn(async (_root: string, fn: () => Promise<unknown>) => fn()),
@@ -191,6 +228,10 @@ vi.mock('@on-par/factory-core/internal', async (importOriginal) => {
     ensureDir: vi.fn((p: string) => mkdirSync(p, { recursive: true })),
     // Worktree GC.
     sweepWorktrees: vi.fn(async () => h.gcReport),
+    // Stale claim reap.
+    releaseStaleClaims: vi.fn(async () => h.staleClaims),
+    // Green-and-ready PR report.
+    findUnmergedGreenPrs: vi.fn(async () => h.greenPrs),
     formatGcReport: vi.fn(
       (report: any) =>
         `GC_REPORT:${report.dryRun ? 'dry' : 'real'}:removed=${report.removed.length}:kept=${report.kept}`,
@@ -201,12 +242,28 @@ vi.mock('@on-par/factory-core/internal', async (importOriginal) => {
 import {
   cleanupWorktree,
   formatGcReport,
+  releaseStaleClaims,
+  setupWorktree,
   sweepWorktrees,
   watchChecks,
+  withFileLock,
   withGitLock,
 } from '@on-par/factory-core/internal';
 
-import { CliExitError, cmdConstitution, cmdLand, cmdUsage, main, parseIssueArg, shipIssue } from './cli/index.js';
+import {
+  buildInitConfig,
+  CliExitError,
+  cmdConstitution,
+  cmdLand,
+  cmdUsage,
+  FACTORY_CONFIG_SCHEMA_URL,
+  formatInitReachability,
+  IssueDecomposedError,
+  IssueSkippedError,
+  main,
+  parseIssueArg,
+  shipIssue,
+} from './cli/index.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -227,8 +284,10 @@ function trackEnv(...keys: string[]) {
 }
 
 function paths() {
-  const state = join(h.repoRoot, '.factory');
+  const root = join(h.repoRoot, '.factory');
+  const state = join(root, 'state');
   return {
+    root,
     state,
     queue: join(state, 'queue'),
     queueProposed: join(state, 'queue.proposed'),
@@ -241,13 +300,19 @@ function paths() {
     steering: join(state, 'steering'),
     kpiHistory: join(state, 'kpi-history.jsonl'),
     breaker: join(state, 'breaker.json'),
+    config: join(root, 'config.json'),
+    constitution: join(root, 'constitution.md'),
+    gitignore: join(root, '.gitignore'),
   };
 }
 
 function defaultOctokit() {
   return {
     rest: {
-      issues: { get: vi.fn(async () => ({ data: { title: 'Fix the bug' } })) },
+      issues: {
+        get: vi.fn(async () => ({ data: { title: 'Fix the bug' } })),
+        listForRepo: vi.fn(async () => ({ data: [] })),
+      },
       pulls: {
         list: vi.fn(async ({ state }: any) =>
           state === 'open'
@@ -319,7 +384,10 @@ beforeEach(() => {
     },
   };
   h.gcReport = { removed: [], kept: 0, dryRun: false };
+  h.staleClaims = [];
+  h.greenPrs = [];
   h.runTuiCalls = [];
+  h.setupWorktreeImpl = async () => {};
   h.claudeAvailable = undefined;
   h.orphanEvents = [];
   h.portListeners = [];
@@ -338,6 +406,9 @@ beforeEach(() => {
     'FACTORY_SANDBOX',
     'FACTORY_PLAN_MODEL',
     'FACTORY_BUILD_MODEL',
+    'FACTORY_AUTO_FAILOVER',
+    'FACTORY_FAILOVER_COOLDOWN_MINUTES',
+    'FACTORY_FAILOVER_MODEL',
     'GITHUB_TOKEN',
     'GH_TOKEN',
   ].forEach((k) => trackEnv(k));
@@ -348,6 +419,9 @@ beforeEach(() => {
   delete process.env.FACTORY_USAGE_WATCH;
   delete process.env.FACTORY_PLAN_MODEL;
   delete process.env.FACTORY_BUILD_MODEL;
+  delete process.env.FACTORY_AUTO_FAILOVER;
+  delete process.env.FACTORY_FAILOVER_COOLDOWN_MINUTES;
+  delete process.env.FACTORY_FAILOVER_MODEL;
   delete process.env.GITHUB_TOKEN;
   process.env.GH_TOKEN = 'test-token';
   process.exitCode = undefined;
@@ -393,6 +467,13 @@ describe('cli commands (via main dispatch)', () => {
   });
 
   describe('init', () => {
+    beforeEach(() => {
+      writeFileSync(
+        join(h.constitutionsDir, '_template.md'),
+        '```markdown\n---\nproduct: <product-name>\n---\n# <Product> Constitution\n```\n',
+      );
+    });
+
     it('creates .factory dirs, the git exclude entry, and a sample queue', async () => {
       const res = await runMain('init');
       expect(res.exited).toBe(false);
@@ -429,6 +510,71 @@ describe('cli commands (via main dispatch)', () => {
       const res = await runMain('init');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('Initialized');
+    });
+
+    it('writes config.json, constitution.md, and .gitignore, then prints a reachability summary', async () => {
+      h.diagnoses = [
+        { reachable: true, tiers: ['worker'] } as any,
+        { reachable: true, tiers: ['worker'] } as any,
+        { reachable: false, tiers: ['worker'] } as any,
+      ];
+      const res = await runMain('init');
+      expect(res.exited).toBe(false);
+
+      expect(existsSync(paths().config)).toBe(true);
+      const config = JSON.parse(readFileSync(paths().config, 'utf-8'));
+      expect(config).toEqual({ $schema: FACTORY_CONFIG_SCHEMA_URL, version: 2 });
+      expect(config.models).toBeUndefined();
+
+      expect(existsSync(paths().constitution)).toBe(true);
+      const constitution = readFileSync(paths().constitution, 'utf-8');
+      const repoName = h.repoRoot.split('/').pop();
+      expect(constitution).toContain(JSON.stringify(repoName));
+
+      expect(existsSync(paths().gitignore)).toBe(true);
+      expect(readFileSync(paths().gitignore, 'utf-8')).toContain('state/');
+
+      expect(logged()).toContain('policy=auto,');
+      expect(logged()).toContain('models reachable');
+    });
+
+    it('is idempotent: a second run without --force leaves an existing config untouched', async () => {
+      const sentinel = '{"version":2,"models":{"plan":"x"}}';
+      writeFileSync(paths().config, sentinel);
+      await runMain('init');
+      expect(readFileSync(paths().config, 'utf-8')).toBe(sentinel);
+      expect(logged()).toContain('leaving as-is');
+    });
+
+    it('--force overwrites an existing config', async () => {
+      writeFileSync(paths().config, '{"version":2,"models":{"plan":"x"}}');
+      await runMain('init', '--force');
+      expect(readFileSync(paths().config, 'utf-8')).toBe(buildInitConfig());
+    });
+
+    it('leaves .factory/ git-clean except the committed config, constitution, .gitignore, and the state/ directory', async () => {
+      await runMain('init');
+      writeFileSync(paths().queue, 'app 1\n');
+
+      expect(readdirSync(paths().root).sort()).toEqual(
+        ['.gitignore', 'config.json', 'constitution.md', 'state'].sort(),
+      );
+    });
+  });
+
+  describe('buildInitConfig', () => {
+    it('returns valid pin-free version-2 JSON', () => {
+      const parsed = JSON.parse(buildInitConfig());
+      expect(parsed).toEqual({ $schema: FACTORY_CONFIG_SCHEMA_URL, version: 2 });
+      expect(parsed.models).toBeUndefined();
+      expect(parsed.tiers).toBeUndefined();
+    });
+  });
+
+  describe('formatInitReachability', () => {
+    it('renders policy=auto, K/N models reachable', () => {
+      const diagnoses = [{ reachable: true } as any, { reachable: true } as any, { reachable: false } as any];
+      expect(formatInitReachability(diagnoses)).toBe('policy=auto, 2/3 models reachable');
     });
   });
 
@@ -790,7 +936,7 @@ bash scripts/verify.sh
     });
 
     it('still renders the report when the KPI snapshot fails (e.g. a malformed repo tier config)', async () => {
-      writeFileSync(join(paths().state, 'config.json'), JSON.stringify({ tiers: { worker: ['no-such-model'] } }));
+      writeFileSync(paths().config, JSON.stringify({ tiers: { worker: ['no-such-model'] } }));
       writeFileSync(paths().events, JSON.stringify({ type: 'issue-title', issue: '1', msg: 'title' }));
 
       const res = await runMain('kpis');
@@ -885,13 +1031,13 @@ bash scripts/verify.sh
       const res = await runMain('tui');
       expect(res.exited).toBe(false);
       expect(h.runTuiCalls).toHaveLength(1);
-      expect(h.runTuiCalls[0].eventsFile.endsWith(join('.factory', 'events.ndjson'))).toBe(true);
+      expect(h.runTuiCalls[0].eventsFile.endsWith(join('.factory', 'state', 'events.ndjson'))).toBe(true);
       expect(h.runTuiCalls[0].repo).toBe(h.ghRepo);
-      expect(h.runTuiCalls[0].stopFile?.endsWith(join('.factory', 'STOP'))).toBe(true);
-      expect(h.runTuiCalls[0].queueFile?.endsWith(join('.factory', 'queue'))).toBe(true);
-      expect(h.runTuiCalls[0].queueProposedFile?.endsWith(join('.factory', 'queue.proposed'))).toBe(true);
-      expect(h.runTuiCalls[0].costsFile?.endsWith(join('.factory', 'costs.jsonl'))).toBe(true);
-      expect(h.runTuiCalls[0].steeringDir?.endsWith(join('.factory', 'steering'))).toBe(true);
+      expect(h.runTuiCalls[0].stopFile?.endsWith(join('.factory', 'state', 'STOP'))).toBe(true);
+      expect(h.runTuiCalls[0].queueFile?.endsWith(join('.factory', 'state', 'queue'))).toBe(true);
+      expect(h.runTuiCalls[0].queueProposedFile?.endsWith(join('.factory', 'state', 'queue.proposed'))).toBe(true);
+      expect(h.runTuiCalls[0].costsFile?.endsWith(join('.factory', 'state', 'costs.jsonl'))).toBe(true);
+      expect(h.runTuiCalls[0].steeringDir?.endsWith(join('.factory', 'state', 'steering'))).toBe(true);
     });
 
     it('calls runTui with repo undefined when gh repo detection fails', async () => {
@@ -931,7 +1077,7 @@ bash scripts/verify.sh
     });
 
     it('exits 2 with the not-initialized message when .factory/ is missing', async () => {
-      rmSync(paths().state, { recursive: true, force: true });
+      rmSync(paths().root, { recursive: true, force: true });
       const res = await runMain('triage');
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('factory not initialized — run `factory init` first');
@@ -998,6 +1144,231 @@ bash scripts/verify.sh
     });
   });
 
+  describe('queue migrate', () => {
+    beforeEach(() => {
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) return h.ghRepo;
+        return '';
+      };
+      h.octokit.rest.issues.createLabel = vi.fn(async () => ({}));
+      h.octokit.rest.issues.addLabels = vi.fn(async () => ({}));
+    });
+
+    it('migrates valid local queue entries in per-lane order without rewriting the source queue', async () => {
+      const source = 'daw 1055\ndocs 200\ndaw 993\n';
+      writeFileSync(paths().queue, source);
+
+      const res = await runMain('queue', 'migrate');
+
+      expect(res.exited).toBe(false);
+      expect(readFileSync(paths().queue, 'utf-8')).toBe(source);
+      expect(logged()).toContain('queue migrated — 3 issue(s)');
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenNthCalledWith(1, {
+        owner: 'on-par',
+        repo: 'software-factory',
+        issue_number: 1055,
+        labels: ['factory:queued', 'factory:lane:daw', 'factory:order:1'],
+      });
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenNthCalledWith(2, {
+        owner: 'on-par',
+        repo: 'software-factory',
+        issue_number: 200,
+        labels: ['factory:queued', 'factory:lane:docs', 'factory:order:1'],
+      });
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenNthCalledWith(3, {
+        owner: 'on-par',
+        repo: 'software-factory',
+        issue_number: 993,
+        labels: ['factory:queued', 'factory:lane:daw', 'factory:order:2'],
+      });
+      expect(h.octokit.rest.issues.createLabel).toHaveBeenCalled();
+    });
+
+    it('rejects a missing local queue before creating or applying labels', async () => {
+      const res = await runMain('queue', 'migrate');
+
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('queue not found');
+      expect(h.octokit.rest.issues.createLabel).not.toHaveBeenCalled();
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+    });
+
+    it('rejects an invalid local queue before creating or applying labels', async () => {
+      writeFileSync(paths().queue, 'daw 1055\ndaw invalid\n');
+
+      const res = await runMain('queue', 'migrate');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('queue is invalid');
+      expect(h.octokit.rest.issues.createLabel).not.toHaveBeenCalled();
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+    });
+
+    it('rejects a queue with a duplicate issue number before any GitHub call', async () => {
+      writeFileSync(paths().queue, 'daw 1055\ndocs 1055\n');
+
+      const res = await runMain('queue', 'migrate');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('duplicate issue #1055');
+      expect(h.octokit.rest.issues.get).not.toHaveBeenCalled();
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+    });
+
+    it('rejects an empty queue with no issue entries', async () => {
+      writeFileSync(paths().queue, '\n# nothing queued yet\n');
+
+      const res = await runMain('queue', 'migrate');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('no issue entries');
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+    });
+
+    it('aborts the whole migration when an entry is a pull request, not an issue', async () => {
+      writeFileSync(paths().queue, 'daw 1055\n');
+      h.octokit.rest.issues.get = vi.fn(async () => ({ data: { title: 'x', pull_request: {} } }));
+
+      const res = await runMain('queue', 'migrate');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('is a pull request');
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+    });
+
+    it('previews the migration plan without mutating GitHub in --dry-run', async () => {
+      const source = 'daw 1055\ndocs 200\n';
+      writeFileSync(paths().queue, source);
+
+      const res = await runMain('queue', 'migrate', '--dry-run');
+
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('dry run');
+      expect(logged()).toContain('#1055 → lane daw, position 1');
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+      expect(h.octokit.rest.issues.createLabel).not.toHaveBeenCalled();
+      expect(readFileSync(paths().queue, 'utf-8')).toBe(source);
+    });
+
+    it('aborts the whole migration when an entry is a closed issue', async () => {
+      writeFileSync(paths().queue, 'daw 1055\n');
+      h.octokit.rest.issues.get = vi.fn(async () => ({ data: { title: 'x', state: 'closed' } }));
+
+      const res = await runMain('queue', 'migrate');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('closed');
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+    });
+
+    it('aborts the whole migration when an entry is inaccessible', async () => {
+      writeFileSync(paths().queue, 'daw 1055\n');
+      h.octokit.rest.issues.get = vi.fn(async () => {
+        throw Object.assign(new Error('Not Found'), { status: 404 });
+      });
+
+      const res = await runMain('queue', 'migrate');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('inaccessible');
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+    });
+
+    it('surfaces a GitHub failure during apply as a CliExitError', async () => {
+      writeFileSync(paths().queue, 'daw 1055\n');
+      h.octokit.rest.issues.addLabels = vi.fn(async () => {
+        throw new Error('label API down');
+      });
+
+      const res = await runMain('queue', 'migrate');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('queue migration failed');
+    });
+
+    it('migrates from an explicit --file path, leaving the default queue untouched', async () => {
+      const legacyFile = join(paths().root, 'legacy-queue');
+      writeFileSync(legacyFile, 'daw 1055\n');
+
+      const res = await runMain('queue', 'migrate', '--file', '.factory/legacy-queue');
+
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('labelled from');
+      expect(logged()).toContain(legacyFile);
+      expect(existsSync(paths().queue)).toBe(false);
+    });
+  });
+
+  describe('queue add', () => {
+    beforeEach(() => {
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) return h.ghRepo;
+        return '';
+      };
+      h.octokit.rest.issues.createLabel = vi.fn(async () => ({}));
+      h.octokit.rest.issues.addLabels = vi.fn(async () => ({}));
+      h.octokit.rest.issues.listForRepo = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.issues.listLabelsOnIssue = vi.fn(async () => ({ data: [] }));
+    });
+
+    it('queues explicit issues into a lane, applying queued/lane/order labels in order', async () => {
+      const res = await runMain('queue', 'add', 'daw', '10', '11');
+
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('#10 queued');
+      expect(logged()).toContain('#11 queued');
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenNthCalledWith(1, {
+        owner: 'on-par',
+        repo: 'software-factory',
+        issue_number: 10,
+        labels: ['factory:queued', 'factory:lane:daw', 'factory:order:1'],
+      });
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenNthCalledWith(2, {
+        owner: 'on-par',
+        repo: 'software-factory',
+        issue_number: 11,
+        labels: ['factory:queued', 'factory:lane:daw', 'factory:order:2'],
+      });
+    });
+
+    it('creates missing factory labels idempotently before applying them', async () => {
+      await runMain('queue', 'add', 'daw', '10');
+
+      expect(h.octokit.rest.issues.createLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'factory:queued' }),
+      );
+      expect(h.octokit.rest.issues.createLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'factory:lane:daw' }),
+      );
+      expect(h.octokit.rest.issues.createLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'factory:order:1' }),
+      );
+    });
+
+    it('exits nonzero and reports a per-issue failure without dropping the successful issue', async () => {
+      h.octokit.rest.issues.addLabels = vi.fn(async ({ issue_number }: any) => {
+        if (issue_number === 10) throw new Error('label API down');
+        return {};
+      });
+
+      const res = await runMain('queue', 'add', 'daw', '10', '11');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('#10 failed');
+      expect(logged()).toContain('#11 queued');
+    });
+
+    it('exits 2 for an invalid issue argument before any GitHub call', async () => {
+      const res = await runMain('queue', 'add', 'daw', 'notanumber');
+
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(h.octokit.rest.issues.createLabel).not.toHaveBeenCalled();
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+    });
+  });
+
   describe('stop / resume', () => {
     it('stop writes the STOP file', async () => {
       await runMain('stop');
@@ -1021,17 +1392,19 @@ bash scripts/verify.sh
   describe('run', () => {
     it('exits 2 when the queue file is missing', async () => {
       rmSync(paths().queue, { force: true });
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res).toEqual({ exited: true, code: 2 });
     });
 
-    it('reads the queue, starts lanes, and stops immediately when STOP is present', async () => {
+    it('loudly clears a stale STOP file left over from a prior halt and proceeds through the queue (#811)', async () => {
       writeFileSync(paths().queue, '# header\napp 1\napp 2\ndocs 3\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
+      expect(existsSync(paths().stop)).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
-      expect(events).toContain('stopped');
+      expect(events).toContain('stop-file-cleared');
+      expect(events).not.toContain('"type":"stopped"');
       expect(events).toContain('run-done');
     });
 
@@ -1039,7 +1412,7 @@ bash scripts/verify.sh
       h.factoryConfig = { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: true } };
       writeFileSync(paths().queue, '# header\napp 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       expect(sweepWorktrees).toHaveBeenCalledWith(
         expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7, repo: h.ghRepo }),
@@ -1052,7 +1425,7 @@ bash scripts/verify.sh
       h.factoryConfig = { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: false } };
       writeFileSync(paths().queue, '# header\napp 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       expect(sweepWorktrees).not.toHaveBeenCalled();
     });
@@ -1062,7 +1435,7 @@ bash scripts/verify.sh
       (sweepWorktrees as any).mockRejectedValueOnce(new Error('gc boom'));
       writeFileSync(paths().queue, '# header\napp 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('gc boom');
@@ -1072,7 +1445,7 @@ bash scripts/verify.sh
     it('skips malformed queue lines, starts lanes only for valid entries, and warns', async () => {
       writeFileSync(paths().queue, '# header\napp 1\napp abc\ndocs 3\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       const err = errored();
       expect(err).toContain('malformed');
@@ -1088,7 +1461,7 @@ bash scripts/verify.sh
       process.env.FACTORY_USAGE_WATCH = '0';
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('run-done');
@@ -1099,7 +1472,7 @@ bash scripts/verify.sh
       vi.mocked(core.watchUsage).mockRejectedValueOnce(new Error('watchdog exploded'));
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('usage watchdog crashed');
@@ -1115,7 +1488,7 @@ bash scripts/verify.sh
       };
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
 
       expect(existsSync(paths().kpiHistory)).toBe(true);
@@ -1132,8 +1505,8 @@ bash scripts/verify.sh
     it('appends a second KPI snapshot on a second run', async () => {
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
-      await runMain('run');
-      await runMain('run');
+      await runMain('run', '--local-queue');
+      await runMain('run', '--local-queue');
 
       const lines = readFileSync(paths().kpiHistory, 'utf-8').trim().split('\n').filter(Boolean);
       expect(lines).toHaveLength(2);
@@ -1142,7 +1515,7 @@ bash scripts/verify.sh
     it('does not create a KPI snapshot when the queue has no entries', async () => {
       writeFileSync(paths().queue, '# header\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
 
       const events = readFileSync(paths().events, 'utf-8');
@@ -1160,7 +1533,7 @@ bash scripts/verify.sh
       };
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
 
       const events = readFileSync(paths().events, 'utf-8');
@@ -1176,12 +1549,95 @@ bash scripts/verify.sh
       writeFileSync(paths().queue, 'app 1\n');
       writeFileSync(paths().stop, '');
       mkdirSync(paths().kpiHistory);
-      const res = await runMain('run');
+      const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
 
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('run-done');
       expect(events).toContain('kpi snapshot failed');
+    });
+
+    it('without --local-queue, discovers lanes from GitHub Issues instead of the queue file, and finishes cleanly when nothing is queued', async () => {
+      rmSync(paths().queue, { force: true });
+      const res = await runMain('run');
+      expect(res.exited).toBe(false);
+      expect(h.octokit.rest.issues.listForRepo).toHaveBeenCalled();
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('run-done');
+      expect(events).not.toContain('kpi-snapshot');
+    });
+
+    describe('macOS keychain preflight (#1014)', () => {
+      let originalPlatform: NodeJS.Platform;
+
+      beforeEach(() => {
+        trackEnv('TMUX', 'ANTHROPIC_API_KEY');
+        originalPlatform = process.platform;
+        Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+        h.claudeAvailable = true;
+        delete process.env.TMUX;
+        delete process.env.ANTHROPIC_API_KEY;
+        writeFileSync(paths().queue, 'app 1\n');
+        writeFileSync(paths().stop, '');
+      });
+
+      afterEach(() => {
+        Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+      });
+
+      it('aborts before claiming any issue when the keychain is unreadable inside tmux', async () => {
+        process.env.TMUX = '/tmp/tmux-1000/default,1234,0';
+        h.execSyncImpl = (cmd: string) => {
+          if (cmd.includes('find-generic-password')) throw new Error('SecKeychainSearchCopyNext: exit 44');
+          return '';
+        };
+        await expect(runMain('run', '--local-queue')).rejects.toThrow(/tmux/);
+        const events = readFileSync(paths().events, 'utf-8');
+        expect(events).toContain('environment_warning');
+        expect(events).toContain('local_auth');
+        expect(events).not.toContain(`lane 'app' started`);
+      });
+
+      it('warns but proceeds when the keychain is unreadable outside tmux', async () => {
+        h.execSyncImpl = (cmd: string) => {
+          if (cmd.includes('find-generic-password')) throw new Error('SecKeychainSearchCopyNext: exit 44');
+          return '';
+        };
+        const res = await runMain('run', '--local-queue');
+        expect(res.exited).toBe(false);
+        const events = readFileSync(paths().events, 'utf-8');
+        expect(events).toContain('run-done');
+      });
+
+      it('proceeds when the login keychain entry is readable', async () => {
+        h.execSyncImpl = () => '';
+        const res = await runMain('run', '--local-queue');
+        expect(res.exited).toBe(false);
+        const events = readFileSync(paths().events, 'utf-8');
+        expect(events).toContain('run-done');
+      });
+
+      it('skips the probe when the claude CLI is not on PATH', async () => {
+        h.claudeAvailable = false;
+        h.execSyncImpl = () => {
+          throw new Error('security should not be invoked when claude is unavailable');
+        };
+        const res = await runMain('run', '--local-queue');
+        expect(res.exited).toBe(false);
+        const events = readFileSync(paths().events, 'utf-8');
+        expect(events).toContain('run-done');
+      });
+
+      it('skips the probe when ANTHROPIC_API_KEY auth is in use', async () => {
+        process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
+        h.execSyncImpl = () => {
+          throw new Error('security should not be invoked when using ANTHROPIC_API_KEY');
+        };
+        const res = await runMain('run', '--local-queue');
+        expect(res.exited).toBe(false);
+        const events = readFileSync(paths().events, 'utf-8');
+        expect(events).toContain('run-done');
+      });
     });
   });
 
@@ -1236,6 +1692,97 @@ bash scripts/verify.sh
     });
   });
 
+  describe('daemon', () => {
+    it('starts the foreground factoryd, serves the registry, and shuts down cleanly on SIGINT', async () => {
+      const registryFile = join(paths().state, 'registry.json');
+      writeFileSync(
+        registryFile,
+        JSON.stringify({
+          version: 1,
+          repos: {
+            'on-par/software-factory': {
+              path: h.repoRoot,
+              attachedAt: '2026-01-01T00:00:00.000Z',
+              state: 'active',
+            },
+          },
+        }),
+      );
+
+      const runPromise = runMain('daemon', 'run', '--port', '0', '--registry', registryFile);
+      while (!logged().includes('listening on 127.0.0.1:')) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      expect(logged()).toContain(registryFile);
+
+      // Runtime state lives in dirname(registryFile) while the daemon is up (#1177).
+      const pidFile = join(paths().state, 'daemon.pid');
+      const portFile = join(paths().state, 'daemon.port');
+      const logFile = join(paths().state, 'daemon.log');
+      const boundPort = Number(/listening on 127\.0\.0\.1:(\d+)/.exec(logged())![1]);
+      expect(readFileSync(pidFile, 'utf-8').trim()).toBe(String(process.pid));
+      expect(JSON.parse(readFileSync(portFile, 'utf-8'))).toEqual({
+        pid: process.pid,
+        port: boundPort,
+        host: '127.0.0.1',
+      });
+
+      process.emit('SIGINT');
+      const res = await runPromise;
+
+      expect(res.exited).toBe(true);
+      expect(res.code).toBe(0);
+      expect(existsSync(pidFile)).toBe(false);
+      expect(existsSync(portFile)).toBe(false);
+      expect(readFileSync(logFile, 'utf-8')).toContain(`factoryd: listening on 127.0.0.1:${boundPort}`);
+    });
+
+    it('exits with code 2 on an invalid --port and never binds', async () => {
+      const res = await runMain('daemon', 'run', '--port', 'abc');
+      expect(res.exited).toBe(true);
+      expect(res.code).toBe(2);
+      expect(logged()).not.toContain('listening on');
+    });
+
+    it('refuses to start when a live daemon holds the pid file, leaving it untouched', async () => {
+      const registryFile = join(paths().state, 'registry.json');
+      const pidFile = join(paths().state, 'daemon.pid');
+      // The test process itself is alive by construction.
+      writeFileSync(pidFile, `${process.pid}\n`);
+
+      const res = await runMain('daemon', 'run', '--port', '0', '--registry', registryFile);
+
+      expect(res.exited).toBe(true);
+      expect(res.code).toBe(2);
+      expect(errored()).toContain(`factoryd already running (pid ${process.pid})`);
+      expect(readFileSync(pidFile, 'utf-8')).toBe(`${process.pid}\n`);
+      expect(logged()).not.toContain('listening on');
+    });
+
+    it('a stale pid file from a killed daemon does not block a restart', async () => {
+      const registryFile = join(paths().state, 'registry.json');
+      writeFileSync(registryFile, JSON.stringify({ version: 1, repos: {} }));
+      const pidFile = join(paths().state, 'daemon.pid');
+      // A real (bypassing the module mock) short-lived child yields a pid that
+      // is guaranteed dead once spawnSync returns.
+      const { spawnSync } = await vi.importActual<typeof ChildProcess>('node:child_process');
+      const deadPid = spawnSync(process.execPath, ['-e', '']).pid;
+      writeFileSync(pidFile, `${deadPid}\n`);
+
+      const runPromise = runMain('daemon', 'run', '--port', '0', '--registry', registryFile);
+      while (!logged().includes('listening on 127.0.0.1:')) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      expect(logged()).toContain(`removed stale pid file (pid ${deadPid})`);
+      expect(readFileSync(pidFile, 'utf-8').trim()).toBe(String(process.pid));
+
+      process.emit('SIGINT');
+      const res = await runPromise;
+      expect(res.exited).toBe(true);
+      expect(res.code).toBe(0);
+    });
+  });
+
   describe('worktree gc', () => {
     it('dry-run calls sweepWorktrees with dryRun: true and takes no lock', async () => {
       h.gcReport = { removed: [], kept: 3, dryRun: true };
@@ -1265,21 +1812,21 @@ bash scripts/verify.sh
   describe('supervise', () => {
     it('exits 2 when the queue is empty', async () => {
       writeFileSync(paths().queue, '# just comments\n');
-      const res = await runMain('supervise', '--now');
+      const res = await runMain('supervise', '--now', '--local-queue');
       expect(res).toEqual({ exited: true, code: 2 });
     });
 
     it('exits 2 on invalid usage knobs', async () => {
       writeFileSync(paths().queue, 'app 1\n');
       process.env.FACTORY_USAGE_CAP = 'abc';
-      const res = await runMain('supervise', '--now');
+      const res = await runMain('supervise', '--now', '--local-queue');
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('FACTORY_USAGE_CAP');
     });
 
     it('exits 2 when the queue contains only malformed lines, and warns why', async () => {
       writeFileSync(paths().queue, 'app abc\n');
-      const res = await runMain('supervise', '--now');
+      const res = await runMain('supervise', '--now', '--local-queue');
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('malformed');
     });
@@ -1287,12 +1834,19 @@ bash scripts/verify.sh
     it('--now runs the queue once end-to-end and finishes once the queue drains without STOP', async () => {
       process.env.FACTORY_MERGE = '1';
       writeFileSync(paths().queue, 'app 1\n');
-      const res = await runMain('supervise', '--now');
+      const res = await runMain('supervise', '--now', '--local-queue');
       expect(res.exited).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('supervisor-done');
       expect(events).toContain('run-done');
     }, 20_000);
+
+    it('without --local-queue, counts pending work via GitHub Issues and exits 2 when nothing is queued', async () => {
+      rmSync(paths().queue, { force: true });
+      const res = await runMain('supervise', '--now');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(h.octokit.rest.issues.listForRepo).toHaveBeenCalled();
+    });
   });
 
   describe('local-small-dry-run', () => {
@@ -1384,6 +1938,28 @@ bash scripts/verify.sh
       const state = JSON.parse(readFileSync(join(queueDir, 'overnight-state.json'), 'utf-8'));
       expect(state.items).toEqual([expect.objectContaining({ issue: 5, status: 'parked' })]);
     });
+
+    // Regression (#681): the curated overnight queue needs a human to prune it —
+    // a closed issue maps to 'parked', not 'ready' or 'failed'.
+    it('parks a closed issue for a human, reports it, and logs overnight-park', async () => {
+      h.diagnoses = [
+        { model: 'w', provider: 'openai', tiers: ['worker'], reachable: true, experimental: false, reason: 'ok' },
+      ];
+      h.octokit.rest.issues.get = vi.fn(async () => ({ data: { title: 'Fix the bug', state: 'closed' } }));
+      const queueDir = join(paths().state, 'local-small');
+      mkdirSync(queueDir, { recursive: true });
+      writeFileSync(join(queueDir, 'overnight-queue'), 'overnight 5\n');
+
+      const res = await runMain('local-small-overnight');
+
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('overnight parked: 1');
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('skipped-already-closed');
+
+      const state = JSON.parse(readFileSync(join(queueDir, 'overnight-state.json'), 'utf-8'));
+      expect(state.items).toEqual([expect.objectContaining({ issue: 5, status: 'parked' })]);
+    });
   });
 
   describe('land', () => {
@@ -1441,6 +2017,52 @@ bash scripts/verify.sh
       expect(errored()).toContain('merge failed for issue #5');
       expect(errored()).toContain('issue vanished');
     });
+
+    it('scopes the git/merge locks to mutations, not the CI watch (#645)', async () => {
+      const trace: string[] = [];
+      let mergeLockAcquisitions = 0;
+      vi.mocked(withGitLock).mockImplementation(async (_root: any, fn: any) => {
+        trace.push('git-lock:acquire');
+        try {
+          return await fn();
+        } finally {
+          trace.push('git-lock:release');
+        }
+      });
+      vi.mocked(withFileLock).mockImplementation(async (lock: any, fn: any) => {
+        const isMerge = String(lock).endsWith('merge.lock');
+        if (isMerge) mergeLockAcquisitions++;
+        trace.push(`file-lock:acquire:${isMerge ? 'merge' : 'git'}`);
+        try {
+          return await fn();
+        } finally {
+          trace.push('file-lock:release');
+        }
+      });
+      vi.mocked(watchChecks).mockImplementation(async () => {
+        trace.push('watch');
+        return 'success' as const;
+      });
+
+      try {
+        const res = await runMain('land', '5');
+        expect(res.exited).toBe(false);
+
+        let depth = 0;
+        for (const entry of trace) {
+          if (entry === 'git-lock:acquire') depth++;
+          else if (entry === 'git-lock:release') depth--;
+          else if (entry === 'watch') expect(depth).toBe(0);
+        }
+        expect(mergeLockAcquisitions).toBeGreaterThanOrEqual(2);
+      } finally {
+        vi.mocked(withGitLock).mockImplementation(async (_root: string, fn: () => Promise<unknown>) => fn());
+        vi.mocked(withFileLock).mockImplementation(async (_lock: string, fn: () => Promise<unknown>, _opts?: unknown) =>
+          fn(),
+        );
+        vi.mocked(watchChecks).mockImplementation(async () => 'success');
+      }
+    });
   });
 
   describe('resume-approved', () => {
@@ -1481,6 +2103,14 @@ bash scripts/verify.sh
       const res = await runMain('ship', '5');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('PR #99 ready for review');
+    });
+
+    // Regression (#681): a closed issue exits 0 (not 1) through the CLI command.
+    it('exits 0 on a closed issue instead of failing', async () => {
+      h.octokit.rest.issues.get = vi.fn(async () => ({ data: { title: 'Fix the bug', state: 'closed' } }));
+      const res = await runMain('ship', '5');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('skipped:');
     });
 
     it('reports already-delivered instead of "ready for review" when SHIP recovery finds a prior merged PR (#520)', async () => {
@@ -1604,7 +2234,7 @@ bash scripts/verify.sh
     });
 
     it('exits 2 with the not-initialized message when .factory/ is missing', async () => {
-      rmSync(paths().state, { recursive: true, force: true });
+      rmSync(paths().root, { recursive: true, force: true });
       const res = await runMain('ship', '5');
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('factory not initialized — run `factory init` first');
@@ -1631,6 +2261,46 @@ bash scripts/verify.sh
         .map((line) => JSON.parse(line));
       expect(events.some((e: any) => e.type === 'sandbox-disabled' && e.msg.includes('--no-sandbox'))).toBe(false);
     });
+
+    it('warns that FACTORY_MERGE does not apply to ship and names factory land/run (#978)', async () => {
+      process.env.FACTORY_MERGE = '1';
+      const res = await runMain('ship', '5');
+      expect(res.exited).toBe(false);
+      expect(errored()).toContain('FACTORY_MERGE=1 ignored');
+      expect(errored()).toContain('factory land 5');
+      expect(errored()).toContain('factory run');
+      expect(logged()).toContain('PR #99 ready for review');
+    });
+
+    it('records the ignored-merge notice as a warn event (#978)', async () => {
+      process.env.FACTORY_MERGE = '1';
+      const res = await runMain('ship', '5');
+      expect(res.exited).toBe(false);
+      const events = readFileSync(paths().events, 'utf-8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      const warnEvents = events.filter((e: any) => e.type === 'warn' && e.issue === '5' && e.msg.includes('ignored'));
+      expect(warnEvents).toHaveLength(1);
+    });
+
+    it('warns for FACTORY_MERGE_ADMIN alone (#978)', async () => {
+      process.env.FACTORY_MERGE_ADMIN = '1';
+      const res = await runMain('ship', '5');
+      expect(res.exited).toBe(false);
+      expect(errored()).toContain('FACTORY_MERGE_ADMIN=1 ignored');
+    });
+
+    it('prints no merge notice when neither variable is set (#978)', async () => {
+      const res = await runMain('ship', '5');
+      expect(res.exited).toBe(false);
+      expect(errored()).not.toContain('ignored —');
+      const events = readFileSync(paths().events, 'utf-8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      expect(events.some((e: any) => e.type === 'warn' && e.msg.includes('ignored'))).toBe(false);
+    });
   });
 
   describe('run-issue (one-shot)', () => {
@@ -1645,6 +2315,16 @@ bash scripts/verify.sh
       expect(vi.mocked(core.checkPhase)).toHaveBeenCalledTimes(1);
       expect(vi.mocked(core.shipPhase)).toHaveBeenCalledTimes(1);
       expect(h.octokit.rest.issues.get).toHaveBeenCalledWith(expect.objectContaining({ issue_number: 5 }));
+    });
+
+    // Regression (#681): a closed issue exits 0 (not 1) through the CLI command,
+    // reusing the ctx.workRequest resolved by this command's own preflight.
+    it('exits 0 on a closed issue instead of failing', async () => {
+      h.octokit.rest.issues.get = vi.fn(async () => ({ data: { title: 'Fix the bug', state: 'closed' } }));
+      const res = await runMain('run-issue', '5');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('skipped:');
+      expect(h.octokit.rest.issues.get).toHaveBeenCalledTimes(1);
     });
 
     it('leaves the queue file untouched', async () => {
@@ -1711,7 +2391,7 @@ bash scripts/verify.sh
     });
 
     it('exits 2 with the not-initialized message when .factory/ is missing', async () => {
-      rmSync(paths().state, { recursive: true, force: true });
+      rmSync(paths().root, { recursive: true, force: true });
       const res = await runMain('run-issue', '5');
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('factory not initialized — run `factory init` first');
@@ -1872,7 +2552,7 @@ Please add a widget that does the thing.
     });
 
     it('exits 2 with the not-initialized message when .factory/ is missing', async () => {
-      rmSync(paths().state, { recursive: true, force: true });
+      rmSync(paths().root, { recursive: true, force: true });
       const briefPath = writeBrief();
 
       const res = await runMain('run-brief', briefPath);
@@ -2155,7 +2835,7 @@ Please add a widget that does the thing.
 
     it('reports a live and a stale port lease without failing doctor', async () => {
       h.claudeAvailable = true;
-      const portsFile = join(h.repoRoot, '.factory', 'ports.json');
+      const portsFile = join(h.repoRoot, '.factory', 'state', 'ports.json');
       writeFileSync(
         portsFile,
         JSON.stringify({
@@ -2188,7 +2868,7 @@ Please add a widget that does the thing.
 
     it('--reconcile removes stale leases and reports freed ports', async () => {
       h.claudeAvailable = true;
-      const portsFile = join(h.repoRoot, '.factory', 'ports.json');
+      const portsFile = join(h.repoRoot, '.factory', 'state', 'ports.json');
       writeFileSync(
         portsFile,
         JSON.stringify({
@@ -2223,7 +2903,7 @@ Please add a widget that does the thing.
 
     it('--reconcile prints orphan-reaper events for the freed lease', async () => {
       h.claudeAvailable = true;
-      const portsFile = join(h.repoRoot, '.factory', 'ports.json');
+      const portsFile = join(h.repoRoot, '.factory', 'state', 'ports.json');
       writeFileSync(
         portsFile,
         JSON.stringify({
@@ -2263,6 +2943,107 @@ Please add a widget that does the thing.
       expect(logged()).toContain('unparseable');
       expect(logged()).toContain('(20.0%)');
     });
+
+    it('--reconcile sweeps dead-run worktrees and reports them', async () => {
+      h.claudeAvailable = true;
+      h.gcReport = {
+        removed: [
+          {
+            path: '/wt/a',
+            branch: 'ship-it/5-x',
+            ageDays: 1,
+            reason: 'merged',
+            scrubbedFiles: [],
+            branchDeleted: true,
+          },
+        ],
+        kept: 0,
+        dryRun: false,
+      };
+
+      const res = await runMain('doctor', '--reconcile');
+      expect(res.exited).toBe(false);
+      expect(sweepWorktrees).toHaveBeenCalledWith(
+        expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7 }),
+        expect.anything(),
+      );
+      expect(logged()).toContain('reconcile: removed worktree /wt/a');
+      expect(logged()).toContain('deleted branch ship-it/5-x');
+    });
+
+    it('doctor without --reconcile never sweeps worktrees', async () => {
+      h.claudeAvailable = true;
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(sweepWorktrees).not.toHaveBeenCalled();
+    });
+
+    it('--reconcile survives a failing worktree sweep', async () => {
+      h.claudeAvailable = true;
+      (sweepWorktrees as any).mockRejectedValueOnce(new Error('gc boom'));
+      const res = await runMain('doctor', '--reconcile');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('reconcile: worktree sweep failed');
+    });
+
+    it('--reconcile releases stale claims and reports them', async () => {
+      h.claudeAvailable = true;
+      h.staleClaims = [{ issue: 42, label: 'factory:claimed-by:test-host-777', pid: 777, released: true }];
+
+      const res = await runMain('doctor', '--reconcile');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('reconcile: released issue #42 back to factory:queued');
+    });
+
+    it('doctor without --reconcile never calls releaseStaleClaims', async () => {
+      h.claudeAvailable = true;
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(releaseStaleClaims).not.toHaveBeenCalled();
+    });
+
+    it('--reconcile survives a rejected releaseStaleClaims', async () => {
+      h.claudeAvailable = true;
+      (releaseStaleClaims as any).mockRejectedValueOnce(new Error('claims boom'));
+      const res = await runMain('doctor', '--reconcile');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('reconcile: stale claim release failed');
+    });
+
+    it('--reconcile skips stale claims when no GitHub token is available', async () => {
+      h.claudeAvailable = true;
+      delete process.env.GITHUB_TOKEN;
+      delete process.env.GH_TOKEN;
+      h.execSyncImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('status --porcelain')) return '';
+        if (cmd.includes('gh auth token')) throw new Error('not logged in');
+        if (cmd.includes('gh auth status')) throw new Error('not logged in');
+        return '';
+      };
+      await runMain('doctor', '--reconcile');
+      expect(logged()).toContain('reconcile: skipping stale claims — no GitHub repo or token');
+      expect(releaseStaleClaims).not.toHaveBeenCalled();
+    });
+
+    it('reports a green-and-ready PR with its owning issue', async () => {
+      h.claudeAvailable = true;
+      h.greenPrs = [{ number: 957, branch: 'ship-it/939-x', title: 't', issue: 939, ageHours: 9 }];
+
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('green PR #957');
+      expect(logged()).toContain('issue #939');
+    });
+
+    it('reports no green-and-ready PRs when there are none', async () => {
+      h.claudeAvailable = true;
+      h.greenPrs = [];
+
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('no green-and-ready PRs awaiting merge');
+    });
   });
 
   describe('git/github detection failures', () => {
@@ -2300,6 +3081,38 @@ describe('shipIssue (direct)', () => {
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('ready');
     expect(events).toContain('worktree');
+  });
+
+  it('loads the committed repo config from paths.root, not paths.state', async () => {
+    const core = await import('@on-par/factory-core');
+    await shipIssue(5, {}, ctx());
+    expect(vi.mocked(core.loadRepoConfig)).toHaveBeenCalledWith(h.repoRoot, paths().root);
+  });
+
+  it('reads providers flags from .factory/config.json (no symlink needed)', async () => {
+    const core = await import('@on-par/factory-core');
+    mkdirSync(paths().root, { recursive: true });
+    writeFileSync(paths().config, JSON.stringify({ version: 1, providers: { ollama: false } }));
+    await shipIssue(5, {}, ctx());
+    expect(vi.mocked(core.loadRepoConfig).mock.results.at(-1)?.value).toEqual({
+      version: 1,
+      providers: { ollama: false },
+    });
+  });
+
+  // Regression (#681): a closed issue must be refused before any resource is
+  // committed — no worktree, no port lease, no model call.
+  it('refuses a closed issue before any resource is committed', async () => {
+    h.octokit.rest.issues.get = vi.fn(async () => ({ data: { title: 'Fix the bug', state: 'closed' } }));
+
+    await expect(shipIssue(5, {}, ctx())).rejects.toBeInstanceOf(IssueSkippedError);
+
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('skipped-already-closed');
+    expect(events).not.toContain('"type":"worktree"');
+    expect(events).not.toContain('"type":"environment_lease"');
+    expect(events).not.toContain('"type":"plan"');
+    expect(events).not.toContain('"type":"ready"');
   });
 
   it('logs an issue-title event with the fetched title before any other events', async () => {
@@ -2399,6 +3212,41 @@ describe('shipIssue (direct)', () => {
     expect(escalateEvents).toHaveLength(1);
   });
 
+  it('rewrites the queue entry and throws IssueDecomposedError (not a park) when the plan decomposed the issue', async () => {
+    writeFileSync(paths().queue, 'app 5\n');
+    h.planResult = { ok: false, route: 'claude', escalate: 'decomposed', decomposed: { childIssues: [10, 11] } };
+
+    const err = await shipIssue(5, {}, ctx()).catch((e) => e);
+
+    expect(err).toBeInstanceOf(IssueDecomposedError);
+    expect(err.childIssues).toEqual([10, 11]);
+    expect(readFileSync(paths().queue, 'utf-8')).toBe('app 10\napp 11\n');
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('queue entry for #5 replaced with #10, #11');
+    expect(events).not.toContain('"type":"escalate"');
+    expect(events).not.toContain('"type":"fail"');
+  });
+
+  it('logs decompose_filed without rewriting when the decomposed issue has no queue entry', async () => {
+    h.planResult = { ok: false, route: 'claude', escalate: 'decomposed', decomposed: { childIssues: [10, 11] } };
+
+    await expect(shipIssue(5, {}, ctx())).rejects.toBeInstanceOf(IssueDecomposedError);
+
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('#5 had no queue entry to replace — continuing the lane with #10, #11');
+  });
+
+  it('logs decompose_file_failed but still throws IssueDecomposedError when the queue rewrite errors', async () => {
+    mkdirSync(paths().queue); // a directory at the queue path makes readFileSync throw
+    h.planResult = { ok: false, route: 'claude', escalate: 'decomposed', decomposed: { childIssues: [10] } };
+
+    await expect(shipIssue(5, {}, ctx())).rejects.toBeInstanceOf(IssueDecomposedError);
+
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('decompose_file_failed');
+    expect(events).toContain('queue rewrite for #5 failed');
+  });
+
   it('throws a LaneParkError with reason escalate when the build escalates', async () => {
     h.buildResult = { ok: false, escalate: 'stuck' };
     await expect(shipIssue(5, {}, ctx())).rejects.toMatchObject({ reason: 'escalate' });
@@ -2485,7 +3333,7 @@ describe('shipIssue (direct)', () => {
   });
 
   it('runs the orphan reaper over a reaped stale lease and logs each event', async () => {
-    const portsFile = join(h.repoRoot, '.factory', 'ports.json');
+    const portsFile = join(h.repoRoot, '.factory', 'state', 'ports.json');
     writeFileSync(
       portsFile,
       JSON.stringify({
@@ -2651,7 +3499,12 @@ describe('shipIssue (direct)', () => {
   it('writes a failed local-only run report and logs the park reason on error', async () => {
     trackEnv('FACTORY_LOCAL_ONLY');
     process.env.FACTORY_LOCAL_ONLY = '1';
-    h.checkResult = { passed: false, summary: { results: [], failures: 1 }, reworkRounds: 0 };
+    h.checkResult = {
+      passed: false,
+      summary: { results: [], failures: 1 },
+      reworkRounds: 0,
+      failureSignature: 'sig-1',
+    };
     const core = await import('@on-par/factory-core');
     await expect(shipIssue(5, {}, ctx())).rejects.toBeTruthy();
     const report = vi.mocked(core.writeLocalRunReport).mock.calls.at(-1)?.[0] as any;
@@ -2665,6 +3518,19 @@ describe('shipIssue (direct)', () => {
     expect(events).toContain('sandbox disabled by config/FACTORY_SANDBOX');
   });
 
+  it('passes the docker-sandbox descriptor to setupWorktree without a speculative sandbox log when sandbox.runtime is docker-sandbox', async () => {
+    h.factoryConfig = { ...h.factoryConfig, sandbox: { ...h.factoryConfig.sandbox, runtime: 'docker-sandbox' } };
+    await shipIssue(5, {}, ctx());
+    const events = readFileSync(paths().events, 'utf-8');
+    // createMicroVm (not the CLI) owns the outcome-driven 'sandbox'/'sandbox-unavailable'
+    // events; setupWorktree is mocked here, so neither fires — the CLI must not log a
+    // premature "active" event before the microVM actually exists.
+    expect(events).not.toContain('docker-sandbox microVM active for lane');
+    expect(vi.mocked(setupWorktree).mock.calls.at(-1)?.[4]).toEqual(
+      expect.objectContaining({ runtime: 'docker-sandbox' }),
+    );
+  });
+
   it('activates the sandbox policy and logs the degraded-egress warning when a sandbox runtime is available', async () => {
     h.execSyncImpl = (cmd: string) => {
       if (cmd.includes('command -v sandbox-exec') || cmd.includes('command -v firejail')) return '/usr/bin/tool';
@@ -2675,6 +3541,21 @@ describe('shipIssue (direct)', () => {
     expect(events).toContain('sandbox-degraded');
     expect(events).toContain('host-level egress filtering unavailable');
     expect(events).not.toContain('sandbox-unavailable');
+  });
+
+  it('stamps the resolved sandboxRuntime and running reworkRoundCount onto each cost row (#655)', async () => {
+    h.factoryConfig = { ...h.factoryConfig, sandbox: { ...h.factoryConfig.sandbox, runtime: 'docker-sandbox' } };
+    h.checkResult = { passed: true, summary: { results: [], failures: 0 }, reworkRounds: 2 };
+
+    await shipIssue(5, {}, ctx());
+
+    const costs = readFileSync(paths().costs, 'utf-8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(costs).toHaveLength(1);
+    expect(costs[0].sandboxRuntime).toBe('docker-sandbox');
+    expect(costs[0].reworkRoundCount).toBe(2);
   });
 
   it('logs skip-ci when FACTORY_SKIP_CI resolves to true', async () => {
@@ -2827,6 +3708,52 @@ describe('CliExitError (direct command invocation)', () => {
       message: expect.stringContaining('no open PR'),
     });
     expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('materializes a missing adopted PR worktree from its remote head, rebases it, and rechecks CI', async () => {
+    const branch = 'contributor/adopted-pr';
+    const worktree = `${h.repoRoot}-factory-ship-it-5`;
+    const commands: string[] = [];
+    const originalExec = h.execImpl;
+    h.execImpl = (command) => {
+      commands.push(command);
+      return originalExec(command);
+    };
+    h.octokit.rest.pulls.list = vi.fn(async ({ head }: { head?: string }) =>
+      head ? { data: [] } : { data: [{ number: 77, head: { ref: branch }, body: 'Closes #5' }] },
+    );
+    h.octokit.graphql = vi.fn(async (query: string) =>
+      query.trimStart().startsWith('query')
+        ? { repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' } } }
+        : {},
+    );
+    h.setupWorktreeImpl = async (_repoRoot, _branch, path) => {
+      mkdirSync(path, { recursive: true });
+    };
+    vi.mocked(watchChecks).mockResolvedValue('success');
+
+    try {
+      await expect(cmdLand(5)).resolves.toBeUndefined();
+      expect(setupWorktree).toHaveBeenCalledWith(
+        h.repoRoot,
+        branch,
+        worktree,
+        `origin/${branch}`,
+        undefined,
+        expect.any(Function),
+      );
+      expect(commands).toContain('git rebase origin/main');
+      expect(commands).toContain("git push --force-with-lease origin 'contributor/adopted-pr'");
+      expect(watchChecks).toHaveBeenCalledTimes(2);
+      expect(h.octokit.rest.pulls.merge).toHaveBeenCalledWith({
+        owner: 'on-par',
+        repo: 'software-factory',
+        pull_number: 77,
+        merge_method: 'squash',
+      });
+    } finally {
+      rmSync(worktree, { recursive: true, force: true });
+    }
   });
 
   it('cmdLand(5) resolves cleanly and leaves the PR open when the merge is blocked on a required review', async () => {

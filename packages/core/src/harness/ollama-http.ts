@@ -29,7 +29,7 @@ export class OllamaHttpHarness implements CodingHarness {
   readonly id = 'ollama-http';
   readonly agentic = false;
 
-  constructor(private fetchFn: OllamaFetchFn = globalThis.fetch as unknown as OllamaFetchFn) {}
+  constructor(private fetchFn: OllamaFetchFn = globalThis.fetch) {}
 
   async run(request: HarnessRequest): Promise<HarnessResult> {
     const { model, prompt, timeoutSeconds, registry } = request;

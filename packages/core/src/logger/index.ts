@@ -4,7 +4,7 @@
 // docs/adr/0002-structured-logging-via-event-log.md.
 
 import { appendFileSync, mkdirSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 
 import type { EventKind } from '../events/kinds.js';
 import type {
@@ -12,16 +12,20 @@ import type {
   FactoryEvent,
   FailoverReason,
   LogLevel,
+  QueueReprioritizationRecord,
   ReadinessInfo,
   ReworkInfo,
 } from '../types/index.js';
 import { colorEnabled, formatEventLine } from '../utils/format.js';
 import { withFileLockSync } from '../utils/lock.js';
+import { resolveRepoSlug } from './repo-slug.js';
 
 export interface LogContext {
   lane?: string;
   issue?: string | number;
   phase?: string;
+  /** Overrides git-derived repo resolution for the emitted events' `repo` field (#971). */
+  repo?: string;
 }
 
 export interface LogExtra {
@@ -30,6 +34,7 @@ export interface LogExtra {
   evidence?: EvidencePack;
   rework?: ReworkInfo;
   readiness?: ReadinessInfo;
+  queueReprioritization?: QueueReprioritizationRecord;
   actor?: string;
   model?: string;
   tokens?: { input: number; output: number };
@@ -81,6 +86,7 @@ function appendLine(eventsFile: string, line: string, lock?: { timeoutMs?: numbe
 export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: LoggerOptions = {}): FactoryLogger {
   const out = opts.out ?? process.stdout;
   const env = opts.env ?? process.env;
+  const repo = ctx.repo ?? resolveRepoSlug(dirname(eventsFile));
 
   function write(level: LogLevel, type: EventKind, msg: string, extra?: LogExtra): void {
     const event: FactoryEvent = {
@@ -90,6 +96,7 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       msg,
       level,
       ...(ctx.lane ? { lane: ctx.lane } : {}),
+      ...(repo ? { repo } : {}),
       ...(ctx.phase ? { phase: ctx.phase } : {}),
       ...(extra?.actor ? { actor: extra.actor } : {}),
       ...(extra?.failoverReason ? { failoverReason: extra.failoverReason } : {}),
@@ -97,6 +104,7 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(extra?.evidence ? { evidence: extra.evidence } : {}),
       ...(extra?.rework ? { rework: extra.rework } : {}),
       ...(extra?.readiness ? { readiness: extra.readiness } : {}),
+      ...(extra?.queueReprioritization !== undefined ? { queueReprioritization: extra.queueReprioritization } : {}),
       ...(extra?.model ? { model: extra.model } : {}),
       ...(extra?.tokens ? { tokens: extra.tokens } : {}),
     };

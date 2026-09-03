@@ -34,6 +34,12 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Config JSON guard
+        run: bash scripts/check-config-json.sh
+
+      - name: Oxlint plugin version guard
+        run: bash scripts/check-oxlint-plugin-version.sh
+
       - name: Typecheck
         run: npm run typecheck
 

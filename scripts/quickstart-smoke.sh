@@ -58,7 +58,11 @@ git init -q
 "$FACTORY" init
 
 test -d .factory/
-test -f .factory/queue
+# #724 split the layout: durable config lives at the .factory/ root, runtime state
+# under .factory/state/. Pin both halves so a regression in either is caught here.
+test -f .factory/config.json
+test -d .factory/state/
+test -f .factory/state/queue
 grep -q "^\.factory/$" .git/info/exclude
 
 echo "quickstart smoke OK"

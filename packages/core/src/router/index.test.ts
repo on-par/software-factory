@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { loadModelsConfig, loadRoutesConfig, type ModelsConfig, type RoutesConfig } from '../config/index.js';
 import { applyRepoConfig } from '../config/repo.js';
@@ -175,6 +175,24 @@ describe('ModelRouter with StubModelExecutor', () => {
     expect(failures).toEqual([{ provider: 'anthropic', reason: 'usage_cap' }]);
   });
 
+  it('does not open provider breaker bookkeeping for local auth failures', async () => {
+    const stub = new StubModelExecutor({ scripts: { plan: [{ fail: 'local_auth' }, { output: 'FROM GPT' }] } });
+    const router = new ModelRouter(providerModels, routes, false, stub);
+    const failures: Array<{ provider: string; reason: string }> = [];
+
+    const result = await router.run('plan', 'do it', {
+      modelOverride: 'claude-preferred',
+      modelFallbacks: ['gpt-fallback'],
+      onProviderFailure: async ({ provider, reason }) => {
+        failures.push({ provider, reason });
+      },
+    });
+
+    expect(result.model).toBe('gpt-fallback');
+    expect(result.failoverReason).toBe('local_auth');
+    expect(failures).toEqual([]);
+  });
+
   it('retries a simulated rate limit and then succeeds', async () => {
     const stub = new StubModelExecutor({
       scripts: { plan: [{ fail: 'rate_limit' }, { output: 'RECOVERED' }] },
@@ -218,6 +236,7 @@ describe('ModelRouter with StubModelExecutor', () => {
     ['mysterious', 1, 'unknown'],
     ['rate limit hit', 1, 'rate_limit'],
     ['insufficient credit', 1, 'usage_cap'],
+    ['Failed to authenticate: OAuth session expired and could not be refreshed', 1, 'local_auth'],
     ['schema_invalid: proposal must be an object', 1, 'schema_invalid'],
     ['apply_failed: file could not be read', 1, 'apply_failed'],
     ['verification failed: exit 1', 1, 'verify_failed'],
@@ -727,6 +746,7 @@ describe('ModelRouter sandbox threading', () => {
     runtime: 'sandbox-exec',
     worktree: '/tmp/factory-worktree',
     writablePaths: ['/tmp/factory-worktree'],
+    writableFilePrefixes: [],
     allowHosts: [],
     cpuMs: 300_000,
     memMb: 4096,
@@ -802,7 +822,15 @@ describe('ModelRouter sandbox threading', () => {
 });
 
 describe('ModelRouter worktree reset guard', () => {
-  const worktree = '/fake/worktree';
+  let worktree: string;
+
+  beforeEach(async () => {
+    worktree = await mkdtemp(join(tmpdir(), 'router-worktree-guard-'));
+  });
+
+  afterEach(async () => {
+    await rm(worktree, { recursive: true, force: true });
+  });
 
   function makeFakeGitExec(
     opts: {
@@ -1083,6 +1111,8 @@ describe('ModelRouter cost sink', () => {
     expect(rows[0].rawInputTokens).toBeUndefined();
     expect(rows[0].cacheReadTokens).toBeUndefined();
     expect(rows[0].cacheCreationTokens).toBeUndefined();
+    expect(typeof rows[0].duration).toBe('number');
+    expect(rows[0].duration).toBeGreaterThanOrEqual(0);
   });
 
   it('records real usage and marks estimated false when the harness reports it', async () => {

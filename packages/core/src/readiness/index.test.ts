@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import type { ReadinessInfo } from '../types/index.js';
 import { extractIssueSections, findSection, scoreIssueReadiness } from './index.js';
 
 const COMPLETE_FACTORY_TASK_BODY = `
@@ -217,7 +218,13 @@ Fix it.
   });
 
   it('defaults an undefined title and body to empty strings instead of crashing', () => {
-    const result = scoreIssueReadiness({ title: undefined as unknown as string, body: undefined as unknown as string });
+    /** scoreIssueReadiness's `title ?? ''` / `body ?? ''` defend against callers outside the type
+     *  system (JSON, JS consumers). This view calls it the way such a caller would; one assertion. */
+    const scoreUnchecked = scoreIssueReadiness as (input: {
+      title: string | undefined;
+      body: string | undefined;
+    }) => ReadinessInfo;
+    const result = scoreUnchecked({ title: undefined, body: undefined });
     expect(result.template).toBe('factory-task');
     expect(result.score).toBe(0);
   });

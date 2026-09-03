@@ -18,6 +18,7 @@ const PUBLIC_API_KEYS = [
   'getConstitutionsDir',
   'getFactoryPaths',
   'loadFactoryConfig',
+  'loadFactoryConfigForRepo',
   'loadModelsConfig',
   'loadRoutesConfig',
   'resolveAutoFailover',
@@ -67,8 +68,35 @@ const PUBLIC_API_KEYS = [
   // Queue
   'parseQueue',
   'readQueue',
+  'rewriteQueueForDecomposition',
   'validateQueue',
+  // Hosted execution (control plane)
+  'createHostedJobStore',
+  'createSqliteHostedJobStore',
+  'hostedExecEnabled',
+  'resolveHostedJobStore',
+  'runContainerJob',
+  'runDockerRunner',
+  'runFakeRunner',
+  'runHostedSmoke',
+  'runWatchdogSweep',
+  'summarizeHostedJob',
+  'summarizeHostedJobs',
+  'AUTHORITY_REDACTION_MASK',
+  'redactSecrets',
+  'withAuthority',
+  'prepareGitHubAuthority',
+  'prototypeFallbackMint',
+  'redactGitHubCredential',
+  'resolveHostedAuthority',
+  'createHostedControlPlaneServer',
+  'handleHostedControlPlaneRequest',
+  'createHttpHostedControlPlaneClient',
+  'runOneJobRunner',
+  'createHttpHostedJobClient',
+  'queueAndTailJob',
   // Work requests
+  'closedWorkSkipReason',
   'createDefaultWorkSourceRegistry',
   'createFsBriefReader',
   'createGithubIssueAdapter',
@@ -90,6 +118,18 @@ const PUBLIC_API_KEYS = [
   'laneStatusOf',
   'severityOf',
   'UNKNOWN_EVENT_TRAITS',
+  // Run outcome
+  'parkEvents',
+  'parkReasonFor',
+  // Run ports (#674)
+  'acquireLaneEnvironment',
+  'localOnlyWorkspace',
+  'worktreeWorkspace',
+  // Run composition (#675)
+  'runIssue',
+  // Lifecycle bus (#591)
+  'createLifecycleBus',
+  'lifecycleBus',
   // Models
   'diagnoseModels',
   'isCommandAvailable',
@@ -151,11 +191,15 @@ const PUBLIC_API_KEYS = [
   // Reports
   'BENCHMARK_MANIFEST_VERSION',
   'buildBenchmarkManifest',
+  'computeSandboxAbReport',
+  'DOCKER_SANDBOX_RUNTIME',
   'gatherEvidencePack',
   'InvalidArtifactsDirError',
   'readIssueEvents',
+  'recommendSandboxAb',
   'renderEvidencePack',
   'renderLocalRunReport',
+  'renderSandboxAbReport',
   'resolveArtifactsDir',
   'writeBenchmarkArtifacts',
   'writeLocalRunReport',
@@ -229,6 +273,38 @@ const PUBLIC_API_KEYS = [
 ];
 
 const INTERNAL_API_KEYS = [
+  // Local queue reprioritization audit records (#869)
+  'createQueueRationaleAuditor',
+  // Daemon-ready ProjectV2 queue intent projection (#866)
+  'createProjectQueuePoller',
+  'DEFAULT_PROJECT_QUEUE_POLL_MS',
+  // gh-authenticated ProjectV2 queue GraphQL client + live poller (#1046)
+  'createGithubProjectQueuePoller',
+  'createOctokitGraphqlClient',
+  // Single-poller cached subscription-usage snapshot (#1029)
+  'createUsageCoordinator',
+  'DEFAULT_USAGE_POLL_MS',
+  'defaultUsageStatePath',
+  'loadUsageState',
+  'writeUsageState',
+  // UsageCoordinator admission-control acquire() API and grant ledger (#1030)
+  'defaultGrantLedgerPath',
+  'DEFAULT_GRANT_TTL_MS',
+  'isCappedModel',
+  'loadGrantLedger',
+  'pruneGrants',
+  'USAGE_ADMISSION_CEILING_PCT',
+  'USAGE_GRANT_RESERVATION_PCT',
+  'writeGrantLedger',
+  // Engine lane parks and resumes on acquire denial (#1032)
+  'createLaneScheduler',
+  // Standalone local UsageCoordinator fallback (#1033)
+  'createLocalUsageCoordinator',
+  'selectUsageCoordinator',
+  // Coarse ProjectV2 status publishing (#868)
+  'createProjectStatusWriter',
+  // Coarse ProjectV2 status writing (#849)
+  'createProjectBoardStatusWriter',
   // Failure fingerprint & evidence
   'captureFailure',
   'fingerprintFailure',
@@ -275,6 +351,8 @@ const INTERNAL_API_KEYS = [
   'PATCH_PROPOSAL_SCHEMA',
   'OllamaHttpHarness',
   'OpenCodeHarness',
+  // Hosted execution: Docker container engine adapter (#899)
+  'createDockerEngine',
   // Router
   'CliModelExecutor',
   // Phase helpers
@@ -293,11 +371,52 @@ const INTERNAL_API_KEYS = [
   'priceFor',
   'TRAILING_WINDOW_MS',
   'readClaudeAccessToken',
+  // Daemon repo registry (#781)
+  'defaultRegistryPath',
+  'dispatchableRepos',
+  'emptyRegistry',
+  'getRepo',
+  'listRepos',
+  'loadRegistry',
+  'upsertRepo',
+  'writeRegistry',
+  // Daemon control-plane HTTP server (#777)
+  'createFactorydServer',
+  'DEFAULT_FACTORYD_PORT',
+  // Daemon runtime state: pid/port/log files (#1177)
+  'acquirePidFile',
+  'createDaemonLogSink',
+  'daemonRuntimePaths',
+  'releaseRuntimeFiles',
+  'writePortFile',
+  // Daemon lane state resolution (#843)
+  'createDaemonLaneContext',
+  // Daemon per-repo orchestration dispatch (#1041)
+  'runDaemonRepo',
+  // Daemon in-process engine supervisor (#1178)
+  'DEFAULT_STALE_THRESHOLD_MS',
+  'DEFAULT_SUPERVISOR_POLL_MS',
+  'superviseActiveRepos',
+  'superviseEngine',
+  // Daemon attach gate (#778)
+  'attachRepo',
+  'parseRemoteSlug',
+  'readOriginUrl',
+  // Daemon pause/resume gate (#779)
+  'setRepoState',
+  // Daemon detach gate (#780)
+  'beginDetach',
+  'DEFAULT_DRAIN_POLL_INTERVAL_MS',
+  'DEFAULT_DRAIN_TIMEOUT_MS',
+  'DRAIN_BLOCKING_STATUSES',
+  'drainAndDetach',
+  'isDrainSafe',
   // Utils
   'branchFor',
   'branchPrefixSlug',
   'cleanupWorktree',
   'colorEnabled',
+  'defaultRemoteBase',
   'ensureDir',
   'escalationLine',
   'formatEventLine',
@@ -308,6 +427,11 @@ const INTERNAL_API_KEYS = [
   'logEvent',
   'readCosts',
   'setupWorktree',
+  // docker-sandbox microVM lifecycle (#653)
+  'createMicroVm',
+  'microVmName',
+  'removeMicroVm',
+  'worktreeSandboxFor',
   'shellEscape',
   'slugify',
   'watchChecks',
@@ -322,6 +446,7 @@ const INTERNAL_API_KEYS = [
   'findCredentialFiles',
   'formatGcReport',
   'parseWorktreeList',
+  'reapLaneWorktree',
   'scrubFile',
   'sweepWorktrees',
   'zeroFill',
@@ -331,6 +456,39 @@ const INTERNAL_API_KEYS = [
   'parseCoverageSummary',
   'parseCoverageSummaryScopes',
   'renderRatchetReport',
+  // GitHub-label-backed work queue (#824)
+  'claimedByLabel',
+  'CLAIMED_BY_LABEL_PREFIX',
+  'createGithubQueue',
+  'createOctokitQueueClient',
+  'defaultClaimantId',
+  'IN_PROGRESS_LABEL',
+  'LANE_LABEL_PREFIX',
+  'laneLabel',
+  'MAX_LABEL_NAME_LENGTH',
+  'PARKED_LABEL',
+  'planQueueMigration',
+  'QUEUED_LABEL',
+  'QUEUE_ORDER_LABEL_PREFIX',
+  'queueOrderLabel',
+  'queueLabelSpecs',
+  // Stale-claim reaping (#999)
+  'findStaleClaims',
+  'localClaimPid',
+  'releaseStaleClaims',
+  // Green-and-ready PR reporting (#1000)
+  'createOctokitGreenPrClient',
+  'findUnmergedGreenPrs',
+  'owningIssueForPr',
+  // Read-only GitHub ProjectV2 queue-intent polling (#847)
+  'createProjectBoardPoller',
+  'DEFAULT_PROJECT_BOARD_POLL_MS',
+  // Board-constrained local lane dispatch (#848)
+  'createBoardQueueDispatcher',
+  // ProjectV2 queue-intent scheduler (#867)
+  'createBoardQueueScheduler',
+  // Sandbox command wrapping — used by the CLI's doctor probe (#1008)
+  'wrapCommandInSandbox',
 ];
 
 const TESTING_API_KEYS = [
@@ -342,6 +500,7 @@ const TESTING_API_KEYS = [
   'SimModelExecutor',
   'createSimOctokit',
   'createSimWorkspace',
+  'simWorkspace',
   'failOnCall',
   'realSimClock',
   'resolveLatencyMs',

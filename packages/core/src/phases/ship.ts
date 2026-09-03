@@ -9,10 +9,11 @@ import { createFsReader } from '@on-par/repo-context';
 
 import { applyAdrWritePlan, planAdrWrites, readAdrDrafts } from '../adr/write.js';
 import type { ApprovalGate } from '../approvals/index.js';
+import { type LifecycleBus, withLifecycle } from '../bus/index.js';
 import type { EventKind } from '../events/kinds.js';
 import { gatherEvidencePack } from '../reports/evidence-pack.js';
 import type { CheckSummary } from '../types/index.js';
-import { watchChecks } from '../utils/ci-watch.js';
+import { type CiOutcome, watchChecks } from '../utils/ci-watch.js';
 import { shellEscape } from '../utils/index.js';
 import { GITHUB_ISSUE_SOURCE } from '../work/github-issue.js';
 import type { WorkRequest } from '../work/index.js';
@@ -25,12 +26,29 @@ export interface ShipResult {
   prNumber?: number;
   denied?: boolean;
   deniedReason?: string;
+  reason?: string;
+  ciOutcome?: CiOutcome;
   /** True when the branch's content had already landed on main (e.g. a retry after a
    *  squash merge) — nothing was pushed and no PR was created (#520). */
   alreadyDelivered?: boolean;
+  /** True when the ADR commit could not be verified onto the remote branch, so the open PR
+   *  does not carry the ADR this run recorded (#736). Always accompanies `ok: false`. */
+  adrPushFailed?: boolean;
 }
 
-export async function shipPhase(opts: {
+export async function shipPhase(opts: Parameters<typeof shipPhaseImpl>[0]): Promise<ShipResult> {
+  return withLifecycle(
+    { bus: opts.bus, phase: 'ship', laneId: opts.laneId, issueId: opts.issue, worktreePath: opts.worktree },
+    () => shipPhaseImpl(opts),
+    (r) => r.ok,
+    (r) =>
+      r.ok
+        ? `ship complete${r.prNumber === undefined ? '' : ` (PR #${r.prNumber})`}`
+        : `ship failed${(r.deniedReason ?? r.reason) === undefined ? '' : `: ${r.deniedReason ?? r.reason}`}`,
+  );
+}
+
+async function shipPhaseImpl(opts: {
   issue: number;
   repo: string;
   worktree: string;
@@ -50,6 +68,10 @@ export async function shipPhase(opts: {
   /** The run's resolved work request; when its kind is not 'github-issue', the PR
    *  title/body come from it instead of fetching the (nonexistent) issue (#507). */
   work?: Pick<WorkRequest, 'id' | 'kind' | 'title'>;
+  /** Lane id stamped onto emitted lifecycle events; defaults to `issue-<issue>` (#591). */
+  laneId?: string;
+  /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
+  bus?: LifecycleBus;
 }): Promise<ShipResult> {
   const { issue, repo, worktree, branch, octokit, watchCI = true, log, run = exec, approvalGate, checkSummary } = opts;
   const [owner, repoName] = repo.split('/');
@@ -86,14 +108,23 @@ export async function shipPhase(opts: {
   }
 
   // Check if a PR already exists (claude route may have created one)
-  let prNumber = await findOpenPR(octokit, owner, repoName, branch);
+  const openLookup = await findOpenPR(octokit, owner, repoName, branch);
+  if (openLookup.status === 'error') {
+    log(
+      'ship',
+      `could not determine whether an open PR exists for ${branch} (${openLookup.detail}) — aborting before PR creation`,
+    );
+    return { ok: false };
+  }
+  let prNumber: number | undefined = openLookup.status === 'found' ? openLookup.prNumber : undefined;
 
+  // The ADR commit exists in this branch's local history, so a push that does not reach the
+  // remote leaves the open PR misrepresenting the branch and merges the recorded decision
+  // away. Same verified-push rule as the main-branch push site (#733/#734/#735), applied
+  // here per #736 — the site ADR-0028 deferred.
   if (prNumber && adr.committed) {
-    try {
-      await run(`git push -u origin ${shellEscape(branch)}`, { cwd: worktree });
-    } catch {
-      log('ship', 'pushing the ADR commit failed — the open PR may not include it');
-    }
+    const pushed = await pushAdrCommit({ run, worktree, branch, prNumber, log });
+    if (!pushed) return { ok: false, prNumber, adrPushFailed: true };
   }
 
   if (!prNumber) {
@@ -107,15 +138,53 @@ export async function shipPhase(opts: {
 
     // A failed ADR commit leaves its files on disk uncommitted (see materializeAdrDrafts) —
     // never let that alone make the worktree look dirty and abort the whole ship.
-    const recoveryState = await inspectRecoveryState(worktree, run, adr.committed ? [] : adr.paths);
+    const ignorePaths = adr.committed ? [] : adr.paths;
+    let recoveryState = await inspectRecoveryState(worktree, run, ignorePaths);
     if (!recoveryState.clean) {
-      log('ship', `not recovering ${branch}: worktree has uncommitted changes`);
-      return { ok: false };
+      const conflicts = conflictedPaths(recoveryState.statusLines);
+      if (conflicts.length > 0) {
+        // Committing an unmerged index would put conflict markers on the PR branch —
+        // park with the concrete paths and leave the worktree for a human (#1172).
+        const listed =
+          conflicts.slice(0, 5).join(', ') + (conflicts.length > 5 ? ` (+${conflicts.length - 5} more)` : '');
+        const reason = `worktree has merge conflicts in ${listed}`;
+        log('ship', `not recovering ${branch}: ${reason} — worktree preserved`);
+        return { ok: false, reason };
+      }
+      // CHECK verified this exact working tree, so the dirt IS the green artifact —
+      // commit it and ship rather than parking verified work (#1164/#1172).
+      const committed = await commitLeftoverBuildOutput({
+        run,
+        worktree,
+        branch,
+        issue,
+        ignorePaths,
+        statusLines: recoveryState.statusLines,
+        log,
+      });
+      if (!committed.ok) {
+        log('ship', `not recovering ${branch}: ${committed.reason} — worktree preserved`);
+        return { ok: false, reason: committed.reason };
+      }
+      recoveryState = await inspectRecoveryState(worktree, run, ignorePaths);
+      if (!recoveryState.clean) {
+        const reason = 'worktree still dirty after committing leftover build output';
+        log('ship', `not recovering ${branch}: ${reason} — worktree preserved`);
+        return { ok: false, reason };
+      }
     }
     if (recoveryState.landed || !recoveryState.ahead) {
       // The branch's content is already on main: identical trees (squash merge) or an
       // empty ahead-count (merge commit / fast-forward). That is delivery, not recovery.
-      const mergedPr = await findMergedPR(octokit, owner, repoName, branch);
+      const mergedLookup = await findMergedPR(octokit, owner, repoName, branch);
+      if (mergedLookup.status === 'error' && !recoveryState.landed) {
+        log(
+          'ship',
+          `not recovering ${branch}: could not determine whether it was already merged (${mergedLookup.detail})`,
+        );
+        return { ok: false };
+      }
+      const mergedPr = mergedLookup.status === 'found' ? mergedLookup.prNumber : undefined;
       if (mergedPr !== undefined || recoveryState.landed) {
         log(
           'ship',
@@ -127,12 +196,37 @@ export async function shipPhase(opts: {
       return { ok: false };
     }
 
-    // Push branch
+    // Push branch. A rejected push means the remote head does not contain this run's
+    // commits — opening a PR against it would advertise work that is not there, so the
+    // ship fails closed here rather than continuing to PR creation (#734).
     try {
       await run(`git push -u origin ${shellEscape(branch)}`, { cwd: worktree });
-    } catch {
-      log('ship', 'push failed — trying to continue');
+    } catch (err) {
+      const { kind, detail } = describePushFailure(err);
+      log('ship', `git push failed (${kind}): ${detail} — aborting before PR creation`);
+      return { ok: false };
     }
+
+    // A zero-exit push is not proof the remote branch actually carries this run's commits — a
+    // concurrent push or an update that silently applied nothing leaves the remote head elsewhere,
+    // and a PR opened against it advertises work that is not there (#735). Fail closed, like the
+    // push-failure abort above (#734).
+    const remoteHead = await verifyRemoteHead(run, worktree, branch);
+    if (remoteHead.status === 'mismatch') {
+      log(
+        'ship',
+        `remote head ${remoteHead.remoteSha} does not match local HEAD ${remoteHead.localSha} for ${branch} — aborting before PR creation`,
+      );
+      return { ok: false };
+    }
+    if (remoteHead.status === 'unreadable') {
+      log(
+        'ship',
+        `could not verify the remote head for ${branch} (${remoteHead.detail}); local HEAD ${remoteHead.localSha ?? 'unknown'} — aborting before PR creation`,
+      );
+      return { ok: false };
+    }
+    log('ship', `remote head ${remoteHead.remoteSha} matches local HEAD ${remoteHead.localSha} for ${branch}`);
 
     const inlineWork = opts.work && opts.work.kind !== GITHUB_ISSUE_SOURCE ? opts.work : undefined;
 
@@ -149,13 +243,15 @@ export async function shipPhase(opts: {
       : `Implements #${issue}. Built by the Software Factory (PLAN → BUILD → CHECK → SHIP).`;
 
     // Create PR
-    const { data: pr } = await octokit.rest.pulls.create({
-      owner,
-      repo: repoName,
-      head: branch,
-      base: 'main',
-      title: inlineWork ? title : `${title} (#${issue})`,
-      body: `## Summary
+    try {
+      const { data: pr } = await octokit.rest.pulls.create({
+        owner,
+        repo: repoName,
+        head: branch,
+        base: 'main',
+        title: inlineWork ? title : `${title} (#${issue})`,
+        draft: true,
+        body: `## Summary
 ${summaryLine}
 
 ## Changes
@@ -165,10 +261,23 @@ ${stat}
 
 ## Verification
 This PR passed independent verification by checker agents before shipping.${inlineWork ? '' : `\n\nCloses #${issue}`}`,
-    });
+      });
 
-    prNumber = pr.number;
-    log('recovered', `opened PR #${prNumber} for committed work on ${branch}`);
+      prNumber = pr.number;
+      log('recovered', `opened PR #${prNumber} for committed work on ${branch}`);
+    } catch (err) {
+      if (!isPullAlreadyExistsError(err)) throw err;
+      const existing = await findOpenPR(octokit, owner, repoName, branch);
+      if (existing.status !== 'found') {
+        log(
+          'ship',
+          `pulls.create reported an existing PR for ${branch} but re-querying did not find it (${existing.status === 'error' ? existing.detail : 'no open PR listed'}) — aborting`,
+        );
+        return { ok: false };
+      }
+      prNumber = existing.prNumber;
+      log('recovered', `PR #${prNumber} already existed for ${branch}; reusing it`);
+    }
   }
 
   if (!prNumber) {
@@ -190,6 +299,23 @@ This PR passed independent verification by checker agents before shipping.${inli
     log('evidence', `posted evidence pack to PR #${prNumber}`);
   } catch {}
 
+  let ciOutcome: CiOutcome | undefined;
+
+  // Watch CI (best-effort)
+  if (watchCI) {
+    log('ship', `Watching CI for PR #${prNumber}`);
+    try {
+      ciOutcome = await watchChecks({ octokit, owner, repo: repoName, ref: branch });
+      if (ciOutcome === 'success') log('ship', `CI green for PR #${prNumber}`);
+      else if (ciOutcome === 'failure') {
+        const reason = `CI failed for PR #${prNumber}`;
+        log('ship', reason);
+        return { ok: false, prNumber, reason, ciOutcome };
+      }
+      // outcome === 'timeout': no log, proceed to ready (unchanged best-effort behavior)
+    } catch {}
+  }
+
   // Mark ready for review (if draft). REST pulls.update ignores `draft`;
   // undrafting requires the markPullRequestReadyForReview GraphQL mutation.
   try {
@@ -206,19 +332,8 @@ This PR passed independent verification by checker agents before shipping.${inli
     }
   } catch {}
 
-  // Watch CI (best-effort)
-  if (watchCI) {
-    log('ship', `Watching CI for PR #${prNumber}`);
-    try {
-      const outcome = await watchChecks({ octokit, owner, repo: repoName, ref: branch });
-      if (outcome === 'success') log('ship', `CI green for PR #${prNumber}`);
-      else if (outcome === 'failure') log('ship', `CI failed for PR #${prNumber}`);
-      // outcome === 'timeout': no log, proceed to ready (unchanged best-effort behavior)
-    } catch {}
-  }
-
   log('ready', `PR #${prNumber} ready for review`);
-  return { ok: true, prNumber };
+  return ciOutcome === undefined ? { ok: true, prNumber } : { ok: true, prNumber, ciOutcome };
 }
 
 async function computeDiffStat(run: CommandRunner, worktree: string): Promise<string> {
@@ -230,7 +345,7 @@ async function computeDiffStat(run: CommandRunner, worktree: string): Promise<st
   }
 }
 
-async function findOpenPR(octokit: Octokit, owner: string, repo: string, branch: string): Promise<number | undefined> {
+export async function findOpenPR(octokit: Octokit, owner: string, repo: string, branch: string): Promise<PrLookup> {
   try {
     const { data: prs } = await octokit.rest.pulls.list({
       owner,
@@ -238,18 +353,14 @@ async function findOpenPR(octokit: Octokit, owner: string, repo: string, branch:
       state: 'open',
       head: `${owner}:${branch}`,
     });
-    return prs[0]?.number;
-  } catch {
-    return undefined;
+    const prNumber = prs[0]?.number;
+    return prNumber === undefined ? { status: 'absent' } : { status: 'found', prNumber };
+  } catch (err) {
+    return { status: 'error', detail: shortDetail(err) };
   }
 }
 
-async function findMergedPR(
-  octokit: Octokit,
-  owner: string,
-  repo: string,
-  branch: string,
-): Promise<number | undefined> {
+export async function findMergedPR(octokit: Octokit, owner: string, repo: string, branch: string): Promise<PrLookup> {
   try {
     const { data: prs } = await octokit.rest.pulls.list({
       owner,
@@ -257,17 +368,31 @@ async function findMergedPR(
       state: 'closed',
       head: `${owner}:${branch}`,
     });
-    return prs.find((pr) => pr.merged_at != null)?.number;
-  } catch {
-    return undefined;
+    const prNumber = prs.find((pr) => pr.merged_at != null)?.number;
+    return prNumber === undefined ? { status: 'absent' } : { status: 'found', prNumber };
+  } catch (err) {
+    return { status: 'error', detail: shortDetail(err) };
   }
+}
+
+/** A `pulls.create` 422 whose message says the PR already exists — recoverable by re-querying,
+ *  unlike every other 422 (e.g. "No commits between ..."), which still propagates (#641). */
+function isPullAlreadyExistsError(err: unknown): boolean {
+  const e = err as {
+    status?: number;
+    message?: string;
+    response?: { data?: { errors?: Array<{ message?: string }> } };
+  } | null;
+  if (e?.status !== 422) return false;
+  const messages = [e.message ?? '', ...(e.response?.data?.errors ?? []).map((x) => x?.message ?? '')];
+  return messages.some((m) => /already exists/i.test(m));
 }
 
 async function inspectRecoveryState(
   worktree: string,
   run: CommandRunner,
   ignorePaths: string[] = [],
-): Promise<{ clean: boolean; ahead: boolean; landed: boolean }> {
+): Promise<{ clean: boolean; ahead: boolean; landed: boolean; statusLines: string[] }> {
   const statusCommand =
     ignorePaths.length > 0
       ? `git status --porcelain -- . ${ignorePaths.map((p) => shellEscape(`:!${p}`)).join(' ')}`
@@ -286,7 +411,55 @@ async function inspectRecoveryState(
     clean: status.trim() === '',
     ahead: Number.parseInt(ahead.trim(), 10) > 0,
     landed,
+    // Porcelain's first two characters are positional XY columns — trim only the right edge.
+    statusLines: status
+      .split('\n')
+      .map((l) => l.trimEnd())
+      .filter((l) => l.trim() !== ''),
   };
+}
+
+/** Paths of porcelain lines that are unmerged (conflict) entries: `U` in either XY column,
+ *  or the both-added/both-deleted codes `AA`/`DD`. Untracked (`??`) and every ordinary code
+ *  are not conflicts. */
+function conflictedPaths(statusLines: string[]): string[] {
+  return statusLines
+    .filter((line) => {
+      const xy = line.slice(0, 2);
+      return xy.includes('U') || xy === 'AA' || xy === 'DD';
+    })
+    .map((line) => line.slice(3));
+}
+
+/**
+ * Commit the dirt a build agent left after a green CHECK onto the ship-it branch — the working
+ * tree is byte-for-byte what the checkers verified, so committing it is what ships the green
+ * artifact instead of parking it (#1164/#1172). The add keeps the same pathspec exclusions the
+ * dirty-check applies, so failed-ADR materialization files still never affect the rest of the ship.
+ */
+async function commitLeftoverBuildOutput(o: {
+  run: CommandRunner;
+  worktree: string;
+  branch: string;
+  issue: number;
+  ignorePaths: string[];
+  statusLines: string[];
+  log: (type: EventKind, msg: string) => void;
+}): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const addCommand =
+    o.ignorePaths.length > 0
+      ? `git add -A -- . ${o.ignorePaths.map((p) => shellEscape(`:!${p}`)).join(' ')}`
+      : 'git add -A';
+  try {
+    await o.run(addCommand, { cwd: o.worktree });
+    await o.run(`git commit -m ${shellEscape(`chore(ship): commit build output left after check (#${o.issue})`)}`, {
+      cwd: o.worktree,
+    });
+  } catch (err) {
+    return { ok: false, reason: `could not commit leftover build output: ${shortDetail(err)}` };
+  }
+  o.log('ship', `committed ${o.statusLines.length} uncommitted path(s) left after check on ${o.branch}`);
+  return { ok: true };
 }
 
 /** The written path's own filename already carries the repo's detected number padding
@@ -350,4 +523,154 @@ async function materializeAdrDrafts(o: {
   }
   o.log('adr_written', `recorded ${plan.writes.length} ADR(s) in ${plan.dir}: ${labels}`);
   return { committed: true, paths: written };
+}
+
+/**
+ * Push the ADR commit onto an already-open PR's branch, under the same verified-push rule the
+ * main-branch push site uses: git's own failure text is logged (#733), and a zero-exit push is
+ * not trusted until the remote head is confirmed to match local HEAD (#735). Returns false when
+ * the ADR commit is not provably on the remote, in which case the caller fails the ship (#736).
+ */
+async function pushAdrCommit(o: {
+  run: CommandRunner;
+  worktree: string;
+  branch: string;
+  prNumber: number;
+  log: (type: EventKind, msg: string) => void;
+}): Promise<boolean> {
+  try {
+    await o.run(`git push -u origin ${shellEscape(o.branch)}`, { cwd: o.worktree });
+  } catch (err) {
+    const { kind, detail } = describePushFailure(err);
+    o.log(
+      'adr_push_failed',
+      `pushing the ADR commit for PR #${o.prNumber} failed (${kind}): ${detail} — aborting the ship`,
+    );
+    return false;
+  }
+
+  const remoteHead = await verifyRemoteHead(o.run, o.worktree, o.branch);
+  if (remoteHead.status === 'mismatch') {
+    o.log(
+      'adr_push_failed',
+      `remote head ${remoteHead.remoteSha} does not match local HEAD ${remoteHead.localSha} after the ADR push for ${o.branch} — aborting the ship`,
+    );
+    return false;
+  }
+  if (remoteHead.status === 'unreadable') {
+    o.log(
+      'adr_push_failed',
+      `could not verify the remote head after the ADR push for ${o.branch} (${remoteHead.detail}); local HEAD ${remoteHead.localSha ?? 'unknown'} — aborting the ship`,
+    );
+    return false;
+  }
+  o.log(
+    'ship',
+    `remote head ${remoteHead.remoteSha} matches local HEAD ${remoteHead.localSha} after the ADR push for ${o.branch}`,
+  );
+  return true;
+}
+
+/** Why a `git push` was refused, as far as git's own stderr says (#733). */
+type PushFailureKind = 'non-fast-forward' | 'network' | 'unknown';
+
+/** Bound on the failure text copied into one NDJSON event row. */
+const MAX_PUSH_ERROR_DETAIL = 400;
+
+const NON_FAST_FORWARD_MARKERS = ['non-fast-forward', '! [rejected]', 'fetch first', 'updates were rejected'];
+
+const NETWORK_MARKERS = [
+  'could not resolve host',
+  'failed to connect',
+  'connection timed out',
+  'connection refused',
+  'network is unreachable',
+  'operation timed out',
+  'the remote end hung up unexpectedly',
+];
+
+function classifyPushFailure(text: string): PushFailureKind {
+  const t = text.toLowerCase();
+  if (NON_FAST_FORWARD_MARKERS.some((m) => t.includes(m))) return 'non-fast-forward';
+  if (NETWORK_MARKERS.some((m) => t.includes(m))) return 'network';
+  return 'unknown';
+}
+
+/**
+ * The real reason a push failed, from git's own stderr when the runner exposes it
+ * (node's promisified `exec` rejection carries `stderr`), else the Error message, else the
+ * value's string form. Flattened to one line and bounded so a single event row stays
+ * greppable in `.factory/events.ndjson`.
+ */
+function describePushFailure(err: unknown): { kind: PushFailureKind; detail: string } {
+  const raw = (err as { stderr?: unknown } | null | undefined)?.stderr;
+  const stderr = typeof raw === 'string' ? raw : '';
+  const text = stderr.trim() || (err instanceof Error ? err.message : String(err));
+  const detail = text.replace(/\s+/g, ' ').trim().slice(0, MAX_PUSH_ERROR_DETAIL);
+  return { kind: classifyPushFailure(detail), detail: detail || 'no error output' };
+}
+
+/** Bound on the ls-remote failure text copied into one NDJSON event row (#735). */
+const MAX_REMOTE_HEAD_DETAIL = 200;
+
+/** The result of comparing the pushed branch's remote head against local HEAD (#735). */
+type RemoteHeadCheck =
+  | { status: 'match'; localSha: string; remoteSha: string }
+  | { status: 'mismatch'; localSha: string; remoteSha: string }
+  | { status: 'unreadable'; localSha?: string; remoteSha?: string; detail: string };
+
+/** The result of asking GitHub whether a PR exists for a branch. `error` is never collapsed
+ *  into `absent` — an unanswered lookup makes ship fail closed rather than open a duplicate
+ *  PR (#641). */
+export type PrLookup =
+  { status: 'found'; prNumber: number } | { status: 'absent' } | { status: 'error'; detail: string };
+
+/** Same flatten-and-bound shaping as {@link describePushFailure}, kept separate so that
+ *  function's asserted output never changes. */
+function shortDetail(err: unknown): string {
+  const raw = (err as { stderr?: unknown } | null | undefined)?.stderr;
+  const stderr = typeof raw === 'string' ? raw : '';
+  const text = stderr.trim() || (err instanceof Error ? err.message : String(err));
+  return text.replace(/\s+/g, ' ').trim().slice(0, MAX_REMOTE_HEAD_DETAIL) || 'no error output';
+}
+
+/** The SHA on the `refs/heads/<branch>` line of `git ls-remote` output. `--heads origin <branch>`
+ *  is a suffix pattern, so it can list more than one ref — match the ref name exactly rather than
+ *  trusting the first line. */
+function parseRemoteHeadSha(stdout: string, branch: string): string | undefined {
+  for (const line of stdout.split('\n')) {
+    const [sha, ref] = line.trim().split(/\s+/);
+    if (ref === `refs/heads/${branch}` && sha) return sha;
+  }
+  return undefined;
+}
+
+/**
+ * A zero-exit push is not proof the remote branch actually carries this run's commits — a
+ * concurrent push or an update that silently applied nothing leaves the remote head elsewhere,
+ * and a PR opened against it would advertise work that is not there (#735).
+ */
+async function verifyRemoteHead(run: CommandRunner, worktree: string, branch: string): Promise<RemoteHeadCheck> {
+  let localSha: string | undefined;
+  try {
+    const { stdout } = await run('git rev-parse HEAD', { cwd: worktree });
+    localSha = stdout.trim();
+  } catch (err) {
+    return { status: 'unreadable', detail: shortDetail(err) };
+  }
+  if (!localSha) return { status: 'unreadable', detail: 'git rev-parse HEAD produced no SHA' };
+
+  let listing: string;
+  try {
+    const { stdout } = await run(`git ls-remote --heads origin ${shellEscape(branch)}`, { cwd: worktree });
+    listing = stdout;
+  } catch (err) {
+    return { status: 'unreadable', localSha, detail: shortDetail(err) };
+  }
+
+  const remoteSha = parseRemoteHeadSha(listing, branch);
+  if (!remoteSha) return { status: 'unreadable', localSha, detail: `no refs/heads/${branch} on origin` };
+  return remoteSha === localSha
+    ? { status: 'match', localSha, remoteSha }
+    : { status: 'mismatch', localSha, remoteSha };
 }

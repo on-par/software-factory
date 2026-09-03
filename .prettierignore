@@ -3,7 +3,9 @@ dist/
 coverage/
 .factory/
 .tmp/
+tools/oxlint/anti-slop/
 package-lock.json
 *.tsbuildinfo
 evals/
 packages/dashboard/src/index.css
+packages/scbench-adapter/src/__fixtures__/

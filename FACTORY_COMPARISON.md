@@ -39,7 +39,7 @@ Same PLAN → BUILD skeleton, re-expressed as a typed library plus three new sub
 | `@on-par/factory-config` | Zero-dep. `models.json`, `routes.json`, `factory.json` + constitution markdown.                                               |
 | `@on-par/factory-core`   | The engine: `ModelRegistry`, `ModelRouter` (failover), `ConstitutionLoader`, checker framework, PLAN/BUILD/CHECK/SHIP phases. |
 | `@on-par/factory-cli`    | The `factory` command (commander/chalk).                                                                                      |
-| `@on-par/factory-server` | **Stub.** `createServer()` throws "not yet implemented".                                                                      |
+| `@on-par/factory-server` | Local HTTP server: loopback-only `GET /events` SSE relay of the lane lifecycle bus, `Last-Event-ID` resume.                   |
 
 ---
 

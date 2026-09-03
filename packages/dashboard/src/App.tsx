@@ -1,11 +1,15 @@
 import { KpiTrendView } from './KpiTrendView.js';
+import { LaneBoard } from './LaneBoard.js';
+import { useLaneEvents } from './useLaneEvents.js';
 
 const NAV_ITEMS = ['Runs', 'Issues', 'Models', 'Settings'];
 
 export function App() {
+  const { board, connection } = useLaneEvents();
+
   return (
     <div className="flex h-screen bg-canvas font-sans text-ink-900">
-      <aside className="w-30 shrink-0 overflow-y-auto bg-navy-950 text-navy-200 flex flex-col">
+      <aside className="hidden w-30 shrink-0 overflow-y-auto bg-navy-950 text-navy-200 sm:flex flex-col">
         <nav aria-label="Primary" className="flex flex-col gap-1 p-2">
           <h1 aria-label="On Par Factory" className="px-2 py-2 leading-tight tracking-tight">
             <span className="block text-sm font-semibold text-white">On Par</span>
@@ -29,8 +33,8 @@ export function App() {
         <header className="h-7 flex items-center border-b border-hairline bg-white px-3">
           <h2 className="text-sm font-semibold">Overview</h2>
         </header>
-        <main className="flex-1 overflow-auto bg-canvas p-3">
-          <p className="text-sm text-ink-400">No runs yet.</p>
+        <main className="flex-1 overflow-y-auto overflow-x-hidden bg-canvas p-2 sm:p-3">
+          <LaneBoard board={board} connection={connection} />
           <h3 className="mt-4 text-sm font-semibold text-ink-900">KPI trends</h3>
           <div className="mt-2">
             <KpiTrendView kpiHistoryJsonl="" />

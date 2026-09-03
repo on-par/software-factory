@@ -1,12 +1,14 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { EvidencePack } from '../types/index.js';
 import { createLogger } from './index.js';
+import { clearRepoSlugCache } from './repo-slug.js';
 
 let tmpDir: string | undefined;
 
@@ -355,5 +357,68 @@ describe('createLogger', () => {
 
     expect(readEvents(eventsFile)).toHaveLength(1);
     expect(existsSync(lockDir)).toBe(true);
+  });
+
+  describe('FactoryEvent repo', () => {
+    beforeEach(() => {
+      clearRepoSlugCache();
+    });
+
+    function initGitRepoWithOrigin(dir: string): void {
+      execFileSync('git', ['init'], { cwd: dir });
+      execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir });
+      execFileSync('git', ['config', 'user.name', 'Test'], { cwd: dir });
+      execFileSync('git', ['remote', 'add', 'origin', 'ssh://git@ssh.github.com:443/on-par/software-factory.git'], {
+        cwd: dir,
+      });
+    }
+
+    it('emitted events carry the repo slug, lane unchanged', async () => {
+      tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
+      initGitRepoWithOrigin(tmpDir);
+      const eventsFile = join(tmpDir, '.factory', 'state', 'events.ndjson');
+      const logger = createLogger(eventsFile, { lane: 'lane-1', issue: 971 }, { out: { write: () => {} } });
+
+      logger.info('build', 'msg');
+
+      const [event] = readEvents(eventsFile);
+      expect(event).toEqual({
+        ts: expect.any(String),
+        type: 'build',
+        issue: '971',
+        msg: 'msg',
+        level: 'info',
+        lane: 'lane-1',
+        repo: 'on-par/software-factory',
+      });
+    });
+
+    it('unresolved origin omits repo and does not throw', async () => {
+      tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
+      const eventsFile = join(tmpDir, 'events.ndjson');
+      const logger = createLogger(eventsFile, { lane: 'lane-1' }, { out: { write: () => {} } });
+
+      expect(() => logger.info('build', 'msg')).not.toThrow();
+
+      const [event] = readEvents(eventsFile);
+      expect(event).not.toHaveProperty('repo');
+      expect(event.lane).toBe('lane-1');
+    });
+
+    it('an explicit ctx.repo overrides resolution and is inherited by child()', async () => {
+      tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
+      initGitRepoWithOrigin(tmpDir);
+      const eventsFile = join(tmpDir, '.factory', 'state', 'events.ndjson');
+      const logger = createLogger(eventsFile, { repo: 'acme/widgets' }, { out: { write: () => {} } });
+      const child = logger.child({ lane: 'l2' });
+
+      logger.info('plan', 'parent event');
+      child.info('build', 'child event');
+
+      const [parentEvent, childEvent] = readEvents(eventsFile);
+      expect(parentEvent.repo).toBe('acme/widgets');
+      expect(childEvent.repo).toBe('acme/widgets');
+      expect(childEvent.lane).toBe('l2');
+    });
   });
 });

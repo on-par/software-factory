@@ -18,6 +18,7 @@ export type EventKind =
   | 'adr_draft_skipped'
   | 'adr_drafts'
   | 'adr_index_skipped'
+  | 'adr_push_failed'
   | 'adr_read_degraded'
   | 'adr_skipped'
   | 'adr_written'
@@ -35,6 +36,8 @@ export type EventKind =
   | 'constitution'
   | 'decompose_comment_posted'
   | 'decompose_failed'
+  | 'decompose_file_failed'
+  | 'decompose_filed'
   | 'decompose_started'
   | 'defect-window-closed'
   | 'design_artifact_emitted'
@@ -42,6 +45,7 @@ export type EventKind =
   | 'design_artifact_received'
   | 'design_open_questions'
   | 'design_shallow'
+  | 'engine-restarted'
   | 'environment_cleanup'
   | 'environment_conflict'
   | 'environment_lease'
@@ -90,6 +94,10 @@ export type EventKind =
   | 'plan_redirect'
   | 'plan_rejected'
   | 'post-merge-defect'
+  | 'queue_reprioritized'
+  | 'queue_rationale_comment_failed'
+  | 'project_queue_refresh_failed'
+  | 'project_queue_refresh_succeeded'
   | 'provider_breaker_close'
   | 'provider_breaker_open'
   | 'provider_breaker_skip'
@@ -111,13 +119,16 @@ export type EventKind =
   | 'sandbox-degraded'
   | 'sandbox-disabled'
   | 'sandbox-unavailable'
+  | 'sandbox_auth_denied'
   | 'sandbox_violation'
   | 'ship'
   | 'ship_denied'
   | 'skip-ci'
+  | 'skipped-already-closed'
   | 'size-gate-escalated'
   | 'steering_applied'
   | 'steering_unconsumed'
+  | 'stop-file-cleared'
   | 'stopped'
   | 'stuck'
   | 'supervisor-done'
@@ -126,6 +137,9 @@ export type EventKind =
   | 'triage_accepted'
   | 'usage-stop'
   | 'usage-unavailable'
+  | 'usage_coordinator_poll_empty'
+  | 'usage_coordinator_poll_failed'
+  | 'usage_coordinator_poll_succeeded'
   | 'warn'
   | 'watchdog'
   | 'work-source'
@@ -133,11 +147,12 @@ export type EventKind =
   | 'worker_failover'
   | 'workspace'
   | 'worktree'
+  | 'worktree-base'
   | 'worktree-gc';
 
 /** Lane state an event kind drives in the TUI/queue dashboard reducers; absent
  *  when the kind doesn't itself change lane status. */
-export type LaneStatus = 'running' | 'waiting-merge' | 'ready' | 'merged' | 'failed' | 'stopped';
+export type LaneStatus = 'running' | 'waiting-merge' | 'ready' | 'merged' | 'failed' | 'parked' | 'stopped';
 
 /** `severity` is widened to `'unknown'` only on the sentinel `UNKNOWN_EVENT_TRAITS`
  *  returned by `eventTraitsFor` for a string outside `EventKind` — every real
@@ -161,6 +176,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   adr_draft_skipped: { severity: 'info', isPark: false, isTerminal: false },
   adr_drafts: { severity: 'info', isPark: false, isTerminal: false },
   adr_index_skipped: { severity: 'info', isPark: false, isTerminal: false },
+  adr_push_failed: { severity: 'warn', isPark: false, isTerminal: false },
   adr_read_degraded: { severity: 'info', isPark: false, isTerminal: false },
   adr_skipped: { severity: 'info', isPark: false, isTerminal: false },
   adr_written: { severity: 'info', isPark: false, isTerminal: false },
@@ -178,6 +194,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   constitution: { severity: 'info', isPark: false, isTerminal: false },
   decompose_comment_posted: { severity: 'info', isPark: false, isTerminal: false },
   decompose_failed: { severity: 'warn', isPark: false, isTerminal: false },
+  decompose_file_failed: { severity: 'warn', isPark: false, isTerminal: false },
+  decompose_filed: { severity: 'info', isPark: false, isTerminal: false },
   decompose_started: { severity: 'info', isPark: false, isTerminal: false },
   'defect-window-closed': { severity: 'info', isPark: false, isTerminal: false },
   design_artifact_emitted: { severity: 'info', isPark: false, isTerminal: false },
@@ -185,6 +203,9 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   design_artifact_received: { severity: 'info', isPark: false, isTerminal: false },
   design_open_questions: { severity: 'warn', isPark: false, isTerminal: false },
   design_shallow: { severity: 'info', isPark: false, isTerminal: false },
+  // factoryd restarted a stale in-process engine (#1178) — operational anomaly
+  // worth surfacing, but not a park (no human action needed) and not terminal.
+  'engine-restarted': { severity: 'warn', isPark: false, isTerminal: false },
   environment_cleanup: { severity: 'info', isPark: false, isTerminal: false },
   environment_conflict: { severity: 'warn', isPark: false, isTerminal: false },
   environment_lease: { severity: 'info', isPark: false, isTerminal: false },
@@ -196,7 +217,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   environment_release: { severity: 'info', isPark: false, isTerminal: false },
   environment_release_failed: { severity: 'info', isPark: false, isTerminal: false },
   environment_warning: { severity: 'warn', isPark: false, isTerminal: false },
-  escalate: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
+  escalate: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },
   evidence: { severity: 'info', isPark: false, isTerminal: false },
   fail: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   failover: { severity: 'info', isPark: false, isTerminal: false },
@@ -205,7 +226,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   // a prior run (ReworkHistory, #740) — distinct from 'escalate'/'fail' so a
   // watchdog or human scanning events.ndjson can tell "already tried and
   // failed identically once, needs a decision" apart from a fresh park.
-  held: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
+  held: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },
   'human-abandoned': { severity: 'info', isPark: false, isTerminal: true },
   'human-approved': { severity: 'info', isPark: false, isTerminal: false },
   'human-edited': { severity: 'info', isPark: false, isTerminal: false },
@@ -230,13 +251,17 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'overnight-park': { severity: 'info', isPark: false, isTerminal: false },
   'overnight-preflight': { severity: 'info', isPark: false, isTerminal: false },
   'overnight-ready': { severity: 'info', isPark: false, isTerminal: false },
-  parked: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
+  parked: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },
   plan: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
   plan_approval_granted: { severity: 'info', isPark: false, isTerminal: false },
   plan_approval_requested: { severity: 'info', isPark: false, isTerminal: false },
   plan_redirect: { severity: 'info', isPark: false, isTerminal: false },
   plan_rejected: { severity: 'info', isPark: false, isTerminal: false },
   'post-merge-defect': { severity: 'info', isPark: false, isTerminal: false },
+  queue_reprioritized: { severity: 'info', isPark: false, isTerminal: false },
+  queue_rationale_comment_failed: { severity: 'warn', isPark: false, isTerminal: false },
+  project_queue_refresh_failed: { severity: 'warn', isPark: false, isTerminal: false },
+  project_queue_refresh_succeeded: { severity: 'info', isPark: false, isTerminal: false },
   provider_breaker_close: { severity: 'info', isPark: false, isTerminal: false },
   provider_breaker_open: { severity: 'info', isPark: false, isTerminal: false },
   provider_breaker_skip: { severity: 'info', isPark: false, isTerminal: false },
@@ -258,13 +283,18 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'sandbox-degraded': { severity: 'warn', isPark: false, isTerminal: false },
   'sandbox-disabled': { severity: 'warn', isPark: false, isTerminal: false },
   'sandbox-unavailable': { severity: 'warn', isPark: false, isTerminal: false },
+  sandbox_auth_denied: { severity: 'warn', isPark: false, isTerminal: false },
   sandbox_violation: { severity: 'warn', isPark: false, isTerminal: false },
   ship: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
   ship_denied: { severity: 'error', isPark: false, isTerminal: true, laneStatus: 'failed' },
   'skip-ci': { severity: 'info', isPark: false, isTerminal: false },
+  // The target issue was already closed when the run started — no work was
+  // attempted, so this is a clean terminal outcome, never a park (#681).
+  'skipped-already-closed': { severity: 'info', isPark: false, isTerminal: true },
   'size-gate-escalated': { severity: 'warn', isPark: false, isTerminal: false },
   steering_applied: { severity: 'info', isPark: false, isTerminal: false },
   steering_unconsumed: { severity: 'info', isPark: false, isTerminal: false },
+  'stop-file-cleared': { severity: 'warn', isPark: false, isTerminal: false },
   stopped: { severity: 'warn', isPark: false, isTerminal: true, laneStatus: 'stopped' },
   stuck: { severity: 'warn', isPark: true, isTerminal: false },
   'supervisor-done': { severity: 'info', isPark: false, isTerminal: false },
@@ -273,6 +303,9 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   triage_accepted: { severity: 'info', isPark: false, isTerminal: false },
   'usage-stop': { severity: 'info', isPark: false, isTerminal: false },
   'usage-unavailable': { severity: 'info', isPark: false, isTerminal: false },
+  usage_coordinator_poll_empty: { severity: 'warn', isPark: false, isTerminal: false },
+  usage_coordinator_poll_failed: { severity: 'warn', isPark: false, isTerminal: false },
+  usage_coordinator_poll_succeeded: { severity: 'info', isPark: false, isTerminal: false },
   warn: { severity: 'warn', isPark: false, isTerminal: false },
   watchdog: { severity: 'info', isPark: false, isTerminal: false },
   'work-source': { severity: 'info', isPark: false, isTerminal: false },
@@ -280,6 +313,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   worker_failover: { severity: 'info', isPark: false, isTerminal: false },
   workspace: { severity: 'info', isPark: false, isTerminal: false },
   worktree: { severity: 'info', isPark: false, isTerminal: false },
+  'worktree-base': { severity: 'info', isPark: false, isTerminal: false },
   'worktree-gc': { severity: 'info', isPark: false, isTerminal: false },
 };
 

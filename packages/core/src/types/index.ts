@@ -112,6 +112,7 @@ export type FailoverReason =
   | 'error'
   | 'empty_response'
   | 'unavailable'
+  | 'local_auth'
   | 'schema_invalid'
   | 'apply_failed'
   | 'verify_failed'
@@ -164,6 +165,12 @@ export interface FingerprintedFailure {
   fingerprint: string;
   evidence: EvidencePack;
 }
+
+// ---------- Repo (#969) ----------
+
+/** A GitHub repository slug in `owner/name` form (e.g. `on-par/sound-buddy`).
+ *  The same shape parseRemoteSlug() resolves from a git origin remote. */
+export type RepoSlug = string;
 
 // ---------- Events ----------
 
@@ -224,6 +231,17 @@ export interface ReadinessInfo {
   sizeReason?: string;
 }
 
+/** Structured payload carried on `queue_reprioritized` events (#869). */
+export interface QueueReprioritizationRecord {
+  issueId: string;
+  issueNumber: number;
+  field: 'lane' | 'order';
+  priorValue: string | number;
+  newValue: string | number;
+  actorType: 'human' | 'daemon';
+  rationale: string | null;
+}
+
 export interface FactoryEvent {
   ts: string;
   type: EventKind;
@@ -231,6 +249,11 @@ export interface FactoryEvent {
   msg: string;
   level?: LogLevel;
   lane?: string;
+  /** GitHub slug (`owner/name`) of the checkout that emitted this event (#971).
+   *  Absent on events logged before #971 and on any checkout whose git `origin`
+   *  remote cannot be read or does not parse to `owner/name`. Qualifies `lane`,
+   *  whose meaning and format are unchanged. */
+  repo?: string;
   phase?: string;
   /** Human who performed the action, for human-* event types (#420). */
   actor?: string;
@@ -239,6 +262,7 @@ export interface FactoryEvent {
   evidence?: EvidencePack;
   rework?: ReworkInfo;
   readiness?: ReadinessInfo;
+  queueReprioritization?: QueueReprioritizationRecord;
   model?: string;
   tokens?: { input: number; output: number };
 }
@@ -268,6 +292,16 @@ export interface CostEntry {
   numTurns?: number;
   durationMs?: number;
   durationApiMs?: number;
+  /** Resolved sandbox runtime the lane was assigned, for A/B cohorting (#655).
+   *  The resolved name — a docker-sandbox lane is labeled here even while it runs
+   *  uncontained (#653). */
+  sandboxRuntime?: string;
+  /** Router-measured wall-clock ms of this model invocation (distinct from the
+   *  CLI-reported durationMs) (#655). */
+  duration?: number;
+  /** Rework rounds completed in the run at the moment this row was emitted; the run
+   *  total is the max over its rows (#655). */
+  reworkRoundCount?: number;
 }
 
 // ---------- Dispute ----------
@@ -299,6 +333,11 @@ export type RunStatus =
 export interface IssueRunState {
   issue: number;
   lane: string;
+  /** GitHub slug (`owner/name`) of the checkout this run belongs to (#972).
+   *  Optional for the same reason `FactoryEvent.repo` is (#971): a checkout with no
+   *  readable `origin` remote has no slug to record. Qualifies `lane`, whose meaning
+   *  and format are unchanged. */
+  repo?: string;
   status: RunStatus;
   branch: string;
   worktree: string;

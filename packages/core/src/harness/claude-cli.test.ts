@@ -11,6 +11,7 @@ const sandboxPolicy: SandboxPolicy = {
   runtime: 'sandbox-exec',
   worktree: '/tmp/factory worktree',
   writablePaths: ['/tmp/factory worktree'],
+  writableFilePrefixes: [],
   allowHosts: [],
   cpuMs: 300_000,
   memMb: 4096,
@@ -110,11 +111,16 @@ describe('ClaudeCliHarness command shape', () => {
     expect(result.output).toBe('CLAUDE OUTPUT');
     expect(rec.calls).toHaveLength(1);
     expect(rec.calls[0].cmd).toContain('claude -p');
-    expect(rec.calls[0].cmd).toContain("'draft plan'");
+    expect(rec.calls[0].cmd).not.toContain("'draft plan'");
     expect(rec.calls[0].cmd).toContain('--model claude-sonnet-5');
-    expect(rec.calls[0].cmd).toContain('--output-format json');
-    expect(rec.calls[0].cmd).toContain('--dangerously-skip-permissions');
-    expect(rec.calls[0].cmd).toMatch(/--dangerously-skip-permissions\s*< \/dev\/null$/);
+    expect(rec.calls[0].cmd).toContain('--output-format stream-json');
+    expect(rec.calls[0].cmd).toContain('--include-partial-messages');
+    expect(rec.calls[0].cmd).toContain('--verbose');
+    expect(rec.calls[0].cmd).toContain('--safe-mode');
+    expect(rec.calls[0].cmd).toContain('--permission-mode bypassPermissions');
+    expect(rec.calls[0].cmd).toMatch(
+      /--safe-mode\s+--permission-mode bypassPermissions\s*< '?[^']*factory-claude-prompt-[^']+\/prompt\.txt'?$/,
+    );
     expect(rec.calls[0].opts.cwd).toBe('/tmp/factory worktree');
     expect(rec.calls[0].opts.timeoutMs).toBe(7 * 1000);
     expect(rec.calls[0].opts.maxBuffer).toBe(10 * 1024 * 1024);
@@ -129,7 +135,7 @@ describe('ClaudeCliHarness command shape', () => {
     expect(rec.calls).toHaveLength(1);
     expect(rec.calls[0].cmd).toContain('claude -p');
     expect(rec.calls[0].cmd).not.toMatch(/(^|\s)--model(\s|$)/);
-    expect(rec.calls[0].cmd).toContain('--dangerously-skip-permissions');
+    expect(rec.calls[0].cmd).toContain('--permission-mode bypassPermissions');
   });
 
   it('forwards request.env verbatim to the execFn opts', async () => {
@@ -181,7 +187,8 @@ describe('ClaudeCliHarness command shape', () => {
     expect(rec.calls).toHaveLength(1);
     expect(rec.calls[0].cmd.startsWith('sandbox-exec -p ')).toBe(true);
     expect(rec.calls[0].cmd).toContain('claude -p');
-    expect(rec.calls[0].cmd).toContain('--dangerously-skip-permissions');
+    expect(rec.calls[0].cmd).toContain('--permission-mode bypassPermissions');
+    expect(rec.calls[0].cmd).toContain('factory-claude-prompt-');
   });
 });
 
@@ -204,6 +211,21 @@ describe('ClaudeCliHarness result-envelope usage parsing', () => {
       durationApiMs: 1900000,
       costUsd: 0.0123,
     });
+  });
+
+  it('parses the final result envelope from stream-json output', async () => {
+    const rec = recordingExec({
+      stdout: [
+        JSON.stringify({ type: 'system', subtype: 'init' }),
+        JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'partial' }] } }),
+        envelope({ result: 'STREAM FINAL' }),
+      ].join('\n'),
+    });
+    const harness = new ClaudeCliHarness(rec.fn);
+
+    const result = await harness.run(makeContractRequest({ model: 'claude-model', registry }));
+
+    expect(result.output).toBe('STREAM FINAL');
   });
 
   it('omits numTurns/durationMs/durationApiMs when the envelope lacks them, but still parses tokens', async () => {
@@ -293,6 +315,18 @@ describe('ClaudeCliHarness result-envelope usage parsing', () => {
     expect(err.details.exitCode).toBe(0);
   });
 
+  it('rejects unknown command result envelopes as worker errors', async () => {
+    const rec = recordingExec({ stdout: envelope({ result: 'Unknown command: /ship-it' }) });
+    const harness = new ClaudeCliHarness(rec.fn);
+
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('error');
+    expect(err.message).toContain('unknown command');
+    expect(err.details).toMatchObject({ exitCode: 0, stdout: 'Unknown command: /ship-it' });
+  });
+
   it('rejects with reason error when the envelope reports is_error: true, even with a non-empty result', async () => {
     const rec = recordingExec({
       stdout: envelope({ is_error: true, subtype: 'error_max_turns', result: 'partial output before max turns' }),
@@ -306,6 +340,26 @@ describe('ClaudeCliHarness result-envelope usage parsing', () => {
     expect(err.message).toContain('error_max_turns');
     expect(err.details.exitCode).toBe(0);
     expect(err.details.stdout).toBe('partial output before max turns');
+  });
+
+  it('classifies a zero-token, zero-API-duration error envelope as unavailable', async () => {
+    const rec = recordingExec({
+      stdout: envelope({
+        is_error: true,
+        subtype: 'error_during_execution',
+        result: 'provider did not start',
+        duration_api_ms: 0,
+        usage: { input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 },
+      }),
+    });
+    const harness = new ClaudeCliHarness(rec.fn);
+
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('unavailable');
+    expect(err.message).toContain('zero-token');
+    expect(err.details.stdout).toBe('provider did not start');
   });
 });
 
@@ -356,6 +410,93 @@ describe('ClaudeCliHarness failure classification', () => {
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.details.stdout).toBe('Invalid API key · Please run /login');
+  });
+
+  it('classifies Claude OAuth refresh failures from stdout as local auth failures', async () => {
+    const harness = new ClaudeCliHarness(async () => {
+      throw Object.assign(new Error('Command failed: claude -p'), {
+        stdout: 'Failed to authenticate: OAuth session expired and could not be refreshed',
+        stderr: '',
+        code: 1,
+      });
+    });
+
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('local_auth');
+    expect(err.details.stdout).toContain('OAuth session expired');
+  });
+
+  it('does not classify Claude stream-json metadata as local auth on process failure', async () => {
+    const harness = new ClaudeCliHarness(async () => {
+      throw Object.assign(new Error('Command failed: claude -p'), {
+        stdout: [
+          JSON.stringify({
+            type: 'system',
+            subtype: 'init',
+            slash_commands: ['login', 'doctor'],
+            message: 'Use /login if you need to switch accounts.',
+          }),
+          JSON.stringify({ type: 'system', subtype: 'status', status: 'requesting' }),
+        ].join('\n'),
+        stderr: 'Process exited before a result envelope was written',
+        code: 1,
+      });
+    });
+
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).not.toBe('local_auth');
+    expect(err.reason).toBe('unknown');
+    expect(err.details.stdout).toContain('"subtype":"init"');
+  });
+
+  it('does not classify non-error Claude stream-json result text as local auth on process failure', async () => {
+    const harness = new ClaudeCliHarness(async () => {
+      throw Object.assign(new Error('Command failed: claude -p'), {
+        stdout: [
+          JSON.stringify({ type: 'system', subtype: 'init', slash_commands: ['login', 'doctor'] }),
+          JSON.stringify({
+            type: 'result',
+            subtype: 'success',
+            terminal_reason: 'completed',
+            is_error: false,
+            result: 'A task note mentioned: please run /login only if auth fails.',
+          }),
+        ].join('\n'),
+        stderr: '',
+        code: 1,
+      });
+    });
+
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).not.toBe('local_auth');
+    expect(err.reason).toBe('unknown');
+  });
+
+  it('classifies Claude stream-json error results as local auth failures', async () => {
+    const harness = new ClaudeCliHarness(async () => {
+      throw Object.assign(new Error('Command failed: claude -p'), {
+        stdout: JSON.stringify({
+          type: 'result',
+          subtype: 'error',
+          terminal_reason: 'failed',
+          is_error: true,
+          result: 'Failed to authenticate: OAuth session expired and could not be refreshed. Please run /login.',
+        }),
+        stderr: '',
+        code: 1,
+      });
+    });
+
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('local_auth');
   });
 
   it('omits stdout from details when the exec error carries none', async () => {

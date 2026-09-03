@@ -225,6 +225,25 @@ describe('readCostsFile', () => {
     expect(readCostsFile(file)).toEqual({ entries: [valid], skipped: 0 });
   });
 
+  it('accepts sandboxRuntime/duration/reworkRoundCount without counting the row as skipped (#655)', () => {
+    const dir = mkdtemp();
+    const file = join(dir, 'costs.jsonl');
+    const valid: CostEntry = {
+      ts: '2026-07-10T11:30:00Z',
+      issue: '61',
+      task: 'build',
+      model: 'claude-sonnet-5',
+      inputTokens: 100,
+      outputTokens: 50,
+      cost: 0.01,
+      sandboxRuntime: 'docker-sandbox',
+      duration: 4200,
+      reworkRoundCount: 1,
+    };
+    writeFileSync(file, JSON.stringify(valid) + '\n');
+    expect(readCostsFile(file)).toEqual({ entries: [valid], skipped: 0 });
+  });
+
   it('counts a line with non-numeric token fields as skipped instead of admitting it for aggregation', () => {
     const dir = mkdtemp();
     const file = join(dir, 'costs.jsonl');

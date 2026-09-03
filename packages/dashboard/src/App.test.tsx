@@ -25,6 +25,12 @@ describe('App', () => {
     expect(screen.getByRole('main')).toBeDefined();
   });
 
+  it('renders the lane status board, waiting for events in jsdom', () => {
+    render(<App />);
+    expect(screen.getByRole('region', { name: 'Lane status board' })).toBeDefined();
+    expect(screen.getByText('Waiting for lane events…')).toBeDefined();
+  });
+
   it('renders the placeholder nav links', () => {
     render(<App />);
     expect(screen.getByRole('link', { name: 'Runs' })).toBeDefined();

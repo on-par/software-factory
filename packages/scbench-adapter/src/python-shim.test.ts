@@ -58,6 +58,28 @@ describe('python shim conformance (pinned SCBench API)', () => {
     }
   });
 
+  it('stays in lockstep with cli-run.ts RETRY_CHECKPOINT_REQUIRED_FLAGS for the auto-rework hook (#1192)', () => {
+    for (const flag of ['retry-checkpoint', '--evaluation', '--index']) {
+      expect(shim).toContain(flag);
+    }
+  });
+
+  it('auto-invokes the rework hook at both agent entry points (next run() and cleanup())', () => {
+    expect(shim).toContain('def _maybe_rework_previous');
+    const callSites = shim.match(/self\._maybe_rework_previous\(\)/g);
+    expect(callSites).toHaveLength(2);
+    // Both hooks: the next run() covers checkpoints 1..N-1, cleanup() the final one.
+    expect(shim.slice(shim.indexOf('def run'), shim.indexOf('def save_artifacts'))).toContain(
+      'self._maybe_rework_previous()',
+    );
+    expect(shim.slice(shim.indexOf('def cleanup'))).toContain('self._maybe_rework_previous()');
+  });
+
+  it('records the pending checkpoint save dir and mirrors rework evidence into the run output', () => {
+    expect(shim).toContain('self._pending_agent_dir = Path(path)');
+    expect(shim).toContain('shutil.copytree(rework_src, agent_dir / "rework-1", dirs_exist_ok=True)');
+  });
+
   it('declares the required run-config keys', () => {
     expect(runConfig).toContain('type: software_factory');
     expect(runConfig).toContain('cost_limits');
@@ -88,6 +110,16 @@ describe('python shim conformance (pinned SCBench API)', () => {
     expect(launcher).toContain('from compat_check import check_problem_catalog');
     expect(launcher).toContain('check_problem_catalog()');
     expect(launcher).toContain('sys.argv[1] == "run"');
+  });
+
+  it('sanitizes the leaked parent VIRTUAL_ENV at both process boundaries', () => {
+    // Launcher: `uv run --project` sets VIRTUAL_ENV to the harness venv;
+    // evaluated temp projects and Factory checkpoints must not inherit it.
+    expect(launcher).toContain('os.environ.pop("VIRTUAL_ENV", None)');
+    // Shim: the adapter-CLI subprocess env omits it even under entrypoints
+    // that did not go through the launcher's own sanitization.
+    expect(shim).toContain('if k != "VIRTUAL_ENV"');
+    expect(shim).toContain('env=env');
   });
 
   it('refuses dirty or non-git catalog/harness checkouts', () => {

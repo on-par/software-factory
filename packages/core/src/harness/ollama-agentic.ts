@@ -117,7 +117,7 @@ export class OllamaAgenticHarness implements CodingHarness {
   readonly agentic = true;
 
   constructor(
-    private fetchFn: OllamaFetchFn = globalThis.fetch as unknown as OllamaFetchFn,
+    private fetchFn: OllamaFetchFn = globalThis.fetch,
     private execFn: OllamaAgenticExecFn = defaultExecFn,
   ) {}
 

@@ -196,6 +196,104 @@ export function doctorFailed(checks: DoctorCheck[]): boolean {
   return checks.some((c) => !c.ok && !c.optional);
 }
 
+/** Result of the macOS login-keychain probe for the Claude Code credential entry (#1014). */
+export type KeychainProbeStatus =
+  { status: 'skipped'; detail: string } | { status: 'readable' } | { status: 'unreadable'; inTmux: boolean };
+
+export function claudeKeychainCheck(probe: KeychainProbeStatus): DoctorCheck {
+  if (probe.status === 'skipped') {
+    return { name: 'claude keychain (macOS)', ok: true, optional: true, detail: probe.detail };
+  }
+
+  if (probe.status === 'readable') {
+    return {
+      name: 'claude keychain (macOS)',
+      ok: true,
+      detail: "login keychain entry 'Claude Code-credentials' is readable in this context",
+    };
+  }
+
+  if (probe.inTmux) {
+    return {
+      name: 'claude keychain (macOS)',
+      ok: false,
+      detail:
+        "security find-generic-password -s 'Claude Code-credentials' failed inside tmux (SecKeychainSearchCopyNext) — Claude OAuth refresh will fail with local_auth",
+      fix: 'run the factory from a context with login-keychain access — a LaunchAgent in the gui domain (launchctl bootstrap gui/$(id -u) …) or a login Terminal, not a raw tmux pane — see docs/runbooks/macos-keychain-launchagent.md',
+    };
+  }
+
+  return {
+    name: 'claude keychain (macOS)',
+    ok: false,
+    optional: true,
+    detail:
+      "security find-generic-password -s 'Claude Code-credentials' failed — either never logged in, or this launch context cannot read the login keychain",
+    fix: 'run `claude` and complete /login (or export ANTHROPIC_API_KEY); if already logged in, see docs/runbooks/macos-keychain-launchagent.md',
+  };
+}
+
+/** Non-null when `factory run` must fail fast instead of claiming issues (#1014).
+ *  Only the tmux-without-keychain differential is certain enough to abort a run on. */
+export function keychainPreflightError(probe: KeychainProbeStatus): string | null {
+  if (probe.status !== 'unreadable' || !probe.inTmux) return null;
+  return "Claude Code credentials are not readable from this tmux session (security find-generic-password -s 'Claude Code-credentials' failed / SecKeychainSearchCopyNext). OAuth refresh will fail and every claimed issue would spuriously park as local_auth. Launch the factory from a context with login-keychain access — a LaunchAgent in the gui domain (launchctl bootstrap gui/$(id -u) …) or a login Terminal — or export ANTHROPIC_API_KEY. See docs/runbooks/macos-keychain-launchagent.md.";
+}
+
+/** Outcome of one `claude -p` probe: it succeeded, it failed, or it was not run. */
+export type ClaudeAuthProbe = 'ok' | 'failed' | 'skipped';
+
+export interface ClaudeAuthProbeResult {
+  host: ClaudeAuthProbe;
+  sandboxed: ClaudeAuthProbe;
+  hostDetail: string;
+  sandboxDetail: string;
+}
+
+const HOST_AUTH_CHECK = 'claude auth (host)';
+const SANDBOX_AUTH_CHECK = 'claude auth (sandboxed)';
+
+/** Reports host and sandboxed Claude auth as two separate checks (#1008). Only the
+ *  differential — host ok, sandboxed failed — is a hard doctor failure; that is the one
+ *  combination that proves the sandbox, not the credentials, is at fault. */
+export function sandboxClaudeAuthChecks(result: ClaudeAuthProbeResult): DoctorCheck[] {
+  const host: DoctorCheck =
+    result.host === 'ok'
+      ? { name: HOST_AUTH_CHECK, ok: true, detail: result.hostDetail }
+      : result.host === 'skipped'
+        ? { name: HOST_AUTH_CHECK, ok: true, optional: true, detail: result.hostDetail }
+        : {
+            name: HOST_AUTH_CHECK,
+            ok: false,
+            detail: result.hostDetail,
+            fix: 'run `claude` and complete /login, then re-run `factory doctor`',
+          };
+
+  let sandboxed: DoctorCheck;
+  if (result.sandboxed === 'ok') {
+    sandboxed = { name: SANDBOX_AUTH_CHECK, ok: true, detail: result.sandboxDetail };
+  } else if (result.sandboxed === 'skipped') {
+    sandboxed = { name: SANDBOX_AUTH_CHECK, ok: true, optional: true, detail: result.sandboxDetail };
+  } else if (result.host === 'ok') {
+    sandboxed = {
+      name: SANDBOX_AUTH_CHECK,
+      ok: false,
+      detail: `${result.sandboxDetail} — host claude auth is healthy, so the sandbox is blocking Claude credential refresh`,
+      fix: 'check the sandbox write allowlist (~/.claude.json*, ~/Library/Keychains); as a stopgap run with FACTORY_SANDBOX=0',
+    };
+  } else {
+    sandboxed = {
+      name: SANDBOX_AUTH_CHECK,
+      ok: false,
+      optional: true,
+      detail: `${result.sandboxDetail} — host claude auth is not healthy either, so this is not attributable to the sandbox`,
+      fix: 'fix host claude auth first, then re-run `factory doctor`',
+    };
+  }
+
+  return [host, sandboxed];
+}
+
 export interface LeaseHealthRow {
   worktreeId: string;
   branch: string;
@@ -283,4 +381,91 @@ export function formatReconcileReport(
   return reaped
     .map((r) => `reconcile: freed port ${r.lease.port} (worktree ${r.lease.worktreeId}, reason ${r.reason})`)
     .join('\n');
+}
+
+/** One worktree the reconcile pass removed. Structurally the subset of core's `GcCandidate`
+ *  that the report renders — kept local so `doctor.ts` stays dependency-free and unit-testable. */
+export interface ReconciledWorktree {
+  path: string;
+  branch: string | null;
+  reason: string;
+  branchDeleted: boolean;
+}
+
+export function formatWorktreeReconcileReport(removed: ReconciledWorktree[]): string {
+  if (removed.length === 0) return 'reconcile: no dead-run worktrees';
+
+  return removed
+    .map((w) => {
+      const branchLabel = w.branch ?? 'detached';
+      const deleted = w.branchDeleted ? `, deleted branch ${w.branch}` : '';
+      return `reconcile: removed worktree ${w.path} (branch ${branchLabel}, reason ${w.reason})${deleted}`;
+    })
+    .join('\n');
+}
+
+/** One claim the reconcile pass put back in the queue. Structurally the subset of core's
+ *  `StaleClaimRelease` that the report renders — kept local so `doctor.ts` stays
+ *  dependency-free and unit-testable. */
+export interface ReleasedClaim {
+  issue: number;
+  pid: number;
+  released: boolean;
+  detail?: string;
+}
+
+export function formatClaimReconcileReport(released: ReleasedClaim[]): string {
+  if (released.length === 0) return 'reconcile: no stale claims';
+
+  return released
+    .map((c) =>
+      c.released
+        ? `reconcile: released issue #${c.issue} back to factory:queued (dead pid ${c.pid})`
+        : `reconcile: failed to release issue #${c.issue} (dead pid ${c.pid}) — ${c.detail ?? 'unknown error'}`,
+    )
+    .join('\n');
+}
+
+/** One green-and-ready PR nobody merged. Structurally the subset of core's `UnmergedGreenPr`
+ *  the report renders — kept local so `doctor.ts` stays dependency-free and unit-testable. */
+export interface UnmergedGreenPrRow {
+  number: number;
+  branch: string;
+  issue: number | null;
+  ageHours: number;
+}
+
+/** Outcome of the green-PR scan: it ran, it was skipped (no repo/token), or it failed. */
+export type GreenPrScanResult =
+  | { status: 'ok'; rows: UnmergedGreenPrRow[] }
+  | { status: 'skipped'; detail: string }
+  | { status: 'failed'; detail: string };
+
+const GREEN_PR_CHECK = 'green PRs awaiting merge';
+
+export function unmergedGreenPrChecks(result: GreenPrScanResult): DoctorCheck[] {
+  if (result.status === 'skipped') {
+    return [{ name: GREEN_PR_CHECK, ok: true, optional: true, detail: result.detail }];
+  }
+  if (result.status === 'failed') {
+    return [
+      {
+        name: GREEN_PR_CHECK,
+        ok: false,
+        optional: true,
+        detail: `scan failed — ${result.detail}`,
+        fix: 'check `gh auth status` and network access, then re-run `factory doctor`',
+      },
+    ];
+  }
+  if (result.rows.length === 0) {
+    return [{ name: GREEN_PR_CHECK, ok: true, optional: true, detail: 'no green-and-ready PRs awaiting merge' }];
+  }
+  return result.rows.map((row) => ({
+    name: `green PR #${row.number}`,
+    ok: false,
+    optional: true,
+    detail: `${row.issue === null ? 'owning issue unknown' : `issue #${row.issue}`} — green and ready on ${row.branch}, open ${row.ageHours}h, not merged`,
+    fix: `review and merge #${row.number} (or close it) — the factory never auto-merges an orphaned PR`,
+  }));
 }

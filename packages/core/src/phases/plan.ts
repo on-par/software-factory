@@ -10,11 +10,16 @@ import { adrLabel, readAdrContext, renderAdrConstraints } from '../adr/index.js'
 import { parseAdrDrafts } from '../adr/write.js';
 import type { ApprovalGate } from '../approvals/index.js';
 import { PLAN_SPEC_PREVIEW_BYTES } from '../approvals/index.js';
+import { type LifecycleBus, withLifecycle } from '../bus/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { parseDesignArtifact, renderDesignArtifact } from '../design/index.js';
 import { buildFastPathSpec, isFastPathEligible } from '../efficiency/fast-path.js';
 import type { EventKind } from '../events/kinds.js';
-import { buildReadinessEnrichmentPrompt } from '../readiness/enrich.js';
+import {
+  buildReadinessEnrichmentPrompt,
+  buildReadinessEnrichmentRetryPrompt,
+  type ReadinessEnrichmentRetryContext,
+} from '../readiness/enrich.js';
 import { decomposeOversizedIssue } from '../readiness/decompose.js';
 import { MAX_BUILD_CALL_EDGES, MAX_BUILD_SIGNATURES, MAX_BUILD_TARGET_TYPES } from '../readiness/size.js';
 import { scoreIssueReadiness } from '../readiness/index.js';
@@ -34,6 +39,10 @@ export interface PlanResult {
   model: string;
   escalate?: string;
   designArtifact: DesignArtifact | null;
+  /** Set only by the pre-flight size gate when the oversized issue was decomposed into
+   *  real filed sub-issues. `ok` stays false: this run is over, but the caller can
+   *  continue the lane with these children instead of parking (#823). */
+  decomposed?: { childIssues: number[] };
 }
 
 export interface PlanPromptOpts {
@@ -156,7 +165,28 @@ can make, print a line starting exactly with "ESCALATE:" followed by the questio
 and do NOT write ${specPath}.`;
 }
 
-export async function planPhase(opts: {
+export async function planPhase(opts: Parameters<typeof planPhaseImpl>[0]): Promise<PlanResult> {
+  return withLifecycle(
+    { bus: opts.bus, phase: 'plan', laneId: opts.laneId, issueId: opts.issue, worktreePath: opts.worktree },
+    () => planPhaseImpl(opts),
+    (r) => r.ok,
+    (r) => (r.ok ? `plan complete (route ${r.route}, model ${r.model})` : `plan escalated: ${r.escalate ?? 'unknown'}`),
+  );
+}
+
+function blockedNoChangeSpecReason(body: string): string | null {
+  const looksBlocked = /^\s*Blocked(?::|\s+by\b)/im.test(body);
+  if (!looksBlocked) return null;
+
+  const saysNoChanges = /\bno files? (?:were )?changed\b/i.test(body) || /\bno changes? (?:were )?made\b/i.test(body);
+  const pointsAtSandbox =
+    /\bsandbox\b/i.test(body) || /\boutside (?:the )?(?:worktree|workspace|checkout)\b/i.test(body);
+  if (!saysNoChanges && !pointsAtSandbox) return null;
+
+  return 'PLAN returned a blocked/no-change note instead of a frozen spec';
+}
+
+async function planPhaseImpl(opts: {
   issue: number;
   repo: string;
   worktree: string;
@@ -198,6 +228,10 @@ export async function planPhase(opts: {
   /** Repo config pins the build route (`.factory/config.json` → `route`). Forced
    *  after plan so the spec frontmatter stays the frozen truth. */
   preferredRoute?: 'codex' | 'claude' | 'opencode';
+  /** Lane id stamped onto emitted lifecycle events; defaults to `issue-<issue>` (#591). */
+  laneId?: string;
+  /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
+  bus?: LifecycleBus;
 }): Promise<PlanResult> {
   const {
     issue,
@@ -245,36 +279,52 @@ export async function planPhase(opts: {
   ) {
     const params = source.params as GithubIssueParams;
     const [owner, name] = params.repo.split('/');
+    const maxEnrichmentAttempts = 2; // one initial call + one retry with the missing headings named (#816)
     log('readiness_enrichment_started', `enriching incomplete factory-task issue #${params.issue}`);
     try {
-      const enrichment = await router.run(
-        'readiness_enrich',
-        buildReadinessEnrichmentPrompt({ title: issueTitle, body: issueBody, missing: readiness.missing }),
-        {
+      let previous: ReadinessEnrichmentRetryContext | null = null;
+      let lastModel = '';
+      let lastReason = '';
+      let enriched = false;
+      for (let attempt = 1; attempt <= maxEnrichmentAttempts; attempt++) {
+        const input = { title: issueTitle, body: issueBody, missing: readiness.missing };
+        const prompt =
+          previous === null
+            ? buildReadinessEnrichmentPrompt(input)
+            : buildReadinessEnrichmentRetryPrompt(input, previous);
+        const enrichment = await router.run('readiness_enrich', prompt, {
           worktree,
           timeoutSeconds: Math.min(timeoutSeconds ?? 1800, 300),
           onLog: (msg) => log('router', msg),
-        },
-      );
-      const candidate = scoreIssueReadiness({ title: issueTitle, body: enrichment.output });
-      if (candidate.template !== 'factory-task' || !candidate.pass) {
-        const reason = `enrichment output failed readiness (${candidate.template}; missing: ${candidate.missing.join(', ') || 'none'})`;
-        log('readiness_enrichment_failed', reason);
-        return {
-          ok: false,
-          route: 'claude',
-          specPath,
-          model: enrichment.model,
-          escalate: reason,
-          designArtifact: null,
-        };
+        });
+        lastModel = enrichment.model;
+        const candidate = scoreIssueReadiness({ title: issueTitle, body: enrichment.output });
+        if (candidate.template === 'factory-task' && candidate.pass) {
+          await octokit.rest.issues.update({ owner, repo: name, issue_number: params.issue, body: enrichment.output });
+          issueBody = enrichment.output;
+          readiness = candidate;
+          log(
+            'readiness_enrichment_succeeded',
+            `enriched factory-task issue #${params.issue} with ${enrichment.model}`,
+            {
+              model: enrichment.model,
+            },
+          );
+          enriched = true;
+          break;
+        }
+        lastReason = `enrichment output failed readiness (${candidate.template}; missing: ${candidate.missing.join(', ') || 'none'})`;
+        log(
+          'readiness_enrichment_failed',
+          attempt < maxEnrichmentAttempts
+            ? `${lastReason} — retrying with the missing heading(s) named (attempt ${attempt}/${maxEnrichmentAttempts})`
+            : `${lastReason} — after ${maxEnrichmentAttempts} attempt(s)`,
+        );
+        previous = { previousOutput: enrichment.output, template: candidate.template, stillMissing: candidate.missing };
       }
-      await octokit.rest.issues.update({ owner, repo: name, issue_number: params.issue, body: enrichment.output });
-      issueBody = enrichment.output;
-      readiness = candidate;
-      log('readiness_enrichment_succeeded', `enriched factory-task issue #${params.issue} with ${enrichment.model}`, {
-        model: enrichment.model,
-      });
+      if (!enriched) {
+        return { ok: false, route: 'claude', specPath, model: lastModel, escalate: lastReason, designArtifact: null };
+      }
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       log('readiness_enrichment_failed', `enrichment failed: ${reason}`);
@@ -296,7 +346,7 @@ export async function planPhase(opts: {
     readiness.sizeOk === false
   ) {
     const params = source.params as GithubIssueParams;
-    await decomposeOversizedIssue({
+    const decomposeResult = await decomposeOversizedIssue({
       issue: params.issue,
       repo: params.repo,
       title: issueTitle,
@@ -307,10 +357,22 @@ export async function planPhase(opts: {
       log: (type, msg) => log(type, msg),
       timeoutSeconds: Math.min(timeoutSeconds ?? 1800, 300),
       onProviderFailure,
+      fileSubIssues: true,
     });
-    const reason = `issue exceeds the size gate (${readiness.sizeReason ?? 'too big'}) — parked for decomposition`;
+    const reason =
+      decomposeResult.childIssues.length > 0
+        ? `issue exceeds the size gate (${readiness.sizeReason ?? 'too big'}) — decomposed into ${decomposeResult.childIssues.map((n) => `#${n}`).join(', ')}`
+        : `issue exceeds the size gate (${readiness.sizeReason ?? 'too big'}) — parked for decomposition`;
     log('size-gate-escalated', reason, { readiness });
-    return { ok: false, route: 'claude', specPath, model: '', escalate: reason, designArtifact: null };
+    return {
+      ok: false,
+      route: 'claude',
+      specPath,
+      model: '',
+      escalate: reason,
+      designArtifact: null,
+      ...(decomposeResult.childIssues.length > 0 ? { decomposed: { childIssues: decomposeResult.childIssues } } : {}),
+    };
   }
 
   if (opts.fastPath && !isCodexDisabled && isFastPathEligible({ issueBody, readinessPassed: readiness.pass })) {
@@ -500,6 +562,11 @@ export async function planPhase(opts: {
         return { ok: false, route, specPath, model: result.model, escalate: reason, designArtifact: null };
       }
     } else {
+      const blockedReason = blockedNoChangeSpecReason(parsed.body);
+      if (blockedReason) {
+        log('escalate', blockedReason);
+        return { ok: false, route, specPath, model: result.model, escalate: blockedReason, designArtifact: null };
+      }
       log('design_artifact_invalid', `spec frontmatter has no valid design artifact: ${designErrors.join('; ')}`);
     }
 
