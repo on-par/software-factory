@@ -169,6 +169,14 @@ describe('detectPythonTestSurface', () => {
     expect(await detectPythonTestSurface(noTests)).toEqual({ present: false, sources: [] });
   });
 
+  it('detects the ADR-0081-decided .factory/tests/ location as a Python test surface', async () => {
+    const worktree = await makeWorktree({ '.factory/tests/test_x.py': 'def test_x(): pass\n' });
+
+    const surface = await detectPythonTestSurface(worktree);
+
+    expect(surface).toEqual({ present: true, sources: ['.factory/tests/'] });
+  });
+
   it('detects top-level test_*.py files', async () => {
     const worktree = await makeWorktree({ 'test_main.py': 'def test_main(): pass\n' });
 

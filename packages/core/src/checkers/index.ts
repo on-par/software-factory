@@ -211,7 +211,10 @@ export const testsChecker: CheckerFn = async (ctx) => {
 
     const pythonSurface = ctx.probe?.pythonTestSurface ?? (await detectPythonTestSurface(ctx.worktree));
     if (pythonSurface.present) {
-      const r = await run(['python3', '-m', 'pytest'], {
+      const pytestArgv = pythonSurface.sources.includes('.factory/tests/')
+        ? ['python3', '-m', 'pytest', '.factory/tests']
+        : ['python3', '-m', 'pytest'];
+      const r = await run(pytestArgv, {
         cwd: ctx.worktree,
         timeoutMs: 300_000,
         env: ctx.env,
