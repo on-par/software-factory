@@ -201,13 +201,38 @@ export function buildBenchmarkManifest(input: BenchmarkArtifactsInput, gathered:
   };
 }
 
+/** Parses `git status --short` porcelain lines (`XY PATH`, or `XY OLD -> NEW`
+ *  for renames — take the path after ` -> `) into plain file paths. */
+function statusPathsFrom(output: string): string[] {
+  return output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const rest = line.slice(2).trim();
+      const arrowIdx = rest.indexOf(' -> ');
+      return arrowIdx >= 0 ? rest.slice(arrowIdx + 4).trim() : rest;
+    });
+}
+
+/** Parses `git diff --name-status` lines (`STATUS\tPATH`, or
+ *  `R100\tOLD\tNEW` for renames — the last tab field is always the current
+ *  path) into plain file paths. */
+function nameStatusPathsFrom(output: string): string[] {
+  return output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const fields = line.split('\t');
+      return fields[fields.length - 1];
+    });
+}
+
 async function readChangedFiles(workspace: string, run: ReportRun): Promise<string[]> {
   try {
     const result = await run('git status --short', { cwd: workspace, timeout: 30_000, maxBuffer: 1024 * 1024 });
-    return result.stdout
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean);
+    return statusPathsFrom(result.stdout);
   } catch {
     return [];
   }
@@ -217,7 +242,7 @@ async function readDiff(
   workspace: string,
   run: ReportRun,
   capturedDiffBase?: string,
-): Promise<{ diffStat: string; diffPatch: string; diffBase: string }> {
+): Promise<{ diffStat: string; diffPatch: string; diffBase: string; changedFiles: string[] }> {
   try {
     const stat = await run('git diff --stat origin/main...HEAD', {
       cwd: workspace,
@@ -229,7 +254,17 @@ async function readDiff(
       timeout: 30_000,
       maxBuffer: 1024 * 1024,
     });
-    return { diffStat: stat.stdout.trim(), diffPatch: patch.stdout, diffBase: 'origin/main...HEAD' };
+    const nameStatus = await run('git diff --name-status origin/main...HEAD', {
+      cwd: workspace,
+      timeout: 30_000,
+      maxBuffer: 1024 * 1024,
+    });
+    return {
+      diffStat: stat.stdout.trim(),
+      diffPatch: patch.stdout,
+      diffBase: 'origin/main...HEAD',
+      changedFiles: nameStatusPathsFrom(nameStatus.stdout),
+    };
   } catch {
     if (capturedDiffBase && /^[0-9a-f]{4,64}$/i.test(capturedDiffBase)) {
       try {
@@ -243,12 +278,33 @@ async function readDiff(
           timeout: 30_000,
           maxBuffer: 1024 * 1024,
         });
-        return { diffStat: stat.stdout.trim(), diffPatch: patch.stdout, diffBase: capturedDiffBase };
+        const nameStatus = await run(`git diff --name-status ${capturedDiffBase}..HEAD`, {
+          cwd: workspace,
+          timeout: 30_000,
+          maxBuffer: 1024 * 1024,
+        });
+        return {
+          diffStat: stat.stdout.trim(),
+          diffPatch: patch.stdout,
+          diffBase: capturedDiffBase,
+          changedFiles: nameStatusPathsFrom(nameStatus.stdout),
+        };
       } catch {
-        return { diffStat: '', diffPatch: '', diffBase: 'none' };
+        return { diffStat: '', diffPatch: '', diffBase: 'none', changedFiles: [] };
       }
     }
-    return { diffStat: '', diffPatch: '', diffBase: 'none' };
+    return { diffStat: '', diffPatch: '', diffBase: 'none', changedFiles: [] };
+  }
+}
+
+/** Plain `git diff` (working tree vs index) — the uncommitted hunks not yet
+ *  captured by the committed-range diff. */
+async function readUncommittedDiff(workspace: string, run: ReportRun): Promise<string> {
+  try {
+    const result = await run('git diff', { cwd: workspace, timeout: 30_000, maxBuffer: 1024 * 1024 });
+    return result.stdout;
+  } catch {
+    return '';
   }
 }
 
@@ -269,8 +325,16 @@ export async function writeBenchmarkArtifacts(
     (entry) =>
       entry.issue === String(input.issue) && (!Number.isFinite(startedMs) || Date.parse(entry.ts) >= startedMs),
   );
-  const changedFiles = await readChangedFiles(input.workspace, run);
-  const { diffStat, diffPatch, diffBase } = await readDiff(input.workspace, run, input.diffBase);
+  const statusPaths = await readChangedFiles(input.workspace, run);
+  const {
+    diffStat,
+    diffPatch: committedPatch,
+    diffBase,
+    changedFiles: committedChangedFiles,
+  } = await readDiff(input.workspace, run, input.diffBase);
+  const uncommittedPatch = await readUncommittedDiff(input.workspace, run);
+  const diffPatch = committedPatch + uncommittedPatch;
+  const changedFiles = Array.from(new Set([...committedChangedFiles, ...statusPaths]));
 
   const manifest = buildBenchmarkManifest(input, { endedAt, events, costs, changedFiles, diffStat, diffBase });
 

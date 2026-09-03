@@ -296,6 +296,8 @@ describe('writeBenchmarkArtifacts', () => {
           if (command === 'git diff --stat origin/main...HEAD') return { stdout: 'widget.ts | 2 ++\n', stderr: '' };
           if (command === 'git diff origin/main...HEAD')
             return { stdout: 'diff --git a/widget.ts b/widget.ts\n', stderr: '' };
+          if (command === 'git diff --name-status origin/main...HEAD') return { stdout: 'M\twidget.ts\n', stderr: '' };
+          if (command === 'git diff') return { stdout: '', stderr: '' };
           throw new Error(`unexpected command: ${command}`);
         },
       },
@@ -374,6 +376,8 @@ describe('writeBenchmarkArtifacts', () => {
               stdout: 'diff --git a/app.py b/app.py\n--- a/app.py\n+++ b/app.py\ndiff --git a/README.md b/README.md\n',
               stderr: '',
             };
+          if (command === `git diff --name-status ${sha}..HEAD`) return { stdout: 'M\tapp.py\n', stderr: '' };
+          if (command === 'git diff') return { stdout: '', stderr: '' };
           throw new Error(`unexpected command: ${command}`);
         },
       },
@@ -408,6 +412,8 @@ describe('writeBenchmarkArtifacts', () => {
           if (command === 'git diff --stat origin/main...HEAD') return { stdout: 'widget.ts | 2 ++\n', stderr: '' };
           if (command === 'git diff origin/main...HEAD')
             return { stdout: 'diff --git a/widget.ts b/widget.ts\n', stderr: '' };
+          if (command === 'git diff --name-status origin/main...HEAD') return { stdout: 'M\twidget.ts\n', stderr: '' };
+          if (command === 'git diff') return { stdout: '', stderr: '' };
           throw new Error(`unexpected command: ${command}`);
         },
       },
@@ -439,5 +445,69 @@ describe('writeBenchmarkArtifacts', () => {
     );
 
     expect(result.manifest.git).toEqual({ changedFiles: [], diffStat: '', diffBase: 'none' });
+  });
+
+  it('merges uncommitted working-tree hunks into diff.patch after the committed range', async () => {
+    const { eventsFile, costsFile, artifactsDir, workspace } = await setup();
+
+    await writeBenchmarkArtifacts(
+      {
+        issue: 137,
+        artifactsDir,
+        eventsFile,
+        costsFile,
+        startedAt: '2026-07-28T02:27:00.000Z',
+        outcome: 'ready',
+        workspace,
+      },
+      {
+        now: () => new Date('2026-07-28T02:30:00.000Z'),
+        run: async (command) => {
+          if (command === 'git status --short') return { stdout: '', stderr: '' };
+          if (command === 'git diff --stat origin/main...HEAD') return { stdout: '', stderr: '' };
+          if (command === 'git diff --name-status origin/main...HEAD') return { stdout: '', stderr: '' };
+          if (command === 'git diff origin/main...HEAD')
+            return { stdout: 'diff --git a/README.md b/README.md\n+committed hunk\n', stderr: '' };
+          if (command === 'git diff')
+            return { stdout: 'diff --git a/app.py b/app.py\n+uncommitted hunk\n', stderr: '' };
+          throw new Error(`unexpected command: ${command}`);
+        },
+      },
+    );
+
+    const diffOnDisk = readFileSync(join(artifactsDir, 'diff.patch'), 'utf-8');
+    expect(diffOnDisk).toContain('+committed hunk');
+    expect(diffOnDisk).toContain('+uncommitted hunk');
+    expect(diffOnDisk.indexOf('+committed hunk')).toBeLessThan(diffOnDisk.indexOf('+uncommitted hunk'));
+  });
+
+  it('merges uncommitted changed-file paths into manifest.git.changedFiles without duplicating committed paths', async () => {
+    const { eventsFile, costsFile, artifactsDir, workspace } = await setup();
+
+    const result = await writeBenchmarkArtifacts(
+      {
+        issue: 137,
+        artifactsDir,
+        eventsFile,
+        costsFile,
+        startedAt: '2026-07-28T02:27:00.000Z',
+        outcome: 'ready',
+        workspace,
+      },
+      {
+        now: () => new Date('2026-07-28T02:30:00.000Z'),
+        run: async (command) => {
+          if (command === 'git status --short') return { stdout: 'M app.py\n', stderr: '' };
+          if (command === 'git diff --stat origin/main...HEAD') return { stdout: '', stderr: '' };
+          if (command === 'git diff --name-status origin/main...HEAD')
+            return { stdout: 'M\tREADME.md\nM\tapp.py\n', stderr: '' };
+          if (command === 'git diff origin/main...HEAD') return { stdout: '', stderr: '' };
+          if (command === 'git diff') return { stdout: '', stderr: '' };
+          throw new Error(`unexpected command: ${command}`);
+        },
+      },
+    );
+
+    expect(result.manifest.git.changedFiles.slice().sort()).toEqual(['README.md', 'app.py']);
   });
 });
