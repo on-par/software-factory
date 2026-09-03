@@ -6,6 +6,7 @@ import { dirname, join, relative, sep } from 'node:path';
 import { BENCHMARK_MANIFEST_VERSION, type BenchmarkManifest } from '@on-par/factory-core';
 import { z } from 'zod';
 
+import { allGroupsPass } from './all-groups-pass.js';
 import { NATIVE_EVIDENCE_FILES } from './artifacts.js';
 import { AdapterError } from './checkpoint.js';
 
@@ -416,6 +417,12 @@ function renderGroupCounts(evaluation: ScbenchEvaluation): string {
   }).join(', ');
 }
 
+function renderVerdictLabel(verdict: TrialVerdict): string {
+  if (verdict === 'infrastructure-failure') return 'infrastructure failure';
+  if (verdict === 'missing-evidence') return 'missing evidence';
+  return verdict;
+}
+
 /** Pinned pass policy 'core-cases' — mirrors upstream PassPolicy.CORE_CASES
  *  at the pinned SCBench commit (pass_counts.Core === total_counts.Core),
  *  fail-closed on missing evidence or infrastructure failure. */
@@ -425,6 +432,17 @@ export function evaluateTrialVerdict(trial: BaselineTrial): TrialVerdict {
   if (evaluation.infrastructure_failure) return 'infrastructure-failure';
   const { passed, total } = coreCounts(evaluation);
   return passed === total ? 'pass' : 'fail';
+}
+
+/** All-groups verdict — the same missing-evidence/infrastructure-failure evidence guards as
+ *  evaluateTrialVerdict, but the pass/fail split comes from the shared allGroupsPass predicate
+ *  (every test group present in the evaluation must pass), not from Core alone. Independent of,
+ *  and never mutates, evaluateTrialVerdict or the pinned core-cases passPolicy. */
+export function evaluateAllGroupsVerdict(trial: BaselineTrial): TrialVerdict {
+  const evaluation = trial.evidence.evaluation;
+  if (!evaluation) return 'missing-evidence';
+  if (evaluation.infrastructure_failure) return 'infrastructure-failure';
+  return allGroupsPass(evaluation) ? 'pass' : 'fail';
 }
 
 function formatEnv(env: Record<string, string>): string {
@@ -491,24 +509,30 @@ function renderBenchmarkPassRate(config: BaselineConfig, trials: BaselineTrial[]
     return `Not measurable — none of the ${trials.length} recorded trial(s) carries native SCBench evaluation evidence (\`evaluation.json\`). Factory run outcomes are reported separately under harness health and are never counted as benchmark passes.`;
   }
 
-  const verdicts = trials.map((t) => ({ trial: t, verdict: evaluateTrialVerdict(t) }));
+  const verdicts = trials.map((t) => ({
+    trial: t,
+    verdict: evaluateTrialVerdict(t),
+    allGroupsVerdict: evaluateAllGroupsVerdict(t),
+  }));
   const passes = verdicts.filter((v) => v.verdict === 'pass').length;
   const fails = verdicts.filter((v) => v.verdict === 'fail').length;
   const infra = verdicts.filter((v) => v.verdict === 'infrastructure-failure').length;
   const missing = verdicts.filter((v) => v.verdict === 'missing-evidence').length;
+  const allGroupsPasses = verdicts.filter((v) => v.allGroupsVerdict === 'pass').length;
 
-  const lines = verdicts.map(({ trial, verdict }) => {
+  const lines = verdicts.map(({ trial, verdict, allGroupsVerdict }) => {
+    const allGroupsSuffix = ` — all-groups: ${renderVerdictLabel(allGroupsVerdict)}`;
     if ((verdict === 'pass' || verdict === 'fail') && hasEvaluation(trial)) {
       const evaluation = trial.evidence.evaluation;
-      return `- \`${trial.id}\`: ${verdict} — ${renderGroupCounts(evaluation)} (${evaluation.problem_name} / ${evaluation.checkpoint_name})`;
+      return `- \`${trial.id}\`: ${verdict} — ${renderGroupCounts(evaluation)} (${evaluation.problem_name} / ${evaluation.checkpoint_name})${allGroupsSuffix}`;
     }
     if (verdict === 'infrastructure-failure') {
-      return `- \`${trial.id}\`: infrastructure failure — native evaluation reports infrastructure_failure`;
+      return `- \`${trial.id}\`: infrastructure failure — native evaluation reports infrastructure_failure${allGroupsSuffix}`;
     }
-    return `- \`${trial.id}\`: missing evidence — no evaluation.json in the trial directory`;
+    return `- \`${trial.id}\`: missing evidence — no evaluation.json in the trial directory${allGroupsSuffix}`;
   });
 
-  const headline = `${formatPassRate(passes, trials.length)} under pass policy \`${config.passPolicy.id}\` — ${passes} pass, ${fails} fail, ${infra} infrastructure failure, ${missing} missing evidence. A trial without native evaluation evidence never counts as a pass.`;
+  const headline = `${formatPassRate(passes, trials.length)} under pass policy \`${config.passPolicy.id}\` — ${passes} pass, ${fails} fail, ${infra} infrastructure failure, ${missing} missing evidence. A trial without native evaluation evidence never counts as a pass. all-groups: ${allGroupsPasses}/${trials.length} — a trial counts only when every test group (Core, Functionality, Regression, Error) passes; missing evidence or an infrastructure failure is never counted as an all-groups pass.`;
 
   return [headline, '', ...lines].join('\n');
 }

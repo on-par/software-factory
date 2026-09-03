@@ -5,8 +5,10 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { allGroupsPass } from './all-groups-pass.js';
 import {
   collectBaselineTrials,
+  evaluateAllGroupsVerdict,
   evaluateTrialVerdict,
   generateBaselineReport,
   loadBaselineConfig,
@@ -19,6 +21,7 @@ import {
 } from './baseline.js';
 import { AdapterError, type ScbenchCheckpoint } from './checkpoint.js';
 import { minimalManifest } from './manifest-fixture.js';
+import { retrySkipReason } from './retry-context.js';
 import { runCheckpoint } from './run-checkpoint.js';
 import { createExecaExec, type ExecFn } from './workspace.js';
 
@@ -766,6 +769,44 @@ describe('evaluateTrialVerdict', () => {
   });
 });
 
+describe('evaluateAllGroupsVerdict', () => {
+  it('all-groups verdict matches retrySkipReason', () => {
+    const passingEvaluation = minimalEvaluation({
+      pass_counts: { Core: 3, Functionality: 2 },
+      total_counts: { Core: 3, Functionality: 2 },
+    });
+    const failingEvaluation = minimalEvaluation({
+      pass_counts: { Core: 3, Functionality: 1 },
+      total_counts: { Core: 3, Functionality: 2 },
+    });
+    const passingTrial = trialAt('a', {}, { evaluation: passingEvaluation, runInfoPresent: false });
+    const failingTrial = trialAt('b', {}, { evaluation: failingEvaluation, runInfoPresent: false });
+
+    expect(evaluateAllGroupsVerdict(passingTrial)).toBe('pass');
+    expect(allGroupsPass(passingEvaluation)).toBe(true);
+    expect(retrySkipReason(passingEvaluation)).toBe(
+      'checkpoint fully green — every test group passed, nothing to rework',
+    );
+
+    expect(evaluateAllGroupsVerdict(failingTrial)).toBe('fail');
+    expect(allGroupsPass(failingEvaluation)).toBe(false);
+    expect(retrySkipReason(failingEvaluation)).toBeUndefined();
+  });
+
+  it('never counts missing evidence as all-groups pass', () => {
+    expect(evaluateAllGroupsVerdict(trialAt('a'))).toBe('missing-evidence');
+  });
+
+  it('never counts an infrastructure failure as all-groups pass', () => {
+    const trial = trialAt(
+      'a',
+      {},
+      { evaluation: minimalEvaluation({ infrastructure_failure: true }), runInfoPresent: false },
+    );
+    expect(evaluateAllGroupsVerdict(trial)).toBe('infrastructure-failure');
+  });
+});
+
 describe('generateBaselineReport', () => {
   const config: BaselineConfig = VALID_CONFIG;
 
@@ -902,14 +943,19 @@ describe('generateBaselineReport', () => {
     expect(report).toContain(
       '1/4 (25.0%) under pass policy `core-cases` — 1 pass, 1 fail, 1 infrastructure failure, 1 missing evidence.',
     );
+    expect(report).toContain('all-groups: 1/4 — a trial counts only when every test group');
     expect(report).toContain(
-      '- `a`: pass — Core 3/3, Functionality 2/2, Regression none, Error none (calculator / checkpoint_1)',
+      '- `a`: pass — Core 3/3, Functionality 2/2, Regression none, Error none (calculator / checkpoint_1) — all-groups: pass',
     );
     expect(report).toContain(
-      '- `b`: fail — Core 2/3, Functionality none, Regression none, Error none (calculator / checkpoint_1)',
+      '- `b`: fail — Core 2/3, Functionality none, Regression none, Error none (calculator / checkpoint_1) — all-groups: fail',
     );
-    expect(report).toContain('- `c`: infrastructure failure — native evaluation reports infrastructure_failure');
-    expect(report).toContain('- `d`: missing evidence — no evaluation.json in the trial directory');
+    expect(report).toContain(
+      '- `c`: infrastructure failure — native evaluation reports infrastructure_failure — all-groups: infrastructure failure',
+    );
+    expect(report).toContain(
+      '- `d`: missing evidence — no evaluation.json in the trial directory — all-groups: missing evidence',
+    );
   });
 
   it('renders per-group counts from pass_counts/total_counts', () => {
