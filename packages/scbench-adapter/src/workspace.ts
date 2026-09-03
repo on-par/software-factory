@@ -94,8 +94,12 @@ export async function prepareWorkspace(dir: string, deps: WorkspaceDeps): Promis
   }
 
   const configPath = join(dir, '.factory', 'config.json');
-  if (!existsSync(configPath)) {
-    writeFileSync(configPath, `${JSON.stringify({ version: 1, providers: { ollama: false } }, null, 2)}\n`);
+  try {
+    writeFileSync(configPath, `${JSON.stringify({ version: 1, providers: { ollama: false } }, null, 2)}\n`, {
+      flag: 'wx',
+    });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
   }
 
   // Always (re)write the factory-authored standards so the nested factory
