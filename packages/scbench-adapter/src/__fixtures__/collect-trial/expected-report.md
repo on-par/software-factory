@@ -24,7 +24,7 @@
 
 1/1 (100.0%) under pass policy `core-cases` — 1 pass, 0 fail, 0 infrastructure failure, 0 missing evidence. A trial without native evaluation evidence never counts as a pass.
 
-- `calculator/1/trial-1`: pass — Core 3/3 (calculator / 1)
+- `calculator/1/trial-1`: pass — Core 3/3, Functionality none, Regression none, Error none (calculator / 1)
 
 ## Erosion trajectory (native SCBench evaluation)
 

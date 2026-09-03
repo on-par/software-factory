@@ -902,13 +902,52 @@ describe('generateBaselineReport', () => {
     expect(report).toContain(
       '1/4 (25.0%) under pass policy `core-cases` — 1 pass, 1 fail, 1 infrastructure failure, 1 missing evidence.',
     );
-    expect(report).toContain('- `a`: pass — Core 3/3 (calculator / checkpoint_1)');
-    expect(report).toContain('- `b`: fail — Core 2/3 (calculator / checkpoint_1)');
+    expect(report).toContain(
+      '- `a`: pass — Core 3/3, Functionality 2/2, Regression none, Error none (calculator / checkpoint_1)',
+    );
+    expect(report).toContain(
+      '- `b`: fail — Core 2/3, Functionality none, Regression none, Error none (calculator / checkpoint_1)',
+    );
     expect(report).toContain('- `c`: infrastructure failure — native evaluation reports infrastructure_failure');
     expect(report).toContain('- `d`: missing evidence — no evaluation.json in the trial directory');
   });
 
-  it('renders "Core 0/0" when the Core key is absent from pass_counts/total_counts', () => {
+  it('renders per-group counts from pass_counts/total_counts', () => {
+    const trials = [
+      trialAt(
+        'a',
+        {},
+        {
+          evaluation: minimalEvaluation({
+            pass_counts: { Core: 6, Functionality: 16, Regression: 92, Error: 4 },
+            total_counts: { Core: 7, Functionality: 17, Regression: 107, Error: 6 },
+          }),
+          runInfoPresent: false,
+        },
+      ),
+      trialAt(
+        'b',
+        {},
+        {
+          evaluation: minimalEvaluation({
+            pass_counts: { Core: 4, Functionality: 20, Regression: 0, Error: 9 },
+            total_counts: { Core: 4, Functionality: 20, Regression: 0, Error: 13 },
+          }),
+          runInfoPresent: false,
+        },
+      ),
+    ];
+    const report = generateBaselineReport(config, trials);
+
+    expect(report).toContain(
+      '- `a`: fail — Core 6/7, Functionality 16/17, Regression 92/107, Error 4/6 (calculator / checkpoint_1)',
+    );
+    expect(report).toContain(
+      '- `b`: pass — Core 4/4, Functionality 20/20, Regression none, Error 9/13 (calculator / checkpoint_1)',
+    );
+  });
+
+  it('renders "Core none" when the Core key is absent from pass_counts/total_counts', () => {
     const trials = [
       trialAt(
         'a',
@@ -920,7 +959,9 @@ describe('generateBaselineReport', () => {
       ),
     ];
     const report = generateBaselineReport(config, trials);
-    expect(report).toContain('- `a`: pass — Core 0/0 (calculator / checkpoint_1)');
+    expect(report).toContain(
+      '- `a`: pass — Core none, Functionality 2/2, Regression none, Error none (calculator / checkpoint_1)',
+    );
   });
 
   it('groups erosion by evaluation.problem_name, ordering checkpoints numerically', () => {

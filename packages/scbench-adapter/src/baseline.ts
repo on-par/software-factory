@@ -393,11 +393,27 @@ export function collectBaselineTrials(runsDir: string, deps: BaselineFsDeps = RE
   return trials;
 }
 
-/** Core-group pass/total, defaulting an absent 'Core' key to 0 (vacuous
+/** Pass/total for one named group, defaulting an absent key to 0 (vacuous
  *  0/0 counts as equal, matching upstream's PassPolicy.CORE_CASES). Single
- *  source of truth so the verdict and every render of it agree. */
+ *  source of truth so every render of a group's counts agrees. */
+function groupCounts(evaluation: ScbenchEvaluation, group: string): { passed: number; total: number } {
+  return { passed: evaluation.pass_counts[group] ?? 0, total: evaluation.total_counts[group] ?? 0 };
+}
+
 function coreCounts(evaluation: ScbenchEvaluation): { passed: number; total: number } {
-  return { passed: evaluation.pass_counts.Core ?? 0, total: evaluation.total_counts.Core ?? 0 };
+  return groupCounts(evaluation, 'Core');
+}
+
+/** Fixed, deterministic render order for SCBench's four native test groups
+ *  (#1255). A group whose total is 0 renders as 'none' rather than a
+ *  fraction or 100%, since 0/0 is a vacuous pass, not a measured result. */
+const REPORT_GROUPS = ['Core', 'Functionality', 'Regression', 'Error'] as const;
+
+function renderGroupCounts(evaluation: ScbenchEvaluation): string {
+  return REPORT_GROUPS.map((group) => {
+    const { passed, total } = groupCounts(evaluation, group);
+    return total === 0 ? `${group} none` : `${group} ${passed}/${total}`;
+  }).join(', ');
 }
 
 /** Pinned pass policy 'core-cases' — mirrors upstream PassPolicy.CORE_CASES
@@ -484,8 +500,7 @@ function renderBenchmarkPassRate(config: BaselineConfig, trials: BaselineTrial[]
   const lines = verdicts.map(({ trial, verdict }) => {
     if ((verdict === 'pass' || verdict === 'fail') && hasEvaluation(trial)) {
       const evaluation = trial.evidence.evaluation;
-      const { passed, total } = coreCounts(evaluation);
-      return `- \`${trial.id}\`: ${verdict} — Core ${passed}/${total} (${evaluation.problem_name} / ${evaluation.checkpoint_name})`;
+      return `- \`${trial.id}\`: ${verdict} — ${renderGroupCounts(evaluation)} (${evaluation.problem_name} / ${evaluation.checkpoint_name})`;
     }
     if (verdict === 'infrastructure-failure') {
       return `- \`${trial.id}\`: infrastructure failure — native evaluation reports infrastructure_failure`;
