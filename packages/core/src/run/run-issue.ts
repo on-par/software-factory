@@ -95,6 +95,7 @@ interface RunReportInfo {
   reason?: string;
   failure?: { phase: FailurePhase; reason: string; message: string };
   reportPath?: string;
+  diffBase?: string;
 }
 
 /** The injected seams runIssue needs. Effectful, path-bound concerns (Octokit, worktree
@@ -160,6 +161,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
   let reworkRounds: number | undefined;
   let checkSummary: CheckSummary | undefined;
   let failurePhase: FailurePhase = 'plan';
+  let runStartDiffBase: string | undefined;
 
   const release = async (): Promise<void> => {
     if (released) return;
@@ -207,6 +209,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       checkSummary,
       failure: { phase: failurePhase, reason, message },
       reportPath,
+      diffBase: runStartDiffBase,
     });
   };
 
@@ -308,7 +311,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     // Run-start HEAD (#1210): captured exactly once, before PLAN, for local-only
     // workspace runs — there is no remote to diff against, and every rework round
     // inside CHECK must diff against this same base rather than a moving target.
-    const runStartDiffBase = request.localOnly ? await captureDiffBase(ports.workspace.path) : undefined;
+    runStartDiffBase = request.localOnly ? await captureDiffBase(ports.workspace.path) : undefined;
 
     // PLAN
     const planModel = await preferFallbackWhenProviderIsOpen(
@@ -514,6 +517,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
         reworkRounds,
         checkSummary,
         reportPath,
+        diffBase: runStartDiffBase,
       });
       return { state: 'ready', route, branch: request.branch, reworkRounds };
     }
