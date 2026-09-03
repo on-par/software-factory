@@ -539,7 +539,7 @@ describe('cli commands (via main dispatch)', () => {
     });
 
     it('is idempotent: a second run without --force leaves an existing config untouched', async () => {
-      const sentinel = '{"version":2,"models":{"plan":"x"}}';
+      const sentinel = '{"version":2,"models":{"pins":{"plan":"x"}}}';
       writeFileSync(paths().config, sentinel);
       await runMain('init');
       expect(readFileSync(paths().config, 'utf-8')).toBe(sentinel);
@@ -547,7 +547,7 @@ describe('cli commands (via main dispatch)', () => {
     });
 
     it('--force overwrites an existing config', async () => {
-      writeFileSync(paths().config, '{"version":2,"models":{"plan":"x"}}');
+      writeFileSync(paths().config, '{"version":2,"models":{"pins":{"plan":"x"}}}');
       await runMain('init', '--force');
       expect(readFileSync(paths().config, 'utf-8')).toBe(buildInitConfig());
     });
@@ -3095,7 +3095,7 @@ describe('shipIssue (direct)', () => {
     writeFileSync(paths().config, JSON.stringify({ version: 1, providers: { ollama: false } }));
     await shipIssue(5, {}, ctx());
     expect(vi.mocked(core.loadRepoConfig).mock.results.at(-1)?.value).toEqual({
-      version: 1,
+      version: 2,
       providers: { ollama: false },
     });
   });

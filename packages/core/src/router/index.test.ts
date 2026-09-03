@@ -1379,9 +1379,9 @@ describe('default Codex GPT phase profiles (#529)', () => {
     // empty that unrelated tier and applyRepoConfig throws eagerly for
     // every tier, not just the one under test (plan/boss).
     const codexOnlyModels = applyRepoConfig(shippedModels, {
-      version: 1,
+      version: 2,
       providers: { anthropic: false, ollama: false },
-      models: { triage: 'gpt-5.1-codex' },
+      models: { pins: { triage: 'gpt-5.1-codex' } },
     });
     const router = new ModelRouter(codexOnlyModels, shippedRoutes, false, stub, false, false);
 

@@ -196,7 +196,7 @@ describe('cli', () => {
   });
 
   it('takes the repo config cap over FACTORY_USAGE_CAP when both are set', () => {
-    expect(resolveUsageKnobs({ FACTORY_USAGE_CAP: '100' }, { version: 1, usage: { capUsd: 50 } }).cap).toBe(50);
+    expect(resolveUsageKnobs({ FACTORY_USAGE_CAP: '100' }, { version: 2, budget: { capUsd: 50 } }).cap).toBe(50);
   });
 
   it('falls back to FACTORY_USAGE_CAP when no repo config is passed', () => {
