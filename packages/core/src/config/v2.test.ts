@@ -4,13 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  FactoryConfigV2Schema,
-  factoryConfigV2JsonSchema,
-  loadV2Config,
-  parseV2Config,
-  type FactoryConfigV2,
-} from './v2.js';
+import { factoryConfigV2JsonSchema, loadV2Config, parseV2Config, type FactoryConfigV2 } from './v2.js';
 
 let dir: string;
 
@@ -331,8 +325,8 @@ describe('JSON Schema generation', () => {
 
 describe('exported schema shape', () => {
   it('exposes the top-level sections the issue enumerates', () => {
-    const shape = FactoryConfigV2Schema.shape;
-    expect(Object.keys(shape).sort()).toEqual(
+    const configSections = factoryConfigV2JsonSchema().properties as Record<string, unknown>;
+    expect(Object.keys(configSections).sort()).toEqual(
       ['budget', 'constitution', 'intake', 'models', 'notifications', 'routes', 'run', 'version'].sort(),
     );
   });
