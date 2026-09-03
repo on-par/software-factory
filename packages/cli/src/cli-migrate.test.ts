@@ -1,4 +1,14 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -33,14 +43,19 @@ function tempRepo(): string {
 }
 
 function snapshotEntry(path: string): { path: string; content: string | undefined; mtime: number } {
-  const mtime = statSync(path).mtimeMs;
-  let content: string | undefined;
+  const fd = openSync(path, 'r');
   try {
-    content = readFileSync(path, 'utf-8');
-  } catch (err: any) {
-    if (err.code !== 'EISDIR') throw err;
+    const mtime = fstatSync(fd).mtimeMs;
+    let content: string | undefined;
+    try {
+      content = readFileSync(fd, 'utf-8');
+    } catch (err: any) {
+      if (err.code !== 'EISDIR') throw err;
+    }
+    return { path, content, mtime };
+  } finally {
+    closeSync(fd);
   }
-  return { path, content, mtime };
 }
 
 function writeV1Fixture(repoRoot: string): void {
