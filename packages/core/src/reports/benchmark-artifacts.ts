@@ -125,6 +125,10 @@ export interface BenchmarkArtifactsInput {
   reworkRounds?: number;
   failure?: BenchmarkRunFailure;
   reportPath?: string;
+  /** Captured run-start HEAD SHA (ADR-0079/#1210), used as the diff base when
+   *  origin/main...HEAD cannot be resolved (e.g. a local-only workspace with no
+   *  remote). Absent means no captured base is available. */
+  diffBase?: string;
 }
 
 interface GatheredRunData {
@@ -212,6 +216,7 @@ async function readChangedFiles(workspace: string, run: ReportRun): Promise<stri
 async function readDiff(
   workspace: string,
   run: ReportRun,
+  capturedDiffBase?: string,
 ): Promise<{ diffStat: string; diffPatch: string; diffBase: string }> {
   try {
     const stat = await run('git diff --stat origin/main...HEAD', {
@@ -226,13 +231,24 @@ async function readDiff(
     });
     return { diffStat: stat.stdout.trim(), diffPatch: patch.stdout, diffBase: 'origin/main...HEAD' };
   } catch {
-    try {
-      const stat = await run('git diff --stat HEAD', { cwd: workspace, timeout: 30_000, maxBuffer: 1024 * 1024 });
-      const patch = await run('git diff HEAD', { cwd: workspace, timeout: 30_000, maxBuffer: 1024 * 1024 });
-      return { diffStat: stat.stdout.trim(), diffPatch: patch.stdout, diffBase: 'HEAD' };
-    } catch {
-      return { diffStat: '', diffPatch: '', diffBase: 'none' };
+    if (capturedDiffBase && /^[0-9a-f]{4,64}$/i.test(capturedDiffBase)) {
+      try {
+        const stat = await run(`git diff --stat ${capturedDiffBase}..HEAD`, {
+          cwd: workspace,
+          timeout: 30_000,
+          maxBuffer: 1024 * 1024,
+        });
+        const patch = await run(`git diff ${capturedDiffBase}..HEAD`, {
+          cwd: workspace,
+          timeout: 30_000,
+          maxBuffer: 1024 * 1024,
+        });
+        return { diffStat: stat.stdout.trim(), diffPatch: patch.stdout, diffBase: capturedDiffBase };
+      } catch {
+        return { diffStat: '', diffPatch: '', diffBase: 'none' };
+      }
     }
+    return { diffStat: '', diffPatch: '', diffBase: 'none' };
   }
 }
 
@@ -254,7 +270,7 @@ export async function writeBenchmarkArtifacts(
       entry.issue === String(input.issue) && (!Number.isFinite(startedMs) || Date.parse(entry.ts) >= startedMs),
   );
   const changedFiles = await readChangedFiles(input.workspace, run);
-  const { diffStat, diffPatch, diffBase } = await readDiff(input.workspace, run);
+  const { diffStat, diffPatch, diffBase } = await readDiff(input.workspace, run, input.diffBase);
 
   const manifest = buildBenchmarkManifest(input, { endedAt, events, costs, changedFiles, diffStat, diffBase });
 

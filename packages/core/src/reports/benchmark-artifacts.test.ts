@@ -348,8 +348,9 @@ describe('writeBenchmarkArtifacts', () => {
     expect(JSON.parse(readFileSync(join(artifactsDir, 'request.json'), 'utf-8'))).toEqual({});
   });
 
-  it('falls back to diffBase HEAD when the origin/main diff throws', async () => {
+  it('uses the captured diffBase SHA when origin/main cannot be resolved', async () => {
     const { eventsFile, costsFile, artifactsDir, workspace } = await setup();
+    const sha = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2';
 
     const result = await writeBenchmarkArtifacts(
       {
@@ -360,21 +361,59 @@ describe('writeBenchmarkArtifacts', () => {
         startedAt: '2026-07-28T02:27:00.000Z',
         outcome: 'ready',
         workspace,
+        diffBase: sha,
       },
       {
         now: () => new Date('2026-07-28T02:30:00.000Z'),
         run: async (command) => {
           if (command.includes('origin/main')) throw new Error('unknown revision origin/main');
           if (command === 'git status --short') return { stdout: '', stderr: '' };
-          if (command === 'git diff --stat HEAD') return { stdout: 'widget.ts | 1 +\n', stderr: '' };
-          if (command === 'git diff HEAD') return { stdout: 'diff --git a/widget.ts\n', stderr: '' };
+          if (command === `git diff --stat ${sha}..HEAD`) return { stdout: 'app.py | 1 +\n', stderr: '' };
+          if (command === `git diff ${sha}..HEAD`)
+            return {
+              stdout: 'diff --git a/app.py b/app.py\n--- a/app.py\n+++ b/app.py\ndiff --git a/README.md b/README.md\n',
+              stderr: '',
+            };
           throw new Error(`unexpected command: ${command}`);
         },
       },
     );
 
-    expect(result.manifest.git.diffBase).toBe('HEAD');
-    expect(result.manifest.git.diffStat).toBe('widget.ts | 1 +');
+    expect(result.manifest.git.diffBase).toBe(sha);
+    expect(result.manifest.git.diffStat).toBe('app.py | 1 +');
+    const diffOnDisk = readFileSync(join(artifactsDir, 'diff.patch'), 'utf-8');
+    expect(diffOnDisk).toContain('app.py');
+    expect(diffOnDisk).toContain('README.md');
+  });
+
+  it('keeps origin/main as the diffBase precedent over a captured SHA', async () => {
+    const { eventsFile, costsFile, artifactsDir, workspace } = await setup();
+    const sha = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2';
+
+    const result = await writeBenchmarkArtifacts(
+      {
+        issue: 137,
+        artifactsDir,
+        eventsFile,
+        costsFile,
+        startedAt: '2026-07-28T02:27:00.000Z',
+        outcome: 'ready',
+        workspace,
+        diffBase: sha,
+      },
+      {
+        now: () => new Date('2026-07-28T02:30:00.000Z'),
+        run: async (command) => {
+          if (command === 'git status --short') return { stdout: '', stderr: '' };
+          if (command === 'git diff --stat origin/main...HEAD') return { stdout: 'widget.ts | 2 ++\n', stderr: '' };
+          if (command === 'git diff origin/main...HEAD')
+            return { stdout: 'diff --git a/widget.ts b/widget.ts\n', stderr: '' };
+          throw new Error(`unexpected command: ${command}`);
+        },
+      },
+    );
+
+    expect(result.manifest.git.diffBase).toBe('origin/main...HEAD');
   });
 
   it('falls back to diffBase none and empty git fields when all git commands throw', async () => {
@@ -389,6 +428,7 @@ describe('writeBenchmarkArtifacts', () => {
         startedAt: '2026-07-28T02:27:00.000Z',
         outcome: 'ready',
         workspace,
+        diffBase: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
       },
       {
         now: () => new Date('2026-07-28T02:30:00.000Z'),

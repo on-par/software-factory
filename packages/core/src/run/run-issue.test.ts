@@ -632,13 +632,15 @@ describe('runIssue — #1210: run-start diffBase captured once, before PLAN', ()
         return { ...BUILD_OK, diffBase: undefined };
       });
 
+      const writeBenchmarkArtifacts = vi.fn().mockResolvedValue(undefined);
       await runIssue(
         baseRequest({ localOnly: true }),
         basePolicy(),
-        basePorts({ workspace: { path: worktree, dispose: async () => {} } }),
+        basePorts({ workspace: { path: worktree, dispose: async () => {} }, writeBenchmarkArtifacts }),
       );
 
       expect(vi.mocked(checkPhase).mock.calls[0][0].diffBase).toBe(runStartSha);
+      expect(writeBenchmarkArtifacts).toHaveBeenCalledWith(expect.objectContaining({ diffBase: runStartSha }));
     } finally {
       await rm(worktree, { recursive: true, force: true });
     }

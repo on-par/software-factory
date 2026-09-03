@@ -1390,6 +1390,7 @@ export async function shipIssue(
         reworkRounds: info.reworkRounds,
         failure: info.failure,
         reportPath: info.reportPath,
+        diffBase: info.diffBase,
         log,
       }),
   };
@@ -1459,6 +1460,7 @@ async function maybeWriteBenchmarkArtifacts(opts: {
   reworkRounds?: number;
   failure?: BenchmarkRunFailure;
   reportPath?: string;
+  diffBase?: string;
   log: (type: EventKind, msg: string) => void;
 }): Promise<void> {
   if (!opts.ctx?.localOnly || !opts.ctx.artifactsDir) return;
@@ -1479,6 +1481,7 @@ async function maybeWriteBenchmarkArtifacts(opts: {
       reworkRounds: opts.reworkRounds,
       failure: opts.failure,
       reportPath: opts.reportPath,
+      diffBase: opts.diffBase,
     });
     opts.log('benchmark-artifacts', `manifest written to ${manifestPath}`);
     console.log(chalk.cyan(`benchmark artifacts: ${manifestPath}`));
