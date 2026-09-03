@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { materializeBrief, materializeRetryBrief } from './brief.js';
 import type { ScbenchCheckpoint } from './checkpoint.js';
+import { findLeakedValues } from './leak-guard.js';
 import type { ScbenchRetryContext } from './retry-context.js';
 
 const CHECKPOINT: ScbenchCheckpoint = {
@@ -155,5 +156,36 @@ describe('materializeRetryBrief', () => {
     expect(request.title).toBe('SCBench calculator — checkpoint 2 (rework)');
     expect(request.brief).toContain(CHECKPOINT.task);
     expect(request.acceptanceCriteria.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+const HIDDEN_TEST_NAME = 'test_hidden_evaluation_case';
+const HIDDEN_PROBLEM_ID = 'hidden-eval-problem-id';
+const HIDDEN = { testNames: [HIDDEN_TEST_NAME], problemIds: [HIDDEN_PROBLEM_ID] };
+
+const PLACEHOLDER_CHECKPOINT: ScbenchCheckpoint = {
+  problemId: 'placeholder-problem',
+  checkpointId: '1',
+  index: 0,
+  task: 'Placeholder task text for the leak-guard fixture.',
+};
+
+const PLACEHOLDER_RETRY_CONTEXT: ScbenchRetryContext = {
+  problemId: 'placeholder-problem',
+  checkpointId: '1',
+  passPolicy: 'core-cases',
+  pytestExitCode: 1,
+  failedTests: [{ group: 'checkpoint_1-Core', name: 'test_placeholder_visible_failure' }],
+};
+
+describe('brief leak guard', () => {
+  it('materializeBrief templates leak no retained hidden-test name or problem id', () => {
+    const brief = materializeBrief(PLACEHOLDER_CHECKPOINT);
+    expect(findLeakedValues(brief, HIDDEN)).toEqual([]);
+  });
+
+  it('materializeRetryBrief templates leak no retained hidden-test name or problem id', () => {
+    const brief = materializeRetryBrief(PLACEHOLDER_CHECKPOINT, PLACEHOLDER_RETRY_CONTEXT);
+    expect(findLeakedValues(brief, HIDDEN)).toEqual([]);
   });
 });
