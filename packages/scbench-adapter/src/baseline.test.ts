@@ -1113,6 +1113,15 @@ describe('generateBaselineReport', () => {
     );
   });
 
+  it('renders the Regression trajectory in checkpoint order', () => {
+    const config = loadBaselineConfig(readFileSync(BASELINE_CONFIG_PATH, 'utf-8'));
+    const trials = collectBaselineTrials(RUNS_DIR);
+    const report = generateBaselineReport(config, trials);
+    expect(report).toContain('## Regression-group trajectory (native SCBench evaluation)');
+    expect(report).toContain('checkpoint_3 `cfgpipe/checkpoint_3/trial-1`: Regression 59/68');
+    expect(report).toContain('checkpoint_4 `cfgpipe/checkpoint_4/trial-1`: Regression 92/107');
+  });
+
   it('renders "confirmed" when every trial has attempts and all observed models are approved', () => {
     const trials = [
       trialAt('a', { modelAttempts: [{ model: 'claude-fable-5', task: 'plan', attempt: '1' }] }),

@@ -30,6 +30,10 @@
 
 - calculator: 1 `calculator/1/trial-1`: pass (Core 3/3)
 
+## Regression-group trajectory (native SCBench evaluation)
+
+- calculator: 1 `calculator/1/trial-1`: Regression none
+
 ## Factory run outcomes (harness health)
 
 1/1 (100.0%) of Factory runs ended `ready`. This is harness health — a `ready` manifest means the PLAN → BUILD → CHECK pipeline completed, not that SCBench's checkpoint evaluation passed; benchmark correctness above is derived only from native SCBench evidence.
