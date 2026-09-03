@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { loadModelsConfig, loadRoutesConfig, type ModelsConfig, type RoutesConfig } from '../config/index.js';
 import { applyRepoConfig } from '../config/repo.js';
@@ -822,7 +822,15 @@ describe('ModelRouter sandbox threading', () => {
 });
 
 describe('ModelRouter worktree reset guard', () => {
-  const worktree = '/fake/worktree';
+  let worktree: string;
+
+  beforeEach(async () => {
+    worktree = await mkdtemp(join(tmpdir(), 'router-worktree-guard-'));
+  });
+
+  afterEach(async () => {
+    await rm(worktree, { recursive: true, force: true });
+  });
 
   function makeFakeGitExec(
     opts: {

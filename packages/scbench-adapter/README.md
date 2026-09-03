@@ -23,12 +23,15 @@ publishing in the CLI.
 
 ## Setup
 
-1. Clone SCBench at the pinned commit recorded in [`scbench.pin.json`](./scbench.pin.json):
+1. Clone SCBench at the pinned commit recorded in [`scbench.pin.json`](./scbench.pin.json),
+   then export the checkout path — the launch gate below, `uv --project`, and
+   `compat_check.py` all read `SCBENCH_CHECKOUT`:
 
    ```bash
    git clone https://github.com/SprocketLab/slop-code-bench.git
    cd slop-code-bench
    git checkout "$(node -p "require('../software-factory/packages/scbench-adapter/scbench.pin.json').commit")"
+   export SCBENCH_CHECKOUT="$PWD"
    ```
 
 2. Clone the problem catalog at its pinned commit (`scbench.pin.json`'s `problems` block) and
@@ -61,7 +64,14 @@ publishing in the CLI.
    `register_agent()` side effect never runs. Instead,
    [`python/run_scbench.py`](./python/run_scbench.py) imports the shim (which
    registers the `software_factory` agent type) and then hands off to
-   SCBench's own `slop-code` CLI:
+   SCBench's own `slop-code` CLI.
+
+   Before invoking it directly, run
+   [`npm run scbench`](#root-level-launch-gate-npm-run-scbench) from the
+   Software Factory repo root. It validates the pinned checkout/catalog
+   commits and the adapter build + problem catalog, and on success prints
+   this exact launcher command — without invoking SCBench or spending model
+   budget:
 
    ```bash
    # From the pinned SCBench checkout's uv environment, invoked from the
@@ -110,7 +120,7 @@ core-cases` explicitly — both are real `RunConfig` fields (upstream
 - Model policy is the evaluator's choice — the adapter never forces one. Set
   `FACTORY_LOCAL_ONLY=1` in the SCBench process environment for an
   all-local model policy, or leave routing as configured in
-  `packages/config/src/routes.json`.
+  `packages/config/src/defaults.ts`.
 
 ## Pinned-upstream compatibility check
 
@@ -144,6 +154,71 @@ CI — the same posture as the live-baseline commands below. CI instead runs
 `src/python-shim.test.ts`, a static conformance test that catches drift in
 the shim's import surface, lifecycle methods, and CLI flags without needing
 Python installed.
+
+## Root-level launch gate (`npm run scbench`)
+
+`npm run scbench` (from the Software Factory repo root) is the single
+discoverable command for the pinned smoke/suite launch path. It runs the two
+preflights above — pinned checkout/catalog commit validation and adapter
+build + problem-catalog validation — against `SCBENCH_CHECKOUT` and
+`SCBENCH_PROBLEMS_PATH`, and only when both pass, prints the confirmed
+problem ids plus the exact pinned launcher command(s) (smoke first, then
+suite). It never invokes SCBench, `uv`, or any model, and it never spends
+model budget — `npm run scbench -- --dry-run` is accepted and behaves
+identically, since the command is inherently a dry run.
+
+Exit codes match the underlying preflights: `0` on success (both preflights
+passed; the launcher command was printed), `1` when either preflight finds a
+failing input (the named failure is printed; no launcher command line is
+ever printed), `2` on a pin-file or baseline-config read/parse error.
+
+Prerequisite: `npm run build` (so the catalog preflight's adapter-build
+check can find `dist/cli.js`).
+
+## Complete suite run (`run-suite`)
+
+Where `npm run scbench` stops at printing the launcher commands, the
+`run-suite` subcommand actually runs the whole configured suite
+(`baseline.config.json`'s `problems.suite`) start to finish:
+
+```bash
+SCBENCH_CHECKOUT=/path/to/slop-code-bench \
+SCBENCH_PROBLEMS_PATH=/path/to/scb-problems \
+SCBENCH_PLACEHOLDER_KEY=x \
+node packages/scbench-adapter/dist/cli.js run-suite \
+  --provider-api-key-env SCBENCH_PLACEHOLDER_KEY \
+  --summary /tmp/suite-summary.json
+```
+
+`--provider-api-key-env <var>` is forwarded verbatim to every per-problem
+launcher invocation. Upstream SCBench's `run` command requires a _populated_
+provider credential env var before it will start (presence-checked for its
+own bookkeeping only — the value is never validated or forwarded to
+Factory's models), so a live run names a harmless placeholder var here.
+Never satisfy that gate by exporting a real `ANTHROPIC_API_KEY`: the nested
+`claude` CLI treats that env var as an auth override and abandons its
+logged-in OAuth session (see `evals/scbench-baseline/README.md`'s credential
+note). With the flag omitted, the launcher argv is unchanged.
+
+The same pin + catalog preflights as `launch` gate the run — a failing
+preflight aborts before any launcher invocation. Once they pass, every
+configured suite problem runs independently, in order, through the exact
+pinned launcher command; a problem whose launcher exits non-zero (or
+crashes) **does not stop later problems**. The final summary classifies
+every configured problem as exactly one of `completed` (exit 0), `failed`
+(recorded non-zero exit), or `missing` (no record — the attempt crashed or
+never happened); a missing problem is never rendered as completed
+(ADR-0007). `--summary <path>` additionally writes the records + summary as
+JSON. Exit codes: `0` only when every configured problem completed, `1`
+when any problem failed/missing or a preflight failed, `2` on a
+pin-file/config read or parse error — the launch/compare convention.
+
+Environment hygiene (#1164): the launcher (`run_scbench.py`) and the shim
+(`software_factory.py`) both strip the leaked parent `VIRTUAL_ENV` (set by
+`uv run --project` to the harness venv) before spawning subprocesses, and
+`run-suite` launches each problem with it un-set — so a
+"VIRTUAL_ENV does not match the project environment" warning in evaluation
+stderr now indicates the solution itself, not the harness.
 
 ## Smoke test
 

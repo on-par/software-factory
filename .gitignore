@@ -24,6 +24,11 @@ coverage/
 # unanchored `reports/` would also shadow the tracked packages/core/src/reports/.
 /reports/
 
+# Raw SCBench run outputs (scbench.run.yaml's save_dir, repo-root relative).
+# Multi-gigabyte and never baseline evidence — collect-trial copies the
+# retained files into evals/scbench-baseline/runs/ instead (#1165).
+/outputs/
+
 # Python
 __pycache__/
 *.pyc

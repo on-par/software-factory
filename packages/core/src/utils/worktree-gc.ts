@@ -9,12 +9,13 @@ import { promisify } from 'node:util';
 import type { Octokit } from '@octokit/rest';
 
 import type { EventKind } from '../events/kinds.js';
-import { shellEscape } from './index.js';
+import { PARKED_LABEL } from '../queue/github-queue.js';
+import { branchPrefixSlug, shellEscape } from './index.js';
 import { removeMicroVm, type WorktreeSandbox } from './microvm.js';
 
 const exec = promisify(execCb);
 
-export type GcReason = 'merged' | 'remote-gone' | 'ttl-expired';
+export type GcReason = 'merged' | 'remote-gone' | 'ttl-expired' | 'issue-closed' | 'issue-parked';
 
 /** GitHub's verdict on a candidate branch's PR(s), read via pulls.list (state=all,
  *  head=owner:branch). `null` means "no verdict" (no client/repo, or the query failed) —
@@ -37,6 +38,11 @@ export interface GcCandidate {
    *  reason was not branch-reapable, when the candidate was detached, when this was a dry run,
    *  or when `git branch -D` failed (a warn is logged in that last case). */
   branchDeleted: boolean;
+  /** Set at decision time for the issue-driven reasons (`issue-closed` / `issue-parked`): true
+   *  only when the branch's content is provably on the remote (a PR ever existed, the remote
+   *  branch is live, or the tip is an ancestor of origin/main). An unpushed parked attempt's
+   *  branch stays as its only handle. */
+  branchReapable?: boolean;
 }
 
 export interface GcReport {
@@ -61,8 +67,11 @@ export interface SweepDeps {
 const CREDENTIAL_BASENAMES = new Set(['.git-credentials', '.npmrc']);
 
 /** Removal reasons that prove the work reached the remote — the only ones whose local
- *  branch is safe to force-delete. `ttl-expired` fires on age alone and is excluded:
- *  its branch may be the last reachable handle on unpushed commits. See ADR (this PR). */
+ *  branch is safe to force-delete unconditionally. `ttl-expired` fires on age alone and is
+ *  excluded: its branch may be the last reachable handle on unpushed commits. The issue-driven
+ *  reasons (`issue-closed` / `issue-parked`) are also excluded here — they delete the branch
+ *  only when the candidate's per-candidate `branchReapable` flag proved remote evidence at
+ *  decision time. See ADR (this PR). */
 const BRANCH_REAPABLE_REASONS: ReadonlySet<GcReason> = new Set<GcReason>(['merged', 'remote-gone']);
 
 export function parseWorktreeList(porcelain: string): WorktreeListEntry[] {
@@ -235,6 +244,45 @@ async function resolvePrState(
   }
 }
 
+/** The owning issue's verdict on a lane worktree. `null` means "no verdict" (no client/repo,
+ *  or the query failed) and must always fall back to the PR-state/local-evidence rules. */
+type IssueDisposition = 'reap-closed' | 'reap-parked' | 'keep';
+
+/** The lane issue number a candidate belongs to: capture group 1 of the lane-branch shape
+ *  `<prefix>/<n>-*`, falling back to a trailing `-<n>` in the directory basename (covers
+ *  detached checkouts of factory-named paths). `null` when neither matches. */
+function laneIssueNumber(entry: WorktreeListEntry, lanePattern: RegExp): number | null {
+  const fromBranch = entry.branch?.match(lanePattern);
+  if (fromBranch) return Number(fromBranch[1]);
+  const fromPath = basename(entry.path).match(/-(\d+)$/);
+  return fromPath ? Number(fromPath[1]) : null;
+}
+
+/** GitHub's verdict on the owning issue. A closed issue and a factory:parked label both mean
+ *  the lane is finished-or-parked and its clean checkout is redundant (see ADR, this PR). */
+async function resolveIssueDisposition(
+  octokit: SweepDeps['octokit'],
+  repo: string | undefined,
+  issue: number,
+  log: (type: EventKind, msg: string) => void,
+): Promise<IssueDisposition | null> {
+  if (!octokit || !repo) return null;
+  const [owner, repoName] = repo.split('/');
+  try {
+    const { data } = await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issue });
+    if (data.state === 'closed') return 'reap-closed';
+    const labels = (data.labels ?? []).map((label) => (typeof label === 'string' ? label : (label?.name ?? '')));
+    if (labels.includes(PARKED_LABEL)) return 'reap-parked';
+    return 'keep';
+  } catch (err: any) {
+    log(
+      'warn',
+      `worktree-gc: GitHub issue query failed for #${issue} (${err?.message ?? String(err)}) — using PR/local evidence only`,
+    );
+    return null;
+  }
+}
+
 /** A worktree is clean when it has no modified tracked files. `--untracked-files=no` deliberately
  *  ignores untracked build residue (node_modules, artifacts) — the "live work" signal is tracked-file
  *  modifications. A probe failure (`safeExec` null) ⇒ false ⇒ keep. */
@@ -247,7 +295,7 @@ async function isWorktreeClean(
 }
 
 export async function sweepWorktrees(
-  opts: { repoRoot: string; ttlDays: number; dryRun?: boolean; repo?: string },
+  opts: { repoRoot: string; ttlDays: number; dryRun?: boolean; repo?: string; branchPrefix?: string },
   deps: SweepDeps = {},
 ): Promise<GcReport> {
   const { runCommand = defaultRunCommand, now = () => Date.now(), log = () => {}, octokit, sandbox } = deps;
@@ -259,11 +307,18 @@ export async function sweepWorktrees(
   const repoRootResolved = resolve(repoRoot);
   const repoBase = basename(repoRootResolved);
   const factoryPrefix = `${repoBase}-factory-`;
+  // The slug is [a-z0-9-] only (branchPrefixSlug), so interpolating it into a regex is safe.
+  const lanePattern = new RegExp('^' + branchPrefixSlug(opts.branchPrefix) + '/(\\d+)-');
 
   const candidates: WorktreeListEntry[] = entries.filter((entry) => {
     const entryPath = resolve(entry.path);
     if (entryPath === repoRootResolved) return false;
-    return basename(entryPath).startsWith(factoryPrefix);
+    const base = basename(entryPath);
+    if (base.startsWith(factoryPrefix)) return true;
+    // Legacy lane paths (<repo>-ship-it-<n>) predate the -factory- infix; there the checked-out
+    // lane-branch shape is what proves factory ownership — manual/* and experiment worktrees
+    // under a <repo>-* name never match it and are never candidates.
+    return base.startsWith(`${repoBase}-`) && entry.branch !== null && lanePattern.test(entry.branch);
   });
 
   const removed: GcCandidate[] = [];
@@ -282,6 +337,17 @@ export async function sweepWorktrees(
     return state;
   };
 
+  // Per-issue GitHub verdicts, memoized across the sweep (one issues.get per distinct lane issue).
+  const dispositionCache = new Map<number, Promise<IssueDisposition | null>>();
+  const dispositionFor = (issue: number): Promise<IssueDisposition | null> => {
+    let disposition = dispositionCache.get(issue);
+    if (!disposition) {
+      disposition = resolveIssueDisposition(octokit, repo, issue, log);
+      dispositionCache.set(issue, disposition);
+    }
+    return disposition;
+  };
+
   for (const entry of candidates) {
     const ageDays = computeAgeDays(entry.path, now, log);
 
@@ -295,9 +361,42 @@ export async function sweepWorktrees(
     };
 
     let reason: GcReason | null = null;
+    let branchReapable = false;
     if (ageDays > ttlDays) {
       reason = 'ttl-expired';
-    } else if (entry.branch) {
+    }
+    if (!reason) {
+      // Issue disposition outranks PR state (see ADR, this PR): a clean worktree whose owning
+      // issue is closed or labeled factory:parked is garbage even while its PR is still open —
+      // a finished or parked issue's open PR proves the work is pushed. No verdict, or a dirty
+      // tree, falls through to the existing PR-state/local-evidence chain unchanged.
+      const issueNumber = laneIssueNumber(entry, lanePattern);
+      const disposition = issueNumber === null ? null : await dispositionFor(issueNumber);
+      if (
+        (disposition === 'reap-parked' || disposition === 'reap-closed') &&
+        (await isWorktreeClean(runCommand, entry.path))
+      ) {
+        reason = disposition === 'reap-parked' ? 'issue-parked' : 'issue-closed';
+        if (entry.branch) {
+          const prState = await prStateFor(entry.branch);
+          if (prState === 'open' || prState === 'merged' || prState === 'closed') {
+            // A PR ever existed under this head ⇒ the branch was pushed.
+            branchReapable = true;
+          } else {
+            const lsRemote = await safeExec(runCommand, `git ls-remote --heads origin ${shellEscape(entry.branch)}`, {
+              cwd: repoRoot,
+            });
+            branchReapable =
+              (lsRemote !== null && lsRemote.stdout.trim() !== '') ||
+              (entry.head !== null &&
+                (await safeExec(runCommand, `git merge-base --is-ancestor ${shellEscape(entry.head)} origin/main`, {
+                  cwd: repoRoot,
+                })) !== null);
+          }
+        }
+      }
+    }
+    if (!reason && entry.branch) {
       const prState = await prStateFor(entry.branch);
       if (prState === 'open') {
         // A live PR is authoritative: the branch is still being worked on — never remove.
@@ -366,6 +465,7 @@ export async function sweepWorktrees(
       reason,
       scrubbedFiles: [],
       branchDeleted: false,
+      branchReapable,
     });
   }
 
@@ -417,7 +517,7 @@ async function deleteReapedBranches(
 ): Promise<void> {
   for (const candidate of candidates) {
     if (candidate.branch === null) continue;
-    if (!BRANCH_REAPABLE_REASONS.has(candidate.reason)) continue;
+    if (!BRANCH_REAPABLE_REASONS.has(candidate.reason) && candidate.branchReapable !== true) continue;
     try {
       await runCommand(`git branch -D ${shellEscape(candidate.branch)}`, { cwd: repoRoot });
       candidate.branchDeleted = true;

@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "problem_name": "cfgpipe",
+  "problem_version": 2,
+  "checkpoint_name": "checkpoint_1",
+  "checkpoint_version": 2,
+  "duration": 1.0375449657440186,
+  "entrypoint": "uv run cfgpipe.py",
+  "tests": {
+    "checkpoint_1-Core": {
+      "passed": [
+        "test_file_overrides_env",
+        "test_env_overrides_default"
+      ],
+      "failed": [
+        "test_cli_arg_forms[arg_candidates0]",
+        "test_missing_required_param"
+      ],
+      "skipped": []
+    },
+    "checkpoint_1-Error": {
+      "passed": [
+        "test_invalid_schema_json"
+      ],
+      "failed": [
+        "test_env_parse_error_priority"
+      ],
+      "skipped": []
+    }
+  },
+  "pass_counts": {
+    "Core": 2,
+    "Error": 1
+  },
+  "total_counts": {
+    "Core": 4,
+    "Error": 2
+  },
+  "pytest_exit_code": 1,
+  "infrastructure_failure": false,
+  "stdout": "collected 6 items\n\n2 failed, 4 passed in 1.03s",
+  "stderr": "FAILED tests/test_checkpoint_1.py::test_missing_required_param - AssertionError: expected resolver error for missing required param\nFAILED tests/test_checkpoint_1.py::test_missing_required_param - AssertionError: expected resolver error for missing required param\nFAILED tests/test_checkpoint_1.py::test_missing_required_param - AssertionError: expected resolver error for missing required param\nFAILED tests/test_checkpoint_1.py::test_missing_required_param - AssertionError: expected resolver error for missing required param\nFAILED tests/test_checkpoint_1.py::test_missing_required_param - AssertionError: expected resolver error for missing required param\nFAILED tests/test_checkpoint_1.py::test_missing_required_param - AssertionError: expected resolver error for missing required param\nFAILED tests/test_checkpoint_1.py::test_missing_required_param - AssertionError: expected resolver error for missing required param\nFAILED tests/test_checkpoint_1.py::test_missing_required_param - AssertionError: expected resolver error for missing required param\nFAILED tests/test_checkpoint_1.py::test_missing_required_param - AssertionError: expected resolver error for missing required param\nFAILED tests/test_checkpoint_1.py::test_missing_required_param - AssertionError: expected resolver error for missing required param\nFAILED tests/test_checkpoint_1.py::test_missing_required_param - AssertionError: expected resolver error for missing required param\nFAILED tests/test_checkpoint_1.py::test_missing_required_param - AssertionError: expected resolver error for missing required param\nFAILED tests/test_checkpoint_1.py::test_missing_required_param - AssertionError: expected resolver error for missing required param\nFAILED tests/test_checkpoint_1.py::test_missing_required_param - AssertionError: expected resolver error for missing required param\nFAILED tests/test_checkpoint_1.py::test_missing_required_param - AssertionError: expected resolver error for missing required param\nFAILED tests/test_checkpoint_1.py::test_missing_required_param - AssertionError: expected resolver error for missing required param\nFAILED tests/test_checkpoint_1.py::test_missing_required_param - AssertionError: expected resolver error for missing required param\nFAILED tests/test_checkpoint_1.py::test_missing_required_param - AssertionError: expected resolver error for missing required param\nFAILED tests/test_checkpoint_1.py::test_missing_required_param - AssertionError: expected resolver error for missing required param\n"
+}

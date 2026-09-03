@@ -19,6 +19,7 @@ import { buildPhase as buildPhaseDefault } from '../phases/build.js';
 import { checkPhase as checkPhaseDefault } from '../phases/check.js';
 import { planPhase as planPhaseDefault } from '../phases/plan.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
+import { captureDiffBase } from '../checkers/design-smells.js';
 import type { ReworkHistory } from '../checkers/rework-history.js';
 import type { AutoFailoverSettings } from '../config/index.js';
 import type { EffectiveModelPins } from '../config/repo.js';
@@ -94,6 +95,7 @@ interface RunReportInfo {
   reason?: string;
   failure?: { phase: FailurePhase; reason: string; message: string };
   reportPath?: string;
+  diffBase?: string;
 }
 
 /** The injected seams runIssue needs. Effectful, path-bound concerns (Octokit, worktree
@@ -159,6 +161,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
   let reworkRounds: number | undefined;
   let checkSummary: CheckSummary | undefined;
   let failurePhase: FailurePhase = 'plan';
+  let runStartDiffBase: string | undefined;
 
   const release = async (): Promise<void> => {
     if (released) return;
@@ -206,6 +209,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       checkSummary,
       failure: { phase: failurePhase, reason, message },
       reportPath,
+      diffBase: runStartDiffBase,
     });
   };
 
@@ -303,6 +307,11 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     } else {
       log('constitution', 'No standards found (no repo instruction files, no constitution) — proceeding without');
     }
+
+    // Run-start HEAD (#1210): captured exactly once, before PLAN, for local-only
+    // workspace runs — there is no remote to diff against, and every rework round
+    // inside CHECK must diff against this same base rather than a moving target.
+    runStartDiffBase = request.localOnly ? await captureDiffBase(ports.workspace.path) : undefined;
 
     // PLAN
     const planModel = await preferFallbackWhenProviderIsOpen(
@@ -433,6 +442,12 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       if (build.reason === 'no_diff') {
         return terminalParked('fail', 'build produced no diff against the base ref — no implementation was produced');
       }
+      if (build.reason === 'junk_only_diff') {
+        return terminalParked(
+          'fail',
+          'build changed only generated/cache files (e.g. __pycache__) — no implementation was produced',
+        );
+      }
       return terminalEscalated(`build escalated: ${build.escalate ?? 'unknown'}`);
     }
     const buildBudget = await assertBudget('BUILD');
@@ -458,6 +473,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       appBaseUrl,
       onPgid,
       priorFailureSignature,
+      diffBase: request.localOnly ? runStartDiffBase : build.diffBase,
       reworkRoute: build.route,
       reworkModel: build.model,
       laneId: request.lane,
@@ -501,6 +517,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
         reworkRounds,
         checkSummary,
         reportPath,
+        diffBase: runStartDiffBase,
       });
       return { state: 'ready', route, branch: request.branch, reworkRounds };
     }
@@ -527,7 +544,11 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     });
     if (!ship.ok) {
       const reason: ParkReason = ship.denied ? 'escalate' : 'fail';
-      const message = ship.denied ? `ship denied: ${ship.deniedReason}` : 'ship phase failed';
+      const message = ship.denied
+        ? `ship denied: ${ship.deniedReason}`
+        : ship.reason
+          ? `ship phase failed: ${ship.reason}`
+          : 'ship phase failed';
       return terminalParked(reason, message);
     }
 
@@ -542,6 +563,14 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     return { state: 'ready', route, branch: request.branch, reworkRounds, prNumber: ship.prNumber };
   } catch (err) {
     if (isDecomposeSignal(err)) throw err;
+    if ((err as { reason?: unknown } | null | undefined)?.reason === 'local_auth') {
+      log(
+        'environment_warning',
+        'provider CLI authentication failed in this launch context (local_auth) — an ops/environment failure, ' +
+          'not a failure of the issue itself; on macOS a launch context without login-keychain access (e.g. tmux) ' +
+          'cannot refresh Claude OAuth — run `factory doctor` (#1014)',
+      );
+    }
     return terminalParked(parkReasonFor(err), errorMessage(err));
   } finally {
     await release();

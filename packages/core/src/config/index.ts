@@ -512,3 +512,13 @@ export function getFactoryPaths(repoRoot: string, stateRoot?: string) {
 export function getConstitutionsDir(): string {
   return resolveConfigPath('constitutions');
 }
+
+// ---------- Unified v2 config schema (additive; v1 loaders above are untouched) ----------
+
+export {
+  FactoryConfigV2Schema,
+  factoryConfigV2JsonSchema,
+  loadV2Config,
+  parseV2Config,
+  type FactoryConfigV2,
+} from './v2.js';

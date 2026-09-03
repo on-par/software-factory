@@ -1,11 +1,12 @@
 // packages/scbench-adapter/src/baseline.ts — pinned SlopCodeBench baseline
-// config loader + report generator (#511).
+// config loader + report generator (#511, #1163).
 import { existsSync, readdirSync, readFileSync, type Dirent } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 
 import { BENCHMARK_MANIFEST_VERSION, type BenchmarkManifest } from '@on-par/factory-core';
 import { z } from 'zod';
 
+import { allGroupsPass } from './all-groups-pass.js';
 import { NATIVE_EVIDENCE_FILES } from './artifacts.js';
 import { AdapterError } from './checkpoint.js';
 
@@ -15,6 +16,10 @@ const PROBLEM_ID_RE = /^[a-z0-9][a-z0-9_-]*$/;
 const SHA_EXPECTATION = 'a full-length (40 hex char) git SHA';
 const PROBLEM_ID_EXPECTATION = 'an exact problem id from the pinned catalog (a selection rule is not reproducible)';
 const SUITE_EXPECTATION = 'a non-empty array of unique exact problem ids from the pinned catalog';
+const MODEL_SOURCE_EXPECTATION =
+  'a source that does not reference the deleted models.json/routes.json (model and route defaults live in packages/config/src/defaults.ts)';
+const APPROVED_MODELS_EXPECTATION = 'a non-empty array of unique model ids';
+const DISABLED_PROVIDERS_EXPECTATION = 'a non-empty array of provider names';
 
 /** A required, non-empty string. The same expectation is used for the
  *  missing/wrong-type case and the empty-string case so the rendered
@@ -45,7 +50,25 @@ export const BaselineConfigSchema = z.object({
     'an object',
   ),
   modelConfig: z.object(
-    { source: nonEmptyString(), env: z.record(z.string(), z.string(), 'an object of string values') },
+    {
+      source: nonEmptyString(MODEL_SOURCE_EXPECTATION).refine(
+        (s) => !/models\.json|routes\.json/.test(s),
+        MODEL_SOURCE_EXPECTATION,
+      ),
+      env: z.record(z.string(), z.string(), 'an object of string values'),
+    },
+    'an object',
+  ),
+  providerPolicy: z.object(
+    {
+      approvedModels: z
+        .array(nonEmptyString(APPROVED_MODELS_EXPECTATION), APPROVED_MODELS_EXPECTATION)
+        .min(1, APPROVED_MODELS_EXPECTATION)
+        .refine((ids) => new Set(ids).size === ids.length, APPROVED_MODELS_EXPECTATION),
+      disabledProviders: z
+        .array(nonEmptyString(DISABLED_PROVIDERS_EXPECTATION), DISABLED_PROVIDERS_EXPECTATION)
+        .min(1, DISABLED_PROVIDERS_EXPECTATION),
+    },
     'an object',
   ),
   promptInputs: nonEmptyString(),
@@ -125,8 +148,18 @@ export function loadBaselineConfig(raw: string): BaselineConfig {
   return result.data;
 }
 
+/** One group's test outcomes inside evaluation.json's native `tests` map. */
+export interface ScbenchTestGroup {
+  passed: string[];
+  failed: string[];
+  skipped: string[];
+}
+
 /** Parsed subset of SCBench's native per-checkpoint evaluation.json
- *  (CorrectnessResults at the pinned commit). Extra fields are ignored. */
+ *  (CorrectnessResults at the pinned commit). Extra fields are ignored.
+ *  `tests`/`stdout`/`stderr` are optional: real retained evidence at the
+ *  pinned commit carries `tests` but not stdout/stderr, and older synthetic
+ *  fixtures may carry none of the three — all keep parsing (#1163). */
 export interface ScbenchEvaluation {
   problem_name: string;
   checkpoint_name: string;
@@ -134,6 +167,9 @@ export interface ScbenchEvaluation {
   total_counts: Record<string, number>;
   pytest_exit_code: number;
   infrastructure_failure: boolean;
+  tests?: Record<string, ScbenchTestGroup>;
+  stdout?: string;
+  stderr?: string;
 }
 
 /** One line of SCBench's run-level checkpoint_results.jsonl. Extra fields
@@ -200,9 +236,26 @@ function isRecordOfNumbers(value: unknown): value is Record<string, number> {
   return isPlainObject(value) && Object.values(value).every((v) => typeof v === 'number');
 }
 
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((v) => typeof v === 'string');
+}
+
+function isTestGroupMap(value: unknown): value is Record<string, ScbenchTestGroup> {
+  return (
+    isPlainObject(value) &&
+    Object.values(value).every(
+      (group) =>
+        isPlainObject(group) &&
+        isStringArray(group.passed) &&
+        isStringArray(group.failed) &&
+        isStringArray(group.skipped),
+    )
+  );
+}
+
 /** Parse + structurally validate a single trial's native evaluation.json.
  *  Throws AdapterError naming `path` and the offending field. */
-function parseEvaluation(raw: string, path: string): ScbenchEvaluation {
+export function parseEvaluation(raw: string, path: string): ScbenchEvaluation {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -215,6 +268,7 @@ function parseEvaluation(raw: string, path: string): ScbenchEvaluation {
   const invalid = (field: string, expectation: string): AdapterError =>
     new AdapterError(`invalid evaluation evidence at ${path}: field "${field}" must be ${expectation}`);
   const { problem_name, checkpoint_name, pass_counts, total_counts, pytest_exit_code, infrastructure_failure } = parsed;
+  const { tests, stdout, stderr } = parsed;
   if (typeof problem_name !== 'string' || problem_name.length === 0) {
     throw invalid('problem_name', 'a non-empty string');
   }
@@ -233,7 +287,29 @@ function parseEvaluation(raw: string, path: string): ScbenchEvaluation {
   if (typeof infrastructure_failure !== 'boolean') {
     throw invalid('infrastructure_failure', 'a boolean');
   }
-  return { problem_name, checkpoint_name, pass_counts, total_counts, pytest_exit_code, infrastructure_failure };
+  if (tests !== undefined && !isTestGroupMap(tests)) {
+    throw invalid('tests', 'an object of {passed, failed, skipped} string arrays');
+  }
+  if (stdout !== undefined && typeof stdout !== 'string') {
+    throw invalid('stdout', 'a string');
+  }
+  if (stderr !== undefined && typeof stderr !== 'string') {
+    throw invalid('stderr', 'a string');
+  }
+  const evaluation: ScbenchEvaluation = {
+    problem_name,
+    checkpoint_name,
+    pass_counts,
+    total_counts,
+    pytest_exit_code,
+    infrastructure_failure,
+  };
+  // Assign — never spread-with-undefined — so absent optional fields do not
+  // appear as `undefined` keys on the parsed evidence.
+  if (tests !== undefined) evaluation.tests = tests;
+  if (stdout !== undefined) evaluation.stdout = stdout;
+  if (stderr !== undefined) evaluation.stderr = stderr;
+  return evaluation;
 }
 
 /** Parse + structurally validate SCBench's run-level
@@ -318,11 +394,33 @@ export function collectBaselineTrials(runsDir: string, deps: BaselineFsDeps = RE
   return trials;
 }
 
-/** Core-group pass/total, defaulting an absent 'Core' key to 0 (vacuous
+/** Pass/total for one named group, defaulting an absent key to 0 (vacuous
  *  0/0 counts as equal, matching upstream's PassPolicy.CORE_CASES). Single
- *  source of truth so the verdict and every render of it agree. */
+ *  source of truth so every render of a group's counts agrees. */
+function groupCounts(evaluation: ScbenchEvaluation, group: string): { passed: number; total: number } {
+  return { passed: evaluation.pass_counts[group] ?? 0, total: evaluation.total_counts[group] ?? 0 };
+}
+
 function coreCounts(evaluation: ScbenchEvaluation): { passed: number; total: number } {
-  return { passed: evaluation.pass_counts.Core ?? 0, total: evaluation.total_counts.Core ?? 0 };
+  return groupCounts(evaluation, 'Core');
+}
+
+/** Fixed, deterministic render order for SCBench's four native test groups
+ *  (#1255). A group whose total is 0 renders as 'none' rather than a
+ *  fraction or 100%, since 0/0 is a vacuous pass, not a measured result. */
+const REPORT_GROUPS = ['Core', 'Functionality', 'Regression', 'Error'] as const;
+
+function renderGroupCounts(evaluation: ScbenchEvaluation): string {
+  return REPORT_GROUPS.map((group) => {
+    const { passed, total } = groupCounts(evaluation, group);
+    return total === 0 ? `${group} none` : `${group} ${passed}/${total}`;
+  }).join(', ');
+}
+
+function renderVerdictLabel(verdict: TrialVerdict): string {
+  if (verdict === 'infrastructure-failure') return 'infrastructure failure';
+  if (verdict === 'missing-evidence') return 'missing evidence';
+  return verdict;
 }
 
 /** Pinned pass policy 'core-cases' — mirrors upstream PassPolicy.CORE_CASES
@@ -334,6 +432,17 @@ export function evaluateTrialVerdict(trial: BaselineTrial): TrialVerdict {
   if (evaluation.infrastructure_failure) return 'infrastructure-failure';
   const { passed, total } = coreCounts(evaluation);
   return passed === total ? 'pass' : 'fail';
+}
+
+/** All-groups verdict — the same missing-evidence/infrastructure-failure evidence guards as
+ *  evaluateTrialVerdict, but the pass/fail split comes from the shared allGroupsPass predicate
+ *  (every test group present in the evaluation must pass), not from Core alone. Independent of,
+ *  and never mutates, evaluateTrialVerdict or the pinned core-cases passPolicy. */
+export function evaluateAllGroupsVerdict(trial: BaselineTrial): TrialVerdict {
+  const evaluation = trial.evidence.evaluation;
+  if (!evaluation) return 'missing-evidence';
+  if (evaluation.infrastructure_failure) return 'infrastructure-failure';
+  return allGroupsPass(evaluation) ? 'pass' : 'fail';
 }
 
 function formatEnv(env: Record<string, string>): string {
@@ -400,25 +509,30 @@ function renderBenchmarkPassRate(config: BaselineConfig, trials: BaselineTrial[]
     return `Not measurable — none of the ${trials.length} recorded trial(s) carries native SCBench evaluation evidence (\`evaluation.json\`). Factory run outcomes are reported separately under harness health and are never counted as benchmark passes.`;
   }
 
-  const verdicts = trials.map((t) => ({ trial: t, verdict: evaluateTrialVerdict(t) }));
+  const verdicts = trials.map((t) => ({
+    trial: t,
+    verdict: evaluateTrialVerdict(t),
+    allGroupsVerdict: evaluateAllGroupsVerdict(t),
+  }));
   const passes = verdicts.filter((v) => v.verdict === 'pass').length;
   const fails = verdicts.filter((v) => v.verdict === 'fail').length;
   const infra = verdicts.filter((v) => v.verdict === 'infrastructure-failure').length;
   const missing = verdicts.filter((v) => v.verdict === 'missing-evidence').length;
+  const allGroupsPasses = verdicts.filter((v) => v.allGroupsVerdict === 'pass').length;
 
-  const lines = verdicts.map(({ trial, verdict }) => {
+  const lines = verdicts.map(({ trial, verdict, allGroupsVerdict }) => {
+    const allGroupsSuffix = ` — all-groups: ${renderVerdictLabel(allGroupsVerdict)}`;
     if ((verdict === 'pass' || verdict === 'fail') && hasEvaluation(trial)) {
       const evaluation = trial.evidence.evaluation;
-      const { passed, total } = coreCounts(evaluation);
-      return `- \`${trial.id}\`: ${verdict} — Core ${passed}/${total} (${evaluation.problem_name} / ${evaluation.checkpoint_name})`;
+      return `- \`${trial.id}\`: ${verdict} — ${renderGroupCounts(evaluation)} (${evaluation.problem_name} / ${evaluation.checkpoint_name})${allGroupsSuffix}`;
     }
     if (verdict === 'infrastructure-failure') {
-      return `- \`${trial.id}\`: infrastructure failure — native evaluation reports infrastructure_failure`;
+      return `- \`${trial.id}\`: infrastructure failure — native evaluation reports infrastructure_failure${allGroupsSuffix}`;
     }
-    return `- \`${trial.id}\`: missing evidence — no evaluation.json in the trial directory`;
+    return `- \`${trial.id}\`: missing evidence — no evaluation.json in the trial directory${allGroupsSuffix}`;
   });
 
-  const headline = `${formatPassRate(passes, trials.length)} under pass policy \`${config.passPolicy.id}\` — ${passes} pass, ${fails} fail, ${infra} infrastructure failure, ${missing} missing evidence. A trial without native evaluation evidence never counts as a pass.`;
+  const headline = `${formatPassRate(passes, trials.length)} under pass policy \`${config.passPolicy.id}\` — ${passes} pass, ${fails} fail, ${infra} infrastructure failure, ${missing} missing evidence. A trial without native evaluation evidence never counts as a pass. all-groups: ${allGroupsPasses}/${trials.length} — a trial counts only when every test group (Core, Functionality, Regression, Error) passes; missing evidence or an infrastructure failure is never counted as an all-groups pass.`;
 
   return [headline, '', ...lines].join('\n');
 }
@@ -428,42 +542,85 @@ function checkpointSortKey(checkpointName: string): { n: number | undefined; nam
   return { n: match ? Number(match[1]) : undefined, name: checkpointName };
 }
 
-function renderErosion(trials: BaselineTrial[]): string {
-  const withEvidence = trials.filter(hasEvaluation);
-  if (withEvidence.length === 0) {
-    return 'Not yet measurable — requires native SCBench evaluation evidence from the live multi-checkpoint suite run.';
-  }
+type TrialWithEvaluation = BaselineTrial & {
+  evidence: BaselineTrialEvidence & { evaluation: ScbenchEvaluation };
+};
 
-  const groups = new Map<string, (typeof withEvidence)[number][]>();
-  for (const trial of withEvidence) {
+/** Bucket evidence-bearing trials by evaluation.problem_name, preserving first-seen insertion
+ *  order within each bucket (callers sort afterwards). Shared by renderErosion and
+ *  renderRegressionTrajectory so both trajectory sections group identically. */
+function groupTrialsByProblem(trials: TrialWithEvaluation[]): Map<string, TrialWithEvaluation[]> {
+  const groups = new Map<string, TrialWithEvaluation[]>();
+  for (const trial of trials) {
     const problem = trial.evidence.evaluation.problem_name;
     const list = groups.get(problem) ?? [];
     list.push(trial);
     groups.set(problem, list);
   }
+  return groups;
+}
 
+/** Order a problem's trials by checkpointSortKey(checkpoint_name) — numeric when both checkpoints
+ *  end in an integer, else lexicographic by name — tiebreaking on trial id. Shared by renderErosion
+ *  and renderRegressionTrajectory. */
+function compareByCheckpointThenId(a: TrialWithEvaluation, b: TrialWithEvaluation): number {
+  const ak = checkpointSortKey(a.evidence.evaluation.checkpoint_name);
+  const bk = checkpointSortKey(b.evidence.evaluation.checkpoint_name);
+  if (ak.n !== undefined && bk.n !== undefined) {
+    if (ak.n !== bk.n) return ak.n - bk.n;
+  } else if (ak.name !== bk.name) {
+    return ak.name < bk.name ? -1 : 1;
+  }
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+function renderErosion(trials: BaselineTrial[]): string {
+  const withEvidence = trials.filter(hasEvaluation);
+  if (withEvidence.length === 0) {
+    return 'Not yet measurable — requires native SCBench evaluation evidence from the live multi-checkpoint suite run.';
+  }
+  const groups = groupTrialsByProblem(withEvidence);
   return [...groups.keys()]
     .sort()
     .map((problem) => {
       const entries = groups
         .get(problem)!
         .slice()
-        .sort((a, b) => {
-          const ak = checkpointSortKey(a.evidence.evaluation.checkpoint_name);
-          const bk = checkpointSortKey(b.evidence.evaluation.checkpoint_name);
-          if (ak.n !== undefined && bk.n !== undefined) {
-            if (ak.n !== bk.n) return ak.n - bk.n;
-          } else if (ak.name !== bk.name) {
-            return ak.name < bk.name ? -1 : 1;
-          }
-          return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-        })
+        .sort(compareByCheckpointThenId)
         .map((t) => {
           const evaluation = t.evidence.evaluation;
           const verdict = evaluateTrialVerdict(t);
           const verdictLabel = verdict === 'infrastructure-failure' ? 'infrastructure failure' : verdict;
           const { passed, total } = coreCounts(evaluation);
           return `${evaluation.checkpoint_name} \`${t.id}\`: ${verdictLabel} (Core ${passed}/${total})`;
+        })
+        .join(', ');
+      return `- ${problem}: ${entries}`;
+    })
+    .join('\n');
+}
+
+/** Per-problem, checkpoint-ordered Regression pass/total trajectory (#1257). Same grouping/sort
+ *  as renderErosion, but reports Regression's own pass/total (via groupCounts) verbatim instead of
+ *  a Core-derived pass/fail verdict — Regression erosion is not implied by the Core verdict. */
+function renderRegressionTrajectory(trials: BaselineTrial[]): string {
+  const withEvidence = trials.filter(hasEvaluation);
+  if (withEvidence.length === 0) {
+    return 'Not yet measurable — requires native SCBench evaluation evidence from the live multi-checkpoint suite run.';
+  }
+  const groups = groupTrialsByProblem(withEvidence);
+  return [...groups.keys()]
+    .sort()
+    .map((problem) => {
+      const entries = groups
+        .get(problem)!
+        .slice()
+        .sort(compareByCheckpointThenId)
+        .map((t) => {
+          const evaluation = t.evidence.evaluation;
+          const { passed, total } = groupCounts(evaluation, 'Regression');
+          const counts = total === 0 ? 'none' : `${passed}/${total}`;
+          return `${evaluation.checkpoint_name} \`${t.id}\`: Regression ${counts}`;
         })
         .join(', ');
       return `- ${problem}: ${entries}`;
@@ -511,6 +668,42 @@ function renderRouting(trials: BaselineTrial[]): string {
     .join('\n');
 }
 
+function renderProviderPolicy(config: BaselineConfig, trials: BaselineTrial[]): string {
+  const { approvedModels, disabledProviders } = config.providerPolicy;
+  const declared = `Declared policy (source: ${config.modelConfig.source}): approved models ${approvedModels.map((m) => `\`${m}\``).join(', ')}; disabled providers: ${disabledProviders.map((p) => `\`${p}\``).join(', ')}`;
+
+  if (trials.length === 0) {
+    return [declared, 'No trials recorded.'].join('\n\n');
+  }
+
+  const approvedSet = new Set(approvedModels);
+  let anyUnapproved = false;
+  let attemptlessCount = 0;
+
+  const bullets = trials.map((trial) => {
+    const observed = [...new Set(trial.manifest.modelAttempts.map((a) => a.model))].sort();
+    if (observed.length === 0) {
+      attemptlessCount += 1;
+      return `- \`${trial.id}\`: no model attempts recorded — provider evidence unavailable`;
+    }
+    const unapproved = observed.filter((m) => !approvedSet.has(m));
+    const observedList = observed.map((m) => `\`${m}\``).join(', ');
+    if (unapproved.length === 0) {
+      return `- \`${trial.id}\`: observed models ${observedList} — all approved`;
+    }
+    anyUnapproved = true;
+    return `- \`${trial.id}\`: observed models ${observedList} — POLICY VIOLATION: ${unapproved.map((m) => `\`${m}\``).join(', ')} not in the approved model set`;
+  });
+
+  const verdict = anyUnapproved
+    ? 'Ollama disabled: NOT CONFIRMED — at least one recorded model attempt used a model outside the approved set.'
+    : attemptlessCount > 0
+      ? `Ollama disabled: not confirmable from recorded evidence — ${attemptlessCount} trial(s) recorded no model attempts. A trial without recorded attempts never counts as confirmation.`
+      : 'Ollama disabled: confirmed — every trial recorded at least one model attempt and every observed model is in the approved set; no disabled-provider model was observed.';
+
+  return [declared, bullets.join('\n'), verdict].join('\n\n');
+}
+
 function renderCheckerOutcomes(trials: BaselineTrial[]): string {
   if (trials.length === 0) return 'No trials recorded.';
   return trials
@@ -552,10 +745,12 @@ export function generateBaselineReport(config: BaselineConfig, trials: BaselineT
     ['## Trials', '', renderTrials(trials)].join('\n'),
     ['## Benchmark pass rate (native SCBench evaluation)', '', renderBenchmarkPassRate(config, trials)].join('\n'),
     ['## Erosion trajectory (native SCBench evaluation)', '', renderErosion(trials)].join('\n'),
+    ['## Regression-group trajectory (native SCBench evaluation)', '', renderRegressionTrajectory(trials)].join('\n'),
     ['## Factory run outcomes (harness health)', '', renderFactoryOutcomes(trials)].join('\n'),
     ['## Elapsed time', '', renderElapsed(trials)].join('\n'),
     ['## Cost', '', renderCost(trials)].join('\n'),
     ['## Routing and failover', '', renderRouting(trials)].join('\n'),
+    ['## Provider policy', '', renderProviderPolicy(config, trials)].join('\n'),
     ['## Checker outcomes', '', renderCheckerOutcomes(trials)].join('\n'),
     ['## Failure notes', '', renderFailureNotes(trials)].join('\n'),
     [

@@ -1,3 +1,4 @@
+import type * as ChildProcess from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -405,6 +406,9 @@ beforeEach(() => {
     'FACTORY_SANDBOX',
     'FACTORY_PLAN_MODEL',
     'FACTORY_BUILD_MODEL',
+    'FACTORY_AUTO_FAILOVER',
+    'FACTORY_FAILOVER_COOLDOWN_MINUTES',
+    'FACTORY_FAILOVER_MODEL',
     'GITHUB_TOKEN',
     'GH_TOKEN',
   ].forEach((k) => trackEnv(k));
@@ -415,6 +419,9 @@ beforeEach(() => {
   delete process.env.FACTORY_USAGE_WATCH;
   delete process.env.FACTORY_PLAN_MODEL;
   delete process.env.FACTORY_BUILD_MODEL;
+  delete process.env.FACTORY_AUTO_FAILOVER;
+  delete process.env.FACTORY_FAILOVER_COOLDOWN_MINUTES;
+  delete process.env.FACTORY_FAILOVER_MODEL;
   delete process.env.GITHUB_TOKEN;
   process.env.GH_TOKEN = 'test-token';
   process.exitCode = undefined;
@@ -1559,6 +1566,79 @@ bash scripts/verify.sh
       expect(events).toContain('run-done');
       expect(events).not.toContain('kpi-snapshot');
     });
+
+    describe('macOS keychain preflight (#1014)', () => {
+      let originalPlatform: NodeJS.Platform;
+
+      beforeEach(() => {
+        trackEnv('TMUX', 'ANTHROPIC_API_KEY');
+        originalPlatform = process.platform;
+        Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+        h.claudeAvailable = true;
+        delete process.env.TMUX;
+        delete process.env.ANTHROPIC_API_KEY;
+        writeFileSync(paths().queue, 'app 1\n');
+        writeFileSync(paths().stop, '');
+      });
+
+      afterEach(() => {
+        Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+      });
+
+      it('aborts before claiming any issue when the keychain is unreadable inside tmux', async () => {
+        process.env.TMUX = '/tmp/tmux-1000/default,1234,0';
+        h.execSyncImpl = (cmd: string) => {
+          if (cmd.includes('find-generic-password')) throw new Error('SecKeychainSearchCopyNext: exit 44');
+          return '';
+        };
+        await expect(runMain('run', '--local-queue')).rejects.toThrow(/tmux/);
+        const events = readFileSync(paths().events, 'utf-8');
+        expect(events).toContain('environment_warning');
+        expect(events).toContain('local_auth');
+        expect(events).not.toContain(`lane 'app' started`);
+      });
+
+      it('warns but proceeds when the keychain is unreadable outside tmux', async () => {
+        h.execSyncImpl = (cmd: string) => {
+          if (cmd.includes('find-generic-password')) throw new Error('SecKeychainSearchCopyNext: exit 44');
+          return '';
+        };
+        const res = await runMain('run', '--local-queue');
+        expect(res.exited).toBe(false);
+        const events = readFileSync(paths().events, 'utf-8');
+        expect(events).toContain('run-done');
+      });
+
+      it('proceeds when the login keychain entry is readable', async () => {
+        h.execSyncImpl = () => '';
+        const res = await runMain('run', '--local-queue');
+        expect(res.exited).toBe(false);
+        const events = readFileSync(paths().events, 'utf-8');
+        expect(events).toContain('run-done');
+      });
+
+      it('skips the probe when the claude CLI is not on PATH', async () => {
+        h.claudeAvailable = false;
+        h.execSyncImpl = () => {
+          throw new Error('security should not be invoked when claude is unavailable');
+        };
+        const res = await runMain('run', '--local-queue');
+        expect(res.exited).toBe(false);
+        const events = readFileSync(paths().events, 'utf-8');
+        expect(events).toContain('run-done');
+      });
+
+      it('skips the probe when ANTHROPIC_API_KEY auth is in use', async () => {
+        process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
+        h.execSyncImpl = () => {
+          throw new Error('security should not be invoked when using ANTHROPIC_API_KEY');
+        };
+        const res = await runMain('run', '--local-queue');
+        expect(res.exited).toBe(false);
+        const events = readFileSync(paths().events, 'utf-8');
+        expect(events).toContain('run-done');
+      });
+    });
   });
 
   describe('proxy', () => {
@@ -1629,23 +1709,77 @@ bash scripts/verify.sh
         }),
       );
 
-      const runPromise = runMain('daemon', '--port', '0', '--registry', registryFile);
+      const runPromise = runMain('daemon', 'run', '--port', '0', '--registry', registryFile);
       while (!logged().includes('listening on 127.0.0.1:')) {
         await new Promise((r) => setTimeout(r, 5));
       }
       expect(logged()).toContain(registryFile);
+
+      // Runtime state lives in dirname(registryFile) while the daemon is up (#1177).
+      const pidFile = join(paths().state, 'daemon.pid');
+      const portFile = join(paths().state, 'daemon.port');
+      const logFile = join(paths().state, 'daemon.log');
+      const boundPort = Number(/listening on 127\.0\.0\.1:(\d+)/.exec(logged())![1]);
+      expect(readFileSync(pidFile, 'utf-8').trim()).toBe(String(process.pid));
+      expect(JSON.parse(readFileSync(portFile, 'utf-8'))).toEqual({
+        pid: process.pid,
+        port: boundPort,
+        host: '127.0.0.1',
+      });
+
       process.emit('SIGINT');
       const res = await runPromise;
 
       expect(res.exited).toBe(true);
       expect(res.code).toBe(0);
+      expect(existsSync(pidFile)).toBe(false);
+      expect(existsSync(portFile)).toBe(false);
+      expect(readFileSync(logFile, 'utf-8')).toContain(`factoryd: listening on 127.0.0.1:${boundPort}`);
     });
 
     it('exits with code 2 on an invalid --port and never binds', async () => {
-      const res = await runMain('daemon', '--port', 'abc');
+      const res = await runMain('daemon', 'run', '--port', 'abc');
       expect(res.exited).toBe(true);
       expect(res.code).toBe(2);
       expect(logged()).not.toContain('listening on');
+    });
+
+    it('refuses to start when a live daemon holds the pid file, leaving it untouched', async () => {
+      const registryFile = join(paths().state, 'registry.json');
+      const pidFile = join(paths().state, 'daemon.pid');
+      // The test process itself is alive by construction.
+      writeFileSync(pidFile, `${process.pid}\n`);
+
+      const res = await runMain('daemon', 'run', '--port', '0', '--registry', registryFile);
+
+      expect(res.exited).toBe(true);
+      expect(res.code).toBe(2);
+      expect(errored()).toContain(`factoryd already running (pid ${process.pid})`);
+      expect(readFileSync(pidFile, 'utf-8')).toBe(`${process.pid}\n`);
+      expect(logged()).not.toContain('listening on');
+    });
+
+    it('a stale pid file from a killed daemon does not block a restart', async () => {
+      const registryFile = join(paths().state, 'registry.json');
+      writeFileSync(registryFile, JSON.stringify({ version: 1, repos: {} }));
+      const pidFile = join(paths().state, 'daemon.pid');
+      // A real (bypassing the module mock) short-lived child yields a pid that
+      // is guaranteed dead once spawnSync returns.
+      const { spawnSync } = await vi.importActual<typeof ChildProcess>('node:child_process');
+      const deadPid = spawnSync(process.execPath, ['-e', '']).pid;
+      writeFileSync(pidFile, `${deadPid}\n`);
+
+      const runPromise = runMain('daemon', 'run', '--port', '0', '--registry', registryFile);
+      while (!logged().includes('listening on 127.0.0.1:')) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      expect(logged()).toContain(`removed stale pid file (pid ${deadPid})`);
+      expect(readFileSync(pidFile, 'utf-8').trim()).toBe(String(process.pid));
+
+      process.emit('SIGINT');
+      const res = await runPromise;
+      expect(res.exited).toBe(true);
+      expect(res.code).toBe(0);
     });
   });
 

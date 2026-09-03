@@ -59,7 +59,7 @@ export async function worktreeWorkspace(opts: {
 }): Promise<Workspace> {
   const setup = opts.setup ?? setupWorktree;
   const cleanup = opts.cleanup ?? cleanupWorktree;
-  await setup(opts.repoRoot, opts.branch, opts.worktreePath, opts.startPoint ?? 'origin/main', opts.sandbox, opts.log);
+  await setup(opts.repoRoot, opts.branch, opts.worktreePath, opts.startPoint, opts.sandbox, opts.log);
   return {
     path: opts.worktreePath,
     dispose: () => cleanup(opts.repoRoot, opts.worktreePath, opts.log, opts.sandbox),

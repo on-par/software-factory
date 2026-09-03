@@ -151,14 +151,17 @@ import type {
   WorktreeSandbox,
 } from '@on-par/factory-core/internal';
 import {
+  acquirePidFile,
   branchFor,
   branchPrefixSlug,
   cleanupWorktree,
+  createDaemonLogSink,
   createFactorydServer,
   createGithubQueue,
   createLocalSmallDryRun,
   createOctokitGreenPrClient,
   createOctokitQueueClient,
+  daemonRuntimePaths,
   DEFAULT_FACTORYD_PORT,
   defaultRegistryPath,
   ensureDir,
@@ -170,6 +173,8 @@ import {
   logEvent,
   planQueueMigration,
   readCosts,
+  reapLaneWorktree,
+  releaseRuntimeFiles,
   releaseStaleClaims,
   resolveBranchPrefix,
   resolveEffectiveConfig,
@@ -187,6 +192,7 @@ import {
   withGitLock,
   withRunLock,
   wrapCommandInSandbox,
+  writePortFile,
 } from '@on-par/factory-core/internal';
 import { runTui } from '@on-par/factory-tui';
 import chalk from 'chalk';
@@ -195,6 +201,7 @@ import { Command } from 'commander';
 import {
   analyzeEventLog,
   type ClaudeAuthProbe,
+  claudeKeychainCheck,
   doctorFailed,
   eventLogCheck,
   formatClaimReconcileReport,
@@ -203,6 +210,8 @@ import {
   formatWorktreeReconcileReport,
   type GreenPrScanResult,
   leaseChecks,
+  keychainPreflightError,
+  type KeychainProbeStatus,
   type LeaseHealthRow,
   runDoctorChecks,
   sandboxClaudeAuthChecks,
@@ -1342,10 +1351,9 @@ export async function shipIssue(
         withGitLock(root, () =>
           withFileLock(
             paths.gitLock,
-            async () => {
-              await gitFetch(root);
-              await setupWorktree(root, br, wt, sp, sandbox, setupLog);
-            },
+            // setupWorktree fetches origin itself before creating the worktree (#1167),
+            // so no explicit gitFetch here — still under the git + file locks.
+            () => setupWorktree(root, br, wt, sp, sandbox, setupLog),
             { onSteal: (pid) => log('lock-stolen', `stole ${paths.gitLock} from dead holder pid ${pid ?? 'unknown'}`) },
           ),
         ),
@@ -1477,6 +1485,7 @@ export async function shipIssue(
         reworkRounds: info.reworkRounds,
         failure: info.failure,
         reportPath: info.reportPath,
+        diffBase: info.diffBase,
         log,
       }),
   };
@@ -1546,6 +1555,7 @@ async function maybeWriteBenchmarkArtifacts(opts: {
   reworkRounds?: number;
   failure?: BenchmarkRunFailure;
   reportPath?: string;
+  diffBase?: string;
   log: (type: EventKind, msg: string) => void;
 }): Promise<void> {
   if (!opts.ctx?.localOnly || !opts.ctx.artifactsDir) return;
@@ -1566,6 +1576,7 @@ async function maybeWriteBenchmarkArtifacts(opts: {
       reworkRounds: opts.reworkRounds,
       failure: opts.failure,
       reportPath: opts.reportPath,
+      diffBase: opts.diffBase,
     });
     opts.log('benchmark-artifacts', `manifest written to ${manifestPath}`);
     console.log(chalk.cyan(`benchmark artifacts: ${manifestPath}`));
@@ -1925,6 +1936,31 @@ function gcWorktreeSandbox(
   return worktreeSandboxFor(policy?.runtime);
 }
 
+/** Eagerly reaps a parked lane's own worktree inside `factory run` (#1007). All the safety
+ *  gates live in reapLaneWorktree; this wrapper resolves the lane's conventional worktree
+ *  path and holds the same git+file lock pairing as every other worktree mutation site. A
+ *  reap failure is logged as a warn and never surfaces — parking must always succeed. */
+export async function reapParkedLaneWorktree(
+  issue: number,
+  repoRoot: string,
+  paths: ReturnType<typeof getFactoryPaths>,
+): Promise<void> {
+  try {
+    const factoryConfig = loadFactoryConfigForRepo(paths.config);
+    const branchPrefix = resolveEffectiveConfig(loadRepoConfig(repoRoot)).branchPrefix;
+    const worktreePath = worktreePathFor(repoRoot, issue, branchPrefix);
+    const log = (type: EventKind, msg: string) => logEvent(paths.events, type, issue, msg);
+    const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
+    await withGitLock(repoRoot, () =>
+      withFileLock(paths.gitLock, () =>
+        reapLaneWorktree(repoRoot, worktreePath, { issue, branchPrefix, log, sandbox }),
+      ),
+    );
+  } catch (err: any) {
+    logEvent(paths.events, 'warn', issue, `parked-lane worktree reap failed: ${err?.message ?? String(err)}`);
+  }
+}
+
 export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
@@ -1938,7 +1974,11 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }
   const ghRepo = await getGitHubRepo().catch(() => undefined);
   const octokit = ghRepo ? (hasGitHubToken() ? getOctokit() : undefined) : undefined;
   const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
-  const run = () => sweepWorktrees({ repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo }, { log, octokit, sandbox });
+  const run = () =>
+    sweepWorktrees(
+      { repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo, branchPrefix: resolveBranchPrefix() },
+      { log, octokit, sandbox },
+    );
   const report = opts.dryRun ? await run() : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
   console.log(formatGcReport(report));
 }
@@ -2396,27 +2436,54 @@ async function cmdProxy() {
 }
 
 /** Runs factoryd in the foreground: a loopback-only HTTP server over the repo
- *  registry (~/.factory/registry.json). Read-only today — GET /repos is the whole
- *  API (#777). Daemon supervision (launchd) is a sibling story; this command is
- *  the process. */
-async function cmdFactoryd(opts: { port?: string; registry?: string }) {
+ *  registry (~/.factory/registry.json) (#777). Owns the daemon runtime state
+ *  next to the registry file — daemon.pid single-instance guard, daemon.port
+ *  bound-address record, daemon.log append sink (#1177). Daemon supervision
+ *  (launchd) and start|stop|status|logs verbs are the next slice; this command
+ *  is the process. */
+async function cmdFactoryd(opts: { port?: string; registry?: string }): Promise<void> {
   const registryFile = opts.registry ?? defaultRegistryPath();
   const port = opts.port === undefined ? DEFAULT_FACTORYD_PORT : Number(opts.port);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     throw new CliExitError(`invalid --port "${opts.port}" — expected an integer 0-65535`, 2);
   }
 
-  const daemon = createFactorydServer({ registryFile, port, log: (line) => console.log(chalk.dim(line)) });
+  const runtime = daemonRuntimePaths(dirname(registryFile));
+  const acquired = await acquirePidFile(runtime);
+  if (!acquired.ok) {
+    throw new CliExitError(
+      `factoryd already running (pid ${acquired.holderPid}) — stop it or remove ${runtime.pidFile}`,
+      2,
+    );
+  }
+  const logSink = createDaemonLogSink(runtime.logFile);
+  const log = (line: string) => {
+    console.log(chalk.dim(line));
+    logSink(line);
+  };
+  if (acquired.stalePid !== null) log(`removed stale pid file (pid ${acquired.stalePid})`);
+
+  const daemon = createFactorydServer({ registryFile, port, log });
   const boundPort = await daemon.start();
-  console.log(chalk.green(`factoryd: listening on 127.0.0.1:${boundPort}`));
-  console.log(`  registry: ${registryFile}`);
-  console.log(`  GET http://127.0.0.1:${boundPort}/repos`);
+  await writePortFile(runtime, boundPort);
+  const banner = [
+    `factoryd: listening on 127.0.0.1:${boundPort}`,
+    `  registry: ${registryFile}`,
+    `  pid file: ${runtime.pidFile} (pid ${process.pid})`,
+    `  port file: ${runtime.portFile}`,
+    `  log file: ${runtime.logFile}`,
+    `  GET http://127.0.0.1:${boundPort}/repos`,
+  ];
+  console.log(chalk.green(banner[0]));
+  for (const line of banner.slice(1)) console.log(line);
+  for (const line of banner) logSink(line);
 
   await new Promise<void>((resolveShutdown) => {
     const shutdown = () => {
       void daemon
         .stop()
         .catch(() => {})
+        .then(() => releaseRuntimeFiles(runtime))
         .then(() => resolveShutdown());
     };
     process.once('SIGINT', shutdown);
@@ -2491,6 +2558,11 @@ async function cmdRun(opts: { localQueue?: boolean } = {}) {
     clearStaleStopFile(paths);
     const ghRepo = await getGitHubRepo();
     const factoryConfig = loadFactoryConfigForRepo(paths.config);
+    const keychainErr = keychainPreflightError(probeClaudeKeychain());
+    if (keychainErr) {
+      logEvent(paths.events, 'environment_warning', 'all', keychainErr);
+      throw new Error(keychainErr);
+    }
     if (factoryConfig.worktree.autoGcOnRun) {
       try {
         const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
@@ -2498,7 +2570,12 @@ async function cmdRun(opts: { localQueue?: boolean } = {}) {
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
             sweepWorktrees(
-              { repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays, repo: ghRepo },
+              {
+                repoRoot,
+                ttlDays: factoryConfig.worktree.gcTtlDays,
+                repo: ghRepo,
+                branchPrefix: resolveBranchPrefix(),
+              },
               { log: gcLog, octokit: getOctokit(), sandbox: gcSandbox },
             ),
           ),
@@ -2561,7 +2638,12 @@ async function cmdRun(opts: { localQueue?: boolean } = {}) {
           `lane '${planned.lane}' started${planned.issues.length ? ` (${planned.issues.length} issues)` : ''}`,
           { lane: planned.lane },
         );
-        pids.push(runLane(planned.lane, planned.issues, repoRoot, ghRepo, paths, planned.deps));
+        pids.push(
+          runLane(planned.lane, planned.issues, repoRoot, ghRepo, paths, {
+            ...planned.deps,
+            reapWorktree: (issue) => reapParkedLaneWorktree(issue, repoRoot, paths),
+          }),
+        );
       }
 
       await Promise.allSettled(pids);
@@ -2710,19 +2792,29 @@ type RunLaneDeps = {
   emitEvent?: typeof logEvent;
   claimNext?: () => Promise<QueueClaim | null>;
   releaseIssue?: (issue: number, outcome: QueueReleaseOutcome) => Promise<void>;
+  /** Eager park-time worktree reap (#1007). Defaults to a no-op so injected-deps callers and
+   *  tests are unaffected; cmdRun wires it to reapParkedLaneWorktree. */
+  reapWorktree?: (issue: number) => Promise<void>;
+  /** Number of issues still claimable on this lane's remote queue (#1222). Absent for
+   *  static local lanes, whose pending list is the whole truth. */
+  countRemaining?: () => Promise<number>;
 };
 
 export interface PlannedLane {
   lane: string;
   /** Seed issues to work before claiming. Always empty in GitHub-queue mode. */
   issues: number[];
-  deps: Pick<RunLaneDeps, 'claimNext' | 'releaseIssue'>;
+  deps: Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'countRemaining'>;
 }
 
-export function laneQueueDeps(queue: GithubQueue, lane: string): Pick<RunLaneDeps, 'claimNext' | 'releaseIssue'> {
+export function laneQueueDeps(
+  queue: GithubQueue,
+  lane: string,
+): Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'countRemaining'> {
   return {
     claimNext: () => queue.claimNext(lane),
     releaseIssue: (issue, outcome) => queue.release(issue, outcome),
+    countRemaining: async () => (await queue.list(lane)).length,
   };
 }
 
@@ -2837,6 +2929,8 @@ export async function runLane(
     emitEvent = logEvent,
     claimNext = async () => null,
     releaseIssue = async () => {},
+    reapWorktree = async () => {},
+    countRemaining,
   } = deps;
   let merged = 0;
   let awaitingReview = 0;
@@ -2846,6 +2940,18 @@ export async function runLane(
   const buildClaim = (issue: number): QueueClaim => ({ issue, decision: { kind: 'build' } });
   const pending: QueueClaim[] = issues.map(buildClaim);
   const seen = new Set(issues);
+  // Truthful park-time remaining count (#1222): local pending plus the lane's still-queued
+  // remote issues. Fail-closed — a count lookup may never change the message beyond the
+  // local truth, and never lane flow.
+  const remainingAfter = async (index: number): Promise<number> => {
+    const local = pending.length - index - 1;
+    if (!countRemaining) return local;
+    try {
+      return local + (await countRemaining());
+    } catch {
+      return local;
+    }
+  };
   for (let i = 0; ; i++) {
     if (i >= pending.length) {
       const claimed = await claimNext();
@@ -2865,9 +2971,12 @@ export async function runLane(
         paths.events,
         'parked',
         issue,
-        `issue #${issue} parked (${decision.reason}); lane '${lane}' continuing, ${pending.length - i - 1} issue(s) remaining`,
+        `issue #${issue} parked (${decision.reason}); lane '${lane}' continuing, ${await remainingAfter(i)} issue(s) remaining`,
         { lane },
       );
+      // A preflight-parked issue may still have a stale worktree from a prior run; the reap
+      // is fail-closed and must never change lane flow.
+      await reapWorktree(issue).catch(() => {});
       await releaseIssue(issue, 'parked');
       parked++;
       continue;
@@ -2918,9 +3027,12 @@ export async function runLane(
         paths.events,
         'parked',
         issue,
-        `issue #${issue} parked (${reason}); lane '${lane}' continuing, ${pending.length - i - 1} issue(s) remaining`,
+        `issue #${issue} parked (${reason}); lane '${lane}' continuing, ${await remainingAfter(i)} issue(s) remaining`,
         { lane },
       );
+      // Remove the parked lane's own worktree so a parked issue stops leaving a sibling
+      // checkout behind (#1007); fail-closed and never allowed to change lane flow.
+      await reapWorktree(issue).catch(() => {});
       await releaseIssue(issue, 'parked');
       parked++;
       continue;
@@ -3705,6 +3817,18 @@ async function scanGreenPrs(ghRepo: string | undefined, octokit: Octokit | undef
   }
 }
 
+function probeClaudeKeychain(): KeychainProbeStatus {
+  if (process.platform !== 'darwin') return { status: 'skipped', detail: 'skipped — not macOS' };
+  if (!isCommandAvailable('claude')) return { status: 'skipped', detail: 'skipped — claude CLI not on PATH' };
+  if (process.env.ANTHROPIC_API_KEY) return { status: 'skipped', detail: 'skipped — ANTHROPIC_API_KEY auth in use' };
+  try {
+    execSync('security find-generic-password -s "Claude Code-credentials"', { timeout: 10_000, stdio: 'ignore' });
+    return { status: 'readable' };
+  } catch {
+    return { status: 'unreadable', inTmux: !!process.env.TMUX };
+  }
+}
+
 async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
   const checks = runDoctorChecks({
     commandAvailable: isCommandAvailable,
@@ -3772,6 +3896,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     }
   }
 
+  checks.push(claudeKeychainCheck(probeClaudeKeychain()));
   checks.push(...sandboxClaudeAuthChecks({ host, sandboxed, hostDetail, sandboxDetail }));
 
   if (repoRoot !== null) {
@@ -3813,7 +3938,12 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
             sweepWorktrees(
-              { repoRoot, ttlDays: factoryConfig.worktree.gcTtlDays, repo: ghRepo },
+              {
+                repoRoot,
+                ttlDays: factoryConfig.worktree.gcTtlDays,
+                repo: ghRepo,
+                branchPrefix: resolveBranchPrefix(),
+              },
               { log: gcLog, octokit, sandbox: gcSandbox },
             ),
           ),
@@ -4130,8 +4260,9 @@ export async function main() {
     )
     .action(cmdProxy);
 
-  program
-    .command('daemon')
+  const daemonCmd = program.command('daemon').description('The factoryd daemon (long-running, user-scoped)');
+  daemonCmd
+    .command('run')
     .description('Run factoryd in the foreground: a localhost-only HTTP API over the repo registry')
     .option('--port <n>', `port to bind on 127.0.0.1 (default ${DEFAULT_FACTORYD_PORT})`)
     .option('--registry <file>', 'registry file to serve (default ~/.factory/registry.json)')

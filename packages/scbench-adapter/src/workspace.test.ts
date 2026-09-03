@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { AdapterError } from './checkpoint.js';
+import { WORKSPACE_CONSTITUTION } from './workspace-constitution.js';
 import { commitCheckpoint, createExecaExec, prepareWorkspace, type ExecFn } from './workspace.js';
 
 function fakeExec(): { exec: ExecFn; calls: string[][] } {
@@ -42,6 +43,46 @@ describe('prepareWorkspace', () => {
     expect(exclude).toContain('.factory/');
   });
 
+  it('writes the factory-authored constitution into .factory/constitution.md', async () => {
+    const { exec } = fakeExec();
+
+    await prepareWorkspace(dir, { exec });
+
+    const content = readFileSync(join(dir, '.factory', 'constitution.md'), 'utf-8');
+    expect(content).toBe(WORKSPACE_CONSTITUTION);
+  });
+
+  it('refreshes a stale constitution on a repeat call (idempotent overwrite)', async () => {
+    mkdirSync(join(dir, '.git'), { recursive: true });
+    const { exec } = fakeExec();
+    await prepareWorkspace(dir, { exec });
+    writeFileSync(join(dir, '.factory', 'constitution.md'), 'stale');
+
+    await prepareWorkspace(dir, { exec });
+
+    const content = readFileSync(join(dir, '.factory', 'constitution.md'), 'utf-8');
+    expect(content).toBe(WORKSPACE_CONSTITUTION);
+  });
+
+  it('writes every junk-artifact exclude entry into .git/info/exclude', async () => {
+    const { exec } = fakeExec();
+
+    await prepareWorkspace(dir, { exec });
+
+    const lines = readFileSync(join(dir, '.git', 'info', 'exclude'), 'utf-8').split('\n');
+    for (const entry of [
+      '.factory/',
+      '__pycache__/',
+      '*.pyc',
+      '.pytest_cache/',
+      '.mypy_cache/',
+      '.ruff_cache/',
+      '.coverage',
+    ]) {
+      expect(lines).toContain(entry);
+    }
+  });
+
   it('throws AdapterError when git init fails, without creating a fake .git', async () => {
     const exec: ExecFn = async (argv) => {
       if (argv[1] === 'init') return { exitCode: 1, stdout: '', stderr: 'git: command not found' };
@@ -74,13 +115,27 @@ describe('prepareWorkspace', () => {
     expect(existsSync(join(dir, '.factory'))).toBe(true);
   });
 
-  it('does not duplicate the exclude entry on a second run', async () => {
+  it('does not duplicate any exclude entry on a second run', async () => {
     const { exec } = fakeExec();
     await prepareWorkspace(dir, { exec });
     await prepareWorkspace(dir, { exec });
 
     const exclude = readFileSync(join(dir, '.git', 'info', 'exclude'), 'utf-8');
     expect(exclude.match(/\.factory\//g)?.length).toBe(1);
+    expect(exclude.match(/__pycache__\//g)?.length).toBe(1);
+  });
+
+  it('adds only the missing junk entries when .factory/ is already excluded', async () => {
+    mkdirSync(join(dir, '.git', 'info'), { recursive: true });
+    writeFileSync(join(dir, '.git', 'info', 'exclude'), 'node_modules/\n.factory/\n');
+    const { exec } = fakeExec();
+
+    await prepareWorkspace(dir, { exec });
+
+    const exclude = readFileSync(join(dir, '.git', 'info', 'exclude'), 'utf-8');
+    expect(exclude).toBe(
+      'node_modules/\n.factory/\n__pycache__/\n*.pyc\n.pytest_cache/\n.mypy_cache/\n.ruff_cache/\n.coverage\n',
+    );
   });
 
   it('propagates a non-ENOENT error reading the exclude file (e.g. it is a directory)', async () => {
@@ -98,7 +153,9 @@ describe('prepareWorkspace', () => {
     await prepareWorkspace(dir, { exec });
 
     const exclude = readFileSync(join(dir, '.git', 'info', 'exclude'), 'utf-8');
-    expect(exclude).toBe('node_modules/\n.factory/\n');
+    expect(exclude).toBe(
+      'node_modules/\n.factory/\n__pycache__/\n*.pyc\n.pytest_cache/\n.mypy_cache/\n.ruff_cache/\n.coverage\n',
+    );
   });
 });
 
@@ -175,6 +232,29 @@ describe('createExecaExec', () => {
     expect(failed.exitCode).toBe(3);
   });
 
+  it('forwards an env overlay, un-setting variables whose value is undefined', async () => {
+    const exec = createExecaExec();
+    const previous = process.env.VIRTUAL_ENV;
+    process.env.VIRTUAL_ENV = '/tmp/fake-venv';
+    try {
+      const printEnv = "process.stdout.write(process.env.VIRTUAL_ENV ?? 'unset')";
+
+      const cleared = await exec([process.execPath, '-e', printEnv], {
+        cwd: dir,
+        env: { VIRTUAL_ENV: undefined },
+      });
+      expect(cleared.stdout).toBe('unset');
+
+      // Omitting env must keep today's inherit-everything behavior — guards
+      // against accidentally switching to extendEnv: false.
+      const inherited = await exec([process.execPath, '-e', printEnv], { cwd: dir });
+      expect(inherited.stdout).toBe('/tmp/fake-venv');
+    } finally {
+      if (previous === undefined) delete process.env.VIRTUAL_ENV;
+      else process.env.VIRTUAL_ENV = previous;
+    }
+  });
+
   it("falls back to execa's shortMessage on a spawn failure (missing binary)", async () => {
     const exec = createExecaExec();
 
@@ -182,5 +262,16 @@ describe('createExecaExec', () => {
 
     expect(result.exitCode).toBe(-1);
     expect(result.stderr.length).toBeGreaterThan(0);
+  });
+
+  it('git check-ignore confirms the existing .factory/ entry already excludes .factory/tests/', async () => {
+    const exec = createExecaExec();
+    await prepareWorkspace(dir, { exec });
+    mkdirSync(join(dir, '.factory', 'tests'), { recursive: true });
+    writeFileSync(join(dir, '.factory', 'tests', 'test_x.py'), 'def test_x(): pass\n');
+
+    const result = await exec(['git', 'check-ignore', '.factory/tests/test_x.py'], { cwd: dir });
+
+    expect(result.exitCode).toBe(0);
   });
 });

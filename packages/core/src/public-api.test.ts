@@ -15,12 +15,16 @@ import * as testingApi from './testing.js';
 
 const PUBLIC_API_KEYS = [
   // Config
+  'FactoryConfigV2Schema',
+  'factoryConfigV2JsonSchema',
   'getConstitutionsDir',
   'getFactoryPaths',
   'loadFactoryConfig',
   'loadFactoryConfigForRepo',
   'loadModelsConfig',
   'loadRoutesConfig',
+  'loadV2Config',
+  'parseV2Config',
   'resolveAutoFailover',
   'resolveDefectWindowDays',
   'resolveEnvironmentPorts',
@@ -383,10 +387,21 @@ const INTERNAL_API_KEYS = [
   // Daemon control-plane HTTP server (#777)
   'createFactorydServer',
   'DEFAULT_FACTORYD_PORT',
+  // Daemon runtime state: pid/port/log files (#1177)
+  'acquirePidFile',
+  'createDaemonLogSink',
+  'daemonRuntimePaths',
+  'releaseRuntimeFiles',
+  'writePortFile',
   // Daemon lane state resolution (#843)
   'createDaemonLaneContext',
   // Daemon per-repo orchestration dispatch (#1041)
   'runDaemonRepo',
+  // Daemon in-process engine supervisor (#1178)
+  'DEFAULT_STALE_THRESHOLD_MS',
+  'DEFAULT_SUPERVISOR_POLL_MS',
+  'superviseActiveRepos',
+  'superviseEngine',
   // Daemon attach gate (#778)
   'attachRepo',
   'parseRemoteSlug',
@@ -405,6 +420,7 @@ const INTERNAL_API_KEYS = [
   'branchPrefixSlug',
   'cleanupWorktree',
   'colorEnabled',
+  'defaultRemoteBase',
   'ensureDir',
   'escalationLine',
   'formatEventLine',
@@ -434,6 +450,7 @@ const INTERNAL_API_KEYS = [
   'findCredentialFiles',
   'formatGcReport',
   'parseWorktreeList',
+  'reapLaneWorktree',
   'scrubFile',
   'sweepWorktrees',
   'zeroFill',
