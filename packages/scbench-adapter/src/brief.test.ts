@@ -121,7 +121,28 @@ describe('materializeRetryBrief', () => {
     const brief = materializeRetryBrief(CHECKPOINT, RETRY_CONTEXT);
 
     expect(brief).toContain('## Acceptance criteria');
-    expect(brief).toContain('- The workspace fixes the failing tests listed above');
+    expect(brief).toContain('- Every example in the specification above reproduces exactly.');
+    expect(brief).toContain('- Behaviour from earlier checkpoints is preserved.');
+    expect(brief).toContain("- The workspace's test suite passes.");
+    expect(brief).toContain('- The failing tests listed above pass.');
+  });
+
+  it('retry brief keeps the failing-test list and adds the generic bullets', () => {
+    const brief = materializeRetryBrief(CHECKPOINT, RETRY_CONTEXT);
+
+    // failing-test list unchanged
+    expect(brief).toContain('## Previous attempt failed SCBench evaluation');
+    expect(brief).toContain('Pass policy `core-cases`; pytest exit code 1.');
+    expect(brief).toContain('Failing tests that must pass:');
+    expect(brief).toContain('- checkpoint_2-Core: test_subtract_negative');
+    expect(brief).toContain('- checkpoint_2-Error: test_subtract_type_error');
+
+    // generic bullets added
+    expect(brief).toContain('## Acceptance criteria');
+    expect(brief).toContain('- Every example in the specification above reproduces exactly.');
+    expect(brief).toContain('- Behaviour from earlier checkpoints is preserved.');
+    expect(brief).toContain("- The workspace's test suite passes.");
+    expect(brief).toContain('- The failing tests listed above pass.');
   });
 
   it('round-trips through createLocalBriefAdapter (#507 validation)', async () => {
@@ -133,6 +154,6 @@ describe('materializeRetryBrief', () => {
 
     expect(request.title).toBe('SCBench calculator — checkpoint 2 (rework)');
     expect(request.brief).toContain(CHECKPOINT.task);
-    expect(request.acceptanceCriteria.length).toBeGreaterThanOrEqual(1);
+    expect(request.acceptanceCriteria.length).toBeGreaterThanOrEqual(3);
   });
 });
