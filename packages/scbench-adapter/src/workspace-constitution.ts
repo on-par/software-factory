@@ -40,4 +40,9 @@ specification wins.
   interrupt is not an error.
 - Fail with a clear message on invalid input, never an unhandled stack
   trace.
+
+## Verification
+
+- Factory-authored tests for this workspace live under .factory/tests/,
+  per ADR-0081.
 `;
