@@ -74,7 +74,7 @@ function xmlEscape(s: string): string {
 /** Pure renderer for ~/Library/LaunchAgents/com.onpar.factoryd.plist. KeepAlive
  *  relaunches factoryd after any exit; RunAtLoad starts it at login/bootstrap;
  *  launchd redirects stdout+stderr to the daemon log. ProgramArguments invokes
- *  the bare foreground `factory daemon` command with its defaults. */
+ *  the foreground `factory daemon run` command with its defaults. */
 export function renderFactorydPlist(opts: { nodePath: string; cliScriptPath: string; logPath: string }): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -87,6 +87,7 @@ export function renderFactorydPlist(opts: { nodePath: string; cliScriptPath: str
     <string>${xmlEscape(opts.nodePath)}</string>
     <string>${xmlEscape(opts.cliScriptPath)}</string>
     <string>daemon</string>
+    <string>run</string>
   </array>
   <key>RunAtLoad</key>
   <true/>

@@ -87,10 +87,10 @@ describe('renderFactorydPlist', () => {
     expect(plist).toContain('<key>RunAtLoad</key>\n  <true/>');
   });
 
-  it('runs node + cli script + the bare daemon command, in order', () => {
+  it('runs node + cli script + the daemon run command, in order', () => {
     const args = /<array>([\s\S]*?)<\/array>/.exec(plist)?.[1] ?? '';
     const strings = [...args.matchAll(/<string>([^<]*)<\/string>/g)].map((m) => m[1]);
-    expect(strings).toEqual(['/usr/local/bin/node', '/opt/factory/dist/cli/index.js', 'daemon']);
+    expect(strings).toEqual(['/usr/local/bin/node', '/opt/factory/dist/cli/index.js', 'daemon', 'run']);
   });
 
   it('sends stdout and stderr to the daemon log', () => {
@@ -341,6 +341,19 @@ describe('daemon control commands', () => {
       process.emit('SIGINT');
       await done;
       expect(text()).toBe('first\nsecond\n');
+    });
+
+    it('follow mode stays quiet while the log has not grown', async () => {
+      const { logPath } = factorydFiles(home);
+      mkdirSync(join(home, '.factory'), { recursive: true });
+      writeFileSync(logPath, 'first\n');
+      const { out, text } = makeOut();
+
+      const done = cmdDaemonLogs({ follow: true }, { home, out, pollMs: 10 });
+      await new Promise((r) => setTimeout(r, 40));
+      process.emit('SIGINT');
+      await done;
+      expect(text()).toBe('first\n');
     });
 
     it('follow mode keeps polling while the log file is transiently missing', async () => {
