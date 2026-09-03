@@ -19,6 +19,7 @@ import { buildPhase as buildPhaseDefault } from '../phases/build.js';
 import { checkPhase as checkPhaseDefault } from '../phases/check.js';
 import { planPhase as planPhaseDefault } from '../phases/plan.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
+import { captureDiffBase } from '../checkers/design-smells.js';
 import type { ReworkHistory } from '../checkers/rework-history.js';
 import type { AutoFailoverSettings } from '../config/index.js';
 import type { EffectiveModelPins } from '../config/repo.js';
@@ -304,6 +305,11 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       log('constitution', 'No standards found (no repo instruction files, no constitution) — proceeding without');
     }
 
+    // Run-start HEAD (#1210): captured exactly once, before PLAN, for local-only
+    // workspace runs — there is no remote to diff against, and every rework round
+    // inside CHECK must diff against this same base rather than a moving target.
+    const runStartDiffBase = request.localOnly ? await captureDiffBase(ports.workspace.path) : undefined;
+
     // PLAN
     const planModel = await preferFallbackWhenProviderIsOpen(
       request.modelPins.plan,
@@ -464,7 +470,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       appBaseUrl,
       onPgid,
       priorFailureSignature,
-      diffBase: build.diffBase,
+      diffBase: request.localOnly ? runStartDiffBase : build.diffBase,
       reworkRoute: build.route,
       reworkModel: build.model,
       laneId: request.lane,

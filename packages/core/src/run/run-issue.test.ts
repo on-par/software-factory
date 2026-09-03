@@ -1,3 +1,9 @@
+import { execFile as execFileCb } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
+
 import type { Octokit } from '@octokit/rest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -24,6 +30,8 @@ const { checkPhase } = await import('../phases/check.js');
 const { shipPhase } = await import('../phases/ship.js');
 const { runIssue } = await import('./run-issue.js');
 import type { RunPorts, RunRequest } from './run-issue.js';
+
+const execFile = promisify(execFileCb);
 
 const PLAN_OK: PlanResult = { ok: true, route: 'codex', specPath: '/tmp/wt/spec.md', model: 'm', designArtifact: null };
 const BUILD_OK: BuildResult = { ok: true, model: 'm', route: 'codex' };
@@ -595,5 +603,61 @@ describe('runIssue — provider breaker and failover', () => {
     await runIssue(request, basePolicy(), basePorts({ events: () => log, router }));
     expect(events.some(([t, m]) => t === 'model_override_ignored' && m.includes('claude-only-model'))).toBe(true);
     expect(vi.mocked(buildPhase).mock.calls[0][0].modelOverride).toBeUndefined();
+  });
+});
+
+describe('runIssue — #1210: run-start diffBase captured once, before PLAN', () => {
+  it('localOnly run threads one diffBase into every rework round', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'run-issue-diffbase-'));
+    try {
+      await execFile('git', ['init', '--initial-branch=main'], { cwd: worktree });
+      await execFile('git', ['config', 'user.email', 'tests@example.com'], { cwd: worktree });
+      await execFile('git', ['config', 'user.name', 'Tests'], { cwd: worktree });
+      await writeFile(join(worktree, 'initial.txt'), 'initial\n');
+      await execFile('git', ['add', '.'], { cwd: worktree });
+      await execFile('git', ['commit', '-m', 'initial'], { cwd: worktree });
+      const { stdout } = await execFile('git', ['rev-parse', 'HEAD'], { cwd: worktree });
+      const runStartSha = stdout.trim();
+
+      vi.mocked(planPhase).mockImplementation(async () => {
+        await writeFile(join(worktree, 'plan.txt'), 'plan\n');
+        await execFile('git', ['add', '.'], { cwd: worktree });
+        await execFile('git', ['commit', '-m', 'plan'], { cwd: worktree });
+        return PLAN_OK;
+      });
+      vi.mocked(buildPhase).mockImplementation(async () => {
+        await writeFile(join(worktree, 'build.txt'), 'build\n');
+        await execFile('git', ['add', '.'], { cwd: worktree });
+        await execFile('git', ['commit', '-m', 'build'], { cwd: worktree });
+        return { ...BUILD_OK, diffBase: undefined };
+      });
+
+      await runIssue(
+        baseRequest({ localOnly: true }),
+        basePolicy(),
+        basePorts({ workspace: { path: worktree, dispose: async () => {} } }),
+      );
+
+      expect(vi.mocked(checkPhase).mock.calls[0][0].diffBase).toBe(runStartSha);
+    } finally {
+      await rm(worktree, { recursive: true, force: true });
+    }
+  });
+
+  it('yields no diffBase, not a fabricated one, when the workspace is not a git checkout', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'run-issue-diffbase-nogit-'));
+    try {
+      await expect(
+        runIssue(
+          baseRequest({ localOnly: true }),
+          basePolicy(),
+          basePorts({ workspace: { path: worktree, dispose: async () => {} } }),
+        ),
+      ).resolves.toMatchObject({ state: 'ready' });
+
+      expect(vi.mocked(checkPhase).mock.calls[0][0].diffBase).toBeUndefined();
+    } finally {
+      await rm(worktree, { recursive: true, force: true });
+    }
   });
 });
