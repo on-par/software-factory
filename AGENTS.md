@@ -44,7 +44,7 @@ readiness-conformance checker named in epic #464 consume them in later stories.
 - `router/` — `ModelRouter` failover state machine + CLI executor
 - `models/` — `ModelRegistry` (reads `models.json`)
 - `harness/` — provider adapters: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, `opencode`, plus a `stub` and a contract test suite
-- `phases/` — the four pipeline phases (`plan`, `build`, `check`, `ship`) plus integration tests (`pipeline.integration.test.ts`, `pipeline.concurrent.integration.test.ts`)
+- `phases/` — the four pipeline phases (`plan`, `build`, `check`, `ship`) plus integration tests (`pipeline.integration.test.ts`, `pipeline.concurrent.integration.test.ts`). The `*.integration.test.ts` files are excluded from the default vitest run and from the required `ci` check; run them with `npm run test:integration` (they also run nightly).
 - `checkers/` — the checker framework (compile/tests/lint/links/accessibility + agent-based custom checkers)
 - `constitutions/` — constitution loader
 - `adr/` — reads the checkout's `docs/adr` through a `RepoContextReader` and renders Accepted ADRs as PLAN constraints
@@ -106,7 +106,15 @@ Run from the repo root unless noted. Node.js **≥ 20** required.
 Run the full verification gate and make sure everything is green:
 
 ```bash
-bash scripts/verify.sh
+bash scripts/verify.sh --no-e2e
 ```
 
-Build, typecheck, lint, test (with coverage thresholds), and the stub eval must **all** pass — this is exactly what CI enforces. Do not commit with a failing or reduced coverage gate.
+Build, typecheck, lint, test (with coverage thresholds), and the stub eval must **all** pass — this is what CI enforces on every PR. `--no-e2e` is the fast local loop and is what the CHECK phase uses; the only thing it skips is the coverage run, so run the bare path before you push. The pipeline integration suites are not in either path any more — they run nightly, or on demand via `npm run test:integration` (#755). Do not commit with a failing or reduced coverage gate.
+
+## Merge policy: main must always be green
+
+`main` must never carry a genuinely failing test, type error, or lint violation. Concretely:
+
+- **Never use `gh pr merge --admin` (or any merge that bypasses required status checks) to get past a check that is actually `FAILURE`.** Admin/bypass merges exist only for two legitimate cases: (1) the factory's own auto-merge, which bypasses the _review-approval_ requirement a bot can't obtain — but its `watchCi()` gate already refuses to merge unless CI reported a real `success`, never on failure or an unresolved/hung outcome (see `packages/cli/src/cli/index.ts`, `waitForMerge`); and (2) a human confirming a required check is _hung/stuck_, not failed (e.g. the #739 CI deadlock), after running an equivalent verification pass locally (`bash scripts/verify.sh --no-e2e` green, plus targeted checks for anything the fast path skips) — and saying so explicitly in the merge/PR comment.
+- If you bypass a check for reason (2), that is a workaround for a known infra bug, not a norm. The actual fix is closing that bug. The multi-hour `ci` hang of #739/#755 is fixed: it was an unbounded microtask-only spin loop in `router/index.test.ts`, not the integration tests, and CI jobs now carry a `timeout-minutes` ceiling so no future spin can strand open PRs.
+- If a `main`-red test is discovered (e.g. it slipped through during a CI-hang period), fix it immediately as the top-priority task — a red `main` blocks everyone and every future PR's diff against it.

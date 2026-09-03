@@ -63,6 +63,21 @@ export function extractIssueSections(body: string): Map<string, string> {
   return sections;
 }
 
+/** Looks up a required field's section content by exact heading match first,
+ *  falling back to a heading that starts with the field name (e.g. an issue's
+ *  own "Acceptance criteria (Gherkin)" heading still satisfies a required
+ *  "Acceptance criteria" field — the parenthetical is a style choice, not a
+ *  missing section). Exact match wins on ambiguity (checked first). */
+export function findSection(sections: Map<string, string>, field: string): string | undefined {
+  const key = field.toLowerCase();
+  const exact = sections.get(key);
+  if (exact !== undefined) return exact;
+  for (const [heading, content] of sections) {
+    if (heading.startsWith(key)) return content;
+  }
+  return undefined;
+}
+
 function isPresent(content: string | undefined): boolean {
   if (content === undefined) return false;
   const trimmed = content.trim();
@@ -97,7 +112,7 @@ export function scoreIssueReadiness(input: { title: string; body: string }): Rea
   let present = 0;
 
   for (const field of requiredFields) {
-    const content = sections.get(field.toLowerCase());
+    const content = findSection(sections, field);
     if (!isPresent(content)) {
       missing.push(field);
       continue;
@@ -112,8 +127,8 @@ export function scoreIssueReadiness(input: { title: string; body: string }): Rea
   const size =
     template === 'factory-task'
       ? checkIssueSize({
-          inScope: sections.get('in scope') ?? '',
-          acceptanceCriteria: sections.get('acceptance criteria') ?? '',
+          inScope: findSection(sections, 'In scope') ?? '',
+          acceptanceCriteria: findSection(sections, 'Acceptance criteria') ?? '',
         })
       : { sizeOk: true };
 

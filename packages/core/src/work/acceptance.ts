@@ -1,9 +1,9 @@
 // packages/core/src/work/acceptance.ts — shared acceptance-criteria extraction (#507).
-import { extractIssueSections } from '../readiness/index.js';
+import { extractIssueSections, findSection } from '../readiness/index.js';
 
 /** Acceptance-criteria lines lifted from a Markdown body; [] when there are none. */
 export function extractAcceptanceCriteria(body: string): string[] {
-  const section = extractIssueSections(body).get('acceptance criteria');
+  const section = findSection(extractIssueSections(body), 'Acceptance criteria');
   if (!section || section.trim().length === 0) return [];
 
   const fenceRe = /^\s*(?:`{3,}|~{3,})/;

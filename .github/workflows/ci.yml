@@ -14,6 +14,9 @@ jobs:
   ci:
     name: ci
     runs-on: ubuntu-latest
+    # Hard ceiling: a worker that starves the event loop cannot be stopped by
+    # Vitest's own (timer-based) test timeout, only by the runner (#755).
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -80,6 +83,7 @@ jobs:
   quickstart:
     name: quickstart-smoke
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -102,6 +106,7 @@ jobs:
   auto-merge-sweep-test:
     name: auto-merge-sweep-test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - name: Merge-exit-code regression test
