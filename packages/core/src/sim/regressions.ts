@@ -3,8 +3,13 @@
 // still open; when the fault lands, flip the assertion in regressions.test.ts (and update
 // the `historicalSignature` line here) rather than deleting the fixture.
 
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
 import { parseSpec, stringifySpec } from '../spec/index.js';
+import type { SimModelStep } from './model.js';
 import { simDefaultScripts, simSpecContent, type SimIssueSpec } from './pipeline.js';
+import { simCommitAll } from './workspace.js';
 
 export interface SimRegressionFixture {
   /** GitHub issue number of the production fault this fixture encodes. */
@@ -52,6 +57,19 @@ export function simSpecWithObjectInterface(issue: number, title: string): string
 
 const FIXTURE_550_TITLE = 'Sim regression #550: fenced enrichment output';
 const FIXTURE_551_TITLE = 'Sim regression #551: object element in interfacesTouched';
+const FIXTURE_1222_TITLE = 'Sim regression #1222: uncommitted build output after green check';
+
+/** #1222: BUILD commits its feature file but leaves an extra file uncommitted — the
+ *  factory's own build output after a green CHECK. Drives the real shipPhase against a
+ *  real worktree so commitLeftoverBuildOutput (#1172) must commit it and ship. */
+const FIXTURE_1222_BUILD_STEP: SimModelStep = {
+  output: 'built',
+  effect: async (ctx) => {
+    await writeFile(join(ctx.worktree, 'feature-9553.txt'), 'simulated build for issue #9553\n');
+    await simCommitAll(ctx.worktree, 'feat: sim issue 9553');
+    await writeFile(join(ctx.worktree, 'build-output-9553.txt'), 'uncommitted build output after check\n');
+  },
+};
 
 export const SIM_REGRESSION_FIXTURES: readonly SimRegressionFixture[] = [
   {
@@ -82,6 +100,23 @@ export const SIM_REGRESSION_FIXTURES: readonly SimRegressionFixture[] = [
       scripts: {
         ...simDefaultScripts(9551, FIXTURE_551_TITLE),
         plan: [{ output: simSpecWithObjectInterface(9551, FIXTURE_551_TITLE) }],
+      },
+    },
+  },
+  {
+    fault: 1222,
+    name: 'ship-parks-on-uncommitted-build-output',
+    historicalSignature:
+      '(fixed by #1172; re-pinned by #1222 after a stale-build ops regression) SHIP used to park the lane ' +
+      'with "not recovering <branch>: worktree has uncommitted changes" even though CHECK had just verified ' +
+      'that exact working tree; it now commits the leftover build output on the ship-it branch and ships.',
+    spec: {
+      issue: 9553,
+      title: FIXTURE_1222_TITLE,
+      scripts: {
+        ...simDefaultScripts(9553, FIXTURE_1222_TITLE),
+        build_claude: [FIXTURE_1222_BUILD_STEP],
+        build_codex: [FIXTURE_1222_BUILD_STEP],
       },
     },
   },
