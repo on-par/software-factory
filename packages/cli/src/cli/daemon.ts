@@ -5,12 +5,12 @@ import { execFile } from 'node:child_process';
 import {
   closeSync,
   existsSync,
+  fstatSync,
   mkdirSync,
   openSync,
   readFileSync,
   readSync,
   realpathSync,
-  statSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
@@ -269,15 +269,24 @@ export async function cmdDaemonLogs(
 
   let offset = Buffer.byteLength(initial);
   const poll = setInterval(() => {
-    let size: number;
+    let fd: number;
     try {
-      size = statSync(logPath).size;
+      fd = openSync(logPath, 'r');
     } catch {
       return; // transiently missing (rotation) — keep polling
     }
+    let size: number;
+    try {
+      size = fstatSync(fd).size;
+    } catch {
+      closeSync(fd);
+      return;
+    }
     if (size < offset) offset = 0; // truncated/rotated: start over
-    if (size === offset) return;
-    const fd = openSync(logPath, 'r');
+    if (size === offset) {
+      closeSync(fd);
+      return;
+    }
     try {
       const buf = Buffer.alloc(size - offset);
       const read = readSync(fd, buf, 0, buf.length, offset);
