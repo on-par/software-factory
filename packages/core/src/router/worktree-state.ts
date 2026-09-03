@@ -2,7 +2,7 @@
 // lifecycle: capture worktree state before the first attempt of an agentic
 // build task, then hard-reset back to it before every retry/failover attempt.
 
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 
@@ -34,7 +34,15 @@ export async function captureWorktreeState(
     onLog(`worktree state guard disabled: ${worktree} is not a git worktree root`);
     return null;
   }
-  if (resolve(toplevel) !== resolve(worktree)) {
+  let realToplevel: string;
+  let realWorktree: string;
+  try {
+    [realToplevel, realWorktree] = await Promise.all([realpath(toplevel), realpath(worktree)]);
+  } catch {
+    onLog(`worktree state guard disabled: ${worktree} is not a git worktree root`);
+    return null;
+  }
+  if (resolve(realToplevel) !== resolve(realWorktree)) {
     onLog(`worktree state guard disabled: ${worktree} is not a git worktree root`);
     return null;
   }
