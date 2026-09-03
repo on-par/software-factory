@@ -12,7 +12,9 @@ ${checkpoint.task}
 
 ## Acceptance criteria
 
-- The workspace implements the checkpoint specification above; SlopCodeBench's hidden evaluation for checkpoint ${checkpoint.checkpointId} passes against the resulting code.
+- Every example in the specification above reproduces exactly.
+- Behaviour from earlier checkpoints is preserved.
+- The workspace's test suite passes.
 `;
 }
 

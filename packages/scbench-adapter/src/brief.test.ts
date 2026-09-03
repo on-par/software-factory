@@ -26,7 +26,21 @@ describe('materializeBrief', () => {
   it('includes a non-empty acceptance criteria section', () => {
     const brief = materializeBrief(CHECKPOINT);
     expect(brief).toContain('## Acceptance criteria');
-    expect(brief).toContain('- The workspace implements the checkpoint specification above');
+    expect(brief).toContain('- Every example in the specification above reproduces exactly.');
+  });
+
+  it('acceptance criteria are generic and spec-derived', () => {
+    const brief = materializeBrief(CHECKPOINT);
+    expect(brief).toContain('## Acceptance criteria');
+    expect(brief).toContain('Every example in the specification above reproduces exactly.');
+    expect(brief).toContain('Behaviour from earlier checkpoints is preserved.');
+    expect(brief).toContain("The workspace's test suite passes.");
+  });
+
+  it('no longer states the tautological hidden-evaluation line', () => {
+    const brief = materializeBrief(CHECKPOINT);
+    expect(brief).not.toMatch(/hidden evaluation for checkpoint/i);
+    expect(brief).not.toContain('SlopCodeBench');
   });
 
   it('round-trips through createLocalBriefAdapter (#507 validation)', async () => {
@@ -38,7 +52,7 @@ describe('materializeBrief', () => {
 
     expect(request.title).toBe('SCBench calculator — checkpoint 2');
     expect(request.brief).toContain(CHECKPOINT.task);
-    expect(request.acceptanceCriteria.length).toBeGreaterThanOrEqual(1);
+    expect(request.acceptanceCriteria.length).toBeGreaterThanOrEqual(3);
   });
 
   it('embeds a task that itself contains an H1 without breaking the title', async () => {
