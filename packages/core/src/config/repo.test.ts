@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ModelRegistry } from '../models/index.js';
 import { ModelRouter } from '../router/index.js';
@@ -11,6 +11,7 @@ import { StubModelExecutor } from '../router/stub.js';
 import { loadModelsConfig, type ModelsConfig, type RoutesConfig } from './index.js';
 import {
   applyRepoConfig,
+  adaptV1ToV2,
   describeEffectiveConfig,
   loadRepoConfig,
   resolveCodexDisabled,
@@ -74,6 +75,7 @@ const routes: RoutesConfig = {
 const tempDirs = new Set<string>();
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
   tempDirs.clear();
 });
@@ -95,10 +97,48 @@ describe('loadRepoConfig', () => {
     expect(loadRepoConfig(repoRoot)).toBeNull();
   });
 
-  it('parses a valid file', async () => {
+  it('adapts a complete v1 file to the canonical v2 shape and warns once per path', async () => {
     const repoRoot = await tempRepoRoot();
-    await writeRepoConfig(repoRoot, { version: 1, models: { plan: 'claude-model' } });
-    expect(loadRepoConfig(repoRoot)).toEqual({ version: 1, models: { plan: 'claude-model' } });
+    await writeRepoConfig(repoRoot, {
+      version: 1,
+      models: {
+        plan: 'claude-model',
+        planFallback: 'gpt-model-a',
+        build: 'gpt-model-a',
+        buildFallback: 'gpt-model-a',
+        checker: 'checker-model',
+        triage: 'triage-model',
+      },
+      usage: { capUsd: 50 },
+      efficiency: { fastPath: true, maxReworkRounds: 2, perIssueCapUsd: 8 },
+      providers: { anthropic: false, openai: true, ollama: false },
+      tiers: { worker: ['gpt-model-a'] },
+      route: 'opencode',
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    expect(loadRepoConfig(repoRoot)).toEqual({
+      version: 2,
+      models: {
+        pins: {
+          plan: 'claude-model',
+          planFallback: 'gpt-model-a',
+          build: 'gpt-model-a',
+          buildFallback: 'gpt-model-a',
+          checker: 'checker-model',
+          triage: 'triage-model',
+        },
+      },
+      policy: { mode: 'pinned' },
+      budget: { capUsd: 50, fastPath: true, maxReworkRounds: 2, perIssueCapUsd: 8 },
+      providers: { anthropic: false, openai: true, ollama: false },
+      tiers: { worker: ['gpt-model-a'] },
+      route: 'opencode',
+    });
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('factory migrate'));
+    loadRepoConfig(repoRoot);
+    expect(warn).toHaveBeenCalledOnce();
   });
 
   it('loads configuration from an external state root without creating checkout-local state', async () => {
@@ -106,7 +146,11 @@ describe('loadRepoConfig', () => {
     const stateRoot = await tempRepoRoot();
     await writeFile(join(stateRoot, 'config.json'), JSON.stringify({ version: 1, models: { plan: 'claude-model' } }));
 
-    expect(loadRepoConfig(repoRoot, stateRoot)).toEqual({ version: 1, models: { plan: 'claude-model' } });
+    expect(loadRepoConfig(repoRoot, stateRoot)).toEqual({
+      version: 2,
+      models: { pins: { plan: 'claude-model' } },
+      policy: { mode: 'pinned' },
+    });
     expect(existsSync(join(repoRoot, '.factory'))).toBe(false);
   });
 
@@ -120,7 +164,7 @@ describe('loadRepoConfig', () => {
         buildFallback: 'claude-model',
       },
     });
-    expect(loadRepoConfig(repoRoot)?.models).toMatchObject({
+    expect(loadRepoConfig(repoRoot)?.models?.pins).toMatchObject({
       plan: 'claude-model',
       planFallback: 'gpt-model-a',
       build: 'gpt-model-a',
@@ -131,7 +175,7 @@ describe('loadRepoConfig', () => {
   it('parses a valid empty object as a no-op', async () => {
     const repoRoot = await tempRepoRoot();
     await writeRepoConfig(repoRoot, {});
-    expect(loadRepoConfig(repoRoot)).toEqual({ version: 1 });
+    expect(loadRepoConfig(repoRoot)).toEqual({ version: 2 });
   });
 
   it('throws naming the file path on malformed JSON', async () => {
@@ -160,7 +204,11 @@ describe('loadRepoConfig', () => {
       merge: { auto: true },
       worktree: { gcTtlDays: 30 },
     });
-    expect(loadRepoConfig(repoRoot)).toEqual({ version: 1, models: { plan: 'claude-model' } });
+    expect(loadRepoConfig(repoRoot)).toEqual({
+      version: 2,
+      models: { pins: { plan: 'claude-model' } },
+      policy: { mode: 'pinned' },
+    });
   });
 
   it('still rejects a genuine root-level typo with the file path in the message', async () => {
@@ -169,7 +217,7 @@ describe('loadRepoConfig', () => {
     expect(() => loadRepoConfig(repoRoot)).toThrow(/\.factory[/\\]config\.json/);
   });
 
-  it('rejects a non-positive usage.capUsd', async () => {
+  it('rejects a non-positive usage.capUsd in a v1 file', async () => {
     const repoRoot = await tempRepoRoot();
     await writeRepoConfig(repoRoot, { usage: { capUsd: -5 } });
     expect(() => loadRepoConfig(repoRoot)).toThrow();
@@ -182,8 +230,8 @@ describe('loadRepoConfig', () => {
     });
 
     expect(loadRepoConfig(repoRoot)).toEqual({
-      version: 1,
-      efficiency: { fastPath: true, maxReworkRounds: 1, perIssueCapUsd: 8 },
+      version: 2,
+      budget: { fastPath: true, maxReworkRounds: 1, perIssueCapUsd: 8 },
     });
   });
 
@@ -193,10 +241,18 @@ describe('loadRepoConfig', () => {
     expect(loadRepoConfig(repoRoot)).toEqual({ $schema: 'http://x', version: 2 });
   });
 
-  it('still round-trips a version-1 file unchanged', async () => {
+  it('loads a minimal version-2 file without warning', async () => {
     const repoRoot = await tempRepoRoot();
-    await writeRepoConfig(repoRoot, { version: 1, models: { plan: 'claude-model' } });
-    expect(loadRepoConfig(repoRoot)).toEqual({ version: 1, models: { plan: 'claude-model' } });
+    await writeRepoConfig(repoRoot, { version: 2 });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(loadRepoConfig(repoRoot)).toEqual({ version: 2 });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('rejects a v2 file containing a v1 key with the path and key in the error', async () => {
+    const repoRoot = await tempRepoRoot();
+    await writeRepoConfig(repoRoot, { version: 2, usage: { capUsd: 50 } });
+    expect(() => loadRepoConfig(repoRoot)).toThrow(/config\.json.*usage/s);
   });
 
   it('rejects an unsupported version number', async () => {
@@ -212,6 +268,57 @@ describe('loadRepoConfig', () => {
   });
 });
 
+describe('adaptV1ToV2', () => {
+  it('omits empty optional sections', () => {
+    expect(adaptV1ToV2({})).toEqual({ version: 2 });
+    expect(adaptV1ToV2({ models: {} })).toEqual({ version: 2 });
+  });
+
+  it('preserves effective behavior against a handwritten v2 twin', () => {
+    const v1 = {
+      models: {
+        plan: 'claude-model',
+        planFallback: 'gpt-model-a',
+        build: 'gpt-model-a',
+        buildFallback: 'gpt-model-a',
+        checker: 'checker-model',
+        triage: 'triage-model',
+      },
+      usage: { capUsd: 50 },
+      efficiency: { fastPath: true, maxReworkRounds: 2, perIssueCapUsd: 8 },
+      providers: { openai: false },
+      tiers: { worker: ['ollama-model'] },
+      route: 'opencode' as const,
+    };
+    const v2 = {
+      version: 2 as const,
+      models: {
+        pins: {
+          plan: 'claude-model',
+          planFallback: 'gpt-model-a',
+          build: 'gpt-model-a',
+          buildFallback: 'gpt-model-a',
+          checker: 'checker-model',
+          triage: 'triage-model',
+        },
+      },
+      policy: { mode: 'pinned' as const },
+      budget: { capUsd: 50, fastPath: true, maxReworkRounds: 2, perIssueCapUsd: 8 },
+      providers: { openai: false },
+      tiers: { worker: ['ollama-model'] },
+      route: 'opencode' as const,
+    };
+    const adapted = adaptV1ToV2(v1);
+    const registry = new ModelRegistry(models);
+
+    expect(resolveEffectiveModelPins(registry, adapted, {})).toEqual(resolveEffectiveModelPins(registry, v2, {}));
+    expect(resolveUsageCap(adapted, {})).toEqual(resolveUsageCap(v2, {}));
+    expect(resolveEfficiencyPolicy(adapted)).toEqual(resolveEfficiencyPolicy(v2));
+    expect(resolveCodexDisabled(adapted, {})).toEqual(resolveCodexDisabled(v2, {}));
+    expect(applyRepoConfig(models, adapted)).toEqual(applyRepoConfig(models, v2));
+  });
+});
+
 describe('resolveEfficiencyPolicy', () => {
   it('uses conservative defaults when a repo has no efficiency policy', () => {
     expect(resolveEfficiencyPolicy(null)).toEqual({ fastPath: false, maxReworkRounds: 1, perIssueCapUsd: undefined });
@@ -219,7 +326,7 @@ describe('resolveEfficiencyPolicy', () => {
 
   it('exposes the repo efficiency policy to the pipeline', () => {
     expect(
-      resolveEfficiencyPolicy({ version: 1, efficiency: { fastPath: true, maxReworkRounds: 1, perIssueCapUsd: 8 } }),
+      resolveEfficiencyPolicy({ version: 2, budget: { fastPath: true, maxReworkRounds: 1, perIssueCapUsd: 8 } }),
     ).toEqual({ fastPath: true, maxReworkRounds: 1, perIssueCapUsd: 8 });
   });
 });
@@ -231,50 +338,50 @@ describe('applyRepoConfig', () => {
   });
 
   it('is a no-op for an empty repo config object', () => {
-    expect(applyRepoConfig(models, { version: 1 })).toEqual(models);
+    expect(applyRepoConfig(models, { version: 2 })).toEqual(models);
   });
 
   it('replaces a tier order wholesale', () => {
-    const result = applyRepoConfig(models, { version: 1, tiers: { worker: ['ollama-model', 'gpt-model-a'] } });
+    const result = applyRepoConfig(models, { version: 2, tiers: { worker: ['ollama-model', 'gpt-model-a'] } });
     expect(result.tiers.worker).toEqual(['ollama-model', 'gpt-model-a']);
     expect(result.tiers.boss).toEqual(models.tiers.boss);
   });
 
   it('throws naming the tier and the unknown model id in a tier override', () => {
-    expect(() => applyRepoConfig(models, { version: 1, tiers: { worker: ['no-such-model'] } })).toThrow(
+    expect(() => applyRepoConfig(models, { version: 2, tiers: { worker: ['no-such-model'] } })).toThrow(
       /worker.*no-such-model/s,
     );
   });
 
   it('strips both openai models from all tiers when providers.openai is false', () => {
-    const result = applyRepoConfig(models, { version: 1, providers: { openai: false } });
+    const result = applyRepoConfig(models, { version: 2, providers: { openai: false } });
     expect(result.tiers.worker).toEqual(['ollama-model']);
     expect(result.tiers.checker).toEqual(['checker-model']);
   });
 
   it('strips ollama models from all tiers when providers.ollama is false', () => {
-    const result = applyRepoConfig(models, { version: 1, providers: { ollama: false } });
+    const result = applyRepoConfig(models, { version: 2, providers: { ollama: false } });
     expect(result.tiers.worker).toEqual(['gpt-model-a']);
   });
 
   it('rewrites the checker tier to a single pinned model', () => {
-    const result = applyRepoConfig(models, { version: 1, models: { checker: 'checker-model' } });
+    const result = applyRepoConfig(models, { version: 2, models: { pins: { checker: 'checker-model' } } });
     expect(result.tiers.checker).toEqual(['checker-model']);
   });
 
   it('rewrites the triage tier to a single pinned model', () => {
-    const result = applyRepoConfig(models, { version: 1, models: { triage: 'triage-model' } });
+    const result = applyRepoConfig(models, { version: 2, models: { pins: { triage: 'triage-model' } } });
     expect(result.tiers.triage).toEqual(['triage-model']);
   });
 
   it('throws naming the unknown checker pin', () => {
-    expect(() => applyRepoConfig(models, { version: 1, models: { checker: 'no-such-model' } })).toThrow(
+    expect(() => applyRepoConfig(models, { version: 2, models: { pins: { checker: 'no-such-model' } } })).toThrow(
       /checker.*no-such-model/s,
     );
   });
 
   it('throws naming the unknown triage pin', () => {
-    expect(() => applyRepoConfig(models, { version: 1, models: { triage: 'no-such-model' } })).toThrow(
+    expect(() => applyRepoConfig(models, { version: 2, models: { pins: { triage: 'no-such-model' } } })).toThrow(
       /triage.*no-such-model/s,
     );
   });
@@ -284,12 +391,12 @@ describe('applyRepoConfig', () => {
       ...models,
       tiers: { ...models.tiers, worker: ['gpt-model-a'] },
     };
-    expect(() => applyRepoConfig(onlyOpenai, { version: 1, providers: { openai: false } })).toThrow(/worker/);
+    expect(() => applyRepoConfig(onlyOpenai, { version: 2, providers: { openai: false } })).toThrow(/worker/);
   });
 
   it('does not mutate the input ModelsConfig', () => {
     const snapshot = JSON.parse(JSON.stringify(models));
-    applyRepoConfig(models, { version: 1, tiers: { worker: ['ollama-model'] }, providers: { openai: false } });
+    applyRepoConfig(models, { version: 2, tiers: { worker: ['ollama-model'] }, providers: { openai: false } });
     expect(models).toEqual(snapshot);
   });
 });
@@ -303,14 +410,14 @@ describe('resolveEffectiveModelPins', () => {
   });
 
   it('resolves repo-only pins', () => {
-    const result = resolveEffectiveModelPins(registry, { version: 1, models: { plan: 'claude-model' } }, {});
+    const result = resolveEffectiveModelPins(registry, { version: 2, models: { pins: { plan: 'claude-model' } } }, {});
     expect(result).toEqual({ plan: 'claude-model', build: undefined, sources: { plan: 'repo' } });
   });
 
   it('resolves the configured fallback alongside a preferred pin', () => {
     const result = resolveEffectiveModelPins(
       registry,
-      { version: 1, models: { plan: 'claude-model', planFallback: 'gpt-model-a' } },
+      { version: 2, models: { pins: { plan: 'claude-model', planFallback: 'gpt-model-a' } } },
       {},
     );
     expect(result).toMatchObject({ plan: 'claude-model', planFallback: 'gpt-model-a' });
@@ -318,14 +425,14 @@ describe('resolveEffectiveModelPins', () => {
 
   it('rejects a non-Codex build fallback', () => {
     expect(() =>
-      resolveEffectiveModelPins(registry, { version: 1, models: { buildFallback: 'claude-model' } }, {}),
+      resolveEffectiveModelPins(registry, { version: 2, models: { pins: { buildFallback: 'claude-model' } } }, {}),
     ).toThrow(/buildFallback must be a Codex-capable model/);
   });
 
   it('repo pins win over env pins', () => {
     const result = resolveEffectiveModelPins(
       registry,
-      { version: 1, models: { plan: 'claude-model' } },
+      { version: 2, models: { pins: { plan: 'claude-model' } } },
       { FACTORY_PLAN_MODEL: 'gpt-model-a' },
     );
     expect(result.plan).toBe('claude-model');
@@ -335,7 +442,7 @@ describe('resolveEffectiveModelPins', () => {
   it('reports sources correctly for a mixed plan/build scenario', () => {
     const result = resolveEffectiveModelPins(
       registry,
-      { version: 1, models: { build: 'ollama-model' } },
+      { version: 2, models: { pins: { build: 'ollama-model' } } },
       { FACTORY_PLAN_MODEL: 'claude-model' },
     );
     expect(result).toEqual({
@@ -346,15 +453,15 @@ describe('resolveEffectiveModelPins', () => {
   });
 
   it('throws naming an unknown repo plan pin', () => {
-    expect(() => resolveEffectiveModelPins(registry, { version: 1, models: { plan: 'no-such-model' } }, {})).toThrow(
-      /no-such-model/,
-    );
+    expect(() =>
+      resolveEffectiveModelPins(registry, { version: 2, models: { pins: { plan: 'no-such-model' } } }, {}),
+    ).toThrow(/no-such-model/);
   });
 
   it('throws naming an unknown repo build pin', () => {
-    expect(() => resolveEffectiveModelPins(registry, { version: 1, models: { build: 'no-such-model' } }, {})).toThrow(
-      /no-such-model/,
-    );
+    expect(() =>
+      resolveEffectiveModelPins(registry, { version: 2, models: { pins: { build: 'no-such-model' } } }, {}),
+    ).toThrow(/no-such-model/);
   });
 });
 
@@ -376,7 +483,7 @@ describe('terra default overrides (#529)', () => {
   it('lets a repo pin beat both an env pin and the terra defaults', () => {
     const result = resolveEffectiveModelPins(
       shippedRegistry,
-      { version: 1, models: { plan: 'claude-opus-5', build: 'gpt-5.6-sol' } },
+      { version: 2, models: { pins: { plan: 'claude-opus-5', build: 'gpt-5.6-sol' } } },
       { FACTORY_PLAN_MODEL: 'gpt-5.6-terra-high' },
     );
     expect(result).toEqual({
@@ -389,7 +496,7 @@ describe('terra default overrides (#529)', () => {
 
 describe('resolveCodexDisabled', () => {
   function check(openai: boolean | undefined, factoryCodex: string | undefined, expected: boolean) {
-    const repo = openai === undefined ? null : { version: 1 as const, providers: { openai } };
+    const repo = openai === undefined ? null : { version: 2 as const, providers: { openai } };
     const env = factoryCodex === undefined ? {} : { FACTORY_CODEX: factoryCodex };
     expect(resolveCodexDisabled(repo, env)).toBe(expected);
   }
@@ -415,7 +522,7 @@ describe('resolveCodexDisabled', () => {
 
 describe('resolveEffectiveConfig', () => {
   it('repo providers.openai=false beats FACTORY_CODEX=1 and keeps the env toggles', () => {
-    const repo = { version: 1 as const, providers: { openai: false } };
+    const repo = { version: 2 as const, providers: { openai: false } };
     const effective = resolveEffectiveConfig(repo, {
       FACTORY_CODEX: '1',
       FACTORY_LOCAL_ONLY: '1',
@@ -455,7 +562,7 @@ describe('resolveEffectiveConfig', () => {
 
 describe('resolveUsageCap', () => {
   it('uses the repo cap over the env cap', () => {
-    expect(resolveUsageCap({ version: 1, usage: { capUsd: 50 } }, { FACTORY_USAGE_CAP: '100' })).toEqual({
+    expect(resolveUsageCap({ version: 2, budget: { capUsd: 50 } }, { FACTORY_USAGE_CAP: '100' })).toEqual({
       cap: 50,
       source: 'repo',
     });
@@ -479,10 +586,10 @@ describe('describeEffectiveConfig', () => {
     const stub = new StubModelExecutor({ scripts: {} });
     const router = new ModelRouter(models, routes, false, stub);
     const repo = {
-      version: 1 as const,
-      models: { checker: 'checker-model' },
+      version: 2 as const,
+      models: { pins: { checker: 'checker-model' } },
       providers: { ollama: false },
-      usage: { capUsd: 42 },
+      budget: { capUsd: 42 },
     };
     const lines = describeEffectiveConfig({
       router,
@@ -503,7 +610,7 @@ describe('describeEffectiveConfig', () => {
     const router = new ModelRouter(models, routes, false, stub);
     const lines = describeEffectiveConfig({
       router,
-      repo: { version: 1, tiers: { worker: ['ollama-model', 'gpt-model-a'] } },
+      repo: { version: 2, tiers: { worker: ['ollama-model', 'gpt-model-a'] } },
       env: {},
       repoConfigPath: '.factory/config.json',
     });

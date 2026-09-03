@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "problem_name": "cfgpipe",
+  "problem_version": 2,
+  "checkpoint_name": "checkpoint_1",
+  "checkpoint_version": 2,
+  "duration": 0.02,
+  "entrypoint": "uv run cfgpipe.py",
+  "pass_counts": {},
+  "total_counts": {
+    "Core": 4
+  },
+  "pytest_exit_code": 3,
+  "infrastructure_failure": true
+}

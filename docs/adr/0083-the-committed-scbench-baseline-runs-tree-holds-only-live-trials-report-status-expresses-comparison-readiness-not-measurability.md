@@ -1,4 +1,4 @@
-# ADR-0070: The committed SCBench baseline runs tree holds only live trials; report status expresses comparison-readiness, not measurability
+# ADR-0083: The committed SCBench baseline runs tree holds only live trials; report status expresses comparison-readiness, not measurability
 
 - Status: Accepted
 - Date: 2026-09-01
@@ -10,10 +10,10 @@ by two deterministic stub trials (zero cost, no native evidence) that had been c
 under `evals/scbench-baseline/runs/smoke/` purely to prove the adapter → manifest → report
 wiring. Once live, model-backed cfgpipe evidence landed (#1064/#1158), those stubs made the
 measured pass rate misrepresent reality (3/6 instead of 3/4) and the generator's
-below-threshold banner conflated two independent axes: whether the pass rate is *measurable*
+below-threshold banner conflated two independent axes: whether the pass rate is _measurable_
 (an evidence property — ADR-0007 already derives correctness only from retained
 `evaluation.json` under the pinned `core-cases` policy) and whether the trial count meets the
-10-trial *comparison* threshold (a statistical bar for comparing configurations).
+10-trial _comparison_ threshold (a statistical bar for comparing configurations).
 
 ## Decision
 

@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "problem_name": "cfgpipe",
+  "problem_version": 2,
+  "checkpoint_name": "checkpoint_3",
+  "checkpoint_version": 2,
+  "duration": 18.697617053985596,
+  "entrypoint": "uv run cfgpipe.py",
+  "tests": {
+    "checkpoint_1-Regression": {
+      "passed": [
+        "test_arg_error_stops_resolution",
+        "test_arg_parse_failure",
+        "test_bool_float_formats",
+        "test_cli_arg_forms[arg_candidates0]",
+        "test_cli_arg_forms[arg_candidates1]",
+        "test_empty_env_string_is_present",
+        "test_empty_schema",
+        "test_env_error_stops_resolution",
+        "test_env_parse_failure",
+        "test_file_overrides_env",
+        "test_file_value_is_trimmed",
+        "test_integer_string_as_float",
+        "test_invalid_boolean[suffix]",
+        "test_invalid_schema_json",
+        "test_missing_file_absent",
+        "test_missing_schema_file",
+        "test_missing_type_field",
+        "test_negative_integer",
+        "test_no_sources_unresolved",
+        "test_non_string_arg",
+        "test_non_string_default",
+        "test_non_string_env",
+        "test_non_string_file",
+        "test_parse_failure_halts",
+        "test_priority_chain",
+        "test_schema_array_root",
+        "test_undeclared_sources",
+        "test_unmatched_args",
+        "test_unreadable_file_absent",
+        "test_unrecognized_type",
+        "test_unresolved_mixed_sources",
+        "test_unresolved_params_error",
+        "test_whitespace_file_absent"
+      ],
+      "failed": [
+        "test_default_parse_error_stops",
+        "test_env_parse_error_priority",
+        "test_file_parse_error_stops",
+        "test_invalid_boolean[whitespace]"
+      ],
+      "skipped": []
+    },
+    "checkpoint_2-Regression": {
+      "passed": [
+        "test_connection_failure",
+        "test_duplicate_error_key",
+        "test_found_true_missing_value",
+        "test_integer_parse_failure",
+        "test_malformed_json",
+        "test_missing_key_fallback",
+        "test_missing_key_fallback_chain",
+        "test_missing_store_flag",
+        "test_missing_store_output",
+        "test_mixed_keys_independent",
+        "test_non_200_fatal",
+        "test_non_200_no_fallback",
+        "test_non_string_value",
+        "test_primary_store_flag_optional",
+        "test_primary_store_resolves[default-fallback]",
+        "test_primary_store_resolves[empty-string]",
+        "test_primary_store_resolves[key-mismatch]",
+        "test_primary_store_resolves[url-encoded]",
+        "test_primary_store_resolves[version-zero]",
+        "test_primary_store_seed",
+        "test_priority_chain",
+        "test_setup_error_no_output",
+        "test_store_flag_ignored",
+        "test_store_overrides_file",
+        "test_unannotated_params_ignored",
+        "test_unparseable_store_value"
+      ],
+      "failed": [
+        "test_duplicate_failure_output",
+        "test_duplicate_keys_fail_first",
+        "test_duplicate_store_keys",
+        "test_missing_version_field",
+        "test_parse_failure_halts"
+      ],
+      "skipped": []
+    },
+    "checkpoint_3-Error": {
+      "passed": [
+        "test_arg_error_full_path",
+        "test_file_error_full_path",
+        "test_group_annotation_rejected",
+        "test_group_any_annotation[arg-name]",
+        "test_group_any_annotation[default-x]",
+        "test_group_any_annotation[file-value.txt]",
+        "test_group_any_annotation[primary-store-cfg/key]",
+        "test_group_child_object",
+        "test_group_or_child_fails",
+        "test_intermediate_group_annotation",
+        "test_invalid_port",
+        "test_root_non_empty_object",
+        "test_root_scalar_null_rejected[\"oops\"]",
+        "test_root_scalar_null_rejected[123]",
+        "test_root_scalar_null_rejected[false]",
+        "test_root_scalar_null_rejected[null]",
+        "test_source_error_full_path",
+        "test_unresolved_paths_reported"
+      ],
+      "failed": [
+        "test_duplicate_error_full_paths",
+        "test_duplicate_keys_hierarchy",
+        "test_group_type_field_rejected",
+        "test_unrecognized_type_path"
+      ],
+      "skipped": []
+    },
+    "checkpoint_3-Functionality": {
+      "passed": [
+        "test_composed_paths_format",
+        "test_deeply_nested_groups",
+        "test_group_non_string_type",
+        "test_grouped_output_strings",
+        "test_multiple_failures_one_reported",
+        "test_output_order_preserved",
+        "test_port_boundary_max",
+        "test_port_boundary_zero",
+        "test_port_custom_type",
+        "test_port_negative_rejected",
+        "test_port_non_numeric_rejected"
+      ],
+      "failed": [
+        "test_duplicate_no_flag",
+        "test_empty_group"
+      ],
+      "skipped": []
+    },
+    "checkpoint_3-Core": {
+      "passed": [
+        "test_group_with_subgroups",
+        "test_nested_group_resolves",
+        "test_nested_groups",
+        "test_nested_preserves_subtrees"
+      ],
+      "failed": [],
+      "skipped": []
+    }
+  },
+  "pass_counts": {
+    "Core": 4,
+    "Functionality": 11,
+    "Regression": 59,
+    "Error": 18
+  },
+  "total_counts": {
+    "Core": 4,
+    "Functionality": 13,
+    "Regression": 68,
+    "Error": 22
+  },
+  "pytest_exit_code": 1,
+  "pytest_collected": 107,
+  "test_collection_hash": "2bc7d6c55787acb6341317122c6c8b260e5df6683e04ca86deee995319dd2a11",
+  "infrastructure_failure": false
+}

@@ -1,13 +1,23 @@
-// packages/scbench-adapter/src/cli-run.ts — scbench-factory-agent argv parsing + execution (#510, #511, #1139).
+// packages/scbench-adapter/src/cli-run.ts — scbench-factory-agent argv parsing + execution (#510, #511, #1139, #1163).
 import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
-import { loadBaselineConfig, type BaselineConfig, collectBaselineTrials, generateBaselineReport } from './baseline.js';
+import {
+  loadBaselineConfig,
+  parseEvaluation,
+  type BaselineConfig,
+  collectBaselineTrials,
+  generateBaselineReport,
+} from './baseline.js';
 import { runCatalogPreflight, type CatalogPreflightOutcome, type CatalogPreflightSpec } from './catalog-preflight.js';
 import { AdapterError, type ScbenchCheckpoint } from './checkpoint.js';
 import { collectTrial } from './collect-trial.js';
+import { compareTrialSets, renderComparisonReport } from './compare.js';
 import { parsePinFile, runPinPreflight, type PinnedInputSpec, type PinPreflightOutcome } from './pin-preflight.js';
+import { retryCheckpoint } from './retry-checkpoint.js';
+import { buildRetryContext, retrySkipReason, type ScbenchRetryContext } from './retry-context.js';
 import { runCheckpoint, type RunCheckpointOptions } from './run-checkpoint.js';
+import { renderSuiteSummary, runSuite, summarizeSuite, LAUNCHER_CONFIG_ARG, LAUNCHER_SCRIPT } from './suite.js';
 import { createExecaExec } from './workspace.js';
 
 const RUN_CHECKPOINT_USAGE =
@@ -18,14 +28,18 @@ const CATALOG_PREFLIGHT_USAGE = 'usage: scbench-factory-agent catalog-preflight 
 const LAUNCH_USAGE = 'usage: scbench-factory-agent launch [--pin <path>] [--config <path>] [--dry-run]';
 const COLLECT_TRIAL_USAGE =
   'usage: scbench-factory-agent collect-trial --output <dir> --scbench-run <dir> --problem <id> --checkpoint <id> --trial <n> [--runs <dir>]';
-const USAGE = `${RUN_CHECKPOINT_USAGE}\n${BASELINE_REPORT_USAGE}\n${PIN_PREFLIGHT_USAGE}\n${CATALOG_PREFLIGHT_USAGE}\n${LAUNCH_USAGE}\n${COLLECT_TRIAL_USAGE}`;
-
-const LAUNCHER_CONFIG_ARG = 'packages/scbench-adapter/scbench.run.yaml';
-const LAUNCHER_SCRIPT = 'packages/scbench-adapter/python/run_scbench.py';
+const COMPARE_USAGE = 'usage: scbench-factory-agent compare --baseline <dir> --candidate <dir> [--threshold <points>]';
+const RETRY_CHECKPOINT_USAGE =
+  'usage: scbench-factory-agent retry-checkpoint --workspace <dir> --artifacts <dir> --task-file <path> --problem <id> --checkpoint <id> --evaluation <path> [--index <n>] [--factory-bin <path>]';
+const RUN_SUITE_USAGE =
+  'usage: scbench-factory-agent run-suite [--pin <path>] [--config <path>] [--summary <path>] [--provider-api-key-env <var>]';
+const USAGE = `${RUN_CHECKPOINT_USAGE}\n${BASELINE_REPORT_USAGE}\n${PIN_PREFLIGHT_USAGE}\n${CATALOG_PREFLIGHT_USAGE}\n${LAUNCH_USAGE}\n${COLLECT_TRIAL_USAGE}\n${COMPARE_USAGE}\n${RETRY_CHECKPOINT_USAGE}\n${RUN_SUITE_USAGE}`;
 
 const REQUIRED_FLAGS = ['--workspace', '--artifacts', '--task-file', '--problem', '--checkpoint'] as const;
 const BASELINE_REPORT_REQUIRED_FLAGS = ['--config', '--runs', '--out'] as const;
 const COLLECT_TRIAL_REQUIRED_FLAGS = ['--output', '--scbench-run', '--problem', '--checkpoint', '--trial'] as const;
+const COMPARE_REQUIRED_FLAGS = ['--baseline', '--candidate'] as const;
+const RETRY_CHECKPOINT_REQUIRED_FLAGS = [...REQUIRED_FLAGS, '--evaluation'] as const;
 
 const DEFAULT_PIN_PATH = fileURLToPath(new URL('../scbench.pin.json', import.meta.url));
 const DEFAULT_ADAPTER_CLI_PATH = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
@@ -47,6 +61,13 @@ export interface CliDeps {
   runPinPreflight: (specs: readonly PinnedInputSpec[]) => Promise<PinPreflightOutcome>;
   runCatalogPreflight: (spec: CatalogPreflightSpec) => CatalogPreflightOutcome;
   collectTrial: typeof collectTrial;
+  readEvaluationFile: (path: string) => Promise<string>;
+  retryCheckpoint: (
+    checkpoint: ScbenchCheckpoint,
+    ctx: ScbenchRetryContext,
+    opts: RunCheckpointOptions,
+  ) => ReturnType<typeof retryCheckpoint>;
+  runSuite: typeof runSuite;
 }
 
 export function defaultCliDeps(): CliDeps {
@@ -63,6 +84,9 @@ export function defaultCliDeps(): CliDeps {
     runPinPreflight: (specs) => runPinPreflight(specs, { exec: createExecaExec() }),
     runCatalogPreflight: (spec) => runCatalogPreflight(spec, {}),
     collectTrial,
+    readEvaluationFile: (path) => readFile(path, 'utf-8'),
+    retryCheckpoint,
+    runSuite,
   };
 }
 
@@ -330,6 +354,61 @@ async function runLaunchCommand(rest: readonly string[], deps: CliDeps): Promise
   return 0;
 }
 
+/** Runs both preflights (pin + catalog, no short-circuit — like `launch`)
+ *  and, only when both pass, actually invokes the pinned launcher once per
+ *  configured suite problem via deps.runSuite, which never stops on a failed
+ *  problem. Prints the completed/failed/missing summary (a problem with no
+ *  record — its launcher crashed — is missing, never completed) and, with
+ *  --summary <path>, writes it as JSON. Returns 2 on a pin-file/config
+ *  read or parse error, 1 when a preflight fails (no launcher invoked) or
+ *  when any problem failed/missing, 0 only when every configured suite
+ *  problem completed. */
+async function runRunSuiteCommand(rest: readonly string[], deps: CliDeps): Promise<number> {
+  const flags = parseFlags(rest);
+  const pin = await evaluatePinPreflight(flags, deps);
+  if ('usageError' in pin) {
+    deps.logError(pin.usageError);
+    return 2;
+  }
+  const catalog = await evaluateCatalogPreflight(flags, deps);
+  if ('usageError' in catalog) {
+    deps.logError(catalog.usageError);
+    return 2;
+  }
+
+  renderPinResults(pin.outcome, deps);
+  renderCatalogResults(catalog.outcome, deps);
+
+  if (!pin.outcome.ok || !catalog.outcome.ok) {
+    return 1;
+  }
+
+  // Repo root — the launcher command's --config/script paths are repo-root
+  // relative; resolves correctly from both src/ and dist/ (same pattern as
+  // DEFAULT_RUNS_DIR).
+  const cwd = fileURLToPath(new URL('../../..', import.meta.url));
+  const suiteIds = catalog.config.problems.suite;
+  const records = await deps.runSuite(
+    {
+      checkout: deps.env.SCBENCH_CHECKOUT!,
+      problemIds: suiteIds,
+      cwd,
+      providerApiKeyEnv: flags['--provider-api-key-env'],
+    },
+    { exec: createExecaExec(), log: deps.log },
+  );
+  const summary = summarizeSuite(suiteIds, records);
+  deps.log(renderSuiteSummary(summary));
+
+  if (flags['--summary'] !== undefined) {
+    const path = flags['--summary'];
+    await deps.writeReport(path, `${JSON.stringify({ configured: suiteIds, records, summary }, null, 2)}\n`);
+    deps.log(`run-suite: wrote summary to ${path}`);
+  }
+
+  return summary.failed.length === 0 && summary.missing.length === 0 ? 0 : 1;
+}
+
 /** Copies the five Factory artifacts and the three native SCBench evidence
  *  files for one trial from the SCBench output tree's <problem>/<checkpoint>/
  *  directory and --scbench-run into <runs>/<problem>/<checkpoint>/trial-<n>/
@@ -379,9 +458,108 @@ async function runCollectTrialCommand(rest: readonly string[], deps: CliDeps): P
   }
 }
 
+/** Compares a retained measured --baseline runs directory against a newer
+ *  measured --candidate runs directory, deriving correctness exclusively
+ *  from validated native SCBench evidence (compareTrialSets/
+ *  evaluateTrialVerdict), and prints the operator-readable report. Returns
+ *  2 on a usage error or AdapterError (e.g. a missing runs directory), 1
+ *  when the worst measured per-group pass-rate drop exceeds --threshold
+ *  (default 0 points), 0 otherwise. */
+async function runCompareCommand(rest: readonly string[], deps: CliDeps): Promise<number> {
+  const flags = parseFlags(rest);
+  const missing = COMPARE_REQUIRED_FLAGS.filter((flag) => flags[flag] === undefined);
+  if (missing.length > 0) {
+    deps.logError(`missing required flag(s): ${missing.join(', ')}\n${COMPARE_USAGE}`);
+    return 2;
+  }
+
+  const threshold = flags['--threshold'] !== undefined ? Number(flags['--threshold']) : 0;
+  if (!Number.isFinite(threshold) || threshold < 0) {
+    deps.logError(`--threshold must be a non-negative number, got ${flags['--threshold']}\n${COMPARE_USAGE}`);
+    return 2;
+  }
+
+  try {
+    const baseline = deps.collectBaselineTrials(flags['--baseline']);
+    const candidate = deps.collectBaselineTrials(flags['--candidate']);
+    const result = compareTrialSets(baseline, candidate, threshold);
+    deps.log(renderComparisonReport(result));
+    return result.exceedsThreshold ? 1 : 0;
+  } catch (err) {
+    if (err instanceof AdapterError) {
+      deps.logError(err.message);
+      return 2;
+    }
+    throw err;
+  }
+}
+
+/** Reads the failed evaluation.json named by --evaluation, refuses to retry
+ *  a non-retryable verdict (pass, or infrastructure failure — provider
+ *  faults are not code faults), and otherwise hands the built retry context
+ *  to retryCheckpoint, printing the RetryCheckpointResult as single-line
+ *  JSON on stdout. Returns 0 on any resolved retry result (including a
+ *  failed/parked Factory run), 1 when the evaluation is not retryable, 2 on
+ *  a usage error or AdapterError — matching the compare/preflight exit-code
+ *  convention. */
+async function runRetryCheckpointCommand(rest: readonly string[], deps: CliDeps): Promise<number> {
+  const flags = parseFlags(rest);
+  const missing = RETRY_CHECKPOINT_REQUIRED_FLAGS.filter((flag) => flags[flag] === undefined);
+  if (missing.length > 0) {
+    deps.logError(`missing required flag(s): ${missing.join(', ')}\n${RETRY_CHECKPOINT_USAGE}`);
+    return 2;
+  }
+
+  let task: string;
+  try {
+    task = await deps.readTaskFile(flags['--task-file']);
+  } catch (err) {
+    deps.logError(`could not read --task-file ${flags['--task-file']}: ${(err as Error).message}`);
+    return 2;
+  }
+
+  let rawEvaluation: string;
+  try {
+    rawEvaluation = await deps.readEvaluationFile(flags['--evaluation']);
+  } catch (err) {
+    deps.logError(`could not read --evaluation ${flags['--evaluation']}: ${(err as Error).message}`);
+    return 2;
+  }
+
+  try {
+    const evaluation = parseEvaluation(rawEvaluation, flags['--evaluation']);
+    const skip = retrySkipReason(evaluation);
+    if (skip !== undefined) {
+      deps.log(`retry-checkpoint: not retryable — ${skip}`);
+      return 1;
+    }
+
+    const checkpoint: ScbenchCheckpoint = {
+      problemId: flags['--problem'],
+      checkpointId: flags['--checkpoint'],
+      index: flags['--index'] !== undefined ? Number(flags['--index']) : 0,
+      task,
+    };
+    const result = await deps.retryCheckpoint(checkpoint, buildRetryContext(evaluation), {
+      workspace: flags['--workspace'],
+      artifactsRoot: flags['--artifacts'],
+      factoryBin: flags['--factory-bin'],
+    });
+    deps.log(JSON.stringify(result));
+    return 0;
+  } catch (err) {
+    if (err instanceof AdapterError) {
+      deps.logError(err.message);
+      return 2;
+    }
+    throw err;
+  }
+}
+
 /** Hand-rolled argv parsing + dispatch across the `run-checkpoint`,
- *  `baseline-report`, `pin-preflight`, `catalog-preflight`, `launch`, and
- *  `collect-trial` subcommands. */
+ *  `baseline-report`, `pin-preflight`, `catalog-preflight`, `launch`,
+ *  `collect-trial`, `compare`, `retry-checkpoint`, and `run-suite`
+ *  subcommands. */
 export async function main(argv: readonly string[], deps: CliDeps = defaultCliDeps()): Promise<number> {
   const [subcommand, ...rest] = argv;
   if (subcommand === 'run-checkpoint') return runRunCheckpoint(rest, deps);
@@ -390,6 +568,9 @@ export async function main(argv: readonly string[], deps: CliDeps = defaultCliDe
   if (subcommand === 'catalog-preflight') return runCatalogPreflightCommand(rest, deps);
   if (subcommand === 'launch') return runLaunchCommand(rest, deps);
   if (subcommand === 'collect-trial') return runCollectTrialCommand(rest, deps);
+  if (subcommand === 'compare') return runCompareCommand(rest, deps);
+  if (subcommand === 'retry-checkpoint') return runRetryCheckpointCommand(rest, deps);
+  if (subcommand === 'run-suite') return runRunSuiteCommand(rest, deps);
 
   deps.logError(USAGE);
   return 2;

@@ -13,8 +13,8 @@ Software Factory harness driven through `@on-par/scbench-adapter`
   the model-config posture, environment assumptions, the exact resolved
   problem ids (not a selection rule — see "Problem catalog" below), trial
   counts, the comparison threshold (10 trials per configuration) below which
-  a report is labeled below comparison threshold, and the pinned `passPolicy`
-  (see "Pass policy" below).
+  a report is labeled preliminary, and the pinned `passPolicy` (see "Pass
+  policy" below).
 - [`runs/`](./runs) — committed trial artifact sets, one directory per trial,
   each containing `brief.md`, `manifest.json`, `request.json`,
   `events.ndjson`, and `diff.patch`. A trial directory additionally retains,
@@ -23,8 +23,8 @@ Software Factory harness driven through `@on-par/scbench-adapter`
   `checkpoint_results.jsonl` (from the SCBench run root), and `run_info.yaml`
   (resolved run spec + execution summary) whenever a live run has produced
   them. **Benchmark pass rate and erosion in `report.md` derive only from
-  these native evidence files** — trials without them count as
-  missing-evidence, never as benchmark passes.
+  these native evidence files** — a trial without them counts as
+  missing-evidence, never as a benchmark pass.
 - [`report.md`](./report.md) — generated from `baseline.config.json` +
   `runs/` by the `baseline-report` CLI subcommand below. **Never hand-edit
   it** — regenerate it after new trials land.
@@ -58,29 +58,26 @@ A trial with `infrastructure_failure: true` or with no retained
 
 ## Status
 
-The deterministic stub trials formerly committed under `runs/smoke/trial-1/`
-and `runs/smoke/trial-2/` (produced by running the adapter's `runCheckpoint`
-twice against a **stub** `factory` binary, with no models involved) have been
-removed from the baseline tree. The adapter → manifest → report wiring proof
-they provided still lives in
-`packages/scbench-adapter/src/run-checkpoint.test.ts` and the collect-trial
-fixtures (`packages/scbench-adapter/src/__fixtures__/collect-trial/`), so
-`runs/` now contains only live, model-backed trials.
+Three live, model-backed `cfgpipe` runs through the pinned SCBench harness
+and problem catalog are now committed as `runs/cfgpipe/checkpoint_{1,2,3,4}/trial-{1,2,3}/`
+(#1064, #1134) — 12 trials total, every one carrying native `evaluation.json`,
+`checkpoint_results.jsonl`, and `run_info.yaml` evidence. In each of the
+three trials, checkpoints 1-3 pass under `core-cases` and checkpoint_4 fails
+one Core case; all three runs recorded the same outcome, which is legitimate
+recorded evidence, not a run failure. The two stub smoke trials that
+previously stood in for `trials.smokeRuns: 2` (`runs/smoke/trial-1/`,
+`runs/smoke/trial-2/`, produced by running the adapter's `runCheckpoint`
+against a **stub** `factory` binary, the same pattern as
+`packages/scbench-adapter/src/run-checkpoint.test.ts`) have been retired now
+that real live runs satisfy that trial count — their wiring proof lives on
+deterministically in `run-checkpoint.test.ts` and the collect-trial fixtures.
+With 12 evidence-bearing trials recorded against a comparison threshold of
+10, `report.md` is labeled **comparison-ready**. The live small-suite run
+(the first three SCBench problems, `trials.suiteTrialsPerProblem` trials
+each) remains **not** executed — deferred to a follow-up story (#1066/#1022),
+using the exact commands below.
 
-The first **live**, model-backed smoke run is committed (#1064): one
-`cfgpipe` run through the pinned SCBench harness and problem catalog,
-committed as `runs/cfgpipe/checkpoint_{1,2,3,4}/trial-1/` — 3 of the 4
-checkpoints pass under `core-cases` (checkpoint_4 fails one Core case; both
-outcomes are legitimate recorded evidence, not a run failure), giving
-`report.md` a measured pass rate of 3/4 (75.0%) derived entirely from native
-`evaluation.json` evidence. The second required smoke run
-(`trials.smokeRuns: 2`) and the live small-suite run (the first three
-SCBench problems, `trials.suiteTrialsPerProblem` trials each) remain **not**
-executed — deferred to a follow-up story (#1066/#1022), using the exact
-commands below. Because 4 of the 10-trial comparison threshold are recorded,
-`report.md` is labeled below comparison threshold (not comparison-ready).
-
-Two operational notes from that run, for future reproductions:
+Two operational notes from these runs, for future reproductions:
 
 - Upstream SCBench's `run_agent.py` resolves a provider credential purely
   for its own bookkeeping before handing off to the `software_factory` agent
@@ -176,6 +173,31 @@ Required tools: `git`, `uv` (Python ≥ 3.12 environment per upstream's
 
 ## Reproducing the live small suite
 
+For a complete start-to-finish suite run, use the adapter's `run-suite`
+subcommand (see
+[`packages/scbench-adapter/README.md`](../../packages/scbench-adapter/README.md)'s
+"Complete suite run" section): it runs the same pin + catalog preflights,
+then every configured suite problem through the pinned launcher, continuing
+past failed problems, and prints a summary separating completed, failed,
+and missing problems:
+
+```bash
+SCBENCH_CHECKOUT=/path/to/slop-code-bench \
+SCBENCH_PROBLEMS_PATH=/path/to/scb-problems \
+SCBENCH_PLACEHOLDER_KEY=x \
+node packages/scbench-adapter/dist/cli.js run-suite \
+  --provider-api-key-env SCBENCH_PLACEHOLDER_KEY \
+  --summary evals/scbench-baseline/suite-summary.json
+```
+
+`--provider-api-key-env` names the harmless placeholder credential var from
+the operational note above — never export a real `ANTHROPIC_API_KEY` for
+this. After the run, per-problem native evidence is still
+imported per trial with `collect-trial` exactly as in the smoke steps
+above; a `failed` or `missing` problem is never counted as evidence
+(ADR-0007) — pass/fail correctness derives solely from retained native
+`evaluation.json` files.
+
 Run the three problems named by `baseline.config.json`'s `problems.suite` —
 the literal ids `cfgpipe`, `circuit_eval`, and `code_search` — through
 SCBench with `trials.suiteTrialsPerProblem` trials per problem, collecting
@@ -200,6 +222,23 @@ This must be run (and the result committed) after any new trial artifacts
 land under `runs/` — `report.md` is derived output, not hand-authored, and
 `packages/scbench-adapter/src/baseline.test.ts` asserts the committed file
 is byte-identical to a fresh regeneration.
+
+## Comparing a new measured run against this baseline
+
+```bash
+node packages/scbench-adapter/dist/cli.js compare \
+  --baseline evals/scbench-baseline/runs --candidate <new-runs-dir> [--threshold <points>]
+```
+
+Exit codes: `2` on a usage error or missing/invalid runs directory, `1` when
+the worst measured per-problem/checkpoint core-cases pass-rate drop (in
+percentage points) strictly exceeds `--threshold` (default `0`, i.e. any
+measured regression gates), `0` otherwise. As with `report.md`, correctness
+is derived only from each side's retained native SCBench evidence
+(ADR-0007) — a trial with no `evaluation.json` or an infrastructure failure
+never counts as a pass on either side. A problem/checkpoint present in only
+one of the two runs directories is reported but never gates the exit code,
+since an unmeasured group is an unknown, not a measured regression.
 
 ## Artifact location contract
 

@@ -145,11 +145,13 @@ export {
   parseCoverageSummaryScopes,
   renderRatchetReport,
 } from './utils/coverage-ratchet.js';
+export type { LaneWorktreeReapResult } from './utils/index.js';
 export {
   branchFor,
   branchPrefixSlug,
   cleanupWorktree,
   colorEnabled,
+  defaultRemoteBase,
   ensureDir,
   escalationLine,
   formatEventLine,
@@ -159,6 +161,7 @@ export {
   logCost,
   logEvent,
   readCosts,
+  reapLaneWorktree,
   setupWorktree,
   shellEscape,
   slugify,
@@ -210,10 +213,32 @@ export type { DaemonLaneContext } from './daemon/lane-context.js';
 export { createDaemonLaneContext } from './daemon/lane-context.js';
 export type { DaemonOrchestrator } from './daemon/run-repo.js';
 export { runDaemonRepo } from './daemon/run-repo.js';
+export type {
+  EngineHandle,
+  EngineRunner,
+  EngineSupervisor,
+  EngineSupervisorOptions,
+} from './daemon/engine-supervisor.js';
+export {
+  DEFAULT_STALE_THRESHOLD_MS,
+  DEFAULT_SUPERVISOR_POLL_MS,
+  superviseActiveRepos,
+  superviseEngine,
+} from './daemon/engine-supervisor.js';
 
 // Daemon control-plane HTTP server (#777)
 export type { FactorydOptions, FactorydServer } from './daemon/factoryd-http.js';
 export { createFactorydServer, DEFAULT_FACTORYD_PORT } from './daemon/factoryd-http.js';
+
+// Daemon runtime state: pid/port/log files under ~/.factory (#1177)
+export type { AcquirePidFileOptions, AcquirePidFileResult, DaemonRuntimePaths } from './daemon/runtime-state.js';
+export {
+  acquirePidFile,
+  createDaemonLogSink,
+  daemonRuntimePaths,
+  releaseRuntimeFiles,
+  writePortFile,
+} from './daemon/runtime-state.js';
 
 // Daemon attach gate (#778)
 export type {

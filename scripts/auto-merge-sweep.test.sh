@@ -231,13 +231,25 @@ grep -qF "FATAL: gh not found on PATH" <<<"$output" || {
   echo "FAIL: missing-gh FATAL message not found in: $output" >&2; exit 1; }
 rm -rf "$GH_LESS_BIN"
 
-# missing repo dir => FATAL + non-zero
-if output="$( (REPOS=(missingrepo); preflight) 2>&1 )"; then
-  echo "FAIL: preflight passed despite missing repo dir" >&2
+# one checkout missing => WARN + skip, sweep continues with the rest
+if ! output="$( (REPOS=(fakerepo missingrepo); preflight; echo "REPOS=${REPOS[*]}") 2>&1 )"; then
+  echo "FAIL: preflight failed despite fakerepo checkout being present: $output" >&2
   exit 1
 fi
-grep -qF "FATAL: repo dir missing: $REPO_ROOT/missingrepo" <<<"$output" || {
-  echo "FAIL: missing-repo-dir FATAL message not found in: $output" >&2; exit 1; }
+grep -qF "WARN: skipping repo, checkout missing: $REPO_ROOT/missingrepo" <<<"$output" || {
+  echo "FAIL: missing-repo WARN line not found in: $output" >&2; exit 1; }
+grep -qF "REPOS=fakerepo" <<<"$output" || {
+  echo "FAIL: preflight did not filter REPOS to present checkouts: $output" >&2; exit 1; }
+grep -qF "FATAL" <<<"$output" && {
+  echo "FAIL: unexpected FATAL in mixed present/missing preflight: $output" >&2; exit 1; }
+
+# every configured repo checkout missing => FATAL + non-zero
+if output="$( (REPOS=(missingrepo); preflight) 2>&1 )"; then
+  echo "FAIL: preflight passed despite every repo checkout missing" >&2
+  exit 1
+fi
+grep -qF "FATAL: no configured repo checkouts found under $REPO_ROOT" <<<"$output" || {
+  echo "FAIL: all-repos-missing FATAL message not found in: $output" >&2; exit 1; }
 
 # missing filter script => FATAL + non-zero
 if output="$( (SCRIPT_DIR="$BINDIR/nowhere"; preflight) 2>&1 )"; then
@@ -384,4 +396,4 @@ resolved_factory_bin_default="$(env -u FACTORY_BIN PATH="$NO_FACTORY_PATH_DIR" "
 [ "$resolved_factory_bin_default" = "$HOME/.local/bin/factory" ] || {
   echo "FAIL: FACTORY_BIN did not fall back to default: $resolved_factory_bin_default" >&2; exit 1; }
 
-echo "PASS: auto-merge-sweep logs merge/land failures with real exit codes, skips landing when the repo dir is missing, honours FACTORY_MERGE_ADMIN for the standalone merge path, writes a heartbeat on each pass, ships a valid KeepAlive launchd plist, preflight fatally rejects missing gh/factory/repo-dir/filter-script dependencies, backs off exponentially up to MAX_SLEEP_SECONDS on sweep-wide failures resetting on success, skips multi-issue-closing PRs with an explicit SKIPPING log line instead of silently landing only the first issue, tees every dated log line to a persistent LOG_FILE creating its parent directory, and externalizes config so ORG drives both ghrepo and the REPO_ROOT default, SWEEP_REPOS overrides the repo list, MERGE_FLAGS overrides the standalone-merge flags, and FACTORY_BIN falls back to command -v factory"
+echo "PASS: auto-merge-sweep logs merge/land failures with real exit codes, skips landing when the repo dir is missing, honours FACTORY_MERGE_ADMIN for the standalone merge path, writes a heartbeat on each pass, ships a valid KeepAlive launchd plist, preflight skips missing repo checkouts with a WARN and fatally rejects only missing gh/factory/filter-script dependencies or an all-repos-missing configuration, backs off exponentially up to MAX_SLEEP_SECONDS on sweep-wide failures resetting on success, skips multi-issue-closing PRs with an explicit SKIPPING log line instead of silently landing only the first issue, tees every dated log line to a persistent LOG_FILE creating its parent directory, and externalizes config so ORG drives both ghrepo and the REPO_ROOT default, SWEEP_REPOS overrides the repo list, MERGE_FLAGS overrides the standalone-merge flags, and FACTORY_BIN falls back to command -v factory"

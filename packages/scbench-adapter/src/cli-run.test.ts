@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { BaselineTrial } from './baseline.js';
+import type { BaselineTrial, ScbenchEvaluation } from './baseline.js';
 import { AdapterError, type CheckpointResult } from './checkpoint.js';
 import { defaultCliDeps, main, type CliDeps } from './cli-run.js';
 import type { CollectTrialResult } from './collect-trial.js';
 import { minimalManifest } from './manifest-fixture.js';
 import type { CatalogPreflightOutcome } from './catalog-preflight.js';
 import type { PinPreflightOutcome } from './pin-preflight.js';
+import type { RetryCheckpointResult } from './retry-checkpoint.js';
+import { runSuite, type SuiteProblemRecord } from './suite.js';
 
 const RESULT: CheckpointResult = {
   outcome: 'ready',
@@ -27,7 +29,7 @@ const VALID_CONFIG_JSON = JSON.stringify({
     pinnedAt: '2026-07-29',
   },
   modelConfig: { source: 'packages/config/src/defaults.ts', env: {} },
-  providerPolicy: { approvedModels: ['claude-fable-5'], disabledProviders: ['ollama'] },
+  providerPolicy: { approvedModels: ['claude-fable-5'], disabledProviders: ['ollama'], providers: { ollama: false } },
   promptInputs: 'briefs',
   environment: { node: '>=20', requiredBinaries: [], hostClass: 'test', scbenchHarness: 'python' },
   problems: { resolvedFrom: 'resolved from the catalog commit', smoke: 'alpha', suite: ['alpha', 'beta', 'gamma'] },
@@ -71,6 +73,28 @@ const COLLECT_TRIAL_RESULT: CollectTrialResult = {
   alreadyImported: false,
 };
 
+const FAILED_EVALUATION: ScbenchEvaluation = {
+  problem_name: 'cfgpipe',
+  checkpoint_name: 'checkpoint_1',
+  tests: {
+    'checkpoint_1-Core': { passed: ['test_a'], failed: ['test_b', 'test_c'], skipped: [] },
+  },
+  pass_counts: { Core: 1 },
+  total_counts: { Core: 3 },
+  pytest_exit_code: 1,
+  infrastructure_failure: false,
+  stderr: 'AssertionError: boom',
+};
+
+const RETRY_RESULT: RetryCheckpointResult = {
+  outcome: 'ready',
+  workspace: '/tmp/ws',
+  artifactsDir: '/tmp/artifacts/cfgpipe/checkpoint_1/rework-1',
+  briefPath: '/tmp/artifacts/cfgpipe/checkpoint_1/rework-1/brief.md',
+  manifestPath: '/tmp/artifacts/cfgpipe/checkpoint_1/rework-1/manifest.json',
+  retryContextPath: '/tmp/artifacts/cfgpipe/checkpoint_1/rework-1/retry-context.json',
+};
+
 const ALL_OK_CATALOG_OUTCOME: CatalogPreflightOutcome = {
   ok: true,
   results: [
@@ -97,6 +121,13 @@ function fakeDeps(overrides: Partial<CliDeps> = {}): CliDeps {
     runPinPreflight: vi.fn(async () => ALL_OK_OUTCOME),
     runCatalogPreflight: vi.fn(() => ALL_OK_CATALOG_OUTCOME),
     collectTrial: vi.fn(() => COLLECT_TRIAL_RESULT),
+    readEvaluationFile: vi.fn(async () => JSON.stringify(FAILED_EVALUATION)),
+    retryCheckpoint: vi.fn(async () => RETRY_RESULT),
+    runSuite: vi.fn(async (): Promise<SuiteProblemRecord[]> => [
+      { problemId: 'alpha', exitCode: 0 },
+      { problemId: 'beta', exitCode: 0 },
+      { problemId: 'gamma', exitCode: 0 },
+    ]),
     ...overrides,
   };
 }
@@ -750,6 +781,189 @@ describe('pin-preflight and catalog-preflight subcommands stay byte-identical af
   });
 });
 
+describe('run-suite subcommand', () => {
+  it('runs every configured suite problem through runSuite and exits 0 when all complete', async () => {
+    const deps = fakeDeps();
+
+    const code = await main(['run-suite'], deps);
+
+    expect(code).toBe(0);
+    expect(deps.runSuite).toHaveBeenCalledWith(
+      {
+        checkout: '/tmp/checkout',
+        problemIds: ['alpha', 'beta', 'gamma'],
+        cwd: expect.stringContaining('/'),
+      },
+      { exec: expect.any(Function), log: deps.log },
+    );
+    expect(deps.log).toHaveBeenCalledWith(
+      'suite summary: completed — alpha, beta, gamma\nsuite summary: failed — (none)\nsuite summary: missing — (none)',
+    );
+  });
+
+  it('threads --provider-api-key-env into RunSuiteOptions', async () => {
+    const deps = fakeDeps();
+
+    const code = await main(['run-suite', '--provider-api-key-env', 'SCBENCH_PLACEHOLDER_KEY'], deps);
+
+    expect(code).toBe(0);
+    expect(deps.runSuite).toHaveBeenCalledWith(
+      expect.objectContaining({ providerApiKeyEnv: 'SCBENCH_PLACEHOLDER_KEY' }),
+      expect.anything(),
+    );
+  });
+
+  it('passes providerApiKeyEnv as undefined when --provider-api-key-env is omitted', async () => {
+    const deps = fakeDeps();
+
+    const code = await main(['run-suite'], deps);
+
+    expect(code).toBe(0);
+    expect(deps.runSuite).toHaveBeenCalledWith(
+      expect.objectContaining({ providerApiKeyEnv: undefined }),
+      expect.anything(),
+    );
+  });
+
+  it('exits 1 on a failed problem, still separating the classes in the summary', async () => {
+    const deps = fakeDeps({
+      runSuite: vi.fn(async (): Promise<SuiteProblemRecord[]> => [
+        { problemId: 'alpha', exitCode: 0 },
+        { problemId: 'beta', exitCode: 3 },
+        { problemId: 'gamma', exitCode: 0 },
+      ]),
+    });
+
+    const code = await main(['run-suite'], deps);
+
+    expect(code).toBe(1);
+    expect(deps.runSuite).toHaveBeenCalledWith(
+      expect.objectContaining({ problemIds: ['alpha', 'beta', 'gamma'] }),
+      expect.anything(),
+    );
+    expect(deps.log).toHaveBeenCalledWith(
+      'suite summary: completed — alpha, gamma\nsuite summary: failed — beta\nsuite summary: missing — (none)',
+    );
+  });
+
+  it('exits 1 and reports a recordless (crashed) problem as missing, never completed', async () => {
+    const deps = fakeDeps({
+      runSuite: vi.fn(async (): Promise<SuiteProblemRecord[]> => [
+        { problemId: 'alpha', exitCode: 0 },
+        { problemId: 'gamma', exitCode: 0 },
+      ]),
+    });
+
+    const code = await main(['run-suite'], deps);
+
+    expect(code).toBe(1);
+    expect(deps.log).toHaveBeenCalledWith(
+      'suite summary: completed — alpha, gamma\nsuite summary: failed — (none)\nsuite summary: missing — beta',
+    );
+  });
+
+  it('gates on a pin-preflight failure without invoking runSuite', async () => {
+    const outcome: PinPreflightOutcome = {
+      ok: false,
+      results: [
+        ALL_OK_OUTCOME.results[0],
+        {
+          input: 'SCBENCH_PROBLEMS_PATH',
+          ok: false,
+          detail: `HEAD ${'c'.repeat(40)} does not match pinned commit ${'b'.repeat(40)}`,
+        },
+      ],
+    };
+    const deps = fakeDeps({ runPinPreflight: vi.fn(async () => outcome) });
+
+    const code = await main(['run-suite'], deps);
+
+    expect(code).toBe(1);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('pin-preflight: SCBENCH_PROBLEMS_PATH FAIL'));
+    expect(deps.runSuite).not.toHaveBeenCalled();
+  });
+
+  it('gates on a catalog-preflight failure without invoking runSuite', async () => {
+    const outcome: CatalogPreflightOutcome = {
+      ok: false,
+      results: [
+        {
+          subject: 'adapter build',
+          ok: false,
+          detail: 'missing build output /pkg/dist/cli.js — run `npm run build` first',
+        },
+        ...ALL_OK_CATALOG_OUTCOME.results.slice(1),
+      ],
+      confirmedProblemIds: [],
+    };
+    const deps = fakeDeps({ runCatalogPreflight: vi.fn(() => outcome) });
+
+    const code = await main(['run-suite'], deps);
+
+    expect(code).toBe(1);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('catalog-preflight: adapter build FAIL'));
+    expect(deps.runSuite).not.toHaveBeenCalled();
+  });
+
+  it('exits 2 when the pin file cannot be read, without invoking runSuite', async () => {
+    const deps = fakeDeps({ readPinFile: vi.fn(async () => Promise.reject(new Error('ENOENT'))) });
+
+    const code = await main(['run-suite'], deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('could not read pin file'));
+    expect(deps.runSuite).not.toHaveBeenCalled();
+  });
+
+  it('exits 2 when the baseline config cannot be read, without invoking runSuite', async () => {
+    const deps = fakeDeps({ readBaselineConfig: vi.fn(async () => Promise.reject(new Error('ENOENT'))) });
+
+    const code = await main(['run-suite'], deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('could not read --config'));
+    expect(deps.runSuite).not.toHaveBeenCalled();
+  });
+
+  it('writes the machine-readable JSON summary when --summary is passed', async () => {
+    const deps = fakeDeps({
+      runSuite: vi.fn(async (): Promise<SuiteProblemRecord[]> => [
+        { problemId: 'alpha', exitCode: 0 },
+        { problemId: 'beta', exitCode: 3 },
+      ]),
+    });
+
+    const code = await main(['run-suite', '--summary', '/tmp/suite-summary.json'], deps);
+
+    expect(code).toBe(1);
+    expect(deps.writeReport).toHaveBeenCalledWith(
+      '/tmp/suite-summary.json',
+      `${JSON.stringify(
+        {
+          configured: ['alpha', 'beta', 'gamma'],
+          records: [
+            { problemId: 'alpha', exitCode: 0 },
+            { problemId: 'beta', exitCode: 3 },
+          ],
+          summary: { completed: ['alpha'], failed: ['beta'], missing: ['gamma'] },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    expect(deps.log).toHaveBeenCalledWith('run-suite: wrote summary to /tmp/suite-summary.json');
+  });
+
+  it('does not write a summary file when --summary is omitted', async () => {
+    const deps = fakeDeps();
+
+    const code = await main(['run-suite'], deps);
+
+    expect(code).toBe(0);
+    expect(deps.writeReport).not.toHaveBeenCalled();
+  });
+});
+
 describe('collect-trial subcommand', () => {
   it('parses flags, calls collectTrial, and logs the copied files + trial dir on success', async () => {
     const deps = fakeDeps();
@@ -951,6 +1165,269 @@ describe('collect-trial subcommand', () => {
   });
 });
 
+function passingTrial(id: string): BaselineTrial {
+  return {
+    id,
+    manifestPath: `/runs/${id}/manifest.json`,
+    manifest: minimalManifest(),
+    evidence: {
+      runInfoPresent: false,
+      evaluation: {
+        problem_name: 'cfgpipe',
+        checkpoint_name: 'checkpoint_1',
+        pass_counts: { Core: 3 },
+        total_counts: { Core: 3 },
+        pytest_exit_code: 0,
+        infrastructure_failure: false,
+      },
+    },
+  };
+}
+
+function failingTrial(id: string): BaselineTrial {
+  const trial = passingTrial(id);
+  return {
+    ...trial,
+    evidence: {
+      ...trial.evidence,
+      evaluation: { ...trial.evidence.evaluation!, pass_counts: { Core: 2 } },
+    },
+  };
+}
+
+describe('compare subcommand', () => {
+  const baseTrials = [passingTrial('cfgpipe/checkpoint_1/trial-1')];
+  const candNoChangeTrials = [passingTrial('cfgpipe/checkpoint_1/trial-1')];
+  const candRegressionTrials = [failingTrial('cfgpipe/checkpoint_1/trial-1')];
+
+  function collectFor(byDir: Record<string, BaselineTrial[]>) {
+    return vi.fn((dir: string): BaselineTrial[] => byDir[dir] ?? []);
+  }
+
+  it('exits 2 when required flags are missing', async () => {
+    const deps = fakeDeps();
+
+    const code = await main(['compare'], deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(
+      expect.stringContaining('missing required flag(s): --baseline, --candidate'),
+    );
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('usage: scbench-factory-agent compare'));
+  });
+
+  it.each(['abc', '-1'])('exits 2 when --threshold is not a non-negative number (%s)', async (threshold) => {
+    const deps = fakeDeps();
+
+    const code = await main(['compare', '--baseline', '/base', '--candidate', '/cand', '--threshold', threshold], deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('--threshold must be a non-negative number'));
+  });
+
+  it('exits 1 and reports a regression when the worst drop exceeds the threshold', async () => {
+    const deps = fakeDeps({
+      collectBaselineTrials: collectFor({ '/base': baseTrials, '/cand': candRegressionTrials }),
+    });
+
+    const code = await main(['compare', '--baseline', '/base', '--candidate', '/cand'], deps);
+
+    expect(code).toBe(1);
+    expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('cfgpipe/checkpoint_1'));
+    expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('REGRESSION'));
+  });
+
+  it('exits 0 when there is no measured regression', async () => {
+    const deps = fakeDeps({
+      collectBaselineTrials: collectFor({ '/base': baseTrials, '/cand': candNoChangeTrials }),
+    });
+
+    const code = await main(['compare', '--baseline', '/base', '--candidate', '/cand'], deps);
+
+    expect(code).toBe(0);
+  });
+
+  it('exits 0 when a regression is within the configured threshold', async () => {
+    const deps = fakeDeps({
+      collectBaselineTrials: collectFor({ '/base': baseTrials, '/cand': candRegressionTrials }),
+    });
+
+    const code = await main(['compare', '--baseline', '/base', '--candidate', '/cand', '--threshold', '100'], deps);
+
+    expect(code).toBe(0);
+  });
+
+  it('exits 2 and forwards the message when collectBaselineTrials throws an AdapterError', async () => {
+    const deps = fakeDeps({
+      collectBaselineTrials: vi.fn(() => {
+        throw new AdapterError('no such directory: /base — pass an existing --runs directory');
+      }),
+    });
+
+    const code = await main(['compare', '--baseline', '/base', '--candidate', '/cand'], deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith('no such directory: /base — pass an existing --runs directory');
+  });
+
+  it('re-throws unexpected (non-AdapterError) errors from collectBaselineTrials', async () => {
+    const deps = fakeDeps({
+      collectBaselineTrials: vi.fn(() => {
+        throw new Error('boom');
+      }),
+    });
+
+    await expect(main(['compare', '--baseline', '/base', '--candidate', '/cand'], deps)).rejects.toThrow('boom');
+  });
+});
+
+describe('retry-checkpoint subcommand', () => {
+  const FULL_ARGS = [
+    'retry-checkpoint',
+    '--workspace',
+    '/tmp/ws',
+    '--artifacts',
+    '/tmp/artifacts',
+    '--task-file',
+    '/tmp/task.md',
+    '--problem',
+    'cfgpipe',
+    '--checkpoint',
+    'checkpoint_1',
+    '--evaluation',
+    '/tmp/evaluation.json',
+  ];
+
+  it('exits 2 with usage when required flags are missing, without calling retryCheckpoint', async () => {
+    const deps = fakeDeps();
+
+    const code = await main(['retry-checkpoint', '--workspace', '/tmp/ws'], deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'missing required flag(s): --artifacts, --task-file, --problem, --checkpoint, --evaluation',
+      ),
+    );
+    expect(deps.logError).toHaveBeenCalledWith(
+      expect.stringContaining('usage: scbench-factory-agent retry-checkpoint'),
+    );
+    expect(deps.retryCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it('exits 2 when the task file cannot be read', async () => {
+    const deps = fakeDeps({ readTaskFile: vi.fn(async () => Promise.reject(new Error('ENOENT'))) });
+
+    const code = await main(FULL_ARGS, deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('could not read --task-file'));
+    expect(deps.retryCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it('exits 2 when --evaluation cannot be read', async () => {
+    const deps = fakeDeps({ readEvaluationFile: vi.fn(async () => Promise.reject(new Error('ENOENT'))) });
+
+    const code = await main(FULL_ARGS, deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(
+      expect.stringContaining('could not read --evaluation /tmp/evaluation.json'),
+    );
+    expect(deps.retryCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it('exits 2 when the evaluation JSON is malformed', async () => {
+    const deps = fakeDeps({ readEvaluationFile: vi.fn(async () => '{not json') });
+
+    const code = await main(FULL_ARGS, deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('could not parse /tmp/evaluation.json'));
+    expect(deps.retryCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it('exits 1 without invoking Factory when the evaluation passed', async () => {
+    const passed: ScbenchEvaluation = {
+      ...FAILED_EVALUATION,
+      pass_counts: { Core: 3 },
+      total_counts: { Core: 3 },
+      pytest_exit_code: 0,
+    };
+    const deps = fakeDeps({ readEvaluationFile: vi.fn(async () => JSON.stringify(passed)) });
+
+    const code = await main(FULL_ARGS, deps);
+
+    expect(code).toBe(1);
+    expect(deps.log).toHaveBeenCalledWith(
+      'retry-checkpoint: not retryable — checkpoint fully green — every test group passed, nothing to rework',
+    );
+    expect(deps.retryCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it('exits 1 without invoking Factory on an infrastructure failure', async () => {
+    const infra: ScbenchEvaluation = { ...FAILED_EVALUATION, infrastructure_failure: true };
+    const deps = fakeDeps({ readEvaluationFile: vi.fn(async () => JSON.stringify(infra)) });
+
+    const code = await main(FULL_ARGS, deps);
+
+    expect(code).toBe(1);
+    expect(deps.log).toHaveBeenCalledWith(
+      'retry-checkpoint: not retryable — infrastructure failure — provider fault, not a code fault',
+    );
+    expect(deps.retryCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it('builds the retry context and checkpoint from the flags and prints the result JSON on success', async () => {
+    const deps = fakeDeps();
+
+    const code = await main([...FULL_ARGS, '--index', '2', '--factory-bin', '/opt/factory'], deps);
+
+    expect(code).toBe(0);
+    expect(deps.readTaskFile).toHaveBeenCalledWith('/tmp/task.md');
+    expect(deps.readEvaluationFile).toHaveBeenCalledWith('/tmp/evaluation.json');
+    expect(deps.retryCheckpoint).toHaveBeenCalledWith(
+      { problemId: 'cfgpipe', checkpointId: 'checkpoint_1', index: 2, task: 'do the thing' },
+      {
+        problemId: 'cfgpipe',
+        checkpointId: 'checkpoint_1',
+        passPolicy: 'core-cases',
+        pytestExitCode: 1,
+        failedTests: [
+          { group: 'checkpoint_1-Core', name: 'test_b' },
+          { group: 'checkpoint_1-Core', name: 'test_c' },
+        ],
+        stderrExcerpt: 'AssertionError: boom',
+      },
+      { workspace: '/tmp/ws', artifactsRoot: '/tmp/artifacts', factoryBin: '/opt/factory' },
+    );
+    expect(deps.log).toHaveBeenCalledWith(JSON.stringify(RETRY_RESULT));
+  });
+
+  it('exits 2 and logs the message when retryCheckpoint throws an AdapterError (duplicate rework)', async () => {
+    const deps = fakeDeps({
+      retryCheckpoint: vi.fn(async () => {
+        throw new AdapterError('retry already recorded at /tmp/artifacts/cfgpipe/checkpoint_1/rework-1');
+      }),
+    });
+
+    const code = await main(FULL_ARGS, deps);
+
+    expect(code).toBe(2);
+    expect(deps.logError).toHaveBeenCalledWith(expect.stringContaining('retry already recorded'));
+  });
+
+  it('re-throws unexpected (non-AdapterError) errors from retryCheckpoint', async () => {
+    const deps = fakeDeps({
+      retryCheckpoint: vi.fn(async () => {
+        throw new Error('boom');
+      }),
+    });
+
+    await expect(main(FULL_ARGS, deps)).rejects.toThrow('boom');
+  });
+});
+
 describe('defaultCliDeps', () => {
   it('logs to console.log/console.error and reads real files', async () => {
     const deps = defaultCliDeps();
@@ -963,6 +1440,7 @@ describe('defaultCliDeps', () => {
     expect(errorSpy).toHaveBeenCalledWith('oops');
 
     await expect(deps.readTaskFile('/definitely/does/not/exist.md')).rejects.toThrow();
+    await expect(deps.readEvaluationFile('/definitely/does/not/exist.json')).rejects.toThrow();
 
     logSpy.mockRestore();
     errorSpy.mockRestore();
@@ -1031,6 +1509,10 @@ describe('defaultCliDeps', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('wires the real runSuite as the run-suite seam', () => {
+    expect(defaultCliDeps().runSuite).toBe(runSuite);
   });
 
   it('runs a real catalog preflight against a missing adapter bin and unset catalog path (fails closed, no crash)', () => {
