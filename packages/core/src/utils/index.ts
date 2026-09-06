@@ -1,6 +1,7 @@
 // src/utils/index.ts — Shared utilities: logging, git ops, cost tracking, shell helpers
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import type { EventKind } from '../events/kinds.js';
@@ -114,9 +115,54 @@ export async function setupWorktree(
   // branch state, which can be stale, dirty, or ahead (#1167).
   await gitFetch(repoRoot);
   const base = startPoint ?? (await defaultRemoteBase(repoRoot));
-  await execGit(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot }).catch(() => {});
-  await execGit(`git branch -D ${shellEscape(branch)}`, { cwd: repoRoot }).catch(() => {});
-  await execGit(`git worktree add -b ${shellEscape(branch)} ${shellEscape(worktreePath)} ${shellEscape(base)}`, {
+  // Resolve everything before destructive operations. A bad base, foreign path,
+  // dirty checkout or failed recovery-ref write must leave the old attempt intact.
+  const baseTip = (
+    await execGit(`git rev-parse --verify ${shellEscape(`${base}^{commit}`)}`, { cwd: repoRoot })
+  ).stdout.trim();
+  await execGit(`git check-ref-format --branch ${shellEscape(branch)}`, { cwd: repoRoot });
+  const branchRef = `refs/heads/${branch}`;
+  const canonicalPath = (path: string) => (existsSync(path) ? realpathSync(path) : resolve(path));
+  const target = canonicalPath(worktreePath);
+  const inventory = (await execGit('git worktree list --porcelain -z', { cwd: repoRoot })).stdout
+    .split('\0\0')
+    .filter(Boolean)
+    .map((record) => record.split('\0'));
+  const registered = inventory.find((fields) => canonicalPath(fields[0].slice('worktree '.length)) === target);
+  if (inventory.some((fields) => fields.includes(`branch ${branchRef}`) && fields !== registered)) {
+    throw new Error(`Retry branch ${branch} is checked out in another worktree; leaving it unchanged`);
+  }
+  if (existsSync(worktreePath)) {
+    if (lstatSync(worktreePath).isSymbolicLink() || !registered?.includes(`branch ${branchRef}`)) {
+      throw new Error(`Worktree ownership or branch mismatch at ${worktreePath}; leaving it unchanged`);
+    }
+    const status = await execGit('git status --porcelain --untracked-files=all', { cwd: worktreePath });
+    if (status.stdout.trim())
+      throw new Error(`Retry worktree ${worktreePath} is dirty or has untracked files; leaving it unchanged`);
+  } else if (registered) {
+    throw new Error(`Registered worktree ${worktreePath} is missing; reconcile it before retrying`);
+  }
+  const branches = await execGit(`git for-each-ref --format='%(refname) %(objectname)' ${shellEscape(branchRef)}`, {
+    cwd: repoRoot,
+  });
+  const oldTip = branches.stdout
+    .split('\n')
+    .find((line) => line.startsWith(`${branchRef} `))
+    ?.slice(branchRef.length + 1);
+  if (oldTip) {
+    const unmerged = await execGit(`git rev-list --max-count=1 ${shellEscape(`${baseTip}..${oldTip}`)}`, {
+      cwd: repoRoot,
+    });
+    if (unmerged.stdout.trim()) {
+      const recoveryRef = `refs/heads/codex/recovery/${randomUUID()}`;
+      // Empty expected old value means create-only: never overwrite another ref.
+      await execGit(`git update-ref ${shellEscape(recoveryRef)} ${shellEscape(oldTip)} ''`, { cwd: repoRoot });
+      log?.('worktree-base', `preserved previous ${branch} @ ${oldTip} as ${recoveryRef}`);
+    }
+  }
+  if (registered) await execGit(`git worktree remove ${shellEscape(worktreePath)}`, { cwd: repoRoot });
+  if (oldTip) await execGit(`git branch -D ${shellEscape(branch)}`, { cwd: repoRoot });
+  await execGit(`git worktree add -b ${shellEscape(branch)} ${shellEscape(worktreePath)} ${shellEscape(baseTip)}`, {
     cwd: repoRoot,
   });
   const { stdout } = await execGit('git rev-parse --verify HEAD', { cwd: worktreePath });

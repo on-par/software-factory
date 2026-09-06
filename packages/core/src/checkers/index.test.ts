@@ -10,6 +10,7 @@ import { ConstitutionLoader } from '../constitutions/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import type { Constitution } from '../types/index.js';
+import * as commandRunner from '../utils/command-runner.js';
 import {
   accessibilityChecker,
   type CheckerContext,
@@ -54,6 +55,64 @@ const routes: RoutesConfig = {
 };
 
 const tempDirs = new Set<string>();
+
+it.each([
+  { timedOut: true, killed: true, exitCode: 137, expected: 'command timed out (exit code 137)' },
+  { timedOut: false, killed: true, exitCode: -1, expected: 'command terminated' },
+])('reports $expected ahead of nonempty command output', async ({ timedOut, killed, exitCode, expected }) => {
+  const worktree = await makeWorktree();
+  const command = vi.spyOn(commandRunner, 'runCommand').mockResolvedValue({
+    command: ['npm', 'run', 'build'],
+    ok: false,
+    timedOut,
+    killed,
+    exitCode,
+    stdout: 'Compiling project\n'.repeat(100) + 'Last completed module\n',
+    stderr: 'npm warning: dependency is deprecated\n',
+  });
+  try {
+    const result = await compileChecker({ ...makeContext(worktree), packageJson: { scripts: { build: 'build' } } });
+    expect(result.result).toBe('FAIL');
+    expect(result.details.startsWith(`npm run build failed: ${expected}\nstdout:`)).toBe(true);
+    expect(result.details).toContain('Last completed module');
+    expect(result.details).toContain('npm warning');
+    expect(result.details).not.toContain('exit code -1');
+  } finally {
+    command.mockRestore();
+  }
+});
+
+it.each([
+  ['compile', compileChecker, 'build'],
+  ['lint', lintChecker, 'lint'],
+  ['tests', testsChecker, 'test'],
+] as const)(
+  '%s reports the final error after npm startup output without leaking credentials',
+  async (_name, checker, script) => {
+    const worktree = await makeWorktree({
+      'package.json': JSON.stringify({ scripts: { [script]: 'node diagnostic.cjs' } }),
+      'diagnostic.cjs': `
+console.log('Checking project');
+console.log('npm startup script details\\n'.repeat(100));
+console.error('npm warn deprecated package\\n'.repeat(100));
+console.log('src/player.ts:42 error: missing return statement');
+console.error('credential=ghp_TestCredentialMustNotLeak');
+console.error('api_key=' + 'sensitive'.repeat(500));
+console.error('ERROR command failed');
+process.exit(1);
+`,
+    });
+
+    const result = await checker(makeContext(worktree));
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain('src/player.ts:42 error: missing return statement');
+    expect(result.details).toContain('ERROR command failed');
+    expect(result.details).not.toContain('ghp_TestCredentialMustNotLeak');
+    expect(result.details).not.toContain('sensitive');
+    expect(result.details.length).toBeLessThan(3_100);
+  },
+);
 
 afterEach(async () => {
   await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
@@ -292,6 +351,34 @@ describe('testsChecker', () => {
     const result = await testsChecker(makeContext(worktree));
 
     expect(result.result).toBe('FAIL');
+  });
+
+  it('retains the actual verification failure after long warning output from both streams', async () => {
+    const worktree = await makeWorktree({
+      'scripts/verify.sh': `#!/bin/bash
+printf 'Starting verification\\n'
+for i in {1..100}; do
+  echo 'npm startup: installing project dependencies'
+  echo 'npm warn deprecated: use a supported dependency' >&2
+done
+printf '\\033[31mERROR src/player.ts:42 expected a number\\033[0m\\n'
+echo 'registry token=private-value-must-not-leak' >&2
+echo 'ERROR verification command exited 2' >&2
+exit 2
+`,
+    });
+
+    const result = await testsChecker(makeContext(worktree));
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain('Starting verification');
+    expect(result.details).toContain('ERROR src/player.ts:42 expected a number');
+    expect(result.details).toContain('ERROR verification command exited 2');
+    expect(result.details).toContain('[truncated]');
+    expect(result.details).toContain('token=[redacted]');
+    expect(result.details).not.toContain('private-value-must-not-leak');
+    expect(result.details).not.toContain('\u001b');
+    expect(result.details.length).toBeLessThan(3_100);
   });
 
   it('prefers failed-test evidence over incidental stderr noise from passing CLI error-path tests', async () => {

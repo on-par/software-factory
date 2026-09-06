@@ -25,6 +25,26 @@ resolved commit SHA for every worktree it creates. Callers must not
 re-introduce their own pre-fetch or derive a worktree base from a local
 branch.
 
+Before replacing an earlier attempt, setup resolves the selected base commit and
+checks Git's registered worktree inventory. The target must belong to this
+repository, have the expected branch, and contain no dirty tracked or untracked
+files. A branch checked out elsewhere, a mismatched path, or a missing registered
+worktree causes a fail-closed rejection. Clean removal does not use `--force`.
+
+If the old local branch contains commits absent from the selected base, setup
+first creates a unique `refs/heads/codex/recovery/<UUID>` pointing at its tip. This
+also covers a branch retained after its parked worktree was reaped. Ref creation
+must succeed before removal/reset; the `worktree-base` log names the saved ref and
+commit. The new attempt still starts from the selected fresh base. Preservation
+does not automatically resume, cherry-pick or merge the old attempt.
+
+To inspect preserved attempts, run
+`git for-each-ref --format='%(refname) %(objectname)' refs/heads/codex/recovery/`,
+then `git show <saved-ref>` or `git diff origin/main...<saved-ref>`. Choose any
+reuse or deletion explicitly after review. Recovery refs remain local, are not
+automatically pruned, and do not replace a remote backup. Resolve dirty or
+mismatched worktrees manually before retrying; setup never discards their files.
+
 ## Consequences
 
 Positive: every lane provably starts from the current remote base, the

@@ -1,6 +1,6 @@
 import { execFile as execFileCb } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -497,7 +497,7 @@ describe('gitFetch / setupWorktree', () => {
     await expect(gitFetch(tmpDir)).rejects.toThrow();
   });
 
-  it('creates a fresh worktree and branch from origin/main, swallowing pre-cleanup errors on the first run', async () => {
+  it('creates a fresh worktree and branch from origin/main', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 201);
 
@@ -533,6 +533,175 @@ describe('gitFetch / setupWorktree', () => {
     await setupWorktree(repoRoot, branch, worktree);
 
     expect(existsSync(join(worktree, 'README.md'))).toBe(true);
+    const { stdout } = await execFile('git', ['for-each-ref', '--format=%(refname)', 'refs/heads/codex/recovery/'], {
+      cwd: repoRoot,
+    });
+    expect(stdout).toBe('');
+  });
+
+  it.each([false, true])(
+    'preserves an unmerged retry tip before resetting (worktree already removed: %s)',
+    async (removed) => {
+      const { repoRoot } = await kit.makeThrowawayRepo();
+      const worktree = kit.trackWorktree(repoRoot, 207);
+      const branch = 'ship-it/207-preserve-retry';
+      const log = vi.fn();
+      await setupWorktree(repoRoot, branch, worktree);
+      writeFileSync(join(worktree, 'UNPUSHED.txt'), 'irreplaceable implementation\n');
+      await execFile('git', ['add', 'UNPUSHED.txt'], { cwd: worktree });
+      await execFile('git', ['commit', '-m', 'unmerged implementation'], { cwd: worktree });
+      const tip = (await execFile('git', ['rev-parse', 'HEAD'], { cwd: worktree })).stdout.trim();
+      if (removed) await execFile('git', ['worktree', 'remove', worktree], { cwd: repoRoot });
+
+      await setupWorktree(repoRoot, branch, worktree, undefined, undefined, log);
+
+      const refs = (
+        await execFile('git', ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads/codex/recovery/'], {
+          cwd: repoRoot,
+        })
+      ).stdout
+        .trim()
+        .split('\n');
+      expect(refs).toHaveLength(1);
+      expect(refs[0]).toMatch(new RegExp(`^refs/heads/codex/recovery/.+ ${tip}$`));
+      expect((await execFile('git', ['show', `${refs[0].split(' ')[0]}:UNPUSHED.txt`], { cwd: repoRoot })).stdout).toBe(
+        'irreplaceable implementation\n',
+      );
+      expect(existsSync(join(worktree, 'UNPUSHED.txt'))).toBe(false);
+      expect((await execFile('git', ['rev-parse', 'HEAD'], { cwd: worktree })).stdout).toBe(
+        (await execFile('git', ['rev-parse', 'origin/main'], { cwd: repoRoot })).stdout,
+      );
+      expect(log).toHaveBeenCalledWith('worktree-base', expect.stringContaining(tip));
+    },
+  );
+
+  it.each(['README.md', 'untracked.txt'])('rejects dirty retry without changing %s or its branch', async (file) => {
+    const { repoRoot } = await kit.makeThrowawayRepo();
+    const worktree = kit.trackWorktree(repoRoot, 208);
+    const branch = 'ship-it/208-dirty-retry';
+    await setupWorktree(repoRoot, branch, worktree);
+    writeFileSync(join(worktree, file), 'unfinished user work\n');
+
+    await expect(setupWorktree(repoRoot, branch, worktree)).rejects.toThrow(/dirty|untracked/i);
+
+    expect(readFileSync(join(worktree, file), 'utf8')).toBe('unfinished user work\n');
+    expect((await execFile('git', ['branch', '--show-current'], { cwd: worktree })).stdout.trim()).toBe(branch);
+  });
+
+  it('rejects an existing worktree on a different branch without removing it', async () => {
+    const { repoRoot } = await kit.makeThrowawayRepo();
+    const worktree = kit.trackWorktree(repoRoot, 209);
+    await setupWorktree(repoRoot, 'ship-it/209-original', worktree);
+    await execFile('git', ['checkout', '-b', 'human-work'], { cwd: worktree });
+
+    await expect(setupWorktree(repoRoot, 'ship-it/209-original', worktree)).rejects.toThrow(/branch|mismatch/i);
+
+    expect((await execFile('git', ['branch', '--show-current'], { cwd: worktree })).stdout.trim()).toBe('human-work');
+  });
+
+  it('resolves the new base before removing the previous worktree or branch', async () => {
+    const { repoRoot } = await kit.makeThrowawayRepo();
+    const worktree = kit.trackWorktree(repoRoot, 210);
+    const branch = 'ship-it/210-invalid-base';
+    await setupWorktree(repoRoot, branch, worktree);
+
+    await expect(setupWorktree(repoRoot, branch, worktree, 'origin/missing')).rejects.toThrow();
+
+    expect(existsSync(join(worktree, 'README.md'))).toBe(true);
+    expect((await execFile('git', ['branch', '--show-current'], { cwd: worktree })).stdout.trim()).toBe(branch);
+  });
+
+  it('does not remove the worktree when the recovery ref cannot be created', async () => {
+    const { repoRoot } = await kit.makeThrowawayRepo();
+    const worktree = kit.trackWorktree(repoRoot, 211);
+    const branch = 'ship-it/211-ref-failure';
+    await setupWorktree(repoRoot, branch, worktree);
+    writeFileSync(join(worktree, 'UNPUSHED.txt'), 'keep me\n');
+    await execFile('git', ['add', 'UNPUSHED.txt'], { cwd: worktree });
+    await execFile('git', ['commit', '-m', 'unmerged work'], { cwd: worktree });
+    const tip = (await execFile('git', ['rev-parse', 'HEAD'], { cwd: worktree })).stdout.trim();
+    await execFile('git', ['branch', 'codex/recovery'], { cwd: repoRoot });
+
+    await expect(setupWorktree(repoRoot, branch, worktree)).rejects.toThrow();
+
+    expect(readFileSync(join(worktree, 'UNPUSHED.txt'), 'utf8')).toBe('keep me\n');
+    expect((await execFile('git', ['rev-parse', branch], { cwd: repoRoot })).stdout.trim()).toBe(tip);
+  });
+
+  it('preserves distinct unmerged tips across repeated retries without overwriting recovery refs', async () => {
+    const { repoRoot } = await kit.makeThrowawayRepo();
+    const worktree = kit.trackWorktree(repoRoot, 212);
+    const branch = 'ship-it/212-multiple-attempts';
+    const tips: string[] = [];
+    await setupWorktree(repoRoot, branch, worktree);
+    for (const content of ['first attempt', 'second attempt']) {
+      writeFileSync(join(worktree, 'WORK.txt'), content);
+      await execFile('git', ['add', 'WORK.txt'], { cwd: worktree });
+      await execFile('git', ['commit', '-m', content], { cwd: worktree });
+      tips.push((await execFile('git', ['rev-parse', 'HEAD'], { cwd: worktree })).stdout.trim());
+      await setupWorktree(repoRoot, branch, worktree);
+    }
+
+    const saved = (
+      await execFile('git', ['for-each-ref', '--format=%(objectname)', 'refs/heads/codex/recovery/'], { cwd: repoRoot })
+    ).stdout
+      .trim()
+      .split('\n');
+    expect(saved.sort()).toEqual(tips.sort());
+  });
+
+  it('rejects a same-named branch worktree belonging to another repository', async () => {
+    const { repoRoot } = await kit.makeThrowawayRepo();
+    const foreign = await kit.makeThrowawayRepo();
+    const worktree = kit.trackWorktree(foreign.repoRoot, 213);
+    const branch = 'ship-it/213-foreign';
+    await setupWorktree(foreign.repoRoot, branch, worktree);
+
+    await expect(setupWorktree(repoRoot, branch, worktree)).rejects.toThrow(/ownership|mismatch/i);
+
+    expect(existsSync(join(worktree, 'README.md'))).toBe(true);
+    expect((await execFile('git', ['branch', '--show-current'], { cwd: worktree })).stdout.trim()).toBe(branch);
+  });
+
+  it('rejects a retry branch checked out at a different registered path', async () => {
+    const { repoRoot } = await kit.makeThrowawayRepo();
+    const worktree = kit.trackWorktree(repoRoot, 214);
+    const otherPath = kit.trackWorktree(repoRoot, 215);
+    const branch = 'ship-it/214-elsewhere';
+    await setupWorktree(repoRoot, branch, otherPath);
+
+    await expect(setupWorktree(repoRoot, branch, worktree)).rejects.toThrow(/another worktree/i);
+
+    expect(existsSync(join(otherPath, 'README.md'))).toBe(true);
+    expect(existsSync(worktree)).toBe(false);
+  });
+
+  it('keeps a retained branch when registered worktree files are unexpectedly absent', async () => {
+    const { repoRoot } = await kit.makeThrowawayRepo();
+    const worktree = kit.trackWorktree(repoRoot, 216);
+    const branch = 'ship-it/216-missing';
+    await setupWorktree(repoRoot, branch, worktree);
+    const tip = (await execFile('git', ['rev-parse', branch], { cwd: repoRoot })).stdout;
+    await rm(worktree, { recursive: true });
+
+    await expect(setupWorktree(repoRoot, branch, worktree)).rejects.toThrow(/missing.*reconcile/i);
+
+    expect((await execFile('git', ['rev-parse', branch], { cwd: repoRoot })).stdout).toBe(tip);
+  });
+
+  it('rejects a symlink alias without deleting the registered worktree', async () => {
+    const { repoRoot } = await kit.makeThrowawayRepo();
+    const worktree = kit.trackWorktree(repoRoot, 217);
+    const alias = `${worktree}-alias`;
+    const branch = 'ship-it/217-symlink';
+    await setupWorktree(repoRoot, branch, worktree);
+    await symlink(worktree, alias, 'dir');
+    try {
+      await expect(setupWorktree(repoRoot, branch, alias)).rejects.toThrow(/ownership|mismatch/i);
+      expect(existsSync(join(worktree, 'README.md'))).toBe(true);
+    } finally {
+      await rm(alias);
+    }
   });
 
   it('creates a worktree from an explicitly supplied remote start point', async () => {

@@ -2,7 +2,9 @@
 
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
 
+import { redactSecrets } from '../router/failure-detail.js';
 import type { ModelRouter } from '../router/index.js';
 import type { CheckerOutput, CheckSummary, Constitution } from '../types/index.js';
 import { describeCommandFailure, runCommand } from '../utils/command-runner.js';
@@ -76,14 +78,14 @@ export const compileChecker: CheckerFn = async (ctx) => {
       return {
         checker: 'compile',
         result: 'FAIL',
-        details: `npm run build failed: ${describeCommandFailure(r).slice(0, 500)}`,
+        details: `npm run build failed: ${describeCheckerFailure(r)}`,
       };
     }
 
     if (await fileExists(join(ctx.worktree, 'Makefile'))) {
       const r = await runCommand(['make'], { cwd: ctx.worktree, timeoutMs: 120_000, env: ctx.env, onPgid: ctx.onPgid });
       if (r.ok) return { checker: 'compile', result: 'PASS', details: 'make: OK' };
-      return { checker: 'compile', result: 'FAIL', details: `make failed: ${describeCommandFailure(r).slice(0, 500)}` };
+      return { checker: 'compile', result: 'FAIL', details: `make failed: ${describeCheckerFailure(r)}` };
     }
 
     if (await fileExists(join(ctx.worktree, 'Cargo.toml'))) {
@@ -97,7 +99,7 @@ export const compileChecker: CheckerFn = async (ctx) => {
       return {
         checker: 'compile',
         result: 'FAIL',
-        details: `cargo build failed: ${describeCommandFailure(r).slice(0, 500)}`,
+        details: `cargo build failed: ${describeCheckerFailure(r)}`,
       };
     }
 
@@ -131,7 +133,7 @@ function stripIncidentalCommanderNoise(text: string): string {
 
 function extractFailedTestEvidence(output: string): string | null {
   const lines = output.split(/\r?\n/);
-  const failLine = lines.findIndex((line) => /\bFAIL\s+.+\s+>/.test(stripAnsi(line)));
+  const failLine = lines.findIndex((line) => /^\s*FAIL\s+.+\s+>/.test(stripAnsi(line)));
   if (failLine >= 0) {
     return lines
       .slice(failLine, failLine + 12)
@@ -150,12 +152,34 @@ function extractFailedTestEvidence(output: string): string | null {
   return null;
 }
 
-function describeVerificationFailure(r: Awaited<ReturnType<typeof runCommand>>): string {
-  const testEvidence = extractFailedTestEvidence(r.stdout);
-  if (!testEvidence) return describeCommandFailure(r);
+/** Keep command context and the final failure, sanitizing before cutting tokens. */
+function failureExcerpt(output: string): string {
+  const text = redactSecrets(stripVTControlCharacters(output)).trim();
+  if (text.length <= 1_500) return text;
+  const marker = '\n… [truncated] …\n';
+  return `${text.slice(0, 250)}${marker}${text.slice(-(1_250 - marker.length))}`;
+}
 
-  const stderr = stripIncidentalCommanderNoise(r.stderr);
-  return stderr ? `${testEvidence}\nstderr:\n${stderr}` : testEvidence;
+function describeCheckerFailure(r: Awaited<ReturnType<typeof runCommand>>): string {
+  const stdoutEvidence = extractFailedTestEvidence(r.stdout);
+  const stderrEvidence = extractFailedTestEvidence(r.stderr);
+  const stdout = r.stdout.trim() ? `stdout:\n${failureExcerpt(stdoutEvidence ?? r.stdout)}` : '';
+  const stderr = r.stderr.trim() ? `stderr:\n${failureExcerpt(stderrEvidence ?? r.stderr)}` : '';
+  // npm can echo a long command on stdout; put genuine failed-test evidence
+  // before that preamble so bounded rework evidence keeps its test identifiers.
+  const streams = stderrEvidence && !stdoutEvidence ? [stderr, stdout] : [stdout, stderr];
+  const excerpt = streams.filter(Boolean).join('\n') || failureExcerpt(describeCommandFailure(r));
+  if (!r.timedOut && !r.killed) return excerpt;
+  const reason = r.timedOut ? 'command timed out' : 'command terminated';
+  const exit = r.exitCode >= 0 ? ` (exit code ${r.exitCode})` : '';
+  return `${reason}${exit}\n${excerpt}`;
+}
+
+function describeVerificationFailure(r: Awaited<ReturnType<typeof runCommand>>): string {
+  return describeCheckerFailure({
+    ...r,
+    stderr: stripIncidentalCommanderNoise(r.stderr),
+  });
 }
 
 export const testsChecker: CheckerFn = async (ctx) => {
@@ -171,7 +195,7 @@ export const testsChecker: CheckerFn = async (ctx) => {
       return {
         checker: 'tests',
         result: 'FAIL',
-        details: `verify.sh failed: ${describeVerificationFailure(r).slice(0, 500)}`,
+        details: `verify.sh failed: ${describeVerificationFailure(r)}`,
       };
     }
 
@@ -187,7 +211,7 @@ export const testsChecker: CheckerFn = async (ctx) => {
       return {
         checker: 'tests',
         result: 'FAIL',
-        details: `npm test failed: ${describeCommandFailure(r).slice(0, 500)}`,
+        details: `npm test failed: ${describeCheckerFailure(r)}`,
       };
     }
 
@@ -231,7 +255,7 @@ export const lintChecker: CheckerFn = async (ctx) => {
       details.push('lint: OK');
     } else {
       result = 'FAIL';
-      details.push(`lint failed: ${describeCommandFailure(r).slice(0, 300)}`);
+      details.push(`lint failed: ${describeCheckerFailure(r)}`);
     }
   }
 
@@ -247,7 +271,7 @@ export const lintChecker: CheckerFn = async (ctx) => {
       details.push('tsc: OK');
     } else {
       result = 'FAIL';
-      details.push(`tsc failed: ${describeCommandFailure(r).slice(0, 300)}`);
+      details.push(`tsc failed: ${describeCheckerFailure(r)}`);
     }
   }
 
