@@ -15,12 +15,16 @@ import * as testingApi from './testing.js';
 
 const PUBLIC_API_KEYS = [
   // Config
+  'FactoryConfigV2Schema',
+  'factoryConfigV2JsonSchema',
   'getConstitutionsDir',
   'getFactoryPaths',
   'loadFactoryConfig',
   'loadFactoryConfigForRepo',
   'loadModelsConfig',
   'loadRoutesConfig',
+  'loadV2Config',
+  'parseV2Config',
   'resolveAutoFailover',
   'resolveDefectWindowDays',
   'resolveEnvironmentPorts',

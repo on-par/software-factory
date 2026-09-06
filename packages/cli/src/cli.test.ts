@@ -196,7 +196,7 @@ describe('cli', () => {
   });
 
   it('takes the repo config cap over FACTORY_USAGE_CAP when both are set', () => {
-    expect(resolveUsageKnobs({ FACTORY_USAGE_CAP: '100' }, { version: 1, usage: { capUsd: 50 } }).cap).toBe(50);
+    expect(resolveUsageKnobs({ FACTORY_USAGE_CAP: '100' }, { version: 2, budget: { capUsd: 50 } }).cap).toBe(50);
   });
 
   it('falls back to FACTORY_USAGE_CAP when no repo config is passed', () => {
@@ -3449,6 +3449,68 @@ describe('cli', () => {
       ]);
     });
 
+    it('reports the true remaining count on park via countRemaining and still drains the queue (#1222)', async () => {
+      const calls: any[] = [];
+      const claims = [buildClaim(21), buildClaim(22)];
+      const remaining = [1, 0];
+      await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
+        claimNext: async () => claims.shift() ?? null,
+        countRemaining: async () => remaining.shift() ?? 0,
+        ship: async (issue) => {
+          calls.push(['ship', issue]);
+          if (issue === 21) throw new LaneParkError('plan escalated: needs a human decision', 'escalate');
+          return `ship-it/${issue}-x`;
+        },
+        waitMerge: async () => {},
+        releaseIssue: async (issue, outcome) => {
+          calls.push(['release', issue, outcome]);
+        },
+        pathExists: () => false,
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
+          calls.push(['event', type, issue, msg, extra]),
+      });
+
+      const parkedEvent = calls.find((c) => c[0] === 'event' && c[1] === 'parked' && c[2] === 21);
+      expect(parkedEvent?.[3]).toContain('1 issue(s) remaining');
+      expect(calls.filter((c) => c[0] === 'ship')).toEqual([
+        ['ship', 21],
+        ['ship', 22],
+      ]);
+      expect(calls).toContainEqual(['release', 21, 'parked']);
+      expect(calls).toContainEqual(['release', 22, 'done']);
+    });
+
+    it('falls back to the local count when the countRemaining lookup fails, without changing lane flow (#1222)', async () => {
+      const calls: any[] = [];
+      const claims = [buildClaim(21), buildClaim(22)];
+      await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
+        claimNext: async () => claims.shift() ?? null,
+        countRemaining: async () => {
+          throw new Error('queue list failed');
+        },
+        ship: async (issue) => {
+          calls.push(['ship', issue]);
+          if (issue === 21) throw new LaneParkError('plan escalated: needs a human decision', 'escalate');
+          return `ship-it/${issue}-x`;
+        },
+        waitMerge: async () => {},
+        releaseIssue: async (issue, outcome) => {
+          calls.push(['release', issue, outcome]);
+        },
+        pathExists: () => false,
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string, extra?: any) =>
+          calls.push(['event', type, issue, msg, extra]),
+      });
+
+      const parkedEvent = calls.find((c) => c[0] === 'event' && c[1] === 'parked' && c[2] === 21);
+      expect(parkedEvent?.[3]).toContain('0 issue(s) remaining');
+      expect(calls.filter((c) => c[0] === 'ship')).toEqual([
+        ['ship', 21],
+        ['ship', 22],
+      ]);
+      expect(calls).toContainEqual(['release', 22, 'done']);
+    });
+
     it('threads ship options plus the run repoRoot, resolved paths, ghRepo, and lane into ship', async () => {
       const seen: any[] = [];
       await runLane('app', [1, 2], '/repo', 'on-par/software-factory', paths, {
@@ -3790,7 +3852,7 @@ describe('cli', () => {
   });
 
   describe('laneQueueDeps', () => {
-    it('binds claimNext and releaseIssue to the given lane through the queue', async () => {
+    it('binds claimNext, releaseIssue, and countRemaining to the given lane through the queue', async () => {
       const calls: any[] = [];
       const fakeQueue: GithubQueue = {
         claimNext: async (lane) => {
@@ -3800,7 +3862,10 @@ describe('cli', () => {
         release: async (issue, outcome) => {
           calls.push(['release', issue, outcome]);
         },
-        list: async () => [],
+        list: async (lane) => {
+          calls.push(['list', lane]);
+          return [4, 5];
+        },
         lanes: async () => [],
         migrateLocalQueue: async () => {},
         enqueue: async () => [],
@@ -3809,10 +3874,12 @@ describe('cli', () => {
       const deps = laneQueueDeps(fakeQueue, 'app');
       expect(await deps.claimNext!()).toEqual({ issue: 3, decision: { kind: 'build' } });
       await deps.releaseIssue!(3, 'done');
+      expect(await deps.countRemaining!()).toBe(2);
 
       expect(calls).toEqual([
         ['claimNext', 'app'],
         ['release', 3, 'done'],
+        ['list', 'app'],
       ]);
     });
   });

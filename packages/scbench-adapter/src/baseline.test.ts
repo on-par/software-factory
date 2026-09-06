@@ -5,11 +5,14 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { allGroupsPass } from './all-groups-pass.js';
 import {
   collectBaselineTrials,
+  evaluateAllGroupsVerdict,
   evaluateTrialVerdict,
   generateBaselineReport,
   loadBaselineConfig,
+  GITHUB_WRITE_EVENT_KINDS,
   parseEvaluation,
   type BaselineConfig,
   type BaselineFsDeps,
@@ -19,6 +22,7 @@ import {
 } from './baseline.js';
 import { AdapterError, type ScbenchCheckpoint } from './checkpoint.js';
 import { minimalManifest } from './manifest-fixture.js';
+import { retrySkipReason } from './retry-context.js';
 import { runCheckpoint } from './run-checkpoint.js';
 import { createExecaExec, type ExecFn } from './workspace.js';
 
@@ -43,7 +47,11 @@ const VALID_CONFIG = {
     pinnedAt: '2026-07-29',
   },
   modelConfig: { source: 'packages/config/src/defaults.ts at factory.commit', env: { FACTORY_LOCAL_ONLY: 'unset' } },
-  providerPolicy: { approvedModels: ['claude-fable-5', 'claude-sonnet-5'], disabledProviders: ['ollama'] },
+  providerPolicy: {
+    approvedModels: ['claude-fable-5', 'claude-sonnet-5'],
+    disabledProviders: ['ollama'],
+    providers: { ollama: false as const },
+  },
   promptInputs: 'briefs from materializeBrief',
   environment: { node: '>=20', requiredBinaries: ['git'], hostClass: 'test', scbenchHarness: 'python' },
   problems: { resolvedFrom: 'resolved from the catalog commit', smoke: 'alpha', suite: ['alpha', 'beta', 'gamma'] },
@@ -345,6 +353,24 @@ describe('loadBaselineConfig', () => {
     ).toThrow(/providerPolicy\.disabledProviders/);
   });
 
+  it('rejects a config missing providerPolicy.providers', () => {
+    const { providers: _providers, ...restProviderPolicy } = VALID_CONFIG.providerPolicy;
+    expect(() => loadBaselineConfig(JSON.stringify({ ...VALID_CONFIG, providerPolicy: restProviderPolicy }))).toThrow(
+      /providerPolicy\.providers/,
+    );
+  });
+
+  it('rejects providerPolicy.providers.ollama when it is not literally false', () => {
+    expect(() =>
+      loadBaselineConfig(
+        JSON.stringify({
+          ...VALID_CONFIG,
+          providerPolicy: { ...VALID_CONFIG.providerPolicy, providers: { ollama: true } },
+        }),
+      ),
+    ).toThrow(/providerPolicy\.providers\.ollama/);
+  });
+
   it('rejects an environment missing its sub-fields', () => {
     expect(() => loadBaselineConfig(JSON.stringify({ ...VALID_CONFIG, environment: { node: '>=20' } }))).toThrow(
       /environment\.requiredBinaries/,
@@ -525,6 +551,65 @@ describe('collectBaselineTrials', () => {
       { problem: 'calculator', checkpoint: 'checkpoint_1', state: 'passed', core_passed: 3, core_total: 3 },
     ]);
     expect(trial.evidence.runInfoPresent).toBe(true);
+  });
+
+  it('parses events.ndjson into factoryEvents, ignoring blank lines and lines without a string type', () => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = {
+      '/runs/manifest.json': JSON.stringify(minimalManifest()),
+      '/runs/events.ndjson': '{"type":"local-only-complete"}\n\n{"event":"no type field"}\n{"type":"build"}\n',
+    };
+    const deps = fakeDeps(tree, files, ['/runs']);
+
+    const [trial] = collectBaselineTrials('/runs', deps);
+
+    expect(trial.evidence.factoryEvents).toEqual({ githubWriteKinds: [], localOnlyComplete: true });
+  });
+
+  it('collects sorted unique GitHub-write kinds from events.ndjson', () => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = {
+      '/runs/manifest.json': JSON.stringify(minimalManifest()),
+      '/runs/events.ndjson': '{"type":"landed"}\n{"type":"ship"}\n{"type":"landed"}\n',
+    };
+    const deps = fakeDeps(tree, files, ['/runs']);
+
+    const [trial] = collectBaselineTrials('/runs', deps);
+
+    expect(trial.evidence.factoryEvents).toEqual({ githubWriteKinds: ['landed', 'ship'], localOnlyComplete: false });
+  });
+
+  it('leaves factoryEvents undefined when a events.ndjson line is unparsable', () => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = {
+      '/runs/manifest.json': JSON.stringify(minimalManifest()),
+      '/runs/events.ndjson': 'not json at all',
+    };
+    const deps = fakeDeps(tree, files, ['/runs']);
+
+    const [trial] = collectBaselineTrials('/runs', deps);
+
+    expect(trial.evidence.factoryEvents).toBeUndefined();
+  });
+
+  it('leaves factoryEvents undefined when events.ndjson is absent', () => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = { '/runs/manifest.json': JSON.stringify(minimalManifest()) };
+    const deps = fakeDeps(tree, files, ['/runs']);
+
+    const [trial] = collectBaselineTrials('/runs', deps);
+
+    expect(trial.evidence.factoryEvents).toBeUndefined();
+  });
+
+  it('yields empty-but-defined factoryEvents for an empty events.ndjson', () => {
+    const tree = { '/runs': [fakeEntry('manifest.json', false)] };
+    const files = { '/runs/manifest.json': JSON.stringify(minimalManifest()), '/runs/events.ndjson': '' };
+    const deps = fakeDeps(tree, files, ['/runs']);
+
+    const [trial] = collectBaselineTrials('/runs', deps);
+
+    expect(trial.evidence.factoryEvents).toEqual({ githubWriteKinds: [], localOnlyComplete: false });
   });
 
   it('records no evidence when none of the three files are present', () => {
@@ -708,6 +793,7 @@ describe('collectBaselineTrials', () => {
       const evidence = byId.get(id)?.evidence;
       expect(evidence?.evaluation).toBeDefined();
       expect(evidence?.runInfoPresent).toBe(true);
+      expect(evidence?.factoryEvents).toEqual({ githubWriteKinds: [], localOnlyComplete: true });
     }
   });
 });
@@ -766,13 +852,51 @@ describe('evaluateTrialVerdict', () => {
   });
 });
 
+describe('evaluateAllGroupsVerdict', () => {
+  it('all-groups verdict matches retrySkipReason', () => {
+    const passingEvaluation = minimalEvaluation({
+      pass_counts: { Core: 3, Functionality: 2 },
+      total_counts: { Core: 3, Functionality: 2 },
+    });
+    const failingEvaluation = minimalEvaluation({
+      pass_counts: { Core: 3, Functionality: 1 },
+      total_counts: { Core: 3, Functionality: 2 },
+    });
+    const passingTrial = trialAt('a', {}, { evaluation: passingEvaluation, runInfoPresent: false });
+    const failingTrial = trialAt('b', {}, { evaluation: failingEvaluation, runInfoPresent: false });
+
+    expect(evaluateAllGroupsVerdict(passingTrial)).toBe('pass');
+    expect(allGroupsPass(passingEvaluation)).toBe(true);
+    expect(retrySkipReason(passingEvaluation)).toBe(
+      'checkpoint fully green — every test group passed, nothing to rework',
+    );
+
+    expect(evaluateAllGroupsVerdict(failingTrial)).toBe('fail');
+    expect(allGroupsPass(failingEvaluation)).toBe(false);
+    expect(retrySkipReason(failingEvaluation)).toBeUndefined();
+  });
+
+  it('never counts missing evidence as all-groups pass', () => {
+    expect(evaluateAllGroupsVerdict(trialAt('a'))).toBe('missing-evidence');
+  });
+
+  it('never counts an infrastructure failure as all-groups pass', () => {
+    const trial = trialAt(
+      'a',
+      {},
+      { evaluation: minimalEvaluation({ infrastructure_failure: true }), runInfoPresent: false },
+    );
+    expect(evaluateAllGroupsVerdict(trial)).toBe('infrastructure-failure');
+  });
+});
+
 describe('generateBaselineReport', () => {
   const config: BaselineConfig = VALID_CONFIG;
 
   it('renders "no trials" fallbacks across every section for zero trials', () => {
     const report = generateBaselineReport(config, []);
     expect(report).toContain('**Trial count:** 0 (comparison threshold: 10)');
-    expect(report).toContain('**Status: PRELIMINARY**');
+    expect(report).toContain('**Status: below comparison threshold**');
     expect(report).toContain('no trials recorded');
     expect(report).toContain('Not yet measurable — requires native SCBench evaluation evidence');
     expect(report).toContain('No trials recorded.');
@@ -780,16 +904,16 @@ describe('generateBaselineReport', () => {
     expect(report).toContain('No failures recorded.');
   });
 
-  it('shows the PRELIMINARY banner (with trial count + config scope) below threshold, and omits it at/above threshold', () => {
+  it('shows the below-threshold banner (with trial count + config scope) below threshold, and omits it at/above threshold', () => {
     const below = generateBaselineReport({ ...config, comparisonThreshold: 2 }, [trialAt('a')]);
-    expect(below).toContain('**Status: PRELIMINARY**');
-    expect(below).toContain('only 1 of the required 2 trials');
+    expect(below).toContain('**Status: below comparison threshold**');
+    expect(below).toContain('1 of the 2 trials per configuration needed for cross-configuration comparison');
     expect(below).toContain(config.baselineId);
     expect(below).toContain(config.factory.commit);
     expect(below).toContain(config.scbench.commit);
 
     const atThreshold = generateBaselineReport({ ...config, comparisonThreshold: 1 }, [trialAt('a')]);
-    expect(atThreshold).not.toContain('PRELIMINARY');
+    expect(atThreshold).not.toContain('below comparison threshold');
     expect(atThreshold).toContain('**Status: comparison-ready**');
   });
 
@@ -902,13 +1026,57 @@ describe('generateBaselineReport', () => {
     expect(report).toContain(
       '1/4 (25.0%) under pass policy `core-cases` — 1 pass, 1 fail, 1 infrastructure failure, 1 missing evidence.',
     );
-    expect(report).toContain('- `a`: pass — Core 3/3 (calculator / checkpoint_1)');
-    expect(report).toContain('- `b`: fail — Core 2/3 (calculator / checkpoint_1)');
-    expect(report).toContain('- `c`: infrastructure failure — native evaluation reports infrastructure_failure');
-    expect(report).toContain('- `d`: missing evidence — no evaluation.json in the trial directory');
+    expect(report).toContain('all-groups: 1/4 — a trial counts only when every test group');
+    expect(report).toContain(
+      '- `a`: pass — Core 3/3, Functionality 2/2, Regression none, Error none (calculator / checkpoint_1) — all-groups: pass',
+    );
+    expect(report).toContain(
+      '- `b`: fail — Core 2/3, Functionality none, Regression none, Error none (calculator / checkpoint_1) — all-groups: fail',
+    );
+    expect(report).toContain(
+      '- `c`: infrastructure failure — native evaluation reports infrastructure_failure — all-groups: infrastructure failure',
+    );
+    expect(report).toContain(
+      '- `d`: missing evidence — no evaluation.json in the trial directory — all-groups: missing evidence',
+    );
   });
 
-  it('renders "Core 0/0" when the Core key is absent from pass_counts/total_counts', () => {
+  it('renders per-group counts from pass_counts/total_counts', () => {
+    const trials = [
+      trialAt(
+        'a',
+        {},
+        {
+          evaluation: minimalEvaluation({
+            pass_counts: { Core: 6, Functionality: 16, Regression: 92, Error: 4 },
+            total_counts: { Core: 7, Functionality: 17, Regression: 107, Error: 6 },
+          }),
+          runInfoPresent: false,
+        },
+      ),
+      trialAt(
+        'b',
+        {},
+        {
+          evaluation: minimalEvaluation({
+            pass_counts: { Core: 4, Functionality: 20, Regression: 0, Error: 9 },
+            total_counts: { Core: 4, Functionality: 20, Regression: 0, Error: 13 },
+          }),
+          runInfoPresent: false,
+        },
+      ),
+    ];
+    const report = generateBaselineReport(config, trials);
+
+    expect(report).toContain(
+      '- `a`: fail — Core 6/7, Functionality 16/17, Regression 92/107, Error 4/6 (calculator / checkpoint_1)',
+    );
+    expect(report).toContain(
+      '- `b`: pass — Core 4/4, Functionality 20/20, Regression none, Error 9/13 (calculator / checkpoint_1)',
+    );
+  });
+
+  it('renders "Core none" when the Core key is absent from pass_counts/total_counts', () => {
     const trials = [
       trialAt(
         'a',
@@ -920,7 +1088,9 @@ describe('generateBaselineReport', () => {
       ),
     ];
     const report = generateBaselineReport(config, trials);
-    expect(report).toContain('- `a`: pass — Core 0/0 (calculator / checkpoint_1)');
+    expect(report).toContain(
+      '- `a`: pass — Core none, Functionality 2/2, Regression none, Error none (calculator / checkpoint_1)',
+    );
   });
 
   it('groups erosion by evaluation.problem_name, ordering checkpoints numerically', () => {
@@ -1026,6 +1196,15 @@ describe('generateBaselineReport', () => {
     );
   });
 
+  it('renders the Regression trajectory in checkpoint order', () => {
+    const config = loadBaselineConfig(readFileSync(BASELINE_CONFIG_PATH, 'utf-8'));
+    const trials = collectBaselineTrials(RUNS_DIR);
+    const report = generateBaselineReport(config, trials);
+    expect(report).toContain('## Regression-group trajectory (native SCBench evaluation)');
+    expect(report).toContain('checkpoint_3 `cfgpipe/checkpoint_3/trial-1`: Regression 59/68');
+    expect(report).toContain('checkpoint_4 `cfgpipe/checkpoint_4/trial-1`: Regression 92/107');
+  });
+
   it('renders "confirmed" when every trial has attempts and all observed models are approved', () => {
     const trials = [
       trialAt('a', { modelAttempts: [{ model: 'claude-fable-5', task: 'plan', attempt: '1' }] }),
@@ -1070,6 +1249,103 @@ describe('generateBaselineReport', () => {
       'Declared policy (source: packages/config/src/defaults.ts at factory.commit): approved models `claude-fable-5`, `claude-sonnet-5`; disabled providers: `ollama`',
     );
     expect(report).not.toContain('Ollama disabled:');
+  });
+});
+
+describe('GITHUB_WRITE_EVENT_KINDS', () => {
+  it('pins exactly the six publishing-path event kinds', () => {
+    expect([...GITHUB_WRITE_EVENT_KINDS].sort()).toEqual(
+      ['await-merge', 'awaiting-review', 'human-merged', 'landed', 'merged', 'ship'].sort(),
+    );
+  });
+
+  it('excludes decompose_filed and local-only-complete (local-only-run event kinds)', () => {
+    expect(GITHUB_WRITE_EVENT_KINDS).not.toContain('decompose_filed');
+    expect(GITHUB_WRITE_EVENT_KINDS).not.toContain('local-only-complete');
+  });
+});
+
+describe('generateBaselineReport — GitHub isolation section', () => {
+  const config: BaselineConfig = VALID_CONFIG;
+
+  it('renders the Provider policy section with the literal providers.ollama: false line', () => {
+    const report = generateBaselineReport(config, []);
+    expect(report).toMatch(/providers\.ollama.*false/);
+  });
+
+  it('renders "confirmed" when every trial has local-only-complete and no write events', () => {
+    const trials = [
+      trialAt('a', {}, { runInfoPresent: false, factoryEvents: { githubWriteKinds: [], localOnlyComplete: true } }),
+      trialAt('b', {}, { runInfoPresent: false, factoryEvents: { githubWriteKinds: [], localOnlyComplete: true } }),
+    ];
+    const report = generateBaselineReport(config, trials);
+    expect(report).toContain('## GitHub isolation');
+    expect(report).toContain(
+      '- `a`: run window 2026-07-28T00:00:00.000Z → 2026-07-28T00:01:00.000Z; profile `local-only`; ship `skipped`; local-only-complete recorded; no GitHub-write events',
+    );
+    expect(report).toContain(
+      'GitHub isolation: confirmed — every trial ran under the local-only profile with SHIP skipped, recorded local-only-complete, and no GitHub-write event (issue, PR, or merge) appears in any retained events.ndjson.',
+    );
+  });
+
+  it('renders NOT CONFIRMED and names the observed kind when a trial records a GitHub-write event', () => {
+    const trials = [
+      trialAt(
+        'a',
+        {},
+        { runInfoPresent: false, factoryEvents: { githubWriteKinds: ['landed'], localOnlyComplete: true } },
+      ),
+    ];
+    const report = generateBaselineReport(config, trials);
+    expect(report).toContain('GITHUB-WRITE EVENTS OBSERVED: `landed`');
+    expect(report).toContain(
+      'GitHub isolation: NOT CONFIRMED — at least one trial records a GitHub-write event or ran outside the local-only profile.',
+    );
+  });
+
+  it('renders NOT CONFIRMED when a trial ran outside the local-only profile or SHIP was not skipped', () => {
+    const notLocalOnly = generateBaselineReport(config, [
+      trialAt(
+        'a',
+        { run: { ...minimalManifest().run, profile: 'other' as never } },
+        { runInfoPresent: false, factoryEvents: { githubWriteKinds: [], localOnlyComplete: true } },
+      ),
+    ]);
+    expect(notLocalOnly).toContain('GitHub isolation: NOT CONFIRMED');
+
+    const shipRan = generateBaselineReport(config, [
+      trialAt(
+        'a',
+        { phases: { ...minimalManifest().phases, ship: 'ok' as never } },
+        { runInfoPresent: false, factoryEvents: { githubWriteKinds: [], localOnlyComplete: true } },
+      ),
+    ]);
+    expect(shipRan).toContain('GitHub isolation: NOT CONFIRMED');
+  });
+
+  it('renders "not confirmable" when events.ndjson is absent, empty, or unparsable', () => {
+    const missing = generateBaselineReport(config, [trialAt('a', {}, { runInfoPresent: false })]);
+    expect(missing).toContain('events.ndjson evidence unavailable');
+    expect(missing).toContain('GitHub isolation: not confirmable from recorded evidence');
+
+    const empty = generateBaselineReport(config, [
+      trialAt('a', {}, { runInfoPresent: false, factoryEvents: { githubWriteKinds: [], localOnlyComplete: false } }),
+    ]);
+    expect(empty).toContain('no GitHub-write events, but no local-only-complete marker');
+    expect(empty).toContain('GitHub isolation: not confirmable from recorded evidence');
+
+    const unparsable = generateBaselineReport(config, [
+      trialAt('a', {}, { runInfoPresent: false, factoryEvents: undefined }),
+    ]);
+    expect(unparsable).toContain('GitHub isolation: not confirmable from recorded evidence');
+  });
+
+  it('renders "No trials recorded." with no verdict line for zero trials', () => {
+    const report = generateBaselineReport(config, []);
+    const section = report.split('## GitHub isolation')[1].split('## Checker outcomes')[0];
+    expect(section).toContain('No trials recorded.');
+    expect(section).not.toContain('GitHub isolation: confirmed');
+    expect(section).not.toContain('NOT CONFIRMED');
   });
 });
 

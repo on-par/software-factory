@@ -1,4 +1,5 @@
 // packages/scbench-adapter/src/retry-context.ts — failed-evaluation → structured retry context (#1163).
+import { allGroupsPass } from './all-groups-pass.js';
 import type { ScbenchEvaluation } from './baseline.js';
 
 /** Pinned pass policy id, mirroring baseline.config.json / ADR-0007. */
@@ -32,11 +33,8 @@ export function retrySkipReason(evaluation: ScbenchEvaluation): string | undefin
   if (evaluation.infrastructure_failure) {
     return 'infrastructure failure — provider fault, not a code fault';
   }
-  const groups = new Set([...Object.keys(evaluation.pass_counts), ...Object.keys(evaluation.total_counts)]);
-  for (const group of groups) {
-    if ((evaluation.pass_counts[group] ?? 0) < (evaluation.total_counts[group] ?? 0)) {
-      return undefined;
-    }
+  if (!allGroupsPass(evaluation)) {
+    return undefined;
   }
   return 'checkpoint fully green — every test group passed, nothing to rework';
 }

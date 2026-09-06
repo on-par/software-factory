@@ -247,8 +247,9 @@ automated in `src/run-checkpoint.test.ts`.
 reproducible SlopCodeBench baseline for this adapter: a committed
 configuration pinning every input (Factory revision, SCBench revision, model
 config, environment, problem set, trial counts), preserved trial evidence,
-a generated report (`report.md`, labeled PRELIMINARY until 10+ trials per
-configuration land), and the exact commands to reproduce or extend it. See
+a generated report (`report.md`, labeled below the comparison threshold
+until 10+ trials per configuration land), and the exact commands to
+reproduce or extend it. See
 [`evals/scbench-baseline/README.md`](../../evals/scbench-baseline/README.md).
 
 ## Isolation guarantees

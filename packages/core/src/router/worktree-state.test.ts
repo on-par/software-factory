@@ -1,11 +1,24 @@
 import { existsSync } from 'node:fs';
-import { readFile, rm } from 'node:fs/promises';
+import { mkdir as mkdirFs, mkdtemp, readFile, rm, symlink, writeFile as writeFileFs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { defaultExecFn } from '../utils/exec.js';
 import type { GitExecFn, WorktreeSnapshot } from './worktree-state.js';
 import { captureWorktreeState, resetWorktreeState } from './worktree-state.js';
+
+let symlinksSupported = true;
+try {
+  const probeDir = await mkdtemp(join(tmpdir(), 'wt-symlink-probe-'));
+  const probeLink = join(probeDir, '..', `probe-link-${Date.now()}`);
+  await symlink(probeDir, probeLink);
+  await rm(probeLink, { force: true }).catch(() => {});
+  await rm(probeDir, { recursive: true, force: true });
+} catch {
+  symlinksSupported = false;
+}
 
 type Handler = (
   cmd: string,
@@ -56,36 +69,119 @@ describe('captureWorktreeState', () => {
     expect(logs).toContain(`worktree state guard disabled: ${worktree} is not a git worktree root`);
   });
 
-  it('returns null when baseline status has a tracked modification', async () => {
-    const { execFn } = makeFakeExec([
-      [/git rev-parse --show-toplevel/, () => ({ stdout: `${worktree}\n`, stderr: '' })],
-      [/git rev-parse HEAD/, () => ({ stdout: 'abc123\n', stderr: '' })],
-      [/git status --porcelain/, () => ({ stdout: ' M src/a.ts\n', stderr: '' })],
-    ]);
-    const logs: string[] = [];
+  describe('with a real worktree directory', () => {
+    let realWorktree: string;
 
-    const result = await captureWorktreeState(execFn, worktree, (msg) => logs.push(msg));
+    beforeEach(async () => {
+      realWorktree = await mkdtemp(join(tmpdir(), 'wt-state-fake-'));
+    });
 
-    expect(result).toBeNull();
-    expect(logs).toContain('worktree state guard disabled: baseline has uncommitted tracked changes');
-  });
+    afterEach(async () => {
+      await rm(realWorktree, { recursive: true, force: true });
+    });
 
-  it('returns a snapshot when baseline is clean or untracked-only', async () => {
-    const { execFn } = makeFakeExec([
-      [/git rev-parse --show-toplevel/, () => ({ stdout: `${worktree}\n`, stderr: '' })],
-      [/git rev-parse HEAD/, () => ({ stdout: 'abc123\n', stderr: '' })],
-      [/git status --porcelain/, () => ({ stdout: '?? notes.txt\n', stderr: '' })],
-    ]);
-    const logs: string[] = [];
+    it('returns null when baseline status has a tracked modification', async () => {
+      const { execFn } = makeFakeExec([
+        [/git rev-parse --show-toplevel/, () => ({ stdout: `${realWorktree}\n`, stderr: '' })],
+        [/git rev-parse HEAD/, () => ({ stdout: 'abc123\n', stderr: '' })],
+        [/git status --porcelain/, () => ({ stdout: ' M src/a.ts\n', stderr: '' })],
+      ]);
+      const logs: string[] = [];
 
-    const result = await captureWorktreeState(execFn, worktree, (msg) => logs.push(msg));
+      const result = await captureWorktreeState(execFn, realWorktree, (msg) => logs.push(msg));
 
-    expect(result).toEqual({
-      headSha: 'abc123',
-      statusText: '?? notes.txt\n',
-      untrackedPaths: ['notes.txt'],
+      expect(result).toBeNull();
+      expect(logs).toContain('worktree state guard disabled: baseline has uncommitted tracked changes');
+    });
+
+    it('returns a snapshot when baseline is clean or untracked-only', async () => {
+      const { execFn } = makeFakeExec([
+        [/git rev-parse --show-toplevel/, () => ({ stdout: `${realWorktree}\n`, stderr: '' })],
+        [/git rev-parse HEAD/, () => ({ stdout: 'abc123\n', stderr: '' })],
+        [/git status --porcelain/, () => ({ stdout: '?? notes.txt\n', stderr: '' })],
+      ]);
+      const logs: string[] = [];
+
+      const result = await captureWorktreeState(execFn, realWorktree, (msg) => logs.push(msg));
+
+      expect(result).toEqual({
+        headSha: 'abc123',
+        statusText: '?? notes.txt\n',
+        untrackedPaths: ['notes.txt'],
+      });
     });
   });
+});
+
+describe('captureWorktreeState with a real git repository', () => {
+  const cleanupPaths: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(cleanupPaths.map((path) => rm(path, { recursive: true, force: true })));
+    cleanupPaths.length = 0;
+  });
+
+  async function makeRepo(): Promise<string> {
+    const repoDir = await mkdtemp(join(tmpdir(), 'wt-state-repo-'));
+    cleanupPaths.push(repoDir);
+    await defaultExecFn('git init', { cwd: repoDir });
+    await defaultExecFn('git config user.email test@example.com', { cwd: repoDir });
+    await defaultExecFn('git config user.name test', { cwd: repoDir });
+    await writeFileFs(join(repoDir, 'tracked.txt'), 'original\n');
+    await defaultExecFn('git add -A', { cwd: repoDir });
+    await defaultExecFn('git commit -m init', { cwd: repoDir });
+    return repoDir;
+  }
+
+  it.skipIf(!symlinksSupported)('captures a snapshot when the worktree is a symlink to the repo root', async () => {
+    const repoDir = await makeRepo();
+    const linkPath = join(tmpdir(), `wt-state-link-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    await symlink(repoDir, linkPath);
+    cleanupPaths.push(linkPath);
+    const logs: string[] = [];
+
+    const result = await captureWorktreeState(defaultExecFn, linkPath, (msg) => logs.push(msg));
+
+    const { stdout: expectedHead } = await defaultExecFn('git rev-parse HEAD', { cwd: repoDir });
+    expect(result).not.toBeNull();
+    expect(result!.headSha).toBe(expectedHead.trim());
+    expect(logs.some((msg) => msg.includes('worktree state guard disabled'))).toBe(false);
+  });
+
+  it('still disables the guard for a subdirectory', async () => {
+    const repoDir = await makeRepo();
+    const subdir = join(repoDir, 'subdir');
+    await mkdirFs(subdir);
+    const logs: string[] = [];
+
+    const result = await captureWorktreeState(defaultExecFn, subdir, (msg) => logs.push(msg));
+
+    expect(result).toBeNull();
+    expect(logs).toContain(`worktree state guard disabled: ${subdir} is not a git worktree root`);
+  });
+
+  it.skipIf(!symlinksSupported)(
+    'resetWorktreeState restores a tracked file dirtied after a snapshot captured via a symlink',
+    async () => {
+      const repoDir = await makeRepo();
+      const linkPath = join(tmpdir(), `wt-state-link-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+      await symlink(repoDir, linkPath);
+      cleanupPaths.push(linkPath);
+      const logs: string[] = [];
+
+      const snapshot = await captureWorktreeState(defaultExecFn, linkPath, (msg) => logs.push(msg));
+      expect(snapshot).not.toBeNull();
+
+      await writeFileFs(join(repoDir, 'tracked.txt'), 'dirtied\n');
+
+      const result = await resetWorktreeState(defaultExecFn, linkPath, snapshot!, (msg) => logs.push(msg));
+
+      expect(result.didReset).toBe(true);
+      const restored = await readFile(join(repoDir, 'tracked.txt'), 'utf-8');
+      expect(restored).toBe('original\n');
+      if (result.tracePath) await rm(result.tracePath, { force: true });
+    },
+  );
 });
 
 describe('resetWorktreeState', () => {

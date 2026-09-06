@@ -1,5 +1,6 @@
 // packages/core/src/sim/regressions.test.ts — proves the headless simulator reproduces the
-// historical (still-open) signatures of #550 and #551 end to end through the real PLAN phase.
+// historical (still-open) signatures of #550 and #551 end to end through the real PLAN phase,
+// and pins the fixed #1172 ship path (re-pinned by #1222) through the real SHIP phase.
 
 import { DesignArtifactSchema } from '@on-par/contracts';
 import matter from 'gray-matter';
@@ -23,6 +24,7 @@ describe('sim regression fixtures (#567)', () => {
   let controlOutcome: SimIssueOutcome;
   let outcome550: SimIssueOutcome;
   let outcome551: SimIssueOutcome;
+  let outcome1222: SimIssueOutcome;
 
   beforeAll(async () => {
     sharedWorkspace = await createSimWorkspace();
@@ -32,9 +34,10 @@ describe('sim regression fixtures (#567)', () => {
         { issue: 9552, title: 'Sim regression control' },
         simRegressionFixture(550).spec,
         simRegressionFixture(551).spec,
+        simRegressionFixture(1222).spec,
       ],
     });
-    [controlOutcome, outcome550, outcome551] = report.outcomes;
+    [controlOutcome, outcome550, outcome551, outcome1222] = report.outcomes;
   }, 180_000);
 
   afterAll(() => sharedWorkspace.dispose());
@@ -59,6 +62,23 @@ describe('sim regression fixtures (#567)', () => {
     // When #551 lands: designArtifact becomes non-null and interfacesTouched has length 2.
   });
 
+  it(
+    '#1222 fixed behaviour (#1172): commits uncommitted build output after a green check and ships',
+    { timeout: 180_000 },
+    () => {
+      expect(outcome1222.state).toBe('shipped');
+      expect(outcome1222.prNumber).toBeDefined();
+      expect(outcome1222.githubCalls.some(([name]) => name === 'pulls.create')).toBe(true);
+      expect(
+        outcome1222.events.some(
+          (e) => e.type === 'ship' && /committed 1 uncommitted path\(s\) left after check/.test(e.msg),
+        ),
+      ).toBe(true);
+      // Acceptance criterion 2: the pre-#1172 dirty-worktree park must never come back.
+      expect(outcome1222.events.some((e) => e.msg.includes('worktree has uncommitted changes'))).toBe(false);
+    },
+  );
+
   it('control run keeps its design artifact', { timeout: 180_000 }, () => {
     expect(controlOutcome.state).toBe('shipped');
     expect(controlOutcome.designArtifact).not.toBeNull();
@@ -66,7 +86,7 @@ describe('sim regression fixtures (#567)', () => {
   });
 
   it('fixture registry', () => {
-    expect(SIM_REGRESSION_FIXTURES.map((f) => f.fault)).toEqual([550, 551]);
+    expect(SIM_REGRESSION_FIXTURES.map((f) => f.fault)).toEqual([550, 551, 1222]);
     for (const fixture of SIM_REGRESSION_FIXTURES) {
       expect(fixture.name.length).toBeGreaterThan(0);
       expect(fixture.historicalSignature.length).toBeGreaterThan(0);

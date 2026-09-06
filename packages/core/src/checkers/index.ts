@@ -7,7 +7,12 @@ import { stripVTControlCharacters } from 'node:util';
 import { redactSecrets } from '../router/failure-detail.js';
 import type { ModelRouter } from '../router/index.js';
 import type { CheckerOutput, CheckSummary, Constitution } from '../types/index.js';
-import { describeCommandFailure, runCommand } from '../utils/command-runner.js';
+import {
+  type CommandResult,
+  describeCommandFailure,
+  runCommand,
+  type RunCommandOptions,
+} from '../utils/command-runner.js';
 import { extractJsonObjects } from '../utils/json.js';
 import {
   DESIGN_SMELLS_CHECKER,
@@ -15,10 +20,17 @@ import {
   workerOutputChecker,
   WORKER_OUTPUT_CHECKER,
 } from './design-smells.js';
-import { countPlaceholderLinks, fileExists, findHtmlFiles, probeWorktree, type WorktreeProbe } from './probe.js';
+import {
+  countPlaceholderLinks,
+  detectPythonTestSurface,
+  fileExists,
+  findHtmlFiles,
+  probeWorktree,
+  type WorktreeProbe,
+} from './probe.js';
 
-export type { PackageJsonProbe, WorktreeProbe } from './probe.js';
-export { countPlaceholderLinks, fileExists, findHtmlFiles, probeWorktree } from './probe.js';
+export type { PackageJsonProbe, PythonTestSurface, PythonTestSurfaceSource, WorktreeProbe } from './probe.js';
+export { countPlaceholderLinks, detectPythonTestSurface, fileExists, findHtmlFiles, probeWorktree } from './probe.js';
 
 interface PackageJson {
   scripts?: Record<string, string>;
@@ -28,6 +40,9 @@ interface PackageJson {
 export interface CheckerContext {
   worktree: string;
   specPath: string;
+  /** Run-start HEAD SHA captured by buildPhase before the worker ran — the diff base
+   *  for checkouts with no origin/main or origin/master (#1162, #1211). */
+  diffBase?: string;
   /** Set by runAllCheckers from the resolved constitution — the single source of the standards text */
   constitutionBody?: string;
   packageJson?: PackageJson | null;
@@ -38,6 +53,8 @@ export interface CheckerContext {
   probe?: WorktreeProbe;
   /** Injection seam for tests: overrides the default probeWorktree implementation. */
   probeWorktree?: (worktree: string) => Promise<WorktreeProbe>;
+  /** Injection seam for tests: overrides the default runCommand implementation. */
+  runCommand?: (argv: readonly string[], options?: RunCommandOptions) => Promise<CommandResult>;
   /** Lane environment (FACTORY_HEADLESS, PLAYWRIGHT_HEADLESS, and PORT/FACTORY_APP_PORT/FACTORY_BASE_URL when a port is leased) merged into every checker command — set by checkPhase */
   env?: Record<string, string>;
   /** When set, every checker command is spawned detached (its own process
@@ -184,8 +201,9 @@ function describeVerificationFailure(r: Awaited<ReturnType<typeof runCommand>>):
 
 export const testsChecker: CheckerFn = async (ctx) => {
   try {
+    const run = ctx.runCommand ?? runCommand;
     if (await fileExists(join(ctx.worktree, 'scripts/verify.sh'))) {
-      const r = await runCommand(['bash', 'scripts/verify.sh', '--no-e2e'], {
+      const r = await run(['bash', 'scripts/verify.sh', '--no-e2e'], {
         cwd: ctx.worktree,
         timeoutMs: 300_000,
         env: ctx.env,
@@ -201,7 +219,7 @@ export const testsChecker: CheckerFn = async (ctx) => {
 
     const pkg = await getPackageJson(ctx);
     if (pkg?.scripts?.test) {
-      const r = await runCommand(['npm', 'test'], {
+      const r = await run(['npm', 'test'], {
         cwd: ctx.worktree,
         timeoutMs: 300_000,
         env: ctx.env,
@@ -215,12 +233,32 @@ export const testsChecker: CheckerFn = async (ctx) => {
       };
     }
 
+    const pythonSurface = ctx.probe?.pythonTestSurface ?? (await detectPythonTestSurface(ctx.worktree));
+    if (pythonSurface.present) {
+      const pytestArgv = pythonSurface.sources.includes('.factory/tests/')
+        ? ['python3', '-m', 'pytest', '.factory/tests']
+        : ['python3', '-m', 'pytest'];
+      const r = await run(pytestArgv, {
+        cwd: ctx.worktree,
+        timeoutMs: 300_000,
+        env: ctx.env,
+        onPgid: ctx.onPgid,
+      });
+      if (r.ok) return { checker: 'tests', result: 'PASS', details: 'python3 -m pytest: OK' };
+      // Fail closed: a surface that cannot run (pytest missing, import error) is FAIL, never SKIP
+      return {
+        checker: 'tests',
+        result: 'FAIL',
+        details: `pytest failed: ${describeCheckerFailure(r)}`,
+      };
+    }
+
     if (ctx.testsRequired) {
       return {
         checker: 'tests',
         result: 'FAIL',
         details:
-          'no verification command was run — constitution requires tests (requireTests: true) but the worktree has no scripts/verify.sh and no package.json test script',
+          'no verification command was run — constitution requires tests (requireTests: true) but the worktree has no pytest, scripts/verify.sh, or npm-test surface',
       };
     }
     return {

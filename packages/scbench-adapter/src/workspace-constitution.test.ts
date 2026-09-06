@@ -22,4 +22,9 @@ describe('WORKSPACE_CONSTITUTION', () => {
     expect(WORKSPACE_CONSTITUTION).not.toContain('test_sigint_shutdown');
     expect(WORKSPACE_CONSTITUTION).not.toContain('cfgpipe');
   });
+
+  it('names the ADR-decided factory-authored test location', () => {
+    expect(WORKSPACE_CONSTITUTION).toContain('.factory/tests/');
+    expect(WORKSPACE_CONSTITUTION).toContain('ADR-0081');
+  });
 });

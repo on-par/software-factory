@@ -12,7 +12,9 @@ ${checkpoint.task}
 
 ## Acceptance criteria
 
-- The workspace implements the checkpoint specification above; SlopCodeBench's hidden evaluation for checkpoint ${checkpoint.checkpointId} passes against the resulting code.
+- Every example in the specification above reproduces exactly.
+- Behaviour from earlier checkpoints is preserved.
+- The workspace's test suite passes.
 `;
 }
 
@@ -42,7 +44,12 @@ export function materializeRetryBrief(checkpoint: ScbenchCheckpoint, ctx: Scbenc
   if (ctx.stdoutExcerpt !== undefined) sections.push('### stdout excerpt', fenced(ctx.stdoutExcerpt));
   sections.push(
     '## Acceptance criteria',
-    `- The workspace fixes the failing tests listed above; SlopCodeBench's hidden evaluation for checkpoint ${ctx.checkpointId} passes against the resulting code.`,
+    [
+      '- Every example in the specification above reproduces exactly.',
+      '- Behaviour from earlier checkpoints is preserved.',
+      "- The workspace's test suite passes.",
+      '- The failing tests listed above pass.',
+    ].join('\n'),
   );
 
   return `${sections.join('\n\n')}\n`;

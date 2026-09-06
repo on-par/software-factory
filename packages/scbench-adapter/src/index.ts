@@ -4,6 +4,11 @@ export { AdapterError } from './checkpoint.js';
 
 export { materializeBrief, materializeRetryBrief } from './brief.js';
 
+export type { LeakGuardHiddenValues } from './leak-guard.js';
+export { findLeakedValues } from './leak-guard.js';
+
+export { allGroupsPass } from './all-groups-pass.js';
+
 export type { FailedTest, ScbenchRetryContext } from './retry-context.js';
 export { buildRetryContext, retrySkipReason, RETRY_PASS_POLICY } from './retry-context.js';
 
@@ -40,6 +45,7 @@ export type {
 } from './baseline.js';
 export {
   collectBaselineTrials,
+  evaluateAllGroupsVerdict,
   evaluateTrialVerdict,
   generateBaselineReport,
   loadBaselineConfig,

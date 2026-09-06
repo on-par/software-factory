@@ -2,7 +2,7 @@
 
 **Trial count:** 1 (comparison threshold: 2)
 
-**Status: PRELIMINARY** — only 1 of the required 2 trials per configuration have been recorded. Configuration scope: baseline `scbench-fixture-baseline`, factory commit `6c74eeea2a7b114c86ffd85a3749824c5c6bdd91`, scbench commit `13de1a7a6b8b3dc5cc532a0c322a0997afa5bec7`, problem catalog commit `4d38d300059667d57e43c31969bc455f5c338b52`, model config env: FACTORY_LOCAL_ONLY=unset, FACTORY_EXPERIMENTAL=unset.
+**Status: below comparison threshold** — 1 of the 2 trials per configuration needed for cross-configuration comparison have been recorded. Benchmark pass rate derives solely from native SCBench evaluation evidence under the pinned pass policy, regardless of trial count. Configuration scope: baseline `scbench-fixture-baseline`, factory commit `6c74eeea2a7b114c86ffd85a3749824c5c6bdd91`, scbench commit `13de1a7a6b8b3dc5cc532a0c322a0997afa5bec7`, problem catalog commit `4d38d300059667d57e43c31969bc455f5c338b52`, model config env: FACTORY_LOCAL_ONLY=unset, FACTORY_EXPERIMENTAL=unset.
 
 ## Pinned inputs
 
@@ -22,13 +22,17 @@
 
 ## Benchmark pass rate (native SCBench evaluation)
 
-1/1 (100.0%) under pass policy `core-cases` — 1 pass, 0 fail, 0 infrastructure failure, 0 missing evidence. A trial without native evaluation evidence never counts as a pass.
+1/1 (100.0%) under pass policy `core-cases` — 1 pass, 0 fail, 0 infrastructure failure, 0 missing evidence. A trial without native evaluation evidence never counts as a pass. all-groups: 1/1 — a trial counts only when every test group (Core, Functionality, Regression, Error) passes; missing evidence or an infrastructure failure is never counted as an all-groups pass.
 
-- `calculator/1/trial-1`: pass — Core 3/3 (calculator / 1)
+- `calculator/1/trial-1`: pass — Core 3/3, Functionality none, Regression none, Error none (calculator / 1) — all-groups: pass
 
 ## Erosion trajectory (native SCBench evaluation)
 
 - calculator: 1 `calculator/1/trial-1`: pass (Core 3/3)
+
+## Regression-group trajectory (native SCBench evaluation)
+
+- calculator: 1 `calculator/1/trial-1`: Regression none
 
 ## Factory run outcomes (harness health)
 
@@ -51,9 +55,19 @@ Total cost: $0.0000; input tokens: 0; output tokens: 0.
 
 Declared policy (source: packages/config/src/defaults.ts (typed model registry and routes) at factory.commit): approved models `claude-fable-5`, `claude-opus-5`, `claude-opus-4-8`, `claude-sonnet-5`; disabled providers: `ollama`
 
+Run configuration: providers.ollama: false — every benchmark workspace is prepared with .factory/config.json disabling the ollama provider, so local models are stripped from routing before any attempt.
+
 - `calculator/1/trial-1`: observed models `claude-fable-5`, `claude-sonnet-5` — all approved
 
 Ollama disabled: confirmed — every trial recorded at least one model attempt and every observed model is in the approved set; no disabled-provider model was observed.
+
+## GitHub isolation
+
+Workspace runs use `factory run-brief --workspace`, which disables publishing — SHIP never runs and no GitHub issue, pull request, or merge is created by the run path. Evidence below is derived only from each trial's retained manifest and events.ndjson.
+
+- `calculator/1/trial-1`: run window 2026-07-28T00:00:00.000Z → 2026-07-28T00:01:00.000Z; profile `local-only`; ship `skipped`; no GitHub-write events, but no local-only-complete marker
+
+GitHub isolation: not confirmable from recorded evidence — 1 trial(s) lack complete event evidence (a parsable events.ndjson containing local-only-complete). Absent evidence never counts as confirmation.
 
 ## Checker outcomes
 

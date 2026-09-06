@@ -6,6 +6,7 @@ import { join } from 'node:path';
 
 import * as FactoryCore from '@on-par/factory-core';
 import type * as FactoryCoreInternal from '@on-par/factory-core/internal';
+import type * as DaemonModule from './cli/daemon.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
@@ -239,6 +240,19 @@ vi.mock('@on-par/factory-core/internal', async (importOriginal) => {
   };
 });
 
+// The daemon-control commands shell out to the real launchctl by default, so the
+// wiring tests stub them; DaemonCtlError stays real for the CliExitError mapping.
+vi.mock('./cli/daemon.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof DaemonModule>();
+  return {
+    ...actual,
+    cmdDaemonStart: vi.fn(async () => {}),
+    cmdDaemonStop: vi.fn(async () => {}),
+    cmdDaemonStatus: vi.fn(async () => {}),
+    cmdDaemonLogs: vi.fn(async () => {}),
+  };
+});
+
 import {
   cleanupWorktree,
   formatGcReport,
@@ -249,6 +263,8 @@ import {
   withFileLock,
   withGitLock,
 } from '@on-par/factory-core/internal';
+
+import { cmdDaemonLogs, cmdDaemonStart, cmdDaemonStatus, cmdDaemonStop, DaemonCtlError } from './cli/daemon.js';
 
 import {
   buildInitConfig,
@@ -539,7 +555,7 @@ describe('cli commands (via main dispatch)', () => {
     });
 
     it('is idempotent: a second run without --force leaves an existing config untouched', async () => {
-      const sentinel = '{"version":2,"models":{"plan":"x"}}';
+      const sentinel = '{"version":2,"models":{"pins":{"plan":"x"}}}';
       writeFileSync(paths().config, sentinel);
       await runMain('init');
       expect(readFileSync(paths().config, 'utf-8')).toBe(sentinel);
@@ -547,7 +563,7 @@ describe('cli commands (via main dispatch)', () => {
     });
 
     it('--force overwrites an existing config', async () => {
-      writeFileSync(paths().config, '{"version":2,"models":{"plan":"x"}}');
+      writeFileSync(paths().config, '{"version":2,"models":{"pins":{"plan":"x"}}}');
       await runMain('init', '--force');
       expect(readFileSync(paths().config, 'utf-8')).toBe(buildInitConfig());
     });
@@ -1800,6 +1816,29 @@ bash scripts/verify.sh
       expect(res.exited).toBe(true);
       expect(res.code).toBe(2);
       expect(logged()).not.toContain('listening on');
+    });
+
+    it.each([
+      ['start', cmdDaemonStart],
+      ['stop', cmdDaemonStop],
+      ['status', cmdDaemonStatus],
+    ])('daemon %s dispatches to its launchctl wrapper', async (verb, cmd) => {
+      const res = await runMain('daemon', verb);
+      expect(res.exited).toBe(false);
+      expect(cmd).toHaveBeenCalledTimes(1);
+    });
+
+    it('daemon logs passes --follow and --lines through', async () => {
+      const res = await runMain('daemon', 'logs', '-f', '-n', '7');
+      expect(res.exited).toBe(false);
+      expect(cmdDaemonLogs).toHaveBeenCalledWith(expect.objectContaining({ follow: true, lines: '7' }));
+    });
+
+    it('maps DaemonCtlError onto the CLI exit code', async () => {
+      vi.mocked(cmdDaemonStatus).mockRejectedValueOnce(new DaemonCtlError('requires macOS launchd', 2));
+      const res = await runMain('daemon', 'status');
+      expect(res.exited).toBe(true);
+      expect(res.code).toBe(2);
     });
 
     it('refuses to start when a live daemon holds the pid file, leaving it untouched', async () => {
@@ -3224,7 +3263,7 @@ describe('shipIssue (direct)', () => {
     writeFileSync(paths().config, JSON.stringify({ version: 1, providers: { ollama: false } }));
     await shipIssue(5, {}, ctx());
     expect(vi.mocked(core.loadRepoConfig).mock.results.at(-1)?.value).toEqual({
-      version: 1,
+      version: 2,
       providers: { ollama: false },
     });
   });

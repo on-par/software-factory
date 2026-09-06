@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { DIFF_EXCLUDES } from '../checkers/design-smells.js';
 import type { CheckSummary, CostEntry, FactoryEvent } from '../types/index.js';
 import type { WorkRequest } from '../work/index.js';
 import {
@@ -14,6 +15,8 @@ import {
   resolveArtifactsDir,
   writeBenchmarkArtifacts,
 } from './benchmark-artifacts.js';
+
+const EXCLUDE = `-- . ${DIFF_EXCLUDES.map((p) => `'${p}'`).join(' ')}`;
 
 let tmpDir: string | undefined;
 
@@ -292,10 +295,14 @@ describe('writeBenchmarkArtifacts', () => {
       {
         now: () => new Date('2026-07-28T02:30:00.000Z'),
         run: async (command) => {
-          if (command === 'git status --short') return { stdout: 'M widget.ts\n', stderr: '' };
-          if (command === 'git diff --stat origin/main...HEAD') return { stdout: 'widget.ts | 2 ++\n', stderr: '' };
-          if (command === 'git diff origin/main...HEAD')
+          if (command === `git status --short ${EXCLUDE}`) return { stdout: 'M widget.ts\n', stderr: '' };
+          if (command === `git diff --stat origin/main...HEAD ${EXCLUDE}`)
+            return { stdout: 'widget.ts | 2 ++\n', stderr: '' };
+          if (command === `git diff origin/main...HEAD ${EXCLUDE}`)
             return { stdout: 'diff --git a/widget.ts b/widget.ts\n', stderr: '' };
+          if (command === `git diff --name-status origin/main...HEAD ${EXCLUDE}`)
+            return { stdout: 'M\twidget.ts\n', stderr: '' };
+          if (command === `git diff ${EXCLUDE}`) return { stdout: '', stderr: '' };
           throw new Error(`unexpected command: ${command}`);
         },
       },
@@ -348,7 +355,141 @@ describe('writeBenchmarkArtifacts', () => {
     expect(JSON.parse(readFileSync(join(artifactsDir, 'request.json'), 'utf-8'))).toEqual({});
   });
 
-  it('falls back to diffBase HEAD when the origin/main diff throws', async () => {
+  it('uses the captured diffBase SHA when origin/main cannot be resolved', async () => {
+    const { eventsFile, costsFile, artifactsDir, workspace } = await setup();
+    const sha = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2';
+
+    const result = await writeBenchmarkArtifacts(
+      {
+        issue: 137,
+        artifactsDir,
+        eventsFile,
+        costsFile,
+        startedAt: '2026-07-28T02:27:00.000Z',
+        outcome: 'ready',
+        workspace,
+        diffBase: sha,
+      },
+      {
+        now: () => new Date('2026-07-28T02:30:00.000Z'),
+        run: async (command) => {
+          if (command.includes('origin/main')) throw new Error('unknown revision origin/main');
+          if (command === `git status --short ${EXCLUDE}`) return { stdout: '', stderr: '' };
+          if (command === `git diff --stat ${sha}..HEAD ${EXCLUDE}`) return { stdout: 'app.py | 1 +\n', stderr: '' };
+          if (command === `git diff ${sha}..HEAD ${EXCLUDE}`)
+            return {
+              stdout: 'diff --git a/app.py b/app.py\n--- a/app.py\n+++ b/app.py\ndiff --git a/README.md b/README.md\n',
+              stderr: '',
+            };
+          if (command === `git diff --name-status ${sha}..HEAD ${EXCLUDE}`)
+            return { stdout: 'M\tapp.py\n', stderr: '' };
+          if (command === `git diff ${EXCLUDE}`) return { stdout: '', stderr: '' };
+          throw new Error(`unexpected command: ${command}`);
+        },
+      },
+    );
+
+    expect(result.manifest.git.diffBase).toBe(sha);
+    expect(result.manifest.git.diffStat).toBe('app.py | 1 +');
+    const diffOnDisk = readFileSync(join(artifactsDir, 'diff.patch'), 'utf-8');
+    expect(diffOnDisk).toContain('app.py');
+    expect(diffOnDisk).toContain('README.md');
+  });
+
+  it('keeps origin/main as the diffBase precedent over a captured SHA', async () => {
+    const { eventsFile, costsFile, artifactsDir, workspace } = await setup();
+    const sha = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2';
+
+    const result = await writeBenchmarkArtifacts(
+      {
+        issue: 137,
+        artifactsDir,
+        eventsFile,
+        costsFile,
+        startedAt: '2026-07-28T02:27:00.000Z',
+        outcome: 'ready',
+        workspace,
+        diffBase: sha,
+      },
+      {
+        now: () => new Date('2026-07-28T02:30:00.000Z'),
+        run: async (command) => {
+          if (command === `git status --short ${EXCLUDE}`) return { stdout: '', stderr: '' };
+          if (command === `git diff --stat origin/main...HEAD ${EXCLUDE}`)
+            return { stdout: 'widget.ts | 2 ++\n', stderr: '' };
+          if (command === `git diff origin/main...HEAD ${EXCLUDE}`)
+            return { stdout: 'diff --git a/widget.ts b/widget.ts\n', stderr: '' };
+          if (command === `git diff --name-status origin/main...HEAD ${EXCLUDE}`)
+            return { stdout: 'M\twidget.ts\n', stderr: '' };
+          if (command === `git diff ${EXCLUDE}`) return { stdout: '', stderr: '' };
+          throw new Error(`unexpected command: ${command}`);
+        },
+      },
+    );
+
+    expect(result.manifest.git.diffBase).toBe('origin/main...HEAD');
+  });
+
+  it('falls back to diffBase none and empty git fields when all git commands throw', async () => {
+    const { eventsFile, costsFile, artifactsDir, workspace } = await setup();
+
+    const result = await writeBenchmarkArtifacts(
+      {
+        issue: 137,
+        artifactsDir,
+        eventsFile,
+        costsFile,
+        startedAt: '2026-07-28T02:27:00.000Z',
+        outcome: 'ready',
+        workspace,
+        diffBase: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+      },
+      {
+        now: () => new Date('2026-07-28T02:30:00.000Z'),
+        run: async () => {
+          throw new Error('git not available');
+        },
+      },
+    );
+
+    expect(result.manifest.git).toEqual({ changedFiles: [], diffStat: '', diffBase: 'none' });
+  });
+
+  it('merges uncommitted working-tree hunks into diff.patch after the committed range', async () => {
+    const { eventsFile, costsFile, artifactsDir, workspace } = await setup();
+
+    await writeBenchmarkArtifacts(
+      {
+        issue: 137,
+        artifactsDir,
+        eventsFile,
+        costsFile,
+        startedAt: '2026-07-28T02:27:00.000Z',
+        outcome: 'ready',
+        workspace,
+      },
+      {
+        now: () => new Date('2026-07-28T02:30:00.000Z'),
+        run: async (command) => {
+          if (command === `git status --short ${EXCLUDE}`) return { stdout: '', stderr: '' };
+          if (command === `git diff --stat origin/main...HEAD ${EXCLUDE}`) return { stdout: '', stderr: '' };
+          if (command === `git diff --name-status origin/main...HEAD ${EXCLUDE}`) return { stdout: '', stderr: '' };
+          if (command === `git diff origin/main...HEAD ${EXCLUDE}`)
+            return { stdout: 'diff --git a/README.md b/README.md\n+committed hunk\n', stderr: '' };
+          if (command === `git diff ${EXCLUDE}`)
+            return { stdout: 'diff --git a/app.py b/app.py\n+uncommitted hunk\n', stderr: '' };
+          throw new Error(`unexpected command: ${command}`);
+        },
+      },
+    );
+
+    const diffOnDisk = readFileSync(join(artifactsDir, 'diff.patch'), 'utf-8');
+    expect(diffOnDisk).toContain('+committed hunk');
+    expect(diffOnDisk).toContain('+uncommitted hunk');
+    expect(diffOnDisk.indexOf('+committed hunk')).toBeLessThan(diffOnDisk.indexOf('+uncommitted hunk'));
+  });
+
+  it('merges uncommitted changed-file paths into manifest.git.changedFiles without duplicating committed paths', async () => {
     const { eventsFile, costsFile, artifactsDir, workspace } = await setup();
 
     const result = await writeBenchmarkArtifacts(
@@ -364,20 +505,36 @@ describe('writeBenchmarkArtifacts', () => {
       {
         now: () => new Date('2026-07-28T02:30:00.000Z'),
         run: async (command) => {
-          if (command.includes('origin/main')) throw new Error('unknown revision origin/main');
-          if (command === 'git status --short') return { stdout: '', stderr: '' };
-          if (command === 'git diff --stat HEAD') return { stdout: 'widget.ts | 1 +\n', stderr: '' };
-          if (command === 'git diff HEAD') return { stdout: 'diff --git a/widget.ts\n', stderr: '' };
+          if (command === `git status --short ${EXCLUDE}`) return { stdout: 'M app.py\n', stderr: '' };
+          if (command === `git diff --stat origin/main...HEAD ${EXCLUDE}`) return { stdout: '', stderr: '' };
+          if (command === `git diff --name-status origin/main...HEAD ${EXCLUDE}`)
+            return { stdout: 'M\tREADME.md\nM\tapp.py\n', stderr: '' };
+          if (command === `git diff origin/main...HEAD ${EXCLUDE}`) return { stdout: '', stderr: '' };
+          if (command === `git diff ${EXCLUDE}`) return { stdout: '', stderr: '' };
           throw new Error(`unexpected command: ${command}`);
         },
       },
     );
 
-    expect(result.manifest.git.diffBase).toBe('HEAD');
-    expect(result.manifest.git.diffStat).toBe('widget.ts | 1 +');
+    expect(result.manifest.git.changedFiles.slice().sort()).toEqual(['README.md', 'app.py']);
   });
+});
 
-  it('falls back to diffBase none and empty git fields when all git commands throw', async () => {
+describe('DIFF_EXCLUDES', () => {
+  async function setup() {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-artifacts-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+    const costsFile = join(tmpDir, 'costs.jsonl');
+    const artifactsDir = join(tmpDir, 'artifacts');
+    const workspace = join(tmpDir, 'workspace');
+    mkdirSync(workspace);
+    mkdirSync(artifactsDir);
+    writeFileSync(eventsFile, '');
+    writeFileSync(costsFile, '');
+    return { eventsFile, costsFile, artifactsDir, workspace };
+  }
+
+  it('excludes cache-only churn entirely: empty diff.patch and empty changedFiles', async () => {
     const { eventsFile, costsFile, artifactsDir, workspace } = await setup();
 
     const result = await writeBenchmarkArtifacts(
@@ -392,12 +549,56 @@ describe('writeBenchmarkArtifacts', () => {
       },
       {
         now: () => new Date('2026-07-28T02:30:00.000Z'),
-        run: async () => {
-          throw new Error('git not available');
+        run: async (command) => {
+          if (command === `git status --short ${EXCLUDE}`) return { stdout: '', stderr: '' };
+          if (command === `git diff --stat origin/main...HEAD ${EXCLUDE}`) return { stdout: '', stderr: '' };
+          if (command === `git diff origin/main...HEAD ${EXCLUDE}`) return { stdout: '', stderr: '' };
+          if (command === `git diff --name-status origin/main...HEAD ${EXCLUDE}`) return { stdout: '', stderr: '' };
+          if (command === `git diff ${EXCLUDE}`) return { stdout: '', stderr: '' };
+          throw new Error(`unexpected command: ${command}`);
         },
       },
     );
 
-    expect(result.manifest.git).toEqual({ changedFiles: [], diffStat: '', diffBase: 'none' });
+    const diffOnDisk = readFileSync(join(artifactsDir, 'diff.patch'), 'utf-8');
+    expect(diffOnDisk).toBe('');
+    expect(diffOnDisk).not.toContain('__pycache__');
+    expect(result.manifest.git.changedFiles).toEqual([]);
+    expect(result.manifest.git.changedFiles.join('')).not.toContain('__pycache__');
+  });
+
+  it('keeps real changes when excluded noise is also present', async () => {
+    const { eventsFile, costsFile, artifactsDir, workspace } = await setup();
+
+    const result = await writeBenchmarkArtifacts(
+      {
+        issue: 137,
+        artifactsDir,
+        eventsFile,
+        costsFile,
+        startedAt: '2026-07-28T02:27:00.000Z',
+        outcome: 'ready',
+        workspace,
+      },
+      {
+        now: () => new Date('2026-07-28T02:30:00.000Z'),
+        run: async (command) => {
+          if (command === `git status --short ${EXCLUDE}`) return { stdout: 'M app.py\n', stderr: '' };
+          if (command === `git diff --stat origin/main...HEAD ${EXCLUDE}`)
+            return { stdout: 'app.py | 1 +\n', stderr: '' };
+          if (command === `git diff origin/main...HEAD ${EXCLUDE}`)
+            return { stdout: 'diff --git a/app.py b/app.py\n+real change\n', stderr: '' };
+          if (command === `git diff --name-status origin/main...HEAD ${EXCLUDE}`)
+            return { stdout: 'M\tapp.py\n', stderr: '' };
+          if (command === `git diff ${EXCLUDE}`) return { stdout: '', stderr: '' };
+          throw new Error(`unexpected command: ${command}`);
+        },
+      },
+    );
+
+    const diffOnDisk = readFileSync(join(artifactsDir, 'diff.patch'), 'utf-8');
+    expect(diffOnDisk).toBe('diff --git a/app.py b/app.py\n+real change\n');
+    expect(diffOnDisk).not.toContain('__pycache__');
+    expect(result.manifest.git.changedFiles).toEqual(['app.py']);
   });
 });
