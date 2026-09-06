@@ -362,12 +362,11 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
 
     // BUILD
     failurePhase = 'build';
-    let buildSteering: ConsumedSteering | undefined;
-    if (request.options.interactive) {
-      buildSteering = ports.drainSteering?.();
-      if (buildSteering && buildSteering.messages.length > 0) {
-        ports.events('build')('steering_applied', describeSteering(buildSteering));
-      }
+    // Queued operator guidance is also available to headless daemon runs.
+    // Interactive approval remains a separate, explicitly selected capability.
+    const buildSteering = ports.drainSteering?.();
+    if (buildSteering && buildSteering.messages.length > 0) {
+      ports.events('build')('steering_applied', describeSteering(buildSteering));
     }
     let breakerBlocked = false;
     if (request.failover.enabled) {
@@ -468,7 +467,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       buildTimeoutSeconds: request.timeouts.build,
       checkTimeoutSeconds: request.timeouts.check,
       sandbox: request.sandboxPolicy,
-      drainSteering: request.options.interactive ? ports.drainSteering : undefined,
+      drainSteering: ports.drainSteering,
       appPort,
       appBaseUrl,
       onPgid,

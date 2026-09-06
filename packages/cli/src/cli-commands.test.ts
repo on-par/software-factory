@@ -3796,19 +3796,42 @@ describe('shipIssue (direct)', () => {
       ]);
     });
 
-    it('does not drain steering, and passes steering: undefined, when not interactive', async () => {
+    it('delivers explicitly queued headless guidance to BUILD and CHECK without enabling interactive approvals', async () => {
       writeQueuedSteering();
       const core = await import('@on-par/factory-core');
 
       await shipIssue(5, {}, ctx());
 
-      const buildCall = vi.mocked(core.buildPhase).mock.calls.at(-1)?.[0] as any;
-      expect(buildCall.steering).toBeUndefined();
-      const checkCall = vi.mocked(core.checkPhase).mock.calls.at(-1)?.[0] as any;
-      expect(checkCall.drainSteering).toBeUndefined();
-      expect(existsSync(join(paths().steering, 'issue-5.ndjson'))).toBe(true);
-      const events = readFileSync(paths().events, 'utf-8');
-      expect(events).not.toContain('steering_applied');
+      const buildCall = vi.mocked(core.buildPhase).mock.calls.at(-1)?.[0];
+      expect(buildCall?.steering?.messages).toEqual([
+        { id: 'steer-1', issue: 5, text: 'prefer approach B', queuedAt: '2026-01-01T00:00:00.000Z' },
+      ]);
+      expect(existsSync(join(paths().steering, 'issue-5.ndjson'))).toBe(false);
+      expect(readFileSync(paths().events, 'utf-8')).toContain('steering_applied');
+
+      const checkCall = vi.mocked(core.checkPhase).mock.calls.at(-1)?.[0];
+      writeQueuedSteering();
+      expect(checkCall?.drainSteering?.().messages).toEqual(buildCall?.steering?.messages);
+      expect(existsSync(join(paths().steering, 'issue-5.ndjson'))).toBe(false);
+      const planCall = vi.mocked(core.planPhase).mock.calls.at(-1)?.[0];
+      expect(planCall?.approvalGate).toBeUndefined();
+      expect(planCall?.drainSteering).toBeUndefined();
+      expect(vi.mocked(core.shipPhase).mock.calls.at(-1)?.[0].approvalGate).toBeUndefined();
+      expect(h.runTuiCalls).toEqual([]);
+    });
+
+    it('keeps headless steering empty and logs no applied guidance when nothing was queued', async () => {
+      const core = await import('@on-par/factory-core');
+
+      await shipIssue(5, {}, ctx());
+
+      expect(vi.mocked(core.buildPhase).mock.calls.at(-1)?.[0].steering).toEqual({ messages: [], attachments: [] });
+      expect(vi.mocked(core.checkPhase).mock.calls.at(-1)?.[0].drainSteering?.()).toEqual({
+        messages: [],
+        attachments: [],
+      });
+      expect(readFileSync(paths().events, 'utf-8')).not.toContain('steering_applied');
+      expect(h.runTuiCalls).toEqual([]);
     });
   });
 });

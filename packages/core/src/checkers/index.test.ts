@@ -58,6 +58,43 @@ const routes: RoutesConfig = {
 const tempDirs = new Set<string>();
 
 it.each([
+  ['build', compileChecker, 120_000],
+  ['lint', lintChecker, 120_000],
+  ['test', testsChecker, 300_000],
+] as const)('retains bounded direct-checker defaults for %s', async (script, checker, timeoutMs) => {
+  const worktree = await makeWorktree({ 'package.json': JSON.stringify({ scripts: { [script]: 'exit 0' } }) });
+  const run = vi.fn(stubRunner({ ok: true, exitCode: 0 }).run);
+
+  await checker({ ...makeContext(worktree), runCommand: run });
+
+  expect(run).toHaveBeenCalledWith(expect.any(Array), expect.objectContaining({ timeoutMs }));
+});
+
+it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
+  'keeps an invalid direct timeout %s bounded',
+  async (timeoutSeconds) => {
+    const worktree = await makeWorktree({ 'pytest.ini': '[pytest]' });
+    const run = vi.fn(stubRunner({ ok: true, exitCode: 0 }).run);
+
+    await testsChecker({ ...makeContext(worktree), runCommand: run, timeoutSeconds });
+
+    expect(run).toHaveBeenCalledWith(['python3', '-m', 'pytest'], expect.objectContaining({ timeoutMs: 300_000 }));
+  },
+);
+
+it.each([
+  [45, 45_000],
+  [Number.MAX_VALUE, 2_147_483_647],
+])('honors direct pytest timeout %s without overflowing Node timers', async (timeoutSeconds, timeoutMs) => {
+  const worktree = await makeWorktree({ 'pytest.ini': '[pytest]' });
+  const run = vi.fn(stubRunner({ ok: true, exitCode: 0 }).run);
+
+  await testsChecker({ ...makeContext(worktree), runCommand: run, timeoutSeconds });
+
+  expect(run).toHaveBeenCalledWith(['python3', '-m', 'pytest'], expect.objectContaining({ timeoutMs }));
+});
+
+it.each([
   { timedOut: true, killed: true, exitCode: 137, expected: 'command timed out (exit code 137)' },
   { timedOut: false, killed: true, exitCode: -1, expected: 'command terminated' },
 ])('reports $expected ahead of nonempty command output', async ({ timedOut, killed, exitCode, expected }) => {
@@ -1073,6 +1110,43 @@ describe('runCustomChecker', () => {
 });
 
 describe('runAllCheckers', () => {
+  it('uses the CHECK timeout consistently for build, lint, and TypeScript commands', async () => {
+    const worktree = await makeWorktree({
+      'package.json': JSON.stringify({ scripts: { build: 'exit 0', test: 'exit 0', lint: 'exit 0' } }),
+      'tsconfig.json': '{}',
+    });
+    const run = vi.spyOn(commandRunner, 'runCommand').mockImplementation(stubRunner({ ok: true, exitCode: 0 }).run);
+    const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
+    try {
+      await runAllCheckers(makeContext(worktree), router, null, 1_800);
+
+      for (const argv of [
+        ['npm', 'run', 'build'],
+        ['npm', 'test'],
+        ['npm', 'run', 'lint'],
+        ['npx', 'tsc', '--noEmit'],
+      ]) {
+        expect(run).toHaveBeenCalledWith(argv, expect.objectContaining({ timeoutMs: 1_800_000 }));
+      }
+    } finally {
+      run.mockRestore();
+    }
+  });
+
+  it.each([1_800, 900])('gives verification commands the resolved %s-second CHECK timeout', async (seconds) => {
+    const worktree = await makeWorktree({ 'scripts/verify.sh': 'exit 0' });
+    const run = vi.fn(stubRunner({ ok: true, exitCode: 0 }).run);
+    const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
+
+    const result = await runAllCheckers({ ...makeContext(worktree), runCommand: run }, router, null, seconds);
+
+    expect(result.results.find((output) => output.checker === 'tests')?.result).toBe('PASS');
+    expect(run).toHaveBeenCalledWith(
+      ['bash', 'scripts/verify.sh', '--no-e2e'],
+      expect.objectContaining({ timeoutMs: seconds * 1_000 }),
+    );
+  });
+
   it(
     'aggregates built-ins and custom checkers and fails closed on unknown checker names',
     { timeout: 60000 },

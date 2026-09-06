@@ -40,6 +40,8 @@ interface PackageJson {
 export interface CheckerContext {
   worktree: string;
   specPath: string;
+  /** Resolved CHECK command timeout in seconds; direct calls keep bounded defaults when omitted. */
+  timeoutSeconds?: number;
   /** Run-start HEAD SHA captured by buildPhase before the worker ran — the diff base
    *  for checkouts with no origin/main or origin/master (#1162, #1211). */
   diffBase?: string;
@@ -71,23 +73,30 @@ export interface Checker {
   run(ctx: CheckerRunCtx): Promise<CheckerOutput>;
 }
 
-/** CheckerContext bound by runAllCheckers with the router + custom-checker timeout. */
+/** CheckerContext bound by runAllCheckers with the router and resolved CHECK timeout. */
 export interface CheckerRunCtx extends CheckerContext {
   router: ModelRouter;
-  timeoutSeconds?: number;
 }
 
 // ---------- Built-in Checkers ----------
 
+function commandTimeoutMs(ctx: CheckerContext, fallbackMs: number): number {
+  const seconds = ctx.timeoutSeconds;
+  return seconds !== undefined && Number.isFinite(seconds) && seconds > 0
+    ? Math.min(seconds * 1_000, 2_147_483_647)
+    : fallbackMs;
+}
+
 export const compileChecker: CheckerFn = async (ctx) => {
   try {
+    const run = ctx.runCommand ?? runCommand;
     const pkg = await getPackageJson(ctx);
     const hasBuild = pkg?.scripts?.build;
 
     if (hasBuild) {
-      const r = await runCommand(['npm', 'run', 'build'], {
+      const r = await run(['npm', 'run', 'build'], {
         cwd: ctx.worktree,
-        timeoutMs: 120_000,
+        timeoutMs: commandTimeoutMs(ctx, 120_000),
         env: ctx.env,
         onPgid: ctx.onPgid,
       });
@@ -100,15 +109,20 @@ export const compileChecker: CheckerFn = async (ctx) => {
     }
 
     if (await fileExists(join(ctx.worktree, 'Makefile'))) {
-      const r = await runCommand(['make'], { cwd: ctx.worktree, timeoutMs: 120_000, env: ctx.env, onPgid: ctx.onPgid });
+      const r = await run(['make'], {
+        cwd: ctx.worktree,
+        timeoutMs: commandTimeoutMs(ctx, 120_000),
+        env: ctx.env,
+        onPgid: ctx.onPgid,
+      });
       if (r.ok) return { checker: 'compile', result: 'PASS', details: 'make: OK' };
       return { checker: 'compile', result: 'FAIL', details: `make failed: ${describeCheckerFailure(r)}` };
     }
 
     if (await fileExists(join(ctx.worktree, 'Cargo.toml'))) {
-      const r = await runCommand(['cargo', 'build'], {
+      const r = await run(['cargo', 'build'], {
         cwd: ctx.worktree,
-        timeoutMs: 120_000,
+        timeoutMs: commandTimeoutMs(ctx, 120_000),
         env: ctx.env,
         onPgid: ctx.onPgid,
       });
@@ -205,7 +219,7 @@ export const testsChecker: CheckerFn = async (ctx) => {
     if (await fileExists(join(ctx.worktree, 'scripts/verify.sh'))) {
       const r = await run(['bash', 'scripts/verify.sh', '--no-e2e'], {
         cwd: ctx.worktree,
-        timeoutMs: 300_000,
+        timeoutMs: commandTimeoutMs(ctx, 300_000),
         env: ctx.env,
         onPgid: ctx.onPgid,
       });
@@ -221,7 +235,7 @@ export const testsChecker: CheckerFn = async (ctx) => {
     if (pkg?.scripts?.test) {
       const r = await run(['npm', 'test'], {
         cwd: ctx.worktree,
-        timeoutMs: 300_000,
+        timeoutMs: commandTimeoutMs(ctx, 300_000),
         env: ctx.env,
         onPgid: ctx.onPgid,
       });
@@ -240,7 +254,7 @@ export const testsChecker: CheckerFn = async (ctx) => {
         : ['python3', '-m', 'pytest'];
       const r = await run(pytestArgv, {
         cwd: ctx.worktree,
-        timeoutMs: 300_000,
+        timeoutMs: commandTimeoutMs(ctx, 300_000),
         env: ctx.env,
         onPgid: ctx.onPgid,
       });
@@ -276,6 +290,7 @@ export const testsChecker: CheckerFn = async (ctx) => {
 };
 
 export const lintChecker: CheckerFn = async (ctx) => {
+  const run = ctx.runCommand ?? runCommand;
   const details: string[] = [];
   let result: 'PASS' | 'FAIL' = 'PASS';
 
@@ -283,9 +298,9 @@ export const lintChecker: CheckerFn = async (ctx) => {
   const scripts = pkg?.scripts ?? {};
 
   if (scripts.lint) {
-    const r = await runCommand(['npm', 'run', 'lint'], {
+    const r = await run(['npm', 'run', 'lint'], {
       cwd: ctx.worktree,
-      timeoutMs: 120_000,
+      timeoutMs: commandTimeoutMs(ctx, 120_000),
       env: ctx.env,
       onPgid: ctx.onPgid,
     });
@@ -299,9 +314,9 @@ export const lintChecker: CheckerFn = async (ctx) => {
 
   // TypeScript type check
   if (await fileExists(join(ctx.worktree, 'tsconfig.json'))) {
-    const r = await runCommand(['npx', 'tsc', '--noEmit'], {
+    const r = await run(['npx', 'tsc', '--noEmit'], {
       cwd: ctx.worktree,
-      timeoutMs: 120_000,
+      timeoutMs: commandTimeoutMs(ctx, 120_000),
       env: ctx.env,
       onPgid: ctx.onPgid,
     });
@@ -527,7 +542,7 @@ export async function runAllCheckers(
   ctx: CheckerContext,
   router: ModelRouter,
   constitution: Constitution | null,
-  customCheckerTimeoutSeconds?: number,
+  checkerTimeoutSeconds?: number,
 ): Promise<CheckSummary> {
   const probe = ctx.probe ?? (await (ctx.probeWorktree ?? probeWorktree)(ctx.worktree));
 
@@ -539,7 +554,7 @@ export async function runAllCheckers(
     constitutionBody: constitution?.body ?? '',
     testsRequired: constitution?.requireTests === true,
     router,
-    timeoutSeconds: customCheckerTimeoutSeconds,
+    timeoutSeconds: checkerTimeoutSeconds ?? ctx.timeoutSeconds,
   };
 
   const results: CheckerOutput[] = [];

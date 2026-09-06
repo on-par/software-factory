@@ -14,6 +14,13 @@ import type { PlanResult } from '../phases/plan.js';
 import type { ShipResult } from '../phases/ship.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
+import {
+  applySteering,
+  drainSteering,
+  listQueuedSteering,
+  queueSteeringMessage,
+  type ConsumedSteering,
+} from '../steering/index.js';
 import type { CheckSummary, Constitution } from '../types/index.js';
 import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
@@ -511,6 +518,65 @@ describe('runIssue — interactive steering, proxy, and pgid tracking', () => {
     expect(vi.mocked(buildPhase).mock.calls[0][0].steering?.messages).toEqual([
       { id: 's1', issue: 1, text: 'do X', queuedAt: '2026-01-01T00:00:00.000Z' },
     ]);
+  });
+
+  it('consumes queued headless guidance at BUILD and CHECK rework boundaries without opening approval prompts', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'run-issue-headless-steering-'));
+    try {
+      const initial = queueSteeringMessage(
+        directory,
+        1,
+        'Reuse the verified feature commit; only fix remaining checks.',
+      );
+      const createApprovalGate = vi.fn(() => {
+        throw new Error('headless runs must not open an approval prompt');
+      });
+      const log = vi.fn();
+      let reworkSteering: ConsumedSteering | undefined;
+      vi.mocked(buildPhase).mockImplementation(async () => {
+        queueSteeringMessage(directory, 1, 'Preserve the implementation while addressing the checker findings.');
+        return BUILD_OK;
+      });
+      vi.mocked(checkPhase).mockImplementation(async (options) => {
+        reworkSteering = options.drainSteering?.();
+        return CHECK_OK;
+      });
+      const outcome = await runIssue(
+        baseRequest(),
+        basePolicy(),
+        basePorts({
+          drainSteering: () => drainSteering(directory, 1, directory),
+          createApprovalGate,
+          events: () => log,
+        }),
+      );
+      expect(outcome.state).toBe('ready');
+      const build = vi.mocked(buildPhase).mock.calls[0][0];
+      expect(build.steering?.messages).toEqual([initial]);
+      expect(applySteering('BUILD instructions', build.steering)).toContain(initial.text);
+      expect(log).toHaveBeenCalledWith('steering_applied', expect.stringContaining(initial.id));
+      expect(reworkSteering?.messages.map((message) => message.text)).toEqual([
+        'Preserve the implementation while addressing the checker findings.',
+      ]);
+      expect(listQueuedSteering(directory, 1)).toEqual([]);
+      expect(vi.mocked(planPhase).mock.calls[0][0].drainSteering).toBeUndefined();
+      expect(vi.mocked(planPhase).mock.calls[0][0].approvalGate).toBeUndefined();
+      expect(vi.mocked(shipPhase).mock.calls[0][0].approvalGate).toBeUndefined();
+      expect(createApprovalGate).not.toHaveBeenCalled();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves headless worker prompts unchanged when the steering queue is empty', async () => {
+    const log = vi.fn();
+    const empty = () => ({ messages: [], attachments: [] });
+    await runIssue(baseRequest(), basePolicy(), basePorts({ drainSteering: empty, events: () => log }));
+    expect(applySteering('BUILD instructions', vi.mocked(buildPhase).mock.calls[0][0].steering)).toBe(
+      'BUILD instructions',
+    );
+    expect(vi.mocked(checkPhase).mock.calls[0][0].drainSteering?.()).toEqual({ messages: [], attachments: [] });
+    expect(log).not.toHaveBeenCalledWith('steering_applied', expect.anything());
   });
 
   it('logs the resolved proxy note when resolveBaseUrl returns one', async () => {
