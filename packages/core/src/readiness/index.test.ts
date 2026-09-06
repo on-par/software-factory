@@ -35,6 +35,29 @@ _No response_
 `;
 
 describe('scoreIssueReadiness', () => {
+  it('accepts three complete Gherkin scenarios without rewriting them as checkboxes', () => {
+    const scenarios = ['initial state', 'changed state', 'restored state']
+      .map((name) => `Scenario: ${name}\nGiven a widget\nWhen it updates\nThen the display matches`)
+      .join('\n\n');
+    const body = COMPLETE_FACTORY_TASK_BODY.replace(
+      '- [ ] Widget no longer flickers on load\n- [x] Regression test added',
+      `\`\`\`gherkin\n${scenarios}\n\`\`\``,
+    );
+    expect(scoreIssueReadiness({ title: 'Widget state', body })).toMatchObject({
+      pass: true,
+      missing: [],
+      sizeOk: true,
+    });
+  });
+
+  it('still rejects an incomplete scenario without an observable outcome', () => {
+    const body = COMPLETE_FACTORY_TASK_BODY.replace(
+      '- [ ] Widget no longer flickers on load\n- [x] Regression test added',
+      'Scenario: an update\nGiven a widget\nWhen it updates',
+    );
+    expect(scoreIssueReadiness({ title: 'Widget state', body }).pass).toBe(false);
+  });
+
   it('scores a complete rendered factory-task body as fully ready', () => {
     const result = scoreIssueReadiness({ title: 'Fix widget flicker', body: COMPLETE_FACTORY_TASK_BODY });
     expect(result.template).toBe('factory-task');

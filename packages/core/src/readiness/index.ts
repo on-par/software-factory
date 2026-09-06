@@ -5,6 +5,7 @@
 // actual template files.
 
 import { checkIssueSize } from './size.js';
+import { hasCompleteScenarios } from './criteria.js';
 import type { ReadinessInfo, ReadinessTemplate } from '../types/index.js';
 
 export const FACTORY_TASK_REQUIRED_FIELDS = [
@@ -117,7 +118,7 @@ export function scoreIssueReadiness(input: { title: string; body: string }): Rea
       missing.push(field);
       continue;
     }
-    if (field === 'Acceptance criteria' && !CHECKBOX_RE.test(content!)) {
+    if (field === 'Acceptance criteria' && !CHECKBOX_RE.test(content!) && !hasCompleteScenarios(content!)) {
       missing.push('Acceptance criteria (checkbox list)');
       continue;
     }

@@ -147,6 +147,52 @@ describe('buildPlanPrompt', () => {
 });
 
 describe('planPhase', () => {
+  it('plans complete named scenarios without enrichment or issue rewriting', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const scenarios = ['initial state', 'changed state', 'restored state']
+      .map((name) => `Scenario: ${name}\nGiven a widget\nWhen it updates\nThen the display matches`)
+      .join('\n\n');
+    const body = `## Problem statement
+The widget display can become stale.
+## In scope
+- Refresh the widget display.
+## Out of scope
+- Replacing the renderer.
+## Research
+- Existing state transitions are reusable.
+## Acceptance criteria (Gherkin)
+\`\`\`gherkin
+${scenarios}
+\`\`\`
+## Verification
+npm test`;
+    const stub = new StubModelExecutor({ scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] } });
+    let updates = 0;
+    const result = await planPhase({
+      issue: 493,
+      repo: 'example/widgets',
+      worktree,
+      specPath: join(worktree, 'issue-493.md'),
+      router: new ModelRouter(models, routes, false, stub),
+      constitution: null,
+      octokit: {
+        rest: {
+          issues: {
+            get: async () => ({ data: { title: 'Refresh the widget display', body } }),
+            update: async () => updates++,
+          },
+        },
+      } as any,
+      log: () => {},
+      enforceReadiness: true,
+    });
+    expect(result.ok).toBe(true);
+    expect(stub.calls.map((call) => call.task)).toEqual(['plan']);
+    expect(updates).toBe(0);
+    expect(stub.calls[0].prompt).toContain(scenarios);
+  });
+
   it('bypasses the boss model only for a ready, bounded fast-path issue', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
     tempDirs.add(worktree);

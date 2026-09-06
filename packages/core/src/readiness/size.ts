@@ -5,6 +5,8 @@
 // needs a parsed Story that does not exist at readiness-scoring time. Change both
 // files together. Pure — no I/O.
 
+import { isScenarioCriterion, parseAcceptanceCriteriaSection } from './criteria.js';
+
 /** More in-scope bullets than this and the issue has stopped being one slice. */
 export const MAX_IN_SCOPE_ITEMS = 5;
 /** More acceptance criteria than this and the issue is really several issues. */
@@ -31,7 +33,7 @@ const FENCE_RE = /^\s*(`{3,}|~{3,})/;
 const LIST_ITEM_RE = /^ {0,3}(?:[-*+]|\d+[.)])\s+\S/;
 const CHECKBOX_ITEM_RE = /^ {0,3}[-*+]\s*\[[ xX]\]\s*\S/;
 
-function countMatchingLines(section: string, re: RegExp): number {
+function countMatchingLines(section: string, re: RegExp, excludeScenarios = false): number {
   let count = 0;
   let inFence = false;
   for (const line of section.split('\n')) {
@@ -40,7 +42,7 @@ function countMatchingLines(section: string, re: RegExp): number {
       continue;
     }
     if (inFence) continue;
-    if (re.test(line)) count++;
+    if (re.test(line) && (!excludeScenarios || !isScenarioCriterion(line))) count++;
   }
   return count;
 }
@@ -50,12 +52,13 @@ function countListItems(section: string): number {
 }
 
 function countCheckboxItems(section: string): number {
-  return countMatchingLines(section, CHECKBOX_ITEM_RE);
+  return countMatchingLines(section, CHECKBOX_ITEM_RE, true);
 }
 
 export function checkIssueSize(input: { inScope: string; acceptanceCriteria: string }): IssueSizeReport {
   const inScopeItems = countListItems(input.inScope);
-  const criteria = countCheckboxItems(input.acceptanceCriteria);
+  const scenarios = parseAcceptanceCriteriaSection(input.acceptanceCriteria).filter(isScenarioCriterion).length;
+  const criteria = countCheckboxItems(input.acceptanceCriteria) + scenarios;
   if (inScopeItems <= MAX_IN_SCOPE_ITEMS && criteria <= MAX_ACCEPTANCE_CRITERIA_ITEMS) {
     return { sizeOk: true };
   }

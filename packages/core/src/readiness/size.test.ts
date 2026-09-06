@@ -6,6 +6,34 @@ const items = (n: number) => Array.from({ length: n }, (_, i) => `- item ${i + 1
 const checkboxes = (n: number) => Array.from({ length: n }, (_, i) => `- [ ] criterion ${i + 1}`).join('\n');
 
 describe('checkIssueSize', () => {
+  it('counts named Gherkin scenarios once each and preserves the five-criterion limit', () => {
+    const scenarios = Array.from(
+      { length: 6 },
+      (_, i) => `Scenario: state ${i}\nGiven a widget\nWhen it updates\nThen it matches`,
+    );
+    expect(checkIssueSize({ inScope: '- update state', acceptanceCriteria: scenarios.slice(0, 5).join('\n') })).toEqual(
+      { sizeOk: true },
+    );
+    expect(
+      checkIssueSize({
+        inScope: '- update state',
+        acceptanceCriteria: `\`\`\`gherkin\n${scenarios.join('\n')}\n\`\`\``,
+      }),
+    ).toEqual({ sizeOk: false, reason: 'too big: 1 in-scope items, 6 acceptance criteria' });
+  });
+
+  it('does not double-count checkbox scenario headings, while retaining separate flat criteria', () => {
+    const scenarios = Array.from(
+      { length: 5 },
+      (_, i) => `- [ ] **Scenario: state ${i}**\n  Given a widget\n  When it updates\n  Then it matches`,
+    ).join('\n');
+    expect(checkIssueSize({ inScope: '', acceptanceCriteria: scenarios })).toEqual({ sizeOk: true });
+    expect(checkIssueSize({ inScope: '', acceptanceCriteria: `${scenarios}\n- [ ] another condition` })).toEqual({
+      sizeOk: false,
+      reason: 'too big: 0 in-scope items, 6 acceptance criteria',
+    });
+  });
+
   it('passes at the boundary — 5 in-scope bullets and 5 checkbox criteria', () => {
     const result = checkIssueSize({ inScope: items(5), acceptanceCriteria: checkboxes(5) });
     expect(result).toEqual({ sizeOk: true });
