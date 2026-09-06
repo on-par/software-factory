@@ -65,6 +65,9 @@ describe('createUsageCoordinator', () => {
       statePath,
       logger,
       subscriptionDeps: credentialsDeps({ fetchImpl }),
+      // This test measures timer cadence. Fake-clock advancement does not drain
+      // real filesystem writes; persistence is verified separately below.
+      writeState: async () => {},
     });
 
     await coordinator.start();
@@ -127,23 +130,30 @@ describe('createUsageCoordinator', () => {
     const pending = new Promise<null>((resolve) => {
       resolvePoll = resolve;
     });
+    let markPollingStarted: () => void = () => {};
+    const pollingStarted = new Promise<void>((resolve) => {
+      markPollingStarted = resolve;
+    });
     const coordinator = createUsageCoordinator({
       statePath,
       logger,
-      fetchSubscription: () => pending,
+      fetchSubscription: () => {
+        markPollingStarted();
+        return pending;
+      },
     });
 
     const starting = coordinator.start();
-    // loadUsageState performs real fs I/O before the (still-pending) first poll,
-    // so give the event loop a few real ticks to let hydration land.
-    for (let i = 0; i < 50 && coordinator.read() === null; i++) {
-      await new Promise((resolve) => setImmediate(resolve));
+    try {
+      // The first fetch starts after hydration. Wait for that observable boundary,
+      // keeping its response pending, instead of guessing how long disk I/O takes.
+      await pollingStarted;
+      expect(coordinator.read()).toEqual(persisted.snapshot);
+    } finally {
+      resolvePoll(null);
+      await starting;
+      coordinator.stop();
     }
-    expect(coordinator.read()).toEqual(persisted.snapshot);
-
-    resolvePoll(null);
-    await starting;
-    coordinator.stop();
   });
 
   it('keeps the last good snapshot and persisted file when a poll returns null', async () => {

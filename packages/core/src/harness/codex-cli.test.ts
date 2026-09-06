@@ -196,7 +196,7 @@ describe('CodexCliHarness command shape', () => {
     expect(rec.calls[0].opts.env).toBeUndefined();
   });
 
-  it('wraps the invocation in sandbox-exec when request.sandbox is set', async () => {
+  it('retains factory Seatbelt containment without asking Codex to nest another macOS sandbox', async () => {
     const rec = recordingExec();
     const harness = new CodexCliHarness(rec.fn);
 
@@ -206,6 +206,26 @@ describe('CodexCliHarness command shape', () => {
 
     expect(rec.calls).toHaveLength(1);
     expect(rec.calls[0].cmd.startsWith('sandbox-exec -p ')).toBe(true);
+    expect(rec.calls[0].cmd).toContain('codex exec --json --sandbox danger-full-access');
+    expect(rec.calls[0].cmd).toContain('(deny file-write*)');
+    expect(rec.calls[0].cmd).toContain('(allow file-write* (subpath "/tmp/factory worktree"))');
+    expect(rec.calls[0].cmd).toContain('(deny network-outbound)');
+    expect(rec.calls[0].cmd).toContain('ulimit -t 300');
+  });
+
+  it('retains Codex workspace-write mode under a Linux firejail outer sandbox', async () => {
+    const rec = recordingExec();
+    await new CodexCliHarness(rec.fn)
+      .run(
+        makeContractRequest({
+          model: 'codex-model',
+          registry,
+          prompt: 'build it',
+          sandbox: { ...sandboxPolicy, runtime: 'firejail' },
+        }),
+      )
+      .catch(() => {});
+    expect(rec.calls[0].cmd).toContain('firejail --quiet');
     expect(rec.calls[0].cmd).toContain('codex exec --json --sandbox workspace-write');
   });
 });

@@ -3,6 +3,7 @@
 import { exec as execCb, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import { spawnSupervisedCommand } from './supervised-exec.js';
 import { killProcessGroup } from '../environment/process-groups.js';
 
 const exec = promisify(execCb);
@@ -50,12 +51,11 @@ function execDetached(
   opts: { cwd?: string; timeoutMs?: number; maxBuffer?: number; env?: Record<string, string> },
 ): Promise<ChildResult> & { child: ReturnType<typeof spawn> } {
   const maxBuffer = opts.maxBuffer ?? DEFAULT_MAX_BUFFER;
-  const child = spawn(cmd, {
-    shell: true,
-    detached: true,
-    cwd: opts.cwd,
-    env: opts.env ? { ...process.env, ...opts.env } : undefined,
-  });
+  const env = { ...process.env, ...opts.env };
+  const ownershipFile = env.FACTORY_DAEMON_GROUPS_FILE;
+  const child = ownershipFile
+    ? spawnSupervisedCommand(cmd, { cwd: opts.cwd, env, ownershipFile })
+    : spawn(cmd, { shell: true, detached: true, cwd: opts.cwd, env: opts.env ? env : undefined });
 
   let stdoutLen = 0;
   let stderrLen = 0;
@@ -63,6 +63,7 @@ function execDetached(
   const stderrChunks: Buffer[] = [];
   let maxBufferExceeded = false;
   let timedOut = false;
+  let settled = false;
 
   const timer =
     opts.timeoutMs !== undefined
@@ -74,6 +75,7 @@ function execDetached(
 
   const promise = new Promise<ChildResult>((resolve, reject) => {
     child.stdout?.on('data', (chunk: Buffer) => {
+      if (settled) return;
       stdoutLen += chunk.length;
       if (stdoutLen > maxBuffer) {
         maxBufferExceeded = true;
@@ -83,6 +85,7 @@ function execDetached(
       stdoutChunks.push(chunk);
     });
     child.stderr?.on('data', (chunk: Buffer) => {
+      if (settled) return;
       stderrLen += chunk.length;
       if (stderrLen > maxBuffer) {
         maxBufferExceeded = true;
@@ -97,7 +100,9 @@ function execDetached(
       reject(err);
     });
 
-    child.on('exit', (code, signal) => {
+    const finish = (code: number | null, signal: NodeJS.Signals | null) => {
+      if (settled) return;
+      settled = true;
       if (timer) clearTimeout(timer);
       const stdout = Buffer.concat(stdoutChunks).toString('utf-8');
       const stderr = Buffer.concat(stderrChunks).toString('utf-8');
@@ -117,7 +122,14 @@ function execDetached(
       err.stdout = stdout;
       err.stderr = stderr;
       reject(err);
-    });
+    };
+    child.on('exit', finish);
+    if (ownershipFile)
+      child.on('message', (message) => {
+        const result = (message as { factoryExit?: { code: number | null; signal: NodeJS.Signals | null } })
+          .factoryExit;
+        if (result) finish(result.code, result.signal);
+      });
   });
 
   return Object.assign(promise, { child });

@@ -382,6 +382,8 @@ const INTERNAL_API_KEYS = [
   'writeRegistry',
   // Daemon control-plane HTTP server (#777)
   'createFactorydServer',
+  'createRunRuntime',
+  'createShipExecutor',
   'DEFAULT_FACTORYD_PORT',
   // Daemon runtime state: pid/port/log files (#1177)
   'acquirePidFile',

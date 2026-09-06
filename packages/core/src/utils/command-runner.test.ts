@@ -1,10 +1,12 @@
-import { mkdtemp, readFile, realpath, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { describeCommandFailure, runCommand } from './command-runner.js';
+import { hasOwnedProcesses } from '../daemon/process-ownership.js';
+import { killProcessGroup } from '../environment/process-groups.js';
 
 const tempDirs = new Set<string>();
 
@@ -104,6 +106,101 @@ describe('runCommand', () => {
   });
 
   describe.skipIf(process.platform === 'win32')('onPgid (detached group tracking)', () => {
+    it('does not run a checker if durable process ownership cannot be written', async () => {
+      const dir = await makeTmpDir();
+      const blocker = join(dir, 'blocker');
+      const marker = join(dir, 'executed');
+      await writeFile(blocker, 'not a directory');
+      let pid: number | undefined;
+      try {
+        const result = await runCommand(
+          [process.execPath, '-e', 'require("fs").writeFileSync(process.argv[1], "bad")', marker],
+          {
+            env: { FACTORY_DAEMON_GROUPS_FILE: join(blocker, 'groups') },
+            onPgid: (value) => {
+              pid = value;
+            },
+            timeoutMs: 2000,
+          },
+        );
+        expect(result.ok).toBe(false);
+        expect(result.exitCode).toBe(-1);
+        expect(await pathExists(marker)).toBe(false);
+      } finally {
+        if (pid) await killProcessGroup(pid, { graceMs: 20 });
+      }
+    });
+
+    it('preserves failed and timed-out checker results under daemon supervision', async () => {
+      const dir = await makeTmpDir();
+      const ownershipFile = join(dir, 'groups');
+      let pid: number | undefined;
+      const options = {
+        env: { FACTORY_DAEMON_GROUPS_FILE: ownershipFile },
+        onPgid: (value: number) => {
+          pid = value;
+        },
+        killGraceMs: 20,
+      };
+      try {
+        const failed = await runCommand([process.execPath, '-e', 'console.error("check failed"); process.exit(7)'], {
+          ...options,
+          timeoutMs: 2000,
+        });
+        expect(failed).toMatchObject({ exitCode: 7, killed: false, timedOut: false, ok: false });
+        expect(failed.stderr).toContain('check failed');
+        await killProcessGroup(pid!, { graceMs: 20 });
+        const timedOut = await runCommand([process.execPath, '-e', 'setInterval(() => {}, 1000)'], {
+          ...options,
+          timeoutMs: 100,
+        });
+        expect(timedOut).toMatchObject({ killed: true, timedOut: true, ok: false });
+        expect(hasOwnedProcesses(ownershipFile)).toBe(false);
+      } finally {
+        if (pid) await killProcessGroup(pid, { graceMs: 20 });
+      }
+    });
+
+    it('retains the minus-one spawn-failure result for a missing supervised checker binary', async () => {
+      const dir = await makeTmpDir();
+      let pid: number | undefined;
+      try {
+        const result = await runCommand(['nonexistent-supervised-checker-command'], {
+          env: { FACTORY_DAEMON_GROUPS_FILE: join(dir, 'groups') },
+          onPgid: (value) => {
+            pid = value;
+          },
+          timeoutMs: 2000,
+        });
+        expect(result).toMatchObject({ exitCode: -1, killed: false, timedOut: false, ok: false });
+        expect(result.stderr).not.toBe('');
+      } finally {
+        if (pid) await killProcessGroup(pid, { graceMs: 20 });
+      }
+    });
+
+    it('durably supervises checker argv without shell interpolation and retains ownership until cleanup', async () => {
+      const dir = await makeTmpDir();
+      const ownershipFile = join(dir, 'groups');
+      const payload = `$(touch ${join(dir, 'pwned')}); quoted 'value'`;
+      let pid: number | undefined;
+      try {
+        const result = await runCommand([process.execPath, '-e', 'console.log(process.argv[1])', payload], {
+          env: { FACTORY_DAEMON_GROUPS_FILE: ownershipFile },
+          onPgid: (value) => {
+            pid = value;
+          },
+          timeoutMs: 2000,
+        });
+        expect(result.ok).toBe(true);
+        expect(result.stdout.trim()).toBe(payload);
+        expect(await pathExists(join(dir, 'pwned'))).toBe(false);
+        expect(hasOwnedProcesses(ownershipFile)).toBe(true);
+      } finally {
+        if (pid) await killProcessGroup(pid, { graceMs: 20 });
+      }
+    });
+
     function isDead(pid: number): boolean {
       try {
         process.kill(pid, 0);

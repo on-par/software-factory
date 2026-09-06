@@ -782,6 +782,62 @@ bash scripts/verify.sh
   });
 
   describe('status', () => {
+    it('reports malformed GitHub ordering as unavailable instead of printing a partial queue', async () => {
+      h.octokit.rest.issues.listForRepo = vi.fn(async () => ({
+        data: [{ number: 1, labels: ['factory:queued', 'factory:lane:app'] }],
+      }));
+
+      await runMain('status');
+
+      expect(logged()).toContain('(unavailable');
+      expect(logged()).not.toContain('(empty)');
+      expect(logged()).not.toContain('  app 1');
+    });
+
+    it('reports an empty GitHub queue even when the local queue contains stale work', async () => {
+      writeFileSync(paths().queue, 'stale 999\n');
+
+      await runMain('status');
+
+      expect(logged()).toContain('== Queue (GitHub) ==\n  (empty)');
+      expect(logged()).not.toContain('stale 999');
+    });
+
+    it('reports an unavailable GitHub queue without claiming it is empty or hiding local diagnostics', async () => {
+      writeFileSync(paths().queue, 'stale 999\n');
+      h.octokit.rest.issues.listForRepo = vi.fn().mockRejectedValue(new Error('offline'));
+
+      const result = await runMain('status');
+
+      expect(result.exited).toBe(false);
+      expect(logged()).toContain('Queue (GitHub)');
+      expect(logged()).toContain('(unavailable');
+      expect(logged()).not.toContain('(empty)');
+      expect(logged()).not.toContain('stale 999');
+      expect(logged()).toContain('== Health KPIs ==');
+    });
+
+    it('shows the GitHub queue in lane order instead of a stale local queue without claiming work', async () => {
+      writeFileSync(paths().queue, 'stale 999\n');
+      h.octokit.rest.issues.addLabels = vi.fn();
+      h.octokit.rest.issues.removeLabel = vi.fn();
+      h.octokit.rest.issues.listForRepo = vi.fn(async () => ({
+        data: [
+          { number: 1235, labels: ['factory:queued', 'factory:lane:app', 'factory:order:2'] },
+          { number: 1236, labels: ['factory:queued', 'factory:lane:app', 'factory:order:1'] },
+        ],
+      }));
+
+      await runMain('status');
+
+      const out = logged();
+      expect(out).toContain('== Queue (GitHub) ==');
+      expect(out).toContain('app 1236\n  app 1235');
+      expect(out).not.toContain('stale 999');
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+      expect(h.octokit.rest.issues.removeLabel).not.toHaveBeenCalled();
+    });
+
     it('prints product, models, queue, events, and STOP state', async () => {
       writeFileSync(paths().product, 'alpha\n');
       writeFileSync(paths().queue, '# comment\napp 1\napp 2\n');
@@ -800,11 +856,13 @@ bash scripts/verify.sh
         ].join('\n'),
       );
       writeFileSync(paths().stop, '');
-      await runMain('status');
+      await runMain('status', '--local-queue');
       const out = logged();
       expect(out).toContain('on-par/software-factory');
       expect(out).toContain('Product: alpha');
       expect(out).toContain('app 1');
+      expect(out).toContain('== Queue (local file) ==');
+      expect(h.octokit.rest.issues.listForRepo).not.toHaveBeenCalled();
       expect(out).toContain('ready #1: done');
       expect(out).toContain('== Health KPIs ==');
       expect(out).toContain('Merge rate:');
@@ -813,7 +871,7 @@ bash scripts/verify.sh
 
     it('handles an empty queue and no events gracefully', async () => {
       writeFileSync(paths().queue, '# only comments\n');
-      await runMain('status');
+      await runMain('status', '--local-queue');
       const out = logged();
       expect(out).toContain('(empty)');
       expect(out).toContain('(none)');
@@ -823,7 +881,7 @@ bash scripts/verify.sh
 
     it('warns on malformed queue lines and never renders NaN', async () => {
       writeFileSync(paths().queue, 'app 1\napp abc\n');
-      await runMain('status');
+      await runMain('status', '--local-queue');
       expect(logged()).toContain('app 1');
       const err = errored();
       expect(err).toContain('malformed');
@@ -832,7 +890,7 @@ bash scripts/verify.sh
     });
 
     it('prints "(no queue file)" when the queue does not exist', async () => {
-      const res = await runMain('status');
+      const res = await runMain('status', '--local-queue');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('(no queue file)');
     });
@@ -2219,6 +2277,45 @@ bash scripts/verify.sh
       const call = vi.mocked(core.planPhase).mock.calls.at(-1)?.[0] as any;
       expect(typeof call.approvalGate).toBe('function');
       expect(typeof call.drainSteering).toBe('function');
+    });
+
+    it('ships with an explicitly Codex-only repo policy when Claude is not installed', async () => {
+      const core = await import('@on-par/factory-core');
+      await vi.mocked(core.isCommandAvailable).withImplementation(
+        (command) => command === 'codex',
+        async () => {
+          writeFileSync(
+            paths().config,
+            JSON.stringify({
+              version: 2,
+              providers: { anthropic: false, openai: true, ollama: false },
+              route: 'codex',
+            }),
+          );
+          h.planResult = { ok: true, route: 'codex' };
+          const res = await runMain('ship', '5');
+          expect(res.exited).toBe(false);
+          expect(logged()).toContain('PR #99 ready for review');
+          expect(core.isCommandAvailable).not.toHaveBeenCalledWith('claude');
+        },
+      );
+    });
+
+    it('fails before starting a Codex-pinned run when the Codex CLI is missing', async () => {
+      const core = await import('@on-par/factory-core');
+      await vi.mocked(core.isCommandAvailable).withImplementation(
+        () => false,
+        async () => {
+          writeFileSync(
+            paths().config,
+            JSON.stringify({ version: 2, providers: { anthropic: false, openai: true }, route: 'codex' }),
+          );
+          const res = await runMain('ship', '5');
+          expect(res).toEqual({ exited: true, code: 2 });
+          expect(errored()).toContain('codex CLI not found');
+          expect(core.planPhase).not.toHaveBeenCalled();
+        },
+      );
     });
 
     it('exits 2 with the missing-claude message and never invokes the phase mocks when claude is unavailable', async () => {

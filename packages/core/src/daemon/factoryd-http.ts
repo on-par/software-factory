@@ -9,6 +9,7 @@
 // change.
 
 import http from 'node:http';
+import { RunRequestError, type RunRuntime } from './run-runtime.js';
 
 import { type AttachRepoDeps, attachRepo } from './repos-attach.js';
 import { beginDetach, type DetachRepoDeps, drainAndDetach } from './repos-detach.js';
@@ -23,6 +24,8 @@ export const DEFAULT_FACTORYD_PORT = 8787;
 const MAX_ATTACH_BODY_BYTES = 64 * 1024;
 
 export interface FactorydOptions {
+  /** Durable explicit-run execution port; production CLI supplies it. */
+  runRuntime?: RunRuntime;
   /** Registry file to serve. Defaults to defaultRegistryPath(). */
   registryFile?: string;
   /** Default DEFAULT_FACTORYD_PORT; pass 0 in tests for an ephemeral port. */
@@ -106,6 +109,7 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
   const registryFile = opts.registryFile ?? defaultRegistryPath();
   const desiredPort = opts.port ?? DEFAULT_FACTORYD_PORT;
   const host = opts.host ?? '127.0.0.1';
+  if (host !== '127.0.0.1' && host !== '::1') throw new Error('factoryd must bind to loopback');
   const log = opts.log ?? ((line: string) => console.log(line));
 
   // Server-scoped drain bookkeeping: the signal lets stop() cooperatively
@@ -130,6 +134,69 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
 
   async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const pathname = parsePathname(req.url);
+    const authority = req.headers.host ?? '';
+    if (
+      !/^(127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/.test(authority) ||
+      (req.headers.origin !== undefined && req.headers.origin !== `http://${authority}`)
+    ) {
+      send(res, req, 403, { error: 'Only same-origin loopback requests are accepted' });
+      return;
+    }
+    if (
+      req.method === 'POST' &&
+      pathname === '/runs' &&
+      req.headers['content-type']?.split(';')[0].trim() !== 'application/json'
+    ) {
+      send(res, req, 415, { error: 'Expected application/json' });
+      return;
+    }
+
+    if (pathname === '/runs' || pathname.startsWith('/runs/')) {
+      const runs = opts.runRuntime;
+      if (!runs) {
+        send(res, req, 503, { error: 'Run execution is unavailable' });
+        return;
+      }
+      try {
+        const parts = pathname.split('/').filter(Boolean);
+        if (parts.length === 1 && req.method === 'GET') {
+          send(res, req, 200, { runs: runs.list() });
+          return;
+        }
+        if (parts.length === 1 && req.method === 'POST') {
+          const body = await readJsonBody(req, MAX_ATTACH_BODY_BYTES);
+          if (!body.ok) {
+            send(res, req, body.tooLarge ? 413 : 400, {
+              error: body.tooLarge ? 'request body too large' : 'invalid JSON body',
+            });
+            return;
+          }
+          send(res, req, 202, { run: await runs.submit(body.value) });
+          return;
+        }
+        if (parts.length === 2 && req.method === 'GET') {
+          const run = runs.get(parts[1]);
+          send(res, req, run ? 200 : 404, run ? { run } : { error: 'Run not found' });
+          return;
+        }
+        if (parts.length === 3 && parts[2] === 'logs' && req.method === 'GET') {
+          send(res, req, 200, runs.logs(parts[1]));
+          return;
+        }
+        if (parts.length === 3 && parts[2] === 'cancel' && req.method === 'POST') {
+          send(res, req, 200, { run: await runs.cancel(parts[1]) });
+          return;
+        }
+        send(res, req, 405, { error: 'method not allowed' });
+        return;
+      } catch (error) {
+        if (error instanceof RunRequestError) {
+          send(res, req, error.status, { error: error.message });
+          return;
+        }
+        throw error;
+      }
+    }
 
     if (pathname === '/repos') {
       if (req.method === 'GET') {
@@ -189,7 +256,11 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
         return;
       }
       if (result.draining) {
-        const drain = drainAndDetach(registryFile, slug, { ...opts.detachDeps, signal: drainSignal })
+        const drain = drainAndDetach(registryFile, slug, {
+          readLaneStatuses: async () => (opts.runRuntime?.isExecuting(slug) ? ['building'] : []),
+          ...opts.detachDeps,
+          signal: drainSignal,
+        })
           .catch((err: unknown) => {
             log(`drain failed for ${slug}: ${err instanceof Error ? err.message : String(err)}`);
             return undefined;
@@ -239,6 +310,7 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
     },
     async stop(): Promise<void> {
       drainSignal.aborted = true;
+      await opts.runRuntime?.stop();
       await Promise.allSettled([...pendingDrains]);
       await new Promise<void>((resolvePromise) => {
         server.closeAllConnections();

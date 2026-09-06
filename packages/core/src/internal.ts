@@ -394,3 +394,7 @@ export {
 
 // Sandbox command wrapping — used by the CLI's doctor probe (#1008)
 export { wrapCommandInSandbox } from './sandbox/index.js';
+
+export { createRunRuntime } from './daemon/run-runtime.js';
+export type { FactoryRun, RunRuntime } from './daemon/run-runtime.js';
+export { createShipExecutor } from './daemon/ship-executor.js';

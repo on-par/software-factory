@@ -1822,6 +1822,35 @@ describe('buildPhase no-diff post-condition', () => {
       run: async () => ({ model: 'fake-model', output, exitCode: 0, attempts: [] }),
     }) as any;
 
+  it('retains a bounded, credential-redacted worker explanation when no implementation was produced', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const logs: string[] = [];
+    const output =
+      '\u001b[31mCannot write the requested file: permission denied.\u001b[0m\nTOKEN=ghp_privateCredentialValue\n' +
+      'x'.repeat(5000);
+    const result = await buildPhase({
+      issue: 1274,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath: join(worktree, 'spec.md'),
+      branch: 'ship-it/1274-diagnostics',
+      route: 'codex',
+      router: fakeRouter(output),
+      constitution: null,
+      log: (_type, message) => logs.push(message),
+      collectDiff: async () => ({ text: '', baseRef: 'origin/main', truncated: false }),
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'no_diff' });
+    const response = logs.find((message) => message.includes('Cannot write the requested file'));
+    expect(response).toBeDefined();
+    expect(response).toContain('[redacted]');
+    expect(response).toContain('[truncated]');
+    expect(response!.length).toBeLessThan(4200);
+    expect(logs.join('\n')).not.toContain('privateCredentialValue');
+    expect(response).not.toContain('\u001b');
+  });
+
   it('fails the build when the diff collector reports an empty diff', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);

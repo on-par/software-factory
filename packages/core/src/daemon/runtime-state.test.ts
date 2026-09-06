@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -44,6 +45,74 @@ describe('daemonRuntimePaths', () => {
 });
 
 describe('acquirePidFile', () => {
+  it('admits exactly one concurrent startup sharing state even when listeners use different ports', async () => {
+    const paths = await tmpPaths();
+    const outcomes = await Promise.all(Array.from({ length: 8 }, () => acquirePidFile(paths)));
+    expect(outcomes.filter((outcome) => outcome.ok)).toHaveLength(1);
+    expect(await readFile(paths.pidFile, 'utf-8')).toBe(`${process.pid}\n`);
+  });
+
+  it('admits one real process and preserves its ownership while competing processes start', async () => {
+    const paths = await tmpPaths();
+    const children: ChildProcess[] = [];
+    const source = new URL('./runtime-state.ts', import.meta.url).href;
+    const script = `
+      import { acquirePidFile, daemonRuntimePaths } from ${JSON.stringify(source)};
+      try {
+        const result = await acquirePidFile(daemonRuntimePaths(${JSON.stringify(paths.dir)}));
+        console.log(JSON.stringify({ acquired: result.ok, pid: process.pid }));
+      } catch { console.log(JSON.stringify({ acquired: false, pid: process.pid })); }
+      process.stdin.resume();
+      await new Promise(resolve => process.stdin.once('end', resolve));
+    `;
+    try {
+      const outcomes = await Promise.all(
+        Array.from(
+          { length: 4 },
+          () =>
+            new Promise<{ acquired: boolean; pid: number }>((resolve, reject) => {
+              const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], {
+                stdio: ['pipe', 'pipe', 'pipe'],
+              });
+              children.push(child);
+              let output = '';
+              child.stdout!.on('data', (chunk: Buffer) => {
+                output += chunk.toString();
+                if (output.includes('\n')) resolve(JSON.parse(output.trim()) as { acquired: boolean; pid: number });
+              });
+              child.once('error', reject);
+              child.once('exit', () => {
+                if (!output) reject(new Error('PID contender exited before reporting'));
+              });
+            }),
+        ),
+      );
+      const winners = outcomes.filter((outcome) => outcome.acquired);
+      expect(winners).toHaveLength(1);
+      expect(await readFile(paths.pidFile, 'utf8')).toBe(`${winners[0]!.pid}\n`);
+    } finally {
+      await Promise.all(
+        children.map(
+          (child) =>
+            new Promise<void>((resolve) => {
+              if (child.exitCode !== null || child.signalCode !== null) {
+                resolve();
+                return;
+              }
+              child.once('exit', () => resolve());
+              child.stdin!.end();
+            }),
+        ),
+      );
+    }
+  });
+
+  it('fails closed on an unreadable pid path instead of overwriting unknown ownership', async () => {
+    const paths = await tmpPaths();
+    await mkdir(paths.pidFile, { recursive: true });
+    await expect(acquirePidFile(paths)).rejects.toThrow();
+  });
+
   it('acquires a fresh dir, creating it and writing the own pid', async () => {
     const paths = await tmpPaths();
     const result = await acquirePidFile(paths, { pid: 4242 });

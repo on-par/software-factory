@@ -38,10 +38,30 @@ start observes the dead pid and proceeds, which is the whole point. Accepted
 risks: pid reuse can make a stale file look live (mitigated only by
 loopback-port bind exclusivity failing the impostor scenario's second listener,
 and by the operator-visible "already running (pid N)" message naming a
-checkable pid); two daemons racing acquisition have no arbiter, but the
-exclusive port bind serializes the outcome. Later slices (status/stop verbs,
+checkable pid). Later slices (status/stop verbs,
 launchd) MUST read `daemon.port`/`daemon.pid` from `dirname(registry)` and
 must not introduce a second state root.
+
+### 2026-09-06 clarification: serialize PID-file mutations
+
+Explicit run records make the state directory a durable execution store. Port
+exclusivity does not protect that store when two startups choose different ports.
+Concurrent read/check/write acquisition reproduced with eight successful holders
+of one PID file, so port exclusivity is no longer an accepted race mitigation.
+
+Acquisition and release now use the existing fenced file-lock implementation only
+for their short synchronous PID-file mutation, with `timeoutMs: 0`. The lock is
+released before startup returns and is never held for the daemon lifetime. The
+dedicated PID guard remains authoritative for a running daemon; competing startup
+or shutdown mutations fail immediately rather than waiting. Release performs its
+ownership check and both removals under the same critical section.
+
+A crash after creating the short claim directory but before writing its PID can
+leave an ownerless claim. The existing ten-second initialization grace applies to
+that case: a startup fails fast and the operator can retry after the grace. A
+fully initialized dead claim is reclaimed by PID liveness. Unreadable PID state
+fails closed. Tests exercise both concurrent calls and four real competing Node
+processes, keeping the winner alive until every contender has reported.
 
 ## References
 

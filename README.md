@@ -126,7 +126,8 @@ factory local-small-dry-run <N>     Dry-run an issue against local small models 
 factory land <N>                    Squash-merge a ready PR and clean up its worktree
 factory run                         Process the whole queue (lanes in parallel)
 factory supervise [--now]           Unattended loop: wait for usage headroom, run the queue, repeat
-factory status                      Show queue, events, PRs, models
+factory status                      Show GitHub queue, events, PRs, models
+factory status --local-queue        Show the legacy local queue instead
 factory cost                        Show cost tracking summary
 factory usage                       Report trailing-5h subscription usage vs cap
 factory stop                        Halt between issues

@@ -1,6 +1,7 @@
 // src/phases/build.ts — BUILD phase: worker model implements the frozen spec
 
 import { readFile } from 'node:fs/promises';
+import { stripVTControlCharacters } from 'node:util';
 
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
 import { captureDiffBase, collectDesignDiff } from '../checkers/design-smells.js';
@@ -10,6 +11,7 @@ import { laneEnv } from '../environment/index.js';
 import type { EventKind } from '../events/kinds.js';
 import type { ModelRouter, RouterResult } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
+import { redactSecrets } from '../router/failure-detail.js';
 import type { SandboxEventType, SandboxPolicy } from '../sandbox/index.js';
 import { applySteering, type ConsumedSteering } from '../steering/index.js';
 import type { Constitution, FailoverReason } from '../types/index.js';
@@ -287,6 +289,13 @@ async function buildPhaseImpl(opts: {
     const detail = junkOnly
       ? `worker changed only generated/cache files against ${diff.baseRef} (${diff.excludedPaths!.slice(0, 10).join(', ')}); no implementation was produced`
       : `worker produced no diff against ${diff.baseRef}; no implementation was produced`;
+    // Preserve the worker's explanation for a blocked/no-op result. Redact
+    // before truncating so a credential crossing the boundary cannot leak.
+    const response = redactSecrets(stripVTControlCharacters(result.output)).trim();
+    if (response) {
+      const excerpt = response.length > 4000 ? `${response.slice(0, 4000)} [truncated]` : response;
+      log('build', `Worker response before failed diff check (model ${result.model}): ${excerpt}`);
+    }
     log('fail', detail);
     return { ok: false, model: result.model, route, reason: junkOnly ? 'junk_only_diff' : 'no_diff' };
   }

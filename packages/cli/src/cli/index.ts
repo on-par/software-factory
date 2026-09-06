@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import { userInfo } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 
 import type { Octokit } from '@octokit/rest';
 import type {
@@ -157,6 +158,8 @@ import {
   cleanupWorktree,
   createDaemonLogSink,
   createFactorydServer,
+  createRunRuntime,
+  createShipExecutor,
   createGithubQueue,
   createLocalSmallDryRun,
   createOctokitGreenPrClient,
@@ -842,7 +845,7 @@ function warnQueueDiagnostics(diagnostics: QueueDiagnostic[]): void {
   }
 }
 
-export async function cmdStatus() {
+export async function cmdStatus(opts: { localQueue?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
   const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
@@ -883,17 +886,33 @@ export async function cmdStatus() {
     }
   }
 
-  console.log(chalk.bold('\n== Queue =='));
-  if (existsSync(paths.queue)) {
-    const { entries, diagnostics } = parseQueue(readFileSync(paths.queue, 'utf-8'));
-    if (entries.length > 0) {
-      for (const e of entries) console.log(`  ${e.lane} ${e.issue}`);
-    } else if (diagnostics.length === 0) {
-      console.log('  (empty)');
+  if (opts.localQueue) {
+    console.log(chalk.bold('\n== Queue (local file) =='));
+    if (existsSync(paths.queue)) {
+      const { entries, diagnostics } = parseQueue(readFileSync(paths.queue, 'utf-8'));
+      if (entries.length > 0) {
+        for (const e of entries) console.log(`  ${e.lane} ${e.issue}`);
+      } else if (diagnostics.length === 0) {
+        console.log('  (empty)');
+      }
+      warnQueueDiagnostics(diagnostics);
+    } else {
+      console.log('  (no queue file)');
     }
-    warnQueueDiagnostics(diagnostics);
   } else {
-    console.log('  (no queue file)');
+    console.log(chalk.bold('\n== Queue (GitHub) =='));
+    try {
+      const [owner, repo] = ghRepo.split('/');
+      const queue = createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo });
+      const rows: string[] = [];
+      for (const lane of await queue.lanes()) {
+        for (const issue of await queue.list(lane)) rows.push(`  ${lane} ${issue}`);
+      }
+      for (const row of rows) console.log(row);
+      if (rows.length === 0) console.log('  (empty)');
+    } catch {
+      console.log('  (unavailable — check GitHub access and factory queue labels)');
+    }
   }
 
   console.log(chalk.bold('\n== Last Events =='));
@@ -1492,13 +1511,18 @@ async function cmdShip(
   issueNum: number,
   opts: { product?: string; autoRework?: boolean; interactive?: boolean; sandbox?: boolean; approvePlan?: boolean },
 ) {
-  if (!isCommandAvailable('claude')) {
-    throw new CliExitError(`factory: ${missingClaudeCliMessage()}`, 2);
-  }
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   if (!existsSync(paths.root)) {
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
+  }
+
+  const repoConfig = loadRepoConfig(repoRoot, paths.root);
+  if (repoConfig?.providers?.anthropic !== false && !isCommandAvailable('claude')) {
+    throw new CliExitError(`factory: ${missingClaudeCliMessage()}`, 2);
+  }
+  if (repoConfig?.route === 'codex' && !isCommandAvailable('codex')) {
+    throw new CliExitError('factory: codex CLI not found — install Codex and run `codex login` before shipping', 2);
   }
 
   const mergeNotice = mergeScopeNotice(process.env, issueNum);
@@ -2365,9 +2389,22 @@ async function cmdFactoryd(opts: { port?: string; registry?: string }): Promise<
   };
   if (acquired.stalePid !== null) log(`removed stale pid file (pid ${acquired.stalePid})`);
 
-  const daemon = createFactorydServer({ registryFile, port, log });
-  const boundPort = await daemon.start();
-  await writePortFile(runtime, boundPort);
+  let runRuntime: Awaited<ReturnType<typeof createRunRuntime>> | undefined;
+  let daemon: ReturnType<typeof createFactorydServer>;
+  let boundPort: number;
+  try {
+    runRuntime = await createRunRuntime({
+      registryFile,
+      execute: createShipExecutor({ cliEntrypoint: fileURLToPath(new URL('../cli.js', import.meta.url)) }),
+    });
+    daemon = createFactorydServer({ registryFile, port, log, runRuntime });
+    boundPort = await daemon.start();
+    await writePortFile(runtime, boundPort);
+  } catch (error) {
+    await runRuntime?.stop().catch(() => {});
+    await releaseRuntimeFiles(runtime);
+    throw error;
+  }
   const banner = [
     `factoryd: listening on 127.0.0.1:${boundPort}`,
     `  registry: ${registryFile}`,
@@ -2375,6 +2412,7 @@ async function cmdFactoryd(opts: { port?: string; registry?: string }): Promise<
     `  port file: ${runtime.portFile}`,
     `  log file: ${runtime.logFile}`,
     `  GET http://127.0.0.1:${boundPort}/repos`,
+    `  GET/POST http://127.0.0.1:${boundPort}/runs`,
   ];
   console.log(chalk.green(banner[0]));
   for (const line of banner.slice(1)) console.log(line);
@@ -3924,7 +3962,11 @@ export async function main() {
     .description('Report real 5h subscription usage (with a list-price heuristic fallback)')
     .action(cmdUsage);
 
-  program.command('status').description('Show queue, events, PRs, models').action(cmdStatus);
+  program
+    .command('status')
+    .description('Show queue, events, PRs, models')
+    .option('--local-queue', 'Read .factory/queue instead of the GitHub Issues queue')
+    .action((opts: { localQueue?: boolean }) => cmdStatus(opts));
 
   program.command('kpis').description('Compute factory health KPIs and record a trend snapshot').action(cmdKpis);
 

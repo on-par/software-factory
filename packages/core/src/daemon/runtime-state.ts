@@ -2,14 +2,15 @@
 // (#1177, epic #764): daemon.pid (single-instance guard), daemon.port (bound
 // address record), daemon.log (append-only stdout copy), colocated with the
 // registry file (~/.factory by default). The pid file is deliberately NOT the
-// ADR-0009 fenced file lock: a daemon guard must fail fast when a live holder
-// exists and must never queue or steal on a grace window — see the ADR shipped
-// with this change (ADR-0076).
+// ADR-0009 fenced file lock: the daemon lifetime still uses pid liveness. A
+// bounded, fail-fast claim critical section only serializes pid-file changes
+// so competing listeners on different ports cannot share a state directory.
 
-import { appendFileSync, mkdirSync } from 'node:fs';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { withFileLockSync } from '../utils/lock.js';
 
 export interface DaemonRuntimePaths {
   /** The state directory itself (default `~/.factory`). */
@@ -63,29 +64,31 @@ function defaultIsPidAlive(pid: number): boolean {
 
 /** Fail-fast single-instance guard. A live holder refuses acquisition
  *  immediately (never waits, never steals); a dead-pid or garbage pid file is
- *  stale and is overwritten in place — so a SIGKILLed daemon can never leave
- *  an orphaned lock that blocks the next start. */
+ *  stale and is overwritten under a short mutation lock. A crash during that
+ *  lock's initialization can require a retry after its bounded stale grace. */
 export async function acquirePidFile(
   paths: DaemonRuntimePaths,
   opts: AcquirePidFileOptions = {},
 ): Promise<AcquirePidFileResult> {
   const pid = opts.pid ?? process.pid;
   const isPidAlive = opts.isPidAlive ?? defaultIsPidAlive;
-  await mkdir(paths.dir, { recursive: true });
-
-  let holder: number | null = null;
-  try {
-    const raw = (await readFile(paths.pidFile, 'utf-8')).trim();
-    const parsed = Number(raw);
-    if (/^\d+$/.test(raw) && Number.isInteger(parsed) && parsed > 0) holder = parsed;
-  } catch {
-    // Missing or unreadable file — stale-or-absent either way.
-  }
-
-  if (holder !== null && isPidAlive(holder)) return { ok: false, holderPid: holder };
-
-  await writeFile(paths.pidFile, `${pid}\n`);
-  return { ok: true, stalePid: holder };
+  return withFileLockSync(
+    `${paths.pidFile}.claim`,
+    () => {
+      let holder: number | null = null;
+      try {
+        const raw = readFileSync(paths.pidFile, 'utf-8').trim();
+        const parsed = Number(raw);
+        if (/^\d+$/.test(raw) && Number.isInteger(parsed) && parsed > 0) holder = parsed;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+      if (holder !== null && isPidAlive(holder)) return { ok: false, holderPid: holder };
+      writeFileSync(paths.pidFile, `${pid}\n`, { mode: 0o600 });
+      return { ok: true, stalePid: holder };
+    },
+    { timeoutMs: 0 },
+  );
 }
 
 /** Records the actually-bound listener as JSON `{ pid, port, host }` — the
@@ -100,10 +103,16 @@ export async function writePortFile(paths: DaemonRuntimePaths, port: number, hos
 export async function releaseRuntimeFiles(paths: DaemonRuntimePaths, opts: { pid?: number } = {}): Promise<void> {
   const pid = opts.pid ?? process.pid;
   try {
-    const raw = (await readFile(paths.pidFile, 'utf-8')).trim();
-    if (Number(raw) !== pid) return;
-    await rm(paths.pidFile, { force: true });
-    await rm(paths.portFile, { force: true });
+    withFileLockSync(
+      `${paths.pidFile}.claim`,
+      () => {
+        const raw = readFileSync(paths.pidFile, 'utf-8').trim();
+        if (Number(raw) !== pid) return;
+        rmSync(paths.portFile, { force: true });
+        rmSync(paths.pidFile, { force: true });
+      },
+      { timeoutMs: 0 },
+    );
   } catch {
     // Unreadable pid file or failed rm: leave whatever is there in place.
   }

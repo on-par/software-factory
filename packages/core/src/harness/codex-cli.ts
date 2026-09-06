@@ -30,10 +30,12 @@ export class CodexCliHarness implements CodingHarness {
     const outFile = await mktemp(join(tmpdir(), 'factory-codex-out-'));
     await writeFile(tmpFile, prompt);
 
-    // With an outer containment sandbox, codex runs workspace-write inside it. Without one,
-    // workspace-write is codex's own restriction and blocks legitimate writes, so the run
-    // produces a blocked no-op spec instead of an implementation (#834).
-    const codexSandbox = sandbox ? 'workspace-write' : 'danger-full-access';
+    // macOS rejects nested Seatbelt activation: Codex workspace-write attempts
+    // sandbox_apply inside the factory's sandbox-exec and even `pwd` fails.
+    // Keep the enclosing factory policy intact and let it enforce containment.
+    // Other outer runtimes retain Codex's additional workspace restriction;
+    // the established no-outer-sandbox behavior remains unchanged (#834).
+    const codexSandbox = sandbox && sandbox.runtime !== 'sandbox-exec' ? 'workspace-write' : 'danger-full-access';
     const cmd = `codex exec --json --sandbox ${codexSandbox} -c approval_policy=never -C ${shellEscape(worktree)} ${extraFlag} -o ${shellEscape(outFile)} - < ${shellEscape(tmpFile)}`;
     const finalCmd = sandbox ? wrapCommandInSandbox(cmd, sandbox) : cmd;
 

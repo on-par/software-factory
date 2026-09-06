@@ -9,3 +9,4 @@ package-lock.json
 evals/
 packages/dashboard/src/index.css
 packages/scbench-adapter/src/__fixtures__/
+.playwright-mcp/
