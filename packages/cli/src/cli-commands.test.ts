@@ -1817,6 +1817,38 @@ bash scripts/verify.sh
       expect(logged()).not.toContain('listening on');
     });
 
+    it('releases the daemon claim when corrupt durable run state prevents startup', async () => {
+      const registryFile = join(paths().state, 'registry.json');
+      const runsFile = join(paths().state, 'runs.json');
+      writeFileSync(runsFile, '{invalid-json');
+
+      await expect(runMain('daemon', 'run', '--port', '0', '--registry', registryFile)).rejects.toThrow(SyntaxError);
+      expect(existsSync(join(paths().state, 'daemon.pid'))).toBe(false);
+      expect(existsSync(join(paths().state, 'daemon.port'))).toBe(false);
+      expect(readFileSync(runsFile, 'utf8')).toBe('{invalid-json');
+      expect(logged()).not.toContain('listening on');
+    });
+
+    it('releases runtime files when another process already owns the requested port', async () => {
+      const { createServer } = await import('node:net');
+      const listener = createServer();
+      await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve));
+      const address = listener.address();
+      if (!address || typeof address === 'string') throw new Error('Expected a TCP listener');
+      try {
+        const registryFile = join(paths().state, 'registry.json');
+        await expect(
+          runMain('daemon', 'run', '--port', String(address.port), '--registry', registryFile),
+        ).rejects.toMatchObject({ code: 'EADDRINUSE' });
+        expect(existsSync(join(paths().state, 'daemon.pid'))).toBe(false);
+        expect(existsSync(join(paths().state, 'daemon.port'))).toBe(false);
+        expect(listener.listening).toBe(true);
+        expect(logged()).not.toContain('listening on');
+      } finally {
+        await new Promise<void>((resolve, reject) => listener.close((error) => (error ? reject(error) : resolve())));
+      }
+    });
+
     it('a stale pid file from a killed daemon does not block a restart', async () => {
       const registryFile = join(paths().state, 'registry.json');
       writeFileSync(registryFile, JSON.stringify({ version: 1, repos: {} }));
