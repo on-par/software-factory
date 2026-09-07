@@ -26,6 +26,7 @@ import type { CheckSummary, Constitution } from '../types/index.js';
 import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
 import type { Environment, Workspace } from './ports.js';
+import { preflightPublication as checkPublication } from './publication-preflight.js';
 
 vi.mock('../phases/plan.js', () => ({ planPhase: vi.fn() }));
 vi.mock('../phases/build.js', () => ({ buildPhase: vi.fn() }));
@@ -146,6 +147,7 @@ function basePorts(overrides: Partial<RunPorts> = {}): RunPorts {
     octokit: {} as Octokit,
     workspace: { path: '/tmp/wt', dispose: async () => {} } as Workspace,
     events: () => vi.fn(),
+    preflightPublication: async () => {},
     breaker: new ProviderBreaker(`/tmp/run-issue-test-breaker-${breakerFileCounter}.json`),
     resolveConstitution: () => null,
     ...overrides,
@@ -228,6 +230,49 @@ describe('runIssue publication boundary', () => {
     } finally {
       await rm(worktree, { recursive: true, force: true });
     }
+  });
+});
+
+describe('runIssue — publication readiness', () => {
+  it('classifies a transport deadline as timeout without beginning PLAN', async () => {
+    const outcome = await runIssue(
+      baseRequest(),
+      basePolicy(),
+      basePorts({
+        preflightPublication: () =>
+          checkPublication({
+            cwd: '/tmp/wt',
+            branch: 'factory/fixture',
+            exec: vi.fn().mockRejectedValue(Object.assign(new Error('sensitive helper output'), { killed: true })),
+          }),
+      }),
+    );
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'timeout' });
+    expect(planPhase).not.toHaveBeenCalled();
+  });
+  it('parks before PLAN when Git publication is unavailable, even with an authenticated API port', async () => {
+    const preflightPublication = vi.fn().mockRejectedValue(new Error('Git publication is unavailable'));
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ preflightPublication }));
+    expect(outcome.state).toBe('parked');
+    expect(preflightPublication).toHaveBeenCalledOnce();
+    expect(planPhase).not.toHaveBeenCalled();
+    expect(buildPhase).not.toHaveBeenCalled();
+    expect(shipPhase).not.toHaveBeenCalled();
+  });
+
+  it('uses the real transport preflight by default before any model call', async () => {
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ preflightPublication: undefined }));
+    expect(outcome.state).toBe('parked');
+    expect(planPhase).not.toHaveBeenCalled();
+  });
+
+  it('does not touch publication credentials for a local-only workspace', async () => {
+    const preflightPublication = vi.fn().mockRejectedValue(new Error('No origin or credentials'));
+    const outcome = await runIssue(baseRequest({ localOnly: true }), basePolicy(), basePorts({ preflightPublication }));
+    expect(preflightPublication).not.toHaveBeenCalled();
+    expect(planPhase).toHaveBeenCalledOnce();
+    expect(outcome.state).toBe('ready');
+    expect(shipPhase).not.toHaveBeenCalled();
   });
 });
 

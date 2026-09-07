@@ -200,7 +200,8 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
     buildPhase: buildPhaseMock,
     checkPhase: checkPhaseMock,
     shipPhase: shipPhaseMock,
-    runIssue: actual.runIssue,
+    runIssue: (request: FactoryCore.RunRequest, policy: FactoryCore.RunPolicy, ports: FactoryCore.RunPorts) =>
+      actual.runIssue(request, policy, { ...ports, preflightPublication: async () => {} }),
     // Usage / reports.
     estimateTrailingSpend: vi.fn(() => h.trailingSpend),
     formatUsageReport: vi.fn(() => 'USAGE REPORT'),

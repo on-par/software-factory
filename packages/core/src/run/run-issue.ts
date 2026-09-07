@@ -34,6 +34,7 @@ import type { WorkRequest, WorkRequestSourceKind } from '../work/index.js';
 import { parkReasonFor, type BuildRoute, type ParkReason, type RunOutcome } from './outcome.js';
 import type { RunPolicy } from './policy.js';
 import type { Environment, Workspace } from './ports.js';
+import { preflightPublication } from './publication-preflight.js';
 
 /** Everything one run needs decided, as a plain resolved value — the CLI adapter
  *  computes this today; no config/file/path resolution happens in here. */
@@ -108,6 +109,8 @@ export interface RunPorts {
   workspace: Workspace;
   /** `mkLog` factory: `events(phase)` returns the log function phases/runIssue emit through. */
   events: (phase?: string) => LogFn;
+  /** Checks Git publication before spending model quota. Local-only runs skip this port. */
+  preflightPublication?: () => Promise<void>;
   /** Acquires the lane's leased port + process-group tracking. A rejection here degrades
    *  the run (appPort left undefined) rather than parking it (Invariant 4). */
   acquireEnvironment?: () => Promise<Environment>;
@@ -276,6 +279,17 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
   };
 
   try {
+    if (!request.localOnly) {
+      await (
+        ports.preflightPublication ??
+        (() =>
+          preflightPublication({
+            cwd: ports.workspace.path,
+            branch: request.branch,
+            onPgid: (pgid) => tracker.track(pgid),
+          }))
+      )();
+    }
     if (ports.acquireEnvironment) {
       try {
         environment = await ports.acquireEnvironment();
