@@ -326,6 +326,14 @@ ${compactForLocalModel(spec)}
 `;
 }
 
+const VERIFICATION_GUIDANCE = `Follow the target repository's explicit verification instructions and the frozen
+spec. Run the required commands as written; use a fast path only when those
+instructions explicitly provide one. Do not substitute a shortcut based on
+assumptions about this repository or another project's test suite.
+Report each command and its actual result. If a required check was not completed,
+say so rather than claiming it passed. Independent CHECK still runs after BUILD;
+your verification report does not replace it.`;
+
 export function buildOpencodePrompt(opts: {
   issue: number;
   specPath: string;
@@ -346,10 +354,7 @@ ${spec}
 
 Match surrounding code style and idioms. Add or update the tests described in the
 spec's Tests section and actually run them — report the exact command and its output.
-If the repo has a fast verify path, run \`scripts/verify.sh --no-e2e\` (NOT bare
-\`scripts/verify.sh\` or \`npm test\` — those run the full integration suite, which
-has a known intermittent multi-hour hang; see #739) and fix failures before
-finishing. Real CI still runs the full suite on the PR, so this is safe.
+${VERIFICATION_GUIDANCE}
 
 When everything passes, commit your work. Commit atomically: create one commit
 per independently testable functional change, each with a clear, conventional
@@ -391,10 +396,7 @@ ${spec}
 
 Match surrounding code style and idioms. Add or update the tests described in the
 spec's Tests section and actually run them — report the exact command and its output.
-If the repo has a fast verify path, run \`scripts/verify.sh --no-e2e\` (NOT bare
-\`scripts/verify.sh\` or \`npm test\` — those run the full integration suite, which
-has a known intermittent multi-hour hang; see #739) and fix failures before
-finishing. Real CI still runs the full suite on the PR, so this is safe.
+${VERIFICATION_GUIDANCE}
 
 When everything passes, commit your work. Commit atomically: create one commit
 per independently testable functional change, each with a clear, conventional

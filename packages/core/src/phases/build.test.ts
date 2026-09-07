@@ -69,6 +69,59 @@ afterEach(async () => {
   tempDirs.clear();
 });
 
+describe('buildPhase target verification contract', () => {
+  const contracts = [
+    {
+      name: 'required full verification',
+      spec: '# Spec\n## Verification\nRun `bash scripts/verify.sh` with its full coverage gate.\n',
+    },
+    {
+      name: 'explicit target fast path',
+      spec: '# Spec\n## Verification\nThe documented fast path is `node tools/check.mjs --fast --contracts`.\n',
+    },
+    { name: 'no explicit fast path', spec: '# Spec\nUpdate the widget and add focused regression tests.\n' },
+  ];
+  const cases = (['codex', 'claude', 'opencode'] as const).flatMap((route) =>
+    contracts.map((contract) => ({ route, ...contract })),
+  );
+
+  it.each(cases)('$route preserves $name without inventing an engine shortcut', async ({ route, spec }) => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-verification-contract-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'spec.md');
+    await writeFile(specPath, spec);
+    const task = route === 'codex' ? 'build_codex' : route === 'claude' ? 'build_claude' : 'build_opencode';
+    const stub = new StubModelExecutor({ scripts: { [task]: [{ output: 'Implemented and verified.' }] } });
+    const targetRoutes: RoutesConfig = {
+      ...routes,
+      routes: { ...routes.routes, build_opencode: { tier: 'worker', description: 'stub' } },
+    };
+    const result = await buildPhase({
+      issue: 1272,
+      repo: 'example/widgets',
+      worktree,
+      specPath,
+      branch: 'feature/widget',
+      route,
+      router: new ModelRouter(models, targetRoutes, false, stub),
+      constitution: null,
+      log: () => {},
+      disablePublish: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(stub.calls[0].prompt).toContain(spec);
+    expect(stub.calls[0].prompt).not.toContain('#739');
+    expect(stub.calls[0].prompt).not.toContain('--no-e2e');
+    expect(stub.calls[0].prompt).not.toContain('npm test');
+    expect(stub.calls[0].prompt).toContain('use a fast path only when those\ninstructions explicitly provide one');
+    expect(stub.calls[0].prompt).toContain(
+      'If a required check was not completed,\nsay so rather than claiming it passed',
+    );
+    expect(stub.calls[0].prompt).toContain('Independent CHECK still runs after BUILD');
+  });
+});
+
 describe('buildPhase FACTORY_CODEX kill-switch', () => {
   it('falls back to build_claude and logs a warn when codex is disabled via the opt', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
