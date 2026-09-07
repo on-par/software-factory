@@ -8,12 +8,13 @@ import type { Octokit } from '@octokit/rest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
-import type { BuildResult } from '../phases/build.js';
+import type { buildPhase as BuildPhaseFn, BuildResult } from '../phases/build.js';
 import type { CheckPhaseResult } from '../phases/check.js';
 import type { PlanResult } from '../phases/plan.js';
 import type { ShipResult } from '../phases/ship.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
+import { StubModelExecutor } from '../router/stub.js';
 import {
   applySteering,
   drainSteering,
@@ -85,7 +86,10 @@ const ROUTES: RoutesConfig = {
 /** A real ModelRouter (matching the rest of core's tests, e.g. phases/build.test.ts)
  *  over a minimal in-memory model set — avoids hand-rolling a partial ModelRouter
  *  double, which the codebase's structural-typing lint forbids for a class this shaped. */
-function fakeRouter(modelDefs: Record<string, { provider: string; codex?: boolean }> = {}): ModelRouter {
+function fakeRouter(
+  modelDefs: Record<string, { provider: string; codex?: boolean }> = {},
+  executor?: StubModelExecutor,
+): ModelRouter {
   const models: ModelsConfig = {
     version: 1,
     models: Object.fromEntries(
@@ -107,7 +111,7 @@ function fakeRouter(modelDefs: Record<string, { provider: string; codex?: boolea
     failover: { triggers: [], maxRetries: 0, cooldownMs: 0, escalateAfterTierExhausted: false },
     routingRules: {},
   };
-  return new ModelRouter(models, ROUTES);
+  return new ModelRouter(models, ROUTES, false, executor);
 }
 
 function basePolicy(overrides: Partial<RunPolicy> = {}): RunPolicy {
@@ -153,6 +157,78 @@ beforeEach(() => {
   vi.mocked(buildPhase).mockReset().mockResolvedValue(BUILD_OK);
   vi.mocked(checkPhase).mockReset().mockResolvedValue(CHECK_OK);
   vi.mocked(shipPhase).mockReset().mockResolvedValue(SHIP_OK);
+});
+
+describe('runIssue publication boundary', () => {
+  it.each([
+    ['claude', false, true],
+    ['codex', false, true],
+    ['claude', true, true],
+    ['codex', true, true],
+    ['claude', false, false],
+    ['codex', false, false],
+  ] as const)('keeps %s BUILD commit-only (failover=%s, CHECK passes=%s)', async (route, failover, checkPasses) => {
+    const worktree = await mkdtemp(join(tmpdir(), 'run-publication-boundary-'));
+    try {
+      const specPath = join(worktree, 'spec.md');
+      await writeFile(specPath, '# Spec\nUpdate the widget and verify it.\n');
+      const stub = new StubModelExecutor({
+        scripts: {
+          build_claude: [
+            route === 'claude' && failover ? { fail: 'usage_cap' } : { output: 'Committed the widget update.' },
+          ],
+          build_codex: [
+            route === 'codex' && failover ? { fail: 'usage_cap' } : { output: 'Committed the widget update.' },
+          ],
+        },
+      });
+      const router = fakeRouter(
+        { 'stub-claude': { provider: 'custom' }, 'stub-codex': { provider: 'openai', codex: true } },
+        stub,
+      );
+      const actualBuild = await vi.importActual<{ buildPhase: typeof BuildPhaseFn }>('../phases/build.js');
+      vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, route });
+      if (!checkPasses)
+        vi.mocked(checkPhase).mockResolvedValue({
+          passed: false,
+          reworkRounds: 0,
+          summary: {
+            failures: 1,
+            passes: 0,
+            skips: 0,
+            total: 1,
+            results: [{ checker: 'tests', result: 'FAIL', details: 'Widget assertion failed.' }],
+          },
+        });
+
+      const outcome = await runIssue(
+        baseRequest({ specPath, failover: { enabled: failover, cooldownMs: 0, fallbackModel: 'stub-claude' } }),
+        basePolicy(),
+        basePorts({
+          router,
+          workspace: { path: worktree, dispose: async () => {} } as Workspace,
+          buildPhase: actualBuild.buildPhase,
+        }),
+      );
+
+      expect(outcome.state).toBe(checkPasses ? 'ready' : 'parked');
+      const tasks = [`build_${route}`];
+      if (failover) tasks.push(route === 'claude' ? 'build_codex' : 'build_claude');
+      expect(stub.calls.map((call) => call.task)).toEqual(tasks);
+      for (const call of stub.calls) {
+        expect(call.prompt).toContain('Do NOT push, do NOT open a pull request, do NOT merge');
+        expect(call.prompt).not.toContain('open PR exists');
+      }
+      expect(checkPhase).toHaveBeenCalledTimes(1);
+      expect(shipPhase).toHaveBeenCalledTimes(checkPasses ? 1 : 0);
+      if (checkPasses)
+        expect(vi.mocked(checkPhase).mock.invocationCallOrder[0]).toBeLessThan(
+          vi.mocked(shipPhase).mock.invocationCallOrder[0],
+        );
+    } finally {
+      await rm(worktree, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('runIssue — invariant 1: constitution resolved exactly once', () => {

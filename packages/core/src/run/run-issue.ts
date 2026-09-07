@@ -422,7 +422,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       log: ports.events('build'),
       timeoutSeconds: request.timeouts.build,
       skipCI: request.skipCI,
-      disablePublish: Boolean(request.localOnly),
+      disablePublish: true,
       modelOverride: buildModel,
       codexFallbackModel: request.modelPins.buildFallback ?? ports.router.resolveAll('build_codex')[0],
       onProviderFailure: rememberProviderFailure,

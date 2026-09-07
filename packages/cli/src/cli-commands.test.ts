@@ -2653,7 +2653,7 @@ Please add a widget that does the thing.
       expect(planArgs.workSource).toEqual({ kind: 'local-brief', params: { path: briefPath } });
 
       const buildArgs = vi.mocked(core.buildPhase).mock.calls.at(-1)?.[0] as any;
-      expect(buildArgs.disablePublish).toBeFalsy();
+      expect(buildArgs.disablePublish).toBe(true);
 
       const shipArgs = vi.mocked(core.shipPhase).mock.calls.at(-1)?.[0] as any;
       expect(shipArgs.work).toMatchObject({ kind: 'local-brief' });
