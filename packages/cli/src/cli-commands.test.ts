@@ -23,6 +23,9 @@ const h = vi.hoisted(() => {
       throw new Error('execSync not stubbed');
     },
     claudeAvailable: undefined as boolean | undefined,
+    inferenceCalls: [] as Array<{ model: string; prompt: string; context: any }>,
+    inferenceError: null as Error | null,
+    httpInferenceCalls: [] as any[],
     // octokit instance returned by `new Octokit()`
     octokit: {} as any,
     // configurable core behaviour
@@ -171,7 +174,14 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
           getClaudeFlag: () => '--flag',
           getModelsInTier: () => ['m'],
           get: (id: string) => (h.modelProviders[id] ? { provider: h.modelProviders[id] } : undefined),
-          getHarnessId: (id: string) => (h.modelProviders[id] === 'anthropic' ? 'claude-cli' : 'codex-cli'),
+          getHarnessId: (id: string) =>
+            h.modelProviders[id] === 'deepseek'
+              ? 'opencode'
+              : h.modelProviders[id] === 'ollama'
+                ? 'ollama-command-agent'
+                : h.modelProviders[id] === 'anthropic'
+                  ? 'claude-cli'
+                  : 'codex-cli',
           isCodexModel: (id: string) => h.modelProviders[id] === 'openai',
         },
         setCostSink: vi.fn((sink: (entry: any) => void) => {
@@ -217,6 +227,23 @@ vi.mock('@on-par/factory-core/internal', async (importOriginal) => {
   const actual = await importOriginal<typeof FactoryCoreInternal>();
   return {
     ...actual,
+    OllamaHttpHarness: vi.fn(function () {
+      return {
+        run: vi.fn(async (request) => {
+          h.httpInferenceCalls.push(request);
+          return { output: 'ok' };
+        }),
+      };
+    }),
+    CliModelExecutor: vi.fn(function () {
+      return {
+        runModel: vi.fn(async (model: string, prompt: string, context: any) => {
+          h.inferenceCalls.push({ model, prompt, context });
+          if (h.inferenceError) throw h.inferenceError;
+          return 'ok';
+        }),
+      };
+    }),
     watchChecks: vi.fn(async () => 'success'),
     createLocalSmallDryRun: vi.fn(async () => ({ planPath: '/tmp/plan.md', contextPath: '/tmp/ctx.md' })),
     // Cost.
@@ -406,6 +433,9 @@ beforeEach(() => {
   h.runTuiCalls = [];
   h.setupWorktreeImpl = async () => {};
   h.claudeAvailable = undefined;
+  h.inferenceCalls = [];
+  h.httpInferenceCalls = [];
+  h.inferenceError = null;
   h.orphanEvents = [];
   h.portListeners = [];
 
@@ -2351,6 +2381,39 @@ bash scripts/verify.sh
       expect(typeof call.drainSteering).toBe('function');
     });
 
+    it('does not require unused Claude enrichment for a ready Codex issue', async () => {
+      const core = await import('@on-par/factory-core');
+      writeFileSync(paths().config, JSON.stringify({ version: 2, route: 'codex' }));
+      h.modelOverrides = { plan: 'codex-ready', build: 'codex-ready' };
+      h.modelProviders = { 'codex-ready': 'openai', 'claude-triage': 'anthropic' };
+      h.routerResolve = (route) => (route === 'readiness_enrich' ? 'claude-triage' : 'codex-ready');
+      h.planResult = { ok: true, route: 'codex' };
+      await vi.mocked(core.isCommandAvailable).withImplementation(
+        (command) => command === 'codex',
+        async () => {
+          const res = await runMain('ship', '5');
+          expect(res.exited).toBe(false);
+          expect(core.isCommandAvailable).not.toHaveBeenCalledWith('claude');
+        },
+      );
+    });
+
+    it('requires the provider selected by PLAN even when BUILD is pinned to Codex', async () => {
+      const core = await import('@on-par/factory-core');
+      writeFileSync(paths().config, JSON.stringify({ version: 2, route: 'codex' }));
+      h.modelOverrides.plan = 'claude-plan';
+      h.modelProviders['claude-plan'] = 'anthropic';
+      await vi.mocked(core.isCommandAvailable).withImplementation(
+        (cmd) => cmd !== 'claude',
+        async () => {
+          const res = await runMain('ship', '5');
+          expect(res).toEqual({ exited: true, code: 2 });
+          expect(errored()).toContain('claude CLI not found');
+          expect(core.planPhase).not.toHaveBeenCalled();
+        },
+      );
+    });
+
     it('ships with an explicitly Codex-only repo policy when Claude is not installed', async () => {
       const core = await import('@on-par/factory-core');
       await vi.mocked(core.isCommandAvailable).withImplementation(
@@ -2473,6 +2536,23 @@ bash scripts/verify.sh
   });
 
   describe('run-issue (one-shot)', () => {
+    it('runs a Codex-only issue without probing an unrelated Claude installation', async () => {
+      const core = await import('@on-par/factory-core');
+      writeFileSync(
+        paths().config,
+        JSON.stringify({ version: 2, providers: { anthropic: false, openai: true, ollama: false }, route: 'codex' }),
+      );
+      h.planResult = { ok: true, route: 'codex' };
+      await vi.mocked(core.isCommandAvailable).withImplementation(
+        (command) => command === 'codex',
+        async () => {
+          const res = await runMain('run-issue', '5');
+          expect(res.exited).toBe(false);
+          expect(core.isCommandAvailable).not.toHaveBeenCalledWith('claude');
+        },
+      );
+    });
+
     it('resolves the issue through the canonical work-request seam and ships it through all phases', async () => {
       const core = await import('@on-par/factory-core');
       const res = await runMain('run-issue', '5');
@@ -2597,6 +2677,25 @@ bash scripts/verify.sh
   });
 
   describe('run-brief (one-shot)', () => {
+    it('runs a Codex-only brief without requiring Claude', async () => {
+      const core = await import('@on-par/factory-core');
+      writeFileSync(
+        paths().config,
+        JSON.stringify({ version: 2, providers: { anthropic: false, openai: true, ollama: false }, route: 'codex' }),
+      );
+      const briefPath = join(h.repoRoot, 'codex-brief.md');
+      writeFileSync(briefPath, VALID_BRIEF);
+      h.planResult = { ok: true, route: 'codex' };
+      await vi.mocked(core.isCommandAvailable).withImplementation(
+        (command) => command === 'codex',
+        async () => {
+          const res = await runMain('run-brief', briefPath);
+          expect(res.exited).toBe(false);
+          expect(core.isCommandAvailable).not.toHaveBeenCalledWith('claude');
+        },
+      );
+    });
+
     const VALID_BRIEF = `# Add a widget
 
 Please add a widget that does the thing.
@@ -2973,6 +3072,79 @@ Please add a widget that does the thing.
         if (cmd.includes('gh auth status')) return 'Logged in';
         return '';
       };
+    });
+
+    it('probes Ollama generation without entering its agentic command loop', async () => {
+      h.modelOverrides.plan = 'local-worker';
+      h.modelProviders['local-worker'] = 'ollama';
+      const res = await runMain('doctor', '--probe-inference');
+      expect(res.exited).toBe(false);
+      expect(h.httpInferenceCalls).toHaveLength(1);
+      expect(h.httpInferenceCalls[0]).toMatchObject({ model: 'local-worker', timeoutSeconds: 30 });
+      expect(h.inferenceCalls).toEqual([]);
+      expect(logged()).toContain('HTTP transport does not verify sandbox execution');
+    });
+
+    it('reserves the OpenCode retry within the thirty-second inference budget', async () => {
+      h.modelOverrides.plan = 'opencode-plan';
+      h.modelProviders['opencode-plan'] = 'deepseek';
+      const res = await runMain('doctor', '--probe-inference');
+      expect(res.exited).toBe(false);
+      expect(h.inferenceCalls).toHaveLength(1);
+      expect(h.inferenceCalls[0]?.context.timeoutSeconds).toBe(15);
+      expect(logged()).toContain('OpenCode harness does not apply Factory sandbox policy');
+    });
+
+    it('explicit doctor inference uses only the selected Codex model with a deadline', async () => {
+      writeFileSync(
+        paths().config,
+        JSON.stringify({ version: 2, providers: { anthropic: false, openai: true }, route: 'codex' }),
+      );
+      h.modelOverrides.plan = 'codex-plan';
+      h.modelProviders['codex-plan'] = 'openai';
+      const res = await runMain('doctor', '--probe-inference');
+      expect(res.exited).toBe(false);
+      expect(h.inferenceCalls.length).toBeGreaterThan(0);
+      expect(h.inferenceCalls.every((call) => call.model === 'codex-plan')).toBe(true);
+      expect(h.inferenceCalls.every((call) => call.context.timeoutSeconds === 30)).toBe(true);
+      expect(logged()).toContain('codex inference (host)');
+    });
+
+    it('ordinary doctor sends no inference prompt on the host or sandbox', async () => {
+      const seen: string[] = [];
+      const exec = h.execSyncImpl;
+      h.execSyncImpl = (cmd) => {
+        seen.push(cmd);
+        return exec(cmd);
+      };
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(seen.filter((cmd) => /claude -p|codex exec|opencode run/.test(cmd))).toEqual([]);
+      expect(h.inferenceCalls).toEqual([]);
+      expect(logged()).toContain('inference unverified');
+    });
+
+    it('doctor does not probe Claude for a Codex-only profile', async () => {
+      const core = await import('@on-par/factory-core');
+      writeFileSync(
+        paths().config,
+        JSON.stringify({ version: 2, providers: { anthropic: false, openai: true }, route: 'codex' }),
+      );
+      const seen: string[] = [];
+      const exec = h.execSyncImpl;
+      h.execSyncImpl = (cmd) => {
+        seen.push(cmd);
+        return exec(cmd);
+      };
+      await vi.mocked(core.isCommandAvailable).withImplementation(
+        (cmd) => cmd !== 'claude',
+        async () => {
+          const res = await runMain('doctor');
+          expect(res.exited).toBe(false);
+          expect(core.isCommandAvailable).not.toHaveBeenCalledWith('claude');
+          expect(seen.some((cmd) => /claude|Claude Code-credentials/.test(cmd))).toBe(false);
+        },
+      );
     });
 
     it('prints the report and does not exit when the environment is all green', async () => {

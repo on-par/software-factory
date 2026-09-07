@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   analyzeEventLog,
@@ -16,6 +16,7 @@ import {
   keychainPreflightError,
   type LeaseHealthRow,
   runDoctorChecks,
+  runDoctorInference,
   sandboxClaudeAuthChecks,
   unmergedGreenPrChecks,
 } from './doctor.js';
@@ -566,5 +567,66 @@ describe('keychainPreflightError', () => {
     expect(error).toContain('tmux');
     expect(error).toContain('launchctl bootstrap gui/$(id -u)');
     expect(error).toContain('docs/runbooks/macos-keychain-launchagent.md');
+  });
+});
+
+describe('explicit provider inference diagnostics', () => {
+  const target = { provider: 'codex', model: 'selected-codex' };
+
+  it('distinguishes a successful host from a sandbox timeout without exposing provider output', async () => {
+    const secret = 'private-provider-credential';
+    const probe = vi.fn(async (_target, sandboxed) => {
+      if (sandboxed) throw Object.assign(new Error(secret), { reason: 'timeout' });
+      return 'ok';
+    });
+    const checks = await runDoctorInference([target], probe);
+    expect(checks).toMatchObject([
+      { name: 'codex inference (host)', ok: true },
+      { name: 'codex inference (sandboxed)', ok: false, detail: 'inference failed (timeout)' },
+    ]);
+    expect(doctorFailed(checks)).toBe(true);
+    expect(formatDoctorChecks(checks)).not.toContain(secret);
+    expect(probe.mock.calls).toEqual([
+      [target, false],
+      [target, true],
+    ]);
+  });
+
+  it('does not retry or probe the sandbox after a rejected host login', async () => {
+    const probe = vi.fn(async () => {
+      throw { reason: 'local_auth', stderr: 'secret' };
+    });
+    const checks = await runDoctorInference([target], probe);
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(checks[0]).toMatchObject({ ok: false, detail: 'inference failed (local_auth)' });
+    expect(checks[1]).toMatchObject({ ok: false, optional: true });
+    expect(formatDoctorChecks(checks)).not.toContain('secret');
+  });
+
+  it('does not certify OpenCode sandbox execution when its harness does not wrap commands', async () => {
+    const probe = vi.fn(async () => 'ok');
+    const checks = await runDoctorInference([{ provider: 'opencode', model: 'selected-opencode' }], probe);
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(checks[1]).toMatchObject({
+      ok: false,
+      optional: true,
+      detail: 'unverified — OpenCode harness does not apply Factory sandbox policy',
+    });
+  });
+
+  it('labels unavailable sandbox inference unverified after a successful host probe', async () => {
+    const probe = vi.fn(async () => 'ok');
+    const checks = await runDoctorInference([target], probe, 'sandbox disabled');
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(checks[1]).toMatchObject({ ok: false, optional: true, detail: 'unverified — sandbox disabled' });
+    expect(doctorFailed(checks)).toBe(false);
+  });
+
+  it('does not copy arbitrary exception reasons or output into diagnostics', async () => {
+    const checks = await runDoctorInference([target], async () => {
+      throw { reason: 'token-secret', stdout: 'token-secret' };
+    });
+    expect(checks[0]?.detail).toBe('inference failed (provider error)');
+    expect(formatDoctorChecks(checks)).not.toContain('token-secret');
   });
 });

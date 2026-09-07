@@ -23,7 +23,80 @@ export interface DoctorEnvProbes {
   distFreshness?: () => { fresh: boolean; detail: string };
 }
 
-export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
+export function providerCommandChecks(
+  commands: readonly string[],
+  available: (command: string) => boolean,
+): DoctorCheck[] {
+  return commands.map((command) => {
+    const installed = available(command);
+    return {
+      name: `${command} CLI`,
+      ok: installed,
+      detail: installed ? 'found on PATH; authentication and inference unverified' : 'not found on PATH',
+      fix:
+        command === 'claude'
+          ? `install Claude Code first: ${CLAUDE_CODE_URL}`
+          : `install ${command} and verify its login/configuration`,
+    };
+  });
+}
+
+export interface DoctorInferenceTarget {
+  model: string;
+  provider: string;
+  transport?: 'ollama-http';
+}
+
+/** Provider output is deliberately not printed: it may contain credentials. */
+export async function runDoctorInference(
+  targets: readonly DoctorInferenceTarget[],
+  run: (target: DoctorInferenceTarget, sandboxed: boolean) => Promise<unknown>,
+  sandboxUnavailable?: string,
+): Promise<DoctorCheck[]> {
+  const checks: DoctorCheck[] = [];
+  for (const target of targets) {
+    const unavailable =
+      target.transport === 'ollama-http'
+        ? 'HTTP transport does not verify sandbox execution'
+        : target.provider === 'opencode'
+          ? 'OpenCode harness does not apply Factory sandbox policy'
+          : sandboxUnavailable;
+    let hostOk = false;
+    for (const sandboxed of [false, true]) {
+      const name = `${target.provider} inference (${sandboxed ? 'sandboxed' : 'host'})`;
+      if (sandboxed && (!hostOk || unavailable)) {
+        checks.push({
+          name,
+          ok: false,
+          optional: true,
+          detail: `unverified — ${unavailable ?? 'host inference did not succeed'}`,
+        });
+        continue;
+      }
+      try {
+        await run(target, sandboxed);
+        checks.push({ name, ok: true, detail: 'inference succeeded for the selected model' });
+        if (!sandboxed) hostOk = true;
+      } catch (error) {
+        const reason = error && typeof error === 'object' && 'reason' in error ? error.reason : undefined;
+        const safeReason =
+          typeof reason === 'string' &&
+          ['timeout', 'local_auth', 'usage_cap', 'rate_limit', 'unavailable', 'empty_response'].includes(reason)
+            ? reason
+            : 'provider error';
+        checks.push({
+          name,
+          ok: false,
+          detail: `inference failed (${safeReason})`,
+          fix: 'verify the selected provider login, quota, model and execution context; no fallback was attempted',
+        });
+      }
+    }
+  }
+  return checks;
+}
+
+export function runDoctorChecks(probes: DoctorEnvProbes, requiredCommands?: readonly string[]): DoctorCheck[] {
   const { commandAvailable, envPresent, tryExec, pathExists, distFreshness } = probes;
   const checks: DoctorCheck[] = [];
 
@@ -39,16 +112,7 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
         },
   );
 
-  checks.push(
-    commandAvailable('claude')
-      ? { name: 'claude CLI', ok: true, detail: 'found on PATH' }
-      : {
-          name: 'claude CLI',
-          ok: false,
-          detail: 'not found on PATH',
-          fix: `install Claude Code first: ${CLAUDE_CODE_URL}`,
-        },
-  );
+  checks.push(...providerCommandChecks(requiredCommands ?? ['claude'], commandAvailable));
 
   if (!commandAvailable('gh')) {
     checks.push({
@@ -116,17 +180,19 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
     });
   }
 
-  checks.push(
-    commandAvailable('codex')
-      ? { name: 'codex sandbox', ok: true, optional: true, detail: 'codex CLI found (sandboxed builds available)' }
-      : {
-          name: 'codex sandbox',
-          ok: false,
-          optional: true,
-          detail: 'codex CLI not found — codex build routes unavailable',
-          fix: 'install the codex CLI, or rely on claude routes',
-        },
-  );
+  if (requiredCommands === undefined) {
+    checks.push(
+      commandAvailable('codex')
+        ? { name: 'codex sandbox', ok: true, optional: true, detail: 'codex CLI found (sandboxed builds available)' }
+        : {
+            name: 'codex sandbox',
+            ok: false,
+            optional: true,
+            detail: 'codex CLI not found — codex build routes unavailable',
+            fix: 'install the codex CLI, or rely on claude routes',
+          },
+    );
+  }
 
   if (repoRoot === null) {
     checks.push({

@@ -90,6 +90,7 @@ import {
   localOnlyWorkspace,
   mergedPrRefs,
   ModelRegistry,
+  HARNESS_CATALOG,
   ModelRouter,
   parkReasonFor,
   parseKpiHistory,
@@ -153,6 +154,8 @@ import type {
 } from '@on-par/factory-core/internal';
 import {
   acquirePidFile,
+  CliModelExecutor,
+  OllamaHttpHarness,
   branchFor,
   branchPrefixSlug,
   cleanupWorktree,
@@ -194,7 +197,6 @@ import {
   withFileLock,
   withGitLock,
   withRunLock,
-  wrapCommandInSandbox,
   writePortFile,
 } from '@on-par/factory-core/internal';
 import { runTui } from '@on-par/factory-tui';
@@ -203,7 +205,6 @@ import { Command } from 'commander';
 import { cmdDaemonLogs, cmdDaemonStart, cmdDaemonStatus, cmdDaemonStop, DaemonCtlError } from './daemon.js';
 import {
   analyzeEventLog,
-  type ClaudeAuthProbe,
   claudeKeychainCheck,
   doctorFailed,
   eventLogCheck,
@@ -217,7 +218,9 @@ import {
   type KeychainProbeStatus,
   type LeaseHealthRow,
   runDoctorChecks,
-  sandboxClaudeAuthChecks,
+  providerCommandChecks,
+  runDoctorInference,
+  type DoctorInferenceTarget,
   unmergedGreenPrChecks,
   type UnmergedGreenPrRow,
 } from './doctor.js';
@@ -1605,6 +1608,51 @@ async function maybeWriteBenchmarkArtifacts(opts: {
   }
 }
 
+function configuredProviderPlan(repoRoot: string | null) {
+  const repo = repoRoot ? loadRepoConfig(repoRoot, getFactoryPaths(repoRoot).root) : null;
+  const effective = resolveEffectiveConfig(repo);
+  const router = new ModelRouter(
+    applyRepoConfig(loadModelsConfig(), repo),
+    loadRoutesConfig(),
+    false,
+    undefined,
+    effective.allowExperimental,
+    effective.localOnly,
+  );
+  const pins = resolveEffectiveModelPins(router.registryRef, repo);
+  const route = repo?.route ?? (repo?.providers?.anthropic === false ? 'codex' : 'claude');
+  const buildModel = pins.build ?? router.resolve(`build_${route}`);
+  // Conditional enrichment and unpinned advisory checkers are not prerequisites
+  // for every issue; their actual phases retain their own availability handling.
+  const selected = [pins.plan ?? router.resolve('plan'), buildModel, repo?.models?.pins?.checker];
+  const commands = new Set<string>();
+  const targets = new Map<string, DoctorInferenceTarget>();
+  for (const model of selected) {
+    if (!model || !router.registryRef.get(model)) continue;
+    const harness = router.registryRef.getHarnessId(model);
+    const probe = harness ? HARNESS_CATALOG[harness]?.probe : undefined;
+    if (probe?.kind === 'command') commands.add(probe.command);
+    const provider = probe?.kind === 'command' ? probe.command : probe?.kind === 'ollama' ? 'ollama' : undefined;
+    if (provider && !targets.has(provider))
+      targets.set(provider, {
+        model,
+        provider,
+        ...(probe?.kind === 'ollama' ? { transport: 'ollama-http' as const } : {}),
+      });
+  }
+  // An unpinned BUILD route still needs its command when no model is currently
+  // available (for example, a missing environment key). Availability is not login.
+  if (!buildModel || !router.registryRef.get(buildModel)) commands.add(route);
+  return { commands: [...commands], targets: [...targets.values()], registry: router.registryRef };
+}
+
+function assertProviderPrerequisites(repoRoot: string): void {
+  const failed = providerCommandChecks(configuredProviderPlan(repoRoot).commands, isCommandAvailable).find(
+    (check) => !check.ok,
+  );
+  if (failed) throw new CliExitError(`factory: ${failed.name} not found — ${failed.fix}`, 2);
+}
+
 async function cmdShip(
   issueNum: number,
   opts: { product?: string; autoRework?: boolean; interactive?: boolean; sandbox?: boolean; approvePlan?: boolean },
@@ -1615,13 +1663,7 @@ async function cmdShip(
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
 
-  const repoConfig = loadRepoConfig(repoRoot, paths.root);
-  if (repoConfig?.providers?.anthropic !== false && !isCommandAvailable('claude')) {
-    throw new CliExitError(`factory: ${missingClaudeCliMessage()}`, 2);
-  }
-  if (repoConfig?.route === 'codex' && !isCommandAvailable('codex')) {
-    throw new CliExitError('factory: codex CLI not found — install Codex and run `codex login` before shipping', 2);
-  }
+  assertProviderPrerequisites(repoRoot);
 
   const mergeNotice = mergeScopeNotice(process.env, issueNum);
   if (mergeNotice) {
@@ -1650,11 +1692,9 @@ async function cmdRunIssue(
   issueNum: number,
   opts: { product?: string; autoRework?: boolean; interactive?: boolean; sandbox?: boolean; approvePlan?: boolean },
 ) {
-  if (!isCommandAvailable('claude')) {
-    throw new CliExitError(`factory: ${missingClaudeCliMessage()}`, 2);
-  }
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
+  assertProviderPrerequisites(repoRoot);
   if (!existsSync(paths.root)) {
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
@@ -1710,11 +1750,9 @@ async function cmdRunBrief(
     artifacts?: string;
   },
 ) {
-  if (!isCommandAvailable('claude')) {
-    throw new CliExitError(`factory: ${missingClaudeCliMessage()}`, 2);
-  }
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
+  assertProviderPrerequisites(repoRoot);
   if (!existsSync(paths.root)) {
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
@@ -3866,21 +3904,7 @@ function probeClaudeKeychain(): KeychainProbeStatus {
   }
 }
 
-async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
-  const checks = runDoctorChecks({
-    commandAvailable: isCommandAvailable,
-    envPresent: (key) => !!process.env[key],
-    tryExec: (cmd) => {
-      try {
-        return execSync(cmd, { encoding: 'utf-8', timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-      } catch {
-        return null;
-      }
-    },
-    pathExists: existsSync,
-    distFreshness: distFreshnessProbe(import.meta.url),
-  });
-
+async function cmdDoctor(opts: { reconcile?: boolean; probeInference?: boolean } = {}) {
   let repoRoot: string | null;
   try {
     repoRoot = execSync('git rev-parse --show-toplevel', {
@@ -3892,49 +3916,78 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     repoRoot = null;
   }
 
-  const CLAUDE_AUTH_PROBE = 'claude -p "reply with exactly: ok"';
-  const probeExec = (cmd: string): string | null => {
-    try {
-      return execSync(cmd, { encoding: 'utf-8', timeout: 120_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    } catch {
-      return null;
-    }
-  };
+  const providerPlan = configuredProviderPlan(repoRoot);
+  const requiredCommands = providerPlan.commands;
+  const checks = runDoctorChecks(
+    {
+      commandAvailable: isCommandAvailable,
+      envPresent: (key) => !!process.env[key],
+      tryExec: (cmd) => {
+        try {
+          return execSync(cmd, { encoding: 'utf-8', timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        } catch {
+          return null;
+        }
+      },
+      pathExists: existsSync,
+      distFreshness: distFreshnessProbe(import.meta.url),
+    },
+    requiredCommands,
+  );
 
-  let host: ClaudeAuthProbe = 'skipped';
-  let hostDetail = 'skipped — claude CLI not on PATH';
-  if (isCommandAvailable('claude')) {
-    host = probeExec(CLAUDE_AUTH_PROBE) === null ? 'failed' : 'ok';
-    hostDetail = host === 'ok' ? 'claude -p succeeded on the host' : 'claude -p failed on the host';
+  if (requiredCommands.includes('claude')) checks.push(claudeKeychainCheck(probeClaudeKeychain()));
+  if (opts.probeInference) {
+    const policy = repoRoot
+      ? resolveSandboxPolicy(loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox, {
+          worktree: repoRoot,
+          repoRoot,
+        })
+      : undefined;
+    const sandboxUnavailable = !policy
+      ? 'sandbox disabled or no repository'
+      : policy.runtime === 'none'
+        ? 'no sandbox runtime'
+        : policy.runtime === 'docker-sandbox'
+          ? 'microVM probe unavailable; command wrapping does not establish containment'
+          : undefined;
+    const executor = new CliModelExecutor();
+    checks.push(
+      ...(await runDoctorInference(
+        providerPlan.targets,
+        (target, sandboxed) =>
+          target.transport === 'ollama-http'
+            ? new OllamaHttpHarness().run({
+                model: target.model,
+                prompt: 'Reply with exactly: ok.',
+                task: 'plan',
+                worktree: repoRoot ?? process.cwd(),
+                timeoutSeconds: 30,
+                registry: providerPlan.registry,
+              })
+            : executor.runModel(
+                target.model,
+                'Reply with exactly: ok. Do not use tools, inspect files, or make changes.',
+                {
+                  worktree: repoRoot ?? process.cwd(),
+                  // OpenCode retries empty output once; both attempts share this budget.
+                  timeoutSeconds: target.provider === 'opencode' ? 15 : 30,
+                  task: 'plan',
+                  registry: providerPlan.registry,
+                  routesConfig: loadRoutesConfig(),
+                  sandbox: sandboxed ? policy : undefined,
+                  onPgid: () => {},
+                },
+              ),
+        sandboxUnavailable,
+      )),
+    );
+    if (providerPlan.targets.length === 0)
+      checks.push({
+        name: 'provider inference',
+        ok: false,
+        detail: 'unverified — no configured model could be resolved',
+      });
   }
-
-  let sandboxed: ClaudeAuthProbe = 'skipped';
-  let sandboxDetail = 'skipped — host claude auth was not verified';
-  if (host === 'ok') {
-    const policy =
-      repoRoot === null
-        ? undefined
-        : resolveSandboxPolicy(loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox, {
-            worktree: repoRoot,
-            repoRoot,
-          });
-    if (!policy) {
-      sandboxDetail = 'skipped — sandbox disabled by config or FACTORY_SANDBOX';
-    } else if (policy.runtime === 'none') {
-      sandboxDetail = 'skipped — no sandbox runtime (sandbox-exec/firejail) on this host';
-    } else if (policy.runtime === 'docker-sandbox') {
-      sandboxDetail = 'skipped — docker-sandbox containment is the microVM, not command wrapping (#653)';
-    } else {
-      sandboxed = probeExec(wrapCommandInSandbox(CLAUDE_AUTH_PROBE, policy)) === null ? 'failed' : 'ok';
-      sandboxDetail =
-        sandboxed === 'ok'
-          ? `claude -p succeeded under ${policy.runtime}`
-          : `claude -p failed under ${policy.runtime} (local_auth)`;
-    }
-  }
-
-  checks.push(claudeKeychainCheck(probeClaudeKeychain()));
-  checks.push(...sandboxClaudeAuthChecks({ host, sandboxed, hostDetail, sandboxDetail }));
 
   if (repoRoot !== null) {
     const paths = getFactoryPaths(repoRoot);
@@ -4074,7 +4127,11 @@ export async function main() {
     .command('doctor')
     .description('Preflight-check your environment (claude, gh, token, git, npm, sandbox)')
     .option('--reconcile', 'Reap stale port leases, dead-run worktrees, and stale issue claims')
-    .action((opts: { reconcile?: boolean }) => cmdDoctor(opts));
+    .option(
+      '--probe-inference',
+      'Explicitly probe selected providers (consumes quota; 30-second deadline per host/sandbox probe)',
+    )
+    .action((opts: { reconcile?: boolean; probeInference?: boolean }) => cmdDoctor(opts));
 
   program
     .command('cost')
