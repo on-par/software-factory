@@ -591,7 +591,7 @@ export async function cmdConstitution(opts: {
   if (opts.product) {
     const products = loader.listProducts();
     if (!products.includes(opts.product)) {
-      throw new CliExitError(`No constitution '${opts.product}' found`, 1);
+      throw new CliExitError(`No constitution '${opts.product}' found. Available products: ${products.join(', ')}`, 1);
     }
     const repoRoot = await getRepoRoot();
     const paths = getFactoryPaths(repoRoot);
