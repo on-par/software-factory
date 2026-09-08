@@ -728,6 +728,18 @@ describe('cli commands (via main dispatch)', () => {
       expect(readFileSync(paths().product, 'utf-8')).toBe('alpha');
     });
 
+    it('overwrites .factory/state/product when --product is run again with a different name', async () => {
+      writeFileSync(join(h.constitutionsDir, 'alpha.md'), '# alpha constitution\n');
+      writeFileSync(join(h.constitutionsDir, 'beta.md'), '# beta constitution\n');
+      const first = await runMain('constitution', '--product', 'alpha');
+      expect(first.exited).toBe(false);
+      expect(readFileSync(paths().product, 'utf-8')).toBe('alpha');
+
+      const second = await runMain('constitution', '--product', 'beta', '--force');
+      expect(second.exited).toBe(false);
+      expect(readFileSync(paths().product, 'utf-8')).toBe('beta');
+    });
+
     it('exits 2 with a usage line when no sub-option is given', async () => {
       const res = await runMain('constitution');
       expect(res).toEqual({ exited: true, code: 2 });
