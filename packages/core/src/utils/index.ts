@@ -31,6 +31,7 @@ export function logEvent(
     actor?: string;
     model?: string;
     tokens?: { input: number; output: number };
+    durationMs?: number;
   },
 ): void {
   const logger = createLogger(eventsFile, { issue, lane: extra?.lane, phase: extra?.phase });
@@ -42,6 +43,7 @@ export function logEvent(
     actor?: string;
     model?: string;
     tokens?: { input: number; output: number };
+    durationMs?: number;
   } = {};
   if (extra?.failoverReason) meta.failoverReason = extra.failoverReason;
   if (extra?.rework) meta.rework = extra.rework;
@@ -49,6 +51,7 @@ export function logEvent(
   if (extra?.actor) meta.actor = extra.actor;
   if (extra?.model) meta.model = extra.model;
   if (extra?.tokens) meta.tokens = extra.tokens;
+  if (extra?.durationMs !== undefined) meta.durationMs = extra.durationMs;
   logger[level](type, msg, Object.keys(meta).length > 0 ? meta : undefined);
 }
 

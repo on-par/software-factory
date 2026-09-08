@@ -1,5 +1,5 @@
 import { LaneLifecycleEventSchema } from '@on-par/contracts';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createLifecycleBus, lifecycleBus, withLifecycle } from './index.js';
 
@@ -140,6 +140,57 @@ describe('withLifecycle', () => {
 
     expect(received.every((e) => e.laneId === 'issue-591')).toBe(true);
     expect(received[1].detail).toBe('plan done');
+  });
+
+  it('log is optional — omitting it from the context must not throw', async () => {
+    const bus = createLifecycleBus();
+
+    await expect(
+      withLifecycle(
+        { ...baseCtx, bus },
+        async () => ({ ok: true }),
+        (r) => r.ok,
+      ),
+    ).resolves.toEqual({ ok: true });
+  });
+
+  it('on success: log receives phase_started then phase_completed with a non-negative durationMs', async () => {
+    const bus = createLifecycleBus();
+    const log = vi.fn();
+
+    await withLifecycle(
+      { ...baseCtx, bus, log },
+      async () => ({ ok: true, value: 42 }),
+      (r) => r.ok,
+      (r) => `plan complete (${r.value})`,
+    );
+
+    expect(log).toHaveBeenCalledTimes(2);
+    expect(log).toHaveBeenNthCalledWith(1, 'phase_started', 'plan started');
+    expect(log).toHaveBeenNthCalledWith(2, 'phase_completed', 'plan complete (42)', {
+      durationMs: expect.any(Number),
+    });
+    expect(log.mock.calls[1][2].durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('when run() rejects: log still receives phase_completed with a durationMs, and the original error still rejects', async () => {
+    const bus = createLifecycleBus();
+    const log = vi.fn();
+
+    await expect(
+      withLifecycle(
+        { ...baseCtx, bus, log },
+        async () => {
+          throw new Error('router exhausted');
+        },
+        () => true,
+      ),
+    ).rejects.toThrow('router exhausted');
+
+    expect(log).toHaveBeenNthCalledWith(1, 'phase_started', 'plan started');
+    expect(log).toHaveBeenNthCalledWith(2, 'phase_completed', expect.stringContaining('router exhausted'), {
+      durationMs: expect.any(Number),
+    });
   });
 
   it('emits onto the process-wide lifecycleBus when no bus is given', async () => {

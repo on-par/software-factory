@@ -38,6 +38,7 @@ export interface LogExtra {
   actor?: string;
   model?: string;
   tokens?: { input: number; output: number };
+  durationMs?: number;
 }
 
 export interface LoggerOptions {
@@ -107,6 +108,7 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(extra?.queueReprioritization !== undefined ? { queueReprioritization: extra.queueReprioritization } : {}),
       ...(extra?.model ? { model: extra.model } : {}),
       ...(extra?.tokens ? { tokens: extra.tokens } : {}),
+      ...(extra?.durationMs !== undefined ? { durationMs: extra.durationMs } : {}),
     };
     const line = JSON.stringify(event) + '\n';
     appendLine(eventsFile, line, opts.lock);
@@ -116,7 +118,9 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
     if (env.FACTORY_LOG_FORMAT === 'json') {
       out.write(line);
     } else {
-      out.write(formatEventLine(type, event.issue, msg, { color: colorEnabled(out, env), lane: ctx.lane }) + '\n');
+      out.write(
+        formatEventLine(type, event.issue, msg, { color: colorEnabled(out, env), lane: ctx.lane, ts: event.ts }) + '\n',
+      );
     }
   }
 

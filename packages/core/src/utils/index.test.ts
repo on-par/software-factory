@@ -246,6 +246,16 @@ describe('utils', () => {
     });
   });
 
+  it('logs a structured durationMs when extra is provided', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+
+    logEvent(eventsFile, 'phase_completed', 1, 'msg', { durationMs: 10 });
+
+    const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter(Boolean);
+    expect(JSON.parse(lines[0]).durationMs).toBe(10);
+  });
+
   it('includes lane and phase in the written event when passed as extra', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
     const eventsFile = join(tmpDir, 'events.ndjson');

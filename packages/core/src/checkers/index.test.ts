@@ -1091,6 +1091,31 @@ describe('runAllCheckers', () => {
     }
   });
 
+  it('emits one checker_started/checker_completed pair with a durationMs around every checker, PASS or FAIL', async () => {
+    const constitutionDir = await mkdtemp(join(tmpdir(), 'checker-test-constitution-'));
+    tempDirs.add(constitutionDir);
+    await writeFile(
+      join(constitutionDir, 'myproduct.md'),
+      '---\nproduct: myproduct\ncheckers:\n  - not_a_real_checker\n---\nBody standard text\n',
+    );
+    const worktree = await makeWorktree();
+    const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
+    const constitution = new ConstitutionLoader(constitutionDir).resolve(worktree, 'myproduct');
+    const log = vi.fn();
+
+    const summary = await runAllCheckers({ ...makeContext(worktree), log }, router, constitution);
+
+    const started = log.mock.calls.filter(([type]) => type === 'checker_started');
+    const completed = log.mock.calls.filter(([type]) => type === 'checker_completed');
+    expect(started.length).toBe(summary.total);
+    expect(completed.length).toBe(summary.total);
+    for (const call of completed) {
+      expect(call[2].durationMs).toEqual(expect.any(Number));
+    }
+    // The fail-closed unknown-checker path still gets its own started/completed pair.
+    expect(completed.some(([, msg]) => typeof msg === 'string' && msg.includes('not_a_real_checker'))).toBe(true);
+  });
+
   it(
     'probes the worktree exactly once per round even when several checkers consume the probe facts',
     { timeout: 60000 },

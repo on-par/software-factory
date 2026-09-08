@@ -265,6 +265,7 @@ export interface FactoryEvent {
   queueReprioritization?: QueueReprioritizationRecord;
   model?: string;
   tokens?: { input: number; output: number };
+  durationMs?: number;
 }
 
 // ---------- Cost Tracking ----------

@@ -167,7 +167,14 @@ and do NOT write ${specPath}.`;
 
 export async function planPhase(opts: Parameters<typeof planPhaseImpl>[0]): Promise<PlanResult> {
   return withLifecycle(
-    { bus: opts.bus, phase: 'plan', laneId: opts.laneId, issueId: opts.issue, worktreePath: opts.worktree },
+    {
+      bus: opts.bus,
+      phase: 'plan',
+      laneId: opts.laneId,
+      issueId: opts.issue,
+      worktreePath: opts.worktree,
+      log: opts.log,
+    },
     () => planPhaseImpl(opts),
     (r) => r.ok,
     (r) => (r.ok ? `plan complete (route ${r.route}, model ${r.model})` : `plan escalated: ${r.escalate ?? 'unknown'}`),
@@ -202,6 +209,7 @@ async function planPhaseImpl(opts: {
       model?: string;
       tokens?: { input: number; output: number };
       readiness?: ReadinessInfo;
+      durationMs?: number;
     },
   ) => void;
   timeoutSeconds?: number;

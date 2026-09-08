@@ -319,7 +319,31 @@ describe('createLogger', () => {
       logger.info('plan', 'pretty line');
 
       expect(out).toHaveLength(1);
-      expect(out[0]).toBe('[factory] plan #9: pretty line\n');
+      expect(out[0]).toMatch(/^\[\d{4}-\d{2}-\d{2}T[\d:.]+Z\] \[factory\] plan #9: pretty line\n$/);
+    });
+  });
+
+  describe('durationMs', () => {
+    it('includes durationMs only when passed as extra', async () => {
+      tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
+      const eventsFile = join(tmpDir, 'events.ndjson');
+      const logger = createLogger(eventsFile, { issue: 5 }, { out: { write: () => {} } });
+
+      logger.info('phase_completed', 'plan complete', { durationMs: 42 });
+
+      const [event] = readEvents(eventsFile);
+      expect(event.durationMs).toBe(42);
+    });
+
+    it('omits durationMs when not supplied', async () => {
+      tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
+      const eventsFile = join(tmpDir, 'events.ndjson');
+      const logger = createLogger(eventsFile, {}, { out: { write: () => {} } });
+
+      logger.info('plan', 'no duration');
+
+      const [event] = readEvents(eventsFile);
+      expect(event).not.toHaveProperty('durationMs');
     });
   });
 

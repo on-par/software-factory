@@ -64,10 +64,13 @@ export function formatEventLine(
   type: string,
   issue: string | number,
   msg: string,
-  opts: { color?: boolean; lane?: string } = {},
+  opts: { color?: boolean; lane?: string; ts?: string } = {},
 ): string {
   if (!opts.color) {
-    return opts.lane ? `[factory] ${type} #${issue} [${opts.lane}]: ${msg}` : `[factory] ${type} #${issue}: ${msg}`;
+    const tsPrefix = opts.ts ? `[${opts.ts}] ` : '';
+    return opts.lane
+      ? `${tsPrefix}[factory] ${type} #${issue} [${opts.lane}]: ${msg}`
+      : `${tsPrefix}[factory] ${type} #${issue}: ${msg}`;
   }
 
   const category = categorize(type);
@@ -84,6 +87,7 @@ export function formatEventLine(
   }
 
   const laneToken = opts.lane ? ` ${DIM}[${opts.lane}]${RESET}` : '';
+  const tsToken = opts.ts ? `${DIM}[${opts.ts}]${RESET} ` : '';
 
-  return `${DIM}[factory]${RESET} ${symbol} ${coloredType} ${BOLD}#${issue}${RESET}${laneToken}: ${renderedMsg}`;
+  return `${tsToken}${DIM}[factory]${RESET} ${symbol} ${coloredType} ${BOLD}#${issue}${RESET}${laneToken}: ${renderedMsg}`;
 }

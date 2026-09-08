@@ -23,7 +23,7 @@ export function eventMatchesIssue(e: FactoryEvent, issue?: string): boolean {
 
 export function renderEvent(e: FactoryEvent, opts: { json?: boolean; color: boolean }): string {
   if (opts.json) return JSON.stringify(e);
-  return formatEventLine(e.type, e.issue, e.msg, { color: opts.color, lane: e.lane });
+  return formatEventLine(e.type, e.issue, e.msg, { color: opts.color, lane: e.lane, ts: e.ts });
 }
 
 /** Print current events; with follow, keep tailing. Returns a stop() function (no-op stop for non-follow). */

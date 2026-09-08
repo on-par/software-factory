@@ -30,7 +30,14 @@ export interface BuildResult {
 
 export async function buildPhase(opts: Parameters<typeof buildPhaseImpl>[0]): Promise<BuildResult> {
   return withLifecycle(
-    { bus: opts.bus, phase: 'build', laneId: opts.laneId, issueId: opts.issue, worktreePath: opts.worktree },
+    {
+      bus: opts.bus,
+      phase: 'build',
+      laneId: opts.laneId,
+      issueId: opts.issue,
+      worktreePath: opts.worktree,
+      log: opts.log,
+    },
     () => buildPhaseImpl(opts),
     (r) => r.ok,
     (r) =>
@@ -56,7 +63,12 @@ async function buildPhaseImpl(opts: {
   log: (
     type: EventKind,
     msg: string,
-    extra?: { failoverReason?: FailoverReason; model?: string; tokens?: { input: number; output: number } },
+    extra?: {
+      failoverReason?: FailoverReason;
+      model?: string;
+      tokens?: { input: number; output: number };
+      durationMs?: number;
+    },
   ) => void;
   timeoutSeconds?: number;
   skipCI?: boolean;

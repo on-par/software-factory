@@ -105,6 +105,23 @@ describe('formatEventLine — unknown type', () => {
   });
 });
 
+describe('formatEventLine — ts option', () => {
+  it('prepends a bracketed ISO timestamp in plain mode', () => {
+    expect(formatEventLine('plan', 209, 'msg', { ts: '2026-01-01T00:00:00.000Z' })).toBe(
+      '[2026-01-01T00:00:00.000Z] [factory] plan #209: msg',
+    );
+  });
+
+  it('renders no prefix when ts is an empty string', () => {
+    expect(formatEventLine('plan', 209, 'msg', { ts: '' })).toBe('[factory] plan #209: msg');
+  });
+
+  it('prepends the timestamp before [factory] in color mode', () => {
+    const line = formatEventLine('plan', 209, 'msg', { color: true, ts: '2026-01-01T00:00:00.000Z' });
+    expect(line.indexOf('[2026-01-01T00:00:00.000Z]')).toBeLessThan(line.indexOf('[factory]'));
+  });
+});
+
 describe('formatEventLine — lane option', () => {
   it('renders the lane after the issue in plain mode', () => {
     expect(formatEventLine('plan', 209, 'msg', { lane: 'app' })).toBe('[factory] plan #209 [app]: msg');
