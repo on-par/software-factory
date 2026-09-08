@@ -118,7 +118,7 @@ factory ship 42              # PLAN → BUILD → CHECK → SHIP one issue (use 
 factory init                        Initialize .factory in this repo
 factory constitution --list         List available product constitutions
 factory constitution --product <p>  Set the active constitution
-factory constitution --init <p>     Scaffold a new product constitution from the template
+factory constitution --init [p]     Scaffold .factory/constitution.md in this repo from the template
 factory models [--doctor]           List available models and costs; --doctor checks provider CLIs
 factory triage [--product <p>]      Propose queue.proposed from open issues (review + mv to accept)
 factory ship <N>                    Plan → build → check → ship one issue (--product, --no-auto-rework)

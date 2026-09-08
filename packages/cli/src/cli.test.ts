@@ -16,7 +16,6 @@ import {
   CiUnverifiedError,
   clearStaleStopFile,
   CliExitError,
-  ConstitutionExistsError,
   createQueuePreflightOps,
   createIngestHook,
   createSuperviseRunQueue,
@@ -27,7 +26,6 @@ import {
   getCliVersion,
   getPullRequestLandState,
   hasReachableWorker,
-  initConstitution,
   InvalidProductNameError,
   isPermanentMergeCheckError,
   IssueDecomposedError,
@@ -4043,39 +4041,6 @@ More prose here.
 
     it('scaffoldConstitution throws when no ```markdown block exists', () => {
       expect(() => scaffoldConstitution('# just some docs, no fenced block', 'acme-app')).toThrow();
-    });
-
-    it('initConstitution scaffolds a product (happy path)', () => {
-      const writeFile = vi.fn();
-      const target = initConstitution('acme-app', {
-        dir: '/constitutions',
-        readFile: () => TEMPLATE,
-        fileExists: () => false,
-        writeFile,
-      });
-
-      expect(target).toMatch(/\/acme-app\.md$/);
-      expect(writeFile).toHaveBeenCalledTimes(1);
-      const [writtenPath, writtenContent] = writeFile.mock.calls[0];
-      expect(writtenPath).toBe(target);
-      expect(writtenContent).toContain('product: "acme-app"');
-      expect(writtenContent).toContain('# Acme App Constitution');
-    });
-
-    it('initConstitution refuses to clobber an existing constitution', () => {
-      const writeFile = vi.fn(() => {
-        throw new Error('writeFile should not be called');
-      });
-
-      expect(() =>
-        initConstitution('acme-app', {
-          dir: '/constitutions',
-          readFile: () => TEMPLATE,
-          fileExists: () => true,
-          writeFile,
-        }),
-      ).toThrow(ConstitutionExistsError);
-      expect(writeFile).not.toHaveBeenCalled();
     });
 
     it('assertValidProduct rejects unsafe names and accepts normal ones', () => {

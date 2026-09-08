@@ -595,15 +595,19 @@ describe('cli commands (via main dispatch)', () => {
   });
 
   describe('constitution', () => {
-    it('scaffolds a new constitution with --init', async () => {
+    it('scaffolds .factory/constitution.md with --init <product>, never touching getConstitutionsDir()', async () => {
       writeFileSync(
         join(h.constitutionsDir, '_template.md'),
         '```markdown\n---\nproduct: <product-name>\n---\n# <Product> Constitution\n```\n',
       );
+      const before = readdirSync(h.constitutionsDir);
       const res = await runMain('constitution', '--init', 'gizmo');
       expect(res.exited).toBe(false);
-      expect(existsSync(join(h.constitutionsDir, 'gizmo.md'))).toBe(true);
-      expect(logged()).toContain('Created constitution');
+      expect(existsSync(paths().constitution)).toBe(true);
+      expect(readFileSync(paths().constitution, 'utf-8')).toContain('product: "gizmo"');
+      expect(readFileSync(paths().constitution, 'utf-8')).toContain('# Gizmo Constitution');
+      // Regression (#1299): --init must never write into getConstitutionsDir().
+      expect(readdirSync(h.constitutionsDir)).toEqual(before);
     });
 
     it('writes constitution to target repo when --init is given with no product', async () => {
@@ -611,11 +615,13 @@ describe('cli commands (via main dispatch)', () => {
         join(h.constitutionsDir, '_template.md'),
         '```markdown\n---\nproduct: <product-name>\n---\n# <Product> Constitution\n```\n',
       );
+      const before = readdirSync(h.constitutionsDir);
       const res = await runMain('constitution', '--init');
       expect(res.exited).toBe(false);
       expect(existsSync(paths().constitution)).toBe(true);
       expect(readFileSync(paths().constitution, 'utf-8')).toContain(basename(h.repoRoot));
-      expect(readdirSync(h.constitutionsDir)).toEqual(['_template.md']);
+      // Regression (#1299): --init must never write into getConstitutionsDir().
+      expect(readdirSync(h.constitutionsDir)).toEqual(before);
     });
 
     it('creates .factory/ when missing before a bare --init', async () => {
@@ -643,6 +649,18 @@ describe('cli commands (via main dispatch)', () => {
       expect(readFileSync(paths().constitution, 'utf-8')).toBe('existing content');
     });
 
+    it('refuses overwrite of an existing repo constitution with a named --init', async () => {
+      writeFileSync(
+        join(h.constitutionsDir, '_template.md'),
+        '```markdown\n---\nproduct: <product-name>\n---\n# <Product> Constitution\n```\n',
+      );
+      writeFileSync(paths().constitution, 'existing content');
+      const res = await runMain('constitution', '--init', 'gizmo');
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('already exists');
+      expect(readFileSync(paths().constitution, 'utf-8')).toBe('existing content');
+    });
+
     it('force overwrite replaces an existing repo constitution when --force is passed', async () => {
       writeFileSync(
         join(h.constitutionsDir, '_template.md'),
@@ -652,14 +670,6 @@ describe('cli commands (via main dispatch)', () => {
       const res = await runMain('constitution', '--init', '--force');
       expect(res.exited).toBe(false);
       expect(readFileSync(paths().constitution, 'utf-8')).toContain(basename(h.repoRoot));
-    });
-
-    it('exits 1 when --init targets an existing constitution', async () => {
-      writeFileSync(join(h.constitutionsDir, '_template.md'), '```markdown\n# <Product>\n```\n');
-      writeFileSync(join(h.constitutionsDir, 'gizmo.md'), 'existing');
-      const res = await runMain('constitution', '--init', 'gizmo');
-      expect(res).toEqual({ exited: true, code: 1 });
-      expect(errored()).toContain('already exists');
     });
 
     it('exits 2 when --init gets an invalid product name', async () => {
