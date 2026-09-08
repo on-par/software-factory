@@ -93,6 +93,7 @@ export type EventKind =
   | 'overnight-ready'
   | 'parked'
   | 'phase_completed'
+  | 'phase_snapshot_failed'
   | 'phase_started'
   | 'plan'
   | 'plan_approval_granted'
@@ -263,6 +264,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'overnight-ready': { severity: 'info', isPark: false, isTerminal: false },
   parked: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },
   phase_completed: { severity: 'info', isPark: false, isTerminal: false },
+  phase_snapshot_failed: { severity: 'info', isPark: false, isTerminal: false },
   phase_started: { severity: 'info', isPark: false, isTerminal: false },
   plan: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
   plan_approval_granted: { severity: 'info', isPark: false, isTerminal: false },

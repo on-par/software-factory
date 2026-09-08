@@ -492,6 +492,33 @@ describe('runIssue — reporting hooks', () => {
   });
 });
 
+describe('runIssue — #1325: truthful phase snapshot', () => {
+  it('records plan, build, check, ship in order for a full successful run', async () => {
+    const recordPhase = vi.fn().mockResolvedValue(undefined);
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ recordPhase }));
+    expect(outcome.state).toBe('ready');
+    expect(recordPhase.mock.calls.map((call) => call[0])).toEqual(['plan', 'build', 'check', 'ship']);
+  });
+
+  it('stops recording after the phase where the run parks', async () => {
+    vi.mocked(buildPhase).mockResolvedValue({ ok: false, model: 'm', route: 'codex', reason: 'no_diff' });
+    const recordPhase = vi.fn().mockResolvedValue(undefined);
+    await runIssue(baseRequest(), basePolicy(), basePorts({ recordPhase }));
+    expect(recordPhase.mock.calls.map((call) => call[0])).toEqual(['plan', 'build']);
+  });
+
+  it('logs a phase_snapshot_failed event but does not fail the run when recordPhase rejects', async () => {
+    const events: Array<[string, string]> = [];
+    const log = vi.fn((type: string, message: string) => events.push([type, message]));
+    const recordPhase = vi.fn().mockRejectedValue(new Error('disk full'));
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ recordPhase, events: () => log }));
+    expect(outcome.state).toBe('ready');
+    const failures = events.filter(([type]) => type === 'phase_snapshot_failed');
+    expect(failures).toHaveLength(4);
+    expect(failures[0][1]).toContain('disk full');
+  });
+});
+
 describe('runIssue — interactive steering, proxy, and pgid tracking', () => {
   it('drains steering during BUILD and logs steering_applied when messages are present', async () => {
     const events: Array<[string, string]> = [];
