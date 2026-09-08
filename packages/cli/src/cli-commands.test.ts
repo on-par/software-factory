@@ -3950,7 +3950,7 @@ describe('CliExitError (direct command invocation)', () => {
     expect(events.some((e) => e.type === 'awaiting-review')).toBe(true);
   });
 
-  it('cmdLand(5) resolves cleanly and leaves the PR open when CI reports a confirmed failure (regression: on-par/sound-buddy#707 merged with a failing e2e check)', async () => {
+  it('cmdLand(5) resolves cleanly and leaves the PR open when CI reports a confirmed failure (regression: owner/example-app#707 merged with a failing e2e check)', async () => {
     vi.mocked(watchChecks).mockResolvedValueOnce('failure');
 
     await expect(cmdLand(5)).resolves.toBeUndefined();

@@ -17,7 +17,7 @@ function makeEvent(overrides: Partial<LaneLifecycleEvent> = {}): LaneLifecycleEv
 }
 
 function makeRepositoryEvent(overrides: Partial<LaneLifecycleEvent> = {}): RepositoryLifecycleEvent {
-  return { ...makeEvent(overrides), repo: 'on-par/sound-buddy' };
+  return { ...makeEvent(overrides), repo: 'owner/example-app' };
 }
 
 describe('formatSseFrame', () => {
@@ -87,14 +87,14 @@ describe('createReplayRing', () => {
 
   it('compares each interleaved repository-local id to the cursor', () => {
     const ring = createReplayRing(5);
-    ring.push(1, { ...makeRepositoryEvent({ detail: 'sound buddy 1' }), repo: 'on-par/sound-buddy' });
-    ring.push(2, { ...makeRepositoryEvent({ detail: 'sound buddy 2' }), repo: 'on-par/sound-buddy' });
+    ring.push(1, { ...makeRepositoryEvent({ detail: 'sound buddy 1' }), repo: 'owner/example-app' });
+    ring.push(2, { ...makeRepositoryEvent({ detail: 'sound buddy 2' }), repo: 'owner/example-app' });
     ring.push(1, { ...makeRepositoryEvent({ detail: 'other app 1' }), repo: 'on-par/other-app' });
     ring.push(2, { ...makeRepositoryEvent({ detail: 'other app 2' }), repo: 'on-par/other-app' });
 
     const replay = ring.since(1);
     expect(replay.map((entry) => entry.id)).toEqual([2, 2]);
-    expect(replay.map((entry) => entry.event.repo)).toEqual(['on-par/sound-buddy', 'on-par/other-app']);
+    expect(replay.map((entry) => entry.event.repo)).toEqual(['owner/example-app', 'on-par/other-app']);
   });
 
   it('since(<huge>) returns nothing', () => {

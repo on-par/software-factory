@@ -15,7 +15,7 @@ import {
 } from './index.js';
 import type { RepositoryLifecycleEvent } from './sse.js';
 
-const SOUND_BUDDY_REPO = 'on-par/sound-buddy';
+const SOUND_BUDDY_REPO = 'owner/example-app';
 const OTHER_APP_REPO = 'on-par/other-app';
 
 interface FakeBus extends LifecycleEventSource {
@@ -339,7 +339,7 @@ describe('@on-par/factory-server', () => {
     });
     await server.start();
 
-    const { res } = await openRequest(server.port, '/repos/on-par/sound-buddy/lanes/lane-1/pause', {
+    const { res } = await openRequest(server.port, '/repos/owner/example-app/lanes/lane-1/pause', {
       method: 'POST',
     });
 

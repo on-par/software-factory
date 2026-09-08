@@ -23,19 +23,19 @@ function jobFor(repoSlug: string): StoredHostedJob {
 
 describe('prepareGitHubAuthority', () => {
   it('scopes a fallback bundle to exactly the job repo and marks it prototype-fallback (AC#1)', async () => {
-    const job = jobFor('on-par/sound-buddy');
+    const job = jobFor('owner/example-app');
     const options: GitHubAuthorityBrokerOptions = { mint: prototypeFallbackMint('local-tok'), now: () => 2_000 };
 
     const bundle = await prepareGitHubAuthority(job, options);
 
     expect(bundle.kind).toBe('prototype-fallback');
-    expect(bundle.repoSlug).toBe('on-par/sound-buddy');
-    expect(bundle.remoteUrl).toContain('on-par/sound-buddy');
+    expect(bundle.repoSlug).toBe('owner/example-app');
+    expect(bundle.remoteUrl).toContain('owner/example-app');
     expect(bundle.remoteUrl).not.toContain('some-other-repo');
   });
 
   it('shapes an installation-token bundle the same way (App path shape)', async () => {
-    const job = jobFor('on-par/sound-buddy');
+    const job = jobFor('owner/example-app');
     const mint: MintGitHubToken = async () => ({ token: 'app-tok', kind: 'installation', username: 'x-access-token' });
     const options: GitHubAuthorityBrokerOptions = { mint, now: () => 2_000 };
 
@@ -46,19 +46,19 @@ describe('prepareGitHubAuthority', () => {
   });
 
   it('embeds the minted token and x-access-token username into remoteUrl/credentialLine (AC#2)', async () => {
-    const job = jobFor('on-par/sound-buddy');
+    const job = jobFor('owner/example-app');
     const options: GitHubAuthorityBrokerOptions = { mint: prototypeFallbackMint('local-tok'), now: () => 2_000 };
 
     const bundle = await prepareGitHubAuthority(job, options);
 
-    expect(bundle.remoteUrl).toBe('https://x-access-token:local-tok@github.com/on-par/sound-buddy.git');
+    expect(bundle.remoteUrl).toBe('https://x-access-token:local-tok@github.com/owner/example-app.git');
     expect(bundle.credentialLine).toBe('https://x-access-token:local-tok@github.com');
     expect(bundle.containerCredentialPath).toBe('/workspace/.git-credentials');
     expect(bundle.createdAt).toBe(new Date(2_000).toISOString());
   });
 
   it('honors a custom containerCredentialPath', async () => {
-    const job = jobFor('on-par/sound-buddy');
+    const job = jobFor('owner/example-app');
     const options: GitHubAuthorityBrokerOptions = {
       mint: prototypeFallbackMint('local-tok'),
       now: () => 2_000,

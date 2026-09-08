@@ -13,7 +13,7 @@ function initGitRepo(dir: string): void {
   execFileSync('git', ['init'], { cwd: dir });
   execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir });
   execFileSync('git', ['config', 'user.name', 'Test'], { cwd: dir });
-  execFileSync('git', ['remote', 'add', 'origin', 'ssh://git@ssh.github.com:443/on-par/sound-buddy.git'], {
+  execFileSync('git', ['remote', 'add', 'origin', 'ssh://git@ssh.github.com:443/owner/example-app.git'], {
     cwd: dir,
   });
 }
@@ -56,9 +56,9 @@ describe('run/state', () => {
       const returned = await writeIssueRunState(file, fixtureState(worktree));
 
       const persisted = JSON.parse(readFileSync(file, 'utf-8')) as IssueRunState;
-      expect(persisted.repo).toBe('on-par/sound-buddy');
+      expect(persisted.repo).toBe('owner/example-app');
       expect(persisted.lane).toBe('lane-2');
-      expect(returned.repo).toBe('on-par/sound-buddy');
+      expect(returned.repo).toBe('owner/example-app');
     });
 
     it('writes the caller-supplied repo verbatim, without resolving the worktree', async () => {
@@ -97,7 +97,7 @@ describe('run/state', () => {
 
       const read = await readIssueRunState(file);
 
-      expect(read?.repo).toBe('on-par/sound-buddy');
+      expect(read?.repo).toBe('owner/example-app');
       expect(read?.lane).toBe('lane-2');
       expect(read?.issue).toBe(972);
       expect(read?.branch).toBe('ship-it/972-x');

@@ -105,7 +105,7 @@ describe('loadRegistry', () => {
     const file = await tmpFile();
     const entryWithStateRoot: RepoRegistryEntry = {
       ...goodEntry,
-      stateRoot: '/var/lib/factory-state/sound-buddy',
+      stateRoot: '/var/lib/factory-state/example-app',
     };
     await writeFile(
       file,
@@ -113,7 +113,7 @@ describe('loadRegistry', () => {
         version: 1,
         repos: {
           'on-par/legacy': goodEntry,
-          'on-par/sound-buddy': entryWithStateRoot,
+          'owner/example-app': entryWithStateRoot,
         },
       }),
     );
@@ -121,40 +121,40 @@ describe('loadRegistry', () => {
     const registry = await loadRegistry(file);
 
     expect(registry.repos['on-par/legacy']).toEqual(goodEntry);
-    expect(registry.repos['on-par/sound-buddy']).toEqual(entryWithStateRoot);
+    expect(registry.repos['owner/example-app']).toEqual(entryWithStateRoot);
   });
 });
 
 describe('writeRegistry + loadRegistry round trip', () => {
   it('writes then reads back an entry by slug', async () => {
     const file = await tmpFile();
-    const registry = upsertRepo(emptyRegistry(), 'on-par/sound-buddy', goodEntry);
+    const registry = upsertRepo(emptyRegistry(), 'owner/example-app', goodEntry);
     await writeRegistry(file, registry);
 
     const loaded = await loadRegistry(file);
-    expect(getRepo(loaded, 'on-par/sound-buddy')).toEqual(goodEntry);
+    expect(getRepo(loaded, 'owner/example-app')).toEqual(goodEntry);
 
     const raw = await readFile(file, 'utf-8');
     const parsed = JSON.parse(raw) as RepoRegistry;
-    expect(parsed.repos['on-par/sound-buddy']).toEqual(goodEntry);
+    expect(parsed.repos['owner/example-app']).toEqual(goodEntry);
   });
 
   it('creates the parent directory on first write', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'registry-test-'));
     tmpDirs.push(dir);
     const file = join(dir, 'nested', '.factory', 'registry.json');
-    const registry = upsertRepo(emptyRegistry(), 'on-par/sound-buddy', goodEntry);
+    const registry = upsertRepo(emptyRegistry(), 'owner/example-app', goodEntry);
 
     await writeRegistry(file, registry);
 
     expect(existsSync(file)).toBe(true);
     const loaded = await loadRegistry(file);
-    expect(getRepo(loaded, 'on-par/sound-buddy')).toEqual(goodEntry);
+    expect(getRepo(loaded, 'owner/example-app')).toEqual(goodEntry);
   });
 
   it('leaves the previous file intact when the write crashes before the rename', async () => {
     const file = await tmpFile();
-    const v1 = upsertRepo(emptyRegistry(), 'on-par/sound-buddy', goodEntry);
+    const v1 = upsertRepo(emptyRegistry(), 'owner/example-app', goodEntry);
     await writeRegistry(file, v1);
 
     const v2 = upsertRepo(v1, 'on-par/other', { ...goodEntry, path: '/tmp/other' });
@@ -175,7 +175,7 @@ describe('writeRegistry + loadRegistry round trip', () => {
 
   it('leaves the previous file intact when the rename crashes', async () => {
     const file = await tmpFile();
-    const v1 = upsertRepo(emptyRegistry(), 'on-par/sound-buddy', goodEntry);
+    const v1 = upsertRepo(emptyRegistry(), 'owner/example-app', goodEntry);
     await writeRegistry(file, v1);
 
     const v2 = upsertRepo(v1, 'on-par/other', { ...goodEntry, path: '/tmp/other' });
@@ -193,7 +193,7 @@ describe('writeRegistry + loadRegistry round trip', () => {
 
   it('writes through `${file}.tmp`, never aimed at `file` directly', async () => {
     const file = await tmpFile();
-    const registry = upsertRepo(emptyRegistry(), 'on-par/sound-buddy', goodEntry);
+    const registry = upsertRepo(emptyRegistry(), 'owner/example-app', goodEntry);
     let recordedPath: string | undefined;
 
     await writeRegistry(file, registry, {
@@ -232,15 +232,15 @@ describe('listRepos', () => {
 
 describe('upsertRepo', () => {
   it('adds a new slug, overwrites an existing one, and does not mutate its input', () => {
-    const original = upsertRepo(emptyRegistry(), 'on-par/sound-buddy', goodEntry);
+    const original = upsertRepo(emptyRegistry(), 'owner/example-app', goodEntry);
 
     const updatedEntry: RepoRegistryEntry = { ...goodEntry, state: 'paused' };
-    const updated = upsertRepo(original, 'on-par/sound-buddy', updatedEntry);
+    const updated = upsertRepo(original, 'owner/example-app', updatedEntry);
     const withNew = upsertRepo(updated, 'on-par/second', goodEntry);
 
-    expect(getRepo(withNew, 'on-par/sound-buddy')).toEqual(updatedEntry);
+    expect(getRepo(withNew, 'owner/example-app')).toEqual(updatedEntry);
     expect(getRepo(withNew, 'on-par/second')).toEqual(goodEntry);
-    expect(getRepo(original, 'on-par/sound-buddy')).toEqual(goodEntry);
+    expect(getRepo(original, 'owner/example-app')).toEqual(goodEntry);
   });
 });
 
