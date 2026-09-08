@@ -261,7 +261,7 @@ grep -qF "FATAL: filter script missing: $BINDIR/nowhere/filter-green-prs.py" <<<
 
 # --- plist: valid property list with KeepAlive set ---
 
-PLIST="$ROOT/scripts/launchd/com.on-par.auto-merge-sweep.plist"
+PLIST="$ROOT/scripts/launchd/com.on-par.auto-merge-sweep.plist.template"
 if ! python3 -c 'import plistlib,sys; plistlib.load(open(sys.argv[1],"rb"))' "$PLIST"; then
   echo "FAIL: $PLIST is not a valid property list" >&2
   exit 1
