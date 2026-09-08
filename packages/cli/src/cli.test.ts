@@ -1956,7 +1956,7 @@ describe('cli', () => {
     expect(calls.some((c) => c[0] === 'merge')).toBe(false);
   });
 
-  it('refuses to merge and throws CiFailedError when CI ends in failure (regression: on-par/sound-buddy#707 merged with a failing e2e check)', async () => {
+  it('refuses to merge and throws CiFailedError when CI ends in failure (regression: owner/example-app#707 merged with a failing e2e check)', async () => {
     const calls: any[] = [];
     const octokit: any = {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
@@ -2006,7 +2006,7 @@ describe('cli', () => {
     expect(calls.some((c) => c[0] === 'merge')).toBe(false);
   });
 
-  it('refuses to merge on a confirmed CI failure even with adminMerge (FACTORY_MERGE_ADMIN=1) set — the exact on-par/sound-buddy#707 scenario', async () => {
+  it('refuses to merge on a confirmed CI failure even with adminMerge (FACTORY_MERGE_ADMIN=1) set — the exact owner/example-app#707 scenario', async () => {
     const calls: any[] = [];
     const octokit: any = {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),

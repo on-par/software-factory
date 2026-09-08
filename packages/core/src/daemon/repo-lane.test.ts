@@ -4,7 +4,7 @@ import { renderRepoLane } from './repo-lane.js';
 
 describe('renderRepoLane', () => {
   it('renders the canonical owner/name#laneId form', () => {
-    expect(renderRepoLane('on-par/sound-buddy', 'lane-2')).toBe('on-par/sound-buddy#lane-2');
+    expect(renderRepoLane('owner/example-app', 'lane-2')).toBe('owner/example-app#lane-2');
   });
 
   it('renders a second representative repo/lane pair', () => {

@@ -67,7 +67,7 @@ describe('createFactorydServer', () => {
     await writeRegistry(registryFile, {
       version: 1,
       repos: {
-        'on-par/sound-buddy': { path: '/repos/sound-buddy', attachedAt: '2026-01-01T00:00:00.000Z', state: 'active' },
+        'owner/example-app': { path: '/repos/example-app', attachedAt: '2026-01-01T00:00:00.000Z', state: 'active' },
         'on-par/software-factory': {
           path: '/repos/software-factory',
           attachedAt: '2026-01-02T00:00:00.000Z',
@@ -91,8 +91,8 @@ describe('createFactorydServer', () => {
           state: 'paused',
         },
         {
-          slug: 'on-par/sound-buddy',
-          path: '/repos/sound-buddy',
+          slug: 'owner/example-app',
+          path: '/repos/example-app',
           attachedAt: '2026-01-01T00:00:00.000Z',
           state: 'active',
         },

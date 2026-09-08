@@ -108,7 +108,7 @@ describe('runContainerJob', () => {
 
   it("clones the job's own repo, never the host checkout (AC#1/#3)", async () => {
     const store = createHostedJobStore({ now: () => 1_000 });
-    store.create(baseJobInput({ repoSlug: 'on-par/sound-buddy' }));
+    store.create(baseJobInput({ repoSlug: 'owner/example-app' }));
     const leaseId = 'lease-1';
     store.acquireLease({ jobId: 'job-1', runnerId: 'r1', leaseId, ttlMs: 60_000, heartbeatIntervalMs: 5_000 });
     const calls: FakeEngineCalls = { preparedJobIds: [], removedJobIds: [], repoSlugs: [], credentials: [] };
@@ -122,7 +122,7 @@ describe('runContainerJob', () => {
       timeoutMs: 5_000,
     });
 
-    expect(calls.repoSlugs).toEqual(['on-par/sound-buddy']);
+    expect(calls.repoSlugs).toEqual(['owner/example-app']);
   });
 
   it('marks the job done and removes the container on exit 0 (AC#3)', async () => {

@@ -883,22 +883,22 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
         cmd.startsWith('git reflog show') ||
         cmd.startsWith('git config --get')
       ) {
-        throw new Error('no local evidence'); // today's sound-buddy state: no ref, no reflog, merge stuck on refs/heads/main
+        throw new Error('no local evidence'); // today's example-app state: no ref, no reflog, merge stuck on refs/heads/main
       }
       return { stdout: '' }; // git status --porcelain --untracked-files=no => clean
     };
 
     const report = await sweepWorktrees(
-      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
       { runCommand, octokit },
     );
     expect(report.removed).toHaveLength(1);
     expect(report.removed[0].reason).toBe('merged');
     expect(pullsList).toHaveBeenCalledWith({
-      owner: 'on-par',
-      repo: 'sound-buddy',
+      owner: 'owner',
+      repo: 'example-app',
       state: 'all',
-      head: 'on-par:ship-it/21-merged',
+      head: 'owner:ship-it/21-merged',
     });
     expect(
       commands.some(
@@ -932,7 +932,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     };
 
     const report = await sweepWorktrees(
-      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
       { runCommand, octokit },
     );
     expect(report.removed).toHaveLength(0);
@@ -962,7 +962,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     };
 
     const report = await sweepWorktrees(
-      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
       { runCommand, octokit },
     );
     expect(report.removed).toHaveLength(1);
@@ -991,7 +991,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     };
 
     const report = await sweepWorktrees(
-      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
       { runCommand, octokit },
     );
     expect(report.removed).toHaveLength(0);
@@ -1021,7 +1021,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     };
 
     const report = await sweepWorktrees(
-      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
       { runCommand, octokit },
     );
     expect(report.removed).toHaveLength(1);
@@ -1055,7 +1055,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     };
 
     const report = await sweepWorktrees(
-      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
       { runCommand, octokit },
     );
     expect(report.removed).toHaveLength(1);
@@ -1087,7 +1087,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     };
 
     const report = await sweepWorktrees(
-      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
       { runCommand, octokit },
     );
     expect(report.removed).toHaveLength(1);
@@ -1118,7 +1118,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     };
 
     const report = await sweepWorktrees(
-      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
       { runCommand, octokit },
     );
     expect(report.removed).toHaveLength(0);
@@ -1147,7 +1147,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     };
 
     const report = await sweepWorktrees(
-      { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+      { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
       { runCommand, octokit },
     );
     expect(report.removed).toHaveLength(0);
@@ -1311,14 +1311,14 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       };
 
       const report = await sweepWorktrees(
-        { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+        { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
         { runCommand, octokit },
       );
       expect(report.removed).toHaveLength(1);
       expect(report.removed[0].reason).toBe('issue-parked');
       expect(report.removed[0].branchDeleted).toBe(true);
       expect(commands).toContain("git branch -D 'ship-it/41-parked'");
-      expect(issuesGet).toHaveBeenCalledWith({ owner: 'on-par', repo: 'sound-buddy', issue_number: 41 });
+      expect(issuesGet).toHaveBeenCalledWith({ owner: 'owner', repo: 'example-app', issue_number: 41 });
     });
 
     it('reaps a clean closed-issue worktree but keeps its never-pushed branch', async () => {
@@ -1345,7 +1345,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       };
 
       const report = await sweepWorktrees(
-        { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+        { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
         { runCommand, octokit },
       );
       expect(report.removed).toHaveLength(1);
@@ -1373,7 +1373,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       };
 
       const report = await sweepWorktrees(
-        { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+        { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
         { runCommand, octokit },
       );
       expect(report.removed).toHaveLength(0);
@@ -1394,7 +1394,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       };
 
       const report = await sweepWorktrees(
-        { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+        { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
         { runCommand, octokit },
       );
       expect(report.removed).toHaveLength(0);
@@ -1424,7 +1424,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       };
 
       const report = await sweepWorktrees(
-        { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+        { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
         { runCommand, octokit },
       );
       expect(report.removed).toHaveLength(1);
@@ -1454,7 +1454,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
       const logs: Array<[string, string]> = [];
       const report = await sweepWorktrees(
-        { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+        { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
         { runCommand, octokit, log: (type, msg) => logs.push([type, msg]) },
       );
       expect(report.removed).toHaveLength(0);
@@ -1485,7 +1485,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       };
 
       const report = await sweepWorktrees(
-        { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy' },
+        { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
         { runCommand, octokit },
       );
       expect(report.removed).toHaveLength(2);
@@ -1508,12 +1508,12 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       };
 
       const report = await sweepWorktrees(
-        { repoRoot: root, ttlDays: 7, repo: 'on-par/sound-buddy', branchPrefix: 'lane' },
+        { repoRoot: root, ttlDays: 7, repo: 'owner/example-app', branchPrefix: 'lane' },
         { runCommand, octokit },
       );
       expect(report.removed).toHaveLength(1);
       expect(report.removed[0].reason).toBe('issue-closed');
-      expect(issuesGet).toHaveBeenCalledWith({ owner: 'on-par', repo: 'sound-buddy', issue_number: 47 });
+      expect(issuesGet).toHaveBeenCalledWith({ owner: 'owner', repo: 'example-app', issue_number: 47 });
     });
   });
 });
