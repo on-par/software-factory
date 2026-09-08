@@ -347,6 +347,12 @@ export { gatherEvidencePack, renderEvidencePack } from './reports/evidence-pack.
 export type { LocalRunOutcome, LocalRunReport, LocalRunReportDeps, LocalRunReportInput } from './reports/local-run.js';
 export { readIssueEvents, renderLocalRunReport, writeLocalRunReport } from './reports/local-run.js';
 export type {
+  ShipPhaseBreakdown,
+  ShipPhaseBreakdownEvent,
+  ShipPhaseBreakdownRow,
+} from './reports/ship-phase-breakdown.js';
+export { aggregateShipPhaseBreakdown, renderShipPhaseBreakdown } from './reports/ship-phase-breakdown.js';
+export type {
   BenchmarkArtifactsInput,
   BenchmarkManifest,
   BenchmarkModelAttempt,
