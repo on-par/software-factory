@@ -62,6 +62,11 @@ export interface CheckerContext {
   onPgid?: (pgid: number) => void;
   /** Injection seam for phase/checker timing events (#1321) — set by checkPhase. */
   log?: (type: EventKind, msg: string, extra?: { durationMs?: number }) => void;
+  /** Heartbeat hook (#1326): called around every checker so the persisted run-phase
+   *  snapshot's `lastActivityAt` advances during CHECK, not just at phase transitions —
+   *  set by checkPhase. A rejection is logged (`activity_touch_failed`) and swallowed:
+   *  this is an observability side channel, not a checker-run invariant. */
+  onActivity?: () => void | Promise<void>;
 }
 
 export type CheckerFn = (ctx: CheckerContext) => Promise<CheckerOutput>;
@@ -502,6 +507,16 @@ function buildCheckers(constitution: Constitution | null): Checker[] {
   return [...checkers.values()];
 }
 
+/** Invokes `ctx.onActivity`, logging and swallowing any rejection (#1326) — an
+ *  observability side channel must never fail a checker run. */
+async function touchActivity(ctx: CheckerContext): Promise<void> {
+  try {
+    await ctx.onActivity?.();
+  } catch (e: any) {
+    ctx.log?.('activity_touch_failed', `activity snapshot touch failed: ${(e?.message ?? String(e)).slice(0, 500)}`);
+  }
+}
+
 export async function runAllCheckers(
   ctx: CheckerContext,
   router: ModelRouter,
@@ -523,6 +538,7 @@ export async function runAllCheckers(
 
   const results: CheckerOutput[] = [];
   for (const checker of buildCheckers(constitution)) {
+    await touchActivity(ctx);
     ctx.log?.('checker_started', `checker ${checker.name} started`);
     const startedAt = Date.now();
     let output: CheckerOutput;
@@ -539,6 +555,7 @@ export async function runAllCheckers(
     ctx.log?.('checker_completed', `checker ${checker.name} completed (${output.result})`, {
       durationMs: Date.now() - startedAt,
     });
+    await touchActivity(ctx);
     results.push(output);
   }
 

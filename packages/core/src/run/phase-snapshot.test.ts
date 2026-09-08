@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import type { RunPhaseSnapshot } from './phase-snapshot.js';
-import { phaseSnapshotFile, readPhaseSnapshot, writePhaseSnapshot } from './phase-snapshot.js';
+import { phaseSnapshotFile, readPhaseSnapshot, touchRunActivity, writePhaseSnapshot } from './phase-snapshot.js';
 
 describe('run/phase-snapshot', () => {
   describe('phaseSnapshotFile', () => {
@@ -18,7 +18,12 @@ describe('run/phase-snapshot', () => {
     it('writes the record atomically into a not-yet-created directory', async () => {
       const runsDir = join(mkdtempSync(join(tmpdir(), 'phase-snapshot-runs-')), 'nested', 'runs');
       const file = phaseSnapshotFile(runsDir, 1325);
-      const snapshot: RunPhaseSnapshot = { issue: 1325, phase: 'check', updatedAt: '2026-09-08T00:00:00.000Z' };
+      const snapshot: RunPhaseSnapshot = {
+        issue: 1325,
+        phase: 'check',
+        updatedAt: '2026-09-08T00:00:00.000Z',
+        lastActivityAt: '2026-09-08T00:00:00.000Z',
+      };
 
       await writePhaseSnapshot(file, snapshot);
 
@@ -30,8 +35,18 @@ describe('run/phase-snapshot', () => {
       const runsDir = mkdtempSync(join(tmpdir(), 'phase-snapshot-runs-'));
       const file = phaseSnapshotFile(runsDir, 1325);
 
-      await writePhaseSnapshot(file, { issue: 1325, phase: 'plan', updatedAt: '2026-09-08T00:00:00.000Z' });
-      await writePhaseSnapshot(file, { issue: 1325, phase: 'build', updatedAt: '2026-09-08T00:01:00.000Z' });
+      await writePhaseSnapshot(file, {
+        issue: 1325,
+        phase: 'plan',
+        updatedAt: '2026-09-08T00:00:00.000Z',
+        lastActivityAt: '2026-09-08T00:00:00.000Z',
+      });
+      await writePhaseSnapshot(file, {
+        issue: 1325,
+        phase: 'build',
+        updatedAt: '2026-09-08T00:01:00.000Z',
+        lastActivityAt: '2026-09-08T00:01:00.000Z',
+      });
 
       const persisted = JSON.parse(readFileSync(file, 'utf-8')) as RunPhaseSnapshot;
       expect(persisted.phase).toBe('build');
@@ -42,7 +57,12 @@ describe('run/phase-snapshot', () => {
     it('round-trips a written record', async () => {
       const runsDir = mkdtempSync(join(tmpdir(), 'phase-snapshot-runs-'));
       const file = phaseSnapshotFile(runsDir, 1325);
-      const snapshot: RunPhaseSnapshot = { issue: 1325, phase: 'ship', updatedAt: '2026-09-08T00:02:00.000Z' };
+      const snapshot: RunPhaseSnapshot = {
+        issue: 1325,
+        phase: 'ship',
+        updatedAt: '2026-09-08T00:02:00.000Z',
+        lastActivityAt: '2026-09-08T00:02:00.000Z',
+      };
       await writePhaseSnapshot(file, snapshot);
 
       const read = await readPhaseSnapshot(file);
@@ -67,8 +87,55 @@ describe('run/phase-snapshot', () => {
     it('returns null when phase is not a valid FailurePhase', async () => {
       const runsDir = mkdtempSync(join(tmpdir(), 'phase-snapshot-runs-'));
       const file = join(runsDir, 'issue-1.phase.json');
-      writeFileSync(file, JSON.stringify({ issue: 1, phase: 'building', updatedAt: '2026-09-08T00:00:00.000Z' }));
+      writeFileSync(
+        file,
+        JSON.stringify({
+          issue: 1,
+          phase: 'building',
+          updatedAt: '2026-09-08T00:00:00.000Z',
+          lastActivityAt: '2026-09-08T00:00:00.000Z',
+        }),
+      );
 
+      await expect(readPhaseSnapshot(file)).resolves.toBeNull();
+    });
+
+    it('returns null when lastActivityAt is missing (pre-#1326 snapshot)', async () => {
+      const runsDir = mkdtempSync(join(tmpdir(), 'phase-snapshot-runs-'));
+      const file = join(runsDir, 'issue-1.phase.json');
+      writeFileSync(file, JSON.stringify({ issue: 1, phase: 'check', updatedAt: '2026-09-08T00:00:00.000Z' }));
+
+      await expect(readPhaseSnapshot(file)).resolves.toBeNull();
+    });
+  });
+
+  describe('touchRunActivity', () => {
+    it('bumps lastActivityAt while leaving phase and updatedAt untouched', async () => {
+      const runsDir = mkdtempSync(join(tmpdir(), 'phase-snapshot-runs-'));
+      const file = phaseSnapshotFile(runsDir, 1326);
+      await writePhaseSnapshot(file, {
+        issue: 1326,
+        phase: 'check',
+        updatedAt: '2026-09-08T00:00:00.000Z',
+        lastActivityAt: '2026-09-08T00:00:00.000Z',
+      });
+
+      await touchRunActivity(file, '2026-09-08T00:05:00.000Z');
+
+      const persisted = JSON.parse(readFileSync(file, 'utf-8')) as RunPhaseSnapshot;
+      expect(persisted).toEqual({
+        issue: 1326,
+        phase: 'check',
+        updatedAt: '2026-09-08T00:00:00.000Z',
+        lastActivityAt: '2026-09-08T00:05:00.000Z',
+      });
+    });
+
+    it('is a no-op when no snapshot exists yet', async () => {
+      const runsDir = mkdtempSync(join(tmpdir(), 'phase-snapshot-runs-'));
+      const file = phaseSnapshotFile(runsDir, 1326);
+
+      await expect(touchRunActivity(file, '2026-09-08T00:05:00.000Z')).resolves.toBeUndefined();
       await expect(readPhaseSnapshot(file)).resolves.toBeNull();
     });
   });

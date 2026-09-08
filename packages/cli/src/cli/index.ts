@@ -129,6 +129,7 @@ import {
   runIssue,
   scoreIssueReadiness,
   shipPhase,
+  touchRunActivity,
   validateQueue,
   watchUsage,
   worktreeWorkspace,
@@ -1436,12 +1437,16 @@ export async function shipIssue(
     createApprovalGate: () => createFileApprovalGate({ dir: paths.approvals, timeoutMs: timeouts.approval * 1000 }),
     drainSteering: () => drainSteering(paths.steering, issueNum, worktree),
     reworkHistory,
-    recordPhase: (phase: FailurePhase) =>
-      writePhaseSnapshot(phaseSnapshotFile(paths.runs, issueNum), {
+    recordPhase: (phase: FailurePhase) => {
+      const now = new Date().toISOString();
+      return writePhaseSnapshot(phaseSnapshotFile(paths.runs, issueNum), {
         issue: issueNum,
         phase,
-        updatedAt: new Date().toISOString(),
-      }),
+        updatedAt: now,
+        lastActivityAt: now,
+      });
+    },
+    onActivity: () => touchRunActivity(phaseSnapshotFile(paths.runs, issueNum), new Date().toISOString()),
     onDecomposed: (childIssues) => {
       const childList = childIssues.map((n) => `#${n}`).join(', ');
       const planLog = mkLog('plan');

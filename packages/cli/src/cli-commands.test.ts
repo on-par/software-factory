@@ -3478,6 +3478,24 @@ describe('shipIssue (direct)', () => {
     expect(typeof checkCall.onPgid).toBe('function');
   });
 
+  it('passes an onActivity callback to checkPhase that bumps the persisted phase snapshot heartbeat (#1326)', async () => {
+    const core = await import('@on-par/factory-core');
+    await shipIssue(5, {}, ctx());
+
+    const checkCall = vi.mocked(core.checkPhase).mock.calls.at(-1)?.[0] as any;
+    expect(typeof checkCall.onActivity).toBe('function');
+
+    const snapshotFile = join(paths().state, 'runs', 'issue-5.phase.json');
+    const before = JSON.parse(readFileSync(snapshotFile, 'utf-8'));
+
+    await checkCall.onActivity();
+
+    const after = JSON.parse(readFileSync(snapshotFile, 'utf-8'));
+    expect(Date.parse(after.lastActivityAt)).toBeGreaterThanOrEqual(Date.parse(before.lastActivityAt));
+    expect(after.issue).toBe(before.issue);
+    expect(after.phase).toBe(before.phase);
+  });
+
   it('tracks a pgid reported through onPgid and sweeps it before releasing the lease, without crashing the run', async () => {
     const core = await import('@on-par/factory-core');
     vi.mocked(core.buildPhase).mockImplementationOnce(async (opts: any) => {

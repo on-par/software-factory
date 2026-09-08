@@ -184,6 +184,9 @@ async function checkPhaseImpl(opts: {
   laneId?: string;
   /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
   bus?: LifecycleBus;
+  /** Heartbeat hook (#1326), forwarded to `CheckerContext.onActivity` — bumps the
+   *  persisted run-phase snapshot's `lastActivityAt` around every checker. */
+  onActivity?: () => void | Promise<void>;
 }): Promise<CheckPhaseResult> {
   const {
     issue,
@@ -205,6 +208,7 @@ async function checkPhaseImpl(opts: {
     diffBase,
     reworkRoute,
     reworkModel,
+    onActivity,
   } = opts;
 
   let probe = await probeWorktree(worktree);
@@ -216,6 +220,7 @@ async function checkPhaseImpl(opts: {
     onPgid,
     probe,
     log,
+    onActivity,
   };
 
   if (appPort === undefined) {

@@ -11,6 +11,7 @@
 import type { LogLevel } from '../types/index.js';
 
 export type EventKind =
+  | 'activity_touch_failed'
   | 'adr_commit_skipped'
   | 'adr_context'
   | 'adr_context_empty'
@@ -176,6 +177,7 @@ export interface EventTraits {
 /** Every existing `EventKind`, classified once. New kinds must be added here —
  *  omitting one is a compile error, which is the point (#663). */
 export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
+  activity_touch_failed: { severity: 'info', isPark: false, isTerminal: false },
   adr_commit_skipped: { severity: 'info', isPark: false, isTerminal: false },
   adr_context: { severity: 'info', isPark: false, isTerminal: false },
   adr_context_empty: { severity: 'info', isPark: false, isTerminal: false },
