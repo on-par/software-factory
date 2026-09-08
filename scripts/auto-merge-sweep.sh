@@ -15,11 +15,13 @@
 # SKIPPING log line (factory land takes exactly one issue); they must be landed
 # manually.
 #
+# Usage: ORG=owner SWEEP_REPOS="example-app other-app" scripts/auto-merge-sweep.sh
+#
 # All config below is env-overridable, each defined exactly once:
-#   ORG               GitHub org (default: on-par)
+#   ORG               GitHub org (default: empty — required; see usage guard below)
 #   REPO_ROOT         local checkout root (default: $HOME/repos/$ORG)
 #   SWEEP_REPOS       space-separated repo names under $ORG / $REPO_ROOT
-#                     (default: sound-buddy software-factory launchblitz).
+#                     (default: empty — required; see usage guard below).
 #                     A repo whose checkout is missing under $REPO_ROOT is
 #                     skipped with a WARN each preflight, not a fatal error;
 #                     hosts that only run a subset of repos can set SWEEP_REPOS
@@ -38,11 +40,12 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # All config is env-overridable; each value is defined exactly once here.
-ORG="${ORG:-on-par}"
+ORG="${ORG:-}"
 REPO_ROOT="${REPO_ROOT:-$HOME/repos/$ORG}"
 FACTORY_BIN="${FACTORY_BIN:-$(command -v factory || echo "$HOME/.local/bin/factory")}"
 # Space-separated repo names under $ORG / $REPO_ROOT.
-IFS=' ' read -r -a REPOS <<<"${SWEEP_REPOS:-sound-buddy software-factory launchblitz}"
+SWEEP_REPOS="${SWEEP_REPOS:-}"
+IFS=' ' read -r -a REPOS <<<"$SWEEP_REPOS"
 # Flags passed to `gh pr merge` for standalone PRs (word-split; no spaces within a flag).
 MERGE_FLAGS="${MERGE_FLAGS:---squash --delete-branch}"
 SLEEP_SECONDS="${SLEEP_SECONDS:-300}"
@@ -72,7 +75,7 @@ preflight() {
   # A missing checkout is a per-repo skip, not a sweep-wide fatal: hosts that
   # only run a subset of repos (see SWEEP_REPOS) still sweep what they have.
   local r present=()
-  for r in "${REPOS[@]}"; do
+  for r in "${REPOS[@]+"${REPOS[@]}"}"; do
     if [ -d "$REPO_ROOT/$r" ]; then
       present+=("$r")
     else
@@ -141,7 +144,7 @@ write_heartbeat() {
 
 sweep_once() {
   local failures=0
-  for r in "${REPOS[@]}"; do
+  for r in "${REPOS[@]+"${REPOS[@]}"}"; do
     sweep_repo "$r" || failures=$((failures + 1))
   done
   write_heartbeat
@@ -177,6 +180,10 @@ run_sweep_loop() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  if [ -z "$ORG" ] || [ -z "$SWEEP_REPOS" ]; then
+    echo "Usage: ORG=owner SWEEP_REPOS=\"example-app other-app\" $0 — both are required; refusing to run with an empty ORG or SWEEP_REPOS"
+    exit 0
+  fi
   preflight || exit 1
   run_sweep_loop
 fi
