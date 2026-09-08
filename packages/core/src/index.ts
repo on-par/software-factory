@@ -240,9 +240,16 @@ export { acquireLaneEnvironment, localOnlyWorkspace, worktreeWorkspace } from '.
 export type { RunPorts, RunRequest } from './run/run-issue.js';
 export { runIssue } from './run/run-issue.js';
 
-// Run phase snapshot (#1325, #1326)
+// Run phase snapshot (#1325, #1326, #1327)
 export type { RunPhaseSnapshot } from './run/phase-snapshot.js';
-export { phaseSnapshotFile, readPhaseSnapshot, touchRunActivity, writePhaseSnapshot } from './run/phase-snapshot.js';
+export {
+  phaseSnapshotFile,
+  readPhaseSnapshot,
+  summarizeEvent,
+  touchLastEvent,
+  touchRunActivity,
+  writePhaseSnapshot,
+} from './run/phase-snapshot.js';
 
 // Lifecycle bus (#591)
 export type {

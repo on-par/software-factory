@@ -3496,6 +3496,22 @@ describe('shipIssue (direct)', () => {
     expect(after.phase).toBe(before.phase);
   });
 
+  it('updates the persisted phase snapshot lastEvent on every logged event (#1327)', async () => {
+    const core = await import('@on-par/factory-core');
+    await shipIssue(5, {}, ctx());
+
+    const checkCall = vi.mocked(core.checkPhase).mock.calls.at(-1)?.[0] as any;
+    expect(typeof checkCall.log).toBe('function');
+
+    const snapshotFile = join(paths().state, 'runs', 'issue-5.phase.json');
+    checkCall.log('build', 'a custom test event');
+
+    await vi.waitFor(() => {
+      const after = JSON.parse(readFileSync(snapshotFile, 'utf-8'));
+      expect(after.lastEvent).toBe('build: a custom test event');
+    });
+  });
+
   it('tracks a pgid reported through onPgid and sweeps it before releasing the lease, without crashing the run', async () => {
     const core = await import('@on-par/factory-core');
     vi.mocked(core.buildPhase).mockImplementationOnce(async (opts: any) => {

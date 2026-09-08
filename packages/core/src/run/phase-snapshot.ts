@@ -7,6 +7,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
+import type { EventKind } from '../events/kinds.js';
 import type { FailurePhase } from '../types/index.js';
 
 export interface RunPhaseSnapshot {
@@ -19,6 +20,20 @@ export interface RunPhaseSnapshot {
    *  each checker during CHECK), so a downstream consumer can tell a long stage that is
    *  still making progress from one that has hung. */
   lastActivityAt: string;
+  /** Short human-readable summary of the most recent daemon event (#1327), via
+   *  `summarizeEvent`. Absent until the CLI's mkLog chokepoint has logged at least one
+   *  event after the first snapshot write — optional/absent-safe for consumers. */
+  lastEvent?: string;
+}
+
+const LAST_EVENT_MAX_LENGTH = 200;
+
+/** Renders a short, human-readable one-line summary of a logged event for `lastEvent`
+ *  (#1327), truncated so a verbose event message can't bloat the snapshot file. */
+export function summarizeEvent(type: EventKind, msg: string): string {
+  const trimmed = msg.trim();
+  const summary = trimmed.length > 0 ? `${type}: ${trimmed}` : type;
+  return summary.length > LAST_EVENT_MAX_LENGTH ? `${summary.slice(0, LAST_EVENT_MAX_LENGTH - 1)}…` : summary;
 }
 
 const PHASES: readonly FailurePhase[] = ['plan', 'build', 'check', 'ship'];
@@ -29,12 +44,34 @@ export function phaseSnapshotFile(runsDir: string, issue: number): string {
   return resolve(runsDir, `issue-${issue}.phase.json`);
 }
 
+// Serializes every write to a given snapshot file behind one queue, keyed by path.
+// recordPhase, touchRunActivity, and touchLastEvent (#1327) are all called unawaited
+// from the CLI's mkLog chokepoint, which can fire several times per tick — without this,
+// two concurrent tmp-write/rename pairs for the same file can interleave and corrupt it.
+// Different issues use different files, so lanes never block each other.
+const writeQueues = new Map<string, Promise<void>>();
+
+function enqueueWrite(file: string, task: () => Promise<void>): Promise<void> {
+  const prior = writeQueues.get(file) ?? Promise.resolve();
+  const result = prior.then(task, task);
+  writeQueues.set(
+    file,
+    result.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return result;
+}
+
 /** Persists `snapshot` atomically (write to a tmp file, then rename). */
 export async function writePhaseSnapshot(file: string, snapshot: RunPhaseSnapshot): Promise<void> {
-  await mkdir(dirname(file), { recursive: true });
-  const tmp = `${file}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(snapshot, null, 2)}\n`);
-  await rename(tmp, file);
+  return enqueueWrite(file, async () => {
+    await mkdir(dirname(file), { recursive: true });
+    const tmp = `${file}.tmp`;
+    await writeFile(tmp, `${JSON.stringify(snapshot, null, 2)}\n`);
+    await rename(tmp, file);
+  });
 }
 
 /** Reads one issue's persisted phase snapshot, or null when the file is missing,
@@ -62,6 +99,7 @@ export async function readPhaseSnapshot(file: string): Promise<RunPhaseSnapshot 
     phase: record.phase as FailurePhase,
     updatedAt: record.updatedAt,
     lastActivityAt: record.lastActivityAt,
+    ...(typeof record.lastEvent === 'string' ? { lastEvent: record.lastEvent } : {}),
   };
 }
 
@@ -73,4 +111,15 @@ export async function touchRunActivity(file: string, now: string): Promise<void>
   const existing = await readPhaseSnapshot(file);
   if (!existing) return;
   await writePhaseSnapshot(file, { ...existing, lastActivityAt: now });
+}
+
+/** Read-modify-write: sets a persisted snapshot's `lastEvent` summary (#1327) without
+ *  disturbing `phase`/`updatedAt`/`lastActivityAt` — the CLI's mkLog chokepoint calls this
+ *  for every logged event. A no-op when no snapshot exists yet for this file (mirrors
+ *  `touchRunActivity`): the first events of a run are logged before PLAN's first
+ *  `recordPhase` write, and this is an observability side channel, not a run invariant. */
+export async function touchLastEvent(file: string, lastEvent: string): Promise<void> {
+  const existing = await readPhaseSnapshot(file);
+  if (!existing) return;
+  await writePhaseSnapshot(file, { ...existing, lastEvent });
 }

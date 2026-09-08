@@ -129,6 +129,8 @@ import {
   runIssue,
   scoreIssueReadiness,
   shipPhase,
+  summarizeEvent,
+  touchLastEvent,
   touchRunActivity,
   validateQueue,
   watchUsage,
@@ -1280,6 +1282,10 @@ export async function shipIssue(
         console.error(chalk.red(`  FAIL: ${msg.slice('FAILED: '.length)}`));
       }
       logEvent(paths.events, type, issueNum, msg, { ...extra, lane, phase });
+      // Best-effort lastEvent summary (#1327) for factory.run.snapshot — an
+      // observability side channel, so a write failure is swallowed, not logged (that
+      // would re-enter this same function for every event this chokepoint fires on).
+      touchLastEvent(phaseSnapshotFile(paths.runs, issueNum), summarizeEvent(type, msg)).catch(() => {});
     };
   const log = mkLog();
 
