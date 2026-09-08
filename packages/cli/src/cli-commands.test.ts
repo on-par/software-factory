@@ -696,6 +696,9 @@ describe('cli commands (via main dispatch)', () => {
       const res = await runMain('constitution', '--product', 'nope');
       expect(res).toEqual({ exited: true, code: 1 });
       expect(errored()).toContain("No constitution 'nope'");
+      expect(errored()).toContain('Available products: alpha, beta');
+      expect(existsSync(paths().constitution)).toBe(false);
+      expect(existsSync(paths().product)).toBe(false);
     });
 
     it('copies the bundled markdown for --product into the repo constitution.md', async () => {
