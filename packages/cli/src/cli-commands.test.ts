@@ -631,6 +631,29 @@ describe('cli commands (via main dispatch)', () => {
       expect(existsSync(paths().constitution)).toBe(true);
     });
 
+    it('refuses overwrite of an existing repo constitution without --force', async () => {
+      writeFileSync(
+        join(h.constitutionsDir, '_template.md'),
+        '```markdown\n---\nproduct: <product-name>\n---\n# <Product> Constitution\n```\n',
+      );
+      writeFileSync(paths().constitution, 'existing content');
+      const res = await runMain('constitution', '--init');
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('already exists');
+      expect(readFileSync(paths().constitution, 'utf-8')).toBe('existing content');
+    });
+
+    it('force overwrite replaces an existing repo constitution when --force is passed', async () => {
+      writeFileSync(
+        join(h.constitutionsDir, '_template.md'),
+        '```markdown\n---\nproduct: <product-name>\n---\n# <Product> Constitution\n```\n',
+      );
+      writeFileSync(paths().constitution, 'existing content');
+      const res = await runMain('constitution', '--init', '--force');
+      expect(res.exited).toBe(false);
+      expect(readFileSync(paths().constitution, 'utf-8')).toContain(basename(h.repoRoot));
+    });
+
     it('exits 1 when --init targets an existing constitution', async () => {
       writeFileSync(join(h.constitutionsDir, '_template.md'), '```markdown\n# <Product>\n```\n');
       writeFileSync(join(h.constitutionsDir, 'gizmo.md'), 'existing');

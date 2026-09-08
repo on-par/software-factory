@@ -574,7 +574,12 @@ export function initConstitution(product: string, deps: InitConstitutionDeps = {
   return target;
 }
 
-export async function cmdConstitution(opts: { list?: boolean; product?: string; init?: string | boolean }) {
+export async function cmdConstitution(opts: {
+  list?: boolean;
+  product?: string;
+  init?: string | boolean;
+  force?: boolean;
+}) {
   const loader = new ConstitutionLoader();
 
   if (typeof opts.init === 'string') {
@@ -601,9 +606,12 @@ export async function cmdConstitution(opts: { list?: boolean; product?: string; 
     const paths = getFactoryPaths(repoRoot);
     ensureDir(paths.root);
     const constitutionPath = resolve(paths.root, 'constitution.md');
+    if (existsSync(constitutionPath) && !opts.force) {
+      throw new CliExitError('.factory/constitution.md already exists — use --force to overwrite', 1);
+    }
     const template = readFileSync(resolve(getConstitutionsDir(), '_template.md'), 'utf-8');
     const content = scaffoldConstitution(template, basename(repoRoot));
-    writeIfAbsent(constitutionPath, content, '.factory/constitution.md');
+    writeIfAbsent(constitutionPath, content, '.factory/constitution.md', opts.force);
     return;
   }
 
@@ -4038,6 +4046,7 @@ export async function main() {
     )
     .option('--list', 'List available constitutions')
     .option('--product <name>', 'Set active product constitution')
+    .option('--force', 'With bare --init, overwrite an existing .factory/constitution.md')
     .action(cmdConstitution);
 
   program
