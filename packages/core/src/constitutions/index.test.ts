@@ -162,13 +162,14 @@ describe('ConstitutionLoader repo-first resolution', () => {
     expect(loader.resolve(repoDir)).toBeNull();
   });
 
-  it('listProducts() lists bundled product names, filtering non-md files and underscore-prefixed templates', async () => {
-    await writeFile(join(bundledDir, 'alpha.md'), '# Alpha');
-    await writeFile(join(bundledDir, 'beta.md'), '# Beta');
+  it('listProducts() lists bundled product names, filtering non-md, underscore-prefixed, and non-example files', async () => {
+    await writeFile(join(bundledDir, 'example-alpha.md'), '# Alpha');
+    await writeFile(join(bundledDir, 'example-beta.md'), '# Beta');
     await writeFile(join(bundledDir, '_template.md'), '# Template');
     await writeFile(join(bundledDir, 'notes.txt'), 'not a constitution');
+    await writeFile(join(bundledDir, 'camp-somewhere-cli.md'), '# Not an example');
 
-    expect(loader.listProducts().sort()).toEqual(['alpha', 'beta']);
+    expect(loader.listProducts().sort()).toEqual(['example-alpha', 'example-beta']);
   });
 
   it('defaults to the real bundled constitutions dir when constructed with no argument', () => {
@@ -176,7 +177,8 @@ describe('ConstitutionLoader repo-first resolution', () => {
     const products = defaultLoader.listProducts();
 
     expect(products.length).toBeGreaterThan(0);
-    expect(products.some((p) => p.startsWith('_'))).toBe(false);
+    expect(products.every((p) => p.startsWith('example-'))).toBe(true);
+    expect(products).not.toContain('camp-somewhere-cli');
   });
 
   it('falls back to the filename-derived product when frontmatter omits product', async () => {

@@ -141,7 +141,7 @@ export class ConstitutionLoader {
   /** List available product constitutions */
   listProducts(): string[] {
     return readdirSync(this.dir)
-      .filter((f) => f.endsWith('.md') && !f.startsWith('_'))
+      .filter((f) => f.endsWith('.md') && f.startsWith('example-'))
       .map((f) => f.replace(/\.md$/, ''));
   }
 }
