@@ -1117,6 +1117,39 @@ describe('runAllCheckers', () => {
   });
 
   it(
+    'calls onActivity twice per checker, bracketing checker_started/checker_completed (#1326)',
+    { timeout: 60000 },
+    async () => {
+      const worktree = await makeWorktree();
+      const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
+      const onActivity = vi.fn().mockResolvedValue(undefined);
+
+      const summary = await runAllCheckers({ ...makeContext(worktree), onActivity }, router, null);
+
+      expect(summary.total).toBeGreaterThan(0);
+      expect(onActivity).toHaveBeenCalledTimes(summary.total * 2);
+    },
+  );
+
+  it(
+    'logs activity_touch_failed and swallows a rejecting onActivity without failing checkers',
+    { timeout: 60000 },
+    async () => {
+      const worktree = await makeWorktree();
+      const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
+      const log = vi.fn();
+      const onActivity = vi.fn().mockRejectedValue(new Error('disk full'));
+
+      const summary = await runAllCheckers({ ...makeContext(worktree), log, onActivity }, router, null);
+
+      const failures = log.mock.calls.filter(([type]) => type === 'activity_touch_failed');
+      expect(summary.total).toBeGreaterThan(0);
+      expect(failures.length).toBe(summary.total * 2);
+      expect(failures[0][1]).toContain('disk full');
+    },
+  );
+
+  it(
     'probes the worktree exactly once per round even when several checkers consume the probe facts',
     { timeout: 60000 },
     async () => {

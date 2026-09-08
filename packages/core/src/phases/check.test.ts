@@ -1122,6 +1122,31 @@ describe('checkPhase success paths', () => {
     expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (2 skipped)' });
   });
 
+  it(
+    'forwards onActivity to the checker context, invoked around every checker (#1326)',
+    { timeout: 120_000 },
+    async () => {
+      const { worktree, specPath } = await makePassingWorktree();
+      const { router } = makeRouter();
+      let activityCalls = 0;
+
+      const check = await checkPhase({
+        issue: 88,
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        log: () => {},
+        onActivity: () => {
+          activityCalls++;
+        },
+      });
+
+      expect(check.passed).toBe(true);
+      expect(activityCalls).toBe(check.summary.total * 2);
+    },
+  );
+
   it('passes with a skipped tests checker when the worktree has no test command', { timeout: 120_000 }, async () => {
     const { worktree, specPath } = await makeSpecOnlyWorktree();
     const { router, stub } = makeRouter();

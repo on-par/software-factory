@@ -519,6 +519,21 @@ describe('runIssue — #1325: truthful phase snapshot', () => {
   });
 });
 
+describe('runIssue — #1326: activity heartbeat forwarded to CHECK', () => {
+  it('forwards ports.onActivity to checkPhase verbatim', async () => {
+    const onActivity = vi.fn().mockResolvedValue(undefined);
+    await runIssue(baseRequest(), basePolicy(), basePorts({ onActivity }));
+
+    expect(vi.mocked(checkPhase).mock.calls[0][0]).toMatchObject({ onActivity });
+  });
+
+  it('passes undefined through to checkPhase when no onActivity port is wired', async () => {
+    await runIssue(baseRequest(), basePolicy(), basePorts());
+
+    expect(vi.mocked(checkPhase).mock.calls[0][0]).toMatchObject({ onActivity: undefined });
+  });
+});
+
 describe('runIssue — interactive steering, proxy, and pgid tracking', () => {
   it('drains steering during BUILD and logs steering_applied when messages are present', async () => {
     const events: Array<[string, string]> = [];
