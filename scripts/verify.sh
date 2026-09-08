@@ -39,3 +39,4 @@ bash scripts/auto-merge-sweep.test.sh
 bash scripts/filter-green-prs.test.sh
 bash scripts/repo-merge-settings.test.sh
 bash scripts/ruleset-copilot-review.test.sh
+bash scripts/launchd/install-sweep-plist.test.sh
