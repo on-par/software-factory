@@ -574,10 +574,10 @@ export function initConstitution(product: string, deps: InitConstitutionDeps = {
   return target;
 }
 
-export async function cmdConstitution(opts: { list?: boolean; product?: string; init?: string }) {
+export async function cmdConstitution(opts: { list?: boolean; product?: string; init?: string | boolean }) {
   const loader = new ConstitutionLoader();
 
-  if (opts.init) {
+  if (typeof opts.init === 'string') {
     try {
       const target = initConstitution(opts.init);
       console.log(chalk.green(`Created constitution at ${target}`));
@@ -593,6 +593,17 @@ export async function cmdConstitution(opts: { list?: boolean; product?: string; 
       }
       throw err;
     }
+    return;
+  }
+
+  if (opts.init === true) {
+    const repoRoot = await getRepoRoot();
+    const paths = getFactoryPaths(repoRoot);
+    ensureDir(paths.root);
+    const constitutionPath = resolve(paths.root, 'constitution.md');
+    const template = readFileSync(resolve(getConstitutionsDir(), '_template.md'), 'utf-8');
+    const content = scaffoldConstitution(template, basename(repoRoot));
+    writeIfAbsent(constitutionPath, content, '.factory/constitution.md');
     return;
   }
 
@@ -4021,7 +4032,10 @@ export async function main() {
   program
     .command('constitution')
     .description('Manage product constitutions')
-    .option('--init <product>', 'Scaffold a new constitution from the template')
+    .option(
+      '--init [product]',
+      'Scaffold a new constitution from the template, or (with no name) write .factory/constitution.md in this repo',
+    )
     .option('--list', 'List available constitutions')
     .option('--product <name>', 'Set active product constitution')
     .action(cmdConstitution);

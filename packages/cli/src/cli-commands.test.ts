@@ -2,7 +2,7 @@ import type * as ChildProcess from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import * as FactoryCore from '@on-par/factory-core';
 import type * as FactoryCoreInternal from '@on-par/factory-core/internal';
@@ -604,6 +604,31 @@ describe('cli commands (via main dispatch)', () => {
       expect(res.exited).toBe(false);
       expect(existsSync(join(h.constitutionsDir, 'gizmo.md'))).toBe(true);
       expect(logged()).toContain('Created constitution');
+    });
+
+    it('writes constitution to target repo when --init is given with no product', async () => {
+      writeFileSync(
+        join(h.constitutionsDir, '_template.md'),
+        '```markdown\n---\nproduct: <product-name>\n---\n# <Product> Constitution\n```\n',
+      );
+      const res = await runMain('constitution', '--init');
+      expect(res.exited).toBe(false);
+      expect(existsSync(paths().constitution)).toBe(true);
+      expect(readFileSync(paths().constitution, 'utf-8')).toContain(basename(h.repoRoot));
+      expect(readdirSync(h.constitutionsDir)).toEqual(['_template.md']);
+    });
+
+    it('creates .factory/ when missing before a bare --init', async () => {
+      rmSync(paths().root, { recursive: true, force: true });
+      writeFileSync(
+        join(h.constitutionsDir, '_template.md'),
+        '```markdown\n---\nproduct: <product-name>\n---\n# <Product> Constitution\n```\n',
+      );
+      expect(existsSync(paths().root)).toBe(false);
+      const res = await runMain('constitution', '--init');
+      expect(res.exited).toBe(false);
+      expect(existsSync(paths().root)).toBe(true);
+      expect(existsSync(paths().constitution)).toBe(true);
     });
 
     it('exits 1 when --init targets an existing constitution', async () => {
