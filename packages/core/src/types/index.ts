@@ -168,7 +168,7 @@ export interface FingerprintedFailure {
 
 // ---------- Repo (#969) ----------
 
-/** A GitHub repository slug in `owner/name` form (e.g. `on-par/sound-buddy`).
+/** A GitHub repository slug in `owner/name` form (e.g. `owner/example-app`).
  *  The same shape parseRemoteSlug() resolves from a git origin remote. */
 export type RepoSlug = string;
 

@@ -17,7 +17,7 @@ import { lifecycleBus } from '@on-par/factory-core';
 const server = createServer({
   repositories: [
     {
-      repo: 'on-par/sound-buddy',
+      repo: 'owner/example-app',
       source: lifecycleBus,
       controller: { pause: (laneId) => pauseLane(laneId) },
     },
@@ -31,7 +31,7 @@ await server.stop();
 
 ```bash
 curl -N http://127.0.0.1:8787/events
-curl -X POST http://127.0.0.1:8787/repos/on-par/sound-buddy/lanes/lane-1/pause
+curl -X POST http://127.0.0.1:8787/repos/owner/example-app/lanes/lane-1/pause
 ```
 
 Each event arrives as an SSE frame with a strictly increasing integer `id:`. A
