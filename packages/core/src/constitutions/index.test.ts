@@ -167,7 +167,7 @@ describe('ConstitutionLoader repo-first resolution', () => {
     await writeFile(join(bundledDir, 'example-beta.md'), '# Beta');
     await writeFile(join(bundledDir, '_template.md'), '# Template');
     await writeFile(join(bundledDir, 'notes.txt'), 'not a constitution');
-    await writeFile(join(bundledDir, 'camp-somewhere-cli.md'), '# Not an example');
+    await writeFile(join(bundledDir, 'acme-cli.md'), '# Not an example');
 
     expect(loader.listProducts().sort()).toEqual(['example-alpha', 'example-beta']);
   });
@@ -178,7 +178,7 @@ describe('ConstitutionLoader repo-first resolution', () => {
 
     expect(products.length).toBeGreaterThan(0);
     expect(products.every((p) => p.startsWith('example-'))).toBe(true);
-    expect(products).not.toContain('camp-somewhere-cli');
+    expect(products).not.toContain('acme-cli');
   });
 
   it('falls back to the filename-derived product when frontmatter omits product', async () => {
