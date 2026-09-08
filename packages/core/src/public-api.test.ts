@@ -131,6 +131,10 @@ const PUBLIC_API_KEYS = [
   'worktreeWorkspace',
   // Run composition (#675)
   'runIssue',
+  // Run phase snapshot (#1325)
+  'phaseSnapshotFile',
+  'readPhaseSnapshot',
+  'writePhaseSnapshot',
   // Lifecycle bus (#591)
   'createLifecycleBus',
   'lifecycleBus',

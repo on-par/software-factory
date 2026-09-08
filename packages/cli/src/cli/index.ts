@@ -16,6 +16,7 @@ import type {
   EventKind,
   FactoryConfig,
   FailoverReason,
+  FailurePhase,
   GithubIssueParams,
   HealthKpis,
   IngestSettings,
@@ -93,6 +94,7 @@ import {
   parkReasonFor,
   parseKpiHistory,
   parseQueue,
+  phaseSnapshotFile,
   planPhase,
   ProviderBreaker,
   readEvents,
@@ -132,6 +134,7 @@ import {
   worktreeWorkspace,
   writeBenchmarkArtifacts,
   writeLocalRunReport,
+  writePhaseSnapshot,
   writeProxyState,
 } from '@on-par/factory-core';
 import type {
@@ -1433,6 +1436,12 @@ export async function shipIssue(
     createApprovalGate: () => createFileApprovalGate({ dir: paths.approvals, timeoutMs: timeouts.approval * 1000 }),
     drainSteering: () => drainSteering(paths.steering, issueNum, worktree),
     reworkHistory,
+    recordPhase: (phase: FailurePhase) =>
+      writePhaseSnapshot(phaseSnapshotFile(paths.runs, issueNum), {
+        issue: issueNum,
+        phase,
+        updatedAt: new Date().toISOString(),
+      }),
     onDecomposed: (childIssues) => {
       const childList = childIssues.map((n) => `#${n}`).join(', ');
       const planLog = mkLog('plan');
