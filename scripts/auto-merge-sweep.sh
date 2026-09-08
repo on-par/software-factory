@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Periodic auto-merge sweep for a configurable list of repos under one GitHub org.
 # Lands any open, non-draft, mergeable PR whose CI checks are ALL green.
-# Requested by Patrick 2026-07-13: auto-merge "for right now" across all three repos
-# while the factory supervisors (sb-factory/sf-factory/lb-factory tmux sessions) build.
+# Requested by Patrick 2026-07-13: auto-merge "for right now" across the configured repos
+# while the factory supervisors (per-repo tmux sessions) build.
 # Runs under launchd via scripts/launchd/com.on-par.auto-merge-sweep.plist (KeepAlive
 # restarts it on crash). Writes a heartbeat to ~/.factory/auto-merge-sweep.heartbeat
 # (override with HEARTBEAT_FILE) at the end of every completed pass so a monitor can
