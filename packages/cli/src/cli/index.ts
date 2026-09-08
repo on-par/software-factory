@@ -478,7 +478,6 @@ async function cmdMigrate(opts: { dryRun?: boolean } = {}): Promise<void> {
   await runMigrate(await getRepoRoot(), opts);
 }
 
-export class ConstitutionExistsError extends Error {}
 export class InvalidProductNameError extends Error {}
 
 /** Expected user-facing CLI failure. Thrown by command helpers; only main() maps it to a process exit code. */
@@ -549,31 +548,6 @@ export function scaffoldConstitution(template: string, product: string): string 
   return skeleton.replaceAll('<product-name>', JSON.stringify(product)).replaceAll('<Product>', display);
 }
 
-export interface InitConstitutionDeps {
-  dir?: string;
-  readFile?: (p: string) => string;
-  fileExists?: (p: string) => boolean;
-  writeFile?: (p: string, data: string) => void;
-}
-
-/** Scaffold `<dir>/<product>.md` from the template. Returns the written path. */
-export function initConstitution(product: string, deps: InitConstitutionDeps = {}): string {
-  const {
-    dir = getConstitutionsDir(),
-    readFile = (p: string) => readFileSync(p, 'utf-8'),
-    fileExists = existsSync,
-    writeFile = (p: string, d: string) => writeFileSync(p, d),
-  } = deps;
-  assertValidProduct(product);
-  const target = resolve(dir, `${product}.md`);
-  if (fileExists(target)) {
-    throw new ConstitutionExistsError(`constitution '${product}' already exists at ${target} — nothing changed`);
-  }
-  const content = scaffoldConstitution(readFile(resolve(dir, '_template.md')), product);
-  writeFile(target, content);
-  return target;
-}
-
 export async function cmdConstitution(opts: {
   list?: boolean;
   product?: string;
@@ -582,26 +556,18 @@ export async function cmdConstitution(opts: {
 }) {
   const loader = new ConstitutionLoader();
 
-  if (typeof opts.init === 'string') {
-    try {
-      const target = initConstitution(opts.init);
-      console.log(chalk.green(`Created constitution at ${target}`));
-      console.log(
-        `Next: edit its Purpose, Standards, and Quality Gates, then run: factory constitution --product ${opts.init}`,
-      );
-    } catch (err: any) {
-      if (err instanceof ConstitutionExistsError) {
-        throw new CliExitError(err.message, 1);
+  if (typeof opts.init === 'string' || opts.init === true) {
+    const product = typeof opts.init === 'string' ? opts.init : undefined;
+    if (product !== undefined) {
+      try {
+        assertValidProduct(product);
+      } catch (err) {
+        if (err instanceof InvalidProductNameError) {
+          throw new CliExitError(err.message, 2);
+        }
+        throw err;
       }
-      if (err instanceof InvalidProductNameError) {
-        throw new CliExitError(err.message, 2);
-      }
-      throw err;
     }
-    return;
-  }
-
-  if (opts.init === true) {
     const repoRoot = await getRepoRoot();
     const paths = getFactoryPaths(repoRoot);
     ensureDir(paths.root);
@@ -610,8 +576,9 @@ export async function cmdConstitution(opts: {
       throw new CliExitError('.factory/constitution.md already exists — use --force to overwrite', 1);
     }
     const template = readFileSync(resolve(getConstitutionsDir(), '_template.md'), 'utf-8');
-    const content = scaffoldConstitution(template, basename(repoRoot));
+    const content = scaffoldConstitution(template, product ?? basename(repoRoot));
     writeIfAbsent(constitutionPath, content, '.factory/constitution.md', opts.force);
+    console.log(`Next: factory constitution --product ${product ?? basename(repoRoot)}`);
     return;
   }
 
@@ -4042,11 +4009,11 @@ export async function main() {
     .description('Manage product constitutions')
     .option(
       '--init [product]',
-      'Scaffold a new constitution from the template, or (with no name) write .factory/constitution.md in this repo',
+      'Write .factory/constitution.md in this repo, scaffolded from the template (an optional name overrides the display name)',
     )
     .option('--list', 'List available constitutions')
     .option('--product <name>', 'Set active product constitution')
-    .option('--force', 'With bare --init, overwrite an existing .factory/constitution.md')
+    .option('--force', 'With --init, overwrite an existing .factory/constitution.md')
     .action(cmdConstitution);
 
   program
