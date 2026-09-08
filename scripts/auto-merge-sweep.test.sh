@@ -362,12 +362,12 @@ MERGE_FLAGS="--squash --delete-branch"
 
 # --- SWEEP_REPOS populates REPOS at source time ---
 
-repos_joined="$(SWEEP_REPOS="alpha beta" bash -c 'source "'"$ROOT"'/scripts/auto-merge-sweep.sh"; echo "${REPOS[*]}"')"
+repos_joined="$(SWEEP_REPOS="alpha beta" bash -c 'source "'"$ROOT"'/scripts/auto-merge-sweep.sh"; echo "${REPOS[*]+"${REPOS[*]}"}"')"
 [ "$repos_joined" = "alpha beta" ] || {
   echo "FAIL: SWEEP_REPOS override not honoured: $repos_joined" >&2; exit 1; }
 
-repos_default="$(env -u SWEEP_REPOS bash -c 'source "'"$ROOT"'/scripts/auto-merge-sweep.sh"; echo "${REPOS[*]}"')"
-[ "$repos_default" = "sound-buddy software-factory launchblitz" ] || {
+repos_default="$(env -u SWEEP_REPOS bash -c 'source "'"$ROOT"'/scripts/auto-merge-sweep.sh"; echo "${REPOS[*]+"${REPOS[*]}"}"')"
+[ "$repos_default" = "" ] || {
   echo "FAIL: default REPOS wrong: $repos_default" >&2; exit 1; }
 
 # --- REPO_ROOT default derives from ORG ---
