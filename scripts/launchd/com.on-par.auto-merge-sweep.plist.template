@@ -21,7 +21,7 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>/Users/moltbot/repos/on-par/software-factory/scripts/auto-merge-sweep.sh</string>
+    <string>__SF_ROOT__/scripts/auto-merge-sweep.sh</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -32,13 +32,13 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/Users/moltbot/.nvm/versions/node/v24.18.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <string>__SF_HOME__/.nvm/versions/node/v24.18.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     <key>FACTORY_MERGE_ADMIN</key>
     <string>1</string>
   </dict>
   <key>StandardOutPath</key>
-  <string>/Users/moltbot/Library/Logs/auto-merge-sweep.log</string>
+  <string>__SF_HOME__/Library/Logs/auto-merge-sweep.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/moltbot/Library/Logs/auto-merge-sweep.log</string>
+  <string>__SF_HOME__/Library/Logs/auto-merge-sweep.log</string>
 </dict>
 </plist>
