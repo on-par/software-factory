@@ -861,7 +861,7 @@ describe('cli', () => {
   });
 
   it('does not report a fresh, still-open PR as merged when an older PR reused the same branch name', async () => {
-    // Regression for the chronica debt-lane bug: a verify-and-close pass
+    // Regression for the debt-lane regression: a verify-and-close pass
     // recreates the exact head branch an earlier, already-merged PR used.
     // The old logic ("was ANY closed PR ever merged under this branch")
     // matched the stale #41 and made waitForMerge believe #44 had landed

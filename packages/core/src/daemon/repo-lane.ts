@@ -5,7 +5,7 @@
 import type { RepoSlug } from '../types/index.js';
 
 /** Render a repo slug and lane id as the canonical flat form `owner/name#laneId`,
- *  e.g. renderRepoLane('on-par/sound-buddy', 'lane-2') === 'on-par/sound-buddy#lane-2'. */
+ *  e.g. renderRepoLane('owner/example-app', 'lane-2') === 'owner/example-app#lane-2'. */
 export function renderRepoLane(repo: RepoSlug, laneId: string): string {
   return `${repo}#${laneId}`;
 }
