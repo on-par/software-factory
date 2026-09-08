@@ -698,6 +698,36 @@ describe('cli commands (via main dispatch)', () => {
       expect(errored()).toContain("No constitution 'nope'");
     });
 
+    it('copies the bundled markdown for --product into the repo constitution.md', async () => {
+      writeFileSync(join(h.constitutionsDir, 'alpha.md'), '# alpha constitution\n');
+      const before = readdirSync(h.constitutionsDir);
+      const res = await runMain('constitution', '--product', 'alpha');
+      expect(res.exited).toBe(false);
+      expect(readFileSync(paths().constitution, 'utf-8')).toBe('# alpha constitution\n');
+      expect(readFileSync(paths().product, 'utf-8')).toBe('alpha');
+      // --product must never write into getConstitutionsDir(), mirroring --init (#1299).
+      expect(readdirSync(h.constitutionsDir)).toEqual(before);
+    });
+
+    it('refuses to overwrite an existing repo constitution.md with --product and no --force', async () => {
+      writeFileSync(join(h.constitutionsDir, 'alpha.md'), '# alpha constitution\n');
+      writeFileSync(paths().constitution, 'existing content');
+      const res = await runMain('constitution', '--product', 'alpha');
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('already exists');
+      expect(readFileSync(paths().constitution, 'utf-8')).toBe('existing content');
+      expect(existsSync(paths().product)).toBe(false);
+    });
+
+    it('overwrites an existing repo constitution.md with --product --force', async () => {
+      writeFileSync(join(h.constitutionsDir, 'alpha.md'), '# alpha constitution\n');
+      writeFileSync(paths().constitution, 'existing content');
+      const res = await runMain('constitution', '--product', 'alpha', '--force');
+      expect(res.exited).toBe(false);
+      expect(readFileSync(paths().constitution, 'utf-8')).toBe('# alpha constitution\n');
+      expect(readFileSync(paths().product, 'utf-8')).toBe('alpha');
+    });
+
     it('exits 2 with a usage line when no sub-option is given', async () => {
       const res = await runMain('constitution');
       expect(res).toEqual({ exited: true, code: 2 });
