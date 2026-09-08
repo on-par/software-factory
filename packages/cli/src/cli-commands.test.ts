@@ -755,6 +755,27 @@ describe('cli commands (via main dispatch)', () => {
         'constitution template is missing its ```markdown skeleton block',
       );
     });
+
+    it('--help documents .factory/constitution.md as the source of truth and --product seeding', async () => {
+      const originalWrite = process.stdout.write.bind(process.stdout);
+      const written: string[] = [];
+      process.stdout.write = ((chunk: unknown) => {
+        written.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write;
+
+      let res: Awaited<ReturnType<typeof runMain>>;
+      try {
+        res = await runMain('constitution', '--help');
+      } finally {
+        process.stdout.write = originalWrite;
+      }
+
+      expect(res.exited).toBe(true);
+      const text = written.join('').replace(/\s+/g, ' ');
+      expect(text).toContain('.factory/constitution.md in this repo is the source of truth');
+      expect(text).toContain('Seed .factory/constitution.md from the bundled example constitution for <name>');
+    });
   });
 
   describe('models', () => {
