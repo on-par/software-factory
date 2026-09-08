@@ -1238,7 +1238,9 @@ describe('shipPhase approval gate', () => {
     const shipIdx = logs.findIndex(([type]) => type === 'ship');
     const requestedIdx = logs.findIndex(([type]) => type === 'approval_requested');
     const grantedIdx = logs.findIndex(([type]) => type === 'approval_granted');
-    expect(shipIdx).toBe(0);
+    // phase_started (#1321) precedes every phase-domain event, including 'ship'.
+    expect(logs[0][0]).toBe('phase_started');
+    expect(shipIdx).toBe(1);
     expect(requestedIdx).toBeGreaterThan(shipIdx);
     expect(grantedIdx).toBeGreaterThan(requestedIdx);
     expect(logs[requestedIdx][1]).toContain('checks: 3 pass, 0 fail, 0 skip');
@@ -1282,8 +1284,10 @@ describe('shipPhase approval gate', () => {
     expect(calls).toEqual([]);
     expect(commands).toEqual(['git diff --stat origin/main...HEAD']);
     expect(logs).toContainEqual(['ship_denied', 'ship denied for ship-it/23-self-heal: not today']);
-    // A 'ship'-typed event fires first so a denial doesn't misreport the TUI's failed phase as CHECK/BUILD.
-    expect(logs[0]).toEqual(['ship', 'Starting ship phase for ship-it/23-self-heal']);
+    // A 'ship'-typed event fires first (right after phase_started, #1321) so a denial
+    // doesn't misreport the TUI's failed phase as CHECK/BUILD.
+    expect(logs[0][0]).toBe('phase_started');
+    expect(logs[1]).toEqual(['ship', 'Starting ship phase for ship-it/23-self-heal']);
   });
 
   it('denies with the default "denied" reason when the gate response omits one', async () => {

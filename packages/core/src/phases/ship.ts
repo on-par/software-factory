@@ -38,7 +38,14 @@ export interface ShipResult {
 
 export async function shipPhase(opts: Parameters<typeof shipPhaseImpl>[0]): Promise<ShipResult> {
   return withLifecycle(
-    { bus: opts.bus, phase: 'ship', laneId: opts.laneId, issueId: opts.issue, worktreePath: opts.worktree },
+    {
+      bus: opts.bus,
+      phase: 'ship',
+      laneId: opts.laneId,
+      issueId: opts.issue,
+      worktreePath: opts.worktree,
+      log: opts.log,
+    },
     () => shipPhaseImpl(opts),
     (r) => r.ok,
     (r) =>

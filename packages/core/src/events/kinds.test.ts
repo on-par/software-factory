@@ -143,6 +143,16 @@ describe('size-gate-escalated classification (#607)', () => {
 // A run refused before any resource was committed because the target issue was already
 // closed (#681) is a clean terminal outcome, not a park — human-intervention KPIs must
 // never count it, and isParkKind must agree.
+// Phase/checker timing events (#1321) are inert bookkeeping — info severity,
+// never a park or terminal outcome, so they cannot affect KPI accounting.
+describe('phase/checker timing event classification (#1321)', () => {
+  it('is info severity, not park, not terminal for all four new kinds', () => {
+    for (const kind of ['phase_started', 'phase_completed', 'checker_started', 'checker_completed'] as const) {
+      expect(EVENT_TRAITS[kind], kind).toEqual({ severity: 'info', isPark: false, isTerminal: false });
+    }
+  });
+});
+
 describe('skipped-already-closed classification (#681)', () => {
   it('is info severity, not park, terminal', () => {
     expect(EVENT_TRAITS['skipped-already-closed']).toEqual({ severity: 'info', isPark: false, isTerminal: true });

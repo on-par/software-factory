@@ -3,6 +3,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import type { EventKind } from '../events/kinds.js';
 import type { ModelRouter } from '../router/index.js';
 import type { CheckerOutput, CheckSummary, Constitution } from '../types/index.js';
 import {
@@ -59,6 +60,8 @@ export interface CheckerContext {
    *  group) and its pid reported here so the lane can track and later kill
    *  the whole group — set by checkPhase. */
   onPgid?: (pgid: number) => void;
+  /** Injection seam for phase/checker timing events (#1321) — set by checkPhase. */
+  log?: (type: EventKind, msg: string, extra?: { durationMs?: number }) => void;
 }
 
 export type CheckerFn = (ctx: CheckerContext) => Promise<CheckerOutput>;
@@ -520,6 +523,8 @@ export async function runAllCheckers(
 
   const results: CheckerOutput[] = [];
   for (const checker of buildCheckers(constitution)) {
+    ctx.log?.('checker_started', `checker ${checker.name} started`);
+    const startedAt = Date.now();
     let output: CheckerOutput;
     try {
       output = await checker.run(runCtx);
@@ -531,6 +536,9 @@ export async function runAllCheckers(
         details: `checker crashed: ${(e?.message ?? String(e)).slice(0, 500)}`,
       };
     }
+    ctx.log?.('checker_completed', `checker ${checker.name} completed (${output.result})`, {
+      durationMs: Date.now() - startedAt,
+    });
     results.push(output);
   }
 

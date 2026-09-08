@@ -5,6 +5,8 @@ import { EventEmitter } from 'node:events';
 
 import type { LaneLifecycleEvent, LaneLifecyclePhase, LaneLifecycleStatus } from '@on-par/contracts';
 
+import type { EventKind } from '../events/kinds.js';
+
 export type { LaneLifecycleEvent, LaneLifecyclePhase, LaneLifecycleStatus };
 
 export type LaneLifecycleListener = (event: LaneLifecycleEvent) => void;
@@ -54,6 +56,7 @@ export interface LifecycleContext {
   laneId?: string;
   issueId: string | number;
   worktreePath: string;
+  log?: (type: EventKind, msg: string, extra?: { durationMs?: number }) => void;
 }
 
 function emitLifecycle(ctx: LifecycleContext, status: LaneLifecycleStatus, detail: string): void {
@@ -80,14 +83,20 @@ export async function withLifecycle<T>(
   describe?: (result: T) => string,
 ): Promise<T> {
   emitLifecycle(ctx, 'started', `${ctx.phase} started`);
+  ctx.log?.('phase_started', `${ctx.phase} started`);
+  const startedAt = Date.now();
   let result: T;
   try {
     result = await run();
   } catch (err) {
-    emitLifecycle(ctx, 'failed', `${ctx.phase} threw: ${err instanceof Error ? err.message : String(err)}`);
+    const detail = `${ctx.phase} threw: ${err instanceof Error ? err.message : String(err)}`;
+    emitLifecycle(ctx, 'failed', detail);
+    ctx.log?.('phase_completed', detail, { durationMs: Date.now() - startedAt });
     throw err;
   }
   const ok = succeeded(result);
-  emitLifecycle(ctx, ok ? 'done' : 'failed', describe?.(result) ?? `${ctx.phase} ${ok ? 'done' : 'failed'}`);
+  const detail = describe?.(result) ?? `${ctx.phase} ${ok ? 'done' : 'failed'}`;
+  emitLifecycle(ctx, ok ? 'done' : 'failed', detail);
+  ctx.log?.('phase_completed', detail, { durationMs: Date.now() - startedAt });
   return result;
 }

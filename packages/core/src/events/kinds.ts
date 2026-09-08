@@ -31,6 +31,8 @@ export type EventKind =
   | 'budget_exceeded'
   | 'build'
   | 'check'
+  | 'checker_completed'
+  | 'checker_started'
   | 'ci-failed'
   | 'conflict'
   | 'constitution'
@@ -88,6 +90,8 @@ export type EventKind =
   | 'overnight-preflight'
   | 'overnight-ready'
   | 'parked'
+  | 'phase_completed'
+  | 'phase_started'
   | 'plan'
   | 'plan_approval_granted'
   | 'plan_approval_requested'
@@ -189,6 +193,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   budget_exceeded: { severity: 'warn', isPark: false, isTerminal: false },
   build: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
   check: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
+  checker_completed: { severity: 'info', isPark: false, isTerminal: false },
+  checker_started: { severity: 'info', isPark: false, isTerminal: false },
   'ci-failed': { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   conflict: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   constitution: { severity: 'info', isPark: false, isTerminal: false },
@@ -252,6 +258,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'overnight-preflight': { severity: 'info', isPark: false, isTerminal: false },
   'overnight-ready': { severity: 'info', isPark: false, isTerminal: false },
   parked: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },
+  phase_completed: { severity: 'info', isPark: false, isTerminal: false },
+  phase_started: { severity: 'info', isPark: false, isTerminal: false },
   plan: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
   plan_approval_granted: { severity: 'info', isPark: false, isTerminal: false },
   plan_approval_requested: { severity: 'info', isPark: false, isTerminal: false },

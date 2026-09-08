@@ -11,7 +11,11 @@ import type { SandboxPolicy } from '../sandbox/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
 import type { CheckSummary, Constitution, FailoverReason, ReworkCause, ReworkInfo } from '../types/index.js';
 
-type LogFn = (type: EventKind, msg: string, extra?: { failoverReason?: FailoverReason; rework?: ReworkInfo }) => void;
+type LogFn = (
+  type: EventKind,
+  msg: string,
+  extra?: { failoverReason?: FailoverReason; rework?: ReworkInfo; durationMs?: number },
+) => void;
 
 export interface CheckPhaseResult {
   passed: boolean;
@@ -129,7 +133,14 @@ function classifyReworkCause(opts: {
 
 export async function checkPhase(opts: Parameters<typeof checkPhaseImpl>[0]): Promise<CheckPhaseResult> {
   return withLifecycle(
-    { bus: opts.bus, phase: 'check', laneId: opts.laneId, issueId: opts.issue, worktreePath: opts.worktree },
+    {
+      bus: opts.bus,
+      phase: 'check',
+      laneId: opts.laneId,
+      issueId: opts.issue,
+      worktreePath: opts.worktree,
+      log: opts.log,
+    },
     () => checkPhaseImpl(opts),
     (r) => r.passed,
     (r) =>
@@ -204,6 +215,7 @@ async function checkPhaseImpl(opts: {
     env: laneEnv(appPort, process.env, appBaseUrl),
     onPgid,
     probe,
+    log,
   };
 
   if (appPort === undefined) {

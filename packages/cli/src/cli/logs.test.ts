@@ -73,7 +73,7 @@ describe('runLogs (non-follow)', () => {
   });
 
   it('prints existing events in the [factory] format and returns a no-op stop', () => {
-    writeFileSync(file, line({ type: 'plan', issue: '1', msg: 'Starting plan phase' }));
+    writeFileSync(file, line({ ts: '', type: 'plan', issue: '1', msg: 'Starting plan phase' }));
     const { written, out } = outStub();
     const stop = runLogs(file, {}, { out, env: {} });
     expect(written).toEqual(['[factory] plan #1: Starting plan phase\n']);
@@ -81,7 +81,7 @@ describe('runLogs (non-follow)', () => {
   });
 
   it('includes the [lane] token when lane is set', () => {
-    writeFileSync(file, line({ type: 'plan', issue: '1', msg: 'go', lane: 'x' }));
+    writeFileSync(file, line({ ts: '', type: 'plan', issue: '1', msg: 'go', lane: 'x' }));
     const { written, out } = outStub();
     runLogs(file, {}, { out, env: {} });
     expect(written).toEqual(['[factory] plan #1 [x]: go\n']);
@@ -119,7 +119,7 @@ describe('runLogs (non-follow)', () => {
   it('filters by --issue', () => {
     writeFileSync(
       file,
-      line({ type: 'plan', issue: '296', msg: 'a' }) + line({ type: 'plan', issue: '301', msg: 'b' }),
+      line({ ts: '', type: 'plan', issue: '296', msg: 'a' }) + line({ ts: '', type: 'plan', issue: '301', msg: 'b' }),
     );
     const { written, out } = outStub();
     runLogs(file, { issue: '296' }, { out, env: {} });
@@ -148,7 +148,7 @@ describe('runLogs (follow)', () => {
     stops.push(stop);
 
     await delay(30);
-    writeFileSync(file, line({ type: 'plan', issue: '1', msg: 'hi' }));
+    writeFileSync(file, line({ ts: '', type: 'plan', issue: '1', msg: 'hi' }));
     await waitFor(() => written.length >= 1);
     expect(written[0]).toBe('[factory] plan #1: hi\n');
   });
@@ -159,7 +159,7 @@ describe('runLogs (follow)', () => {
     const stop = runLogs(file, { follow: true }, { out, env: {}, pollMs: 10 });
     stops.push(stop);
 
-    appendFileSync(file, 'not json\n' + line({ type: 'plan', issue: '1', msg: 'ok' }));
+    appendFileSync(file, 'not json\n' + line({ ts: '', type: 'plan', issue: '1', msg: 'ok' }));
     await waitFor(() => written.length >= 1);
     expect(written).toEqual(['[factory] plan #1: ok\n']);
   });
@@ -169,24 +169,24 @@ describe('runLogs (follow)', () => {
     const { written, out } = outStub();
     const stop = runLogs(file, { follow: true }, { out, env: {}, pollMs: 10 });
 
-    appendFileSync(file, line({ type: 'plan', issue: '1', msg: 'first' }));
+    appendFileSync(file, line({ ts: '', type: 'plan', issue: '1', msg: 'first' }));
     await waitFor(() => written.length >= 1);
 
     stop();
-    appendFileSync(file, line({ type: 'plan', issue: '1', msg: 'second' }));
+    appendFileSync(file, line({ ts: '', type: 'plan', issue: '1', msg: 'second' }));
     await delay(50);
     expect(written).toEqual(['[factory] plan #1: first\n']);
   });
 
   it('stop() catches up on an event written in the poll window right before it is called', async () => {
-    writeFileSync(file, line({ type: 'plan', issue: '1', msg: 'first' }));
+    writeFileSync(file, line({ ts: '', type: 'plan', issue: '1', msg: 'first' }));
     const { written, out } = outStub();
     const stop = runLogs(file, { follow: true }, { out, env: {}, pollMs: 10 });
     await waitFor(() => written.length >= 1);
 
     // Append and stop synchronously (no await between them) so no poll tick can
     // interleave — reproducing an event racing SIGINT within the poll window.
-    appendFileSync(file, line({ type: 'plan', issue: '1', msg: 'last-before-sigint' }));
+    appendFileSync(file, line({ ts: '', type: 'plan', issue: '1', msg: 'last-before-sigint' }));
     stop();
 
     expect(written).toEqual(['[factory] plan #1: first\n', '[factory] plan #1: last-before-sigint\n']);
@@ -207,14 +207,14 @@ describe('cmdLogs', () => {
   });
 
   it('non-follow mode prints and returns without hanging', async () => {
-    writeFileSync(file, line({ type: 'plan', issue: '1', msg: 'hi' }));
+    writeFileSync(file, line({ ts: '', type: 'plan', issue: '1', msg: 'hi' }));
     const { written, out } = outStub();
     await cmdLogs({}, { eventsFile: file, out, env: {} });
     expect(written).toEqual(['[factory] plan #1: hi\n']);
   });
 
   it('follow mode tails until SIGINT, then stops and resolves', async () => {
-    writeFileSync(file, line({ type: 'plan', issue: '1', msg: 'hi' }));
+    writeFileSync(file, line({ ts: '', type: 'plan', issue: '1', msg: 'hi' }));
     const { written, out } = outStub();
     const done = cmdLogs({ follow: true }, { eventsFile: file, out, env: {}, pollMs: 10 });
 
