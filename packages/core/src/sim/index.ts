@@ -38,6 +38,8 @@ export {
 } from './monte-carlo-cli.js';
 export type { SimOctokit, SimOctokitEndpoint, SimOctokitOptions, SimOctokitStep, SimRecordedCall } from './octokit.js';
 export { createSimOctokit } from './octokit.js';
+export type { ShipPhaseBreakdownCliDeps } from './ship-phase-breakdown-cli.js';
+export { runShipPhaseBreakdownReportCli } from './ship-phase-breakdown-cli.js';
 export type {
   SimIssueOutcome,
   SimIssueSpec,

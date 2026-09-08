@@ -409,6 +409,8 @@ async function planPhaseImpl(opts: {
     { readiness },
   );
 
+  log('adr_inject_started', 'reading accepted ADRs for design-constraint injection');
+  const adrInjectStartedAt = Date.now();
   const adrReader = createFsReader({
     root: worktree,
     onDegrade: (event) => {
@@ -431,6 +433,9 @@ async function planPhaseImpl(opts: {
   if (adrContext.skipped.length > 0) {
     log('adr_skipped', `${adrContext.skipped.length} ADR file(s) skipped (not Accepted or unparsable)`);
   }
+  log('adr_inject_completed', `ADR injection complete (${adrContext.active.length} active)`, {
+    durationMs: Date.now() - adrInjectStartedAt,
+  });
 
   let steering: ConsumedSteering | undefined;
   let replans = 0;

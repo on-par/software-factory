@@ -207,6 +207,8 @@ const PUBLIC_API_KEYS = [
   'resolveArtifactsDir',
   'writeBenchmarkArtifacts',
   'writeLocalRunReport',
+  'aggregateShipPhaseBreakdown',
+  'renderShipPhaseBreakdown',
   // KPIs
   'appendKpiHistoryLine',
   'computeHealthKpis',
@@ -530,6 +532,7 @@ const TESTING_API_KEYS = [
   'MONTE_CARLO_CLI_USAGE',
   'parseMonteCarloArgs',
   'runMonteCarloCli',
+  'runShipPhaseBreakdownReportCli',
   'simMonteCarloIssues',
   'SIM_FENCED_ENRICHMENT_OUTPUT',
   'SIM_REGRESSION_FIXTURES',

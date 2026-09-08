@@ -208,6 +208,28 @@ describe('runSimulation', () => {
     expect(streamed.length).toBeGreaterThanOrEqual(outcome.events.length);
   });
 
+  it(
+    'carries ts and durationMs through phase_completed/checker_completed/adr_inject_completed events (#1328)',
+    { timeout: 180_000 },
+    async () => {
+      const report = await runSimulation({
+        workspace: sharedWorkspace,
+        issues: [{ issue: 9017, title: 'Sim duration passthrough' }],
+      });
+      const [outcome] = report.outcomes;
+      expect(outcome.events.every((e) => typeof e.ts === 'string' && e.ts.length > 0)).toBe(true);
+
+      const planCompleted = outcome.events.find((e) => e.phase === 'plan' && e.type === 'phase_completed');
+      expect(typeof planCompleted?.durationMs).toBe('number');
+
+      const adrInjectCompleted = outcome.events.find((e) => e.type === 'adr_inject_completed');
+      expect(typeof adrInjectCompleted?.durationMs).toBe('number');
+
+      const checkerCompleted = outcome.events.find((e) => e.type === 'checker_completed');
+      expect(typeof checkerCompleted?.durationMs).toBe('number');
+    },
+  );
+
   it('a workspace created for a caller-supplied run is left alone', { timeout: 180_000 }, async () => {
     const ws = await createSimWorkspace();
     expect(existsSync(ws.origin)).toBe(true);

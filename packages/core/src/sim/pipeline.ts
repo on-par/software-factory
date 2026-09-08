@@ -36,6 +36,11 @@ export interface SimPipelineEvent {
   phase: SimPhaseName;
   type: string;
   msg: string;
+  /** ISO timestamp captured when the phase/checker code logged this event. */
+  ts: string;
+  /** Carried through from the phase/checker `log(type, msg, { durationMs })` call, when present
+   *  (e.g. `phase_completed`, `checker_completed`, `adr_inject_completed`) — see #1328. */
+  durationMs?: number;
 }
 
 export interface SimIssueSpec {
@@ -245,8 +250,14 @@ async function runSimIssue(
   const events: SimPipelineEvent[] = [];
   const log =
     (phase: SimPhaseName) =>
-    (type: string, msg: string, _extra?: unknown): void => {
-      const event: SimPipelineEvent = { phase, type, msg };
+    (type: string, msg: string, extra?: { durationMs?: number }): void => {
+      const event: SimPipelineEvent = {
+        phase,
+        type,
+        msg,
+        ts: new Date().toISOString(),
+        ...(extra?.durationMs !== undefined ? { durationMs: extra.durationMs } : {}),
+      };
       events.push(event);
       options.onEvent?.(spec.issue, event);
     };

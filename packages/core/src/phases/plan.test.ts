@@ -2151,7 +2151,7 @@ npm run test`;
       const octokit: any = {
         rest: { issues: { get: async () => ({ data: { title: 'ADR reader', body: 'Body.' } }) } },
       };
-      const logs: Array<{ type: string; msg: string }> = [];
+      const logs: Array<{ type: string; msg: string; extra?: { durationMs?: number } }> = [];
 
       await planPhase({
         issue: 481,
@@ -2161,7 +2161,7 @@ npm run test`;
         router,
         constitution: null,
         octokit,
-        log: (type, msg) => logs.push({ type, msg }),
+        log: (type, msg, extra) => logs.push({ type, msg, extra }),
       });
 
       const prompt = stub.calls[0]?.prompt ?? '';
@@ -2169,6 +2169,10 @@ npm run test`;
       expect(prompt).toContain('Use fixture ADRs');
       expect(prompt).not.toContain('Superseded fixture');
       expect(logs.some((l) => l.type === 'adr_context')).toBe(true);
+      expect(logs.some((l) => l.type === 'adr_inject_started')).toBe(true);
+      const completed = logs.find((l) => l.type === 'adr_inject_completed');
+      expect(completed).toBeDefined();
+      expect(typeof completed?.extra?.durationMs).toBe('number');
     });
 
     it('plans without ADR constraints when the worktree has no docs/adr', async () => {
@@ -2198,6 +2202,8 @@ npm run test`;
       const prompt = stub.calls[0]?.prompt ?? '';
       expect(prompt).not.toContain('## Active architecture decisions');
       expect(logs.some((l) => l.type === 'adr_context_empty')).toBe(true);
+      expect(logs.some((l) => l.type === 'adr_inject_started')).toBe(true);
+      expect(logs.some((l) => l.type === 'adr_inject_completed')).toBe(true);
     });
   });
 
