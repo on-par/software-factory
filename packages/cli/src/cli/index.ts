@@ -4014,13 +4014,13 @@ export async function main() {
 
   program
     .command('constitution')
-    .description('Manage product constitutions')
+    .description('Manage product constitutions — .factory/constitution.md in this repo is the source of truth')
     .option(
       '--init [product]',
       'Write .factory/constitution.md in this repo, scaffolded from the template (an optional name overrides the display name)',
     )
     .option('--list', 'List available constitutions')
-    .option('--product <name>', 'Set active product constitution')
+    .option('--product <name>', 'Seed .factory/constitution.md from the bundled example constitution for <name>')
     .option('--force', 'With --init or --product, overwrite an existing .factory/constitution.md')
     .action(cmdConstitution);
 
