@@ -396,4 +396,41 @@ resolved_factory_bin_default="$(env -u FACTORY_BIN PATH="$NO_FACTORY_PATH_DIR" "
 [ "$resolved_factory_bin_default" = "$HOME/.local/bin/factory" ] || {
   echo "FAIL: FACTORY_BIN did not fall back to default: $resolved_factory_bin_default" >&2; exit 1; }
 
-echo "PASS: auto-merge-sweep logs merge/land failures with real exit codes, skips landing when the repo dir is missing, honours FACTORY_MERGE_ADMIN for the standalone merge path, writes a heartbeat on each pass, ships a valid KeepAlive launchd plist, preflight skips missing repo checkouts with a WARN and fatally rejects only missing gh/factory/filter-script dependencies or an all-repos-missing configuration, backs off exponentially up to MAX_SLEEP_SECONDS on sweep-wide failures resetting on success, skips multi-issue-closing PRs with an explicit SKIPPING log line instead of silently landing only the first issue, tees every dated log line to a persistent LOG_FILE creating its parent directory, and externalizes config so ORG drives both ghrepo and the REPO_ROOT default, SWEEP_REPOS overrides the repo list, MERGE_FLAGS overrides the standalone-merge flags, and FACTORY_BIN falls back to command -v factory"
+# --- SWEEP_REPOS variable itself (not just the derived REPOS array) defaults to empty ---
+
+sweep_repos_var_default="$(env -u SWEEP_REPOS bash -c 'source "'"$ROOT"'/scripts/auto-merge-sweep.sh"; echo "[$SWEEP_REPOS]"')"
+[ "$sweep_repos_var_default" = "[]" ] || {
+  echo "FAIL: SWEEP_REPOS variable not empty by default: $sweep_repos_var_default" >&2; exit 1; }
+
+# --- usage guard: running the script as a real subprocess (not sourced) with ORG
+# and/or SWEEP_REPOS unset exits 0 and prints a usage message, in every combination
+# where at least one of the two is missing ---
+
+assert_usage_guard() {
+  local desc="$1" out
+  shift
+  if ! out="$(env -u ORG -u SWEEP_REPOS "$@" "$ROOT/scripts/auto-merge-sweep.sh" 2>&1)"; then
+    echo "FAIL: usage guard ($desc): expected exit 0, got $?: $out" >&2; exit 1
+  fi
+  grep -qF "Usage:" <<<"$out" || {
+    echo "FAIL: usage guard ($desc): expected a Usage message, got: $out" >&2; exit 1; }
+}
+
+assert_usage_guard "both unset"
+assert_usage_guard "only ORG set" ORG=testorg
+assert_usage_guard "only SWEEP_REPOS set" SWEEP_REPOS=fakerepo
+
+# --- explicit ORG/SWEEP_REPOS overrides bypass the usage guard and reach preflight,
+# proving the overrides were actually read (a deliberately bad FACTORY_BIN makes
+# preflight fail deterministically instead of the sweep loop running for real) ---
+
+override_rc=0
+override_out="$(env -u FACTORY_BIN ORG=testorg SWEEP_REPOS=fakerepo FACTORY_BIN="$BINDIR/does-not-exist" "$ROOT/scripts/auto-merge-sweep.sh" 2>&1)" || override_rc=$?
+[ "$override_rc" -eq 1 ] || {
+  echo "FAIL: override test: expected exit 1 from preflight failure, got $override_rc: $override_out" >&2; exit 1; }
+grep -qF "Usage:" <<<"$override_out" && {
+  echo "FAIL: override test: usage guard fired despite explicit ORG/SWEEP_REPOS overrides: $override_out" >&2; exit 1; }
+grep -qF "FATAL: factory CLI missing or not executable at $BINDIR/does-not-exist" <<<"$override_out" || {
+  echo "FAIL: override test: expected preflight FATAL for the bad FACTORY_BIN, got: $override_out" >&2; exit 1; }
+
+echo "PASS: auto-merge-sweep logs merge/land failures with real exit codes, skips landing when the repo dir is missing, honours FACTORY_MERGE_ADMIN for the standalone merge path, writes a heartbeat on each pass, ships a valid KeepAlive launchd plist, preflight skips missing repo checkouts with a WARN and fatally rejects only missing gh/factory/filter-script dependencies or an all-repos-missing configuration, backs off exponentially up to MAX_SLEEP_SECONDS on sweep-wide failures resetting on success, skips multi-issue-closing PRs with an explicit SKIPPING log line instead of silently landing only the first issue, tees every dated log line to a persistent LOG_FILE creating its parent directory, externalizes config so ORG drives both ghrepo and the REPO_ROOT default, SWEEP_REPOS overrides the repo list, MERGE_FLAGS overrides the standalone-merge flags, and FACTORY_BIN falls back to command -v factory, the SWEEP_REPOS variable itself (not just REPOS) defaults to empty, the usage guard exits 0 with a Usage message when run as a real subprocess with ORG and/or SWEEP_REPOS unset, and explicit overrides bypass that guard and fail deterministically in preflight instead"
