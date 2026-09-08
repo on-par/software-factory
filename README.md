@@ -162,7 +162,9 @@ Every model declares a **harness** — the provider adapter that executes it: `c
 
 ## Constitutions
 
-A constitution is a written standard that defines "done right" for a product. Every build round is tested against it.
+A constitution is a written standard that defines "done right" for a product. Every build round is tested against it. The source of truth for a real product is `.factory/constitution.md` in the **target repo** — `factory init`, `factory constitution --init`, and `factory constitution --product <name>` all read from and write to that path, never to a file bundled with the factory itself.
+
+The bundled files below are only templates and worked examples used to seed a new `.factory/constitution.md` (via `factory constitution --product <name>`):
 
 - `packages/config/src/constitutions/example-marketing-site.md` — Static site generation (brand, WCAG 2.2 AA, SEO, links)
 - `packages/config/src/constitutions/example-data-app.md` — Data analysis (data integrity, report validation)
