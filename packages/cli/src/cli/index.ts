@@ -589,12 +589,20 @@ export async function cmdConstitution(opts: {
   }
 
   if (opts.product) {
-    const constPath = resolve(getConstitutionsDir(), `${opts.product}.md`);
-    if (!existsSync(constPath)) {
+    const products = loader.listProducts();
+    if (!products.includes(opts.product)) {
       throw new CliExitError(`No constitution '${opts.product}' found`, 1);
     }
     const repoRoot = await getRepoRoot();
     const paths = getFactoryPaths(repoRoot);
+    ensureDir(paths.root);
+    const constitutionPath = resolve(paths.root, 'constitution.md');
+    if (existsSync(constitutionPath) && !opts.force) {
+      throw new CliExitError('.factory/constitution.md already exists — use --force to overwrite', 1);
+    }
+    const content = readFileSync(resolve(getConstitutionsDir(), `${opts.product}.md`), 'utf-8');
+    writeIfAbsent(constitutionPath, content, '.factory/constitution.md', opts.force);
+
     ensureDir(paths.state);
     writeFileSync(paths.product, opts.product);
     console.log(chalk.green(`Active product: ${opts.product}`));
@@ -4013,7 +4021,7 @@ export async function main() {
     )
     .option('--list', 'List available constitutions')
     .option('--product <name>', 'Set active product constitution')
-    .option('--force', 'With --init, overwrite an existing .factory/constitution.md')
+    .option('--force', 'With --init or --product, overwrite an existing .factory/constitution.md')
     .action(cmdConstitution);
 
   program
