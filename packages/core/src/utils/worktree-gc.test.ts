@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   findCredentialFiles,
   formatGcReport,
+  IssueWarnDedup,
   parseWorktreeList,
   scrubFile,
   sweepWorktrees,
@@ -1461,6 +1462,156 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       expect(report.kept).toBe(1);
       expect(existsSync(wt)).toBe(true);
       expect(logs.some(([type, msg]) => type === 'warn' && /issue query failed for #45/.test(msg))).toBe(true);
+    });
+
+    describe('issue-query-failure warn dedup (#1354)', () => {
+      it('suppresses the repeated warning across loop iterations, with a one-line count summary', async () => {
+        const { repoRoot: root } = setup();
+        const wt = makeWorktree(`${basename(root)}-factory-ship-it-9678562`);
+
+        const { octokit } = fakeOctokit(
+          () => ({ data: [] }),
+          () => {
+            throw Object.assign(new Error('Not Found'), { status: 404 });
+          },
+        );
+        const runCommand = async (cmd: string) => {
+          if (cmd === 'git worktree list --porcelain') {
+            return { stdout: laneListing(root, wt, 'ship-it/9678562-ghost') };
+          }
+          return { stdout: '' };
+        };
+        const issueWarnDedup = new IssueWarnDedup();
+        const logsFor = async () => {
+          const logs: Array<[string, string]> = [];
+          await sweepWorktrees(
+            { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
+            { runCommand, octokit, issueWarnDedup, log: (type, msg) => logs.push([type, msg]) },
+          );
+          return logs.filter(([type]) => type === 'warn');
+        };
+
+        const first = await logsFor();
+        expect(first.some(([, msg]) => /issue query failed for #9678562 \(Not Found\)/.test(msg))).toBe(true);
+
+        const second = await logsFor();
+        expect(second.some(([, msg]) => /issue query failed for #9678562 \(Not Found\)/.test(msg))).toBe(false);
+        expect(
+          second.some(([, msg]) => /issue query failed for #9678562 — suppressed 1 repeated warning/.test(msg)),
+        ).toBe(true);
+
+        const third = await logsFor();
+        expect(third.some(([, msg]) => /suppressed 2 repeated warning/.test(msg))).toBe(true);
+      });
+
+      it('still warns in full for a different failing issue after another is already suppressed', async () => {
+        const { repoRoot: root } = setup();
+        const wtA = makeWorktree(`${basename(root)}-factory-ship-it-9678562`);
+        const wtB = makeWorktree(`${basename(root)}-factory-ship-it-9872774`);
+
+        const { octokit } = fakeOctokit(
+          () => ({ data: [] }),
+          () => {
+            throw Object.assign(new Error('Not Found'), { status: 404 });
+          },
+        );
+        const runCommand = async (cmd: string) => {
+          if (cmd === 'git worktree list --porcelain') {
+            return {
+              stdout:
+                `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\n` +
+                `worktree ${wtA}\nHEAD bbb\nbranch refs/heads/ship-it/9678562-ghost\n\n`,
+            };
+          }
+          return { stdout: '' };
+        };
+        const issueWarnDedup = new IssueWarnDedup();
+        await sweepWorktrees(
+          { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
+          { runCommand, octokit, issueWarnDedup },
+        );
+
+        // A new sweep where issue 9678562 is still present (now suppressed) and a fresh
+        // nonexistent-issue worktree (9872774) appears for the first time.
+        const bothListing = async (cmd: string) => {
+          if (cmd === 'git worktree list --porcelain') {
+            return {
+              stdout:
+                `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\n` +
+                `worktree ${wtA}\nHEAD bbb\nbranch refs/heads/ship-it/9678562-ghost\n\n` +
+                `worktree ${wtB}\nHEAD ccc\nbranch refs/heads/ship-it/9872774-ghost\n\n`,
+            };
+          }
+          return { stdout: '' };
+        };
+        const logs: Array<[string, string]> = [];
+        await sweepWorktrees(
+          { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
+          { runCommand: bothListing, octokit, issueWarnDedup, log: (type, msg) => logs.push([type, msg]) },
+        );
+
+        expect(logs.some(([type, msg]) => type === 'warn' && /suppressed 1 repeated warning.*#9678562/.test(msg))).toBe(
+          false,
+        );
+        expect(
+          logs.some(([type, msg]) => type === 'warn' && /#9678562 — suppressed 1 repeated warning/.test(msg)),
+        ).toBe(true);
+        expect(
+          logs.some(([type, msg]) => type === 'warn' && /issue query failed for #9872774 \(Not Found\)/.test(msg)),
+        ).toBe(true);
+      });
+
+      it('clears suppression once the worktree is gone, so a later reappearance warns in full again', async () => {
+        const { repoRoot: root } = setup();
+        const wt = makeWorktree(`${basename(root)}-factory-ship-it-9678562`);
+
+        const { octokit } = fakeOctokit(
+          () => ({ data: [] }),
+          () => {
+            throw Object.assign(new Error('Not Found'), { status: 404 });
+          },
+        );
+        const withWorktree = async (cmd: string) => {
+          if (cmd === 'git worktree list --porcelain') {
+            return { stdout: laneListing(root, wt, 'ship-it/9678562-ghost') };
+          }
+          return { stdout: '' };
+        };
+        const withoutWorktree = async (cmd: string) => {
+          if (cmd === 'git worktree list --porcelain') {
+            return { stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\n` };
+          }
+          return { stdout: '' };
+        };
+        const issueWarnDedup = new IssueWarnDedup();
+
+        await sweepWorktrees(
+          { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
+          { runCommand: withWorktree, octokit, issueWarnDedup },
+        );
+        await sweepWorktrees(
+          { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
+          { runCommand: withoutWorktree, octokit, issueWarnDedup },
+        );
+
+        const wt2 = makeWorktree(`${basename(root)}-factory-ship-it-9678562-b`);
+        const reappeared = async (cmd: string) => {
+          if (cmd === 'git worktree list --porcelain') {
+            return { stdout: laneListing(root, wt2, 'ship-it/9678562-ghost') };
+          }
+          return { stdout: '' };
+        };
+        const logs: Array<[string, string]> = [];
+        await sweepWorktrees(
+          { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
+          { runCommand: reappeared, octokit, issueWarnDedup, log: (type, msg) => logs.push([type, msg]) },
+        );
+
+        expect(
+          logs.some(([type, msg]) => type === 'warn' && /issue query failed for #9678562 \(Not Found\)/.test(msg)),
+        ).toBe(true);
+        expect(logs.some(([, msg]) => /suppressed/.test(msg))).toBe(false);
+      });
     });
 
     it('memoizes the issue probe across two worktrees of the same issue', async () => {
