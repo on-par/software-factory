@@ -30,7 +30,7 @@ export interface QueueActivityPartition {
 }
 
 /** Partitions local queue-file entries into "active" (fresh per-issue heartbeat) vs
- *  stale, for factory status's `== Queue ==` section. An entry with no phase snapshot
+ *  stale, for factory status's `== Active ==` section. An entry with no phase snapshot
  *  yet (never run) counts as stale — it has no evidence of activity to show as "active". */
 export async function partitionLocalQueueByActivity(
   entries: readonly QueueEntry[],

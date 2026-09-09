@@ -954,9 +954,20 @@ bash scripts/verify.sh
       expect(out).toMatch(/app 1 {2}\[build, .+ ago\]/);
       expect(out).toContain('(1 stale entry hidden — no recent activity)');
       expect(out).toContain('ready #1: done');
-      expect(out).toContain('== Health KPIs ==');
+      expect(out).toContain('== Health ==');
       expect(out).toContain('Merge rate:');
       expect(logged() + errored()).toContain('STOP file present');
+    });
+
+    it('renders Active, Queue, and Health as three distinct labeled bands, in that order (#1344)', async () => {
+      await runMain('status');
+      const out = logged();
+      const activeIdx = out.indexOf('== Active ==');
+      const queueIdx = out.indexOf('== Queue ==');
+      const healthIdx = out.indexOf('== Health ==');
+      expect(activeIdx).toBeGreaterThan(-1);
+      expect(queueIdx).toBeGreaterThan(activeIdx);
+      expect(healthIdx).toBeGreaterThan(queueIdx);
     });
 
     it('handles an empty queue and no events gracefully', async () => {
@@ -999,13 +1010,65 @@ bash scripts/verify.sh
       expect(readFileSync(paths().queue, 'utf-8')).toBe(before);
     });
 
-    it('prints "(no queue file)" when the queue does not exist', async () => {
+    it('prints "(no queue file)" when the local queue does not exist', async () => {
       const res = await runMain('status');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('(no queue file)');
     });
 
-    it('shows an open provider breaker without mutating the breaker file', async () => {
+    it('lists only claimable GitHub-backed work in the Queue band (#1344)', async () => {
+      h.octokit.rest.issues.listForRepo = vi.fn(async ({ labels }: any) => {
+        if (labels === 'factory:queued') {
+          return { data: [{ number: 42, labels: ['factory:queued', 'factory:lane:daw', 'factory:order:1'] }] };
+        }
+        if (labels === 'factory:queued,factory:lane:daw') {
+          return { data: [{ number: 42, labels: ['factory:queued', 'factory:lane:daw', 'factory:order:1'] }] };
+        }
+        return { data: [] };
+      });
+
+      await runMain('status');
+      const out = logged();
+      const queueBand = out.slice(out.indexOf('== Queue =='), out.indexOf('== Health =='));
+      expect(queueBand).toContain('daw #42');
+    });
+
+    it('reports a queue lookup failure in the Queue band without crashing status (#1344)', async () => {
+      h.octokit.rest.issues.listForRepo = vi.fn(async () => {
+        throw new Error('GitHub API unavailable');
+      });
+
+      const res = await runMain('status');
+      expect(res.exited).toBe(false);
+      const out = logged();
+      const queueBand = out.slice(out.indexOf('== Queue =='), out.indexOf('== Health =='));
+      expect(queueBand).toContain('queue lookup failed — GitHub API unavailable');
+    });
+
+    it('shows "(no claimable work)" in the Queue band when nothing is claimable', async () => {
+      await runMain('status');
+      const out = logged();
+      const queueBand = out.slice(out.indexOf('== Queue =='), out.indexOf('== Health =='));
+      expect(queueBand).toContain('(no claimable work)');
+    });
+
+    it('shows a no-token message in the Queue band instead of calling GitHub when unauthenticated', async () => {
+      delete process.env.GITHUB_TOKEN;
+      delete process.env.GH_TOKEN;
+      h.execSyncImpl = () => {
+        throw new Error('gh not authenticated');
+      };
+      const listForRepo = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.issues.listForRepo = listForRepo;
+
+      await runMain('status');
+      const out = logged();
+      const queueBand = out.slice(out.indexOf('== Queue =='), out.indexOf('== Health =='));
+      expect(queueBand).toContain('no GitHub token');
+      expect(listForRepo).not.toHaveBeenCalled();
+    });
+
+    it('shows an open provider breaker under Health without mutating the breaker file', async () => {
       const breakerFixture = {
         version: 1,
         providers: {
@@ -1016,7 +1079,8 @@ bash scripts/verify.sh
 
       await runMain('status');
       const out = logged();
-      expect(out).toContain('== Provider breaker ==');
+      expect(out).toContain('== Health ==');
+      expect(out).toContain('Provider breaker:');
       expect(out).toContain('openai: OPEN (usage_cap)');
       expect(out).toContain('m remaining');
       expect(existsSync(paths().breaker)).toBe(true);
@@ -1025,7 +1089,7 @@ bash scripts/verify.sh
     it('shows "(closed)" when there is no breaker file', async () => {
       await runMain('status');
       const out = logged();
-      expect(out).toContain('== Provider breaker ==');
+      expect(out).toContain('Provider breaker:');
       expect(out).toContain('(closed)');
     });
   });

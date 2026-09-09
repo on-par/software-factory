@@ -939,7 +939,7 @@ function warnQueueDiagnostics(diagnostics: QueueDiagnostic[]): void {
 }
 
 /** Formats the time since `lastActivityAt` as a short duration (e.g. `3m`) for the
- *  `factory status` `== Queue ==` section's `[phase, <age> ago]` display (#1343). An
+ *  `factory status` `== Active ==` section's `[phase, <age> ago]` display (#1343). An
  *  active claim's heartbeat is always within DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS
  *  (15m), so minutes is the only unit that ever shows. */
 function formatClaimAge(lastActivityAt: string, now: number): string {
@@ -970,26 +970,7 @@ export async function cmdStatus() {
   console.log(chalk.bold(`== ${ghRepo} ==`));
   console.log(`Product: ${product}`);
 
-  console.log(chalk.bold('\n== Effective config =='));
-  for (const line of describeEffectiveConfig({
-    router,
-    repo: repoConfig,
-    repoConfigPath: '.factory/config.json',
-  })) {
-    console.log(`  ${line}`);
-  }
-
-  console.log(chalk.bold('\n== Provider breaker =='));
-  const openBreakers = await new ProviderBreaker(paths.breaker).list();
-  if (openBreakers.length === 0) {
-    console.log('  (closed)');
-  } else {
-    for (const b of openBreakers) {
-      console.log(`  ${b.provider}: OPEN (${b.reason}) — ${Math.ceil(b.remainingMs / 60_000)}m remaining`);
-    }
-  }
-
-  console.log(chalk.bold('\n== Queue =='));
+  console.log(chalk.bold('\n== Active =='));
   if (existsSync(paths.queue)) {
     const { entries, diagnostics } = parseQueue(readFileSync(paths.queue, 'utf-8'));
     if (entries.length > 0) {
@@ -1013,24 +994,69 @@ export async function cmdStatus() {
     console.log('  (no queue file)');
   }
 
-  console.log(chalk.bold('\n== Last Events =='));
+  console.log(chalk.bold('\n== Queue =='));
+  if (!hasGitHubToken()) {
+    console.log('  (no GitHub token — run `gh auth login`)');
+  } else {
+    const [owner, repoName] = ghRepo.split('/');
+    const githubQueue = createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo: repoName });
+    try {
+      const lanes = await githubQueue.lanes();
+      let printed = false;
+      for (const lane of lanes) {
+        const issues = await githubQueue.list(lane);
+        for (const issue of issues) {
+          console.log(`  ${lane} #${issue}`);
+          printed = true;
+        }
+      }
+      if (!printed) {
+        console.log('  (no claimable work)');
+      }
+    } catch (err) {
+      console.log(`  (queue lookup failed — ${errorDetail(err)})`);
+    }
+  }
+
+  console.log(chalk.bold('\n== Health =='));
+
+  console.log(chalk.bold('\n  Effective config:'));
+  for (const line of describeEffectiveConfig({
+    router,
+    repo: repoConfig,
+    repoConfigPath: '.factory/config.json',
+  })) {
+    console.log(`    ${line}`);
+  }
+
+  console.log(chalk.bold('\n  Provider breaker:'));
+  const openBreakers = await new ProviderBreaker(paths.breaker).list();
+  if (openBreakers.length === 0) {
+    console.log('    (closed)');
+  } else {
+    for (const b of openBreakers) {
+      console.log(`    ${b.provider}: OPEN (${b.reason}) — ${Math.ceil(b.remainingMs / 60_000)}m remaining`);
+    }
+  }
+
+  console.log(chalk.bold('\n  Last Events:'));
   if (existsSync(paths.events)) {
     const events = readFileSync(paths.events, 'utf-8').trim().split('\n').slice(-12);
     for (const e of events) {
       try {
         const ev = JSON.parse(e);
-        console.log(`  ${ev.type} #${ev.issue}: ${ev.msg}`);
+        console.log(`    ${ev.type} #${ev.issue}: ${ev.msg}`);
       } catch {}
     }
   } else {
-    console.log('  (none)');
+    console.log('    (none)');
   }
 
-  console.log(chalk.bold('\n== Health KPIs =='));
+  console.log(chalk.bold('\n  KPIs:'));
   const kpiEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
   const kpiCosts = existsSync(paths.costs) ? readCosts(paths.costs) : [];
   for (const line of formatKpiLines(computeHealthKpis(kpiEvents, kpiCosts))) {
-    console.log(`  ${line}`);
+    console.log(`    ${line}`);
   }
 
   if (existsSync(paths.stop)) {
