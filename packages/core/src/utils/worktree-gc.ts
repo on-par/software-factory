@@ -93,7 +93,46 @@ export interface SweepDeps {
    *  today's config, but removeMicroVm is a no-op unless `runtime === 'docker-sandbox'` and the
    *  named VM exists, so passing today's descriptor for every candidate is safe and idempotent. */
   sandbox?: WorktreeSandbox;
+  /** Dedup tracker for resolveIssueDisposition's lookup-failure warning (see IssueWarnDedup).
+   *  Defaults to a module-level singleton shared across every sweep in the process; tests should
+   *  inject a fresh instance to avoid bleeding suppression state across cases. */
+  issueWarnDedup?: IssueWarnDedup;
 }
+
+/** Dedupes resolveIssueDisposition's lookup-failure warning across repeated sweeps — the factory
+ *  loop calls sweepWorktrees every iteration, and a worktree tied to a nonexistent issue number
+ *  fails that lookup on every one of them. The first failure for a given issue since the last
+ *  reconcile-clear warns in full; every following one folds into a one-line "suppressed N"
+ *  summary instead of repeating the same text. `reconcile()` drops an issue's tracking once it's
+ *  no longer among the sweep's candidates, so a later re-appearance (or a different worktree
+ *  reusing the number) warns in full again. Keyed by issue number, not by worktree path, since
+ *  the failing lookup is per-issue (see ADR, this PR). */
+export class IssueWarnDedup {
+  private readonly counts = new Map<number, number>();
+
+  /** Records one occurrence for `issue`. Returns true the first time since the last
+   *  reconcile-clear (caller should log the full warning), false thereafter. */
+  record(issue: number): boolean {
+    const count = (this.counts.get(issue) ?? 0) + 1;
+    this.counts.set(issue, count);
+    return count === 1;
+  }
+
+  /** Occurrences suppressed for `issue` since its last full warning (0 before the second one). */
+  suppressedCount(issue: number): number {
+    return Math.max(0, (this.counts.get(issue) ?? 0) - 1);
+  }
+
+  /** Drops tracking for every issue not in `activeIssues` — call once per sweep with the issue
+   *  numbers still present among that sweep's candidates. */
+  reconcile(activeIssues: ReadonlySet<number>): void {
+    for (const issue of this.counts.keys()) {
+      if (!activeIssues.has(issue)) this.counts.delete(issue);
+    }
+  }
+}
+
+const defaultIssueWarnDedup = new IssueWarnDedup();
 
 const CREDENTIAL_BASENAMES = new Set(['.git-credentials', '.npmrc']);
 
@@ -296,6 +335,7 @@ async function resolveIssueDisposition(
   repo: string | undefined,
   issue: number,
   log: (type: EventKind, msg: string) => void,
+  issueWarnDedup: IssueWarnDedup,
 ): Promise<IssueDisposition | null> {
   if (!octokit || !repo) return null;
   const [owner, repoName] = repo.split('/');
@@ -306,10 +346,17 @@ async function resolveIssueDisposition(
     if (labels.includes(PARKED_LABEL)) return 'reap-parked';
     return 'keep';
   } catch (err: any) {
-    log(
-      'warn',
-      `worktree-gc: GitHub issue query failed for #${issue} (${err?.message ?? String(err)}) — using PR/local evidence only`,
-    );
+    if (issueWarnDedup.record(issue)) {
+      log(
+        'warn',
+        `worktree-gc: GitHub issue query failed for #${issue} (${err?.message ?? String(err)}) — using PR/local evidence only`,
+      );
+    } else {
+      log(
+        'warn',
+        `worktree-gc: GitHub issue query failed for #${issue} — suppressed ${issueWarnDedup.suppressedCount(issue)} repeated warning(s) (using PR/local evidence only)`,
+      );
+    }
     return null;
   }
 }
@@ -378,7 +425,14 @@ export async function sweepWorktrees(
   opts: { repoRoot: string; ttlDays: number; dryRun?: boolean; repo?: string; branchPrefix?: string },
   deps: SweepDeps = {},
 ): Promise<GcReport> {
-  const { runCommand = defaultRunCommand, now = () => Date.now(), log = () => {}, octokit, sandbox } = deps;
+  const {
+    runCommand = defaultRunCommand,
+    now = () => Date.now(),
+    log = () => {},
+    octokit,
+    sandbox,
+    issueWarnDedup = defaultIssueWarnDedup,
+  } = deps;
   const { repoRoot, ttlDays, dryRun = false, repo } = opts;
 
   const { stdout } = await runCommand('git worktree list --porcelain', { cwd: repoRoot });
@@ -401,6 +455,16 @@ export async function sweepWorktrees(
     return base.startsWith(`${repoBase}-`) && entry.branch !== null && lanePattern.test(entry.branch);
   });
 
+  // Reconcile the issue-warn dedup tracker to this sweep's live candidates before resolving any
+  // disposition, so a worktree that's gone (or an issue number no longer in play) drops its
+  // suppression state and a later re-appearance warns in full again (see ADR, this PR).
+  const activeIssueNumbers = new Set<number>();
+  for (const entry of candidates) {
+    const issueNumber = laneIssueNumber(entry, lanePattern);
+    if (issueNumber !== null) activeIssueNumbers.add(issueNumber);
+  }
+  issueWarnDedup.reconcile(activeIssueNumbers);
+
   const removed: GcCandidate[] = [];
   let kept = 0;
 
@@ -422,7 +486,7 @@ export async function sweepWorktrees(
   const dispositionFor = (issue: number): Promise<IssueDisposition | null> => {
     let disposition = dispositionCache.get(issue);
     if (!disposition) {
-      disposition = resolveIssueDisposition(octokit, repo, issue, log);
+      disposition = resolveIssueDisposition(octokit, repo, issue, log, issueWarnDedup);
       dispositionCache.set(issue, disposition);
     }
     return disposition;
