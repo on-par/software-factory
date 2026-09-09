@@ -94,6 +94,7 @@ import {
   parkReasonFor,
   parseKpiHistory,
   parseQueue,
+  partitionLocalQueueByActivity,
   phaseSnapshotFile,
   planPhase,
   ProviderBreaker,
@@ -982,7 +983,11 @@ export async function cmdStatus() {
   if (existsSync(paths.queue)) {
     const { entries, diagnostics } = parseQueue(readFileSync(paths.queue, 'utf-8'));
     if (entries.length > 0) {
-      for (const e of entries) console.log(`  ${e.lane} ${e.issue}`);
+      const { active, staleCount } = await partitionLocalQueueByActivity(entries, paths.runs);
+      for (const e of active) console.log(`  ${e.lane} ${e.issue}`);
+      if (staleCount > 0) {
+        console.log(`  (${staleCount} stale entr${staleCount === 1 ? 'y' : 'ies'} hidden — no recent activity)`);
+      }
     } else if (diagnostics.length === 0) {
       console.log('  (empty)');
     }

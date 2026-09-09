@@ -313,6 +313,7 @@ function paths() {
     stop: join(state, 'STOP'),
     costs: join(state, 'costs.jsonl'),
     reports: join(state, 'reports'),
+    runs: join(state, 'runs'),
     steering: join(state, 'steering'),
     kpiHistory: join(state, 'kpi-history.jsonl'),
     breaker: join(state, 'breaker.json'),
@@ -925,6 +926,12 @@ bash scripts/verify.sh
     it('prints product, models, queue, events, and STOP state', async () => {
       writeFileSync(paths().product, 'alpha\n');
       writeFileSync(paths().queue, '# comment\napp 1\napp 2\n');
+      await FactoryCore.writePhaseSnapshot(FactoryCore.phaseSnapshotFile(paths().runs, 1), {
+        issue: 1,
+        phase: 'build',
+        updatedAt: new Date().toISOString(),
+        lastActivityAt: new Date().toISOString(),
+      });
       writeFileSync(
         paths().events,
         [
@@ -945,6 +952,7 @@ bash scripts/verify.sh
       expect(out).toContain('on-par/software-factory');
       expect(out).toContain('Product: alpha');
       expect(out).toContain('app 1');
+      expect(out).toContain('(1 stale entry hidden — no recent activity)');
       expect(out).toContain('ready #1: done');
       expect(out).toContain('== Health KPIs ==');
       expect(out).toContain('Merge rate:');
@@ -963,12 +971,31 @@ bash scripts/verify.sh
 
     it('warns on malformed queue lines and never renders NaN', async () => {
       writeFileSync(paths().queue, 'app 1\napp abc\n');
+      await FactoryCore.writePhaseSnapshot(FactoryCore.phaseSnapshotFile(paths().runs, 1), {
+        issue: 1,
+        phase: 'build',
+        updatedAt: new Date().toISOString(),
+        lastActivityAt: new Date().toISOString(),
+      });
       await runMain('status');
       expect(logged()).toContain('app 1');
       const err = errored();
       expect(err).toContain('malformed');
       expect(err).toContain('line 2');
       expect(logged() + err).not.toContain('NaN');
+    });
+
+    it('excludes stale local queue entries from the active view without touching the queue file (#1342)', async () => {
+      const staleLines = Array.from({ length: 60 }, (_, i) => `app ${i + 1}`).join('\n') + '\n';
+      writeFileSync(paths().queue, staleLines);
+      const before = readFileSync(paths().queue, 'utf-8');
+
+      await runMain('status');
+      const out = logged();
+
+      expect(out).not.toMatch(/ {2}app \d+$/m);
+      expect(out).toContain('(60 stale entries hidden — no recent activity)');
+      expect(readFileSync(paths().queue, 'utf-8')).toBe(before);
     });
 
     it('prints "(no queue file)" when the queue does not exist', async () => {

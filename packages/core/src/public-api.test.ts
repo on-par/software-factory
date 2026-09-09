@@ -74,6 +74,9 @@ const PUBLIC_API_KEYS = [
   'readQueue',
   'rewriteQueueForDecomposition',
   'validateQueue',
+  // Queue activity (#1342)
+  'DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS',
+  'partitionLocalQueueByActivity',
   // Hosted execution (control plane)
   'createHostedJobStore',
   'createSqliteHostedJobStore',
