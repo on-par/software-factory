@@ -955,8 +955,18 @@ bash scripts/verify.sh
       expect(out).toContain('(1 stale entry hidden — no recent activity)');
       expect(out).toContain('ready #1: done');
       expect(out).toContain('== Health ==');
-      expect(out).toContain('Merge rate:');
+      expect(out).toContain('Effective config and KPIs hidden');
+      expect(out).not.toContain('Effective config:');
+      expect(out).not.toContain('Merge rate:');
       expect(logged() + errored()).toContain('STOP file present');
+    });
+
+    it('shows full Effective config and KPIs when --kpis is passed', async () => {
+      await runMain('status', '--kpis');
+      const out = logged();
+      expect(out).toContain('Effective config:');
+      expect(out).toContain('Plan model:');
+      expect(out).toContain('No factory runs recorded yet.');
     });
 
     it('renders Active, Queue, and Health as three distinct labeled bands, in that order (#1344)', async () => {
@@ -977,7 +987,6 @@ bash scripts/verify.sh
       expect(out).toContain('(idle — no active claims)');
       expect(out).toContain('(none)');
       expect(out).toContain('Product: (none)');
-      expect(out).toContain('No factory runs recorded yet.');
     });
 
     it('warns on malformed queue lines and never renders NaN', async () => {
