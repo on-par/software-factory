@@ -975,10 +975,10 @@ bash scripts/verify.sh
         issue: 1,
         phase: 'build',
         updatedAt: new Date().toISOString(),
-        lastActivityAt: new Date().toISOString(),
+        lastActivityAt: new Date(Date.now() - 2 * 60_000).toISOString(),
       });
       await runMain('status');
-      expect(logged()).toContain('app 1');
+      expect(logged()).toMatch(/app 1 {2}\[build, 2m ago\]/);
       const err = errored();
       expect(err).toContain('malformed');
       expect(err).toContain('line 2');

@@ -938,17 +938,14 @@ function warnQueueDiagnostics(diagnostics: QueueDiagnostic[]): void {
   }
 }
 
-/** Formats the time since `lastActivityAt` as a short duration (e.g. `3m`, `2h`, `1d`)
- *  for the `factory status` `== Queue ==` section's `[phase, <age> ago]` display (#1343). */
+/** Formats the time since `lastActivityAt` as a short duration (e.g. `3m`) for the
+ *  `factory status` `== Queue ==` section's `[phase, <age> ago]` display (#1343). An
+ *  active claim's heartbeat is always within DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS
+ *  (15m), so minutes is the only unit that ever shows. */
 function formatClaimAge(lastActivityAt: string, now: number): string {
   const ageMs = Math.max(0, now - Date.parse(lastActivityAt));
   const minutes = Math.floor(ageMs / 60_000);
-  if (minutes < 1) return '<1m';
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  return `${days}d`;
+  return minutes < 1 ? '<1m' : `${minutes}m`;
 }
 
 export async function cmdStatus() {
