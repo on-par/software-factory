@@ -176,4 +176,32 @@ describe('runTui', () => {
     expect(call).toBeDefined();
     expect(appPropsOf(call?.[0]).steeringDir).toBe('/repo/.factory/steering');
   });
+
+  it('forwards breakerFile and effectiveConfigLines through to the rendered App', async () => {
+    const stdout = fakeStdout(true);
+    const waitUntilExit = vi.fn().mockResolvedValue(undefined);
+    const renderFn = vi.fn<typeof render>(() => ({
+      rerender: vi.fn(),
+      unmount: vi.fn(),
+      waitUntilExit,
+      cleanup: vi.fn(),
+      clear: vi.fn(),
+    }));
+    const followPlainFn = vi.fn(() => vi.fn());
+
+    await runTui({
+      eventsFile: 'events.ndjson',
+      breakerFile: '/repo/.factory/breaker.json',
+      effectiveConfigLines: ['router: default'],
+      stdout,
+      render: renderFn,
+      followPlainFn,
+    });
+
+    const call = renderFn.mock.calls[0];
+    expect(call).toBeDefined();
+    const props = appPropsOf(call?.[0]);
+    expect(props.breakerFile).toBe('/repo/.factory/breaker.json');
+    expect(props.effectiveConfigLines).toEqual(['router: default']);
+  });
 });

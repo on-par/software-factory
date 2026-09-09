@@ -23,7 +23,7 @@ export function Dashboard({ state, selectedIndex, now, repo, stopReason }: Dashb
       </Text>
       {stopReason && <StopBanner reason={stopReason} />}
       {state.lanes.length === 0 ? (
-        <Text dimColor>waiting for factory events…</Text>
+        <Text dimColor>(idle — no active claims)</Text>
       ) : (
         state.lanes.map((lane, i) => (
           <LaneRow
