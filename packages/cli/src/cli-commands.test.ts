@@ -1042,6 +1042,32 @@ bash scripts/verify.sh
       expect(queueBand).toContain('daw #42');
     });
 
+    it('lists all issues queued into one lane in order, with no local queue file (#977)', async () => {
+      const issues = [
+        { number: 1236, labels: ['factory:queued', 'factory:lane:launch-trust', 'factory:order:1'] },
+        { number: 1234, labels: ['factory:queued', 'factory:lane:launch-trust', 'factory:order:2'] },
+        { number: 1235, labels: ['factory:queued', 'factory:lane:launch-trust', 'factory:order:3'] },
+      ];
+      h.octokit.rest.issues.listForRepo = vi.fn(async ({ labels }: any) => {
+        if (labels === 'factory:queued') return { data: issues };
+        if (labels === 'factory:queued,factory:lane:launch-trust') return { data: issues };
+        return { data: [] };
+      });
+
+      const res = await runMain('status');
+      expect(res.exited).toBe(false);
+      const out = logged();
+      expect(out).toContain('(no queue file)');
+      const queueBand = out.slice(out.indexOf('== Queue =='), out.indexOf('== Health =='));
+      expect(queueBand).not.toContain('(empty)');
+      expect(queueBand).not.toContain('(no claimable work)');
+      expect(queueBand).toContain('launch-trust #1236');
+      expect(queueBand).toContain('launch-trust #1234');
+      expect(queueBand).toContain('launch-trust #1235');
+      expect(queueBand.indexOf('#1236')).toBeLessThan(queueBand.indexOf('#1234'));
+      expect(queueBand.indexOf('#1234')).toBeLessThan(queueBand.indexOf('#1235'));
+    });
+
     it('reports a queue lookup failure in the Queue band without crashing status (#1344)', async () => {
       h.octokit.rest.issues.listForRepo = vi.fn(async () => {
         throw new Error('GitHub API unavailable');
