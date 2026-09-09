@@ -19,7 +19,16 @@ import {
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import { type JSX, useEffect, useMemo, useState } from 'react';
 
-import { type DashboardState, initialDashboard, reduceDashboard } from '../dashboard.js';
+import {
+  computeIdleReason,
+  type DashboardState,
+  hasActiveLane,
+  type IdleReason,
+  initialDashboard,
+  type LaneState,
+  laneElapsedMs,
+  reduceDashboard,
+} from '../dashboard.js';
 import { CostsTab } from '../tabs/CostsTab.js';
 import { initialLogScroll, reduceLogScroll } from '../tabs/log-scroll.js';
 import { LogTab } from '../tabs/LogTab.js';
@@ -35,6 +44,15 @@ import { StopBanner } from './StopBanner.js';
 
 const MAX_LOG_EVENTS = 5000;
 const POLL_MS = 2000;
+
+const IDLE_REASON_TEXT: Record<IdleReason, string> = {
+  'empty-queue': 'no active work — queue is empty',
+  'all-parked': 'no active work — all runs are parked or finished',
+};
+
+function lastActivityOf(lane: LaneState): string | undefined {
+  return lane.run.feed.at(-1)?.ts;
+}
 
 export interface AppProps {
   eventsFile: string;
@@ -297,24 +315,29 @@ export function App({
   const stopReason = stopFlag || state.usageStop ? (state.usageStop ?? 'STOP flag present (.factory/STOP)') : undefined;
 
   function DashboardPane(): JSX.Element {
-    if (state.lanes.length === 0) {
+    if (!hasActiveLane(state)) {
       return (
         <Box flexDirection="column">
           <Header repo={repo} done={false} />
-          <Text dimColor>waiting for factory events…</Text>
+          {stopReason && <StopBanner reason={stopReason} />}
+          <Text dimColor>{IDLE_REASON_TEXT[computeIdleReason(queueSnap.entries.length)]}</Text>
         </Box>
       );
     }
 
     if (state.lanes.length === 1) {
+      const lane = state.lanes[0];
       return (
         <Box flexDirection="column">
           {stopReason && <StopBanner reason={stopReason} />}
           <RunDetail
-            run={state.lanes[0].run}
+            run={lane.run}
+            title={lane.title}
             repo={repo}
             now={now}
-            steeringQueued={steeringQueued[state.lanes[0].issue]}
+            elapsedMs={laneElapsedMs(lane, now)}
+            lastActivityAt={lastActivityOf(lane)}
+            steeringQueued={steeringQueued[lane.issue]}
           />
         </Box>
       );
@@ -325,8 +348,11 @@ export function App({
     ) : (
       <RunDetail
         run={state.lanes[clampedIndex].run}
+        title={state.lanes[clampedIndex].title}
         repo={repo}
         now={now}
+        elapsedMs={laneElapsedMs(state.lanes[clampedIndex], now)}
+        lastActivityAt={lastActivityOf(state.lanes[clampedIndex])}
         showBackHint
         steeringQueued={steeringQueued[state.lanes[clampedIndex].issue]}
       />

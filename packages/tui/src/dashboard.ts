@@ -100,3 +100,17 @@ export function laneElapsedMs(lane: LaneState, now: number): number {
   const end = lane.finishedAt ? Date.parse(lane.finishedAt) : now;
   return Math.max(0, end - Date.parse(lane.startedAt));
 }
+
+const ACTIVE_LANE_STATUSES: readonly LaneStatus[] = ['running', 'ready', 'waiting-merge'];
+
+/** True when at least one lane is still in flight — i.e. there is something to show besides an idle state. */
+export function hasActiveLane(state: DashboardState): boolean {
+  return state.lanes.some((l) => ACTIVE_LANE_STATUSES.includes(l.status));
+}
+
+export type IdleReason = 'empty-queue' | 'all-parked';
+
+/** Distinguishes "nothing queued" from "queue has work but every lane is parked/finished" for the idle banner. */
+export function computeIdleReason(queueLength: number): IdleReason {
+  return queueLength === 0 ? 'empty-queue' : 'all-parked';
+}

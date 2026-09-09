@@ -23,6 +23,16 @@ export function formatElapsed(startedAt: string | undefined, now: number): strin
   return formatDuration(now - Date.parse(startedAt));
 }
 
+export function formatAgo(ms: number): string {
+  const totalSeconds = Math.floor(Math.max(0, ms) / 1000);
+  if (totalSeconds < 5) return 'just now';
+  if (totalSeconds < 60) return `${totalSeconds}s ago`;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  if (totalMinutes < 60) return `${totalMinutes}m ago`;
+  const totalHours = Math.floor(totalMinutes / 60);
+  return `${totalHours}h ago`;
+}
+
 export interface PhaseRowProps {
   state: RunState;
   now: number;

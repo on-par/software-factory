@@ -3,16 +3,18 @@ import type { JSX } from 'react';
 
 export interface HeaderProps {
   issue?: string;
+  title?: string;
   repo?: string;
   done: boolean;
 }
 
-export function Header({ issue, repo, done }: HeaderProps): JSX.Element {
+export function Header({ issue, title, repo, done }: HeaderProps): JSX.Element {
+  const issuePart = issue ? `issue #${issue}${title ? ` ${title}` : ''}` : undefined;
   const text =
-    repo && issue
-      ? `Factory — issue #${issue} · ${repo}`
-      : issue
-        ? `Factory — issue #${issue}`
+    repo && issuePart
+      ? `Factory — ${issuePart} · ${repo}`
+      : issuePart
+        ? `Factory — ${issuePart}`
         : repo
           ? `Factory — ${repo}`
           : 'Factory';

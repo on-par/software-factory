@@ -34,10 +34,52 @@ const flush = async () => {
 };
 
 describe('App', () => {
-  it('shows a waiting message before any events arrive', () => {
+  it('shows an idle message with a reason before any events arrive', () => {
     const { follow } = makeFakeFollow();
     const { lastFrame } = render(<App eventsFile="ignored" follow={follow} />);
-    expect(lastFrame()).toContain('waiting for factory events');
+    expect(lastFrame()).toContain('no active work — queue is empty');
+  });
+
+  it('shows an idle banner instead of stale lane rows once every lane is terminal', async () => {
+    const fake = makeFakeFollow();
+    const { lastFrame } = render(<App eventsFile="ignored" follow={fake.follow} />);
+
+    fake.push(ev('plan', 'Starting plan phase', '296'));
+    fake.push(ev('landed', 'PR merged', '296'));
+    await flush();
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('no active work — queue is empty');
+    expect(frame).not.toContain('#296');
+  });
+
+  it('reports the all-parked idle reason when the queue still has entries but nothing is active', async () => {
+    const fake = makeFakeFollow();
+    const queueSnap: QueueSnapshot = { entries: [{ lane: 'app', issue: 301 }] };
+    const readQueueFn = vi.fn(() => queueSnap);
+    const { lastFrame } = render(
+      <App eventsFile="ignored" follow={fake.follow} queueFile="/repo/.factory/queue" readQueueFn={readQueueFn} />,
+    );
+
+    fake.push(ev('plan', 'Starting plan phase', '296'));
+    fake.push(ev('parked', 'needs a human', '296'));
+    await flush();
+
+    expect(lastFrame() ?? '').toContain('no active work — all runs are parked or finished');
+  });
+
+  it('shows the issue title and elapsed/last-activity summary for a single active lane', async () => {
+    const fake = makeFakeFollow();
+    const { lastFrame } = render(<App eventsFile="ignored" follow={fake.follow} />);
+
+    fake.push(ev('plan', 'Starting plan phase', '296', '2026-01-01T00:00:00.000Z'));
+    fake.push(ev('issue-title', 'Fix the flaky test', '296', '2026-01-01T00:00:00.000Z'));
+    await flush();
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('#296 Fix the flaky test');
+    expect(frame).toContain('elapsed');
+    expect(frame).toContain('last activity');
   });
 
   it('renders a single lane directly in detail view with no row list', async () => {

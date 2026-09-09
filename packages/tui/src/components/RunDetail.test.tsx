@@ -54,4 +54,26 @@ describe('RunDetail', () => {
     const unset = render(<RunDetail run={initialState()} now={NOW} />);
     expect(unset.lastFrame()).not.toContain('queued for next phase boundary');
   });
+
+  it('shows the issue title in the header when provided', () => {
+    const run = reduceEvent(initialState(), ev('plan', 'Starting plan phase'));
+    const { lastFrame } = render(<RunDetail run={run} title="Fix the flaky test" now={NOW} />);
+    expect(lastFrame()).toContain('#296 Fix the flaky test');
+  });
+
+  it('shows elapsed time and last activity when provided', () => {
+    const run = reduceEvent(initialState(), ev('plan', 'Starting plan phase'));
+    const { lastFrame } = render(
+      <RunDetail run={run} now={NOW} elapsedMs={65_000} lastActivityAt="2025-12-31T23:59:55.000Z" />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('elapsed 01:05');
+    expect(frame).toContain('last activity 10s ago');
+  });
+
+  it('omits the elapsed/last-activity line when neither is provided', () => {
+    const { lastFrame } = render(<RunDetail run={initialState()} now={NOW} />);
+    expect(lastFrame()).not.toContain('elapsed');
+    expect(lastFrame()).not.toContain('last activity');
+  });
 });

@@ -2,7 +2,9 @@ import type { EventKind, FactoryEvent } from '@on-par/factory-core';
 import { describe, expect, it } from 'vitest';
 
 import {
+  computeIdleReason,
   type DashboardState,
+  hasActiveLane,
   initialDashboard,
   isLaneEvent,
   laneElapsedMs,
@@ -242,5 +244,47 @@ describe('laneElapsedMs', () => {
     ]);
     const now = Date.parse('2026-01-01T00:05:00.000Z');
     expect(laneElapsedMs(state.lanes[0], now)).toBe(10_000);
+  });
+});
+
+describe('hasActiveLane', () => {
+  it('is false when there are no lanes at all', () => {
+    expect(hasActiveLane(initialDashboard())).toBe(false);
+  });
+
+  it('is true for running, ready, and waiting-merge lanes', () => {
+    expect(hasActiveLane(reduceAll([ev('plan', '296', 'Starting plan phase')]))).toBe(true);
+    expect(
+      hasActiveLane(reduceAll([ev('plan', '296', 'Starting plan phase'), ev('ready', '296', 'PR #1 ready')])),
+    ).toBe(true);
+    expect(
+      hasActiveLane(
+        reduceAll([ev('plan', '296', 'Starting plan phase'), ev('await-merge', '296', 'waiting to merge')]),
+      ),
+    ).toBe(true);
+  });
+
+  it('is false when every lane is merged, failed, parked, or stopped', () => {
+    const state = reduceAll([
+      ev('plan', '296', 'Starting plan phase'),
+      ev('landed', '296', 'PR merged', '2026-01-01T00:00:10.000Z'),
+      ev('plan', '301', 'Starting plan phase'),
+      ev('fail', '301', 'boom', '2026-01-01T00:00:10.000Z'),
+      ev('plan', '305', 'Starting plan phase'),
+      ev('parked', '305', 'needs a human', '2026-01-01T00:00:10.000Z'),
+      ev('plan', '310', 'Starting plan phase'),
+      ev('stopped', '310', 'STOP flag present', '2026-01-01T00:00:10.000Z'),
+    ]);
+    expect(hasActiveLane(state)).toBe(false);
+  });
+});
+
+describe('computeIdleReason', () => {
+  it('reports an empty queue when nothing is queued', () => {
+    expect(computeIdleReason(0)).toBe('empty-queue');
+  });
+
+  it('reports all-parked when the queue still has entries', () => {
+    expect(computeIdleReason(3)).toBe('all-parked');
   });
 });
