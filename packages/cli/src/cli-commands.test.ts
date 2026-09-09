@@ -951,7 +951,7 @@ bash scripts/verify.sh
       const out = logged();
       expect(out).toContain('on-par/software-factory');
       expect(out).toContain('Product: alpha');
-      expect(out).toContain('app 1');
+      expect(out).toMatch(/app 1 {2}\[build, .+ ago\]/);
       expect(out).toContain('(1 stale entry hidden — no recent activity)');
       expect(out).toContain('ready #1: done');
       expect(out).toContain('== Health KPIs ==');
@@ -963,7 +963,7 @@ bash scripts/verify.sh
       writeFileSync(paths().queue, '# only comments\n');
       await runMain('status');
       const out = logged();
-      expect(out).toContain('(empty)');
+      expect(out).toContain('(idle — no active claims)');
       expect(out).toContain('(none)');
       expect(out).toContain('Product: (none)');
       expect(out).toContain('No factory runs recorded yet.');
@@ -975,10 +975,10 @@ bash scripts/verify.sh
         issue: 1,
         phase: 'build',
         updatedAt: new Date().toISOString(),
-        lastActivityAt: new Date().toISOString(),
+        lastActivityAt: new Date(Date.now() - 2 * 60_000).toISOString(),
       });
       await runMain('status');
-      expect(logged()).toContain('app 1');
+      expect(logged()).toMatch(/app 1 {2}\[build, 2m ago\]/);
       const err = errored();
       expect(err).toContain('malformed');
       expect(err).toContain('line 2');
@@ -994,6 +994,7 @@ bash scripts/verify.sh
       const out = logged();
 
       expect(out).not.toMatch(/ {2}app \d+$/m);
+      expect(out).toContain('(idle — no active claims)');
       expect(out).toContain('(60 stale entries hidden — no recent activity)');
       expect(readFileSync(paths().queue, 'utf-8')).toBe(before);
     });

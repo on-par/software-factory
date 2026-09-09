@@ -938,6 +938,16 @@ function warnQueueDiagnostics(diagnostics: QueueDiagnostic[]): void {
   }
 }
 
+/** Formats the time since `lastActivityAt` as a short duration (e.g. `3m`) for the
+ *  `factory status` `== Queue ==` section's `[phase, <age> ago]` display (#1343). An
+ *  active claim's heartbeat is always within DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS
+ *  (15m), so minutes is the only unit that ever shows. */
+function formatClaimAge(lastActivityAt: string, now: number): string {
+  const ageMs = Math.max(0, now - Date.parse(lastActivityAt));
+  const minutes = Math.floor(ageMs / 60_000);
+  return minutes < 1 ? '<1m' : `${minutes}m`;
+}
+
 export async function cmdStatus() {
   const repoRoot = await getRepoRoot();
   const ghRepo = await getGitHubRepo();
@@ -984,12 +994,19 @@ export async function cmdStatus() {
     const { entries, diagnostics } = parseQueue(readFileSync(paths.queue, 'utf-8'));
     if (entries.length > 0) {
       const { active, staleCount } = await partitionLocalQueueByActivity(entries, paths.runs);
-      for (const e of active) console.log(`  ${e.lane} ${e.issue}`);
+      if (active.length === 0) {
+        console.log('  (idle — no active claims)');
+      } else {
+        const now = Date.now();
+        for (const e of active) {
+          console.log(`  ${e.lane} ${e.issue}  [${e.phase}, ${formatClaimAge(e.lastActivityAt, now)} ago]`);
+        }
+      }
       if (staleCount > 0) {
         console.log(`  (${staleCount} stale entr${staleCount === 1 ? 'y' : 'ies'} hidden — no recent activity)`);
       }
     } else if (diagnostics.length === 0) {
-      console.log('  (empty)');
+      console.log('  (idle — no active claims)');
     }
     warnQueueDiagnostics(diagnostics);
   } else {
