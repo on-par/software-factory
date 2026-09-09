@@ -10,6 +10,7 @@ import {
   followEvents,
   listPendingApprovals,
   listQueuedSteering,
+  ProviderBreaker,
   type QueueSnapshot,
   queueSteeringMessage,
   readCostsFile,
@@ -21,6 +22,7 @@ import { type JSX, useEffect, useMemo, useState } from 'react';
 
 import { type DashboardState, initialDashboard, reduceDashboard } from '../dashboard.js';
 import { CostsTab } from '../tabs/CostsTab.js';
+import { type BreakerRow, HealthTab } from '../tabs/HealthTab.js';
 import { initialLogScroll, reduceLogScroll } from '../tabs/log-scroll.js';
 import { LogTab } from '../tabs/LogTab.js';
 import { QueueTab } from '../tabs/QueueTab.js';
@@ -53,6 +55,14 @@ export interface AppProps {
   steeringDir?: string;
   queueSteeringFn?: typeof queueSteeringMessage;
   listSteeringFn?: typeof listQueuedSteering;
+  breakerFile?: string;
+  effectiveConfigLines?: string[];
+  listBreakersFn?: (file: string) => Promise<BreakerRow[]>;
+}
+
+async function defaultListBreakersFn(file: string): Promise<BreakerRow[]> {
+  const breakers = await new ProviderBreaker(file).list();
+  return breakers.map((b) => ({ provider: b.provider, reason: b.reason, remainingMs: b.remainingMs }));
 }
 
 type View = 'dashboard' | 'detail';
@@ -81,6 +91,9 @@ export function App({
   steeringDir,
   queueSteeringFn = queueSteeringMessage,
   listSteeringFn = listQueuedSteering,
+  breakerFile,
+  effectiveConfigLines,
+  listBreakersFn = defaultListBreakersFn,
 }: AppProps): JSX.Element {
   const { exit } = useApp();
   const { stdout } = useStdout();
@@ -100,6 +113,8 @@ export function App({
   const [answered, setAnswered] = useState<Set<string>>(new Set());
   const [composer, setComposer] = useState<ComposerState | undefined>(undefined);
   const [steeringQueued, setSteeringQueued] = useState<Record<string, number>>({});
+  const [breakers, setBreakers] = useState<BreakerRow[]>([]);
+  const [healthSecondary, setHealthSecondary] = useState(false);
 
   useEffect(() => {
     const stop = follow(
@@ -147,6 +162,16 @@ export function App({
     const interval = setInterval(read, POLL_MS);
     return () => clearInterval(interval);
   }, [approvalsDir, listPendingFn]);
+
+  useEffect(() => {
+    if (!breakerFile) return;
+    const read = () => {
+      void listBreakersFn(breakerFile).then(setBreakers);
+    };
+    read();
+    const interval = setInterval(read, POLL_MS);
+    return () => clearInterval(interval);
+  }, [breakerFile, listBreakersFn]);
 
   const laneIssuesKey = state.lanes.map((l) => l.issue).join(',');
 
@@ -291,6 +316,8 @@ export function App({
       if (key.pageUp) setLogScroll((s) => reduceLogScroll(s, 'pageUp', logHeight, events.length));
       if (key.pageDown) setLogScroll((s) => reduceLogScroll(s, 'pageDown', logHeight, events.length));
       if (input === 'f') setLogScroll((s) => reduceLogScroll(s, 'toggleFollow', logHeight, events.length));
+    } else if (tab === 'health') {
+      if (input === 'e') setHealthSecondary((v) => !v);
     }
   });
 
@@ -301,7 +328,7 @@ export function App({
       return (
         <Box flexDirection="column">
           <Header repo={repo} done={false} />
-          <Text dimColor>waiting for factory events…</Text>
+          <Text dimColor>(idle — no active claims)</Text>
         </Box>
       );
     }
@@ -355,6 +382,15 @@ export function App({
       {tab === 'queue' && <QueueTab snapshot={queueSnap} lanes={state.lanes} />}
       {tab === 'costs' && <CostsTab costs={costsRead} selectedIndex={costsSelected} />}
       {tab === 'log' && <LogTab events={events} scroll={logScroll} height={logHeight} />}
+      {tab === 'health' && (
+        <HealthTab
+          events={events}
+          costs={costsRead.entries}
+          breakers={breakers}
+          effectiveConfigLines={effectiveConfigLines ?? []}
+          showSecondary={healthSecondary}
+        />
+      )}
     </Box>
   );
 }

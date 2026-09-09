@@ -20,7 +20,7 @@ const NOW = Date.parse('2026-01-01T00:00:05.000Z');
 describe('Dashboard', () => {
   it('shows the waiting message when there are no lanes', () => {
     const { lastFrame } = render(<Dashboard state={initialDashboard()} selectedIndex={0} now={NOW} />);
-    expect(lastFrame()).toContain('waiting for factory events');
+    expect(lastFrame()).toContain('idle — no active claims');
   });
 
   it('renders one row per lane and a lane count in the header', () => {

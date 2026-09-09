@@ -1079,6 +1079,25 @@ async function cmdTui() {
   } catch {
     // header just omits the repo
   }
+
+  const repoConfig = loadRepoConfig(repoRoot);
+  const modelsConfig = applyRepoConfig(loadModelsConfig(), repoConfig);
+  const routesConfig = loadRoutesConfig();
+  const effective = resolveEffectiveConfig(repoConfig);
+  const router = new ModelRouter(
+    modelsConfig,
+    routesConfig,
+    false,
+    undefined,
+    effective.allowExperimental,
+    effective.localOnly,
+  );
+  const effectiveConfigLines = describeEffectiveConfig({
+    router,
+    repo: repoConfig,
+    repoConfigPath: '.factory/config.json',
+  });
+
   await runTui({
     eventsFile: paths.events,
     repo,
@@ -1088,6 +1107,8 @@ async function cmdTui() {
     costsFile: paths.costs,
     approvalsDir: paths.approvals,
     steeringDir: paths.steering,
+    breakerFile: paths.breaker,
+    effectiveConfigLines,
   });
 }
 

@@ -37,7 +37,7 @@ describe('App', () => {
   it('shows a waiting message before any events arrive', () => {
     const { follow } = makeFakeFollow();
     const { lastFrame } = render(<App eventsFile="ignored" follow={follow} />);
-    expect(lastFrame()).toContain('waiting for factory events');
+    expect(lastFrame()).toContain('idle — no active claims');
   });
 
   it('renders a single lane directly in detail view with no row list', async () => {
@@ -146,7 +146,7 @@ describe('App', () => {
     expect(frame).toContain('daily usage cap reached');
   });
 
-  it('cycles Dashboard -> Queue -> Costs -> Log -> Dashboard on Tab, and jumps directly on digit keys', async () => {
+  it('cycles Active -> Queue -> Costs -> Log -> Health -> Active on Tab, and jumps directly on digit keys', async () => {
     const fake = makeFakeFollow();
     const { lastFrame, stdin } = render(<App eventsFile="ignored" follow={fake.follow} />);
 
@@ -164,7 +164,11 @@ describe('App', () => {
 
     stdin.write('\t');
     await flush();
-    expect(lastFrame()).toContain('[1 Dashboard]');
+    expect(lastFrame()).toContain('[5 Health]');
+
+    stdin.write('\t');
+    await flush();
+    expect(lastFrame()).toContain('[1 Active]');
 
     stdin.write('2');
     await flush();
@@ -225,6 +229,36 @@ describe('App', () => {
     expect(frame).toContain('#296');
     expect(frame).toContain('⚠ skipped 1 malformed line(s) in costs.jsonl');
     expect(frame).toContain('session total');
+  });
+
+  it('shows the Health tab breaker state and reveals Effective config/KPIs on e', async () => {
+    const fake = makeFakeFollow();
+    const listBreakersFn = vi.fn(async () => [{ provider: 'anthropic', reason: 'rate-limit', remainingMs: 60_000 }]);
+    const { lastFrame, stdin } = render(
+      <App
+        eventsFile="ignored"
+        follow={fake.follow}
+        breakerFile="/repo/.factory/breaker.json"
+        listBreakersFn={listBreakersFn}
+        effectiveConfigLines={['router: default']}
+      />,
+    );
+
+    stdin.write('5');
+    await flush();
+    await flush();
+
+    let frame = lastFrame() ?? '';
+    expect(frame).toContain('[5 Health]');
+    expect(frame).toContain('anthropic: OPEN (rate-limit)');
+    expect(frame).toContain('(Effective config and KPIs hidden — press e to view)');
+
+    stdin.write('e');
+    await flush();
+
+    frame = lastFrame() ?? '';
+    expect(frame).toContain('router: default');
+    expect(frame).toContain('KPIs:');
   });
 
   it('scrolls the Log tab with the up arrow and re-enables follow with f', async () => {

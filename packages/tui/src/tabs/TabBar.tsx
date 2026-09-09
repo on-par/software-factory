@@ -24,7 +24,7 @@ export function TabBar({ active }: TabBarProps): JSX.Element {
           )}
         </Text>
       ))}
-      <Text dimColor> Tab/1-4 switch · q quit</Text>
+      <Text dimColor> Tab/1-5 switch · q quit</Text>
     </Box>
   );
 }
