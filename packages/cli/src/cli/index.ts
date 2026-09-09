@@ -948,7 +948,7 @@ function formatClaimAge(lastActivityAt: string, now: number): string {
   return minutes < 1 ? '<1m' : `${minutes}m`;
 }
 
-export async function cmdStatus() {
+export async function cmdStatus(opts: { kpis?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
   const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
@@ -1020,13 +1020,17 @@ export async function cmdStatus() {
 
   console.log(chalk.bold('\n== Health =='));
 
-  console.log(chalk.bold('\n  Effective config:'));
-  for (const line of describeEffectiveConfig({
-    router,
-    repo: repoConfig,
-    repoConfigPath: '.factory/config.json',
-  })) {
-    console.log(`    ${line}`);
+  if (opts.kpis) {
+    console.log(chalk.bold('\n  Effective config:'));
+    for (const line of describeEffectiveConfig({
+      router,
+      repo: repoConfig,
+      repoConfigPath: '.factory/config.json',
+    })) {
+      console.log(`    ${line}`);
+    }
+  } else {
+    console.log('\n  (Effective config and KPIs hidden — run `factory status --kpis` to view)');
   }
 
   console.log(chalk.bold('\n  Provider breaker:'));
@@ -1052,11 +1056,13 @@ export async function cmdStatus() {
     console.log('    (none)');
   }
 
-  console.log(chalk.bold('\n  KPIs:'));
-  const kpiEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
-  const kpiCosts = existsSync(paths.costs) ? readCosts(paths.costs) : [];
-  for (const line of formatKpiLines(computeHealthKpis(kpiEvents, kpiCosts))) {
-    console.log(`    ${line}`);
+  if (opts.kpis) {
+    console.log(chalk.bold('\n  KPIs:'));
+    const kpiEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
+    const kpiCosts = existsSync(paths.costs) ? readCosts(paths.costs) : [];
+    for (const line of formatKpiLines(computeHealthKpis(kpiEvents, kpiCosts))) {
+      console.log(`    ${line}`);
+    }
   }
 
   if (existsSync(paths.stop)) {
@@ -4115,7 +4121,11 @@ export async function main() {
     .description('Report real 5h subscription usage (with a list-price heuristic fallback)')
     .action(cmdUsage);
 
-  program.command('status').description('Show queue, events, PRs, models').action(cmdStatus);
+  program
+    .command('status')
+    .description('Show queue, events, PRs, models')
+    .option('--kpis', 'Show full Health KPIs and Effective config')
+    .action((opts: { kpis?: boolean }) => cmdStatus(opts));
 
   program.command('kpis').description('Compute factory health KPIs and record a trend snapshot').action(cmdKpis);
 
