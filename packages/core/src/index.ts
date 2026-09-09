@@ -100,6 +100,10 @@ export type {
 } from './queue/index.js';
 export { parseQueue, readQueue, rewriteQueueForDecomposition, validateQueue } from './queue/index.js';
 
+// Queue activity (#1342)
+export type { QueueActivityPartition } from './queue/activity.js';
+export { DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS, partitionLocalQueueByActivity } from './queue/activity.js';
+
 // Hosted execution (control plane)
 export type {
   AcquireLeaseInput,
