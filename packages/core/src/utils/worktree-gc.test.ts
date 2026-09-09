@@ -1516,6 +1516,110 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       expect(issuesGet).toHaveBeenCalledWith({ owner: 'owner', repo: 'example-app', issue_number: 47 });
     });
   });
+
+  describe('issue existence check (#1352)', () => {
+    function laneListing(root: string, wt: string, branch: string): string {
+      return `worktree ${root}\nHEAD bbb\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/${branch}\n\n`;
+    }
+
+    function noOtherReasonRunCommand(root: string, wt: string, branch: string) {
+      const commands: string[] = [];
+      const runCommand = async (cmd: string) => {
+        commands.push(cmd);
+        if (cmd === 'git worktree list --porcelain') return { stdout: laneListing(root, wt, branch) };
+        if (cmd === 'git rev-parse --verify origin/main') return { stdout: 'bbb\n' }; // matches wt's HEAD ⇒ not an ancestor candidate
+        if (cmd.startsWith('git ls-remote --heads origin')) return { stdout: `bbb\trefs/heads/${branch}\n` }; // live remote branch
+        return { stdout: '' }; // status probe => clean
+      };
+      return { commands, runCommand };
+    }
+
+    it('flags a worktree whose lane issue 404s, without removing it', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-50`);
+
+      const { octokit, issuesGet } = fakeOctokit(
+        () => ({ data: [] }), // no PR
+        () => {
+          throw Object.assign(new Error('Not Found'), { status: 404 });
+        },
+      );
+      const { commands, runCommand } = noOtherReasonRunCommand(root, wt, 'ship-it/50-ghost');
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
+        { runCommand, octokit },
+      );
+
+      expect(report.issueNotFound).toEqual([{ path: wt, branch: 'ship-it/50-ghost', issue: 50 }]);
+      expect(report.issueUnverifiable).toEqual([]);
+      expect(report.removed).toEqual([]);
+      expect(commands.some((c) => c.includes('worktree remove'))).toBe(false);
+      expect(issuesGet).toHaveBeenCalledWith({ owner: 'owner', repo: 'example-app', issue_number: 50 });
+    });
+
+    it('does not flag a worktree whose lane issue exists', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-51`);
+
+      const { octokit } = fakeOctokit(() => ({ data: [] }));
+      const { runCommand } = noOtherReasonRunCommand(root, wt, 'ship-it/51-live');
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
+        { runCommand, octokit },
+      );
+
+      expect(report.issueNotFound).toEqual([]);
+      expect(report.issueUnverifiable).toEqual([]);
+    });
+
+    it('reports unverifiable, not flagged, on a non-404 API error (rate limit)', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-52`);
+
+      const { octokit } = fakeOctokit(
+        () => ({ data: [] }),
+        () => {
+          throw Object.assign(new Error('API rate limit exceeded'), { status: 403 });
+        },
+      );
+      const { runCommand } = noOtherReasonRunCommand(root, wt, 'ship-it/52-flaky');
+
+      const logs: Array<[string, string]> = [];
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
+        { runCommand, octokit, log: (type, msg) => logs.push([type, msg]) },
+      );
+
+      expect(report.issueUnverifiable).toEqual([{ path: wt, branch: 'ship-it/52-flaky', issue: 52 }]);
+      expect(report.issueNotFound).toEqual([]);
+      expect(logs.some(([type, msg]) => type === 'warn' && msg.includes('#52'))).toBe(true);
+    });
+
+    it('never performs the issue-existence check outside dry-run', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-53`);
+
+      const { octokit, issuesGet } = fakeOctokit(
+        () => ({ data: [{ number: 1, state: 'open' }] }), // open PR ⇒ keep, no removal
+        () => {
+          throw Object.assign(new Error('Not Found'), { status: 404 });
+        },
+      );
+      const { runCommand } = noOtherReasonRunCommand(root, wt, 'ship-it/53-real');
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
+        { runCommand, octokit },
+      );
+
+      expect(report.issueNotFound).toEqual([]);
+      expect(report.issueUnverifiable).toEqual([]);
+      // Only resolveIssueDisposition's issues.get call happened — resolveIssueExistence never ran.
+      expect(issuesGet).toHaveBeenCalledTimes(1);
+    });
+  });
 });
 
 describe('formatGcReport', () => {
@@ -1533,6 +1637,8 @@ describe('formatGcReport', () => {
           branchDeleted: false,
         },
       ],
+      issueNotFound: [],
+      issueUnverifiable: [],
     });
     expect(text).toContain('/repo/foo-factory-ship-it-1 (ship-it/1-x, 3d old) — merged');
     expect(text).toContain('would remove 1 worktree(s), kept 2');
@@ -1552,6 +1658,8 @@ describe('formatGcReport', () => {
           branchDeleted: false,
         },
       ],
+      issueNotFound: [],
+      issueUnverifiable: [],
     });
     expect(text).toContain(
       '/repo/foo-factory-ship-it-2 (detached, 10d old) — ttl-expired, scrubbed 1 credential file(s)',
@@ -1573,6 +1681,8 @@ describe('formatGcReport', () => {
           branchDeleted: true,
         },
       ],
+      issueNotFound: [],
+      issueUnverifiable: [],
     });
     expect(text).toContain('/repo/foo-factory-ship-it-3 (ship-it/3-x, 1d old) — merged, deleted branch ship-it/3-x');
   });
@@ -1591,7 +1701,23 @@ describe('formatGcReport', () => {
           branchDeleted: false,
         },
       ],
+      issueNotFound: [],
+      issueUnverifiable: [],
     });
     expect(text).not.toContain('deleted branch');
+  });
+
+  it('renders the issueNotFound and issueUnverifiable sections when present', () => {
+    const text = formatGcReport({
+      dryRun: true,
+      kept: 0,
+      removed: [],
+      issueNotFound: [{ path: '/repo/foo-factory-ship-it-5', branch: 'ship-it/5-x', issue: 5 }],
+      issueUnverifiable: [{ path: '/repo/foo-factory-ship-it-6', branch: 'ship-it/6-x', issue: 6 }],
+    });
+    expect(text).toContain('1 worktree(s) flagged — owning issue not found (404):');
+    expect(text).toContain('  /repo/foo-factory-ship-it-5 (ship-it/5-x) — issue #5 not found');
+    expect(text).toContain('1 worktree(s) unverifiable — GitHub issue lookup failed:');
+    expect(text).toContain('  /repo/foo-factory-ship-it-6 (ship-it/6-x) — issue #6 unverifiable');
   });
 });

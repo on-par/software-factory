@@ -45,10 +45,26 @@ export interface GcCandidate {
   branchReapable?: boolean;
 }
 
+/** A factory-owned worktree whose lane-branch issue number could not be confirmed to exist on
+ *  GitHub, surfaced only in the dry-run report (see ADR, this PR). */
+export interface Issue404Candidate {
+  path: string;
+  branch: string | null;
+  issue: number;
+}
+
 export interface GcReport {
   removed: GcCandidate[];
   kept: number;
   dryRun: boolean;
+  /** Dry-run only: factory-owned candidates whose lane issue number 404'd on GitHub — a strong
+   *  signal the worktree was created for an issue that never existed. Never read by, or written
+   *  from, GcReason/BRANCH_REAPABLE_REASONS. Always [] outside dry-run. */
+  issueNotFound: Issue404Candidate[];
+  /** Dry-run only: factory-owned candidates whose lane issue lookup threw a non-404 error (rate
+   *  limit, network failure) — "couldn't check," never conflated with issueNotFound's "confirmed
+   *  gone." Always [] outside dry-run. */
+  issueUnverifiable: Issue404Candidate[];
 }
 
 export interface SweepDeps {
@@ -283,6 +299,31 @@ async function resolveIssueDisposition(
   }
 }
 
+/** The lane issue's existence on GitHub, checked only for worktree-gc's dry-run report.
+ *  'not-configured' (no client/repo) and 'error' (the call threw anything but a 404) both mean
+ *  "no verdict" but are reported differently: 'error' surfaces as unverifiable so a rate-limit
+ *  or network blip is never mistaken for a confirmed-gone issue. */
+async function resolveIssueExistence(
+  octokit: SweepDeps['octokit'],
+  repo: string | undefined,
+  issue: number,
+  log: (type: EventKind, msg: string) => void,
+): Promise<'exists' | 'not-found' | 'error' | 'not-configured'> {
+  if (!octokit || !repo) return 'not-configured';
+  const [owner, repoName] = repo.split('/');
+  try {
+    await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issue });
+    return 'exists';
+  } catch (err: any) {
+    if (err?.status === 404) return 'not-found';
+    log(
+      'warn',
+      `worktree-gc: GitHub issue existence check failed for #${issue} (${err?.message ?? String(err)}) — reporting as unverifiable`,
+    );
+    return 'error';
+  }
+}
+
 /** A worktree is clean when it has no modified tracked files. `--untracked-files=no` deliberately
  *  ignores untracked build residue (node_modules, artifacts) — the "live work" signal is tracked-file
  *  modifications. A probe failure (`safeExec` null) ⇒ false ⇒ keep. */
@@ -470,7 +511,30 @@ export async function sweepWorktrees(
   }
 
   if (dryRun) {
-    return { removed, kept, dryRun: true };
+    const issueExistenceCache = new Map<number, Promise<'exists' | 'not-found' | 'error' | 'not-configured'>>();
+    const issueExistenceFor = (issue: number) => {
+      let p = issueExistenceCache.get(issue);
+      if (!p) {
+        p = resolveIssueExistence(octokit, repo, issue, log);
+        issueExistenceCache.set(issue, p);
+      }
+      return p;
+    };
+
+    const issueNotFound: Issue404Candidate[] = [];
+    const issueUnverifiable: Issue404Candidate[] = [];
+    for (const entry of candidates) {
+      const issueNumber = laneIssueNumber(entry, lanePattern);
+      if (issueNumber === null) continue;
+      const existence = await issueExistenceFor(issueNumber);
+      if (existence === 'not-found') {
+        issueNotFound.push({ path: entry.path, branch: entry.branch, issue: issueNumber });
+      } else if (existence === 'error') {
+        issueUnverifiable.push({ path: entry.path, branch: entry.branch, issue: issueNumber });
+      }
+    }
+
+    return { removed, kept, dryRun: true, issueNotFound, issueUnverifiable };
   }
 
   for (const candidate of removed) {
@@ -506,7 +570,7 @@ export async function sweepWorktrees(
 
   await deleteReapedBranches(removed, repoRoot, runCommand, log);
 
-  return { removed, kept, dryRun: false };
+  return { removed, kept, dryRun: false, issueNotFound: [], issueUnverifiable: [] };
 }
 
 async function deleteReapedBranches(
@@ -558,6 +622,19 @@ export function formatGcReport(report: GcReport): string {
   }
 
   lines.push(`${verb} ${report.removed.length} worktree(s), kept ${report.kept}`);
+
+  if (report.issueNotFound.length > 0) {
+    lines.push(`${report.issueNotFound.length} worktree(s) flagged — owning issue not found (404):`);
+    for (const c of report.issueNotFound) {
+      lines.push(`  ${c.path} (${c.branch ?? 'detached'}) — issue #${c.issue} not found`);
+    }
+  }
+  if (report.issueUnverifiable.length > 0) {
+    lines.push(`${report.issueUnverifiable.length} worktree(s) unverifiable — GitHub issue lookup failed:`);
+    for (const c of report.issueUnverifiable) {
+      lines.push(`  ${c.path} (${c.branch ?? 'detached'}) — issue #${c.issue} unverifiable`);
+    }
+  }
 
   return lines.join('\n');
 }
