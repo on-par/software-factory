@@ -9,7 +9,7 @@ import { promisify } from 'node:util';
 import type { Octokit } from '@octokit/rest';
 
 import type { EventKind } from '../events/kinds.js';
-import { PARKED_LABEL } from '../queue/github-queue.js';
+import { CLAIMED_BY_LABEL_PREFIX, PARKED_LABEL } from '../queue/github-queue.js';
 import { branchPrefixSlug, shellEscape } from './index.js';
 import { removeMicroVm, type WorktreeSandbox } from './microvm.js';
 
@@ -53,6 +53,15 @@ export interface Issue404Candidate {
   issue: number;
 }
 
+/** A factory-owned worktree whose branch's PR is merged or closed but whose owning issue has no
+ *  active `factory:claimed-by:*` label, surfaced only in the dry-run report (see ADR, this PR). */
+export interface NoActiveClaimCandidate {
+  path: string;
+  branch: string | null;
+  issue: number;
+  prState: 'merged' | 'closed';
+}
+
 export interface GcReport {
   removed: GcCandidate[];
   kept: number;
@@ -65,6 +74,12 @@ export interface GcReport {
    *  limit, network failure) — "couldn't check," never conflated with issueNotFound's "confirmed
    *  gone." Always [] outside dry-run. */
   issueUnverifiable: Issue404Candidate[];
+  /** Dry-run only: factory-owned candidates whose branch's PR is merged or closed and whose
+   *  owning issue carries no active `factory:claimed-by:*` label — the lane finished (or was
+   *  abandoned) without releasing its worktree. Fail-safe: any doubt (no client/repo, lookup
+   *  error, unresolved issue number) means "not flagged." Never read by, or written from,
+   *  GcReason/BRANCH_REAPABLE_REASONS. Always [] outside dry-run. */
+  noActiveClaim: NoActiveClaimCandidate[];
 }
 
 export interface SweepDeps {
@@ -324,6 +339,30 @@ async function resolveIssueExistence(
   }
 }
 
+/** Whether the lane issue carries an active `factory:claimed-by:*` label, checked only for
+ *  worktree-gc's dry-run report. Fail-safe: no client/repo, or a lookup error, both resolve to
+ *  'unknown' — never conflated with a confirmed 'unclaimed' verdict. */
+async function resolveActiveClaim(
+  octokit: SweepDeps['octokit'],
+  repo: string | undefined,
+  issue: number,
+  log: (type: EventKind, msg: string) => void,
+): Promise<'claimed' | 'unclaimed' | 'unknown'> {
+  if (!octokit || !repo) return 'unknown';
+  const [owner, repoName] = repo.split('/');
+  try {
+    const { data } = await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issue });
+    const labels = (data.labels ?? []).map((label: any) => (typeof label === 'string' ? label : (label?.name ?? '')));
+    return labels.some((name: string) => name.startsWith(CLAIMED_BY_LABEL_PREFIX)) ? 'claimed' : 'unclaimed';
+  } catch (err: any) {
+    log(
+      'warn',
+      `worktree-gc: GitHub claim-label check failed for #${issue} (${err?.message ?? String(err)}) — reporting as unknown (not flagged)`,
+    );
+    return 'unknown';
+  }
+}
+
 /** A worktree is clean when it has no modified tracked files. `--untracked-files=no` deliberately
  *  ignores untracked build residue (node_modules, artifacts) — the "live work" signal is tracked-file
  *  modifications. A probe failure (`safeExec` null) ⇒ false ⇒ keep. */
@@ -534,7 +573,30 @@ export async function sweepWorktrees(
       }
     }
 
-    return { removed, kept, dryRun: true, issueNotFound, issueUnverifiable };
+    const claimCache = new Map<number, Promise<'claimed' | 'unclaimed' | 'unknown'>>();
+    const claimFor = (issue: number) => {
+      let p = claimCache.get(issue);
+      if (!p) {
+        p = resolveActiveClaim(octokit, repo, issue, log);
+        claimCache.set(issue, p);
+      }
+      return p;
+    };
+
+    const noActiveClaim: NoActiveClaimCandidate[] = [];
+    for (const entry of candidates) {
+      if (!entry.branch) continue;
+      const prState = await prStateFor(entry.branch);
+      if (prState !== 'merged' && prState !== 'closed') continue;
+      const issueNumber = laneIssueNumber(entry, lanePattern);
+      if (issueNumber === null) continue;
+      const claim = await claimFor(issueNumber);
+      if (claim === 'unclaimed') {
+        noActiveClaim.push({ path: entry.path, branch: entry.branch, issue: issueNumber, prState });
+      }
+    }
+
+    return { removed, kept, dryRun: true, issueNotFound, issueUnverifiable, noActiveClaim };
   }
 
   for (const candidate of removed) {
@@ -570,7 +632,7 @@ export async function sweepWorktrees(
 
   await deleteReapedBranches(removed, repoRoot, runCommand, log);
 
-  return { removed, kept, dryRun: false, issueNotFound: [], issueUnverifiable: [] };
+  return { removed, kept, dryRun: false, issueNotFound: [], issueUnverifiable: [], noActiveClaim: [] };
 }
 
 async function deleteReapedBranches(
@@ -633,6 +695,12 @@ export function formatGcReport(report: GcReport): string {
     lines.push(`${report.issueUnverifiable.length} worktree(s) unverifiable — GitHub issue lookup failed:`);
     for (const c of report.issueUnverifiable) {
       lines.push(`  ${c.path} (${c.branch ?? 'detached'}) — issue #${c.issue} unverifiable`);
+    }
+  }
+  if (report.noActiveClaim.length > 0) {
+    lines.push(`${report.noActiveClaim.length} worktree(s) flagged — merged/closed PR with no active claim:`);
+    for (const c of report.noActiveClaim) {
+      lines.push(`  ${c.path} (${c.branch ?? 'detached'}) — issue #${c.issue} ${c.prState}, no active claim`);
     }
   }
 

@@ -1620,6 +1620,140 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       expect(issuesGet).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('no-active-claim check (#1353)', () => {
+    function laneListing(root: string, wt: string, branch: string): string {
+      return `worktree ${root}\nHEAD bbb\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/${branch}\n\n`;
+    }
+
+    function cleanRunCommand(root: string, wt: string, branch: string) {
+      const commands: string[] = [];
+      const runCommand = async (cmd: string) => {
+        commands.push(cmd);
+        if (cmd === 'git worktree list --porcelain') return { stdout: laneListing(root, wt, branch) };
+        if (cmd === 'git rev-parse --verify origin/main') return { stdout: 'bbb\n' };
+        if (cmd.startsWith('git ls-remote --heads origin')) return { stdout: `bbb\trefs/heads/${branch}\n` };
+        return { stdout: '' }; // status probe => clean
+      };
+      return { commands, runCommand };
+    }
+
+    it('flags a merged-PR worktree whose issue has no active claim label', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-60`);
+
+      const { octokit } = fakeOctokit(
+        () => ({ data: [{ number: 1, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
+        () => ({ data: { state: 'open', labels: [] } }),
+      );
+      const { runCommand } = cleanRunCommand(root, wt, 'ship-it/60-done');
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
+        { runCommand, octokit },
+      );
+
+      expect(report.noActiveClaim).toEqual([{ path: wt, branch: 'ship-it/60-done', issue: 60, prState: 'merged' }]);
+    });
+
+    it('flags a closed (unmerged) PR worktree whose issue has no active claim label', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-61`);
+
+      const { octokit } = fakeOctokit(
+        () => ({ data: [{ number: 2, state: 'closed' }] }),
+        () => ({ data: { state: 'open', labels: [] } }),
+      );
+      const { runCommand } = cleanRunCommand(root, wt, 'ship-it/61-abandoned');
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
+        { runCommand, octokit },
+      );
+
+      expect(report.noActiveClaim).toEqual([
+        { path: wt, branch: 'ship-it/61-abandoned', issue: 61, prState: 'closed' },
+      ]);
+    });
+
+    it('does not flag an open-PR worktree, even without a claim label', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-62`);
+
+      const { octokit } = fakeOctokit(
+        () => ({ data: [{ number: 3, state: 'open' }] }),
+        () => ({ data: { state: 'open', labels: [] } }),
+      );
+      const { runCommand } = cleanRunCommand(root, wt, 'ship-it/62-active');
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
+        { runCommand, octokit },
+      );
+
+      expect(report.noActiveClaim).toEqual([]);
+    });
+
+    it('does not flag a merged-PR worktree whose issue carries an active claim label', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-63`);
+
+      const { octokit } = fakeOctokit(
+        () => ({ data: [{ number: 4, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
+        () => ({ data: { state: 'open', labels: ['factory:claimed-by:lane-7'] } }),
+      );
+      const { runCommand } = cleanRunCommand(root, wt, 'ship-it/63-claimed');
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
+        { runCommand, octokit },
+      );
+
+      expect(report.noActiveClaim).toEqual([]);
+    });
+
+    it('does not flag on a claim-label lookup error (fail-safe)', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-64`);
+
+      const { octokit } = fakeOctokit(
+        () => ({ data: [{ number: 5, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
+        () => {
+          throw Object.assign(new Error('API rate limit exceeded'), { status: 403 });
+        },
+      );
+      const { runCommand } = cleanRunCommand(root, wt, 'ship-it/64-flaky');
+
+      const logs: Array<[string, string]> = [];
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
+        { runCommand, octokit, log: (type, msg) => logs.push([type, msg]) },
+      );
+
+      expect(report.noActiveClaim).toEqual([]);
+      expect(logs.some(([type, msg]) => type === 'warn' && msg.includes('#64'))).toBe(true);
+    });
+
+    it('never performs the claim check outside dry-run', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-65`);
+
+      const { octokit, issuesGet } = fakeOctokit(
+        () => ({ data: [{ number: 6, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
+        () => ({ data: { state: 'open', labels: [] } }),
+      );
+      const { runCommand } = cleanRunCommand(root, wt, 'ship-it/65-nondry');
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
+        { runCommand, octokit },
+      );
+
+      expect(report.noActiveClaim).toEqual([]);
+      // Only resolveIssueDisposition's issues.get call happened — resolveActiveClaim never ran.
+      expect(issuesGet).toHaveBeenCalledTimes(1);
+    });
+  });
 });
 
 describe('formatGcReport', () => {
@@ -1639,6 +1773,7 @@ describe('formatGcReport', () => {
       ],
       issueNotFound: [],
       issueUnverifiable: [],
+      noActiveClaim: [],
     });
     expect(text).toContain('/repo/foo-factory-ship-it-1 (ship-it/1-x, 3d old) — merged');
     expect(text).toContain('would remove 1 worktree(s), kept 2');
@@ -1660,6 +1795,7 @@ describe('formatGcReport', () => {
       ],
       issueNotFound: [],
       issueUnverifiable: [],
+      noActiveClaim: [],
     });
     expect(text).toContain(
       '/repo/foo-factory-ship-it-2 (detached, 10d old) — ttl-expired, scrubbed 1 credential file(s)',
@@ -1683,6 +1819,7 @@ describe('formatGcReport', () => {
       ],
       issueNotFound: [],
       issueUnverifiable: [],
+      noActiveClaim: [],
     });
     expect(text).toContain('/repo/foo-factory-ship-it-3 (ship-it/3-x, 1d old) — merged, deleted branch ship-it/3-x');
   });
@@ -1703,6 +1840,7 @@ describe('formatGcReport', () => {
       ],
       issueNotFound: [],
       issueUnverifiable: [],
+      noActiveClaim: [],
     });
     expect(text).not.toContain('deleted branch');
   });
@@ -1714,10 +1852,24 @@ describe('formatGcReport', () => {
       removed: [],
       issueNotFound: [{ path: '/repo/foo-factory-ship-it-5', branch: 'ship-it/5-x', issue: 5 }],
       issueUnverifiable: [{ path: '/repo/foo-factory-ship-it-6', branch: 'ship-it/6-x', issue: 6 }],
+      noActiveClaim: [],
     });
     expect(text).toContain('1 worktree(s) flagged — owning issue not found (404):');
     expect(text).toContain('  /repo/foo-factory-ship-it-5 (ship-it/5-x) — issue #5 not found');
     expect(text).toContain('1 worktree(s) unverifiable — GitHub issue lookup failed:');
     expect(text).toContain('  /repo/foo-factory-ship-it-6 (ship-it/6-x) — issue #6 unverifiable');
+  });
+
+  it('renders the noActiveClaim section when present', () => {
+    const text = formatGcReport({
+      dryRun: true,
+      kept: 0,
+      removed: [],
+      issueNotFound: [],
+      issueUnverifiable: [],
+      noActiveClaim: [{ path: '/repo/foo-factory-ship-it-7', branch: 'ship-it/7-x', issue: 7, prState: 'merged' }],
+    });
+    expect(text).toContain('1 worktree(s) flagged — merged/closed PR with no active claim:');
+    expect(text).toContain('  /repo/foo-factory-ship-it-7 (ship-it/7-x) — issue #7 merged, no active claim');
   });
 });
