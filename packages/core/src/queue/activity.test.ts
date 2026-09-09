@@ -17,12 +17,16 @@ function snapshotAt(issue: number, lastActivityAt: string): RunPhaseSnapshot {
 describe('partitionLocalQueueByActivity', () => {
   it('treats a snapshot within the freshness window as active', async () => {
     const entries = [entry('app', 1)];
+    const lastActivityAt = new Date(NOW - 60_000).toISOString();
     const result = await partitionLocalQueueByActivity(entries, '/tmp/runs', {
       now: () => NOW,
-      readSnapshot: async () => snapshotAt(1, new Date(NOW - 60_000).toISOString()),
+      readSnapshot: async () => snapshotAt(1, lastActivityAt),
     });
 
-    expect(result).toEqual({ active: entries, staleCount: 0 });
+    expect(result).toEqual({
+      active: [{ ...entries[0], phase: 'build', lastActivityAt }],
+      staleCount: 0,
+    });
   });
 
   it('treats a snapshot older than the threshold as stale', async () => {
@@ -48,16 +52,20 @@ describe('partitionLocalQueueByActivity', () => {
 
   it('preserves original queue order among active entries and counts the rest as stale', async () => {
     const entries = [entry('app', 1), entry('infra', 2), entry('app', 3)];
+    const lastActivityAt = new Date(NOW - 60_000).toISOString();
     const result = await partitionLocalQueueByActivity(entries, '/tmp/runs', {
       now: () => NOW,
       readSnapshot: async (file) => {
-        if (file.includes('issue-2')) return snapshotAt(2, new Date(NOW - 60_000).toISOString());
-        if (file.includes('issue-3')) return snapshotAt(3, new Date(NOW - 60_000).toISOString());
+        if (file.includes('issue-2')) return snapshotAt(2, lastActivityAt);
+        if (file.includes('issue-3')) return snapshotAt(3, lastActivityAt);
         return null;
       },
     });
 
-    expect(result.active).toEqual([entry('infra', 2), entry('app', 3)]);
+    expect(result.active).toEqual([
+      { ...entry('infra', 2), phase: 'build', lastActivityAt },
+      { ...entry('app', 3), phase: 'build', lastActivityAt },
+    ]);
     expect(result.staleCount).toBe(1);
   });
 

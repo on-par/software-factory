@@ -14,9 +14,17 @@ import type { QueueEntry } from './index.js';
  *  (same value as DEFAULT_STALE_THRESHOLD_MS in ../daemon/engine-supervisor.ts). */
 export const DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS = 15 * 60_000;
 
+/** An active queue entry paired with the per-issue snapshot evidence that made it
+ *  count as active, so callers (factory status, #1343) can render phase/age without
+ *  re-reading the snapshot file themselves. */
+export interface ActiveQueueClaim extends QueueEntry {
+  phase: RunPhaseSnapshot['phase'];
+  lastActivityAt: string;
+}
+
 export interface QueueActivityPartition {
   /** Entries with a fresh per-issue heartbeat, in original queue order. */
-  active: QueueEntry[];
+  active: ActiveQueueClaim[];
   /** Count of entries with no snapshot, or a snapshot older than the threshold. */
   staleCount: number;
 }
@@ -37,19 +45,20 @@ export async function partitionLocalQueueByActivity(
   const staleThresholdMs = opts.staleThresholdMs ?? DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS;
   const readSnapshot = opts.readSnapshot ?? readPhaseSnapshot;
 
-  const isFresh = await Promise.all(
+  const snapshots = await Promise.all(
     entries.map(async (entry) => {
       const snapshot = await readSnapshot(phaseSnapshotFile(runsDir, entry.issue));
-      if (!snapshot) return false;
+      if (!snapshot) return null;
       const age = now() - Date.parse(snapshot.lastActivityAt);
-      return Number.isFinite(age) && age <= staleThresholdMs;
+      return Number.isFinite(age) && age <= staleThresholdMs ? snapshot : null;
     }),
   );
 
-  const active: QueueEntry[] = [];
+  const active: ActiveQueueClaim[] = [];
   let staleCount = 0;
   entries.forEach((entry, i) => {
-    if (isFresh[i]) active.push(entry);
+    const snapshot = snapshots[i];
+    if (snapshot) active.push({ ...entry, phase: snapshot.phase, lastActivityAt: snapshot.lastActivityAt });
     else staleCount += 1;
   });
 
