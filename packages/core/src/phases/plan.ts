@@ -77,10 +77,12 @@ Steps:
    - route: codex — when the implementation from a frozen spec is bounded and mechanical
      (known-repro fixes, well-scoped features, refactors, test writing, CI/tooling)
    - route: claude — when the work needs UX, design, or architecture judgment; naming/API
-     design calls; is a tiny diff (<20 lines); or needs session tools
+     design calls; is a tiny diff (<20 lines); needs session tools; or when the repo's
+     pinned build worker is a claude-cli model (e.g. claude-sonnet-5 in .factory/config.json)
    - route: opencode — when the repo's pinned build worker is an opencode-harness model
      (e.g. opencode-deepseek-v4-flash in .factory/config.json); bounded mechanical work
-   Default to route: claude when genuinely unsure.
+   A pinned build worker's harness always wins over your judgment: the factory forces the
+   route to match it after PLAN. Default to route: claude when genuinely unsure.
 4. RIGHT-SIZE THE SLICE. A single BUILD pass must be bounded: aim for roughly
    5-15 minutes of agent work, a handful of files, at most ~6 target types /
    ~8 signatures / ~10 call edges in the design block. If the issue genuinely

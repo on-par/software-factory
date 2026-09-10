@@ -22,7 +22,7 @@ import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
 import { captureDiffBase } from '../checkers/design-smells.js';
 import type { ReworkHistory } from '../checkers/rework-history.js';
 import type { AutoFailoverSettings } from '../config/index.js';
-import type { EffectiveModelPins } from '../config/repo.js';
+import { type EffectiveModelPins, routeForBuildModel } from '../config/repo.js';
 import type { EventKind } from '../events/kinds.js';
 import { ProcessGroupTracker } from '../environment/process-groups.js';
 import type { ModelRouter } from '../router/index.js';
@@ -338,6 +338,16 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       request.modelPins.planFallback,
       'PLAN',
     );
+    // A pinned build model determines the route (#1367): an explicit repo `route` still wins, but
+    // without one the pin's harness decides, so PLAN cannot send an Anthropic-pinned build to Codex.
+    const derivedRoute = request.preferredRoute
+      ? undefined
+      : routeForBuildModel(ports.router.registryRef, request.modelPins.build);
+    const pinnedRoute = request.preferredRoute ?? derivedRoute;
+    if (derivedRoute && request.modelPins.build) {
+      log('model-override', `build route derived from pinned build model ${request.modelPins.build} → ${derivedRoute}`);
+    }
+
     const plan = await planPhase({
       issue: request.issue,
       repo: request.repo,
@@ -364,7 +374,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       enforceReadiness: true,
       fastPath: request.efficiency.fastPath,
       enforceSizeGate: true,
-      preferredRoute: request.preferredRoute,
+      preferredRoute: pinnedRoute,
     });
     route = plan.route;
     if (!plan.ok) {
@@ -402,9 +412,11 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       breakerBlocked = gate.codexBlocked;
     }
 
-    let buildRoute = plan.route;
+    // PLAN already honors pinnedRoute and rewrites the spec; re-apply here so a plan port that
+    // ignores it (a daemon or a test double) still cannot route a pinned worker elsewhere.
+    let buildRoute = pinnedRoute ?? plan.route;
     let buildModel = request.modelPins.build;
-    if (request.failover.enabled && plan.route === 'claude') {
+    if (request.failover.enabled && buildRoute === 'claude') {
       const primaryClaude = buildModel ?? ports.router.resolveAll('build_claude')[0];
       const fallbackCodex = request.modelPins.buildFallback ?? ports.router.resolveAll('build_codex')[0];
       const selected = await preferFallbackWhenProviderIsOpen(primaryClaude, fallbackCodex, 'BUILD');
@@ -424,7 +436,9 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       if (!compatible) {
         log(
           'model_override_ignored',
-          `build model ${buildModel} is incompatible with the ${buildRoute} route — using that route's default worker`,
+          `build model ${buildModel} is incompatible with the ${buildRoute} route${
+            request.preferredRoute ? ' pinned by .factory/config.json' : ''
+          } — using that route's default worker`,
         );
         buildModel = undefined;
       }
