@@ -284,6 +284,7 @@ export {
   QUEUE_ORDER_LABEL_PREFIX,
   queueOrderLabel,
   queueLabelSpecs,
+  readGithubQueueSnapshot,
 } from './queue/github-queue.js';
 export type { QueueEntry } from './queue/index.js';
 

@@ -72,6 +72,7 @@ const PUBLIC_API_KEYS = [
   // Queue
   'parseQueue',
   'readQueue',
+  'redactSecretPatterns',
   'rewriteQueueForDecomposition',
   'validateQueue',
   // Queue activity (#1342)
@@ -488,6 +489,7 @@ const INTERNAL_API_KEYS = [
   'QUEUE_ORDER_LABEL_PREFIX',
   'queueOrderLabel',
   'queueLabelSpecs',
+  'readGithubQueueSnapshot',
   // Stale-claim reaping (#999)
   'findStaleClaims',
   'localClaimPid',

@@ -1,16 +1,20 @@
-import type { QueueSnapshot } from '@on-par/factory-core';
+import type { QueueEntryStatus, QueueSnapshot } from '@on-par/factory-core';
 import { Box, Text } from 'ink';
 import type { JSX } from 'react';
 
 import type { LaneState, LaneStatus } from '../dashboard.js';
+import { sanitizeTerminalText } from '../text.js';
 
 const TITLE_MAX_LENGTH = 40;
 
 function truncate(s: string, max: number): string {
-  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+  const clean = sanitizeTerminalText(s);
+  return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
 }
 
-const STATUS_COLOR: Record<LaneStatus | 'queued', string | undefined> = {
+type RowStatus = LaneStatus | QueueEntryStatus;
+
+const STATUS_COLOR: Record<RowStatus, string | undefined> = {
   running: 'yellow',
   ready: 'green',
   'waiting-merge': 'yellow',
@@ -19,18 +23,26 @@ const STATUS_COLOR: Record<LaneStatus | 'queued', string | undefined> = {
   parked: 'yellow',
   stopped: undefined,
   queued: undefined,
+  'in-progress': 'yellow',
 };
 
 export interface QueueTabProps {
   snapshot: QueueSnapshot;
   lanes: LaneState[];
+  /** Source name for the heading ("GitHub" / "local file"); omitted when the App has no queue reader. */
+  source?: string;
 }
 
-export function QueueTab({ snapshot, lanes }: QueueTabProps): JSX.Element {
+export function QueueTab({ snapshot, lanes, source }: QueueTabProps): JSX.Element {
+  const heading = source === undefined ? undefined : <Text dimColor>queue: {source}</Text>;
+  const error =
+    snapshot.error === undefined ? undefined : <Text color="red">({sanitizeTerminalText(snapshot.error)})</Text>;
+
   if (snapshot.entries.length === 0) {
     return (
       <Box flexDirection="column">
-        <Text dimColor>queue is empty</Text>
+        {heading}
+        {error ?? <Text dimColor>queue is empty</Text>}
       </Box>
     );
   }
@@ -39,13 +51,24 @@ export function QueueTab({ snapshot, lanes }: QueueTabProps): JSX.Element {
 
   return (
     <Box flexDirection="column">
+      {heading}
+      {error}
       {snapshot.entries.map((entry, i) => {
+        // A live lane (from the event log) knows more than a label does, so it wins; a snapshot
+        // status/title from GitHub fills in for issues no lane has touched yet.
         const lane = laneByIssue.get(String(entry.issue));
-        const status: LaneStatus | 'queued' = lane?.status ?? 'queued';
+        const status: RowStatus = lane?.status ?? entry.status ?? 'queued';
+        const claimant =
+          lane === undefined && entry.claimant !== undefined ? ` (${sanitizeTerminalText(entry.claimant)})` : '';
+        const title = lane?.title ?? entry.title ?? '';
         return (
           <Text key={`${entry.lane}-${entry.issue}`}>
-            {String(i + 1).padStart(3, ' ')}. {entry.lane} <Text bold>#{entry.issue}</Text>{' '}
-            <Text color={STATUS_COLOR[status]}>{status}</Text> {truncate(lane?.title ?? '', TITLE_MAX_LENGTH)}
+            {String(i + 1).padStart(3, ' ')}. {sanitizeTerminalText(entry.lane)} <Text bold>#{entry.issue}</Text>{' '}
+            <Text color={STATUS_COLOR[status]}>
+              {status}
+              {claimant}
+            </Text>{' '}
+            {truncate(title, TITLE_MAX_LENGTH)}
           </Text>
         );
       })}

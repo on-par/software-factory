@@ -94,11 +94,16 @@ export type {
   ParsedQueue,
   QueueDiagnostic,
   QueueEntry,
+  QueueEntryStatus,
   QueueSnapshot,
   QueueSnapshotEntry,
   QueueValidationResult,
 } from './queue/index.js';
 export { parseQueue, readQueue, rewriteQueueForDecomposition, validateQueue } from './queue/index.js';
+
+// Pattern-based secret redaction for GitHub/provider error text shown to an operator (#1362).
+// Distinct from the authority-list `redactSecrets` exported from ./hosted/authority.js.
+export { redactSecrets as redactSecretPatterns } from './router/failure-detail.js';
 
 // Queue activity (#1342)
 export type { ActiveQueueClaim, QueueActivityPartition } from './queue/activity.js';

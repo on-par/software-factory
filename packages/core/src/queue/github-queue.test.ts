@@ -711,8 +711,9 @@ describe('createOctokitQueueClient', () => {
             captured.listForRepo = input;
             return {
               data: [
-                { number: 1, labels: ['factory:queued', { name: 'factory:lane:build' }] },
+                { number: 1, title: 'Build the thing', labels: ['factory:queued', { name: 'factory:lane:build' }] },
                 { number: 2, labels: [{ name: '' }, { name: undefined }], pull_request: {} },
+                { number: 3, labels: ['factory:queued'] },
               ],
             };
           },
@@ -731,7 +732,10 @@ describe('createOctokitQueueClient', () => {
       labels: 'factory:queued',
       per_page: 100,
     });
-    expect(result).toEqual([{ number: 1, labels: ['factory:queued', 'factory:lane:build'] }]);
+    expect(result).toEqual([
+      { number: 1, labels: ['factory:queued', 'factory:lane:build'], title: 'Build the thing' },
+      { number: 3, labels: ['factory:queued'] },
+    ]);
   });
 
   it("reads back an issue's current label names", async () => {

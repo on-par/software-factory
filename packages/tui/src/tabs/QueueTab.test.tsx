@@ -50,6 +50,85 @@ describe('QueueTab', () => {
     expect(frame).toContain('queued');
   });
 
+  it('names the queue source in a heading when given one (#1362)', () => {
+    const { lastFrame } = render(<QueueTab snapshot={{ entries: [] }} lanes={[]} source="GitHub" />);
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('queue: GitHub');
+    expect(frame).toContain('queue is empty');
+    expect(render(<QueueTab snapshot={{ entries: [] }} lanes={[]} />).lastFrame()).not.toContain('queue:');
+  });
+
+  it('renders status, claimant, and title carried on the snapshot entry when no lane matches (#1362)', () => {
+    const snapshot: QueueSnapshot = {
+      entries: [
+        { lane: 'ops', issue: 7, title: 'Rotate the keys', status: 'in-progress', claimant: 'mini-123' },
+        { lane: 'ops', issue: 8, title: 'Parked one', status: 'parked' },
+        { lane: 'ops', issue: 9, title: 'Plain queued', status: 'queued' },
+      ],
+    };
+    const frame = render(<QueueTab snapshot={snapshot} lanes={[]} source="GitHub" />).lastFrame() ?? '';
+    expect(frame).toContain('#7');
+    expect(frame).toContain('in-progress (mini-123)');
+    expect(frame).toContain('Rotate the keys');
+    expect(frame).toContain('#8');
+    expect(frame).toContain('parked');
+    expect(frame).toContain('#9');
+    expect(frame).toContain('queued');
+    expect(frame).toContain('Plain queued');
+  });
+
+  it('prefers a live lane over the snapshot entry for status and title', () => {
+    const lane: LaneState = {
+      ...laneFor('61', [{ type: 'plan', msg: 'Starting plan phase' }]),
+      title: 'Title from the event log',
+    };
+    const snapshot: QueueSnapshot = {
+      entries: [{ lane: 'app', issue: 61, title: 'Title from GitHub', status: 'queued', claimant: 'ignored' }],
+    };
+    const frame = render(<QueueTab snapshot={snapshot} lanes={[lane]} />).lastFrame() ?? '';
+    expect(frame).toContain('running');
+    expect(frame).toContain('Title from the event log');
+    expect(frame).not.toContain('Title from GitHub');
+    expect(frame).not.toContain('ignored');
+  });
+
+  it('shows the snapshot error instead of "queue is empty", and above any kept entries', () => {
+    const empty: QueueSnapshot = { entries: [], error: 'no GitHub token — run `gh auth login`' };
+    const emptyFrame = render(<QueueTab snapshot={empty} lanes={[]} source="GitHub" />).lastFrame() ?? '';
+    expect(emptyFrame).toContain('(no GitHub token — run `gh auth login`)');
+    expect(emptyFrame).not.toContain('queue is empty');
+
+    const kept: QueueSnapshot = {
+      entries: [{ lane: 'app', issue: 61 }],
+      error: 'queue lookup failed — GitHub API unavailable',
+    };
+    const keptFrame = render(<QueueTab snapshot={kept} lanes={[]} />).lastFrame() ?? '';
+    expect(keptFrame).toContain('(queue lookup failed — GitHub API unavailable)');
+    expect(keptFrame).toContain('#61');
+    expect(keptFrame.indexOf('queue lookup failed')).toBeLessThan(keptFrame.indexOf('#61'));
+  });
+
+  it('strips terminal control characters from GitHub-sourced lane, claimant, title and error text', () => {
+    const snapshot: QueueSnapshot = {
+      entries: [
+        {
+          lane: 'ops\r',
+          issue: 7,
+          title: '\x1b[2JWipe the pane',
+          status: 'in-progress',
+          claimant: 'mini\x1b[31m',
+        },
+      ],
+      error: 'queue lookup failed — \x1b[Hbad',
+    };
+    const frame = render(<QueueTab snapshot={snapshot} lanes={[]} source="GitHub" />).lastFrame() ?? '';
+    expect(frame).not.toContain('\x1b');
+    expect(frame).not.toContain('\r');
+    expect(frame).toContain('[2JWipe the pane');
+    expect(frame).toContain('in-progress (mini[31m)');
+    expect(frame).toContain('(queue lookup failed — [Hbad)');
+  });
+
   it('shows a proposed-count footer when proposedCount > 0', () => {
     const snapshot: QueueSnapshot = { entries: [{ lane: 'app', issue: 61 }], proposedCount: 3 };
     const { lastFrame } = render(<QueueTab snapshot={snapshot} lanes={[]} />);
