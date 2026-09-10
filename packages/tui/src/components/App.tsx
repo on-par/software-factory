@@ -14,7 +14,6 @@ import {
   type QueueSnapshot,
   queueSteeringMessage,
   readCostsFile,
-  readQueue,
   respondToApproval,
 } from '@on-par/factory-core';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
@@ -38,16 +37,25 @@ import { StopBanner } from './StopBanner.js';
 const MAX_LOG_EVENTS = 5000;
 const POLL_MS = 2000;
 
+/** Where the Queue tab's backlog comes from. The CLI builds one (GitHub Issues by default, the
+ *  local queue file under `--local-queue`) so this package never touches octokit itself (#1362). */
+export interface QueueReader {
+  /** Short source name shown in the Queue tab heading, e.g. "GitHub" or "local file". */
+  source: string;
+  /** One read. A thrown error is shown in the tab; the previous entries are kept. */
+  read: () => Promise<QueueSnapshot> | QueueSnapshot;
+  /** Poll interval; defaults to the TUI's file-poll cadence. GitHub-backed readers should pass a slower one. */
+  pollMs?: number;
+}
+
 export interface AppProps {
   eventsFile: string;
   repo?: string;
   follow?: typeof followEvents;
   stopFile?: string;
   pathExists?: (p: string) => boolean;
-  queueFile?: string;
-  queueProposedFile?: string;
+  queueReader?: QueueReader;
   costsFile?: string;
-  readQueueFn?: typeof readQueue;
   readCostsFn?: typeof readCostsFile;
   approvalsDir?: string;
   listPendingFn?: typeof listPendingApprovals;
@@ -80,10 +88,8 @@ export function App({
   follow = followEvents,
   stopFile,
   pathExists = existsSync,
-  queueFile,
-  queueProposedFile,
+  queueReader,
   costsFile,
-  readQueueFn = readQueue,
   readCostsFn = readCostsFile,
   approvalsDir,
   listPendingFn = listPendingApprovals,
@@ -140,12 +146,29 @@ export function App({
   }, [stopFile, pathExists]);
 
   useEffect(() => {
-    if (!queueFile) return;
-    const read = () => setQueueSnap(readQueueFn(queueFile, queueProposedFile));
-    read();
-    const interval = setInterval(read, POLL_MS);
-    return () => clearInterval(interval);
-  }, [queueFile, queueProposedFile, readQueueFn]);
+    if (!queueReader) return;
+    let cancelled = false;
+    let inFlight = false;
+    const read = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const snapshot = await queueReader.read();
+        if (!cancelled) setQueueSnap(snapshot);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (!cancelled) setQueueSnap((prev) => ({ ...prev, error: `queue lookup failed — ${message}` }));
+      } finally {
+        inFlight = false;
+      }
+    };
+    void read();
+    const interval = setInterval(() => void read(), queueReader.pollMs ?? POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [queueReader]);
 
   useEffect(() => {
     if (!costsFile) return;
@@ -379,7 +402,7 @@ export function App({
       )}
       <TabBar active={tab} />
       {tab === 'dashboard' && <DashboardPane />}
-      {tab === 'queue' && <QueueTab snapshot={queueSnap} lanes={state.lanes} />}
+      {tab === 'queue' && <QueueTab snapshot={queueSnap} lanes={state.lanes} source={queueReader?.source} />}
       {tab === 'costs' && <CostsTab costs={costsRead} selectedIndex={costsSelected} />}
       {tab === 'log' && <LogTab events={events} scroll={logScroll} height={logHeight} />}
       {tab === 'health' && (

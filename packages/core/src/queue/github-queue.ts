@@ -4,7 +4,7 @@ import { hostname } from 'node:os';
 
 import type { Octokit } from '@octokit/rest';
 
-import type { QueueEntry } from './index.js';
+import type { QueueEntry, QueueSnapshot, QueueSnapshotEntry } from './index.js';
 
 export const QUEUED_LABEL = 'factory:queued';
 export const IN_PROGRESS_LABEL = 'factory:in-progress';
@@ -87,6 +87,8 @@ export function queueLabelSpecs(lane: string, claimantId: string): QueueLabelSpe
 export interface QueueIssue {
   number: number;
   labels: string[];
+  /** Issue title; optional so existing fakes and callers that only care about labels keep working. */
+  title?: string;
 }
 
 /** A no-model classification made before a queue candidate is claimed. */
@@ -190,6 +192,57 @@ function orderedCandidates(lane: string, issues: QueueIssue[]): QueueIssue[] {
   return candidates.sort((a, b) => a.position - b.position).map(({ issue }) => issue);
 }
 
+/** Claim state of one GitHub-backed queue issue, read from its labels. */
+function queueIssueStatus(labels: readonly string[]): Pick<QueueSnapshotEntry, 'status' | 'claimant'> {
+  if (labels.includes(IN_PROGRESS_LABEL)) {
+    const claim = labels.find((name) => name.startsWith(CLAIMED_BY_LABEL_PREFIX));
+    return claim === undefined
+      ? { status: 'in-progress' }
+      : { status: 'in-progress', claimant: claim.slice(CLAIMED_BY_LABEL_PREFIX.length) };
+  }
+  if (labels.includes(PARKED_LABEL)) return { status: 'parked' };
+  return { status: 'queued' };
+}
+
+/** One read of the claimable GitHub-backed queue as a `QueueSnapshot` — the shape the TUI Queue
+ *  tab renders, so `factory tui` can show the same backlog `factory status` does (#1362).
+ *  One list call for `factory:queued` issues; lanes come from their `factory:lane:*` labels and
+ *  each lane is ordered exactly as `GithubQueue.list(lane)` orders it. Throws on the same
+ *  malformed-order-label states `list()` throws on; callers degrade to a message. */
+export async function readGithubQueueSnapshot(input: {
+  client: Pick<QueueGitHubClient, 'listOpenIssuesWithLabels'>;
+  owner: string;
+  repo: string;
+}): Promise<QueueSnapshot> {
+  const { client, owner, repo } = input;
+  const issues = await client.listOpenIssuesWithLabels({ owner, repo, labels: [QUEUED_LABEL] });
+
+  const byLane = new Map<string, QueueIssue[]>();
+  for (const issue of issues) {
+    for (const label of issue.labels) {
+      if (!label.startsWith(LANE_LABEL_PREFIX)) continue;
+      const slug = label.slice(LANE_LABEL_PREFIX.length);
+      if (slug === '') continue;
+      if (!byLane.has(slug)) byLane.set(slug, []);
+      byLane.get(slug)!.push(issue);
+    }
+  }
+
+  const entries: QueueSnapshotEntry[] = [];
+  for (const lane of [...byLane.keys()].sort()) {
+    for (const issue of orderedCandidates(lane, byLane.get(lane)!)) {
+      const status: Pick<QueueSnapshotEntry, 'status' | 'claimant'> = queueIssueStatus(issue.labels);
+      entries.push({
+        lane,
+        issue: issue.number,
+        ...(issue.title === undefined ? {} : { title: issue.title }),
+        ...status,
+      });
+    }
+  }
+  return { entries };
+}
+
 export function createOctokitQueueClient(octokit: Octokit): QueueGitHubClient {
   return {
     async listOpenIssuesWithLabels({ owner, repo, labels }) {
@@ -202,11 +255,12 @@ export function createOctokitQueueClient(octokit: Octokit): QueueGitHubClient {
       });
       return data
         .filter((issue: { pull_request?: unknown }) => !issue.pull_request)
-        .map((issue: { number: number; labels: Array<string | { name?: string }> }) => ({
+        .map((issue: { number: number; title?: string; labels: Array<string | { name?: string }> }) => ({
           number: issue.number,
           labels: (issue.labels ?? [])
             .map((label) => (typeof label === 'string' ? label : (label.name ?? '')))
             .filter((name) => name !== ''),
+          ...(typeof issue.title === 'string' ? { title: issue.title } : {}),
         }));
     },
     async getIssueLabels({ owner, repo, issue_number }) {

@@ -94,6 +94,7 @@ import {
   parkReasonFor,
   parseKpiHistory,
   parseQueue,
+  readQueue,
   partitionLocalQueueByActivity,
   phaseSnapshotFile,
   planPhase,
@@ -168,6 +169,7 @@ import {
   createLocalSmallDryRun,
   createOctokitGreenPrClient,
   createOctokitQueueClient,
+  readGithubQueueSnapshot,
   daemonRuntimePaths,
   DEFAULT_FACTORYD_PORT,
   defaultRegistryPath,
@@ -201,7 +203,7 @@ import {
   wrapCommandInSandbox,
   writePortFile,
 } from '@on-par/factory-core/internal';
-import { runTui } from '@on-par/factory-tui';
+import { type QueueReader, runTui } from '@on-par/factory-tui';
 import chalk from 'chalk';
 import { Command } from 'commander';
 import { cmdDaemonLogs, cmdDaemonStart, cmdDaemonStatus, cmdDaemonStop, DaemonCtlError } from './daemon.js';
@@ -1070,7 +1072,44 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
   }
 }
 
-async function cmdTui() {
+/** GitHub is polled far less often than local files: a queue changes on the order of minutes. */
+const TUI_GITHUB_QUEUE_POLL_MS = 30_000;
+
+/** The Queue tab's backlog source for `factory tui` (#1362). Mirrors `factory run`: GitHub Issues
+ *  by default, the local queue file only under `--local-queue`. Never throws — a missing repo or
+ *  token becomes a snapshot error the tab renders, so the TUI still starts. Octokit is built
+ *  once, lazily, and only on the GitHub path. */
+export function tuiQueueReader(input: {
+  localQueue: boolean;
+  queueFile: string;
+  queueProposedFile: string;
+  repo: string | undefined;
+  hasToken?: () => boolean;
+  octokit?: () => Octokit;
+}): QueueReader {
+  const { hasToken = hasGitHubToken, octokit = getOctokit } = input;
+  if (input.localQueue) {
+    return { source: 'local file', read: () => readQueue(input.queueFile, input.queueProposedFile) };
+  }
+  const unavailable = (error: string): QueueReader => ({
+    source: 'GitHub',
+    read: async () => ({ entries: [], error }),
+  });
+  if (input.repo === undefined) return unavailable('repo detection failed — run inside a GitHub-backed checkout');
+  if (!hasToken()) return unavailable('no GitHub token — run `gh auth login`');
+  const [owner, repoName] = input.repo.split('/');
+  let client: ReturnType<typeof createOctokitQueueClient> | undefined;
+  return {
+    source: 'GitHub',
+    pollMs: TUI_GITHUB_QUEUE_POLL_MS,
+    read: () => {
+      client ??= createOctokitQueueClient(octokit());
+      return readGithubQueueSnapshot({ client, owner, repo: repoName });
+    },
+  };
+}
+
+async function cmdTui(opts: { localQueue?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   let repo: string | undefined;
@@ -1102,8 +1141,12 @@ async function cmdTui() {
     eventsFile: paths.events,
     repo,
     stopFile: paths.stop,
-    queueFile: paths.queue,
-    queueProposedFile: paths.queueProposed,
+    queueReader: tuiQueueReader({
+      localQueue: opts.localQueue === true,
+      queueFile: paths.queue,
+      queueProposedFile: paths.queueProposed,
+      repo,
+    }),
     costsFile: paths.costs,
     approvalsDir: paths.approvals,
     steeringDir: paths.steering,
@@ -4150,7 +4193,11 @@ export async function main() {
 
   program.command('kpis').description('Compute factory health KPIs and record a trend snapshot').action(cmdKpis);
 
-  program.command('tui').description('Live read-only view of the current run (q to quit)').action(cmdTui);
+  program
+    .command('tui')
+    .description('Live read-only view of the current run (q to quit)')
+    .option('--local-queue', 'Read .factory/queue instead of claiming issues from GitHub Issues')
+    .action((opts: { localQueue?: boolean }) => cmdTui(opts));
 
   program
     .command('logs')

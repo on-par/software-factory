@@ -94,6 +94,7 @@ export type {
   ParsedQueue,
   QueueDiagnostic,
   QueueEntry,
+  QueueEntryStatus,
   QueueSnapshot,
   QueueSnapshotEntry,
   QueueValidationResult,

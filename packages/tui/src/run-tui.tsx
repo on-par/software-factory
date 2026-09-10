@@ -1,14 +1,13 @@
 import { render } from 'ink';
 
-import { App } from './components/App.js';
+import { App, type QueueReader } from './components/App.js';
 import { followPlain } from './fallback.js';
 
 export interface RunTuiOptions {
   eventsFile: string;
   repo?: string;
   stopFile?: string;
-  queueFile?: string;
-  queueProposedFile?: string;
+  queueReader?: QueueReader;
   costsFile?: string;
   approvalsDir?: string;
   steeringDir?: string;
@@ -36,8 +35,7 @@ export async function runTui(opts: RunTuiOptions): Promise<void> {
     eventsFile,
     repo,
     stopFile,
-    queueFile,
-    queueProposedFile,
+    queueReader,
     costsFile,
     approvalsDir,
     steeringDir,
@@ -59,8 +57,7 @@ export async function runTui(opts: RunTuiOptions): Promise<void> {
         eventsFile={eventsFile}
         repo={repo}
         stopFile={stopFile}
-        queueFile={queueFile}
-        queueProposedFile={queueProposedFile}
+        queueReader={queueReader}
         costsFile={costsFile}
         approvalsDir={approvalsDir}
         steeringDir={steeringDir}

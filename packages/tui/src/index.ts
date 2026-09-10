@@ -1,4 +1,4 @@
-export type { AppProps } from './components/App.js';
+export type { AppProps, QueueReader } from './components/App.js';
 export { App } from './components/App.js';
 export type { ApprovalPromptProps } from './components/ApprovalPrompt.js';
 export { ApprovalPrompt } from './components/ApprovalPrompt.js';

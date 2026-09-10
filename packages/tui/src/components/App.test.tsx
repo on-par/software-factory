@@ -2,7 +2,7 @@ import type { ApprovalRequest, CostsRead, EventKind, FactoryEvent, QueueSnapshot
 import { cleanup, render } from 'ink-testing-library';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { App } from './App.js';
+import { App, type QueueReader } from './App.js';
 
 afterEach(() => {
   cleanup();
@@ -178,10 +178,8 @@ describe('App', () => {
   it('shows Queue tab entries with titles joined from issue-title events', async () => {
     const fake = makeFakeFollow();
     const queueSnap: QueueSnapshot = { entries: [{ lane: 'app', issue: 296 }] };
-    const readQueueFn = vi.fn(() => queueSnap);
-    const { lastFrame, stdin } = render(
-      <App eventsFile="ignored" follow={fake.follow} queueFile="/repo/.factory/queue" readQueueFn={readQueueFn} />,
-    );
+    const queueReader: QueueReader = { source: 'local file', read: vi.fn(() => queueSnap) };
+    const { lastFrame, stdin } = render(<App eventsFile="ignored" follow={fake.follow} queueReader={queueReader} />);
 
     fake.push(ev('plan', 'Starting plan phase', '296'));
     fake.push(ev('issue-title', 'Fix the flaky test', '296'));
@@ -191,9 +189,60 @@ describe('App', () => {
     await flush();
 
     const frame = lastFrame() ?? '';
+    expect(frame).toContain('queue: local file');
     expect(frame).toContain('#296');
     expect(frame).toContain('running');
     expect(frame).toContain('Fix the flaky test');
+  });
+
+  it('renders an async GitHub-backed queue reader with its own titles and status (#1362)', async () => {
+    const fake = makeFakeFollow();
+    const queueReader: QueueReader = {
+      source: 'GitHub',
+      read: vi.fn(async () => ({
+        entries: [{ lane: 'cleanup', issue: 1362, title: 'Read the queue from GitHub', status: 'queued' as const }],
+      })),
+    };
+    const { lastFrame, stdin } = render(<App eventsFile="ignored" follow={fake.follow} queueReader={queueReader} />);
+    await flush();
+
+    stdin.write('2');
+    await flush();
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('queue: GitHub');
+    expect(frame).toContain('cleanup');
+    expect(frame).toContain('#1362');
+    expect(frame).toContain('queued');
+    expect(frame).toContain('Read the queue from GitHub');
+  });
+
+  it('keeps the last good entries and shows a lookup-failed line when the reader throws (#1362)', async () => {
+    const fake = makeFakeFollow();
+    let calls = 0;
+    const queueReader: QueueReader = {
+      source: 'GitHub',
+      pollMs: 10,
+      read: vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) return { entries: [{ lane: 'cleanup', issue: 1362, status: 'queued' as const }] };
+        throw new Error('GitHub API unavailable');
+      }),
+    };
+    const { lastFrame, stdin } = render(<App eventsFile="ignored" follow={fake.follow} queueReader={queueReader} />);
+    await flush();
+    stdin.write('2');
+    await flush();
+    expect(lastFrame()).toContain('#1362');
+    expect(lastFrame()).not.toContain('queue lookup failed');
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    await flush();
+
+    const frame = lastFrame() ?? '';
+    expect(calls).toBeGreaterThanOrEqual(2);
+    expect(frame).toContain('(queue lookup failed — GitHub API unavailable)');
+    expect(frame).toContain('#1362');
   });
 
   it('shows Costs tab totals and the skipped-line warning without crashing', async () => {
