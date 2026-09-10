@@ -129,6 +129,15 @@ export interface RunPorts {
   onDecomposed?: (childIssues: number[]) => void | Promise<void>;
   writeLocalRunReport?: (info: RunReportInfo) => Promise<string | undefined>;
   writeBenchmarkArtifacts?: (info: RunReportInfo) => Promise<void>;
+  /** Records the truthful current phase for downstream connectors (#1325) — called once
+   *  at each of the four PLAN/BUILD/CHECK/SHIP transitions. A rejection here is logged
+   *  and swallowed: this is an observability side channel, not a run invariant. */
+  recordPhase?: (phase: FailurePhase) => void | Promise<void>;
+  /** Heartbeat hook (#1326) forwarded to CHECK's CheckerContext — called around every
+   *  checker so the persisted run-phase snapshot's `lastActivityAt` advances during a
+   *  long CHECK stage, not just at the four phase transitions `recordPhase` covers. A
+   *  rejection is logged and swallowed the same way (observability, not an invariant). */
+  onActivity?: () => void | Promise<void>;
   /** Phase implementations. Default to the real PLAN/BUILD/CHECK/SHIP phases; overridable
    *  so callers (notably the CLI's test double, per ADR-0004) can stub the phases and drive
    *  the real runIssue sequencing/breaker/budget/constitution logic instead of reimplementing it. */
@@ -162,6 +171,15 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
   let checkSummary: CheckSummary | undefined;
   let failurePhase: FailurePhase = 'plan';
   let runStartDiffBase: string | undefined;
+
+  const setPhase = async (phase: FailurePhase): Promise<void> => {
+    failurePhase = phase;
+    try {
+      await ports.recordPhase?.(phase);
+    } catch (err) {
+      log('phase_snapshot_failed', `phase snapshot write failed for '${phase}': ${errorMessage(err)}`);
+    }
+  };
 
   const release = async (): Promise<void> => {
     if (released) return;
@@ -314,6 +332,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     runStartDiffBase = request.localOnly ? await captureDiffBase(ports.workspace.path) : undefined;
 
     // PLAN
+    await setPhase('plan');
     const planModel = await preferFallbackWhenProviderIsOpen(
       request.modelPins.plan,
       request.modelPins.planFallback,
@@ -361,7 +380,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     if (planBudget) return planBudget;
 
     // BUILD
-    failurePhase = 'build';
+    await setPhase('build');
     let buildSteering: ConsumedSteering | undefined;
     if (request.options.interactive) {
       buildSteering = ports.drainSteering?.();
@@ -454,7 +473,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     if (buildBudget) return buildBudget;
 
     // CHECK
-    failurePhase = 'check';
+    await setPhase('check');
     const priorFailureSignature = await ports.reworkHistory?.priorSignature(request.issue);
     const check = await checkPhase({
       issue: request.issue,
@@ -477,6 +496,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       reworkRoute: build.route,
       reworkModel: build.model,
       laneId: request.lane,
+      onActivity: ports.onActivity,
     });
     checkSummary = check.summary;
     reworkRounds = check.reworkRounds;
@@ -523,7 +543,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     }
 
     // SHIP
-    failurePhase = 'ship';
+    await setPhase('ship');
     const ship = await shipPhase({
       issue: request.issue,
       repo: request.repo,

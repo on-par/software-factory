@@ -2,12 +2,14 @@ import { Box, Text } from 'ink';
 import type { JSX } from 'react';
 
 import { laneElapsedMs, type LaneState } from '../dashboard.js';
+import { sanitizeTerminalText } from '../text.js';
 import { formatDuration, spinnerFrame } from './PhaseRow.js';
 
 const TITLE_MAX_LENGTH = 32;
 
 function truncate(s: string, max: number): string {
-  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+  const clean = sanitizeTerminalText(s);
+  return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
 }
 
 function StatusCell({

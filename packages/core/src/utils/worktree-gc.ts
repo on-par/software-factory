@@ -2,20 +2,21 @@
 
 import { exec as execCb } from 'node:child_process';
 import type { Dirent } from 'node:fs';
-import { existsSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
 
 import type { EventKind } from '../events/kinds.js';
-import { PARKED_LABEL } from '../queue/github-queue.js';
+import { CLAIMED_BY_LABEL_PREFIX, PARKED_LABEL } from '../queue/github-queue.js';
 import { branchPrefixSlug, shellEscape } from './index.js';
 import { removeMicroVm, type WorktreeSandbox } from './microvm.js';
 
 const exec = promisify(execCb);
 
-export type GcReason = 'merged' | 'remote-gone' | 'ttl-expired' | 'issue-closed' | 'issue-parked';
+export type GcReason =
+  'merged' | 'remote-gone' | 'ttl-expired' | 'issue-closed' | 'issue-parked' | 'issue-not-found' | 'no-active-claim';
 
 /** GitHub's verdict on a candidate branch's PR(s), read via pulls.list (state=all,
  *  head=owner:branch). `null` means "no verdict" (no client/repo, or the query failed) —
@@ -43,12 +44,60 @@ export interface GcCandidate {
    *  branch is live, or the tip is an ancestor of origin/main). An unpushed parked attempt's
    *  branch stays as its only handle. */
   branchReapable?: boolean;
+  /** `'remove'` for every hard-evidence reason (merge/remote/ttl/issue-disposition proof).
+   *  `'quarantine'` for the two heuristic reasons (`issue-not-found` / `no-active-claim`, #1355)
+   *  that carry no merge/ancestry proof: the worktree is relocated under the quarantine
+   *  directory instead of deleted, and its branch is never force-deleted (see ADR, this PR). */
+  action: 'remove' | 'quarantine';
+  /** Set only in real mode, only for a `'quarantine'` action, only once the move succeeds — the
+   *  path the worktree was relocated to. Absent for `'remove'`, for dry-run, and when the move
+   *  itself failed (the worktree is then left in place; see the `warn` log for the failure). */
+  quarantinedTo?: string;
+}
+
+/** A factory-owned worktree whose lane-branch issue number could not be confirmed to exist on
+ *  GitHub. Dry-run surfaces every such candidate here regardless of its other GcReason evidence
+ *  (see ADR-0088); real mode instead quarantines it via `removed`/`GcReason.issue-not-found`
+ *  (only when no hard-evidence reason already claimed it — see ADR, this PR). */
+export interface Issue404Candidate {
+  path: string;
+  branch: string | null;
+  issue: number;
+}
+
+/** A factory-owned worktree whose branch's PR is merged or closed but whose owning issue has no
+ *  active `factory:claimed-by:*` label. Dry-run surfaces every such candidate here regardless of
+ *  its other GcReason evidence; real mode instead quarantines it via
+ *  `removed`/`GcReason.no-active-claim` (only when no hard-evidence reason already claimed it —
+ *  see ADR, this PR). */
+export interface NoActiveClaimCandidate {
+  path: string;
+  branch: string | null;
+  issue: number;
+  prState: 'merged' | 'closed';
 }
 
 export interface GcReport {
   removed: GcCandidate[];
   kept: number;
   dryRun: boolean;
+  /** Dry-run only: factory-owned candidates whose lane issue number 404'd on GitHub — a strong
+   *  signal the worktree was created for an issue that never existed. Never read by, or written
+   *  from, GcReason/BRANCH_REAPABLE_REASONS. Always [] outside dry-run — real mode's equivalent
+   *  signal shows up as a `removed` entry with `reason: 'issue-not-found'` instead. */
+  issueNotFound: Issue404Candidate[];
+  /** Dry-run only: factory-owned candidates whose lane issue lookup threw a non-404 error (rate
+   *  limit, network failure) — "couldn't check," never conflated with issueNotFound's "confirmed
+   *  gone." Always [] outside dry-run; real mode never acts on an unverifiable lookup (fail-safe:
+   *  keeps the worktree). */
+  issueUnverifiable: Issue404Candidate[];
+  /** Dry-run only: factory-owned candidates whose branch's PR is merged or closed and whose
+   *  owning issue carries no active `factory:claimed-by:*` label — the lane finished (or was
+   *  abandoned) without releasing its worktree. Fail-safe: any doubt (no client/repo, lookup
+   *  error, unresolved issue number) means "not flagged." Never read by, or written from,
+   *  GcReason/BRANCH_REAPABLE_REASONS. Always [] outside dry-run — real mode's equivalent signal
+   *  shows up as a `removed` entry with `reason: 'no-active-claim'` instead. */
+  noActiveClaim: NoActiveClaimCandidate[];
 }
 
 export interface SweepDeps {
@@ -62,7 +111,46 @@ export interface SweepDeps {
    *  today's config, but removeMicroVm is a no-op unless `runtime === 'docker-sandbox'` and the
    *  named VM exists, so passing today's descriptor for every candidate is safe and idempotent. */
   sandbox?: WorktreeSandbox;
+  /** Dedup tracker for resolveIssueDisposition's lookup-failure warning (see IssueWarnDedup).
+   *  Defaults to a module-level singleton shared across every sweep in the process; tests should
+   *  inject a fresh instance to avoid bleeding suppression state across cases. */
+  issueWarnDedup?: IssueWarnDedup;
 }
+
+/** Dedupes resolveIssueDisposition's lookup-failure warning across repeated sweeps — the factory
+ *  loop calls sweepWorktrees every iteration, and a worktree tied to a nonexistent issue number
+ *  fails that lookup on every one of them. The first failure for a given issue since the last
+ *  reconcile-clear warns in full; every following one folds into a one-line "suppressed N"
+ *  summary instead of repeating the same text. `reconcile()` drops an issue's tracking once it's
+ *  no longer among the sweep's candidates, so a later re-appearance (or a different worktree
+ *  reusing the number) warns in full again. Keyed by issue number, not by worktree path, since
+ *  the failing lookup is per-issue (see ADR, this PR). */
+export class IssueWarnDedup {
+  private readonly counts = new Map<number, number>();
+
+  /** Records one occurrence for `issue`. Returns true the first time since the last
+   *  reconcile-clear (caller should log the full warning), false thereafter. */
+  record(issue: number): boolean {
+    const count = (this.counts.get(issue) ?? 0) + 1;
+    this.counts.set(issue, count);
+    return count === 1;
+  }
+
+  /** Occurrences suppressed for `issue` since its last full warning (0 before the second one). */
+  suppressedCount(issue: number): number {
+    return Math.max(0, (this.counts.get(issue) ?? 0) - 1);
+  }
+
+  /** Drops tracking for every issue not in `activeIssues` — call once per sweep with the issue
+   *  numbers still present among that sweep's candidates. */
+  reconcile(activeIssues: ReadonlySet<number>): void {
+    for (const issue of this.counts.keys()) {
+      if (!activeIssues.has(issue)) this.counts.delete(issue);
+    }
+  }
+}
+
+const defaultIssueWarnDedup = new IssueWarnDedup();
 
 const CREDENTIAL_BASENAMES = new Set(['.git-credentials', '.npmrc']);
 
@@ -73,6 +161,25 @@ const CREDENTIAL_BASENAMES = new Set(['.git-credentials', '.npmrc']);
  *  only when the candidate's per-candidate `branchReapable` flag proved remote evidence at
  *  decision time. See ADR (this PR). */
 const BRANCH_REAPABLE_REASONS: ReadonlySet<GcReason> = new Set<GcReason>(['merged', 'remote-gone']);
+
+/** Reasons whose real-mode action is `'quarantine'` rather than `'remove'` — the two heuristic
+ *  signals (#1355) that carry no merge/ancestry proof, unlike every other `GcReason`. */
+const QUARANTINE_REASONS: ReadonlySet<GcReason> = new Set<GcReason>(['issue-not-found', 'no-active-claim']);
+
+/** Where a quarantined worktree lands: `<repoRoot>/.factory/state/quarantine/`, matching every
+ *  other runtime path's home under `.factory/state/` (see `getFactoryPaths`). */
+function quarantineRoot(repoRoot: string): string {
+  return join(repoRoot, '.factory', 'state', 'quarantine');
+}
+
+/** The destination for a quarantined worktree: its own basename under `quarantineDir`, unless
+ *  that name is already occupied (e.g. a prior quarantine nobody cleared), in which case a
+ *  timestamp suffix disambiguates rather than overwriting or failing. */
+function quarantineDestination(quarantineDir: string, worktreePath: string): string {
+  const base = basename(worktreePath);
+  const dest = join(quarantineDir, base);
+  return existsSync(dest) ? join(quarantineDir, `${base}-${Date.now()}`) : dest;
+}
 
 export function parseWorktreeList(porcelain: string): WorktreeListEntry[] {
   const entries: WorktreeListEntry[] = [];
@@ -265,6 +372,7 @@ async function resolveIssueDisposition(
   repo: string | undefined,
   issue: number,
   log: (type: EventKind, msg: string) => void,
+  issueWarnDedup: IssueWarnDedup,
 ): Promise<IssueDisposition | null> {
   if (!octokit || !repo) return null;
   const [owner, repoName] = repo.split('/');
@@ -275,11 +383,67 @@ async function resolveIssueDisposition(
     if (labels.includes(PARKED_LABEL)) return 'reap-parked';
     return 'keep';
   } catch (err: any) {
+    if (issueWarnDedup.record(issue)) {
+      log(
+        'warn',
+        `worktree-gc: GitHub issue query failed for #${issue} (${err?.message ?? String(err)}) — using PR/local evidence only`,
+      );
+    } else {
+      log(
+        'warn',
+        `worktree-gc: GitHub issue query failed for #${issue} — suppressed ${issueWarnDedup.suppressedCount(issue)} repeated warning(s) (using PR/local evidence only)`,
+      );
+    }
+    return null;
+  }
+}
+
+/** The lane issue's existence on GitHub, checked only for worktree-gc's dry-run report.
+ *  'not-configured' (no client/repo) and 'error' (the call threw anything but a 404) both mean
+ *  "no verdict" but are reported differently: 'error' surfaces as unverifiable so a rate-limit
+ *  or network blip is never mistaken for a confirmed-gone issue. */
+async function resolveIssueExistence(
+  octokit: SweepDeps['octokit'],
+  repo: string | undefined,
+  issue: number,
+  log: (type: EventKind, msg: string) => void,
+): Promise<'exists' | 'not-found' | 'error' | 'not-configured'> {
+  if (!octokit || !repo) return 'not-configured';
+  const [owner, repoName] = repo.split('/');
+  try {
+    await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issue });
+    return 'exists';
+  } catch (err: any) {
+    if (err?.status === 404) return 'not-found';
     log(
       'warn',
-      `worktree-gc: GitHub issue query failed for #${issue} (${err?.message ?? String(err)}) — using PR/local evidence only`,
+      `worktree-gc: GitHub issue existence check failed for #${issue} (${err?.message ?? String(err)}) — reporting as unverifiable`,
     );
-    return null;
+    return 'error';
+  }
+}
+
+/** Whether the lane issue carries an active `factory:claimed-by:*` label, checked only for
+ *  worktree-gc's dry-run report. Fail-safe: no client/repo, or a lookup error, both resolve to
+ *  'unknown' — never conflated with a confirmed 'unclaimed' verdict. */
+async function resolveActiveClaim(
+  octokit: SweepDeps['octokit'],
+  repo: string | undefined,
+  issue: number,
+  log: (type: EventKind, msg: string) => void,
+): Promise<'claimed' | 'unclaimed' | 'unknown'> {
+  if (!octokit || !repo) return 'unknown';
+  const [owner, repoName] = repo.split('/');
+  try {
+    const { data } = await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issue });
+    const labels = (data.labels ?? []).map((label: any) => (typeof label === 'string' ? label : (label?.name ?? '')));
+    return labels.some((name: string) => name.startsWith(CLAIMED_BY_LABEL_PREFIX)) ? 'claimed' : 'unclaimed';
+  } catch (err: any) {
+    log(
+      'warn',
+      `worktree-gc: GitHub claim-label check failed for #${issue} (${err?.message ?? String(err)}) — reporting as unknown (not flagged)`,
+    );
+    return 'unknown';
   }
 }
 
@@ -298,7 +462,14 @@ export async function sweepWorktrees(
   opts: { repoRoot: string; ttlDays: number; dryRun?: boolean; repo?: string; branchPrefix?: string },
   deps: SweepDeps = {},
 ): Promise<GcReport> {
-  const { runCommand = defaultRunCommand, now = () => Date.now(), log = () => {}, octokit, sandbox } = deps;
+  const {
+    runCommand = defaultRunCommand,
+    now = () => Date.now(),
+    log = () => {},
+    octokit,
+    sandbox,
+    issueWarnDedup = defaultIssueWarnDedup,
+  } = deps;
   const { repoRoot, ttlDays, dryRun = false, repo } = opts;
 
   const { stdout } = await runCommand('git worktree list --porcelain', { cwd: repoRoot });
@@ -321,6 +492,16 @@ export async function sweepWorktrees(
     return base.startsWith(`${repoBase}-`) && entry.branch !== null && lanePattern.test(entry.branch);
   });
 
+  // Reconcile the issue-warn dedup tracker to this sweep's live candidates before resolving any
+  // disposition, so a worktree that's gone (or an issue number no longer in play) drops its
+  // suppression state and a later re-appearance warns in full again (see ADR, this PR).
+  const activeIssueNumbers = new Set<number>();
+  for (const entry of candidates) {
+    const issueNumber = laneIssueNumber(entry, lanePattern);
+    if (issueNumber !== null) activeIssueNumbers.add(issueNumber);
+  }
+  issueWarnDedup.reconcile(activeIssueNumbers);
+
   const removed: GcCandidate[] = [];
   let kept = 0;
 
@@ -342,10 +523,33 @@ export async function sweepWorktrees(
   const dispositionFor = (issue: number): Promise<IssueDisposition | null> => {
     let disposition = dispositionCache.get(issue);
     if (!disposition) {
-      disposition = resolveIssueDisposition(octokit, repo, issue, log);
+      disposition = resolveIssueDisposition(octokit, repo, issue, log, issueWarnDedup);
       dispositionCache.set(issue, disposition);
     }
     return disposition;
+  };
+
+  // Per-issue existence/claim verdicts (#1352/#1353), memoized across the sweep and shared by
+  // both the real-mode quarantine tier below and the dry-run-only diagnostic block further down
+  // — only one of the two ever runs per call, so sharing the cache is safe.
+  const issueExistenceCache = new Map<number, Promise<'exists' | 'not-found' | 'error' | 'not-configured'>>();
+  const issueExistenceFor = (issue: number): Promise<'exists' | 'not-found' | 'error' | 'not-configured'> => {
+    let p = issueExistenceCache.get(issue);
+    if (!p) {
+      p = resolveIssueExistence(octokit, repo, issue, log);
+      issueExistenceCache.set(issue, p);
+    }
+    return p;
+  };
+
+  const claimCache = new Map<number, Promise<'claimed' | 'unclaimed' | 'unknown'>>();
+  const claimFor = (issue: number): Promise<'claimed' | 'unclaimed' | 'unknown'> => {
+    let p = claimCache.get(issue);
+    if (!p) {
+      p = resolveActiveClaim(octokit, repo, issue, log);
+      claimCache.set(issue, p);
+    }
+    return p;
   };
 
   for (const entry of candidates) {
@@ -453,6 +657,34 @@ export async function sweepWorktrees(
       }
     }
 
+    // Real-mode-only heuristic quarantine tier (#1355): issue-not-found / no-active-claim carry
+    // no merge/ancestry proof, unlike every reason above, so they never ran outside dry-run's
+    // report-only diagnostics (ADR-0088/0089) until now. Real mode acts on them here — but by
+    // quarantining (see QUARANTINE_REASONS), never by hard-deleting — while dry-run keeps
+    // reporting them for every candidate via the unconditional block below, regardless of reason.
+    // Gated on cleanliness like every other acting tier above (a dirty worktree is live work,
+    // never touched on a heuristic signal alone) and never overriding a live open PR — the same
+    // "never remove" rule the hard-evidence tier above already applies to it.
+    const openPr = entry.branch !== null && (await prStateFor(entry.branch)) === 'open';
+    if (!reason && !dryRun && !openPr && (await isWorktreeClean(runCommand, entry.path))) {
+      const issueNumber = laneIssueNumber(entry, lanePattern);
+      if (issueNumber !== null) {
+        const existence = await issueExistenceFor(issueNumber);
+        if (existence === 'not-found') {
+          reason = 'issue-not-found';
+        }
+      }
+      if (!reason && issueNumber !== null && entry.branch) {
+        const prState = await prStateFor(entry.branch);
+        if (prState === 'merged' || prState === 'closed') {
+          const claim = await claimFor(issueNumber);
+          if (claim === 'unclaimed') {
+            reason = 'no-active-claim';
+          }
+        }
+      }
+    }
+
     if (!reason) {
       kept++;
       continue;
@@ -466,11 +698,38 @@ export async function sweepWorktrees(
       scrubbedFiles: [],
       branchDeleted: false,
       branchReapable,
+      action: QUARANTINE_REASONS.has(reason) ? 'quarantine' : 'remove',
     });
   }
 
   if (dryRun) {
-    return { removed, kept, dryRun: true };
+    const issueNotFound: Issue404Candidate[] = [];
+    const issueUnverifiable: Issue404Candidate[] = [];
+    for (const entry of candidates) {
+      const issueNumber = laneIssueNumber(entry, lanePattern);
+      if (issueNumber === null) continue;
+      const existence = await issueExistenceFor(issueNumber);
+      if (existence === 'not-found') {
+        issueNotFound.push({ path: entry.path, branch: entry.branch, issue: issueNumber });
+      } else if (existence === 'error') {
+        issueUnverifiable.push({ path: entry.path, branch: entry.branch, issue: issueNumber });
+      }
+    }
+
+    const noActiveClaim: NoActiveClaimCandidate[] = [];
+    for (const entry of candidates) {
+      if (!entry.branch) continue;
+      const prState = await prStateFor(entry.branch);
+      if (prState !== 'merged' && prState !== 'closed') continue;
+      const issueNumber = laneIssueNumber(entry, lanePattern);
+      if (issueNumber === null) continue;
+      const claim = await claimFor(issueNumber);
+      if (claim === 'unclaimed') {
+        noActiveClaim.push({ path: entry.path, branch: entry.branch, issue: issueNumber, prState });
+      }
+    }
+
+    return { removed, kept, dryRun: true, issueNotFound, issueUnverifiable, noActiveClaim };
   }
 
   for (const candidate of removed) {
@@ -488,12 +747,41 @@ export async function sweepWorktrees(
       await removeMicroVm({ ...sandbox, worktreePath: candidate.path, log });
     }
 
+    if (candidate.action === 'quarantine') {
+      const quarantineDir = quarantineRoot(repoRoot);
+      const dest = quarantineDestination(quarantineDir, candidate.path);
+      try {
+        mkdirSync(quarantineDir, { recursive: true });
+        await runCommand(`git worktree move ${shellEscape(candidate.path)} ${shellEscape(dest)}`, { cwd: repoRoot });
+        candidate.quarantinedTo = dest;
+        log('worktree-gc', `quarantined ${candidate.path} to ${dest} — ${candidate.reason}`);
+      } catch (err: any) {
+        log(
+          'warn',
+          `git worktree move failed for ${candidate.path} (${err?.message ?? String(err)}) — falling back to a manual move`,
+        );
+        try {
+          renameSync(candidate.path, dest);
+          candidate.quarantinedTo = dest;
+          log('worktree-gc', `quarantined ${candidate.path} to ${dest} via manual move — ${candidate.reason}`);
+        } catch (renameErr: any) {
+          log(
+            'warn',
+            `manual move fallback failed for ${candidate.path}: ${renameErr?.message ?? String(renameErr)} — worktree left in place`,
+          );
+        }
+      }
+      continue;
+    }
+
     try {
       await runCommand(`git worktree remove --force ${shellEscape(candidate.path)}`, { cwd: repoRoot });
+      log('worktree-gc', `removed ${candidate.path} — ${candidate.reason}`);
     } catch (err: any) {
       log('warn', `git worktree remove failed for ${candidate.path}: ${err?.message ?? String(err)}`);
       try {
         rmSync(candidate.path, { recursive: true, force: true });
+        log('worktree-gc', `removed ${candidate.path} via rmSync fallback — ${candidate.reason}`);
       } catch (rmErr: any) {
         log('warn', `rmSync fallback failed for ${candidate.path}: ${rmErr?.message ?? String(rmErr)}`);
       }
@@ -506,7 +794,7 @@ export async function sweepWorktrees(
 
   await deleteReapedBranches(removed, repoRoot, runCommand, log);
 
-  return { removed, kept, dryRun: false };
+  return { removed, kept, dryRun: false, issueNotFound: [], issueUnverifiable: [], noActiveClaim: [] };
 }
 
 async function deleteReapedBranches(
@@ -554,10 +842,38 @@ export function formatGcReport(report: GcReport): string {
     if (candidate.branchDeleted && candidate.branch !== null) {
       line += `, deleted branch ${candidate.branch}`;
     }
+    if (candidate.action === 'quarantine') {
+      line += candidate.quarantinedTo ? `, quarantined to ${candidate.quarantinedTo}` : ', quarantined';
+    }
     lines.push(line);
   }
 
-  lines.push(`${verb} ${report.removed.length} worktree(s), kept ${report.kept}`);
+  const removedCount = report.removed.filter((c) => c.action !== 'quarantine').length;
+  const quarantinedCount = report.removed.length - removedCount;
+  lines.push(
+    quarantinedCount > 0
+      ? `${verb} ${removedCount} worktree(s), quarantined ${quarantinedCount}, kept ${report.kept}`
+      : `${verb} ${removedCount} worktree(s), kept ${report.kept}`,
+  );
+
+  if (report.issueNotFound.length > 0) {
+    lines.push(`${report.issueNotFound.length} worktree(s) flagged — owning issue not found (404):`);
+    for (const c of report.issueNotFound) {
+      lines.push(`  ${c.path} (${c.branch ?? 'detached'}) — issue #${c.issue} not found`);
+    }
+  }
+  if (report.issueUnverifiable.length > 0) {
+    lines.push(`${report.issueUnverifiable.length} worktree(s) unverifiable — GitHub issue lookup failed:`);
+    for (const c of report.issueUnverifiable) {
+      lines.push(`  ${c.path} (${c.branch ?? 'detached'}) — issue #${c.issue} unverifiable`);
+    }
+  }
+  if (report.noActiveClaim.length > 0) {
+    lines.push(`${report.noActiveClaim.length} worktree(s) flagged — merged/closed PR with no active claim:`);
+    for (const c of report.noActiveClaim) {
+      lines.push(`  ${c.path} (${c.branch ?? 'detached'}) — issue #${c.issue} ${c.prState}, no active claim`);
+    }
+  }
 
   return lines.join('\n');
 }

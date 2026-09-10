@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   findCredentialFiles,
   formatGcReport,
+  IssueWarnDedup,
   parseWorktreeList,
   scrubFile,
   sweepWorktrees,
@@ -974,7 +975,12 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const wtName = `${basename(root)}-factory-ship-it-24`;
     const wt = makeWorktree(wtName);
 
-    const { octokit } = fakeOctokit(async () => ({ data: [{ number: 1, state: 'closed', merged_at: null }] }));
+    // An active claim label neutralizes the #1355 no-active-claim quarantine tier below, so this
+    // fixture isolates exactly what it's named for: the PR-state/local-evidence chain alone.
+    const { octokit } = fakeOctokit(
+      async () => ({ data: [{ number: 1, state: 'closed', merged_at: null }] }),
+      () => ({ data: { state: 'open', labels: ['factory:claimed-by:lane-24'] } }),
+    );
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
@@ -997,6 +1003,43 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     expect(report.removed).toHaveLength(0);
     expect(report.kept).toBe(1);
     expect(existsSync(wt)).toBe(true);
+  });
+
+  it('quarantines (never removes) a closed-not-merged, unclaimed-issue worktree even with a live remote branch', async () => {
+    const { repoRoot: root } = setup();
+    const wtName = `${basename(root)}-factory-ship-it-200`;
+    const wt = makeWorktree(wtName);
+
+    // Same PR/remote shape as the 'kept' case above, but no active claim label — the lane
+    // finished (or was abandoned) per GitHub, so #1355's heuristic tier now quarantines it.
+    const { octokit } = fakeOctokit(async () => ({ data: [{ number: 1, state: 'closed', merged_at: null }] }));
+    const commands: string[] = [];
+    const runCommand = async (cmd: string) => {
+      commands.push(cmd);
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/200-live\n\n`,
+        };
+      }
+      if (cmd.startsWith('git merge-base --is-ancestor')) {
+        throw new Error('exit 1');
+      }
+      if (cmd.startsWith('git ls-remote')) {
+        return { stdout: 'xxx\trefs/heads/ship-it/200-live\n' }; // live upstream
+      }
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees(
+      { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
+      { runCommand, octokit },
+    );
+    expect(report.removed).toHaveLength(1);
+    expect(report.removed[0].reason).toBe('no-active-claim');
+    expect(report.removed[0].action).toBe('quarantine');
+    expect(commands.some((c) => c.includes('worktree remove'))).toBe(false);
+    expect(commands.some((c) => c.includes('branch -D'))).toBe(false);
+    expect(commands.some((c) => c.includes('worktree move') && c.includes(wt))).toBe(true);
   });
 
   it('removes a closed-not-merged PR worktree whose HEAD is an ancestor of origin/main', async () => {
@@ -1463,6 +1506,156 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       expect(logs.some(([type, msg]) => type === 'warn' && /issue query failed for #45/.test(msg))).toBe(true);
     });
 
+    describe('issue-query-failure warn dedup (#1354)', () => {
+      it('suppresses the repeated warning across loop iterations, with a one-line count summary', async () => {
+        const { repoRoot: root } = setup();
+        const wt = makeWorktree(`${basename(root)}-factory-ship-it-9678562`);
+
+        const { octokit } = fakeOctokit(
+          () => ({ data: [] }),
+          () => {
+            throw Object.assign(new Error('Not Found'), { status: 404 });
+          },
+        );
+        const runCommand = async (cmd: string) => {
+          if (cmd === 'git worktree list --porcelain') {
+            return { stdout: laneListing(root, wt, 'ship-it/9678562-ghost') };
+          }
+          return { stdout: '' };
+        };
+        const issueWarnDedup = new IssueWarnDedup();
+        const logsFor = async () => {
+          const logs: Array<[string, string]> = [];
+          await sweepWorktrees(
+            { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
+            { runCommand, octokit, issueWarnDedup, log: (type, msg) => logs.push([type, msg]) },
+          );
+          return logs.filter(([type]) => type === 'warn');
+        };
+
+        const first = await logsFor();
+        expect(first.some(([, msg]) => /issue query failed for #9678562 \(Not Found\)/.test(msg))).toBe(true);
+
+        const second = await logsFor();
+        expect(second.some(([, msg]) => /issue query failed for #9678562 \(Not Found\)/.test(msg))).toBe(false);
+        expect(
+          second.some(([, msg]) => /issue query failed for #9678562 — suppressed 1 repeated warning/.test(msg)),
+        ).toBe(true);
+
+        const third = await logsFor();
+        expect(third.some(([, msg]) => /suppressed 2 repeated warning/.test(msg))).toBe(true);
+      });
+
+      it('still warns in full for a different failing issue after another is already suppressed', async () => {
+        const { repoRoot: root } = setup();
+        const wtA = makeWorktree(`${basename(root)}-factory-ship-it-9678562`);
+        const wtB = makeWorktree(`${basename(root)}-factory-ship-it-9872774`);
+
+        const { octokit } = fakeOctokit(
+          () => ({ data: [] }),
+          () => {
+            throw Object.assign(new Error('Not Found'), { status: 404 });
+          },
+        );
+        const runCommand = async (cmd: string) => {
+          if (cmd === 'git worktree list --porcelain') {
+            return {
+              stdout:
+                `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\n` +
+                `worktree ${wtA}\nHEAD bbb\nbranch refs/heads/ship-it/9678562-ghost\n\n`,
+            };
+          }
+          return { stdout: '' };
+        };
+        const issueWarnDedup = new IssueWarnDedup();
+        await sweepWorktrees(
+          { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
+          { runCommand, octokit, issueWarnDedup },
+        );
+
+        // A new sweep where issue 9678562 is still present (now suppressed) and a fresh
+        // nonexistent-issue worktree (9872774) appears for the first time.
+        const bothListing = async (cmd: string) => {
+          if (cmd === 'git worktree list --porcelain') {
+            return {
+              stdout:
+                `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\n` +
+                `worktree ${wtA}\nHEAD bbb\nbranch refs/heads/ship-it/9678562-ghost\n\n` +
+                `worktree ${wtB}\nHEAD ccc\nbranch refs/heads/ship-it/9872774-ghost\n\n`,
+            };
+          }
+          return { stdout: '' };
+        };
+        const logs: Array<[string, string]> = [];
+        await sweepWorktrees(
+          { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
+          { runCommand: bothListing, octokit, issueWarnDedup, log: (type, msg) => logs.push([type, msg]) },
+        );
+
+        expect(logs.some(([type, msg]) => type === 'warn' && /suppressed 1 repeated warning.*#9678562/.test(msg))).toBe(
+          false,
+        );
+        expect(
+          logs.some(([type, msg]) => type === 'warn' && /#9678562 — suppressed 1 repeated warning/.test(msg)),
+        ).toBe(true);
+        expect(
+          logs.some(([type, msg]) => type === 'warn' && /issue query failed for #9872774 \(Not Found\)/.test(msg)),
+        ).toBe(true);
+      });
+
+      it('clears suppression once the worktree is gone, so a later reappearance warns in full again', async () => {
+        const { repoRoot: root } = setup();
+        const wt = makeWorktree(`${basename(root)}-factory-ship-it-9678562`);
+
+        const { octokit } = fakeOctokit(
+          () => ({ data: [] }),
+          () => {
+            throw Object.assign(new Error('Not Found'), { status: 404 });
+          },
+        );
+        const withWorktree = async (cmd: string) => {
+          if (cmd === 'git worktree list --porcelain') {
+            return { stdout: laneListing(root, wt, 'ship-it/9678562-ghost') };
+          }
+          return { stdout: '' };
+        };
+        const withoutWorktree = async (cmd: string) => {
+          if (cmd === 'git worktree list --porcelain') {
+            return { stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\n` };
+          }
+          return { stdout: '' };
+        };
+        const issueWarnDedup = new IssueWarnDedup();
+
+        await sweepWorktrees(
+          { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
+          { runCommand: withWorktree, octokit, issueWarnDedup },
+        );
+        await sweepWorktrees(
+          { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
+          { runCommand: withoutWorktree, octokit, issueWarnDedup },
+        );
+
+        const wt2 = makeWorktree(`${basename(root)}-factory-ship-it-9678562-b`);
+        const reappeared = async (cmd: string) => {
+          if (cmd === 'git worktree list --porcelain') {
+            return { stdout: laneListing(root, wt2, 'ship-it/9678562-ghost') };
+          }
+          return { stdout: '' };
+        };
+        const logs: Array<[string, string]> = [];
+        await sweepWorktrees(
+          { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
+          { runCommand: reappeared, octokit, issueWarnDedup, log: (type, msg) => logs.push([type, msg]) },
+        );
+
+        expect(
+          logs.some(([type, msg]) => type === 'warn' && /issue query failed for #9678562 \(Not Found\)/.test(msg)),
+        ).toBe(true);
+        expect(logs.some(([, msg]) => /suppressed/.test(msg))).toBe(false);
+      });
+    });
+
     it('memoizes the issue probe across two worktrees of the same issue', async () => {
       const { repoRoot: root } = setup();
       const wtA = makeWorktree(`${basename(root)}-factory-ship-it-46`);
@@ -1516,6 +1709,323 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       expect(issuesGet).toHaveBeenCalledWith({ owner: 'owner', repo: 'example-app', issue_number: 47 });
     });
   });
+
+  describe('issue existence check (#1352)', () => {
+    function laneListing(root: string, wt: string, branch: string): string {
+      return `worktree ${root}\nHEAD bbb\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/${branch}\n\n`;
+    }
+
+    function noOtherReasonRunCommand(root: string, wt: string, branch: string) {
+      const commands: string[] = [];
+      const runCommand = async (cmd: string) => {
+        commands.push(cmd);
+        if (cmd === 'git worktree list --porcelain') return { stdout: laneListing(root, wt, branch) };
+        if (cmd === 'git rev-parse --verify origin/main') return { stdout: 'bbb\n' }; // matches wt's HEAD ⇒ not an ancestor candidate
+        if (cmd.startsWith('git ls-remote --heads origin')) return { stdout: `bbb\trefs/heads/${branch}\n` }; // live remote branch
+        return { stdout: '' }; // status probe => clean
+      };
+      return { commands, runCommand };
+    }
+
+    it('flags a worktree whose lane issue 404s, without removing it', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-50`);
+
+      const { octokit, issuesGet } = fakeOctokit(
+        () => ({ data: [] }), // no PR
+        () => {
+          throw Object.assign(new Error('Not Found'), { status: 404 });
+        },
+      );
+      const { commands, runCommand } = noOtherReasonRunCommand(root, wt, 'ship-it/50-ghost');
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
+        { runCommand, octokit },
+      );
+
+      expect(report.issueNotFound).toEqual([{ path: wt, branch: 'ship-it/50-ghost', issue: 50 }]);
+      expect(report.issueUnverifiable).toEqual([]);
+      expect(report.removed).toEqual([]);
+      expect(commands.some((c) => c.includes('worktree remove'))).toBe(false);
+      expect(issuesGet).toHaveBeenCalledWith({ owner: 'owner', repo: 'example-app', issue_number: 50 });
+    });
+
+    it('does not flag a worktree whose lane issue exists', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-51`);
+
+      const { octokit } = fakeOctokit(() => ({ data: [] }));
+      const { runCommand } = noOtherReasonRunCommand(root, wt, 'ship-it/51-live');
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
+        { runCommand, octokit },
+      );
+
+      expect(report.issueNotFound).toEqual([]);
+      expect(report.issueUnverifiable).toEqual([]);
+    });
+
+    it('reports unverifiable, not flagged, on a non-404 API error (rate limit)', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-52`);
+
+      const { octokit } = fakeOctokit(
+        () => ({ data: [] }),
+        () => {
+          throw Object.assign(new Error('API rate limit exceeded'), { status: 403 });
+        },
+      );
+      const { runCommand } = noOtherReasonRunCommand(root, wt, 'ship-it/52-flaky');
+
+      const logs: Array<[string, string]> = [];
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
+        { runCommand, octokit, log: (type, msg) => logs.push([type, msg]) },
+      );
+
+      expect(report.issueUnverifiable).toEqual([{ path: wt, branch: 'ship-it/52-flaky', issue: 52 }]);
+      expect(report.issueNotFound).toEqual([]);
+      expect(logs.some(([type, msg]) => type === 'warn' && msg.includes('#52'))).toBe(true);
+    });
+
+    it('keeps a worktree with an open PR outside dry-run, even on a 404 issue (open PR is authoritative)', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-53`);
+
+      const { octokit } = fakeOctokit(
+        () => ({ data: [{ number: 1, state: 'open' }] }), // open PR ⇒ keep, no removal
+        () => {
+          throw Object.assign(new Error('Not Found'), { status: 404 });
+        },
+      );
+      const { runCommand } = noOtherReasonRunCommand(root, wt, 'ship-it/53-real');
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
+        { runCommand, octokit },
+      );
+
+      // An open PR short-circuits the reason chain before the issue-not-found tier ever runs.
+      expect(report.removed).toEqual([]);
+      expect(report.kept).toBe(1);
+      expect(report.issueNotFound).toEqual([]);
+      expect(report.issueUnverifiable).toEqual([]);
+    });
+
+    it('quarantines (never removes) a real-mode worktree whose lane issue 404s, with no hard-evidence reason', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-54`);
+
+      const { octokit } = fakeOctokit(
+        () => ({ data: [] }), // no PR ⇒ no hard-evidence reason
+        () => {
+          throw Object.assign(new Error('Not Found'), { status: 404 });
+        },
+      );
+      const { commands, runCommand } = noOtherReasonRunCommand(root, wt, 'ship-it/54-ghost');
+
+      const logs: Array<[string, string]> = [];
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
+        { runCommand, octokit, log: (type, msg) => logs.push([type, msg]) },
+      );
+
+      expect(report.removed).toHaveLength(1);
+      expect(report.removed[0].reason).toBe('issue-not-found');
+      expect(report.removed[0].action).toBe('quarantine');
+      expect(report.removed[0].quarantinedTo).toBe(join(root, '.factory', 'state', 'quarantine', basename(wt)));
+      // Quarantine relocates via `git worktree move`, never `git worktree remove`.
+      expect(commands.some((c) => c.includes('worktree remove'))).toBe(false);
+      expect(commands.some((c) => c.includes('worktree move') && c.includes(wt))).toBe(true);
+      // The branch is never force-deleted for a heuristic quarantine reason.
+      expect(commands.some((c) => c.includes('branch -D'))).toBe(false);
+      // An audit-log entry records the worktree and reason.
+      expect(
+        logs.some(([type, msg]) => type === 'worktree-gc' && msg.includes(wt) && msg.includes('issue-not-found')),
+      ).toBe(true);
+    });
+
+    it('quarantines only the flagged worktree, leaving a healthy sibling untouched (#1355 acceptance)', async () => {
+      const { repoRoot: root } = setup();
+      const ghost = makeWorktree(`${basename(root)}-factory-ship-it-55`);
+      const healthy = makeWorktree(`${basename(root)}-factory-ship-it-56`);
+
+      const pullsList = vi.fn(async () => ({ data: [] })); // no PR for either branch
+      const issuesGet = vi.fn(async (params: { issue_number: number }) => {
+        if (params.issue_number === 55) throw Object.assign(new Error('Not Found'), { status: 404 });
+        return { data: { state: 'open', labels: [] } };
+      });
+      const octokit = asSweepOctokit({ rest: { pulls: { list: pullsList }, issues: { get: issuesGet } } });
+      const commands: string[] = [];
+      const runCommand = async (cmd: string) => {
+        commands.push(cmd);
+        if (cmd === 'git worktree list --porcelain') {
+          return {
+            stdout:
+              `worktree ${root}\nHEAD bbb\nbranch refs/heads/main\n\n` +
+              `worktree ${ghost}\nHEAD bbb\nbranch refs/heads/ship-it/55-ghost\n\n` +
+              `worktree ${healthy}\nHEAD bbb\nbranch refs/heads/ship-it/56-live\n\n`,
+          };
+        }
+        if (cmd === 'git rev-parse --verify origin/main') return { stdout: 'bbb\n' };
+        if (cmd.startsWith('git ls-remote --heads origin')) return { stdout: 'bbb\trefs/heads/x\n' };
+        return { stdout: '' };
+      };
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
+        { runCommand, octokit },
+      );
+
+      expect(report.removed).toHaveLength(1);
+      expect(report.removed[0].path).toBe(ghost);
+      expect(report.removed[0].reason).toBe('issue-not-found');
+      expect(report.kept).toBe(1);
+      expect(existsSync(healthy)).toBe(true);
+      expect(commands.some((c) => c.includes('worktree move') && c.includes(healthy))).toBe(false);
+    });
+  });
+
+  describe('no-active-claim check (#1353)', () => {
+    function laneListing(root: string, wt: string, branch: string): string {
+      return `worktree ${root}\nHEAD bbb\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/${branch}\n\n`;
+    }
+
+    function cleanRunCommand(root: string, wt: string, branch: string) {
+      const commands: string[] = [];
+      const runCommand = async (cmd: string) => {
+        commands.push(cmd);
+        if (cmd === 'git worktree list --porcelain') return { stdout: laneListing(root, wt, branch) };
+        if (cmd === 'git rev-parse --verify origin/main') return { stdout: 'bbb\n' };
+        if (cmd.startsWith('git ls-remote --heads origin')) return { stdout: `bbb\trefs/heads/${branch}\n` };
+        return { stdout: '' }; // status probe => clean
+      };
+      return { commands, runCommand };
+    }
+
+    it('flags a merged-PR worktree whose issue has no active claim label', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-60`);
+
+      const { octokit } = fakeOctokit(
+        () => ({ data: [{ number: 1, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
+        () => ({ data: { state: 'open', labels: [] } }),
+      );
+      const { runCommand } = cleanRunCommand(root, wt, 'ship-it/60-done');
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
+        { runCommand, octokit },
+      );
+
+      expect(report.noActiveClaim).toEqual([{ path: wt, branch: 'ship-it/60-done', issue: 60, prState: 'merged' }]);
+    });
+
+    it('flags a closed (unmerged) PR worktree whose issue has no active claim label', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-61`);
+
+      const { octokit } = fakeOctokit(
+        () => ({ data: [{ number: 2, state: 'closed' }] }),
+        () => ({ data: { state: 'open', labels: [] } }),
+      );
+      const { runCommand } = cleanRunCommand(root, wt, 'ship-it/61-abandoned');
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
+        { runCommand, octokit },
+      );
+
+      expect(report.noActiveClaim).toEqual([
+        { path: wt, branch: 'ship-it/61-abandoned', issue: 61, prState: 'closed' },
+      ]);
+    });
+
+    it('does not flag an open-PR worktree, even without a claim label', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-62`);
+
+      const { octokit } = fakeOctokit(
+        () => ({ data: [{ number: 3, state: 'open' }] }),
+        () => ({ data: { state: 'open', labels: [] } }),
+      );
+      const { runCommand } = cleanRunCommand(root, wt, 'ship-it/62-active');
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
+        { runCommand, octokit },
+      );
+
+      expect(report.noActiveClaim).toEqual([]);
+    });
+
+    it('does not flag a merged-PR worktree whose issue carries an active claim label', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-63`);
+
+      const { octokit } = fakeOctokit(
+        () => ({ data: [{ number: 4, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
+        () => ({ data: { state: 'open', labels: ['factory:claimed-by:lane-7'] } }),
+      );
+      const { runCommand } = cleanRunCommand(root, wt, 'ship-it/63-claimed');
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
+        { runCommand, octokit },
+      );
+
+      expect(report.noActiveClaim).toEqual([]);
+    });
+
+    it('does not flag on a claim-label lookup error (fail-safe)', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-64`);
+
+      const { octokit } = fakeOctokit(
+        () => ({ data: [{ number: 5, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
+        () => {
+          throw Object.assign(new Error('API rate limit exceeded'), { status: 403 });
+        },
+      );
+      const { runCommand } = cleanRunCommand(root, wt, 'ship-it/64-flaky');
+
+      const logs: Array<[string, string]> = [];
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
+        { runCommand, octokit, log: (type, msg) => logs.push([type, msg]) },
+      );
+
+      expect(report.noActiveClaim).toEqual([]);
+      expect(logs.some(([type, msg]) => type === 'warn' && msg.includes('#64'))).toBe(true);
+    });
+
+    it('keeps outside dry-run via merged-PR hard evidence, pre-empting the #1355 claim-check tier', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-65`);
+
+      const { octokit, issuesGet } = fakeOctokit(
+        () => ({ data: [{ number: 6, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
+        () => ({ data: { state: 'open', labels: [] } }),
+      );
+      const { runCommand } = cleanRunCommand(root, wt, 'ship-it/65-nondry');
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
+        { runCommand, octokit },
+      );
+
+      expect(report.noActiveClaim).toEqual([]);
+      // GitHub's merged verdict is authoritative and resolves the reason before the real-mode
+      // no-active-claim tier ever runs — it removes (hard evidence), never quarantines (heuristic).
+      expect(report.removed).toHaveLength(1);
+      expect(report.removed[0].reason).toBe('merged');
+      expect(report.removed[0].action).toBe('remove');
+      // Only resolveIssueDisposition's issues.get call happened — resolveActiveClaim never ran.
+      expect(issuesGet).toHaveBeenCalledTimes(1);
+    });
+  });
 });
 
 describe('formatGcReport', () => {
@@ -1531,8 +2041,12 @@ describe('formatGcReport', () => {
           reason: 'merged',
           scrubbedFiles: [],
           branchDeleted: false,
+          action: 'remove',
         },
       ],
+      issueNotFound: [],
+      issueUnverifiable: [],
+      noActiveClaim: [],
     });
     expect(text).toContain('/repo/foo-factory-ship-it-1 (ship-it/1-x, 3d old) — merged');
     expect(text).toContain('would remove 1 worktree(s), kept 2');
@@ -1550,8 +2064,12 @@ describe('formatGcReport', () => {
           reason: 'ttl-expired',
           scrubbedFiles: ['/repo/foo-factory-ship-it-2/.env'],
           branchDeleted: false,
+          action: 'remove',
         },
       ],
+      issueNotFound: [],
+      issueUnverifiable: [],
+      noActiveClaim: [],
     });
     expect(text).toContain(
       '/repo/foo-factory-ship-it-2 (detached, 10d old) — ttl-expired, scrubbed 1 credential file(s)',
@@ -1571,8 +2089,12 @@ describe('formatGcReport', () => {
           reason: 'merged',
           scrubbedFiles: [],
           branchDeleted: true,
+          action: 'remove',
         },
       ],
+      issueNotFound: [],
+      issueUnverifiable: [],
+      noActiveClaim: [],
     });
     expect(text).toContain('/repo/foo-factory-ship-it-3 (ship-it/3-x, 1d old) — merged, deleted branch ship-it/3-x');
   });
@@ -1589,9 +2111,76 @@ describe('formatGcReport', () => {
           reason: 'ttl-expired',
           scrubbedFiles: [],
           branchDeleted: false,
+          action: 'remove',
         },
       ],
+      issueNotFound: [],
+      issueUnverifiable: [],
+      noActiveClaim: [],
     });
     expect(text).not.toContain('deleted branch');
+  });
+
+  it('renders the issueNotFound and issueUnverifiable sections when present', () => {
+    const text = formatGcReport({
+      dryRun: true,
+      kept: 0,
+      removed: [],
+      issueNotFound: [{ path: '/repo/foo-factory-ship-it-5', branch: 'ship-it/5-x', issue: 5 }],
+      issueUnverifiable: [{ path: '/repo/foo-factory-ship-it-6', branch: 'ship-it/6-x', issue: 6 }],
+      noActiveClaim: [],
+    });
+    expect(text).toContain('1 worktree(s) flagged — owning issue not found (404):');
+    expect(text).toContain('  /repo/foo-factory-ship-it-5 (ship-it/5-x) — issue #5 not found');
+    expect(text).toContain('1 worktree(s) unverifiable — GitHub issue lookup failed:');
+    expect(text).toContain('  /repo/foo-factory-ship-it-6 (ship-it/6-x) — issue #6 unverifiable');
+  });
+
+  it('renders the noActiveClaim section when present', () => {
+    const text = formatGcReport({
+      dryRun: true,
+      kept: 0,
+      removed: [],
+      issueNotFound: [],
+      issueUnverifiable: [],
+      noActiveClaim: [{ path: '/repo/foo-factory-ship-it-7', branch: 'ship-it/7-x', issue: 7, prState: 'merged' }],
+    });
+    expect(text).toContain('1 worktree(s) flagged — merged/closed PR with no active claim:');
+    expect(text).toContain('  /repo/foo-factory-ship-it-7 (ship-it/7-x) — issue #7 merged, no active claim');
+  });
+
+  it('renders a quarantine suffix and splits the summary counts', () => {
+    const text = formatGcReport({
+      dryRun: false,
+      kept: 1,
+      removed: [
+        {
+          path: '/repo/foo-factory-ship-it-8',
+          branch: 'ship-it/8-x',
+          ageDays: 4,
+          reason: 'merged',
+          scrubbedFiles: [],
+          branchDeleted: true,
+          action: 'remove',
+        },
+        {
+          path: '/repo/foo-factory-ship-it-9',
+          branch: 'ship-it/9-ghost',
+          ageDays: 2,
+          reason: 'issue-not-found',
+          scrubbedFiles: [],
+          branchDeleted: false,
+          action: 'quarantine',
+          quarantinedTo: '/repo/.factory/state/quarantine/foo-factory-ship-it-9',
+        },
+      ],
+      issueNotFound: [],
+      issueUnverifiable: [],
+      noActiveClaim: [],
+    });
+    expect(text).toContain(
+      '/repo/foo-factory-ship-it-9 (ship-it/9-ghost, 2d old) — issue-not-found, quarantined to /repo/.factory/state/quarantine/foo-factory-ship-it-9',
+    );
+    expect(text).toContain('removed 1 worktree(s), quarantined 1, kept 1');
   });
 });

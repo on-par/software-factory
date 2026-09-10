@@ -97,7 +97,7 @@ describe('runTui', () => {
     expect(appPropsOf(call?.[0]).stopFile).toBe('/repo/.factory/STOP');
   });
 
-  it('forwards queueFile, queueProposedFile, and costsFile through to the rendered App', async () => {
+  it('forwards queueReader and costsFile through to the rendered App', async () => {
     const stdout = fakeStdout(true);
     const waitUntilExit = vi.fn().mockResolvedValue(undefined);
     const renderFn = vi.fn<typeof render>(() => ({
@@ -109,10 +109,10 @@ describe('runTui', () => {
     }));
     const followPlainFn = vi.fn(() => vi.fn());
 
+    const queueReader = { source: 'GitHub', read: async () => ({ entries: [] }), pollMs: 30_000 };
     await runTui({
       eventsFile: 'events.ndjson',
-      queueFile: '/repo/.factory/queue',
-      queueProposedFile: '/repo/.factory/queue.proposed',
+      queueReader,
       costsFile: '/repo/.factory/costs.jsonl',
       stdout,
       render: renderFn,
@@ -122,8 +122,7 @@ describe('runTui', () => {
     const call = renderFn.mock.calls[0];
     expect(call).toBeDefined();
     const props = appPropsOf(call?.[0]);
-    expect(props.queueFile).toBe('/repo/.factory/queue');
-    expect(props.queueProposedFile).toBe('/repo/.factory/queue.proposed');
+    expect(props.queueReader).toBe(queueReader);
     expect(props.costsFile).toBe('/repo/.factory/costs.jsonl');
   });
 
@@ -175,5 +174,33 @@ describe('runTui', () => {
     const call = renderFn.mock.calls[0];
     expect(call).toBeDefined();
     expect(appPropsOf(call?.[0]).steeringDir).toBe('/repo/.factory/steering');
+  });
+
+  it('forwards breakerFile and effectiveConfigLines through to the rendered App', async () => {
+    const stdout = fakeStdout(true);
+    const waitUntilExit = vi.fn().mockResolvedValue(undefined);
+    const renderFn = vi.fn<typeof render>(() => ({
+      rerender: vi.fn(),
+      unmount: vi.fn(),
+      waitUntilExit,
+      cleanup: vi.fn(),
+      clear: vi.fn(),
+    }));
+    const followPlainFn = vi.fn(() => vi.fn());
+
+    await runTui({
+      eventsFile: 'events.ndjson',
+      breakerFile: '/repo/.factory/breaker.json',
+      effectiveConfigLines: ['router: default'],
+      stdout,
+      render: renderFn,
+      followPlainFn,
+    });
+
+    const call = renderFn.mock.calls[0];
+    expect(call).toBeDefined();
+    const props = appPropsOf(call?.[0]);
+    expect(props.breakerFile).toBe('/repo/.factory/breaker.json');
+    expect(props.effectiveConfigLines).toEqual(['router: default']);
   });
 });

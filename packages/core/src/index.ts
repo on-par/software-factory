@@ -94,11 +94,20 @@ export type {
   ParsedQueue,
   QueueDiagnostic,
   QueueEntry,
+  QueueEntryStatus,
   QueueSnapshot,
   QueueSnapshotEntry,
   QueueValidationResult,
 } from './queue/index.js';
 export { parseQueue, readQueue, rewriteQueueForDecomposition, validateQueue } from './queue/index.js';
+
+// Pattern-based secret redaction for GitHub/provider error text shown to an operator (#1362).
+// Distinct from the authority-list `redactSecrets` exported from ./hosted/authority.js.
+export { redactSecrets as redactSecretPatterns } from './router/failure-detail.js';
+
+// Queue activity (#1342)
+export type { ActiveQueueClaim, QueueActivityPartition } from './queue/activity.js';
+export { DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS, partitionLocalQueueByActivity } from './queue/activity.js';
 
 // Hosted execution (control plane)
 export type {
@@ -239,6 +248,17 @@ export { acquireLaneEnvironment, localOnlyWorkspace, worktreeWorkspace } from '.
 // Run composition (#675)
 export type { RunPorts, RunRequest } from './run/run-issue.js';
 export { runIssue } from './run/run-issue.js';
+
+// Run phase snapshot (#1325, #1326, #1327)
+export type { RunPhaseSnapshot } from './run/phase-snapshot.js';
+export {
+  phaseSnapshotFile,
+  readPhaseSnapshot,
+  summarizeEvent,
+  touchLastEvent,
+  touchRunActivity,
+  writePhaseSnapshot,
+} from './run/phase-snapshot.js';
 
 // Lifecycle bus (#591)
 export type {

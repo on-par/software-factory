@@ -2,7 +2,7 @@ import type { ApprovalRequest, CostsRead, EventKind, FactoryEvent, QueueSnapshot
 import { cleanup, render } from 'ink-testing-library';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { App } from './App.js';
+import { App, type QueueReader } from './App.js';
 
 afterEach(() => {
   cleanup();
@@ -37,7 +37,7 @@ describe('App', () => {
   it('shows a waiting message before any events arrive', () => {
     const { follow } = makeFakeFollow();
     const { lastFrame } = render(<App eventsFile="ignored" follow={follow} />);
-    expect(lastFrame()).toContain('waiting for factory events');
+    expect(lastFrame()).toContain('idle — no active claims');
   });
 
   it('renders a single lane directly in detail view with no row list', async () => {
@@ -146,7 +146,7 @@ describe('App', () => {
     expect(frame).toContain('daily usage cap reached');
   });
 
-  it('cycles Dashboard -> Queue -> Costs -> Log -> Dashboard on Tab, and jumps directly on digit keys', async () => {
+  it('cycles Active -> Queue -> Costs -> Log -> Health -> Active on Tab, and jumps directly on digit keys', async () => {
     const fake = makeFakeFollow();
     const { lastFrame, stdin } = render(<App eventsFile="ignored" follow={fake.follow} />);
 
@@ -164,7 +164,11 @@ describe('App', () => {
 
     stdin.write('\t');
     await flush();
-    expect(lastFrame()).toContain('[1 Dashboard]');
+    expect(lastFrame()).toContain('[5 Health]');
+
+    stdin.write('\t');
+    await flush();
+    expect(lastFrame()).toContain('[1 Active]');
 
     stdin.write('2');
     await flush();
@@ -174,10 +178,8 @@ describe('App', () => {
   it('shows Queue tab entries with titles joined from issue-title events', async () => {
     const fake = makeFakeFollow();
     const queueSnap: QueueSnapshot = { entries: [{ lane: 'app', issue: 296 }] };
-    const readQueueFn = vi.fn(() => queueSnap);
-    const { lastFrame, stdin } = render(
-      <App eventsFile="ignored" follow={fake.follow} queueFile="/repo/.factory/queue" readQueueFn={readQueueFn} />,
-    );
+    const queueReader: QueueReader = { source: 'local file', read: vi.fn(() => queueSnap) };
+    const { lastFrame, stdin } = render(<App eventsFile="ignored" follow={fake.follow} queueReader={queueReader} />);
 
     fake.push(ev('plan', 'Starting plan phase', '296'));
     fake.push(ev('issue-title', 'Fix the flaky test', '296'));
@@ -187,9 +189,63 @@ describe('App', () => {
     await flush();
 
     const frame = lastFrame() ?? '';
+    expect(frame).toContain('queue: local file');
     expect(frame).toContain('#296');
     expect(frame).toContain('running');
     expect(frame).toContain('Fix the flaky test');
+  });
+
+  it('renders an async GitHub-backed queue reader with its own titles and status (#1362)', async () => {
+    const fake = makeFakeFollow();
+    const queueReader: QueueReader = {
+      source: 'GitHub',
+      read: vi.fn(async () => ({
+        entries: [{ lane: 'cleanup', issue: 1362, title: 'Read the queue from GitHub', status: 'queued' as const }],
+      })),
+    };
+    const { lastFrame, stdin } = render(<App eventsFile="ignored" follow={fake.follow} queueReader={queueReader} />);
+    await flush();
+
+    stdin.write('2');
+    await flush();
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('queue: GitHub');
+    expect(frame).toContain('cleanup');
+    expect(frame).toContain('#1362');
+    expect(frame).toContain('queued');
+    expect(frame).toContain('Read the queue from GitHub');
+  });
+
+  it('keeps the last good entries on a failed read, redacts the error, and clears it on the next success (#1362)', async () => {
+    const fake = makeFakeFollow();
+    let mode: 'ok' | 'throw' = 'ok';
+    const queueReader: QueueReader = {
+      source: 'GitHub',
+      pollMs: 5,
+      read: vi.fn(async () => {
+        if (mode === 'throw') throw new Error('GitHub API unavailable for Bearer ghp_abcdefghijklmnop123456');
+        return { entries: [{ lane: 'cleanup', issue: 1362, status: 'queued' as const }] };
+      }),
+    };
+    const { lastFrame, stdin } = render(<App eventsFile="ignored" follow={fake.follow} queueReader={queueReader} />);
+    await flush();
+    stdin.write('2');
+    await flush();
+    expect(lastFrame()).toContain('#1362');
+    expect(lastFrame()).not.toContain('queue lookup failed');
+
+    mode = 'throw';
+    await vi.waitFor(
+      () => expect(lastFrame()).toContain('(queue lookup failed — GitHub API unavailable for Bearer [redacted])'),
+      { timeout: 2_000, interval: 5 },
+    );
+    expect(lastFrame()).not.toContain('ghp_');
+    expect(lastFrame()).toContain('#1362');
+
+    mode = 'ok';
+    await vi.waitFor(() => expect(lastFrame()).not.toContain('queue lookup failed'), { timeout: 2_000, interval: 5 });
+    expect(lastFrame()).toContain('#1362');
   });
 
   it('shows Costs tab totals and the skipped-line warning without crashing', async () => {
@@ -225,6 +281,36 @@ describe('App', () => {
     expect(frame).toContain('#296');
     expect(frame).toContain('⚠ skipped 1 malformed line(s) in costs.jsonl');
     expect(frame).toContain('session total');
+  });
+
+  it('shows the Health tab breaker state and reveals Effective config/KPIs on e', async () => {
+    const fake = makeFakeFollow();
+    const listBreakersFn = vi.fn(async () => [{ provider: 'anthropic', reason: 'rate-limit', remainingMs: 60_000 }]);
+    const { lastFrame, stdin } = render(
+      <App
+        eventsFile="ignored"
+        follow={fake.follow}
+        breakerFile="/repo/.factory/breaker.json"
+        listBreakersFn={listBreakersFn}
+        effectiveConfigLines={['router: default']}
+      />,
+    );
+
+    stdin.write('5');
+    await flush();
+    await flush();
+
+    let frame = lastFrame() ?? '';
+    expect(frame).toContain('[5 Health]');
+    expect(frame).toContain('anthropic: OPEN (rate-limit)');
+    expect(frame).toContain('(Effective config and KPIs hidden — press e to view)');
+
+    stdin.write('e');
+    await flush();
+
+    frame = lastFrame() ?? '';
+    expect(frame).toContain('router: default');
+    expect(frame).toContain('KPIs:');
   });
 
   it('scrolls the Log tab with the up arrow and re-enables follow with f', async () => {

@@ -72,8 +72,12 @@ const PUBLIC_API_KEYS = [
   // Queue
   'parseQueue',
   'readQueue',
+  'redactSecretPatterns',
   'rewriteQueueForDecomposition',
   'validateQueue',
+  // Queue activity (#1342)
+  'DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS',
+  'partitionLocalQueueByActivity',
   // Hosted execution (control plane)
   'createHostedJobStore',
   'createSqliteHostedJobStore',
@@ -131,6 +135,13 @@ const PUBLIC_API_KEYS = [
   'worktreeWorkspace',
   // Run composition (#675)
   'runIssue',
+  // Run phase snapshot (#1325, #1326, #1327)
+  'phaseSnapshotFile',
+  'readPhaseSnapshot',
+  'summarizeEvent',
+  'touchLastEvent',
+  'touchRunActivity',
+  'writePhaseSnapshot',
   // Lifecycle bus (#591)
   'createLifecycleBus',
   'lifecycleBus',
@@ -478,6 +489,7 @@ const INTERNAL_API_KEYS = [
   'QUEUE_ORDER_LABEL_PREFIX',
   'queueOrderLabel',
   'queueLabelSpecs',
+  'readGithubQueueSnapshot',
   // Stale-claim reaping (#999)
   'findStaleClaims',
   'localClaimPid',

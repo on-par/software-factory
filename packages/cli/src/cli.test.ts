@@ -46,6 +46,7 @@ import {
   parkEvents,
   parkReasonFor,
   planRunLanes,
+  tuiQueueReader,
   preflightQueuedIssue,
   PREREQUISITES_TEXT,
   prLookupFailure,
@@ -3742,6 +3743,65 @@ describe('cli', () => {
       });
 
       expect(calls).toEqual([['ship', 1]]);
+    });
+  });
+
+  describe('tuiQueueReader (#1362)', () => {
+    const base = { queueFile: '/nowhere/queue', queueProposedFile: '/nowhere/queue.proposed', repo: 'o/r' };
+    const listForRepo = vi.fn(async () => ({
+      data: [{ number: 5, title: 'Five', labels: ['factory:queued', 'factory:lane:ops', 'factory:order:1'] }],
+    }));
+    const fakeOctokit = { rest: { issues: { listForRepo } } } as any;
+
+    it('--local-queue reads the file and never resolves a token or builds octokit', async () => {
+      const token = vi.fn(() => 'ghp_x');
+      const octokit = vi.fn(() => fakeOctokit);
+      const reader = tuiQueueReader({ ...base, localQueue: true, token, octokit });
+      expect(reader.source).toBe('local file');
+      expect(await reader.read()).toEqual({ entries: [] });
+      expect(token).not.toHaveBeenCalled();
+      expect(octokit).not.toHaveBeenCalled();
+    });
+
+    it('GitHub path resolves the token up front and builds octokit exactly once across reads', async () => {
+      const token = vi.fn(() => 'ghp_x');
+      const octokit = vi.fn(() => fakeOctokit);
+      const reader = tuiQueueReader({ ...base, localQueue: false, token, octokit });
+      expect(token).toHaveBeenCalledTimes(1);
+      expect(octokit).toHaveBeenCalledWith('ghp_x');
+      const first = await reader.read();
+      await reader.read();
+      expect(first.entries).toEqual([{ lane: 'ops', issue: 5, title: 'Five', status: 'queued' }]);
+      expect(octokit).toHaveBeenCalledTimes(1);
+      expect(token).toHaveBeenCalledTimes(1);
+    });
+
+    it('with no token at startup, reports it per read and recovers once a token appears', async () => {
+      let current: string | undefined;
+      const token = vi.fn(() => current);
+      const octokit = vi.fn(() => fakeOctokit);
+      const reader = tuiQueueReader({ ...base, localQueue: false, token, octokit });
+      expect(reader.pollMs).toBe(30_000);
+      expect(await reader.read()).toEqual({ entries: [], error: 'no GitHub token — run `gh auth login`' });
+      expect(octokit).not.toHaveBeenCalled();
+
+      current = 'ghp_late';
+      expect((await reader.read()).entries).toHaveLength(1);
+      expect(octokit).toHaveBeenCalledTimes(1);
+      expect(octokit).toHaveBeenCalledWith('ghp_late');
+      await reader.read();
+      expect(octokit).toHaveBeenCalledTimes(1);
+    });
+
+    it('with no detected repo, never touches the token and reports why', async () => {
+      const token = vi.fn(() => 'ghp_x');
+      const reader = tuiQueueReader({ ...base, repo: undefined, localQueue: false, token });
+      expect(reader.pollMs).toBe(30_000);
+      expect(await reader.read()).toEqual({
+        entries: [],
+        error: 'repo detection failed — run inside a GitHub-backed checkout',
+      });
+      expect(token).not.toHaveBeenCalled();
     });
   });
 

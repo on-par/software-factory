@@ -1,4 +1,4 @@
-export type { AppProps } from './components/App.js';
+export type { AppProps, QueueReader } from './components/App.js';
 export { App } from './components/App.js';
 export type { ApprovalPromptProps } from './components/ApprovalPrompt.js';
 export { ApprovalPrompt } from './components/ApprovalPrompt.js';
@@ -35,3 +35,4 @@ export type { TabBarProps } from './tabs/TabBar.js';
 export { TabBar } from './tabs/TabBar.js';
 export type { TabName } from './tabs/types.js';
 export { TAB_LABELS, TAB_ORDER } from './tabs/types.js';
+export { sanitizeTerminalText } from './text.js';

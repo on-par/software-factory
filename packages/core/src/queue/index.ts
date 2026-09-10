@@ -154,14 +154,25 @@ export function validateQueue(content: string): QueueValidationResult {
 
 // ---------- Queue reading (TUI Queue tab) ----------
 
+/** Claim state of one queue entry, derived from GitHub labels when the source is GitHub Issues. */
+export type QueueEntryStatus = 'queued' | 'in-progress' | 'parked';
+
 export interface QueueSnapshotEntry {
   lane: string;
   issue: number;
+  /** Issue title; present when the source carries one (GitHub Issues), absent for the local queue file. */
+  title?: string;
+  /** Claim state; absent for the local queue file, whose lines carry no state. */
+  status?: QueueEntryStatus;
+  /** Claimant id from a `factory:claimed-by:*` label; present only when status is 'in-progress'. */
+  claimant?: string;
 }
 
 export interface QueueSnapshot {
   entries: QueueSnapshotEntry[];
   proposedCount?: number;
+  /** Set when the source could not be read; `entries` then holds the last good read (or nothing). */
+  error?: string;
 }
 
 /** De-duplicated {lane, issue} pairs from the shared parseQueue() parser, first occurrence wins. */

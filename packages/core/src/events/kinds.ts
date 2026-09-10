@@ -11,6 +11,7 @@
 import type { LogLevel } from '../types/index.js';
 
 export type EventKind =
+  | 'activity_touch_failed'
   | 'adr_commit_skipped'
   | 'adr_context'
   | 'adr_context_empty'
@@ -93,6 +94,7 @@ export type EventKind =
   | 'overnight-ready'
   | 'parked'
   | 'phase_completed'
+  | 'phase_snapshot_failed'
   | 'phase_started'
   | 'plan'
   | 'plan_approval_granted'
@@ -175,6 +177,7 @@ export interface EventTraits {
 /** Every existing `EventKind`, classified once. New kinds must be added here —
  *  omitting one is a compile error, which is the point (#663). */
 export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
+  activity_touch_failed: { severity: 'info', isPark: false, isTerminal: false },
   adr_commit_skipped: { severity: 'info', isPark: false, isTerminal: false },
   adr_context: { severity: 'info', isPark: false, isTerminal: false },
   adr_context_empty: { severity: 'info', isPark: false, isTerminal: false },
@@ -263,6 +266,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'overnight-ready': { severity: 'info', isPark: false, isTerminal: false },
   parked: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },
   phase_completed: { severity: 'info', isPark: false, isTerminal: false },
+  phase_snapshot_failed: { severity: 'info', isPark: false, isTerminal: false },
   phase_started: { severity: 'info', isPark: false, isTerminal: false },
   plan: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
   plan_approval_granted: { severity: 'info', isPark: false, isTerminal: false },

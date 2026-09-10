@@ -58,8 +58,11 @@ const h = vi.hoisted(() => {
       eventsFile: string;
       repo?: string;
       stopFile?: string;
-      queueFile?: string;
-      queueProposedFile?: string;
+      queueReader?: {
+        source: string;
+        read: () => Promise<FactoryCore.QueueSnapshot> | FactoryCore.QueueSnapshot;
+        pollMs?: number;
+      };
       costsFile?: string;
       steeringDir?: string;
     }>,
@@ -104,8 +107,11 @@ vi.mock('@on-par/factory-tui', () => ({
       eventsFile: string;
       repo?: string;
       stopFile?: string;
-      queueFile?: string;
-      queueProposedFile?: string;
+      queueReader?: {
+        source: string;
+        read: () => Promise<FactoryCore.QueueSnapshot> | FactoryCore.QueueSnapshot;
+        pollMs?: number;
+      };
       costsFile?: string;
       steeringDir?: string;
     }) => {
@@ -313,6 +319,7 @@ function paths() {
     stop: join(state, 'STOP'),
     costs: join(state, 'costs.jsonl'),
     reports: join(state, 'reports'),
+    runs: join(state, 'runs'),
     steering: join(state, 'steering'),
     kpiHistory: join(state, 'kpi-history.jsonl'),
     breaker: join(state, 'breaker.json'),
@@ -925,6 +932,12 @@ bash scripts/verify.sh
     it('prints product, models, queue, events, and STOP state', async () => {
       writeFileSync(paths().product, 'alpha\n');
       writeFileSync(paths().queue, '# comment\napp 1\napp 2\n');
+      await FactoryCore.writePhaseSnapshot(FactoryCore.phaseSnapshotFile(paths().runs, 1), {
+        issue: 1,
+        phase: 'build',
+        updatedAt: new Date().toISOString(),
+        lastActivityAt: new Date().toISOString(),
+      });
       writeFileSync(
         paths().events,
         [
@@ -944,40 +957,159 @@ bash scripts/verify.sh
       const out = logged();
       expect(out).toContain('on-par/software-factory');
       expect(out).toContain('Product: alpha');
-      expect(out).toContain('app 1');
+      expect(out).toMatch(/app 1 {2}\[build, .+ ago\]/);
+      expect(out).toContain('(1 stale entry hidden — no recent activity)');
       expect(out).toContain('ready #1: done');
-      expect(out).toContain('== Health KPIs ==');
-      expect(out).toContain('Merge rate:');
+      expect(out).toContain('== Health ==');
+      expect(out).toContain('Effective config and KPIs hidden');
+      expect(out).not.toContain('Effective config:');
+      expect(out).not.toContain('Merge rate:');
       expect(logged() + errored()).toContain('STOP file present');
+    });
+
+    it('shows full Effective config and KPIs when --kpis is passed', async () => {
+      await runMain('status', '--kpis');
+      const out = logged();
+      expect(out).toContain('Effective config:');
+      expect(out).toContain('Plan model:');
+      expect(out).toContain('No factory runs recorded yet.');
+    });
+
+    it('renders Active, Queue, and Health as three distinct labeled bands, in that order (#1344)', async () => {
+      await runMain('status');
+      const out = logged();
+      const activeIdx = out.indexOf('== Active ==');
+      const queueIdx = out.indexOf('== Queue ==');
+      const healthIdx = out.indexOf('== Health ==');
+      expect(activeIdx).toBeGreaterThan(-1);
+      expect(queueIdx).toBeGreaterThan(activeIdx);
+      expect(healthIdx).toBeGreaterThan(queueIdx);
     });
 
     it('handles an empty queue and no events gracefully', async () => {
       writeFileSync(paths().queue, '# only comments\n');
       await runMain('status');
       const out = logged();
-      expect(out).toContain('(empty)');
+      expect(out).toContain('(idle — no active claims)');
       expect(out).toContain('(none)');
       expect(out).toContain('Product: (none)');
-      expect(out).toContain('No factory runs recorded yet.');
     });
 
     it('warns on malformed queue lines and never renders NaN', async () => {
       writeFileSync(paths().queue, 'app 1\napp abc\n');
+      await FactoryCore.writePhaseSnapshot(FactoryCore.phaseSnapshotFile(paths().runs, 1), {
+        issue: 1,
+        phase: 'build',
+        updatedAt: new Date().toISOString(),
+        lastActivityAt: new Date(Date.now() - 2 * 60_000).toISOString(),
+      });
       await runMain('status');
-      expect(logged()).toContain('app 1');
+      expect(logged()).toMatch(/app 1 {2}\[build, 2m ago\]/);
       const err = errored();
       expect(err).toContain('malformed');
       expect(err).toContain('line 2');
       expect(logged() + err).not.toContain('NaN');
     });
 
-    it('prints "(no queue file)" when the queue does not exist', async () => {
+    it('excludes stale local queue entries from the active view without touching the queue file (#1342)', async () => {
+      const staleLines = Array.from({ length: 60 }, (_, i) => `app ${i + 1}`).join('\n') + '\n';
+      writeFileSync(paths().queue, staleLines);
+      const before = readFileSync(paths().queue, 'utf-8');
+
+      await runMain('status');
+      const out = logged();
+
+      expect(out).not.toMatch(/ {2}app \d+$/m);
+      expect(out).toContain('(idle — no active claims)');
+      expect(out).toContain('(60 stale entries hidden — no recent activity)');
+      expect(readFileSync(paths().queue, 'utf-8')).toBe(before);
+    });
+
+    it('prints "(no queue file)" when the local queue does not exist', async () => {
       const res = await runMain('status');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('(no queue file)');
     });
 
-    it('shows an open provider breaker without mutating the breaker file', async () => {
+    it('lists only claimable GitHub-backed work in the Queue band (#1344)', async () => {
+      h.octokit.rest.issues.listForRepo = vi.fn(async ({ labels }: any) => {
+        if (labels === 'factory:queued') {
+          return { data: [{ number: 42, labels: ['factory:queued', 'factory:lane:daw', 'factory:order:1'] }] };
+        }
+        if (labels === 'factory:queued,factory:lane:daw') {
+          return { data: [{ number: 42, labels: ['factory:queued', 'factory:lane:daw', 'factory:order:1'] }] };
+        }
+        return { data: [] };
+      });
+
+      await runMain('status');
+      const out = logged();
+      const queueBand = out.slice(out.indexOf('== Queue =='), out.indexOf('== Health =='));
+      expect(queueBand).toContain('daw #42');
+    });
+
+    it('lists all issues queued into one lane in order, with no local queue file (#977)', async () => {
+      const issues = [
+        { number: 1236, labels: ['factory:queued', 'factory:lane:launch-trust', 'factory:order:1'] },
+        { number: 1234, labels: ['factory:queued', 'factory:lane:launch-trust', 'factory:order:2'] },
+        { number: 1235, labels: ['factory:queued', 'factory:lane:launch-trust', 'factory:order:3'] },
+      ];
+      h.octokit.rest.issues.listForRepo = vi.fn(async ({ labels }: any) => {
+        if (labels === 'factory:queued') return { data: issues };
+        if (labels === 'factory:queued,factory:lane:launch-trust') return { data: issues };
+        return { data: [] };
+      });
+
+      const res = await runMain('status');
+      expect(res.exited).toBe(false);
+      const out = logged();
+      expect(out).toContain('(no queue file)');
+      const queueBand = out.slice(out.indexOf('== Queue =='), out.indexOf('== Health =='));
+      expect(queueBand).not.toContain('(empty)');
+      expect(queueBand).not.toContain('(no claimable work)');
+      expect(queueBand).toContain('launch-trust #1236');
+      expect(queueBand).toContain('launch-trust #1234');
+      expect(queueBand).toContain('launch-trust #1235');
+      expect(queueBand.indexOf('#1236')).toBeLessThan(queueBand.indexOf('#1234'));
+      expect(queueBand.indexOf('#1234')).toBeLessThan(queueBand.indexOf('#1235'));
+    });
+
+    it('reports a queue lookup failure in the Queue band without crashing status (#1344)', async () => {
+      h.octokit.rest.issues.listForRepo = vi.fn(async () => {
+        throw new Error('GitHub API unavailable');
+      });
+
+      const res = await runMain('status');
+      expect(res.exited).toBe(false);
+      const out = logged();
+      const queueBand = out.slice(out.indexOf('== Queue =='), out.indexOf('== Health =='));
+      expect(queueBand).toContain('queue lookup failed — GitHub API unavailable');
+    });
+
+    it('shows "(no claimable work)" in the Queue band when nothing is claimable', async () => {
+      await runMain('status');
+      const out = logged();
+      const queueBand = out.slice(out.indexOf('== Queue =='), out.indexOf('== Health =='));
+      expect(queueBand).toContain('(no claimable work)');
+    });
+
+    it('shows a no-token message in the Queue band instead of calling GitHub when unauthenticated', async () => {
+      delete process.env.GITHUB_TOKEN;
+      delete process.env.GH_TOKEN;
+      h.execSyncImpl = () => {
+        throw new Error('gh not authenticated');
+      };
+      const listForRepo = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.issues.listForRepo = listForRepo;
+
+      await runMain('status');
+      const out = logged();
+      const queueBand = out.slice(out.indexOf('== Queue =='), out.indexOf('== Health =='));
+      expect(queueBand).toContain('no GitHub token');
+      expect(listForRepo).not.toHaveBeenCalled();
+    });
+
+    it('shows an open provider breaker under Health without mutating the breaker file', async () => {
       const breakerFixture = {
         version: 1,
         providers: {
@@ -988,7 +1120,8 @@ bash scripts/verify.sh
 
       await runMain('status');
       const out = logged();
-      expect(out).toContain('== Provider breaker ==');
+      expect(out).toContain('== Health ==');
+      expect(out).toContain('Provider breaker:');
       expect(out).toContain('openai: OPEN (usage_cap)');
       expect(out).toContain('m remaining');
       expect(existsSync(paths().breaker)).toBe(true);
@@ -997,7 +1130,7 @@ bash scripts/verify.sh
     it('shows "(closed)" when there is no breaker file', async () => {
       await runMain('status');
       const out = logged();
-      expect(out).toContain('== Provider breaker ==');
+      expect(out).toContain('Provider breaker:');
       expect(out).toContain('(closed)');
     });
   });
@@ -1167,20 +1300,118 @@ bash scripts/verify.sh
   });
 
   describe('tui', () => {
-    it('calls runTui with the events file and detected repo', async () => {
+    it('calls runTui with the events file, detected repo, and a GitHub-backed queue reader by default', async () => {
       const res = await runMain('tui');
       expect(res.exited).toBe(false);
       expect(h.runTuiCalls).toHaveLength(1);
       expect(h.runTuiCalls[0].eventsFile.endsWith(join('.factory', 'state', 'events.ndjson'))).toBe(true);
       expect(h.runTuiCalls[0].repo).toBe(h.ghRepo);
       expect(h.runTuiCalls[0].stopFile?.endsWith(join('.factory', 'state', 'STOP'))).toBe(true);
-      expect(h.runTuiCalls[0].queueFile?.endsWith(join('.factory', 'state', 'queue'))).toBe(true);
-      expect(h.runTuiCalls[0].queueProposedFile?.endsWith(join('.factory', 'state', 'queue.proposed'))).toBe(true);
+      expect(h.runTuiCalls[0].queueReader?.source).toBe('GitHub');
+      expect(h.runTuiCalls[0].queueReader?.pollMs).toBe(30_000);
       expect(h.runTuiCalls[0].costsFile?.endsWith(join('.factory', 'state', 'costs.jsonl'))).toBe(true);
       expect(h.runTuiCalls[0].steeringDir?.endsWith(join('.factory', 'state', 'steering'))).toBe(true);
     });
 
-    it('calls runTui with repo undefined when gh repo detection fails', async () => {
+    it('default reader lists claimable GitHub issues with titles in lane order, ignoring a stale queue file (#1362)', async () => {
+      writeFileSync(paths().queue, 'stale 1\nstale 2\nstale 3\n');
+      const issues = [
+        {
+          number: 12,
+          title: 'Second in cleanup',
+          labels: ['factory:queued', 'factory:lane:cleanup', 'factory:order:2'],
+        },
+        {
+          number: 11,
+          title: 'First in cleanup',
+          labels: ['factory:queued', 'factory:lane:cleanup', 'factory:order:1'],
+        },
+      ];
+      const listForRepo = vi.fn(async ({ labels }: any) =>
+        labels === 'factory:queued' ? { data: issues } : { data: [] },
+      );
+      h.octokit.rest.issues.listForRepo = listForRepo;
+
+      await runMain('tui');
+      expect(listForRepo).not.toHaveBeenCalled();
+
+      const snapshot = await h.runTuiCalls[0].queueReader!.read();
+      expect(snapshot).toEqual({
+        entries: [
+          { lane: 'cleanup', issue: 11, title: 'First in cleanup', status: 'queued' },
+          { lane: 'cleanup', issue: 12, title: 'Second in cleanup', status: 'queued' },
+        ],
+      });
+      expect(listForRepo).toHaveBeenCalledTimes(1);
+    });
+
+    it('--local-queue reads the queue file and its proposed count, and never calls GitHub (#1362)', async () => {
+      writeFileSync(paths().queue, 'app 5\napp 6\n');
+      writeFileSync(paths().queueProposed, 'app 7\n');
+      const listForRepo = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.issues.listForRepo = listForRepo;
+
+      const res = await runMain('tui', '--local-queue');
+      expect(res.exited).toBe(false);
+      const reader = h.runTuiCalls[0].queueReader!;
+      expect(reader.source).toBe('local file');
+      expect(reader.pollMs).toBeUndefined();
+      expect(await reader.read()).toEqual({
+        entries: [
+          { lane: 'app', issue: 5 },
+          { lane: 'app', issue: 6 },
+        ],
+        proposedCount: 1,
+      });
+      expect(listForRepo).not.toHaveBeenCalled();
+    });
+
+    it('without a GitHub token the default reader yields the no-token message and the TUI still starts', async () => {
+      delete process.env.GITHUB_TOKEN;
+      delete process.env.GH_TOKEN;
+      h.execSyncImpl = () => {
+        throw new Error('gh not authenticated');
+      };
+      const listForRepo = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.issues.listForRepo = listForRepo;
+
+      const res = await runMain('tui');
+      expect(res.exited).toBe(false);
+      const reader = h.runTuiCalls[0].queueReader!;
+      expect(reader.source).toBe('GitHub');
+      expect(await reader.read()).toEqual({ entries: [], error: 'no GitHub token — run `gh auth login`' });
+      expect(listForRepo).not.toHaveBeenCalled();
+    });
+
+    it('surfaces a GitHub lookup failure as a rejected read the TUI renders, not a crash at startup', async () => {
+      h.octokit.rest.issues.listForRepo = vi.fn(async () => {
+        throw new Error('GitHub API unavailable');
+      });
+      const res = await runMain('tui');
+      expect(res.exited).toBe(false);
+      await expect(h.runTuiCalls[0].queueReader!.read()).rejects.toThrow('GitHub API unavailable');
+    });
+
+    it('--help lists --local-queue with the same wording as factory run (#1362)', async () => {
+      const originalWrite = process.stdout.write;
+      const written: string[] = [];
+      process.stdout.write = ((chunk: string | Uint8Array) => {
+        written.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write;
+      let res: Awaited<ReturnType<typeof runMain>>;
+      try {
+        res = await runMain('tui', '--help');
+      } finally {
+        process.stdout.write = originalWrite;
+      }
+      expect(res.exited).toBe(true);
+      const text = written.join('').replace(/\s+/g, ' ');
+      expect(text).toContain('--local-queue');
+      expect(text).toContain('Read .factory/queue instead of claiming issues from GitHub Issues');
+    });
+
+    it('calls runTui with repo undefined when gh repo detection fails, and the reader says so', async () => {
       h.execImpl = (cmd: string) => {
         if (cmd.includes('rev-parse')) return h.repoRoot;
         if (cmd.includes('gh repo view')) throw new Error('gh not authenticated');
@@ -1190,6 +1421,10 @@ bash scripts/verify.sh
       expect(res.exited).toBe(false);
       expect(h.runTuiCalls).toHaveLength(1);
       expect(h.runTuiCalls[0].repo).toBeUndefined();
+      expect(await h.runTuiCalls[0].queueReader!.read()).toEqual({
+        entries: [],
+        error: 'repo detection failed — run inside a GitHub-backed checkout',
+      });
     });
   });
 
@@ -3476,6 +3711,40 @@ describe('shipIssue (direct)', () => {
     const checkCall = vi.mocked(core.checkPhase).mock.calls.at(-1)?.[0] as any;
     expect(typeof buildCall.onPgid).toBe('function');
     expect(typeof checkCall.onPgid).toBe('function');
+  });
+
+  it('passes an onActivity callback to checkPhase that bumps the persisted phase snapshot heartbeat (#1326)', async () => {
+    const core = await import('@on-par/factory-core');
+    await shipIssue(5, {}, ctx());
+
+    const checkCall = vi.mocked(core.checkPhase).mock.calls.at(-1)?.[0] as any;
+    expect(typeof checkCall.onActivity).toBe('function');
+
+    const snapshotFile = join(paths().state, 'runs', 'issue-5.phase.json');
+    const before = JSON.parse(readFileSync(snapshotFile, 'utf-8'));
+
+    await checkCall.onActivity();
+
+    const after = JSON.parse(readFileSync(snapshotFile, 'utf-8'));
+    expect(Date.parse(after.lastActivityAt)).toBeGreaterThanOrEqual(Date.parse(before.lastActivityAt));
+    expect(after.issue).toBe(before.issue);
+    expect(after.phase).toBe(before.phase);
+  });
+
+  it('updates the persisted phase snapshot lastEvent on every logged event (#1327)', async () => {
+    const core = await import('@on-par/factory-core');
+    await shipIssue(5, {}, ctx());
+
+    const checkCall = vi.mocked(core.checkPhase).mock.calls.at(-1)?.[0] as any;
+    expect(typeof checkCall.log).toBe('function');
+
+    const snapshotFile = join(paths().state, 'runs', 'issue-5.phase.json');
+    checkCall.log('build', 'a custom test event');
+
+    await vi.waitFor(() => {
+      const after = JSON.parse(readFileSync(snapshotFile, 'utf-8'));
+      expect(after.lastEvent).toBe('build: a custom test event');
+    });
   });
 
   it('tracks a pgid reported through onPgid and sweeps it before releasing the lease, without crashing the run', async () => {

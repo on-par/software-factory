@@ -134,11 +134,10 @@ describe('createUsageCoordinator', () => {
     });
 
     const starting = coordinator.start();
-    // loadUsageState performs real fs I/O before the (still-pending) first poll,
-    // so give the event loop a few real ticks to let hydration land.
-    for (let i = 0; i < 50 && coordinator.read() === null; i++) {
-      await new Promise((resolve) => setImmediate(resolve));
-    }
+    // loadUsageState performs real fs I/O before the (still-pending) first poll. Wait on the
+    // hydrated value itself, not a fixed tick count — under full-suite load a read can take
+    // more than a handful of event-loop turns, which made a 50-tick bound flaky (#1363).
+    await vi.waitFor(() => expect(coordinator.read()).not.toBeNull(), { timeout: 5_000, interval: 5 });
     expect(coordinator.read()).toEqual(persisted.snapshot);
 
     resolvePoll(null);

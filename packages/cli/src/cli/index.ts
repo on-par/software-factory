@@ -16,6 +16,7 @@ import type {
   EventKind,
   FactoryConfig,
   FailoverReason,
+  FailurePhase,
   GithubIssueParams,
   HealthKpis,
   IngestSettings,
@@ -93,10 +94,13 @@ import {
   parkReasonFor,
   parseKpiHistory,
   parseQueue,
+  partitionLocalQueueByActivity,
+  phaseSnapshotFile,
   planPhase,
   ProviderBreaker,
   readEvents,
   readPortLeases,
+  readQueue,
   readUsage,
   reapOrphanProcesses,
   reapStalePortLeases,
@@ -127,11 +131,15 @@ import {
   runIssue,
   scoreIssueReadiness,
   shipPhase,
+  summarizeEvent,
+  touchLastEvent,
+  touchRunActivity,
   validateQueue,
   watchUsage,
   worktreeWorkspace,
   writeBenchmarkArtifacts,
   writeLocalRunReport,
+  writePhaseSnapshot,
   writeProxyState,
 } from '@on-par/factory-core';
 import type {
@@ -173,6 +181,7 @@ import {
   logEvent,
   planQueueMigration,
   readCosts,
+  readGithubQueueSnapshot,
   reapLaneWorktree,
   releaseRuntimeFiles,
   releaseStaleClaims,
@@ -194,7 +203,7 @@ import {
   wrapCommandInSandbox,
   writePortFile,
 } from '@on-par/factory-core/internal';
-import { runTui } from '@on-par/factory-tui';
+import { type QueueReader, runTui } from '@on-par/factory-tui';
 import chalk from 'chalk';
 import { Command } from 'commander';
 import { cmdDaemonLogs, cmdDaemonStart, cmdDaemonStatus, cmdDaemonStop, DaemonCtlError } from './daemon.js';
@@ -257,7 +266,8 @@ async function getGitHubRepo(): Promise<string> {
   }
 }
 
-function getOctokit(): Octokit {
+/** Env token first, then one `gh auth token` subprocess (≤5 s). `undefined` when neither yields one. */
+function resolveGitHubToken(): string | undefined {
   let token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
   if (!token) {
     try {
@@ -265,7 +275,11 @@ function getOctokit(): Octokit {
       token = out.trim() || undefined;
     } catch {}
   }
-  return createFactoryOctokit(token);
+  return token;
+}
+
+function getOctokit(): Octokit {
+  return createFactoryOctokit(resolveGitHubToken());
 }
 
 export function errorDetail(err: unknown): string {
@@ -931,7 +945,17 @@ function warnQueueDiagnostics(diagnostics: QueueDiagnostic[]): void {
   }
 }
 
-export async function cmdStatus() {
+/** Formats the time since `lastActivityAt` as a short duration (e.g. `3m`) for the
+ *  `factory status` `== Active ==` section's `[phase, <age> ago]` display (#1343). An
+ *  active claim's heartbeat is always within DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS
+ *  (15m), so minutes is the only unit that ever shows. */
+function formatClaimAge(lastActivityAt: string, now: number): string {
+  const ageMs = Math.max(0, now - Date.parse(lastActivityAt));
+  const minutes = Math.floor(ageMs / 60_000);
+  return minutes < 1 ? '<1m' : `${minutes}m`;
+}
+
+export async function cmdStatus(opts: { kpis?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
   const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
@@ -953,56 +977,99 @@ export async function cmdStatus() {
   console.log(chalk.bold(`== ${ghRepo} ==`));
   console.log(`Product: ${product}`);
 
-  console.log(chalk.bold('\n== Effective config =='));
-  for (const line of describeEffectiveConfig({
-    router,
-    repo: repoConfig,
-    repoConfigPath: '.factory/config.json',
-  })) {
-    console.log(`  ${line}`);
-  }
-
-  console.log(chalk.bold('\n== Provider breaker =='));
-  const openBreakers = await new ProviderBreaker(paths.breaker).list();
-  if (openBreakers.length === 0) {
-    console.log('  (closed)');
-  } else {
-    for (const b of openBreakers) {
-      console.log(`  ${b.provider}: OPEN (${b.reason}) — ${Math.ceil(b.remainingMs / 60_000)}m remaining`);
-    }
-  }
-
-  console.log(chalk.bold('\n== Queue =='));
+  console.log(chalk.bold('\n== Active =='));
   if (existsSync(paths.queue)) {
     const { entries, diagnostics } = parseQueue(readFileSync(paths.queue, 'utf-8'));
     if (entries.length > 0) {
-      for (const e of entries) console.log(`  ${e.lane} ${e.issue}`);
+      const { active, staleCount } = await partitionLocalQueueByActivity(entries, paths.runs);
+      if (active.length === 0) {
+        console.log('  (idle — no active claims)');
+      } else {
+        const now = Date.now();
+        for (const e of active) {
+          console.log(`  ${e.lane} ${e.issue}  [${e.phase}, ${formatClaimAge(e.lastActivityAt, now)} ago]`);
+        }
+      }
+      if (staleCount > 0) {
+        console.log(`  (${staleCount} stale entr${staleCount === 1 ? 'y' : 'ies'} hidden — no recent activity)`);
+      }
     } else if (diagnostics.length === 0) {
-      console.log('  (empty)');
+      console.log('  (idle — no active claims)');
     }
     warnQueueDiagnostics(diagnostics);
   } else {
     console.log('  (no queue file)');
   }
 
-  console.log(chalk.bold('\n== Last Events =='));
+  console.log(chalk.bold('\n== Queue =='));
+  if (!hasGitHubToken()) {
+    console.log('  (no GitHub token — run `gh auth login`)');
+  } else {
+    const [owner, repoName] = ghRepo.split('/');
+    const githubQueue = createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo: repoName });
+    try {
+      const lanes = await githubQueue.lanes();
+      let printed = false;
+      for (const lane of lanes) {
+        const issues = await githubQueue.list(lane);
+        for (const issue of issues) {
+          console.log(`  ${lane} #${issue}`);
+          printed = true;
+        }
+      }
+      if (!printed) {
+        console.log('  (no claimable work)');
+      }
+    } catch (err) {
+      console.log(`  (queue lookup failed — ${errorDetail(err)})`);
+    }
+  }
+
+  console.log(chalk.bold('\n== Health =='));
+
+  if (opts.kpis) {
+    console.log(chalk.bold('\n  Effective config:'));
+    for (const line of describeEffectiveConfig({
+      router,
+      repo: repoConfig,
+      repoConfigPath: '.factory/config.json',
+    })) {
+      console.log(`    ${line}`);
+    }
+  } else {
+    console.log('\n  (Effective config and KPIs hidden — run `factory status --kpis` to view)');
+  }
+
+  console.log(chalk.bold('\n  Provider breaker:'));
+  const openBreakers = await new ProviderBreaker(paths.breaker).list();
+  if (openBreakers.length === 0) {
+    console.log('    (closed)');
+  } else {
+    for (const b of openBreakers) {
+      console.log(`    ${b.provider}: OPEN (${b.reason}) — ${Math.ceil(b.remainingMs / 60_000)}m remaining`);
+    }
+  }
+
+  console.log(chalk.bold('\n  Last Events:'));
   if (existsSync(paths.events)) {
     const events = readFileSync(paths.events, 'utf-8').trim().split('\n').slice(-12);
     for (const e of events) {
       try {
         const ev = JSON.parse(e);
-        console.log(`  ${ev.type} #${ev.issue}: ${ev.msg}`);
+        console.log(`    ${ev.type} #${ev.issue}: ${ev.msg}`);
       } catch {}
     }
   } else {
-    console.log('  (none)');
+    console.log('    (none)');
   }
 
-  console.log(chalk.bold('\n== Health KPIs =='));
-  const kpiEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
-  const kpiCosts = existsSync(paths.costs) ? readCosts(paths.costs) : [];
-  for (const line of formatKpiLines(computeHealthKpis(kpiEvents, kpiCosts))) {
-    console.log(`  ${line}`);
+  if (opts.kpis) {
+    console.log(chalk.bold('\n  KPIs:'));
+    const kpiEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
+    const kpiCosts = existsSync(paths.costs) ? readCosts(paths.costs) : [];
+    for (const line of formatKpiLines(computeHealthKpis(kpiEvents, kpiCosts))) {
+      console.log(`    ${line}`);
+    }
   }
 
   if (existsSync(paths.stop)) {
@@ -1010,7 +1077,52 @@ export async function cmdStatus() {
   }
 }
 
-async function cmdTui() {
+/** GitHub is polled far less often than local files: a queue changes on the order of minutes. */
+const TUI_GITHUB_QUEUE_POLL_MS = 30_000;
+
+/** The Queue tab's backlog source for `factory tui` (#1362). Mirrors `factory run`: GitHub Issues
+ *  by default, the local queue file only under `--local-queue`. Never throws at build time — a
+ *  missing repo or token becomes a snapshot error the tab renders, so the TUI still starts.
+ *
+ *  The token is resolved here, before Ink takes the terminal, so the `gh auth token` subprocess
+ *  never runs inside the first poll. Octokit is built at most once and only on the GitHub path;
+ *  when no token is present at startup, each poll re-resolves it so a `gh auth login` in another
+ *  terminal is picked up without restarting the TUI. */
+export function tuiQueueReader(input: {
+  localQueue: boolean;
+  queueFile: string;
+  queueProposedFile: string;
+  repo: string | undefined;
+  token?: () => string | undefined;
+  octokit?: (token: string) => Octokit;
+}): QueueReader {
+  const { token: resolveToken = resolveGitHubToken, octokit = createFactoryOctokit } = input;
+  if (input.localQueue) {
+    return { source: 'local file', read: () => readQueue(input.queueFile, input.queueProposedFile) };
+  }
+  if (input.repo === undefined) {
+    return {
+      source: 'GitHub',
+      pollMs: TUI_GITHUB_QUEUE_POLL_MS,
+      read: async () => ({ entries: [], error: 'repo detection failed — run inside a GitHub-backed checkout' }),
+    };
+  }
+  const [owner, repoName] = input.repo.split('/');
+  const clientFor = (token: string | undefined): ReturnType<typeof createOctokitQueueClient> | undefined =>
+    token === undefined ? undefined : createOctokitQueueClient(octokit(token));
+  let client = clientFor(resolveToken());
+  return {
+    source: 'GitHub',
+    pollMs: TUI_GITHUB_QUEUE_POLL_MS,
+    read: async () => {
+      client ??= clientFor(resolveToken());
+      if (client === undefined) return { entries: [], error: 'no GitHub token — run `gh auth login`' };
+      return readGithubQueueSnapshot({ client, owner, repo: repoName });
+    },
+  };
+}
+
+async function cmdTui(opts: { localQueue?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   let repo: string | undefined;
@@ -1019,15 +1131,40 @@ async function cmdTui() {
   } catch {
     // header just omits the repo
   }
+
+  const repoConfig = loadRepoConfig(repoRoot);
+  const modelsConfig = applyRepoConfig(loadModelsConfig(), repoConfig);
+  const routesConfig = loadRoutesConfig();
+  const effective = resolveEffectiveConfig(repoConfig);
+  const router = new ModelRouter(
+    modelsConfig,
+    routesConfig,
+    false,
+    undefined,
+    effective.allowExperimental,
+    effective.localOnly,
+  );
+  const effectiveConfigLines = describeEffectiveConfig({
+    router,
+    repo: repoConfig,
+    repoConfigPath: '.factory/config.json',
+  });
+
   await runTui({
     eventsFile: paths.events,
     repo,
     stopFile: paths.stop,
-    queueFile: paths.queue,
-    queueProposedFile: paths.queueProposed,
+    queueReader: tuiQueueReader({
+      localQueue: opts.localQueue === true,
+      queueFile: paths.queue,
+      queueProposedFile: paths.queueProposed,
+      repo,
+    }),
     costsFile: paths.costs,
     approvalsDir: paths.approvals,
     steeringDir: paths.steering,
+    breakerFile: paths.breaker,
+    effectiveConfigLines,
   });
 }
 
@@ -1276,6 +1413,10 @@ export async function shipIssue(
         console.error(chalk.red(`  FAIL: ${msg.slice('FAILED: '.length)}`));
       }
       logEvent(paths.events, type, issueNum, msg, { ...extra, lane, phase });
+      // Best-effort lastEvent summary (#1327) for factory.run.snapshot — an
+      // observability side channel, so a write failure is swallowed, not logged (that
+      // would re-enter this same function for every event this chokepoint fires on).
+      touchLastEvent(phaseSnapshotFile(paths.runs, issueNum), summarizeEvent(type, msg)).catch(() => {});
     };
   const log = mkLog();
 
@@ -1433,6 +1574,16 @@ export async function shipIssue(
     createApprovalGate: () => createFileApprovalGate({ dir: paths.approvals, timeoutMs: timeouts.approval * 1000 }),
     drainSteering: () => drainSteering(paths.steering, issueNum, worktree),
     reworkHistory,
+    recordPhase: (phase: FailurePhase) => {
+      const now = new Date().toISOString();
+      return writePhaseSnapshot(phaseSnapshotFile(paths.runs, issueNum), {
+        issue: issueNum,
+        phase,
+        updatedAt: now,
+        lastActivityAt: now,
+      });
+    },
+    onActivity: () => touchRunActivity(phaseSnapshotFile(paths.runs, issueNum), new Date().toISOString()),
     onDecomposed: (childIssues) => {
       const childList = childIssues.map((n) => `#${n}`).join(', ');
       const planLog = mkLog('plan');
@@ -4047,11 +4198,19 @@ export async function main() {
     .description('Report real 5h subscription usage (with a list-price heuristic fallback)')
     .action(cmdUsage);
 
-  program.command('status').description('Show queue, events, PRs, models').action(cmdStatus);
+  program
+    .command('status')
+    .description('Show queue, events, PRs, models')
+    .option('--kpis', 'Show full Health KPIs and Effective config')
+    .action((opts: { kpis?: boolean }) => cmdStatus(opts));
 
   program.command('kpis').description('Compute factory health KPIs and record a trend snapshot').action(cmdKpis);
 
-  program.command('tui').description('Live read-only view of the current run (q to quit)').action(cmdTui);
+  program
+    .command('tui')
+    .description('Live read-only view of the current run (q to quit)')
+    .option('--local-queue', 'Read .factory/queue instead of claiming issues from GitHub Issues')
+    .action((opts: { localQueue?: boolean }) => cmdTui(opts));
 
   program
     .command('logs')

@@ -10,10 +10,11 @@ import {
   followEvents,
   listPendingApprovals,
   listQueuedSteering,
+  ProviderBreaker,
   type QueueSnapshot,
   queueSteeringMessage,
   readCostsFile,
-  readQueue,
+  redactSecretPatterns,
   respondToApproval,
 } from '@on-par/factory-core';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
@@ -21,6 +22,7 @@ import { type JSX, useEffect, useMemo, useState } from 'react';
 
 import { type DashboardState, initialDashboard, reduceDashboard } from '../dashboard.js';
 import { CostsTab } from '../tabs/CostsTab.js';
+import { type BreakerRow, HealthTab } from '../tabs/HealthTab.js';
 import { initialLogScroll, reduceLogScroll } from '../tabs/log-scroll.js';
 import { LogTab } from '../tabs/LogTab.js';
 import { QueueTab } from '../tabs/QueueTab.js';
@@ -36,16 +38,25 @@ import { StopBanner } from './StopBanner.js';
 const MAX_LOG_EVENTS = 5000;
 const POLL_MS = 2000;
 
+/** Where the Queue tab's backlog comes from. The CLI builds one (GitHub Issues by default, the
+ *  local queue file under `--local-queue`) so this package never touches octokit itself (#1362). */
+export interface QueueReader {
+  /** Short source name shown in the Queue tab heading, e.g. "GitHub" or "local file". */
+  source: string;
+  /** One read. A thrown error is shown in the tab; the previous entries are kept. */
+  read: () => Promise<QueueSnapshot> | QueueSnapshot;
+  /** Poll interval; defaults to the TUI's file-poll cadence. GitHub-backed readers should pass a slower one. */
+  pollMs?: number;
+}
+
 export interface AppProps {
   eventsFile: string;
   repo?: string;
   follow?: typeof followEvents;
   stopFile?: string;
   pathExists?: (p: string) => boolean;
-  queueFile?: string;
-  queueProposedFile?: string;
+  queueReader?: QueueReader;
   costsFile?: string;
-  readQueueFn?: typeof readQueue;
   readCostsFn?: typeof readCostsFile;
   approvalsDir?: string;
   listPendingFn?: typeof listPendingApprovals;
@@ -53,6 +64,14 @@ export interface AppProps {
   steeringDir?: string;
   queueSteeringFn?: typeof queueSteeringMessage;
   listSteeringFn?: typeof listQueuedSteering;
+  breakerFile?: string;
+  effectiveConfigLines?: string[];
+  listBreakersFn?: (file: string) => Promise<BreakerRow[]>;
+}
+
+async function defaultListBreakersFn(file: string): Promise<BreakerRow[]> {
+  const breakers = await new ProviderBreaker(file).list();
+  return breakers.map((b) => ({ provider: b.provider, reason: b.reason, remainingMs: b.remainingMs }));
 }
 
 type View = 'dashboard' | 'detail';
@@ -70,10 +89,8 @@ export function App({
   follow = followEvents,
   stopFile,
   pathExists = existsSync,
-  queueFile,
-  queueProposedFile,
+  queueReader,
   costsFile,
-  readQueueFn = readQueue,
   readCostsFn = readCostsFile,
   approvalsDir,
   listPendingFn = listPendingApprovals,
@@ -81,6 +98,9 @@ export function App({
   steeringDir,
   queueSteeringFn = queueSteeringMessage,
   listSteeringFn = listQueuedSteering,
+  breakerFile,
+  effectiveConfigLines,
+  listBreakersFn = defaultListBreakersFn,
 }: AppProps): JSX.Element {
   const { exit } = useApp();
   const { stdout } = useStdout();
@@ -100,6 +120,8 @@ export function App({
   const [answered, setAnswered] = useState<Set<string>>(new Set());
   const [composer, setComposer] = useState<ComposerState | undefined>(undefined);
   const [steeringQueued, setSteeringQueued] = useState<Record<string, number>>({});
+  const [breakers, setBreakers] = useState<BreakerRow[]>([]);
+  const [healthSecondary, setHealthSecondary] = useState(false);
 
   useEffect(() => {
     const stop = follow(
@@ -125,12 +147,30 @@ export function App({
   }, [stopFile, pathExists]);
 
   useEffect(() => {
-    if (!queueFile) return;
-    const read = () => setQueueSnap(readQueueFn(queueFile, queueProposedFile));
-    read();
-    const interval = setInterval(read, POLL_MS);
-    return () => clearInterval(interval);
-  }, [queueFile, queueProposedFile, readQueueFn]);
+    if (!queueReader) return;
+    let cancelled = false;
+    let inFlight = false;
+    const read = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const snapshot = await queueReader.read();
+        if (!cancelled) setQueueSnap(snapshot);
+      } catch (err) {
+        // GitHub-controlled text: redact anything token-shaped before it reaches the pane.
+        const message = redactSecretPatterns(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setQueueSnap((prev) => ({ ...prev, error: `queue lookup failed — ${message}` }));
+      } finally {
+        inFlight = false;
+      }
+    };
+    void read();
+    const interval = setInterval(() => void read(), queueReader.pollMs ?? POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [queueReader]);
 
   useEffect(() => {
     if (!costsFile) return;
@@ -147,6 +187,16 @@ export function App({
     const interval = setInterval(read, POLL_MS);
     return () => clearInterval(interval);
   }, [approvalsDir, listPendingFn]);
+
+  useEffect(() => {
+    if (!breakerFile) return;
+    const read = () => {
+      void listBreakersFn(breakerFile).then(setBreakers);
+    };
+    read();
+    const interval = setInterval(read, POLL_MS);
+    return () => clearInterval(interval);
+  }, [breakerFile, listBreakersFn]);
 
   const laneIssuesKey = state.lanes.map((l) => l.issue).join(',');
 
@@ -291,6 +341,8 @@ export function App({
       if (key.pageUp) setLogScroll((s) => reduceLogScroll(s, 'pageUp', logHeight, events.length));
       if (key.pageDown) setLogScroll((s) => reduceLogScroll(s, 'pageDown', logHeight, events.length));
       if (input === 'f') setLogScroll((s) => reduceLogScroll(s, 'toggleFollow', logHeight, events.length));
+    } else if (tab === 'health') {
+      if (input === 'e') setHealthSecondary((v) => !v);
     }
   });
 
@@ -301,7 +353,7 @@ export function App({
       return (
         <Box flexDirection="column">
           <Header repo={repo} done={false} />
-          <Text dimColor>waiting for factory events…</Text>
+          <Text dimColor>(idle — no active claims)</Text>
         </Box>
       );
     }
@@ -352,9 +404,18 @@ export function App({
       )}
       <TabBar active={tab} />
       {tab === 'dashboard' && <DashboardPane />}
-      {tab === 'queue' && <QueueTab snapshot={queueSnap} lanes={state.lanes} />}
+      {tab === 'queue' && <QueueTab snapshot={queueSnap} lanes={state.lanes} source={queueReader?.source} />}
       {tab === 'costs' && <CostsTab costs={costsRead} selectedIndex={costsSelected} />}
       {tab === 'log' && <LogTab events={events} scroll={logScroll} height={logHeight} />}
+      {tab === 'health' && (
+        <HealthTab
+          events={events}
+          costs={costsRead.entries}
+          breakers={breakers}
+          effectiveConfigLines={effectiveConfigLines ?? []}
+          showSecondary={healthSecondary}
+        />
+      )}
     </Box>
   );
 }
