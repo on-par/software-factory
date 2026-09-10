@@ -37,10 +37,10 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "license": "MIT",
   "devDependencies": {
-    "@types/node": "^26.4.0"
+    "@types/node": "^26.4.1"
   }
 }
