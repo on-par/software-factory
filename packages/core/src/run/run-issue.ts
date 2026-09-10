@@ -340,9 +340,21 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     );
     // A pinned build model determines the route (#1367): an explicit repo `route` still wins, but
     // without one the pin's harness decides, so PLAN cannot send an Anthropic-pinned build to Codex.
-    const derivedRoute = request.preferredRoute
-      ? undefined
-      : routeForBuildModel(ports.router.registryRef, request.modelPins.build);
+    // Two guards keep the pin from resurrecting a route the operator turned off: local-only mode
+    // forces codex in PLAN and a pin must not undo that; and a codex pin while codex is disabled
+    // cannot force codex — PLAN's codex→claude fallback applies and the compatibility check below
+    // drops the pin, exactly as on main.
+    let derivedRoute =
+      request.preferredRoute || request.localOnly
+        ? undefined
+        : routeForBuildModel(ports.router.registryRef, request.modelPins.build);
+    if (derivedRoute === 'codex' && request.codexDisabled) {
+      log(
+        'model-override',
+        `pinned build model ${request.modelPins.build} needs the codex route but codex is disabled — the pin cannot force it`,
+      );
+      derivedRoute = undefined;
+    }
     const pinnedRoute = request.preferredRoute ?? derivedRoute;
     if (derivedRoute && request.modelPins.build) {
       log('model-override', `build route derived from pinned build model ${request.modelPins.build} → ${derivedRoute}`);

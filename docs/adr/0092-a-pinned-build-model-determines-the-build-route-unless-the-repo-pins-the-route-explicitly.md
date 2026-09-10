@@ -35,13 +35,22 @@ from pinned build model X → Y` when it came from the pin, feeds it to
    rewritten with the existing `repo-config-pin` reason), and re-applies it
    before BUILD so a plan port that ignores `preferredRoute` (a daemon, a
    test double) still cannot route a pinned worker elsewhere.
-3. **`model_override_ignored` stays, but only for a real conflict.** The
+3. **A pin cannot resurrect a route the operator turned off.** No route
+   is derived in local-only mode (PLAN forces codex there), and a
+   Codex-harness pin derives nothing while codex is disabled
+   (`providers.openai: false`, `FACTORY_CODEX=0`, or an open breaker) —
+   PLAN's codex→claude fallback then applies and the pin is dropped as
+   incompatible, as before. `buildPhase` backs this up: when it flips a
+   codex route to claude it also drops a Codex-harness `modelOverride`,
+   because an override skips the tier's provider filter and would run the
+   codex model on the claude route anyway.
+4. **`model_override_ignored` stays, but only for a real conflict.** The
    only way to reach it now is an explicit `route` that contradicts the
    pin; the message says the route was pinned by `.factory/config.json`.
-4. **The plan prompt states the rule** for claude-cli pins as it already
+5. **The plan prompt states the rule** for claude-cli pins as it already
    did for opencode, and says the factory enforces it, so the boss and the
    guard agree in the common case.
-5. **`factory status --kpis` shows the effective route** and its source:
+6. **`factory status --kpis` shows the effective route** and its source:
    `Build route: claude (derived from build pin claude-sonnet-5)`,
    `(.factory/config.json)`, or `plan decides (default)`.
 

@@ -103,6 +103,50 @@ describe('buildPhase FACTORY_CODEX kill-switch', () => {
     expect(logs).toContainEqual({ type: 'warn', msg: 'codex unavailable — falling back to claude' });
   });
 
+  it('drops a Codex-harness modelOverride when codex is disabled instead of running it on the claude route (#1367)', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-1367.md');
+    const stub = new StubModelExecutor({
+      scripts: {
+        build_codex: [{ output: 'codex output' }],
+        build_claude: [{ output: 'claude output' }],
+      },
+    });
+    // Put the claude-capable worker first so the claude route's own pick is observable: with
+    // the override dropped, the route must land on stub-worker, not the codex model.
+    const router = new ModelRouter(
+      { ...models, tiers: { worker: ['stub-worker', 'stub-codex', 'pinned-model'] } },
+      routes,
+      false,
+      stub,
+    );
+    const logs: Array<{ type: string; msg: string }> = [];
+
+    const result = await buildPhase({
+      issue: 1367,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/1367',
+      route: 'codex',
+      router,
+      constitution: null,
+      log: (type, msg) => {
+        logs.push({ type, msg });
+      },
+      codexDisabled: true,
+      modelOverride: 'stub-codex',
+    });
+
+    expect(result.ok).toBe(true);
+    const last = stub.calls[stub.calls.length - 1];
+    expect(last.task).toBe('build_claude');
+    expect(last.model).toBe('stub-worker');
+    expect(logs).toContainEqual({ type: 'warn', msg: 'codex unavailable — falling back to claude' });
+    expect(logs.some((l) => l.type === 'model_override_ignored' && l.msg.includes('stub-codex'))).toBe(true);
+  });
+
   it('uses build_codex and logs no warn when codex is not disabled', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);
