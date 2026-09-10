@@ -1392,6 +1392,25 @@ bash scripts/verify.sh
       await expect(h.runTuiCalls[0].queueReader!.read()).rejects.toThrow('GitHub API unavailable');
     });
 
+    it('--help lists --local-queue with the same wording as factory run (#1362)', async () => {
+      const originalWrite = process.stdout.write;
+      const written: string[] = [];
+      process.stdout.write = ((chunk: string | Uint8Array) => {
+        written.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write;
+      let res: Awaited<ReturnType<typeof runMain>>;
+      try {
+        res = await runMain('tui', '--help');
+      } finally {
+        process.stdout.write = originalWrite;
+      }
+      expect(res.exited).toBe(true);
+      const text = written.join('').replace(/\s+/g, ' ');
+      expect(text).toContain('--local-queue');
+      expect(text).toContain('Read .factory/queue instead of claiming issues from GitHub Issues');
+    });
+
     it('calls runTui with repo undefined when gh repo detection fails, and the reader says so', async () => {
       h.execImpl = (cmd: string) => {
         if (cmd.includes('rev-parse')) return h.repoRoot;

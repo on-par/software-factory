@@ -28,6 +28,16 @@ describe('readGithubQueueSnapshot (#1362)', () => {
     });
   });
 
+  it('lists an issue carrying two lane labels under both lanes, as list(lane) would', async () => {
+    const { client } = clientWith([
+      { number: 4, labels: ['factory:queued', 'factory:lane:a', 'factory:lane:b', 'factory:order:1'] },
+    ]);
+    const { entries } = await readGithubQueueSnapshot({ client, owner: 'o', repo: 'r' });
+    expect(entries.map((e) => `${e.lane}#${e.issue}`)).toEqual(['a#4', 'b#4']);
+  });
+
+  // `parked` here is a hand-applied label: the pipeline's own release(issue, 'parked') removes
+  // `factory:queued`, so a normally parked issue never appears in this list at all.
   it('derives in-progress + claimant and parked from labels, and omits a missing title', async () => {
     const { client } = clientWith([
       {

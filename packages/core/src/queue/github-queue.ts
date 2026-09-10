@@ -192,7 +192,10 @@ function orderedCandidates(lane: string, issues: QueueIssue[]): QueueIssue[] {
   return candidates.sort((a, b) => a.position - b.position).map(({ issue }) => issue);
 }
 
-/** Claim state of one GitHub-backed queue issue, read from its labels. */
+/** Claim state of one GitHub-backed queue issue, read from its labels. `in-progress` is the
+ *  mid-claim window where `factory:queued` and `factory:in-progress` coexist; `parked` can only
+ *  come from a hand-applied label, since `release(issue, 'parked')` strips `factory:queued` and the
+ *  issue then leaves this list altogether. */
 function queueIssueStatus(labels: readonly string[]): Pick<QueueSnapshotEntry, 'status' | 'claimant'> {
   if (labels.includes(IN_PROGRESS_LABEL)) {
     const claim = labels.find((name) => name.startsWith(CLAIMED_BY_LABEL_PREFIX));

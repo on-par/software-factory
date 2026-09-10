@@ -3,11 +3,13 @@ import { Box, Text } from 'ink';
 import type { JSX } from 'react';
 
 import type { LaneState, LaneStatus } from '../dashboard.js';
+import { sanitizeTerminalText } from '../text.js';
 
 const TITLE_MAX_LENGTH = 40;
 
 function truncate(s: string, max: number): string {
-  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+  const clean = sanitizeTerminalText(s);
+  return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
 }
 
 type RowStatus = LaneStatus | QueueEntryStatus;
@@ -33,7 +35,8 @@ export interface QueueTabProps {
 
 export function QueueTab({ snapshot, lanes, source }: QueueTabProps): JSX.Element {
   const heading = source === undefined ? undefined : <Text dimColor>queue: {source}</Text>;
-  const error = snapshot.error === undefined ? undefined : <Text color="red">({snapshot.error})</Text>;
+  const error =
+    snapshot.error === undefined ? undefined : <Text color="red">({sanitizeTerminalText(snapshot.error)})</Text>;
 
   if (snapshot.entries.length === 0) {
     return (
@@ -55,11 +58,12 @@ export function QueueTab({ snapshot, lanes, source }: QueueTabProps): JSX.Elemen
         // status/title from GitHub fills in for issues no lane has touched yet.
         const lane = laneByIssue.get(String(entry.issue));
         const status: RowStatus = lane?.status ?? entry.status ?? 'queued';
-        const claimant = lane === undefined && entry.claimant !== undefined ? ` (${entry.claimant})` : '';
+        const claimant =
+          lane === undefined && entry.claimant !== undefined ? ` (${sanitizeTerminalText(entry.claimant)})` : '';
         const title = lane?.title ?? entry.title ?? '';
         return (
           <Text key={`${entry.lane}-${entry.issue}`}>
-            {String(i + 1).padStart(3, ' ')}. {entry.lane} <Text bold>#{entry.issue}</Text>{' '}
+            {String(i + 1).padStart(3, ' ')}. {sanitizeTerminalText(entry.lane)} <Text bold>#{entry.issue}</Text>{' '}
             <Text color={STATUS_COLOR[status]}>
               {status}
               {claimant}

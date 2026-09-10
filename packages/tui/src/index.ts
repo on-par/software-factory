@@ -35,3 +35,4 @@ export type { TabBarProps } from './tabs/TabBar.js';
 export { TabBar } from './tabs/TabBar.js';
 export type { TabName } from './tabs/types.js';
 export { TAB_LABELS, TAB_ORDER } from './tabs/types.js';
+export { sanitizeTerminalText } from './text.js';

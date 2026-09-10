@@ -108,6 +108,27 @@ describe('QueueTab', () => {
     expect(keptFrame.indexOf('queue lookup failed')).toBeLessThan(keptFrame.indexOf('#61'));
   });
 
+  it('strips terminal control characters from GitHub-sourced lane, claimant, title and error text', () => {
+    const snapshot: QueueSnapshot = {
+      entries: [
+        {
+          lane: 'ops\r',
+          issue: 7,
+          title: '\x1b[2JWipe the pane',
+          status: 'in-progress',
+          claimant: 'mini\x1b[31m',
+        },
+      ],
+      error: 'queue lookup failed — \x1b[Hbad',
+    };
+    const frame = render(<QueueTab snapshot={snapshot} lanes={[]} source="GitHub" />).lastFrame() ?? '';
+    expect(frame).not.toContain('\x1b');
+    expect(frame).not.toContain('\r');
+    expect(frame).toContain('[2JWipe the pane');
+    expect(frame).toContain('in-progress (mini[31m)');
+    expect(frame).toContain('(queue lookup failed — [Hbad)');
+  });
+
   it('shows a proposed-count footer when proposedCount > 0', () => {
     const snapshot: QueueSnapshot = { entries: [{ lane: 'app', issue: 61 }], proposedCount: 3 };
     const { lastFrame } = render(<QueueTab snapshot={snapshot} lanes={[]} />);

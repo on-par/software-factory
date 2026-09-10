@@ -40,10 +40,12 @@ never written to the board.
 3. **The TUI takes a reader, not a file path.** `RunTuiOptions.queueFile` /
    `queueProposedFile` are replaced by a `QueueReader` — `{ source, read,
 pollMs? }` — and `AppProps.readQueueFn` is folded into it. The CLI builds
-   the reader (`tuiQueueReader`): octokit is constructed lazily, once, and
-   only on the GitHub path, so `@on-par/factory-tui` still never depends on
-   octokit and `--local-queue` never builds a client (the same laziness
-   `planRunLanes` promises).
+   the reader (`tuiQueueReader`): the token is resolved before Ink takes
+   the terminal (so the `gh auth token` subprocess never runs inside a
+   poll), octokit is built at most once and only on the GitHub path, and
+   `--local-queue` never builds a client (the same laziness `planRunLanes`
+   promises). When no token is present at startup, each poll re-resolves
+   it, so a `gh auth login` in another terminal is picked up live.
 4. **Widened `QueueSnapshot`, additive only.** `QueueSnapshotEntry` gains
    optional `title`, `status` (`queued | in-progress | parked`) and
    `claimant`; `QueueSnapshot` gains optional `error`. `readQueue()` for
@@ -66,6 +68,9 @@ are kept. The tab heading names the source (`queue: GitHub`/`queue:
 - `RunTuiOptions.queueFile` / `queueProposedFile` and
   `AppProps.readQueueFn` are gone. `@on-par/factory-tui` has one queue seam
   (`queueReader`), which is also the test seam.
+- `parked` in `QueueEntryStatus` can only come from a hand-applied label:
+  `release(issue, 'parked')` strips `factory:queued`, so a normally parked
+  issue leaves the Queue tab rather than showing as parked.
 - A GitHub-backed reader shows `in-progress` only for the transient window
   where an issue carries both `factory:queued` and `factory:in-progress`
   (mid-claim); a fully claimed issue leaves the Queue tab and appears in

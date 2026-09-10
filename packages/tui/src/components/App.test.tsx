@@ -217,16 +217,15 @@ describe('App', () => {
     expect(frame).toContain('Read the queue from GitHub');
   });
 
-  it('keeps the last good entries and shows a lookup-failed line when the reader throws (#1362)', async () => {
+  it('keeps the last good entries on a failed read, redacts the error, and clears it on the next success (#1362)', async () => {
     const fake = makeFakeFollow();
-    let calls = 0;
+    let mode: 'ok' | 'throw' = 'ok';
     const queueReader: QueueReader = {
       source: 'GitHub',
-      pollMs: 10,
+      pollMs: 5,
       read: vi.fn(async () => {
-        calls += 1;
-        if (calls === 1) return { entries: [{ lane: 'cleanup', issue: 1362, status: 'queued' as const }] };
-        throw new Error('GitHub API unavailable');
+        if (mode === 'throw') throw new Error('GitHub API unavailable for Bearer ghp_abcdefghijklmnop123456');
+        return { entries: [{ lane: 'cleanup', issue: 1362, status: 'queued' as const }] };
       }),
     };
     const { lastFrame, stdin } = render(<App eventsFile="ignored" follow={fake.follow} queueReader={queueReader} />);
@@ -236,13 +235,17 @@ describe('App', () => {
     expect(lastFrame()).toContain('#1362');
     expect(lastFrame()).not.toContain('queue lookup failed');
 
-    await new Promise((resolve) => setTimeout(resolve, 40));
-    await flush();
+    mode = 'throw';
+    await vi.waitFor(
+      () => expect(lastFrame()).toContain('(queue lookup failed — GitHub API unavailable for Bearer [redacted])'),
+      { timeout: 2_000, interval: 5 },
+    );
+    expect(lastFrame()).not.toContain('ghp_');
+    expect(lastFrame()).toContain('#1362');
 
-    const frame = lastFrame() ?? '';
-    expect(calls).toBeGreaterThanOrEqual(2);
-    expect(frame).toContain('(queue lookup failed — GitHub API unavailable)');
-    expect(frame).toContain('#1362');
+    mode = 'ok';
+    await vi.waitFor(() => expect(lastFrame()).not.toContain('queue lookup failed'), { timeout: 2_000, interval: 5 });
+    expect(lastFrame()).toContain('#1362');
   });
 
   it('shows Costs tab totals and the skipped-line warning without crashing', async () => {

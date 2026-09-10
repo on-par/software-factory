@@ -94,13 +94,13 @@ import {
   parkReasonFor,
   parseKpiHistory,
   parseQueue,
-  readQueue,
   partitionLocalQueueByActivity,
   phaseSnapshotFile,
   planPhase,
   ProviderBreaker,
   readEvents,
   readPortLeases,
+  readQueue,
   readUsage,
   reapOrphanProcesses,
   reapStalePortLeases,
@@ -169,7 +169,6 @@ import {
   createLocalSmallDryRun,
   createOctokitGreenPrClient,
   createOctokitQueueClient,
-  readGithubQueueSnapshot,
   daemonRuntimePaths,
   DEFAULT_FACTORYD_PORT,
   defaultRegistryPath,
@@ -182,6 +181,7 @@ import {
   logEvent,
   planQueueMigration,
   readCosts,
+  readGithubQueueSnapshot,
   reapLaneWorktree,
   releaseRuntimeFiles,
   releaseStaleClaims,
@@ -266,7 +266,8 @@ async function getGitHubRepo(): Promise<string> {
   }
 }
 
-function getOctokit(): Octokit {
+/** Env token first, then one `gh auth token` subprocess (≤5 s). `undefined` when neither yields one. */
+function resolveGitHubToken(): string | undefined {
   let token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
   if (!token) {
     try {
@@ -274,7 +275,11 @@ function getOctokit(): Octokit {
       token = out.trim() || undefined;
     } catch {}
   }
-  return createFactoryOctokit(token);
+  return token;
+}
+
+function getOctokit(): Octokit {
+  return createFactoryOctokit(resolveGitHubToken());
 }
 
 export function errorDetail(err: unknown): string {
@@ -1076,34 +1081,42 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
 const TUI_GITHUB_QUEUE_POLL_MS = 30_000;
 
 /** The Queue tab's backlog source for `factory tui` (#1362). Mirrors `factory run`: GitHub Issues
- *  by default, the local queue file only under `--local-queue`. Never throws — a missing repo or
- *  token becomes a snapshot error the tab renders, so the TUI still starts. Octokit is built
- *  once, lazily, and only on the GitHub path. */
+ *  by default, the local queue file only under `--local-queue`. Never throws at build time — a
+ *  missing repo or token becomes a snapshot error the tab renders, so the TUI still starts.
+ *
+ *  The token is resolved here, before Ink takes the terminal, so the `gh auth token` subprocess
+ *  never runs inside the first poll. Octokit is built at most once and only on the GitHub path;
+ *  when no token is present at startup, each poll re-resolves it so a `gh auth login` in another
+ *  terminal is picked up without restarting the TUI. */
 export function tuiQueueReader(input: {
   localQueue: boolean;
   queueFile: string;
   queueProposedFile: string;
   repo: string | undefined;
-  hasToken?: () => boolean;
-  octokit?: () => Octokit;
+  token?: () => string | undefined;
+  octokit?: (token: string) => Octokit;
 }): QueueReader {
-  const { hasToken = hasGitHubToken, octokit = getOctokit } = input;
+  const { token: resolveToken = resolveGitHubToken, octokit = createFactoryOctokit } = input;
   if (input.localQueue) {
     return { source: 'local file', read: () => readQueue(input.queueFile, input.queueProposedFile) };
   }
-  const unavailable = (error: string): QueueReader => ({
-    source: 'GitHub',
-    read: async () => ({ entries: [], error }),
-  });
-  if (input.repo === undefined) return unavailable('repo detection failed — run inside a GitHub-backed checkout');
-  if (!hasToken()) return unavailable('no GitHub token — run `gh auth login`');
+  if (input.repo === undefined) {
+    return {
+      source: 'GitHub',
+      pollMs: TUI_GITHUB_QUEUE_POLL_MS,
+      read: async () => ({ entries: [], error: 'repo detection failed — run inside a GitHub-backed checkout' }),
+    };
+  }
   const [owner, repoName] = input.repo.split('/');
-  let client: ReturnType<typeof createOctokitQueueClient> | undefined;
+  const clientFor = (token: string | undefined): ReturnType<typeof createOctokitQueueClient> | undefined =>
+    token === undefined ? undefined : createOctokitQueueClient(octokit(token));
+  let client = clientFor(resolveToken());
   return {
     source: 'GitHub',
     pollMs: TUI_GITHUB_QUEUE_POLL_MS,
-    read: () => {
-      client ??= createOctokitQueueClient(octokit());
+    read: async () => {
+      client ??= clientFor(resolveToken());
+      if (client === undefined) return { entries: [], error: 'no GitHub token — run `gh auth login`' };
       return readGithubQueueSnapshot({ client, owner, repo: repoName });
     },
   };

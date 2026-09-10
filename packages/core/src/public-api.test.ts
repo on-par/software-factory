@@ -72,6 +72,7 @@ const PUBLIC_API_KEYS = [
   // Queue
   'parseQueue',
   'readQueue',
+  'redactSecretPatterns',
   'rewriteQueueForDecomposition',
   'validateQueue',
   // Queue activity (#1342)

@@ -14,6 +14,7 @@ import {
   type QueueSnapshot,
   queueSteeringMessage,
   readCostsFile,
+  redactSecretPatterns,
   respondToApproval,
 } from '@on-par/factory-core';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
@@ -156,7 +157,8 @@ export function App({
         const snapshot = await queueReader.read();
         if (!cancelled) setQueueSnap(snapshot);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        // GitHub-controlled text: redact anything token-shaped before it reaches the pane.
+        const message = redactSecretPatterns(err instanceof Error ? err.message : String(err));
         if (!cancelled) setQueueSnap((prev) => ({ ...prev, error: `queue lookup failed — ${message}` }));
       } finally {
         inFlight = false;
