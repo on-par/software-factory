@@ -108,9 +108,29 @@ export async function readPhaseSnapshot(file: string): Promise<RunPhaseSnapshot 
  *  A no-op when no snapshot exists yet for this file (recordPhase('check') always writes
  *  one before checkers run, so this only fires once that snapshot is in place). */
 export async function touchRunActivity(file: string, now: string): Promise<void> {
-  const existing = await readPhaseSnapshot(file);
-  if (!existing) return;
-  await writePhaseSnapshot(file, { ...existing, lastActivityAt: now });
+  return serializedPerFile(file, async () => {
+    const existing = await readPhaseSnapshot(file);
+    if (!existing) return;
+    await writePhaseSnapshot(file, { ...existing, lastActivityAt: now });
+  });
+}
+
+/** In-flight read-modify-write chain per snapshot file. The CLI fires `touchLastEvent` for
+ *  every logged event without awaiting it, so two quick events could interleave their
+ *  read and write steps and let the earlier event land last (#1371). Chaining each file's
+ *  touches applies them in call order; a failed touch does not block the next one. */
+const rmwChains = new Map<string, Promise<void>>();
+
+function serializedPerFile(file: string, op: () => Promise<void>): Promise<void> {
+  const prev = rmwChains.get(file) ?? Promise.resolve();
+  const next = prev.catch(() => undefined).then(op);
+  rmwChains.set(file, next);
+  void next
+    .catch(() => undefined)
+    .finally(() => {
+      if (rmwChains.get(file) === next) rmwChains.delete(file);
+    });
+  return next;
 }
 
 /** Read-modify-write: sets a persisted snapshot's `lastEvent` summary (#1327) without
@@ -119,7 +139,9 @@ export async function touchRunActivity(file: string, now: string): Promise<void>
  *  `touchRunActivity`): the first events of a run are logged before PLAN's first
  *  `recordPhase` write, and this is an observability side channel, not a run invariant. */
 export async function touchLastEvent(file: string, lastEvent: string): Promise<void> {
-  const existing = await readPhaseSnapshot(file);
-  if (!existing) return;
-  await writePhaseSnapshot(file, { ...existing, lastEvent });
+  return serializedPerFile(file, async () => {
+    const existing = await readPhaseSnapshot(file);
+    if (!existing) return;
+    await writePhaseSnapshot(file, { ...existing, lastEvent });
+  });
 }
