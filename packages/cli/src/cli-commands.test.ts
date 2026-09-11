@@ -65,6 +65,7 @@ const h = vi.hoisted(() => {
       };
       costsFile?: string;
       steeringDir?: string;
+      runsDir?: string;
     }>,
     setupWorktreeImpl: async (_repoRoot: string, _branch: string, _worktree: string, _startPoint?: string) => {},
   };
@@ -114,6 +115,7 @@ vi.mock('@on-par/factory-tui', () => ({
       };
       costsFile?: string;
       steeringDir?: string;
+      runsDir?: string;
     }) => {
       h.runTuiCalls.push(opts);
     },
@@ -1311,6 +1313,7 @@ bash scripts/verify.sh
       expect(h.runTuiCalls[0].queueReader?.pollMs).toBe(30_000);
       expect(h.runTuiCalls[0].costsFile?.endsWith(join('.factory', 'state', 'costs.jsonl'))).toBe(true);
       expect(h.runTuiCalls[0].steeringDir?.endsWith(join('.factory', 'state', 'steering'))).toBe(true);
+      expect(h.runTuiCalls[0].runsDir?.endsWith(join('.factory', 'state', 'runs'))).toBe(true);
     });
 
     it('default reader lists claimable GitHub issues with titles in lane order, ignoring a stale queue file (#1362)', async () => {
@@ -3485,6 +3488,25 @@ describe('shipIssue (direct)', () => {
     const core = await import('@on-par/factory-core');
     await shipIssue(5, {}, ctx());
     expect(vi.mocked(core.loadRepoConfig)).toHaveBeenCalledWith(h.repoRoot, paths().root);
+  });
+
+  it('keeps a claude-cli build pin on the claude route when PLAN picks codex (#1367)', async () => {
+    const core = await import('@on-par/factory-core');
+    h.modelOverrides = { build: 'claude-sonnet-5' };
+    h.modelProviders = { 'claude-sonnet-5': 'anthropic' };
+    h.planResult = { ok: true, route: 'codex' };
+
+    await shipIssue(5, {}, ctx());
+
+    expect(vi.mocked(core.planPhase).mock.calls.at(-1)?.[0]).toMatchObject({ preferredRoute: 'claude' });
+    expect(vi.mocked(core.buildPhase).mock.calls.at(-1)?.[0]).toMatchObject({
+      route: 'claude',
+      modelOverride: 'claude-sonnet-5',
+    });
+    const events = readFileSync(paths().events, 'utf-8');
+    expect(events).toContain('build model pinned to claude-sonnet-5');
+    expect(events).toContain('build route derived from pinned build model claude-sonnet-5 → claude');
+    expect(events).not.toContain('model_override_ignored');
   });
 
   it('reads providers flags from .factory/config.json (no symlink needed)', async () => {

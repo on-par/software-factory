@@ -10,15 +10,17 @@ import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { loadModelsConfig, type ModelsConfig, type RoutesConfig } from './index.js';
 import {
-  applyRepoConfig,
   adaptV1ToV2,
+  applyRepoConfig,
   describeEffectiveConfig,
   loadRepoConfig,
   resolveCodexDisabled,
+  resolveEffectiveBuildRoute,
   resolveEffectiveConfig,
   resolveEffectiveModelPins,
   resolveEfficiencyPolicy,
   resolveUsageCap,
+  routeForBuildModel,
 } from './repo.js';
 
 type ModelDef = ModelsConfig['models'][string];
@@ -578,6 +580,58 @@ describe('resolveUsageCap', () => {
 
   it('rejects a non-positive env cap', () => {
     expect(() => resolveUsageCap(null, { FACTORY_USAGE_CAP: '-1' })).toThrow(/FACTORY_USAGE_CAP/);
+  });
+});
+
+describe('build route from a pinned build model (#1367)', () => {
+  const registry = new ModelRegistry(models);
+
+  it('routeForBuildModel maps a harness to its only possible route', () => {
+    expect(routeForBuildModel(registry, 'claude-model')).toBe('claude');
+    expect(routeForBuildModel(registry, 'gpt-model-a')).toBe('codex');
+    expect(routeForBuildModel(registry, 'ollama-model')).toBeUndefined();
+    expect(routeForBuildModel(registry, 'no-such-model')).toBeUndefined();
+    expect(routeForBuildModel(registry, undefined)).toBeUndefined();
+  });
+
+  it('resolveEffectiveBuildRoute: explicit repo route > build pin > plan decides', () => {
+    expect(
+      resolveEffectiveBuildRoute(registry, { version: 2, route: 'opencode' }, { build: 'claude-model', sources: {} }),
+    ).toEqual({
+      route: 'opencode',
+      source: 'repo',
+    });
+    expect(resolveEffectiveBuildRoute(registry, { version: 2 }, { build: 'claude-model', sources: {} })).toEqual({
+      route: 'claude',
+      source: 'build-pin',
+    });
+    expect(resolveEffectiveBuildRoute(registry, { version: 2 }, { build: 'gpt-model-a', sources: {} })).toEqual({
+      route: 'codex',
+      source: 'build-pin',
+    });
+    expect(resolveEffectiveBuildRoute(registry, null, { sources: {} })).toEqual({ source: 'plan' });
+    expect(resolveEffectiveBuildRoute(registry, null, { build: 'ollama-model', sources: {} })).toEqual({
+      source: 'plan',
+    });
+  });
+
+  it('describeEffectiveConfig prints the effective build route and where it came from', () => {
+    const stub = new StubModelExecutor({ scripts: {} });
+    const router = new ModelRouter(models, routes, false, stub);
+    const at = (repo: Parameters<typeof describeEffectiveConfig>[0]['repo'], env: NodeJS.ProcessEnv = {}) =>
+      describeEffectiveConfig({ router, repo, env, repoConfigPath: '.factory/config.json' }).find((l) =>
+        l.startsWith('Build route:'),
+      );
+    expect(at({ version: 2, models: { pins: { build: 'claude-model' } } })).toBe(
+      'Build route: claude (derived from build pin claude-model)',
+    );
+    expect(at({ version: 2, models: { pins: { build: 'claude-model' } }, route: 'codex' })).toBe(
+      'Build route: codex (.factory/config.json)',
+    );
+    expect(at(null, { FACTORY_BUILD_MODEL: 'gpt-model-a' })).toBe(
+      'Build route: codex (derived from build pin gpt-model-a)',
+    );
+    expect(at(null)).toBe('Build route: plan decides (default)');
   });
 });
 
