@@ -127,7 +127,7 @@ export class ClaudeCliHarness implements CodingHarness {
     const effort = registry.getEffort(model, request.task);
     const effortArg = effort === undefined ? '' : ` --effort ${shellEscape(String(effort))}`;
     const flag = registry.getClaudeFlag(model);
-    const modelArg = flag ? `--model ${flag}` : '';
+    const modelArg = flag ? `--model ${shellEscape(flag)}` : '';
     const promptDir = await mkdtemp(join(tmpdir(), 'factory-claude-prompt-'));
     const promptPath = join(promptDir, 'prompt.txt');
     await writeFile(promptPath, prompt, 'utf8');
