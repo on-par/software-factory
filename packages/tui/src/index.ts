@@ -20,6 +20,7 @@ export type { DashboardState, LaneActivityPartition, LaneState, LaneStatus } fro
 export {
   initialDashboard,
   isLaneEvent,
+  isNonTerminalLane,
   laneElapsedMs,
   mergeTrainPosition,
   partitionLanesByActivity,

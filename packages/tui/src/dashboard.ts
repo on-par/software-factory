@@ -41,6 +41,11 @@ function newLane(e: FactoryEvent): LaneState {
 /** Lane statuses that mean "this lane is still doing something"; only these can go stale. */
 const NON_TERMINAL: ReadonlySet<LaneStatus> = new Set(['running', 'ready', 'waiting-merge']);
 
+/** True for lanes whose staleness depends on a heartbeat — the only ones worth polling a snapshot for. */
+export function isNonTerminalLane(lane: LaneState): boolean {
+  return NON_TERMINAL.has(lane.status);
+}
+
 export function reduceDashboard(state: DashboardState, e: FactoryEvent): DashboardState {
   if (!isLaneEvent(e)) {
     if (e.type === 'usage-stop') return { ...state, usageStop: e.msg };

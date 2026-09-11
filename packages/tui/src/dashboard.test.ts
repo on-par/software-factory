@@ -5,6 +5,7 @@ import {
   type DashboardState,
   initialDashboard,
   isLaneEvent,
+  isNonTerminalLane,
   laneElapsedMs,
   mergeTrainPosition,
   partitionLanesByActivity,
@@ -299,6 +300,15 @@ describe('partitionLanesByActivity (#1369)', () => {
     });
     expect(active.map((l) => l.issue)).toEqual(['22', '23']);
     expect(staleCount).toBe(2);
+  });
+
+  it('isNonTerminalLane is true only for running / ready / waiting-merge', () => {
+    expect(lanes.map((l) => [l.issue, isNonTerminalLane(l)])).toEqual([
+      ['20', true],
+      ['21', true],
+      ['22', false],
+      ['23', false],
+    ]);
   });
 
   it('keeps a quiet lane whose phase-snapshot heartbeat is fresh', () => {

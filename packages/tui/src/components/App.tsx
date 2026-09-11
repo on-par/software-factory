@@ -24,7 +24,13 @@ import {
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import { type JSX, useEffect, useMemo, useState } from 'react';
 
-import { type DashboardState, initialDashboard, partitionLanesByActivity, reduceDashboard } from '../dashboard.js';
+import {
+  type DashboardState,
+  initialDashboard,
+  isNonTerminalLane,
+  partitionLanesByActivity,
+  reduceDashboard,
+} from '../dashboard.js';
 import { CostsTab } from '../tabs/CostsTab.js';
 import { type BreakerRow, HealthTab } from '../tabs/HealthTab.js';
 import { initialLogScroll, reduceLogScroll } from '../tabs/log-scroll.js';
@@ -215,18 +221,26 @@ export function App({
   useEffect(() => {
     if (!runsDir) return;
     let cancelled = false;
+    let inFlight = false;
     const read = async () => {
-      const next: Record<string, string | undefined> = {};
-      await Promise.all(
-        state.lanes.map(async (lane) => {
-          try {
-            next[lane.issue] = (await readSnapshotFn(phaseSnapshotFile(runsDir, Number(lane.issue))))?.lastActivityAt;
-          } catch {
-            next[lane.issue] = undefined;
-          }
-        }),
-      );
-      if (!cancelled) setHeartbeats(next);
+      if (inFlight) return; // a slow read must not be overwritten by an older, later-landing one
+      inFlight = true;
+      try {
+        const next: Record<string, string | undefined> = {};
+        // Only non-terminal lanes can go stale, so only they need a heartbeat.
+        await Promise.all(
+          state.lanes.filter(isNonTerminalLane).map(async (lane) => {
+            try {
+              next[lane.issue] = (await readSnapshotFn(phaseSnapshotFile(runsDir, Number(lane.issue))))?.lastActivityAt;
+            } catch {
+              next[lane.issue] = undefined;
+            }
+          }),
+        );
+        if (!cancelled) setHeartbeats(next);
+      } finally {
+        inFlight = false;
+      }
     };
     void read();
     const interval = setInterval(() => void read(), POLL_MS);
