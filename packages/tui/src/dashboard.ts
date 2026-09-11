@@ -16,6 +16,8 @@ export interface LaneState {
   finishedAt?: string;
   waitingSince?: string;
   worktree?: string;
+  /** Timestamp of the lane's most recent event; the staleness input for partitionLanesByActivity (#1369). */
+  lastEventAt: string;
 }
 
 export interface DashboardState {
@@ -33,21 +35,28 @@ export function isLaneEvent(e: FactoryEvent): boolean {
 }
 
 function newLane(e: FactoryEvent): LaneState {
-  return { issue: e.issue, run: initialState(), status: 'running', startedAt: e.ts };
+  return { issue: e.issue, run: initialState(), status: 'running', startedAt: e.ts, lastEventAt: e.ts };
 }
+
+/** Lane statuses that mean "this lane is still doing something"; only these can go stale. */
+const NON_TERMINAL: ReadonlySet<LaneStatus> = new Set(['running', 'ready', 'waiting-merge']);
 
 export function reduceDashboard(state: DashboardState, e: FactoryEvent): DashboardState {
   if (!isLaneEvent(e)) {
     if (e.type === 'usage-stop') return { ...state, usageStop: e.msg };
-    if (e.type === 'run-done') return { ...state, runDone: true };
+    // A finished run has no active lanes by definition: drop them, so replaying a log that
+    // holds many runs leaves only the run in progress on the Active tab (#1369).
+    if (e.type === 'run-done') return { ...state, lanes: [], runDone: true };
     return state;
   }
 
-  const idx = state.lanes.findIndex((l) => l.issue === e.issue);
-  const prevLane = idx === -1 ? newLane(e) : state.lanes[idx];
+  // The first lane event after a run ended starts the next run's lane set.
+  const base = state.runDone ? { ...state, lanes: [], runDone: false } : state;
+  const idx = base.lanes.findIndex((l) => l.issue === e.issue);
+  const prevLane = idx === -1 ? newLane(e) : base.lanes[idx];
   const prevStatus = prevLane.status;
 
-  let lane: LaneState = { ...prevLane, run: reduceEvent(prevLane.run, e) };
+  let lane: LaneState = { ...prevLane, run: reduceEvent(prevLane.run, e), lastEventAt: e.ts };
 
   if (laneStatusOf(e.type) === 'running' && prevStatus !== 'running') {
     lane = {
@@ -81,8 +90,41 @@ export function reduceDashboard(state: DashboardState, e: FactoryEvent): Dashboa
     lane = { ...lane, status: 'stopped', finishedAt: e.ts };
   }
 
-  const lanes = idx === -1 ? [...state.lanes, lane] : state.lanes.map((l, i) => (i === idx ? lane : l));
-  return { ...state, lanes };
+  const lanes = idx === -1 ? [...base.lanes, lane] : base.lanes.map((l, i) => (i === idx ? lane : l));
+  return { ...base, lanes };
+}
+
+export interface LaneActivityPartition {
+  /** Lanes to show: every terminal lane of the current run, plus non-terminal lanes with recent activity. */
+  active: LaneState[];
+  /** Non-terminal lanes with neither a recent event nor a recent phase-snapshot heartbeat. */
+  staleCount: number;
+}
+
+/** Hides lanes a dead or killed run left behind at `running` / `ready` / `waiting-merge` (#1369).
+ *  A lane stays visible while either its last event or its per-issue phase-snapshot heartbeat
+ *  (`RunPhaseSnapshot.lastActivityAt`, keyed by issue in `heartbeats`) is within the threshold —
+ *  the same rule `factory status` applies to local claims (ADR-0086). Terminal lanes are never
+ *  hidden; `run-done` clears them. */
+export function partitionLanesByActivity(
+  lanes: readonly LaneState[],
+  opts: { now: number; heartbeats?: Readonly<Record<string, string | undefined>>; staleThresholdMs: number },
+): LaneActivityPartition {
+  const fresh = (iso: string | undefined): boolean => {
+    if (!iso) return false;
+    const age = opts.now - Date.parse(iso);
+    return Number.isFinite(age) && age <= opts.staleThresholdMs;
+  };
+  const active: LaneState[] = [];
+  let staleCount = 0;
+  for (const lane of lanes) {
+    if (!NON_TERMINAL.has(lane.status) || fresh(lane.lastEventAt) || fresh(opts.heartbeats?.[lane.issue])) {
+      active.push(lane);
+    } else {
+      staleCount += 1;
+    }
+  }
+  return { active, staleCount };
 }
 
 export function mergeTrainPosition(state: DashboardState, issue: string): number | undefined {

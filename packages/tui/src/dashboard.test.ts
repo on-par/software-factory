@@ -7,6 +7,7 @@ import {
   isLaneEvent,
   laneElapsedMs,
   mergeTrainPosition,
+  partitionLanesByActivity,
   reduceDashboard,
 } from './dashboard.js';
 
@@ -242,5 +243,72 @@ describe('laneElapsedMs', () => {
     ]);
     const now = Date.parse('2026-01-01T00:05:00.000Z');
     expect(laneElapsedMs(state.lanes[0], now)).toBe(10_000);
+  });
+});
+
+describe('reduceDashboard — run boundaries (#1369)', () => {
+  it('drops every lane on run-done and starts a fresh set on the next lane event', () => {
+    const afterRun = reduceAll([
+      ev('plan', '10', 'Starting plan phase', '2026-01-01T00:00:00.000Z'),
+      ev('await-merge', '10', 'waiting', '2026-01-01T00:10:00.000Z'),
+      ev('plan', '11', 'Starting plan phase', '2026-01-01T00:11:00.000Z'),
+      ev('run-done', 'all', 'all lanes finished', '2026-01-01T01:00:00.000Z'),
+    ]);
+    expect(afterRun.lanes).toEqual([]);
+    expect(afterRun.runDone).toBe(true);
+
+    const nextRun = reduceDashboard(afterRun, ev('plan', '12', 'Starting plan phase', '2026-01-02T00:00:00.000Z'));
+    expect(nextRun.lanes.map((l) => l.issue)).toEqual(['12']);
+    expect(nextRun.runDone).toBe(false);
+  });
+
+  it("tracks each lane's last event time", () => {
+    const state = reduceAll([
+      ev('plan', '10', 'Starting plan phase', '2026-01-01T00:00:00.000Z'),
+      ev('build', '10', 'Starting build phase', '2026-01-01T00:05:00.000Z'),
+      ev('plan', '11', 'Starting plan phase', '2026-01-01T00:01:00.000Z'),
+    ]);
+    expect(state.lanes.find((l) => l.issue === '10')?.lastEventAt).toBe('2026-01-01T00:05:00.000Z');
+    expect(state.lanes.find((l) => l.issue === '11')?.lastEventAt).toBe('2026-01-01T00:01:00.000Z');
+  });
+});
+
+describe('partitionLanesByActivity (#1369)', () => {
+  const T0 = Date.parse('2026-01-01T00:00:00.000Z');
+  const threshold = 15 * 60_000;
+  const lanes = reduceAll([
+    ev('plan', '20', 'Starting plan phase', '2026-01-01T00:00:00.000Z'),
+    ev('await-merge', '20', 'waiting', '2026-01-01T00:00:00.000Z'),
+    ev('plan', '21', 'Starting plan phase', '2026-01-01T00:00:00.000Z'),
+    ev('plan', '22', 'Starting plan phase', '2026-01-01T00:00:00.000Z'),
+    ev('landed', '22', 'merged', '2026-01-01T00:00:00.000Z'),
+    ev('plan', '23', 'Starting plan phase', '2026-01-01T00:00:00.000Z'),
+    ev('parked', '23', 'parked', '2026-01-01T00:00:00.000Z'),
+  ]).lanes;
+
+  it('keeps every lane while events are fresh', () => {
+    const { active, staleCount } = partitionLanesByActivity(lanes, { now: T0 + 60_000, staleThresholdMs: threshold });
+    expect(active.map((l) => l.issue)).toEqual(['20', '21', '22', '23']);
+    expect(staleCount).toBe(0);
+  });
+
+  it('hides non-terminal lanes with no recent event or heartbeat, but never terminal ones', () => {
+    const { active, staleCount } = partitionLanesByActivity(lanes, {
+      now: T0 + 2 * threshold,
+      staleThresholdMs: threshold,
+    });
+    expect(active.map((l) => l.issue)).toEqual(['22', '23']);
+    expect(staleCount).toBe(2);
+  });
+
+  it('keeps a quiet lane whose phase-snapshot heartbeat is fresh', () => {
+    const now = T0 + 2 * threshold;
+    const heartbeats = {
+      '20': new Date(now - 60_000).toISOString(),
+      '21': new Date(now - 3 * threshold).toISOString(),
+    };
+    const { active, staleCount } = partitionLanesByActivity(lanes, { now, heartbeats, staleThresholdMs: threshold });
+    expect(active.map((l) => l.issue)).toEqual(['20', '22', '23']);
+    expect(staleCount).toBe(1);
   });
 });

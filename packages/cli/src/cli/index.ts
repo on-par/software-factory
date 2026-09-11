@@ -1163,6 +1163,7 @@ async function cmdTui(opts: { localQueue?: boolean } = {}) {
     costsFile: paths.costs,
     approvalsDir: paths.approvals,
     steeringDir: paths.steering,
+    runsDir: paths.runs,
     breakerFile: paths.breaker,
     effectiveConfigLines,
   });

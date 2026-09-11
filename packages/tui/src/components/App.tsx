@@ -5,22 +5,26 @@ import {
   aggregateCosts,
   type ApprovalRequest,
   type CostsRead,
+  DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS,
   extractPathCandidates,
   type FactoryEvent,
   followEvents,
   listPendingApprovals,
   listQueuedSteering,
+  phaseSnapshotFile,
   ProviderBreaker,
   type QueueSnapshot,
   queueSteeringMessage,
   readCostsFile,
+  readPhaseSnapshot,
   redactSecretPatterns,
   respondToApproval,
+  type RunPhaseSnapshot,
 } from '@on-par/factory-core';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import { type JSX, useEffect, useMemo, useState } from 'react';
 
-import { type DashboardState, initialDashboard, reduceDashboard } from '../dashboard.js';
+import { type DashboardState, initialDashboard, partitionLanesByActivity, reduceDashboard } from '../dashboard.js';
 import { CostsTab } from '../tabs/CostsTab.js';
 import { type BreakerRow, HealthTab } from '../tabs/HealthTab.js';
 import { initialLogScroll, reduceLogScroll } from '../tabs/log-scroll.js';
@@ -29,7 +33,7 @@ import { QueueTab } from '../tabs/QueueTab.js';
 import { TabBar } from '../tabs/TabBar.js';
 import { TAB_ORDER, type TabName } from '../tabs/types.js';
 import { ApprovalPrompt } from './ApprovalPrompt.js';
-import { Dashboard } from './Dashboard.js';
+import { Dashboard, staleLanesLine } from './Dashboard.js';
 import { Header } from './Header.js';
 import { RunDetail } from './RunDetail.js';
 import { SteeringComposer } from './SteeringComposer.js';
@@ -67,6 +71,10 @@ export interface AppProps {
   breakerFile?: string;
   effectiveConfigLines?: string[];
   listBreakersFn?: (file: string) => Promise<BreakerRow[]>;
+  /** `.factory/state/runs`: per-issue phase snapshots whose heartbeat keeps a quiet lane visible (#1369). */
+  runsDir?: string;
+  readSnapshotFn?: (file: string) => Promise<RunPhaseSnapshot | null>;
+  staleThresholdMs?: number;
 }
 
 async function defaultListBreakersFn(file: string): Promise<BreakerRow[]> {
@@ -101,6 +109,9 @@ export function App({
   breakerFile,
   effectiveConfigLines,
   listBreakersFn = defaultListBreakersFn,
+  runsDir,
+  readSnapshotFn = readPhaseSnapshot,
+  staleThresholdMs = DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS,
 }: AppProps): JSX.Element {
   const { exit } = useApp();
   const { stdout } = useStdout();
@@ -122,6 +133,7 @@ export function App({
   const [steeringQueued, setSteeringQueued] = useState<Record<string, number>>({});
   const [breakers, setBreakers] = useState<BreakerRow[]>([]);
   const [healthSecondary, setHealthSecondary] = useState(false);
+  const [heartbeats, setHeartbeats] = useState<Record<string, string | undefined>>({});
 
   useEffect(() => {
     const stop = follow(
@@ -201,6 +213,38 @@ export function App({
   const laneIssuesKey = state.lanes.map((l) => l.issue).join(',');
 
   useEffect(() => {
+    if (!runsDir) return;
+    let cancelled = false;
+    const read = async () => {
+      const next: Record<string, string | undefined> = {};
+      await Promise.all(
+        state.lanes.map(async (lane) => {
+          try {
+            next[lane.issue] = (await readSnapshotFn(phaseSnapshotFile(runsDir, Number(lane.issue))))?.lastActivityAt;
+          } catch {
+            next[lane.issue] = undefined;
+          }
+        }),
+      );
+      if (!cancelled) setHeartbeats(next);
+    };
+    void read();
+    const interval = setInterval(() => void read(), POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+    // laneIssuesKey, not state.lanes: re-poll only when the set of issues changes.
+  }, [runsDir, readSnapshotFn, laneIssuesKey]);
+
+  const { active: activeLanes, staleCount } = partitionLanesByActivity(state.lanes, {
+    now,
+    heartbeats,
+    staleThresholdMs,
+  });
+  const activeState: DashboardState = { ...state, lanes: activeLanes };
+
+  useEffect(() => {
     if (!steeringDir) return;
     const read = () => {
       const counts: Record<string, number> = {};
@@ -219,7 +263,7 @@ export function App({
   const issueCount = useMemo(() => aggregateCosts(costsRead.entries).perIssue.length, [costsRead]);
   const logHeight = Math.max(5, (stdout?.rows ?? 24) - 4);
   const visibleApprovals = pendingApprovals.filter((r) => !answered.has(r.id));
-  const clampedIndex = Math.min(selectedIndex, Math.max(0, state.lanes.length - 1));
+  const clampedIndex = Math.min(selectedIndex, Math.max(0, activeLanes.length - 1));
 
   useInput((input, key) => {
     if (composer) {
@@ -298,10 +342,10 @@ export function App({
       tab === 'dashboard' &&
       steeringDir &&
       input === 'i' &&
-      state.lanes.length > 0 &&
+      activeLanes.length > 0 &&
       visibleApprovals.length === 0
     ) {
-      const activeLane = state.lanes[clampedIndex];
+      const activeLane = activeLanes[clampedIndex];
       if (activeLane) {
         setComposer({ issue: activeLane.issue, worktree: activeLane.worktree, text: '', warned: false });
       }
@@ -327,7 +371,7 @@ export function App({
     if (tab === 'dashboard') {
       if (view === 'dashboard') {
         if (key.upArrow) setSelectedIndex((i) => Math.max(0, i - 1));
-        if (key.downArrow) setSelectedIndex((i) => Math.min(state.lanes.length - 1, i + 1));
+        if (key.downArrow) setSelectedIndex((i) => Math.min(activeLanes.length - 1, i + 1));
         if (key.return) setView('detail');
       } else if (key.escape) {
         setView('dashboard');
@@ -349,38 +393,47 @@ export function App({
   const stopReason = stopFlag || state.usageStop ? (state.usageStop ?? 'STOP flag present (.factory/STOP)') : undefined;
 
   function DashboardPane(): JSX.Element {
-    if (state.lanes.length === 0) {
+    if (activeLanes.length === 0) {
       return (
         <Box flexDirection="column">
           <Header repo={repo} done={false} />
           <Text dimColor>(idle — no active claims)</Text>
+          {staleCount > 0 && <Text dimColor>{staleLanesLine(staleCount)}</Text>}
         </Box>
       );
     }
 
-    if (state.lanes.length === 1) {
+    if (activeLanes.length === 1) {
       return (
         <Box flexDirection="column">
           {stopReason && <StopBanner reason={stopReason} />}
           <RunDetail
-            run={state.lanes[0].run}
+            run={activeLanes[0].run}
             repo={repo}
             now={now}
-            steeringQueued={steeringQueued[state.lanes[0].issue]}
+            steeringQueued={steeringQueued[activeLanes[0].issue]}
           />
+          {staleCount > 0 && <Text dimColor>{staleLanesLine(staleCount)}</Text>}
         </Box>
       );
     }
 
     return view === 'dashboard' ? (
-      <Dashboard state={state} selectedIndex={clampedIndex} now={now} repo={repo} stopReason={stopReason} />
+      <Dashboard
+        state={activeState}
+        selectedIndex={clampedIndex}
+        now={now}
+        repo={repo}
+        stopReason={stopReason}
+        staleCount={staleCount}
+      />
     ) : (
       <RunDetail
-        run={state.lanes[clampedIndex].run}
+        run={activeLanes[clampedIndex].run}
         repo={repo}
         now={now}
         showBackHint
-        steeringQueued={steeringQueued[state.lanes[clampedIndex].issue]}
+        steeringQueued={steeringQueued[activeLanes[clampedIndex].issue]}
       />
     );
   }
@@ -404,7 +457,7 @@ export function App({
       )}
       <TabBar active={tab} />
       {tab === 'dashboard' && <DashboardPane />}
-      {tab === 'queue' && <QueueTab snapshot={queueSnap} lanes={state.lanes} source={queueReader?.source} />}
+      {tab === 'queue' && <QueueTab snapshot={queueSnap} lanes={activeLanes} source={queueReader?.source} />}
       {tab === 'costs' && <CostsTab costs={costsRead} selectedIndex={costsSelected} />}
       {tab === 'log' && <LogTab events={events} scroll={logScroll} height={logHeight} />}
       {tab === 'health' && (

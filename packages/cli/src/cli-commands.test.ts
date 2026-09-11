@@ -65,6 +65,7 @@ const h = vi.hoisted(() => {
       };
       costsFile?: string;
       steeringDir?: string;
+      runsDir?: string;
     }>,
     setupWorktreeImpl: async (_repoRoot: string, _branch: string, _worktree: string, _startPoint?: string) => {},
   };
@@ -114,6 +115,7 @@ vi.mock('@on-par/factory-tui', () => ({
       };
       costsFile?: string;
       steeringDir?: string;
+      runsDir?: string;
     }) => {
       h.runTuiCalls.push(opts);
     },
@@ -1311,6 +1313,7 @@ bash scripts/verify.sh
       expect(h.runTuiCalls[0].queueReader?.pollMs).toBe(30_000);
       expect(h.runTuiCalls[0].costsFile?.endsWith(join('.factory', 'state', 'costs.jsonl'))).toBe(true);
       expect(h.runTuiCalls[0].steeringDir?.endsWith(join('.factory', 'state', 'steering'))).toBe(true);
+      expect(h.runTuiCalls[0].runsDir?.endsWith(join('.factory', 'state', 'runs'))).toBe(true);
     });
 
     it('default reader lists claimable GitHub issues with titles in lane order, ignoring a stale queue file (#1362)', async () => {

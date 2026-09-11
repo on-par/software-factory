@@ -18,6 +18,15 @@ function stateFor(events: FactoryEvent[]): DashboardState {
 const NOW = Date.parse('2026-01-01T00:00:05.000Z');
 
 describe('Dashboard', () => {
+  it('renders the stale-lanes footer when lanes were hidden (#1369)', () => {
+    const state = initialDashboard();
+    const { lastFrame } = render(<Dashboard state={state} selectedIndex={0} now={Date.now()} staleCount={2} />);
+    expect(lastFrame()).toContain('(2 stale lanes hidden — no activity for 15m; run factory doctor --reconcile)');
+    expect(render(<Dashboard state={state} selectedIndex={0} now={Date.now()} />).lastFrame()).not.toContain(
+      'stale lane',
+    );
+  });
+
   it('shows the waiting message when there are no lanes', () => {
     const { lastFrame } = render(<Dashboard state={initialDashboard()} selectedIndex={0} now={NOW} />);
     expect(lastFrame()).toContain('idle — no active claims');
