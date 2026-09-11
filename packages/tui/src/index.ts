@@ -3,7 +3,7 @@ export { App } from './components/App.js';
 export type { ApprovalPromptProps } from './components/ApprovalPrompt.js';
 export { ApprovalPrompt } from './components/ApprovalPrompt.js';
 export type { DashboardProps } from './components/Dashboard.js';
-export { Dashboard } from './components/Dashboard.js';
+export { Dashboard, staleLanesLine } from './components/Dashboard.js';
 export type { EventFeedProps } from './components/EventFeed.js';
 export { EventFeed } from './components/EventFeed.js';
 export type { HeaderProps } from './components/Header.js';
@@ -16,8 +16,16 @@ export type { RunDetailProps } from './components/RunDetail.js';
 export { RunDetail } from './components/RunDetail.js';
 export type { StopBannerProps } from './components/StopBanner.js';
 export { StopBanner } from './components/StopBanner.js';
-export type { DashboardState, LaneState, LaneStatus } from './dashboard.js';
-export { initialDashboard, isLaneEvent, laneElapsedMs, mergeTrainPosition, reduceDashboard } from './dashboard.js';
+export type { DashboardState, LaneActivityPartition, LaneState, LaneStatus } from './dashboard.js';
+export {
+  initialDashboard,
+  isLaneEvent,
+  isNonTerminalLane,
+  laneElapsedMs,
+  mergeTrainPosition,
+  partitionLanesByActivity,
+  reduceDashboard,
+} from './dashboard.js';
 export { followPlain } from './fallback.js';
 export type { RunTuiOptions } from './run-tui.js';
 export { runTui } from './run-tui.js';

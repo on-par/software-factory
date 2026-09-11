@@ -40,6 +40,54 @@ describe('App', () => {
     expect(lastFrame()).toContain('idle — no active claims');
   });
 
+  it('shows only the run in progress when the log holds a finished run before it (#1369)', async () => {
+    const fake = makeFakeFollow();
+    const { lastFrame } = render(<App eventsFile="ignored" follow={fake.follow} />);
+
+    fake.push(ev('plan', 'Starting plan phase', '100', '2026-01-01T00:00:00.000Z'));
+    fake.push(ev('await-merge', 'waiting to merge', '100', '2026-01-01T00:10:00.000Z'));
+    fake.push(ev('run-done', 'all lanes finished', 'all', '2026-01-01T01:00:00.000Z'));
+    await flush();
+    expect(lastFrame()).toContain('idle — no active claims');
+    expect(lastFrame()).not.toContain('#100');
+
+    fake.push(ev('plan', 'Starting plan phase', '200'));
+    await flush();
+    expect(lastFrame()).toContain('#200');
+    expect(lastFrame()).not.toContain('#100');
+  });
+
+  it('hides a stale waiting-to-merge lane unless its phase-snapshot heartbeat is fresh (#1369)', async () => {
+    const fake = makeFakeFollow();
+    const old = new Date(Date.now() - 60 * 60_000).toISOString();
+    const readSnapshotFn = vi.fn(async (file: string) =>
+      file.includes('301')
+        ? { issue: 301, phase: 'ship' as const, updatedAt: old, lastActivityAt: new Date().toISOString() }
+        : null,
+    );
+    const { lastFrame } = render(
+      <App
+        eventsFile="ignored"
+        follow={fake.follow}
+        runsDir="/repo/.factory/state/runs"
+        readSnapshotFn={readSnapshotFn}
+      />,
+    );
+
+    fake.push(ev('plan', 'Starting plan phase', '300', old));
+    fake.push(ev('await-merge', 'waiting to merge', '300', old));
+    fake.push(ev('plan', 'Starting plan phase', '301', old));
+    fake.push(ev('await-merge', 'waiting to merge', '301', old));
+    await flush();
+    await vi.waitFor(() => expect(readSnapshotFn).toHaveBeenCalled());
+    await flush();
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('#301');
+    expect(frame).not.toContain('#300');
+    expect(frame).toContain('1 stale lane hidden');
+  });
+
   it('renders a single lane directly in detail view with no row list', async () => {
     const fake = makeFakeFollow();
     const { lastFrame } = render(<App eventsFile="ignored" follow={fake.follow} />);

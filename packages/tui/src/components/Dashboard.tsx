@@ -11,9 +11,22 @@ export interface DashboardProps {
   now: number;
   repo?: string;
   stopReason?: string;
+  /** Lanes hidden as stale by partitionLanesByActivity; rendered as a one-line footer when > 0. */
+  staleCount?: number;
 }
 
-export function Dashboard({ state, selectedIndex, now, repo, stopReason }: DashboardProps): JSX.Element {
+export function staleLanesLine(staleCount: number): string {
+  return `(${staleCount} stale lane${staleCount === 1 ? '' : 's'} hidden — no activity for 15m; run factory doctor --reconcile)`;
+}
+
+export function Dashboard({
+  state,
+  selectedIndex,
+  now,
+  repo,
+  stopReason,
+  staleCount = 0,
+}: DashboardProps): JSX.Element {
   const headerText = `Factory —${repo ? ` ${repo} ·` : ''} ${state.lanes.length} lane(s)`;
 
   return (
@@ -35,6 +48,7 @@ export function Dashboard({ state, selectedIndex, now, repo, stopReason }: Dashb
           />
         ))
       )}
+      {staleCount > 0 && <Text dimColor>{staleLanesLine(staleCount)}</Text>}
       <Text dimColor>↑/↓ select · ⏎ detail · q quit</Text>
     </Box>
   );
