@@ -213,6 +213,19 @@ export const defaultModelsConfig: ModelsDefaults = {
       codex: true,
       codexFlag: '-m gpt-5.6-luna -c model_reasoning_effort=high',
     },
+    /** Opt-in Astra profile. Codex subscription auth; existing tier order stays unchanged. */
+    'gpt-6-astra': {
+      provider: 'openai',
+      tier: ['boss', 'worker', 'checker'],
+      costPerMtokInput: 10,
+      costPerMtokOutput: 50,
+      contextWindow: 272000,
+      capabilities: ['planning', 'implementation', 'verification', 'codex'],
+      envKey: null,
+      harness: 'codex-cli',
+      codex: true,
+      codexFlag: '-m gpt-6-astra -c model_reasoning_effort=medium',
+    },
     /** claude-CLI wiring is unproven — the Claude CLI only serves Anthropic models */
     'gpt-4.1-mini': {
       provider: 'openai',

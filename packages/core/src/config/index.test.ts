@@ -276,6 +276,7 @@ describe('loadModelsConfig', () => {
         'gpt-5.6-sol',
         'gpt-5.6-terra-high',
         'gpt-5.6-terra-medium',
+        'gpt-6-astra',
         'qwen2.5-coder:14b',
         'qwen3.5:9b',
         'qwen3:8b',

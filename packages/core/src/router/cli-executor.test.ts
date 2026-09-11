@@ -177,7 +177,7 @@ describe('CliModelExecutor', () => {
     expect(output).toBe('CLAUDE OUTPUT');
     expect(rec.calls).toHaveLength(1);
     expect(rec.calls[0].cmd).toContain('claude -p');
-    expect(rec.calls[0].cmd).toContain('--model claude-sonnet-5');
+    expect(rec.calls[0].cmd).toContain("--model 'claude-sonnet-5'");
     expect(rec.calls[0].cmd).toContain('--output-format stream-json');
     expect(rec.calls[0].cmd).toContain('--permission-mode bypassPermissions');
     expect(rec.calls[0].cmd).toMatch(/< '?[^']*factory-claude-prompt-[^']+\/prompt\.txt'?$/);
@@ -433,7 +433,7 @@ describe('CliModelExecutor', () => {
     expect(output).toBe('CLAUDE OUTPUT');
     expect(rec.calls).toHaveLength(1);
     expect(rec.calls[0].cmd).toContain('claude -p');
-    expect(rec.calls[0].cmd).toContain('--model claude-sonnet-5');
+    expect(rec.calls[0].cmd).toContain("--model 'claude-sonnet-5'");
   });
 
   it('dispatches through the opencode harness', async () => {

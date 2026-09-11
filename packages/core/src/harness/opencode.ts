@@ -18,6 +18,8 @@ export class OpenCodeHarness implements CodingHarness {
 
   async run(request: HarnessRequest): Promise<HarnessResult> {
     const { model, prompt, worktree, timeoutSeconds, registry, env, onPgid } = request;
+    const effort = registry.getEffort(model, request.task);
+    const effortArg = effort === undefined ? '' : ` --variant ${shellEscape(String(effort))}`;
     const providerModel = registry.get(model)?.providerModel;
     const modelArg = providerModel ? `--model ${shellEscape(providerModel)}` : '';
 
@@ -40,7 +42,7 @@ export class OpenCodeHarness implements CodingHarness {
       // `< /dev/null`: opencode run blocks awaiting stdin EOF when spawned with a
       // pipe stdin (execDetached never closes child.stdin), hanging every call
       // until the phase timeout. Redirecting stdin closes it at spawn.
-      const cmd = `opencode run --auto ${modelArg} ${shellEscape(attemptPrompt)} < /dev/null`;
+      const cmd = `opencode run --auto ${modelArg}${effortArg} ${shellEscape(attemptPrompt)} < /dev/null`;
 
       try {
         ({ stdout } = await this.execFn(cmd, {

@@ -36,6 +36,7 @@ export class OllamaHttpHarness implements CodingHarness {
     const baseUrl = (process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434').replace(/\/+$/, '');
     const nativeModel = registry.getProviderModel(model);
     const options = registry.getProviderOptions(model);
+    const effort = registry.getEffort(model, request.task);
 
     try {
       const res = await this.fetchFn(`${baseUrl}/api/chat`, {
@@ -47,6 +48,7 @@ export class OllamaHttpHarness implements CodingHarness {
           stream: false,
           messages: [{ role: 'user', content: prompt }],
           ...(options ? { options } : {}),
+          ...(effort === undefined ? {} : { think: effort }),
         }),
       });
 

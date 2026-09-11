@@ -26,6 +26,8 @@ import { readFileSync } from 'node:fs';
 
 import { z } from 'zod';
 
+import { ModelEffortsSchema } from './effort.js';
+
 // ---------- Models ----------
 
 const ProviderSchema = z
@@ -110,6 +112,7 @@ const ModelsSectionSchema = z
       .default({})
       .describe('Tier name -> ordered list of model ids. The router resolves a tier to its first available model.'),
     pins: ModelPinsSchema.prefault({}),
+    efforts: ModelEffortsSchema.optional(),
     providers: ProvidersSchema.prefault({}),
     failover: ModelFailoverSchema.prefault({}),
     routingRules: z

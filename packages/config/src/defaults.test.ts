@@ -6,9 +6,9 @@ import { describe, expect, it } from 'vitest';
 import { defaultFactoryConfig, defaultModelsConfig, defaultRoutesConfig } from './defaults.js';
 
 describe('shipped defaults', () => {
-  it('has 21 models with the expected harness-bearing spot checks', () => {
+  it('has 22 models with the expected harness-bearing spot checks', () => {
     const modelIds = Object.keys(defaultModelsConfig.models);
-    expect(modelIds).toHaveLength(21);
+    expect(modelIds).toHaveLength(22);
 
     for (const id of [
       'claude-opus-5',
@@ -17,6 +17,7 @@ describe('shipped defaults', () => {
       'gpt-5.6-terra-high',
       'gpt-5.6-terra-medium',
       'gpt-5.6-luna-high',
+      'gpt-6-astra',
       'gpt-5.6-sol',
       'gpt-5.1-codex',
       'opencode-deepseek-v4-flash-free',
@@ -31,6 +32,16 @@ describe('shipped defaults', () => {
     expect(defaultModelsConfig.models['qwen3.5:9b'].harness).toBe('ollama-http');
     expect(defaultModelsConfig.models['codex-ollama-qwen3.5:9b'].harness).toBe('ollama-agentic');
     expect(defaultModelsConfig.models['opencode-deepseek-v4-flash-free'].harness).toBe('opencode');
+  });
+
+  it('offers Astra through subscription-authenticated Codex without changing tier defaults', () => {
+    expect(defaultModelsConfig.models['gpt-6-astra']).toMatchObject({
+      provider: 'openai',
+      codex: true,
+      harness: 'codex-cli',
+      envKey: null,
+      codexFlag: '-m gpt-6-astra -c model_reasoning_effort=medium',
+    });
   });
 
   it('every tier entry exists in models, with the expected tier lengths', () => {

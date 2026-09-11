@@ -2,12 +2,25 @@
 
 import { execSync } from 'node:child_process';
 
+import { ModelEffortsSchema, supportsEffort } from '../config/effort.js';
 import type { ModelsConfig } from '../config/index.js';
 import { HARNESS_CATALOG, KNOWN_HARNESS_IDS } from '../harness/catalog.js';
 import type { ModelDefinition, ModelTier } from '../types/index.js';
 
 export class ModelRegistry {
-  constructor(private config: ModelsConfig) {}
+  constructor(private config: ModelsConfig) {
+    if (!config.efforts) return;
+    const efforts = ModelEffortsSchema.parse(config.efforts);
+    for (const [model, setting] of Object.entries(efforts)) {
+      if (!Object.hasOwn(config.models, model)) throw new Error(`models.efforts: unknown model '${model}'`);
+      for (const effort of typeof setting === 'object' ? Object.values(setting) : [setting]) {
+        if (!supportsEffort(this.getHarnessId(model), effort)) {
+          throw new Error(`models.efforts: '${effort}' is not supported by ${this.getHarnessId(model)} for '${model}'`);
+        }
+      }
+    }
+    this.config = { ...config, efforts };
+  }
 
   /** List all model IDs */
   list(): string[] {
@@ -91,6 +104,14 @@ export class ModelRegistry {
   /** Get provider-native options */
   getProviderOptions(modelId: string): Record<string, unknown> | undefined {
     return this.get(modelId)?.providerOptions;
+  }
+
+  /** Resolve effort for this model and task without changing other phases or failovers. */
+  getEffort(modelId: string, task: string) {
+    if (!this.config.efforts || !Object.hasOwn(this.config.efforts, modelId)) return undefined;
+    const setting = this.config.efforts[modelId];
+    if (typeof setting === 'object' && !Object.hasOwn(setting, task)) return undefined;
+    return typeof setting === 'object' ? setting[task] : setting;
   }
 
   /** Get codex flags for a model */

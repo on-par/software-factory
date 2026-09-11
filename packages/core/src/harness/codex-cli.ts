@@ -24,7 +24,10 @@ export class CodexCliHarness implements CodingHarness {
 
   async run(request: HarnessRequest): Promise<HarnessResult> {
     const { model, prompt, worktree, timeoutSeconds, registry, sandbox, env, onPgid } = request;
-    const extraFlag = registry.getCodexFlag(model) ?? '';
+    const effort = registry.getEffort(model, request.task);
+    const flags = registry.getCodexFlag(model) ?? '';
+    // Codex applies repeated config overrides in order; preserve arbitrary profile flags.
+    const extraFlag = effort === undefined ? flags : `${flags} -c ${shellEscape(`model_reasoning_effort=${effort}`)}`;
 
     const tmpFile = await mktemp(join(tmpdir(), 'factory-codex-'));
     const outFile = await mktemp(join(tmpdir(), 'factory-codex-out-'));

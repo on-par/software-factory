@@ -22,6 +22,8 @@ import {
   type ModelsConfig,
 } from './index.js';
 
+import { ModelEffortsSchema } from './effort.js';
+
 // ---------- Schema ----------
 
 export const RepoFactoryConfigV1Schema = z
@@ -71,6 +73,7 @@ export const RepoFactoryConfigV2Schema = z
     version: z.literal(2),
     models: z
       .object({
+        efforts: ModelEffortsSchema.optional(),
         pins: z
           .object({
             plan: z.string().optional(),
@@ -270,7 +273,11 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
     }
   }
 
-  return { ...models, tiers };
+  return {
+    ...models,
+    tiers,
+    ...(repo.models?.efforts ? { efforts: { ...models.efforts, ...repo.models.efforts } } : {}),
+  };
 }
 
 // ---------- Effective plan/build pins ----------
@@ -504,6 +511,10 @@ export function describeEffectiveConfig(opts: DescribeEffectiveConfigOpts): stri
   lines.push(
     `Triage model: ${triageModel} ${sourceLabel(repo?.models?.pins?.triage ? 'repo' : 'default', repoConfigPath, '')}`,
   );
+
+  for (const [model, effort] of Object.entries(repo?.models?.efforts ?? {})) {
+    lines.push(`Effort ${model}: ${JSON.stringify(effort)} (${repoConfigPath})`);
+  }
 
   const codexOff = resolveCodexDisabled(repo, env);
   const openaiSource: 'repo' | 'env' | 'default' =

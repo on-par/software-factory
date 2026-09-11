@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+
 import { describe, expect, it } from 'vitest';
 
 import type { ModelsConfig } from '../config/index.js';
@@ -94,6 +96,23 @@ function recordingExec(result: { stdout?: string; stderr?: string } = {}) {
 }
 
 describe('ClaudeCliHarness command shape', () => {
+  it.each(['model with spaces', "model'; printf INJECTED; #", 'model$(printf INJECTED)`printf INJECTED`'])(
+    'passes model %s as one literal shell argument',
+    async (flag) => {
+      const registry = new ModelRegistry({
+        ...modelsConfig,
+        models: { 'claude-model': { ...modelsConfig.models['claude-model'], claudeFlag: flag } },
+        efforts: { 'claude-model': 'high' },
+      });
+      const harness = new ClaudeCliHarness(async (cmd) => ({
+        stdout: execFileSync('/bin/sh', ['-c', `claude() { printf '%s\\0' "$@"; }; ${cmd}`], { encoding: 'utf8' }),
+        stderr: '',
+      }));
+      const result = await harness.run(makeContractRequest({ model: 'claude-model', registry }));
+      expect(result.output.split('\0').slice(0, 5)).toEqual(['-p', '--model', flag, '--effort', 'high']);
+    },
+  );
+
   it('builds the expected invocation with a model flag', async () => {
     const rec = recordingExec({ stdout: 'CLAUDE OUTPUT' });
     const harness = new ClaudeCliHarness(rec.fn);
@@ -112,7 +131,7 @@ describe('ClaudeCliHarness command shape', () => {
     expect(rec.calls).toHaveLength(1);
     expect(rec.calls[0].cmd).toContain('claude -p');
     expect(rec.calls[0].cmd).not.toContain("'draft plan'");
-    expect(rec.calls[0].cmd).toContain('--model claude-sonnet-5');
+    expect(rec.calls[0].cmd).toContain("--model 'claude-sonnet-5'");
     expect(rec.calls[0].cmd).toContain('--output-format stream-json');
     expect(rec.calls[0].cmd).toContain('--include-partial-messages');
     expect(rec.calls[0].cmd).toContain('--verbose');
