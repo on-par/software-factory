@@ -139,7 +139,8 @@ export function App({
   const [steeringQueued, setSteeringQueued] = useState<Record<string, number>>({});
   const [breakers, setBreakers] = useState<BreakerRow[]>([]);
   const [healthSecondary, setHealthSecondary] = useState(false);
-  const [heartbeats, setHeartbeats] = useState<Record<string, string | undefined>>({});
+  // null until the first snapshot poll resolves: replayed lanes must not flash as stale first.
+  const [heartbeats, setHeartbeats] = useState<Record<string, string | undefined> | null>(null);
 
   useEffect(() => {
     const stop = follow(
@@ -251,11 +252,10 @@ export function App({
     // laneIssuesKey, not state.lanes: re-poll only when the set of issues changes.
   }, [runsDir, readSnapshotFn, laneIssuesKey]);
 
-  const { active: activeLanes, staleCount } = partitionLanesByActivity(state.lanes, {
-    now,
-    heartbeats,
-    staleThresholdMs,
-  });
+  const { active: activeLanes, staleCount } =
+    runsDir && heartbeats === null
+      ? { active: state.lanes, staleCount: 0 }
+      : partitionLanesByActivity(state.lanes, { now, heartbeats: heartbeats ?? undefined, staleThresholdMs });
   const activeState: DashboardState = { ...state, lanes: activeLanes };
 
   useEffect(() => {

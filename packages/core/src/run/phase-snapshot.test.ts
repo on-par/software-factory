@@ -264,6 +264,34 @@ describe('run/phase-snapshot', () => {
     });
   });
 
+  describe('a phase write fired after a touch (#1371)', () => {
+    it('cannot be regressed by that touch landing later', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'phase-snapshot-'));
+      const file = join(dir, 'issue-10.phase.json');
+      const base: RunPhaseSnapshot = {
+        issue: 10,
+        phase: 'plan',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        lastActivityAt: '2026-01-01T00:00:00.000Z',
+      };
+      writeFileSync(file, JSON.stringify(base));
+      await Promise.all([
+        touchLastEvent(file, 'plan: done'),
+        writePhaseSnapshot(file, {
+          ...base,
+          phase: 'build',
+          updatedAt: '2026-01-01T00:10:00.000Z',
+          lastActivityAt: '2026-01-01T00:10:00.000Z',
+        }),
+        touchLastEvent(file, 'build: started'),
+      ]);
+      const after = JSON.parse(readFileSync(file, 'utf-8'));
+      expect(after.phase).toBe('build');
+      expect(after.lastActivityAt).toBe('2026-01-01T00:10:00.000Z');
+      expect(after.lastEvent).toBe('build: started');
+    });
+  });
+
   describe('touchLastEvent (#1327)', () => {
     it('sets lastEvent while leaving phase/updatedAt/lastActivityAt untouched', async () => {
       const runsDir = mkdtempSync(join(tmpdir(), 'phase-snapshot-runs-'));

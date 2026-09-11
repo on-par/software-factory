@@ -55,8 +55,11 @@ export function reduceDashboard(state: DashboardState, e: FactoryEvent): Dashboa
     return state;
   }
 
-  // The first lane event after a run ended starts the next run's lane set.
-  const base = state.runDone ? { ...state, lanes: [], runDone: false } : state;
+  // After a run ended, only a run's own opening events (`issue-title`, a phase start) may open
+  // the next run's lane set. Out-of-run commands log numeric-issue events too — `factory land`
+  // logs `land` / `merged` / `fail` — and those must not resurrect a phantom lane (#1369).
+  if (state.runDone && !(e.type === 'issue-title' || laneStatusOf(e.type) === 'running')) return state;
+  const base = state.runDone ? { ...state, lanes: [], runDone: false, usageStop: undefined } : state;
   const idx = base.lanes.findIndex((l) => l.issue === e.issue);
   const prevLane = idx === -1 ? newLane(e) : base.lanes[idx];
   const prevStatus = prevLane.status;
@@ -81,7 +84,7 @@ export function reduceDashboard(state: DashboardState, e: FactoryEvent): Dashboa
     lane = { ...lane, status: 'ready', prNumber: e.msg.match(/PR #(\d+)/)?.[1] ?? lane.prNumber };
   } else if (e.type === 'await-merge') {
     lane = { ...lane, status: 'waiting-merge', waitingSince: lane.waitingSince ?? e.ts };
-  } else if (e.type === 'landed') {
+  } else if (e.type === 'landed' || e.type === 'merged') {
     lane = { ...lane, status: 'merged', finishedAt: e.ts };
   } else if (laneStatusOf(e.type) === 'failed' || laneStatusOf(e.type) === 'parked') {
     lane = {

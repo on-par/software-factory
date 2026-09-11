@@ -3771,6 +3771,9 @@ export async function waitForMerge(
   let consecutiveFailures = 0;
   let firstFailureAt: number | null = null;
   while (!pathExists(paths.stop)) {
+    // The merge wait logs nothing on its happy path, so each poll bumps the per-issue heartbeat:
+    // status/TUI staleness rules (ADR-0086, ADR-0093) otherwise read a live wait as a dead run.
+    if (paths.runs) touchRunActivity(phaseSnapshotFile(paths.runs, issue), new Date().toISOString()).catch(() => {});
     let merged = false;
     try {
       merged = await checkMerged(octokit, owner, repoName, branch);

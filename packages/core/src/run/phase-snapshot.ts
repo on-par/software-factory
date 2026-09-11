@@ -44,34 +44,37 @@ export function phaseSnapshotFile(runsDir: string, issue: number): string {
   return resolve(runsDir, `issue-${issue}.phase.json`);
 }
 
-// Serializes every write to a given snapshot file behind one queue, keyed by path.
-// recordPhase, touchRunActivity, and touchLastEvent (#1327) are all called unawaited
-// from the CLI's mkLog chokepoint, which can fire several times per tick — without this,
-// two concurrent tmp-write/rename pairs for the same file can interleave and corrupt it.
-// Different issues use different files, so lanes never block each other.
-const writeQueues = new Map<string, Promise<void>>();
+// One promise chain per snapshot file. recordPhase (a plain write), touchRunActivity, and
+// touchLastEvent (#1327) are all fired unawaited from the CLI's mkLog chokepoint, several
+// times per tick. Chaining every write AND every read-modify-write on the same file keeps
+// (a) two tmp-write/rename pairs from interleaving and corrupting the file, and (b) a touch
+// that read an older snapshot from landing after a newer phase write and regressing it
+// (#1371). A failed step never blocks the next. Different issues use different files.
+const fileChains = new Map<string, Promise<void>>();
 
-function enqueueWrite(file: string, task: () => Promise<void>): Promise<void> {
-  const prior = writeQueues.get(file) ?? Promise.resolve();
-  const result = prior.then(task, task);
-  writeQueues.set(
-    file,
-    result.then(
-      () => undefined,
-      () => undefined,
-    ),
-  );
-  return result;
+function serializedPerFile(file: string, op: () => Promise<void>): Promise<void> {
+  const prev = fileChains.get(file) ?? Promise.resolve();
+  const next = prev.catch(() => undefined).then(op);
+  fileChains.set(file, next);
+  void next
+    .catch(() => undefined)
+    .finally(() => {
+      if (fileChains.get(file) === next) fileChains.delete(file);
+    });
+  return next;
 }
 
-/** Persists `snapshot` atomically (write to a tmp file, then rename). */
+async function writeSnapshotFile(file: string, snapshot: RunPhaseSnapshot): Promise<void> {
+  await mkdir(dirname(file), { recursive: true });
+  const tmp = `${file}.tmp`;
+  await writeFile(tmp, `${JSON.stringify(snapshot, null, 2)}\n`);
+  await rename(tmp, file);
+}
+
+/** Persists `snapshot` atomically (write to a tmp file, then rename), in call order with
+ *  every other write or touch on the same file. */
 export async function writePhaseSnapshot(file: string, snapshot: RunPhaseSnapshot): Promise<void> {
-  return enqueueWrite(file, async () => {
-    await mkdir(dirname(file), { recursive: true });
-    const tmp = `${file}.tmp`;
-    await writeFile(tmp, `${JSON.stringify(snapshot, null, 2)}\n`);
-    await rename(tmp, file);
-  });
+  return serializedPerFile(file, () => writeSnapshotFile(file, snapshot));
 }
 
 /** Reads one issue's persisted phase snapshot, or null when the file is missing,
@@ -111,26 +114,8 @@ export async function touchRunActivity(file: string, now: string): Promise<void>
   return serializedPerFile(file, async () => {
     const existing = await readPhaseSnapshot(file);
     if (!existing) return;
-    await writePhaseSnapshot(file, { ...existing, lastActivityAt: now });
+    await writeSnapshotFile(file, { ...existing, lastActivityAt: now });
   });
-}
-
-/** In-flight read-modify-write chain per snapshot file. The CLI fires `touchLastEvent` for
- *  every logged event without awaiting it, so two quick events could interleave their
- *  read and write steps and let the earlier event land last (#1371). Chaining each file's
- *  touches applies them in call order; a failed touch does not block the next one. */
-const rmwChains = new Map<string, Promise<void>>();
-
-function serializedPerFile(file: string, op: () => Promise<void>): Promise<void> {
-  const prev = rmwChains.get(file) ?? Promise.resolve();
-  const next = prev.catch(() => undefined).then(op);
-  rmwChains.set(file, next);
-  void next
-    .catch(() => undefined)
-    .finally(() => {
-      if (rmwChains.get(file) === next) rmwChains.delete(file);
-    });
-  return next;
 }
 
 /** Read-modify-write: sets a persisted snapshot's `lastEvent` summary (#1327) without
@@ -142,6 +127,6 @@ export async function touchLastEvent(file: string, lastEvent: string): Promise<v
   return serializedPerFile(file, async () => {
     const existing = await readPhaseSnapshot(file);
     if (!existing) return;
-    await writePhaseSnapshot(file, { ...existing, lastEvent });
+    await writeSnapshotFile(file, { ...existing, lastEvent });
   });
 }

@@ -1095,6 +1095,42 @@ describe('cli', () => {
     },
   });
 
+  it('bumps the per-issue phase-snapshot heartbeat on every merge-wait poll (#1369)', async () => {
+    const core = await import('@on-par/factory-core');
+    const root = await mkdtemp(join(tmpdir(), 'wait-for-merge-'));
+    const runs = join(root, 'runs');
+    const file = core.phaseSnapshotFile(runs, 21);
+    await core.writePhaseSnapshot(file, {
+      issue: 21,
+      phase: 'ship',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      lastActivityAt: '2026-01-01T00:00:00.000Z',
+    });
+    const paths: any = { events: join(root, 'events.ndjson'), stop: join(root, 'STOP'), runs };
+    let polls = 0;
+
+    await waitForMerge(21, 'ship-it/21-heartbeat', '/repo', 'on-par/software-factory', paths, {
+      createOctokit: () => ({}) as any,
+      pathExists: () => false,
+      checkMerged: async () => {
+        polls += 1;
+        return polls >= 2;
+      },
+      loadConfig: () => fakeFactoryConfig(false),
+      listIssueLabels: async () => [],
+      land: async () => ({ branch: 'ship-it/21-heartbeat', prNumber: 1 }),
+      emitEvent: () => {},
+      sleep: async () => {},
+    });
+
+    await vi.waitFor(async () => {
+      const after = await core.readPhaseSnapshot(file);
+      expect(Date.parse(after?.lastActivityAt ?? '')).toBeGreaterThan(Date.parse('2026-01-01T00:00:00.000Z'));
+      expect(after?.phase).toBe('ship');
+    });
+    await rm(root, { recursive: true, force: true });
+  });
+
   it('self-merges a ready PR when merge is enabled via config', async () => {
     const calls: any[] = [];
     const octokit: any = {};
