@@ -147,7 +147,8 @@ export class CliModelExecutor implements ModelExecutor {
       'codex-cli': { run: (m, p, c) => this.runViaHarness(this.codexHarness, m, p, c) },
       'ollama-http': { run: (m, p, c) => this.runViaHarness(this.ollamaHarness, m, p, c) },
       'ollama-command-agent': {
-        run: (m, p, c) => this.runOllamaCommandAgent(m, p, c.worktree, c.timeoutSeconds, c.registry, c.env, c.onPgid),
+        run: (m, p, c) =>
+          this.runOllamaCommandAgent(m, p, c.worktree, c.timeoutSeconds, c.registry, c.task, c.env, c.onPgid),
       },
       opencode: { run: (m, p, c) => this.runViaHarness(this.opencodeHarness, m, p, c) },
       'ollama-agentic': { run: (m, p, c) => this.runViaHarness(this.ollamaAgenticHarness, m, p, c) },
@@ -218,6 +219,7 @@ export class CliModelExecutor implements ModelExecutor {
     worktree: string,
     timeoutSeconds: number,
     registry: ModelRegistry,
+    task: TaskType,
     env?: Record<string, string>,
     onPgid?: (pgid: number) => void,
   ): Promise<string> {
@@ -240,14 +242,7 @@ First inspect, then edit, then run one cheap check, then git add/commit.
     for (let step = 0; step < 8; step++) {
       let output: string;
       try {
-        output = await this.callOllamaForCommandAgent(
-          model,
-          conversation,
-          timeoutSeconds,
-          registry,
-          worktree,
-          'build_codex',
-        );
+        output = await this.callOllamaForCommandAgent(model, conversation, timeoutSeconds, registry, worktree, task);
       } catch (err) {
         const reason = extractFailoverReason(err) ?? 'error';
         const message = err instanceof Error ? err.message : String(err);
@@ -275,6 +270,7 @@ First inspect, then edit, then run one cheap check, then git add/commit.
         worktree,
         timeoutSeconds,
         registry,
+        task,
         step,
       });
       if (action.repairTranscript) transcript.push(action.repairTranscript);
@@ -355,6 +351,7 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
     worktree: string;
     timeoutSeconds: number;
     registry: ModelRegistry;
+    task: TaskType;
     step: number;
   }): Promise<
     ReturnType<typeof parseLocalAgentAction> & {
@@ -389,7 +386,7 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
         opts.timeoutSeconds,
         opts.registry,
         opts.worktree,
-        'build_codex',
+        opts.task,
       );
     } catch (err) {
       const reason = extractFailoverReason(err) ?? 'error';

@@ -20,6 +20,8 @@ import type { FilingPolicy } from '../filing/policy.js';
 import { KNOWN_HARNESS_IDS } from '../harness/catalog.js';
 import type { FailoverReason } from '../types/index.js';
 
+import { ModelEffortsSchema } from './effort.js';
+
 // ---------- Schemas ----------
 
 const ModelDefSchema = z.object({
@@ -43,6 +45,7 @@ const ModelsConfigSchema = z
   .object({
     version: z.number(),
     models: z.record(z.string(), ModelDefSchema),
+    efforts: ModelEffortsSchema.optional(),
     tiers: z.record(z.string(), z.array(z.string())),
     failover: z.object({
       triggers: z.array(z.string()),

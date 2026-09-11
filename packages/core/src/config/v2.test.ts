@@ -331,3 +331,9 @@ describe('exported schema shape', () => {
     );
   });
 });
+
+// Both the unified schema and the runtime repo overlay retain the same effort shape.
+it('retains model and task effort settings in v2 config', () => {
+  const efforts = { 'gpt-6-astra': { plan: 'ultra' }, 'claude-opus-5': 'high', 'qwen3.5:9b': false };
+  expect(parseV2Config({ version: 2, models: { efforts } }).models.efforts).toEqual(efforts);
+});

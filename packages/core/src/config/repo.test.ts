@@ -653,3 +653,21 @@ describe('describeEffectiveConfig', () => {
     expect(lines).toContainEqual(expect.stringContaining('Branch prefix: ship-it (default)'));
   });
 });
+
+it('merges effort overrides without dropping other configured model efforts', () => {
+  const base = { ...models, efforts: { 'gpt-model-a': 'high' as const, 'claude-model': 'low' as const } };
+  const merged = applyRepoConfig(base, { version: 2, models: { efforts: { 'claude-model': 'medium' } } });
+  expect(merged.efforts).toEqual({ 'gpt-model-a': 'high', 'claude-model': 'medium' });
+  expect(base.efforts['claude-model']).toBe('low');
+});
+
+it('shows scalar and task-specific effort overrides in factory status', () => {
+  const repo = {
+    version: 2 as const,
+    models: { efforts: { 'gpt-model-a': { plan: 'high' as const }, 'claude-model': 'low' as const } },
+  };
+  const router = new ModelRouter(applyRepoConfig(models, repo), routes, false, new StubModelExecutor());
+  const lines = describeEffectiveConfig({ router, repo, env: {}, repoConfigPath: '.factory/config.json' });
+  expect(lines).toContain('Effort gpt-model-a: {"plan":"high"} (.factory/config.json)');
+  expect(lines).toContain('Effort claude-model: "low" (.factory/config.json)');
+});

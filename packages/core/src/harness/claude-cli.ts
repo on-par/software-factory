@@ -124,12 +124,14 @@ export class ClaudeCliHarness implements CodingHarness {
 
   async run(request: HarnessRequest): Promise<HarnessResult> {
     const { model, prompt, worktree, timeoutSeconds, registry, sandbox, env, onPgid } = request;
+    const effort = registry.getEffort(model, request.task);
+    const effortArg = effort === undefined ? '' : ` --effort ${shellEscape(String(effort))}`;
     const flag = registry.getClaudeFlag(model);
     const modelArg = flag ? `--model ${flag}` : '';
     const promptDir = await mkdtemp(join(tmpdir(), 'factory-claude-prompt-'));
     const promptPath = join(promptDir, 'prompt.txt');
     await writeFile(promptPath, prompt, 'utf8');
-    const cmd = `claude -p ${modelArg} --output-format stream-json --include-partial-messages --verbose --safe-mode --permission-mode bypassPermissions < ${shellEscape(promptPath)}`;
+    const cmd = `claude -p ${modelArg}${effortArg} --output-format stream-json --include-partial-messages --verbose --safe-mode --permission-mode bypassPermissions < ${shellEscape(promptPath)}`;
     const finalCmd = sandbox ? wrapCommandInSandbox(cmd, sandbox) : cmd;
 
     let stdout: string;
@@ -138,7 +140,7 @@ export class ClaudeCliHarness implements CodingHarness {
         cwd: worktree,
         timeoutMs: timeoutSeconds * 1000,
         maxBuffer: 10 * 1024 * 1024,
-        env,
+        env: effort === undefined ? env : { ...env, CLAUDE_CODE_EFFORT_LEVEL: String(effort) },
         onPgid,
       }));
     } catch (err: any) {

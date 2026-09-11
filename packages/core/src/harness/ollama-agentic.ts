@@ -126,6 +126,7 @@ export class OllamaAgenticHarness implements CodingHarness {
     const baseUrl = (process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434').replace(/\/+$/, '');
     const nativeModel = registry.getProviderModel(model);
     const options = registry.getProviderOptions(model);
+    const effort = registry.getEffort(model, request.task);
 
     const callModel = async (content: string): Promise<string> => {
       try {
@@ -139,6 +140,7 @@ export class OllamaAgenticHarness implements CodingHarness {
             format: PATCH_PROPOSAL_SCHEMA,
             messages: [{ role: 'user', content }],
             ...(options ? { options } : {}),
+            ...(effort === undefined ? {} : { think: effort }),
           }),
         });
 
