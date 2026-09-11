@@ -385,7 +385,15 @@ async function planPhaseImpl(opts: {
     };
   }
 
-  if (opts.fastPath && !isCodexDisabled && isFastPathEligible({ issueBody, readinessPassed: readiness.pass })) {
+  // The fast path emits a compact Codex spec, so it is only valid when the route may be codex:
+  // a pinned claude/opencode build route (#1367) must go through model PLAN like any other issue.
+  const fastPathRouteOk = !opts.preferredRoute || opts.preferredRoute === 'codex';
+  if (
+    opts.fastPath &&
+    !isCodexDisabled &&
+    fastPathRouteOk &&
+    isFastPathEligible({ issueBody, readinessPassed: readiness.pass })
+  ) {
     const fastPath = buildFastPathSpec({ issue, title: issueTitle, issueBody });
     await writeSpec(specPath, {
       body: fastPath.markdown,
@@ -510,7 +518,7 @@ async function planPhaseImpl(opts: {
     }
 
     if (opts.preferredRoute && route !== opts.preferredRoute) {
-      log('model-override', `repo config pins build route to ${opts.preferredRoute} — overriding plan's ${route}`);
+      log('model-override', `pinned build route ${opts.preferredRoute} — overriding plan's ${route}`);
       route = opts.preferredRoute;
       await updateSpecRoute(specPath, opts.preferredRoute, 'repo-config-pin');
     }

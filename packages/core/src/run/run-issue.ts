@@ -356,7 +356,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       derivedRoute = undefined;
     }
     const pinnedRoute = request.preferredRoute ?? derivedRoute;
-    if (derivedRoute && request.modelPins.build) {
+    if (derivedRoute) {
       log('model-override', `build route derived from pinned build model ${request.modelPins.build} → ${derivedRoute}`);
     }
 
@@ -449,7 +449,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
         log(
           'model_override_ignored',
           `build model ${buildModel} is incompatible with the ${buildRoute} route${
-            request.preferredRoute ? ' pinned by .factory/config.json' : ''
+            buildRoute === request.preferredRoute ? ' pinned by .factory/config.json' : ''
           } — using that route's default worker`,
         );
         buildModel = undefined;
