@@ -637,14 +637,104 @@ describe('runIssue — provider breaker and failover', () => {
     expect(vi.mocked(buildPhase).mock.calls[0][0]).toMatchObject({ route: 'codex', modelOverride: 'gpt-build' });
   });
 
-  it('ignores an override model incompatible with its route and logs model_override_ignored', async () => {
+  it('ignores an override model incompatible with an explicitly pinned route and logs model_override_ignored', async () => {
     const events: Array<[string, string]> = [];
     const log = vi.fn((type: string, msg: string) => events.push([type, msg]));
     const router = fakeRouter({ 'claude-only-model': { provider: 'anthropic' } });
-    const request = baseRequest({ modelPins: { build: 'claude-only-model', sources: {} } });
+    const request = baseRequest({ modelPins: { build: 'claude-only-model', sources: {} }, preferredRoute: 'codex' });
     await runIssue(request, basePolicy(), basePorts({ events: () => log, router }));
-    expect(events.some(([t, m]) => t === 'model_override_ignored' && m.includes('claude-only-model'))).toBe(true);
-    expect(vi.mocked(buildPhase).mock.calls[0][0].modelOverride).toBeUndefined();
+    expect(
+      events.some(
+        ([t, m]) =>
+          t === 'model_override_ignored' &&
+          m.includes('claude-only-model') &&
+          m.includes('pinned by .factory/config.json'),
+      ),
+    ).toBe(true);
+    expect(vi.mocked(buildPhase).mock.calls[0][0]).toMatchObject({ route: 'codex', modelOverride: undefined });
+    expect(events.some(([t]) => t === 'model-override')).toBe(false);
+  });
+});
+
+describe('runIssue — #1367: a pinned build model determines the build route', () => {
+  it('keeps a claude-cli build pin on the claude route even when PLAN picks codex', async () => {
+    const events: Array<[string, string]> = [];
+    const log = vi.fn((type: string, msg: string) => events.push([type, msg]));
+    vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, route: 'codex' });
+    const router = fakeRouter({ 'claude-sonnet-5': { provider: 'anthropic' } });
+    const request = baseRequest({ modelPins: { build: 'claude-sonnet-5', sources: { build: 'repo' } } });
+    await runIssue(request, basePolicy(), basePorts({ events: () => log, router }));
+
+    expect(vi.mocked(planPhase).mock.calls[0][0].preferredRoute).toBe('claude');
+    expect(vi.mocked(buildPhase).mock.calls[0][0]).toMatchObject({ route: 'claude', modelOverride: 'claude-sonnet-5' });
+    expect(
+      events.some(
+        ([t, m]) => t === 'model-override' && m.includes('derived from pinned build model claude-sonnet-5 → claude'),
+      ),
+    ).toBe(true);
+    expect(events.some(([t]) => t === 'model_override_ignored')).toBe(false);
+  });
+
+  it('keeps a codex build pin on the codex route even when PLAN picks claude', async () => {
+    vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, route: 'claude' });
+    const router = fakeRouter({ 'gpt-build': { provider: 'openai', codex: true } });
+    const request = baseRequest({ modelPins: { build: 'gpt-build', sources: { build: 'repo' } } });
+    await runIssue(request, basePolicy(), basePorts({ router }));
+
+    expect(vi.mocked(planPhase).mock.calls[0][0].preferredRoute).toBe('codex');
+    expect(vi.mocked(buildPhase).mock.calls[0][0]).toMatchObject({ route: 'codex', modelOverride: 'gpt-build' });
+  });
+
+  it('does not let a codex pin force the codex route while codex is disabled', async () => {
+    const events: Array<[string, string]> = [];
+    const log = vi.fn((type: string, msg: string) => events.push([type, msg]));
+    vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, route: 'claude' });
+    const router = fakeRouter({ 'gpt-build': { provider: 'openai', codex: true } });
+    const request = baseRequest({ modelPins: { build: 'gpt-build', sources: { build: 'repo' } }, codexDisabled: true });
+    await runIssue(request, basePolicy(), basePorts({ events: () => log, router }));
+
+    expect(vi.mocked(planPhase).mock.calls[0][0].preferredRoute).toBeUndefined();
+    expect(events.some(([t, m]) => t === 'model-override' && m.includes('codex is disabled'))).toBe(true);
+    expect(events.some(([t, m]) => t === 'model-override' && m.includes('derived from'))).toBe(false);
+    // PLAN's route stands and the codex pin is incompatible with it, as on main.
+    expect(vi.mocked(buildPhase).mock.calls[0][0]).toMatchObject({
+      route: 'claude',
+      modelOverride: undefined,
+      codexDisabled: true,
+    });
+    expect(events.some(([t]) => t === 'model_override_ignored')).toBe(true);
+  });
+
+  it('does not derive a route in local-only mode, where PLAN forces codex', async () => {
+    vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, route: 'codex' });
+    const router = fakeRouter({ 'claude-sonnet-5': { provider: 'anthropic' } });
+    const request = baseRequest({
+      modelPins: { build: 'claude-sonnet-5', sources: { build: 'repo' } },
+      localOnly: true,
+    });
+    await runIssue(request, basePolicy(), basePorts({ router }));
+
+    expect(vi.mocked(planPhase).mock.calls[0][0].preferredRoute).toBeUndefined();
+    expect(vi.mocked(buildPhase).mock.calls[0][0]).toMatchObject({ route: 'codex', modelOverride: undefined });
+  });
+
+  it('lets an explicit repo route win over the pin, and PLAN decide when nothing is pinned', async () => {
+    vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, route: 'claude' });
+    const router = fakeRouter({ 'claude-sonnet-5': { provider: 'anthropic' } });
+    await runIssue(
+      baseRequest({ modelPins: { build: 'claude-sonnet-5', sources: {} }, preferredRoute: 'opencode' }),
+      basePolicy(),
+      basePorts({ router }),
+    );
+    expect(vi.mocked(planPhase).mock.calls[0][0].preferredRoute).toBe('opencode');
+    expect(vi.mocked(buildPhase).mock.calls[0][0].route).toBe('opencode');
+
+    vi.mocked(planPhase).mockClear();
+    vi.mocked(buildPhase).mockClear();
+    vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, route: 'codex' });
+    await runIssue(baseRequest(), basePolicy(), basePorts({ router }));
+    expect(vi.mocked(planPhase).mock.calls[0][0].preferredRoute).toBeUndefined();
+    expect(vi.mocked(buildPhase).mock.calls[0][0].route).toBe('codex');
   });
 });
 

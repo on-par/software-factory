@@ -50,7 +50,9 @@ async function makeStatePath(): Promise<string> {
 afterEach(async () => {
   vi.useRealTimers();
   if (tmpDir) {
-    await rm(tmpDir, { recursive: true, force: true });
+    // A poll's atomic write (tmp file + rename) can still be in flight when a test ends —
+    // stop() does not await it — so rm can hit ENOTEMPTY mid-rename. Let rm retry.
+    await rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 });
     tmpDir = undefined;
   }
 });

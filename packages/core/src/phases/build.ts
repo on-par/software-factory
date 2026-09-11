@@ -113,7 +113,7 @@ async function buildPhaseImpl(opts: {
     timeoutSeconds,
     skipCI,
     disablePublish,
-    modelOverride,
+    modelOverride: modelOverrideOpt,
     codexFallbackModel,
     onProviderFailure,
     sandbox,
@@ -143,9 +143,20 @@ async function buildPhaseImpl(opts: {
   let prompt: string;
   let taskType: 'build_codex' | 'build_claude' | 'build_opencode';
 
+  let modelOverride = modelOverrideOpt;
   if (route === 'codex' && isCodexDisabled) {
     log('warn', 'codex unavailable — falling back to claude');
     route = 'claude';
+    // A Codex-harness override would put that model first in the claude route's chain and run it
+    // anyway (an override skips the tier's provider filter), so a pinned or fallback codex model
+    // cannot ride the flip. Drop it and let the claude route pick its own worker (#1367).
+    if (modelOverride && router.registryRef.isCodexModel(modelOverride)) {
+      log(
+        'model_override_ignored',
+        `build model ${modelOverride} needs the codex route, which is unavailable — using the claude route's default worker`,
+      );
+      modelOverride = undefined;
+    }
   }
 
   if (route === 'codex') {

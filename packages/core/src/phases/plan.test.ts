@@ -183,6 +183,49 @@ npm test`;
     expect(existsSync(specPath.replace(/\.md$/, '.design.json'))).toBe(true);
   });
 
+  it('skips the fast path when the build route is pinned to claude, and honors the pin after model PLAN (#1367)', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-1367.md');
+    const body = `## Problem statement
+Status output has an extra blank line.
+## In scope
+- Update packages/cli/src/status.ts and its test.
+## Out of scope
+- Changing output format.
+## Acceptance criteria
+- [ ] Status has no blank line.
+## Verification
+npm test`;
+    const stub = new StubModelExecutor({ scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] } });
+    const router = new ModelRouter(models, routes, false, stub);
+    const logs: Array<{ type: string; msg: string }> = [];
+
+    const result = await planPhase({
+      issue: 1367,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit: { rest: { issues: { get: async () => ({ data: { title: 'Fix status output', body } }) } } } as any,
+      log: (type, msg) => {
+        logs.push({ type, msg });
+      },
+      enforceReadiness: true,
+      fastPath: true,
+      preferredRoute: 'claude',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.route).toBe('claude');
+    expect(result.model).not.toBe('fast-path');
+    expect(stub.calls.some((c) => c.task === 'plan')).toBe(true);
+    expect(logs.some((l) => l.type === 'fast_path')).toBe(false);
+    expect(logs).toContainEqual({ type: 'model-override', msg: "pinned build route claude — overriding plan's codex" });
+    expect(await readFile(specPath, 'utf8')).toContain('route: claude');
+  });
+
   it('enriches an incomplete GitHub factory task before a single PLAN call', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
     tempDirs.add(worktree);
