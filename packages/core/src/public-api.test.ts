@@ -406,6 +406,15 @@ const INTERNAL_API_KEYS = [
   // Daemon control-plane HTTP server (#777)
   'createFactorydServer',
   'DEFAULT_FACTORYD_PORT',
+  // Durable explicit daemon runs (#1393)
+  'createDaemonRunExclusive',
+  'daemonRunFile',
+  'executeDaemonRun',
+  'isValidRunId',
+  'MAX_DETAIL_CHARS',
+  'readDaemonRun',
+  'submitDaemonRun',
+  'writeDaemonRun',
   // Daemon runtime state: pid/port/log files (#1177)
   'acquirePidFile',
   'createDaemonLogSink',

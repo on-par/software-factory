@@ -6,29 +6,37 @@
 // /repos/<owner>/<name>[?force=true] begins a drain-based detach through
 // beginDetach + the background drainAndDetach loop (#780, epic #761); GET/PUT
 // /repos/<owner>/<name>/policy read and persist the SAFE_POLICY_FIELDS
-// allow-list against the checkout's .factory/config.json (#1389, ADR-0094).
-// Binding to 127.0.0.1 IS the authorization model; see the ADRs shipped with
-// these changes.
+// allow-list against the checkout's .factory/config.json (#1389, ADR-0094);
+// POST /runs creates durable explicit runs and GET /runs/<id> reads them
+// (#1393, ADR-0097). Binding to 127.0.0.1 IS the authorization model; see the
+// ADRs shipped with these changes.
 
 import http from 'node:http';
 
 import { getFactoryPaths, isPlainObject } from '../config/index.js';
 import { isSafePolicyFieldId, resolveSafeRepoPolicy, setSafeRepoPolicyField } from '../config/policy.js';
 import { type AttachRepoDeps, attachRepo } from './repos-attach.js';
+import { createDaemonLaneContext } from './lane-context.js';
 import { beginDetach, type DetachRepoDeps, drainAndDetach } from './repos-detach.js';
 import { setRepoState } from './repos-pause-resume.js';
 import { defaultRegistryPath, listRepos, loadRegistry, type RepoRegistryListing } from './registry.js';
+import { daemonRunFile, isValidRunId, readDaemonRun } from './run-store.js';
+import { type DaemonRunDeps, type DaemonRunExecutor, executeDaemonRun, submitDaemonRun } from './runs-submit.js';
+import { daemonRuntimePaths } from './runtime-state.js';
+import { dirname } from 'node:path';
 
 /** Default TCP port for the foreground factoryd listener. */
 export const DEFAULT_FACTORYD_PORT = 8787;
 
-/** POST /repos body cap — attach requests are a couple of short strings; 64
+/** POST request body cap — requests are a couple of short strings; 64
  *  KiB is generous headroom while still bounding the read. */
-const MAX_ATTACH_BODY_BYTES = 64 * 1024;
+const MAX_REQUEST_BODY_BYTES = 64 * 1024;
 
 export interface FactorydOptions {
   /** Registry file to serve. Defaults to defaultRegistryPath(). */
   registryFile?: string;
+  /** Default daemonRuntimePaths(dirname(registryFile)).runsDir. */
+  runsDir?: string;
   /** Default DEFAULT_FACTORYD_PORT; pass 0 in tests for an ephemeral port. */
   port?: number;
   /** Default '127.0.0.1' — never anything else in production code paths. */
@@ -39,6 +47,10 @@ export interface FactorydOptions {
   attachDeps?: AttachRepoDeps;
   /** Seams passed through to drainAndDetach for DELETE /repos/<owner>/<name>. Test-only. */
   detachDeps?: DetachRepoDeps;
+  /** Engine port POST /runs dispatches to. Default rejects with the #1366 gap. */
+  runExecutor?: DaemonRunExecutor;
+  /** Seams passed through to submitDaemonRun/executeDaemonRun. Test-only. */
+  runDeps?: DaemonRunDeps;
 }
 
 type ReadJsonBodyResult = { ok: true; value: unknown } | { ok: false; tooLarge: boolean };
@@ -108,15 +120,20 @@ function parseForce(url: string | undefined): boolean {
 
 export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer {
   const registryFile = opts.registryFile ?? defaultRegistryPath();
+  const runsDir = opts.runsDir ?? daemonRuntimePaths(dirname(registryFile)).runsDir;
   const desiredPort = opts.port ?? DEFAULT_FACTORYD_PORT;
   const host = opts.host ?? '127.0.0.1';
   const log = opts.log ?? ((line: string) => console.log(line));
+  const runExecutor =
+    opts.runExecutor ?? (() => Promise.reject(new Error('no run executor wired into factoryd (#1366)')));
+  const runDeps: DaemonRunDeps = { ...opts.runDeps, log: opts.runDeps?.log ?? log };
 
   // Server-scoped drain bookkeeping: the signal lets stop() cooperatively
   // abort every in-flight drainAndDetach loop, and pendingDrains is what
   // stop() awaits so no poll timer outlives the server.
   const drainSignal = { aborted: false };
   const pendingDrains = new Set<Promise<unknown>>();
+  const pendingRuns = new Set<Promise<unknown>>();
 
   function send(
     res: http.ServerResponse,
@@ -143,7 +160,7 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
       }
 
       if (req.method === 'POST') {
-        const body = await readJsonBody(req, MAX_ATTACH_BODY_BYTES);
+        const body = await readJsonBody(req, MAX_REQUEST_BODY_BYTES);
         if (!body.ok) {
           send(res, req, body.tooLarge ? 413 : 400, {
             error: body.tooLarge ? 'request body too large' : 'invalid JSON body',
@@ -164,7 +181,53 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
       return;
     }
 
+    if (pathname === '/runs') {
+      if (req.method !== 'POST') {
+        send(res, req, 405, { error: 'method not allowed' }, 'POST');
+        return;
+      }
+      const body = await readJsonBody(req, MAX_REQUEST_BODY_BYTES);
+      if (!body.ok) {
+        send(res, req, body.tooLarge ? 413 : 400, {
+          error: body.tooLarge ? 'request body too large' : 'invalid JSON body',
+          reason: 'invalid-request',
+        });
+        return;
+      }
+      const result = await submitDaemonRun(registryFile, runsDir, body.value, runDeps);
+      if (!result.ok) {
+        const status = result.reason === 'invalid-request' ? 400 : result.reason === 'unknown-repo' ? 404 : 409;
+        send(res, req, status, { error: result.detail, reason: result.reason });
+        return;
+      }
+      if (result.created) {
+        const context = createDaemonLaneContext(result.entry);
+        const run = executeDaemonRun(runsDir, result.run, context, runExecutor, runDeps)
+          .catch(() => undefined)
+          .finally(() => pendingRuns.delete(run));
+        pendingRuns.add(run);
+        send(res, req, 201, { run: result.run });
+        return;
+      }
+      send(res, req, 200, { run: result.run });
+      return;
+    }
+
     const segments = pathname.split('/').filter((s) => s.length > 0);
+    if (segments.length === 2 && segments[0] === 'runs') {
+      if (req.method !== 'GET') {
+        send(res, req, 405, { error: 'method not allowed' }, 'GET');
+        return;
+      }
+      const runId = segments[1] as string;
+      const run = isValidRunId(runId) ? await readDaemonRun(daemonRunFile(runsDir, runId)) : null;
+      if (run === null) {
+        send(res, req, 404, { error: `no run ${runId}`, reason: 'unknown-run' });
+        return;
+      }
+      send(res, req, 200, { run });
+      return;
+    }
     if (segments.length === 4 && segments[0] === 'repos' && (segments[3] === 'pause' || segments[3] === 'resume')) {
       if (req.method !== 'POST') {
         send(res, req, 405, { error: 'method not allowed' }, 'POST');
@@ -200,7 +263,7 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
           return;
         }
 
-        const body = await readJsonBody(req, MAX_ATTACH_BODY_BYTES);
+        const body = await readJsonBody(req, MAX_REQUEST_BODY_BYTES);
         if (!body.ok) {
           send(res, req, body.tooLarge ? 413 : 400, {
             error: body.tooLarge ? 'request body too large' : 'invalid JSON body',
@@ -289,7 +352,8 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
     },
     async stop(): Promise<void> {
       drainSignal.aborted = true;
-      await Promise.allSettled([...pendingDrains]);
+      // Like drains, an executor that never settles deliberately holds shutdown.
+      await Promise.allSettled([...pendingDrains, ...pendingRuns]);
       await new Promise<void>((resolvePromise) => {
         server.closeAllConnections();
         server.close(() => resolvePromise());

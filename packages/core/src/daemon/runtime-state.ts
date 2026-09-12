@@ -1,6 +1,7 @@
 // src/daemon/runtime-state.ts — factoryd's on-disk runtime-state contract
 // (#1177, epic #764): daemon.pid (single-instance guard), daemon.port (bound
-// address record), daemon.log (append-only stdout copy), colocated with the
+// address record), daemon.log (append-only stdout copy), and runs/ (durable
+// explicit run records), colocated with the
 // registry file (~/.factory by default). The pid file is deliberately NOT the
 // ADR-0009 fenced file lock: a daemon guard must fail fast when a live holder
 // exists and must never queue or steal on a grace window — see the ADR shipped
@@ -20,6 +21,8 @@ export interface DaemonRuntimePaths {
   portFile: string;
   /** `<dir>/daemon.log` — timestamped copy of every daemon log line. */
   logFile: string;
+  /** `<dir>/runs` — one JSON record per app-launched run. */
+  runsDir: string;
 }
 
 /** Resolves the daemon runtime file paths. `dir` defaults to `<home>/.factory`
@@ -32,6 +35,7 @@ export function daemonRuntimePaths(dir?: string): DaemonRuntimePaths {
     pidFile: join(stateDir, 'daemon.pid'),
     portFile: join(stateDir, 'daemon.port'),
     logFile: join(stateDir, 'daemon.log'),
+    runsDir: join(stateDir, 'runs'),
   };
 }
 

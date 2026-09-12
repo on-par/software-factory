@@ -2608,7 +2608,7 @@ async function cmdFactoryd(opts: { port?: string; registry?: string }): Promise<
   };
   if (acquired.stalePid !== null) log(`removed stale pid file (pid ${acquired.stalePid})`);
 
-  const daemon = createFactorydServer({ registryFile, port, log });
+  const daemon = createFactorydServer({ registryFile, runsDir: runtime.runsDir, port, log });
   const boundPort = await daemon.start();
   await writePortFile(runtime, boundPort);
   const banner = [
@@ -2618,6 +2618,7 @@ async function cmdFactoryd(opts: { port?: string; registry?: string }): Promise<
     `  port file: ${runtime.portFile}`,
     `  log file: ${runtime.logFile}`,
     `  GET http://127.0.0.1:${boundPort}/repos`,
+    `  POST http://127.0.0.1:${boundPort}/runs  {"runId","repo","issue"}`,
   ];
   console.log(chalk.green(banner[0]));
   for (const line of banner.slice(1)) console.log(line);
