@@ -11,9 +11,11 @@ import {
 export interface AttachRepoFormProps {
   /** Injectable seam — defaults to the real client. */
   attach?: (input: AttachRepoInput) => Promise<AttachRepoOutcome>;
+  /** Called with the slug only when factoryd accepted and registered the repo. */
+  onAttached?: (slug: string) => void;
 }
 
-export function AttachRepoForm({ attach = attachRepo }: AttachRepoFormProps) {
+export function AttachRepoForm({ attach = attachRepo, onAttached }: AttachRepoFormProps) {
   const [repo, setRepo] = useState('');
   const [path, setPath] = useState('');
   const [busy, setBusy] = useState(false);
@@ -33,6 +35,7 @@ export function AttachRepoForm({ attach = attachRepo }: AttachRepoFormProps) {
       const result = await attach(input);
       setOutcome(result);
       setBusy(false);
+      if (result.ok) onAttached?.(result.slug);
     })();
   }
 

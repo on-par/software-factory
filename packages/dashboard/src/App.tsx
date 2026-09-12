@@ -1,5 +1,5 @@
 import { AttachRepoForm } from './AttachRepoForm.js';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 
 import { useAttachedRepos } from './attachedRepos.js';
 import { KpiTrendView } from './KpiTrendView.js';
@@ -7,6 +7,7 @@ import { parseAttachedRepos } from './laneBoardState.js';
 import { LaneBoard } from './LaneBoard.js';
 import { RepoDetail } from './RepoDetail.js';
 import { repoFromLocation } from './repoDetailState.js';
+import { RepoList } from './RepoList.js';
 import { createRepoPolicyClient, SettingsView } from './SettingsView.js';
 import { useLaneEvents } from './useLaneEvents.js';
 
@@ -24,6 +25,7 @@ export function App() {
   const { board, connection } = useLaneEvents(repo === null ? {} : { repo });
   const policyClient = useMemo(() => createRepoPolicyClient(), []);
   const attachedRepos = useAttachedRepos(ATTACHED_REPOS);
+  const [attachCount, setAttachCount] = useState(0);
 
   return (
     <div className="flex h-screen bg-canvas font-sans text-ink-900">
@@ -60,7 +62,10 @@ export function App() {
                   a future factoryd-served reading. */}
               <LaneBoard board={board} connection={connection} attachedRepos={attachedRepos} usage={null} />
               <div className="mt-4">
-                <AttachRepoForm />
+                <RepoList refreshKey={attachCount} />
+              </div>
+              <div className="mt-4">
+                <AttachRepoForm onAttached={() => setAttachCount((n) => n + 1)} />
               </div>
             </>
           ) : (

@@ -58,6 +58,11 @@ describe('App', () => {
     expect(screen.getByRole('region', { name: 'Attach a repository' })).toBeDefined();
   });
 
+  it('renders the attached repositories region alongside the attach form', () => {
+    render(<App />);
+    expect(screen.getByRole('region', { name: 'Attached repositories' })).toBeDefined();
+  });
+
   it('renders the Settings region and its nav link still resolves', () => {
     render(<App />);
     expect(screen.getByRole('region', { name: 'Settings' })).toBeDefined();
