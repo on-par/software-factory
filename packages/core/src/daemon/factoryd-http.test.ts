@@ -3,7 +3,7 @@ import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getFactoryPaths } from '../config/index.js';
 import { createFactorydServer, DEFAULT_FACTORYD_PORT, type FactorydServer } from './factoryd-http.js';
@@ -42,6 +42,7 @@ describe('createFactorydServer', () => {
   let factoryd: FactorydServer | undefined;
 
   beforeEach(async () => {
+    vi.stubEnv('FACTORY_MERGE', '');
     dir = await mkdtemp(join(tmpdir(), 'factoryd-http-'));
     registryFile = join(dir, 'registry.json');
   });
@@ -49,6 +50,7 @@ describe('createFactorydServer', () => {
   afterEach(async () => {
     await factoryd?.stop();
     factoryd = undefined;
+    vi.unstubAllEnvs();
     await rm(dir, { recursive: true, force: true });
   });
 

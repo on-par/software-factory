@@ -1,4 +1,4 @@
-/** Mirrors core's AttachFailureReason (packages/core/src/daemon/repos-attach.ts) — the dashboard
+/** Mirrors core's AttachFailureReason (packages/core/src/daemon/checkout-validation.ts) — the dashboard
  *  cannot import @on-par/factory-core, which is Node-only. The two extra members are app-side:
  *  'daemon-unreachable' for a transport failure, 'unknown-failure' for a reason this build has no
  *  copy for (e.g. a newer daemon). See the ADR shipped with this change. */

@@ -260,13 +260,17 @@ export {
 } from './daemon/runtime-state.js';
 
 // Daemon attach gate (#778)
-export type {
-  AttachFailureReason,
-  AttachRepoDeps,
-  AttachRepoRequest,
-  AttachRepoResult,
-} from './daemon/repos-attach.js';
+export type { AttachFailureReason, AttachRepoDeps, AttachRepoResult } from './daemon/repos-attach.js';
 export { attachRepo, parseRemoteSlug, readOriginUrl } from './daemon/repos-attach.js';
+
+// Daemon checkout validation gate (#1398)
+export type {
+  CheckoutValidationDeps,
+  CheckoutValidationFailureReason,
+  CheckoutValidationResult,
+  ValidatedCheckout,
+} from './daemon/checkout-validation.js';
+export { parseCheckoutRequest, validateCheckout } from './daemon/checkout-validation.js';
 
 // Daemon pause/resume gate (#779)
 export type { SetRepoStateFailureReason, SetRepoStateResult, SettableRepoState } from './daemon/repos-pause-resume.js';
