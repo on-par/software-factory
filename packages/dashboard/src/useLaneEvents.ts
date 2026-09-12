@@ -1,7 +1,7 @@
 import { LaneLifecycleEventSchema, RepositoryLaneLifecycleEventSchema } from '@on-par/contracts';
 import { useEffect, useState } from 'react';
 
-import { emptyLaneBoard, reduceLaneEvent, type LaneBoardState } from './laneBoardState.js';
+import { emptyLaneBoard, readEventRepo, reduceLaneEvent, type LaneBoardState } from './laneBoardState.js';
 import { DEFAULT_EVENTS_URL, repoEventsUrl, reduceRepoLaneEvent } from './repoDetailState.js';
 
 export interface EventSourceLike {
@@ -57,7 +57,10 @@ export function useLaneEvents(options: UseLaneEventsOptions = {}): UseLaneEvents
       if (repo === undefined) {
         const parsed = LaneLifecycleEventSchema.safeParse(raw);
         if (!parsed.success) return;
-        setBoard((prev) => reduceLaneEvent(prev, parsed.data));
+        const eventRepo = readEventRepo(raw);
+        setBoard((prev) =>
+          reduceLaneEvent(prev, eventRepo === undefined ? parsed.data : { ...parsed.data, repo: eventRepo }),
+        );
         return;
       }
       const parsed = RepositoryLaneLifecycleEventSchema.safeParse(raw);

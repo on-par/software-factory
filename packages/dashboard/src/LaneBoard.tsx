@@ -1,9 +1,11 @@
 import {
   BOARD_PHASES,
+  groupLanesByRepo,
   laneStatusChip,
   type LaneBoardState,
   type LaneCard,
   type PhaseSegmentState,
+  type RepoLaneGroup,
 } from './laneBoardState.js';
 
 export type ConnectionState = 'connecting' | 'live' | 'disconnected';
@@ -11,6 +13,9 @@ export type ConnectionState = 'connecting' | 'live' | 'disconnected';
 export interface LaneBoardProps {
   board: LaneBoardState;
   connection: ConnectionState;
+  /** Attached repo slugs from injected config — seeds an idle section for a repo with no lane
+   *  events yet. See ADR-0038/ADR-0039: this is config, never a network read. */
+  attachedRepos?: readonly string[];
 }
 
 export const CONNECTION_CHIP: Record<ConnectionState, { label: string; className: string }> = {
@@ -81,23 +86,51 @@ export function LaneCardView({ card }: { card: LaneCard }) {
   );
 }
 
-export function LaneBoard({ board, connection }: LaneBoardProps) {
+function RepoGroupView({ group }: { group: RepoLaneGroup }) {
+  const idle = group.lanes.length === 0;
+
+  return (
+    <section aria-label={`Repo ${group.repo}`} className="flex flex-col gap-1">
+      <div className="flex items-center gap-2">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-600">{group.repo}</h4>
+        {idle && (
+          <span role="status" className="rounded-sm bg-hairline px-1.5 py-0.5 text-[11px] font-medium text-ink-600">
+            Idle
+          </span>
+        )}
+      </div>
+      {idle ? (
+        <p className="text-sm text-ink-400">No active lanes.</p>
+      ) : (
+        <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          {group.lanes.map((card) => (
+            <li key={card.laneId}>
+              <LaneCardView card={card} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+export function LaneBoard({ board, connection, attachedRepos = [] }: LaneBoardProps) {
+  const groups = groupLanesByRepo(board.lanes, attachedRepos);
+
   return (
     <section aria-label="Lane status board" className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-ink-900">Lanes</h3>
         <ConnectionChip connection={connection} />
       </div>
-      {board.lanes.length === 0 ? (
+      {groups.length === 0 ? (
         <p className="text-sm text-ink-400">Waiting for lane events…</p>
       ) : (
-        <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-          {board.lanes.map((card) => (
-            <li key={card.laneId}>
-              <LaneCardView card={card} />
-            </li>
+        <div className="flex flex-col gap-4">
+          {groups.map((group) => (
+            <RepoGroupView key={group.repo} group={group} />
           ))}
-        </ul>
+        </div>
       )}
     </section>
   );

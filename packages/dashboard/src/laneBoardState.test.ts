@@ -3,9 +3,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
   LOG_TAIL_LIMIT,
+  UNKNOWN_REPO,
   emptyLaneBoard,
   formatLogLine,
+  groupLanesByRepo,
   laneStatusChip,
+  parseAttachedRepos,
+  readEventRepo,
   reduceLaneEvent,
   type LaneCard,
 } from './laneBoardState.js';
@@ -39,6 +43,22 @@ describe('reduceLaneEvent', () => {
     expect(card.worktreePath).toBe('/tmp/lane-1');
     expect(card.detail).toBe('planning');
     expect(card.segments).toEqual({ plan: 'active', build: 'pending', check: 'pending', ship: 'pending' });
+  });
+
+  it('defaults repo to UNKNOWN_REPO when the event carries no annotation', () => {
+    const state = reduceLaneEvent(emptyLaneBoard(), makeEvent());
+    expect(state.lanes[0]?.repo).toBe(UNKNOWN_REPO);
+  });
+
+  it('carries a repo annotation onto the card', () => {
+    const state = reduceLaneEvent(emptyLaneBoard(), { ...makeEvent(), repo: 'on-par/software-factory' });
+    expect(state.lanes[0]?.repo).toBe('on-par/software-factory');
+  });
+
+  it('keeps the existing repo when a later event for the same lane omits it', () => {
+    let state = reduceLaneEvent(emptyLaneBoard(), { ...makeEvent(), repo: 'on-par/software-factory' });
+    state = reduceLaneEvent(state, makeEvent({ status: 'progress' }));
+    expect(state.lanes[0]?.repo).toBe('on-par/software-factory');
   });
 
   it('updates an existing lane in place rather than adding a second card', () => {
@@ -143,5 +163,89 @@ describe('laneStatusChip', () => {
       label: 'build…',
       className: 'bg-status-building text-navy-950',
     });
+  });
+});
+
+describe('readEventRepo', () => {
+  it('reads a string repo field off an object', () => {
+    expect(readEventRepo({ repo: 'on-par/software-factory' })).toBe('on-par/software-factory');
+  });
+
+  it('returns undefined when repo is absent', () => {
+    expect(readEventRepo({ laneId: 'lane-1' })).toBeUndefined();
+  });
+
+  it('returns undefined when repo is present but not a string', () => {
+    expect(readEventRepo({ repo: 42 })).toBeUndefined();
+  });
+
+  it.each([null, undefined, 'a string', 42, true])('returns undefined for non-object input %s', (raw) => {
+    expect(readEventRepo(raw)).toBeUndefined();
+  });
+});
+
+describe('groupLanesByRepo', () => {
+  function cardWithRepo(repo: string, laneId = repo): LaneCard {
+    const state = reduceLaneEvent(emptyLaneBoard(), { ...makeEvent({ laneId }), repo });
+    return state.lanes[0] as LaneCard;
+  }
+
+  it('groups lane cards by repo', () => {
+    const cardA = cardWithRepo('on-par/software-factory', 'lane-a');
+    const cardB = cardWithRepo('on-par/other-repo', 'lane-b');
+
+    const groups = groupLanesByRepo([cardA, cardB]);
+
+    expect(groups).toEqual([
+      { repo: 'on-par/software-factory', lanes: [cardA] },
+      { repo: 'on-par/other-repo', lanes: [cardB] },
+    ]);
+  });
+
+  it('seeds an idle group with an empty lanes array for an attached repo with no lane cards', () => {
+    const groups = groupLanesByRepo([], ['on-par/software-factory']);
+    expect(groups).toEqual([{ repo: 'on-par/software-factory', lanes: [] }]);
+  });
+
+  it('orders attached repos first, in config order, ahead of unlisted observed repos', () => {
+    const observed = cardWithRepo('on-par/unlisted-repo');
+    const groups = groupLanesByRepo([observed], ['on-par/software-factory', 'on-par/other-repo']);
+
+    expect(groups.map((group) => group.repo)).toEqual([
+      'on-par/software-factory',
+      'on-par/other-repo',
+      'on-par/unlisted-repo',
+    ]);
+  });
+
+  it('still groups an observed repo missing from the attached list, rather than hiding it', () => {
+    const observed = cardWithRepo('on-par/software-factory');
+    const groups = groupLanesByRepo([observed], []);
+    expect(groups).toEqual([{ repo: 'on-par/software-factory', lanes: [observed] }]);
+  });
+
+  it('returns no groups for no lanes and no attached repos', () => {
+    expect(groupLanesByRepo([])).toEqual([]);
+  });
+});
+
+describe('parseAttachedRepos', () => {
+  it('returns an empty array for undefined', () => {
+    expect(parseAttachedRepos(undefined)).toEqual([]);
+  });
+
+  it('returns an empty array for an empty string', () => {
+    expect(parseAttachedRepos('')).toEqual([]);
+  });
+
+  it('splits on commas and trims whitespace', () => {
+    expect(parseAttachedRepos('on-par/software-factory, on-par/other-repo ,  ')).toEqual([
+      'on-par/software-factory',
+      'on-par/other-repo',
+    ]);
+  });
+
+  it('de-duplicates repeated slugs while preserving first-seen order', () => {
+    expect(parseAttachedRepos('a/b,c/d,a/b')).toEqual(['a/b', 'c/d']);
   });
 });

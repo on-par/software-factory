@@ -46,6 +46,7 @@ function Probe({ source, repo }: { source: FakeEventSource; repo?: string }) {
     <div>
       <span data-testid="connection">{connection}</span>
       <span data-testid="lane-count">{board.lanes.length}</span>
+      <span data-testid="lane-repo">{board.lanes[0]?.repo}</span>
     </div>
   );
 }
@@ -58,6 +59,24 @@ describe('useLaneEvents', () => {
     act(() => source.emit('lifecycle', validEventJson()));
 
     expect(screen.getByTestId('lane-count').textContent).toBe('1');
+  });
+
+  it('carries a repo annotation from the raw frame onto the lane card, even though the schema strips it', () => {
+    const source = new FakeEventSource();
+    render(<Probe source={source} />);
+
+    act(() => source.emit('lifecycle', validEventJson({ repo: 'on-par/software-factory' })));
+
+    expect(screen.getByTestId('lane-repo').textContent).toBe('on-par/software-factory');
+  });
+
+  it('lands a lane with the default repo when the frame carries no repo annotation', () => {
+    const source = new FakeEventSource();
+    render(<Probe source={source} />);
+
+    act(() => source.emit('lifecycle', validEventJson()));
+
+    expect(screen.getByTestId('lane-repo').textContent).toBe('unknown');
   });
 
   it('produces two lanes for two different laneIds', () => {
