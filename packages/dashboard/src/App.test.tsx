@@ -51,4 +51,9 @@ describe('App', () => {
     expect(screen.getByText('KPI trends')).toBeDefined();
     expect(screen.getByText('No KPI history yet.')).toBeDefined();
   });
+
+  it('renders the attach-a-repository form', () => {
+    render(<App />);
+    expect(screen.getByRole('region', { name: 'Attach a repository' })).toBeDefined();
+  });
 });
