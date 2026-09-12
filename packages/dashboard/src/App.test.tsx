@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from './App.js';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe('App', () => {
   it('renders the On Par Factory heading', () => {
@@ -50,5 +53,19 @@ describe('App', () => {
     render(<App />);
     expect(screen.getByText('KPI trends')).toBeDefined();
     expect(screen.getByText('No KPI history yet.')).toBeDefined();
+  });
+
+  it('renders the repo lifecycle panel, waiting for factoryd in jsdom', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('fetch is not implemented in jsdom');
+      }),
+    );
+    render(<App />);
+    expect(screen.getByRole('region', { name: 'Attached repositories' })).toBeDefined();
+    await waitFor(() =>
+      expect(screen.getByText('Could not read the repo registry: fetch is not implemented in jsdom')).toBeDefined(),
+    );
   });
 });
