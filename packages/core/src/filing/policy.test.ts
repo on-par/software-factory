@@ -8,9 +8,12 @@ import {
   evaluateFilingPolicy,
   isAutoMergeBlocked,
   labelsFor,
+  mergeGateMessage,
+  parseMergeGateMessage,
   recordFiled,
   recordPark,
   rollDay,
+  SELF_FIX_MERGE_GATE_POLICY,
   touchesSensitiveScope,
 } from './policy.js';
 
@@ -110,6 +113,24 @@ describe('isAutoMergeBlocked', () => {
 
   it('is false when the self-fix label is absent', () => {
     expect(isAutoMergeBlocked(['bug'], policy)).toBe(false);
+  });
+});
+
+describe('merge gate', () => {
+  it('mergeGateMessage pins the exact shipped text', () => {
+    expect(mergeGateMessage('no-auto-merge')).toBe('auto-merge blocked by no-auto-merge — awaiting human approval');
+  });
+
+  it('round-trips through parseMergeGateMessage', () => {
+    expect(parseMergeGateMessage(mergeGateMessage('guard-me'))).toEqual({
+      label: 'guard-me',
+      policy: SELF_FIX_MERGE_GATE_POLICY,
+    });
+  });
+
+  it('returns undefined for non-gate messages', () => {
+    expect(parseMergeGateMessage('PR merged')).toBeUndefined();
+    expect(parseMergeGateMessage('auto-merge blocked by')).toBeUndefined();
   });
 });
 

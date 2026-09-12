@@ -89,6 +89,7 @@ import {
   LOCAL_BRIEF_SOURCE,
   localOnlyWorkspace,
   mergedPrRefs,
+  mergeGateMessage,
   ModelRegistry,
   ModelRouter,
   parkReasonFor,
@@ -3812,12 +3813,7 @@ export async function waitForMerge(
         labels = [filingPolicy.selfFixLabel];
       }
       if (isAutoMergeBlocked(labels, filingPolicy)) {
-        emitEvent(
-          paths.events,
-          'merge-gated',
-          issue,
-          `auto-merge blocked by ${filingPolicy.selfFixLabel} — awaiting human approval`,
-        );
+        emitEvent(paths.events, 'merge-gated', issue, mergeGateMessage(filingPolicy.selfFixLabel));
         writeLine(
           `[factory] #${issue} auto-merge gated (${filingPolicy.selfFixLabel}); awaiting human merge (poll 120s)`,
         );

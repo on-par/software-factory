@@ -112,3 +112,27 @@ export function touchesSensitiveScope(changedPaths: readonly string[], policy: F
 export function isAutoMergeBlocked(labels: readonly string[], policy: FilingPolicy): boolean {
   return labels.includes(policy.selfFixLabel);
 }
+
+/** Config key that puts the self-fix merge gate in force. */
+export const SELF_FIX_MERGE_GATE_POLICY = 'filing.selfFixLabel';
+
+/** Why autonomous merge is blocked for a PR: the label on the issue, and the policy that put
+ *  it in force. Produced by `mergeGateMessage` and recovered by `parseMergeGateMessage` — the
+ *  `merge-gated` event message is the wire format between the merge path and any UI. */
+export interface MergeGateBlock {
+  label: string;
+  policy: typeof SELF_FIX_MERGE_GATE_POLICY;
+}
+
+const MERGE_GATE_RE = /^auto-merge blocked by (\S+) — awaiting human approval$/;
+
+/** The one and only renderer of the `merge-gated` event message. */
+export function mergeGateMessage(label: string): string {
+  return `auto-merge blocked by ${label} — awaiting human approval`;
+}
+
+/** The one and only reader of it. `undefined` for any message that is not a merge-gate line. */
+export function parseMergeGateMessage(msg: string): MergeGateBlock | undefined {
+  const label = msg.match(MERGE_GATE_RE)?.[1];
+  return label === undefined ? undefined : { label, policy: SELF_FIX_MERGE_GATE_POLICY };
+}

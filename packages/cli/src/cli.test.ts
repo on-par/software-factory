@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import type { ModelDiagnosis } from '@on-par/factory-core';
-import { getFactoryPaths, readPortLeases } from '@on-par/factory-core';
+import { getFactoryPaths, mergeGateMessage, readPortLeases } from '@on-par/factory-core';
 import type { GithubQueue } from '@on-par/factory-core/internal';
 import { RunLockHeldError, resolveBranchPrefix } from '@on-par/factory-core/internal';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1240,6 +1240,7 @@ describe('cli', () => {
 
   it('gates auto-merge behind the no-auto-merge label and keeps polling', async () => {
     const calls: any[] = [];
+    const landCalls: any[] = [];
     const octokit: any = {};
     const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
     let stopped = false;
@@ -1250,7 +1251,8 @@ describe('cli', () => {
       checkMerged: async () => false,
       loadConfig: () => fakeFactoryConfig(true),
       listIssueLabels: async () => ['bug', 'no-auto-merge'],
-      land: async () => {
+      land: async (...args: any[]) => {
+        landCalls.push(args);
         throw new Error('land should not be called');
       },
       emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) =>
@@ -1262,17 +1264,13 @@ describe('cli', () => {
       },
     });
 
-    expect(calls).toContainEqual([
-      'event',
-      'merge-gated',
-      21,
-      'auto-merge blocked by no-auto-merge — awaiting human approval',
-    ]);
+    expect(calls).toContainEqual(['event', 'merge-gated', 21, mergeGateMessage('no-auto-merge')]);
     expect(calls).toContainEqual([
       'writeLine',
       '[factory] #21 auto-merge gated (no-auto-merge); awaiting human merge (poll 120s)',
     ]);
     expect(calls).toContainEqual(['sleep', 120_000]);
+    expect(landCalls).toEqual([]);
   });
 
   it('treats a failed label check as blocked and does not auto-merge (fail-safe)', async () => {
@@ -1304,12 +1302,7 @@ describe('cli', () => {
     const warnEvent = calls.find((c) => c[0] === 'event' && c[1] === 'warn');
     expect(warnEvent).toBeDefined();
     expect(warnEvent[3]).toContain('label check failed');
-    expect(calls).toContainEqual([
-      'event',
-      'merge-gated',
-      21,
-      'auto-merge blocked by no-auto-merge — awaiting human approval',
-    ]);
+    expect(calls).toContainEqual(['event', 'merge-gated', 21, mergeGateMessage('no-auto-merge')]);
   });
 
   it('propagates an AwaitingReviewError from land unchanged instead of swallowing it', async () => {
