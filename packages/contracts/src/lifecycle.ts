@@ -21,3 +21,11 @@ export const LaneLifecycleEventSchema = z.object({
 export type LaneLifecyclePhase = z.infer<typeof LaneLifecyclePhaseSchema>;
 export type LaneLifecycleStatus = z.infer<typeof LaneLifecycleStatusSchema>;
 export type LaneLifecycleEvent = z.infer<typeof LaneLifecycleEventSchema>;
+
+/** A lifecycle event annotated with the attached repository that produced it —
+ * the shape the server puts on the wire (`owner/name`). */
+export const RepositoryLaneLifecycleEventSchema = LaneLifecycleEventSchema.extend({
+  repo: z.string().min(1),
+});
+
+export type RepositoryLaneLifecycleEvent = z.infer<typeof RepositoryLaneLifecycleEventSchema>;
