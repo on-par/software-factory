@@ -96,7 +96,23 @@ const FactoryConfigSchema = z.object({
     merge_poll_seconds: z.number(),
     approval_seconds: z.number().default(1800),
   }),
-  merge: z.object({ auto: z.boolean(), comment: z.string() }),
+  merge: z.object({ auto: z.boolean(), admin: z.boolean().default(false), comment: z.string() }),
+  /** `run.merge.*` mirrors FactoryConfigV2Schema's `run.merge` naming and, when present,
+   *  is authoritative over the legacy top-level `merge.*` fields above (see
+   *  `resolveMergePolicy`). Left optional with no defaults so "unset" survives parsing
+   *  and is distinguishable from an explicit `false`. */
+  run: z
+    .object({
+      merge: z
+        .object({
+          auto: z.boolean().optional(),
+          admin: z.boolean().optional(),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict()
+    .optional(),
   worktree: z.object({
     prefix: z.string(),
     parent: z.string(),
@@ -260,6 +276,7 @@ export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'paths',
   'timeouts',
   'merge',
+  'run',
   'worktree',
   'byok',
   'notifications',
@@ -455,6 +472,50 @@ export function resolveBranchPrefix(env: NodeJS.ProcessEnv = process.env): strin
  *  process groups on terminal state or reaping a dead lane's orphans. */
 export function resolveProcessGroupGraceMs(config: FactoryConfig): number {
   return config.environment?.processGroups?.graceMs ?? 5000;
+}
+
+export interface EffectiveMergePolicy {
+  auto: boolean;
+  admin: boolean;
+  sources: { auto: 'repo' | 'env' | 'default'; admin: 'repo' | 'env' | 'default' };
+}
+
+/** Resolve auto-merge/admin-merge: `run.merge.*` (present ⇒ from the repo file, and
+ *  authoritative — an explicit `false` here is NOT overridden by the legacy env var)
+ *  > legacy `merge.auto: true` (there is no legacy admin field) > `FACTORY_MERGE` /
+ *  `FACTORY_MERGE_ADMIN` env > default `false`. This is a deliberate behavior change from
+ *  the prior `merge.auto || FACTORY_MERGE === '1'` OR semantics (see ADR). */
+export function resolveMergePolicy(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): EffectiveMergePolicy {
+  let auto: boolean;
+  let autoSource: 'repo' | 'env' | 'default';
+  if (config.run?.merge?.auto !== undefined) {
+    auto = config.run.merge.auto;
+    autoSource = 'repo';
+  } else if (config.merge.auto) {
+    auto = true;
+    autoSource = 'repo';
+  } else if (env.FACTORY_MERGE === '1') {
+    auto = true;
+    autoSource = 'env';
+  } else {
+    auto = false;
+    autoSource = 'default';
+  }
+
+  let admin: boolean;
+  let adminSource: 'repo' | 'env' | 'default';
+  if (config.run?.merge?.admin !== undefined) {
+    admin = config.run.merge.admin;
+    adminSource = 'repo';
+  } else if (env.FACTORY_MERGE_ADMIN === '1') {
+    admin = true;
+    adminSource = 'env';
+  } else {
+    admin = false;
+    adminSource = 'default';
+  }
+
+  return { auto, admin, sources: { auto: autoSource, admin: adminSource } };
 }
 
 export function resolveFilingPolicy(config: FactoryConfig): FilingPolicy {

@@ -7,6 +7,7 @@
 // Config
 export type {
   AutoFailoverSettings,
+  EffectiveMergePolicy,
   EnvironmentPortsSettings,
   EnvironmentProxySettings,
   FactoryConfig,
@@ -31,6 +32,7 @@ export {
   resolveEnvironmentPorts,
   resolveEnvironmentProxy,
   resolveIngestConfig,
+  resolveMergePolicy,
   resolvePlanApproval,
   resolveProcessGroupGraceMs,
   resolveSkipCI,
@@ -41,6 +43,7 @@ export type {
   EffectiveBuildRoute,
   EffectiveModelPins,
   EffectiveUsageCap,
+  EffectiveWatchdogPolicy,
   EfficiencyPolicy,
   RepoFactoryConfig,
 } from './config/repo.js';
@@ -53,6 +56,7 @@ export {
   resolveEffectiveModelPins,
   resolveEfficiencyPolicy,
   resolveUsageCap,
+  resolveWatchdogPolicy,
   routeForBuildModel,
 } from './config/repo.js';
 export type {

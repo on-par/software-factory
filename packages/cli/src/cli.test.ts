@@ -1203,6 +1203,34 @@ describe('cli', () => {
     expect(calls.some((call) => call[0] === 'land')).toBe(true);
   });
 
+  it('does not self-merge when run.merge.auto is explicitly false, even with FACTORY_MERGE=1 set (deliberate behavior change)', async () => {
+    const calls: any[] = [];
+    const octokit: any = {};
+    const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
+    process.env.FACTORY_MERGE = '1';
+    let stopped = false;
+
+    await waitForMerge(21, 'ship-it/21-self-merge', '/repo', 'on-par/software-factory', paths, {
+      createOctokit: () => octokit,
+      pathExists: () => stopped,
+      checkMerged: async () => false,
+      loadConfig: () => ({ ...fakeFactoryConfig(false), run: { merge: { auto: false } } }),
+      listIssueLabels: async () => {
+        throw new Error('listIssueLabels should not be called — merge is disabled');
+      },
+      land: async () => {
+        throw new Error('land should not be called — run.merge.auto: false must win over FACTORY_MERGE=1');
+      },
+      emitEvent: () => {},
+      writeLine: (line) => calls.push(line),
+      sleep: async () => {
+        stopped = true;
+      },
+    });
+
+    expect(calls).toContainEqual('[factory] #21 awaiting human merge (poll 120s)');
+  });
+
   it('falls back to the GitHub API for issue labels when no listIssueLabels override is provided', async () => {
     const calls: any[] = [];
     const octokit: any = {

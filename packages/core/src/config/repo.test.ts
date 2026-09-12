@@ -20,6 +20,7 @@ import {
   resolveEffectiveModelPins,
   resolveEfficiencyPolicy,
   resolveUsageCap,
+  resolveWatchdogPolicy,
   routeForBuildModel,
 } from './repo.js';
 
@@ -583,6 +584,75 @@ describe('resolveUsageCap', () => {
   });
 });
 
+describe('resolveWatchdogPolicy', () => {
+  it('uses the packaged defaults when neither repo nor env set anything', () => {
+    expect(resolveWatchdogPolicy(null, {})).toEqual({
+      stopAt: 0.75,
+      resumeAt: 0.65,
+      pollMs: 180_000,
+      watch: true,
+      estimator: false,
+      sources: { stopAt: 'default', resumeAt: 'default', pollMs: 'default', watch: 'default', estimator: 'default' },
+    });
+  });
+
+  it('falls back to the legacy FACTORY_* env vars when no repo config is passed', () => {
+    expect(
+      resolveWatchdogPolicy(null, {
+        FACTORY_STOP_AT: '0.5',
+        FACTORY_RESUME_AT: '0.4',
+        FACTORY_USAGE_POLL: '60',
+        FACTORY_USAGE_WATCH: '0',
+        FACTORY_USAGE_ESTIMATOR: '1',
+      }),
+    ).toEqual({
+      stopAt: 0.5,
+      resumeAt: 0.4,
+      pollMs: 60_000,
+      watch: false,
+      estimator: true,
+      sources: { stopAt: 'env', resumeAt: 'env', pollMs: 'env', watch: 'env', estimator: 'env' },
+    });
+  });
+
+  it('takes the repo budget.watchdog.* over the matching env var, field by field', () => {
+    const repo = {
+      version: 2 as const,
+      budget: { watchdog: { stopAt: 0.9, resumeAt: 0.8, pollSeconds: 30, watch: false, estimator: true } },
+    };
+    expect(
+      resolveWatchdogPolicy(repo, {
+        FACTORY_STOP_AT: '0.5',
+        FACTORY_RESUME_AT: '0.4',
+        FACTORY_USAGE_POLL: '60',
+        FACTORY_USAGE_WATCH: '1',
+        FACTORY_USAGE_ESTIMATOR: '0',
+      }),
+    ).toEqual({
+      stopAt: 0.9,
+      resumeAt: 0.8,
+      pollMs: 30_000,
+      watch: false,
+      estimator: true,
+      sources: { stopAt: 'repo', resumeAt: 'repo', pollMs: 'repo', watch: 'repo', estimator: 'repo' },
+    });
+  });
+
+  it('resolves each field independently when the repo only pins one of them', () => {
+    const result = resolveWatchdogPolicy({ version: 2, budget: { watchdog: { pollSeconds: 45 } } }, {});
+    expect(result.pollMs).toBe(45_000);
+    expect(result.sources.pollMs).toBe('repo');
+    expect(result.stopAt).toBe(0.75);
+    expect(result.sources.stopAt).toBe('default');
+  });
+
+  it('rejects invalid env values with the offending env var name', () => {
+    expect(() => resolveWatchdogPolicy(null, { FACTORY_STOP_AT: '1.5' })).toThrow(/FACTORY_STOP_AT/);
+    expect(() => resolveWatchdogPolicy(null, { FACTORY_RESUME_AT: '1.5' })).toThrow(/FACTORY_RESUME_AT/);
+    expect(() => resolveWatchdogPolicy(null, { FACTORY_USAGE_POLL: 'abc' })).toThrow(/FACTORY_USAGE_POLL/);
+  });
+});
+
 describe('build route from a pinned build model (#1367)', () => {
   const registry = new ModelRegistry(models);
 
@@ -705,6 +775,50 @@ describe('describeEffectiveConfig', () => {
     expect(lines).toContainEqual(expect.stringContaining('Local only: off (default)'));
     expect(lines).toContainEqual(expect.stringContaining('Experimental models: off (default)'));
     expect(lines).toContainEqual(expect.stringContaining('Branch prefix: ship-it (default)'));
+  });
+
+  it('shows merge auto/admin with .factory/config.json as the source when the mergePolicy says repo', () => {
+    const stub = new StubModelExecutor({ scripts: {} });
+    const router = new ModelRouter(models, routes, false, stub);
+    const lines = describeEffectiveConfig({
+      router,
+      repo: null,
+      env: {},
+      repoConfigPath: '.factory/config.json',
+      mergePolicy: { auto: true, admin: true, sources: { auto: 'repo', admin: 'repo' } },
+    });
+
+    expect(lines).toContainEqual('Merge auto: on (.factory/config.json)');
+    expect(lines).toContainEqual('Merge admin: on (.factory/config.json)');
+  });
+
+  it('falls back to an env-only merge policy when none is passed', () => {
+    const stub = new StubModelExecutor({ scripts: {} });
+    const router = new ModelRouter(models, routes, false, stub);
+    const lines = describeEffectiveConfig({
+      router,
+      repo: null,
+      env: { FACTORY_MERGE: '1' },
+      repoConfigPath: '.factory/config.json',
+    });
+
+    expect(lines).toContainEqual('Merge auto: on (env: FACTORY_MERGE)');
+    expect(lines).toContainEqual('Merge admin: off (default)');
+  });
+
+  it('shows usage-watchdog knobs sourced from the repo budget.watchdog namespace', () => {
+    const stub = new StubModelExecutor({ scripts: {} });
+    const router = new ModelRouter(models, routes, false, stub);
+    const lines = describeEffectiveConfig({
+      router,
+      repo: { version: 2, budget: { watchdog: { pollSeconds: 30 } } },
+      env: { FACTORY_STOP_AT: '0.5' },
+      repoConfigPath: '.factory/config.json',
+    });
+
+    expect(lines).toContainEqual('Usage watchdog poll: 30s (.factory/config.json)');
+    expect(lines).toContainEqual('Usage watchdog stop-at: 0.5 (env: FACTORY_STOP_AT)');
+    expect(lines).toContainEqual('Usage watchdog resume-at: 0.65 (default)');
   });
 });
 
