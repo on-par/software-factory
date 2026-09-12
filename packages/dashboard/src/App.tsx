@@ -7,6 +7,7 @@ import { RepoDetail } from './RepoDetail.js';
 import { repoFromLocation } from './repoDetailState.js';
 import { createRepoPolicyClient, SettingsView } from './SettingsView.js';
 import { useLaneEvents } from './useLaneEvents.js';
+import { useNow } from './useNow.js';
 
 const NAV_ITEMS = [
   { label: 'Runs', href: '#' },
@@ -19,6 +20,7 @@ export function App() {
   const repo = repoFromLocation(window.location.search);
   const { board, connection } = useLaneEvents(repo === null ? {} : { repo });
   const policyClient = useMemo(() => createRepoPolicyClient(), []);
+  const now = useNow();
 
   return (
     <div className="flex h-screen bg-canvas font-sans text-ink-900">
@@ -49,13 +51,13 @@ export function App() {
         <main className="flex-1 overflow-y-auto overflow-x-hidden bg-canvas p-2 sm:p-3">
           {repo === null ? (
             <>
-              <LaneBoard board={board} connection={connection} />
+              <LaneBoard board={board} connection={connection} now={now} />
               <div className="mt-4">
                 <AttachRepoForm />
               </div>
             </>
           ) : (
-            <RepoDetail repo={repo} board={board} connection={connection} />
+            <RepoDetail repo={repo} board={board} connection={connection} now={now} />
           )}
           <h3 className="mt-4 text-sm font-semibold text-ink-900">KPI trends</h3>
           <div className="mt-2">

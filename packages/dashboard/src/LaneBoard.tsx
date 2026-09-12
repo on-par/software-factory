@@ -1,16 +1,12 @@
-import {
-  BOARD_PHASES,
-  laneStatusChip,
-  type LaneBoardState,
-  type LaneCard,
-  type PhaseSegmentState,
-} from './laneBoardState.js';
+import type { LaneBoardState, LaneCard, PhaseSegmentState } from './laneBoardState.js';
+import { laneProgress } from './laneProgress.js';
 
 export type ConnectionState = 'connecting' | 'live' | 'disconnected';
 
 export interface LaneBoardProps {
   board: LaneBoardState;
   connection: ConnectionState;
+  now: number;
 }
 
 export const CONNECTION_CHIP: Record<ConnectionState, { label: string; className: string }> = {
@@ -35,7 +31,8 @@ const BAR_CLASS_BY_SEGMENT: Record<PhaseSegmentState, string> = {
   failed: 'bg-status-failed',
 };
 
-export function LaneCardView({ card }: { card: LaneCard }) {
+export function LaneCardView({ card, now }: { card: LaneCard; now: number }) {
+  const progress = laneProgress(card, now);
   return (
     <article
       aria-label={`Lane ${card.laneId}`}
@@ -46,27 +43,42 @@ export function LaneCardView({ card }: { card: LaneCard }) {
           <h4 className="truncate text-sm font-semibold text-ink-900">Issue #{card.issueId}</h4>
           <p className="truncate text-xs text-ink-400">{card.laneId}</p>
         </div>
-        <span
-          role="status"
-          className={`shrink-0 rounded-sm px-1.5 py-0.5 text-[11px] font-medium ${laneStatusChip(card).className}`}
-        >
-          {laneStatusChip(card).label}
-        </span>
+        <div className="flex shrink-0 items-center gap-1">
+          <span role="status" className={`rounded-sm px-1.5 py-0.5 text-[11px] font-medium ${progress.className}`}>
+            {progress.label}
+          </span>
+          <span aria-label="Lane elapsed" className="text-[11px] text-ink-400">
+            {progress.elapsedLabel}
+          </span>
+        </div>
       </div>
       <ol aria-label="Pipeline progress" className="flex gap-0.5">
-        {BOARD_PHASES.map((phase) => {
-          const segmentState = card.segments[phase];
-          return (
-            <li key={phase} className="min-w-0 flex-1" aria-current={segmentState === 'active' ? 'step' : undefined}>
-              <span className="block truncate text-[10px] font-medium uppercase text-ink-600">{phase}</span>
-              <span
-                aria-label={`${phase} ${segmentState}`}
-                className={`block h-1 rounded-sm ${BAR_CLASS_BY_SEGMENT[segmentState]}`}
-              />
-            </li>
-          );
-        })}
+        {progress.phases.map(({ phase, segment, elapsedLabel }) => (
+          <li key={phase} className="min-w-0 flex-1" aria-current={segment.state === 'active' ? 'step' : undefined}>
+            <span className="block truncate text-[10px] font-medium uppercase text-ink-600">{phase}</span>
+            <span
+              aria-label={`${phase} ${segment.state}`}
+              className={`block h-1 rounded-sm ${BAR_CLASS_BY_SEGMENT[segment.state]}`}
+            />
+            {elapsedLabel !== undefined ? (
+              <span aria-label={`${phase} elapsed`} className="block truncate text-[10px] text-ink-400">
+                {elapsedLabel}
+              </span>
+            ) : null}
+          </li>
+        ))}
       </ol>
+      {progress.state === 'parked' ? (
+        <div role="alert" className="rounded-sm bg-status-parked/10 p-1 text-[11px] text-ink-900">
+          <p>Parked — {progress.parkReason}</p>
+          <p className="text-ink-600">{progress.nextAction?.hint}</p>
+          {progress.nextAction ? (
+            <a href={progress.nextAction.href} className="font-medium text-blue-600 hover:text-blue-700">
+              {progress.nextAction.label}
+            </a>
+          ) : null}
+        </div>
+      ) : null}
       <ul
         aria-label="Log tail"
         className="max-h-24 overflow-y-auto rounded-sm bg-canvas p-1 font-mono text-[11px] text-ink-600"
@@ -81,7 +93,7 @@ export function LaneCardView({ card }: { card: LaneCard }) {
   );
 }
 
-export function LaneBoard({ board, connection }: LaneBoardProps) {
+export function LaneBoard({ board, connection, now }: LaneBoardProps) {
   return (
     <section aria-label="Lane status board" className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
@@ -94,7 +106,7 @@ export function LaneBoard({ board, connection }: LaneBoardProps) {
         <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {board.lanes.map((card) => (
             <li key={card.laneId}>
-              <LaneCardView card={card} />
+              <LaneCardView card={card} now={now} />
             </li>
           ))}
         </ul>

@@ -17,6 +17,10 @@ describe('design tokens (index.css @theme)', () => {
     expect(themeBlock).toMatch(/--color-status-building:\s*#14b8a6/);
   });
 
+  it('resolves the parked status token to a hex value', () => {
+    expect(themeBlock).toMatch(/--color-status-parked:\s*#[0-9a-f]{6}/i);
+  });
+
   it('never uses green, emerald, or lime anywhere in the theme declarations', () => {
     expect(themeDeclarations).not.toMatch(/green|emerald|lime/i);
   });

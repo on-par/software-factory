@@ -7,6 +7,12 @@ export const LANE_LIFECYCLE_PHASES = ['plan', 'build', 'check', 'ship'] as const
 export const LaneLifecyclePhaseSchema = z.enum(LANE_LIFECYCLE_PHASES);
 export const LaneLifecycleStatusSchema = z.enum(['started', 'progress', 'done', 'failed']);
 
+/** Lane-level state a producer declares explicitly when the phase/status pair cannot
+ *  express it: a lane parked for a human, or one waiting for its PR to merge. Absent on
+ *  every frame that is just phase progress. The park reason is the frame's `detail`. */
+export const LaneLifecycleLaneStateSchema = z.enum(['waiting-merge', 'parked']);
+export type LaneLifecycleLaneState = z.infer<typeof LaneLifecycleLaneStateSchema>;
+
 export const LaneLifecycleEventSchema = z.object({
   /** ISO-8601, same clock format as FactoryEvent.ts. */
   ts: z.string(),
@@ -16,6 +22,7 @@ export const LaneLifecycleEventSchema = z.object({
   status: LaneLifecycleStatusSchema,
   detail: z.string(),
   worktreePath: z.string(),
+  laneState: LaneLifecycleLaneStateSchema.optional(),
 });
 
 export type LaneLifecyclePhase = z.infer<typeof LaneLifecyclePhaseSchema>;

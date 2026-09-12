@@ -9,6 +9,8 @@ import { reduceRepoLaneEvent } from './repoDetailState.js';
 
 afterEach(cleanup);
 
+const NOW = Date.parse('2026-08-19T00:00:00.000Z');
+
 const baseEvent: RepositoryLaneLifecycleEvent = {
   ts: '2026-08-19T00:00:00.000Z',
   laneId: 'lane-1',
@@ -22,7 +24,7 @@ const baseEvent: RepositoryLaneLifecycleEvent = {
 
 describe('RepoDetail', () => {
   it('renders the region, repo heading, and back link', () => {
-    render(<RepoDetail repo="a/one" board={emptyLaneBoard()} connection="connecting" />);
+    render(<RepoDetail repo="a/one" board={emptyLaneBoard()} connection="connecting" now={NOW} />);
 
     const region = screen.getByRole('region', { name: 'Repo detail a/one' });
     expect(within(region).getByText('a/one')).toBeDefined();
@@ -30,7 +32,7 @@ describe('RepoDetail', () => {
   });
 
   it('shows the empty state and no log tail when there are no lanes', () => {
-    render(<RepoDetail repo="a/one" board={emptyLaneBoard()} connection="connecting" />);
+    render(<RepoDetail repo="a/one" board={emptyLaneBoard()} connection="connecting" now={NOW} />);
 
     expect(screen.getByText('No lanes for a/one yet…')).toBeDefined();
     expect(screen.queryByRole('list', { name: 'Log tail' })).toBeNull();
@@ -45,7 +47,7 @@ describe('RepoDetail', () => {
         detail: `step ${i}`,
       });
     }
-    render(<RepoDetail repo="a/one" board={board} connection="live" />);
+    render(<RepoDetail repo="a/one" board={board} connection="live" now={NOW} />);
 
     const region = screen.getByRole('region', { name: 'Repo detail a/one' });
     const logTail = within(region).getByRole('list', { name: 'Log tail' });
@@ -55,12 +57,12 @@ describe('RepoDetail', () => {
   });
 
   it('renders the Live chip for a live connection', () => {
-    render(<RepoDetail repo="a/one" board={emptyLaneBoard()} connection="live" />);
+    render(<RepoDetail repo="a/one" board={emptyLaneBoard()} connection="live" now={NOW} />);
     expect(screen.getByRole('status').textContent).toBe('Live');
   });
 
   it('renders the Disconnected chip for a disconnected connection', () => {
-    render(<RepoDetail repo="a/one" board={emptyLaneBoard()} connection="disconnected" />);
+    render(<RepoDetail repo="a/one" board={emptyLaneBoard()} connection="disconnected" now={NOW} />);
     expect(screen.getByRole('status').textContent).toBe('Disconnected');
   });
 });

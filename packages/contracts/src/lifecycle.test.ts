@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   LANE_LIFECYCLE_PHASES,
   LaneLifecycleEventSchema,
+  LaneLifecycleLaneStateSchema,
   LaneLifecyclePhaseSchema,
   LaneLifecycleStatusSchema,
   RepositoryLaneLifecycleEventSchema,
@@ -47,6 +48,32 @@ describe('LaneLifecycleEventSchema', () => {
     const { worktreePath: _worktreePath, ...withoutWorktreePath } = baseEvent;
     expect(() => LaneLifecycleEventSchema.parse(withoutWorktreePath)).toThrow();
   });
+
+  it('parses and round-trips a waiting-merge laneState', () => {
+    const event = { ...baseEvent, laneState: 'waiting-merge' };
+    expect(LaneLifecycleEventSchema.parse(event).laneState).toBe('waiting-merge');
+  });
+
+  it('parses and round-trips a parked laneState', () => {
+    const event = { ...baseEvent, laneState: 'parked' };
+    expect(LaneLifecycleEventSchema.parse(event).laneState).toBe('parked');
+  });
+
+  it('parses a frame without laneState and yields laneState undefined', () => {
+    expect(LaneLifecycleEventSchema.parse(baseEvent).laneState).toBeUndefined();
+  });
+
+  it('rejects an unknown laneState value', () => {
+    expect(() => LaneLifecycleEventSchema.parse({ ...baseEvent, laneState: 'napping' })).toThrow();
+  });
+});
+
+describe('LaneLifecycleLaneStateSchema', () => {
+  it('round-trips each lane state value', () => {
+    for (const laneState of ['waiting-merge', 'parked'] as const) {
+      expect(LaneLifecycleLaneStateSchema.parse(laneState)).toBe(laneState);
+    }
+  });
 });
 
 describe('RepositoryLaneLifecycleEventSchema', () => {
@@ -61,6 +88,11 @@ describe('RepositoryLaneLifecycleEventSchema', () => {
 
   it('rejects an empty repo', () => {
     expect(() => RepositoryLaneLifecycleEventSchema.parse({ ...baseEvent, repo: '' })).toThrow();
+  });
+
+  it('carries laneState through the repo-scoped schema', () => {
+    const event = { ...baseEvent, repo: 'on-par/software-factory', laneState: 'parked' };
+    expect(RepositoryLaneLifecycleEventSchema.parse(event).laneState).toBe('parked');
   });
 });
 

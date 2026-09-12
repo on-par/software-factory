@@ -6,9 +6,10 @@ export interface RepoDetailProps {
   repo: string;
   board: LaneBoardState;
   connection: ConnectionState;
+  now: number;
 }
 
-export function RepoDetail({ repo, board, connection }: RepoDetailProps) {
+export function RepoDetail({ repo, board, connection, now }: RepoDetailProps) {
   return (
     <section aria-label={`Repo detail ${repo}`} className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
@@ -26,7 +27,7 @@ export function RepoDetail({ repo, board, connection }: RepoDetailProps) {
         <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {board.lanes.map((card) => (
             <li key={card.laneId}>
-              <LaneCardView card={card} />
+              <LaneCardView card={card} now={now} />
             </li>
           ))}
         </ul>
