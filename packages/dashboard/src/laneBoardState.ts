@@ -9,7 +9,23 @@ export const BOARD_PHASES = LANE_LIFECYCLE_PHASES;
 
 export const LOG_TAIL_LIMIT = 8;
 
+/** Fallback repo key for a card whose originating frame carried no `repo` annotation. */
+export const UNKNOWN_REPO = 'unknown';
+
 export type PhaseSegmentState = 'pending' | 'active' | 'done' | 'failed';
+
+/** `LaneLifecycleEvent` as relayed by `packages/server`'s `/events` endpoint, which tags every
+ *  frame with its source repo (see `RepositoryLifecycleEvent` in `packages/server/src/sse.ts`).
+ *  `repo` is optional here because `LaneLifecycleEventSchema` — the shared, server-side-authored
+ *  schema — strips unknown keys, so a plain schema-validated event never carries it. */
+export type RepoLaneLifecycleEvent = LaneLifecycleEvent & { repo?: string };
+
+/** Assertion-free read of a `repo` annotation off an unknown value — used to recover it from the
+ *  raw SSE payload before/alongside `LaneLifecycleEventSchema` validation, which discards it. */
+export function readEventRepo(raw: unknown): string | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  return 'repo' in raw && typeof raw.repo === 'string' ? raw.repo : undefined;
+}
 
 export function formatLogLine(event: Pick<LaneLifecycleEvent, 'ts' | 'phase' | 'status' | 'detail'>): string {
   return `${event.ts.slice(11, 19)} ${event.phase} ${event.status} — ${event.detail}`;
@@ -19,6 +35,7 @@ export interface LaneCard {
   laneId: string;
   issueId: string;
   worktreePath: string;
+  repo: string;
   phase: LaneLifecyclePhase;
   status: LaneLifecycleStatus;
   detail: string;
@@ -46,7 +63,7 @@ function emptySegments(): Record<LaneLifecyclePhase, PhaseSegmentState> {
   return { plan: 'pending', build: 'pending', check: 'pending', ship: 'pending' };
 }
 
-export function reduceLaneEvent(state: LaneBoardState, event: LaneLifecycleEvent): LaneBoardState {
+export function reduceLaneEvent(state: LaneBoardState, event: RepoLaneLifecycleEvent): LaneBoardState {
   const existing = state.lanes.find((lane) => lane.laneId === event.laneId);
   const previousSegments = existing?.segments ?? emptySegments();
   const previousLog = existing?.log ?? [];
@@ -55,6 +72,7 @@ export function reduceLaneEvent(state: LaneBoardState, event: LaneLifecycleEvent
     laneId: event.laneId,
     issueId: event.issueId,
     worktreePath: event.worktreePath,
+    repo: event.repo ?? existing?.repo ?? UNKNOWN_REPO,
     phase: event.phase,
     status: event.status,
     detail: event.detail,
@@ -79,4 +97,46 @@ export function laneStatusChip(card: LaneCard): { label: string; className: stri
     return { label: `${card.phase} done`, className: 'bg-status-checking text-navy-950' };
   }
   return { label: `${card.phase}…`, className: 'bg-status-building text-navy-950' };
+}
+
+export interface RepoLaneGroup {
+  repo: string;
+  lanes: LaneCard[];
+}
+
+/**
+ * Groups lane cards by their source repo. `attachedRepos` (injected config, never a network
+ * read — see ADR-0038/ADR-0039) seeds a group for every configured repo up front, in config
+ * order, so a repo with zero observed lane cards still renders — as idle, never as absent. A
+ * repo observed on the stream but missing from `attachedRepos` still gets a group, appended in
+ * first-seen order, so a stale config list can never hide live work.
+ */
+export function groupLanesByRepo(lanes: readonly LaneCard[], attachedRepos: readonly string[] = []): RepoLaneGroup[] {
+  const lanesByRepo = new Map<string, LaneCard[]>();
+  for (const lane of lanes) {
+    const group = lanesByRepo.get(lane.repo) ?? [];
+    group.push(lane);
+    lanesByRepo.set(lane.repo, group);
+  }
+
+  const groups: RepoLaneGroup[] = attachedRepos.map((repo) => ({ repo, lanes: lanesByRepo.get(repo) ?? [] }));
+
+  const seen = new Set(attachedRepos);
+  for (const [repo, repoLanes] of lanesByRepo) {
+    if (!seen.has(repo)) groups.push({ repo, lanes: repoLanes });
+  }
+
+  return groups;
+}
+
+/** Parses the injected `VITE_FACTORY_REPOS` config value (comma-separated repo slugs) into an
+ *  ordered, de-duplicated list. Pure and network-free by construction — config, not a fetch. */
+export function parseAttachedRepos(raw: string | undefined): string[] {
+  if (raw === undefined) return [];
+  const seen = new Set<string>();
+  for (const entry of raw.split(',')) {
+    const slug = entry.trim();
+    if (slug !== '') seen.add(slug);
+  }
+  return [...seen];
 }

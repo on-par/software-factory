@@ -2,6 +2,7 @@ import { AttachRepoForm } from './AttachRepoForm.js';
 import { useMemo } from 'react';
 
 import { KpiTrendView } from './KpiTrendView.js';
+import { parseAttachedRepos } from './laneBoardState.js';
 import { LaneBoard } from './LaneBoard.js';
 import { RepoDetail } from './RepoDetail.js';
 import { repoFromLocation } from './repoDetailState.js';
@@ -14,6 +15,8 @@ const NAV_ITEMS = [
   { label: 'Models', href: '#' },
   { label: 'Settings', href: '#settings' },
 ];
+
+const ATTACHED_REPOS = parseAttachedRepos(import.meta.env.VITE_FACTORY_REPOS);
 
 export function App() {
   const repo = repoFromLocation(window.location.search);
@@ -49,7 +52,7 @@ export function App() {
         <main className="flex-1 overflow-y-auto overflow-x-hidden bg-canvas p-2 sm:p-3">
           {repo === null ? (
             <>
-              <LaneBoard board={board} connection={connection} />
+              <LaneBoard board={board} connection={connection} attachedRepos={ATTACHED_REPOS} />
               <div className="mt-4">
                 <AttachRepoForm />
               </div>

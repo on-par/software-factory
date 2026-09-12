@@ -128,4 +128,51 @@ describe('LaneBoard', () => {
     render(<LaneBoard board={board} connection={connection} />);
     expect(screen.getByText(expectedText)).toBeDefined();
   });
+
+  it('groups lane cards under their source repo', () => {
+    let board = boardWithLane({ laneId: 'lane-a', repo: 'on-par/software-factory' });
+    board = reduceLaneEvent(board, {
+      ts: '2026-08-19T00:01:00.000Z',
+      laneId: 'lane-b',
+      issueId: '594',
+      repo: 'on-par/other-repo',
+      phase: 'plan',
+      status: 'started',
+      detail: 'planning',
+      worktreePath: '/tmp/lane-b',
+    });
+
+    render(<LaneBoard board={board} connection="live" />);
+
+    const repoA = screen.getByRole('region', { name: 'Repo on-par/software-factory' });
+    const repoB = screen.getByRole('region', { name: 'Repo on-par/other-repo' });
+    expect(within(repoA).getByLabelText('Lane lane-a')).toBeDefined();
+    expect(within(repoB).getByLabelText('Lane lane-b')).toBeDefined();
+  });
+
+  it('shows an attached repo with no lane events as an idle section', () => {
+    render(<LaneBoard board={emptyLaneBoard()} connection="live" attachedRepos={['on-par/software-factory']} />);
+
+    const repoSection = screen.getByRole('region', { name: 'Repo on-par/software-factory' });
+    expect(within(repoSection).getByText('Idle')).toBeDefined();
+    expect(within(repoSection).getByText('No active lanes.')).toBeDefined();
+    expect(within(repoSection).queryByRole('article')).toBeNull();
+  });
+
+  it('does not mark an attached repo idle once it has an active lane', () => {
+    const board = boardWithLane({ repo: 'on-par/software-factory' });
+    render(<LaneBoard board={board} connection="live" attachedRepos={['on-par/software-factory']} />);
+
+    const repoSection = screen.getByRole('region', { name: 'Repo on-par/software-factory' });
+    expect(within(repoSection).queryByText('Idle')).toBeNull();
+    expect(within(repoSection).getByLabelText('Lane lane-1')).toBeDefined();
+  });
+
+  it('still renders a repo observed on the stream but absent from attachedRepos', () => {
+    const board = boardWithLane({ repo: 'on-par/unlisted-repo' });
+    render(<LaneBoard board={board} connection="live" attachedRepos={['on-par/software-factory']} />);
+
+    expect(screen.getByRole('region', { name: 'Repo on-par/software-factory' })).toBeDefined();
+    expect(screen.getByRole('region', { name: 'Repo on-par/unlisted-repo' })).toBeDefined();
+  });
 });
