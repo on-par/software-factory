@@ -11,7 +11,17 @@ import { isPlainObject, loadFactoryConfig } from './index.js';
 
 export type PolicySource = 'flag' | 'config' | 'env' | 'default';
 
-export type SafePolicyFieldId = 'merge.auto';
+export type SafePolicyFieldId = 'merge.auto' | 'merge.admin';
+
+/** A distinct-confirmation gate for enabling a field: `setSafeRepoPolicyField` refuses to
+ *  write until the caller echoes back `token`, and `auditText` is the one string shared by
+ *  the daemon's AUDIT log line and the dashboard's post-save banner, so the two can't drift
+ *  (#1390). The token is a deliberate-action ceremony, not a credential — loopback binding
+ *  is still the authorization model (ADR-0094/0096). */
+export interface PolicyConfirmation {
+  token: string;
+  auditText: string;
+}
 
 export interface SafePolicyFieldSpec {
   id: SafePolicyFieldId;
@@ -20,6 +30,13 @@ export interface SafePolicyFieldSpec {
   configPath: readonly string[];
   envVar: string;
   flag: string;
+  /** true: an env var of '1' forces the value on even when the config key is present —
+   *  `merge.auto`'s legacy `config.merge.auto || FACTORY_MERGE === '1'` OR read. Omitted/
+   *  false: a present config value is authoritative over the env var, matching
+   *  `resolveMergePolicy`'s `run.merge.admin` read. */
+  envForcesValue?: boolean;
+  /** Present only for fields where *enabling* requires the distinct confirmation gate. */
+  confirmEnable?: PolicyConfirmation;
 }
 
 export const SAFE_POLICY_FIELDS: readonly SafePolicyFieldSpec[] = [
@@ -30,8 +47,35 @@ export const SAFE_POLICY_FIELDS: readonly SafePolicyFieldSpec[] = [
     configPath: ['merge', 'auto'],
     envVar: 'FACTORY_MERGE',
     flag: '--merge',
+    envForcesValue: true,
+  },
+  {
+    id: 'merge.admin',
+    label: 'Admin-merge (bypass required checks)',
+    description: 'Merge a shipped PR using GitHub admin privileges even when required checks have not passed.',
+    configPath: ['run', 'merge', 'admin'],
+    envVar: 'FACTORY_MERGE_ADMIN',
+    flag: '--admin-merge',
+    confirmEnable: {
+      token: 'ENABLE_ADMIN_MERGE_BYPASS',
+      auditText: 'admin-merge bypass explicitly enabled — required checks can be skipped when merging',
+    },
   },
 ];
+
+/** The confirmation an *enable* of `id` requires, or undefined when none is needed
+ *  (disabling, or a field with no `confirmEnable` gate). */
+export function policyConfirmationFor(id: SafePolicyFieldId, value: boolean): PolicyConfirmation | undefined {
+  if (!value) return undefined;
+  return SAFE_POLICY_FIELDS.find((f) => f.id === id)?.confirmEnable;
+}
+
+export class PolicyConfirmationRequiredError extends Error {
+  constructor(public readonly confirmation: PolicyConfirmation) {
+    super(`confirmation required: ${confirmation.auditText}`);
+    this.name = 'PolicyConfirmationRequiredError';
+  }
+}
 
 export interface EffectivePolicyField {
   id: SafePolicyFieldId;
@@ -41,6 +85,9 @@ export interface EffectivePolicyField {
   source: PolicySource;
   sourceDetail: string;
   editable: boolean;
+  /** Copied from the field's spec — present when *enabling* this field requires the
+   *  distinct confirmation gate, so the UI can show its copy without a second field. */
+  confirmEnable?: PolicyConfirmation;
 }
 
 export interface SafeRepoPolicySnapshot {
@@ -84,29 +131,41 @@ export function resolveSafeRepoPolicy(
   const raw = readRawConfig(configPath);
 
   const fields = SAFE_POLICY_FIELDS.map((field): EffectivePolicyField => {
-    const base = { id: field.id, label: field.label, description: field.description };
+    const base = {
+      id: field.id,
+      label: field.label,
+      description: field.description,
+      ...(field.confirmEnable ? { confirmEnable: field.confirmEnable } : {}),
+    };
 
     const flagValue = flags[field.id];
     if (flagValue !== undefined) {
       return { ...base, value: flagValue, source: 'flag', sourceDetail: field.flag, editable: false };
     }
 
-    // The engine's read is `config.merge.auto || FACTORY_MERGE === '1'`: an explicit
-    // FACTORY_MERGE=1 forces the value on regardless of the file; any other value lets
-    // the file decide, so it is not treated as an env-sourced override here.
-    if (env[field.envVar] === '1') {
-      return {
-        ...base,
-        value: true,
-        source: 'env',
-        sourceDetail: `env: ${field.envVar}=1`,
-        editable: false,
-      };
+    const envForced = () => ({
+      ...base,
+      value: true,
+      source: 'env' as const,
+      sourceDetail: `env: ${field.envVar}=1`,
+      editable: false,
+    });
+
+    // `merge.auto`'s engine read is `config.merge.auto || FACTORY_MERGE === '1'`: an
+    // explicit FACTORY_MERGE=1 forces the value on regardless of the file. Other fields
+    // (e.g. `merge.admin`, via `resolveMergePolicy`) treat a present config value as
+    // authoritative over the env var instead — see `envForcesValue` on the spec.
+    if (field.envForcesValue && env[field.envVar] === '1') {
+      return envForced();
     }
 
     const rawValue = raw === null ? undefined : readAtPath(raw, field.configPath);
     if (typeof rawValue === 'boolean') {
       return { ...base, value: rawValue, source: 'config', sourceDetail: field.configPath.join('.'), editable: true };
+    }
+
+    if (env[field.envVar] === '1') {
+      return envForced();
     }
 
     const defaults = loadFactoryConfig();
@@ -117,14 +176,27 @@ export function resolveSafeRepoPolicy(
   return { configPath, fields };
 }
 
+export interface SetSafeRepoPolicyFieldOptions {
+  env?: NodeJS.ProcessEnv;
+  /** Must equal the field's `confirmEnable.token` when enabling a confirmation-gated
+   *  field, or the write is refused before anything touches disk (#1390). */
+  confirmationToken?: string;
+}
+
 export function setSafeRepoPolicyField(
   configPath: string,
   id: SafePolicyFieldId,
   value: boolean,
-  env: NodeJS.ProcessEnv = process.env,
+  options: SetSafeRepoPolicyFieldOptions = {},
 ): SafeRepoPolicySnapshot {
+  const { env = process.env, confirmationToken } = options;
   const field = SAFE_POLICY_FIELDS.find((f) => f.id === id);
   if (!field) throw new Error(`Unknown safe policy field: ${id}`);
+
+  const confirmation = policyConfirmationFor(id, value);
+  if (confirmation && confirmationToken !== confirmation.token) {
+    throw new PolicyConfirmationRequiredError(confirmation);
+  }
 
   const raw = readRawConfig(configPath) ?? { version: 2 };
 
