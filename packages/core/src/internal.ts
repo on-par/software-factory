@@ -230,6 +230,25 @@ export {
 export type { FactorydOptions, FactorydServer } from './daemon/factoryd-http.js';
 export { createFactorydServer, DEFAULT_FACTORYD_PORT } from './daemon/factoryd-http.js';
 
+// Durable explicit daemon runs (#1393)
+export type { DaemonRunRecord, DaemonRunStatus } from './daemon/run-store.js';
+export {
+  createDaemonRunExclusive,
+  daemonRunFile,
+  isValidRunId,
+  MAX_DETAIL_CHARS,
+  readDaemonRun,
+  writeDaemonRun,
+} from './daemon/run-store.js';
+export type {
+  DaemonRunDeps,
+  DaemonRunExecutor,
+  SubmitDaemonRunResult,
+  SubmitRunFailureReason,
+  SubmitRunRequest,
+} from './daemon/runs-submit.js';
+export { executeDaemonRun, submitDaemonRun } from './daemon/runs-submit.js';
+
 // Daemon runtime state: pid/port/log files under ~/.factory (#1177)
 export type { AcquirePidFileOptions, AcquirePidFileResult, DaemonRuntimePaths } from './daemon/runtime-state.js';
 export {

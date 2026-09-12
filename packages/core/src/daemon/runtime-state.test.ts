@@ -39,6 +39,7 @@ describe('daemonRuntimePaths', () => {
       pidFile: '/tmp/x/daemon.pid',
       portFile: '/tmp/x/daemon.port',
       logFile: '/tmp/x/daemon.log',
+      runsDir: '/tmp/x/runs',
     });
   });
 });

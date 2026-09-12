@@ -855,4 +855,70 @@ describe('createFactorydServer', () => {
       expect((await loadRegistry(registryFile)).repos['on-par/software-factory']?.state).toBe('draining');
     });
   });
+
+  describe('runs', () => {
+    async function activeRepo(): Promise<void> {
+      await writeRegistry(registryFile, {
+        version: 1,
+        repos: { 'owner/example-app': { path: '/repos/example-app', attachedAt: 't', state: 'active' } },
+      });
+    }
+
+    it('submits an idempotent run and exposes its persisted terminal record', async () => {
+      await activeRepo();
+      let calls = 0;
+      factoryd = createFactorydServer({
+        registryFile,
+        port: 0,
+        runExecutor: async () => {
+          calls++;
+        },
+      });
+      await factoryd.start();
+      const body = JSON.stringify({ runId: 'R', repo: 'owner/example-app', issue: 7 });
+      const first = await get(factoryd.port, '/runs', 'POST', body);
+      const replay = await get(factoryd.port, '/runs', 'POST', body);
+      expect(first.status).toBe(201);
+      expect(replay.status).toBe(200);
+      const firstRun = JSON.parse(first.body).run;
+      const replayRun = JSON.parse(replay.body).run;
+      expect(replayRun).toMatchObject({
+        runId: firstRun.runId,
+        repo: firstRun.repo,
+        issue: firstRun.issue,
+        submittedAt: firstRun.submittedAt,
+      });
+      await factoryd.stop();
+      factoryd = undefined;
+      expect(calls).toBe(1);
+      const reader = createFactorydServer({ registryFile, port: 0 });
+      await reader.start();
+      const current = await get(reader.port, '/runs/R');
+      const terminalReplay = await get(reader.port, '/runs', 'POST', body);
+      await reader.stop();
+      expect(JSON.parse(current.body).run.status).toBe('succeeded');
+      expect(JSON.parse(terminalReplay.body).run).toEqual(JSON.parse(current.body).run);
+    });
+
+    it('guards run methods, malformed ids, request bodies, and registry dispatchability', async () => {
+      factoryd = createFactorydServer({ registryFile, port: 0 });
+      await factoryd.start();
+      expect((await get(factoryd.port, '/runs', 'DELETE')).headers.allow).toBe('POST');
+      expect((await get(factoryd.port, '/runs/R', 'POST')).headers.allow).toBe('GET');
+      expect(JSON.parse((await get(factoryd.port, '/runs/..%2Fetc')).body).reason).toBe('unknown-run');
+      expect((await get(factoryd.port, '/runs', 'POST', 'not json')).status).toBe(400);
+      expect(
+        (await get(factoryd.port, '/runs', 'POST', JSON.stringify({ runId: 'R', repo: 'none/x', issue: 1 }))).status,
+      ).toBe(404);
+      await activeRepo();
+      await writeRegistry(registryFile, {
+        version: 1,
+        repos: { 'owner/example-app': { path: '/x', attachedAt: 't', state: 'paused' } },
+      });
+      expect(
+        (await get(factoryd.port, '/runs', 'POST', JSON.stringify({ runId: 'R', repo: 'owner/example-app', issue: 1 })))
+          .status,
+      ).toBe(409);
+    });
+  });
 });
