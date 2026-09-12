@@ -425,6 +425,9 @@ const INTERNAL_API_KEYS = [
   'attachRepo',
   'parseRemoteSlug',
   'readOriginUrl',
+  // Daemon checkout validation gate (#1398)
+  'parseCheckoutRequest',
+  'validateCheckout',
   // Daemon pause/resume gate (#779)
   'setRepoState',
   // Daemon detach gate (#780)
