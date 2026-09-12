@@ -7,6 +7,9 @@
   "workspaces": [
     "packages/*"
   ],
+  "overrides": {
+    "qs": "6.16.0"
+  },
   "scripts": {
     "build": "tsc -b && npm run build --workspace @on-par/factory-dashboard",
     "dev": "npm run dev --workspace @on-par/factory-cli",
