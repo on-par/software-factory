@@ -39,12 +39,12 @@
   "dependencies": {
     "@on-par/factory-core": "^2.0.0",
     "ink": "^6.0.0",
-    "react": "^19.2.8"
+    "react": "^19.3.0"
   },
   "license": "MIT",
   "devDependencies": {
-    "@types/node": "^26.4.1",
-    "@types/react": "^19.2.18",
+    "@types/node": "^26.5.1",
+    "@types/react": "^19.3.0",
     "ink-testing-library": "^4.0.0"
   }
 }
