@@ -29,6 +29,11 @@ export interface AttachRepoExplanation {
 
 export type AttachRepoOutcome = { ok: true; slug: string } | { ok: false; explanation: AttachRepoExplanation };
 
+export interface AttachFieldErrors {
+  repo?: string;
+  path?: string;
+}
+
 export interface AttachRepoDeps {
   fetch?: typeof globalThis.fetch;
   url?: string;
@@ -76,6 +81,16 @@ function isKnownReason(reason: string): reason is AttachFailureReason {
 export function explainAttachFailure(reason: string, detail: string): AttachRepoExplanation {
   const known = isKnownReason(reason) ? reason : 'unknown-failure';
   return { reason: known, ...ATTACH_FAILURE_COPY[known], detail };
+}
+
+/** Pure: client-side presence checks only (AC "empty fields block submission"). Trims before
+ *  checking, so whitespace-only input still prompts. Origin match and config existence are
+ *  server-side concerns handled by explainAttachFailure, not here. */
+export function validateAttachInput(input: AttachRepoInput): AttachFieldErrors {
+  const errors: AttachFieldErrors = {};
+  if (input.repo.trim() === '') errors.repo = 'Enter a GitHub repo slug (owner/name).';
+  if (input.path.trim() === '') errors.path = 'Enter the absolute local checkout path.';
+  return errors;
 }
 
 export async function attachRepo(input: AttachRepoInput, deps: AttachRepoDeps = {}): Promise<AttachRepoOutcome> {

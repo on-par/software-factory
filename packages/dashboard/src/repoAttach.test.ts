@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { attachRepo, DEFAULT_REPOS_URL, explainAttachFailure } from './repoAttach.js';
+import { attachRepo, DEFAULT_REPOS_URL, explainAttachFailure, validateAttachInput } from './repoAttach.js';
 
 function fakeResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status });
@@ -28,6 +28,30 @@ describe('explainAttachFailure', () => {
     const explanation = explainAttachFailure('something-new-from-a-newer-daemon', 'whatever');
     expect(explanation.reason).toBe('unknown-failure');
     expect(explanation.detail).toBe('whatever');
+  });
+});
+
+describe('validateAttachInput', () => {
+  it('returns no errors when both fields carry non-blank text', () => {
+    expect(validateAttachInput({ repo: 'on-par/software-factory', path: '/tmp/checkout' })).toEqual({});
+  });
+
+  it('flags an empty repo slug', () => {
+    const errors = validateAttachInput({ repo: '', path: '/tmp/checkout' });
+    expect(errors.repo).toBe('Enter a GitHub repo slug (owner/name).');
+    expect(errors.path).toBeUndefined();
+  });
+
+  it('flags a whitespace-only checkout path', () => {
+    const errors = validateAttachInput({ repo: 'on-par/software-factory', path: '   ' });
+    expect(errors.path).toBe('Enter the absolute local checkout path.');
+    expect(errors.repo).toBeUndefined();
+  });
+
+  it('flags both fields when both are blank', () => {
+    const errors = validateAttachInput({ repo: '  ', path: '' });
+    expect(errors.repo).toBe('Enter a GitHub repo slug (owner/name).');
+    expect(errors.path).toBe('Enter the absolute local checkout path.');
   });
 });
 
