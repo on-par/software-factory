@@ -57,3 +57,22 @@ describe('App', () => {
     expect(screen.getByRole('region', { name: 'Attach a repository' })).toBeDefined();
   });
 });
+
+describe('App with ?repo= in the URL', () => {
+  afterEach(() => {
+    window.history.replaceState({}, '', '/');
+  });
+
+  it('renders the repo detail region instead of the fleet board', () => {
+    window.history.replaceState({}, '', '?repo=a/one');
+    render(<App />);
+
+    expect(screen.getByRole('region', { name: 'Repo detail a/one' })).toBeDefined();
+    expect(screen.queryByRole('region', { name: 'Lane status board' })).toBeNull();
+  });
+
+  it('still renders the fleet board with no query string', () => {
+    render(<App />);
+    expect(screen.getByRole('region', { name: 'Lane status board' })).toBeDefined();
+  });
+});

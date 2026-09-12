@@ -5,6 +5,7 @@ import {
   LaneLifecycleEventSchema,
   LaneLifecyclePhaseSchema,
   LaneLifecycleStatusSchema,
+  RepositoryLaneLifecycleEventSchema,
 } from './lifecycle.js';
 
 const baseEvent = {
@@ -45,6 +46,21 @@ describe('LaneLifecycleEventSchema', () => {
   it('rejects a missing worktreePath', () => {
     const { worktreePath: _worktreePath, ...withoutWorktreePath } = baseEvent;
     expect(() => LaneLifecycleEventSchema.parse(withoutWorktreePath)).toThrow();
+  });
+});
+
+describe('RepositoryLaneLifecycleEventSchema', () => {
+  it('parses a repo-tagged event and returns the repo', () => {
+    const event = { ...baseEvent, repo: 'on-par/software-factory' };
+    expect(RepositoryLaneLifecycleEventSchema.parse(event).repo).toBe('on-par/software-factory');
+  });
+
+  it('rejects an event missing repo', () => {
+    expect(() => RepositoryLaneLifecycleEventSchema.parse(baseEvent)).toThrow();
+  });
+
+  it('rejects an empty repo', () => {
+    expect(() => RepositoryLaneLifecycleEventSchema.parse({ ...baseEvent, repo: '' })).toThrow();
   });
 });
 

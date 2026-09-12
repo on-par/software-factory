@@ -1,9 +1,8 @@
-import { LaneLifecycleEventSchema } from '@on-par/contracts';
+import { LaneLifecycleEventSchema, RepositoryLaneLifecycleEventSchema } from '@on-par/contracts';
 import { useEffect, useState } from 'react';
 
 import { emptyLaneBoard, reduceLaneEvent, type LaneBoardState } from './laneBoardState.js';
-
-export const DEFAULT_EVENTS_URL = '/events';
+import { DEFAULT_EVENTS_URL, repoEventsUrl, reduceRepoLaneEvent } from './repoDetailState.js';
 
 export interface EventSourceLike {
   addEventListener(type: string, listener: (event: MessageEvent) => void): void;
@@ -16,6 +15,8 @@ export type ConnectionState = 'connecting' | 'live' | 'disconnected';
 
 export interface UseLaneEventsOptions {
   url?: string;
+  /** When set, subscribes to the repo-scoped stream and drops frames from any other repo. */
+  repo?: string;
   createEventSource?: EventSourceFactory;
 }
 
@@ -37,7 +38,8 @@ export function createBrowserEventSource(url: string): EventSourceLike {
 export function useLaneEvents(options: UseLaneEventsOptions = {}): UseLaneEventsResult {
   const [board, setBoard] = useState<LaneBoardState>(emptyLaneBoard);
   const [connection, setConnection] = useState<ConnectionState>('connecting');
-  const url = options.url ?? DEFAULT_EVENTS_URL;
+  const repo = options.repo;
+  const url = options.url ?? (repo === undefined ? DEFAULT_EVENTS_URL : repoEventsUrl(repo));
   const factory = options.createEventSource ?? createBrowserEventSource;
 
   useEffect(() => {
@@ -52,13 +54,19 @@ export function useLaneEvents(options: UseLaneEventsOptions = {}): UseLaneEvents
       } catch {
         return;
       }
-      const parsed = LaneLifecycleEventSchema.safeParse(raw);
+      if (repo === undefined) {
+        const parsed = LaneLifecycleEventSchema.safeParse(raw);
+        if (!parsed.success) return;
+        setBoard((prev) => reduceLaneEvent(prev, parsed.data));
+        return;
+      }
+      const parsed = RepositoryLaneLifecycleEventSchema.safeParse(raw);
       if (!parsed.success) return;
-      setBoard((prev) => reduceLaneEvent(prev, parsed.data));
+      setBoard((prev) => reduceRepoLaneEvent(prev, repo, parsed.data));
     });
 
     return () => source.close();
-  }, [url, factory]);
+  }, [url, repo, factory]);
 
   return { board, connection };
 }

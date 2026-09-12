@@ -13,11 +13,20 @@ export interface LaneBoardProps {
   connection: ConnectionState;
 }
 
-const CONNECTION_CHIP: Record<ConnectionState, { label: string; className: string }> = {
+export const CONNECTION_CHIP: Record<ConnectionState, { label: string; className: string }> = {
   connecting: { label: 'Connecting…', className: 'bg-status-queued' },
   live: { label: 'Live', className: 'bg-teal-500' },
   disconnected: { label: 'Disconnected', className: 'bg-status-failed' },
 };
+
+export function ConnectionChip({ connection }: { connection: ConnectionState }) {
+  const chip = CONNECTION_CHIP[connection];
+  return (
+    <span role="status" className={`rounded-sm px-1.5 py-0.5 text-[11px] font-medium text-white ${chip.className}`}>
+      {chip.label}
+    </span>
+  );
+}
 
 const BAR_CLASS_BY_SEGMENT: Record<PhaseSegmentState, string> = {
   pending: 'bg-hairline',
@@ -26,7 +35,7 @@ const BAR_CLASS_BY_SEGMENT: Record<PhaseSegmentState, string> = {
   failed: 'bg-status-failed',
 };
 
-function LaneCardView({ card }: { card: LaneCard }) {
+export function LaneCardView({ card }: { card: LaneCard }) {
   return (
     <article
       aria-label={`Lane ${card.laneId}`}
@@ -73,15 +82,11 @@ function LaneCardView({ card }: { card: LaneCard }) {
 }
 
 export function LaneBoard({ board, connection }: LaneBoardProps) {
-  const chip = CONNECTION_CHIP[connection];
-
   return (
     <section aria-label="Lane status board" className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-ink-900">Lanes</h3>
-        <span role="status" className={`rounded-sm px-1.5 py-0.5 text-[11px] font-medium text-white ${chip.className}`}>
-          {chip.label}
-        </span>
+        <ConnectionChip connection={connection} />
       </div>
       {board.lanes.length === 0 ? (
         <p className="text-sm text-ink-400">Waiting for lane events…</p>
