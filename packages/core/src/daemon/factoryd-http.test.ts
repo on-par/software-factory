@@ -495,9 +495,7 @@ describe('createFactorydServer', () => {
       const parsed = JSON.parse(body);
       expect(parsed.repo).toBe('on-par/software-factory');
       expect(parsed.configPath).toMatch(/\.factory[/\\]config\.json$/);
-      expect(parsed.fields).toEqual([
-        expect.objectContaining({ id: 'merge.auto', value: false, source: 'default' }),
-      ]);
+      expect(parsed.fields).toEqual([expect.objectContaining({ id: 'merge.auto', value: false, source: 'default' })]);
     });
 
     it('PUT persists an allow-listed field to disk and a follow-up GET agrees', async () => {

@@ -62,7 +62,12 @@ export type {
   SafePolicyFieldSpec,
   SafeRepoPolicySnapshot,
 } from './config/policy.js';
-export { isSafePolicyFieldId, resolveSafeRepoPolicy, SAFE_POLICY_FIELDS, setSafeRepoPolicyField } from './config/policy.js';
+export {
+  isSafePolicyFieldId,
+  resolveSafeRepoPolicy,
+  SAFE_POLICY_FIELDS,
+  setSafeRepoPolicyField,
+} from './config/policy.js';
 
 // Environment
 export type {

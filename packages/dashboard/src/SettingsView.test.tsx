@@ -2,7 +2,12 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createRepoPolicyClient, SettingsView, type RepoPolicyClient, type RepoPolicySnapshot } from './SettingsView.js';
+import {
+  createRepoPolicyClient,
+  SettingsView,
+  type RepoPolicyClient,
+  type RepoPolicySnapshot,
+} from './SettingsView.js';
 
 afterEach(cleanup);
 
@@ -78,9 +83,9 @@ describe('SettingsView', () => {
   });
 
   it('clicking the checkbox calls save and re-renders the returned snapshot', async () => {
-    const save = vi.fn().mockResolvedValue(
-      fixtureSnapshot({ value: true, source: 'config', sourceDetail: 'merge.auto' }),
-    );
+    const save = vi
+      .fn()
+      .mockResolvedValue(fixtureSnapshot({ value: true, source: 'config', sourceDetail: 'merge.auto' }));
     render(<SettingsView client={fakeClient({ save })} />);
 
     await screen.findByText('Auto-merge');

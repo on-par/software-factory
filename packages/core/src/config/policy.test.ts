@@ -71,7 +71,12 @@ describe('config/policy', () => {
     it('a flag override wins over env and config, and is not editable', async () => {
       await writeFile(configPath, JSON.stringify({ version: 2, merge: { auto: true } }));
       const snapshot = resolveSafeRepoPolicy(configPath, { FACTORY_MERGE: '1' }, { 'merge.auto': false });
-      expect(snapshot.fields[0]).toMatchObject({ value: false, source: 'flag', sourceDetail: '--merge', editable: false });
+      expect(snapshot.fields[0]).toMatchObject({
+        value: false,
+        source: 'flag',
+        sourceDetail: '--merge',
+        editable: false,
+      });
     });
 
     it('throws with the file path in the message on malformed JSON', async () => {
