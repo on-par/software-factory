@@ -56,6 +56,12 @@ describe('App', () => {
     render(<App />);
     expect(screen.getByRole('region', { name: 'Attach a repository' })).toBeDefined();
   });
+
+  it('renders the Settings region and its nav link still resolves', () => {
+    render(<App />);
+    expect(screen.getByRole('region', { name: 'Settings' })).toBeDefined();
+    expect(screen.getByRole('link', { name: 'Settings' })).toBeDefined();
+  });
 });
 
 describe('App with ?repo= in the URL', () => {

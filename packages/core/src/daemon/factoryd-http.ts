@@ -4,12 +4,16 @@
 // attachRepo precondition gate (#778); POST /repos/<owner>/<name>/pause|resume
 // toggle an attached entry's state through setRepoState (#779); DELETE
 // /repos/<owner>/<name>[?force=true] begins a drain-based detach through
-// beginDetach + the background drainAndDetach loop (#780, epic #761). Binding
-// to 127.0.0.1 IS the authorization model; see the ADR shipped with this
-// change.
+// beginDetach + the background drainAndDetach loop (#780, epic #761); GET/PUT
+// /repos/<owner>/<name>/policy read and persist the SAFE_POLICY_FIELDS
+// allow-list against the checkout's .factory/config.json (#1389, ADR-0094).
+// Binding to 127.0.0.1 IS the authorization model; see the ADRs shipped with
+// these changes.
 
 import http from 'node:http';
 
+import { getFactoryPaths, isPlainObject } from '../config/index.js';
+import { isSafePolicyFieldId, resolveSafeRepoPolicy, setSafeRepoPolicyField } from '../config/policy.js';
 import { type AttachRepoDeps, attachRepo } from './repos-attach.js';
 import { beginDetach, type DetachRepoDeps, drainAndDetach } from './repos-detach.js';
 import { setRepoState } from './repos-pause-resume.js';
@@ -174,6 +178,52 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
       }
       send(res, req, 200, { repo: result.entry });
       return;
+    }
+
+    if (segments.length === 4 && segments[0] === 'repos' && segments[3] === 'policy') {
+      if (req.method !== 'GET' && req.method !== 'PUT') {
+        send(res, req, 405, { error: 'method not allowed' }, 'GET, PUT');
+        return;
+      }
+      const slug = `${segments[1]}/${segments[2]}`;
+      const registry = await loadRegistry(registryFile);
+      const entry = registry.repos[slug];
+      if (!entry || entry.state === 'detached') {
+        send(res, req, 404, { error: `repo ${slug} is not attached`, reason: 'not-attached' });
+        return;
+      }
+      const configPath = getFactoryPaths(entry.path, entry.stateRoot).config;
+
+      try {
+        if (req.method === 'GET') {
+          send(res, req, 200, { repo: slug, ...resolveSafeRepoPolicy(configPath) });
+          return;
+        }
+
+        const body = await readJsonBody(req, MAX_ATTACH_BODY_BYTES);
+        if (!body.ok) {
+          send(res, req, body.tooLarge ? 413 : 400, {
+            error: body.tooLarge ? 'request body too large' : 'invalid JSON body',
+            reason: 'invalid-request',
+          });
+          return;
+        }
+        const payload = body.value;
+        const field = isPlainObject(payload) ? payload.field : undefined;
+        const value = isPlainObject(payload) ? payload.value : undefined;
+        if (!isSafePolicyFieldId(field) || typeof value !== 'boolean') {
+          send(res, req, 400, {
+            error: 'field must be a safe policy field id and value must be a boolean',
+            reason: 'invalid-field',
+          });
+          return;
+        }
+        send(res, req, 200, { repo: slug, ...setSafeRepoPolicyField(configPath, field, value) });
+        return;
+      } catch (err) {
+        send(res, req, 500, { error: err instanceof Error ? err.message : String(err) });
+        return;
+      }
     }
 
     if (segments.length === 3 && segments[0] === 'repos') {

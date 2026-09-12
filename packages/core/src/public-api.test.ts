@@ -44,6 +44,10 @@ const PUBLIC_API_KEYS = [
   'resolveEffectiveModelPins',
   'resolveUsageCap',
   'routeForBuildModel',
+  'isSafePolicyFieldId',
+  'resolveSafeRepoPolicy',
+  'SAFE_POLICY_FIELDS',
+  'setSafeRepoPolicyField',
   // Environment
   'acquirePortLease',
   'defaultFindPortListeners',
