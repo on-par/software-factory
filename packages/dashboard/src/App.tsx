@@ -1,15 +1,24 @@
 import { AttachRepoForm } from './AttachRepoForm.js';
+import { useMemo } from 'react';
+
 import { KpiTrendView } from './KpiTrendView.js';
 import { LaneBoard } from './LaneBoard.js';
 import { RepoDetail } from './RepoDetail.js';
 import { repoFromLocation } from './repoDetailState.js';
+import { createRepoPolicyClient, SettingsView } from './SettingsView.js';
 import { useLaneEvents } from './useLaneEvents.js';
 
-const NAV_ITEMS = ['Runs', 'Issues', 'Models', 'Settings'];
+const NAV_ITEMS = [
+  { label: 'Runs', href: '#' },
+  { label: 'Issues', href: '#' },
+  { label: 'Models', href: '#' },
+  { label: 'Settings', href: '#settings' },
+];
 
 export function App() {
   const repo = repoFromLocation(window.location.search);
   const { board, connection } = useLaneEvents(repo === null ? {} : { repo });
+  const policyClient = useMemo(() => createRepoPolicyClient(), []);
 
   return (
     <div className="flex h-screen bg-canvas font-sans text-ink-900">
@@ -21,12 +30,12 @@ export function App() {
           </h1>
           <ul className="flex flex-col gap-1">
             {NAV_ITEMS.map((item) => (
-              <li key={item}>
+              <li key={item.label}>
                 <a
-                  href="#"
+                  href={item.href}
                   className="block rounded-md px-2 py-1 text-sm font-medium text-navy-200 hover:bg-navy-800 hover:text-white"
                 >
-                  {item}
+                  {item.label}
                 </a>
               </li>
             ))}
@@ -51,6 +60,9 @@ export function App() {
           <h3 className="mt-4 text-sm font-semibold text-ink-900">KPI trends</h3>
           <div className="mt-2">
             <KpiTrendView kpiHistoryJsonl="" />
+          </div>
+          <div id="settings" className="mt-4">
+            <SettingsView client={policyClient} />
           </div>
         </main>
       </div>
