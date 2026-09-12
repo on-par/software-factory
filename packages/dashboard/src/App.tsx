@@ -1,5 +1,6 @@
 import { KpiTrendView } from './KpiTrendView.js';
 import { LaneBoard } from './LaneBoard.js';
+import { RepoLifecyclePanel } from './RepoLifecyclePanel.js';
 import { useLaneEvents } from './useLaneEvents.js';
 
 const NAV_ITEMS = ['Runs', 'Issues', 'Models', 'Settings'];
@@ -35,6 +36,9 @@ export function App() {
         </header>
         <main className="flex-1 overflow-y-auto overflow-x-hidden bg-canvas p-2 sm:p-3">
           <LaneBoard board={board} connection={connection} />
+          <div className="mt-4">
+            <RepoLifecyclePanel />
+          </div>
           <h3 className="mt-4 text-sm font-semibold text-ink-900">KPI trends</h3>
           <div className="mt-2">
             <KpiTrendView kpiHistoryJsonl="" />
