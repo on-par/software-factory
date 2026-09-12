@@ -13,14 +13,6 @@ import { loadRegistry, type RepoRegistryListing, upsertRepo, writeRegistry } fro
 export { parseRemoteSlug } from './remote-slug.js';
 export { readOriginUrl } from './checkout-validation.js';
 
-/** A POST /repos request body once validated. */
-export interface AttachRepoRequest {
-  /** GitHub slug, `owner/name`, as posted. */
-  repo: string;
-  /** Absolute path to the local checkout, as posted. */
-  path: string;
-}
-
 export type AttachFailureReason = CheckoutValidationFailureReason;
 
 export type AttachRepoResult =

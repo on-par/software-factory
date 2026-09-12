@@ -244,7 +244,6 @@ export {
 export type {
   AttachFailureReason,
   AttachRepoDeps,
-  AttachRepoRequest,
   AttachRepoResult,
 } from './daemon/repos-attach.js';
 export { attachRepo, parseRemoteSlug, readOriginUrl } from './daemon/repos-attach.js';
