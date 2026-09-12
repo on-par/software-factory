@@ -55,6 +55,14 @@ export {
   resolveUsageCap,
   routeForBuildModel,
 } from './config/repo.js';
+export type {
+  EffectivePolicyField,
+  PolicySource,
+  SafePolicyFieldId,
+  SafePolicyFieldSpec,
+  SafeRepoPolicySnapshot,
+} from './config/policy.js';
+export { isSafePolicyFieldId, resolveSafeRepoPolicy, SAFE_POLICY_FIELDS, setSafeRepoPolicyField } from './config/policy.js';
 
 // Environment
 export type {
