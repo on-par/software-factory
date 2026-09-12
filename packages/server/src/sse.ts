@@ -1,9 +1,9 @@
 // src/sse.ts — Pure SSE helpers for the lifecycle event stream (#592). No I/O:
 // frame formatting, Last-Event-ID header parsing, and a bounded replay ring.
-import type { LaneLifecycleEvent } from '@on-par/contracts';
+import type { RepositoryLaneLifecycleEvent } from '@on-par/contracts';
 
 /** Lifecycle event annotated with its attached repository at the server boundary. */
-export type RepositoryLifecycleEvent = LaneLifecycleEvent & { repo: string };
+export type RepositoryLifecycleEvent = RepositoryLaneLifecycleEvent;
 
 /** SSE frame: `id:`, `event:`, one `data:` line of JSON, terminated by a blank line. */
 export function formatSseFrame(id: number, event: RepositoryLifecycleEvent): string {
