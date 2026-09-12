@@ -3,6 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { App } from './App.js';
+import { USAGE_UNAVAILABLE_REASON } from './usageHeadroomState.js';
 
 afterEach(cleanup);
 
@@ -62,6 +63,12 @@ describe('App', () => {
     expect(screen.getByRole('region', { name: 'Settings' })).toBeDefined();
     expect(screen.getByRole('link', { name: 'Settings' })).toBeDefined();
   });
+
+  it('renders the Usage headroom region in the unavailable state', () => {
+    render(<App />);
+    expect(screen.getByRole('region', { name: 'Usage headroom' })).toBeDefined();
+    expect(screen.getByText(USAGE_UNAVAILABLE_REASON)).toBeDefined();
+  });
 });
 
 describe('App with ?repo= in the URL', () => {
@@ -75,6 +82,7 @@ describe('App with ?repo= in the URL', () => {
 
     expect(screen.getByRole('region', { name: 'Repo detail a/one' })).toBeDefined();
     expect(screen.queryByRole('region', { name: 'Lane status board' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Usage headroom' })).toBeNull();
   });
 
   it('still renders the fleet board with no query string', () => {

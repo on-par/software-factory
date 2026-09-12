@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { LaneBoard } from './LaneBoard.js';
 import { emptyLaneBoard, reduceLaneEvent, type LaneBoardState } from './laneBoardState.js';
+import { USAGE_UNAVAILABLE_REASON, type UsageHeadroomReading } from './usageHeadroomState.js';
 
 afterEach(cleanup);
 
@@ -174,5 +175,34 @@ describe('LaneBoard', () => {
 
     expect(screen.getByRole('region', { name: 'Repo on-par/software-factory' })).toBeDefined();
     expect(screen.getByRole('region', { name: 'Repo on-par/unlisted-repo' })).toBeDefined();
+  });
+
+  it('renders the Usage headroom region with a reading present', () => {
+    const usage: UsageHeadroomReading = {
+      pct: 0.42,
+      cap: 227,
+      source: 'subscription',
+      nextPollAt: '2026-08-19T00:05:30.000Z',
+    };
+    render(<LaneBoard board={emptyLaneBoard()} connection="live" usage={usage} />);
+
+    const region = screen.getByRole('region', { name: 'Usage headroom' });
+    expect(within(region).getByText('42%')).toBeDefined();
+    expect(within(region).getByRole('progressbar')).toBeDefined();
+  });
+
+  it('renders the unavailable usage state when usage is omitted entirely', () => {
+    render(<LaneBoard board={emptyLaneBoard()} connection="live" />);
+
+    const region = screen.getByRole('region', { name: 'Usage headroom' });
+    expect(within(region).getByText(USAGE_UNAVAILABLE_REASON)).toBeDefined();
+    expect(within(region).queryByRole('progressbar')).toBeNull();
+  });
+
+  it('renders the Usage headroom region even when the board is empty', () => {
+    render(<LaneBoard board={emptyLaneBoard()} connection="live" />);
+
+    expect(screen.getByText('Waiting for lane events…')).toBeDefined();
+    expect(screen.getByRole('region', { name: 'Usage headroom' })).toBeDefined();
   });
 });
