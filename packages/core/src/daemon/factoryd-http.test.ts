@@ -474,6 +474,20 @@ describe('createFactorydServer', () => {
   });
 
   describe('GET/PUT /repos/<owner>/<name>/policy', () => {
+    const savedFactoryMerge = process.env.FACTORY_MERGE;
+
+    beforeEach(() => {
+      delete process.env.FACTORY_MERGE;
+    });
+
+    afterEach(() => {
+      if (savedFactoryMerge === undefined) {
+        delete process.env.FACTORY_MERGE;
+      } else {
+        process.env.FACTORY_MERGE = savedFactoryMerge;
+      }
+    });
+
     async function writeCheckoutRegistry(): Promise<string> {
       const checkoutDir = join(dir, 'checkout');
       await writeRegistry(registryFile, {
