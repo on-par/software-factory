@@ -1,12 +1,15 @@
 import { AttachRepoForm } from './AttachRepoForm.js';
 import { KpiTrendView } from './KpiTrendView.js';
 import { LaneBoard } from './LaneBoard.js';
+import { RepoDetail } from './RepoDetail.js';
+import { repoFromLocation } from './repoDetailState.js';
 import { useLaneEvents } from './useLaneEvents.js';
 
 const NAV_ITEMS = ['Runs', 'Issues', 'Models', 'Settings'];
 
 export function App() {
-  const { board, connection } = useLaneEvents();
+  const repo = repoFromLocation(window.location.search);
+  const { board, connection } = useLaneEvents(repo === null ? {} : { repo });
 
   return (
     <div className="flex h-screen bg-canvas font-sans text-ink-900">
@@ -32,13 +35,19 @@ export function App() {
       </aside>
       <div className="flex flex-1 flex-col min-w-0">
         <header className="h-7 flex items-center border-b border-hairline bg-white px-3">
-          <h2 className="text-sm font-semibold">Overview</h2>
+          <h2 className="text-sm font-semibold">{repo ?? 'Overview'}</h2>
         </header>
         <main className="flex-1 overflow-y-auto overflow-x-hidden bg-canvas p-2 sm:p-3">
-          <LaneBoard board={board} connection={connection} />
-          <div className="mt-4">
-            <AttachRepoForm />
-          </div>
+          {repo === null ? (
+            <>
+              <LaneBoard board={board} connection={connection} />
+              <div className="mt-4">
+                <AttachRepoForm />
+              </div>
+            </>
+          ) : (
+            <RepoDetail repo={repo} board={board} connection={connection} />
+          )}
           <h3 className="mt-4 text-sm font-semibold text-ink-900">KPI trends</h3>
           <div className="mt-2">
             <KpiTrendView kpiHistoryJsonl="" />

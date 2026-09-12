@@ -13,7 +13,7 @@ export interface LaneBoardProps {
   connection: ConnectionState;
 }
 
-const CONNECTION_CHIP: Record<ConnectionState, { label: string; className: string }> = {
+export const CONNECTION_CHIP: Record<ConnectionState, { label: string; className: string }> = {
   connecting: { label: 'Connecting…', className: 'bg-status-queued' },
   live: { label: 'Live', className: 'bg-teal-500' },
   disconnected: { label: 'Disconnected', className: 'bg-status-failed' },
@@ -26,7 +26,7 @@ const BAR_CLASS_BY_SEGMENT: Record<PhaseSegmentState, string> = {
   failed: 'bg-status-failed',
 };
 
-function LaneCardView({ card }: { card: LaneCard }) {
+export function LaneCardView({ card }: { card: LaneCard }) {
   return (
     <article
       aria-label={`Lane ${card.laneId}`}

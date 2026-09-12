@@ -40,8 +40,8 @@ function validEventJson(overrides: Record<string, unknown> = {}): string {
   });
 }
 
-function Probe({ source }: { source: FakeEventSource }) {
-  const { board, connection } = useLaneEvents({ createEventSource: () => source });
+function Probe({ source, repo }: { source: FakeEventSource; repo?: string }) {
+  const { board, connection } = useLaneEvents({ createEventSource: () => source, repo });
   return (
     <div>
       <span data-testid="connection">{connection}</span>
@@ -110,6 +110,45 @@ describe('useLaneEvents', () => {
     expect(source.closed).toBe(false);
     unmount();
     expect(source.closed).toBe(true);
+  });
+});
+
+describe('useLaneEvents with repo scoping', () => {
+  it('calls the factory with the repo-scoped URL', () => {
+    const source = new FakeEventSource();
+    let constructedUrl: string | undefined;
+    function ScopedProbe() {
+      const { connection } = useLaneEvents({
+        repo: 'a/one',
+        createEventSource: (url) => {
+          constructedUrl = url;
+          return source;
+        },
+      });
+      return <span data-testid="connection">{connection}</span>;
+    }
+    render(<ScopedProbe />);
+
+    expect(constructedUrl).toBe('/events?repo=a%2Fone');
+  });
+
+  it('lands a matching frame and drops a differently-tagged one', () => {
+    const source = new FakeEventSource();
+    render(<Probe source={source} repo="a/one" />);
+
+    act(() => source.emit('lifecycle', validEventJson({ repo: 'a/one' })));
+    expect(screen.getByTestId('lane-count').textContent).toBe('1');
+
+    act(() => source.emit('lifecycle', validEventJson({ laneId: 'lane-2', repo: 'b/two' })));
+    expect(screen.getByTestId('lane-count').textContent).toBe('1');
+  });
+
+  it('drops an untagged frame when a repo is selected', () => {
+    const source = new FakeEventSource();
+    render(<Probe source={source} repo="a/one" />);
+
+    act(() => source.emit('lifecycle', validEventJson()));
+    expect(screen.getByTestId('lane-count').textContent).toBe('0');
   });
 });
 
