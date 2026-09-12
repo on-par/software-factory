@@ -1,7 +1,7 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -497,7 +497,10 @@ describe('createFactorydServer', () => {
       const parsed = JSON.parse(body);
       expect(parsed.repo).toBe('on-par/software-factory');
       expect(parsed.configPath).toMatch(/\.factory[/\\]config\.json$/);
-      expect(parsed.fields).toEqual([expect.objectContaining({ id: 'merge.auto', value: false, source: 'default' })]);
+      expect(parsed.fields).toEqual([
+        expect.objectContaining({ id: 'merge.auto', value: false, source: 'default' }),
+        expect.objectContaining({ id: 'merge.admin', value: false, source: 'default' }),
+      ]);
     });
 
     it('PUT persists an allow-listed field to disk and a follow-up GET agrees', async () => {
@@ -514,6 +517,7 @@ describe('createFactorydServer', () => {
       expect(putResult.status).toBe(200);
       expect(JSON.parse(putResult.body).fields).toEqual([
         expect.objectContaining({ id: 'merge.auto', value: true, source: 'config' }),
+        expect.objectContaining({ id: 'merge.admin', value: false, source: 'default' }),
       ]);
 
       const configPath = getFactoryPaths(checkoutDir).config;
@@ -523,6 +527,7 @@ describe('createFactorydServer', () => {
       const getResult = await get(factoryd.port, '/repos/on-par/software-factory/policy');
       expect(JSON.parse(getResult.body).fields).toEqual([
         expect.objectContaining({ id: 'merge.auto', value: true, source: 'config' }),
+        expect.objectContaining({ id: 'merge.admin', value: false, source: 'default' }),
       ]);
     });
 
@@ -566,6 +571,96 @@ describe('createFactorydServer', () => {
       const { status, body } = await get(factoryd.port, '/repos/nope/nope/policy');
       expect(status).toBe(404);
       expect(JSON.parse(body).reason).toBe('not-attached');
+    });
+
+    describe('merge.admin confirmation gate (#1390)', () => {
+      it('PUT enabling merge.admin without a confirmationToken is rejected 400 and writes nothing', async () => {
+        const checkoutDir = await writeCheckoutRegistry();
+        const lines: string[] = [];
+        factoryd = createFactorydServer({ registryFile, port: 0, log: (line) => lines.push(line) });
+        await factoryd.start();
+
+        const { status, body } = await get(
+          factoryd.port,
+          '/repos/on-par/software-factory/policy',
+          'PUT',
+          JSON.stringify({ field: 'merge.admin', value: true }),
+        );
+        expect(status).toBe(400);
+        const parsed = JSON.parse(body);
+        expect(parsed.reason).toBe('confirmation-required');
+        expect(parsed.error).toContain('admin-merge bypass explicitly enabled');
+
+        const configPath = getFactoryPaths(checkoutDir).config;
+        await expect(readFile(configPath, 'utf-8')).rejects.toThrow();
+        expect(lines.some((l) => l.includes('AUDIT'))).toBe(false);
+      });
+
+      it('PUT enabling merge.admin with the wrong confirmationToken is rejected 400 and writes nothing', async () => {
+        const checkoutDir = await writeCheckoutRegistry();
+        factoryd = createFactorydServer({ registryFile, port: 0 });
+        await factoryd.start();
+
+        const { status, body } = await get(
+          factoryd.port,
+          '/repos/on-par/software-factory/policy',
+          'PUT',
+          JSON.stringify({ field: 'merge.admin', value: true, confirmationToken: 'nope' }),
+        );
+        expect(status).toBe(400);
+        expect(JSON.parse(body).reason).toBe('confirmation-required');
+
+        const configPath = getFactoryPaths(checkoutDir).config;
+        await expect(readFile(configPath, 'utf-8')).rejects.toThrow();
+      });
+
+      it('PUT enabling merge.admin with the matching confirmationToken writes the config and logs an AUDIT line naming the bypass', async () => {
+        const checkoutDir = await writeCheckoutRegistry();
+        const lines: string[] = [];
+        factoryd = createFactorydServer({ registryFile, port: 0, log: (line) => lines.push(line) });
+        await factoryd.start();
+
+        const { status, body } = await get(
+          factoryd.port,
+          '/repos/on-par/software-factory/policy',
+          'PUT',
+          JSON.stringify({ field: 'merge.admin', value: true, confirmationToken: 'ENABLE_ADMIN_MERGE_BYPASS' }),
+        );
+        expect(status).toBe(200);
+        expect(JSON.parse(body).fields).toEqual([
+          expect.objectContaining({ id: 'merge.auto', value: false, source: 'default' }),
+          expect.objectContaining({ id: 'merge.admin', value: true, source: 'config' }),
+        ]);
+
+        const configPath = getFactoryPaths(checkoutDir).config;
+        const onDisk = JSON.parse(await readFile(configPath, 'utf-8'));
+        expect(onDisk.run.merge.admin).toBe(true);
+
+        expect(lines.some((l) => l.includes('AUDIT') && l.includes('admin-merge bypass explicitly enabled'))).toBe(
+          true,
+        );
+      });
+
+      it('PUT disabling merge.admin needs no confirmationToken', async () => {
+        const checkoutDir = await writeCheckoutRegistry();
+        const configPath = getFactoryPaths(checkoutDir).config;
+        await mkdir(dirname(configPath), { recursive: true });
+        await writeFile(configPath, JSON.stringify({ version: 2, run: { merge: { admin: true } } }));
+        factoryd = createFactorydServer({ registryFile, port: 0 });
+        await factoryd.start();
+
+        const { status, body } = await get(
+          factoryd.port,
+          '/repos/on-par/software-factory/policy',
+          'PUT',
+          JSON.stringify({ field: 'merge.admin', value: false }),
+        );
+        expect(status).toBe(200);
+        expect(JSON.parse(body).fields).toEqual([
+          expect.objectContaining({ id: 'merge.auto', value: false, source: 'default' }),
+          expect.objectContaining({ id: 'merge.admin', value: false, source: 'config' }),
+        ]);
+      });
     });
 
     it('rejects a non-GET/PUT method with 405 and an Allow: GET, PUT header', async () => {

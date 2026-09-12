@@ -61,13 +61,17 @@ export {
 } from './config/repo.js';
 export type {
   EffectivePolicyField,
+  PolicyConfirmation,
   PolicySource,
   SafePolicyFieldId,
   SafePolicyFieldSpec,
   SafeRepoPolicySnapshot,
+  SetSafeRepoPolicyFieldOptions,
 } from './config/policy.js';
 export {
   isSafePolicyFieldId,
+  policyConfirmationFor,
+  PolicyConfirmationRequiredError,
   resolveSafeRepoPolicy,
   SAFE_POLICY_FIELDS,
   setSafeRepoPolicyField,

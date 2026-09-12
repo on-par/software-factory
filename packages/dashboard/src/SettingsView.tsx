@@ -9,7 +9,7 @@ export interface RepoPolicySnapshot extends SafeRepoPolicySnapshot {
 
 export interface RepoPolicyClient {
   load(): Promise<RepoPolicySnapshot>;
-  save(field: string, value: boolean): Promise<RepoPolicySnapshot>;
+  save(field: string, value: boolean, confirmationToken?: string): Promise<RepoPolicySnapshot>;
 }
 
 interface RepoListing {
@@ -41,12 +41,12 @@ export function createRepoPolicyClient(fetchImpl: typeof fetch = globalThis.fetc
       if (!res.ok) throw new Error(`factoryd responded ${res.status}`);
       return (await res.json()) as RepoPolicySnapshot;
     },
-    async save(field: string, value: boolean): Promise<RepoPolicySnapshot> {
+    async save(field: string, value: boolean, confirmationToken?: string): Promise<RepoPolicySnapshot> {
       const repoSlug = await resolveSlug();
       const res = await fetchImpl(`/repos/${repoSlug}/policy`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ field, value }),
+        body: JSON.stringify({ field, value, confirmationToken }),
       });
       if (!res.ok) throw new Error(`factoryd responded ${res.status}`);
       return (await res.json()) as RepoPolicySnapshot;
@@ -70,6 +70,8 @@ export function SettingsView({ client }: { client: RepoPolicyClient }): JSX.Elem
   const [snapshot, setSnapshot] = useState<RepoPolicySnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
+  const [pendingConfirm, setPendingConfirm] = useState<EffectivePolicyField | null>(null);
+  const [auditNotice, setAuditNotice] = useState<string | null>(null);
 
   useEffect(() => {
     client
@@ -78,23 +80,37 @@ export function SettingsView({ client }: { client: RepoPolicyClient }): JSX.Elem
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
   }, [client]);
 
-  async function handleToggle(field: EffectivePolicyField): Promise<void> {
+  async function applyToggle(field: EffectivePolicyField, confirmationToken?: string): Promise<void> {
     setSaving(field.id);
     try {
-      const next = await client.save(field.id, !field.value);
+      const next = await client.save(field.id, !field.value, confirmationToken);
       setSnapshot(next);
       setError(null);
+      setAuditNotice(confirmationToken !== undefined ? (field.confirmEnable?.auditText ?? null) : null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(null);
+      setPendingConfirm(null);
     }
+  }
+
+  // Enabling a `confirmEnable` field (e.g. admin-merge) stops here for a distinct
+  // confirmation step instead of saving immediately — disabling and every other field
+  // still save on the first click (#1390).
+  function handleToggle(field: EffectivePolicyField): void {
+    if (!field.value && field.confirmEnable) {
+      setPendingConfirm(field);
+      return;
+    }
+    void applyToggle(field);
   }
 
   return (
     <section aria-label="Settings" className="flex flex-col gap-2">
       <h3 className="text-sm font-semibold text-ink-900">Settings</h3>
       {error !== null && <p role="alert">{error}</p>}
+      {auditNotice !== null && <p role="status">{auditNotice}</p>}
       {snapshot === null ? (
         <p>Loading settings…</p>
       ) : (
@@ -109,9 +125,7 @@ export function SettingsView({ client }: { client: RepoPolicyClient }): JSX.Elem
                   type="checkbox"
                   checked={field.value}
                   disabled={!field.editable || saving === field.id}
-                  onChange={() => {
-                    void handleToggle(field);
-                  }}
+                  onChange={() => handleToggle(field)}
                 />
                 {field.label}
               </label>
@@ -121,6 +135,30 @@ export function SettingsView({ client }: { client: RepoPolicyClient }): JSX.Elem
                 <span className="text-xs text-ink-400">
                   Set by {field.source === 'flag' ? 'a CLI flag' : 'an environment variable'} — edit it there.
                 </span>
+              )}
+              {pendingConfirm?.id === field.id && field.confirmEnable !== undefined && (
+                <div
+                  role="alertdialog"
+                  aria-label={`Confirm enabling ${field.label}`}
+                  className="flex flex-col gap-2 rounded border border-ink-400 p-2 text-xs"
+                >
+                  <p>
+                    This explicitly enables the {field.label.toLowerCase()} bypass: {field.confirmEnable.auditText}.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void applyToggle(field, field.confirmEnable?.token);
+                      }}
+                    >
+                      Enable bypass
+                    </button>
+                    <button type="button" onClick={() => setPendingConfirm(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           ))}

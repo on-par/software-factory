@@ -47,6 +47,8 @@ const PUBLIC_API_KEYS = [
   'resolveWatchdogPolicy',
   'routeForBuildModel',
   'isSafePolicyFieldId',
+  'policyConfirmationFor',
+  'PolicyConfirmationRequiredError',
   'resolveSafeRepoPolicy',
   'SAFE_POLICY_FIELDS',
   'setSafeRepoPolicyField',
