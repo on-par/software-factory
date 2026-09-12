@@ -1,4 +1,4 @@
-import { CONNECTION_CHIP, LaneCardView } from './LaneBoard.js';
+import { ConnectionChip, LaneCardView } from './LaneBoard.js';
 import type { LaneBoardState } from './laneBoardState.js';
 import type { ConnectionState } from './useLaneEvents.js';
 
@@ -9,8 +9,6 @@ export interface RepoDetailProps {
 }
 
 export function RepoDetail({ repo, board, connection }: RepoDetailProps) {
-  const chip = CONNECTION_CHIP[connection];
-
   return (
     <section aria-label={`Repo detail ${repo}`} className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
@@ -20,9 +18,7 @@ export function RepoDetail({ repo, board, connection }: RepoDetailProps) {
             ← All repos
           </a>
         </div>
-        <span role="status" className={`rounded-sm px-1.5 py-0.5 text-[11px] font-medium text-white ${chip.className}`}>
-          {chip.label}
-        </span>
+        <ConnectionChip connection={connection} />
       </div>
       {board.lanes.length === 0 ? (
         <p className="text-sm text-ink-400">No lanes for {repo} yet…</p>
