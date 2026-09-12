@@ -48,6 +48,19 @@ describe('LaneRow', () => {
     expect(frame).toContain('#2 in train');
   });
 
+  it('renders a merge-gated lane with the blocking label instead of "waiting to merge"', () => {
+    const lane = laneFor([
+      { type: 'plan', msg: 'Starting plan phase' },
+      { type: 'await-merge', msg: 'waiting to merge x' },
+      { type: 'merge-gated', msg: 'auto-merge blocked by no-auto-merge — awaiting human approval' },
+    ]);
+    const { lastFrame } = render(<LaneRow lane={lane} selected={false} now={NOW} trainPosition={2} />);
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('human approval required');
+    expect(frame).toContain('no-auto-merge');
+    expect(frame).not.toContain('waiting to merge');
+  });
+
   it('renders a merged lane with the PR number', () => {
     const lane = laneFor([
       { type: 'plan', msg: 'Starting plan phase' },

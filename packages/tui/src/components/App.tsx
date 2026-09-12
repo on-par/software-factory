@@ -426,6 +426,7 @@ export function App({
             repo={repo}
             now={now}
             steeringQueued={steeringQueued[activeLanes[0].issue]}
+            mergeGate={activeLanes[0].mergeGate}
           />
           {staleCount > 0 && <Text dimColor>{staleLanesLine(staleCount)}</Text>}
         </Box>
@@ -448,6 +449,7 @@ export function App({
         now={now}
         showBackHint
         steeringQueued={steeringQueued[activeLanes[clampedIndex].issue]}
+        mergeGate={activeLanes[clampedIndex].mergeGate}
       />
     );
   }

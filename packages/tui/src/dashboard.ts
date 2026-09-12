@@ -1,4 +1,4 @@
-import { laneStatusOf, type FactoryEvent } from '@on-par/factory-core';
+import { laneStatusOf, type MergeGateBlock, parseMergeGateMessage, type FactoryEvent } from '@on-par/factory-core';
 
 import { initialState, type PhaseName, reduceEvent, type RunState } from './state.js';
 
@@ -15,6 +15,9 @@ export interface LaneState {
   startedAt: string;
   finishedAt?: string;
   waitingSince?: string;
+  /** Set while autonomous merge is blocked for this lane: the label/policy responsible (#1394).
+   *  Cleared when the lane goes back to a running phase. */
+  mergeGate?: MergeGateBlock;
   worktree?: string;
   /** Timestamp of the lane's most recent event; the staleness input for partitionLanesByActivity (#1369). */
   lastEventAt: string;
@@ -74,6 +77,7 @@ export function reduceDashboard(state: DashboardState, e: FactoryEvent): Dashboa
       failedPhase: undefined,
       failReason: undefined,
       waitingSince: undefined,
+      mergeGate: undefined,
     };
   } else if (e.type === 'issue-title') {
     lane = { ...lane, title: e.msg };
@@ -84,6 +88,13 @@ export function reduceDashboard(state: DashboardState, e: FactoryEvent): Dashboa
     lane = { ...lane, status: 'ready', prNumber: e.msg.match(/PR #(\d+)/)?.[1] ?? lane.prNumber };
   } else if (e.type === 'await-merge') {
     lane = { ...lane, status: 'waiting-merge', waitingSince: lane.waitingSince ?? e.ts };
+  } else if (e.type === 'merge-gated') {
+    lane = {
+      ...lane,
+      status: 'waiting-merge',
+      waitingSince: lane.waitingSince ?? e.ts,
+      mergeGate: parseMergeGateMessage(e.msg) ?? lane.mergeGate,
+    };
   } else if (e.type === 'landed' || e.type === 'merged') {
     lane = { ...lane, status: 'merged', finishedAt: e.ts };
   } else if (laneStatusOf(e.type) === 'failed' || laneStatusOf(e.type) === 'parked') {

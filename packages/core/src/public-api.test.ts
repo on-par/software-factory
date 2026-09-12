@@ -77,6 +77,10 @@ const PUBLIC_API_KEYS = [
   'redactSecretPatterns',
   'rewriteQueueForDecomposition',
   'validateQueue',
+  // Merge gate (self-fix guard label, #1394)
+  'mergeGateMessage',
+  'parseMergeGateMessage',
+  'SELF_FIX_MERGE_GATE_POLICY',
   // Queue activity (#1342)
   'DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS',
   'partitionLocalQueueByActivity',

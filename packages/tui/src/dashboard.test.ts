@@ -88,6 +88,35 @@ describe('reduceDashboard — lifecycle events', () => {
     expect(state.lanes[0].waitingSince).toBe('2026-01-01T00:05:00.000Z');
   });
 
+  it('merge-gated sets waiting-merge and mergeGate from the parsed message (#1394)', () => {
+    const state = reduceAll([
+      ev('plan', '296', 'Starting plan phase'),
+      ev('await-merge', '296', 'waiting to merge ship-it/296-x', '2026-01-01T00:05:00.000Z'),
+      ev(
+        'merge-gated',
+        '296',
+        'auto-merge blocked by no-auto-merge — awaiting human approval',
+        '2026-01-01T00:06:00.000Z',
+      ),
+    ]);
+    expect(state.lanes[0].status).toBe('waiting-merge');
+    expect(state.lanes[0].mergeGate).toEqual({ label: 'no-auto-merge', policy: 'filing.selfFixLabel' });
+  });
+
+  it('merge-gated with an unrecognized message leaves mergeGate undefined', () => {
+    const state = reduceAll([ev('plan', '296', 'Starting plan phase'), ev('merge-gated', '296', 'not a gate message')]);
+    expect(state.lanes[0].mergeGate).toBeUndefined();
+  });
+
+  it('a later plan/build event clears mergeGate', () => {
+    const state = reduceAll([
+      ev('plan', '296', 'Starting plan phase'),
+      ev('merge-gated', '296', 'auto-merge blocked by no-auto-merge — awaiting human approval'),
+      ev('build', '296', 'Starting build phase again'),
+    ]);
+    expect(state.lanes[0].mergeGate).toBeUndefined();
+  });
+
   it('landed sets status merged and freezes finishedAt', () => {
     const state = reduceAll([
       ev('plan', '296', 'Starting plan phase'),

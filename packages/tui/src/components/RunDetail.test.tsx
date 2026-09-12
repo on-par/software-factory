@@ -54,4 +54,23 @@ describe('RunDetail', () => {
     const unset = render(<RunDetail run={initialState()} now={NOW} />);
     expect(unset.lastFrame()).not.toContain('queued for next phase boundary');
   });
+
+  it('shows the blocking label and policy when mergeGate is set', () => {
+    const { lastFrame } = render(
+      <RunDetail
+        run={initialState()}
+        now={NOW}
+        mergeGate={{ label: 'no-auto-merge', policy: 'filing.selfFixLabel' }}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('human approval required');
+    expect(frame).toContain('no-auto-merge');
+    expect(frame).toContain('filing.selfFixLabel');
+  });
+
+  it('omits the merge-gate line when mergeGate is unset', () => {
+    const { lastFrame } = render(<RunDetail run={initialState()} now={NOW} />);
+    expect(lastFrame() ?? '').not.toContain('human approval required');
+  });
 });

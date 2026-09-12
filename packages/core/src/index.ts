@@ -114,6 +114,10 @@ export { parseQueue, readQueue, rewriteQueueForDecomposition, validateQueue } fr
 // Distinct from the authority-list `redactSecrets` exported from ./hosted/authority.js.
 export { redactSecrets as redactSecretPatterns } from './router/failure-detail.js';
 
+// Merge gate (self-fix guard label)
+export type { MergeGateBlock } from './filing/policy.js';
+export { mergeGateMessage, parseMergeGateMessage, SELF_FIX_MERGE_GATE_POLICY } from './filing/policy.js';
+
 // Queue activity (#1342)
 export type { ActiveQueueClaim, QueueActivityPartition } from './queue/activity.js';
 export { DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS, partitionLocalQueueByActivity } from './queue/activity.js';

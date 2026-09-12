@@ -31,7 +31,9 @@ function StatusCell({
     case 'ready':
       return <Text color="green">✔ ready{lane.prNumber ? ` PR #${lane.prNumber}` : ''}</Text>;
     case 'waiting-merge':
-      return (
+      return lane.mergeGate ? (
+        <Text color="yellow">⛔ human approval required ({lane.mergeGate.label})</Text>
+      ) : (
         <Text color="yellow">
           ⏳ waiting to merge{trainPosition !== undefined ? ` (#${trainPosition} in train)` : ''}
         </Text>
