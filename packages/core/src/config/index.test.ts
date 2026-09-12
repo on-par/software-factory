@@ -20,6 +20,7 @@ import {
   resolveFilingPolicy,
   resolveIngestConfig,
   resolveLocalOnly,
+  resolveMergePolicy,
   resolvePlanApproval,
   resolveProcessGroupGraceMs,
   resolveSkipCI,
@@ -746,6 +747,21 @@ describe('loadFactoryConfigForRepo', () => {
     await writeFile(path, JSON.stringify({ sandbox: { runtime: 'podman' } }));
     expect(() => loadFactoryConfigForRepo(path)).toThrow(/sandbox\.runtime/);
   });
+
+  it('parses merge.admin and defaults it to false when absent', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ merge: { admin: true } }));
+    expect(loadFactoryConfigForRepo(path).merge.admin).toBe(true);
+    expect(loadFactoryConfig().merge.admin).toBe(false);
+  });
+
+  it('parses an explicit run.merge.auto/admin overlay, leaving it undefined when the file omits it', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ run: { merge: { auto: false, admin: true } } }));
+    const config = loadFactoryConfigForRepo(path);
+    expect(config.run).toEqual({ merge: { auto: false, admin: true } });
+    expect(loadFactoryConfig().run).toBeUndefined();
+  });
 });
 
 describe('loadRoutesConfig', () => {
@@ -808,6 +824,70 @@ describe('resolveSkipCI', () => {
     const { ci: _ci, ...withoutCi } = config;
 
     expect(resolveSkipCI(withoutCi as typeof config, {})).toBe(false);
+  });
+});
+
+describe('resolveMergePolicy', () => {
+  const config = loadFactoryConfig();
+
+  it('uses legacy merge.auto: true as a repo signal, regardless of env', () => {
+    expect(resolveMergePolicy({ ...config, merge: { ...config.merge, auto: true } }, {})).toEqual({
+      auto: true,
+      admin: false,
+      sources: { auto: 'repo', admin: 'default' },
+    });
+  });
+
+  it('falls back to FACTORY_MERGE=1 when merge.auto is (still) false', () => {
+    expect(resolveMergePolicy({ ...config, merge: { ...config.merge, auto: false } }, { FACTORY_MERGE: '1' })).toEqual({
+      auto: true,
+      admin: false,
+      sources: { auto: 'env', admin: 'default' },
+    });
+  });
+
+  it('run.merge.auto: false is authoritative and is NOT overridden by FACTORY_MERGE=1 (deliberate behavior change)', () => {
+    expect(resolveMergePolicy({ ...config, run: { merge: { auto: false } } }, { FACTORY_MERGE: '1' })).toEqual({
+      auto: false,
+      admin: false,
+      sources: { auto: 'repo', admin: 'default' },
+    });
+  });
+
+  it('run.merge.auto: true wins over a false legacy merge.auto', () => {
+    expect(
+      resolveMergePolicy({ ...config, merge: { ...config.merge, auto: false }, run: { merge: { auto: true } } }, {}),
+    ).toEqual({
+      auto: true,
+      admin: false,
+      sources: { auto: 'repo', admin: 'default' },
+    });
+  });
+
+  it('resolves admin from run.merge.admin, then FACTORY_MERGE_ADMIN, then default false', () => {
+    expect(resolveMergePolicy({ ...config, run: { merge: { admin: true } } }, { FACTORY_MERGE_ADMIN: '0' })).toEqual({
+      auto: false,
+      admin: true,
+      sources: { auto: 'default', admin: 'repo' },
+    });
+    expect(resolveMergePolicy(config, { FACTORY_MERGE_ADMIN: '1' })).toEqual({
+      auto: false,
+      admin: true,
+      sources: { auto: 'default', admin: 'env' },
+    });
+    expect(resolveMergePolicy(config, {})).toEqual({
+      auto: false,
+      admin: false,
+      sources: { auto: 'default', admin: 'default' },
+    });
+  });
+
+  it('run.merge.admin: false is authoritative and is NOT overridden by FACTORY_MERGE_ADMIN=1', () => {
+    expect(resolveMergePolicy({ ...config, run: { merge: { admin: false } } }, { FACTORY_MERGE_ADMIN: '1' })).toEqual({
+      auto: false,
+      admin: false,
+      sources: { auto: 'default', admin: 'repo' },
+    });
   });
 });
 

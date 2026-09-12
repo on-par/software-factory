@@ -19,6 +19,7 @@ import {
   resolveBranchPrefix,
   resolveExperimental,
   resolveLocalOnly,
+  type EffectiveMergePolicy,
   type ModelsConfig,
 } from './index.js';
 
@@ -107,6 +108,19 @@ export const RepoFactoryConfigV2Schema = z
         fastPath: z.boolean().optional(),
         maxReworkRounds: z.number().int().min(0).max(3).optional(),
         perIssueCapUsd: z.number().positive().optional(),
+        /** Usage-watchdog knobs, colocated with `capUsd` since both gate the usage
+         *  supervisor. Each field is independently optional so a repo can durably pin
+         *  just one, e.g. `{"watchdog": {"pollSeconds": 60}}` (see resolveWatchdogPolicy). */
+        watchdog: z
+          .object({
+            stopAt: z.number().gt(0).max(1).optional(),
+            resumeAt: z.number().gt(0).max(1).optional(),
+            pollSeconds: z.number().positive().optional(),
+            watch: z.boolean().optional(),
+            estimator: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .optional(),
@@ -458,6 +472,123 @@ export function resolveUsageCap(
   return { cap: 227, source: 'default' };
 }
 
+// ---------- Usage watchdog policy ----------
+
+export interface EffectiveWatchdogPolicy {
+  stopAt: number;
+  resumeAt: number;
+  pollMs: number;
+  watch: boolean;
+  estimator: boolean;
+  sources: {
+    stopAt: 'repo' | 'env' | 'default';
+    resumeAt: 'repo' | 'env' | 'default';
+    pollMs: 'repo' | 'env' | 'default';
+    watch: 'repo' | 'env' | 'default';
+    estimator: 'repo' | 'env' | 'default';
+  };
+}
+
+/** Resolve the usage-watchdog knobs: repo `budget.watchdog.*` > the matching legacy
+ *  `FACTORY_STOP_AT`/`FACTORY_RESUME_AT`/`FACTORY_USAGE_POLL`/`FACTORY_USAGE_WATCH`/
+ *  `FACTORY_USAGE_ESTIMATOR` env var > the packaged default. Each field resolves
+ *  independently, mirroring `resolveUsageCap`. */
+export function resolveWatchdogPolicy(
+  repo: RepoFactoryConfig | null,
+  env: NodeJS.ProcessEnv = process.env,
+): EffectiveWatchdogPolicy {
+  const wd = repo?.budget?.watchdog;
+
+  let stopAt: number;
+  let stopAtSource: 'repo' | 'env' | 'default';
+  if (wd?.stopAt !== undefined) {
+    stopAt = wd.stopAt;
+    stopAtSource = 'repo';
+  } else if (env.FACTORY_STOP_AT !== undefined) {
+    stopAt = Number(env.FACTORY_STOP_AT);
+    if (!Number.isFinite(stopAt) || stopAt <= 0 || stopAt > 1) {
+      throw new Error('FACTORY_STOP_AT must be a number in (0, 1]');
+    }
+    stopAtSource = 'env';
+  } else {
+    stopAt = 0.75;
+    stopAtSource = 'default';
+  }
+
+  let resumeAt: number;
+  let resumeAtSource: 'repo' | 'env' | 'default';
+  if (wd?.resumeAt !== undefined) {
+    resumeAt = wd.resumeAt;
+    resumeAtSource = 'repo';
+  } else if (env.FACTORY_RESUME_AT !== undefined) {
+    resumeAt = Number(env.FACTORY_RESUME_AT);
+    if (!Number.isFinite(resumeAt) || resumeAt <= 0 || resumeAt > 1) {
+      throw new Error('FACTORY_RESUME_AT must be a number in (0, 1]');
+    }
+    resumeAtSource = 'env';
+  } else {
+    resumeAt = 0.65;
+    resumeAtSource = 'default';
+  }
+
+  let pollSeconds: number;
+  let pollSource: 'repo' | 'env' | 'default';
+  if (wd?.pollSeconds !== undefined) {
+    pollSeconds = wd.pollSeconds;
+    pollSource = 'repo';
+  } else if (env.FACTORY_USAGE_POLL !== undefined) {
+    pollSeconds = Number(env.FACTORY_USAGE_POLL);
+    if (!Number.isFinite(pollSeconds) || pollSeconds <= 0) {
+      throw new Error('FACTORY_USAGE_POLL must be a positive number');
+    }
+    pollSource = 'env';
+  } else {
+    pollSeconds = 180;
+    pollSource = 'default';
+  }
+
+  let watch: boolean;
+  let watchSource: 'repo' | 'env' | 'default';
+  if (wd?.watch !== undefined) {
+    watch = wd.watch;
+    watchSource = 'repo';
+  } else if (env.FACTORY_USAGE_WATCH !== undefined) {
+    watch = env.FACTORY_USAGE_WATCH !== '0';
+    watchSource = 'env';
+  } else {
+    watch = true;
+    watchSource = 'default';
+  }
+
+  let estimator: boolean;
+  let estimatorSource: 'repo' | 'env' | 'default';
+  if (wd?.estimator !== undefined) {
+    estimator = wd.estimator;
+    estimatorSource = 'repo';
+  } else if (env.FACTORY_USAGE_ESTIMATOR !== undefined) {
+    estimator = env.FACTORY_USAGE_ESTIMATOR === '1';
+    estimatorSource = 'env';
+  } else {
+    estimator = false;
+    estimatorSource = 'default';
+  }
+
+  return {
+    stopAt,
+    resumeAt,
+    pollMs: pollSeconds * 1000,
+    watch,
+    estimator,
+    sources: {
+      stopAt: stopAtSource,
+      resumeAt: resumeAtSource,
+      pollMs: pollSource,
+      watch: watchSource,
+      estimator: estimatorSource,
+    },
+  };
+}
+
 // ---------- factory status formatter ----------
 
 export interface DescribeEffectiveConfigOpts {
@@ -466,6 +597,18 @@ export interface DescribeEffectiveConfigOpts {
   env?: NodeJS.ProcessEnv;
   /** Display label for the repo config file, e.g. '.factory/config.json'. */
   repoConfigPath: string;
+  /** Merge auto/admin policy. `repo` here only carries the model-routing namespace
+   *  (RepoFactoryConfig), not the FactoryConfig runtime-policy namespace `merge`/`run.merge`
+   *  live in, so callers resolve this via `resolveMergePolicy` against their loaded
+   *  FactoryConfig and pass it in. Omitting it falls back to an env-only policy (as if no
+   *  repo file set merge/admin at all). */
+  mergePolicy?: EffectiveMergePolicy;
+}
+
+function defaultMergePolicy(env: NodeJS.ProcessEnv): EffectiveMergePolicy {
+  const auto = env.FACTORY_MERGE === '1';
+  const admin = env.FACTORY_MERGE_ADMIN === '1';
+  return { auto, admin, sources: { auto: auto ? 'env' : 'default', admin: admin ? 'env' : 'default' } };
 }
 
 function sourceLabel(source: 'repo' | 'env' | 'default' | undefined, repoConfigPath: string, envVar: string): string {
@@ -542,6 +685,31 @@ export function describeEffectiveConfig(opts: DescribeEffectiveConfigOpts): stri
 
   const usage = resolveUsageCap(repo, env);
   lines.push(`Usage cap: $${usage.cap} ${sourceLabel(usage.source, repoConfigPath, 'FACTORY_USAGE_CAP')}`);
+
+  const mergePolicy = opts.mergePolicy ?? defaultMergePolicy(env);
+  lines.push(
+    `Merge auto: ${mergePolicy.auto ? 'on' : 'off'} ${sourceLabel(mergePolicy.sources.auto, repoConfigPath, 'FACTORY_MERGE')}`,
+  );
+  lines.push(
+    `Merge admin: ${mergePolicy.admin ? 'on' : 'off'} ${sourceLabel(mergePolicy.sources.admin, repoConfigPath, 'FACTORY_MERGE_ADMIN')}`,
+  );
+
+  const watchdog = resolveWatchdogPolicy(repo, env);
+  lines.push(
+    `Usage watchdog stop-at: ${watchdog.stopAt} ${sourceLabel(watchdog.sources.stopAt, repoConfigPath, 'FACTORY_STOP_AT')}`,
+  );
+  lines.push(
+    `Usage watchdog resume-at: ${watchdog.resumeAt} ${sourceLabel(watchdog.sources.resumeAt, repoConfigPath, 'FACTORY_RESUME_AT')}`,
+  );
+  lines.push(
+    `Usage watchdog poll: ${watchdog.pollMs / 1000}s ${sourceLabel(watchdog.sources.pollMs, repoConfigPath, 'FACTORY_USAGE_POLL')}`,
+  );
+  lines.push(
+    `Usage watchdog watch: ${watchdog.watch ? 'on' : 'off'} ${sourceLabel(watchdog.sources.watch, repoConfigPath, 'FACTORY_USAGE_WATCH')}`,
+  );
+  lines.push(
+    `Usage watchdog estimator: ${watchdog.estimator ? 'on' : 'off'} ${sourceLabel(watchdog.sources.estimator, repoConfigPath, 'FACTORY_USAGE_ESTIMATOR')}`,
+  );
 
   if (repo?.tiers) {
     for (const [tier, ids] of Object.entries(repo.tiers)) {

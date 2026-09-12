@@ -119,12 +119,14 @@ import {
   resolveArtifactsDir,
   resolveIngestConfig,
   resolveLocalOnlyPolicy,
+  resolveMergePolicy,
   resolvePlanApproval,
   resolveProcessGroupGraceMs,
   resolveSandboxPolicy,
   resolveSkipCI,
   resolveTimeouts,
   resolveUsageCap,
+  resolveWatchdogPolicy,
   ReworkHistory,
   rewriteQueueForDecomposition,
   runAutoIngest,
@@ -885,29 +887,15 @@ export function resolveUsageKnobs(
   repoConfig: RepoFactoryConfig | null = null,
 ): UsageKnobs {
   const { cap } = resolveUsageCap(repoConfig, env);
-
-  const stopAt = Number(env.FACTORY_STOP_AT ?? 0.75);
-  if (!Number.isFinite(stopAt) || stopAt <= 0 || stopAt > 1) {
-    throw new Error('FACTORY_STOP_AT must be a number in (0, 1]');
-  }
-
-  const resumeAt = Number(env.FACTORY_RESUME_AT ?? 0.65);
-  if (!Number.isFinite(resumeAt) || resumeAt <= 0 || resumeAt > 1) {
-    throw new Error('FACTORY_RESUME_AT must be a number in (0, 1]');
-  }
-
-  const pollSeconds = Number(env.FACTORY_USAGE_POLL ?? 180);
-  if (!Number.isFinite(pollSeconds) || pollSeconds <= 0) {
-    throw new Error('FACTORY_USAGE_POLL must be a positive number');
-  }
+  const watchdog = resolveWatchdogPolicy(repoConfig, env);
 
   return {
     cap,
-    stopAt,
-    resumeAt,
-    pollMs: pollSeconds * 1000,
-    watch: env.FACTORY_USAGE_WATCH !== '0',
-    estimator: env.FACTORY_USAGE_ESTIMATOR === '1',
+    stopAt: watchdog.stopAt,
+    resumeAt: watchdog.resumeAt,
+    pollMs: watchdog.pollMs,
+    watch: watchdog.watch,
+    estimator: watchdog.estimator,
   };
 }
 
@@ -1033,6 +1021,7 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
       router,
       repo: repoConfig,
       repoConfigPath: '.factory/config.json',
+      mergePolicy: resolveMergePolicy(loadFactoryConfigForRepo(paths.config)),
     })) {
       console.log(`    ${line}`);
     }
@@ -1148,6 +1137,7 @@ async function cmdTui(opts: { localQueue?: boolean } = {}) {
     router,
     repo: repoConfig,
     repoConfigPath: '.factory/config.json',
+    mergePolicy: resolveMergePolicy(loadFactoryConfigForRepo(paths.config)),
   });
 
   await runTui({
@@ -2212,7 +2202,8 @@ async function landIssue(
     throw new LandFailureError(`no open PR for issue #${issueNum} (${guessedBranch})`, 1);
   }
 
-  const landSandboxPolicy = resolveSandboxPolicy(loadFactoryConfigForRepo(paths.config).sandbox, {
+  const landFactoryConfig = loadFactoryConfigForRepo(paths.config);
+  const landSandboxPolicy = resolveSandboxPolicy(landFactoryConfig.sandbox, {
     worktree,
     repoRoot,
   });
@@ -2241,6 +2232,7 @@ async function landIssue(
         prNumber: prNumber!,
         log,
         skipCI,
+        adminMerge: resolveMergePolicy(landFactoryConfig).admin,
         withLock: withLandLock,
         ensureWorktree: async () => {
           if (!existsSync(worktree)) {
@@ -3761,7 +3753,7 @@ export async function waitForMerge(
     now = () => Date.now(),
   } = deps;
   const factoryConfig = loadConfig(paths.config);
-  const isMergeEnabled = mergeEnabled ?? (() => factoryConfig.merge.auto || process.env.FACTORY_MERGE === '1');
+  const isMergeEnabled = mergeEnabled ?? (() => resolveMergePolicy(factoryConfig).auto);
   const skipCI = resolveSkipCI(factoryConfig);
   const filingPolicy = resolveFilingPolicy(factoryConfig);
   const octokit = createOctokit();

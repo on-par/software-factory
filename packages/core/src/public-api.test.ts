@@ -30,6 +30,7 @@ const PUBLIC_API_KEYS = [
   'resolveEnvironmentPorts',
   'resolveEnvironmentProxy',
   'resolveIngestConfig',
+  'resolveMergePolicy',
   'resolvePlanApproval',
   'resolveProcessGroupGraceMs',
   'resolveSkipCI',
@@ -43,6 +44,7 @@ const PUBLIC_API_KEYS = [
   'resolveEffectiveBuildRoute',
   'resolveEffectiveModelPins',
   'resolveUsageCap',
+  'resolveWatchdogPolicy',
   'routeForBuildModel',
   // Environment
   'acquirePortLease',
