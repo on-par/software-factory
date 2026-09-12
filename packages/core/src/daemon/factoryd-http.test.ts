@@ -1,10 +1,11 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { getFactoryPaths } from '../config/index.js';
 import { createFactorydServer, DEFAULT_FACTORYD_PORT, type FactorydServer } from './factoryd-http.js';
 import { dispatchableRepos, loadRegistry, type RepoRegistry } from './registry.js';
 
@@ -469,6 +470,113 @@ describe('createFactorydServer', () => {
 
       await get(factoryd.port, '/repos/on-par/software-factory/pause', 'POST');
       expect(lines).toEqual(['POST /repos/on-par/software-factory/pause 200']);
+    });
+  });
+
+  describe('GET/PUT /repos/<owner>/<name>/policy', () => {
+    async function writeCheckoutRegistry(): Promise<string> {
+      const checkoutDir = join(dir, 'checkout');
+      await writeRegistry(registryFile, {
+        version: 1,
+        repos: {
+          'on-par/software-factory': { path: checkoutDir, attachedAt: '2026-08-19T12:00:00.000Z', state: 'active' },
+        },
+      });
+      return checkoutDir;
+    }
+
+    it('GET returns the effective policy snapshot for an attached repo', async () => {
+      await writeCheckoutRegistry();
+      factoryd = createFactorydServer({ registryFile, port: 0 });
+      await factoryd.start();
+
+      const { status, body } = await get(factoryd.port, '/repos/on-par/software-factory/policy');
+      expect(status).toBe(200);
+      const parsed = JSON.parse(body);
+      expect(parsed.repo).toBe('on-par/software-factory');
+      expect(parsed.configPath).toMatch(/\.factory[/\\]config\.json$/);
+      expect(parsed.fields).toEqual([
+        expect.objectContaining({ id: 'merge.auto', value: false, source: 'default' }),
+      ]);
+    });
+
+    it('PUT persists an allow-listed field to disk and a follow-up GET agrees', async () => {
+      const checkoutDir = await writeCheckoutRegistry();
+      factoryd = createFactorydServer({ registryFile, port: 0 });
+      await factoryd.start();
+
+      const putResult = await get(
+        factoryd.port,
+        '/repos/on-par/software-factory/policy',
+        'PUT',
+        JSON.stringify({ field: 'merge.auto', value: true }),
+      );
+      expect(putResult.status).toBe(200);
+      expect(JSON.parse(putResult.body).fields).toEqual([
+        expect.objectContaining({ id: 'merge.auto', value: true, source: 'config' }),
+      ]);
+
+      const configPath = getFactoryPaths(checkoutDir).config;
+      const onDisk = JSON.parse(await readFile(configPath, 'utf-8'));
+      expect(onDisk.merge.auto).toBe(true);
+
+      const getResult = await get(factoryd.port, '/repos/on-par/software-factory/policy');
+      expect(JSON.parse(getResult.body).fields).toEqual([
+        expect.objectContaining({ id: 'merge.auto', value: true, source: 'config' }),
+      ]);
+    });
+
+    it('PUT with a field outside the allow-list is rejected 400 and writes nothing', async () => {
+      const checkoutDir = await writeCheckoutRegistry();
+      factoryd = createFactorydServer({ registryFile, port: 0 });
+      await factoryd.start();
+
+      const { status, body } = await get(
+        factoryd.port,
+        '/repos/on-par/software-factory/policy',
+        'PUT',
+        JSON.stringify({ field: 'models.pins.build', value: true }),
+      );
+      expect(status).toBe(400);
+      expect(JSON.parse(body).reason).toBe('invalid-field');
+
+      const configPath = getFactoryPaths(checkoutDir).config;
+      await expect(readFile(configPath, 'utf-8')).rejects.toThrow();
+    });
+
+    it('PUT with a non-boolean value is rejected 400', async () => {
+      await writeCheckoutRegistry();
+      factoryd = createFactorydServer({ registryFile, port: 0 });
+      await factoryd.start();
+
+      const { status, body } = await get(
+        factoryd.port,
+        '/repos/on-par/software-factory/policy',
+        'PUT',
+        JSON.stringify({ field: 'merge.auto', value: 'yes' }),
+      );
+      expect(status).toBe(400);
+      expect(JSON.parse(body).reason).toBe('invalid-field');
+    });
+
+    it('GET returns 404 for an unattached repo', async () => {
+      factoryd = createFactorydServer({ registryFile, port: 0 });
+      await factoryd.start();
+
+      const { status, body } = await get(factoryd.port, '/repos/nope/nope/policy');
+      expect(status).toBe(404);
+      expect(JSON.parse(body).reason).toBe('not-attached');
+    });
+
+    it('rejects a non-GET/PUT method with 405 and an Allow: GET, PUT header', async () => {
+      await writeCheckoutRegistry();
+      factoryd = createFactorydServer({ registryFile, port: 0 });
+      await factoryd.start();
+
+      const { status, headers, body } = await get(factoryd.port, '/repos/on-par/software-factory/policy', 'DELETE');
+      expect(status).toBe(405);
+      expect(headers.allow).toBe('GET, PUT');
+      expect(JSON.parse(body)).toEqual({ error: 'method not allowed' });
     });
   });
 

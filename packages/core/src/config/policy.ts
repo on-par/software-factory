@@ -109,7 +109,8 @@ export function resolveSafeRepoPolicy(
       return { ...base, value: rawValue, source: 'config', sourceDetail: field.configPath.join('.'), editable: true };
     }
 
-    const defaultValue = Boolean(readAtPath(loadFactoryConfig() as unknown as Record<string, unknown>, field.configPath));
+    const defaults = loadFactoryConfig();
+    const defaultValue = Boolean(isPlainObject(defaults) ? readAtPath(defaults, field.configPath) : undefined);
     return { ...base, value: defaultValue, source: 'default', sourceDetail: 'built-in default', editable: true };
   });
 
