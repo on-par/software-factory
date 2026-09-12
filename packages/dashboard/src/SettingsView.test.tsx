@@ -38,6 +38,31 @@ function fakeClient(overrides: Partial<RepoPolicyClient> = {}): RepoPolicyClient
   };
 }
 
+const ADMIN_CONFIRM = {
+  token: 'ENABLE_ADMIN_MERGE_BYPASS',
+  auditText: 'admin-merge bypass explicitly enabled — required checks can be skipped when merging',
+};
+
+function adminSnapshot(overrides: Partial<RepoPolicySnapshot['fields'][number]> = {}): RepoPolicySnapshot {
+  return {
+    repo: 'on-par/software-factory',
+    configPath: '/repos/software-factory/.factory/config.json',
+    fields: [
+      {
+        id: 'merge.admin',
+        label: 'Admin-merge (bypass required checks)',
+        description: 'Merge a shipped PR using GitHub admin privileges even when required checks have not passed.',
+        value: false,
+        source: 'default',
+        sourceDetail: 'built-in default',
+        editable: true,
+        confirmEnable: ADMIN_CONFIRM,
+        ...overrides,
+      },
+    ],
+  };
+}
+
 describe('SettingsView', () => {
   it('renders the field label, description, and a config source badge', async () => {
     render(<SettingsView client={fakeClient()} />);
@@ -92,7 +117,7 @@ describe('SettingsView', () => {
     fireEvent.click(screen.getByRole('checkbox'));
 
     await waitFor(() => expect(screen.getByRole('checkbox')).toHaveProperty('checked', true));
-    expect(save).toHaveBeenCalledWith('merge.auto', true);
+    expect(save).toHaveBeenCalledWith('merge.auto', true, undefined);
   });
 
   it('a rejecting load() renders the message in a role=alert node', async () => {
@@ -126,6 +151,61 @@ describe('SettingsView', () => {
     fireEvent.click(screen.getByRole('checkbox'));
 
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'plain string rejection');
+  });
+
+  describe('admin-merge confirmation gate (#1390)', () => {
+    it('enabling shows a distinct confirmation step instead of saving immediately', async () => {
+      const save = vi.fn();
+      const client: RepoPolicyClient = { load: () => Promise.resolve(adminSnapshot()), save };
+      render(<SettingsView client={client} />);
+
+      await screen.findByText('Admin-merge (bypass required checks)');
+      fireEvent.click(screen.getByRole('checkbox'));
+
+      expect(await screen.findByRole('alertdialog')).toBeDefined();
+      expect(save).not.toHaveBeenCalled();
+    });
+
+    it('cancelling the confirmation never calls save', async () => {
+      const save = vi.fn();
+      const client: RepoPolicyClient = { load: () => Promise.resolve(adminSnapshot()), save };
+      render(<SettingsView client={client} />);
+
+      await screen.findByText('Admin-merge (bypass required checks)');
+      fireEvent.click(screen.getByRole('checkbox'));
+      fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+      expect(save).not.toHaveBeenCalled();
+    });
+
+    it('confirming calls save with the confirmation token and shows the audit text in a role=status banner', async () => {
+      const save = vi.fn().mockResolvedValue(adminSnapshot({ value: true, source: 'config' }));
+      const client: RepoPolicyClient = { load: () => Promise.resolve(adminSnapshot()), save };
+      render(<SettingsView client={client} />);
+
+      await screen.findByText('Admin-merge (bypass required checks)');
+      fireEvent.click(screen.getByRole('checkbox'));
+      fireEvent.click(await screen.findByRole('button', { name: 'Enable bypass' }));
+
+      await waitFor(() => expect(save).toHaveBeenCalledWith('merge.admin', true, ADMIN_CONFIRM.token));
+      expect(await screen.findByRole('status')).toHaveProperty('textContent', ADMIN_CONFIRM.auditText);
+    });
+
+    it('disabling an already-enabled admin-merge saves immediately with no confirmation step', async () => {
+      const save = vi.fn().mockResolvedValue(adminSnapshot({ value: false, source: 'config' }));
+      const client: RepoPolicyClient = {
+        load: () => Promise.resolve(adminSnapshot({ value: true, source: 'config' })),
+        save,
+      };
+      render(<SettingsView client={client} />);
+
+      await screen.findByText('Admin-merge (bypass required checks)');
+      fireEvent.click(screen.getByRole('checkbox'));
+
+      await waitFor(() => expect(save).toHaveBeenCalledWith('merge.admin', false, undefined));
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+    });
   });
 });
 
