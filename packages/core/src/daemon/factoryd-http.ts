@@ -14,7 +14,12 @@
 import http from 'node:http';
 
 import { getFactoryPaths, isPlainObject } from '../config/index.js';
-import { isSafePolicyFieldId, resolveSafeRepoPolicy, setSafeRepoPolicyField } from '../config/policy.js';
+import {
+  isSafePolicyFieldId,
+  policyConfirmationFor,
+  resolveSafeRepoPolicy,
+  setSafeRepoPolicyField,
+} from '../config/policy.js';
 import { type AttachRepoDeps, attachRepo } from './repos-attach.js';
 import { createDaemonLaneContext } from './lane-context.js';
 import { beginDetach, type DetachRepoDeps, drainAndDetach } from './repos-detach.js';
@@ -274,6 +279,10 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
         const payload = body.value;
         const field = isPlainObject(payload) ? payload.field : undefined;
         const value = isPlainObject(payload) ? payload.value : undefined;
+        const confirmationToken =
+          isPlainObject(payload) && typeof payload.confirmationToken === 'string'
+            ? payload.confirmationToken
+            : undefined;
         if (!isSafePolicyFieldId(field) || typeof value !== 'boolean') {
           send(res, req, 400, {
             error: 'field must be a safe policy field id and value must be a boolean',
@@ -281,7 +290,19 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
           });
           return;
         }
-        send(res, req, 200, { repo: slug, ...setSafeRepoPolicyField(configPath, field, value) });
+        const confirmation = policyConfirmationFor(field, value);
+        if (confirmation && confirmationToken !== confirmation.token) {
+          send(res, req, 400, {
+            error: `confirmation required: ${confirmation.auditText}`,
+            reason: 'confirmation-required',
+          });
+          return;
+        }
+        const snapshot = setSafeRepoPolicyField(configPath, field, value, { confirmationToken });
+        if (confirmation) {
+          log(`AUDIT ${slug}: ${confirmation.auditText}`);
+        }
+        send(res, req, 200, { repo: slug, ...snapshot });
         return;
       } catch (err) {
         send(res, req, 500, { error: err instanceof Error ? err.message : String(err) });
