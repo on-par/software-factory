@@ -13,6 +13,64 @@ function fillForm(repo: string, path: string) {
 }
 
 describe('AttachRepoForm', () => {
+  it('scenario: operator submits slug and path (AC 1)', async () => {
+    const attach = vi.fn(async (): Promise<AttachRepoOutcome> => ({ ok: true, slug: 'on-par/software-factory' }));
+    render(<AttachRepoForm attach={attach} />);
+
+    fillForm('on-par/software-factory', '/tmp/checkout');
+    fireEvent.click(screen.getByRole('button', { name: 'Attach repo' }));
+
+    await screen.findByRole('status');
+    expect(attach).toHaveBeenCalledTimes(1);
+    expect(attach).toHaveBeenCalledWith({ repo: 'on-par/software-factory', path: '/tmp/checkout' });
+  });
+
+  it('scenario: empty slug blocks submission and prompts for it (AC 2)', () => {
+    const attach = vi.fn(async (): Promise<AttachRepoOutcome> => ({ ok: true, slug: 'x' }));
+    render(<AttachRepoForm attach={attach} />);
+
+    fillForm('', '/tmp/checkout');
+    fireEvent.click(screen.getByRole('button', { name: 'Attach repo' }));
+
+    const slugInput = screen.getByLabelText('GitHub repo (owner/name)');
+    expect(screen.getByRole('alert').textContent).toContain('Enter a GitHub repo slug');
+    expect(slugInput.getAttribute('aria-invalid')).toBe('true');
+    expect(slugInput.getAttribute('aria-describedby')).toBe('attach-repo-slug-error');
+    expect(attach).not.toHaveBeenCalled();
+  });
+
+  it('scenario: empty checkout path blocks submission and prompts for it (AC 2)', () => {
+    const attach = vi.fn(async (): Promise<AttachRepoOutcome> => ({ ok: true, slug: 'x' }));
+    render(<AttachRepoForm attach={attach} />);
+
+    fillForm('on-par/software-factory', '   ');
+    fireEvent.click(screen.getByRole('button', { name: 'Attach repo' }));
+
+    const pathInput = screen.getByLabelText('Local checkout path');
+    expect(screen.getByRole('alert').textContent).toContain('Enter the absolute local checkout path');
+    expect(pathInput.getAttribute('aria-invalid')).toBe('true');
+    expect(pathInput.getAttribute('aria-describedby')).toBe('attach-repo-path-error');
+    expect(attach).not.toHaveBeenCalled();
+  });
+
+  it('clears the field prompt and submits once the operator fills in the missing field', async () => {
+    const attach = vi.fn(async (): Promise<AttachRepoOutcome> => ({ ok: true, slug: 'on-par/software-factory' }));
+    render(<AttachRepoForm attach={attach} />);
+
+    fillForm('', '/tmp/checkout');
+    fireEvent.click(screen.getByRole('button', { name: 'Attach repo' }));
+    await screen.findByRole('alert');
+
+    fillForm('on-par/software-factory', '/tmp/checkout');
+    fireEvent.click(screen.getByRole('button', { name: 'Attach repo' }));
+
+    await screen.findByRole('status');
+    const slugInput = screen.getByLabelText('GitHub repo (owner/name)');
+    expect(slugInput.getAttribute('aria-invalid')).toBe('false');
+    expect(slugInput.getAttribute('aria-describedby')).toBeNull();
+    expect(attach).toHaveBeenCalledTimes(1);
+  });
+
   it('scenario: missing config blocks attach', async () => {
     const explanation = explainAttachFailure('missing-factory-config', '/tmp/checkout/.factory/config.json not found');
     const attach = vi.fn(async (): Promise<AttachRepoOutcome> => ({ ok: false, explanation }));
@@ -58,17 +116,11 @@ describe('AttachRepoForm', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
-  it('disables the submit button until both fields carry non-blank text', () => {
+  it('leaves the submit button enabled with blank fields so the empty-submit scenario is reachable', () => {
     const attach = vi.fn(async (): Promise<AttachRepoOutcome> => ({ ok: true, slug: 'x' }));
     render(<AttachRepoForm attach={attach} />);
 
     const button = screen.getByRole('button', { name: 'Attach repo' }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
-
-    fillForm('on-par/software-factory', '   ');
-    expect(button.disabled).toBe(true);
-
-    fillForm('on-par/software-factory', '/tmp/checkout');
     expect(button.disabled).toBe(false);
   });
 
