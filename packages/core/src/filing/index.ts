@@ -23,6 +23,8 @@ export interface CandidateIssue {
   number: number;
   body: string;
   state?: 'open' | 'closed';
+  /** Label names on the candidate, when the client can supply them. */
+  labels?: readonly string[];
 }
 
 export interface FilingGitHubClient {
@@ -36,6 +38,7 @@ export interface FilingGitHubClient {
     labels: string[];
   }): Promise<{ number: number }>;
   updateIssue(input: { owner: string; repo: string; issue_number: number; body: string }): Promise<void>;
+  addLabels(input: { owner: string; repo: string; issue_number: number; labels: string[] }): Promise<void>;
   commentIssue(input: { owner: string; repo: string; issue_number: number; body: string }): Promise<void>;
 }
 
@@ -161,11 +164,13 @@ export async function fileBug(client: FilingGitHubClient, input: FileBugInput): 
 export interface OctokitFilingClientOptions {
   recentlyClosedDays?: number;
   now?: () => Date;
+  scanLabel?: string;
 }
 
 export function createOctokitFilingClient(octokit: Octokit, opts: OctokitFilingClientOptions = {}): FilingGitHubClient {
   const recentlyClosedDays = opts.recentlyClosedDays ?? 30;
   const now = opts.now ?? (() => new Date());
+  const scanLabel = opts.scanLabel ?? 'bug';
 
   return {
     async listCandidateIssues({ owner, repo }) {
@@ -174,16 +179,19 @@ export function createOctokitFilingClient(octokit: Octokit, opts: OctokitFilingC
         owner,
         repo,
         state: 'all',
-        labels: 'bug',
+        labels: scanLabel,
         since,
         per_page: 100,
       });
       return data
         .filter((issue: { pull_request?: unknown }) => !issue.pull_request)
-        .map((issue: { number: number; body?: string | null; state?: string }) => ({
+        .map((issue: { number: number; body?: string | null; state?: string; labels?: unknown[] }) => ({
           number: issue.number,
           body: issue.body ?? '',
           state: issue.state as 'open' | 'closed' | undefined,
+          labels: (issue.labels ?? [])
+            .map((label) => (typeof label === 'string' ? label : ((label as { name?: string }).name ?? '')))
+            .filter((name) => name.length > 0),
         }));
     },
     async createIssue({ owner, repo, title, body, labels }) {
@@ -192,6 +200,10 @@ export function createOctokitFilingClient(octokit: Octokit, opts: OctokitFilingC
     },
     async updateIssue({ owner, repo, issue_number, body }) {
       await octokit.rest.issues.update({ owner, repo, issue_number, body });
+    },
+    async addLabels({ owner, repo, issue_number, labels }) {
+      if (labels.length === 0) return;
+      await octokit.rest.issues.addLabels({ owner, repo, issue_number, labels });
     },
     async commentIssue({ owner, repo, issue_number, body }) {
       await octokit.rest.issues.createComment({ owner, repo, issue_number, body });

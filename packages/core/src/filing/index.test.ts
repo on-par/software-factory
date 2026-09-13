@@ -38,6 +38,7 @@ function makeFakeClient(seedIssues: CandidateIssue[]) {
   const created: any[] = [];
   const updated: any[] = [];
   const commented: any[] = [];
+  const labelled: any[] = [];
   let nextNumber = 1000;
 
   const client: FilingGitHubClient = {
@@ -52,12 +53,15 @@ function makeFakeClient(seedIssues: CandidateIssue[]) {
     async updateIssue(input) {
       updated.push(input);
     },
+    async addLabels(input) {
+      labelled.push(input);
+    },
     async commentIssue(input) {
       commented.push(input);
     },
   };
 
-  return { client, created, updated, commented };
+  return { client, created, updated, commented, labelled };
 }
 
 describe('resolveTargetRepo', () => {
@@ -262,8 +266,8 @@ describe('createOctokitFilingClient', () => {
             calls.push(['issues.listForRepo', args]);
             return {
               data: [
-                { number: 1, body: 'a bug', state: 'open' },
-                { number: 2, body: null, state: 'closed' },
+                { number: 1, body: 'a bug', state: 'open', labels: [{ name: 'bug' }, 'no-auto-merge'] },
+                { number: 2, body: null, state: 'closed', labels: [{ name: '' }, {}] },
                 { number: 3, body: 'a pr', state: 'open', pull_request: {} },
               ],
             };
@@ -278,6 +282,10 @@ describe('createOctokitFilingClient', () => {
           },
           createComment: async (args: any) => {
             calls.push(['issues.createComment', args]);
+            return { data: {} };
+          },
+          addLabels: async (args: any) => {
+            calls.push(['issues.addLabels', args]);
             return { data: {} };
           },
         },
@@ -296,8 +304,8 @@ describe('createOctokitFilingClient', () => {
     expect(calls[0][1]).toMatchObject({ owner: 'on-par', repo: 'widgets', state: 'all', labels: 'bug', per_page: 100 });
     expect(typeof calls[0][1].since).toBe('string');
     expect(issues).toEqual([
-      { number: 1, body: 'a bug', state: 'open' },
-      { number: 2, body: '', state: 'closed' },
+      { number: 1, body: 'a bug', state: 'open', labels: ['bug', 'no-auto-merge'] },
+      { number: 2, body: '', state: 'closed', labels: [] },
     ]);
   });
 
@@ -342,5 +350,33 @@ describe('createOctokitFilingClient', () => {
       'issues.createComment',
       { owner: 'on-par', repo: 'widgets', issue_number: 7, body: 'a comment' },
     ]);
+  });
+
+  it('forwards the default scan label and a configured override', async () => {
+    const defaults = createOctokit();
+    await createOctokitFilingClient(defaults.octokit as any).listCandidateIssues({ owner: 'on-par', repo: 'widgets' });
+    expect(defaults.calls[0][1].labels).toBe('bug');
+
+    const custom = createOctokit();
+    await createOctokitFilingClient(custom.octokit as any, { scanLabel: 'defect' }).listCandidateIssues({
+      owner: 'on-par',
+      repo: 'widgets',
+    });
+    expect(custom.calls[0][1].labels).toBe('defect');
+  });
+
+  it('maps candidate labels and adds labels without calling GitHub for an empty set', async () => {
+    const { octokit, calls } = createOctokit();
+    const client = createOctokitFilingClient(octokit as any);
+
+    await client.listCandidateIssues({ owner: 'on-par', repo: 'widgets' });
+    await client.addLabels({ owner: 'on-par', repo: 'widgets', issue_number: 7, labels: [] });
+    await client.addLabels({ owner: 'on-par', repo: 'widgets', issue_number: 7, labels: ['bug'] });
+
+    expect(calls).toContainEqual([
+      'issues.addLabels',
+      { owner: 'on-par', repo: 'widgets', issue_number: 7, labels: ['bug'] },
+    ]);
+    expect(calls.filter(([method]) => method === 'issues.addLabels')).toHaveLength(1);
   });
 });

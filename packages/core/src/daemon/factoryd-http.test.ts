@@ -1055,4 +1055,78 @@ describe('createFactorydServer', () => {
       ).toBe(409);
     });
   });
+
+  describe('POST /self-fix', () => {
+    const request = {
+      repo: 'on-par/software-factory',
+      fingerprint: 'ff_0123456789abcdef',
+      evidence: {
+        repo: 'on-par/software-factory',
+        issue: '1392',
+        model: 'codex',
+        component: 'factoryd',
+        eventExcerpt: 'failure',
+        logPath: '/tmp/factory.log',
+        phase: 'build',
+        origin: 'factory-internal',
+        reason: 'error',
+      },
+    };
+
+    async function attachSelfFixCheckout(): Promise<void> {
+      const checkout = join(dir, 'self-fix-checkout');
+      await mkdir(join(checkout, '.factory'), { recursive: true });
+      await writeFile(getFactoryPaths(checkout).config, JSON.stringify({ version: 2 }));
+      await writeRegistry(registryFile, {
+        version: 1,
+        repos: {
+          'on-par/software-factory': { path: checkout, attachedAt: 't', state: 'active' },
+        },
+      });
+    }
+
+    it('guards method, JSON, and unwired requests', async () => {
+      await attachSelfFixCheckout();
+      factoryd = createFactorydServer({ registryFile, port: 0 });
+      await factoryd.start();
+
+      const method = await get(factoryd.port, '/self-fix');
+      expect(method.status).toBe(405);
+      expect(method.headers.allow).toBe('POST');
+      const invalidJson = await get(factoryd.port, '/self-fix', 'POST', 'not json');
+      expect(invalidJson.status).toBe(400);
+      expect(JSON.parse(invalidJson.body).reason).toBe('invalid-request');
+      const unwired = await get(factoryd.port, '/self-fix', 'POST', JSON.stringify(request));
+      expect(unwired.status).toBe(503);
+      expect(JSON.parse(unwired.body).reason).toBe('not-wired');
+    });
+
+    it('creates then bumps the one matching self-fix issue', async () => {
+      await attachSelfFixCheckout();
+      const candidates: any[] = [];
+      const client = {
+        async listCandidateIssues() {
+          return candidates;
+        },
+        async createIssue(input: any) {
+          candidates.push({ number: 1, body: input.body });
+          return { number: 1 };
+        },
+        async updateIssue(input: any) {
+          candidates[0].body = input.body;
+        },
+        async addLabels() {},
+        async commentIssue() {},
+      };
+      factoryd = createFactorydServer({ registryFile, port: 0, selfFixClient: client });
+      await factoryd.start();
+
+      const first = await get(factoryd.port, '/self-fix', 'POST', JSON.stringify(request));
+      const repeat = await get(factoryd.port, '/self-fix', 'POST', JSON.stringify(request));
+      expect(first.status).toBe(201);
+      expect(JSON.parse(first.body).selfFix.action).toBe('created');
+      expect(repeat.status).toBe(200);
+      expect(JSON.parse(repeat.body).selfFix.action).toBe('bumped');
+    });
+  });
 });

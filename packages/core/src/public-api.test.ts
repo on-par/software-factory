@@ -356,6 +356,10 @@ const INTERNAL_API_KEYS = [
   'recordPark',
   'rollDay',
   'touchesSensitiveScope',
+  // Operator-requested self-fix filing (#1392)
+  'requestSelfFix',
+  'selfFixLabels',
+  'submitDaemonSelfFix',
   // Config
   'resolveFilingPolicy',
   'resolveBranchPrefix',

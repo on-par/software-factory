@@ -48,6 +48,12 @@ export {
   touchesSensitiveScope,
 } from './filing/policy.js';
 
+// Operator-requested self-fix filing (#1392)
+export type { SelfFixRequest, SelfFixResult } from './filing/self-fix.js';
+export type { DaemonSelfFixDeps, DaemonSelfFixResult, SelfFixFailureReason } from './daemon/self-fix-submit.js';
+export { requestSelfFix, selfFixLabels } from './filing/self-fix.js';
+export { submitDaemonSelfFix } from './daemon/self-fix-submit.js';
+
 // Config
 export { resolveFilingPolicy } from './config/index.js';
 export type { EffectiveConfig } from './config/repo.js';

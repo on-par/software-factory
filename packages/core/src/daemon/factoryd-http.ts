@@ -8,7 +8,8 @@
 // /repos/<owner>/<name>/policy read and persist the SAFE_POLICY_FIELDS
 // allow-list against the checkout's .factory/config.json (#1389, ADR-0094);
 // POST /runs creates durable explicit runs and GET /runs/<id> reads them
-// (#1393, ADR-0097). Binding to 127.0.0.1 IS the authorization model; see the
+// (#1393, ADR-0097); POST /self-fix files or reuses one guard-labelled self-fix
+// issue for a fingerprint (#1392). Binding to 127.0.0.1 IS the authorization model; see the
 // ADRs shipped with these changes.
 
 import http from 'node:http';
@@ -27,6 +28,8 @@ import { setRepoState } from './repos-pause-resume.js';
 import { defaultRegistryPath, listRepos, loadRegistry, type RepoRegistryListing } from './registry.js';
 import { daemonRunFile, isValidRunId, readDaemonRun } from './run-store.js';
 import { type DaemonRunDeps, type DaemonRunExecutor, executeDaemonRun, submitDaemonRun } from './runs-submit.js';
+import { type DaemonSelfFixDeps, submitDaemonSelfFix } from './self-fix-submit.js';
+import type { FilingGitHubClient } from '../filing/index.js';
 import { daemonRuntimePaths } from './runtime-state.js';
 import { dirname } from 'node:path';
 
@@ -56,6 +59,10 @@ export interface FactorydOptions {
   runExecutor?: DaemonRunExecutor;
   /** Seams passed through to submitDaemonRun/executeDaemonRun. Test-only. */
   runDeps?: DaemonRunDeps;
+  /** GitHub port POST /self-fix files through. Unwired by default -> 503. */
+  selfFixClient?: FilingGitHubClient;
+  /** Seams passed through to submitDaemonSelfFix. Test-only. */
+  selfFixDeps?: DaemonSelfFixDeps;
 }
 
 type ReadJsonBodyResult = { ok: true; value: unknown } | { ok: false; tooLarge: boolean };
@@ -215,6 +222,32 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
         return;
       }
       send(res, req, 200, { run: result.run });
+      return;
+    }
+
+    if (pathname === '/self-fix') {
+      if (req.method !== 'POST') {
+        send(res, req, 405, { error: 'method not allowed' }, 'POST');
+        return;
+      }
+      const body = await readJsonBody(req, MAX_REQUEST_BODY_BYTES);
+      if (!body.ok) {
+        send(res, req, body.tooLarge ? 413 : 400, {
+          error: body.tooLarge ? 'request body too large' : 'invalid JSON body',
+          reason: 'invalid-request',
+        });
+        return;
+      }
+      const result = await submitDaemonSelfFix(registryFile, body.value, {
+        ...opts.selfFixDeps,
+        client: opts.selfFixDeps?.client ?? opts.selfFixClient,
+      });
+      if (!result.ok) {
+        const status = result.reason === 'invalid-request' ? 400 : result.reason === 'unknown-repo' ? 404 : 503;
+        send(res, req, status, { error: result.detail, reason: result.reason });
+        return;
+      }
+      send(res, req, result.result.action === 'created' ? 201 : 200, { selfFix: result.result });
       return;
     }
 
