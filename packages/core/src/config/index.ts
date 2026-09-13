@@ -474,21 +474,39 @@ export function resolveProcessGroupGraceMs(config: FactoryConfig): number {
   return config.environment?.processGroups?.graceMs ?? 5000;
 }
 
+/** Where a resolved merge decision came from. `'flag'` is an explicit per-invocation CLI
+ *  flag (`--auto-merge`/`--no-auto-merge`) and outranks every other source. */
+export type MergePolicySource = 'flag' | 'repo' | 'env' | 'default';
+
 export interface EffectiveMergePolicy {
   auto: boolean;
   admin: boolean;
-  sources: { auto: 'repo' | 'env' | 'default'; admin: 'repo' | 'env' | 'default' };
+  sources: { auto: MergePolicySource; admin: MergePolicySource };
 }
 
-/** Resolve auto-merge/admin-merge: `run.merge.*` (present ⇒ from the repo file, and
- *  authoritative — an explicit `false` here is NOT overridden by the legacy env var)
- *  > legacy `merge.auto: true` (there is no legacy admin field) > `FACTORY_MERGE` /
- *  `FACTORY_MERGE_ADMIN` env > default `false`. This is a deliberate behavior change from
- *  the prior `merge.auto || FACTORY_MERGE === '1'` OR semantics (see ADR). */
-export function resolveMergePolicy(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): EffectiveMergePolicy {
+/** Per-invocation CLI overrides. A field left `undefined` means "the flag was not
+ *  supplied" and changes nothing; a boolean wins over config file and env alike. */
+export interface MergePolicyOverrides {
+  auto?: boolean;
+}
+
+/** Resolve auto-merge/admin-merge: an explicit per-invocation `overrides.auto` (from
+ *  `--auto-merge`/`--no-auto-merge`) is highest-precedence > `run.merge.*` (present ⇒ from
+ *  the repo file, and authoritative — an explicit `false` here is NOT overridden by the
+ *  legacy env var) > legacy `merge.auto: true` (there is no legacy admin field) >
+ *  `FACTORY_MERGE` / `FACTORY_MERGE_ADMIN` env > default `false`. This is a deliberate
+ *  behavior change from the prior `merge.auto || FACTORY_MERGE === '1'` OR semantics (see ADR). */
+export function resolveMergePolicy(
+  config: FactoryConfig,
+  env: NodeJS.ProcessEnv = process.env,
+  overrides: MergePolicyOverrides = {},
+): EffectiveMergePolicy {
   let auto: boolean;
-  let autoSource: 'repo' | 'env' | 'default';
-  if (config.run?.merge?.auto !== undefined) {
+  let autoSource: MergePolicySource;
+  if (overrides.auto !== undefined) {
+    auto = overrides.auto;
+    autoSource = 'flag';
+  } else if (config.run?.merge?.auto !== undefined) {
     auto = config.run.merge.auto;
     autoSource = 'repo';
   } else if (config.merge.auto) {
@@ -503,7 +521,7 @@ export function resolveMergePolicy(config: FactoryConfig, env: NodeJS.ProcessEnv
   }
 
   let admin: boolean;
-  let adminSource: 'repo' | 'env' | 'default';
+  let adminSource: MergePolicySource;
   if (config.run?.merge?.admin !== undefined) {
     admin = config.run.merge.admin;
     adminSource = 'repo';
@@ -568,6 +586,9 @@ export function getFactoryPaths(repoRoot: string, stateRoot?: string) {
     proxyState: resolve(state, 'proxy.json'),
     breaker: resolve(state, 'breaker.json'),
     reworkHistory: resolve(state, 'rework-history.json'),
+    /** Per-invocation CLI flag overrides recorded by `factory run` so a separate
+     *  `factory status` process can attribute the policy to the flag (#1400). */
+    runFlags: resolve(state, 'run-flags.json'),
   };
 }
 

@@ -325,6 +325,7 @@ function paths() {
     steering: join(state, 'steering'),
     kpiHistory: join(state, 'kpi-history.jsonl'),
     breaker: join(state, 'breaker.json'),
+    runFlags: join(state, 'run-flags.json'),
     config: join(root, 'config.json'),
     constitution: join(root, 'constitution.md'),
     gitignore: join(root, '.gitignore'),
@@ -975,6 +976,17 @@ bash scripts/verify.sh
       expect(out).toContain('Effective config:');
       expect(out).toContain('Plan model:');
       expect(out).toContain('No factory runs recorded yet.');
+    });
+
+    it('auto-merge flag: status --kpis attributes the auto-merge policy to the flag', async () => {
+      mkdirSync(paths().state, { recursive: true });
+      writeFileSync(paths().runFlags, JSON.stringify({ autoMerge: true }));
+      await runMain('status', '--kpis');
+      expect(logged()).toContain('Merge auto: on (flag: --auto-merge)');
+
+      writeFileSync(paths().runFlags, JSON.stringify({ autoMerge: false }));
+      await runMain('status', '--kpis');
+      expect(logged()).toContain('Merge auto: off (flag: --no-auto-merge)');
     });
 
     it('renders Active, Queue, and Health as three distinct labeled bands, in that order (#1344)', async () => {
@@ -1945,6 +1957,28 @@ bash scripts/verify.sh
       expect(events).not.toContain('kpi-snapshot');
     });
 
+    it('auto-merge flag: factory run --auto-merge records the positive override in run-flags.json', async () => {
+      writeFileSync(paths().queue, '# header\n');
+      const res = await runMain('run', '--local-queue', '--auto-merge');
+      expect(res.exited).toBe(false);
+      expect(JSON.parse(readFileSync(paths().runFlags, 'utf-8'))).toEqual({ autoMerge: true });
+    });
+
+    it('auto-merge flag: factory run --no-auto-merge records the negative override in run-flags.json', async () => {
+      writeFileSync(paths().queue, '# header\n');
+      const res = await runMain('run', '--local-queue', '--no-auto-merge');
+      expect(res.exited).toBe(false);
+      expect(JSON.parse(readFileSync(paths().runFlags, 'utf-8'))).toEqual({ autoMerge: false });
+    });
+
+    it('auto-merge flag: a later flagless factory run clears the recorded override', async () => {
+      writeFileSync(paths().queue, '# header\n');
+      await runMain('run', '--local-queue', '--auto-merge');
+      expect(existsSync(paths().runFlags)).toBe(true);
+      await runMain('run', '--local-queue');
+      expect(existsSync(paths().runFlags)).toBe(false);
+    });
+
     describe('macOS keychain preflight (#1014)', () => {
       let originalPlatform: NodeJS.Platform;
 
@@ -2248,6 +2282,13 @@ bash scripts/verify.sh
       expect(res).toEqual({ exited: true, code: 2 });
       expect(h.octokit.rest.issues.listForRepo).toHaveBeenCalled();
     });
+
+    it('auto-merge flag: factory supervise --auto-merge records the override for the cycles it drives', async () => {
+      writeFileSync(paths().queue, 'app 1\n');
+      const res = await runMain('supervise', '--now', '--local-queue', '--auto-merge');
+      expect(res.exited).toBe(false);
+      expect(JSON.parse(readFileSync(paths().runFlags, 'utf-8'))).toEqual({ autoMerge: true });
+    }, 20_000);
   });
 
   describe('local-small-dry-run', () => {

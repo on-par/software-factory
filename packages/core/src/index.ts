@@ -13,6 +13,8 @@ export type {
   FactoryConfig,
   FactoryConfigV2,
   IngestSettings,
+  MergePolicyOverrides,
+  MergePolicySource,
   ModelsConfig,
   RoutesConfig,
 } from './config/index.js';
