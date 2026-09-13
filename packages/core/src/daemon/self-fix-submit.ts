@@ -62,8 +62,7 @@ function parseSubmitSelfFixRequest(
   }
   if (!PHASES.has(candidate.phase as FailurePhase)) return { ok: false, detail: 'invalid evidence.phase' };
   if (!ORIGINS.has(candidate.origin as FailureOrigin)) return { ok: false, detail: 'invalid evidence.origin' };
-  if (!REASONS.has(candidate.reason as FailoverReason))
-    return { ok: false, detail: 'invalid evidence.reason' };
+  if (!REASONS.has(candidate.reason as FailoverReason)) return { ok: false, detail: 'invalid evidence.reason' };
   return {
     ok: true,
     request: {
