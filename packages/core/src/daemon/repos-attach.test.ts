@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { execa } from 'execa';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { dispatchableRepos, loadRegistry } from './registry.js';
 import { attachRepo, parseRemoteSlug, readOriginUrl } from './repos-attach.js';
 
 /** The local git host may rewrite remote URLs (e.g. a global `url.insteadOf`
@@ -91,6 +92,28 @@ describe('attachRepo', () => {
       attachedAt: '2026-08-19T12:00:00.000Z',
       state: 'active',
     });
+  });
+
+  it('persists the attach so a fresh loadRegistry still yields the repo as active and dispatchable (#1403)', async () => {
+    const dir = await checkoutWithConfig();
+    const registryFile = join(await tmpDir(), 'registry.json');
+
+    const result = await attachRepo(
+      registryFile,
+      { repo: 'on-par/software-factory', path: dir },
+      {
+        readOrigin: async () => 'git@github.com:on-par/software-factory.git',
+        now: () => new Date('2026-08-19T12:00:00.000Z'),
+      },
+    );
+    expect(result.ok).toBe(true);
+
+    // Simulates a reload: a brand-new read of the registry file, independent of the
+    // in-memory result attachRepo just returned.
+    const reloaded = await loadRegistry(registryFile);
+    expect(dispatchableRepos(reloaded)).toEqual([
+      { slug: 'on-par/software-factory', path: dir, attachedAt: '2026-08-19T12:00:00.000Z', state: 'active' },
+    ]);
   });
 
   it('rejects an origin mismatch and leaves a pre-existing registry byte-for-byte unchanged (acceptance criterion 2)', async () => {

@@ -105,11 +105,13 @@ export interface RepoLaneGroup {
 }
 
 /**
- * Groups lane cards by their source repo. `attachedRepos` (injected config, never a network
- * read — see ADR-0038/ADR-0039) seeds a group for every configured repo up front, in config
- * order, so a repo with zero observed lane cards still renders — as idle, never as absent. A
- * repo observed on the stream but missing from `attachedRepos` still gets a group, appended in
- * first-seen order, so a stale config list can never hide live work.
+ * Groups lane cards by their source repo. `attachedRepos` seeds a group for every attached repo
+ * up front, in the given order, so a repo with zero observed lane cards still renders — as idle,
+ * never as absent. `App.tsx` fills this list from the persisted registry (`useAttachedRepos`,
+ * ADR-0100), not from the SSE stream — ADR-0038/ADR-0039 govern the lane *set* and lane *state*,
+ * not which repo slugs seed idle groups. A repo observed on the stream but missing from
+ * `attachedRepos` still gets a group, appended in first-seen order, so a stale roster can never
+ * hide live work.
  */
 export function groupLanesByRepo(lanes: readonly LaneCard[], attachedRepos: readonly string[] = []): RepoLaneGroup[] {
   const lanesByRepo = new Map<string, LaneCard[]>();
