@@ -145,6 +145,32 @@ describe('AttachRepoForm', () => {
     expect(button.disabled).toBe(false);
   });
 
+  it('scenario: a successful attach calls onAttached once with the slug (AC 1)', async () => {
+    const attach = vi.fn(async (): Promise<AttachRepoOutcome> => ({ ok: true, slug: 'on-par/software-factory' }));
+    const onAttached = vi.fn();
+    render(<AttachRepoForm attach={attach} onAttached={onAttached} />);
+
+    fillForm('on-par/software-factory', '/tmp/checkout');
+    fireEvent.click(screen.getByRole('button', { name: 'Attach repo' }));
+
+    await screen.findByRole('status');
+    expect(onAttached).toHaveBeenCalledTimes(1);
+    expect(onAttached).toHaveBeenCalledWith('on-par/software-factory');
+  });
+
+  it('scenario: a rejected attach never calls onAttached (AC 2)', async () => {
+    const explanation = explainAttachFailure('origin-mismatch', 'origin is on-par/other-repo, not on-par/x');
+    const attach = vi.fn(async (): Promise<AttachRepoOutcome> => ({ ok: false, explanation }));
+    const onAttached = vi.fn();
+    render(<AttachRepoForm attach={attach} onAttached={onAttached} />);
+
+    fillForm('on-par/software-factory', '/tmp/checkout');
+    fireEvent.click(screen.getByRole('button', { name: 'Attach repo' }));
+
+    await screen.findByRole('alert');
+    expect(onAttached).not.toHaveBeenCalled();
+  });
+
   it('replaces the previous alert on a second failed submit rather than stacking two', async () => {
     const explanation = explainAttachFailure('origin-mismatch', 'origin is on-par/other-repo, not on-par/x');
     const attach = vi.fn(async (): Promise<AttachRepoOutcome> => ({ ok: false, explanation }));

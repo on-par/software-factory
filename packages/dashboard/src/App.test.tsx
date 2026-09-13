@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from './App.js';
 import { USAGE_UNAVAILABLE_REASON } from './usageHeadroomState.js';
 
 afterEach(cleanup);
+
+function reposResponse(repos: unknown[]): Response {
+  return new Response(JSON.stringify({ repos }), { status: 200 });
+}
 
 describe('App', () => {
   it('renders the On Par Factory heading', () => {
@@ -58,6 +62,11 @@ describe('App', () => {
     expect(screen.getByRole('region', { name: 'Attach a repository' })).toBeDefined();
   });
 
+  it('renders the attached repositories region alongside the attach form', () => {
+    render(<App />);
+    expect(screen.getByRole('region', { name: 'Attached repositories' })).toBeDefined();
+  });
+
   it('renders the Settings region and its nav link still resolves', () => {
     render(<App />);
     expect(screen.getByRole('region', { name: 'Settings' })).toBeDefined();
@@ -68,6 +77,58 @@ describe('App', () => {
     render(<App />);
     expect(screen.getByRole('region', { name: 'Usage headroom' })).toBeDefined();
     expect(screen.getByText(USAGE_UNAVAILABLE_REASON)).toBeDefined();
+  });
+
+  it('refreshes the attached repository list after a successful attach', async () => {
+    let attached = false;
+    const fetchFn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = String(input);
+      if (url === '/repos' && init?.method === 'POST') {
+        attached = true;
+        return new Response(null, { status: 201 });
+      }
+      if (url === '/repos') {
+        return reposResponse(
+          attached
+            ? [
+                {
+                  slug: 'on-par/software-factory',
+                  path: '/tmp/software-factory',
+                  attachedAt: '2026-01-01T00:00:00.000Z',
+                  state: 'active',
+                },
+              ]
+            : [],
+        );
+      }
+      if (url === '/repos/on-par/software-factory/policy') {
+        return new Response(
+          JSON.stringify({ repo: 'on-par/software-factory', configPath: '/tmp/.factory/config.json', fields: [] }),
+          {
+            status: 200,
+          },
+        );
+      }
+      return new Response('not found', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchFn);
+
+    try {
+      render(<App />);
+      await screen.findByText('No repositories attached yet.');
+
+      fireEvent.change(screen.getByLabelText('GitHub repo (owner/name)'), {
+        target: { value: 'on-par/software-factory' },
+      });
+      fireEvent.change(screen.getByLabelText('Local checkout path'), { target: { value: '/tmp/software-factory' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Attach repo' }));
+
+      expect(await screen.findByText('Attached on-par/software-factory.')).toBeDefined();
+      await waitFor(() => expect(screen.getByText('/tmp/software-factory')).toBeDefined());
+      expect(fetchFn).toHaveBeenCalledWith('/repos', expect.objectContaining({ method: 'POST' }));
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
