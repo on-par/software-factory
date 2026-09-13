@@ -41,8 +41,8 @@ export async function requestSelfFix(client: FilingGitHubClient, request: SelfFi
   if (filed.action === 'bumped') {
     const [owner, repo] = filed.repo.split('/');
     await client.addLabels({
-      owner: owner as string,
-      repo: repo as string,
+      owner,
+      repo,
       issue_number: filed.issueNumber,
       labels,
     });
