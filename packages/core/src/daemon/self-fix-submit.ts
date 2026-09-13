@@ -28,6 +28,19 @@ const SLUG_RE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
 const FINGERPRINT_RE = /^ff_[0-9a-f]{16}$/;
 const PHASES = new Set<FailurePhase>(['plan', 'build', 'check', 'ship']);
 const ORIGINS = new Set<FailureOrigin>(['factory-internal', 'product']);
+const REASONS = new Set<FailoverReason>([
+  'rate_limit',
+  'usage_cap',
+  'timeout',
+  'error',
+  'empty_response',
+  'unavailable',
+  'local_auth',
+  'schema_invalid',
+  'apply_failed',
+  'verify_failed',
+  'unknown',
+]);
 
 function parseSubmitSelfFixRequest(
   body: unknown,
@@ -49,7 +62,7 @@ function parseSubmitSelfFixRequest(
   }
   if (!PHASES.has(candidate.phase as FailurePhase)) return { ok: false, detail: 'invalid evidence.phase' };
   if (!ORIGINS.has(candidate.origin as FailureOrigin)) return { ok: false, detail: 'invalid evidence.origin' };
-  if (typeof candidate.reason !== 'string' || candidate.reason.length === 0)
+  if (!REASONS.has(candidate.reason as FailoverReason))
     return { ok: false, detail: 'invalid evidence.reason' };
   return {
     ok: true,

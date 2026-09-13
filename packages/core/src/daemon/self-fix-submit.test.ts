@@ -71,6 +71,7 @@ describe('submitDaemonSelfFix', () => {
     { ...body, fingerprint: 'bad' },
     { ...body, evidence: { ...body.evidence, phase: undefined } },
     { ...body, evidence: { ...body.evidence, origin: 'bad' } },
+    { ...body, evidence: { ...body.evidence, reason: 'bad' } },
   ])('rejects malformed input', async (input) =>
     expect(await submitDaemonSelfFix(registryFile, input)).toMatchObject({ ok: false, reason: 'invalid-request' }),
   );
