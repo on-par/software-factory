@@ -63,4 +63,39 @@ describe('run-flags', () => {
     writeFileSync(wrongType, JSON.stringify({ autoMerge: 'yes' }));
     expect(readRunFlagOverrides(wrongType)).toEqual({});
   });
+
+  it('admin-merge flag: round-trips true and false through the run-flags file', () => {
+    const file = join(dir, 'run-flags.json');
+
+    writeRunFlagOverrides(file, { adminMerge: true });
+    expect(readRunFlagOverrides(file)).toEqual({ adminMerge: true });
+
+    writeRunFlagOverrides(file, { adminMerge: false });
+    expect(readRunFlagOverrides(file)).toEqual({ adminMerge: false });
+  });
+
+  it('admin-merge flag: records both flags independently and omits the unsupplied one', () => {
+    const file = join(dir, 'run-flags.json');
+
+    writeRunFlagOverrides(file, { adminMerge: true });
+    expect(readRunFlagOverrides(file)).toEqual({ adminMerge: true });
+
+    writeRunFlagOverrides(file, { autoMerge: false, adminMerge: true });
+    expect(readRunFlagOverrides(file)).toEqual({ autoMerge: false, adminMerge: true });
+  });
+
+  it('admin-merge flag: an all-undefined set still removes the file', () => {
+    const file = join(dir, 'run-flags.json');
+    writeRunFlagOverrides(file, { adminMerge: true });
+
+    writeRunFlagOverrides(file, { autoMerge: undefined, adminMerge: undefined });
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it('admin-merge flag: reads a non-boolean adminMerge as no override', () => {
+    const file = join(dir, 'run-flags.json');
+    writeFileSync(file, JSON.stringify({ adminMerge: 'yes' }));
+
+    expect(readRunFlagOverrides(file)).toEqual({});
+  });
 });

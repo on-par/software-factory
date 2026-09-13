@@ -1025,6 +1025,7 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
       repoConfigPath: '.factory/config.json',
       mergePolicy: resolveMergePolicy(loadFactoryConfigForRepo(paths.config), process.env, {
         auto: readRunFlagOverrides(paths.runFlags).autoMerge,
+        admin: readRunFlagOverrides(paths.runFlags).adminMerge,
       }),
     })) {
       console.log(`    ${line}`);
@@ -1143,6 +1144,7 @@ async function cmdTui(opts: { localQueue?: boolean } = {}) {
     repoConfigPath: '.factory/config.json',
     mergePolicy: resolveMergePolicy(loadFactoryConfigForRepo(paths.config), process.env, {
       auto: readRunFlagOverrides(paths.runFlags).autoMerge,
+      admin: readRunFlagOverrides(paths.runFlags).adminMerge,
     }),
   });
 
@@ -2172,6 +2174,7 @@ async function landIssue(
   paths: ReturnType<typeof getFactoryPaths>,
   octokit: Octokit,
   skipCI?: boolean,
+  adminMerge?: boolean,
 ): Promise<{ branch: string; prNumber: number }> {
   const [owner, repoName] = ghRepo.split('/');
   const log = (type: EventKind, msg: string, extra?: { failoverReason?: FailoverReason }) =>
@@ -2238,7 +2241,7 @@ async function landIssue(
         prNumber: prNumber!,
         log,
         skipCI,
-        adminMerge: resolveMergePolicy(landFactoryConfig).admin,
+        adminMerge: resolveMergePolicy(landFactoryConfig, process.env, { admin: adminMerge }).admin,
         withLock: withLandLock,
         ensureWorktree: async () => {
           if (!existsSync(worktree)) {
@@ -2694,13 +2697,13 @@ export function clearStaleStopFile(paths: { stop: string; events: string }, deps
   return true;
 }
 
-async function cmdRun(opts: { localQueue?: boolean; autoMerge?: boolean } = {}) {
+async function cmdRun(opts: { localQueue?: boolean; autoMerge?: boolean; adminMerge?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
 
   return withRepoRunLock(paths, 'factory run', async () => {
     clearStaleStopFile(paths);
-    writeRunFlagOverrides(paths.runFlags, { autoMerge: opts.autoMerge });
+    writeRunFlagOverrides(paths.runFlags, { autoMerge: opts.autoMerge, adminMerge: opts.adminMerge });
     const ghRepo = await getGitHubRepo();
     const factoryConfig = loadFactoryConfigForRepo(paths.config);
     const keychainErr = keychainPreflightError(probeClaudeKeychain());
@@ -2788,7 +2791,10 @@ async function cmdRun(opts: { localQueue?: boolean; autoMerge?: boolean } = {}) 
             ...planned.deps,
             reapWorktree: (issue) => reapParkedLaneWorktree(issue, repoRoot, paths),
             waitMerge: (issue, branch, root, gh, p, d = {}) =>
-              waitForMerge(issue, branch, root, gh, p, { ...d, mergeOverrides: { auto: opts.autoMerge } }),
+              waitForMerge(issue, branch, root, gh, p, {
+                ...d,
+                mergeOverrides: { auto: opts.autoMerge, admin: opts.adminMerge },
+              }),
           }),
         );
       }
@@ -2879,7 +2885,7 @@ export function createIngestHook(
   };
 }
 
-async function cmdSupervise(opts: { now?: boolean; localQueue?: boolean; autoMerge?: boolean }) {
+async function cmdSupervise(opts: { now?: boolean; localQueue?: boolean; autoMerge?: boolean; adminMerge?: boolean }) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   const ingestCfg = resolveIngestConfig(loadFactoryConfigForRepo(paths.config));
@@ -2920,7 +2926,7 @@ async function cmdSupervise(opts: { now?: boolean; localQueue?: boolean; autoMer
       eventsFile: paths.events,
       now: opts.now,
       runQueue: createSuperviseRunQueue(paths, ingestCfg, {
-        cmdRunFn: () => cmdRun({ localQueue: opts.localQueue, autoMerge: opts.autoMerge }),
+        cmdRunFn: () => cmdRun({ localQueue: opts.localQueue, autoMerge: opts.autoMerge, adminMerge: opts.adminMerge }),
         pendingCount: countPending,
       }),
       ingest: ingestCfg.enabled ? createIngestHook(repoRoot, paths, ingestCfg) : undefined,
@@ -3726,6 +3732,8 @@ type WaitForMergeDeps = {
     ghRepo: string,
     paths: ReturnType<typeof getFactoryPaths>,
     octokit: Octokit,
+    skipCI?: boolean,
+    adminMerge?: boolean,
   ) => Promise<{ branch: string; prNumber: number }>;
   listIssueLabels?: (octokit: Octokit, owner: string, repo: string, issue: number) => Promise<string[]>;
   sleep?: (ms: number) => Promise<void>;
@@ -3734,9 +3742,10 @@ type WaitForMergeDeps = {
   writeLine?: (line: string) => void;
   /** Injectable clock so the wall-clock failure budget is testable. Default `() => Date.now()`. */
   now?: () => number;
-  /** Per-invocation CLI flag overrides (`--auto-merge`/`--no-auto-merge`). Threaded in by
+  /** Per-invocation CLI flag overrides (`--auto-merge`/`--no-auto-merge`, `--admin-merge`/
+   *  `--no-admin-merge`). Threaded in by
    *  cmdRun rather than read from disk so a live run's merge gate cannot change underneath
-   *  it (#1400). */
+   *  it (#1400, #1402). */
   mergeOverrides?: MergePolicyOverrides;
 };
 
@@ -3831,7 +3840,7 @@ export async function waitForMerge(
         await sleep(120_000);
         continue;
       }
-      await land(issue, repoRoot, ghRepo, paths, octokit, skipCI);
+      await land(issue, repoRoot, ghRepo, paths, octokit, skipCI, mergeOverrides?.admin);
       return;
     }
 
@@ -4420,7 +4429,9 @@ export async function main() {
     .option('--local-queue', 'Read .factory/queue instead of claiming issues from GitHub Issues')
     .option('--auto-merge', 'Merge eligible PRs autonomously, overriding .factory/config.json and FACTORY_MERGE')
     .option('--no-auto-merge', 'Never merge autonomously, overriding .factory/config.json and FACTORY_MERGE')
-    .action((opts: { localQueue?: boolean; autoMerge?: boolean }) => cmdRun(opts));
+    .option('--admin-merge', 'Admin-merge eligible PRs, overriding .factory/config.json and FACTORY_MERGE_ADMIN')
+    .option('--no-admin-merge', 'Never admin-merge, overriding .factory/config.json and FACTORY_MERGE_ADMIN')
+    .action((opts: { localQueue?: boolean; autoMerge?: boolean; adminMerge?: boolean }) => cmdRun(opts));
 
   program
     .command('proxy')
@@ -4475,6 +4486,8 @@ export async function main() {
     .option('--local-queue', 'Read .factory/queue instead of claiming issues from GitHub Issues')
     .option('--auto-merge', 'Merge eligible PRs autonomously, overriding .factory/config.json and FACTORY_MERGE')
     .option('--no-auto-merge', 'Never merge autonomously, overriding .factory/config.json and FACTORY_MERGE')
+    .option('--admin-merge', 'Admin-merge eligible PRs, overriding .factory/config.json and FACTORY_MERGE_ADMIN')
+    .option('--no-admin-merge', 'Never admin-merge, overriding .factory/config.json and FACTORY_MERGE_ADMIN')
     .action(async (opts) => {
       await cmdSupervise(opts);
     });

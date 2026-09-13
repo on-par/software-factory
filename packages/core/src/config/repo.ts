@@ -703,7 +703,12 @@ export function describeEffectiveConfig(opts: DescribeEffectiveConfigOpts): stri
     )}`,
   );
   lines.push(
-    `Merge admin: ${mergePolicy.admin ? 'on' : 'off'} ${sourceLabel(mergePolicy.sources.admin, repoConfigPath, 'FACTORY_MERGE_ADMIN')}`,
+    `Merge admin: ${mergePolicy.admin ? 'on' : 'off'} ${sourceLabel(
+      mergePolicy.sources.admin,
+      repoConfigPath,
+      'FACTORY_MERGE_ADMIN',
+      mergePolicy.admin ? '--admin-merge' : '--no-admin-merge',
+    )}`,
   );
 
   const watchdog = resolveWatchdogPolicy(repo, env);

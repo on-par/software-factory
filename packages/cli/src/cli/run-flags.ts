@@ -1,5 +1,5 @@
-// packages/cli/src/cli/run-flags.ts — per-invocation CLI flag overrides, recorded so a
-// separate `factory status` process can attribute a run's policy to the flag (#1400).
+// packages/cli/src/cli/run-flags.ts — per-invocation `--auto-merge` and `--admin-merge`
+// overrides, recorded so a separate `factory status` process can attribute a run's policy (#1400, #1402).
 
 import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -7,6 +7,7 @@ import { dirname } from 'node:path';
 /** Flags an operator supplied explicitly on this invocation. `undefined` = not supplied. */
 export interface RunFlagOverrides {
   autoMerge?: boolean;
+  adminMerge?: boolean;
 }
 
 /** Read the recorded overrides. Fails soft: a missing, unreadable, non-JSON, non-object,
@@ -22,7 +23,11 @@ export function readRunFlagOverrides(file: string): RunFlagOverrides {
   }
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {};
   const autoMerge = (raw as { autoMerge?: unknown }).autoMerge;
-  return typeof autoMerge === 'boolean' ? { autoMerge } : {};
+  const adminMerge = (raw as { adminMerge?: unknown }).adminMerge;
+  const overrides: RunFlagOverrides = {};
+  if (typeof autoMerge === 'boolean') overrides.autoMerge = autoMerge;
+  if (typeof adminMerge === 'boolean') overrides.adminMerge = adminMerge;
+  return overrides;
 }
 
 /** Record the overrides for this invocation. Writing an all-`undefined` set removes the
@@ -30,6 +35,7 @@ export function readRunFlagOverrides(file: string): RunFlagOverrides {
 export function writeRunFlagOverrides(file: string, overrides: RunFlagOverrides): void {
   const recorded: RunFlagOverrides = {};
   if (overrides.autoMerge !== undefined) recorded.autoMerge = overrides.autoMerge;
+  if (overrides.adminMerge !== undefined) recorded.adminMerge = overrides.adminMerge;
   if (Object.keys(recorded).length === 0) {
     rmSync(file, { force: true });
     return;

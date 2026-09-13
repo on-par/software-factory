@@ -989,6 +989,17 @@ bash scripts/verify.sh
       expect(logged()).toContain('Merge auto: off (flag: --no-auto-merge)');
     });
 
+    it('admin-merge flag: status --kpis attributes the admin-merge policy to the flag', async () => {
+      mkdirSync(paths().state, { recursive: true });
+      writeFileSync(paths().runFlags, JSON.stringify({ adminMerge: true }));
+      await runMain('status', '--kpis');
+      expect(logged()).toContain('Merge admin: on (flag: --admin-merge)');
+
+      writeFileSync(paths().runFlags, JSON.stringify({ adminMerge: false }));
+      await runMain('status', '--kpis');
+      expect(logged()).toContain('Merge admin: off (flag: --no-admin-merge)');
+    });
+
     it('renders Active, Queue, and Health as three distinct labeled bands, in that order (#1344)', async () => {
       await runMain('status');
       const out = logged();
@@ -1979,6 +1990,20 @@ bash scripts/verify.sh
       expect(existsSync(paths().runFlags)).toBe(false);
     });
 
+    it('admin-merge flag: factory run --admin-merge records the positive override in run-flags.json', async () => {
+      writeFileSync(paths().queue, '# header\n');
+      const res = await runMain('run', '--local-queue', '--admin-merge');
+      expect(res.exited).toBe(false);
+      expect(JSON.parse(readFileSync(paths().runFlags, 'utf-8'))).toEqual({ adminMerge: true });
+    });
+
+    it('admin-merge flag: factory run --no-admin-merge records the negative override in run-flags.json', async () => {
+      writeFileSync(paths().queue, '# header\n');
+      const res = await runMain('run', '--local-queue', '--no-admin-merge');
+      expect(res.exited).toBe(false);
+      expect(JSON.parse(readFileSync(paths().runFlags, 'utf-8'))).toEqual({ adminMerge: false });
+    });
+
     describe('macOS keychain preflight (#1014)', () => {
       let originalPlatform: NodeJS.Platform;
 
@@ -2288,6 +2313,13 @@ bash scripts/verify.sh
       const res = await runMain('supervise', '--now', '--local-queue', '--auto-merge');
       expect(res.exited).toBe(false);
       expect(JSON.parse(readFileSync(paths().runFlags, 'utf-8'))).toEqual({ autoMerge: true });
+    }, 20_000);
+
+    it('admin-merge flag: factory supervise --admin-merge records the override for the cycles it drives', async () => {
+      writeFileSync(paths().queue, 'app 1\n');
+      const res = await runMain('supervise', '--now', '--local-queue', '--admin-merge');
+      expect(res.exited).toBe(false);
+      expect(JSON.parse(readFileSync(paths().runFlags, 'utf-8'))).toEqual({ adminMerge: true });
     }, 20_000);
   });
 

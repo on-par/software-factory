@@ -914,6 +914,28 @@ describe('resolveMergePolicy', () => {
     expect(resolveMergePolicy({ ...config, merge: { ...config.merge, auto: true } }, {}, {}).sources.auto).toBe('repo');
     expect(resolveMergePolicy(config, { FACTORY_MERGE: '1' }, { auto: undefined }).sources.auto).toBe('env');
   });
+
+  it('admin-merge flag: an explicit true override beats run.merge.admin false and reports source flag', () => {
+    const result = resolveMergePolicy({ ...config, run: { merge: { admin: false } } }, {}, { admin: true });
+    expect(result.admin).toBe(true);
+    expect(result.sources.admin).toBe('flag');
+  });
+
+  it('admin-merge flag: an explicit false override beats run.merge.admin true and FACTORY_MERGE_ADMIN=1', () => {
+    const result = resolveMergePolicy(
+      { ...config, run: { merge: { admin: true } } },
+      { FACTORY_MERGE_ADMIN: '1' },
+      { admin: false },
+    );
+    expect(result.admin).toBe(false);
+    expect(result.sources.admin).toBe('flag');
+  });
+
+  it('admin-merge flag: an absent override leaves repo/env/default precedence unchanged', () => {
+    expect(resolveMergePolicy({ ...config, run: { merge: { admin: true } } }, {}, {}).sources.admin).toBe('repo');
+    expect(resolveMergePolicy(config, { FACTORY_MERGE_ADMIN: '1' }, { admin: undefined }).sources.admin).toBe('env');
+    expect(resolveMergePolicy(config, {}, { admin: undefined }).sources.admin).toBe('default');
+  });
 });
 
 describe('resolveDefectWindowDays', () => {

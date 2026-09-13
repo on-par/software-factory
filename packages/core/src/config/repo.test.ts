@@ -834,6 +834,34 @@ describe('describeEffectiveConfig', () => {
     expect(lines).toContainEqual('Merge auto: off (flag: --no-auto-merge)');
   });
 
+  it('admin-merge flag: renders the positive flag as the Merge admin source', () => {
+    const stub = new StubModelExecutor({ scripts: {} });
+    const router = new ModelRouter(models, routes, false, stub);
+    const lines = describeEffectiveConfig({
+      router,
+      repo: null,
+      env: {},
+      repoConfigPath: '.factory/config.json',
+      mergePolicy: { auto: false, admin: true, sources: { auto: 'default', admin: 'flag' } },
+    });
+
+    expect(lines).toContainEqual('Merge admin: on (flag: --admin-merge)');
+  });
+
+  it('admin-merge flag: renders the negative flag as the Merge admin source', () => {
+    const stub = new StubModelExecutor({ scripts: {} });
+    const router = new ModelRouter(models, routes, false, stub);
+    const lines = describeEffectiveConfig({
+      router,
+      repo: null,
+      env: {},
+      repoConfigPath: '.factory/config.json',
+      mergePolicy: { auto: false, admin: false, sources: { auto: 'default', admin: 'flag' } },
+    });
+
+    expect(lines).toContainEqual('Merge admin: off (flag: --no-admin-merge)');
+  });
+
   it('shows usage-watchdog knobs sourced from the repo budget.watchdog namespace', () => {
     const stub = new StubModelExecutor({ scripts: {} });
     const router = new ModelRouter(models, routes, false, stub);

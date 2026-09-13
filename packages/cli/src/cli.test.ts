@@ -1167,7 +1167,7 @@ describe('cli', () => {
       ['event', 'await-merge', 21, 'waiting to merge ship-it/21-self-merge'],
       ['checkMerged', [octokit, 'on-par', 'software-factory', 'ship-it/21-self-merge']],
       ['listIssueLabels', [octokit, 'on-par', 'software-factory', 21]],
-      ['land', [21, '/repo', 'on-par/software-factory', paths, octokit, false]],
+      ['land', [21, '/repo', 'on-par/software-factory', paths, octokit, false, undefined]],
     ]);
   });
 
@@ -1283,6 +1283,33 @@ describe('cli', () => {
     expect(calls).toContainEqual('[factory] #21 awaiting human merge (poll 120s)');
   });
 
+  it('admin-merge flag: waitForMerge threads mergeOverrides.admin into the land call', async () => {
+    const octokit: any = {};
+    const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
+    const adminMerges: Array<boolean | undefined> = [];
+    const run = async (admin: boolean) => {
+      await waitForMerge(21, 'ship-it/21-admin-flag', '/repo', 'on-par/software-factory', paths, {
+        createOctokit: () => octokit,
+        pathExists: () => false,
+        checkMerged: async () => false,
+        loadConfig: () => fakeFactoryConfig(false),
+        mergeEnabled: () => true,
+        mergeOverrides: { admin },
+        listIssueLabels: async () => [],
+        land: async (_issue, _root, _repo, _paths, _octokit, _skipCI, adminMerge) => {
+          adminMerges.push(adminMerge);
+          return { branch: 'ship-it/21-admin-flag', prNumber: 321 };
+        },
+        emitEvent: () => {},
+        sleep: async () => {},
+      });
+    };
+
+    await run(true);
+    await run(false);
+    expect(adminMerges).toEqual([true, false]);
+  });
+
   it('falls back to the GitHub API for issue labels when no listIssueLabels override is provided', async () => {
     const calls: any[] = [];
     const octokit: any = {
@@ -1314,7 +1341,7 @@ describe('cli', () => {
 
     expect(calls).toEqual([
       ['listLabelsOnIssue', [{ owner: 'on-par', repo: 'software-factory', issue_number: 21 }]],
-      ['land', [21, '/repo', 'on-par/software-factory', paths, octokit, false]],
+      ['land', [21, '/repo', 'on-par/software-factory', paths, octokit, false, undefined]],
     ]);
   });
 

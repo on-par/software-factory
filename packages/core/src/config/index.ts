@@ -475,7 +475,7 @@ export function resolveProcessGroupGraceMs(config: FactoryConfig): number {
 }
 
 /** Where a resolved merge decision came from. `'flag'` is an explicit per-invocation CLI
- *  flag (`--auto-merge`/`--no-auto-merge`) and outranks every other source. */
+ *  flag (`--auto-merge`/`--no-auto-merge` or `--admin-merge`/`--no-admin-merge`) and outranks every other source. */
 export type MergePolicySource = 'flag' | 'repo' | 'env' | 'default';
 
 export interface EffectiveMergePolicy {
@@ -488,14 +488,15 @@ export interface EffectiveMergePolicy {
  *  supplied" and changes nothing; a boolean wins over config file and env alike. */
 export interface MergePolicyOverrides {
   auto?: boolean;
+  admin?: boolean;
 }
 
-/** Resolve auto-merge/admin-merge: an explicit per-invocation `overrides.auto` (from
- *  `--auto-merge`/`--no-auto-merge`) is highest-precedence > `run.merge.*` (present ⇒ from
- *  the repo file, and authoritative — an explicit `false` here is NOT overridden by the
- *  legacy env var) > legacy `merge.auto: true` (there is no legacy admin field) >
- *  `FACTORY_MERGE` / `FACTORY_MERGE_ADMIN` env > default `false`. This is a deliberate
- *  behavior change from the prior `merge.auto || FACTORY_MERGE === '1'` OR semantics (see ADR). */
+/** Resolve auto-merge/admin-merge: explicit per-invocation `overrides.auto` / `overrides.admin`
+ *  are highest-precedence > `run.merge.*` (present ⇒ from the repo file, and authoritative —
+ *  an explicit `false` here is NOT overridden by the legacy env var) > legacy `merge.auto: true`
+ *  (there is no legacy admin field) > `FACTORY_MERGE` / `FACTORY_MERGE_ADMIN` env > default
+ *  `false`. This is a deliberate behavior change from the prior
+ *  `merge.auto || FACTORY_MERGE === '1'` OR semantics (see ADR). */
 export function resolveMergePolicy(
   config: FactoryConfig,
   env: NodeJS.ProcessEnv = process.env,
@@ -522,7 +523,10 @@ export function resolveMergePolicy(
 
   let admin: boolean;
   let adminSource: MergePolicySource;
-  if (config.run?.merge?.admin !== undefined) {
+  if (overrides.admin !== undefined) {
+    admin = overrides.admin;
+    adminSource = 'flag';
+  } else if (config.run?.merge?.admin !== undefined) {
     admin = config.run.merge.admin;
     adminSource = 'repo';
   } else if (env.FACTORY_MERGE_ADMIN === '1') {
