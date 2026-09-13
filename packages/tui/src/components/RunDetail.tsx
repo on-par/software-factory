@@ -3,6 +3,7 @@ import type { JSX } from 'react';
 
 import type { LaneFailureEvidence } from '../dashboard.js';
 import type { RunState } from '../state.js';
+import { sanitizeTerminalText } from '../text.js';
 import { EventFeed } from './EventFeed.js';
 import { Header } from './Header.js';
 import { PhaseRow } from './PhaseRow.js';
@@ -34,6 +35,11 @@ export function RunDetail({
         <>
           <Text>{`failure reason: ${failureEvidence.reason}`}</Text>
           <Text>{`failure fingerprint: ${failureEvidence.fingerprint}`}</Text>
+          <Text>{`failure excerpt: ${sanitizeTerminalText(failureEvidence.eventExcerpt)}`}</Text>
+          <Text dimColor>{`failure log: ${sanitizeTerminalText(failureEvidence.logPath)}`}</Text>
+          {failureEvidence.relatedIssue && (
+            <Text>{`related filed issue: https://github.com/${sanitizeTerminalText(failureEvidence.relatedIssue.repo)}/issues/${failureEvidence.relatedIssue.issueNumber}`}</Text>
+          )}
         </>
       )}
       {!!steeringQueued && (

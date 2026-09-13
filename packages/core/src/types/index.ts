@@ -138,6 +138,12 @@ export interface FailureSignatureInput {
   reason: FailoverReason;
 }
 
+/** A tracking issue already filed for the failure class represented by an EvidencePack. */
+export interface RelatedFiledIssue {
+  repo: string;
+  issueNumber: number;
+}
+
 /** Everything a downstream filing story needs without re-deriving from the log. */
 export interface EvidencePack {
   repo: string;
@@ -149,6 +155,7 @@ export interface EvidencePack {
   origin: FailureOrigin;
   eventExcerpt: string;
   logPath: string;
+  relatedIssue?: RelatedFiledIssue;
 }
 
 /** Inputs to captureFailure: signature fields plus the evidence-only context. */

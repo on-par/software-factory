@@ -44,6 +44,7 @@ const failureEvidence: EvidencePack = {
   origin: 'product',
   eventExcerpt: 'tests failed',
   logPath: '/tmp/factory.log',
+  relatedIssue: { repo: 'on-par/software-factory', issueNumber: 1392 },
 };
 
 /** Ink schedules re-renders on a microtask; flush it before reading lastFrame(). */
@@ -133,6 +134,32 @@ describe('App', () => {
     const frame = lastFrame() ?? '';
     expect(frame).toContain('failure reason: verify_failed');
     expect(frame).toContain('failure fingerprint: ff_0123456789abcdef');
+  });
+
+  it.each([
+    ['parked', { repo: 'on-par/software-factory', issueNumber: 1392 }],
+    ['fail', undefined],
+  ] as const)('laneDetail.failureEvidence.excerptAndIssueLink (%s)', async (type, relatedIssue) => {
+    const fake = makeFakeFollow();
+    const { lastFrame } = render(<App eventsFile="ignored" follow={fake.follow} />);
+
+    fake.push(ev('plan', 'Starting plan phase'));
+    fake.push({
+      ...ev(type, 'terminal failure'),
+      evidence: { ...failureEvidence, relatedIssue },
+      fingerprint: 'ff_0123456789abcdef',
+    });
+    await flush();
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('failure excerpt: tests failed');
+    expect(frame).toContain('failure log: /tmp/factory.log');
+    if (relatedIssue) {
+      expect(frame).toContain('https://github.com/on-par/software-factory/issues/1392');
+    } else {
+      expect(frame).not.toContain('related filed issue:');
+      expect(frame).not.toContain('https://github.com/');
+    }
   });
 
   it('renders independent rows for multiple lanes that update independently', async () => {
