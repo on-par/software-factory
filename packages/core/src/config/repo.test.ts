@@ -646,6 +646,27 @@ describe('resolveWatchdogPolicy', () => {
     expect(result.sources.stopAt).toBe('default');
   });
 
+  it('usage-watch flag: an explicit watch override beats budget.watchdog.watch', () => {
+    expect(
+      resolveWatchdogPolicy({ version: 2, budget: { watchdog: { watch: true } } }, {}, { watch: false }),
+    ).toMatchObject({
+      watch: false,
+      sources: { watch: 'flag' },
+    });
+  });
+
+  it('usage-watch flag: an explicit watch override beats FACTORY_USAGE_WATCH', () => {
+    const result = resolveWatchdogPolicy(null, { FACTORY_USAGE_WATCH: '0' }, { watch: true });
+    expect(result.watch).toBe(true);
+    expect(result.sources.watch).toBe('flag');
+  });
+
+  it('usage-watch flag: an undefined override leaves repo/env/default precedence untouched', () => {
+    const result = resolveWatchdogPolicy(null, { FACTORY_USAGE_WATCH: '0' }, { watch: undefined });
+    expect(result.watch).toBe(false);
+    expect(result.sources.watch).toBe('env');
+  });
+
   it('rejects invalid env values with the offending env var name', () => {
     expect(() => resolveWatchdogPolicy(null, { FACTORY_STOP_AT: '1.5' })).toThrow(/FACTORY_STOP_AT/);
     expect(() => resolveWatchdogPolicy(null, { FACTORY_RESUME_AT: '1.5' })).toThrow(/FACTORY_RESUME_AT/);

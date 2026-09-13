@@ -40,6 +40,8 @@ import type {
   SandboxPolicy,
   SandboxRuntime,
   UsageReading,
+  WatchdogPolicyOverrides,
+  WatchdogPolicySource,
   Workspace,
   WorkRequest,
   WorkRequestSourceKind,
@@ -882,14 +884,17 @@ export interface UsageKnobs {
   pollMs: number;
   watch: boolean;
   estimator: boolean;
+  /** Where `watch` was decided — `'flag'` when `--usage-watch`/`--no-usage-watch` was supplied. */
+  watchSource: WatchdogPolicySource;
 }
 
 export function resolveUsageKnobs(
   env: NodeJS.ProcessEnv = process.env,
   repoConfig: RepoFactoryConfig | null = null,
+  overrides: WatchdogPolicyOverrides = {},
 ): UsageKnobs {
   const { cap } = resolveUsageCap(repoConfig, env);
-  const watchdog = resolveWatchdogPolicy(repoConfig, env);
+  const watchdog = resolveWatchdogPolicy(repoConfig, env, overrides);
 
   return {
     cap,
@@ -898,7 +903,23 @@ export function resolveUsageKnobs(
     pollMs: watchdog.pollMs,
     watch: watchdog.watch,
     estimator: watchdog.estimator,
+    watchSource: watchdog.sources.watch,
   };
+}
+
+/** Human-readable name for whatever decided the usage-watch gate, used in the `factory run`
+ *  and `factory supervise` logs so an explicit operator override is always attributable (#1404). */
+export function usageWatchSourceLabel(source: WatchdogPolicySource, watch: boolean): string {
+  switch (source) {
+    case 'flag':
+      return watch ? 'flag: --usage-watch' : 'flag: --no-usage-watch';
+    case 'repo':
+      return '.factory/config.json: budget.watchdog.watch';
+    case 'env':
+      return 'env: FACTORY_USAGE_WATCH';
+    default:
+      return 'default';
+  }
 }
 
 export async function cmdUsage() {
@@ -2694,7 +2715,7 @@ export function clearStaleStopFile(paths: { stop: string; events: string }, deps
   return true;
 }
 
-async function cmdRun(opts: { localQueue?: boolean; autoMerge?: boolean } = {}) {
+async function cmdRun(opts: { localQueue?: boolean; autoMerge?: boolean; usageWatch?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
 
@@ -2753,7 +2774,12 @@ async function cmdRun(opts: { localQueue?: boolean; autoMerge?: boolean } = {}) 
     });
     warnQueueDiagnostics(diagnostics);
 
-    const knobs = resolveUsageKnobs(process.env, loadRepoConfig(repoRoot));
+    const knobs = resolveUsageKnobs(process.env, loadRepoConfig(repoRoot), { watch: opts.usageWatch });
+    if (knobs.watchSource === 'flag') {
+      const detail = `usage watchdog ${knobs.watch ? 'enabled' : 'disabled'} by ${usageWatchSourceLabel(knobs.watchSource, knobs.watch)}`;
+      console.log(`[factory] run: ${detail}`);
+      logEvent(paths.events, 'watchdog', 'all', detail);
+    }
     const controller = new AbortController();
     const watchdog = knobs.watch
       ? watchUsage({
@@ -2879,7 +2905,7 @@ export function createIngestHook(
   };
 }
 
-async function cmdSupervise(opts: { now?: boolean; localQueue?: boolean; autoMerge?: boolean }) {
+async function cmdSupervise(opts: { now?: boolean; localQueue?: boolean; autoMerge?: boolean; usageWatch?: boolean }) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   const ingestCfg = resolveIngestConfig(loadFactoryConfigForRepo(paths.config));
@@ -2904,7 +2930,7 @@ async function cmdSupervise(opts: { now?: boolean; localQueue?: boolean; autoMer
 
   let knobs: UsageKnobs;
   try {
-    knobs = resolveUsageKnobs(process.env, loadRepoConfig(repoRoot));
+    knobs = resolveUsageKnobs(process.env, loadRepoConfig(repoRoot), { watch: opts.usageWatch });
   } catch (err: any) {
     throw new CliExitError(`factory: ${err.message}`, 2);
   }
@@ -2915,12 +2941,13 @@ async function cmdSupervise(opts: { now?: boolean; localQueue?: boolean; autoMer
       resumeAt: knobs.resumeAt,
       pollMs: knobs.pollMs,
       watch: knobs.watch,
+      watchSource: knobs.watchSource,
       estimator: knobs.estimator,
       stopFile: paths.stop,
       eventsFile: paths.events,
       now: opts.now,
       runQueue: createSuperviseRunQueue(paths, ingestCfg, {
-        cmdRunFn: () => cmdRun({ localQueue: opts.localQueue, autoMerge: opts.autoMerge }),
+        cmdRunFn: () => cmdRun({ localQueue: opts.localQueue, autoMerge: opts.autoMerge, usageWatch: opts.usageWatch }),
         pendingCount: countPending,
       }),
       ingest: ingestCfg.enabled ? createIngestHook(repoRoot, paths, ingestCfg) : undefined,
@@ -3845,6 +3872,9 @@ export interface SuperviseDeps {
   resumeAt: number;
   pollMs: number;
   watch?: boolean;
+  /** Where `watch` was decided, so the loop can attribute an explicit operator override
+   *  to the flag rather than always blaming FACTORY_USAGE_WATCH (#1404). */
+  watchSource?: WatchdogPolicySource;
   estimator?: boolean;
   stopFile: string;
   eventsFile: string;
@@ -3870,6 +3900,7 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
     resumeAt,
     pollMs,
     watch = true,
+    watchSource = 'default',
     estimator = false,
     stopFile,
     eventsFile,
@@ -3891,8 +3922,15 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
     let source = 'unavailable';
 
     if (!watch) {
-      writeLine('[factory] supervise: usage watchdog disabled (FACTORY_USAGE_WATCH=0) — skipping resume gate');
+      writeLine(
+        `[factory] supervise: usage watchdog disabled (${usageWatchSourceLabel(watchSource, watch)}) — skipping resume gate`,
+      );
     } else {
+      if (watchSource === 'flag') {
+        writeLine(
+          `[factory] supervise: usage watchdog enabled (${usageWatchSourceLabel(watchSource, watch)}) — enforcing resume gate`,
+        );
+      }
       let reading = await readUsageFn();
       if (reading === null) {
         writeLine(USAGE_UNAVAILABLE_LINE);
@@ -4420,7 +4458,15 @@ export async function main() {
     .option('--local-queue', 'Read .factory/queue instead of claiming issues from GitHub Issues')
     .option('--auto-merge', 'Merge eligible PRs autonomously, overriding .factory/config.json and FACTORY_MERGE')
     .option('--no-auto-merge', 'Never merge autonomously, overriding .factory/config.json and FACTORY_MERGE')
-    .action((opts: { localQueue?: boolean; autoMerge?: boolean }) => cmdRun(opts));
+    .option(
+      '--usage-watch',
+      'Enforce the usage gate for this run, overriding .factory/config.json and FACTORY_USAGE_WATCH',
+    )
+    .option(
+      '--no-usage-watch',
+      'Skip the usage gate for this run, overriding .factory/config.json and FACTORY_USAGE_WATCH',
+    )
+    .action((opts: { localQueue?: boolean; autoMerge?: boolean; usageWatch?: boolean }) => cmdRun(opts));
 
   program
     .command('proxy')
@@ -4475,6 +4521,14 @@ export async function main() {
     .option('--local-queue', 'Read .factory/queue instead of claiming issues from GitHub Issues')
     .option('--auto-merge', 'Merge eligible PRs autonomously, overriding .factory/config.json and FACTORY_MERGE')
     .option('--no-auto-merge', 'Never merge autonomously, overriding .factory/config.json and FACTORY_MERGE')
+    .option(
+      '--usage-watch',
+      'Enforce the usage gate for this run, overriding .factory/config.json and FACTORY_USAGE_WATCH',
+    )
+    .option(
+      '--no-usage-watch',
+      'Skip the usage gate for this run, overriding .factory/config.json and FACTORY_USAGE_WATCH',
+    )
     .action(async (opts) => {
       await cmdSupervise(opts);
     });

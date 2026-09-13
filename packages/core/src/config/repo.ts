@@ -475,6 +475,18 @@ export function resolveUsageCap(
 
 // ---------- Usage watchdog policy ----------
 
+/** Where a resolved watchdog knob came from. `'flag'` is an explicit per-invocation CLI
+ *  flag (`--usage-watch`/`--no-usage-watch`) and outranks every other source. Only `watch`
+ *  is flag-settable today; the union is shared by all five fields so `sourceLabel` can
+ *  format them uniformly. */
+export type WatchdogPolicySource = 'flag' | 'repo' | 'env' | 'default';
+
+/** Per-invocation CLI overrides. A field left `undefined` means "the flag was not
+ *  supplied" and changes nothing; a boolean wins over config file and env alike. */
+export interface WatchdogPolicyOverrides {
+  watch?: boolean;
+}
+
 export interface EffectiveWatchdogPolicy {
   stopAt: number;
   resumeAt: number;
@@ -482,26 +494,28 @@ export interface EffectiveWatchdogPolicy {
   watch: boolean;
   estimator: boolean;
   sources: {
-    stopAt: 'repo' | 'env' | 'default';
-    resumeAt: 'repo' | 'env' | 'default';
-    pollMs: 'repo' | 'env' | 'default';
-    watch: 'repo' | 'env' | 'default';
-    estimator: 'repo' | 'env' | 'default';
+    stopAt: WatchdogPolicySource;
+    resumeAt: WatchdogPolicySource;
+    pollMs: WatchdogPolicySource;
+    watch: WatchdogPolicySource;
+    estimator: WatchdogPolicySource;
   };
 }
 
 /** Resolve the usage-watchdog knobs: repo `budget.watchdog.*` > the matching legacy
  *  `FACTORY_STOP_AT`/`FACTORY_RESUME_AT`/`FACTORY_USAGE_POLL`/`FACTORY_USAGE_WATCH`/
- *  `FACTORY_USAGE_ESTIMATOR` env var > the packaged default. Each field resolves
+ *  `FACTORY_USAGE_ESTIMATOR` env var > the packaged default. An explicit `overrides.watch`
+ *  from `--usage-watch`/`--no-usage-watch` has highest precedence. Each field resolves
  *  independently, mirroring `resolveUsageCap`. */
 export function resolveWatchdogPolicy(
   repo: RepoFactoryConfig | null,
   env: NodeJS.ProcessEnv = process.env,
+  overrides: WatchdogPolicyOverrides = {},
 ): EffectiveWatchdogPolicy {
   const wd = repo?.budget?.watchdog;
 
   let stopAt: number;
-  let stopAtSource: 'repo' | 'env' | 'default';
+  let stopAtSource: WatchdogPolicySource;
   if (wd?.stopAt !== undefined) {
     stopAt = wd.stopAt;
     stopAtSource = 'repo';
@@ -517,7 +531,7 @@ export function resolveWatchdogPolicy(
   }
 
   let resumeAt: number;
-  let resumeAtSource: 'repo' | 'env' | 'default';
+  let resumeAtSource: WatchdogPolicySource;
   if (wd?.resumeAt !== undefined) {
     resumeAt = wd.resumeAt;
     resumeAtSource = 'repo';
@@ -533,7 +547,7 @@ export function resolveWatchdogPolicy(
   }
 
   let pollSeconds: number;
-  let pollSource: 'repo' | 'env' | 'default';
+  let pollSource: WatchdogPolicySource;
   if (wd?.pollSeconds !== undefined) {
     pollSeconds = wd.pollSeconds;
     pollSource = 'repo';
@@ -549,8 +563,11 @@ export function resolveWatchdogPolicy(
   }
 
   let watch: boolean;
-  let watchSource: 'repo' | 'env' | 'default';
-  if (wd?.watch !== undefined) {
+  let watchSource: WatchdogPolicySource;
+  if (overrides.watch !== undefined) {
+    watch = overrides.watch;
+    watchSource = 'flag';
+  } else if (wd?.watch !== undefined) {
     watch = wd.watch;
     watchSource = 'repo';
   } else if (env.FACTORY_USAGE_WATCH !== undefined) {
@@ -562,7 +579,7 @@ export function resolveWatchdogPolicy(
   }
 
   let estimator: boolean;
-  let estimatorSource: 'repo' | 'env' | 'default';
+  let estimatorSource: WatchdogPolicySource;
   if (wd?.estimator !== undefined) {
     estimator = wd.estimator;
     estimatorSource = 'repo';

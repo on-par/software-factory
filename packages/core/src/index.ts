@@ -48,6 +48,8 @@ export type {
   EffectiveWatchdogPolicy,
   EfficiencyPolicy,
   RepoFactoryConfig,
+  WatchdogPolicyOverrides,
+  WatchdogPolicySource,
 } from './config/repo.js';
 export {
   applyRepoConfig,

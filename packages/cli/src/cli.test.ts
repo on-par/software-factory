@@ -62,6 +62,7 @@ import {
   sweepApprovedPRs,
   triageNoProposalError,
   triageProposalMessage,
+  usageWatchSourceLabel,
   waitForMerge,
   withRepoRunLock,
 } from './cli/index.js';
@@ -159,6 +160,7 @@ describe('cli', () => {
       pollMs: 180_000,
       watch: true,
       estimator: false,
+      watchSource: 'default',
     });
   });
 
@@ -179,7 +181,23 @@ describe('cli', () => {
       pollMs: 60_000,
       watch: false,
       estimator: true,
+      watchSource: 'env',
     });
+  });
+
+  it('usage-watch flag: resolveUsageKnobs reports the flag as the watch source', () => {
+    expect(resolveUsageKnobs({ FACTORY_USAGE_WATCH: '0' }, null, { watch: true })).toMatchObject({
+      watch: true,
+      watchSource: 'flag',
+    });
+  });
+
+  it('usage-watch flag: usageWatchSourceLabel names each source', () => {
+    expect(usageWatchSourceLabel('flag', false)).toBe('flag: --no-usage-watch');
+    expect(usageWatchSourceLabel('flag', true)).toBe('flag: --usage-watch');
+    expect(usageWatchSourceLabel('repo', true)).toBe('.factory/config.json: budget.watchdog.watch');
+    expect(usageWatchSourceLabel('env', false)).toBe('env: FACTORY_USAGE_WATCH');
+    expect(usageWatchSourceLabel('default', true)).toBe('default');
   });
 
   it('defaults estimator to false for any value other than "1"', () => {
@@ -383,6 +401,91 @@ describe('cli', () => {
 
     expect(calls.filter((c) => c[0] === 'sleep')).toHaveLength(0);
     expect(calls.filter((c) => c[0] === 'runQueue')).toHaveLength(1);
+  });
+
+  it('usage-watch flag: superviseLoop attributes a skipped resume gate to --no-usage-watch', async () => {
+    const calls: string[] = [];
+    let usageReads = 0;
+    let sleeps = 0;
+
+    await superviseLoop({
+      cap: 1,
+      resumeAt: 0.65,
+      pollMs: 1000,
+      watch: false,
+      watchSource: 'flag',
+      stopFile: '/repo/.factory/STOP',
+      eventsFile: '/repo/.factory/events.ndjson',
+      readUsageFn: async () => {
+        usageReads++;
+        return reading(1);
+      },
+      pathExists: () => false,
+      clearStop: () => {},
+      sleep: async () => {
+        sleeps++;
+      },
+      emitEvent: () => {},
+      writeLine: (line) => calls.push(line),
+      runQueue: async () => {},
+    });
+
+    expect(calls).toContain(
+      '[factory] supervise: usage watchdog disabled (flag: --no-usage-watch) — skipping resume gate',
+    );
+    expect(usageReads).toBe(0);
+    expect(sleeps).toBe(0);
+  });
+
+  it('usage-watch flag: superviseLoop logs --usage-watch when the flag forces the gate on', async () => {
+    const calls: string[] = [];
+    let runQueueCalls = 0;
+
+    await superviseLoop({
+      cap: 1,
+      resumeAt: 0.65,
+      pollMs: 1000,
+      watch: true,
+      watchSource: 'flag',
+      stopFile: '/repo/.factory/STOP',
+      eventsFile: '/repo/.factory/events.ndjson',
+      readUsageFn: async () => reading(0.1),
+      pathExists: () => false,
+      clearStop: () => {},
+      sleep: async () => {},
+      emitEvent: () => {},
+      writeLine: (line) => calls.push(line),
+      runQueue: async () => {
+        runQueueCalls++;
+      },
+    });
+
+    expect(calls).toContain(
+      '[factory] supervise: usage watchdog enabled (flag: --usage-watch) — enforcing resume gate',
+    );
+    expect(runQueueCalls).toBe(1);
+  });
+
+  it('usage-watch flag: superviseLoop logs no source line when no flag was supplied', async () => {
+    const calls: string[] = [];
+
+    await superviseLoop({
+      cap: 1,
+      resumeAt: 0.65,
+      pollMs: 1000,
+      watch: true,
+      stopFile: '/repo/.factory/STOP',
+      eventsFile: '/repo/.factory/events.ndjson',
+      readUsageFn: async () => reading(0.1),
+      pathExists: () => false,
+      clearStop: () => {},
+      sleep: async () => {},
+      emitEvent: () => {},
+      writeLine: (line) => calls.push(line),
+      runQueue: async () => {},
+    });
+
+    expect(calls.some((line) => line.includes('usage watchdog enabled'))).toBe(false);
   });
 
   it('proceeds immediately without gating when the usage reading is null, logging the unavailable warning', async () => {
