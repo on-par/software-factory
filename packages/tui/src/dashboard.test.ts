@@ -26,6 +26,7 @@ const failureEvidence: EvidencePack = {
   origin: 'product',
   eventExcerpt: 'tests failed',
   logPath: '/tmp/factory.log',
+  relatedIssue: { repo: 'on-par/software-factory', issueNumber: 1392 },
 };
 
 function reduceAll(events: FactoryEvent[]): DashboardState {
@@ -155,7 +156,13 @@ describe('reduceDashboard — lifecycle events', () => {
     ]);
     const lane = state.lanes[0];
     expect(lane.status).toBe(status);
-    expect(lane.failureEvidence).toEqual({ reason: 'verify_failed', fingerprint: 'ff_0123456789abcdef' });
+    expect(lane.failureEvidence).toEqual({
+      reason: 'verify_failed',
+      fingerprint: 'ff_0123456789abcdef',
+      eventExcerpt: 'tests failed',
+      logPath: '/tmp/factory.log',
+      relatedIssue: { repo: 'on-par/software-factory', issueNumber: 1392 },
+    });
 
     const restarted = reduceDashboard(state, ev('build', '296', 'Starting build phase again'));
     expect(restarted.lanes[0].failureEvidence).toBeUndefined();
@@ -164,6 +171,25 @@ describe('reduceDashboard — lifecycle events', () => {
   it('does not infer structured failure evidence from a terminal event without both fields', () => {
     const state = reduceAll([ev('plan', '296', 'Starting plan phase'), ev('fail', '296', 'verify failed')]);
     expect(state.lanes[0].failureEvidence).toBeUndefined();
+  });
+
+  it('retains an absent related issue as undefined rather than deriving it from the lane issue', () => {
+    const state = reduceAll([
+      ev('plan', '296', 'Starting plan phase'),
+      {
+        ...ev('fail', '296', 'terminal failure'),
+        evidence: { ...failureEvidence, relatedIssue: undefined },
+        fingerprint: 'ff_0123456789abcdef',
+      },
+    ]);
+
+    expect(state.lanes[0].failureEvidence).toEqual({
+      reason: 'verify_failed',
+      fingerprint: 'ff_0123456789abcdef',
+      eventExcerpt: 'tests failed',
+      logPath: '/tmp/factory.log',
+      relatedIssue: undefined,
+    });
   });
 
   it('does not overwrite failedPhase/failReason when a second failure event follows', () => {
@@ -184,7 +210,13 @@ describe('reduceDashboard — lifecycle events', () => {
     expect(lane.status).toBe('failed');
     expect(lane.failedPhase).toBe('PLAN');
     expect(lane.failReason).toBe('first failure');
-    expect(lane.failureEvidence).toEqual({ reason: 'verify_failed', fingerprint: 'ff_0123456789abcdef' });
+    expect(lane.failureEvidence).toEqual({
+      reason: 'verify_failed',
+      fingerprint: 'ff_0123456789abcdef',
+      eventExcerpt: 'tests failed',
+      logPath: '/tmp/factory.log',
+      relatedIssue: { repo: 'on-par/software-factory', issueNumber: 1392 },
+    });
     expect(lane.finishedAt).toBe('2026-01-01T00:08:00.000Z');
   });
 

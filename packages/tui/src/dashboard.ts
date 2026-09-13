@@ -1,4 +1,4 @@
-import { laneStatusOf, type FactoryEvent, type FailoverReason } from '@on-par/factory-core';
+import { laneStatusOf, type EvidencePack, type FactoryEvent, type FailoverReason } from '@on-par/factory-core';
 
 import { initialState, type PhaseName, reduceEvent, type RunState } from './state.js';
 
@@ -7,6 +7,9 @@ export type LaneStatus = 'running' | 'waiting-merge' | 'ready' | 'merged' | 'fai
 export interface LaneFailureEvidence {
   reason: FailoverReason;
   fingerprint: string;
+  eventExcerpt: string;
+  logPath: string;
+  relatedIssue?: EvidencePack['relatedIssue'];
 }
 
 export interface LaneState {
@@ -95,7 +98,15 @@ export function reduceDashboard(state: DashboardState, e: FactoryEvent): Dashboa
     lane = { ...lane, status: 'merged', finishedAt: e.ts };
   } else if (laneStatusOf(e.type) === 'failed' || laneStatusOf(e.type) === 'parked') {
     const capturedEvidence =
-      e.evidence && e.fingerprint ? { reason: e.evidence.reason, fingerprint: e.fingerprint } : undefined;
+      e.evidence && e.fingerprint
+        ? {
+            reason: e.evidence.reason,
+            fingerprint: e.fingerprint,
+            eventExcerpt: e.evidence.eventExcerpt,
+            logPath: e.evidence.logPath,
+            relatedIssue: e.evidence.relatedIssue,
+          }
+        : undefined;
     lane = {
       ...lane,
       status: laneStatusOf(e.type) as 'failed' | 'parked',

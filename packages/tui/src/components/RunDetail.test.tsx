@@ -55,19 +55,51 @@ describe('RunDetail', () => {
     expect(unset.lastFrame()).not.toContain('queued for next phase boundary');
   });
 
-  it('shows classified failure evidence only when supplied', () => {
+  it('shows enriched failure evidence with a sanitized related filed issue link', () => {
     const withEvidence = render(
       <RunDetail
         run={initialState()}
         now={NOW}
-        failureEvidence={{ reason: 'verify_failed', fingerprint: 'ff_0123456789abcdef' }}
+        failureEvidence={{
+          reason: 'verify_failed',
+          fingerprint: 'ff_0123456789abcdef',
+          eventExcerpt: 'tests\u001b[2J failed',
+          logPath: '/tmp/\u001b[Hfactory.log',
+          relatedIssue: { repo: 'on-par/software-factory', issueNumber: 1392 },
+        }}
       />,
     );
     expect(withEvidence.lastFrame()).toContain('failure reason: verify_failed');
     expect(withEvidence.lastFrame()).toContain('failure fingerprint: ff_0123456789abcdef');
+    expect(withEvidence.lastFrame()).toContain('failure excerpt: tests[2J failed');
+    expect(withEvidence.lastFrame()).toContain('failure log: /tmp/[Hfactory.log');
+    expect(withEvidence.lastFrame()).toContain(
+      'related filed issue: https://github.com/on-par/software-factory/issues/1392',
+    );
+    expect(withEvidence.lastFrame()).not.toContain('\u001b');
 
     const withoutEvidence = render(<RunDetail run={initialState()} now={NOW} />);
     expect(withoutEvidence.lastFrame()).not.toContain('failure reason:');
     expect(withoutEvidence.lastFrame()).not.toContain('failure fingerprint:');
+  });
+
+  it('renders excerpt and log without a related filed issue when the reference is absent', () => {
+    const { lastFrame } = render(
+      <RunDetail
+        run={initialState()}
+        now={NOW}
+        failureEvidence={{
+          reason: 'verify_failed',
+          fingerprint: 'ff_0123456789abcdef',
+          eventExcerpt: 'tests failed',
+          logPath: '/tmp/factory.log',
+        }}
+      />,
+    );
+
+    expect(lastFrame()).toContain('failure excerpt: tests failed');
+    expect(lastFrame()).toContain('failure log: /tmp/factory.log');
+    expect(lastFrame()).not.toContain('related filed issue:');
+    expect(lastFrame()).not.toContain('https://github.com/');
   });
 });
