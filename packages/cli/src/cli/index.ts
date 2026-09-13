@@ -886,6 +886,9 @@ export interface UsageKnobs {
   estimator: boolean;
   /** Where `watch` was decided — `'flag'` when `--usage-watch`/`--no-usage-watch` was supplied. */
   watchSource: WatchdogPolicySource;
+  stopAtSource: WatchdogPolicySource;
+  resumeAtSource: WatchdogPolicySource;
+  pollSource: WatchdogPolicySource;
 }
 
 export function resolveUsageKnobs(
@@ -904,6 +907,9 @@ export function resolveUsageKnobs(
     watch: watchdog.watch,
     estimator: watchdog.estimator,
     watchSource: watchdog.sources.watch,
+    stopAtSource: watchdog.sources.stopAt,
+    resumeAtSource: watchdog.sources.resumeAt,
+    pollSource: watchdog.sources.pollMs,
   };
 }
 
@@ -2715,7 +2721,26 @@ export function clearStaleStopFile(paths: { stop: string; events: string }, deps
   return true;
 }
 
-async function cmdRun(opts: { localQueue?: boolean; autoMerge?: boolean; usageWatch?: boolean } = {}) {
+function usageFlagOverrides(
+  opts: { usageWatch?: boolean; usageThreshold?: string; usagePoll?: string },
+  threshold: 'stopAt' | 'resumeAt',
+): WatchdogPolicyOverrides {
+  return {
+    watch: opts.usageWatch,
+    [threshold]: opts.usageThreshold === undefined ? undefined : Number(opts.usageThreshold),
+    pollSeconds: opts.usagePoll === undefined ? undefined : Number(opts.usagePoll),
+  };
+}
+
+async function cmdRun(
+  opts: {
+    localQueue?: boolean;
+    autoMerge?: boolean;
+    usageWatch?: boolean;
+    usageThreshold?: string;
+    usagePoll?: string;
+  } = {},
+): Promise<void> {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
 
@@ -2774,9 +2799,24 @@ async function cmdRun(opts: { localQueue?: boolean; autoMerge?: boolean; usageWa
     });
     warnQueueDiagnostics(diagnostics);
 
-    const knobs = resolveUsageKnobs(process.env, loadRepoConfig(repoRoot), { watch: opts.usageWatch });
+    let knobs: UsageKnobs;
+    try {
+      knobs = resolveUsageKnobs(process.env, loadRepoConfig(repoRoot), usageFlagOverrides(opts, 'stopAt'));
+    } catch (err: any) {
+      throw new CliExitError(`factory: ${err.message}`, 2);
+    }
     if (knobs.watchSource === 'flag') {
       const detail = `usage watchdog ${knobs.watch ? 'enabled' : 'disabled'} by ${usageWatchSourceLabel(knobs.watchSource, knobs.watch)}`;
+      console.log(`[factory] run: ${detail}`);
+      logEvent(paths.events, 'watchdog', 'all', detail);
+    }
+    if (knobs.stopAtSource === 'flag') {
+      const detail = 'usage watchdog threshold set by flag: --usage-threshold';
+      console.log(`[factory] run: ${detail}`);
+      logEvent(paths.events, 'watchdog', 'all', detail);
+    }
+    if (knobs.pollSource === 'flag') {
+      const detail = 'usage watchdog poll set by flag: --usage-poll';
       console.log(`[factory] run: ${detail}`);
       logEvent(paths.events, 'watchdog', 'all', detail);
     }
@@ -2905,7 +2945,14 @@ export function createIngestHook(
   };
 }
 
-async function cmdSupervise(opts: { now?: boolean; localQueue?: boolean; autoMerge?: boolean; usageWatch?: boolean }) {
+async function cmdSupervise(opts: {
+  now?: boolean;
+  localQueue?: boolean;
+  autoMerge?: boolean;
+  usageWatch?: boolean;
+  usageThreshold?: string;
+  usagePoll?: string;
+}): Promise<void> {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   const ingestCfg = resolveIngestConfig(loadFactoryConfigForRepo(paths.config));
@@ -2930,7 +2977,7 @@ async function cmdSupervise(opts: { now?: boolean; localQueue?: boolean; autoMer
 
   let knobs: UsageKnobs;
   try {
-    knobs = resolveUsageKnobs(process.env, loadRepoConfig(repoRoot), { watch: opts.usageWatch });
+    knobs = resolveUsageKnobs(process.env, loadRepoConfig(repoRoot), usageFlagOverrides(opts, 'resumeAt'));
   } catch (err: any) {
     throw new CliExitError(`factory: ${err.message}`, 2);
   }
@@ -2942,12 +2989,21 @@ async function cmdSupervise(opts: { now?: boolean; localQueue?: boolean; autoMer
       pollMs: knobs.pollMs,
       watch: knobs.watch,
       watchSource: knobs.watchSource,
+      resumeAtSource: knobs.resumeAtSource,
+      pollSource: knobs.pollSource,
       estimator: knobs.estimator,
       stopFile: paths.stop,
       eventsFile: paths.events,
       now: opts.now,
       runQueue: createSuperviseRunQueue(paths, ingestCfg, {
-        cmdRunFn: () => cmdRun({ localQueue: opts.localQueue, autoMerge: opts.autoMerge, usageWatch: opts.usageWatch }),
+        cmdRunFn: () =>
+          cmdRun({
+            localQueue: opts.localQueue,
+            autoMerge: opts.autoMerge,
+            usageWatch: opts.usageWatch,
+            usageThreshold: opts.usageThreshold,
+            usagePoll: opts.usagePoll,
+          }),
         pendingCount: countPending,
       }),
       ingest: ingestCfg.enabled ? createIngestHook(repoRoot, paths, ingestCfg) : undefined,
@@ -3875,6 +3931,10 @@ export interface SuperviseDeps {
   /** Where `watch` was decided, so the loop can attribute an explicit operator override
    *  to the flag rather than always blaming FACTORY_USAGE_WATCH (#1404). */
   watchSource?: WatchdogPolicySource;
+  /** Where the resume threshold was decided, for attribution of explicit CLI overrides. */
+  resumeAtSource?: WatchdogPolicySource;
+  /** Where the poll interval was decided, for attribution of explicit CLI overrides. */
+  pollSource?: WatchdogPolicySource;
   estimator?: boolean;
   stopFile: string;
   eventsFile: string;
@@ -3901,6 +3961,8 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
     pollMs,
     watch = true,
     watchSource = 'default',
+    resumeAtSource = 'default',
+    pollSource = 'default',
     estimator = false,
     stopFile,
     eventsFile,
@@ -3916,6 +3978,16 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
   } = deps;
 
   let cycle = 0;
+  if (resumeAtSource === 'flag') {
+    const detail = 'usage watchdog threshold set by flag: --usage-threshold';
+    writeLine(`[factory] supervise: ${detail}`);
+    emitEvent(eventsFile, 'watchdog', 'usage', detail);
+  }
+  if (pollSource === 'flag') {
+    const detail = 'usage watchdog poll set by flag: --usage-poll';
+    writeLine(`[factory] supervise: ${detail}`);
+    emitEvent(eventsFile, 'watchdog', 'usage', detail);
+  }
   while (true) {
     cycle++;
     let pct = 0;
@@ -4466,7 +4538,20 @@ export async function main() {
       '--no-usage-watch',
       'Skip the usage gate for this run, overriding .factory/config.json and FACTORY_USAGE_WATCH',
     )
-    .action((opts: { localQueue?: boolean; autoMerge?: boolean; usageWatch?: boolean }) => cmdRun(opts));
+    .option(
+      '--usage-threshold <fraction>',
+      "Override .factory/config.json and FACTORY_STOP_AT for this run's usage threshold",
+    )
+    .option('--usage-poll <seconds>', "Override .factory/config.json and FACTORY_USAGE_POLL for this run's usage poll")
+    .action(
+      (opts: {
+        localQueue?: boolean;
+        autoMerge?: boolean;
+        usageWatch?: boolean;
+        usageThreshold?: string;
+        usagePoll?: string;
+      }) => cmdRun(opts),
+    );
 
   program
     .command('proxy')
@@ -4529,6 +4614,11 @@ export async function main() {
       '--no-usage-watch',
       'Skip the usage gate for this run, overriding .factory/config.json and FACTORY_USAGE_WATCH',
     )
+    .option(
+      '--usage-threshold <fraction>',
+      "Override .factory/config.json and FACTORY_RESUME_AT for this run's usage threshold",
+    )
+    .option('--usage-poll <seconds>', "Override .factory/config.json and FACTORY_USAGE_POLL for this run's usage poll")
     .action(async (opts) => {
       await cmdSupervise(opts);
     });

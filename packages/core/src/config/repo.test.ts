@@ -667,6 +667,29 @@ describe('resolveWatchdogPolicy', () => {
     expect(result.sources.watch).toBe('env');
   });
 
+  it('usage threshold and poll flags override each field independently and retain flag provenance', () => {
+    const repo = { version: 2 as const, budget: { watchdog: { stopAt: 0.9, resumeAt: 0.8, pollSeconds: 30 } } };
+    const result = resolveWatchdogPolicy(
+      repo,
+      { FACTORY_STOP_AT: '0.5', FACTORY_RESUME_AT: '0.4', FACTORY_USAGE_POLL: '60' },
+      { stopAt: 0.7, resumeAt: 0.6, pollSeconds: 15 },
+    );
+    expect(result).toMatchObject({
+      stopAt: 0.7,
+      resumeAt: 0.6,
+      pollMs: 15_000,
+      sources: { stopAt: 'flag', resumeAt: 'flag', pollMs: 'flag' },
+    });
+    expect(resolveWatchdogPolicy(null, { FACTORY_STOP_AT: '0.5', FACTORY_USAGE_POLL: '60' }, {})).toMatchObject({
+      stopAt: 0.5,
+      pollMs: 60_000,
+      sources: { stopAt: 'env', pollMs: 'env' },
+    });
+    expect(() => resolveWatchdogPolicy(null, {}, { stopAt: 0 })).toThrow(/--usage-threshold/);
+    expect(() => resolveWatchdogPolicy(null, {}, { resumeAt: Number.NaN })).toThrow(/--usage-threshold/);
+    expect(() => resolveWatchdogPolicy(null, {}, { pollSeconds: 0 })).toThrow(/--usage-poll/);
+  });
+
   it('rejects invalid env values with the offending env var name', () => {
     expect(() => resolveWatchdogPolicy(null, { FACTORY_STOP_AT: '1.5' })).toThrow(/FACTORY_STOP_AT/);
     expect(() => resolveWatchdogPolicy(null, { FACTORY_RESUME_AT: '1.5' })).toThrow(/FACTORY_RESUME_AT/);
