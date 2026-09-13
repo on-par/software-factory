@@ -43,6 +43,7 @@ describe('createFactorydServer', () => {
 
   beforeEach(async () => {
     vi.stubEnv('FACTORY_MERGE', '');
+    vi.stubEnv('FACTORY_MERGE_ADMIN', '');
     dir = await mkdtemp(join(tmpdir(), 'factoryd-http-'));
     registryFile = join(dir, 'registry.json');
   });
