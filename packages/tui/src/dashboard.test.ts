@@ -1,4 +1,4 @@
-import type { EventKind, FactoryEvent } from '@on-par/factory-core';
+import type { EvidencePack, EventKind, FactoryEvent } from '@on-par/factory-core';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -15,6 +15,18 @@ import {
 function ev(type: EventKind, issue: string, msg: string, ts = '2026-01-01T00:00:00.000Z'): FactoryEvent {
   return { ts, type, issue, msg };
 }
+
+const failureEvidence: EvidencePack = {
+  repo: 'on-par/software-factory',
+  issue: '296',
+  phase: 'build',
+  model: 'codex',
+  reason: 'verify_failed',
+  component: 'check:tests',
+  origin: 'product',
+  eventExcerpt: 'tests failed',
+  logPath: '/tmp/factory.log',
+};
 
 function reduceAll(events: FactoryEvent[]): DashboardState {
   return events.reduce(reduceDashboard, initialDashboard());
@@ -129,16 +141,50 @@ describe('reduceDashboard — lifecycle events', () => {
     },
   );
 
+  it.each([
+    ['parked', 'parked'],
+    ['fail', 'failed'],
+  ] as const)('%s retains structured failure evidence until the lane restarts', (type, status) => {
+    const state = reduceAll([
+      ev('plan', '296', 'Starting plan phase'),
+      {
+        ...ev(type, '296', 'terminal failure', '2026-01-01T00:07:00.000Z'),
+        evidence: failureEvidence,
+        fingerprint: 'ff_0123456789abcdef',
+      },
+    ]);
+    const lane = state.lanes[0];
+    expect(lane.status).toBe(status);
+    expect(lane.failureEvidence).toEqual({ reason: 'verify_failed', fingerprint: 'ff_0123456789abcdef' });
+
+    const restarted = reduceDashboard(state, ev('build', '296', 'Starting build phase again'));
+    expect(restarted.lanes[0].failureEvidence).toBeUndefined();
+  });
+
+  it('does not infer structured failure evidence from a terminal event without both fields', () => {
+    const state = reduceAll([ev('plan', '296', 'Starting plan phase'), ev('fail', '296', 'verify failed')]);
+    expect(state.lanes[0].failureEvidence).toBeUndefined();
+  });
+
   it('does not overwrite failedPhase/failReason when a second failure event follows', () => {
     const state = reduceAll([
       ev('plan', '296', 'Starting plan phase'),
-      ev('fail', '296', 'first failure', '2026-01-01T00:07:00.000Z'),
-      ev('timeout', '296', 'second failure', '2026-01-01T00:08:00.000Z'),
+      {
+        ...ev('fail', '296', 'first failure', '2026-01-01T00:07:00.000Z'),
+        evidence: failureEvidence,
+        fingerprint: 'ff_0123456789abcdef',
+      },
+      {
+        ...ev('timeout', '296', 'second failure', '2026-01-01T00:08:00.000Z'),
+        evidence: { ...failureEvidence, reason: 'error' },
+        fingerprint: 'ff_fedcba9876543210',
+      },
     ]);
     const lane = state.lanes[0];
     expect(lane.status).toBe('failed');
     expect(lane.failedPhase).toBe('PLAN');
     expect(lane.failReason).toBe('first failure');
+    expect(lane.failureEvidence).toEqual({ reason: 'verify_failed', fingerprint: 'ff_0123456789abcdef' });
     expect(lane.finishedAt).toBe('2026-01-01T00:08:00.000Z');
   });
 

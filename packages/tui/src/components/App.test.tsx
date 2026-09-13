@@ -1,4 +1,11 @@
-import type { ApprovalRequest, CostsRead, EventKind, FactoryEvent, QueueSnapshot } from '@on-par/factory-core';
+import type {
+  ApprovalRequest,
+  CostsRead,
+  EvidencePack,
+  EventKind,
+  FactoryEvent,
+  QueueSnapshot,
+} from '@on-par/factory-core';
 import { cleanup, render } from 'ink-testing-library';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -26,6 +33,18 @@ function makeFakeFollow() {
 function ev(type: EventKind, msg: string, issue = '192', ts = new Date().toISOString()): FactoryEvent {
   return { ts, type, issue, msg };
 }
+
+const failureEvidence: EvidencePack = {
+  repo: 'on-par/software-factory',
+  issue: '192',
+  phase: 'plan',
+  model: 'codex',
+  reason: 'verify_failed',
+  component: 'check:tests',
+  origin: 'product',
+  eventExcerpt: 'tests failed',
+  logPath: '/tmp/factory.log',
+};
 
 /** Ink schedules re-renders on a microtask; flush it before reading lastFrame(). */
 const flush = async () => {
@@ -101,6 +120,19 @@ describe('App', () => {
     expect(frame).toContain('PLAN');
     expect(frame).toContain('claude-sonnet');
     expect(frame).not.toContain('lane(s)');
+  });
+
+  it.each(['parked', 'fail'] as const)('laneDetail.failureEvidence.reasonFingerprint (%s)', async (type) => {
+    const fake = makeFakeFollow();
+    const { lastFrame } = render(<App eventsFile="ignored" follow={fake.follow} />);
+
+    fake.push(ev('plan', 'Starting plan phase'));
+    fake.push({ ...ev(type, 'terminal failure'), evidence: failureEvidence, fingerprint: 'ff_0123456789abcdef' });
+    await flush();
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('failure reason: verify_failed');
+    expect(frame).toContain('failure fingerprint: ff_0123456789abcdef');
   });
 
   it('renders independent rows for multiple lanes that update independently', async () => {
