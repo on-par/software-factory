@@ -136,6 +136,20 @@ describe('App', () => {
     expect(frame).toContain('failure fingerprint: ff_0123456789abcdef');
   });
 
+  it('laneDetail.failureEvidence.legacyFallback', async () => {
+    const fake = makeFakeFollow();
+    const { lastFrame } = render(<App eventsFile="ignored" follow={fake.follow} />);
+
+    fake.push(ev('plan', 'Starting plan phase'));
+    fake.push(ev('parked', 'legacy terminal event: /tmp/legacy-event.log'));
+    await flush();
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('failure event/log: legacy terminal event: /tmp/legacy-event.log');
+    expect(frame).not.toContain('failure reason:');
+    expect(frame).not.toContain('failure fingerprint:');
+  });
+
   it.each([
     ['parked', { repo: 'on-par/software-factory', issueNumber: 1392 }],
     ['fail', undefined],

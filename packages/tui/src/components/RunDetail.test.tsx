@@ -77,10 +77,21 @@ describe('RunDetail', () => {
       'related filed issue: https://github.com/on-par/software-factory/issues/1392',
     );
     expect(withEvidence.lastFrame()).not.toContain('\u001b');
+    expect(withEvidence.lastFrame()).not.toContain('failure event/log:');
 
     const withoutEvidence = render(<RunDetail run={initialState()} now={NOW} />);
     expect(withoutEvidence.lastFrame()).not.toContain('failure reason:');
     expect(withoutEvidence.lastFrame()).not.toContain('failure fingerprint:');
+    expect(withoutEvidence.lastFrame()).not.toContain('failure event/log:');
+  });
+
+  it('renders a sanitized legacy failure event/log pointer without structured evidence', () => {
+    const { lastFrame } = render(
+      <RunDetail run={initialState()} now={NOW} legacyFailurePointer={'see \u001b[2J/tmp/legacy-event.log'} />,
+    );
+
+    expect(lastFrame()).toContain('failure event/log: see [2J/tmp/legacy-event.log');
+    expect(lastFrame()).not.toContain('\u001b');
   });
 
   it('renders excerpt and log without a related filed issue when the reference is absent', () => {

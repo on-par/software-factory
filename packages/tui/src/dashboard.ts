@@ -35,6 +35,10 @@ export interface DashboardState {
   runDone: boolean;
 }
 
+export function legacyFailurePointerFor(lane: LaneState): string | undefined {
+  return lane.status === 'parked' && !lane.failureEvidence ? lane.failReason : undefined;
+}
+
 export function initialDashboard(): DashboardState {
   return { lanes: [], runDone: false };
 }
