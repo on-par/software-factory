@@ -1,6 +1,7 @@
 import { AttachRepoForm } from './AttachRepoForm.js';
 import { useMemo } from 'react';
 
+import { useAttachedRepos } from './attachedRepos.js';
 import { KpiTrendView } from './KpiTrendView.js';
 import { parseAttachedRepos } from './laneBoardState.js';
 import { LaneBoard } from './LaneBoard.js';
@@ -22,6 +23,7 @@ export function App() {
   const repo = repoFromLocation(window.location.search);
   const { board, connection } = useLaneEvents(repo === null ? {} : { repo });
   const policyClient = useMemo(() => createRepoPolicyClient(), []);
+  const attachedRepos = useAttachedRepos(ATTACHED_REPOS);
 
   return (
     <div className="flex h-screen bg-canvas font-sans text-ink-900">
@@ -56,7 +58,7 @@ export function App() {
                   frames only and factoryd exposes no usage route, so this renders the
                   explicit unavailable state. This prop is the single injection point for
                   a future factoryd-served reading. */}
-              <LaneBoard board={board} connection={connection} attachedRepos={ATTACHED_REPOS} usage={null} />
+              <LaneBoard board={board} connection={connection} attachedRepos={attachedRepos} usage={null} />
               <div className="mt-4">
                 <AttachRepoForm />
               </div>
