@@ -1,8 +1,13 @@
-import { laneStatusOf, type FactoryEvent } from '@on-par/factory-core';
+import { laneStatusOf, type FactoryEvent, type FailoverReason } from '@on-par/factory-core';
 
 import { initialState, type PhaseName, reduceEvent, type RunState } from './state.js';
 
 export type LaneStatus = 'running' | 'waiting-merge' | 'ready' | 'merged' | 'failed' | 'parked' | 'stopped';
+
+export interface LaneFailureEvidence {
+  reason: FailoverReason;
+  fingerprint: string;
+}
 
 export interface LaneState {
   issue: string;
@@ -11,6 +16,7 @@ export interface LaneState {
   status: LaneStatus;
   failedPhase?: PhaseName;
   failReason?: string;
+  failureEvidence?: LaneFailureEvidence;
   prNumber?: string;
   startedAt: string;
   finishedAt?: string;
@@ -73,6 +79,7 @@ export function reduceDashboard(state: DashboardState, e: FactoryEvent): Dashboa
       finishedAt: undefined,
       failedPhase: undefined,
       failReason: undefined,
+      failureEvidence: undefined,
       waitingSince: undefined,
     };
   } else if (e.type === 'issue-title') {
@@ -87,11 +94,14 @@ export function reduceDashboard(state: DashboardState, e: FactoryEvent): Dashboa
   } else if (e.type === 'landed' || e.type === 'merged') {
     lane = { ...lane, status: 'merged', finishedAt: e.ts };
   } else if (laneStatusOf(e.type) === 'failed' || laneStatusOf(e.type) === 'parked') {
+    const capturedEvidence =
+      e.evidence && e.fingerprint ? { reason: e.evidence.reason, fingerprint: e.fingerprint } : undefined;
     lane = {
       ...lane,
       status: laneStatusOf(e.type) as 'failed' | 'parked',
       failedPhase: lane.failedPhase ?? lane.run.activePhase,
       failReason: lane.failReason ?? e.msg,
+      failureEvidence: lane.failureEvidence ?? capturedEvidence,
       finishedAt: e.ts,
     };
   } else if (e.type === 'stopped') {

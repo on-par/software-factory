@@ -54,4 +54,20 @@ describe('RunDetail', () => {
     const unset = render(<RunDetail run={initialState()} now={NOW} />);
     expect(unset.lastFrame()).not.toContain('queued for next phase boundary');
   });
+
+  it('shows classified failure evidence only when supplied', () => {
+    const withEvidence = render(
+      <RunDetail
+        run={initialState()}
+        now={NOW}
+        failureEvidence={{ reason: 'verify_failed', fingerprint: 'ff_0123456789abcdef' }}
+      />,
+    );
+    expect(withEvidence.lastFrame()).toContain('failure reason: verify_failed');
+    expect(withEvidence.lastFrame()).toContain('failure fingerprint: ff_0123456789abcdef');
+
+    const withoutEvidence = render(<RunDetail run={initialState()} now={NOW} />);
+    expect(withoutEvidence.lastFrame()).not.toContain('failure reason:');
+    expect(withoutEvidence.lastFrame()).not.toContain('failure fingerprint:');
+  });
 });
