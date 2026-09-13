@@ -1971,6 +1971,14 @@ bash scripts/verify.sh
       expect(JSON.parse(readFileSync(paths().runFlags, 'utf-8'))).toEqual({ autoMerge: false });
     });
 
+    it('usage-watch flag: factory run --no-usage-watch logs the flag as the override source', async () => {
+      writeFileSync(paths().queue, '# header\n');
+      const res = await runMain('run', '--local-queue', '--no-usage-watch');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('usage watchdog disabled by flag: --no-usage-watch');
+      expect(readFileSync(paths().events, 'utf-8')).toContain('usage watchdog disabled by flag: --no-usage-watch');
+    });
+
     it('auto-merge flag: a later flagless factory run clears the recorded override', async () => {
       writeFileSync(paths().queue, '# header\n');
       await runMain('run', '--local-queue', '--auto-merge');
