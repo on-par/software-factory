@@ -215,6 +215,43 @@ describe('createFactorydServer', () => {
       expect(lines).toEqual(['POST /repos 201', 'GET /repos 200']);
     });
 
+    it('persists an attach across a daemon restart: a fresh server over the same file still lists it (#1403)', async () => {
+      factoryd = createFactorydServer({
+        registryFile,
+        port: 0,
+        attachDeps: {
+          readOrigin: async () => 'git@github.com:on-par/software-factory.git',
+          fileExists: async () => true,
+          now: () => new Date('2026-08-19T12:00:00.000Z'),
+        },
+      });
+      await factoryd.start();
+      await get(
+        factoryd.port,
+        '/repos',
+        'POST',
+        JSON.stringify({ repo: 'on-par/software-factory', path: '/tmp/checkout' }),
+      );
+      await factoryd.stop();
+
+      // Simulates a reload: a brand-new server instance (as a fresh daemon start or a fresh
+      // dashboard load would see), reading the same registry file from scratch.
+      factoryd = createFactorydServer({ registryFile, port: 0 });
+      await factoryd.start();
+
+      const listing = await get(factoryd.port, '/repos');
+      expect(JSON.parse(listing.body)).toEqual({
+        repos: [
+          {
+            slug: 'on-par/software-factory',
+            path: '/tmp/checkout',
+            attachedAt: '2026-08-19T12:00:00.000Z',
+            state: 'active',
+          },
+        ],
+      });
+    });
+
     it('rejects an origin mismatch with 400 and leaves the registry unchanged (acceptance criterion 2)', async () => {
       factoryd = createFactorydServer({
         registryFile,
