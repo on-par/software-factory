@@ -1979,6 +1979,28 @@ bash scripts/verify.sh
       expect(readFileSync(paths().events, 'utf-8')).toContain('usage watchdog disabled by flag: --no-usage-watch');
     });
 
+    it('usage threshold and poll flags: factory run wires flag values and logs their sources', async () => {
+      trackEnv('FACTORY_STOP_AT', 'FACTORY_USAGE_POLL');
+      process.env.FACTORY_STOP_AT = '0.5';
+      process.env.FACTORY_USAGE_POLL = '60';
+      writeFileSync(paths().queue, '# header\n');
+      const res = await runMain('run', '--local-queue', '--usage-threshold', '0.7', '--usage-poll', '15');
+      expect(res.exited).toBe(false);
+      expect(vi.mocked(FactoryCore.watchUsage)).toHaveBeenCalledWith(
+        expect.objectContaining({ stopAt: 0.7, pollMs: 15_000 }),
+      );
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('flag: --usage-threshold');
+      expect(events).toContain('flag: --usage-poll');
+    });
+
+    it('usage threshold and poll flags: invalid factory run values name the offending flag', async () => {
+      writeFileSync(paths().queue, '# header\n');
+      const res = await runMain('run', '--local-queue', '--usage-threshold', '0');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('--usage-threshold');
+    });
+
     it('auto-merge flag: a later flagless factory run clears the recorded override', async () => {
       writeFileSync(paths().queue, '# header\n');
       await runMain('run', '--local-queue', '--auto-merge');
@@ -2297,6 +2319,37 @@ bash scripts/verify.sh
       expect(res.exited).toBe(false);
       expect(JSON.parse(readFileSync(paths().runFlags, 'utf-8'))).toEqual({ autoMerge: true });
     }, 20_000);
+
+    it('usage threshold and poll flags: factory supervise wires both gates and logs their sources', async () => {
+      trackEnv('FACTORY_STOP_AT', 'FACTORY_RESUME_AT', 'FACTORY_USAGE_POLL');
+      process.env.FACTORY_STOP_AT = '0.5';
+      process.env.FACTORY_RESUME_AT = '0.4';
+      process.env.FACTORY_USAGE_POLL = '60';
+      writeFileSync(paths().queue, 'app 1\n');
+      const res = await runMain(
+        'supervise',
+        '--now',
+        '--local-queue',
+        '--usage-threshold',
+        '0.7',
+        '--usage-poll',
+        '15',
+      );
+      expect(res.exited).toBe(false);
+      expect(vi.mocked(FactoryCore.watchUsage)).toHaveBeenCalledWith(
+        expect.objectContaining({ stopAt: 0.7, pollMs: 15_000 }),
+      );
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('flag: --usage-threshold');
+      expect(events).toContain('flag: --usage-poll');
+    }, 20_000);
+
+    it('usage threshold and poll flags: invalid factory supervise values name the offending flag', async () => {
+      writeFileSync(paths().queue, 'app 1\n');
+      const res = await runMain('supervise', '--now', '--local-queue', '--usage-poll', '0');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('--usage-poll');
+    });
   });
 
   describe('local-small-dry-run', () => {

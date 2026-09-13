@@ -161,6 +161,9 @@ describe('cli', () => {
       watch: true,
       estimator: false,
       watchSource: 'default',
+      stopAtSource: 'default',
+      resumeAtSource: 'default',
+      pollSource: 'default',
     });
   });
 
@@ -182,6 +185,9 @@ describe('cli', () => {
       watch: false,
       estimator: true,
       watchSource: 'env',
+      stopAtSource: 'env',
+      resumeAtSource: 'env',
+      pollSource: 'env',
     });
   });
 
@@ -189,6 +195,23 @@ describe('cli', () => {
     expect(resolveUsageKnobs({ FACTORY_USAGE_WATCH: '0' }, null, { watch: true })).toMatchObject({
       watch: true,
       watchSource: 'flag',
+    });
+  });
+
+  it('usage threshold and poll flags preserve their source metadata', () => {
+    expect(
+      resolveUsageKnobs({ FACTORY_STOP_AT: '0.5', FACTORY_RESUME_AT: '0.4', FACTORY_USAGE_POLL: '60' }, null, {
+        stopAt: 0.7,
+        resumeAt: 0.6,
+        pollSeconds: 15,
+      }),
+    ).toMatchObject({
+      stopAt: 0.7,
+      resumeAt: 0.6,
+      pollMs: 15_000,
+      stopAtSource: 'flag',
+      resumeAtSource: 'flag',
+      pollSource: 'flag',
     });
   });
 
@@ -464,6 +487,34 @@ describe('cli', () => {
       '[factory] supervise: usage watchdog enabled (flag: --usage-watch) — enforcing resume gate',
     );
     expect(runQueueCalls).toBe(1);
+  });
+
+  it('usage threshold and poll flags: superviseLoop logs supplied flag sources', async () => {
+    const lines: string[] = [];
+    const events: any[] = [];
+    await superviseLoop({
+      cap: 1,
+      resumeAt: 0.65,
+      pollMs: 1000,
+      resumeAtSource: 'flag',
+      pollSource: 'flag',
+      stopFile: '/repo/.factory/STOP',
+      eventsFile: '/repo/.factory/events.ndjson',
+      readUsageFn: async () => reading(0.1),
+      pathExists: () => false,
+      clearStop: () => {},
+      emitEvent: (...args: any[]) => events.push(args),
+      writeLine: (line) => lines.push(line),
+      runQueue: async () => {},
+    });
+    expect(lines).toContain('[factory] supervise: usage watchdog threshold set by flag: --usage-threshold');
+    expect(lines).toContain('[factory] supervise: usage watchdog poll set by flag: --usage-poll');
+    expect(events.map((event) => event[3])).toEqual(
+      expect.arrayContaining([
+        'usage watchdog threshold set by flag: --usage-threshold',
+        'usage watchdog poll set by flag: --usage-poll',
+      ]),
+    );
   });
 
   it('usage-watch flag: superviseLoop logs no source line when no flag was supplied', async () => {

@@ -476,15 +476,16 @@ export function resolveUsageCap(
 // ---------- Usage watchdog policy ----------
 
 /** Where a resolved watchdog knob came from. `'flag'` is an explicit per-invocation CLI
- *  flag (`--usage-watch`/`--no-usage-watch`) and outranks every other source. Only `watch`
- *  is flag-settable today; the union is shared by all five fields so `sourceLabel` can
- *  format them uniformly. */
+ *  flag and outranks every other source. */
 export type WatchdogPolicySource = 'flag' | 'repo' | 'env' | 'default';
 
 /** Per-invocation CLI overrides. A field left `undefined` means "the flag was not
- *  supplied" and changes nothing; a boolean wins over config file and env alike. */
+ *  supplied" and changes nothing; supplied values win over config file and env alike. */
 export interface WatchdogPolicyOverrides {
   watch?: boolean;
+  stopAt?: number;
+  resumeAt?: number;
+  pollSeconds?: number;
 }
 
 export interface EffectiveWatchdogPolicy {
@@ -504,9 +505,9 @@ export interface EffectiveWatchdogPolicy {
 
 /** Resolve the usage-watchdog knobs: repo `budget.watchdog.*` > the matching legacy
  *  `FACTORY_STOP_AT`/`FACTORY_RESUME_AT`/`FACTORY_USAGE_POLL`/`FACTORY_USAGE_WATCH`/
- *  `FACTORY_USAGE_ESTIMATOR` env var > the packaged default. An explicit `overrides.watch`
- *  from `--usage-watch`/`--no-usage-watch` has highest precedence. Each field resolves
- *  independently, mirroring `resolveUsageCap`. */
+ *  `FACTORY_USAGE_ESTIMATOR` env var > the packaged default. Explicit per-invocation
+ *  overrides have highest precedence. Each field resolves independently, mirroring
+ *  `resolveUsageCap`. */
 export function resolveWatchdogPolicy(
   repo: RepoFactoryConfig | null,
   env: NodeJS.ProcessEnv = process.env,
@@ -516,7 +517,13 @@ export function resolveWatchdogPolicy(
 
   let stopAt: number;
   let stopAtSource: WatchdogPolicySource;
-  if (wd?.stopAt !== undefined) {
+  if (overrides.stopAt !== undefined) {
+    stopAt = overrides.stopAt;
+    if (!Number.isFinite(stopAt) || stopAt <= 0 || stopAt > 1) {
+      throw new Error('--usage-threshold must be a number in (0, 1]');
+    }
+    stopAtSource = 'flag';
+  } else if (wd?.stopAt !== undefined) {
     stopAt = wd.stopAt;
     stopAtSource = 'repo';
   } else if (env.FACTORY_STOP_AT !== undefined) {
@@ -532,7 +539,13 @@ export function resolveWatchdogPolicy(
 
   let resumeAt: number;
   let resumeAtSource: WatchdogPolicySource;
-  if (wd?.resumeAt !== undefined) {
+  if (overrides.resumeAt !== undefined) {
+    resumeAt = overrides.resumeAt;
+    if (!Number.isFinite(resumeAt) || resumeAt <= 0 || resumeAt > 1) {
+      throw new Error('--usage-threshold must be a number in (0, 1]');
+    }
+    resumeAtSource = 'flag';
+  } else if (wd?.resumeAt !== undefined) {
     resumeAt = wd.resumeAt;
     resumeAtSource = 'repo';
   } else if (env.FACTORY_RESUME_AT !== undefined) {
@@ -548,7 +561,13 @@ export function resolveWatchdogPolicy(
 
   let pollSeconds: number;
   let pollSource: WatchdogPolicySource;
-  if (wd?.pollSeconds !== undefined) {
+  if (overrides.pollSeconds !== undefined) {
+    pollSeconds = overrides.pollSeconds;
+    if (!Number.isFinite(pollSeconds) || pollSeconds <= 0) {
+      throw new Error('--usage-poll must be a positive number');
+    }
+    pollSource = 'flag';
+  } else if (wd?.pollSeconds !== undefined) {
     pollSeconds = wd.pollSeconds;
     pollSource = 'repo';
   } else if (env.FACTORY_USAGE_POLL !== undefined) {
