@@ -52,7 +52,11 @@ export function App() {
         <main className="flex-1 overflow-y-auto overflow-x-hidden bg-canvas p-2 sm:p-3">
           {repo === null ? (
             <>
-              <LaneBoard board={board} connection={connection} attachedRepos={ATTACHED_REPOS} />
+              {/* No usage feed reaches the browser yet: the server relays lane lifecycle
+                  frames only and factoryd exposes no usage route, so this renders the
+                  explicit unavailable state. This prop is the single injection point for
+                  a future factoryd-served reading. */}
+              <LaneBoard board={board} connection={connection} attachedRepos={ATTACHED_REPOS} usage={null} />
               <div className="mt-4">
                 <AttachRepoForm />
               </div>

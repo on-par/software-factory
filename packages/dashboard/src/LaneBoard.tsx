@@ -7,6 +7,8 @@ import {
   type PhaseSegmentState,
   type RepoLaneGroup,
 } from './laneBoardState.js';
+import { UsageHeadroom } from './UsageHeadroom.js';
+import type { UsageHeadroomReading } from './usageHeadroomState.js';
 
 export type ConnectionState = 'connecting' | 'live' | 'disconnected';
 
@@ -16,6 +18,9 @@ export interface LaneBoardProps {
   /** Attached repo slugs from injected config — seeds an idle section for a repo with no lane
    *  events yet. See ADR-0038/ADR-0039: this is config, never a network read. */
   attachedRepos?: readonly string[];
+  /** Current usage reading, or `null` when no usage signal is available. Optional so
+   *  existing call sites (RepoDetail's chip/card reuse, tests) are unchanged. */
+  usage?: UsageHeadroomReading | null;
 }
 
 export const CONNECTION_CHIP: Record<ConnectionState, { label: string; className: string }> = {
@@ -114,7 +119,7 @@ function RepoGroupView({ group }: { group: RepoLaneGroup }) {
   );
 }
 
-export function LaneBoard({ board, connection, attachedRepos = [] }: LaneBoardProps) {
+export function LaneBoard({ board, connection, attachedRepos = [], usage = null }: LaneBoardProps) {
   const groups = groupLanesByRepo(board.lanes, attachedRepos);
 
   return (
@@ -123,6 +128,7 @@ export function LaneBoard({ board, connection, attachedRepos = [] }: LaneBoardPr
         <h3 className="text-sm font-semibold text-ink-900">Lanes</h3>
         <ConnectionChip connection={connection} />
       </div>
+      <UsageHeadroom usage={usage} />
       {groups.length === 0 ? (
         <p className="text-sm text-ink-400">Waiting for lane events…</p>
       ) : (
