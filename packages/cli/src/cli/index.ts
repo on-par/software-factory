@@ -25,6 +25,7 @@ import type {
   LeaseHealth,
   LocalBriefParams,
   LocalOnlyPolicy,
+  MergePolicyOverrides,
   ModelDiagnosis,
   PrSource,
   ParkReason,
@@ -236,6 +237,7 @@ import { cmdHostedRunner } from './hosted-runner.js';
 import { cmdLogs } from './logs.js';
 import { mergeScopeNotice } from './merge-scope.js';
 import { createFactoryOctokit } from './octokit.js';
+import { readRunFlagOverrides, writeRunFlagOverrides } from './run-flags.js';
 import { distFreshnessProbe, runStalenessGuard } from './staleness.js';
 
 const exec = promisify(execCb);
@@ -1021,7 +1023,9 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
       router,
       repo: repoConfig,
       repoConfigPath: '.factory/config.json',
-      mergePolicy: resolveMergePolicy(loadFactoryConfigForRepo(paths.config)),
+      mergePolicy: resolveMergePolicy(loadFactoryConfigForRepo(paths.config), process.env, {
+        auto: readRunFlagOverrides(paths.runFlags).autoMerge,
+      }),
     })) {
       console.log(`    ${line}`);
     }
@@ -1137,7 +1141,9 @@ async function cmdTui(opts: { localQueue?: boolean } = {}) {
     router,
     repo: repoConfig,
     repoConfigPath: '.factory/config.json',
-    mergePolicy: resolveMergePolicy(loadFactoryConfigForRepo(paths.config)),
+    mergePolicy: resolveMergePolicy(loadFactoryConfigForRepo(paths.config), process.env, {
+      auto: readRunFlagOverrides(paths.runFlags).autoMerge,
+    }),
   });
 
   await runTui({
@@ -2688,12 +2694,13 @@ export function clearStaleStopFile(paths: { stop: string; events: string }, deps
   return true;
 }
 
-async function cmdRun(opts: { localQueue?: boolean } = {}) {
+async function cmdRun(opts: { localQueue?: boolean; autoMerge?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
 
   return withRepoRunLock(paths, 'factory run', async () => {
     clearStaleStopFile(paths);
+    writeRunFlagOverrides(paths.runFlags, { autoMerge: opts.autoMerge });
     const ghRepo = await getGitHubRepo();
     const factoryConfig = loadFactoryConfigForRepo(paths.config);
     const keychainErr = keychainPreflightError(probeClaudeKeychain());
@@ -2780,6 +2787,8 @@ async function cmdRun(opts: { localQueue?: boolean } = {}) {
           runLane(planned.lane, planned.issues, repoRoot, ghRepo, paths, {
             ...planned.deps,
             reapWorktree: (issue) => reapParkedLaneWorktree(issue, repoRoot, paths),
+            waitMerge: (issue, branch, root, gh, p, d = {}) =>
+              waitForMerge(issue, branch, root, gh, p, { ...d, mergeOverrides: { auto: opts.autoMerge } }),
           }),
         );
       }
@@ -2870,7 +2879,7 @@ export function createIngestHook(
   };
 }
 
-async function cmdSupervise(opts: { now?: boolean; localQueue?: boolean }) {
+async function cmdSupervise(opts: { now?: boolean; localQueue?: boolean; autoMerge?: boolean }) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   const ingestCfg = resolveIngestConfig(loadFactoryConfigForRepo(paths.config));
@@ -2911,7 +2920,7 @@ async function cmdSupervise(opts: { now?: boolean; localQueue?: boolean }) {
       eventsFile: paths.events,
       now: opts.now,
       runQueue: createSuperviseRunQueue(paths, ingestCfg, {
-        cmdRunFn: () => cmdRun({ localQueue: opts.localQueue }),
+        cmdRunFn: () => cmdRun({ localQueue: opts.localQueue, autoMerge: opts.autoMerge }),
         pendingCount: countPending,
       }),
       ingest: ingestCfg.enabled ? createIngestHook(repoRoot, paths, ingestCfg) : undefined,
@@ -3725,6 +3734,10 @@ type WaitForMergeDeps = {
   writeLine?: (line: string) => void;
   /** Injectable clock so the wall-clock failure budget is testable. Default `() => Date.now()`. */
   now?: () => number;
+  /** Per-invocation CLI flag overrides (`--auto-merge`/`--no-auto-merge`). Threaded in by
+   *  cmdRun rather than read from disk so a live run's merge gate cannot change underneath
+   *  it (#1400). */
+  mergeOverrides?: MergePolicyOverrides;
 };
 
 async function defaultListIssueLabels(octokit: Octokit, owner: string, repo: string, issue: number): Promise<string[]> {
@@ -3752,9 +3765,10 @@ export async function waitForMerge(
     mergeEnabled,
     writeLine = (line) => console.log(line),
     now = () => Date.now(),
+    mergeOverrides,
   } = deps;
   const factoryConfig = loadConfig(paths.config);
-  const isMergeEnabled = mergeEnabled ?? (() => resolveMergePolicy(factoryConfig).auto);
+  const isMergeEnabled = mergeEnabled ?? (() => resolveMergePolicy(factoryConfig, process.env, mergeOverrides).auto);
   const skipCI = resolveSkipCI(factoryConfig);
   const filingPolicy = resolveFilingPolicy(factoryConfig);
   const octokit = createOctokit();
@@ -4404,7 +4418,9 @@ export async function main() {
     .command('run')
     .description('Process the whole queue (lanes in parallel)')
     .option('--local-queue', 'Read .factory/queue instead of claiming issues from GitHub Issues')
-    .action((opts: { localQueue?: boolean }) => cmdRun(opts));
+    .option('--auto-merge', 'Merge eligible PRs autonomously, overriding .factory/config.json and FACTORY_MERGE')
+    .option('--no-auto-merge', 'Never merge autonomously, overriding .factory/config.json and FACTORY_MERGE')
+    .action((opts: { localQueue?: boolean; autoMerge?: boolean }) => cmdRun(opts));
 
   program
     .command('proxy')
@@ -4457,6 +4473,8 @@ export async function main() {
     .description('Multi-window loop: wait for usage headroom, run the queue, repeat until drained')
     .option('--now', 'Skip the initial headroom wait')
     .option('--local-queue', 'Read .factory/queue instead of claiming issues from GitHub Issues')
+    .option('--auto-merge', 'Merge eligible PRs autonomously, overriding .factory/config.json and FACTORY_MERGE')
+    .option('--no-auto-merge', 'Never merge autonomously, overriding .factory/config.json and FACTORY_MERGE')
     .action(async (opts) => {
       await cmdSupervise(opts);
     });

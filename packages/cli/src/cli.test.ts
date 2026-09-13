@@ -1231,6 +1231,58 @@ describe('cli', () => {
     expect(calls).toContainEqual('[factory] #21 awaiting human merge (poll 120s)');
   });
 
+  it('auto-merge flag: mergeOverrides.auto true merges even when run.merge.auto is false', async () => {
+    const octokit: any = {};
+    const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
+    let landCalled = false;
+
+    await waitForMerge(21, 'ship-it/21-flag-true', '/repo', 'on-par/software-factory', paths, {
+      createOctokit: () => octokit,
+      pathExists: () => false,
+      checkMerged: async () => false,
+      loadConfig: () => ({ ...fakeFactoryConfig(false), run: { merge: { auto: false } } }),
+      mergeOverrides: { auto: true },
+      listIssueLabels: async () => [],
+      land: async () => {
+        landCalled = true;
+        return { branch: 'ship-it/21-flag-true', prNumber: 321 };
+      },
+      emitEvent: () => {},
+      sleep: async () => {},
+    });
+
+    expect(landCalled).toBe(true);
+  });
+
+  it('auto-merge flag: mergeOverrides.auto false blocks merge even with FACTORY_MERGE=1 and run.merge.auto true', async () => {
+    const calls: any[] = [];
+    const octokit: any = {};
+    const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
+    process.env.FACTORY_MERGE = '1';
+    let stopped = false;
+
+    await waitForMerge(21, 'ship-it/21-flag-false', '/repo', 'on-par/software-factory', paths, {
+      createOctokit: () => octokit,
+      pathExists: () => stopped,
+      checkMerged: async () => false,
+      loadConfig: () => ({ ...fakeFactoryConfig(false), run: { merge: { auto: true } } }),
+      mergeOverrides: { auto: false },
+      listIssueLabels: async () => {
+        throw new Error('listIssueLabels should not be called — merge is disabled by the flag');
+      },
+      land: async () => {
+        throw new Error('land should not be called — mergeOverrides.auto: false must win');
+      },
+      emitEvent: () => {},
+      writeLine: (line) => calls.push(line),
+      sleep: async () => {
+        stopped = true;
+      },
+    });
+
+    expect(calls).toContainEqual('[factory] #21 awaiting human merge (poll 120s)');
+  });
+
   it('falls back to the GitHub API for issue labels when no listIssueLabels override is provided', async () => {
     const calls: any[] = [];
     const octokit: any = {

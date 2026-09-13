@@ -20,6 +20,7 @@ import {
   resolveExperimental,
   resolveLocalOnly,
   type EffectiveMergePolicy,
+  type MergePolicySource,
   type ModelsConfig,
 } from './index.js';
 
@@ -611,7 +612,13 @@ function defaultMergePolicy(env: NodeJS.ProcessEnv): EffectiveMergePolicy {
   return { auto, admin, sources: { auto: auto ? 'env' : 'default', admin: admin ? 'env' : 'default' } };
 }
 
-function sourceLabel(source: 'repo' | 'env' | 'default' | undefined, repoConfigPath: string, envVar: string): string {
+function sourceLabel(
+  source: MergePolicySource | undefined,
+  repoConfigPath: string,
+  envVar: string,
+  flagLabel?: string,
+): string {
+  if (source === 'flag') return flagLabel ? `(flag: ${flagLabel})` : '(flag)';
   if (source === 'repo') return `(${repoConfigPath})`;
   if (source === 'env') return `(env: ${envVar})`;
   return '(default)';
@@ -688,7 +695,12 @@ export function describeEffectiveConfig(opts: DescribeEffectiveConfigOpts): stri
 
   const mergePolicy = opts.mergePolicy ?? defaultMergePolicy(env);
   lines.push(
-    `Merge auto: ${mergePolicy.auto ? 'on' : 'off'} ${sourceLabel(mergePolicy.sources.auto, repoConfigPath, 'FACTORY_MERGE')}`,
+    `Merge auto: ${mergePolicy.auto ? 'on' : 'off'} ${sourceLabel(
+      mergePolicy.sources.auto,
+      repoConfigPath,
+      'FACTORY_MERGE',
+      mergePolicy.auto ? '--auto-merge' : '--no-auto-merge',
+    )}`,
   );
   lines.push(
     `Merge admin: ${mergePolicy.admin ? 'on' : 'off'} ${sourceLabel(mergePolicy.sources.admin, repoConfigPath, 'FACTORY_MERGE_ADMIN')}`,

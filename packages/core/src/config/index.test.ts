@@ -88,6 +88,7 @@ describe('getFactoryPaths', () => {
       proxyState: resolve(state, 'proxy.json'),
       breaker: resolve(state, 'breaker.json'),
       reworkHistory: resolve(state, 'rework-history.json'),
+      runFlags: resolve(state, 'run-flags.json'),
     };
   };
 
@@ -145,6 +146,7 @@ describe('getFactoryPaths', () => {
       'proxyState',
       'breaker',
       'reworkHistory',
+      'runFlags',
       'mergeLock',
       'gitLock',
       'runLock',
@@ -888,6 +890,29 @@ describe('resolveMergePolicy', () => {
       admin: false,
       sources: { auto: 'default', admin: 'repo' },
     });
+  });
+
+  it('auto-merge flag: an explicit true override beats run.merge.auto: false and reports source flag', () => {
+    expect(resolveMergePolicy({ ...config, run: { merge: { auto: false } } }, {}, { auto: true })).toEqual({
+      auto: true,
+      admin: false,
+      sources: { auto: 'flag', admin: 'default' },
+    });
+  });
+
+  it('auto-merge flag: an explicit false override beats run.merge.auto: true and FACTORY_MERGE=1', () => {
+    const result = resolveMergePolicy(
+      { ...config, run: { merge: { auto: true } } },
+      { FACTORY_MERGE: '1' },
+      { auto: false },
+    );
+    expect(result.auto).toBe(false);
+    expect(result.sources.auto).toBe('flag');
+  });
+
+  it('auto-merge flag: an absent override leaves repo/env/default precedence unchanged', () => {
+    expect(resolveMergePolicy({ ...config, merge: { ...config.merge, auto: true } }, {}, {}).sources.auto).toBe('repo');
+    expect(resolveMergePolicy(config, { FACTORY_MERGE: '1' }, { auto: undefined }).sources.auto).toBe('env');
   });
 });
 
