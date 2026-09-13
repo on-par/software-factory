@@ -7,6 +7,7 @@ import {
   isLaneEvent,
   isNonTerminalLane,
   laneElapsedMs,
+  legacyFailurePointerFor,
   mergeTrainPosition,
   partitionLanesByActivity,
   reduceDashboard,
@@ -171,6 +172,27 @@ describe('reduceDashboard — lifecycle events', () => {
   it('does not infer structured failure evidence from a terminal event without both fields', () => {
     const state = reduceAll([ev('plan', '296', 'Starting plan phase'), ev('fail', '296', 'verify failed')]);
     expect(state.lanes[0].failureEvidence).toBeUndefined();
+  });
+
+  it('returns a raw terminal pointer only for a parked lane without structured evidence', () => {
+    const legacyParked = reduceAll([
+      ev('plan', '296', 'Starting plan phase'),
+      ev('parked', '296', 'see /tmp/legacy-event.log'),
+    ]).lanes[0];
+    const structuredParked = reduceAll([
+      ev('plan', '296', 'Starting plan phase'),
+      {
+        ...ev('parked', '296', 'terminal failure'),
+        evidence: failureEvidence,
+        fingerprint: 'ff_0123456789abcdef',
+      },
+    ]).lanes[0];
+    const failed = reduceAll([ev('plan', '296', 'Starting plan phase'), ev('fail', '296', 'see /tmp/failed-event.log')])
+      .lanes[0];
+
+    expect(legacyFailurePointerFor(legacyParked)).toBe('see /tmp/legacy-event.log');
+    expect(legacyFailurePointerFor(structuredParked)).toBeUndefined();
+    expect(legacyFailurePointerFor(failed)).toBeUndefined();
   });
 
   it('retains an absent related issue as undefined rather than deriving it from the lane issue', () => {

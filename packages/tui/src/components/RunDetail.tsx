@@ -15,6 +15,7 @@ export interface RunDetailProps {
   showBackHint?: boolean;
   steeringQueued?: number;
   failureEvidence?: LaneFailureEvidence;
+  legacyFailurePointer?: string;
 }
 
 export function RunDetail({
@@ -24,6 +25,7 @@ export function RunDetail({
   showBackHint,
   steeringQueued,
   failureEvidence,
+  legacyFailurePointer,
 }: RunDetailProps): JSX.Element {
   const hasEvents = run.feed.length > 0;
 
@@ -41,6 +43,9 @@ export function RunDetail({
             <Text>{`related filed issue: https://github.com/${sanitizeTerminalText(failureEvidence.relatedIssue.repo)}/issues/${failureEvidence.relatedIssue.issueNumber}`}</Text>
           )}
         </>
+      )}
+      {!failureEvidence && legacyFailurePointer && (
+        <Text dimColor>{`failure event/log: ${sanitizeTerminalText(legacyFailurePointer)}`}</Text>
       )}
       {!!steeringQueued && (
         <Text dimColor>{`steering: ${steeringQueued} message(s) queued for next phase boundary`}</Text>

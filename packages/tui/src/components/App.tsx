@@ -28,6 +28,7 @@ import {
   type DashboardState,
   initialDashboard,
   isNonTerminalLane,
+  legacyFailurePointerFor,
   partitionLanesByActivity,
   reduceDashboard,
 } from '../dashboard.js';
@@ -427,6 +428,7 @@ export function App({
             now={now}
             steeringQueued={steeringQueued[activeLanes[0].issue]}
             failureEvidence={activeLanes[0].failureEvidence}
+            legacyFailurePointer={legacyFailurePointerFor(activeLanes[0])}
           />
           {staleCount > 0 && <Text dimColor>{staleLanesLine(staleCount)}</Text>}
         </Box>
@@ -450,6 +452,7 @@ export function App({
         showBackHint
         steeringQueued={steeringQueued[activeLanes[clampedIndex].issue]}
         failureEvidence={activeLanes[clampedIndex].failureEvidence}
+        legacyFailurePointer={legacyFailurePointerFor(activeLanes[clampedIndex])}
       />
     );
   }
