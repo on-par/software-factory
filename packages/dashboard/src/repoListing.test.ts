@@ -44,6 +44,18 @@ describe('parseRepoListing', () => {
     const result = parseRepoListing({ repos: [REPO_A, missingField, unknownState, REPO_B] });
     expect(result).toEqual([REPO_B, REPO_A]);
   });
+
+  it('drops non-object rows and rows with non-string fields', () => {
+    const malformedRows = [
+      null,
+      'nope',
+      { ...REPO_A, slug: 42 },
+      { ...REPO_A, path: 42 },
+      { ...REPO_A, attachedAt: 42 },
+      { ...REPO_A, state: 42 },
+    ];
+    expect(parseRepoListing({ repos: [...malformedRows, REPO_A] })).toEqual([REPO_A]);
+  });
 });
 
 describe('fetchRepos', () => {
@@ -83,6 +95,22 @@ describe('fetchRepos', () => {
     });
     const outcome = await fetchRepos({ fetch: fetchFn });
     expect(outcome).toEqual({ ok: false, error: 'connection refused' });
+  });
+
+  it('returns { ok: false } for a non-Error fetch rejection', async () => {
+    const fetchFn = vi.fn(async () => {
+      throw 'offline';
+    });
+    const outcome = await fetchRepos({ fetch: fetchFn });
+    expect(outcome).toEqual({ ok: false, error: 'offline' });
+  });
+
+  it('returns { ok: false } for a non-Error json rejection', async () => {
+    const response = fakeResponse(200, { repos: [] });
+    vi.spyOn(response, 'json').mockRejectedValue('bad json');
+    const fetchFn = vi.fn(async () => response);
+    const outcome = await fetchRepos({ fetch: fetchFn });
+    expect(outcome).toEqual({ ok: false, error: 'bad json' });
   });
 
   it('defaults to globalThis.fetch when no fetch dep is injected', async () => {

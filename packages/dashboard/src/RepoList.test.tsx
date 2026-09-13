@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from '@testing-library/react';
+import { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RepoList } from './RepoList.js';
@@ -28,6 +29,24 @@ describe('RepoList', () => {
     expect(await screen.findByText('on-par/software-factory')).toBeDefined();
     expect(screen.getByText('Active')).toBeDefined();
     expect(screen.getByText('/tmp/software-factory')).toBeDefined();
+  });
+
+  it('renders every repo state with its label', async () => {
+    const load = vi.fn(async (): Promise<RepoListOutcome> => ({
+      ok: true,
+      repos: [
+        REPO,
+        { ...REPO, slug: 'on-par/paused', state: 'paused' },
+        { ...REPO, slug: 'on-par/draining', state: 'draining' },
+        { ...REPO, slug: 'on-par/detached', state: 'detached' },
+      ],
+    }));
+    render(<RepoList load={load} />);
+
+    expect(await screen.findByText('Active')).toBeDefined();
+    expect(screen.getByText('Paused')).toBeDefined();
+    expect(screen.getByText('Draining')).toBeDefined();
+    expect(screen.getByText('Detached')).toBeDefined();
   });
 
   it('renders "No repositories attached yet." for an empty registry', async () => {
@@ -68,6 +87,24 @@ describe('RepoList', () => {
     await screen.findByText('No repositories attached yet.');
 
     rerender(<RepoList load={load} refreshKey={0} />);
+
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores a load result that resolves after unmount', async () => {
+    let resolveLoad: (outcome: RepoListOutcome) => void = () => {};
+    const load = vi.fn(
+      () =>
+        new Promise<RepoListOutcome>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    const { unmount } = render(<RepoList load={load} />);
+
+    unmount();
+    await act(async () => {
+      resolveLoad({ ok: true, repos: [REPO] });
+    });
 
     expect(load).toHaveBeenCalledTimes(1);
   });
