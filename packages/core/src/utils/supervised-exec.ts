@@ -15,7 +15,7 @@ process.stdin.on('data', chunk => input += chunk);
 process.stdin.on('end', () => {
   if (input !== 'go\\n') process.exit(1);
   const specification = JSON.parse(process.argv[1]);
-  const command = Array.isArray(specification) ? spawn(specification[0], specification.slice(1), { stdio: ['ignore', 'inherit', 'inherit'] }) : spawn(specification, { shell: true, stdio: ['ignore', 'inherit', 'inherit'] });
+  const command = Array.isArray(specification) ? spawn(specification[0], specification.slice(1), { stdio: ['ignore', 'inherit', 'inherit'], shell: false }) : spawn(specification, { shell: true, stdio: ['ignore', 'inherit', 'inherit'] });
   command.on('error', error => { console.error(error.message); report({ code: -1, signal: null }); });
   command.on('exit', (code, signal) => report({ code, signal }));
 });
@@ -26,6 +26,7 @@ export function spawnSupervisedCommand(
 ): ChildProcess {
   const child = spawn(process.execPath, ['-e', supervisor, JSON.stringify(cmd)], {
     detached: true,
+    shell: false,
     cwd: options.cwd,
     env: { ...options.env, FACTORY_EXEC_PARENT: String(process.pid) },
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],

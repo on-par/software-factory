@@ -50,7 +50,12 @@ async function runCommandDetached(argv: readonly string[], options: RunCommandOp
   const ownershipFile = env.FACTORY_DAEMON_GROUPS_FILE;
   const child = ownershipFile
     ? spawnSupervisedCommand(argv, { cwd: options.cwd, env, ownershipFile })
-    : spawn(argv[0], argv.slice(1), { cwd: options.cwd, env: options.env ? env : undefined, detached: true });
+    : spawn(argv[0], argv.slice(1), {
+        cwd: options.cwd,
+        env: options.env ? env : undefined,
+        detached: true,
+        shell: false,
+      });
 
   const pid = child.pid;
   if (pid !== undefined) options.onPgid?.(pid);

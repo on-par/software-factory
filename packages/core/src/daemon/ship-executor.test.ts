@@ -142,3 +142,22 @@ it('launches a lane delivery in its own worktree with a run-specific pipeline br
   expect(observed.prefix).toBe(`codex/run-${runId}`);
   expect((await execa('git', ['branch', '--show-current'], { cwd: dir })).stdout).toBe('main');
 });
+
+it('never launches the CLI when durable PID acknowledgement fails', async () => {
+  await writeFile(cliEntrypoint, "console.log('UNEXPECTED EXECUTION');");
+  let output = '';
+  await expect(
+    createShipExecutor({ cliEntrypoint, terminationGraceMs: 20 })({
+      run,
+      cwd: dir,
+      signal: new AbortController().signal,
+      output: (text) => {
+        output += text;
+      },
+      started: async () => {
+        throw new Error('ownership journal unavailable');
+      },
+    }),
+  ).rejects.toThrow('ownership journal unavailable');
+  expect(output).not.toContain('UNEXPECTED EXECUTION');
+});

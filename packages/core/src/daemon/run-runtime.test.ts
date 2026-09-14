@@ -368,3 +368,34 @@ it('retires recovered process identities only after observing that every owner h
   const { access } = await import('node:fs/promises');
   await expect(access(join(dir, 'run-groups', `${run.runId}.ndjson`))).rejects.toMatchObject({ code: 'ENOENT' });
 });
+
+it('aborts active lanes and stops accepting work when periodic log persistence fails', async () => {
+  let executing = false;
+  let aborted = false;
+  runtime = await createRunRuntime({
+    registryFile,
+    execute: async ({ signal, output }) => {
+      executing = true;
+      output('progress');
+      return new Promise((resolve) =>
+        signal.addEventListener('abort', () => {
+          aborted = true;
+          resolve({ exitCode: null, prUrl: null });
+        }),
+      );
+    },
+  });
+  await runtime.submit({ runId: randomUUID(), repo: 'test/repo', issue: 1 });
+  await expect.poll(() => executing).toBe(true);
+  const { mkdir } = await import('node:fs/promises');
+  const blocked = join(dir, 'runs.json.tmp');
+  await mkdir(blocked);
+  try {
+    await expect.poll(() => aborted, { timeout: 3000 }).toBe(true);
+    await expect(runtime.submit({ runId: randomUUID(), repo: 'test/repo', issue: 2 })).rejects.toMatchObject({
+      status: 503,
+    });
+  } finally {
+    await rm(blocked, { recursive: true, force: true });
+  }
+});
