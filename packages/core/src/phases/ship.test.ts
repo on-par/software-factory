@@ -1508,6 +1508,57 @@ describe('ADR writer (#482)', () => {
     expect(logs.some((l) => l[0].startsWith('adr_'))).toBe(false);
   });
 
+  it('logs adr_duplicate_skipped without writing or committing a near-match for an Accepted ADR', async () => {
+    const worktree = await makeWorktree();
+    const acceptedPath = join(worktree, 'docs', 'adr', '0001-first.md');
+    await writeFile(
+      acceptedPath,
+      '# ADR-0001: Autonomous cloud provisioning requires a human-approved plan gate\n\n- Status: Accepted\n- Date: 2026-01-01\n\n## Context\n\nC.\n\n## Decision\n\nD.\n\n## Consequences\n\nCq.\n',
+    );
+    const duplicate = {
+      ...goodDraft,
+      title: 'Autonomous cloud provisioning requires a human-approved plan',
+    };
+    const specPath = join(worktree, 'issue-482.md');
+    const artifact = JSON.stringify([duplicate], null, 2);
+    await writeFile(specPaths(specPath).adr, artifact);
+
+    const { octokit } = createOctokit();
+    const commands: string[] = [];
+    const logs: Array<[string, string]> = [];
+    const run = async (command: string) => {
+      commands.push(command);
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: 482,
+      repo: 'on-par/software-factory',
+      worktree,
+      branch: 'ship-it/482-adr-writer',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+      specPath,
+      today: '2026-07-25',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(logs.filter(([type]) => type === 'adr_duplicate_skipped')).toEqual([
+      ['adr_duplicate_skipped', expect.stringContaining('docs/adr/0001-first.md')],
+    ]);
+    expect(logs.some(([type]) => type === 'adr_written')).toBe(false);
+    expect(commands.some((command) => command.startsWith('git add') || command.startsWith('git commit'))).toBe(false);
+    await expect(readFile(specPaths(specPath).adr, 'utf-8')).resolves.toBe(artifact);
+  });
+
   it('logs adr_commit_skipped and still ships when git commit rejects, without the leftover ADR files aborting recovery', async () => {
     const worktree = await makeWorktree();
     const specPath = join(worktree, 'issue-482.md');

@@ -21,7 +21,8 @@ import { AdrDraftSchema } from '@on-par/contracts';
 import type { RepoContextReader } from '@on-par/repo-context';
 
 import { specPaths } from '../spec/index.js';
-import { DEFAULT_ADR_DIR, isNonAdrFile } from './index.js';
+import { DEFAULT_ADR_DIR, isNonAdrFile, readAdrContext } from './index.js';
+import { findDuplicateAdrTitle } from './similarity.js';
 
 /** The index table lives in the ADR home's README.md — see docs/adr/README.md. */
 export const ADR_INDEX_FILE = 'README.md';
@@ -37,7 +38,7 @@ export interface RejectedAdrDraft {
 export interface SkippedAdrDraft {
   title: string;
   path: string;
-  reason: 'already-accepted' | 'cap' | 'duplicate-slug' | 'unreadable';
+  reason: 'already-accepted' | 'cap' | 'duplicate-slug' | 'duplicate-title' | 'unreadable';
 }
 export interface AdrFileWrite {
   /** Repo-root-relative, e.g. 'docs/adr/0005-cache-repo-context.md'. */
@@ -157,6 +158,8 @@ export async function planAdrWrites(
     if (file !== undefined) conventionTexts.push(file.text);
   }
   const convention = conventionTexts.length > 0 ? detectConvention(conventionTexts) : NYGARD_CONVENTION;
+  const accepted = await readAdrContext(reader, { dir, maxAdrs: Number.POSITIVE_INFINITY });
+  const titleCandidates = accepted.active.map(({ title, path }) => ({ title, path }));
 
   let nextNumber = nextAdrNumberFromFilenames(adrFiles.map((entry) => entry.name));
 
@@ -188,6 +191,7 @@ export async function planAdrWrites(
     let number: number;
     let path: string;
     let promoted: boolean;
+    let existingNumber: number | undefined;
 
     if (existing) {
       if (claimedPaths.has(existing.path)) {
@@ -197,9 +201,7 @@ export async function planAdrWrites(
       const file = await reader.readFile(existing.path);
       const parsed = file !== undefined ? parseAdr(file.text, { filename: existing.name }) : undefined;
       if (parsed !== undefined && normalizeStatus(parsed.status) === 'Proposed') {
-        number = parsed.number ?? adrNumberFromFilename(existing.name) ?? nextNumber++;
-        path = existing.path;
-        promoted = true;
+        existingNumber = parsed.number ?? adrNumberFromFilename(existing.name);
       } else {
         skipped.push({
           title: draft.title,
@@ -208,6 +210,18 @@ export async function planAdrWrites(
         });
         continue;
       }
+    }
+
+    const duplicate = findDuplicateAdrTitle(draft.title, titleCandidates);
+    if (duplicate) {
+      skipped.push({ title: draft.title, path: duplicate.path, reason: 'duplicate-title' });
+      continue;
+    }
+
+    if (existing) {
+      number = existingNumber ?? nextNumber++;
+      path = existing.path;
+      promoted = true;
     } else {
       number = nextNumber++;
       path = `${dir}/${adrFilename(number, draft.title, convention.numberWidth)}`;
@@ -235,6 +249,7 @@ export async function planAdrWrites(
     );
 
     writes.push({ path, contents, number, title: draft.title, promoted });
+    titleCandidates.push({ title: draft.title, path });
 
     if (indexMarkdown !== undefined) {
       try {

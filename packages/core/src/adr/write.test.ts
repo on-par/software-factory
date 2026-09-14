@@ -250,6 +250,67 @@ describe('planAdrWrites', () => {
     ]);
   });
 
+  it('skips a near-match for an Accepted ADR title without writing or updating the index', async () => {
+    const acceptedTitle = 'Autonomous cloud provisioning requires a human-approved plan gate';
+    const reader = createInMemoryReader({
+      'docs/adr/0026-autonomous-cloud-provisioning.md': adrFixture('0026', acceptedTitle, 'Accepted'),
+      'docs/adr/README.md': README_WITH_TABLE,
+    });
+    const duplicate = { ...goodDraft, title: 'Autonomous cloud provisioning requires a human-approved plan' };
+
+    const plan = await planAdrWrites(reader, [duplicate], { date: '2026-07-25' });
+
+    expect(plan.writes).toEqual([]);
+    expect(plan.index).toBeUndefined();
+    expect(plan.skipped).toEqual([
+      {
+        title: duplicate.title,
+        path: 'docs/adr/0026-autonomous-cloud-provisioning.md',
+        reason: 'duplicate-title',
+      },
+    ]);
+  });
+
+  it('still numbers and indexes an unrelated title after an Accepted-title duplicate', async () => {
+    const reader = createInMemoryReader({
+      'docs/adr/0026-autonomous-cloud-provisioning.md': adrFixture(
+        '0026',
+        'Autonomous cloud provisioning requires a human-approved plan gate',
+        'Accepted',
+      ),
+      'docs/adr/README.md': README_WITH_TABLE,
+    });
+    const duplicate = { ...goodDraft, title: 'Autonomous cloud provisioning requires a human-approved plan' };
+    const unrelated = { ...goodDraft, title: 'Document local cache invalidation' };
+
+    const plan = await planAdrWrites(reader, [duplicate, unrelated], { date: '2026-07-25' });
+
+    expect(plan.writes).toHaveLength(1);
+    expect(plan.writes[0]).toMatchObject({ number: 27, title: unrelated.title });
+    expect(plan.index?.contents).toContain('[0027](0027-document-local-cache-invalidation.md)');
+  });
+
+  it('skips a near-match for an earlier planned draft before allocating another number', async () => {
+    const reader = createInMemoryReader({ 'docs/adr/README.md': README_WITH_TABLE });
+    const first = { ...goodDraft, title: 'Adopt durable cloud provisioning workflow' };
+    const duplicate = { ...goodDraft, title: 'Adopt durable cloud provisioning' };
+    const unrelated = { ...goodDraft, title: 'Document local cache invalidation' };
+
+    const plan = await planAdrWrites(reader, [first, duplicate, unrelated], { date: '2026-07-25' });
+
+    expect(plan.writes.map((write) => ({ number: write.number, title: write.title }))).toEqual([
+      { number: 1, title: first.title },
+      { number: 2, title: unrelated.title },
+    ]);
+    expect(plan.skipped).toEqual([
+      {
+        title: duplicate.title,
+        path: 'docs/adr/0001-adopt-durable-cloud-provisioning-workflow.md',
+        reason: 'duplicate-title',
+      },
+    ]);
+  });
+
   it('skips a second draft that collides on the same slug instead of silently overwriting the first', async () => {
     const reader = createInMemoryReader({
       'docs/adr/0003-record-adr-drafts-during-plan.md': adrFixture('0003', 'Record ADR drafts during PLAN', 'Proposed'),

@@ -18,6 +18,7 @@ export type EventKind =
   | 'adr_draft_rejected'
   | 'adr_draft_skipped'
   | 'adr_drafts'
+  | 'adr_duplicate_skipped'
   | 'adr_index_skipped'
   | 'adr_inject_completed'
   | 'adr_inject_started'
@@ -184,6 +185,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   adr_draft_rejected: { severity: 'info', isPark: false, isTerminal: false },
   adr_draft_skipped: { severity: 'info', isPark: false, isTerminal: false },
   adr_drafts: { severity: 'info', isPark: false, isTerminal: false },
+  adr_duplicate_skipped: { severity: 'warn', isPark: false, isTerminal: false },
   adr_index_skipped: { severity: 'info', isPark: false, isTerminal: false },
   adr_inject_completed: { severity: 'info', isPark: false, isTerminal: false },
   adr_inject_started: { severity: 'info', isPark: false, isTerminal: false },

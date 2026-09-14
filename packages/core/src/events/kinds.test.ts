@@ -31,6 +31,10 @@ describe('eventTraitsFor', () => {
     expect(eventTraitsFor('plan')).toEqual(EVENT_TRAITS.plan);
   });
 
+  it('classifies adr_duplicate_skipped as a non-terminal warning, not a park', () => {
+    expect(eventTraitsFor('adr_duplicate_skipped')).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
+  });
+
   it('returns UNKNOWN_EVENT_TRAITS for a string outside EventKind, never a default that looks like success', () => {
     const traits = eventTraitsFor('some-made-up-legacy-kind');
     expect(traits).toEqual(UNKNOWN_EVENT_TRAITS);

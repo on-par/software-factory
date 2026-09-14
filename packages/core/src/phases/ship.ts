@@ -509,7 +509,14 @@ async function materializeAdrDrafts(o: {
     o.log('adr_draft_rejected', `ADR draft "${r.title}" refused: ${r.errors.join('; ')}`);
   }
   for (const s of plan.skipped) {
-    o.log('adr_draft_skipped', `ADR draft "${s.title}" skipped (${s.reason})`);
+    if (s.reason === 'duplicate-title') {
+      o.log(
+        'adr_duplicate_skipped',
+        `ADR draft "${s.title}" duplicates ${s.path} — not written; the draft stays in the spec artifact`,
+      );
+    } else {
+      o.log('adr_draft_skipped', `ADR draft "${s.title}" skipped (${s.reason})`);
+    }
   }
   if (plan.indexSkipped) {
     o.log('adr_index_skipped', `ADR index not updated in ${plan.dir} (${plan.indexSkipped})`);
