@@ -229,15 +229,8 @@ const EnvironmentSchema = z
 const AutoFailoverSchema = z
   .object({
     enabled: z.boolean().default(true).describe('Supervisor circuit breaker for cross-harness build failover.'),
-    cooldownMinutes: z
-      .number()
-      .positive()
-      .default(30)
-      .describe('How long a tripped provider is skipped (FACTORY_FAILOVER_COOLDOWN_MINUTES).'),
-    fallbackModel: z
-      .string()
-      .default('claude-sonnet-5')
-      .describe('Model the tripping lane falls over to (FACTORY_FAILOVER_MODEL).'),
+    cooldownMinutes: z.number().positive().default(30).describe('How long a tripped provider is skipped, in minutes.'),
+    fallbackModel: z.string().default('claude-sonnet-5').describe('Model the tripping lane falls over to.'),
   })
   .describe('Supervisor-level circuit breaker: on a quota trip, skip the failing provider for a cooldown window.');
 

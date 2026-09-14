@@ -62,8 +62,9 @@ from pinned build model X → Y` when it came from the pin, feeds it to
 - The derivation lives in `config/`, which must not import `run/`, so
   `BuildRoutePin` duplicates the `BuildRoute` literal union.
 - Breaker-driven failover (`preferFallbackWhenProviderIsOpen`) still
-  applies on top of the pinned route; `FACTORY_AUTO_FAILOVER=0` disables it,
-  unchanged.
+  applies on top of the pinned route. As amended by [ADR-0102](0102-failover-policy-is-owned-by-validated-configuration.md),
+  `auto_failover.enabled: false` in configuration disables it; environment
+  variables no longer override that policy.
 - `providers.openai: false` continues to flip a codex route to claude inside
   `buildPhase`; with this ADR that path is no longer how an Anthropic pin
   gets honored, only a backstop.

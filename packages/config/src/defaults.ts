@@ -664,6 +664,6 @@ export const defaultFactoryConfig: FactoryDefaults = {
     cooldown_minutes: 30,
     fallback_model: 'claude-sonnet-5',
     comment:
-      'Supervisor circuit breaker for cross-harness build failover. On a quota trip (usage_cap/rate_limit) the Codex provider is skipped for cooldown_minutes: the lane that trips it falls over to fallback_model (when available); every later lane during the cooldown is routed straight to claude via the existing codexDisabled path (default tier order, not necessarily fallback_model). Disable with FACTORY_AUTO_FAILOVER=0; override cooldown with FACTORY_FAILOVER_COOLDOWN_MINUTES, fallback with FACTORY_FAILOVER_MODEL.',
+      'Supervisor circuit breaker for cross-harness build failover. On a quota trip (usage_cap/rate_limit) the Codex provider is skipped for cooldown_minutes: the lane that trips it falls over to fallback_model (when available); every later lane during the cooldown is routed straight to claude via the existing codexDisabled path (default tier order, not necessarily fallback_model). Configure enabled, cooldown_minutes and fallback_model in .factory/config.json; environment variables do not override this policy.',
   },
 };

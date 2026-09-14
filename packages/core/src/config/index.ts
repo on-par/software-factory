@@ -441,13 +441,14 @@ export interface AutoFailoverSettings {
   fallbackModel: string;
 }
 
-export function resolveAutoFailover(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): AutoFailoverSettings {
-  const enabled = resolveEnabledFlag(env, 'FACTORY_AUTO_FAILOVER', config.auto_failover?.enabled ?? true);
-  const envMinutes = Number(env.FACTORY_FAILOVER_COOLDOWN_MINUTES);
-  const minutes =
-    Number.isFinite(envMinutes) && envMinutes > 0 ? envMinutes : (config.auto_failover?.cooldown_minutes ?? 30);
-  const fallbackModel = env.FACTORY_FAILOVER_MODEL ?? config.auto_failover?.fallback_model ?? 'claude-sonnet-5';
-  return { enabled, cooldownMs: minutes * 60_000, fallbackModel };
+/** Failover policy comes from validated configuration, never inherited process state. */
+export function resolveAutoFailover(config: FactoryConfig): AutoFailoverSettings {
+  return {
+    enabled: config.auto_failover?.enabled ?? defaultFactoryConfig.auto_failover.enabled,
+    cooldownMs:
+      (config.auto_failover?.cooldown_minutes ?? defaultFactoryConfig.auto_failover.cooldown_minutes) * 60_000,
+    fallbackModel: config.auto_failover?.fallback_model ?? defaultFactoryConfig.auto_failover.fallback_model,
+  };
 }
 
 /** Local-only mode: restrict routing to local worker models and force the
