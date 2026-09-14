@@ -6,12 +6,8 @@ import { join } from 'node:path';
 import type { EventKind } from '../events/kinds.js';
 import type { ModelRouter } from '../router/index.js';
 import type { CheckerOutput, CheckSummary, Constitution } from '../types/index.js';
-import {
-  type CommandResult,
-  describeCommandFailure,
-  runCommand,
-  type RunCommandOptions,
-} from '../utils/command-runner.js';
+import { type CommandResult, describeCommandFailure, type RunCommandOptions } from '../utils/command-runner.js';
+import { runVerificationCommand as runCommand } from './run-command.js';
 import { extractJsonObjects } from '../utils/json.js';
 import {
   DESIGN_SMELLS_CHECKER,
