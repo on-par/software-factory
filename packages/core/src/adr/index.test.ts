@@ -129,9 +129,31 @@ describe('readAdrContext', () => {
 
     const capped = await readAdrContext(reader, { maxAdrs: 1 });
     expect(capped.active).toHaveLength(1);
-    expect(capped.active[0]?.path).toBe('docs/adr/0001-first.md');
+    expect(capped.active[0]?.path).toBe('docs/adr/0002-second.md');
     expect(capped.truncated).toBe(2);
-    expect(renderAdrConstraints(capped)).toContain('2 more Accepted ADR(s) omitted by the injection cap');
+    expect(renderAdrConstraints(capped)).toContain('2 older Accepted ADR(s) omitted by the injection cap');
+  });
+
+  it('retains the 20 most recent numbered ADRs under the default cap', async () => {
+    const reader = createInMemoryReader(
+      Object.fromEntries(
+        Array.from({ length: 25 }, (_, index) => {
+          const number = String(index + 1).padStart(4, '0');
+          return [`docs/adr/${number}-decision.md`, accepted(number, `Decision ${number}`, 'Decision text.')];
+        }),
+      ),
+    );
+
+    const ctx = await readAdrContext(reader);
+
+    expect(ctx.active.map((adr) => adr.path)).toEqual(
+      Array.from({ length: 20 }, (_, index) => {
+        const number = String(index + 6).padStart(4, '0');
+        return `docs/adr/${number}-decision.md`;
+      }),
+    );
+    expect(ctx.active.map((adr) => adr.number)).toEqual(Array.from({ length: 20 }, (_, index) => index + 6));
+    expect(ctx.truncated).toBe(5);
   });
 });
 

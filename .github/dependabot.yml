@@ -5,6 +5,12 @@ updates:
     schedule:
       interval: weekly
     groups:
+      vitest-major:
+        patterns:
+          - vitest
+          - '@vitest/*'
+        update-types:
+          - major
       npm-minor-patch:
         update-types:
           - minor
