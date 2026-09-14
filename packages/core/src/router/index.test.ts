@@ -11,7 +11,7 @@ import type { SandboxPolicy } from '../sandbox/index.js';
 import type { CostEntry } from '../types/index.js';
 import { aggregateCosts, readCostsFile } from '../usage/index.js';
 import type { ExecFn, ModelExecutorContext } from './index.js';
-import { failoversFrom, ModelExecutorError, ModelRouter } from './index.js';
+import { failoversFrom, ModelExecutorError, ModelRouter, ModelRouterError } from './index.js';
 import { StubModelExecutor } from './stub.js';
 
 const models: ModelsConfig = {
@@ -216,6 +216,7 @@ describe('ModelRouter with StubModelExecutor', () => {
     const router = new ModelRouter(models, routes, false, stub);
 
     const err: any = await router.run('plan', 'do it').catch((e) => e);
+    expect(err).toBeInstanceOf(ModelRouterError);
     expect(err.message).toBe(
       'All models failed for task \'plan\': stub-model(error: msg="stub failure: error" exitCode=1), stub-model(error: msg="stub failure: error" exitCode=1)',
     );
@@ -338,6 +339,7 @@ describe('ModelRouter with StubModelExecutor', () => {
     const router = new ModelRouter(twoModels, routes, false, stub);
 
     const err: any = await router.run('plan', 'do it').catch((e) => e);
+    expect(err).toBeInstanceOf(ModelRouterError);
     expect(err.message).toBe(
       'All models failed for task \'plan\': model-a(timeout: msg="stub failure: timeout" exitCode=1), model-b(timeout: msg="stub failure: timeout" exitCode=1)',
     );
@@ -377,6 +379,20 @@ describe('ModelRouter with StubModelExecutor', () => {
       { model: 'model-b', reason: null, ok: true },
     ]);
     expect(result.failoverReason).toBe('usage_cap');
+  });
+
+  it('throws a typed error when every eligible model is usage-capped', async () => {
+    const stub = new StubModelExecutor({
+      scripts: { plan: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }] },
+    });
+    const router = new ModelRouter(twoModels, routes, false, stub);
+
+    const err: any = await router.run('plan', 'do it').catch((e) => e);
+
+    expect(err).toBeInstanceOf(ModelRouterError);
+    expect(err.reason).toBe('usage_cap');
+    expect(err.attempts).toHaveLength(2);
+    expect(stub.calls.map((call) => call.model)).toEqual(['model-a', 'model-b']);
   });
 
   it.each(['usage_cap', 'timeout', 'empty_response'] as const)(
@@ -526,6 +542,7 @@ describe('ModelRouter with StubModelExecutor', () => {
 
       const err: any = await router.run('plan', 'do it').catch((e) => e);
 
+      expect(err).toBeInstanceOf(ModelRouterError);
       expect(err.reason).toBe(reason);
       expect(err.attempts).toEqual([
         { model: 'model-a', reason, ok: false, detail: `msg="stub failure: ${reason}" exitCode=1` },

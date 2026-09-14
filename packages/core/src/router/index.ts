@@ -19,12 +19,12 @@ import type { CostEntry, RetryCause, TaskType } from '../types/index.js';
 import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
 import { shellEscape } from '../utils/index.js';
-import { extractFailoverReason, ModelExecutorError } from './executor-error.js';
+import { extractFailoverReason, ModelExecutorError, ModelRouterError, type RouterAttempt } from './executor-error.js';
 import { describeFailureDetail } from './failure-detail.js';
 import { captureWorktreeState, resetWorktreeState } from './worktree-state.js';
 
 export type { ExecFn } from '../utils/exec.js';
-export { ModelExecutorError } from './executor-error.js';
+export { ModelExecutorError, ModelRouterError } from './executor-error.js';
 
 const PROVIDER_LEVEL_FAILURES = new Set<FailoverReason>(['usage_cap', 'rate_limit', 'timeout', 'unavailable']);
 
@@ -65,7 +65,7 @@ export interface RouterResult {
   exitCode: number;
   /** Why the winning model was reached via failover (undefined if the first model succeeded). */
   failoverReason?: FailoverReason;
-  attempts: { model: string; reason: FailoverReason | null; ok: boolean; detail?: string }[];
+  attempts: RouterAttempt[];
 }
 
 /** Failed attempts that actually caused a model switch: the next attempt (or the
@@ -665,7 +665,7 @@ export class ModelRouter {
 
     const maxRetries = this.registry.failover.maxRetries;
     const cooldownMs = this.registry.failover.cooldownMs;
-    const attempts: RouterResult['attempts'] = [];
+    const attempts: RouterAttempt[] = [];
     const blockedProviders = new Set<string>();
 
     const snapshot = taskRequiresAgenticHarness(task)
@@ -730,12 +730,11 @@ export class ModelRouter {
           if (!isRetryableFailure(reason)) {
             await blockProvider();
             onLog(`${model} failed (${reason}) on ${task} — non-retryable, not failing over`);
-            const error = new Error(
+            throw new ModelRouterError(
               `Non-retryable failure (${reason}) from ${model} for task '${task}'${detail ? `: ${detail}` : ''}`,
-            ) as Error & { reason?: FailoverReason; attempts?: RouterResult['attempts'] };
-            error.reason = reason;
-            error.attempts = attempts;
-            throw error;
+              reason,
+              attempts,
+            );
           }
 
           if (snapshot) {
@@ -747,12 +746,11 @@ export class ModelRouter {
                 );
             } catch (resetErr) {
               const message = resetErr instanceof Error ? resetErr.message : String(resetErr);
-              const error = new Error(
+              throw new ModelRouterError(
                 `Worktree reset failed after ${model} failure (${reason}) for task '${task}' — aborting failover to avoid mixing attempt state: ${message}`,
-              ) as Error & { reason?: FailoverReason; attempts?: RouterResult['attempts'] };
-              error.reason = 'error';
-              error.attempts = attempts;
-              throw error;
+                'error',
+                attempts,
+              );
             }
           }
 
@@ -834,12 +832,11 @@ export class ModelRouter {
               );
           } catch (resetErr) {
             const message = resetErr instanceof Error ? resetErr.message : String(resetErr);
-            const error = new Error(
+            throw new ModelRouterError(
               `Worktree reset failed after ${model} failure (empty_response) for task '${task}' — aborting failover to avoid mixing attempt state: ${message}`,
-            ) as Error & { reason?: FailoverReason; attempts?: RouterResult['attempts'] };
-            error.reason = 'error';
-            error.attempts = attempts;
-            throw error;
+              'error',
+              attempts,
+            );
           }
         }
         break;
@@ -847,13 +844,11 @@ export class ModelRouter {
     }
 
     const summary = attempts.map((a) => `${a.model}(${a.reason}${a.detail ? `: ${a.detail}` : ''})`).join(', ');
-    const error = new Error(`All models failed for task '${task}': ${summary}`) as Error & {
-      reason?: FailoverReason;
-      attempts?: RouterResult['attempts'];
-    };
-    error.reason = attempts[attempts.length - 1]?.reason ?? 'error';
-    error.attempts = attempts;
-    throw error;
+    throw new ModelRouterError(
+      `All models failed for task '${task}': ${summary}`,
+      attempts[attempts.length - 1]?.reason ?? 'error',
+      attempts,
+    );
   }
 }
 
