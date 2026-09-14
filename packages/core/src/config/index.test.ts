@@ -1476,3 +1476,18 @@ describe('resolveTimeouts', () => {
     }
   });
 });
+
+it('shares only the daemon port lease registry across isolated delivery state roots', () => {
+  vi.stubEnv('FACTORY_DAEMON_PORTS_DIR', '/tmp/daemon-ports');
+  try {
+    const first = getFactoryPaths('/tmp/first-run');
+    const second = getFactoryPaths('/tmp/second-run');
+    expect(first.ports).toBe('/tmp/daemon-ports/ports.json');
+    expect(second.ports).toBe(first.ports);
+    expect(second.portsLock).toBe(first.portsLock);
+    expect(second.runLock).not.toBe(first.runLock);
+    expect(second.events).not.toBe(first.events);
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});

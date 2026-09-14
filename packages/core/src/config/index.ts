@@ -15,6 +15,7 @@ import {
   resolveConfigPath,
 } from '@on-par/factory-config';
 import { z } from 'zod';
+import { runConfigSource } from './run-config-source.js';
 
 import type { FilingPolicy } from '../filing/policy.js';
 import { KNOWN_HARNESS_IDS } from '../harness/catalog.js';
@@ -320,11 +321,12 @@ function deepMergeConfig(base: Record<string, unknown>, overlay: Record<string, 
  *  section is legal — `{"merge": {"auto": true}}` overrides only `merge.auto`. The file's
  *  model-routing keys are ignored here; `loadRepoConfig` owns them. */
 export function loadFactoryConfigForRepo(configPath: string): FactoryConfig {
-  if (!existsSync(configPath)) return loadFactoryConfig();
+  const explicit = runConfigSource();
+  if (explicit === undefined && !existsSync(configPath)) return loadFactoryConfig();
 
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(configPath, 'utf-8'));
+    raw = JSON.parse(explicit ?? readFileSync(configPath, 'utf-8'));
   } catch (err) {
     throw new Error(`Failed to parse ${configPath}: ${(err as Error).message}`);
   }
@@ -582,8 +584,8 @@ export function getFactoryPaths(repoRoot: string, stateRoot?: string) {
     steering: resolve(state, 'steering'),
     kpiHistory: resolve(state, 'kpi-history.jsonl'),
     ingestWatermark: resolve(state, 'ingest-watermark'),
-    ports: resolve(state, 'ports.json'),
-    portsLock: resolve(state, 'ports.lock'),
+    ports: resolve(process.env.FACTORY_DAEMON_PORTS_DIR ?? state, 'ports.json'),
+    portsLock: resolve(process.env.FACTORY_DAEMON_PORTS_DIR ?? state, 'ports.lock'),
     proxyState: resolve(state, 'proxy.json'),
     breaker: resolve(state, 'breaker.json'),
     reworkHistory: resolve(state, 'rework-history.json'),

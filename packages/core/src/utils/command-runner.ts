@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { execa } from 'execa';
 
 import { killProcessGroup } from '../environment/process-groups.js';
+import { spawnSupervisedCommand } from './supervised-exec.js';
 
 export interface RunCommandOptions {
   cwd?: string;
@@ -45,11 +46,11 @@ const DEFAULT_MAX_BUFFER = 1000 * 1000 * 100;
  *  sweep so such grandchildren don't outlive the check. */
 async function runCommandDetached(argv: readonly string[], options: RunCommandOptions): Promise<CommandResult> {
   const maxBuffer = options.maxBuffer ?? DEFAULT_MAX_BUFFER;
-  const child = spawn(argv[0], argv.slice(1), {
-    cwd: options.cwd,
-    env: options.env ? { ...process.env, ...options.env } : undefined,
-    detached: true,
-  });
+  const env = { ...process.env, ...options.env };
+  const ownershipFile = env.FACTORY_DAEMON_GROUPS_FILE;
+  const child = ownershipFile
+    ? spawnSupervisedCommand(argv, { cwd: options.cwd, env, ownershipFile })
+    : spawn(argv[0], argv.slice(1), { cwd: options.cwd, env: options.env ? env : undefined, detached: true });
 
   const pid = child.pid;
   if (pid !== undefined) options.onPgid?.(pid);
@@ -60,6 +61,7 @@ async function runCommandDetached(argv: readonly string[], options: RunCommandOp
   const stderrChunks: Buffer[] = [];
   let maxBufferExceeded = false;
   let timedOut = false;
+  let settled = false;
 
   const timer =
     options.timeoutMs !== undefined
@@ -72,6 +74,7 @@ async function runCommandDetached(argv: readonly string[], options: RunCommandOp
   const { exitCode, signal } = await new Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>(
     (resolve) => {
       child.stdout?.on('data', (chunk: Buffer) => {
+        if (settled) return;
         stdoutLen += chunk.length;
         if (stdoutLen > maxBuffer) {
           maxBufferExceeded = true;
@@ -81,6 +84,7 @@ async function runCommandDetached(argv: readonly string[], options: RunCommandOp
         stdoutChunks.push(chunk);
       });
       child.stderr?.on('data', (chunk: Buffer) => {
+        if (settled) return;
         stderrLen += chunk.length;
         if (stderrLen > maxBuffer) {
           maxBufferExceeded = true;
@@ -89,8 +93,19 @@ async function runCommandDetached(argv: readonly string[], options: RunCommandOp
         }
         stderrChunks.push(chunk);
       });
-      child.on('error', () => resolve({ exitCode: -1, signal: null }));
-      child.on('exit', (code, sig) => resolve({ exitCode: code, signal: sig }));
+      const finish = (code: number | null, signal: NodeJS.Signals | null) => {
+        if (settled) return;
+        settled = true;
+        resolve({ exitCode: code, signal });
+      };
+      child.on('error', () => finish(-1, null));
+      child.on('exit', finish);
+      if (ownershipFile)
+        child.on('message', (message) => {
+          const result = (message as { factoryExit?: { code: number | null; signal: NodeJS.Signals | null } })
+            .factoryExit;
+          if (result) finish(result.code, result.signal);
+        });
     },
   );
 
