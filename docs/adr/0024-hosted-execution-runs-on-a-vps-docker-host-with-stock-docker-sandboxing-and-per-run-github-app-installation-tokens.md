@@ -1,6 +1,6 @@
 # ADR-0024: Hosted execution runs on a VPS + Docker host with stock-Docker sandboxing and per-run GitHub App installation tokens
 
-- Status: Accepted
+- Status: Superseded by ADR-0023
 - Date: 2026-08-14
 
 ## Context

@@ -1,6 +1,6 @@
 # ADR-0074: Issue disposition (closed or factory:parked) outranks an open PR in worktree GC; branch deletion still requires remote evidence
 
-- Status: Accepted
+- Status: Superseded by ADR-0073
 - Date: 2026-09-02
 
 ## Context

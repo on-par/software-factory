@@ -1,6 +1,6 @@
 # ADR-0080: The workspace diff base is the run-start HEAD, captured once, authoritative for CHECK
 
-- Status: Accepted
+- Status: Superseded by ADR-0079
 - Date: 2026-09-03
 
 ## Context
