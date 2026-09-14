@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 // packages/cli/src/cli/index.ts — CLI entry point: factory <command> [options]
 
 import { exec as execCb, execSync } from 'node:child_process';
@@ -170,6 +171,8 @@ import {
   cleanupWorktree,
   createDaemonLogSink,
   createFactorydServer,
+  createRunRuntime,
+  createShipExecutor,
   createGithubQueue,
   createLocalSmallDryRun,
   createOctokitGreenPrClient,
@@ -2633,7 +2636,12 @@ async function cmdFactoryd(opts: { port?: string; registry?: string }): Promise<
   };
   if (acquired.stalePid !== null) log(`removed stale pid file (pid ${acquired.stalePid})`);
 
-  const daemon = createFactorydServer({ registryFile, runsDir: runtime.runsDir, port, log });
+  const runRuntime = await createRunRuntime({
+    registryFile,
+    allowParallel: true,
+    execute: createShipExecutor({ cliEntrypoint: fileURLToPath(new URL('../cli.js', import.meta.url)) }),
+  });
+  const daemon = createFactorydServer({ registryFile, runsDir: runtime.runsDir, port, log, runRuntime });
   const boundPort = await daemon.start();
   await writePortFile(runtime, boundPort);
   const banner = [

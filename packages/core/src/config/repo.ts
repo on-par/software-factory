@@ -8,6 +8,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 
 import { z } from 'zod';
+import { runConfigSource } from './run-config-source.js';
 
 import type { ModelRegistry } from '../models/index.js';
 import { resolveModelOverrides } from '../models/index.js';
@@ -194,11 +195,12 @@ const warnedV1ConfigPaths = new Set<string>();
  *  schema violation (typos are rejected loudly via `.strict()` at every level). */
 export function loadRepoConfig(repoRoot: string, stateRoot?: string): RepoFactoryConfig | null {
   const path = getFactoryPaths(repoRoot, stateRoot).config;
-  if (!existsSync(path)) return null;
+  const explicit = runConfigSource();
+  if (explicit === undefined && !existsSync(path)) return null;
 
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(path, 'utf-8'));
+    raw = JSON.parse(explicit ?? readFileSync(path, 'utf-8'));
   } catch (err: any) {
     throw new Error(`Failed to parse ${path}: ${err.message}`);
   }

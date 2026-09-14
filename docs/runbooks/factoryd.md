@@ -45,3 +45,25 @@ All live in `dirname(registry)` — `~/.factory/` by default (#1177, ADR-0076):
 launchd packaging and `factory daemon start|stop|status|logs` verbs are
 follow-ups; they will read `daemon.pid`/`daemon.port` from `dirname(registry)`
 and must not introduce a second state root (ADR-0076).
+
+## Durable explicit runs and isolated lanes
+
+The CLI daemon installs a supervised executor. `GET /capabilities` reports
+`run.execution-config.v1` and `run.isolated-lanes.v1`. `POST /runs` accepts a UUID
+`runId`, attached repository slug, positive issue number, optional frozen
+`executionConfig`, optional `expiresAt`, and optional integer `laneId` (1–8).
+Omitting the lane preserves the single sequential queue. Different lanes execute
+concurrently; each lane remains FIFO. Reusing a run ID with different inputs is
+rejected, and replaying the same request returns its retained state.
+
+`GET /runs`, `GET /runs/<id>`, and `GET /runs/<id>/logs` expose durable state.
+`POST /runs/<id>/cancel` cancels only that delivery. The listener accepts only
+same-origin loopback requests. Existing per-file run records remain readable.
+
+Lane execution owns a Git worktree under the repository's Git common directory,
+`factory-runs/<runId>`, with a unique run branch prefix and independent factory
+state. Preserve `runs.json` and `run-groups/` beside the registry during upgrades.
+Port leases are shared through `port-leases/` beside the registry. Stop or drain
+active work before upgrading: restart retains unfinished runs as interrupted and
+never implicitly replays them. Inspect retained worktrees and PRs before retrying
+with a new run ID; worktree cleanup is manual.
