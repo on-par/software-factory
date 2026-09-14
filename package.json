@@ -38,19 +38,19 @@
   },
   "license": "MIT",
   "devDependencies": {
-    "@oxlint/plugins": "1.81.0",
+    "@oxlint/plugins": "1.82.0",
     "@stryker-mutator/core": "^10.0.0",
     "@stryker-mutator/vitest-runner": "^10.0.0",
-    "@types/node": "^26.4.1",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@types/node": "^26.5.1",
+    "@vitest/coverage-v8": "^5.0.0",
     "jsdom": "^30.0.1",
-    "knip": "^6.34.0",
-    "oxlint": "^1.81.0",
+    "knip": "^6.35.1",
+    "oxlint": "^1.82.0",
     "oxlint-tsgolint": "^7.0.2001",
     "prettier": "3.9.6",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.10"
+    "vitest": "^5.0.0"
   },
   "repository": {
     "type": "git",
