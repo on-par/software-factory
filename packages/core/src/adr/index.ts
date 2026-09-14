@@ -4,7 +4,7 @@ import { formatAdrNumber, normalizeStatus, tryParseAdr } from '@on-par/adr-kit';
 import type { RepoContextReader } from '@on-par/repo-context';
 
 export const DEFAULT_ADR_DIR = 'docs/adr';
-/** Cap on injected ADRs — bounds boss-model context on ADR-heavy repos. */
+/** Cap on the most recent injected ADRs — bounds boss-model context on ADR-heavy repos. */
 export const DEFAULT_MAX_ADRS = 20;
 /** Cap on the Decision text quoted per ADR. */
 export const DEFAULT_MAX_DECISION_CHARS = 600;
@@ -27,7 +27,7 @@ export type AdrSkipReason = 'unparsable' | 'inactive';
 
 export interface AdrContext {
   dir: string;
-  /** Accepted ADRs, ascending by number (unnumbered last), then by path. */
+  /** Most recent Accepted ADRs, displayed ascending by number (unnumbered last), then by path. */
   active: ActiveAdr[];
   skipped: { path: string; reason: AdrSkipReason }[];
   /** Candidate ADR files seen in `dir`. */
@@ -84,16 +84,24 @@ export async function readAdrContext(
     });
   }
 
-  active.sort((a, b) => {
+  const compareByPath = (a: ActiveAdr, b: ActiveAdr): number => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  const compareForDisplay = (a: ActiveAdr, b: ActiveAdr): number => {
     if (a.number === undefined && b.number === undefined) return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
     if (a.number === undefined) return 1;
     if (b.number === undefined) return -1;
     if (a.number !== b.number) return a.number - b.number;
-    return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
-  });
+    return compareByPath(a, b);
+  };
+  const compareForRetention = (a: ActiveAdr, b: ActiveAdr): number => {
+    if (a.number === undefined && b.number === undefined) return compareByPath(a, b);
+    if (a.number === undefined) return 1;
+    if (b.number === undefined) return -1;
+    if (a.number !== b.number) return b.number - a.number;
+    return compareByPath(a, b);
+  };
 
   const truncated = Math.max(0, active.length - maxAdrs);
-  const kept = active.slice(0, maxAdrs);
+  const kept = active.sort(compareForRetention).slice(0, maxAdrs).sort(compareForDisplay);
 
   return { dir, active: kept, skipped, scanned: candidates.length, truncated };
 }
@@ -130,7 +138,7 @@ export function renderAdrConstraints(ctx: AdrContext, opts?: { maxDecisionChars?
   }
 
   if (ctx.truncated > 0) {
-    lines.push('', `(${ctx.truncated} more Accepted ADR(s) omitted by the injection cap.)`);
+    lines.push('', `(${ctx.truncated} older Accepted ADR(s) omitted by the injection cap.)`);
   }
 
   lines.push(
