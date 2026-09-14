@@ -50,6 +50,9 @@ jobs:
         run: npm run knip
 
       - name: Test & coverage
+        # Exercise the same inherited configuration transport as daemon CHECK runs.
+        env:
+          FACTORY_RUN_CONFIG_JSON: '{"version":2}'
         run: npm run test
 
       - name: Coverage ratchet

@@ -24,8 +24,10 @@ software-factory/
 │   ├── dashboard/ @on-par/factory-dashboard — Vite + React + Tailwind dashboard (walking skeleton, private).
 │   ├── product/  @on-par/product           — Product (proposer) app: brain-dump →
 │   │                                        engineering-ready issues. Read-only, private.
-│   └── server/   @on-par/factory-server    — Local HTTP server: GET /events relays the
+│   ├── scbench-adapter/                    — SCBench adapter for `factory run-brief` without GitHub/queue/PR/merge effects.
+│   ├── server/   @on-par/factory-server    — Local HTTP server: GET /events relays the
 │                                             lane lifecycle bus as SSE. Private.
+│   └── tui/                                — Read-only Ink live-run view.
 ├── scripts/      Root tooling: verify.sh, eval.ts, eval-history.ts,
 │                 regression-issue.ts, local-small-scoreboard.ts,
 │                 coverage-ratchet.ts
@@ -48,11 +50,32 @@ readiness-conformance checker named in epic #464 consume them in later stories.
 - `checkers/` — the checker framework (compile/tests/lint/links/accessibility + agent-based custom checkers)
 - `constitutions/` — constitution loader
 - `adr/` — reads the checkout's `docs/adr` through a `RepoContextReader` and renders Accepted ADRs as PLAN constraints
+- `approvals/` — approval-gate seam with file-based transport in `.factory/approvals/`
+- `bus/` — in-process lane lifecycle bus
+- `daemon/` — factoryd checkout precondition validation
+- `design/` — design-artifact validation, rendering, and frozen-spec persistence
+- `discovery/` — read-only discovery scans that rank candidate ideas from product signals
+- `efficiency/` — narrow fast-path planning eligibility and spec generation
 - `environment/` — port-lease registry for parallel lanes (`.factory/ports.json`) + `leaseEnv()`/`laneEnv()`, the `PORT`/`FACTORY_APP_PORT`/`FACTORY_BASE_URL` + `FACTORY_HEADLESS`/`PLAYWRIGHT_HEADLESS` contract injected into build agents and all checker commands
 - `logger/` — structured leveled logger (`createLogger`) over the `.factory/events.ndjson` sink (ADR-0002)
 - `eval/` — the eval harness (runner, judge, scoring, golden loader, baseline/trend/regression reports)
+- `events/` — reads and tails the `.factory/events.ndjson` append log
+- `failure/` — deterministic failure fingerprinting and evidence capture
+- `filing/` — fingerprinted bug filing with deduplication and repository routing
+- `hosted/` — provider-session authority bundles for hosted jobs
+- `ingest/` — always-on ingestion of ready issues into the queue
+- `kpis/` — pure factory-health KPI aggregation from events and costs
+- `projects/` — GitHub ProjectV2 queue GraphQL client and live poller
+- `proxy/` — opt-in loopback reverse proxy with stable per-lane URLs
+- `queue/` — proposed-queue validation for `factory triage accept`
+- `readiness/` — pure readiness scoring for GitHub issue bodies
+- `run/` — terminal run outcomes and parking-reason helpers
+- `sandbox/` — OS-level containment for agentic BUILD and rework runs
 - `sim/` — headless simulator harness (fake model/octokit, throwaway git workspace, jitter injection, Monte Carlo runner), and regression fixtures for known production faults
-- `usage/`, `reports/`, `local-small/`, `utils/` (incl. `lock.ts`, `ci-watch.ts`), `config/`, `types/`
+- `spec/` — frozen-spec artifact paths, route normalization, writing, and archival
+- `steering/` — operator steering queued from the TUI for worker prompt assembly
+- `usage/`, `reports/`, `local-small/`, `test-support/`, `utils/` (incl. `lock.ts`, `ci-watch.ts`), `config/`, `types/`
+- `work/` — canonical work requests and input-source adapters
 
 ## Key commands
 
@@ -91,6 +114,7 @@ Run from the repo root unless noted. Node.js **≥ 20** required.
 ## Testing
 
 - Test runner is **Vitest**. Tests are `*.test.ts` files **colocated** next to the source they cover in each package's `src/` tree (e.g. `packages/core/src/router/index.test.ts`).
+- `agents-layout.test.ts` guards the repository-layout and core-module inventory sections.
 - `npm run test` at the root runs all workspace tests in one pass and aggregates coverage (config in `vitest.config.ts`, which globs `packages/*/src/**/*.test.ts`).
 - **Coverage gate:** v8 thresholds enforced by Vitest — lines 94, functions 91, branches 85, statements 94 globally. Each package (`config`, `core`, `cli`, `dashboard`) also has its own ratcheting thresholds in `vitest.config.ts`, so a per-package regression fails the build even if the aggregate stays above the global floor. The ratchet is self-enforcing: `npm run coverage-ratchet` (run by `verify.sh` and CI after tests) fails when measured coverage exceeds any threshold by more than 2 points, telling you to raise the thresholds in the same PR. Never lower them. `packages/core/src/types/**` is excluded from coverage.
 - **TDD is expected:** write or update the colocated `*.test.ts` alongside any source change. Integration tests for the pipeline live under `packages/core/src/phases/`.
