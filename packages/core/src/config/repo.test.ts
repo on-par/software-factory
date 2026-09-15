@@ -206,6 +206,7 @@ describe('loadRepoConfig', () => {
       models: { plan: 'claude-model' },
       merge: { auto: true },
       worktree: { gcTtlDays: 30 },
+      adr: { mandate: true },
     });
     expect(loadRepoConfig(repoRoot)).toEqual({
       version: 2,

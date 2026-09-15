@@ -11,7 +11,8 @@ export interface RunCommandOptions {
   /** Milliseconds. Always ms — call sites must not pass seconds. */
   timeoutMs?: number;
   maxBuffer?: number;
-  env?: Record<string, string>;
+  /** Undefined values explicitly remove inherited variables. */
+  env?: NodeJS.ProcessEnv;
   /** When set, the child is spawned detached (its own process group) and
    *  its pid is reported here so a lane can track and later kill the
    *  whole group. */
