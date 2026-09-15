@@ -1,6 +1,6 @@
 # ADR-0059: A detach drains through a `draining` registry state, and lane status arrives via an injected port
 
-- Status: Accepted
+- Status: Superseded by ADR-0058
 - Date: 2026-08-19
 
 ## Context

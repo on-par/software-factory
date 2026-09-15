@@ -1,6 +1,6 @@
 # ADR-0026: Autonomous cloud provisioning requires a human-approved plan gate
 
-- Status: Accepted
+- Status: Superseded by ADR-0025
 - Date: 2026-08-14
 
 ## Context
