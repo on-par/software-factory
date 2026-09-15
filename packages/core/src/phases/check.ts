@@ -5,6 +5,7 @@ import { type CheckerContext, probeWorktree, runAllCheckers, type WorktreeProbe 
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { laneEnv } from '../environment/index.js';
 import type { EventKind } from '../events/kinds.js';
+import { routerFailureOf } from '../router/executor-error.js';
 import type { ModelRouter, RouterResult } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
@@ -471,8 +472,9 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
     // ModelRouter.run only throws once every eligible model is exhausted, and the
     // error carries the reason + attempts. Swallowing it made a provider outage
     // look like a factory fault (#642).
-    failureReason = (err as { reason?: FailoverReason }).reason;
-    attempts = (err as { attempts?: RouterResult['attempts'] }).attempts ?? [];
+    const routerFailure = routerFailureOf(err);
+    failureReason = routerFailure?.reason;
+    attempts = routerFailure?.attempts ?? [];
     const attemptSummary =
       attempts.map((a) => `${a.model}(${a.reason ?? 'ok'}${a.detail ? `: ${a.detail}` : ''})`).join(', ') || 'none';
     log(

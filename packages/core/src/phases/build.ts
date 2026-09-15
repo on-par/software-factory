@@ -8,6 +8,7 @@ import { buildConstitutionContext } from '../constitutions/index.js';
 import { readDesignArtifact, renderDesignGrounding } from '../design/index.js';
 import { laneEnv } from '../environment/index.js';
 import type { EventKind } from '../events/kinds.js';
+import { routerFailureOf } from '../router/executor-error.js';
 import type { ModelRouter, RouterResult } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
 import type { SandboxEventType, SandboxPolicy } from '../sandbox/index.js';
@@ -213,8 +214,9 @@ async function buildPhaseImpl(opts: {
   try {
     result = await router.run(taskType, prompt, runOpts);
   } catch (err) {
-    const reason = (err as { reason?: FailoverReason }).reason;
-    const attempts = (err as { attempts?: RouterResult['attempts'] }).attempts;
+    const routerFailure = routerFailureOf(err);
+    const reason = routerFailure?.reason;
+    const attempts = routerFailure?.attempts;
     // These all indicate a provider problem rather than a bad task. Preserve
     // the frozen spec and continue on the other provider when one is available.
     const providerFailure =
