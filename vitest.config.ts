@@ -26,6 +26,7 @@ export default defineConfig({
   // test files — the packages/core "test script" agent trap in AGENTS.md.
   root: fileURLToPath(new URL('.', import.meta.url)),
   test: {
+    setupFiles: [fileURLToPath(new URL('./packages/core/src/test-support/setup-env.ts', import.meta.url))],
     // Coverage instrumentation across the monorepo is memory-intensive. Keep
     // files serial so the required full-suite check stays within CI's heap
     // limit instead of loading several instrumented workspace graphs at once.
