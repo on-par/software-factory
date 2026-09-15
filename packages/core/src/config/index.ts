@@ -243,6 +243,7 @@ const FactoryConfigSchema = z.object({
       comment: z.string().optional(),
     })
     .default({ enabled: true, cooldown_minutes: 30, fallback_model: 'claude-sonnet-5' }),
+  adr: z.object({ mandate: z.boolean().default(false), comment: z.string().optional() }).default({ mandate: false }),
 });
 
 // ---------- Types ----------
@@ -291,6 +292,7 @@ export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'ingest',
   'environment',
   'auto_failover',
+  'adr',
 ];
 
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -380,6 +382,10 @@ export function resolveSkipCI(config: FactoryConfig, env: NodeJS.ProcessEnv = pr
 
 export function resolvePlanApproval(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
   return resolveEnabledFlag(env, 'FACTORY_APPROVE_PLAN', config.plan_approval?.enabled ?? false);
+}
+
+export function resolveAdrMandate(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
+  return resolveEnabledFlag(env, 'FACTORY_ADR_MANDATE', config.adr?.mandate ?? false);
 }
 
 export function resolveDefectWindowDays(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): number {

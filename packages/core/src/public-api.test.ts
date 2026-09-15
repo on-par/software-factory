@@ -25,6 +25,7 @@ const PUBLIC_API_KEYS = [
   'loadRoutesConfig',
   'loadV2Config',
   'parseV2Config',
+  'resolveAdrMandate',
   'resolveAutoFailover',
   'resolveDefectWindowDays',
   'resolveEnvironmentPorts',
