@@ -309,7 +309,25 @@ export {
   queueLabelSpecs,
   readGithubQueueSnapshot,
 } from './queue/github-queue.js';
-export type { QueueEntry } from './queue/index.js';
+export type { QueueEntry, QueueSnapshot, QueueSnapshotEntry } from './queue/index.js';
+
+// Factory App admission-state compatibility (#1497)
+export type {
+  AdmissionLookup,
+  AdmissionRecord,
+  AdmissionState,
+  AdmissionStateReader,
+  QueueCompatibilityVerdict,
+} from './admission/index.js';
+export {
+  ADMISSION_SNAPSHOT_VERSION,
+  ADMISSION_STATE_FILENAME,
+  classifyQueueCompatibility,
+  createFileAdmissionStateReader,
+  FACTORY_APP_REPAIR_HINT,
+  formatAdmissionConflict,
+  withAdmissionGuard,
+} from './admission/index.js';
 
 // Stale-claim reaping (#999)
 export type { ReleaseStaleClaimsOptions, StaleClaim, StaleClaimRelease } from './queue/stale-claims.js';
