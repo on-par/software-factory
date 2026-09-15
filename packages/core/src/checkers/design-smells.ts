@@ -9,7 +9,7 @@ import { readAdrContext, renderAdrConstraints } from '../adr/index.js';
 import { readDesignArtifact, renderDesignGrounding } from '../design/index.js';
 import type { ModelRouter } from '../router/index.js';
 import type { CheckerOutput } from '../types/index.js';
-import { runCommand } from '../utils/command-runner.js';
+import { runVerificationCommand as runCommand } from './run-command.js';
 import { extractJsonObjects } from '../utils/json.js';
 import type { CheckerContext } from './index.js';
 
