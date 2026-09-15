@@ -11,6 +11,7 @@ import {
   loadFactoryConfigForRepo,
   loadModelsConfig,
   loadRoutesConfig,
+  resolveAdrMandate,
   resolveAutoFailover,
   resolveBranchPrefix,
   resolveDefectWindowDays,
@@ -764,6 +765,15 @@ describe('loadFactoryConfigForRepo', () => {
     expect(config.run).toEqual({ merge: { auto: false, admin: true } });
     expect(loadFactoryConfig().run).toBeUndefined();
   });
+
+  it('overlays adr.mandate from a repository config file', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ adr: { mandate: true } }));
+
+    const config = loadFactoryConfigForRepo(path);
+    expect(resolveAdrMandate(config, {})).toBe(true);
+    expect(resolveAdrMandate(config, { FACTORY_ADR_MANDATE: '0' })).toBe(false);
+  });
 });
 
 describe('loadRoutesConfig', () => {
@@ -1268,6 +1278,16 @@ describe('resolvePlanApproval', () => {
   it('falls back to config.plan_approval.enabled when the env var is unset', () => {
     const config = loadFactoryConfig();
     expect(resolvePlanApproval({ ...config, plan_approval: { enabled: true } }, {})).toBe(true);
+  });
+});
+
+describe('resolveAdrMandate', () => {
+  it('defaults to false from the shipped config', () => {
+    expect(resolveAdrMandate(loadFactoryConfig(), {})).toBe(false);
+  });
+
+  it('is true when FACTORY_ADR_MANDATE is exactly "1", regardless of config', () => {
+    expect(resolveAdrMandate(loadFactoryConfig(), { FACTORY_ADR_MANDATE: '1' })).toBe(true);
   });
 });
 

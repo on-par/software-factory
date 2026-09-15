@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { loadFactoryConfigForRepo, type ModelsConfig, type RoutesConfig } from '../config/index.js';
+import { killProcessGroup } from '../environment/process-groups.js';
 import { ConstitutionLoader } from '../constitutions/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
@@ -462,6 +463,60 @@ exit 1
 
     expect(result.result).toBe('FAIL');
   });
+
+  it.each(['ordinary', 'detached', 'supervised'] as const)(
+    'keeps the orchestration snapshot out of %s verification subprocesses',
+    { timeout: 30000 },
+    async (mode) => {
+      const snapshot = JSON.stringify({ version: 2, merge: { auto: true } });
+      const previous = process.env.FACTORY_RUN_CONFIG_JSON;
+      process.env.FACTORY_RUN_CONFIG_JSON = snapshot;
+      let pgid: number | undefined;
+      try {
+        const configModule = new URL('../config/index.ts', import.meta.url).href;
+        const worktree = await makeWorktree({
+          '.factory/config.json': JSON.stringify({ version: 2, merge: { auto: false } }),
+          'scripts/verify.sh': `#!/bin/bash
+node --import '${import.meta.resolve('tsx')}' verify.mjs
+`,
+          'verify.mjs': `import assert from 'node:assert/strict';
+import { loadFactoryConfigForRepo } from ${JSON.stringify(configModule)};
+assert.equal(process.env.FACTORY_RUN_CONFIG_JSON, undefined);
+assert.equal(loadFactoryConfigForRepo('.factory/config.json').merge.auto, false);
+assert.equal(process.env.PORT, '3142');
+assert.equal(process.env.FACTORY_APP_PORT, '3142');
+assert.equal(process.env.FACTORY_BASE_URL, 'http://127.0.0.1:3142');
+assert.equal(process.env.FACTORY_HEADLESS, '1');
+assert.equal(process.env.PLAYWRIGHT_HEADLESS, '1');
+assert.ok(process.env.PATH);
+`,
+        });
+        const result = await testsChecker({
+          ...makeContext(worktree),
+          env: {
+            ...LANE_ENV,
+            FACTORY_HEADLESS: '1',
+            PLAYWRIGHT_HEADLESS: '1',
+            ...(mode === 'supervised' ? { FACTORY_DAEMON_GROUPS_FILE: join(worktree, 'groups') } : {}),
+          },
+          ...(mode === 'ordinary'
+            ? {}
+            : {
+                onPgid: (value: number) => {
+                  pgid = value;
+                },
+              }),
+        });
+        expect(result.result, result.details).toBe('PASS');
+        expect(process.env.FACTORY_RUN_CONFIG_JSON).toBe(snapshot);
+        expect(loadFactoryConfigForRepo(join(worktree, '.factory/config.json')).merge.auto).toBe(true);
+      } finally {
+        if (previous === undefined) delete process.env.FACTORY_RUN_CONFIG_JSON;
+        else process.env.FACTORY_RUN_CONFIG_JSON = previous;
+        if (pgid !== undefined) await killProcessGroup(pgid, { graceMs: 20 });
+      }
+    },
+  );
 
   it('forwards ctx.env through scripts/verify.sh', { timeout: 30000 }, async () => {
     const worktree = await makeWorktree({

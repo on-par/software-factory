@@ -29,6 +29,7 @@ export {
   loadRoutesConfig,
   loadV2Config,
   parseV2Config,
+  resolveAdrMandate,
   resolveAutoFailover,
   resolveDefectWindowDays,
   resolveEnvironmentPorts,
