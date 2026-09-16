@@ -4,6 +4,7 @@ import { basename, join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { claimExpiresLabel } from '../queue/github-queue.js';
 import {
   findCredentialFiles,
   formatGcReport,
@@ -1970,6 +1971,44 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
         () => ({ data: { state: 'open', labels: ['factory:claimed-by:lane-7'] } }),
       );
       const { runCommand } = cleanRunCommand(root, wt, 'ship-it/63-claimed');
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
+        { runCommand, octokit },
+      );
+
+      expect(report.noActiveClaim).toEqual([]);
+    });
+
+    it('flags a merged-PR worktree whose claim label carries an expired lease (#1501)', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-66`);
+
+      const expiredLabel = claimExpiresLabel(Math.floor(Date.now() / 1000) - 3600);
+      const { octokit } = fakeOctokit(
+        () => ({ data: [{ number: 7, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
+        () => ({ data: { state: 'open', labels: ['factory:claimed-by:lane-7', expiredLabel] } }),
+      );
+      const { runCommand } = cleanRunCommand(root, wt, 'ship-it/66-lapsed');
+
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
+        { runCommand, octokit },
+      );
+
+      expect(report.noActiveClaim).toEqual([{ path: wt, branch: 'ship-it/66-lapsed', issue: 66, prState: 'merged' }]);
+    });
+
+    it('does not flag a merged-PR worktree whose claim label carries a live (unexpired) lease', async () => {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-67`);
+
+      const liveLabel = claimExpiresLabel(Math.floor(Date.now() / 1000) + 3600);
+      const { octokit } = fakeOctokit(
+        () => ({ data: [{ number: 8, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
+        () => ({ data: { state: 'open', labels: ['factory:claimed-by:lane-7', liveLabel] } }),
+      );
+      const { runCommand } = cleanRunCommand(root, wt, 'ship-it/67-active-lease');
 
       const report = await sweepWorktrees(
         { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },

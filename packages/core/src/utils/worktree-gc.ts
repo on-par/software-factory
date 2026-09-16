@@ -10,6 +10,7 @@ import type { Octokit } from '@octokit/rest';
 
 import type { EventKind } from '../events/kinds.js';
 import { CLAIMED_BY_LABEL_PREFIX, PARKED_LABEL } from '../queue/github-queue.js';
+import { findStaleClaims } from '../queue/stale-claims.js';
 import { branchPrefixSlug, shellEscape } from './index.js';
 import { removeMicroVm, type WorktreeSandbox } from './microvm.js';
 
@@ -423,9 +424,13 @@ async function resolveIssueExistence(
   }
 }
 
-/** Whether the lane issue carries an active `factory:claimed-by:*` label, checked only for
- *  worktree-gc's dry-run report. Fail-safe: no client/repo, or a lookup error, both resolve to
- *  'unknown' — never conflated with a confirmed 'unclaimed' verdict. */
+/** Whether the lane issue carries an active, unexpired claim, checked only for worktree-gc's
+ *  dry-run report. A `factory:claimed-by:*` label alone is not enough (#1501): if the issue also
+ *  carries a `factory:claim-expires:*` lease label and that lease has lapsed, `findStaleClaims`
+ *  (the same primitive the queue's own reconcile uses, ADR-0104/#1506) reads it as unclaimed
+ *  immediately — no separate release step, and no host-pid/hostname evidence anywhere. Fail-safe:
+ *  no client/repo, or a lookup error, both resolve to 'unknown' — never conflated with a
+ *  confirmed 'unclaimed' verdict. */
 async function resolveActiveClaim(
   octokit: SweepDeps['octokit'],
   repo: string | undefined,
@@ -437,7 +442,9 @@ async function resolveActiveClaim(
   try {
     const { data } = await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issue });
     const labels = (data.labels ?? []).map((label: any) => (typeof label === 'string' ? label : (label?.name ?? '')));
-    return labels.some((name: string) => name.startsWith(CLAIMED_BY_LABEL_PREFIX)) ? 'claimed' : 'unclaimed';
+    if (!labels.some((name: string) => name.startsWith(CLAIMED_BY_LABEL_PREFIX))) return 'unclaimed';
+    const stale = findStaleClaims([{ number: issue, labels }]);
+    return stale.length > 0 ? 'unclaimed' : 'claimed';
   } catch (err: any) {
     log(
       'warn',
