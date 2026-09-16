@@ -527,6 +527,8 @@ const INTERNAL_API_KEYS = [
   'FACTORY_APP_REPAIR_HINT',
   'formatAdmissionConflict',
   'withAdmissionGuard',
+  // Backend-agnostic queue seam (#1499)
+  'createGithubQueueBackend',
   // Stale-claim reaping (#999, lease-based since #1500)
   'findStaleClaims',
   'releaseStaleClaims',
