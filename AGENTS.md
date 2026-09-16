@@ -50,6 +50,7 @@ readiness-conformance checker named in epic #464 consume them in later stories.
 - `checkers/` — the checker framework (compile/tests/lint/links/accessibility + agent-based custom checkers)
 - `constitutions/` — constitution loader
 - `adr/` — reads the checkout's `docs/adr` through a `RepoContextReader` and renders Accepted ADRs as PLAN constraints
+- `admission/` — Factory App admission-state compatibility for the GitHub-label queue: the read port, the verdict classifier, and the claim-time guard
 - `approvals/` — approval-gate seam with file-based transport in `.factory/approvals/`
 - `bus/` — in-process lane lifecycle bus
 - `daemon/` — factoryd checkout precondition validation

@@ -205,6 +205,7 @@ import {
   shellEscape,
   sweepWorktrees,
   watchChecks,
+  withAdmissionGuard,
   withFileLock,
   withGitLock,
   withRunLock,
@@ -214,6 +215,7 @@ import {
 import { type QueueReader, runTui } from '@on-par/factory-tui';
 import chalk from 'chalk';
 import { Command } from 'commander';
+import { admissionStateReaderFor, runQueueReconcile } from './admission.js';
 import { cmdDaemonLogs, cmdDaemonStart, cmdDaemonStatus, cmdDaemonStop, DaemonCtlError } from './daemon.js';
 import {
   analyzeEventLog,
@@ -2504,6 +2506,22 @@ export async function cmdQueueAdd(lane: string, issueArgs: string[]): Promise<vo
   }
 }
 
+export async function cmdQueueReconcile(opts: { lane?: string } = {}): Promise<void> {
+  const repoRoot = await getRepoRoot();
+  const paths = getFactoryPaths(repoRoot);
+  const [owner, repo] = (await getGitHubRepo()).split('/');
+  const client = createOctokitQueueClient(getOctokit());
+  const { report, conflicts } = await runQueueReconcile({
+    readSnapshot: () => readGithubQueueSnapshot({ client, owner, repo }),
+    reader: admissionStateReaderFor(paths.state),
+    ...(opts.lane === undefined ? {} : { lane: opts.lane }),
+  });
+  console.log(report);
+  if (conflicts > 0) {
+    throw new CliExitError(`factory: ${conflicts} queued issue(s) conflict with Factory App admission state`, 1);
+  }
+}
+
 export function triageNoProposalError(plannerError: unknown): CliExitError {
   const detail = plannerError ? ` — planner failed: ${errorDetail(plannerError)}` : '';
   return new CliExitError(`triage produced no proposal${detail}`, 1);
@@ -2801,7 +2819,15 @@ async function cmdRun(
           client: createOctokitQueueClient(octokit),
           owner,
           repo,
-          preflight: (issue) => preflightQueuedIssue(issue, createQueuePreflightOps(octokit, owner, repo)),
+          preflight: withAdmissionGuard({
+            reader: admissionStateReaderFor(paths.state),
+            preflight: (issue) => preflightQueuedIssue(issue, createQueuePreflightOps(octokit, owner, repo)),
+            onConflict: (issue, verdict) => {
+              const line = `#${issue} refused — ${verdict.reason} | repair: ${verdict.repair}`;
+              console.error(chalk.yellow(`factory: ${line}`));
+              logEvent(paths.events, 'queue_admission_conflict', String(issue), line);
+            },
+          }),
         });
       },
     });
@@ -4381,6 +4407,15 @@ export async function main() {
     )
     .action(async (lane: string, issues: string[]) => {
       await cmdQueueAdd(lane, issues);
+    });
+  queue
+    .command('reconcile')
+    .description(
+      'Report queued GitHub issues that conflict with Factory App admission state, with the repair-flow pointer for each',
+    )
+    .option('--lane <lane>', 'Only reconcile one lane')
+    .action(async (opts: { lane?: string }) => {
+      await cmdQueueReconcile(opts);
     });
 
   const hosted = program

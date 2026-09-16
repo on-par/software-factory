@@ -515,6 +515,14 @@ const INTERNAL_API_KEYS = [
   'queueOrderLabel',
   'queueLabelSpecs',
   'readGithubQueueSnapshot',
+  // Factory App admission-state compatibility (#1497)
+  'ADMISSION_SNAPSHOT_VERSION',
+  'ADMISSION_STATE_FILENAME',
+  'classifyQueueCompatibility',
+  'createFileAdmissionStateReader',
+  'FACTORY_APP_REPAIR_HINT',
+  'formatAdmissionConflict',
+  'withAdmissionGuard',
   // Stale-claim reaping (#999)
   'findStaleClaims',
   'localClaimPid',
