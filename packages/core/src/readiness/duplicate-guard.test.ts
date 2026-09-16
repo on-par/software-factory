@@ -9,7 +9,8 @@ import {
 
 const retryJobsText =
   'Retry failed import jobs failed import jobs retry automatically so transient failures do not lose work';
-const instrumentQueueText = 'Instrument queue throughput queue throughput is visible so operators can spot stalls early';
+const instrumentQueueText =
+  'Instrument queue throughput queue throughput is visible so operators can spot stalls early';
 
 describe('decompositionTextSimilarity', () => {
   it('scores identical text as 1', () => {
@@ -57,9 +58,7 @@ describe('findDuplicateStory', () => {
   });
 
   it('ignores a sibling whose body is null', () => {
-    const duplicate = findDuplicateStory('Retry failed import jobs', [
-      { number: 903, title: '', body: null },
-    ]);
+    const duplicate = findDuplicateStory('Retry failed import jobs', [{ number: 903, title: '', body: null }]);
 
     expect(duplicate).toBeUndefined();
   });

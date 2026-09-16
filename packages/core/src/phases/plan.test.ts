@@ -848,7 +848,7 @@ npm run test`;
         nextIssue += 1;
         return Promise.resolve({ data: { number: nextIssue, id: 6000 + nextIssue } });
       });
-      const request = vi.fn().mockResolvedValue({});
+      const request = vi.fn().mockResolvedValue({ data: [] });
       const events: string[] = [];
 
       const result = await planPhase({
@@ -875,7 +875,7 @@ npm run test`;
       expect(result.decomposed).toEqual({ childIssues: [701] });
       expect(result.escalate).toMatch(/decomposed into #701/);
       expect(create).toHaveBeenCalledTimes(1);
-      expect(request).toHaveBeenCalledTimes(1);
+      expect(request).toHaveBeenCalledTimes(2); // GET duplicate check + POST sub-issue link
       expect(events).toContain('decompose_filed');
       expect(events).toContain('size-gate-escalated');
     });

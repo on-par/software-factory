@@ -41,6 +41,7 @@ export type EventKind =
   | 'conflict'
   | 'constitution'
   | 'decompose_comment_posted'
+  | 'decompose_duplicate_skipped'
   | 'decompose_failed'
   | 'decompose_file_failed'
   | 'decompose_filed'
@@ -209,6 +210,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   conflict: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   constitution: { severity: 'info', isPark: false, isTerminal: false },
   decompose_comment_posted: { severity: 'info', isPark: false, isTerminal: false },
+  decompose_duplicate_skipped: { severity: 'warn', isPark: false, isTerminal: false },
   decompose_failed: { severity: 'warn', isPark: false, isTerminal: false },
   decompose_file_failed: { severity: 'warn', isPark: false, isTerminal: false },
   decompose_filed: { severity: 'info', isPark: false, isTerminal: false },

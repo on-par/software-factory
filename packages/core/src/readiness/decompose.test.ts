@@ -372,7 +372,9 @@ describe('decomposeOversizedIssue', () => {
       nextIssue += 1;
       return Promise.resolve({ data: { number: nextIssue, id: 5000 + nextIssue } });
     });
-    const request = vi.fn().mockResolvedValue({});
+    // Defaults to an empty sub-issues listing for the GET pre-file duplicate check, and
+    // is reused as-is for the POST sub-issue-link calls (their resolved value is unused).
+    const request = vi.fn().mockResolvedValue({ data: [] });
     return {
       octokit: { rest: { issues: { createComment, create } }, request } as any,
       createComment,
@@ -627,14 +629,19 @@ describe('decomposeOversizedIssue', () => {
       title: 'Instrument queue throughput',
       body: expect.stringContaining('## Problem statement'),
     });
-    expect(request).toHaveBeenCalledTimes(2);
-    expect(request).toHaveBeenNthCalledWith(1, 'POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues', {
+    expect(request).toHaveBeenCalledTimes(3);
+    expect(request).toHaveBeenNthCalledWith(1, 'GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues', {
+      owner: 'on-par',
+      repo: 'software-factory',
+      issue_number: 606,
+    });
+    expect(request).toHaveBeenNthCalledWith(2, 'POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues', {
       owner: 'on-par',
       repo: 'software-factory',
       issue_number: 606,
       sub_issue_id: 5901,
     });
-    expect(request).toHaveBeenNthCalledWith(2, 'POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues', {
+    expect(request).toHaveBeenNthCalledWith(3, 'POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues', {
       owner: 'on-par',
       repo: 'software-factory',
       issue_number: 606,
@@ -688,7 +695,7 @@ describe('decomposeOversizedIssue', () => {
     });
 
     expect(result).toEqual({ posted: true, childIssues: [] });
-    expect(request).toHaveBeenCalledTimes(1); // link for the first, successfully-created child
+    expect(request).toHaveBeenCalledTimes(2); // GET duplicate check + link for the first, successfully-created child
     const failed = events.find((e) => e.type === 'decompose_file_failed');
     expect(failed?.msg).toContain('secondary rate limit');
     expect(failed?.msg).toContain('#901');
@@ -698,7 +705,8 @@ describe('decomposeOversizedIssue', () => {
     const stub = new StubModelExecutor({ scripts: { decompose: [{ output: VALID_DECOMPOSITION_JSON }] } });
     const router = new ModelRouter(models, routes, false, stub);
     const { octokit, create, request } = makeOctokit();
-    request.mockRejectedValueOnce(new Error('sub-issues API unavailable'));
+    request.mockResolvedValueOnce({ data: [] }); // GET duplicate check succeeds
+    request.mockRejectedValueOnce(new Error('sub-issues API unavailable')); // first POST link fails
     const { log, events } = makeLog();
 
     const result = await decomposeOversizedIssue({
@@ -755,7 +763,7 @@ describe('fileDecomposition', () => {
       nextIssue += 1;
       return Promise.resolve({ data: { number: nextIssue, id: 5000 + nextIssue } });
     });
-    const request = vi.fn().mockResolvedValue({});
+    const request = vi.fn().mockResolvedValue({ data: [] });
     const octokit: any = { rest: { issues: { createComment, create } }, request };
     const events: { type: string; msg: string }[] = [];
 
@@ -769,6 +777,122 @@ describe('fileDecomposition', () => {
 
     expect(childIssues).toEqual([901, 902]);
     expect(events.some((e) => e.type === 'decompose_filed')).toBe(true);
+  });
+
+  it('blocks the entire batch and posts a warning comment when a story closely matches an existing open sibling', async () => {
+    const parsed = parseDecompositionOutput(VALID_DECOMPOSITION_JSON);
+    if (!parsed.ok) throw new Error('fixture must parse');
+    const [firstStory] = parsed.decomposition.stories;
+    const createComment = vi.fn().mockResolvedValue({});
+    const create = vi.fn();
+    const request = vi.fn().mockResolvedValue({
+      data: [{ number: 700, title: firstStory.title, body: renderChildIssueBody(firstStory, 606), state: 'open' }],
+    });
+    const octokit: any = { rest: { issues: { createComment, create } }, request };
+    const events: { type: string; msg: string }[] = [];
+
+    const childIssues = await fileDecomposition({
+      decomposition: parsed.decomposition,
+      issue: 606,
+      repo: 'on-par/software-factory',
+      octokit,
+      log: (type, msg) => events.push({ type, msg }),
+    });
+
+    expect(childIssues).toEqual([]);
+    expect(create).not.toHaveBeenCalled();
+    expect(createComment).toHaveBeenCalledTimes(1);
+    expect(createComment).toHaveBeenCalledWith({
+      owner: 'on-par',
+      repo: 'software-factory',
+      issue_number: 606,
+      body: expect.stringContaining('#700'),
+    });
+    const skipped = events.find((e) => e.type === 'decompose_duplicate_skipped');
+    expect(skipped?.msg).toContain('#700');
+    expect(skipped?.msg).toContain(firstStory.title);
+  });
+
+  it('ignores closed sibling issues when checking for duplicates', async () => {
+    const parsed = parseDecompositionOutput(VALID_DECOMPOSITION_JSON);
+    if (!parsed.ok) throw new Error('fixture must parse');
+    const [firstStory] = parsed.decomposition.stories;
+    const createComment = vi.fn().mockResolvedValue({});
+    let nextIssue = 900;
+    const create = vi.fn().mockImplementation(() => {
+      nextIssue += 1;
+      return Promise.resolve({ data: { number: nextIssue, id: 5000 + nextIssue } });
+    });
+    const request = vi.fn().mockImplementation((route: string) => {
+      if (route.startsWith('GET')) {
+        return Promise.resolve({
+          data: [
+            { number: 700, title: firstStory.title, body: renderChildIssueBody(firstStory, 606), state: 'closed' },
+          ],
+        });
+      }
+      return Promise.resolve({});
+    });
+    const octokit: any = { rest: { issues: { createComment, create } }, request };
+    const events: { type: string; msg: string }[] = [];
+
+    const childIssues = await fileDecomposition({
+      decomposition: parsed.decomposition,
+      issue: 606,
+      repo: 'on-par/software-factory',
+      octokit,
+      log: (type, msg) => events.push({ type, msg }),
+    });
+
+    expect(childIssues).toEqual([901, 902]);
+    expect(events.some((e) => e.type === 'decompose_duplicate_skipped')).toBe(false);
+  });
+
+  it('fails closed (files nothing) when the sibling listing request throws (ADR-0018)', async () => {
+    const parsed = parseDecompositionOutput(VALID_DECOMPOSITION_JSON);
+    if (!parsed.ok) throw new Error('fixture must parse');
+    const createComment = vi.fn().mockResolvedValue({});
+    const create = vi.fn();
+    const request = vi.fn().mockRejectedValue(new Error('rate limited'));
+    const octokit: any = { rest: { issues: { createComment, create } }, request };
+    const events: { type: string; msg: string }[] = [];
+
+    const childIssues = await fileDecomposition({
+      decomposition: parsed.decomposition,
+      issue: 606,
+      repo: 'on-par/software-factory',
+      octokit,
+      log: (type, msg) => events.push({ type, msg }),
+    });
+
+    expect(childIssues).toEqual([]);
+    expect(create).not.toHaveBeenCalled();
+    expect(createComment).not.toHaveBeenCalled();
+    const failed = events.find((e) => e.type === 'decompose_file_failed');
+    expect(failed?.msg).toContain('rate limited');
+  });
+
+  it('fails closed (files nothing) when the sibling listing does not return an array (ADR-0018)', async () => {
+    const parsed = parseDecompositionOutput(VALID_DECOMPOSITION_JSON);
+    if (!parsed.ok) throw new Error('fixture must parse');
+    const createComment = vi.fn().mockResolvedValue({});
+    const create = vi.fn();
+    const request = vi.fn().mockResolvedValue({ data: 'not-an-array' });
+    const octokit: any = { rest: { issues: { createComment, create } }, request };
+    const events: { type: string; msg: string }[] = [];
+
+    const childIssues = await fileDecomposition({
+      decomposition: parsed.decomposition,
+      issue: 606,
+      repo: 'on-par/software-factory',
+      octokit,
+      log: (type, msg) => events.push({ type, msg }),
+    });
+
+    expect(childIssues).toEqual([]);
+    expect(create).not.toHaveBeenCalled();
+    const failed = events.find((e) => e.type === 'decompose_file_failed');
+    expect(failed?.msg).toContain('did not return an array');
   });
 });
 
