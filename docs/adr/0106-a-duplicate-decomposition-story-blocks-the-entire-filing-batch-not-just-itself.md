@@ -13,13 +13,13 @@ scratch and, when `fileSubIssues` is set (ADR-0043's pre-flight gate path), file
 as a new linked sub-issue regardless of what already exists under the parent.
 
 Closing that requires a pre-file duplicate check against the parent's existing open sub-issues.
-Once a check exists, a choice remains for what happens when it fires and only *some* of the
+Once a check exists, a choice remains for what happens when it fires and only _some_ of the
 proposed stories match an existing sibling: file the ones that don't match and skip only the
 duplicates, or refuse to file anything from that decomposition run. The two options trade off
 differently. Filing the non-duplicate remainder maximizes forward progress on a single run, but
 a decomposition batch is not a set of independent stories — `epic.children` declares a build
 order, `story.sequencing` narrates position within that order ("second slice", "story 2 of 3"),
-and each story's INVEST validation already runs over the *whole* batch before anything is filed
+and each story's INVEST validation already runs over the _whole_ batch before anything is filed
 (`validateDecomposition`). Silently dropping one story from the middle of a declared sequence
 produces a build order with a hole in it, sequencing text that references a story that was never
 filed, and a set of children that no longer matches what the epic comment on the parent
