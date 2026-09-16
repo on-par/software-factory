@@ -372,23 +372,25 @@ describe('formatClaimReconcileReport', () => {
   });
 
   it('reports a released claim', () => {
-    const report = formatClaimReconcileReport([{ issue: 42, pid: 777, released: true }]);
-    expect(report).toBe('reconcile: released issue #42 back to factory:queued (dead pid 777)');
+    const report = formatClaimReconcileReport([{ issue: 42, expiresAt: 1_700_000_000, released: true }]);
+    expect(report).toBe('reconcile: released issue #42 back to factory:queued (lease expired at 1700000000)');
   });
 
   it('reports a failed release with its detail', () => {
-    const report = formatClaimReconcileReport([{ issue: 42, pid: 777, released: false, detail: 'boom' }]);
-    expect(report).toBe('reconcile: failed to release issue #42 (dead pid 777) — boom');
+    const report = formatClaimReconcileReport([
+      { issue: 42, expiresAt: 1_700_000_000, released: false, detail: 'boom' },
+    ]);
+    expect(report).toBe('reconcile: failed to release issue #42 (lease expired at 1700000000) — boom');
   });
 
   it('joins multiple entries with a single newline', () => {
     const report = formatClaimReconcileReport([
-      { issue: 42, pid: 777, released: true },
-      { issue: 43, pid: 778, released: false, detail: 'boom' },
+      { issue: 42, expiresAt: 1_700_000_000, released: true },
+      { issue: 43, expiresAt: 1_700_000_100, released: false, detail: 'boom' },
     ]);
     expect(report).toBe(
-      'reconcile: released issue #42 back to factory:queued (dead pid 777)\n' +
-        'reconcile: failed to release issue #43 (dead pid 778) — boom',
+      'reconcile: released issue #42 back to factory:queued (lease expired at 1700000000)\n' +
+        'reconcile: failed to release issue #43 (lease expired at 1700000100) — boom',
     );
   });
 });

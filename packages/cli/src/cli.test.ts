@@ -3283,6 +3283,44 @@ describe('cli', () => {
       ]);
     });
 
+    it('heartbeats the claim lease every 5 minutes while ship/waitMerge are in flight, and stops once they settle (#1500)', async () => {
+      vi.useFakeTimers();
+      try {
+        const heartbeats: number[] = [];
+        let resolveShip!: () => void;
+        const shipGate = new Promise<void>((resolve) => {
+          resolveShip = resolve;
+        });
+
+        const runPromise = runLane('app', [9], '/repo', 'on-par/software-factory', paths, {
+          ship: async (issue) => {
+            await shipGate;
+            return `ship-it/${issue}-x`;
+          },
+          waitMerge: async () => {},
+          releaseIssue: async () => {},
+          heartbeat: async (issue) => {
+            heartbeats.push(issue);
+          },
+          pathExists: () => false,
+          emitEvent: () => {},
+        });
+
+        await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+        await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+        expect(heartbeats).toEqual([9, 9]);
+
+        resolveShip();
+        await runPromise;
+
+        // No further heartbeats fire once ship/waitMerge have both settled.
+        await vi.advanceTimersByTimeAsync(20 * 60 * 1000);
+        expect(heartbeats).toEqual([9, 9]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('parks a preflight claim without invoking shipIssue and leaves another lane independent', async () => {
       const parked: any[] = [];
       const finished: any[] = [];
@@ -4127,6 +4165,7 @@ describe('cli', () => {
         release: async (issue, outcome) => {
           calls.push(['release', issue, outcome]);
         },
+        heartbeat: async () => true,
         list: async () => [],
         lanes: async () => ['app', 'infra'],
         migrateLocalQueue: async () => {},
@@ -4161,6 +4200,7 @@ describe('cli', () => {
       const fakeQueue: GithubQueue = {
         claimNext: async () => null,
         release: async () => {},
+        heartbeat: async () => true,
         list: async () => [],
         lanes: async () => [],
         migrateLocalQueue: async () => {},
@@ -4180,7 +4220,7 @@ describe('cli', () => {
   });
 
   describe('laneQueueDeps', () => {
-    it('binds claimNext, releaseIssue, and countRemaining to the given lane through the queue', async () => {
+    it('binds claimNext, releaseIssue, heartbeat, and countRemaining to the given lane through the queue', async () => {
       const calls: any[] = [];
       const fakeQueue: GithubQueue = {
         claimNext: async (lane) => {
@@ -4189,6 +4229,10 @@ describe('cli', () => {
         },
         release: async (issue, outcome) => {
           calls.push(['release', issue, outcome]);
+        },
+        heartbeat: async (issue) => {
+          calls.push(['heartbeat', issue]);
+          return true;
         },
         list: async (lane) => {
           calls.push(['list', lane]);
@@ -4202,11 +4246,13 @@ describe('cli', () => {
       const deps = laneQueueDeps(fakeQueue, 'app');
       expect(await deps.claimNext!()).toEqual({ issue: 3, decision: { kind: 'build' } });
       await deps.releaseIssue!(3, 'done');
+      expect(await deps.heartbeat!(3)).toBe(true);
       expect(await deps.countRemaining!()).toBe(2);
 
       expect(calls).toEqual([
         ['claimNext', 'app'],
         ['release', 3, 'done'],
+        ['heartbeat', 3],
         ['list', 'app'],
       ]);
     });

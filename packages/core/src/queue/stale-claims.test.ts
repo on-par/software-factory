@@ -1,17 +1,13 @@
-// packages/core/src/queue/stale-claims.test.ts — Dead-pid claim detection and release (#999).
+// packages/core/src/queue/stale-claims.test.ts — Expired-lease claim detection and release (#1500).
 
 import { describe, expect, it, vi } from 'vitest';
 
-import {
-  claimedByLabel,
-  defaultClaimantId,
-  IN_PROGRESS_LABEL,
-  type QueueGitHubClient,
-  type QueueIssue,
-} from './github-queue.js';
-import { findStaleClaims, localClaimPid, releaseStaleClaims } from './stale-claims.js';
+import { claimExpiresLabel, IN_PROGRESS_LABEL, type QueueGitHubClient, type QueueIssue } from './github-queue.js';
+import { findStaleClaims, releaseStaleClaims } from './stale-claims.js';
 
-const HOST = 'test-host';
+const NOW_MS = 1_700_000_000_000;
+const NOW_SECONDS = Math.floor(NOW_MS / 1000);
+const now = () => NOW_MS;
 
 function createFakeStore(issues: Array<{ number: number; labels: string[] }>) {
   const state = new Map<number, Set<string>>(issues.map((i) => [i.number, new Set(i.labels)]));
@@ -43,79 +39,59 @@ function createFakeStore(issues: Array<{ number: number; labels: string[] }>) {
   return { state, client };
 }
 
-describe('localClaimPid', () => {
-  const label = claimedByLabel(defaultClaimantId(HOST, 4242));
-
-  it('returns the pid for a label minted by the same host', () => {
-    expect(localClaimPid(label, HOST)).toBe(4242);
-  });
-
-  it('returns null for a different host', () => {
-    expect(localClaimPid(label, 'other-host')).toBeNull();
-  });
-
-  it('returns null for a label with no trailing -<digits>', () => {
-    expect(localClaimPid('factory:claimed-by:test-host', HOST)).toBeNull();
-  });
-
-  it('returns null for a non-claim label', () => {
-    expect(localClaimPid('factory:queued', HOST)).toBeNull();
-  });
-});
-
 describe('findStaleClaims', () => {
-  it('returns an issue whose single claim label names a dead local pid', () => {
-    const label = claimedByLabel(defaultClaimantId(HOST, 111));
+  it('returns an issue whose lease has expired', () => {
+    const label = claimExpiresLabel(NOW_SECONDS - 60);
     const issues: QueueIssue[] = [{ number: 1, labels: [IN_PROGRESS_LABEL, label] }];
-    const stale = findStaleClaims(issues, { host: HOST, isPidAlive: () => false });
-    expect(stale).toEqual([{ issue: 1, label, pid: 111 }]);
+    const stale = findStaleClaims(issues, { now });
+    expect(stale).toEqual([{ issue: 1, label, expiresAt: NOW_SECONDS - 60 }]);
   });
 
-  it('skips an issue whose claim pid is alive', () => {
-    const label = claimedByLabel(defaultClaimantId(HOST, 111));
+  it('skips an issue whose lease has not yet expired', () => {
+    const label = claimExpiresLabel(NOW_SECONDS + 60);
     const issues: QueueIssue[] = [{ number: 1, labels: [IN_PROGRESS_LABEL, label] }];
-    const stale = findStaleClaims(issues, { host: HOST, isPidAlive: () => true });
+    const stale = findStaleClaims(issues, { now });
     expect(stale).toEqual([]);
   });
 
-  it('skips an issue whose claim label was minted by another host', () => {
-    const label = claimedByLabel(defaultClaimantId('other-host', 111));
+  it('treats an issue at the exact expiry second as stale (the deadline has passed)', () => {
+    const label = claimExpiresLabel(NOW_SECONDS);
     const issues: QueueIssue[] = [{ number: 1, labels: [IN_PROGRESS_LABEL, label] }];
-    const stale = findStaleClaims(issues, { host: HOST, isPidAlive: () => false });
-    expect(stale).toEqual([]);
+    const stale = findStaleClaims(issues, { now });
+    expect(stale).toEqual([{ issue: 1, label, expiresAt: NOW_SECONDS }]);
   });
 
-  it('skips an issue carrying factory:in-progress but no claim label', () => {
+  it('skips an issue carrying factory:in-progress but no lease label', () => {
     const issues: QueueIssue[] = [{ number: 1, labels: [IN_PROGRESS_LABEL] }];
-    const stale = findStaleClaims(issues, { host: HOST, isPidAlive: () => false });
+    const stale = findStaleClaims(issues, { now });
     expect(stale).toEqual([]);
   });
 
-  it('skips an issue carrying one dead-local and one live/foreign claim label', () => {
-    const deadLabel = claimedByLabel(defaultClaimantId(HOST, 111));
-    const foreignLabel = claimedByLabel(defaultClaimantId('other-host', 222));
-    const issues: QueueIssue[] = [{ number: 1, labels: [IN_PROGRESS_LABEL, deadLabel, foreignLabel] }];
-    const stale = findStaleClaims(issues, { host: HOST, isPidAlive: () => false });
+  it('skips an issue carrying one expired and one still-live lease label', () => {
+    const expired = claimExpiresLabel(NOW_SECONDS - 60);
+    const live = claimExpiresLabel(NOW_SECONDS + 60);
+    const issues: QueueIssue[] = [{ number: 1, labels: [IN_PROGRESS_LABEL, expired, live] }];
+    const stale = findStaleClaims(issues, { now });
     expect(stale).toEqual([]);
+  });
+
+  it('is evaluable identically regardless of which host reaps it — no host/pid evidence involved', () => {
+    const label = claimExpiresLabel(NOW_SECONDS - 1);
+    const issues: QueueIssue[] = [{ number: 1, labels: [IN_PROGRESS_LABEL, label] }];
+    expect(findStaleClaims(issues, { now })).toEqual(findStaleClaims(issues, { now }));
   });
 });
 
 describe('releaseStaleClaims', () => {
-  it('removes factory:in-progress and the claim label, re-adds factory:queued, leaves lane/order labels', async () => {
-    const label = claimedByLabel(defaultClaimantId(HOST, 111));
+  it('removes factory:in-progress and the lease label, re-adds factory:queued, leaves lane/order labels', async () => {
+    const label = claimExpiresLabel(NOW_SECONDS - 60);
     const { state, client } = createFakeStore([
       { number: 1, labels: [IN_PROGRESS_LABEL, label, 'factory:lane:default', 'factory:order:3'] },
     ]);
 
-    const results = await releaseStaleClaims({
-      client,
-      owner: 'o',
-      repo: 'r',
-      host: HOST,
-      isPidAlive: () => false,
-    });
+    const results = await releaseStaleClaims({ client, owner: 'o', repo: 'r', now });
 
-    expect(results).toEqual([{ issue: 1, label, pid: 111, released: true }]);
+    expect(results).toEqual([{ issue: 1, label, expiresAt: NOW_SECONDS - 60, released: true }]);
     expect([...state.get(1)!].sort()).toEqual(['factory:lane:default', 'factory:order:3', 'factory:queued'].sort());
   });
 
@@ -124,7 +100,7 @@ describe('releaseStaleClaims', () => {
     const addLabels = vi.spyOn(client, 'addLabels');
     const removeLabel = vi.spyOn(client, 'removeLabel');
 
-    const results = await releaseStaleClaims({ client, owner: 'o', repo: 'r', host: HOST, isPidAlive: () => false });
+    const results = await releaseStaleClaims({ client, owner: 'o', repo: 'r', now });
 
     expect(results).toEqual([]);
     expect(addLabels).not.toHaveBeenCalled();
@@ -132,8 +108,8 @@ describe('releaseStaleClaims', () => {
   });
 
   it('records released: false with the error message when one issue fails, and still releases the other', async () => {
-    const label1 = claimedByLabel(defaultClaimantId(HOST, 111));
-    const label2 = claimedByLabel(defaultClaimantId(HOST, 222));
+    const label1 = claimExpiresLabel(NOW_SECONDS - 60);
+    const label2 = claimExpiresLabel(NOW_SECONDS - 30);
     const { state, client } = createFakeStore([
       { number: 1, labels: [IN_PROGRESS_LABEL, label1] },
       { number: 2, labels: [IN_PROGRESS_LABEL, label2] },
@@ -144,11 +120,11 @@ describe('releaseStaleClaims', () => {
       return originalRemoveLabel(input);
     };
 
-    const results = await releaseStaleClaims({ client, owner: 'o', repo: 'r', host: HOST, isPidAlive: () => false });
+    const results = await releaseStaleClaims({ client, owner: 'o', repo: 'r', now });
 
     expect(results).toEqual([
-      { issue: 1, label: label1, pid: 111, released: false, detail: 'boom' },
-      { issue: 2, label: label2, pid: 222, released: true },
+      { issue: 1, label: label1, expiresAt: NOW_SECONDS - 60, released: false, detail: 'boom' },
+      { issue: 2, label: label2, expiresAt: NOW_SECONDS - 30, released: true },
     ]);
     expect(state.get(2)!.has('factory:queued')).toBe(true);
   });

@@ -294,13 +294,17 @@ export type {
 export {
   claimedByLabel,
   CLAIMED_BY_LABEL_PREFIX,
+  claimExpiresLabel,
+  CLAIM_EXPIRES_LABEL_PREFIX,
   createGithubQueue,
   createOctokitQueueClient,
   defaultClaimantId,
+  DEFAULT_CLAIM_LEASE_MS,
   IN_PROGRESS_LABEL,
   LANE_LABEL_PREFIX,
   laneLabel,
   MAX_LABEL_NAME_LENGTH,
+  parseClaimExpiresLabel,
   PARKED_LABEL,
   planQueueMigration,
   QUEUED_LABEL,
@@ -329,9 +333,9 @@ export {
   withAdmissionGuard,
 } from './admission/index.js';
 
-// Stale-claim reaping (#999)
+// Stale-claim reaping (#999, lease-based since #1500)
 export type { ReleaseStaleClaimsOptions, StaleClaim, StaleClaimRelease } from './queue/stale-claims.js';
-export { findStaleClaims, localClaimPid, releaseStaleClaims } from './queue/stale-claims.js';
+export { findStaleClaims, releaseStaleClaims } from './queue/stale-claims.js';
 
 // Green-and-ready PR reporting (#1000)
 export type {

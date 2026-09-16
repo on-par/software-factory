@@ -5,13 +5,17 @@ import { describe, expect, it } from 'vitest';
 import {
   CLAIMED_BY_LABEL_PREFIX,
   claimedByLabel,
+  claimExpiresLabel,
+  CLAIM_EXPIRES_LABEL_PREFIX,
   createGithubQueue,
   createOctokitQueueClient,
   defaultClaimantId,
+  DEFAULT_CLAIM_LEASE_MS,
   IN_PROGRESS_LABEL,
   LANE_LABEL_PREFIX,
   laneLabel,
   MAX_LABEL_NAME_LENGTH,
+  parseClaimExpiresLabel,
   PARKED_LABEL,
   planQueueMigration,
   QUEUED_LABEL,
@@ -101,6 +105,28 @@ describe('label taxonomy', () => {
   it('falls back to "unknown" when nothing survives slugification', () => {
     expect(laneLabel('!!!')).toBe('factory:lane:unknown');
     expect(claimedByLabel('!!!')).toBe('factory:claimed-by:unknown');
+  });
+});
+
+describe('claimExpiresLabel / parseClaimExpiresLabel', () => {
+  it('exposes the prefix and default lease constants', () => {
+    expect(CLAIM_EXPIRES_LABEL_PREFIX).toBe('factory:claim-expires:');
+    expect(DEFAULT_CLAIM_LEASE_MS).toBe(15 * 60 * 1000);
+  });
+
+  it('round-trips an epoch-second expiry through the label and back', () => {
+    expect(claimExpiresLabel(1_700_000_000)).toBe('factory:claim-expires:1700000000');
+    expect(parseClaimExpiresLabel('factory:claim-expires:1700000000')).toBe(1_700_000_000);
+  });
+
+  it.each([-1, 1.5, Number.MAX_SAFE_INTEGER + 1])('rejects an invalid expiry: %s', (value) => {
+    expect(() => claimExpiresLabel(value)).toThrow(RangeError);
+  });
+
+  it('parseClaimExpiresLabel returns null for a non-matching or malformed label', () => {
+    expect(parseClaimExpiresLabel(QUEUED_LABEL)).toBeNull();
+    expect(parseClaimExpiresLabel('factory:claim-expires:not-a-number')).toBeNull();
+    expect(parseClaimExpiresLabel('factory:claim-expires:')).toBeNull();
   });
 });
 
@@ -292,6 +318,21 @@ describe('claimNext', () => {
     expect(labels?.has(QUEUED_LABEL)).toBe(false);
   });
 
+  it('mints a claim-expires label leaseMs in the future, ensured before it is applied', async () => {
+    const { client, state, createdLabels } = createFakeStore([
+      { number: 1, labels: [QUEUED_LABEL, laneLabel('build'), queueOrderLabel(1)] },
+    ]);
+    const nowMs = 1_700_000_000_000;
+    const leaseMs = 10 * 60 * 1000;
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1', now: () => nowMs, leaseMs });
+
+    await queue.claimNext('build');
+
+    const expiresLabel = claimExpiresLabel(Math.floor((nowMs + leaseMs) / 1000));
+    expect(state.get(1)?.has(expiresLabel)).toBe(true);
+    expect(createdLabels.has(expiresLabel)).toBe(true);
+  });
+
   it('creates every taxonomy label on first claim and memoises on the next claim for the same lane', async () => {
     const { client, createdLabels, calls } = createFakeStore([
       { number: 1, labels: [QUEUED_LABEL, laneLabel('build'), queueOrderLabel(1)] },
@@ -304,11 +345,13 @@ describe('claimNext', () => {
     for (const spec of specs) {
       expect(createdLabels.has(spec.name)).toBe(true);
     }
+    // +1: the per-claim claim-expires label, ensured fresh on every claim since its value
+    // (the lease expiry) differs each time — unlike the five memoised lane/claimant labels.
     const ensureCallsAfterFirst = calls.filter((c) => c === 'ensureLabel').length;
-    expect(ensureCallsAfterFirst).toBe(specs.length);
+    expect(ensureCallsAfterFirst).toBe(specs.length + 1);
 
     await queue.claimNext('build');
-    expect(calls.filter((c) => c === 'ensureLabel').length).toBe(ensureCallsAfterFirst);
+    expect(calls.filter((c) => c === 'ensureLabel').length).toBe(ensureCallsAfterFirst + 1);
   });
 
   it('skips a candidate already in progress and claims the next one', async () => {
@@ -520,6 +563,50 @@ describe('simulated concurrent claimNext (race)', () => {
   });
 });
 
+describe('heartbeat', () => {
+  it("refreshes this claimant's lease, replacing the old expiry label with a later one", async () => {
+    const { client, state } = createFakeStore([
+      { number: 1, labels: [QUEUED_LABEL, laneLabel('build'), queueOrderLabel(1)] },
+    ]);
+    let nowMs = 1_700_000_000_000;
+    const leaseMs = 10 * 60 * 1000;
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1', now: () => nowMs, leaseMs });
+    await queue.claimNext('build');
+    const firstExpiry = claimExpiresLabel(Math.floor((nowMs + leaseMs) / 1000));
+    expect(state.get(1)?.has(firstExpiry)).toBe(true);
+
+    nowMs += 5 * 60 * 1000;
+    const refreshed = await queue.heartbeat(1);
+
+    expect(refreshed).toBe(true);
+    const labels = state.get(1) ?? new Set<string>();
+    const expiryLabels = [...labels].filter((l) => l.startsWith(CLAIM_EXPIRES_LABEL_PREFIX));
+    expect(expiryLabels).toEqual([claimExpiresLabel(Math.floor((nowMs + leaseMs) / 1000))]);
+  });
+
+  it('is a no-op and returns false when this claimant no longer holds the issue', async () => {
+    const { client, state } = createFakeStore([{ number: 1, labels: [QUEUED_LABEL] }]);
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    const refreshed = await queue.heartbeat(1);
+
+    expect(refreshed).toBe(false);
+    expect([...(state.get(1) ?? [])].some((l) => l.startsWith(CLAIM_EXPIRES_LABEL_PREFIX))).toBe(false);
+  });
+
+  it('does not refresh a lease minted by a different claimant', async () => {
+    const { client, state } = createFakeStore([
+      { number: 1, labels: [IN_PROGRESS_LABEL, claimedByLabel('other-1'), claimExpiresLabel(1_700_000_000)] },
+    ]);
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    const refreshed = await queue.heartbeat(1);
+
+    expect(refreshed).toBe(false);
+    expect(state.get(1)?.has(claimExpiresLabel(1_700_000_000))).toBe(true);
+  });
+});
+
 describe('release', () => {
   it('restores factory:queued after a claim, and the issue becomes claimable again', async () => {
     const { client, state } = createFakeStore([
@@ -535,6 +622,7 @@ describe('release', () => {
     expect(labels.has(queueOrderLabel(1))).toBe(true);
     expect(labels.has(IN_PROGRESS_LABEL)).toBe(false);
     expect([...labels].some((l) => l.startsWith(CLAIMED_BY_LABEL_PREFIX))).toBe(false);
+    expect([...labels].some((l) => l.startsWith(CLAIM_EXPIRES_LABEL_PREFIX))).toBe(false);
 
     expect(await queue.claimNext('build')).toEqual({ issue: 1, decision: { kind: 'build' } });
   });
