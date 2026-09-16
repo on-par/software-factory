@@ -166,6 +166,70 @@ All children close.
     expect(result.pass).toBe(true);
   });
 
+  it('detects an epic from an "Epic:" colon-prefixed title', () => {
+    const body = `
+### Why
+
+Because.
+
+### Children
+
+- [ ] #1
+
+### Done when
+
+All children close.
+`;
+    const result = scoreIssueReadiness({ title: 'Epic: Ship the thing', body });
+    expect(result.template).toBe('epic');
+    expect(result.pass).toBe(true);
+  });
+
+  it('scores a "Scope / Success means" house-style epic body (#1504) as fully ready', () => {
+    const body = `Make onboarding a repo on a new device possible from the app without curl commands, hand-edited registry files, or hidden machine-local setup.
+
+Scope:
+- Attach a validated local checkout to factoryd from the app.
+- Show prerequisite failures with specific remediation.
+
+Success means:
+- A device operator can add a repo from the app.
+- Invalid repos fail closed with a clear fix.
+
+Context:
+- Requested by Patrick in #software-factory on 2026-09-12.
+`;
+    const result = scoreIssueReadiness({
+      title: 'Epic: Factory app repo onboarding parity across devices',
+      body,
+    });
+    expect(result.template).toBe('epic');
+    expect(result.score).toBe(1);
+    expect(result.pass).toBe(true);
+    expect(result.missing).toEqual([]);
+  });
+
+  it('treats a house-style epic missing its preamble (no "Why") as missing', () => {
+    const body = `Scope:
+- Attach a validated local checkout to factoryd from the app.
+
+Success means:
+- A device operator can add a repo from the app.
+`;
+    const result = scoreIssueReadiness({ title: 'Epic: No preamble', body });
+    expect(result.missing).toContain('Why');
+  });
+
+  it('does not read a "Label:"-only line as a heading for a non-epic body', () => {
+    const body = COMPLETE_FACTORY_TASK_BODY.replace(
+      '### Problem statement\n\nThe widget flickers on load.\n',
+      '### Problem statement\n\nThe widget flickers on load.\n\nNote:\n\nThis should stay part of the same section.\n',
+    );
+    const result = scoreIssueReadiness({ title: 'Fix widget flicker', body });
+    expect(result.template).toBe('factory-task');
+    expect(result.pass).toBe(true);
+  });
+
   it('detects a factory-bug from an Observed behavior heading', () => {
     const body = `
 ### Observed behavior
@@ -375,5 +439,44 @@ describe('extractIssueSections', () => {
     expect(sections.get('problem statement')).toBe('Something is wrong.');
     expect(sections.get('acceptance criteria')).toBe('```py\n# not a heading\n```\n\n- [ ] it works');
     expect(sections.has('not a heading')).toBe(false);
+  });
+
+  it('with labelLineHeadings, captures unheaded leading content as a preamble section', () => {
+    const body = 'Some preamble text.\nMore preamble.\n\nScope:\n- one thing\n';
+    const sections = extractIssueSections(body, { labelLineHeadings: true });
+    expect(sections.get('preamble')).toBe('Some preamble text.\nMore preamble.');
+    expect(sections.get('scope')).toBe('- one thing');
+  });
+
+  it('without labelLineHeadings, a "Label:"-only line is not treated as a heading', () => {
+    const body = 'Scope:\n- one thing\n';
+    const sections = extractIssueSections(body);
+    expect(sections.has('scope')).toBe(false);
+  });
+
+  it('with labelLineHeadings, sets no preamble section when there is no leading content', () => {
+    const body = 'Scope:\n- one thing\n';
+    const sections = extractIssueSections(body, { labelLineHeadings: true });
+    expect(sections.has('preamble')).toBe(false);
+  });
+});
+
+describe('findSection synonyms', () => {
+  it('falls back to a synonym heading when the primary field is absent', () => {
+    const sections = extractIssueSections('Scope:\n- child issue\n', { labelLineHeadings: true });
+    expect(findSection(sections, 'Children', ['scope'])).toBe('- child issue');
+  });
+
+  it('prefers the field itself over a synonym when both are present', () => {
+    const sections = new Map([
+      ['children', '- the real children'],
+      ['scope', '- the synonym'],
+    ]);
+    expect(findSection(sections, 'Children', ['scope'])).toBe('- the real children');
+  });
+
+  it('returns undefined when neither the field nor any synonym is present', () => {
+    const sections = new Map<string, string>();
+    expect(findSection(sections, 'Children', ['scope'])).toBeUndefined();
   });
 });
