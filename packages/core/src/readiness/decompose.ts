@@ -22,6 +22,8 @@ import { z } from 'zod';
 import type { EventKind } from '../events/kinds.js';
 import type { ModelRouter } from '../router/index.js';
 import type { FailoverReason } from '../types/index.js';
+import { findDuplicateStory } from './duplicate-guard.js';
+import type { SiblingIssue } from './duplicate-guard.js';
 import { MAX_ACCEPTANCE_CRITERIA_ITEMS, MAX_IN_SCOPE_ITEMS } from './size.js';
 
 const errorDetail = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -407,10 +409,49 @@ export function renderChildIssueBody(story: Story, parentIssue: number): string 
 }
 
 /**
+ * Fetches the parent issue's existing open native sub-issues (ADR-0043 linking). Follows
+ * ADR-0018's fail-closed rule: an unverified listing (request throws, or a payload that
+ * doesn't parse to an array) is never treated as "no siblings" — the caller must abort
+ * filing rather than risk re-filing something already there.
+ */
+async function fetchOpenSiblingIssues(deps: {
+  owner: string;
+  repo: string;
+  issue: number;
+  octokit: Octokit;
+}): Promise<{ ok: true; siblings: SiblingIssue[] } | { ok: false; detail: string }> {
+  const { owner, repo, issue, octokit } = deps;
+  try {
+    const response = await octokit.request('GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues', {
+      owner,
+      repo,
+      issue_number: issue,
+    });
+    if (!Array.isArray(response.data)) {
+      return { ok: false, detail: 'sub-issues listing did not return an array' };
+    }
+    const siblings: SiblingIssue[] = response.data
+      .filter((sibling: { state?: string }) => sibling.state === 'open')
+      .map((sibling: { number: number; title: string; body?: string | null }) => ({
+        number: sibling.number,
+        title: sibling.title,
+        body: sibling.body ?? null,
+      }));
+    return { ok: true, siblings };
+  } catch (error) {
+    return { ok: false, detail: errorDetail(error) };
+  }
+}
+
+/**
  * Files one factory-task-shaped GitHub issue per story and links each as a native
- * sub-issue of the original issue. A create failure aborts the whole batch (a partially
- * filed decomposition must never read as success) and returns []; a link failure keeps
- * going since the child issue already exists and is still queueable on its own.
+ * sub-issue of the original issue. Before filing anything, checks every proposed story
+ * against the parent's existing open sub-issues (Jaccard title+body similarity,
+ * duplicate-guard.ts); a close match blocks the entire batch and posts a warning comment
+ * instead of silently re-filing (#1502). A create failure aborts the whole batch (a
+ * partially filed decomposition must never read as success) and returns []; a link
+ * failure keeps going since the child issue already exists and is still queueable on its
+ * own.
  */
 export async function fileDecomposition(deps: {
   decomposition: DecompositionOutput;
@@ -422,6 +463,42 @@ export async function fileDecomposition(deps: {
   const { decomposition, issue, repo, octokit, log } = deps;
   const [owner, name] = repo.split('/');
   const childIssues: number[] = [];
+
+  const siblingResult = await fetchOpenSiblingIssues({ owner, repo: name, issue, octokit });
+  if (!siblingResult.ok) {
+    log(
+      'decompose_file_failed',
+      `could not verify #${issue}'s existing sub-issues before filing: ${siblingResult.detail}`,
+    );
+    return [];
+  }
+
+  for (const story of decomposition.stories) {
+    const duplicate = findDuplicateStory(
+      `${story.title} ${renderChildIssueBody(story, issue)}`,
+      siblingResult.siblings,
+    );
+    if (duplicate !== undefined) {
+      log(
+        'decompose_duplicate_skipped',
+        `story "${story.title}" is ${Math.round(duplicate.similarity * 100)}% similar to existing sibling #${duplicate.number} ("${duplicate.title}") under #${issue} — skipping the entire batch instead of filing`,
+      );
+      try {
+        await octokit.rest.issues.createComment({
+          owner,
+          repo: name,
+          issue_number: issue,
+          body: `⚠️ Decomposition blocked: proposed story "${story.title}" closely matches existing sibling #${duplicate.number} ("${duplicate.title}"). No child issues were filed. Review the existing sub-issues under this parent before re-running decomposition.`,
+        });
+      } catch (error) {
+        log(
+          'decompose_file_failed',
+          `failed to post the duplicate-decomposition warning comment on #${issue}: ${errorDetail(error)}`,
+        );
+      }
+      return [];
+    }
+  }
 
   for (const story of decomposition.stories) {
     let created: { number: number; id: number };
