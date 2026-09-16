@@ -1,6 +1,6 @@
 # ADR-0060: A stale claim is one whose claimed-by label round-trips to this host and whose pid is dead
 
-- Status: Accepted
+- Status: Superseded by ADR-0104
 - Date: 2026-08-29
 
 ## Context

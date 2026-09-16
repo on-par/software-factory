@@ -409,7 +409,7 @@ export function formatWorktreeReconcileReport(removed: ReconciledWorktree[]): st
  *  dependency-free and unit-testable. */
 export interface ReleasedClaim {
   issue: number;
-  pid: number;
+  expiresAt: number;
   released: boolean;
   detail?: string;
 }
@@ -420,8 +420,8 @@ export function formatClaimReconcileReport(released: ReleasedClaim[]): string {
   return released
     .map((c) =>
       c.released
-        ? `reconcile: released issue #${c.issue} back to factory:queued (dead pid ${c.pid})`
-        : `reconcile: failed to release issue #${c.issue} (dead pid ${c.pid}) — ${c.detail ?? 'unknown error'}`,
+        ? `reconcile: released issue #${c.issue} back to factory:queued (lease expired at ${c.expiresAt})`
+        : `reconcile: failed to release issue #${c.issue} (lease expired at ${c.expiresAt}) — ${c.detail ?? 'unknown error'}`,
     )
     .join('\n');
 }

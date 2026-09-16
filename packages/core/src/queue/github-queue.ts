@@ -12,9 +12,13 @@ export const PARKED_LABEL = 'factory:parked';
 export const LANE_LABEL_PREFIX = 'factory:lane:';
 export const QUEUE_ORDER_LABEL_PREFIX = 'factory:order:';
 export const CLAIMED_BY_LABEL_PREFIX = 'factory:claimed-by:';
+export const CLAIM_EXPIRES_LABEL_PREFIX = 'factory:claim-expires:';
 
 /** GitHub's hard limit on a label name. */
 export const MAX_LABEL_NAME_LENGTH = 50;
+
+/** Default claim lease duration, refreshed by `GithubQueue.heartbeat` (#1500). */
+export const DEFAULT_CLAIM_LEASE_MS = 15 * 60 * 1000;
 
 const QUEUED_LABEL_COLOR = '0e8a16';
 const LANE_LABEL_COLOR = '1d76db';
@@ -22,6 +26,7 @@ const QUEUE_ORDER_LABEL_COLOR = '0052cc';
 const IN_PROGRESS_LABEL_COLOR = 'fbca04';
 const CLAIMED_BY_LABEL_COLOR = '5319e7';
 const PARKED_LABEL_COLOR = 'b60205';
+const CLAIM_EXPIRES_LABEL_COLOR = 'c5def5';
 
 export interface QueueLabelSpec {
   name: string;
@@ -55,6 +60,32 @@ export function queueOrderLabel(position: number): string {
 
 export function claimedByLabel(claimantId: string): string {
   return CLAIMED_BY_LABEL_PREFIX + slugSegment(claimantId, MAX_LABEL_NAME_LENGTH - CLAIMED_BY_LABEL_PREFIX.length);
+}
+
+/** Renders a claim lease expiry as a GitHub-safe factory label (#1500). */
+export function claimExpiresLabel(expiresAtEpochSeconds: number): string {
+  if (!Number.isSafeInteger(expiresAtEpochSeconds) || expiresAtEpochSeconds < 0) {
+    throw new RangeError(`claim expiry must be a non-negative safe integer, got ${expiresAtEpochSeconds}`);
+  }
+  return `${CLAIM_EXPIRES_LABEL_PREFIX}${expiresAtEpochSeconds}`;
+}
+
+/** Parses a `factory:claim-expires:<epochSeconds>` label back to its epoch-second value, or
+ *  `null` when the label doesn't carry that prefix or its suffix isn't a safe non-negative integer. */
+export function parseClaimExpiresLabel(label: string): number | null {
+  if (!label.startsWith(CLAIM_EXPIRES_LABEL_PREFIX)) return null;
+  const text = label.slice(CLAIM_EXPIRES_LABEL_PREFIX.length);
+  if (!/^\d+$/.test(text)) return null;
+  const value = Number(text);
+  return Number.isSafeInteger(value) ? value : null;
+}
+
+function claimExpiresLabelSpec(expiresAtEpochSeconds: number): QueueLabelSpec {
+  return {
+    name: claimExpiresLabel(expiresAtEpochSeconds),
+    color: CLAIM_EXPIRES_LABEL_COLOR,
+    description: `Claim lease expires at epoch second ${expiresAtEpochSeconds}`,
+  };
 }
 
 /** Reuses run-lock's holder identity (host + pid, see utils/run-lock.ts) — host alone
@@ -308,11 +339,18 @@ export interface GithubQueueOptions {
   claimantId?: string;
   /** Cheap GitHub/git evidence gathered before the label-CAS claim. */
   preflight?: QueuePreflight;
+  /** Claim lease duration, refreshed by `heartbeat`. Defaults to `DEFAULT_CLAIM_LEASE_MS`. */
+  leaseMs?: number;
+  /** Clock injection for tests. Defaults to `Date.now`. */
+  now?: () => number;
 }
 
 export interface GithubQueue {
   claimNext(lane: string): Promise<QueueClaim | null>;
   release(issue: number, outcome?: QueueReleaseOutcome): Promise<void>;
+  /** Refreshes this claimant's lease on `issue` while its identity label is still present.
+   *  Returns `false` (no-op) when the label is gone — claimed elsewhere, released, or reaped (#1500). */
+  heartbeat(issue: number): Promise<boolean>;
   list(lane: string): Promise<number[]>;
   lanes(): Promise<string[]>;
   migrateLocalQueue(entries: readonly QueueEntry[]): Promise<void>;
@@ -323,8 +361,14 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
   const { client, owner, repo } = options;
   const claimantId = options.claimantId ?? defaultClaimantId();
   const myLabel = claimedByLabel(claimantId);
+  const leaseMs = options.leaseMs ?? DEFAULT_CLAIM_LEASE_MS;
+  const now = options.now ?? Date.now;
   const ensuredLanes = new Set<string>();
   const deferred = new Set<number>();
+
+  function leaseExpiresAt(): number {
+    return Math.floor((now() + leaseMs) / 1000);
+  }
 
   async function ensureLabels(lane: string): Promise<void> {
     if (ensuredLanes.has(lane)) return;
@@ -374,6 +418,9 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
       const after = await client.getIssueLabels({ owner, repo, issue_number: candidate.number });
       const claims = after.filter((name) => name.startsWith(CLAIMED_BY_LABEL_PREFIX)).sort();
       if (claims.length > 0 && claims[0] === myLabel) {
+        const expiresSpec = claimExpiresLabelSpec(leaseExpiresAt());
+        await client.ensureLabel({ owner, repo, ...expiresSpec });
+        await client.addLabels({ owner, repo, issue_number: candidate.number, labels: [expiresSpec.name] });
         await client.removeLabel({ owner, repo, issue_number: candidate.number, name: QUEUED_LABEL });
         return { issue: candidate.number, decision };
       }
@@ -390,6 +437,7 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
       (name) =>
         name === IN_PROGRESS_LABEL ||
         name.startsWith(CLAIMED_BY_LABEL_PREFIX) ||
+        name.startsWith(CLAIM_EXPIRES_LABEL_PREFIX) ||
         (outcome !== 'queued' && (name === QUEUED_LABEL || name.startsWith(QUEUE_ORDER_LABEL_PREFIX))),
     );
     for (const name of toRemove) {
@@ -406,6 +454,20 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
       }
       await client.addLabels({ owner, repo, issue_number: issue, labels: [target] });
     }
+  }
+
+  async function heartbeat(issue: number): Promise<boolean> {
+    const current = await client.getIssueLabels({ owner, repo, issue_number: issue });
+    if (!current.includes(myLabel)) return false;
+
+    const expiresSpec = claimExpiresLabelSpec(leaseExpiresAt());
+    await client.ensureLabel({ owner, repo, ...expiresSpec });
+    const stale = current.filter((name) => name.startsWith(CLAIM_EXPIRES_LABEL_PREFIX));
+    for (const name of stale) {
+      await client.removeLabel({ owner, repo, issue_number: issue, name });
+    }
+    await client.addLabels({ owner, repo, issue_number: issue, labels: [expiresSpec.name] });
+    return true;
   }
 
   async function lanes(): Promise<string[]> {
@@ -472,5 +534,5 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     return results;
   }
 
-  return { claimNext, release, list, lanes, migrateLocalQueue, enqueue };
+  return { claimNext, release, heartbeat, list, lanes, migrateLocalQueue, enqueue };
 }

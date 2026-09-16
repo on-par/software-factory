@@ -1,25 +1,21 @@
-// packages/core/src/queue/stale-claims.ts — Release dead-pid claims back to factory:queued (#999).
+// packages/core/src/queue/stale-claims.ts — Release expired-lease claims back to factory:queued (#1500).
 
-import { hostname } from 'node:os';
-
-import { defaultIsPidAlive } from '../environment/index.js';
 import {
-  CLAIMED_BY_LABEL_PREFIX,
-  claimedByLabel,
+  CLAIM_EXPIRES_LABEL_PREFIX,
   createGithubQueue,
-  defaultClaimantId,
   IN_PROGRESS_LABEL,
+  parseClaimExpiresLabel,
   type QueueGitHubClient,
   type QueueIssue,
 } from './github-queue.js';
 
-/** One open issue whose every claimed-by label names a dead pid minted by this host. */
+/** One open issue whose claim lease has expired. */
 export interface StaleClaim {
   issue: number;
-  /** The factory:claimed-by:* label that proved the claim stale. */
+  /** The factory:claim-expires:* label that proved the claim stale. */
   label: string;
-  /** The dead pid that label names. */
-  pid: number;
+  /** The lease expiry (epoch seconds) that label names. */
+  expiresAt: number;
 }
 
 /** The result of attempting to put one stale claim back in the queue. */
@@ -33,52 +29,31 @@ export interface ReleaseStaleClaimsOptions {
   client: QueueGitHubClient;
   owner: string;
   repo: string;
-  /** Defaults to `os.hostname()`. Injectable so tests can simulate a foreign host. */
-  host?: string;
-  /** Defaults to `defaultIsPidAlive` (signal-0 probe). */
-  isPidAlive?: (pid: number) => boolean;
+  /** Defaults to `Date.now`. Injectable so tests can simulate elapsed time. */
+  now?: () => number;
 }
 
-/** Returns the pid a `factory:claimed-by:` label names on this host, or `null` when the label
- *  wasn't minted by this host (wrong prefix, malformed suffix, or the slug/pid round-trip through
- *  `defaultClaimantId` + `claimedByLabel` doesn't reproduce the observed label byte-for-byte). */
-export function localClaimPid(label: string, host: string): number | null {
-  if (!label.startsWith(CLAIMED_BY_LABEL_PREFIX)) return null;
-
-  const match = /-(\d+)$/.exec(label.slice(CLAIMED_BY_LABEL_PREFIX.length));
-  if (!match) return null;
-
-  const pid = Number(match[1]);
-  if (!Number.isSafeInteger(pid) || pid <= 0) return null;
-
-  return claimedByLabel(defaultClaimantId(host, pid)) === label ? pid : null;
-}
-
-export function findStaleClaims(
-  issues: readonly QueueIssue[],
-  opts: { host?: string; isPidAlive?: (pid: number) => boolean } = {},
-): StaleClaim[] {
-  const host = opts.host ?? hostname();
-  const isPidAlive = opts.isPidAlive ?? defaultIsPidAlive;
+export function findStaleClaims(issues: readonly QueueIssue[], opts: { now?: () => number } = {}): StaleClaim[] {
+  const now = opts.now ?? Date.now;
+  const nowSeconds = Math.floor(now() / 1000);
   const stale: StaleClaim[] = [];
 
   for (const issue of issues) {
-    const claimLabels = issue.labels.filter((name) => name.startsWith(CLAIMED_BY_LABEL_PREFIX));
-    // No claim label ⇒ no pid evidence ⇒ never releasable (#999 out of scope: other claim states).
-    if (claimLabels.length === 0) continue;
+    const expiresLabels = issue.labels.filter((name) => name.startsWith(CLAIM_EXPIRES_LABEL_PREFIX));
+    // No lease label ⇒ no expiry evidence ⇒ never releasable (#999 out of scope: other claim states).
+    if (expiresLabels.length === 0) continue;
 
-    let deadest: StaleClaim | null = null;
-    let allDeadLocal = true;
-    for (const label of claimLabels) {
-      const pid = localClaimPid(label, host);
-      // A foreign-host label or a live pid means somebody may still be working this issue.
-      if (pid === null || isPidAlive(pid)) {
-        allDeadLocal = false;
+    let expired: StaleClaim | null = null;
+    for (const label of expiresLabels) {
+      const expiresAt = parseClaimExpiresLabel(label);
+      // A malformed or still-live lease means somebody may still be working this issue.
+      if (expiresAt === null || expiresAt > nowSeconds) {
+        expired = null;
         break;
       }
-      deadest ??= { issue: issue.number, label, pid };
+      expired ??= { issue: issue.number, label, expiresAt };
     }
-    if (allDeadLocal && deadest) stale.push(deadest);
+    if (expired) stale.push(expired);
   }
 
   return stale;
@@ -87,7 +62,7 @@ export function findStaleClaims(
 export async function releaseStaleClaims(opts: ReleaseStaleClaimsOptions): Promise<StaleClaimRelease[]> {
   const { client, owner, repo } = opts;
   const claimed = await client.listOpenIssuesWithLabels({ owner, repo, labels: [IN_PROGRESS_LABEL] });
-  const stale = findStaleClaims(claimed, { host: opts.host, isPidAlive: opts.isPidAlive });
+  const stale = findStaleClaims(claimed, { now: opts.now });
   if (stale.length === 0) return [];
 
   const queue = createGithubQueue({ client, owner, repo });

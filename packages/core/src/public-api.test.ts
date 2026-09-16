@@ -501,13 +501,17 @@ const INTERNAL_API_KEYS = [
   // GitHub-label-backed work queue (#824)
   'claimedByLabel',
   'CLAIMED_BY_LABEL_PREFIX',
+  'claimExpiresLabel',
+  'CLAIM_EXPIRES_LABEL_PREFIX',
   'createGithubQueue',
   'createOctokitQueueClient',
   'defaultClaimantId',
+  'DEFAULT_CLAIM_LEASE_MS',
   'IN_PROGRESS_LABEL',
   'LANE_LABEL_PREFIX',
   'laneLabel',
   'MAX_LABEL_NAME_LENGTH',
+  'parseClaimExpiresLabel',
   'PARKED_LABEL',
   'planQueueMigration',
   'QUEUED_LABEL',
@@ -523,9 +527,8 @@ const INTERNAL_API_KEYS = [
   'FACTORY_APP_REPAIR_HINT',
   'formatAdmissionConflict',
   'withAdmissionGuard',
-  // Stale-claim reaping (#999)
+  // Stale-claim reaping (#999, lease-based since #1500)
   'findStaleClaims',
-  'localClaimPid',
   'releaseStaleClaims',
   // Green-and-ready PR reporting (#1000)
   'createOctokitGreenPrClient',

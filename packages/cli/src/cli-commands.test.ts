@@ -3561,7 +3561,9 @@ Please add a widget that does the thing.
 
     it('--reconcile releases stale claims and reports them', async () => {
       h.claudeAvailable = true;
-      h.staleClaims = [{ issue: 42, label: 'factory:claimed-by:test-host-777', pid: 777, released: true }];
+      h.staleClaims = [
+        { issue: 42, label: 'factory:claim-expires:1700000000', expiresAt: 1_700_000_000, released: true },
+      ];
 
       const res = await runMain('doctor', '--reconcile');
       expect(res.exited).toBe(false);

@@ -3056,6 +3056,9 @@ type RunLaneDeps = {
   emitEvent?: typeof logEvent;
   claimNext?: () => Promise<QueueClaim | null>;
   releaseIssue?: (issue: number, outcome: QueueReleaseOutcome) => Promise<void>;
+  /** Refreshes the claim lease every HEARTBEAT_INTERVAL_MS while an issue is in flight
+   *  (#1500). Absent for static local-queue lanes, which carry no remote claim to lease. */
+  heartbeat?: (issue: number) => Promise<unknown>;
   /** Eager park-time worktree reap (#1007). Defaults to a no-op so injected-deps callers and
    *  tests are unaffected; cmdRun wires it to reapParkedLaneWorktree. */
   reapWorktree?: (issue: number) => Promise<void>;
@@ -3068,16 +3071,17 @@ export interface PlannedLane {
   lane: string;
   /** Seed issues to work before claiming. Always empty in GitHub-queue mode. */
   issues: number[];
-  deps: Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'countRemaining'>;
+  deps: Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'heartbeat' | 'countRemaining'>;
 }
 
 export function laneQueueDeps(
   queue: GithubQueue,
   lane: string,
-): Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'countRemaining'> {
+): Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'heartbeat' | 'countRemaining'> {
   return {
     claimNext: () => queue.claimNext(lane),
     releaseIssue: (issue, outcome) => queue.release(issue, outcome),
+    heartbeat: (issue) => queue.heartbeat(issue),
     countRemaining: async () => (await queue.list(lane)).length,
   };
 }
@@ -3178,6 +3182,30 @@ export async function planRunLanes(input: {
   };
 }
 
+/** How often an in-flight issue's claim lease is refreshed (#1500). Well inside the
+ *  15-minute default lease (github-queue.ts's DEFAULT_CLAIM_LEASE_MS) so a normal poll
+ *  cadence never lets the lease lapse mid-ship. */
+const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
+
+/** Runs `work` while periodically calling `heartbeat(issue)` so a long-running ship or
+ *  merge wait keeps this claimant's lease fresh. A heartbeat failure is swallowed — losing
+ *  one refresh must never abort the work it is protecting. */
+async function withHeartbeat<T>(
+  issue: number,
+  heartbeat: ((issue: number) => Promise<unknown>) | undefined,
+  work: () => Promise<T>,
+): Promise<T> {
+  if (!heartbeat) return work();
+  const timer = setInterval(() => {
+    heartbeat(issue).catch(() => {});
+  }, HEARTBEAT_INTERVAL_MS);
+  try {
+    return await work();
+  } finally {
+    clearInterval(timer);
+  }
+}
+
 export async function runLane(
   lane: string,
   issues: number[],
@@ -3193,6 +3221,7 @@ export async function runLane(
     emitEvent = logEvent,
     claimNext = async () => null,
     releaseIssue = async () => {},
+    heartbeat,
     reapWorktree = async () => {},
     countRemaining,
   } = deps;
@@ -3247,8 +3276,10 @@ export async function runLane(
     }
     try {
       const branch =
-        decision.kind === 'adopt' ? decision.branch : await ship(issue, {}, { repoRoot, ghRepo, paths, lane });
-      await waitMerge(issue, branch, repoRoot, ghRepo, paths);
+        decision.kind === 'adopt'
+          ? decision.branch
+          : await withHeartbeat(issue, heartbeat, () => ship(issue, {}, { repoRoot, ghRepo, paths, lane }));
+      await withHeartbeat(issue, heartbeat, () => waitMerge(issue, branch, repoRoot, ghRepo, paths));
       merged++;
       await releaseIssue(issue, 'done');
     } catch (err: any) {
