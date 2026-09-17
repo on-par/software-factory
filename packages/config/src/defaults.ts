@@ -432,6 +432,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       'qwen2.5-coder:14b',
       'qwen3:8b',
       'claude-sonnet-5',
+      'gpt-5.6-luna-high',
       'gpt-4.1-mini',
       'glm-5.2',
     ],

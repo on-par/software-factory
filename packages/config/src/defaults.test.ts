@@ -55,7 +55,7 @@ describe('shipped defaults', () => {
 
     expect(defaultModelsConfig.tiers.boss).toHaveLength(8);
     expect(defaultModelsConfig.tiers.worker).toHaveLength(13);
-    expect(defaultModelsConfig.tiers.checker).toHaveLength(7);
+    expect(defaultModelsConfig.tiers.checker).toHaveLength(8);
     expect(defaultModelsConfig.tiers.triage).toHaveLength(3);
   });
 
@@ -66,6 +66,11 @@ describe('shipped defaults', () => {
     expect(workerIdx('gpt-5.6-terra-medium')).toBeGreaterThanOrEqual(0);
     expect(workerIdx('gpt-5.6-terra-medium')).toBeLessThan(workerIdx('gpt-5.6-sol'));
     expect(workerIdx('gpt-5.6-sol')).toBeLessThan(workerIdx('gpt-5.1-codex'));
+
+    const checkerIdx = (id: string) => defaultModelsConfig.tiers.checker.indexOf(id);
+    expect(checkerIdx('claude-sonnet-5')).toBeGreaterThanOrEqual(0);
+    expect(checkerIdx('claude-sonnet-5')).toBeLessThan(checkerIdx('gpt-5.6-luna-high'));
+    expect(checkerIdx('gpt-5.6-luna-high')).toBeLessThan(checkerIdx('gpt-4.1-mini'));
   });
 
   it('has the expected failover policy', () => {
