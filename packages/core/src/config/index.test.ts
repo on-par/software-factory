@@ -89,6 +89,7 @@ describe('getFactoryPaths', () => {
       proxyState: resolve(state, 'proxy.json'),
       breaker: resolve(state, 'breaker.json'),
       reworkHistory: resolve(state, 'rework-history.json'),
+      laneFiles: resolve(state, 'lane-files.json'),
       runFlags: resolve(state, 'run-flags.json'),
     };
   };
@@ -147,6 +148,7 @@ describe('getFactoryPaths', () => {
       'proxyState',
       'breaker',
       'reworkHistory',
+      'laneFiles',
       'runFlags',
       'mergeLock',
       'gitLock',

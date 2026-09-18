@@ -31,6 +31,8 @@ import type { SandboxPolicy } from '../sandbox/index.js';
 import { describeSteering, type ConsumedSteering } from '../steering/index.js';
 import type { CheckSummary, Constitution, FailoverReason, FailurePhase, ReadinessInfo } from '../types/index.js';
 import type { WorkRequest, WorkRequestSourceKind } from '../work/index.js';
+import type { LaneFileGuard } from './lane-file-guard.js';
+import { touchedFilesFrom } from './lane-file-guard.js';
 import { parkReasonFor, type BuildRoute, type ParkReason, type RunOutcome } from './outcome.js';
 import type { RunPolicy } from './policy.js';
 import type { Environment, Workspace } from './ports.js';
@@ -123,6 +125,10 @@ export interface RunPorts {
   createApprovalGate?: () => ApprovalGate;
   drainSteering?: () => ConsumedSteering;
   reworkHistory?: ReworkHistory;
+  /** Same-file lane guard (#1515): parks a run whose PLAN-reported touched files collide
+   *  with another in-flight run's claim in the same repo. Optional and a no-op when
+   *  undefined, so existing callers/tests that don't wire it see no behavior change. */
+  laneFileGuard?: LaneFileGuard;
   /** PLAN's pre-flight size gate decomposed this issue into filed sub-issues. The hook
    *  owns the (path-bound) queue rewrite and is expected to throw to signal the caller;
    *  if it returns normally, runIssue treats the decomposition as an escalation. */
@@ -171,6 +177,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
   let checkSummary: CheckSummary | undefined;
   let failurePhase: FailurePhase = 'plan';
   let runStartDiffBase: string | undefined;
+  let laneFileClaimed = false;
 
   const setPhase = async (phase: FailurePhase): Promise<void> => {
     failurePhase = phase;
@@ -184,6 +191,10 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
   const release = async (): Promise<void> => {
     if (released) return;
     released = true;
+    if (laneFileClaimed) {
+      laneFileClaimed = false;
+      await ports.laneFileGuard?.release(request.repo, request.issue);
+    }
     const outcomes = await tracker.killAll({ graceMs: request.processGroupGraceMs });
     if (outcomes.length > 0) {
       log(
@@ -400,6 +411,23 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     }
     const planBudget = await assertBudget('PLAN');
     if (planBudget) return planBudget;
+
+    // Same-file lane guard (#1515): before this run claims BUILD, make sure no other
+    // in-flight run in this repo already owns a file PLAN just said this run will touch.
+    if (ports.laneFileGuard && plan.designArtifact) {
+      const touchedFiles = touchedFilesFrom(plan.designArtifact);
+      const collision = await ports.laneFileGuard.findCollision(request.repo, request.issue, touchedFiles);
+      if (collision) {
+        return terminalParked(
+          'held',
+          `issue held: #${request.issue} touches ${collision.file}, already claimed by in-flight issue #${collision.issue} — held until that lane finishes`,
+        );
+      }
+      if (touchedFiles.length > 0) {
+        await ports.laneFileGuard.register(request.repo, request.issue, touchedFiles);
+        laneFileClaimed = true;
+      }
+    }
 
     // BUILD
     await setPhase('build');

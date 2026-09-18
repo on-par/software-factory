@@ -14,8 +14,9 @@ import type { PlanResult } from '../phases/plan.js';
 import type { ShipResult } from '../phases/ship.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
-import type { CheckSummary, Constitution } from '../types/index.js';
+import type { CheckSummary, Constitution, DesignArtifact } from '../types/index.js';
 import type { WorkRequest } from '../work/index.js';
+import { LaneFileGuard } from './lane-file-guard.js';
 import type { RunPolicy } from './policy.js';
 import type { Environment, Workspace } from './ports.js';
 
@@ -793,5 +794,93 @@ describe('runIssue — #1210: run-start diffBase captured once, before PLAN', ()
     } finally {
       await rm(worktree, { recursive: true, force: true });
     }
+  });
+});
+
+describe('runIssue — #1515: same-file lane guard', () => {
+  async function tmpGuardFile(): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'run-issue-lane-guard-'));
+    return join(dir, 'lane-files.json');
+  }
+
+  function designTouching(file: string, via: 'targetTypes' | 'signatures'): DesignArtifact {
+    return {
+      restatedProblem: 'problem',
+      approach: { chosen: 'chosen', rejected: [] },
+      interfacesTouched: [],
+      targetTypes: via === 'targetTypes' ? [{ name: 'Thing', file, kind: 'changed' }] : [],
+      signatures: via === 'signatures' ? [{ symbol: 'thing', file, signature: '() => void' }] : [],
+      callGraph: [],
+      behaviorContract: [],
+      verificationPlan: [],
+      riskBlastRadius: 'low',
+      openQuestions: [],
+    };
+  }
+
+  it('parks the second run naming the colliding issue and file, while a disjoint third run is unaffected', async () => {
+    const guard = new LaneFileGuard(await tmpGuardFile());
+
+    let releaseBuildA: (() => void) | undefined;
+    const buildABlocked = new Promise<void>((resolve) => {
+      releaseBuildA = resolve;
+    });
+
+    vi.mocked(planPhase)
+      .mockReset()
+      .mockResolvedValueOnce({ ...PLAN_OK, designArtifact: designTouching('src/shared.ts', 'targetTypes') })
+      .mockResolvedValueOnce({ ...PLAN_OK, designArtifact: designTouching('src/shared.ts', 'signatures') })
+      .mockResolvedValueOnce({ ...PLAN_OK, designArtifact: designTouching('src/other.ts', 'targetTypes') });
+
+    vi.mocked(buildPhase)
+      .mockReset()
+      .mockImplementationOnce(async () => {
+        await buildABlocked;
+        return BUILD_OK;
+      })
+      .mockResolvedValue(BUILD_OK);
+
+    // Run A (#100) claims src/shared.ts and hangs in BUILD, simulating an in-flight lane
+    // whose claim has not been released yet.
+    const runA = runIssue(baseRequest({ issue: 100, repo: 'o/r' }), basePolicy(), basePorts({ laneFileGuard: guard }));
+    await vi.waitFor(() => expect(vi.mocked(buildPhase)).toHaveBeenCalledTimes(1));
+
+    const eventsB: Array<[string, string]> = [];
+    const logB = vi.fn((type: string, msg: string) => eventsB.push([type, msg]));
+    const outcomeB = await runIssue(
+      baseRequest({ issue: 200, repo: 'o/r' }),
+      basePolicy(),
+      basePorts({ laneFileGuard: guard, events: () => logB }),
+    );
+
+    expect(outcomeB).toMatchObject({ state: 'parked', reason: 'held' });
+    expect(
+      eventsB.some(
+        ([type, msg]) =>
+          type === 'held' && msg.includes('#200') && msg.includes('#100') && msg.includes('src/shared.ts'),
+      ),
+    ).toBe(true);
+
+    // Run C (#300) touches a disjoint file and is unaffected — reaches its stubbed BUILD.
+    const outcomeC = await runIssue(
+      baseRequest({ issue: 300, repo: 'o/r' }),
+      basePolicy(),
+      basePorts({ laneFileGuard: guard }),
+    );
+    expect(outcomeC.state).toBe('ready');
+    expect(buildPhase).toHaveBeenCalledTimes(2);
+
+    releaseBuildA?.();
+    await expect(runA).resolves.toMatchObject({ state: 'ready' });
+  });
+
+  it('is a no-op when ports.laneFileGuard is left undefined, matching every caller that does not wire it', async () => {
+    vi.mocked(planPhase).mockResolvedValue({
+      ...PLAN_OK,
+      designArtifact: designTouching('src/shared.ts', 'targetTypes'),
+    });
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts());
+    expect(outcome.state).toBe('ready');
+    expect(buildPhase).toHaveBeenCalledTimes(1);
   });
 });

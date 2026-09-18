@@ -84,6 +84,7 @@ import {
   kpisToHistoryRecord,
   laneBaseUrl,
   laneEnv,
+  LaneFileGuard,
   laneHostLabel,
   listQueuedSteering,
   loadFactoryConfigForRepo,
@@ -1353,6 +1354,7 @@ export async function shipIssue(
   const failoverSettings = resolveAutoFailover(factoryConfig);
   const breaker = new ProviderBreaker(paths.breaker);
   const reworkHistory = new ReworkHistory(paths.reworkHistory);
+  const laneFileGuard = new LaneFileGuard(paths.laneFiles);
   const efficiency = resolveEfficiencyPolicy(repoConfig);
   const policy: RunPolicy = {
     models: applyRepoConfig(loadModelsConfig(), repoConfig),
@@ -1603,6 +1605,7 @@ export async function shipIssue(
     createApprovalGate: () => createFileApprovalGate({ dir: paths.approvals, timeoutMs: timeouts.approval * 1000 }),
     drainSteering: () => drainSteering(paths.steering, issueNum, worktree),
     reworkHistory,
+    laneFileGuard,
     recordPhase: (phase: FailurePhase) => {
       const now = new Date().toISOString();
       return writePhaseSnapshot(phaseSnapshotFile(paths.runs, issueNum), {

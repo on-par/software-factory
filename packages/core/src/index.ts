@@ -328,6 +328,10 @@ export { gateBuildOnBreaker, parseResetCooldownMs, ProviderBreaker } from './rou
 export type { ReworkHistoryEntry } from './checkers/rework-history.js';
 export { ReworkHistory } from './checkers/rework-history.js';
 
+// Same-file lane guard (#1515)
+export type { LaneFileClaim, LaneFileCollision } from './run/lane-file-guard.js';
+export { LaneFileGuard, touchedFilesFrom } from './run/lane-file-guard.js';
+
 // Coding harness contract
 export type {
   CodingHarness,
