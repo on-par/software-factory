@@ -12,6 +12,7 @@ import { issueFromFactoryBranch, runAutoIngest } from './index.js';
 interface FakeIssue {
   number: number;
   title: string;
+  body?: string;
   updatedAt: string;
 }
 
@@ -382,6 +383,49 @@ describe('runAutoIngest', () => {
       runCommandSpy.mockRestore();
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('holds back a later ready issue that names the same primary file as an earlier one, and does not advance the watermark past it', async () => {
+    const { deps, writes } = makeDeps({
+      runOpts: {
+        issues: [
+          { number: 568, title: 'Fix layout bug', body: 'in intake-lane.tsx', updatedAt: '2026-07-19T01:00:00.000Z' },
+          { number: 598, title: 'Refactor intake-lane.tsx', body: '', updatedAt: '2026-07-19T02:00:00.000Z' },
+        ],
+      },
+      queueContent: '',
+    });
+
+    const result = await runAutoIngest(
+      { repoDir: '/repo', queueFile: QUEUE_FILE, watermarkFile: WATERMARK_FILE },
+      deps,
+    );
+
+    expect(result.appended).toEqual([568]);
+    expect(writes[QUEUE_FILE]).toBe('auto 568\n');
+    expect(result.skippedFileOverlap).toEqual([{ issue: 598, collidesWith: 568, path: 'intake-lane.tsx' }]);
+    expect(result.watermark < '2026-07-19T02:00:00.000Z').toBe(true);
+  });
+
+  it('admits both same-file-naming issues when forceAdmit is set, matching pre-change behavior', async () => {
+    const { deps, writes } = makeDeps({
+      runOpts: {
+        issues: [
+          { number: 568, title: 'Fix layout bug', body: 'in intake-lane.tsx', updatedAt: '2026-07-19T01:00:00.000Z' },
+          { number: 598, title: 'Refactor intake-lane.tsx', body: '', updatedAt: '2026-07-19T02:00:00.000Z' },
+        ],
+      },
+      queueContent: '',
+    });
+
+    const result = await runAutoIngest(
+      { repoDir: '/repo', queueFile: QUEUE_FILE, watermarkFile: WATERMARK_FILE, forceAdmit: true },
+      deps,
+    );
+
+    expect(result.appended).toEqual([568, 598]);
+    expect(result.skippedFileOverlap).toEqual([]);
+    expect(writes[QUEUE_FILE]).toBe('auto 568\nauto 598\n');
   });
 
   it('production defaultReadFile returns null for a missing file (no queue/watermark on disk yet)', async () => {

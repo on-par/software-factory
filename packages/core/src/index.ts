@@ -508,7 +508,7 @@ export {
 } from './discovery/promote.js';
 
 // Ingest
-export type { AutoIngestDeps, AutoIngestOptions, AutoIngestResult } from './ingest/index.js';
+export type { AutoIngestDeps, AutoIngestOptions, AutoIngestResult, FileOverlapSkip } from './ingest/index.js';
 export { issueFromFactoryBranch, runAutoIngest } from './ingest/index.js';
 
 // Eval
