@@ -110,13 +110,14 @@ describe('docs live as JSDoc, not as note/comment data', () => {
   // entries validate as `z.unknown()`, which does NOT strip unrecognized keys, so dropping `note`
   // there would desync loadModelsConfig()'s no-path output from what the deleted models.json
   // produced. Likewise `comment` is allowed only at the four paths FactoryConfigSchema requires it
-  // (merge/worktree/byok/cost_tracking) plus the nine schema-optional-but-not-stripped paths this
+  // (merge/worktree/byok/cost_tracking) plus the ten schema-optional-but-not-stripped paths this
   // package deliberately keeps for byte-identical loadFactoryConfig() output (see the comment above
   // `kpis` in defaults.ts).
   const REQUIRED_COMMENT_PATHS = new Set(['merge', 'worktree', 'byok', 'cost_tracking']);
   const OPTIONAL_PRESERVED_COMMENT_PATHS = new Set([
     'kpis',
     'ci',
+    'sweep',
     'plan_approval',
     'sandbox',
     'discovery',
@@ -156,7 +157,7 @@ describe('docs live as JSDoc, not as note/comment data', () => {
     walk(defaultRoutesConfig, [], false);
   });
 
-  it('only carries a comment data field at the four required plus nine byte-identical-preserved paths', () => {
+  it('only carries a comment data field at the four required plus ten byte-identical-preserved paths', () => {
     walk(defaultFactoryConfig, [], true);
   });
 });

@@ -776,6 +776,27 @@ describe('loadFactoryConfigForRepo', () => {
     expect(resolveAdrMandate(config, {})).toBe(true);
     expect(resolveAdrMandate(config, { FACTORY_ADR_MANDATE: '0' })).toBe(false);
   });
+
+  it('parses a config file with no sweep key using the documented defaults', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ merge: { auto: true } }));
+    const config = loadFactoryConfigForRepo(path);
+    expect(config.sweep.loopIntervalSeconds).toBe(300);
+    expect(config.sweep.staleThresholdMultiplier).toBe(2);
+    expect(config.sweep.heartbeatFile).toBeUndefined();
+  });
+
+  it('round-trips an explicit sweep.heartbeatFile override', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(
+      path,
+      JSON.stringify({ sweep: { heartbeatFile: '/tmp/hb', loopIntervalSeconds: 60, staleThresholdMultiplier: 3 } }),
+    );
+    const config = loadFactoryConfigForRepo(path);
+    expect(config.sweep.heartbeatFile).toBe('/tmp/hb');
+    expect(config.sweep.loopIntervalSeconds).toBe(60);
+    expect(config.sweep.staleThresholdMultiplier).toBe(3);
+  });
 });
 
 describe('loadRoutesConfig', () => {

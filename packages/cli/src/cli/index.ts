@@ -247,6 +247,12 @@ import { mergeScopeNotice } from './merge-scope.js';
 import { createFactoryOctokit } from './octokit.js';
 import { readRunFlagOverrides, writeRunFlagOverrides } from './run-flags.js';
 import { distFreshnessProbe, runStalenessGuard } from './staleness.js';
+import {
+  checkSweepHeartbeat,
+  defaultSweepHeartbeatDeps,
+  formatSweepHeartbeatStatusLine,
+  sweepHeartbeatCheck,
+} from './sweep-heartbeat.js';
 
 const exec = promisify(execCb);
 type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<unknown>;
@@ -1075,6 +1081,14 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
       console.log(`    ${b.provider}: OPEN (${b.reason}) — ${Math.ceil(b.remainingMs / 60_000)}m remaining`);
     }
   }
+
+  console.log(chalk.bold('\n  Sweep heartbeat:'));
+  const sweepStatus = checkSweepHeartbeat(
+    loadFactoryConfigForRepo(paths.config).sweep,
+    process.env,
+    defaultSweepHeartbeatDeps(),
+  );
+  console.log(`    ${formatSweepHeartbeatStatusLine(sweepStatus)}`);
 
   console.log(chalk.bold('\n  Last Events:'));
   if (existsSync(paths.events)) {
@@ -4243,8 +4257,13 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
 
   if (repoRoot !== null) {
     const paths = getFactoryPaths(repoRoot);
+    const factoryConfig = loadFactoryConfigForRepo(paths.config);
     const health = await inspectPortLeases({ registryFile: paths.ports });
     checks.push(...leaseChecks(health.map(toLeaseRow)));
+
+    const sweepStatus = checkSweepHeartbeat(factoryConfig.sweep, process.env, defaultSweepHeartbeatDeps());
+    const sweepCheck = sweepHeartbeatCheck(sweepStatus);
+    if (sweepCheck) checks.push(sweepCheck);
 
     const eventsContent = existsSync(paths.events) ? readFileSync(paths.events, 'utf-8') : null;
     checks.push(eventLogCheck(eventsContent === null ? null : analyzeEventLog(eventsContent)));
@@ -4259,8 +4278,6 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     checks.push(...unmergedGreenPrChecks(await scanGreenPrs(ghRepo, octokit)));
 
     if (opts.reconcile) {
-      const factoryConfig = loadFactoryConfigForRepo(paths.config);
-
       const reaped = await reapStalePortLeases({ registryFile: paths.ports, lockDir: paths.portsLock });
       console.log(formatReconcileReport(reaped));
 
