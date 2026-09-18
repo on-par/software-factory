@@ -90,6 +90,8 @@ export class HarnessError extends Error {
       exitCode?: number;
       stderr?: string;
       stdout?: string;
+      /** The exact text the classifier keyed on, when narrower than raw stdout/stderr (#1520). */
+      diagnostic?: string;
       code?: string | number;
       signal?: string;
       killed?: boolean;

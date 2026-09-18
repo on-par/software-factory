@@ -20,9 +20,12 @@ export function classifyFailure(stderr: string, exitCode: number): HarnessFailur
   )
     return 'rate_limit';
   // Codex/ChatGPT usage/plan caps: usage-limit, plan-limit, monthly/weekly/daily limit,
-  // "usage cap", quota/billing/credit, and the "your limit … resets at <time>" variant.
+  // "usage cap", quota/billing, a cap-qualified insufficient/credit phrase, and the
+  // "your limit … resets at <time>" variant. `insufficient`/`credit` are required to be
+  // followed by a cap/billing noun so bare substrings (e.g. "insufficient permissions",
+  // "accreditation") don't false-positive (#1520).
   if (
-    /usage[\s_-]?limit|plan[\s_-]?limit|(?:monthly|weekly|daily)[\s_-]?limit|usage cap|quota|billing|insufficient|credit|\blimit\b.{0,30}\breset/.test(
+    /usage[\s_-]?limit|plan[\s_-]?limit|(?:monthly|weekly|daily)[\s_-]?limit|usage cap|quota|billing|insufficient\s+(?:quota|credits?|balance|funds)|credits?\s+(?:exhausted|depleted|balance)|\blimit\b.{0,30}\breset/.test(
       text,
     )
   )

@@ -48,9 +48,14 @@ export function describeFailureDetail(err: unknown): string {
   if (typeof stderr === 'string' && stderr.trim()) {
     parts.push(`stderr="${truncate(collapse(stderr), STDERR_LIMIT)}"`);
   }
-  const stdout = e.stdout ?? details.stdout;
-  if (typeof stdout === 'string' && stdout.trim()) {
-    parts.push(`stdout="${truncate(collapse(stdout), STDERR_LIMIT)}"`);
+  const diagnostic = details.diagnostic;
+  if (typeof diagnostic === 'string' && diagnostic.trim()) {
+    parts.push(`diagnostic="${truncate(collapse(diagnostic), STDERR_LIMIT)}"`);
+  } else {
+    const stdout = e.stdout ?? details.stdout;
+    if (typeof stdout === 'string' && stdout.trim()) {
+      parts.push(`stdout="${truncate(collapse(stdout), STDERR_LIMIT)}"`);
+    }
   }
   const tracePath = e.tracePath ?? details.tracePath;
   if (typeof tracePath === 'string' && tracePath) parts.push(`trace=${tracePath}`);

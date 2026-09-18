@@ -540,4 +540,57 @@ describe('ClaudeCliHarness failure classification', () => {
     expect(err.details.signal).toBe('SIGTERM');
     expect(err.details.killed).toBe(true);
   });
+
+  it('populates details.diagnostic from stderr when the exec error carries it', async () => {
+    const harness = new ClaudeCliHarness(async () => {
+      throw Object.assign(new Error('boom'), { stderr: 'quota exceeded', code: 1 });
+    });
+
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.details.diagnostic).toBe('quota exceeded');
+  });
+
+  it('populates details.diagnostic with the extracted result text, not the raw stream-json stdout', async () => {
+    const harness = new ClaudeCliHarness(async () => {
+      throw Object.assign(new Error('Command failed: claude -p'), {
+        stdout: [
+          JSON.stringify({
+            type: 'system',
+            subtype: 'init',
+            slash_commands: ['login', 'doctor'],
+            message: 'x'.repeat(500),
+          }),
+          JSON.stringify({
+            type: 'result',
+            subtype: 'error',
+            terminal_reason: 'failed',
+            is_error: true,
+            result: 'You have reached your monthly limit.',
+          }),
+        ].join('\n'),
+        stderr: '',
+        code: 1,
+      });
+    });
+
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.details.diagnostic).toContain('You have reached your monthly limit.');
+    expect(err.details.diagnostic).not.toContain('subtype');
+    expect(err.details.diagnostic).not.toContain('x'.repeat(500));
+  });
+
+  it('omits diagnostic when the exec error carries neither stderr nor stdout', async () => {
+    const harness = new ClaudeCliHarness(async () => {
+      throw Object.assign(new Error('killed'), { killed: true, signal: 'SIGTERM', code: null });
+    });
+
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.details.diagnostic).toBeUndefined();
+  });
 });
