@@ -333,6 +333,10 @@ export {
   withAdmissionGuard,
 } from './admission/index.js';
 
+// Backend-agnostic queue seam (#1499)
+export type { GithubQueueBackendOptions, QueueBackend } from './queue/queue-backend.js';
+export { createGithubQueueBackend } from './queue/queue-backend.js';
+
 // Stale-claim reaping (#999, lease-based since #1500)
 export type { ReleaseStaleClaimsOptions, StaleClaim, StaleClaimRelease } from './queue/stale-claims.js';
 export { findStaleClaims, releaseStaleClaims } from './queue/stale-claims.js';
