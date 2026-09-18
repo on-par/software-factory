@@ -170,6 +170,9 @@ const PUBLIC_API_KEYS = [
   'ProviderBreaker',
   // Cross-run failure-signature memory
   'ReworkHistory',
+  // Same-file lane guard
+  'LaneFileGuard',
+  'touchedFilesFrom',
   // Harness contract
   'HARNESS_CATALOG',
   'HarnessError',
