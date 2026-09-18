@@ -941,6 +941,7 @@ describe('cli', () => {
             lane: 'auto',
             maxPerCycle: 20,
             branchPrefix: resolveBranchPrefix(),
+            forceAdmit: false,
           });
           return {
             scannedAt: '2026-07-20T00:00:00.000Z',
@@ -949,6 +950,7 @@ describe('cli', () => {
             skippedInQueue: [],
             skippedInFlight: [],
             skippedStale: [],
+            skippedFileOverlap: [],
             watermark: '2026-07-20T00:00:00.000Z',
           };
         },
@@ -971,6 +973,7 @@ describe('cli', () => {
           skippedInQueue: [],
           skippedInFlight: [],
           skippedStale: [],
+          skippedFileOverlap: [],
           watermark: '2026-07-20T00:00:00.000Z',
         }),
         emitEvent: (...args: any[]) => events.push(args),
@@ -980,6 +983,27 @@ describe('cli', () => {
 
       expect(appended).toBe(0);
       expect(events).toHaveLength(0);
+    });
+
+    it('emits an ingest_file_overlap_held event per held-back issue, naming the collision', async () => {
+      const events: any[] = [];
+      const hook = createIngestHook('/repo', paths, ingestCfg, {
+        runAutoIngestFn: async () => ({
+          scannedAt: '2026-07-20T00:00:00.000Z',
+          candidates: 2,
+          appended: [42],
+          skippedInQueue: [],
+          skippedInFlight: [],
+          skippedStale: [],
+          skippedFileOverlap: [{ issue: 99, collidesWith: 42, path: 'foo.ts' }],
+          watermark: '2026-07-20T00:00:00.000Z',
+        }),
+        emitEvent: (...args: any[]) => events.push(args),
+      });
+
+      await hook();
+
+      expect(events).toContainEqual([paths.events, 'ingest_file_overlap_held', 99, expect.stringContaining('#42')]);
     });
 
     it('catches a runAutoIngest failure, logs a warn event, and returns 0', async () => {

@@ -1,6 +1,8 @@
 // src/ingest/index.ts — Always-on auto-ingest: poll for "ready" issues and append them to the queue
 import { readFileSync, writeFileSync } from 'node:fs';
 
+import { findFileOverlapCollisions } from './file-overlap-guard.js';
+import type { FileOverlapCandidate, FileOverlapMatch } from './file-overlap-guard.js';
 import { parseQueue } from '../queue/index.js';
 import type { CommandResult } from '../utils/command-runner.js';
 import { runCommand } from '../utils/command-runner.js';
@@ -33,6 +35,8 @@ export interface AutoIngestOptions {
   maxPerCycle?: number;
   /** Factory branch prefix used to recognize in-flight PRs. Defaults to branchPrefixSlug(). */
   branchPrefix?: string;
+  /** Admits every candidate even when two name the same file. Defaults to false. */
+  forceAdmit?: boolean;
 }
 
 type Runner = (argv: readonly string[], opts: { cwd: string }) => Promise<Pick<CommandResult, 'stdout' | 'ok'>>;
@@ -55,13 +59,24 @@ export interface AutoIngestResult {
   skippedInFlight: number[];
   /** Filtered out by the watermark (not updated since the previous cycle). */
   skippedStale: number[];
+  /** Held back because it names the same primary file as an earlier same-cycle candidate. */
+  skippedFileOverlap: FileOverlapSkip[];
   /** Watermark persisted after this cycle. */
   watermark: string;
+}
+
+export interface FileOverlapSkip {
+  /** The issue held back this cycle. */
+  issue: number;
+  /** The earlier-admitted issue it names the same primary file as. */
+  collidesWith: number;
+  path: string;
 }
 
 interface ReadyIssue {
   number: number;
   title: string;
+  body: string;
   updatedAt: string;
 }
 
@@ -95,7 +110,7 @@ async function listReadyIssues(
       '--limit',
       String(limit),
       '--json',
-      'number,title,updatedAt',
+      'number,title,body,updatedAt',
     ],
     { cwd: repoDir },
   );
@@ -103,12 +118,17 @@ async function listReadyIssues(
   try {
     const parsed: unknown = JSON.parse(result.stdout);
     if (!Array.isArray(parsed)) return { ok: false, issues: [] };
-    const issues = (parsed as Array<{ number?: unknown; title?: unknown; updatedAt?: unknown }>)
+    const issues = (parsed as Array<{ number?: unknown; title?: unknown; body?: unknown; updatedAt?: unknown }>)
       .filter(
-        (item): item is { number: number; title: string; updatedAt: string } =>
+        (item): item is { number: number; title: string; body?: unknown; updatedAt: string } =>
           typeof item.number === 'number' && typeof item.title === 'string' && typeof item.updatedAt === 'string',
       )
-      .map((item) => ({ number: item.number, title: item.title, updatedAt: item.updatedAt }));
+      .map((item) => ({
+        number: item.number,
+        title: item.title,
+        body: typeof item.body === 'string' ? item.body : '',
+        updatedAt: item.updatedAt,
+      }));
     return { ok: true, issues };
   } catch {
     return { ok: false, issues: [] };
@@ -165,6 +185,7 @@ export async function runAutoIngest(options: AutoIngestOptions, deps: AutoIngest
       skippedInQueue: [],
       skippedInFlight: [],
       skippedStale: [],
+      skippedFileOverlap: [],
       watermark: prevWatermark ?? scannedAt,
     };
   }
@@ -194,8 +215,29 @@ export async function runAutoIngest(options: AutoIngestOptions, deps: AutoIngest
     toAppend.push(issue);
   }
 
-  const capped = toAppend.slice(0, maxPerCycle);
-  const deferred = toAppend.slice(maxPerCycle);
+  const forceAdmit = options.forceAdmit ?? false;
+  const overlapCandidates: FileOverlapCandidate[] = toAppend.map((issue) => ({
+    number: issue.number,
+    title: issue.title,
+    body: issue.body,
+  }));
+  const collisions: Map<number, FileOverlapMatch> = forceAdmit
+    ? new Map()
+    : findFileOverlapCollisions(overlapCandidates);
+
+  const skippedFileOverlap: FileOverlapSkip[] = [];
+  const admissible: ReadyIssue[] = [];
+  for (const issue of toAppend) {
+    const match = collisions.get(issue.number);
+    if (match) {
+      skippedFileOverlap.push({ issue: issue.number, collidesWith: match.number, path: match.path });
+    } else {
+      admissible.push(issue);
+    }
+  }
+
+  const capped = admissible.slice(0, maxPerCycle);
+  const deferred = admissible.slice(maxPerCycle);
 
   if (capped.length > 0) {
     const needsNewline = queueContent.length > 0 && !queueContent.endsWith('\n');
@@ -205,9 +247,12 @@ export async function runAutoIngest(options: AutoIngestOptions, deps: AutoIngest
     appended.push(...capped.map((issue) => issue.number));
   }
 
-  // Never advance the watermark up to or past an issue the maxPerCycle cap deferred this
-  // cycle — otherwise it would be misclassified as stale (and permanently dropped) next cycle.
-  const deferredCeiling = deferred.reduce<string | undefined>(
+  // Never advance the watermark up to or past an issue the maxPerCycle cap deferred, or a
+  // file-overlap collision held back, this cycle — otherwise it would be misclassified as
+  // stale (and permanently dropped, or never retried) next cycle.
+  const heldBackNumbers = new Set(skippedFileOverlap.map((s) => s.issue));
+  const heldBack = [...deferred, ...toAppend.filter((issue) => heldBackNumbers.has(issue.number))];
+  const deferredCeiling = heldBack.reduce<string | undefined>(
     (min, issue) => (min === undefined || issue.updatedAt < min ? issue.updatedAt : min),
     undefined,
   );
@@ -228,6 +273,7 @@ export async function runAutoIngest(options: AutoIngestOptions, deps: AutoIngest
     skippedInQueue,
     skippedInFlight,
     skippedStale,
+    skippedFileOverlap,
     watermark,
   };
 }

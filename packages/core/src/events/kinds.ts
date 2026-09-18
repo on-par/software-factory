@@ -76,6 +76,7 @@ export type EventKind =
   | 'human-merged'
   | 'human-restarted'
   | 'idle'
+  | 'ingest_file_overlap_held'
   | 'ingested'
   | 'issue-title'
   | 'kpi-snapshot'
@@ -251,6 +252,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'human-merged': { severity: 'info', isPark: false, isTerminal: true },
   'human-restarted': { severity: 'info', isPark: false, isTerminal: false },
   idle: { severity: 'info', isPark: false, isTerminal: false },
+  ingest_file_overlap_held: { severity: 'warn', isPark: false, isTerminal: false },
   ingested: { severity: 'info', isPark: false, isTerminal: false },
   'issue-title': { severity: 'info', isPark: false, isTerminal: false },
   'kpi-snapshot': { severity: 'info', isPark: false, isTerminal: false },

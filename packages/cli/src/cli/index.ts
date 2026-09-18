@@ -2962,7 +2962,16 @@ export function createIngestHook(
         lane: ingestCfg.lane,
         maxPerCycle: ingestCfg.maxPerCycle,
         branchPrefix: resolveBranchPrefix(),
+        forceAdmit: process.env.FACTORY_INGEST_FORCE_ADMIT === '1',
       });
+      for (const held of result.skippedFileOverlap) {
+        emitEvent(
+          paths.events,
+          'ingest_file_overlap_held',
+          held.issue,
+          `#${held.issue} held back — names the same file (${held.path}) as already-admitted #${held.collidesWith}; set FACTORY_INGEST_FORCE_ADMIT=1 to admit both`,
+        );
+      }
       if (result.appended.length) {
         emitEvent(
           paths.events,
