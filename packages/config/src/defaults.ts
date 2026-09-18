@@ -61,12 +61,13 @@ export interface FactoryDefaults {
   byok: { enabled: boolean; comment: string };
   notifications: Record<string, boolean>;
   cost_tracking: { enabled: boolean; log_file: string; comment: string };
-  // ci/plan_approval/kpis/sandbox/discovery/filing/ingest/environment ports+proxy/auto_failover.comment are
+  // ci/sweep/plan_approval/kpis/sandbox/discovery/filing/ingest/environment ports+proxy/auto_failover.comment are
   // schema-optional (FactoryConfigSchema declares them z.string().optional()), but this package keeps them as
   // data anyway: dropping them would desync loadFactoryConfig()'s no-path output from what the deleted
   // factory.json produced, breaking the byte-identical behavior contract (#716).
   kpis: { defectWindowDays: number; comment?: string };
   ci: { skip: boolean; comment?: string };
+  sweep: { heartbeatFile?: string; loopIntervalSeconds: number; staleThresholdMultiplier: number; comment?: string };
   plan_approval: { enabled: boolean; comment?: string };
   sandbox: {
     enabled: boolean;
@@ -603,6 +604,12 @@ export const defaultFactoryConfig: FactoryDefaults = {
   ci: {
     skip: false,
     comment: 'Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging',
+  },
+  sweep: {
+    loopIntervalSeconds: 300,
+    staleThresholdMultiplier: 2,
+    comment:
+      'Optional: set sweep.heartbeatFile (or export HEARTBEAT_FILE) to the path an auto-merge-sweep loop writes an ISO8601 timestamp to once per pass (see scripts/auto-merge-sweep.sh, docs/runbooks/sweep-heartbeat.md). factory doctor/status fail when it is older than loopIntervalSeconds * staleThresholdMultiplier seconds. Unset means no sweep is configured for this repo — no check runs.',
   },
   plan_approval: {
     enabled: false,

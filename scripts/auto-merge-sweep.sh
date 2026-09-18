@@ -6,7 +6,8 @@
 # Runs under launchd via scripts/launchd/com.on-par.auto-merge-sweep.plist (KeepAlive
 # restarts it on crash). Writes a heartbeat to ~/.factory/auto-merge-sweep.heartbeat
 # (override with HEARTBEAT_FILE) at the end of every completed pass so a monitor can
-# detect a stalled/dead sweeper. Every log line is also appended to a dated persistent
+# detect a stalled/dead sweeper. See docs/runbooks/sweep-heartbeat.md for how factory
+# doctor/status consume this file. Every log line is also appended to a dated persistent
 # log at ~/.local/state/auto-merge-sweep.log (override with LOG_FILE). On a sweep-wide
 # failure (every repo's `gh pr list`
 # failed), the sleep between passes doubles each consecutive failing pass up to

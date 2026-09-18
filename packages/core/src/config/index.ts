@@ -130,6 +130,14 @@ const FactoryConfigSchema = z.object({
       comment: z.string().default('Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging'),
     })
     .default({ skip: false, comment: 'Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging' }),
+  sweep: z
+    .object({
+      heartbeatFile: z.string().optional(),
+      loopIntervalSeconds: z.number().int().positive().default(300),
+      staleThresholdMultiplier: z.number().positive().default(2),
+      comment: z.string().optional(),
+    })
+    .default({ loopIntervalSeconds: 300, staleThresholdMultiplier: 2 }),
   plan_approval: z
     .object({
       enabled: z.boolean().default(false),
@@ -284,6 +292,7 @@ export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'notifications',
   'cost_tracking',
   'ci',
+  'sweep',
   'plan_approval',
   'kpis',
   'sandbox',

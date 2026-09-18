@@ -50,6 +50,7 @@ const h = vi.hoisted(() => {
         network: { allow: ['api.anthropic.com', 'github.com'] },
         resources: { cpuMs: 300_000, memMb: 4096 },
       },
+      sweep: { loopIntervalSeconds: 300, staleThresholdMultiplier: 2 },
     } as any,
     gcReport: { removed: [], kept: 0, dryRun: false } as any,
     staleClaims: [] as any[],
@@ -408,6 +409,7 @@ beforeEach(() => {
       network: { allow: ['api.anthropic.com', 'github.com'] },
       resources: { cpuMs: 300_000, memMb: 4096 },
     },
+    sweep: { loopIntervalSeconds: 300, staleThresholdMultiplier: 2 },
   };
   h.gcReport = { removed: [], kept: 0, dryRun: false };
   h.staleClaims = [];
