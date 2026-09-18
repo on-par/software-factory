@@ -156,6 +156,7 @@ export class ClaudeCliHarness implements CodingHarness {
         exitCode: typeof err.code === 'number' ? err.code : undefined,
         stderr: typeof err.stderr === 'string' ? err.stderr : undefined,
         stdout,
+        diagnostic: diagnosticText.trim().length > 0 ? diagnosticText : undefined,
         code: typeof err.code === 'string' || typeof err.code === 'number' ? err.code : undefined,
         signal: typeof err.signal === 'string' ? err.signal : undefined,
         killed: err.killed === true ? true : undefined,

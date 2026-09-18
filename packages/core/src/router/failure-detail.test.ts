@@ -70,6 +70,36 @@ describe('describeFailureDetail', () => {
     expect(detail).not.toContain('hunter2');
   });
 
+  it('prefers details.diagnostic over the raw stdout dump when present', () => {
+    const err = new HarnessError('claude CLI process exited 1', 'usage_cap', {
+      exitCode: 1,
+      stdout: `${JSON.stringify({ type: 'system', subtype: 'init' })}\n${'x'.repeat(500)}`,
+      diagnostic: 'You have reached your monthly limit.',
+    });
+
+    const detail = describeFailureDetail(err);
+
+    expect(detail).toContain('diagnostic="You have reached your monthly limit."');
+    expect(detail).not.toContain('stdout="');
+  });
+
+  it('falls back to stdout when there is no diagnostic', () => {
+    const err = new HarnessError('claude CLI process exited 1', 'error', { exitCode: 1, stdout: 'plain stdout' });
+
+    const detail = describeFailureDetail(err);
+
+    expect(detail).toContain('stdout="plain stdout"');
+    expect(detail).not.toContain('diagnostic="');
+  });
+
+  it('truncates an overlong diagnostic to 400 chars plus an ellipsis', () => {
+    const err = new HarnessError('boom', 'usage_cap', { exitCode: 1, diagnostic: 'd'.repeat(500) });
+
+    const detail = describeFailureDetail(err);
+
+    expect(detail).toContain(`diagnostic="${'d'.repeat(400)}…"`);
+  });
+
   it('reads fields from a HarnessError details bag', () => {
     const err = new HarnessError('claude CLI died', 'unknown', { exitCode: 1, stderr: 'oops', signal: 'SIGTERM' });
 
