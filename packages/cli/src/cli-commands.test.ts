@@ -1858,22 +1858,21 @@ bash scripts/verify.sh
       expect(res).toEqual({ exited: true, code: 2 });
     });
 
-    it('loudly clears a stale STOP file left over from a prior halt and proceeds through the queue (#811)', async () => {
+    it('skips claiming new work and leaves .factory/STOP in place when STOP is present at the top of a run', async () => {
       writeFileSync(paths().queue, '# header\napp 1\napp 2\ndocs 3\n');
       writeFileSync(paths().stop, '');
       const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
-      expect(existsSync(paths().stop)).toBe(false);
+      expect(existsSync(paths().stop)).toBe(true);
       const events = readFileSync(paths().events, 'utf-8');
-      expect(events).toContain('stop-file-cleared');
-      expect(events).not.toContain('"type":"stopped"');
-      expect(events).toContain('run-done');
+      expect(events).toContain('"type":"stopped"');
+      expect(events).not.toContain('run-done');
+      expect(logged() + errored()).toContain('.factory/STOP present');
     });
 
     it('runs worktree gc before lanes when worktree.autoGcOnRun is true', async () => {
       h.factoryConfig = { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: true } };
       writeFileSync(paths().queue, '# header\napp 1\n');
-      writeFileSync(paths().stop, '');
       const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       expect(sweepWorktrees).toHaveBeenCalledWith(
@@ -1886,7 +1885,6 @@ bash scripts/verify.sh
     it('does not run worktree gc when worktree.autoGcOnRun is false', async () => {
       h.factoryConfig = { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: false } };
       writeFileSync(paths().queue, '# header\napp 1\n');
-      writeFileSync(paths().stop, '');
       const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       expect(sweepWorktrees).not.toHaveBeenCalled();
@@ -1896,7 +1894,6 @@ bash scripts/verify.sh
       h.factoryConfig = { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: true } };
       (sweepWorktrees as any).mockRejectedValueOnce(new Error('gc boom'));
       writeFileSync(paths().queue, '# header\napp 1\n');
-      writeFileSync(paths().stop, '');
       const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
@@ -1906,7 +1903,6 @@ bash scripts/verify.sh
 
     it('skips malformed queue lines, starts lanes only for valid entries, and warns', async () => {
       writeFileSync(paths().queue, '# header\napp 1\napp abc\ndocs 3\n');
-      writeFileSync(paths().stop, '');
       const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       const err = errored();
@@ -1922,7 +1918,6 @@ bash scripts/verify.sh
       trackEnv('FACTORY_USAGE_WATCH');
       process.env.FACTORY_USAGE_WATCH = '0';
       writeFileSync(paths().queue, 'app 1\n');
-      writeFileSync(paths().stop, '');
       const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
@@ -1933,7 +1928,6 @@ bash scripts/verify.sh
       const core = await import('@on-par/factory-core');
       vi.mocked(core.watchUsage).mockRejectedValueOnce(new Error('watchdog exploded'));
       writeFileSync(paths().queue, 'app 1\n');
-      writeFileSync(paths().stop, '');
       const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
       const events = readFileSync(paths().events, 'utf-8');
@@ -1949,7 +1943,6 @@ bash scripts/verify.sh
         return '';
       };
       writeFileSync(paths().queue, 'app 1\n');
-      writeFileSync(paths().stop, '');
       const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
 
@@ -1966,7 +1959,6 @@ bash scripts/verify.sh
 
     it('appends a second KPI snapshot on a second run', async () => {
       writeFileSync(paths().queue, 'app 1\n');
-      writeFileSync(paths().stop, '');
       await runMain('run', '--local-queue');
       await runMain('run', '--local-queue');
 
@@ -1976,7 +1968,6 @@ bash scripts/verify.sh
 
     it('does not create a KPI snapshot when the queue has no entries', async () => {
       writeFileSync(paths().queue, '# header\n');
-      writeFileSync(paths().stop, '');
       const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
 
@@ -1994,7 +1985,6 @@ bash scripts/verify.sh
         return '';
       };
       writeFileSync(paths().queue, 'app 1\n');
-      writeFileSync(paths().stop, '');
       const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
 
@@ -2009,7 +1999,6 @@ bash scripts/verify.sh
 
     it('does not fail the run when the KPI history path cannot be read for a reason other than "missing"', async () => {
       writeFileSync(paths().queue, 'app 1\n');
-      writeFileSync(paths().stop, '');
       mkdirSync(paths().kpiHistory);
       const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
@@ -2092,7 +2081,6 @@ bash scripts/verify.sh
         delete process.env.TMUX;
         delete process.env.ANTHROPIC_API_KEY;
         writeFileSync(paths().queue, 'app 1\n');
-        writeFileSync(paths().stop, '');
       });
 
       afterEach(() => {
@@ -3386,6 +3374,15 @@ Please add a widget that does the thing.
       const res = await runMain('doctor');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('== factory doctor ==');
+    });
+
+    it('reports .factory/STOP presence as an explicit, non-failing row', async () => {
+      h.claudeAvailable = true;
+      writeFileSync(paths().stop, '');
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('STOP sentinel');
+      expect(logged()).toContain('.factory/STOP present');
     });
 
     it('exits 1 when claude is unavailable', async () => {
