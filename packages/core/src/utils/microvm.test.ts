@@ -3,8 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ExecFn } from './exec.js';
 import {
   createMicroVm,
+  listMicroVms,
   type MicroVmLifecycleOptions,
   microVmName,
+  reapOrphanMicroVm,
   removeMicroVm,
   worktreeSandboxFor,
 } from './microvm.js';
@@ -178,5 +180,72 @@ describe('removeMicroVm', () => {
     await removeMicroVm(baseOpts({ exec, runtime: 'none' }));
 
     expect(exec).not.toHaveBeenCalled();
+  });
+});
+
+describe('listMicroVms', () => {
+  it('returns [] when sbx is not installed', async () => {
+    const exec = makeExec(async () => ({ stdout: 'factory-abc123\n', stderr: '' }));
+
+    const names = await listMicroVms({ exec, isAvailable: () => false });
+
+    expect(names).toEqual([]);
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('returns [] when exec rejects', async () => {
+    const exec = makeExec(async () => {
+      throw new Error('sbx list failed');
+    });
+
+    await expect(listMicroVms({ exec, isAvailable: () => true })).resolves.toEqual([]);
+  });
+
+  it('keeps only lines whose first token starts with factory-', async () => {
+    const exec = makeExec(async () => ({
+      stdout: 'factory-abc123   running\nother-vm   running\nfactory-def456   stopped\n\n',
+      stderr: '',
+    }));
+
+    const names = await listMicroVms({ exec, isAvailable: () => true });
+
+    expect(names).toEqual(['factory-abc123', 'factory-def456']);
+  });
+
+  it('issues sbx list', async () => {
+    const exec = makeExec(async () => ({ stdout: '', stderr: '' }));
+
+    await listMicroVms({ exec, isAvailable: () => true });
+
+    expect(exec).toHaveBeenCalledWith('sbx list', expect.objectContaining({ timeoutMs: expect.any(Number) }));
+  });
+});
+
+describe('reapOrphanMicroVm', () => {
+  it('issues sbx rm --force <name> and returns removed: true on success', async () => {
+    const exec = makeExec(async () => ({ stdout: '', stderr: '' }));
+
+    const result = await reapOrphanMicroVm('factory-abc123', { exec });
+
+    expect(exec).toHaveBeenCalledWith(
+      "sbx rm --force 'factory-abc123'",
+      expect.objectContaining({ timeoutMs: expect.any(Number) }),
+    );
+    expect(result).toEqual({ name: 'factory-abc123', removed: true, detail: 'sbx rm --force factory-abc123 ok' });
+  });
+
+  it('returns removed: false with the error text (never throws) when exec rejects', async () => {
+    const exec = makeExec(async () => {
+      const err = Object.assign(new Error('vm not found'), { stderr: 'no such vm' });
+      throw err;
+    });
+
+    const result = await reapOrphanMicroVm('factory-abc123', { exec });
+
+    expect(result).toEqual({
+      name: 'factory-abc123',
+      removed: false,
+      detail: 'sbx rm --force factory-abc123 failed: no such vm',
+    });
   });
 });

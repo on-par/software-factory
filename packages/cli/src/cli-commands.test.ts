@@ -23,6 +23,12 @@ const h = vi.hoisted(() => {
       throw new Error('execSync not stubbed');
     },
     claudeAvailable: undefined as boolean | undefined,
+    dockerAvailable: undefined as boolean | undefined,
+    sbxAvailable: undefined as boolean | undefined,
+    orphanContainers: [] as Array<{ id: string; name: string }>,
+    reapedContainers: [] as Array<{ id: string; name: string; removed: boolean; detail: string }>,
+    orphanVmNames: [] as string[],
+    reapedVms: [] as Array<{ name: string; removed: boolean; detail: string }>,
     // octokit instance returned by `new Octokit()`
     octokit: {} as any,
     // configurable core behaviour
@@ -165,7 +171,11 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
       buildFallback: h.modelOverrides.buildFallback,
       sources: {},
     })),
-    isCommandAvailable: vi.fn(() => h.claudeAvailable ?? true),
+    isCommandAvailable: vi.fn((cmd: string) => {
+      if (cmd === 'docker') return h.dockerAvailable ?? false;
+      if (cmd === 'sbx') return h.sbxAvailable ?? false;
+      return h.claudeAvailable ?? true;
+    }),
     defaultFindPortListeners: vi.fn(async () => h.portListeners),
     reapOrphanProcesses: vi.fn(async (opts: any) => {
       for (const e of h.orphanEvents) opts.onEvent?.(e);
@@ -242,6 +252,14 @@ vi.mock('@on-par/factory-core/internal', async (importOriginal) => {
     releaseStaleClaims: vi.fn(async () => h.staleClaims),
     // Green-and-ready PR report.
     findUnmergedGreenPrs: vi.fn(async () => h.greenPrs),
+    // Orphan container/microVM scan + reap (#1527).
+    listOrphanContainers: vi.fn(async () => h.orphanContainers),
+    reapOrphanContainers: vi.fn(async () => h.reapedContainers),
+    listMicroVms: vi.fn(async () => h.orphanVmNames),
+    reapOrphanMicroVm: vi.fn(
+      async (name: string) =>
+        h.reapedVms.find((r) => r.name === name) ?? { name, removed: true, detail: `sbx rm --force ${name} ok` },
+    ),
     formatGcReport: vi.fn(
       (report: any) =>
         `GC_REPORT:${report.dryRun ? 'dry' : 'real'}:removed=${report.removed.length}:kept=${report.kept}`,
@@ -265,6 +283,11 @@ vi.mock('./cli/daemon.js', async (importOriginal) => {
 import {
   cleanupWorktree,
   formatGcReport,
+  listMicroVms,
+  listOrphanContainers,
+  microVmName,
+  reapOrphanContainers,
+  reapOrphanMicroVm,
   releaseStaleClaims,
   setupWorktree,
   sweepWorktrees,
@@ -417,6 +440,12 @@ beforeEach(() => {
   h.runTuiCalls = [];
   h.setupWorktreeImpl = async () => {};
   h.claudeAvailable = undefined;
+  h.dockerAvailable = undefined;
+  h.sbxAvailable = undefined;
+  h.orphanContainers = [];
+  h.reapedContainers = [];
+  h.orphanVmNames = [];
+  h.reapedVms = [];
   h.orphanEvents = [];
   h.portListeners = [];
 
@@ -3617,6 +3646,111 @@ Please add a widget that does the thing.
       const res = await runMain('doctor');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('no green-and-ready PRs awaiting merge');
+    });
+
+    it('skips the orphan container/sbx VM scan entirely when docker/sbx are not on PATH', async () => {
+      h.claudeAvailable = true;
+
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(listOrphanContainers).not.toHaveBeenCalled();
+      expect(listMicroVms).not.toHaveBeenCalled();
+      expect(logged()).toContain('no orphan sf-job-*/factory.managed containers');
+      expect(logged()).toContain('no orphan factory-* sbx VMs');
+    });
+
+    it('fails doctor and reports each stopped sf-job-*/factory.managed container as an orphan', async () => {
+      h.claudeAvailable = true;
+      h.dockerAvailable = true;
+      h.orphanContainers = [{ id: 'abc123', name: 'sf-job-1' }];
+
+      const res = await runMain('doctor');
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(logged()).toContain('orphan container sf-job-1');
+      expect(logged()).toContain('is stopped and not tied to any running job');
+    });
+
+    it('--reconcile reaps orphan containers and reports the outcome', async () => {
+      h.claudeAvailable = true;
+      h.dockerAvailable = true;
+      h.orphanContainers = [{ id: 'abc123', name: 'sf-job-1' }];
+      h.reapedContainers = [{ id: 'abc123', name: 'sf-job-1', removed: true, detail: 'docker rm -f -v sf-job-1 ok' }];
+
+      const res = await runMain('doctor', '--reconcile');
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(reapOrphanContainers).toHaveBeenCalledWith(h.orphanContainers);
+      expect(logged()).toContain('reconcile: removed container sf-job-1');
+    });
+
+    it('doctor without --reconcile never calls reapOrphanContainers even when orphans exist', async () => {
+      h.claudeAvailable = true;
+      h.dockerAvailable = true;
+      h.orphanContainers = [{ id: 'abc123', name: 'sf-job-1' }];
+
+      const res = await runMain('doctor');
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(reapOrphanContainers).not.toHaveBeenCalled();
+    });
+
+    it('fails doctor and reports a factory-* sbx VM with no active lane as an orphan', async () => {
+      h.claudeAvailable = true;
+      h.sbxAvailable = true;
+      h.orphanVmNames = ['factory-abc123'];
+
+      const res = await runMain('doctor');
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(logged()).toContain('orphan sbx VM factory-abc123');
+      expect(logged()).toContain('has no active lane holding its worktree');
+    });
+
+    it('excludes the sbx VM name derived from an alive lease from the orphan set', async () => {
+      h.claudeAvailable = true;
+      h.sbxAvailable = true;
+      const activeName = microVmName(h.repoRoot);
+      h.orphanVmNames = [activeName, 'factory-def456'];
+      const portsFile = join(h.repoRoot, '.factory', 'state', 'ports.json');
+      writeFileSync(
+        portsFile,
+        JSON.stringify({
+          version: 1,
+          leases: [
+            {
+              worktreeId: h.repoRoot,
+              branch: 'live',
+              port: 4001,
+              pid: process.pid,
+              acquiredAt: '2026-01-01T00:00:00Z',
+            },
+          ],
+        }),
+      );
+
+      const res = await runMain('doctor');
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(logged()).not.toContain(`orphan sbx VM ${activeName}`);
+      expect(logged()).toContain('orphan sbx VM factory-def456');
+    });
+
+    it('--reconcile reaps orphan sbx VMs and reports the outcome', async () => {
+      h.claudeAvailable = true;
+      h.sbxAvailable = true;
+      h.orphanVmNames = ['factory-abc123'];
+      h.reapedVms = [{ name: 'factory-abc123', removed: true, detail: 'sbx rm --force factory-abc123 ok' }];
+
+      const res = await runMain('doctor', '--reconcile');
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(reapOrphanMicroVm).toHaveBeenCalledWith('factory-abc123');
+      expect(logged()).toContain('reconcile: removed sbx VM factory-abc123 (sbx rm --force)');
+    });
+
+    it('doctor without --reconcile never calls reapOrphanMicroVm even when orphans exist', async () => {
+      h.claudeAvailable = true;
+      h.sbxAvailable = true;
+      h.orphanVmNames = ['factory-abc123'];
+
+      const res = await runMain('doctor');
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(reapOrphanMicroVm).not.toHaveBeenCalled();
     });
   });
 

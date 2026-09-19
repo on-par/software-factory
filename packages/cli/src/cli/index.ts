@@ -189,12 +189,17 @@ import {
   formatGcReport,
   gitFetch,
   isAutoMergeBlocked,
+  listMicroVms,
+  listOrphanContainers,
   logCost,
   logEvent,
+  microVmName,
   planQueueMigration,
   readCosts,
   readGithubQueueSnapshot,
   reapLaneWorktree,
+  reapOrphanContainers,
+  reapOrphanMicroVm,
   releaseRuntimeFiles,
   releaseStaleClaims,
   resolveBranchPrefix,
@@ -229,7 +234,9 @@ import {
   doctorFailed,
   eventLogCheck,
   formatClaimReconcileReport,
+  formatContainerReconcileReport,
   formatDoctorChecks,
+  formatMicroVmReconcileReport,
   formatReconcileReport,
   formatWorktreeReconcileReport,
   type GreenPrScanResult,
@@ -237,6 +244,8 @@ import {
   keychainPreflightError,
   type KeychainProbeStatus,
   type LeaseHealthRow,
+  orphanContainerChecks,
+  orphanMicroVmChecks,
   runDoctorChecks,
   sandboxClaudeAuthChecks,
   unmergedGreenPrChecks,
@@ -4235,6 +4244,15 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     const health = await inspectPortLeases({ registryFile: paths.ports });
     checks.push(...leaseChecks(health.map(toLeaseRow)));
 
+    const dockerAvailable = isCommandAvailable('docker');
+    const orphanContainers = dockerAvailable ? await listOrphanContainers().catch(() => []) : [];
+    checks.push(...orphanContainerChecks(orphanContainers.map((c) => c.name)));
+
+    const sbxAvailable = isCommandAvailable('sbx');
+    const activeVmNames = new Set(health.filter((h) => h.alive).map((h) => microVmName(h.lease.worktreeId)));
+    const orphanVmNames = sbxAvailable ? (await listMicroVms()).filter((n) => !activeVmNames.has(n)) : [];
+    checks.push(...orphanMicroVmChecks(orphanVmNames));
+
     const sweepStatus = checkSweepHeartbeat(factoryConfig.sweep, process.env, defaultSweepHeartbeatDeps());
     const sweepCheck = sweepHeartbeatCheck(sweepStatus);
     if (sweepCheck) checks.push(sweepCheck);
@@ -4254,6 +4272,16 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     checks.push(...unmergedGreenPrChecks(await scanGreenPrs(ghRepo, octokit)));
 
     if (opts.reconcile) {
+      if (orphanContainers.length > 0) {
+        const reapedContainers = await reapOrphanContainers(orphanContainers);
+        console.log(formatContainerReconcileReport(reapedContainers));
+      }
+
+      if (orphanVmNames.length > 0) {
+        const reapedVms = await Promise.all(orphanVmNames.map((name) => reapOrphanMicroVm(name)));
+        console.log(formatMicroVmReconcileReport(reapedVms));
+      }
+
       const reaped = await reapStalePortLeases({ registryFile: paths.ports, lockDir: paths.portsLock });
       console.log(formatReconcileReport(reaped));
 
@@ -4375,7 +4403,10 @@ export async function main() {
   program
     .command('doctor')
     .description('Preflight-check your environment (claude, gh, token, git, npm, sandbox)')
-    .option('--reconcile', 'Reap stale port leases, dead-run worktrees, and stale issue claims')
+    .option(
+      '--reconcile',
+      'Reap stale port leases, dead-run worktrees, stale issue claims, orphan sf-job-*/factory.managed containers, and orphan factory-* sbx VMs',
+    )
     .action((opts: { reconcile?: boolean }) => cmdDoctor(opts));
 
   program
