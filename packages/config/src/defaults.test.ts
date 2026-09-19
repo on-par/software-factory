@@ -61,9 +61,7 @@ describe('shipped defaults', () => {
     expect(defaultModelsConfig.models['gpt-6-astra-low'].codexFlag).toBe(
       '-m gpt-6-astra -c model_reasoning_effort=low',
     );
-    expect(defaultModelsConfig.models['gpt-5.5'].codexFlag).toBe(
-      '-m gpt-5.5 -c model_reasoning_effort=medium',
-    );
+    expect(defaultModelsConfig.models['gpt-5.5'].codexFlag).toBe('-m gpt-5.5 -c model_reasoning_effort=medium');
   });
 
   it('every tier entry exists in models, with the expected tier lengths', () => {
