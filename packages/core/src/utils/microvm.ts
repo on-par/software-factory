@@ -109,6 +109,10 @@ export async function createMicroVm(opts: MicroVmLifecycleOptions): Promise<bool
   }
 }
 
+async function sbxRemove(name: string, exec: ExecFn): Promise<void> {
+  await exec(`sbx rm --force ${name}`, { timeoutMs: MICRO_VM_TIMEOUT_MS });
+}
+
 /** Removes the microVM for a docker-sandbox lane. Best-effort and idempotent: `--force`
  *  tolerates an already-gone VM, and any exec failure is swallowed so cleanup never
  *  throws and never leaves the caller unable to finish tearing down the worktree. */
@@ -122,9 +126,57 @@ export async function removeMicroVm(opts: MicroVmLifecycleOptions): Promise<void
   const exec = opts.exec ?? defaultExecFn;
 
   try {
-    await exec(`sbx rm --force ${name}`, { timeoutMs: MICRO_VM_TIMEOUT_MS });
+    await sbxRemove(name, exec);
     opts.log?.('sandbox', `microVM ${name} removed for ${opts.worktreePath}`);
   } catch {
     // Best-effort — an already-gone or unreachable VM must not fail worktree cleanup.
+  }
+}
+
+export interface ReapedMicroVm {
+  name: string;
+  removed: boolean;
+  detail: string;
+}
+
+/** Lists every `factory-*` sbx microVM name currently known to `sbx list`, regardless of
+ *  which (if any) lane still owns it — callers cross-reference against active port leases
+ *  to determine orphan-ness. Returns `[]` (never throws) when `sbx` is not on PATH or the
+ *  listing itself fails, consistent with how the rest of `factory doctor` treats an absent
+ *  optional tool. */
+export async function listMicroVms(
+  opts: { exec?: ExecFn; isAvailable?: (cmd: string) => boolean } = {},
+): Promise<string[]> {
+  const isAvailable = opts.isAvailable ?? isCommandAvailable;
+  if (!isAvailable('sbx')) return [];
+
+  const exec = opts.exec ?? defaultExecFn;
+  try {
+    const { stdout } = await exec('sbx list', { timeoutMs: MICRO_VM_TIMEOUT_MS });
+    return stdout
+      .split('\n')
+      .map((l) => l.trim().split(/\s+/)[0])
+      .filter((name): name is string => !!name && name.startsWith(MICRO_VM_NAME_PREFIX));
+  } catch {
+    return [];
+  }
+}
+
+/** Removes one orphan sbx VM by its already-known name (unlike `removeMicroVm`, which only
+ *  knows a worktree path and re-derives the name — reconcile discovers orphans by name via
+ *  `listMicroVms`, and the whole point is that their original worktree may already be
+ *  gone). Never throws: a failure is reported in the returned row so the caller can still
+ *  act on every VM and let the doctor check surface the failure. */
+export async function reapOrphanMicroVm(name: string, opts: { exec?: ExecFn } = {}): Promise<ReapedMicroVm> {
+  const exec = opts.exec ?? defaultExecFn;
+  try {
+    await sbxRemove(shellQuote(name), exec);
+    return { name, removed: true, detail: `sbx rm --force ${name} ok` };
+  } catch (err: any) {
+    return {
+      name,
+      removed: false,
+      detail: `sbx rm --force ${name} failed: ${err?.stderr ?? err?.message ?? String(err)}`,
+    };
   }
 }

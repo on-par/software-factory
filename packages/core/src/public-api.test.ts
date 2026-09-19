@@ -384,6 +384,9 @@ const INTERNAL_API_KEYS = [
   'OpenCodeHarness',
   // Hosted execution: Docker container engine adapter (#899)
   'createDockerEngine',
+  // Hosted execution: orphan sf-job-* container scan + reap (#1527)
+  'listOrphanContainers',
+  'reapOrphanContainers',
   // Router
   'CliModelExecutor',
   // Phase helpers
@@ -477,6 +480,9 @@ const INTERNAL_API_KEYS = [
   'microVmName',
   'removeMicroVm',
   'worktreeSandboxFor',
+  // docker-sandbox orphan microVM scan + reap (#1527)
+  'listMicroVms',
+  'reapOrphanMicroVm',
   'shellEscape',
   'slugify',
   'watchChecks',
