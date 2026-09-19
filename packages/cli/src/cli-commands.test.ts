@@ -4145,14 +4145,17 @@ describe('shipIssue (direct)', () => {
     expect(events).toContain('sandbox disabled by config/FACTORY_SANDBOX');
   });
 
-  it('passes the docker-sandbox descriptor to setupWorktree without a speculative sandbox log when sandbox.runtime is docker-sandbox', async () => {
+  it('passes the docker-sandbox descriptor to setupWorktree without a speculative sandbox log, but does log the no-exec warning, when sandbox.runtime is docker-sandbox', async () => {
     h.factoryConfig = { ...h.factoryConfig, sandbox: { ...h.factoryConfig.sandbox, runtime: 'docker-sandbox' } };
     await shipIssue(5, {}, ctx());
     const events = readFileSync(paths().events, 'utf-8');
     // createMicroVm (not the CLI) owns the outcome-driven 'sandbox'/'sandbox-unavailable'
     // events; setupWorktree is mocked here, so neither fires — the CLI must not log a
-    // premature "active" event before the microVM actually exists.
+    // premature "active" event before the microVM actually exists. It must still log the
+    // docker-sandbox-no-exec warning (#1531): the microVM never execs the agent command.
     expect(events).not.toContain('docker-sandbox microVM active for lane');
+    expect(events).toContain('docker-sandbox-no-exec');
+    expect(events).toContain('does not exec the agent command inside it');
     expect(vi.mocked(setupWorktree).mock.calls.at(-1)?.[4]).toEqual(
       expect.objectContaining({ runtime: 'docker-sandbox' }),
     );

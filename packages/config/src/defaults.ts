@@ -623,7 +623,7 @@ export const defaultFactoryConfig: FactoryDefaults = {
     resources: { cpuMs: 300000, memMb: 4096 },
     docker: { rolloutPercent: 0 },
     comment:
-      'Containment for agentic build runs. Disable per-run with --no-sandbox or FACTORY_SANDBOX=0. Empty network.allow denies all egress; non-empty leaves egress open (per-host filtering is logged as degraded in v1). Set sandbox.runtime (auto|sandbox-exec|firejail|docker-sandbox|none) or FACTORY_SANDBOX_RUNTIME to pick a runtime; auto probes the host. docker-sandbox is reserved for the microVM runtime and does not contain anything yet (#653). sandbox.docker.rolloutPercent (0-100) deterministically promotes that percentage of unpinned lanes into the docker-sandbox cohort for A/B evidence (#655).',
+      "Containment for agentic build runs. Disable per-run with --no-sandbox or FACTORY_SANDBOX=0. Empty network.allow denies all egress; non-empty leaves egress open (per-host filtering is logged as degraded in v1). Set sandbox.runtime (auto|sandbox-exec|firejail|docker-sandbox|none) or FACTORY_SANDBOX_RUNTIME to pick a runtime; auto probes the host. docker-sandbox creates/removes a microVM but does NOT exec the agent command inside it yet — sbx exec is unbuilt (#653/#1531), so it does not contain agent execution; sandbox-exec/firejail are today's real containment, and workspace.backend: disposable-docker is the intended future isolation path (that config surface is itself unimplemented today, tracked by epic #1525 and siblings). sandbox.docker.rolloutPercent (0-100) deterministically promotes that percentage of unpinned lanes into the docker-sandbox cohort for A/B evidence (#655).",
   },
   discovery: {
     enabled: true,
