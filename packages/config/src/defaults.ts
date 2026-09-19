@@ -251,7 +251,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       envKey: null,
       harness: 'codex-cli',
       codex: true,
-      codexFlag: '-m gpt-5.6-luna -c model_reasoning_effort=medium',
+      codexFlag: '-m gpt-5.6-luna',
     },
     /** GPT-5.6 Luna at max reasoning effort — worker/checker pin for "luna max". */
     'gpt-5.6-luna-max': {
@@ -277,7 +277,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       envKey: null,
       harness: 'codex-cli',
       codex: true,
-      codexFlag: '-m gpt-5.6-terra -c model_reasoning_effort=medium',
+      codexFlag: '-m gpt-5.6-terra',
     },
     /** GPT-5.5 — previous-generation Codex catalog model. */
     'gpt-5.5': {
@@ -290,7 +290,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       envKey: null,
       harness: 'codex-cli',
       codex: true,
-      codexFlag: '-m gpt-5.5 -c model_reasoning_effort=medium',
+      codexFlag: '-m gpt-5.5',
     },
     /** claude-CLI wiring is unproven — the Claude CLI only serves Anthropic models */
     'gpt-4.1-mini': {
