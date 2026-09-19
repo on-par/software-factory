@@ -1506,7 +1506,14 @@ export async function shipIssue(
     // (#653), not a command-prefix wrap — activeSandboxPolicy stays undefined because
     // wrapCommandInSandbox remains a no-op for this runtime. createMicroVm logs the
     // actual outcome ('sandbox' on success, 'sandbox-unavailable' on fallback), so no
-    // speculative log is emitted here.
+    // speculative log is emitted here. The line below is a distinct warning: even when
+    // the microVM comes up cleanly, docker-sandbox never execs the agent command inside
+    // it (#1531) — workspace.backend: disposable-docker is the intended future isolation
+    // path (itself unimplemented today, tracked by epic #1525 and siblings).
+    log(
+      'docker-sandbox-no-exec',
+      'sandbox.runtime is docker-sandbox — the microVM is created/removed but does not exec the agent command inside it; this runtime does not contain agent execution today. workspace.backend: disposable-docker is the intended future isolation path (not yet implemented).',
+    );
   } else {
     activeSandboxPolicy = sandboxPolicy;
     if (sandboxPolicy.allowHosts.length > 0) {
