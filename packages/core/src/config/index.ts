@@ -19,6 +19,7 @@ import { runConfigSource } from './run-config-source.js';
 
 import type { FilingPolicy } from '../filing/policy.js';
 import { KNOWN_HARNESS_IDS } from '../harness/catalog.js';
+import { resolveSandboxRuntimeSetting } from '../sandbox/index.js';
 import type { FailoverReason } from '../types/index.js';
 
 import { ModelEffortsSchema } from './effort.js';
@@ -170,6 +171,12 @@ const FactoryConfigSchema = z.object({
       resources: { cpuMs: 300_000, memMb: 4096 },
       docker: { rolloutPercent: 0 },
     }),
+  workspace: z
+    .object({
+      backend: z.enum(['worktree', 'disposable-docker']).default('worktree'),
+      comment: z.string().optional(),
+    })
+    .default({ backend: 'worktree' }),
   discovery: z
     .object({
       enabled: z.boolean().default(true),
@@ -306,6 +313,7 @@ export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'plan_approval',
   'kpis',
   'sandbox',
+  'workspace',
   'discovery',
   'filing',
   'ingest',
@@ -461,6 +469,40 @@ export function resolveEnvironmentProxy(
     port: config.environment?.proxy?.port ?? 80,
     domain: config.environment?.proxy?.domain ?? 'factory.localhost',
   };
+}
+
+export type WorkspaceBackend = 'worktree' | 'disposable-docker';
+
+const WORKSPACE_BACKENDS: readonly WorkspaceBackend[] = ['worktree', 'disposable-docker'];
+
+function workspaceBackendFromEnv(env: NodeJS.ProcessEnv): WorkspaceBackend | undefined {
+  const raw = env.FACTORY_WORKSPACE_BACKEND;
+  return WORKSPACE_BACKENDS.find((b) => b === raw);
+}
+
+/** FACTORY_WORKSPACE_BACKEND wins over config, mirroring FACTORY_SANDBOX_RUNTIME's
+ *  precedence over sandbox.runtime; an unrecognized env value is ignored. */
+export function resolveWorkspaceBackend(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): WorkspaceBackend {
+  return workspaceBackendFromEnv(env) ?? config.workspace?.backend ?? 'worktree';
+}
+
+/** Returns a message when the resolved workspace backend and the resolved (pre-auto-probe)
+ *  sandbox.runtime setting both claim the disposable-Docker boundary, or null otherwise.
+ *  Compares settings, not a host-probed runtime: sandbox.runtime: 'auto' never conflicts
+ *  here even if this host would auto-probe to docker-sandbox. */
+export function workspaceSandboxConflict(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): string | null {
+  const backend = resolveWorkspaceBackend(config, env);
+  const sandboxRuntimeSetting = resolveSandboxRuntimeSetting(config.sandbox?.runtime, { env });
+  if (backend === 'disposable-docker' && sandboxRuntimeSetting === 'docker-sandbox') {
+    return (
+      'Contradictory Docker workspace configuration: workspace.backend is ' +
+      '"disposable-docker" and sandbox.runtime is "docker-sandbox". These are two ' +
+      'independent Docker boundaries and cannot both be set. Set sandbox.runtime to ' +
+      'something other than "docker-sandbox" (e.g. "auto" or "none"), or set ' +
+      'workspace.backend back to "worktree".'
+    );
+  }
+  return null;
 }
 
 export interface AutoFailoverSettings {

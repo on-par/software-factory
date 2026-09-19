@@ -36,6 +36,8 @@ const PUBLIC_API_KEYS = [
   'resolveProcessGroupGraceMs',
   'resolveSkipCI',
   'resolveTimeouts',
+  'resolveWorkspaceBackend',
+  'workspaceSandboxConflict',
   // Repo config (.factory/config.json)
   'applyRepoConfig',
   'describeEffectiveConfig',

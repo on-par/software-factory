@@ -69,11 +69,21 @@ function sandboxRuntimeFromEnv(env: NodeJS.ProcessEnv): SandboxRuntimeSetting | 
   return SANDBOX_RUNTIME_SETTINGS.find((s) => s === raw);
 }
 
-/** Resolves the concrete runtime for one run. FACTORY_SANDBOX_RUNTIME wins over the
+/** Resolves the configured *setting* for one run — env override or the configured
+ *  literal, or 'auto' — without probing the host. FACTORY_SANDBOX_RUNTIME wins over the
  *  config field (mirroring FACTORY_SANDBOX over `sandbox.enabled`); an unrecognized env
- *  value is ignored, exactly as FACTORY_SANDBOX ignores anything that is not 0 or 1.
- *  Only 'auto' probes the host — an explicit runtime is honored verbatim so an operator
- *  opting into docker-sandbox is never silently downgraded. */
+ *  value is ignored, exactly as FACTORY_SANDBOX ignores anything that is not 0 or 1. */
+export function resolveSandboxRuntimeSetting(
+  configured: SandboxRuntimeSetting | undefined,
+  opts: { env?: NodeJS.ProcessEnv } = {},
+): SandboxRuntimeSetting {
+  const env = opts.env ?? process.env;
+  return sandboxRuntimeFromEnv(env) ?? configured ?? 'auto';
+}
+
+/** Resolves the concrete runtime for one run. Only 'auto' probes the host — an explicit
+ *  runtime is honored verbatim so an operator opting into docker-sandbox is never
+ *  silently downgraded. */
 export function resolveSandboxRuntime(
   configured: SandboxRuntimeSetting | undefined,
   opts: {
@@ -82,8 +92,7 @@ export function resolveSandboxRuntime(
     isAvailable?: (cmd: string) => boolean;
   } = {},
 ): SandboxRuntime {
-  const env = opts.env ?? process.env;
-  const setting = sandboxRuntimeFromEnv(env) ?? configured ?? 'auto';
+  const setting = resolveSandboxRuntimeSetting(configured, { env: opts.env });
   if (setting !== 'auto') return setting;
   return detectSandboxRuntime(opts.platform ?? process.platform, opts.isAvailable ?? isCommandAvailable);
 }
