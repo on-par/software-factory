@@ -150,6 +150,9 @@ function createFakeEngine(script: FakeEngineScript, calls: FakeEngineCalls): Con
     async createLaneContainer(containerName) {
       return { containerName };
     },
+    async prepareLaneWorkspace() {
+      throw new Error('not used');
+    },
   };
 }
 

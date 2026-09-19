@@ -14,6 +14,7 @@ import type {
   ContainerRunResult,
   ContainerRunSpec,
   LaneContainerCreateResult,
+  LaneWorkspacePrepared,
   PreparedWorkspace,
 } from './container.js';
 import { redactGitHubCredential, type GitHubCredentialBundle } from './github-authority.js';
@@ -155,6 +156,30 @@ export function createDockerEngine(options: DockerEngineOptions): ContainerEngin
     async createLaneContainer(name): Promise<LaneContainerCreateResult> {
       await exec(`docker create --name ${quote(name)} --label ${quote(MANAGED_LABEL)} ${quote(laneImage)}`, {});
       return { containerName: name };
+    },
+
+    async prepareLaneWorkspace(targetContainerName, repoSlug): Promise<LaneWorkspacePrepared> {
+      const containerRepoPath = `/workspace/${repoDirname}`;
+      const tempDir = await mkdtemp(join(options.rootDir ?? tmpdir(), 'sf-lane-'));
+      let clone: CloneOutcome;
+      try {
+        await exec(`git clone --depth 1 ${quote(cloneUrlFor(repoSlug))} ${quote(tempDir)}`, {});
+        const { stdout } = await exec(`git -C ${quote(tempDir)} rev-parse HEAD`, {});
+        clone = { ok: true, commit: stdout.trim() };
+      } catch (err) {
+        const execErr = err as PromisifiedExecError;
+        clone = { ok: false, error: execErr.stderr ?? (err instanceof Error ? err.message : String(err)) };
+      }
+      if (clone.ok) {
+        try {
+          await exec(`docker cp ${quote(`${tempDir}/.`)} ${quote(`${targetContainerName}:${containerRepoPath}`)}`, {});
+        } catch (err) {
+          const execErr = err as PromisifiedExecError;
+          clone = { ok: false, error: execErr.stderr ?? (err instanceof Error ? err.message : String(err)) };
+        }
+      }
+      await rm(tempDir, { recursive: true, force: true });
+      return { containerRepoPath, clone };
     },
   };
 }
