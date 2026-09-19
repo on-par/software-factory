@@ -244,6 +244,41 @@ describe('readCostsFile', () => {
     expect(readCostsFile(file)).toEqual({ entries: [valid], skipped: 0 });
   });
 
+  it('accepts workspaceBackend "worktree" or "disposable-docker" without counting the row as skipped (#1532)', () => {
+    const dir = mkdtemp();
+    const file = join(dir, 'costs.jsonl');
+    const worktree: CostEntry = {
+      ts: '2026-07-10T11:30:00Z',
+      issue: '61',
+      task: 'build',
+      model: 'claude-sonnet-5',
+      inputTokens: 100,
+      outputTokens: 50,
+      cost: 0.01,
+      workspaceBackend: 'worktree',
+    };
+    const dockerBacked: CostEntry = { ...worktree, issue: '62', workspaceBackend: 'disposable-docker' };
+    writeFileSync(file, [JSON.stringify(worktree), JSON.stringify(dockerBacked)].join('\n') + '\n');
+    expect(readCostsFile(file)).toEqual({ entries: [worktree, dockerBacked], skipped: 0 });
+  });
+
+  it('counts a line with an unrecognized workspaceBackend value as skipped (#1532)', () => {
+    const dir = mkdtemp();
+    const file = join(dir, 'costs.jsonl');
+    const invalid = {
+      ts: '2026-07-10T11:30:00Z',
+      issue: '61',
+      task: 'build',
+      model: 'claude-sonnet-5',
+      inputTokens: 100,
+      outputTokens: 50,
+      cost: 0.01,
+      workspaceBackend: 'host',
+    };
+    writeFileSync(file, JSON.stringify(invalid) + '\n');
+    expect(readCostsFile(file)).toEqual({ entries: [], skipped: 1 });
+  });
+
   it('counts a line with non-numeric token fields as skipped instead of admitting it for aggregation', () => {
     const dir = mkdtemp();
     const file = join(dir, 'costs.jsonl');

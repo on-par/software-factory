@@ -310,6 +310,9 @@ export interface CostEntry {
   /** Rework rounds completed in the run at the moment this row was emitted; the run
    *  total is the max over its rows (#655). */
   reworkRoundCount?: number;
+  /** Lane workspace isolation backend the run used, mapped from `workspace.backend`
+   *  config (`'host'` -> `'worktree'`) (#1532). */
+  workspaceBackend?: 'worktree' | 'disposable-docker';
 }
 
 // ---------- Dispute ----------

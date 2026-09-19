@@ -162,6 +162,18 @@ describe('computeSandboxAbReport', () => {
     expect(report.docker.sandboxViolations).toBe(0);
     expect(report.baseline.sandboxViolations).toBe(0);
   });
+
+  it('breaks down runs by workspaceBackend independent of the sandboxRuntime cohort split (#1532)', () => {
+    const costs: CostEntry[] = [
+      cost({ issue: '1', sandboxRuntime: DOCKER_SANDBOX_RUNTIME, workspaceBackend: 'worktree' }),
+      cost({ issue: '2', sandboxRuntime: 'none', workspaceBackend: 'disposable-docker' }),
+      cost({ issue: '3', sandboxRuntime: 'none' }),
+    ];
+
+    const report = computeSandboxAbReport([], costs);
+
+    expect(report.workspaceBackendCounts).toEqual({ worktree: 1, 'disposable-docker': 1, unknown: 1 });
+  });
 });
 
 describe('recommendSandboxAb', () => {
@@ -233,6 +245,21 @@ describe('renderSandboxAbReport', () => {
     const report = computeSandboxAbReport([], [cost({ issue: '1' })]);
     const rendered = renderSandboxAbReport(report);
     expect(rendered).toContain('unknown runs');
+  });
+
+  it('renders the workspace backend breakdown (#1532)', () => {
+    const report = computeSandboxAbReport(
+      [],
+      [
+        cost({ issue: '1', sandboxRuntime: DOCKER_SANDBOX_RUNTIME, workspaceBackend: 'worktree' }),
+        cost({ issue: '2', sandboxRuntime: 'none', workspaceBackend: 'disposable-docker' }),
+      ],
+    );
+    const rendered = renderSandboxAbReport(report);
+    expect(rendered).toContain('workspace backend:');
+    expect(rendered).toContain('worktree: 1');
+    expect(rendered).toContain('disposable-docker: 1');
+    expect(rendered).toContain('unknown: 0');
   });
 });
 
