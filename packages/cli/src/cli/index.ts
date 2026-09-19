@@ -1401,6 +1401,8 @@ export async function shipIssue(
   );
   let issueSpend = 0;
   let laneSandboxRuntime = 'none';
+  const laneWorkspaceBackend =
+    factoryConfig.workspace?.backend === 'disposable-docker' ? 'disposable-docker' : 'worktree';
   router.setCostSink((entry) => {
     issueSpend += entry.cost;
     logCost(paths.costs, {
@@ -1408,6 +1410,7 @@ export async function shipIssue(
       issue: String(issueNum),
       sandboxRuntime: laneSandboxRuntime,
       reworkRoundCount: laneReworkRounds,
+      workspaceBackend: laneWorkspaceBackend,
     });
   });
   const modelPins = resolveEffectiveModelPins(router.registryRef, repoConfig);

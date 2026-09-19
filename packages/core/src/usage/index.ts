@@ -253,7 +253,10 @@ function isValidCostEntry(value: unknown): value is CostEntry {
     (v.durationApiMs === undefined || Number.isFinite(v.durationApiMs)) &&
     (v.sandboxRuntime === undefined || typeof v.sandboxRuntime === 'string') &&
     (v.duration === undefined || Number.isFinite(v.duration)) &&
-    (v.reworkRoundCount === undefined || Number.isFinite(v.reworkRoundCount))
+    (v.reworkRoundCount === undefined || Number.isFinite(v.reworkRoundCount)) &&
+    (v.workspaceBackend === undefined ||
+      v.workspaceBackend === 'worktree' ||
+      v.workspaceBackend === 'disposable-docker')
   );
 }
 

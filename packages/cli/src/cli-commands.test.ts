@@ -4319,6 +4319,30 @@ describe('shipIssue (direct)', () => {
     expect(costs[0].reworkRoundCount).toBe(2);
   });
 
+  it('stamps workspaceBackend "worktree" onto each cost row when workspace.backend is unset (#1532)', async () => {
+    await shipIssue(5, {}, ctx());
+
+    const costs = readFileSync(paths().costs, 'utf-8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(costs).toHaveLength(1);
+    expect(costs[0].workspaceBackend).toBe('worktree');
+  });
+
+  it('stamps workspaceBackend "disposable-docker" onto each cost row when workspace.backend is disposable-docker (#1532)', async () => {
+    h.factoryConfig = { ...h.factoryConfig, workspace: { backend: 'disposable-docker' } };
+
+    await shipIssue(5, {}, ctx());
+
+    const costs = readFileSync(paths().costs, 'utf-8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(costs).toHaveLength(1);
+    expect(costs[0].workspaceBackend).toBe('disposable-docker');
+  });
+
   it('logs skip-ci when FACTORY_SKIP_CI resolves to true', async () => {
     const core = await import('@on-par/factory-core');
     vi.mocked(core.resolveSkipCI).mockReturnValueOnce(true);

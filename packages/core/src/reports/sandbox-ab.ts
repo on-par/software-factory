@@ -38,6 +38,9 @@ export interface SandboxAbReport {
   baseline: SandboxAbCohortMetrics;
   /** Runs whose cost rows carry no sandboxRuntime; excluded from both cohorts. */
   unknownRuns: number;
+  /** Run counts by resolved `workspaceBackend` (#1532) — a separate breakdown of lane
+   *  workspace isolation, independent of the docker/baseline sandboxRuntime cohort split. */
+  workspaceBackendCounts: { worktree: number; 'disposable-docker': number; unknown: number };
   recommendation: SandboxAbRecommendation;
   rationale: string;
 }
@@ -50,6 +53,11 @@ function cohortOf(rows: CostEntry[]): Cohort {
   const resolved = rows.find((r) => r.sandboxRuntime !== undefined)?.sandboxRuntime;
   if (resolved === undefined) return 'unknown';
   return resolved === DOCKER_SANDBOX_RUNTIME ? 'docker' : 'baseline';
+}
+
+function workspaceBackendOf(rows: CostEntry[]): 'worktree' | 'disposable-docker' | 'unknown' {
+  const resolved = rows.find((r) => r.workspaceBackend !== undefined)?.workspaceBackend;
+  return resolved ?? 'unknown';
 }
 
 function sumDuration(rows: CostEntry[]): number | null {
@@ -95,10 +103,12 @@ export function computeSandboxAbReport(events: FactoryEvent[], costs: CostEntry[
 
   const cohortByIssue = new Map<string, Cohort>();
   let unknownRuns = 0;
+  const workspaceBackendCounts = { worktree: 0, 'disposable-docker': 0, unknown: 0 };
   for (const [issue, rows] of costsByIssue) {
     const cohort = cohortOf(rows);
     cohortByIssue.set(issue, cohort);
     if (cohort === 'unknown') unknownRuns++;
+    workspaceBackendCounts[workspaceBackendOf(rows)]++;
   }
 
   const violationsByIssue = new Map<string, number>();
@@ -159,7 +169,7 @@ export function computeSandboxAbReport(events: FactoryEvent[], costs: CostEntry[
 
   const { recommendation, rationale } = recommendSandboxAb(docker, baseline);
 
-  return { docker, baseline, unknownRuns, recommendation, rationale };
+  return { docker, baseline, unknownRuns, workspaceBackendCounts, recommendation, rationale };
 }
 
 export function recommendSandboxAb(
@@ -256,6 +266,13 @@ export function renderSandboxAbReport(report: SandboxAbReport): string {
   if (report.unknownRuns > 0) {
     lines.push('', `unknown runs (no sandboxRuntime recorded): ${report.unknownRuns}`);
   }
+  lines.push(
+    '',
+    'workspace backend:',
+    `  worktree: ${report.workspaceBackendCounts.worktree}`,
+    `  disposable-docker: ${report.workspaceBackendCounts['disposable-docker']}`,
+    `  unknown: ${report.workspaceBackendCounts.unknown}`,
+  );
   lines.push('', `Recommendation: ${report.recommendation.toUpperCase()} — ${report.rationale}`);
   return lines.join('\n');
 }
