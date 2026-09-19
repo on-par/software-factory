@@ -17,6 +17,7 @@ export type {
   MergePolicySource,
   ModelsConfig,
   RoutesConfig,
+  WorkspaceBackend,
 } from './config/index.js';
 export {
   FactoryConfigV2Schema,
@@ -40,6 +41,8 @@ export {
   resolveProcessGroupGraceMs,
   resolveSkipCI,
   resolveTimeouts,
+  resolveWorkspaceBackend,
+  workspaceSandboxConflict,
 } from './config/index.js';
 export type {
   BuildRoutePin,

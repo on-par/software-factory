@@ -8,6 +8,7 @@ import {
   resolveRolloutRuntime,
   resolveSandboxPolicy,
   resolveSandboxRuntime,
+  resolveSandboxRuntimeSetting,
   sandboxEventFromError,
   wrapCommandInSandbox,
 } from './index.js';
@@ -124,6 +125,26 @@ describe('resolveSandboxRuntime', () => {
         env: { FACTORY_SANDBOX_RUNTIME: '' },
       }),
     ).toBe('firejail');
+  });
+});
+
+describe('resolveSandboxRuntimeSetting', () => {
+  it('with no configured value and no env, resolves to auto', () => {
+    expect(resolveSandboxRuntimeSetting(undefined, { env: {} })).toBe('auto');
+  });
+
+  it('returns the configured setting verbatim, without auto-probing', () => {
+    expect(resolveSandboxRuntimeSetting('docker-sandbox', { env: {} })).toBe('docker-sandbox');
+  });
+
+  it('FACTORY_SANDBOX_RUNTIME overrides the config field', () => {
+    expect(resolveSandboxRuntimeSetting('auto', { env: { FACTORY_SANDBOX_RUNTIME: 'docker-sandbox' } })).toBe(
+      'docker-sandbox',
+    );
+  });
+
+  it('ignores an unrecognized env value and falls back to the config field', () => {
+    expect(resolveSandboxRuntimeSetting('firejail', { env: { FACTORY_SANDBOX_RUNTIME: 'bogus' } })).toBe('firejail');
   });
 });
 

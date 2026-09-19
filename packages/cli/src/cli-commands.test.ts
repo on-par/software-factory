@@ -1887,6 +1887,21 @@ bash scripts/verify.sh
       expect(res).toEqual({ exited: true, code: 2 });
     });
 
+    it('exits 2 before any lane or worktree work when workspace.backend and sandbox.runtime contradict', async () => {
+      h.factoryConfig = {
+        ...h.factoryConfig,
+        workspace: { backend: 'disposable-docker' },
+        sandbox: { ...h.factoryConfig.sandbox, runtime: 'docker-sandbox' },
+      };
+      writeFileSync(paths().queue, 'app 1\n');
+      const res = await runMain('run', '--local-queue');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored() + logged()).toContain('workspace.backend');
+      const events = existsSync(paths().events) ? readFileSync(paths().events, 'utf-8') : '';
+      expect(events).not.toContain('started');
+      expect(sweepWorktrees).not.toHaveBeenCalled();
+    });
+
     it('skips claiming new work and leaves .factory/STOP in place when STOP is present at the top of a run', async () => {
       writeFileSync(paths().queue, '# header\napp 1\napp 2\ndocs 3\n');
       writeFileSync(paths().stop, '');
@@ -3795,6 +3810,16 @@ describe('shipIssue (direct)', () => {
     const core = await import('@on-par/factory-core');
     await shipIssue(5, {}, ctx());
     expect(vi.mocked(core.loadRepoConfig)).toHaveBeenCalledWith(h.repoRoot, paths().root);
+  });
+
+  it('rejects before worktree setup when workspace.backend and sandbox.runtime contradict', async () => {
+    h.factoryConfig = {
+      ...h.factoryConfig,
+      workspace: { backend: 'disposable-docker' },
+      sandbox: { ...h.factoryConfig.sandbox, runtime: 'docker-sandbox' },
+    };
+    await expect(shipIssue(5, {}, ctx())).rejects.toThrow(/workspace\.backend/);
+    expect(setupWorktree).not.toHaveBeenCalled();
   });
 
   it('keeps a claude-cli build pin on the claude route when PLAN picks codex (#1367)', async () => {

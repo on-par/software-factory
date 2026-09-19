@@ -134,6 +134,7 @@ import {
   resolveTimeouts,
   resolveUsageCap,
   resolveWatchdogPolicy,
+  workspaceSandboxConflict,
   ReworkHistory,
   rewriteQueueForDecomposition,
   runAutoIngest,
@@ -1378,6 +1379,10 @@ export async function shipIssue(
 
   const repoConfig = loadRepoConfig(repoRoot, paths.root);
   const factoryConfig = loadFactoryConfigForRepo(paths.config);
+  const workspaceConflict = workspaceSandboxConflict(factoryConfig);
+  if (workspaceConflict) {
+    throw new CliExitError(workspaceConflict, 2);
+  }
   const timeouts = resolveTimeouts(factoryConfig);
   const failoverSettings = resolveAutoFailover(factoryConfig);
   const breaker = new ProviderBreaker(paths.breaker);
@@ -2757,6 +2762,10 @@ async function cmdRun(
     writeRunFlagOverrides(paths.runFlags, { autoMerge: opts.autoMerge });
     const ghRepo = await getGitHubRepo();
     const factoryConfig = loadFactoryConfigForRepo(paths.config);
+    const workspaceConflict = workspaceSandboxConflict(factoryConfig);
+    if (workspaceConflict) {
+      throw new CliExitError(workspaceConflict, 2);
+    }
     const keychainErr = keychainPreflightError(probeClaudeKeychain());
     if (keychainErr) {
       logEvent(paths.events, 'environment_warning', 'all', keychainErr);

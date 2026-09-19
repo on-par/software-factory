@@ -100,6 +100,9 @@ describe('shipped defaults', () => {
     expect(defaultFactoryConfig.worktree.gcTtlDays).toBe(7);
     expect(defaultFactoryConfig.filing.maxPerDay).toBe(20);
     expect(defaultFactoryConfig.ingest.maxPerCycle).toBe(20);
+    expect(defaultFactoryConfig.workspace.backend).toBe('worktree');
+    expect(defaultFactoryConfig.sandbox.runtime).toBe('auto');
+    expect(defaultFactoryConfig.sandbox.docker?.rolloutPercent).toBe(0);
   });
 });
 
@@ -120,6 +123,7 @@ describe('docs live as JSDoc, not as note/comment data', () => {
     'sweep',
     'plan_approval',
     'sandbox',
+    'workspace',
     'discovery',
     'filing',
     'ingest',

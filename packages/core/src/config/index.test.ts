@@ -26,6 +26,8 @@ import {
   resolveProcessGroupGraceMs,
   resolveSkipCI,
   resolveTimeouts,
+  resolveWorkspaceBackend,
+  workspaceSandboxConflict,
 } from './index.js';
 
 function baseModelDef(overrides: Record<string, unknown> = {}) {
@@ -1406,6 +1408,91 @@ describe('resolveAutoFailover', () => {
         auto_failover: { ...config.auto_failover, fallback_model: 'gpt-5.6-terra-medium' },
       }).fallbackModel,
     ).toBe('gpt-5.6-terra-medium');
+  });
+});
+
+describe('resolveWorkspaceBackend', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('defaults to worktree when unset', () => {
+    const config = loadFactoryConfig();
+    expect(resolveWorkspaceBackend(config, {})).toBe('worktree');
+  });
+
+  it('honors an explicitly configured backend', () => {
+    const config = loadFactoryConfig();
+    expect(resolveWorkspaceBackend({ ...config, workspace: { backend: 'disposable-docker' } }, {})).toBe(
+      'disposable-docker',
+    );
+  });
+
+  it('FACTORY_WORKSPACE_BACKEND overrides the configured value', () => {
+    const config = loadFactoryConfig();
+    expect(
+      resolveWorkspaceBackend(
+        { ...config, workspace: { backend: 'worktree' } },
+        { FACTORY_WORKSPACE_BACKEND: 'disposable-docker' },
+      ),
+    ).toBe('disposable-docker');
+  });
+
+  it('ignores an unrecognized env value and falls back to config', () => {
+    const config = loadFactoryConfig();
+    expect(
+      resolveWorkspaceBackend(
+        { ...config, workspace: { backend: 'worktree' } },
+        { FACTORY_WORKSPACE_BACKEND: 'bogus' },
+      ),
+    ).toBe('worktree');
+  });
+});
+
+describe('workspaceSandboxConflict', () => {
+  it('returns null for the default config', () => {
+    const config = loadFactoryConfig();
+    expect(workspaceSandboxConflict(config, {})).toBeNull();
+  });
+
+  it('returns a message naming both fields when backend and runtime both claim docker', () => {
+    const config = loadFactoryConfig();
+    const message = workspaceSandboxConflict(
+      {
+        ...config,
+        workspace: { backend: 'disposable-docker' },
+        sandbox: { ...config.sandbox, runtime: 'docker-sandbox' },
+      },
+      {},
+    );
+    expect(message).toContain('workspace.backend');
+    expect(message).toContain('sandbox.runtime');
+  });
+
+  it('still conflicts when FACTORY_WORKSPACE_BACKEND overrides the config (resolved, not raw)', () => {
+    const config = loadFactoryConfig();
+    const message = workspaceSandboxConflict(
+      {
+        ...config,
+        workspace: { backend: 'worktree' },
+        sandbox: { ...config.sandbox, runtime: 'docker-sandbox' },
+      },
+      { FACTORY_WORKSPACE_BACKEND: 'disposable-docker' },
+    );
+    expect(message).not.toBeNull();
+  });
+
+  it('does not conflict when sandbox.runtime is auto', () => {
+    const config = loadFactoryConfig();
+    const message = workspaceSandboxConflict(
+      {
+        ...config,
+        workspace: { backend: 'disposable-docker' },
+        sandbox: { ...config.sandbox, runtime: 'auto' },
+      },
+      {},
+    );
+    expect(message).toBeNull();
   });
 });
 
