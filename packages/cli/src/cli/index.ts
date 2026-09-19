@@ -2872,6 +2872,7 @@ async function cmdRun(
             workspaceBackend,
             runId,
             slugify(planned.lane),
+            ghRepo,
           );
           if (provision.attempted && !provision.created) {
             logEvent(
@@ -2879,6 +2880,14 @@ async function cmdRun(
               'warn',
               '-',
               `disposable-docker container creation failed for lane '${planned.lane}': ${provision.error}`,
+              { lane: planned.lane },
+            );
+          } else if (provision.attempted && provision.created && provision.workspaceCloned === false) {
+            logEvent(
+              paths.events,
+              'warn',
+              '-',
+              `disposable-docker workspace clone failed for lane '${planned.lane}': ${provision.workspaceError}`,
               { lane: planned.lane },
             );
           }

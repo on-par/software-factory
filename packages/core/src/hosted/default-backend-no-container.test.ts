@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import { provisionLaneContainer, type ContainerEngine } from './container.js';
 
-function fakeEngine(): { engine: ContainerEngine; calls: string[] } {
+function fakeEngine(): { engine: ContainerEngine; calls: string[]; workspaceCalls: string[] } {
   const calls: string[] = [];
+  const workspaceCalls: string[] = [];
   const engine: ContainerEngine = {
     prepareWorkspace: async () => {
       throw new Error('not used');
@@ -18,17 +19,22 @@ function fakeEngine(): { engine: ContainerEngine; calls: string[] } {
       calls.push(containerName);
       return { containerName };
     },
+    async prepareLaneWorkspace(containerName) {
+      workspaceCalls.push(containerName);
+      return { containerRepoPath: '/workspace/repo', clone: { ok: true, commit: 'deadbeef' } };
+    },
   };
-  return { engine, calls };
+  return { engine, calls, workspaceCalls };
 }
 
 describe('provisionLaneContainer (backend: host, the default)', () => {
-  it('creates no container for a lane that has not opted into disposable-docker', async () => {
-    const { engine, calls } = fakeEngine();
+  it('creates no container and clones no workspace for a lane that has not opted into disposable-docker', async () => {
+    const { engine, calls, workspaceCalls } = fakeEngine();
 
-    const result = await provisionLaneContainer(engine, 'host', 'run-1', 'my-lane');
+    const result = await provisionLaneContainer(engine, 'host', 'run-1', 'my-lane', 'owner/example-app');
 
     expect(calls).toEqual([]);
+    expect(workspaceCalls).toEqual([]);
     expect(result).toEqual({ attempted: false, created: false });
   });
 });
