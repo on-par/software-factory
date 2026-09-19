@@ -252,6 +252,16 @@ const FactoryConfigSchema = z.object({
     })
     .default({ enabled: true, cooldown_minutes: 30, fallback_model: 'claude-sonnet-5' }),
   adr: z.object({ mandate: z.boolean().default(false), comment: z.string().optional() }).default({ mandate: false }),
+  /** Ship-it lane workspace isolation (#1535). `'host'` is the existing sibling-worktree
+   *  behavior; `'disposable-docker'` opts a repo into a managed, labeled container per
+   *  lane via the existing hosted ContainerEngine. Default-off — every existing repo is
+   *  unaffected unless it explicitly opts in. */
+  workspace: z
+    .object({
+      backend: z.enum(['host', 'disposable-docker']).default('host'),
+      comment: z.string().optional(),
+    })
+    .default({ backend: 'host' }),
 });
 
 // ---------- Types ----------
@@ -302,6 +312,7 @@ export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'environment',
   'auto_failover',
   'adr',
+  'workspace',
 ];
 
 export function isPlainObject(value: unknown): value is Record<string, unknown> {

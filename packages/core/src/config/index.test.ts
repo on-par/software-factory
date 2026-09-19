@@ -777,6 +777,21 @@ describe('loadFactoryConfigForRepo', () => {
     expect(resolveAdrMandate(config, { FACTORY_ADR_MANDATE: '0' })).toBe(false);
   });
 
+  it('defaults workspace.backend to host when the repo config omits it', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ merge: { auto: true } }));
+
+    expect(loadFactoryConfigForRepo(path).workspace.backend).toBe('host');
+    expect(loadFactoryConfig().workspace.backend).toBe('host');
+  });
+
+  it('overlays workspace.backend from a repository config file', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ workspace: { backend: 'disposable-docker' } }));
+
+    expect(loadFactoryConfigForRepo(path).workspace.backend).toBe('disposable-docker');
+  });
+
   it('parses a config file with no sweep key using the documented defaults', async () => {
     const path = join(dir, 'config.json');
     await writeFile(path, JSON.stringify({ merge: { auto: true } }));

@@ -180,9 +180,12 @@ export type {
   ContainerJobOutcome,
   ContainerRunResult,
   ContainerRunSpec,
+  LaneContainerCreateResult,
+  LaneContainerProvisionResult,
   PreparedWorkspace,
+  WorkspaceBackend,
 } from './hosted/container.js';
-export { runContainerJob } from './hosted/container.js';
+export { laneContainerName, provisionLaneContainer, runContainerJob } from './hosted/container.js';
 export type { HostedJobSummary } from './hosted/summary.js';
 export { summarizeHostedJob, summarizeHostedJobs } from './hosted/summary.js';
 export type { HostedSmokeConfig, HostedSmokeOutcome } from './hosted/smoke.js';
