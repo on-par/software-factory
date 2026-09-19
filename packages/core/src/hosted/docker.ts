@@ -13,6 +13,7 @@ import type {
   ContainerEngine,
   ContainerRunResult,
   ContainerRunSpec,
+  LaneContainerCreateResult,
   PreparedWorkspace,
 } from './container.js';
 import { redactGitHubCredential, type GitHubCredentialBundle } from './github-authority.js';
@@ -28,6 +29,8 @@ export interface DockerEngineOptions {
   cloneUrlFor?: (repoSlug: string) => string;
   /** Subdir under the workspace the repo is cloned into; default 'repo'. */
   repoDirname?: string;
+  /** Image for containers created by createLaneContainer; default 'node:20-alpine'. */
+  laneImage?: string;
 }
 
 interface PromisifiedExecError {
@@ -39,6 +42,10 @@ interface PromisifiedExecError {
 
 const containerName = (jobId: string) => `sf-job-${jobId}`;
 
+/** Applied to every container createLaneContainer creates, so cleanup sweeps can
+ *  find factory-owned containers by label alone (#1535). */
+const MANAGED_LABEL = 'factory.managed=true';
+
 function quote(arg: string): string {
   return `'${arg.replace(/'/g, `'\\''`)}'`;
 }
@@ -48,6 +55,7 @@ export function createDockerEngine(options: DockerEngineOptions): ContainerEngin
   const payloadFilename = options.payloadFilename ?? 'payload';
   const repoDirname = options.repoDirname ?? 'repo';
   const cloneUrlFor = options.cloneUrlFor ?? ((slug: string) => `https://github.com/${slug}.git`);
+  const laneImage = options.laneImage ?? 'node:20-alpine';
 
   return {
     async prepareWorkspace(_jobId, payload, repoSlug, credential?: GitHubCredentialBundle): Promise<PreparedWorkspace> {
@@ -142,6 +150,11 @@ export function createDockerEngine(options: DockerEngineOptions): ContainerEngin
         : `ps -a ${removed ? 'empty' : 'still shows a match'}`;
       const evidence = `${removeEvidence}; ${psCheckResult}; workspace ${workspaceRemoved ? 'removed' : 'removal failed'}; credential ${workspaceRemoved ? 'removed' : 'removal failed'}`;
       return { containerName: name, removed, workspaceRemoved, credentialRemoved: workspaceRemoved, evidence };
+    },
+
+    async createLaneContainer(name): Promise<LaneContainerCreateResult> {
+      await exec(`docker create --name ${quote(name)} --label ${quote(MANAGED_LABEL)} ${quote(laneImage)}`, {});
+      return { containerName: name };
     },
   };
 }

@@ -64,6 +64,9 @@ function createFakeEngine(script: FakeEngineScript, calls: FakeEngineCalls): Con
         evidence: script.evidence ?? `removed sf-job-${jobId}; no container matches name`,
       };
     },
+    async createLaneContainer(containerName) {
+      return { containerName };
+    },
   };
 }
 

@@ -93,6 +93,8 @@ const PUBLIC_API_KEYS = [
   'createHostedJobStore',
   'createSqliteHostedJobStore',
   'hostedExecEnabled',
+  'laneContainerName',
+  'provisionLaneContainer',
   'resolveHostedJobStore',
   'runContainerJob',
   'runDockerRunner',

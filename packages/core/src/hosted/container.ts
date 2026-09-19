@@ -66,6 +66,10 @@ export interface ContainerCleanupProof {
   evidence: string;
 }
 
+export interface LaneContainerCreateResult {
+  containerName: string;
+}
+
 export interface ContainerEngine {
   prepareWorkspace(
     jobId: string,
@@ -75,6 +79,54 @@ export interface ContainerEngine {
   ): Promise<PreparedWorkspace>;
   run(spec: ContainerRunSpec): Promise<ContainerRunResult>;
   remove(jobId: string, workspaceHostPath: string): Promise<ContainerCleanupProof>;
+  /** Creates (but does not start) a labeled, disposable container for a ship-it lane
+   *  (#1535) — recognition + creation only; no workspace mount, no exec routing, no
+   *  teardown. Those belong to later stories. */
+  createLaneContainer(containerName: string): Promise<LaneContainerCreateResult>;
+}
+
+/** Backend a ship-it lane's workspace runs on. `'host'` (default) is the existing
+ *  sibling-worktree behavior; `'disposable-docker'` opts into a managed, labeled
+ *  container per lane (#1535). */
+export type WorkspaceBackend = 'host' | 'disposable-docker';
+
+/** Builds the per-lane container name the issue mandates: `sf-job-<runId>-<laneSlug>`. */
+export function laneContainerName(runId: string, laneSlug: string): string {
+  return `sf-job-${runId}-${laneSlug}`;
+}
+
+export interface LaneContainerProvisionResult {
+  /** False when the backend isn't 'disposable-docker' — no container was attempted. */
+  attempted: boolean;
+  created: boolean;
+  containerName?: string;
+  error?: string;
+}
+
+/** Recognizes `workspace.backend: disposable-docker` at lane start and creates the
+ *  managed container through the existing ContainerEngine port. A no-op for every
+ *  other backend value, so lanes that don't opt in are unaffected (#1535). */
+export async function provisionLaneContainer(
+  engine: ContainerEngine,
+  backend: WorkspaceBackend,
+  runId: string,
+  laneSlug: string,
+): Promise<LaneContainerProvisionResult> {
+  if (backend !== 'disposable-docker') {
+    return { attempted: false, created: false };
+  }
+  const containerName = laneContainerName(runId, laneSlug);
+  try {
+    await engine.createLaneContainer(containerName);
+    return { attempted: true, created: true, containerName };
+  } catch (err) {
+    return {
+      attempted: true,
+      created: false,
+      containerName,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 export interface ContainerJobConfig {

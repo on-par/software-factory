@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 // packages/cli/src/cli/index.ts — CLI entry point: factory <command> [options]
 
 import { exec as execCb, execSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { userInfo } from 'node:os';
@@ -102,6 +103,7 @@ import {
   partitionLocalQueueByActivity,
   phaseSnapshotFile,
   planPhase,
+  provisionLaneContainer,
   ProviderBreaker,
   readEvents,
   readPortLeases,
@@ -171,6 +173,7 @@ import {
   branchPrefixSlug,
   cleanupWorktree,
   createDaemonLogSink,
+  createDockerEngine,
   createFactorydServer,
   createRunRuntime,
   createShipExecutor,
@@ -204,6 +207,7 @@ import {
   runOvernightQueue,
   setupWorktree,
   shellEscape,
+  slugify,
   sweepWorktrees,
   watchChecks,
   withAdmissionGuard,
@@ -2838,6 +2842,10 @@ async function cmdRun(
 
     const { proxy } = await startLaneProxy(paths, resolveEnvironmentProxy(factoryConfig));
 
+    const workspaceBackend = factoryConfig.workspace?.backend ?? 'host';
+    const runId = randomUUID();
+    const containerEngine = workspaceBackend === 'disposable-docker' ? createDockerEngine({}) : undefined;
+
     try {
       // Run lanes in parallel
       const pids: Promise<void>[] = [];
@@ -2849,6 +2857,23 @@ async function cmdRun(
           `lane '${planned.lane}' started${planned.issues.length ? ` (${planned.issues.length} issues)` : ''}`,
           { lane: planned.lane },
         );
+        if (containerEngine) {
+          const provision = await provisionLaneContainer(
+            containerEngine,
+            workspaceBackend,
+            runId,
+            slugify(planned.lane),
+          );
+          if (provision.attempted && !provision.created) {
+            logEvent(
+              paths.events,
+              'warn',
+              '-',
+              `disposable-docker container creation failed for lane '${planned.lane}': ${provision.error}`,
+              { lane: planned.lane },
+            );
+          }
+        }
         pids.push(
           runLane(planned.lane, planned.issues, repoRoot, ghRepo, paths, {
             ...planned.deps,
