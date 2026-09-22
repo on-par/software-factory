@@ -55,7 +55,6 @@ readiness-conformance checker named in epic #464 consume them in later stories.
 - `bus/` — in-process lane lifecycle bus
 - `daemon/` — factoryd checkout precondition validation
 - `design/` — design-artifact validation, rendering, and frozen-spec persistence
-- `discovery/` — read-only discovery scans that rank candidate ideas from product signals
 - `efficiency/` — narrow fast-path planning eligibility and spec generation
 - `environment/` — port-lease registry for parallel lanes (`.factory/ports.json`) + `leaseEnv()`/`laneEnv()`, the `PORT`/`FACTORY_APP_PORT`/`FACTORY_BASE_URL` + `FACTORY_HEADLESS`/`PLAYWRIGHT_HEADLESS` contract injected into build agents and all checker commands
 - `logger/` — structured leveled logger (`createLogger`) over the `.factory/events.ndjson` sink (ADR-0002)

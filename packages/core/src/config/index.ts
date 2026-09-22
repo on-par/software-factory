@@ -170,14 +170,6 @@ const FactoryConfigSchema = z.object({
       resources: { cpuMs: 300_000, memMb: 4096 },
       docker: { rolloutPercent: 0 },
     }),
-  discovery: z
-    .object({
-      enabled: z.boolean().default(true),
-      schedule: z.enum(['weekly', 'daily', 'manual']).default('weekly'),
-      maxCandidates: z.number().int().positive().default(5),
-      comment: z.string().optional(),
-    })
-    .default({ enabled: true, schedule: 'weekly', maxCandidates: 5 }),
   filing: z
     .object({
       enabled: z.boolean().default(true),
@@ -291,7 +283,10 @@ export function loadFactoryConfig(path?: string): FactoryConfig {
  *  The rest of the file belongs to RepoFactoryConfigSchema's model-routing namespace in
  *  ./repo.ts, and each loader ignores the other's keys. `version` is deliberately absent:
  *  it is the repo namespace's literal, and FactoryConfig's version comes from the defaults.
- *  Adding a new top-level section to FactoryConfigSchema means adding it here too. */
+ *  Adding a new top-level section to FactoryConfigSchema means adding it here too.
+ *  `discovery` is retired (its loop was removed 2026-09) but stays listed so an existing
+ *  config file carrying it still loads: the key is claimed here and FactoryConfigSchema
+ *  strips it, instead of the repo namespace's strict parse rejecting it as a typo. */
 export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'paths',
   'timeouts',

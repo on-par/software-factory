@@ -475,45 +475,6 @@ export {
   renderKpiTrend,
 } from './kpis/index.js';
 
-// Discovery
-export type { AuthorDraftEpicDeps, AuthorDraftEpicOptions, AuthorDraftEpicResult } from './discovery/author.js';
-export {
-  authorDraftEpic,
-  DEFAULT_OWNER_QUESTIONS,
-  DISCOVERY_LABEL,
-  EXPLORING_LABEL,
-  ideaMarker,
-} from './discovery/author.js';
-export type {
-  DiscoveryCandidate,
-  DiscoveryScanDeps,
-  DiscoveryScanOptions,
-  DiscoveryScanResult,
-  DiscoverySignal,
-  DiscoverySignalSource,
-} from './discovery/index.js';
-export { DEFAULT_MAX_CANDIDATES, runDiscoveryScan } from './discovery/index.js';
-export type {
-  AdvanceDraftEpicDeps,
-  AdvanceDraftEpicOptions,
-  AdvanceDraftEpicResult,
-  DraftStory,
-  EpicLifecycle,
-  EpicView,
-  GherkinScenario,
-} from './discovery/promote.js';
-export {
-  advanceDraftEpic,
-  ARCHIVED_LABEL,
-  classifyLifecycle,
-  DEFAULT_MAX_STORIES,
-  READY_LABEL,
-  renderStoryBody,
-  seedStories,
-  VALIDATED_LABEL,
-  WONTFIX_LABEL,
-} from './discovery/promote.js';
-
 // Ingest
 export type { AutoIngestDeps, AutoIngestOptions, AutoIngestResult, FileOverlapSkip } from './ingest/index.js';
 export { issueFromFactoryBranch, runAutoIngest } from './ingest/index.js';
