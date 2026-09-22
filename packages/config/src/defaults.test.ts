@@ -98,7 +98,7 @@ describe('shipped defaults', () => {
     expect(defaultFactoryConfig.timeouts.plan_seconds).toBe(1800);
     expect(defaultFactoryConfig.timeouts.build_seconds).toBe(7200);
     expect(defaultFactoryConfig.worktree.gcTtlDays).toBe(7);
-    expect(defaultFactoryConfig.filing.maxPerDay).toBe(20);
+    expect(defaultFactoryConfig.filing.selfFixLabel).toBe('no-auto-merge');
     expect(defaultFactoryConfig.ingest.maxPerCycle).toBe(20);
   });
 });

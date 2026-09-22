@@ -60,8 +60,7 @@ readiness-conformance checker named in epic #464 consume them in later stories.
 - `logger/` — structured leveled logger (`createLogger`) over the `.factory/events.ndjson` sink (ADR-0002)
 - `eval/` — the eval harness (runner, judge, scoring, golden loader, baseline/trend/regression reports)
 - `events/` — reads and tails the `.factory/events.ndjson` append log
-- `failure/` — deterministic failure fingerprinting and evidence capture
-- `filing/` — fingerprinted bug filing with deduplication and repository routing
+- `filing/` — self-fix merge gate (`isAutoMergeBlocked`) keyed on the configured `filing.selfFixLabel`
 - `hosted/` — provider-session authority bundles for hosted jobs
 - `ingest/` — always-on ingestion of ready issues into the queue
 - `kpis/` — pure factory-health KPI aggregation from events and costs

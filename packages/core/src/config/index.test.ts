@@ -472,25 +472,24 @@ describe('loadFactoryConfig', () => {
     }
   });
 
-  const defaultFilingPolicy = {
-    enabled: true,
-    excludeReasons: ['rate_limit', 'usage_cap', 'timeout', 'verify_failed'],
-    repeatThreshold: 3,
-    maxPerRun: 5,
-    maxPerDay: 20,
-    selfFixLabel: 'no-auto-merge',
-    bugLabels: ['bug'],
-    sensitivePaths: ['packages/core/', 'packages/config/', 'packages/cli/', 'scripts/', '.github/'],
-  };
+  const defaultFilingPolicy = { selfFixLabel: 'no-auto-merge' };
 
   it('exposes filing defaults from the default config file', () => {
     const config = loadFactoryConfig();
-    expect(config.filing.enabled).toBe(true);
-    expect(config.filing.excludeReasons).toEqual(['rate_limit', 'usage_cap', 'timeout', 'verify_failed']);
-    expect(config.filing.repeatThreshold).toBe(3);
-    expect(config.filing.maxPerRun).toBe(5);
-    expect(config.filing.maxPerDay).toBe(20);
     expect(config.filing.selfFixLabel).toBe('no-auto-merge');
+  });
+
+  it('drops retired filing keys from an older config file', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
+    try {
+      const path = join(dir, 'config.json');
+      await writeFile(path, JSON.stringify({ filing: { enabled: false, maxPerDay: 1, selfFixLabel: 'blocked' } }));
+      const config = loadFactoryConfigForRepo(path);
+      expect(config.filing).toEqual({ selfFixLabel: 'blocked', comment: loadFactoryConfig().filing.comment });
+      expect(resolveFilingPolicy(config)).toEqual({ selfFixLabel: 'blocked' });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('resolveFilingPolicy returns a FilingPolicy matching the config block', () => {

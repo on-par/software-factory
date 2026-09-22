@@ -85,8 +85,7 @@ describe('zero-config: { version: 2 }', () => {
 
     // intake
     expect(cfg.intake.ingest).toEqual({ enabled: false, label: 'ready', lane: 'auto', maxPerCycle: 20 });
-    expect(cfg.intake.filing.enabled).toBe(true);
-    expect(cfg.intake.filing.sensitivePaths).toContain('packages/core/');
+    expect(cfg.intake.filing).toEqual({ selfFixLabel: 'no-auto-merge' });
 
     // constitution + notifications
     expect(cfg.constitution).toEqual({ path: 'constitutions/' });
@@ -228,16 +227,7 @@ describe('full v2 config', () => {
     },
     intake: {
       ingest: { enabled: true, label: 'go', lane: 'main', maxPerCycle: 5 },
-      filing: {
-        enabled: false,
-        excludeReasons: ['timeout'],
-        repeatThreshold: 2,
-        maxPerRun: 1,
-        maxPerDay: 2,
-        selfFixLabel: 'blocked',
-        bugLabels: ['defect'],
-        sensitivePaths: ['src/'],
-      },
+      filing: { selfFixLabel: 'blocked' },
     },
     constitution: { path: 'docs/constitution.md' },
     notifications: { on_ship: false, on_fail: true },

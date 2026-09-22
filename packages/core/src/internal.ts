@@ -2,51 +2,12 @@
 // own packages (cli, tui, root scripts). No stability guarantee: these exports may
 // change or disappear without notice. See ADR-0004 for the public/internal split.
 
-// Failure fingerprint & evidence
-export { captureFailure, fingerprintFailure, normalizeFailureMessage } from './failure/index.js';
-export type {
-  CaptureFailureInput,
-  EvidencePack,
-  FailureOrigin,
-  FailurePhase,
-  FailureSignatureInput,
-  FingerprintedFailure,
-} from './types/index.js';
+// Failure evidence carried on events
+export type { EvidencePack, FailureOrigin, FailurePhase } from './types/index.js';
 
-// Auto-file a fingerprinted bug (#373)
-export type {
-  CandidateIssue,
-  FileBugAction,
-  FileBugInput,
-  FileBugResult,
-  FilingGitHubClient,
-  OctokitFilingClientOptions,
-} from './filing/index.js';
-export {
-  createOctokitFilingClient,
-  DEFAULT_BUG_LABELS,
-  DEFAULT_INTERNAL_REPO,
-  fileBug,
-  findMatchingIssue,
-  fingerprintMarker,
-  renderBugBody,
-  renderOccurrenceComment,
-  resolveTargetRepo,
-} from './filing/index.js';
-
-// Filing policy: when to file, caps, and self-fix labeling (#374)
-export type { FilingDecision, FilingLedger, FilingPolicy, FilingSkipReason } from './filing/policy.js';
-export {
-  DEFAULT_FILING_POLICY,
-  emptyLedger,
-  evaluateFilingPolicy,
-  isAutoMergeBlocked,
-  labelsFor,
-  recordFiled,
-  recordPark,
-  rollDay,
-  touchesSensitiveScope,
-} from './filing/policy.js';
+// Self-fix merge gate (#374)
+export type { FilingPolicy } from './filing/policy.js';
+export { isAutoMergeBlocked } from './filing/policy.js';
 
 // Config
 export { resolveFilingPolicy } from './config/index.js';

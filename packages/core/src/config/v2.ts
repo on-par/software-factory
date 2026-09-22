@@ -333,33 +333,15 @@ const IntakeSectionSchema = z
       .describe('Auto-ingest of labeled GitHub issues.'),
     filing: z
       .object({
-        enabled: z.boolean().default(true).describe('Auto-file self-defects discovered during runs.'),
-        excludeReasons: z
-          .array(z.string())
-          .default(['rate_limit', 'usage_cap', 'timeout', 'verify_failed'])
-          .describe('Park reasons never filed unless the same fingerprint repeats.'),
-        repeatThreshold: z
-          .number()
-          .int()
-          .positive()
-          .default(3)
-          .describe('Repeats of an excluded fingerprint before it is filed anyway.'),
-        maxPerRun: z.number().int().positive().default(5).describe('Maximum new bugs filed per run.'),
-        maxPerDay: z.number().int().positive().default(20).describe('Maximum new bugs filed per day.'),
         selfFixLabel: z
           .string()
           .default('no-auto-merge')
-          .describe('Label applied to factory-internal bugs so the merge path requires human approval.'),
-        bugLabels: z.array(z.string()).default(['bug']).describe('Labels applied to filed bugs.'),
-        sensitivePaths: z
-          .array(z.string())
-          .default(['packages/core/', 'packages/config/', 'packages/cli/', 'scripts/', '.github/'])
-          .describe('Paths whose changes are treated as sensitive.'),
+          .describe('Label that makes the merge path refuse auto-merge and wait for human approval.'),
       })
       .prefault({})
-      .describe('Guardrails for auto-filing self-defects.'),
+      .describe('Self-fix merge gate.'),
   })
-  .describe('Work intake: ingest and self-defect filing.');
+  .describe('Work intake: ingest and the self-fix merge gate.');
 
 // ---------- Constitution & notifications ----------
 
