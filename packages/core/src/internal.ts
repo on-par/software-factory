@@ -323,44 +323,6 @@ export type {
 } from './utils/green-prs.js';
 export { createOctokitGreenPrClient, findUnmergedGreenPrs, owningIssueForPr } from './utils/green-prs.js';
 
-// Single-poller cached subscription-usage snapshot (#1029)
-export type {
-  UsageCoordinator,
-  UsageCoordinatorOptions,
-  UsageCoordinatorState,
-  WriteUsageStateOptions,
-} from './usage/coordinator.js';
-export {
-  createUsageCoordinator,
-  DEFAULT_USAGE_POLL_MS,
-  defaultUsageStatePath,
-  loadUsageState,
-  writeUsageState,
-} from './usage/coordinator.js';
-
-// UsageCoordinator admission-control acquire() API and grant ledger (#1030)
-export type { AcquireResult, GrantLedger, GrantLedgerEntry, GrantRequest } from './usage/grant-ledger.js';
-export {
-  defaultGrantLedgerPath,
-  DEFAULT_GRANT_TTL_MS,
-  isCappedModel,
-  loadGrantLedger,
-  pruneGrants,
-  USAGE_ADMISSION_CEILING_PCT,
-  USAGE_GRANT_RESERVATION_PCT,
-  writeGrantLedger,
-} from './usage/grant-ledger.js';
-
-// Engine lane parks and resumes on acquire denial (#1032)
-export type { LaneAcquire, LaneAdmission, LaneScheduler, LaneSchedulerOptions } from './usage/lane-scheduler.js';
-export { createLaneScheduler } from './usage/lane-scheduler.js';
-
-// Standalone local UsageCoordinator fallback (#1033)
-export type { LocalUsageCoordinatorOptions } from './usage/local-coordinator.js';
-export { createLocalUsageCoordinator } from './usage/local-coordinator.js';
-export type { SelectUsageCoordinatorOptions } from './usage/select-coordinator.js';
-export { selectUsageCoordinator } from './usage/select-coordinator.js';
-
 // Daemon detach gate (#780)
 export type { BeginDetachResult, DetachRepoDeps, DrainOutcome } from './daemon/repos-detach.js';
 export {
