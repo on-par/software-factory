@@ -61,7 +61,7 @@ export interface FactoryDefaults {
   byok: { enabled: boolean; comment: string };
   notifications: Record<string, boolean>;
   cost_tracking: { enabled: boolean; log_file: string; comment: string };
-  // ci/sweep/plan_approval/kpis/sandbox/discovery/filing/ingest/environment ports+proxy/auto_failover.comment are
+  // ci/sweep/plan_approval/kpis/sandbox/filing/ingest/environment ports+proxy/auto_failover.comment are
   // schema-optional (FactoryConfigSchema declares them z.string().optional()), but this package keeps them as
   // data anyway: dropping them would desync loadFactoryConfig()'s no-path output from what the deleted
   // factory.json produced, breaking the byte-identical behavior contract (#716).
@@ -77,7 +77,6 @@ export interface FactoryDefaults {
     docker?: { rolloutPercent: number };
     comment?: string;
   };
-  discovery: { enabled: boolean; schedule: 'weekly' | 'daily' | 'manual'; maxCandidates: number; comment?: string };
   filing: {
     enabled: boolean;
     excludeReasons: string[];
@@ -624,13 +623,6 @@ export const defaultFactoryConfig: FactoryDefaults = {
     docker: { rolloutPercent: 0 },
     comment:
       'Containment for agentic build runs. Disable per-run with --no-sandbox or FACTORY_SANDBOX=0. Empty network.allow denies all egress; non-empty leaves egress open (per-host filtering is logged as degraded in v1). Set sandbox.runtime (auto|sandbox-exec|firejail|docker-sandbox|none) or FACTORY_SANDBOX_RUNTIME to pick a runtime; auto probes the host. docker-sandbox is reserved for the microVM runtime and does not contain anything yet (#653). sandbox.docker.rolloutPercent (0-100) deterministically promotes that percentage of unpinned lanes into the docker-sandbox cohort for A/B evidence (#655).',
-  },
-  discovery: {
-    enabled: true,
-    schedule: 'weekly',
-    maxCandidates: 5,
-    comment:
-      'Scheduled read-only scan that proposes a ranked, capped list of candidate ideas from product signals. No GitHub writes.',
   },
   filing: {
     enabled: true,

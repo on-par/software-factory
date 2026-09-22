@@ -472,70 +472,6 @@ describe('loadFactoryConfig', () => {
     }
   });
 
-  it('resolves discovery defaults', () => {
-    const config = loadFactoryConfig();
-    expect(config.discovery.enabled).toBe(true);
-    expect(config.discovery.schedule).toBe('weekly');
-    expect(config.discovery.maxCandidates).toBe(5);
-  });
-
-  it('applies discovery defaults when the config omits the discovery key', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
-    try {
-      const path = join(dir, 'factory.json');
-      const minimal = {
-        version: 1,
-        paths: {
-          constitutions: 'constitutions/',
-          checkers: 'lib/checkers/',
-          plans: '.factory/plans/',
-          logs: '.factory/logs/',
-          events: '.factory/events.ndjson',
-        },
-        timeouts: { plan_seconds: 1800, build_seconds: 7200, check_seconds: 1800, merge_poll_seconds: 120 },
-        merge: { auto: false, comment: '' },
-        worktree: { prefix: 'ship-it/', parent: '../', comment: '' },
-        byok: { enabled: false, comment: '' },
-        notifications: {},
-        cost_tracking: { enabled: true, log_file: '.factory/costs.jsonl', comment: '' },
-      };
-      await writeFile(path, JSON.stringify(minimal));
-      const config = loadFactoryConfig(path);
-      expect(config.discovery).toEqual({ enabled: true, schedule: 'weekly', maxCandidates: 5 });
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('parses a discovery override', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
-    try {
-      const path = join(dir, 'factory.json');
-      const minimal = {
-        version: 1,
-        paths: {
-          constitutions: 'constitutions/',
-          checkers: 'lib/checkers/',
-          plans: '.factory/plans/',
-          logs: '.factory/logs/',
-          events: '.factory/events.ndjson',
-        },
-        timeouts: { plan_seconds: 1800, build_seconds: 7200, check_seconds: 1800, merge_poll_seconds: 120 },
-        merge: { auto: false, comment: '' },
-        worktree: { prefix: 'ship-it/', parent: '../', comment: '' },
-        byok: { enabled: false, comment: '' },
-        notifications: {},
-        cost_tracking: { enabled: true, log_file: '.factory/costs.jsonl', comment: '' },
-        discovery: { enabled: false, schedule: 'daily', maxCandidates: 3 },
-      };
-      await writeFile(path, JSON.stringify(minimal));
-      const config = loadFactoryConfig(path);
-      expect(config.discovery).toEqual({ enabled: false, schedule: 'daily', maxCandidates: 3 });
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
   const defaultFilingPolicy = {
     enabled: true,
     excludeReasons: ['rate_limit', 'usage_cap', 'timeout', 'verify_failed'],
@@ -710,6 +646,14 @@ describe('loadFactoryConfigForRepo', () => {
     await writeFile(path, JSON.stringify({ environment: { ports: { range: [4000, 4100] } } }));
     const config = loadFactoryConfigForRepo(path);
     expect(config.environment.ports.range).toEqual([4000, 4100]);
+  });
+
+  it('accepts and drops a retired discovery section so existing files keep loading', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ discovery: { enabled: false, schedule: 'daily', maxCandidates: 3 } }));
+    const config = loadFactoryConfigForRepo(path);
+    expect(config).toEqual(loadFactoryConfig());
+    expect('discovery' in config).toBe(false);
   });
 
   it('throws an error naming the file path on malformed JSON', async () => {

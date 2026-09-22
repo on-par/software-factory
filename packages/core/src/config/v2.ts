@@ -331,14 +331,6 @@ const IntakeSectionSchema = z
       })
       .prefault({})
       .describe('Auto-ingest of labeled GitHub issues.'),
-    discovery: z
-      .object({
-        enabled: z.boolean().default(true).describe('Scheduled read-only scan proposing candidate ideas.'),
-        schedule: z.enum(['weekly', 'daily', 'manual']).default('weekly').describe('How often discovery runs.'),
-        maxCandidates: z.number().int().positive().default(5).describe('Maximum ranked candidates proposed per scan.'),
-      })
-      .prefault({})
-      .describe('Idea discovery from product signals (no GitHub writes).'),
     filing: z
       .object({
         enabled: z.boolean().default(true).describe('Auto-file self-defects discovered during runs.'),
@@ -367,7 +359,7 @@ const IntakeSectionSchema = z
       .prefault({})
       .describe('Guardrails for auto-filing self-defects.'),
   })
-  .describe('Work intake: ingest, discovery, and self-defect filing.');
+  .describe('Work intake: ingest and self-defect filing.');
 
 // ---------- Constitution & notifications ----------
 

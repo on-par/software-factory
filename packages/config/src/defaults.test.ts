@@ -120,7 +120,6 @@ describe('docs live as JSDoc, not as note/comment data', () => {
     'sweep',
     'plan_approval',
     'sandbox',
-    'discovery',
     'filing',
     'ingest',
     'environment.ports',
