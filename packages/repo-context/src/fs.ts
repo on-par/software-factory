@@ -2,10 +2,12 @@
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { join, sep } from 'node:path';
 
-import { DEFAULT_MAX_FILE_BYTES } from './github.js';
 import { joinRepoPath, normalizeRepoPath } from './path.js';
 import type { DegradeEvent, DegradeReason, OnDegrade, RepoContextReader, RepoDirEntry } from './reader.js';
 import { EMPTY_DIR } from './reader.js';
+
+/** Files above this size degrade to `too-large` rather than being inlined. */
+export const DEFAULT_MAX_FILE_BYTES = 1_000_000;
 
 /** Minimal `node:fs/promises` surface the reader needs; injected in tests. */
 export interface FsDirent {

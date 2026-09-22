@@ -15,8 +15,8 @@ software-factory/
 │   │                                        numbering, zero deps, no I/O.
 │   ├── contracts/ @on-par/contracts        — Shared typed seam: zod schemas + inferred
 │   │                                        types for Issue/Epic/Story/DesignArtifact.
-│   ├── repo-context/ @on-par/repo-context  — Read-only repo reader port: GitHub
-│   │                                        contents-API and in-memory impls, zero deps.
+│   ├── repo-context/ @on-par/repo-context  — Read-only repo reader port: local
+│   │                                        filesystem and in-memory impls, zero deps.
 │   ├── config/   @on-par/factory-config  — Zero-dep. Ships typed defaults (defaults.ts)
 │   │                                        and constitution markdown. No JSON.
 │   ├── core/     @on-par/factory-core     — The engine (imports config).
