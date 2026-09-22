@@ -61,7 +61,7 @@ readiness-conformance checker named in epic #464 consume them in later stories.
 - `eval/` — the eval harness (runner, judge, scoring, golden loader, baseline/trend/regression reports)
 - `events/` — reads and tails the `.factory/events.ndjson` append log
 - `filing/` — self-fix merge gate (`isAutoMergeBlocked`) keyed on the configured `filing.selfFixLabel`
-- `hosted/` — provider-session authority bundles for hosted jobs
+- `hosted/` — disposable-docker lane workspaces: container provisioning, the Docker engine adapter, and orphan-container reaping
 - `ingest/` — always-on ingestion of ready issues into the queue
 - `kpis/` — pure factory-health KPI aggregation from events and costs
 - `proxy/` — opt-in loopback reverse proxy with stable per-lane URLs

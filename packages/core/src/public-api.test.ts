@@ -89,33 +89,9 @@ const PUBLIC_API_KEYS = [
   // Queue activity (#1342)
   'DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS',
   'partitionLocalQueueByActivity',
-  // Hosted execution (control plane)
-  'createHostedJobStore',
-  'createSqliteHostedJobStore',
-  'hostedExecEnabled',
+  // Disposable-docker lane workspaces (#1535, #1536)
   'laneContainerName',
   'provisionLaneContainer',
-  'resolveHostedJobStore',
-  'runContainerJob',
-  'runDockerRunner',
-  'runFakeRunner',
-  'runHostedSmoke',
-  'runWatchdogSweep',
-  'summarizeHostedJob',
-  'summarizeHostedJobs',
-  'AUTHORITY_REDACTION_MASK',
-  'redactSecrets',
-  'withAuthority',
-  'prepareGitHubAuthority',
-  'prototypeFallbackMint',
-  'redactGitHubCredential',
-  'resolveHostedAuthority',
-  'createHostedControlPlaneServer',
-  'handleHostedControlPlaneRequest',
-  'createHttpHostedControlPlaneClient',
-  'runOneJobRunner',
-  'createHttpHostedJobClient',
-  'queueAndTailJob',
   // Work requests
   'closedWorkSkipReason',
   'createDefaultWorkSourceRegistry',
@@ -312,7 +288,7 @@ const INTERNAL_API_KEYS = [
   'PATCH_PROPOSAL_SCHEMA',
   'OllamaHttpHarness',
   'OpenCodeHarness',
-  // Hosted execution: Docker container engine adapter (#899)
+  // Disposable-docker lanes: Docker container engine adapter (#1535, #1536)
   'createDockerEngine',
   // Hosted execution: orphan sf-job-* container scan + reap (#1527)
   'listOrphanContainers',

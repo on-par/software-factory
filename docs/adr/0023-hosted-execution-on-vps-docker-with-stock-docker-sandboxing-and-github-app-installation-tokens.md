@@ -65,6 +65,16 @@ secured; and the picks are Accepted provisionally — the #622 go/no-go spike,
 scoped separately, validates them before any migration is planned, and a failed
 spike supersedes this ADR.
 
+Implementation note (2026-09): the hosted-exec control plane built toward this
+decision (epic #895 — job store and its SQLite adapter, control-plane HTTP server,
+runner and queue clients, watchdog, container job runner, provider/GitHub
+authority brokers, the `@on-par/contracts` hosted-job schemas, and the
+`factory hosted smoke|runner|queue` commands) was never started in production
+(#940/#944 parked) and was removed. ADRs 0047-0053 and 0056 describe that removed
+code. The disposable-docker lane workspace (`hosted/container.ts`,
+`hosted/docker.ts`, `hosted/orphans.ts`) remains. The decision above still
+stands as the direction for any future hosted execution.
+
 ## References
 
 - [docs/research/sandbox-tech-comparison.md (#619)](sandbox-tech-comparison.md)

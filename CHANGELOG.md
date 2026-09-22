@@ -6,6 +6,20 @@ All notable changes to this project are documented in this file.
 
 ### Removed
 
+- Removed the unstarted hosted-exec control plane (epic #895; #940/#944 parked).
+  The `factory hosted smoke`, `factory hosted runner` and `factory hosted queue`
+  commands are gone, along with the `FACTORY_HOSTED_EXEC` flag. Removed from
+  `@on-par/factory-core`'s root export: the hosted job store (in-memory and
+  SQLite, `resolveHostedJobStore`), control-plane server and HTTP clients,
+  runners, watchdog sweep, job summaries, smoke, `runContainerJob`, and the
+  provider/GitHub authority brokers (`withAuthority`, `redactSecrets`,
+  `AUTHORITY_REDACTION_MASK`, `prepareGitHubAuthority`, `prototypeFallbackMint`,
+  `redactGitHubCredential`, `resolveHostedAuthority`). Removed from
+  `@on-par/contracts`: the hosted-job and provider-session schemas,
+  `hostedExecEnabled`, `HOSTED_EXEC_FLAG` and the `runHostedContractDemo` demo.
+  The disposable-docker lane backend (`laneContainerName`,
+  `provisionLaneContainer`, `createDockerEngine`, orphan-container reaping) is
+  unchanged; `ContainerEngine` now carries only its lane methods.
 - Removed the bundled `camp-somewhere-cli` constitution. This was a breaking
   change for anyone relying on the bundled constitution for that product; seed
   your own repo's constitution instead with `factory constitution --init <product>`.

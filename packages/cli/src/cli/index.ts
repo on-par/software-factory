@@ -252,9 +252,6 @@ import {
   type UnmergedGreenPrRow,
 } from './doctor.js';
 import { formatOverview, missingClaudeCliMessage, missingTokenMessage, notInitializedMessage } from './first-run.js';
-import { cmdHostedSmoke } from './hosted.js';
-import { cmdHostedQueue } from './hosted-queue.js';
-import { cmdHostedRunner } from './hosted-runner.js';
 import { cmdLogs } from './logs.js';
 import { mergeScopeNotice } from './merge-scope.js';
 import { createFactoryOctokit } from './octokit.js';
@@ -4547,66 +4544,6 @@ export async function main() {
     .action(async (opts: { lane?: string }) => {
       await cmdQueueReconcile(opts);
     });
-
-  const hosted = program
-    .command('hosted')
-    .description('Hosted (remote-runner) execution — experimental, gated by FACTORY_HOSTED_EXEC=1');
-  hosted
-    .command('smoke')
-    .description('Local end-to-end hosted-exec smoke: create → lease → Docker run → result → cleanup')
-    .option('--repo <slug>', 'owner/repo to clone and run against', 'on-par/software-factory')
-    .option('--image <image>', 'container image for the smoke run', 'node:20-alpine')
-    .action(async (opts: { repo?: string; image?: string }) => {
-      await cmdHostedSmoke(opts);
-    });
-  hosted
-    .command('runner')
-    .description('Register capabilities with the local control plane and lease one compatible job, then exit')
-    .option('--url <url>', 'control-plane base URL', 'http://127.0.0.1:8799')
-    .option('--runner-id <id>', 'runner identity (default runner-<pid>)')
-    .option('--capabilities <csv>', 'comma-separated capability list', 'git,node')
-    .option('--timeout <ms>', 'bounded wait window for a compatible job, in ms', '30000')
-    .option('--poll-interval <ms>', 'delay between poll attempts, in ms', '2000')
-    .option('--lease-ttl <ms>', 'lease TTL, in ms', '300000')
-    .option('--heartbeat-interval <ms>', 'expected heartbeat interval, in ms', '30000')
-    .action(
-      async (opts: {
-        url?: string;
-        runnerId?: string;
-        capabilities?: string;
-        timeout?: string;
-        pollInterval?: string;
-        leaseTtl?: string;
-        heartbeatInterval?: string;
-      }) => {
-        await cmdHostedRunner(opts);
-      },
-    );
-  hosted
-    .command('queue')
-    .description('Queue one job to the local control plane, tail it to terminal, print the result')
-    .option('--url <url>', 'control-plane base URL', 'http://127.0.0.1:8799')
-    .option('--repo <slug>', 'owner/repo the job runs against', 'on-par/software-factory')
-    .option('--task <text>', 'opaque task payload')
-    .option('--capabilities <csv>', 'comma-separated required capabilities', 'git,node')
-    .option('--authority <authority>', 'required authority', 'repo:read')
-    .option('--timeout <ms>', 'bounded wait for a terminal result, in ms', '120000')
-    .option('--poll-interval <ms>', 'delay between summary polls, in ms', '1000')
-    .option('--job-id <id>', 'explicit job id (default server-generated)')
-    .action(
-      async (opts: {
-        url?: string;
-        repo?: string;
-        task?: string;
-        capabilities?: string;
-        authority?: string;
-        timeout?: string;
-        pollInterval?: string;
-        jobId?: string;
-      }) => {
-        await cmdHostedQueue(opts);
-      },
-    );
 
   program
     .command('ready <issue>')
