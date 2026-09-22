@@ -790,9 +790,47 @@ describe('lanes', () => {
   });
 });
 
+/** Minimal stand-in for octokit.paginate: requests page after page until a short one. */
+async function fakePaginate(
+  method: (params: Record<string, unknown>) => Promise<{ data: unknown[] }>,
+  params: { per_page: number },
+): Promise<unknown[]> {
+  const all: unknown[] = [];
+  for (let page = 1; ; page++) {
+    const { data } = await method({ ...params, page });
+    all.push(...data);
+    if (data.length < params.per_page) return all;
+  }
+}
+
 describe('createOctokitQueueClient', () => {
+  it('reads every page of open issues, not just the first 100 (H10)', async () => {
+    const issues = Array.from({ length: 250 }, (_, i) => ({ number: i + 1, labels: ['factory:queued'] }));
+    const pages: unknown[] = [];
+    const octokit: any = {
+      paginate: fakePaginate,
+      rest: {
+        issues: {
+          listForRepo: async (input: { page: number; per_page: number }) => {
+            pages.push(input.page);
+            const start = (input.page - 1) * input.per_page;
+            return { data: issues.slice(start, start + input.per_page) };
+          },
+        },
+      },
+    };
+
+    const client = createOctokitQueueClient(octokit);
+    const result = await client.listOpenIssuesWithLabels({ owner: 'o', repo: 'r', labels: ['factory:queued'] });
+
+    expect(pages).toEqual([1, 2, 3]);
+    expect(result).toHaveLength(250);
+    expect(result.at(-1)).toEqual({ number: 250, labels: ['factory:queued'] });
+  });
+
   it('lists open issues with the given labels, dropping pull requests and normalising label shapes', async () => {
     const octokit: any = {
+      paginate: fakePaginate,
       rest: {
         issues: {
           listForRepo: async (input: unknown) => {
@@ -819,6 +857,7 @@ describe('createOctokitQueueClient', () => {
       state: 'open',
       labels: 'factory:queued',
       per_page: 100,
+      page: 1,
     });
     expect(result).toEqual([
       { number: 1, labels: ['factory:queued', 'factory:lane:build'], title: 'Build the thing' },
