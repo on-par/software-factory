@@ -683,7 +683,7 @@ describe('shipPhase self-healing', () => {
 });
 
 describe('defaultShipRunner (H9)', () => {
-  const node = (script: string) => `${JSON.stringify(process.execPath)} -e ${JSON.stringify(script)}`;
+  const node = (script: string) => `node -e ${JSON.stringify(script)}`;
 
   it('disables git terminal prompts and keeps the rest of the parent env', async () => {
     const { stdout } = await defaultShipRunner(
