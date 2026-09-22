@@ -358,6 +358,8 @@ function paths() {
 
 function defaultOctokit() {
   return {
+    // Single-page stand-in: every fake listing here fits on one page.
+    paginate: vi.fn(async (method: any, params: any) => (await method(params)).data),
     rest: {
       issues: {
         get: vi.fn(async () => ({ data: { title: 'Fix the bug' } })),
@@ -369,6 +371,7 @@ function defaultOctokit() {
             ? { data: [{ number: 77, head: { ref: 'ship-it/5-fix-the-bug' }, body: 'Closes #5' }] }
             : { data: [] },
         ),
+        get: vi.fn(async () => ({ data: { head: { sha: 'abc123' } } })),
         merge: vi.fn(async () => ({})),
       },
       git: { deleteRef: vi.fn(async () => ({})) },
@@ -4535,6 +4538,7 @@ describe('CliExitError (direct command invocation)', () => {
         repo: 'software-factory',
         pull_number: 77,
         merge_method: 'squash',
+        sha: 'abc123',
       });
     } finally {
       rmSync(worktree, { recursive: true, force: true });

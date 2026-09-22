@@ -7,6 +7,7 @@ const STDERR_LIMIT = 400;
 /** Redact common credential/token patterns before anything reaches logs. */
 export function redactSecrets(text: string): string {
   return text
+    .replace(/(\bhttps?:\/\/)[^\s/@:'"]+:[^\s/@'"]+@/gi, '$1[redacted]@')
     .replace(/sk-ant-[A-Za-z0-9_-]+/g, '[redacted]')
     .replace(/sk-[A-Za-z0-9_-]{16,}/g, '[redacted]')
     .replace(/\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]+/g, '[redacted]')

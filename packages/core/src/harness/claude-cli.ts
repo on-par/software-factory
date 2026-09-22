@@ -109,6 +109,15 @@ function extractFailureDiagnosticFromStream(stdout: string): string | undefined 
   return diagnostics.length > 0 ? diagnostics.join('\n') : sawJsonLine ? '' : undefined;
 }
 
+/** True when the child was killed for exceeding maxBuffer: node's own exec reports
+ *  ERR_CHILD_PROCESS_STDIO_MAXBUFFER, utils/exec.ts reports it by message. */
+function isMaxBufferOverflow(err: { code?: unknown; message?: unknown }): boolean {
+  return (
+    err.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' ||
+    (typeof err.message === 'string' && /maxBuffer (length )?exceeded/i.test(err.message))
+  );
+}
+
 function stripClaudeStreamMetadata(text: string): string {
   const diagnostics = extractFailureDiagnosticFromStream(text);
   return diagnostics !== undefined ? diagnostics : text;
@@ -131,7 +140,7 @@ export class ClaudeCliHarness implements CodingHarness {
     const promptDir = await mkdtemp(join(tmpdir(), 'factory-claude-prompt-'));
     const promptPath = join(promptDir, 'prompt.txt');
     await writeFile(promptPath, prompt, 'utf8');
-    const cmd = `claude -p ${modelArg}${effortArg} --output-format stream-json --include-partial-messages --verbose --safe-mode --permission-mode bypassPermissions < ${shellEscape(promptPath)}`;
+    const cmd = `claude -p ${modelArg}${effortArg} --output-format stream-json --verbose --safe-mode --permission-mode bypassPermissions < ${shellEscape(promptPath)}`;
     const finalCmd = sandbox ? wrapCommandInSandbox(cmd, sandbox) : cmd;
 
     let stdout: string;
@@ -150,9 +159,13 @@ export class ClaudeCliHarness implements CodingHarness {
       const diagnosticText = [stderrDiagnostic, stdoutDiagnostic ?? stdout]
         .filter((text) => typeof text === 'string')
         .join('\n');
-      const reason = err.killed ? 'timeout' : classifyFailure(diagnosticText, err.code ?? 1);
+      // An output overflow also sets `killed`, but it is not a provider timeout: reporting
+      // it as one would block every model on the provider. Classify it as a plain error.
+      const overflow = isMaxBufferOverflow(err);
+      const reason = overflow ? 'error' : err.killed ? 'timeout' : classifyFailure(diagnosticText, err.code ?? 1);
       const codeText = typeof err.code === 'number' || typeof err.code === 'string' ? ` ${err.code}` : '';
-      throw new HarnessError(`claude CLI process exited${codeText}`.trim(), reason, {
+      const overflowText = overflow ? ' (output exceeded maxBuffer)' : '';
+      throw new HarnessError(`claude CLI process exited${codeText}${overflowText}`.trim(), reason, {
         exitCode: typeof err.code === 'number' ? err.code : undefined,
         stderr: typeof err.stderr === 'string' ? err.stderr : undefined,
         stdout,

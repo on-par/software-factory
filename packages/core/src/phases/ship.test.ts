@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createLifecycleBus } from '../bus/index.js';
 import { specPaths } from '../spec/index.js';
-import { findMergedPR, findOpenPR, shipPhase } from './ship.js';
+import { defaultShipRunner, findMergedPR, findOpenPR, shipPhase } from './ship.js';
 
 function createOctokit(prDraft = true) {
   const calls: any[] = [];
@@ -682,6 +682,28 @@ describe('shipPhase self-healing', () => {
   });
 });
 
+describe('defaultShipRunner (H9)', () => {
+  const node = (script: string) => `node -e ${JSON.stringify(script)}`;
+
+  it('disables git terminal prompts and keeps the rest of the parent env', async () => {
+    const { stdout } = await defaultShipRunner(
+      node("process.stdout.write(process.env.GIT_TERMINAL_PROMPT + '|' + (process.env.PATH === undefined))"),
+    );
+    expect(stdout).toBe('0|false');
+  });
+
+  it('kills a command that outlives its timeout', async () => {
+    await expect(defaultShipRunner(node('setTimeout(() => {}, 10000)'), { timeout: 200 })).rejects.toMatchObject({
+      killed: true,
+    });
+  });
+
+  it('buffers more than node’s 1 MB default', async () => {
+    const { stdout } = await defaultShipRunner(node("process.stdout.write('x'.repeat(3 * 1024 * 1024))"));
+    expect(stdout.length).toBe(3 * 1024 * 1024);
+  });
+});
+
 describe('shipPhase remote head verification (#735)', () => {
   function recoveryRun(handleExtra: (command: string) => { stdout: string } | undefined) {
     return async (command: string) => {
@@ -785,6 +807,73 @@ describe('shipPhase remote head verification (#735)', () => {
           msg.includes('fatal: could not read from remote repository'),
       ),
     ).toBe(true);
+  });
+
+  const TOKEN = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789';
+  const shipArgs = (logs: Array<[string, string]>, run: (command: string) => Promise<{ stdout: string }>) => ({
+    issue: 23,
+    repo: 'on-par/software-factory',
+    worktree: '/repo-factory-23',
+    branch: 'ship-it/23-self-heal',
+    octokit: createOctokit().octokit as any,
+    watchCI: false,
+    log: (type: any, msg: string) => logs.push([type, msg]),
+    run,
+  });
+
+  it('redacts credentials from git push failure text before truncating it (H9)', async () => {
+    const logs: Array<[string, string]> = [];
+    const run = recoveryRun((command) => {
+      if (command === "git push -u origin 'ship-it/23-self-heal'") {
+        throw Object.assign(new Error('Command failed'), {
+          // The token sits right at the 400-char truncation boundary.
+          stderr: `${'x'.repeat(330)} fatal: unable to access 'https://user:${TOKEN}@github.com/o/r.git/'\n`,
+        });
+      }
+      return undefined;
+    });
+
+    const result = await shipPhase(shipArgs(logs, run));
+
+    expect(result).toEqual({ ok: false });
+    const pushLog = logs.find(([, msg]) => msg.startsWith('git push failed'));
+    expect(pushLog?.[1]).toContain('[redacted]');
+    expect(pushLog?.[1]).not.toContain('ghp_abc');
+    expect(pushLog?.[1]).not.toContain('user:');
+  });
+
+  it('redacts credentials from git ls-remote failure text (H9)', async () => {
+    const logs: Array<[string, string]> = [];
+    const run = recoveryRun((command) => {
+      if (command === "git ls-remote --heads origin 'ship-it/23-self-heal'") {
+        throw Object.assign(new Error('Command failed'), { stderr: `fatal: auth failed for token=${TOKEN}\n` });
+      }
+      return undefined;
+    });
+
+    await shipPhase(shipArgs(logs, run));
+
+    const verifyLog = logs.find(([, msg]) => msg.includes('could not verify the remote head'));
+    expect(verifyLog?.[1]).toContain('token=[redacted]');
+    expect(verifyLog?.[1]).not.toContain(TOKEN);
+  });
+
+  it('a git status that fails (e.g. maxBuffer overflow) fails closed without committing (H9)', async () => {
+    const logs: Array<[string, string]> = [];
+    const commands: string[] = [];
+    const run = recoveryRun((command) => {
+      commands.push(command);
+      if (command === 'git status --porcelain') throw new Error('stdout maxBuffer length exceeded');
+      return undefined;
+    });
+
+    const result = await shipPhase(shipArgs(logs, run));
+
+    expect(result).toEqual({
+      ok: false,
+      reason: 'could not read worktree state: stdout maxBuffer length exceeded',
+    });
+    expect(commands.some((c) => c.startsWith('git add') || c.startsWith('git push'))).toBe(false);
   });
 
   it('git ls-remote returns no matching ref → abort', async () => {
