@@ -4,7 +4,6 @@
 // port. The CLI supplies its own Environment (port lease + pgid tracking + release).
 
 import type { EventKind } from '../events/kinds.js';
-import type { WorktreeSandbox } from '../utils/microvm.js';
 import { cleanupWorktree, setupWorktree } from '../utils/index.js';
 import type { LocalOnlyPolicy } from '../work/local-only.js';
 
@@ -43,16 +42,15 @@ export async function worktreeWorkspace(opts: {
   worktreePath: string;
   startPoint?: string;
   log?: (type: EventKind, msg: string) => void;
-  sandbox?: WorktreeSandbox;
   setup?: typeof setupWorktree;
   cleanup?: typeof cleanupWorktree;
 }): Promise<Workspace> {
   const setup = opts.setup ?? setupWorktree;
   const cleanup = opts.cleanup ?? cleanupWorktree;
-  await setup(opts.repoRoot, opts.branch, opts.worktreePath, opts.startPoint, opts.sandbox, opts.log);
+  await setup(opts.repoRoot, opts.branch, opts.worktreePath, opts.startPoint, opts.log);
   return {
     path: opts.worktreePath,
-    dispose: () => cleanup(opts.repoRoot, opts.worktreePath, opts.log, opts.sandbox),
+    dispose: () => cleanup(opts.repoRoot, opts.worktreePath, opts.log),
   };
 }
 

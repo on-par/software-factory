@@ -6,6 +6,22 @@ All notable changes to this project are documented in this file.
 
 ### Removed
 
+- Removed the `docker-sandbox` sandbox runtime and its A/B rollout (#653,
+  #655). It never contained anything: commands ran unwrapped and the microVM was
+  only created, never used. `sandbox.runtime` now accepts
+  `auto|sandbox-exec|firejail|none`, and the `sandbox.docker.rolloutPercent`
+  config key is gone. An existing `.factory/config.json` keeps loading:
+  `runtime: "docker-sandbox"` is treated as `"none"` (what it actually did) and
+  `sandbox.docker` is ignored, with a one-time warning.
+  `FACTORY_SANDBOX_RUNTIME=docker-sandbox` is now ignored like any other unknown
+  value. `factory doctor` no longer scans for or reaps `factory-*` sbx VMs;
+  remove leftover ones with `sbx rm --force <name>`. Removed from
+  `@on-par/factory-core/internal`: `createMicroVm`, `removeMicroVm`,
+  `listMicroVms`, `reapOrphanMicroVm`, `microVmName`, `worktreeSandboxFor` and
+  the `WorktreeSandbox` type; `setupWorktree`, `cleanupWorktree`,
+  `worktreeWorkspace`, `reapLaneWorktree` and `sweepWorktrees` no longer take a
+  sandbox descriptor. `npm run sandbox-ab-report` is kept, because it also
+  reports the `workspaceBackend` breakdown (#1532).
 - Removed the unstarted hosted-exec control plane (epic #895; #940/#944 parked).
   The `factory hosted smoke`, `factory hosted runner` and `factory hosted queue`
   commands are gone, along with the `FACTORY_HOSTED_EXEC` flag. Removed from

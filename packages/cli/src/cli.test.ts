@@ -867,7 +867,6 @@ describe('cli', () => {
     let dir: string;
     let paths: any;
     const baseOpts = (overrides: Partial<Parameters<typeof resolveEnvironmentAcquirer>[0]> = {}) => ({
-      laneSandboxRuntime: 'none' as const,
       paths,
       worktree: '/repo/.worktrees/654',
       branch: 'ship-it/654',
@@ -886,38 +885,9 @@ describe('cli', () => {
       await rm(dir, { recursive: true, force: true });
     });
 
-    it('returns undefined and logs a skip for a docker-sandbox lane, never reaching acquirePortLease', () => {
-      const log = vi.fn();
-
-      const acquirer = resolveEnvironmentAcquirer(
-        baseOpts({ laneSandboxRuntime: 'docker-sandbox', worktree: '/repo/.worktrees/654', log }),
-      );
-
-      expect(acquirer).toBeUndefined();
-      expect(log).toHaveBeenCalledWith(
-        'environment_lease',
-        expect.stringContaining('docker-sandbox lane /repo/.worktrees/654 binds its port inside its own microVM'),
-      );
-      expect(readPortLeases(paths.ports)).toEqual([]);
-    });
-
-    it('returns an acquirer function for non-docker-sandbox runtimes', () => {
-      for (const laneSandboxRuntime of ['sandbox-exec', 'none'] as const) {
-        const acquirer = resolveEnvironmentAcquirer(baseOpts({ laneSandboxRuntime }));
-        expect(typeof acquirer).toBe('function');
-      }
-    });
-
-    it('leaves .factory/ports.json with no entries for either of two concurrent docker-sandbox lanes', () => {
-      const acquirerA = resolveEnvironmentAcquirer(
-        baseOpts({ laneSandboxRuntime: 'docker-sandbox', worktree: '/repo/.worktrees/654a' }),
-      );
-      const acquirerB = resolveEnvironmentAcquirer(
-        baseOpts({ laneSandboxRuntime: 'docker-sandbox', worktree: '/repo/.worktrees/654b' }),
-      );
-
-      expect(acquirerA).toBeUndefined();
-      expect(acquirerB).toBeUndefined();
+    it('returns an acquirer function without leasing a port until it is called', () => {
+      const acquirer = resolveEnvironmentAcquirer(baseOpts());
+      expect(typeof acquirer).toBe('function');
       expect(readPortLeases(paths.ports)).toEqual([]);
     });
   });

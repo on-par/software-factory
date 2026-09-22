@@ -107,15 +107,6 @@ export {
   shellEscape,
   slugify,
 } from './utils/index.js';
-export type { MicroVmLifecycleOptions, ReapedMicroVm, WorktreeSandbox } from './utils/microvm.js';
-export {
-  createMicroVm,
-  listMicroVms,
-  microVmName,
-  reapOrphanMicroVm,
-  removeMicroVm,
-  worktreeSandboxFor,
-} from './utils/microvm.js';
 export type { FileLockOptions, SyncFileLockOptions } from './utils/lock.js';
 export { withFileLock, withFileLockSync, withGitLock } from './utils/lock.js';
 export type { RunLockHolder, RunLockOptions } from './utils/run-lock.js';

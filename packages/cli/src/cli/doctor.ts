@@ -391,18 +391,6 @@ export function orphanContainerChecks(names: readonly string[]): DoctorCheck[] {
   }));
 }
 
-export function orphanMicroVmChecks(names: readonly string[]): DoctorCheck[] {
-  if (names.length === 0) {
-    return [{ name: 'orphan sbx VMs', ok: true, detail: 'no orphan factory-* sbx VMs' }];
-  }
-  return names.map((name) => ({
-    name: `orphan sbx VM ${name}`,
-    ok: false,
-    detail: `${name} has no active lane holding its worktree`,
-    fix: 'run `factory doctor --reconcile` to remove it via `sbx rm --force`',
-  }));
-}
-
 export function formatContainerReconcileReport(reaped: ReapRow[]): string {
   if (reaped.length === 0) return 'reconcile: no orphan containers';
   return reaped
@@ -410,17 +398,6 @@ export function formatContainerReconcileReport(reaped: ReapRow[]): string {
       r.removed
         ? `reconcile: removed container ${r.name}`
         : `reconcile: failed to remove container ${r.name} — ${r.detail}`,
-    )
-    .join('\n');
-}
-
-export function formatMicroVmReconcileReport(reaped: ReapRow[]): string {
-  if (reaped.length === 0) return 'reconcile: no orphan sbx VMs';
-  return reaped
-    .map((r) =>
-      r.removed
-        ? `reconcile: removed sbx VM ${r.name} (sbx rm --force)`
-        : `reconcile: failed to remove sbx VM ${r.name} — ${r.detail}`,
     )
     .join('\n');
 }

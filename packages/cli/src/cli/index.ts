@@ -40,7 +40,6 @@ import type {
   RunPorts,
   RunRequest,
   SandboxPolicy,
-  SandboxRuntime,
   UsageReading,
   WatchdogPolicyOverrides,
   WatchdogPolicySource,
@@ -165,7 +164,6 @@ import type {
   QueueReleaseOutcome,
   UnmergedGreenPr,
   WatchChecksOptions,
-  WorktreeSandbox,
 } from '@on-par/factory-core/internal';
 import {
   acquirePidFile,
@@ -189,22 +187,18 @@ import {
   formatGcReport,
   gitFetch,
   isAutoMergeBlocked,
-  listMicroVms,
   listOrphanContainers,
   logCost,
   logEvent,
-  microVmName,
   planQueueMigration,
   readCosts,
   readGithubQueueSnapshot,
   reapLaneWorktree,
   reapOrphanContainers,
-  reapOrphanMicroVm,
   releaseRuntimeFiles,
   releaseStaleClaims,
   resolveBranchPrefix,
   resolveEffectiveConfig,
-  worktreeSandboxFor,
   resolveExperimental,
   resolveFilingPolicy,
   resolveLocalOnly,
@@ -236,7 +230,6 @@ import {
   formatClaimReconcileReport,
   formatContainerReconcileReport,
   formatDoctorChecks,
-  formatMicroVmReconcileReport,
   formatReconcileReport,
   formatWorktreeReconcileReport,
   type GreenPrScanResult,
@@ -245,7 +238,6 @@ import {
   type KeychainProbeStatus,
   type LeaseHealthRow,
   orphanContainerChecks,
-  orphanMicroVmChecks,
   runDoctorChecks,
   sandboxClaudeAuthChecks,
   unmergedGreenPrChecks,
@@ -1261,28 +1253,15 @@ export function resolveLaneBaseUrl(
   return { note: `proxy enabled but not running — using http://127.0.0.1:${appPort}` };
 }
 
-/** Builds the port-lease acquirer passed to runIssue, or undefined to skip it. A
- *  docker-sandbox lane runs inside its own microVM network namespace and binds its
- *  normal port there, so it needs no host port-lease and (since the proxy resolves
- *  routes solely from the lease registry) no proxy route either — every other
- *  runtime keeps acquiring a lease exactly as before. */
+/** Builds the port-lease acquirer passed to runIssue. */
 export function resolveEnvironmentAcquirer(opts: {
-  laneSandboxRuntime: SandboxRuntime;
   paths: ReturnType<typeof getFactoryPaths>;
   worktree: string;
   branch: string;
   range: [number, number];
   processGroupGraceMs: number;
   log: (type: EventKind, msg: string) => void;
-}): (() => Promise<Environment>) | undefined {
-  if (opts.laneSandboxRuntime === 'docker-sandbox') {
-    opts.log(
-      'environment_lease',
-      `docker-sandbox lane ${opts.worktree} binds its port inside its own microVM — skipping host port-lease`,
-    );
-    return undefined;
-  }
-
+}): () => Promise<Environment> {
   return async (): Promise<Environment> => {
     const reaped: ReapedLease[] = [];
     const lease = await acquirePortLease({
@@ -1500,12 +1479,8 @@ export async function shipIssue(
     worktree,
     repoRoot,
     cliDisabled: opts.sandbox === false,
-    laneId: lane,
   });
   laneSandboxRuntime = sandboxPolicy?.runtime ?? 'none';
-  const worktreeSandbox: WorktreeSandbox | undefined = worktreeSandboxFor(sandboxPolicy?.runtime, {
-    allowHosts: sandboxPolicy?.allowHosts ?? [],
-  });
   let activeSandboxPolicy: SandboxPolicy | undefined;
   if (opts.sandbox === false) {
     console.error(chalk.yellow('factory: sandbox disabled by --no-sandbox — agent runs are UNCONTAINED'));
@@ -1514,12 +1489,6 @@ export async function shipIssue(
     log('sandbox-disabled', 'sandbox disabled by config/FACTORY_SANDBOX');
   } else if (sandboxPolicy.runtime === 'none') {
     log('sandbox-unavailable', 'no sandbox runtime found (sandbox-exec/firejail) — running uncontained');
-  } else if (sandboxPolicy.runtime === 'docker-sandbox') {
-    // docker-sandbox's containment is the microVM created by worktreeWorkspace below
-    // (#653), not a command-prefix wrap — activeSandboxPolicy stays undefined because
-    // wrapCommandInSandbox remains a no-op for this runtime. createMicroVm logs the
-    // actual outcome ('sandbox' on success, 'sandbox-unavailable' on fallback), so no
-    // speculative log is emitted here.
   } else {
     activeSandboxPolicy = sandboxPolicy;
     if (sandboxPolicy.allowHosts.length > 0) {
@@ -1540,14 +1509,13 @@ export async function shipIssue(
       branch,
       worktreePath: worktree,
       log,
-      sandbox: worktreeSandbox,
-      setup: (root, br, wt, sp, sandbox, setupLog) =>
+      setup: (root, br, wt, sp, setupLog) =>
         withGitLock(root, () =>
           withFileLock(
             paths.gitLock,
             // setupWorktree fetches origin itself before creating the worktree (#1167),
             // so no explicit gitFetch here — still under the git + file locks.
-            () => setupWorktree(root, br, wt, sp, sandbox, setupLog),
+            () => setupWorktree(root, br, wt, sp, setupLog),
             { onSteal: (pid) => log('lock-stolen', `stole ${paths.gitLock} from dead holder pid ${pid ?? 'unknown'}`) },
           ),
         ),
@@ -1570,7 +1538,6 @@ export async function shipIssue(
   // so a lease-disabled/failed run still tears down every spawned agent process.
   const acquireEnvironment = portsSettings.enabled
     ? resolveEnvironmentAcquirer({
-        laneSandboxRuntime: sandboxPolicy?.runtime ?? 'none',
         paths,
         worktree,
         branch,
@@ -2130,17 +2097,6 @@ export async function withRepoRunLock<T>(
   }
 }
 
-/** The repo's current docker-sandbox descriptor for worktree-gc sweeps, or undefined for
- *  every other runtime/config state (including a fixture config with no `sandbox` key). */
-function gcWorktreeSandbox(
-  sandboxCfg: FactoryConfig['sandbox'] | undefined,
-  repoRoot: string,
-): WorktreeSandbox | undefined {
-  if (!sandboxCfg) return undefined;
-  const policy = resolveSandboxPolicy(sandboxCfg, { worktree: repoRoot, repoRoot });
-  return worktreeSandboxFor(policy?.runtime);
-}
-
 /** Eagerly reaps a parked lane's own worktree inside `factory run` (#1007). All the safety
  *  gates live in reapLaneWorktree; this wrapper resolves the lane's conventional worktree
  *  path and holds the same git+file lock pairing as every other worktree mutation site. A
@@ -2151,15 +2107,11 @@ export async function reapParkedLaneWorktree(
   paths: ReturnType<typeof getFactoryPaths>,
 ): Promise<void> {
   try {
-    const factoryConfig = loadFactoryConfigForRepo(paths.config);
     const branchPrefix = resolveEffectiveConfig(loadRepoConfig(repoRoot)).branchPrefix;
     const worktreePath = worktreePathFor(repoRoot, issue, branchPrefix);
     const log = (type: EventKind, msg: string) => logEvent(paths.events, type, issue, msg);
-    const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
     await withGitLock(repoRoot, () =>
-      withFileLock(paths.gitLock, () =>
-        reapLaneWorktree(repoRoot, worktreePath, { issue, branchPrefix, log, sandbox }),
-      ),
+      withFileLock(paths.gitLock, () => reapLaneWorktree(repoRoot, worktreePath, { issue, branchPrefix, log })),
     );
   } catch (err: any) {
     logEvent(paths.events, 'warn', issue, `parked-lane worktree reap failed: ${err?.message ?? String(err)}`);
@@ -2178,11 +2130,10 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }
   // Best-effort GitHub evidence: tokenless/local-only repos keep today's pure-local behavior.
   const ghRepo = await getGitHubRepo().catch(() => undefined);
   const octokit = ghRepo ? (hasGitHubToken() ? getOctokit() : undefined) : undefined;
-  const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
   const run = () =>
     sweepWorktrees(
       { repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo, branchPrefix: resolveBranchPrefix() },
-      { log, octokit, sandbox },
+      { log, octokit },
     );
   const report = opts.dryRun ? await run() : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
   console.log(formatGcReport(report));
@@ -2272,13 +2223,6 @@ async function landIssue(
   }
 
   const landFactoryConfig = loadFactoryConfigForRepo(paths.config);
-  const landSandboxPolicy = resolveSandboxPolicy(landFactoryConfig.sandbox, {
-    worktree,
-    repoRoot,
-  });
-  const worktreeSandbox: WorktreeSandbox | undefined = worktreeSandboxFor(landSandboxPolicy?.runtime, {
-    allowHosts: landSandboxPolicy?.allowHosts ?? [],
-  });
 
   const withLandLock: LandLock = (fn) =>
     withGitLock(repoRoot, () =>
@@ -2305,18 +2249,18 @@ async function landIssue(
         withLock: withLandLock,
         ensureWorktree: async () => {
           if (!existsSync(worktree)) {
-            await setupWorktree(repoRoot, branch, worktree, `origin/${branch}`, worktreeSandbox, log);
+            await setupWorktree(repoRoot, branch, worktree, `origin/${branch}`, log);
           }
         },
       });
     } catch (err) {
       if (err instanceof AwaitingReviewError || err instanceof CiFailedError) {
-        await withLandLock(() => cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
+        await withLandLock(() => cleanupWorktree(repoRoot, worktree, log));
       }
       throw err;
     }
     log('merged', `squash-merged PR #${prNumber}`);
-    await withLandLock(() => cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
+    await withLandLock(() => cleanupWorktree(repoRoot, worktree, log));
   } catch (err: any) {
     if (err instanceof LandConflictError || err instanceof AwaitingReviewError || err instanceof CiFailedError)
       throw err;
@@ -2762,7 +2706,6 @@ async function cmdRun(
     if (factoryConfig.worktree.autoGcOnRun) {
       try {
         const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
-        const gcSandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
             sweepWorktrees(
@@ -2772,7 +2715,7 @@ async function cmdRun(
                 repo: ghRepo,
                 branchPrefix: resolveBranchPrefix(),
               },
-              { log: gcLog, octokit: getOctokit(), sandbox: gcSandbox },
+              { log: gcLog, octokit: getOctokit() },
             ),
           ),
         );
@@ -4284,8 +4227,6 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
       sandboxDetail = 'skipped — sandbox disabled by config or FACTORY_SANDBOX';
     } else if (policy.runtime === 'none') {
       sandboxDetail = 'skipped — no sandbox runtime (sandbox-exec/firejail) on this host';
-    } else if (policy.runtime === 'docker-sandbox') {
-      sandboxDetail = 'skipped — docker-sandbox containment is the microVM, not command wrapping (#653)';
     } else {
       sandboxed = probeExec(wrapCommandInSandbox(CLAUDE_AUTH_PROBE, policy)) === null ? 'failed' : 'ok';
       sandboxDetail =
@@ -4307,11 +4248,6 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     const dockerAvailable = isCommandAvailable('docker');
     const orphanContainers = dockerAvailable ? await listOrphanContainers().catch(() => []) : [];
     checks.push(...orphanContainerChecks(orphanContainers.map((c) => c.name)));
-
-    const sbxAvailable = isCommandAvailable('sbx');
-    const activeVmNames = new Set(health.filter((h) => h.alive).map((h) => microVmName(h.lease.worktreeId)));
-    const orphanVmNames = sbxAvailable ? (await listMicroVms()).filter((n) => !activeVmNames.has(n)) : [];
-    checks.push(...orphanMicroVmChecks(orphanVmNames));
 
     const sweepStatus = checkSweepHeartbeat(factoryConfig.sweep, process.env, defaultSweepHeartbeatDeps());
     const sweepCheck = sweepHeartbeatCheck(sweepStatus);
@@ -4337,11 +4273,6 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
         console.log(formatContainerReconcileReport(reapedContainers));
       }
 
-      if (orphanVmNames.length > 0) {
-        const reapedVms = await Promise.all(orphanVmNames.map((name) => reapOrphanMicroVm(name)));
-        console.log(formatMicroVmReconcileReport(reapedVms));
-      }
-
       const reaped = await reapStalePortLeases({ registryFile: paths.ports, lockDir: paths.portsLock });
       console.log(formatReconcileReport(reaped));
 
@@ -4357,7 +4288,6 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
 
       try {
         const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
-        const gcSandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
             sweepWorktrees(
@@ -4367,7 +4297,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
                 repo: ghRepo,
                 branchPrefix: resolveBranchPrefix(),
               },
-              { log: gcLog, octokit, sandbox: gcSandbox },
+              { log: gcLog, octokit },
             ),
           ),
         );
@@ -4465,7 +4395,7 @@ export async function main() {
     .description('Preflight-check your environment (claude, gh, token, git, npm, sandbox)')
     .option(
       '--reconcile',
-      'Reap stale port leases, dead-run worktrees, stale issue claims, orphan sf-job-*/factory.managed containers, and orphan factory-* sbx VMs',
+      'Reap stale port leases, dead-run worktrees, stale issue claims, and orphan sf-job-*/factory.managed containers',
     )
     .action((opts: { reconcile?: boolean }) => cmdDoctor(opts));
 

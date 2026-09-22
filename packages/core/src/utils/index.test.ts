@@ -9,7 +9,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PipelineTestKit } from '../test-support/index.js';
 import { getFactoryPaths } from '../config/index.js';
-import type { ExecFn } from './exec.js';
 import {
   branchFor,
   branchPrefixSlug,
@@ -28,7 +27,6 @@ import {
   setupWorktree,
   shellEscape,
   slugify,
-  type WorktreeSandbox,
 } from './index.js';
 
 let tmpDir: string | undefined;
@@ -558,7 +556,7 @@ describe('gitFetch / setupWorktree', () => {
     await execFile('git', ['push', '-u', 'origin', branch], { cwd: repoRoot });
     await execFile('git', ['checkout', 'main'], { cwd: repoRoot });
 
-    await setupWorktree(repoRoot, branch, worktree, `origin/${branch}`, undefined, log);
+    await setupWorktree(repoRoot, branch, worktree, `origin/${branch}`, log);
 
     expect(readFileSync(join(worktree, 'ADOPTED.txt'), 'utf-8')).toBe('remote head\n');
     expect(log).toHaveBeenCalledWith('worktree-base', expect.stringContaining('origin/contributor/adopted-pr'));
@@ -605,7 +603,7 @@ describe('gitFetch / setupWorktree', () => {
     const worktree = kit.trackWorktree(repoRoot, 206);
     const log = vi.fn();
 
-    await setupWorktree(repoRoot, 'ship-it/206-base-event', worktree, undefined, undefined, log);
+    await setupWorktree(repoRoot, 'ship-it/206-base-event', worktree, undefined, log);
 
     const call = log.mock.calls.find(([type]) => type === 'worktree-base');
     expect(call).toBeDefined();
@@ -645,84 +643,6 @@ describe('defaultRemoteBase', () => {
     });
 
     await expect(defaultRemoteBase(repoRoot)).resolves.toBe('origin/trunk');
-  });
-});
-
-describe('setupWorktree / cleanupWorktree sandbox lifecycle', () => {
-  const kit = new PipelineTestKit();
-
-  afterEach(async () => {
-    await kit.cleanup();
-  });
-
-  it('with sandbox undefined, runs no sbx commands (behavior unchanged)', async () => {
-    const { repoRoot } = await kit.makeThrowawayRepo();
-    const worktree = kit.trackWorktree(repoRoot, 653);
-    const branch = 'ship-it/653-no-sandbox';
-    const exec = vi.fn();
-
-    await setupWorktree(repoRoot, branch, worktree);
-    await cleanupWorktree(repoRoot, worktree);
-
-    expect(exec).not.toHaveBeenCalled();
-  });
-
-  it('setupWorktree with a docker-sandbox descriptor creates the VM via the injected exec', async () => {
-    const { repoRoot } = await kit.makeThrowawayRepo();
-    const worktree = kit.trackWorktree(repoRoot, 654);
-    const branch = 'ship-it/654-docker-sandbox';
-    const exec: ExecFn = vi.fn().mockResolvedValue({ stdout: '', stderr: '' });
-    const sandbox: WorktreeSandbox = {
-      runtime: 'docker-sandbox',
-      authPaths: ['/home/user/.claude'],
-      allowHosts: [],
-      exec,
-      isAvailable: () => true,
-    };
-
-    await setupWorktree(repoRoot, branch, worktree, 'origin/main', sandbox);
-
-    expect(exec).toHaveBeenCalledWith(expect.stringContaining('sbx create'), expect.anything());
-  });
-
-  it('setupWorktree forwards its log callback into createMicroVm so a fallback is observable', async () => {
-    const { repoRoot } = await kit.makeThrowawayRepo();
-    const worktree = kit.trackWorktree(repoRoot, 656);
-    const branch = 'ship-it/656-docker-sandbox-log';
-    const exec: ExecFn = vi.fn().mockRejectedValue(new Error('sbx create boom'));
-    const sandbox: WorktreeSandbox = {
-      runtime: 'docker-sandbox',
-      authPaths: ['/home/user/.claude'],
-      allowHosts: [],
-      exec,
-      isAvailable: () => true,
-    };
-    const log = vi.fn();
-
-    await setupWorktree(repoRoot, branch, worktree, 'origin/main', sandbox, log);
-
-    expect(log).toHaveBeenCalledWith('sandbox-unavailable', expect.stringContaining('sbx create failed'));
-  });
-
-  it('cleanupWorktree with the same descriptor removes the VM and is idempotent on a second call', async () => {
-    const { repoRoot } = await kit.makeThrowawayRepo();
-    const worktree = kit.trackWorktree(repoRoot, 655);
-    const branch = 'ship-it/655-docker-sandbox-cleanup';
-    const exec: ExecFn = vi.fn().mockResolvedValue({ stdout: '', stderr: '' });
-    const sandbox: WorktreeSandbox = {
-      runtime: 'docker-sandbox',
-      authPaths: ['/home/user/.claude'],
-      allowHosts: [],
-      exec,
-      isAvailable: () => true,
-    };
-    const log = vi.fn();
-
-    await setupWorktree(repoRoot, branch, worktree, 'origin/main', sandbox);
-    await cleanupWorktree(repoRoot, worktree, log, sandbox);
-    await expect(cleanupWorktree(repoRoot, worktree, log, sandbox)).resolves.toBeUndefined();
-
-    expect(exec).toHaveBeenCalledWith(expect.stringContaining('sbx rm --force'), expect.anything());
   });
 });
 
