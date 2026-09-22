@@ -2,7 +2,7 @@
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { join, sep } from 'node:path';
 
-import { joinRepoPath, normalizeRepoPath } from './path.js';
+import { compareByPath, joinRepoPath, normalizeRepoPath } from './path.js';
 import type { DegradeEvent, DegradeReason, OnDegrade, RepoContextReader, RepoDirEntry } from './reader.js';
 import { EMPTY_DIR } from './reader.js';
 
@@ -210,7 +210,7 @@ export function createFsReader(options: FsReaderOptions): RepoContextReader {
         }
       }
 
-      return entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+      return entries.sort(compareByPath);
     },
 
     async exists(rawPath) {

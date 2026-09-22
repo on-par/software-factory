@@ -2,7 +2,7 @@
 
 import { Buffer } from 'node:buffer';
 
-import { normalizeRepoPath } from './path.js';
+import { compareByPath, normalizeRepoPath } from './path.js';
 import type { DegradeEvent, OnDegrade, RepoContextReader, RepoDirEntry } from './reader.js';
 import { EMPTY_DIR } from './reader.js';
 
@@ -98,7 +98,7 @@ export function createInMemoryReader(
         return EMPTY_DIR;
       }
 
-      return [...children.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+      return [...children.values()].sort(compareByPath);
     },
 
     async exists(rawPath) {

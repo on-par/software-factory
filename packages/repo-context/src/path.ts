@@ -21,3 +21,8 @@ export function normalizeRepoPath(path: string): string | undefined {
 export function joinRepoPath(base: string, name: string): string {
   return base === '' ? name : `${base}/${name}`;
 }
+
+/** Code-point order on `path`, so listings sort identically across backends. */
+export function compareByPath(a: { path: string }, b: { path: string }): number {
+  return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+}
