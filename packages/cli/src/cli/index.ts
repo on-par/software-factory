@@ -3304,6 +3304,13 @@ export async function runLane(
       merged++;
       await releaseIssue(issue, 'done');
     } catch (err: any) {
+      if (err instanceof MergeWaitStoppedError) {
+        // STOP arrived mid-merge-wait: the PR is still open, so the issue goes back to the
+        // queue exactly as the top-of-loop STOP path leaves it — never counted as merged.
+        emitEvent(paths.events, 'stopped', issue, 'STOP file present', { lane });
+        await releaseIssue(issue, 'queued');
+        return;
+      }
       if (err instanceof AwaitingReviewError) {
         // The land path already emitted the awaiting-review event and cleaned the
         // worktree — this is a clean outcome, not a park; move to the next issue.
@@ -3486,6 +3493,10 @@ export class IssueDecomposedError extends Error {
     super(message);
   }
 }
+
+/** The STOP sentinel appeared while waitForMerge was polling: the PR is still unmerged, so
+ *  the issue must go back to the queue rather than be counted as landed. */
+export class MergeWaitStoppedError extends Error {}
 
 export class LandFailureError extends Error {
   constructor(
@@ -4007,6 +4018,7 @@ export async function waitForMerge(
     writeLine(`[factory] #${issue} awaiting human merge (poll 120s)`);
     await sleep(120_000);
   }
+  throw new MergeWaitStoppedError(`STOP file present while waiting to merge ${branch}`);
 }
 
 export interface SuperviseDeps {
