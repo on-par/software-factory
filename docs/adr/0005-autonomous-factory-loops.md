@@ -1,7 +1,8 @@
 # ADR-0005: Autonomous factory loops — auto-failover, self-healing, and discovery
 
-- Status: Proposed
+- Status: Deprecated
 - Date: 2026-07-20
+- Note: the self-healing (failure fingerprinting + auto bug filing) and discovery loops were removed 2026-09; auto-failover lives on in the router.
 
 ## Context
 
