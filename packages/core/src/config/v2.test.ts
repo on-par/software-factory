@@ -85,9 +85,7 @@ describe('zero-config: { version: 2 }', () => {
 
     // intake
     expect(cfg.intake.ingest).toEqual({ enabled: false, label: 'ready', lane: 'auto', maxPerCycle: 20 });
-    expect(cfg.intake.discovery).toEqual({ enabled: true, schedule: 'weekly', maxCandidates: 5 });
-    expect(cfg.intake.filing.enabled).toBe(true);
-    expect(cfg.intake.filing.sensitivePaths).toContain('packages/core/');
+    expect(cfg.intake.filing).toEqual({ selfFixLabel: 'no-auto-merge' });
 
     // constitution + notifications
     expect(cfg.constitution).toEqual({ path: 'constitutions/' });
@@ -128,7 +126,7 @@ describe('sparse overlay', () => {
     // untouched sibling sections still fully default
     expect(cfg.run.sandbox.enabled).toBe(true);
     expect(cfg.budget.costTracking.enabled).toBe(true);
-    expect(cfg.intake.discovery.schedule).toBe('weekly');
+    expect(cfg.intake.ingest.enabled).toBe(false);
   });
 
   it('accepts a per-repo model pin + tier + provider overlay', () => {
@@ -229,17 +227,7 @@ describe('full v2 config', () => {
     },
     intake: {
       ingest: { enabled: true, label: 'go', lane: 'main', maxPerCycle: 5 },
-      discovery: { enabled: false, schedule: 'daily', maxCandidates: 3 },
-      filing: {
-        enabled: false,
-        excludeReasons: ['timeout'],
-        repeatThreshold: 2,
-        maxPerRun: 1,
-        maxPerDay: 2,
-        selfFixLabel: 'blocked',
-        bugLabels: ['defect'],
-        sensitivePaths: ['src/'],
-      },
+      filing: { selfFixLabel: 'blocked' },
     },
     constitution: { path: 'docs/constitution.md' },
     notifications: { on_ship: false, on_fail: true },

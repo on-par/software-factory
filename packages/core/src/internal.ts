@@ -2,51 +2,12 @@
 // own packages (cli, tui, root scripts). No stability guarantee: these exports may
 // change or disappear without notice. See ADR-0004 for the public/internal split.
 
-// Failure fingerprint & evidence
-export { captureFailure, fingerprintFailure, normalizeFailureMessage } from './failure/index.js';
-export type {
-  CaptureFailureInput,
-  EvidencePack,
-  FailureOrigin,
-  FailurePhase,
-  FailureSignatureInput,
-  FingerprintedFailure,
-} from './types/index.js';
+// Failure evidence carried on events
+export type { EvidencePack, FailureOrigin, FailurePhase } from './types/index.js';
 
-// Auto-file a fingerprinted bug (#373)
-export type {
-  CandidateIssue,
-  FileBugAction,
-  FileBugInput,
-  FileBugResult,
-  FilingGitHubClient,
-  OctokitFilingClientOptions,
-} from './filing/index.js';
-export {
-  createOctokitFilingClient,
-  DEFAULT_BUG_LABELS,
-  DEFAULT_INTERNAL_REPO,
-  fileBug,
-  findMatchingIssue,
-  fingerprintMarker,
-  renderBugBody,
-  renderOccurrenceComment,
-  resolveTargetRepo,
-} from './filing/index.js';
-
-// Filing policy: when to file, caps, and self-fix labeling (#374)
-export type { FilingDecision, FilingLedger, FilingPolicy, FilingSkipReason } from './filing/policy.js';
-export {
-  DEFAULT_FILING_POLICY,
-  emptyLedger,
-  evaluateFilingPolicy,
-  isAutoMergeBlocked,
-  labelsFor,
-  recordFiled,
-  recordPark,
-  rollDay,
-  touchesSensitiveScope,
-} from './filing/policy.js';
+// Self-fix merge gate (#374)
+export type { FilingPolicy } from './filing/policy.js';
+export { isAutoMergeBlocked } from './filing/policy.js';
 
 // Config
 export { resolveFilingPolicy } from './config/index.js';
@@ -82,23 +43,6 @@ export { CliModelExecutor } from './router/index.js';
 export type { PlanPromptOpts } from './phases/plan.js';
 export { buildPlanPrompt } from './phases/plan.js';
 
-// Board-constrained local lane dispatch (#848)
-export type {
-  BoardQueueDispatcher,
-  BoardQueueOrdering,
-  LocalLaneCandidate,
-  QueueIntentReader,
-} from './phases/board-queue-dispatch.js';
-export { createBoardQueueDispatcher } from './phases/board-queue-dispatch.js';
-
-// ProjectV2 queue-intent scheduler (#867)
-export type {
-  BoardQueueScheduler,
-  BoardQueueSchedulerOptions,
-  ProjectQueueProjectionReader,
-} from './phases/board-queue-scheduler.js';
-export { createBoardQueueScheduler } from './phases/board-queue-scheduler.js';
-
 // Local-small harness
 export type {
   OvernightItemOutcome,
@@ -116,15 +60,10 @@ export type {
   LocalSmallDryRunInput,
   LocalSmallDryRunResult,
   LocalSmallLimits,
-  LocalSmallPatchChange,
-  LocalSmallPatchProposal,
-  LocalSmallPatchStepInput,
-  LocalSmallPatchStepResult,
-  LocalSmallPatchStepStatus,
   LocalSmallStep,
   LocalSmallStepPlan,
 } from './local-small/stepwise.js';
-export { applyLocalSmallPatchStep, createLocalSmallDryRun } from './local-small/stepwise.js';
+export { createLocalSmallDryRun } from './local-small/stepwise.js';
 
 // Eval internals
 export { judgeSpec, median, runJudgeSamples, scoreSpec } from './eval/index.js';
@@ -168,15 +107,6 @@ export {
   shellEscape,
   slugify,
 } from './utils/index.js';
-export type { MicroVmLifecycleOptions, ReapedMicroVm, WorktreeSandbox } from './utils/microvm.js';
-export {
-  createMicroVm,
-  listMicroVms,
-  microVmName,
-  reapOrphanMicroVm,
-  removeMicroVm,
-  worktreeSandboxFor,
-} from './utils/microvm.js';
 export type { FileLockOptions, SyncFileLockOptions } from './utils/lock.js';
 export { withFileLock, withFileLockSync, withGitLock } from './utils/lock.js';
 export type { RunLockHolder, RunLockOptions } from './utils/run-lock.js';
@@ -220,20 +150,6 @@ export {
 // Daemon lane state resolution (#843)
 export type { DaemonLaneContext } from './daemon/lane-context.js';
 export { createDaemonLaneContext } from './daemon/lane-context.js';
-export type { DaemonOrchestrator } from './daemon/run-repo.js';
-export { runDaemonRepo } from './daemon/run-repo.js';
-export type {
-  EngineHandle,
-  EngineRunner,
-  EngineSupervisor,
-  EngineSupervisorOptions,
-} from './daemon/engine-supervisor.js';
-export {
-  DEFAULT_STALE_THRESHOLD_MS,
-  DEFAULT_SUPERVISOR_POLL_MS,
-  superviseActiveRepos,
-  superviseEngine,
-} from './daemon/engine-supervisor.js';
 
 // Daemon control-plane HTTP server (#777)
 export type { FactorydOptions, FactorydServer } from './daemon/factoryd-http.js';
@@ -359,87 +275,6 @@ export type {
 } from './utils/green-prs.js';
 export { createOctokitGreenPrClient, findUnmergedGreenPrs, owningIssueForPr } from './utils/green-prs.js';
 
-// Read-only GitHub ProjectV2 queue-intent polling (#847)
-export type {
-  ProjectBoardConfig,
-  ProjectBoardPoller,
-  ProjectBoardPollerOptions,
-  QueueIntentItem,
-  QueueIntentSnapshot,
-  QueueIntentStatus,
-} from './queue/project-board-poller.js';
-export { createProjectBoardPoller, DEFAULT_PROJECT_BOARD_POLL_MS } from './queue/project-board-poller.js';
-
-// Daemon-ready ProjectV2 queue intent projection (#866)
-export type {
-  ProjectQueuePoller,
-  ProjectQueuePollerOptions,
-  ProjectQueueProjection,
-} from './projects/project-queue-poller.js';
-export { createProjectQueuePoller, DEFAULT_PROJECT_QUEUE_POLL_MS } from './projects/project-queue-poller.js';
-export type { ProjectQueueStatus } from './projects/project-queue-reader.js';
-
-// gh-authenticated ProjectV2 queue GraphQL client + live poller (#1046)
-export type { GithubProjectQueuePollerOptions, ProjectGraphqlClient } from './projects/github-project-graphql.js';
-export { createGithubProjectQueuePoller, createOctokitGraphqlClient } from './projects/github-project-graphql.js';
-
-// Single-poller cached subscription-usage snapshot (#1029)
-export type {
-  UsageCoordinator,
-  UsageCoordinatorOptions,
-  UsageCoordinatorState,
-  WriteUsageStateOptions,
-} from './usage/coordinator.js';
-export {
-  createUsageCoordinator,
-  DEFAULT_USAGE_POLL_MS,
-  defaultUsageStatePath,
-  loadUsageState,
-  writeUsageState,
-} from './usage/coordinator.js';
-
-// UsageCoordinator admission-control acquire() API and grant ledger (#1030)
-export type { AcquireResult, GrantLedger, GrantLedgerEntry, GrantRequest } from './usage/grant-ledger.js';
-export {
-  defaultGrantLedgerPath,
-  DEFAULT_GRANT_TTL_MS,
-  isCappedModel,
-  loadGrantLedger,
-  pruneGrants,
-  USAGE_ADMISSION_CEILING_PCT,
-  USAGE_GRANT_RESERVATION_PCT,
-  writeGrantLedger,
-} from './usage/grant-ledger.js';
-
-// Engine lane parks and resumes on acquire denial (#1032)
-export type { LaneAcquire, LaneAdmission, LaneScheduler, LaneSchedulerOptions } from './usage/lane-scheduler.js';
-export { createLaneScheduler } from './usage/lane-scheduler.js';
-
-// Standalone local UsageCoordinator fallback (#1033)
-export type { LocalUsageCoordinatorOptions } from './usage/local-coordinator.js';
-export { createLocalUsageCoordinator } from './usage/local-coordinator.js';
-export type { SelectUsageCoordinatorOptions } from './usage/select-coordinator.js';
-export { selectUsageCoordinator } from './usage/select-coordinator.js';
-
-// Local queue reprioritization audit records (#869)
-export type { QueueReprioritizationRecord } from './types/index.js';
-export type { QueueRationaleAuditor } from './queue/reprioritization-audit.js';
-export { createQueueRationaleAuditor } from './queue/reprioritization-audit.js';
-
-// Publish only coarse daemon lifecycle status to configured ProjectV2 items (#868)
-export type { ProjectStatusWriter, ProjectStatusWriterOptions } from './projects/project-status-writer.js';
-export { createProjectStatusWriter } from './projects/project-status-writer.js';
-
-// Coarse ProjectV2 status writing (#849)
-export type {
-  ProjectBoardCoarseStatus,
-  ProjectBoardStatusConfig,
-  ProjectBoardStatusItem,
-  ProjectBoardStatusValues,
-  ProjectBoardStatusWriter,
-  ProjectBoardStatusWriterOptions,
-} from './queue/project-board-status-writer.js';
-export { createProjectBoardStatusWriter } from './queue/project-board-status-writer.js';
 // Daemon detach gate (#780)
 export type { BeginDetachResult, DetachRepoDeps, DrainOutcome } from './daemon/repos-detach.js';
 export {

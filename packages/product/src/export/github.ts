@@ -8,7 +8,7 @@ export interface ExportTarget {
   repo: string;
 }
 
-/** The GitHub seam — shaped after core's FilingGitHubClient; the caller injects a real impl. */
+/** The GitHub seam; the caller injects a real impl. */
 export interface ExportGitHubClient {
   createIssue(input: {
     owner: string;

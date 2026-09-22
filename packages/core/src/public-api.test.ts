@@ -89,33 +89,9 @@ const PUBLIC_API_KEYS = [
   // Queue activity (#1342)
   'DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS',
   'partitionLocalQueueByActivity',
-  // Hosted execution (control plane)
-  'createHostedJobStore',
-  'createSqliteHostedJobStore',
-  'hostedExecEnabled',
+  // Disposable-docker lane workspaces (#1535, #1536)
   'laneContainerName',
   'provisionLaneContainer',
-  'resolveHostedJobStore',
-  'runContainerJob',
-  'runDockerRunner',
-  'runFakeRunner',
-  'runHostedSmoke',
-  'runWatchdogSweep',
-  'summarizeHostedJob',
-  'summarizeHostedJobs',
-  'AUTHORITY_REDACTION_MASK',
-  'redactSecrets',
-  'withAuthority',
-  'prepareGitHubAuthority',
-  'prototypeFallbackMint',
-  'redactGitHubCredential',
-  'resolveHostedAuthority',
-  'createHostedControlPlaneServer',
-  'handleHostedControlPlaneRequest',
-  'createHttpHostedControlPlaneClient',
-  'runOneJobRunner',
-  'createHttpHostedJobClient',
-  'queueAndTailJob',
   // Work requests
   'closedWorkSkipReason',
   'createDefaultWorkSourceRegistry',
@@ -143,7 +119,6 @@ const PUBLIC_API_KEYS = [
   'parkEvents',
   'parkReasonFor',
   // Run ports (#674)
-  'acquireLaneEnvironment',
   'localOnlyWorkspace',
   'worktreeWorkspace',
   // Run composition (#675)
@@ -258,23 +233,6 @@ const PUBLIC_API_KEYS = [
   'renderKpiDriftLine',
   'renderKpiReport',
   'renderKpiTrend',
-  // Discovery
-  'DEFAULT_MAX_CANDIDATES',
-  'runDiscoveryScan',
-  'authorDraftEpic',
-  'DEFAULT_OWNER_QUESTIONS',
-  'DISCOVERY_LABEL',
-  'EXPLORING_LABEL',
-  'ideaMarker',
-  'advanceDraftEpic',
-  'ARCHIVED_LABEL',
-  'classifyLifecycle',
-  'DEFAULT_MAX_STORIES',
-  'READY_LABEL',
-  'renderStoryBody',
-  'seedStories',
-  'VALIDATED_LABEL',
-  'WONTFIX_LABEL',
   // Ingest
   'issueFromFactoryBranch',
   'runAutoIngest',
@@ -306,62 +264,8 @@ const PUBLIC_API_KEYS = [
 ];
 
 const INTERNAL_API_KEYS = [
-  // Local queue reprioritization audit records (#869)
-  'createQueueRationaleAuditor',
-  // Daemon-ready ProjectV2 queue intent projection (#866)
-  'createProjectQueuePoller',
-  'DEFAULT_PROJECT_QUEUE_POLL_MS',
-  // gh-authenticated ProjectV2 queue GraphQL client + live poller (#1046)
-  'createGithubProjectQueuePoller',
-  'createOctokitGraphqlClient',
-  // Single-poller cached subscription-usage snapshot (#1029)
-  'createUsageCoordinator',
-  'DEFAULT_USAGE_POLL_MS',
-  'defaultUsageStatePath',
-  'loadUsageState',
-  'writeUsageState',
-  // UsageCoordinator admission-control acquire() API and grant ledger (#1030)
-  'defaultGrantLedgerPath',
-  'DEFAULT_GRANT_TTL_MS',
-  'isCappedModel',
-  'loadGrantLedger',
-  'pruneGrants',
-  'USAGE_ADMISSION_CEILING_PCT',
-  'USAGE_GRANT_RESERVATION_PCT',
-  'writeGrantLedger',
-  // Engine lane parks and resumes on acquire denial (#1032)
-  'createLaneScheduler',
-  // Standalone local UsageCoordinator fallback (#1033)
-  'createLocalUsageCoordinator',
-  'selectUsageCoordinator',
-  // Coarse ProjectV2 status publishing (#868)
-  'createProjectStatusWriter',
-  // Coarse ProjectV2 status writing (#849)
-  'createProjectBoardStatusWriter',
-  // Failure fingerprint & evidence
-  'captureFailure',
-  'fingerprintFailure',
-  'normalizeFailureMessage',
-  // Auto-file a fingerprinted bug (#373)
-  'createOctokitFilingClient',
-  'DEFAULT_BUG_LABELS',
-  'DEFAULT_INTERNAL_REPO',
-  'fileBug',
-  'findMatchingIssue',
-  'fingerprintMarker',
-  'renderBugBody',
-  'renderOccurrenceComment',
-  'resolveTargetRepo',
-  // Filing policy: when to file, caps, and self-fix labeling (#374)
-  'DEFAULT_FILING_POLICY',
-  'emptyLedger',
-  'evaluateFilingPolicy',
+  // Self-fix merge gate (#374)
   'isAutoMergeBlocked',
-  'labelsFor',
-  'recordFiled',
-  'recordPark',
-  'rollDay',
-  'touchesSensitiveScope',
   // Config
   'resolveFilingPolicy',
   'resolveBranchPrefix',
@@ -384,7 +288,7 @@ const INTERNAL_API_KEYS = [
   'PATCH_PROPOSAL_SCHEMA',
   'OllamaHttpHarness',
   'OpenCodeHarness',
-  // Hosted execution: Docker container engine adapter (#899)
+  // Disposable-docker lanes: Docker container engine adapter (#1535, #1536)
   'createDockerEngine',
   // Hosted execution: orphan sf-job-* container scan + reap (#1527)
   'listOrphanContainers',
@@ -394,7 +298,6 @@ const INTERNAL_API_KEYS = [
   // Phase helpers
   'buildPlanPrompt',
   // Local-small harness
-  'applyLocalSmallPatchStep',
   'createLocalSmallDryRun',
   'runOvernightQueue',
   // Eval internals
@@ -438,13 +341,6 @@ const INTERNAL_API_KEYS = [
   'writePortFile',
   // Daemon lane state resolution (#843)
   'createDaemonLaneContext',
-  // Daemon per-repo orchestration dispatch (#1041)
-  'runDaemonRepo',
-  // Daemon in-process engine supervisor (#1178)
-  'DEFAULT_STALE_THRESHOLD_MS',
-  'DEFAULT_SUPERVISOR_POLL_MS',
-  'superviseActiveRepos',
-  'superviseEngine',
   // Daemon attach gate (#778)
   'attachRepo',
   'parseRemoteSlug',
@@ -477,14 +373,6 @@ const INTERNAL_API_KEYS = [
   'logEvent',
   'readCosts',
   'setupWorktree',
-  // docker-sandbox microVM lifecycle (#653)
-  'createMicroVm',
-  'microVmName',
-  'removeMicroVm',
-  'worktreeSandboxFor',
-  // docker-sandbox orphan microVM scan + reap (#1527)
-  'listMicroVms',
-  'reapOrphanMicroVm',
   'shellEscape',
   'slugify',
   'watchChecks',
@@ -547,13 +435,6 @@ const INTERNAL_API_KEYS = [
   'createOctokitGreenPrClient',
   'findUnmergedGreenPrs',
   'owningIssueForPr',
-  // Read-only GitHub ProjectV2 queue-intent polling (#847)
-  'createProjectBoardPoller',
-  'DEFAULT_PROJECT_BOARD_POLL_MS',
-  // Board-constrained local lane dispatch (#848)
-  'createBoardQueueDispatcher',
-  // ProjectV2 queue-intent scheduler (#867)
-  'createBoardQueueScheduler',
   // Sandbox command wrapping — used by the CLI's doctor probe (#1008)
   'wrapCommandInSandbox',
 ];
@@ -567,7 +448,6 @@ const TESTING_API_KEYS = [
   'SimModelExecutor',
   'createSimOctokit',
   'createSimWorkspace',
-  'simWorkspace',
   'failOnCall',
   'realSimClock',
   'resolveLatencyMs',

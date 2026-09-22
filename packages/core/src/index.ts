@@ -137,105 +137,21 @@ export type {
 export { parseQueue, readQueue, rewriteQueueForDecomposition, validateQueue } from './queue/index.js';
 
 // Pattern-based secret redaction for GitHub/provider error text shown to an operator (#1362).
-// Distinct from the authority-list `redactSecrets` exported from ./hosted/authority.js.
 export { redactSecrets as redactSecretPatterns } from './router/failure-detail.js';
 
 // Queue activity (#1342)
 export type { ActiveQueueClaim, QueueActivityPartition } from './queue/activity.js';
 export { DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS, partitionLocalQueueByActivity } from './queue/activity.js';
 
-// Hosted execution (control plane)
-export type {
-  AcquireLeaseInput,
-  CreateHostedJobInput,
-  HostedClock,
-  HostedJobResultDetail,
-  HostedJobStore,
-  HostedJobStoreOptions,
-  JobLeaseResult,
-  JobUpdateResult,
-  LeaseRejectionReason,
-  PollForLeaseInput,
-  PollResult,
-  ReclaimJobResult,
-  RegisterRunnerInput,
-  StoredHostedJob,
-  StoredRunner,
-  UpdateRejectionReason,
-} from './hosted/store.js';
-export { createHostedJobStore } from './hosted/store.js';
-export type { SqliteHostedJobStore, SqliteHostedJobStoreOptions } from './hosted/store-sqlite.js';
-export { createSqliteHostedJobStore } from './hosted/store-sqlite.js';
-export type { HostedJobStoreBackend, ResolveHostedJobStoreOptions } from './hosted/store-resolve.js';
-export { resolveHostedJobStore } from './hosted/store-resolve.js';
-export type { DockerRunnerConfig, DockerRunnerOutcome, FakeRunnerConfig, FakeRunnerOutcome } from './hosted/runner.js';
-export { runDockerRunner, runFakeRunner } from './hosted/runner.js';
-export type { WatchdogEscalation, WatchdogPolicy, WatchdogReport } from './hosted/watchdog.js';
-export { runWatchdogSweep } from './hosted/watchdog.js';
+// Disposable-docker lane workspaces (#1535, #1536)
 export type {
   CloneOutcome,
-  ContainerCleanupProof,
   ContainerEngine,
-  ContainerJobConfig,
-  ContainerJobOutcome,
-  ContainerRunResult,
-  ContainerRunSpec,
   LaneContainerCreateResult,
   LaneContainerProvisionResult,
-  PreparedWorkspace,
   WorkspaceBackend,
 } from './hosted/container.js';
-export { laneContainerName, provisionLaneContainer, runContainerJob } from './hosted/container.js';
-export type { HostedJobSummary } from './hosted/summary.js';
-export { summarizeHostedJob, summarizeHostedJobs } from './hosted/summary.js';
-export type { HostedSmokeConfig, HostedSmokeOutcome } from './hosted/smoke.js';
-export { runHostedSmoke } from './hosted/smoke.js';
-// Re-exported so consumers gating on the hosted-exec flag (e.g. the CLI) go through
-// core rather than reaching past it to `@on-par/contracts` directly.
-export { hostedExecEnabled } from '@on-par/contracts';
-export type {
-  AuthorityBroker,
-  AuthorityCleanupProof,
-  AuthorityFailure,
-  AuthorityMount,
-  AuthorityMountEngine,
-  AuthorityRunOutcome,
-  PrepareAuthorityConfig,
-  ResolvedSecret,
-} from './hosted/authority.js';
-export { AUTHORITY_REDACTION_MASK, redactSecrets, withAuthority } from './hosted/authority.js';
-export type {
-  GitHubAuthorityBrokerOptions,
-  GitHubCredentialBundle,
-  GitHubTokenKind,
-  MintGitHubToken,
-  MintGitHubTokenInput,
-  MintedGitHubToken,
-} from './hosted/github-authority.js';
-export {
-  prepareGitHubAuthority,
-  prototypeFallbackMint,
-  redactGitHubCredential,
-  resolveHostedAuthority,
-} from './hosted/github-authority.js';
-export type {
-  ControlPlaneResponse,
-  HostedControlPlaneOptions,
-  HostedControlPlaneServer,
-} from './hosted/control-plane.js';
-export { createHostedControlPlaneServer, handleHostedControlPlaneRequest } from './hosted/control-plane.js';
-export type {
-  HostedControlPlaneClient,
-  HostedControlPlaneFetchFn,
-  HttpHostedControlPlaneClientOptions,
-  OneJobRunnerConfig,
-  OneJobRunnerOutcome,
-  PollForLeaseResult,
-  RegisteredRunner,
-} from './hosted/runner-client.js';
-export { createHttpHostedControlPlaneClient, runOneJobRunner } from './hosted/runner-client.js';
-export type { HostedJobClient, QueueAndTailConfig, QueueAndTailOutcome } from './hosted/queue-client.js';
-export { createHttpHostedJobClient, queueAndTailJob } from './hosted/queue-client.js';
+export { laneContainerName, provisionLaneContainer } from './hosted/container.js';
 
 // Work requests
 export type {
@@ -281,7 +197,7 @@ export type { RunBudget, RunPolicy } from './run/policy.js';
 
 // Run ports (#674)
 export type { Environment, Workspace } from './run/ports.js';
-export { acquireLaneEnvironment, localOnlyWorkspace, worktreeWorkspace } from './run/ports.js';
+export { localOnlyWorkspace, worktreeWorkspace } from './run/ports.js';
 
 // Run composition (#675)
 export type { RunPorts, RunRequest } from './run/run-issue.js';
@@ -474,45 +390,6 @@ export {
   renderKpiReport,
   renderKpiTrend,
 } from './kpis/index.js';
-
-// Discovery
-export type { AuthorDraftEpicDeps, AuthorDraftEpicOptions, AuthorDraftEpicResult } from './discovery/author.js';
-export {
-  authorDraftEpic,
-  DEFAULT_OWNER_QUESTIONS,
-  DISCOVERY_LABEL,
-  EXPLORING_LABEL,
-  ideaMarker,
-} from './discovery/author.js';
-export type {
-  DiscoveryCandidate,
-  DiscoveryScanDeps,
-  DiscoveryScanOptions,
-  DiscoveryScanResult,
-  DiscoverySignal,
-  DiscoverySignalSource,
-} from './discovery/index.js';
-export { DEFAULT_MAX_CANDIDATES, runDiscoveryScan } from './discovery/index.js';
-export type {
-  AdvanceDraftEpicDeps,
-  AdvanceDraftEpicOptions,
-  AdvanceDraftEpicResult,
-  DraftStory,
-  EpicLifecycle,
-  EpicView,
-  GherkinScenario,
-} from './discovery/promote.js';
-export {
-  advanceDraftEpic,
-  ARCHIVED_LABEL,
-  classifyLifecycle,
-  DEFAULT_MAX_STORIES,
-  READY_LABEL,
-  renderStoryBody,
-  seedStories,
-  VALIDATED_LABEL,
-  WONTFIX_LABEL,
-} from './discovery/promote.js';
 
 // Ingest
 export type { AutoIngestDeps, AutoIngestOptions, AutoIngestResult, FileOverlapSkip } from './ingest/index.js';

@@ -118,7 +118,7 @@ export type FailoverReason =
   | 'verify_failed'
   | 'unknown';
 
-// ---------- Failure fingerprint & evidence (#372) ----------
+// ---------- Failure evidence (#372) ----------
 
 /** Pipeline phase a failure terminated in. */
 export type FailurePhase = 'plan' | 'build' | 'check' | 'ship';
@@ -126,25 +126,13 @@ export type FailurePhase = 'plan' | 'build' | 'check' | 'ship';
 /** Whether the fault is in the factory itself or in the product under work. */
 export type FailureOrigin = 'factory-internal' | 'product';
 
-/** Fields that identify a defect and compose its deterministic signature. */
-export interface FailureSignatureInput {
-  /** Raw error message / event excerpt (volatile tokens stripped at fingerprint time). */
-  message: string;
-  phase: FailurePhase;
-  /** Harness id or checker name, e.g. 'codex-cli', 'check:tests'. */
-  component: string;
-  origin: FailureOrigin;
-  /** Classified reason from classifyFailure (#368). */
-  reason: FailoverReason;
-}
-
 /** A tracking issue already filed for the failure class represented by an EvidencePack. */
 export interface RelatedFiledIssue {
   repo: string;
   issueNumber: number;
 }
 
-/** Everything a downstream filing story needs without re-deriving from the log. */
+/** Failure evidence an event may carry (rendered by the TUI). */
 export interface EvidencePack {
   repo: string;
   issue: string;
@@ -156,21 +144,6 @@ export interface EvidencePack {
   eventExcerpt: string;
   logPath: string;
   relatedIssue?: RelatedFiledIssue;
-}
-
-/** Inputs to captureFailure: signature fields plus the evidence-only context. */
-export interface CaptureFailureInput extends FailureSignatureInput {
-  repo: string;
-  issue: string;
-  model: string;
-  logPath: string;
-  /** Excerpt char cap (default 600). */
-  excerptLimit?: number;
-}
-
-export interface FingerprintedFailure {
-  fingerprint: string;
-  evidence: EvidencePack;
 }
 
 // ---------- Repo (#969) ----------
@@ -238,17 +211,6 @@ export interface ReadinessInfo {
   sizeReason?: string;
 }
 
-/** Structured payload carried on `queue_reprioritized` events (#869). */
-export interface QueueReprioritizationRecord {
-  issueId: string;
-  issueNumber: number;
-  field: 'lane' | 'order';
-  priorValue: string | number;
-  newValue: string | number;
-  actorType: 'human' | 'daemon';
-  rationale: string | null;
-}
-
 export interface FactoryEvent {
   ts: string;
   type: EventKind;
@@ -269,7 +231,6 @@ export interface FactoryEvent {
   evidence?: EvidencePack;
   rework?: ReworkInfo;
   readiness?: ReadinessInfo;
-  queueReprioritization?: QueueReprioritizationRecord;
   model?: string;
   tokens?: { input: number; output: number };
   durationMs?: number;
@@ -300,9 +261,8 @@ export interface CostEntry {
   numTurns?: number;
   durationMs?: number;
   durationApiMs?: number;
-  /** Resolved sandbox runtime the lane was assigned, for A/B cohorting (#655).
-   *  The resolved name — a docker-sandbox lane is labeled here even while it runs
-   *  uncontained (#653). */
+  /** Resolved sandbox runtime the lane was assigned, for A/B cohorting (#655). Rows
+   *  written before 2026-09 may carry the since-removed 'docker-sandbox' runtime. */
   sandboxRuntime?: string;
   /** Router-measured wall-clock ms of this model invocation (distinct from the
    *  CLI-reported durationMs) (#655). */

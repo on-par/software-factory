@@ -15,8 +15,8 @@ software-factory/
 │   │                                        numbering, zero deps, no I/O.
 │   ├── contracts/ @on-par/contracts        — Shared typed seam: zod schemas + inferred
 │   │                                        types for Issue/Epic/Story/DesignArtifact.
-│   ├── repo-context/ @on-par/repo-context  — Read-only repo reader port: GitHub
-│   │                                        contents-API and in-memory impls, zero deps.
+│   ├── repo-context/ @on-par/repo-context  — Read-only repo reader port: local
+│   │                                        filesystem and in-memory impls, zero deps.
 │   ├── config/   @on-par/factory-config  — Zero-dep. Ships typed defaults (defaults.ts)
 │   │                                        and constitution markdown. No JSON.
 │   ├── core/     @on-par/factory-core     — The engine (imports config).
@@ -55,18 +55,15 @@ readiness-conformance checker named in epic #464 consume them in later stories.
 - `bus/` — in-process lane lifecycle bus
 - `daemon/` — factoryd checkout precondition validation
 - `design/` — design-artifact validation, rendering, and frozen-spec persistence
-- `discovery/` — read-only discovery scans that rank candidate ideas from product signals
 - `efficiency/` — narrow fast-path planning eligibility and spec generation
 - `environment/` — port-lease registry for parallel lanes (`.factory/ports.json`) + `leaseEnv()`/`laneEnv()`, the `PORT`/`FACTORY_APP_PORT`/`FACTORY_BASE_URL` + `FACTORY_HEADLESS`/`PLAYWRIGHT_HEADLESS` contract injected into build agents and all checker commands
 - `logger/` — structured leveled logger (`createLogger`) over the `.factory/events.ndjson` sink (ADR-0002)
 - `eval/` — the eval harness (runner, judge, scoring, golden loader, baseline/trend/regression reports)
 - `events/` — reads and tails the `.factory/events.ndjson` append log
-- `failure/` — deterministic failure fingerprinting and evidence capture
-- `filing/` — fingerprinted bug filing with deduplication and repository routing
-- `hosted/` — provider-session authority bundles for hosted jobs
+- `filing/` — self-fix merge gate (`isAutoMergeBlocked`) keyed on the configured `filing.selfFixLabel`
+- `hosted/` — disposable-docker lane workspaces: container provisioning, the Docker engine adapter, and orphan-container reaping
 - `ingest/` — always-on ingestion of ready issues into the queue
 - `kpis/` — pure factory-health KPI aggregation from events and costs
-- `projects/` — GitHub ProjectV2 queue GraphQL client and live poller
 - `proxy/` — opt-in loopback reverse proxy with stable per-lane URLs
 - `queue/` — proposed-queue validation for `factory triage accept`
 - `readiness/` — pure readiness scoring for GitHub issue bodies

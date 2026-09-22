@@ -181,6 +181,12 @@ describe('loadRepoConfig', () => {
     expect(loadRepoConfig(repoRoot)).toEqual({ version: 2 });
   });
 
+  it('tolerates a retired runtime section (discovery) instead of rejecting it as a typo', async () => {
+    const repoRoot = await tempRepoRoot();
+    await writeRepoConfig(repoRoot, { discovery: { enabled: false } });
+    expect(loadRepoConfig(repoRoot)).toEqual({ version: 2 });
+  });
+
   it('throws naming the file path on malformed JSON', async () => {
     const repoRoot = await tempRepoRoot();
     await mkdir(join(repoRoot, '.factory'), { recursive: true });

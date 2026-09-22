@@ -167,7 +167,6 @@ describe('runIssue — workspace artifacts integration (#1213)', () => {
         runtime: 'auto',
         network: { allow: [] },
         resources: { cpuMs: 0, memMb: 0 },
-        docker: { rolloutPercent: 0 },
       },
       budget: {},
       effective: {} as RunPolicy['effective'],

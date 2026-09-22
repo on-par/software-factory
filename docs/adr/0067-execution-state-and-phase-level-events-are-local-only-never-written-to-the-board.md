@@ -1,7 +1,8 @@
 # ADR-0067: Execution state and phase-level events are local-only, never written to the board
 
-- Status: Accepted
+- Status: Superseded
 - Date: 2026-08-30
+- Note: the project-board enforcement code this ADR relies on was removed along with the ProjectV2 board queue (epic #773 closed as superseded); there is no board writer left to constrain.
 
 ## Context
 

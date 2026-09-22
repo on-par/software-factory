@@ -472,89 +472,24 @@ describe('loadFactoryConfig', () => {
     }
   });
 
-  it('resolves discovery defaults', () => {
-    const config = loadFactoryConfig();
-    expect(config.discovery.enabled).toBe(true);
-    expect(config.discovery.schedule).toBe('weekly');
-    expect(config.discovery.maxCandidates).toBe(5);
-  });
-
-  it('applies discovery defaults when the config omits the discovery key', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
-    try {
-      const path = join(dir, 'factory.json');
-      const minimal = {
-        version: 1,
-        paths: {
-          constitutions: 'constitutions/',
-          checkers: 'lib/checkers/',
-          plans: '.factory/plans/',
-          logs: '.factory/logs/',
-          events: '.factory/events.ndjson',
-        },
-        timeouts: { plan_seconds: 1800, build_seconds: 7200, check_seconds: 1800, merge_poll_seconds: 120 },
-        merge: { auto: false, comment: '' },
-        worktree: { prefix: 'ship-it/', parent: '../', comment: '' },
-        byok: { enabled: false, comment: '' },
-        notifications: {},
-        cost_tracking: { enabled: true, log_file: '.factory/costs.jsonl', comment: '' },
-      };
-      await writeFile(path, JSON.stringify(minimal));
-      const config = loadFactoryConfig(path);
-      expect(config.discovery).toEqual({ enabled: true, schedule: 'weekly', maxCandidates: 5 });
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('parses a discovery override', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
-    try {
-      const path = join(dir, 'factory.json');
-      const minimal = {
-        version: 1,
-        paths: {
-          constitutions: 'constitutions/',
-          checkers: 'lib/checkers/',
-          plans: '.factory/plans/',
-          logs: '.factory/logs/',
-          events: '.factory/events.ndjson',
-        },
-        timeouts: { plan_seconds: 1800, build_seconds: 7200, check_seconds: 1800, merge_poll_seconds: 120 },
-        merge: { auto: false, comment: '' },
-        worktree: { prefix: 'ship-it/', parent: '../', comment: '' },
-        byok: { enabled: false, comment: '' },
-        notifications: {},
-        cost_tracking: { enabled: true, log_file: '.factory/costs.jsonl', comment: '' },
-        discovery: { enabled: false, schedule: 'daily', maxCandidates: 3 },
-      };
-      await writeFile(path, JSON.stringify(minimal));
-      const config = loadFactoryConfig(path);
-      expect(config.discovery).toEqual({ enabled: false, schedule: 'daily', maxCandidates: 3 });
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  const defaultFilingPolicy = {
-    enabled: true,
-    excludeReasons: ['rate_limit', 'usage_cap', 'timeout', 'verify_failed'],
-    repeatThreshold: 3,
-    maxPerRun: 5,
-    maxPerDay: 20,
-    selfFixLabel: 'no-auto-merge',
-    bugLabels: ['bug'],
-    sensitivePaths: ['packages/core/', 'packages/config/', 'packages/cli/', 'scripts/', '.github/'],
-  };
+  const defaultFilingPolicy = { selfFixLabel: 'no-auto-merge' };
 
   it('exposes filing defaults from the default config file', () => {
     const config = loadFactoryConfig();
-    expect(config.filing.enabled).toBe(true);
-    expect(config.filing.excludeReasons).toEqual(['rate_limit', 'usage_cap', 'timeout', 'verify_failed']);
-    expect(config.filing.repeatThreshold).toBe(3);
-    expect(config.filing.maxPerRun).toBe(5);
-    expect(config.filing.maxPerDay).toBe(20);
     expect(config.filing.selfFixLabel).toBe('no-auto-merge');
+  });
+
+  it('drops retired filing keys from an older config file', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
+    try {
+      const path = join(dir, 'config.json');
+      await writeFile(path, JSON.stringify({ filing: { enabled: false, maxPerDay: 1, selfFixLabel: 'blocked' } }));
+      const config = loadFactoryConfigForRepo(path);
+      expect(config.filing).toEqual({ selfFixLabel: 'blocked', comment: loadFactoryConfig().filing.comment });
+      expect(resolveFilingPolicy(config)).toEqual({ selfFixLabel: 'blocked' });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('resolveFilingPolicy returns a FilingPolicy matching the config block', () => {
@@ -712,6 +647,14 @@ describe('loadFactoryConfigForRepo', () => {
     expect(config.environment.ports.range).toEqual([4000, 4100]);
   });
 
+  it('accepts and drops a retired discovery section so existing files keep loading', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ discovery: { enabled: false, schedule: 'daily', maxCandidates: 3 } }));
+    const config = loadFactoryConfigForRepo(path);
+    expect(config).toEqual(loadFactoryConfig());
+    expect('discovery' in config).toBe(false);
+  });
+
   it('throws an error naming the file path on malformed JSON', async () => {
     const path = join(dir, 'config.json');
     await writeFile(path, '{ not valid json');
@@ -740,11 +683,43 @@ describe('loadFactoryConfigForRepo', () => {
 
   it('parses a sandbox.runtime override and keeps the other sandbox defaults', async () => {
     const path = join(dir, 'config.json');
-    await writeFile(path, JSON.stringify({ sandbox: { runtime: 'docker-sandbox' } }));
+    await writeFile(path, JSON.stringify({ sandbox: { runtime: 'firejail' } }));
     const config = loadFactoryConfigForRepo(path);
-    expect(config.sandbox.runtime).toBe('docker-sandbox');
+    expect(config.sandbox.runtime).toBe('firejail');
     expect(config.sandbox.enabled).toBe(loadFactoryConfig().sandbox.enabled);
     expect(config.sandbox.network.allow).toEqual(loadFactoryConfig().sandbox.network.allow);
+  });
+
+  it("maps the removed 'docker-sandbox' runtime to 'none' and drops sandbox.docker, warning once per path", async () => {
+    const path = join(dir, 'removed-sandbox.json');
+    await writeFile(path, JSON.stringify({ sandbox: { runtime: 'docker-sandbox', docker: { rolloutPercent: 50 } } }));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const config = loadFactoryConfigForRepo(path);
+      expect(config.sandbox.runtime).toBe('none');
+      expect(config.sandbox).not.toHaveProperty('docker');
+      loadFactoryConfigForRepo(path);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toContain("sandbox.runtime 'docker-sandbox' (treated as 'none')");
+      expect(warn.mock.calls[0]?.[0]).toContain('sandbox.docker (ignored)');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('drops a leftover sandbox.docker block without touching an explicit runtime', async () => {
+    const path = join(dir, 'leftover-docker.json');
+    await writeFile(path, JSON.stringify({ sandbox: { runtime: 'firejail', docker: { rolloutPercent: 0 } } }));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const config = loadFactoryConfigForRepo(path);
+      expect(config.sandbox.runtime).toBe('firejail');
+      expect(config.sandbox).not.toHaveProperty('docker');
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).not.toContain('treated as');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('throws on an invalid sandbox.runtime value', async () => {

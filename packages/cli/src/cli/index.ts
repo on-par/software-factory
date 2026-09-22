@@ -40,7 +40,6 @@ import type {
   RunPorts,
   RunRequest,
   SandboxPolicy,
-  SandboxRuntime,
   UsageReading,
   WatchdogPolicyOverrides,
   WatchdogPolicySource,
@@ -165,7 +164,6 @@ import type {
   QueueReleaseOutcome,
   UnmergedGreenPr,
   WatchChecksOptions,
-  WorktreeSandbox,
 } from '@on-par/factory-core/internal';
 import {
   acquirePidFile,
@@ -189,22 +187,18 @@ import {
   formatGcReport,
   gitFetch,
   isAutoMergeBlocked,
-  listMicroVms,
   listOrphanContainers,
   logCost,
   logEvent,
-  microVmName,
   planQueueMigration,
   readCosts,
   readGithubQueueSnapshot,
   reapLaneWorktree,
   reapOrphanContainers,
-  reapOrphanMicroVm,
   releaseRuntimeFiles,
   releaseStaleClaims,
   resolveBranchPrefix,
   resolveEffectiveConfig,
-  worktreeSandboxFor,
   resolveExperimental,
   resolveFilingPolicy,
   resolveLocalOnly,
@@ -236,7 +230,6 @@ import {
   formatClaimReconcileReport,
   formatContainerReconcileReport,
   formatDoctorChecks,
-  formatMicroVmReconcileReport,
   formatReconcileReport,
   formatWorktreeReconcileReport,
   type GreenPrScanResult,
@@ -245,16 +238,12 @@ import {
   type KeychainProbeStatus,
   type LeaseHealthRow,
   orphanContainerChecks,
-  orphanMicroVmChecks,
   runDoctorChecks,
   sandboxClaudeAuthChecks,
   unmergedGreenPrChecks,
   type UnmergedGreenPrRow,
 } from './doctor.js';
 import { formatOverview, missingClaudeCliMessage, missingTokenMessage, notInitializedMessage } from './first-run.js';
-import { cmdHostedSmoke } from './hosted.js';
-import { cmdHostedQueue } from './hosted-queue.js';
-import { cmdHostedRunner } from './hosted-runner.js';
 import { cmdLogs } from './logs.js';
 import { mergeScopeNotice } from './merge-scope.js';
 import { createFactoryOctokit } from './octokit.js';
@@ -1264,28 +1253,15 @@ export function resolveLaneBaseUrl(
   return { note: `proxy enabled but not running — using http://127.0.0.1:${appPort}` };
 }
 
-/** Builds the port-lease acquirer passed to runIssue, or undefined to skip it. A
- *  docker-sandbox lane runs inside its own microVM network namespace and binds its
- *  normal port there, so it needs no host port-lease and (since the proxy resolves
- *  routes solely from the lease registry) no proxy route either — every other
- *  runtime keeps acquiring a lease exactly as before. */
+/** Builds the port-lease acquirer passed to runIssue. */
 export function resolveEnvironmentAcquirer(opts: {
-  laneSandboxRuntime: SandboxRuntime;
   paths: ReturnType<typeof getFactoryPaths>;
   worktree: string;
   branch: string;
   range: [number, number];
   processGroupGraceMs: number;
   log: (type: EventKind, msg: string) => void;
-}): (() => Promise<Environment>) | undefined {
-  if (opts.laneSandboxRuntime === 'docker-sandbox') {
-    opts.log(
-      'environment_lease',
-      `docker-sandbox lane ${opts.worktree} binds its port inside its own microVM — skipping host port-lease`,
-    );
-    return undefined;
-  }
-
+}): () => Promise<Environment> {
   return async (): Promise<Environment> => {
     const reaped: ReapedLease[] = [];
     const lease = await acquirePortLease({
@@ -1503,12 +1479,8 @@ export async function shipIssue(
     worktree,
     repoRoot,
     cliDisabled: opts.sandbox === false,
-    laneId: lane,
   });
   laneSandboxRuntime = sandboxPolicy?.runtime ?? 'none';
-  const worktreeSandbox: WorktreeSandbox | undefined = worktreeSandboxFor(sandboxPolicy?.runtime, {
-    allowHosts: sandboxPolicy?.allowHosts ?? [],
-  });
   let activeSandboxPolicy: SandboxPolicy | undefined;
   if (opts.sandbox === false) {
     console.error(chalk.yellow('factory: sandbox disabled by --no-sandbox — agent runs are UNCONTAINED'));
@@ -1517,12 +1489,6 @@ export async function shipIssue(
     log('sandbox-disabled', 'sandbox disabled by config/FACTORY_SANDBOX');
   } else if (sandboxPolicy.runtime === 'none') {
     log('sandbox-unavailable', 'no sandbox runtime found (sandbox-exec/firejail) — running uncontained');
-  } else if (sandboxPolicy.runtime === 'docker-sandbox') {
-    // docker-sandbox's containment is the microVM created by worktreeWorkspace below
-    // (#653), not a command-prefix wrap — activeSandboxPolicy stays undefined because
-    // wrapCommandInSandbox remains a no-op for this runtime. createMicroVm logs the
-    // actual outcome ('sandbox' on success, 'sandbox-unavailable' on fallback), so no
-    // speculative log is emitted here.
   } else {
     activeSandboxPolicy = sandboxPolicy;
     if (sandboxPolicy.allowHosts.length > 0) {
@@ -1543,14 +1509,13 @@ export async function shipIssue(
       branch,
       worktreePath: worktree,
       log,
-      sandbox: worktreeSandbox,
-      setup: (root, br, wt, sp, sandbox, setupLog) =>
+      setup: (root, br, wt, sp, setupLog) =>
         withGitLock(root, () =>
           withFileLock(
             paths.gitLock,
             // setupWorktree fetches origin itself before creating the worktree (#1167),
             // so no explicit gitFetch here — still under the git + file locks.
-            () => setupWorktree(root, br, wt, sp, sandbox, setupLog),
+            () => setupWorktree(root, br, wt, sp, setupLog),
             { onSteal: (pid) => log('lock-stolen', `stole ${paths.gitLock} from dead holder pid ${pid ?? 'unknown'}`) },
           ),
         ),
@@ -1573,7 +1538,6 @@ export async function shipIssue(
   // so a lease-disabled/failed run still tears down every spawned agent process.
   const acquireEnvironment = portsSettings.enabled
     ? resolveEnvironmentAcquirer({
-        laneSandboxRuntime: sandboxPolicy?.runtime ?? 'none',
         paths,
         worktree,
         branch,
@@ -2133,17 +2097,6 @@ export async function withRepoRunLock<T>(
   }
 }
 
-/** The repo's current docker-sandbox descriptor for worktree-gc sweeps, or undefined for
- *  every other runtime/config state (including a fixture config with no `sandbox` key). */
-function gcWorktreeSandbox(
-  sandboxCfg: FactoryConfig['sandbox'] | undefined,
-  repoRoot: string,
-): WorktreeSandbox | undefined {
-  if (!sandboxCfg) return undefined;
-  const policy = resolveSandboxPolicy(sandboxCfg, { worktree: repoRoot, repoRoot });
-  return worktreeSandboxFor(policy?.runtime);
-}
-
 /** Eagerly reaps a parked lane's own worktree inside `factory run` (#1007). All the safety
  *  gates live in reapLaneWorktree; this wrapper resolves the lane's conventional worktree
  *  path and holds the same git+file lock pairing as every other worktree mutation site. A
@@ -2154,15 +2107,11 @@ export async function reapParkedLaneWorktree(
   paths: ReturnType<typeof getFactoryPaths>,
 ): Promise<void> {
   try {
-    const factoryConfig = loadFactoryConfigForRepo(paths.config);
     const branchPrefix = resolveEffectiveConfig(loadRepoConfig(repoRoot)).branchPrefix;
     const worktreePath = worktreePathFor(repoRoot, issue, branchPrefix);
     const log = (type: EventKind, msg: string) => logEvent(paths.events, type, issue, msg);
-    const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
     await withGitLock(repoRoot, () =>
-      withFileLock(paths.gitLock, () =>
-        reapLaneWorktree(repoRoot, worktreePath, { issue, branchPrefix, log, sandbox }),
-      ),
+      withFileLock(paths.gitLock, () => reapLaneWorktree(repoRoot, worktreePath, { issue, branchPrefix, log })),
     );
   } catch (err: any) {
     logEvent(paths.events, 'warn', issue, `parked-lane worktree reap failed: ${err?.message ?? String(err)}`);
@@ -2181,11 +2130,10 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }
   // Best-effort GitHub evidence: tokenless/local-only repos keep today's pure-local behavior.
   const ghRepo = await getGitHubRepo().catch(() => undefined);
   const octokit = ghRepo ? (hasGitHubToken() ? getOctokit() : undefined) : undefined;
-  const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
   const run = () =>
     sweepWorktrees(
       { repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo, branchPrefix: resolveBranchPrefix() },
-      { log, octokit, sandbox },
+      { log, octokit },
     );
   const report = opts.dryRun ? await run() : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
   console.log(formatGcReport(report));
@@ -2275,13 +2223,6 @@ async function landIssue(
   }
 
   const landFactoryConfig = loadFactoryConfigForRepo(paths.config);
-  const landSandboxPolicy = resolveSandboxPolicy(landFactoryConfig.sandbox, {
-    worktree,
-    repoRoot,
-  });
-  const worktreeSandbox: WorktreeSandbox | undefined = worktreeSandboxFor(landSandboxPolicy?.runtime, {
-    allowHosts: landSandboxPolicy?.allowHosts ?? [],
-  });
 
   const withLandLock: LandLock = (fn) =>
     withGitLock(repoRoot, () =>
@@ -2308,18 +2249,18 @@ async function landIssue(
         withLock: withLandLock,
         ensureWorktree: async () => {
           if (!existsSync(worktree)) {
-            await setupWorktree(repoRoot, branch, worktree, `origin/${branch}`, worktreeSandbox, log);
+            await setupWorktree(repoRoot, branch, worktree, `origin/${branch}`, log);
           }
         },
       });
     } catch (err) {
       if (err instanceof AwaitingReviewError || err instanceof CiFailedError) {
-        await withLandLock(() => cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
+        await withLandLock(() => cleanupWorktree(repoRoot, worktree, log));
       }
       throw err;
     }
     log('merged', `squash-merged PR #${prNumber}`);
-    await withLandLock(() => cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
+    await withLandLock(() => cleanupWorktree(repoRoot, worktree, log));
   } catch (err: any) {
     if (err instanceof LandConflictError || err instanceof AwaitingReviewError || err instanceof CiFailedError)
       throw err;
@@ -2765,7 +2706,6 @@ async function cmdRun(
     if (factoryConfig.worktree.autoGcOnRun) {
       try {
         const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
-        const gcSandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
             sweepWorktrees(
@@ -2775,7 +2715,7 @@ async function cmdRun(
                 repo: ghRepo,
                 branchPrefix: resolveBranchPrefix(),
               },
-              { log: gcLog, octokit: getOctokit(), sandbox: gcSandbox },
+              { log: gcLog, octokit: getOctokit() },
             ),
           ),
         );
@@ -3304,6 +3244,13 @@ export async function runLane(
       merged++;
       await releaseIssue(issue, 'done');
     } catch (err: any) {
+      if (err instanceof MergeWaitStoppedError) {
+        // STOP arrived mid-merge-wait: the PR is still open, so the issue goes back to the
+        // queue exactly as the top-of-loop STOP path leaves it — never counted as merged.
+        emitEvent(paths.events, 'stopped', issue, 'STOP file present', { lane });
+        await releaseIssue(issue, 'queued');
+        return;
+      }
       if (err instanceof AwaitingReviewError) {
         // The land path already emitted the awaiting-review event and cleaned the
         // worktree — this is a clean outcome, not a park; move to the next issue.
@@ -3438,15 +3385,26 @@ export async function squashMergeAndDelete(
   repoName: string,
   branch: string,
   prNumber: number,
-  opts: { admin?: boolean; run?: CommandRunner } = {},
+  /** `sha`: the CI-verified head commit. GitHub refuses the merge if the PR head has moved. */
+  opts: { admin?: boolean; run?: CommandRunner; sha?: string } = {},
 ): Promise<void> {
+  const { sha } = opts;
   if (opts.admin) {
     const run = opts.run ?? exec;
-    await run(`gh pr merge ${prNumber} --repo ${shellEscape(`${owner}/${repoName}`)} --admin --squash --delete-branch`);
+    const pin = sha ? ` --match-head-commit ${shellEscape(sha)}` : '';
+    await run(
+      `gh pr merge ${prNumber} --repo ${shellEscape(`${owner}/${repoName}`)} --admin --squash --delete-branch${pin}`,
+    );
     return;
   }
 
-  await octokit.rest.pulls.merge({ owner, repo: repoName, pull_number: prNumber, merge_method: 'squash' });
+  await octokit.rest.pulls.merge({
+    owner,
+    repo: repoName,
+    pull_number: prNumber,
+    merge_method: 'squash',
+    ...(sha ? { sha } : {}),
+  });
   // Best-effort branch delete: the merge is the source of truth.
   await octokit.rest.git.deleteRef({ owner, repo: repoName, ref: `heads/${branch}` }).catch(() => {});
 }
@@ -3487,6 +3445,10 @@ export class IssueDecomposedError extends Error {
   }
 }
 
+/** The STOP sentinel appeared while waitForMerge was polling: the PR is still unmerged, so
+ *  the issue must go back to the queue rather than be counted as landed. */
+export class MergeWaitStoppedError extends Error {}
+
 export class LandFailureError extends Error {
   constructor(
     message: string,
@@ -3518,6 +3480,14 @@ export class CiUnverifiedError extends CiFailedError {}
 
 const MAX_MERGE_ATTEMPTS = 5;
 const MERGE_RETRY_BASE_MS = 5_000;
+
+/** True when GitHub refused a SHA-pinned merge because the PR head moved past the verified
+ *  commit (REST 409, or gh's "Head branch was modified"). Retrying as-is can never succeed. */
+export function isHeadModifiedMergeError(err: unknown): boolean {
+  if ((err as { status?: unknown } | null)?.status === 409) return true;
+  const msg = `${err instanceof Error ? err.message : ''}\n${errorDetail(err)}`;
+  return /head branch was modified/i.test(msg);
+}
 
 export function isReviewRequiredMergeError(
   err: unknown,
@@ -3638,16 +3608,29 @@ export async function landOpenPullRequest(opts: {
     ensureWorktree,
   } = opts;
 
-  const watchCi = async () => {
+  if (skipCI && adminMerge) {
+    // An admin merge bypasses branch protection; with the CI watch skipped too, nothing at all
+    // would stand between an unverified head and main.
+    const msg = `PR #${prNumber}: refusing an admin merge with the CI watch skipped (ci.skip / FACTORY_SKIP_CI) — disable one of them`;
+    log('ci-failed', msg);
+    throw new CiUnverifiedError(msg, prNumber);
+  }
+
+  /** Watches CI on the PR's current head commit and returns that SHA once it is green, so the
+   *  merge can be pinned to exactly the commit CI verified. */
+  const watchCi = async (): Promise<string> => {
+    let headSha: string;
     let outcome: CiOutcome;
     try {
-      outcome = await watch({ octokit, owner, repo: repoName, ref: branch });
+      const { data: pr } = await octokit.rest.pulls.get({ owner, repo: repoName, pull_number: prNumber });
+      headSha = pr.head.sha;
+      outcome = await watch({ octokit, owner, repo: repoName, ref: headSha });
     } catch (err) {
       const msg = `CI watch for ${branch} failed: ${errorDetail(err)} — refusing to merge without a green verdict`;
       log('ci-failed', msg);
       throw new CiUnverifiedError(msg, prNumber);
     }
-    if (outcome === 'success') return;
+    if (outcome === 'success') return headSha;
     if (outcome === 'failure') {
       const msg = `CI failed for PR #${prNumber} on ${branch} — refusing to merge with a failing check`;
       log('ci-failed', msg);
@@ -3660,9 +3643,7 @@ export async function landOpenPullRequest(opts: {
 
   // The CI watch is a 10-20 minute wait, not a mutation: it must never run under the land
   // locks, or every other lane's setupWorktree serializes behind it (#645).
-  if (!skipCI) {
-    await watchCi();
-  }
+  let verifiedSha = skipCI ? undefined : await watchCi();
   let state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
 
   if (state.mergeStateStatus === 'DIRTY') {
@@ -3677,7 +3658,7 @@ export async function landOpenPullRequest(opts: {
     });
     if (rebased) {
       if (!skipCI) {
-        await watchCi();
+        verifiedSha = await watchCi();
       }
       state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
     }
@@ -3695,10 +3676,19 @@ export async function landOpenPullRequest(opts: {
             log('warn', `ready-for-review flip failed for PR #${prNumber}: ${errorDetail(err)}`),
           );
         }
-        await squashMergeAndDelete(octokit, owner, repoName, branch, prNumber, { admin: adminMerge, run });
+        await squashMergeAndDelete(octokit, owner, repoName, branch, prNumber, {
+          admin: adminMerge,
+          run,
+          sha: verifiedSha,
+        });
       });
       return;
     } catch (err: any) {
+      if (verifiedSha && isHeadModifiedMergeError(err)) {
+        const msg = `PR #${prNumber} head moved past CI-verified commit ${verifiedSha} — refusing to merge an unverified head`;
+        log('ci-failed', msg);
+        throw new CiUnverifiedError(msg, prNumber);
+      }
       if (isReviewRequiredMergeError(err, state)) {
         log('awaiting-review', `PR #${prNumber} blocked on human review — leaving open for approval`);
         throw new AwaitingReviewError(`PR #${prNumber} awaiting review: ${err.message}`, prNumber);
@@ -4007,6 +3997,7 @@ export async function waitForMerge(
     writeLine(`[factory] #${issue} awaiting human merge (poll 120s)`);
     await sleep(120_000);
   }
+  throw new MergeWaitStoppedError(`STOP file present while waiting to merge ${branch}`);
 }
 
 export interface SuperviseDeps {
@@ -4236,8 +4227,6 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
       sandboxDetail = 'skipped — sandbox disabled by config or FACTORY_SANDBOX';
     } else if (policy.runtime === 'none') {
       sandboxDetail = 'skipped — no sandbox runtime (sandbox-exec/firejail) on this host';
-    } else if (policy.runtime === 'docker-sandbox') {
-      sandboxDetail = 'skipped — docker-sandbox containment is the microVM, not command wrapping (#653)';
     } else {
       sandboxed = probeExec(wrapCommandInSandbox(CLAUDE_AUTH_PROBE, policy)) === null ? 'failed' : 'ok';
       sandboxDetail =
@@ -4259,11 +4248,6 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     const dockerAvailable = isCommandAvailable('docker');
     const orphanContainers = dockerAvailable ? await listOrphanContainers().catch(() => []) : [];
     checks.push(...orphanContainerChecks(orphanContainers.map((c) => c.name)));
-
-    const sbxAvailable = isCommandAvailable('sbx');
-    const activeVmNames = new Set(health.filter((h) => h.alive).map((h) => microVmName(h.lease.worktreeId)));
-    const orphanVmNames = sbxAvailable ? (await listMicroVms()).filter((n) => !activeVmNames.has(n)) : [];
-    checks.push(...orphanMicroVmChecks(orphanVmNames));
 
     const sweepStatus = checkSweepHeartbeat(factoryConfig.sweep, process.env, defaultSweepHeartbeatDeps());
     const sweepCheck = sweepHeartbeatCheck(sweepStatus);
@@ -4289,11 +4273,6 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
         console.log(formatContainerReconcileReport(reapedContainers));
       }
 
-      if (orphanVmNames.length > 0) {
-        const reapedVms = await Promise.all(orphanVmNames.map((name) => reapOrphanMicroVm(name)));
-        console.log(formatMicroVmReconcileReport(reapedVms));
-      }
-
       const reaped = await reapStalePortLeases({ registryFile: paths.ports, lockDir: paths.portsLock });
       console.log(formatReconcileReport(reaped));
 
@@ -4309,7 +4288,6 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
 
       try {
         const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
-        const gcSandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
             sweepWorktrees(
@@ -4319,7 +4297,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
                 repo: ghRepo,
                 branchPrefix: resolveBranchPrefix(),
               },
-              { log: gcLog, octokit, sandbox: gcSandbox },
+              { log: gcLog, octokit },
             ),
           ),
         );
@@ -4417,7 +4395,7 @@ export async function main() {
     .description('Preflight-check your environment (claude, gh, token, git, npm, sandbox)')
     .option(
       '--reconcile',
-      'Reap stale port leases, dead-run worktrees, stale issue claims, orphan sf-job-*/factory.managed containers, and orphan factory-* sbx VMs',
+      'Reap stale port leases, dead-run worktrees, stale issue claims, and orphan sf-job-*/factory.managed containers',
     )
     .action((opts: { reconcile?: boolean }) => cmdDoctor(opts));
 
@@ -4496,66 +4474,6 @@ export async function main() {
     .action(async (opts: { lane?: string }) => {
       await cmdQueueReconcile(opts);
     });
-
-  const hosted = program
-    .command('hosted')
-    .description('Hosted (remote-runner) execution — experimental, gated by FACTORY_HOSTED_EXEC=1');
-  hosted
-    .command('smoke')
-    .description('Local end-to-end hosted-exec smoke: create → lease → Docker run → result → cleanup')
-    .option('--repo <slug>', 'owner/repo to clone and run against', 'on-par/software-factory')
-    .option('--image <image>', 'container image for the smoke run', 'node:20-alpine')
-    .action(async (opts: { repo?: string; image?: string }) => {
-      await cmdHostedSmoke(opts);
-    });
-  hosted
-    .command('runner')
-    .description('Register capabilities with the local control plane and lease one compatible job, then exit')
-    .option('--url <url>', 'control-plane base URL', 'http://127.0.0.1:8799')
-    .option('--runner-id <id>', 'runner identity (default runner-<pid>)')
-    .option('--capabilities <csv>', 'comma-separated capability list', 'git,node')
-    .option('--timeout <ms>', 'bounded wait window for a compatible job, in ms', '30000')
-    .option('--poll-interval <ms>', 'delay between poll attempts, in ms', '2000')
-    .option('--lease-ttl <ms>', 'lease TTL, in ms', '300000')
-    .option('--heartbeat-interval <ms>', 'expected heartbeat interval, in ms', '30000')
-    .action(
-      async (opts: {
-        url?: string;
-        runnerId?: string;
-        capabilities?: string;
-        timeout?: string;
-        pollInterval?: string;
-        leaseTtl?: string;
-        heartbeatInterval?: string;
-      }) => {
-        await cmdHostedRunner(opts);
-      },
-    );
-  hosted
-    .command('queue')
-    .description('Queue one job to the local control plane, tail it to terminal, print the result')
-    .option('--url <url>', 'control-plane base URL', 'http://127.0.0.1:8799')
-    .option('--repo <slug>', 'owner/repo the job runs against', 'on-par/software-factory')
-    .option('--task <text>', 'opaque task payload')
-    .option('--capabilities <csv>', 'comma-separated required capabilities', 'git,node')
-    .option('--authority <authority>', 'required authority', 'repo:read')
-    .option('--timeout <ms>', 'bounded wait for a terminal result, in ms', '120000')
-    .option('--poll-interval <ms>', 'delay between summary polls, in ms', '1000')
-    .option('--job-id <id>', 'explicit job id (default server-generated)')
-    .action(
-      async (opts: {
-        url?: string;
-        repo?: string;
-        task?: string;
-        capabilities?: string;
-        authority?: string;
-        timeout?: string;
-        pollInterval?: string;
-        jobId?: string;
-      }) => {
-        await cmdHostedQueue(opts);
-      },
-    );
 
   program
     .command('ready <issue>')

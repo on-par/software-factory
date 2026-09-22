@@ -52,7 +52,6 @@ export type EventKind =
   | 'design_artifact_received'
   | 'design_open_questions'
   | 'design_shallow'
-  | 'engine-restarted'
   | 'environment_cleanup'
   | 'environment_conflict'
   | 'environment_lease'
@@ -106,10 +105,6 @@ export type EventKind =
   | 'plan_rejected'
   | 'post-merge-defect'
   | 'queue_admission_conflict'
-  | 'queue_reprioritized'
-  | 'queue_rationale_comment_failed'
-  | 'project_queue_refresh_failed'
-  | 'project_queue_refresh_succeeded'
   | 'provider_breaker_close'
   | 'provider_breaker_open'
   | 'provider_breaker_skip'
@@ -222,9 +217,6 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   design_artifact_received: { severity: 'info', isPark: false, isTerminal: false },
   design_open_questions: { severity: 'warn', isPark: false, isTerminal: false },
   design_shallow: { severity: 'info', isPark: false, isTerminal: false },
-  // factoryd restarted a stale in-process engine (#1178) — operational anomaly
-  // worth surfacing, but not a park (no human action needed) and not terminal.
-  'engine-restarted': { severity: 'warn', isPark: false, isTerminal: false },
   environment_cleanup: { severity: 'info', isPark: false, isTerminal: false },
   environment_conflict: { severity: 'warn', isPark: false, isTerminal: false },
   environment_lease: { severity: 'info', isPark: false, isTerminal: false },
@@ -282,10 +274,6 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   plan_rejected: { severity: 'info', isPark: false, isTerminal: false },
   'post-merge-defect': { severity: 'info', isPark: false, isTerminal: false },
   queue_admission_conflict: { severity: 'warn', isPark: false, isTerminal: false },
-  queue_reprioritized: { severity: 'info', isPark: false, isTerminal: false },
-  queue_rationale_comment_failed: { severity: 'warn', isPark: false, isTerminal: false },
-  project_queue_refresh_failed: { severity: 'warn', isPark: false, isTerminal: false },
-  project_queue_refresh_succeeded: { severity: 'info', isPark: false, isTerminal: false },
   provider_breaker_close: { severity: 'info', isPark: false, isTerminal: false },
   provider_breaker_open: { severity: 'info', isPark: false, isTerminal: false },
   provider_breaker_skip: { severity: 'info', isPark: false, isTerminal: false },

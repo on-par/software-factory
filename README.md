@@ -35,7 +35,7 @@ software-factory/
 │   ├── config/       @on-par/factory-config   — Shared JSON configs + product constitutions
 │   ├── contracts/    @on-par/contracts        — Shared typed seam: Issue/Epic/Story/DesignArtifact schemas
 │   ├── adr-kit/      @on-par/adr-kit          — Pure ADR kernel: parse/serialize/template/numbering, zero deps
-│   ├── repo-context/ @on-par/repo-context     — Read-only repo reader port: GitHub contents-API + in-memory, zero deps
+│   ├── repo-context/ @on-par/repo-context     — Read-only repo reader port: local filesystem + in-memory, zero deps
 │   └── server/       @on-par/factory-server   — Local HTTP server: GET /events relays the lane lifecycle bus as SSE
 ├── tsconfig.base.json
 └── package.json      (npm workspaces root)
@@ -54,7 +54,7 @@ contracts   ←  core  ←  server
 - **@on-par/factory-cli** — The `factory` CLI. Imports core.
 - **@on-par/factory-server** — Local HTTP server. `GET /events` relays the lane lifecycle bus as SSE, with `Last-Event-ID` resume via a bounded replay ring. Depends only on `@on-par/contracts` — no auth, loopback-only.
 - **@on-par/adr-kit** — Zero runtime dependencies. Pure, no-I/O ADR kernel: parses ADR markdown into a typed record, serializes it back byte-stably, models the repo's ADR convention (Nygard fallback, or inferred/reused when the repo already has ADRs), and provides next-number and index-table helpers. Not yet imported anywhere — the ADR reader, ADR writer, and readiness-conformance checker consume it in later stories of epic #464.
-- **@on-par/repo-context** — Zero runtime dependencies. Defines the `RepoContextReader` port (`readFile`, `readDir`, `exists`) that every repo-reading consumer shares, plus a GitHub contents-API implementation (for the proposer, which holds only a read-only token) and an in-memory implementation (for tests, and proof the port is backend-independent). Degrades to an empty result instead of throwing on a missing path, auth failure, or rate limit. Not yet imported anywhere — later stories of epic #464 wire it into the proposer and writer.
+- **@on-par/repo-context** — Zero runtime dependencies. Defines the `RepoContextReader` port (`readFile`, `readDir`, `exists`) that every repo-reading consumer shares, plus a local-filesystem implementation confined to a checkout root and an in-memory implementation (for tests, and proof the port is backend-independent). Degrades to an empty result instead of throwing on a missing, unreadable, or oversized path. Imported by core (ADR reader/writer, PLAN, SHIP) and product (architecture survey).
 
 ## Quick Start (5 minutes)
 

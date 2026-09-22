@@ -10,7 +10,6 @@ import {
   formatContainerReconcileReport,
   formatDoctorChecks,
   formatClaimReconcileReport,
-  formatMicroVmReconcileReport,
   formatReconcileReport,
   formatWorktreeReconcileReport,
   type GreenPrScanResult,
@@ -18,7 +17,6 @@ import {
   keychainPreflightError,
   type LeaseHealthRow,
   orphanContainerChecks,
-  orphanMicroVmChecks,
   type ReapRow,
   runDoctorChecks,
   sandboxClaudeAuthChecks,
@@ -600,27 +598,6 @@ describe('orphanContainerChecks', () => {
   });
 });
 
-describe('orphanMicroVmChecks', () => {
-  it('reports a single ok check when there are no orphans', () => {
-    const checks = orphanMicroVmChecks([]);
-    expect(checks).toEqual([{ name: 'orphan sbx VMs', ok: true, detail: 'no orphan factory-* sbx VMs' }]);
-    expect(doctorFailed(checks)).toBe(false);
-  });
-
-  it('reports one non-optional failing check per orphan name, failing doctor overall', () => {
-    const checks = orphanMicroVmChecks(['factory-abc123']);
-    expect(checks).toEqual([
-      {
-        name: 'orphan sbx VM factory-abc123',
-        ok: false,
-        detail: 'factory-abc123 has no active lane holding its worktree',
-        fix: 'run `factory doctor --reconcile` to remove it via `sbx rm --force`',
-      },
-    ]);
-    expect(doctorFailed(checks)).toBe(true);
-  });
-});
-
 describe('formatContainerReconcileReport', () => {
   it('reports no orphan containers when empty', () => {
     expect(formatContainerReconcileReport([])).toBe('reconcile: no orphan containers');
@@ -647,26 +624,6 @@ describe('formatContainerReconcileReport', () => {
     ];
     expect(formatContainerReconcileReport(rows)).toBe(
       'reconcile: removed container sf-job-1\nreconcile: failed to remove container sf-job-2 — boom',
-    );
-  });
-});
-
-describe('formatMicroVmReconcileReport', () => {
-  it('reports no orphan sbx VMs when empty', () => {
-    expect(formatMicroVmReconcileReport([])).toBe('reconcile: no orphan sbx VMs');
-  });
-
-  it('reports a removed line for a successful reap', () => {
-    const rows: ReapRow[] = [{ name: 'factory-abc123', removed: true, detail: 'sbx rm --force factory-abc123 ok' }];
-    expect(formatMicroVmReconcileReport(rows)).toBe('reconcile: removed sbx VM factory-abc123 (sbx rm --force)');
-  });
-
-  it('reports a failed line with detail for a failed reap', () => {
-    const rows: ReapRow[] = [
-      { name: 'factory-abc123', removed: false, detail: 'sbx rm --force factory-abc123 failed: not found' },
-    ];
-    expect(formatMicroVmReconcileReport(rows)).toBe(
-      'reconcile: failed to remove sbx VM factory-abc123 — sbx rm --force factory-abc123 failed: not found',
     );
   });
 });

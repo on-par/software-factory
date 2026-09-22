@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { joinRepoPath, normalizeRepoPath } from './path.js';
+import { compareByPath, joinRepoPath, normalizeRepoPath } from './path.js';
 
 describe('normalizeRepoPath', () => {
   it.each(['', '.', '/', './'])('maps %j to the repo root', (input) => {
@@ -27,5 +27,16 @@ describe('joinRepoPath', () => {
 
   it('joins base and name with a slash', () => {
     expect(joinRepoPath('a', 'b')).toBe('a/b');
+  });
+});
+
+describe('compareByPath', () => {
+  it('orders by code point, not locale', () => {
+    const sorted = [{ path: 'b' }, { path: 'B' }, { path: 'a' }].sort(compareByPath);
+    expect(sorted.map((e) => e.path)).toEqual(['B', 'a', 'b']);
+  });
+
+  it('returns 0 for equal paths', () => {
+    expect(compareByPath({ path: 'x' }, { path: 'x' })).toBe(0);
   });
 });

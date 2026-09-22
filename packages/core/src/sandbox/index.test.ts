@@ -5,7 +5,6 @@ import { HarnessError } from '../harness/index.js';
 import {
   buildDarwinProfile,
   detectSandboxRuntime,
-  resolveRolloutRuntime,
   resolveSandboxPolicy,
   resolveSandboxRuntime,
   sandboxEventFromError,
@@ -17,7 +16,6 @@ const defaultSandboxCfg: FactoryConfig['sandbox'] = {
   runtime: 'auto',
   network: { allow: ['api.anthropic.com', 'github.com'] },
   resources: { cpuMs: 300_000, memMb: 4096 },
-  docker: { rolloutPercent: 0 },
 };
 
 describe('detectSandboxRuntime', () => {
@@ -40,19 +38,6 @@ describe('detectSandboxRuntime', () => {
   it('is none on win32 regardless of probe result', () => {
     expect(detectSandboxRuntime('win32', () => true)).toBe('none');
   });
-
-  it('picks docker-sandbox when opted in and sbx is on PATH', () => {
-    expect(detectSandboxRuntime('linux', (c) => c === 'sbx', { includeDockerSandbox: true })).toBe('docker-sandbox');
-  });
-
-  it('opting in to docker-sandbox wins over sandbox-exec on darwin', () => {
-    expect(detectSandboxRuntime('darwin', () => true, { includeDockerSandbox: true })).toBe('docker-sandbox');
-  });
-
-  it('never selects docker-sandbox when includeDockerSandbox is absent, even with sbx present', () => {
-    expect(detectSandboxRuntime('darwin', () => true)).toBe('sandbox-exec');
-    expect(detectSandboxRuntime('linux', (c) => c === 'sbx')).toBe('none');
-  });
 });
 
 describe('resolveSandboxRuntime', () => {
@@ -68,13 +53,9 @@ describe('resolveSandboxRuntime', () => {
     );
   });
 
-  it("'auto' with sbx present never resolves to docker-sandbox (AC5)", () => {
-    expect(resolveSandboxRuntime('auto', { platform: 'linux', isAvailable: () => true, env: {} })).toBe('firejail');
-  });
-
   it('an explicit runtime is honored verbatim even when its binary is unavailable', () => {
-    expect(resolveSandboxRuntime('docker-sandbox', { platform: 'linux', isAvailable: () => false, env: {} })).toBe(
-      'docker-sandbox',
+    expect(resolveSandboxRuntime('firejail', { platform: 'linux', isAvailable: () => false, env: {} })).toBe(
+      'firejail',
     );
   });
 
@@ -87,9 +68,9 @@ describe('resolveSandboxRuntime', () => {
       resolveSandboxRuntime('auto', {
         platform: 'darwin',
         isAvailable: () => true,
-        env: { FACTORY_SANDBOX_RUNTIME: 'docker-sandbox' },
+        env: { FACTORY_SANDBOX_RUNTIME: 'none' },
       }),
-    ).toBe('docker-sandbox');
+    ).toBe('none');
     expect(
       resolveSandboxRuntime('auto', {
         platform: 'darwin',
@@ -105,6 +86,16 @@ describe('resolveSandboxRuntime', () => {
         platform: 'linux',
         isAvailable: () => true,
         env: { FACTORY_SANDBOX_RUNTIME: 'auto' },
+      }),
+    ).toBe('firejail');
+  });
+
+  it('treats the removed docker-sandbox runtime as an unknown FACTORY_SANDBOX_RUNTIME value', () => {
+    expect(
+      resolveSandboxRuntime('auto', {
+        platform: 'linux',
+        isAvailable: () => true,
+        env: { FACTORY_SANDBOX_RUNTIME: 'docker-sandbox' },
       }),
     ).toBe('firejail');
   });
@@ -217,12 +208,6 @@ describe('resolveSandboxPolicy', () => {
     expect(darwinPolicy?.writablePaths).not.toContain('/home/factory');
   });
 
-  it('honors an explicit docker-sandbox runtime from config', () => {
-    const cfg: FactoryConfig['sandbox'] = { ...defaultSandboxCfg, runtime: 'docker-sandbox' };
-    const policy = resolveSandboxPolicy(cfg, { ...baseOpts, env: {} });
-    expect(policy?.runtime).toBe('docker-sandbox');
-  });
-
   it('FACTORY_SANDBOX_RUNTIME=none yields a defined policy with runtime none (not sandbox-disabled)', () => {
     const policy = resolveSandboxPolicy(defaultSandboxCfg, {
       ...baseOpts,
@@ -230,79 +215,6 @@ describe('resolveSandboxPolicy', () => {
     });
     expect(policy).toBeDefined();
     expect(policy?.runtime).toBe('none');
-  });
-
-  it('promotes an unpinned lane to docker-sandbox when rolloutPercent=100', () => {
-    const cfg: FactoryConfig['sandbox'] = { ...defaultSandboxCfg, docker: { rolloutPercent: 100 } };
-    const policy = resolveSandboxPolicy(cfg, { ...baseOpts, env: {}, laneId: 'lane-any' });
-    expect(policy?.runtime).toBe('docker-sandbox');
-  });
-
-  it('leaves the normally-resolved runtime when rolloutPercent=0', () => {
-    const cfg: FactoryConfig['sandbox'] = { ...defaultSandboxCfg, docker: { rolloutPercent: 0 } };
-    const policy = resolveSandboxPolicy(cfg, {
-      ...baseOpts,
-      env: {},
-      laneId: 'lane-any',
-      isAvailable: (cmd) => cmd === 'firejail',
-    });
-    expect(policy?.runtime).toBe('firejail');
-  });
-
-  it('ignores the rollout when the runtime is pinned via config', () => {
-    const cfg: FactoryConfig['sandbox'] = {
-      ...defaultSandboxCfg,
-      runtime: 'sandbox-exec',
-      docker: { rolloutPercent: 100 },
-    };
-    const policy = resolveSandboxPolicy(cfg, { ...baseOpts, env: {}, laneId: 'lane-any' });
-    expect(policy?.runtime).toBe('sandbox-exec');
-  });
-
-  it('ignores the rollout when FACTORY_SANDBOX_RUNTIME is set', () => {
-    const cfg: FactoryConfig['sandbox'] = { ...defaultSandboxCfg, docker: { rolloutPercent: 100 } };
-    const policy = resolveSandboxPolicy(cfg, {
-      ...baseOpts,
-      env: { FACTORY_SANDBOX_RUNTIME: 'none' },
-      laneId: 'lane-any',
-    });
-    expect(policy?.runtime).toBe('none');
-  });
-
-  it('ignores the rollout when laneId is undefined', () => {
-    const cfg: FactoryConfig['sandbox'] = { ...defaultSandboxCfg, docker: { rolloutPercent: 100 } };
-    const policy = resolveSandboxPolicy(cfg, { ...baseOpts, env: {} });
-    expect(policy?.runtime).toBe('none');
-  });
-});
-
-describe('resolveRolloutRuntime', () => {
-  it('is deterministic for the same lane ID', () => {
-    expect(resolveRolloutRuntime('lane-42', 50)).toBe(resolveRolloutRuntime('lane-42', 50));
-  });
-
-  it('returns undefined for an undefined laneId', () => {
-    expect(resolveRolloutRuntime(undefined, 100)).toBeUndefined();
-  });
-
-  it('returns undefined when rolloutPercent <= 0', () => {
-    expect(resolveRolloutRuntime('lane-1', 0)).toBeUndefined();
-    expect(resolveRolloutRuntime('lane-1', -5)).toBeUndefined();
-  });
-
-  it('always assigns docker-sandbox at rolloutPercent=100 for a fixed lane', () => {
-    expect(resolveRolloutRuntime('lane-1', 100)).toBe('docker-sandbox');
-  });
-
-  it('assigns roughly rolloutPercent share of a large synthetic lane sample', () => {
-    const total = 10_000;
-    let assigned = 0;
-    for (let i = 0; i < total; i++) {
-      if (resolveRolloutRuntime(`lane-${i}`, 50) === 'docker-sandbox') assigned++;
-    }
-    const share = (assigned / total) * 100;
-    expect(share).toBeGreaterThan(45);
-    expect(share).toBeLessThan(55);
   });
 });
 
@@ -417,14 +329,6 @@ describe('wrapCommandInSandbox', () => {
     };
     const wrapped = wrapCommandInSandbox('echo hi', policy);
     expect(wrapped).toContain("--read-write='/home/factory/.claude.json'");
-  });
-
-  it('returns the command unchanged and never wraps for docker-sandbox', () => {
-    const policy = { ...basePolicy, runtime: 'docker-sandbox' as const };
-    const wrapped = wrapCommandInSandbox('echo hi', policy);
-    expect(wrapped).toBe('echo hi');
-    expect(wrapped).not.toContain('firejail');
-    expect(wrapped).not.toContain('sandbox-exec');
   });
 });
 

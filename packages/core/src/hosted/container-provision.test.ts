@@ -16,15 +16,6 @@ function fakeEngine(script: { fail?: string; workspaceFail?: string } = {}): {
   const calls: string[] = [];
   const workspaceCalls: { containerName: string; repoSlug: string }[] = [];
   const engine: ContainerEngine = {
-    prepareWorkspace: async () => {
-      throw new Error('not used');
-    },
-    run: async () => {
-      throw new Error('not used');
-    },
-    remove: async () => {
-      throw new Error('not used');
-    },
     async createLaneContainer(containerName): Promise<LaneContainerCreateResult> {
       calls.push(containerName);
       if (script.fail) throw new Error(script.fail);

@@ -1,7 +1,8 @@
 # ADR-0066: Engines read a single-poller cached subscription-usage snapshot, never poll OAuth /usage directly
 
-- Status: Accepted
+- Status: Deprecated
 - Date: 2026-08-30
+- Note: the `UsageCoordinator` (with its grant ledger and lane scheduler) was removed 2026-09 without ever being wired to an engine; callers read usage through `readUsage`/`fetchSubscriptionUsage`.
 
 ## Context
 

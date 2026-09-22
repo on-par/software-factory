@@ -19,7 +19,6 @@ import { runConfigSource } from './run-config-source.js';
 
 import type { FilingPolicy } from '../filing/policy.js';
 import { KNOWN_HARNESS_IDS } from '../harness/catalog.js';
-import type { FailoverReason } from '../types/index.js';
 
 import { ModelEffortsSchema } from './effort.js';
 
@@ -153,14 +152,13 @@ const FactoryConfigSchema = z.object({
   sandbox: z
     .object({
       enabled: z.boolean().default(true),
-      runtime: z.enum(['auto', 'sandbox-exec', 'firejail', 'docker-sandbox', 'none']).default('auto'),
+      runtime: z.enum(['auto', 'sandbox-exec', 'firejail', 'none']).default('auto'),
       network: z
         .object({ allow: z.array(z.string()).default(['api.anthropic.com', 'github.com']) })
         .default({ allow: ['api.anthropic.com', 'github.com'] }),
       resources: z
         .object({ cpuMs: z.number().positive().default(300_000), memMb: z.number().positive().default(4096) })
         .default({ cpuMs: 300_000, memMb: 4096 }),
-      docker: z.object({ rolloutPercent: z.number().min(0).max(100).default(0) }).default({ rolloutPercent: 0 }),
       comment: z.string().optional(),
     })
     .default({
@@ -168,40 +166,13 @@ const FactoryConfigSchema = z.object({
       runtime: 'auto',
       network: { allow: ['api.anthropic.com', 'github.com'] },
       resources: { cpuMs: 300_000, memMb: 4096 },
-      docker: { rolloutPercent: 0 },
     }),
-  discovery: z
-    .object({
-      enabled: z.boolean().default(true),
-      schedule: z.enum(['weekly', 'daily', 'manual']).default('weekly'),
-      maxCandidates: z.number().int().positive().default(5),
-      comment: z.string().optional(),
-    })
-    .default({ enabled: true, schedule: 'weekly', maxCandidates: 5 }),
   filing: z
     .object({
-      enabled: z.boolean().default(true),
-      excludeReasons: z.array(z.string()).default(['rate_limit', 'usage_cap', 'timeout', 'verify_failed']),
-      repeatThreshold: z.number().int().positive().default(3),
-      maxPerRun: z.number().int().positive().default(5),
-      maxPerDay: z.number().int().positive().default(20),
       selfFixLabel: z.string().default('no-auto-merge'),
-      bugLabels: z.array(z.string()).default(['bug']),
-      sensitivePaths: z
-        .array(z.string())
-        .default(['packages/core/', 'packages/config/', 'packages/cli/', 'scripts/', '.github/']),
       comment: z.string().optional(),
     })
-    .default({
-      enabled: true,
-      excludeReasons: ['rate_limit', 'usage_cap', 'timeout', 'verify_failed'],
-      repeatThreshold: 3,
-      maxPerRun: 5,
-      maxPerDay: 20,
-      selfFixLabel: 'no-auto-merge',
-      bugLabels: ['bug'],
-      sensitivePaths: ['packages/core/', 'packages/config/', 'packages/cli/', 'scripts/', '.github/'],
-    }),
+    .default({ selfFixLabel: 'no-auto-merge' }),
   ingest: z
     .object({
       enabled: z.boolean().default(false),
@@ -291,7 +262,10 @@ export function loadFactoryConfig(path?: string): FactoryConfig {
  *  The rest of the file belongs to RepoFactoryConfigSchema's model-routing namespace in
  *  ./repo.ts, and each loader ignores the other's keys. `version` is deliberately absent:
  *  it is the repo namespace's literal, and FactoryConfig's version comes from the defaults.
- *  Adding a new top-level section to FactoryConfigSchema means adding it here too. */
+ *  Adding a new top-level section to FactoryConfigSchema means adding it here too.
+ *  `discovery` is retired (its loop was removed 2026-09) but stays listed so an existing
+ *  config file carrying it still loads: the key is claimed here and FactoryConfigSchema
+ *  strips it, instead of the repo namespace's strict parse rejecting it as a typo. */
 export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'paths',
   'timeouts',
@@ -337,6 +311,32 @@ function deepMergeConfig(base: Record<string, unknown>, overlay: Record<string, 
   return out;
 }
 
+const warnedRemovedSandboxKeyPaths = new Set<string>();
+
+/** The `docker-sandbox` runtime and its `sandbox.docker.rolloutPercent` A/B rollout were
+ *  removed in 2026-09: the runtime never contained anything (the microVM was created but no
+ *  command ever ran inside it). A config that still names them keeps loading, exactly as the
+ *  v1 config adapter does: `runtime: 'docker-sandbox'` maps to `'none'` — what it actually did —
+ *  and `sandbox.docker` is dropped, with a one-time warning per config path. Mutates `overlay`. */
+function migrateRemovedSandboxKeys(overlay: Record<string, unknown>, configPath: string): void {
+  const sandbox = overlay.sandbox;
+  if (!isPlainObject(sandbox)) return;
+  const removed: string[] = [];
+  if (sandbox.runtime === 'docker-sandbox') {
+    removed.push("sandbox.runtime 'docker-sandbox' (treated as 'none')");
+    overlay.sandbox = { ...sandbox, runtime: 'none' };
+  }
+  if ('docker' in sandbox) {
+    removed.push('sandbox.docker (ignored)');
+    overlay.sandbox = Object.fromEntries(Object.entries(asRecord(overlay.sandbox)).filter(([key]) => key !== 'docker'));
+  }
+  if (removed.length === 0 || warnedRemovedSandboxKeyPaths.has(configPath)) return;
+  warnedRemovedSandboxKeyPaths.add(configPath);
+  console.warn(
+    `factory: ${configPath} uses removed sandbox settings: ${removed.join(', ')}. The docker-sandbox runtime never contained anything; set sandbox.runtime to auto, firejail or sandbox-exec for real containment.`,
+  );
+}
+
 /** Load the effective FactoryConfig for a repo: the shipped defaults, with the runtime-policy
  *  keys of `<repoRoot>/.factory/config.json` (i.e. `getFactoryPaths(repoRoot).config`) merged
  *  over them. Returns the shipped defaults untouched when the file does not exist. A partial
@@ -361,6 +361,7 @@ export function loadFactoryConfigForRepo(configPath: string): FactoryConfig {
     if (key in raw) overlay[key] = raw[key];
   }
 
+  migrateRemovedSandboxKeys(overlay, configPath);
   const merged = deepMergeConfig(asRecord(defaultFactoryConfig), overlay);
   const result = FactoryConfigSchema.safeParse(merged);
   if (!result.success) {
@@ -566,18 +567,7 @@ export function resolveMergePolicy(
 }
 
 export function resolveFilingPolicy(config: FactoryConfig): FilingPolicy {
-  const f = config.filing;
-  return {
-    enabled: f.enabled,
-    // Validated as free-form strings by the Zod schema; narrowed here to the FailoverReason union.
-    excludeReasons: f.excludeReasons as FailoverReason[],
-    repeatThreshold: f.repeatThreshold,
-    maxPerRun: f.maxPerRun,
-    maxPerDay: f.maxPerDay,
-    selfFixLabel: f.selfFixLabel,
-    bugLabels: f.bugLabels,
-    sensitivePaths: f.sensitivePaths,
-  };
+  return { selfFixLabel: config.filing.selfFixLabel };
 }
 
 // ---------- Factory state paths ----------

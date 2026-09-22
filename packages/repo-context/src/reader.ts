@@ -23,8 +23,8 @@ export interface RepoDirEntry {
  * Read-only access to one repository at one revision.
  *
  * Backend coordinates (owner/repo/ref/token/worktree root) are bound when the reader is
- * constructed, never passed here — that is what lets a gh-contents reader, an fs-backed
- * reader, and a future blobless sparse-checkout reader be swapped without changing callers.
+ * constructed, never passed here — that is what lets an fs-backed reader, an in-memory
+ * reader, and a future remote or sparse-checkout reader be swapped without changing callers.
  *
  * No method throws. A path that is missing, unreadable, unauthorized, rate-limited, too
  * large, or not text degrades to the empty result for that method; pass `onDegrade` to the

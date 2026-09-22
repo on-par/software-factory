@@ -1,6 +1,8 @@
 // src/reports/sandbox-ab.ts — A/B cohort comparison of docker-sandbox vs baseline
 // runtimes over the cost log + event log (#656), turning #655's per-cost-row
-// instrumentation into a go/no-go recommendation.
+// instrumentation into a go/no-go recommendation. The docker-sandbox runtime was
+// removed in 2026-09, so its cohort only ever holds historical rows; the
+// workspaceBackend breakdown (#1532) is the live part of this report.
 
 import type { CostEntry, FactoryEvent } from '../types/index.js';
 

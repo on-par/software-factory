@@ -1,4 +1,16 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  linkSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
@@ -89,7 +101,97 @@ describe('findCredentialFiles / zeroFill / scrubFile', () => {
     scrubFile(envPath);
     expect(existsSync(envPath)).toBe(false);
   });
+
+  describe('symlinks and hard links planted in the worktree (H6)', () => {
+    let outside: string;
+
+    afterEach(() => {
+      if (outside) rmSync(outside, { recursive: true, force: true });
+    });
+
+    function setup(): { hostKey: string; hostClaudeFile: string } {
+      dir = mkdtempSync(join(tmpdir(), 'gc-'));
+      outside = mkdtempSync(join(tmpdir(), 'gc-host-'));
+      const hostKey = join(outside, 'id_ed25519');
+      writeFileSync(hostKey, 'PRIVATE KEY');
+      mkdirSync(join(outside, 'dot-claude'));
+      const hostClaudeFile = join(outside, 'dot-claude', 'credentials.json');
+      writeFileSync(hostClaudeFile, '{"token":"host"}');
+      return { hostKey, hostClaudeFile };
+    }
+
+    it('does not list a symlinked .env or a symlinked .claude directory', () => {
+      const { hostKey } = setup();
+      symlinkSync(hostKey, join(dir, '.env'));
+      symlinkSync(hostKey, join(dir, '.npmrc'));
+      symlinkSync(join(outside, 'dot-claude'), join(dir, '.claude'));
+
+      expect(findCredentialFiles(dir)).toEqual([]);
+    });
+
+    it('does not follow a symlink nested inside a real .claude directory', () => {
+      const { hostClaudeFile } = setup();
+      mkdirSync(join(dir, '.claude'));
+      writeFileSync(join(dir, '.claude', 'own.json'), '{}');
+      symlinkSync(hostClaudeFile, join(dir, '.claude', 'linked.json'));
+      symlinkSync(join(outside, 'dot-claude'), join(dir, '.claude', 'linked-dir'));
+
+      expect(findCredentialFiles(dir)).toEqual([join(dir, '.claude', 'own.json')]);
+    });
+
+    it('zeroFill refuses to write through a symlink and leaves the target intact', () => {
+      const { hostKey } = setup();
+      const link = join(dir, '.env');
+      symlinkSync(hostKey, link);
+
+      expect(() => zeroFill(link)).toThrow();
+      expect(readFileSync(hostKey, 'utf8')).toBe('PRIVATE KEY');
+    });
+
+    it('scrubFile on a symlink removes only the link, never the target', () => {
+      const { hostKey } = setup();
+      const link = join(dir, '.env');
+      symlinkSync(hostKey, link);
+
+      expect(() => scrubFile(link)).toThrow();
+      expect(lstatExists(link)).toBe(false);
+      expect(readFileSync(hostKey, 'utf8')).toBe('PRIVATE KEY');
+    });
+
+    it('scrubFile on a hard link to a host file unlinks it without zeroing the shared inode', () => {
+      const { hostKey } = setup();
+      const hard = join(dir, '.npmrc');
+      linkSync(hostKey, hard);
+
+      expect(findCredentialFiles(dir)).toEqual([hard]);
+      expect(() => scrubFile(hard)).toThrow(/hard links/);
+      expect(existsSync(hard)).toBe(false);
+      expect(readFileSync(hostKey, 'utf8')).toBe('PRIVATE KEY');
+    });
+
+    it('scrubbing every listed file in a worktree with planted symlinks leaves host files untouched', () => {
+      const { hostKey, hostClaudeFile } = setup();
+      symlinkSync(hostKey, join(dir, '.env'));
+      symlinkSync(join(outside, 'dot-claude'), join(dir, '.claude'));
+      writeFileSync(join(dir, '.env.local'), 'SECRET=own');
+
+      for (const filePath of findCredentialFiles(dir)) scrubFile(filePath);
+
+      expect(readFileSync(hostKey, 'utf8')).toBe('PRIVATE KEY');
+      expect(readFileSync(hostClaudeFile, 'utf8')).toBe('{"token":"host"}');
+      expect(existsSync(join(dir, '.env.local'))).toBe(false);
+    });
+  });
 });
+
+function lstatExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 describe('sweepWorktrees', () => {
   let repoRoot: string;
@@ -1261,75 +1363,6 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     expect(report.removed).toHaveLength(0);
     expect(report.kept).toBe(1);
     expect(existsSync(wt)).toBe(true);
-  });
-
-  it('tears down a candidate microVM via the injected sandbox before removing its worktree', async () => {
-    const { repoRoot: root } = setup();
-    const wtName = `${basename(root)}-factory-ship-it-8`;
-    const wt = makeWorktree(wtName);
-
-    const runCommand = vi.fn(async (cmd: string) => {
-      if (cmd === 'git worktree list --porcelain') {
-        return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/8-feature\n\n`,
-        };
-      }
-      if (cmd === 'git rev-parse --verify origin/main') {
-        return { stdout: 'aaa\n' };
-      }
-      if (cmd.startsWith('git merge-base --is-ancestor')) {
-        return { stdout: '' }; // ancestor => merged
-      }
-      if (cmd.includes('rev-parse --verify --quiet')) {
-        return { stdout: 'bbb\n' }; // prior-push evidence
-      }
-      return { stdout: '' };
-    });
-    const sbxExec = vi.fn().mockResolvedValue({ stdout: '', stderr: '' });
-    const sandbox = {
-      runtime: 'docker-sandbox' as const,
-      authPaths: [],
-      allowHosts: [],
-      exec: sbxExec,
-      isAvailable: () => true,
-    };
-
-    const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand, sandbox });
-    expect(report.removed).toHaveLength(1);
-    expect(sbxExec).toHaveBeenCalledWith(expect.stringContaining('sbx rm --force'), expect.anything());
-
-    const sbxRmOrder = sbxExec.mock.invocationCallOrder[0];
-    const worktreeRemoveCall = runCommand.mock.calls.findIndex(([cmd]) => cmd.includes('worktree remove'));
-    const worktreeRemoveOrder = runCommand.mock.invocationCallOrder[worktreeRemoveCall];
-    expect(worktreeRemoveCall).toBeGreaterThan(-1);
-    expect(sbxRmOrder).toBeLessThan(worktreeRemoveOrder);
-  });
-
-  it('never touches the sandbox when no sandbox descriptor is injected', async () => {
-    const { repoRoot: root } = setup();
-    const wtName = `${basename(root)}-factory-ship-it-9`;
-    const wt = makeWorktree(wtName);
-
-    const runCommand = async (cmd: string) => {
-      if (cmd === 'git worktree list --porcelain') {
-        return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/9-feature\n\n`,
-        };
-      }
-      if (cmd === 'git rev-parse --verify origin/main') {
-        return { stdout: 'aaa\n' };
-      }
-      if (cmd.startsWith('git merge-base --is-ancestor')) {
-        return { stdout: '' };
-      }
-      if (cmd.includes('rev-parse --verify --quiet')) {
-        return { stdout: 'bbb\n' };
-      }
-      return { stdout: '' };
-    };
-
-    const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand });
-    expect(report.removed).toHaveLength(1);
   });
 
   describe('issue disposition (#1007)', () => {

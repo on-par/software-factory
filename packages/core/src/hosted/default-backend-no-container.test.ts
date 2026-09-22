@@ -6,15 +6,6 @@ function fakeEngine(): { engine: ContainerEngine; calls: string[]; workspaceCall
   const calls: string[] = [];
   const workspaceCalls: string[] = [];
   const engine: ContainerEngine = {
-    prepareWorkspace: async () => {
-      throw new Error('not used');
-    },
-    run: async () => {
-      throw new Error('not used');
-    },
-    remove: async () => {
-      throw new Error('not used');
-    },
     async createLaneContainer(containerName) {
       calls.push(containerName);
       return { containerName };

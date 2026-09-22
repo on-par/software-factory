@@ -133,7 +133,7 @@ describe('ClaudeCliHarness command shape', () => {
     expect(rec.calls[0].cmd).not.toContain("'draft plan'");
     expect(rec.calls[0].cmd).toContain("--model 'claude-sonnet-5'");
     expect(rec.calls[0].cmd).toContain('--output-format stream-json');
-    expect(rec.calls[0].cmd).toContain('--include-partial-messages');
+    expect(rec.calls[0].cmd).not.toContain('--include-partial-messages');
     expect(rec.calls[0].cmd).toContain('--verbose');
     expect(rec.calls[0].cmd).toContain('--safe-mode');
     expect(rec.calls[0].cmd).toContain('--permission-mode bypassPermissions');
@@ -404,6 +404,36 @@ describe('ClaudeCliHarness failure classification', () => {
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('timeout');
+  });
+
+  it('classifies a maxBuffer overflow from utils/exec as error, not timeout', async () => {
+    const harness = new ClaudeCliHarness(async () => {
+      throw Object.assign(new Error('stdout/stderr maxBuffer exceeded'), {
+        killed: true,
+        signal: 'SIGTERM',
+        stdout: '{"type":"assistant"}\n',
+        stderr: '',
+      });
+    });
+
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('error');
+    expect(err.message).toContain('output exceeded maxBuffer');
+  });
+
+  it('classifies node ERR_CHILD_PROCESS_STDIO_MAXBUFFER as error, not timeout', async () => {
+    const harness = new ClaudeCliHarness(async () => {
+      throw Object.assign(new Error('stdout maxBuffer length exceeded'), {
+        killed: true,
+        code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',
+      });
+    });
+
+    const err: any = await harness.run(makeContractRequest({ model: 'claude-model', registry })).catch((e) => e);
+
+    expect(err.reason).toBe('error');
   });
 
   it('classifies empty stdout as empty_response with exitCode 0', async () => {

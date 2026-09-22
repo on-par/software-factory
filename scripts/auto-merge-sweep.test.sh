@@ -37,6 +37,8 @@ if [ "$1 $2" = "pr list" ]; then
     "number": 101,
     "isDraft": false,
     "mergeable": "MERGEABLE",
+    "mergeStateStatus": "CLEAN",
+    "headRefOid": "sha101",
     "statusCheckRollup": [{"conclusion": "SUCCESS"}],
     "closingIssuesReferences": []
   },
@@ -44,6 +46,8 @@ if [ "$1 $2" = "pr list" ]; then
     "number": 102,
     "isDraft": false,
     "mergeable": "MERGEABLE",
+    "mergeStateStatus": "CLEAN",
+    "headRefOid": "sha102",
     "statusCheckRollup": [{"conclusion": "SUCCESS"}],
     "closingIssuesReferences": [{"number": 42}]
   },
@@ -51,8 +55,19 @@ if [ "$1 $2" = "pr list" ]; then
     "number": 103,
     "isDraft": false,
     "mergeable": "MERGEABLE",
+    "mergeStateStatus": "CLEAN",
+    "headRefOid": "sha103",
     "statusCheckRollup": [{"conclusion": "SUCCESS"}],
     "closingIssuesReferences": [{"number": 55}, {"number": 56}]
+  },
+  {
+    "number": 104,
+    "isDraft": false,
+    "mergeable": "MERGEABLE",
+    "mergeStateStatus": "BLOCKED",
+    "headRefOid": "sha104",
+    "statusCheckRollup": [{"conclusion": "SUCCESS"}],
+    "closingIssuesReferences": []
   }
 ]
 JSON
@@ -104,6 +119,9 @@ assert_line not_contains "landed #42"
 assert_line contains "SKIPPING PR #103: closes multiple issues (#55, #56)"
 assert_line not_contains "landing issue #55"
 assert_line not_contains "merging standalone PR #103"
+# PR #104's present checks are green but it is not CLEAN (a required check or review is
+# outstanding) — it must not be merged.
+assert_line not_contains "PR #104"
 
 # --- log persistence: log() tees dated lines to LOG_FILE, creating its dir ---
 
@@ -154,6 +172,19 @@ if ! grep -q -- "--squash --delete-branch" "$GH_CALL_LOG"; then
 fi
 if grep -q -- "--admin" "$GH_CALL_LOG"; then
   echo "FAIL: gh pr merge call included --admin without FACTORY_MERGE_ADMIN=1" >&2
+  cat "$GH_CALL_LOG" >&2
+  exit 1
+fi
+
+# --- head-SHA pinning: the standalone merge is pinned to the head the filter saw green ---
+
+if ! grep -qE -- "^pr merge 101 --repo [^ ]*fakerepo --squash --delete-branch --match-head-commit sha101$" "$GH_CALL_LOG"; then
+  echo "FAIL: expected gh pr merge for PR #101 pinned with --match-head-commit sha101" >&2
+  cat "$GH_CALL_LOG" >&2
+  exit 1
+fi
+if grep -q -- "pr merge 104" "$GH_CALL_LOG"; then
+  echo "FAIL: non-CLEAN PR #104 was merged" >&2
   cat "$GH_CALL_LOG" >&2
   exit 1
 fi
@@ -268,6 +299,11 @@ if ! python3 -c 'import plistlib,sys; plistlib.load(open(sys.argv[1],"rb"))' "$P
 fi
 if ! grep -q "<key>KeepAlive</key>" "$PLIST"; then
   echo "FAIL: $PLIST does not set KeepAlive" >&2
+  exit 1
+fi
+# Admin merges bypass branch protection, so the shipped plist must not enable them.
+if ! python3 -c 'import plistlib,sys; env=plistlib.load(open(sys.argv[1],"rb")).get("EnvironmentVariables",{}); sys.exit(1 if env.get("FACTORY_MERGE_ADMIN")=="1" else 0)' "$PLIST"; then
+  echo "FAIL: $PLIST enables FACTORY_MERGE_ADMIN by default" >&2
   exit 1
 fi
 
