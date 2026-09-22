@@ -552,4 +552,59 @@ hand-rolls the same `safeParse` in `adr/write.ts:104,138`.
 
 ## 8. Abandoned / unfinished work
 
-_Filled in from the cleanup pass. See below._
+Method: full git history (613 commits, 2026-07-10 → 2026-09-19); consumers found with `grep -rlw` over non-test
+sources (barrels and `public-api.test.ts` excluded); parent epics checked on GitHub. **Why knip misses this:**
+`core` exposes `.`, `./internal` and `./testing` as package entry points, so everything re-exported from those
+barrels looks "used". Open epic #1436 already tracks making dead code visible.
+
+Verdicts: **REMOVE** = abandoned, no consumers — _removed on this branch_ (see §8.1). **DECIDE** = partially built;
+owner must choose finish vs. delete. **KEEP** = looks unfinished but is used or intentional.
+
+| #   | Item                                                                                        | Location                                                                                                  | Last activity                            | Verdict                                                 |
+| --- | ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------- |
+| 1   | GitHub ProjectV2 board queue (pollers, dispatchers, status writers, reprioritization)       | `core/src/projects/*`, `queue/project-board-*`, `queue/reprioritization-audit.ts`, `phases/board-queue-*` | 08-30; epic #773 closed superseded 09-16 | **REMOVE** (done)                                       |
+| 2   | `applyLocalSmallPatchStep` (also an unsandboxed-shell risk, H26)                            | `core/src/local-small/stepwise.ts:156`                                                                    | 07-19                                    | **REMOVE** (done)                                       |
+| 3   | `acquireLaneEnvironment`, `simWorkspace` + stale "later story" comment                      | `core/src/run/ports.ts`                                                                                   | 08-27                                    | **REMOVE** (done)                                       |
+| 4   | Unreferenced PR-evidence screenshots                                                        | `docs/screenshots/{257,593}/`                                                                             | 07-15, 08-19                             | **REMOVE** (done)                                       |
+| 5   | Stale "later stories" comment on `RunOutcome`                                               | `core/src/run/outcome.ts:7-9`                                                                             | —                                        | comment fixed (done)                                    |
+| 6   | Stale remote branches (see §8.2)                                                            | `origin/ship-it/*`, `backup/606-*`, misc                                                                  | 07-24 → 09-01                            | **REMOVE** — _not done, needs owner_                    |
+| 7   | factoryd in-process engine supervisor                                                       | `core/src/daemon/engine-supervisor.ts`, `daemon/run-repo.ts`                                              | 09-02; epic #764 parked                  | DECIDE (leans remove; see #1433)                        |
+| 8   | Failure fingerprinting + auto bug filing                                                    | `core/src/failure/`, `core/src/filing/`; `filing.enabled: true` in defaults but unread                    | 07-20                                    | DECIDE                                                  |
+| 9   | Discovery scan / draft-epic authoring / promotion (public root exports)                     | `core/src/discovery/*`; `discovery.*` config unread                                                       | 08-12                                    | DECIDE (removal = breaking API change)                  |
+| 10  | UsageCoordinator, grant ledger, LaneScheduler                                               | `core/src/usage/{coordinator,grant-ledger,lane-scheduler,local-coordinator,select-coordinator}.ts`        | 08-30; epic #763 open                    | DECIDE                                                  |
+| 11  | Hosted-exec control plane (CLI clients exist; nothing starts the server)                    | `core/src/hosted/{control-plane,runner,watchdog,store-*}.ts`                                              | 08-27; #940/#944 parked                  | DECIDE (keep `container.ts`/`docker.ts`)                |
+| 12  | `packages/server` + dashboard live board + lifecycle bus (no producer; port clash)          | `packages/server`, `dashboard/src/useLaneEvents.ts`, `core/src/bus`                                       | 09-12; epic #583 open                    | DECIDE — mount `/events` in factoryd or delete          |
+| 13  | `docker-sandbox` runtime + A/B rollout (contains nothing, H3)                               | `sandbox/index.ts:102-111`, `utils/microvm.ts`, `scripts/sandbox-ab-report.ts`                            | 08-31; #1531 unmerged                    | DECIDE — build `sbx exec` or drop for disposable-docker |
+| 14  | `packages/product` readiness/export/architecture (not reachable from its CLI)               | `product/src/{readiness,export,architecture}`                                                             | 08-19; epic #463 idle since 07-25        | DECIDE                                                  |
+| 15  | `createGitHubContentsReader` (only tests use it)                                            | `repo-context/src/github.ts`                                                                              | 07-25                                    | DECIDE (leans remove)                                   |
+| 16  | ADR-0005 stuck at Proposed; missing from ADR index                                          | `docs/adr/0005-autonomous-factory-loops.md`                                                               | 07-26                                    | DECIDE (accept+scope or deprecate)                      |
+| 17  | Local-small track (dry-run, overnight, scoreboard) — no feature work in 2 months            | `core/src/local-small`, `scripts/local-small-scoreboard.ts`                                               | 07-19                                    | KEEP/DECIDE (still CLI-reachable)                       |
+| 18  | Deployment-automation research track (6 docs, ADR-0025/0026); Terraform spike never started | `docs/research/*deployment*`, `cloud-provisioning-guardrails.md`, `hosting-comparison.md`                 | 08-14                                    | KEEP (flag as stalled)                                  |
+| 19  | `packages/tui`, `scbench-adapter`, `adr-kit`, `QueueBackend`, disposable-docker lanes       | various                                                                                                   | 09-03 → 09-19                            | KEEP (active)                                           |
+
+### 8.1 Removed on this branch
+
+Items 1–5 above. Each removal was re-verified with grep before deletion and the full `bash scripts/verify.sh` gate
+was run afterwards (see the commit message for results).
+
+### 8.2 Stale remote branches (not deleted — needs the owner)
+
+Superseded by work already on `main`: `ship-it/148` (#457), `ship-it/511` (#518), `ship-it/522` (#540),
+`ship-it/523` (#537), `ship-it/529` (#541), `ship-it/538` (#542), `ship-it/596` (#638/#680), `ship-it/606` and
+`backup/606-prior-attempt` (#630), `ship-it/1007` (#1169).
+
+Diff against `main` before deleting — may hold unlanded fixes: `fix/codex-gh-queue-recovery` (08-21),
+`local-fixes-20260826` (08-26, contains a "WIP … parked before syncing main" commit),
+`claude/architecture-diagrams-docs-90e8rl`, `claude/repo-skill-integration-aib3d6`. `codex/local-hosted-mvp` (10
+commits ahead) is a real unmerged feature line — DECIDE with item 11.
+
+Collision to watch: `ship-it/1525` adds ADR-0112, which already exists on `main`; it needs renumbering before merge.
+
+### 8.3 Stale documentation statements
+
+- AGENTS.md: Node ≥ 20 (actual `>=24`); coverage floors 94/91/85/94 (actual 97/95/90/96, 10 per-package blocks);
+  `packages/server` "exposes only `GET /events` … no control endpoints" (it has `POST …/pause`); "ADR writer …
+  consume them in later stories" (landed in #482).
+- README.md: layout omits dashboard/product/tui/scbench-adapter; calls config "Shared JSON configs" (TypeScript per
+  ADR-0033); server row "✅ Working" (item 12).
+- `server/README.md` "Phase 2 (planned)" and `product/README.md` Status are stale.
