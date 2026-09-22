@@ -10,6 +10,7 @@ Findings that several passes reported independently are merged and marked **(×N
 
 ## Contents
 
+0. [Progress](#0-progress-updated-2026-09-22)
 1. [Top priorities](#1-top-priorities)
 2. [Cross-cutting themes](#2-cross-cutting-themes)
 3. [Hardening](#3-hardening)
@@ -20,6 +21,37 @@ Findings that several passes reported independently are merged and marked **(×N
 8. [Abandoned / unfinished work](#8-abandoned--unfinished-work)
 
 ---
+
+## 0. Progress (updated 2026-09-22)
+
+**Done on branch `claude/subagents-optimization-review-ng85la`:**
+
+| Finding                                                                                         | Commit(s)                                                                            |
+| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| H1 merges pinned to the CI-verified SHA (CLI + sweep); admin merge opt-in; skipCI+admin refused | `fix(cli): pin merges to the CI-verified head SHA…`                                  |
+| H2 STOP during merge wait re-queues instead of counting as merged                               | `fix(cli): STOP during the merge wait…`                                              |
+| H6 worktree GC never follows symlinks/hard links; GC git goes through `execGit` timeout         | `fix(core): worktree GC credential scrub…`                                           |
+| H8 no `--include-partial-messages`; maxBuffer overflow ≠ timeout (no provider block)            | `fix(core): claude CLI drops partial…`                                               |
+| H9 SHIP git timeout, `GIT_TERMINAL_PROMPT=0`, 64 MB buffer, redacted push errors                | `fix(core): SHIP git gets a deadline…`                                               |
+| H10 GitHub-label queue paginates (also fixes the stale-claim reaper)                            | `fix(core): GitHub-label queue reads every page…`                                    |
+| H3, H14, H15, H16 — removed with the code (docker-sandbox runtime, hosted control plane)        | `chore(sandbox): …`, `chore(core): remove unstarted hosted-exec control plane`       |
+| §8 items 1–5, 7–11, 13, 15, 16 — removed / ADRs retired                                         | `chore(core): remove …` series, `docs(adr): retire ADR-0005, ADR-0066 and ADR-0067…` |
+
+**Tracked as GitHub issues** (INVEST-sliced, Gherkin acceptance criteria, no labels so nothing auto-ingests):
+
+| Epic                                                     | Children                            | Covers                           |
+| -------------------------------------------------------- | ----------------------------------- | -------------------------------- |
+| #1578 Sandbox containment actually contains              | #1584–#1591                         | H4, H5, H7                       |
+| #1579 Prompt assembly: token efficiency & prefix caching | #1592–#1604 (+ #1447, #1442, #1201) | T1–T5, T9, T10                   |
+| #1580 CHECK and rework loop efficiency                   | #1605–#1614                         | T6, T7, T11, P1, P2              |
+| #1581 Run-state durability and clean shutdown            | #1615–#1627                         | H11, H12, H17, H18, H21          |
+| #1582 Event log and observability performance            | #1628–#1636                         | P4, P5, P6, P8, H22              |
+| #1583 CI and release hardening                           | #1637–#1644 (+ #1560, #1562)        | H19, H23–H25, P3                 |
+| Under #583 / #134 / #463, standalone                     | #1645–#1655                         | H13, S3, P7, T8, §8.2, §8.3, T14 |
+
+**Still open for the owner:** product readiness/export/architecture keep-or-delete (#1651); stale remote branches
+(#1652); ADRs 0064, 0065, 0068 describe the removed docker-sandbox runtime and should be marked Superseded;
+`scripts/sandbox-ab-report.ts` was kept because it now also reports the disposable-docker `workspaceBackend` split.
 
 ## 1. Top priorities
 
