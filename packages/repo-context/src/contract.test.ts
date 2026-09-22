@@ -1,4 +1,3 @@
-import { Buffer } from 'node:buffer';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -6,8 +5,6 @@ import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createFsReader } from './fs.js';
-import type { FetchLike, FetchLikeResponse } from './github.js';
-import { createGitHubContentsReader } from './github.js';
 import { createInMemoryReader } from './memory.js';
 import type { RepoContextReader } from './reader.js';
 
@@ -18,58 +15,8 @@ const TREE: Readonly<Record<string, string>> = {
   'src/index.ts': 'export {};',
 };
 
-function contentsFetchOver(tree: Readonly<Record<string, string>>): FetchLike {
-  return async (url) => {
-    const match = /\/contents(?:\/(.*?))?(?:\?ref=.*)?$/.exec(url);
-    const rawPath = match?.[1] ? decodeURIComponent(match[1]) : '';
-
-    if (Object.hasOwn(tree, rawPath)) {
-      const content = tree[rawPath]!;
-      return jsonResponse(200, {
-        type: 'file',
-        size: Buffer.byteLength(content, 'utf8'),
-        encoding: 'base64',
-        content: Buffer.from(content, 'utf8').toString('base64'),
-      });
-    }
-
-    const prefix = rawPath === '' ? '' : `${rawPath}/`;
-    const children = new Map<string, { name: string; path: string; type: 'file' | 'dir' }>();
-    for (const key of Object.keys(tree)) {
-      if (!key.startsWith(prefix)) {
-        continue;
-      }
-      const rest = key.slice(prefix.length);
-      const segments = rest.split('/');
-      const name = segments[0]!;
-      const childPath = prefix === '' ? name : `${prefix}${name}`;
-      const type = segments.length === 1 ? 'file' : 'dir';
-      children.set(childPath, { name, path: childPath, type });
-    }
-
-    if (children.size > 0) {
-      return jsonResponse(200, [...children.values()]);
-    }
-
-    return jsonResponse(404, { message: 'Not Found' });
-  };
-}
-
-function jsonResponse(status: number, body: unknown): FetchLikeResponse {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    headers: { get: () => null },
-    text: async () => JSON.stringify(body),
-  };
-}
-
 function makeMemoryReader(): RepoContextReader {
   return createInMemoryReader(TREE);
-}
-
-function makeGitHubReader(): RepoContextReader {
-  return createGitHubContentsReader({ owner: 'o', repo: 'r', fetch: contentsFetchOver(TREE) });
 }
 
 let fsRoot: string;
@@ -93,7 +40,6 @@ afterAll(async () => {
 
 describe.each([
   ['in-memory', makeMemoryReader],
-  ['github', makeGitHubReader],
   ['fs', makeFsReader],
 ])('%s reader honors the RepoContextReader contract', (_label, makeReader) => {
   it('reads a nested file', async () => {
