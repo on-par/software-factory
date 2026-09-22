@@ -305,26 +305,6 @@ const PUBLIC_API_KEYS = [
 ];
 
 const INTERNAL_API_KEYS = [
-  // Single-poller cached subscription-usage snapshot (#1029)
-  'createUsageCoordinator',
-  'DEFAULT_USAGE_POLL_MS',
-  'defaultUsageStatePath',
-  'loadUsageState',
-  'writeUsageState',
-  // UsageCoordinator admission-control acquire() API and grant ledger (#1030)
-  'defaultGrantLedgerPath',
-  'DEFAULT_GRANT_TTL_MS',
-  'isCappedModel',
-  'loadGrantLedger',
-  'pruneGrants',
-  'USAGE_ADMISSION_CEILING_PCT',
-  'USAGE_GRANT_RESERVATION_PCT',
-  'writeGrantLedger',
-  // Engine lane parks and resumes on acquire denial (#1032)
-  'createLaneScheduler',
-  // Standalone local UsageCoordinator fallback (#1033)
-  'createLocalUsageCoordinator',
-  'selectUsageCoordinator',
   // Failure fingerprint & evidence
   'captureFailure',
   'fingerprintFailure',
