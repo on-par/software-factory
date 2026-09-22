@@ -3445,15 +3445,26 @@ export async function squashMergeAndDelete(
   repoName: string,
   branch: string,
   prNumber: number,
-  opts: { admin?: boolean; run?: CommandRunner } = {},
+  /** `sha`: the CI-verified head commit. GitHub refuses the merge if the PR head has moved. */
+  opts: { admin?: boolean; run?: CommandRunner; sha?: string } = {},
 ): Promise<void> {
+  const { sha } = opts;
   if (opts.admin) {
     const run = opts.run ?? exec;
-    await run(`gh pr merge ${prNumber} --repo ${shellEscape(`${owner}/${repoName}`)} --admin --squash --delete-branch`);
+    const pin = sha ? ` --match-head-commit ${shellEscape(sha)}` : '';
+    await run(
+      `gh pr merge ${prNumber} --repo ${shellEscape(`${owner}/${repoName}`)} --admin --squash --delete-branch${pin}`,
+    );
     return;
   }
 
-  await octokit.rest.pulls.merge({ owner, repo: repoName, pull_number: prNumber, merge_method: 'squash' });
+  await octokit.rest.pulls.merge({
+    owner,
+    repo: repoName,
+    pull_number: prNumber,
+    merge_method: 'squash',
+    ...(sha ? { sha } : {}),
+  });
   // Best-effort branch delete: the merge is the source of truth.
   await octokit.rest.git.deleteRef({ owner, repo: repoName, ref: `heads/${branch}` }).catch(() => {});
 }
@@ -3529,6 +3540,14 @@ export class CiUnverifiedError extends CiFailedError {}
 
 const MAX_MERGE_ATTEMPTS = 5;
 const MERGE_RETRY_BASE_MS = 5_000;
+
+/** True when GitHub refused a SHA-pinned merge because the PR head moved past the verified
+ *  commit (REST 409, or gh's "Head branch was modified"). Retrying as-is can never succeed. */
+export function isHeadModifiedMergeError(err: unknown): boolean {
+  if ((err as { status?: unknown } | null)?.status === 409) return true;
+  const msg = `${err instanceof Error ? err.message : ''}\n${errorDetail(err)}`;
+  return /head branch was modified/i.test(msg);
+}
 
 export function isReviewRequiredMergeError(
   err: unknown,
@@ -3649,16 +3668,29 @@ export async function landOpenPullRequest(opts: {
     ensureWorktree,
   } = opts;
 
-  const watchCi = async () => {
+  if (skipCI && adminMerge) {
+    // An admin merge bypasses branch protection; with the CI watch skipped too, nothing at all
+    // would stand between an unverified head and main.
+    const msg = `PR #${prNumber}: refusing an admin merge with the CI watch skipped (ci.skip / FACTORY_SKIP_CI) — disable one of them`;
+    log('ci-failed', msg);
+    throw new CiUnverifiedError(msg, prNumber);
+  }
+
+  /** Watches CI on the PR's current head commit and returns that SHA once it is green, so the
+   *  merge can be pinned to exactly the commit CI verified. */
+  const watchCi = async (): Promise<string> => {
+    let headSha: string;
     let outcome: CiOutcome;
     try {
-      outcome = await watch({ octokit, owner, repo: repoName, ref: branch });
+      const { data: pr } = await octokit.rest.pulls.get({ owner, repo: repoName, pull_number: prNumber });
+      headSha = pr.head.sha;
+      outcome = await watch({ octokit, owner, repo: repoName, ref: headSha });
     } catch (err) {
       const msg = `CI watch for ${branch} failed: ${errorDetail(err)} — refusing to merge without a green verdict`;
       log('ci-failed', msg);
       throw new CiUnverifiedError(msg, prNumber);
     }
-    if (outcome === 'success') return;
+    if (outcome === 'success') return headSha;
     if (outcome === 'failure') {
       const msg = `CI failed for PR #${prNumber} on ${branch} — refusing to merge with a failing check`;
       log('ci-failed', msg);
@@ -3671,9 +3703,7 @@ export async function landOpenPullRequest(opts: {
 
   // The CI watch is a 10-20 minute wait, not a mutation: it must never run under the land
   // locks, or every other lane's setupWorktree serializes behind it (#645).
-  if (!skipCI) {
-    await watchCi();
-  }
+  let verifiedSha = skipCI ? undefined : await watchCi();
   let state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
 
   if (state.mergeStateStatus === 'DIRTY') {
@@ -3688,7 +3718,7 @@ export async function landOpenPullRequest(opts: {
     });
     if (rebased) {
       if (!skipCI) {
-        await watchCi();
+        verifiedSha = await watchCi();
       }
       state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
     }
@@ -3706,10 +3736,19 @@ export async function landOpenPullRequest(opts: {
             log('warn', `ready-for-review flip failed for PR #${prNumber}: ${errorDetail(err)}`),
           );
         }
-        await squashMergeAndDelete(octokit, owner, repoName, branch, prNumber, { admin: adminMerge, run });
+        await squashMergeAndDelete(octokit, owner, repoName, branch, prNumber, {
+          admin: adminMerge,
+          run,
+          sha: verifiedSha,
+        });
       });
       return;
     } catch (err: any) {
+      if (verifiedSha && isHeadModifiedMergeError(err)) {
+        const msg = `PR #${prNumber} head moved past CI-verified commit ${verifiedSha} — refusing to merge an unverified head`;
+        log('ci-failed', msg);
+        throw new CiUnverifiedError(msg, prNumber);
+      }
       if (isReviewRequiredMergeError(err, state)) {
         log('awaiting-review', `PR #${prNumber} blocked on human review — leaving open for approval`);
         throw new AwaitingReviewError(`PR #${prNumber} awaiting review: ${err.message}`, prNumber);
