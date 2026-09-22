@@ -8,9 +8,6 @@ import { createLogger } from '../logger/index.js';
 import type { CostEntry, FailoverReason, LogLevel, ReadinessInfo, ReworkInfo } from '../types/index.js';
 import { levelForType } from './format.js';
 import { execGit } from './git-exec.js';
-import { createMicroVm, removeMicroVm, type WorktreeSandbox } from './microvm.js';
-
-export type { WorktreeSandbox } from './microvm.js';
 
 export { colorEnabled, formatEventLine, levelForType } from './format.js';
 
@@ -110,7 +107,6 @@ export async function setupWorktree(
   branch: string,
   worktreePath: string,
   startPoint?: string,
-  sandbox?: WorktreeSandbox,
   log?: (type: EventKind, msg: string) => void,
 ): Promise<void> {
   // The base of record is the freshly fetched remote-tracking ref — never local
@@ -124,20 +120,13 @@ export async function setupWorktree(
   });
   const { stdout } = await execGit('git rev-parse --verify HEAD', { cwd: worktreePath });
   log?.('worktree-base', `created from ${base} @ ${stdout.trim()}`);
-  if (sandbox) {
-    await createMicroVm({ ...sandbox, worktreePath, log });
-  }
 }
 
 export async function cleanupWorktree(
   repoRoot: string,
   worktreePath: string,
   log: (type: EventKind, msg: string) => void = () => {},
-  sandbox?: WorktreeSandbox,
 ): Promise<void> {
-  if (sandbox) {
-    await removeMicroVm({ ...sandbox, worktreePath, log });
-  }
   await execGit(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot }).catch((err: any) =>
     log(
       'warn',
@@ -173,7 +162,6 @@ export async function reapLaneWorktree(
     issue: number;
     branchPrefix?: string;
     log?: (type: EventKind, msg: string) => void;
-    sandbox?: WorktreeSandbox;
   },
 ): Promise<LaneWorktreeReapResult> {
   const log = opts.log ?? (() => {});
@@ -208,7 +196,7 @@ export async function reapLaneWorktree(
     () => null,
   );
 
-  await cleanupWorktree(repoRoot, worktreePath, log, opts.sandbox);
+  await cleanupWorktree(repoRoot, worktreePath, log);
 
   const lsRemote = await execGit(`git ls-remote --heads origin ${shellEscape(branch)}`, { cwd: repoRoot }).catch(
     () => null,

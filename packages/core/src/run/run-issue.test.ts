@@ -119,7 +119,6 @@ function basePolicy(overrides: Partial<RunPolicy> = {}): RunPolicy {
       runtime: 'auto',
       network: { allow: [] },
       resources: { cpuMs: 0, memMb: 0 },
-      docker: { rolloutPercent: 0 },
     },
     budget: {},
     effective: {} as RunPolicy['effective'],

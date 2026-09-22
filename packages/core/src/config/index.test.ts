@@ -683,11 +683,43 @@ describe('loadFactoryConfigForRepo', () => {
 
   it('parses a sandbox.runtime override and keeps the other sandbox defaults', async () => {
     const path = join(dir, 'config.json');
-    await writeFile(path, JSON.stringify({ sandbox: { runtime: 'docker-sandbox' } }));
+    await writeFile(path, JSON.stringify({ sandbox: { runtime: 'firejail' } }));
     const config = loadFactoryConfigForRepo(path);
-    expect(config.sandbox.runtime).toBe('docker-sandbox');
+    expect(config.sandbox.runtime).toBe('firejail');
     expect(config.sandbox.enabled).toBe(loadFactoryConfig().sandbox.enabled);
     expect(config.sandbox.network.allow).toEqual(loadFactoryConfig().sandbox.network.allow);
+  });
+
+  it("maps the removed 'docker-sandbox' runtime to 'none' and drops sandbox.docker, warning once per path", async () => {
+    const path = join(dir, 'removed-sandbox.json');
+    await writeFile(path, JSON.stringify({ sandbox: { runtime: 'docker-sandbox', docker: { rolloutPercent: 50 } } }));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const config = loadFactoryConfigForRepo(path);
+      expect(config.sandbox.runtime).toBe('none');
+      expect(config.sandbox).not.toHaveProperty('docker');
+      loadFactoryConfigForRepo(path);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toContain("sandbox.runtime 'docker-sandbox' (treated as 'none')");
+      expect(warn.mock.calls[0]?.[0]).toContain('sandbox.docker (ignored)');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('drops a leftover sandbox.docker block without touching an explicit runtime', async () => {
+    const path = join(dir, 'leftover-docker.json');
+    await writeFile(path, JSON.stringify({ sandbox: { runtime: 'firejail', docker: { rolloutPercent: 0 } } }));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const config = loadFactoryConfigForRepo(path);
+      expect(config.sandbox.runtime).toBe('firejail');
+      expect(config.sandbox).not.toHaveProperty('docker');
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).not.toContain('treated as');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('throws on an invalid sandbox.runtime value', async () => {

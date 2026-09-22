@@ -24,11 +24,8 @@ const h = vi.hoisted(() => {
     },
     claudeAvailable: undefined as boolean | undefined,
     dockerAvailable: undefined as boolean | undefined,
-    sbxAvailable: undefined as boolean | undefined,
     orphanContainers: [] as Array<{ id: string; name: string }>,
     reapedContainers: [] as Array<{ id: string; name: string; removed: boolean; detail: string }>,
-    orphanVmNames: [] as string[],
-    reapedVms: [] as Array<{ name: string; removed: boolean; detail: string }>,
     // octokit instance returned by `new Octokit()`
     octokit: {} as any,
     // configurable core behaviour
@@ -173,7 +170,6 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
     })),
     isCommandAvailable: vi.fn((cmd: string) => {
       if (cmd === 'docker') return h.dockerAvailable ?? false;
-      if (cmd === 'sbx') return h.sbxAvailable ?? false;
       return h.claudeAvailable ?? true;
     }),
     defaultFindPortListeners: vi.fn(async () => h.portListeners),
@@ -252,14 +248,9 @@ vi.mock('@on-par/factory-core/internal', async (importOriginal) => {
     releaseStaleClaims: vi.fn(async () => h.staleClaims),
     // Green-and-ready PR report.
     findUnmergedGreenPrs: vi.fn(async () => h.greenPrs),
-    // Orphan container/microVM scan + reap (#1527).
+    // Orphan container scan + reap (#1527).
     listOrphanContainers: vi.fn(async () => h.orphanContainers),
     reapOrphanContainers: vi.fn(async () => h.reapedContainers),
-    listMicroVms: vi.fn(async () => h.orphanVmNames),
-    reapOrphanMicroVm: vi.fn(
-      async (name: string) =>
-        h.reapedVms.find((r) => r.name === name) ?? { name, removed: true, detail: `sbx rm --force ${name} ok` },
-    ),
     formatGcReport: vi.fn(
       (report: any) =>
         `GC_REPORT:${report.dryRun ? 'dry' : 'real'}:removed=${report.removed.length}:kept=${report.kept}`,
@@ -283,11 +274,8 @@ vi.mock('./cli/daemon.js', async (importOriginal) => {
 import {
   cleanupWorktree,
   formatGcReport,
-  listMicroVms,
   listOrphanContainers,
-  microVmName,
   reapOrphanContainers,
-  reapOrphanMicroVm,
   releaseStaleClaims,
   setupWorktree,
   sweepWorktrees,
@@ -444,11 +432,8 @@ beforeEach(() => {
   h.setupWorktreeImpl = async () => {};
   h.claudeAvailable = undefined;
   h.dockerAvailable = undefined;
-  h.sbxAvailable = undefined;
   h.orphanContainers = [];
   h.reapedContainers = [];
-  h.orphanVmNames = [];
-  h.reapedVms = [];
   h.orphanEvents = [];
   h.portListeners = [];
 
@@ -3651,15 +3636,13 @@ Please add a widget that does the thing.
       expect(logged()).toContain('no green-and-ready PRs awaiting merge');
     });
 
-    it('skips the orphan container/sbx VM scan entirely when docker/sbx are not on PATH', async () => {
+    it('skips the orphan container scan entirely when docker is not on PATH', async () => {
       h.claudeAvailable = true;
 
       const res = await runMain('doctor');
       expect(res.exited).toBe(false);
       expect(listOrphanContainers).not.toHaveBeenCalled();
-      expect(listMicroVms).not.toHaveBeenCalled();
       expect(logged()).toContain('no orphan sf-job-*/factory.managed containers');
-      expect(logged()).toContain('no orphan factory-* sbx VMs');
     });
 
     it('fails doctor and reports each stopped sf-job-*/factory.managed container as an orphan', async () => {
@@ -3693,67 +3676,6 @@ Please add a widget that does the thing.
       const res = await runMain('doctor');
       expect(res).toEqual({ exited: true, code: 1 });
       expect(reapOrphanContainers).not.toHaveBeenCalled();
-    });
-
-    it('fails doctor and reports a factory-* sbx VM with no active lane as an orphan', async () => {
-      h.claudeAvailable = true;
-      h.sbxAvailable = true;
-      h.orphanVmNames = ['factory-abc123'];
-
-      const res = await runMain('doctor');
-      expect(res).toEqual({ exited: true, code: 1 });
-      expect(logged()).toContain('orphan sbx VM factory-abc123');
-      expect(logged()).toContain('has no active lane holding its worktree');
-    });
-
-    it('excludes the sbx VM name derived from an alive lease from the orphan set', async () => {
-      h.claudeAvailable = true;
-      h.sbxAvailable = true;
-      const activeName = microVmName(h.repoRoot);
-      h.orphanVmNames = [activeName, 'factory-def456'];
-      const portsFile = join(h.repoRoot, '.factory', 'state', 'ports.json');
-      writeFileSync(
-        portsFile,
-        JSON.stringify({
-          version: 1,
-          leases: [
-            {
-              worktreeId: h.repoRoot,
-              branch: 'live',
-              port: 4001,
-              pid: process.pid,
-              acquiredAt: '2026-01-01T00:00:00Z',
-            },
-          ],
-        }),
-      );
-
-      const res = await runMain('doctor');
-      expect(res).toEqual({ exited: true, code: 1 });
-      expect(logged()).not.toContain(`orphan sbx VM ${activeName}`);
-      expect(logged()).toContain('orphan sbx VM factory-def456');
-    });
-
-    it('--reconcile reaps orphan sbx VMs and reports the outcome', async () => {
-      h.claudeAvailable = true;
-      h.sbxAvailable = true;
-      h.orphanVmNames = ['factory-abc123'];
-      h.reapedVms = [{ name: 'factory-abc123', removed: true, detail: 'sbx rm --force factory-abc123 ok' }];
-
-      const res = await runMain('doctor', '--reconcile');
-      expect(res).toEqual({ exited: true, code: 1 });
-      expect(reapOrphanMicroVm).toHaveBeenCalledWith('factory-abc123');
-      expect(logged()).toContain('reconcile: removed sbx VM factory-abc123 (sbx rm --force)');
-    });
-
-    it('doctor without --reconcile never calls reapOrphanMicroVm even when orphans exist', async () => {
-      h.claudeAvailable = true;
-      h.sbxAvailable = true;
-      h.orphanVmNames = ['factory-abc123'];
-
-      const res = await runMain('doctor');
-      expect(res).toEqual({ exited: true, code: 1 });
-      expect(reapOrphanMicroVm).not.toHaveBeenCalled();
     });
   });
 
@@ -4282,19 +4204,6 @@ describe('shipIssue (direct)', () => {
     expect(events).toContain('sandbox disabled by config/FACTORY_SANDBOX');
   });
 
-  it('passes the docker-sandbox descriptor to setupWorktree without a speculative sandbox log when sandbox.runtime is docker-sandbox', async () => {
-    h.factoryConfig = { ...h.factoryConfig, sandbox: { ...h.factoryConfig.sandbox, runtime: 'docker-sandbox' } };
-    await shipIssue(5, {}, ctx());
-    const events = readFileSync(paths().events, 'utf-8');
-    // createMicroVm (not the CLI) owns the outcome-driven 'sandbox'/'sandbox-unavailable'
-    // events; setupWorktree is mocked here, so neither fires — the CLI must not log a
-    // premature "active" event before the microVM actually exists.
-    expect(events).not.toContain('docker-sandbox microVM active for lane');
-    expect(vi.mocked(setupWorktree).mock.calls.at(-1)?.[4]).toEqual(
-      expect.objectContaining({ runtime: 'docker-sandbox' }),
-    );
-  });
-
   it('activates the sandbox policy and logs the degraded-egress warning when a sandbox runtime is available', async () => {
     h.execSyncImpl = (cmd: string) => {
       if (cmd.includes('command -v sandbox-exec') || cmd.includes('command -v firejail')) return '/usr/bin/tool';
@@ -4308,7 +4217,7 @@ describe('shipIssue (direct)', () => {
   });
 
   it('stamps the resolved sandboxRuntime and running reworkRoundCount onto each cost row (#655)', async () => {
-    h.factoryConfig = { ...h.factoryConfig, sandbox: { ...h.factoryConfig.sandbox, runtime: 'docker-sandbox' } };
+    h.factoryConfig = { ...h.factoryConfig, sandbox: { ...h.factoryConfig.sandbox, runtime: 'firejail' } };
     h.checkResult = { passed: true, summary: { results: [], failures: 0 }, reworkRounds: 2 };
 
     await shipIssue(5, {}, ctx());
@@ -4318,7 +4227,7 @@ describe('shipIssue (direct)', () => {
       .split('\n')
       .map((line) => JSON.parse(line));
     expect(costs).toHaveLength(1);
-    expect(costs[0].sandboxRuntime).toBe('docker-sandbox');
+    expect(costs[0].sandboxRuntime).toBe('firejail');
     expect(costs[0].reworkRoundCount).toBe(2);
   });
 
@@ -4527,7 +4436,6 @@ describe('CliExitError (direct command invocation)', () => {
         branch,
         worktree,
         `origin/${branch}`,
-        undefined,
         expect.any(Function),
       );
       expect(commands).toContain('git rebase origin/main');

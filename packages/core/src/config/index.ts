@@ -152,14 +152,13 @@ const FactoryConfigSchema = z.object({
   sandbox: z
     .object({
       enabled: z.boolean().default(true),
-      runtime: z.enum(['auto', 'sandbox-exec', 'firejail', 'docker-sandbox', 'none']).default('auto'),
+      runtime: z.enum(['auto', 'sandbox-exec', 'firejail', 'none']).default('auto'),
       network: z
         .object({ allow: z.array(z.string()).default(['api.anthropic.com', 'github.com']) })
         .default({ allow: ['api.anthropic.com', 'github.com'] }),
       resources: z
         .object({ cpuMs: z.number().positive().default(300_000), memMb: z.number().positive().default(4096) })
         .default({ cpuMs: 300_000, memMb: 4096 }),
-      docker: z.object({ rolloutPercent: z.number().min(0).max(100).default(0) }).default({ rolloutPercent: 0 }),
       comment: z.string().optional(),
     })
     .default({
@@ -167,7 +166,6 @@ const FactoryConfigSchema = z.object({
       runtime: 'auto',
       network: { allow: ['api.anthropic.com', 'github.com'] },
       resources: { cpuMs: 300_000, memMb: 4096 },
-      docker: { rolloutPercent: 0 },
     }),
   filing: z
     .object({
@@ -313,6 +311,32 @@ function deepMergeConfig(base: Record<string, unknown>, overlay: Record<string, 
   return out;
 }
 
+const warnedRemovedSandboxKeyPaths = new Set<string>();
+
+/** The `docker-sandbox` runtime and its `sandbox.docker.rolloutPercent` A/B rollout were
+ *  removed in 2026-09: the runtime never contained anything (the microVM was created but no
+ *  command ever ran inside it). A config that still names them keeps loading, exactly as the
+ *  v1 config adapter does: `runtime: 'docker-sandbox'` maps to `'none'` — what it actually did —
+ *  and `sandbox.docker` is dropped, with a one-time warning per config path. Mutates `overlay`. */
+function migrateRemovedSandboxKeys(overlay: Record<string, unknown>, configPath: string): void {
+  const sandbox = overlay.sandbox;
+  if (!isPlainObject(sandbox)) return;
+  const removed: string[] = [];
+  if (sandbox.runtime === 'docker-sandbox') {
+    removed.push("sandbox.runtime 'docker-sandbox' (treated as 'none')");
+    overlay.sandbox = { ...sandbox, runtime: 'none' };
+  }
+  if ('docker' in sandbox) {
+    removed.push('sandbox.docker (ignored)');
+    overlay.sandbox = Object.fromEntries(Object.entries(asRecord(overlay.sandbox)).filter(([key]) => key !== 'docker'));
+  }
+  if (removed.length === 0 || warnedRemovedSandboxKeyPaths.has(configPath)) return;
+  warnedRemovedSandboxKeyPaths.add(configPath);
+  console.warn(
+    `factory: ${configPath} uses removed sandbox settings: ${removed.join(', ')}. The docker-sandbox runtime never contained anything; set sandbox.runtime to auto, firejail or sandbox-exec for real containment.`,
+  );
+}
+
 /** Load the effective FactoryConfig for a repo: the shipped defaults, with the runtime-policy
  *  keys of `<repoRoot>/.factory/config.json` (i.e. `getFactoryPaths(repoRoot).config`) merged
  *  over them. Returns the shipped defaults untouched when the file does not exist. A partial
@@ -337,6 +361,7 @@ export function loadFactoryConfigForRepo(configPath: string): FactoryConfig {
     if (key in raw) overlay[key] = raw[key];
   }
 
+  migrateRemovedSandboxKeys(overlay, configPath);
   const merged = deepMergeConfig(asRecord(defaultFactoryConfig), overlay);
   const result = FactoryConfigSchema.safeParse(merged);
   if (!result.success) {

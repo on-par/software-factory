@@ -13,7 +13,6 @@ describe('RunPolicy', () => {
         runtime: 'auto',
         network: { allow: [] },
         resources: { cpuMs: 1, memMb: 1 },
-        docker: { rolloutPercent: 0 },
       },
       budget: { perIssueCapUsd: 5 },
       effective: { localOnly: false, allowExperimental: false, codexDisabled: false, branchPrefix: 'ship-it' },

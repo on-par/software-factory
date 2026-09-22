@@ -5,10 +5,7 @@
 // worktree + known state dirs and gates network by an allowlist. Per-host
 // network filtering is not expressible in either runtime without a proxy —
 // see resolveSandboxPolicy's caller for the 'sandbox-degraded' warning this
-// implies when the allowlist is non-empty. `docker-sandbox` is a selectable
-// runtime backed by a microVM lifecycle (create/mount/teardown, #653) owned by
-// utils/microvm.ts and driven from setupWorktree/cleanupWorktree; the VM itself is
-// the containment boundary, so it is not a command prefix and wraps nothing here.
+// implies when the allowlist is non-empty.
 
 import { homedir, tmpdir } from 'node:os';
 import { resolve } from 'node:path';
@@ -18,20 +15,14 @@ import { HarnessError } from '../harness/index.js';
 import { isCommandAvailable } from '../models/index.js';
 import { shellEscape } from '../utils/index.js';
 
-export type SandboxRuntime = 'sandbox-exec' | 'firejail' | 'docker-sandbox' | 'none';
+export type SandboxRuntime = 'sandbox-exec' | 'firejail' | 'none';
 
 /** The configurable form of SandboxRuntime: the concrete runtimes plus 'auto',
  *  which defers to host detection. This is what `sandbox.runtime` in
  *  .factory/config.json and FACTORY_SANDBOX_RUNTIME accept. */
 export type SandboxRuntimeSetting = SandboxRuntime | 'auto';
 
-const SANDBOX_RUNTIME_SETTINGS: readonly SandboxRuntimeSetting[] = [
-  'auto',
-  'sandbox-exec',
-  'firejail',
-  'docker-sandbox',
-  'none',
-];
+const SANDBOX_RUNTIME_SETTINGS: readonly SandboxRuntimeSetting[] = ['auto', 'sandbox-exec', 'firejail', 'none'];
 
 export interface SandboxPolicy {
   runtime: SandboxRuntime;
@@ -50,15 +41,11 @@ export interface SandboxPolicy {
 
 export type SandboxEventType = 'sandbox_violation' | 'resource_limit' | 'sandbox_auth_denied';
 
-/** Which sandbox runtime (if any) is usable on this host.
- *  `includeDockerSandbox` is opt-in and defaults to false: docker-sandbox has no VM
- *  lifecycle yet (#653), so the `auto` path must never select it — see the ADR. */
+/** Which sandbox runtime (if any) is usable on this host. */
 export function detectSandboxRuntime(
   platform: NodeJS.Platform,
   isAvailable: (cmd: string) => boolean = isCommandAvailable,
-  opts: { includeDockerSandbox?: boolean } = {},
 ): SandboxRuntime {
-  if (opts.includeDockerSandbox === true && isAvailable('sbx')) return 'docker-sandbox';
   if (platform === 'darwin' && isAvailable('sandbox-exec')) return 'sandbox-exec';
   if (platform === 'linux' && isAvailable('firejail')) return 'firejail';
   return 'none';
@@ -72,8 +59,7 @@ function sandboxRuntimeFromEnv(env: NodeJS.ProcessEnv): SandboxRuntimeSetting | 
 /** Resolves the concrete runtime for one run. FACTORY_SANDBOX_RUNTIME wins over the
  *  config field (mirroring FACTORY_SANDBOX over `sandbox.enabled`); an unrecognized env
  *  value is ignored, exactly as FACTORY_SANDBOX ignores anything that is not 0 or 1.
- *  Only 'auto' probes the host — an explicit runtime is honored verbatim so an operator
- *  opting into docker-sandbox is never silently downgraded. */
+ *  Only 'auto' probes the host — an explicit runtime is honored verbatim. */
 export function resolveSandboxRuntime(
   configured: SandboxRuntimeSetting | undefined,
   opts: {
@@ -86,35 +72,6 @@ export function resolveSandboxRuntime(
   const setting = sandboxRuntimeFromEnv(env) ?? configured ?? 'auto';
   if (setting !== 'auto') return setting;
   return detectSandboxRuntime(opts.platform ?? process.platform, opts.isAvailable ?? isCommandAvailable);
-}
-
-/** FNV-1a hash of a lane ID reduced to a stable 0..99 bucket. Deterministic across
- *  processes so the same lane always lands in the same A/B cohort (#655). */
-function laneHashBucket(laneId: string): number {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < laneId.length; i++) {
-    h ^= laneId.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0) % 100;
-}
-
-/** Deterministic A/B cohort assignment (#655). Returns 'docker-sandbox' when this lane
- *  falls in the rollout bucket, else undefined. Only ever *promotes* a lane into the
- *  docker-sandbox cohort — it never picks another runtime. */
-export function resolveRolloutRuntime(
-  laneId: string | undefined,
-  rolloutPercent: number,
-): 'docker-sandbox' | undefined {
-  if (!laneId) return undefined;
-  if (!(rolloutPercent > 0)) return undefined;
-  return laneHashBucket(laneId) < Math.min(100, rolloutPercent) ? 'docker-sandbox' : undefined;
-}
-
-/** True when the runtime is pinned by env or explicit config (not 'auto'), meaning the
- *  #655 rollout must not touch it (#655). */
-function isSandboxRuntimePinned(configured: SandboxRuntimeSetting | undefined, env: NodeJS.ProcessEnv): boolean {
-  return sandboxRuntimeFromEnv(env) !== undefined || (configured !== undefined && configured !== 'auto');
 }
 
 function sandboxDisabled(
@@ -145,7 +102,6 @@ export function resolveSandboxPolicy(
     isAvailable?: (cmd: string) => boolean;
     homedir?: string;
     tmpdir?: string;
-    laneId?: string;
   },
 ): SandboxPolicy | undefined {
   const env = opts.env ?? process.env;
@@ -157,10 +113,6 @@ export function resolveSandboxPolicy(
   const tmp = opts.tmpdir ?? tmpdir();
 
   const runtime = resolveSandboxRuntime(cfg.runtime, { env, platform, isAvailable });
-  const rollout = isSandboxRuntimePinned(cfg.runtime, env)
-    ? undefined
-    : resolveRolloutRuntime(opts.laneId, cfg.docker?.rolloutPercent ?? 0);
-  const effectiveRuntime = rollout ?? runtime;
 
   const writablePaths = dedupeAbsolutePaths([
     opts.worktree,
@@ -188,7 +140,7 @@ export function resolveSandboxPolicy(
   const writableFilePrefixes = dedupeAbsolutePaths([resolve(home, '.claude.json')]);
 
   return {
-    runtime: effectiveRuntime,
+    runtime,
     worktree: opts.worktree,
     writablePaths,
     writableFilePrefixes,
@@ -231,10 +183,7 @@ ${prefixRules}
 /** Wraps `cmd` with the platform sandbox + resource-limit prefix. Pure —
  *  runtime 'none' returns cmd unchanged. */
 export function wrapCommandInSandbox(cmd: string, policy: SandboxPolicy): string {
-  // docker-sandbox is a VM runtime, not a command prefix; its create/teardown lifecycle
-  // is owned by utils/microvm.ts (#653). It wraps nothing here — and must never fall
-  // through to the firejail branch below.
-  if (policy.runtime === 'none' || policy.runtime === 'docker-sandbox') return cmd;
+  if (policy.runtime === 'none') return cmd;
 
   const cpuSeconds = Math.ceil(policy.cpuMs / 1000);
   const ulimitPrefix =

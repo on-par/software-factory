@@ -373,14 +373,6 @@ const INTERNAL_API_KEYS = [
   'logEvent',
   'readCosts',
   'setupWorktree',
-  // docker-sandbox microVM lifecycle (#653)
-  'createMicroVm',
-  'microVmName',
-  'removeMicroVm',
-  'worktreeSandboxFor',
-  // docker-sandbox orphan microVM scan + reap (#1527)
-  'listMicroVms',
-  'reapOrphanMicroVm',
   'shellEscape',
   'slugify',
   'watchChecks',

@@ -25,7 +25,6 @@ import { CLAIMED_BY_LABEL_PREFIX, PARKED_LABEL } from '../queue/github-queue.js'
 import { findStaleClaims } from '../queue/stale-claims.js';
 import { execGit } from './git-exec.js';
 import { branchPrefixSlug, shellEscape } from './index.js';
-import { removeMicroVm, type WorktreeSandbox } from './microvm.js';
 
 export type GcReason =
   'merged' | 'remote-gone' | 'ttl-expired' | 'issue-closed' | 'issue-parked' | 'issue-not-found' | 'no-active-claim';
@@ -118,11 +117,6 @@ export interface SweepDeps {
   log?: (type: EventKind, msg: string) => void;
   /** When present (with opts.repo), merged/close status is sourced from GitHub; absent or failing ⇒ local evidence only. */
   octokit?: Pick<Octokit, 'rest'>;
-  /** The repo's current docker-sandbox descriptor (runtime + authPaths), or undefined for every
-   *  other runtime. A reaped candidate may have been provisioned under a different runtime than
-   *  today's config, but removeMicroVm is a no-op unless `runtime === 'docker-sandbox'` and the
-   *  named VM exists, so passing today's descriptor for every candidate is safe and idempotent. */
-  sandbox?: WorktreeSandbox;
   /** Dedup tracker for resolveIssueDisposition's lookup-failure warning (see IssueWarnDedup).
    *  Defaults to a module-level singleton shared across every sweep in the process; tests should
    *  inject a fresh instance to avoid bleeding suppression state across cases. */
@@ -521,7 +515,6 @@ export async function sweepWorktrees(
     now = () => Date.now(),
     log = () => {},
     octokit,
-    sandbox,
     issueWarnDedup = defaultIssueWarnDedup,
   } = deps;
   const { repoRoot, ttlDays, dryRun = false, repo } = opts;
@@ -795,10 +788,6 @@ export async function sweepWorktrees(
       } catch (err: any) {
         log('warn', `failed to scrub ${filePath}: ${err?.message ?? String(err)}`);
       }
-    }
-
-    if (sandbox) {
-      await removeMicroVm({ ...sandbox, worktreePath: candidate.path, log });
     }
 
     if (candidate.action === 'quarantine') {

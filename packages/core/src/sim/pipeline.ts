@@ -295,7 +295,6 @@ async function runSimIssue(
       runtime: 'auto',
       network: { allow: [] },
       resources: { cpuMs: 300_000, memMb: 4096 },
-      docker: { rolloutPercent: 0 },
     },
     budget: {},
     effective: { localOnly: false, allowExperimental: false, codexDisabled: false, branchPrefix: 'ship-it' },
