@@ -424,13 +424,6 @@ const INTERNAL_API_KEYS = [
   'writePortFile',
   // Daemon lane state resolution (#843)
   'createDaemonLaneContext',
-  // Daemon per-repo orchestration dispatch (#1041)
-  'runDaemonRepo',
-  // Daemon in-process engine supervisor (#1178)
-  'DEFAULT_STALE_THRESHOLD_MS',
-  'DEFAULT_SUPERVISOR_POLL_MS',
-  'superviseActiveRepos',
-  'superviseEngine',
   // Daemon attach gate (#778)
   'attachRepo',
   'parseRemoteSlug',

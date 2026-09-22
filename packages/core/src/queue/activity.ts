@@ -3,15 +3,13 @@
 // from RunPhaseSnapshot.lastActivityAt (../run/phase-snapshot.ts, #1336), not from the
 // queue file's own mtime: that mtime is shared across every entry and gets touched by
 // unrelated decomposition rewrites (rewriteQueueForDecomposition, ./index.ts), so it
-// can't tell "this issue is actively running" from "some other entry changed". This
-// mirrors the identical stale-heartbeat pattern in ../daemon/engine-supervisor.ts. Read-
-// only: never rewrites the queue file (see ADR-0086).
+// can't tell "this issue is actively running" from "some other entry changed". Read-only:
+// never rewrites the queue file (see ADR-0086).
 
 import { phaseSnapshotFile, readPhaseSnapshot, type RunPhaseSnapshot } from '../run/phase-snapshot.js';
 import type { QueueEntry } from './index.js';
 
-/** No heartbeat within this window => the entry is presented as stale, not active
- *  (same value as DEFAULT_STALE_THRESHOLD_MS in ../daemon/engine-supervisor.ts). */
+/** No heartbeat within this window => the entry is presented as stale, not active. */
 export const DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS = 15 * 60_000;
 
 /** An active queue entry paired with the per-issue snapshot evidence that made it
