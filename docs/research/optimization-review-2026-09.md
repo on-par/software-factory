@@ -584,8 +584,19 @@ owner must choose finish vs. delete. **KEEP** = looks unfinished but is used or 
 
 ### 8.1 Removed on this branch
 
-Items 1–5 above. Each removal was re-verified with grep before deletion and the full `bash scripts/verify.sh` gate
-was run afterwards (see the commit message for results).
+Items 1–5 above: 38 files, about 4,240 lines deleted. The ProjectV2 removal also took out the nightly
+`phases/project-board-queue.integration.test.ts`, four event kinds that only those modules emitted
+(`queue_reprioritized`, `queue_rationale_comment_failed`, `project_queue_refresh_{failed,succeeded}`), and the
+`QueueReprioritizationRecord` type. I grepped every symbol before deleting it and found no non-test consumer.
+
+Gate: format, build, typecheck, lint, knip, coverage-ratchet and the stub eval all pass. 5,854 tests pass. Four tests
+fail, and they fail identically on the unmodified base commit: three chmod-unreadable tests and one
+process-group kill test. They fail because the audit sandbox runs as root, not because of these removals. I changed
+no coverage thresholds.
+
+**Follow-up:** ADR-0067 ("execution state … never written to the board") names the deleted
+`createProjectBoardStatusWriter` and `queue/project-board-boundary.test.ts` as its enforcement. Mark it Superseded
+(or re-point it at `QueueBackend`) in the next ADR pass.
 
 ### 8.2 Stale remote branches (not deleted — needs the owner)
 

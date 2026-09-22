@@ -81,4 +81,3 @@ export {
 } from './sim/index.js';
 export type { StubModelExecutorOptions } from './router/stub.js';
 export { StubModelExecutor } from './router/stub.js';
-export { simWorkspace } from './run/ports.js';

@@ -66,7 +66,6 @@ readiness-conformance checker named in epic #464 consume them in later stories.
 - `hosted/` — provider-session authority bundles for hosted jobs
 - `ingest/` — always-on ingestion of ready issues into the queue
 - `kpis/` — pure factory-health KPI aggregation from events and costs
-- `projects/` — GitHub ProjectV2 queue GraphQL client and live poller
 - `proxy/` — opt-in loopback reverse proxy with stable per-lane URLs
 - `queue/` — proposed-queue validation for `factory triage accept`
 - `readiness/` — pure readiness scoring for GitHub issue bodies

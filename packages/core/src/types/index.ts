@@ -238,17 +238,6 @@ export interface ReadinessInfo {
   sizeReason?: string;
 }
 
-/** Structured payload carried on `queue_reprioritized` events (#869). */
-export interface QueueReprioritizationRecord {
-  issueId: string;
-  issueNumber: number;
-  field: 'lane' | 'order';
-  priorValue: string | number;
-  newValue: string | number;
-  actorType: 'human' | 'daemon';
-  rationale: string | null;
-}
-
 export interface FactoryEvent {
   ts: string;
   type: EventKind;
@@ -269,7 +258,6 @@ export interface FactoryEvent {
   evidence?: EvidencePack;
   rework?: ReworkInfo;
   readiness?: ReadinessInfo;
-  queueReprioritization?: QueueReprioritizationRecord;
   model?: string;
   tokens?: { input: number; output: number };
   durationMs?: number;

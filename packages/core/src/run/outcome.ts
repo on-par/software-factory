@@ -4,9 +4,8 @@ export type ParkReason = Extract<EventKind, 'escalate' | 'timeout' | 'fail' | 'c
 
 export type BuildRoute = 'codex' | 'claude' | 'opencode';
 
-/** A run's terminal outcome. Only the `parked` variant is produced today (by the CLI's
- *  LaneParkError); `shipped` / `ready` / `escalated` are defined here for later stories
- *  (#4, #5) that re-point the CLI supervisor and the sim onto this union. */
+/** A run's terminal outcome. `runIssue` returns `ready` / `escalated` / `parked`, and the
+ *  CLI supervisor branches on every variant (treating `ready` and `shipped` alike). */
 export type RunOutcome =
   | { state: 'shipped'; route: BuildRoute; branch: string; reworkRounds: number; prNumber: number }
   | { state: 'ready'; route: BuildRoute; branch: string; reworkRounds: number; prNumber?: number }

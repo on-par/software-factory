@@ -82,23 +82,6 @@ export { CliModelExecutor } from './router/index.js';
 export type { PlanPromptOpts } from './phases/plan.js';
 export { buildPlanPrompt } from './phases/plan.js';
 
-// Board-constrained local lane dispatch (#848)
-export type {
-  BoardQueueDispatcher,
-  BoardQueueOrdering,
-  LocalLaneCandidate,
-  QueueIntentReader,
-} from './phases/board-queue-dispatch.js';
-export { createBoardQueueDispatcher } from './phases/board-queue-dispatch.js';
-
-// ProjectV2 queue-intent scheduler (#867)
-export type {
-  BoardQueueScheduler,
-  BoardQueueSchedulerOptions,
-  ProjectQueueProjectionReader,
-} from './phases/board-queue-scheduler.js';
-export { createBoardQueueScheduler } from './phases/board-queue-scheduler.js';
-
 // Local-small harness
 export type {
   OvernightItemOutcome,
@@ -116,15 +99,10 @@ export type {
   LocalSmallDryRunInput,
   LocalSmallDryRunResult,
   LocalSmallLimits,
-  LocalSmallPatchChange,
-  LocalSmallPatchProposal,
-  LocalSmallPatchStepInput,
-  LocalSmallPatchStepResult,
-  LocalSmallPatchStepStatus,
   LocalSmallStep,
   LocalSmallStepPlan,
 } from './local-small/stepwise.js';
-export { applyLocalSmallPatchStep, createLocalSmallDryRun } from './local-small/stepwise.js';
+export { createLocalSmallDryRun } from './local-small/stepwise.js';
 
 // Eval internals
 export { judgeSpec, median, runJudgeSamples, scoreSpec } from './eval/index.js';
@@ -359,30 +337,6 @@ export type {
 } from './utils/green-prs.js';
 export { createOctokitGreenPrClient, findUnmergedGreenPrs, owningIssueForPr } from './utils/green-prs.js';
 
-// Read-only GitHub ProjectV2 queue-intent polling (#847)
-export type {
-  ProjectBoardConfig,
-  ProjectBoardPoller,
-  ProjectBoardPollerOptions,
-  QueueIntentItem,
-  QueueIntentSnapshot,
-  QueueIntentStatus,
-} from './queue/project-board-poller.js';
-export { createProjectBoardPoller, DEFAULT_PROJECT_BOARD_POLL_MS } from './queue/project-board-poller.js';
-
-// Daemon-ready ProjectV2 queue intent projection (#866)
-export type {
-  ProjectQueuePoller,
-  ProjectQueuePollerOptions,
-  ProjectQueueProjection,
-} from './projects/project-queue-poller.js';
-export { createProjectQueuePoller, DEFAULT_PROJECT_QUEUE_POLL_MS } from './projects/project-queue-poller.js';
-export type { ProjectQueueStatus } from './projects/project-queue-reader.js';
-
-// gh-authenticated ProjectV2 queue GraphQL client + live poller (#1046)
-export type { GithubProjectQueuePollerOptions, ProjectGraphqlClient } from './projects/github-project-graphql.js';
-export { createGithubProjectQueuePoller, createOctokitGraphqlClient } from './projects/github-project-graphql.js';
-
 // Single-poller cached subscription-usage snapshot (#1029)
 export type {
   UsageCoordinator,
@@ -421,25 +375,6 @@ export { createLocalUsageCoordinator } from './usage/local-coordinator.js';
 export type { SelectUsageCoordinatorOptions } from './usage/select-coordinator.js';
 export { selectUsageCoordinator } from './usage/select-coordinator.js';
 
-// Local queue reprioritization audit records (#869)
-export type { QueueReprioritizationRecord } from './types/index.js';
-export type { QueueRationaleAuditor } from './queue/reprioritization-audit.js';
-export { createQueueRationaleAuditor } from './queue/reprioritization-audit.js';
-
-// Publish only coarse daemon lifecycle status to configured ProjectV2 items (#868)
-export type { ProjectStatusWriter, ProjectStatusWriterOptions } from './projects/project-status-writer.js';
-export { createProjectStatusWriter } from './projects/project-status-writer.js';
-
-// Coarse ProjectV2 status writing (#849)
-export type {
-  ProjectBoardCoarseStatus,
-  ProjectBoardStatusConfig,
-  ProjectBoardStatusItem,
-  ProjectBoardStatusValues,
-  ProjectBoardStatusWriter,
-  ProjectBoardStatusWriterOptions,
-} from './queue/project-board-status-writer.js';
-export { createProjectBoardStatusWriter } from './queue/project-board-status-writer.js';
 // Daemon detach gate (#780)
 export type { BeginDetachResult, DetachRepoDeps, DrainOutcome } from './daemon/repos-detach.js';
 export {

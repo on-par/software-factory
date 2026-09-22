@@ -281,7 +281,7 @@ export type { RunBudget, RunPolicy } from './run/policy.js';
 
 // Run ports (#674)
 export type { Environment, Workspace } from './run/ports.js';
-export { acquireLaneEnvironment, localOnlyWorkspace, worktreeWorkspace } from './run/ports.js';
+export { localOnlyWorkspace, worktreeWorkspace } from './run/ports.js';
 
 // Run composition (#675)
 export type { RunPorts, RunRequest } from './run/run-issue.js';
