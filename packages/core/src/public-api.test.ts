@@ -288,30 +288,8 @@ const PUBLIC_API_KEYS = [
 ];
 
 const INTERNAL_API_KEYS = [
-  // Failure fingerprint & evidence
-  'captureFailure',
-  'fingerprintFailure',
-  'normalizeFailureMessage',
-  // Auto-file a fingerprinted bug (#373)
-  'createOctokitFilingClient',
-  'DEFAULT_BUG_LABELS',
-  'DEFAULT_INTERNAL_REPO',
-  'fileBug',
-  'findMatchingIssue',
-  'fingerprintMarker',
-  'renderBugBody',
-  'renderOccurrenceComment',
-  'resolveTargetRepo',
-  // Filing policy: when to file, caps, and self-fix labeling (#374)
-  'DEFAULT_FILING_POLICY',
-  'emptyLedger',
-  'evaluateFilingPolicy',
+  // Self-fix merge gate (#374)
   'isAutoMergeBlocked',
-  'labelsFor',
-  'recordFiled',
-  'recordPark',
-  'rollDay',
-  'touchesSensitiveScope',
   // Config
   'resolveFilingPolicy',
   'resolveBranchPrefix',

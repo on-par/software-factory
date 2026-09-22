@@ -19,7 +19,6 @@ import { runConfigSource } from './run-config-source.js';
 
 import type { FilingPolicy } from '../filing/policy.js';
 import { KNOWN_HARNESS_IDS } from '../harness/catalog.js';
-import type { FailoverReason } from '../types/index.js';
 
 import { ModelEffortsSchema } from './effort.js';
 
@@ -172,28 +171,10 @@ const FactoryConfigSchema = z.object({
     }),
   filing: z
     .object({
-      enabled: z.boolean().default(true),
-      excludeReasons: z.array(z.string()).default(['rate_limit', 'usage_cap', 'timeout', 'verify_failed']),
-      repeatThreshold: z.number().int().positive().default(3),
-      maxPerRun: z.number().int().positive().default(5),
-      maxPerDay: z.number().int().positive().default(20),
       selfFixLabel: z.string().default('no-auto-merge'),
-      bugLabels: z.array(z.string()).default(['bug']),
-      sensitivePaths: z
-        .array(z.string())
-        .default(['packages/core/', 'packages/config/', 'packages/cli/', 'scripts/', '.github/']),
       comment: z.string().optional(),
     })
-    .default({
-      enabled: true,
-      excludeReasons: ['rate_limit', 'usage_cap', 'timeout', 'verify_failed'],
-      repeatThreshold: 3,
-      maxPerRun: 5,
-      maxPerDay: 20,
-      selfFixLabel: 'no-auto-merge',
-      bugLabels: ['bug'],
-      sensitivePaths: ['packages/core/', 'packages/config/', 'packages/cli/', 'scripts/', '.github/'],
-    }),
+    .default({ selfFixLabel: 'no-auto-merge' }),
   ingest: z
     .object({
       enabled: z.boolean().default(false),
@@ -561,18 +542,7 @@ export function resolveMergePolicy(
 }
 
 export function resolveFilingPolicy(config: FactoryConfig): FilingPolicy {
-  const f = config.filing;
-  return {
-    enabled: f.enabled,
-    // Validated as free-form strings by the Zod schema; narrowed here to the FailoverReason union.
-    excludeReasons: f.excludeReasons as FailoverReason[],
-    repeatThreshold: f.repeatThreshold,
-    maxPerRun: f.maxPerRun,
-    maxPerDay: f.maxPerDay,
-    selfFixLabel: f.selfFixLabel,
-    bugLabels: f.bugLabels,
-    sensitivePaths: f.sensitivePaths,
-  };
+  return { selfFixLabel: config.filing.selfFixLabel };
 }
 
 // ---------- Factory state paths ----------

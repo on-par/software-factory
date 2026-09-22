@@ -77,17 +77,7 @@ export interface FactoryDefaults {
     docker?: { rolloutPercent: number };
     comment?: string;
   };
-  filing: {
-    enabled: boolean;
-    excludeReasons: string[];
-    repeatThreshold: number;
-    maxPerRun: number;
-    maxPerDay: number;
-    selfFixLabel: string;
-    bugLabels: string[];
-    sensitivePaths: string[];
-    comment?: string;
-  };
+  filing: { selfFixLabel: string; comment?: string };
   ingest: { enabled: boolean; label: string; lane: string; maxPerCycle: number; comment?: string };
   environment: {
     ports: { enabled: boolean; range: [number, number]; comment?: string };
@@ -625,16 +615,8 @@ export const defaultFactoryConfig: FactoryDefaults = {
       'Containment for agentic build runs. Disable per-run with --no-sandbox or FACTORY_SANDBOX=0. Empty network.allow denies all egress; non-empty leaves egress open (per-host filtering is logged as degraded in v1). Set sandbox.runtime (auto|sandbox-exec|firejail|docker-sandbox|none) or FACTORY_SANDBOX_RUNTIME to pick a runtime; auto probes the host. docker-sandbox is reserved for the microVM runtime and does not contain anything yet (#653). sandbox.docker.rolloutPercent (0-100) deterministically promotes that percentage of unpinned lanes into the docker-sandbox cohort for A/B evidence (#655).',
   },
   filing: {
-    enabled: true,
-    excludeReasons: ['rate_limit', 'usage_cap', 'timeout', 'verify_failed'],
-    repeatThreshold: 3,
-    maxPerRun: 5,
-    maxPerDay: 20,
     selfFixLabel: 'no-auto-merge',
-    bugLabels: ['bug'],
-    sensitivePaths: ['packages/core/', 'packages/config/', 'packages/cli/', 'scripts/', '.github/'],
-    comment:
-      'Guardrails for auto-filing self-defects. excludeReasons are never filed unless the same fingerprint parks >= repeatThreshold times. maxPerRun/maxPerDay cap new bugs. Bugs whose origin is factory-internal get selfFixLabel so the merge path refuses auto-merge (human approval required).',
+    comment: 'A PR carrying selfFixLabel is never auto-merged: the merge path waits for human approval instead.',
   },
   ingest: {
     enabled: false,
