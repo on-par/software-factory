@@ -358,6 +358,8 @@ function paths() {
 
 function defaultOctokit() {
   return {
+    // Single-page stand-in: every fake listing here fits on one page.
+    paginate: vi.fn(async (method: any, params: any) => (await method(params)).data),
     rest: {
       issues: {
         get: vi.fn(async () => ({ data: { title: 'Fix the bug' } })),
