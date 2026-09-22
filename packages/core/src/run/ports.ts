@@ -1,19 +1,9 @@
 // packages/core/src/run/ports.ts — Workspace + Environment ports (#674): names the
-// workspace-provisioning and lane-environment seams that today are satisfied only by
-// convention, and adapts the three existing workspace impls (locked CLI worktree, sim
-// throwaway workspace, local-only passthrough) plus the CLI's lease/pgid/release
-// primitives to conform. No existing caller is rewired — that is a later story.
+// workspace-provisioning and lane-environment seams runIssue depends on, and adapts
+// the locked CLI worktree and local-only passthrough workspaces to the Workspace
+// port. The CLI supplies its own Environment (port lease + pgid tracking + release).
 
 import type { EventKind } from '../events/kinds.js';
-import {
-  acquirePortLease,
-  type AcquirePortLeaseOptions,
-  laneEnv,
-  recordLeasePgid,
-  releasePortLease,
-} from '../environment/index.js';
-import { ProcessGroupTracker } from '../environment/process-groups.js';
-import type { SimWorkspace } from '../sim/workspace.js';
 import type { WorktreeSandbox } from '../utils/microvm.js';
 import { cleanupWorktree, setupWorktree } from '../utils/index.js';
 import type { LocalOnlyPolicy } from '../work/local-only.js';
@@ -66,38 +56,8 @@ export async function worktreeWorkspace(opts: {
   };
 }
 
-/** Sim throwaway-workspace adapter: the sim's repoRoot IS the working tree; its
- *  dispose already removes every directory it created. */
-export function simWorkspace(sim: SimWorkspace): Workspace {
-  return { path: sim.repoRoot, dispose: () => sim.dispose() };
-}
-
 /** Local-only passthrough adapter: the caller-provided workspace is used as-is and
  *  never torn down (factory did not create it). */
 export function localOnlyWorkspace(policy: LocalOnlyPolicy): Workspace {
   return { path: policy.workspace, dispose: async () => {} };
-}
-
-/** Lane-environment adapter composing exactly the primitives the CLI orchestrates
- *  inline (acquirePortLease + ProcessGroupTracker + recordLeasePgid +
- *  releasePortLease + laneEnv). Resolves to a fully-provisioned Environment, or
- *  throws — never a partial state. */
-export async function acquireLaneEnvironment(
-  opts: AcquirePortLeaseOptions & { tracker?: ProcessGroupTracker; baseUrl?: string; graceMs?: number },
-): Promise<Environment> {
-  const tracker = opts.tracker ?? new ProcessGroupTracker();
-  const lease = await acquirePortLease(opts);
-  const { registryFile, lockDir, worktreeId } = opts;
-  return {
-    port: lease.port,
-    env: () => laneEnv(lease.port, process.env, opts.baseUrl),
-    recordPgid(pgid: number): void {
-      tracker.track(pgid);
-      void recordLeasePgid({ registryFile, lockDir, worktreeId, pgid }).catch(() => {});
-    },
-    async release(): Promise<void> {
-      await tracker.killAll({ graceMs: opts.graceMs });
-      await releasePortLease({ registryFile, lockDir, worktreeId });
-    },
-  };
 }

@@ -69,7 +69,7 @@ async function defaultLastEventAt(context: DaemonLaneContext): Promise<number | 
 
 /** Supervises one in-process engine for one registry entry. Callers own
  *  start()/stop(); checkNow() is the deterministic seam the poll interval
- *  drives (mirrors project-board-poller). */
+ *  drives. */
 export function superviseEngine(
   entry: RepoRegistryListing,
   runEngine: EngineRunner,

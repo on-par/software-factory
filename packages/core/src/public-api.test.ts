@@ -143,7 +143,6 @@ const PUBLIC_API_KEYS = [
   'parkEvents',
   'parkReasonFor',
   // Run ports (#674)
-  'acquireLaneEnvironment',
   'localOnlyWorkspace',
   'worktreeWorkspace',
   // Run composition (#675)
@@ -306,14 +305,6 @@ const PUBLIC_API_KEYS = [
 ];
 
 const INTERNAL_API_KEYS = [
-  // Local queue reprioritization audit records (#869)
-  'createQueueRationaleAuditor',
-  // Daemon-ready ProjectV2 queue intent projection (#866)
-  'createProjectQueuePoller',
-  'DEFAULT_PROJECT_QUEUE_POLL_MS',
-  // gh-authenticated ProjectV2 queue GraphQL client + live poller (#1046)
-  'createGithubProjectQueuePoller',
-  'createOctokitGraphqlClient',
   // Single-poller cached subscription-usage snapshot (#1029)
   'createUsageCoordinator',
   'DEFAULT_USAGE_POLL_MS',
@@ -334,10 +325,6 @@ const INTERNAL_API_KEYS = [
   // Standalone local UsageCoordinator fallback (#1033)
   'createLocalUsageCoordinator',
   'selectUsageCoordinator',
-  // Coarse ProjectV2 status publishing (#868)
-  'createProjectStatusWriter',
-  // Coarse ProjectV2 status writing (#849)
-  'createProjectBoardStatusWriter',
   // Failure fingerprint & evidence
   'captureFailure',
   'fingerprintFailure',
@@ -394,7 +381,6 @@ const INTERNAL_API_KEYS = [
   // Phase helpers
   'buildPlanPrompt',
   // Local-small harness
-  'applyLocalSmallPatchStep',
   'createLocalSmallDryRun',
   'runOvernightQueue',
   // Eval internals
@@ -547,13 +533,6 @@ const INTERNAL_API_KEYS = [
   'createOctokitGreenPrClient',
   'findUnmergedGreenPrs',
   'owningIssueForPr',
-  // Read-only GitHub ProjectV2 queue-intent polling (#847)
-  'createProjectBoardPoller',
-  'DEFAULT_PROJECT_BOARD_POLL_MS',
-  // Board-constrained local lane dispatch (#848)
-  'createBoardQueueDispatcher',
-  // ProjectV2 queue-intent scheduler (#867)
-  'createBoardQueueScheduler',
   // Sandbox command wrapping — used by the CLI's doctor probe (#1008)
   'wrapCommandInSandbox',
 ];
@@ -567,7 +546,6 @@ const TESTING_API_KEYS = [
   'SimModelExecutor',
   'createSimOctokit',
   'createSimWorkspace',
-  'simWorkspace',
   'failOnCall',
   'realSimClock',
   'resolveLatencyMs',
