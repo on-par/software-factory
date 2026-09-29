@@ -2564,6 +2564,7 @@ export async function cmdQueueClear(opts: { dryRun?: boolean; yes?: boolean } = 
   const queue = createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo });
   const { report, exitCode, message } = await runQueueClear({
     previewClear: () => queue.previewClear(),
+    clear: () => queue.clear(),
     ...(opts.dryRun === undefined ? {} : { dryRun: opts.dryRun }),
     ...(opts.yes === undefined ? {} : { yes: opts.yes }),
   });
@@ -4518,10 +4519,10 @@ export async function main() {
   queue
     .command('clear')
     .description(
-      'Preview emptying the GitHub-backed queue: lists every factory:queued issue as would-clear or would-skip (claimed); never changes labels yet',
+      'Empty the GitHub-backed queue: removes factory:queued and factory:order:* from every unclaimed queued issue (lane labels kept; claimed issues skipped). Preview with --dry-run',
     )
     .option('--dry-run', 'Print the preview and exit 0 without changing any label')
-    .option('--yes', 'Confirm the clear (label removal lands in #1674; currently refuses with no writes)')
+    .option('--yes', 'Confirm and remove the queue labels')
     .action(async (opts: { dryRun?: boolean; yes?: boolean }) => {
       await cmdQueueClear(opts);
     });
