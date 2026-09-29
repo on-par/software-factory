@@ -4,6 +4,7 @@ import type { ContainerEngine } from '../hosted/container.js';
 import {
   isForkPullRequest,
   resolveReviewContainment,
+  REVIEW_CONTAINED_FLAG_HELP,
   REVIEW_CONTAINMENT_REFUSED_EXIT_CODE,
   runContainmentGatedReview,
   type ReviewPullRequestRepos,
@@ -78,6 +79,50 @@ describe('resolveReviewContainment', () => {
       ),
     ).toEqual({ kind: 'contained' });
   });
+
+  describe('forceContained (#1687)', () => {
+    it('routes a same-repo PR to containment when Docker is available', async () => {
+      const isAvailable = vi.fn(async () => true);
+      expect(await resolveReviewContainment(sameRepo, engineWith(isAvailable), { forceContained: true })).toEqual({
+        kind: 'contained',
+      });
+      expect(isAvailable).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['the probe reports unavailable', async () => false],
+      [
+        'the probe rejects',
+        async () => {
+          throw new Error('boom');
+        },
+      ],
+      ['the engine has no probe', undefined],
+    ])('refuses a same-repo PR when %s', async (_name, probe) => {
+      const decision = await resolveReviewContainment(sameRepo, engineWith(probe), { forceContained: true });
+      expect(decision).toMatchObject({ kind: 'refused', exitCode: 2 });
+      const message = decision.kind === 'refused' ? decision.message : '';
+      expect(message).toContain('containment is required');
+      expect(message).toContain('--contained');
+      expect(message).not.toContain(' comes from ');
+    });
+
+    it.each([[{ forceContained: false }], [{}], [undefined]])(
+      'keeps a same-repo PR on the host without probing for %j',
+      async (options) => {
+        const isAvailable = vi.fn(async () => false);
+        expect(await resolveReviewContainment(sameRepo, engineWith(isAvailable), options)).toEqual({ kind: 'host' });
+        expect(isAvailable).not.toHaveBeenCalled();
+      },
+    );
+
+    it('keeps the fork wording for a fork PR', async () => {
+      const decision = await resolveReviewContainment(fork, engineWith(), { forceContained: true });
+      const message = decision.kind === 'refused' ? decision.message : '';
+      expect(message).toContain('mallory/app');
+      expect(message).not.toContain('--contained');
+    });
+  });
 });
 
 describe('runContainmentGatedReview', () => {
@@ -138,5 +183,59 @@ describe('runContainmentGatedReview', () => {
     const s = spies();
     s.runOnHost.mockResolvedValue({ exitCode: 1 });
     expect(await runContainmentGatedReview({ pr: sameRepo, engine: engineWith(), ...s })).toEqual({ exitCode: 1 });
+  });
+
+  describe('forceContained (#1687)', () => {
+    it('runs a same-repo PR through the contained runner and propagates its exit code', async () => {
+      const s = spies();
+      s.runContained.mockResolvedValue({ exitCode: 1 });
+      const result = await runContainmentGatedReview({
+        pr: sameRepo,
+        engine: engineWith(async () => true),
+        forceContained: true,
+        ...s,
+      });
+      expect(result).toEqual({ exitCode: 1 });
+      expect(s.runContained).toHaveBeenCalledTimes(1);
+      expect(s.runOnHost).not.toHaveBeenCalled();
+      expect(s.write).not.toHaveBeenCalled();
+    });
+
+    it('refuses with exit 2 and runs nothing when Docker is unavailable', async () => {
+      const s = spies();
+      const result = await runContainmentGatedReview({
+        pr: sameRepo,
+        engine: engineWith(async () => false),
+        forceContained: true,
+        ...s,
+      });
+      expect(result).toEqual({ exitCode: REVIEW_CONTAINMENT_REFUSED_EXIT_CODE });
+      expect(s.write).toHaveBeenCalledTimes(1);
+      expect(s.write).toHaveBeenCalledWith(expect.stringContaining('containment is required'));
+      expect(s.runOnHost).not.toHaveBeenCalled();
+      expect(s.runContained).not.toHaveBeenCalled();
+    });
+
+    it('refuses without a contained runner and never runs on the host', async () => {
+      const s = spies();
+      const result = await runContainmentGatedReview({
+        pr: sameRepo,
+        engine: engineWith(async () => true),
+        forceContained: true,
+        runOnHost: s.runOnHost,
+        write: s.write,
+      });
+      expect(result).toEqual({ exitCode: 2 });
+      expect(s.write).toHaveBeenCalledWith(expect.stringContaining('containment is required'));
+      expect(s.write).toHaveBeenCalledWith(expect.stringContaining('--contained'));
+      expect(s.runOnHost).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('REVIEW_CONTAINED_FLAG_HELP', () => {
+  it('describes the docker requirement and the refusal', () => {
+    expect(REVIEW_CONTAINED_FLAG_HELP).toContain('Docker');
+    expect(REVIEW_CONTAINED_FLAG_HELP).toContain('exit 2');
   });
 });

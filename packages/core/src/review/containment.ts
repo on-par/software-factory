@@ -1,4 +1,4 @@
-// packages/core/src/review/containment.ts — fail-closed fork-PR containment gate (#1684).
+// packages/core/src/review/containment.ts — fail-closed fork-PR containment gate (#1684); `--contained` forces it for same-repo PRs (#1687).
 
 import type { ContainerEngine } from '../hosted/container.js';
 
@@ -19,6 +19,15 @@ export type ReviewContainmentDecision =
   | { kind: 'contained' }
   | { kind: 'refused'; exitCode: typeof REVIEW_CONTAINMENT_REFUSED_EXIT_CODE; message: string };
 
+export interface ReviewContainmentOptions {
+  /** `factory review --contained`: require containment even for a same-repo PR (#1687). */
+  forceContained?: boolean;
+}
+
+/** Help text for `factory review --contained` (#1687). */
+export const REVIEW_CONTAINED_FLAG_HELP =
+  'Run the checkers inside a disposable Docker container even for a same-repo PR; refuses (exit 2) if Docker is unavailable';
+
 export interface ContainmentGatedReviewDeps {
   pr: ReviewPullRequestRepos;
   engine: ContainerEngine;
@@ -26,6 +35,8 @@ export interface ContainmentGatedReviewDeps {
   runOnHost: () => Promise<{ exitCode: number }>;
   /** Contained review (#1685). When absent, a fork PR is refused rather than run on the host. */
   runContained?: () => Promise<{ exitCode: number }>;
+  /** Force containment for a same-repo PR (`factory review --contained`). Never falls back to the host. */
+  forceContained?: boolean;
   /** Sink for the refusal message (the CLI passes stderr). */
   write: (line: string) => void;
 }
@@ -52,29 +63,38 @@ function refusal(pr: ReviewPullRequestRepos, why: string): string {
   return `review refused: PR #${pr.number} comes from ${pr.headRepo?.trim() || 'an unknown head repository'}, not ${pr.baseRepo} — containment is required to review a fork PR, and ${why}. No fork code was checked out and no checker ran.`;
 }
 
+function forcedRefusal(pr: ReviewPullRequestRepos, why: string): string {
+  return `review refused: PR #${pr.number} — --contained was requested, so containment is required, and ${why}. No PR code was checked out and no checker ran.`;
+}
+
+function refusalFor(pr: ReviewPullRequestRepos, why: string): string {
+  return isForkPullRequest(pr) ? refusal(pr, why) : forcedRefusal(pr, why);
+}
+
 export async function resolveReviewContainment(
   pr: ReviewPullRequestRepos,
   engine: ContainerEngine,
+  options?: ReviewContainmentOptions,
 ): Promise<ReviewContainmentDecision> {
-  if (!isForkPullRequest(pr)) return { kind: 'host' };
+  if (options?.forceContained !== true && !isForkPullRequest(pr)) return { kind: 'host' };
   if (!(await probeAvailable(engine))) {
     return {
       kind: 'refused',
       exitCode: REVIEW_CONTAINMENT_REFUSED_EXIT_CODE,
-      message: refusal(pr, DOCKER_UNAVAILABLE_WHY),
+      message: refusalFor(pr, DOCKER_UNAVAILABLE_WHY),
     };
   }
   return { kind: 'contained' };
 }
 
 export async function runContainmentGatedReview(deps: ContainmentGatedReviewDeps): Promise<{ exitCode: number }> {
-  const decision = await resolveReviewContainment(deps.pr, deps.engine);
+  const decision = await resolveReviewContainment(deps.pr, deps.engine, { forceContained: deps.forceContained });
   if (decision.kind === 'host') return deps.runOnHost();
   if (decision.kind === 'refused') {
     deps.write(decision.message);
     return { exitCode: decision.exitCode };
   }
   if (deps.runContained) return deps.runContained();
-  deps.write(refusal(deps.pr, NO_RUNNER_WHY));
+  deps.write(refusalFor(deps.pr, NO_RUNNER_WHY));
   return { exitCode: REVIEW_CONTAINMENT_REFUSED_EXIT_CODE };
 }
