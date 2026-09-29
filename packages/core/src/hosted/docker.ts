@@ -59,6 +59,15 @@ export function createDockerEngine(options: DockerEngineOptions): ContainerEngin
   const laneImage = options.laneImage ?? 'node:20-alpine';
 
   return {
+    async isAvailable(): Promise<boolean> {
+      try {
+        await exec("docker info --format '{{.ServerVersion}}'", { timeoutMs: 10_000 });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+
     async prepareWorkspace(_jobId, payload, repoSlug, credential?: GitHubCredentialBundle): Promise<PreparedWorkspace> {
       const dir = await mkdtemp(join(options.rootDir ?? tmpdir(), 'sf-job-'));
       await writeFile(join(dir, payloadFilename), payload, 'utf-8');

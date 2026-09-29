@@ -94,6 +94,11 @@ export interface ContainerEngine {
    *  copies it into the already-created lane container — the container's code never
    *  comes from (or touches) the host worktree (#1536). */
   prepareLaneWorkspace(containerName: string, repoSlug: string): Promise<LaneWorkspacePrepared>;
+  /** Resolves true when the container runtime (Docker daemon) is reachable.
+   *  Optional so existing engines/fakes compile unchanged; callers that gate
+   *  untrusted code on containment MUST treat an absent probe as unavailable
+   *  (#1684). */
+  isAvailable?(): Promise<boolean>;
 }
 
 /** Backend a ship-it lane's workspace runs on. `'host'` (default) is the existing
