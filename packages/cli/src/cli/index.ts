@@ -2559,14 +2559,15 @@ export async function cmdQueueReconcile(opts: { lane?: string } = {}): Promise<v
   }
 }
 
-export async function cmdQueueClear(opts: { dryRun?: boolean; yes?: boolean } = {}): Promise<void> {
+export async function cmdQueueClear(opts: { dryRun?: boolean; yes?: boolean; lane?: string } = {}): Promise<void> {
   const [owner, repo] = (await getGitHubRepo()).split('/');
   const queue = createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo });
   const { report, exitCode, message } = await runQueueClear({
-    previewClear: () => queue.previewClear(),
-    clear: () => queue.clear(),
+    previewClear: () => queue.previewClear(opts.lane),
+    clear: () => queue.clear(opts.lane),
     ...(opts.dryRun === undefined ? {} : { dryRun: opts.dryRun }),
     ...(opts.yes === undefined ? {} : { yes: opts.yes }),
+    ...(opts.lane === undefined ? {} : { lane: opts.lane }),
   });
   console.log(report);
   if (exitCode !== 0) throw new CliExitError(message ?? 'factory: queue clear refused', exitCode);
@@ -4519,11 +4520,12 @@ export async function main() {
   queue
     .command('clear')
     .description(
-      'Empty the GitHub-backed queue: removes factory:queued and factory:order:* from every unclaimed queued issue (lane labels kept; claimed issues skipped). Preview with --dry-run',
+      'Empty the GitHub-backed queue: removes factory:queued and factory:order:* from every unclaimed queued issue (lane labels kept; claimed issues skipped). Preview with --dry-run; limit to one lane with --lane',
     )
     .option('--dry-run', 'Print the preview and exit 0 without changing any label')
     .option('--yes', 'Confirm and remove the queue labels')
-    .action(async (opts: { dryRun?: boolean; yes?: boolean }) => {
+    .option('--lane <lane>', 'Only clear queued issues in this lane (factory:lane:<lane>)')
+    .action(async (opts: { dryRun?: boolean; yes?: boolean; lane?: string }) => {
       await cmdQueueClear(opts);
     });
 

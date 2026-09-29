@@ -344,7 +344,7 @@ export interface QueueClearPreviewEntry {
 }
 
 export interface QueueClearPreview {
-  /** Every open factory:queued issue, ascending by issue number. */
+  /** Every open factory:queued issue (in `lane`, when one was given), ascending by issue number. */
   entries: QueueClearPreviewEntry[];
   wouldClear: number;
   wouldSkip: number;
@@ -363,7 +363,7 @@ export interface QueueClearEntry {
 }
 
 export interface QueueClearResult {
-  /** Every open factory:queued issue, ascending by issue number. */
+  /** Every open factory:queued issue (in `lane`, when one was given), ascending by issue number. */
   entries: QueueClearEntry[];
   cleared: number;
   skipped: number;
@@ -420,11 +420,13 @@ export interface GithubQueue {
   lanes(): Promise<string[]>;
   migrateLocalQueue(entries: readonly QueueEntry[]): Promise<void>;
   enqueue(lane: string, issues: readonly number[]): Promise<EnqueueResult[]>;
-  /** Read-only preview of what clearing the queue would touch: one list call, never writes. */
-  previewClear(): Promise<QueueClearPreview>;
-  /** Removes factory:queued and factory:order:* from every open unclaimed queued issue; leaves lane and every
-   *  other label; skips claimed issues with no writes. */
-  clear(): Promise<QueueClearResult>;
+  /** Read-only preview of what clearing the queue would touch: one list call, never writes. Covers every open
+   *  queued issue, or only those labelled `factory:lane:<lane>` when `lane` is given. */
+  previewClear(lane?: string): Promise<QueueClearPreview>;
+  /** Removes factory:queued and factory:order:* from every open unclaimed queued issue (or only those labelled
+   *  `factory:lane:<lane>` when `lane` is given); leaves lane and every other label; skips claimed issues with no
+   *  writes. */
+  clear(lane?: string): Promise<QueueClearResult>;
 }
 
 export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
@@ -604,13 +606,17 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     return results;
   }
 
-  async function previewClear(): Promise<QueueClearPreview> {
-    const issues = await client.listOpenIssuesWithLabels({ owner, repo, labels: [QUEUED_LABEL] });
+  function clearLabels(lane: string | undefined): string[] {
+    return lane === undefined ? [QUEUED_LABEL] : [QUEUED_LABEL, laneLabel(lane)];
+  }
+
+  async function previewClear(lane?: string): Promise<QueueClearPreview> {
+    const issues = await client.listOpenIssuesWithLabels({ owner, repo, labels: clearLabels(lane) });
     return classifyQueueClear(issues);
   }
 
-  async function clear(): Promise<QueueClearResult> {
-    const issues = await client.listOpenIssuesWithLabels({ owner, repo, labels: [QUEUED_LABEL] });
+  async function clear(lane?: string): Promise<QueueClearResult> {
+    const issues = await client.listOpenIssuesWithLabels({ owner, repo, labels: clearLabels(lane) });
     const sorted = [...issues].sort((a, b) => a.number - b.number);
     const entries: QueueClearEntry[] = [];
     for (const issue of sorted) {
