@@ -228,6 +228,7 @@ import { type QueueReader, runTui } from '@on-par/factory-tui';
 import chalk from 'chalk';
 import { Command } from 'commander';
 import { admissionStateReaderFor, runQueueReconcile } from './admission.js';
+import { runQueueClear } from './queue-clear.js';
 import { cmdDaemonLogs, cmdDaemonStart, cmdDaemonStatus, cmdDaemonStop, DaemonCtlError } from './daemon.js';
 import {
   analyzeEventLog,
@@ -2558,6 +2559,18 @@ export async function cmdQueueReconcile(opts: { lane?: string } = {}): Promise<v
   }
 }
 
+export async function cmdQueueClear(opts: { dryRun?: boolean; yes?: boolean } = {}): Promise<void> {
+  const [owner, repo] = (await getGitHubRepo()).split('/');
+  const queue = createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo });
+  const { report, exitCode, message } = await runQueueClear({
+    previewClear: () => queue.previewClear(),
+    ...(opts.dryRun === undefined ? {} : { dryRun: opts.dryRun }),
+    ...(opts.yes === undefined ? {} : { yes: opts.yes }),
+  });
+  console.log(report);
+  if (exitCode !== 0) throw new CliExitError(message ?? 'factory: queue clear refused', exitCode);
+}
+
 export function triageNoProposalError(plannerError: unknown): CliExitError {
   const detail = plannerError ? ` — planner failed: ${errorDetail(plannerError)}` : '';
   return new CliExitError(`triage produced no proposal${detail}`, 1);
@@ -4501,6 +4514,16 @@ export async function main() {
     .option('--lane <lane>', 'Only reconcile one lane')
     .action(async (opts: { lane?: string }) => {
       await cmdQueueReconcile(opts);
+    });
+  queue
+    .command('clear')
+    .description(
+      'Preview emptying the GitHub-backed queue: lists every factory:queued issue as would-clear or would-skip (claimed); never changes labels yet',
+    )
+    .option('--dry-run', 'Print the preview and exit 0 without changing any label')
+    .option('--yes', 'Confirm the clear (label removal lands in #1674; currently refuses with no writes)')
+    .action(async (opts: { dryRun?: boolean; yes?: boolean }) => {
+      await cmdQueueClear(opts);
     });
 
   const hosted = program
