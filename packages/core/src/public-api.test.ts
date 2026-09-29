@@ -306,6 +306,9 @@ const PUBLIC_API_KEYS = [
 ];
 
 const INTERNAL_API_KEYS = [
+  // Review verdict (#1679)
+  'computeReviewVerdict',
+  'DETERMINISTIC_CHECKERS',
   // Local queue reprioritization audit records (#869)
   'createQueueRationaleAuditor',
   // Daemon-ready ProjectV2 queue intent projection (#866)
