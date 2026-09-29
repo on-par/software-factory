@@ -16,6 +16,7 @@ import { resolve } from 'node:path';
 import type { FactoryConfig } from '../config/index.js';
 import { HarnessError } from '../harness/index.js';
 import { isCommandAvailable } from '../models/index.js';
+import { claudeConfigDirOverride } from '../utils/claude-config.js';
 import { shellEscape } from '../utils/index.js';
 
 export type SandboxRuntime = 'sandbox-exec' | 'firejail' | 'docker-sandbox' | 'none';
@@ -155,6 +156,10 @@ export function resolveSandboxPolicy(
   const isAvailable = opts.isAvailable ?? isCommandAvailable;
   const home = opts.homedir ?? homedir();
   const tmp = opts.tmpdir ?? tmpdir();
+  // A non-default Claude profile (CLAUDE_CONFIG_DIR) keeps its credentials, .claude.json,
+  // and transcripts in that dir, so it must be writable too. ~/.claude stays writable:
+  // profiles commonly symlink shared items (settings, skills, plugins) back into it.
+  const claudeProfileDir = claudeConfigDirOverride(env);
 
   const runtime = resolveSandboxRuntime(cfg.runtime, { env, platform, isAvailable });
   const rollout = isSandboxRuntimePinned(cfg.runtime, env)
@@ -167,6 +172,7 @@ export function resolveSandboxPolicy(
     resolve(opts.repoRoot, '.git'),
     tmp,
     resolve(home, '.claude'),
+    ...(claudeProfileDir ? [resolve(claudeProfileDir)] : []),
     resolve(home, '.codex'),
     resolve(home, '.openclaw'),
     resolve(home, '.npm'),

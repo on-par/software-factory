@@ -171,6 +171,8 @@ import {
   acquirePidFile,
   branchFor,
   branchPrefixSlug,
+  claudeConfigDirOverride,
+  claudeKeychainService,
   cleanupWorktree,
   createDaemonLogSink,
   createDockerEngine,
@@ -4172,11 +4174,15 @@ function probeClaudeKeychain(): KeychainProbeStatus {
   if (process.platform !== 'darwin') return { status: 'skipped', detail: 'skipped — not macOS' };
   if (!isCommandAvailable('claude')) return { status: 'skipped', detail: 'skipped — claude CLI not on PATH' };
   if (process.env.ANTHROPIC_API_KEY) return { status: 'skipped', detail: 'skipped — ANTHROPIC_API_KEY auth in use' };
+  // Check the entry for the profile child `claude` runs will use (CLAUDE_CONFIG_DIR), not
+  // always the default one.
+  const service = claudeKeychainService();
+  const profile = { service, configDir: claudeConfigDirOverride() };
   try {
-    execSync('security find-generic-password -s "Claude Code-credentials"', { timeout: 10_000, stdio: 'ignore' });
-    return { status: 'readable' };
+    execSync(`security find-generic-password -s ${shellEscape(service)}`, { timeout: 10_000, stdio: 'ignore' });
+    return { status: 'readable', ...profile };
   } catch {
-    return { status: 'unreadable', inTmux: !!process.env.TMUX };
+    return { status: 'unreadable', inTmux: !!process.env.TMUX, ...profile };
   }
 }
 

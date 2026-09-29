@@ -5,11 +5,12 @@
 // uses the refresh token, never refreshes, never logs/throws the token.
 
 import { readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
 import { execa } from 'execa';
 import { z } from 'zod';
+
+import { claudeConfigDirPath, claudeKeychainService } from '../utils/claude-config.js';
 
 export interface SubscriptionUsage {
   fiveHourUtilization: number;
@@ -22,19 +23,23 @@ export interface SubscriptionUsageDeps {
   readCredentialsFile?: () => string;
   fetchImpl?: typeof fetch;
   now?: () => number;
+  /** Selects the Claude profile (CLAUDE_CONFIG_DIR) the default keychain/file readers
+   *  use; defaults to process.env. */
+  env?: NodeJS.ProcessEnv;
 }
 
-const DEFAULT_CREDENTIALS_PATH = resolve(homedir(), '.claude/.credentials.json');
-
-async function defaultReadKeychain(): Promise<string> {
-  const result = await execa('security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w'], {
+/** Reads the selected profile's keychain entry — `Claude Code-credentials`, or its
+ *  hash-suffixed variant when CLAUDE_CONFIG_DIR is set. */
+async function readKeychainFor(env: NodeJS.ProcessEnv): Promise<string> {
+  const result = await execa('security', ['find-generic-password', '-s', claudeKeychainService(env), '-w'], {
     timeout: 10_000,
   });
   return result.stdout;
 }
 
-function defaultReadCredentialsFile(): string {
-  return readFileSync(DEFAULT_CREDENTIALS_PATH, 'utf-8');
+/** Reads `<config dir>/.credentials.json` for the selected profile (~/.claude by default). */
+function readCredentialsFileFor(env: NodeJS.ProcessEnv): string {
+  return readFileSync(resolve(claudeConfigDirPath(env), '.credentials.json'), 'utf-8');
 }
 
 const UsageResponseSchema = z
@@ -47,10 +52,11 @@ const UsageResponseSchema = z
   .passthrough();
 
 export async function readClaudeAccessToken(deps: SubscriptionUsageDeps = {}): Promise<string | null> {
+  const env = deps.env ?? process.env;
   const {
     platform = process.platform,
-    readKeychain = defaultReadKeychain,
-    readCredentialsFile = defaultReadCredentialsFile,
+    readKeychain = () => readKeychainFor(env),
+    readCredentialsFile = () => readCredentialsFileFor(env),
     now = Date.now,
   } = deps;
 

@@ -165,10 +165,23 @@ describe('usage', () => {
   });
 
   it('exposes the default transcript roots', () => {
-    const roots = defaultTranscriptRoots();
+    const roots = defaultTranscriptRoots({});
     expect(roots).toHaveLength(2);
     expect(roots[0].endsWith('.claude/projects')).toBe(true);
     expect(roots[1].endsWith('.config/claude/projects')).toBe(true);
+  });
+
+  it('roots the default transcripts under the given home when CLAUDE_CONFIG_DIR is unset', () => {
+    expect(defaultTranscriptRoots({}, '/home/dev')).toEqual([
+      '/home/dev/.claude/projects',
+      '/home/dev/.config/claude/projects',
+    ]);
+  });
+
+  it("reads only the selected profile's projects/ dir when CLAUDE_CONFIG_DIR is set", () => {
+    expect(defaultTranscriptRoots({ CLAUDE_CONFIG_DIR: '/home/dev/.claude-work' }, '/home/dev')).toEqual([
+      '/home/dev/.claude-work/projects',
+    ]);
   });
 
   it('formats the usage report', () => {

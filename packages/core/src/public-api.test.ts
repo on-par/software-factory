@@ -477,6 +477,9 @@ const INTERNAL_API_KEYS = [
   'logEvent',
   'readCosts',
   'setupWorktree',
+  // Selected Claude profile (CLAUDE_CONFIG_DIR) and its keychain entry
+  'claudeConfigDirOverride',
+  'claudeKeychainService',
   // docker-sandbox microVM lifecycle (#653)
   'createMicroVm',
   'microVmName',
