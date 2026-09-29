@@ -284,7 +284,7 @@ describe('createDockerEngine.createLaneContainer', () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0]?.cmd).toBe(
-      "docker create --name 'sf-job-run-1-my-lane' --label 'factory.managed=true' 'node:20-alpine'",
+      "docker create --name 'sf-job-run-1-my-lane' --label 'factory.managed=true' 'node:20-alpine' 'tail' '-f' '/dev/null'",
     );
     expect(result).toEqual({ containerName: 'sf-job-run-1-my-lane' });
   });
@@ -296,6 +296,62 @@ describe('createDockerEngine.createLaneContainer', () => {
     await engine.createLaneContainer('sf-job-run-2-other-lane');
 
     expect(calls[0]?.cmd).toContain("'ubuntu:24.04'");
+  });
+});
+
+describe('createDockerEngine.execInLaneContainer (#1685)', () => {
+  it('starts the container then execs the quoted command in the given cwd', async () => {
+    const { exec, calls } = fakeExec((call) =>
+      call.cmd.startsWith('docker exec') ? { stdout: 'out', stderr: 'err' } : { stdout: '', stderr: '' },
+    );
+    const engine = createDockerEngine({ exec });
+
+    const result = await engine.execInLaneContainer?.('sf-job-run-1-review-pr-8', ['npm', 'run', "b'uild"], {
+      cwd: '/workspace/repo',
+      timeoutMs: 5_000,
+    });
+
+    expect(calls[0]?.cmd).toBe("docker start 'sf-job-run-1-review-pr-8'");
+    expect(calls[1]?.cmd).toBe("docker exec -w '/workspace/repo' 'sf-job-run-1-review-pr-8' 'npm' 'run' 'b'\\''uild'");
+    expect(calls[1]?.opts).toEqual({ timeoutMs: 5_000 });
+    expect(result).toEqual({ exitCode: 0, output: 'outerr', timedOut: false });
+  });
+
+  it('maps a non-zero exit code and output', async () => {
+    const { exec } = fakeExec((call) => {
+      if (call.cmd.startsWith('docker exec')) rejects({ code: 3, stdout: 'so', stderr: 'se' });
+      return { stdout: '', stderr: '' };
+    });
+    const engine = createDockerEngine({ exec });
+
+    const result = await engine.execInLaneContainer?.('c', ['false'], { cwd: '/w', timeoutMs: 1 });
+
+    expect(result).toEqual({ exitCode: 3, output: 'sose', timedOut: false });
+  });
+
+  it('maps a killed process to timedOut and a non-numeric code to exit 1', async () => {
+    const { exec } = fakeExec((call) => {
+      if (call.cmd.startsWith('docker exec')) rejects({ killed: true });
+      return { stdout: '', stderr: '' };
+    });
+    const engine = createDockerEngine({ exec });
+
+    const result = await engine.execInLaneContainer?.('c', ['sleep', '9'], { cwd: '/w', timeoutMs: 1 });
+
+    expect(result).toEqual({ exitCode: 1, output: '', timedOut: true });
+  });
+
+  it('returns a docker start failure instead of throwing, and never execs', async () => {
+    const { exec, calls } = fakeExec((call) => {
+      if (call.cmd.startsWith('docker start')) rejects({ code: 125, stderr: 'no such container' });
+      return { stdout: '', stderr: '' };
+    });
+    const engine = createDockerEngine({ exec });
+
+    const result = await engine.execInLaneContainer?.('c', ['ls'], { cwd: '/w', timeoutMs: 1 });
+
+    expect(result).toEqual({ exitCode: 125, output: 'no such container', timedOut: false });
+    expect(calls.some((c) => c.cmd.startsWith('docker exec'))).toBe(false);
   });
 });
 
