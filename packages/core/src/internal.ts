@@ -487,3 +487,13 @@ export {
   REVIEW_CONTAINMENT_REFUSED_EXIT_CODE,
   runContainmentGatedReview,
 } from './review/containment.js';
+
+// Cross-repo PR references + review constitution (#1673)
+export type { PullRequestReference, PullRequestReferenceParse, ResolvedPullRequest } from './review/pr-reference.js';
+export {
+  describePullRequestAccessError,
+  formatPullRequestReference,
+  parsePullRequestReference,
+  resolvePullRequestReference,
+  REVIEW_ACCESS_ERROR_EXIT_CODE,
+} from './review/pr-reference.js';

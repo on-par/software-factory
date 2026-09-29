@@ -317,6 +317,12 @@ const INTERNAL_API_KEYS = [
   'runContainmentGatedReview',
   'pullRequestHeadRef',
   'runContainedReview',
+  // Cross-repo PR references + review constitution (#1673)
+  'describePullRequestAccessError',
+  'formatPullRequestReference',
+  'parsePullRequestReference',
+  'resolvePullRequestReference',
+  'REVIEW_ACCESS_ERROR_EXIT_CODE',
   // Local queue reprioritization audit records (#869)
   'createQueueRationaleAuditor',
   // Daemon-ready ProjectV2 queue intent projection (#866)
