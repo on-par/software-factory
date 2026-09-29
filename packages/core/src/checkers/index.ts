@@ -555,14 +555,15 @@ export async function runAllCheckers(
     results.push(output);
   }
 
-  const failures = results.filter((r) => r.result === 'FAIL').length;
-  const passes = results.filter((r) => r.result === 'PASS').length;
-  const skips = results.filter((r) => r.result === 'SKIP').length;
+  return summarizeCheckerOutputs(results);
+}
 
+/** Folds checker outputs into the CheckSummary shape every review/report consumes. */
+export function summarizeCheckerOutputs(results: CheckerOutput[]): CheckSummary {
   return {
-    failures,
-    passes,
-    skips,
+    failures: results.filter((r) => r.result === 'FAIL').length,
+    passes: results.filter((r) => r.result === 'PASS').length,
+    skips: results.filter((r) => r.result === 'SKIP').length,
     total: results.length,
     results,
   };

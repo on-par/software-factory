@@ -21,6 +21,7 @@ import {
   lintChecker,
   runAllCheckers,
   runCustomChecker,
+  summarizeCheckerOutputs,
   testsChecker,
   type WorktreeProbe,
 } from './index.js';
@@ -1018,6 +1019,20 @@ describe('runCustomChecker', () => {
     await runCustomChecker({ ...makeContext(worktree), onPgid }, 'custom_x', fakeRouter);
 
     expect(captured[0].options.onPgid).toBe(onPgid);
+  });
+});
+
+describe('summarizeCheckerOutputs', () => {
+  it('tallies failures, passes and skips and passes the results through', () => {
+    const results = [
+      { checker: 'compile', result: 'PASS' as const, details: 'ok' },
+      { checker: 'tests', result: 'FAIL' as const, details: 'bad' },
+      { checker: 'lint', result: 'SKIP' as const, details: 'none' },
+      { checker: 'links', result: 'SKIP' as const, details: 'none' },
+    ];
+
+    expect(summarizeCheckerOutputs(results)).toEqual({ failures: 1, passes: 1, skips: 2, total: 4, results });
+    expect(summarizeCheckerOutputs([])).toEqual({ failures: 0, passes: 0, skips: 0, total: 0, results: [] });
   });
 });
 
