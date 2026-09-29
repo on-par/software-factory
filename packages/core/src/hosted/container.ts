@@ -90,6 +90,14 @@ export interface LaneExecResult {
   timedOut: boolean;
 }
 
+export interface LaneContainerRemoval {
+  containerName: string;
+  /** True when `docker ps -a` no longer lists the container. */
+  removed: boolean;
+  /** Audit evidence, e.g. 'docker rm -f -v sf-job-r-review-pr-8 ok; ps -a empty'. */
+  evidence: string;
+}
+
 export interface ContainerEngine {
   prepareWorkspace(
     jobId: string,
@@ -100,8 +108,8 @@ export interface ContainerEngine {
   run(spec: ContainerRunSpec): Promise<ContainerRunResult>;
   remove(jobId: string, workspaceHostPath: string): Promise<ContainerCleanupProof>;
   /** Creates (but does not start) a labeled, disposable container for a ship-it lane
-   *  (#1535) — recognition + creation only; no workspace mount, no exec routing, no
-   *  teardown. Those belong to later stories. */
+   *  (#1535) — recognition + creation only; no workspace mount and no exec routing.
+   *  Teardown is `removeLaneContainer`. */
   createLaneContainer(containerName: string): Promise<LaneContainerCreateResult>;
   /** Clones repoSlug fresh from the remote into a disposable host temp dir, then
    *  copies it into the already-created lane container — the container's code never
@@ -116,6 +124,10 @@ export interface ContainerEngine {
     command: readonly string[],
     options: LaneExecOptions,
   ): Promise<LaneExecResult>;
+  /** Force-removes a lane container (and its anonymous volumes). Optional so existing
+   *  engines/fakes compile unchanged; callers that contain untrusted code MUST treat an
+   *  absent method as "cannot contain" (#1686). */
+  removeLaneContainer?(containerName: string): Promise<LaneContainerRemoval>;
   /** Resolves true when the container runtime (Docker daemon) is reachable.
    *  Optional so existing engines/fakes compile unchanged; callers that gate
    *  untrusted code on containment MUST treat an absent probe as unavailable

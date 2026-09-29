@@ -1,9 +1,17 @@
+import { EventEmitter } from 'node:events';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import { summarizeCheckerOutputs } from '../checkers/index.js';
-import type { ContainerEngine, LaneExecOptions, LaneExecResult, LaneWorkspacePrepared } from '../hosted/container.js';
+import type {
+  ContainerEngine,
+  LaneContainerRemoval,
+  LaneExecOptions,
+  LaneExecResult,
+  LaneWorkspacePrepared,
+} from '../hosted/container.js';
 import { runContainmentGatedReview, type ReviewPullRequestRepos } from './containment.js';
-import { pullRequestHeadRef, runContainedReview } from './contained.js';
+import { pullRequestHeadRef, runContainedReview as runReview, type ContainedReviewDeps } from './contained.js';
 import { computeReviewVerdict } from './verdict.js';
 
 const fork: ReviewPullRequestRepos = { number: 8, baseRepo: 'acme/app', headRepo: 'mallory/app' };
@@ -17,7 +25,27 @@ interface Script {
   prepareThrows?: string;
   execThrows?: string;
   noExec?: boolean;
+  noRemove?: boolean;
+  removeThrows?: string;
+  removeReports?: boolean;
+  onRemove?: () => void;
 }
+
+function fakeSignals() {
+  const emitter = new EventEmitter();
+  return {
+    once: (signal: 'SIGINT' | 'SIGTERM', listener: () => void) => emitter.once(signal, listener),
+    removeListener: (signal: 'SIGINT' | 'SIGTERM', listener: () => void) => emitter.removeListener(signal, listener),
+    emit: (signal: 'SIGINT' | 'SIGTERM') => emitter.emit(signal),
+    count: () => emitter.listenerCount('SIGINT') + emitter.listenerCount('SIGTERM'),
+  };
+}
+
+const exitSpy = vi.fn<(code: number) => void>();
+
+// Every review gets a fake signal source so no test touches real process listeners.
+const runContainedReview = (deps: Omit<ContainedReviewDeps, 'signals' | 'exit'> & Partial<ContainedReviewDeps>) =>
+  runReview({ signals: fakeSignals(), exit: exitSpy, ...deps });
 
 function fakeEngine(script: Script = {}) {
   const packageJson =
@@ -25,6 +53,7 @@ function fakeEngine(script: Script = {}) {
       ? JSON.stringify({ scripts: { build: 'tsc', test: 'vitest', lint: 'oxlint' } })
       : script.packageJson;
   const created: string[] = [];
+  const removed: string[] = [];
   const prepared: { containerName: string; repoSlug: string; ref?: string }[] = [];
   const execs: { command: readonly string[]; options: LaneExecOptions }[] = [];
   const engine: ContainerEngine = {
@@ -51,6 +80,18 @@ function fakeEngine(script: Script = {}) {
       return { containerRepoPath: '/workspace/repo', clone: { ok: true, commit: 'abc123' } };
     },
   };
+  if (!script.noRemove) {
+    engine.removeLaneContainer = async (containerName): Promise<LaneContainerRemoval> => {
+      removed.push(containerName);
+      script.onRemove?.();
+      if (script.removeThrows) throw new Error(script.removeThrows);
+      return {
+        containerName,
+        removed: script.removeReports ?? true,
+        evidence: script.removeReports === false ? 'still listed' : 'ok',
+      };
+    };
+  }
   if (!script.noExec) {
     engine.execInLaneContainer = async (_name, command, options) => {
       execs.push({ command, options });
@@ -65,7 +106,7 @@ function fakeEngine(script: Script = {}) {
       return { exitCode: 0, output: 'ok', timedOut: false };
     };
   }
-  return { engine, created, prepared, execs };
+  return { engine, created, removed, prepared, execs };
 }
 
 const argv = (execs: { command: readonly string[] }[]) => execs.map((e) => e.command.join(' '));
@@ -320,7 +361,12 @@ describe('runContainedReview', () => {
 
     const result = await runContainedReview({ engine, pr: fork, runId: 'run-1' });
 
-    expect(result).toEqual({ ok: false, error: 'docker not found', containerName: CONTAINER });
+    expect(result).toEqual({
+      ok: false,
+      error: 'docker not found',
+      containerName: CONTAINER,
+      teardown: { containerName: CONTAINER, removed: true, evidence: 'ok' },
+    });
     expect(prepared).toEqual([]);
     expect(execs).toEqual([]);
   });
@@ -334,6 +380,7 @@ describe('runContainedReview', () => {
       ok: false,
       error: "PR head clone failed: couldn't find remote ref",
       containerName: CONTAINER,
+      teardown: { containerName: CONTAINER, removed: true, evidence: 'ok' },
     });
     expect(execs).toEqual([]);
   });
@@ -343,7 +390,149 @@ describe('runContainedReview', () => {
 
     const result = await runContainedReview({ engine, pr: fork, runId: 'run-1' });
 
-    expect(result).toEqual({ ok: false, error: 'PR head clone failed: cp blew up', containerName: CONTAINER });
+    expect(result).toEqual({
+      ok: false,
+      error: 'PR head clone failed: cp blew up',
+      containerName: CONTAINER,
+      teardown: { containerName: CONTAINER, removed: true, evidence: 'ok' },
+    });
     expect(execs).toEqual([]);
+  });
+});
+
+describe('runContainedReview teardown (#1686)', () => {
+  it('removes the container exactly once after a successful review and attaches the proof', async () => {
+    const { engine, removed } = fakeEngine();
+    const signals = fakeSignals();
+
+    const result = await runContainedReview({ engine, pr: fork, runId: 'run-1', signals });
+
+    expect(removed).toEqual([CONTAINER]);
+    expect(result).toMatchObject({ ok: true, teardown: { containerName: CONTAINER, removed: true } });
+    expect(signals.count()).toBe(0);
+  });
+
+  it('removes the container after a clone failure', async () => {
+    const { engine, removed } = fakeEngine({ cloneFails: 'no ref' });
+
+    const result = await runContainedReview({ engine, pr: fork, runId: 'run-1' });
+
+    expect(result.ok).toBe(false);
+    expect(removed).toEqual([CONTAINER]);
+  });
+
+  it('attempts removal after a create failure (partially created containers)', async () => {
+    const { engine, removed } = fakeEngine({ createFails: 'docker create failed' });
+
+    const result = await runContainedReview({ engine, pr: fork, runId: 'run-1' });
+
+    expect(result.ok).toBe(false);
+    expect(removed).toEqual([CONTAINER]);
+  });
+
+  it('removes the container once when exec errors are swallowed as failed commands', async () => {
+    const { engine, removed } = fakeEngine({ execThrows: 'docker gone' });
+
+    await runContainedReview({ engine, pr: fork, runId: 'run-1' });
+
+    expect(removed).toEqual([CONTAINER]);
+  });
+
+  it('removes the container, rethrows, and detaches listeners when the review body throws', async () => {
+    const { engine, removed } = fakeEngine();
+    const signals = fakeSignals();
+    engine.execInLaneContainer = async () =>
+      ({
+        get exitCode(): number {
+          throw new Error('boom');
+        },
+        output: '',
+        timedOut: false,
+      }) as LaneExecResult;
+
+    await expect(runContainedReview({ engine, pr: fork, runId: 'run-1', signals })).rejects.toThrow('boom');
+
+    expect(removed).toEqual([CONTAINER]);
+    expect(signals.count()).toBe(0);
+  });
+
+  it.each([
+    ['SIGINT', 130],
+    ['SIGTERM', 143],
+  ] as const)('removes the container before exiting %s with %i, without a second removal', async (signal, code) => {
+    const order: string[] = [];
+    const { engine, removed } = fakeEngine({ onRemove: () => order.push('remove') });
+    const signals = fakeSignals();
+    const exit = vi.fn((c: number) => void order.push(`exit ${c}`));
+    let release: (r: LaneExecResult) => void = () => undefined;
+    const original = engine.execInLaneContainer!;
+    engine.execInLaneContainer = (name, command, options) =>
+      command.join(' ') === 'npm test'
+        ? new Promise<LaneExecResult>((resolve) => {
+            release = resolve;
+          })
+        : original(name, command, options);
+
+    const review = runContainedReview({ engine, pr: fork, runId: 'run-1', signals, exit });
+    await vi.waitFor(() => expect(signals.count()).toBe(2));
+    await vi.waitFor(() => expect(release).not.toBeUndefined());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    signals.emit(signal);
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(code));
+
+    expect(order).toEqual(['remove', `exit ${code}`]);
+    release({ exitCode: 0, output: 'ok', timedOut: false });
+    await review;
+    expect(removed).toEqual([CONTAINER]);
+    expect(signals.count()).toBe(0);
+  });
+
+  it('refuses before creating anything when the engine cannot remove a lane container', async () => {
+    const { engine, created } = fakeEngine({ noRemove: true });
+
+    const result = await runContainedReview({ engine, pr: fork, runId: 'run-1' });
+
+    expect(result).toEqual({
+      ok: false,
+      error: 'container engine cannot remove a lane container; refusing to run fork checkers',
+    });
+    expect(created).toEqual([]);
+  });
+
+  it('surfaces a throwing teardown in the result instead of throwing', async () => {
+    const { engine } = fakeEngine({ removeThrows: 'docker rm exploded' });
+
+    const result = await runContainedReview({ engine, pr: fork, runId: 'run-1' });
+
+    expect(result).toMatchObject({
+      ok: true,
+      teardown: { containerName: CONTAINER, removed: false, evidence: 'teardown error: docker rm exploded' },
+    });
+  });
+
+  it('stringifies a non-Error teardown rejection', async () => {
+    const { engine } = fakeEngine();
+    engine.removeLaneContainer = () => Promise.reject('nope');
+
+    const result = await runContainedReview({ engine, pr: fork, runId: 'run-1' });
+
+    expect(result.teardown).toEqual({ containerName: CONTAINER, removed: false, evidence: 'teardown error: nope' });
+  });
+
+  it('surfaces a teardown that reports removed:false', async () => {
+    const { engine } = fakeEngine({ removeReports: false });
+
+    const result = await runContainedReview({ engine, pr: fork, runId: 'run-1' });
+
+    expect(result).toMatchObject({ ok: true, teardown: { removed: false, evidence: 'still listed' } });
+  });
+
+  it('defaults to process signals and process.exit', async () => {
+    const { engine } = fakeEngine();
+    const before = process.listenerCount('SIGINT');
+
+    await runReview({ engine, pr: fork, runId: 'run-1' });
+
+    expect(process.listenerCount('SIGINT')).toBe(before);
   });
 });

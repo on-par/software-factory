@@ -275,6 +275,71 @@ describe('createDockerEngine.remove', () => {
   });
 });
 
+describe('createDockerEngine.removeLaneContainer (#1686)', () => {
+  it('force-removes by name with volumes, then proves absence via ps -a', async () => {
+    const { exec, calls } = fakeExec(() => ({ stdout: '', stderr: '' }));
+    const engine = createDockerEngine({ exec });
+
+    const proof = await engine.removeLaneContainer!('sf-job-run-1-review-pr-8');
+
+    expect(calls.map((c) => c.cmd)).toEqual([
+      "docker rm -f -v 'sf-job-run-1-review-pr-8'",
+      "docker ps -a --filter 'name=sf-job-run-1-review-pr-8' --format '{{.ID}}'",
+    ]);
+    expect(proof).toEqual({
+      containerName: 'sf-job-run-1-review-pr-8',
+      removed: true,
+      evidence: 'docker rm -f -v sf-job-run-1-review-pr-8 ok; ps -a empty',
+    });
+  });
+
+  it('reports removed: false when docker ps -a still lists the container', async () => {
+    const { exec } = fakeExec((call) =>
+      call.cmd.startsWith('docker ps -a') ? { stdout: 'abc123', stderr: '' } : { stdout: '', stderr: '' },
+    );
+
+    const proof = await createDockerEngine({ exec }).removeLaneContainer!('c1');
+
+    expect(proof.removed).toBe(false);
+    expect(proof.evidence).toContain('ps -a still shows a match');
+  });
+
+  it('surfaces a docker rm rejection in evidence without throwing', async () => {
+    const { exec } = fakeExec((call) => {
+      if (call.cmd.startsWith('docker rm')) rejects({ code: 1, stderr: 'no such container' });
+      return { stdout: '', stderr: '' };
+    });
+
+    const proof = await createDockerEngine({ exec }).removeLaneContainer!('c1');
+
+    expect(proof.removed).toBe(true);
+    expect(proof.evidence).toContain('no such container');
+  });
+
+  it('reports removed: false when the ps -a check itself fails', async () => {
+    const { exec } = fakeExec((call) => {
+      if (call.cmd.startsWith('docker ps -a')) rejects({ stderr: 'daemon down' });
+      return { stdout: '', stderr: '' };
+    });
+
+    const proof = await createDockerEngine({ exec }).removeLaneContainer!('c1');
+
+    expect(proof.removed).toBe(false);
+    expect(proof.evidence).toContain('ps -a check failed: daemon down');
+  });
+
+  it('falls back to String(err) when the error carries no stderr', async () => {
+    const exec: ExecFn = async () => {
+      throw 'plain';
+    };
+
+    const proof = await createDockerEngine({ exec }).removeLaneContainer!('c1');
+
+    expect(proof.removed).toBe(false);
+    expect(proof.evidence).toContain('error: plain');
+  });
+});
+
 describe('createDockerEngine.createLaneContainer', () => {
   it('creates (but does not start) a container carrying the factory.managed=true label', async () => {
     const { exec, calls } = fakeExec(() => ({ stdout: 'containerid123', stderr: '' }));

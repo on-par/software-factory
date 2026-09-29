@@ -477,7 +477,7 @@ export type {
 } from './review/containment.js';
 
 // Contained fork-PR review (#1685)
-export type { ContainedReviewDeps, ContainedReviewResult } from './review/contained.js';
+export type { ContainedReviewDeps, ContainedReviewResult, ReviewInterruptSource } from './review/contained.js';
 export { pullRequestHeadRef, runContainedReview } from './review/contained.js';
 export {
   isForkPullRequest,
