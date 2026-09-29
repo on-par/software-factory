@@ -131,4 +131,26 @@ describe('runQueueClear', () => {
     const result = await runQueueClear({ previewClear: async () => empty, clear: async () => emptyResult, ...flags });
     expect(result).toEqual({ report: expect.stringContaining('already empty'), exitCode: 0 });
   });
+
+  it.each([{}, { dryRun: true }, { yes: true }])('names the lane in the empty report (%j)', async (flags) => {
+    const result = await runQueueClear({
+      previewClear: async () => empty,
+      clear: async () => emptyResult,
+      lane: 'docs',
+      ...flags,
+    });
+    expect(result).toEqual({
+      report: 'queue is already empty for lane docs — no open factory:queued issues in factory:lane:docs',
+      exitCode: 0,
+    });
+  });
+
+  it('labels the --dry-run and --yes reports with the lane', async () => {
+    const dry = await runQueueClear({ previewClear, clear, dryRun: true, lane: 'ops' });
+    expect(dry.report).toContain('dry run — queue clear preview (lane ops)\n');
+    const yes = await runQueueClear({ previewClear, clear, yes: true, lane: 'ops' });
+    expect(yes.report).toContain('queue clear (lane ops)\n');
+    const bare = await runQueueClear({ previewClear, clear, yes: true });
+    expect(bare.report).toContain('queue clear\n');
+  });
 });

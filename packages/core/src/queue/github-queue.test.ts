@@ -282,6 +282,39 @@ describe('previewClear', () => {
     });
     expect(calls).toEqual(['listOpenIssuesWithLabels']);
   });
+  it('limits the preview to one lane when given', async () => {
+    const { client, calls, state } = createFakeStore([
+      { number: 1, labels: [QUEUED_LABEL, laneLabel('ops')] },
+      { number: 2, labels: [QUEUED_LABEL, laneLabel('review')] },
+      { number: 3, labels: [QUEUED_LABEL, laneLabel('ops'), IN_PROGRESS_LABEL, claimedByLabel('host-1')] },
+    ]);
+    const before = JSON.stringify([...state].map(([n, l]) => [n, [...l]]));
+    const preview = await createGithubQueue({ client, ...opts }).previewClear('ops');
+    expect(preview).toEqual({
+      entries: [
+        { issue: 1, lanes: ['ops'], action: 'would-clear' },
+        {
+          issue: 3,
+          lanes: ['ops'],
+          action: 'would-skip',
+          reason: `claimed (${IN_PROGRESS_LABEL}, ${claimedByLabel('host-1')})`,
+        },
+      ],
+      wouldClear: 1,
+      wouldSkip: 1,
+    });
+    expect(calls).toEqual(['listOpenIssuesWithLabels']);
+    expect(JSON.stringify([...state].map(([n, l]) => [n, [...l]]))).toBe(before);
+  });
+
+  it('returns an empty preview for a lane with no queued issues', async () => {
+    const { client } = createFakeStore([{ number: 1, labels: [QUEUED_LABEL, laneLabel('ops')] }]);
+    expect(await createGithubQueue({ client, ...opts }).previewClear('docs')).toEqual({
+      entries: [],
+      wouldClear: 0,
+      wouldSkip: 0,
+    });
+  });
 });
 
 describe('clear', () => {

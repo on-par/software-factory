@@ -1,4 +1,4 @@
-// packages/cli/src/cli/queue-clear.ts — `factory queue clear`: preview (#1693) and `--yes` clear (#1694).
+// packages/cli/src/cli/queue-clear.ts — `factory queue clear`: preview (#1693), `--yes` clear (#1694), `--lane` (#1695).
 
 import type { QueueClearPreview, QueueClearResult } from '@on-par/factory-core/internal';
 
@@ -27,18 +27,24 @@ export function formatQueueClearResult(result: QueueClearResult): string {
   return lines.join('\n');
 }
 
-const EMPTY_QUEUE_REPORT = 'queue is already empty — no open factory:queued issues';
+function emptyQueueReport(lane: string | undefined): string {
+  return lane === undefined
+    ? 'queue is already empty — no open factory:queued issues'
+    : `queue is already empty for lane ${lane} — no open factory:queued issues in factory:lane:${lane}`;
+}
 
 export async function runQueueClear(deps: {
   previewClear: () => Promise<QueueClearPreview>;
   clear: () => Promise<QueueClearResult>;
   dryRun?: boolean;
   yes?: boolean;
+  lane?: string;
 }): Promise<{ report: string; exitCode: 0 | 1 | 2; message?: string }> {
+  const laneSuffix = deps.lane === undefined ? '' : ` (lane ${deps.lane})`;
   if (deps.yes && !deps.dryRun) {
     const result = await deps.clear();
-    if (result.entries.length === 0) return { report: EMPTY_QUEUE_REPORT, exitCode: 0 };
-    const report = `queue clear\n${formatQueueClearResult(result)}`;
+    if (result.entries.length === 0) return { report: emptyQueueReport(deps.lane), exitCode: 0 };
+    const report = `queue clear${laneSuffix}\n${formatQueueClearResult(result)}`;
     if (result.failed > 0) {
       return {
         report,
@@ -50,14 +56,14 @@ export async function runQueueClear(deps: {
   }
   const preview = await deps.previewClear();
   if (preview.entries.length === 0) {
-    return { report: EMPTY_QUEUE_REPORT, exitCode: 0 };
+    return { report: emptyQueueReport(deps.lane), exitCode: 0 };
   }
   const body = formatQueueClearPreview(preview);
   if (deps.dryRun) {
-    return { report: `dry run — queue clear preview\n${body}\nno GitHub labels changed`, exitCode: 0 };
+    return { report: `dry run — queue clear preview${laneSuffix}\n${body}\nno GitHub labels changed`, exitCode: 0 };
   }
   return {
-    report: `queue clear preview\n${body}`,
+    report: `queue clear preview${laneSuffix}\n${body}`,
     exitCode: 2,
     message: 'factory: queue clear needs --yes to proceed (or --dry-run to preview); no GitHub labels changed',
   };
