@@ -209,6 +209,81 @@ describe('list', () => {
   });
 });
 
+describe('previewClear', () => {
+  const opts = { owner: 'o', repo: 'r' };
+
+  it('marks unclaimed queued issues would-clear with their lanes', async () => {
+    const { client, calls } = createFakeStore([
+      { number: 12, labels: [QUEUED_LABEL, laneLabel('docs')] },
+      { number: 10, labels: [QUEUED_LABEL, laneLabel('daw')] },
+      { number: 11, labels: [QUEUED_LABEL, laneLabel('daw'), laneLabel('docs')] },
+      { number: 13, labels: [laneLabel('daw')] },
+    ]);
+    const preview = await createGithubQueue({ client, ...opts }).previewClear();
+    expect(preview).toEqual({
+      entries: [
+        { issue: 10, lanes: ['daw'], action: 'would-clear' },
+        { issue: 11, lanes: ['daw', 'docs'], action: 'would-clear' },
+        { issue: 12, lanes: ['docs'], action: 'would-clear' },
+      ],
+      wouldClear: 3,
+      wouldSkip: 0,
+    });
+    expect(calls).toEqual(['listOpenIssuesWithLabels']);
+  });
+
+  it('marks claimed issues would-skip with the claim labels', async () => {
+    const { client, calls, state } = createFakeStore([
+      { number: 1, labels: [QUEUED_LABEL, laneLabel('daw'), IN_PROGRESS_LABEL, claimedByLabel('host-1')] },
+      { number: 2, labels: [QUEUED_LABEL, laneLabel('daw'), claimedByLabel('other')] },
+      { number: 3, labels: [QUEUED_LABEL, laneLabel('daw')] },
+    ]);
+    const before = JSON.stringify([...state].map(([n, l]) => [n, [...l]]));
+    const preview = await createGithubQueue({ client, ...opts }).previewClear();
+    expect(preview.wouldClear).toBe(1);
+    expect(preview.wouldSkip).toBe(2);
+    expect(preview.entries[0]).toMatchObject({
+      issue: 1,
+      action: 'would-skip',
+      reason: `claimed (${IN_PROGRESS_LABEL}, ${claimedByLabel('host-1')})`,
+    });
+    expect(preview.entries[1]).toMatchObject({
+      issue: 2,
+      action: 'would-skip',
+      reason: `claimed (${claimedByLabel('other')})`,
+    });
+    expect(preview.entries[2]).toEqual({ issue: 3, lanes: ['daw'], action: 'would-clear' });
+    expect(calls).toEqual(['listOpenIssuesWithLabels']);
+    expect(JSON.stringify([...state].map(([n, l]) => [n, [...l]]))).toBe(before);
+  });
+
+  it('reports an empty lane list when no lane label is present', async () => {
+    const { client } = createFakeStore([{ number: 5, labels: [QUEUED_LABEL, LANE_LABEL_PREFIX] }]);
+    const preview = await createGithubQueue({ client, ...opts }).previewClear();
+    expect(preview.entries).toEqual([{ issue: 5, lanes: [], action: 'would-clear' }]);
+  });
+
+  it('copies the issue title when the client provides one', async () => {
+    const { client } = createFakeStore([]);
+    const titled: QueueGitHubClient = {
+      ...client,
+      listOpenIssuesWithLabels: async () => [{ number: 7, labels: [QUEUED_LABEL], title: 'Hello' }],
+    };
+    const preview = await createGithubQueue({ client: titled, ...opts }).previewClear();
+    expect(preview.entries).toEqual([{ issue: 7, lanes: [], title: 'Hello', action: 'would-clear' }]);
+  });
+
+  it('returns an empty preview for an empty queue', async () => {
+    const { client, calls } = createFakeStore([]);
+    expect(await createGithubQueue({ client, ...opts }).previewClear()).toEqual({
+      entries: [],
+      wouldClear: 0,
+      wouldSkip: 0,
+    });
+    expect(calls).toEqual(['listOpenIssuesWithLabels']);
+  });
+});
+
 describe('migrateLocalQueue', () => {
   it('applies queued, lane, and independent per-lane order labels in local-file order', async () => {
     const { client, createdLabels, state } = createFakeStore([

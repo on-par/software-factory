@@ -331,6 +331,45 @@ export interface EnqueueResult {
   detail?: string;
 }
 
+export type QueueClearAction = 'would-clear' | 'would-skip';
+
+export interface QueueClearPreviewEntry {
+  issue: number;
+  /** Lane slugs from `factory:lane:*` labels, sorted; empty when the issue carries none. */
+  lanes: string[];
+  title?: string;
+  action: QueueClearAction;
+  /** Set only when action === 'would-skip', e.g. 'claimed (factory:in-progress, factory:claimed-by:host-1)'. */
+  reason?: string;
+}
+
+export interface QueueClearPreview {
+  /** Every open factory:queued issue, ascending by issue number. */
+  entries: QueueClearPreviewEntry[];
+  wouldClear: number;
+  wouldSkip: number;
+}
+
+function classifyQueueClear(issues: readonly QueueIssue[]): QueueClearPreview {
+  const entries: QueueClearPreviewEntry[] = issues.map((issue) => {
+    const lanes = issue.labels
+      .filter((label) => label.startsWith(LANE_LABEL_PREFIX))
+      .map((label) => label.slice(LANE_LABEL_PREFIX.length))
+      .filter((slug) => slug !== '')
+      .sort();
+    const claimLabels = issue.labels.filter(
+      (label) => label === IN_PROGRESS_LABEL || label.startsWith(CLAIMED_BY_LABEL_PREFIX),
+    );
+    const base = { issue: issue.number, lanes, ...(issue.title === undefined ? {} : { title: issue.title }) };
+    return claimLabels.length > 0
+      ? { ...base, action: 'would-skip', reason: `claimed (${claimLabels.join(', ')})` }
+      : { ...base, action: 'would-clear' };
+  });
+  entries.sort((a, b) => a.issue - b.issue);
+  const wouldSkip = entries.filter((entry) => entry.action === 'would-skip').length;
+  return { entries, wouldClear: entries.length - wouldSkip, wouldSkip };
+}
+
 export interface GithubQueueOptions {
   client: QueueGitHubClient;
   owner: string;
@@ -355,6 +394,8 @@ export interface GithubQueue {
   lanes(): Promise<string[]>;
   migrateLocalQueue(entries: readonly QueueEntry[]): Promise<void>;
   enqueue(lane: string, issues: readonly number[]): Promise<EnqueueResult[]>;
+  /** Read-only preview of what clearing the queue would touch: one list call, never writes. */
+  previewClear(): Promise<QueueClearPreview>;
 }
 
 export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
@@ -534,5 +575,10 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     return results;
   }
 
-  return { claimNext, release, heartbeat, list, lanes, migrateLocalQueue, enqueue };
+  async function previewClear(): Promise<QueueClearPreview> {
+    const issues = await client.listOpenIssuesWithLabels({ owner, repo, labels: [QUEUED_LABEL] });
+    return classifyQueueClear(issues);
+  }
+
+  return { claimNext, release, heartbeat, list, lanes, migrateLocalQueue, enqueue, previewClear };
 }
