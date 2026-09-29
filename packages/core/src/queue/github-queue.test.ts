@@ -284,6 +284,134 @@ describe('previewClear', () => {
   });
 });
 
+describe('clear', () => {
+  const opts = { owner: 'o', repo: 'r' };
+  const snapshot = (state: Map<number, Set<string>>) => JSON.stringify([...state].map(([n, l]) => [n, [...l].sort()]));
+
+  it('removes queued and order labels but keeps lane labels', async () => {
+    const { client, state, calls } = createFakeStore([
+      { number: 10, labels: [QUEUED_LABEL, laneLabel('daw'), queueOrderLabel(1)] },
+      { number: 11, labels: [QUEUED_LABEL, laneLabel('docs'), queueOrderLabel(2), queueOrderLabel(5)] },
+      { number: 12, labels: [QUEUED_LABEL] },
+      { number: 13, labels: [laneLabel('daw')] },
+    ]);
+    const result = await createGithubQueue({ client, ...opts }).clear();
+    expect(result).toEqual({
+      entries: [
+        { issue: 10, lanes: ['daw'], outcome: 'cleared' },
+        { issue: 11, lanes: ['docs'], outcome: 'cleared' },
+        { issue: 12, lanes: [], outcome: 'cleared' },
+      ],
+      cleared: 3,
+      skipped: 0,
+      failed: 0,
+    });
+    expect([...(state.get(10) ?? [])]).toEqual([laneLabel('daw')]);
+    expect([...(state.get(11) ?? [])]).toEqual([laneLabel('docs')]);
+    expect([...(state.get(12) ?? [])]).toEqual([]);
+    expect([...(state.get(13) ?? [])]).toEqual([laneLabel('daw')]);
+    expect(calls).not.toContain('addLabels');
+    expect(calls).not.toContain('ensureLabel');
+  });
+
+  it('skips claimed issues without changing any label', async () => {
+    const { client, state } = createFakeStore([
+      {
+        number: 1,
+        labels: [QUEUED_LABEL, laneLabel('daw'), queueOrderLabel(1), IN_PROGRESS_LABEL, claimedByLabel('host-1')],
+      },
+      { number: 2, labels: [QUEUED_LABEL, claimedByLabel('other')] },
+      { number: 3, labels: [QUEUED_LABEL, laneLabel('daw'), queueOrderLabel(2)] },
+    ]);
+    const before1 = [...(state.get(1) ?? [])];
+    const before2 = [...(state.get(2) ?? [])];
+    const result = await createGithubQueue({ client, ...opts }).clear();
+    expect(result.entries[0]).toMatchObject({
+      issue: 1,
+      outcome: 'skipped',
+      reason: `claimed (${IN_PROGRESS_LABEL}, ${claimedByLabel('host-1')})`,
+    });
+    expect(result.entries[1]).toMatchObject({
+      issue: 2,
+      outcome: 'skipped',
+      reason: `claimed (${claimedByLabel('other')})`,
+    });
+    expect(result.entries[2]).toEqual({ issue: 3, lanes: ['daw'], outcome: 'cleared' });
+    expect(result).toMatchObject({ cleared: 1, skipped: 2, failed: 0 });
+    expect([...(state.get(1) ?? [])]).toEqual(before1);
+    expect([...(state.get(2) ?? [])]).toEqual(before2);
+    expect(snapshot(state)).toContain(`[3,["${laneLabel('daw')}"]]`);
+  });
+
+  it('re-reads labels per issue and skips an issue claimed since the list call', async () => {
+    const { client, calls } = createFakeStore([{ number: 4, labels: [QUEUED_LABEL] }]);
+    const racing: QueueGitHubClient = {
+      ...client,
+      listOpenIssuesWithLabels: async () => [{ number: 4, labels: [QUEUED_LABEL] }],
+      getIssueLabels: async () => [QUEUED_LABEL, IN_PROGRESS_LABEL],
+    };
+    const result = await createGithubQueue({ client: racing, ...opts }).clear();
+    expect(result.entries).toEqual([
+      { issue: 4, lanes: [], outcome: 'skipped', reason: `claimed (${IN_PROGRESS_LABEL})` },
+    ]);
+    expect(calls).not.toContain('removeLabel');
+  });
+
+  it('records a per-issue failure and keeps going', async () => {
+    const { client, state } = createFakeStore([
+      { number: 1, labels: [QUEUED_LABEL, laneLabel('daw')] },
+      { number: 2, labels: [QUEUED_LABEL] },
+    ]);
+    const flaky: QueueGitHubClient = {
+      ...client,
+      removeLabel: async (input) => {
+        if (input.issue_number === 1) throw new Error('boom');
+        await client.removeLabel(input);
+      },
+    };
+    const result = await createGithubQueue({ client: flaky, ...opts }).clear();
+    expect(result.entries).toEqual([
+      { issue: 1, lanes: ['daw'], outcome: 'failed', reason: 'boom' },
+      { issue: 2, lanes: [], outcome: 'cleared' },
+    ]);
+    expect(result).toMatchObject({ cleared: 1, skipped: 0, failed: 1 });
+    expect([...(state.get(2) ?? [])]).toEqual([]);
+  });
+
+  it('stringifies non-Error failures', async () => {
+    const { client } = createFakeStore([{ number: 1, labels: [QUEUED_LABEL] }]);
+    const flaky: QueueGitHubClient = {
+      ...client,
+      getIssueLabels: async () => {
+        throw 'nope';
+      },
+    };
+    const result = await createGithubQueue({ client: flaky, ...opts }).clear();
+    expect(result.entries).toEqual([{ issue: 1, lanes: [], outcome: 'failed', reason: 'nope' }]);
+  });
+
+  it('passes the issue title through', async () => {
+    const { client } = createFakeStore([{ number: 7, labels: [QUEUED_LABEL] }]);
+    const titled: QueueGitHubClient = {
+      ...client,
+      listOpenIssuesWithLabels: async () => [{ number: 7, labels: [QUEUED_LABEL], title: 'Hello' }],
+    };
+    const result = await createGithubQueue({ client: titled, ...opts }).clear();
+    expect(result.entries).toEqual([{ issue: 7, lanes: [], title: 'Hello', outcome: 'cleared' }]);
+  });
+
+  it('returns an empty result without writes for an empty queue', async () => {
+    const { client, calls } = createFakeStore([]);
+    expect(await createGithubQueue({ client, ...opts }).clear()).toEqual({
+      entries: [],
+      cleared: 0,
+      skipped: 0,
+      failed: 0,
+    });
+    expect(calls).toEqual(['listOpenIssuesWithLabels']);
+  });
+});
+
 describe('migrateLocalQueue', () => {
   it('applies queued, lane, and independent per-lane order labels in local-file order', async () => {
     const { client, createdLabels, state } = createFakeStore([

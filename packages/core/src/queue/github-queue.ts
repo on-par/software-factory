@@ -350,16 +350,42 @@ export interface QueueClearPreview {
   wouldSkip: number;
 }
 
+export type QueueClearOutcome = 'cleared' | 'skipped' | 'failed';
+
+export interface QueueClearEntry {
+  issue: number;
+  /** Lane slugs from `factory:lane:*` labels, sorted; empty when the issue carries none. */
+  lanes: string[];
+  title?: string;
+  outcome: QueueClearOutcome;
+  /** Set for 'skipped' (e.g. 'claimed (factory:in-progress, factory:claimed-by:host-1)') and 'failed' (error message). */
+  reason?: string;
+}
+
+export interface QueueClearResult {
+  /** Every open factory:queued issue, ascending by issue number. */
+  entries: QueueClearEntry[];
+  cleared: number;
+  skipped: number;
+  failed: number;
+}
+
+function laneSlugsOf(labels: readonly string[]): string[] {
+  return labels
+    .filter((label) => label.startsWith(LANE_LABEL_PREFIX))
+    .map((label) => label.slice(LANE_LABEL_PREFIX.length))
+    .filter((slug) => slug !== '')
+    .sort();
+}
+
+function claimLabelsOf(labels: readonly string[]): string[] {
+  return labels.filter((label) => label === IN_PROGRESS_LABEL || label.startsWith(CLAIMED_BY_LABEL_PREFIX));
+}
+
 function classifyQueueClear(issues: readonly QueueIssue[]): QueueClearPreview {
   const entries: QueueClearPreviewEntry[] = issues.map((issue) => {
-    const lanes = issue.labels
-      .filter((label) => label.startsWith(LANE_LABEL_PREFIX))
-      .map((label) => label.slice(LANE_LABEL_PREFIX.length))
-      .filter((slug) => slug !== '')
-      .sort();
-    const claimLabels = issue.labels.filter(
-      (label) => label === IN_PROGRESS_LABEL || label.startsWith(CLAIMED_BY_LABEL_PREFIX),
-    );
+    const lanes = laneSlugsOf(issue.labels);
+    const claimLabels = claimLabelsOf(issue.labels);
     const base = { issue: issue.number, lanes, ...(issue.title === undefined ? {} : { title: issue.title }) };
     return claimLabels.length > 0
       ? { ...base, action: 'would-skip', reason: `claimed (${claimLabels.join(', ')})` }
@@ -396,6 +422,9 @@ export interface GithubQueue {
   enqueue(lane: string, issues: readonly number[]): Promise<EnqueueResult[]>;
   /** Read-only preview of what clearing the queue would touch: one list call, never writes. */
   previewClear(): Promise<QueueClearPreview>;
+  /** Removes factory:queued and factory:order:* from every open unclaimed queued issue; leaves lane and every
+   *  other label; skips claimed issues with no writes. */
+  clear(): Promise<QueueClearResult>;
 }
 
 export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
@@ -580,5 +609,39 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     return classifyQueueClear(issues);
   }
 
-  return { claimNext, release, heartbeat, list, lanes, migrateLocalQueue, enqueue, previewClear };
+  async function clear(): Promise<QueueClearResult> {
+    const issues = await client.listOpenIssuesWithLabels({ owner, repo, labels: [QUEUED_LABEL] });
+    const sorted = [...issues].sort((a, b) => a.number - b.number);
+    const entries: QueueClearEntry[] = [];
+    for (const issue of sorted) {
+      const title = issue.title === undefined ? {} : { title: issue.title };
+      try {
+        const current = await client.getIssueLabels({ owner, repo, issue_number: issue.number });
+        const base = { issue: issue.number, lanes: laneSlugsOf(current), ...title };
+        const claims = claimLabelsOf(current);
+        if (claims.length > 0) {
+          entries.push({ ...base, outcome: 'skipped', reason: `claimed (${claims.join(', ')})` });
+          continue;
+        }
+        const toRemove = [QUEUED_LABEL, ...current.filter((name) => name.startsWith(QUEUE_ORDER_LABEL_PREFIX))];
+        for (const name of toRemove) {
+          await client.removeLabel({ owner, repo, issue_number: issue.number, name });
+        }
+        entries.push({ ...base, outcome: 'cleared' });
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        entries.push({
+          issue: issue.number,
+          lanes: laneSlugsOf(issue.labels),
+          ...title,
+          outcome: 'failed',
+          reason,
+        });
+      }
+    }
+    const count = (outcome: QueueClearOutcome): number => entries.filter((e) => e.outcome === outcome).length;
+    return { entries, cleared: count('cleared'), skipped: count('skipped'), failed: count('failed') };
+  }
+
+  return { claimNext, release, heartbeat, list, lanes, migrateLocalQueue, enqueue, previewClear, clear };
 }

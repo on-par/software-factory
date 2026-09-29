@@ -1874,14 +1874,20 @@ bash scripts/verify.sh
       };
       h.octokit.rest.issues.removeLabel = removeLabel;
       h.octokit.rest.issues.addLabels = addLabels;
+      const labelsFor = (n: number): string[] =>
+        n === 10
+          ? ['factory:queued', 'factory:lane:daw', 'factory:order:1']
+          : n === 11
+            ? ['factory:queued', 'factory:lane:daw', 'factory:in-progress', 'factory:claimed-by:host-1']
+            : ['factory:queued', 'factory:lane:daw'];
+      h.octokit.rest.issues.listLabelsOnIssue = vi.fn(async ({ issue_number }: { issue_number: number }) => ({
+        data: labelsFor(issue_number).map((name) => ({ name })),
+      }));
       h.octokit.rest.issues.listForRepo = vi.fn(async () => ({
         data: [
-          { number: 10, title: 'Queued issue', labels: ['factory:queued', 'factory:lane:daw'] },
-          {
-            number: 11,
-            labels: ['factory:queued', 'factory:lane:daw', 'factory:in-progress', 'factory:claimed-by:host-1'],
-          },
-          { number: 12, labels: ['factory:queued', 'factory:lane:daw'] },
+          { number: 10, title: 'Queued issue', labels: labelsFor(10) },
+          { number: 11, labels: labelsFor(11) },
+          { number: 12, labels: labelsFor(12) },
         ],
       }));
     });
@@ -1905,6 +1911,33 @@ bash scripts/verify.sh
       expect(errored()).toContain('--yes');
       expect(removeLabel).not.toHaveBeenCalled();
       expect(addLabels).not.toHaveBeenCalled();
+    });
+
+    it('--yes removes queue labels, keeps lanes, and skips claimed issues', async () => {
+      const res = await runMain('queue', 'clear', '--yes');
+
+      expect(res).toEqual({ exited: false, code: undefined });
+      expect(logged()).toContain('#10 [lane daw] cleared');
+      expect(logged()).toContain('#11 [lane daw] skipped — claimed');
+      expect(logged()).toContain('#12 [lane daw] cleared');
+      expect(logged()).toContain('3 queued issue(s): 2 cleared, 1 skipped');
+      const removed = removeLabel.mock.calls.map(([arg]) => [arg.issue_number, arg.name]);
+      expect(removed).toContainEqual([10, 'factory:queued']);
+      expect(removed).toContainEqual([10, 'factory:order:1']);
+      expect(removed).toContainEqual([12, 'factory:queued']);
+      expect(removed.some(([n]) => n === 11)).toBe(false);
+      expect(removed.some(([, name]) => String(name).startsWith('factory:lane:'))).toBe(false);
+      expect(addLabels).not.toHaveBeenCalled();
+    });
+
+    it('--yes on an empty queue reports it and does not remove labels', async () => {
+      h.octokit.rest.issues.listForRepo = vi.fn(async () => ({ data: [] }));
+
+      const res = await runMain('queue', 'clear', '--yes');
+
+      expect(res).toEqual({ exited: false, code: undefined });
+      expect(logged()).toContain('already empty');
+      expect(removeLabel).not.toHaveBeenCalled();
     });
 
     it('reports an already-empty queue and exits 0', async () => {
