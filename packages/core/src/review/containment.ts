@@ -1,4 +1,4 @@
-// packages/core/src/review/containment.ts — fail-closed fork-PR containment gate (#1684); `--contained` forces it for same-repo PRs (#1687).
+// packages/core/src/review/containment.ts — fail-closed fork-PR containment gate (#1684); `--contained` forces it for same-repo PRs (#1687); a PR outside the current checkout is always contained (#1673).
 
 import type { ContainerEngine } from '../hosted/container.js';
 
@@ -22,6 +22,8 @@ export type ReviewContainmentDecision =
 export interface ReviewContainmentOptions {
   /** `factory review --contained`: require containment even for a same-repo PR (#1687). */
   forceContained?: boolean;
+  /** `owner/name` of the current checkout; a PR whose base repo differs is cross-repo and must run contained (#1673). */
+  currentRepo?: string;
 }
 
 /** Help text for `factory review --contained` (#1687). */
@@ -37,6 +39,8 @@ export interface ContainmentGatedReviewDeps {
   runContained?: () => Promise<{ exitCode: number }>;
   /** Force containment for a same-repo PR (`factory review --contained`). Never falls back to the host. */
   forceContained?: boolean;
+  /** `owner/name` of the current checkout; a PR from another repository is always contained (#1673). */
+  currentRepo?: string;
   /** Sink for the refusal message (the CLI passes stderr). */
   write: (line: string) => void;
 }
@@ -48,6 +52,12 @@ export function isForkPullRequest(pr: ReviewPullRequestRepos): boolean {
   const head = pr.headRepo?.trim();
   if (!head) return true;
   return head.toLowerCase() !== pr.baseRepo.trim().toLowerCase();
+}
+
+export function isCrossRepoPullRequest(pr: ReviewPullRequestRepos, currentRepo: string | undefined): boolean {
+  const current = currentRepo?.trim();
+  if (!current) return false;
+  return pr.baseRepo.trim().toLowerCase() !== current.toLowerCase();
 }
 
 async function probeAvailable(engine: ContainerEngine): Promise<boolean> {
@@ -67,8 +77,14 @@ function forcedRefusal(pr: ReviewPullRequestRepos, why: string): string {
   return `review refused: PR #${pr.number} — --contained was requested, so containment is required, and ${why}. No PR code was checked out and no checker ran.`;
 }
 
-function refusalFor(pr: ReviewPullRequestRepos, why: string): string {
-  return isForkPullRequest(pr) ? refusal(pr, why) : forcedRefusal(pr, why);
+function crossRepoRefusal(pr: ReviewPullRequestRepos, why: string, currentRepo: string | undefined): string {
+  return `review refused: PR ${pr.baseRepo}#${pr.number} is in ${pr.baseRepo}, not the current checkout ${currentRepo?.trim()} — containment is required to review a PR from another repository, and ${why}. No PR code was checked out and no checker ran.`;
+}
+
+function refusalFor(pr: ReviewPullRequestRepos, why: string, currentRepo: string | undefined): string {
+  if (isForkPullRequest(pr)) return refusal(pr, why);
+  if (isCrossRepoPullRequest(pr, currentRepo)) return crossRepoRefusal(pr, why, currentRepo);
+  return forcedRefusal(pr, why);
 }
 
 export async function resolveReviewContainment(
@@ -76,25 +92,30 @@ export async function resolveReviewContainment(
   engine: ContainerEngine,
   options?: ReviewContainmentOptions,
 ): Promise<ReviewContainmentDecision> {
-  if (options?.forceContained !== true && !isForkPullRequest(pr)) return { kind: 'host' };
+  if (options?.forceContained !== true && !isForkPullRequest(pr) && !isCrossRepoPullRequest(pr, options?.currentRepo)) {
+    return { kind: 'host' };
+  }
   if (!(await probeAvailable(engine))) {
     return {
       kind: 'refused',
       exitCode: REVIEW_CONTAINMENT_REFUSED_EXIT_CODE,
-      message: refusalFor(pr, DOCKER_UNAVAILABLE_WHY),
+      message: refusalFor(pr, DOCKER_UNAVAILABLE_WHY, options?.currentRepo),
     };
   }
   return { kind: 'contained' };
 }
 
 export async function runContainmentGatedReview(deps: ContainmentGatedReviewDeps): Promise<{ exitCode: number }> {
-  const decision = await resolveReviewContainment(deps.pr, deps.engine, { forceContained: deps.forceContained });
+  const decision = await resolveReviewContainment(deps.pr, deps.engine, {
+    forceContained: deps.forceContained,
+    currentRepo: deps.currentRepo,
+  });
   if (decision.kind === 'host') return deps.runOnHost();
   if (decision.kind === 'refused') {
     deps.write(decision.message);
     return { exitCode: decision.exitCode };
   }
   if (deps.runContained) return deps.runContained();
-  deps.write(refusalFor(deps.pr, NO_RUNNER_WHY));
+  deps.write(refusalFor(deps.pr, NO_RUNNER_WHY, deps.currentRepo));
   return { exitCode: REVIEW_CONTAINMENT_REFUSED_EXIT_CODE };
 }

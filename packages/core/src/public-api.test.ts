@@ -310,6 +310,7 @@ const INTERNAL_API_KEYS = [
   'computeReviewVerdict',
   'DETERMINISTIC_CHECKERS',
   // Review fork-PR containment gate (#1684)
+  'isCrossRepoPullRequest',
   'isForkPullRequest',
   'resolveReviewContainment',
   'REVIEW_CONTAINED_FLAG_HELP',

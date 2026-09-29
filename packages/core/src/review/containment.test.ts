@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { ContainerEngine } from '../hosted/container.js';
 import {
+  isCrossRepoPullRequest,
   isForkPullRequest,
   resolveReviewContainment,
   REVIEW_CONTAINED_FLAG_HELP,
@@ -39,6 +40,19 @@ describe('isForkPullRequest', () => {
   it('flags an unknown head repo as a fork', () => {
     expect(isForkPullRequest({ ...sameRepo, headRepo: null })).toBe(true);
     expect(isForkPullRequest({ ...sameRepo, headRepo: '' })).toBe(true);
+  });
+});
+
+describe('isCrossRepoPullRequest', () => {
+  it('is false without a usable currentRepo', () => {
+    expect(isCrossRepoPullRequest(sameRepo, undefined)).toBe(false);
+    expect(isCrossRepoPullRequest(sameRepo, '  ')).toBe(false);
+  });
+  it('ignores case and whitespace', () => {
+    expect(isCrossRepoPullRequest(sameRepo, ' ACME/App ')).toBe(false);
+  });
+  it('is true when the base repo differs from the current checkout', () => {
+    expect(isCrossRepoPullRequest(sameRepo, 'me/here')).toBe(true);
   });
 });
 
@@ -122,6 +136,73 @@ describe('resolveReviewContainment', () => {
       expect(message).toContain('mallory/app');
       expect(message).not.toContain('--contained');
     });
+  });
+});
+
+describe('cross-repo PRs (#1673)', () => {
+  const other: ReviewPullRequestRepos = { number: 9, baseRepo: 'other/repo', headRepo: 'other/repo' };
+
+  it('contains a cross-repo PR when Docker is available', async () => {
+    const decision = await resolveReviewContainment(
+      other,
+      engineWith(async () => true),
+      { currentRepo: 'me/here' },
+    );
+    expect(decision).toEqual({ kind: 'contained' });
+  });
+
+  it.each([
+    ['the probe reports unavailable', async () => false],
+    [
+      'the probe rejects',
+      async () => {
+        throw new Error('boom');
+      },
+    ],
+    ['the engine has no probe', undefined],
+  ])('refuses a cross-repo PR when %s', async (_name, probe) => {
+    const decision = await resolveReviewContainment(other, engineWith(probe), { currentRepo: 'me/here' });
+    expect(decision).toMatchObject({ kind: 'refused', exitCode: 2 });
+    const message = decision.kind === 'refused' ? decision.message : '';
+    expect(message).toContain('other/repo#9');
+    expect(message).toContain('me/here');
+    expect(message).not.toContain('--contained');
+  });
+
+  it('keeps a matching or unspecified currentRepo on the host without probing', async () => {
+    const isAvailable = vi.fn(async () => false);
+    expect(await resolveReviewContainment(other, engineWith(isAvailable), { currentRepo: 'Other/Repo' })).toEqual({
+      kind: 'host',
+    });
+    expect(await resolveReviewContainment(other, engineWith(isAvailable))).toEqual({ kind: 'host' });
+    expect(isAvailable).not.toHaveBeenCalled();
+  });
+
+  it('runs a cross-repo PR through the contained runner, never the host', async () => {
+    const s = spies();
+    const result = await runContainmentGatedReview({
+      pr: other,
+      engine: engineWith(async () => true),
+      currentRepo: 'me/here',
+      ...s,
+    });
+    expect(result).toEqual({ exitCode: 0 });
+    expect(s.runContained).toHaveBeenCalledTimes(1);
+    expect(s.runOnHost).not.toHaveBeenCalled();
+  });
+
+  it('refuses with exit 2 and cross-repo wording when there is no contained runner', async () => {
+    const s = spies();
+    const result = await runContainmentGatedReview({
+      pr: other,
+      engine: engineWith(async () => true),
+      currentRepo: 'me/here',
+      runOnHost: s.runOnHost,
+      write: s.write,
+    });
+    expect(result).toEqual({ exitCode: 2 });
+    expect(s.write).toHaveBeenCalledWith(expect.stringContaining('not the current checkout me/here'));
+    expect(s.runOnHost).not.toHaveBeenCalled();
   });
 });
 

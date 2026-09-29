@@ -481,6 +481,7 @@ export type {
 export type { ContainedReviewDeps, ContainedReviewResult, ReviewInterruptSource } from './review/contained.js';
 export { pullRequestHeadRef, runContainedReview } from './review/contained.js';
 export {
+  isCrossRepoPullRequest,
   isForkPullRequest,
   resolveReviewContainment,
   REVIEW_CONTAINED_FLAG_HELP,
