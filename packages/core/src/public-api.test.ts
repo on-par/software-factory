@@ -309,6 +309,11 @@ const INTERNAL_API_KEYS = [
   // Review verdict (#1679)
   'computeReviewVerdict',
   'DETERMINISTIC_CHECKERS',
+  // Review fork-PR containment gate (#1684)
+  'isForkPullRequest',
+  'resolveReviewContainment',
+  'REVIEW_CONTAINMENT_REFUSED_EXIT_CODE',
+  'runContainmentGatedReview',
   // Local queue reprioritization audit records (#869)
   'createQueueRationaleAuditor',
   // Daemon-ready ProjectV2 queue intent projection (#866)

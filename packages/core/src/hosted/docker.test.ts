@@ -298,3 +298,22 @@ describe('createDockerEngine.createLaneContainer', () => {
     expect(calls[0]?.cmd).toContain("'ubuntu:24.04'");
   });
 });
+
+describe('createDockerEngine.isAvailable', () => {
+  it('resolves true when `docker info` succeeds', async () => {
+    const { exec, calls } = fakeExec(() => ({ stdout: '27.0.1\n', stderr: '' }));
+    const engine = createDockerEngine({ exec });
+
+    expect(await engine.isAvailable?.()).toBe(true);
+    expect(calls[0]?.cmd.startsWith('docker info')).toBe(true);
+  });
+
+  it('resolves false when `docker info` fails', async () => {
+    const exec: ExecFn = async () => {
+      throw new Error('Cannot connect to the Docker daemon');
+    };
+    const engine = createDockerEngine({ exec });
+
+    expect(await engine.isAvailable?.()).toBe(false);
+  });
+});

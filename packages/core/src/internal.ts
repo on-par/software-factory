@@ -468,3 +468,16 @@ export type {
   ReviewVerdictResult,
 } from './review/verdict.js';
 export { computeReviewVerdict, DETERMINISTIC_CHECKERS } from './review/verdict.js';
+
+// Review fork-PR containment gate (#1684)
+export type {
+  ContainmentGatedReviewDeps,
+  ReviewContainmentDecision,
+  ReviewPullRequestRepos,
+} from './review/containment.js';
+export {
+  isForkPullRequest,
+  resolveReviewContainment,
+  REVIEW_CONTAINMENT_REFUSED_EXIT_CODE,
+  runContainmentGatedReview,
+} from './review/containment.js';
