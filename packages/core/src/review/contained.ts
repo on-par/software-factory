@@ -1,9 +1,22 @@
-// packages/core/src/review/contained.ts — runs a fork PR's checkers inside a disposable container (#1685).
+// packages/core/src/review/contained.ts — runs a fork PR's checkers inside a disposable container (#1685)
+// and tears that container down on every exit path, including SIGINT/SIGTERM (#1686).
 
 import { summarizeCheckerOutputs } from '../checkers/index.js';
-import { provisionLaneContainer, type ContainerEngine, type LaneExecResult } from '../hosted/container.js';
+import {
+  laneContainerName,
+  provisionLaneContainer,
+  type ContainerEngine,
+  type LaneContainerRemoval,
+  type LaneExecResult,
+} from '../hosted/container.js';
 import type { CheckerOutput, CheckSummary } from '../types/index.js';
 import type { ReviewPullRequestRepos } from './containment.js';
+
+/** Minimal signal port so tests can simulate an interrupt; defaults to `process`. */
+export interface ReviewInterruptSource {
+  once(signal: 'SIGINT' | 'SIGTERM', listener: () => void): unknown;
+  removeListener(signal: 'SIGINT' | 'SIGTERM', listener: () => void): unknown;
+}
 
 export interface ContainedReviewDeps {
   engine: ContainerEngine;
@@ -14,11 +27,15 @@ export interface ContainedReviewDeps {
   testsRequired?: boolean;
   /** Per-command timeout in ms; default 300_000. */
   timeoutMs?: number;
+  /** Interrupt source for teardown-on-signal; defaults to `process`. */
+  signals?: ReviewInterruptSource;
+  /** Called after teardown on SIGINT (130) / SIGTERM (143); defaults to `process.exit`. */
+  exit?: (code: number) => void;
 }
 
 export type ContainedReviewResult =
-  | { ok: true; summary: CheckSummary; containerName: string; commit?: string }
-  | { ok: false; error: string; containerName?: string };
+  | { ok: true; summary: CheckSummary; containerName: string; commit?: string; teardown?: LaneContainerRemoval }
+  | { ok: false; error: string; containerName?: string; teardown?: LaneContainerRemoval };
 
 const DEFAULT_TIMEOUT_MS = 300_000;
 const READ_TIMEOUT_MS = 30_000;
@@ -50,11 +67,51 @@ export async function runContainedReview(deps: ContainedReviewDeps): Promise<Con
     return { ok: false, error: 'container engine cannot exec into a lane container; refusing to run fork checkers' };
   }
 
+  const removeLane = engine.removeLaneContainer?.bind(engine);
+  if (!removeLane) {
+    return { ok: false, error: 'container engine cannot remove a lane container; refusing to run fork checkers' };
+  }
+
+  const laneSlug = `review-pr-${pr.number}`;
+  const name = laneContainerName(runId, laneSlug);
+  let teardownPromise: Promise<LaneContainerRemoval> | undefined;
+  const teardown = (): Promise<LaneContainerRemoval> =>
+    (teardownPromise ??= removeLane(name).catch((err: unknown) => ({
+      containerName: name,
+      removed: false,
+      evidence: `teardown error: ${err instanceof Error ? err.message : String(err)}`,
+    })));
+
+  const signals = deps.signals ?? process;
+  const exit = deps.exit ?? ((code: number): void => process.exit(code));
+  const onSigint = (): void => void teardown().then(() => exit(130));
+  const onSigterm = (): void => void teardown().then(() => exit(143));
+  signals.once('SIGINT', onSigint);
+  signals.once('SIGTERM', onSigterm);
+
+  try {
+    const result = await reviewInContainer(deps, execInLane, laneSlug);
+    return { ...result, teardown: await teardown() };
+  } catch (err) {
+    await teardown();
+    throw err;
+  } finally {
+    signals.removeListener('SIGINT', onSigint);
+    signals.removeListener('SIGTERM', onSigterm);
+  }
+}
+
+async function reviewInContainer(
+  deps: ContainedReviewDeps,
+  execInLane: NonNullable<ContainerEngine['execInLaneContainer']>,
+  laneSlug: string,
+): Promise<ContainedReviewResult> {
+  const { engine, pr, runId } = deps;
   const provision = await provisionLaneContainer(
     engine,
     'disposable-docker',
     runId,
-    `review-pr-${pr.number}`,
+    laneSlug,
     pr.baseRepo,
     pullRequestHeadRef(pr.number),
   );

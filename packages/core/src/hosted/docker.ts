@@ -14,6 +14,7 @@ import type {
   ContainerRunResult,
   ContainerRunSpec,
   LaneContainerCreateResult,
+  LaneContainerRemoval,
   LaneExecOptions,
   LaneExecResult,
   LaneWorkspacePrepared,
@@ -162,6 +163,29 @@ export function createDockerEngine(options: DockerEngineOptions): ContainerEngin
         : `ps -a ${removed ? 'empty' : 'still shows a match'}`;
       const evidence = `${removeEvidence}; ${psCheckResult}; workspace ${workspaceRemoved ? 'removed' : 'removal failed'}; credential ${workspaceRemoved ? 'removed' : 'removal failed'}`;
       return { containerName: name, removed, workspaceRemoved, credentialRemoved: workspaceRemoved, evidence };
+    },
+
+    async removeLaneContainer(name): Promise<LaneContainerRemoval> {
+      let removeEvidence: string;
+      try {
+        await exec(`docker rm -f -v ${quote(name)}`, {});
+        removeEvidence = `docker rm -f -v ${name} ok`;
+      } catch (err) {
+        const execErr = err as PromisifiedExecError;
+        removeEvidence = `docker rm -f -v ${name} error: ${execErr.stderr ?? String(err)}`;
+      }
+
+      let removed = false;
+      let psCheckResult: string;
+      try {
+        const { stdout } = await exec(`docker ps -a --filter ${quote(`name=${name}`)} --format '{{.ID}}'`, {});
+        removed = stdout.trim() === '';
+        psCheckResult = `ps -a ${removed ? 'empty' : 'still shows a match'}`;
+      } catch (err) {
+        const execErr = err as PromisifiedExecError;
+        psCheckResult = `ps -a check failed: ${execErr.stderr ?? String(err)}`;
+      }
+      return { containerName: name, removed, evidence: `${removeEvidence}; ${psCheckResult}` };
     },
 
     async createLaneContainer(name): Promise<LaneContainerCreateResult> {
