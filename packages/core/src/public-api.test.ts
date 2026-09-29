@@ -319,7 +319,9 @@ const INTERNAL_API_KEYS = [
   'pullRequestHeadRef',
   'runContainedReview',
   // Cross-repo PR references + review constitution (#1673)
+  'DEFAULT_REVIEW_CONSTITUTION',
   'describePullRequestAccessError',
+  'describeReviewConstitutionSource',
   'formatPullRequestReference',
   'parsePullRequestReference',
   'resolvePullRequestReference',

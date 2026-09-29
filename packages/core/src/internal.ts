@@ -498,3 +498,5 @@ export {
   resolvePullRequestReference,
   REVIEW_ACCESS_ERROR_EXIT_CODE,
 } from './review/pr-reference.js';
+export type { ReviewConstitution, ReviewConstitutionSource } from './constitutions/index.js';
+export { DEFAULT_REVIEW_CONSTITUTION, describeReviewConstitutionSource } from './constitutions/index.js';

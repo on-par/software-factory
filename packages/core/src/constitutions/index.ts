@@ -18,6 +18,31 @@ export const REPO_INSTRUCTION_FILES = ['CLAUDE.md', 'AGENTS.md', '.github/copilo
 /** Default path, relative to a consumer repo's root, of its committed constitution instance. */
 export const DEFAULT_REPO_CONSTITUTION_PATH = '.factory/constitution.md';
 
+/** Bundled product name of the built-in review fallback (packages/config/src/constitutions/default-review.md). */
+export const DEFAULT_REVIEW_CONSTITUTION = 'default-review';
+
+export type ReviewConstitutionSource =
+  | { kind: 'repo-constitution'; path: string }
+  | { kind: 'instruction-files'; files: string[] }
+  | { kind: 'default'; product: typeof DEFAULT_REVIEW_CONSTITUTION };
+
+export interface ReviewConstitution {
+  constitution: Constitution;
+  source: ReviewConstitutionSource;
+}
+
+/** One-line report description of where a review's standards came from. */
+export function describeReviewConstitutionSource(source: ReviewConstitutionSource): string {
+  switch (source.kind) {
+    case 'repo-constitution':
+      return `constitution: ${source.path} (the repo's factory constitution)`;
+    case 'instruction-files':
+      return `constitution: repo instruction files (${source.files.join(', ')})`;
+    case 'default':
+      return `constitution: built-in default review constitution — the repo has no ${DEFAULT_REPO_CONSTITUTION_PATH} and no ${REPO_INSTRUCTION_FILES.join(', ')}`;
+  }
+}
+
 /** Build a Constitution from a bundled/repo-instance file's raw text and frontmatter. */
 function parseConstitution(raw: string, path: string, fallbackProduct: string): Constitution {
   const { data, content } = matter(raw);
@@ -68,9 +93,8 @@ export class ConstitutionLoader {
     return parseConstitution(raw, path, fallbackProduct);
   }
 
-  /** Load standards from the target repo's own agent instruction files, if any */
-  loadFromRepo(repoDir: string): Constitution | null {
-    const sections: string[] = [];
+  private readInstructionFiles(repoDir: string): Array<{ file: string; content: string }> {
+    const entries: Array<{ file: string; content: string }> = [];
     for (const file of REPO_INSTRUCTION_FILES) {
       let content: string;
       try {
@@ -81,17 +105,49 @@ export class ConstitutionLoader {
         continue;
       }
       if (!content) continue;
-      sections.push(`<standards source="${file}">\n\n${content}\n\n</standards>`);
+      entries.push({ file, content });
     }
-    if (sections.length === 0) return null;
+    return entries;
+  }
+
+  private repoConstitutionFrom(repoDir: string, entries: Array<{ file: string; content: string }>): Constitution {
     return {
       product: 'repo',
       version: 1,
       checkers: [],
       requireTests: false,
-      body: sections.join('\n\n'),
+      body: entries.map((e) => `<standards source="${e.file}">\n\n${e.content}\n\n</standards>`).join('\n\n'),
       path: repoDir,
       source: 'repo',
+    };
+  }
+
+  /** Load standards from the target repo's own agent instruction files, if any */
+  loadFromRepo(repoDir: string): Constitution | null {
+    const entries = this.readInstructionFiles(repoDir);
+    return entries.length === 0 ? null : this.repoConstitutionFrom(repoDir, entries);
+  }
+
+  /**
+   * Resolve the standards for a review, first-hit and never merged:
+   * the repo's `.factory/constitution.md`, then its agent instruction files,
+   * then the built-in default review constitution. Never returns null.
+   */
+  resolveForReview(repoDir: string, constitutionPath: string = DEFAULT_REPO_CONSTITUTION_PATH): ReviewConstitution {
+    const repoConstitution = this.loadRepoConstitution(repoDir, constitutionPath);
+    if (repoConstitution) {
+      return { constitution: repoConstitution, source: { kind: 'repo-constitution', path: constitutionPath } };
+    }
+    const entries = this.readInstructionFiles(repoDir);
+    if (entries.length > 0) {
+      return {
+        constitution: this.repoConstitutionFrom(repoDir, entries),
+        source: { kind: 'instruction-files', files: entries.map((e) => e.file) },
+      };
+    }
+    return {
+      constitution: this.load(DEFAULT_REVIEW_CONSTITUTION),
+      source: { kind: 'default', product: DEFAULT_REVIEW_CONSTITUTION },
     };
   }
 
