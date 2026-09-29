@@ -458,3 +458,13 @@ export { wrapCommandInSandbox } from './sandbox/index.js';
 
 export { createRunRuntime } from './daemon/run-runtime.js';
 export { createShipExecutor } from './daemon/ship-executor.js';
+
+// Review verdict (#1679)
+export type {
+  AcceptanceCriterionFinding,
+  ReviewContextLevel,
+  ReviewVerdict,
+  ReviewVerdictInput,
+  ReviewVerdictResult,
+} from './review/verdict.js';
+export { computeReviewVerdict, DETERMINISTIC_CHECKERS } from './review/verdict.js';
