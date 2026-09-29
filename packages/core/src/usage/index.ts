@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
 import type { CostEntry } from '../types/index.js';
+import { claudeConfigDirOverride } from '../utils/claude-config.js';
 import { logEvent } from '../utils/index.js';
 import type { SubscriptionUsage } from './subscription.js';
 import { fetchSubscriptionUsage } from './subscription.js';
@@ -33,8 +34,12 @@ export function priceFor(model: string): { input: number; output: number } {
   return { input: price.input, output: price.output };
 }
 
-export function defaultTranscriptRoots(): string[] {
-  return [resolve(homedir(), '.claude/projects'), resolve(homedir(), '.config/claude/projects')];
+/** Where Claude Code writes session transcripts. With CLAUDE_CONFIG_DIR set, only that
+ *  profile's projects/ dir — so the estimator never counts another profile's spend. */
+export function defaultTranscriptRoots(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string[] {
+  const override = claudeConfigDirOverride(env);
+  if (override) return [resolve(override, 'projects')];
+  return [resolve(home, '.claude/projects'), resolve(home, '.config/claude/projects')];
 }
 
 export function estimateTrailingSpend(opts: TrailingUsageOptions = {}): number {

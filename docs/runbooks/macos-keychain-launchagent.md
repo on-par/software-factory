@@ -84,3 +84,13 @@ Doctor hard-fails for tmux without keychain access and gives this remediation. `
 Do not re-enable Ollama/qwen failover as a workaround. Do not treat issues parked on `local_auth` as product failures; re-queue them after fixing the launch context.
 
 The sandbox-allowlist siblings #1008 and #1009 cover a different failure: the sandbox write allowlist. Factoryd #764 tracks making a launchd wrapper first-class.
+
+## Non-default Claude profile (`CLAUDE_CONFIG_DIR`)
+
+To run the factory against a different Claude account, set `CLAUDE_CONFIG_DIR` for the factory process, e.g. `CLAUDE_CONFIG_DIR=~/.claude-work factory run-issue 42`, or `export CLAUDE_CONFIG_DIR=/Users/<you>/.claude-work` in the LaunchAgent wrapper before `exec factory run`. Child `claude` runs inherit it, and the factory's own reads follow it: the usage gate, the transcript estimator, the sandbox write allowlist, docker-sandbox mounts, and the doctor keychain check.
+
+Claude Code stores that profile's credential under a different keychain service: `Claude Code-credentials-<first 8 hex of sha256($CLAUDE_CONFIG_DIR)>`. The hash is over the path exactly as spelled, so `~/.claude-work` and `~/.claude-work/` name different entries. To probe it by hand:
+
+```sh
+security find-generic-password -s "Claude Code-credentials-$(printf '%s' "$CLAUDE_CONFIG_DIR" | shasum -a 256 | cut -c1-8)"
+```

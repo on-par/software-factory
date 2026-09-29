@@ -198,6 +198,32 @@ describe('resolveSandboxPolicy', () => {
     expect(policy?.runtime).toBe('firejail');
   });
 
+  it("makes the CLAUDE_CONFIG_DIR profile writable too, keeping ~/.claude for the profile's symlinked items", () => {
+    const policy = resolveSandboxPolicy(defaultSandboxCfg, {
+      ...baseOpts,
+      env: { CLAUDE_CONFIG_DIR: '/home/factory/.claude-work' },
+    });
+    expect(policy?.writablePaths).toContain('/home/factory/.claude-work');
+    expect(policy?.writablePaths).toContain('/home/factory/.claude');
+    expect(policy?.writableFilePrefixes).toEqual(['/home/factory/.claude.json']);
+  });
+
+  it('adds no extra Claude profile path when CLAUDE_CONFIG_DIR is unset or empty', () => {
+    const unset = resolveSandboxPolicy(defaultSandboxCfg, { ...baseOpts, env: {} });
+    const empty = resolveSandboxPolicy(defaultSandboxCfg, { ...baseOpts, env: { CLAUDE_CONFIG_DIR: '' } });
+    expect(empty?.writablePaths).toEqual(unset?.writablePaths);
+    expect(unset?.writablePaths.filter((p) => p.includes('.claude'))).toEqual(['/home/factory/.claude']);
+  });
+
+  it('renders the CLAUDE_CONFIG_DIR profile as a writable subpath in the darwin profile', () => {
+    const policy = resolveSandboxPolicy(defaultSandboxCfg, {
+      ...baseOpts,
+      platform: 'darwin',
+      env: { CLAUDE_CONFIG_DIR: '/Users/dev/.claude-work' },
+    });
+    expect(buildDarwinProfile(policy!)).toContain('(allow file-write* (subpath "/Users/dev/.claude-work"))');
+  });
+
   it('includes ~/.claude.json in writableFilePrefixes', () => {
     const policy = resolveSandboxPolicy(defaultSandboxCfg, { ...baseOpts, env: {} });
     expect(policy?.writableFilePrefixes).toContain('/home/factory/.claude.json');

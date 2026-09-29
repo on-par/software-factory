@@ -17,6 +17,7 @@ import { resolve } from 'node:path';
 import type { EventKind } from '../events/kinds.js';
 import { isCommandAvailable } from '../models/index.js';
 import type { SandboxRuntime } from '../sandbox/index.js';
+import { claudeConfigDirOverride } from './claude-config.js';
 import { defaultExecFn, type ExecFn } from './exec.js';
 
 const MICRO_VM_NAME_PREFIX = 'factory-';
@@ -33,8 +34,9 @@ export function microVmName(worktreePath: string): string {
 }
 
 /** The sandbox descriptor callers thread through setupWorktree/cleanupWorktree.
- *  `authPaths` is the resolved set of auth dirs (~/.claude, ~/.codex, ~/.npm) mounted
- *  read-write so contained agent runs can authenticate. */
+ *  `authPaths` is the resolved set of auth dirs (~/.claude, the CLAUDE_CONFIG_DIR
+ *  profile when set, ~/.codex, ~/.npm) mounted read-write so contained agent runs can
+ *  authenticate. */
 export interface WorktreeSandbox {
   runtime: SandboxRuntime;
   authPaths: string[];
@@ -51,13 +53,21 @@ export interface WorktreeSandbox {
  *  from one place instead of re-deriving them inline (#653). */
 export function worktreeSandboxFor(
   runtime: SandboxRuntime | undefined,
-  opts: { homedir?: string; allowHosts?: string[] } = {},
+  opts: { homedir?: string; allowHosts?: string[]; env?: NodeJS.ProcessEnv } = {},
 ): WorktreeSandbox | undefined {
   if (runtime !== 'docker-sandbox') return undefined;
   const home = opts.homedir ?? homedir();
+  // The selected Claude profile is mounted alongside ~/.claude (not in place of it) because
+  // a profile dir commonly symlinks shared items back into ~/.claude.
+  const claudeProfileDir = claudeConfigDirOverride(opts.env ?? process.env);
   return {
     runtime: 'docker-sandbox',
-    authPaths: [resolve(home, '.claude'), resolve(home, '.codex'), resolve(home, '.npm')],
+    authPaths: [
+      resolve(home, '.claude'),
+      ...(claudeProfileDir ? [resolve(claudeProfileDir)] : []),
+      resolve(home, '.codex'),
+      resolve(home, '.npm'),
+    ],
     allowHosts: opts.allowHosts ?? [],
   };
 }

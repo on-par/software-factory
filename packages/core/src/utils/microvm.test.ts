@@ -38,16 +38,29 @@ describe('worktreeSandboxFor', () => {
   });
 
   it('builds authPaths for ~/.claude, ~/.codex, ~/.npm under the given home, with an empty allowlist by default', () => {
-    expect(worktreeSandboxFor('docker-sandbox', { homedir: '/home/user' })).toEqual({
+    expect(worktreeSandboxFor('docker-sandbox', { homedir: '/home/user', env: {} })).toEqual({
       runtime: 'docker-sandbox',
       authPaths: ['/home/user/.claude', '/home/user/.codex', '/home/user/.npm'],
       allowHosts: [],
     });
   });
 
+  it('also mounts the CLAUDE_CONFIG_DIR profile when set, alongside ~/.claude', () => {
+    expect(
+      worktreeSandboxFor('docker-sandbox', {
+        homedir: '/home/user',
+        env: { CLAUDE_CONFIG_DIR: '/home/user/.claude-work' },
+      })?.authPaths,
+    ).toEqual(['/home/user/.claude', '/home/user/.claude-work', '/home/user/.codex', '/home/user/.npm']);
+  });
+
   it('carries the given allowHosts on the descriptor', () => {
     expect(
-      worktreeSandboxFor('docker-sandbox', { homedir: '/home/user', allowHosts: ['api.anthropic.com', 'github.com'] }),
+      worktreeSandboxFor('docker-sandbox', {
+        homedir: '/home/user',
+        allowHosts: ['api.anthropic.com', 'github.com'],
+        env: {},
+      }),
     ).toEqual({
       runtime: 'docker-sandbox',
       authPaths: ['/home/user/.claude', '/home/user/.codex', '/home/user/.npm'],

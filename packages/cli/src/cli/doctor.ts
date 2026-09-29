@@ -196,20 +196,39 @@ export function doctorFailed(checks: DoctorCheck[]): boolean {
   return checks.some((c) => !c.ok && !c.optional);
 }
 
+/** The keychain service Claude Code uses for the default profile (CLAUDE_CONFIG_DIR unset). */
+const DEFAULT_KEYCHAIN_SERVICE = 'Claude Code-credentials';
+
+/** Which Claude profile a keychain probe checked: the keychain service name and, for a
+ *  non-default profile, the CLAUDE_CONFIG_DIR it belongs to. Absent = default profile. */
+export interface KeychainProbeProfile {
+  service?: string;
+  configDir?: string;
+}
+
 /** Result of the macOS login-keychain probe for the Claude Code credential entry (#1014). */
 export type KeychainProbeStatus =
-  { status: 'skipped'; detail: string } | { status: 'readable' } | { status: 'unreadable'; inTmux: boolean };
+  | { status: 'skipped'; detail: string }
+  | ({ status: 'readable' } & KeychainProbeProfile)
+  | ({ status: 'unreadable'; inTmux: boolean } & KeychainProbeProfile);
+
+function loginFix(profile: KeychainProbeProfile): string {
+  return profile.configDir ? `CLAUDE_CONFIG_DIR=${profile.configDir} claude` : '`claude`';
+}
 
 export function claudeKeychainCheck(probe: KeychainProbeStatus): DoctorCheck {
   if (probe.status === 'skipped') {
     return { name: 'claude keychain (macOS)', ok: true, optional: true, detail: probe.detail };
   }
 
+  const service = probe.service ?? DEFAULT_KEYCHAIN_SERVICE;
+  const profile = probe.configDir ? ` (profile CLAUDE_CONFIG_DIR=${probe.configDir})` : '';
+
   if (probe.status === 'readable') {
     return {
       name: 'claude keychain (macOS)',
       ok: true,
-      detail: "login keychain entry 'Claude Code-credentials' is readable in this context",
+      detail: `login keychain entry '${service}'${profile} is readable in this context`,
     };
   }
 
@@ -217,8 +236,7 @@ export function claudeKeychainCheck(probe: KeychainProbeStatus): DoctorCheck {
     return {
       name: 'claude keychain (macOS)',
       ok: false,
-      detail:
-        "security find-generic-password -s 'Claude Code-credentials' failed inside tmux (SecKeychainSearchCopyNext) — Claude OAuth refresh will fail with local_auth",
+      detail: `security find-generic-password -s '${service}'${profile} failed inside tmux (SecKeychainSearchCopyNext) — Claude OAuth refresh will fail with local_auth`,
       fix: 'run the factory from a context with login-keychain access — a LaunchAgent in the gui domain (launchctl bootstrap gui/$(id -u) …) or a login Terminal, not a raw tmux pane — see docs/runbooks/macos-keychain-launchagent.md',
     };
   }
@@ -227,9 +245,8 @@ export function claudeKeychainCheck(probe: KeychainProbeStatus): DoctorCheck {
     name: 'claude keychain (macOS)',
     ok: false,
     optional: true,
-    detail:
-      "security find-generic-password -s 'Claude Code-credentials' failed — either never logged in, or this launch context cannot read the login keychain",
-    fix: 'run `claude` and complete /login (or export ANTHROPIC_API_KEY); if already logged in, see docs/runbooks/macos-keychain-launchagent.md',
+    detail: `security find-generic-password -s '${service}'${profile} failed — either never logged in, or this launch context cannot read the login keychain`,
+    fix: `run ${loginFix(probe)} and complete /login (or export ANTHROPIC_API_KEY); if already logged in, see docs/runbooks/macos-keychain-launchagent.md`,
   };
 }
 
@@ -237,7 +254,8 @@ export function claudeKeychainCheck(probe: KeychainProbeStatus): DoctorCheck {
  *  Only the tmux-without-keychain differential is certain enough to abort a run on. */
 export function keychainPreflightError(probe: KeychainProbeStatus): string | null {
   if (probe.status !== 'unreadable' || !probe.inTmux) return null;
-  return "Claude Code credentials are not readable from this tmux session (security find-generic-password -s 'Claude Code-credentials' failed / SecKeychainSearchCopyNext). OAuth refresh will fail and every claimed issue would spuriously park as local_auth. Launch the factory from a context with login-keychain access — a LaunchAgent in the gui domain (launchctl bootstrap gui/$(id -u) …) or a login Terminal — or export ANTHROPIC_API_KEY. See docs/runbooks/macos-keychain-launchagent.md.";
+  const service = probe.service ?? DEFAULT_KEYCHAIN_SERVICE;
+  return `Claude Code credentials are not readable from this tmux session (security find-generic-password -s '${service}' failed / SecKeychainSearchCopyNext). OAuth refresh will fail and every claimed issue would spuriously park as local_auth. Launch the factory from a context with login-keychain access — a LaunchAgent in the gui domain (launchctl bootstrap gui/$(id -u) …) or a login Terminal — or export ANTHROPIC_API_KEY. See docs/runbooks/macos-keychain-launchagent.md.`;
 }
 
 /** Outcome of one `claude -p` probe: it succeeded, it failed, or it was not run. */
@@ -279,7 +297,7 @@ export function sandboxClaudeAuthChecks(result: ClaudeAuthProbeResult): DoctorCh
       name: SANDBOX_AUTH_CHECK,
       ok: false,
       detail: `${result.sandboxDetail} — host claude auth is healthy, so the sandbox is blocking Claude credential refresh`,
-      fix: 'check the sandbox write allowlist (~/.claude.json*, ~/Library/Keychains); as a stopgap run with FACTORY_SANDBOX=0',
+      fix: 'check the sandbox write allowlist (~/.claude.json*, $CLAUDE_CONFIG_DIR when set, ~/Library/Keychains); as a stopgap run with FACTORY_SANDBOX=0',
     };
   } else {
     sandboxed = {

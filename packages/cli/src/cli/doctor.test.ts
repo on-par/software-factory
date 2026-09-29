@@ -560,7 +560,47 @@ describe('claudeKeychainCheck', () => {
   });
 });
 
+describe('claudeKeychainCheck for a CLAUDE_CONFIG_DIR profile', () => {
+  const profile = { service: 'Claude Code-credentials-685abfe8', configDir: '/home/dev/.claude-work' };
+
+  it("names the selected profile's keychain entry when readable", () => {
+    const check = claudeKeychainCheck({ status: 'readable', ...profile });
+    expect(check.ok).toBe(true);
+    expect(check.detail).toContain("login keychain entry 'Claude Code-credentials-685abfe8'");
+    expect(check.detail).toContain('CLAUDE_CONFIG_DIR=/home/dev/.claude-work');
+  });
+
+  it('names the profile entry in the tmux hard-fail', () => {
+    const check = claudeKeychainCheck({ status: 'unreadable', inTmux: true, ...profile });
+    expect(check.ok).toBe(false);
+    expect(check.detail).toContain("-s 'Claude Code-credentials-685abfe8'");
+  });
+
+  it('tells the user to log in under the same profile', () => {
+    const check = claudeKeychainCheck({ status: 'unreadable', inTmux: false, ...profile });
+    expect(check).toMatchObject({ ok: false, optional: true });
+    expect(check.detail).toContain("-s 'Claude Code-credentials-685abfe8'");
+    expect(check.fix).toContain('CLAUDE_CONFIG_DIR=/home/dev/.claude-work claude');
+  });
+
+  it('keeps the default entry name and plain `claude` fix when no profile is given', () => {
+    const check = claudeKeychainCheck({ status: 'unreadable', inTmux: false });
+    expect(check.detail).toContain("-s 'Claude Code-credentials' failed");
+    expect(check.fix).toContain('run `claude` and complete /login');
+  });
+});
+
 describe('keychainPreflightError', () => {
+  it("names the selected profile's keychain entry inside tmux", () => {
+    const error = keychainPreflightError({
+      status: 'unreadable',
+      inTmux: true,
+      service: 'Claude Code-credentials-685abfe8',
+      configDir: '/home/dev/.claude-work',
+    });
+    expect(error).toContain("-s 'Claude Code-credentials-685abfe8'");
+  });
+
   it('returns null unless the keychain is unreadable inside tmux', () => {
     expect(keychainPreflightError({ status: 'readable' })).toBeNull();
     expect(keychainPreflightError({ status: 'skipped', detail: 'skipped — not macOS' })).toBeNull();
