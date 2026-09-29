@@ -4122,6 +4122,7 @@ describe('cli', () => {
         lanes: async () => ['app', 'infra'],
         migrateLocalQueue: async () => {},
         enqueue: async () => [],
+        previewClear: async () => ({ entries: [], wouldClear: 0, wouldSkip: 0 }),
       };
 
       const result = await planRunLanes({
@@ -4157,6 +4158,7 @@ describe('cli', () => {
         lanes: async () => [],
         migrateLocalQueue: async () => {},
         enqueue: async () => [],
+        previewClear: async () => ({ entries: [], wouldClear: 0, wouldSkip: 0 }),
       };
 
       const result = await planRunLanes({
@@ -4193,6 +4195,7 @@ describe('cli', () => {
         lanes: async () => [],
         migrateLocalQueue: async () => {},
         enqueue: async () => [],
+        previewClear: async () => ({ entries: [], wouldClear: 0, wouldSkip: 0 }),
       };
 
       const deps = laneQueueDeps(fakeQueue, 'app');
