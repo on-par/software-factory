@@ -312,6 +312,7 @@ const INTERNAL_API_KEYS = [
   // Review fork-PR containment gate (#1684)
   'isForkPullRequest',
   'resolveReviewContainment',
+  'REVIEW_CONTAINED_FLAG_HELP',
   'REVIEW_CONTAINMENT_REFUSED_EXIT_CODE',
   'runContainmentGatedReview',
   'pullRequestHeadRef',

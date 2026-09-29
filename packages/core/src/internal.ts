@@ -473,6 +473,7 @@ export { computeReviewVerdict, DETERMINISTIC_CHECKERS } from './review/verdict.j
 export type {
   ContainmentGatedReviewDeps,
   ReviewContainmentDecision,
+  ReviewContainmentOptions,
   ReviewPullRequestRepos,
 } from './review/containment.js';
 
@@ -482,6 +483,7 @@ export { pullRequestHeadRef, runContainedReview } from './review/contained.js';
 export {
   isForkPullRequest,
   resolveReviewContainment,
+  REVIEW_CONTAINED_FLAG_HELP,
   REVIEW_CONTAINMENT_REFUSED_EXIT_CODE,
   runContainmentGatedReview,
 } from './review/containment.js';
