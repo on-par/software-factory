@@ -310,6 +310,7 @@ const INTERNAL_API_KEYS = [
   'computeReviewVerdict',
   'DETERMINISTIC_CHECKERS',
   // Review fork-PR containment gate (#1684)
+  'isCrossRepoPullRequest',
   'isForkPullRequest',
   'resolveReviewContainment',
   'REVIEW_CONTAINED_FLAG_HELP',
@@ -317,6 +318,14 @@ const INTERNAL_API_KEYS = [
   'runContainmentGatedReview',
   'pullRequestHeadRef',
   'runContainedReview',
+  // Cross-repo PR references + review constitution (#1673)
+  'DEFAULT_REVIEW_CONSTITUTION',
+  'describePullRequestAccessError',
+  'describeReviewConstitutionSource',
+  'formatPullRequestReference',
+  'parsePullRequestReference',
+  'resolvePullRequestReference',
+  'REVIEW_ACCESS_ERROR_EXIT_CODE',
   // Local queue reprioritization audit records (#869)
   'createQueueRationaleAuditor',
   // Daemon-ready ProjectV2 queue intent projection (#866)

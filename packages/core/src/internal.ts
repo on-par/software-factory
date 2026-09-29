@@ -481,9 +481,22 @@ export type {
 export type { ContainedReviewDeps, ContainedReviewResult, ReviewInterruptSource } from './review/contained.js';
 export { pullRequestHeadRef, runContainedReview } from './review/contained.js';
 export {
+  isCrossRepoPullRequest,
   isForkPullRequest,
   resolveReviewContainment,
   REVIEW_CONTAINED_FLAG_HELP,
   REVIEW_CONTAINMENT_REFUSED_EXIT_CODE,
   runContainmentGatedReview,
 } from './review/containment.js';
+
+// Cross-repo PR references + review constitution (#1673)
+export type { PullRequestReference, PullRequestReferenceParse, ResolvedPullRequest } from './review/pr-reference.js';
+export {
+  describePullRequestAccessError,
+  formatPullRequestReference,
+  parsePullRequestReference,
+  resolvePullRequestReference,
+  REVIEW_ACCESS_ERROR_EXIT_CODE,
+} from './review/pr-reference.js';
+export type { ReviewConstitution, ReviewConstitutionSource } from './constitutions/index.js';
+export { DEFAULT_REVIEW_CONSTITUTION, describeReviewConstitutionSource } from './constitutions/index.js';

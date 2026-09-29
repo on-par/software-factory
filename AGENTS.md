@@ -48,7 +48,7 @@ readiness-conformance checker named in epic #464 consume them in later stories.
 - `harness/` — provider adapters: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, `opencode`, plus a `stub` and a contract test suite
 - `phases/` — the four pipeline phases (`plan`, `build`, `check`, `ship`) plus integration tests (`pipeline.integration.test.ts`, `pipeline.concurrent.integration.test.ts`). The `*.integration.test.ts` files are excluded from the default vitest run and from the required `ci` check; run them with `npm run test:integration` (they also run nightly).
 - `checkers/` — the checker framework (compile/tests/lint/links/accessibility + agent-based custom checkers)
-- `constitutions/` — constitution loader
+- `constitutions/` — constitution loader (including first-hit review resolution ending in the built-in default review constitution)
 - `adr/` — reads the checkout's `docs/adr` through a `RepoContextReader` and renders Accepted ADRs as PLAN constraints
 - `admission/` — Factory App admission-state compatibility for the GitHub-label queue: the read port, the verdict classifier, and the claim-time guard
 - `approvals/` — approval-gate seam with file-based transport in `.factory/approvals/`
@@ -70,7 +70,7 @@ readiness-conformance checker named in epic #464 consume them in later stories.
 - `proxy/` — opt-in loopback reverse proxy with stable per-lane URLs
 - `queue/` — proposed-queue validation for `factory triage accept`
 - `readiness/` — pure readiness scoring for GitHub issue bodies
-- `review/` — pure three-tier review verdict (approve / approve with comments / request changes) with reasons, the fail-closed fork-PR containment gate, and the contained runner that runs a fork PR's command checkers inside a disposable container
+- `review/` — pure three-tier review verdict (approve / approve with comments / request changes) with reasons, the fail-closed fork-PR containment gate, and the contained runner that runs a fork PR's command checkers inside a disposable container, cross-repo PR reference parsing (number / owner/repo#N / URL)
 - `run/` — terminal run outcomes and parking-reason helpers
 - `sandbox/` — OS-level containment for agentic BUILD and rework runs
 - `sim/` — headless simulator harness (fake model/octokit, throwaway git workspace, jitter injection, Monte Carlo runner), and regression fixtures for known production faults
