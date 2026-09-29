@@ -70,7 +70,7 @@ readiness-conformance checker named in epic #464 consume them in later stories.
 - `proxy/` — opt-in loopback reverse proxy with stable per-lane URLs
 - `queue/` — proposed-queue validation for `factory triage accept`
 - `readiness/` — pure readiness scoring for GitHub issue bodies
-- `review/` — pure three-tier review verdict (approve / approve with comments / request changes) with reasons, and the fail-closed fork-PR containment gate
+- `review/` — pure three-tier review verdict (approve / approve with comments / request changes) with reasons, the fail-closed fork-PR containment gate, and the contained runner that runs a fork PR's command checkers inside a disposable container
 - `run/` — terminal run outcomes and parking-reason helpers
 - `sandbox/` — OS-level containment for agentic BUILD and rework runs
 - `sim/` — headless simulator harness (fake model/octokit, throwaway git workspace, jitter injection, Monte Carlo runner), and regression fixtures for known production faults

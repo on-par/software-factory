@@ -77,6 +77,19 @@ export interface LaneWorkspacePrepared {
   clone: CloneOutcome;
 }
 
+export interface LaneExecOptions {
+  /** Working directory inside the container, e.g. /workspace/repo. */
+  cwd: string;
+  timeoutMs: number;
+}
+
+export interface LaneExecResult {
+  exitCode: number;
+  /** Combined stdout + stderr. */
+  output: string;
+  timedOut: boolean;
+}
+
 export interface ContainerEngine {
   prepareWorkspace(
     jobId: string,
@@ -92,8 +105,17 @@ export interface ContainerEngine {
   createLaneContainer(containerName: string): Promise<LaneContainerCreateResult>;
   /** Clones repoSlug fresh from the remote into a disposable host temp dir, then
    *  copies it into the already-created lane container — the container's code never
-   *  comes from (or touches) the host worktree (#1536). */
-  prepareLaneWorkspace(containerName: string, repoSlug: string): Promise<LaneWorkspacePrepared>;
+   *  comes from (or touches) the host worktree (#1536). When `ref` is set, the fresh
+   *  clone is checked out at that ref (e.g. `refs/pull/12/head`) before being copied in. */
+  prepareLaneWorkspace(containerName: string, repoSlug: string, ref?: string): Promise<LaneWorkspacePrepared>;
+  /** Runs a command inside a lane container. Optional so existing engines/fakes
+   *  compile unchanged; callers that must contain untrusted code MUST treat an
+   *  absent method as "cannot contain" (#1685). */
+  execInLaneContainer?(
+    containerName: string,
+    command: readonly string[],
+    options: LaneExecOptions,
+  ): Promise<LaneExecResult>;
   /** Resolves true when the container runtime (Docker daemon) is reachable.
    *  Optional so existing engines/fakes compile unchanged; callers that gate
    *  untrusted code on containment MUST treat an absent probe as unavailable
@@ -120,6 +142,8 @@ export interface LaneContainerProvisionResult {
   /** Set once the container was created and a workspace clone was attempted. */
   workspaceCloned?: boolean;
   workspaceError?: string;
+  /** Commit the workspace clone resolved to, when the clone succeeded. */
+  workspaceCommit?: string;
 }
 
 /** Recognizes `workspace.backend: disposable-docker` at lane start, creates the
@@ -132,6 +156,7 @@ export async function provisionLaneContainer(
   runId: string,
   laneSlug: string,
   repoSlug: string,
+  ref?: string,
 ): Promise<LaneContainerProvisionResult> {
   if (backend !== 'disposable-docker') {
     return { attempted: false, created: false };
@@ -148,13 +173,17 @@ export async function provisionLaneContainer(
     };
   }
   try {
-    const workspace = await engine.prepareLaneWorkspace(containerName, repoSlug);
+    const workspace =
+      ref === undefined
+        ? await engine.prepareLaneWorkspace(containerName, repoSlug)
+        : await engine.prepareLaneWorkspace(containerName, repoSlug, ref);
     return {
       attempted: true,
       created: true,
       containerName,
       workspaceCloned: workspace.clone.ok,
       workspaceError: workspace.clone.ok ? undefined : workspace.clone.error,
+      workspaceCommit: workspace.clone.ok ? workspace.clone.commit : undefined,
     };
   } catch (err) {
     return {

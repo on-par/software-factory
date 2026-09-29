@@ -11,10 +11,10 @@ import {
 function fakeEngine(script: { fail?: string; workspaceFail?: string } = {}): {
   engine: ContainerEngine;
   calls: string[];
-  workspaceCalls: { containerName: string; repoSlug: string }[];
+  workspaceCalls: { containerName: string; repoSlug: string; ref?: string }[];
 } {
   const calls: string[] = [];
-  const workspaceCalls: { containerName: string; repoSlug: string }[] = [];
+  const workspaceCalls: { containerName: string; repoSlug: string; ref?: string }[] = [];
   const engine: ContainerEngine = {
     prepareWorkspace: async () => {
       throw new Error('not used');
@@ -30,8 +30,8 @@ function fakeEngine(script: { fail?: string; workspaceFail?: string } = {}): {
       if (script.fail) throw new Error(script.fail);
       return { containerName };
     },
-    async prepareLaneWorkspace(containerName, repoSlug): Promise<LaneWorkspacePrepared> {
-      workspaceCalls.push({ containerName, repoSlug });
+    async prepareLaneWorkspace(containerName, repoSlug, ref): Promise<LaneWorkspacePrepared> {
+      workspaceCalls.push(ref === undefined ? { containerName, repoSlug } : { containerName, repoSlug, ref });
       if (script.workspaceFail) {
         return { containerRepoPath: '/workspace/repo', clone: { ok: false, error: script.workspaceFail } };
       }
@@ -61,7 +61,25 @@ describe('provisionLaneContainer (backend: disposable-docker)', () => {
       containerName: 'sf-job-run-1-my-lane',
       workspaceCloned: true,
       workspaceError: undefined,
+      workspaceCommit: 'deadbeef',
     });
+  });
+
+  it('forwards an optional ref to prepareLaneWorkspace and only then', async () => {
+    const { engine, workspaceCalls } = fakeEngine();
+
+    await provisionLaneContainer(
+      engine,
+      'disposable-docker',
+      'run-1',
+      'review-pr-8',
+      'owner/example-app',
+      'refs/pull/8/head',
+    );
+
+    expect(workspaceCalls).toEqual([
+      { containerName: 'sf-job-run-1-review-pr-8', repoSlug: 'owner/example-app', ref: 'refs/pull/8/head' },
+    ]);
   });
 
   it('reports the failure reason without throwing when creation fails, and never attempts the clone', async () => {

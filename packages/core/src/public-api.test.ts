@@ -314,6 +314,8 @@ const INTERNAL_API_KEYS = [
   'resolveReviewContainment',
   'REVIEW_CONTAINMENT_REFUSED_EXIT_CODE',
   'runContainmentGatedReview',
+  'pullRequestHeadRef',
+  'runContainedReview',
   // Local queue reprioritization audit records (#869)
   'createQueueRationaleAuditor',
   // Daemon-ready ProjectV2 queue intent projection (#866)

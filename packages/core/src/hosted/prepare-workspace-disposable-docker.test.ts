@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -99,5 +99,51 @@ describe('createDockerEngine.prepareLaneWorkspace (#1536)', () => {
 
     expect(workspace.clone.ok).toBe(false);
     expect(workspace.clone.error).toContain('No such container:path');
+  });
+
+  it('with a ref, fetches and detaches that ref before rev-parse, and removes the temp dir', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sf-lane-test-'));
+    const { exec, calls } = fakeExec((call) =>
+      call.cmd.endsWith('rev-parse HEAD') ? { stdout: 'cafef00d\n', stderr: '' } : { stdout: '', stderr: '' },
+    );
+    const engine = createDockerEngine({ exec, rootDir: root });
+
+    const workspace = await engine.prepareLaneWorkspace('c', 'owner/example-app', 'refs/pull/8/head');
+
+    const cmds = calls.map((c) => c.cmd);
+    const fetchIdx = cmds.findIndex((c) => c.includes("fetch --depth 1 origin 'refs/pull/8/head'"));
+    const checkoutIdx = cmds.findIndex((c) => c.includes('checkout --detach FETCH_HEAD'));
+    const revParseIdx = cmds.findIndex((c) => c.endsWith('rev-parse HEAD'));
+    expect(fetchIdx).toBeGreaterThan(0);
+    expect(checkoutIdx).toBeGreaterThan(fetchIdx);
+    expect(revParseIdx).toBeGreaterThan(checkoutIdx);
+    expect(workspace.clone).toEqual({ ok: true, commit: 'cafef00d' });
+    expect(await readdir(root)).toEqual([]);
+  });
+
+  it('with a ref, reports a fetch failure as data and never attempts docker cp', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sf-lane-test-'));
+    const { exec, calls } = fakeExec((call) => {
+      if (call.cmd.includes(' fetch ')) rejects({ stderr: "fatal: couldn't find remote ref" });
+      return { stdout: '', stderr: '' };
+    });
+    const engine = createDockerEngine({ exec, rootDir: root });
+
+    const workspace = await engine.prepareLaneWorkspace('c', 'owner/example-app', 'refs/pull/8/head');
+
+    expect(workspace.clone.ok).toBe(false);
+    expect(workspace.clone.error).toContain("couldn't find remote ref");
+    expect(calls.some((c) => c.cmd.startsWith('docker cp'))).toBe(false);
+    expect(await readdir(root)).toEqual([]);
+  });
+
+  it('without a ref, never fetches or checks out', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sf-lane-test-'));
+    const { exec, calls } = fakeExec(() => ({ stdout: 'deadbeef\n', stderr: '' }));
+    const engine = createDockerEngine({ exec, rootDir: root });
+
+    await engine.prepareLaneWorkspace('c', 'owner/example-app');
+
+    expect(calls.some((c) => c.cmd.includes(' fetch ') || c.cmd.includes('checkout'))).toBe(false);
   });
 });

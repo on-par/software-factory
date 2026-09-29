@@ -14,6 +14,8 @@ import type {
   ContainerRunResult,
   ContainerRunSpec,
   LaneContainerCreateResult,
+  LaneExecOptions,
+  LaneExecResult,
   LaneWorkspacePrepared,
   PreparedWorkspace,
 } from './container.js';
@@ -163,16 +165,23 @@ export function createDockerEngine(options: DockerEngineOptions): ContainerEngin
     },
 
     async createLaneContainer(name): Promise<LaneContainerCreateResult> {
-      await exec(`docker create --name ${quote(name)} --label ${quote(MANAGED_LABEL)} ${quote(laneImage)}`, {});
+      await exec(
+        `docker create --name ${quote(name)} --label ${quote(MANAGED_LABEL)} ${quote(laneImage)} 'tail' '-f' '/dev/null'`,
+        {},
+      );
       return { containerName: name };
     },
 
-    async prepareLaneWorkspace(targetContainerName, repoSlug): Promise<LaneWorkspacePrepared> {
+    async prepareLaneWorkspace(targetContainerName, repoSlug, ref): Promise<LaneWorkspacePrepared> {
       const containerRepoPath = `/workspace/${repoDirname}`;
       const tempDir = await mkdtemp(join(options.rootDir ?? tmpdir(), 'sf-lane-'));
       let clone: CloneOutcome;
       try {
         await exec(`git clone --depth 1 ${quote(cloneUrlFor(repoSlug))} ${quote(tempDir)}`, {});
+        if (ref !== undefined) {
+          await exec(`git -C ${quote(tempDir)} fetch --depth 1 origin ${quote(ref)}`, {});
+          await exec(`git -C ${quote(tempDir)} checkout --detach FETCH_HEAD`, {});
+        }
         const { stdout } = await exec(`git -C ${quote(tempDir)} rev-parse HEAD`, {});
         clone = { ok: true, commit: stdout.trim() };
       } catch (err) {
@@ -189,6 +198,29 @@ export function createDockerEngine(options: DockerEngineOptions): ContainerEngin
       }
       await rm(tempDir, { recursive: true, force: true });
       return { containerRepoPath, clone };
+    },
+
+    async execInLaneContainer(name, command, execOptions: LaneExecOptions): Promise<LaneExecResult> {
+      const toResult = (err: unknown): LaneExecResult => {
+        const execErr = err as PromisifiedExecError;
+        return {
+          exitCode: typeof execErr.code === 'number' ? execErr.code : 1,
+          output: (execErr.stdout ?? '') + (execErr.stderr ?? ''),
+          timedOut: execErr.killed === true,
+        };
+      };
+      try {
+        await exec(`docker start ${quote(name)}`, {});
+      } catch (err) {
+        return toResult(err);
+      }
+      const cmd = ['docker exec', `-w ${quote(execOptions.cwd)}`, quote(name), ...command.map(quote)].join(' ');
+      try {
+        const { stdout, stderr } = await exec(cmd, { timeoutMs: execOptions.timeoutMs });
+        return { exitCode: 0, output: stdout + stderr, timedOut: false };
+      } catch (err) {
+        return toResult(err);
+      }
     },
   };
 }
