@@ -21,6 +21,7 @@
     "test:integration": "FACTORY_INTEGRATION_TESTS=1 vitest run",
     "test:coverage": "NODE_OPTIONS=--max-old-space-size=16384 vitest run --coverage --maxWorkers=1",
     "coverage-ratchet": "tsx scripts/coverage-ratchet.ts",
+    "config-example": "tsx scripts/gen-config-example.ts",
     "mutation": "stryker run",
     "eval": "tsx scripts/eval.ts",
     "local-small-scoreboard": "tsx scripts/local-small-scoreboard.ts",

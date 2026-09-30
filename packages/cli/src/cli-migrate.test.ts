@@ -16,6 +16,7 @@ import {
   applyRepoConfig,
   getConstitutionsDir,
   getFactoryPaths,
+  loadFactoryConfigForRepo,
   loadModelsConfig,
   loadRepoConfig,
   ModelRegistry,
@@ -110,13 +111,35 @@ describe('runMigrate', () => {
       policy: { mode: 'pinned' },
       budget: { capUsd: 50, fastPath: true, maxReworkRounds: 2, perIssueCapUsd: 8 },
     });
-    expect(config.$schema).toBeTypeOf('string');
+    expect(config).not.toHaveProperty('$schema');
     expect(existsSync(join(root, 'state', 'events.ndjson'))).toBe(true);
     expect(existsSync(join(root, 'state', 'queue'))).toBe(true);
     expect(existsSync(join(root, 'events.ndjson'))).toBe(false);
     expect(existsSync(join(root, 'queue'))).toBe(false);
     expect(readFileSync(join(root, '.gitignore'), 'utf-8')).toBe('state/\n');
     expect(existsSync(join(root, 'constitution.md'))).toBe(true);
+  });
+
+  it('keeps runtime-policy keys and an existing $schema when rewriting a v1 config', async () => {
+    const repoRoot = tempRepo();
+    const root = join(repoRoot, '.factory');
+    mkdirSync(root, { recursive: true });
+    const runtime = {
+      sweep: { heartbeatFile: '/tmp/heartbeat' },
+      run: { merge: { auto: true } },
+      timeouts: { build_seconds: 600 },
+      workspace: { backend: 'disposable-docker' },
+    };
+    writeFileSync(
+      join(root, 'config.json'),
+      JSON.stringify({ $schema: './my-schema.json', version: 1, models: { plan: 'claude-opus-5' }, ...runtime }),
+    );
+
+    await runMigrate(repoRoot);
+
+    const config = JSON.parse(readFileSync(join(root, 'config.json'), 'utf-8'));
+    expect(config).toMatchObject({ $schema: './my-schema.json', version: 2, ...runtime });
+    expect(loadFactoryConfigForRepo(join(root, 'config.json'))).toMatchObject(runtime);
   });
 
   it('round-trips effective config without a post-migration deprecation warning', async () => {

@@ -187,6 +187,7 @@ import {
   DEFAULT_FACTORYD_PORT,
   defaultRegistryPath,
   ensureDir,
+  FACTORY_RUNTIME_CONFIG_KEYS,
   findUnmergedGreenPrs,
   formatGcReport,
   gitFetch,
@@ -338,13 +339,11 @@ export function hasGitHubToken(env: NodeJS.ProcessEnv = process.env, tryToken?: 
 
 // ---------- commands ----------
 
-export const FACTORY_CONFIG_SCHEMA_URL =
-  'https://raw.githubusercontent.com/on-par/software-factory/main/packages/config/schema/factory.config.schema.json';
-
 /** The minimal, pin-free repo config `factory init` writes. No model pins → routing
- *  stays on packaged defaults (policy=auto). Two-space JSON + trailing newline. */
+ *  stays on packaged defaults (policy=auto). Two-space JSON + trailing newline.
+ *  Every available key is documented in docs/config.example.jsonc. */
 export function buildInitConfig(): string {
-  return JSON.stringify({ $schema: FACTORY_CONFIG_SCHEMA_URL, version: 2 }, null, 2) + '\n';
+  return JSON.stringify({ version: 2 }, null, 2) + '\n';
 }
 
 /** Write content once without a check-then-act race. Callers choose whether an
@@ -457,7 +456,7 @@ export async function runMigrate(repoRoot: string, opts: { dryRun?: boolean } = 
     }
   }
 
-  let rawConfig: { version?: unknown; $schema?: unknown } | undefined;
+  let rawConfig: Record<string, unknown> | undefined;
   try {
     rawConfig = JSON.parse(readFileSync(paths.config, 'utf-8'));
   } catch (err: any) {
@@ -471,12 +470,19 @@ export async function runMigrate(repoRoot: string, opts: { dryRun?: boolean } = 
     const v2 = loadRepoConfig(repoRoot);
     if (!v2) throw new Error(`Expected ${paths.config} to exist`);
     const { $schema: _schema, version: _version, ...rest } = v2;
+    // loadRepoConfig only returns the model-routing namespace; carry the runtime-policy
+    // keys (sweep, run, timeouts, ...) over verbatim so the rewrite does not drop them.
+    const source = rawConfig;
+    const runtime = Object.fromEntries(
+      FACTORY_RUNTIME_CONFIG_KEYS.filter((key) => key in source).map((key) => [key, source[key]]),
+    );
     const content =
       JSON.stringify(
         {
-          $schema: typeof rawConfig.$schema === 'string' ? rawConfig.$schema : FACTORY_CONFIG_SCHEMA_URL,
+          ...(typeof rawConfig.$schema === 'string' ? { $schema: rawConfig.$schema } : {}),
           version: 2,
           ...rest,
+          ...runtime,
         },
         null,
         2,
