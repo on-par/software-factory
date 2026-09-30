@@ -8,7 +8,7 @@ import { defaultFactoryConfig, defaultModelsConfig, defaultRoutesConfig } from '
 describe('shipped defaults', () => {
   it('has 22 models with the expected harness-bearing spot checks', () => {
     const modelIds = Object.keys(defaultModelsConfig.models);
-    expect(modelIds).toHaveLength(22);
+    expect(modelIds).toHaveLength(27);
 
     for (const id of [
       'claude-opus-5',
@@ -17,7 +17,12 @@ describe('shipped defaults', () => {
       'gpt-5.6-terra-high',
       'gpt-5.6-terra-medium',
       'gpt-5.6-luna-high',
+      'gpt-5.6-luna',
+      'gpt-5.6-luna-max',
+      'gpt-5.6-terra',
       'gpt-6-astra',
+      'gpt-6-astra-low',
+      'gpt-5.5',
       'gpt-5.6-sol',
       'gpt-5.1-codex',
       'opencode-deepseek-v4-flash-free',
@@ -42,6 +47,17 @@ describe('shipped defaults', () => {
       envKey: null,
       codexFlag: '-m gpt-6-astra -c model_reasoning_effort=medium',
     });
+  });
+  it('exposes plain Codex catalog slugs and effort variants for Luna/Terra/Astra/5.5', () => {
+    expect(defaultModelsConfig.models['gpt-5.6-luna'].codexFlag).toBe('-m gpt-5.6-luna');
+    expect(defaultModelsConfig.models['gpt-5.6-luna-max'].codexFlag).toBe(
+      '-m gpt-5.6-luna -c model_reasoning_effort=max',
+    );
+    expect(defaultModelsConfig.models['gpt-5.6-terra'].codexFlag).toBe('-m gpt-5.6-terra');
+    expect(defaultModelsConfig.models['gpt-6-astra-low'].codexFlag).toBe(
+      '-m gpt-6-astra -c model_reasoning_effort=low',
+    );
+    expect(defaultModelsConfig.models['gpt-5.5'].codexFlag).toBe('-m gpt-5.5');
   });
 
   it('every tier entry exists in models, with the expected tier lengths', () => {
