@@ -33,8 +33,13 @@
   <dict>
     <key>PATH</key>
     <string>__SF_HOME__/.nvm/versions/node/v24.18.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <!--
+      Admin merges bypass branch protection (for the sweep's standalone merges and for
+      `factory land`), so they are opt-in. Uncomment only if the bot cannot satisfy a
+      required review and you accept that bypass:
     <key>FACTORY_MERGE_ADMIN</key>
     <string>1</string>
+    -->
   </dict>
   <key>StandardOutPath</key>
   <string>__SF_HOME__/Library/Logs/auto-merge-sweep.log</string>

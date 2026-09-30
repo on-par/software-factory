@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Periodic auto-merge sweep for a configurable list of repos under one GitHub org.
-# Lands any open, non-draft, mergeable PR whose CI checks are ALL green.
+# Lands any open, non-draft, mergeable PR whose CI checks are ALL green and whose
+# mergeStateStatus is CLEAN; standalone merges are pinned to the head SHA that was seen
+# green (--match-head-commit), so a later push is never merged unverified.
 # Requested by Patrick 2026-07-13: auto-merge "for right now" across the configured repos
 # while the factory supervisors (per-repo tmux sessions) build.
 # Runs under launchd via scripts/launchd/com.on-par.auto-merge-sweep.plist (KeepAlive
@@ -32,6 +34,8 @@
 #                     $HOME/.local/bin/factory)
 #   MERGE_FLAGS       flags passed to `gh pr merge` for standalone PRs
 #                     (default: --squash --delete-branch)
+#   FACTORY_MERGE_ADMIN  set to 1 to add --admin to standalone merges (opt-in;
+#                     default off)
 #   SLEEP_SECONDS     delay between passes (default: 300)
 #   MAX_SLEEP_SECONDS backoff cap on sweep-wide failure (default: 3600)
 #   HEARTBEAT_FILE    heartbeat path (default: ~/.factory/auto-merge-sweep.heartbeat)
@@ -99,14 +103,14 @@ sweep_repo() {
 
   local pr_json gh_exit
   pr_json="$(gh pr list --repo "$ghrepo" --state open \
-    --json number,isDraft,mergeable,statusCheckRollup,closingIssuesReferences 2>&1)"
+    --json number,isDraft,mergeable,mergeStateStatus,headRefOid,statusCheckRollup,closingIssuesReferences 2>&1)"
   gh_exit=$?
   if [ "$gh_exit" -ne 0 ]; then
     log "$repo: gh pr list failed (exit $gh_exit): $pr_json" >&2
     return 1
   fi
 
-  printf '%s' "$pr_json" | python3 "$SCRIPT_DIR/filter-green-prs.py" | while IFS=$'\t' read -r pr issue; do
+  printf '%s' "$pr_json" | python3 "$SCRIPT_DIR/filter-green-prs.py" | while IFS=$'\t' read -r pr head_sha issue; do
     [ -z "$pr" ] && continue
     if [[ "$issue" == *,* ]]; then
       log "$repo: SKIPPING PR #$pr: closes multiple issues (#${issue//,/, #}) — factory land takes exactly one issue; land manually"
@@ -125,6 +129,8 @@ sweep_repo() {
     else
       local merge_args
       IFS=' ' read -r -a merge_args <<<"$MERGE_FLAGS"
+      # Pin to the head the filter saw green: a push since then makes gh refuse the merge.
+      merge_args+=(--match-head-commit "$head_sha")
       if [ "${FACTORY_MERGE_ADMIN:-0}" = "1" ]; then
         merge_args+=(--admin)
       fi

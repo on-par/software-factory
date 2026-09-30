@@ -12,14 +12,37 @@ import type { ApprovalGate } from '../approvals/index.js';
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
 import type { EventKind } from '../events/kinds.js';
 import { gatherEvidencePack } from '../reports/evidence-pack.js';
+import { redactSecrets } from '../router/failure-detail.js';
 import type { CheckSummary } from '../types/index.js';
 import { type CiOutcome, watchChecks } from '../utils/ci-watch.js';
+import { GIT_COMMAND_TIMEOUT_MS } from '../utils/git-exec.js';
 import { shellEscape } from '../utils/index.js';
 import { GITHUB_ISSUE_SOURCE } from '../work/github-issue.js';
 import type { WorkRequest } from '../work/index.js';
 
 const exec = promisify(execCb);
 type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<{ stdout: string }>;
+
+/** Room for a large `git status --porcelain` or `git diff --stat` (node's default is 1 MB). */
+const SHIP_MAX_BUFFER = 64 * 1024 * 1024;
+
+/**
+ * The default SHIP runner. Every git call gets a deadline and runs with terminal prompts
+ * disabled, so a credential prompt or a stalled push fails the ship instead of hanging
+ * the lane forever (H9).
+ */
+export async function defaultShipRunner(
+  command: string,
+  options: { cwd?: string; timeout?: number } = {},
+): Promise<{ stdout: string }> {
+  const { stdout } = await exec(command, {
+    cwd: options.cwd,
+    timeout: options.timeout ?? GIT_COMMAND_TIMEOUT_MS,
+    maxBuffer: SHIP_MAX_BUFFER,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+  });
+  return { stdout };
+}
 
 export interface ShipResult {
   ok: boolean;
@@ -80,7 +103,18 @@ async function shipPhaseImpl(opts: {
   /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
   bus?: LifecycleBus;
 }): Promise<ShipResult> {
-  const { issue, repo, worktree, branch, octokit, watchCI = true, log, run = exec, approvalGate, checkSummary } = opts;
+  const {
+    issue,
+    repo,
+    worktree,
+    branch,
+    octokit,
+    watchCI = true,
+    log,
+    run = defaultShipRunner,
+    approvalGate,
+    checkSummary,
+  } = opts;
   const [owner, repoName] = repo.split('/');
 
   const adr = await materializeAdrDrafts({
@@ -146,7 +180,13 @@ async function shipPhaseImpl(opts: {
     // A failed ADR commit leaves its files on disk uncommitted (see materializeAdrDrafts) —
     // never let that alone make the worktree look dirty and abort the whole ship.
     const ignorePaths = adr.committed ? [] : adr.paths;
+    const unreadable = (detail: string): ShipResult => {
+      const reason = `could not read worktree state: ${detail}`;
+      log('ship', `not recovering ${branch}: ${reason} — worktree preserved`);
+      return { ok: false, reason };
+    };
     let recoveryState = await inspectRecoveryState(worktree, run, ignorePaths);
+    if ('unreadable' in recoveryState) return unreadable(recoveryState.unreadable);
     if (!recoveryState.clean) {
       const conflicts = conflictedPaths(recoveryState.statusLines);
       if (conflicts.length > 0) {
@@ -174,6 +214,7 @@ async function shipPhaseImpl(opts: {
         return { ok: false, reason: committed.reason };
       }
       recoveryState = await inspectRecoveryState(worktree, run, ignorePaths);
+      if ('unreadable' in recoveryState) return unreadable(recoveryState.unreadable);
       if (!recoveryState.clean) {
         const reason = 'worktree still dirty after committing leftover build output';
         log('ship', `not recovering ${branch}: ${reason} — worktree preserved`);
@@ -399,21 +440,30 @@ async function inspectRecoveryState(
   worktree: string,
   run: CommandRunner,
   ignorePaths: string[] = [],
-): Promise<{ clean: boolean; ahead: boolean; landed: boolean; statusLines: string[] }> {
+): Promise<{ clean: boolean; ahead: boolean; landed: boolean; statusLines: string[] } | { unreadable: string }> {
   const statusCommand =
     ignorePaths.length > 0
       ? `git status --porcelain -- . ${ignorePaths.map((p) => shellEscape(`:!${p}`)).join(' ')}`
       : 'git status --porcelain';
-  const [{ stdout: status }, { stdout: ahead }, landed] = await Promise.all([
-    run(statusCommand, { cwd: worktree }),
-    run('git rev-list --count origin/main..HEAD', { cwd: worktree }),
-    // A squash merge leaves origin/main..HEAD nonzero forever even though the branch's
-    // tree is byte-identical to main — exit 0 here is the reliable "already landed" signal.
-    run('git diff --quiet origin/main..HEAD', { cwd: worktree }).then(
-      () => true,
-      () => false,
-    ),
-  ]);
+  let status: string;
+  let ahead: string;
+  let landed: boolean;
+  try {
+    [{ stdout: status }, { stdout: ahead }, landed] = await Promise.all([
+      run(statusCommand, { cwd: worktree }),
+      run('git rev-list --count origin/main..HEAD', { cwd: worktree }),
+      // A squash merge leaves origin/main..HEAD nonzero forever even though the branch's
+      // tree is byte-identical to main — exit 0 here is the reliable "already landed" signal.
+      run('git diff --quiet origin/main..HEAD', { cwd: worktree }).then(
+        () => true,
+        () => false,
+      ),
+    ]);
+  } catch (err) {
+    // A status that timed out or overflowed its buffer says nothing about the tree, and
+    // treating it as dirty would `git add -A` blind — fail closed and keep the worktree.
+    return { unreadable: shortDetail(err) };
+  }
   return {
     clean: status.trim() === '',
     ahead: Number.parseInt(ahead.trim(), 10) > 0,
@@ -620,7 +670,8 @@ function describePushFailure(err: unknown): { kind: PushFailureKind; detail: str
   const raw = (err as { stderr?: unknown } | null | undefined)?.stderr;
   const stderr = typeof raw === 'string' ? raw : '';
   const text = stderr.trim() || (err instanceof Error ? err.message : String(err));
-  const detail = text.replace(/\s+/g, ' ').trim().slice(0, MAX_PUSH_ERROR_DETAIL);
+  // Redact before truncating so a cut can never leave a partial token the patterns miss.
+  const detail = redactSecrets(text).replace(/\s+/g, ' ').trim().slice(0, MAX_PUSH_ERROR_DETAIL);
   return { kind: classifyPushFailure(detail), detail: detail || 'no error output' };
 }
 
@@ -645,7 +696,7 @@ function shortDetail(err: unknown): string {
   const raw = (err as { stderr?: unknown } | null | undefined)?.stderr;
   const stderr = typeof raw === 'string' ? raw : '';
   const text = stderr.trim() || (err instanceof Error ? err.message : String(err));
-  return text.replace(/\s+/g, ' ').trim().slice(0, MAX_REMOTE_HEAD_DETAIL) || 'no error output';
+  return redactSecrets(text).replace(/\s+/g, ' ').trim().slice(0, MAX_REMOTE_HEAD_DETAIL) || 'no error output';
 }
 
 /** The SHA on the `refs/heads/<branch>` line of `git ls-remote` output. `--heads origin <branch>`

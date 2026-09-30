@@ -1,20 +1,31 @@
 // src/utils/worktree-gc.ts — Stale factory worktree cleanup + credential scrub
 
-import { exec as execCb } from 'node:child_process';
 import type { Dirent } from 'node:fs';
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { basename, join, resolve } from 'node:path';
-import { promisify } from 'node:util';
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { basename, join, resolve, sep } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
 
 import type { EventKind } from '../events/kinds.js';
 import { CLAIMED_BY_LABEL_PREFIX, PARKED_LABEL } from '../queue/github-queue.js';
 import { findStaleClaims } from '../queue/stale-claims.js';
+import { execGit } from './git-exec.js';
 import { branchPrefixSlug, shellEscape } from './index.js';
 import { removeMicroVm, type WorktreeSandbox } from './microvm.js';
-
-const exec = promisify(execCb);
 
 export type GcReason =
   'merged' | 'remote-gone' | 'ttl-expired' | 'issue-closed' | 'issue-parked' | 'issue-not-found' | 'no-active-claim';
@@ -215,12 +226,21 @@ export function parseWorktreeList(porcelain: string): WorktreeListEntry[] {
   return entries;
 }
 
+/**
+ * Lists the credential files to scrub before a worktree is removed. The worktree's
+ * contents are agent-controlled, so nothing here follows a symlink: a planted
+ * `.env -> ~/.ssh/id_ed25519` or `.claude -> ~/.claude` must never lead the scrub out
+ * of the worktree onto host files. Only regular files whose real path stays inside the
+ * worktree are returned.
+ */
 export function findCredentialFiles(worktreePath: string): string[] {
   const found: string[] = [];
 
+  let root: string;
   let topLevel: string[];
   try {
-    topLevel = readdirSync(worktreePath);
+    root = realpathSync(worktreePath);
+    topLevel = readdirSync(root);
   } catch {
     return found;
   }
@@ -229,19 +249,29 @@ export function findCredentialFiles(worktreePath: string): string[] {
     if (name === '.env' || name.startsWith('.env.') || CREDENTIAL_BASENAMES.has(name)) {
       const filePath = join(worktreePath, name);
       try {
-        if (statSync(filePath).isFile()) found.push(filePath);
+        if (lstatSync(filePath).isFile()) found.push(filePath);
       } catch {}
     }
   }
 
   const claudeDir = join(worktreePath, '.claude');
-  if (existsSync(claudeDir)) {
-    walkFiles(claudeDir, found);
-  }
+  try {
+    if (lstatSync(claudeDir).isDirectory()) walkFiles(claudeDir, found);
+  } catch {}
 
-  return found;
+  return found.filter((filePath) => isInside(root, filePath));
 }
 
+function isInside(root: string, filePath: string): boolean {
+  try {
+    return realpathSync(filePath).startsWith(root + sep);
+  } catch {
+    return false;
+  }
+}
+
+// Dirent types have lstat semantics: a symlink is neither isDirectory() nor isFile(),
+// so it is skipped rather than followed.
 function walkFiles(dir: string, found: string[]): void {
   let entries: Dirent[];
   try {
@@ -260,19 +290,36 @@ function walkFiles(dir: string, found: string[]): void {
   }
 }
 
+/**
+ * Overwrites a regular file's bytes with zeros in place. Throws instead of writing
+ * through a symlink (O_NOFOLLOW), into a non-regular file, or into a file with other
+ * hard links, since each of those can put the write on a file outside the worktree.
+ */
 export function zeroFill(filePath: string): void {
-  const size = statSync(filePath).size;
-  writeFileSync(filePath, Buffer.alloc(size));
+  const fd = openSync(filePath, constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) throw new Error(`refusing to zero-fill ${filePath}: not a regular file`);
+    if (stat.nlink > 1) throw new Error(`refusing to zero-fill ${filePath}: it has ${stat.nlink} hard links`);
+    writeFileSync(fd, Buffer.alloc(stat.size));
+  } finally {
+    closeSync(fd);
+  }
 }
 
+/** Zero-fills, then unlinks. The unlink runs even when the zero-fill refuses, because
+ *  removing the worktree's own directory entry never touches a link target. */
 export function scrubFile(filePath: string): void {
-  zeroFill(filePath);
-  rmSync(filePath, { force: true });
+  try {
+    zeroFill(filePath);
+  } finally {
+    rmSync(filePath, { force: true });
+  }
 }
 
 async function defaultRunCommand(cmd: string, opts?: { cwd?: string }): Promise<{ stdout: string }> {
-  const { stdout } = await exec(cmd, opts);
-  return { stdout: stdout.toString() };
+  const { stdout } = await execGit(cmd, { cwd: opts?.cwd });
+  return { stdout };
 }
 
 function safeExec(

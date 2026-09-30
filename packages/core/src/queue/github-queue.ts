@@ -280,7 +280,8 @@ export async function readGithubQueueSnapshot(input: {
 export function createOctokitQueueClient(octokit: Octokit): QueueGitHubClient {
   return {
     async listOpenIssuesWithLabels({ owner, repo, labels }) {
-      const { data } = await octokit.rest.issues.listForRepo({
+      // Every page: a queue deeper than one page must not silently drop its tail (H10).
+      const data = await octokit.paginate(octokit.rest.issues.listForRepo, {
         owner,
         repo,
         state: 'open',

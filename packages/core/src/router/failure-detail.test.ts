@@ -179,4 +179,11 @@ describe('redactSecrets', () => {
     expect(redactSecrets('ANTHROPIC_API_KEY=sk-live-xyz')).toBe('ANTHROPIC_API_KEY=[redacted]');
     expect(redactSecrets('token: hunter2')).toBe('token: [redacted]');
   });
+
+  it('redacts credentials embedded in a URL', () => {
+    expect(redactSecrets("fatal: unable to access 'https://oauth2:glpat-abc123@gitlab.com/o/r.git/'")).toBe(
+      "fatal: unable to access 'https://[redacted]@gitlab.com/o/r.git/'",
+    );
+    expect(redactSecrets('https://github.com/o/r.git')).toBe('https://github.com/o/r.git');
+  });
 });
