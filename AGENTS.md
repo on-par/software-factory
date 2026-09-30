@@ -1,147 +1,28 @@
 # AGENTS.md
 
-Context for AI coding agents working in this repository. Read this before starting any task.
+Software Factory is a TypeScript monorepo (npm workspaces under `packages/`) that ships GitHub issues autonomously through a boss-worker-checker pipeline: PLAN → BUILD → CHECK → SHIP. `core` is the UI-less engine, `cli` is the `factory` command, and `config` holds the typed defaults and constitutions.
 
-## Project overview
+## Rules
 
-**Software Factory** (`@on-par/software-factory`, v2.0.0) is a TypeScript/Node.js monorepo that implements a multi-agent "software factory" — it ships verified GitHub issues autonomously through a **boss-worker-checker** orchestration pattern (PLAN → BUILD → CHECK → SHIP). Its distinguishing ideas are: **config-driven multi-provider model routing** with automatic failover (free local Ollama models first, cloud models such as Claude and Codex/GPT as failover, ranked per task tier), per-product **constitutions** (a written "standard + how to verify it" injected into every phase), and an independent **checker framework** with a rework loop. The engine is UI-less and packaged so a CLI (and, eventually, a server) can consume it.
-
-## Repository layout
-
-```
-software-factory/
-├── packages/
-│   ├── adr-kit/  @on-par/adr-kit           — Pure ADR kernel: parse/serialize/template/
-│   │                                        numbering, zero deps, no I/O.
-│   ├── contracts/ @on-par/contracts        — Shared typed seam: zod schemas + inferred
-│   │                                        types for Issue/Epic/Story/DesignArtifact.
-│   ├── repo-context/ @on-par/repo-context  — Read-only repo reader port: GitHub
-│   │                                        contents-API and in-memory impls, zero deps.
-│   ├── config/   @on-par/factory-config  — Zero-dep. Ships typed defaults (defaults.ts)
-│   │                                        and constitution markdown. No JSON.
-│   ├── core/     @on-par/factory-core     — The engine (imports config).
-│   ├── cli/      @on-par/factory-cli       — The `factory` CLI (imports core).
-│   ├── dashboard/ @on-par/factory-dashboard — Vite + React + Tailwind dashboard (walking skeleton, private).
-│   ├── product/  @on-par/product           — Product (proposer) app: brain-dump →
-│   │                                        engineering-ready issues. Read-only, private.
-│   ├── scbench-adapter/                    — SCBench adapter for `factory run-brief` without GitHub/queue/PR/merge effects.
-│   ├── server/   @on-par/factory-server    — Local HTTP server: GET /events relays the
-│                                             lane lifecycle bus as SSE. Private.
-│   └── tui/                                — Read-only Ink live-run view.
-├── scripts/      Root tooling: verify.sh, eval.ts, eval-history.ts,
-│                 regression-issue.ts, local-small-scoreboard.ts,
-│                 coverage-ratchet.ts
-├── evals/        Golden eval cases (evals/golden/*.md) + baseline.json + README
-├── docs/         Research notes (docs/research/*) + ADRs (docs/adr/ — see its README)
-├── tsconfig.base.json / tsconfig.json      Composite project references
-└── package.json  npm workspaces root
-```
-
-Dependency direction: `contracts ← core ← cli`, `config ← core ← cli`, `config ← core ← server`,
-`adr-kit ← product`, `adr-kit ← core`, `repo-context ← core`, and `repo-context ← product` — the ADR writer and
-readiness-conformance checker named in epic #464 consume them in later stories.
-
-### What lives in `packages/core/src`
-
-- `router/` — `ModelRouter` failover state machine + CLI executor
-- `models/` — `ModelRegistry` (reads the model registry from `@on-par/factory-config`)
-- `harness/` — provider adapters: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, `opencode`, plus a `stub` and a contract test suite
-- `phases/` — the four pipeline phases (`plan`, `build`, `check`, `ship`) plus integration tests (`pipeline.integration.test.ts`, `pipeline.concurrent.integration.test.ts`). The `*.integration.test.ts` files are excluded from the default vitest run and from the required `ci` check; run them with `npm run test:integration` (they also run nightly).
-- `checkers/` — the checker framework (compile/tests/lint/links/accessibility + agent-based custom checkers)
-- `constitutions/` — constitution loader (including first-hit review resolution ending in the built-in default review constitution)
-- `adr/` — reads the checkout's `docs/adr` through a `RepoContextReader` and renders Accepted ADRs as PLAN constraints
-- `admission/` — Factory App admission-state compatibility for the GitHub-label queue: the read port, the verdict classifier, and the claim-time guard
-- `approvals/` — approval-gate seam with file-based transport in `.factory/approvals/`
-- `bus/` — in-process lane lifecycle bus
-- `daemon/` — factoryd checkout precondition validation
-- `design/` — design-artifact validation, rendering, and frozen-spec persistence
-- `discovery/` — read-only discovery scans that rank candidate ideas from product signals
-- `efficiency/` — narrow fast-path planning eligibility and spec generation
-- `environment/` — port-lease registry for parallel lanes (`.factory/ports.json`) + `leaseEnv()`/`laneEnv()`, the `PORT`/`FACTORY_APP_PORT`/`FACTORY_BASE_URL` + `FACTORY_HEADLESS`/`PLAYWRIGHT_HEADLESS` contract injected into build agents and all checker commands
-- `logger/` — structured leveled logger (`createLogger`) over the `.factory/events.ndjson` sink (ADR-0002)
-- `eval/` — the eval harness (runner, judge, scoring, golden loader, baseline/trend/regression reports)
-- `events/` — reads and tails the `.factory/events.ndjson` append log
-- `failure/` — deterministic failure fingerprinting and evidence capture
-- `filing/` — fingerprinted bug filing with deduplication and repository routing
-- `hosted/` — provider-session authority bundles for hosted jobs
-- `ingest/` — always-on ingestion of ready issues into the queue
-- `kpis/` — pure factory-health KPI aggregation from events and costs
-- `projects/` — GitHub ProjectV2 queue GraphQL client and live poller
-- `proxy/` — opt-in loopback reverse proxy with stable per-lane URLs
-- `queue/` — proposed-queue validation for `factory triage accept`
-- `readiness/` — pure readiness scoring for GitHub issue bodies
-- `review/` — pure three-tier review verdict (approve / approve with comments / request changes) with reasons, the fail-closed fork-PR containment gate, and the contained runner that runs a fork PR's command checkers inside a disposable container, cross-repo PR reference parsing (number / owner/repo#N / URL)
-- `run/` — terminal run outcomes and parking-reason helpers
-- `sandbox/` — OS-level containment for agentic BUILD and rework runs
-- `sim/` — headless simulator harness (fake model/octokit, throwaway git workspace, jitter injection, Monte Carlo runner), and regression fixtures for known production faults
-- `spec/` — frozen-spec artifact paths, route normalization, writing, and archival
-- `steering/` — operator steering queued from the TUI for worker prompt assembly
-- `usage/`, `reports/`, `local-small/`, `test-support/`, `utils/` (incl. `lock.ts`, `ci-watch.ts`), `config/`, `types/`
-- `work/` — canonical work requests and input-source adapters
-
-## Key commands
-
-Run from the repo root unless noted. Node.js **≥ 20** required.
-
-| Task                           | Command                                  |
-| ------------------------------ | ---------------------------------------- |
-| Install (clean, CI-style)      | `npm ci`                                 |
-| Install (dev)                  | `npm install`                            |
-| Build all packages             | `npm run build` (`tsc -b`)               |
-| Typecheck                      | `npm run typecheck`                      |
-| Lint                           | `npm run lint`                           |
-| Format all files               | `npm run format`                         |
-| Format check                   | `npm run format:check`                   |
-| Dead code / unused deps        | `npm run knip`                           |
-| Test with coverage             | `npm run test` (`vitest run --coverage`) |
-| Coverage ratchet drift check   | `npm run coverage-ratchet`               |
-| Eval (deterministic stub)      | `npm run eval -- --stub`                 |
-| Eval (full harness)            | `npm run eval`                           |
-| Simulator Monte Carlo batch    | `npm run sim-monte-carlo -- --runs 20`   |
-| Full verify (all of the above) | `bash scripts/verify.sh`                 |
-
-`scripts/verify.sh` runs, in order: `npm ci` → `npm run format:check` → `npm run build` → `bash scripts/check-config-json.sh` → `npm run typecheck` → `npm run lint` → `npm run knip` → `npm run test` → `npm run coverage-ratchet` → `npm run eval -- --stub`. This mirrors the CI workflow in `.github/workflows/ci.yml`.
-
-## Conventions
-
-- **Language:** TypeScript, strict mode, ESM only — every `package.json` sets `"type": "module"`. Use `import`/`export`, `.js` extensions on relative imports where required by NodeNext resolution.
-- **Runtime:** Node.js ≥ 20 (`engines.node: ">=20.0.0"`).
-- **Monorepo:** npm workspaces (`packages/*`) with TypeScript composite project references (`tsc -b`). Cross-package imports use the published names (`@on-par/factory-core`, `@on-par/factory-config`), not relative paths across package boundaries.
-- **Dependencies:** keep `config` zero-dependency. Core depends on `execa`, `@octokit/rest`, `gray-matter`, `zod`.
-- **Config as source of truth:** model routing lives in `packages/config/src/defaults.ts`; do not hard-code model lists in `core`.
-- **ADR mandate:** off by default for target repos. This repository opts in through its gitignored `.factory/config.json` containing `{"adr":{"mandate":true}}` or via `FACTORY_ADR_MANDATE=1`.
-- **`core`'s root export is the narrow public API** — implementation details live behind `@on-par/factory-core/internal`, test helpers behind `@on-par/factory-core/testing` (ADR-0004).
-- **`packages/server` is a real but deliberately narrow local server** — it binds loopback, exposes only `GET /events` (SSE over the lane lifecycle bus), takes the bus as an injected port, and depends on `@on-par/contracts` only — no auth and no control endpoints yet (#583).
-- **Lint:** Oxlint with the TS 7-native `oxlint-tsgolint` type-aware backend. Configuration lives in `oxlint.config.ts`; run `npm run lint`, which denies warnings.
-
-## Testing
-
-- Test runner is **Vitest**. Tests are `*.test.ts` files **colocated** next to the source they cover in each package's `src/` tree (e.g. `packages/core/src/router/index.test.ts`).
-- `agents-layout.test.ts` guards the repository-layout and core-module inventory sections.
-- `npm run test` at the root runs all workspace tests in one pass and aggregates coverage (config in `vitest.config.ts`, which globs `packages/*/src/**/*.test.ts`).
-- **Coverage gate:** v8 thresholds enforced by Vitest — lines 94, functions 91, branches 85, statements 94 globally. Each package (`config`, `core`, `cli`, `dashboard`) also has its own ratcheting thresholds in `vitest.config.ts`, so a per-package regression fails the build even if the aggregate stays above the global floor. The ratchet is self-enforcing: `npm run coverage-ratchet` (run by `verify.sh` and CI after tests) fails when measured coverage exceeds any threshold by more than 2 points, telling you to raise the thresholds in the same PR. Never lower them. `packages/core/src/types/**` is excluded from coverage.
-- **TDD is expected:** write or update the colocated `*.test.ts` alongside any source change. Integration tests for the pipeline live under `packages/core/src/phases/`.
-- **Evals:** golden cases live in `evals/golden/*.md` with `evals/baseline.json`. The deterministic stub subset (`npm run eval -- --stub`) runs in CI on every PR; the full LLM-judge mode runs locally/nightly.
-- `packages/dashboard` renders via Vite; its component tests are `*.test.tsx` files colocated in `src/` (e.g. `packages/dashboard/src/App.test.tsx`).
+- Run `bash scripts/verify.sh --no-e2e` and get it green before every commit. Run it from the repo root.
+- Never lower a coverage threshold in `vitest.config.ts`. When the ratchet says coverage rose, raise the threshold in the same PR.
+- Never merge past a required check that is genuinely `FAILURE` (`gh pr merge --admin` or equivalent). `main` must always be green.
+- Write or update the colocated `*.test.ts` next to every source change.
+- Keep `packages/config` zero-dependency. The dependency direction is `config ← core ← cli`.
+- Model routing lives in `packages/config/src/defaults.ts`. Do not hard-code model lists in `core`.
+- `core`'s root export is the narrow public API. Put implementation details behind `@on-par/factory-core/internal` and test helpers behind `@on-par/factory-core/testing` (ADR-0004).
+- Import across packages by published name (`@on-par/factory-core`), never by a relative path across a package boundary.
+- TypeScript is strict and ESM only. Use `.js` extensions on relative imports.
+- Record significant design decisions as ADRs in `docs/adr/` (see its README).
 
 ## Known agent traps
 
-- **Do not "fix" the `test` script in `packages/core/package.json`.** It is intentionally `"test": "vitest run"`. Codex-style agents repeatedly rewrite it to work around a pre-existing vitest quirk when running tests from inside the package — that change is always out of scope and must be reverted. Run tests from the **repo root** with `npm run test` (or `bash scripts/verify.sh`), which is where coverage is configured and aggregated.
+- Do not "fix" the `test` script in `packages/core/package.json`. It is intentionally `"test": "vitest run"`. Tests only resolve from the repo root, where coverage is configured. Run `npm run test` there instead.
 
-## Before committing
+## Skills
 
-Run the full verification gate and make sure everything is green:
+Step-by-step procedures live in `.claude/skills/`. Read the matching `SKILL.md` before you do the task.
 
-```bash
-bash scripts/verify.sh --no-e2e
-```
-
-Build, typecheck, lint, test (with coverage thresholds), and the stub eval must **all** pass — this is what CI enforces on every PR. `--no-e2e` is the fast local loop and is what the CHECK phase uses; the only thing it skips is the coverage run, so run the bare path before you push. The pipeline integration suites are not in either path any more — they run nightly, or on demand via `npm run test:integration` (#755). Do not commit with a failing or reduced coverage gate.
-
-## Merge policy: main must always be green
-
-`main` must never carry a genuinely failing test, type error, or lint violation. Concretely:
-
-- **Never use `gh pr merge --admin` (or any merge that bypasses required status checks) to get past a check that is actually `FAILURE`.** Admin/bypass merges exist only for two legitimate cases: (1) the factory's own auto-merge, which bypasses the _review-approval_ requirement a bot can't obtain — but its `watchCi()` gate already refuses to merge unless CI reported a real `success`, never on failure or an unresolved/hung outcome (see `packages/cli/src/cli/index.ts`, `waitForMerge`); and (2) a human confirming a required check is _hung/stuck_, not failed (e.g. the #739 CI deadlock), after running an equivalent verification pass locally (`bash scripts/verify.sh --no-e2e` green, plus targeted checks for anything the fast path skips) — and saying so explicitly in the merge/PR comment.
-- If you bypass a check for reason (2), that is a workaround for a known infra bug, not a norm. The actual fix is closing that bug. The multi-hour `ci` hang of #739/#755 is fixed: it was an unbounded microtask-only spin loop in `router/index.test.ts`, not the integration tests, and CI jobs now carry a `timeout-minutes` ceiling so no future spin can strand open PRs.
-- If a `main`-red test is discovered (e.g. it slipped through during a CI-hang period), fix it immediately as the top-priority task — a red `main` blocks everyone and every future PR's diff against it.
+- `verify` — what the verify gate runs, how to read and fix each failure, coverage ratchet, integration tests.
+- `merge-policy` — landing PRs, the two legitimate bypass cases, what to do when `main` is red.
+- `run-evals` — stub, single-case, and full LLM-judge eval runs and baseline comparison.
