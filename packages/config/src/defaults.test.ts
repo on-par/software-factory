@@ -6,14 +6,16 @@ import { describe, expect, it } from 'vitest';
 import { defaultFactoryConfig, defaultModelsConfig, defaultRoutesConfig } from './defaults.js';
 
 describe('shipped defaults', () => {
-  it('has 22 models with the expected harness-bearing spot checks', () => {
+  it('has 24 models with the expected harness-bearing spot checks', () => {
     const modelIds = Object.keys(defaultModelsConfig.models);
-    expect(modelIds).toHaveLength(22);
+    expect(modelIds).toHaveLength(24);
 
     for (const id of [
       'claude-opus-5',
+      'claude-opus-5-5',
       'claude-fable-5',
       'claude-sonnet-5',
+      'claude-sonnet-5-5',
       'gpt-5.6-terra-high',
       'gpt-5.6-terra-medium',
       'gpt-5.6-luna-high',
@@ -42,6 +44,32 @@ describe('shipped defaults', () => {
       envKey: null,
       codexFlag: '-m gpt-6-astra -c model_reasoning_effort=medium',
     });
+  });
+
+  it('registers Opus 5.5 and Sonnet 5.5 for repo pins without adding them to any default tier', () => {
+    expect(defaultModelsConfig.models['claude-opus-5-5']).toMatchObject({
+      provider: 'anthropic',
+      tier: 'boss',
+      costPerMtokInput: 4,
+      costPerMtokOutput: 20,
+      envKey: null,
+      harness: 'claude-cli',
+      claudeFlag: 'claude-opus-5-5',
+    });
+    expect(defaultModelsConfig.models['claude-sonnet-5-5']).toMatchObject({
+      provider: 'anthropic',
+      tier: ['checker', 'boss_fallback', 'worker_fallback'],
+      costPerMtokInput: 2,
+      costPerMtokOutput: 10,
+      envKey: null,
+      harness: 'claude-cli',
+      claudeFlag: 'claude-sonnet-5-5',
+    });
+
+    for (const ids of Object.values(defaultModelsConfig.tiers)) {
+      expect(ids).not.toContain('claude-opus-5-5');
+      expect(ids).not.toContain('claude-sonnet-5-5');
+    }
   });
 
   it('every tier entry exists in models, with the expected tier lengths', () => {

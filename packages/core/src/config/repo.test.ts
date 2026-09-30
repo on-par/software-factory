@@ -469,6 +469,33 @@ describe('resolveEffectiveModelPins', () => {
   });
 });
 
+describe('Opus 5.5 / Sonnet 5.5 repo pins', () => {
+  const shipped = loadModelsConfig();
+  const shippedRegistry = new ModelRegistry(shipped);
+  const repo = {
+    version: 2 as const,
+    models: { pins: { plan: 'claude-opus-5-5', build: 'claude-sonnet-5-5', checker: 'claude-sonnet-5-5' } },
+  };
+
+  it('accepts plan and build pins to the 5.5 models and routes the build to claude', () => {
+    expect(resolveEffectiveModelPins(shippedRegistry, repo, {})).toEqual({
+      plan: 'claude-opus-5-5',
+      build: 'claude-sonnet-5-5',
+      sources: { plan: 'repo', build: 'repo' },
+    });
+    expect(routeForBuildModel(shippedRegistry, 'claude-sonnet-5-5')).toBe('claude');
+  });
+
+  it('accepts a checker pin to Sonnet 5.5', () => {
+    expect(applyRepoConfig(shipped, repo).tiers.checker).toEqual(['claude-sonnet-5-5']);
+  });
+
+  it('prices both models at their per-MTok rates', () => {
+    expect(shippedRegistry.estimateCost('claude-opus-5-5', 1_000_000, 1_000_000)).toBe(24);
+    expect(shippedRegistry.estimateCost('claude-sonnet-5-5', 1_000_000, 1_000_000)).toBe(12);
+  });
+});
+
 describe('terra default overrides (#529)', () => {
   const shippedRegistry = new ModelRegistry(loadModelsConfig());
 

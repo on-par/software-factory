@@ -125,6 +125,18 @@ export const defaultModelsConfig: ModelsDefaults = {
       harness: 'claude-cli',
       claudeFlag: 'claude-opus-5',
     },
+    /** Claude Opus 5.5 — registered for repo pins only (not in any default tier), uses claude CLI subscription auth. */
+    'claude-opus-5-5': {
+      provider: 'anthropic',
+      tier: 'boss',
+      costPerMtokInput: 4.0,
+      costPerMtokOutput: 20.0,
+      contextWindow: 200000,
+      capabilities: ['planning', 'design', 'architecture', 'review', 'dispute_resolution'],
+      envKey: null,
+      harness: 'claude-cli',
+      claudeFlag: 'claude-opus-5-5',
+    },
     /** Uses claude CLI subscription auth, no API key needed. */
     'claude-opus-4-8': {
       provider: 'anthropic',
@@ -148,6 +160,18 @@ export const defaultModelsConfig: ModelsDefaults = {
       envKey: null,
       harness: 'claude-cli',
       claudeFlag: 'claude-sonnet-5',
+    },
+    /** Claude Sonnet 5.5 — registered for repo pins only (not in any default tier), uses claude CLI subscription auth. */
+    'claude-sonnet-5-5': {
+      provider: 'anthropic',
+      tier: ['checker', 'boss_fallback', 'worker_fallback'],
+      costPerMtokInput: 2.0,
+      costPerMtokOutput: 10.0,
+      contextWindow: 200000,
+      capabilities: ['review', 'verification', 'implementation', 'triage'],
+      envKey: null,
+      harness: 'claude-cli',
+      claudeFlag: 'claude-sonnet-5-5',
     },
     /** Codex CLI subscription auth (ChatGPT/OAuth), not an API key — do not gate availability on OPENAI_API_KEY. Explicitly pins -m gpt-5.6-sol instead of silently riding ~/.codex/config.toml's default model. */
     'gpt-5.6-sol': {
