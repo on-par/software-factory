@@ -70,66 +70,113 @@ export const RepoFactoryConfigV1Schema = z
   })
   .strict();
 
+// The `.describe()` text below is rendered into docs/config.example.jsonc by
+// renderConfigExample (./example.ts), so keep it accurate to the resolvers in this file.
 export const RepoFactoryConfigV2Schema = z
   .object({
-    $schema: z.string().optional(),
+    $schema: z.string().optional().describe('Accepted and ignored.'),
     version: z.literal(2),
     models: z
       .object({
         efforts: ModelEffortsSchema.optional(),
         pins: z
           .object({
-            plan: z.string().optional(),
-            planFallback: z.string().optional(),
-            build: z.string().optional(),
-            buildFallback: z.string().optional(),
-            checker: z.string().optional(),
-            triage: z.string().optional(),
+            plan: z.string().optional().describe('PLAN model. Beats FACTORY_PLAN_MODEL.'),
+            planFallback: z
+              .string()
+              .optional()
+              .describe('PLAN model tried when the pinned plan model fails or its provider is tripped.'),
+            build: z
+              .string()
+              .optional()
+              .describe(
+                'BUILD model. Beats FACTORY_BUILD_MODEL. When `route` is unset, its harness also picks the build route.',
+              ),
+            buildFallback: z.string().optional().describe('Codex-capable model to use after a Claude BUILD failure.'),
+            checker: z.string().optional().describe('Checker model. Replaces the checker tier.'),
+            triage: z.string().optional().describe('Triage model. Replaces the triage tier.'),
           })
           .strict()
-          .optional(),
+          .optional()
+          .describe('Per-phase model pins. Each value is a model id from `factory models`. Unset: tier resolution.'),
       })
       .strict()
       .optional(),
     policy: z
       .object({ mode: z.enum(['pinned', 'auto']).optional() })
       .strict()
-      .optional(),
-    tiers: z.record(z.string(), z.array(z.string())).optional(),
+      .optional()
+      .describe('Written by `factory migrate`. Not read at runtime.'),
+    tiers: z
+      .record(z.string(), z.array(z.string()))
+      .optional()
+      .describe(
+        'Tier name -> ordered model ids. Replaces that packaged tier; the router uses the first available model. ' +
+          'An unknown model id fails loudly. The packaged tiers are:',
+      ),
     providers: z
       .object({
         anthropic: z.boolean().optional(),
-        openai: z.boolean().optional(),
+        openai: z.boolean().optional().describe('An explicit value beats the FACTORY_CODEX=0 kill-switch.'),
         ollama: z.boolean().optional(),
       })
       .strict()
-      .optional(),
+      .optional()
+      .describe('Provider switches. Unset leaves a provider on. `false` removes its models from every tier.'),
     budget: z
       .object({
-        capUsd: z.number().positive().optional(),
-        fastPath: z.boolean().optional(),
-        maxReworkRounds: z.number().int().min(0).max(3).optional(),
-        perIssueCapUsd: z.number().positive().optional(),
+        capUsd: z.number().positive().optional().describe('Run-wide usage cap in USD. Beats FACTORY_USAGE_CAP.'),
+        fastPath: z.boolean().optional().describe('Trade expensive exploration for a bounded PLAN path.'),
+        maxReworkRounds: z.number().int().min(0).max(3).optional().describe('Checker-rework retries per issue (0-3).'),
+        perIssueCapUsd: z
+          .number()
+          .positive()
+          .optional()
+          .describe('Hard USD cap per issue, on top of the run-wide cap. Unset: no per-issue cap.'),
         /** Usage-watchdog knobs, colocated with `capUsd` since both gate the usage
          *  supervisor. Each field is independently optional so a repo can durably pin
          *  just one, e.g. `{"watchdog": {"pollSeconds": 60}}` (see resolveWatchdogPolicy). */
         watchdog: z
           .object({
-            stopAt: z.number().gt(0).max(1).optional(),
-            resumeAt: z.number().gt(0).max(1).optional(),
-            pollSeconds: z.number().positive().optional(),
-            watch: z.boolean().optional(),
-            estimator: z.boolean().optional(),
+            stopAt: z
+              .number()
+              .gt(0)
+              .max(1)
+              .optional()
+              .describe('Usage fraction (0-1] at which work pauses. Beats FACTORY_STOP_AT.'),
+            resumeAt: z
+              .number()
+              .gt(0)
+              .max(1)
+              .optional()
+              .describe('Usage fraction (0-1] at which paused work resumes. Beats FACTORY_RESUME_AT.'),
+            pollSeconds: z
+              .number()
+              .positive()
+              .optional()
+              .describe('Seconds between usage polls. Beats FACTORY_USAGE_POLL.'),
+            watch: z.boolean().optional().describe('Enforce the usage gate. Beats FACTORY_USAGE_WATCH.'),
+            estimator: z
+              .boolean()
+              .optional()
+              .describe('Use the list-price usage estimator. Beats FACTORY_USAGE_ESTIMATOR.'),
           })
           .strict()
-          .optional(),
+          .optional()
+          .describe('Usage watchdog. `factory run` / `supervise` flags beat these values.'),
       })
       .strict()
       .optional(),
     /** Repo pins the build route for every issue (e.g. "opencode"). The plan
      *  phase still writes the spec, but the pinned route wins over the model's
      *  route choice so deepseek workers are actually used when pinned. */
-    route: z.enum(['codex', 'claude', 'opencode']).optional(),
+    route: z
+      .enum(['codex', 'claude', 'opencode'])
+      .optional()
+      .describe(
+        'Build route for every issue: "codex", "claude", or "opencode". ' +
+          "Unset: derived from the build pin's harness, else PLAN decides per issue.",
+      ),
   })
   .strict();
 

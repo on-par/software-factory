@@ -388,6 +388,9 @@ const INTERNAL_API_KEYS = [
   'resolveEffectiveConfig',
   'resolveExperimental',
   'resolveLocalOnly',
+  'FACTORY_RUNTIME_CONFIG_KEYS',
+  'CONFIG_EXAMPLE_OMITTED_KEYS',
+  'renderConfigExample',
   // Design artifact (#422)
   'DesignArtifactSchema',
   'parseDesignArtifact',

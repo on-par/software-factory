@@ -305,7 +305,6 @@ import {
   cmdConstitution,
   cmdLand,
   cmdUsage,
-  FACTORY_CONFIG_SCHEMA_URL,
   formatInitReachability,
   IssueDecomposedError,
   IssueSkippedError,
@@ -581,7 +580,7 @@ describe('cli commands (via main dispatch)', () => {
 
       expect(existsSync(paths().config)).toBe(true);
       const config = JSON.parse(readFileSync(paths().config, 'utf-8'));
-      expect(config).toEqual({ $schema: FACTORY_CONFIG_SCHEMA_URL, version: 2 });
+      expect(config).toEqual({ version: 2 });
       expect(config.models).toBeUndefined();
 
       expect(existsSync(paths().constitution)).toBe(true);
@@ -623,7 +622,7 @@ describe('cli commands (via main dispatch)', () => {
   describe('buildInitConfig', () => {
     it('returns valid pin-free version-2 JSON', () => {
       const parsed = JSON.parse(buildInitConfig());
-      expect(parsed).toEqual({ $schema: FACTORY_CONFIG_SCHEMA_URL, version: 2 });
+      expect(parsed).toEqual({ version: 2 });
       expect(parsed.models).toBeUndefined();
       expect(parsed.tiers).toBeUndefined();
     });

@@ -87,7 +87,7 @@ npm link --workspace @on-par/factory-cli
 ```bash
 cd /path/to/your/repo        # any git repo with a GitHub remote and open issues
 export GITHUB_TOKEN=$(gh auth token)   # the factory opens PRs via the GitHub API
-factory init                 # creates .factory/ (state, logs, plans, queue)
+factory init                 # creates .factory/ (config.json, constitution.md, state/)
 ```
 
 **Step 3 — Pick a constitution**
@@ -111,6 +111,16 @@ factory ship 42              # PLAN → BUILD → CHECK → SHIP one issue (use 
 ```
 
 `factory ship` ends at a green, ready-for-review PR that closes the issue (it prints `✅ Issue #N → PR #M ready for review`); merging stays with you — review the PR and merge it, or run `factory land <N>` to squash-merge and clean up the worktree. To process the whole triaged queue in parallel lanes instead, run `factory run` (after accepting a triage proposal with the `mv` above). `FACTORY_MERGE` / `FACTORY_MERGE_ADMIN` apply to `factory run` and `factory land` only — `factory ship` warns and ignores them.
+
+## Configuration
+
+`factory init` writes a minimal `.factory/config.json`:
+
+```json
+{ "version": 2 }
+```
+
+Every other key is optional. [`docs/config.example.jsonc`](docs/config.example.jsonc) lists each key the factory reads, with its default and what it does. It is generated from the config schemas (`npm run config-example`) and a test fails when it drifts, so it matches the code. `.factory/config.json` itself is plain JSON: copy only the keys you want to change, without the comments. `factory status --kpis` prints the effective config.
 
 ## CLI Commands
 
