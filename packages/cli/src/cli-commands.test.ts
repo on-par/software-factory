@@ -297,6 +297,7 @@ import {
 } from '@on-par/factory-core/internal';
 
 import { cmdDaemonLogs, cmdDaemonStart, cmdDaemonStatus, cmdDaemonStop, DaemonCtlError } from './cli/daemon.js';
+import { HELP_GROUPS, OTHER_GROUP } from './cli/help-groups.js';
 
 import {
   buildInitConfig,
@@ -4793,4 +4794,62 @@ describe('parseIssueArg wired into ship/land/local-small-dry-run', () => {
       expect(h.octokit.rest.pulls.list).not.toHaveBeenCalled();
     },
   );
+});
+
+// ===========================================================================
+describe('factory --help layout', () => {
+  async function topLevelHelp(): Promise<string> {
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    const written: string[] = [];
+    process.stdout.write = ((chunk: unknown) => {
+      written.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      const res = await runMain('--help');
+      expect(res.exited).toBe(true);
+    } finally {
+      process.stdout.write = originalWrite;
+    }
+    return written.join('');
+  }
+
+  /** Command names listed under one heading, up to the next blank line. */
+  function section(help: string, heading: string): string[] {
+    const start = help.indexOf(`${heading}\n`);
+    expect(start, `missing heading ${heading}`).toBeGreaterThanOrEqual(0);
+    const body = help.slice(start + heading.length + 1).split('\n\n')[0];
+    return body
+      .split('\n')
+      .map((line) => line.trim().split(/\s+/)[0])
+      .filter((name) => /^[a-z]/.test(name));
+  }
+
+  it('shows every group heading in table order, with no catch-all section', async () => {
+    const help = await topLevelHelp();
+    const positions = HELP_GROUPS.map((g) => help.indexOf(`${g.heading}\n`));
+    expect(positions.every((p) => p >= 0)).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+    expect(help).not.toContain(`${OTHER_GROUP}\n`);
+    expect(help).not.toContain('Commands:\n');
+  });
+
+  it("lists each group's commands under its heading, in table order", async () => {
+    const help = await topLevelHelp();
+    for (const group of HELP_GROUPS) {
+      const expected = group.includesHelp ? [...group.commands, 'help'] : [...group.commands];
+      expect(section(help, group.heading)).toEqual(expected);
+    }
+  });
+
+  it('puts run-issue, ship, run, and land under "Run work:"', async () => {
+    const runWork = section(await topLevelHelp(), 'Run work:');
+    expect(runWork).toEqual(expect.arrayContaining(['run-issue', 'ship', 'run', 'land']));
+  });
+
+  it('says ship opens a PR and never merges, and run-issue is ship with an up-front issue check', async () => {
+    const help = (await topLevelHelp()).replace(/\s+/g, ' ');
+    expect(help).toContain('open a ready-for-review PR; never merges (merge later with land)');
+    expect(help).toContain('Like ship, but loads the issue first');
+  });
 });
