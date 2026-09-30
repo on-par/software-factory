@@ -114,23 +114,32 @@ factory ship 42              # PLAN → BUILD → CHECK → SHIP one issue (use 
 
 ## CLI Commands
 
+The most-used commands, by the group `factory --help` lists them under. Run `factory --help` for the full, current list.
+
 ```bash
-factory init                        Initialize .factory in this repo
-factory constitution --list         List available product constitutions
-factory constitution --product <p>  Set the active constitution
-factory constitution --init [p]     Scaffold .factory/constitution.md in this repo from the template
-factory models [--doctor]           List available models and costs; --doctor checks provider CLIs
-factory triage [--product <p>]      Propose queue.proposed from open issues (review + mv to accept)
-factory ship <N>                    Plan → build → check → ship one issue (--product, --no-auto-rework)
-factory local-small-dry-run <N>     Dry-run an issue against local small models (--spec, --output)
-factory land <N>                    Squash-merge a ready PR and clean up its worktree
-factory run                         Process the whole queue (lanes in parallel)
-factory supervise [--now]           Unattended loop: wait for usage headroom, run the queue, repeat
-factory status                      Show queue, events, PRs, models
-factory cost                        Show cost tracking summary
-factory usage                       Report trailing-5h subscription usage vs cap
-factory stop                        Halt between issues
-factory resume                      Resume after stop
+# Run work
+factory ship <N>                    Plan → build → check one issue and open a ready-for-review PR; never merges
+factory run-issue <N>               Like ship, but loads the issue first and exits 2 if it cannot be found
+factory run                         Claim queued issues and ship them, lanes in parallel; merges only when auto-merge is on
+factory supervise [--now]           Unattended loop: wait for usage headroom, run the queue, repeat until it is empty
+factory land <N>                    Squash-merge the issue's open PR once CI is green, then remove its worktree
+factory stop / factory resume       Halt lanes after their current issue / clear the stop
+
+# Setup
+factory init                        Set up .factory/ in this repo and check model reachability
+factory doctor                      Check your environment (git, claude, gh auth, GitHub token, npm, sandbox)
+factory constitution --product <p>  Seed .factory/constitution.md from a bundled example constitution
+factory models [--doctor]           List models with tiers, cost, and availability; --doctor probes provider CLIs
+
+# Queue
+factory triage [--product <p>]      Have a model propose a queue into .factory/queue.proposed
+factory queue add <lane> <N...>     Queue GitHub issues into a lane (factory:queued labels)
+
+# Observe
+factory status                      Show active runs, the GitHub queue, provider health, and recent events
+factory logs [--follow]             Print pipeline events
+factory cost                        Show recorded model spend by model
+factory usage                       Report 5-hour subscription usage
 ```
 
 ## Model Routing

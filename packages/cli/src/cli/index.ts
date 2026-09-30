@@ -259,6 +259,7 @@ import { cmdHostedSmoke } from './hosted.js';
 import { cmdHostedQueue } from './hosted-queue.js';
 import { cmdHostedRunner } from './hosted-runner.js';
 import { cmdLogs } from './logs.js';
+import { applyHelpGroups } from './help-groups.js';
 import { mergeScopeNotice } from './merge-scope.js';
 import { createFactoryOctokit } from './octokit.js';
 import { readRunFlagOverrides, writeRunFlagOverrides } from './run-flags.js';
@@ -4403,15 +4404,15 @@ export async function main() {
 
   program
     .command('init')
-    .description('Initialize .factory in this repo (config, constitution, .gitignore) and validate reachability')
+    .description(
+      'Set up .factory/ in this repo (config, constitution, queue file, .gitignore) and check model reachability',
+    )
     .option('--force', 'Overwrite an existing .factory config, constitution, and .gitignore')
     .action((opts: { force?: boolean }) => cmdInit(opts));
 
   program
     .command('migrate')
-    .description(
-      'Rewrite .factory/ to the v2 layout: v2 config.json, constitution.md, .gitignore, runtime state under state/',
-    )
+    .description('Upgrade .factory/ to the v2 layout (config.json, constitution.md, .gitignore, state/)')
     .option('--dry-run', 'Print planned changes without writing')
     .action((opts: { dryRun?: boolean }) => cmdMigrate(opts));
 
@@ -4429,13 +4430,13 @@ export async function main() {
 
   program
     .command('models')
-    .description('List available models and costs')
+    .description('List models with their tiers, cost per 1M tokens, and availability')
     .option('--doctor', 'Probe provider CLIs and env keys; report per-model reachability')
     .action(cmdModels);
 
   program
     .command('doctor')
-    .description('Preflight-check your environment (claude, gh, token, git, npm, sandbox)')
+    .description('Check your environment (git, claude, gh auth, GitHub token, npm, sandbox, .factory/)')
     .option(
       '--reconcile',
       'Reap stale port leases, dead-run worktrees, stale issue claims, orphan sf-job-*/factory.managed containers, and orphan factory-* sbx VMs',
@@ -4444,18 +4445,18 @@ export async function main() {
 
   program
     .command('cost')
-    .description('Show cost tracking summary')
+    .description('Show recorded model spend by model (--issue for one issue)')
     .option('--issue <number>', 'show per-entry detail for one issue')
     .action((opts: { issue?: string }) => cmdCost(opts));
 
   program
     .command('usage')
-    .description('Report real 5h subscription usage (with a list-price heuristic fallback)')
+    .description('Report 5-hour subscription usage (falls back to a list-price estimate)')
     .action(cmdUsage);
 
   program
     .command('status')
-    .description('Show queue, events, PRs, models')
+    .description('Show active runs, the GitHub queue, provider health, and recent events')
     .option('--kpis', 'Show full Health KPIs and Effective config')
     .action((opts: { kpis?: boolean }) => cmdStatus(opts));
 
@@ -4481,7 +4482,7 @@ export async function main() {
 
   const triage = program
     .command('triage')
-    .description('Propose a queue from open issues')
+    .description('Have a model propose a queue from open issues into .factory/queue.proposed')
     .option('--product <name>', 'Product constitution to scope triage')
     .action(cmdTriage);
 
@@ -4493,7 +4494,9 @@ export async function main() {
       await cmdTriageAccept(opts);
     });
 
-  const queue = program.command('queue').description('Manage the GitHub-backed work queue');
+  const queue = program
+    .command('queue')
+    .description('Manage the GitHub-label work queue (add, clear, reconcile, migrate)');
   queue
     .command('migrate')
     .description('Copy valid .factory/queue lane order into GitHub issue labels')
@@ -4531,7 +4534,7 @@ export async function main() {
 
   const hosted = program
     .command('hosted')
-    .description('Hosted (remote-runner) execution — experimental, gated by FACTORY_HOSTED_EXEC=1');
+    .description('Experimental remote-runner execution (needs FACTORY_HOSTED_EXEC=1)');
   hosted
     .command('smoke')
     .description('Local end-to-end hosted-exec smoke: create → lease → Docker run → result → cleanup')
@@ -4591,13 +4594,13 @@ export async function main() {
 
   program
     .command('ready <issue>')
-    .description('Score an issue against the factory-ready template fields (pass/fail, names missing fields)')
+    .description('Check whether an issue has the fields the factory needs (pass/fail, lists missing fields)')
     .action(cmdReady);
 
   program
     .command('ship <issue>')
     .description(
-      'Plan → build → check → ship one issue; stops at a ready-for-review PR (FACTORY_MERGE / FACTORY_MERGE_ADMIN are honored by "factory run" and "factory land", not by ship)',
+      'Plan → build → check one GitHub issue and open a ready-for-review PR; never merges (merge later with land)',
     )
     .option('--product <name>', 'Override active product constitution')
     .option('--no-auto-rework', 'Disable automatic rework loop')
@@ -4610,9 +4613,7 @@ export async function main() {
 
   program
     .command('run-issue <issue>')
-    .description(
-      'One-shot: resolve one GitHub issue through the canonical work-request seam and run plan → build → check → ship (queue untouched)',
-    )
+    .description('Like ship, but loads the issue first and exits 2 before any worktree or PR if it cannot be found')
     .option('--product <name>', 'Override active product constitution')
     .option('--no-auto-rework', 'Disable automatic rework loop')
     .option('--interactive', 'Pause before opening the PR and wait for approval from the TUI')
@@ -4624,9 +4625,7 @@ export async function main() {
 
   program
     .command('run-brief <file>')
-    .description(
-      'One-shot: resolve a local Markdown brief through the canonical work-request seam and run plan → build → check → ship (queue untouched)',
-    )
+    .description('Like run-issue, but the work comes from a local Markdown brief instead of a GitHub issue')
     .option('--product <name>', 'Override active product constitution')
     .option('--no-auto-rework', 'Disable automatic rework loop')
     .option('--interactive', 'Pause before opening the PR and wait for approval from the TUI')
@@ -4666,7 +4665,9 @@ export async function main() {
 
   program
     .command('land <issue>')
-    .description('Squash-merge a ready PR and clean up its worktree')
+    .description(
+      "Squash-merge the issue's open PR once CI is green, then remove its worktree (left open if CI fails or review is pending)",
+    )
     .action(async (issueNum) => {
       await cmdLand(parseIssueArg(issueNum));
     });
@@ -4680,7 +4681,9 @@ export async function main() {
 
   program
     .command('run')
-    .description('Process the whole queue (lanes in parallel)')
+    .description(
+      'Claim queued issues (factory:queued labels) and ship them, lanes in parallel; merges only when auto-merge is on',
+    )
     .option('--local-queue', 'Read .factory/queue instead of claiming issues from GitHub Issues')
     .option('--auto-merge', 'Merge eligible PRs autonomously, overriding .factory/config.json and FACTORY_MERGE')
     .option('--no-auto-merge', 'Never merge autonomously, overriding .factory/config.json and FACTORY_MERGE')
@@ -4709,12 +4712,12 @@ export async function main() {
 
   program
     .command('proxy')
-    .description(
-      'Run the opt-in lane reverse proxy in the foreground (manual use; `factory run`/`supervise` host it in-process)',
-    )
+    .description('Run the opt-in lane reverse proxy in the foreground (run and supervise start it themselves)')
     .action(cmdProxy);
 
-  const daemonCmd = program.command('daemon').description('The factoryd daemon (long-running, user-scoped)');
+  const daemonCmd = program
+    .command('daemon')
+    .description('Manage factoryd, the long-running background service for this user');
   daemonCmd
     .command('run')
     .description('Run factoryd in the foreground: a localhost-only HTTP API over the repo registry')
@@ -4745,7 +4748,7 @@ export async function main() {
     .option('-n, --lines <n>', 'lines to print first (default 100)')
     .action((opts: { follow?: boolean; lines?: string }) => daemonCtl(() => cmdDaemonLogs(opts)));
 
-  const worktreeCmd = program.command('worktree').description('Worktree maintenance');
+  const worktreeCmd = program.command('worktree').description('Clean up stale factory worktrees (gc)');
   worktreeCmd
     .command('gc')
     .description('Remove stale factory worktrees (merged/closed branches or older than TTL) and scrub credentials')
@@ -4755,7 +4758,7 @@ export async function main() {
 
   program
     .command('supervise')
-    .description('Multi-window loop: wait for usage headroom, run the queue, repeat until drained')
+    .description('Unattended loop: wait for usage headroom, run the queue, repeat until it is empty')
     .option('--now', 'Skip the initial headroom wait')
     .option('--local-queue', 'Read .factory/queue instead of claiming issues from GitHub Issues')
     .option('--auto-merge', 'Merge eligible PRs autonomously, overriding .factory/config.json and FACTORY_MERGE')
@@ -4779,7 +4782,7 @@ export async function main() {
 
   program
     .command('stop')
-    .description('Halt between issues')
+    .description('Tell running lanes to halt after their current issue')
     .action(async () => {
       const repoRoot = await getRepoRoot();
       const paths = getFactoryPaths(repoRoot);
@@ -4790,7 +4793,7 @@ export async function main() {
 
   program
     .command('resume')
-    .description('Resume after stop')
+    .description('Clear a stop so lanes pick up new issues again')
     .action(async () => {
       const repoRoot = await getRepoRoot();
       const paths = getFactoryPaths(repoRoot);
@@ -4799,6 +4802,8 @@ export async function main() {
       }
       console.log('STOP cleared');
     });
+
+  applyHelpGroups(program);
 
   try {
     await program.parseAsync(process.argv);
