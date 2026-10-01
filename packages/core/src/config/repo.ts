@@ -71,7 +71,7 @@ export const RepoFactoryConfigV1Schema = z
   })
   .strict();
 
-// The `.describe()` text below is rendered into docs/config.example.jsonc by
+// The `.describe()` text below is rendered into docs/config.example.yaml by
 // renderConfigExample (./example.ts), so keep it accurate to the resolvers in this file.
 export const RepoFactoryConfigV2Schema = z
   .object({

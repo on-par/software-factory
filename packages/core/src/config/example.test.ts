@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { afterAll, describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
 import { z } from 'zod';
 
 import { ModelRegistry } from '../models/index.js';
@@ -27,27 +28,19 @@ import {
   resolveWatchdogPolicy,
 } from './repo.js';
 
-const EXAMPLE_PATH = fileURLToPath(new URL('../../../../docs/config.example.jsonc', import.meta.url));
-
-/** The example with its `//` comment lines removed: the plain JSON a repo could commit. */
-function stripComments(text: string): string {
-  return text
-    .split('\n')
-    .filter((line) => !line.trimStart().startsWith('//'))
-    .join('\n');
-}
+const EXAMPLE_PATH = fileURLToPath(new URL('../../../../docs/config.example.yaml', import.meta.url));
 
 const tempDirs: string[] = [];
 afterAll(() => {
   for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
 });
 
-/** A throwaway repo whose `.factory/config.json` is the stripped example. */
+/** A throwaway repo whose `.factory/config.yaml` is the example. */
 function repoWithExample(): string {
   const repoRoot = mkdtempSync(join(tmpdir(), 'factory-config-example-'));
   tempDirs.push(repoRoot);
   mkdirSync(join(repoRoot, '.factory'), { recursive: true });
-  writeFileSync(getFactoryPaths(repoRoot).config, stripComments(renderConfigExample()));
+  writeFileSync(join(repoRoot, '.factory', 'config.yaml'), renderConfigExample());
   return repoRoot;
 }
 
@@ -56,21 +49,37 @@ const modelKeys = Object.keys(
 );
 const acceptedTopLevelKeys = [...modelKeys, ...FACTORY_RUNTIME_CONFIG_KEYS];
 
-describe('docs/config.example.jsonc', () => {
+describe('docs/config.example.yaml', () => {
   it('matches the generator output', () => {
     expect(
       readFileSync(EXAMPLE_PATH, 'utf-8'),
-      'docs/config.example.jsonc is stale — regenerate it with `npm run build && npm run config-example`',
+      'docs/config.example.yaml is stale — regenerate it with `npm run build && npm run config-example`',
     ).toBe(renderConfigExample());
   });
 
-  it('parses as JSON once comment lines are removed', () => {
-    expect(() => JSON.parse(stripComments(renderConfigExample()))).not.toThrow();
+  it('parses as YAML into a mapping', () => {
+    const parsed: unknown = parse(renderConfigExample());
+    expect(parsed).not.toBeNull();
+    expect(typeof parsed).toBe('object');
+    expect(Array.isArray(parsed)).toBe(false);
+    expect((parsed as { version: unknown }).version).toBe(2);
+  });
+
+  it('parses to a tree with no null values', () => {
+    const nulls: string[] = [];
+    const walk = (value: unknown, path: string): void => {
+      if (value === null) nulls.push(path);
+      else if (typeof value === 'object') for (const [k, v] of Object.entries(value)) walk(v, `${path}.${k}`);
+    };
+    walk(parse(renderConfigExample()), '');
+    expect(nulls).toEqual([]);
   });
 
   it('renders or deliberately omits every top-level key the loaders accept', () => {
-    // Top-level keys sit at two-space indent, live or commented out (e.g. `  // "route": ...`).
-    const rendered = [...renderConfigExample().matchAll(/^ {2}(?:\/\/ )?"([^"]+)":/gm)].map((m) => m[1]);
+    // Top-level keys sit at column 0, live or commented out (e.g. `# route: ...`); skip the header prose.
+    const text = renderConfigExample();
+    const body = text.slice(text.indexOf('\nversion: 2\n'));
+    const rendered = [...body.matchAll(/^(?:# )?"?([A-Za-z_$][\w$-]*)"?:(?: |$)/gm)].map((m) => m[1]);
     const missing = acceptedTopLevelKeys.filter(
       (key) => !rendered.includes(key) && !(key in CONFIG_EXAMPLE_OMITTED_KEYS),
     );
@@ -84,7 +93,7 @@ describe('docs/config.example.jsonc', () => {
 
 describe('the example, loaded as a repo config, behaves like no config file', () => {
   const repoRoot = repoWithExample();
-  const noConfig = join(repoRoot, 'missing', 'config.json');
+  const noConfig = join(repoRoot, 'missing', 'config.yaml');
   const envs: NodeJS.ProcessEnv[] = [
     {},
     {

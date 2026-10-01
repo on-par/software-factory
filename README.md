@@ -87,7 +87,7 @@ npm link --workspace @on-par/factory-cli
 ```bash
 cd /path/to/your/repo        # any git repo with a GitHub remote and open issues
 export GITHUB_TOKEN=$(gh auth token)   # the factory opens PRs via the GitHub API
-factory init                 # creates .factory/ (config.json, constitution.md, state/)
+factory init                 # creates .factory/ (config.yaml, constitution.md, state/)
 ```
 
 **Step 3 — Pick a constitution**
@@ -114,13 +114,13 @@ factory ship 42              # PLAN → BUILD → CHECK → SHIP one issue (use 
 
 ## Configuration
 
-`factory init` writes a minimal `.factory/config.json`:
+`factory init` writes a minimal `.factory/config.yaml`:
 
-```json
-{ "version": 2 }
+```yaml
+version: 2
 ```
 
-Every other key is optional. [`docs/config.example.jsonc`](docs/config.example.jsonc) lists each key the factory reads, with its default and what it does. It is generated from the config schemas (`npm run config-example`) and a test fails when it drifts, so it matches the code. `.factory/config.json` itself is plain JSON: copy only the keys you want to change, without the comments. `factory status --kpis` prints the effective config.
+Every other key is optional. [`docs/config.example.yaml`](docs/config.example.yaml) lists each key the factory reads, with its default and what it does. It is generated from the config schemas (`npm run config-example`) and a test fails when it drifts, so it matches the code. Copy only the keys you want to change (comments included) into `.factory/config.yaml`; `.factory/config.json` is still read for existing repos, and `factory migrate --to-yaml` converts it. `factory status --kpis` prints the effective config.
 
 ## CLI Commands
 
@@ -180,24 +180,20 @@ Each task type maps to a tier, and each tier is a hand-ordered priority list in 
 
 Local Ollama models cost $0 and lead every tier. `FACTORY_LOCAL_ONLY=1` restricts routing to local models entirely. Experimental models (glm-5.2, deepseek-v3, qwen-3.5-coder, gpt-4.1-mini, opencode-sonnet) exist in `defaults.ts` but are only routed when `FACTORY_EXPERIMENTAL=1`.
 
-**Codex GPT phase profiles.** Whenever Codex GPT is the selected provider path (e.g. `providers.anthropic`/`providers.ollama` disabled, or an explicit pin), PLAN defaults to `gpt-5.6-terra-high` (`model_reasoning_effort=high`) and BUILD (`build_codex`) defaults to `gpt-5.6-terra-medium` (`model_reasoning_effort=medium`); the generic `gpt-5.6-sol` → `gpt-5.1-codex` profiles remain as failover. Override per repo with `.factory/config.json` (`models.pins.plan` / `models.pins.build`) or per run with `FACTORY_PLAN_MODEL` / `FACTORY_BUILD_MODEL`; the repo file wins over env.
+**Codex GPT phase profiles.** Whenever Codex GPT is the selected provider path (e.g. `providers.anthropic`/`providers.ollama` disabled, or an explicit pin), PLAN defaults to `gpt-5.6-terra-high` (`model_reasoning_effort=high`) and BUILD (`build_codex`) defaults to `gpt-5.6-terra-medium` (`model_reasoning_effort=medium`); the generic `gpt-5.6-sol` → `gpt-5.1-codex` profiles remain as failover. Override per repo with `.factory/config.yaml` (`models.pins.plan` / `models.pins.build`) or per run with `FACTORY_PLAN_MODEL` / `FACTORY_BUILD_MODEL`; the repo file wins over env.
 
-**Model and effort selection.** GPT-6 Astra is available as `gpt-6-astra` through Codex subscription authentication (default effort: `medium`). Pin it explicitly; it does not change the default tier/failover order. In a v2 `.factory/config.json`, configure effort independently of model pins:
+**Model and effort selection.** GPT-6 Astra is available as `gpt-6-astra` through Codex subscription authentication (default effort: `medium`). Pin it explicitly; it does not change the default tier/failover order. In a v2 `.factory/config.yaml`, configure effort independently of model pins:
 
-```json
-{
-  "version": 2,
-  "models": {
-    "pins": { "plan": "gpt-6-astra", "build": "gpt-6-astra", "checker": "claude-opus-5" },
-    "efforts": {
-      "gpt-6-astra": { "plan": "high", "build_codex": "medium" },
-      "claude-opus-5": "high",
-      "opencode-deepseek-v4-flash-free": "low",
-      "qwen3.5:9b": false
-    }
-  },
-  "route": "codex"
-}
+```yaml
+version: 2
+models:
+  pins: { plan: gpt-6-astra, build: gpt-6-astra, checker: claude-opus-5 }
+  efforts:
+    gpt-6-astra: { plan: high, build_codex: medium }
+    claude-opus-5: high
+    opencode-deepseek-v4-flash-free: low
+    'qwen3.5:9b': false
+route: codex
 ```
 
 Each `efforts` key is a registered model ID. A scalar applies to every task for that model; a map applies only to its named task types (for example `plan`, `build_codex`, `build_claude`, `build_opencode`, `check_custom`, `review_pr`, or `triage`; see the routes in `defaults.ts`). Unspecified models/tasks keep their current profile/provider defaults. A fallback uses its own effort configuration. Existing string model pins and `FACTORY_PLAN_MODEL` / `FACTORY_BUILD_MODEL` still work. `factory status --kpis` shows configured effort overrides.

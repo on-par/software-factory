@@ -57,7 +57,7 @@ export function readRepoConfigFile(configPath: string): unknown {
 
 /** Header comment written at the top of a freshly created `config.yaml`. */
 export const REPO_CONFIG_YAML_HEADER =
-  '# Software Factory repo config. Every key is documented in docs/config.example.jsonc.\n';
+  '# Software Factory repo config. Every key is documented in docs/config.example.yaml.\n';
 
 function isYamlPath(p: string): boolean {
   const ext = extname(p);
