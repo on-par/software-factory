@@ -6,7 +6,7 @@ import type { FileOverlapCandidate, FileOverlapMatch } from './file-overlap-guar
 import { parseQueue } from '../queue/index.js';
 import type { CommandResult } from '../utils/command-runner.js';
 import { runCommand } from '../utils/command-runner.js';
-import { branchPrefixSlug } from '../utils/index.js';
+import { branchPrefixSlug, factoryBranchIssue } from '../utils/index.js';
 
 const DEFAULT_LABEL = 'ready';
 const DEFAULT_LANE = 'auto';
@@ -33,7 +33,7 @@ export interface AutoIngestOptions {
   lane?: string;
   /** Cap on issues appended per cycle. Defaults to 20. */
   maxPerCycle?: number;
-  /** Factory branch prefix used to recognize in-flight PRs. Defaults to branchPrefixSlug(). */
+  /** Factory branch prefix used to recognize in-flight PRs. Defaults to branchPrefixSlug(). Legacy `ship-it/` PRs are also recognized. */
   branchPrefix?: string;
   /** Admits every candidate even when two name the same file. Defaults to false. */
   forceAdmit?: boolean;
@@ -146,7 +146,7 @@ async function listInFlightIssues(run: Runner, repoDir: string, branchPrefix: st
     if (!Array.isArray(parsed)) return inFlight;
     for (const item of parsed as Array<{ headRefName?: unknown }>) {
       if (typeof item.headRefName !== 'string') continue;
-      const issue = issueFromFactoryBranch(item.headRefName, branchPrefix);
+      const issue = factoryBranchIssue(item.headRefName, branchPrefix);
       if (issue !== null) inFlight.add(issue);
     }
   } catch {

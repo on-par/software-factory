@@ -1,6 +1,7 @@
 // src/kpis/human.ts — Reconstruct explicit human-intervention events (#420)
 
 import { isParkKind } from '../events/kinds.js';
+import { factoryBranchIssue } from '../utils/index.js';
 import type { FactoryEvent, HumanEventType } from '../types/index.js';
 
 export const HUMAN_EVENT_TYPES: ReadonlySet<string> = new Set<HumanEventType>([
@@ -24,7 +25,7 @@ export interface CommitSource {
 }
 
 export interface PrSource {
-  issue: string; // numeric string parsed from the ship-it/<n>- branch
+  issue: string; // numeric string parsed from the factory/<n>- or legacy ship-it/<n>- branch
   prNumber: number;
   commits: CommitSource[];
   /** Approving reviews. */
@@ -170,6 +171,7 @@ export async function fetchHumanEventSources(
   owner: string,
   repo: string,
   issues: ReadonlySet<string>,
+  branchPrefix?: string,
 ): Promise<PrSource[]> {
   const prs: any[] = [];
   for (let page = 1; page <= 3; page++) {
@@ -187,12 +189,12 @@ export async function fetchHumanEventSources(
   }
 
   const matched = prs
-    .map((pr) => ({ pr, match: /^ship-it\/(\d+)-/.exec(pr.head?.ref ?? '') }))
-    .filter(({ match }) => match !== null && issues.has(match[1]));
+    .map((pr) => ({ pr, issue: factoryBranchIssue(pr.head?.ref ?? '', branchPrefix) }))
+    .filter(({ issue }) => issue !== null && issues.has(String(issue)));
 
   return Promise.all(
-    matched.map(async ({ pr, match }) => {
-      const issue = match![1];
+    matched.map(async ({ pr, issue: issueNum }) => {
+      const issue = String(issueNum);
 
       const [{ data: commitsData }, { data: reviewsData }] = await Promise.all([
         client.rest.pulls.listCommits({ owner, repo, pull_number: pr.number, per_page: 100 }),

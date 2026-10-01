@@ -17,6 +17,8 @@ import {
   defaultRemoteBase,
   ensureDir,
   escalationLine,
+  factoryBranchIssue,
+  factoryBranchPrefixes,
   getIssueTitle,
   gitFetch,
   isEscalation,
@@ -86,6 +88,20 @@ describe('utils', () => {
   it('falls back to ship-it when the custom branch prefix has no slug characters', () => {
     expect(branchPrefixSlug('!!!')).toBe('ship-it');
     expect(branchFor(7, 'Hello, World!', '!!!')).toBe('ship-it/7-hello-world');
+  });
+
+  it('factoryBranchPrefixes lists the resolved prefix then the legacy one, deduped', () => {
+    expect(factoryBranchPrefixes()).toEqual(['ship-it']);
+    expect(factoryBranchPrefixes('factory')).toEqual(['factory', 'ship-it']);
+    expect(factoryBranchPrefixes('Ship It')).toEqual(['ship-it']);
+  });
+
+  it('factoryBranchIssue recognizes the resolved and legacy prefixes only', () => {
+    expect(factoryBranchIssue('factory/12-x', 'factory')).toBe(12);
+    expect(factoryBranchIssue('ship-it/7-y', 'factory')).toBe(7);
+    expect(factoryBranchIssue('sf/3-z', 'sf')).toBe(3);
+    expect(factoryBranchIssue('feature/4-a', 'factory')).toBeNull();
+    expect(factoryBranchIssue('factory/abc-x', 'factory')).toBeNull();
   });
 
   it('logs worktree cleanup failures without rejecting', async () => {
