@@ -54,7 +54,15 @@ export type { EffectiveConfig } from './config/repo.js';
 export { resolveEffectiveConfig } from './config/repo.js';
 export { resolveExperimental, resolveLocalOnly, resolveBranchPrefix } from './config/index.js';
 export { FACTORY_RUNTIME_CONFIG_KEYS } from './config/index.js';
-export { REPO_CONFIG_FILENAMES, readRepoConfigFile, resolveRepoConfigPath } from './config/repo-config-file.js';
+export {
+  migrateRepoConfigToYaml,
+  REPO_CONFIG_FILENAMES,
+  REPO_CONFIG_YAML_HEADER,
+  readRepoConfigFile,
+  resolveRepoConfigPath,
+  setRepoConfigValue,
+} from './config/repo-config-file.js';
+export type { RepoConfigYamlMigration } from './config/repo-config-file.js';
 export { CONFIG_EXAMPLE_OMITTED_KEYS, renderConfigExample } from './config/example.js';
 
 // Design artifact (#422)

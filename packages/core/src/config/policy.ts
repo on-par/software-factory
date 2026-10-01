@@ -1,14 +1,12 @@
 // packages/core/src/config/policy.ts — the settings API's allow-list of repo policy fields
 // safe for the dashboard to edit, plus the resolver that reports each field's effective
 // value and the source that decided it (flag > env > config > packaged default) and the
-// writer that persists one allow-listed field into `.factory/config.json`. See ADR-0094:
+// writer that persists one allow-listed field into the repo config file, in that file's own
+// format (YAML edited in place, comments kept). See ADR-0094:
 // this allow-list IS the authorization model for the loopback settings write surface.
 
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
-
 import { isPlainObject, loadFactoryConfig } from './index.js';
-import { readRepoConfigFile } from './repo-config-file.js';
+import { readRepoConfigFile, setRepoConfigValue } from './repo-config-file.js';
 
 export type PolicySource = 'flag' | 'config' | 'env' | 'default';
 
@@ -193,24 +191,9 @@ export function setSafeRepoPolicyField(
     throw new PolicyConfirmationRequiredError(confirmation);
   }
 
-  const raw = readRawConfig(configPath) ?? { version: 2 };
+  readRawConfig(configPath);
 
-  const next: Record<string, unknown> = { ...raw };
-  let cursor = next;
-  for (let i = 0; i < field.configPath.length - 1; i++) {
-    const key = field.configPath[i]!;
-    const existing = cursor[key];
-    const cloned: Record<string, unknown> = isPlainObject(existing) ? { ...existing } : {};
-    cursor[key] = cloned;
-    cursor = cloned;
-  }
-  const leafKey = field.configPath[field.configPath.length - 1]!;
-  cursor[leafKey] = value;
-
-  mkdirSync(dirname(configPath), { recursive: true });
-  const tmp = `${configPath}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(next, null, 2)}\n`);
-  renameSync(tmp, configPath);
+  setRepoConfigValue(configPath, field.configPath, value);
 
   return resolveSafeRepoPolicy(configPath, env);
 }
