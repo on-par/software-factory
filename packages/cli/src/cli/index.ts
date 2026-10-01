@@ -144,7 +144,6 @@ import {
   rewriteQueueForDecomposition,
   runAutoIngest,
   runIssue,
-  scoreIssueReadiness,
   shipPhase,
   summarizeEvent,
   touchLastEvent,
@@ -275,6 +274,7 @@ import { cmdLogs } from './logs.js';
 import { applyHelpGroups } from './help-groups.js';
 import { mergeScopeNotice } from './merge-scope.js';
 import { createFactoryOctokit } from './octokit.js';
+import { runIssueCheck } from './ready-check.js';
 import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
 import { readRunFlagOverrides, writeRunFlagOverrides } from './run-flags.js';
 import { distFreshnessProbe, runStalenessGuard } from './staleness.js';
@@ -844,34 +844,26 @@ async function cmdCost(opts: { issue?: string } = {}) {
   console.log(`  Total: $${grandTotal.toFixed(4)}`);
 }
 
-async function cmdReady(issueRaw: string) {
+async function cmdCheck(issueRaw: string, opts: { json?: boolean }) {
   const issueNum = parseIssueArg(issueRaw);
   const ghRepo = await getGitHubRepo();
   const [owner, repoName] = ghRepo.split('/');
-  const { data } = await getOctokit().rest.issues.get({ owner, repo: repoName, issue_number: issueNum });
-  const readiness = scoreIssueReadiness({ title: data.title, body: data.body ?? '' });
-
-  if (readiness.pass) {
-    console.log(
-      chalk.green(
-        `issue #${issueNum} is factory-ready (${readiness.template}, score ${Math.round(readiness.score * 100)}%)`,
-      ),
+  const report = await runIssueCheck(issueNum, opts, {
+    getIssue: async (n) => {
+      const { data } = await getOctokit().rest.issues.get({ owner, repo: repoName, issue_number: n });
+      return { title: data.title, body: data.body ?? null };
+    },
+    log: (line) => console.log(line),
+  });
+  if (report.exitCode === 1) {
+    throw new CliExitError(
+      `factory: issue #${issueNum} is not factory-ready — missing: ${report.fields.missing.join(', ')}`,
+      1,
     );
-    return;
   }
-
-  console.log(
-    chalk.yellow(
-      `issue #${issueNum} is not factory-ready (${readiness.template}, score ${Math.round(readiness.score * 100)}%)`,
-    ),
-  );
-  for (const field of readiness.missing) {
-    console.log(chalk.yellow(`  missing: ${field}`));
+  if (report.exitCode === 3) {
+    throw new CliExitError(`factory: issue #${issueNum} would split — ${report.size.reason}`, 3);
   }
-  throw new CliExitError(
-    `factory: issue #${issueNum} is not factory-ready — missing: ${readiness.missing.join(', ')}`,
-    1,
-  );
 }
 
 async function currentCommitSha(): Promise<string | null> {
@@ -4831,9 +4823,13 @@ export async function main() {
     );
 
   program
-    .command('ready <issue>')
-    .description('Check whether an issue has the fields the factory needs (pass/fail, lists missing fields)')
-    .action(cmdReady);
+    .command('check <issue>')
+    .alias('ready')
+    .description(
+      'Check an issue before queuing: required fields and whether the size gate runs it as-is or would split it (read-only; exit 0 ready, 1 missing fields, 3 would split)',
+    )
+    .option('--json', 'Print one JSON object with fields, size verdict, and reasons')
+    .action(cmdCheck);
 
   program
     .command('ship <issue>')
