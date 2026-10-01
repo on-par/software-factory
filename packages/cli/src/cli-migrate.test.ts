@@ -27,7 +27,7 @@ import {
 } from '@on-par/factory-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { runMigrate } from './cli/index.js';
+import { CliExitError, runMigrate } from './cli/index.js';
 
 const tempDirs = new Set<string>();
 
@@ -193,5 +193,57 @@ describe('runMigrate', () => {
     expect(readFileSync(join(root, 'constitution.md'), 'utf-8')).toBe(
       readFileSync(join(getConstitutionsDir(), `${product}.md`), 'utf-8'),
     );
+  });
+});
+
+describe('runMigrate --to-yaml', () => {
+  const setup = (): { repoRoot: string; root: string } => {
+    const repoRoot = tempRepo();
+    const root = join(repoRoot, '.factory');
+    mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, 'config.json'), JSON.stringify({ version: 2, merge: { auto: true } }));
+    return { repoRoot, root };
+  };
+
+  it('converts config.json to config.yaml with equal values and skips the layout steps', async () => {
+    const { repoRoot, root } = setup();
+    const before = loadFactoryConfigForRepo(join(root, 'config.json'));
+    await runMigrate(repoRoot, { toYaml: true });
+    expect(existsSync(join(root, 'config.json'))).toBe(false);
+    expect(existsSync(join(root, 'config.yaml'))).toBe(true);
+    expect(loadFactoryConfigForRepo(join(root, 'config.yaml'))).toEqual(before);
+    expect(existsSync(join(root, 'constitution.md'))).toBe(false);
+  });
+
+  it('writes nothing on --dry-run', async () => {
+    const { repoRoot, root } = setup();
+    await runMigrate(repoRoot, { toYaml: true, dryRun: true });
+    expect(existsSync(join(root, 'config.json'))).toBe(true);
+    expect(existsSync(join(root, 'config.yaml'))).toBe(false);
+  });
+
+  it('is a no-op for a YAML repo and for no config', async () => {
+    const { repoRoot, root } = setup();
+    rmSync(join(root, 'config.json'));
+    await expect(runMigrate(repoRoot, { toYaml: true })).resolves.toBeUndefined();
+    writeFileSync(join(root, 'config.yaml'), 'version: 2\n');
+    await expect(runMigrate(repoRoot, { toYaml: true })).resolves.toBeUndefined();
+  });
+
+  it('exits 1 when the round trip fails', async () => {
+    const { repoRoot } = setup();
+    const err = await runMigrate(repoRoot, {
+      toYaml: true,
+      migrateToYaml: () => ({ status: 'round-trip-failed', from: 'x', reason: 'x' }),
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CliExitError);
+    expect((err as CliExitError).code).toBe(1);
+  });
+
+  it('maps a core error (both files present) to exit 1', async () => {
+    const { repoRoot, root } = setup();
+    writeFileSync(join(root, 'config.yaml'), 'version: 2\n');
+    const err = await runMigrate(repoRoot, { toYaml: true }).catch((e: unknown) => e);
+    expect((err as CliExitError).code).toBe(1);
   });
 });

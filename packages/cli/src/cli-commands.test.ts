@@ -569,7 +569,7 @@ describe('cli commands (via main dispatch)', () => {
       expect(logged()).toContain('Initialized');
     });
 
-    it('writes config.json, constitution.md, and .gitignore, then prints a reachability summary', async () => {
+    it('writes config.yaml, constitution.md, and .gitignore, then prints a reachability summary', async () => {
       h.diagnoses = [
         { reachable: true, tiers: ['worker'] } as any,
         { reachable: true, tiers: ['worker'] } as any,
@@ -578,10 +578,11 @@ describe('cli commands (via main dispatch)', () => {
       const res = await runMain('init');
       expect(res.exited).toBe(false);
 
-      expect(existsSync(paths().config)).toBe(true);
-      const config = JSON.parse(readFileSync(paths().config, 'utf-8'));
-      expect(config).toEqual({ version: 2 });
-      expect(config.models).toBeUndefined();
+      const yamlConfig = join(h.repoRoot, '.factory', 'config.yaml');
+      expect(existsSync(yamlConfig)).toBe(true);
+      const text = readFileSync(yamlConfig, 'utf-8');
+      expect(text.startsWith('#')).toBe(true);
+      expect(text).toContain('version: 2');
 
       expect(existsSync(paths().constitution)).toBe(true);
       const constitution = readFileSync(paths().constitution, 'utf-8');
@@ -606,7 +607,7 @@ describe('cli commands (via main dispatch)', () => {
     it('--force overwrites an existing config', async () => {
       writeFileSync(paths().config, '{"version":2,"models":{"pins":{"plan":"x"}}}');
       await runMain('init', '--force');
-      expect(readFileSync(paths().config, 'utf-8')).toBe(buildInitConfig());
+      expect(readFileSync(paths().config, 'utf-8')).toBe(buildInitConfig('json'));
     });
 
     it('leaves .factory/ git-clean except the committed config, constitution, .gitignore, and the state/ directory', async () => {
@@ -614,14 +615,20 @@ describe('cli commands (via main dispatch)', () => {
       writeFileSync(paths().queue, 'app 1\n');
 
       expect(readdirSync(paths().root).sort()).toEqual(
-        ['.gitignore', 'config.json', 'constitution.md', 'state'].sort(),
+        ['.gitignore', 'config.yaml', 'constitution.md', 'state'].sort(),
       );
     });
   });
 
   describe('buildInitConfig', () => {
-    it('returns valid pin-free version-2 JSON', () => {
-      const parsed = JSON.parse(buildInitConfig());
+    it('defaults to a YAML header comment plus version: 2', () => {
+      const text = buildInitConfig();
+      expect(text.startsWith('#')).toBe(true);
+      expect(text).toContain('version: 2\n');
+    });
+
+    it('returns valid pin-free version-2 JSON for json', () => {
+      const parsed = JSON.parse(buildInitConfig('json'));
       expect(parsed).toEqual({ version: 2 });
       expect(parsed.models).toBeUndefined();
       expect(parsed.tiers).toBeUndefined();
