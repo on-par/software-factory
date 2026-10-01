@@ -3,10 +3,10 @@ import { fileURLToPath } from 'node:url';
 
 import { exec as execCb, execSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { userInfo } from 'node:os';
-import { basename, dirname, relative, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
@@ -183,6 +183,9 @@ import type {
 } from '@on-par/factory-core/internal';
 import {
   acquirePidFile,
+  parseHandLabels,
+  runClassifierBacktest,
+  selectBacktestPrs,
   formatWorktreeLocation,
   laneWorktreePath,
   resolveWorktreeRoot,
@@ -971,6 +974,125 @@ async function cmdClassifierReport(opts: { json?: boolean } = {}) {
     return;
   }
   for (const line of formatClassifierReport(report)) console.log(line);
+}
+
+async function cmdClassifierBacktest(opts: {
+  since: string;
+  limit?: string;
+  labels?: string;
+  maxCost?: string;
+  branchPrefix?: string;
+}) {
+  const fail = (msg: string) => {
+    console.error(chalk.red(msg));
+    process.exitCode = 1;
+  };
+  if (Number.isNaN(Date.parse(opts.since))) return fail(`--since must be a date, got "${opts.since}"`);
+  let limit: number | undefined;
+  if (opts.limit !== undefined) {
+    limit = Number(opts.limit);
+    if (!Number.isInteger(limit) || limit < 1) return fail(`--limit must be a positive integer, got "${opts.limit}"`);
+  }
+  let maxCostUsd: number | undefined;
+  if (opts.maxCost !== undefined) {
+    maxCostUsd = Number(opts.maxCost);
+    if (!Number.isFinite(maxCostUsd) || maxCostUsd <= 0) {
+      return fail(`--max-cost must be a number greater than 0, got "${opts.maxCost}"`);
+    }
+  }
+  let handLabels: Map<number, 'A' | 'B' | 'C'> | undefined;
+  if (opts.labels !== undefined) {
+    try {
+      handLabels = parseHandLabels(readFileSync(opts.labels, 'utf-8'));
+    } catch (err: any) {
+      return fail(`--labels ${opts.labels}: ${err?.message ?? err}`);
+    }
+  }
+
+  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
+  const repoRoot = await getRepoRoot();
+  const paths = getFactoryPaths(repoRoot);
+  const repoConfig = loadRepoConfig(repoRoot);
+  const effective = resolveEffectiveConfig(repoConfig);
+  const router = new ModelRouter(
+    applyRepoConfig(loadModelsConfig(), repoConfig),
+    loadRoutesConfig(),
+    false,
+    undefined,
+    effective.allowExperimental,
+    effective.localOnly,
+  );
+  const rules = resolveReviewFloorRules(repoConfig);
+  const modelPin = repoConfig?.models?.pins?.classifier;
+  const [owner, repoName] = (await getGitHubRepo()).split('/');
+  const octokit = getOctokit();
+  const now = new Date().toISOString();
+  const windowDays = resolveDefectWindowDays(loadFactoryConfigForRepo(paths.config));
+
+  const sources = await fetchHumanEventSources(octokit, owner, repoName, null, branchPrefix);
+  const prs = selectBacktestPrs(sources, { since: opts.since, limit });
+  if (prs.length === 0) {
+    console.log(`No merged factory PRs since ${opts.since}.`);
+    return;
+  }
+  const local = existsSync(paths.events) ? readEvents(paths.events) : [];
+  const withHuman = [...local, ...reconstructHumanEvents(sources, local)];
+  let outcomeEvents = withHuman;
+  try {
+    const defectSources = await fetchDefectSources(octokit, owner, repoName, mergedPrRefs(prs), { now, windowDays });
+    outcomeEvents = [...withHuman, ...detectPostMergeDefects(defectSources, withHuman, { now, windowDays })];
+  } catch (err: any) {
+    console.error(
+      chalk.yellow(`factory: post-merge defect lookup failed (${err?.message ?? err}) — outcomes will show as pending`),
+    );
+  }
+
+  const outFile = join(paths.state, `classifier-backtest-${now.replace(/[:.]/g, '-')}.jsonl`);
+  ensureDir(paths.state);
+  console.log(
+    chalk.dim(
+      `Backtesting ${prs.length} PR(s) merged since ${opts.since} (hindsight: ADRs/plans read from the current checkout)`,
+    ),
+  );
+  const result = await runClassifierBacktest(
+    {
+      repoRoot,
+      prs,
+      outcomeEvents,
+      rules,
+      router,
+      modelPin,
+      specPathFor: (i) => resolve(paths.plans, `issue-${i}.md`),
+      handLabels,
+      maxCostUsd,
+      now,
+      windowDays,
+    },
+    {
+      getIssue: async (issue) => {
+        const { data } = await octokit.rest.issues.get({ owner, repo: repoName, issue_number: Number(issue) });
+        return { title: data.title, body: data.body ?? '' };
+      },
+      onRecord: (r) => appendFileSync(outFile, `${JSON.stringify(r)}\n`),
+    },
+  );
+
+  if (result.records.length > 0) console.log(`Classified ${result.records.length} PR(s) → ${outFile}`);
+  else console.log('No PRs classified.');
+  for (const s of result.skipped) console.log(`skipped PR #${s.prNumber} (issue ${s.issue}): ${s.reason}`);
+  if (result.stopped === 'budget') {
+    console.log(
+      `Budget $${maxCostUsd} reached after ${result.covered} PR(s) ($${result.spentUsd.toFixed(2)} spent); ${result.notRun} not run.`,
+    );
+  } else if (result.stopped === 'unpriced') {
+    console.log(
+      `Stopped after ${result.covered} PR(s): classifier model is unpriced, so --max-cost cannot be enforced; ${result.notRun} not run.`,
+    );
+  } else if (result.unpricedCalls > 0) {
+    console.log(`Note: ${result.unpricedCalls} classifier call(s) were unpriced and are not in the spend total.`);
+  }
+  console.log('');
+  for (const line of formatClassifierReport(summarizeClassifierOutcomes(result.records))) console.log(line);
 }
 
 async function cmdKpis(opts: { branchPrefix?: string } = {}) {
@@ -4931,6 +5053,15 @@ export async function main() {
     )
     .option('--json', 'Print one JSON object with the same numbers')
     .action((opts: { json?: boolean }) => cmdClassifierReport(opts));
+  classifierCmd
+    .command('backtest')
+    .description('Replay the floor and shadow classifier over merged factory PRs and report against known outcomes')
+    .requiredOption('--since <date>', 'Only PRs merged on or after this date (e.g. 2026-08-01)')
+    .option('--limit <n>', 'Classify at most N PRs (oldest first)')
+    .option('--labels <file>', 'CSV of hand labels "pr,class" that override heuristic outcomes')
+    .option('--max-cost <usd>', 'Stop once classifier spend reaches this many dollars')
+    .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
+    .action((opts) => cmdClassifierBacktest(opts));
 
   program
     .command('tui')
