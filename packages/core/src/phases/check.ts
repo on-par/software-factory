@@ -1,5 +1,7 @@
 // src/phases/check.ts — CHECK phase: independent checkers verify output, rework loop
 
+import { join } from 'node:path';
+
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
 import { type CheckerContext, probeWorktree, runAllCheckers, type WorktreeProbe } from '../checkers/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
@@ -70,7 +72,14 @@ function testFailureEvidence(summary: CheckSummary): Pick<ReworkInfo, 'failingTe
   const details = testsFailure.details.slice(0, MAX_FAILURE_OUTPUT_LENGTH);
   const failingTests = details
     .split(/\r?\n/)
-    .flatMap((line) => line.match(/(?:\bFAIL|[×✕●])\s+(.+)/)?.[1] ?? line.match(/\bnot ok \d+\s*-\s*(.+)/i)?.[1] ?? [])
+    .flatMap(
+      (line) =>
+        line.match(/(?:\bFAIL|[×✕●])\s+(.+)/)?.[1] ??
+        line.match(/\bnot ok \d+\s*-\s*(.+)/i)?.[1] ??
+        // .NET Microsoft.Testing.Platform: "failed Namespace.Class.Test (46ms)"
+        line.match(/\bfailed\s+(\S+)\s+\(\d/)?.[1] ??
+        [],
+    )
     .map((identifier) => identifier.trim())
     .filter((identifier) => identifier !== '')
     .slice(0, MAX_FAILING_TESTS);
@@ -188,6 +197,9 @@ async function checkPhaseImpl(opts: {
   /** Heartbeat hook (#1326), forwarded to `CheckerContext.onActivity` — bumps the
    *  persisted run-phase snapshot's `lastActivityAt` around every checker. */
   onActivity?: () => void | Promise<void>;
+  /** Factory logs dir (`.factory/state/logs`). When set, failing checker commands write
+   *  their full output to `<logsDir>/issue-<n>/check-r<round>/` and FAIL details link it. */
+  logsDir?: string;
 }): Promise<CheckPhaseResult> {
   const {
     issue,
@@ -210,7 +222,10 @@ async function checkPhaseImpl(opts: {
     reworkRoute,
     reworkModel,
     onActivity,
+    logsDir,
   } = opts;
+  const roundLogDir = (round: number): string | undefined =>
+    logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, `check-r${round}`);
 
   let probe = await probeWorktree(worktree);
   const ctx: CheckerContext = {
@@ -222,6 +237,7 @@ async function checkPhaseImpl(opts: {
     probe,
     log,
     onActivity,
+    outputLogDir: roundLogDir(0),
   };
 
   if (appPort === undefined) {
@@ -321,6 +337,7 @@ async function checkPhaseImpl(opts: {
 
     probe = await probeWorktree(worktree);
     ctx.probe = probe;
+    ctx.outputLogDir = roundLogDir(reworkRounds);
     summary = await runAllCheckers(ctx, router, constitution, checkTimeoutSeconds);
     log('check', `Rework round ${reworkRounds}: ${summary.failures} failures remaining`);
     // When no model ran this round (modelCompleted === false), an unchanged failure
@@ -440,6 +457,9 @@ ${constitutionCtx}
 
 ## Check Failures (from independent verification agents)
 ${failureDetails}
+
+Each failure above is a bounded summary. When it ends with \`full output: <path>\`,
+read that file first — it holds the command's complete stdout and stderr.
 
 ## Instructions
 1. Make one focused repair pass. Change only files necessary to address the listed failures.

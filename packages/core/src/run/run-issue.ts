@@ -551,6 +551,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       reworkModel: build.model,
       laneId: request.lane,
       onActivity: ports.onActivity,
+      logsDir: request.logsDir,
     });
     checkSummary = check.summary;
     reworkRounds = check.reworkRounds;

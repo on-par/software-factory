@@ -1,5 +1,5 @@
 import { execFile as execFileCb } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -214,6 +214,60 @@ describe('checkPhase auto rework', () => {
     expect(check.passed).toBe(false);
     expect(check.reworkRounds).toBe(1);
     expect(stub.calls).toHaveLength(1);
+  });
+
+  it(
+    "writes each round's failing checker output under logsDir and points the rework prompt at it",
+    { timeout: 120_000 },
+    async () => {
+      const { worktree, specPath } = await makeFailingWorktree();
+      const logsDir = await mkdtemp(join(tmpdir(), 'check-phase-logs-'));
+      tempDirs.add(logsDir);
+      const { router, stub } = makeRouter();
+
+      const check = await checkPhase({
+        issue: 77,
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        log: () => {},
+        maxReworkRounds: 1,
+        logsDir,
+      });
+
+      const round0 = join(logsDir, 'issue-77', 'check-r0', 'tests-npm-test.log');
+      const round1 = join(logsDir, 'issue-77', 'check-r1', 'tests-npm-test.log');
+      await expect(readFile(round0, 'utf8')).resolves.toContain('$ npm test');
+      await expect(readFile(round1, 'utf8')).resolves.toContain('$ npm test');
+      expect(stub.calls[0]?.prompt).toContain(`full output: ${round0}`);
+      expect(stub.calls[0]?.prompt).toContain('read that file first');
+      expect(check.summary.results.find((r) => r.checker === 'tests')?.details).toContain(`full output: ${round1}`);
+    },
+  );
+
+  it('captures .NET failed-test identifiers in the rework event', { timeout: 120_000 }, async () => {
+    const worktree = await makeWorktreeWithFiles(78, {
+      'package.json': JSON.stringify({
+        scripts: { test: `node -e "console.log('failed Ns.ClassTests.ShouldWork (46ms)'); process.exit(1)"` },
+      }),
+    });
+    const { router } = makeRouter();
+    const reworks: ReworkInfo[] = [];
+
+    await checkPhase({
+      issue: 78,
+      worktree,
+      specPath: join(worktree, 'issue-78.md'),
+      router,
+      constitution: null,
+      log: (type, _msg, extra) => {
+        if (type === 'rework' && extra?.rework) reworks.push(extra.rework);
+      },
+      maxReworkRounds: 1,
+    });
+
+    expect(reworks[0]?.failingTests).toEqual(['Ns.ClassTests.ShouldWork']);
   });
 
   it('keeps the existing rework behavior by default', { timeout: 120_000 }, async () => {
