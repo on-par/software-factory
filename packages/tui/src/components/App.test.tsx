@@ -435,7 +435,7 @@ describe('App', () => {
     let frame = lastFrame() ?? '';
     expect(frame).toContain('[5 Health]');
     expect(frame).toContain('anthropic: OPEN (rate-limit)');
-    expect(frame).toContain('(Effective config and KPIs hidden — press e to view)');
+    expect(frame).toContain('(Effective config and full KPIs hidden — press e to view)');
 
     stdin.write('e');
     await flush();
@@ -443,6 +443,22 @@ describe('App', () => {
     frame = lastFrame() ?? '';
     expect(frame).toContain('router: default');
     expect(frame).toContain('KPIs:');
+  });
+
+  it('toggles the Health window with w', async () => {
+    const fake = makeFakeFollow();
+    const { lastFrame, stdin } = render(<App eventsFile="ignored" follow={fake.follow} />);
+    stdin.write('5');
+    await flush();
+    await flush();
+    expect(lastFrame()).toContain('this run');
+    expect(lastFrame()).toContain('Merge rate');
+    stdin.write('w');
+    await flush();
+    expect(lastFrame()).toContain('last 24h');
+    stdin.write('w');
+    await flush();
+    expect(lastFrame()).toContain('this run');
   });
 
   it('scrolls the Log tab with the up arrow and re-enables follow with f', async () => {
