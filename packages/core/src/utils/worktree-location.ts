@@ -50,7 +50,12 @@ export async function ensureWorktreeParentExcluded(repoRoot: string, worktreePar
   const { stdout } = await execGit('git rev-parse --git-path info/exclude', { cwd: repoRoot });
   const file = resolve(repoRoot, stdout.trim());
   const line = `/${rel.split(sep).join('/')}/`;
-  const existing = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  let existing = '';
+  try {
+    existing = readFileSync(file, 'utf8');
+  } catch {
+    // no exclude file yet
+  }
   const lines = existing.split(/\r?\n/).map((l) => l.trim());
   if (lines.includes(line) || lines.includes('/.factory/') || lines.includes('.factory/')) return false;
   mkdirSync(dirname(file), { recursive: true });
