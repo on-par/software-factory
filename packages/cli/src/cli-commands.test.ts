@@ -3143,6 +3143,25 @@ bash scripts/verify.sh
   });
 
   describe('run-issue (one-shot)', () => {
+    it('--help lists --run-children with its one-line description (#1750)', async () => {
+      const originalWrite = process.stdout.write;
+      const written: string[] = [];
+      process.stdout.write = ((chunk: string | Uint8Array) => {
+        written.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write;
+      let res: Awaited<ReturnType<typeof runMain>>;
+      try {
+        res = await runMain('run-issue', '--help');
+      } finally {
+        process.stdout.write = originalWrite;
+      }
+      expect(res.exited).toBe(true);
+      const text = written.join('').replace(/\s+/g, ' ');
+      expect(text).toContain('--run-children');
+      expect(text).toContain('When the size gate decomposes the issue, run the child issues it filed');
+    });
+
     it('names the branch with the default factory prefix when --branch-prefix is omitted', async () => {
       const branches: string[] = [];
       h.setupWorktreeImpl = async (_r, branch) => {
