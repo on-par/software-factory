@@ -253,7 +253,7 @@ import chalk from 'chalk';
 import { Command } from 'commander';
 import { admissionStateReaderFor, runQueueReconcile } from './admission.js';
 import { runQueueClear } from './queue-clear.js';
-import { parseResetIssues, runReset } from './reset.js';
+import { formatResetLine, parseResetIssues, resetIssues } from './reset.js';
 import { cmdDaemonLogs, cmdDaemonStart, cmdDaemonStatus, cmdDaemonStop, DaemonCtlError } from './daemon.js';
 import {
   analyzeEventLog,
@@ -2592,7 +2592,7 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string; 
   console.log(formatGcReport(report));
 }
 
-/** `factory reset <issue...>` (#1787): wipes an issue's local state; see reset.ts. */
+/** `factory reset <issue...>` (#1787): wipes an issue's local state; refuses an issue with an active run (#1790); see reset.ts. */
 export async function cmdReset(
   issues: string[],
   opts: { branchPrefix?: string; dryRun?: boolean; force?: boolean },
@@ -2608,8 +2608,10 @@ export async function cmdReset(
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
   const sandbox = gcWorktreeSandbox(loadFactoryConfigForRepo(paths.config).sandbox, repoRoot);
   const log = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
+  const ghRepo = await getGitHubRepo().catch(() => undefined);
+  const octokit = ghRepo && hasGitHubToken() ? getOctokit() : undefined;
   const run = () =>
-    runReset(nums, {
+    resetIssues(nums, {
       repoRoot,
       cwd: process.cwd(),
       paths,
@@ -2621,10 +2623,25 @@ export async function cmdReset(
       runCommand: (cmd, o) => exec(cmd, { cwd: o?.cwd ?? repoRoot }).then((r) => ({ stdout: r.stdout })),
       dryRun: opts.dryRun === true,
       force: opts.force === true,
+      readIssueLabels:
+        octokit && ghRepo
+          ? async (n) => {
+              const [owner, repo] = ghRepo.split('/');
+              const { data } = await octokit.rest.issues.get({ owner, repo, issue_number: n });
+              return data.labels.map((l) => (typeof l === 'string' ? l : (l.name ?? ''))).filter(Boolean);
+            }
+          : undefined,
     });
   // A dry run takes no lock: the lock itself writes files.
-  const lines = opts.dryRun ? await run() : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
-  for (const line of lines) console.log(line);
+  const results = opts.dryRun ? await run() : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
+  for (const r of results) console.log(formatResetLine(r));
+  const refused = results.filter((r) => r.refused !== undefined).map((r) => `#${r.issue}`);
+  if (refused.length > 0) {
+    throw new CliExitError(
+      `factory reset: refused ${refused.join(', ')} — an active run holds it; wait for it to finish or stop it`,
+      1,
+    );
+  }
 }
 
 export async function cmdLand(issueNum: number, opts: { branchPrefix?: string } = {}) {

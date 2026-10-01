@@ -346,6 +346,7 @@ function paths() {
     costs: join(state, 'costs.jsonl'),
     reports: join(state, 'reports'),
     runs: join(state, 'runs'),
+    runLock: join(state, 'run.lock'),
     steering: join(state, 'steering'),
     kpiHistory: join(state, 'kpi-history.jsonl'),
     classifierOutcomes: join(state, 'classifier-outcomes.jsonl'),
@@ -2777,6 +2778,22 @@ bash scripts/verify.sh
       expect(logged()).toContain('#555: nothing to reset');
       expect(logged()).toContain('#556: nothing to reset');
       expect(withGitLock).toHaveBeenCalled();
+    });
+
+    it('refuses an issue held by a live run lock with a fresh heartbeat and exits 1 (#1790)', async () => {
+      h.execImpl = (cmd: string) => (cmd.includes('rev-parse') ? h.repoRoot : '');
+      mkdirSync(paths().runLock, { recursive: true });
+      writeFileSync(join(paths().runLock, 'pid'), String(process.pid));
+      mkdirSync(paths().runs, { recursive: true });
+      const now = new Date().toISOString();
+      writeFileSync(
+        join(paths().runs, 'issue-555.phase.json'),
+        JSON.stringify({ issue: 555, phase: 'build', updatedAt: now, lastActivityAt: now }),
+      );
+      const res = await runMain('reset', '555');
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(logged()).toContain('#555: refused — live factory run pid');
+      expect(errored()).toContain('refused #555');
     });
 
     it('--dry-run previews without taking the git lock', async () => {

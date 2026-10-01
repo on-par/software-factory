@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { LaneFileGuard, ReworkHistory } from '@on-par/factory-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { formatResetLine, parseResetIssues, type ResetDeps, runReset } from './reset.js';
+import { findActiveRun, formatResetLine, parseResetIssues, type ResetDeps, resetIssues, runReset } from './reset.js';
 
 let root: string;
 let repo: string;
@@ -45,6 +45,7 @@ function makeDeps(state: string, over: Partial<ResetDeps> = {}) {
       logs: join(state, 'logs'),
       reworkHistory: join(state, 'rework-history.json'),
       laneFiles: join(state, 'lane-files.json'),
+      runLock: join(state, 'run.lock'),
     },
     git: async (cmd) => sh(cmd),
     runCommand: async (cmd, o) => ({ stdout: sh(cmd, o?.cwd ?? repo) }),
@@ -427,5 +428,176 @@ describe('runReset safety (#1789)', () => {
     });
     const [line] = await runReset([192], deps);
     expect(line).toContain('could not verify it is pushed; pass --force to remove');
+  });
+});
+
+describe('active run refusal (#1790)', () => {
+  const nowSec = () => Math.floor(Date.now() / 1000);
+  const claimLabels = (expiresSec: number | null) => [
+    'factory:in-progress',
+    'factory:claimed-by:host-42',
+    ...(expiresSec === null ? [] : [`factory:claim-expires:${expiresSec}`]),
+  ];
+
+  async function expectIntact(state: string, releaseLease: ReturnType<typeof vi.fn>) {
+    expect(existsSync(wt192)).toBe(true);
+    expect(sh('git branch --list "ship-it/192-*"')).toContain('ship-it/192-some-title');
+    expect(readdirSafe(join(state, 'plans'))).not.toEqual([]);
+    expect(existsSync(join(state, 'runs', 'issue-192.phase.json'))).toBe(true);
+    expect(existsSync(join(state, 'logs', 'issue-192'))).toBe(true);
+    expect(releaseLease).not.toHaveBeenCalled();
+    expect(await new ReworkHistory(join(state, 'rework-history.json')).priorSignature(192)).toBe('sig-192');
+    expect(await new LaneFileGuard(join(state, 'lane-files.json')).findCollision('o/r', 1, ['a.ts'])).toBeDefined();
+  }
+
+  function writeLock(state: string) {
+    mkdirSync(join(state, 'run.lock'), { recursive: true });
+    writeFileSync(join(state, 'run.lock', 'pid'), String(process.pid));
+    writeFileSync(
+      join(state, 'run.lock', 'meta.json'),
+      JSON.stringify({ command: 'factory run', host: 'h', startedAt: 't' }),
+    );
+  }
+
+  function writeSnapshot(state: string, lastActivityAt: string) {
+    writeFileSync(
+      join(state, 'runs', 'issue-192.phase.json'),
+      JSON.stringify({ issue: 192, phase: 'build', updatedAt: lastActivityAt, lastActivityAt }),
+    );
+  }
+
+  it('refuses a live claim, with and without --force, changing nothing', async () => {
+    const state = seedState();
+    await seedHistory(state);
+    for (const force of [false, true]) {
+      const { deps, releaseLease } = makeDeps(state, {
+        force,
+        readIssueLabels: async () => claimLabels(nowSec() + 600),
+      });
+      const [line] = await runReset([192], deps);
+      expect(line).toContain('refused — claimed by host-42, lease expires');
+      await expectIntact(state, releaseLease);
+    }
+  });
+
+  it('refuses a claim with no lease label', async () => {
+    const state = seedState();
+    await seedHistory(state);
+    const { deps, releaseLease } = makeDeps(state, { readIssueLabels: async () => claimLabels(null) });
+    const [line] = await runReset([192], deps);
+    expect(line).toContain('no lease expiry');
+    await expectIntact(state, releaseLease);
+  });
+
+  it('claims by in-progress only name the label', async () => {
+    const state = seedState();
+    const { deps } = makeDeps(state, {
+      readIssueLabels: async () => ['factory:in-progress', `factory:claim-expires:${nowSec() + 600}`],
+    });
+    expect(await findActiveRun(192, deps)).toContain('claimed by factory:in-progress');
+  });
+
+  it('does not block on a stale claim', async () => {
+    const state = seedState();
+    await seedHistory(state);
+    const { deps } = makeDeps(state, { readIssueLabels: async () => claimLabels(nowSec() - 600) });
+    const [line] = await runReset([192], deps);
+    expect(line).toContain('removed worktree');
+    expect(existsSync(wt192)).toBe(false);
+  });
+
+  it('refuses when the label read throws', async () => {
+    const state = seedState();
+    await seedHistory(state);
+    const { deps, releaseLease } = makeDeps(state, {
+      readIssueLabels: async () => {
+        throw new Error('boom');
+      },
+    });
+    const [line] = await runReset([192], deps);
+    expect(line).toContain('could not check claim labels (boom)');
+    await expectIntact(state, releaseLease);
+  });
+
+  it('proceeds without readIssueLabels', async () => {
+    const state = seedState();
+    const { deps } = makeDeps(state);
+    const [line] = await runReset([192], deps);
+    expect(line).toContain('removed worktree');
+  });
+
+  it('refuses a live run lock with a fresh snapshot', async () => {
+    const state = seedState();
+    await seedHistory(state);
+    writeLock(state);
+    writeSnapshot(state, new Date().toISOString());
+    const { deps, releaseLease } = makeDeps(state, { isPidAlive: () => true });
+    const [line] = await runReset([192], deps);
+    expect(line).toContain(`pid ${process.pid}, factory run, started t on h (build, last active`);
+    await expectIntact(state, releaseLease);
+  });
+
+  it('refuses a live run lock without meta details', async () => {
+    const state = seedState();
+    mkdirSync(join(state, 'run.lock'), { recursive: true });
+    writeFileSync(join(state, 'run.lock', 'pid'), String(process.pid));
+    writeSnapshot(state, new Date().toISOString());
+    const { deps } = makeDeps(state, { isPidAlive: () => true });
+    expect(await findActiveRun(192, deps)).toMatch(/^live factory run pid \d+ \(build,/);
+  });
+
+  it.each([
+    ['a stale snapshot', () => true, 20 * 60_000],
+    ['a dead pid', () => false, 0],
+  ])('does not block on a live lock with %s', async (_n, alive, advance) => {
+    const state = seedState();
+    writeLock(state);
+    writeSnapshot(state, new Date().toISOString());
+    const { deps } = makeDeps(state, { isPidAlive: alive, now: () => Date.now() + advance });
+    expect(await findActiveRun(192, deps)).toBeNull();
+  });
+
+  it('does not block on a lock with no snapshot, an unparseable heartbeat, or no lock', async () => {
+    const state = seedState();
+    const { deps } = makeDeps(state, { isPidAlive: () => true });
+    expect(await findActiveRun(192, deps)).toBeNull();
+    writeLock(state);
+    rmSync(join(state, 'runs', 'issue-192.phase.json'), { force: true });
+    expect(await findActiveRun(192, deps)).toBeNull();
+    writeSnapshot(state, 'not-a-date');
+    expect(await findActiveRun(192, deps)).toBeNull();
+  });
+
+  it('dry run with an active claim says it would refuse and changes nothing', async () => {
+    const state = seedState();
+    await seedHistory(state);
+    const { deps, releaseLease } = makeDeps(state, {
+      dryRun: true,
+      readIssueLabels: async () => claimLabels(nowSec() + 600),
+    });
+    const [line] = await runReset([192], deps);
+    expect(line).toContain('#192 (dry run): would refuse — claimed by host-42');
+    expect(line).toContain('nothing would change');
+    await expectIntact(state, releaseLease);
+  });
+
+  it('a refused issue does not stop the others', async () => {
+    const state = seedState();
+    await seedHistory(state);
+    const { deps } = makeDeps(state, {
+      readIssueLabels: async (n) => (n === 192 ? claimLabels(nowSec() + 600) : []),
+    });
+    const results = await resetIssues([192, 7], deps);
+    expect(results[0].refused).toContain('host-42');
+    expect(results[1].refused).toBeUndefined();
+    expect(await new ReworkHistory(join(state, 'rework-history.json')).priorSignature(7)).toBeUndefined();
+    expect(await new ReworkHistory(join(state, 'rework-history.json')).priorSignature(192)).toBe('sig-192');
+  });
+
+  it('formats both refused forms', () => {
+    expect(formatResetLine({ issue: 3, removed: [], kept: [], refused: 'x' })).toBe('#3: refused — x; nothing changed');
+    expect(formatResetLine({ issue: 3, removed: [], kept: [], refused: 'x', dryRun: true })).toBe(
+      '#3 (dry run): would refuse — x; nothing would change',
+    );
   });
 });
