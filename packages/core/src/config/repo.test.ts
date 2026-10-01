@@ -564,7 +564,7 @@ describe('resolveEffectiveConfig', () => {
       localOnly: true,
       allowExperimental: true,
       codexDisabled: true,
-      branchPrefix: 'compare-local',
+      branchPrefix: 'factory',
     });
   });
 
@@ -577,7 +577,7 @@ describe('resolveEffectiveConfig', () => {
       localOnly: false,
       allowExperimental: false,
       codexDisabled: true,
-      branchPrefix: 'compare-local',
+      branchPrefix: 'factory',
     });
   });
 
@@ -586,7 +586,7 @@ describe('resolveEffectiveConfig', () => {
       localOnly: false,
       allowExperimental: false,
       codexDisabled: false,
-      branchPrefix: 'ship-it',
+      branchPrefix: 'factory',
     });
   });
 });
@@ -824,7 +824,7 @@ describe('describeEffectiveConfig', () => {
     expect(lines).toContainEqual(expect.stringContaining('Provider openai: on (default)'));
   });
 
-  it('reports local-only, experimental, and branch prefix from env with source labels', () => {
+  it('reports local-only and experimental from env, and a default branch prefix that ignores FACTORY_BRANCH_PREFIX', () => {
     const stub = new StubModelExecutor({ scripts: {} });
     const router = new ModelRouter(models, routes, false, stub);
     const lines = describeEffectiveConfig({
@@ -836,7 +836,8 @@ describe('describeEffectiveConfig', () => {
 
     expect(lines).toContainEqual(expect.stringContaining('Local only: on (env: FACTORY_LOCAL_ONLY)'));
     expect(lines).toContainEqual(expect.stringContaining('Experimental models: on (env: FACTORY_EXPERIMENTAL)'));
-    expect(lines).toContainEqual(expect.stringContaining('Branch prefix: compare-local (env: FACTORY_BRANCH_PREFIX)'));
+    expect(lines).toContainEqual(expect.stringContaining('Branch prefix: factory (default)'));
+    expect(lines.some((l) => l.includes('FACTORY_BRANCH_PREFIX'))).toBe(false);
   });
 
   it('reports local-only/experimental off and the default branch prefix when unset', () => {
@@ -846,7 +847,7 @@ describe('describeEffectiveConfig', () => {
 
     expect(lines).toContainEqual(expect.stringContaining('Local only: off (default)'));
     expect(lines).toContainEqual(expect.stringContaining('Experimental models: off (default)'));
-    expect(lines).toContainEqual(expect.stringContaining('Branch prefix: ship-it (default)'));
+    expect(lines).toContainEqual(expect.stringContaining('Branch prefix: factory (default)'));
   });
 
   it('shows merge auto/admin with .factory/config.json as the source when the mergePolicy says repo', () => {

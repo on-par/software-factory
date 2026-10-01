@@ -3932,7 +3932,7 @@ describe('shipIssue (direct)', () => {
 
   it('returns the branch on the happy path and logs a ready event', async () => {
     const branch = await shipIssue(5, {}, ctx());
-    expect(branch).toBe('ship-it/5-fix-the-bug');
+    expect(branch).toBe('factory/5-fix-the-bug');
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('ready');
     expect(events).toContain('worktree');
@@ -4232,7 +4232,7 @@ describe('shipIssue (direct)', () => {
     });
 
     const branch = await shipIssue(5, {}, ctx());
-    expect(branch).toBe('ship-it/5-fix-the-bug');
+    expect(branch).toBe('factory/5-fix-the-bug');
   });
 
   it('does not log environment_cleanup when no process groups were tracked', async () => {
@@ -4644,7 +4644,7 @@ describe('CliExitError (direct command invocation)', () => {
 
   it('materializes a missing adopted PR worktree from its remote head, rebases it, and rechecks CI', async () => {
     const branch = 'contributor/adopted-pr';
-    const worktree = `${h.repoRoot}-factory-ship-it-5`;
+    const worktree = `${h.repoRoot}-factory-factory-5`;
     const commands: string[] = [];
     const originalExec = h.execImpl;
     h.execImpl = (command) => {

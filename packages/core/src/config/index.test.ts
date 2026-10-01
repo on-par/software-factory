@@ -1444,13 +1444,19 @@ describe('resolveExperimental', () => {
 });
 
 describe('resolveBranchPrefix', () => {
-  it('uses a custom FACTORY_BRANCH_PREFIX', () => {
-    expect(resolveBranchPrefix({ FACTORY_BRANCH_PREFIX: 'compare-local' })).toBe('compare-local');
+  it('defaults to "factory"', () => {
+    expect(resolveBranchPrefix()).toBe('factory');
   });
 
-  it('falls back to the ship-it default when unset or empty', () => {
-    expect(resolveBranchPrefix({})).toBe('ship-it');
-    expect(resolveBranchPrefix({ FACTORY_BRANCH_PREFIX: '' })).toBe('ship-it');
+  it('ignores FACTORY_BRANCH_PREFIX', () => {
+    const prev = process.env.FACTORY_BRANCH_PREFIX;
+    process.env.FACTORY_BRANCH_PREFIX = 'compare-local';
+    try {
+      expect(resolveBranchPrefix()).toBe('factory');
+    } finally {
+      if (prev === undefined) delete process.env.FACTORY_BRANCH_PREFIX;
+      else process.env.FACTORY_BRANCH_PREFIX = prev;
+    }
   });
 });
 
