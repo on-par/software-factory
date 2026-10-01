@@ -7,7 +7,7 @@ import { isPassingConclusion } from './ci-watch.js';
 /** The fields the scan needs from one open pull request. */
 export interface OpenPullRequestSummary {
   number: number;
-  /** Head branch ref, e.g. `ship-it/939-fix-thing`. */
+  /** Head branch ref, e.g. `factory/939-fix-thing`. */
   branch: string;
   /** Head SHA — the ref the check runs are listed for. */
   headSha: string;

@@ -1,8 +1,9 @@
 import { execFile as execFileCb } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -868,5 +869,44 @@ ESCALATE: which behavior should win?`;
     expect(escalationLine('')).toBeUndefined();
     expect(isEscalation('No escalation here.')).toBe(false);
     expect(escalationLine('No escalation here.')).toBeUndefined();
+  });
+});
+
+describe('legacy branch prefix literal', () => {
+  const root = resolve(fileURLToPath(import.meta.url), '../../../../..');
+  const allowedFile = 'packages/core/src/utils/index.ts';
+
+  function sourceFiles(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        return entry.name === 'node_modules' || entry.name === 'dist' ? [] : sourceFiles(full);
+      }
+      return /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [full] : [];
+    });
+  }
+
+  it('appears in non-test source only in the LEGACY_BRANCH_PREFIX doc comment', () => {
+    const offenders: string[] = [];
+    let allowed = 0;
+    for (const pkg of readdirSync(join(root, 'packages'))) {
+      const src = join(root, 'packages', pkg, 'src');
+      if (!existsSync(src)) continue;
+      for (const file of sourceFiles(src)) {
+        const rel = file
+          .slice(root.length + 1)
+          .split('\\')
+          .join('/');
+        readFileSync(file, 'utf8')
+          .split('\n')
+          .forEach((line, i) => {
+            if (!line.includes('ship-it/')) return;
+            if (rel === allowedFile && /^(\/\*\*|\*|\/\/)/.test(line.trim())) allowed++;
+            else offenders.push(`${rel}:${i + 1}`);
+          });
+      }
+    }
+    expect(offenders).toEqual([]);
+    expect(allowed).toBeGreaterThan(0);
   });
 });

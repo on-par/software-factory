@@ -259,7 +259,7 @@ export function slugify(s: string): string {
     .replace(/-$/, '');
 }
 
-/** Prefix of factory branches created before the default became `factory` (#1714). Still recognized, never created. */
+/** Prefix of factory branches (`ship-it/<n>-…`) created before the default became `factory` (#1714). Still recognized, never created. */
 export const LEGACY_BRANCH_PREFIX = 'ship-it';
 
 export function branchPrefixSlug(prefix?: string): string {

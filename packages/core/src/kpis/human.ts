@@ -25,7 +25,7 @@ export interface CommitSource {
 }
 
 export interface PrSource {
-  issue: string; // numeric string parsed from the factory/<n>- or legacy ship-it/<n>- branch
+  issue: string; // numeric string parsed from the factory/<n>- or legacy-prefix (LEGACY_BRANCH_PREFIX) <n>- branch
   prNumber: number;
   commits: CommitSource[];
   /** Approving reviews. */

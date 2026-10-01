@@ -2310,7 +2310,7 @@ async function landIssue(
   // lives on (same failure mode fixed for waitForMerge in #51). Guess the
   // branch from the current title first, but fall back to matching the open
   // PR that references this issue directly and use its real head branch.
-  // Legacy ship-it/ branches are guessed too, after the resolved prefix (#1708).
+  // Legacy-prefix (LEGACY_BRANCH_PREFIX) branches are guessed too, after the resolved prefix (#1708).
   const resolved = branchPrefix ?? resolveEffectiveConfig(loadRepoConfig(repoRoot)).branchPrefix;
   const title = await getIssueTitle(octokit, ghRepo, issueNum);
   const guesses = factoryBranchPrefixes(resolved).map((p) => branchFor(issueNum, title, p));
@@ -4773,7 +4773,9 @@ export async function main() {
 
   program
     .command('resume-approved')
-    .description('Land open factory PRs (factory/*, plus legacy ship-it/*) whose review is now approved; skip the rest')
+    .description(
+      `Land open factory PRs (factory/*, plus legacy ${LEGACY_BRANCH_PREFIX}/*) whose review is now approved; skip the rest`,
+    )
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
     .action(async (opts) => {
       await cmdResumeApproved(opts);
