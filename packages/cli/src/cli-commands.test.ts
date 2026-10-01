@@ -1238,6 +1238,10 @@ bash scripts/verify.sh
         return '';
       };
 
+      const bad = await runMain('kpis', '--branch-prefix', '!!!');
+      expect(bad).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('--branch-prefix');
+
       await runMain('kpis');
       const out = logged();
       expect(out).toContain('## Health KPIs');
@@ -2525,6 +2529,18 @@ bash scripts/verify.sh
       expect(sweepWorktrees).toHaveBeenCalledWith(expect.objectContaining({ ttlDays: 3 }), expect.anything());
     });
 
+    it('--branch-prefix sf is passed to sweepWorktrees', async () => {
+      const res = await runMain('worktree', 'gc', '--branch-prefix', 'sf');
+      expect(res.exited).toBe(false);
+      expect(sweepWorktrees).toHaveBeenCalledWith(expect.objectContaining({ branchPrefix: 'sf' }), expect.anything());
+    });
+
+    it('exits 2 when --branch-prefix has no letters or digits', async () => {
+      const res = await runMain('worktree', 'gc', '--branch-prefix', '!!!');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('--branch-prefix');
+    });
+
     it('exits 2 on a non-numeric --ttl-days', async () => {
       const res = await runMain('worktree', 'gc', '--ttl-days', 'nope');
       expect(res).toEqual({ exited: true, code: 2 });
@@ -2746,6 +2762,12 @@ bash scripts/verify.sh
   });
 
   describe('land', () => {
+    it('exits 2 when --branch-prefix has no letters or digits', async () => {
+      const res = await runMain('land', '5', '--branch-prefix', '!!!');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('--branch-prefix');
+    });
+
     it('lands an open PR and prints success', async () => {
       const res = await runMain('land', '5');
       expect(res.exited).toBe(false);
@@ -2849,6 +2871,12 @@ bash scripts/verify.sh
   });
 
   describe('resume-approved', () => {
+    it('exits 2 when --branch-prefix has no letters or digits', async () => {
+      const res = await runMain('resume-approved', '--branch-prefix', '!!!');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('--branch-prefix');
+    });
+
     it('resolves cleanly when there are no open factory PRs', async () => {
       const res = await runMain('resume-approved');
       expect(res.exited).toBe(false);

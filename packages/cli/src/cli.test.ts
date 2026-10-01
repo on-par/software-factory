@@ -4464,6 +4464,13 @@ More prose here.
         expect(issueFromFactoryBranch('ship-it/7-')).toBe(7);
       });
 
+      it('recognizes the factory default, a custom prefix, and legacy ship-it', () => {
+        expect(issueFromFactoryBranch('factory/9-a', 'factory')).toBe(9);
+        expect(issueFromFactoryBranch('sf/9-a', 'sf')).toBe(9);
+        expect(issueFromFactoryBranch('ship-it/9-a', 'sf')).toBe(9);
+        expect(issueFromFactoryBranch('factory/9-a', 'sf')).toBeUndefined();
+      });
+
       it('returns undefined for branches without a leading issue number', () => {
         expect(issueFromFactoryBranch('ship-it/abc-x')).toBeUndefined();
         expect(issueFromFactoryBranch('main')).toBeUndefined();
@@ -4471,6 +4478,28 @@ More prose here.
     });
 
     describe('listOpenFactoryPRs', () => {
+      it('keeps factory/* and legacy ship-it/* branches and drops the rest', async () => {
+        const octokit: any = {
+          graphql: vi.fn(async () => ({
+            repository: {
+              pullRequests: {
+                pageInfo: { hasNextPage: false, endCursor: null },
+                nodes: [
+                  { number: 1, headRefName: 'factory/1-a' },
+                  { number: 2, headRefName: 'ship-it/2-b' },
+                  { number: 3, headRefName: 'chore/3-c' },
+                  { number: 4, headRefName: 'sf/4-d' },
+                ],
+              },
+            },
+          })),
+        };
+        const result = await listOpenFactoryPRs(octokit, 'o', 'r', 'factory');
+        expect(result.map((p) => p.number)).toEqual([1, 2]);
+        const custom = await listOpenFactoryPRs(octokit, 'o', 'r', 'sf');
+        expect(custom.map((p) => p.number)).toEqual([2, 4]);
+      });
+
       it('filters to ship-it/* branches and paginates through every page', async () => {
         const calls: any[] = [];
         const octokit: any = {
@@ -4534,7 +4563,7 @@ More prose here.
           writeLine: (line: string) => calls.push(['writeLine', line]),
         });
 
-        expect(calls[0]).toEqual(['land', [12, repoRoot, ghRepo, paths, octokit, false]]);
+        expect(calls[0]).toEqual(['land', [12, repoRoot, ghRepo, paths, octokit, false, undefined]]);
         expect(result.landed).toEqual([320]);
         expect(result.skipped).toEqual([]);
         expect(result.failed).toEqual([]);
@@ -4544,6 +4573,41 @@ More prose here.
         expect(events[0][2]).toBe('resume-approved');
         expect(events[0][3]).toBe('-');
         expect(events[0][4]).toBe('sweep: 1 landed, 0 skipped, 0 failed of 1 open factory PRs');
+      });
+
+      it('lands approved PRs on both the factory and legacy ship-it prefixes', async () => {
+        const landCalls: any[] = [];
+        const listCalls: any[] = [];
+        const result = await sweepApprovedPRs(
+          repoRoot,
+          ghRepo,
+          paths,
+          {
+            createOctokit: () => octokit,
+            loadConfig: () => fakeFactoryConfig,
+            listPRs: async (...args: any[]) => {
+              listCalls.push(args);
+              return [
+                { number: 40, branch: 'factory/30-x', reviewDecision: 'APPROVED' },
+                { number: 41, branch: 'ship-it/31-y', reviewDecision: 'APPROVED' },
+              ];
+            },
+            land: async (...args: any[]) => {
+              landCalls.push(args);
+              return { branch: '', prNumber: 0 };
+            },
+            emitEvent: () => {},
+            writeLine: () => {},
+          },
+          { branchPrefix: 'factory' },
+        );
+
+        expect(result.landed).toEqual([40, 41]);
+        expect(landCalls.map((c) => [c[0], c[6]])).toEqual([
+          [30, 'factory'],
+          [31, 'factory'],
+        ]);
+        expect(listCalls[0][3]).toBe('factory');
       });
 
       it('skips unapproved and unparseable PRs without landing or throwing, idempotently', async () => {

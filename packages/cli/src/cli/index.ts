@@ -49,6 +49,7 @@ import type {
   WorkRequestSourceKind,
 } from '@on-par/factory-core';
 import {
+  BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION,
   BRANCH_PREFIX_OPTION_DESCRIPTION,
   INVALID_BRANCH_PREFIX_MESSAGE,
   resolveBranchPrefixOption,
@@ -180,6 +181,9 @@ import {
   claudeKeychainService,
   cleanupWorktree,
   createDaemonLogSink,
+  factoryBranchIssue,
+  factoryBranchPrefixes,
+  LEGACY_BRANCH_PREFIX,
   createDockerEngine,
   createFactorydServer,
   createRunRuntime,
@@ -865,7 +869,8 @@ async function appendKpiSnapshot(
   return { record, history: parseKpiHistory(updated) };
 }
 
-async function cmdKpis() {
+async function cmdKpis(opts: { branchPrefix?: string } = {}) {
+  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   const events = existsSync(paths.events) ? readEvents(paths.events) : [];
@@ -879,7 +884,7 @@ async function cmdKpis() {
     const ghRepo = await getGitHubRepo();
     [owner, repoName] = ghRepo.split('/');
     const issues = new Set(events.map((e) => e.issue).filter((i) => /^\d+$/.test(i)));
-    prSources = await fetchHumanEventSources(getOctokit(), owner, repoName, issues);
+    prSources = await fetchHumanEventSources(getOctokit(), owner, repoName, issues, branchPrefix);
     allEvents = [...events, ...reconstructHumanEvents(prSources, events)];
   } catch (err: any) {
     console.error(
@@ -2226,7 +2231,7 @@ export async function reapParkedLaneWorktree(
   }
 }
 
-export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }) {
+export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string; branchPrefix?: string }) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   const factoryConfig = loadFactoryConfigForRepo(paths.config);
@@ -2234,21 +2239,20 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string }
   if (!Number.isFinite(ttlDays) || ttlDays < 0) {
     throw new CliExitError('factory: --ttl-days must be a non-negative number', 2);
   }
+  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
   const log = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
   // Best-effort GitHub evidence: tokenless/local-only repos keep today's pure-local behavior.
   const ghRepo = await getGitHubRepo().catch(() => undefined);
   const octokit = ghRepo ? (hasGitHubToken() ? getOctokit() : undefined) : undefined;
   const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
   const run = () =>
-    sweepWorktrees(
-      { repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo, branchPrefix: resolveBranchPrefix() },
-      { log, octokit, sandbox },
-    );
+    sweepWorktrees({ repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo, branchPrefix }, { log, octokit, sandbox });
   const report = opts.dryRun ? await run() : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
   console.log(formatGcReport(report));
 }
 
-export async function cmdLand(issueNum: number) {
+export async function cmdLand(issueNum: number, opts: { branchPrefix?: string } = {}) {
+  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
   const repoRoot = await getRepoRoot();
   const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
@@ -2257,7 +2261,7 @@ export async function cmdLand(issueNum: number) {
   const skipCI = resolveSkipCI(factoryConfig);
 
   try {
-    const result = await landIssue(issueNum, repoRoot, ghRepo, paths, octokit, skipCI);
+    const result = await landIssue(issueNum, repoRoot, ghRepo, paths, octokit, skipCI, branchPrefix);
     console.log(chalk.green(`✅ Landed PR #${result.prNumber} for issue #${issueNum}`));
   } catch (err: any) {
     if (err instanceof AwaitingReviewError) {
@@ -2295,6 +2299,7 @@ async function landIssue(
   paths: ReturnType<typeof getFactoryPaths>,
   octokit: Octokit,
   skipCI?: boolean,
+  branchPrefix?: string,
 ): Promise<{ branch: string; prNumber: number }> {
   const [owner, repoName] = ghRepo.split('/');
   const log = (type: EventKind, msg: string, extra?: { failoverReason?: FailoverReason }) =>
@@ -2305,14 +2310,26 @@ async function landIssue(
   // lives on (same failure mode fixed for waitForMerge in #51). Guess the
   // branch from the current title first, but fall back to matching the open
   // PR that references this issue directly and use its real head branch.
-  const branchPrefix = resolveEffectiveConfig(loadRepoConfig(repoRoot)).branchPrefix;
-  const guessedBranch = branchFor(issueNum, await getIssueTitle(octokit, ghRepo, issueNum), branchPrefix);
-  const worktree = worktreePathFor(repoRoot, issueNum, branchPrefix);
+  // Legacy ship-it/ branches are guessed too, after the resolved prefix (#1708).
+  const resolved = branchPrefix ?? resolveEffectiveConfig(loadRepoConfig(repoRoot)).branchPrefix;
+  const title = await getIssueTitle(octokit, ghRepo, issueNum);
+  const guesses = factoryBranchPrefixes(resolved).map((p) => branchFor(issueNum, title, p));
+  const guessedBranch = guesses[0];
 
   let branch = guessedBranch;
   let prNumber: number | undefined;
   try {
-    [, prNumber] = await Promise.all([gitFetch(repoRoot), findOpenPRNumber(octokit, owner, repoName, guessedBranch)]);
+    const findByGuess = async (): Promise<number | undefined> => {
+      for (const guess of guesses) {
+        const found = await findOpenPRNumber(octokit, owner, repoName, guess);
+        if (found) {
+          branch = guess;
+          return found;
+        }
+      }
+      return undefined;
+    };
+    [, prNumber] = await Promise.all([gitFetch(repoRoot), findByGuess()]);
     if (!prNumber) {
       const fallback = await findOpenPRForIssue(octokit, owner, repoName, issueNum);
       if (fallback) {
@@ -2331,6 +2348,11 @@ async function landIssue(
     throw new LandFailureError(`no open PR for issue #${issueNum} (${guessedBranch})`, 1);
   }
 
+  const worktree = worktreePathFor(
+    repoRoot,
+    issueNum,
+    branch.startsWith(`${LEGACY_BRANCH_PREFIX}/`) ? LEGACY_BRANCH_PREFIX : resolved,
+  );
   const landFactoryConfig = loadFactoryConfigForRepo(paths.config);
   const landSandboxPolicy = resolveSandboxPolicy(landFactoryConfig.sandbox, {
     worktree,
@@ -3797,15 +3819,15 @@ export async function landOpenPullRequest(opts: {
   }
 }
 
-export function issueFromFactoryBranch(branch: string): number | undefined {
-  const match = /^ship-it\/(\d+)-/.exec(branch);
-  return match ? Number(match[1]) : undefined;
+export function issueFromFactoryBranch(branch: string, prefix?: string): number | undefined {
+  return factoryBranchIssue(branch, prefix) ?? undefined;
 }
 
 export async function listOpenFactoryPRs(
   octokit: Octokit,
   owner: string,
   repoName: string,
+  branchPrefix?: string,
 ): Promise<Array<{ number: number; branch: string; reviewDecision?: string; isDraft?: boolean }>> {
   const prs: Array<{ number: number; branch: string; reviewDecision?: string; isDraft?: boolean }> = [];
   let cursor: string | undefined;
@@ -3832,7 +3854,7 @@ export async function listOpenFactoryPRs(
 
     const pullRequests = result.repository?.pullRequests;
     for (const node of pullRequests?.nodes ?? []) {
-      if (node.headRefName.startsWith('ship-it/')) {
+      if (factoryBranchPrefixes(branchPrefix).some((p) => node.headRefName.startsWith(`${p}/`))) {
         prs.push({
           number: node.number,
           branch: node.headRefName,
@@ -3863,6 +3885,7 @@ export async function sweepApprovedPRs(
   ghRepo: string,
   paths: ReturnType<typeof getFactoryPaths>,
   deps: SweepDeps = {},
+  opts: { branchPrefix?: string } = {},
 ): Promise<{
   landed: number[];
   skipped: Array<{ pr: number; branch: string; reason: string }>;
@@ -3880,14 +3903,14 @@ export async function sweepApprovedPRs(
   const [owner, repoName] = ghRepo.split('/');
   const octokit = createOctokit();
   const skipCI = resolveSkipCI(loadConfig(paths.config));
-  const prs = await listPRs(octokit, owner, repoName);
+  const prs = await listPRs(octokit, owner, repoName, opts.branchPrefix);
 
   const landed: number[] = [];
   const skipped: Array<{ pr: number; branch: string; reason: string }> = [];
   const failed: Array<{ pr: number; issue: number; reason: string }> = [];
 
   for (const pr of prs) {
-    const issue = issueFromFactoryBranch(pr.branch);
+    const issue = issueFromFactoryBranch(pr.branch, opts.branchPrefix);
     if (issue === undefined) {
       const reason = 'no issue number in branch';
       skipped.push({ pr: pr.number, branch: pr.branch, reason });
@@ -3903,7 +3926,7 @@ export async function sweepApprovedPRs(
     }
 
     try {
-      await land(issue, repoRoot, ghRepo, paths, octokit, skipCI);
+      await land(issue, repoRoot, ghRepo, paths, octokit, skipCI, opts.branchPrefix);
       landed.push(pr.number);
       writeLine(`[factory] PR #${pr.number} (${pr.branch}) landed for issue #${issue}`);
     } catch (err) {
@@ -3924,11 +3947,12 @@ export async function sweepApprovedPRs(
   return { landed, skipped, failed };
 }
 
-export async function cmdResumeApproved() {
+export async function cmdResumeApproved(opts: { branchPrefix?: string } = {}) {
+  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
   const repoRoot = await getRepoRoot();
   const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
-  const result = await sweepApprovedPRs(repoRoot, ghRepo, paths);
+  const result = await sweepApprovedPRs(repoRoot, ghRepo, paths, {}, { branchPrefix });
   console.log(
     chalk.green(
       `✅ resume-approved: ${result.landed.length} landed, ${result.skipped.length} skipped, ${result.failed.length} failed`,
@@ -4525,7 +4549,13 @@ export async function main() {
     .option('--kpis', 'Show full Health KPIs and Effective config')
     .action((opts: { kpis?: boolean }) => cmdStatus(opts));
 
-  program.command('kpis').description('Compute factory health KPIs and record a trend snapshot').action(cmdKpis);
+  program
+    .command('kpis')
+    .description('Compute factory health KPIs and record a trend snapshot')
+    .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
+    .action(async (opts) => {
+      await cmdKpis(opts);
+    });
 
   program
     .command('tui')
@@ -4736,15 +4766,17 @@ export async function main() {
     .description(
       "Squash-merge the issue's open PR once CI is green, then remove its worktree (left open if CI fails or review is pending)",
     )
-    .action(async (issueNum) => {
-      await cmdLand(parseIssueArg(issueNum));
+    .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
+    .action(async (issueNum, opts) => {
+      await cmdLand(parseIssueArg(issueNum), opts);
     });
 
   program
     .command('resume-approved')
     .description('Land open factory PRs (ship-it/*) whose review is now approved; skip the rest')
-    .action(async () => {
-      await cmdResumeApproved();
+    .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
+    .action(async (opts) => {
+      await cmdResumeApproved(opts);
     });
 
   program
@@ -4824,6 +4856,7 @@ export async function main() {
     .description('Remove stale factory worktrees (merged/closed branches or older than TTL) and scrub credentials')
     .option('--dry-run', 'Preview what would be removed without deleting anything')
     .option('--ttl-days <n>', 'Override worktree.gcTtlDays from factory.json')
+    .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
     .action(cmdWorktreeGc);
 
   program
