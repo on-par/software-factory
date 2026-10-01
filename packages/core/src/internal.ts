@@ -49,9 +49,10 @@ export {
 } from './filing/policy.js';
 
 // Config
-export { resolveFilingPolicy } from './config/index.js';
+export { resolveFilingPolicy, resolvePrClassifierPolicy } from './config/index.js';
+export type { EffectivePrClassifierPolicy } from './config/index.js';
 export type { EffectiveConfig } from './config/repo.js';
-export { resolveEffectiveConfig } from './config/repo.js';
+export { resolveEffectiveConfig, resolveReviewFloorRules } from './config/repo.js';
 export { resolveExperimental, resolveLocalOnly, resolveBranchPrefix } from './config/index.js';
 export { FACTORY_RUNTIME_CONFIG_KEYS } from './config/index.js';
 export {
@@ -508,6 +509,10 @@ export type {
   ReviewFloorRuleSet,
 } from './review/floor.js';
 export { computeReviewFloor, DEFAULT_REVIEW_FLOOR_RULES } from './review/floor.js';
+
+// PR classifier routing (#1724)
+export type { ReviewRouting } from './review/routing.js';
+export { classifierGateReason, parseNumstat, readReviewFloorChanges, resolveReviewRouting } from './review/routing.js';
 
 // Review fork-PR containment gate (#1684)
 export type {
