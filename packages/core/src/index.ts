@@ -447,8 +447,11 @@ export {
 // KPIs
 export type {
   CommitSource,
+  ClassifierClassStats,
+  ClassifierOutcomeBucket,
   ClassifierOutcomeRecord,
   ClassifierOutcomeVerdict,
+  ClassifierReport,
   DefectSourceClient,
   DefectSources,
   HealthKpis,
@@ -475,6 +478,8 @@ export {
   HUMAN_EVENT_TYPES,
   isDefectWindowClosed,
   isHumanEvent,
+  classifierOutcomeBucket,
+  formatClassifierReport,
   joinClassifierOutcomes,
   KPI_DRIFT_THRESHOLD_RATIO,
   KPI_DRIFT_WINDOW_SIZE,
@@ -482,6 +487,7 @@ export {
   mergeClassifierOutcomes,
   mergedPrRefs,
   parseClassifierOutcomes,
+  summarizeClassifierOutcomes,
   parseKpiHistory,
   reconstructHumanEvents,
   renderKpiDriftLine,

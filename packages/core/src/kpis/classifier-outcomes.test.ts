@@ -3,7 +3,15 @@
 import { describe, expect, it } from 'vitest';
 import type { ReviewClass } from '../review/floor.js';
 import type { FactoryEvent } from '../types/index.js';
-import { joinClassifierOutcomes, mergeClassifierOutcomes, parseClassifierOutcomes } from './classifier-outcomes.js';
+import type { ClassifierOutcomeRecord } from './classifier-outcomes.js';
+import {
+  classifierOutcomeBucket,
+  formatClassifierReport,
+  joinClassifierOutcomes,
+  mergeClassifierOutcomes,
+  parseClassifierOutcomes,
+  summarizeClassifierOutcomes,
+} from './classifier-outcomes.js';
 import type { PrSource } from './human.js';
 
 const NOW = '2026-10-01T00:00:00.000Z';
@@ -136,5 +144,120 @@ describe('mergeClassifierOutcomes / parseClassifierOutcomes', () => {
     const text = mergeClassifierOutcomes('garbage\n\n{"x":1}\n', [final]);
     expect(lines(text).slice(0, 2)).toEqual(['garbage', '{"x":1}']);
     expect(parseClassifierOutcomes(text)).toHaveLength(1);
+  });
+});
+
+describe('summarizeClassifierOutcomes / formatClassifierReport (#1727)', () => {
+  const rec = (o: Partial<ClassifierOutcomeRecord> = {}): ClassifierOutcomeRecord => ({
+    issue: '1',
+    prNumber: 1,
+    classifiedAt: NOW,
+    modelClass: 'A',
+    floorClass: 'A',
+    finalClass: 'A',
+    model: 'm',
+    promptVersion: 'p1',
+    policyVersion: 'v1',
+    diffSha: null,
+    humanApproved: false,
+    humanEdited: false,
+    humanAbandoned: false,
+    merged: true,
+    mergedAt: daysAgo(30),
+    defectWindowClosed: true,
+    defectFired: false,
+    verdict: 'agree',
+    slipped: false,
+    ...o,
+  });
+  const many = (n: number, o: Partial<ClassifierOutcomeRecord>) =>
+    Array.from({ length: n }, (_, i) => rec({ prNumber: i + 1, ...o }));
+
+  it('buckets each rule path', () => {
+    expect(classifierOutcomeBucket(rec({ humanAbandoned: true, merged: false, defectWindowClosed: false }))).toBe(
+      'humanGated',
+    );
+    expect(classifierOutcomeBucket(rec({ merged: false, defectWindowClosed: false }))).toBe('pending');
+    expect(classifierOutcomeBucket(rec({ defectWindowClosed: false }))).toBe('pending');
+    expect(classifierOutcomeBucket(rec({ defectFired: true }))).toBe('slippedDefect');
+    expect(classifierOutcomeBucket(rec({ humanEdited: true }))).toBe('humanGated');
+    expect(classifierOutcomeBucket(rec())).toBe('mergedClean');
+  });
+
+  it('builds the confusion table and prints it', () => {
+    const report = summarizeClassifierOutcomes([
+      rec({ prNumber: 1, modelClass: 'A' }),
+      rec({ prNumber: 2, modelClass: 'B', defectFired: true }),
+      rec({ prNumber: 3, modelClass: 'C', merged: false, defectWindowClosed: false }),
+      rec({ prNumber: 4, modelClass: 'C', humanEdited: true }),
+    ]);
+    expect(report.total).toBe(4);
+    expect(report.confusion.A.mergedClean).toBe(1);
+    expect(report.confusion.B.slippedDefect).toBe(1);
+    expect(report.confusion.C).toEqual({ humanGated: 1, mergedClean: 0, slippedDefect: 0, pending: 1 });
+    const text = formatClassifierReport(report).join('\n');
+    for (const h of ['human-gated', 'merged clean', 'slipped defect', 'pending']) expect(text).toContain(h);
+    expect(formatClassifierReport(report).filter((l) => /^[ABC] {6}/.test(l))).toHaveLength(3);
+  });
+
+  it('shows the rule-of-three bound', () => {
+    const report = summarizeClassifierOutcomes(many(60, {}));
+    expect(report.classes.A.closed).toBe(60);
+    expect(report.classes.A.slipped).toBe(0);
+    expect(report.classes.A.slipRate).toBe(0);
+    expect(report.classes.A.upperBound).toBeCloseTo(0.05);
+    expect(formatClassifierReport(report)).toContain('A: 60 closed, 0 slipped — slip rate ≤ 5%');
+  });
+
+  it('prints unknown, never 0%, without closed evidence', () => {
+    const report = summarizeClassifierOutcomes([
+      rec({ modelClass: 'A', merged: false, defectWindowClosed: false }),
+      rec({ prNumber: 2, modelClass: 'B' }),
+    ]);
+    expect(report.classes.A.upperBound).toBeNull();
+    expect(report.classes.A.slipRate).toBeNull();
+    const line = formatClassifierReport(report).find((l) => l.startsWith('A:'))!;
+    expect(line).toContain('unknown');
+    expect(line).not.toContain('0%');
+
+    const empty = summarizeClassifierOutcomes([]);
+    expect(empty.total).toBe(0);
+    const lines = formatClassifierReport(empty);
+    expect(lines[0]).toContain('factory kpis');
+    expect(lines.filter((l) => l.includes('slip rate unknown'))).toHaveLength(3);
+    expect(lines.join('\n')).toContain('(unknown)');
+  });
+
+  it('reports the observed rate when slips exist', () => {
+    const records = [
+      ...many(38, {}),
+      rec({ prNumber: 100, defectFired: true }),
+      rec({ prNumber: 101, defectFired: true }),
+    ];
+    const report = summarizeClassifierOutcomes(records);
+    expect(report.classes.A.slipRate).toBeCloseTo(0.05);
+    expect(report.classes.A.upperBound).toBeNull();
+    expect(formatClassifierReport(report)).toContain('A: 40 closed, 2 slipped — observed slip rate 5%');
+  });
+
+  it('caps the bound at 100% for tiny n', () => {
+    const report = summarizeClassifierOutcomes(many(2, {}));
+    expect(report.classes.A.upperBound).toBe(1);
+    expect(formatClassifierReport(report)).toContain('A: 2 closed, 0 slipped — slip rate ≤ 100%');
+  });
+
+  it('counts model vs floor strictness and ignores unknown classes', () => {
+    const report = summarizeClassifierOutcomes([
+      rec({ prNumber: 1, modelClass: 'B', floorClass: 'A' }),
+      rec({ prNumber: 2, modelClass: 'B', floorClass: 'B' }),
+      rec({ prNumber: 3, modelClass: 'A', floorClass: 'C' }),
+      rec({ prNumber: 4, modelClass: 'A', floorClass: null }),
+      rec({ prNumber: 5, modelClass: 'Z' as ReviewClass }),
+    ]);
+    expect(report.total).toBe(4);
+    expect(report.floorAgreement).toEqual({ stricter: 1, equal: 1, looser: 1, noFloor: 1 });
+    expect(formatClassifierReport(report).join('\n')).toContain(
+      'Model vs floor: stricter 1 (33.3%), equal 1 (33.3%), looser 1 (33.3%); no floor 1',
+    );
   });
 });
