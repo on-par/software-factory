@@ -187,3 +187,52 @@ describe('renderAdrConstraints', () => {
     expect(rendered).toContain(`${condensed.slice(0, 20)}…`);
   });
 });
+
+describe('readAdrContext changedPaths (#1722)', () => {
+  const SHIP = 'packages/core/src/phases/ship.ts';
+  function fixture(): Record<string, string> {
+    const files: Record<string, string> = {};
+    for (let i = 1; i <= 25; i++) {
+      const n = String(i).padStart(4, '0');
+      const decision = i === 1 ? `Touch \`${SHIP}\`.` : i === 2 ? 'Use packages/core/src/phases/ here.' : 'Plain.';
+      files[`docs/adr/${n}-a.md`] = accepted(n, `Decision ${i}`, decision);
+    }
+    files['docs/adr/0026-s.md'] = withStatus('0026', 'Old ship', 'Superseded by ADR-0009').replace(
+      'Decision text.',
+      `Cites ${SHIP}`,
+    );
+    return files;
+  }
+
+  it('puts a cited-file ADR first even when old, then the dir match', async () => {
+    const ctx = await readAdrContext(createInMemoryReader(fixture()), { changedPaths: [SHIP] });
+    expect(ctx.active[0]?.number).toBe(1);
+    expect(ctx.matches?.[0]).toEqual({ path: 'docs/adr/0001-a.md', reason: 'cites-file', changedPath: SHIP });
+    expect(ctx.matches?.[1]?.reason).toBe('cites-dir');
+    expect(ctx.active.some((a) => a.path === 'docs/adr/0026-s.md')).toBe(false);
+    expect(ctx.matches?.some((m) => m.path === 'docs/adr/0026-s.md')).toBe(false);
+  });
+
+  it('fills remaining slots with the newest ADRs', async () => {
+    const files = fixture();
+    delete files['docs/adr/0002-a.md'];
+    const ctx = await readAdrContext(createInMemoryReader(files), { maxAdrs: 5, changedPaths: [SHIP] });
+    expect(ctx.active.map((a) => a.number)).toEqual([1, 22, 23, 24, 25]);
+    expect(ctx.truncated).toBe(24 - 5);
+  });
+
+  it('leaves the default output unchanged without changedPaths', async () => {
+    const ctx = await readAdrContext(createInMemoryReader(fixture()));
+    expect('matches' in ctx).toBe(false);
+    expect(ctx.active.map((a) => a.number)).toEqual(Array.from({ length: 20 }, (_, i) => i + 6));
+  });
+
+  it('returns empty matches and the default selection for empty changedPaths', async () => {
+    const reader = createInMemoryReader(fixture());
+    const base = await readAdrContext(reader);
+    const ctx = await readAdrContext(reader, { changedPaths: [] });
+    expect(ctx.matches).toEqual([]);
+    expect(ctx.active).toEqual(base.active);
+    expect(ctx.truncated).toBe(base.truncated);
+  });
+});
