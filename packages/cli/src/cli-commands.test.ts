@@ -3187,6 +3187,87 @@ bash scripts/verify.sh
       expect(vi.mocked(core.shipPhase)).toHaveBeenCalledTimes(1);
     });
 
+    describe('--run-children', () => {
+      const decompose = (children: number[]) =>
+        ({ ok: false, route: 'claude', escalate: 'decomposed', decomposed: { childIssues: children } }) as any;
+
+      it('runs children in order, prints the summary, takes no labels/merge, and holds the lock', async () => {
+        const core = await import('@on-par/factory-core');
+        const { existsSync } = await import('node:fs');
+        const lockPath = join(paths().state, 'run.lock');
+        writeFileSync(paths().queue, 'app 7\n');
+        const lockSeen: boolean[] = [];
+        const recordLock = async () => {
+          lockSeen.push(existsSync(lockPath));
+          return h.planResult;
+        };
+        vi.mocked(core.planPhase)
+          .mockImplementationOnce(async () => decompose([10, 11]))
+          .mockImplementationOnce(recordLock)
+          .mockImplementationOnce(recordLock);
+        vi.mocked(core.shipPhase)
+          .mockResolvedValueOnce({ ok: true, prNumber: 101 } as any)
+          .mockResolvedValueOnce({ ok: true, prNumber: 102 } as any);
+        h.octokit.rest.issues.addLabels = vi.fn(async () => ({}));
+
+        const res = await runMain('run-issue', '5', '--run-children');
+
+        expect(res.exited).toBe(false);
+        const issues = h.octokit.rest.issues.get.mock.calls.map((c: any[]) => c[0].issue_number);
+        expect(issues.slice(0, 3)).toEqual([5, 10, 11]);
+        expect(vi.mocked(core.planPhase)).toHaveBeenCalledTimes(3);
+        expect(vi.mocked(core.buildPhase)).toHaveBeenCalledTimes(2);
+        expect(vi.mocked(core.checkPhase)).toHaveBeenCalledTimes(2);
+        expect(vi.mocked(core.shipPhase)).toHaveBeenCalledTimes(2);
+        expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+        expect(h.octokit.rest.pulls.merge).not.toHaveBeenCalled();
+        expect(readFileSync(paths().queue, 'utf-8')).toBe('app 7\n');
+        expect(logged()).toContain('#10 → PR #101 ready for review');
+        expect(logged()).toContain('#11 → PR #102 ready for review');
+        expect(logged()).toContain('2/2 children ready for review');
+        expect(lockSeen).toEqual([true, true]);
+        expect(existsSync(lockPath)).toBe(false);
+      });
+
+      it('stops at the first failed child and reports the rest as not run', async () => {
+        const core = await import('@on-par/factory-core');
+        vi.mocked(core.planPhase).mockImplementationOnce(async () => decompose([10, 11, 12]));
+        vi.mocked(core.shipPhase)
+          .mockResolvedValueOnce({ ok: true, prNumber: 101 } as any)
+          .mockResolvedValueOnce({ ok: false } as any);
+        const res = await runMain('run-issue', '5', '--run-children');
+        expect(res).toMatchObject({ exited: true, code: 1 });
+        expect(logged()).toContain('#11 → failed');
+        expect(logged()).toContain('#12 → not run');
+        expect(logged()).toContain('1/3 children ready for review');
+        expect(vi.mocked(core.planPhase)).toHaveBeenCalledTimes(3);
+      });
+
+      it('does not run a child that decomposes again', async () => {
+        const core = await import('@on-par/factory-core');
+        vi.mocked(core.planPhase)
+          .mockImplementationOnce(async () => decompose([10, 11]))
+          .mockImplementationOnce(async () => decompose([20]));
+        const res = await runMain('run-issue', '5', '--run-children');
+        expect(res).toMatchObject({ exited: true, code: 1 });
+        expect(logged()).toContain('decomposed again');
+        expect(logged()).toContain('#11 → not run');
+      });
+
+      it('records a child that cannot be resolved as failed', async () => {
+        const core = await import('@on-par/factory-core');
+        vi.mocked(core.planPhase).mockImplementationOnce(async () => decompose([10]));
+        const get = h.octokit.rest.issues.get;
+        h.octokit.rest.issues.get = vi.fn(async (args: any) => {
+          if (args.issue_number === 10) throw new Error('Not Found');
+          return get(args);
+        });
+        const res = await runMain('run-issue', '5', '--run-children');
+        expect(res).toMatchObject({ exited: true, code: 1 });
+        expect(logged()).toContain('could not resolve issue #10');
+      });
+    });
+
     it('resolves the issue through the canonical work-request seam and ships it through all phases', async () => {
       const core = await import('@on-par/factory-core');
       const res = await runMain('run-issue', '5');

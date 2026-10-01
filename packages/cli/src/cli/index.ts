@@ -272,6 +272,7 @@ import { cmdLogs } from './logs.js';
 import { applyHelpGroups } from './help-groups.js';
 import { mergeScopeNotice } from './merge-scope.js';
 import { createFactoryOctokit } from './octokit.js';
+import { formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
 import { readRunFlagOverrides, writeRunFlagOverrides } from './run-flags.js';
 import { distFreshnessProbe, runStalenessGuard } from './staleness.js';
 import { readStopFileStatus, stopSentinelCheck, stopSentinelRunSkipMessage } from './stop-sentinel.js';
@@ -1395,6 +1396,9 @@ export async function shipIssue(
     paths?: ReturnType<typeof getFactoryPaths>;
     lane?: string;
     workRequest?: WorkRequest;
+    /** Receives the core RunOutcome before shipIssue maps it to a return/throw — lets
+     *  `run-issue --run-children` read the PR number as data (#1747). */
+    onOutcome?: (outcome: RunOutcome) => void;
     /** Input source for planPhase to resolve; defaults inside planPhase to this run's GitHub issue. */
     workSource?: { kind: WorkRequestSourceKind; params: unknown };
     /** Local-only policy (#508): run in this caller-provided workspace, skip
@@ -1735,6 +1739,7 @@ export async function shipIssue(
   };
 
   const outcome = await runIssue(request, policy, ports);
+  ctx?.onOutcome?.(outcome);
 
   if (opts.interactive && !ctx?.localOnly && (outcome.state === 'ready' || outcome.state === 'shipped')) {
     const leftover = listQueuedSteering(paths.steering, issueNum);
@@ -1933,6 +1938,15 @@ async function cmdRunIssue(
       await shipIssue(issueNum, { ...shipOpts, branchPrefix }, { repoRoot, ghRepo, workRequest: work });
     } catch (err: any) {
       if (err instanceof IssueSkippedError) return;
+      if (err instanceof IssueDecomposedError && runChildren) {
+        await runDecomposedChildren(
+          issueNum,
+          err.childIssues,
+          { ...shipOpts, branchPrefix },
+          { repoRoot, ghRepo, workSources },
+        );
+        return;
+      }
       if (err instanceof IssueDecomposedError && !runChildren) {
         const children = err.childIssues.map((n) => `#${n}`).join(', ');
         throw new CliExitError(
@@ -1944,6 +1958,63 @@ async function cmdRunIssue(
       throw new CliExitError(`Run failed for issue #${issueNum}: ${err.message}`, 1);
     }
   });
+}
+
+/** Runs each decomposed child through the one-shot pipeline in build order, inside the caller's
+ *  run lock, then prints a per-child summary. Throws CliExitError(1) unless all are ready (#1747). */
+async function runDecomposedChildren(
+  parent: number,
+  children: readonly number[],
+  opts: Parameters<typeof shipIssue>[1],
+  env: { repoRoot: string; ghRepo: string; workSources: ReturnType<typeof createDefaultWorkSourceRegistry> },
+): Promise<void> {
+  const list = children.map((n) => `#${n}`).join(', ');
+  console.log(chalk.cyan(`run-children: #${parent} decomposed into ${list} — running them in build order`));
+  const results = await runChildrenInOrder(children, async (child): Promise<ChildRunResult> => {
+    let work: WorkRequest;
+    try {
+      work = await env.workSources.resolve(GITHUB_ISSUE_SOURCE, {
+        repo: env.ghRepo,
+        issue: child,
+      } satisfies GithubIssueParams);
+    } catch (err) {
+      return { issue: child, status: 'failed', detail: `could not resolve issue #${child} (${errorDetail(err)})` };
+    }
+    console.log(chalk.cyan(`one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
+    let outcome: RunOutcome | undefined;
+    try {
+      await shipIssue(child, opts, {
+        repoRoot: env.repoRoot,
+        ghRepo: env.ghRepo,
+        workRequest: work,
+        onOutcome: (o) => {
+          outcome = o;
+        },
+      });
+    } catch (err: any) {
+      if (err instanceof IssueDecomposedError) {
+        const again = err.childIssues.map((n) => `#${n}`).join(', ');
+        return {
+          issue: child,
+          status: 'failed',
+          detail: `decomposed again into ${again} — nested decomposition is not run`,
+        };
+      }
+      if (err instanceof IssueSkippedError) {
+        return { issue: child, status: 'failed', detail: `skipped: ${err.message}` };
+      }
+      return { issue: child, status: 'failed', detail: err instanceof Error ? err.message : String(err) };
+    }
+    const done = outcome as RunOutcome | undefined;
+    return { issue: child, status: 'ready', prNumber: done && 'prNumber' in done ? done.prNumber : undefined };
+  });
+  const allReady = results.every((r) => r.status === 'ready');
+  for (const line of formatChildRunSummary(parent, results)) {
+    console.log(allReady ? chalk.green(line) : chalk.yellow(line));
+  }
+  if (!allReady) {
+    throw new CliExitError(`Run failed for issue #${parent}: not every decomposed child reached ready-for-review`, 1);
+  }
 }
 
 async function cmdRunBrief(
