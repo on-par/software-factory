@@ -1884,6 +1884,7 @@ async function cmdRunIssue(
     sandbox?: boolean;
     approvePlan?: boolean;
     branchPrefix?: string;
+    runChildren?: boolean;
   },
 ) {
   if (!isCommandAvailable('claude')) {
@@ -1895,6 +1896,7 @@ async function cmdRunIssue(
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
 
+  const { runChildren, ...shipOpts } = opts;
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
 
   await withRepoRunLock(paths, 'factory run-issue', async () => {
@@ -1928,9 +1930,17 @@ async function cmdRunIssue(
     }
 
     try {
-      await shipIssue(issueNum, { ...opts, branchPrefix }, { repoRoot, ghRepo, workRequest: work });
+      await shipIssue(issueNum, { ...shipOpts, branchPrefix }, { repoRoot, ghRepo, workRequest: work });
     } catch (err: any) {
       if (err instanceof IssueSkippedError) return;
+      if (err instanceof IssueDecomposedError && !runChildren) {
+        const children = err.childIssues.map((n) => `#${n}`).join(', ');
+        throw new CliExitError(
+          `Run failed for issue #${issueNum}: the size gate decomposed it into ${children} — no child issue was run. ` +
+            `Re-run with \`factory run-issue ${issueNum} --run-children\` to run them.`,
+          1,
+        );
+      }
       throw new CliExitError(`Run failed for issue #${issueNum}: ${err.message}`, 1);
     }
   });
@@ -4716,6 +4726,7 @@ export async function main() {
     .option('--approve-plan', 'Pause after PLAN freezes the spec and wait for approval before BUILD')
     .option('--no-sandbox', 'Disable the containment sandbox for agent runs (dangerous)')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
+    .option('--run-children', 'When the size gate decomposes the issue, run the child issues it filed')
     .action(async (issueNum, opts) => {
       await cmdRunIssue(parseIssueArg(issueNum), opts);
     });
