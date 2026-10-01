@@ -60,7 +60,7 @@ git init -q
 test -d .factory/
 # #724 split the layout: durable config lives at the .factory/ root, runtime state
 # under .factory/state/. Pin both halves so a regression in either is caught here.
-test -f .factory/config.json
+test -f .factory/config.yaml
 test -d .factory/state/
 test -f .factory/state/queue
 grep -q "^\.factory/$" .git/info/exclude
