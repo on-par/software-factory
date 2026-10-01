@@ -309,6 +309,9 @@ const INTERNAL_API_KEYS = [
   // Review verdict (#1679)
   'computeReviewVerdict',
   'DETERMINISTIC_CHECKERS',
+  // Review floor (#1721)
+  'computeReviewFloor',
+  'DEFAULT_REVIEW_FLOOR_RULES',
   // Review fork-PR containment gate (#1684)
   'isCrossRepoPullRequest',
   'isForkPullRequest',
