@@ -1,3 +1,4 @@
+import { scoreIssueReadiness } from '@on-par/factory-core';
 import { describe, expect, it, vi } from 'vitest';
 import { buildIssueCheckReport, formatIssueCheckLines, runIssueCheck } from './ready-check.js';
 
@@ -23,6 +24,64 @@ function deps(b: string, title = 'Fix it') {
   const getIssue = vi.fn(async () => ({ title, body: b as string | null }));
   return { lines, getIssue, d: { getIssue, log: (l: string) => lines.push(l) } };
 }
+
+describe('runIssueCheck INVEST', () => {
+  const withDep = body(3).replace('Something is wrong.', 'Something is wrong, depends on #12 because reasons.');
+
+  it('prints invest block without changing exit code', async () => {
+    const { lines, d } = deps(withDep);
+    const r = await runIssueCheck(7, {}, { ...d, getIssueState: async () => 'open' });
+    expect(lines).toContain('invest:');
+    expect(lines.join('\n')).toContain('independent: warn — depends on open #12');
+    expect(r.exitCode).toBe(0);
+    expect(r.reasons).toEqual([]);
+  });
+
+  it('keeps exit 3 for oversize while small warns', async () => {
+    const { d } = deps(body(7));
+    const r = await runIssueCheck(7, {}, d);
+    expect(r.exitCode).toBe(3);
+    expect(r.invest!.findings.find((f) => f.letter === 'small')!.status).toBe('warn');
+  });
+
+  it('--json includes six invest findings', async () => {
+    const { lines, d } = deps(body(3));
+    await runIssueCheck(7, { json: true }, d);
+    expect(JSON.parse(lines[0]!).invest.findings).toHaveLength(6);
+  });
+
+  it('treats a throwing or absent getIssueState as unknown', async () => {
+    const { d } = deps(withDep);
+    const thrown = await runIssueCheck(
+      7,
+      {},
+      {
+        ...d,
+        getIssueState: async () => {
+          throw new Error('boom');
+        },
+      },
+    );
+    const ind = thrown.invest!.findings[0]!;
+    expect(ind.status).toBe('warn');
+    expect(ind.reason).toContain('could not check');
+    const absent = await runIssueCheck(7, {}, d);
+    expect(absent.invest!.findings[0]!.status).toBe('warn');
+  });
+
+  it('leaves invest null for non factory-task issues and does no lookups', async () => {
+    const getIssueState = vi.fn(async () => 'open' as const);
+    const { d } = deps('### Why\n\nbecause. depends on #4\n\n### Children\n\n- #1\n\n### Done when\n\nall', '[Epic] x');
+    const r = await runIssueCheck(7, {}, { ...d, getIssueState });
+    expect(r.invest).toBeNull();
+    expect(getIssueState).not.toHaveBeenCalled();
+  });
+
+  it('buildIssueCheckReport defaults invest to null', () => {
+    const readiness = scoreIssueReadiness({ title: 'x', body: body(3) });
+    expect(buildIssueCheckReport(1, readiness).invest).toBeNull();
+  });
+});
 
 describe('runIssueCheck', () => {
   it('reports runs-as-is with exit 0', async () => {

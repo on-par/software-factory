@@ -866,6 +866,10 @@ async function cmdCheck(issueRaw: string, opts: { json?: boolean }) {
       const { data } = await getOctokit().rest.issues.get({ owner, repo: repoName, issue_number: n });
       return { title: data.title, body: data.body ?? null };
     },
+    getIssueState: async (n) => {
+      const { data } = await getOctokit().rest.issues.get({ owner, repo: repoName, issue_number: n });
+      return data.state === 'closed' ? 'closed' : 'open';
+    },
     log: (line) => console.log(line),
   });
   if (report.exitCode === 1) {
@@ -4945,9 +4949,12 @@ export async function main() {
     .command('check <issue>')
     .alias('ready')
     .description(
-      'Check an issue before queuing: required fields and whether the size gate runs it as-is or would split it (read-only; exit 0 ready, 1 missing fields or ungradeable criteria, 3 would split)',
+      'Check an issue before queuing: required fields and whether the size gate runs it as-is or would split it, plus an advisory INVEST report (read-only; exit 0 ready, 1 missing fields or ungradeable criteria, 3 would split)',
     )
-    .option('--json', 'Print one JSON object with fields, criteria findings, size verdict, and reasons')
+    .option(
+      '--json',
+      'Print one JSON object with fields, criteria findings, size verdict, INVEST findings, and reasons',
+    )
     .action(cmdCheck);
 
   program

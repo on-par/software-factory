@@ -189,6 +189,8 @@ const PUBLIC_API_KEYS = [
   // Readiness
   'assessAcceptanceCriteria',
   'gradeIssueCriteria',
+  'findIssueDependencies',
+  'gradeIssueInvest',
   'EPIC_REQUIRED_FIELDS',
   'FACTORY_BUG_REQUIRED_FIELDS',
   'FACTORY_TASK_REQUIRED_FIELDS',
