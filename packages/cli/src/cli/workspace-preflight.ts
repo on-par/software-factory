@@ -82,6 +82,36 @@ export async function workspaceGate(
   };
 }
 
+export interface WorkspaceGateIo {
+  warn(msg: string): void;
+  info(msg: string): void;
+  event(kind: 'warn' | 'environment_warning' | 'stopped', msg: string): void;
+  invalid(msg: string): Error;
+}
+
+/** Applies `workspaceGate` for `factory run`: emits the sandbox warning, throws on an invalid
+ *  mode or failed Docker preflight, and returns false when the run must stop before claiming. */
+export async function applyWorkspaceGate(
+  config: FactoryConfig,
+  io: WorkspaceGateIo,
+  deps: Parameters<typeof workspaceGate>[1] = {},
+): Promise<boolean> {
+  const gate = await workspaceGate(config, deps);
+  if (gate.warning) {
+    io.warn(gate.warning);
+    io.event('warn', gate.warning);
+  }
+  if (gate.kind === 'worktree') return true;
+  if (gate.kind === 'invalid') throw io.invalid(gate.message);
+  if (gate.kind === 'preflight-failed') {
+    io.event('environment_warning', gate.message);
+    throw new Error(gate.message);
+  }
+  io.info(gate.message);
+  io.event('stopped', gate.message);
+  return false;
+}
+
 /** Workspace mode for status display; an invalid FACTORY_WORKSPACE_MODE must not crash status. */
 export function statusWorkspaceMode(config: FactoryConfig): EffectiveWorkspaceMode {
   try {

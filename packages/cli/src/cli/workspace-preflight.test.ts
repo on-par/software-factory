@@ -1,8 +1,13 @@
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import { loadFactoryConfig } from '@on-par/factory-core';
 
 import {
+  applyWorkspaceGate,
   dockerWorkspacePreflightError,
   probeDocker,
   statusWorkspaceMode,
@@ -97,9 +102,79 @@ describe('statusWorkspaceMode', () => {
 });
 
 describe('probeDocker default CLI check', () => {
-  it('never throws and returns booleans', async () => {
-    const r = await probeDocker({ engine: { isAvailable: async () => false } });
-    expect(typeof r.cli).toBe('boolean');
-    expect(r.daemon).toBe(false);
+  const engine = { isAvailable: async () => true };
+  const withPath = async (dir: string, fn: () => Promise<void>) => {
+    const prev = process.env.PATH;
+    process.env.PATH = dir;
+    try {
+      await fn();
+    } finally {
+      process.env.PATH = prev;
+    }
+  };
+
+  it('reports the CLI missing when docker is not on PATH', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wsp-empty-'));
+    await withPath(dir, async () => {
+      expect(await probeDocker({ engine })).toEqual({ cli: false, daemon: false });
+    });
+  });
+
+  it('reports the CLI present when `docker --version` succeeds', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wsp-fake-'));
+    writeFileSync(join(dir, 'docker'), '#!/bin/sh\nexit 0\n');
+    chmodSync(join(dir, 'docker'), 0o755);
+    await withPath(dir, async () => {
+      expect(await probeDocker({ engine })).toEqual({ cli: true, daemon: true });
+    });
+  });
+});
+
+describe('applyWorkspaceGate', () => {
+  const mk = () => {
+    const calls: string[] = [];
+    const io = {
+      warn: (m: string) => calls.push(`warn:${m}`),
+      info: (m: string) => calls.push(`info:${m}`),
+      event: (k: string, m: string) => calls.push(`${k}:${m}`),
+      invalid: (m: string) => new Error(`invalid:${m}`),
+    };
+    return { calls, io: io as Parameters<typeof applyWorkspaceGate>[1] };
+  };
+  const dockerCfg = () => {
+    const c = loadFactoryConfig();
+    return {
+      ...c,
+      sandbox: { ...c.sandbox, runtime: 'firejail' as const },
+      workspace: { ...c.workspace, mode: 'docker' as const },
+    };
+  };
+
+  it('proceeds in worktree mode', async () => {
+    const { io, calls } = mk();
+    expect(await applyWorkspaceGate(loadFactoryConfig(), io, { env: {} })).toBe(true);
+    expect(calls).toEqual([]);
+  });
+  it('throws via io.invalid for a bad env value', async () => {
+    const { io } = mk();
+    await expect(
+      applyWorkspaceGate(loadFactoryConfig(), io, { env: { FACTORY_WORKSPACE_MODE: 'vm' } }),
+    ).rejects.toThrow(/^invalid:/);
+  });
+  it('logs and throws when docker preflight fails', async () => {
+    const { io, calls } = mk();
+    await expect(
+      applyWorkspaceGate(dockerCfg(), io, { env: {}, probe: async () => ({ cli: false, daemon: false }) }),
+    ).rejects.toThrow(/Docker CLI/);
+    expect(calls.some((c) => c.startsWith('environment_warning:'))).toBe(true);
+    expect(calls.some((c) => c.startsWith('warn:'))).toBe(true);
+  });
+  it('stops without claiming when docker is healthy', async () => {
+    const { io, calls } = mk();
+    expect(
+      await applyWorkspaceGate(dockerCfg(), io, { env: {}, probe: async () => ({ cli: true, daemon: true }) }),
+    ).toBe(false);
+    expect(calls.some((c) => c.startsWith('stopped:'))).toBe(true);
+    expect(calls.some((c) => c.startsWith('info:'))).toBe(true);
   });
 });

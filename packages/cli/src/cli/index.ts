@@ -245,7 +245,7 @@ import chalk from 'chalk';
 import { Command } from 'commander';
 import { admissionStateReaderFor, runQueueReconcile } from './admission.js';
 import { runQueueClear } from './queue-clear.js';
-import { statusWorkspaceMode, workspaceGate } from './workspace-preflight.js';
+import { applyWorkspaceGate, statusWorkspaceMode } from './workspace-preflight.js';
 import { cmdDaemonLogs, cmdDaemonStart, cmdDaemonStatus, cmdDaemonStop, DaemonCtlError } from './daemon.js';
 import {
   analyzeEventLog,
@@ -3126,21 +3126,13 @@ async function cmdRun(
       logEvent(paths.events, 'environment_warning', 'all', keychainErr);
       throw new Error(keychainErr);
     }
-    const gate = await workspaceGate(factoryConfig);
-    if (gate.warning) {
-      console.warn(chalk.yellow(`factory: ${gate.warning}`));
-      logEvent(paths.events, 'warn', 'all', gate.warning);
-    }
-    if (gate.kind === 'invalid') throw new CliExitError(`factory: ${gate.message}`, 2);
-    if (gate.kind === 'preflight-failed') {
-      logEvent(paths.events, 'environment_warning', 'all', gate.message);
-      throw new Error(gate.message);
-    }
-    if (gate.kind === 'docker-unavailable') {
-      console.log(chalk.yellow(`!! ${gate.message}`));
-      logEvent(paths.events, 'stopped', 'all', gate.message);
-      return;
-    }
+    const proceed = await applyWorkspaceGate(factoryConfig, {
+      warn: (msg) => console.warn(chalk.yellow(`factory: ${msg}`)),
+      info: (msg) => console.log(chalk.yellow(`!! ${msg}`)),
+      event: (kind, msg) => logEvent(paths.events, kind, 'all', msg),
+      invalid: (msg) => new CliExitError(`factory: ${msg}`, 2),
+    });
+    if (!proceed) return;
     await runAutoWorktreeGc(repoRoot, paths, ghRepo, 'all');
 
     const { lanes, diagnostics } = await planRunLanes({
