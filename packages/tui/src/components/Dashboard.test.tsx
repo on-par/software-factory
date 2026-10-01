@@ -45,9 +45,16 @@ describe('Dashboard', () => {
     const { lastFrame } = render(<Dashboard state={state} selectedIndex={0} now={NOW} />);
     const frame = lastFrame() ?? '';
     expect(frame).toContain('1 lane · 3 issues');
-    expect(frame).toContain('#296');
-    expect(frame).toContain('#301');
     expect(frame).toContain('#305');
+    expect(frame).not.toContain('#296');
+  });
+
+  it('renders two rows for two lanes', () => {
+    const state = stateFor([laned('plan', '10', 'prefix'), laned('plan', '11', 'docs')]);
+    const frame = render(<Dashboard state={state} selectedIndex={0} now={NOW} />).lastFrame() ?? '';
+    expect(frame).toContain('2 lanes');
+    expect(frame).toContain('prefix');
+    expect(frame).toContain('docs');
   });
 
   it('counts one lane on its fifth issue as 1 lane (#1736)', () => {
@@ -94,7 +101,7 @@ describe('Dashboard', () => {
   it('shows the navigation footer hint', () => {
     const state = stateFor([ev('plan', '296', 'Starting plan phase')]);
     const { lastFrame } = render(<Dashboard state={state} selectedIndex={0} now={NOW} />);
-    expect(lastFrame()).toContain('↑/↓ select · ⏎ detail · q quit');
+    expect(lastFrame()).toContain('↑/↓ select · ⏎ open lane · q quit');
   });
 
   it('shows the StopBanner only when a stopReason is set', () => {
