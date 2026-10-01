@@ -2796,6 +2796,21 @@ bash scripts/verify.sh
       expect(errored()).toContain('refused #555');
     });
 
+    it('reads claim labels through octokit and refuses a live claim (#1790)', async () => {
+      h.execImpl = (cmd: string) =>
+        cmd.includes('rev-parse') ? h.repoRoot : cmd.includes('gh repo view') ? 'o/r' : '';
+      const expires = Math.floor(Date.now() / 1000) + 600;
+      h.octokit.rest.issues.get = vi.fn(async () => ({
+        data: {
+          labels: ['factory:in-progress', { name: `factory:claim-expires:${expires}` }, { name: undefined }],
+        },
+      }));
+      const res = await runMain('reset', '555');
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(h.octokit.rest.issues.get).toHaveBeenCalledWith({ owner: 'o', repo: 'r', issue_number: 555 });
+      expect(logged()).toContain('#555: refused — claimed by factory:in-progress');
+    });
+
     it('--dry-run previews without taking the git lock', async () => {
       h.execImpl = (cmd: string) => (cmd.includes('rev-parse') ? h.repoRoot : '');
       const res = await runMain('reset', '555', '--dry-run');
