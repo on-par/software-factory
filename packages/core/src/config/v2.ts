@@ -28,11 +28,10 @@
 // missing section expands to all of its inner defaults (recursively). Leaf
 // primitives and concrete-value records/arrays keep `.default(...)`.
 
-import { readFileSync } from 'node:fs';
-
 import { z } from 'zod';
 
 import { ModelEffortsSchema } from './effort.js';
+import { readRepoConfigFile } from './repo-config-file.js';
 
 // ---------- Models ----------
 
@@ -419,15 +418,11 @@ export function parseV2Config(raw: unknown): FactoryConfigV2 {
   return result.data;
 }
 
-/** Read and validate a v2 config file (e.g. `.factory/config.json`). A file
+/** Read and validate a v2 config file (e.g. `.factory/config.yaml`). A file
  *  containing only `{"version": 2}` loads as a complete config with defaults. */
 export function loadV2Config(path: string): FactoryConfigV2 {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(readFileSync(path, 'utf-8'));
-  } catch (err: any) {
-    throw new Error(`Failed to parse ${path}: ${err.message}`);
-  }
+  const raw = readRepoConfigFile(path);
+  if (raw === undefined) throw new Error(`Failed to parse ${path}: file not found`);
   try {
     return parseV2Config(raw);
   } catch (err: any) {

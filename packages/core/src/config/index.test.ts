@@ -66,7 +66,7 @@ describe('getFactoryPaths', () => {
     return {
       root,
       state,
-      config: resolve(root, 'config.json'),
+      config: resolve(root, 'config.yaml'),
       queue: resolve(state, 'queue'),
       queueProposed: resolve(state, 'queue.proposed'),
       events: resolve(state, 'events.ndjson'),
