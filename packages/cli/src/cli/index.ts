@@ -416,7 +416,8 @@ async function cmdInit(opts: { force?: boolean } = {}) {
 
   // Write onboarding files. Idempotent: never clobber an existing file unless --force.
   const force = opts.force === true;
-  const configPath = paths.config;
+  // Writers still emit JSON, so a fresh repo gets config.json; an existing yaml/yml config is kept.
+  const configPath = existsSync(paths.config) ? paths.config : resolve(paths.root, 'config.json');
   const constitutionPath = resolve(paths.root, 'constitution.md');
   const gitignorePath = resolve(paths.root, '.gitignore');
 

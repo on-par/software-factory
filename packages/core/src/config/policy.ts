@@ -4,10 +4,11 @@
 // writer that persists one allow-listed field into `.factory/config.json`. See ADR-0094:
 // this allow-list IS the authorization model for the loopback settings write surface.
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 import { isPlainObject, loadFactoryConfig } from './index.js';
+import { readRepoConfigFile } from './repo-config-file.js';
 
 export type PolicySource = 'flag' | 'config' | 'env' | 'default';
 
@@ -100,14 +101,8 @@ export function isSafePolicyFieldId(id: unknown): id is SafePolicyFieldId {
 }
 
 function readRawConfig(configPath: string): Record<string, unknown> | null {
-  if (!existsSync(configPath)) return null;
-
-  let raw: unknown;
-  try {
-    raw = JSON.parse(readFileSync(configPath, 'utf-8'));
-  } catch (err) {
-    throw new Error(`Failed to parse ${configPath}: ${(err as Error).message}`);
-  }
+  const raw = readRepoConfigFile(configPath);
+  if (raw === undefined) return null;
   if (!isPlainObject(raw)) {
     throw new Error(`Invalid ${configPath}: expected a JSON object`);
   }

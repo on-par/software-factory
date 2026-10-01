@@ -534,7 +534,7 @@ describe('createFactorydServer', () => {
       expect(status).toBe(200);
       const parsed = JSON.parse(body);
       expect(parsed.repo).toBe('on-par/software-factory');
-      expect(parsed.configPath).toMatch(/\.factory[/\\]config\.json$/);
+      expect(parsed.configPath).toMatch(/\.factory[/\\]config\.yaml$/);
       expect(parsed.fields).toEqual([
         expect.objectContaining({ id: 'merge.auto', value: false, source: 'default' }),
         expect.objectContaining({ id: 'merge.admin', value: false, source: 'default' }),

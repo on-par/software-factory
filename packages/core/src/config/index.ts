@@ -15,6 +15,7 @@ import {
   resolveConfigPath,
 } from '@on-par/factory-config';
 import { z } from 'zod';
+import { readRepoConfigFile, resolveRepoConfigPath } from './repo-config-file.js';
 import { runConfigSource } from './run-config-source.js';
 
 import type { FilingPolicy } from '../filing/policy.js';
@@ -337,7 +338,7 @@ function deepMergeConfig(base: Record<string, unknown>, overlay: Record<string, 
 }
 
 /** Load the effective FactoryConfig for a repo: the shipped defaults, with the runtime-policy
- *  keys of `<repoRoot>/.factory/config.json` (i.e. `getFactoryPaths(repoRoot).config`) merged
+ *  keys of the repo config file (`.factory/config.yaml|yml|json`, i.e. `getFactoryPaths(repoRoot).config`) merged
  *  over them. Returns the shipped defaults untouched when the file does not exist. A partial
  *  section is legal — `{"merge": {"auto": true}}` overrides only `merge.auto`. The file's
  *  model-routing keys are ignored here; `loadRepoConfig` owns them. */
@@ -346,10 +347,14 @@ export function loadFactoryConfigForRepo(configPath: string): FactoryConfig {
   if (explicit === undefined && !existsSync(configPath)) return loadFactoryConfig();
 
   let raw: unknown;
-  try {
-    raw = JSON.parse(explicit ?? readFileSync(configPath, 'utf-8'));
-  } catch (err) {
-    throw new Error(`Failed to parse ${configPath}: ${(err as Error).message}`);
+  if (explicit !== undefined) {
+    try {
+      raw = JSON.parse(explicit);
+    } catch (err) {
+      throw new Error(`Failed to parse ${configPath}: ${(err as Error).message}`);
+    }
+  } else {
+    raw = readRepoConfigFile(configPath);
   }
   if (!isPlainObject(raw)) {
     throw new Error(`Invalid ${configPath}: expected a JSON object`);
@@ -582,7 +587,7 @@ export function resolveFilingPolicy(config: FactoryConfig): FilingPolicy {
 // ---------- Factory state paths ----------
 
 /** `root` (`.factory/`, or an explicit `stateRoot` override) holds only the committed
- *  inputs — `config.json`, plus the CLI-written `constitution.md`/`.gitignore` — so a
+ *  inputs — the repo config file (`config.yaml`/`config.yml`/`config.json`), plus the CLI-written `constitution.md`/`.gitignore` — so a
  *  consumer repo can gitignore just `state/` and keep those three files tracked. Every
  *  other runtime path resolves under `<root>/state/`. */
 export function getFactoryPaths(repoRoot: string, stateRoot?: string) {
@@ -591,7 +596,7 @@ export function getFactoryPaths(repoRoot: string, stateRoot?: string) {
   return {
     root,
     state,
-    config: resolve(root, 'config.json'),
+    config: resolveRepoConfigPath(root),
     queue: resolve(state, 'queue'),
     queueProposed: resolve(state, 'queue.proposed'),
     events: resolve(state, 'events.ndjson'),

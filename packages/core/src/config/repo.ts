@@ -5,9 +5,10 @@
 // in @on-par/factory-config. Resolution order: repo file > env vars > packaged
 // defaults.
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 
 import { z } from 'zod';
+import { readRepoConfigFile } from './repo-config-file.js';
 import { runConfigSource } from './run-config-source.js';
 
 import type { ModelRegistry } from '../models/index.js';
@@ -237,8 +238,8 @@ export function adaptV1ToV2(v1: RepoFactoryConfigV1Input): RepoFactoryConfig {
 
 const warnedV1ConfigPaths = new Set<string>();
 
-/** Read the resolved factory-state `config.json`. Returns `null` when the file does
- *  not exist. Throws a descriptive error naming the file path on malformed JSON or a
+/** Read the resolved repo config file (`config.yaml|yml|json`). Returns `null` when the file
+ *  does not exist. Throws a descriptive error naming the file path on malformed JSON/YAML or a
  *  schema violation (typos are rejected loudly via `.strict()` at every level). */
 export function loadRepoConfig(repoRoot: string, stateRoot?: string): RepoFactoryConfig | null {
   const path = getFactoryPaths(repoRoot, stateRoot).config;
@@ -246,10 +247,14 @@ export function loadRepoConfig(repoRoot: string, stateRoot?: string): RepoFactor
   if (explicit === undefined && !existsSync(path)) return null;
 
   let raw: unknown;
-  try {
-    raw = JSON.parse(explicit ?? readFileSync(path, 'utf-8'));
-  } catch (err: any) {
-    throw new Error(`Failed to parse ${path}: ${err.message}`);
+  if (explicit !== undefined) {
+    try {
+      raw = JSON.parse(explicit);
+    } catch (err: any) {
+      throw new Error(`Failed to parse ${path}: ${err.message}`);
+    }
+  } else {
+    raw = readRepoConfigFile(path);
   }
 
   const toParse = isPlainObject(raw) ? stripRuntimeKeys(raw) : raw;

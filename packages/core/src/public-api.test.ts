@@ -420,6 +420,10 @@ const INTERNAL_API_KEYS = [
   'applyLocalSmallPatchStep',
   'createLocalSmallDryRun',
   'runOvernightQueue',
+  // Repo config file reader
+  'REPO_CONFIG_FILENAMES',
+  'readRepoConfigFile',
+  'resolveRepoConfigPath',
   // Eval internals
   'judgeSpec',
   'median',
