@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 
+import type { ReviewRouting } from '../review/routing.js';
 import { specPaths } from '../spec/index.js';
 import type { CheckSummary, FactoryEvent } from '../types/index.js';
 import { readIssueEvents } from './local-run.js';
@@ -16,6 +17,8 @@ export interface EvidencePackRenderInput {
   designMarkdown?: string;
   events: FactoryEvent[];
   logFiles: string[];
+  /** PR classifier decision (#1724); the section is omitted when undefined. */
+  reviewRouting?: ReviewRouting;
 }
 
 export interface EvidencePackGatherInput {
@@ -26,10 +29,11 @@ export interface EvidencePackGatherInput {
   eventsFile?: string;
   startedAt?: string;
   logsDir?: string;
+  reviewRouting?: ReviewRouting;
 }
 
 export function renderEvidencePack(input: EvidencePackRenderInput): string {
-  const { checkSummary, reworkRounds, specSummary, designMarkdown, events, logFiles } = input;
+  const { checkSummary, reworkRounds, specSummary, designMarkdown, events, logFiles, reviewRouting } = input;
 
   const summaryParts = [
     checkSummary
@@ -61,6 +65,7 @@ export function renderEvidencePack(input: EvidencePackRenderInput): string {
             .join('\n')
         : '- No checker results recorded.',
     ),
+    ...(reviewRouting ? [section('Review routing', renderReviewRouting(reviewRouting))] : []),
     section('Frozen spec', specSummary ?? '- Spec summary unavailable.'),
     section('Design artifact', designMarkdown ?? '- No design artifact recorded.'),
     section(
@@ -96,7 +101,36 @@ export function gatherEvidencePack(input: EvidencePackGatherInput): string {
   const events = eventsFile && startedAt ? readIssueEvents(eventsFile, issue, startedAt) : [];
   const logFiles = readLogFiles(logsDir, issue);
 
-  return renderEvidencePack({ issue, checkSummary, reworkRounds, specSummary, designMarkdown, events, logFiles });
+  return renderEvidencePack({
+    issue,
+    checkSummary,
+    reworkRounds,
+    specSummary,
+    designMarkdown,
+    events,
+    logFiles,
+    reviewRouting: input.reviewRouting,
+  });
+}
+
+function renderReviewRouting(routing: ReviewRouting): string {
+  const lines = [
+    routing.floor === null
+      ? `- Floor: unavailable (classifier error: ${routing.error ?? 'unknown'})`
+      : `- Floor: **${routing.floor}**`,
+    routing.gated
+      ? `- Gate: held for a human — \`${routing.reason ?? 'classifier'}\``
+      : '- Gate: none — auto-merge eligible',
+  ];
+  if (routing.rules.length === 0) {
+    lines.push('- No rules fired.');
+  } else {
+    for (const rule of routing.rules) {
+      const paths = rule.paths.map((p) => `\`${p}\``).join(', ');
+      lines.push(`- \`${rule.id}\` (${rule.class}): ${paths === '' ? '(no paths)' : truncate(paths, 300)}`);
+    }
+  }
+  return lines.join('\n');
 }
 
 function section(title: string, body: string): string {

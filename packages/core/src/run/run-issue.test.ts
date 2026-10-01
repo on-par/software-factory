@@ -12,6 +12,7 @@ import type { BuildResult } from '../phases/build.js';
 import type { CheckPhaseResult } from '../phases/check.js';
 import type { PlanResult } from '../phases/plan.js';
 import type { ShipResult } from '../phases/ship.js';
+import { DEFAULT_REVIEW_FLOOR_RULES } from '../review/floor.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
 import type { CheckSummary, Constitution, DesignArtifact } from '../types/index.js';
@@ -882,5 +883,97 @@ describe('runIssue — #1515: same-file lane guard', () => {
     const outcome = await runIssue(baseRequest(), basePolicy(), basePorts());
     expect(outcome.state).toBe('ready');
     expect(buildPhase).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('runIssue — PR classifier gate (#1724)', () => {
+  const RULES = DEFAULT_REVIEW_FLOOR_RULES;
+  const classifier = { rules: RULES, gateLabel: 'no-auto-merge' };
+
+  function setup(opts: {
+    changes?: { path: string; added: number; removed: number }[];
+    readError?: Error;
+    labelError?: Error;
+  }) {
+    const addLabels = vi.fn(async () => {
+      if (opts.labelError) throw opts.labelError;
+      return {};
+    });
+    const octokit = Object.assign({} as Octokit, { rest: { issues: { addLabels } } });
+    const readReviewFloorChanges = vi.fn(async () => {
+      if (opts.readError) throw opts.readError;
+      return opts.changes ?? [];
+    });
+    const events: { kind: string; msg: string }[] = [];
+    const ports = basePorts({
+      octokit,
+      readReviewFloorChanges,
+      events: () => (kind: string, msg: string) => {
+        events.push({ kind, msg });
+      },
+    });
+    return { addLabels, readReviewFloorChanges, events, ports };
+  }
+
+  const gated = (events: { kind: string; msg: string }[]) => events.filter((e) => e.kind === 'merge-gated');
+
+  it('is off by default: no git read, no label, no event, no routing passed to ship', async () => {
+    const t = setup({ changes: [{ path: '.github/workflows/ci.yml', added: 1, removed: 0 }] });
+    const outcome = await runIssue(baseRequest(), basePolicy(), t.ports);
+    expect(outcome.state).toBe('ready');
+    expect(t.readReviewFloorChanges).not.toHaveBeenCalled();
+    expect(t.addLabels).not.toHaveBeenCalled();
+    expect(gated(t.events)).toHaveLength(0);
+    expect(vi.mocked(shipPhase).mock.calls[0][0].reviewRouting).toBeUndefined();
+  });
+
+  it('holds a C-floor PR: labels the issue and logs merge-gated, then still ships', async () => {
+    const t = setup({ changes: [{ path: '.github/workflows/ci.yml', added: 1, removed: 0 }] });
+    const outcome = await runIssue(baseRequest({ issue: 7, prClassifier: classifier }), basePolicy(), t.ports);
+    expect(outcome.state).toBe('ready');
+    expect(t.addLabels).toHaveBeenCalledWith({ owner: 'o', repo: 'r', issue_number: 7, labels: ['no-auto-merge'] });
+    const [event] = gated(t.events);
+    expect(event.msg).toContain('classifier:floor:C:');
+    expect(event.msg).toContain('workflows');
+  });
+
+  it('lets an A-floor PR through untouched, and hands the receipt to ship', async () => {
+    const t = setup({ changes: [{ path: 'docs/guide.md', added: 3, removed: 0 }] });
+    await runIssue(baseRequest({ prClassifier: classifier }), basePolicy(), t.ports);
+    expect(t.addLabels).not.toHaveBeenCalled();
+    expect(gated(t.events)).toHaveLength(0);
+    expect(vi.mocked(shipPhase).mock.calls[0][0].reviewRouting).toMatchObject({ floor: 'A', gated: false });
+  });
+
+  it('fails closed when the diff cannot be read', async () => {
+    const t = setup({ readError: new Error('no base ref') });
+    await runIssue(baseRequest({ prClassifier: classifier }), basePolicy(), t.ports);
+    expect(t.addLabels).toHaveBeenCalledTimes(1);
+    expect(gated(t.events)[0].msg.startsWith('classifier:error')).toBe(true);
+  });
+
+  it('passes the floor and fired rules to ship as the receipt', async () => {
+    const t = setup({ changes: [{ path: '.github/workflows/ci.yml', added: 1, removed: 0 }] });
+    await runIssue(baseRequest({ prClassifier: classifier }), basePolicy(), t.ports);
+    const routing = vi.mocked(shipPhase).mock.calls[0][0].reviewRouting;
+    expect(routing?.floor).toBe('C');
+    expect(routing?.rules.map((r) => r.id)).toContain('workflows');
+  });
+
+  it('parks held and never ships when the gate label cannot be applied', async () => {
+    const t = setup({
+      changes: [{ path: '.github/workflows/ci.yml', added: 1, removed: 0 }],
+      labelError: new Error('403'),
+    });
+    const outcome = await runIssue(baseRequest({ prClassifier: classifier }), basePolicy(), t.ports);
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'held' });
+    expect(shipPhase).not.toHaveBeenCalled();
+  });
+
+  it('never runs for a local-only run', async () => {
+    const t = setup({ changes: [{ path: '.github/workflows/ci.yml', added: 1, removed: 0 }] });
+    await runIssue(baseRequest({ localOnly: true, prClassifier: classifier }), basePolicy(), t.ports);
+    expect(t.readReviewFloorChanges).not.toHaveBeenCalled();
+    expect(t.addLabels).not.toHaveBeenCalled();
   });
 });

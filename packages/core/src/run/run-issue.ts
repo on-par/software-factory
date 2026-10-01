@@ -19,6 +19,8 @@ import { buildPhase as buildPhaseDefault } from '../phases/build.js';
 import { checkPhase as checkPhaseDefault } from '../phases/check.js';
 import { planPhase as planPhaseDefault } from '../phases/plan.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
+import type { ReviewFloorPathChange, ReviewFloorRuleSet } from '../review/floor.js';
+import { resolveReviewRouting, type ReviewRouting } from '../review/routing.js';
 import { captureDiffBase } from '../checkers/design-smells.js';
 import type { ReworkHistory } from '../checkers/rework-history.js';
 import type { AutoFailoverSettings } from '../config/index.js';
@@ -59,6 +61,9 @@ export interface RunRequest {
   };
   /** Local-only run (#508): publishing disabled, SHIP is skipped. */
   localOnly?: boolean;
+  /** PR classifier gate (#1724). Present only when the setting is on; undefined = off (no git
+   *  calls, no label, no event, no evidence-pack section). */
+  prClassifier?: { rules: ReviewFloorRuleSet; gateLabel: string };
   timeouts: { plan: number; build: number; check: number; approval: number };
   modelPins: EffectiveModelPins;
   codexDisabled: boolean;
@@ -151,6 +156,8 @@ export interface RunPorts {
   buildPhase?: typeof buildPhaseDefault;
   checkPhase?: typeof checkPhaseDefault;
   shipPhase?: typeof shipPhaseDefault;
+  /** Reads the PR's path changes for the classifier (#1724). Defaults to the git-backed reader. */
+  readReviewFloorChanges?: (worktree: string, fallbackBaseRef?: string) => Promise<ReviewFloorPathChange[]>;
 }
 
 function errorMessage(err: unknown): string {
@@ -597,6 +604,38 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       return { state: 'ready', route, branch: request.branch, reworkRounds };
     }
 
+    // PR classifier gate (#1724): escalate-only — a B/C floor (or any failure) adds the gate label.
+    let reviewRouting: ReviewRouting | undefined;
+    if (request.prClassifier) {
+      reviewRouting = await resolveReviewRouting({
+        worktree: ports.workspace.path,
+        fallbackBaseRef: build.diffBase,
+        rules: request.prClassifier.rules,
+        readChanges: ports.readReviewFloorChanges,
+      });
+      if (reviewRouting.gated) {
+        const label = request.prClassifier.gateLabel;
+        const [owner, repoName] = request.repo.split('/');
+        try {
+          await ports.octokit.rest.issues.addLabels({
+            owner,
+            repo: repoName,
+            issue_number: request.issue,
+            labels: [label],
+          });
+        } catch (err) {
+          return terminalParked(
+            'held',
+            `issue held: classifier gate label '${label}' could not be applied (${reviewRouting.reason}): ${errorMessage(err)} — needs a human`,
+          );
+        }
+        log(
+          'merge-gated',
+          `${reviewRouting.reason} — applied ${label}; auto-merge held for a human${reviewRouting.error ? ` (${reviewRouting.error})` : ''}`,
+        );
+      }
+    }
+
     // SHIP
     await setPhase('ship');
     const ship = await shipPhase({
@@ -616,6 +655,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       reworkRounds: check.reworkRounds,
       work: request.work,
       laneId: request.lane,
+      reviewRouting,
     });
     if (!ship.ok) {
       const reason: ParkReason = ship.denied ? 'escalate' : 'fail';

@@ -140,6 +140,50 @@ describe('renderEvidencePack', () => {
   });
 });
 
+describe('renderEvidencePack — review routing (#1724)', () => {
+  const base = { issue: 1, events: [], logFiles: [] };
+
+  it('has no Review routing section when no routing is given', () => {
+    expect(renderEvidencePack(base)).not.toContain('Review routing');
+  });
+
+  it('lists the floor, gate reason and each fired rule with its paths', () => {
+    const md = renderEvidencePack({
+      ...base,
+      reviewRouting: {
+        floor: 'C',
+        gated: true,
+        reason: 'classifier:floor:C:workflows',
+        rules: [
+          { id: 'workflows', class: 'C', paths: ['.github/workflows/ci.yml', 'b.yml'] },
+          { id: 'empty-diff', class: 'B', paths: [] },
+        ],
+      },
+    });
+    expect(md).toContain('Review routing');
+    expect(md).toContain('- Floor: **C**');
+    expect(md).toContain('- Gate: held for a human — `classifier:floor:C:workflows`');
+    expect(md).toContain('- `workflows` (C): `.github/workflows/ci.yml`, `b.yml`');
+    expect(md).toContain('- `empty-diff` (B): (no paths)');
+  });
+
+  it('renders an A floor as auto-merge eligible with no rules', () => {
+    const md = renderEvidencePack({ ...base, reviewRouting: { floor: 'A', gated: false, rules: [] } });
+    expect(md).toContain('- Floor: **A**');
+    expect(md).toContain('- Gate: none — auto-merge eligible');
+    expect(md).toContain('- No rules fired.');
+  });
+
+  it('renders a classifier error as unavailable', () => {
+    const md = renderEvidencePack({
+      ...base,
+      reviewRouting: { floor: null, gated: true, reason: 'classifier:error', error: 'boom', rules: [] },
+    });
+    expect(md).toContain('- Floor: unavailable (classifier error: boom)');
+    expect(md).toContain('`classifier:error`');
+  });
+});
+
 describe('gatherEvidencePack', () => {
   it('reads a spec file, extracts the Goal section, filters events, and lists matching log files', () => {
     const dir = mkdtemp();

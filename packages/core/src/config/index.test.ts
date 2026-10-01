@@ -22,6 +22,7 @@ import {
   resolveIngestConfig,
   resolveLocalOnly,
   resolveMergePolicy,
+  resolvePrClassifierPolicy,
   resolvePlanApproval,
   resolveProcessGroupGraceMs,
   resolveSkipCI,
@@ -772,6 +773,12 @@ describe('loadFactoryConfigForRepo', () => {
     expect(loadFactoryConfig().run).toBeUndefined();
   });
 
+  it('parses run.merge.classifier from a repository config file (#1724)', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ run: { merge: { classifier: true } } }));
+    expect(loadFactoryConfigForRepo(path).run).toEqual({ merge: { classifier: true } });
+  });
+
   it('overlays adr.mandate from a repository config file', async () => {
     const path = join(dir, 'config.json');
     await writeFile(path, JSON.stringify({ adr: { mandate: true } }));
@@ -878,6 +885,38 @@ describe('resolveSkipCI', () => {
     const { ci: _ci, ...withoutCi } = config;
 
     expect(resolveSkipCI(withoutCi as typeof config, {})).toBe(false);
+  });
+});
+
+describe('resolvePrClassifierPolicy (#1724)', () => {
+  const config = loadFactoryConfig();
+  const withRepo = (classifier: boolean) => ({ ...config, run: { merge: { classifier } } });
+
+  it('defaults to off', () => {
+    expect(resolvePrClassifierPolicy(config, {})).toEqual({ enabled: false, source: 'default' });
+  });
+
+  it('FACTORY_PR_CLASSIFIER=1 turns it on', () => {
+    expect(resolvePrClassifierPolicy(config, { FACTORY_PR_CLASSIFIER: '1' })).toEqual({ enabled: true, source: 'env' });
+  });
+
+  it('run.merge.classifier beats the env, including an explicit false', () => {
+    expect(resolvePrClassifierPolicy(withRepo(false), { FACTORY_PR_CLASSIFIER: '1' })).toEqual({
+      enabled: false,
+      source: 'repo',
+    });
+    expect(resolvePrClassifierPolicy(withRepo(true), {})).toEqual({ enabled: true, source: 'repo' });
+  });
+
+  it('the flag beats everything', () => {
+    expect(resolvePrClassifierPolicy(withRepo(false), {}, { classifier: true })).toEqual({
+      enabled: true,
+      source: 'flag',
+    });
+    expect(resolvePrClassifierPolicy(withRepo(true), { FACTORY_PR_CLASSIFIER: '1' }, { classifier: false })).toEqual({
+      enabled: false,
+      source: 'flag',
+    });
   });
 });
 

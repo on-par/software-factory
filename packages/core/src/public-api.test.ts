@@ -397,6 +397,13 @@ const INTERNAL_API_KEYS = [
   'touchesSensitiveScope',
   // Config
   'resolveFilingPolicy',
+  'resolvePrClassifierPolicy',
+  'resolveReviewFloorRules',
+  // PR classifier routing (#1724)
+  'classifierGateReason',
+  'parseNumstat',
+  'readReviewFloorChanges',
+  'resolveReviewRouting',
   'resolveBranchPrefix',
   'resolveEffectiveConfig',
   'resolveExperimental',

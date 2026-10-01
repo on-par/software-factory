@@ -91,7 +91,7 @@ export interface RejectedSmell {
 
 export type DiffRunner = (argv: readonly string[], cwd: string) => Promise<{ ok: boolean; stdout: string }>;
 
-const defaultDiffRunner: DiffRunner = async (argv, cwd) => {
+export const defaultDiffRunner: DiffRunner = async (argv, cwd) => {
   const r = await runCommand(argv, { cwd, timeoutMs: 60_000 });
   return { ok: r.ok, stdout: r.stdout };
 };

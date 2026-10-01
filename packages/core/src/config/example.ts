@@ -227,6 +227,12 @@ function runtimeNamespace(): Node[] {
               doc: 'Merge with GitHub admin bypass of unmet requirements. Unset: FACTORY_MERGE_ADMIN=1.',
               example: 'false',
             },
+            {
+              kind: 'unset',
+              key: 'classifier',
+              doc: 'Hold PRs whose review floor is B or C (or cannot be computed) for a human by applying no-auto-merge. Unset: FACTORY_PR_CLASSIFIER=1. --pr-classifier / --no-pr-classifier beat all.',
+              example: 'false',
+            },
           ],
         },
       ],
