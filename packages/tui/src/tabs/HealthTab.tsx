@@ -2,6 +2,14 @@ import { computeHealthKpis, type CostEntry, type FactoryEvent, formatKpiLines } 
 import { Box, Text } from 'ink';
 import { type JSX, useMemo } from 'react';
 
+import {
+  filterToWindow,
+  formatHealthHeadline,
+  HEALTH_WINDOW_LABELS,
+  type HealthWindowName,
+  resolveHealthWindowStart,
+} from './health-window.js';
+
 export interface BreakerRow {
   provider: string;
   reason: string;
@@ -14,6 +22,9 @@ export interface HealthTabProps {
   breakers: BreakerRow[];
   effectiveConfigLines: string[];
   showSecondary: boolean;
+  window: HealthWindowName;
+  runStartedAt?: string;
+  now: number;
 }
 
 export function HealthTab({
@@ -22,21 +33,39 @@ export function HealthTab({
   breakers,
   effectiveConfigLines,
   showSecondary,
+  window,
+  runStartedAt,
+  now,
 }: HealthTabProps): JSX.Element {
-  const kpiLines = useMemo(() => formatKpiLines(computeHealthKpis(events, costs)), [events, costs]);
+  const startMs = resolveHealthWindowStart(window, runStartedAt, now);
+  // Bucket 24h starts to the minute so the 500ms `now` tick doesn't recompute every frame.
+  const memoStart = startMs === null ? null : window === '24h' ? Math.floor(startMs / 60_000) * 60_000 : startMs;
+  const kpis = useMemo(() => {
+    const w = filterToWindow(events, costs, memoStart);
+    return computeHealthKpis(w.events, w.costs);
+  }, [events, costs, memoStart]);
+  const headline = formatHealthHeadline(kpis);
+  const kpiLines = formatKpiLines(kpis);
 
   return (
     <Box flexDirection="column">
-      <Text bold>Provider breaker:</Text>
+      <Box>
+        <Text bold>Health — {HEALTH_WINDOW_LABELS[window]}</Text>
+        <Text dimColor> w window · e details</Text>
+      </Box>
       {breakers.length === 0 ? (
-        <Text dimColor>(closed)</Text>
+        <Text>{'Breaker:'.padEnd(22)}closed</Text>
       ) : (
         breakers.map((b) => (
           <Text key={b.provider} color="yellow">
+            {'Breaker:'.padEnd(22)}
             {b.provider}: OPEN ({b.reason}) — {Math.ceil(b.remainingMs / 60_000)}m remaining
           </Text>
         ))
       )}
+      {headline.map((row) => (
+        <Text key={row.label}>{row.label.padEnd(22) + row.value}</Text>
+      ))}
       <Text> </Text>
       {showSecondary ? (
         <>
@@ -53,7 +82,7 @@ export function HealthTab({
           ))}
         </>
       ) : (
-        <Text dimColor>(Effective config and KPIs hidden — press e to view)</Text>
+        <Text dimColor>(Effective config and full KPIs hidden — press e to view)</Text>
       )}
     </Box>
   );

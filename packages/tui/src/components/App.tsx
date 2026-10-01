@@ -34,6 +34,7 @@ import {
 import { CostsTab } from '../tabs/CostsTab.js';
 import { resolveCostsSelection, summarizeRunCosts } from '../tabs/run-costs.js';
 import { type BreakerRow, HealthTab } from '../tabs/HealthTab.js';
+import type { HealthWindowName } from '../tabs/health-window.js';
 import { initialLogScroll, reduceLogScroll } from '../tabs/log-scroll.js';
 import { LogTab } from '../tabs/LogTab.js';
 import { QueueTab } from '../tabs/QueueTab.js';
@@ -141,6 +142,7 @@ export function App({
   const [steeringQueued, setSteeringQueued] = useState<Record<string, number>>({});
   const [breakers, setBreakers] = useState<BreakerRow[]>([]);
   const [healthSecondary, setHealthSecondary] = useState(false);
+  const [healthWindow, setHealthWindow] = useState<HealthWindowName>('run');
   // null until the first snapshot poll resolves: replayed lanes must not flash as stale first.
   const [heartbeats, setHeartbeats] = useState<Record<string, string | undefined> | null>(null);
 
@@ -408,6 +410,7 @@ export function App({
       if (input === 'f') setLogScroll((s) => reduceLogScroll(s, 'toggleFollow', logHeight, events.length));
     } else if (tab === 'health') {
       if (input === 'e') setHealthSecondary((v) => !v);
+      if (input === 'w') setHealthWindow((w) => (w === 'run' ? '24h' : 'run'));
     }
   });
 
@@ -500,6 +503,9 @@ export function App({
           breakers={breakers}
           effectiveConfigLines={effectiveConfigLines ?? []}
           showSecondary={healthSecondary}
+          window={healthWindow}
+          runStartedAt={runCosts.runStartedAt}
+          now={now}
         />
       )}
     </Box>
