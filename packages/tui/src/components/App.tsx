@@ -27,6 +27,7 @@ import {
   type DashboardState,
   initialDashboard,
   isNonTerminalLane,
+  lanesOf,
   legacyFailurePointerFor,
   partitionLanesByActivity,
   reduceDashboard,
@@ -43,6 +44,8 @@ import { TAB_ORDER, type TabName } from '../tabs/types.js';
 import { ApprovalPrompt } from './ApprovalPrompt.js';
 import { Dashboard, staleLanesLine } from './Dashboard.js';
 import { Header } from './Header.js';
+import { summarizeLane } from './LaneList.js';
+import { collapseMerged, LaneView } from './LaneView.js';
 import { RunDetail } from './RunDetail.js';
 import { SteeringComposer } from './SteeringComposer.js';
 import { StopBanner } from './StopBanner.js';
@@ -90,7 +93,7 @@ async function defaultListBreakersFn(file: string): Promise<BreakerRow[]> {
   return breakers.map((b) => ({ provider: b.provider, reason: b.reason, remainingMs: b.remainingMs }));
 }
 
-type View = 'dashboard' | 'detail';
+type View = 'lanes' | 'lane' | 'detail';
 
 interface ComposerState {
   issue: string;
@@ -126,8 +129,10 @@ export function App({
   const [state, setState] = useState<DashboardState>(initialDashboard());
   const [events, setEvents] = useState<FactoryEvent[]>([]);
   const [now, setNow] = useState(Date.now());
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const [view, setView] = useState<View>('dashboard');
+  const [laneIndex, setLaneIndex] = useState(0);
+  const [issueIndex, setIssueIndex] = useState(0);
+  const [mergedExpanded, setMergedExpanded] = useState(false);
+  const [view, setView] = useState<View>('lanes');
   const [stopFlag, setStopFlag] = useState(false);
   const [tab, setTab] = useState<TabName>('dashboard');
   const [queueSnap, setQueueSnap] = useState<QueueSnapshot>({ entries: [] });
@@ -282,7 +287,13 @@ export function App({
   const costsCurrent = resolveCostsSelection(runCosts, state.lanes, costsSelectedIssue);
   const logHeight = Math.max(5, (stdout?.rows ?? 24) - 4);
   const visibleApprovals = pendingApprovals.filter((r) => !answered.has(r.id));
-  const clampedIndex = Math.min(selectedIndex, Math.max(0, activeLanes.length - 1));
+  const groups = lanesOf(activeState);
+  const clampedLane = Math.min(laneIndex, Math.max(0, groups.length - 1));
+  const group = groups[clampedLane];
+  const laneRows = group ? collapseMerged(group.issues, mergedExpanded).rows : [];
+  const clampedIssue = Math.min(issueIndex, Math.max(0, laneRows.length - 1));
+  const singleLane = groups.length === 1;
+  const effectiveView: View = singleLane && view === 'lanes' ? 'lane' : view;
 
   useInput((input, key) => {
     if (composer) {
@@ -364,7 +375,12 @@ export function App({
       activeLanes.length > 0 &&
       visibleApprovals.length === 0
     ) {
-      const activeLane = activeLanes[clampedIndex];
+      const activeLane =
+        activeLanes.length === 1
+          ? activeLanes[0]
+          : effectiveView === 'lanes'
+            ? summarizeLane(group, now).current
+            : laneRows[clampedIssue];
       if (activeLane) {
         setComposer({ issue: activeLane.issue, worktree: activeLane.worktree, text: '', warned: false });
       }
@@ -377,23 +393,43 @@ export function App({
     }
     if (key.tab) {
       setTab((t) => TAB_ORDER[(TAB_ORDER.indexOf(t) + 1) % TAB_ORDER.length]);
-      setView('dashboard');
+      setView('lanes');
+      setMergedExpanded(false);
       return;
     }
     const digit = Number(input);
     if (Number.isInteger(digit) && digit >= 1 && digit <= TAB_ORDER.length) {
       setTab(TAB_ORDER[digit - 1]);
-      setView('dashboard');
+      setView('lanes');
+      setMergedExpanded(false);
       return;
     }
 
     if (tab === 'dashboard') {
-      if (view === 'dashboard') {
-        if (key.upArrow) setSelectedIndex((i) => Math.max(0, i - 1));
-        if (key.downArrow) setSelectedIndex((i) => Math.min(activeLanes.length - 1, i + 1));
-        if (key.return) setView('detail');
+      if (effectiveView === 'lanes') {
+        if (key.upArrow) setLaneIndex(Math.max(0, clampedLane - 1));
+        if (key.downArrow) setLaneIndex(Math.min(groups.length - 1, clampedLane + 1));
+        if (key.return && group) {
+          setIssueIndex(0);
+          setMergedExpanded(false);
+          setView('lane');
+        }
+      } else if (effectiveView === 'lane') {
+        if (key.upArrow) setIssueIndex(Math.max(0, clampedIssue - 1));
+        if (key.downArrow) setIssueIndex(Math.min(laneRows.length - 1, clampedIssue + 1));
+        if (input === 'm') {
+          setMergedExpanded((e) => !e);
+          setIssueIndex(0);
+        }
+        if (key.return && laneRows.length > 0) {
+          setView('detail');
+        }
+        if (key.escape && !singleLane) {
+          setView('lanes');
+          setMergedExpanded(false);
+        }
       } else if (key.escape) {
-        setView('dashboard');
+        setView('lane');
       }
     } else if (tab === 'costs') {
       const at = runCosts.issues.findIndex((i) => i.issue === costsCurrent);
@@ -444,24 +480,42 @@ export function App({
       );
     }
 
-    return view === 'dashboard' ? (
-      <Dashboard
+    const detailRow = effectiveView === 'detail' ? laneRows[clampedIssue] : undefined;
+    if (effectiveView === 'lanes') {
+      return (
+        <Dashboard
+          state={activeState}
+          selectedIndex={clampedLane}
+          now={now}
+          repo={repo}
+          stopReason={stopReason}
+          staleCount={staleCount}
+        />
+      );
+    }
+    if (detailRow) {
+      return (
+        <RunDetail
+          run={detailRow.run}
+          repo={repo}
+          now={now}
+          showBackHint
+          steeringQueued={steeringQueued[detailRow.issue]}
+          failureEvidence={detailRow.failureEvidence}
+          legacyFailurePointer={legacyFailurePointerFor(detailRow)}
+        />
+      );
+    }
+    return (
+      <LaneView
+        group={group}
         state={activeState}
-        selectedIndex={clampedIndex}
+        selectedIndex={clampedIssue}
+        mergedExpanded={mergedExpanded}
         now={now}
-        repo={repo}
+        canGoBack={!singleLane}
         stopReason={stopReason}
         staleCount={staleCount}
-      />
-    ) : (
-      <RunDetail
-        run={activeLanes[clampedIndex].run}
-        repo={repo}
-        now={now}
-        showBackHint
-        steeringQueued={steeringQueued[activeLanes[clampedIndex].issue]}
-        failureEvidence={activeLanes[clampedIndex].failureEvidence}
-        legacyFailurePointer={legacyFailurePointerFor(activeLanes[clampedIndex])}
       />
     );
   }

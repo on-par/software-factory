@@ -12,11 +12,11 @@ function truncate(s: string, max: number): string {
   return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
 }
 
-function phaseLabel(phase: string, round: number | undefined): string {
+export function phaseLabel(phase: string, round: number | undefined): string {
   return round && round > 0 ? `${phase} r${round}` : phase;
 }
 
-function StatusCell({
+export function StatusCell({
   lane,
   now,
   trainPosition,
