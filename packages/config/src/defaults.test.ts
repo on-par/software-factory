@@ -123,6 +123,7 @@ describe('shipped defaults', () => {
   });
 
   it('has the expected factory defaults', () => {
+    expect(defaultFactoryConfig.worktree).not.toHaveProperty('prefix');
     expect(defaultFactoryConfig.timeouts.plan_seconds).toBe(1800);
     expect(defaultFactoryConfig.timeouts.build_seconds).toBe(7200);
     expect(defaultFactoryConfig.worktree.gcTtlDays).toBe(7);

@@ -57,7 +57,7 @@ export interface FactoryDefaults {
     approval_seconds: number;
   };
   merge: { auto: boolean; comment: string };
-  worktree: { prefix: string; parent: string; comment: string; gcTtlDays: number; autoGcOnRun: boolean };
+  worktree: { parent: string; comment: string; gcTtlDays: number; autoGcOnRun: boolean };
   byok: { enabled: boolean; comment: string };
   notifications: Record<string, boolean>;
   cost_tracking: { enabled: boolean; log_file: string; comment: string };
@@ -598,7 +598,6 @@ export const defaultFactoryConfig: FactoryDefaults = {
       'Set FACTORY_MERGE=1 to enable autonomous squash-merge; set FACTORY_MERGE_ADMIN=1 to bypass unmet merge requirements with GitHub admin privileges',
   },
   worktree: {
-    prefix: 'ship-it/',
     parent: '../',
     comment: 'Worktrees created as siblings of the repo',
     gcTtlDays: 7,

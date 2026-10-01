@@ -692,7 +692,7 @@ describe('loadFactoryConfigForRepo', () => {
     expect(loadFactoryConfigForRepo(path)).toEqual(loadFactoryConfig());
   });
 
-  it('merges a mixed file: worktree.gcTtlDays overrides while worktree.prefix stays default', async () => {
+  it('merges a mixed file: worktree.gcTtlDays overrides while worktree.parent stays default', async () => {
     const path = join(dir, 'config.json');
     await writeFile(
       path,
@@ -704,7 +704,8 @@ describe('loadFactoryConfigForRepo', () => {
     );
     const config = loadFactoryConfigForRepo(path);
     expect(config.worktree.gcTtlDays).toBe(30);
-    expect(config.worktree.prefix).toBe(loadFactoryConfig().worktree.prefix);
+    expect(config.worktree.parent).toBe(loadFactoryConfig().worktree.parent);
+    expect(config.worktree).not.toHaveProperty('prefix');
   });
 
   it('replaces array/tuple fields wholesale rather than merging element-wise', async () => {
