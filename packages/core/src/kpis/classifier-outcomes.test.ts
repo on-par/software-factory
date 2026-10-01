@@ -5,6 +5,7 @@ import type { ReviewClass } from '../review/floor.js';
 import type { FactoryEvent } from '../types/index.js';
 import type { ClassifierOutcomeRecord } from './classifier-outcomes.js';
 import {
+  applyHandLabel,
   classifierOutcomeBucket,
   formatClassifierReport,
   joinClassifierOutcomes,
@@ -259,5 +260,34 @@ describe('summarizeClassifierOutcomes / formatClassifierReport (#1727)', () => {
     expect(formatClassifierReport(report).join('\n')).toContain(
       'Model vs floor: stricter 1 (33.3%), equal 1 (33.3%), looser 1 (33.3%); no floor 1',
     );
+  });
+});
+
+describe('applyHandLabel (#1728)', () => {
+  const base = (modelClass: ReviewClass, o: Partial<ClassifierOutcomeRecord> = {}) => ({
+    ...one([classified('1', modelClass)], [source('1', 10)]),
+    ...o,
+  });
+
+  it('label A makes the PR merged clean, even over a heuristic defect', () => {
+    const rec = base('A', { defectFired: true, humanEdited: true, verdict: 'disagree', slipped: true });
+    const out = applyHandLabel(rec, 'A');
+    expect(out).toMatchObject({ defectFired: false, humanEdited: false, verdict: 'agree', slipped: false });
+    expect(classifierOutcomeBucket(out)).toBe('mergedClean');
+    expect(applyHandLabel(base('B'), 'A').verdict).toBe('disagree');
+  });
+
+  it('label B or C records a defect and recomputes the slip', () => {
+    for (const label of ['B', 'C'] as const) {
+      const a = applyHandLabel(base('A'), label);
+      expect(a).toMatchObject({ defectFired: true, defectWindowClosed: true, verdict: 'disagree', slipped: true });
+      const b = applyHandLabel(base('B'), label);
+      expect(b).toMatchObject({ verdict: 'agree', slipped: false });
+    }
+  });
+
+  it('closes the window and clears abandonment', () => {
+    const out = applyHandLabel(base('A', { defectWindowClosed: false, humanAbandoned: true }), 'A');
+    expect(out).toMatchObject({ defectWindowClosed: true, humanAbandoned: false });
   });
 });
