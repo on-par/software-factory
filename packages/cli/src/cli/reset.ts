@@ -1,10 +1,16 @@
-// packages/cli/src/cli/reset.ts — `factory reset <issue...>`: remove an issue's local factory state (#1787).
+// packages/cli/src/cli/reset.ts — `factory reset <issue...>`: remove an issue's local factory state (#1787);
+// dirty/unpushed worktrees and branches are kept unless --force (#1789).
 
 import { existsSync, rmSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 
 import { LaneFileGuard, phaseSnapshotFile, type PortLease, ReworkHistory } from '@on-par/factory-core';
-import { factoryBranchIssue, parseWorktreeList } from '@on-par/factory-core/internal';
+import {
+  countUnpushedCommits,
+  factoryBranchIssue,
+  isWorktreeClean,
+  parseWorktreeList,
+} from '@on-par/factory-core/internal';
 
 export interface ResetDeps {
   repoRoot: string;
@@ -17,8 +23,12 @@ export interface ResetDeps {
   removeWorktree: (path: string) => Promise<void>;
   readLeases: () => PortLease[];
   releaseLease: (worktreeId: string) => Promise<void>;
+  /** Runs a command (cwd defaults to repoRoot in prod); used for the read-only dirty/unpushed probes. */
+  runCommand: (cmd: string, opts?: { cwd?: string }) => Promise<{ stdout: string }>;
   /** Preview only: discover and report, never mutate. */
   dryRun?: boolean;
+  /** Remove worktrees and branches even when dirty or unpushed (#1789). */
+  force?: boolean;
 }
 
 export interface ResetResult {
@@ -42,6 +52,15 @@ const errText = (err: unknown): string => (err instanceof Error ? err.message : 
 
 const shellQuote = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`;
 
+/** Why removing this worktree/branch would lose work, or null when it is safe (same probes as `worktree gc`). */
+async function unsafeReason(deps: ResetDeps, path: string | null, rev: string | null): Promise<string | null> {
+  if (path !== null && !(await isWorktreeClean(deps.runCommand, path))) return 'uncommitted changes';
+  if (rev === null) return 'could not verify it is pushed';
+  const n = await countUnpushedCommits(deps.runCommand, deps.repoRoot, rev);
+  if (n === null) return 'could not verify it is pushed';
+  return n > 0 ? `${n} unpushed commit(s)` : null;
+}
+
 export async function resetIssue(issue: number, deps: ResetDeps): Promise<ResetResult> {
   const { paths, branchPrefix } = deps;
   const dry = deps.dryRun === true;
@@ -61,6 +80,14 @@ export async function resetIssue(issue: number, deps: ResetDeps): Promise<ResetR
         kept.push(`worktree ${entry.path} (current checkout)`);
         protectedBranches.set(entry.branch, entry.path);
         continue;
+      }
+      if (!deps.force) {
+        const why = await unsafeReason(deps, entry.path, entry.head ?? entry.branch);
+        if (why !== null) {
+          kept.push(`worktree ${entry.path} (${why}; pass --force to remove)`);
+          protectedBranches.set(entry.branch, entry.path);
+          continue;
+        }
       }
       try {
         if (!dry) await deps.removeWorktree(entry.path);
@@ -87,6 +114,13 @@ export async function resetIssue(issue: number, deps: ResetDeps): Promise<ResetR
       if (where !== undefined) {
         kept.push(`branch ${b} (checked out in ${where})`);
         continue;
+      }
+      if (!deps.force) {
+        const why = await unsafeReason(deps, null, b);
+        if (why !== null) {
+          kept.push(`branch ${b} (${why}; pass --force to remove)`);
+          continue;
+        }
       }
       try {
         if (!dry) await deps.git(`git branch -D ${shellQuote(b)}`);

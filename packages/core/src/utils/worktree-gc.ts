@@ -478,12 +478,25 @@ async function resolveActiveClaim(
 /** A worktree is clean when it has no modified tracked files. `--untracked-files=no` deliberately
  *  ignores untracked build residue (node_modules, artifacts) — the "live work" signal is tracked-file
  *  modifications. A probe failure (`safeExec` null) ⇒ false ⇒ keep. */
-async function isWorktreeClean(
+export async function isWorktreeClean(
   runCommand: NonNullable<SweepDeps['runCommand']>,
   worktreePath: string,
 ): Promise<boolean> {
   const result = await safeExec(runCommand, 'git status --porcelain --untracked-files=no', { cwd: worktreePath });
   return result !== null && result.stdout.trim() === '';
+}
+
+/** Commits reachable from `rev` that are on no `origin` ref; null when the probe fails or is unparseable (⇒ keep). */
+export async function countUnpushedCommits(
+  runCommand: NonNullable<SweepDeps['runCommand']>,
+  repoRoot: string,
+  rev: string,
+): Promise<number | null> {
+  const result = await safeExec(runCommand, `git rev-list --count ${shellEscape(rev)} --not --remotes=origin`, {
+    cwd: repoRoot,
+  });
+  const n = result === null ? NaN : Number.parseInt(result.stdout.trim(), 10);
+  return Number.isInteger(n) ? n : null;
 }
 
 export async function sweepWorktrees(
@@ -643,13 +656,8 @@ export async function sweepWorktrees(
           } else if (entry.head === null) {
             hold('decomposed parent HEAD could not be resolved');
           } else {
-            const unpushed = await safeExec(
-              runCommand,
-              `git rev-list --count ${shellEscape(entry.head)} --not --remotes=origin`,
-              { cwd: repoRoot },
-            );
-            const unpushedCount = unpushed === null ? NaN : Number.parseInt(unpushed.stdout.trim(), 10);
-            if (!Number.isInteger(unpushedCount)) {
+            const unpushedCount = await countUnpushedCommits(runCommand, repoRoot, entry.head);
+            if (unpushedCount === null) {
               hold('could not verify decomposed parent is pushed');
             } else if (unpushedCount > 0) {
               hold(`decomposed parent has ${unpushedCount} unpushed commit(s)`);
