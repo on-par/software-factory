@@ -4773,7 +4773,7 @@ export async function main() {
 
   program
     .command('resume-approved')
-    .description('Land open factory PRs (ship-it/*) whose review is now approved; skip the rest')
+    .description('Land open factory PRs (factory/*, plus legacy ship-it/*) whose review is now approved; skip the rest')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
     .action(async (opts) => {
       await cmdResumeApproved(opts);

@@ -673,7 +673,7 @@ export const defaultFactoryConfig: FactoryDefaults = {
     lane: 'auto',
     maxPerCycle: 20,
     comment:
-      'Always-on auto-ingest. When enabled, `factory supervise` polls each cycle for open issues carrying `label` and appends new ones (deduped against the queue and open ship-it/* PRs) to the queue under `lane`. Enable per-run with FACTORY_AUTO_INGEST=1; disable with =0.',
+      'Always-on auto-ingest. When enabled, `factory supervise` polls each cycle for open issues carrying `label` and appends new ones (deduped against the queue and open factory/* PRs, legacy ship-it/* included) to the queue under `lane`. Enable per-run with FACTORY_AUTO_INGEST=1; disable with =0.',
   },
   environment: {
     ports: {
