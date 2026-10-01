@@ -924,7 +924,7 @@ describe('cli commands (via main dispatch)', () => {
     });
   });
 
-  describe('ready', () => {
+  describe('check / ready', () => {
     const COMPLETE_BODY = `### Problem statement
 
 Something is wrong.
@@ -960,6 +960,40 @@ bash scripts/verify.sh
       expect(res).toEqual({ exited: true, code: 1 });
       expect(logged()).toContain('missing: Verification');
       expect(errored()).toContain('issue #421 is not factory-ready — missing: Verification');
+    });
+
+    const bigBody = COMPLETE_BODY.replace(
+      '- [ ] it works',
+      Array.from({ length: 7 }, (_, i) => `- [ ] c${i}`).join('\n'),
+    );
+
+    it('check prints the runs-as-is size line and exits 0', async () => {
+      h.octokit.rest.issues.get = vi.fn(async () => ({ data: { title: 'Fix it', body: COMPLETE_BODY } }));
+      const res = await runMain('check', '421');
+      expect(res).toEqual({ exited: false, code: undefined });
+      expect(logged()).toContain('size: runs as-is');
+    });
+
+    it('exits 3 and says would split for an oversized issue', async () => {
+      h.octokit.rest.issues.get = vi.fn(async () => ({ data: { title: 'Fix it', body: bigBody } }));
+      const res = await runMain('check', '421');
+      expect(res).toEqual({ exited: true, code: 3 });
+      expect(logged()).toContain('would split');
+    });
+
+    it('ready is an alias with identical output', async () => {
+      h.octokit.rest.issues.get = vi.fn(async () => ({ data: { title: 'Fix it', body: COMPLETE_BODY } }));
+      await runMain('check', '421');
+      const viaCheck = logged();
+      logSpy.mockClear();
+      await runMain('ready', '421');
+      expect(logged()).toBe(viaCheck);
+    });
+
+    it('--json prints one parseable object', async () => {
+      h.octokit.rest.issues.get = vi.fn(async () => ({ data: { title: 'Fix it', body: COMPLETE_BODY } }));
+      await runMain('check', '421', '--json');
+      expect(JSON.parse(logged())).toMatchObject({ issue: 421, exitCode: 0 });
     });
 
     it('exits 2 on an invalid issue argument', async () => {
@@ -5193,7 +5227,7 @@ describe('factory --help layout', () => {
     const body = help.slice(start + heading.length + 1).split('\n\n')[0];
     return body
       .split('\n')
-      .map((line) => line.trim().split(/\s+/)[0])
+      .map((line) => line.trim().split(/\s+/)[0].split('|')[0])
       .filter((name) => /^[a-z]/.test(name));
   }
 

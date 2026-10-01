@@ -145,6 +145,7 @@ factory models [--doctor]           List models with tiers, cost, and availabili
 # Queue
 factory triage [--product <p>]      Have a model propose a queue into .factory/queue.proposed
 factory queue add <lane> <N...>     Queue GitHub issues into a lane (factory:queued labels)
+factory check <N> [--json]          Read-only pre-flight: missing fields, and whether the size gate runs it as-is or would split it (alias: ready)
 
 # Observe
 factory status                      Show active runs, the GitHub queue, provider health, and recent events
@@ -152,6 +153,8 @@ factory logs [--follow]             Print pipeline events
 factory cost                        Show recorded model spend by model
 factory usage                       Report 5-hour subscription usage
 ```
+
+`factory check` exits 0 when the issue is ready and runs as-is, 1 when fields are missing, and 3 when it would split.
 
 ### `factory run-issue --run-children`
 
