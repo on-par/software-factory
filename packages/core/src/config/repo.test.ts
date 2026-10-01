@@ -869,6 +869,25 @@ describe('describeEffectiveConfig', () => {
     expect(lines).toContainEqual('Merge admin: on (.factory/config.json)');
   });
 
+  it('shows the PR classifier policy with its source (#1724)', () => {
+    const stub = new StubModelExecutor({ scripts: {} });
+    const router = new ModelRouter(models, routes, false, stub);
+    const base = { router, repo: null, env: {}, repoConfigPath: '.factory/config.json' };
+    expect(describeEffectiveConfig(base)).toContainEqual('PR classifier: off (default)');
+    expect(describeEffectiveConfig({ ...base, env: { FACTORY_PR_CLASSIFIER: '1' } })).toContainEqual(
+      'PR classifier: on (env: FACTORY_PR_CLASSIFIER)',
+    );
+    expect(describeEffectiveConfig({ ...base, prClassifier: { enabled: true, source: 'flag' } })).toContainEqual(
+      'PR classifier: on (flag: --pr-classifier)',
+    );
+    expect(describeEffectiveConfig({ ...base, prClassifier: { enabled: false, source: 'flag' } })).toContainEqual(
+      'PR classifier: off (flag: --no-pr-classifier)',
+    );
+    expect(describeEffectiveConfig({ ...base, prClassifier: { enabled: true, source: 'repo' } })).toContainEqual(
+      'PR classifier: on (.factory/config.json)',
+    );
+  });
+
   it('falls back to an env-only merge policy when none is passed', () => {
     const stub = new StubModelExecutor({ scripts: {} });
     const router = new ModelRouter(models, routes, false, stub);

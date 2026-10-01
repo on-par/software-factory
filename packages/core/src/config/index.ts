@@ -109,6 +109,7 @@ const FactoryConfigSchema = z.object({
         .object({
           auto: z.boolean().optional(),
           admin: z.boolean().optional(),
+          classifier: z.boolean().optional(),
         })
         .strict()
         .optional(),
@@ -521,6 +522,25 @@ export interface EffectiveMergePolicy {
  *  supplied" and changes nothing; a boolean wins over config file and env alike. */
 export interface MergePolicyOverrides {
   auto?: boolean;
+  /** From `--pr-classifier` / `--no-pr-classifier` (#1724). */
+  classifier?: boolean;
+}
+
+export interface EffectivePrClassifierPolicy {
+  enabled: boolean;
+  source: MergePolicySource;
+}
+
+/** Resolve the PR classifier gate (#1724): flag > run.merge.classifier > FACTORY_PR_CLASSIFIER=1 > off. */
+export function resolvePrClassifierPolicy(
+  config: FactoryConfig,
+  env: NodeJS.ProcessEnv = process.env,
+  overrides: MergePolicyOverrides = {},
+): EffectivePrClassifierPolicy {
+  if (overrides.classifier !== undefined) return { enabled: overrides.classifier, source: 'flag' };
+  if (config.run?.merge?.classifier !== undefined) return { enabled: config.run.merge.classifier, source: 'repo' };
+  if (env.FACTORY_PR_CLASSIFIER === '1') return { enabled: true, source: 'env' };
+  return { enabled: false, source: 'default' };
 }
 
 /** Resolve auto-merge/admin-merge: an explicit per-invocation `overrides.auto` (from

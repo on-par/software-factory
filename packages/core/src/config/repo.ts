@@ -23,6 +23,7 @@ import {
   resolveExperimental,
   resolveLocalOnly,
   type EffectiveMergePolicy,
+  type EffectivePrClassifierPolicy,
   type MergePolicySource,
   type ModelsConfig,
 } from './index.js';
@@ -730,6 +731,8 @@ export interface DescribeEffectiveConfigOpts {
    *  FactoryConfig and pass it in. Omitting it falls back to an env-only policy (as if no
    *  repo file set merge/admin at all). */
   mergePolicy?: EffectiveMergePolicy;
+  /** PR classifier gate (#1724), resolved via `resolvePrClassifierPolicy`. Omitted ⇒ env-only. */
+  prClassifier?: EffectivePrClassifierPolicy;
 }
 
 function defaultMergePolicy(env: NodeJS.ProcessEnv): EffectiveMergePolicy {
@@ -828,6 +831,17 @@ export function describeEffectiveConfig(opts: DescribeEffectiveConfigOpts): stri
   );
   lines.push(
     `Merge admin: ${mergePolicy.admin ? 'on' : 'off'} ${sourceLabel(mergePolicy.sources.admin, repoConfigPath, 'FACTORY_MERGE_ADMIN')}`,
+  );
+  const prClassifier: EffectivePrClassifierPolicy =
+    opts.prClassifier ??
+    (env.FACTORY_PR_CLASSIFIER === '1' ? { enabled: true, source: 'env' } : { enabled: false, source: 'default' });
+  lines.push(
+    `PR classifier: ${prClassifier.enabled ? 'on' : 'off'} ${sourceLabel(
+      prClassifier.source,
+      repoConfigPath,
+      'FACTORY_PR_CLASSIFIER',
+      prClassifier.enabled ? '--pr-classifier' : '--no-pr-classifier',
+    )}`,
   );
 
   const watchdog = resolveWatchdogPolicy(repo, env);
