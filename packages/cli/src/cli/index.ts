@@ -1916,6 +1916,68 @@ async function runAutoWorktreeGc(
   }
 }
 
+export interface LaneGcDeps {
+  loadConfig?: (configPath: string) => Pick<FactoryConfig, 'worktree' | 'sandbox'>;
+  sweep?: typeof sweepWorktrees;
+  emitEvent?: typeof logEvent;
+  octokit?: () => NonNullable<Parameters<typeof sweepWorktrees>[1]>['octokit'];
+}
+
+/** Mid-run worktree GC between issues in a lane (#1757). Honors worktree.autoGcOnRun, holds
+ *  the git + file locks every worktree mutation holds, and skips (never waits) when another
+ *  lane holds the land lock so a sweep can never race a merge. Logs worktree-gc only when it
+ *  removed something. Never throws. */
+export async function sweepBetweenLaneIssues(
+  issue: number,
+  lane: string,
+  repoRoot: string,
+  ghRepo: string,
+  paths: ReturnType<typeof getFactoryPaths>,
+  deps: LaneGcDeps = {},
+): Promise<'disabled' | 'land-in-progress' | 'swept' | 'failed'> {
+  const {
+    loadConfig = loadFactoryConfigForRepo,
+    sweep = sweepWorktrees,
+    emitEvent = logEvent,
+    octokit = getOctokit,
+  } = deps;
+  try {
+    const cfg = loadConfig(paths.config);
+    if (!cfg.worktree.autoGcOnRun) return 'disabled';
+    const gcLog = (type: EventKind, msg: string) => emitEvent(paths.events, type, issue, msg, { lane });
+    const sandbox = gcWorktreeSandbox(cfg.sandbox, repoRoot);
+    const report = await withGitLock(repoRoot, () =>
+      withFileLock(
+        paths.mergeLock,
+        () =>
+          withFileLock(paths.gitLock, () =>
+            sweep(
+              { repoRoot, ttlDays: cfg.worktree.gcTtlDays, repo: ghRepo, branchPrefix: resolveBranchPrefix() },
+              { log: gcLog, octokit: octokit(), sandbox },
+            ),
+          ),
+        { timeoutMs: 0 },
+      ),
+    );
+    if (report.removed.length > 0) {
+      emitEvent(
+        paths.events,
+        'worktree-gc',
+        issue,
+        `removed ${report.removed.length} stale worktree(s), kept ${report.kept}`,
+        { lane },
+      );
+      console.log(formatGcReport(report));
+    }
+    return 'swept';
+  } catch (err: any) {
+    // A zero-timeout merge-lock acquire failing means another lane is mid-land: skip quietly.
+    if (err?.reason === 'timeout') return 'land-in-progress';
+    emitEvent(paths.events, 'warn', issue, `mid-run worktree gc failed: ${err?.message ?? String(err)}`, { lane });
+    return 'failed';
+  }
+}
+
 async function cmdShip(
   issueNum: number,
   opts: {
@@ -3152,6 +3214,8 @@ async function cmdRun(
           runLane(planned.lane, planned.issues, repoRoot, ghRepo, paths, {
             ...planned.deps,
             ship: (issue, o, c) => shipIssue(issue, { ...o, branchPrefix }, c),
+            sweepFinished: (issue) =>
+              sweepBetweenLaneIssues(issue, planned.lane, repoRoot, ghRepo, paths).then(() => {}),
             reapWorktree: (issue) =>
               reapParkedLaneWorktree(
                 issue,
@@ -3346,6 +3410,10 @@ type RunLaneDeps = {
   /** Eager park-time worktree reap (#1007). Defaults to a no-op so injected-deps callers and
    *  tests are unaffected; cmdRun wires it to reapParkedLaneWorktree. */
   reapWorktree?: (issue: number) => Promise<void>;
+  /** Between-issues worktree GC pass (#1757), run after every terminal outcome before the
+   *  lane moves on. Defaults to a no-op so injected-deps callers and tests are unaffected;
+   *  cmdRun wires it to sweepBetweenLaneIssues. */
+  sweepFinished?: (issue: number) => Promise<void>;
   /** Number of issues still claimable on this lane's remote queue (#1222). Absent for
    *  static local lanes, whose pending list is the whole truth. */
   countRemaining?: () => Promise<number>;
@@ -3507,6 +3575,7 @@ export async function runLane(
     releaseIssue = async () => {},
     heartbeat,
     reapWorktree = async () => {},
+    sweepFinished = async () => {},
     countRemaining,
   } = deps;
   let merged = 0;
@@ -3528,6 +3597,12 @@ export async function runLane(
     } catch {
       return local;
     }
+  };
+  // Every terminal outcome releases the claim, then gives finished worktrees a GC pass before
+  // the lane moves on (#1757). The pass is fail-closed and must never change lane flow.
+  const settle = async (issue: number, outcome: QueueReleaseOutcome): Promise<void> => {
+    await releaseIssue(issue, outcome);
+    await sweepFinished(issue).catch(() => {});
   };
   for (let i = 0; ; i++) {
     if (i >= pending.length) {
@@ -3554,7 +3629,7 @@ export async function runLane(
       // A preflight-parked issue may still have a stale worktree from a prior run; the reap
       // is fail-closed and must never change lane flow.
       await reapWorktree(issue).catch(() => {});
-      await releaseIssue(issue, 'parked');
+      await settle(issue, 'parked');
       parked++;
       continue;
     }
@@ -3565,19 +3640,19 @@ export async function runLane(
           : await withHeartbeat(issue, heartbeat, () => ship(issue, {}, { repoRoot, ghRepo, paths, lane }));
       await withHeartbeat(issue, heartbeat, () => waitMerge(issue, branch, repoRoot, ghRepo, paths));
       merged++;
-      await releaseIssue(issue, 'done');
+      await settle(issue, 'done');
     } catch (err: any) {
       if (err instanceof AwaitingReviewError) {
         // The land path already emitted the awaiting-review event and cleaned the
         // worktree — this is a clean outcome, not a park; move to the next issue.
         awaitingReview++;
-        await releaseIssue(issue, 'done');
+        await settle(issue, 'done');
         continue;
       }
       if (err instanceof IssueSkippedError) {
         // shipIssue already emitted skipped-already-closed; nothing was attempted.
         skipped++;
-        await releaseIssue(issue, 'done');
+        await settle(issue, 'done');
         continue;
       }
       if (err instanceof IssueDecomposedError) {
@@ -3594,7 +3669,7 @@ export async function runLane(
           `lane '${lane}' continuing with ${fresh.length} child issue(s) in place of #${issue}`,
           { lane },
         );
-        await releaseIssue(issue, 'done');
+        await settle(issue, 'done');
         continue;
       }
       const reason = parkReasonFor(err);
@@ -3612,7 +3687,7 @@ export async function runLane(
       // Remove the parked lane's own worktree so a parked issue stops leaving a sibling
       // checkout behind (#1007); fail-closed and never allowed to change lane flow.
       await reapWorktree(issue).catch(() => {});
-      await releaseIssue(issue, 'parked');
+      await settle(issue, 'parked');
       parked++;
       continue;
     }

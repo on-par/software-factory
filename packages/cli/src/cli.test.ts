@@ -54,6 +54,7 @@ import {
   resolveLaneBaseUrl,
   resolveUsageKnobs,
   runLane,
+  sweepBetweenLaneIssues,
   scaffoldConstitution,
   squashMergeAndDelete,
   startLaneProxy,
@@ -4029,6 +4030,246 @@ describe('cli', () => {
       });
 
       expect(calls).toEqual([['ship', 1]]);
+    });
+
+    describe('between-issues sweep (#1757)', () => {
+      it('sweeps after each release and before the next issue ships', async () => {
+        const calls: any[] = [];
+        await runLane('app', [1, 2], '/repo', 'on-par/software-factory', paths, {
+          ship: async (issue) => {
+            calls.push(['ship', issue]);
+            if (issue === 1) throw new LaneParkError('nope', 'escalate');
+            return `ship-it/${issue}-x`;
+          },
+          waitMerge: async () => {},
+          releaseIssue: async (issue, outcome) => {
+            calls.push(['release', issue, outcome]);
+          },
+          sweepFinished: async (issue) => {
+            calls.push(['sweep', issue]);
+          },
+          pathExists: () => false,
+          emitEvent: () => {},
+        });
+
+        expect(calls).toEqual([
+          ['ship', 1],
+          ['release', 1, 'parked'],
+          ['sweep', 1],
+          ['ship', 2],
+          ['release', 2, 'done'],
+          ['sweep', 2],
+        ]);
+      });
+
+      it.each([
+        ['awaiting review', () => new AwaitingReviewError('PR #9 awaiting review', 9)],
+        ['skipped', () => new IssueSkippedError('already closed', 'already-closed')],
+        ['decomposed', () => new IssueDecomposedError('split', [])],
+      ])('sweeps once after a %s outcome', async (_name, makeErr) => {
+        const calls: any[] = [];
+        await runLane('app', [5], '/repo', 'on-par/software-factory', paths, {
+          ship: async () => {
+            throw makeErr();
+          },
+          releaseIssue: async (issue, outcome) => {
+            calls.push(['release', issue, outcome]);
+          },
+          sweepFinished: async (issue) => {
+            calls.push(['sweep', issue]);
+          },
+          pathExists: () => false,
+          emitEvent: () => {},
+        });
+
+        expect(calls).toEqual([
+          ['release', 5, 'done'],
+          ['sweep', 5],
+        ]);
+      });
+
+      it('sweeps after a preflight park', async () => {
+        const calls: any[] = [];
+        const claims = [{ issue: 6, decision: { kind: 'park' as const, reason: 'held' } }];
+        await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
+          claimNext: async () => claims.shift() ?? null,
+          releaseIssue: async (issue, outcome) => {
+            calls.push(['release', issue, outcome]);
+          },
+          sweepFinished: async (issue) => {
+            calls.push(['sweep', issue]);
+          },
+          pathExists: () => false,
+          emitEvent: () => {},
+        });
+
+        expect(calls).toEqual([
+          ['release', 6, 'parked'],
+          ['sweep', 6],
+        ]);
+      });
+
+      it('does not sweep on STOP', async () => {
+        const sweepFinished = vi.fn(async () => {});
+        await runLane('app', [1], '/repo', 'on-par/software-factory', paths, {
+          ship: async () => 'b',
+          sweepFinished,
+          pathExists: () => true,
+          emitEvent: () => {},
+        });
+
+        expect(sweepFinished).not.toHaveBeenCalled();
+      });
+
+      it('a failing sweep never changes lane flow', async () => {
+        const shipped: number[] = [];
+        const events: string[] = [];
+        await runLane('app', [1, 2], '/repo', 'on-par/software-factory', paths, {
+          ship: async (issue) => {
+            shipped.push(issue);
+            return `ship-it/${issue}-x`;
+          },
+          waitMerge: async () => {},
+          sweepFinished: async () => {
+            throw new Error('sweep exploded');
+          },
+          pathExists: () => false,
+          emitEvent: (_p, kind) => {
+            events.push(kind);
+          },
+        });
+
+        expect(shipped).toEqual([1, 2]);
+        expect(events.filter((k) => k === 'lane-done')).toHaveLength(1);
+        expect(events).not.toContain('parked');
+      });
+    });
+  });
+
+  describe('sweepBetweenLaneIssues (#1757)', () => {
+    let tmp: string;
+    let lanePaths: any;
+    const idleReport = {
+      removed: [],
+      kept: 3,
+      dryRun: false,
+      issueNotFound: [],
+      issueUnverifiable: [],
+      noActiveClaim: [],
+      held: [],
+    };
+    const cfg = (autoGcOnRun: boolean): any => ({ worktree: { autoGcOnRun, gcTtlDays: 7 } });
+
+    beforeEach(async () => {
+      tmp = await mkdtemp(join(tmpdir(), 'sweep-between-'));
+      lanePaths = {
+        events: join(tmp, 'events.ndjson'),
+        config: join(tmp, 'config.yaml'),
+        mergeLock: join(tmp, 'merge.lock'),
+        gitLock: join(tmp, 'git.lock'),
+      };
+    });
+    afterEach(async () => {
+      await rm(tmp, { recursive: true, force: true });
+    });
+
+    it('does nothing when worktree.autoGcOnRun is false', async () => {
+      const sweep = vi.fn();
+      const emitEvent = vi.fn();
+      const result = await sweepBetweenLaneIssues(7, 'app', tmp, 'o/r', lanePaths, {
+        loadConfig: () => cfg(false),
+        sweep: sweep as any,
+        emitEvent: emitEvent as any,
+        octokit: () => undefined as any,
+      });
+
+      expect(result).toBe('disabled');
+      expect(sweep).not.toHaveBeenCalled();
+      expect(emitEvent).not.toHaveBeenCalled();
+    });
+
+    it('skips without stealing when another lane holds the land lock', async () => {
+      await mkdir(lanePaths.mergeLock, { recursive: true });
+      await writeFile(join(lanePaths.mergeLock, 'pid'), String(process.pid));
+      const sweep = vi.fn();
+      const emitEvent = vi.fn();
+      const result = await sweepBetweenLaneIssues(7, 'app', tmp, 'o/r', lanePaths, {
+        loadConfig: () => cfg(true),
+        sweep: sweep as any,
+        emitEvent: emitEvent as any,
+        octokit: () => undefined as any,
+      });
+
+      expect(result).toBe('land-in-progress');
+      expect(sweep).not.toHaveBeenCalled();
+      expect(emitEvent.mock.calls.filter((c) => c[1] === 'worktree-gc')).toHaveLength(0);
+      expect(existsSync(lanePaths.mergeLock)).toBe(true);
+    });
+
+    it('stays quiet when nothing was removed and releases both locks', async () => {
+      const emitEvent = vi.fn();
+      const result = await sweepBetweenLaneIssues(7, 'app', tmp, 'o/r', lanePaths, {
+        loadConfig: () => cfg(true),
+        sweep: (async () => idleReport) as any,
+        emitEvent: emitEvent as any,
+        octokit: () => undefined as any,
+      });
+
+      expect(result).toBe('swept');
+      expect(emitEvent.mock.calls.filter((c) => c[1] === 'worktree-gc')).toHaveLength(0);
+      expect(existsSync(lanePaths.mergeLock)).toBe(false);
+      expect(existsSync(lanePaths.gitLock)).toBe(false);
+    });
+
+    it('logs one worktree-gc event when it removed something', async () => {
+      const emitEvent = vi.fn();
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const result = await sweepBetweenLaneIssues(7, 'app', tmp, 'o/r', lanePaths, {
+          loadConfig: () => cfg(true),
+          sweep: (async () => ({
+            ...idleReport,
+            removed: [
+              {
+                path: '/wt/1',
+                branch: 'ship-it/1-x',
+                ageDays: 9,
+                reason: 'issue-closed',
+                scrubbedFiles: [],
+                branchDeleted: true,
+              },
+            ],
+          })) as any,
+          emitEvent: emitEvent as any,
+          octokit: () => undefined as any,
+        });
+
+        expect(result).toBe('swept');
+        const gc = emitEvent.mock.calls.filter((c) => c[1] === 'worktree-gc');
+        expect(gc).toHaveLength(1);
+        expect(gc[0][2]).toBe(7);
+        expect(gc[0][3]).toMatch(/removed 1 stale worktree\(s\), kept/);
+        expect(gc[0][4]).toEqual({ lane: 'app' });
+      } finally {
+        log.mockRestore();
+      }
+    });
+
+    it('never throws: a failing sweep becomes a warn event', async () => {
+      const emitEvent = vi.fn();
+      const result = await sweepBetweenLaneIssues(7, 'app', tmp, 'o/r', lanePaths, {
+        loadConfig: () => cfg(true),
+        sweep: (async () => {
+          throw new Error('boom');
+        }) as any,
+        emitEvent: emitEvent as any,
+        octokit: () => undefined as any,
+      });
+
+      expect(result).toBe('failed');
+      const warns = emitEvent.mock.calls.filter((c) => c[1] === 'warn');
+      expect(warns).toHaveLength(1);
+      expect(warns[0][3]).toContain('mid-run worktree gc failed: boom');
     });
   });
 
