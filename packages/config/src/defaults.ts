@@ -598,8 +598,11 @@ export const defaultFactoryConfig: FactoryDefaults = {
       'Set FACTORY_MERGE=1 to enable autonomous squash-merge; set FACTORY_MERGE_ADMIN=1 to bypass unmet merge requirements with GitHub admin privileges',
   },
   worktree: {
-    parent: '../',
-    comment: 'Worktrees created as siblings of the repo',
+    parent: '~/.factory/worktrees',
+    comment:
+      'Where lane worktrees are created. "~/..." or an absolute path is a shared root, namespaced as <parent>/<owner>/<repo>/. ' +
+      'A repo-relative path is used as-is: "../" gives the old sibling layout; ".factory/worktrees" keeps them inside the repo ' +
+      "(auto-added to .git/info/exclude) but the repo's own tools (jest, eslint, tsc, globbing scripts) may crawl into those nested checkouts.",
     gcTtlDays: 7,
     autoGcOnRun: true,
   },

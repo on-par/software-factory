@@ -43,8 +43,7 @@ const RUNTIME_NOTES: Record<string, string> = {
     'FACTORY_APPROVAL_TIMEOUT beat these values.',
   environment: 'Per-lane runtime environment.',
   'environment.processGroups': "Grace period in ms between SIGTERM and SIGKILL when a lane's process group is swept.",
-  workspace:
-    'Lane workspace backend: "host" (sibling git worktrees) or "disposable-docker" (a managed container per lane).',
+  workspace: 'Lane workspace backend: "host" (git worktrees) or "disposable-docker" (a managed container per lane).',
 };
 
 function wrap(text: string, width: number): string[] {

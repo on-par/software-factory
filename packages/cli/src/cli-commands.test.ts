@@ -50,7 +50,7 @@ const h = vi.hoisted(() => {
     routerResolve: (_route: string): string | undefined => 'claude-model',
     factoryConfig: {
       merge: { auto: false, comment: '' },
-      worktree: { gcTtlDays: 7, autoGcOnRun: false },
+      worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: false },
       sandbox: {
         enabled: true,
         network: { allow: ['api.anthropic.com', 'github.com'] },
@@ -426,7 +426,7 @@ beforeEach(() => {
   h.routerResolve = () => 'claude-model';
   h.factoryConfig = {
     merge: { auto: false, comment: '' },
-    worktree: { gcTtlDays: 7, autoGcOnRun: false },
+    worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: false },
     sandbox: {
       enabled: true,
       network: { allow: ['api.anthropic.com', 'github.com'] },
@@ -2080,7 +2080,10 @@ bash scripts/verify.sh
     });
 
     it('runs worktree gc before lanes when worktree.autoGcOnRun is true', async () => {
-      h.factoryConfig = { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: true } };
+      h.factoryConfig = {
+        merge: { auto: false, comment: '' },
+        worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: true },
+      };
       writeFileSync(paths().queue, '# header\napp 1\n');
       const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
@@ -2092,7 +2095,10 @@ bash scripts/verify.sh
     });
 
     it('does not run worktree gc when worktree.autoGcOnRun is false', async () => {
-      h.factoryConfig = { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: false } };
+      h.factoryConfig = {
+        merge: { auto: false, comment: '' },
+        worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: false },
+      };
       writeFileSync(paths().queue, '# header\napp 1\n');
       const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
@@ -2100,7 +2106,10 @@ bash scripts/verify.sh
     });
 
     it('proceeds with the run even when worktree gc rejects', async () => {
-      h.factoryConfig = { merge: { auto: false, comment: '' }, worktree: { gcTtlDays: 7, autoGcOnRun: true } };
+      h.factoryConfig = {
+        merge: { auto: false, comment: '' },
+        worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: true },
+      };
       (sweepWorktrees as any).mockRejectedValueOnce(new Error('gc boom'));
       writeFileSync(paths().queue, '# header\napp 1\n');
       const res = await runMain('run', '--local-queue');
@@ -2918,7 +2927,7 @@ bash scripts/verify.sh
 
   describe('ship (via cmdShip)', () => {
     it('runs worktree gc before shipping when worktree.autoGcOnRun is true (#1756)', async () => {
-      h.factoryConfig = { ...h.factoryConfig, worktree: { gcTtlDays: 7, autoGcOnRun: true } };
+      h.factoryConfig = { ...h.factoryConfig, worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: true } };
       const res = await runMain('ship', '5');
       expect(res.exited).toBe(false);
       expect(sweepWorktrees).toHaveBeenCalledWith(
@@ -3168,7 +3177,7 @@ bash scripts/verify.sh
 
   describe('run-issue (one-shot)', () => {
     it('runs worktree gc before shipping when worktree.autoGcOnRun is true (#1756)', async () => {
-      h.factoryConfig = { ...h.factoryConfig, worktree: { gcTtlDays: 7, autoGcOnRun: true } };
+      h.factoryConfig = { ...h.factoryConfig, worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: true } };
       const res = await runMain('run-issue', '5');
       expect(res.exited).toBe(false);
       expect(sweepWorktrees).toHaveBeenCalledWith(
