@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path';
 
 import type { EventKind } from '../events/kinds.js';
 import { createLogger } from '../logger/index.js';
+import type { PrClassificationRecord } from '../review/classifier.js';
 import type { CostEntry, FailoverReason, LogLevel, ReadinessInfo, ReworkInfo } from '../types/index.js';
 import { levelForType } from './format.js';
 import { execGit } from './git-exec.js';
@@ -29,6 +30,7 @@ export function logEvent(
     level?: LogLevel;
     rework?: ReworkInfo;
     readiness?: ReadinessInfo;
+    prClassification?: PrClassificationRecord;
     actor?: string;
     model?: string;
     tokens?: { input: number; output: number };
@@ -41,6 +43,7 @@ export function logEvent(
     failoverReason?: FailoverReason;
     rework?: ReworkInfo;
     readiness?: ReadinessInfo;
+    prClassification?: PrClassificationRecord;
     actor?: string;
     model?: string;
     tokens?: { input: number; output: number };
@@ -49,6 +52,7 @@ export function logEvent(
   if (extra?.failoverReason) meta.failoverReason = extra.failoverReason;
   if (extra?.rework) meta.rework = extra.rework;
   if (extra?.readiness) meta.readiness = extra.readiness;
+  if (extra?.prClassification) meta.prClassification = extra.prClassification;
   if (extra?.actor) meta.actor = extra.actor;
   if (extra?.model) meta.model = extra.model;
   if (extra?.tokens) meta.tokens = extra.tokens;

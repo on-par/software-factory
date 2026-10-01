@@ -12,6 +12,7 @@ import {
   type ReviewFloorResult,
   type ReviewFloorRuleSet,
 } from './floor.js';
+import type { PrShadowVerdict } from './classifier.js';
 
 /** The classifier's pre-SHIP decision for one run (#1724). */
 export interface ReviewRouting {
@@ -23,6 +24,8 @@ export interface ReviewRouting {
   reason?: string;
   /** Error message when the floor threw. */
   error?: string;
+  /** Shadow model verdict (#1725, ADR-0121) — recorded only; never affects `gated`. */
+  shadow?: PrShadowVerdict;
 }
 
 function errorMessage(err: unknown): string {

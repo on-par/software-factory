@@ -510,6 +510,18 @@ export type {
 } from './review/floor.js';
 export { computeReviewFloor, DEFAULT_REVIEW_FLOOR_RULES } from './review/floor.js';
 
+// PR classifier shadow verdict (#1725)
+export type { PrClassificationRecord, PrClassifierClaim, PrShadowInput, PrShadowVerdict } from './review/classifier.js';
+export {
+  buildClassifierPrompt,
+  changedPathsFromDiff,
+  CLASSIFIER_PROMPT_VERSION,
+  classifierPolicyVersion,
+  classifyPrShadow,
+  parseClassifierOutput,
+  toClassificationRecord,
+} from './review/classifier.js';
+
 // PR classifier routing (#1724)
 export type { ReviewRouting } from './review/routing.js';
 export { classifierGateReason, parseNumstat, readReviewFloorChanges, resolveReviewRouting } from './review/routing.js';
