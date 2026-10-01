@@ -14,7 +14,7 @@ const DEFAULT_MAX_PER_CYCLE = 20;
 
 // ---------- Branch parsing ----------
 
-/** Extract the issue number from a factory branch like "ship-it/388-foo". Returns null otherwise. */
+/** Extract the issue number from a factory branch like "factory/388-foo". Returns null otherwise. */
 export function issueFromFactoryBranch(branch: string, prefix: string): number | null {
   const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const match = new RegExp(`^${escapedPrefix}/(\\d+)-`).exec(branch);
@@ -33,7 +33,7 @@ export interface AutoIngestOptions {
   lane?: string;
   /** Cap on issues appended per cycle. Defaults to 20. */
   maxPerCycle?: number;
-  /** Factory branch prefix used to recognize in-flight PRs. Defaults to branchPrefixSlug(). Legacy `ship-it/` PRs are also recognized. */
+  /** Factory branch prefix used to recognize in-flight PRs. Defaults to branchPrefixSlug(). Legacy-prefix (LEGACY_BRANCH_PREFIX) PRs are also recognized. */
   branchPrefix?: string;
   /** Admits every candidate even when two name the same file. Defaults to false. */
   forceAdmit?: boolean;
