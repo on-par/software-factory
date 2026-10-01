@@ -928,6 +928,32 @@ describe('cli', () => {
     } as any;
     const ingestCfg = { enabled: true, label: 'ready', lane: 'auto', maxPerCycle: 20 };
 
+    it.each([
+      [{ branchPrefix: 'sf' }, 'sf'],
+      [{}, 'factory'],
+    ])('passes the branch prefix to auto-ingest (%j)', async (deps, expected) => {
+      let seen: string | undefined;
+      const hook = createIngestHook('/repo', paths, ingestCfg, {
+        ...deps,
+        runAutoIngestFn: async (opts) => {
+          seen = opts.branchPrefix;
+          return {
+            scannedAt: '2026-07-20T00:00:00.000Z',
+            candidates: 0,
+            appended: [],
+            skippedInQueue: [],
+            skippedInFlight: [],
+            skippedStale: [],
+            skippedFileOverlap: [],
+            watermark: '2026-07-20T00:00:00.000Z',
+          };
+        },
+        emitEvent: () => {},
+      });
+      await hook();
+      expect(seen).toBe(expected);
+    });
+
     it('logs an ingested event and returns the appended count when issues are appended', async () => {
       const events: any[] = [];
       const hook = createIngestHook('/repo', paths, ingestCfg, {
