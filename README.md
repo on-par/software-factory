@@ -130,6 +130,7 @@ The most-used commands, by the group `factory --help` lists them under. Run `fac
 # Run work
 factory ship <N>                    Plan → build → check one issue and open a ready-for-review PR; never merges
 factory run-issue <N>               Like ship, but loads the issue first and exits 2 if it cannot be found
+factory run-issue <N> --run-children Also run the child issues the size gate files when it splits <N>
 factory run                         Claim queued issues and ship them, lanes in parallel; merges only when auto-merge is on
 factory supervise [--now]           Unattended loop: wait for usage headroom, run the queue, repeat until it is empty
 factory land <N>                    Squash-merge the issue's open PR once CI is green, then remove its worktree
@@ -151,6 +152,20 @@ factory logs [--follow]             Print pipeline events
 factory cost                        Show recorded model spend by model
 factory usage                       Report 5-hour subscription usage
 ```
+
+### `factory run-issue --run-children`
+
+When the size gate decides an issue is too big, it files child issues and stops the run. Without the flag, `run-issue` exits 1, names the children, and suggests re-running with `--run-children`. With the flag, it runs those children itself:
+
+- **Order.** Children run one at a time, in the build order the size gate filed them, under the same run lock as the parent.
+- **Nested splits.** If a child is decomposed again, its new children replace it and run before the remaining siblings. No issue runs twice.
+- **Closed children** are skipped.
+- **Failures don't stop the run.** A child that fails or escalates is recorded, and the next child still runs.
+- **`.factory/STOP`** is checked before each child starts. Once it is present, no further child starts, and the file is left in place (ADR-0111). A child already running finishes.
+- **Summary.** At the end, `run-issue` prints one line per child: its PR, or why it failed, was skipped, or did not run.
+- **No labels, no merge.** Like `ship`, it never touches the queue's `factory:*` labels and never merges. Each successful child ends at its own ready-for-review PR.
+
+Exit codes: `0` when every child reached ready-for-review, was skipped as closed, or was replaced by its own children. `1` when any child failed or was not started because of STOP, or when the issue was decomposed and `--run-children` was not passed. `2` when the parent issue cannot be resolved, before any worktree or PR exists. If the issue is not decomposed, the flag changes nothing.
 
 ## Model Routing
 
