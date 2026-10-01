@@ -245,6 +245,7 @@ import chalk from 'chalk';
 import { Command } from 'commander';
 import { admissionStateReaderFor, runQueueReconcile } from './admission.js';
 import { runQueueClear } from './queue-clear.js';
+import { applyWorkspaceGate, statusWorkspaceMode } from './workspace-preflight.js';
 import { cmdDaemonLogs, cmdDaemonStart, cmdDaemonStatus, cmdDaemonStop, DaemonCtlError } from './daemon.js';
 import {
   analyzeEventLog,
@@ -1151,13 +1152,15 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
 
   if (opts.kpis) {
     console.log(chalk.bold('\n  Effective config:'));
+    const statusFactoryConfig = loadFactoryConfigForRepo(paths.config);
     for (const line of describeEffectiveConfig({
       router,
       repo: repoConfig,
       repoConfigPath: '.factory/config.json',
-      mergePolicy: resolveMergePolicy(loadFactoryConfigForRepo(paths.config), process.env, {
+      mergePolicy: resolveMergePolicy(statusFactoryConfig, process.env, {
         auto: readRunFlagOverrides(paths.runFlags).autoMerge,
       }),
+      workspaceMode: statusWorkspaceMode(statusFactoryConfig),
     })) {
       console.log(`    ${line}`);
     }
@@ -1277,13 +1280,15 @@ async function cmdTui(opts: { localQueue?: boolean } = {}) {
     effective.allowExperimental,
     effective.localOnly,
   );
+  const tuiFactoryConfig = loadFactoryConfigForRepo(paths.config);
   const effectiveConfigLines = describeEffectiveConfig({
     router,
     repo: repoConfig,
     repoConfigPath: '.factory/config.json',
-    mergePolicy: resolveMergePolicy(loadFactoryConfigForRepo(paths.config), process.env, {
+    mergePolicy: resolveMergePolicy(tuiFactoryConfig, process.env, {
       auto: readRunFlagOverrides(paths.runFlags).autoMerge,
     }),
+    workspaceMode: statusWorkspaceMode(tuiFactoryConfig),
   });
 
   await runTui({
@@ -3122,6 +3127,13 @@ async function cmdRun(
       logEvent(paths.events, 'environment_warning', 'all', keychainErr);
       throw new Error(keychainErr);
     }
+    const proceed = await applyWorkspaceGate(factoryConfig, {
+      warn: (msg) => console.warn(chalk.yellow(`factory: ${msg}`)),
+      info: (msg) => console.log(chalk.yellow(`!! ${msg}`)),
+      event: (kind, msg) => logEvent(paths.events, kind, 'all', msg),
+      invalid: (msg) => new CliExitError(`factory: ${msg}`, 2),
+    });
+    if (!proceed) return;
     await runAutoWorktreeGc(repoRoot, paths, ghRepo, 'all');
 
     const { lanes, diagnostics } = await planRunLanes({

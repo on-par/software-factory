@@ -54,6 +54,9 @@ export type { EffectiveConfig } from './config/repo.js';
 export { resolveEffectiveConfig } from './config/repo.js';
 export { resolveExperimental, resolveLocalOnly, resolveBranchPrefix } from './config/index.js';
 export { FACTORY_RUNTIME_CONFIG_KEYS } from './config/index.js';
+export { resolveWorkspaceMode, workspaceSandboxWarning } from './config/index.js';
+export type { WorkspaceMode, WorkspaceModeSource, EffectiveWorkspaceMode } from './config/index.js';
+export type { ContainerEngine } from './hosted/container.js';
 export {
   migrateRepoConfigToYaml,
   REPO_CONFIG_FILENAMES,

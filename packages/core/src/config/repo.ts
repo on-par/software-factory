@@ -19,10 +19,13 @@ import {
   FACTORY_RUNTIME_CONFIG_KEYS,
   getFactoryPaths,
   isPlainObject,
+  loadFactoryConfig,
   resolveBranchPrefix,
   resolveExperimental,
   resolveLocalOnly,
+  resolveWorkspaceMode,
   type EffectiveMergePolicy,
+  type EffectiveWorkspaceMode,
   type MergePolicySource,
   type ModelsConfig,
 } from './index.js';
@@ -730,6 +733,9 @@ export interface DescribeEffectiveConfigOpts {
    *  FactoryConfig and pass it in. Omitting it falls back to an env-only policy (as if no
    *  repo file set merge/admin at all). */
   mergePolicy?: EffectiveMergePolicy;
+  /** Workspace mode (#1759). Callers resolve it via `resolveWorkspaceMode` against their
+   *  loaded FactoryConfig; omitting it falls back to env-only resolution. */
+  workspaceMode?: EffectiveWorkspaceMode;
 }
 
 function defaultMergePolicy(env: NodeJS.ProcessEnv): EffectiveMergePolicy {
@@ -813,6 +819,8 @@ export function describeEffectiveConfig(opts: DescribeEffectiveConfigOpts): stri
     `Experimental models: ${effective.allowExperimental ? 'on' : 'off'} ${sourceLabel(env.FACTORY_EXPERIMENTAL !== undefined ? 'env' : 'default', repoConfigPath, 'FACTORY_EXPERIMENTAL')}`,
   );
   lines.push(`Branch prefix: ${effective.branchPrefix} ${sourceLabel('default', repoConfigPath, '')}`);
+  const ws = opts.workspaceMode ?? resolveWorkspaceMode(loadFactoryConfig(), env);
+  lines.push(`Workspace: ${ws.mode} ${sourceLabel(ws.source, repoConfigPath, 'FACTORY_WORKSPACE_MODE')}`);
 
   const usage = resolveUsageCap(repo, env);
   lines.push(`Usage cap: $${usage.cap} ${sourceLabel(usage.source, repoConfigPath, 'FACTORY_USAGE_CAP')}`);

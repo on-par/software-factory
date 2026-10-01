@@ -26,6 +26,8 @@ import {
   resolveProcessGroupGraceMs,
   resolveSkipCI,
   resolveTimeouts,
+  resolveWorkspaceMode,
+  workspaceSandboxWarning,
 } from './index.js';
 
 function baseModelDef(overrides: Record<string, unknown> = {}) {
@@ -1558,4 +1560,57 @@ it('shares only the daemon port lease registry across isolated delivery state ro
   } finally {
     vi.unstubAllEnvs();
   }
+});
+
+describe('resolveWorkspaceMode', () => {
+  const withMode = (mode?: 'worktree' | 'docker') => {
+    const c = loadFactoryConfig();
+    return { ...c, workspace: { ...c.workspace, mode } };
+  };
+  it('defaults to worktree', () => {
+    expect(resolveWorkspaceMode(loadFactoryConfig(), {})).toEqual({ mode: 'worktree', source: 'default' });
+  });
+  it('uses the repo value', () => {
+    expect(resolveWorkspaceMode(withMode('docker'), {})).toEqual({ mode: 'docker', source: 'repo' });
+  });
+  it('uses the env value when the repo is unset', () => {
+    expect(resolveWorkspaceMode(withMode(), { FACTORY_WORKSPACE_MODE: 'docker' })).toEqual({
+      mode: 'docker',
+      source: 'env',
+    });
+  });
+  it('repo beats env', () => {
+    expect(resolveWorkspaceMode(withMode('worktree'), { FACTORY_WORKSPACE_MODE: 'docker' })).toEqual({
+      mode: 'worktree',
+      source: 'repo',
+    });
+  });
+  it('rejects an invalid env value', () => {
+    expect(() => resolveWorkspaceMode(withMode(), { FACTORY_WORKSPACE_MODE: 'container' })).toThrow(
+      /FACTORY_WORKSPACE_MODE/,
+    );
+  });
+});
+
+describe('workspaceSandboxWarning', () => {
+  const withRuntime = (runtime: 'auto' | 'firejail') => {
+    const c = loadFactoryConfig();
+    return { ...c, sandbox: { ...c.sandbox, runtime } };
+  };
+  it('is null in worktree mode', () => {
+    expect(workspaceSandboxWarning(withRuntime('firejail'), 'worktree', {})).toBeNull();
+  });
+  it('is null in docker mode with the auto default', () => {
+    expect(workspaceSandboxWarning(withRuntime('auto'), 'docker', {})).toBeNull();
+  });
+  it('warns when sandbox.runtime is set', () => {
+    const w = workspaceSandboxWarning(withRuntime('firejail'), 'docker', {});
+    expect(w).toContain('sandbox.runtime');
+    expect(w).toContain('ignored');
+  });
+  it('warns when FACTORY_SANDBOX_RUNTIME is set', () => {
+    const w = workspaceSandboxWarning(withRuntime('auto'), 'docker', { FACTORY_SANDBOX_RUNTIME: 'sandbox-exec' });
+    expect(w).toContain('FACTORY_SANDBOX_RUNTIME');
+    expect(w).toContain('ignored');
+  });
 });

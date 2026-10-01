@@ -761,6 +761,20 @@ describe('build route from a pinned build model (#1367)', () => {
     });
   });
 
+  it('describeEffectiveConfig prints the workspace mode and its source', () => {
+    const router = new ModelRouter(models, routes, false, new StubModelExecutor({ scripts: {} }));
+    const line = (
+      env: NodeJS.ProcessEnv,
+      workspaceMode?: { mode: 'worktree' | 'docker'; source: 'repo' | 'env' | 'default' },
+    ) =>
+      describeEffectiveConfig({ router, repo: null, env, repoConfigPath: '.factory/config.json', workspaceMode }).find(
+        (l) => l.startsWith('Workspace:'),
+      );
+    expect(line({}, { mode: 'docker', source: 'repo' })).toBe('Workspace: docker (.factory/config.json)');
+    expect(line({})).toBe('Workspace: worktree (default)');
+    expect(line({ FACTORY_WORKSPACE_MODE: 'docker' })).toBe('Workspace: docker (env: FACTORY_WORKSPACE_MODE)');
+  });
+
   it('describeEffectiveConfig prints the effective build route and where it came from', () => {
     const stub = new StubModelExecutor({ scripts: {} });
     const router = new ModelRouter(models, routes, false, stub);
