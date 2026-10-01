@@ -64,6 +64,12 @@ export class LaneFileGuard {
     await this.write(data);
   }
 
+  /** Every claim for `issue`, whatever its repo. Read-only — for `factory reset --dry-run`. */
+  async claimsForIssue(issue: number): Promise<LaneFileClaim[]> {
+    const data = await this.read();
+    return Object.values(data.claims).filter((c) => c.issue === issue);
+  }
+
   /** Removes every claim for `issue`, whatever its repo. For `factory reset`, which may not
    *  know the gh repo slug. Resolves true when any claim was removed. */
   async releaseIssue(issue: number): Promise<boolean> {

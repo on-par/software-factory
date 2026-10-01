@@ -2633,6 +2633,14 @@ bash scripts/verify.sh
       expect(withGitLock).toHaveBeenCalled();
     });
 
+    it('--dry-run previews without taking the git lock', async () => {
+      h.execImpl = (cmd: string) => (cmd.includes('rev-parse') ? h.repoRoot : '');
+      const res = await runMain('reset', '555', '--dry-run');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('#555 (dry run): nothing to reset');
+      expect(withGitLock).not.toHaveBeenCalled();
+    });
+
     it('exits 2 on a non-numeric issue', async () => {
       const res = await runMain('reset', 'abc');
       expect(res).toEqual({ exited: true, code: 2 });

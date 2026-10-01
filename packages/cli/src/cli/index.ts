@@ -2559,7 +2559,7 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string; 
 }
 
 /** `factory reset <issue...>` (#1787): wipes an issue's local state; see reset.ts. */
-export async function cmdReset(issues: string[], opts: { branchPrefix?: string }): Promise<void> {
+export async function cmdReset(issues: string[], opts: { branchPrefix?: string; dryRun?: boolean }): Promise<void> {
   let nums: number[];
   try {
     nums = parseResetIssues(issues);
@@ -2571,20 +2571,20 @@ export async function cmdReset(issues: string[], opts: { branchPrefix?: string }
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
   const sandbox = gcWorktreeSandbox(loadFactoryConfigForRepo(paths.config).sandbox, repoRoot);
   const log = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
-  const lines = await withGitLock(repoRoot, () =>
-    withFileLock(paths.gitLock, () =>
-      runReset(nums, {
-        repoRoot,
-        cwd: process.cwd(),
-        paths,
-        branchPrefix,
-        git: (cmd) => exec(cmd, { cwd: repoRoot }).then((r) => r.stdout),
-        removeWorktree: (p) => cleanupWorktree(repoRoot, p, log, sandbox),
-        readLeases: () => readPortLeases(paths.ports),
-        releaseLease: (id) => releasePortLease({ registryFile: paths.ports, lockDir: paths.portsLock, worktreeId: id }),
-      }),
-    ),
-  );
+  const run = () =>
+    runReset(nums, {
+      repoRoot,
+      cwd: process.cwd(),
+      paths,
+      branchPrefix,
+      git: (cmd) => exec(cmd, { cwd: repoRoot }).then((r) => r.stdout),
+      removeWorktree: (p) => cleanupWorktree(repoRoot, p, log, sandbox),
+      readLeases: () => readPortLeases(paths.ports),
+      releaseLease: (id) => releasePortLease({ registryFile: paths.ports, lockDir: paths.portsLock, worktreeId: id }),
+      dryRun: opts.dryRun === true,
+    });
+  // A dry run takes no lock: the lock itself writes files.
+  const lines = opts.dryRun ? await run() : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
   for (const line of lines) console.log(line);
 }
 
@@ -5216,7 +5216,11 @@ export async function main() {
   program
     .command('reset <issue...>')
     .description(
-      "Remove an issue's local factory state (worktree, local branch, plan/phase files, rework history, logs, leases) so the next run starts fresh. Do not run while that issue's lane is active",
+      "Remove an issue's local factory state (worktree, local branch, plan/phase files, rework history, logs, leases) so the next run starts fresh. Do not run while that issue's lane is active. Preview with --dry-run",
+    )
+    .option(
+      '--dry-run',
+      'List every worktree, branch, file, history entry, log dir, claim and lease that would be removed, without changing anything',
     )
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
     .action(cmdReset);
