@@ -396,7 +396,7 @@ describe('utils', () => {
     expect(costs).toHaveLength(2);
     expect(costs[0]).toEqual({ ...first, ts: expect.any(String) });
     expect(costs[1]).toEqual({ ...second, ts: expect.any(String) });
-    expect(costs.reduce((sum, entry) => sum + entry.cost, 0)).toBe(0.03);
+    expect(costs.reduce((sum, entry) => sum + (entry.cost ?? 0), 0)).toBe(0.03);
     expect(costs.reduce((sum, entry) => sum + entry.inputTokens, 0)).toBe(125);
   });
 

@@ -284,7 +284,9 @@ export interface CostEntry {
   model: string;
   inputTokens: number;
   outputTokens: number;
-  cost: number;
+  cost: number | null;
+  /** True when no price was known for the model, so cost is null (#1738, ADR-0020). */
+  unpriced?: boolean;
   failoverReason?: FailoverReason;
   /** Set when this row is the cost of a retry attempt (#419). */
   retryCause?: RetryCause;

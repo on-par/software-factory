@@ -119,10 +119,10 @@ export class ModelRegistry {
     return this.get(modelId)?.codexFlag;
   }
 
-  /** Estimate cost for a model given token counts */
-  estimateCost(modelId: string, inputTokens: number, outputTokens: number): number {
+  /** Estimate cost for a model given token counts. Null means unpriced (model not registered); 0 means free (#1738). */
+  estimateCost(modelId: string, inputTokens: number, outputTokens: number): number | null {
     const def = this.get(modelId);
-    if (!def) return 0;
+    if (!def) return null;
     return (inputTokens / 1_000_000) * def.costPerMtokInput + (outputTokens / 1_000_000) * def.costPerMtokOutput;
   }
 

@@ -168,9 +168,28 @@ describe('estimateCost', () => {
     expect(registry.estimateCost('priced-model', 1_000_000, 500_000)).toBeCloseTo(3 + 7.5);
   });
 
-  it('returns 0 for an unknown model', () => {
+  it('returns null (unpriced) for an unknown model', () => {
     const registry = new ModelRegistry(config);
-    expect(registry.estimateCost('missing-model', 1000, 1000)).toBe(0);
+    expect(registry.estimateCost('missing-model', 1000, 1000)).toBeNull();
+  });
+
+  it('returns 0 for a registered model priced at 0', () => {
+    const registry = new ModelRegistry({
+      ...config,
+      models: {
+        ...config.models,
+        'free-model': {
+          provider: 'custom',
+          tier: 'boss',
+          costPerMtokInput: 0,
+          costPerMtokOutput: 0,
+          contextWindow: 1000,
+          capabilities: [],
+          envKey: null,
+        },
+      },
+    });
+    expect(registry.estimateCost('free-model', 1000, 1000)).toBe(0);
   });
 });
 
