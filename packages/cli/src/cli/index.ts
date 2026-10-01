@@ -1962,7 +1962,9 @@ async function cmdRunIssue(
 
 /** Runs each decomposed child through the one-shot pipeline in build order, inside the caller's
  *  run lock, then prints a per-child summary. Nested decompositions expand in place and closed
- *  children are skipped. Throws CliExitError(1) unless every child is ready or skipped (#1747, #1748). */
+ *  children are skipped. A failed or escalated child is recorded and the next one still runs;
+ *  `.factory/STOP` is checked before each child starts (read only, ADR-0111). Throws CliExitError(1)
+ *  unless every child is ready or skipped (#1747, #1748, #1749). */
 async function runDecomposedChildren(
   parent: number,
   children: readonly number[],
@@ -1971,6 +1973,7 @@ async function runDecomposedChildren(
 ): Promise<void> {
   const list = children.map((n) => `#${n}`).join(', ');
   console.log(chalk.cyan(`run-children: #${parent} decomposed into ${list} — running them in build order`));
+  const paths = getFactoryPaths(env.repoRoot);
   const results = await runChildrenInOrder(
     children,
     async (child): Promise<ChildRunResult> => {
@@ -2009,6 +2012,12 @@ async function runDecomposedChildren(
       return { issue: child, status: 'ready', prNumber: done && 'prNumber' in done ? done.prNumber : undefined };
     },
     [parent],
+    (next) => {
+      if (!existsSync(paths.stop)) return false;
+      logEvent(paths.events, 'stopped', next, 'STOP file present');
+      console.log(chalk.yellow(`run-children: .factory/STOP present — not starting #${next} or any later child`));
+      return true;
+    },
   );
   const ok = childRunSucceeded(results);
   for (const line of formatChildRunSummary(parent, results)) {
@@ -2016,7 +2025,7 @@ async function runDecomposedChildren(
   }
   if (!ok) {
     throw new CliExitError(
-      `Run failed for issue #${parent}: not every decomposed child reached ready-for-review or was skipped as closed`,
+      `Run failed for issue #${parent}: not every decomposed child reached ready-for-review or was skipped as closed (failed or not-run children are listed above)`,
       1,
     );
   }
