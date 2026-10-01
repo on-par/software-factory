@@ -117,4 +117,68 @@ describe('LaneRow', () => {
     expect(frame).toContain('claude-sonnet');
     expect(frame).toContain('00:05');
   });
+
+  describe('rework round and model fields (#1737)', () => {
+    function laneWith(extra: Array<Record<string, unknown>>): LaneState {
+      let state = initialDashboard();
+      for (const e of extra) {
+        state = reduceDashboard(state, {
+          ts: '2026-01-01T00:00:00.000Z',
+          issue: '296',
+          ...e,
+        } as Parameters<typeof reduceDashboard>[1]);
+      }
+      return state.lanes[0];
+    }
+    const rework = { round: 2, failingChecks: ['tests'], cause: 'factory-fault' };
+
+    it('shows the rework round after the phase', () => {
+      const lane = laneWith([
+        { type: 'check', msg: 'Starting check phase' },
+        { type: 'rework', msg: 'rework', rework },
+      ]);
+      const { lastFrame } = render(<LaneRow lane={lane} selected={false} now={NOW} />);
+      expect(lastFrame()).toContain('CHECK r2');
+    });
+
+    it('omits the round when there is no rework', () => {
+      const lane = laneWith([{ type: 'check', msg: 'Starting check phase' }]);
+      const { lastFrame } = render(<LaneRow lane={lane} selected={false} now={NOW} />);
+      const frame = lastFrame() ?? '';
+      expect(frame).toContain('CHECK');
+      expect(frame).not.toContain(' r0');
+    });
+
+    it('shows the round on a failed lane', () => {
+      const lane: LaneState = {
+        ...laneWith([{ type: 'check', msg: 'Starting check phase' }]),
+        status: 'failed',
+        failedPhase: 'CHECK',
+        reworkRound: 2,
+      };
+      const { lastFrame } = render(<LaneRow lane={lane} selected={false} now={NOW} />);
+      expect(lastFrame()).toContain('CHECK r2');
+    });
+
+    it('shows the round on a parked lane', () => {
+      const lane: LaneState = {
+        ...laneWith([{ type: 'check', msg: 'Starting check phase' }]),
+        status: 'parked',
+        failedPhase: 'CHECK',
+        reworkRound: 2,
+      };
+      const { lastFrame } = render(<LaneRow lane={lane} selected={false} now={NOW} />);
+      expect(lastFrame()).toContain('(CHECK r2)');
+    });
+
+    it('renders the model from the event field, not the message', () => {
+      const lane = laneWith([
+        { type: 'build', msg: 'Build complete with model gpt-5-codex', model: 'claude-sonnet-5-5' },
+      ]);
+      const { lastFrame } = render(<LaneRow lane={lane} selected={false} now={NOW} />);
+      const frame = lastFrame() ?? '';
+      expect(frame).toContain('claude-sonnet-5-5');
+      expect(frame).not.toContain('gpt-5-codex');
+    });
+  });
 });

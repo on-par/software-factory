@@ -45,6 +45,7 @@ export function isFailoverEvent(e: FactoryEvent): boolean {
 }
 
 function extractModel(e: FactoryEvent): string | undefined {
+  if (e.model) return e.model;
   if (e.type === 'router') {
     return e.msg.match(MODEL_TRYING_RE)?.[1];
   }

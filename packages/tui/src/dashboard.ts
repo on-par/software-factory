@@ -20,6 +20,8 @@ export interface LaneState {
   run: RunState;
   status: LaneStatus;
   failedPhase?: PhaseName;
+  /** Highest `FactoryEvent.rework.round` seen for this issue; absent until a rework event arrives (#1737). */
+  reworkRound?: number;
   failReason?: string;
   failureEvidence?: LaneFailureEvidence;
   prNumber?: string;
@@ -108,6 +110,7 @@ export function reduceDashboard(state: DashboardState, e: FactoryEvent): Dashboa
     ...prevLane,
     lane: e.lane ?? prevLane.lane,
     run: reduceEvent(prevLane.run, e),
+    reworkRound: e.rework ? Math.max(prevLane.reworkRound ?? 0, e.rework.round) : prevLane.reworkRound,
     lastEventAt: e.ts,
   };
 

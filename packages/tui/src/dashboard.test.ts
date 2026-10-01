@@ -467,3 +467,28 @@ describe('lanesOf (#1736)', () => {
     expect(lanesOf(initialDashboard())).toEqual([]);
   });
 });
+
+describe('reduceDashboard — rework round (#1737)', () => {
+  const rework = (round: number) => ({ round, failingChecks: ['tests'], cause: 'factory-fault' as const });
+
+  it('records the rework round and never lowers it', () => {
+    const state = reduceAll([
+      ev('check', '1737', 'Starting check phase'),
+      { ...ev('rework', '1737', 'rework'), rework: rework(2) },
+      { ...ev('rework', '1737', 'rework'), rework: rework(1) },
+      ev('check', '1737', 'still checking'),
+    ]);
+    expect(state.lanes[0].reworkRound).toBe(2);
+  });
+
+  it('leaves reworkRound undefined without rework events', () => {
+    expect(reduceAll([ev('plan', '1737', 'Starting plan phase')]).lanes[0].reworkRound).toBeUndefined();
+  });
+
+  it('takes the row model from the event field', () => {
+    const state = reduceAll([
+      { ...ev('build', '1737', 'Build complete with model gpt-5-codex'), model: 'claude-sonnet-5-5' },
+    ]);
+    expect(state.lanes[0].run.model).toBe('claude-sonnet-5-5');
+  });
+});

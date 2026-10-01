@@ -12,6 +12,10 @@ function truncate(s: string, max: number): string {
   return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
 }
 
+function phaseLabel(phase: string, round: number | undefined): string {
+  return round && round > 0 ? `${phase} r${round}` : phase;
+}
+
 function StatusCell({
   lane,
   now,
@@ -25,7 +29,7 @@ function StatusCell({
     case 'running':
       return (
         <Text>
-          <Text color="yellow">{spinnerFrame(now)}</Text> {lane.run.activePhase ?? '?'}
+          <Text color="yellow">{spinnerFrame(now)}</Text> {phaseLabel(lane.run.activePhase ?? '?', lane.reworkRound)}
         </Text>
       );
     case 'ready':
@@ -39,9 +43,13 @@ function StatusCell({
     case 'merged':
       return <Text color="green">✔ merged PR #{lane.prNumber ?? '?'}</Text>;
     case 'failed':
-      return <Text color="red">✖ {lane.failedPhase ?? 'FAILED'}</Text>;
+      return <Text color="red">✖ {lane.failedPhase ? phaseLabel(lane.failedPhase, lane.reworkRound) : 'FAILED'}</Text>;
     case 'parked':
-      return <Text color="yellow">⏸ parked{lane.failedPhase ? ` (${lane.failedPhase})` : ''}</Text>;
+      return (
+        <Text color="yellow">
+          ⏸ parked{lane.failedPhase ? ` (${phaseLabel(lane.failedPhase, lane.reworkRound)})` : ''}
+        </Text>
+      );
     case 'stopped':
       return <Text dimColor>■ stopped</Text>;
   }

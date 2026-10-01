@@ -138,3 +138,19 @@ describe('isFailoverEvent', () => {
     expect(isFailoverEvent(ev('ship', 'CI green for PR #192'))).toBe(false);
   });
 });
+
+describe('reduceEvent — model field (#1737)', () => {
+  it('prefers FactoryEvent.model over the message', () => {
+    const e = { ...ev('build', 'Build complete with model gpt-5-codex'), model: 'claude-sonnet-5-5' };
+    expect(reduceEvent(initialState(), e).model).toBe('claude-sonnet-5-5');
+  });
+
+  it('uses model on event types the regexes ignore', () => {
+    const e = { ...ev('check', 'checking'), model: 'claude-sonnet-5-5' };
+    expect(reduceEvent(initialState(), e).model).toBe('claude-sonnet-5-5');
+  });
+
+  it('falls back to the message regex without a model field', () => {
+    expect(reduceEvent(initialState(), ev('build', 'Build complete with model gpt-5-codex')).model).toBe('gpt-5-codex');
+  });
+});
