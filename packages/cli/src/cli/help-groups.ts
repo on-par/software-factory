@@ -28,7 +28,7 @@ export const HELP_GROUPS: readonly HelpGroup[] = [
   { heading: 'Observe:', commands: ['status', 'logs', 'tui', 'cost', 'usage', 'kpis'] },
   {
     heading: 'Advanced / experimental:',
-    commands: ['worktree', 'daemon', 'proxy', 'hosted', 'local-small-dry-run', 'local-small-overnight'],
+    commands: ['worktree', 'reset', 'daemon', 'proxy', 'hosted', 'local-small-dry-run', 'local-small-overnight'],
   },
 ];
 

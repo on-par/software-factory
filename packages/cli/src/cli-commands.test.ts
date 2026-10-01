@@ -2623,6 +2623,28 @@ bash scripts/verify.sh
     });
   });
 
+  describe('reset', () => {
+    it('prints one summary line per issue and exits 0 when nothing is found', async () => {
+      h.execImpl = (cmd: string) => (cmd.includes('rev-parse') ? h.repoRoot : '');
+      const res = await runMain('reset', '555', '556');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('#555: nothing to reset');
+      expect(logged()).toContain('#556: nothing to reset');
+      expect(withGitLock).toHaveBeenCalled();
+    });
+
+    it('exits 2 on a non-numeric issue', async () => {
+      const res = await runMain('reset', 'abc');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('is not an issue number');
+    });
+
+    it('exits 2 when --branch-prefix has no letters or digits', async () => {
+      const res = await runMain('reset', '5', '--branch-prefix', '!!!');
+      expect(res).toEqual({ exited: true, code: 2 });
+    });
+  });
+
   describe('supervise', () => {
     it('names the branch with the default factory prefix when --branch-prefix is omitted', async () => {
       writeFileSync(paths().queue, 'app 5\n');

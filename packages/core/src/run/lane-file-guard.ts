@@ -64,6 +64,20 @@ export class LaneFileGuard {
     await this.write(data);
   }
 
+  /** Removes every claim for `issue`, whatever its repo. For `factory reset`, which may not
+   *  know the gh repo slug. Resolves true when any claim was removed. */
+  async releaseIssue(issue: number): Promise<boolean> {
+    const data = await this.read();
+    let removed = false;
+    for (const [key, claim] of Object.entries(data.claims)) {
+      if (claim.issue !== issue) continue;
+      delete data.claims[key];
+      removed = true;
+    }
+    if (removed) await this.write(data);
+    return removed;
+  }
+
   /** Checks `files` against every other repo-scoped claim (the caller's own repo+issue is
    *  excluded, so a re-check never collides with itself). Cross-repo claims never collide —
    *  single-repo scope, by design. Returns the first colliding issue/file pair, if any. */

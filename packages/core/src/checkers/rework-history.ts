@@ -49,12 +49,14 @@ export class ReworkHistory {
     await this.write(data);
   }
 
-  /** Clears an issue's entry — call once it ships/merges or a check run passes clean. */
-  async clear(issue: number): Promise<void> {
+  /** Clears an issue's entry — call once it ships/merges or a check run passes clean.
+   *  Resolves true when an entry was deleted, false when there was none. */
+  async clear(issue: number): Promise<boolean> {
     const data = await this.read();
-    if (!(String(issue) in data.issues)) return;
+    if (!(String(issue) in data.issues)) return false;
     delete data.issues[String(issue)];
     await this.write(data);
+    return true;
   }
 
   private async read(): Promise<ReworkHistoryFile> {

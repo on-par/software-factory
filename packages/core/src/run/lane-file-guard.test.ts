@@ -138,4 +138,21 @@ describe('LaneFileGuard', () => {
 
     await expect(guard.release('acme/repo', 999)).resolves.toBeUndefined();
   });
+
+  it('releaseIssue removes the issue claims across repos and leaves others alone', async () => {
+    const guard = new LaneFileGuard(await tmpFile());
+    await guard.register('acme/repo', 100, ['src/a.ts']);
+    await guard.register('other/repo', 100, ['src/b.ts']);
+    await guard.register('acme/repo', 200, ['src/a.ts']);
+
+    await expect(guard.releaseIssue(100)).resolves.toBe(true);
+
+    expect(await guard.findCollision('acme/repo', 300, ['src/b.ts'])).toBeUndefined();
+    expect(await guard.findCollision('acme/repo', 300, ['src/a.ts'])).toEqual({ issue: 200, file: 'src/a.ts' });
+  });
+
+  it('releaseIssue resolves false when the issue has no claim', async () => {
+    const guard = new LaneFileGuard(await tmpFile());
+    await expect(guard.releaseIssue(999)).resolves.toBe(false);
+  });
 });

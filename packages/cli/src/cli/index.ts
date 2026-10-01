@@ -248,6 +248,7 @@ import chalk from 'chalk';
 import { Command } from 'commander';
 import { admissionStateReaderFor, runQueueReconcile } from './admission.js';
 import { runQueueClear } from './queue-clear.js';
+import { parseResetIssues, runReset } from './reset.js';
 import { cmdDaemonLogs, cmdDaemonStart, cmdDaemonStatus, cmdDaemonStop, DaemonCtlError } from './daemon.js';
 import {
   analyzeEventLog,
@@ -2555,6 +2556,36 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string; 
     sweepWorktrees({ repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo, branchPrefix }, { log, octokit, sandbox });
   const report = opts.dryRun ? await run() : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
   console.log(formatGcReport(report));
+}
+
+/** `factory reset <issue...>` (#1787): wipes an issue's local state; see reset.ts. */
+export async function cmdReset(issues: string[], opts: { branchPrefix?: string }): Promise<void> {
+  let nums: number[];
+  try {
+    nums = parseResetIssues(issues);
+  } catch (err: any) {
+    throw new CliExitError(err.message, 2);
+  }
+  const repoRoot = await getRepoRoot();
+  const paths = getFactoryPaths(repoRoot);
+  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
+  const sandbox = gcWorktreeSandbox(loadFactoryConfigForRepo(paths.config).sandbox, repoRoot);
+  const log = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
+  const lines = await withGitLock(repoRoot, () =>
+    withFileLock(paths.gitLock, () =>
+      runReset(nums, {
+        repoRoot,
+        cwd: process.cwd(),
+        paths,
+        branchPrefix,
+        git: (cmd) => exec(cmd, { cwd: repoRoot }).then((r) => r.stdout),
+        removeWorktree: (p) => cleanupWorktree(repoRoot, p, log, sandbox),
+        readLeases: () => readPortLeases(paths.ports),
+        releaseLease: (id) => releasePortLease({ registryFile: paths.ports, lockDir: paths.portsLock, worktreeId: id }),
+      }),
+    ),
+  );
+  for (const line of lines) console.log(line);
 }
 
 export async function cmdLand(issueNum: number, opts: { branchPrefix?: string } = {}) {
@@ -5181,6 +5212,14 @@ export async function main() {
     .option('--ttl-days <n>', 'Override worktree.gcTtlDays from factory.json')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
     .action(cmdWorktreeGc);
+
+  program
+    .command('reset <issue...>')
+    .description(
+      "Remove an issue's local factory state (worktree, local branch, plan/phase files, rework history, logs, leases) so the next run starts fresh. Do not run while that issue's lane is active",
+    )
+    .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
+    .action(cmdReset);
 
   program
     .command('supervise')
