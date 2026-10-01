@@ -1,22 +1,37 @@
 // packages/cli/src/cli/reset.ts — `factory reset <issue...>`: remove an issue's local factory state (#1787);
-// dirty/unpushed worktrees and branches are kept unless --force (#1789).
+// dirty/unpushed worktrees and branches are kept unless --force (#1789); an issue with an active run
+// (live claim lease, or live run lock plus a fresh heartbeat) is refused outright (#1790).
 
 import { existsSync, rmSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 
-import { LaneFileGuard, phaseSnapshotFile, type PortLease, ReworkHistory } from '@on-par/factory-core';
 import {
+  DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS,
+  defaultIsPidAlive,
+  LaneFileGuard,
+  phaseSnapshotFile,
+  type PortLease,
+  readPhaseSnapshot,
+  ReworkHistory,
+} from '@on-par/factory-core';
+import {
+  CLAIM_EXPIRES_LABEL_PREFIX,
+  CLAIMED_BY_LABEL_PREFIX,
   countUnpushedCommits,
   factoryBranchIssue,
+  findStaleClaims,
+  IN_PROGRESS_LABEL,
   isWorktreeClean,
+  parseClaimExpiresLabel,
   parseWorktreeList,
+  readRunLockHolder,
 } from '@on-par/factory-core/internal';
 
 export interface ResetDeps {
   repoRoot: string;
   /** process.cwd() in prod — the worktree containing it is never removed. */
   cwd: string;
-  paths: { plans: string; runs: string; logs: string; reworkHistory: string; laneFiles: string };
+  paths: { plans: string; runs: string; logs: string; reworkHistory: string; laneFiles: string; runLock: string };
   branchPrefix?: string;
   /** Runs a shell command in repoRoot and returns stdout; throws on failure. */
   git: (cmd: string) => Promise<string>;
@@ -29,12 +44,18 @@ export interface ResetDeps {
   dryRun?: boolean;
   /** Remove worktrees and branches even when dirty or unpushed (#1789). */
   force?: boolean;
+  /** Reads an issue's GitHub labels; undefined when GitHub is unavailable (the claim probe is skipped). */
+  readIssueLabels?: (issue: number) => Promise<string[]>;
+  isPidAlive?: (pid: number) => boolean;
+  now?: () => number;
 }
 
 export interface ResetResult {
   issue: number;
   removed: string[];
   kept: string[];
+  /** Set when an active run holds the issue: who holds it. Nothing was changed. */
+  refused?: string;
   dryRun?: boolean;
 }
 
@@ -61,9 +82,51 @@ async function unsafeReason(deps: ResetDeps, path: string | null, rev: string | 
   return n > 0 ? `${n} unpushed commit(s)` : null;
 }
 
+/** Read-only: who is actively working this issue (live claim, or live run lock with a fresh heartbeat), or null. */
+export async function findActiveRun(issue: number, deps: ResetDeps): Promise<string | null> {
+  const now = deps.now ?? Date.now;
+  if (deps.readIssueLabels) {
+    let labels: string[];
+    try {
+      labels = await deps.readIssueLabels(issue);
+    } catch (err) {
+      return `could not check claim labels (${errText(err)})`;
+    }
+    const claims = labels.filter((l) => l === IN_PROGRESS_LABEL || l.startsWith(CLAIMED_BY_LABEL_PREFIX));
+    if (claims.length > 0 && findStaleClaims([{ number: issue, labels }], { now }).length === 0) {
+      const claimedBy = claims.find((l) => l.startsWith(CLAIMED_BY_LABEL_PREFIX));
+      const who = claimedBy ? claimedBy.slice(CLAIMED_BY_LABEL_PREFIX.length) : IN_PROGRESS_LABEL;
+      const expiries = labels
+        .filter((l) => l.startsWith(CLAIM_EXPIRES_LABEL_PREFIX))
+        .map(parseClaimExpiresLabel)
+        .filter((n): n is number => n !== null);
+      const lease =
+        expiries.length > 0
+          ? `, lease expires ${new Date(Math.max(...expiries) * 1000).toISOString()}`
+          : ', no lease expiry';
+      return `claimed by ${who}${lease}`;
+    }
+  }
+
+  const holder = readRunLockHolder(deps.paths.runLock);
+  if (holder && (deps.isPidAlive ?? defaultIsPidAlive)(holder.pid)) {
+    const snapshot = await readPhaseSnapshot(phaseSnapshotFile(deps.paths.runs, issue)).catch(() => null);
+    if (snapshot) {
+      const age = now() - Date.parse(snapshot.lastActivityAt);
+      if (Number.isFinite(age) && age <= DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS) {
+        const { pid, command, startedAt, host } = holder;
+        return `live factory run pid ${pid}${command ? `, ${command}` : ''}${startedAt ? `, started ${startedAt}` : ''}${host ? ` on ${host}` : ''} (${snapshot.phase}, last active ${snapshot.lastActivityAt})`;
+      }
+    }
+  }
+  return null;
+}
+
 export async function resetIssue(issue: number, deps: ResetDeps): Promise<ResetResult> {
   const { paths, branchPrefix } = deps;
   const dry = deps.dryRun === true;
+  const active = await findActiveRun(issue, deps);
+  if (active !== null) return { issue, removed: [], kept: [], refused: active, ...(dry ? { dryRun: true } : {}) };
   const removed: string[] = [];
   const kept: string[] = [];
   const protectedBranches = new Map<string, string>();
@@ -211,6 +274,11 @@ export async function resetIssue(issue: number, deps: ResetDeps): Promise<ResetR
 }
 
 export function formatResetLine(r: ResetResult): string {
+  if (r.refused !== undefined) {
+    return r.dryRun
+      ? `#${r.issue} (dry run): would refuse — ${r.refused}; nothing would change`
+      : `#${r.issue}: refused — ${r.refused}; nothing changed`;
+  }
   if (r.dryRun) {
     if (r.removed.length === 0 && r.kept.length === 0) return `#${r.issue} (dry run): nothing to reset`;
     return `#${r.issue} (dry run): would remove ${r.removed.join(', ') || 'nothing'}; would keep ${r.kept.join(', ') || 'nothing'}`;
@@ -219,8 +287,12 @@ export function formatResetLine(r: ResetResult): string {
   return `#${r.issue}: removed ${r.removed.join(', ') || 'nothing'}; kept ${r.kept.join(', ') || 'nothing'}`;
 }
 
+export async function resetIssues(issues: number[], deps: ResetDeps): Promise<ResetResult[]> {
+  const results: ResetResult[] = [];
+  for (const issue of issues) results.push(await resetIssue(issue, deps));
+  return results;
+}
+
 export async function runReset(issues: number[], deps: ResetDeps): Promise<string[]> {
-  const lines: string[] = [];
-  for (const issue of issues) lines.push(formatResetLine(await resetIssue(issue, deps)));
-  return lines;
+  return (await resetIssues(issues, deps)).map(formatResetLine);
 }
