@@ -245,7 +245,8 @@ function isValidCostEntry(value: unknown): value is CostEntry {
   return (
     typeof v.issue === 'string' &&
     typeof v.model === 'string' &&
-    Number.isFinite(v.cost) &&
+    (v.cost === null || Number.isFinite(v.cost)) &&
+    (v.unpriced === undefined || typeof v.unpriced === 'boolean') &&
     (v.inputTokens === undefined || Number.isFinite(v.inputTokens)) &&
     (v.outputTokens === undefined || Number.isFinite(v.outputTokens)) &&
     (v.failoverReason === undefined || typeof v.failoverReason === 'string') &&
@@ -295,7 +296,9 @@ export interface ModelCostRow {
   model: string;
   inputTokens: number;
   outputTokens: number;
-  cost: number;
+  /** Null when every row was unpriced (ADR-0020, #1738). */
+  cost: number | null;
+  unpricedCount: number;
   tasks: number;
 }
 
@@ -303,55 +306,115 @@ export interface IssueCostRow {
   issue: string;
   inputTokens: number;
   outputTokens: number;
-  cost: number;
+  /** Null when every row was unpriced (ADR-0020, #1738). */
+  cost: number | null;
+  unpricedCount: number;
   perModel: ModelCostRow[];
 }
 
 export interface CostsSummary {
   perIssue: IssueCostRow[];
-  total: { inputTokens: number; outputTokens: number; cost: number };
+  total: { inputTokens: number; outputTokens: number; cost: number | null; unpricedCount: number };
 }
 
-/** Group cost entries by issue (first-seen order), with a nested per-model rollup and a grand total. Pure, no I/O. */
+interface CostAcc {
+  sum: number;
+  priced: number;
+  unpriced: number;
+}
+
+function finalizeCost(acc: CostAcc): number | null {
+  return acc.priced === 0 && acc.unpriced > 0 ? null : acc.sum;
+}
+
+/**
+ * Group cost entries by issue (first-seen order), with a nested per-model rollup and a grand total. Pure, no I/O.
+ * Unpriced rows (cost null/missing or unpriced true) add tokens but no dollars and bump unpricedCount; a row
+ * group made only of unpriced rows has cost null (ADR-0020, #1738).
+ */
 export function aggregateCosts(entries: CostEntry[]): CostsSummary {
   const issueOrder: string[] = [];
   const byIssue = new Map<string, IssueCostRow>();
+  const issueAcc = new Map<string, CostAcc>();
   const modelByIssue = new Map<string, Map<string, ModelCostRow>>();
-  const total = { inputTokens: 0, outputTokens: 0, cost: 0 };
+  const modelAcc = new Map<string, Map<string, CostAcc>>();
+  const total = { inputTokens: 0, outputTokens: 0, cost: 0 as number | null, unpricedCount: 0 };
+  const totalAcc: CostAcc = { sum: 0, priced: 0, unpriced: 0 };
+
+  const add = (acc: CostAcc, cost: number | null): void => {
+    if (cost === null) acc.unpriced += 1;
+    else {
+      acc.sum += cost;
+      acc.priced += 1;
+    }
+  };
 
   for (const e of entries) {
     const inputTokens = e.inputTokens ?? 0;
     const outputTokens = e.outputTokens ?? 0;
-    const cost = e.cost ?? 0;
+    const cost = e.unpriced === true || e.cost === null || e.cost === undefined ? null : e.cost;
 
     if (!byIssue.has(e.issue)) {
       issueOrder.push(e.issue);
-      byIssue.set(e.issue, { issue: e.issue, inputTokens: 0, outputTokens: 0, cost: 0, perModel: [] });
+      byIssue.set(e.issue, {
+        issue: e.issue,
+        inputTokens: 0,
+        outputTokens: 0,
+        cost: 0,
+        unpricedCount: 0,
+        perModel: [],
+      });
+      issueAcc.set(e.issue, { sum: 0, priced: 0, unpriced: 0 });
       modelByIssue.set(e.issue, new Map());
+      modelAcc.set(e.issue, new Map());
     }
 
     const issueRow = byIssue.get(e.issue)!;
     issueRow.inputTokens += inputTokens;
     issueRow.outputTokens += outputTokens;
-    issueRow.cost += cost;
+    add(issueAcc.get(e.issue)!, cost);
 
     const models = modelByIssue.get(e.issue)!;
-    const modelRow = models.get(e.model) ?? { model: e.model, inputTokens: 0, outputTokens: 0, cost: 0, tasks: 0 };
+    const accs = modelAcc.get(e.issue)!;
+    const modelRow = models.get(e.model) ?? {
+      model: e.model,
+      inputTokens: 0,
+      outputTokens: 0,
+      cost: 0,
+      unpricedCount: 0,
+      tasks: 0,
+    };
+    const mAcc = accs.get(e.model) ?? { sum: 0, priced: 0, unpriced: 0 };
     modelRow.inputTokens += inputTokens;
     modelRow.outputTokens += outputTokens;
-    modelRow.cost += cost;
     modelRow.tasks += 1;
+    add(mAcc, cost);
     models.set(e.model, modelRow);
+    accs.set(e.model, mAcc);
 
     total.inputTokens += inputTokens;
     total.outputTokens += outputTokens;
-    total.cost += cost;
+    add(totalAcc, cost);
   }
 
-  const perIssue = issueOrder.map((issue) => ({
-    ...byIssue.get(issue)!,
-    perModel: Array.from(modelByIssue.get(issue)!.values()),
-  }));
+  const perIssue = issueOrder.map((issue) => {
+    const row = byIssue.get(issue)!;
+    const acc = issueAcc.get(issue)!;
+    const accs = modelAcc.get(issue)!;
+    const perModel = Array.from(modelByIssue.get(issue)!.values()).map((m) => {
+      const a = accs.get(m.model)!;
+      return { ...m, cost: finalizeCost(a), unpricedCount: a.unpriced };
+    });
+    return { ...row, cost: finalizeCost(acc), unpricedCount: acc.unpriced, perModel };
+  });
 
+  total.cost = finalizeCost(totalAcc);
+  total.unpricedCount = totalAcc.unpriced;
   return { perIssue, total };
+}
+
+/** Render a cost figure: "unknown" for null (ADR-0020), "$x" otherwise, plus "(N unpriced)" when N > 0 (#1738). */
+export function formatCostTotal(cost: number | null, unpricedCount: number, digits = 4): string {
+  const base = cost === null ? 'unknown' : `$${cost.toFixed(digits)}`;
+  return unpricedCount > 0 ? `${base} (${unpricedCount} unpriced)` : base;
 }

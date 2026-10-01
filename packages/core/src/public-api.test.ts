@@ -297,6 +297,7 @@ const PUBLIC_API_KEYS = [
   'createLogger',
   // Usage
   'aggregateCosts',
+  'formatCostTotal',
   'estimateTrailingSpend',
   'formatUsageReport',
   'readCostsFile',

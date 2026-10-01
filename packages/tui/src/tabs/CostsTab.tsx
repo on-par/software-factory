@@ -1,13 +1,9 @@
-import { aggregateCosts, type CostsRead } from '@on-par/factory-core';
+import { aggregateCosts, formatCostTotal, type CostsRead } from '@on-par/factory-core';
 import { Box, Text } from 'ink';
 import { type JSX, useMemo } from 'react';
 
 function fmtTokens(n: number): string {
   return n.toLocaleString('en-US');
-}
-
-function fmtCost(n: number): string {
-  return `$${n.toFixed(4)}`;
 }
 
 export interface CostsTabProps {
@@ -38,7 +34,8 @@ export function CostsTab({ costs, selectedIndex }: CostsTabProps): JSX.Element {
         <Text key={row.issue}>
           <Text color={i === clampedIndex ? 'cyan' : undefined}>{i === clampedIndex ? '❯ ' : '  '}</Text>
           <Text inverse={i === clampedIndex}>
-            #{row.issue} {fmtTokens(row.inputTokens)} {fmtTokens(row.outputTokens)} {fmtCost(row.cost)}
+            #{row.issue} {fmtTokens(row.inputTokens)} {fmtTokens(row.outputTokens)}{' '}
+            {formatCostTotal(row.cost, row.unpricedCount)}
           </Text>
         </Text>
       ))}
@@ -47,13 +44,14 @@ export function CostsTab({ costs, selectedIndex }: CostsTabProps): JSX.Element {
       {selected.perModel.map((m) => (
         <Text key={m.model}>
           {' '}
-          {m.model} {m.tasks} task(s) in {fmtTokens(m.inputTokens)} out {fmtTokens(m.outputTokens)} {fmtCost(m.cost)}
+          {m.model} {m.tasks} task(s) in {fmtTokens(m.inputTokens)} out {fmtTokens(m.outputTokens)}{' '}
+          {formatCostTotal(m.cost, m.unpricedCount)}
         </Text>
       ))}
       <Text> </Text>
       <Text dimColor>
         session total: in {fmtTokens(summary.total.inputTokens)} · out {fmtTokens(summary.total.outputTokens)} ·{' '}
-        {fmtCost(summary.total.cost)}
+        {formatCostTotal(summary.total.cost, summary.total.unpricedCount)}
       </Text>
     </Box>
   );

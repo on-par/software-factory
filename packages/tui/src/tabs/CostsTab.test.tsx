@@ -44,6 +44,14 @@ describe('CostsTab', () => {
     expect(frame).toContain('$0.0300');
   });
 
+  it('renders unknown, not $0.0000, for an all-unpriced entry set', () => {
+    const costs: CostsRead = { entries: [entry({ cost: null, unpriced: true })], skipped: 0 };
+    const frame = render(<CostsTab costs={costs} selectedIndex={0} />).lastFrame() ?? '';
+    expect(frame).toContain('unknown');
+    expect(frame).toContain('1 unpriced');
+    expect(frame).not.toContain('$0.0000');
+  });
+
   it('follows selectedIndex to show the per-model section for a different issue', () => {
     const costs: CostsRead = {
       entries: [entry({ issue: '61', model: 'claude-sonnet-5' }), entry({ issue: '62', model: 'gpt-5' })],

@@ -1121,6 +1121,7 @@ describe('ModelRouter cost sink', () => {
     expect(rows[0].inputTokens).toBeGreaterThan(0);
     expect(rows[0].outputTokens).toBeGreaterThan(0);
     expect(rows[0].cost).toBeGreaterThan(0);
+    expect(rows[0].unpriced).toBeUndefined();
     expect(rows[0].estimated).toBe(true);
     expect(rows[0].numTurns).toBeUndefined();
     expect(rows[0].durationMs).toBeUndefined();
@@ -1130,6 +1131,37 @@ describe('ModelRouter cost sink', () => {
     expect(rows[0].cacheCreationTokens).toBeUndefined();
     expect(typeof rows[0].duration).toBe('number');
     expect(rows[0].duration).toBeGreaterThanOrEqual(0);
+  });
+
+  it('records an unpriced row (cost null) when the model has no known price', async () => {
+    const stub = new StubModelExecutor({ scripts: { plan: [{ output: 'SCRIPTED PLAN' }] } });
+    const router = new ModelRouter(costModels, routes, false, stub);
+    vi.spyOn(router.registryRef, 'estimateCost').mockReturnValue(null);
+    const rows: Parameters<Parameters<ModelRouter['setCostSink']>[0]>[0][] = [];
+    router.setCostSink((entry) => rows.push(entry));
+
+    await router.run('plan', 'do it');
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].cost).toBeNull();
+    expect(rows[0].unpriced).toBe(true);
+  });
+
+  it('keeps a harness-reported costUsd priced even when the model has no known price', async () => {
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [{ output: 'X', effect: (ctx) => ctx.onUsage?.({ inputTokens: 10, outputTokens: 5, costUsd: 0.05 }) }],
+      },
+    });
+    const router = new ModelRouter(costModels, routes, false, stub);
+    vi.spyOn(router.registryRef, 'estimateCost').mockReturnValue(null);
+    const rows: Parameters<Parameters<ModelRouter['setCostSink']>[0]>[0][] = [];
+    router.setCostSink((entry) => rows.push(entry));
+
+    await router.run('plan', 'do it');
+
+    expect(rows[0].cost).toBe(0.05);
+    expect('unpriced' in rows[0]).toBe(false);
   });
 
   it('records real usage and marks estimated false when the harness reports it', async () => {
@@ -1373,7 +1405,7 @@ describe('ModelRouter cost sink', () => {
 
       expect(summary.total.inputTokens).toBe(claudeRow.inputTokens + codexRow.inputTokens);
       expect(summary.total.outputTokens).toBe(claudeRow.outputTokens + codexRow.outputTokens);
-      expect(summary.total.cost).toBeCloseTo(claudeRow.cost + codexRow.cost, 10);
+      expect(summary.total.cost).toBeCloseTo((claudeRow.cost ?? 0) + (codexRow.cost ?? 0), 10);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

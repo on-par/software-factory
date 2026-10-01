@@ -56,6 +56,7 @@ import {
 } from './branch-prefix.js';
 import {
   acquirePortLease,
+  aggregateCosts,
   appendKpiHistoryLine,
   applyRepoConfig,
   buildPhase,
@@ -146,6 +147,7 @@ import {
   runIssue,
   shipPhase,
   summarizeEvent,
+  formatCostTotal,
   touchLastEvent,
   touchRunActivity,
   validateQueue,
@@ -783,11 +785,12 @@ async function cmdModels(opts: { doctor?: boolean } = {}) {
   console.log(chalk.bold('\n== Available Models =='));
   for (const m of registry.list()) {
     const tiers = registry.getTiers(m).join('/');
-    const cost = registry.estimateCost(m, 1_000_000, 1_000_000).toFixed(2);
+    const est = registry.estimateCost(m, 1_000_000, 1_000_000);
+    const cost = est === null ? 'unpriced' : `$${est.toFixed(2)}/M`;
     const gated = registry.isExperimental(m) && !allowExperimental;
     const avail = !gated && registry.isAvailable(m) ? chalk.green('✅') : chalk.red('❌');
     const tag = registry.isExperimental(m) ? chalk.yellow(' [experimental]') : '';
-    console.log(`  ${avail} ${m} tier=${tiers} $${cost}/M${tag}`);
+    console.log(`  ${avail} ${m} tier=${tiers} ${cost}${tag}`);
   }
 
   console.log(chalk.bold('\n== Tiers =='));
@@ -811,12 +814,12 @@ async function cmdCost(opts: { issue?: string } = {}) {
     console.log(chalk.bold(`== Costs for issue ${opts.issue} ==`));
     for (const c of filtered) {
       console.log(
-        `  ${c.task} ${c.model} $${c.cost.toFixed(4)}${c.failoverReason ? ` [failover: ${c.failoverReason}]` : ''}`,
+        `  ${c.task} ${c.model} ${c.cost === null || c.cost === undefined ? 'unknown' : `$${c.cost.toFixed(4)}`}${c.failoverReason ? ` [failover: ${c.failoverReason}]` : ''}`,
       );
     }
-    const total = filtered.reduce((s, c) => s + c.cost, 0);
+    const t = aggregateCosts(filtered).total;
     console.log('  ---');
-    console.log(`  Total: $${total.toFixed(4)}`);
+    console.log(`  Total: ${formatCostTotal(t.cost, t.unpricedCount)}`);
     return;
   }
 
@@ -825,23 +828,31 @@ async function cmdCost(opts: { issue?: string } = {}) {
     return;
   }
 
-  const byModel = new Map<string, { tasks: number; total: number; failovers: number }>();
+  const byModel = new Map<
+    string,
+    { tasks: number; priced: number; pricedCount: number; unpriced: number; failovers: number }
+  >();
   for (const c of costs) {
-    const e = byModel.get(c.model) ?? { tasks: 0, total: 0, failovers: 0 };
+    const e = byModel.get(c.model) ?? { tasks: 0, priced: 0, pricedCount: 0, unpriced: 0, failovers: 0 };
     e.tasks++;
-    e.total += c.cost;
+    if (c.unpriced === true || c.cost === null || c.cost === undefined) e.unpriced++;
+    else {
+      e.priced += c.cost;
+      e.pricedCount++;
+    }
     if (c.failoverReason) e.failovers++;
     byModel.set(c.model, e);
   }
 
   console.log(chalk.bold('== Cost Summary =='));
-  for (const [model, { tasks, total, failovers }] of byModel) {
+  for (const [model, { tasks, priced, pricedCount, unpriced, failovers }] of byModel) {
     const failoverSuffix = failovers > 0 ? ` (${failovers} failover${failovers === 1 ? '' : 's'})` : '';
-    console.log(`  ${model}: ${tasks} tasks, $${total.toFixed(4)}${failoverSuffix}`);
+    const modelCost = formatCostTotal(pricedCount === 0 && unpriced > 0 ? null : priced, unpriced);
+    console.log(`  ${model}: ${tasks} tasks, ${modelCost}${failoverSuffix}`);
   }
-  const grandTotal = costs.reduce((s, c) => s + c.cost, 0);
+  const grand = aggregateCosts(costs).total;
   console.log('  ---');
-  console.log(`  Total: $${grandTotal.toFixed(4)}`);
+  console.log(`  Total: ${formatCostTotal(grand.cost, grand.unpricedCount)}`);
 }
 
 async function cmdCheck(issueRaw: string, opts: { json?: boolean }) {
@@ -1478,7 +1489,7 @@ export async function shipIssue(
   const laneWorkspaceBackend =
     factoryConfig.workspace?.backend === 'disposable-docker' ? 'disposable-docker' : 'worktree';
   router.setCostSink((entry) => {
-    issueSpend += entry.cost;
+    issueSpend += entry.cost ?? 0;
     logCost(paths.costs, {
       ...entry,
       issue: String(issueNum),

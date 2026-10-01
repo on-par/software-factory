@@ -575,6 +575,7 @@ export type {
 } from './usage/index.js';
 export {
   aggregateCosts,
+  formatCostTotal,
   estimateTrailingSpend,
   formatUsageReport,
   readCostsFile,

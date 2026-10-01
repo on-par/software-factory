@@ -10,6 +10,7 @@ import type { UsageReading } from './index.js';
 import { defaultTranscriptRoots } from './index.js';
 import {
   aggregateCosts,
+  formatCostTotal,
   estimateTrailingSpend,
   formatUsageReport,
   priceFor,
@@ -428,7 +429,10 @@ describe('readCostsFile', () => {
 
 describe('aggregateCosts', () => {
   it('returns empty perIssue and zero totals for empty input', () => {
-    expect(aggregateCosts([])).toEqual({ perIssue: [], total: { inputTokens: 0, outputTokens: 0, cost: 0 } });
+    expect(aggregateCosts([])).toEqual({
+      perIssue: [],
+      total: { inputTokens: 0, outputTokens: 0, cost: 0, unpricedCount: 0 },
+    });
   });
 
   it('sums per-issue, nests per-model, and computes a grand total, preserving first-seen issue order', () => {
@@ -456,8 +460,8 @@ describe('aggregateCosts', () => {
     expect(issue61.outputTokens).toBe(56);
     expect(issue61.cost).toBeCloseTo(0.0111, 10);
     expect(issue61.perModel).toEqual([
-      { model: 'claude-sonnet-5', inputTokens: 110, outputTokens: 55, cost: 0.011, tasks: 2 },
-      { model: 'claude-haiku-5', inputTokens: 1, outputTokens: 1, cost: 0.0001, tasks: 1 },
+      { model: 'claude-sonnet-5', inputTokens: 110, outputTokens: 55, cost: 0.011, unpricedCount: 0, tasks: 2 },
+      { model: 'claude-haiku-5', inputTokens: 1, outputTokens: 1, cost: 0.0001, unpricedCount: 0, tasks: 1 },
     ]);
 
     const issue62 = summary.perIssue[1];
@@ -466,7 +470,8 @@ describe('aggregateCosts', () => {
       inputTokens: 200,
       outputTokens: 100,
       cost: 0.02,
-      perModel: [{ model: 'gpt-5', inputTokens: 200, outputTokens: 100, cost: 0.02, tasks: 1 }],
+      unpricedCount: 0,
+      perModel: [{ model: 'gpt-5', inputTokens: 200, outputTokens: 100, cost: 0.02, unpricedCount: 0, tasks: 1 }],
     });
 
     expect(summary.total.inputTokens).toBe(311);
@@ -481,11 +486,82 @@ describe('aggregateCosts', () => {
     expect(summary.perIssue[0].outputTokens).toBe(0);
   });
 
-  it('defaults a missing cost field to zero', () => {
+  it('treats a missing cost as unpriced', () => {
     const entries = [{ ts: 't1', issue: '61', task: 'build', model: 'claude-sonnet-5' } as CostEntry];
     const summary = aggregateCosts(entries);
-    expect(summary.perIssue[0].cost).toBe(0);
-    expect(summary.total.cost).toBe(0);
+    expect(summary.perIssue[0].cost).toBeNull();
+    expect(summary.total.cost).toBeNull();
+    expect(summary.total.unpricedCount).toBe(1);
+  });
+
+  it('excludes unpriced rows from dollar sums but counts them and their tokens', () => {
+    const entries: CostEntry[] = [
+      { ts: 't1', issue: '61', task: 'build', model: 'a', inputTokens: 100, outputTokens: 50, cost: 0.02 },
+      {
+        ts: 't2',
+        issue: '61',
+        task: 'build',
+        model: 'b',
+        inputTokens: 10,
+        outputTokens: 5,
+        cost: null,
+        unpriced: true,
+      },
+    ];
+    const s = aggregateCosts(entries);
+    expect(s.total).toEqual({ inputTokens: 110, outputTokens: 55, cost: 0.02, unpricedCount: 1 });
+    expect(s.perIssue[0].cost).toBe(0.02);
+    expect(s.perIssue[0].unpricedCount).toBe(1);
+    expect(s.perIssue[0].perModel.map((m) => [m.model, m.cost, m.unpricedCount])).toEqual([
+      ['a', 0.02, 0],
+      ['b', null, 1],
+    ]);
+  });
+
+  it('never reports $0 for an all-unpriced total', () => {
+    const entries: CostEntry[] = [
+      { ts: 't1', issue: '1', task: 'x', model: 'a', inputTokens: 1, outputTokens: 1, cost: null, unpriced: true },
+      { ts: 't2', issue: '1', task: 'x', model: 'a', inputTokens: 1, outputTokens: 1, cost: null, unpriced: true },
+    ];
+    const s = aggregateCosts(entries);
+    expect(s.total.cost).toBeNull();
+    expect(formatCostTotal(s.total.cost, s.total.unpricedCount)).toBe('unknown (2 unpriced)');
+  });
+
+  it('aggregates legacy numeric rows with unpricedCount 0', () => {
+    const s = aggregateCosts([
+      { ts: 't1', issue: '1', task: 'x', model: 'a', inputTokens: 1, outputTokens: 1, cost: 0 },
+      { ts: 't2', issue: '1', task: 'x', model: 'a', inputTokens: 1, outputTokens: 1, cost: 0.5 },
+    ]);
+    expect(s.total).toEqual({ inputTokens: 2, outputTokens: 2, cost: 0.5, unpricedCount: 0 });
+  });
+});
+
+describe('readCostsFile unpriced rows', () => {
+  it('keeps legacy and unpriced rows and skips a non-boolean unpriced', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'costs-unpriced-'));
+    const file = join(dir, 'costs.jsonl');
+    const base = { ts: 't', issue: '1', task: 'build', model: 'm', inputTokens: 1, outputTokens: 1 };
+    writeFileSync(
+      file,
+      [
+        JSON.stringify({ ...base, cost: 0.1 }),
+        JSON.stringify({ ...base, cost: null, unpriced: true }),
+        JSON.stringify({ ...base, cost: null, unpriced: 'yes' }),
+      ].join('\n') + '\n',
+    );
+    const r = readCostsFile(file);
+    expect(r.entries).toHaveLength(2);
+    expect(r.skipped).toBe(1);
+  });
+});
+
+describe('formatCostTotal', () => {
+  it('formats priced, unknown, mixed and custom digits', () => {
+    expect(formatCostTotal(0.03, 0)).toBe('$0.0300');
+    expect(formatCostTotal(null, 0)).toBe('unknown');
+    expect(formatCostTotal(0.03, 1)).toBe('$0.0300 (1 unpriced)');
+    expect(formatCostTotal(0.03, 0, 2)).toBe('$0.03');
   });
 });
 

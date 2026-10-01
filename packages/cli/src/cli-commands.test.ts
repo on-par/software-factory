@@ -876,6 +876,31 @@ describe('cli commands (via main dispatch)', () => {
       expect(out).toContain('Total: $3.5000');
     });
 
+    it('prints unknown for an all-unpriced summary', async () => {
+      h.costs = [{ model: 'x', cost: null, unpriced: true }];
+      await runMain('cost');
+      const out = logged();
+      expect(out).toContain('Total: unknown (1 unpriced)');
+      expect(out).not.toContain('$0.0000');
+    });
+
+    it('excludes unpriced rows from a mixed total and counts them', async () => {
+      h.costs = [
+        { model: 'a', cost: 1 },
+        { model: 'x', cost: null, unpriced: true },
+      ];
+      await runMain('cost');
+      expect(logged()).toContain('Total: $1.0000 (1 unpriced)');
+    });
+
+    it('prints unknown for an unpriced row under --issue', async () => {
+      h.costs = [{ issue: '5', task: 'plan', model: 'x', cost: null, unpriced: true }];
+      await runMain('cost', '--issue', '5');
+      const out = logged();
+      expect(out).toContain('plan x unknown');
+      expect(out).toContain('Total: unknown (1 unpriced)');
+    });
+
     it('shows a per-entry breakdown filtered to one issue via --issue', async () => {
       h.costs = [
         { issue: '296', task: 'build_codex', model: 'qwen', cost: 0, failoverReason: 'rate_limit' },
