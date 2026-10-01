@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -203,6 +203,39 @@ describe('runReset failure reporting', () => {
     expect(line).toContain('kept');
     expect(line).toMatch(/plan files \(/);
     expect(line).toMatch(/phase file \(/);
+  });
+});
+
+describe('runReset state-write failures', () => {
+  it('reports rework-history and lane-file registries that cannot be rewritten as kept', async () => {
+    const state = seedState();
+    await seedHistory(state);
+    // A directory squatting on the registry's tmp file makes the rewrite throw.
+    mkdirSync(join(state, 'rework-history.json.tmp'));
+    mkdirSync(join(state, 'lane-files.json.tmp'));
+    const { deps } = makeDeps(state);
+
+    const [line] = await runReset([192], deps);
+
+    expect(line).toMatch(/kept .*rework history \(/);
+    expect(line).toMatch(/lane-file claim \(/);
+  });
+});
+
+describe('runReset logs failure', () => {
+  it('reports a logs dir that cannot be removed as kept', async () => {
+    const state = seedState();
+    const { deps } = makeDeps(state);
+    const logsDir = join(state, 'logs');
+    // Removing an entry needs write permission on its parent directory.
+    chmodSync(logsDir, 0o500);
+    try {
+      const [line] = await runReset([192], deps);
+      // Running as root bypasses the permission check, so only assert when the removal failed.
+      if (existsSync(join(logsDir, 'issue-192'))) expect(line).toMatch(/logs \(/);
+    } finally {
+      chmodSync(logsDir, 0o700);
+    }
   });
 });
 
