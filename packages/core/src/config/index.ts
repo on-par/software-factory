@@ -255,9 +255,12 @@ const FactoryConfigSchema = z.object({
   /** Ship-it lane workspace isolation (#1535). `'host'` is the existing sibling-worktree
    *  behavior; `'disposable-docker'` opts a repo into a managed, labeled container per
    *  lane via the existing hosted ContainerEngine. Default-off — every existing repo is
-   *  unaffected unless it explicitly opts in. */
+   *  unaffected unless it explicitly opts in. `mode` (#1759) chooses the local workspace
+   *  model (`worktree` | `docker`); it has no default so "unset" survives parsing (see
+   *  `resolveWorkspaceMode`) and is independent of `backend`. */
   workspace: z
     .object({
+      mode: z.enum(['worktree', 'docker']).optional(),
       backend: z.enum(['host', 'disposable-docker']).default('host'),
       comment: z.string().optional(),
     })
@@ -510,6 +513,44 @@ export function resolveProcessGroupGraceMs(config: FactoryConfig): number {
 /** Where a resolved merge decision came from. `'flag'` is an explicit per-invocation CLI
  *  flag (`--auto-merge`/`--no-auto-merge`) and outranks every other source. */
 export type MergePolicySource = 'flag' | 'repo' | 'env' | 'default';
+
+export type WorkspaceMode = 'worktree' | 'docker';
+export type WorkspaceModeSource = 'repo' | 'env' | 'default';
+export interface EffectiveWorkspaceMode {
+  mode: WorkspaceMode;
+  source: WorkspaceModeSource;
+}
+
+/** Resolve the local workspace model: `workspace.mode` (repo file) > `FACTORY_WORKSPACE_MODE`
+ *  env > default `worktree`. An invalid env value throws. */
+export function resolveWorkspaceMode(
+  config: FactoryConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): EffectiveWorkspaceMode {
+  const repoMode = config.workspace?.mode;
+  if (repoMode !== undefined) return { mode: repoMode, source: 'repo' };
+  const raw = env.FACTORY_WORKSPACE_MODE;
+  if (raw) {
+    if (raw === 'worktree' || raw === 'docker') return { mode: raw, source: 'env' };
+    throw new Error("FACTORY_WORKSPACE_MODE must be 'worktree' or 'docker'");
+  }
+  return { mode: 'worktree', source: 'default' };
+}
+
+/** Warning when an explicit sandbox runtime is set but docker mode makes it moot; null otherwise.
+ *  `'auto'` is the packaged default and counts as unset. */
+export function workspaceSandboxWarning(
+  config: FactoryConfig,
+  mode: WorkspaceMode,
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  if (mode !== 'docker') return null;
+  let label: string | null = null;
+  if (env.FACTORY_SANDBOX_RUNTIME) label = `FACTORY_SANDBOX_RUNTIME=${env.FACTORY_SANDBOX_RUNTIME}`;
+  else if (config.sandbox.runtime !== 'auto') label = `sandbox.runtime: ${config.sandbox.runtime}`;
+  if (!label) return null;
+  return `${label} is ignored in workspace.mode: docker — the container is the workspace and the containment boundary`;
+}
 
 export interface EffectiveMergePolicy {
   auto: boolean;

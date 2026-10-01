@@ -397,6 +397,7 @@ const INTERNAL_API_KEYS = [
   'resolveEffectiveConfig',
   'resolveExperimental',
   'resolveLocalOnly',
+  'resolveWorkspaceMode',
   'FACTORY_RUNTIME_CONFIG_KEYS',
   'CONFIG_EXAMPLE_OMITTED_KEYS',
   'renderConfigExample',
@@ -526,6 +527,7 @@ const INTERNAL_API_KEYS = [
   'createMicroVm',
   'microVmName',
   'removeMicroVm',
+  'workspaceSandboxWarning',
   'worktreeSandboxFor',
   // docker-sandbox orphan microVM scan + reap (#1527)
   'listMicroVms',

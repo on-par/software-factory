@@ -110,8 +110,10 @@ worktree:
   parent: "~/.factory/worktrees"
   gcTtlDays: 7
   autoGcOnRun: true
-# Lane workspace backend: "host" (git worktrees) or "disposable-docker" (a managed container per
-# lane).
+# Lane workspace. mode: "worktree" (default: git worktree on the host, contained by sandbox.runtime)
+# or "docker" (fresh disposable clone per issue in a container; sandbox.runtime is ignored).
+# FACTORY_WORKSPACE_MODE applies when mode is unset. backend: "host" or "disposable-docker" (a
+# managed container per lane).
 workspace:
   backend: "host"
 # Containment for agentic build runs. Disable per-run with --no-sandbox or FACTORY_SANDBOX=0. Empty

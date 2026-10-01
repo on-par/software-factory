@@ -167,6 +167,7 @@ import type {
   OvernightQueueDeps,
   OvernightStateItem,
   QueueClaim,
+  EffectiveWorkspaceMode,
   QueueIssue,
   QueuePreflightDecision,
   QueueReleaseOutcome,
@@ -221,6 +222,8 @@ import {
   releaseRuntimeFiles,
   releaseStaleClaims,
   resolveBranchPrefix,
+  resolveWorkspaceMode,
+  workspaceSandboxWarning,
   resolveEffectiveConfig,
   worktreeSandboxFor,
   resolveExperimental,
@@ -245,6 +248,7 @@ import chalk from 'chalk';
 import { Command } from 'commander';
 import { admissionStateReaderFor, runQueueReconcile } from './admission.js';
 import { runQueueClear } from './queue-clear.js';
+import { dockerWorkspacePreflightError, probeDocker } from './workspace-preflight.js';
 import { cmdDaemonLogs, cmdDaemonStart, cmdDaemonStatus, cmdDaemonStop, DaemonCtlError } from './daemon.js';
 import {
   analyzeEventLog,
@@ -1150,13 +1154,15 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
 
   if (opts.kpis) {
     console.log(chalk.bold('\n  Effective config:'));
+    const statusFactoryConfig = loadFactoryConfigForRepo(paths.config);
     for (const line of describeEffectiveConfig({
       router,
       repo: repoConfig,
       repoConfigPath: '.factory/config.json',
-      mergePolicy: resolveMergePolicy(loadFactoryConfigForRepo(paths.config), process.env, {
+      mergePolicy: resolveMergePolicy(statusFactoryConfig, process.env, {
         auto: readRunFlagOverrides(paths.runFlags).autoMerge,
       }),
+      workspaceMode: statusWorkspaceMode(statusFactoryConfig),
     })) {
       console.log(`    ${line}`);
     }
@@ -1276,13 +1282,15 @@ async function cmdTui(opts: { localQueue?: boolean } = {}) {
     effective.allowExperimental,
     effective.localOnly,
   );
+  const tuiFactoryConfig = loadFactoryConfigForRepo(paths.config);
   const effectiveConfigLines = describeEffectiveConfig({
     router,
     repo: repoConfig,
     repoConfigPath: '.factory/config.json',
-    mergePolicy: resolveMergePolicy(loadFactoryConfigForRepo(paths.config), process.env, {
+    mergePolicy: resolveMergePolicy(tuiFactoryConfig, process.env, {
       auto: readRunFlagOverrides(paths.runFlags).autoMerge,
     }),
+    workspaceMode: statusWorkspaceMode(tuiFactoryConfig),
   });
 
   await runTui({
@@ -1889,6 +1897,15 @@ async function maybeWriteBenchmarkArtifacts(opts: {
 /** The autoGcOnRun-gated worktree sweep every pipeline entry point runs before shipping
  *  (`factory run`, and since #1756 the one-shot `factory ship` / `factory run-issue`). Never
  *  throws — a GC failure is a warn, never a reason to abort the command. */
+/** Workspace mode for status display; an invalid FACTORY_WORKSPACE_MODE must not crash status. */
+function statusWorkspaceMode(config: ReturnType<typeof loadFactoryConfigForRepo>): EffectiveWorkspaceMode {
+  try {
+    return resolveWorkspaceMode(config);
+  } catch {
+    return { mode: 'worktree', source: 'default' };
+  }
+}
+
 async function runAutoWorktreeGc(
   repoRoot: string,
   paths: ReturnType<typeof getFactoryPaths>,
@@ -3120,6 +3137,29 @@ async function cmdRun(
     if (keychainErr) {
       logEvent(paths.events, 'environment_warning', 'all', keychainErr);
       throw new Error(keychainErr);
+    }
+    let workspace: EffectiveWorkspaceMode;
+    try {
+      workspace = resolveWorkspaceMode(factoryConfig);
+    } catch (err: any) {
+      throw new CliExitError(`factory: ${err.message}`, 2);
+    }
+    const sandboxWarning = workspaceSandboxWarning(factoryConfig, workspace.mode);
+    if (sandboxWarning) {
+      console.warn(chalk.yellow(`factory: ${sandboxWarning}`));
+      logEvent(paths.events, 'warn', 'all', sandboxWarning);
+    }
+    if (workspace.mode === 'docker') {
+      const dockerErr = dockerWorkspacePreflightError(await probeDocker());
+      if (dockerErr) {
+        logEvent(paths.events, 'environment_warning', 'all', dockerErr);
+        throw new Error(dockerErr);
+      }
+      const msg =
+        'workspace.mode is docker: the Docker workspace pipeline is not available yet (follow-up to #1759) — not claiming any issue. Set workspace.mode: worktree to run today.';
+      console.log(chalk.yellow(`!! ${msg}`));
+      logEvent(paths.events, 'stopped', 'all', msg);
+      return;
     }
     await runAutoWorktreeGc(repoRoot, paths, ghRepo, 'all');
 
