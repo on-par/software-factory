@@ -63,7 +63,6 @@ describe('zero-config: { version: 2 }', () => {
       resources: { cpuMs: 300_000, memMb: 4096 },
     });
     expect(cfg.run.worktree).toEqual({
-      prefix: 'ship-it/',
       parent: '../',
       gcTtlDays: 7,
       autoGcOnRun: true,
@@ -75,7 +74,7 @@ describe('zero-config: { version: 2 }', () => {
     expect(cfg.run.efficiency).toEqual({ fastPath: false, maxReworkRounds: 1 });
     expect(cfg.run.ci).toEqual({ skip: false });
     expect(cfg.run.planApproval).toEqual({ enabled: false });
-    expect(cfg.run.branchPrefix).toBe('ship-it');
+    expect(cfg.run).not.toHaveProperty('branchPrefix');
     expect(cfg.run.byok).toEqual({ enabled: false });
 
     // budget
@@ -148,10 +147,23 @@ describe('sparse overlay', () => {
   });
 
   it('loads a sparse overlay file from disk', async () => {
-    const path = await writeConfig({ version: 2, run: { branchPrefix: 'exp' } });
+    const path = await writeConfig({ version: 2, run: { ci: { skip: true } } });
     const cfg = loadV2Config(path);
-    expect(cfg.run.branchPrefix).toBe('exp');
+    expect(cfg.run.ci.skip).toBe(true);
     expect(cfg.run.merge.auto).toBe(false);
+  });
+
+  it('strips removed run.branchPrefix and run.worktree.prefix keys from old files', async () => {
+    const path = await writeConfig({ version: 2, run: { branchPrefix: 'exp', worktree: { prefix: 'wt/' } } });
+    const cfg = loadV2Config(path);
+    expect(cfg.run).not.toHaveProperty('branchPrefix');
+    expect(cfg.run.worktree).not.toHaveProperty('prefix');
+  });
+
+  it('JSON schema lists neither branchPrefix nor worktree.prefix', () => {
+    const run = (factoryConfigV2JsonSchema() as any).properties.run.properties;
+    expect(run).not.toHaveProperty('branchPrefix');
+    expect(run.worktree.properties).not.toHaveProperty('prefix');
   });
 });
 
@@ -209,7 +221,7 @@ describe('full v2 config', () => {
         approval_seconds: 600,
       },
       sandbox: { enabled: false, network: { allow: [] }, resources: { cpuMs: 100, memMb: 512 } },
-      worktree: { prefix: 'wt/', parent: '../wt', gcTtlDays: 3, autoGcOnRun: false },
+      worktree: { parent: '../wt', gcTtlDays: 3, autoGcOnRun: false },
       environment: {
         ports: { enabled: false, range: [4000, 4100] },
         processGroups: { graceMs: 1000 },
@@ -219,7 +231,6 @@ describe('full v2 config', () => {
       efficiency: { fastPath: true, maxReworkRounds: 0, perIssueCapUsd: 10 },
       ci: { skip: true },
       planApproval: { enabled: true },
-      branchPrefix: 'factory',
       byok: { enabled: true },
     },
     budget: {

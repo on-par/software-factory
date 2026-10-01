@@ -115,7 +115,6 @@ const FactoryConfigSchema = z.object({
     .strict()
     .optional(),
   worktree: z.object({
-    prefix: z.string(),
     parent: z.string(),
     comment: z.string(),
     gcTtlDays: z.number().default(7),

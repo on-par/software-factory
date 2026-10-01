@@ -115,7 +115,6 @@
   },
   // Worktrees created as siblings of the repo
   "worktree": {
-    "prefix": "ship-it/",
     "parent": "../",
     "gcTtlDays": 7,
     "autoGcOnRun": true

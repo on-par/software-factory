@@ -187,7 +187,6 @@ const SandboxSchema = z
 
 const WorktreeSchema = z
   .object({
-    prefix: z.string().default('ship-it/').describe('Branch/worktree name prefix for factory work.'),
     parent: z.string().default('../').describe('Directory (relative to the repo) where worktrees are created.'),
     gcTtlDays: z.number().default(7).describe('Age in days after which stale worktrees are garbage-collected.'),
     autoGcOnRun: z.boolean().default(true).describe('Garbage-collect stale worktrees at the start of each run.'),
@@ -279,10 +278,6 @@ const RunSectionSchema = z
       })
       .prefault({})
       .describe('Optional pre-code approval gate.'),
-    branchPrefix: z
-      .string()
-      .default('ship-it')
-      .describe('Branch-name prefix shared by ship, land, and ingest (FACTORY_BRANCH_PREFIX).'),
     byok: z
       .object({
         enabled: z
