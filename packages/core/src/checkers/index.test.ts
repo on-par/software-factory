@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -404,6 +404,113 @@ exit 1
     expect(result.details).toContain('packages/core/src/public-api.test.ts');
     expect(result.details).toContain('root export exposes exactly the documented public API');
     expect(result.details).not.toMatch(/^verify\.sh failed: error: required option/);
+  });
+
+  it('keeps the end of verify.sh output when no test runner format is recognized', async () => {
+    const worktree = await makeWorktree({ 'scripts/verify.sh': '#!/bin/bash\nexit 1' });
+    const esc = String.fromCharCode(27);
+    const stdout = [
+      `${esc}[1m${esc}[38;2;53;206;214m   ___  BANNER  ___${esc}(B${esc}[m`,
+      'Verifying Restore',
+      ...Array.from({ length: 80 }, (_, i) => `  restored project ${i}`),
+      `${esc}[1m${esc}[31mVerification failed during: Lint${esc}(B${esc}[m`,
+    ].join('\n');
+    const { run } = stubRunner({ stdout });
+
+    const result = await testsChecker({ ...makeContext(worktree), runCommand: run });
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain('Verification failed during: Lint');
+    expect(result.details).not.toContain('BANNER');
+    expect(result.details).not.toContain(esc);
+    expect(result.details.length).toBeLessThanOrEqual('verify.sh failed: '.length + 501);
+  });
+
+  it('extracts .NET Microsoft.Testing.Platform failed-test evidence from verify.sh output', async () => {
+    const worktree = await makeWorktree({ 'scripts/verify.sh': '#!/bin/bash\nexit 1' });
+    const stdout = [
+      'Local verification banner',
+      'failed AgentReadyAssessment.Cli.Tests.HtmlReportRendererTests.ShouldRenderPerfectReport_WhenNoFindings (6ms)',
+      '  from /repo/tests/Cli.Tests/bin/Debug/net10.0/Cli.Tests.dll (net10.0|arm64)',
+      '  Xunit.MicrosoftTestingPlatform.XunitException: VerifyException : Directory: /repo/tests/Snapshots',
+      ...Array.from({ length: 60 }, (_, i) => `  <div>received html line ${i}</div>`),
+      'Test run summary: Failed!',
+      '  total: 1413',
+      '  failed: 3',
+    ].join('\n');
+    const { run } = stubRunner({ stdout });
+
+    const result = await testsChecker({ ...makeContext(worktree), runCommand: run });
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain('HtmlReportRendererTests.ShouldRenderPerfectReport_WhenNoFindings');
+    expect(result.details).toContain('VerifyException');
+    expect(result.details).not.toContain('Local verification banner');
+  });
+
+  it.each([
+    [
+      '.NET VSTest',
+      '  Failed Namespace.Class.ShouldWork [46 ms]\n  Error Message:\n   Assert.Equal() Failure',
+      'ShouldWork',
+    ],
+    ['go test', '--- FAIL: TestParse (0.00s)\n    parse_test.go:12: got 1, want 2', 'TestParse'],
+    ['pytest', 'FAILED tests/test_parse.py::test_parse - AssertionError: 1 != 2', 'test_parse.py::test_parse'],
+  ])('extracts %s failed-test evidence from verify.sh output', async (_runner, failure, identifier) => {
+    const worktree = await makeWorktree({ 'scripts/verify.sh': '#!/bin/bash\nexit 1' });
+    const stdout = ['banner line', failure, ...Array.from({ length: 80 }, (_, i) => `trailing noise ${i}`)].join('\n');
+    const { run } = stubRunner({ stdout });
+
+    const result = await testsChecker({ ...makeContext(worktree), runCommand: run });
+
+    expect(result.details).toContain(identifier);
+    expect(result.details).not.toContain('banner line');
+  });
+
+  it("finds failed-test evidence on stderr and ignores npm's echo of the script command", async () => {
+    const worktree = await makeWorktree({ 'scripts/verify.sh': '#!/bin/bash\nexit 1' });
+    const stdout = '\n> fixture@1.0.0 test\n> node -e "console.error(\'FAIL  echoed.test.ts > not output\')"\n';
+    const stderr = `FAIL  real.test.ts > suite > breaks\nAssertionError: nope\n${'diagnostic '.repeat(200)}`;
+    const { run } = stubRunner({ stdout, stderr });
+
+    const result = await testsChecker({ ...makeContext(worktree), runCommand: run });
+
+    expect(result.details).toContain('FAIL  real.test.ts > suite > breaks');
+    expect(result.details).toContain('AssertionError: nope');
+    expect(result.details).not.toContain('echoed.test.ts');
+  });
+
+  it('writes the full command output to outputLogDir and links it after the bounded summary', async () => {
+    const worktree = await makeWorktree({ 'scripts/verify.sh': '#!/bin/bash\nexit 1' });
+    const outputLogDir = join(worktree, 'logs', 'issue-7', 'check-r0');
+    const stdout = `first stdout line\n${'x'.repeat(5000)}\nlast stdout line`;
+    const { run } = stubRunner({ stdout, stderr: 'a stderr line', exitCode: 2 });
+
+    const result = await testsChecker({ ...makeContext(worktree), runCommand: run, outputLogDir });
+
+    const logPath = join(outputLogDir, 'tests-verify.sh.log');
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toMatch(new RegExp(`\\nfull output: ${logPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
+    const log = await readFile(logPath, 'utf8');
+    expect(log).toContain('$ bash scripts/verify.sh --no-e2e');
+    expect(log).toContain('exit code: 2');
+    expect(log).toContain('first stdout line');
+    expect(log).toContain('last stdout line');
+    expect(log).toContain('a stderr line');
+  });
+
+  it('keeps the FAIL verdict and omits the link when the output log cannot be written', async () => {
+    const worktree = await makeWorktree({ 'scripts/verify.sh': '#!/bin/bash\nexit 1', blocker: 'a file, not a dir' });
+    const { run } = stubRunner({ stdout: 'boom' });
+
+    const result = await testsChecker({
+      ...makeContext(worktree),
+      runCommand: run,
+      outputLogDir: join(worktree, 'blocker', 'logs'),
+    });
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toBe('verify.sh failed: boom');
   });
 
   it('uses shared package.json from context instead of re-reading from disk', async () => {

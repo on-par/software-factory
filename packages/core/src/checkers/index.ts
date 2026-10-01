@@ -1,12 +1,12 @@
 // src/checkers/index.ts — Checker framework: built-in + custom checkers
 
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { EventKind } from '../events/kinds.js';
 import type { ModelRouter } from '../router/index.js';
 import type { CheckerOutput, CheckSummary, Constitution } from '../types/index.js';
-import { type CommandResult, describeCommandFailure, type RunCommandOptions } from '../utils/command-runner.js';
+import { type CommandResult, type RunCommandOptions } from '../utils/command-runner.js';
 import { runVerificationCommand as runCommand } from './run-command.js';
 import { extractJsonObjects } from '../utils/json.js';
 import {
@@ -63,6 +63,10 @@ export interface CheckerContext {
    *  set by checkPhase. A rejection is logged (`activity_touch_failed`) and swallowed:
    *  this is an observability side channel, not a checker-run invariant. */
   onActivity?: () => void | Promise<void>;
+  /** Directory where a failing checker command writes its full stdout/stderr — set by
+   *  checkPhase per round. The FAIL details carry only a bounded summary plus this
+   *  log's path, so the rework worker and a human can read what the cap cut. */
+  outputLogDir?: string;
 }
 
 export type CheckerFn = (ctx: CheckerContext) => Promise<CheckerOutput>;
@@ -97,14 +101,18 @@ export const compileChecker: CheckerFn = async (ctx) => {
       return {
         checker: 'compile',
         result: 'FAIL',
-        details: `npm run build failed: ${describeCommandFailure(r).slice(0, 500)}`,
+        details: await commandFailureDetails(ctx, 'compile', 'npm run build', r, describeCommandFailureTail(r, 500)),
       };
     }
 
     if (await fileExists(join(ctx.worktree, 'Makefile'))) {
       const r = await runCommand(['make'], { cwd: ctx.worktree, timeoutMs: 120_000, env: ctx.env, onPgid: ctx.onPgid });
       if (r.ok) return { checker: 'compile', result: 'PASS', details: 'make: OK' };
-      return { checker: 'compile', result: 'FAIL', details: `make failed: ${describeCommandFailure(r).slice(0, 500)}` };
+      return {
+        checker: 'compile',
+        result: 'FAIL',
+        details: await commandFailureDetails(ctx, 'compile', 'make', r, describeCommandFailureTail(r, 500)),
+      };
     }
 
     if (await fileExists(join(ctx.worktree, 'Cargo.toml'))) {
@@ -118,7 +126,7 @@ export const compileChecker: CheckerFn = async (ctx) => {
       return {
         checker: 'compile',
         result: 'FAIL',
-        details: `cargo build failed: ${describeCommandFailure(r).slice(0, 500)}`,
+        details: await commandFailureDetails(ctx, 'compile', 'cargo build', r, describeCommandFailureTail(r, 500)),
       };
     }
 
@@ -134,10 +142,11 @@ export const compileChecker: CheckerFn = async (ctx) => {
 
 const COMMANDER_REQUIRED_OPTION_PATTERN = /^error: required option '.+' not specified$/gm;
 
+/** Removes terminal escape sequences: SGR/CSI (`ESC[1;31m`, `ESC[2K`) and charset selects (`ESC(B`). */
 function stripAnsi(text: string): string {
   return text
     .split(String.fromCharCode(27))
-    .map((part, index) => (index === 0 ? part : part.replace(/^\[[0-9;]*m/, '')))
+    .map((part, index) => (index === 0 ? part : part.replace(/^\[[0-9;?]*[A-Za-z]|^[()][A-Za-z0-9]/, '')))
     .join('');
 }
 
@@ -150,33 +159,108 @@ function stripIncidentalCommanderNoise(text: string): string {
     .join('\n');
 }
 
+/** Where a failing test announces itself, per runner, and how many lines of its message to keep.
+ *  Checked in order, so a vitest FAIL line wins over a vitest suite summary. */
+const FAILED_TEST_MARKERS: readonly { pattern: RegExp; lines: number }[] = [
+  // vitest: " FAIL  file > suite > test"
+  { pattern: /\bFAIL\s+.+\s+>/, lines: 12 },
+  // vitest suite summary: " > file (6 tests | 1 failed) 15ms"
+  { pattern: /^\s*\S+\s+.+\(\d+ tests?\s+\|\s+\d+ failed\)/, lines: 8 },
+  // .NET Microsoft.Testing.Platform: "failed Namespace.Class.Test (46ms)"
+  { pattern: /^\s*failed\s+\S+\s+\((?:\d+(?:\.\d+)?\s*(?:ms|s|m)\s*)+\)\s*$/, lines: 12 },
+  // .NET VSTest: "  Failed Namespace.Class.Test [46 ms]"
+  { pattern: /^\s*Failed\s+\S+\s+\[[^\]]+\]\s*$/, lines: 12 },
+  // go test: "--- FAIL: TestName (0.00s)"
+  { pattern: /^\s*--- FAIL:\s+\S+/, lines: 12 },
+  // pytest short summary: "FAILED tests/test_x.py::test_y - AssertionError"
+  { pattern: /^FAILED\s+\S+::\S+/, lines: 8 },
+];
+
+/** npm echoes the script it runs at column 0 (`> node -e "..."`); that text is the command, not its output. */
+const NPM_SCRIPT_ECHO = /^> /;
+
 function extractFailedTestEvidence(output: string): string | null {
-  const lines = output.split(/\r?\n/);
-  const failLine = lines.findIndex((line) => /\bFAIL\s+.+\s+>/.test(stripAnsi(line)));
-  if (failLine >= 0) {
-    return lines
-      .slice(failLine, failLine + 12)
-      .join('\n')
-      .trim();
+  const lines = stripAnsi(output).split(/\r?\n/);
+  for (const { pattern, lines: keep } of FAILED_TEST_MARKERS) {
+    const start = lines.findIndex((line) => !NPM_SCRIPT_ECHO.test(line) && pattern.test(line));
+    if (start >= 0) {
+      return lines
+        .slice(start, start + keep)
+        .join('\n')
+        .trim();
+    }
   }
-
-  const suiteLine = lines.findIndex((line) => /^\s*\S+\s+.+\(\d+ tests?\s+\|\s+\d+ failed\)/.test(stripAnsi(line)));
-  if (suiteLine >= 0) {
-    return lines
-      .slice(suiteLine, suiteLine + 8)
-      .join('\n')
-      .trim();
-  }
-
   return null;
 }
 
-function describeVerificationFailure(r: Awaited<ReturnType<typeof runCommand>>): string {
-  const testEvidence = extractFailedTestEvidence(r.stdout);
-  if (!testEvidence) return describeCommandFailure(r);
+/** Bounded tail of command output. Runners print banners first and failures and summaries
+ *  last, so a head slice keeps the banner and drops the error. */
+function outputTail(text: string, maxChars: number): string {
+  const clean = stripAnsi(text).trim();
+  if (clean.length <= maxChars) return clean;
+  const tail = clean.slice(-maxChars);
+  // Drop the partial first line, unless that would throw away most of the tail.
+  const lineStart = tail.indexOf('\n');
+  return `…${lineStart >= 0 && lineStart < maxChars / 2 ? tail.slice(lineStart + 1) : tail}`;
+}
 
-  const stderr = stripIncidentalCommanderNoise(r.stderr);
-  return stderr ? `${testEvidence}\nstderr:\n${stderr}` : testEvidence;
+function describeCommandFailureTail(r: CommandResult, maxChars: number): string {
+  const output = r.stderr.trim() !== '' ? r.stderr : r.stdout;
+  return outputTail(output, maxChars) || (r.timedOut ? 'timed out' : `exit code ${r.exitCode}`);
+}
+
+/** Failed-test evidence when a known runner format is found on stdout or stderr, else the output's tail. */
+function describeTestFailure(r: CommandResult, maxChars: number): string {
+  const stdoutEvidence = extractFailedTestEvidence(r.stdout);
+  if (stdoutEvidence) {
+    const stderr = stripIncidentalCommanderNoise(stripAnsi(r.stderr));
+    return (stderr ? `${stdoutEvidence}\nstderr:\n${stderr}` : stdoutEvidence).slice(0, maxChars);
+  }
+
+  const stderrEvidence = extractFailedTestEvidence(r.stderr);
+  if (stderrEvidence) return stderrEvidence.slice(0, maxChars);
+
+  return describeCommandFailureTail(r, maxChars);
+}
+
+/** Writes a failed command's full stdout/stderr under ctx.outputLogDir. Returns the path,
+ *  or null when no log dir is set or the write fails — the log is a diagnostic side
+ *  channel and must never change a checker's verdict. */
+async function writeCommandLog(ctx: CheckerContext, name: string, r: CommandResult): Promise<string | null> {
+  if (!ctx.outputLogDir) return null;
+  const path = join(ctx.outputLogDir, `${name.replace(/[^A-Za-z0-9.]+/g, '-')}.log`);
+  try {
+    await mkdir(ctx.outputLogDir, { recursive: true });
+    await writeFile(
+      path,
+      [
+        `$ ${r.command.join(' ')}`,
+        `exit code: ${r.exitCode}${r.timedOut ? ' (timed out)' : ''}`,
+        '',
+        '--- stdout ---',
+        stripAnsi(r.stdout),
+        '--- stderr ---',
+        stripAnsi(r.stderr),
+        '',
+      ].join('\n'),
+    );
+    return path;
+  } catch {
+    return null;
+  }
+}
+
+/** FAIL details for a checker command: `<label> failed: <summary>`, plus the full-output
+ *  log path when one was written. The path sits after the bounded summary so the cap never cuts it. */
+async function commandFailureDetails(
+  ctx: CheckerContext,
+  checker: string,
+  label: string,
+  r: CommandResult,
+  summary: string,
+): Promise<string> {
+  const logPath = await writeCommandLog(ctx, `${checker}-${label}`, r);
+  return logPath ? `${label} failed: ${summary}\nfull output: ${logPath}` : `${label} failed: ${summary}`;
 }
 
 export const testsChecker: CheckerFn = async (ctx) => {
@@ -193,7 +277,7 @@ export const testsChecker: CheckerFn = async (ctx) => {
       return {
         checker: 'tests',
         result: 'FAIL',
-        details: `verify.sh failed: ${describeVerificationFailure(r).slice(0, 500)}`,
+        details: await commandFailureDetails(ctx, 'tests', 'verify.sh', r, describeTestFailure(r, 500)),
       };
     }
 
@@ -209,7 +293,7 @@ export const testsChecker: CheckerFn = async (ctx) => {
       return {
         checker: 'tests',
         result: 'FAIL',
-        details: `npm test failed: ${describeCommandFailure(r).slice(0, 500)}`,
+        details: await commandFailureDetails(ctx, 'tests', 'npm test', r, describeTestFailure(r, 500)),
       };
     }
 
@@ -229,7 +313,7 @@ export const testsChecker: CheckerFn = async (ctx) => {
       return {
         checker: 'tests',
         result: 'FAIL',
-        details: `pytest failed: ${describeCommandFailure(r).slice(0, 500)}`,
+        details: await commandFailureDetails(ctx, 'tests', 'pytest', r, describeTestFailure(r, 500)),
       };
     }
 
@@ -273,7 +357,7 @@ export const lintChecker: CheckerFn = async (ctx) => {
       details.push('lint: OK');
     } else {
       result = 'FAIL';
-      details.push(`lint failed: ${describeCommandFailure(r).slice(0, 300)}`);
+      details.push(await commandFailureDetails(ctx, 'lint', 'lint', r, describeCommandFailureTail(r, 300)));
     }
   }
 
@@ -289,7 +373,7 @@ export const lintChecker: CheckerFn = async (ctx) => {
       details.push('tsc: OK');
     } else {
       result = 'FAIL';
-      details.push(`tsc failed: ${describeCommandFailure(r).slice(0, 300)}`);
+      details.push(await commandFailureDetails(ctx, 'lint', 'tsc', r, describeCommandFailureTail(r, 300)));
     }
   }
 
