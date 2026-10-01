@@ -2028,6 +2028,28 @@ bash scripts/verify.sh
   });
 
   describe('run', () => {
+    it('names the branch with the default factory prefix when --branch-prefix is omitted', async () => {
+      writeFileSync(paths().queue, '# header\napp 5\n');
+      const branches: string[] = [];
+      h.setupWorktreeImpl = async (_r, branch) => {
+        branches.push(branch);
+      };
+      const res = await runMain('run', '--local-queue');
+      expect(res.exited).toBe(false);
+      expect(branches[0]).toEqual(expect.stringMatching(/^factory\/\d+-/));
+    });
+
+    it('names the branch and worktree with --branch-prefix sf', async () => {
+      writeFileSync(paths().queue, '# header\napp 5\n');
+      const calls: string[][] = [];
+      h.setupWorktreeImpl = async (_r, branch, worktree) => {
+        calls.push([branch, worktree]);
+      };
+      const res = await runMain('run', '--local-queue', '--branch-prefix', 'sf');
+      expect(res.exited).toBe(false);
+      expect(calls[0][0]).toEqual(expect.stringMatching(/^sf\/\d+-/));
+      expect(calls[0][1]).toContain('-factory-sf-');
+    });
     it('exits 2 when the queue file is missing', async () => {
       rmSync(paths().queue, { force: true });
       const res = await runMain('run', '--local-queue');
@@ -2511,6 +2533,28 @@ bash scripts/verify.sh
   });
 
   describe('supervise', () => {
+    it('names the branch with the default factory prefix when --branch-prefix is omitted', async () => {
+      writeFileSync(paths().queue, 'app 5\n');
+      const branches: string[] = [];
+      h.setupWorktreeImpl = async (_r, branch) => {
+        branches.push(branch);
+      };
+      const res = await runMain('supervise', '--now', '--local-queue');
+      expect(res.exited).toBe(false);
+      expect(branches[0]).toEqual(expect.stringMatching(/^factory\/\d+-/));
+    });
+
+    it('names the branch and worktree with --branch-prefix sf', async () => {
+      writeFileSync(paths().queue, 'app 5\n');
+      const calls: string[][] = [];
+      h.setupWorktreeImpl = async (_r, branch, worktree) => {
+        calls.push([branch, worktree]);
+      };
+      const res = await runMain('supervise', '--now', '--local-queue', '--branch-prefix', 'sf');
+      expect(res.exited).toBe(false);
+      expect(calls[0][0]).toEqual(expect.stringMatching(/^sf\/\d+-/));
+      expect(calls[0][1]).toContain('-factory-sf-');
+    });
     it('exits 2 when the queue is empty', async () => {
       writeFileSync(paths().queue, '# just comments\n');
       const res = await runMain('supervise', '--now', '--local-queue');
@@ -2838,6 +2882,34 @@ bash scripts/verify.sh
   });
 
   describe('ship (via cmdShip)', () => {
+    it('names the branch with the default factory prefix when --branch-prefix is omitted', async () => {
+      const branches: string[] = [];
+      h.setupWorktreeImpl = async (_r, branch) => {
+        branches.push(branch);
+      };
+      const res = await runMain('ship', '5');
+      expect(res.exited).toBe(false);
+      expect(branches[0]).toEqual('factory/5-fix-the-bug');
+    });
+
+    it('names the branch and worktree with --branch-prefix sf', async () => {
+      const calls: string[][] = [];
+      h.setupWorktreeImpl = async (_r, branch, worktree) => {
+        calls.push([branch, worktree]);
+      };
+      const res = await runMain('ship', '5', '--branch-prefix', 'sf');
+      expect(res.exited).toBe(false);
+      expect(calls[0][0]).toEqual('sf/5-fix-the-bug');
+      expect(calls[0][1]).toContain('-factory-sf-');
+    });
+
+    it('exits 2 before any phase runs when --branch-prefix has no letters or digits', async () => {
+      const core = await import('@on-par/factory-core');
+      const res = await runMain('ship', '5', '--branch-prefix', '!!!');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('--branch-prefix');
+      expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
+    });
     it('ships an issue through all phases and prints the ready PR', async () => {
       const res = await runMain('ship', '5');
       expect(res.exited).toBe(false);
@@ -3043,6 +3115,26 @@ bash scripts/verify.sh
   });
 
   describe('run-issue (one-shot)', () => {
+    it('names the branch with the default factory prefix when --branch-prefix is omitted', async () => {
+      const branches: string[] = [];
+      h.setupWorktreeImpl = async (_r, branch) => {
+        branches.push(branch);
+      };
+      const res = await runMain('run-issue', '5');
+      expect(res.exited).toBe(false);
+      expect(branches[0]).toEqual('factory/5-fix-the-bug');
+    });
+
+    it('names the branch and worktree with --branch-prefix sf', async () => {
+      const calls: string[][] = [];
+      h.setupWorktreeImpl = async (_r, branch, worktree) => {
+        calls.push([branch, worktree]);
+      };
+      const res = await runMain('run-issue', '5', '--branch-prefix', 'sf');
+      expect(res.exited).toBe(false);
+      expect(calls[0][0]).toEqual('sf/5-fix-the-bug');
+      expect(calls[0][1]).toContain('-factory-sf-');
+    });
     it('resolves the issue through the canonical work-request seam and ships it through all phases', async () => {
       const core = await import('@on-par/factory-core');
       const res = await runMain('run-issue', '5');
@@ -3197,6 +3289,20 @@ Please add a widget that does the thing.
       workspaceDirs.push(ws);
       return ws;
     }
+
+    it.each([
+      [[], /^factory\//, false],
+      [['--branch-prefix', 'sf'], /^sf\//, true],
+    ] as const)('creates the worktree branch for prefix args %j', async (extra, pattern, sf) => {
+      const calls: string[][] = [];
+      h.setupWorktreeImpl = async (_r, branch, worktree) => {
+        calls.push([branch, worktree]);
+      };
+      const res = await runMain('run-brief', writeBrief(), ...extra);
+      expect(res.exited).toBe(false);
+      expect(calls[0][0]).toMatch(pattern);
+      if (sf) expect(calls[0][1]).toContain('-factory-sf-');
+    });
 
     afterEach(() => {
       for (const ws of workspaceDirs.splice(0)) rmSync(ws, { recursive: true, force: true });
@@ -3929,6 +4035,10 @@ Please add a widget that does the thing.
 // ===========================================================================
 describe('shipIssue (direct)', () => {
   const ctx = () => ({ repoRoot: h.repoRoot, ghRepo: h.ghRepo });
+
+  it('uses the branchPrefix override for the branch name', async () => {
+    expect(await shipIssue(5, { branchPrefix: 'sf' }, ctx())).toBe('sf/5-fix-the-bug');
+  });
 
   it('returns the branch on the happy path and logs a ready event', async () => {
     const branch = await shipIssue(5, {}, ctx());

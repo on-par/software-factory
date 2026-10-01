@@ -49,6 +49,11 @@ import type {
   WorkRequestSourceKind,
 } from '@on-par/factory-core';
 import {
+  BRANCH_PREFIX_OPTION_DESCRIPTION,
+  INVALID_BRANCH_PREFIX_MESSAGE,
+  resolveBranchPrefixOption,
+} from './branch-prefix.js';
+import {
   acquirePortLease,
   appendKpiHistoryLine,
   applyRepoConfig,
@@ -554,6 +559,12 @@ export function parseIssueArg(raw: string): number {
     throw new CliExitError(`factory: invalid issue argument '${raw}' — expected a positive integer issue number`, 2);
   }
   return Number(trimmed);
+}
+
+function branchPrefixOrExit(raw: string | undefined): string {
+  const prefix = resolveBranchPrefixOption(raw);
+  if (prefix === null) throw new CliExitError(INVALID_BRANCH_PREFIX_MESSAGE, 2);
+  return prefix;
 }
 
 /** Deterministic run number for a brief, derived from its content digest.
@@ -1364,7 +1375,14 @@ export function resolveEnvironmentAcquirer(opts: {
 
 export async function shipIssue(
   issueNum: number,
-  opts: { product?: string; autoRework?: boolean; interactive?: boolean; sandbox?: boolean; approvePlan?: boolean },
+  opts: {
+    product?: string;
+    autoRework?: boolean;
+    interactive?: boolean;
+    sandbox?: boolean;
+    approvePlan?: boolean;
+    branchPrefix?: string;
+  },
   ctx?: {
     repoRoot: string;
     ghRepo: string;
@@ -1399,7 +1417,10 @@ export async function shipIssue(
     routes: loadRoutesConfig(),
     sandbox: factoryConfig.sandbox,
     budget: { perIssueCapUsd: efficiency.perIssueCapUsd },
-    effective: resolveEffectiveConfig(repoConfig),
+    effective:
+      opts.branchPrefix === undefined
+        ? resolveEffectiveConfig(repoConfig)
+        : { ...resolveEffectiveConfig(repoConfig), branchPrefix: opts.branchPrefix },
   };
   const router = new ModelRouter(
     policy.models,
@@ -1806,7 +1827,14 @@ async function maybeWriteBenchmarkArtifacts(opts: {
 
 async function cmdShip(
   issueNum: number,
-  opts: { product?: string; autoRework?: boolean; interactive?: boolean; sandbox?: boolean; approvePlan?: boolean },
+  opts: {
+    product?: string;
+    autoRework?: boolean;
+    interactive?: boolean;
+    sandbox?: boolean;
+    approvePlan?: boolean;
+    branchPrefix?: string;
+  },
 ) {
   if (!isCommandAvailable('claude')) {
     throw new CliExitError(`factory: ${missingClaudeCliMessage()}`, 2);
@@ -1823,6 +1851,8 @@ async function cmdShip(
     logEvent(paths.events, 'warn', issueNum, mergeNotice);
   }
 
+  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
+
   return withRepoRunLock(paths, 'factory ship', async () => {
     const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
     if (hasUnresolvedPark(priorEvents, String(issueNum))) {
@@ -1832,7 +1862,7 @@ async function cmdShip(
     }
 
     try {
-      return await shipIssue(issueNum, opts);
+      return await shipIssue(issueNum, { ...opts, branchPrefix });
     } catch (err: any) {
       if (err instanceof IssueSkippedError) return;
       throw new CliExitError(`Ship failed for issue #${issueNum}: ${err.message}`, 1);
@@ -1842,7 +1872,14 @@ async function cmdShip(
 
 async function cmdRunIssue(
   issueNum: number,
-  opts: { product?: string; autoRework?: boolean; interactive?: boolean; sandbox?: boolean; approvePlan?: boolean },
+  opts: {
+    product?: string;
+    autoRework?: boolean;
+    interactive?: boolean;
+    sandbox?: boolean;
+    approvePlan?: boolean;
+    branchPrefix?: string;
+  },
 ) {
   if (!isCommandAvailable('claude')) {
     throw new CliExitError(`factory: ${missingClaudeCliMessage()}`, 2);
@@ -1852,6 +1889,8 @@ async function cmdRunIssue(
   if (!existsSync(paths.root)) {
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
+
+  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
 
   await withRepoRunLock(paths, 'factory run-issue', async () => {
     const ghRepo = await getGitHubRepo();
@@ -1884,7 +1923,7 @@ async function cmdRunIssue(
     }
 
     try {
-      await shipIssue(issueNum, opts, { repoRoot, ghRepo, workRequest: work });
+      await shipIssue(issueNum, { ...opts, branchPrefix }, { repoRoot, ghRepo, workRequest: work });
     } catch (err: any) {
       if (err instanceof IssueSkippedError) return;
       throw new CliExitError(`Run failed for issue #${issueNum}: ${err.message}`, 1);
@@ -1902,6 +1941,7 @@ async function cmdRunBrief(
     approvePlan?: boolean;
     workspace?: string;
     artifacts?: string;
+    branchPrefix?: string;
   },
 ) {
   if (!isCommandAvailable('claude')) {
@@ -1912,6 +1952,8 @@ async function cmdRunBrief(
   if (!existsSync(paths.root)) {
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
+
+  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
 
   await withRepoRunLock(paths, 'factory run-brief', async () => {
     let localOnly: LocalOnlyPolicy | undefined;
@@ -1978,14 +2020,18 @@ async function cmdRunBrief(
     }
 
     try {
-      await shipIssue(runNum, opts, {
-        repoRoot,
-        ghRepo,
-        workRequest: work,
-        workSource: { kind: LOCAL_BRIEF_SOURCE, params: { path: briefPath } satisfies LocalBriefParams },
-        localOnly,
-        artifactsDir,
-      });
+      await shipIssue(
+        runNum,
+        { ...opts, branchPrefix },
+        {
+          repoRoot,
+          ghRepo,
+          workRequest: work,
+          workSource: { kind: LOCAL_BRIEF_SOURCE, params: { path: briefPath } satisfies LocalBriefParams },
+          localOnly,
+          artifactsDir,
+        },
+      );
     } catch (err: any) {
       throw new CliExitError(`Run failed for brief ${briefPath}: ${err.message}`, 1);
     }
@@ -2162,10 +2208,11 @@ export async function reapParkedLaneWorktree(
   issue: number,
   repoRoot: string,
   paths: ReturnType<typeof getFactoryPaths>,
+  prefixOverride?: string,
 ): Promise<void> {
   try {
     const factoryConfig = loadFactoryConfigForRepo(paths.config);
-    const branchPrefix = resolveEffectiveConfig(loadRepoConfig(repoRoot)).branchPrefix;
+    const branchPrefix = prefixOverride ?? resolveEffectiveConfig(loadRepoConfig(repoRoot)).branchPrefix;
     const worktreePath = worktreePathFor(repoRoot, issue, branchPrefix);
     const log = (type: EventKind, msg: string) => logEvent(paths.events, type, issue, msg);
     const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
@@ -2765,10 +2812,12 @@ async function cmdRun(
     usageWatch?: boolean;
     usageThreshold?: string;
     usagePoll?: string;
+    branchPrefix?: string;
   } = {},
 ): Promise<void> {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
+  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
 
   return withRepoRunLock(paths, 'factory run', async () => {
     const stopStatus = readStopFileStatus(paths);
@@ -2922,7 +2971,14 @@ async function cmdRun(
         pids.push(
           runLane(planned.lane, planned.issues, repoRoot, ghRepo, paths, {
             ...planned.deps,
-            reapWorktree: (issue) => reapParkedLaneWorktree(issue, repoRoot, paths),
+            ship: (issue, o, c) => shipIssue(issue, { ...o, branchPrefix }, c),
+            reapWorktree: (issue) =>
+              reapParkedLaneWorktree(
+                issue,
+                repoRoot,
+                paths,
+                opts.branchPrefix === undefined ? undefined : branchPrefix,
+              ),
             waitMerge: (issue, branch, root, gh, p, d = {}) =>
               waitForMerge(issue, branch, root, gh, p, { ...d, mergeOverrides: { auto: opts.autoMerge } }),
           }),
@@ -2985,7 +3041,7 @@ export function createIngestHook(
   repoRoot: string,
   paths: ReturnType<typeof getFactoryPaths>,
   ingestCfg: IngestSettings,
-  deps: { runAutoIngestFn?: typeof runAutoIngest; emitEvent?: typeof logEvent } = {},
+  deps: { runAutoIngestFn?: typeof runAutoIngest; emitEvent?: typeof logEvent; branchPrefix?: string } = {},
 ): () => Promise<number> {
   const { runAutoIngestFn = runAutoIngest, emitEvent = logEvent } = deps;
   return async () => {
@@ -2997,7 +3053,7 @@ export function createIngestHook(
         label: ingestCfg.label,
         lane: ingestCfg.lane,
         maxPerCycle: ingestCfg.maxPerCycle,
-        branchPrefix: resolveBranchPrefix(),
+        branchPrefix: deps.branchPrefix ?? resolveBranchPrefix(),
         forceAdmit: process.env.FACTORY_INGEST_FORCE_ADMIT === '1',
       });
       for (const held of result.skippedFileOverlap) {
@@ -3031,7 +3087,9 @@ async function cmdSupervise(opts: {
   usageWatch?: boolean;
   usageThreshold?: string;
   usagePoll?: string;
+  branchPrefix?: string;
 }): Promise<void> {
+  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   const ingestCfg = resolveIngestConfig(loadFactoryConfigForRepo(paths.config));
@@ -3082,10 +3140,11 @@ async function cmdSupervise(opts: {
             usageWatch: opts.usageWatch,
             usageThreshold: opts.usageThreshold,
             usagePoll: opts.usagePoll,
+            branchPrefix: opts.branchPrefix,
           }),
         pendingCount: countPending,
       }),
-      ingest: ingestCfg.enabled ? createIngestHook(repoRoot, paths, ingestCfg) : undefined,
+      ingest: ingestCfg.enabled ? createIngestHook(repoRoot, paths, ingestCfg, { branchPrefix }) : undefined,
     }),
   );
 }
@@ -4613,6 +4672,7 @@ export async function main() {
     .option('--interactive', 'Pause before opening the PR and wait for approval from the TUI')
     .option('--approve-plan', 'Pause after PLAN freezes the spec and wait for approval before BUILD')
     .option('--no-sandbox', 'Disable the containment sandbox for agent runs (dangerous)')
+    .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
     .action(async (issueNum, opts) => {
       await cmdShip(parseIssueArg(issueNum), opts);
     });
@@ -4625,6 +4685,7 @@ export async function main() {
     .option('--interactive', 'Pause before opening the PR and wait for approval from the TUI')
     .option('--approve-plan', 'Pause after PLAN freezes the spec and wait for approval before BUILD')
     .option('--no-sandbox', 'Disable the containment sandbox for agent runs (dangerous)')
+    .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
     .action(async (issueNum, opts) => {
       await cmdRunIssue(parseIssueArg(issueNum), opts);
     });
@@ -4645,6 +4706,7 @@ export async function main() {
       '--artifacts <dir>',
       'Local-only: write a versioned benchmark artifact manifest (manifest.json, request.json, events.ndjson, diff.patch) to this directory; requires --workspace',
     )
+    .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
     .action(async (file, opts) => {
       await cmdRunBrief(file, opts);
     });
@@ -4706,6 +4768,7 @@ export async function main() {
       "Override .factory/config.json and FACTORY_STOP_AT for this run's usage threshold",
     )
     .option('--usage-poll <seconds>', "Override .factory/config.json and FACTORY_USAGE_POLL for this run's usage poll")
+    .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
     .action(
       (opts: {
         localQueue?: boolean;
@@ -4713,6 +4776,7 @@ export async function main() {
         usageWatch?: boolean;
         usageThreshold?: string;
         usagePoll?: string;
+        branchPrefix?: string;
       }) => cmdRun(opts),
     );
 
@@ -4782,6 +4846,7 @@ export async function main() {
       "Override .factory/config.json and FACTORY_RESUME_AT for this run's usage threshold",
     )
     .option('--usage-poll <seconds>', "Override .factory/config.json and FACTORY_USAGE_POLL for this run's usage poll")
+    .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
     .action(async (opts) => {
       await cmdSupervise(opts);
     });
