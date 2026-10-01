@@ -66,15 +66,15 @@ describe('ReworkHistory', () => {
     const history = new ReworkHistory(file);
 
     await history.record(640, 'sig-a', ['tests']);
-    await history.clear(640);
+    await expect(history.clear(640)).resolves.toBe(true);
 
     expect(await history.priorSignature(640)).toBeUndefined();
   });
 
-  it('clear on an issue with no entry is a harmless no-op', async () => {
+  it('clear on an issue with no entry resolves false', async () => {
     const file = await tmpFile();
     const history = new ReworkHistory(file);
-    await expect(history.clear(999)).resolves.toBeUndefined();
+    await expect(history.clear(999)).resolves.toBe(false);
   });
 
   it('treats a missing file the same as an empty history', async () => {
