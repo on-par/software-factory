@@ -21,6 +21,7 @@ import { z } from 'zod';
 
 import type { EventKind } from '../events/kinds.js';
 import type { ModelRouter } from '../router/index.js';
+import { DECOMPOSED_LABEL } from '../queue/github-queue.js';
 import type { FailoverReason } from '../types/index.js';
 import { findDuplicateStory } from './duplicate-guard.js';
 import type { SiblingIssue } from './duplicate-guard.js';
@@ -451,7 +452,8 @@ async function fetchOpenSiblingIssues(deps: {
  * instead of silently re-filing (#1502). A create failure aborts the whole batch (a
  * partially filed decomposition must never read as success) and returns []; a link
  * failure keeps going since the child issue already exists and is still queueable on its
- * own.
+ * own. After a successful filing the parent is labeled `factory:decomposed` (best-effort) so
+ * worktree-gc can reap its lane worktree (#1756).
  */
 export async function fileDecomposition(deps: {
   decomposition: DecompositionOutput;
@@ -536,6 +538,14 @@ export async function fileDecomposition(deps: {
         'decompose_file_failed',
         `failed to link #${created.number} as a sub-issue of #${issue}: ${errorDetail(error)}`,
       );
+    }
+  }
+
+  if (childIssues.length > 0) {
+    try {
+      await octokit.rest.issues.addLabels({ owner, repo: name, issue_number: issue, labels: [DECOMPOSED_LABEL] });
+    } catch (error) {
+      log('decompose_file_failed', `failed to label #${issue} ${DECOMPOSED_LABEL}: ${errorDetail(error)}`);
     }
   }
 

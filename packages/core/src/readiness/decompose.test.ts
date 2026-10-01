@@ -894,6 +894,85 @@ describe('fileDecomposition', () => {
     const failed = events.find((e) => e.type === 'decompose_file_failed');
     expect(failed?.msg).toContain('did not return an array');
   });
+
+  describe('factory:decomposed label (#1756)', () => {
+    function fixture(addLabels: ReturnType<typeof vi.fn>, request = vi.fn().mockResolvedValue({ data: [] })) {
+      const parsed = parseDecompositionOutput(VALID_DECOMPOSITION_JSON);
+      if (!parsed.ok) throw new Error('fixture must parse');
+      let nextIssue = 900;
+      const create = vi.fn().mockImplementation(() => {
+        nextIssue += 1;
+        return Promise.resolve({ data: { number: nextIssue, id: 5000 + nextIssue } });
+      });
+      const createComment = vi.fn().mockResolvedValue({});
+      const octokit: any = { rest: { issues: { createComment, create, addLabels } }, request };
+      const events: { type: string; msg: string }[] = [];
+      const run = () =>
+        fileDecomposition({
+          decomposition: parsed.decomposition,
+          issue: 606,
+          repo: 'on-par/software-factory',
+          octokit,
+          log: (type, msg) => events.push({ type, msg }),
+        });
+      return { run, events, parsed };
+    }
+
+    it('labels the parent after a successful filing', async () => {
+      const addLabels = vi.fn().mockResolvedValue({});
+      const { run } = fixture(addLabels);
+      await run();
+      expect(addLabels).toHaveBeenCalledWith({
+        owner: 'on-par',
+        repo: 'software-factory',
+        issue_number: 606,
+        labels: ['factory:decomposed'],
+      });
+    });
+
+    it('does not label on a duplicate-blocked batch or a failed sibling fetch', async () => {
+      const addLabels = vi.fn();
+      const blocked = fixture(addLabels, vi.fn().mockRejectedValue(new Error('rate limited')));
+      expect(await blocked.run()).toEqual([]);
+      const [first] = blocked.parsed.decomposition.stories;
+      const dup = fixture(
+        addLabels,
+        vi.fn().mockResolvedValue({
+          data: [{ number: 700, title: first.title, body: renderChildIssueBody(first, 606), state: 'open' }],
+        }),
+      );
+      expect(await dup.run()).toEqual([]);
+      expect(addLabels).not.toHaveBeenCalled();
+    });
+
+    it('does not label when a child create fails', async () => {
+      const addLabels = vi.fn();
+      const parsed = parseDecompositionOutput(VALID_DECOMPOSITION_JSON);
+      if (!parsed.ok) throw new Error('fixture must parse');
+      const create = vi.fn().mockRejectedValue(new Error('nope'));
+      const octokit: any = {
+        rest: { issues: { createComment: vi.fn(), create, addLabels } },
+        request: vi.fn().mockResolvedValue({ data: [] }),
+      };
+      const result = await fileDecomposition({
+        decomposition: parsed.decomposition,
+        issue: 606,
+        repo: 'on-par/software-factory',
+        octokit,
+        log: () => {},
+      });
+      expect(result).toEqual([]);
+      expect(addLabels).not.toHaveBeenCalled();
+    });
+
+    it('still returns the child issues and logs when labeling fails', async () => {
+      const addLabels = vi.fn().mockRejectedValue(new Error('label denied'));
+      const { run, events } = fixture(addLabels);
+      expect(await run()).toEqual([901, 902]);
+      expect(events.find((e) => e.type === 'decompose_file_failed')?.msg).toContain('label denied');
+      expect(events.some((e) => e.type === 'decompose_filed')).toBe(true);
+    });
+  });
 });
 
 describe('renderChildIssueBody', () => {

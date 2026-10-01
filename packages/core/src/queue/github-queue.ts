@@ -9,6 +9,7 @@ import type { QueueEntry, QueueSnapshot, QueueSnapshotEntry } from './index.js';
 export const QUEUED_LABEL = 'factory:queued';
 export const IN_PROGRESS_LABEL = 'factory:in-progress';
 export const PARKED_LABEL = 'factory:parked';
+export const DECOMPOSED_LABEL = 'factory:decomposed';
 export const LANE_LABEL_PREFIX = 'factory:lane:';
 export const QUEUE_ORDER_LABEL_PREFIX = 'factory:order:';
 export const CLAIMED_BY_LABEL_PREFIX = 'factory:claimed-by:';
