@@ -12,6 +12,7 @@ import type { BuildResult } from '../phases/build.js';
 import type { CheckPhaseResult } from '../phases/check.js';
 import type { PlanResult } from '../phases/plan.js';
 import type { ShipResult } from '../phases/ship.js';
+import type { PrShadowVerdict } from '../review/classifier.js';
 import { DEFAULT_REVIEW_FLOOR_RULES } from '../review/floor.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
@@ -904,16 +905,95 @@ describe('runIssue — PR classifier gate (#1724)', () => {
       if (opts.readError) throw opts.readError;
       return opts.changes ?? [];
     });
-    const events: { kind: string; msg: string }[] = [];
+    const events: { kind: string; msg: string; extra?: any }[] = [];
+    const classifyPr = vi.fn(async (): Promise<PrShadowVerdict> => verdict(null));
     const ports = basePorts({
       octokit,
       readReviewFloorChanges,
-      events: () => (kind: string, msg: string) => {
-        events.push({ kind, msg });
+      classifyPr,
+      events: () => (kind: string, msg: string, extra?: any) => {
+        events.push({ kind, msg, extra });
       },
     });
-    return { addLabels, readReviewFloorChanges, events, ports };
+    return { addLabels, readReviewFloorChanges, classifyPr, events, ports };
   }
+
+  function verdict(modelClass: 'A' | 'B' | 'C' | null, reason?: string): PrShadowVerdict {
+    return {
+      modelClass,
+      floorClass: 'A',
+      finalClass: 'A',
+      model: 'm-1',
+      promptVersion: 'classify-pr/v1',
+      policyVersion: 'floor-0123456789ab',
+      diffSha: 'f'.repeat(64),
+      adrIds: ['ADR-0121'],
+      costUsd: 0.01,
+      claims: [{ text: 'c', citation: 'a.ts:1' }],
+      unsupportedClaims: [],
+      notInspected: ['tests'],
+      droppedClaims: 0,
+      ...(reason ? { reason } : {}),
+    };
+  }
+  const classified = (events: { kind: string; msg: string; extra?: any }[]) =>
+    events.filter((e) => e.kind === 'pr-classified');
+
+  it('records the shadow verdict as one pr-classified event and hands it to ship', async () => {
+    const t = setup({ changes: [{ path: 'docs/guide.md', added: 3, removed: 0 }] });
+    t.classifyPr.mockResolvedValue(verdict('B'));
+    await runIssue(baseRequest({ prClassifier: { ...classifier, modelPin: 'pin' } }), basePolicy(), t.ports);
+    const [event] = classified(t.events);
+    expect(classified(t.events)).toHaveLength(1);
+    expect(event.extra.prClassification).toMatchObject({
+      modelClass: 'B',
+      floorClass: 'A',
+      finalClass: 'A',
+      model: 'm-1',
+      promptVersion: 'classify-pr/v1',
+      policyVersion: 'floor-0123456789ab',
+      adrIds: ['ADR-0121'],
+      notInspected: ['tests'],
+    });
+    expect(t.classifyPr).toHaveBeenCalledWith(expect.objectContaining({ modelPin: 'pin', floor: 'A' }));
+    expect(vi.mocked(shipPhase).mock.calls[0][0].reviewRouting?.shadow?.modelClass).toBe('B');
+  });
+
+  it('never lets a model C change an A floor: no label, no merge-gated', async () => {
+    const t = setup({ changes: [{ path: 'docs/guide.md', added: 3, removed: 0 }] });
+    t.classifyPr.mockResolvedValue(verdict('C'));
+    const outcome = await runIssue(baseRequest({ prClassifier: classifier }), basePolicy(), t.ports);
+    expect(outcome.state).toBe('ready');
+    expect(t.addLabels).not.toHaveBeenCalled();
+    expect(gated(t.events)).toHaveLength(0);
+    expect(vi.mocked(shipPhase).mock.calls[0][0].reviewRouting?.gated).toBe(false);
+  });
+
+  it('continues to ship when the model verdict is unavailable', async () => {
+    const t = setup({ changes: [{ path: 'docs/guide.md', added: 3, removed: 0 }] });
+    t.classifyPr.mockResolvedValue(verdict(null, 'classifier produced no JSON object'));
+    const outcome = await runIssue(baseRequest({ prClassifier: classifier }), basePolicy(), t.ports);
+    expect(outcome.state).toBe('ready');
+    expect(classified(t.events)[0].msg).toContain('classifier produced no JSON object');
+  });
+
+  it('logs a null verdict and still ships when the classifier port rejects', async () => {
+    const t = setup({ changes: [{ path: 'docs/guide.md', added: 3, removed: 0 }] });
+    t.classifyPr.mockRejectedValue(new Error('port blew up'));
+    const outcome = await runIssue(baseRequest({ prClassifier: classifier }), basePolicy(), t.ports);
+    expect(outcome.state).toBe('ready');
+    expect(classified(t.events)[0].extra.prClassification).toMatchObject({
+      modelClass: null,
+      reason: 'classifier error: port blew up',
+    });
+  });
+
+  it('does not call the shadow classifier when the flag is off', async () => {
+    const t = setup({ changes: [{ path: 'docs/guide.md', added: 3, removed: 0 }] });
+    await runIssue(baseRequest(), basePolicy(), t.ports);
+    expect(t.classifyPr).not.toHaveBeenCalled();
+    expect(classified(t.events)).toHaveLength(0);
+  });
 
   const gated = (events: { kind: string; msg: string }[]) => events.filter((e) => e.kind === 'merge-gated');
 

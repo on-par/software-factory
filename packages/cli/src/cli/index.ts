@@ -166,6 +166,7 @@ import type {
   OvernightPreflightResult,
   OvernightQueueDeps,
   OvernightStateItem,
+  PrClassificationRecord,
   QueueClaim,
   QueueIssue,
   QueuePreflightDecision,
@@ -1585,6 +1586,7 @@ export async function shipIssue(
         model?: string;
         tokens?: { input: number; output: number };
         readiness?: ReadinessInfo;
+        prClassification?: PrClassificationRecord;
       },
     ) => {
       if (TERMINAL_EVENT_KINDS.has(type)) terminalMessage = msg;
@@ -1729,7 +1731,11 @@ export async function shipIssue(
     },
     localOnly: Boolean(ctx?.localOnly),
     prClassifier: classifierPolicy.enabled
-      ? { rules: resolveReviewFloorRules(repoConfig), gateLabel: resolveFilingPolicy(factoryConfig).selfFixLabel }
+      ? {
+          rules: resolveReviewFloorRules(repoConfig),
+          gateLabel: resolveFilingPolicy(factoryConfig).selfFixLabel,
+          modelPin: repoConfig?.models?.pins?.classifier,
+        }
       : undefined,
     timeouts,
     modelPins,

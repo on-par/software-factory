@@ -1,6 +1,7 @@
 // src/types/index.ts — Core type definitions for the Software Factory
 
 import type { EventKind } from '../events/kinds.js';
+import type { PrClassificationRecord } from '../review/classifier.js';
 
 // ---------- Models ----------
 
@@ -271,6 +272,7 @@ export interface FactoryEvent {
   rework?: ReworkInfo;
   readiness?: ReadinessInfo;
   queueReprioritization?: QueueReprioritizationRecord;
+  prClassification?: PrClassificationRecord;
   model?: string;
   tokens?: { input: number; output: number };
   durationMs?: number;

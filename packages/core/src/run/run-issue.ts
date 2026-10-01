@@ -20,6 +20,15 @@ import { checkPhase as checkPhaseDefault } from '../phases/check.js';
 import { planPhase as planPhaseDefault } from '../phases/plan.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
 import type { ReviewFloorPathChange, ReviewFloorRuleSet } from '../review/floor.js';
+import {
+  CLASSIFIER_PROMPT_VERSION,
+  classifierPolicyVersion,
+  classifyPrShadow,
+  toClassificationRecord,
+  type PrClassificationRecord,
+  type PrShadowInput,
+  type PrShadowVerdict,
+} from '../review/classifier.js';
 import { resolveReviewRouting, type ReviewRouting } from '../review/routing.js';
 import { captureDiffBase } from '../checkers/design-smells.js';
 import type { ReworkHistory } from '../checkers/rework-history.js';
@@ -63,7 +72,7 @@ export interface RunRequest {
   localOnly?: boolean;
   /** PR classifier gate (#1724). Present only when the setting is on; undefined = off (no git
    *  calls, no label, no event, no evidence-pack section). */
-  prClassifier?: { rules: ReviewFloorRuleSet; gateLabel: string };
+  prClassifier?: { rules: ReviewFloorRuleSet; gateLabel: string; modelPin?: string };
   timeouts: { plan: number; build: number; check: number; approval: number };
   modelPins: EffectiveModelPins;
   codexDisabled: boolean;
@@ -90,6 +99,7 @@ type LogFn = (
     model?: string;
     tokens?: { input: number; output: number };
     readiness?: ReadinessInfo;
+    prClassification?: PrClassificationRecord;
   },
 ) => void;
 
@@ -110,6 +120,8 @@ interface RunReportInfo {
  *  responsibility to wire — runIssue only calls the closures it is handed. */
 export interface RunPorts {
   router: ModelRouter;
+  /** Shadow classifier model call (#1725). Defaults to classifyPrShadow. */
+  classifyPr?: (input: PrShadowInput) => Promise<PrShadowVerdict>;
   octokit: Octokit;
   /** The working tree the phases run in (`.path` is the phase cwd). */
   workspace: Workspace;
@@ -634,6 +646,48 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
           `${reviewRouting.reason} — applied ${label}; auto-merge held for a human${reviewRouting.error ? ` (${reviewRouting.error})` : ''}`,
         );
       }
+
+      // Shadow model verdict (#1725, ADR-0121): recorded only. It runs after the gate is fully
+      // decided, so it cannot change the label or merge routing.
+      const shadowInput: PrShadowInput = {
+        worktree: ports.workspace.path,
+        fallbackBaseRef: build.diffBase,
+        issueTitle: request.work.title,
+        issueBody: request.work.brief,
+        specPath: request.specPath,
+        floor: reviewRouting.floor,
+        floorRules: reviewRouting.rules,
+        rules: request.prClassifier.rules,
+        modelPin: request.prClassifier.modelPin,
+        router: ports.router,
+      };
+      let shadow: PrShadowVerdict;
+      try {
+        shadow = await (ports.classifyPr ?? classifyPrShadow)(shadowInput);
+      } catch (err) {
+        shadow = {
+          modelClass: null,
+          floorClass: reviewRouting.floor,
+          finalClass: reviewRouting.floor,
+          model: null,
+          promptVersion: CLASSIFIER_PROMPT_VERSION,
+          policyVersion: classifierPolicyVersion(request.prClassifier.rules),
+          diffSha: null,
+          adrIds: [],
+          costUsd: null,
+          claims: [],
+          unsupportedClaims: [],
+          notInspected: [],
+          droppedClaims: 0,
+          reason: `classifier error: ${errorMessage(err)}`,
+        };
+      }
+      reviewRouting = { ...reviewRouting, shadow };
+      log(
+        'pr-classified',
+        `shadow — no effect: model ${shadow.modelClass ?? 'null'}${shadow.reason ? ` (${shadow.reason})` : ''}, floor ${shadow.floorClass ?? 'error'}, final ${shadow.finalClass ?? 'error'}`,
+        { model: shadow.model ?? undefined, prClassification: toClassificationRecord(shadow) },
+      );
     }
 
     // SHIP
