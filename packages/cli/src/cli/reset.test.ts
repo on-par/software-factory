@@ -152,6 +152,60 @@ describe('runReset', () => {
   });
 });
 
+describe('runReset failure reporting', () => {
+  it('reports git failures as kept and never throws', async () => {
+    const state = seedState();
+    const { deps } = makeDeps(state, {
+      git: async () => {
+        throw new Error('git down');
+      },
+      readLeases: () => {
+        throw new Error('lease read');
+      },
+    });
+
+    const [line] = await runReset([192], deps);
+
+    expect(line).toContain('kept worktrees (git worktree list failed: git down)');
+    expect(line).toContain('branches (git down)');
+    expect(line).toContain('port leases (lease read)');
+  });
+
+  it('reports a failing branch delete and lease release as kept', async () => {
+    const state = seedState();
+    const { deps } = makeDeps(state, {
+      git: async (cmd) => {
+        if (cmd.includes('branch -D')) throw new Error('locked');
+        return sh(cmd);
+      },
+      releaseLease: async () => {
+        throw new Error('busy');
+      },
+    });
+
+    const [line] = await runReset([192], deps);
+
+    expect(line).toContain('kept branch ship-it/192-some-title (locked)');
+    expect(line).toContain('port lease 3100 (busy)');
+  });
+
+  it('reports plan and phase files that cannot be removed as kept', async () => {
+    const state = seedState();
+    const { deps } = makeDeps(state);
+    // A directory where a file is expected makes rmSync (non-recursive) throw EISDIR.
+    rmSync(join(state, 'plans', 'issue-192.md'));
+    mkdirSync(join(state, 'plans', 'issue-192.md'));
+    rmSync(join(state, 'runs', 'issue-192.phase.json'));
+    mkdirSync(join(state, 'runs', 'issue-192.phase.json'));
+
+    const [line] = await runReset([192], deps);
+
+    expect(line).toContain('kept');
+    expect(line).toMatch(/plan files \(/);
+    expect(line).toMatch(/phase file \(/);
+  });
+});
+
 describe('parseResetIssues', () => {
   it('dedupes in order and rejects non-issue values', () => {
     expect(parseResetIssues(['12', '12', '3'])).toEqual([12, 3]);
