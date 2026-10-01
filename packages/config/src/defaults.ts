@@ -563,6 +563,10 @@ export const defaultRoutesConfig: RoutesDefaults = {
       tier: 'checker',
       description: 'Security review of the diff',
     },
+    classify_pr: {
+      tier: 'checker',
+      description: 'PR classifier: escalate-only review class (A/B/C) from the diff (ADR-0121)',
+    },
     dispute_resolution: {
       tier: 'boss',
       description: 'Boss arbitrates when worker disputes checker failure',

@@ -14,6 +14,7 @@
 import { z } from 'zod';
 
 import { isPlainObject, loadFactoryConfig, loadModelsConfig, type FactoryConfig } from './index.js';
+import { DEFAULT_REVIEW_FLOOR_RULES } from '../review/floor.js';
 import { RepoFactoryConfigV2Schema, resolveEfficiencyPolicy, resolveUsageCap, resolveWatchdogPolicy } from './repo.js';
 
 /** Top-level keys the loaders accept that the example deliberately leaves out, with why.
@@ -181,6 +182,16 @@ function modelNamespace(): Node[] {
             unset('estimator', doc('budget', 'watchdog', 'estimator'), usage.estimator),
           ],
         },
+      ],
+    },
+    {
+      kind: 'object',
+      key: 'classifier',
+      doc: doc('classifier'),
+      children: [
+        unset('alwaysHuman', doc('classifier', 'alwaysHuman'), '["<path prefix or glob>"]'),
+        unset('autoEligible', doc('classifier', 'autoEligible'), '["<path prefix or glob>"]'),
+        unset('maxDiffLines', doc('classifier', 'maxDiffLines'), DEFAULT_REVIEW_FLOOR_RULES.maxLines),
       ],
     },
   ];

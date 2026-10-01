@@ -95,6 +95,7 @@ const ModelPinsSchema = z
       .describe('Fallback BUILD model; must be Codex-capable (used after a Claude build failure).'),
     checker: z.string().optional().describe('Pin the checker-tier model.'),
     triage: z.string().optional().describe('Pin the triage-tier model.'),
+    classifier: z.string().optional().describe('Pin the PR classifier model (classify_pr route).'),
   })
   .describe('Per-phase model pins. Each overrides the default tier resolution for that phase.');
 

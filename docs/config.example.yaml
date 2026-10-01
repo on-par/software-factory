@@ -40,6 +40,9 @@ version: 2
     # checker: "<model id>"
     # Triage model. Replaces the triage tier.
     # triage: "<model id>"
+    # PR classifier model (classify_pr route). Unset: the checker tier. Changing it demotes the
+    # classifier (ADR-0121).
+    # classifier: "<model id>"
 # Tier name -> ordered model ids. Replaces that packaged tier; the router uses the first available
 # model. An unknown model id fails loudly. The packaged tiers are:
 # tiers:
@@ -77,6 +80,16 @@ version: 2
     # watch: true
     # Use the list-price usage estimator. Beats FACTORY_USAGE_ESTIMATOR.
     # estimator: false
+# Review floor rules for the PR classifier. Unset keys use the packaged floor rules.
+# classifier:
+  # Path prefixes or globs forced to review class C. Added to the packaged C rules, never replacing
+  # them.
+  # alwaysHuman: ["<path prefix or glob>"]
+  # Path prefixes or globs eligible for class A. Replaces the packaged A rules (docs/, *.md,
+  # *.test.ts).
+  # autoEligible: ["<path prefix or glob>"]
+  # Total added+removed lines above which the floor is at least B.
+  # maxDiffLines: 500
 # Merge policy. `factory run` and `supervise` read `auto`; `factory land` reads `admin`. `factory
 # ship` and `run-issue` always stop at a ready-for-review PR.
 # run:

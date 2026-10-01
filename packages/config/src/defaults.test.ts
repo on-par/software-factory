@@ -110,9 +110,9 @@ describe('shipped defaults', () => {
     });
   });
 
-  it('has 18 routes, each pointing at a known tier', () => {
+  it('has 19 routes, each pointing at a known tier', () => {
     const routeIds = Object.keys(defaultRoutesConfig.routes);
-    expect(routeIds).toHaveLength(18);
+    expect(routeIds).toHaveLength(19);
 
     const tierIds = new Set(Object.keys(defaultModelsConfig.tiers));
     for (const [route, def] of Object.entries(defaultRoutesConfig.routes)) {

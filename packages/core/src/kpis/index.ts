@@ -220,6 +220,7 @@ const TASK_PHASE: Record<string, string> = {
   dispute_resolution: 'check',
   review_pr: 'ship',
   security_review: 'ship',
+  classify_pr: 'ship',
 };
 
 /** Attributes one CostEntry to a phase, or null if the task isn't mapped.
