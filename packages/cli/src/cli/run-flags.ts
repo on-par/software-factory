@@ -7,6 +7,8 @@ import { dirname } from 'node:path';
 /** Flags an operator supplied explicitly on this invocation. `undefined` = not supplied. */
 export interface RunFlagOverrides {
   autoMerge?: boolean;
+  /** `--pr-classifier` / `--no-pr-classifier` (#1724). */
+  prClassifier?: boolean;
 }
 
 /** Read the recorded overrides. Fails soft: a missing, unreadable, non-JSON, non-object,
@@ -21,8 +23,11 @@ export function readRunFlagOverrides(file: string): RunFlagOverrides {
     return {};
   }
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {};
-  const autoMerge = (raw as { autoMerge?: unknown }).autoMerge;
-  return typeof autoMerge === 'boolean' ? { autoMerge } : {};
+  const { autoMerge, prClassifier } = raw as { autoMerge?: unknown; prClassifier?: unknown };
+  const overrides: RunFlagOverrides = {};
+  if (typeof autoMerge === 'boolean') overrides.autoMerge = autoMerge;
+  if (typeof prClassifier === 'boolean') overrides.prClassifier = prClassifier;
+  return overrides;
 }
 
 /** Record the overrides for this invocation. Writing an all-`undefined` set removes the
@@ -30,6 +35,7 @@ export function readRunFlagOverrides(file: string): RunFlagOverrides {
 export function writeRunFlagOverrides(file: string, overrides: RunFlagOverrides): void {
   const recorded: RunFlagOverrides = {};
   if (overrides.autoMerge !== undefined) recorded.autoMerge = overrides.autoMerge;
+  if (overrides.prClassifier !== undefined) recorded.prClassifier = overrides.prClassifier;
   if (Object.keys(recorded).length === 0) {
     rmSync(file, { force: true });
     return;

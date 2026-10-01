@@ -226,6 +226,8 @@ import {
   resolveExperimental,
   resolveFilingPolicy,
   resolveLocalOnly,
+  resolvePrClassifierPolicy,
+  resolveReviewFloorRules,
   RunLockHeldError,
   runOvernightQueue,
   setupWorktree,
@@ -1154,6 +1156,9 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
       mergePolicy: resolveMergePolicy(loadFactoryConfigForRepo(paths.config), process.env, {
         auto: readRunFlagOverrides(paths.runFlags).autoMerge,
       }),
+      prClassifier: resolvePrClassifierPolicy(loadFactoryConfigForRepo(paths.config), process.env, {
+        classifier: readRunFlagOverrides(paths.runFlags).prClassifier,
+      }),
     })) {
       console.log(`    ${line}`);
     }
@@ -1279,6 +1284,9 @@ async function cmdTui(opts: { localQueue?: boolean } = {}) {
     repoConfigPath: '.factory/config.json',
     mergePolicy: resolveMergePolicy(loadFactoryConfigForRepo(paths.config), process.env, {
       auto: readRunFlagOverrides(paths.runFlags).autoMerge,
+    }),
+    prClassifier: resolvePrClassifierPolicy(loadFactoryConfigForRepo(paths.config), process.env, {
+      classifier: readRunFlagOverrides(paths.runFlags).prClassifier,
     }),
   });
 
@@ -1436,6 +1444,8 @@ export async function shipIssue(
     sandbox?: boolean;
     approvePlan?: boolean;
     branchPrefix?: string;
+    /** `--pr-classifier` / `--no-pr-classifier` (#1724); undefined defers to config/env. */
+    prClassifier?: boolean;
   },
   ctx?: {
     repoRoot: string;
@@ -1463,6 +1473,7 @@ export async function shipIssue(
 
   const repoConfig = loadRepoConfig(repoRoot, paths.root);
   const factoryConfig = loadFactoryConfigForRepo(paths.config);
+  const classifierPolicy = resolvePrClassifierPolicy(factoryConfig, process.env, { classifier: opts.prClassifier });
   const timeouts = resolveTimeouts(factoryConfig);
   const failoverSettings = resolveAutoFailover(factoryConfig);
   const breaker = new ProviderBreaker(paths.breaker);
@@ -1691,6 +1702,9 @@ export async function shipIssue(
       sandboxDisabled: opts.sandbox === false,
     },
     localOnly: Boolean(ctx?.localOnly),
+    prClassifier: classifierPolicy.enabled
+      ? { rules: resolveReviewFloorRules(repoConfig), gateLabel: resolveFilingPolicy(factoryConfig).selfFixLabel }
+      : undefined,
     timeouts,
     modelPins,
     codexDisabled: codexOff,
@@ -3092,6 +3106,7 @@ async function cmdRun(
   opts: {
     localQueue?: boolean;
     autoMerge?: boolean;
+    prClassifier?: boolean;
     usageWatch?: boolean;
     usageThreshold?: string;
     usagePoll?: string;
@@ -3110,7 +3125,7 @@ async function cmdRun(
       logEvent(paths.events, 'stopped', 'all', msg);
       return;
     }
-    writeRunFlagOverrides(paths.runFlags, { autoMerge: opts.autoMerge });
+    writeRunFlagOverrides(paths.runFlags, { autoMerge: opts.autoMerge, prClassifier: opts.prClassifier });
     const ghRepo = await getGitHubRepo();
     const factoryConfig = loadFactoryConfigForRepo(paths.config);
     const keychainErr = keychainPreflightError(probeClaudeKeychain());
@@ -3227,7 +3242,7 @@ async function cmdRun(
         pids.push(
           runLane(planned.lane, planned.issues, repoRoot, ghRepo, paths, {
             ...planned.deps,
-            ship: (issue, o, c) => shipIssue(issue, { ...o, branchPrefix }, c),
+            ship: (issue, o, c) => shipIssue(issue, { ...o, branchPrefix, prClassifier: opts.prClassifier }, c),
             sweepFinished: (issue) =>
               sweepBetweenLaneIssues(issue, planned.lane, repoRoot, ghRepo, paths).then(() => {}),
             reapWorktree: (issue) =>
@@ -5048,6 +5063,14 @@ export async function main() {
     .option('--local-queue', 'Read .factory/queue instead of claiming issues from GitHub Issues')
     .option('--auto-merge', 'Merge eligible PRs autonomously, overriding .factory/config.json and FACTORY_MERGE')
     .option('--no-auto-merge', 'Never merge autonomously, overriding .factory/config.json and FACTORY_MERGE')
+    .option(
+      '--pr-classifier',
+      'Hold PRs whose review floor is B or C for a human (applies no-auto-merge), overriding .factory/config.json and FACTORY_PR_CLASSIFIER',
+    )
+    .option(
+      '--no-pr-classifier',
+      'Never run the PR classifier gate, overriding .factory/config.json and FACTORY_PR_CLASSIFIER',
+    )
     .option(
       '--usage-watch',
       'Enforce the usage gate for this run, overriding .factory/config.json and FACTORY_USAGE_WATCH',
