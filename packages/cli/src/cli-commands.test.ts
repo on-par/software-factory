@@ -3163,6 +3163,30 @@ bash scripts/verify.sh
       expect(calls[0][0]).toEqual('sf/5-fix-the-bug');
       expect(calls[0][1]).toContain('-factory-sf-');
     });
+    it('names the child issues and suggests --run-children when the size gate decomposes the issue', async () => {
+      const core = await import('@on-par/factory-core');
+      h.planResult = { ok: false, route: 'claude', escalate: 'decomposed', decomposed: { childIssues: [10, 11] } };
+      const res = await runMain('run-issue', '5');
+      expect(res).toMatchObject({ exited: true, code: 1 });
+      expect(errored()).toContain('#10');
+      expect(errored()).toContain('#11');
+      expect(errored()).toContain('--run-children');
+      expect(vi.mocked(core.planPhase)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(core.buildPhase)).not.toHaveBeenCalled();
+      expect(vi.mocked(core.shipPhase)).not.toHaveBeenCalled();
+    });
+
+    it('accepts --run-children and ships a non-decomposed issue exactly as without it', async () => {
+      const core = await import('@on-par/factory-core');
+      const res = await runMain('run-issue', '5', '--run-children');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('PR #99 ready for review');
+      expect(vi.mocked(core.planPhase)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(core.buildPhase)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(core.checkPhase)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(core.shipPhase)).toHaveBeenCalledTimes(1);
+    });
+
     it('resolves the issue through the canonical work-request seam and ships it through all phases', async () => {
       const core = await import('@on-par/factory-core');
       const res = await runMain('run-issue', '5');
