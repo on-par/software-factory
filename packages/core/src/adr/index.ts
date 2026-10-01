@@ -3,6 +3,9 @@
 import { formatAdrNumber, normalizeStatus, tryParseAdr } from '@on-par/adr-kit';
 import type { RepoContextReader } from '@on-par/repo-context';
 
+import { rankAdrsByRelevance } from './relevance.js';
+import type { AdrMatchReason } from './relevance.js';
+
 export const DEFAULT_ADR_DIR = 'docs/adr';
 /** Cap on the most recent injected ADRs — bounds boss-model context on ADR-heavy repos. */
 export const DEFAULT_MAX_ADRS = 20;
@@ -34,6 +37,8 @@ export interface AdrContext {
   scanned: number;
   /** Accepted ADRs dropped by the maxAdrs cap — never silently zero. */
   truncated: number;
+  /** Present only when `changedPaths` was passed: the relevance-selected ADRs in rank order, with why each matched. */
+  matches?: { path: string; reason: AdrMatchReason; changedPath: string }[];
 }
 
 /** Shared with `adr/write.ts` so the two ADR directory scans never drift apart. */
@@ -43,7 +48,7 @@ export function isNonAdrFile(name: string): boolean {
 
 export async function readAdrContext(
   reader: RepoContextReader,
-  opts?: { dir?: string; maxAdrs?: number },
+  opts?: { dir?: string; maxAdrs?: number; changedPaths?: readonly string[] },
 ): Promise<AdrContext> {
   const dir = opts?.dir ?? DEFAULT_ADR_DIR;
   const maxAdrs = opts?.maxAdrs ?? DEFAULT_MAX_ADRS;
@@ -55,6 +60,7 @@ export async function readAdrContext(
 
   const active: ActiveAdr[] = [];
   const skipped: { path: string; reason: AdrSkipReason }[] = [];
+  const texts = new Map<string, string>();
 
   for (const entry of candidates) {
     const file = await reader.readFile(entry.path);
@@ -74,6 +80,7 @@ export async function readAdrContext(
       continue;
     }
 
+    if (opts?.changedPaths !== undefined) texts.set(entry.path, file.text);
     active.push({
       number: result.adr.number,
       title: result.adr.title,
@@ -99,6 +106,30 @@ export async function readAdrContext(
     if (a.number !== b.number) return b.number - a.number;
     return compareByPath(a, b);
   };
+
+  const changedPaths = opts?.changedPaths;
+  if (changedPaths !== undefined) {
+    const acceptedCount = active.length;
+    const ranked = rankAdrsByRelevance(
+      active.map((adr) => ({ adr, text: texts.get(adr.path) ?? '' })),
+      changedPaths,
+    ).slice(0, maxAdrs);
+    const picked = new Set(ranked.map((m) => m.adr.path));
+    const fill = active
+      .sort(compareForRetention)
+      .filter((adr) => !picked.has(adr.path))
+      .slice(0, maxAdrs - ranked.length)
+      .sort(compareForDisplay);
+    const keptRanked = [...ranked.map((m) => m.adr), ...fill];
+    return {
+      dir,
+      active: keptRanked,
+      skipped,
+      scanned: candidates.length,
+      truncated: Math.max(0, acceptedCount - keptRanked.length),
+      matches: ranked.map((m) => ({ path: m.adr.path, reason: m.reason, changedPath: m.changedPath })),
+    };
+  }
 
   const truncated = Math.max(0, active.length - maxAdrs);
   const kept = active.sort(compareForRetention).slice(0, maxAdrs).sort(compareForDisplay);
