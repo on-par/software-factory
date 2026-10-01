@@ -3,6 +3,8 @@
 import type { CostEntry, FactoryEvent, ReadinessInfo, ReworkCauseTag, RetryCause } from '../types/index.js';
 import { isHumanEvent } from './human.js';
 
+export type { ClassifierOutcomeRecord, ClassifierOutcomeVerdict } from './classifier-outcomes.js';
+export { joinClassifierOutcomes, mergeClassifierOutcomes, parseClassifierOutcomes } from './classifier-outcomes.js';
 export type { CommitSource, HumanSourceClient, PrSource } from './human.js';
 export {
   fetchHumanEventSources,

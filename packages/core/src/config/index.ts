@@ -633,6 +633,7 @@ export function getFactoryPaths(repoRoot: string, stateRoot?: string) {
     approvals: resolve(state, 'approvals'),
     steering: resolve(state, 'steering'),
     kpiHistory: resolve(state, 'kpi-history.jsonl'),
+    classifierOutcomes: resolve(state, 'classifier-outcomes.jsonl'),
     ingestWatermark: resolve(state, 'ingest-watermark'),
     ports: resolve(process.env.FACTORY_DAEMON_PORTS_DIR ?? state, 'ports.json'),
     portsLock: resolve(process.env.FACTORY_DAEMON_PORTS_DIR ?? state, 'ports.lock'),
