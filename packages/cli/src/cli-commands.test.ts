@@ -3229,18 +3229,48 @@ bash scripts/verify.sh
         expect(existsSync(lockPath)).toBe(false);
       });
 
-      it('stops at the first failed child and reports the rest as not run', async () => {
+      it('continues past a failed child and exits 1', async () => {
         const core = await import('@on-par/factory-core');
         vi.mocked(core.planPhase).mockImplementationOnce(async () => decompose([10, 11, 12]));
         vi.mocked(core.shipPhase)
           .mockResolvedValueOnce({ ok: true, prNumber: 101 } as any)
-          .mockResolvedValueOnce({ ok: false } as any);
+          .mockResolvedValueOnce({ ok: false } as any)
+          .mockResolvedValueOnce({ ok: true, prNumber: 112 } as any);
         const res = await runMain('run-issue', '5', '--run-children');
         expect(res).toMatchObject({ exited: true, code: 1 });
         expect(logged()).toContain('#11 → failed');
-        expect(logged()).toContain('#12 → not run');
-        expect(logged()).toContain('1/3 children ready for review');
-        expect(vi.mocked(core.planPhase)).toHaveBeenCalledTimes(3);
+        expect(logged()).toContain('#12 → PR #112 ready for review');
+        expect(logged()).toContain('2/3 children ready for review');
+        expect(vi.mocked(core.planPhase)).toHaveBeenCalledTimes(4);
+      });
+
+      it('an escalated child does not stop later children', async () => {
+        const core = await import('@on-par/factory-core');
+        vi.mocked(core.planPhase)
+          .mockImplementationOnce(async () => decompose([10, 11]))
+          .mockImplementationOnce(async () => ({ ok: false, route: 'claude', escalate: 'needs human' }) as any);
+        vi.mocked(core.shipPhase).mockResolvedValueOnce({ ok: true, prNumber: 111 } as any);
+        const res = await runMain('run-issue', '5', '--run-children');
+        expect(res).toMatchObject({ exited: true, code: 1 });
+        expect(logged()).toContain('#10 → failed');
+        expect(logged()).toContain('#11 → PR #111 ready for review');
+      });
+
+      it('stops starting children once .factory/STOP appears, and leaves STOP in place', async () => {
+        const core = await import('@on-par/factory-core');
+        const stopPath = join(paths().state, 'STOP');
+        vi.mocked(core.planPhase).mockImplementationOnce(async () => decompose([10, 11]));
+        vi.mocked(core.shipPhase).mockImplementationOnce(async () => {
+          writeFileSync(stopPath, '');
+          return { ok: true, prNumber: 110 } as any;
+        });
+        const res = await runMain('run-issue', '5', '--run-children');
+        expect(res).toMatchObject({ exited: true, code: 1 });
+        expect(vi.mocked(core.shipPhase)).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(core.planPhase)).toHaveBeenCalledTimes(2);
+        expect(logged()).toContain('#10 → PR #110 ready for review');
+        expect(logged()).toContain('#11 → not run: .factory/STOP present');
+        expect(readFileSync(stopPath, 'utf-8')).toBe('');
       });
 
       it('runs a nested decomposition in place of the child, before later siblings', async () => {

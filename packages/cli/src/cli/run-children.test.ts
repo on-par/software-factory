@@ -14,13 +14,13 @@ describe('runChildrenInOrder', () => {
     expect(results.map((r) => r.status)).toEqual(['ready', 'ready']);
   });
 
-  it('stops at the first failure and marks the rest not-run', async () => {
+  it('continues past a failed child', async () => {
     const runChild = vi.fn(async (issue: number): Promise<ChildRunResult> =>
       issue === 11 ? { issue, status: 'failed', detail: 'boom' } : { issue, status: 'ready', prNumber: 1 },
     );
     const results = await runChildrenInOrder([10, 11, 12, 13], runChild);
-    expect(runChild.mock.calls.map((c) => c[0])).toEqual([10, 11]);
-    expect(results.map((r) => r.status)).toEqual(['ready', 'failed', 'not-run', 'not-run']);
+    expect(runChild.mock.calls.map((c) => c[0])).toEqual([10, 11, 12, 13]);
+    expect(results.map((r) => r.status)).toEqual(['ready', 'failed', 'ready', 'ready']);
   });
 
   it('records a thrown runChild as failed with the message', async () => {
@@ -29,7 +29,7 @@ describe('runChildrenInOrder', () => {
     });
     expect(results).toEqual([
       { issue: 10, status: 'failed', detail: 'kaput' },
-      { issue: 11, status: 'not-run' },
+      { issue: 11, status: 'failed', detail: 'kaput' },
     ]);
   });
 
@@ -50,6 +50,7 @@ describe('formatChildRunSummary', () => {
         { issue: 12, status: 'failed', detail: 'bad' },
         { issue: 13, status: 'failed' },
         { issue: 14, status: 'not-run' },
+        { issue: 15, status: 'not-run', detail: '.factory/STOP present' },
       ]),
     ).toEqual([
       'Children of #5:',
@@ -58,7 +59,50 @@ describe('formatChildRunSummary', () => {
       '  #12 → failed: bad',
       '  #13 → failed',
       '  #14 → not run',
-      '2/5 children ready for review',
+      '  #15 → not run: .factory/STOP present',
+      '2/6 children ready for review',
+    ]);
+  });
+});
+
+describe('shouldStop (#1749)', () => {
+  const ok = async (issue: number): Promise<ChildRunResult> => ({ issue, status: 'ready', prNumber: issue });
+
+  it('marks the rest not-run once shouldStop is true and stops asking', async () => {
+    const runChild = vi.fn(ok);
+    const shouldStop = vi.fn((n: number) => n === 11);
+    const results = await runChildrenInOrder([10, 11, 12], runChild, [], shouldStop);
+    expect(runChild.mock.calls.map((c) => c[0])).toEqual([10]);
+    expect(results.slice(1)).toEqual([
+      { issue: 11, status: 'not-run', detail: '.factory/STOP present' },
+      { issue: 12, status: 'not-run', detail: '.factory/STOP present' },
+    ]);
+    expect(shouldStop.mock.calls.map((c) => c[0])).toEqual([10, 11]);
+  });
+
+  it('runs nothing when stopped before the first child', async () => {
+    const runChild = vi.fn(ok);
+    const results = await runChildrenInOrder([10, 11], runChild, [], () => true);
+    expect(runChild).not.toHaveBeenCalled();
+    expect(results.every((r) => r.status === 'not-run')).toBe(true);
+  });
+
+  it('marks expansion children and later siblings not-run when stopped after a decomposed child', async () => {
+    let stop = false;
+    const results = await runChildrenInOrder(
+      [10, 11],
+      async (issue) => {
+        stop = true;
+        return { issue, status: 'decomposed', children: [20, 21] };
+      },
+      [],
+      () => stop && true,
+    );
+    expect(results.map((r) => [r.issue, r.status])).toEqual([
+      [10, 'decomposed'],
+      [20, 'not-run'],
+      [21, 'not-run'],
+      [11, 'not-run'],
     ]);
   });
 });
@@ -107,7 +151,7 @@ describe('nested decomposition and skipped children (#1748)', () => {
     expect(results.map((r) => r.status)).toEqual(['skipped', 'ready']);
   });
 
-  it('marks the rest not-run when a failure follows an expansion', async () => {
+  it('keeps running siblings when a failure follows an expansion', async () => {
     const results = await runChildrenInOrder([10, 11], async (issue) => {
       if (issue === 10) return { issue, status: 'decomposed', children: [20, 21] };
       return issue === 20 ? { issue, status: 'failed', detail: 'x' } : ready(issue);
@@ -115,8 +159,8 @@ describe('nested decomposition and skipped children (#1748)', () => {
     expect(results.map((r) => [r.issue, r.status])).toEqual([
       [10, 'decomposed'],
       [20, 'failed'],
-      [21, 'not-run'],
-      [11, 'not-run'],
+      [21, 'ready'],
+      [11, 'ready'],
     ]);
   });
 

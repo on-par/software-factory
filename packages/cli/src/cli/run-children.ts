@@ -5,21 +5,26 @@ export interface ChildRunResult {
   issue: number;
   status: 'ready' | 'failed' | 'not-run' | 'skipped' | 'decomposed';
   prNumber?: number;
-  /** Failure detail for `failed`; the skip reason for `skipped`; unused otherwise. */
+  /** Failure detail for `failed`; the skip reason for `skipped`; why it did not start for `not-run`. */
   detail?: string;
   /** Child issues filed when this child was itself decomposed (`decomposed` only). */
   children?: number[];
 }
 
+const STOP_DETAIL = '.factory/STOP present';
+
 /** Runs children strictly one at a time in the given (build) order. A child that decomposes again
  *  is replaced in place by its fresh children, which run before the remaining siblings; issues in
  *  the seen set (`alreadySeen`, the initial children, anything already expanded) never run twice.
- *  A `skipped` child does not stop the sequence. The first `failed` child stops it and the rest are
- *  marked `not-run`. A `runChild` that throws is recorded as `failed` with the error message. */
+ *  A `skipped` or `failed` child does not stop the sequence: failures are recorded and the next
+ *  child still runs. A `runChild` that throws is recorded as `failed` with the error message.
+ *  `shouldStop` is consulted before each child starts; once it returns true that child and every
+ *  later one are marked `not-run` and never run. A child already running is never interrupted. */
 export async function runChildrenInOrder(
   children: readonly number[],
   runChild: (issue: number) => Promise<ChildRunResult>,
   alreadySeen: Iterable<number> = [],
+  shouldStop: (nextIssue: number) => boolean = () => false,
 ): Promise<ChildRunResult[]> {
   const queue = [...children];
   const seen = new Set<number>([...alreadySeen, ...children]);
@@ -27,8 +32,9 @@ export async function runChildrenInOrder(
   let stopped = false;
   for (let i = 0; i < queue.length; i++) {
     const issue = queue[i];
+    if (!stopped && shouldStop(issue)) stopped = true;
     if (stopped) {
-      results.push({ issue, status: 'not-run' });
+      results.push({ issue, status: 'not-run', detail: STOP_DETAIL });
       continue;
     }
     let result: ChildRunResult;
@@ -42,8 +48,6 @@ export async function runChildrenInOrder(
       const fresh = (result.children ?? []).filter((n) => !seen.has(n));
       for (const n of fresh) seen.add(n);
       queue.splice(i + 1, 0, ...fresh);
-    } else if (result.status !== 'ready' && result.status !== 'skipped') {
-      stopped = true;
     }
   }
   return results;
@@ -72,7 +76,7 @@ export function formatChildRunSummary(parent: number, results: readonly ChildRun
     } else if (r.status === 'decomposed') {
       lines.push(`  #${r.issue} → decomposed into ${(r.children ?? []).map((n) => `#${n}`).join(', ')}`);
     } else {
-      lines.push(`  #${r.issue} → not run`);
+      lines.push(r.detail ? `  #${r.issue} → not run: ${r.detail}` : `  #${r.issue} → not run`);
     }
   }
   const leaf = results.filter((r) => r.status !== 'decomposed');
