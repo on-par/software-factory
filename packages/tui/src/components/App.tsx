@@ -2,7 +2,6 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
-  aggregateCosts,
   type ApprovalRequest,
   type CostsRead,
   DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS,
@@ -33,6 +32,7 @@ import {
   reduceDashboard,
 } from '../dashboard.js';
 import { CostsTab } from '../tabs/CostsTab.js';
+import { resolveCostsSelection, summarizeRunCosts } from '../tabs/run-costs.js';
 import { type BreakerRow, HealthTab } from '../tabs/HealthTab.js';
 import { initialLogScroll, reduceLogScroll } from '../tabs/log-scroll.js';
 import { LogTab } from '../tabs/LogTab.js';
@@ -131,7 +131,8 @@ export function App({
   const [tab, setTab] = useState<TabName>('dashboard');
   const [queueSnap, setQueueSnap] = useState<QueueSnapshot>({ entries: [] });
   const [costsRead, setCostsRead] = useState<CostsRead>({ entries: [], skipped: 0 });
-  const [costsSelected, setCostsSelected] = useState(0);
+  const [costsSelectedIssue, setCostsSelectedIssue] = useState<string | undefined>();
+  const [costsExpanded, setCostsExpanded] = useState(false);
   const [logScroll, setLogScroll] = useState(initialLogScroll());
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
   const [denyReason, setDenyReason] = useState<string | undefined>(undefined);
@@ -275,7 +276,8 @@ export function App({
     // issues changes, so this poll doesn't tear down/reinstall on every factory event.
   }, [steeringDir, listSteeringFn, laneIssuesKey]);
 
-  const issueCount = useMemo(() => aggregateCosts(costsRead.entries).perIssue.length, [costsRead]);
+  const runCosts = useMemo(() => summarizeRunCosts(costsRead.entries, state.lanes), [costsRead, state.lanes]);
+  const costsCurrent = resolveCostsSelection(runCosts, state.lanes, costsSelectedIssue);
   const logHeight = Math.max(5, (stdout?.rows ?? 24) - 4);
   const visibleApprovals = pendingApprovals.filter((r) => !answered.has(r.id));
   const clampedIndex = Math.min(selectedIndex, Math.max(0, activeLanes.length - 1));
@@ -392,8 +394,12 @@ export function App({
         setView('dashboard');
       }
     } else if (tab === 'costs') {
-      if (key.upArrow) setCostsSelected((i) => Math.max(0, i - 1));
-      if (key.downArrow) setCostsSelected((i) => Math.min(Math.max(0, issueCount - 1), i + 1));
+      const at = runCosts.issues.findIndex((i) => i.issue === costsCurrent);
+      if (key.upArrow && at > 0) setCostsSelectedIssue(runCosts.issues[at - 1].issue);
+      if (key.downArrow && at >= 0 && at < runCosts.issues.length - 1)
+        setCostsSelectedIssue(runCosts.issues[at + 1].issue);
+      if (key.return) setCostsExpanded((e) => !e);
+      if (key.escape) setCostsExpanded(false);
     } else if (tab === 'log') {
       if (key.upArrow) setLogScroll((s) => reduceLogScroll(s, 'up', logHeight, events.length));
       if (key.downArrow) setLogScroll((s) => reduceLogScroll(s, 'down', logHeight, events.length));
@@ -477,7 +483,15 @@ export function App({
       <TabBar active={tab} />
       {tab === 'dashboard' && <DashboardPane />}
       {tab === 'queue' && <QueueTab snapshot={queueSnap} lanes={activeLanes} source={queueReader?.source} />}
-      {tab === 'costs' && <CostsTab costs={costsRead} selectedIndex={costsSelected} />}
+      {tab === 'costs' && (
+        <CostsTab
+          costs={costsRead}
+          lanes={state.lanes}
+          selectedIssue={costsCurrent}
+          expanded={costsExpanded}
+          width={stdout?.columns ?? 100}
+        />
+      )}
       {tab === 'log' && <LogTab events={events} scroll={logScroll} height={logHeight} />}
       {tab === 'health' && (
         <HealthTab

@@ -45,3 +45,5 @@ export { TabBar } from './tabs/TabBar.js';
 export type { TabName } from './tabs/types.js';
 export { TAB_LABELS, TAB_ORDER } from './tabs/types.js';
 export { sanitizeTerminalText } from './text.js';
+export type { LaneCostTotal, RunCostsSummary, RunIssueCost } from './tabs/run-costs.js';
+export { formatTokensShort, resolveCostsSelection, summarizeRunCosts, truncateSegments } from './tabs/run-costs.js';

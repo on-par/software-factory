@@ -374,7 +374,7 @@ describe('App', () => {
     const costsRead: CostsRead = {
       entries: [
         {
-          ts: 't1',
+          ts: '2026-01-01T00:05:00.000Z',
           issue: '296',
           task: 'build',
           model: 'claude-sonnet-5',
@@ -395,13 +395,24 @@ describe('App', () => {
       />,
     );
 
+    fake.push(ev('build', 'Starting build phase', '296', '2026-01-01T00:00:00.000Z'));
     stdin.write('3');
     await flush();
 
     const frame = lastFrame() ?? '';
     expect(frame).toContain('#296');
     expect(frame).toContain('⚠ skipped 1 malformed line(s) in costs.jsonl');
-    expect(frame).toContain('session total');
+    expect(frame).toContain('All-time (costs.jsonl)');
+    expect(frame).not.toContain('session total');
+    expect(frame).not.toContain('per-model —');
+
+    stdin.write('\r');
+    await flush();
+    expect(lastFrame()).toContain('per-model — #296');
+
+    stdin.write('\u001b');
+    await flush();
+    expect(lastFrame()).not.toContain('per-model —');
   });
 
   it('shows the Health tab breaker state and reveals Effective config/KPIs on e', async () => {
