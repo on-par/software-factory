@@ -856,10 +856,7 @@ async function cmdCheck(issueRaw: string, opts: { json?: boolean }) {
     log: (line) => console.log(line),
   });
   if (report.exitCode === 1) {
-    throw new CliExitError(
-      `factory: issue #${issueNum} is not factory-ready — missing: ${report.fields.missing.join(', ')}`,
-      1,
-    );
+    throw new CliExitError(`factory: issue #${issueNum} is not factory-ready — ${report.reasons.join('; ')}`, 1);
   }
   if (report.exitCode === 3) {
     throw new CliExitError(`factory: issue #${issueNum} would split — ${report.size.reason}`, 3);
@@ -4922,9 +4919,9 @@ export async function main() {
     .command('check <issue>')
     .alias('ready')
     .description(
-      'Check an issue before queuing: required fields and whether the size gate runs it as-is or would split it (read-only; exit 0 ready, 1 missing fields, 3 would split)',
+      'Check an issue before queuing: required fields and whether the size gate runs it as-is or would split it (read-only; exit 0 ready, 1 missing fields or ungradeable criteria, 3 would split)',
     )
-    .option('--json', 'Print one JSON object with fields, size verdict, and reasons')
+    .option('--json', 'Print one JSON object with fields, criteria findings, size verdict, and reasons')
     .action(cmdCheck);
 
   program

@@ -106,3 +106,74 @@ describe('buildIssueCheckReport', () => {
     ]);
   });
 });
+
+describe('runIssueCheck criteria grading', () => {
+  const task = (ac: string, verification = 'bash scripts/verify.sh') => `### Problem statement
+
+Something is wrong.
+
+### In scope
+
+- Fix it.
+
+### Out of scope
+
+Nothing else.
+
+### Acceptance criteria
+
+${ac}
+
+### Verification
+
+${verification}
+`;
+
+  it('exits 1 on an empty criterion', async () => {
+    const { lines, d } = deps(task('- [ ] prints `ok`\n- [ ]'));
+    const r = await runIssueCheck(7, {}, d);
+    expect(r.exitCode).toBe(1);
+    expect(lines).toContain('criteria:');
+    expect(lines).toContain('  2. empty');
+    expect(lines.join('\n')).toContain('is not factory-ready');
+    expect(r.reasons).toContain('criterion 2 is empty');
+  });
+
+  it('exits 1 on command-less Verification', async () => {
+    const { lines, d } = deps(task('- [ ] prints `ok`', 'Run the tests and make sure it works.'));
+    const r = await runIssueCheck(7, {}, d);
+    expect(r.exitCode).toBe(1);
+    expect(lines).toContain('  Verification has no runnable command');
+    expect(r.reasons).toContain('Verification has no runnable command');
+  });
+
+  it('exits 1 on zero criteria', async () => {
+    const { lines, d } = deps(task('nothing here'));
+    const r = await runIssueCheck(7, {}, d);
+    expect(r.exitCode).toBe(1);
+    expect(lines).toContain('  no acceptance criteria');
+  });
+
+  it('keeps a vague criterion as a warning with exit 0', async () => {
+    const { lines, d } = deps(task('- [ ] works correctly'));
+    const r = await runIssueCheck(7, {}, d);
+    expect(r.exitCode).toBe(0);
+    expect(lines.join('\n')).toContain('(no observable outcome)');
+  });
+
+  it('includes criteria in --json and null for epics', async () => {
+    const { lines, d } = deps(task('- [ ] prints `ok`'));
+    await runIssueCheck(7, { json: true }, d);
+    const parsed = JSON.parse(lines[0] ?? '{}');
+    expect(parsed.criteria.findings[0].grade).toBe('unstructured');
+    const epic = deps('### Goal\n\nx\n', 'Epic: big thing');
+    const r = await runIssueCheck(8, {}, epic.d);
+    expect(r.criteria).toBeNull();
+  });
+
+  it('criteria exit 1 wins over oversize', async () => {
+    const ac = Array.from({ length: 6 }, (_, i) => `- [ ] criterion ${i + 1}`).join('\n') + '\n- [ ]';
+    const { d } = deps(task(ac));
+    expect((await runIssueCheck(7, {}, d)).exitCode).toBe(1);
+  });
+});
