@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 
+import type { PrClassifierClaim, PrShadowVerdict } from '../review/classifier.js';
 import type { ReviewRouting } from '../review/routing.js';
 import { specPaths } from '../spec/index.js';
 import type { CheckSummary, FactoryEvent } from '../types/index.js';
@@ -130,7 +131,29 @@ function renderReviewRouting(routing: ReviewRouting): string {
       lines.push(`- \`${rule.id}\` (${rule.class}): ${paths === '' ? '(no paths)' : truncate(paths, 300)}`);
     }
   }
+  if (routing.shadow) lines.push(...renderShadowVerdict(routing.shadow));
   return lines.join('\n');
+}
+
+function renderShadowVerdict(shadow: PrShadowVerdict): string[] {
+  const bullets = (items: string[]): string[] =>
+    items.length === 0 ? ['  - none'] : items.map((item) => `  - ${item}`);
+  const claim = (c: PrClassifierClaim): string =>
+    c.citation === '' ? truncate(c.text, 200) : `${truncate(c.text, 200)} — \`${c.citation}\``;
+  return [
+    '- **Shadow model verdict — shadow — no effect**',
+    shadow.modelClass === null
+      ? `  - Model class: unavailable — ${shadow.reason ?? 'unknown'}`
+      : `  - Model class: **${shadow.modelClass}** (\`${shadow.model ?? 'unknown'}\`, \`${shadow.promptVersion}\`, policy \`${shadow.policyVersion}\`)`,
+    `  - Final class: ${shadow.finalClass ?? 'unavailable'} (= floor)`,
+    '  - Cited claims:',
+    ...bullets(shadow.claims.map(claim)).map((l) => `  ${l}`),
+    '  - Unsupported claims (no citation):',
+    ...bullets(shadow.unsupportedClaims.map(claim)).map((l) => `  ${l}`),
+    '  - Not inspected:',
+    ...bullets(shadow.notInspected.map((s) => truncate(s, 200))).map((l) => `  ${l}`),
+    `  - ADRs consulted: ${shadow.adrIds.length === 0 ? 'none' : shadow.adrIds.join(', ')}`,
+  ];
 }
 
 function section(title: string, body: string): string {
