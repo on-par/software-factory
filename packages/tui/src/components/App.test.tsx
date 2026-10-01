@@ -617,6 +617,47 @@ describe('App lane drill-down (#1743)', () => {
     expect(lastFrame()).not.toContain('esc back · q quit');
   });
 
+  it('lists the lane queue below the event-log rows and drops started issues', async () => {
+    const fake = makeFakeFollow();
+    const queueReader: QueueReader = {
+      source: 'GitHub',
+      read: () => ({
+        entries: [
+          { lane: 'prefix', issue: 1801 },
+          { lane: 'prefix', issue: 1802 },
+        ],
+      }),
+    };
+    const { lastFrame } = render(<App eventsFile="ignored" follow={fake.follow} queueReader={queueReader} />);
+    fake.push(ev('plan', 'Starting plan phase', '1706', undefined, 'prefix'));
+    fake.push(ev('plan', 'Starting plan phase', '1707', undefined, 'prefix'));
+    await flush();
+    await flush();
+    expect(lastFrame()).toMatch(/queued \(1\) #1801[\s\S]*queued \(2\) #1802/);
+    fake.push(ev('plan', 'Starting plan phase', '1801', undefined, 'prefix'));
+    await flush();
+    await flush();
+    const frame = lastFrame() ?? '';
+    expect(frame.split('#1801').length - 1).toBe(1);
+    expect(frame).toContain('queued (1) #1802');
+  });
+
+  it('shows queue unavailable when the queue read throws', async () => {
+    const fake = makeFakeFollow();
+    const queueReader: QueueReader = {
+      source: 'GitHub',
+      read: () => {
+        throw new Error('nope');
+      },
+    };
+    const { lastFrame } = render(<App eventsFile="ignored" follow={fake.follow} queueReader={queueReader} />);
+    fake.push(ev('plan', 'Starting plan phase', '1706', undefined, 'prefix'));
+    fake.push(ev('plan', 'Starting plan phase', '1707', undefined, 'prefix'));
+    await flush();
+    await flush();
+    expect(lastFrame()).toContain('queue unavailable');
+  });
+
   it('collapses merged issues and expands them on m', async () => {
     const { fake, lastFrame, stdin } = await setup();
     for (const n of ['1706', '1707', '1708', '1709']) {

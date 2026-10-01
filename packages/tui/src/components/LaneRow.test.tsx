@@ -181,4 +181,15 @@ describe('LaneRow', () => {
       expect(frame).not.toContain('gpt-5-codex');
     });
   });
+
+  it('appends the park reason only with showReason', () => {
+    const lane = laneFor([
+      { type: 'plan', msg: 'Starting plan phase' },
+      { type: 'escalate', msg: 'needs a human' },
+    ]);
+    const on = render(<LaneRow lane={lane} selected={false} now={NOW} showReason />).lastFrame();
+    const off = render(<LaneRow lane={lane} selected={false} now={NOW} />).lastFrame();
+    expect(on).toContain('needs a human');
+    expect(off).not.toContain('needs a human');
+  });
 });
