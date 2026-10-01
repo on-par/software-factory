@@ -187,6 +187,8 @@ const PUBLIC_API_KEYS = [
   'detectSandboxRuntime',
   'resolveSandboxPolicy',
   // Readiness
+  'assessAcceptanceCriteria',
+  'gradeIssueCriteria',
   'EPIC_REQUIRED_FIELDS',
   'FACTORY_BUG_REQUIRED_FIELDS',
   'FACTORY_TASK_REQUIRED_FIELDS',

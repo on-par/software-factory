@@ -1,5 +1,11 @@
 // packages/cli/src/cli/ready-check.ts — read-only `factory check <issue>` report (#1729)
-import { scoreIssueReadiness, type ReadinessInfo, type ReadinessTemplate } from '@on-par/factory-core';
+import {
+  gradeIssueCriteria,
+  scoreIssueReadiness,
+  type CriteriaReport,
+  type ReadinessInfo,
+  type ReadinessTemplate,
+} from '@on-par/factory-core';
 
 export type IssueSizeVerdict = 'runs-as-is' | 'would-split';
 
@@ -9,6 +15,8 @@ export interface IssueCheckReport {
   /** 0..100, rounded. */
   score: number;
   fields: { pass: boolean; missing: string[] };
+  /** Per-criterion findings for factory-task issues; null for epic/factory-bug. */
+  criteria: CriteriaReport | null;
   size: { verdict: IssueSizeVerdict; reason?: string };
   /** Human-readable reasons the issue is not ready / would split; empty when exitCode is 0. */
   reasons: string[];
@@ -21,29 +29,45 @@ export interface IssueCheckDeps {
   log(line: string): void;
 }
 
-export function buildIssueCheckReport(issue: number, readiness: ReadinessInfo): IssueCheckReport {
+export function buildIssueCheckReport(
+  issue: number,
+  readiness: ReadinessInfo,
+  criteria: CriteriaReport | null = null,
+): IssueCheckReport {
   const wouldSplit = readiness.sizeOk === false;
   const size: IssueCheckReport['size'] = wouldSplit
     ? { verdict: 'would-split', reason: readiness.sizeReason ?? 'too big' }
     : { verdict: 'runs-as-is' };
+  const notReady = !readiness.pass || (criteria !== null && !criteria.pass);
   const reasons = readiness.missing.map((field) => `missing: ${field}`);
+  reasons.push(...(criteria?.problems ?? []));
   if (size.reason) reasons.push(size.reason);
   return {
     issue,
     template: readiness.template,
     score: Math.round(readiness.score * 100),
     fields: { pass: readiness.pass, missing: [...readiness.missing] },
+    criteria,
     size,
     reasons,
-    exitCode: !readiness.pass ? 1 : wouldSplit ? 3 : 0,
+    exitCode: notReady ? 1 : wouldSplit ? 3 : 0,
   };
 }
 
 export function formatIssueCheckLines(report: IssueCheckReport): string[] {
   const lines: string[] = [];
-  const state = report.fields.pass ? 'is factory-ready' : 'is not factory-ready';
+  const state = report.exitCode === 1 ? 'is not factory-ready' : 'is factory-ready';
   lines.push(`issue #${report.issue} ${state} (${report.template}, score ${report.score}%)`);
   for (const field of report.fields.missing) lines.push(`  missing: ${field}`);
+  if (report.criteria) {
+    lines.push('criteria:');
+    for (const f of report.criteria.findings) {
+      lines.push(`  ${f.index}. ${f.grade}${f.text ? ` — ${f.text}` : ''}${f.note ? ` (${f.note})` : ''}`);
+    }
+    for (const problem of report.criteria.problems) {
+      if (!/^criterion \d+ is empty$/.test(problem)) lines.push(`  ${problem}`);
+    }
+  }
   lines.push(report.size.verdict === 'would-split' ? `size: would split — ${report.size.reason}` : 'size: runs as-is');
   return lines;
 }
@@ -54,7 +78,9 @@ export async function runIssueCheck(
   deps: IssueCheckDeps,
 ): Promise<IssueCheckReport> {
   const { title, body } = await deps.getIssue(issue);
-  const report = buildIssueCheckReport(issue, scoreIssueReadiness({ title, body: body ?? '' }));
+  const readiness = scoreIssueReadiness({ title, body: body ?? '' });
+  const criteria = readiness.template === 'factory-task' ? gradeIssueCriteria(body ?? '') : null;
+  const report = buildIssueCheckReport(issue, readiness, criteria);
   if (opts.json) {
     deps.log(JSON.stringify(report));
   } else {
