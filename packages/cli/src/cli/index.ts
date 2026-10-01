@@ -103,6 +103,9 @@ import {
   localOnlyWorkspace,
   joinClassifierOutcomes,
   mergeClassifierOutcomes,
+  parseClassifierOutcomes,
+  summarizeClassifierOutcomes,
+  formatClassifierReport,
   mergedPrRefs,
   ModelRegistry,
   ModelRouter,
@@ -957,6 +960,17 @@ function persistClassifierOutcomes(
   const updated = mergeClassifierOutcomes(readTextFileOrEmpty(paths.classifierOutcomes), records);
   ensureDir(paths.state);
   writeFileSync(paths.classifierOutcomes, updated);
+}
+
+async function cmdClassifierReport(opts: { json?: boolean } = {}) {
+  const repoRoot = await getRepoRoot();
+  const paths = getFactoryPaths(repoRoot);
+  const report = summarizeClassifierOutcomes(parseClassifierOutcomes(readTextFileOrEmpty(paths.classifierOutcomes)));
+  if (opts.json) {
+    console.log(JSON.stringify(report));
+    return;
+  }
+  for (const line of formatClassifierReport(report)) console.log(line);
 }
 
 async function cmdKpis(opts: { branchPrefix?: string } = {}) {
@@ -4908,6 +4922,15 @@ export async function main() {
     .action(async (opts) => {
       await cmdKpis(opts);
     });
+
+  const classifierCmd = program.command('classifier').description('Inspect the shadow PR classifier track record');
+  classifierCmd
+    .command('report')
+    .description(
+      'Confusion table, rule-of-three slip bounds and model-vs-floor agreement from classifier-outcomes.jsonl',
+    )
+    .option('--json', 'Print one JSON object with the same numbers')
+    .action((opts: { json?: boolean }) => cmdClassifierReport(opts));
 
   program
     .command('tui')
