@@ -34,4 +34,4 @@ History: the multi-hour `ci` hang of #739/#755 was an unbounded microtask-only s
 
 - `factory ship` and `factory run-issue` stop at a ready-for-review PR. They never merge.
 - `factory land <issue>` squash-merges a ready PR and cleans up its worktree.
-- `factory run` merges only when auto-merge is on (`--auto-merge`, `.factory/config.json`, or `FACTORY_MERGE=1`), and only through the CI gate above.
+- `factory run` merges only when auto-merge is on (`--auto-merge`, `.factory/config.yaml`, or `FACTORY_MERGE=1`), and only through the CI gate above.
