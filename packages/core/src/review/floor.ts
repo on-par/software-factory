@@ -1,4 +1,4 @@
-// packages/core/src/review/floor.ts — pure deterministic review floor (class A/B/C) from a diff (#1721).
+// packages/core/src/review/floor.ts — pure deterministic review floor (class A/B/C) from a diff (#1721, repo overrides #1723).
 
 export type ReviewClass = 'A' | 'B' | 'C';
 
@@ -22,6 +22,8 @@ export interface ReviewFloorPathRule {
   basenames?: readonly string[];
   /** Regex source tested against the whole path with the 'i' flag. */
   pattern?: string;
+  /** Globs matched against the whole path ('**' crosses '/', '*' and '?' do not). */
+  globs?: readonly string[];
 }
 
 export interface ReviewFloorRuleSet {
@@ -96,10 +98,37 @@ function normalizePath(p: string): string {
 interface CompiledRule {
   rule: ReviewFloorPathRule;
   regex: RegExp | null;
+  globs: RegExp[];
 }
 
-function matchesRule(path: string, { rule, regex }: CompiledRule): boolean {
+function globToRegExp(glob: string): RegExp {
+  let out = '';
+  for (let i = 0; i < glob.length; i++) {
+    const ch = glob[i]!;
+    if (ch === '*') {
+      if (glob[i + 1] === '*') {
+        if (glob[i + 2] === '/') {
+          out += '(?:.*/)?';
+          i += 2;
+        } else {
+          out += '.*';
+          i += 1;
+        }
+      } else {
+        out += '[^/]*';
+      }
+    } else if (ch === '?') {
+      out += '[^/]';
+    } else {
+      out += ch.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+    }
+  }
+  return new RegExp(`^${out}$`, 'i');
+}
+
+function matchesRule(path: string, { rule, regex, globs }: CompiledRule): boolean {
   const lower = path.toLowerCase();
+  if (globs.some((g) => g.test(path))) return true;
   if (rule.prefixes?.some((p) => lower.startsWith(p.toLowerCase()))) return true;
   if (rule.suffixes?.some((s) => lower.endsWith(s.toLowerCase()))) return true;
   if (rule.basenames) {
@@ -138,6 +167,7 @@ export function computeReviewFloor(input: ReviewFloorInput): ReviewFloorResult {
   const compiled: CompiledRule[] = ruleSet.rules.map((rule) => ({
     rule,
     regex: rule.pattern === undefined ? null : new RegExp(rule.pattern, 'i'),
+    globs: (rule.globs ?? []).map(globToRegExp),
   }));
   const cRules = compiled.filter((c) => c.rule.class === 'C');
   const aRules = compiled.filter((c) => c.rule.class === 'A');
@@ -167,4 +197,50 @@ export function computeReviewFloor(input: ReviewFloorInput): ReviewFloorResult {
 
   const floor = fired.reduce<ReviewClass>((max, r) => (CLASS_ORDER[r.class] > CLASS_ORDER[max] ? r.class : max), 'A');
   return { floor, rules: fired };
+}
+
+/** A repo's classifier config section, structurally (floor.ts stays dependency-free). */
+export interface ReviewFloorOverrides {
+  alwaysHuman?: readonly string[];
+  autoEligible?: readonly string[];
+  maxDiffLines?: number;
+}
+
+function pathRule(id: string, cls: 'A' | 'C', entries: readonly string[]): ReviewFloorPathRule {
+  const globs: string[] = [];
+  const prefixes: string[] = [];
+  for (const e of entries) {
+    if (/[*?]/.test(e)) globs.push(e);
+    else prefixes.push(normalizePath(e));
+  }
+  return { id, class: cls, prefixes, globs };
+}
+
+/**
+ * Merge a repo's classifier section onto the packaged rules. Escalate-only (ADR-0121):
+ * alwaysHuman ADDS a C rule and every packaged C rule is kept; autoEligible replaces the
+ * packaged A rules; maxDiffLines replaces maxLines. Unset keys keep the packaged value.
+ */
+export function applyReviewFloorOverrides(
+  overrides: ReviewFloorOverrides | undefined,
+  base: ReviewFloorRuleSet = DEFAULT_REVIEW_FLOOR_RULES,
+): ReviewFloorRuleSet {
+  if (
+    overrides === undefined ||
+    (overrides.alwaysHuman === undefined &&
+      overrides.autoEligible === undefined &&
+      overrides.maxDiffLines === undefined)
+  ) {
+    return base;
+  }
+  const rules: ReviewFloorPathRule[] = base.rules.filter((r) => r.class === 'C');
+  if (overrides.alwaysHuman && overrides.alwaysHuman.length > 0) {
+    rules.push(pathRule('repo-always-human', 'C', overrides.alwaysHuman));
+  }
+  if (overrides.autoEligible === undefined) {
+    rules.push(...base.rules.filter((r) => r.class === 'A'));
+  } else if (overrides.autoEligible.length > 0) {
+    rules.push(pathRule('repo-auto-eligible', 'A', overrides.autoEligible));
+  }
+  return { rules, maxLines: overrides.maxDiffLines ?? base.maxLines };
 }

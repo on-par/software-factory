@@ -14,6 +14,7 @@ import { runConfigSource } from './run-config-source.js';
 import type { ModelRegistry } from '../models/index.js';
 import { resolveModelOverrides } from '../models/index.js';
 import type { ModelRouter } from '../router/index.js';
+import { applyReviewFloorOverrides, type ReviewFloorRuleSet } from '../review/floor.js';
 import {
   FACTORY_RUNTIME_CONFIG_KEYS,
   getFactoryPaths,
@@ -96,6 +97,12 @@ export const RepoFactoryConfigV2Schema = z
             buildFallback: z.string().optional().describe('Codex-capable model to use after a Claude BUILD failure.'),
             checker: z.string().optional().describe('Checker model. Replaces the checker tier.'),
             triage: z.string().optional().describe('Triage model. Replaces the triage tier.'),
+            classifier: z
+              .string()
+              .optional()
+              .describe(
+                'PR classifier model (classify_pr route). Unset: the checker tier. Changing it demotes the classifier (ADR-0121).',
+              ),
           })
           .strict()
           .optional()
@@ -168,6 +175,30 @@ export const RepoFactoryConfigV2Schema = z
       })
       .strict()
       .optional(),
+    classifier: z
+      .object({
+        alwaysHuman: z
+          .array(z.string().min(1))
+          .optional()
+          .describe(
+            'Path prefixes or globs forced to review class C. Added to the packaged C rules, never replacing them.',
+          ),
+        autoEligible: z
+          .array(z.string().min(1))
+          .optional()
+          .describe(
+            'Path prefixes or globs eligible for class A. Replaces the packaged A rules (docs/, *.md, *.test.ts).',
+          ),
+        maxDiffLines: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe('Total added+removed lines above which the floor is at least B.'),
+      })
+      .strict()
+      .optional()
+      .describe('Review floor rules for the PR classifier. Unset keys use the packaged floor rules.'),
     /** Repo pins the build route for every issue (e.g. "opencode"). The plan
      *  phase still writes the spec, but the pinned route wins over the model's
      *  route choice so deepseek workers are actually used when pinned. */
@@ -331,6 +362,11 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
       );
     }
     tiers = { ...tiers, triage: [repo.models.pins.triage] };
+  }
+  if (repo.models?.pins?.classifier && !models.models[repo.models.pins.classifier]) {
+    throw new Error(
+      `.factory/config.json: models.pins.classifier references unknown model '${repo.models.pins.classifier}' (known models: ${knownModels})`,
+    );
   }
 
   for (const [tierName, modelIds] of Object.entries(tiers)) {
@@ -818,4 +854,21 @@ export function describeEffectiveConfig(opts: DescribeEffectiveConfigOpts): stri
   }
 
   return lines;
+}
+
+/** Review floor rules for this repo: the classifier section merged onto the packaged rules (#1723). */
+export function resolveReviewFloorRules(repo: RepoFactoryConfig | null): ReviewFloorRuleSet {
+  return applyReviewFloorOverrides(repo?.classifier);
+}
+
+/** Model for the classify_pr route: the repo pin when set, else the route's checker-tier model. */
+export function resolveClassifierModel(router: ModelRouter, repo: RepoFactoryConfig | null): string | undefined {
+  const pin = repo?.models?.pins?.classifier;
+  if (pin === undefined) return router.resolve('classify_pr');
+  if (!router.registryRef.get(pin)) {
+    throw new Error(
+      `.factory/config.json: models.pins.classifier references unknown model '${pin}' (known models: ${router.registryRef.list().join(', ')})`,
+    );
+  }
+  return pin;
 }

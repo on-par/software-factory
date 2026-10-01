@@ -52,6 +52,7 @@ export type TaskType =
   | 'check_design'
   | 'review_pr'
   | 'security_review'
+  | 'classify_pr'
   | 'dispute_resolution'
   | 'triage'
   | (string & {}); // extensible
