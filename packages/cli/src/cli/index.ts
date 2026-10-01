@@ -167,7 +167,6 @@ import type {
   OvernightQueueDeps,
   OvernightStateItem,
   QueueClaim,
-  EffectiveWorkspaceMode,
   QueueIssue,
   QueuePreflightDecision,
   QueueReleaseOutcome,
@@ -222,8 +221,6 @@ import {
   releaseRuntimeFiles,
   releaseStaleClaims,
   resolveBranchPrefix,
-  resolveWorkspaceMode,
-  workspaceSandboxWarning,
   resolveEffectiveConfig,
   worktreeSandboxFor,
   resolveExperimental,
@@ -248,7 +245,7 @@ import chalk from 'chalk';
 import { Command } from 'commander';
 import { admissionStateReaderFor, runQueueReconcile } from './admission.js';
 import { runQueueClear } from './queue-clear.js';
-import { dockerWorkspacePreflightError, probeDocker } from './workspace-preflight.js';
+import { statusWorkspaceMode, workspaceGate } from './workspace-preflight.js';
 import { cmdDaemonLogs, cmdDaemonStart, cmdDaemonStatus, cmdDaemonStop, DaemonCtlError } from './daemon.js';
 import {
   analyzeEventLog,
@@ -1897,15 +1894,6 @@ async function maybeWriteBenchmarkArtifacts(opts: {
 /** The autoGcOnRun-gated worktree sweep every pipeline entry point runs before shipping
  *  (`factory run`, and since #1756 the one-shot `factory ship` / `factory run-issue`). Never
  *  throws — a GC failure is a warn, never a reason to abort the command. */
-/** Workspace mode for status display; an invalid FACTORY_WORKSPACE_MODE must not crash status. */
-function statusWorkspaceMode(config: ReturnType<typeof loadFactoryConfigForRepo>): EffectiveWorkspaceMode {
-  try {
-    return resolveWorkspaceMode(config);
-  } catch {
-    return { mode: 'worktree', source: 'default' };
-  }
-}
-
 async function runAutoWorktreeGc(
   repoRoot: string,
   paths: ReturnType<typeof getFactoryPaths>,
@@ -3138,27 +3126,19 @@ async function cmdRun(
       logEvent(paths.events, 'environment_warning', 'all', keychainErr);
       throw new Error(keychainErr);
     }
-    let workspace: EffectiveWorkspaceMode;
-    try {
-      workspace = resolveWorkspaceMode(factoryConfig);
-    } catch (err: any) {
-      throw new CliExitError(`factory: ${err.message}`, 2);
+    const gate = await workspaceGate(factoryConfig);
+    if (gate.warning) {
+      console.warn(chalk.yellow(`factory: ${gate.warning}`));
+      logEvent(paths.events, 'warn', 'all', gate.warning);
     }
-    const sandboxWarning = workspaceSandboxWarning(factoryConfig, workspace.mode);
-    if (sandboxWarning) {
-      console.warn(chalk.yellow(`factory: ${sandboxWarning}`));
-      logEvent(paths.events, 'warn', 'all', sandboxWarning);
+    if (gate.kind === 'invalid') throw new CliExitError(`factory: ${gate.message}`, 2);
+    if (gate.kind === 'preflight-failed') {
+      logEvent(paths.events, 'environment_warning', 'all', gate.message);
+      throw new Error(gate.message);
     }
-    if (workspace.mode === 'docker') {
-      const dockerErr = dockerWorkspacePreflightError(await probeDocker());
-      if (dockerErr) {
-        logEvent(paths.events, 'environment_warning', 'all', dockerErr);
-        throw new Error(dockerErr);
-      }
-      const msg =
-        'workspace.mode is docker: the Docker workspace pipeline is not available yet (follow-up to #1759) — not claiming any issue. Set workspace.mode: worktree to run today.';
-      console.log(chalk.yellow(`!! ${msg}`));
-      logEvent(paths.events, 'stopped', 'all', msg);
+    if (gate.kind === 'docker-unavailable') {
+      console.log(chalk.yellow(`!! ${gate.message}`));
+      logEvent(paths.events, 'stopped', 'all', gate.message);
       return;
     }
     await runAutoWorktreeGc(repoRoot, paths, ghRepo, 'all');
