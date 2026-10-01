@@ -169,12 +169,15 @@ import type {
   QueueIssue,
   QueuePreflightDecision,
   QueueReleaseOutcome,
+  RepoConfigYamlMigration,
   UnmergedGreenPr,
   WatchChecksOptions,
   WorktreeSandbox,
 } from '@on-par/factory-core/internal';
 import {
   acquirePidFile,
+  migrateRepoConfigToYaml,
+  REPO_CONFIG_YAML_HEADER,
   branchFor,
   branchPrefixSlug,
   claudeConfigDirOverride,
@@ -350,10 +353,12 @@ export function hasGitHubToken(env: NodeJS.ProcessEnv = process.env, tryToken?: 
 // ---------- commands ----------
 
 /** The minimal, pin-free repo config `factory init` writes. No model pins → routing
- *  stays on packaged defaults (policy=auto). Two-space JSON + trailing newline.
+ *  stays on packaged defaults (policy=auto). YAML (header comment + `version: 2`) by default;
+ *  `'json'` gives two-space JSON + trailing newline for repos that already use config.json.
  *  Every available key is documented in docs/config.example.jsonc. */
-export function buildInitConfig(): string {
-  return JSON.stringify({ version: 2 }, null, 2) + '\n';
+export function buildInitConfig(format: 'yaml' | 'json' = 'yaml'): string {
+  if (format === 'json') return JSON.stringify({ version: 2 }, null, 2) + '\n';
+  return REPO_CONFIG_YAML_HEADER + 'version: 2\n';
 }
 
 /** Write content once without a check-then-act race. Callers choose whether an
@@ -416,12 +421,17 @@ async function cmdInit(opts: { force?: boolean } = {}) {
 
   // Write onboarding files. Idempotent: never clobber an existing file unless --force.
   const force = opts.force === true;
-  // Writers still emit JSON, so a fresh repo gets config.json; an existing yaml/yml config is kept.
-  const configPath = existsSync(paths.config) ? paths.config : resolve(paths.root, 'config.json');
+  // A fresh repo gets config.yaml; an existing config keeps its own format (--force never switches it).
+  const configPath = existsSync(paths.config) ? paths.config : resolve(paths.root, 'config.yaml');
   const constitutionPath = resolve(paths.root, 'constitution.md');
   const gitignorePath = resolve(paths.root, '.gitignore');
 
-  writeIfAbsent(configPath, buildInitConfig(), '.factory/config.json', force);
+  writeIfAbsent(
+    configPath,
+    buildInitConfig(configPath.endsWith('.json') ? 'json' : 'yaml'),
+    `.factory/${basename(configPath)}`,
+    force,
+  );
 
   // Constitution scaffold: repo directory basename fills <product-name>/<Product>.
   const repoName = basename(repoRoot);
@@ -445,9 +455,40 @@ async function cmdInit(opts: { force?: boolean } = {}) {
 
 /** Rewrite a checkout's legacy `.factory/` inputs and runtime files to the v2
  * layout. Every write is idempotent so it is safe to run this more than once. */
-export async function runMigrate(repoRoot: string, opts: { dryRun?: boolean } = {}): Promise<void> {
+export async function runMigrate(
+  repoRoot: string,
+  opts: { dryRun?: boolean; toYaml?: boolean; migrateToYaml?: typeof migrateRepoConfigToYaml } = {},
+): Promise<void> {
   const dryRun = opts.dryRun === true;
   const paths = getFactoryPaths(repoRoot);
+
+  if (opts.toYaml) {
+    let result: RepoConfigYamlMigration;
+    try {
+      result = (opts.migrateToYaml ?? migrateRepoConfigToYaml)(paths.root, { dryRun });
+    } catch (err) {
+      throw new CliExitError(`factory: ${(err as Error).message}`, 1);
+    }
+    switch (result.status) {
+      case 'migrated':
+        console.log('converted .factory/config.json to .factory/config.yaml');
+        return;
+      case 'would-migrate':
+        console.log('would convert .factory/config.json to .factory/config.yaml');
+        return;
+      case 'already-yaml':
+        console.log(`config already YAML (${basename(result.path)}) — nothing to convert`);
+        return;
+      case 'no-config':
+        console.log('no .factory/config.json — nothing to convert');
+        return;
+      case 'round-trip-failed':
+        throw new CliExitError(
+          `factory: config.yaml did not round-trip (${result.reason}); kept .factory/config.json`,
+          1,
+        );
+    }
+  }
   const isRuntimePath = (path: string) => {
     const fromState = relative(paths.state, path);
     return fromState !== '' && !fromState.startsWith('..') && !resolve(paths.state, fromState).startsWith('..');
@@ -541,7 +582,7 @@ export async function runMigrate(repoRoot: string, opts: { dryRun?: boolean } = 
   console.log('Verify: factory status');
 }
 
-async function cmdMigrate(opts: { dryRun?: boolean } = {}): Promise<void> {
+async function cmdMigrate(opts: { dryRun?: boolean; toYaml?: boolean } = {}): Promise<void> {
   await runMigrate(await getRepoRoot(), opts);
 }
 
@@ -4597,9 +4638,15 @@ export async function main() {
 
   program
     .command('migrate')
-    .description('Upgrade .factory/ to the v2 layout (config.json, constitution.md, .gitignore, state/)')
+    .description(
+      'Upgrade .factory/ to the v2 layout (config, constitution.md, .gitignore, state/); --to-yaml converts config.json to config.yaml',
+    )
     .option('--dry-run', 'Print planned changes without writing')
-    .action((opts: { dryRun?: boolean }) => cmdMigrate(opts));
+    .option(
+      '--to-yaml',
+      'Convert .factory/config.json to .factory/config.yaml (removes the JSON only after a round-trip check)',
+    )
+    .action((opts: { dryRun?: boolean; toYaml?: boolean }) => cmdMigrate(opts));
 
   program
     .command('constitution')

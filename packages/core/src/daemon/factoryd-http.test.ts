@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getFactoryPaths } from '../config/index.js';
+import { readRepoConfigFile } from '../config/repo-config-file.js';
 import { createFactorydServer, DEFAULT_FACTORYD_PORT, type FactorydServer } from './factoryd-http.js';
 import { dispatchableRepos, loadRegistry, type RepoRegistry } from './registry.js';
 
@@ -559,7 +560,7 @@ describe('createFactorydServer', () => {
       ]);
 
       const configPath = getFactoryPaths(checkoutDir).config;
-      const onDisk = JSON.parse(await readFile(configPath, 'utf-8'));
+      const onDisk = readRepoConfigFile(configPath) as any;
       expect(onDisk.merge.auto).toBe(true);
 
       const getResult = await get(factoryd.port, '/repos/on-par/software-factory/policy');
@@ -671,7 +672,7 @@ describe('createFactorydServer', () => {
         ]);
 
         const configPath = getFactoryPaths(checkoutDir).config;
-        const onDisk = JSON.parse(await readFile(configPath, 'utf-8'));
+        const onDisk = readRepoConfigFile(configPath) as any;
         expect(onDisk.run.merge.admin).toBe(true);
 
         expect(lines.some((l) => l.includes('AUDIT') && l.includes('admin-merge bypass explicitly enabled'))).toBe(

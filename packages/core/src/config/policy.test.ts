@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { getFactoryPaths } from './index.js';
 import { loadRepoConfig } from './repo.js';
+import { readRepoConfigFile } from './repo-config-file.js';
 import {
   isSafePolicyFieldId,
   policyConfirmationFor,
@@ -18,10 +19,12 @@ import {
 describe('config/policy', () => {
   let dir: string;
   let configPath: string;
+  let yamlPath: string;
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'factory-policy-'));
-    configPath = getFactoryPaths(dir).config;
+    yamlPath = getFactoryPaths(dir).config;
+    configPath = join(dirname(yamlPath), 'config.json');
     await mkdir(dirname(configPath), { recursive: true });
   });
 
@@ -222,6 +225,53 @@ describe('config/policy', () => {
       expect(isSafePolicyFieldId('merge.admin')).toBe(true);
       expect(isSafePolicyFieldId('')).toBe(false);
       expect(isSafePolicyFieldId(42)).toBe(false);
+    });
+  });
+
+  describe('setSafeRepoPolicyField in a YAML repo', () => {
+    it('changes only the edited value and keeps every comment', async () => {
+      const input = [
+        '# my repo config',
+        'version: 2',
+        '',
+        'sweep:',
+        '  # keep this',
+        '  limit: 3',
+        '',
+        'merge:',
+        '  auto: false # flip me',
+        '',
+      ].join('\n');
+      await writeFile(yamlPath, input);
+      setSafeRepoPolicyField(yamlPath, 'merge.auto', true, { env: {} });
+      expect(readFileSync(yamlPath, 'utf-8')).toBe(input.replace('false', 'true'));
+    });
+
+    it('creates missing parent maps and keeps existing comments', async () => {
+      await writeFile(yamlPath, '# header\nversion: 2\n');
+      setSafeRepoPolicyField(yamlPath, 'merge.admin', true, {
+        env: {},
+        confirmationToken: 'ENABLE_ADMIN_MERGE_BYPASS',
+      });
+      const text = readFileSync(yamlPath, 'utf-8');
+      expect(text).toContain('# header');
+      expect((readRepoConfigFile(yamlPath) as any).run.merge.admin).toBe(true);
+    });
+
+    it('creates config.yaml (not JSON) when there is no config file', () => {
+      setSafeRepoPolicyField(yamlPath, 'merge.auto', true, { env: {} });
+      expect(yamlPath.endsWith('config.yaml')).toBe(true);
+      expect(readFileSync(yamlPath, 'utf-8').startsWith('{')).toBe(false);
+      expect(loadRepoConfig(dir)).not.toBeNull();
+      expect((readRepoConfigFile(yamlPath) as any).version).toBe(2);
+    });
+
+    it('keeps a JSON repo as JSON and creates no YAML file', async () => {
+      await writeFile(configPath, JSON.stringify({ version: 2 }));
+      setSafeRepoPolicyField(configPath, 'merge.auto', true, { env: {} });
+      const text = readFileSync(configPath, 'utf-8');
+      expect(text).toBe(`${JSON.stringify({ version: 2, merge: { auto: true } }, null, 2)}\n`);
+      expect(existsSync(yamlPath)).toBe(false);
     });
   });
 });

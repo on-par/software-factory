@@ -422,6 +422,9 @@ const INTERNAL_API_KEYS = [
   'runOvernightQueue',
   // Repo config file reader
   'REPO_CONFIG_FILENAMES',
+  'REPO_CONFIG_YAML_HEADER',
+  'migrateRepoConfigToYaml',
+  'setRepoConfigValue',
   'readRepoConfigFile',
   'resolveRepoConfigPath',
   // Eval internals
