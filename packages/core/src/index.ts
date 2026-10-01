@@ -355,6 +355,13 @@ export { detectSandboxRuntime, resolveSandboxPolicy } from './sandbox/index.js';
 // Readiness
 export type { CriteriaReport, CriterionFinding, CriterionGrade } from './readiness/criteria.js';
 export { assessAcceptanceCriteria, gradeIssueCriteria } from './readiness/criteria.js';
+export type {
+  IssueDependencyState,
+  IssueInvestFinding,
+  IssueInvestReport,
+  IssueInvestStatus,
+} from './readiness/invest.js';
+export { findIssueDependencies, gradeIssueInvest } from './readiness/invest.js';
 export {
   EPIC_REQUIRED_FIELDS,
   FACTORY_BUG_REQUIRED_FIELDS,

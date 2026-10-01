@@ -1,8 +1,12 @@
 // packages/cli/src/cli/ready-check.ts — read-only `factory check <issue>` report (#1729)
 import {
+  findIssueDependencies,
   gradeIssueCriteria,
+  gradeIssueInvest,
   scoreIssueReadiness,
   type CriteriaReport,
+  type IssueDependencyState,
+  type IssueInvestReport,
   type ReadinessInfo,
   type ReadinessTemplate,
 } from '@on-par/factory-core';
@@ -18,6 +22,8 @@ export interface IssueCheckReport {
   /** Per-criterion findings for factory-task issues; null for epic/factory-bug. */
   criteria: CriteriaReport | null;
   size: { verdict: IssueSizeVerdict; reason?: string };
+  /** Advisory INVEST findings for factory-task issues; null for epic/factory-bug. Never affects exitCode. */
+  invest: IssueInvestReport | null;
   /** Human-readable reasons the issue is not ready / would split; empty when exitCode is 0. */
   reasons: string[];
   exitCode: 0 | 1 | 3;
@@ -26,6 +32,8 @@ export interface IssueCheckReport {
 export interface IssueCheckDeps {
   /** Read-only issue fetch — the only GitHub access this command has. */
   getIssue(issue: number): Promise<{ title: string; body: string | null }>;
+  /** Read-only state lookup for dependencies cited in the issue body. */
+  getIssueState?(issue: number): Promise<'open' | 'closed'>;
   log(line: string): void;
 }
 
@@ -33,6 +41,7 @@ export function buildIssueCheckReport(
   issue: number,
   readiness: ReadinessInfo,
   criteria: CriteriaReport | null = null,
+  invest: IssueInvestReport | null = null,
 ): IssueCheckReport {
   const wouldSplit = readiness.sizeOk === false;
   const size: IssueCheckReport['size'] = wouldSplit
@@ -49,6 +58,7 @@ export function buildIssueCheckReport(
     fields: { pass: readiness.pass, missing: [...readiness.missing] },
     criteria,
     size,
+    invest,
     reasons,
     exitCode: notReady ? 1 : wouldSplit ? 3 : 0,
   };
@@ -69,6 +79,10 @@ export function formatIssueCheckLines(report: IssueCheckReport): string[] {
     }
   }
   lines.push(report.size.verdict === 'would-split' ? `size: would split — ${report.size.reason}` : 'size: runs as-is');
+  if (report.invest) {
+    lines.push('invest:');
+    for (const f of report.invest.findings) lines.push(`  ${f.letter}: ${f.status} — ${f.reason}`);
+  }
   return lines;
 }
 
@@ -80,7 +94,23 @@ export async function runIssueCheck(
   const { title, body } = await deps.getIssue(issue);
   const readiness = scoreIssueReadiness({ title, body: body ?? '' });
   const criteria = readiness.template === 'factory-task' ? gradeIssueCriteria(body ?? '') : null;
-  const report = buildIssueCheckReport(issue, readiness, criteria);
+  let invest: IssueInvestReport | null = null;
+  if (readiness.template === 'factory-task') {
+    const states = new Map<number, IssueDependencyState>();
+    await Promise.all(
+      findIssueDependencies(body ?? '').map(async (n) => {
+        let state: IssueDependencyState = 'unknown';
+        try {
+          if (deps.getIssueState) state = await deps.getIssueState(n);
+        } catch {
+          // a failed lookup is advisory only — leave the dependency 'unknown'
+        }
+        states.set(n, state);
+      }),
+    );
+    invest = gradeIssueInvest(body ?? '', states);
+  }
+  const report = buildIssueCheckReport(issue, readiness, criteria, invest);
   if (opts.json) {
     deps.log(JSON.stringify(report));
   } else {
