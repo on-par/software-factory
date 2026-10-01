@@ -3,7 +3,7 @@ import { cleanup, render } from 'ink-testing-library';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { type DashboardState, initialDashboard, reduceDashboard } from '../dashboard.js';
-import { Dashboard } from './Dashboard.js';
+import { Dashboard, laneCountsLine } from './Dashboard.js';
 
 afterEach(cleanup);
 
@@ -13,6 +13,10 @@ function ev(type: EventKind, issue: string, msg: string, ts = '2026-01-01T00:00:
 
 function stateFor(events: FactoryEvent[]): DashboardState {
   return events.reduce(reduceDashboard, initialDashboard());
+}
+
+function laned(type: EventKind, issue: string, lane: string): FactoryEvent {
+  return { ...ev(type, issue, type), lane };
 }
 
 const NOW = Date.parse('2026-01-01T00:00:05.000Z');
@@ -40,10 +44,42 @@ describe('Dashboard', () => {
     ]);
     const { lastFrame } = render(<Dashboard state={state} selectedIndex={0} now={NOW} />);
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('3 lane(s)');
+    expect(frame).toContain('1 lane · 3 issues');
     expect(frame).toContain('#296');
     expect(frame).toContain('#301');
     expect(frame).toContain('#305');
+  });
+
+  it('counts one lane on its fifth issue as 1 lane (#1736)', () => {
+    const events = ['1706', '1707', '1708', '1709'].flatMap((n) => [
+      laned('plan', n, 'prefix'),
+      laned('merged', n, 'prefix'),
+    ]);
+    const state = stateFor([...events, laned('plan', '1710', 'prefix')]);
+    const frame = render(<Dashboard state={state} selectedIndex={0} now={NOW} />).lastFrame() ?? '';
+    expect(frame).toContain('1 lane · 5 issues');
+    expect(frame).not.toContain('5 lanes');
+    expect(frame).not.toContain('lane(s)');
+  });
+
+  it('counts two lanes with one issue each as 2 lanes (#1736)', () => {
+    const state = stateFor([laned('plan', '1', 'prefix'), laned('plan', '2', 'docs')]);
+    const frame = render(<Dashboard state={state} selectedIndex={0} now={NOW} />).lastFrame() ?? '';
+    expect(frame).toContain('2 lanes');
+    expect(frame).not.toContain('issues');
+  });
+
+  it('counts a single un-laned issue as 1 lane (#1736)', () => {
+    const state = stateFor([ev('plan', '1', 'Starting plan phase')]);
+    const frame = render(<Dashboard state={state} selectedIndex={0} now={NOW} />).lastFrame() ?? '';
+    expect(frame).toContain('1 lane');
+    expect(frame).not.toContain('lanes');
+    expect(frame).not.toContain('issue');
+  });
+
+  it('laneCountsLine formats idle and multi-issue lanes (#1736)', () => {
+    expect(laneCountsLine(initialDashboard())).toBe('0 lanes');
+    expect(laneCountsLine(stateFor([laned('plan', '1', 'a'), laned('plan', '2', 'a')]))).toBe('1 lane · 2 issues');
   });
 
   it('includes the repo in the header when provided, omits it otherwise', () => {
