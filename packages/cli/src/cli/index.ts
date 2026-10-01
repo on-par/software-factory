@@ -272,7 +272,7 @@ import { cmdLogs } from './logs.js';
 import { applyHelpGroups } from './help-groups.js';
 import { mergeScopeNotice } from './merge-scope.js';
 import { createFactoryOctokit } from './octokit.js';
-import { formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
+import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
 import { readRunFlagOverrides, writeRunFlagOverrides } from './run-flags.js';
 import { distFreshnessProbe, runStalenessGuard } from './staleness.js';
 import { readStopFileStatus, stopSentinelCheck, stopSentinelRunSkipMessage } from './stop-sentinel.js';
@@ -1961,7 +1961,8 @@ async function cmdRunIssue(
 }
 
 /** Runs each decomposed child through the one-shot pipeline in build order, inside the caller's
- *  run lock, then prints a per-child summary. Throws CliExitError(1) unless all are ready (#1747). */
+ *  run lock, then prints a per-child summary. Nested decompositions expand in place and closed
+ *  children are skipped. Throws CliExitError(1) unless every child is ready or skipped (#1747, #1748). */
 async function runDecomposedChildren(
   parent: number,
   children: readonly number[],
@@ -1970,50 +1971,54 @@ async function runDecomposedChildren(
 ): Promise<void> {
   const list = children.map((n) => `#${n}`).join(', ');
   console.log(chalk.cyan(`run-children: #${parent} decomposed into ${list} — running them in build order`));
-  const results = await runChildrenInOrder(children, async (child): Promise<ChildRunResult> => {
-    let work: WorkRequest;
-    try {
-      work = await env.workSources.resolve(GITHUB_ISSUE_SOURCE, {
-        repo: env.ghRepo,
-        issue: child,
-      } satisfies GithubIssueParams);
-    } catch (err) {
-      return { issue: child, status: 'failed', detail: `could not resolve issue #${child} (${errorDetail(err)})` };
-    }
-    console.log(chalk.cyan(`one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
-    let outcome: RunOutcome | undefined;
-    try {
-      await shipIssue(child, opts, {
-        repoRoot: env.repoRoot,
-        ghRepo: env.ghRepo,
-        workRequest: work,
-        onOutcome: (o) => {
-          outcome = o;
-        },
-      });
-    } catch (err: any) {
-      if (err instanceof IssueDecomposedError) {
-        const again = err.childIssues.map((n) => `#${n}`).join(', ');
-        return {
+  const results = await runChildrenInOrder(
+    children,
+    async (child): Promise<ChildRunResult> => {
+      let work: WorkRequest;
+      try {
+        work = await env.workSources.resolve(GITHUB_ISSUE_SOURCE, {
+          repo: env.ghRepo,
           issue: child,
-          status: 'failed',
-          detail: `decomposed again into ${again} — nested decomposition is not run`,
-        };
+        } satisfies GithubIssueParams);
+      } catch (err) {
+        return { issue: child, status: 'failed', detail: `could not resolve issue #${child} (${errorDetail(err)})` };
       }
-      if (err instanceof IssueSkippedError) {
-        return { issue: child, status: 'failed', detail: `skipped: ${err.message}` };
+      console.log(chalk.cyan(`one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
+      let outcome: RunOutcome | undefined;
+      try {
+        await shipIssue(child, opts, {
+          repoRoot: env.repoRoot,
+          ghRepo: env.ghRepo,
+          workRequest: work,
+          onOutcome: (o) => {
+            outcome = o;
+          },
+        });
+      } catch (err: any) {
+        if (err instanceof IssueDecomposedError) {
+          const again = err.childIssues.map((n) => `#${n}`).join(', ');
+          console.log(chalk.cyan(`run-children: #${child} decomposed into ${again} — running them in its place`));
+          return { issue: child, status: 'decomposed', children: err.childIssues };
+        }
+        if (err instanceof IssueSkippedError) {
+          return { issue: child, status: 'skipped', detail: err.message };
+        }
+        return { issue: child, status: 'failed', detail: err instanceof Error ? err.message : String(err) };
       }
-      return { issue: child, status: 'failed', detail: err instanceof Error ? err.message : String(err) };
-    }
-    const done = outcome as RunOutcome | undefined;
-    return { issue: child, status: 'ready', prNumber: done && 'prNumber' in done ? done.prNumber : undefined };
-  });
-  const allReady = results.every((r) => r.status === 'ready');
+      const done = outcome as RunOutcome | undefined;
+      return { issue: child, status: 'ready', prNumber: done && 'prNumber' in done ? done.prNumber : undefined };
+    },
+    [parent],
+  );
+  const ok = childRunSucceeded(results);
   for (const line of formatChildRunSummary(parent, results)) {
-    console.log(allReady ? chalk.green(line) : chalk.yellow(line));
+    console.log(ok ? chalk.green(line) : chalk.yellow(line));
   }
-  if (!allReady) {
-    throw new CliExitError(`Run failed for issue #${parent}: not every decomposed child reached ready-for-review`, 1);
+  if (!ok) {
+    throw new CliExitError(
+      `Run failed for issue #${parent}: not every decomposed child reached ready-for-review or was skipped as closed`,
+      1,
+    );
   }
 }
 

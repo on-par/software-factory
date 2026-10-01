@@ -3243,15 +3243,55 @@ bash scripts/verify.sh
         expect(vi.mocked(core.planPhase)).toHaveBeenCalledTimes(3);
       });
 
-      it('does not run a child that decomposes again', async () => {
+      it('runs a nested decomposition in place of the child, before later siblings', async () => {
         const core = await import('@on-par/factory-core');
         vi.mocked(core.planPhase)
           .mockImplementationOnce(async () => decompose([10, 11]))
-          .mockImplementationOnce(async () => decompose([20]));
+          .mockImplementationOnce(async () => decompose([20, 21]));
+        vi.mocked(core.shipPhase)
+          .mockResolvedValueOnce({ ok: true, prNumber: 120 } as any)
+          .mockResolvedValueOnce({ ok: true, prNumber: 121 } as any)
+          .mockResolvedValueOnce({ ok: true, prNumber: 111 } as any);
+        const res = await runMain('run-issue', '5', '--run-children');
+        expect(res.exited).toBe(false);
+        const issues = h.octokit.rest.issues.get.mock.calls.map((c: any[]) => c[0].issue_number);
+        expect(issues.slice(0, 5)).toEqual([5, 10, 20, 21, 11]);
+        expect(vi.mocked(core.planPhase)).toHaveBeenCalledTimes(5);
+        expect(vi.mocked(core.shipPhase)).toHaveBeenCalledTimes(3);
+        expect(logged()).toContain('#10 → decomposed into #20, #21');
+        expect(logged()).toContain('3/3 children ready for review');
+      });
+
+      const closeIssue10 = () => {
+        const get = h.octokit.rest.issues.get;
+        h.octokit.rest.issues.get = vi.fn(async (args: any) => {
+          const res = await get(args);
+          return args.issue_number === 10 ? { ...res, data: { ...res.data, state: 'closed' } } : res;
+        });
+      };
+
+      it('skips a closed child, keeps going, and exits 0', async () => {
+        const core = await import('@on-par/factory-core');
+        vi.mocked(core.planPhase).mockImplementationOnce(async () => decompose([10, 11]));
+        vi.mocked(core.shipPhase).mockResolvedValueOnce({ ok: true, prNumber: 111 } as any);
+        closeIssue10();
+        const res = await runMain('run-issue', '5', '--run-children');
+        expect(res.exited).toBe(false);
+        expect(vi.mocked(core.shipPhase)).toHaveBeenCalledTimes(1);
+        expect(logged()).toContain('#10 → skipped:');
+        expect(logged()).toContain('#11 → PR #111 ready for review');
+        expect(logged()).toContain('1/2 children ready for review, 1 skipped');
+      });
+
+      it('still exits 1 when a child after a skipped one fails', async () => {
+        const core = await import('@on-par/factory-core');
+        vi.mocked(core.planPhase).mockImplementationOnce(async () => decompose([10, 11]));
+        vi.mocked(core.shipPhase).mockResolvedValueOnce({ ok: false } as any);
+        closeIssue10();
         const res = await runMain('run-issue', '5', '--run-children');
         expect(res).toMatchObject({ exited: true, code: 1 });
-        expect(logged()).toContain('decomposed again');
-        expect(logged()).toContain('#11 → not run');
+        expect(logged()).toContain('#10 → skipped:');
+        expect(logged()).toContain('#11 → failed');
       });
 
       it('records a child that cannot be resolved as failed', async () => {
