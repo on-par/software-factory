@@ -177,10 +177,12 @@ import type {
 } from '@on-par/factory-core/internal';
 import {
   acquirePidFile,
+  formatWorktreeLocation,
+  laneWorktreePath,
+  resolveWorktreeRoot,
   migrateRepoConfigToYaml,
   REPO_CONFIG_YAML_HEADER,
   branchFor,
-  branchPrefixSlug,
   claudeConfigDirOverride,
   claudeKeychainService,
   cleanupWorktree,
@@ -1091,6 +1093,10 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
 
   console.log(chalk.bold(`== ${ghRepo} ==`));
   console.log(`Product: ${product}`);
+  const worktreeParent = loadFactoryConfigForRepo(paths.config).worktree.parent;
+  console.log(
+    formatWorktreeLocation(resolveWorktreeRoot({ repoRoot, parent: worktreeParent, repo: ghRepo }), worktreeParent),
+  );
 
   console.log(chalk.bold('\n== Active =='));
   if (existsSync(paths.queue)) {
@@ -1515,7 +1521,7 @@ export async function shipIssue(
   const branch = branchFor(issueNum, issueTitle, policy.effective.branchPrefix);
   const worktree = ctx?.localOnly
     ? ctx.localOnly.workspace
-    : worktreePathFor(repoRoot, issueNum, policy.effective.branchPrefix);
+    : worktreePathFor(repoRoot, ghRepo, issueNum, policy.effective.branchPrefix);
   const specPath = resolve(paths.plans, `issue-${issueNum}.md`);
   const runStartedAt = new Date().toISOString();
 
@@ -2405,8 +2411,14 @@ async function getIssueTitle(octokit: Octokit, repo: string, issue: number): Pro
   return data.title;
 }
 
-function worktreePathFor(repoRoot: string, issueNum: number, prefix?: string): string {
-  return resolve(dirname(repoRoot), `${basename(repoRoot)}-factory-${branchPrefixSlug(prefix)}-${issueNum}`);
+function worktreePathFor(repoRoot: string, ghRepo: string, issueNum: number, prefix?: string): string {
+  return laneWorktreePath({
+    repoRoot,
+    parent: loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).worktree.parent,
+    repo: ghRepo,
+    issue: issueNum,
+    prefix,
+  });
 }
 
 /** Fences a whole run behind the checkout's `.factory/run.lock` (#598). A live holder is
@@ -2462,13 +2474,14 @@ function gcWorktreeSandbox(
 export async function reapParkedLaneWorktree(
   issue: number,
   repoRoot: string,
+  ghRepo: string,
   paths: ReturnType<typeof getFactoryPaths>,
   prefixOverride?: string,
 ): Promise<void> {
   try {
     const factoryConfig = loadFactoryConfigForRepo(paths.config);
     const branchPrefix = prefixOverride ?? resolveEffectiveConfig(loadRepoConfig(repoRoot)).branchPrefix;
-    const worktreePath = worktreePathFor(repoRoot, issue, branchPrefix);
+    const worktreePath = worktreePathFor(repoRoot, ghRepo, issue, branchPrefix);
     const log = (type: EventKind, msg: string) => logEvent(paths.events, type, issue, msg);
     const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
     await withGitLock(repoRoot, () =>
@@ -2600,6 +2613,7 @@ async function landIssue(
 
   const worktree = worktreePathFor(
     repoRoot,
+    ghRepo,
     issueNum,
     branch.startsWith(`${LEGACY_BRANCH_PREFIX}/`) ? LEGACY_BRANCH_PREFIX : resolved,
   );
@@ -3223,6 +3237,7 @@ async function cmdRun(
               reapParkedLaneWorktree(
                 issue,
                 repoRoot,
+                ghRepo,
                 paths,
                 opts.branchPrefix === undefined ? undefined : branchPrefix,
               ),

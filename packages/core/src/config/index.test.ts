@@ -352,6 +352,7 @@ describe('loadFactoryConfig', () => {
 
   it('shipped config has worktree gc defaults', () => {
     const config = loadFactoryConfig();
+    expect(config.worktree.parent).toBe('~/.factory/worktrees');
     expect(config.worktree.gcTtlDays).toBe(7);
     expect(config.worktree.autoGcOnRun).toBe(true);
   });

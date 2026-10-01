@@ -197,6 +197,12 @@ export type { FileLockOptions, SyncFileLockOptions } from './utils/lock.js';
 export { withFileLock, withFileLockSync, withGitLock } from './utils/lock.js';
 export type { RunLockHolder, RunLockOptions } from './utils/run-lock.js';
 export { readRunLockHolder, RunLockHeldError, withRunLock } from './utils/run-lock.js';
+export {
+  ensureWorktreeParentExcluded,
+  formatWorktreeLocation,
+  laneWorktreePath,
+  resolveWorktreeRoot,
+} from './utils/worktree-location.js';
 export type {
   GcCandidate,
   GcHeadPrState,

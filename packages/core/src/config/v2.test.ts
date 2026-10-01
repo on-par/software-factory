@@ -63,7 +63,7 @@ describe('zero-config: { version: 2 }', () => {
       resources: { cpuMs: 300_000, memMb: 4096 },
     });
     expect(cfg.run.worktree).toEqual({
-      parent: '../',
+      parent: '~/.factory/worktrees',
       gcTtlDays: 7,
       autoGcOnRun: true,
     });

@@ -1,7 +1,7 @@
 // src/utils/index.ts — Shared utilities: logging, git ops, cost tracking, shell helpers
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 
 import type { EventKind } from '../events/kinds.js';
 import { createLogger } from '../logger/index.js';
@@ -9,6 +9,7 @@ import type { CostEntry, FailoverReason, LogLevel, ReadinessInfo, ReworkInfo } f
 import { levelForType } from './format.js';
 import { execGit } from './git-exec.js';
 import { createMicroVm, removeMicroVm, type WorktreeSandbox } from './microvm.js';
+import { ensureWorktreeParentExcluded } from './worktree-location.js';
 
 export type { WorktreeSandbox } from './microvm.js';
 
@@ -119,6 +120,8 @@ export async function setupWorktree(
   const base = startPoint ?? (await defaultRemoteBase(repoRoot));
   await execGit(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot }).catch(() => {});
   await execGit(`git branch -D ${shellEscape(branch)}`, { cwd: repoRoot }).catch(() => {});
+  mkdirSync(dirname(worktreePath), { recursive: true });
+  await ensureWorktreeParentExcluded(repoRoot, dirname(worktreePath));
   await execGit(`git worktree add -b ${shellEscape(branch)} ${shellEscape(worktreePath)} ${shellEscape(base)}`, {
     cwd: repoRoot,
   });

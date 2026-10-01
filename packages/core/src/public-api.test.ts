@@ -307,6 +307,11 @@ const PUBLIC_API_KEYS = [
 ];
 
 const INTERNAL_API_KEYS = [
+  // Worktree location (#1758)
+  'ensureWorktreeParentExcluded',
+  'formatWorktreeLocation',
+  'laneWorktreePath',
+  'resolveWorktreeRoot',
   // Review verdict (#1679)
   'computeReviewVerdict',
   'DETERMINISTIC_CHECKERS',

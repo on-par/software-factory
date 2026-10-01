@@ -102,13 +102,16 @@ plan_approval:
 # Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging
 ci:
   skip: false
-# Worktrees created as siblings of the repo
+# Where lane worktrees are created. "~/..." or an absolute path is a shared root, namespaced as
+# <parent>/<owner>/<repo>/. A repo-relative path is used as-is: "../" gives the old sibling layout;
+# ".factory/worktrees" keeps them inside the repo (auto-added to .git/info/exclude) but the repo's
+# own tools (jest, eslint, tsc, globbing scripts) may crawl into those nested checkouts.
 worktree:
-  parent: "../"
+  parent: "~/.factory/worktrees"
   gcTtlDays: 7
   autoGcOnRun: true
-# Lane workspace backend: "host" (sibling git worktrees) or "disposable-docker" (a managed container
-# per lane).
+# Lane workspace backend: "host" (git worktrees) or "disposable-docker" (a managed container per
+# lane).
 workspace:
   backend: "host"
 # Containment for agentic build runs. Disable per-run with --no-sandbox or FACTORY_SANDBOX=0. Empty

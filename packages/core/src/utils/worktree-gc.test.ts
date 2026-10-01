@@ -117,6 +117,28 @@ describe('sweepWorktrees', () => {
     return { parentDir, repoRoot };
   }
 
+  it('reaps both a legacy sibling worktree and one under the shared worktree root (#1758)', async () => {
+    const { repoRoot: root } = setup();
+    const legacy = makeWorktree(`${basename(root)}-factory-ship-it-5`);
+    const shared = join(parentDir, 'home', '.factory', 'worktrees', 'o', 'r', `${basename(root)}-factory-ship-it-6`);
+    mkdirSync(shared, { recursive: true });
+    writeFileSync(join(shared, '.git'), 'gitdir: /somewhere');
+
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${legacy}\nHEAD bbb\nbranch refs/heads/ship-it/5-a\n\nworktree ${shared}\nHEAD ccc\nbranch refs/heads/ship-it/6-b\n\n`,
+        };
+      }
+      if (cmd === 'git rev-parse --verify origin/main') return { stdout: 'aaa\n' };
+      if (cmd.includes('rev-parse --verify --quiet')) return { stdout: 'bbb\n' };
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand });
+    expect(report.removed.map((r) => r.path).sort()).toEqual([legacy, shared].sort());
+  });
+
   it('never issues remove commands for the main worktree or non-factory-named worktrees', async () => {
     setup();
     const otherWorktree = makeWorktree('some-other-worktree');
