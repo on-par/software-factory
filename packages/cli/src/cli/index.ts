@@ -101,6 +101,8 @@ import {
   loadRoutesConfig,
   LOCAL_BRIEF_SOURCE,
   localOnlyWorkspace,
+  joinClassifierOutcomes,
+  mergeClassifierOutcomes,
   mergedPrRefs,
   ModelRegistry,
   ModelRouter,
@@ -943,6 +945,19 @@ async function appendKpiSnapshot(
   return { record, history: parseKpiHistory(updated) };
 }
 
+function persistClassifierOutcomes(
+  paths: ReturnType<typeof getFactoryPaths>,
+  events: Parameters<typeof joinClassifierOutcomes>[0],
+  sources: PrSource[],
+  opts: { now: string; windowDays: number },
+): void {
+  const records = joinClassifierOutcomes(events, sources, opts);
+  if (records.length === 0) return;
+  const updated = mergeClassifierOutcomes(readTextFileOrEmpty(paths.classifierOutcomes), records);
+  ensureDir(paths.state);
+  writeFileSync(paths.classifierOutcomes, updated);
+}
+
 async function cmdKpis(opts: { branchPrefix?: string } = {}) {
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
   const repoRoot = await getRepoRoot();
@@ -975,6 +990,11 @@ async function cmdKpis(opts: { branchPrefix?: string } = {}) {
       const merged = mergedPrRefs(prSources);
       const sources = await fetchDefectSources(getOctokit(), owner, repoName, merged, { now, windowDays });
       allEvents = [...allEvents, ...detectPostMergeDefects(sources, allEvents, { now, windowDays })];
+      try {
+        persistClassifierOutcomes(paths, allEvents, prSources, { now, windowDays });
+      } catch (err: any) {
+        console.error(chalk.yellow(`factory: classifier outcomes not recorded (${err?.message ?? err})`));
+      }
     } catch (err: any) {
       console.error(
         chalk.yellow(

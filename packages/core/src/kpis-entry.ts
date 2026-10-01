@@ -5,6 +5,8 @@
 // pure-only door to it.
 
 export type {
+  ClassifierOutcomeRecord,
+  ClassifierOutcomeVerdict,
   CommitSource,
   DefectSourceClient,
   DefectSources,
@@ -32,10 +34,13 @@ export {
   HUMAN_EVENT_TYPES,
   isDefectWindowClosed,
   isHumanEvent,
+  joinClassifierOutcomes,
   KPI_DRIFT_THRESHOLD_RATIO,
   KPI_DRIFT_WINDOW_SIZE,
   kpisToHistoryRecord,
+  mergeClassifierOutcomes,
   mergedPrRefs,
+  parseClassifierOutcomes,
   parseKpiHistory,
   reconstructHumanEvents,
   renderKpiDriftLine,

@@ -84,6 +84,7 @@ describe('getFactoryPaths', () => {
       approvals: resolve(state, 'approvals'),
       steering: resolve(state, 'steering'),
       kpiHistory: resolve(state, 'kpi-history.jsonl'),
+      classifierOutcomes: resolve(state, 'classifier-outcomes.jsonl'),
       ingestWatermark: resolve(state, 'ingest-watermark'),
       ports: resolve(state, 'ports.json'),
       portsLock: resolve(state, 'ports.lock'),
@@ -163,6 +164,7 @@ describe('getFactoryPaths', () => {
       'runs',
       'costs',
       'kpiHistory',
+      'classifierOutcomes',
     ] as const;
 
     for (const key of runtimeKeys) {

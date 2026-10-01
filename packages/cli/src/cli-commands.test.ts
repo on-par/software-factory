@@ -348,6 +348,7 @@ function paths() {
     runs: join(state, 'runs'),
     steering: join(state, 'steering'),
     kpiHistory: join(state, 'kpi-history.jsonl'),
+    classifierOutcomes: join(state, 'classifier-outcomes.jsonl'),
     breaker: join(state, 'breaker.json'),
     runFlags: join(state, 'run-flags.json'),
     config: join(root, 'config.json'),
@@ -1374,6 +1375,93 @@ bash scripts/verify.sh
       const record = JSON.parse(readFileSync(paths().kpiHistory, 'utf-8').trim().split('\n')[0]);
       expect(record.defectWindowClosedRuns).toBe(1);
       expect(record.postMergeDefectRate).toBe(1);
+    });
+
+    it('upserts classifier outcomes once per PR across repeated kpis runs (#1726)', async () => {
+      const mergedAt = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      writeFileSync(
+        paths().events,
+        JSON.stringify({
+          type: 'pr-classified',
+          issue: '1',
+          ts: mergedAt,
+          prClassification: {
+            modelClass: 'A',
+            floorClass: 'B',
+            finalClass: 'B',
+            model: 'm',
+            promptVersion: 'p1',
+            policyVersion: 'f1',
+            diffSha: 'abc',
+            adrIds: [],
+            costUsd: null,
+            claims: [],
+            unsupportedClaims: [],
+            notInspected: [],
+            droppedClaims: 0,
+          },
+        }),
+      );
+      writeFileSync(paths().costs, '');
+      h.octokit.rest.pulls.list = vi.fn(async ({ state }: any) =>
+        state === 'all'
+          ? {
+              data: [
+                {
+                  number: 77,
+                  head: { ref: 'ship-it/1-fix-the-bug' },
+                  state: 'closed',
+                  merged_at: mergedAt,
+                  merge_commit_sha: 'abcdef1234567',
+                  closed_at: null,
+                },
+              ],
+            }
+          : { data: [] },
+      );
+      h.octokit.rest.pulls.listCommits = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.pulls.listReviews = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.pulls.get = vi.fn(async () => ({ data: { merged_by: { login: 'patrob' } } }));
+      h.octokit.rest.repos = { listCommits: vi.fn(async () => ({ data: [] })) };
+      h.octokit.rest.issues.listForRepo = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.issues.listComments = vi.fn(async () => ({ data: [] }));
+
+      await runMain('kpis');
+      await runMain('kpis');
+      const lines = readFileSync(paths().classifierOutcomes, 'utf-8').trim().split('\n');
+      expect(lines).toHaveLength(1);
+      expect(JSON.parse(lines[0])).toMatchObject({ prNumber: 77, modelClass: 'A', verdict: 'agree' });
+    });
+
+    it('does not write classifier outcomes when post-merge defect detection fails (#1726)', async () => {
+      writeFileSync(paths().events, JSON.stringify({ type: 'issue-title', issue: '1', msg: 'title' }));
+      writeFileSync(paths().costs, '');
+      h.octokit.rest.pulls.list = vi.fn(async ({ state }: any) =>
+        state === 'all'
+          ? {
+              data: [
+                {
+                  number: 77,
+                  head: { ref: 'ship-it/1-fix-the-bug' },
+                  state: 'closed',
+                  merged_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+                  merge_commit_sha: 'abcdef1234567',
+                  closed_at: null,
+                },
+              ],
+            }
+          : { data: [] },
+      );
+      h.octokit.rest.pulls.listCommits = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.pulls.listReviews = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.pulls.get = vi.fn(async () => ({ data: { merged_by: { login: 'patrob' } } }));
+      h.octokit.rest.repos = {
+        listCommits: vi.fn(async () => {
+          throw new Error('rate limited');
+        }),
+      };
+      await runMain('kpis');
+      expect(existsSync(paths().classifierOutcomes)).toBe(false);
     });
 
     it('omits postMergeDefectRate and warns when the post-merge defect fetch fails (#612)', async () => {
