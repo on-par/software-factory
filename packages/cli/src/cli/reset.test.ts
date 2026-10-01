@@ -1,5 +1,14 @@
 import { execSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -246,7 +255,84 @@ describe('parseResetIssues', () => {
   });
 });
 
+describe('runReset --dry-run', () => {
+  const readOr = (f: string) => (existsSync(f) ? readFileSync(f, 'utf-8') : '');
+  const snapshot = (state: string) => ({
+    worktrees: sh('git worktree list --porcelain'),
+    refs: sh('git for-each-ref refs/heads/'),
+    plans: readdirSafe(join(state, 'plans')),
+    phase: existsSync(join(state, 'runs', 'issue-192.phase.json')),
+    logs: existsSync(join(state, 'logs', 'issue-192', 'x.log')),
+    history: readOr(join(state, 'rework-history.json')),
+    claims: readOr(join(state, 'lane-files.json')),
+  });
+
+  it('lists every item it would remove and changes nothing', async () => {
+    const state = seedState();
+    await seedHistory(state);
+    const cmds: string[] = [];
+    const removeWorktree = vi.fn(async () => {});
+    const { deps, releaseLease } = makeDeps(state, {
+      dryRun: true,
+      removeWorktree,
+      git: async (cmd) => {
+        cmds.push(cmd);
+        return sh(cmd);
+      },
+    });
+    const before = snapshot(state);
+
+    const [line] = await runReset([192], deps);
+
+    expect(line.startsWith('#192 (dry run): would remove')).toBe(true);
+    for (const part of [
+      `worktree ${wt192}`,
+      'branch ship-it/192-some-title',
+      `plan file ${join(state, 'plans', 'issue-192.md')}`,
+      `plan file ${join(state, 'plans', 'issue-192.design.json')}`,
+      `plan file ${join(state, 'plans', 'issue-192.design.md')}`,
+      `phase file ${join(state, 'runs', 'issue-192.phase.json')}`,
+      `logs ${join(state, 'logs', 'issue-192')}`,
+      'rework history entry #192',
+      'lane-file claim o/r#192',
+      'port lease 3100',
+      'would keep nothing',
+    ]) {
+      expect(line).toContain(part);
+    }
+    expect(snapshot(state)).toEqual(before);
+    expect(removeWorktree).not.toHaveBeenCalled();
+    expect(releaseLease).not.toHaveBeenCalled();
+    expect(cmds.some((c) => c.includes('branch -D'))).toBe(false);
+  });
+
+  it('reports the current checkout as would-keep', async () => {
+    const state = seedState();
+    const { deps } = makeDeps(state, { dryRun: true, cwd: join(wt192, 'sub') });
+
+    const [line] = await runReset([192], deps);
+
+    expect(line).toContain(`would keep worktree ${wt192} (current checkout)`);
+    expect(line).toContain('branch ship-it/192-some-title (checked out in');
+  });
+
+  it('prints nothing to reset for an unknown issue', async () => {
+    const { deps } = makeDeps(seedState(), { dryRun: true });
+    expect(await runReset([555], deps)).toEqual(['#555 (dry run): nothing to reset']);
+  });
+});
+
 describe('formatResetLine', () => {
+  it('formats the dry-run shapes', () => {
+    expect(formatResetLine({ issue: 1, removed: [], kept: [], dryRun: true })).toBe('#1 (dry run): nothing to reset');
+    expect(formatResetLine({ issue: 1, removed: ['logs x'], kept: [], dryRun: true })).toBe(
+      '#1 (dry run): would remove logs x; would keep nothing',
+    );
+    expect(formatResetLine({ issue: 1, removed: [], kept: ['b'], dryRun: true })).toBe(
+      '#1 (dry run): would remove nothing; would keep b',
+    );
+  });
+
   it('formats nothing, removed-only and removed+kept', () => {
     expect(formatResetLine({ issue: 1, removed: [], kept: [] })).toBe('#1: nothing to reset');
     expect(formatResetLine({ issue: 1, removed: ['logs'], kept: [] })).toBe('#1: removed logs; kept nothing');

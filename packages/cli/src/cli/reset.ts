@@ -17,12 +17,15 @@ export interface ResetDeps {
   removeWorktree: (path: string) => Promise<void>;
   readLeases: () => PortLease[];
   releaseLease: (worktreeId: string) => Promise<void>;
+  /** Preview only: discover and report, never mutate. */
+  dryRun?: boolean;
 }
 
 export interface ResetResult {
   issue: number;
   removed: string[];
   kept: string[];
+  dryRun?: boolean;
 }
 
 export function parseResetIssues(raw: string[]): number[] {
@@ -41,6 +44,7 @@ const shellQuote = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`;
 
 export async function resetIssue(issue: number, deps: ResetDeps): Promise<ResetResult> {
   const { paths, branchPrefix } = deps;
+  const dry = deps.dryRun === true;
   const removed: string[] = [];
   const kept: string[] = [];
   const protectedBranches = new Map<string, string>();
@@ -59,7 +63,7 @@ export async function resetIssue(issue: number, deps: ResetDeps): Promise<ResetR
         continue;
       }
       try {
-        await deps.removeWorktree(entry.path);
+        if (!dry) await deps.removeWorktree(entry.path);
         removed.push(`worktree ${entry.path}`);
         removedWorktrees.add(entry.path);
       } catch (err) {
@@ -85,7 +89,7 @@ export async function resetIssue(issue: number, deps: ResetDeps): Promise<ResetR
         continue;
       }
       try {
-        await deps.git(`git branch -D ${shellQuote(b)}`);
+        if (!dry) await deps.git(`git branch -D ${shellQuote(b)}`);
         removed.push(`branch ${b}`);
       } catch (err) {
         kept.push(`branch ${b} (${errText(err)})`);
@@ -101,10 +105,11 @@ export async function resetIssue(issue: number, deps: ResetDeps): Promise<ResetR
     for (const ext of ['md', 'design.json', 'design.md', 'adr.json']) {
       const file = join(paths.plans, `issue-${issue}.${ext}`);
       if (!existsSync(file)) continue;
-      rmSync(file, { force: true });
+      if (dry) removed.push(`plan file ${file}`);
+      else rmSync(file, { force: true });
       count++;
     }
-    if (count > 0) removed.push(`plan files (${count})`);
+    if (!dry && count > 0) removed.push(`plan files (${count})`);
   } catch (err) {
     kept.push(`plan files (${errText(err)})`);
   }
@@ -113,8 +118,8 @@ export async function resetIssue(issue: number, deps: ResetDeps): Promise<ResetR
   try {
     const file = phaseSnapshotFile(paths.runs, issue);
     if (existsSync(file)) {
-      rmSync(file, { force: true });
-      removed.push('phase file');
+      if (!dry) rmSync(file, { force: true });
+      removed.push(dry ? `phase file ${file}` : 'phase file');
     }
   } catch (err) {
     kept.push(`phase file (${errText(err)})`);
@@ -122,7 +127,10 @@ export async function resetIssue(issue: number, deps: ResetDeps): Promise<ResetR
 
   // 5. Rework history
   try {
-    if (await new ReworkHistory(paths.reworkHistory).clear(issue)) removed.push('rework history');
+    const history = new ReworkHistory(paths.reworkHistory);
+    if (dry) {
+      if ((await history.priorSignature(issue)) !== undefined) removed.push(`rework history entry #${issue}`);
+    } else if (await history.clear(issue)) removed.push('rework history');
   } catch (err) {
     kept.push(`rework history (${errText(err)})`);
   }
@@ -131,8 +139,8 @@ export async function resetIssue(issue: number, deps: ResetDeps): Promise<ResetR
   try {
     const dir = join(paths.logs, `issue-${issue}`);
     if (existsSync(dir)) {
-      rmSync(dir, { recursive: true, force: true });
-      removed.push('logs');
+      if (!dry) rmSync(dir, { recursive: true, force: true });
+      removed.push(dry ? `logs ${dir}` : 'logs');
     }
   } catch (err) {
     kept.push(`logs (${errText(err)})`);
@@ -140,7 +148,10 @@ export async function resetIssue(issue: number, deps: ResetDeps): Promise<ResetR
 
   // 7. Lane-file claim
   try {
-    if (await new LaneFileGuard(paths.laneFiles).releaseIssue(issue)) removed.push('lane-file claim');
+    const guard = new LaneFileGuard(paths.laneFiles);
+    if (dry) {
+      for (const c of await guard.claimsForIssue(issue)) removed.push(`lane-file claim ${c.repo}#${c.issue}`);
+    } else if (await guard.releaseIssue(issue)) removed.push('lane-file claim');
   } catch (err) {
     kept.push(`lane-file claim (${errText(err)})`);
   }
@@ -152,7 +163,7 @@ export async function resetIssue(issue: number, deps: ResetDeps): Promise<ResetR
       if (keptPaths.has(lease.worktreeId)) continue;
       if (!removedWorktrees.has(lease.worktreeId) && factoryBranchIssue(lease.branch, branchPrefix) !== issue) continue;
       try {
-        await deps.releaseLease(lease.worktreeId);
+        if (!dry) await deps.releaseLease(lease.worktreeId);
         removed.push(`port lease ${lease.port}`);
       } catch (err) {
         kept.push(`port lease ${lease.port} (${errText(err)})`);
@@ -162,10 +173,14 @@ export async function resetIssue(issue: number, deps: ResetDeps): Promise<ResetR
     kept.push(`port leases (${errText(err)})`);
   }
 
-  return { issue, removed, kept };
+  return { issue, removed, kept, ...(dry ? { dryRun: true } : {}) };
 }
 
 export function formatResetLine(r: ResetResult): string {
+  if (r.dryRun) {
+    if (r.removed.length === 0 && r.kept.length === 0) return `#${r.issue} (dry run): nothing to reset`;
+    return `#${r.issue} (dry run): would remove ${r.removed.join(', ') || 'nothing'}; would keep ${r.kept.join(', ') || 'nothing'}`;
+  }
   if (r.removed.length === 0 && r.kept.length === 0) return `#${r.issue}: nothing to reset`;
   return `#${r.issue}: removed ${r.removed.join(', ') || 'nothing'}; kept ${r.kept.join(', ') || 'nothing'}`;
 }
