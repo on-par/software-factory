@@ -11,7 +11,7 @@ import type { Octokit } from '@octokit/rest';
 import type { EventKind } from '../events/kinds.js';
 import { CLAIMED_BY_LABEL_PREFIX, PARKED_LABEL } from '../queue/github-queue.js';
 import { findStaleClaims } from '../queue/stale-claims.js';
-import { branchPrefixSlug, shellEscape } from './index.js';
+import { factoryBranchPrefixes, shellEscape } from './index.js';
 import { removeMicroVm, type WorktreeSandbox } from './microvm.js';
 
 const exec = promisify(execCb);
@@ -485,8 +485,9 @@ export async function sweepWorktrees(
   const repoRootResolved = resolve(repoRoot);
   const repoBase = basename(repoRootResolved);
   const factoryPrefix = `${repoBase}-factory-`;
-  // The slug is [a-z0-9-] only (branchPrefixSlug), so interpolating it into a regex is safe.
-  const lanePattern = new RegExp('^' + branchPrefixSlug(opts.branchPrefix) + '/(\\d+)-');
+  // Slugs are [a-z0-9-] only (branchPrefixSlug), so interpolating them into a regex is safe.
+  // Matches the resolved prefix and the legacy ship-it one.
+  const lanePattern = new RegExp('^(?:' + factoryBranchPrefixes(opts.branchPrefix).join('|') + ')/(\\d+)-');
 
   const candidates: WorktreeListEntry[] = entries.filter((entry) => {
     const entryPath = resolve(entry.path);

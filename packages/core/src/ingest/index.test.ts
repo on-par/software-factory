@@ -140,6 +140,28 @@ describe('runAutoIngest', () => {
     expect(result.skippedInFlight).toEqual([200]);
   });
 
+  it('skips issues with open PRs on the configured prefix or legacy ship-it, but not other branches', async () => {
+    const { deps } = makeDeps({
+      runOpts: {
+        issues: [
+          { number: 200, title: 'New prefix', updatedAt: '2026-07-19T00:00:00.000Z' },
+          { number: 201, title: 'Legacy prefix', updatedAt: '2026-07-19T00:00:00.000Z' },
+          { number: 202, title: 'Unrelated branch', updatedAt: '2026-07-19T00:00:00.000Z' },
+        ],
+        prHeadRefs: ['factory/200-new-prefix', 'ship-it/201-legacy-prefix', 'feature/202-unrelated'],
+      },
+      queueContent: '',
+    });
+
+    const result = await runAutoIngest(
+      { repoDir: '/repo', queueFile: QUEUE_FILE, watermarkFile: WATERMARK_FILE, branchPrefix: 'factory' },
+      deps,
+    );
+
+    expect(result.skippedInFlight).toEqual([200, 201]);
+    expect(result.appended).toEqual([202]);
+  });
+
   it('skips a stale issue (updatedAt <= prevWatermark) and advances the watermark to the max updatedAt seen', async () => {
     const { deps, writes } = makeDeps({
       runOpts: {

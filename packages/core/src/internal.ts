@@ -153,6 +153,9 @@ export type { LaneWorktreeReapResult } from './utils/index.js';
 export {
   branchFor,
   branchPrefixSlug,
+  LEGACY_BRANCH_PREFIX,
+  factoryBranchPrefixes,
+  factoryBranchIssue,
   cleanupWorktree,
   colorEnabled,
   defaultRemoteBase,

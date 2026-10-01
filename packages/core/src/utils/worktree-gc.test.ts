@@ -206,6 +206,35 @@ describe('sweepWorktrees', () => {
     expect(report.removed[0].reason).toBe('remote-gone');
   });
 
+  it('treats lane worktrees on the resolved prefix and legacy ship-it as candidates, not manual branches', async () => {
+    const { repoRoot: root } = setup();
+    const newWt = makeWorktree(`${basename(root)}-factory-factory-21`);
+    const legacyWt = makeWorktree(`${basename(root)}-ship-it-22`);
+    const manualWt = makeWorktree(`${basename(root)}-scratch`);
+
+    const commands: string[] = [];
+    const runCommand = async (cmd: string) => {
+      commands.push(cmd);
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout:
+            `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\n` +
+            `worktree ${newWt}\nHEAD bbb\nbranch refs/heads/factory/21-feature\n\n` +
+            `worktree ${legacyWt}\nHEAD bbb\nbranch refs/heads/ship-it/22-feature\n\n` +
+            `worktree ${manualWt}\nHEAD bbb\nbranch refs/heads/manual/5-x\n\n`,
+        };
+      }
+      if (cmd === 'git rev-parse --verify origin/main') return { stdout: 'aaa\n' };
+      if (cmd.startsWith('git merge-base --is-ancestor')) return { stdout: '' };
+      if (cmd.includes('rev-parse --verify --quiet')) return { stdout: 'bbb\n' };
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7, branchPrefix: 'factory' }, { runCommand });
+    expect(report.removed.map((r) => r.path).sort()).toEqual([newWt, legacyWt].sort());
+    expect(existsSync(manualWt)).toBe(true);
+  });
+
   it('keeps a fresh worktree with a live remote branch and unmerged head', async () => {
     const { repoRoot: root } = setup();
     const wtName = `${basename(root)}-factory-ship-it-7`;

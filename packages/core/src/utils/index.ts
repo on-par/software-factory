@@ -259,8 +259,26 @@ export function slugify(s: string): string {
     .replace(/-$/, '');
 }
 
+/** Prefix of factory branches created before the default became `factory` (#1714). Still recognized, never created. */
+export const LEGACY_BRANCH_PREFIX = 'ship-it';
+
 export function branchPrefixSlug(prefix?: string): string {
-  return slugify(prefix || 'ship-it') || 'ship-it';
+  return slugify(prefix || LEGACY_BRANCH_PREFIX) || LEGACY_BRANCH_PREFIX;
+}
+
+/** Prefixes recognized as factory branches: the resolved slug first, then the legacy one, deduped. */
+export function factoryBranchPrefixes(prefix?: string): string[] {
+  const resolved = branchPrefixSlug(prefix);
+  return resolved === LEGACY_BRANCH_PREFIX ? [resolved] : [resolved, LEGACY_BRANCH_PREFIX];
+}
+
+/** Issue number of a `<prefix>/<n>-…` factory branch on any recognized prefix; null otherwise. */
+export function factoryBranchIssue(branch: string, prefix?: string): number | null {
+  for (const p of factoryBranchPrefixes(prefix)) {
+    const match = new RegExp(`^${p}/(\\d+)-`).exec(branch); // slugs are [a-z0-9-] only
+    if (match) return Number(match[1]);
+  }
+  return null;
 }
 
 export function branchFor(issue: number, title: string, prefix?: string): string {

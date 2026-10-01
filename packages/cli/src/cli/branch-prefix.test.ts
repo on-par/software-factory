@@ -1,7 +1,11 @@
 import { Command } from 'commander';
 import { branchFor } from '@on-par/factory-core/internal';
 import { describe, expect, it } from 'vitest';
-import { addBranchPrefixOption, resolveBranchPrefixOption } from './branch-prefix.js';
+import {
+  BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION,
+  addBranchPrefixOption,
+  resolveBranchPrefixOption,
+} from './branch-prefix.js';
 
 describe('resolveBranchPrefixOption', () => {
   it('defaults to factory when the flag is omitted', () => {
@@ -37,5 +41,11 @@ describe('addBranchPrefixOption', () => {
     const cmd = addBranchPrefixOption(new Command('x'));
     cmd.parse([], { from: 'user' });
     expect(cmd.opts().branchPrefix).toBeUndefined();
+  });
+});
+
+describe('BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION', () => {
+  it('tells the user legacy ship-it/ branches are included', () => {
+    expect(BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION).toContain('ship-it/');
   });
 });
