@@ -1,7 +1,9 @@
+import type { QueueSnapshot } from '@on-par/factory-core';
 import { Box, Text } from 'ink';
 import type { JSX } from 'react';
 
 import { type DashboardState, type LaneGroup, type LaneState, mergeTrainPosition } from '../dashboard.js';
+import { laneQueueRows } from '../lane-queue.js';
 import { sanitizeTerminalText } from '../text.js';
 import { staleLanesLine } from './Dashboard.js';
 import { LaneRow } from './LaneRow.js';
@@ -9,6 +11,12 @@ import { summarizeLane } from './LaneList.js';
 import { StopBanner } from './StopBanner.js';
 
 const MERGED_COLLAPSE_THRESHOLD = 3;
+const TITLE_MAX_LENGTH = 32;
+
+function truncate(s: string, max: number): string {
+  const clean = sanitizeTerminalText(s);
+  return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
+}
 
 export interface LaneViewRows {
   rows: LaneState[];
@@ -40,6 +48,8 @@ export interface LaneViewProps {
   canGoBack: boolean;
   stopReason?: string;
   staleCount?: number;
+  /** The polled queue; absent when the App has no queue reader. */
+  queue?: QueueSnapshot;
 }
 
 export function LaneView({
@@ -51,9 +61,11 @@ export function LaneView({
   canGoBack,
   stopReason,
   staleCount = 0,
+  queue,
 }: LaneViewProps): JSX.Element {
   const s = summarizeLane(group, now);
   const { rows, collapsed } = collapseMerged(group.issues, mergedExpanded);
+  const q = queue !== undefined ? laneQueueRows(group.lane, queue, group.issues) : undefined;
   return (
     <Box flexDirection="column">
       <Text bold color="cyan">
@@ -75,7 +87,23 @@ export function LaneView({
           selected={i === selectedIndex}
           now={now}
           trainPosition={mergeTrainPosition(state, issue.issue)}
+          showReason
         />
+      ))}
+      {q?.unavailable !== undefined && (
+        <Text color="red">
+          {'  '}queue unavailable ({sanitizeTerminalText(q.unavailable)})
+        </Text>
+      )}
+      {q?.rows.map((row) => (
+        <Box key={`queue-${row.issue}`}>
+          <Text>{'  '}</Text>
+          {row.kind === 'queued' ? <Text dimColor>queued ({row.position})</Text> : <Text color="yellow">parked</Text>}
+          <Text>
+            {' '}
+            <Text bold>#{row.issue}</Text> {truncate(row.title ?? '', TITLE_MAX_LENGTH)}
+          </Text>
+        </Box>
       ))}
       {staleCount > 0 && <Text dimColor>{staleLanesLine(staleCount)}</Text>}
       <Text dimColor>{`↑/↓ select · ⏎ issue detail · m merged · ${canGoBack ? 'esc lanes · ' : ''}q quit`}</Text>

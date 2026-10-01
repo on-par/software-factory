@@ -516,6 +516,7 @@ export function App({
         canGoBack={!singleLane}
         stopReason={stopReason}
         staleCount={staleCount}
+        queue={queueReader ? queueSnap : undefined}
       />
     );
   }

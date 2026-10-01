@@ -1,4 +1,4 @@
-import type { EventKind, FactoryEvent } from '@on-par/factory-core';
+import type { EventKind, FactoryEvent, QueueSnapshot } from '@on-par/factory-core';
 import { cleanup, render } from 'ink-testing-library';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -61,5 +61,54 @@ describe('LaneView', () => {
   it('shows esc lanes only when it can go back', () => {
     expect(view(true)).toContain('esc lanes');
     expect(view(false)).not.toContain('esc lanes');
+  });
+});
+
+describe('LaneView queue rows (#1744)', () => {
+  const state = [ev('plan', '20'), { ...ev('escalate', '21'), msg: 'needs a human' }].reduce(
+    reduceDashboard,
+    initialDashboard(),
+  );
+  const group = lanesOf(state)[0];
+  const frameFor = (queue?: QueueSnapshot) =>
+    render(
+      <LaneView
+        group={group}
+        state={state}
+        selectedIndex={0}
+        mergedExpanded={false}
+        now={NOW}
+        canGoBack
+        queue={queue}
+      />,
+    ).lastFrame() ?? '';
+
+  it('lists queued issues in order, once, and parked ones', () => {
+    const frame = frameFor({
+      entries: [
+        { lane: 'prefix', issue: 30, title: 'first', status: 'queued' },
+        { lane: 'prefix', issue: 20, status: 'queued' },
+        { lane: 'prefix', issue: 31, status: 'queued' },
+        { lane: 'prefix', issue: 32, status: 'parked' },
+      ],
+    });
+    expect(frame.indexOf('queued (1)')).toBeGreaterThan(-1);
+    expect(frame).toMatch(/queued \(1\) #30[\s\S]*queued \(2\) #31/);
+    expect(frame).toMatch(/parked #32/);
+    expect(frame.split('#20').length - 1).toBe(1);
+  });
+
+  it('shows the reason of an event-log parked row', () => {
+    expect(frameFor()).toContain('needs a human');
+  });
+
+  it('shows one unavailable line instead of stale entries', () => {
+    const frame = frameFor({ entries: [{ lane: 'prefix', issue: 30 }], error: 'boom' });
+    expect(frame).toContain('queue unavailable (boom)');
+    expect(frame).not.toContain('queued (');
+  });
+
+  it('renders no queue lines without a queue prop', () => {
+    expect(frameFor()).not.toContain('queue');
   });
 });

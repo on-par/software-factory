@@ -60,9 +60,12 @@ export interface LaneRowProps {
   selected: boolean;
   now: number;
   trainPosition?: number;
+  /** Lane view only: append the park reason of a parked row. */
+  showReason?: boolean;
 }
 
-export function LaneRow({ lane, selected, now, trainPosition }: LaneRowProps): JSX.Element {
+export function LaneRow({ lane, selected, now, trainPosition, showReason }: LaneRowProps): JSX.Element {
+  const reason = showReason && lane.status === 'parked' ? (lane.failureEvidence?.reason ?? lane.failReason) : undefined;
   return (
     <Box>
       <Text color={selected ? 'cyan' : undefined}>{selected ? '❯ ' : '  '}</Text>
@@ -72,6 +75,7 @@ export function LaneRow({ lane, selected, now, trainPosition }: LaneRowProps): J
         <Text bold>#{lane.issue}</Text> {truncate(lane.title ?? '', TITLE_MAX_LENGTH)}{' '}
         <Text dimColor>{lane.run.model ?? '?'}</Text> {formatDuration(laneElapsedMs(lane, now))}
       </Text>
+      {reason !== undefined && <Text dimColor> — {truncate(reason, TITLE_MAX_LENGTH)}</Text>}
     </Box>
   );
 }
