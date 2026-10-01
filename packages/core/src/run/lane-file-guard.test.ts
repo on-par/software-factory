@@ -139,7 +139,7 @@ describe('LaneFileGuard', () => {
     await expect(guard.release('acme/repo', 999)).resolves.toBeUndefined();
   });
 
-  it('releaseIssue removes that issue's claims across repos and leaves others alone', async () => {
+  it('releaseIssue removes the issue claims across repos and leaves others alone', async () => {
     const guard = new LaneFileGuard(await tmpFile());
     await guard.register('acme/repo', 100, ['src/a.ts']);
     await guard.register('other/repo', 100, ['src/b.ts']);
