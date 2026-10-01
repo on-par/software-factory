@@ -492,7 +492,7 @@ export function resolveEffectiveConfig(
     localOnly: resolveLocalOnly(env),
     allowExperimental: resolveExperimental(env),
     codexDisabled: resolveCodexDisabled(repo, env),
-    branchPrefix: resolveBranchPrefix(env),
+    branchPrefix: resolveBranchPrefix(),
   };
 }
 
@@ -771,9 +771,7 @@ export function describeEffectiveConfig(opts: DescribeEffectiveConfigOpts): stri
   lines.push(
     `Experimental models: ${effective.allowExperimental ? 'on' : 'off'} ${sourceLabel(env.FACTORY_EXPERIMENTAL !== undefined ? 'env' : 'default', repoConfigPath, 'FACTORY_EXPERIMENTAL')}`,
   );
-  lines.push(
-    `Branch prefix: ${effective.branchPrefix} ${sourceLabel(env.FACTORY_BRANCH_PREFIX !== undefined ? 'env' : 'default', repoConfigPath, 'FACTORY_BRANCH_PREFIX')}`,
-  );
+  lines.push(`Branch prefix: ${effective.branchPrefix} ${sourceLabel('default', repoConfigPath, '')}`);
 
   const usage = resolveUsageCap(repo, env);
   lines.push(`Usage cap: $${usage.cap} ${sourceLabel(usage.source, repoConfigPath, 'FACTORY_USAGE_CAP')}`);

@@ -492,9 +492,9 @@ export function resolveExperimental(env: NodeJS.ProcessEnv = process.env): boole
 }
 
 /** Branch-name prefix shared by ship, land, and ingest so they agree on which
- *  factory branches/worktrees belong to this run (FACTORY_BRANCH_PREFIX). */
-export function resolveBranchPrefix(env: NodeJS.ProcessEnv = process.env): string {
-  return env.FACTORY_BRANCH_PREFIX || 'ship-it';
+ *  factory branches/worktrees belong to this run. */
+export function resolveBranchPrefix(): string {
+  return 'factory';
 }
 
 /** Grace period (ms) between SIGTERM and SIGKILL when sweeping a lane's
