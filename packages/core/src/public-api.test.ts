@@ -311,6 +311,11 @@ const PUBLIC_API_KEYS = [
 ];
 
 const INTERNAL_API_KEYS = [
+  // Readiness deep check (#1732)
+  'buildDecompositionPrompt',
+  'parseDecompositionOutput',
+  'buildReadinessGapPrompt',
+  'parseReadinessGapOutput',
   // Worktree location (#1758)
   'ensureWorktreeParentExcluded',
   'formatWorktreeLocation',
