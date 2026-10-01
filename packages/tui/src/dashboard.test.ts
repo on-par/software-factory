@@ -7,6 +7,7 @@ import {
   isLaneEvent,
   isNonTerminalLane,
   laneElapsedMs,
+  lanesOf,
   legacyFailurePointerFor,
   mergeTrainPosition,
   partitionLanesByActivity,
@@ -420,5 +421,49 @@ describe('partitionLanesByActivity (#1369)', () => {
     const { active, staleCount } = partitionLanesByActivity(lanes, { now, heartbeats, staleThresholdMs: threshold });
     expect(active.map((l) => l.issue)).toEqual(['20', '22', '23']);
     expect(staleCount).toBe(1);
+  });
+});
+
+function laned(type: EventKind, issue: string, lane?: string): FactoryEvent {
+  return lane ? { ...ev(type, issue, type), lane } : ev(type, issue, type);
+}
+
+describe('reduceDashboard — lane field (#1736)', () => {
+  it('records the lane from the event', () => {
+    const s = reduceDashboard(initialDashboard(), laned('plan', '1', 'prefix'));
+    expect(s.lanes[0].lane).toBe('prefix');
+  });
+
+  it("defaults to 'default' when no event carries a lane", () => {
+    const s = reduceDashboard(initialDashboard(), laned('plan', '1'));
+    expect(s.lanes[0].lane).toBe('default');
+  });
+
+  it('adopts a later lane and keeps it across un-laned events', () => {
+    let s = reduceDashboard(initialDashboard(), laned('plan', '1'));
+    s = reduceDashboard(s, laned('build', '1', 'docs'));
+    s = reduceDashboard(s, laned('check', '1'));
+    expect(s.lanes[0].lane).toBe('docs');
+  });
+});
+
+describe('lanesOf (#1736)', () => {
+  it('groups rows by lane in first-seen order', () => {
+    const events = [
+      laned('plan', '1706', 'prefix'),
+      laned('plan', '1720', 'docs'),
+      laned('plan', '1707', 'prefix'),
+      laned('plan', '1721', 'docs'),
+      laned('plan', '1708', 'prefix'),
+    ];
+    const groups = lanesOf(events.reduce(reduceDashboard, initialDashboard()));
+    expect(groups.map((g) => ({ lane: g.lane, issues: g.issues.map((r) => r.issue) }))).toEqual([
+      { lane: 'prefix', issues: ['1706', '1707', '1708'] },
+      { lane: 'docs', issues: ['1720', '1721'] },
+    ]);
+  });
+
+  it('returns [] for an empty state', () => {
+    expect(lanesOf(initialDashboard())).toEqual([]);
   });
 });

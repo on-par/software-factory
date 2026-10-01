@@ -14,6 +14,8 @@ export interface LaneFailureEvidence {
 
 export interface LaneState {
   issue: string;
+  /** Queue lane this issue ran in, from `FactoryEvent.lane`; 'default' when no event carried one (#1736). */
+  lane: string;
   title?: string;
   run: RunState;
   status: LaneStatus;
@@ -43,12 +45,37 @@ export function initialDashboard(): DashboardState {
   return { lanes: [], runDone: false };
 }
 
+export interface LaneGroup {
+  lane: string;
+  issues: LaneState[];
+}
+
+/** Groups issue rows by their queue lane, lanes and rows both in first-seen order (#1736). */
+export function lanesOf(state: DashboardState): LaneGroup[] {
+  const groups = new Map<string, LaneState[]>();
+  for (const row of state.lanes) {
+    const g = groups.get(row.lane);
+    if (g) g.push(row);
+    else groups.set(row.lane, [row]);
+  }
+  return [...groups].map(([lane, issues]) => ({ lane, issues }));
+}
+
 export function isLaneEvent(e: FactoryEvent): boolean {
   return /^\d+$/.test(e.issue);
 }
 
+const DEFAULT_LANE = 'default';
+
 function newLane(e: FactoryEvent): LaneState {
-  return { issue: e.issue, run: initialState(), status: 'running', startedAt: e.ts, lastEventAt: e.ts };
+  return {
+    issue: e.issue,
+    lane: e.lane ?? DEFAULT_LANE,
+    run: initialState(),
+    status: 'running',
+    startedAt: e.ts,
+    lastEventAt: e.ts,
+  };
 }
 
 /** Lane statuses that mean "this lane is still doing something"; only these can go stale. */
@@ -77,7 +104,12 @@ export function reduceDashboard(state: DashboardState, e: FactoryEvent): Dashboa
   const prevLane = idx === -1 ? newLane(e) : base.lanes[idx];
   const prevStatus = prevLane.status;
 
-  let lane: LaneState = { ...prevLane, run: reduceEvent(prevLane.run, e), lastEventAt: e.ts };
+  let lane: LaneState = {
+    ...prevLane,
+    lane: e.lane ?? prevLane.lane,
+    run: reduceEvent(prevLane.run, e),
+    lastEventAt: e.ts,
+  };
 
   if (laneStatusOf(e.type) === 'running' && prevStatus !== 'running') {
     lane = {

@@ -186,7 +186,7 @@ describe('App', () => {
     await flush();
 
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('2 lane(s)');
+    expect(frame).toContain('1 lane · 2 issues');
     expect(frame).toContain('#296');
     expect(frame).toContain('#301');
   });
@@ -214,7 +214,7 @@ describe('App', () => {
     await flush();
 
     const dashboardFrame = lastFrame() ?? '';
-    expect(dashboardFrame).toContain('2 lane(s)');
+    expect(dashboardFrame).toContain('1 lane · 2 issues');
   });
 
   it('stops following when the user presses q from the dashboard or detail view', async () => {
@@ -487,7 +487,7 @@ describe('App', () => {
 
     stdin.write('1'); // back to Dashboard tab
     await flush();
-    expect(lastFrame()).toContain('2 lane(s)');
+    expect(lastFrame()).toContain('1 lane · 2 issues');
   });
 
   it('resets a stale dashboard drill-down when leaving and returning to the Dashboard tab', async () => {
@@ -510,7 +510,7 @@ describe('App', () => {
     await flush();
 
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('2 lane(s)');
+    expect(frame).toContain('1 lane · 2 issues');
     expect(frame).not.toContain('esc back · q quit');
   });
 });

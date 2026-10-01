@@ -1,7 +1,7 @@
 import { Box, Text } from 'ink';
 import type { JSX } from 'react';
 
-import { type DashboardState, mergeTrainPosition } from '../dashboard.js';
+import { type DashboardState, lanesOf, mergeTrainPosition } from '../dashboard.js';
 import { LaneRow } from './LaneRow.js';
 import { StopBanner } from './StopBanner.js';
 
@@ -13,6 +13,14 @@ export interface DashboardProps {
   stopReason?: string;
   /** Lanes hidden as stale by partitionLanesByActivity; rendered as a one-line footer when > 0. */
   staleCount?: number;
+}
+
+/** Header counts: distinct lanes, plus the issue count when it differs (#1736). */
+export function laneCountsLine(state: DashboardState): string {
+  const lanes = lanesOf(state).length;
+  const issues = state.lanes.length;
+  const laneText = `${lanes} lane${lanes === 1 ? '' : 's'}`;
+  return issues === lanes ? laneText : `${laneText} · ${issues} issue${issues === 1 ? '' : 's'}`;
 }
 
 export function staleLanesLine(staleCount: number): string {
@@ -27,7 +35,7 @@ export function Dashboard({
   stopReason,
   staleCount = 0,
 }: DashboardProps): JSX.Element {
-  const headerText = `Factory —${repo ? ` ${repo} ·` : ''} ${state.lanes.length} lane(s)`;
+  const headerText = `Factory —${repo ? ` ${repo} ·` : ''} ${laneCountsLine(state)}`;
 
   return (
     <Box flexDirection="column">
