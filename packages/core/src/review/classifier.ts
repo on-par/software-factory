@@ -109,8 +109,9 @@ export function classifierPolicyVersion(rules: ReviewFloorRuleSet): string {
 export function changedPathsFromDiff(diff: string): string[] {
   const paths = new Set<string>();
   for (const line of diff.split('\n')) {
-    const m = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
-    if (m) paths.add(m[2]);
+    if (!line.startsWith('diff --git a/')) continue;
+    const at = line.lastIndexOf(' b/');
+    if (at > 0) paths.add(line.slice(at + 3));
   }
   return [...paths].sort();
 }
