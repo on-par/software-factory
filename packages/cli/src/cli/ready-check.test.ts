@@ -1,6 +1,12 @@
 import { scoreIssueReadiness } from '@on-par/factory-core';
 import { describe, expect, it, vi } from 'vitest';
-import { DeepCheckError, buildIssueCheckReport, formatIssueCheckLines, runIssueCheck } from './ready-check.js';
+import {
+  DeepCheckError,
+  createDeepModelRunner,
+  buildIssueCheckReport,
+  formatIssueCheckLines,
+  runIssueCheck,
+} from './ready-check.js';
 
 const body = (criteria: number, opts: { verification?: boolean } = {}) => `### Problem statement
 
@@ -331,5 +337,28 @@ describe('runIssueCheck --deep', () => {
     await runIssueCheck(7, { json: true }, { ...b.d, runModel });
     expect(JSON.parse(b.lines[0])).not.toHaveProperty('deep');
     expect(runModel).not.toHaveBeenCalled();
+  });
+});
+
+describe('createDeepModelRunner', () => {
+  it('returns the model, output, and the cost captured by the sink', async () => {
+    let sink: (e: { cost: number | null }) => void = () => {};
+    const router = {
+      setCostSink: (s: typeof sink) => {
+        sink = s;
+      },
+      run: vi.fn(async () => {
+        sink({ cost: 0.5 });
+        return { model: 'm9', output: 'out' };
+      }),
+    };
+    const run = createDeepModelRunner(router, '/repo');
+    expect(await run('triage', 'p')).toEqual({ model: 'm9', output: 'out', cost: 0.5 });
+    expect(router.run).toHaveBeenCalledWith('triage', 'p', { worktree: '/repo', timeoutSeconds: 600 });
+  });
+
+  it('reports a null cost when the sink never fires', async () => {
+    const router = { setCostSink: () => {}, run: async () => ({ model: 'm', output: 'o' }) };
+    expect((await createDeepModelRunner(router, '/r')('decompose', 'p')).cost).toBeNull();
   });
 });

@@ -278,7 +278,7 @@ import { cmdLogs } from './logs.js';
 import { applyHelpGroups } from './help-groups.js';
 import { mergeScopeNotice } from './merge-scope.js';
 import { createFactoryOctokit } from './octokit.js';
-import { DeepCheckError, runIssueCheck, type DeepCheckModelRunner } from './ready-check.js';
+import { DeepCheckError, createDeepModelRunner, runIssueCheck, type DeepCheckModelRunner } from './ready-check.js';
 import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
 import { readRunFlagOverrides, writeRunFlagOverrides } from './run-flags.js';
 import { distFreshnessProbe, runStalenessGuard } from './staleness.js';
@@ -874,15 +874,7 @@ async function cmdCheck(issueRaw: string, opts: { json?: boolean; deep?: boolean
       effective.allowExperimental,
       effective.localOnly,
     );
-    let lastCost: number | null = null;
-    router.setCostSink((entry) => {
-      lastCost = entry.cost;
-    });
-    runModel = async (task, prompt) => {
-      lastCost = null;
-      const r = await router.run(task, prompt, { worktree: repoRoot, timeoutSeconds: 600 });
-      return { model: r.model, output: r.output, cost: lastCost };
-    };
+    runModel = createDeepModelRunner(router, repoRoot);
   }
   let report;
   try {

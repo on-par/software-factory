@@ -35,6 +35,29 @@ export type IssueDeepCheck =
   | { kind: 'split'; model: string; cost: number | null; unpriced: boolean; children: DeepSplitChild[] }
   | { kind: 'gaps'; model: string; cost: number | null; unpriced: boolean; gaps: ReadinessGapReport };
 
+/** Minimal router surface the deep check needs (a ModelRouter satisfies it). */
+export interface DeepCheckRouter {
+  setCostSink(sink: (entry: { cost: number | null }) => void): void;
+  run(
+    task: string,
+    prompt: string,
+    opts: { worktree: string; timeoutSeconds: number },
+  ): Promise<{ model: string; output: string }>;
+}
+
+/** Backs `--deep` with a router; captures the call's cost without writing costs.jsonl. */
+export function createDeepModelRunner(router: DeepCheckRouter, worktree: string): DeepCheckModelRunner {
+  let lastCost: number | null = null;
+  router.setCostSink((entry) => {
+    lastCost = entry.cost;
+  });
+  return async (task, prompt) => {
+    lastCost = null;
+    const r = await router.run(task, prompt, { worktree, timeoutSeconds: 600 });
+    return { model: r.model, output: r.output, cost: lastCost };
+  };
+}
+
 export class DeepCheckError extends Error {
   constructor(message: string) {
     super(message);
