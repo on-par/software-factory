@@ -2787,6 +2787,20 @@ bash scripts/verify.sh
       expect(withGitLock).not.toHaveBeenCalled();
     });
 
+    it('runs the dirty probe through exec and keeps a dirty worktree (#1789)', async () => {
+      const wt = join(h.repoRoot, '..', 'wt-777');
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('worktree list')) return `worktree ${wt}\nHEAD abc\nbranch refs/heads/ship-it/777-x\n`;
+        if (cmd.includes('git status')) return ' M a.ts\n';
+        return '';
+      };
+      const res = await runMain('reset', '777', '--dry-run');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain(`would keep worktree ${wt} (uncommitted changes; pass --force to remove)`);
+      expect(logged()).not.toContain('would remove worktree');
+    });
+
     it('exits 2 on a non-numeric issue', async () => {
       const res = await runMain('reset', 'abc');
       expect(res).toEqual({ exited: true, code: 2 });

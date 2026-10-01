@@ -15,6 +15,7 @@ import {
   zeroFill,
 } from './worktree-gc.js';
 import type { SweepDeps } from './worktree-gc.js';
+import { countUnpushedCommits, isWorktreeClean } from './worktree-gc.js';
 
 describe('parseWorktreeList', () => {
   it('parses main, branch, and detached worktree entries', () => {
@@ -2401,5 +2402,32 @@ describe('formatGcReport', () => {
     expect(text).toContain(
       '/repo/foo-factory-ship-it-3 (ship-it/3-x) — issue #3: decomposed parent has uncommitted changes',
     );
+  });
+});
+
+describe('countUnpushedCommits / isWorktreeClean', () => {
+  it('parses the rev-list count', async () => {
+    expect(await countUnpushedCommits(async () => ({ stdout: '3\n', stderr: '' }), '/r', 'HEAD')).toBe(3);
+  });
+  it('returns null on failure or non-numeric output', async () => {
+    expect(
+      await countUnpushedCommits(
+        async () => {
+          throw new Error('x');
+        },
+        '/r',
+        'HEAD',
+      ),
+    ).toBeNull();
+    expect(await countUnpushedCommits(async () => ({ stdout: 'nope', stderr: '' }), '/r', 'HEAD')).toBeNull();
+  });
+  it('isWorktreeClean: true on empty porcelain, false on rejection or output', async () => {
+    expect(await isWorktreeClean(async () => ({ stdout: '', stderr: '' }), '/w')).toBe(true);
+    expect(await isWorktreeClean(async () => ({ stdout: ' M a', stderr: '' }), '/w')).toBe(false);
+    expect(
+      await isWorktreeClean(async () => {
+        throw new Error('x');
+      }, '/w'),
+    ).toBe(false);
   });
 });

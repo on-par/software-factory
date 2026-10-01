@@ -47,6 +47,7 @@ function makeDeps(state: string, over: Partial<ResetDeps> = {}) {
       laneFiles: join(state, 'lane-files.json'),
     },
     git: async (cmd) => sh(cmd),
+    runCommand: async (cmd, o) => ({ stdout: sh(cmd, o?.cwd ?? repo) }),
     removeWorktree: async (p) => {
       sh(`git worktree remove --force '${p}'`);
       sh('git worktree prune');
@@ -70,8 +71,10 @@ beforeEach(() => {
   repo = join(root, 'repo');
   mkdirSync(repo);
   sh(
-    'git init -q -b main && git config user.email t@t && git config user.name t && git commit -q --allow-empty -m init',
+    'git init -q -b main && git config user.email t@t && git config user.name t && echo x > a.txt && git add a.txt && git commit -q -m init',
   );
+  sh(`git init -q --bare '${join(root, 'origin.git')}'`);
+  sh(`git remote add origin '${join(root, 'origin.git')}' && git push -q origin main`);
   wt192 = join(root, 'wt-192');
   sh(`git worktree add -q -b ship-it/192-some-title '${wt192}'`);
   sh('git branch factory/193-other');
@@ -348,3 +351,81 @@ describe('formatResetLine', () => {
 function readdirSafe(dir: string): string[] {
   return existsSync(dir) ? execSync(`ls '${dir}'`, { encoding: 'utf-8' }).split('\n').filter(Boolean) : [];
 }
+
+describe('runReset safety (#1789)', () => {
+  it('keeps a dirty worktree and its branch, still removes other state', async () => {
+    const state = seedState();
+    writeFileSync(join(wt192, 'a.txt'), 'changed');
+    const { deps, releaseLease } = makeDeps(state);
+    const [line] = await runReset([192], deps);
+    expect(existsSync(wt192)).toBe(true);
+    expect(sh('git branch --list ship-it/192-some-title')).not.toBe('');
+    expect(existsSync(join(state, 'plans', 'issue-192.md'))).toBe(false);
+    expect(existsSync(join(state, 'logs', 'issue-192'))).toBe(false);
+    expect(releaseLease).not.toHaveBeenCalled();
+    expect(line).toContain(`kept worktree ${wt192} (uncommitted changes; pass --force to remove)`);
+  });
+
+  it('keeps a worktree with unpushed commits', async () => {
+    const state = seedState();
+    sh('git commit -q --allow-empty -m wip', wt192);
+    const { deps } = makeDeps(state);
+    const [line] = await runReset([192], deps);
+    expect(existsSync(wt192)).toBe(true);
+    expect(sh('git branch --list ship-it/192-some-title')).not.toBe('');
+    expect(line).toContain('1 unpushed commit(s); pass --force to remove');
+    expect(existsSync(join(state, 'plans', 'issue-192.md'))).toBe(false);
+  });
+
+  it('keeps an unpushed branch that has no worktree', async () => {
+    const state = seedState();
+    const extra = join(root, 'wt-extra');
+    sh(`git worktree add -q -b ship-it/192-extra '${extra}'`);
+    sh('git commit -q --allow-empty -m extra', extra);
+    sh(`git worktree remove --force '${extra}'`);
+    const { deps } = makeDeps(state);
+    const [line] = await runReset([192], deps);
+    expect(line).toContain('branch ship-it/192-extra (1 unpushed commit(s); pass --force to remove)');
+    expect(sh('git branch --list ship-it/192-extra')).not.toBe('');
+  });
+
+  it('keeps a worktree whose HEAD is unresolvable as unverifiable', async () => {
+    const state = seedState();
+    const { deps } = makeDeps(state, {
+      runCommand: async () => {
+        throw new Error('boom');
+      },
+    });
+    const [line] = await runReset([192], deps);
+    expect(line).toContain('(uncommitted changes; pass --force to remove)');
+  });
+
+  it('--force removes dirty and unpushed worktrees and branches', async () => {
+    const state = seedState();
+    sh('git commit -q --allow-empty -m wip', wt192);
+    writeFileSync(join(wt192, 'a.txt'), 'changed');
+    const { deps } = makeDeps(state, { force: true });
+    const [line] = await runReset([192], deps);
+    expect(existsSync(wt192)).toBe(false);
+    expect(sh('git branch --list ship-it/192-some-title')).toBe('');
+    expect(line).not.toContain('kept worktree');
+  });
+
+  it('--dry-run reports would-keep for a dirty worktree', async () => {
+    const state = seedState();
+    writeFileSync(join(wt192, 'a.txt'), 'changed');
+    const { deps } = makeDeps(state, { dryRun: true });
+    const [line] = await runReset([192], deps);
+    expect(line).toContain(`would keep worktree ${wt192} (uncommitted changes`);
+    expect(existsSync(wt192)).toBe(true);
+  });
+
+  it('keeps when the unpushed count cannot be parsed', async () => {
+    const state = seedState();
+    const { deps } = makeDeps(state, {
+      runCommand: async (cmd, o) => ({ stdout: cmd.includes('rev-list') ? 'nope' : sh(cmd, o?.cwd ?? repo) }),
+    });
+    const [line] = await runReset([192], deps);
+    expect(line).toContain('could not verify it is pushed; pass --force to remove');
+  });
+});

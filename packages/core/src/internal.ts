@@ -214,8 +214,10 @@ export type {
   WorktreeListEntry,
 } from './utils/worktree-gc.js';
 export {
+  countUnpushedCommits,
   findCredentialFiles,
   formatGcReport,
+  isWorktreeClean,
   parseWorktreeList,
   scrubFile,
   sweepWorktrees,

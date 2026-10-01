@@ -2593,7 +2593,10 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string; 
 }
 
 /** `factory reset <issue...>` (#1787): wipes an issue's local state; see reset.ts. */
-export async function cmdReset(issues: string[], opts: { branchPrefix?: string; dryRun?: boolean }): Promise<void> {
+export async function cmdReset(
+  issues: string[],
+  opts: { branchPrefix?: string; dryRun?: boolean; force?: boolean },
+): Promise<void> {
   let nums: number[];
   try {
     nums = parseResetIssues(issues);
@@ -2615,7 +2618,9 @@ export async function cmdReset(issues: string[], opts: { branchPrefix?: string; 
       removeWorktree: (p) => cleanupWorktree(repoRoot, p, log, sandbox),
       readLeases: () => readPortLeases(paths.ports),
       releaseLease: (id) => releasePortLease({ registryFile: paths.ports, lockDir: paths.portsLock, worktreeId: id }),
+      runCommand: (cmd, o) => exec(cmd, { cwd: o?.cwd ?? repoRoot }).then((r) => ({ stdout: r.stdout })),
       dryRun: opts.dryRun === true,
+      force: opts.force === true,
     });
   // A dry run takes no lock: the lock itself writes files.
   const lines = opts.dryRun ? await run() : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
@@ -5259,12 +5264,13 @@ export async function main() {
   program
     .command('reset <issue...>')
     .description(
-      "Remove an issue's local factory state (worktree, local branch, plan/phase files, rework history, logs, leases) so the next run starts fresh. Do not run while that issue's lane is active. Preview with --dry-run",
+      "Remove an issue's local factory state (worktree, local branch, plan/phase files, rework history, logs, leases) so the next run starts fresh. A worktree or branch with uncommitted changes or unpushed commits is kept unless --force is passed. Do not run while that issue's lane is active. Preview with --dry-run",
     )
     .option(
       '--dry-run',
       'List every worktree, branch, file, history entry, log dir, claim and lease that would be removed, without changing anything',
     )
+    .option('--force', 'Remove worktrees and branches even when they have uncommitted changes or unpushed commits')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
     .action(cmdReset);
 
