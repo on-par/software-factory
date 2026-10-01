@@ -1877,6 +1877,45 @@ async function maybeWriteBenchmarkArtifacts(opts: {
   }
 }
 
+/** The autoGcOnRun-gated worktree sweep every pipeline entry point runs before shipping
+ *  (`factory run`, and since #1756 the one-shot `factory ship` / `factory run-issue`). Never
+ *  throws — a GC failure is a warn, never a reason to abort the command. */
+async function runAutoWorktreeGc(
+  repoRoot: string,
+  paths: ReturnType<typeof getFactoryPaths>,
+  ghRepo: string,
+  eventScope: string | number,
+): Promise<void> {
+  try {
+    const factoryConfig = loadFactoryConfigForRepo(paths.config);
+    if (!factoryConfig.worktree.autoGcOnRun) return;
+    const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
+    const gcSandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
+    const report = await withGitLock(repoRoot, () =>
+      withFileLock(paths.gitLock, () =>
+        sweepWorktrees(
+          {
+            repoRoot,
+            ttlDays: factoryConfig.worktree.gcTtlDays,
+            repo: ghRepo,
+            branchPrefix: resolveBranchPrefix(),
+          },
+          { log: gcLog, octokit: getOctokit(), sandbox: gcSandbox },
+        ),
+      ),
+    );
+    logEvent(
+      paths.events,
+      'worktree-gc',
+      eventScope,
+      `removed ${report.removed.length} stale worktree(s), kept ${report.kept}`,
+    );
+    console.log(formatGcReport(report));
+  } catch (err: any) {
+    logEvent(paths.events, 'warn', eventScope, `worktree gc failed: ${err.message}`);
+  }
+}
+
 async function cmdShip(
   issueNum: number,
   opts: {
@@ -1906,6 +1945,14 @@ async function cmdShip(
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
 
   return withRepoRunLock(paths, 'factory ship', async () => {
+    let ghRepo: string | null = null;
+    try {
+      ghRepo = await getGitHubRepo();
+    } catch {
+      /* shipIssue reports repo resolution itself */
+    }
+    if (ghRepo) await runAutoWorktreeGc(repoRoot, paths, ghRepo, issueNum);
+
     const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
     if (hasUnresolvedPark(priorEvents, String(issueNum))) {
       logEvent(paths.events, 'human-restarted', issueNum, 'manual retry of a previously parked/failed run', {
@@ -1968,6 +2015,7 @@ async function cmdRunIssue(
       );
     }
     console.log(chalk.cyan(`one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
+    await runAutoWorktreeGc(repoRoot, paths, ghRepo, issueNum);
 
     const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
     if (hasUnresolvedPark(priorEvents, String(issueNum))) {
@@ -2994,34 +3042,7 @@ async function cmdRun(
       logEvent(paths.events, 'environment_warning', 'all', keychainErr);
       throw new Error(keychainErr);
     }
-    if (factoryConfig.worktree.autoGcOnRun) {
-      try {
-        const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
-        const gcSandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
-        const report = await withGitLock(repoRoot, () =>
-          withFileLock(paths.gitLock, () =>
-            sweepWorktrees(
-              {
-                repoRoot,
-                ttlDays: factoryConfig.worktree.gcTtlDays,
-                repo: ghRepo,
-                branchPrefix: resolveBranchPrefix(),
-              },
-              { log: gcLog, octokit: getOctokit(), sandbox: gcSandbox },
-            ),
-          ),
-        );
-        logEvent(
-          paths.events,
-          'worktree-gc',
-          'all',
-          `removed ${report.removed.length} stale worktree(s), kept ${report.kept}`,
-        );
-        console.log(formatGcReport(report));
-      } catch (err: any) {
-        logEvent(paths.events, 'warn', 'all', `worktree gc failed: ${err.message}`);
-      }
-    }
+    await runAutoWorktreeGc(repoRoot, paths, ghRepo, 'all');
 
     const { lanes, diagnostics } = await planRunLanes({
       localQueue: opts.localQueue === true,

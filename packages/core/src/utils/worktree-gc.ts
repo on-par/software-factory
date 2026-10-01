@@ -9,7 +9,7 @@ import { promisify } from 'node:util';
 import type { Octokit } from '@octokit/rest';
 
 import type { EventKind } from '../events/kinds.js';
-import { CLAIMED_BY_LABEL_PREFIX, PARKED_LABEL } from '../queue/github-queue.js';
+import { CLAIMED_BY_LABEL_PREFIX, DECOMPOSED_LABEL, PARKED_LABEL } from '../queue/github-queue.js';
 import { findStaleClaims } from '../queue/stale-claims.js';
 import { factoryBranchPrefixes, shellEscape } from './index.js';
 import { removeMicroVm, type WorktreeSandbox } from './microvm.js';
@@ -17,7 +17,14 @@ import { removeMicroVm, type WorktreeSandbox } from './microvm.js';
 const exec = promisify(execCb);
 
 export type GcReason =
-  'merged' | 'remote-gone' | 'ttl-expired' | 'issue-closed' | 'issue-parked' | 'issue-not-found' | 'no-active-claim';
+  | 'merged'
+  | 'remote-gone'
+  | 'ttl-expired'
+  | 'issue-closed'
+  | 'issue-parked'
+  | 'issue-decomposed'
+  | 'issue-not-found'
+  | 'no-active-claim';
 
 /** GitHub's verdict on a candidate branch's PR(s), read via pulls.list (state=all,
  *  head=owner:branch). `null` means "no verdict" (no client/repo, or the query failed) —
@@ -78,6 +85,15 @@ export interface NoActiveClaimCandidate {
   prState: 'merged' | 'closed';
 }
 
+/** A candidate GC would otherwise reap on hard issue evidence but kept to protect local work —
+ *  surfaced so the operator sees why it survived (#1756). */
+export interface GcHeldCandidate {
+  path: string;
+  branch: string | null;
+  issue: number;
+  why: string;
+}
+
 export interface GcReport {
   removed: GcCandidate[];
   kept: number;
@@ -99,6 +115,10 @@ export interface GcReport {
    *  GcReason/BRANCH_REAPABLE_REASONS. Always [] outside dry-run — real mode's equivalent signal
    *  shows up as a `removed` entry with `reason: 'no-active-claim'` instead. */
   noActiveClaim: NoActiveClaimCandidate[];
+  /** Decomposed-parent worktrees (`factory:decomposed`) kept because they are dirty, hold
+   *  unpushed commits, or could not be verified (#1756). Populated in dry-run and real mode;
+   *  every entry is also counted in `kept`. */
+  held: GcHeldCandidate[];
 }
 
 export interface SweepDeps {
@@ -354,7 +374,7 @@ async function resolvePrState(
 
 /** The owning issue's verdict on a lane worktree. `null` means "no verdict" (no client/repo,
  *  or the query failed) and must always fall back to the PR-state/local-evidence rules. */
-type IssueDisposition = 'reap-closed' | 'reap-parked' | 'keep';
+type IssueDisposition = 'reap-closed' | 'reap-parked' | 'reap-decomposed' | 'keep';
 
 /** The lane issue number a candidate belongs to: capture group 1 of the lane-branch shape
  *  `<prefix>/<n>-*`, falling back to a trailing `-<n>` in the directory basename (covers
@@ -382,6 +402,7 @@ async function resolveIssueDisposition(
     if (data.state === 'closed') return 'reap-closed';
     const labels = (data.labels ?? []).map((label) => (typeof label === 'string' ? label : (label?.name ?? '')));
     if (labels.includes(PARKED_LABEL)) return 'reap-parked';
+    if (labels.includes(DECOMPOSED_LABEL)) return 'reap-decomposed';
     return 'keep';
   } catch (err: any) {
     if (issueWarnDedup.record(issue)) {
@@ -511,6 +532,7 @@ export async function sweepWorktrees(
   issueWarnDedup.reconcile(activeIssueNumbers);
 
   const removed: GcCandidate[] = [];
+  const held: GcHeldCandidate[] = [];
   let kept = 0;
 
   const mainTip = candidates.length > 0 ? await resolveMainTip(runCommand, repoRoot) : null;
@@ -574,6 +596,7 @@ export async function sweepWorktrees(
 
     let reason: GcReason | null = null;
     let branchReapable = false;
+    let heldThisEntry = false;
     if (ageDays > ttlDays) {
       reason = 'ttl-expired';
     }
@@ -606,9 +629,44 @@ export async function sweepWorktrees(
                 })) !== null);
           }
         }
+      } else if (disposition === 'reap-decomposed' && issueNumber !== null) {
+        // Decomposed parent (#1756): reap only a clean, fully-pushed tree with no open PR. An open
+        // PR falls through to the chain below, which keeps it; anything else unsafe is held.
+        const hold = (why: string): void => {
+          heldThisEntry = true;
+          held.push({ path: entry.path, branch: entry.branch, issue: issueNumber, why });
+        };
+        const openDecomposedPr = entry.branch !== null && (await prStateFor(entry.branch)) === 'open';
+        if (!openDecomposedPr) {
+          if (!(await isWorktreeClean(runCommand, entry.path))) {
+            hold('decomposed parent has uncommitted changes');
+          } else if (entry.head === null) {
+            hold('decomposed parent HEAD could not be resolved');
+          } else {
+            const unpushed = await safeExec(
+              runCommand,
+              `git rev-list --count ${shellEscape(entry.head)} --not --remotes=origin`,
+              { cwd: repoRoot },
+            );
+            const unpushedCount = unpushed === null ? NaN : Number.parseInt(unpushed.stdout.trim(), 10);
+            if (!Number.isInteger(unpushedCount)) {
+              hold('could not verify decomposed parent is pushed');
+            } else if (unpushedCount > 0) {
+              hold(`decomposed parent has ${unpushedCount} unpushed commit(s)`);
+            } else {
+              const beyondBase = await safeExec(
+                runCommand,
+                `git rev-list --count origin/main..${shellEscape(entry.head)}`,
+                { cwd: repoRoot },
+              );
+              reason = 'issue-decomposed';
+              branchReapable = beyondBase !== null && beyondBase.stdout.trim() === '0';
+            }
+          }
+        }
       }
     }
-    if (!reason && entry.branch) {
+    if (!reason && entry.branch && !heldThisEntry) {
       const prState = await prStateFor(entry.branch);
       if (prState === 'open') {
         // A live PR is authoritative: the branch is still being worked on — never remove.
@@ -674,7 +732,7 @@ export async function sweepWorktrees(
     // never touched on a heuristic signal alone) and never overriding a live open PR — the same
     // "never remove" rule the hard-evidence tier above already applies to it.
     const openPr = entry.branch !== null && (await prStateFor(entry.branch)) === 'open';
-    if (!reason && !dryRun && !openPr && (await isWorktreeClean(runCommand, entry.path))) {
+    if (!reason && !heldThisEntry && !dryRun && !openPr && (await isWorktreeClean(runCommand, entry.path))) {
       const issueNumber = laneIssueNumber(entry, lanePattern);
       if (issueNumber !== null) {
         const existence = await issueExistenceFor(issueNumber);
@@ -737,7 +795,7 @@ export async function sweepWorktrees(
       }
     }
 
-    return { removed, kept, dryRun: true, issueNotFound, issueUnverifiable, noActiveClaim };
+    return { removed, kept, dryRun: true, issueNotFound, issueUnverifiable, noActiveClaim, held };
   }
 
   for (const candidate of removed) {
@@ -802,7 +860,7 @@ export async function sweepWorktrees(
 
   await deleteReapedBranches(removed, repoRoot, runCommand, log);
 
-  return { removed, kept, dryRun: false, issueNotFound: [], issueUnverifiable: [], noActiveClaim: [] };
+  return { removed, kept, dryRun: false, issueNotFound: [], issueUnverifiable: [], noActiveClaim: [], held };
 }
 
 async function deleteReapedBranches(
@@ -880,6 +938,13 @@ export function formatGcReport(report: GcReport): string {
     lines.push(`${report.noActiveClaim.length} worktree(s) flagged — merged/closed PR with no active claim:`);
     for (const c of report.noActiveClaim) {
       lines.push(`  ${c.path} (${c.branch ?? 'detached'}) — issue #${c.issue} ${c.prState}, no active claim`);
+    }
+  }
+
+  if (report.held.length > 0) {
+    lines.push(`${report.held.length} worktree(s) kept — decomposed parent with local work:`);
+    for (const c of report.held) {
+      lines.push(`  ${c.path} (${c.branch ?? 'detached'}) — issue #${c.issue}: ${c.why}`);
     }
   }
 

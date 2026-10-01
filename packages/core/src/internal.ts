@@ -200,6 +200,7 @@ export { readRunLockHolder, RunLockHeldError, withRunLock } from './utils/run-lo
 export type {
   GcCandidate,
   GcHeadPrState,
+  GcHeldCandidate,
   GcReason,
   GcReport,
   SweepDeps,
@@ -337,6 +338,7 @@ export {
   MAX_LABEL_NAME_LENGTH,
   parseClaimExpiresLabel,
   PARKED_LABEL,
+  DECOMPOSED_LABEL,
   planQueueMigration,
   QUEUED_LABEL,
   QUEUE_ORDER_LABEL_PREFIX,

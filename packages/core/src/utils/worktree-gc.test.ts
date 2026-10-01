@@ -2094,6 +2094,105 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       expect(issuesGet).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('issue-decomposed (#1756)', () => {
+    const DECOMPOSED_ISSUE = () => ({ data: { state: 'open', labels: [{ name: 'factory:decomposed' }] } });
+
+    function listing(root: string, wt: string, branch: string): string {
+      return `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/${branch}\n\n`;
+    }
+
+    /** `unpushed` / `beyondBase` answer the two rev-list probes; 'throw' makes a probe fail. */
+    function harness(opts: { unpushed?: string; beyondBase?: string; dirty?: boolean; openPr?: boolean }) {
+      const { repoRoot: root } = setup();
+      const wt = makeWorktree(`${basename(root)}-factory-ship-it-61`);
+      const { octokit } = fakeOctokit(
+        () => ({ data: opts.openPr ? [{ number: 5, state: 'open' }] : [] }),
+        DECOMPOSED_ISSUE,
+      );
+      const commands: string[] = [];
+      const runCommand = async (cmd: string) => {
+        commands.push(cmd);
+        if (cmd === 'git worktree list --porcelain') return { stdout: listing(root, wt, 'ship-it/61-big') };
+        if (cmd.startsWith('git status --porcelain')) return { stdout: opts.dirty ? ' M file\n' : '' };
+        if (cmd.includes('--not --remotes=origin')) {
+          if (opts.unpushed === 'throw') throw new Error('boom');
+          return { stdout: `${opts.unpushed ?? '0'}\n` };
+        }
+        if (cmd.includes('origin/main..')) return { stdout: `${opts.beyondBase ?? '0'}\n` };
+        return { stdout: '' };
+      };
+      const run = (dryRun = false) =>
+        sweepWorktrees({ repoRoot: root, ttlDays: 7, repo: 'owner/example-app', dryRun }, { runCommand, octokit });
+      return { run, commands, wt };
+    }
+
+    it('reaps a clean, pushed, no-PR decomposed parent and deletes its empty branch', async () => {
+      const h = harness({});
+      const report = await h.run();
+      expect(report.removed).toHaveLength(1);
+      expect(report.removed[0].reason).toBe('issue-decomposed');
+      expect(report.removed[0].branchDeleted).toBe(true);
+      expect(h.commands.some((c) => c.startsWith('git worktree remove --force'))).toBe(true);
+      expect(h.commands).toContain("git branch -D 'ship-it/61-big'");
+      expect(report.held).toEqual([]);
+    });
+
+    it('removes the worktree but keeps the branch when pushed commits go beyond base', async () => {
+      const h = harness({ beyondBase: '2' });
+      const report = await h.run();
+      expect(report.removed[0].reason).toBe('issue-decomposed');
+      expect(report.removed[0].branchDeleted).toBe(false);
+      expect(h.commands.some((c) => c.startsWith('git branch -D'))).toBe(false);
+    });
+
+    it('holds a dirty decomposed parent and says why', async () => {
+      const h = harness({ dirty: true });
+      const report = await h.run();
+      expect(report.removed).toEqual([]);
+      expect(report.kept).toBe(1);
+      expect(report.held[0].why).toContain('uncommitted changes');
+      expect(report.held[0].issue).toBe(61);
+      expect(h.commands.some((c) => c.startsWith('git worktree remove'))).toBe(false);
+    });
+
+    it('holds a decomposed parent with unpushed commits', async () => {
+      const h = harness({ unpushed: '3' });
+      const report = await h.run();
+      expect(report.removed).toEqual([]);
+      expect(report.kept).toBe(1);
+      expect(report.held[0].why).toContain('3 unpushed commit(s)');
+    });
+
+    it('keeps a decomposed parent with an open PR without listing it as held', async () => {
+      const h = harness({ openPr: true });
+      const report = await h.run();
+      expect(report.removed).toEqual([]);
+      expect(report.kept).toBe(1);
+      expect(report.held).toEqual([]);
+      expect(h.commands.some((c) => c.startsWith('git worktree remove'))).toBe(false);
+    });
+
+    it('holds when the pushed-ness probe fails', async () => {
+      const h = harness({ unpushed: 'throw' });
+      const report = await h.run();
+      expect(report.removed).toEqual([]);
+      expect(report.held[0].why).toContain('could not verify');
+    });
+
+    it('dry-run reports a reapable parent as removed and a dirty one as held, mutating nothing', async () => {
+      const clean = harness({});
+      const cleanReport = await clean.run(true);
+      expect(cleanReport.removed[0].reason).toBe('issue-decomposed');
+      expect(clean.commands.some((c) => c.startsWith('git worktree remove') || c.startsWith('git branch -D'))).toBe(
+        false,
+      );
+      const dirty = harness({ dirty: true });
+      const dirtyReport = await dirty.run(true);
+      expect(dirtyReport.removed).toEqual([]);
+      expect(dirtyReport.held).toHaveLength(1);
+    });
+  });
 });
 
 describe('formatGcReport', () => {
@@ -2115,6 +2214,7 @@ describe('formatGcReport', () => {
       issueNotFound: [],
       issueUnverifiable: [],
       noActiveClaim: [],
+      held: [],
     });
     expect(text).toContain('/repo/foo-factory-ship-it-1 (ship-it/1-x, 3d old) — merged');
     expect(text).toContain('would remove 1 worktree(s), kept 2');
@@ -2138,6 +2238,7 @@ describe('formatGcReport', () => {
       issueNotFound: [],
       issueUnverifiable: [],
       noActiveClaim: [],
+      held: [],
     });
     expect(text).toContain(
       '/repo/foo-factory-ship-it-2 (detached, 10d old) — ttl-expired, scrubbed 1 credential file(s)',
@@ -2163,6 +2264,7 @@ describe('formatGcReport', () => {
       issueNotFound: [],
       issueUnverifiable: [],
       noActiveClaim: [],
+      held: [],
     });
     expect(text).toContain('/repo/foo-factory-ship-it-3 (ship-it/3-x, 1d old) — merged, deleted branch ship-it/3-x');
   });
@@ -2185,6 +2287,7 @@ describe('formatGcReport', () => {
       issueNotFound: [],
       issueUnverifiable: [],
       noActiveClaim: [],
+      held: [],
     });
     expect(text).not.toContain('deleted branch');
   });
@@ -2197,6 +2300,7 @@ describe('formatGcReport', () => {
       issueNotFound: [{ path: '/repo/foo-factory-ship-it-5', branch: 'ship-it/5-x', issue: 5 }],
       issueUnverifiable: [{ path: '/repo/foo-factory-ship-it-6', branch: 'ship-it/6-x', issue: 6 }],
       noActiveClaim: [],
+      held: [],
     });
     expect(text).toContain('1 worktree(s) flagged — owning issue not found (404):');
     expect(text).toContain('  /repo/foo-factory-ship-it-5 (ship-it/5-x) — issue #5 not found');
@@ -2212,6 +2316,7 @@ describe('formatGcReport', () => {
       issueNotFound: [],
       issueUnverifiable: [],
       noActiveClaim: [{ path: '/repo/foo-factory-ship-it-7', branch: 'ship-it/7-x', issue: 7, prState: 'merged' }],
+      held: [],
     });
     expect(text).toContain('1 worktree(s) flagged — merged/closed PR with no active claim:');
     expect(text).toContain('  /repo/foo-factory-ship-it-7 (ship-it/7-x) — issue #7 merged, no active claim');
@@ -2245,10 +2350,34 @@ describe('formatGcReport', () => {
       issueNotFound: [],
       issueUnverifiable: [],
       noActiveClaim: [],
+      held: [],
     });
     expect(text).toContain(
       '/repo/foo-factory-ship-it-9 (ship-it/9-ghost, 2d old) — issue-not-found, quarantined to /repo/.factory/state/quarantine/foo-factory-ship-it-9',
     );
     expect(text).toContain('removed 1 worktree(s), quarantined 1, kept 1');
+  });
+
+  it('prints decomposed parents kept for local work', () => {
+    const text = formatGcReport({
+      dryRun: false,
+      kept: 1,
+      removed: [],
+      issueNotFound: [],
+      issueUnverifiable: [],
+      noActiveClaim: [],
+      held: [
+        {
+          path: '/repo/foo-factory-ship-it-3',
+          branch: 'ship-it/3-x',
+          issue: 3,
+          why: 'decomposed parent has uncommitted changes',
+        },
+      ],
+    });
+    expect(text).toContain('1 worktree(s) kept — decomposed parent with local work:');
+    expect(text).toContain(
+      '/repo/foo-factory-ship-it-3 (ship-it/3-x) — issue #3: decomposed parent has uncommitted changes',
+    );
   });
 });

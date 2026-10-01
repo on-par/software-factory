@@ -2917,6 +2917,23 @@ bash scripts/verify.sh
   });
 
   describe('ship (via cmdShip)', () => {
+    it('runs worktree gc before shipping when worktree.autoGcOnRun is true (#1756)', async () => {
+      h.factoryConfig = { ...h.factoryConfig, worktree: { gcTtlDays: 7, autoGcOnRun: true } };
+      const res = await runMain('ship', '5');
+      expect(res.exited).toBe(false);
+      expect(sweepWorktrees).toHaveBeenCalledWith(
+        expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7, repo: h.ghRepo }),
+        expect.objectContaining({ octokit: expect.anything() }),
+      );
+      expect(formatGcReport).toHaveBeenCalled();
+    });
+
+    it('does not run worktree gc when worktree.autoGcOnRun is false (#1756)', async () => {
+      const res = await runMain('ship', '5');
+      expect(res.exited).toBe(false);
+      expect(sweepWorktrees).not.toHaveBeenCalled();
+    });
+
     it('names the branch with the default factory prefix when --branch-prefix is omitted', async () => {
       const branches: string[] = [];
       h.setupWorktreeImpl = async (_r, branch) => {
@@ -3150,6 +3167,23 @@ bash scripts/verify.sh
   });
 
   describe('run-issue (one-shot)', () => {
+    it('runs worktree gc before shipping when worktree.autoGcOnRun is true (#1756)', async () => {
+      h.factoryConfig = { ...h.factoryConfig, worktree: { gcTtlDays: 7, autoGcOnRun: true } };
+      const res = await runMain('run-issue', '5');
+      expect(res.exited).toBe(false);
+      expect(sweepWorktrees).toHaveBeenCalledWith(
+        expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7, repo: h.ghRepo }),
+        expect.objectContaining({ octokit: expect.anything() }),
+      );
+      expect(formatGcReport).toHaveBeenCalled();
+    });
+
+    it('does not run worktree gc when worktree.autoGcOnRun is false (#1756)', async () => {
+      const res = await runMain('run-issue', '5');
+      expect(res.exited).toBe(false);
+      expect(sweepWorktrees).not.toHaveBeenCalled();
+    });
+
     it('--help lists --run-children with its one-line description (#1750)', async () => {
       const originalWrite = process.stdout.write;
       const written: string[] = [];

@@ -560,6 +560,7 @@ const INTERNAL_API_KEYS = [
   'MAX_LABEL_NAME_LENGTH',
   'parseClaimExpiresLabel',
   'PARKED_LABEL',
+  'DECOMPOSED_LABEL',
   'planQueueMigration',
   'QUEUED_LABEL',
   'QUEUE_ORDER_LABEL_PREFIX',
