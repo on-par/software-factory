@@ -25,7 +25,7 @@ export interface CriteriaReport {
 }
 
 const FENCE_RE = /^\s*(`{3,}|~{3,})/;
-const CHECKBOX_LINE_RE = /^ {0,3}[-*+]\s*\[[ xX]\]\s*(.*)$/;
+const CHECKBOX_LINE_RE = /^ {0,3}[-*+] *\[[ xX]\](.*)$/;
 const CONTINUATION_RE = /^\s+\S/;
 const LIST_ITEM_RE = /^\s*(?:[-*+]|\d+[.)])\s/;
 
