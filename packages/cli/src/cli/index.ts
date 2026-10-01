@@ -280,7 +280,7 @@ import { cmdLogs } from './logs.js';
 import { applyHelpGroups } from './help-groups.js';
 import { mergeScopeNotice } from './merge-scope.js';
 import { createFactoryOctokit } from './octokit.js';
-import { runIssueCheck } from './ready-check.js';
+import { DeepCheckError, createDeepModelRunner, runIssueCheck, type DeepCheckModelRunner } from './ready-check.js';
 import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
 import { readRunFlagOverrides, writeRunFlagOverrides } from './run-flags.js';
 import { distFreshnessProbe, runStalenessGuard } from './staleness.js';
@@ -859,21 +859,43 @@ async function cmdCost(opts: { issue?: string } = {}) {
   console.log(`  Total: ${formatCostTotal(grand.cost, grand.unpricedCount)}`);
 }
 
-async function cmdCheck(issueRaw: string, opts: { json?: boolean }) {
+async function cmdCheck(issueRaw: string, opts: { json?: boolean; deep?: boolean }) {
   const issueNum = parseIssueArg(issueRaw);
   const ghRepo = await getGitHubRepo();
   const [owner, repoName] = ghRepo.split('/');
-  const report = await runIssueCheck(issueNum, opts, {
-    getIssue: async (n) => {
-      const { data } = await getOctokit().rest.issues.get({ owner, repo: repoName, issue_number: n });
-      return { title: data.title, body: data.body ?? null };
-    },
-    getIssueState: async (n) => {
-      const { data } = await getOctokit().rest.issues.get({ owner, repo: repoName, issue_number: n });
-      return data.state === 'closed' ? 'closed' : 'open';
-    },
-    log: (line) => console.log(line),
-  });
+  let runModel: DeepCheckModelRunner | undefined;
+  if (opts.deep) {
+    const repoRoot = await getRepoRoot();
+    const repoConfig = loadRepoConfig(repoRoot);
+    const effective = resolveEffectiveConfig(repoConfig);
+    const router = new ModelRouter(
+      applyRepoConfig(loadModelsConfig(), repoConfig),
+      loadRoutesConfig(),
+      false,
+      undefined,
+      effective.allowExperimental,
+      effective.localOnly,
+    );
+    runModel = createDeepModelRunner(router, repoRoot);
+  }
+  let report;
+  try {
+    report = await runIssueCheck(issueNum, opts, {
+      runModel,
+      getIssue: async (n) => {
+        const { data } = await getOctokit().rest.issues.get({ owner, repo: repoName, issue_number: n });
+        return { title: data.title, body: data.body ?? null };
+      },
+      getIssueState: async (n) => {
+        const { data } = await getOctokit().rest.issues.get({ owner, repo: repoName, issue_number: n });
+        return data.state === 'closed' ? 'closed' : 'open';
+      },
+      log: (line) => console.log(line),
+    });
+  } catch (err) {
+    if (err instanceof DeepCheckError) throw new CliExitError(`factory: --deep failed — ${err.message}`, 2);
+    throw err;
+  }
   if (report.exitCode === 1) {
     throw new CliExitError(`factory: issue #${issueNum} is not factory-ready — ${report.reasons.join('; ')}`, 1);
   }
@@ -4964,11 +4986,15 @@ export async function main() {
     .command('check <issue>')
     .alias('ready')
     .description(
-      'Check an issue before queuing: required fields and whether the size gate runs it as-is or would split it, plus an advisory INVEST report (read-only; exit 0 ready, 1 missing fields or ungradeable criteria, 3 would split)',
+      'Check an issue before queuing: required fields and whether the size gate runs it as-is or would split it, plus an advisory INVEST report (read-only, optional --deep model review; exit 0 ready, 1 missing fields or ungradeable criteria, 2 invalid --deep output, 3 would split)',
     )
     .option(
       '--json',
       'Print one JSON object with fields, criteria findings, size verdict, INVEST findings, and reasons',
+    )
+    .option(
+      '--deep',
+      'Also call the triage-tier model once: preview the proposed split when the issue would split, otherwise suggest missing criteria and scope concerns (prints model id and cost; never files anything; exit 2 on invalid model output)',
     )
     .action(cmdCheck);
 

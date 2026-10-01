@@ -545,3 +545,9 @@ export {
 } from './review/pr-reference.js';
 export type { ReviewConstitution, ReviewConstitutionSource } from './constitutions/index.js';
 export { DEFAULT_REVIEW_CONSTITUTION, describeReviewConstitutionSource } from './constitutions/index.js';
+
+// Readiness deep check (#1732)
+export type { DecompositionOutput } from './readiness/decompose.js';
+export { buildDecompositionPrompt, parseDecompositionOutput } from './readiness/decompose.js';
+export type { ReadinessGapCriterion, ReadinessGapReport } from './readiness/enrich.js';
+export { buildReadinessGapPrompt, parseReadinessGapOutput } from './readiness/enrich.js';

@@ -1,6 +1,12 @@
 import { scoreIssueReadiness } from '@on-par/factory-core';
 import { describe, expect, it, vi } from 'vitest';
-import { buildIssueCheckReport, formatIssueCheckLines, runIssueCheck } from './ready-check.js';
+import {
+  DeepCheckError,
+  createDeepModelRunner,
+  buildIssueCheckReport,
+  formatIssueCheckLines,
+  runIssueCheck,
+} from './ready-check.js';
 
 const body = (criteria: number, opts: { verification?: boolean } = {}) => `### Problem statement
 
@@ -234,5 +240,125 @@ ${verification}
     const ac = Array.from({ length: 6 }, (_, i) => `- [ ] criterion ${i + 1}`).join('\n') + '\n- [ ]';
     const { d } = deps(task(ac));
     expect((await runIssueCheck(7, {}, d)).exitCode).toBe(1);
+  });
+});
+
+const SPLIT_JSON = JSON.stringify({
+  epic: { title: 'Epic', why: 'why', doneWhen: ['done'], children: ['Child one'] },
+  stories: [
+    {
+      title: 'Child one',
+      role: 'operator',
+      want: 'the thing works',
+      soThat: 'value',
+      problemStatement: 'problem',
+      inScope: ['item'],
+      outOfScope: ['other'],
+      acceptanceCriteria: [{ name: 'Works', given: [], when: ['run'], then: ['it works'] }],
+      verification: [{ command: 'npm test', passWhen: 'passes' }],
+    },
+  ],
+});
+
+const GAP_JSON = JSON.stringify({
+  missingCriteria: [{ name: 'Covers edge', when: ['input empty'], then: ['prints error'] }],
+  unclearScope: ['what is "it"?'],
+});
+
+describe('runIssueCheck --deep', () => {
+  const model = (output: string, cost: number | null = 0.0123) =>
+    vi.fn(async (_task: string, _prompt: string) => ({ model: 'm1', output, cost }));
+
+  it('previews the split without any write dep', async () => {
+    const { lines, getIssue } = deps(body(7));
+    const runModel = model(SPLIT_JSON);
+    const r = await runIssueCheck(7, { deep: true }, { getIssue, log: (l) => lines.push(l), runModel });
+    expect(runModel).toHaveBeenCalledTimes(1);
+    expect(runModel.mock.calls[0][0]).toBe('decompose');
+    expect(r.deep?.kind).toBe('split');
+    expect(lines).toContain('  1. Child one');
+    expect(lines).toContain('     - Works (When: run — Then: it works)');
+    expect(lines.at(-1)).toBe('model: m1, cost: $0.0123');
+  });
+
+  it('suggests missing criteria on the triage route', async () => {
+    const { lines, getIssue } = deps(body(3));
+    const runModel = model(GAP_JSON);
+    await runIssueCheck(7, { deep: true }, { getIssue, log: (l) => lines.push(l), runModel });
+    expect(runModel).toHaveBeenCalledTimes(1);
+    expect(runModel.mock.calls[0][0]).toBe('triage');
+    expect(lines).toContain('  - Covers edge (When: input empty — Then: prints error)');
+    expect(lines).toContain('unclear scope:');
+    expect(lines).not.toContain('negotiable:');
+  });
+
+  it('prints (none) when there are no gaps', async () => {
+    const { lines, getIssue } = deps(body(3));
+    await runIssueCheck(
+      7,
+      { deep: true },
+      { getIssue, log: (l) => lines.push(l), runModel: model('{"missingCriteria":[]}') },
+    );
+    expect(lines).toContain('  (none)');
+  });
+
+  it('rejects invalid output or a failing model without printing a report', async () => {
+    const { lines, getIssue } = deps(body(3));
+    const log = (l: string) => lines.push(l);
+    await expect(runIssueCheck(7, { deep: true }, { getIssue, log, runModel: model('not json') })).rejects.toThrow(
+      DeepCheckError,
+    );
+    const failing = vi.fn(async () => {
+      throw new Error('boom');
+    });
+    await expect(runIssueCheck(7, { deep: true }, { getIssue, log, runModel: failing })).rejects.toThrow(
+      /model call failed: boom/,
+    );
+    await expect(runIssueCheck(7, { deep: true }, { getIssue, log })).rejects.toThrow(DeepCheckError);
+    const split = deps(body(7));
+    await expect(
+      runIssueCheck(7, { deep: true }, { getIssue: split.getIssue, log, runModel: model('not json') }),
+    ).rejects.toThrow(/invalid output/);
+    expect(lines).toEqual([]);
+  });
+
+  it('shows unknown cost when unpriced', async () => {
+    const { lines, getIssue } = deps(body(3));
+    await runIssueCheck(7, { deep: true }, { getIssue, log: (l) => lines.push(l), runModel: model(GAP_JSON, null) });
+    expect(lines.at(-1)).toBe('model: m1, cost: unknown (1 unpriced)');
+  });
+
+  it('adds deep to --json only when requested', async () => {
+    const a = deps(body(3));
+    await runIssueCheck(7, { json: true, deep: true }, { ...a.d, runModel: model(GAP_JSON) });
+    expect(JSON.parse(a.lines[0]).deep.model).toBe('m1');
+    const b = deps(body(3));
+    const runModel = model(GAP_JSON);
+    await runIssueCheck(7, { json: true }, { ...b.d, runModel });
+    expect(JSON.parse(b.lines[0])).not.toHaveProperty('deep');
+    expect(runModel).not.toHaveBeenCalled();
+  });
+});
+
+describe('createDeepModelRunner', () => {
+  it('returns the model, output, and the cost captured by the sink', async () => {
+    let sink: (e: { cost: number | null }) => void = () => {};
+    const router = {
+      setCostSink: (s: typeof sink) => {
+        sink = s;
+      },
+      run: vi.fn(async () => {
+        sink({ cost: 0.5 });
+        return { model: 'm9', output: 'out' };
+      }),
+    };
+    const run = createDeepModelRunner(router, '/repo');
+    expect(await run('triage', 'p')).toEqual({ model: 'm9', output: 'out', cost: 0.5 });
+    expect(router.run).toHaveBeenCalledWith('triage', 'p', { worktree: '/repo', timeoutSeconds: 600 });
+  });
+
+  it('reports a null cost when the sink never fires', async () => {
+    const router = { setCostSink: () => {}, run: async () => ({ model: 'm', output: 'o' }) };
+    expect((await createDeepModelRunner(router, '/r')('decompose', 'p')).cost).toBeNull();
   });
 });
