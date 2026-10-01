@@ -491,6 +491,18 @@ export type {
 } from './review/verdict.js';
 export { computeReviewVerdict, DETERMINISTIC_CHECKERS } from './review/verdict.js';
 
+// Review floor (#1721)
+export type {
+  ReviewClass,
+  ReviewFloorFiredRule,
+  ReviewFloorInput,
+  ReviewFloorPathChange,
+  ReviewFloorPathRule,
+  ReviewFloorResult,
+  ReviewFloorRuleSet,
+} from './review/floor.js';
+export { computeReviewFloor, DEFAULT_REVIEW_FLOOR_RULES } from './review/floor.js';
+
 // Review fork-PR containment gate (#1684)
 export type {
   ContainmentGatedReviewDeps,
