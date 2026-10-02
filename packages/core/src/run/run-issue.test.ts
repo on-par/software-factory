@@ -151,6 +151,18 @@ beforeEach(() => {
   vi.mocked(shipPhase).mockReset().mockResolvedValue(SHIP_OK);
 });
 
+describe('runIssue — recorded remote branch SHA (#1869)', () => {
+  it('threads the recorded remote SHA into shipPhase, undefined without a record', async () => {
+    await runIssue(baseRequest(), basePolicy(), basePorts());
+    expect(vi.mocked(shipPhase).mock.calls[0][0].recordedRemoteSha).toBeUndefined();
+
+    vi.mocked(shipPhase).mockClear();
+    const workspace = { path: '/tmp/wt', dispose: async () => {}, remoteBranch: { sha: 'd'.repeat(40) } } as Workspace;
+    await runIssue(baseRequest(), basePolicy(), basePorts({ workspace }));
+    expect(vi.mocked(shipPhase).mock.calls[0][0].recordedRemoteSha).toBe('d'.repeat(40));
+  });
+});
+
 describe('runIssue — invariant 1: constitution resolved exactly once', () => {
   it('calls resolveConstitution exactly once, before BUILD, and passes the same value to every phase', async () => {
     const constitution: Constitution = {

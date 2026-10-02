@@ -2512,3 +2512,117 @@ describe('shipPhase lifecycle events', () => {
     expect(received[1].detail.length).toBeGreaterThan(0);
   });
 });
+
+describe('shipPhase stale remote branch leased push (#1869)', () => {
+  const BRANCH = 'ship-it/23-self-heal';
+  const RECORDED = 'b'.repeat(40);
+  const LS_REMOTE = `git ls-remote --heads origin '${BRANCH}'`;
+
+  /** `before` is what ls-remote returns until a push command is seen; STUB_HEAD_SHA after. */
+  function staleRun(
+    before: { stdout: string } | Error,
+    state: { commands: string[]; pushed: boolean },
+    pushError?: Error,
+  ) {
+    return async (command: string) => {
+      state.commands.push(command);
+      if (command.startsWith('git push')) {
+        if (pushError) throw pushError;
+        state.pushed = true;
+        return { stdout: '' };
+      }
+      if (command === LS_REMOTE && !state.pushed) {
+        if (before instanceof Error) throw before;
+        return before;
+      }
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+  }
+
+  const at = (sha: string) => ({ stdout: `${sha}\trefs/heads/${BRANCH}\n` });
+
+  async function ship(run: (c: string) => Promise<{ stdout: string }>) {
+    const { octokit, calls } = createOctokit();
+    const logs: Array<[string, string]> = [];
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: BRANCH,
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run,
+      recordedRemoteSha: RECORDED,
+    });
+    return { result, calls, logs };
+  }
+
+  it('remote unchanged → leased push, verified, PR created', async () => {
+    const state = { commands: [] as string[], pushed: false };
+    const { result, calls, logs } = await ship(staleRun(at(RECORDED), state));
+
+    expect(result).toEqual({ ok: true, prNumber: 123 });
+    expect(state.commands).toContain(`git push '--force-with-lease=${BRANCH}:${RECORDED}' -u origin '${BRANCH}'`);
+    expect(state.commands).not.toContain(`git push -u origin '${BRANCH}'`);
+    expect(state.commands.some((c) => /--force(\s|$)/.test(c))).toBe(false);
+    expect(logs).toContainEqual([
+      'ship',
+      `remote head ${STUB_HEAD_SHA} matches local HEAD ${STUB_HEAD_SHA} for ${BRANCH}`,
+    ]);
+    expect(calls).toContainEqual(['pulls.create', expect.anything()]);
+  });
+
+  it('remote moved → fails closed naming both SHAs, nothing pushed', async () => {
+    const moved = 'c'.repeat(40);
+    const state = { commands: [] as string[], pushed: false };
+    const { result, calls, logs } = await ship(staleRun(at(moved), state));
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain(RECORDED);
+    expect(result.reason).toContain(moved);
+    expect(state.commands.some((c) => c.startsWith('git push'))).toBe(false);
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
+    expect(logs.map(([type]) => type)).not.toContain('ready');
+    expect(logs.some(([type, msg]) => type === 'ship' && msg.includes(RECORDED) && msg.includes(moved))).toBe(true);
+  });
+
+  it('ls-remote throws → fails closed, nothing pushed', async () => {
+    const state = { commands: [] as string[], pushed: false };
+    const { result, calls } = await ship(staleRun(new Error('network down'), state));
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain(RECORDED);
+    expect(result.reason).toContain('network down');
+    expect(state.commands.some((c) => c.startsWith('git push'))).toBe(false);
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
+  });
+
+  it('remote branch gone → plain push', async () => {
+    const state = { commands: [] as string[], pushed: false };
+    const { result } = await ship(staleRun({ stdout: '' }, state));
+
+    expect(result.ok).toBe(true);
+    expect(state.commands).toContain(`git push -u origin '${BRANCH}'`);
+    expect(state.commands.some((c) => c.includes('--force'))).toBe(false);
+  });
+
+  it('lease rejected → fails closed as non-fast-forward', async () => {
+    const state = { commands: [] as string[], pushed: false };
+    const err = Object.assign(new Error('push failed'), {
+      stderr: `! [rejected] ${BRANCH} -> ${BRANCH} (stale info)`,
+    });
+    const { result, calls, logs } = await ship(staleRun(at(RECORDED), state, err));
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain(RECORDED);
+    expect(logs.some(([, msg]) => msg.includes('(non-fast-forward)'))).toBe(true);
+    expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
+  });
+});

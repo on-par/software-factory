@@ -82,6 +82,9 @@ async function shipPhaseImpl(opts: {
   laneId?: string;
   /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
   bus?: LifecycleBus;
+  /** origin/<branch> SHA recorded at worktree creation (#1868). When set, the new-PR push
+   *  replaces that stale head under a lease on this SHA, and fails closed if the remote moved (#1869). */
+  recordedRemoteSha?: string;
 }): Promise<ShipResult> {
   const { issue, repo, worktree, branch, octokit, watchCI = true, log, run = exec, approvalGate, checkSummary } = opts;
   const [owner, repoName] = repo.split('/');
@@ -209,11 +212,38 @@ async function shipPhaseImpl(opts: {
     // Push branch. A rejected push means the remote head does not contain this run's
     // commits — opening a PR against it would advertise work that is not there, so the
     // ship fails closed here rather than continuing to PR creation (#734).
+    let pushCmd = `git push -u origin ${shellEscape(branch)}`;
+    const recorded = opts.recordedRemoteSha;
+    let leased = false;
+    if (recorded) {
+      // A retry rebuilds the branch from origin/main, so an earlier run's push is stale. Replace it
+      // only while the remote is still exactly what was recorded at worktree creation (#1869).
+      const current = await readRemoteBranchSha(run, worktree, branch);
+      if (current.status === 'unreadable') {
+        const reason = `could not read origin/${branch} to check recorded SHA ${recorded} (${current.detail})`;
+        log('ship', `${reason} — aborting before push`);
+        return { ok: false, reason };
+      }
+      if (current.sha === null) {
+        log('ship', `origin/${branch} recorded @ ${recorded} no longer exists — nothing to replace, plain push`);
+      } else if (current.sha !== recorded) {
+        const reason = `origin/${branch} moved since it was recorded: recorded ${recorded}, current ${current.sha}`;
+        log('ship', `${reason} — aborting before push`);
+        return { ok: false, reason };
+      } else {
+        pushCmd = `git push ${shellEscape(`--force-with-lease=${branch}:${recorded}`)} -u origin ${shellEscape(branch)}`;
+        leased = true;
+        log('ship', `replacing stale origin/${branch} @ ${recorded} with a leased push`);
+      }
+    }
     try {
-      await run(`git push -u origin ${shellEscape(branch)}`, { cwd: worktree });
+      await run(pushCmd, { cwd: worktree });
     } catch (err) {
       const { kind, detail } = describePushFailure(err);
       log('ship', `git push failed (${kind}): ${detail} — aborting before PR creation`);
+      if (leased) {
+        return { ok: false, reason: `leased push of ${branch} over recorded ${recorded} was rejected (${kind})` };
+      }
       return { ok: false };
     }
 
@@ -595,7 +625,13 @@ type PushFailureKind = 'non-fast-forward' | 'network' | 'unknown';
 /** Bound on the failure text copied into one NDJSON event row. */
 const MAX_PUSH_ERROR_DETAIL = 400;
 
-const NON_FAST_FORWARD_MARKERS = ['non-fast-forward', '! [rejected]', 'fetch first', 'updates were rejected'];
+const NON_FAST_FORWARD_MARKERS = [
+  'non-fast-forward',
+  '! [rejected]',
+  'fetch first',
+  'updates were rejected',
+  'stale info',
+];
 
 const NETWORK_MARKERS = [
   'could not resolve host',
@@ -661,6 +697,20 @@ function parseRemoteHeadSha(stdout: string, branch: string): string | undefined 
     if (ref === `refs/heads/${branch}` && sha) return sha;
   }
   return undefined;
+}
+
+/** origin/<branch>'s current SHA, `null` when the branch is absent, or the failure detail (#1869). */
+async function readRemoteBranchSha(
+  run: CommandRunner,
+  worktree: string,
+  branch: string,
+): Promise<{ status: 'ok'; sha: string | null } | { status: 'unreadable'; detail: string }> {
+  try {
+    const { stdout } = await run(`git ls-remote --heads origin ${shellEscape(branch)}`, { cwd: worktree });
+    return { status: 'ok', sha: parseRemoteHeadSha(stdout, branch) ?? null };
+  } catch (err) {
+    return { status: 'unreadable', detail: shortDetail(err) };
+  }
 }
 
 /**
