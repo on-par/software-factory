@@ -178,6 +178,7 @@ export async function runFeedback(prUrl: string, opts: { note?: string }, deps: 
     labels: FEEDBACK_LABELS,
     title,
     problem: lines.join('\n'),
+    prUrl: pr.url,
     host: deps.host,
     internalRepo: deps.internalRepo,
   });

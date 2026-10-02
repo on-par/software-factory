@@ -5017,6 +5017,22 @@ describe('runFeedbackCommand (#1851)', () => {
     expect(lines).toEqual(['Filed on-par/software-factory#9']);
   });
 
+  it('prints Commented on when a prior issue for the PR exists', async () => {
+    const lines: string[] = [];
+    const d = deps({
+      filing: {
+        listCandidateIssues: async () => [
+          { number: 5, body: '<!-- feedback-pr:https://github.com/o/r/pull/1 -->', state: 'open' },
+        ],
+        createIssue: async () => ({ number: 9 }),
+        updateIssue: async () => {},
+        commentIssue: async () => {},
+      },
+    });
+    await runFeedbackCommand('https://github.com/o/r/pull/1', { note: 'gap' }, d, (l) => lines.push(l));
+    expect(lines).toEqual(['Commented on on-par/software-factory#5']);
+  });
+
   it('maps validation errors to exit 2', async () => {
     await expect(runFeedbackCommand('bogus', {}, deps())).rejects.toMatchObject({ code: 2 });
   });

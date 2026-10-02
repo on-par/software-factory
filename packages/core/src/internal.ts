@@ -27,6 +27,8 @@ export {
   DEFAULT_BUG_LABELS,
   DEFAULT_INTERNAL_REPO,
   fileBug,
+  feedbackPrMarker,
+  findIssueByPrUrl,
   findMatchingIssue,
   fingerprintMarker,
   renderBugBody,

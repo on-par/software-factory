@@ -392,6 +392,8 @@ const INTERNAL_API_KEYS = [
   'DEFAULT_BUG_LABELS',
   'DEFAULT_INTERNAL_REPO',
   'fileBug',
+  'feedbackPrMarker',
+  'findIssueByPrUrl',
   'findMatchingIssue',
   'fingerprintMarker',
   'renderBugBody',
