@@ -1949,14 +1949,19 @@ bash scripts/verify.sh
       h.octokit.rest.issues.addLabels = vi.fn(async () => ({}));
       h.octokit.rest.issues.listForRepo = vi.fn(async () => ({ data: [] }));
       h.octokit.rest.issues.listLabelsOnIssue = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.users = { getAuthenticated: vi.fn(async () => ({ data: { login: 'alice' } })) };
+      h.octokit.rest.issues.get = vi.fn(async ({ issue_number }: any) => ({
+        data: { title: 'T', body: `body ${issue_number}` },
+      }));
+      h.octokit.rest.issues.createComment = vi.fn(async () => ({}));
     });
 
     it('queues explicit issues into a lane, applying queued/lane/order labels in order', async () => {
       const res = await runMain('queue', 'add', 'daw', '10', '11');
 
       expect(res.exited).toBe(false);
-      expect(logged()).toContain('#10 queued');
-      expect(logged()).toContain('#11 queued');
+      expect(logged()).toContain('#10 approved');
+      expect(logged()).toContain('#11 approved');
       expect(h.octokit.rest.issues.addLabels).toHaveBeenNthCalledWith(1, {
         owner: 'on-par',
         repo: 'software-factory',
@@ -1969,6 +1974,24 @@ bash scripts/verify.sh
         issue_number: 11,
         labels: ['factory:queued', 'factory:lane:daw', 'factory:order:2'],
       });
+    });
+
+    it('--lane form posts a content-pinned approval comment and queues the issue', async () => {
+      const res = await runMain('queue', 'add', '13', '--lane', 'x');
+
+      expect(res.exited).toBe(false);
+      const call = (h.octokit.rest.issues.createComment as any).mock.calls[0][0];
+      expect(call.issue_number).toBe(13);
+      expect(call.body).toContain('factory-approval v1 sha256:');
+      expect(call.body).toContain('lane:x');
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenCalledWith(
+        expect.objectContaining({ issue_number: 13, labels: ['factory:queued', 'factory:lane:x', 'factory:order:1'] }),
+      );
+    });
+
+    it('exits 2 when legacy form has no issues', async () => {
+      const res = await runMain('queue', 'add', 'daw');
+      expect(res).toEqual({ exited: true, code: 2 });
     });
 
     it('creates missing factory labels idempotently before applying them', async () => {
@@ -1995,7 +2018,7 @@ bash scripts/verify.sh
 
       expect(res).toEqual({ exited: true, code: 1 });
       expect(errored()).toContain('#10 failed');
-      expect(logged()).toContain('#11 queued');
+      expect(logged()).toContain('#11 approved');
     });
 
     it('exits 2 for an invalid issue argument before any GitHub call', async () => {
@@ -2004,6 +2027,88 @@ bash scripts/verify.sh
       expect(res).toEqual({ exited: true, code: 2 });
       expect(h.octokit.rest.issues.createLabel).not.toHaveBeenCalled();
       expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('approve', () => {
+    beforeEach(() => {
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) return h.ghRepo;
+        return '';
+      };
+      h.octokit.rest.issues.createLabel = vi.fn(async () => ({}));
+      h.octokit.rest.issues.addLabels = vi.fn(async () => ({}));
+      h.octokit.rest.issues.listForRepo = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.issues.listLabelsOnIssue = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.users = { getAuthenticated: vi.fn(async () => ({ data: { login: 'alice' } })) };
+      h.octokit.rest.issues.get = vi.fn(async ({ issue_number }: any) => ({
+        data: { title: 'T', body: `body ${issue_number}` },
+      }));
+      h.octokit.rest.issues.createComment = vi.fn(async () => ({}));
+    });
+
+    it('posts a pinned comment and applies queue labels', async () => {
+      const res = await runMain('approve', '12', '--lane', 'x');
+
+      expect(res.exited).toBe(false);
+      const call = (h.octokit.rest.issues.createComment as any).mock.calls[0][0];
+      expect(call.body).toMatch(/<!-- factory-approval v1 sha256:[0-9a-f]{64} lane:x -->/);
+      expect(call.body).toContain('@alice');
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenCalledWith(
+        expect.objectContaining({ issue_number: 12, labels: ['factory:queued', 'factory:lane:x', 'factory:order:1'] }),
+      );
+    });
+
+    it('posts one comment per issue with its own hash, deduping repeats', async () => {
+      const res = await runMain('approve', '12', '14', '12', '--lane', 'x');
+
+      expect(res.exited).toBe(false);
+      const calls = (h.octokit.rest.issues.createComment as any).mock.calls.map((c: any) => c[0]);
+      expect(calls).toHaveLength(2);
+      const hash = (b: string) => /sha256:([0-9a-f]{64})/.exec(b)![1];
+      expect(hash(calls[0].body)).not.toBe(hash(calls[1].body));
+    });
+
+    it('exits 1 before any write when the approver cannot be determined', async () => {
+      h.octokit.rest.users.getAuthenticated = vi.fn(async () => {
+        throw new Error('no auth');
+      });
+
+      const res = await runMain('approve', '12', '--lane', 'x');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(h.octokit.rest.issues.createComment).not.toHaveBeenCalled();
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+    });
+
+    it('exits 2 for a bad issue argument before any GitHub call', async () => {
+      const res = await runMain('approve', 'nope', '--lane', 'x');
+
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(h.octokit.rest.users.getAuthenticated).not.toHaveBeenCalled();
+      expect(h.octokit.rest.issues.createComment).not.toHaveBeenCalled();
+    });
+
+    it('is rejected without --lane', async () => {
+      const res = await runMain('approve', '12');
+      expect(res.exited).toBe(true);
+      expect(res.code).not.toBe(0);
+      expect(h.octokit.rest.issues.createComment).not.toHaveBeenCalled();
+    });
+
+    it('does not label an issue whose comment failed and exits 1', async () => {
+      h.octokit.rest.issues.createComment = vi.fn(async ({ issue_number }: any) => {
+        if (issue_number === 12) throw new Error('forbidden');
+        return {};
+      });
+
+      const res = await runMain('approve', '12', '14', '--lane', 'x');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('#12 failed');
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenCalledTimes(1);
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenCalledWith(expect.objectContaining({ issue_number: 14 }));
     });
   });
 

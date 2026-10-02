@@ -430,6 +430,12 @@ const INTERNAL_API_KEYS = [
   'FACTORY_RUNTIME_CONFIG_KEYS',
   'isTrustedApprover',
   'createOctokitCollaboratorPermissionClient',
+  'computeApprovalHash',
+  'approvalMarker',
+  'formatApprovalComment',
+  'approveIssues',
+  'createOctokitApprovalClient',
+  'APPROVAL_MARKER_VERSION',
   'CONFIG_EXAMPLE_OMITTED_KEYS',
   'renderConfigExample',
   // Design artifact (#422)

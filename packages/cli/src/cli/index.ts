@@ -165,7 +165,6 @@ import {
 } from '@on-par/factory-core';
 import type {
   CiOutcome,
-  EnqueueResult,
   GithubQueue,
   OvernightItemOutcome,
   OvernightPreflightResult,
@@ -204,6 +203,8 @@ import {
   createLocalSmallDryRun,
   createOctokitGreenPrClient,
   createOctokitQueueClient,
+  approveIssues,
+  createOctokitApprovalClient,
   daemonRuntimePaths,
   DEFAULT_FACTORYD_PORT,
   defaultRegistryPath,
@@ -3001,7 +3002,9 @@ export async function cmdQueueMigrate(opts: { file?: string; dryRun?: boolean } 
   console.log(chalk.green(`queue migrated — ${entries.length} issue(s) labelled from ${queueFile}`));
 }
 
-export async function cmdQueueAdd(lane: string, issueArgs: string[]): Promise<void> {
+export async function cmdApprove(issueArgs: string[], opts: { lane: string }): Promise<void> {
+  const lane = opts.lane.trim();
+  if (lane === '') throw new CliExitError('factory: approve needs a non-empty --lane', 2);
   // Validate + dedupe BEFORE any GitHub call. parseIssueArg throws CliExitError(2) on bad input.
   const seen = new Set<number>();
   const issues: number[] = [];
@@ -3012,16 +3015,35 @@ export async function cmdQueueAdd(lane: string, issueArgs: string[]): Promise<vo
       issues.push(n);
     }
   }
+  if (issues.length === 0) throw new CliExitError('factory: approve needs at least one issue', 2);
 
   const [owner, repo] = (await getGitHubRepo()).split('/');
-  const queue = createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo });
-  const results: EnqueueResult[] = await queue.enqueue(lane, issues);
+  const octokit = getOctokit();
+  let approver: string;
+  try {
+    approver = (await octokit.rest.users.getAuthenticated()).data.login;
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new CliExitError(`factory: could not determine the approving GitHub user — ${detail}`, 1);
+  }
+
+  const queue = createGithubQueue({ client: createOctokitQueueClient(octokit), owner, repo });
+  const results = await approveIssues({
+    owner,
+    repo,
+    lane,
+    issues,
+    approver,
+    client: createOctokitApprovalClient(octokit),
+    enqueue: (l, i) => queue.enqueue(l, i),
+  });
 
   for (const r of results) {
+    const short = r.hash?.slice(0, 12);
     if (r.outcome === 'queued') {
-      console.log(chalk.green(`#${r.issue} queued → lane ${lane}, position ${r.position}`));
+      console.log(chalk.green(`#${r.issue} approved (sha256 ${short}) → lane ${lane}, position ${r.position}`));
     } else if (r.outcome === 'already-queued') {
-      console.log(`#${r.issue} already queued — skipped`);
+      console.log(`#${r.issue} approved (sha256 ${short}) — already queued, labels unchanged`);
     } else {
       console.error(chalk.red(`#${r.issue} failed — ${r.detail}`));
     }
@@ -3029,8 +3051,19 @@ export async function cmdQueueAdd(lane: string, issueArgs: string[]): Promise<vo
 
   const failed = results.filter((r) => r.outcome === 'failed');
   if (failed.length > 0) {
-    throw new CliExitError(`factory: ${failed.length} issue(s) failed to queue`, 1);
+    throw new CliExitError(`factory: ${failed.length} issue(s) failed to approve`, 1);
   }
+}
+
+export async function cmdQueueAdd(args: string[], opts: { lane?: string } = {}): Promise<void> {
+  if (opts.lane !== undefined) {
+    await cmdApprove(args, { lane: opts.lane });
+    return;
+  }
+  if (args.length < 2) {
+    throw new CliExitError('factory: queue add needs --lane <lane> <issues...> (or <lane> <issues...>)', 2);
+  }
+  await cmdApprove(args.slice(1), { lane: args[0] });
 }
 
 export async function cmdQueueReconcile(opts: { lane?: string } = {}): Promise<void> {
@@ -5018,6 +5051,16 @@ export async function main() {
       await cmdTriageAccept(opts);
     });
 
+  program
+    .command('approve <issues...>')
+    .description(
+      'Approve issues for a lane: post a content-pinned approval comment (sha256 of title+body) and apply the queue labels',
+    )
+    .requiredOption('--lane <lane>', 'Lane to queue the approved issues into')
+    .action(async (issues: string[], opts: { lane: string }) => {
+      await cmdApprove(issues, opts);
+    });
+
   const queue = program
     .command('queue')
     .description('Manage the GitHub-label work queue (add, clear, reconcile, migrate)');
@@ -5028,12 +5071,13 @@ export async function main() {
     .option('--dry-run', 'Print the intended label updates without mutating GitHub')
     .action((opts: { file?: string; dryRun?: boolean }) => cmdQueueMigrate(opts));
   queue
-    .command('add <lane> <issues...>')
+    .command('add <args...>')
+    .option('--lane <lane>', 'Lane to queue into (legacy form: first positional is the lane)')
     .description(
-      'Queue explicit GitHub issues into a lane — applies factory:queued + factory:lane:<lane> (and an order label), creating any missing factory labels idempotently',
+      'Approve (content-pinned comment) and queue explicit GitHub issues into a lane — alias of `factory approve`; applies factory:queued + factory:lane:<lane> (and an order label), creating any missing factory labels idempotently',
     )
-    .action(async (lane: string, issues: string[]) => {
-      await cmdQueueAdd(lane, issues);
+    .action(async (args: string[], opts: { lane?: string }) => {
+      await cmdQueueAdd(args, opts);
     });
   queue
     .command('reconcile')
