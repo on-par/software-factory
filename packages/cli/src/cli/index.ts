@@ -3958,11 +3958,12 @@ export async function runLane(
       await settle(issue, 'parked');
       parked++;
       if (tripped && streak) {
+        const { signature: tripSignature, firstIssue, failingChecks: firstChecks } = streak;
         const payload: LanePausedPayload = {
           lane,
-          signature: streak.signature,
-          failingChecks: checks.filter((c) => streak!.failingChecks.includes(c)),
-          firstIssue: streak.firstIssue,
+          signature: tripSignature,
+          failingChecks: checks.filter((c) => firstChecks.includes(c)),
+          firstIssue,
           secondIssue: issue,
         };
         emitEvent(
