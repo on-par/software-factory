@@ -315,17 +315,20 @@ export function headlessEnv(parentEnv: Record<string, string | undefined> = proc
 /** Full lane environment for build/check/rework child processes: headless
  *  contract always, port-lease vars when the lane holds a lease. `baseUrl`
  *  forwards to leaseEnv (e.g. a stable lane URL from the factory proxy).
- *  When `worktreeRoot` is a .NET worktree, adds DOTNET_TieredPGO=0 unless the
- *  parent environment already sets it. */
+ *  When `worktreeRoot` is a .NET worktree, adds DOTNET_TieredPGO=0,
+ *  MSBUILDDISABLENODEREUSE=1 and, when `runId` is given,
+ *  SharedCompilationId=factory-<runId>, each unless the parent environment
+ *  already sets it. */
 export function laneEnv(
   port?: number,
   parentEnv: Record<string, string | undefined> = process.env,
   baseUrl?: string,
   worktreeRoot?: string,
+  runId?: string,
 ): Record<string, string> {
   return {
     ...headlessEnv(parentEnv),
     ...(port !== undefined ? leaseEnv(port, baseUrl) : {}),
-    ...(worktreeRoot !== undefined ? dotnetEnv(worktreeRoot, parentEnv) : {}),
+    ...(worktreeRoot !== undefined ? dotnetEnv(worktreeRoot, parentEnv, runId) : {}),
   };
 }

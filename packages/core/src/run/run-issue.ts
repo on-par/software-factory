@@ -12,6 +12,7 @@
 // CLI filesystem layout (ADR-0004). The CLI's shipIssue is a thin adapter that constructs
 // these ports and re-raises a parked/escalated outcome as LaneParkError.
 
+import { randomUUID } from 'node:crypto';
 import type { Octokit } from '@octokit/rest';
 
 import type { ApprovalGate } from '../approvals/index.js';
@@ -192,6 +193,9 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
   const checkPhase = ports.checkPhase ?? checkPhaseDefault;
   const shipPhase = ports.shipPhase ?? shipPhaseDefault;
   const log = ports.events();
+  // One id per run: BUILD, CHECK and rework share a per-run VBCSCompiler server (#1910).
+  // 12 hex chars keeps the compiler's Unix-socket pipe path short under macOS $TMPDIR.
+  const runId = randomUUID().replace(/-/g, '').slice(0, 12);
   const tracker = new ProcessGroupTracker();
   let environment: Environment | undefined;
   let released = false;
@@ -509,6 +513,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     }
 
     const build = await buildPhase({
+      runId,
       issue: request.issue,
       repo: request.repo,
       worktree: ports.workspace.path,
@@ -555,6 +560,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     await setPhase('check');
     const priorFailureSignature = await ports.reworkHistory?.priorSignature(request.issue);
     const check = await checkPhase({
+      runId,
       issue: request.issue,
       worktree: ports.workspace.path,
       specPath: request.specPath,

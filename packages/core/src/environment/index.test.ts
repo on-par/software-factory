@@ -306,7 +306,7 @@ describe('leaseEnv', () => {
   });
 
   it.each(['App.sln', 'App.slnx', 'App.csproj', 'global.json'])(
-    'adds DOTNET_TieredPGO=0 for a worktree containing %s',
+    'adds the .NET isolation env for a worktree containing %s',
     async (marker) => {
       await withTmpDir(async (root) => {
         await writeFile(join(root, marker), '');
@@ -317,10 +317,28 @@ describe('leaseEnv', () => {
           FACTORY_APP_PORT: '3142',
           FACTORY_BASE_URL: 'http://127.0.0.1:3142',
           DOTNET_TieredPGO: '0',
+          MSBUILDDISABLENODEREUSE: '1',
         });
       });
     },
   );
+
+  it('adds a per-run SharedCompilationId when runId is given', async () => {
+    await withTmpDir(async (root) => {
+      await writeFile(join(root, 'App.sln'), '');
+      expect(laneEnv(3142, {}, undefined, root, 'r1')).toMatchObject({ SharedCompilationId: 'factory-r1' });
+    });
+  });
+
+  it('lets a parent-set SharedCompilationId win', async () => {
+    await withTmpDir(async (root) => {
+      await writeFile(join(root, 'App.sln'), '');
+      const parent = { SharedCompilationId: 'mine' };
+      const env = laneEnv(undefined, parent, undefined, root, 'r1');
+      expect(env).not.toHaveProperty('SharedCompilationId');
+      expect({ ...parent, ...env }.SharedCompilationId).toBe('mine');
+    });
+  });
 
   it('leaves a non-.NET worktree unchanged', async () => {
     await withTmpDir(async (root) => {
