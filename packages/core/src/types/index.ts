@@ -357,6 +357,14 @@ export type RunStatus =
   | 'merged'
   | 'failed';
 
+/** origin/<branch> as found when the lane worktree was created (#1868): an earlier
+ *  run's push that this run's fresh base does not include. */
+export interface RemoteBranchRecord {
+  sha: string;
+  /** Open PR whose head is this branch, when the lookup found one. */
+  prNumber?: number;
+}
+
 export interface IssueRunState {
   issue: number;
   lane: string;
@@ -375,6 +383,8 @@ export interface IssueRunState {
   startedAt: string;
   updatedAt: string;
   prNumber?: number;
+  /** Pre-existing origin/<branch> found at worktree creation (#1868). */
+  remoteBranch?: RemoteBranchRecord;
   failures?: CheckerOutput[];
 }
 

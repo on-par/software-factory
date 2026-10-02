@@ -122,6 +122,7 @@ export type EventKind =
   | 'readiness_enrichment_succeeded'
   | 'ready'
   | 'recovered'
+  | 'remote-branch-preexisting'
   | 'resource_limit'
   | 'resume-approved'
   | 'resumed'
@@ -305,6 +306,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   readiness_enrichment_succeeded: { severity: 'info', isPark: false, isTerminal: false },
   ready: { severity: 'info', isPark: false, isTerminal: true, laneStatus: 'ready' },
   recovered: { severity: 'info', isPark: false, isTerminal: false },
+  'remote-branch-preexisting': { severity: 'info', isPark: false, isTerminal: false },
   resource_limit: { severity: 'warn', isPark: false, isTerminal: false },
   'resume-approved': { severity: 'info', isPark: false, isTerminal: false },
   resumed: { severity: 'info', isPark: false, isTerminal: false },

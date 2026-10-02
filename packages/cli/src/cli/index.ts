@@ -239,6 +239,7 @@ import {
   resolveReviewFloorRules,
   RunLockHeldError,
   runOvernightQueue,
+  findOpenPR,
   setupWorktree,
   shellEscape,
   slugify,
@@ -1585,6 +1586,7 @@ export async function shipIssue(
   const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo());
   const paths = ctx?.paths ?? getFactoryPaths(repoRoot);
   const octokit = getOctokit();
+  const [ghOwner, ghName] = ghRepo.split('/');
 
   const repoConfig = loadRepoConfig(repoRoot, paths.root);
   const factoryConfig = loadFactoryConfigForRepo(paths.config);
@@ -1759,13 +1761,14 @@ export async function shipIssue(
       worktreePath: worktree,
       log,
       sandbox: worktreeSandbox,
-      setup: (root, br, wt, sp, sandbox, setupLog) =>
+      findOpenPr: (br) => findOpenPR(octokit, ghOwner, ghName, br),
+      setup: (root, br, wt, sp, sandbox, setupLog, setupOpts) =>
         withGitLock(root, () =>
           withFileLock(
             paths.gitLock,
             // setupWorktree fetches origin itself before creating the worktree (#1167),
             // so no explicit gitFetch here — still under the git + file locks.
-            () => setupWorktree(root, br, wt, sp, sandbox, setupLog),
+            () => setupWorktree(root, br, wt, sp, sandbox, setupLog, setupOpts),
             { onSteal: (pid) => log('lock-stolen', `stole ${paths.gitLock} from dead holder pid ${pid ?? 'unknown'}`) },
           ),
         ),

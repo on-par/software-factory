@@ -509,6 +509,7 @@ const INTERNAL_API_KEYS = [
   // Daemon control-plane HTTP server (#777)
   'createFactorydServer',
   'createRunRuntime',
+  'findOpenPR',
   'createShipExecutor',
   'DEFAULT_FACTORYD_PORT',
   // Durable explicit daemon runs (#1393)

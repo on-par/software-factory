@@ -6,7 +6,15 @@ import { dirname, resolve } from 'node:path';
 import type { EventKind } from '../events/kinds.js';
 import { createLogger } from '../logger/index.js';
 import type { PrClassificationRecord } from '../review/classifier.js';
-import type { CostEntry, FailoverReason, LogLevel, ReadinessInfo, ReworkInfo } from '../types/index.js';
+import type { PrLookup } from '../phases/ship.js';
+import type {
+  CostEntry,
+  FailoverReason,
+  LogLevel,
+  ReadinessInfo,
+  RemoteBranchRecord,
+  ReworkInfo,
+} from '../types/index.js';
 import { levelForType } from './format.js';
 import { execGit } from './git-exec.js';
 import { createMicroVm, removeMicroVm, type WorktreeSandbox } from './microvm.js';
@@ -110,6 +118,33 @@ export async function defaultRemoteBase(repoRoot: string): Promise<string> {
   return 'origin/main';
 }
 
+/** SHA of refs/remotes/origin/<branch>, or null when that remote-tracking ref does not
+ *  exist. Reads local refs only; call after gitFetch (setupWorktree does). Never throws. */
+export async function detectRemoteBranch(repoRoot: string, branch: string): Promise<string | null> {
+  try {
+    const { stdout } = await execGit(
+      `git rev-parse --verify -q ${shellEscape(`refs/remotes/origin/${branch}^{commit}`)}`,
+      { cwd: repoRoot },
+    );
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+export interface WorktreeSetupOptions {
+  /** Looks up an open PR whose head is `branch`; only called when origin/<branch> exists. */
+  findOpenPr?: (branch: string) => Promise<PrLookup>;
+}
+
+export interface WorktreeSetupResult {
+  /** The ref the worktree was created from. */
+  base: string;
+  /** Resolved HEAD SHA of the new worktree. */
+  head: string;
+  remoteBranch: RemoteBranchRecord | null;
+}
+
 export async function setupWorktree(
   repoRoot: string,
   branch: string,
@@ -117,11 +152,36 @@ export async function setupWorktree(
   startPoint?: string,
   sandbox?: WorktreeSandbox,
   log?: (type: EventKind, msg: string) => void,
-): Promise<void> {
+  opts?: WorktreeSetupOptions,
+): Promise<WorktreeSetupResult> {
   // The base of record is the freshly fetched remote-tracking ref — never local
   // branch state, which can be stale, dirty, or ahead (#1167).
   await gitFetch(repoRoot);
   const base = startPoint ?? (await defaultRemoteBase(repoRoot));
+  // An earlier run's push (#1868) is recorded and reported here, never adopted or discarded.
+  let remoteBranch: RemoteBranchRecord | null = null;
+  const remoteSha = await detectRemoteBranch(repoRoot, branch);
+  if (remoteSha) {
+    remoteBranch = { sha: remoteSha };
+    let prText = 'open PR not checked';
+    if (opts?.findOpenPr) {
+      let lookup: PrLookup;
+      try {
+        lookup = await opts.findOpenPr(branch);
+      } catch (err) {
+        lookup = { status: 'error', detail: err instanceof Error ? err.message : String(err) };
+      }
+      if (lookup.status === 'found') {
+        remoteBranch.prNumber = lookup.prNumber;
+        prText = `open PR #${lookup.prNumber}`;
+      } else if (lookup.status === 'absent') {
+        prText = 'no open PR';
+      } else {
+        prText = `open PR lookup failed: ${lookup.detail}`;
+      }
+    }
+    log?.('remote-branch-preexisting', `origin/${branch} already exists @ ${remoteSha}; ${prText}`);
+  }
   await execGit(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot }).catch(() => {});
   await execGit(`git branch -D ${shellEscape(branch)}`, { cwd: repoRoot }).catch(() => {});
   mkdirSync(dirname(worktreePath), { recursive: true });
@@ -134,6 +194,7 @@ export async function setupWorktree(
   if (sandbox) {
     await createMicroVm({ ...sandbox, worktreePath, log });
   }
+  return { base, head: stdout.trim(), remoteBranch };
 }
 
 export async function cleanupWorktree(
