@@ -1,4 +1,5 @@
 // packages/cli/src/cli/feedback.ts — `factory feedback <pr-url>`: file a human review's findings as one factory issue (#1851).
+// Each review body is sanitized on its own (stripHiddenContent) before it reaches the title or body (#1852).
 
 import { createHash } from 'node:crypto';
 import { hostname } from 'node:os';
@@ -7,7 +8,7 @@ import { join } from 'node:path';
 import type { FactoryEvent } from '@on-par/factory-core';
 import { readEvents } from '@on-par/factory-core';
 import type { FileBugResult, FilingGitHubClient, FingerprintedFailure } from '@on-par/factory-core/internal';
-import { DEFAULT_BUG_LABELS, factoryBranchIssue, fileBug } from '@on-par/factory-core/internal';
+import { DEFAULT_BUG_LABELS, factoryBranchIssue, fileBug, stripHiddenContent } from '@on-par/factory-core/internal';
 import type { Octokit } from '@octokit/rest';
 
 export const FEEDBACK_TRIAGE_LABEL = 'factory:needs-triage';
@@ -64,24 +65,26 @@ export async function collectReviewFindings(client: FeedbackGitHubClient, pr: Pr
   const [reviews, comments] = await Promise.all([client.listReviews(pr), client.listReviewComments(pr)]);
   const findings: ReviewFinding[] = [];
   for (const r of reviews) {
-    if (!r.body?.trim()) continue;
+    const body = stripHiddenContent(r.body ?? '').trim();
+    if (!body) continue;
     findings.push({
-      author: r.user,
+      author: stripHiddenContent(r.user),
       kind: 'review',
-      body: r.body.trim(),
+      body,
       at: r.submittedAt,
       state: r.state,
       url: r.url,
     });
   }
   for (const c of comments) {
-    if (!c.body?.trim()) continue;
+    const body = stripHiddenContent(c.body ?? '').trim();
+    if (!body) continue;
     findings.push({
-      author: c.user,
+      author: stripHiddenContent(c.user),
       kind: 'comment',
-      body: c.body.trim(),
+      body,
       at: c.createdAt,
-      path: c.path,
+      path: c.path === undefined ? undefined : stripHiddenContent(c.path),
       line: c.line,
       url: c.url,
     });
