@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Filter `gh pr list --json number,isDraft,mergeable,statusCheckRollup,closingIssuesReferences`
+"""Filter `gh pr list --json number,isDraft,mergeable,statusCheckRollup,closingIssuesReferences,labels`
 output down to landable PRs: open, non-draft, MERGEABLE, with at least one CI check and
 every check SUCCESS. Reads the JSON array on stdin; prints one line per landable PR:
-"<number>\t<comma-joined closing issue numbers>" (issue field empty for standalone PRs).
+"<number>\t<comma-joined closing issue numbers>\t<gated>" (issue field empty for standalone PRs;
+<gated> is "gated" when the PR's own labels include $GATE_LABEL, default no-auto-merge, else empty).
 Used by scripts/auto-merge-sweep.sh."""
 import json
+import os
 import sys
+
+GATE_LABEL = os.environ.get("GATE_LABEL") or "no-auto-merge"
 
 
 def is_landable(pr):
@@ -25,13 +29,18 @@ def closing_issue(pr):
     return ",".join(dict.fromkeys(str(r["number"]) for r in refs))
 
 
+def pr_gated(pr, label):
+    return any((entry or {}).get("name") == label for entry in (pr.get("labels") or []))
+
+
 def main():
     raw = sys.stdin.read()
     prs = json.loads(raw) if raw.strip() else []
     for pr in prs:
         if not is_landable(pr):
             continue
-        print(f"{pr['number']}\t{closing_issue(pr)}")
+        gated = "gated" if pr_gated(pr, GATE_LABEL) else ""
+        print(f"{pr['number']}\t{closing_issue(pr)}\t{gated}")
 
 
 if __name__ == "__main__":

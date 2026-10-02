@@ -27,6 +27,10 @@ describe('EVENT_TRAITS', () => {
 });
 
 describe('eventTraitsFor', () => {
+  it('classifies merge-gated-override as a non-park warning', () => {
+    expect(eventTraitsFor('merge-gated-override')).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
+  });
+
   it('returns the matching EVENT_TRAITS entry for a known kind', () => {
     expect(eventTraitsFor('plan')).toEqual(EVENT_TRAITS.plan);
   });
