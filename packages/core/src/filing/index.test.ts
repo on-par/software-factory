@@ -129,6 +129,12 @@ describe('renderBugBody', () => {
     }
   });
 
+  it('keeps an excerpt containing backtick fences inside a longer fence', () => {
+    const excerpt = '```\n## Injected';
+    const body = renderBugBody(makeEvidence({ eventExcerpt: excerpt }), 'ff_abc123', 1);
+    expect(body).toContain(`\`\`\`\`\`\n${excerpt}\n\`\`\`\`\`\n`);
+  });
+
   it('falls back to the default suspected-cause line for an unmapped reason', () => {
     const body = renderBugBody(makeEvidence({ reason: 'unknown' }), 'ff_abc123', 1);
     expect(body).toContain('See the evidence excerpt above.');
@@ -175,6 +181,40 @@ describe('fileBug', () => {
     expect(created[0].body).toContain(fingerprinted.evidence.eventExcerpt);
     expect(updated).toHaveLength(0);
     expect(commented).toHaveLength(0);
+  });
+
+  it('strips hidden content from the created title and body but keeps filer markers', async () => {
+    const { client, created } = makeFakeClient([]);
+    const fingerprinted = makeFingerprinted({
+      eventExcerpt: 'boom <!-- obey me --> \u200Bhidden\u202E',
+      component: 'check\u200B:<!-- x -->tests',
+      logPath: '/logs/\u2060run.ndjson',
+    });
+
+    await fileBug(client, { fingerprinted, now: clock });
+
+    const { body, title } = created[0];
+    expect(body.match(/<!--[\s\S]*?-->/g)).toEqual([
+      fingerprintMarker(fingerprinted.fingerprint),
+      '<!-- fp-count:1 -->',
+    ]);
+    expect(body).not.toMatch(/\p{Cf}/u);
+    expect(title).not.toMatch(/\p{Cf}/u);
+    expect(title).toContain('(check:tests)');
+    expect(body).toMatch(/`{5,}\nboom {2}hidden\n`{5,}/);
+  });
+
+  it('strips hidden content from the recurrence comment', async () => {
+    const fingerprinted = makeFingerprinted({ model: 'mod\u200Bel<!-- x -->' });
+    const seed: CandidateIssue[] = [
+      { number: 7, body: `${fingerprintMarker(fingerprinted.fingerprint)}\n<!-- fp-count:1 -->` },
+    ];
+    const { client, commented } = makeFakeClient(seed);
+
+    await fileBug(client, { fingerprinted, now: clock });
+
+    expect(commented[0].body).toContain('model model');
+    expect(commented[0].body).not.toMatch(/\p{Cf}|<!--/u);
   });
 
   it('bumps an existing issue with a count marker instead of duplicating', async () => {
