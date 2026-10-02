@@ -29,6 +29,38 @@ function bulletList(items: string[]): string {
   return items.length > 0 ? items.join('\n') : '_None recorded._';
 }
 
+type DeltaRow = NonNullable<DesignArtifact['behaviorDelta']>[number];
+type ExtList = NonNullable<DesignArtifact['externalLists']>[number];
+
+function tableCell(text: string): string {
+  return text.replace(/\r?\n/g, ' ').replace(/\|/g, '\\|');
+}
+
+function renderEdgeInputs(inputs: string[] | undefined): string[] {
+  if (!inputs || inputs.length === 0) return [];
+  return ['### Edge inputs', '', inputs.map((i) => `- ${i}`).join('\n'), ''];
+}
+
+function renderBehaviorDelta(rows: DeltaRow[] | undefined): string[] {
+  if (!rows || rows.length === 0) return [];
+  const body = rows.map((r) => `| ${[r.input, r.branch, r.before, r.after, r.verdict].map(tableCell).join(' | ')} |`);
+  return [
+    '### Behavior delta',
+    '',
+    ['| Input | Branch | Before | After | Verdict |', '| --- | --- | --- | --- | --- |', ...body].join('\n'),
+    '',
+  ];
+}
+
+function renderExternalLists(lists: ExtList[] | undefined): string[] {
+  if (!lists || lists.length === 0) return [];
+  const items = lists.map((l) => {
+    const gaps = l.gaps.length > 0 ? l.gaps.map((g) => `  - gap: ${g}`).join('\n') : '  - gaps: none';
+    return `- **${l.name}** (${l.location}) — source: ${l.source}\n${gaps}`;
+  });
+  return ['### External lists', '', items.join('\n'), ''];
+}
+
 export function renderDesignArtifact(artifact: DesignArtifact, issue: number): string {
   const rejectedList =
     artifact.approach.rejected.length > 0
@@ -79,6 +111,9 @@ export function renderDesignArtifact(artifact: DesignArtifact, issue: number): s
     '',
     artifact.behaviorContract.map((b) => `- ${b}`).join('\n'),
     '',
+    ...renderEdgeInputs(artifact.edgeInputs),
+    ...renderBehaviorDelta(artifact.behaviorDelta),
+    ...renderExternalLists(artifact.externalLists),
     '### Verification plan',
     '',
     artifact.verificationPlan.map((v) => `- \`${v.command}\` — pass when: ${v.passWhen}`).join('\n'),

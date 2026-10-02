@@ -140,6 +140,134 @@ describe('renderDesignArtifact', () => {
     const noneRecordedCount = md.split('_None recorded._').length - 1;
     expect(noneRecordedCount).toBeGreaterThanOrEqual(3);
   });
+
+  describe('edge inputs, behavior delta, external lists (#1816)', () => {
+    const delta = [
+      { input: 'empty body', branch: 'guard', before: 'throws', after: 'returns []', verdict: 'better' as const },
+      { input: 'unicode', branch: 'parse', before: 'ok', after: 'ok', verdict: 'same' as const },
+      {
+        input: 'any other input',
+        branch: 'fallthrough',
+        before: 'returns null',
+        after: 'returns null',
+        verdict: 'same' as const,
+      },
+    ];
+    const full: DesignArtifact = {
+      ...artifact,
+      edgeInputs: ['empty issue body', 'unicode title'],
+      behaviorDelta: delta,
+      externalLists: [
+        {
+          name: 'ParkReason',
+          location: 'packages/core/src/park.ts',
+          source: 'hand-maintained enum',
+          gaps: ['no held-on-merge value'],
+        },
+        { name: 'Other', location: 'a.ts', source: 'generated', gaps: [] },
+      ],
+    };
+
+    it('renders the delta table with a row per entry including the fallthrough row', () => {
+      const md = renderDesignArtifact(full, 422);
+      expect(md).toContain('### Behavior delta');
+      expect(md).toContain('| Input | Branch | Before | After | Verdict |');
+      expect(md).toContain('| --- | --- | --- | --- | --- |');
+      expect(md).toContain('| empty body | guard | throws | returns [] | better |');
+      expect(md).toContain('| any other input | fallthrough | returns null | returns null | same |');
+      expect(md.split('\n').filter((l) => l.startsWith('| ')).length).toBe(5);
+    });
+
+    it('escapes pipes and collapses newlines in cells', () => {
+      const md = renderDesignArtifact({ ...artifact, behaviorDelta: [{ ...delta[0]!, before: 'a | b\nc' }] }, 422);
+      const row = md.split('\n').find((l) => l.startsWith('| empty body'))!;
+      expect(row).toContain('a \\| b c');
+      expect(row.replace(/\\\|/g, '').split('|').length).toBe(7);
+    });
+
+    it('renders edge inputs and external lists with gaps', () => {
+      const md = renderDesignArtifact(full, 422);
+      expect(md).toContain('### Edge inputs');
+      expect(md).toContain('- empty issue body');
+      expect(md).toContain('- unicode title');
+      expect(md).toContain('### External lists');
+      expect(md).toContain('- **ParkReason** (packages/core/src/park.ts) — source: hand-maintained enum');
+      expect(md).toContain('  - gap: no held-on-merge value');
+      expect(md).toContain('  - gaps: none');
+    });
+
+    it('orders the new sections between behavior contract and verification plan', () => {
+      const md = renderDesignArtifact(full, 422);
+      const idx = [
+        '### Behavior contract',
+        '### Edge inputs',
+        '### Behavior delta',
+        '### External lists',
+        '### Verification plan',
+      ].map((h) => md.indexOf(h));
+      expect(idx).toEqual([...idx].sort((a, b) => a - b));
+      expect(idx.every((i) => i >= 0)).toBe(true);
+    });
+
+    it('renders the pre-change output when the fields are absent or empty', () => {
+      const expected = [
+        '## Design artifact (#422)',
+        '',
+        '### Restated problem',
+        '',
+        artifact.restatedProblem,
+        '',
+        '### Approach',
+        '',
+        artifact.approach.chosen,
+        '',
+        'Rejected:',
+        '',
+        '- **Separate file only** — BUILD would need an extra read.',
+        '',
+        '### Interfaces touched',
+        '',
+        '- packages/core/src/types/index.ts',
+        '',
+        '### Target types',
+        '',
+        '- `DesignArtifact` (packages/contracts/src/design.ts) — changed',
+        '',
+        '### Key signatures',
+        '',
+        '- `renderDesignGrounding` (packages/core/src/design/index.ts) — `(artifact: DesignArtifact) => string`',
+        '',
+        '### Call graph',
+        '',
+        '- buildPhase → renderDesignGrounding — grounding block for the worker prompt',
+        '',
+        '### Behavior contract',
+        '',
+        '- PLAN emits a validated design artifact.',
+        '',
+        '### Verification plan',
+        '',
+        '- `bash scripts/verify.sh` — pass when: all checks green',
+        '',
+        '### Risk / blast radius',
+        '',
+        artifact.riskBlastRadius,
+        '',
+        '### Open questions',
+        '',
+        '_None._',
+        '',
+      ].join('\n');
+      const base = renderDesignArtifact(artifact, 422);
+      expect(base).toBe(expected);
+      expect(base).not.toContain('### Edge inputs');
+      expect(base).not.toContain('### Behavior delta');
+      expect(base).not.toContain('### External lists');
+      expect(renderDesignArtifact({ ...artifact, edgeInputs: [], behaviorDelta: [], externalLists: [] }, 422)).toBe(
+        expected,
+      );
+    });
+  });
 });
 
 describe('renderDesignGrounding', () => {
