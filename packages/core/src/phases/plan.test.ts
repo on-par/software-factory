@@ -63,6 +63,57 @@ afterEach(async () => {
 });
 
 describe('buildPlanPrompt', () => {
+  const riskyPrompt = () =>
+    buildPlanPrompt({
+      issue: 36,
+      issueTitle: 'Add eval runner',
+      issueBody: 'Measure the current prompt.',
+      specPath: '/tmp/spec.md',
+      constitutionCtx: '',
+    });
+
+  it('requires edgeInputs, behaviorDelta, and externalLists for risky changes', () => {
+    const prompt = riskyPrompt();
+    for (const s of [
+      'edgeInputs',
+      'behaviorDelta',
+      'externalLists',
+      'dispatch',
+      'default branch',
+      'external tool',
+      'you MUST fill',
+    ]) {
+      expect(prompt).toContain(s);
+    }
+  });
+
+  it('asks what each new explicit flag turns off', () => {
+    expect(riskyPrompt()).toMatch(/what each new explicit\s+flag turns off/);
+  });
+
+  it('says worse or unknown rows are fixed in the approach or listed in openQuestions', () => {
+    expect(riskyPrompt()).toMatch(
+      /verdict worse or unknown must be fixed in the approach or\s+also listed in openQuestions/,
+    );
+  });
+
+  it('shows the three optional design keys with schema field names', () => {
+    const prompt = riskyPrompt();
+    for (const s of [
+      'verdict: same|better|worse|unknown',
+      'input:',
+      'branch:',
+      'before:',
+      'after:',
+      'name:',
+      'location:',
+      'source:',
+      'gaps:',
+    ]) {
+      expect(prompt).toContain(s);
+    }
+  });
+
   it('contains the issue fields, target spec path, and route template marker', () => {
     const prompt = buildPlanPrompt({
       issue: 36,
