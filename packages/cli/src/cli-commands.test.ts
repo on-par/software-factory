@@ -1464,6 +1464,32 @@ bash scripts/verify.sh
       expect(h.backtestCalls[0].handLabels.get(77)).toBe('B');
     });
 
+    it('fetches issue text for the backtest and survives a defect lookup failure', async () => {
+      h.octokit.rest.issues.get = vi.fn(async () => ({ data: { title: 'T', body: null } }));
+      h.octokit.rest.repos = {
+        listCommits: vi.fn(async () => {
+          throw new Error('rate limited');
+        }),
+      };
+      let issue: unknown;
+      h.backtestImpl = async (_input, deps) => {
+        issue = await deps.getIssue('1');
+        return {
+          records: [],
+          skipped: [],
+          covered: 1,
+          spentUsd: 0,
+          unpricedCalls: 2,
+          stopped: null,
+          notRun: 0,
+        };
+      };
+      await runMain('classifier', 'backtest', '--since', '2026-08-01');
+      expect(issue).toEqual({ title: 'T', body: '' });
+      expect(errored()).toContain('post-merge defect lookup failed');
+      expect(logged()).toContain('2 classifier call(s) were unpriced');
+    });
+
     it('reports when no merged PRs match', async () => {
       await runMain('classifier', 'backtest', '--since', '2027-01-01');
       expect(logged()).toContain('No merged factory PRs since 2027-01-01.');
