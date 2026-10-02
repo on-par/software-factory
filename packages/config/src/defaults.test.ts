@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { defaultFactoryConfig, defaultModelsConfig, defaultRoutesConfig } from './defaults.js';
+import { defaultEvidenceCaps, defaultFactoryConfig, defaultModelsConfig, defaultRoutesConfig } from './defaults.js';
 
 describe('shipped defaults', () => {
   it('defaults intake to warn with no trusted approvers', () => {
@@ -135,6 +135,13 @@ describe('shipped defaults', () => {
     expect(defaultFactoryConfig.filing.maxPerDay).toBe(20);
     expect(defaultFactoryConfig.ingest.maxPerCycle).toBe(20);
     expect(defaultFactoryConfig.design.blockUnresolvedRegressions).toBe(false);
+  });
+});
+
+describe('evidence caps (#1842)', () => {
+  it('ships the default excerpt and body caps', () => {
+    expect(defaultEvidenceCaps).toEqual({ maxExcerptChars: 2000, maxBodyChars: 8000 });
+    expect(defaultEvidenceCaps.maxExcerptChars).toBeLessThan(defaultEvidenceCaps.maxBodyChars);
   });
 });
 
