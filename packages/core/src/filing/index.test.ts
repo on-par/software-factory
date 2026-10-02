@@ -381,6 +381,29 @@ describe('fileBug', () => {
   });
 });
 
+describe('fileBug title/problem overrides (#1851)', () => {
+  it('uses a sanitized title and problem', async () => {
+    const { client, created } = makeFakeClient([]);
+    await fileBug(client, {
+      fingerprinted: makeFingerprinted(),
+      now: clock,
+      title: '[feedback] hi\u200B there<!-- hidden -->',
+      problem: 'Custom\u200B problem <!-- secret -->text',
+    });
+    expect(created[0].title).toBe('[feedback] hi there');
+    expect(created[0].body).toContain('## Problem\nCustom problem text\n');
+    expect(created[0].body).not.toContain('Factory failure in the');
+    expect(created[0].body).not.toContain('secret');
+  });
+
+  it('falls back to defaults when overrides are blank', async () => {
+    const { client, created } = makeFakeClient([]);
+    await fileBug(client, { fingerprinted: makeFingerprinted(), now: clock, title: '  ', problem: '' });
+    expect(created[0].title).toBe('[factory] verify_failed in build (check:tests)');
+    expect(created[0].body).toContain('Factory failure in the build phase');
+  });
+});
+
 describe('createOctokitFilingClient', () => {
   function createOctokit() {
     const calls: any[] = [];

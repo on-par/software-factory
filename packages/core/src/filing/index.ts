@@ -56,6 +56,10 @@ export interface FileBugInput {
   host?: string;
   /** Evidence size caps (default: defaultEvidenceCaps). */
   caps?: EvidenceCaps;
+  /** Overrides the default "[factory] <reason> in <phase> (<component>)" title. Sanitized. */
+  title?: string;
+  /** Overrides the default "## Problem" paragraph. Sanitized. */
+  problem?: string;
 }
 
 export interface FileBugResult {
@@ -105,6 +109,8 @@ export interface RenderBugBodyOptions {
   host?: string;
   /** Size caps (default: defaultEvidenceCaps from @on-par/factory-config). */
   caps?: EvidenceCaps;
+  /** Overrides the default "## Problem" paragraph (sanitized; empty falls back to default). */
+  problem?: string;
 }
 
 export interface CappedExcerpt {
@@ -131,12 +137,16 @@ function composeBody(
   occurrences: number,
   pointer: string,
   excerpt: CappedExcerpt,
+  problem: string | undefined,
 ): string {
   const note = excerpt.truncated
     ? `\n\n_Evidence truncated: showing the first ${excerpt.shownChars} of ${excerpt.totalChars} characters. The full raw log stays on the originating machine at \`${pointer}\`._`
     : '';
+  const problemText = problem?.trim()
+    ? problem.trim()
+    : `Factory failure in the ${evidence.phase} phase (${evidence.component}) — reason: ${evidence.reason}, origin: ${evidence.origin}.`;
   return `## Problem
-Factory failure in the ${evidence.phase} phase (${evidence.component}) — reason: ${evidence.reason}, origin: ${evidence.origin}.
+${problemText}
 
 ## Evidence
 - Repo under work: ${evidence.repo}
@@ -169,6 +179,7 @@ export function renderBugBody(
   const host = stripHiddenContent(options.host ?? hostname()) || 'unknown-host';
   const caps = options.caps ?? defaultEvidenceCaps;
   const pointer = `${host}:${evidence.logPath}`;
+  const problem = options.problem === undefined ? undefined : stripHiddenContent(options.problem);
   let budget = caps.maxExcerptChars;
   let body = composeBody(
     evidence,
@@ -176,10 +187,18 @@ export function renderBugBody(
     occurrences,
     pointer,
     capEvidenceExcerpt(evidence.eventExcerpt, budget),
+    problem,
   );
   while (body.length > caps.maxBodyChars && budget > 0) {
     budget = Math.max(0, budget - (body.length - caps.maxBodyChars));
-    body = composeBody(evidence, fingerprint, occurrences, pointer, capEvidenceExcerpt(evidence.eventExcerpt, budget));
+    body = composeBody(
+      evidence,
+      fingerprint,
+      occurrences,
+      pointer,
+      capEvidenceExcerpt(evidence.eventExcerpt, budget),
+      problem,
+    );
   }
   return body;
 }
@@ -221,12 +240,13 @@ export async function fileBug(client: FilingGitHubClient, input: FileBugInput): 
   }
 
   const labels = [...(input.labels ?? DEFAULT_BUG_LABELS)];
-  const title = `[factory] ${evidence.reason} in ${evidence.phase} (${evidence.component})`;
+  const overrideTitle = input.title === undefined ? '' : stripHiddenContent(input.title).trim();
+  const title = overrideTitle || `[factory] ${evidence.reason} in ${evidence.phase} (${evidence.component})`;
   const { number } = await client.createIssue({
     owner,
     repo,
     title,
-    body: renderBugBody(evidence, fingerprint, 1, { host: input.host, caps: input.caps }),
+    body: renderBugBody(evidence, fingerprint, 1, { host: input.host, caps: input.caps, problem: input.problem }),
     labels,
   });
   return { action: 'created', repo: target, issueNumber: number, fingerprint, occurrences: 1 };
