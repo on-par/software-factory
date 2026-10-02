@@ -3042,6 +3042,17 @@ describe('cli', () => {
       expect(parkReasonFor(new LaneParkError('x', 'fail'))).toBe('fail');
     });
 
+    it('carries the failure signature and failing checks on LaneParkError when given', () => {
+      const err = new LaneParkError('x', 'fail', { failureSignature: 's', failingChecks: ['lint'] });
+      expect(err.failureSignature).toBe('s');
+      expect(err.failingChecks).toEqual(['lint']);
+      expect(err.outcome).toEqual({ state: 'parked', reason: 'fail', failureSignature: 's', failingChecks: ['lint'] });
+      const bare = new LaneParkError('x', 'fail');
+      expect(bare.failureSignature).toBeUndefined();
+      expect(bare.failingChecks).toBeUndefined();
+      expect(bare.outcome).toEqual({ state: 'parked', reason: 'fail' });
+    });
+
     it('maps a LandConflictError to conflict', () => {
       expect(parkReasonFor(new LandConflictError('x'))).toBe('conflict');
     });

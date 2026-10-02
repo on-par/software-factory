@@ -1431,13 +1431,26 @@ export { parkEvents, parkReasonFor } from '@on-par/factory-core';
 export class LaneParkError extends Error {
   readonly outcome: Extract<RunOutcome, { state: 'parked' }>;
 
-  constructor(message: string, reason: ParkReason) {
+  constructor(message: string, reason: ParkReason, failure?: { failureSignature?: string; failingChecks?: string[] }) {
     super(message);
-    this.outcome = { state: 'parked', reason };
+    this.outcome = {
+      state: 'parked',
+      reason,
+      ...(failure?.failureSignature !== undefined ? { failureSignature: failure.failureSignature } : {}),
+      ...(failure?.failingChecks !== undefined ? { failingChecks: failure.failingChecks } : {}),
+    };
   }
 
   get reason(): ParkReason {
     return this.outcome.reason;
+  }
+
+  get failureSignature(): string | undefined {
+    return this.outcome.failureSignature;
+  }
+
+  get failingChecks(): string[] | undefined {
+    return this.outcome.failingChecks;
   }
 }
 
@@ -1946,7 +1959,13 @@ export async function shipIssue(
 
   const reason: ParkReason = outcome.state === 'escalated' ? 'escalate' : outcome.reason;
   const message = outcome.state === 'escalated' ? outcome.reason : (terminalMessage ?? `run parked: ${outcome.reason}`);
-  throw new LaneParkError(message, reason);
+  throw new LaneParkError(
+    message,
+    reason,
+    outcome.state === 'parked'
+      ? { failureSignature: outcome.failureSignature, failingChecks: outcome.failingChecks }
+      : undefined,
+  );
 }
 
 async function maybeWriteLocalRunReport(opts: {

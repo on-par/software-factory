@@ -307,6 +307,7 @@ import {
   cmdUsage,
   formatInitReachability,
   IssueDecomposedError,
+  LaneParkError,
   IssueSkippedError,
   main,
   parseIssueArg,
@@ -4757,6 +4758,28 @@ describe('shipIssue (direct)', () => {
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('decompose_file_failed');
     expect(events).toContain('queue rewrite for #5 failed');
+  });
+
+  it('carries the CHECK failure signature and failing checks on the LaneParkError', async () => {
+    h.checkResult = {
+      passed: false,
+      summary: { results: [{ checker: 'tests', result: 'FAIL', details: 'x' }], failures: 1 },
+      reworkRounds: 0,
+      failureSignature: 'sig-1',
+    };
+    const err = await shipIssue(5, {}, ctx()).catch((e) => e);
+    expect(err).toBeInstanceOf(LaneParkError);
+    expect(err.failureSignature).toBe('sig-1');
+    expect(err.failingChecks).toEqual(['tests']);
+    expect(err.outcome.failureSignature).toBe('sig-1');
+  });
+
+  it('leaves the failure signature undefined for a non-CHECK park', async () => {
+    h.planResult = { ok: false, route: 'claude', escalate: 'needs human' };
+    const err = await shipIssue(5, {}, ctx()).catch((e) => e);
+    expect(err).toBeInstanceOf(LaneParkError);
+    expect(err.failureSignature).toBeUndefined();
+    expect(err.failingChecks).toBeUndefined();
   });
 
   it('throws a LaneParkError with reason escalate when the build escalates', async () => {
