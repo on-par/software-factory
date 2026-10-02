@@ -111,6 +111,20 @@ describe('createLogger', () => {
     expect(event.failoverReason).toBe('rate_limit');
   });
 
+  it('includes lanePaused only when passed as extra', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+    const logger = createLogger(eventsFile, { lane: 'app' }, { out: { write: () => {} } });
+    const lanePaused = { lane: 'app', signature: 'sig-A', failingChecks: ['tests'], firstIssue: 1, secondIssue: 2 };
+
+    logger.warn('lane-paused', 'paused', { lanePaused });
+    logger.warn('lane-paused', 'again');
+
+    const [withPayload, without] = readEvents(eventsFile);
+    expect(withPayload.lanePaused).toEqual(lanePaused);
+    expect(without).not.toHaveProperty('lanePaused');
+  });
+
   it('includes actor only when passed as extra', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
     const eventsFile = join(tmpDir, 'events.ndjson');

@@ -62,6 +62,7 @@ export {
   resolveEffectiveBuildRoute,
   resolveEffectiveModelPins,
   resolveEfficiencyPolicy,
+  resolveLaneBreakerThreshold,
   resolveUsageCap,
   resolveWatchdogPolicy,
   routeForBuildModel,
