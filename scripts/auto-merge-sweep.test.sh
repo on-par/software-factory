@@ -53,9 +53,37 @@ if [ "$1 $2" = "pr list" ]; then
     "mergeable": "MERGEABLE",
     "statusCheckRollup": [{"conclusion": "SUCCESS"}],
     "closingIssuesReferences": [{"number": 55}, {"number": 56}]
+  },
+  {
+    "number": 104,
+    "isDraft": false,
+    "mergeable": "MERGEABLE",
+    "statusCheckRollup": [{"conclusion": "SUCCESS"}],
+    "closingIssuesReferences": [],
+    "labels": [{"name": "no-auto-merge"}]
+  },
+  {
+    "number": 105,
+    "isDraft": false,
+    "mergeable": "MERGEABLE",
+    "statusCheckRollup": [{"conclusion": "SUCCESS"}],
+    "closingIssuesReferences": [{"number": 60}]
+  },
+  {
+    "number": 106,
+    "isDraft": false,
+    "mergeable": "MERGEABLE",
+    "statusCheckRollup": [{"conclusion": "SUCCESS"}],
+    "closingIssuesReferences": [{"number": 61}]
   }
 ]
 JSON
+  exit 0
+elif [ "$1 $2" = "issue view" ]; then
+  case "$3" in
+    60) echo "no-auto-merge"; exit 0 ;;
+    61) echo "simulated label failure" >&2; exit 9 ;;
+  esac
   exit 0
 elif [ "$1 $2" = "pr merge" ]; then
   echo "$@" >>"${GH_CALL_LOG}"
@@ -104,6 +132,18 @@ assert_line not_contains "landed #42"
 assert_line contains "SKIPPING PR #103: closes multiple issues (#55, #56)"
 assert_line not_contains "landing issue #55"
 assert_line not_contains "merging standalone PR #103"
+
+# --- no-auto-merge gate: gated PRs / issues / unreadable labels are never merged ---
+
+assert_line contains "SKIPPING PR #104: labelled no-auto-merge"
+assert_line contains "SKIPPING PR #105: issue #60 is labelled no-auto-merge"
+assert_line contains "SKIPPING PR #106: could not read labels of issue #61 (exit 9)"
+assert_line not_contains "merging standalone PR #104"
+assert_line not_contains "landing issue #60"
+assert_line not_contains "landing issue #61"
+if grep -q "pr merge 104" "$GH_CALL_LOG"; then
+  echo "FAIL: gh pr merge was called for gated PR #104" >&2; cat "$GH_CALL_LOG" >&2; exit 1
+fi
 
 # --- log persistence: log() tees dated lines to LOG_FILE, creating its dir ---
 
