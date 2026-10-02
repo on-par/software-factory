@@ -3,9 +3,19 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { defaultEvidenceCaps, defaultFactoryConfig, defaultModelsConfig, defaultRoutesConfig } from './defaults.js';
+import {
+  defaultEvidenceCaps,
+  defaultFactoryConfig,
+  defaultLaneBreakerThreshold,
+  defaultModelsConfig,
+  defaultRoutesConfig,
+} from './defaults.js';
 
 describe('shipped defaults', () => {
+  it('defaults the lane breaker threshold to 2 (#1915)', () => {
+    expect(defaultLaneBreakerThreshold).toBe(2);
+  });
+
   it('describes build_claude as driving its own commits without publishing (#1870)', () => {
     const description = defaultRoutesConfig.routes['build_claude']?.description ?? '';
     expect(description).toContain('drives its own commits');

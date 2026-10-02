@@ -15,7 +15,13 @@ import { z } from 'zod';
 
 import { isPlainObject, loadFactoryConfig, loadModelsConfig, type FactoryConfig } from './index.js';
 import { DEFAULT_REVIEW_FLOOR_RULES } from '../review/floor.js';
-import { RepoFactoryConfigV2Schema, resolveEfficiencyPolicy, resolveUsageCap, resolveWatchdogPolicy } from './repo.js';
+import {
+  RepoFactoryConfigV2Schema,
+  resolveEfficiencyPolicy,
+  resolveLaneBreakerThreshold,
+  resolveUsageCap,
+  resolveWatchdogPolicy,
+} from './repo.js';
 
 /** Top-level keys the loaders accept that the example deliberately leaves out, with why.
  *  example.test.ts fails when a newly accepted key is neither rendered nor listed here. */
@@ -177,6 +183,7 @@ function modelNamespace(): Node[] {
         unset('perIssueCapUsd', doc('budget', 'perIssueCapUsd'), '<usd>'),
         unset('fastPath', doc('budget', 'fastPath'), efficiency.fastPath),
         unset('maxReworkRounds', doc('budget', 'maxReworkRounds'), efficiency.maxReworkRounds),
+        unset('laneBreakerThreshold', doc('budget', 'laneBreakerThreshold'), resolveLaneBreakerThreshold(null)),
         {
           kind: 'object',
           key: 'watchdog',

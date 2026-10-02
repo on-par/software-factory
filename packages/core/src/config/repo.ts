@@ -7,6 +7,7 @@
 
 import { existsSync } from 'node:fs';
 
+import { defaultLaneBreakerThreshold } from '@on-par/factory-config';
 import { z } from 'zod';
 import { readRepoConfigFile } from './repo-config-file.js';
 import { runConfigSource } from './run-config-source.js';
@@ -142,6 +143,12 @@ export const RepoFactoryConfigV2Schema = z
           .positive()
           .optional()
           .describe('Hard USD cap per issue, on top of the run-wide cap. Unset: no per-issue cap.'),
+        laneBreakerThreshold: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe('Lane circuit breaker threshold (non-negative integer). 0 turns the breaker off. Unset: 2.'),
         /** Usage-watchdog knobs, colocated with `capUsd` since both gate the usage
          *  supervisor. Each field is independently optional so a repo can durably pin
          *  just one, e.g. `{"watchdog": {"pollSeconds": 60}}` (see resolveWatchdogPolicy). */
@@ -230,6 +237,11 @@ export function resolveEfficiencyPolicy(repo: RepoFactoryConfig | null): Efficie
     maxReworkRounds: repo?.budget?.maxReworkRounds ?? 1,
     perIssueCapUsd: repo?.budget?.perIssueCapUsd,
   };
+}
+
+/** Resolve the lane breaker threshold: repo `budget.laneBreakerThreshold` > the packaged default (2). 0 means off. */
+export function resolveLaneBreakerThreshold(repo: RepoFactoryConfig | null): number {
+  return repo?.budget?.laneBreakerThreshold ?? defaultLaneBreakerThreshold;
 }
 
 // ---------- Loading ----------

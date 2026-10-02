@@ -601,6 +601,9 @@ export const defaultEvidenceCaps: EvidenceCapsDefaults = {
   maxBodyChars: 8000,
 };
 
+/** Lane circuit breaker threshold (#1915): default for `budget.laneBreakerThreshold`. 0 turns the breaker off. */
+export const defaultLaneBreakerThreshold = 2;
+
 /** Global factory configuration: paths, timeouts, merge/worktree/budget/intake defaults. */
 export const defaultFactoryConfig: FactoryDefaults = {
   version: 1,

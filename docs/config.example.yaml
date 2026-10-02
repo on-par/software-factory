@@ -68,6 +68,8 @@ version: 2
   # fastPath: false
   # Checker-rework retries per issue (0-3).
   # maxReworkRounds: 1
+  # Lane circuit breaker threshold (non-negative integer). 0 turns the breaker off. Unset: 2.
+  # laneBreakerThreshold: 2
   # Usage watchdog. `factory run` / `supervise` flags beat these values.
   # watchdog:
     # Usage fraction (0-1] at which work pauses. Beats FACTORY_STOP_AT.
