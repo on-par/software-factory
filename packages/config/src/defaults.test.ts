@@ -6,6 +6,13 @@ import { describe, expect, it } from 'vitest';
 import { defaultEvidenceCaps, defaultFactoryConfig, defaultModelsConfig, defaultRoutesConfig } from './defaults.js';
 
 describe('shipped defaults', () => {
+  it('describes build_claude as driving its own commits without publishing (#1870)', () => {
+    const description = defaultRoutesConfig.routes['build_claude']?.description ?? '';
+    expect(description).toContain('drives its own commits');
+    expect(description).toContain('commit-only');
+    expect(description).not.toMatch(/\bpush|pull request|\bopens? (a )?PR\b|wait(s)? for CI/i);
+  });
+
   it('defaults intake to warn with no trusted approvers', () => {
     expect(defaultFactoryConfig.intake.enforce).toBe('warn');
     expect(defaultFactoryConfig.intake.trustedApprovers).toBeUndefined();
