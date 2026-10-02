@@ -5,6 +5,7 @@ import net from 'node:net';
 import { dirname } from 'node:path';
 
 import { type FileLockOptions, withFileLock, withGitLock } from '../utils/lock.js';
+import { dotnetEnv } from './dotnet.js';
 
 export interface PortLease {
   worktreeId: string;
@@ -313,11 +314,18 @@ export function headlessEnv(parentEnv: Record<string, string | undefined> = proc
 
 /** Full lane environment for build/check/rework child processes: headless
  *  contract always, port-lease vars when the lane holds a lease. `baseUrl`
- *  forwards to leaseEnv (e.g. a stable lane URL from the factory proxy). */
+ *  forwards to leaseEnv (e.g. a stable lane URL from the factory proxy).
+ *  When `worktreeRoot` is a .NET worktree, adds DOTNET_TieredPGO=0 unless the
+ *  parent environment already sets it. */
 export function laneEnv(
   port?: number,
   parentEnv: Record<string, string | undefined> = process.env,
   baseUrl?: string,
+  worktreeRoot?: string,
 ): Record<string, string> {
-  return { ...headlessEnv(parentEnv), ...(port !== undefined ? leaseEnv(port, baseUrl) : {}) };
+  return {
+    ...headlessEnv(parentEnv),
+    ...(port !== undefined ? leaseEnv(port, baseUrl) : {}),
+    ...(worktreeRoot !== undefined ? dotnetEnv(worktreeRoot, parentEnv) : {}),
+  };
 }
