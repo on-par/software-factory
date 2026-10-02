@@ -337,3 +337,53 @@ describe('gatherEvidencePack', () => {
     expect(markdown).toContain('- No design artifact recorded.');
   });
 });
+
+describe('renderEvidencePack — regression_hunt (#1839)', () => {
+  const render = (results: CheckSummary['results'], counts: Partial<CheckSummary>) =>
+    renderEvidencePack({
+      checkSummary: { failures: 0, passes: 0, skips: 0, total: results.length, results, ...counts },
+      issue: 1839,
+      events: [],
+      logFiles: [],
+    });
+
+  it('shows nested findings in full for a FAIL', () => {
+    const out = render(
+      [
+        {
+          checker: 'regression_hunt',
+          result: 'FAIL',
+          details: 'regressed',
+          findings: [
+            {
+              input: 'npm-shrinkwrap.json only',
+              before: 'ok-before',
+              after: 'bad-after',
+              evidence: 'e',
+              reproduced: true,
+            },
+          ],
+        },
+      ],
+      { failures: 1 },
+    );
+    expect(out).toContain('`regression_hunt`');
+    expect(out).toMatch(/ {2}- input: npm-shrinkwrap\.json only .*before: ok-before.*after: bad-after.*reproduced/);
+  });
+
+  it('shows an explicit no-findings bullet for a PASS', () => {
+    const out = render([{ checker: 'regression_hunt', result: 'PASS', details: 'clean', findings: [] }], { passes: 1 });
+    expect(out).toContain('  - no findings');
+  });
+
+  it('shows a SKIP as a skip with its reason', () => {
+    const out = render(
+      [{ checker: 'regression_hunt', result: 'SKIP', details: 'review floor class A — regression hunt not run' }],
+      { skips: 1 },
+    );
+    expect(out).toContain('⚪ SKIP `regression_hunt` — review floor class A');
+    expect(out).not.toContain('PASS `regression_hunt`');
+    expect(out).toContain('0 pass, 0 fail, 1 skip');
+    expect(out).not.toContain('  - ');
+  });
+});

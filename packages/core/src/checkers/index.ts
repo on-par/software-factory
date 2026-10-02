@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import type { EventKind } from '../events/kinds.js';
 import type { ModelRouter } from '../router/index.js';
-import type { CheckerOutput, CheckSummary, Constitution } from '../types/index.js';
+import type { CheckerOutput, CheckSummary, Constitution, RegressionFinding } from '../types/index.js';
 import { type CommandResult, type RunCommandOptions } from '../utils/command-runner.js';
 import { runVerificationCommand as runCommand } from './run-command.js';
 import { extractJsonObjects } from '../utils/json.js';
@@ -643,6 +643,22 @@ export async function runAllCheckers(
 }
 
 /** Folds checker outputs into the CheckSummary shape every review/report consumes. */
+const FINDING_EVIDENCE_MAX = 300;
+
+function oneLine(text: string): string {
+  return text.replace(/\s*[\r\n]+\s*/g, ' ');
+}
+
+/** One markdown bullet per regression finding — the single formatter the check summary and evidence pack share. */
+export function renderCheckerFindings(findings: readonly RegressionFinding[]): string[] {
+  if (findings.length === 0) return ['- no findings'];
+  return findings.map((f) => {
+    const evidence = oneLine(f.evidence);
+    const shown = evidence.length > FINDING_EVIDENCE_MAX ? `${evidence.slice(0, FINDING_EVIDENCE_MAX)}…` : evidence;
+    return `- input: ${oneLine(f.input)} — before: ${oneLine(f.before)} — after: ${oneLine(f.after)} — ${f.reproduced ? 'reproduced' : 'not reproduced'}${shown ? ` — evidence: ${shown}` : ''}`;
+  });
+}
+
 export function summarizeCheckerOutputs(results: CheckerOutput[]): CheckSummary {
   return {
     failures: results.filter((r) => r.result === 'FAIL').length,
