@@ -148,6 +148,7 @@ const FactoryConfigSchema = z.object({
   design: z
     .object({ blockUnresolvedRegressions: z.boolean().default(false) })
     .default({ blockUnresolvedRegressions: false }),
+  build: z.object({ publishFromBuild: z.boolean().default(false) }).default({ publishFromBuild: false }),
   kpis: z
     .object({
       defectWindowDays: z.number().int().positive().default(14),
@@ -316,6 +317,7 @@ export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'sweep',
   'plan_approval',
   'design',
+  'build',
   'kpis',
   'sandbox',
   'discovery',
@@ -415,6 +417,10 @@ function resolveEnabledFlag(env: NodeJS.ProcessEnv, envVar: string, fallback: bo
 
 export function resolveSkipCI(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
   return resolveEnabledFlag(env, 'FACTORY_SKIP_CI', config.ci?.skip ?? false);
+}
+
+export function resolveBuildPublish(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
+  return resolveEnabledFlag(env, 'FACTORY_BUILD_PUBLISH', config.build?.publishFromBuild ?? false);
 }
 
 export function resolveDesignRegressionBlock(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {

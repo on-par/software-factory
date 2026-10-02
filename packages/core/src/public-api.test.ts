@@ -32,6 +32,7 @@ const PUBLIC_API_KEYS = [
   'resolveEnvironmentProxy',
   'resolveIngestConfig',
   'resolveMergePolicy',
+  'resolveBuildPublish',
   'resolveDesignRegressionBlock',
   'resolvePlanApproval',
   'resolveProcessGroupGraceMs',

@@ -23,6 +23,7 @@ import {
   resolveLocalOnly,
   resolveMergePolicy,
   resolvePrClassifierPolicy,
+  resolveBuildPublish,
   resolveDesignRegressionBlock,
   resolvePlanApproval,
   resolveProcessGroupGraceMs,
@@ -1635,5 +1636,28 @@ describe('resolveDesignRegressionBlock', () => {
   it('falls back to config when env is unset', () => {
     const on = { ...config, design: { blockUnresolvedRegressions: true } };
     expect(resolveDesignRegressionBlock(on, {})).toBe(true);
+  });
+});
+
+describe('resolveBuildPublish', () => {
+  const config = loadFactoryConfig();
+
+  it('defaults to false from the shipped config', () => {
+    expect(config.build.publishFromBuild).toBe(false);
+    expect(resolveBuildPublish(config, {})).toBe(false);
+  });
+
+  it('FACTORY_BUILD_PUBLISH=1 wins over config false', () => {
+    expect(resolveBuildPublish(config, { FACTORY_BUILD_PUBLISH: '1' })).toBe(true);
+  });
+
+  it('FACTORY_BUILD_PUBLISH=0 wins over config true', () => {
+    const on = { ...config, build: { publishFromBuild: true } };
+    expect(resolveBuildPublish(on, { FACTORY_BUILD_PUBLISH: '0' })).toBe(false);
+  });
+
+  it('falls back to config when env is unset', () => {
+    const on = { ...config, build: { publishFromBuild: true } };
+    expect(resolveBuildPublish(on, {})).toBe(true);
   });
 });

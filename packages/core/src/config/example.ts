@@ -43,6 +43,10 @@ const RUNTIME_NOTES: Record<string, string> = {
     'Design-artifact gates at PLAN. blockUnresolvedRegressions: true stops PLAN before BUILD when a worse/unknown ' +
     'behaviorDelta row is not in openQuestions (default false logs design_regression_unresolved only). ' +
     'FACTORY_DESIGN_BLOCK_REGRESSIONS=1/0 beats it.',
+  build:
+    'BUILD policy. publishFromBuild: true lets the claude BUILD worker push, open a PR and wait for CI before ' +
+    'CHECK (the old behavior). Default false keeps BUILD commit-only on every route; SHIP pushes and opens the PR ' +
+    'after CHECK. FACTORY_BUILD_PUBLISH=1/0 beats it.',
   timeouts:
     'Phase timeouts in seconds. FACTORY_PLAN_TIMEOUT, FACTORY_BUILD_TIMEOUT, FACTORY_CHECK_TIMEOUT and ' +
     'FACTORY_APPROVAL_TIMEOUT beat these values.',
@@ -253,6 +257,7 @@ function runtimeNamespace(): Node[] {
     section('timeouts'),
     section('plan_approval'),
     section('design'),
+    section('build'),
     section('ci'),
     section('worktree'),
     section('workspace'),

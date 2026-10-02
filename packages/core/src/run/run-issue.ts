@@ -74,6 +74,8 @@ export interface RunRequest {
    *  calls, no label, no event, no evidence-pack section). */
   /** design.blockUnresolvedRegressions resolved (#1819); undefined = off. */
   blockUnresolvedRegressions?: boolean;
+  /** build.publishFromBuild resolved (#1867); undefined = off (commit-only BUILD on every route). */
+  publishFromBuild?: boolean;
   prClassifier?: { rules: ReviewFloorRuleSet; gateLabel: string; modelPin?: string };
   timeouts: { plan: number; build: number; check: number; approval: number };
   modelPins: EffectiveModelPins;
@@ -519,6 +521,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       timeoutSeconds: request.timeouts.build,
       skipCI: request.skipCI,
       disablePublish: Boolean(request.localOnly),
+      publishFromBuild: request.publishFromBuild,
       modelOverride: buildModel,
       codexFallbackModel: request.modelPins.buildFallback ?? ports.router.resolveAll('build_codex')[0],
       onProviderFailure: rememberProviderFailure,

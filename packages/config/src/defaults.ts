@@ -71,6 +71,8 @@ export interface FactoryDefaults {
   plan_approval: { enabled: boolean; comment?: string };
   /** PLAN design-artifact gates (#1819). */
   design: { blockUnresolvedRegressions: boolean };
+  /** BUILD policy (#1867). publishFromBuild: true lets the claude BUILD worker push and open a PR before CHECK; default false = commit-only, SHIP publishes. */
+  build: { publishFromBuild: boolean };
   sandbox: {
     enabled: boolean;
     runtime: 'auto' | 'sandbox-exec' | 'firejail' | 'docker-sandbox' | 'none';
@@ -673,6 +675,11 @@ export const defaultFactoryConfig: FactoryDefaults = {
    * FACTORY_DESIGN_BLOCK_REGRESSIONS=1/0 overrides.
    */
   design: { blockUnresolvedRegressions: false },
+  /**
+   * BUILD policy (#1867). false keeps BUILD commit-only on every route (SHIP pushes and
+   * opens the PR after CHECK); true lets the claude worker push and open a PR itself.
+   */
+  build: { publishFromBuild: false },
   sandbox: {
     enabled: true,
     runtime: 'auto',

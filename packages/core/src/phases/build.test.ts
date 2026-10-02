@@ -339,6 +339,7 @@ describe('buildPhase escalation', () => {
       constitution: null,
       log: () => {},
       skipCI: true,
+      publishFromBuild: true,
     });
 
     expect(result.ok).toBe(true);
@@ -375,7 +376,7 @@ describe('buildPhase disablePublish', () => {
     expect(prompt).not.toContain('ready-for-review PR');
   });
 
-  it('claude route without disablePublish still sends the publish prompt without a slash command prefix', async () => {
+  it('claude route with publishFromBuild sends the publish prompt without a slash command prefix', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);
     const specPath = join(worktree, 'issue-509.md');
@@ -392,6 +393,7 @@ describe('buildPhase disablePublish', () => {
       router,
       constitution: null,
       log: () => {},
+      publishFromBuild: true,
     });
 
     expect(result.ok).toBe(true);
@@ -499,6 +501,7 @@ describe('buildPhase atomic commit policy', () => {
       router,
       constitution: null,
       log: () => {},
+      publishFromBuild: true,
     });
 
     expect(result.ok).toBe(true);
@@ -1794,6 +1797,45 @@ describe('buildPhase cross-harness failover', () => {
     expect(result.model).toBe('claude-sonnet-5');
     expect(stub.calls.at(-1)).toMatchObject({ model: 'claude-sonnet-5', task: 'build_claude' });
   });
+
+  async function runFailover(extra: { publishFromBuild?: boolean }) {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-1867.md');
+    await writeFile(specPath, '# Frozen spec 1867\nDo the thing.\n');
+    const stub = new StubModelExecutor({
+      scripts: {
+        build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
+        build_claude: [{ output: 'claude output' }],
+      },
+    });
+    const router = new ModelRouter(failoverModels, failoverRoutes, false, stub);
+    const result = await buildPhase({
+      issue: 1867,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/1867-failover',
+      route: 'codex',
+      router,
+      constitution: null,
+      log: () => {},
+      ...extra,
+    });
+    expect(result.ok).toBe(true);
+    return stub.calls.find((c) => c.task === 'build_claude')?.prompt;
+  }
+
+  it('codex→claude failover is commit-only by default', async () => {
+    const prompt = await runFailover({});
+    expect(prompt).toContain('Do NOT push, do NOT open a pull request');
+    expect(prompt).not.toContain('open PR exists');
+  });
+
+  it('codex→claude failover sends the publish prompt when publishFromBuild is true', async () => {
+    const prompt = await runFailover({ publishFromBuild: true });
+    expect(prompt).toContain('open PR exists');
+  });
 });
 
 describe('buildPhase lifecycle events', () => {
@@ -2080,5 +2122,49 @@ describe('BUILD prompt untrusted issue body', () => {
   it('claude prompt carries the notice', () => {
     const prompt = buildClaudePrompt({ issue: 1840, branch: 'b', specPath: 's.md', constitutionCtx: '' });
     expect(prompt).toContain(UNTRUSTED_ISSUE_BODY_NOTICE);
+  });
+});
+
+describe('buildPhase publishFromBuild (#1867)', () => {
+  async function runClaude(extra: { publishFromBuild?: boolean; disablePublish?: boolean }) {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-1867.md');
+    const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'done' }] } });
+    const router = new ModelRouter(models, routes, false, stub);
+    const result = await buildPhase({
+      issue: 1867,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'ship-it/1867-commit-only',
+      route: 'claude',
+      router,
+      constitution: null,
+      log: () => {},
+      ...extra,
+    });
+    expect(result.ok).toBe(true);
+    return stub.calls[stub.calls.length - 1].prompt;
+  }
+
+  it('claude route is commit-only by default', async () => {
+    const prompt = await runClaude({});
+    expect(prompt).toContain('Do NOT push, do NOT open a pull request');
+    expect(prompt).not.toContain('open PR exists');
+    expect(prompt).not.toContain('ready-for-review PR');
+    expect(prompt).not.toContain('headless mode for issue');
+  });
+
+  it('claude route sends the publish prompt when publishFromBuild is true', async () => {
+    const prompt = await runClaude({ publishFromBuild: true });
+    expect(prompt).toContain('Run fully autonomously in headless mode for issue #1867, BUILD phase.');
+    expect(prompt).toContain('open PR exists');
+  });
+
+  it('disablePublish wins over publishFromBuild', async () => {
+    const prompt = await runClaude({ publishFromBuild: true, disablePublish: true });
+    expect(prompt).toContain('Do NOT push, do NOT open a pull request');
+    expect(prompt).not.toContain('open PR exists');
   });
 });
