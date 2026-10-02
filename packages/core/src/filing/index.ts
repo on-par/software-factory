@@ -3,6 +3,7 @@
 import type { Octokit } from '@octokit/rest';
 
 import type { EvidencePack, FailoverReason, FingerprintedFailure } from '../types/index.js';
+import { fenceExcerpt, sanitizeEvidence } from './sanitize.js';
 
 /** Where factory-internal faults are filed when origin === 'factory-internal'. */
 export const DEFAULT_INTERNAL_REPO = 'on-par/software-factory';
@@ -99,9 +100,7 @@ Factory failure in the ${evidence.phase} phase (${evidence.component}) — reaso
 - Classified reason: ${evidence.reason}
 - Log: ${evidence.logPath}
 
-\`\`\`
-${evidence.eventExcerpt}
-\`\`\`
+${fenceExcerpt(evidence.eventExcerpt)}
 
 ## Suspected cause
 ${suspectedCause(evidence.reason)}
@@ -123,7 +122,8 @@ export function renderOccurrenceComment(
 }
 
 export async function fileBug(client: FilingGitHubClient, input: FileBugInput): Promise<FileBugResult> {
-  const { evidence, fingerprint } = input.fingerprinted;
+  const { fingerprint } = input.fingerprinted;
+  const evidence = sanitizeEvidence(input.fingerprinted.evidence);
   const target = resolveTargetRepo(evidence, input.internalRepo);
   const [owner, repo] = target.split('/');
   const issues = await client.listCandidateIssues({ owner, repo });
