@@ -157,6 +157,7 @@ export type EventKind =
   | 'usage_coordinator_poll_succeeded'
   | 'upstream_report_outboxed'
   | 'upstream_report_sent'
+  | 'upstream_report_bumped'
   | 'upstream_report_skipped'
   | 'warn'
   | 'watchdog'
@@ -341,6 +342,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   usage_coordinator_poll_succeeded: { severity: 'info', isPark: false, isTerminal: false },
   upstream_report_outboxed: { severity: 'warn', isPark: false, isTerminal: false },
   upstream_report_sent: { severity: 'info', isPark: false, isTerminal: false },
+  upstream_report_bumped: { severity: 'info', isPark: false, isTerminal: false },
   upstream_report_skipped: { severity: 'info', isPark: false, isTerminal: false },
   warn: { severity: 'warn', isPark: false, isTerminal: false },
   watchdog: { severity: 'info', isPark: false, isTerminal: false },

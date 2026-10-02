@@ -28,11 +28,14 @@ export interface CandidateIssue {
   number: number;
   body: string;
   state?: 'open' | 'closed';
+  closedAt?: string | null;
 }
 
 export interface FilingGitHubClient {
   /** Open + recently-closed issues (impl decides the window) to scan for the marker. */
   listCandidateIssues(input: { owner: string; repo: string }): Promise<CandidateIssue[]>;
+  /** Full-text body search (search/issues), open + recently-closed issues only; no label filter. */
+  searchIssues(input: { owner: string; repo: string; text: string }): Promise<CandidateIssue[]>;
   createIssue(input: {
     owner: string;
     repo: string;
@@ -79,6 +82,16 @@ export function resolveTargetRepo(evidence: EvidencePack, internalRepo = DEFAULT
 export function findMatchingIssue(issues: readonly CandidateIssue[], fingerprint: string): CandidateIssue | undefined {
   const marker = fingerprintMarker(fingerprint);
   return issues.find((i) => (i.body ?? '').includes(marker));
+}
+
+/** Exact-marker match over search results; lowest issue number wins (pure, exported). */
+export function findIssueByMarker(issues: readonly CandidateIssue[], marker: string): CandidateIssue | undefined {
+  return issues.filter((i) => (i.body ?? '').includes(marker)).sort((a, b) => a.number - b.number)[0];
+}
+
+/** Occurrence comment for an upstream report: fingerprint and time only, no evidence (ADR-0132). */
+export function renderUpstreamOccurrenceComment(fingerprint: string, now: () => Date): string {
+  return `Recurrence at ${now().toISOString()} reported by another factory run. (fingerprint ${fingerprint})`;
 }
 
 const SUSPECTED_CAUSE_BY_REASON: Record<FailoverReason, string> = {
@@ -278,6 +291,20 @@ export function createOctokitFilingClient(octokit: Octokit, opts: OctokitFilingC
           number: issue.number,
           body: issue.body ?? '',
           state: issue.state as 'open' | 'closed' | undefined,
+        }));
+    },
+    async searchIssues({ owner, repo, text }) {
+      const since = now().getTime() - recentlyClosedDays * 24 * 60 * 60 * 1000;
+      const q = `repo:${owner}/${repo} is:issue in:body "${text.replaceAll('"', '')}"`;
+      const { data } = await octokit.rest.search.issuesAndPullRequests({ q, per_page: 100 });
+      return data.items
+        .filter((i) => !i.pull_request)
+        .filter((i) => i.state === 'open' || (i.closed_at != null && Date.parse(i.closed_at) >= since))
+        .map((i) => ({
+          number: i.number,
+          body: i.body ?? '',
+          state: i.state as 'open' | 'closed',
+          closedAt: i.closed_at ?? null,
         }));
     },
     async createIssue({ owner, repo, title, body, labels }) {

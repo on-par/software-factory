@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { IN_PROGRESS_LABEL, LANE_LABEL_PREFIX, QUEUE_ORDER_LABEL_PREFIX, QUEUED_LABEL } from '../queue/github-queue.js';
 import type { EvidencePack, FailoverReason, FingerprintedFailure } from '../types/index.js';
 import type { CandidateIssue, FilingGitHubClient } from './index.js';
+import { findIssueByMarker, renderUpstreamOccurrenceComment } from './index.js';
 import {
   capEvidenceExcerpt,
   createOctokitFilingClient,
@@ -48,6 +49,9 @@ function makeFakeClient(seedIssues: CandidateIssue[]) {
   const client: FilingGitHubClient = {
     async listCandidateIssues(_input) {
       return seedIssues;
+    },
+    async searchIssues(_input) {
+      return [];
     },
     async createIssue(input) {
       created.push(input);
@@ -410,6 +414,22 @@ describe('createOctokitFilingClient', () => {
     const calls: any[] = [];
     const octokit = {
       rest: {
+        search: {
+          issuesAndPullRequests: async (args: any) => {
+            calls.push(['search.issuesAndPullRequests', args]);
+            const ago = (d: number) => new Date(clock().getTime() - d * 86_400_000).toISOString();
+            return {
+              data: {
+                items: [
+                  { number: 1, body: 'open', state: 'open', closed_at: null },
+                  { number: 2, body: null, state: 'closed', closed_at: ago(5) },
+                  { number: 3, body: 'old', state: 'closed', closed_at: ago(60) },
+                  { number: 4, body: 'pr', state: 'open', pull_request: {} },
+                ],
+              },
+            };
+          },
+        },
         issues: {
           listForRepo: async (args: any) => {
             calls.push(['issues.listForRepo', args]);
@@ -452,6 +472,20 @@ describe('createOctokitFilingClient', () => {
       { number: 1, body: 'a bug', state: 'open' },
       { number: 2, body: '', state: 'closed' },
     ]);
+  });
+
+  it('maps searchIssues to search/issues without labels, filtering PRs and old closed issues', async () => {
+    const { octokit, calls } = createOctokit();
+    const client = createOctokitFilingClient(octokit as any, { now: clock });
+
+    const issues = await client.searchIssues({ owner: 'on-par', repo: 'widgets', text: 'ff_"abc"' });
+
+    expect(calls[0][0]).toBe('search.issuesAndPullRequests');
+    expect(calls[0][1].q).toBe('repo:on-par/widgets is:issue in:body "ff_abc"');
+    expect(calls[0][1].q).not.toContain('label:');
+    expect(issues.map((i) => i.number)).toEqual([1, 2]);
+    expect(issues[0]).toEqual({ number: 1, body: 'open', state: 'open', closedAt: null });
+    expect(issues[1]?.body).toBe('');
   });
 
   it('maps createIssue to issues.create', async () => {
@@ -519,5 +553,38 @@ describe('fileBug caller labels (#1852)', () => {
     });
     expect(created[0].body).not.toContain('<!-- x -->');
     expect(created[0].body).not.toContain('\u2066');
+  });
+});
+
+describe('findIssueByMarker', () => {
+  const marker = '<!-- factory-upstream-report v1 fp:ff_x -->';
+  it('returns undefined without an exact marker match', () => {
+    expect(findIssueByMarker([], marker)).toBeUndefined();
+    expect(
+      findIssueByMarker(
+        [
+          { number: 1, body: '<!-- fp:ff_x -->' },
+          { number: 2, body: 'ff_x' },
+        ],
+        marker,
+      ),
+    ).toBeUndefined();
+  });
+  it('returns the lowest-numbered match regardless of labels and does not mutate input', () => {
+    const issues: CandidateIssue[] = [
+      { number: 9, body: marker },
+      { number: 3, body: `x ${marker}` },
+    ];
+    expect(findIssueByMarker(issues, marker)?.number).toBe(3);
+    expect(issues[0]?.number).toBe(9);
+  });
+});
+
+describe('renderUpstreamOccurrenceComment', () => {
+  it('contains the time and fingerprint but no hidden markers', () => {
+    const out = renderUpstreamOccurrenceComment('ff_x', clock);
+    expect(out).toContain('2026-07-20T00:00:00.000Z');
+    expect(out).toContain('ff_x');
+    expect(out).not.toContain('<!--');
   });
 });

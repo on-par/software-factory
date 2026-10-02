@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { CandidateIssue } from './index.js';
 import { buildUpstreamReport, upstreamReportMarker } from './upstream.js';
 import {
   classifyUpstreamSendError,
@@ -67,7 +68,12 @@ interface CreateArg {
   body: string;
   labels: string[];
 }
-const okClient = () => ({ createIssue: vi.fn(async (_a: CreateArg) => ({ number: 7 })) });
+const okClient = () => ({
+  createIssue: vi.fn(async (_a: CreateArg) => ({ number: 7 })),
+  searchIssues: vi.fn(async (_a: { owner: string; repo: string; text: string }): Promise<CandidateIssue[]> => []),
+  commentIssue: vi.fn(async (_a: { owner: string; repo: string; issue_number: number; body: string }) => {}),
+  updateIssue: vi.fn(),
+});
 
 describe('sendUpstreamReports', () => {
   it('creates one issue with no labels', async () => {
@@ -87,7 +93,7 @@ describe('sendUpstreamReports', () => {
 
   it('outboxes on 403 without counting against the cap', async () => {
     const err = Object.assign(new Error('Resource not accessible by integration'), { status: 403 });
-    const client = { createIssue: vi.fn().mockRejectedValue(err) };
+    const client = { ...okClient(), createIssue: vi.fn().mockRejectedValue(err) };
     const p = pending('ff_2');
     const res = await sendUpstreamReports({ ...base(), reports: [p], client });
     expect(res[0]?.outcome).toBe('outboxed');
@@ -105,7 +111,7 @@ describe('sendUpstreamReports', () => {
   });
 
   it('outboxes on a network error without status', async () => {
-    const client = { createIssue: vi.fn().mockRejectedValue(new Error('ECONNRESET')) };
+    const client = { ...okClient(), createIssue: vi.fn().mockRejectedValue(new Error('ECONNRESET')) };
     const res = await sendUpstreamReports({ ...base(), reports: [pending('ff_4')], client });
     expect(res[0]?.outcome).toBe('outboxed');
     expect(res[0]?.reason).toMatch(/^send-failed/);
@@ -220,5 +226,78 @@ describe('writeUpstreamOutbox', () => {
     });
     expect(path.startsWith(outboxDir)).toBe(true);
     expect(path).toMatch(/invalid-\d+\.json$/);
+  });
+
+  describe('marker dedup (#1861)', () => {
+    const existing = (fp: string, state: 'open' | 'closed' = 'open'): CandidateIssue => ({
+      number: 42,
+      body: pending(fp).report.body,
+      state,
+    });
+
+    it('comments on a matching unlabeled issue and never edits or creates', async () => {
+      const client = okClient();
+      client.searchIssues.mockResolvedValue([existing('ff_1')]);
+      const res = await sendUpstreamReports({ ...base(), reports: [pending('ff_1')], client });
+      expect(res).toEqual([{ fingerprint: 'ff_1', outcome: 'bumped', issueNumber: 42 }]);
+      expect(client.searchIssues).toHaveBeenCalledWith({ owner: 'on-par', repo: 'software-factory', text: 'ff_1' });
+      expect(client.commentIssue).toHaveBeenCalledTimes(1);
+      expect(client.commentIssue.mock.calls[0]?.[0]).toMatchObject({ issue_number: 42 });
+      expect(client.createIssue).not.toHaveBeenCalled();
+      expect(client.updateIssue).not.toHaveBeenCalled();
+      expect(logs.some((l) => l.type === 'upstream_report_bumped')).toBe(true);
+    });
+
+    it('bumps a recently closed match', async () => {
+      const client = okClient();
+      client.searchIssues.mockResolvedValue([existing('ff_1', 'closed')]);
+      const res = await sendUpstreamReports({ ...base(), reports: [pending('ff_1')], client });
+      expect(res[0]).toMatchObject({ outcome: 'bumped', issueNumber: 42 });
+      expect(client.createIssue).not.toHaveBeenCalled();
+    });
+
+    it('creates when the hit has the fingerprint but not the marker', async () => {
+      const client = okClient();
+      client.searchIssues.mockResolvedValue([{ number: 5, body: 'ff_1 <!-- fp:ff_1 -->', state: 'open' }]);
+      const res = await sendUpstreamReports({ ...base(), reports: [pending('ff_1')], client });
+      expect(res[0]).toMatchObject({ outcome: 'created' });
+    });
+
+    it('skips search for an invalid fingerprint and creates', async () => {
+      const client = okClient();
+      const res = await sendUpstreamReports({ ...base(), reports: [pending('bad fp!')], client });
+      expect(client.searchIssues).not.toHaveBeenCalled();
+      expect(res[0]).toMatchObject({ outcome: 'created' });
+    });
+
+    it('outboxes when search fails', async () => {
+      const client = okClient();
+      client.searchIssues.mockRejectedValue({ status: 403 });
+      const res = await sendUpstreamReports({ ...base(), reports: [pending('ff_1')], client });
+      expect(res[0]?.outcome).toBe('outboxed');
+      expect(res[0]?.reason).toMatch(/^search-failed: forbidden \(403\)/);
+      expect(client.createIssue).not.toHaveBeenCalled();
+    });
+
+    it('outboxes when the comment fails', async () => {
+      const client = okClient();
+      client.searchIssues.mockResolvedValue([existing('ff_1')]);
+      client.commentIssue.mockRejectedValue({ status: 500 });
+      const res = await sendUpstreamReports({ ...base(), reports: [pending('ff_1')], client });
+      expect(res[0]?.outcome).toBe('outboxed');
+      expect(res[0]?.reason).toMatch(/^comment-failed:/);
+      expect(client.createIssue).not.toHaveBeenCalled();
+    });
+
+    it('does not consume caps on a bump', async () => {
+      const client = okClient();
+      client.searchIssues.mockImplementation(async ({ text }) => (text === 'a' ? [existing('a')] : []));
+      const res = await sendUpstreamReports({
+        ...base({ policy: { ...policy, maxPerRun: 1 } }),
+        reports: [pending('a'), pending('b')],
+        client,
+      });
+      expect(res.map((r) => r.outcome)).toEqual(['bumped', 'created']);
+    });
   });
 });

@@ -27,10 +27,12 @@ export {
   DEFAULT_BUG_LABELS,
   DEFAULT_INTERNAL_REPO,
   fileBug,
+  findIssueByMarker,
   findMatchingIssue,
   fingerprintMarker,
   renderBugBody,
   renderOccurrenceComment,
+  renderUpstreamOccurrenceComment,
   resolveTargetRepo,
 } from './filing/index.js';
 
