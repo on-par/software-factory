@@ -733,6 +733,20 @@ describe('loadFactoryConfigForRepo', () => {
     expect(() => loadFactoryConfigForRepo(path)).toThrow(/merge\.auto/);
   });
 
+  it('merges a repo intake overlay and keeps enforce at warn', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ version: 2, intake: { trustedApprovers: ['patrob'] } }));
+    const config = loadFactoryConfigForRepo(path);
+    expect(config.intake.trustedApprovers).toEqual(['patrob']);
+    expect(config.intake.enforce).toBe('warn');
+  });
+
+  it('rejects an invalid intake.enforce value', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ intake: { enforce: 'block' } }));
+    expect(() => loadFactoryConfigForRepo(path)).toThrow(/intake\.enforce/);
+  });
+
   it('throws "expected a JSON object" when the top level is an array', async () => {
     const path = join(dir, 'config.json');
     await writeFile(path, JSON.stringify([1, 2, 3]));

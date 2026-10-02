@@ -6,6 +6,11 @@ import { describe, expect, it } from 'vitest';
 import { defaultFactoryConfig, defaultModelsConfig, defaultRoutesConfig } from './defaults.js';
 
 describe('shipped defaults', () => {
+  it('defaults intake to warn with no trusted approvers', () => {
+    expect(defaultFactoryConfig.intake.enforce).toBe('warn');
+    expect(defaultFactoryConfig.intake.trustedApprovers).toBeUndefined();
+  });
+
   it('has 24 models with the expected harness-bearing spot checks', () => {
     const modelIds = Object.keys(defaultModelsConfig.models);
     expect(modelIds).toHaveLength(24);

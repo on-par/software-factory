@@ -90,6 +90,12 @@ export interface FactoryDefaults {
     comment?: string;
   };
   ingest: { enabled: boolean; label: string; lane: string; maxPerCycle: number; comment?: string };
+  /**
+   * Issue-approval gate for claims (#1802). `trustedApprovers` lists the GitHub logins whose approval
+   * counts; unset means users with admin permission on the repo (a permission-lookup failure counts
+   * as untrusted). `enforce: 'warn'` only logs a missing/untrusted approval; `'enforce'` blocks the claim.
+   */
+  intake: { trustedApprovers?: string[]; enforce: 'warn' | 'enforce'; comment?: string };
   environment: {
     ports: { enabled: boolean; range: [number, number]; comment?: string };
     proxy: { enabled: boolean; port: number; domain: string; comment?: string };
@@ -682,6 +688,7 @@ export const defaultFactoryConfig: FactoryDefaults = {
     comment:
       'Always-on auto-ingest. When enabled, `factory supervise` polls each cycle for open issues carrying `label` and appends new ones (deduped against the queue and open factory/* PRs, legacy ship-it branches included) to the queue under `lane`. Enable per-run with FACTORY_AUTO_INGEST=1; disable with =0.',
   },
+  intake: { enforce: 'warn' },
   environment: {
     ports: {
       enabled: true,
