@@ -1336,11 +1336,11 @@ npm run test`;
       verdict: worse
   openQuestions: ${openQuestions}
 `;
-      const run = async (openQuestions: string, block?: boolean) => {
+      const run = async (openQuestions: string, block?: boolean, yaml?: string, issue = 1819) => {
         const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
         tempDirs.add(worktree);
         const stub = new StubModelExecutor({
-          scripts: { plan: [{ output: `---\nroute: codex\n${deltaYaml(openQuestions)}---\n# Spec\n` }] },
+          scripts: { plan: [{ output: `---\nroute: codex\n${yaml ?? deltaYaml(openQuestions)}---\n# Spec\n` }] },
         });
         const router = new ModelRouter(models, routes, false, stub);
         const octokit: any = {
@@ -1348,10 +1348,10 @@ npm run test`;
         };
         const logs: Array<{ type: string; msg: string }> = [];
         const result = await planPhase({
-          issue: 1819,
+          issue,
           repo: 'on-par/software-factory',
           worktree,
-          specPath: join(worktree, 'issue-1819.md'),
+          specPath: join(worktree, `issue-${issue}.md`),
           router,
           constitution: null,
           octokit,
@@ -1380,6 +1380,29 @@ npm run test`;
         const { result, logs } = await run('["What should happen when config absent?"]', true);
         expect(logs.some((l) => l.type === 'design_regression_unresolved')).toBe(false);
         expect(result.ok).toBe(true);
+      });
+
+      it('flags the issue #192 shrinkwrap-only fallthrough left out of openQuestions (#1820)', async () => {
+        const yaml192 = `${validDesignYaml}  behaviorDelta:
+    - input: repo with only npm-shrinkwrap.json
+      branch: no lockfile (fallthrough)
+      before: npm install
+      after: npm install, shrinkwrap ignored
+      verdict: worse
+  externalLists:
+    - name: npm lockfile names
+      location: install command detection
+      source: https://docs.npmjs.com/cli/configuring-npm/npm-shrinkwrap-json
+      gaps:
+        - npm-shrinkwrap.json
+  openQuestions: []
+`;
+        const { result, logs } = await run('[]', undefined, yaml192, 192);
+        const events = logs.filter((l) => l.type === 'design_regression_unresolved');
+        expect(events).toHaveLength(1);
+        expect(events[0]?.msg).toContain('repo with only npm-shrinkwrap.json');
+        expect(result.ok).toBe(true);
+        expect(result.designArtifact?.externalLists?.[0]?.gaps).toEqual(['npm-shrinkwrap.json']);
       });
     });
 
