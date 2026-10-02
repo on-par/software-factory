@@ -703,6 +703,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       repo: request.repo,
       worktree: ports.workspace.path,
       branch: request.branch,
+      recordedRemoteSha: ports.workspace.remoteBranch?.sha,
       octokit: ports.octokit,
       watchCI: !request.skipCI,
       log: ports.events('ship'),
