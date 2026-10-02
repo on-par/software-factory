@@ -203,6 +203,15 @@ function runtimeNamespace(): Node[] {
   const sweep = section('sweep');
   if (sweep.kind === 'object') sweep.children.unshift({ kind: 'unset', key: 'heartbeatFile', example: '"<path>"' });
 
+  const intake = section('intake');
+  if (intake.kind === 'object')
+    intake.children.unshift({
+      kind: 'unset',
+      key: 'trustedApprovers',
+      doc: 'GitHub logins whose approval counts. Unset: users with admin permission on the repo.',
+      example: '["<login>"]',
+    });
+
   return [
     {
       kind: 'object',
@@ -246,6 +255,7 @@ function runtimeNamespace(): Node[] {
     section('environment'),
     section('auto_failover'),
     section('ingest'),
+    intake,
     section('filing'),
     section('kpis'),
     sweep,

@@ -188,6 +188,10 @@ ingest:
   label: "ready"
   lane: "auto"
   maxPerCycle: 20
+intake:
+  # GitHub logins whose approval counts. Unset: users with admin permission on the repo.
+  # trustedApprovers: ["<login>"]
+  enforce: "warn"
 # Guardrails for auto-filing self-defects. excludeReasons are never filed unless the same
 # fingerprint parks >= repeatThreshold times. maxPerRun/maxPerDay cap new bugs. Bugs whose origin is
 # factory-internal get selfFixLabel so the merge path refuses auto-merge (human approval required).

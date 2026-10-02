@@ -212,6 +212,13 @@ const FactoryConfigSchema = z.object({
       comment: z.string().optional(),
     })
     .default({ enabled: false, label: 'ready', lane: 'auto', maxPerCycle: 20 }),
+  intake: z
+    .object({
+      trustedApprovers: z.array(z.string().min(1)).optional(),
+      enforce: z.enum(['warn', 'enforce']).default('warn'),
+      comment: z.string().optional(),
+    })
+    .default({ enforce: 'warn' }),
   environment: z
     .object({
       ports: z
@@ -310,6 +317,7 @@ export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'discovery',
   'filing',
   'ingest',
+  'intake',
   'environment',
   'auto_failover',
   'adr',

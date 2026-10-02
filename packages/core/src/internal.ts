@@ -55,6 +55,8 @@ export type { EffectiveConfig } from './config/repo.js';
 export { resolveEffectiveConfig, resolveReviewFloorRules } from './config/repo.js';
 export { resolveExperimental, resolveLocalOnly, resolveBranchPrefix } from './config/index.js';
 export { FACTORY_RUNTIME_CONFIG_KEYS } from './config/index.js';
+export { isTrustedApprover, createOctokitCollaboratorPermissionClient } from './queue/approval.js';
+export type { CollaboratorPermissionClient, TrustedApproverOptions } from './queue/approval.js';
 export {
   migrateRepoConfigToYaml,
   REPO_CONFIG_FILENAMES,
