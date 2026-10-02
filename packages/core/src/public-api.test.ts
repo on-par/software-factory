@@ -428,6 +428,8 @@ const INTERNAL_API_KEYS = [
   'resolveExperimental',
   'resolveLocalOnly',
   'FACTORY_RUNTIME_CONFIG_KEYS',
+  'isTrustedApprover',
+  'createOctokitCollaboratorPermissionClient',
   'CONFIG_EXAMPLE_OMITTED_KEYS',
   'renderConfigExample',
   // Design artifact (#422)
