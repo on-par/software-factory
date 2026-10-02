@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 
 import type { PrClassifierClaim, PrShadowVerdict } from '../review/classifier.js';
 import type { ReviewRouting } from '../review/routing.js';
+import { renderCheckerFindings } from '../checkers/index.js';
 import { specPaths } from '../spec/index.js';
 import type { CheckSummary, FactoryEvent } from '../types/index.js';
 import { readIssueEvents } from './local-run.js';
@@ -59,9 +60,11 @@ export function renderEvidencePack(input: EvidencePackRenderInput): string {
       'Checker verdicts',
       checkSummary && checkSummary.results.length > 0
         ? checkSummary.results
-            .map(
-              (result) =>
+            .map((result) =>
+              [
                 `- ${RESULT_EMOJI[result.result] ?? '⚪'} ${result.result} \`${result.checker}\` — ${truncate(result.details, 200)}`,
+                ...(result.findings !== undefined ? renderCheckerFindings(result.findings).map((l) => `  ${l}`) : []),
+              ].join('\n'),
             )
             .join('\n')
         : '- No checker results recorded.',

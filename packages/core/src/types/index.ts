@@ -85,12 +85,23 @@ export interface Constitution {
 
 export type CheckResult = 'PASS' | 'FAIL' | 'SKIP';
 
+/** One concrete input where the new behaviour is worse than the old (regression_hunt, #1798). */
+export interface RegressionFinding {
+  input: string;
+  before: string;
+  after: string;
+  evidence: string;
+  reproduced: boolean;
+}
+
 export interface CheckerOutput {
   checker: string;
   result: CheckResult;
   details: string;
   linksChecked?: number;
   broken?: number;
+  /** Structured findings (regression_hunt); rendered by renderCheckerFindings in the check summary and evidence pack. */
+  findings?: RegressionFinding[];
 }
 
 export interface CheckSummary {

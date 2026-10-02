@@ -3,7 +3,13 @@
 import { join } from 'node:path';
 
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
-import { type CheckerContext, probeWorktree, runAllCheckers, type WorktreeProbe } from '../checkers/index.js';
+import {
+  type CheckerContext,
+  probeWorktree,
+  renderCheckerFindings,
+  runAllCheckers,
+  type WorktreeProbe,
+} from '../checkers/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { laneEnv } from '../environment/index.js';
 import type { EventKind } from '../events/kinds.js';
@@ -378,7 +384,16 @@ async function checkPhaseImpl(opts: {
   // outcome only carries an aggregate count, so without this the checker/details pairs
   // that name WHY a run parked are never surfaced to the operator (#675).
   for (const f of summary.results.filter((r) => r.result === 'FAIL')) {
-    log('check', `FAILED: ${f.checker} — ${f.details}`);
+    log(
+      'check',
+      f.findings?.length
+        ? `FAILED: ${f.checker} — ${f.details}\n${renderCheckerFindings(f.findings).join('\n')}`
+        : `FAILED: ${f.checker} — ${f.details}`,
+    );
+  }
+
+  for (const p of summary.results.filter((r) => r.result === 'PASS' && r.findings?.length)) {
+    log('check', `FINDINGS: ${p.checker}\n${renderCheckerFindings(p.findings ?? []).join('\n')}`);
   }
 
   if (summary.failures > 0) {
