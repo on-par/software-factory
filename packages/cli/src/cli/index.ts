@@ -2627,7 +2627,7 @@ export async function cmdReset(
   for (const line of lines) console.log(line);
 }
 
-export async function cmdLand(issueNum: number, opts: { branchPrefix?: string } = {}) {
+export async function cmdLand(issueNum: number, opts: { branchPrefix?: string; allowGated?: boolean } = {}) {
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
   const repoRoot = await getRepoRoot();
   const ghRepo = await getGitHubRepo();
@@ -2637,7 +2637,9 @@ export async function cmdLand(issueNum: number, opts: { branchPrefix?: string } 
   const skipCI = resolveSkipCI(factoryConfig);
 
   try {
-    const result = await landIssue(issueNum, repoRoot, ghRepo, paths, octokit, skipCI, branchPrefix);
+    const result = await landIssue(issueNum, repoRoot, ghRepo, paths, octokit, skipCI, branchPrefix, {
+      allowGated: opts.allowGated === true,
+    });
     console.log(chalk.green(`✅ Landed PR #${result.prNumber} for issue #${issueNum}`));
   } catch (err: any) {
     if (err instanceof AwaitingReviewError) {
@@ -2658,6 +2660,9 @@ export async function cmdLand(issueNum: number, opts: { branchPrefix?: string } 
       );
       return;
     }
+    if (err instanceof MergeGatedError) {
+      throw new CliExitError(`factory: ${err.message}`, 4);
+    }
     if (err instanceof LandConflictError) {
       throw new CliExitError(`factory: ${err.message}`, 3);
     }
@@ -2676,6 +2681,7 @@ async function landIssue(
   octokit: Octokit,
   skipCI?: boolean,
   branchPrefix?: string,
+  opts: { allowGated?: boolean } = {},
 ): Promise<{ branch: string; prNumber: number }> {
   const [owner, repoName] = ghRepo.split('/');
   const log = (type: EventKind, msg: string, extra?: { failoverReason?: FailoverReason }) =>
@@ -2724,13 +2730,44 @@ async function landIssue(
     throw new LandFailureError(`no open PR for issue #${issueNum} (${guessedBranch})`, 1);
   }
 
+  const landFactoryConfig = loadFactoryConfigForRepo(paths.config);
+  // Every merge path honors the no-auto-merge gate on the issue and on the PR; unreadable labels fail closed (#1720).
+  const filingPolicy = resolveFilingPolicy(landFactoryConfig);
+  const gateLabel = filingPolicy.selfFixLabel;
+  if (opts.allowGated) {
+    console.log(
+      `AUDIT factory land #${issueNum}: --allow-gated override — merging PR #${prNumber} past the ${gateLabel} gate`,
+    );
+    log('merge-gated-override', `--allow-gated: merging PR #${prNumber} past ${gateLabel} gate (human override)`);
+  } else {
+    let where: string | undefined;
+    try {
+      const [issueLabels, prLabels] = await Promise.all([
+        defaultListIssueLabels(octokit, owner, repoName, issueNum),
+        defaultListIssueLabels(octokit, owner, repoName, prNumber),
+      ]);
+      if (isAutoMergeBlocked(issueLabels, filingPolicy)) where = `issue #${issueNum} is labelled ${gateLabel}`;
+      else if (isAutoMergeBlocked(prLabels, filingPolicy)) where = `PR #${prNumber} is labelled ${gateLabel}`;
+    } catch (err) {
+      where = `labels could not be read (${errorDetail(err)}) — failing closed on the ${gateLabel} gate`;
+    }
+    if (where) {
+      log('merge-gated', `land refused: ${where}`);
+      throw new MergeGatedError(
+        `not merging PR #${prNumber} for issue #${issueNum}: ${where} (human approval required). Re-run \`factory land ${issueNum} --allow-gated\` to merge it deliberately.`,
+        issueNum,
+        prNumber,
+        gateLabel,
+      );
+    }
+  }
+
   const worktree = worktreePathFor(
     repoRoot,
     ghRepo,
     issueNum,
     branch.startsWith(`${LEGACY_BRANCH_PREFIX}/`) ? LEGACY_BRANCH_PREFIX : resolved,
   );
-  const landFactoryConfig = loadFactoryConfigForRepo(paths.config);
   const landSandboxPolicy = resolveSandboxPolicy(landFactoryConfig.sandbox, {
     worktree,
     repoRoot,
@@ -3919,6 +3956,18 @@ export async function squashMergeAndDelete(
   await octokit.rest.pulls.merge({ owner, repo: repoName, pull_number: prNumber, merge_method: 'squash' });
   // Best-effort branch delete: the merge is the source of truth.
   await octokit.rest.git.deleteRef({ owner, repo: repoName, ref: `heads/${branch}` }).catch(() => {});
+}
+
+export class MergeGatedError extends Error {
+  constructor(
+    message: string,
+    readonly issue: number,
+    readonly prNumber: number,
+    readonly label: string,
+  ) {
+    super(message);
+    this.name = 'MergeGatedError';
+  }
 }
 
 export class LandConflictError extends Error {
@@ -5159,6 +5208,10 @@ export async function main() {
       "Squash-merge the issue's open PR once CI is green, then remove its worktree (left open if CI fails or review is pending)",
     )
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
+    .option(
+      '--allow-gated',
+      'Merge even when the issue or PR carries the no-auto-merge gate label (human override; writes an AUDIT line and a merge-gated-override event)',
+    )
     .action(async (issueNum, opts) => {
       await cmdLand(parseIssueArg(issueNum), opts);
     });

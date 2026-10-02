@@ -88,6 +88,7 @@ export type EventKind =
   | 'local-only-complete'
   | 'lock-stolen'
   | 'merge-gated'
+  | 'merge-gated-override'
   | 'pr-classified'
   | 'merged'
   | 'model-override'
@@ -265,6 +266,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'local-only-complete': { severity: 'info', isPark: false, isTerminal: false },
   'lock-stolen': { severity: 'info', isPark: false, isTerminal: false },
   'merge-gated': { severity: 'info', isPark: false, isTerminal: false },
+  'merge-gated-override': { severity: 'warn', isPark: false, isTerminal: false },
   'pr-classified': { severity: 'info', isPark: false, isTerminal: false },
   merged: { severity: 'info', isPark: false, isTerminal: true },
   'model-override': { severity: 'info', isPark: false, isTerminal: false },

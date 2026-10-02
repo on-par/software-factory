@@ -363,6 +363,7 @@ function defaultOctokit() {
       issues: {
         get: vi.fn(async () => ({ data: { title: 'Fix the bug' } })),
         listForRepo: vi.fn(async () => ({ data: [] })),
+        listLabelsOnIssue: vi.fn(async () => ({ data: [] })),
       },
       pulls: {
         list: vi.fn(async ({ state }: any) =>
@@ -3027,6 +3028,11 @@ bash scripts/verify.sh
   });
 
   describe('land', () => {
+    beforeEach(() => {
+      // landIssue reads the filing policy for the no-auto-merge gate (#1720).
+      h.factoryConfig = { ...h.factoryConfig, filing: { selfFixLabel: 'no-auto-merge', enabled: false } };
+    });
+
     it('exits 2 when --branch-prefix has no letters or digits', async () => {
       const res = await runMain('land', '5', '--branch-prefix', '!!!');
       expect(res).toEqual({ exited: true, code: 2 });
@@ -4542,6 +4548,7 @@ Please add a widget that does the thing.
     it('falls back to `gh auth token` via execSync when no GITHUB_TOKEN/GH_TOKEN env var is set', async () => {
       delete process.env.GITHUB_TOKEN;
       delete process.env.GH_TOKEN;
+      h.factoryConfig = { ...h.factoryConfig, filing: { selfFixLabel: 'no-auto-merge', enabled: false } };
       h.execSyncImpl = (cmd: string) => {
         if (cmd.includes('gh auth token')) return 'gho_fallback_token\n';
         throw new Error('not stubbed');
@@ -5210,6 +5217,11 @@ describe('shipIssue (direct)', () => {
 
 // ===========================================================================
 describe('CliExitError (direct command invocation)', () => {
+  beforeEach(() => {
+    // landIssue reads the filing policy for the no-auto-merge gate (#1720).
+    h.factoryConfig = { ...h.factoryConfig, filing: { selfFixLabel: 'no-auto-merge', enabled: false } };
+  });
+
   it('is a proper Error subclass carrying a code', () => {
     const err = new CliExitError('msg', 3);
     expect(err).toBeInstanceOf(Error);
@@ -5271,6 +5283,62 @@ describe('CliExitError (direct command invocation)', () => {
       message: expect.stringContaining('no open PR'),
     });
     expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  describe('cmdLand no-auto-merge gate (#1720)', () => {
+    const labelsFor = (gated: number[]) =>
+      vi.fn(async ({ issue_number }: { issue_number: number }) => ({
+        data: gated.includes(issue_number) ? [{ name: 'no-auto-merge' }] : [],
+      }));
+    const eventsOf = () =>
+      readFileSync(paths().events, 'utf-8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+
+    it('refuses with code 4 when the issue carries the gate label', async () => {
+      h.octokit.rest.issues.listLabelsOnIssue = labelsFor([5]);
+      vi.mocked(watchChecks).mockResolvedValue('success');
+      await expect(cmdLand(5)).rejects.toMatchObject({
+        name: 'CliExitError',
+        code: 4,
+        message: expect.stringMatching(
+          /no-auto-merge[\s\S]*#5[\s\S]*--allow-gated|#5[\s\S]*no-auto-merge[\s\S]*--allow-gated/,
+        ),
+      });
+      expect(h.octokit.rest.pulls.merge).not.toHaveBeenCalled();
+      expect(setupWorktree).not.toHaveBeenCalled();
+      expect(eventsOf().some((e) => e.type === 'merge-gated' && String(e.issue) === '5')).toBe(true);
+    });
+
+    it('refuses when only the PR carries the gate label', async () => {
+      h.octokit.rest.issues.listLabelsOnIssue = labelsFor([77]);
+      await expect(cmdLand(5)).rejects.toMatchObject({
+        code: 4,
+        message: expect.stringContaining('PR #77 is labelled no-auto-merge'),
+      });
+      expect(h.octokit.rest.pulls.merge).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when labels cannot be read', async () => {
+      h.octokit.rest.issues.listLabelsOnIssue = vi.fn(async () => {
+        throw new Error('boom');
+      });
+      await expect(cmdLand(5)).rejects.toMatchObject({
+        code: 4,
+        message: expect.stringContaining('could not be read'),
+      });
+      expect(h.octokit.rest.pulls.merge).not.toHaveBeenCalled();
+    });
+
+    it('--allow-gated merges past the gate with an AUDIT line and a merge-gated-override event', async () => {
+      h.octokit.rest.issues.listLabelsOnIssue = labelsFor([5]);
+      vi.mocked(watchChecks).mockResolvedValue('success');
+      await expect(cmdLand(5, { allowGated: true })).resolves.toBeUndefined();
+      expect(h.octokit.rest.pulls.merge).toHaveBeenCalled();
+      expect(logged()).toMatch(/^AUDIT .*#5/m);
+      expect(eventsOf().some((e) => e.type === 'merge-gated-override' && String(e.issue) === '5')).toBe(true);
+    });
   });
 
   it('materializes a missing adopted PR worktree from its remote head, rebases it, and rechecks CI', async () => {
