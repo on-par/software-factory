@@ -1320,6 +1320,21 @@ describe('CliModelExecutor harness injection', () => {
     expect(rec.calls).toEqual([]);
   });
 
+  it('forwards isolation through to the claude command line', async () => {
+    const rec = recordingExec({ stdout: '{"type":"result","result":"x"}' });
+    const real = new CliModelExecutor(rec.fn);
+    await real.runModel('claude-model', 'p', {
+      worktree,
+      timeoutSeconds,
+      task: 'plan',
+      registry,
+      routesConfig,
+      isolation: { tools: 'none', network: 'none' },
+    });
+    expect(rec.calls[0].cmd).toContain('--strict-mcp-config');
+    expect(rec.calls[0].cmd).not.toContain('bypassPermissions');
+  });
+
   it('leaves other default harnesses intact when only one id is overridden', async () => {
     const rec = recordingExec({ stdout: 'OC OUT' });
     const executor = new CliModelExecutor(rec.fn, undefined, {

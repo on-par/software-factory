@@ -55,7 +55,17 @@ export type { EffectiveConfig } from './config/repo.js';
 export { resolveEffectiveConfig, resolveReviewFloorRules } from './config/repo.js';
 export { resolveExperimental, resolveLocalOnly, resolveBranchPrefix } from './config/index.js';
 export { FACTORY_RUNTIME_CONFIG_KEYS } from './config/index.js';
-export { isTrustedApprover, createOctokitCollaboratorPermissionClient } from './queue/approval.js';
+export { isTrustedApprover, createOctokitCollaboratorPermissionClient, computeApprovalHash } from './queue/approval.js';
+export {
+  TRIAGE_REWRITE_TASK,
+  TRIAGE_REWRITE_ISOLATION,
+  TRIAGE_REWRITE_SECTIONS,
+  ORIGINAL_EVIDENCE_SUMMARY,
+  buildTriageRewritePrompt,
+  renderRewrittenIssueBody,
+  rewriteFiledIssue,
+} from './queue/triage-rewrite.js';
+export type { TriageRewriteResult } from './queue/triage-rewrite.js';
 export type { CollaboratorPermissionClient, TrustedApproverOptions } from './queue/approval.js';
 export {
   migrateRepoConfigToYaml,

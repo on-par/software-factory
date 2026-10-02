@@ -7,7 +7,7 @@ import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { classifyFailure } from '../harness/classify.js';
 import { ClaudeCliHarness } from '../harness/claude-cli.js';
 import { CodexCliHarness } from '../harness/codex-cli.js';
-import type { CodingHarness, HarnessFailureReason, HarnessUsage } from '../harness/index.js';
+import type { AgentIsolation, CodingHarness, HarnessFailureReason, HarnessUsage } from '../harness/index.js';
 import { HarnessError, isAgenticHarness, isRetryableFailure, taskRequiresAgenticHarness } from '../harness/index.js';
 import { OllamaAgenticHarness } from '../harness/ollama-agentic.js';
 import { OllamaHttpHarness } from '../harness/ollama-http.js';
@@ -86,6 +86,9 @@ export function failoversFrom(
   return out;
 }
 
+/** Harnesses that can honor `AgentIsolation` (ollama-http is prompt-only). */
+const ISOLATION_CAPABLE_HARNESSES: readonly string[] = ['claude-cli', 'ollama-http'];
+
 export interface ModelExecutorContext {
   worktree: string;
   timeoutSeconds: number;
@@ -102,6 +105,8 @@ export interface ModelExecutorContext {
   /** Reports provider-reported token usage for the attempt, when the harness
    *  surfaces one (#424). Called at most once per runModel call. */
   onUsage?: (usage: HarnessUsage) => void;
+  /** Text-only call: no tools, MCP or network-capable tool (#1843). */
+  isolation?: AgentIsolation;
 }
 
 /** Executes a single resolved model. On failure, implementations should
@@ -194,7 +199,7 @@ export class CliModelExecutor implements ModelExecutor {
     prompt: string,
     ctx: Pick<
       ModelExecutorContext,
-      'worktree' | 'timeoutSeconds' | 'task' | 'registry' | 'sandbox' | 'env' | 'onPgid' | 'onUsage'
+      'worktree' | 'timeoutSeconds' | 'task' | 'registry' | 'sandbox' | 'env' | 'onPgid' | 'onUsage' | 'isolation'
     >,
   ): Promise<string> {
     const { output, usage } = await harness.run({
@@ -207,6 +212,7 @@ export class CliModelExecutor implements ModelExecutor {
       sandbox: ctx.sandbox,
       env: ctx.env,
       onPgid: ctx.onPgid,
+      isolation: ctx.isolation,
     });
     if (usage) ctx.onUsage?.(usage);
     return output;
@@ -642,6 +648,8 @@ export class ModelRouter {
       env?: Record<string, string>;
       onPgid?: (pgid: number) => void;
       retryCause?: RetryCause;
+      /** Text-only call (#1843): only models on isolation-capable harnesses are tried. */
+      isolation?: AgentIsolation;
     } = {},
   ): Promise<RouterResult> {
     const {
@@ -655,11 +663,18 @@ export class ModelRouter {
       env,
       onPgid,
       retryCause,
+      isolation,
     } = options;
 
-    const models = modelOverride
+    let models = modelOverride
       ? [modelOverride, ...modelFallbacks.filter((id) => id !== modelOverride)]
       : this.resolveAll(task);
+    if (isolation) {
+      models = models.filter((m) => ISOLATION_CAPABLE_HARNESSES.includes(this.registry.getHarnessId(m) ?? ''));
+      if (models.length === 0) {
+        throw new Error(`No isolation-capable model for task '${task}' (needs a claude-cli or ollama-http model)`);
+      }
+    }
     if (models.length === 0) {
       throw new Error(`No available models for task '${task}'`);
     }
@@ -697,6 +712,7 @@ export class ModelRouter {
             sandbox,
             env,
             onPgid,
+            isolation,
             onUsage: (u) => {
               usage = u;
             },

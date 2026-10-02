@@ -331,6 +331,15 @@ const INTERNAL_API_KEYS = [
   // Review verdict (#1679)
   'computeReviewVerdict',
   'DETERMINISTIC_CHECKERS',
+  // Triage rewrite + approval hash (#1843)
+  'computeApprovalHash',
+  'TRIAGE_REWRITE_TASK',
+  'TRIAGE_REWRITE_ISOLATION',
+  'TRIAGE_REWRITE_SECTIONS',
+  'ORIGINAL_EVIDENCE_SUMMARY',
+  'buildTriageRewritePrompt',
+  'renderRewrittenIssueBody',
+  'rewriteFiledIssue',
   // Review floor (#1721)
   'computeReviewFloor',
   'DEFAULT_REVIEW_FLOOR_RULES',

@@ -509,6 +509,10 @@ export const defaultRoutesConfig: RoutesDefaults = {
       tier: 'triage',
       description: 'Create a complete factory-task issue body before PLAN',
     },
+    triage_rewrite: {
+      tier: 'triage',
+      description: 'Tool-less rewrite of an auto-filed bug into a factory-task spec before approval (#1843)',
+    },
     decompose: {
       tier: 'triage',
       description:

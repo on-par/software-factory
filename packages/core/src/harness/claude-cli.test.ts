@@ -145,6 +145,20 @@ describe('ClaudeCliHarness command shape', () => {
     expect(rec.calls[0].opts.maxBuffer).toBe(10 * 1024 * 1024);
   });
 
+  it('runs tool-less without bypassPermissions when isolation is set', async () => {
+    const rec = recordingExec({ stdout: 'CLAUDE OUTPUT' });
+    const harness = new ClaudeCliHarness(rec.fn);
+
+    await harness.run(
+      makeContractRequest({ model: 'claude-model', registry, isolation: { tools: 'none', network: 'none' } }),
+    );
+
+    const cmd = rec.calls[0].cmd;
+    expect(cmd).toContain("--tools ''");
+    expect(cmd).toContain('--strict-mcp-config');
+    expect(cmd).not.toContain('bypassPermissions');
+  });
+
   it('omits the model flag when none is configured', async () => {
     const rec = recordingExec({ stdout: 'CLAUDE OUTPUT' });
     const harness = new ClaudeCliHarness(rec.fn);
