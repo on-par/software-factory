@@ -524,6 +524,23 @@ export {
   toClassificationRecord,
 } from './review/classifier.js';
 
+// Classifier backtest over historical merged PRs (#1728)
+export type {
+  BacktestLabelSource,
+  ClassifierBacktestDeps,
+  ClassifierBacktestInput,
+  ClassifierBacktestRecord,
+  ClassifierBacktestResult,
+} from './kpis/classifier-backtest.js';
+export {
+  collectMergeCommitDiff,
+  parseHandLabels,
+  readMergeCommitChanges,
+  runClassifierBacktest,
+  selectBacktestPrs,
+} from './kpis/classifier-backtest.js';
+export { applyHandLabel } from './kpis/classifier-outcomes.js';
+
 // PR classifier routing (#1724)
 export type { ReviewRouting } from './review/routing.js';
 export { classifierGateReason, parseNumstat, readReviewFloorChanges, resolveReviewRouting } from './review/routing.js';

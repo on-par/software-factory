@@ -56,6 +56,22 @@ function decideVerdict(cls: ReviewClass, facts: OutcomeFacts): { verdict: Classi
   return { verdict: escalated ? 'agree' : 'disagree', slipped: false };
 }
 
+/**
+ * Apply a human hand label (#1728). A means the PR merged clean; B or C means it needed a
+ * human, recorded as a defect. The verdict is recomputed by the same rule as the join.
+ */
+export function applyHandLabel(record: ClassifierOutcomeRecord, label: ReviewClass): ClassifierOutcomeRecord {
+  const facts: OutcomeFacts = {
+    merged: record.merged,
+    defectWindowClosed: true,
+    humanAbandoned: false,
+    defectFired: label !== 'A',
+    humanEdited: label === 'A' ? false : record.humanEdited,
+  };
+  const { verdict, slipped } = decideVerdict(record.modelClass, facts);
+  return { ...record, ...facts, verdict, slipped };
+}
+
 export function joinClassifierOutcomes(
   events: FactoryEvent[],
   sources: PrSource[],

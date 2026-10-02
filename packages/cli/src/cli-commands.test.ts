@@ -74,6 +74,8 @@ const h = vi.hoisted(() => {
       steeringDir?: string;
       runsDir?: string;
     }>,
+    backtestCalls: [] as any[],
+    backtestImpl: null as null | ((input: any, deps: any) => Promise<any>),
     setupWorktreeImpl: async (_repoRoot: string, _branch: string, _worktree: string, _startPoint?: string) => {},
   };
 });
@@ -237,6 +239,10 @@ vi.mock('@on-par/factory-core/internal', async (importOriginal) => {
     ...actual,
     watchChecks: vi.fn(async () => 'success'),
     createLocalSmallDryRun: vi.fn(async () => ({ planPath: '/tmp/plan.md', contextPath: '/tmp/ctx.md' })),
+    runClassifierBacktest: vi.fn(async (input: any, deps: any) => {
+      h.backtestCalls.push(input);
+      return h.backtestImpl ? h.backtestImpl(input, deps) : actual.runClassifierBacktest(input, deps);
+    }),
     // Cost.
     readCosts: vi.fn(() => h.costs),
     // Git / worktree side-effects — no-ops.
@@ -1339,6 +1345,171 @@ bash scripts/verify.sh
       expect(res.exited).toBe(false);
       expect(logged()).toContain('factory kpis');
       expect(logged()).toContain('unknown');
+    });
+  });
+
+  describe('classifier backtest (#1728)', () => {
+    const rec = (prNumber: number, o: Record<string, unknown> = {}) => ({
+      issue: String(prNumber),
+      prNumber,
+      classifiedAt: '2026-09-01T00:00:00.000Z',
+      modelClass: 'A',
+      floorClass: 'A',
+      finalClass: 'A',
+      model: 'm',
+      promptVersion: 'p1',
+      policyVersion: 'v1',
+      diffSha: null,
+      humanApproved: false,
+      humanEdited: false,
+      humanAbandoned: false,
+      merged: true,
+      mergedAt: '2026-08-01T00:00:00.000Z',
+      defectWindowClosed: true,
+      defectFired: false,
+      verdict: 'agree',
+      slipped: false,
+      backtest: true,
+      outcome: 'mergedClean',
+      ...o,
+    });
+    const mergedAt = '2026-08-10T00:00:00.000Z';
+
+    beforeEach(() => {
+      h.backtestCalls = [];
+      h.backtestImpl = null;
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) return h.ghRepo;
+        return '';
+      };
+      h.octokit.rest.pulls.list = vi.fn(async () => ({
+        data: [
+          {
+            number: 77,
+            head: { ref: 'ship-it/1-fix' },
+            state: 'closed',
+            merged_at: mergedAt,
+            merge_commit_sha: 'abc1234',
+            closed_at: null,
+          },
+        ],
+      }));
+      h.octokit.rest.pulls.listCommits = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.pulls.listReviews = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.pulls.get = vi.fn(async () => ({ data: { merged_by: { login: 'patrob' } } }));
+      h.octokit.rest.repos = { listCommits: vi.fn(async () => ({ data: [] })) };
+      h.octokit.rest.issues.listForRepo = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.issues.listComments = vi.fn(async () => ({ data: [] }));
+    });
+
+    it('writes classifier-backtest-*.jsonl and prints the rule-of-three report', async () => {
+      h.backtestImpl = async (_input, deps) => {
+        const records = Array.from({ length: 60 }, (_, i) => rec(i + 1));
+        for (const r of records) deps.onRecord(r);
+        return { records, skipped: [], covered: 60, spentUsd: 0, unpricedCalls: 0, stopped: null, notRun: 0 };
+      };
+      await runMain('classifier', 'backtest', '--since', '2026-08-01', '--limit', '20');
+      const files = readdirSync(paths().state).filter((f) => /^classifier-backtest-.*\.jsonl$/.test(f));
+      expect(files).toHaveLength(1);
+      expect(readFileSync(join(paths().state, files[0]), 'utf-8').trim().split('\n')).toHaveLength(60);
+      expect(logged()).toContain('Slip bounds (rule of three');
+      expect(logged()).toContain('Classified 60 PR(s)');
+      expect(h.backtestCalls[0].prs).toHaveLength(1);
+      expect(existsSync(paths().classifierOutcomes)).toBe(false);
+    });
+
+    it('prints the budget stop and the unpriced stop', async () => {
+      h.backtestImpl = async () => ({
+        records: [rec(1), rec(2)],
+        skipped: [{ issue: '3', prNumber: 3, reason: 'no diff' }],
+        covered: 2,
+        spentUsd: 1.2,
+        unpricedCalls: 0,
+        stopped: 'budget',
+        notRun: 3,
+      });
+      await runMain('classifier', 'backtest', '--since', '2026-08-01', '--max-cost', '1');
+      expect(logged()).toContain('Budget $1 reached after 2 PR(s) ($1.20 spent); 3 not run.');
+      expect(logged()).toContain('skipped PR #3 (issue 3): no diff');
+      expect(h.backtestCalls[0].maxCostUsd).toBe(1);
+
+      h.backtestImpl = async () => ({
+        records: [],
+        skipped: [],
+        covered: 1,
+        spentUsd: 0,
+        unpricedCalls: 1,
+        stopped: 'unpriced',
+        notRun: 2,
+      });
+      await runMain('classifier', 'backtest', '--since', '2026-08-01', '--max-cost', '1');
+      expect(logged()).toContain('classifier model is unpriced');
+      expect(logged()).toContain('No PRs classified.');
+    });
+
+    it('passes parsed hand labels through', async () => {
+      const labels = join(h.repoRoot, 'labels.csv');
+      writeFileSync(labels, 'pr,class\n#77,b\n');
+      h.backtestImpl = async () => ({
+        records: [],
+        skipped: [],
+        covered: 0,
+        spentUsd: 0,
+        unpricedCalls: 0,
+        stopped: null,
+        notRun: 0,
+      });
+      await runMain('classifier', 'backtest', '--since', '2026-08-01', '--labels', labels);
+      expect(h.backtestCalls[0].handLabels.get(77)).toBe('B');
+    });
+
+    it('fetches issue text for the backtest and survives a defect lookup failure', async () => {
+      h.octokit.rest.issues.get = vi.fn(async () => ({ data: { title: 'T', body: null } }));
+      h.octokit.rest.repos = {
+        listCommits: vi.fn(async () => {
+          throw new Error('rate limited');
+        }),
+      };
+      let issue: unknown;
+      h.backtestImpl = async (_input, deps) => {
+        issue = await deps.getIssue('1');
+        return {
+          records: [],
+          skipped: [],
+          covered: 1,
+          spentUsd: 0,
+          unpricedCalls: 2,
+          stopped: null,
+          notRun: 0,
+        };
+      };
+      await runMain('classifier', 'backtest', '--since', '2026-08-01');
+      expect(issue).toEqual({ title: 'T', body: '' });
+      expect(errored()).toContain('post-merge defect lookup failed');
+      expect(logged()).toContain('2 classifier call(s) were unpriced');
+    });
+
+    it('reports when no merged PRs match', async () => {
+      await runMain('classifier', 'backtest', '--since', '2027-01-01');
+      expect(logged()).toContain('No merged factory PRs since 2027-01-01.');
+      expect(h.backtestCalls).toHaveLength(0);
+    });
+
+    it('rejects bad input with exit code 1', async () => {
+      const labels = join(h.repoRoot, 'bad.csv');
+      writeFileSync(labels, '77,Z\n');
+      for (const args of [
+        ['--since', 'not-a-date'],
+        ['--since', '2026-08-01', '--limit', '0'],
+        ['--since', '2026-08-01', '--max-cost', '-1'],
+        ['--since', '2026-08-01', '--labels', labels],
+        ['--since', '2026-08-01', '--labels', join(h.repoRoot, 'missing.csv')],
+      ]) {
+        const res = await runMain('classifier', 'backtest', ...args);
+        expect(res).toEqual({ exited: true, code: 1 });
+      }
+      expect(h.backtestCalls).toHaveLength(0);
     });
   });
 

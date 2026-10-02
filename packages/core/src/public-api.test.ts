@@ -420,6 +420,12 @@ const INTERNAL_API_KEYS = [
   'toClassificationRecord',
   // PR classifier routing (#1724)
   'classifierGateReason',
+  'applyHandLabel',
+  'collectMergeCommitDiff',
+  'parseHandLabels',
+  'readMergeCommitChanges',
+  'runClassifierBacktest',
+  'selectBacktestPrs',
   'parseNumstat',
   'readReviewFloorChanges',
   'resolveReviewRouting',
