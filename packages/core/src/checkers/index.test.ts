@@ -1255,6 +1255,20 @@ describe('runAllCheckers', () => {
     },
   );
 
+  it('restricts the run to the `only` names and runs everything when it is undefined (#1925)', async () => {
+    const worktree = await makeWorktree();
+    const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
+
+    const subset = await runAllCheckers(makeContext(worktree), router, null, undefined, ['lint']);
+    expect(subset.results.map((r) => r.checker)).toEqual(['lint']);
+
+    const none = await runAllCheckers(makeContext(worktree), router, null, undefined, []);
+    expect(none.total).toBe(0);
+
+    const all = await runAllCheckers(makeContext(worktree), router, null, undefined, undefined);
+    expect(all.total).toBe(7);
+  });
+
   it('does not throw and fails closed when package.json is unreadable', { timeout: 60000 }, async () => {
     const worktree = await makeWorktree();
     await mkdir(join(worktree, 'package.json'));
