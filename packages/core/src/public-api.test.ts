@@ -398,6 +398,13 @@ const INTERNAL_API_KEYS = [
   'renderOccurrenceComment',
   // Evidence sanitizer for untrusted text (#1841, #1852)
   'stripHiddenContent',
+  'REDACTION_PLACEHOLDERS',
+  'redactText',
+  'buildUpstreamReport',
+  'factoryStackFrames',
+  'UPSTREAM_TITLE_PREFIX',
+  'upstreamInputFromEvidence',
+  'upstreamReportMarker',
   'resolveTargetRepo',
   // Filing policy: when to file, caps, and self-fix labeling (#374)
   'DEFAULT_FILING_POLICY',
