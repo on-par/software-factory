@@ -9,6 +9,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ModelRouter } from '../router/index.js';
 import type { CheckerOutput } from '../types/index.js';
+import { runCommand } from '../utils/command-runner.js';
+import { BaselineCache, hashBaselineEnv } from './baseline-cache.js';
 import { compareBaseline, extractFailingTestNames, runBaselineCheckers } from './baseline.js';
 import { type CheckerContext, type runAllCheckers, summarizeCheckerOutputs } from './index.js';
 
@@ -206,5 +208,143 @@ describe('runBaselineCheckers', () => {
     const report = await runBaselineCheckers(opts);
     expect(touched).toBe(false);
     expect(report.checkers.map((c) => c.verdict)).toEqual(['not-run']);
+  });
+  describe('cache (#1926)', () => {
+    const cacheFilePath = async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'baseline-cache-'));
+      tempDirs.add(dir);
+      return join(dir, 'baseline-cache.json');
+    };
+
+    /** Records runCheckers filters and git commands; runCheckers returns FAIL for every filter. */
+    function recorder() {
+      const filters: string[][] = [];
+      const commands: string[][] = [];
+      const deps = {
+        runCommand: ((argv, options) => {
+          commands.push([...argv]);
+          return runCommand(argv, options);
+        }) satisfies typeof runCommand,
+        runCheckers: (async (_ctx, _router, _c, _t, only: string[]) => {
+          filters.push(only);
+          return summarizeCheckerOutputs(only.map((n) => out(n, 'FAIL', 'base')));
+        }) as typeof runAllCheckers,
+      };
+      return { filters, commands, deps };
+    }
+
+    it('runs on a miss and stores the base result', async () => {
+      const { repo, shaA } = await makeRepo();
+      const file = await cacheFilePath();
+      const { filters, deps } = recorder();
+      const { env, opts } = makeOpts(repo, shaA, { deps, cache: new BaselineCache(file) });
+      const report = await runBaselineCheckers(opts);
+      expect(filters).toEqual([['tests']]);
+      const stored = JSON.parse(await readFile(file, 'utf-8'));
+      expect(Object.keys(stored.entries)).toEqual([`${shaA}:${hashBaselineEnv(env)}:tests`]);
+      expect(report.checkers.find((c) => c.checker === 'tests')?.cached).toBeUndefined();
+    });
+
+    it('reuses a cached result without creating a worktree', async () => {
+      const { repo, shaA } = await makeRepo();
+      const file = await cacheFilePath();
+      const { env, opts } = makeOpts(repo, shaA);
+      await new BaselineCache(file).set(shaA, hashBaselineEnv(env), [out('tests', 'FAIL', 'base')]);
+      const { filters, commands, deps } = recorder();
+      const report = await runBaselineCheckers({ ...opts, deps, cache: new BaselineCache(file) });
+      expect(filters).toEqual([]);
+      expect(commands.some((c) => c.includes('worktree'))).toBe(false);
+      const tests = report.checkers.find((c) => c.checker === 'tests');
+      expect(tests?.verdict).toBe('fails-on-base');
+      expect(tests?.cached).toBe(true);
+      expect(report.checkers.find((c) => c.checker === 'design_smells')?.cached).toBeUndefined();
+    });
+
+    it('misses when the applied laneEnv changes', async () => {
+      const { repo, shaA } = await makeRepo();
+      const file = await cacheFilePath();
+      const envA = { FACTORY_HEADLESS: '1' };
+      await new BaselineCache(file).set(shaA, hashBaselineEnv(envA), [out('tests', 'FAIL')]);
+      const { filters, deps } = recorder();
+      const { opts } = makeOpts(repo, shaA, { deps, cache: new BaselineCache(file) });
+      await runBaselineCheckers({ ...opts, ctx: { ...opts.ctx, env: {} } });
+      expect(filters).toEqual([['tests']]);
+      const stored = JSON.parse(await readFile(file, 'utf-8'));
+      expect(Object.keys(stored.entries)).toHaveLength(2);
+    });
+
+    it('ignores volatile env keys', async () => {
+      const { repo, shaA } = await makeRepo();
+      const file = await cacheFilePath();
+      await new BaselineCache(file).set(shaA, hashBaselineEnv({ FACTORY_HEADLESS: '1', PORT: '4001' }), [
+        out('tests', 'FAIL'),
+      ]);
+      const { filters, deps } = recorder();
+      const { opts } = makeOpts(repo, shaA, { deps, cache: new BaselineCache(file) });
+      await runBaselineCheckers({ ...opts, ctx: { ...opts.ctx, env: { FACTORY_HEADLESS: '1', PORT: '4002' } } });
+      expect(filters).toEqual([]);
+    });
+
+    it('runs only the cache misses', async () => {
+      const { repo, shaA } = await makeRepo();
+      const file = await cacheFilePath();
+      const { env, opts } = makeOpts(repo, shaA);
+      await new BaselineCache(file).set(shaA, hashBaselineEnv(env), [out('tests', 'FAIL')]);
+      const { filters, deps } = recorder();
+      const report = await runBaselineCheckers({
+        ...opts,
+        failing: [out('tests', 'FAIL'), out('lint', 'FAIL')],
+        deps,
+        cache: new BaselineCache(file),
+      });
+      expect(filters).toEqual([['lint']]);
+      expect(report.checkers.map((c) => [c.checker, c.cached])).toEqual([
+        ['tests', true],
+        ['lint', undefined],
+      ]);
+    });
+
+    it('does not cache when the base run throws', async () => {
+      const { repo, shaA } = await makeRepo();
+      const file = await cacheFilePath();
+      const { opts } = makeOpts(repo, shaA, {
+        cache: new BaselineCache(file),
+        deps: {
+          runCheckers: (async () => {
+            throw new Error('kaboom');
+          }) as typeof runAllCheckers,
+        },
+      });
+      const report = await runBaselineCheckers(opts);
+      expect(report.error).toMatch(/^baseline run failed/);
+      expect(existsSync(file)).toBe(false);
+    });
+
+    it('does not cache when the worktree cannot be created', async () => {
+      const { repo } = await makeRepo();
+      const file = await cacheFilePath();
+      const { opts } = makeOpts(repo, 'deadbeef'.repeat(5), { cache: new BaselineCache(file) });
+      const report = await runBaselineCheckers(opts);
+      expect(report.error).toMatch(/^git worktree add failed/);
+      expect(existsSync(file)).toBe(false);
+    });
+
+    it('treats cache read and write errors as misses', async () => {
+      const { repo, shaA } = await makeRepo();
+      const { filters, deps } = recorder();
+      class BrokenCache extends BaselineCache {
+        override async get(): Promise<never> {
+          throw new Error('read');
+        }
+        override async set(): Promise<never> {
+          throw new Error('write');
+        }
+      }
+      const broken = new BrokenCache('unused');
+      const { opts } = makeOpts(repo, shaA, { deps, cache: broken });
+      const report = await runBaselineCheckers(opts);
+      expect(filters).toEqual([['tests']]);
+      expect(report.error).toBeUndefined();
+    });
   });
 });

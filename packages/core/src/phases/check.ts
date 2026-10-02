@@ -3,6 +3,7 @@
 import { join } from 'node:path';
 
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
+import { BaselineCache } from '../checkers/baseline-cache.js';
 import { type BaselineReport, extractFailingTestNames, runBaselineCheckers } from '../checkers/baseline.js';
 import {
   type CheckerContext,
@@ -199,6 +200,8 @@ async function checkPhaseImpl(opts: {
   /** Factory logs dir (`.factory/state/logs`). When set, failing checker commands write
    *  their full output to `<logsDir>/issue-<n>/check-r<round>/` and FAIL details link it. */
   logsDir?: string;
+  /** state/baseline-cache.json (#1926); when set, baseline results are cached per base SHA + laneEnv hash. */
+  baselineCachePath?: string;
   /** Injection seam for tests; defaults to runBaselineCheckers (#1925). */
   runBaseline?: typeof runBaselineCheckers;
 }): Promise<CheckPhaseResult> {
@@ -225,6 +228,7 @@ async function checkPhaseImpl(opts: {
     runId,
     onActivity,
     logsDir,
+    baselineCachePath,
     runBaseline,
   } = opts;
   const roundLogDir = (round: number): string | undefined =>
@@ -289,6 +293,7 @@ async function checkPhaseImpl(opts: {
         router,
         constitution,
         customCheckerTimeoutSeconds: checkTimeoutSeconds,
+        cache: baselineCachePath === undefined ? undefined : new BaselineCache(baselineCachePath),
       }).catch((e: any) => ({ baseSha: diffBase, checkers: [], error: String(e?.message ?? e).slice(0, 300) }));
       log('check', describeBaseline(baseline));
     }
@@ -445,9 +450,9 @@ function describeBaseline(report: BaselineReport): string {
         c.sharedFailingTests && c.newFailingTests
           ? ` (${c.sharedFailingTests.length} shared, ${c.newFailingTests.length} new failing tests)`
           : '';
-      return `${c.checker} also fails on base${counts}`;
+      return `${c.checker} also fails on base${counts}${c.cached ? ' (cached)' : ''}`;
     }
-    if (c.verdict === 'clean-on-base') return `${c.checker} clean on base`;
+    if (c.verdict === 'clean-on-base') return `${c.checker} clean on base${c.cached ? ' (cached)' : ''}`;
     return `${c.checker} not run on base (${c.reason ?? 'unknown'})`;
   });
   const body = parts.length > 0 ? parts.join('; ') : 'no checkers compared';

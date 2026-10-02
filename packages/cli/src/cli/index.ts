@@ -1856,6 +1856,7 @@ export async function shipIssue(
     preferredRoute: repoConfig?.route,
     eventsFile: paths.events,
     logsDir: paths.logs,
+    baselineCachePath: paths.baselineCache,
   };
 
   const ports: RunPorts = {

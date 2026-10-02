@@ -13,6 +13,7 @@ import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import type { BaselineReport } from '../checkers/baseline.js';
+import { BaselineCache } from '../checkers/baseline-cache.js';
 import type { Constitution, ReworkInfo } from '../types/index.js';
 import { checkPhase } from './check.js';
 
@@ -194,6 +195,52 @@ describe('checkPhase baseline (#1925)', () => {
       }),
     });
     expect(logs.some((m) => m.includes('tests also fails on base (1 shared, 1 new failing tests)'))).toBe(true);
+  });
+
+  it('passes a BaselineCache only when baselineCachePath is set (#1926)', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router } = makeRouter();
+    const caches: unknown[] = [];
+    const base = {
+      issue: 77,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      autoRework: false,
+      diffBase: 'abc1234567',
+    };
+    const runBaseline = async (o: any) => {
+      caches.push(o.cache);
+      return cleanReport(o.baseSha);
+    };
+    await checkPhase({ ...base, log: () => {}, runBaseline });
+    await checkPhase({ ...base, log: () => {}, runBaseline, baselineCachePath: join(worktree, 'bc.json') });
+    expect(caches[0]).toBeUndefined();
+    expect(caches[1]).toBeInstanceOf(BaselineCache);
+  });
+
+  it('marks cached baseline entries in the log (#1926)', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router } = makeRouter();
+    const logs: string[] = [];
+    await checkPhase({
+      issue: 77,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      autoRework: false,
+      log: (type, msg) => {
+        if (type === 'check') logs.push(msg);
+      },
+      diffBase: 'abc1234567',
+      runBaseline: async (o) => ({
+        baseSha: o.baseSha,
+        checkers: [{ checker: 'tests', verdict: 'clean-on-base', baseResult: 'PASS', cached: true }],
+      }),
+    });
+    expect(logs.some((m) => m.includes('tests clean on base (cached)'))).toBe(true);
   });
 
   it('runs the baseline once even when rework rounds happen', { timeout: 120_000 }, async () => {

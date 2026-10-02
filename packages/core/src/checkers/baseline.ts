@@ -8,6 +8,7 @@ import type { ModelRouter } from '../router/index.js';
 import type { CheckerOutput, CheckResult, Constitution } from '../types/index.js';
 import { runCommand } from '../utils/command-runner.js';
 import { GIT_COMMAND_TIMEOUT_MS } from '../utils/git-exec.js';
+import { type BaselineCache, hashBaselineEnv } from './baseline-cache.js';
 import { DESIGN_SMELLS_CHECKER, WORKER_OUTPUT_CHECKER } from './design-smells.js';
 import { type CheckerContext, runAllCheckers } from './index.js';
 
@@ -24,6 +25,8 @@ export interface BaselineCheckerComparison {
   newFailingTests?: string[];
   /** Why the checker was not run on base (verdict 'not-run'). */
   reason?: string;
+  /** True when the base result came from the baseline cache (#1926). */
+  cached?: boolean;
 }
 
 export interface BaselineReport {
@@ -52,6 +55,8 @@ export interface BaselineOptions {
   constitution: Constitution | null;
   customCheckerTimeoutSeconds?: number;
   deps?: BaselineDeps;
+  /** Baseline result cache (#1926); when absent every runnable checker runs on base. */
+  cache?: BaselineCache;
 }
 
 /** Checkers that grade the change diff, which is empty at the base SHA. */
@@ -115,11 +120,39 @@ export function compareBaseline(
 }
 
 export async function runBaselineCheckers(opts: BaselineOptions): Promise<BaselineReport> {
-  const { baseSha, laneWorktree, failing, ctx, router, constitution, customCheckerTimeoutSeconds, deps = {} } = opts;
+  const {
+    baseSha,
+    laneWorktree,
+    failing,
+    ctx,
+    router,
+    constitution,
+    customCheckerTimeoutSeconds,
+    deps = {},
+    cache,
+  } = opts;
   const runnable = failing
     .filter((o) => o.result === 'FAIL' && notRunnableReason(o.checker) === null)
     .map((o) => o.checker);
   if (runnable.length === 0) return { baseSha, checkers: compareBaseline(failing, []) };
+
+  const envHash = hashBaselineEnv(ctx.env);
+  const cachedOutputs: CheckerOutput[] = [];
+  const toRun: string[] = [];
+  for (const name of runnable) {
+    let hit: CheckerOutput | undefined;
+    try {
+      hit = await cache?.get(baseSha, envHash, name);
+    } catch {
+      hit = undefined; // a cache read error is a miss
+    }
+    if (hit) cachedOutputs.push(hit);
+    else toRun.push(name);
+  }
+  const cachedNames = new Set(cachedOutputs.map((o) => o.checker));
+  if (toRun.length === 0) {
+    return { baseSha, checkers: markCached(compareBaseline(failing, cachedOutputs), cachedNames) };
+  }
 
   const run = deps.runCommand ?? runCommand;
   const runCheckers = deps.runCheckers ?? runAllCheckers;
@@ -135,7 +168,7 @@ export async function runBaselineCheckers(opts: BaselineOptions): Promise<Baseli
     await rm(parent, { recursive: true, force: true });
     return {
       baseSha,
-      checkers: compareBaseline(failing, []),
+      checkers: markCached(compareBaseline(failing, cachedOutputs), cachedNames),
       error: `git worktree add failed: ${(add.stderr || add.stdout).trim().slice(0, 300)}`,
     };
   }
@@ -146,18 +179,30 @@ export async function runBaselineCheckers(opts: BaselineOptions): Promise<Baseli
       router,
       constitution,
       customCheckerTimeoutSeconds,
-      runnable,
+      toRun,
     );
-    return { baseSha, checkers: compareBaseline(failing, summary.results) };
+    const fresh = summary.results.filter((o) => toRun.includes(o.checker));
+    await cache?.set(baseSha, envHash, fresh).catch(() => {});
+    return { baseSha, checkers: markCached(compareBaseline(failing, [...cachedOutputs, ...fresh]), cachedNames) };
   } catch (e: any) {
     return {
       baseSha,
-      checkers: compareBaseline(failing, []),
+      checkers: markCached(compareBaseline(failing, cachedOutputs), cachedNames),
       error: `baseline run failed: ${(e?.message ?? String(e)).slice(0, 300)}`,
     };
   } finally {
     await removeBaseWorktree(run, laneWorktree, parent, baseWorktree);
   }
+}
+
+function markCached(
+  comparisons: BaselineCheckerComparison[],
+  cachedNames: ReadonlySet<string>,
+): BaselineCheckerComparison[] {
+  for (const c of comparisons) {
+    if (cachedNames.has(c.checker) && c.verdict !== 'not-run') c.cached = true;
+  }
+  return comparisons;
 }
 
 /** Removes only our worktree; never throws. */
