@@ -203,6 +203,7 @@ import {
   createShipExecutor,
   createGithubQueue,
   createLocalSmallDryRun,
+  createOctokitFilingClient,
   createOctokitGreenPrClient,
   createOctokitQueueClient,
   daemonRuntimePaths,
@@ -284,6 +285,7 @@ import { formatOverview, missingClaudeCliMessage, missingTokenMessage, notInitia
 import { cmdHostedSmoke } from './hosted.js';
 import { cmdHostedQueue } from './hosted-queue.js';
 import { cmdHostedRunner } from './hosted-runner.js';
+import { buildFeedbackDeps, type FeedbackDeps, runFeedback } from './feedback.js';
 import { cmdLogs } from './logs.js';
 import { applyHelpGroups } from './help-groups.js';
 import { mergeScopeNotice } from './merge-scope.js';
@@ -620,6 +622,28 @@ export function parseIssueArg(raw: string): number {
     throw new CliExitError(`factory: invalid issue argument '${raw}' — expected a positive integer issue number`, 2);
   }
   return Number(trimmed);
+}
+
+/** Run `factory feedback` and print the filed issue; validation errors become exit-2 CliExitErrors. */
+export async function runFeedbackCommand(
+  prUrl: string,
+  opts: { note?: string },
+  deps: FeedbackDeps,
+  log: (line: string) => void = console.log,
+): Promise<void> {
+  try {
+    const result = await runFeedback(prUrl, opts, deps);
+    log(`Filed ${result.repo}#${result.issueNumber}`);
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('factory feedback:')) throw new CliExitError(err.message, 2);
+    throw err;
+  }
+}
+
+export async function cmdFeedback(prUrl: string, opts: { note?: string; branchPrefix?: string }): Promise<void> {
+  const paths = getFactoryPaths(await getRepoRoot());
+  const prefix = opts.branchPrefix === undefined ? resolveBranchPrefix() : branchPrefixOrExit(opts.branchPrefix);
+  await runFeedbackCommand(prUrl, opts, buildFeedbackDeps(getOctokit(), paths, prefix, createOctokitFilingClient));
 }
 
 function branchPrefixOrExit(raw: string | undefined): string {
@@ -5005,6 +5029,13 @@ export async function main() {
       const paths = getFactoryPaths(repoRoot);
       await cmdLogs(opts, { eventsFile: paths.events });
     });
+
+  program
+    .command('feedback <pr-url>')
+    .description("File one factory issue (bug, factory:needs-triage) from a PR's human review findings")
+    .option('--note <text>', 'Use this as the issue title instead of the first finding')
+    .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
+    .action(cmdFeedback);
 
   const triage = program
     .command('triage')
