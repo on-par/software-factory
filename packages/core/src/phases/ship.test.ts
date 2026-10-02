@@ -1190,6 +1190,66 @@ describe('shipPhase evidence pack', () => {
   });
 });
 
+describe('shipPhase PR description', () => {
+  it('opens the PR with the frozen spec goal, approach, and tests ahead of the diff stat', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ship-pr-body-test-'));
+    try {
+      const specPath = join(dir, 'issue-23.md');
+      await writeFile(
+        specPath,
+        [
+          '---',
+          'route: codex',
+          '---',
+          '# Spec: Self-heal committed work (#23)',
+          '## Goal',
+          'A crashed run leaves committed work with no PR. Recover it on the next run.',
+          '## Files / approach',
+          'Detect commits ahead of main in `ship.ts` and open the PR for them.',
+          '## Tests',
+          'Cover the recovery path in `ship.test.ts`.',
+          '## Non-goals',
+          'Recovering uncommitted work.',
+          '',
+        ].join('\n'),
+      );
+      const { octokit, calls } = createOctokit();
+      const run = async (command: string) => {
+        const remote = remoteHeadStub(command);
+        if (remote) return remote;
+        if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+        if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+        if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+        return { stdout: '' };
+      };
+
+      const result = await shipPhase({
+        issue: 23,
+        repo: 'on-par/software-factory',
+        worktree: dir,
+        branch: 'ship-it/23-self-heal',
+        octokit: octokit as any,
+        watchCI: false,
+        log: () => {},
+        run,
+        specPath,
+      });
+
+      expect(result).toEqual({ ok: true, prNumber: 123 });
+      const body: string = calls.find((c) => c[0] === 'pulls.create')[1].body;
+      expect(body).toContain('## Why\nA crashed run leaves committed work with no PR.');
+      expect(body).toContain('## How\nDetect commits ahead of main in `ship.ts`');
+      expect(body).toContain('## Tests\nCover the recovery path in `ship.test.ts`.');
+      expect(body).not.toContain('route: codex');
+      expect(body).not.toContain('Recovering uncommitted work.');
+      expect(body.indexOf('## Why')).toBeLessThan(body.indexOf('ship.ts | 12'));
+      expect(body).toContain('Closes #23');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('shipPhase approval gate', () => {
   it('approves: gate resolving approved:true lets ship proceed and logs ship, then approval_requested, then approval_granted', async () => {
     const { octokit, calls } = createOctokit();

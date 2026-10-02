@@ -12,7 +12,9 @@ import type { ApprovalGate } from '../approvals/index.js';
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
 import type { EventKind } from '../events/kinds.js';
 import { gatherEvidencePack } from '../reports/evidence-pack.js';
+import { renderPrBody } from '../reports/pr-body.js';
 import type { ReviewRouting } from '../review/routing.js';
+import { readSpec } from '../spec/index.js';
 import type { CheckSummary } from '../types/index.js';
 import { type CiOutcome, watchChecks } from '../utils/ci-watch.js';
 import { shellEscape } from '../utils/index.js';
@@ -291,16 +293,13 @@ async function shipPhaseImpl(opts: {
         base: 'main',
         title: inlineWork ? title : `${title} (#${issue})`,
         draft: true,
-        body: `## Summary
-${summaryLine}
-
-## Changes
-\`\`\`
-${stat}
-\`\`\`
-
-## Verification
-This PR passed independent verification by checker agents before shipping.${inlineWork ? '' : `\n\nCloses #${issue}`}`,
+        body: renderPrBody({
+          summaryLine,
+          specBody: await readSpecBody(opts.specPath),
+          diffStat: stat,
+          checkSummary,
+          closes: inlineWork ? undefined : issue,
+        }),
       });
 
       prNumber = pr.number;
@@ -375,6 +374,16 @@ This PR passed independent verification by checker agents before shipping.${inli
 
   log('ready', `PR #${prNumber} ready for review`);
   return ciOutcome === undefined ? { ok: true, prNumber } : { ok: true, prNumber, ciOutcome };
+}
+
+/** The frozen spec body for the PR description; undefined when there is no readable spec. */
+async function readSpecBody(specPath: string | undefined): Promise<string | undefined> {
+  if (!specPath) return undefined;
+  try {
+    return (await readSpec(specPath)).body;
+  } catch {
+    return undefined;
+  }
 }
 
 async function computeDiffStat(run: CommandRunner, worktree: string): Promise<string> {
