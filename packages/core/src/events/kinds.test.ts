@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { EVENT_TRAITS, eventTraitsFor, isParkKind, laneStatusOf, severityOf, UNKNOWN_EVENT_TRAITS } from './kinds.js';
+import type { FactoryEvent } from '../types/index.js';
+import {
+  EVENT_TRAITS,
+  eventTraitsFor,
+  isParkKind,
+  laneStatusOf,
+  severityOf,
+  UNKNOWN_EVENT_TRAITS,
+  type LanePausedPayload,
+} from './kinds.js';
 
 const VALID_SEVERITIES = new Set(['debug', 'info', 'warn', 'error']);
 const VALID_LANE_STATUSES = new Set(['running', 'waiting-merge', 'ready', 'merged', 'failed', 'parked', 'stopped']);
@@ -168,5 +177,49 @@ describe('skipped-already-closed classification (#681)', () => {
 
   it('isParkKind is false — a skip must never count as human intervention', () => {
     expect(isParkKind('skipped-already-closed')).toBe(false);
+  });
+});
+
+describe('lane-paused', () => {
+  it('is registered in EVENT_TRAITS', () => {
+    expect(Object.hasOwn(EVENT_TRAITS, 'lane-paused')).toBe(true);
+    expect(EVENT_TRAITS['lane-paused']).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
+  });
+
+  it('classifies as a warn, non-park, status-less kind', () => {
+    expect(eventTraitsFor('lane-paused')).not.toBe(UNKNOWN_EVENT_TRAITS);
+    expect(severityOf('lane-paused')).toBe('warn');
+    expect(isParkKind('lane-paused')).toBe(false);
+    expect(laneStatusOf('lane-paused')).toBeUndefined();
+  });
+
+  it('requires lane, signature, failing checks and both issue numbers', () => {
+    const payload: LanePausedPayload = {
+      lane: 'lane-1',
+      signature: 'tests|lint',
+      failingChecks: ['tests', 'lint'],
+      firstIssue: 10,
+      secondIssue: 11,
+    };
+    const event: FactoryEvent = {
+      ts: '2026-01-01T00:00:00.000Z',
+      type: 'lane-paused',
+      issue: '11',
+      msg: 'lane paused',
+      lanePaused: payload,
+    };
+    expect(event.lanePaused).toEqual(payload);
+
+    // @ts-expect-error lane is required
+    const noLane: LanePausedPayload = { signature: 's', failingChecks: [], firstIssue: 1, secondIssue: 2 };
+    // @ts-expect-error signature is required
+    const noSignature: LanePausedPayload = { lane: 'l', failingChecks: [], firstIssue: 1, secondIssue: 2 };
+    // @ts-expect-error failingChecks is required
+    const noChecks: LanePausedPayload = { lane: 'l', signature: 's', firstIssue: 1, secondIssue: 2 };
+    // @ts-expect-error firstIssue is required
+    const noFirst: LanePausedPayload = { lane: 'l', signature: 's', failingChecks: [], secondIssue: 2 };
+    // @ts-expect-error secondIssue is required
+    const noSecond: LanePausedPayload = { lane: 'l', signature: 's', failingChecks: [], firstIssue: 1 };
+    expect([noLane, noSignature, noChecks, noFirst, noSecond]).toHaveLength(5);
   });
 });
