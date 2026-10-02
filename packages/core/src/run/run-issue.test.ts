@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import type { BuildResult } from '../phases/build.js';
@@ -199,6 +199,41 @@ describe('runIssue — per-run id threading (#1910)', () => {
     vi.mocked(buildPhase).mockClear();
     await runIssue(baseRequest(), basePolicy(), basePorts());
     expect(vi.mocked(buildPhase).mock.calls[0][0].runId).not.toBe(buildId);
+  });
+});
+
+describe('runIssue — .NET env event (#1911)', () => {
+  const dirs: string[] = [];
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    for (const d of dirs.splice(0)) await rm(d, { recursive: true, force: true });
+  });
+
+  async function runWith(marker: string): Promise<Array<[string, string]>> {
+    for (const k of ['DiffEngine_Disabled', 'DOTNET_CLI_TELEMETRY_OPTOUT', 'DOTNET_NOLOGO', 'DOTNET_TieredPGO']) {
+      vi.stubEnv(k, undefined);
+    }
+    const path = await mkdtemp(join(tmpdir(), 'run-issue-dotnet-'));
+    dirs.push(path);
+    await writeFile(join(path, marker), '');
+    const events: Array<[string, string]> = [];
+    const log = vi.fn((type: string, msg: string) => events.push([type, msg]));
+    const workspace = { path, dispose: async () => {} } as Workspace;
+    await runIssue(baseRequest(), basePolicy(), basePorts({ workspace, events: () => log }));
+    return events;
+  }
+
+  it('logs one environment_dotnet event naming the applied variables for a .NET workspace', async () => {
+    const found = (await runWith('App.sln')).filter(([t]) => t === 'environment_dotnet');
+    expect(found).toHaveLength(1);
+    expect(found[0][1]).toContain('DiffEngine_Disabled=true');
+    expect(found[0][1]).toContain('DOTNET_NOLOGO=1');
+    expect(found[0][1]).toContain('SharedCompilationId=factory-');
+  });
+
+  it('logs no environment_dotnet event for a non-.NET workspace', async () => {
+    const events = await runWith('package.json');
+    expect(events.some(([t]) => t === 'environment_dotnet')).toBe(false);
   });
 });
 

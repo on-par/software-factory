@@ -36,6 +36,7 @@ import type { ReworkHistory } from '../checkers/rework-history.js';
 import type { AutoFailoverSettings } from '../config/index.js';
 import { type EffectiveModelPins, routeForBuildModel } from '../config/repo.js';
 import type { EventKind } from '../events/kinds.js';
+import { describeDotnetEnv, dotnetEnvReport } from '../environment/dotnet.js';
 import { ProcessGroupTracker } from '../environment/process-groups.js';
 import type { ModelRouter } from '../router/index.js';
 import { gateBuildOnBreaker, parseResetCooldownMs, type ProviderBreaker } from '../router/breaker.js';
@@ -349,6 +350,9 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     };
     const { baseUrl: appBaseUrl, note: proxyNote } = ports.resolveBaseUrl?.(appPort) ?? { note: '' };
     if (proxyNote) log(appBaseUrl ? 'environment_proxy' : 'environment_proxy_unavailable', proxyNote);
+    // Record which .NET lane variables BUILD/CHECK/rework children get (#1911).
+    const dotnet = dotnetEnvReport(ports.workspace.path, process.env, runId);
+    if (dotnet) log('environment_dotnet', describeDotnetEnv(dotnet));
 
     // Resolve standards ONCE against the fresh worktree (Invariant 1). Resolving again
     // later would let the build worker author the standards it is graded by.
