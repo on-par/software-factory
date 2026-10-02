@@ -66,6 +66,9 @@ function setup(opts: { headRef?: string; reviews?: any[]; comments?: any[] } = {
     async listCandidateIssues() {
       return [];
     },
+    async searchIssues() {
+      return [];
+    },
     async createIssue(i: any) {
       created.push(i);
       return { number: 900 };

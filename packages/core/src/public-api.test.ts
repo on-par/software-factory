@@ -392,10 +392,12 @@ const INTERNAL_API_KEYS = [
   'DEFAULT_BUG_LABELS',
   'DEFAULT_INTERNAL_REPO',
   'fileBug',
+  'findIssueByMarker',
   'findMatchingIssue',
   'fingerprintMarker',
   'renderBugBody',
   'renderOccurrenceComment',
+  'renderUpstreamOccurrenceComment',
   // Evidence sanitizer for untrusted text (#1841, #1852)
   'stripHiddenContent',
   'REDACTION_PLACEHOLDERS',

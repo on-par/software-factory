@@ -5002,6 +5002,7 @@ describe('runFeedbackCommand (#1851)', () => {
     },
     filing: {
       listCandidateIssues: async () => [],
+      searchIssues: async () => [],
       createIssue: async () => ({ number: 9 }),
       updateIssue: async () => {},
       commentIssue: async () => {},

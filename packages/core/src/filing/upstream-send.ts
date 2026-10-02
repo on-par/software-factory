@@ -1,12 +1,18 @@
-// src/filing/upstream-send.ts — Send upstream factory reports with outbox fallback and per-operator caps (#1860).
+// src/filing/upstream-send.ts — Send upstream factory reports with outbox fallback and per-operator caps (#1860); dedup by marker via search, bump by comment only (#1861).
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import type { FactoryLogger } from '../logger/index.js';
-import { DEFAULT_INTERNAL_REPO, type FilingGitHubClient } from './index.js';
+import {
+  type CandidateIssue,
+  DEFAULT_INTERNAL_REPO,
+  type FilingGitHubClient,
+  findIssueByMarker,
+  renderUpstreamOccurrenceComment,
+} from './index.js';
 import { emptyLedger, type FilingLedger, type FilingPolicy, recordFiled, rollDay } from './policy.js';
-import type { UpstreamReport } from './upstream.js';
+import { type UpstreamReport, upstreamReportMarker } from './upstream.js';
 
 export function defaultUpstreamOutboxDir(home?: string): string {
   return join(home ?? homedir(), '.factory', 'filing', 'outbox');
@@ -36,7 +42,7 @@ export interface PendingUpstreamReport {
 export interface UpstreamSendInput {
   reports: readonly PendingUpstreamReport[];
   /** Client built from the run's GitHub auth; null when no auth was resolved. */
-  client: Pick<FilingGitHubClient, 'createIssue'> | null;
+  client: Pick<FilingGitHubClient, 'createIssue' | 'searchIssues' | 'commentIssue'> | null;
   repo?: string;
   policy: Pick<FilingPolicy, 'enabled' | 'maxPerRun' | 'maxPerDay'>;
   ledgerFile?: string;
@@ -45,7 +51,7 @@ export interface UpstreamSendInput {
   now?: () => Date;
 }
 
-export type UpstreamSendOutcome = 'created' | 'outboxed' | 'skipped';
+export type UpstreamSendOutcome = 'created' | 'bumped' | 'outboxed' | 'skipped';
 
 export interface UpstreamSendResult {
   fingerprint: string;
@@ -174,6 +180,33 @@ export async function sendUpstreamReports(input: UpstreamSendInput): Promise<Ups
 
     if (client === null) {
       await outbox(pending, 'no-auth');
+      continue;
+    }
+    let match: CandidateIssue | undefined;
+    if (/^[A-Za-z0-9_-]{1,64}$/.test(fingerprint)) {
+      try {
+        match = findIssueByMarker(
+          await client.searchIssues({ owner, repo: name, text: fingerprint }),
+          upstreamReportMarker(fingerprint),
+        );
+      } catch (err) {
+        await outbox(pending, `search-failed: ${classifyUpstreamSendError(err)}`);
+        continue;
+      }
+    }
+    if (match) {
+      try {
+        await client.commentIssue({
+          owner,
+          repo: name,
+          issue_number: match.number,
+          body: renderUpstreamOccurrenceComment(fingerprint, now),
+        });
+        logger?.info('upstream_report_bumped', `Commented on upstream report ${repo}#${match.number}`, { fingerprint });
+        results.push({ fingerprint, outcome: 'bumped', issueNumber: match.number });
+      } catch (err) {
+        await outbox(pending, `comment-failed: ${classifyUpstreamSendError(err)}`);
+      }
       continue;
     }
     try {
