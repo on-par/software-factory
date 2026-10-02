@@ -285,7 +285,7 @@ import { formatOverview, missingClaudeCliMessage, missingTokenMessage, notInitia
 import { cmdHostedSmoke } from './hosted.js';
 import { cmdHostedQueue } from './hosted-queue.js';
 import { cmdHostedRunner } from './hosted-runner.js';
-import { createOctokitFeedbackClient, runFeedback } from './feedback.js';
+import { buildFeedbackDeps, type FeedbackDeps, runFeedback } from './feedback.js';
 import { cmdLogs } from './logs.js';
 import { applyHelpGroups } from './help-groups.js';
 import { mergeScopeNotice } from './merge-scope.js';
@@ -624,23 +624,26 @@ export function parseIssueArg(raw: string): number {
   return Number(trimmed);
 }
 
-async function cmdFeedback(prUrl: string, opts: { note?: string; branchPrefix?: string }): Promise<void> {
-  const repoRoot = await getRepoRoot();
-  const paths = getFactoryPaths(repoRoot);
-  const octokit = getOctokit();
+/** Run `factory feedback` and print the filed issue; validation errors become exit-2 CliExitErrors. */
+export async function runFeedbackCommand(
+  prUrl: string,
+  opts: { note?: string },
+  deps: FeedbackDeps,
+  log: (line: string) => void = console.log,
+): Promise<void> {
   try {
-    const result = await runFeedback(prUrl, opts, {
-      github: createOctokitFeedbackClient(octokit),
-      filing: createOctokitFilingClient(octokit),
-      paths: { events: paths.events, plans: paths.plans, logs: paths.logs },
-      branchPrefix: opts.branchPrefix === undefined ? resolveBranchPrefix() : branchPrefixOrExit(opts.branchPrefix),
-      now: () => new Date(),
-    });
-    console.log(`Filed ${result.repo}#${result.issueNumber}`);
+    const result = await runFeedback(prUrl, opts, deps);
+    log(`Filed ${result.repo}#${result.issueNumber}`);
   } catch (err) {
     if (err instanceof Error && err.message.startsWith('factory feedback:')) throw new CliExitError(err.message, 2);
     throw err;
   }
+}
+
+export async function cmdFeedback(prUrl: string, opts: { note?: string; branchPrefix?: string }): Promise<void> {
+  const paths = getFactoryPaths(await getRepoRoot());
+  const prefix = opts.branchPrefix === undefined ? resolveBranchPrefix() : branchPrefixOrExit(opts.branchPrefix);
+  await runFeedbackCommand(prUrl, opts, buildFeedbackDeps(getOctokit(), paths, prefix, createOctokitFilingClient));
 }
 
 function branchPrefixOrExit(raw: string | undefined): string {

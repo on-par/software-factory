@@ -219,3 +219,19 @@ export function createOctokitFeedbackClient(octokit: Octokit): FeedbackGitHubCli
     },
   };
 }
+
+/** Wire the real GitHub clients and run-state paths into FeedbackDeps. */
+export function buildFeedbackDeps(
+  octokit: Octokit,
+  paths: { events: string; plans: string; logs: string },
+  branchPrefix: string,
+  createFilingClient: (octokit: Octokit) => FilingGitHubClient,
+): FeedbackDeps {
+  return {
+    github: createOctokitFeedbackClient(octokit),
+    filing: createFilingClient(octokit),
+    paths: { events: paths.events, plans: paths.plans, logs: paths.logs },
+    branchPrefix,
+    now: () => new Date(),
+  };
+}

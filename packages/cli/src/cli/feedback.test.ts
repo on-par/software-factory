@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildFeedbackDeps,
   buildFeedbackTitle,
   collectReviewFindings,
   createOctokitFeedbackClient,
@@ -147,6 +148,12 @@ describe('runFeedback', () => {
     expect(created).toHaveLength(0);
   });
 
+  it('files with only a note and a placeholder excerpt', async () => {
+    const { deps, created } = setup({ reviews: [], comments: [] });
+    await runFeedback(PR, { note: 'n' }, deps);
+    expect(created[0].body).toContain('(no review findings; see note)');
+  });
+
   it('refuses an invalid URL before any network call', async () => {
     const { deps } = setup();
     deps.github.getPull = async () => {
@@ -186,6 +193,7 @@ describe('createOctokitFeedbackClient', () => {
                 created_at: 't',
                 html_url: 'u2',
               },
+              { user: null, body: null, path: 'q', line: 4, original_line: 9, created_at: 't2', html_url: 'u3' },
             ],
     };
     const c = createOctokitFeedbackClient(octokit);
@@ -196,6 +204,25 @@ describe('createOctokitFeedbackClient', () => {
     ]);
     expect(await c.listReviewComments(ref)).toEqual([
       { user: 'bob', body: 'b', path: 'p', line: 3, createdAt: 't', url: 'u2' },
+      { user: 'unknown', body: '', path: 'q', line: 4, createdAt: 't2', url: 'u3' },
     ]);
+  });
+});
+
+describe('buildFeedbackDeps', () => {
+  it('wires clients, paths and prefix', () => {
+    const octokit: any = {};
+    const filing: any = { tag: 'filing' };
+    const d = buildFeedbackDeps(
+      octokit,
+      { events: 'e', plans: 'p', logs: 'l', extra: 'x' } as any,
+      'ship-it',
+      () => filing,
+    );
+    expect(d.filing).toBe(filing);
+    expect(d.paths).toEqual({ events: 'e', plans: 'p', logs: 'l' });
+    expect(d.branchPrefix).toBe('ship-it');
+    expect(d.now()).toBeInstanceOf(Date);
+    expect(typeof d.github.getPull).toBe('function');
   });
 });

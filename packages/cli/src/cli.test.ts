@@ -27,6 +27,8 @@ import {
   hasReachableWorker,
   InvalidProductNameError,
   isPermanentMergeCheckError,
+  cmdFeedback,
+  runFeedbackCommand,
   IssueDecomposedError,
   IssueSkippedError,
   isPrMerged,
@@ -4987,5 +4989,56 @@ describe('withRepoRunLock', () => {
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ eventsFile: paths.events, type: 'lock-stolen' });
     expect(events[0].msg).toContain('4321');
+  });
+});
+
+describe('runFeedbackCommand (#1851)', () => {
+  const deps = (over: Record<string, unknown> = {}): any => ({
+    github: {
+      getPull: async () => ({ headRef: 'x', title: 't', url: 'u' }),
+      listReviews: async () => [],
+      listReviewComments: async () => [],
+    },
+    filing: {
+      listCandidateIssues: async () => [],
+      createIssue: async () => ({ number: 9 }),
+      updateIssue: async () => {},
+      commentIssue: async () => {},
+    },
+    paths: { events: '/nowhere/events', plans: '/p', logs: '/l' },
+    now: () => new Date(0),
+    host: 'h',
+    ...over,
+  });
+
+  it('prints the filed issue', async () => {
+    const lines: string[] = [];
+    await runFeedbackCommand('https://github.com/o/r/pull/1', { note: 'gap' }, deps(), (l) => lines.push(l));
+    expect(lines).toEqual(['Filed on-par/software-factory#9']);
+  });
+
+  it('maps validation errors to exit 2', async () => {
+    await expect(runFeedbackCommand('bogus', {}, deps())).rejects.toMatchObject({ code: 2 });
+  });
+
+  it('rethrows other errors untouched', async () => {
+    const d = deps({
+      github: {
+        getPull: async () => {
+          throw new Error('boom');
+        },
+      },
+    });
+    await expect(runFeedbackCommand('https://github.com/o/r/pull/1', {}, d)).rejects.toThrow('boom');
+  });
+
+  it('cmdFeedback wires real deps and refuses an invalid URL before any network call', async () => {
+    vi.stubEnv('GITHUB_TOKEN', 'ghp_test');
+    try {
+      await expect(cmdFeedback('bogus', {})).rejects.toMatchObject({ code: 2 });
+      await expect(cmdFeedback('bogus', { branchPrefix: 'ship-it' })).rejects.toMatchObject({ code: 2 });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
