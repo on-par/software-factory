@@ -35,6 +35,9 @@ export {
 } from './filing/index.js';
 
 // Filing policy: when to file, caps, and self-fix labeling (#374)
+// Evidence sanitizer for untrusted text (#1841, #1852)
+export { stripHiddenContent } from './filing/sanitize.js';
+
 export type { FilingDecision, FilingLedger, FilingPolicy, FilingSkipReason } from './filing/policy.js';
 export {
   DEFAULT_FILING_POLICY,

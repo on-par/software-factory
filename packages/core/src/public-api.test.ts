@@ -396,6 +396,8 @@ const INTERNAL_API_KEYS = [
   'fingerprintMarker',
   'renderBugBody',
   'renderOccurrenceComment',
+  // Evidence sanitizer for untrusted text (#1841, #1852)
+  'stripHiddenContent',
   'resolveTargetRepo',
   // Filing policy: when to file, caps, and self-fix labeling (#374)
   'DEFAULT_FILING_POLICY',

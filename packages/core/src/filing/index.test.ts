@@ -3,6 +3,7 @@ import { hostname } from 'node:os';
 import { defaultEvidenceCaps } from '@on-par/factory-config';
 import { describe, expect, it } from 'vitest';
 
+import { IN_PROGRESS_LABEL, LANE_LABEL_PREFIX, QUEUE_ORDER_LABEL_PREFIX, QUEUED_LABEL } from '../queue/github-queue.js';
 import type { EvidencePack, FailoverReason, FingerprintedFailure } from '../types/index.js';
 import type { CandidateIssue, FilingGitHubClient } from './index.js';
 import {
@@ -494,5 +495,29 @@ describe('createOctokitFilingClient', () => {
       'issues.createComment',
       { owner: 'on-par', repo: 'widgets', issue_number: 7, body: 'a comment' },
     ]);
+  });
+});
+
+describe('fileBug caller labels (#1852)', () => {
+  it('passes labels through exactly and adds no queue, lane or order label', async () => {
+    const { client, created } = makeFakeClient([]);
+    const labels = ['bug', 'factory:needs-triage'];
+    await fileBug(client, { fingerprinted: makeFingerprinted(), now: clock, labels });
+    expect(created[0].labels).toEqual(labels);
+    for (const l of created[0].labels as string[]) {
+      expect([QUEUED_LABEL, IN_PROGRESS_LABEL]).not.toContain(l);
+      expect(l.startsWith(LANE_LABEL_PREFIX)).toBe(false);
+      expect(l.startsWith(QUEUE_ORDER_LABEL_PREFIX)).toBe(false);
+    }
+  });
+
+  it('strips hidden content from the evidence excerpt in the body', async () => {
+    const { client, created } = makeFakeClient([]);
+    await fileBug(client, {
+      fingerprinted: makeFingerprinted({ eventExcerpt: 'before <!-- x --> after\u2066end' }),
+      now: clock,
+    });
+    expect(created[0].body).not.toContain('<!-- x -->');
+    expect(created[0].body).not.toContain('\u2066');
   });
 });
