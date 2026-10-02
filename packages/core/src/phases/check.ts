@@ -3,6 +3,7 @@
 import { join } from 'node:path';
 
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
+import { type BaselineReport, extractFailingTestNames, runBaselineCheckers } from '../checkers/baseline.js';
 import {
   type CheckerContext,
   probeWorktree,
@@ -40,6 +41,8 @@ export interface CheckPhaseResult {
    *  via ReworkHistory so a future run can detect a repeat. Present whenever the
    *  phase ends with `summary.failures > 0`; absent when it passes clean. */
   failureSignature?: string;
+  /** Round-1 failing checkers re-run on diffBase (#1925); absent when round 1 passed, worker_output failed, or no diffBase. */
+  baseline?: BaselineReport;
 }
 
 const MAX_REWORK_ROUNDS = 3;
@@ -76,19 +79,7 @@ function testFailureEvidence(summary: CheckSummary): Pick<ReworkInfo, 'failingTe
   if (!testsFailure) return {};
 
   const details = testsFailure.details.slice(0, MAX_FAILURE_OUTPUT_LENGTH);
-  const failingTests = details
-    .split(/\r?\n/)
-    .flatMap(
-      (line) =>
-        line.match(/(?:\bFAIL|[×✕●])\s+(.+)/)?.[1] ??
-        line.match(/\bnot ok \d+\s*-\s*(.+)/i)?.[1] ??
-        // .NET Microsoft.Testing.Platform: "failed Namespace.Class.Test (46ms)"
-        line.match(/\bfailed\s+(\S+)\s+\(\d/)?.[1] ??
-        [],
-    )
-    .map((identifier) => identifier.trim())
-    .filter((identifier) => identifier !== '')
-    .slice(0, MAX_FAILING_TESTS);
+  const failingTests = extractFailingTestNames(details).slice(0, MAX_FAILING_TESTS);
 
   return {
     ...(failingTests.length > 0 ? { failingTests } : {}),
@@ -208,6 +199,8 @@ async function checkPhaseImpl(opts: {
   /** Factory logs dir (`.factory/state/logs`). When set, failing checker commands write
    *  their full output to `<logsDir>/issue-<n>/check-r<round>/` and FAIL details link it. */
   logsDir?: string;
+  /** Injection seam for tests; defaults to runBaselineCheckers (#1925). */
+  runBaseline?: typeof runBaselineCheckers;
 }): Promise<CheckPhaseResult> {
   const {
     issue,
@@ -232,6 +225,7 @@ async function checkPhaseImpl(opts: {
     runId,
     onActivity,
     logsDir,
+    runBaseline,
   } = opts;
   const roundLogDir = (round: number): string | undefined =>
     logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, `check-r${round}`);
@@ -279,6 +273,27 @@ async function checkPhaseImpl(opts: {
     return { passed: false, summary, reworkRounds: 0, failureSignature: signature };
   }
 
+  let baseline: BaselineReport | undefined;
+  if (summary.failures > 0) {
+    if (diffBase === undefined) {
+      log('check', 'baseline skipped: no base SHA for this run');
+    } else {
+      baseline = await (runBaseline ?? runBaselineCheckers)({
+        baseSha: diffBase,
+        laneWorktree: worktree,
+        failing: summary.results,
+        ctx: {
+          ...ctx,
+          outputLogDir: logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, 'check-base'),
+        },
+        router,
+        constitution,
+        customCheckerTimeoutSeconds: checkTimeoutSeconds,
+      }).catch((e: any) => ({ baseSha: diffBase, checkers: [], error: String(e?.message ?? e).slice(0, 300) }));
+      log('check', describeBaseline(baseline));
+    }
+  }
+
   // Cross-run stuck (#740): round one already reproduces the exact failure a
   // prior run parked on. Skip the rework loop entirely rather than re-burning
   // a full budget against a root cause nothing has fixed since — a watchdog
@@ -302,6 +317,7 @@ async function checkPhaseImpl(opts: {
       stuck: true,
       crossRunStuck: true,
       failureSignature: priorFailureSignature,
+      ...(baseline ? { baseline } : {}),
     };
   }
 
@@ -417,7 +433,25 @@ async function checkPhaseImpl(opts: {
     reworkRounds,
     stuck,
     failureSignature: summary.failures > 0 ? failureSignature(summary) : undefined,
+    ...(baseline ? { baseline } : {}),
   };
+}
+
+/** One-line summary of the baseline comparison for the CHECK log. */
+function describeBaseline(report: BaselineReport): string {
+  const parts = report.checkers.map((c) => {
+    if (c.verdict === 'fails-on-base') {
+      const counts =
+        c.sharedFailingTests && c.newFailingTests
+          ? ` (${c.sharedFailingTests.length} shared, ${c.newFailingTests.length} new failing tests)`
+          : '';
+      return `${c.checker} also fails on base${counts}`;
+    }
+    if (c.verdict === 'clean-on-base') return `${c.checker} clean on base`;
+    return `${c.checker} not run on base (${c.reason ?? 'unknown'})`;
+  });
+  const body = parts.length > 0 ? parts.join('; ') : 'no checkers compared';
+  return `baseline at ${report.baseSha.slice(0, 8)}: ${body}${report.error ? ` — error: ${report.error}` : ''}`;
 }
 
 interface ReworkWorkerOptions {

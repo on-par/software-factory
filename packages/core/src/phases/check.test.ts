@@ -12,6 +12,7 @@ import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
+import type { BaselineReport } from '../checkers/baseline.js';
 import type { Constitution, ReworkInfo } from '../types/index.js';
 import { checkPhase } from './check.js';
 
@@ -103,6 +104,162 @@ const tempDirs = new Set<string>();
 afterEach(async () => {
   await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
   tempDirs.clear();
+});
+
+describe('checkPhase baseline (#1925)', () => {
+  const cleanReport = (baseSha: string): BaselineReport => ({
+    baseSha,
+    checkers: [{ checker: 'tests', verdict: 'clean-on-base', baseResult: 'PASS' }],
+  });
+
+  it('does not call the baseline when round 1 passes', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makePassingWorktree();
+    const { router } = makeRouter();
+    const calls: unknown[] = [];
+    const result = await checkPhase({
+      issue: 1,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      log: () => {},
+      diffBase: 'abc12345',
+      runBaseline: async (o) => {
+        calls.push(o);
+        return cleanReport(o.baseSha);
+      },
+    });
+    expect(calls).toHaveLength(0);
+    expect(result.baseline).toBeUndefined();
+  });
+
+  it('reports a clean base without changing the outcome', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router } = makeRouter();
+    const baseOpts = { issue: 77, worktree, specPath, router, constitution: null, autoRework: false };
+    const without = await checkPhase({ ...baseOpts, log: () => {} });
+
+    const logs: string[] = [];
+    const calls: any[] = [];
+    const result = await checkPhase({
+      ...baseOpts,
+      log: (type, msg) => {
+        if (type === 'check') logs.push(msg);
+      },
+      diffBase: 'abc1234567',
+      runBaseline: async (o) => {
+        calls.push(o);
+        return cleanReport(o.baseSha);
+      },
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].baseSha).toBe('abc1234567');
+    expect(calls[0].laneWorktree).toBe(worktree);
+    expect(calls[0].ctx.env).toEqual(calls[0].ctx.env);
+    expect(calls[0].ctx.env).toBeDefined();
+    expect(result.baseline).toEqual(cleanReport('abc1234567'));
+    expect(result.passed).toBe(without.passed);
+    expect(result.reworkRounds).toBe(without.reworkRounds);
+    expect(result.failureSignature).toBe(without.failureSignature);
+    expect(logs.some((m) => m.includes('clean on base'))).toBe(true);
+  });
+
+  it('logs when a checker also fails on base', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router } = makeRouter();
+    const logs: string[] = [];
+    await checkPhase({
+      issue: 77,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      autoRework: false,
+      log: (type, msg) => {
+        if (type === 'check') logs.push(msg);
+      },
+      diffBase: 'abc1234567',
+      runBaseline: async (o) => ({
+        baseSha: o.baseSha,
+        checkers: [
+          {
+            checker: 'tests',
+            verdict: 'fails-on-base',
+            baseResult: 'FAIL',
+            sharedFailingTests: ['a'],
+            newFailingTests: ['b'],
+          },
+        ],
+      }),
+    });
+    expect(logs.some((m) => m.includes('tests also fails on base (1 shared, 1 new failing tests)'))).toBe(true);
+  });
+
+  it('runs the baseline once even when rework rounds happen', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router } = makeRouter();
+    let calls = 0;
+    const result = await checkPhase({
+      issue: 77,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      log: () => {},
+      maxReworkRounds: 2,
+      diffBase: 'abc1234567',
+      runBaseline: async (o) => {
+        calls++;
+        return cleanReport(o.baseSha);
+      },
+    });
+    expect(result.reworkRounds).toBeGreaterThan(0);
+    expect(calls).toBe(1);
+  });
+
+  it('survives a rejecting baseline and records the error', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router } = makeRouter();
+    const result = await checkPhase({
+      issue: 77,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      log: () => {},
+      autoRework: false,
+      diffBase: 'abc1234567',
+      runBaseline: async () => {
+        throw new Error('boom');
+      },
+    });
+    expect(result.passed).toBe(false);
+    expect(result.baseline?.error).toBe('boom');
+  });
+
+  it('skips the baseline when diffBase is undefined', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router } = makeRouter();
+    const logs: string[] = [];
+    let calls = 0;
+    const result = await checkPhase({
+      issue: 77,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      autoRework: false,
+      log: (_t, msg) => logs.push(msg),
+      runBaseline: async (o) => {
+        calls++;
+        return cleanReport(o.baseSha);
+      },
+    });
+    expect(calls).toBe(0);
+    expect(result.baseline).toBeUndefined();
+    expect(logs.some((m) => m.includes('baseline skipped'))).toBe(true);
+  });
 });
 
 describe('checkPhase auto rework', () => {
