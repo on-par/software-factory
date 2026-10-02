@@ -586,6 +586,19 @@ export const defaultRoutesConfig: RoutesDefaults = {
   },
 };
 
+/** Size caps for auto-filed bug evidence (#1842). Raw logs stay local; issues get a capped excerpt plus a host:path pointer. */
+export interface EvidenceCapsDefaults {
+  /** Max characters of the evidence excerpt placed in a filed bug body. */
+  maxExcerptChars: number;
+  /** Max characters of the whole filed bug body. */
+  maxBodyChars: number;
+}
+
+export const defaultEvidenceCaps: EvidenceCapsDefaults = {
+  maxExcerptChars: 2000,
+  maxBodyChars: 8000,
+};
+
 /** Global factory configuration: paths, timeouts, merge/worktree/budget/intake defaults. */
 export const defaultFactoryConfig: FactoryDefaults = {
   version: 1,

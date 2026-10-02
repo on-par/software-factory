@@ -1,9 +1,13 @@
 // src/filing/index.ts — Auto-file a fingerprinted bug with dedup + repo routing (#373).
+// Evidence is capped and the raw log is referenced as host:path, never inlined (#1842).
 
+import { hostname } from 'node:os';
+
+import { defaultEvidenceCaps } from '@on-par/factory-config';
 import type { Octokit } from '@octokit/rest';
 
 import type { EvidencePack, FailoverReason, FingerprintedFailure } from '../types/index.js';
-import { fenceExcerpt, sanitizeEvidence } from './sanitize.js';
+import { fenceExcerpt, sanitizeEvidence, stripHiddenContent } from './sanitize.js';
 
 /** Where factory-internal faults are filed when origin === 'factory-internal'. */
 export const DEFAULT_INTERNAL_REPO = 'on-par/software-factory';
@@ -48,6 +52,10 @@ export interface FileBugInput {
   runId?: string;
   internalRepo?: string;
   labels?: readonly string[];
+  /** Host that holds the raw log, printed as host:path (default: os.hostname()). */
+  host?: string;
+  /** Evidence size caps (default: defaultEvidenceCaps). */
+  caps?: EvidenceCaps;
 }
 
 export interface FileBugResult {
@@ -87,8 +95,46 @@ function suspectedCause(reason: FailoverReason): string {
   return SUSPECTED_CAUSE_BY_REASON[reason] ?? 'See the evidence excerpt above.';
 }
 
-/** House bug format with the two hidden dedup/count markers appended last. */
-export function renderBugBody(evidence: EvidencePack, fingerprint: string, occurrences = 1): string {
+export interface EvidenceCaps {
+  maxExcerptChars: number;
+  maxBodyChars: number;
+}
+
+export interface RenderBugBodyOptions {
+  /** Host that holds the raw log (default: os.hostname()). */
+  host?: string;
+  /** Size caps (default: defaultEvidenceCaps from @on-par/factory-config). */
+  caps?: EvidenceCaps;
+}
+
+export interface CappedExcerpt {
+  text: string;
+  truncated: boolean;
+  shownChars: number;
+  totalChars: number;
+}
+
+/** Cut an excerpt to at most maxChars, never leaving a lone high surrogate (pure, exported). */
+export function capEvidenceExcerpt(text: string, maxChars: number): CappedExcerpt {
+  const limit = Math.max(0, Math.floor(maxChars));
+  if (text.length <= limit) {
+    return { text, truncated: false, shownChars: text.length, totalChars: text.length };
+  }
+  let kept = text.slice(0, limit);
+  if (kept.length > 0 && /[\uD800-\uDBFF]/.test(kept[kept.length - 1])) kept = kept.slice(0, -1);
+  return { text: kept, truncated: true, shownChars: kept.length, totalChars: text.length };
+}
+
+function composeBody(
+  evidence: EvidencePack,
+  fingerprint: string,
+  occurrences: number,
+  pointer: string,
+  excerpt: CappedExcerpt,
+): string {
+  const note = excerpt.truncated
+    ? `\n\n_Evidence truncated: showing the first ${excerpt.shownChars} of ${excerpt.totalChars} characters. The full raw log stays on the originating machine at \`${pointer}\`._`
+    : '';
   return `## Problem
 Factory failure in the ${evidence.phase} phase (${evidence.component}) — reason: ${evidence.reason}, origin: ${evidence.origin}.
 
@@ -98,9 +144,9 @@ Factory failure in the ${evidence.phase} phase (${evidence.component}) — reaso
 - Phase / component: ${evidence.phase} / ${evidence.component}
 - Model: ${evidence.model}
 - Classified reason: ${evidence.reason}
-- Log: ${evidence.logPath}
+- Log: ${pointer}
 
-${fenceExcerpt(evidence.eventExcerpt)}
+${fenceExcerpt(excerpt.text)}${note}
 
 ## Suspected cause
 ${suspectedCause(evidence.reason)}
@@ -108,6 +154,34 @@ ${suspectedCause(evidence.reason)}
 ${fingerprintMarker(fingerprint)}
 ${countMarker(occurrences)}
 `;
+}
+
+/**
+ * House bug format with the two hidden dedup/count markers appended last. The excerpt is capped
+ * (per-excerpt and total-body); the structure and markers are never cut.
+ */
+export function renderBugBody(
+  evidence: EvidencePack,
+  fingerprint: string,
+  occurrences = 1,
+  options: RenderBugBodyOptions = {},
+): string {
+  const host = stripHiddenContent(options.host ?? hostname()) || 'unknown-host';
+  const caps = options.caps ?? defaultEvidenceCaps;
+  const pointer = `${host}:${evidence.logPath}`;
+  let budget = caps.maxExcerptChars;
+  let body = composeBody(
+    evidence,
+    fingerprint,
+    occurrences,
+    pointer,
+    capEvidenceExcerpt(evidence.eventExcerpt, budget),
+  );
+  while (body.length > caps.maxBodyChars && budget > 0) {
+    budget = Math.max(0, budget - (body.length - caps.maxBodyChars));
+    body = composeBody(evidence, fingerprint, occurrences, pointer, capEvidenceExcerpt(evidence.eventExcerpt, budget));
+  }
+  return body;
 }
 
 export function renderOccurrenceComment(
@@ -152,7 +226,7 @@ export async function fileBug(client: FilingGitHubClient, input: FileBugInput): 
     owner,
     repo,
     title,
-    body: renderBugBody(evidence, fingerprint, 1),
+    body: renderBugBody(evidence, fingerprint, 1, { host: input.host, caps: input.caps }),
     labels,
   });
   return { action: 'created', repo: target, issueNumber: number, fingerprint, occurrences: 1 };

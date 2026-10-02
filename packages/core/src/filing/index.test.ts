@@ -1,8 +1,12 @@
+import { hostname } from 'node:os';
+
+import { defaultEvidenceCaps } from '@on-par/factory-config';
 import { describe, expect, it } from 'vitest';
 
 import type { EvidencePack, FailoverReason, FingerprintedFailure } from '../types/index.js';
 import type { CandidateIssue, FilingGitHubClient } from './index.js';
 import {
+  capEvidenceExcerpt,
   createOctokitFilingClient,
   DEFAULT_INTERNAL_REPO,
   fileBug,
@@ -138,6 +142,91 @@ describe('renderBugBody', () => {
   it('falls back to the default suspected-cause line for an unmapped reason', () => {
     const body = renderBugBody(makeEvidence({ reason: 'unknown' }), 'ff_abc123', 1);
     expect(body).toContain('See the evidence excerpt above.');
+  });
+});
+
+describe('evidence caps (#1842)', () => {
+  const pointer = 'build-box:/logs/run-1.ndjson';
+  const markers = `${fingerprintMarker('ff_abc123')}\n<!-- fp-count:1 -->\n`;
+
+  it('capEvidenceExcerpt leaves short text alone and cuts long text', () => {
+    expect(capEvidenceExcerpt('abc', 10)).toEqual({ text: 'abc', truncated: false, shownChars: 3, totalChars: 3 });
+    expect(capEvidenceExcerpt('abcdef', 4)).toEqual({ text: 'abcd', truncated: true, shownChars: 4, totalChars: 6 });
+    expect(capEvidenceExcerpt('abc', 0).text).toBe('');
+    expect(capEvidenceExcerpt('abc', -5).text).toBe('');
+  });
+
+  it('capEvidenceExcerpt drops a high surrogate it would split', () => {
+    const r = capEvidenceExcerpt('a\u{1F600}b', 2);
+    expect(r.text).toBe('a');
+    expect(r.shownChars).toBe(1);
+    expect(r.totalChars).toBe(4);
+  });
+
+  it('caps the excerpt, notes the truncation and keeps markers last', () => {
+    const excerpt = 'x'.repeat(49) + 'Y' + 'z'.repeat(450);
+    const body = renderBugBody(makeEvidence({ eventExcerpt: excerpt }), 'ff_abc123', 1, {
+      host: 'build-box',
+      caps: { maxExcerptChars: 50, maxBodyChars: 100000 },
+    });
+    expect(body).toContain(excerpt.slice(0, 50));
+    expect(body).not.toContain(excerpt.slice(0, 51));
+    expect(body).toContain('_Evidence truncated: showing the first 50 of 500 characters');
+    expect(body).toContain(pointer);
+    expect(body.endsWith(markers)).toBe(true);
+  });
+
+  it('enforces the total body cap', () => {
+    const body = renderBugBody(makeEvidence({ eventExcerpt: 'q'.repeat(10000) }), 'ff_abc123', 1, {
+      host: 'build-box',
+      caps: { maxExcerptChars: 100000, maxBodyChars: 1500 },
+    });
+    expect(body.length).toBeLessThanOrEqual(1500);
+    expect(body).toContain('Evidence truncated');
+    expect(body.endsWith(markers)).toBe(true);
+  });
+
+  it('never cuts structure when metadata alone exceeds the body cap', () => {
+    const body = renderBugBody(makeEvidence({ eventExcerpt: 'q'.repeat(100) }), 'ff_abc123', 1, {
+      host: 'build-box',
+      caps: { maxExcerptChars: 100, maxBodyChars: 10 },
+    });
+    expect(body.endsWith(markers)).toBe(true);
+  });
+
+  it('does not truncate a short excerpt and prints host:path', () => {
+    const body = renderBugBody(makeEvidence(), 'ff_abc123', 1, { host: 'build-box' });
+    expect(body).not.toContain('Evidence truncated');
+    expect(body).toContain(`- Log: ${pointer}`);
+  });
+
+  it('defaults the host to os.hostname()', () => {
+    expect(renderBugBody(makeEvidence(), 'ff_abc123', 1)).toContain(`- Log: ${hostname()}:/logs/run-1.ndjson`);
+  });
+
+  it('falls back when the host is empty after stripping', () => {
+    expect(renderBugBody(makeEvidence(), 'ff_abc123', 1, { host: '\u200B' })).toContain('- Log: unknown-host:');
+  });
+
+  it('applies the default caps', () => {
+    const body = renderBugBody(makeEvidence({ eventExcerpt: 'w'.repeat(5000) }), 'ff_abc123', 1);
+    expect(body).toContain('w'.repeat(defaultEvidenceCaps.maxExcerptChars - 1));
+    expect(body).not.toContain('w'.repeat(defaultEvidenceCaps.maxExcerptChars + 1));
+    expect(body.length).toBeLessThanOrEqual(defaultEvidenceCaps.maxBodyChars);
+  });
+
+  it('fileBug files a capped body pointing at host:path', async () => {
+    const { client, created } = makeFakeClient([]);
+    await fileBug(client, {
+      fingerprinted: makeFingerprinted({ eventExcerpt: 'L'.repeat(300) }),
+      now: clock,
+      host: 'build-box',
+      caps: { maxExcerptChars: 20, maxBodyChars: 100000 },
+    });
+    expect(created[0].body).toContain('L'.repeat(20));
+    expect(created[0].body).not.toContain('L'.repeat(21));
+    expect(created[0].body).toContain('showing the first 20 of 300 characters');
+    expect(created[0].body).toContain(pointer);
   });
 });
 
