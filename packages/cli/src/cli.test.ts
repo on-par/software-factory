@@ -28,6 +28,7 @@ import {
   InvalidProductNameError,
   isPermanentMergeCheckError,
   cmdFeedback,
+  cmdFilingPreview,
   runFeedbackCommand,
   IssueDecomposedError,
   IssueSkippedError,
@@ -5039,6 +5040,20 @@ describe('runFeedbackCommand (#1851)', () => {
       await expect(cmdFeedback('bogus', { branchPrefix: 'ship-it' })).rejects.toMatchObject({ code: 2 });
     } finally {
       vi.unstubAllEnvs();
+    }
+  });
+});
+
+describe('cmdFilingPreview (#1858)', () => {
+  it('exits 2 when no failure evidence matches the run id, with and without a branch prefix', async () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      await expect(cmdFilingPreview('no-such-run-1858', {})).rejects.toMatchObject({ code: 2 });
+      await expect(cmdFilingPreview('no-such-run-1858', { branchPrefix: 'ship-it' })).rejects.toMatchObject({
+        code: 2,
+      });
+    } finally {
+      stderr.mockRestore();
     }
   });
 });

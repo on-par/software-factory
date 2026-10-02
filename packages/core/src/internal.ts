@@ -38,6 +38,18 @@ export {
 // Evidence sanitizer for untrusted text (#1841, #1852)
 export { stripHiddenContent } from './filing/sanitize.js';
 
+// Redacted upstream factory report (#1858)
+export type { RedactionClass, RedactionContext } from './filing/redact.js';
+export { REDACTION_PLACEHOLDERS, redactText } from './filing/redact.js';
+export type { UpstreamEnvironment, UpstreamReport, UpstreamReportInput } from './filing/upstream.js';
+export {
+  buildUpstreamReport,
+  factoryStackFrames,
+  UPSTREAM_TITLE_PREFIX,
+  upstreamInputFromEvidence,
+  upstreamReportMarker,
+} from './filing/upstream.js';
+
 export type { FilingDecision, FilingLedger, FilingPolicy, FilingSkipReason } from './filing/policy.js';
 export {
   DEFAULT_FILING_POLICY,

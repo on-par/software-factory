@@ -5,7 +5,7 @@ import { exec as execCb, execSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { userInfo } from 'node:os';
+import { arch, hostname as osHostname, release, platform, userInfo } from 'node:os';
 import { basename, dirname, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -285,6 +285,7 @@ import { formatOverview, missingClaudeCliMessage, missingTokenMessage, notInitia
 import { cmdHostedSmoke } from './hosted.js';
 import { cmdHostedQueue } from './hosted-queue.js';
 import { cmdHostedRunner } from './hosted-runner.js';
+import { resolveFactoryCheckoutCommit, runFilingPreview } from './filing.js';
 import { buildFeedbackDeps, type FeedbackDeps, runFeedback } from './feedback.js';
 import { cmdLogs } from './logs.js';
 import { applyHelpGroups } from './help-groups.js';
@@ -644,6 +645,32 @@ export async function cmdFeedback(prUrl: string, opts: { note?: string; branchPr
   const paths = getFactoryPaths(await getRepoRoot());
   const prefix = opts.branchPrefix === undefined ? resolveBranchPrefix() : branchPrefixOrExit(opts.branchPrefix);
   await runFeedbackCommand(prUrl, opts, buildFeedbackDeps(getOctokit(), paths, prefix, createOctokitFilingClient));
+}
+
+async function resolveFactoryCommit(): Promise<string | null> {
+  return resolveFactoryCheckoutCommit(
+    dirname(fileURLToPath(import.meta.url)),
+    async (cmd, cwd) => (await exec(cmd, { cwd })).stdout,
+  );
+}
+
+export async function cmdFilingPreview(runId: string, opts: { branchPrefix?: string }): Promise<void> {
+  const paths = getFactoryPaths(await getRepoRoot());
+  const prefix = opts.branchPrefix === undefined ? resolveBranchPrefix() : branchPrefixOrExit(opts.branchPrefix);
+  const found = await runFilingPreview(runId, {
+    out: process.stdout,
+    err: process.stderr,
+    eventsFile: paths.events,
+    runsDir: daemonRuntimePaths().runsDir,
+    factoryVersion: getCliVersion(),
+    factoryCommit: resolveFactoryCommit,
+    os: `${platform()} ${release()} ${arch()}`,
+    nodeVersion: process.version,
+    usernames: [userInfo().username],
+    hostnames: [osHostname()],
+    branchPrefix: prefix,
+  });
+  if (!found) throw new CliExitError(`no failure evidence found for run ${runId}`, 2);
 }
 
 function branchPrefixOrExit(raw: string | undefined): string {
@@ -5036,6 +5063,13 @@ export async function main() {
     .option('--note <text>', 'Use this as the issue title instead of the first finding')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
     .action(cmdFeedback);
+
+  const filingCmd = program.command('filing').description('Inspect upstream factory reports (nothing is sent)');
+  filingCmd
+    .command('preview <run-id>')
+    .description('Print the exact redacted [factory-report] title and body that would be sent upstream; sends nothing')
+    .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
+    .action((runId: string, opts: { branchPrefix?: string }) => cmdFilingPreview(runId, opts));
 
   const triage = program
     .command('triage')
