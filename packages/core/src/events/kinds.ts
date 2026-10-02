@@ -48,6 +48,7 @@ export type EventKind =
   | 'engine-restarted'
   | 'environment_cleanup'
   | 'environment_conflict'
+  | 'environment_dotnet'
   | 'environment_lease'
   | 'environment_lease_failed'
   | 'environment_lease_reaped'
@@ -220,6 +221,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'engine-restarted': { severity: 'warn', isPark: false, isTerminal: false },
   environment_cleanup: { severity: 'info', isPark: false, isTerminal: false },
   environment_conflict: { severity: 'warn', isPark: false, isTerminal: false },
+  environment_dotnet: { severity: 'info', isPark: false, isTerminal: false },
   environment_lease: { severity: 'info', isPark: false, isTerminal: false },
   environment_lease_failed: { severity: 'info', isPark: false, isTerminal: false },
   environment_lease_reaped: { severity: 'info', isPark: false, isTerminal: false },

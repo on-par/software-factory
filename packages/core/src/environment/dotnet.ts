@@ -21,7 +21,13 @@ export function isDotnetWorktree(root: string): boolean {
   });
 }
 
-/** .NET lane isolation for a .NET worktree root:
+/** What dotnetEnv applied for a .NET worktree, and which wanted keys the parent env already set. */
+export interface DotnetEnvReport {
+  applied: Record<string, string>;
+  parentKept: string[];
+}
+
+/** .NET lane env for a .NET worktree root:
  *  - DOTNET_TieredPGO=0 — Dynamic PGO tiers up the Razor source generator after ~4
  *    compiles and produces wrong output.
  *  - MSBUILDDISABLENODEREUSE=1 — MSBuild nodes exit at build end instead of being
@@ -29,15 +35,44 @@ export function isDotnetWorktree(root: string): boolean {
  *  - SharedCompilationId=factory-<runId> — a VBCSCompiler server private to this run
  *    (omitted when runId is absent). It exits on its own idle timeout; the factory
  *    never shuts down compiler servers.
+ *  - DiffEngine_Disabled=true — Verify/DiffEngine never launches a diff tool such as
+ *    ImageMagick compare.
+ *  - DOTNET_CLI_TELEMETRY_OPTOUT=1 and DOTNET_NOLOGO=1 — no telemetry or first-run
+ *    banner noise.
  *  Each key already set in the parent environment wins (children inherit it), so
- *  that key alone is omitted. */
+ *  that key alone goes to `parentKept` instead of `applied`. Null for a non-.NET root. */
+export function dotnetEnvReport(
+  root: string,
+  parentEnv: Record<string, string | undefined> = process.env,
+  runId?: string,
+): DotnetEnvReport | null {
+  if (!isDotnetWorktree(root)) return null;
+  const wanted: Record<string, string> = { DOTNET_TieredPGO: '0', MSBUILDDISABLENODEREUSE: '1' };
+  if (runId) wanted.SharedCompilationId = `factory-${runId}`;
+  wanted.DiffEngine_Disabled = 'true';
+  wanted.DOTNET_CLI_TELEMETRY_OPTOUT = '1';
+  wanted.DOTNET_NOLOGO = '1';
+  const applied: Record<string, string> = {};
+  const parentKept: string[] = [];
+  for (const [k, v] of Object.entries(wanted)) {
+    if (parentEnv[k] === undefined) applied[k] = v;
+    else parentKept.push(k);
+  }
+  return { applied, parentKept };
+}
+
+/** The .NET lane variables for `root` (see dotnetEnvReport); {} for a non-.NET root. */
 export function dotnetEnv(
   root: string,
   parentEnv: Record<string, string | undefined> = process.env,
   runId?: string,
 ): Record<string, string> {
-  if (!isDotnetWorktree(root)) return {};
-  const wanted: Record<string, string> = { DOTNET_TieredPGO: '0', MSBUILDDISABLENODEREUSE: '1' };
-  if (runId) wanted.SharedCompilationId = `factory-${runId}`;
-  return Object.fromEntries(Object.entries(wanted).filter(([k]) => parentEnv[k] === undefined));
+  return dotnetEnvReport(root, parentEnv, runId)?.applied ?? {};
+}
+
+/** Event text for a report: the applied KEY=value pairs and any keys kept from the parent. */
+export function describeDotnetEnv(report: DotnetEnvReport): string {
+  const pairs = Object.entries(report.applied).map(([k, v]) => `${k}=${v}`);
+  const applied = `applied .NET variables: ${pairs.length > 0 ? pairs.join(', ') : 'none'}`;
+  return report.parentKept.length > 0 ? `${applied}; kept from parent: ${report.parentKept.join(', ')}` : applied;
 }

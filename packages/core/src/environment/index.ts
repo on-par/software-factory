@@ -317,8 +317,9 @@ export function headlessEnv(parentEnv: Record<string, string | undefined> = proc
  *  forwards to leaseEnv (e.g. a stable lane URL from the factory proxy).
  *  When `worktreeRoot` is a .NET worktree, adds DOTNET_TieredPGO=0,
  *  MSBUILDDISABLENODEREUSE=1 and, when `runId` is given,
- *  SharedCompilationId=factory-<runId>, each unless the parent environment
- *  already sets it. */
+ *  SharedCompilationId=factory-<runId>, DiffEngine_Disabled=true,
+ *  DOTNET_CLI_TELEMETRY_OPTOUT=1 and DOTNET_NOLOGO=1, each unless the parent
+ *  environment already sets it. */
 export function laneEnv(
   port?: number,
   parentEnv: Record<string, string | undefined> = process.env,

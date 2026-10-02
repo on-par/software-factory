@@ -318,10 +318,23 @@ describe('leaseEnv', () => {
           FACTORY_BASE_URL: 'http://127.0.0.1:3142',
           DOTNET_TieredPGO: '0',
           MSBUILDDISABLENODEREUSE: '1',
+          DiffEngine_Disabled: 'true',
+          DOTNET_CLI_TELEMETRY_OPTOUT: '1',
+          DOTNET_NOLOGO: '1',
         });
       });
     },
   );
+
+  it('lets a parent-set DiffEngine_Disabled win', async () => {
+    await withTmpDir(async (root) => {
+      await writeFile(join(root, 'App.sln'), '');
+      const parent = { DiffEngine_Disabled: 'false' };
+      const env = laneEnv(undefined, parent, undefined, root);
+      expect(env).not.toHaveProperty('DiffEngine_Disabled');
+      expect({ ...parent, ...env }.DiffEngine_Disabled).toBe('false');
+    });
+  });
 
   it('adds a per-run SharedCompilationId when runId is given', async () => {
     await withTmpDir(async (root) => {

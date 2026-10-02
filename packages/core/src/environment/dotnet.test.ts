@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { dotnetEnv, isDotnetWorktree } from './dotnet.js';
+import { describeDotnetEnv, dotnetEnv, dotnetEnvReport, isDotnetWorktree } from './dotnet.js';
 
 const roots: string[] = [];
 
@@ -55,11 +55,22 @@ describe('isDotnetWorktree', () => {
 });
 
 describe('dotnetEnv', () => {
-  it('adds all three isolation keys for a .NET root with a runId', () => {
+  it('adds all isolation and quiet keys for a .NET root with a runId', () => {
     expect(dotnetEnv(makeRoot(['App.sln']), {}, 'abc123')).toEqual({
       DOTNET_TieredPGO: '0',
       MSBUILDDISABLENODEREUSE: '1',
       SharedCompilationId: 'factory-abc123',
+      DiffEngine_Disabled: 'true',
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1',
+      DOTNET_NOLOGO: '1',
+    });
+  });
+
+  it('silences DiffEngine and dotnet CLI noise for a .NET root', () => {
+    expect(dotnetEnv(makeRoot(['App.sln']), {})).toMatchObject({
+      DiffEngine_Disabled: 'true',
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1',
+      DOTNET_NOLOGO: '1',
     });
   });
 
@@ -82,12 +93,21 @@ describe('dotnetEnv', () => {
     ['MSBUILDDISABLENODEREUSE', ''],
     ['SharedCompilationId', 'mine'],
     ['SharedCompilationId', ''],
+    ['DiffEngine_Disabled', 'false'],
+    ['DiffEngine_Disabled', ''],
+    ['DOTNET_CLI_TELEMETRY_OPTOUT', '0'],
+    ['DOTNET_CLI_TELEMETRY_OPTOUT', ''],
+    ['DOTNET_NOLOGO', '0'],
+    ['DOTNET_NOLOGO', ''],
   ])('leaves only %s out when the parent sets it to %j', (key, value) => {
     const env = dotnetEnv(makeRoot(['App.sln']), { [key]: value }, 'abc');
     const all = {
       DOTNET_TieredPGO: '0',
       MSBUILDDISABLENODEREUSE: '1',
       SharedCompilationId: 'factory-abc',
+      DiffEngine_Disabled: 'true',
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1',
+      DOTNET_NOLOGO: '1',
     } as Record<string, string>;
     delete all[key];
     expect(env).toEqual(all);
@@ -98,7 +118,55 @@ describe('dotnetEnv', () => {
   });
 
   it('leaves the key out when the parent already sets DOTNET_TieredPGO', () => {
-    expect(dotnetEnv(makeRoot(['App.sln']), { DOTNET_TieredPGO: '1' })).toEqual({ MSBUILDDISABLENODEREUSE: '1' });
+    expect(dotnetEnv(makeRoot(['App.sln']), { DOTNET_TieredPGO: '1' })).toEqual({
+      MSBUILDDISABLENODEREUSE: '1',
+      DiffEngine_Disabled: 'true',
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1',
+      DOTNET_NOLOGO: '1',
+    });
+  });
+});
+
+describe('dotnetEnvReport', () => {
+  it('is null for a non-.NET root', () => {
+    expect(dotnetEnvReport(makeRoot(['package.json']), {}, 'abc')).toBeNull();
+  });
+
+  it('reports a parent-set key under parentKept and leaves it out of applied', () => {
+    const report = dotnetEnvReport(makeRoot(['App.sln']), { DOTNET_NOLOGO: '0' }, 'abc');
+    expect(report?.parentKept).toEqual(['DOTNET_NOLOGO']);
+    expect(report?.applied).not.toHaveProperty('DOTNET_NOLOGO');
+    expect(report?.applied.DiffEngine_Disabled).toBe('true');
+  });
+
+  it('returns empty applied but a non-null report when the parent sets every key', () => {
+    const parent = {
+      DOTNET_TieredPGO: '1',
+      MSBUILDDISABLENODEREUSE: '0',
+      SharedCompilationId: 'mine',
+      DiffEngine_Disabled: 'false',
+      DOTNET_CLI_TELEMETRY_OPTOUT: '0',
+      DOTNET_NOLOGO: '',
+    };
+    const report = dotnetEnvReport(makeRoot(['App.sln']), parent, 'abc');
+    expect(report?.applied).toEqual({});
+    expect(report?.parentKept).toEqual(Object.keys(parent));
+  });
+});
+
+describe('describeDotnetEnv', () => {
+  it('formats applied pairs', () => {
+    expect(describeDotnetEnv({ applied: { A: '1', B: 'x' }, parentKept: [] })).toBe('applied .NET variables: A=1, B=x');
+  });
+
+  it('formats none', () => {
+    expect(describeDotnetEnv({ applied: {}, parentKept: [] })).toBe('applied .NET variables: none');
+  });
+
+  it('adds the kept-from-parent suffix', () => {
+    expect(describeDotnetEnv({ applied: { A: '1' }, parentKept: ['C', 'D'] })).toBe(
+      'applied .NET variables: A=1; kept from parent: C, D',
+    );
   });
 });
 
