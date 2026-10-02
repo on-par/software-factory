@@ -564,6 +564,45 @@ describe('runIssue — reporting hooks', () => {
     expect(reworkHistory.record).toHaveBeenCalledWith(1, 'sig-1', ['tests']);
     expect(reworkHistory.clear).not.toHaveBeenCalled();
   });
+
+  it('carries the recorded failure signature and failing checks on the parked outcome (#1917)', async () => {
+    vi.mocked(checkPhase).mockResolvedValue({
+      passed: false,
+      summary: { ...CHECK_SUMMARY, results: [{ checker: 'tests', result: 'FAIL', details: 'nope' }] },
+      reworkRounds: 1,
+      failureSignature: 'sig-1',
+    });
+    const reworkHistory = {
+      priorSignature: vi.fn().mockResolvedValue(undefined),
+      record: vi.fn().mockResolvedValue(undefined),
+      clear: vi.fn().mockResolvedValue(undefined),
+    };
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ reworkHistory: reworkHistory as never }));
+    expect(outcome).toMatchObject({ state: 'parked', failureSignature: 'sig-1', failingChecks: ['tests'] });
+    const parked = outcome as Extract<typeof outcome, { state: 'parked' }>;
+    expect(reworkHistory.record).toHaveBeenCalledWith(1, parked.failureSignature, parked.failingChecks);
+  });
+
+  it('carries the signature on a held (cross-run stuck) CHECK park (#1917)', async () => {
+    vi.mocked(checkPhase).mockResolvedValue({
+      passed: false,
+      summary: { ...CHECK_SUMMARY, results: [{ checker: 'tests', result: 'FAIL', details: 'nope' }] },
+      reworkRounds: 0,
+      failureSignature: 'sig-1',
+      crossRunStuck: true,
+      stuck: true,
+    });
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts());
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'held', failureSignature: 'sig-1' });
+  });
+
+  it('leaves the signature undefined on a non-CHECK park (#1917)', async () => {
+    vi.mocked(buildPhase).mockResolvedValue({ ok: false, model: 'm', route: 'codex', reason: 'no_diff' });
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts());
+    expect(outcome.state).toBe('parked');
+    expect(outcome).not.toHaveProperty('failureSignature');
+    expect(outcome).not.toHaveProperty('failingChecks');
+  });
 });
 
 describe('runIssue — #1325: truthful phase snapshot', () => {

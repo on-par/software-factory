@@ -17,6 +17,10 @@ export type RunOutcome =
       branch?: string;
       reworkRounds?: number;
       prNumber?: number;
+      /** CHECK failure signature (same value recorded in rework-history.json) — set only when CHECK parked the run (#1917). */
+      failureSignature?: string;
+      /** Names of the checkers that FAILed in that CHECK — set only alongside failureSignature. */
+      failingChecks?: string[];
     }
   | { state: 'escalated'; reason: string; route?: BuildRoute; branch?: string; reworkRounds?: number };
 

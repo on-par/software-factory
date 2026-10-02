@@ -276,13 +276,17 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     return { state: 'escalated', reason: message, route, branch: request.branch, reworkRounds };
   };
 
-  const terminalParked = async (reason: ParkReason, message: string): Promise<RunOutcome> => {
+  const terminalParked = async (
+    reason: ParkReason,
+    message: string,
+    checkFailure?: { failureSignature: string; failingChecks: string[] },
+  ): Promise<RunOutcome> => {
     log(reason, message);
     if (reason === 'timeout') {
       log('stuck', `run exceeded its phase timeout without progressing — ${message}`);
     }
     await writeReports(reportOutcomeFor(reason), reason, message);
-    return { state: 'parked', reason, route, branch: request.branch, reworkRounds };
+    return { state: 'parked', reason, route, branch: request.branch, reworkRounds, ...checkFailure };
   };
 
   const assertBudget = async (phase: string): Promise<RunOutcome | undefined> => {
@@ -593,9 +597,15 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     const checkBudget = await assertBudget('CHECK');
     if (checkBudget) return checkBudget;
     if (!check.passed) {
-      if (check.failureSignature !== undefined) {
-        const failingChecks = check.summary.results.filter((r) => r.result === 'FAIL').map((r) => r.checker);
-        await ports.reworkHistory?.record(request.issue, check.failureSignature, failingChecks);
+      const checkFailure =
+        check.failureSignature !== undefined
+          ? {
+              failureSignature: check.failureSignature,
+              failingChecks: check.summary.results.filter((r) => r.result === 'FAIL').map((r) => r.checker),
+            }
+          : undefined;
+      if (checkFailure) {
+        await ports.reworkHistory?.record(request.issue, checkFailure.failureSignature, checkFailure.failingChecks);
       }
       const reason: ParkReason = check.crossRunStuck ? 'held' : check.stuck ? 'escalate' : 'fail';
       const message = check.crossRunStuck
@@ -603,7 +613,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
         : check.stuck
           ? `lane stuck after ${check.reworkRounds} rework rounds (identical failures) — escalated`
           : `${check.summary.failures} check failures after ${check.reworkRounds} rework rounds`;
-      return terminalParked(reason, message);
+      return terminalParked(reason, message, checkFailure);
     }
     // Clean check — clear stale cross-run history so a future, genuinely different
     // failure is not mistaken for a repeat of one already resolved.
