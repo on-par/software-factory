@@ -524,7 +524,7 @@ export const defaultRoutesConfig: RoutesDefaults = {
     build_claude: {
       tier: 'worker',
       description:
-        'Claude implementation from frozen spec (design/UX tasks) - requires the claude-cli harness, which drives its own commits',
+        'Claude implementation from frozen spec (design/UX tasks) - requires the claude-cli harness, which drives its own commits (commit-only; SHIP publishes after CHECK)',
       requires: 'claude',
     },
     build_opencode: {
