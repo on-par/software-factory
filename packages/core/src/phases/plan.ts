@@ -91,6 +91,20 @@ Steps:
    and do not write the spec file. A slice that takes 40 minutes to build is a
    planning failure, not a build problem.
 ${constitutionCtx ? '5. The constitution above defines the standards for this product. Your spec MUST satisfy every standard.' : '5. No constitution loaded — use your best judgment.'}
+6. RISKY-CHANGE FIELDS. If the plan changes a dispatch, switch, or match; a default branch
+   or fallthrough; or the flags passed to an external tool, you MUST fill the design fields
+   edgeInputs, behaviorDelta, and externalLists:
+   - edgeInputs: every input that reaches the default/fallthrough branch, including empty,
+     unknown, and malformed values.
+   - behaviorDelta: one row per input/branch with its behavior before and after the change,
+     and a verdict of same, better, worse, or unknown.
+   - externalLists: every closed list the change depends on (enum, allow-list, supported
+     values), checked against the upstream docs (read them, do not run the tool), with the
+     source and any gaps.
+   When replacing a tool's default call with explicit flags, list what each new explicit
+   flag turns off (defaults, config files, or behavior the implicit call had) as behaviorDelta rows.
+   Any behaviorDelta row with verdict worse or unknown must be fixed in the approach or
+   also listed in openQuestions. For any other change, omit these three keys.
 
 Write EXACTLY ONE file, at ${specPath}, in this shape:
 ---
@@ -124,6 +138,19 @@ design:
       passWhen: <what a pass looks like>
   riskBlastRadius: <what breaks if this is wrong>
   openQuestions: []   # anything you could not resolve; empty list if none
+  edgeInputs:     # OPTIONAL — required by step 6 for dispatch/default-branch/external-flag changes
+    - <input that reaches the default/fallthrough branch>
+  behaviorDelta:  # OPTIONAL — required by step 6
+    - input: <input>
+      branch: <branch it takes>
+      before: <behavior before>
+      after: <behavior after>
+      verdict: same|better|worse|unknown
+  externalLists:  # OPTIONAL — required by step 6
+    - name: <closed list>
+      location: <file/symbol where it lives>
+      source: <upstream doc checked>
+      gaps: []    # entries missing vs upstream; empty list if none
 adr:            # OPTIONAL — omit entirely unless this change makes a decision worth recording
   - title: <short decision title>
     context: |
