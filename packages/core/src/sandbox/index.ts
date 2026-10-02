@@ -7,8 +7,14 @@
 // see resolveSandboxPolicy's caller for the 'sandbox-degraded' warning this
 // implies when the allowlist is non-empty. `docker-sandbox` is a selectable
 // runtime backed by a microVM lifecycle (create/mount/teardown, #653) owned by
-// utils/microvm.ts and driven from setupWorktree/cleanupWorktree; the VM itself is
-// the containment boundary, so it is not a command prefix and wraps nothing here.
+// utils/microvm.ts and driven from setupWorktree/cleanupWorktree; it is not a
+// command prefix and wraps nothing here. The microVM is created and torn down,
+// but nothing execs the agent command inside it — `sbx exec` is unbuilt (#1531),
+// so selecting `docker-sandbox` today does NOT contain agent execution.
+// `sandbox-exec`/`firejail` (the command-wrap runtimes below) are today's real
+// containment; `workspace.backend: disposable-docker` is the intended future
+// isolation path for the microVM approach, but that config surface is itself
+// unimplemented today (tracked by epic #1525 and siblings).
 
 import { homedir, tmpdir } from 'node:os';
 import { resolve } from 'node:path';

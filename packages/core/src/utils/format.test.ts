@@ -150,6 +150,7 @@ describe('levelForType', () => {
     ['sandbox-unavailable', 'warn'],
     ['sandbox-degraded', 'warn'],
     ['sandbox-disabled', 'warn'],
+    ['docker-sandbox-no-exec', 'warn'],
     ['environment_warning', 'warn'],
     ['environment_orphan', 'warn'],
     ['environment_conflict', 'warn'],

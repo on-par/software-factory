@@ -53,6 +53,7 @@ export type EventKind =
   | 'design_open_questions'
   | 'design_regression_unresolved'
   | 'design_shallow'
+  | 'docker-sandbox-no-exec'
   | 'engine-restarted'
   | 'environment_cleanup'
   | 'environment_conflict'
@@ -231,6 +232,10 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   design_regression_unresolved: { severity: 'warn', isPark: false, isTerminal: false },
   design_open_questions: { severity: 'warn', isPark: false, isTerminal: false },
   design_shallow: { severity: 'info', isPark: false, isTerminal: false },
+  // docker-sandbox creates/removes a microVM but does not exec the agent command
+  // inside it (#653/#1531) — a run-start warning so operators don't mistake
+  // runtime selection alone for containment.
+  'docker-sandbox-no-exec': { severity: 'warn', isPark: false, isTerminal: false },
   // factoryd restarted a stale in-process engine (#1178) — operational anomaly
   // worth surfacing, but not a park (no human action needed) and not terminal.
   'engine-restarted': { severity: 'warn', isPark: false, isTerminal: false },
