@@ -5,8 +5,20 @@ import type { EvidencePack } from '../types/index.js';
 // Unicode format chars (zero-width, bidi, tag, soft hyphen) plus C0/C1 controls except \t \n \r.
 // eslint-disable-next-line no-control-regex
 const INVISIBLE_RE = /[\p{Cf}\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/gu;
-const COMMENT_RE = /<!--[\s\S]*?-->/g;
-const UNTERMINATED_COMMENT_RE = /<!--[\s\S]*$/;
+
+/** Remove HTML comments with linear scans; an unterminated `<!--` hides to end of text. */
+function removeComments(text: string): string {
+  let out = '';
+  let i = 0;
+  for (;;) {
+    const open = text.indexOf('<!--', i);
+    if (open === -1) return out + text.slice(i);
+    out += text.slice(i, open);
+    const close = text.indexOf('-->', open + 4);
+    if (close === -1) return out;
+    i = close + 3;
+  }
+}
 
 /** Remove invisible characters and HTML comments (incl. an unterminated `<!--`) until stable. */
 export function stripHiddenContent(text: string): string {
@@ -14,7 +26,7 @@ export function stripHiddenContent(text: string): string {
   let prev: string;
   do {
     prev = out;
-    out = out.replace(INVISIBLE_RE, '').replace(COMMENT_RE, '').replace(UNTERMINATED_COMMENT_RE, '');
+    out = removeComments(out.replace(INVISIBLE_RE, ''));
   } while (out !== prev);
   return out;
 }
