@@ -42,6 +42,22 @@ export { stripHiddenContent } from './filing/sanitize.js';
 export type { RedactionClass, RedactionContext } from './filing/redact.js';
 export { REDACTION_PLACEHOLDERS, redactText } from './filing/redact.js';
 export type { UpstreamEnvironment, UpstreamReport, UpstreamReportInput } from './filing/upstream.js';
+
+// Send upstream reports with outbox fallback (#1860)
+export type {
+  PendingUpstreamReport,
+  UpstreamOutboxEntry,
+  UpstreamSendInput,
+  UpstreamSendOutcome,
+  UpstreamSendResult,
+} from './filing/upstream-send.js';
+export {
+  classifyUpstreamSendError,
+  defaultUpstreamLedgerPath,
+  defaultUpstreamOutboxDir,
+  sendUpstreamReports,
+  writeUpstreamOutbox,
+} from './filing/upstream-send.js';
 export {
   buildUpstreamReport,
   factoryStackFrames,

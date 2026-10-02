@@ -405,6 +405,12 @@ const INTERNAL_API_KEYS = [
   'UPSTREAM_TITLE_PREFIX',
   'upstreamInputFromEvidence',
   'upstreamReportMarker',
+  // Send upstream reports with outbox fallback (#1860)
+  'classifyUpstreamSendError',
+  'defaultUpstreamLedgerPath',
+  'defaultUpstreamOutboxDir',
+  'sendUpstreamReports',
+  'writeUpstreamOutbox',
   'resolveTargetRepo',
   // Filing policy: when to file, caps, and self-fix labeling (#374)
   'DEFAULT_FILING_POLICY',
