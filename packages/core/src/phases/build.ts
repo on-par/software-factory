@@ -100,6 +100,8 @@ async function buildPhaseImpl(opts: {
   localOnly?: boolean;
   /** Lane id stamped onto emitted lifecycle events; defaults to `issue-<issue>` (#591). */
   laneId?: string;
+  /** Per-run id minted by runIssue; becomes SharedCompilationId=factory-<runId> for .NET lanes (#1910). */
+  runId?: string;
   /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
   bus?: LifecycleBus;
   /** Injectable for tests; defaults to collectDesignDiff. */
@@ -127,6 +129,7 @@ async function buildPhaseImpl(opts: {
     appPort,
     appBaseUrl,
     onPgid,
+    runId,
   } = opts;
   let route = opts.route;
 
@@ -200,7 +203,7 @@ async function buildPhaseImpl(opts: {
     sandbox,
     onSandboxEvent: (type: SandboxEventType, detail: string) => log(type, detail),
     onLog: (msg: string) => log('router', msg),
-    env: laneEnv(appPort, process.env, appBaseUrl, worktree),
+    env: laneEnv(appPort, process.env, appBaseUrl, worktree, runId),
     onPgid,
     onProviderFailure,
   };

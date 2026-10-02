@@ -188,6 +188,37 @@ describe('buildPhase FACTORY_CODEX kill-switch', () => {
     expect(logs.some((l) => l.type === 'warn')).toBe(false);
   });
 
+  it('forwards the per-run .NET isolation env to router.run on a .NET worktree (#1910)', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    await writeFile(join(worktree, 'App.sln'), '');
+    const captured: { options?: any } = {};
+    const fakeRouter = {
+      run: async (_task: string, _prompt: string, options: any) => {
+        captured.options = options;
+        return { model: 'fake-model', output: 'done', exitCode: 0, attempts: [] };
+      },
+    } as any;
+
+    await buildPhase({
+      issue: 1910,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath: join(worktree, 'issue-1910.md'),
+      branch: 'ship-it/1910-dotnet',
+      route: 'codex',
+      router: fakeRouter,
+      constitution: null,
+      log: () => {},
+      runId: 'r1',
+    });
+
+    expect(captured.options.env).toMatchObject({
+      SharedCompilationId: 'factory-r1',
+      MSBUILDDISABLENODEREUSE: '1',
+    });
+  });
+
   it('forces build_claude via the codexDisabled opt', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);

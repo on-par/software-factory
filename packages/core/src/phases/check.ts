@@ -198,6 +198,8 @@ async function checkPhaseImpl(opts: {
   reworkModel?: string;
   /** Lane id stamped onto emitted lifecycle events; defaults to `issue-<issue>` (#591). */
   laneId?: string;
+  /** Per-run id minted by runIssue; becomes SharedCompilationId=factory-<runId> for .NET lanes (#1910). */
+  runId?: string;
   /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
   bus?: LifecycleBus;
   /** Heartbeat hook (#1326), forwarded to `CheckerContext.onActivity` — bumps the
@@ -227,6 +229,7 @@ async function checkPhaseImpl(opts: {
     diffBase,
     reworkRoute,
     reworkModel,
+    runId,
     onActivity,
     logsDir,
   } = opts;
@@ -238,7 +241,7 @@ async function checkPhaseImpl(opts: {
     worktree,
     specPath,
     diffBase,
-    env: laneEnv(appPort, process.env, appBaseUrl, worktree),
+    env: laneEnv(appPort, process.env, appBaseUrl, worktree, runId),
     onPgid,
     probe,
     log,
@@ -329,6 +332,7 @@ async function checkPhaseImpl(opts: {
       onPgid,
       reworkRoute,
       reworkModel,
+      runId,
     });
 
     const cause = classifyReworkCause({ steering, failovers, failureReason });
@@ -432,6 +436,7 @@ interface ReworkWorkerOptions {
   onPgid?: (pgid: number) => void;
   reworkRoute?: 'codex' | 'claude' | 'opencode';
   reworkModel?: string;
+  runId?: string;
 }
 
 async function reworkWorker(opts: ReworkWorkerOptions): Promise<{
@@ -456,6 +461,7 @@ async function reworkWorker(opts: ReworkWorkerOptions): Promise<{
     onPgid,
     reworkRoute = 'claude',
     reworkModel,
+    runId,
   } = opts;
   const constitutionCtx = buildConstitutionContext(constitution);
   const failures = summary.results.filter((r) => r.result === 'FAIL');
@@ -497,7 +503,7 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
       sandbox,
       onSandboxEvent: (type, detail) => log(type, detail),
       onLog: (msg) => log('router', msg),
-      env: laneEnv(appPort, process.env, appBaseUrl, worktree),
+      env: laneEnv(appPort, process.env, appBaseUrl, worktree, runId),
       onPgid,
       retryCause: 'checker',
       modelOverride: reworkModel,

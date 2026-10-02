@@ -128,6 +128,32 @@ describe('checkPhase auto rework', () => {
     expect(stub.calls.some((call) => call.task === 'build_claude')).toBe(false);
   });
 
+  it('threads the per-run id into the rework worker env (#1910)', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    await writeFile(join(worktree, 'App.sln'), '');
+    const envs: unknown[] = [];
+    const fakeRouter = {
+      run: async (_task: string, _prompt: string, options: { env?: unknown }) => {
+        envs.push(options.env);
+        return { model: 'fake-model', output: 'done', exitCode: 0, attempts: [] };
+      },
+    } as any;
+
+    await checkPhase({
+      issue: 1910,
+      worktree,
+      specPath,
+      router: fakeRouter,
+      constitution: null,
+      log: () => {},
+      maxReworkRounds: 1,
+      runId: 'r1',
+    });
+
+    expect(envs).toHaveLength(1);
+    expect(envs[0]).toMatchObject({ SharedCompilationId: 'factory-r1', MSBUILDDISABLENODEREUSE: '1' });
+  });
+
   it('parks before rework when a collectable worker diff is empty', { timeout: 120_000 }, async () => {
     const { worktree, specPath } = await makeCleanGitWorktree();
     const { router, stub } = makeRouter();

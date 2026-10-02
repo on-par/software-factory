@@ -189,6 +189,19 @@ describe('runIssue — invariant 1: constitution resolved exactly once', () => {
   });
 });
 
+describe('runIssue — per-run id threading (#1910)', () => {
+  it('mints one runId shared by BUILD and CHECK, fresh for every run', async () => {
+    await runIssue(baseRequest(), basePolicy(), basePorts());
+    const buildId = vi.mocked(buildPhase).mock.calls[0][0].runId;
+    expect(buildId).toMatch(/^[0-9a-f]{12}$/);
+    expect(vi.mocked(checkPhase).mock.calls[0][0].runId).toBe(buildId);
+
+    vi.mocked(buildPhase).mockClear();
+    await runIssue(baseRequest(), basePolicy(), basePorts());
+    expect(vi.mocked(buildPhase).mock.calls[0][0].runId).not.toBe(buildId);
+  });
+});
+
 describe('runIssue — publishFromBuild threading (#1867)', () => {
   it('passes publishFromBuild to buildPhase, undefined by default', async () => {
     await runIssue(baseRequest(), basePolicy(), basePorts());

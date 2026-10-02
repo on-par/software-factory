@@ -21,13 +21,23 @@ export function isDotnetWorktree(root: string): boolean {
   });
 }
 
-/** Disables Dynamic PGO for .NET worktrees: it tiers up the Razor source generator
- *  after ~4 compiles and produces wrong output. A DOTNET_TieredPGO already set in
- *  the parent environment wins (children inherit it), so the key is omitted then. */
+/** .NET lane isolation for a .NET worktree root:
+ *  - DOTNET_TieredPGO=0 — Dynamic PGO tiers up the Razor source generator after ~4
+ *    compiles and produces wrong output.
+ *  - MSBUILDDISABLENODEREUSE=1 — MSBuild nodes exit at build end instead of being
+ *    reused by other lanes or the user's shell.
+ *  - SharedCompilationId=factory-<runId> — a VBCSCompiler server private to this run
+ *    (omitted when runId is absent). It exits on its own idle timeout; the factory
+ *    never shuts down compiler servers.
+ *  Each key already set in the parent environment wins (children inherit it), so
+ *  that key alone is omitted. */
 export function dotnetEnv(
   root: string,
   parentEnv: Record<string, string | undefined> = process.env,
+  runId?: string,
 ): Record<string, string> {
-  if (parentEnv.DOTNET_TieredPGO !== undefined) return {};
-  return isDotnetWorktree(root) ? { DOTNET_TieredPGO: '0' } : {};
+  if (!isDotnetWorktree(root)) return {};
+  const wanted: Record<string, string> = { DOTNET_TieredPGO: '0', MSBUILDDISABLENODEREUSE: '1' };
+  if (runId) wanted.SharedCompilationId = `factory-${runId}`;
+  return Object.fromEntries(Object.entries(wanted).filter(([k]) => parentEnv[k] === undefined));
 }
