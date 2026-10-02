@@ -20,6 +20,7 @@ The fallback standard for reviewing a pull request in a repository that has no
 
 - The change builds and type-checks with the repository's own scripts.
 - Existing tests pass, and new behavior comes with tests where the repository has a test suite.
+- Test doubles record each argument of a call separately (never joined into one string or dropped), and tests assert every argument that affects behaviour.
 - Lint is clean under the repository's own configuration.
 - The diff does what the PR title, body and linked issue say, and nothing unrelated.
 - There are no committed secrets, debug leftovers or disabled tests.
