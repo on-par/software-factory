@@ -283,7 +283,13 @@ import {
   unmergedGreenPrChecks,
   type UnmergedGreenPrRow,
 } from './doctor.js';
-import { formatOverview, missingClaudeCliMessage, missingTokenMessage, notInitializedMessage } from './first-run.js';
+import {
+  DOCS_URL,
+  formatOverview,
+  missingClaudeCliMessage,
+  missingTokenMessage,
+  notInitializedMessage,
+} from './first-run.js';
 import { cmdHostedSmoke } from './hosted.js';
 import { cmdHostedQueue } from './hosted-queue.js';
 import { cmdHostedRunner } from './hosted-runner.js';
@@ -314,6 +320,23 @@ export const PREREQUISITES_TEXT = `Prerequisites:
   - GITHUB_TOKEN or GH_TOKEN set (falls back to \`gh auth token\`)
 Run inside a git repository with a GitHub remote.
 `;
+
+/** Printed after the command list in `factory --help`: the env vars operators reach for most. */
+export const HELP_FOOTER_TEXT = `
+Common environment variables:
+  FACTORY_MERGE=1                     Squash-merge eligible PRs (--auto-merge / --no-auto-merge win)
+  FACTORY_MERGE_ADMIN=1               Merge with GitHub admin bypass of unmet requirements
+  FACTORY_SKIP_CI=1                   Do not wait for CI before merging
+  FACTORY_SANDBOX=0                   Disable the containment sandbox for agent runs (dangerous)
+  FACTORY_PLAN_MODEL=<id>             Pick the PLAN model
+  FACTORY_BUILD_MODEL=<id>            Pick the BUILD model
+  FACTORY_STOP_AT=<fraction>          Usage fraction (0-1] at which work pauses
+  FACTORY_RESUME_AT=<fraction>        Usage fraction (0-1] at which paused work resumes
+  FACTORY_ALLOW_STALE=1               Run even when the built CLI is older than its source
+Every config key, its default, and its env var: docs/config.example.yaml
+
+Run \`factory <command> --help\` for a command's options.
+Docs: ${DOCS_URL}`;
 
 // ---------- helpers ----------
 
@@ -4961,7 +4984,8 @@ export async function main() {
     .name('factory')
     .description('Multi-agent software factory with boss-worker-checker orchestration')
     .version(getCliVersion())
-    .addHelpText('before', PREREQUISITES_TEXT);
+    .addHelpText('before', PREREQUISITES_TEXT)
+    .addHelpText('after', HELP_FOOTER_TEXT);
 
   program
     .command('init')
@@ -5013,7 +5037,7 @@ export async function main() {
   program
     .command('cost')
     .description('Show recorded model spend by model (--issue for one issue)')
-    .option('--issue <number>', 'show per-entry detail for one issue')
+    .option('--issue <number>', 'Show per-entry detail for one issue')
     .action((opts: { issue?: string }) => cmdCost(opts));
 
   program
@@ -5024,7 +5048,7 @@ export async function main() {
   program
     .command('status')
     .description('Show active runs, the GitHub queue, provider health, and recent events')
-    .option('--kpis', 'Show full Health KPIs and Effective config')
+    .option('--kpis', 'Also show the full health KPIs and the effective config')
     .action((opts: { kpis?: boolean }) => cmdStatus(opts));
 
   program
@@ -5135,20 +5159,20 @@ export async function main() {
     .command('smoke')
     .description('Local end-to-end hosted-exec smoke: create → lease → Docker run → result → cleanup')
     .option('--repo <slug>', 'owner/repo to clone and run against', 'on-par/software-factory')
-    .option('--image <image>', 'container image for the smoke run', 'node:20-alpine')
+    .option('--image <image>', 'Container image for the smoke run', 'node:20-alpine')
     .action(async (opts: { repo?: string; image?: string }) => {
       await cmdHostedSmoke(opts);
     });
   hosted
     .command('runner')
     .description('Register capabilities with the local control plane and lease one compatible job, then exit')
-    .option('--url <url>', 'control-plane base URL', 'http://127.0.0.1:8799')
-    .option('--runner-id <id>', 'runner identity (default runner-<pid>)')
-    .option('--capabilities <csv>', 'comma-separated capability list', 'git,node')
-    .option('--timeout <ms>', 'bounded wait window for a compatible job, in ms', '30000')
-    .option('--poll-interval <ms>', 'delay between poll attempts, in ms', '2000')
-    .option('--lease-ttl <ms>', 'lease TTL, in ms', '300000')
-    .option('--heartbeat-interval <ms>', 'expected heartbeat interval, in ms', '30000')
+    .option('--url <url>', 'Control-plane base URL', 'http://127.0.0.1:8799')
+    .option('--runner-id <id>', 'Runner identity (default runner-<pid>)')
+    .option('--capabilities <csv>', 'Comma-separated capability list', 'git,node')
+    .option('--timeout <ms>', 'Bounded wait window for a compatible job, in ms', '30000')
+    .option('--poll-interval <ms>', 'Delay between poll attempts, in ms', '2000')
+    .option('--lease-ttl <ms>', 'Lease TTL, in ms', '300000')
+    .option('--heartbeat-interval <ms>', 'Expected heartbeat interval, in ms', '30000')
     .action(
       async (opts: {
         url?: string;
@@ -5165,14 +5189,14 @@ export async function main() {
   hosted
     .command('queue')
     .description('Queue one job to the local control plane, tail it to terminal, print the result')
-    .option('--url <url>', 'control-plane base URL', 'http://127.0.0.1:8799')
+    .option('--url <url>', 'Control-plane base URL', 'http://127.0.0.1:8799')
     .option('--repo <slug>', 'owner/repo the job runs against', 'on-par/software-factory')
-    .option('--task <text>', 'opaque task payload')
-    .option('--capabilities <csv>', 'comma-separated required capabilities', 'git,node')
-    .option('--authority <authority>', 'required authority', 'repo:read')
-    .option('--timeout <ms>', 'bounded wait for a terminal result, in ms', '120000')
-    .option('--poll-interval <ms>', 'delay between summary polls, in ms', '1000')
-    .option('--job-id <id>', 'explicit job id (default server-generated)')
+    .option('--task <text>', 'Opaque task payload')
+    .option('--capabilities <csv>', 'Comma-separated required capabilities', 'git,node')
+    .option('--authority <authority>', 'Required authority', 'repo:read')
+    .option('--timeout <ms>', 'Bounded wait for a terminal result, in ms', '120000')
+    .option('--poll-interval <ms>', 'Delay between summary polls, in ms', '1000')
+    .option('--job-id <id>', 'Explicit job id (default server-generated)')
     .action(
       async (opts: {
         url?: string;
@@ -5304,8 +5328,8 @@ export async function main() {
       'Claim queued issues (factory:queued labels) and ship them, lanes in parallel; merges only when auto-merge is on',
     )
     .option('--local-queue', 'Read .factory/queue instead of claiming issues from GitHub Issues')
-    .option('--auto-merge', 'Merge eligible PRs autonomously, overriding .factory/config.json and FACTORY_MERGE')
-    .option('--no-auto-merge', 'Never merge autonomously, overriding .factory/config.json and FACTORY_MERGE')
+    .option('--auto-merge', 'Merge eligible PRs autonomously, overriding .factory/config.yaml and FACTORY_MERGE')
+    .option('--no-auto-merge', 'Never merge autonomously, overriding .factory/config.yaml and FACTORY_MERGE')
     .option(
       '--pr-classifier',
       'Hold PRs whose review floor is B or C for a human (applies no-auto-merge), overriding .factory/config.json and FACTORY_PR_CLASSIFIER',
@@ -5316,17 +5340,17 @@ export async function main() {
     )
     .option(
       '--usage-watch',
-      'Enforce the usage gate for this run, overriding .factory/config.json and FACTORY_USAGE_WATCH',
+      'Enforce the usage gate for this run, overriding .factory/config.yaml and FACTORY_USAGE_WATCH',
     )
     .option(
       '--no-usage-watch',
-      'Skip the usage gate for this run, overriding .factory/config.json and FACTORY_USAGE_WATCH',
+      'Skip the usage gate for this run, overriding .factory/config.yaml and FACTORY_USAGE_WATCH',
     )
     .option(
       '--usage-threshold <fraction>',
-      "Override .factory/config.json and FACTORY_STOP_AT for this run's usage threshold",
+      "Override .factory/config.yaml and FACTORY_STOP_AT for this run's usage threshold",
     )
-    .option('--usage-poll <seconds>', "Override .factory/config.json and FACTORY_USAGE_POLL for this run's usage poll")
+    .option('--usage-poll <seconds>', "Override .factory/config.yaml and FACTORY_USAGE_POLL for this run's usage poll")
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
     .action(
       (opts: {
@@ -5350,8 +5374,8 @@ export async function main() {
   daemonCmd
     .command('run')
     .description('Run factoryd in the foreground: a localhost-only HTTP API over the repo registry')
-    .option('--port <n>', `port to bind on 127.0.0.1 (default ${DEFAULT_FACTORYD_PORT})`)
-    .option('--registry <file>', 'registry file to serve (default ~/.factory/registry.json)')
+    .option('--port <n>', `Port to bind on 127.0.0.1 (default ${DEFAULT_FACTORYD_PORT})`)
+    .option('--registry <file>', 'Registry file to serve (default ~/.factory/registry.json)')
     .action((opts: { port?: string; registry?: string }) => cmdFactoryd(opts));
   const daemonCtl = (fn: () => Promise<void>) =>
     fn().catch((err: unknown) => {
@@ -5360,11 +5384,11 @@ export async function main() {
     });
   daemonCmd
     .command('start')
-    .description('Install + load the com.onpar.factoryd LaunchAgent (KeepAlive, RunAtLoad)')
+    .description('Install and load the com.onpar.factoryd LaunchAgent (macOS only; KeepAlive, RunAtLoad)')
     .action(() => daemonCtl(() => cmdDaemonStart()));
   daemonCmd
     .command('stop')
-    .description('Unload the LaunchAgent (plist stays installed)')
+    .description('Unload the LaunchAgent (macOS only; plist stays installed)')
     .action(() => daemonCtl(() => cmdDaemonStop()));
   daemonCmd
     .command('status')
@@ -5372,9 +5396,9 @@ export async function main() {
     .action(() => daemonCtl(() => cmdDaemonStatus()));
   daemonCmd
     .command('logs')
-    .description('Print/tail ~/.factory/daemon.log')
-    .option('-f, --follow', 'keep tailing')
-    .option('-n, --lines <n>', 'lines to print first (default 100)')
+    .description('Print or tail ~/.factory/daemon.log')
+    .option('-f, --follow', 'Keep tailing')
+    .option('-n, --lines <n>', 'Lines to print first (default 100)')
     .action((opts: { follow?: boolean; lines?: string }) => daemonCtl(() => cmdDaemonLogs(opts)));
 
   const worktreeCmd = program.command('worktree').description('Clean up stale factory worktrees (gc)');
@@ -5382,7 +5406,7 @@ export async function main() {
     .command('gc')
     .description('Remove stale factory worktrees (merged/closed branches or older than TTL) and scrub credentials')
     .option('--dry-run', 'Preview what would be removed without deleting anything')
-    .option('--ttl-days <n>', 'Override worktree.gcTtlDays from factory.json')
+    .option('--ttl-days <n>', 'Override worktree.gcTtlDays from .factory/config.yaml (default 7)')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
     .action(cmdWorktreeGc);
 
@@ -5404,21 +5428,21 @@ export async function main() {
     .description('Unattended loop: wait for usage headroom, run the queue, repeat until it is empty')
     .option('--now', 'Skip the initial headroom wait')
     .option('--local-queue', 'Read .factory/queue instead of claiming issues from GitHub Issues')
-    .option('--auto-merge', 'Merge eligible PRs autonomously, overriding .factory/config.json and FACTORY_MERGE')
-    .option('--no-auto-merge', 'Never merge autonomously, overriding .factory/config.json and FACTORY_MERGE')
+    .option('--auto-merge', 'Merge eligible PRs autonomously, overriding .factory/config.yaml and FACTORY_MERGE')
+    .option('--no-auto-merge', 'Never merge autonomously, overriding .factory/config.yaml and FACTORY_MERGE')
     .option(
       '--usage-watch',
-      'Enforce the usage gate for this run, overriding .factory/config.json and FACTORY_USAGE_WATCH',
+      'Enforce the usage gate for this run, overriding .factory/config.yaml and FACTORY_USAGE_WATCH',
     )
     .option(
       '--no-usage-watch',
-      'Skip the usage gate for this run, overriding .factory/config.json and FACTORY_USAGE_WATCH',
+      'Skip the usage gate for this run, overriding .factory/config.yaml and FACTORY_USAGE_WATCH',
     )
     .option(
       '--usage-threshold <fraction>',
-      "Override .factory/config.json and FACTORY_RESUME_AT for this run's usage threshold",
+      "Override .factory/config.yaml and FACTORY_RESUME_AT for this run's usage threshold",
     )
-    .option('--usage-poll <seconds>', "Override .factory/config.json and FACTORY_USAGE_POLL for this run's usage poll")
+    .option('--usage-poll <seconds>', "Override .factory/config.yaml and FACTORY_USAGE_POLL for this run's usage poll")
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
     .action(async (opts) => {
       await cmdSupervise(opts);
