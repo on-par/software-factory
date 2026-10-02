@@ -6,7 +6,7 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-import type { EventKind } from '../events/kinds.js';
+import type { EventKind, LanePausedPayload } from '../events/kinds.js';
 import type {
   EvidencePack,
   FactoryEvent,
@@ -35,6 +35,7 @@ export interface LogExtra {
   rework?: ReworkInfo;
   readiness?: ReadinessInfo;
   queueReprioritization?: QueueReprioritizationRecord;
+  lanePaused?: LanePausedPayload;
   actor?: string;
   model?: string;
   tokens?: { input: number; output: number };
@@ -106,6 +107,7 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(extra?.rework ? { rework: extra.rework } : {}),
       ...(extra?.readiness ? { readiness: extra.readiness } : {}),
       ...(extra?.queueReprioritization !== undefined ? { queueReprioritization: extra.queueReprioritization } : {}),
+      ...(extra?.lanePaused ? { lanePaused: extra.lanePaused } : {}),
       ...(extra?.model ? { model: extra.model } : {}),
       ...(extra?.tokens ? { tokens: extra.tokens } : {}),
       ...(extra?.durationMs !== undefined ? { durationMs: extra.durationMs } : {}),

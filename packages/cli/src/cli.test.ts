@@ -3443,6 +3443,109 @@ describe('cli', () => {
       ]);
     });
 
+    describe('lane breaker (#1918)', () => {
+      const parkErr = (signature?: string) =>
+        new LaneParkError('check failed', 'escalate', { failureSignature: signature, failingChecks: ['tests'] });
+      const harness = (behavior: Record<number, string | Error>, queued: number[]) => {
+        const shipped: number[] = [];
+        const events: any[] = [];
+        const released: any[] = [];
+        const claimNext = vi.fn(async () => buildClaim(queued.shift()));
+        const deps = {
+          claimNext,
+          ship: async (issue: number) => {
+            shipped.push(issue);
+            const b = behavior[issue];
+            if (b instanceof Error) throw b;
+            return 'branch';
+          },
+          waitMerge: async () => {},
+          releaseIssue: async (issue: number, outcome: string) => {
+            released.push([issue, outcome]);
+          },
+          pathExists: () => false,
+          emitEvent: ((...args: any[]) => {
+            events.push(args);
+          }) as any,
+        };
+        return { shipped, events, released, claimNext, deps };
+      };
+      const kinds = (events: any[], kind: string) => events.filter((e) => e[1] === kind);
+
+      it('pauses the lane after consecutive parks with the same signature', async () => {
+        const h = harness({ 1: parkErr('sig-A'), 2: parkErr('sig-A'), 3: parkErr('sig-A') }, [1, 2, 3]);
+        await runLane('app', [], '/repo', 'on-par/software-factory', paths, { ...h.deps, laneBreakerThreshold: 2 });
+
+        expect(h.shipped).toEqual([1, 2]);
+        expect(h.claimNext).toHaveBeenCalledTimes(2);
+        expect(kinds(h.events, 'lane-paused')).toHaveLength(1);
+        expect(kinds(h.events, 'lane-paused')[0][4]).toEqual({
+          lane: 'app',
+          lanePaused: { lane: 'app', signature: 'sig-A', failingChecks: ['tests'], firstIssue: 1, secondIssue: 2 },
+        });
+        expect(kinds(h.events, 'lane-done')).toHaveLength(0);
+        expect(kinds(h.events, 'parked')[1][3]).toContain("lane 'app' paused (lane breaker)");
+        expect(h.released).toEqual([
+          [1, 'parked'],
+          [2, 'parked'],
+        ]);
+      });
+
+      it('does not pause when signatures differ', async () => {
+        const h = harness({ 1: parkErr('sig-A'), 2: parkErr('sig-B') }, [1, 2, 3]);
+        await runLane('app', [], '/repo', 'on-par/software-factory', paths, { ...h.deps, laneBreakerThreshold: 2 });
+
+        expect(h.shipped).toEqual([1, 2, 3]);
+        expect(kinds(h.events, 'lane-paused')).toHaveLength(0);
+        expect(kinds(h.events, 'lane-done')).toHaveLength(1);
+      });
+
+      it('resets the streak on a merge, then trips on a fresh streak', async () => {
+        const h = harness({ 1: parkErr('sig-A'), 3: parkErr('sig-A'), 4: parkErr('sig-A') }, [1, 2, 3]);
+        await runLane('app', [], '/repo', 'on-par/software-factory', paths, { ...h.deps, laneBreakerThreshold: 2 });
+        expect(kinds(h.events, 'lane-paused')).toHaveLength(0);
+        expect(kinds(h.events, 'lane-done')).toHaveLength(1);
+
+        const h2 = harness({ 1: parkErr('sig-A'), 3: parkErr('sig-A'), 4: parkErr('sig-A') }, [1, 2, 3, 4]);
+        await runLane('app', [], '/repo', 'on-par/software-factory', paths, { ...h2.deps, laneBreakerThreshold: 2 });
+        const paused = kinds(h2.events, 'lane-paused');
+        expect(paused).toHaveLength(1);
+        expect(paused[0][4].lanePaused).toMatchObject({ firstIssue: 3, secondIssue: 4 });
+      });
+
+      it('leaves other lanes running when one lane pauses', async () => {
+        const a = harness({ 1: parkErr('sig-A'), 2: parkErr('sig-A'), 3: parkErr('sig-A') }, [1, 2, 3]);
+        const b = harness({}, [11, 12, 13]);
+        await Promise.all([
+          runLane('a', [], '/repo', 'on-par/software-factory', paths, { ...a.deps, laneBreakerThreshold: 2 }),
+          runLane('b', [], '/repo', 'on-par/software-factory', paths, { ...b.deps, laneBreakerThreshold: 2 }),
+        ]);
+
+        expect(a.shipped).toEqual([1, 2]);
+        expect(kinds(a.events, 'lane-paused')).toHaveLength(1);
+        expect(b.shipped).toEqual([11, 12, 13]);
+        expect(kinds(b.events, 'lane-paused')).toHaveLength(0);
+        expect(kinds(b.events, 'lane-done')).toHaveLength(1);
+      });
+
+      it.each([0, undefined])('never pauses when the threshold is %s', async (laneBreakerThreshold) => {
+        const h = harness({ 1: parkErr('sig-A'), 2: parkErr('sig-A'), 3: parkErr('sig-A') }, [1, 2, 3]);
+        await runLane('app', [], '/repo', 'on-par/software-factory', paths, { ...h.deps, laneBreakerThreshold });
+
+        expect(h.shipped).toEqual([1, 2, 3]);
+        expect(kinds(h.events, 'lane-paused')).toHaveLength(0);
+        expect(kinds(h.events, 'lane-done')[0][3]).toContain('3 parked');
+      });
+
+      it('does not pause on parks without a signature', async () => {
+        const h = harness({ 1: new Error('boom'), 2: new Error('boom'), 3: parkErr(''), 4: parkErr('') }, [1, 2, 3, 4]);
+        await runLane('app', [], '/repo', 'on-par/software-factory', paths, { ...h.deps, laneBreakerThreshold: 2 });
+
+        expect(h.shipped).toEqual([1, 2, 3, 4]);
+        expect(kinds(h.events, 'lane-paused')).toHaveLength(0);
+      });
+    });
+
     it('reaps the parked worktree exactly once when ship throws a LaneParkError', async () => {
       const reapWorktree = vi.fn(async () => {});
       await runLane('app', [12], '/repo', 'on-par/software-factory', paths, {

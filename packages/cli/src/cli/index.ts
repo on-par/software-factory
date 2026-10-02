@@ -30,6 +30,7 @@ import type {
   MergePolicyOverrides,
   ModelDiagnosis,
   PrSource,
+  LanePausedPayload,
   ParkReason,
   QueueDiagnostic,
   ReadinessInfo,
@@ -135,6 +136,7 @@ import {
   resolveDesignRegressionBlock,
   resolveEffectiveModelPins,
   resolveEfficiencyPolicy,
+  resolveLaneBreakerThreshold,
   resolveEnvironmentPorts,
   resolveEnvironmentProxy,
   resolveArtifactsDir,
@@ -3376,8 +3378,10 @@ async function cmdRun(
     warnQueueDiagnostics(diagnostics);
 
     let knobs: UsageKnobs;
+    let laneBreakerThreshold: number;
     try {
       knobs = resolveUsageKnobs(process.env, loadRepoConfig(repoRoot), usageFlagOverrides(opts, 'stopAt'));
+      laneBreakerThreshold = resolveLaneBreakerThreshold(loadRepoConfig(repoRoot));
     } catch (err: any) {
       throw new CliExitError(`factory: ${err.message}`, 2);
     }
@@ -3458,6 +3462,7 @@ async function cmdRun(
         pids.push(
           runLane(planned.lane, planned.issues, repoRoot, ghRepo, paths, {
             ...planned.deps,
+            laneBreakerThreshold,
             ship: (issue, o, c) => shipIssue(issue, { ...o, branchPrefix, prClassifier: opts.prClassifier }, c),
             sweepFinished: (issue) =>
               sweepBetweenLaneIssues(issue, planned.lane, repoRoot, ghRepo, paths).then(() => {}),
@@ -3640,6 +3645,10 @@ async function cmdSupervise(opts: {
 }
 
 type RunLaneDeps = {
+  /** Lane circuit breaker (#1918): pause after this many consecutive parks with the same
+   *  non-empty failure signature. 0 or absent = off; cmdRun wires the resolved
+   *  budget.laneBreakerThreshold. */
+  laneBreakerThreshold?: number;
   ship?: (
     issue: number,
     opts: { product?: string; autoRework?: boolean; interactive?: boolean; approvePlan?: boolean },
@@ -3823,7 +3832,9 @@ export async function runLane(
     reapWorktree = async () => {},
     sweepFinished = async () => {},
     countRemaining,
+    laneBreakerThreshold = 0,
   } = deps;
+  let streak: { signature: string; firstIssue: number; failingChecks: string[]; count: number } | null = null;
   let merged = 0;
   let awaitingReview = 0;
   let skipped = 0;
@@ -3877,6 +3888,7 @@ export async function runLane(
       await reapWorktree(issue).catch(() => {});
       await settle(issue, 'parked');
       parked++;
+      streak = null;
       continue;
     }
     try {
@@ -3886,12 +3898,14 @@ export async function runLane(
           : await withHeartbeat(issue, heartbeat, () => ship(issue, {}, { repoRoot, ghRepo, paths, lane }));
       await withHeartbeat(issue, heartbeat, () => waitMerge(issue, branch, repoRoot, ghRepo, paths));
       merged++;
+      streak = null;
       await settle(issue, 'done');
     } catch (err: any) {
       if (err instanceof AwaitingReviewError) {
         // The land path already emitted the awaiting-review event and cleaned the
         // worktree — this is a clean outcome, not a park; move to the next issue.
         awaitingReview++;
+        streak = null;
         await settle(issue, 'done');
         continue;
       }
@@ -3923,11 +3937,19 @@ export async function runLane(
       // once by the layer that detects the failure — shipIssue for pipeline failures,
       // the land path for merge failures. runLane owns only lane-lifecycle events
       // (stopped/parked/lane-done), so injected ship functions never change ownership.
+      const signature = err instanceof LaneParkError ? err.failureSignature : undefined;
+      const checks = err instanceof LaneParkError ? (err.failingChecks ?? []) : [];
+      if (!signature) streak = null;
+      else if (streak && streak.signature === signature) streak.count++;
+      else streak = { signature, firstIssue: issue, failingChecks: checks, count: 1 };
+      const tripped = laneBreakerThreshold > 0 && streak !== null && streak.count >= laneBreakerThreshold;
       emitEvent(
         paths.events,
         'parked',
         issue,
-        `issue #${issue} parked (${reason}); lane '${lane}' continuing, ${await remainingAfter(i)} issue(s) remaining`,
+        `issue #${issue} parked (${reason}); ${
+          tripped ? `lane '${lane}' paused (lane breaker)` : `lane '${lane}' continuing`
+        }, ${await remainingAfter(i)} issue(s) remaining`,
         { lane },
       );
       // Remove the parked lane's own worktree so a parked issue stops leaving a sibling
@@ -3935,6 +3957,23 @@ export async function runLane(
       await reapWorktree(issue).catch(() => {});
       await settle(issue, 'parked');
       parked++;
+      if (tripped && streak) {
+        const payload: LanePausedPayload = {
+          lane,
+          signature: streak.signature,
+          failingChecks: checks.filter((c) => streak!.failingChecks.includes(c)),
+          firstIssue: streak.firstIssue,
+          secondIssue: issue,
+        };
+        emitEvent(
+          paths.events,
+          'lane-paused',
+          lane,
+          `lane '${lane}' paused: #${payload.firstIssue} and #${payload.secondIssue} parked with the same failure signature (${payload.failingChecks.join(', ') || 'no failing checks'})`,
+          { lane, lanePaused: payload },
+        );
+        return;
+      }
       continue;
     }
   }

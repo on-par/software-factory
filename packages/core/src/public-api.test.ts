@@ -44,6 +44,7 @@ const PUBLIC_API_KEYS = [
   'loadRepoConfig',
   'resolveCodexDisabled',
   'resolveEfficiencyPolicy',
+  'resolveLaneBreakerThreshold',
   'resolveEffectiveBuildRoute',
   'resolveEffectiveModelPins',
   'resolveUsageCap',
