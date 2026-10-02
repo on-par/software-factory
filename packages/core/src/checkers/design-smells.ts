@@ -16,8 +16,15 @@ import type { CheckerContext } from './index.js';
 export const DESIGN_SMELLS_CHECKER = 'design_smells';
 export const WORKER_OUTPUT_CHECKER = 'worker_output';
 
-/** Smell taxonomy from #483 — the four maintainability failures binary gates cannot see. */
-export const SMELL_KINDS = ['cast-to-pass', 'swallowed-error', 'shotgun-surgery', 'boundary-violation'] as const;
+/** Smell taxonomy from #483 and #1799 — maintainability failures binary gates cannot see. */
+export const SMELL_KINDS = [
+  'cast-to-pass',
+  'swallowed-error',
+  'shotgun-surgery',
+  'boundary-violation',
+  'restating-comment',
+  'lossy-test-double',
+] as const;
 
 /** Base refs tried in order; the first that resolves is the merge-base target. */
 export const BASE_REF_CANDIDATES = ['origin/main', 'origin/master'] as const;
@@ -278,6 +285,15 @@ export function buildDesignSmellPrompt(input: {
     '- `boundary-violation` — the diff crosses a boundary the constitution or an Accepted ADR fixes',
     '  (e.g. importing across a package seam that the ADR routes through a port, reaching into another',
     "  package's internals, or hard-coding config the constitution says lives in config).",
+    '- `restating-comment` — a comment added by this diff that only repeats what the next lines of code',
+    '  already say, with no why, constraint or link. Smell: `// increment i` directly above `i++`. Not a',
+    '  smell: `// retry once: the registry returns 409 on the first write after a tag move`, which gives a',
+    '  reason the code cannot show. Doc comments on exported/public APIs are **not** this smell.',
+    '- `lossy-test-double` — a fake, stub or spy added by this diff that records a call in a form that',
+    '  loses argument boundaries (for example joining arguments into one string) or drops arguments, so',
+    '  the test cannot assert each one. Example: a fake `RunAsync(file, args, cwd)` that records only',
+    '  `$"{file} {args}"`. Suggest recording each argument separately (a tuple/object per call) and',
+    '  asserting every argument that affects behaviour.',
     '',
     'Every finding must cite a file that appears in the diff, and must include a concrete suggested',
     'alternative — findings without both are worthless and must be dropped.',

@@ -479,16 +479,44 @@ describe('buildDesignSmellPrompt', () => {
     expect(prompt).toContain('diff truncated');
   });
 
-  it('names all four kinds from SMELL_KINDS', () => {
+  it('names every kind from SMELL_KINDS', () => {
     const prompt = buildDesignSmellPrompt(base);
 
     for (const kind of SMELL_KINDS) {
       expect(prompt).toContain(kind);
     }
   });
+
+  it('teaches restating-comment and lossy-test-double with examples (#1799)', () => {
+    const prompt = buildDesignSmellPrompt(base);
+
+    expect(prompt).toContain('restating-comment');
+    expect(prompt).toContain('// increment i');
+    expect(prompt).toContain('i++');
+    expect(prompt).toContain('// retry once: the registry returns 409');
+    expect(prompt).toContain('Doc comments on exported/public APIs are **not** this smell');
+    expect(prompt).toContain('lossy-test-double');
+    expect(prompt).toContain('RunAsync(file, args, cwd)');
+  });
 });
 
 describe('parseDesignSmellVerdict', () => {
+  it('accepts restating-comment and lossy-test-double smells (#1799)', () => {
+    const { verdict, rejected } = parseDesignSmellVerdict(
+      JSON.stringify({
+        checker: 'design_smells',
+        result: 'FAIL',
+        smells: [
+          { kind: 'restating-comment', file: 'a.ts', line: 3, evidence: 'e', suggestion: 's' },
+          { kind: 'lossy-test-double', file: 'a.test.ts', evidence: 'e', suggestion: 's' },
+        ],
+      }),
+    );
+
+    expect(rejected).toEqual([]);
+    expect(verdict?.smells.map((x) => x.kind)).toEqual(['restating-comment', 'lossy-test-double']);
+  });
+
   it('parses a valid verdict', () => {
     const { verdict, rejected, reason } = parseDesignSmellVerdict(
       '{"checker":"design_smells","result":"PASS","smells":[]}',
@@ -672,6 +700,42 @@ describe('designSmellsChecker', () => {
     expect(result.details).toContain('packages/core/src/a.ts:42');
     expect(result.details).toContain('widen the parameter type instead');
     expect(stub.calls[0].prompt).toContain('test constitution');
+  });
+
+  it.each([
+    ['restating-comment', '+// increment i\n+i++;\n'],
+    ['lossy-test-double', '+RunAsync(file, args, cwd) { calls.Add($"{file} {args}"); }\n'],
+  ])('fails on a %s finding (#1799)', async (kind, added) => {
+    const worktree = await makeWorktree();
+    const { router } = makeRouter(
+      JSON.stringify({
+        checker: 'design_smells',
+        result: 'FAIL',
+        smells: [{ kind, file: 'x.ts', line: 1, evidence: 'e', suggestion: 's' }],
+      }),
+    );
+
+    const result = await designSmellsChecker(makeContext(worktree), router, undefined, {
+      collectDiff: async () => ({ ...cleanDiff, text: `diff --git a/x.ts b/x.ts\n${added}` }),
+    });
+
+    expect(result.result).toBe('FAIL');
+    expect(result.details).toContain(`[${kind}]`);
+  });
+
+  it('passes when a reason-giving comment is kept (#1799)', async () => {
+    const worktree = await makeWorktree();
+    const { router } = makeRouter('{"checker":"design_smells","result":"PASS","smells":[]}');
+
+    const result = await designSmellsChecker(makeContext(worktree), router, undefined, {
+      collectDiff: async () => ({
+        ...cleanDiff,
+        text: 'diff --git a/x.ts b/x.ts\n+// retry once: the registry returns 409 after a tag move\n+retry();\n',
+      }),
+    });
+
+    expect(result.result).toBe('PASS');
+    expect(result.details).not.toContain('restating-comment');
   });
 
   it('passes on a clean verdict with no smells', async () => {
