@@ -654,7 +654,7 @@ async function resolveFactoryCommit(): Promise<string | null> {
   );
 }
 
-async function cmdFilingPreview(runId: string, opts: { branchPrefix?: string }): Promise<void> {
+export async function cmdFilingPreview(runId: string, opts: { branchPrefix?: string }): Promise<void> {
   const paths = getFactoryPaths(await getRepoRoot());
   const prefix = opts.branchPrefix === undefined ? resolveBranchPrefix() : branchPrefixOrExit(opts.branchPrefix);
   const found = await runFilingPreview(runId, {
