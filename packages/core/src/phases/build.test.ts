@@ -18,6 +18,7 @@ import {
   buildLocalSmallPrompt,
   buildOpencodePrompt,
   buildPhase,
+  TEST_DOUBLE_RULE,
 } from './build.js';
 
 const models: ModelsConfig = {
@@ -2080,5 +2081,17 @@ describe('BUILD prompt untrusted issue body', () => {
   it('claude prompt carries the notice', () => {
     const prompt = buildClaudePrompt({ issue: 1840, branch: 'b', specPath: 's.md', constitutionCtx: '' });
     expect(prompt).toContain(UNTRUSTED_ISSUE_BODY_NOTICE);
+  });
+});
+
+describe('BUILD prompt test-double rule (#1799)', () => {
+  const base = { issue: 1799, specPath: 's.md', constitutionCtx: '', spec: 'spec' };
+
+  it.each([
+    ['opencode', buildOpencodePrompt(base)],
+    ['commit-only', buildCommitOnlyPrompt(base)],
+    ['claude', buildClaudePrompt({ issue: 1799, branch: 'b', specPath: 's.md', constitutionCtx: '' })],
+  ])('%s prompt carries the rule', (_name, prompt) => {
+    expect(prompt).toContain(TEST_DOUBLE_RULE);
   });
 });

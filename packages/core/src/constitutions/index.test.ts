@@ -346,6 +346,11 @@ describe('ConstitutionLoader.resolveForReview (#1673)', () => {
     expect(r.constitution.body.trim()).not.toBe('');
   });
 
+  it('default review constitution carries the test-double rule (#1799)', () => {
+    const r = new ConstitutionLoader().resolveForReview(repoDir);
+    expect(r.constitution.body).toContain('Test doubles record each argument of a call separately');
+  });
+
   it('describes each source', () => {
     expect(describeReviewConstitutionSource({ kind: 'repo-constitution', path: '.factory/constitution.md' })).toContain(
       '.factory/constitution.md',

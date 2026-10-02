@@ -324,6 +324,10 @@ async function buildPhaseImpl(opts: {
   return { ok: true, model: result.model, route, diffBase: fallbackBaseRef };
 }
 
+/** Test-double rule from #1799, rendered into every full BUILD prompt. */
+export const TEST_DOUBLE_RULE =
+  'Test doubles (fakes, stubs, spies) record each argument of a call separately — never joined into one string, never dropped — and tests assert every argument that affects behaviour.';
+
 export function buildLocalSmallPrompt(opts: { issue: number; branch: string; spec: string }): string {
   const { issue, branch, spec } = opts;
   return `Local-small build for issue #${issue}.
@@ -367,6 +371,7 @@ ${spec}
 
 Match surrounding code style and idioms. Add or update the tests described in the
 spec's Tests section and actually run them — report the exact command and its output.
+${TEST_DOUBLE_RULE}
 If the repo has a fast verify path, run \`scripts/verify.sh --no-e2e\` (NOT bare
 \`scripts/verify.sh\` or \`npm test\` — those run the full integration suite, which
 has a known intermittent multi-hour hang; see #739) and fix failures before
@@ -414,6 +419,7 @@ ${spec}
 
 Match surrounding code style and idioms. Add or update the tests described in the
 spec's Tests section and actually run them — report the exact command and its output.
+${TEST_DOUBLE_RULE}
 If the repo has a fast verify path, run \`scripts/verify.sh --no-e2e\` (NOT bare
 \`scripts/verify.sh\` or \`npm test\` — those run the full integration suite, which
 has a known intermittent multi-hour hang; see #739) and fix failures before
@@ -463,6 +469,8 @@ uncertain findings apply the conservative default and note the deferral in the P
 Never pause for permission or input — nobody is watching this session.
 
 ${UNTRUSTED_ISSUE_BODY_NOTICE}
+
+${TEST_DOUBLE_RULE}
 
 Commit atomically: one commit per independently testable functional change, each
 with a clear conventional message; never mix unrelated functional changes in the
