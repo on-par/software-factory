@@ -10,7 +10,9 @@ import {
   capEvidenceExcerpt,
   createOctokitFilingClient,
   DEFAULT_INTERNAL_REPO,
+  feedbackPrMarker,
   fileBug,
+  findIssueByPrUrl,
   findMatchingIssue,
   fingerprintMarker,
   renderBugBody,
@@ -519,5 +521,59 @@ describe('fileBug caller labels (#1852)', () => {
     });
     expect(created[0].body).not.toContain('<!-- x -->');
     expect(created[0].body).not.toContain('\u2066');
+  });
+});
+
+describe('fileBug PR-URL dedup (#1853)', () => {
+  const prUrl = 'https://github.com/on-par/widgets/pull/7';
+
+  it('findIssueByPrUrl picks the lowest-numbered open match and ignores closed', () => {
+    const body = `x\n${feedbackPrMarker(prUrl)}\n`;
+    const issues: CandidateIssue[] = [
+      { number: 3, body, state: 'closed' },
+      { number: 9, body, state: 'open' },
+      { number: 5, body, state: 'open' },
+      { number: 2, body: feedbackPrMarker('https://github.com/on-par/widgets/pull/70'), state: 'open' },
+    ];
+    expect(findIssueByPrUrl(issues, prUrl)?.number).toBe(5);
+    expect(findIssueByPrUrl([], prUrl)).toBeUndefined();
+  });
+
+  it('puts the marker on a created issue', async () => {
+    const { client, created } = makeFakeClient([]);
+    const r = await fileBug(client, { fingerprinted: makeFingerprinted(), now: clock, prUrl });
+    expect(r.action).toBe('created');
+    expect(created[0].body).toContain(`\n${feedbackPrMarker(prUrl)}\n`);
+  });
+
+  it('comments on the existing issue without updating it', async () => {
+    const { client, created, updated, commented } = makeFakeClient([
+      { number: 77, body: `old\n${feedbackPrMarker(prUrl)}\n`, state: 'open' },
+    ]);
+    const r = await fileBug(client, {
+      fingerprinted: makeFingerprinted({ eventExcerpt: 'new finding' }, 'fb_other'),
+      now: clock,
+      prUrl,
+    });
+    expect(r).toMatchObject({ action: 'commented', issueNumber: 77 });
+    expect(created).toHaveLength(0);
+    expect(updated).toHaveLength(0);
+    expect(commented).toHaveLength(1);
+    expect(commented[0].issue_number).toBe(77);
+    expect(commented[0].body).toContain('new finding');
+  });
+
+  it('files a new issue for a different PR', async () => {
+    const { client, created, commented } = makeFakeClient([
+      { number: 77, body: feedbackPrMarker(prUrl), state: 'open' },
+    ]);
+    const r = await fileBug(client, {
+      fingerprinted: makeFingerprinted(),
+      now: clock,
+      prUrl: 'https://github.com/on-par/widgets/pull/8',
+    });
+    expect(r.action).toBe('created');
+    expect(created).toHaveLength(1);
+    expect(commented).toHaveLength(0);
   });
 });

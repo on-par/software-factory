@@ -633,7 +633,7 @@ export async function runFeedbackCommand(
 ): Promise<void> {
   try {
     const result = await runFeedback(prUrl, opts, deps);
-    log(`Filed ${result.repo}#${result.issueNumber}`);
+    log(`${result.action === 'commented' ? 'Commented on' : 'Filed'} ${result.repo}#${result.issueNumber}`);
   } catch (err) {
     if (err instanceof Error && err.message.startsWith('factory feedback:')) throw new CliExitError(err.message, 2);
     throw err;

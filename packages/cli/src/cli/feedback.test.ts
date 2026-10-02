@@ -266,7 +266,7 @@ describe('runFeedback sanitizing and queue safety (#1852)', () => {
     await runFeedback(PR, {}, deps);
     const c = created[0];
     for (const bad of ['<!--', 'ignore previous instructions', '\u202E', '\u200B']) {
-      expect(c.body.replace(/<!-- fp(?:-count)?:[^>]*-->/g, '')).not.toContain(bad);
+      expect(c.body.replace(/<!-- (?:fp(?:-count)?|feedback-pr):[^>]*-->/g, '')).not.toContain(bad);
       expect(c.title).not.toContain(bad);
     }
     expect(c.body).toContain('Fix the  test');
@@ -286,5 +286,38 @@ describe('runFeedback sanitizing and queue safety (#1852)', () => {
         expect(l.startsWith(QUEUE_ORDER_LABEL_PREFIX)).toBe(false);
       }
     }
+  });
+});
+
+describe('runFeedback PR dedup (#1853)', () => {
+  it('second run for the same PR comments on the first issue; another PR files anew', async () => {
+    const { deps } = setup();
+    const store: Array<{ number: number; body: string; state: 'open' }> = [];
+    const comments: any[] = [];
+    const filing = {
+      async listCandidateIssues() {
+        return store;
+      },
+      async createIssue(i: any) {
+        store.push({ number: 900 + store.length, body: i.body, state: 'open' });
+        return { number: 900 + store.length - 1 };
+      },
+      async updateIssue() {
+        throw new Error('must not update');
+      },
+      async commentIssue(i: any) {
+        comments.push(i);
+      },
+    };
+    const d = { ...deps, filing };
+    const first = await runFeedback(PR, {}, d);
+    expect(first.action).toBe('created');
+    const second = await runFeedback(PR, {}, { ...d, now: () => new Date('2030-01-01T00:00:00Z') });
+    expect(second).toMatchObject({ action: 'commented', issueNumber: first.issueNumber });
+    expect(comments).toHaveLength(1);
+    expect(comments[0].body).toContain('Missing regression test');
+    const other = await runFeedback('https://github.com/on-par/widgets/pull/99', {}, d);
+    expect(other.action).toBe('created');
+    expect(store).toHaveLength(2);
   });
 });

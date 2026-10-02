@@ -18,6 +18,11 @@ export function fingerprintMarker(fingerprint: string): string {
   return `<!-- fp:${fingerprint} -->`;
 }
 
+/** Hidden marker tying a feedback issue to the PR whose review it files (#1853). */
+export function feedbackPrMarker(prUrl: string): string {
+  return `<!-- feedback-pr:${prUrl} -->`;
+}
+
 function countMarker(n: number): string {
   return `<!-- fp-count:${n} -->`;
 }
@@ -44,7 +49,7 @@ export interface FilingGitHubClient {
   commentIssue(input: { owner: string; repo: string; issue_number: number; body: string }): Promise<void>;
 }
 
-export type FileBugAction = 'created' | 'bumped';
+export type FileBugAction = 'created' | 'bumped' | 'commented';
 
 export interface FileBugInput {
   fingerprinted: FingerprintedFailure;
@@ -60,6 +65,8 @@ export interface FileBugInput {
   title?: string;
   /** Overrides the default "## Problem" paragraph. Sanitized. */
   problem?: string;
+  /** Canonical PR URL: dedups by an open issue carrying its marker and comments instead of filing anew. */
+  prUrl?: string;
 }
 
 export interface FileBugResult {
@@ -79,6 +86,14 @@ export function resolveTargetRepo(evidence: EvidencePack, internalRepo = DEFAULT
 export function findMatchingIssue(issues: readonly CandidateIssue[], fingerprint: string): CandidateIssue | undefined {
   const marker = fingerprintMarker(fingerprint);
   return issues.find((i) => (i.body ?? '').includes(marker));
+}
+
+/** Lowest-numbered open issue carrying the PR's feedback marker (pure, exported). */
+export function findIssueByPrUrl(issues: readonly CandidateIssue[], prUrl: string): CandidateIssue | undefined {
+  const marker = feedbackPrMarker(prUrl);
+  return issues
+    .filter((i) => i.state !== 'closed' && (i.body ?? '').includes(marker))
+    .sort((a, b) => a.number - b.number)[0];
 }
 
 const SUSPECTED_CAUSE_BY_REASON: Record<FailoverReason, string> = {
@@ -220,6 +235,19 @@ export async function fileBug(client: FilingGitHubClient, input: FileBugInput): 
   const target = resolveTargetRepo(evidence, input.internalRepo);
   const [owner, repo] = target.split('/');
   const issues = await client.listCandidateIssues({ owner, repo });
+  const renderOpts = { host: input.host, caps: input.caps, problem: input.problem };
+
+  const prMatch = input.prUrl === undefined ? undefined : findIssueByPrUrl(issues, input.prUrl);
+  if (prMatch) {
+    await client.commentIssue({
+      owner,
+      repo,
+      issue_number: prMatch.number,
+      body: renderBugBody(evidence, fingerprint, 1, renderOpts),
+    });
+    return { action: 'commented', repo: target, issueNumber: prMatch.number, fingerprint, occurrences: 1 };
+  }
+
   const match = findMatchingIssue(issues, fingerprint);
 
   if (match) {
@@ -246,7 +274,10 @@ export async function fileBug(client: FilingGitHubClient, input: FileBugInput): 
     owner,
     repo,
     title,
-    body: renderBugBody(evidence, fingerprint, 1, { host: input.host, caps: input.caps, problem: input.problem }),
+    body:
+      input.prUrl === undefined
+        ? renderBugBody(evidence, fingerprint, 1, renderOpts)
+        : `${renderBugBody(evidence, fingerprint, 1, renderOpts)}${feedbackPrMarker(input.prUrl)}\n`,
     labels,
   });
   return { action: 'created', repo: target, issueNumber: number, fingerprint, occurrences: 1 };
