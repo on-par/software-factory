@@ -4,10 +4,7 @@ import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
-import { formatAdrNumber } from '@on-par/adr-kit';
-import { createFsReader } from '@on-par/repo-context';
 
-import { applyAdrWritePlan, planAdrWrites, readAdrDrafts } from '../adr/write.js';
 import type { ApprovalGate } from '../approvals/index.js';
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
 import type { EventKind } from '../events/kinds.js';
@@ -34,9 +31,6 @@ export interface ShipResult {
   /** True when the branch's content had already landed on main (e.g. a retry after a
    *  squash merge) — nothing was pushed and no PR was created (#520). */
   alreadyDelivered?: boolean;
-  /** True when the ADR commit could not be verified onto the remote branch, so the open PR
-   *  does not carry the ADR this run recorded (#736). Always accompanies `ok: false`. */
-  adrPushFailed?: boolean;
 }
 
 export async function shipPhase(opts: Parameters<typeof shipPhaseImpl>[0]): Promise<ShipResult> {
@@ -76,7 +70,6 @@ async function shipPhaseImpl(opts: {
   reworkRounds?: number;
   /** PR classifier decision (#1724), rendered into the evidence pack. */
   reviewRouting?: ReviewRouting;
-  today?: string;
   /** The run's resolved work request; when its kind is not 'github-issue', the PR
    *  title/body come from it instead of fetching the (nonexistent) issue (#507). */
   work?: Pick<WorkRequest, 'id' | 'kind' | 'title'>;
@@ -90,16 +83,6 @@ async function shipPhaseImpl(opts: {
 }): Promise<ShipResult> {
   const { issue, repo, worktree, branch, octokit, watchCI = true, log, run = exec, approvalGate, checkSummary } = opts;
   const [owner, repoName] = repo.split('/');
-
-  const adr = await materializeAdrDrafts({
-    issue,
-    repo,
-    worktree,
-    specPath: opts.specPath,
-    run,
-    log,
-    today: opts.today ?? new Date().toISOString().slice(0, 10),
-  });
 
   let diffStat: string | undefined;
 
@@ -133,15 +116,6 @@ async function shipPhaseImpl(opts: {
   }
   let prNumber: number | undefined = openLookup.status === 'found' ? openLookup.prNumber : undefined;
 
-  // The ADR commit exists in this branch's local history, so a push that does not reach the
-  // remote leaves the open PR misrepresenting the branch and merges the recorded decision
-  // away. Same verified-push rule as the main-branch push site (#733/#734/#735), applied
-  // here per #736 — the site ADR-0028 deferred.
-  if (prNumber && adr.committed) {
-    const pushed = await pushAdrCommit({ run, worktree, branch, prNumber, log });
-    if (!pushed) return { ok: false, prNumber, adrPushFailed: true };
-  }
-
   if (!prNumber) {
     // Recovery decisions must compare against the *current* remote — a stale
     // remote-tracking ref makes already-delivered work look like recovery work (#520).
@@ -151,10 +125,7 @@ async function shipPhaseImpl(opts: {
       log('ship', 'git fetch origin main failed — recovery may compare against a stale origin/main');
     }
 
-    // A failed ADR commit leaves its files on disk uncommitted (see materializeAdrDrafts) —
-    // never let that alone make the worktree look dirty and abort the whole ship.
-    const ignorePaths = adr.committed ? [] : adr.paths;
-    let recoveryState = await inspectRecoveryState(worktree, run, ignorePaths);
+    let recoveryState = await inspectRecoveryState(worktree, run);
     if (!recoveryState.clean) {
       const conflicts = conflictedPaths(recoveryState.statusLines);
       if (conflicts.length > 0) {
@@ -173,7 +144,6 @@ async function shipPhaseImpl(opts: {
         worktree,
         branch,
         issue,
-        ignorePaths,
         statusLines: recoveryState.statusLines,
         log,
       });
@@ -181,7 +151,7 @@ async function shipPhaseImpl(opts: {
         log('ship', `not recovering ${branch}: ${committed.reason} — worktree preserved`);
         return { ok: false, reason: committed.reason };
       }
-      recoveryState = await inspectRecoveryState(worktree, run, ignorePaths);
+      recoveryState = await inspectRecoveryState(worktree, run);
       if (!recoveryState.clean) {
         const reason = 'worktree still dirty after committing leftover build output';
         log('ship', `not recovering ${branch}: ${reason} — worktree preserved`);
@@ -441,14 +411,9 @@ function isPullAlreadyExistsError(err: unknown): boolean {
 async function inspectRecoveryState(
   worktree: string,
   run: CommandRunner,
-  ignorePaths: string[] = [],
 ): Promise<{ clean: boolean; ahead: boolean; landed: boolean; statusLines: string[] }> {
-  const statusCommand =
-    ignorePaths.length > 0
-      ? `git status --porcelain -- . ${ignorePaths.map((p) => shellEscape(`:!${p}`)).join(' ')}`
-      : 'git status --porcelain';
   const [{ stdout: status }, { stdout: ahead }, landed] = await Promise.all([
-    run(statusCommand, { cwd: worktree }),
+    run('git status --porcelain', { cwd: worktree }),
     run('git rev-list --count origin/main..HEAD', { cwd: worktree }),
     // A squash merge leaves origin/main..HEAD nonzero forever even though the branch's
     // tree is byte-identical to main — exit 0 here is the reliable "already landed" signal.
@@ -484,24 +449,18 @@ function conflictedPaths(statusLines: string[]): string[] {
 /**
  * Commit the dirt a build agent left after a green CHECK onto the ship-it branch — the working
  * tree is byte-for-byte what the checkers verified, so committing it is what ships the green
- * artifact instead of parking it (#1164/#1172). The add keeps the same pathspec exclusions the
- * dirty-check applies, so failed-ADR materialization files still never affect the rest of the ship.
+ * artifact instead of parking it (#1164/#1172).
  */
 async function commitLeftoverBuildOutput(o: {
   run: CommandRunner;
   worktree: string;
   branch: string;
   issue: number;
-  ignorePaths: string[];
   statusLines: string[];
   log: (type: EventKind, msg: string) => void;
 }): Promise<{ ok: true } | { ok: false; reason: string }> {
-  const addCommand =
-    o.ignorePaths.length > 0
-      ? `git add -A -- . ${o.ignorePaths.map((p) => shellEscape(`:!${p}`)).join(' ')}`
-      : 'git add -A';
   try {
-    await o.run(addCommand, { cwd: o.worktree });
+    await o.run('git add -A', { cwd: o.worktree });
     await o.run(`git commit -m ${shellEscape(`chore(ship): commit build output left after check (#${o.issue})`)}`, {
       cwd: o.worktree,
     });
@@ -510,122 +469,6 @@ async function commitLeftoverBuildOutput(o: {
   }
   o.log('ship', `committed ${o.statusLines.length} uncommitted path(s) left after check on ${o.branch}`);
   return { ok: true };
-}
-
-/** The written path's own filename already carries the repo's detected number padding
- *  (e.g. '002-x.md' in a 3-digit-convention repo) — reuse it so the commit message and log
- *  never disagree with the file actually on disk, unlike formatAdrNumber's default width-4. */
-function adrNumberLabel(write: { path: string; number: number }): string {
-  const match = /^(\d+)-/.exec(write.path.split('/').pop() ?? '');
-  return match ? match[1] : formatAdrNumber(write.number);
-}
-
-async function materializeAdrDrafts(o: {
-  issue: number;
-  repo: string;
-  worktree: string;
-  specPath?: string;
-  run: CommandRunner;
-  log: (type: EventKind, msg: string) => void;
-  today: string;
-}): Promise<{ committed: boolean; paths: string[] }> {
-  if (!o.specPath) return { committed: false, paths: [] };
-  const drafts = await readAdrDrafts(o.specPath);
-  if (drafts.length === 0) return { committed: false, paths: [] };
-
-  // A 'ship'-typed line first, for the same reason the approval block logs one: it is what
-  // advances the TUI's activePhase to SHIP.
-  o.log('ship', `materializing ${drafts.length} ADR draft(s) from the frozen plan`);
-
-  const reader = createFsReader({
-    root: o.worktree,
-    onDegrade: (event) => {
-      if (event.reason === 'not-found') return; // a repo with no docs/adr is normal
-      o.log('adr_read_degraded', `adr read degraded: ${event.operation} ${event.path} (${event.reason})`);
-    },
-  });
-  const plan = await planAdrWrites(reader, drafts, {
-    date: o.today,
-    issueRef: { text: `Issue #${o.issue}`, url: `https://github.com/${o.repo}/issues/${o.issue}` },
-  });
-  for (const r of plan.rejected) {
-    o.log('adr_draft_rejected', `ADR draft "${r.title}" refused: ${r.errors.join('; ')}`);
-  }
-  for (const s of plan.skipped) {
-    if (s.reason === 'duplicate-title') {
-      o.log(
-        'adr_duplicate_skipped',
-        `ADR draft "${s.title}" duplicates ${s.path} — not written; the draft stays in the spec artifact`,
-      );
-    } else {
-      o.log('adr_draft_skipped', `ADR draft "${s.title}" skipped (${s.reason})`);
-    }
-  }
-  if (plan.indexSkipped) {
-    o.log('adr_index_skipped', `ADR index not updated in ${plan.dir} (${plan.indexSkipped})`);
-  }
-  if (plan.writes.length === 0) return { committed: false, paths: [] };
-
-  const written = await applyAdrWritePlan(plan, { root: o.worktree });
-  const labels = plan.writes.map((w) => `ADR-${adrNumberLabel(w)} ${w.title}`).join(', ');
-  try {
-    await o.run(`git add ${written.map(shellEscape).join(' ')}`, { cwd: o.worktree });
-    await o.run(`git commit -m ${shellEscape(`docs(adr): record ${labels} (#${o.issue})`)}`, { cwd: o.worktree });
-  } catch {
-    // Nothing staged (an identical re-ship) or git refused — the files are on disk either
-    // way; never fail a ship over documentation. The caller excludes `paths` from its own
-    // dirty-worktree check so this alone never aborts the rest of shipPhase.
-    o.log('adr_commit_skipped', `could not commit ${plan.dir} — the ADR may not reach the PR`);
-    return { committed: false, paths: written };
-  }
-  o.log('adr_written', `recorded ${plan.writes.length} ADR(s) in ${plan.dir}: ${labels}`);
-  return { committed: true, paths: written };
-}
-
-/**
- * Push the ADR commit onto an already-open PR's branch, under the same verified-push rule the
- * main-branch push site uses: git's own failure text is logged (#733), and a zero-exit push is
- * not trusted until the remote head is confirmed to match local HEAD (#735). Returns false when
- * the ADR commit is not provably on the remote, in which case the caller fails the ship (#736).
- */
-async function pushAdrCommit(o: {
-  run: CommandRunner;
-  worktree: string;
-  branch: string;
-  prNumber: number;
-  log: (type: EventKind, msg: string) => void;
-}): Promise<boolean> {
-  try {
-    await o.run(`git push -u origin ${shellEscape(o.branch)}`, { cwd: o.worktree });
-  } catch (err) {
-    const { kind, detail } = describePushFailure(err);
-    o.log(
-      'adr_push_failed',
-      `pushing the ADR commit for PR #${o.prNumber} failed (${kind}): ${detail} — aborting the ship`,
-    );
-    return false;
-  }
-
-  const remoteHead = await verifyRemoteHead(o.run, o.worktree, o.branch);
-  if (remoteHead.status === 'mismatch') {
-    o.log(
-      'adr_push_failed',
-      `remote head ${remoteHead.remoteSha} does not match local HEAD ${remoteHead.localSha} after the ADR push for ${o.branch} — aborting the ship`,
-    );
-    return false;
-  }
-  if (remoteHead.status === 'unreadable') {
-    o.log(
-      'adr_push_failed',
-      `could not verify the remote head after the ADR push for ${o.branch} (${remoteHead.detail}); local HEAD ${remoteHead.localSha ?? 'unknown'} — aborting the ship`,
-    );
-    return false;
-  }
-  o.log(
-    'ship',
-    `remote head ${remoteHead.remoteSha} matches local HEAD ${remoteHead.localSha} after the ADR push for ${o.branch}`,
-  );
-  return true;
 }
 
 /** Why a `git push` was refused, as far as git's own stderr says (#733). */

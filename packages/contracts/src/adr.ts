@@ -1,5 +1,5 @@
-// src/adr.ts — AdrDraft: a proposed architecture decision handed to the factory's ADR
-// writer, which is the sole writer of docs/adr in a target repo (#482).
+// src/adr.ts — AdrDraft: a proposed architecture decision. The product proposer exports
+// drafts as Proposed ADR files; the factory's PLAN/SHIP pipeline never records ADRs.
 import { z } from 'zod';
 
 export const AdrReferenceDraftSchema = z.object({

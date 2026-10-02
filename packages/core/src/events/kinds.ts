@@ -12,20 +12,12 @@ import type { LogLevel } from '../types/index.js';
 
 export type EventKind =
   | 'activity_touch_failed'
-  | 'adr_commit_skipped'
   | 'adr_context'
   | 'adr_context_empty'
-  | 'adr_draft_rejected'
-  | 'adr_draft_skipped'
-  | 'adr_drafts'
-  | 'adr_duplicate_skipped'
-  | 'adr_index_skipped'
   | 'adr_inject_completed'
   | 'adr_inject_started'
-  | 'adr_push_failed'
   | 'adr_read_degraded'
   | 'adr_skipped'
-  | 'adr_written'
   | 'approval_granted'
   | 'approval_requested'
   | 'await-merge'
@@ -190,20 +182,12 @@ export interface EventTraits {
  *  omitting one is a compile error, which is the point (#663). */
 export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   activity_touch_failed: { severity: 'info', isPark: false, isTerminal: false },
-  adr_commit_skipped: { severity: 'info', isPark: false, isTerminal: false },
   adr_context: { severity: 'info', isPark: false, isTerminal: false },
   adr_context_empty: { severity: 'info', isPark: false, isTerminal: false },
-  adr_draft_rejected: { severity: 'info', isPark: false, isTerminal: false },
-  adr_draft_skipped: { severity: 'info', isPark: false, isTerminal: false },
-  adr_drafts: { severity: 'info', isPark: false, isTerminal: false },
-  adr_duplicate_skipped: { severity: 'warn', isPark: false, isTerminal: false },
-  adr_index_skipped: { severity: 'info', isPark: false, isTerminal: false },
   adr_inject_completed: { severity: 'info', isPark: false, isTerminal: false },
   adr_inject_started: { severity: 'info', isPark: false, isTerminal: false },
-  adr_push_failed: { severity: 'warn', isPark: false, isTerminal: false },
   adr_read_degraded: { severity: 'info', isPark: false, isTerminal: false },
   adr_skipped: { severity: 'info', isPark: false, isTerminal: false },
-  adr_written: { severity: 'info', isPark: false, isTerminal: false },
   approval_granted: { severity: 'info', isPark: false, isTerminal: false },
   approval_requested: { severity: 'warn', isPark: false, isTerminal: false },
   'await-merge': { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'waiting-merge' },

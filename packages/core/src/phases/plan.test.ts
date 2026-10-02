@@ -10,7 +10,6 @@ import { createLifecycleBus } from '../bus/index.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
-import { specPaths } from '../spec/index.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE } from '../utils/untrusted-input.js';
 import { UnsupportedWorkSourceError, WorkSourceRegistry } from '../work/index.js';
 import { buildPlanPrompt, planPhase } from './plan.js';
@@ -197,7 +196,7 @@ describe('buildPlanPrompt', () => {
     expect(prompt.indexOf('ADR-0001 stuff.')).toBeLessThan(prompt.indexOf('## Issue #36'));
   });
 
-  it('includes the optional adr: frontmatter block and its guidance', () => {
+  it('asks for no adr: frontmatter block and tells the planner not to record new ADRs', () => {
     const prompt = buildPlanPrompt({
       issue: 36,
       issueTitle: 'Add eval runner',
@@ -206,10 +205,9 @@ describe('buildPlanPrompt', () => {
       constitutionCtx: '',
     });
 
-    expect(prompt).toContain('adr:');
-    expect(prompt).toContain('OPTIONAL');
-    expect(prompt).toContain("'why'");
-    expect(prompt).toContain('docs/adr/');
+    expect(prompt).not.toMatch(/^adr:/m);
+    expect(prompt).toContain('Do not record new ADRs.');
+    expect(prompt).toContain('unless the issue itself asks for one');
   });
 });
 
@@ -2433,8 +2431,8 @@ npm run test`;
     });
   });
 
-  describe('ADR drafts (#482)', () => {
-    it('writes <spec>.adr.json and logs adr_drafts for a valid adr: entry', async () => {
+  describe('ADR drafts', () => {
+    it('ignores an adr: block a planner still emits: no <spec>.adr.json and no adr draft logs', async () => {
       const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
       tempDirs.add(worktree);
       const specPath = join(worktree, 'issue-482.md');
@@ -2455,7 +2453,7 @@ npm run test`;
       };
       const logs: Array<{ type: string; msg: string }> = [];
 
-      await planPhase({
+      const result = await planPhase({
         issue: 482,
         repo: 'on-par/software-factory',
         worktree,
@@ -2466,92 +2464,9 @@ npm run test`;
         log: (type, msg) => logs.push({ type, msg }),
       });
 
-      const adrDraftsPath = specPaths(specPath).adr;
-      const written = JSON.parse(await readFile(adrDraftsPath, 'utf-8'));
-      expect(written).toEqual([
-        {
-          title: 'Record ADR drafts during PLAN',
-          context: 'Decisions made during PLAN evaporate into spec prose.',
-          decision: 'SHIP materializes drafts as Accepted ADRs.',
-          consequences: 'Future PLAN runs can read prior decisions back.',
-          status: 'proposed',
-          references: [],
-        },
-      ]);
-      const draftsLog = logs.find((l) => l.type === 'adr_drafts');
-      expect(draftsLog?.msg).toContain('Record ADR drafts during PLAN');
-    });
-
-    it('refuses an adr: entry with an empty context, never freezing or writing it', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
-      const specPath = join(worktree, 'issue-483.md');
-      const adrYaml = `adr:
-  - title: Bad draft
-    context: ''
-    decision: Decided anyway.
-    consequences: Some consequence.
-`;
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [{ output: `---\nroute: codex\n${adrYaml}---\n# Spec\n` }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: { issues: { get: async () => ({ data: { title: 'Bad ADR draft', body: 'Body.' } }) } },
-      };
-      const logs: Array<{ type: string; msg: string }> = [];
-
-      const result = await planPhase({
-        issue: 483,
-        repo: 'on-par/software-factory',
-        worktree,
-        specPath,
-        router,
-        constitution: null,
-        octokit,
-        log: (type, msg) => logs.push({ type, msg }),
-      });
-
       expect(result.ok).toBe(true);
-      const adrDraftsPath = specPaths(specPath).adr;
-      expect(existsSync(adrDraftsPath)).toBe(false);
-      const rejectedLog = logs.find((l) => l.type === 'adr_draft_rejected');
-      expect(rejectedLog?.msg).toMatch(/'why'\) is required/);
-    });
-
-    it('archives a pre-existing <spec>.adr.json alongside a replanned spec', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
-      const specPath = join(worktree, 'issue-484.md');
-      await writeFile(specPath, '---\nroute: claude\n---\n# Stale Spec\n');
-      await writeFile(`${specPath.replace(/\.md$/, '')}.adr.json`, JSON.stringify([{ stale: true }]));
-
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [{ output: '---\nroute: codex\n---\n# Fresh Spec\n' }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: { issues: { get: async () => ({ data: { title: 'Replan', body: 'Body.' } }) } },
-      };
-
-      await planPhase({
-        issue: 484,
-        repo: 'on-par/software-factory',
-        worktree,
-        specPath,
-        router,
-        constitution: null,
-        octokit,
-        log: () => {},
-      });
-
-      const archived = await readdir(join(worktree, '.archive'));
-      expect(archived.some((f) => f.endsWith('.adr.json'))).toBe(true);
-      expect(existsSync(`${specPath.replace(/\.md$/, '')}.adr.json`)).toBe(false);
+      expect(existsSync(join(worktree, 'issue-482.adr.json'))).toBe(false);
+      expect(logs.some((l) => l.type.startsWith('adr_draft'))).toBe(false);
     });
   });
 
