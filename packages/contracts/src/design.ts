@@ -36,6 +36,27 @@ export const CallEdgeSchema = z.object({
   note: z.string().min(1).optional(),
 });
 
+export const BehaviorVerdictSchema = z.enum(['same', 'better', 'worse', 'unknown']);
+
+export const BehaviorDeltaRowSchema = z.object({
+  input: z.string().min(1),
+  branch: z.string().min(1),
+  before: z.string().min(1),
+  after: z.string().min(1),
+  verdict: BehaviorVerdictSchema,
+});
+
+export const ExternalListSchema = z.object({
+  name: z.string().min(1),
+  location: z.string().min(1),
+  source: z.string().min(1),
+  gaps: z.array(z.string().min(1)),
+});
+
+// A bare YAML key parses to null, which must not fail the whole parse; and unlike
+// targetTypes the key stays optional in the inferred type (no [] default injected).
+const optionalList = <T extends z.ZodType>(item: T) => z.preprocess((v) => v ?? undefined, z.array(item).optional());
+
 export const DesignArtifactSchema = z.object({
   restatedProblem: z.string().min(1),
   approach: DesignApproachSchema,
@@ -59,6 +80,9 @@ export const DesignArtifactSchema = z.object({
   verificationPlan: z.array(VerificationStepSchema),
   riskBlastRadius: z.string().min(1),
   openQuestions: z.array(z.string()),
+  edgeInputs: optionalList(z.string().min(1)),
+  behaviorDelta: optionalList(BehaviorDeltaRowSchema),
+  externalLists: optionalList(ExternalListSchema),
 });
 
 export type VerificationStep = z.infer<typeof VerificationStepSchema>;
@@ -67,4 +91,7 @@ export type DesignApproach = z.infer<typeof DesignApproachSchema>;
 export type TargetType = z.infer<typeof TargetTypeSchema>;
 export type Signature = z.infer<typeof SignatureSchema>;
 export type CallEdge = z.infer<typeof CallEdgeSchema>;
+export type BehaviorVerdict = z.infer<typeof BehaviorVerdictSchema>;
+export type BehaviorDeltaRow = z.infer<typeof BehaviorDeltaRowSchema>;
+export type ExternalList = z.infer<typeof ExternalListSchema>;
 export type DesignArtifact = z.infer<typeof DesignArtifactSchema>;
