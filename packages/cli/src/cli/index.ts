@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { createRequire } from 'node:module';
 import { userInfo } from 'node:os';
 import { basename, dirname, relative, resolve } from 'node:path';
+import { createInterface } from 'node:readline/promises';
 import { promisify } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
@@ -248,11 +249,13 @@ import {
   withRunLock,
   wrapCommandInSandbox,
   writePortFile,
+  rewriteFiledIssue,
 } from '@on-par/factory-core/internal';
 import { type QueueReader, runTui } from '@on-par/factory-tui';
 import chalk from 'chalk';
 import { Command } from 'commander';
 import { admissionStateReaderFor, runQueueReconcile } from './admission.js';
+import { runApproveRewrite } from './approve-rewrite.js';
 import { runQueueClear } from './queue-clear.js';
 import { parseResetIssues, runReset } from './reset.js';
 import { cmdDaemonLogs, cmdDaemonStart, cmdDaemonStatus, cmdDaemonStop, DaemonCtlError } from './daemon.js';
@@ -2829,6 +2832,55 @@ export function prLookupFailure(issueNum: number, branch: string, err: unknown):
   return new LandFailureError(`PR lookup failed for issue #${issueNum} (${branch}): ${errorDetail(err)}`, 5);
 }
 
+async function cmdApprove(issueArg: string, opts: { rewrite?: boolean; yes?: boolean }) {
+  const issue = Number.parseInt(issueArg, 10);
+  if (!Number.isInteger(issue) || issue <= 0) throw new CliExitError(`factory approve: invalid issue '${issueArg}'`, 2);
+  if (!opts.rewrite) {
+    throw new CliExitError('factory approve: plain approval is not implemented yet (#1826); use --rewrite', 2);
+  }
+  const repoRoot = await getRepoRoot();
+  const [owner, repoName] = (await getGitHubRepo()).split('/');
+  const repoConfig = loadRepoConfig(repoRoot);
+  const modelsConfig = applyRepoConfig(loadModelsConfig(), repoConfig);
+  const routesConfig = loadRoutesConfig();
+  const effective = resolveEffectiveConfig(repoConfig);
+  const router = new ModelRouter(
+    modelsConfig,
+    routesConfig,
+    false,
+    undefined,
+    effective.allowExperimental,
+    effective.localOnly,
+  );
+  const octokit = getOctokit();
+  try {
+    await runApproveRewrite({
+      issue,
+      yes: opts.yes,
+      getIssue: async (n) => {
+        const { data } = await octokit.rest.issues.get({ owner, repo: repoName, issue_number: n });
+        return { title: data.title, body: data.body ?? '' };
+      },
+      updateIssueBody: async (n, body) => {
+        await octokit.rest.issues.update({ owner, repo: repoName, issue_number: n, body });
+      },
+      rewrite: (i) => rewriteFiledIssue({ ...i, router, worktree: repoRoot }),
+      confirm: async (question) => {
+        if (!process.stdin.isTTY) return false;
+        const rl = createInterface({ input: process.stdin, output: process.stdout });
+        try {
+          return /^y(es)?$/i.test((await rl.question(question)).trim());
+        } finally {
+          rl.close();
+        }
+      },
+      out: (line) => console.log(line),
+    });
+  } catch (err) {
+    throw new CliExitError(`factory approve: ${errorDetail(err)}`, 1);
+  }
+}
+
 async function cmdTriage(opts: { product?: string }) {
   const repoRoot = await getRepoRoot();
   const ghRepo = await getGitHubRepo();
@@ -5005,6 +5057,13 @@ export async function main() {
       const paths = getFactoryPaths(repoRoot);
       await cmdLogs(opts, { eventsFile: paths.events });
     });
+
+  program
+    .command('approve <issue>')
+    .description('Approve an issue; --rewrite drafts a tool-less factory-task spec from a filed bug first')
+    .option('--rewrite', 'Draft a clean factory-task spec with a tool-less triage agent and replace the issue body')
+    .option('--yes', 'Apply the rewrite without prompting')
+    .action(cmdApprove);
 
   const triage = program
     .command('triage')

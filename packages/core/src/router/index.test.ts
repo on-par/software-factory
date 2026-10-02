@@ -139,6 +139,59 @@ async function drainMicrotasksAndYield(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+describe('ModelRouter isolation', () => {
+  const mk = (harness: string): ModelsConfig['models'][string] => ({
+    provider: 'custom',
+    tier: 'boss',
+    costPerMtokInput: 0,
+    costPerMtokOutput: 0,
+    contextWindow: 1000,
+    capabilities: [],
+    envKey: null,
+    harness,
+    ...(harness === 'codex-cli' ? { codex: true } : {}),
+  });
+  const cfg = (defs: ModelsConfig['models']): ModelsConfig => ({
+    ...models,
+    models: defs,
+    tiers: { boss: Object.keys(defs) },
+  });
+  const isolation = { tools: 'none', network: 'none' } as const;
+
+  it('forwards isolation and skips models on non-capable harnesses', async () => {
+    const stub = new StubModelExecutor({ scripts: { plan: [{ output: 'OK' }] } });
+    const seen: ModelExecutorContext[] = [];
+    const spy = { runModel: (m: string, p: string, c: ModelExecutorContext) => (seen.push(c), stub.runModel(m, p, c)) };
+    const router = new ModelRouter(
+      cfg({ 'codex-m': mk('codex-cli'), 'claude-m': mk('claude-cli') }),
+      routes,
+      false,
+      spy,
+    );
+
+    const result = await router.run('plan', 'p', { isolation });
+
+    expect(result.model).toBe('claude-m');
+    expect(seen).toHaveLength(1);
+    expect(seen[0].isolation).toEqual(isolation);
+  });
+
+  it('does not set isolation on ordinary runs', async () => {
+    const stub = new StubModelExecutor({ scripts: { plan: [{ output: 'OK' }] } });
+    const seen: ModelExecutorContext[] = [];
+    const spy = { runModel: (m: string, p: string, c: ModelExecutorContext) => (seen.push(c), stub.runModel(m, p, c)) };
+    await new ModelRouter(models, routes, false, spy).run('plan', 'p');
+    expect(seen[0].isolation).toBeUndefined();
+  });
+
+  it('throws when no model can honor isolation', async () => {
+    const stub = new StubModelExecutor({ scripts: {} });
+    const router = new ModelRouter(cfg({ 'codex-m': mk('codex-cli') }), routes, false, stub);
+    await expect(router.run('plan', 'p', { isolation })).rejects.toThrow(/No isolation-capable model/);
+    expect(stub.calls).toHaveLength(0);
+  });
+});
+
 describe('ModelRouter with StubModelExecutor', () => {
   afterEach(() => {
     vi.useRealTimers();

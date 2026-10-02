@@ -34,6 +34,12 @@ export function isRetryableFailure(reason: HarnessFailureReason): boolean {
   return !(NON_RETRYABLE_FAILURE_REASONS as readonly string[]).includes(reason);
 }
 
+/** A text-only call: no tools, no MCP servers, no network-capable tool (#1843). */
+export interface AgentIsolation {
+  tools: 'none';
+  network: 'none';
+}
+
 export interface HarnessRequest {
   /** Registry model id (key in models.json), not the provider-native id. */
   model: string;
@@ -52,6 +58,8 @@ export interface HarnessRequest {
    *  process group) and its pid reported here so the lane can track and
    *  later kill the whole group. */
   onPgid?: (pgid: number) => void;
+  /** Text-only call (#1843). Harnesses that cannot honor it must not be selected for it. */
+  isolation?: AgentIsolation;
 }
 
 /** Provider-reported token usage for one harness invocation (#424). */

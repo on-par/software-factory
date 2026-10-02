@@ -1,6 +1,9 @@
 // Intake approval trust (#1825, ADR-0128). One owner for "is this login a trusted approver?".
 // An explicit trustedApprovers list is authoritative (even empty). Unset falls back to repo
 // admins via the collaborator-permission API. Any lookup failure is untrusted (fail closed).
+// `computeApprovalHash` is the single owner of the approval-content digest (#1843, ADR-0132).
+import { createHash } from 'node:crypto';
+
 import type { Octokit } from '@octokit/rest';
 
 /** Narrow port over GitHub's collaborator-permission endpoint. */
@@ -38,4 +41,13 @@ export function createOctokitCollaboratorPermissionClient(octokit: Octokit): Col
       return data.permission;
     },
   };
+}
+
+const normalizeEol = (s: string): string => s.replace(/\r\n?/g, '\n');
+
+/** sha256 hex over LF-normalized `title + "\n" + body` (#1802/#1843). The only approval-hash owner. */
+export function computeApprovalHash(input: { title: string; body: string }): string {
+  return createHash('sha256')
+    .update(`${normalizeEol(input.title)}\n${normalizeEol(input.body)}`, 'utf8')
+    .digest('hex');
 }

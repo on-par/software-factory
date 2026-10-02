@@ -115,7 +115,8 @@ function stripClaudeStreamMetadata(text: string): string {
 }
 
 /** Runs a model via the Claude CLI:
- *  claude -p [--model <claudeFlag>] --output-format stream-json --verbose --safe-mode --permission-mode bypassPermissions < prompt-file */
+ *  claude -p [--model <claudeFlag>] --output-format stream-json --verbose --safe-mode --permission-mode bypassPermissions < prompt-file
+ *  With `request.isolation` it runs tool-less instead: `--tools "" --strict-mcp-config`, no bypassPermissions (#1843). */
 export class ClaudeCliHarness implements CodingHarness {
   readonly id = 'claude-cli';
   readonly agentic = true;
@@ -131,7 +132,10 @@ export class ClaudeCliHarness implements CodingHarness {
     const promptDir = await mkdtemp(join(tmpdir(), 'factory-claude-prompt-'));
     const promptPath = join(promptDir, 'prompt.txt');
     await writeFile(promptPath, prompt, 'utf8');
-    const cmd = `claude -p ${modelArg}${effortArg} --output-format stream-json --include-partial-messages --verbose --safe-mode --permission-mode bypassPermissions < ${shellEscape(promptPath)}`;
+    const accessArgs = request.isolation
+      ? `--tools ${shellEscape('')} --strict-mcp-config`
+      : '--permission-mode bypassPermissions';
+    const cmd = `claude -p ${modelArg}${effortArg} --output-format stream-json --include-partial-messages --verbose --safe-mode ${accessArgs} < ${shellEscape(promptPath)}`;
     const finalCmd = sandbox ? wrapCommandInSandbox(cmd, sandbox) : cmd;
 
     let stdout: string;

@@ -11,6 +11,10 @@ describe('shipped defaults', () => {
     expect(defaultFactoryConfig.intake.trustedApprovers).toBeUndefined();
   });
 
+  it('routes triage_rewrite to the triage tier', () => {
+    expect(defaultRoutesConfig.routes.triage_rewrite?.tier).toBe('triage');
+  });
+
   it('has 24 models with the expected harness-bearing spot checks', () => {
     const modelIds = Object.keys(defaultModelsConfig.models);
     expect(modelIds).toHaveLength(24);
@@ -115,9 +119,9 @@ describe('shipped defaults', () => {
     });
   });
 
-  it('has 19 routes, each pointing at a known tier', () => {
+  it('has 20 routes, each pointing at a known tier', () => {
     const routeIds = Object.keys(defaultRoutesConfig.routes);
-    expect(routeIds).toHaveLength(19);
+    expect(routeIds).toHaveLength(20);
 
     const tierIds = new Set(Object.keys(defaultModelsConfig.tiers));
     for (const [route, def] of Object.entries(defaultRoutesConfig.routes)) {

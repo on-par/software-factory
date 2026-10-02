@@ -1,9 +1,12 @@
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import { defaultFactoryConfig } from '@on-par/factory-config';
 
 import { loadFactoryConfig } from '../config/index.js';
 import {
+  computeApprovalHash,
   createOctokitCollaboratorPermissionClient,
   isTrustedApprover,
   type CollaboratorPermissionClient,
@@ -76,5 +79,26 @@ describe('createOctokitCollaboratorPermissionClient', () => {
     const client = createOctokitCollaboratorPermissionClient(octokit);
     expect(await client.getPermissionLevel({ owner: 'o', repo: 'r', username: 'u' })).toBe('admin');
     expect(get).toHaveBeenCalledWith({ owner: 'o', repo: 'r', username: 'u' });
+  });
+});
+
+describe('computeApprovalHash', () => {
+  it('is lowercase sha256 hex of "title\\nbody"', () => {
+    const h = computeApprovalHash({ title: 't', body: 'b' });
+    expect(h).toMatch(/^[0-9a-f]{64}$/);
+    expect(h).toBe(createHash('sha256').update('t\nb', 'utf8').digest('hex'));
+  });
+
+  it('treats CRLF, CR and LF alike', () => {
+    const lf = computeApprovalHash({ title: 't', body: 'a\nb' });
+    expect(computeApprovalHash({ title: 't', body: 'a\r\nb' })).toBe(lf);
+    expect(computeApprovalHash({ title: 't', body: 'a\rb' })).toBe(lf);
+  });
+
+  it('changes with the body, the title and trailing whitespace', () => {
+    const h = computeApprovalHash({ title: 't', body: 'abc' });
+    expect(computeApprovalHash({ title: 't', body: 'abd' })).not.toBe(h);
+    expect(computeApprovalHash({ title: 'u', body: 'abc' })).not.toBe(h);
+    expect(computeApprovalHash({ title: 't', body: 'abc ' })).not.toBe(h);
   });
 });
