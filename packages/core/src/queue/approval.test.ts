@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { defaultFactoryConfig } from '@on-par/factory-config';
 
 import { loadFactoryConfig } from '../config/index.js';
+import type { EnqueueResult } from './github-queue.js';
 import {
   approvalMarker,
   approveIssues,
@@ -131,7 +132,7 @@ describe('approveIssues', () => {
       })),
       createComment: vi.fn(async () => {}),
     } satisfies ApprovalGitHubClient;
-    const enqueue = vi.fn(async (_lane: string, issues: readonly number[]) =>
+    const enqueue = vi.fn(async (_lane: string, issues: readonly number[]): Promise<EnqueueResult[]> =>
       issues.map((issue, i) => ({ issue, outcome: 'queued' as const, position: i + 1 })),
     );
     const run = (issues: number[]) =>
@@ -175,8 +176,8 @@ describe('approveIssues', () => {
   it('passes through already-queued and enqueue-reported failures', async () => {
     const { enqueue, run } = setup();
     enqueue.mockResolvedValueOnce([
-      { issue: 12, outcome: 'already-queued' as const },
-      { issue: 14, outcome: 'failed' as const, detail: 'labels' } as never,
+      { issue: 12, outcome: 'already-queued' },
+      { issue: 14, outcome: 'failed', detail: 'labels' },
     ]);
     const res = await run([12, 14]);
     expect(res[0]).toEqual({ issue: 12, outcome: 'already-queued', hash: computeApprovalHash('T', 'b12') });
