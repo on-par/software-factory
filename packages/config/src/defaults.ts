@@ -69,6 +69,8 @@ export interface FactoryDefaults {
   ci: { skip: boolean; comment?: string };
   sweep: { heartbeatFile?: string; loopIntervalSeconds: number; staleThresholdMultiplier: number; comment?: string };
   plan_approval: { enabled: boolean; comment?: string };
+  /** PLAN design-artifact gates (#1819). */
+  design: { blockUnresolvedRegressions: boolean };
   sandbox: {
     enabled: boolean;
     runtime: 'auto' | 'sandbox-exec' | 'firejail' | 'docker-sandbox' | 'none';
@@ -646,6 +648,12 @@ export const defaultFactoryConfig: FactoryDefaults = {
     comment:
       'OPTIONAL pre-code gate: when true (or --approve-plan / FACTORY_APPROVE_PLAN=1), PLAN pauses after freezing the spec and waits for operator approval before BUILD. Default off keeps unattended auto-plan. Independent of the SHIP/auto-merge gate.',
   },
+  /**
+   * Opt-in: when true, PLAN stops before BUILD if a behaviorDelta row with verdict worse/unknown is not listed in
+   * openQuestions. Default false = log design_regression_unresolved only, like the other design checks.
+   * FACTORY_DESIGN_BLOCK_REGRESSIONS=1/0 overrides.
+   */
+  design: { blockUnresolvedRegressions: false },
   sandbox: {
     enabled: true,
     runtime: 'auto',

@@ -8,6 +8,7 @@ import { DesignArtifactSchema } from '@on-par/contracts';
 
 import { specPaths } from '../spec/index.js';
 import type { DesignArtifact } from '../types/index.js';
+import type { BehaviorDeltaRow } from '@on-par/contracts';
 
 export { DesignArtifactSchema };
 
@@ -145,4 +146,15 @@ export async function readDesignArtifact(specPath: string): Promise<DesignArtifa
 
   const result = DesignArtifactSchema.safeParse(parsed);
   return result.success ? result.data : null;
+}
+
+/** Rows with verdict worse/unknown that no openQuestions entry names (by the row's input,
+ *  case-insensitive substring). Absent behaviorDelta → []. */
+export function findUnresolvedRegressions(artifact: DesignArtifact): BehaviorDeltaRow[] {
+  const questions = artifact.openQuestions.map((q) => q.toLowerCase());
+  return (artifact.behaviorDelta ?? []).filter((row) => {
+    if (row.verdict !== 'worse' && row.verdict !== 'unknown') return false;
+    const needle = row.input.trim().toLowerCase();
+    return !questions.some((q) => q.includes(needle));
+  });
 }

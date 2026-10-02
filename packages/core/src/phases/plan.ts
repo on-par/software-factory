@@ -12,7 +12,7 @@ import type { ApprovalGate } from '../approvals/index.js';
 import { PLAN_SPEC_PREVIEW_BYTES } from '../approvals/index.js';
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
-import { parseDesignArtifact, renderDesignArtifact } from '../design/index.js';
+import { findUnresolvedRegressions, parseDesignArtifact, renderDesignArtifact } from '../design/index.js';
 import { buildFastPathSpec, isFastPathEligible } from '../efficiency/fast-path.js';
 import type { EventKind } from '../events/kinds.js';
 import {
@@ -260,6 +260,8 @@ async function planPhaseImpl(opts: {
   fastPath?: boolean;
   /** Park oversized factory-task issues (sizeOk: false) instead of proceeding. Default true. */
   enforceSizeGate?: boolean;
+  /** Stop PLAN before BUILD when a worse/unknown behaviorDelta row is not in openQuestions (#1819). Default false = log only. */
+  blockUnresolvedRegressions?: boolean;
   /** Local-only mode: force the route to codex so builds use a local harness. */
   localOnly?: boolean;
   /** Repo config pins the build route (`.factory/config.json` → `route`). Forced
@@ -609,6 +611,18 @@ async function planPhaseImpl(opts: {
           `(${designArtifact.targetTypes.length} target types, ${designArtifact.signatures.length} signatures, ` +
           `${designArtifact.callGraph.length} call edges) — parked for decomposition`;
         log('size-gate-escalated', reason);
+        return { ok: false, route, specPath, model: result.model, escalate: reason, designArtifact: null };
+      }
+      const unresolved = findUnresolvedRegressions(designArtifact);
+      for (const row of unresolved) {
+        log(
+          'design_regression_unresolved',
+          `behaviorDelta row "${row.input}" (${row.branch}) has verdict ${row.verdict} and is not listed in openQuestions`,
+        );
+      }
+      if (unresolved.length > 0 && opts.blockUnresolvedRegressions) {
+        const reason = `plan has ${unresolved.length} unresolved behaviorDelta regression row(s) (verdict worse/unknown, not in openQuestions) — design.blockUnresolvedRegressions is on`;
+        log('escalate', reason);
         return { ok: false, route, specPath, model: result.model, escalate: reason, designArtifact: null };
       }
     } else {

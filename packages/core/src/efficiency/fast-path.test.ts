@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { findUnresolvedRegressions } from '../design/index.js';
 import { buildFastPathSpec, isFastPathEligible } from './fast-path.js';
 
 const completeIssue = `## Problem statement
@@ -32,6 +33,8 @@ describe('fast-path planning', () => {
 
     expect(spec.frontmatter.route).toBe('codex');
     expect(spec.frontmatter.design.openQuestions).toEqual([]);
+    expect(spec.frontmatter.design.behaviorDelta).toBeUndefined();
+    expect(findUnresolvedRegressions(spec.frontmatter.design)).toEqual([]);
     expect(spec.markdown).toContain('## Acceptance criteria');
     expect(spec.markdown).toContain('Update packages/cli/src/status.ts');
   });

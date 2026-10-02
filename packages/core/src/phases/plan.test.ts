@@ -234,6 +234,43 @@ npm test`;
     expect(existsSync(specPath.replace(/\.md$/, '.design.json'))).toBe(true);
   });
 
+  it('fast path is unaffected by blockUnresolvedRegressions (#1819)', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-493.md');
+    const body = `## Problem statement
+Status output has an extra blank line.
+## In scope
+- Update packages/cli/src/status.ts and its test.
+## Out of scope
+- Changing output format.
+## Acceptance criteria
+- [ ] Status has no blank line.
+## Verification
+npm test`;
+    const stub = new StubModelExecutor({ scripts: {} });
+    const router = new ModelRouter(models, routes, false, stub);
+    const logs: string[] = [];
+
+    const result = await planPhase({
+      issue: 493,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit: { rest: { issues: { get: async () => ({ data: { title: 'Fix status output', body } }) } } } as any,
+      log: (type) => logs.push(type),
+      enforceReadiness: true,
+      fastPath: true,
+      blockUnresolvedRegressions: true,
+    });
+
+    expect(result).toMatchObject({ ok: true, route: 'codex', model: 'fast-path' });
+    expect(stub.calls).toHaveLength(0);
+    expect(logs).not.toContain('design_regression_unresolved');
+  });
+
   it('skips the fast path when the build route is pinned to claude, and honors the pin after model PLAN (#1367)', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
     tempDirs.add(worktree);
@@ -1288,6 +1325,62 @@ npm run test`;
       );
       expect(logs.some((l) => l.type === 'design_artifact_emitted')).toBe(true);
       expect(logs.some((l) => l.type === 'design_open_questions')).toBe(false);
+    });
+
+    describe('unresolved behaviorDelta regressions (#1819)', () => {
+      const deltaYaml = (openQuestions: string) => `${validDesignYaml}  behaviorDelta:
+    - input: config absent
+      branch: default path
+      before: crashes
+      after: warns
+      verdict: worse
+  openQuestions: ${openQuestions}
+`;
+      const run = async (openQuestions: string, block?: boolean) => {
+        const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+        tempDirs.add(worktree);
+        const stub = new StubModelExecutor({
+          scripts: { plan: [{ output: `---\nroute: codex\n${deltaYaml(openQuestions)}---\n# Spec\n` }] },
+        });
+        const router = new ModelRouter(models, routes, false, stub);
+        const octokit: any = {
+          rest: { issues: { get: async () => ({ data: { title: 'Regression', body: 'Body.' } }) } },
+        };
+        const logs: Array<{ type: string; msg: string }> = [];
+        const result = await planPhase({
+          issue: 1819,
+          repo: 'on-par/software-factory',
+          worktree,
+          specPath: join(worktree, 'issue-1819.md'),
+          router,
+          constitution: null,
+          octokit,
+          log: (type, msg) => logs.push({ type, msg }),
+          blockUnresolvedRegressions: block,
+        });
+        return { result, logs };
+      };
+
+      it('logs one event per unresolved row and continues by default', async () => {
+        const { result, logs } = await run('[]');
+        expect(logs.filter((l) => l.type === 'design_regression_unresolved')).toHaveLength(1);
+        expect(result.ok).toBe(true);
+        expect(result.escalate).toBeUndefined();
+      });
+
+      it('stops PLAN when blockUnresolvedRegressions is on', async () => {
+        const { result, logs } = await run('[]', true);
+        expect(logs.filter((l) => l.type === 'design_regression_unresolved')).toHaveLength(1);
+        expect(result.ok).toBe(false);
+        expect(result.escalate).toContain('unresolved behaviorDelta');
+        expect(result.designArtifact).toBeNull();
+      });
+
+      it('passes when the row is named in openQuestions', async () => {
+        const { result, logs } = await run('["What should happen when config absent?"]', true);
+        expect(logs.some((l) => l.type === 'design_regression_unresolved')).toBe(false);
+        expect(result.ok).toBe(true);
+      });
     });
 
     it('logs design_shallow when the design block carries no targetTypes, signatures, or callGraph', async () => {

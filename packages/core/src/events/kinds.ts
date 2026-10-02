@@ -51,6 +51,7 @@ export type EventKind =
   | 'design_artifact_invalid'
   | 'design_artifact_received'
   | 'design_open_questions'
+  | 'design_regression_unresolved'
   | 'design_shallow'
   | 'engine-restarted'
   | 'environment_cleanup'
@@ -222,6 +223,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   design_artifact_emitted: { severity: 'info', isPark: false, isTerminal: false },
   design_artifact_invalid: { severity: 'warn', isPark: false, isTerminal: false },
   design_artifact_received: { severity: 'info', isPark: false, isTerminal: false },
+  design_regression_unresolved: { severity: 'warn', isPark: false, isTerminal: false },
   design_open_questions: { severity: 'warn', isPark: false, isTerminal: false },
   design_shallow: { severity: 'info', isPark: false, isTerminal: false },
   // factoryd restarted a stale in-process engine (#1178) — operational anomaly

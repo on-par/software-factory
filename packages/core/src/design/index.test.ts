@@ -6,7 +6,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { specPaths } from '../spec/index.js';
 import type { DesignArtifact } from '../types/index.js';
-import { parseDesignArtifact, readDesignArtifact, renderDesignArtifact, renderDesignGrounding } from './index.js';
+import { buildFastPathSpec } from '../efficiency/fast-path.js';
+import {
+  findUnresolvedRegressions,
+  parseDesignArtifact,
+  readDesignArtifact,
+  renderDesignArtifact,
+  renderDesignGrounding,
+} from './index.js';
 
 const validDesign = {
   restatedProblem: 'PLAN output is unstructured markdown.',
@@ -224,5 +231,43 @@ describe('readDesignArtifact', () => {
     await writeFile(designJson, JSON.stringify({ foo: 'bar' }));
 
     await expect(readDesignArtifact(specPath)).resolves.toBeNull();
+  });
+});
+
+describe('findUnresolvedRegressions', () => {
+  const row = (verdict: 'same' | 'better' | 'worse' | 'unknown', input = 'config absent') => ({
+    input,
+    branch: 'default path',
+    before: 'a',
+    after: 'b',
+    verdict,
+  });
+
+  it('returns [] when behaviorDelta is absent', () => {
+    expect(findUnresolvedRegressions(artifact)).toEqual([]);
+  });
+
+  it('ignores same and better rows', () => {
+    expect(findUnresolvedRegressions({ ...artifact, behaviorDelta: [row('same'), row('better')] })).toEqual([]);
+  });
+
+  it('returns worse and unknown rows not named in openQuestions', () => {
+    const rows = [row('worse', 'a'), row('unknown', 'b'), row('better', 'c')];
+    expect(findUnresolvedRegressions({ ...artifact, behaviorDelta: rows })).toEqual([rows[0], rows[1]]);
+  });
+
+  it('treats a case-insensitive openQuestions mention of the input as resolved', () => {
+    const resolved = { ...artifact, behaviorDelta: [row('worse')], openQuestions: ['What if CONFIG Absent?'] };
+    expect(findUnresolvedRegressions(resolved)).toEqual([]);
+  });
+
+  it('returns [] for the fast-path design', () => {
+    const spec = buildFastPathSpec({
+      issue: 12,
+      title: 'Remove blank status line',
+      issueBody:
+        '## Problem statement\nx\n## In scope\n- Update packages/cli/src/status.ts\n## Out of scope\n- y\n## Acceptance criteria\n- [ ] z\n## Verification\nnpm test',
+    });
+    expect(findUnresolvedRegressions(spec.frontmatter.design)).toEqual([]);
   });
 });

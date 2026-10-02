@@ -39,6 +39,10 @@ const WRAP = 100;
 
 /** Docs for runtime-policy sections whose packaged defaults carry no `comment`. */
 const RUNTIME_NOTES: Record<string, string> = {
+  design:
+    'Design-artifact gates at PLAN. blockUnresolvedRegressions: true stops PLAN before BUILD when a worse/unknown ' +
+    'behaviorDelta row is not in openQuestions (default false logs design_regression_unresolved only). ' +
+    'FACTORY_DESIGN_BLOCK_REGRESSIONS=1/0 beats it.',
   timeouts:
     'Phase timeouts in seconds. FACTORY_PLAN_TIMEOUT, FACTORY_BUILD_TIMEOUT, FACTORY_CHECK_TIMEOUT and ' +
     'FACTORY_APPROVAL_TIMEOUT beat these values.',
@@ -239,6 +243,7 @@ function runtimeNamespace(): Node[] {
     },
     section('timeouts'),
     section('plan_approval'),
+    section('design'),
     section('ci'),
     section('worktree'),
     section('workspace'),

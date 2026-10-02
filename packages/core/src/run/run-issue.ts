@@ -72,6 +72,8 @@ export interface RunRequest {
   localOnly?: boolean;
   /** PR classifier gate (#1724). Present only when the setting is on; undefined = off (no git
    *  calls, no label, no event, no evidence-pack section). */
+  /** design.blockUnresolvedRegressions resolved (#1819); undefined = off. */
+  blockUnresolvedRegressions?: boolean;
   prClassifier?: { rules: ReviewFloorRuleSet; gateLabel: string; modelPin?: string };
   timeouts: { plan: number; build: number; check: number; approval: number };
   modelPins: EffectiveModelPins;
@@ -416,6 +418,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       enforceReadiness: true,
       fastPath: request.efficiency.fastPath,
       enforceSizeGate: true,
+      blockUnresolvedRegressions: request.blockUnresolvedRegressions,
       preferredRoute: pinnedRoute,
     });
     route = plan.route;
