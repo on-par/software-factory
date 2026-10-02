@@ -134,6 +134,7 @@ describe('shipped defaults', () => {
     expect(defaultFactoryConfig.worktree.gcTtlDays).toBe(7);
     expect(defaultFactoryConfig.filing.maxPerDay).toBe(20);
     expect(defaultFactoryConfig.ingest.maxPerCycle).toBe(20);
+    expect(defaultFactoryConfig.design.blockUnresolvedRegressions).toBe(false);
   });
 });
 

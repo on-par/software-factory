@@ -23,6 +23,7 @@ import {
   resolveLocalOnly,
   resolveMergePolicy,
   resolvePrClassifierPolicy,
+  resolveDesignRegressionBlock,
   resolvePlanApproval,
   resolveProcessGroupGraceMs,
   resolveSkipCI,
@@ -1613,4 +1614,26 @@ it('shares only the daemon port lease registry across isolated delivery state ro
   } finally {
     vi.unstubAllEnvs();
   }
+});
+
+describe('resolveDesignRegressionBlock', () => {
+  const config = loadFactoryConfig();
+
+  it('defaults to false from the shipped config', () => {
+    expect(resolveDesignRegressionBlock(config, {})).toBe(false);
+  });
+
+  it('FACTORY_DESIGN_BLOCK_REGRESSIONS=1 wins over config false', () => {
+    expect(resolveDesignRegressionBlock(config, { FACTORY_DESIGN_BLOCK_REGRESSIONS: '1' })).toBe(true);
+  });
+
+  it('FACTORY_DESIGN_BLOCK_REGRESSIONS=0 wins over config true', () => {
+    const on = { ...config, design: { blockUnresolvedRegressions: true } };
+    expect(resolveDesignRegressionBlock(on, { FACTORY_DESIGN_BLOCK_REGRESSIONS: '0' })).toBe(false);
+  });
+
+  it('falls back to config when env is unset', () => {
+    const on = { ...config, design: { blockUnresolvedRegressions: true } };
+    expect(resolveDesignRegressionBlock(on, {})).toBe(true);
+  });
 });

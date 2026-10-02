@@ -131,6 +131,7 @@ import {
   resolveAutoFailover,
   resolveCodexDisabled,
   resolveDefectWindowDays,
+  resolveDesignRegressionBlock,
   resolveEffectiveModelPins,
   resolveEfficiencyPolicy,
   resolveEnvironmentPorts,
@@ -1765,6 +1766,7 @@ export async function shipIssue(
       sandboxDisabled: opts.sandbox === false,
     },
     localOnly: Boolean(ctx?.localOnly),
+    blockUnresolvedRegressions: resolveDesignRegressionBlock(factoryConfig),
     prClassifier: classifierPolicy.enabled
       ? {
           rules: resolveReviewFloorRules(repoConfig),
