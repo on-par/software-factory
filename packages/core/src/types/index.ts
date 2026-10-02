@@ -1,6 +1,6 @@
 // src/types/index.ts — Core type definitions for the Software Factory
 
-import type { EventKind } from '../events/kinds.js';
+import type { EventKind, LanePausedPayload } from '../events/kinds.js';
 import type { PrClassificationRecord } from '../review/classifier.js';
 
 // ---------- Models ----------
@@ -284,6 +284,8 @@ export interface FactoryEvent {
   readiness?: ReadinessInfo;
   queueReprioritization?: QueueReprioritizationRecord;
   prClassification?: PrClassificationRecord;
+  /** Breaker details on a `lane-paused` event (#1916). */
+  lanePaused?: LanePausedPayload;
   model?: string;
   tokens?: { input: number; output: number };
   durationMs?: number;

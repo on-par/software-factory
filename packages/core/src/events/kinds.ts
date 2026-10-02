@@ -77,6 +77,7 @@ export type EventKind =
   | 'land'
   | 'landed'
   | 'lane-done'
+  | 'lane-paused'
   | 'lane-start'
   | 'local-only'
   | 'local-only-complete'
@@ -179,6 +180,19 @@ export interface EventTraits {
   laneStatus?: LaneStatus;
 }
 
+/** Payload of a `lane-paused` event (#1906/#1916): the lane circuit breaker
+ *  stopped `lane` after `firstIssue` and then `secondIssue` parked in a row
+ *  with the same non-empty failure `signature`. */
+export interface LanePausedPayload {
+  lane: string;
+  /** `failureSignature()` shared by both parks. */
+  signature: string;
+  /** Checker names that failed in both parks (e.g. ['tests','lint']). */
+  failingChecks: string[];
+  firstIssue: number;
+  secondIssue: number;
+}
+
 /** Every existing `EventKind`, classified once. New kinds must be added here —
  *  omitting one is a compile error, which is the point (#663). */
 export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
@@ -254,6 +268,10 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   land: { severity: 'info', isPark: false, isTerminal: false },
   landed: { severity: 'info', isPark: false, isTerminal: true, laneStatus: 'merged' },
   'lane-done': { severity: 'info', isPark: false, isTerminal: false },
+  // The lane circuit breaker stopped claiming issues (#1906). Not a park: both
+  // issues already logged their own park, so counting this too would double
+  // human-intervention KPIs. No laneStatus: LaneStatus has no paused state yet.
+  'lane-paused': { severity: 'warn', isPark: false, isTerminal: false },
   'lane-start': { severity: 'info', isPark: false, isTerminal: false },
   'local-only': { severity: 'info', isPark: false, isTerminal: false },
   'local-only-complete': { severity: 'info', isPark: false, isTerminal: false },
