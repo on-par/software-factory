@@ -50,6 +50,37 @@ describe('simWorkspace', () => {
 });
 
 describe('worktreeWorkspace', () => {
+  it('copies the pre-existing remote branch from the setup result and forwards findOpenPr (#1868)', async () => {
+    const setup = vi.fn().mockResolvedValue({ base: 'origin/main', head: 'x', remoteBranch: { sha: 'abc' } });
+    const findOpenPr = vi.fn();
+
+    const ws = await worktreeWorkspace({
+      repoRoot: '/repo',
+      branch: 'issue-9',
+      worktreePath: '/repo/.worktrees/issue-9',
+      findOpenPr,
+      setup,
+      cleanup: vi.fn(),
+    });
+
+    expect(ws.remoteBranch).toEqual({ sha: 'abc' });
+    expect(setup.mock.calls[0][6]).toEqual({ findOpenPr });
+  });
+
+  it('leaves remoteBranch absent when the setup result has none', async () => {
+    const setup = vi.fn().mockResolvedValue({ base: 'origin/main', head: 'x', remoteBranch: null });
+
+    const ws = await worktreeWorkspace({
+      repoRoot: '/repo',
+      branch: 'issue-10',
+      worktreePath: '/repo/.worktrees/issue-10',
+      setup,
+      cleanup: vi.fn(),
+    });
+
+    expect('remoteBranch' in ws).toBe(false);
+  });
+
   it('provisions via injected setup, exposes worktreePath, and tears down via injected cleanup', async () => {
     const setup = vi.fn().mockResolvedValue(undefined);
     const cleanup = vi.fn().mockResolvedValue(undefined);
@@ -64,7 +95,9 @@ describe('worktreeWorkspace', () => {
       log,
     });
 
-    expect(setup).toHaveBeenCalledWith('/repo', 'issue-1', '/repo/.worktrees/issue-1', undefined, undefined, log);
+    expect(setup).toHaveBeenCalledWith('/repo', 'issue-1', '/repo/.worktrees/issue-1', undefined, undefined, log, {
+      findOpenPr: undefined,
+    });
     expect(ws.path).toBe('/repo/.worktrees/issue-1');
 
     await ws.dispose();
@@ -87,7 +120,9 @@ describe('worktreeWorkspace', () => {
       log,
     });
 
-    expect(setup).toHaveBeenCalledWith('/repo', 'issue-3', '/repo/.worktrees/issue-3', undefined, sandbox, log);
+    expect(setup).toHaveBeenCalledWith('/repo', 'issue-3', '/repo/.worktrees/issue-3', undefined, sandbox, log, {
+      findOpenPr: undefined,
+    });
 
     await ws.dispose();
     expect(cleanup).toHaveBeenCalledWith('/repo', '/repo/.worktrees/issue-3', log, sandbox);
@@ -113,6 +148,7 @@ describe('worktreeWorkspace', () => {
       'origin/develop',
       undefined,
       undefined,
+      { findOpenPr: undefined },
     );
   });
 });

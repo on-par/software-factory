@@ -523,6 +523,7 @@ export {
 export { wrapCommandInSandbox } from './sandbox/index.js';
 
 export { createRunRuntime } from './daemon/run-runtime.js';
+export { findOpenPR, type PrLookup } from './phases/ship.js';
 export { createShipExecutor } from './daemon/ship-executor.js';
 
 // Review verdict (#1679)
