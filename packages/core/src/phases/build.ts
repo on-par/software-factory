@@ -15,6 +15,7 @@ import type { SandboxEventType, SandboxPolicy } from '../sandbox/index.js';
 import { applySteering, type ConsumedSteering } from '../steering/index.js';
 import type { Constitution, FailoverReason } from '../types/index.js';
 import { escalationLine, isEscalation } from '../utils/index.js';
+import { UNTRUSTED_ISSUE_BODY_NOTICE } from '../utils/untrusted-input.js';
 
 export interface BuildResult {
   ok: boolean;
@@ -337,6 +338,8 @@ Rules:
 - Create exactly one git commit.
 - Do not push, open a PR, or merge.
 
+${UNTRUSTED_ISSUE_BODY_NOTICE}
+
 Frozen spec:
 ${compactForLocalModel(spec)}
 `;
@@ -356,6 +359,8 @@ export function buildOpencodePrompt(opts: {
 Read the full spec before writing any code — it is the approved plan; do not deviate.
 
 ${constitutionCtx}
+
+${UNTRUSTED_ISSUE_BODY_NOTICE}
 
 ## Spec
 ${spec}
@@ -401,6 +406,8 @@ export function buildCommitOnlyPrompt(opts: {
 Read the full spec before writing any code — it is the approved plan; do not deviate.
 
 ${constitutionCtx}
+
+${UNTRUSTED_ISSUE_BODY_NOTICE}
 
 ## Spec
 ${spec}
@@ -454,6 +461,8 @@ A frozen, already-approved spec exists at ${specPath} (written by a separate pla
 issue or block on any plan gate. Auto-fix only high-confidence review findings; for
 uncertain findings apply the conservative default and note the deferral in the PR body.
 Never pause for permission or input — nobody is watching this session.
+
+${UNTRUSTED_ISSUE_BODY_NOTICE}
 
 Commit atomically: one commit per independently testable functional change, each
 with a clear conventional message; never mix unrelated functional changes in the

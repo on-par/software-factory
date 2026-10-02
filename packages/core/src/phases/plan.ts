@@ -29,6 +29,7 @@ import { applySteering, type ConsumedSteering, describeSteering } from '../steer
 import { archiveSpec, readSpec, updateSpecRoute, writeSpec } from '../spec/index.js';
 import type { Constitution, DesignArtifact, FailoverReason, ReadinessInfo } from '../types/index.js';
 import { escalationLine, isEscalation } from '../utils/index.js';
+import { UNTRUSTED_ISSUE_BODY_NOTICE, wrapUntrustedIssueBody } from '../utils/untrusted-input.js';
 import { GITHUB_ISSUE_SOURCE, type GithubIssueParams } from '../work/github-issue.js';
 import { createDefaultWorkSourceRegistry, type WorkRequestSourceKind, type WorkSourceRegistry } from '../work/index.js';
 
@@ -64,7 +65,9 @@ ${constitutionCtx}
 ${adrCtx ?? ''}
 ## Issue #${issue}: ${issueTitle}
 
-${issueBody}
+${UNTRUSTED_ISSUE_BODY_NOTICE}
+
+${wrapUntrustedIssueBody(issueBody)}
 
 Steps:
 1. Read the issue above fully. Read CONTEXT.md if present. Any Accepted ADRs in this checkout
