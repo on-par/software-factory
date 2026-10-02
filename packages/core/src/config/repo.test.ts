@@ -21,6 +21,7 @@ import {
   resolveEffectiveConfig,
   resolveEffectiveModelPins,
   resolveEfficiencyPolicy,
+  resolveLaneBreakerThreshold,
   resolveReviewFloorRules,
   resolveUsageCap,
   resolveWatchdogPolicy,
@@ -240,6 +241,35 @@ describe('loadRepoConfig', () => {
     expect(loadRepoConfig(repoRoot)).toEqual({
       version: 2,
       budget: { fastPath: true, maxReworkRounds: 1, perIssueCapUsd: 8 },
+    });
+  });
+
+  describe('budget.laneBreakerThreshold (#1915)', () => {
+    it('resolves to 2 when unset', async () => {
+      expect(resolveLaneBreakerThreshold(null)).toBe(2);
+      const repoRoot = await tempRepoRoot();
+      await writeRepoConfig(repoRoot, { version: 2 });
+      expect(resolveLaneBreakerThreshold(loadRepoConfig(repoRoot))).toBe(2);
+    });
+
+    it('keeps 0 (breaker off) rather than falling back to the default', async () => {
+      const repoRoot = await tempRepoRoot();
+      await writeRepoConfig(repoRoot, { version: 2, budget: { laneBreakerThreshold: 0 } });
+      const loaded = loadRepoConfig(repoRoot);
+      expect(loaded).toEqual({ version: 2, budget: { laneBreakerThreshold: 0 } });
+      expect(resolveLaneBreakerThreshold(loaded)).toBe(0);
+    });
+
+    it('loads a positive integer as written', async () => {
+      const repoRoot = await tempRepoRoot();
+      await writeRepoConfig(repoRoot, { version: 2, budget: { laneBreakerThreshold: 5 } });
+      expect(resolveLaneBreakerThreshold(loadRepoConfig(repoRoot))).toBe(5);
+    });
+
+    it.each([-1, 1.5, '2'])('rejects %j naming the key', async (value) => {
+      const repoRoot = await tempRepoRoot();
+      await writeRepoConfig(repoRoot, { version: 2, budget: { laneBreakerThreshold: value } });
+      expect(() => loadRepoConfig(repoRoot)).toThrow(/budget\.laneBreakerThreshold/);
     });
   });
 

@@ -26,6 +26,7 @@ export const constitutionsDir = resolveConfigPath('constitutions');
 export {
   defaultEvidenceCaps,
   defaultFactoryConfig,
+  defaultLaneBreakerThreshold,
   defaultModelsConfig,
   defaultRoutesConfig,
   type EvidenceCapsDefaults,
