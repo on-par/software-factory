@@ -75,8 +75,11 @@ async function buildPhaseImpl(opts: {
   timeoutSeconds?: number;
   skipCI?: boolean;
   /** Local-only workspace runs (#508): use the commit-only prompt on every
-   *  route — never instruct the worker to push, open a PR, or watch CI. */
+   *  route — never instruct the worker to push, open a PR, or watch CI.
+   *  Forces commit-only even when publishFromBuild is set. */
   disablePublish?: boolean;
+  /** Opt-in (#1867, build.publishFromBuild): the claude route sends the publishing prompt (push, open PR, wait for CI). Default false = commit-only on every route. Ignored when disablePublish is set. */
+  publishFromBuild?: boolean;
   modelOverride?: string;
   /** Cross-provider Codex fallback used when a Claude worker is capped or unavailable. */
   codexFallbackModel?: string;
@@ -115,6 +118,7 @@ async function buildPhaseImpl(opts: {
     timeoutSeconds,
     skipCI,
     disablePublish,
+    publishFromBuild,
     modelOverride: modelOverrideOpt,
     codexFallbackModel,
     onProviderFailure,
@@ -142,6 +146,11 @@ async function buildPhaseImpl(opts: {
   const localOnly = opts.localOnly ?? false;
   const isCodexDisabled = opts.codexDisabled ?? false;
 
+  // Commit-only unless the repo opts in (#1867); local-only always stays commit-only (#508).
+  const claudeRoutePrompt = (): string =>
+    publishFromBuild && !disablePublish
+      ? buildClaudePrompt({ issue, branch, specPath, constitutionCtx, skipCI, appPort, appBaseUrl, designGrounding })
+      : buildCommitOnlyPrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding });
   let prompt: string;
   let taskType: 'build_codex' | 'build_claude' | 'build_opencode';
 
@@ -171,18 +180,7 @@ async function buildPhaseImpl(opts: {
     prompt = buildOpencodePrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding });
   } else {
     taskType = 'build_claude';
-    prompt = disablePublish
-      ? buildCommitOnlyPrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding })
-      : buildClaudePrompt({
-          issue,
-          branch,
-          specPath,
-          constitutionCtx,
-          skipCI,
-          appPort,
-          appBaseUrl,
-          designGrounding,
-        });
+    prompt = claudeRoutePrompt();
   }
 
   prompt = applySteering(prompt, steering);
@@ -271,21 +269,7 @@ async function buildPhaseImpl(opts: {
       }
       route = 'claude';
       taskType = 'build_claude';
-      const claudePrompt = applySteering(
-        disablePublish
-          ? buildCommitOnlyPrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding })
-          : buildClaudePrompt({
-              issue,
-              branch,
-              specPath,
-              constitutionCtx,
-              skipCI,
-              appPort,
-              appBaseUrl,
-              designGrounding,
-            }),
-        steering,
-      );
+      const claudePrompt = applySteering(claudeRoutePrompt(), steering);
       result = await router.run('build_claude', claudePrompt, {
         ...runOpts,
         retryCause: 'failover',

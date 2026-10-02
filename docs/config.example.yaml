@@ -120,6 +120,11 @@ plan_approval:
 # design_regression_unresolved only). FACTORY_DESIGN_BLOCK_REGRESSIONS=1/0 beats it.
 design:
   blockUnresolvedRegressions: false
+# BUILD policy. publishFromBuild: true lets the claude BUILD worker push, open a PR and wait for CI
+# before CHECK (the old behavior). Default false keeps BUILD commit-only on every route; SHIP pushes
+# and opens the PR after CHECK. FACTORY_BUILD_PUBLISH=1/0 beats it.
+build:
+  publishFromBuild: false
 # Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging
 ci:
   skip: false

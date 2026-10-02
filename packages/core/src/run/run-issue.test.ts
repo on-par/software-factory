@@ -177,6 +177,17 @@ describe('runIssue — invariant 1: constitution resolved exactly once', () => {
   });
 });
 
+describe('runIssue — publishFromBuild threading (#1867)', () => {
+  it('passes publishFromBuild to buildPhase, undefined by default', async () => {
+    await runIssue(baseRequest(), basePolicy(), basePorts());
+    expect(vi.mocked(buildPhase).mock.calls[0][0].publishFromBuild).toBeUndefined();
+
+    vi.mocked(buildPhase).mockClear();
+    await runIssue(baseRequest({ publishFromBuild: true }), basePolicy(), basePorts());
+    expect(vi.mocked(buildPhase).mock.calls[0][0].publishFromBuild).toBe(true);
+  });
+});
+
 describe('runIssue — invariant 2: budget asserted after each phase', () => {
   it('parks with reason fail when the budget is already exceeded after PLAN', async () => {
     const outcome = await runIssue(

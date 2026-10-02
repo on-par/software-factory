@@ -131,6 +131,7 @@ import {
   resolveAutoFailover,
   resolveCodexDisabled,
   resolveDefectWindowDays,
+  resolveBuildPublish,
   resolveDesignRegressionBlock,
   resolveEffectiveModelPins,
   resolveEfficiencyPolicy,
@@ -1818,6 +1819,7 @@ export async function shipIssue(
     },
     localOnly: Boolean(ctx?.localOnly),
     blockUnresolvedRegressions: resolveDesignRegressionBlock(factoryConfig),
+    publishFromBuild: resolveBuildPublish(factoryConfig),
     prClassifier: classifierPolicy.enabled
       ? {
           rules: resolveReviewFloorRules(repoConfig),

@@ -33,6 +33,7 @@ export {
   resolveAutoFailover,
   resolveDefectWindowDays,
   resolveEnvironmentPorts,
+  resolveBuildPublish,
   resolveDesignRegressionBlock,
   resolveEnvironmentProxy,
   resolveIngestConfig,
