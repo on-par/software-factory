@@ -304,6 +304,42 @@ describe('leaseEnv', () => {
       FACTORY_BASE_URL: 'http://ship-it-296.factory.localhost',
     });
   });
+
+  it.each(['App.sln', 'App.slnx', 'App.csproj', 'global.json'])(
+    'adds DOTNET_TieredPGO=0 for a worktree containing %s',
+    async (marker) => {
+      await withTmpDir(async (root) => {
+        await writeFile(join(root, marker), '');
+        expect(laneEnv(3142, {}, undefined, root)).toEqual({
+          FACTORY_HEADLESS: '1',
+          PLAYWRIGHT_HEADLESS: '1',
+          PORT: '3142',
+          FACTORY_APP_PORT: '3142',
+          FACTORY_BASE_URL: 'http://127.0.0.1:3142',
+          DOTNET_TieredPGO: '0',
+        });
+      });
+    },
+  );
+
+  it('leaves a non-.NET worktree unchanged', async () => {
+    await withTmpDir(async (root) => {
+      await writeFile(join(root, 'package.json'), '{}');
+      const env = laneEnv(3142, {}, undefined, root);
+      expect(env).toEqual(laneEnv(3142, {}));
+      expect(Object.keys(env).some((k) => k.startsWith('DOTNET_'))).toBe(false);
+    });
+  });
+
+  it('lets a parent-set DOTNET_TieredPGO win', async () => {
+    await withTmpDir(async (root) => {
+      await writeFile(join(root, 'App.sln'), '');
+      const parent = { DOTNET_TieredPGO: '1' };
+      const env = laneEnv(undefined, parent, undefined, root);
+      expect(env).not.toHaveProperty('DOTNET_TieredPGO');
+      expect({ ...parent, ...env }.DOTNET_TieredPGO).toBe('1');
+    });
+  });
 });
 
 describe('readPortLeases', () => {

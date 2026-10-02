@@ -200,7 +200,7 @@ async function buildPhaseImpl(opts: {
     sandbox,
     onSandboxEvent: (type: SandboxEventType, detail: string) => log(type, detail),
     onLog: (msg: string) => log('router', msg),
-    env: laneEnv(appPort, process.env, appBaseUrl),
+    env: laneEnv(appPort, process.env, appBaseUrl, worktree),
     onPgid,
     onProviderFailure,
   };
