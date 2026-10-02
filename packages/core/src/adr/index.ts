@@ -41,8 +41,7 @@ export interface AdrContext {
   matches?: { path: string; reason: AdrMatchReason; changedPath: string }[];
 }
 
-/** Shared with `adr/write.ts` so the two ADR directory scans never drift apart. */
-export function isNonAdrFile(name: string): boolean {
+function isNonAdrFile(name: string): boolean {
   return NON_ADR_FILENAME.test(name);
 }
 

@@ -39,7 +39,7 @@ export function classifyArtifact(kind: ArtifactKind): ArtifactOwner {
 
 /** ADR conformance evidence the proposer collected against the ADR home. */
 export interface AdrConformanceEvidence {
-  /** Decisions the proposer recorded as drafts for the factory's ADR writer. */
+  /** Decisions the proposer recorded as drafts, exported as Proposed ADR files. */
   drafts: readonly AdrDraft[];
   /** Decisions the proposer knows are NOT yet recorded — handed downstream as open questions. */
   unrecordedDecisions: readonly string[];
