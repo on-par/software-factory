@@ -19,6 +19,10 @@ export interface RunCommandOptions {
   onPgid?: (pgid: number) => void;
   /** Grace period before SIGKILL when sweeping the group after termination. */
   killGraceMs?: number;
+  /** Defaults to `process.platform`. Used only on the `onPgid` path. */
+  platform?: NodeJS.Platform;
+  /** Test seam; defaults to `killProcessGroup`. */
+  killGroup?: typeof killProcessGroup;
 }
 
 export interface CommandResult {
@@ -44,9 +48,15 @@ const DEFAULT_MAX_BUFFER = 1000 * 1000 * 100;
  *  otherwise keep the inherited pipe open past the direct child's own exit,
  *  hanging execa's stream-aware result past any timeout. After settling, a
  *  timeout or any signal-based termination triggers a `killProcessGroup`
- *  sweep so such grandchildren don't outlive the check. */
+ *  sweep so such grandchildren don't outlive the check. On win32 there are no
+ *  process groups and `child.kill()` ends only the root (after which taskkill
+ *  can't find the tree), so timeout/maxBuffer kills start the `taskkill /T`
+ *  tree kill while the root is alive and the sweep reuses it. */
 async function runCommandDetached(argv: readonly string[], options: RunCommandOptions): Promise<CommandResult> {
   const maxBuffer = options.maxBuffer ?? DEFAULT_MAX_BUFFER;
+  const platform = options.platform ?? process.platform;
+  const killGroup = options.killGroup ?? killProcessGroup;
+  const win32 = platform === 'win32';
   const env = { ...process.env, ...options.env };
   const ownershipFile = env.FACTORY_DAEMON_GROUPS_FILE;
   const child = ownershipFile
@@ -54,7 +64,7 @@ async function runCommandDetached(argv: readonly string[], options: RunCommandOp
     : spawn(argv[0], argv.slice(1), {
         cwd: options.cwd,
         env: options.env ? env : undefined,
-        detached: true,
+        detached: !win32,
         shell: false,
       });
 
@@ -69,11 +79,25 @@ async function runCommandDetached(argv: readonly string[], options: RunCommandOp
   let timedOut = false;
   let settled = false;
 
+  let treeKill: Promise<unknown> | undefined;
+  const terminate = () => {
+    if (win32 && pid !== undefined) {
+      treeKill ??= killGroup(pid, { graceMs: options.killGraceMs, platform }).then(
+        (o) => {
+          if (!o.terminated) child.kill();
+        },
+        () => child.kill(),
+      );
+      return;
+    }
+    child.kill();
+  };
+
   const timer =
     options.timeoutMs !== undefined
       ? setTimeout(() => {
           timedOut = true;
-          child.kill();
+          terminate();
         }, options.timeoutMs)
       : undefined;
 
@@ -84,7 +108,7 @@ async function runCommandDetached(argv: readonly string[], options: RunCommandOp
         stdoutLen += chunk.length;
         if (stdoutLen > maxBuffer) {
           maxBufferExceeded = true;
-          child.kill();
+          terminate();
           return;
         }
         stdoutChunks.push(chunk);
@@ -94,7 +118,7 @@ async function runCommandDetached(argv: readonly string[], options: RunCommandOp
         stderrLen += chunk.length;
         if (stderrLen > maxBuffer) {
           maxBufferExceeded = true;
-          child.kill();
+          terminate();
           return;
         }
         stderrChunks.push(chunk);
@@ -119,7 +143,8 @@ async function runCommandDetached(argv: readonly string[], options: RunCommandOp
 
   const isTerminated = timedOut || maxBufferExceeded || signal !== null;
   if (isTerminated && pid !== undefined) {
-    await killProcessGroup(pid, { graceMs: options.killGraceMs });
+    if (win32 && treeKill) await treeKill;
+    else await killGroup(pid, { graceMs: options.killGraceMs, platform });
   }
 
   return {

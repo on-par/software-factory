@@ -2,8 +2,9 @@ import { mkdtemp, readFile, realpath, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { KillOutcome } from '../environment/process-groups.js';
 import { describeCommandFailure, runCommand } from './command-runner.js';
 
 const tempDirs = new Set<string>();
@@ -153,6 +154,72 @@ describe('runCommand', () => {
       const result = await runCommand([process.execPath, '-e', 'console.log("hi")']);
       expect(result.stdout).toContain('hi');
     });
+  });
+
+  describe.skipIf(process.platform === 'win32')('onPgid platform handling (injected platform + killGroup)', () => {
+    const sleeper = [process.execPath, '-e', 'setTimeout(() => {}, 30000)'];
+
+    it('win32 timeout takes the tree-kill path once, reusing it for the sweep', async () => {
+      let reportedPid: number | undefined;
+      const killGroup = vi.fn(async (pid: number): Promise<KillOutcome> => {
+        process.kill(pid, 'SIGKILL');
+        return { pgid: pid, terminated: true, forced: false };
+      });
+
+      const result = await runCommand(sleeper, {
+        timeoutMs: 200,
+        killGraceMs: 50,
+        platform: 'win32',
+        onPgid: (pgid) => {
+          reportedPid = pgid;
+        },
+        killGroup,
+      });
+
+      expect(result.timedOut).toBe(true);
+      expect(result.killed).toBe(true);
+      expect(killGroup).toHaveBeenCalledTimes(1);
+      expect(killGroup).toHaveBeenCalledWith(reportedPid, expect.objectContaining({ platform: 'win32', graceMs: 50 }));
+    }, 10000);
+
+    it('win32 falls back to child.kill() when the tree kill does not terminate the root', async () => {
+      const killGroup = vi.fn(async (pid: number): Promise<KillOutcome> => ({
+        pgid: pid,
+        terminated: false,
+        forced: true,
+      }));
+
+      const result = await runCommand(sleeper, {
+        timeoutMs: 200,
+        killGraceMs: 50,
+        platform: 'win32',
+        onPgid: () => {},
+        killGroup,
+      });
+
+      expect(result.timedOut).toBe(true);
+      expect(killGroup).toHaveBeenCalledTimes(1);
+    }, 10000);
+
+    it('posix sweeps once after exit with the injected platform', async () => {
+      const killGroup = vi.fn(async (pid: number): Promise<KillOutcome> => ({
+        pgid: pid,
+        terminated: true,
+        forced: false,
+      }));
+
+      const result = await runCommand(sleeper, {
+        timeoutMs: 200,
+        killGraceMs: 50,
+        platform: 'linux',
+        onPgid: () => {},
+        killGroup,
+      });
+
+      expect(result.timedOut).toBe(true);
+      expect(killGroup).toHaveBeenCalledTimes(1);
+      expect(killGroup).toHaveBeenCalledWith(expect.any(Number), expect.objectContaining({ platform: 'linux' }));
+    }, 10000);
   });
 });
 
