@@ -190,6 +190,35 @@ export function isEnvironmentFailure(summary: CheckSummary, baseline: BaselineRe
   return failing.every((name) => baseline.checkers.some((c) => c.checker === name && c.verdict === 'fails-on-base'));
 }
 
+/** Checkers rework ignores on partial overlap (#1929): fails-on-base with no new failing tests. Empty without a usable baseline. */
+export function baseFailingCheckers(baseline: BaselineReport | undefined): Set<string> {
+  if (!baseline || baseline.error !== undefined) return new Set();
+  return new Set(
+    baseline.checkers
+      .filter((c) => c.verdict === 'fails-on-base' && !(c.newFailingTests && c.newFailingTests.length > 0))
+      .map((c) => c.checker),
+  );
+}
+
+/** The summary without the FAIL results of excluded (base-failing) checkers. */
+export function excludeBaseFailing(summary: CheckSummary, excluded: ReadonlySet<string>): CheckSummary {
+  if (excluded.size === 0) return summary;
+  const results = summary.results.filter((r) => !(r.result === 'FAIL' && excluded.has(r.checker)));
+  return {
+    ...summary,
+    results,
+    failures: results.filter((r) => r.result === 'FAIL').length,
+    total: results.length,
+  };
+}
+
+/** Failure signature over the lane-owned failures; falls back to the full signature when the
+ *  filter leaves none, so a failing CHECK never gets an empty signature. */
+export function stuckSignature(summary: CheckSummary, excluded: ReadonlySet<string>): string {
+  const target = excludeBaseFailing(summary, excluded);
+  return failureSignature(target.failures > 0 ? target : summary);
+}
+
 export async function checkPhase(opts: Parameters<typeof checkPhaseImpl>[0]): Promise<CheckPhaseResult> {
   return withLifecycle(
     {
@@ -392,6 +421,9 @@ async function checkPhaseImpl(opts: {
     };
   }
 
+  const baseFailing = baseFailingCheckers(baseline);
+  if (baseFailing.size > 0) log('check', `dropping base-failing checkers from rework: ${[...baseFailing].join(', ')}`);
+
   // Cross-run stuck (#740): round one already reproduces the exact failure a
   // prior run parked on. Skip the rework loop entirely rather than re-burning
   // a full budget against a root cause nothing has fixed since — a watchdog
@@ -400,7 +432,8 @@ async function checkPhaseImpl(opts: {
   if (
     summary.failures > 0 &&
     priorFailureSignature !== undefined &&
-    failureSignature(summary) === priorFailureSignature
+    (stuckSignature(summary, baseFailing) === priorFailureSignature ||
+      failureSignature(summary) === priorFailureSignature)
   ) {
     const failingChecks = failingCheckerNames(summary);
     log(
@@ -423,8 +456,13 @@ async function checkPhaseImpl(opts: {
   let noProgressStreak = 0;
 
   while (summary.failures > 0 && reworkRounds < maxRounds) {
+    const target = excludeBaseFailing(summary, baseFailing);
+    if (target.failures === 0) {
+      log('check', `only base-failing checkers remain (${failingCheckerNames(summary).join(', ')}) — stopping rework`);
+      break;
+    }
     reworkRounds++;
-    const signatureBefore = failureSignature(summary);
+    const signatureBefore = stuckSignature(summary, baseFailing);
     const failingChecks = failingCheckerNames(summary);
     const evidence = testFailureEvidence(summary);
 
@@ -434,7 +472,7 @@ async function checkPhaseImpl(opts: {
       issue,
       worktree,
       specPath,
-      summary,
+      summary: target,
       constitution,
       router,
       log,
@@ -468,7 +506,7 @@ async function checkPhaseImpl(opts: {
     // signature is not evidence of a stuck worker — leave the streak untouched
     // (neither advanced nor reset) rather than treat a provider outage as no-progress (#642).
     if (modelCompleted) {
-      if (summary.failures > 0 && failureSignature(summary) === signatureBefore) {
+      if (summary.failures > 0 && stuckSignature(summary, baseFailing) === signatureBefore) {
         noProgressStreak++;
       } else {
         noProgressStreak = 0;
@@ -520,7 +558,7 @@ async function checkPhaseImpl(opts: {
     summary,
     reworkRounds,
     stuck,
-    failureSignature: summary.failures > 0 ? failureSignature(summary) : undefined,
+    failureSignature: summary.failures > 0 ? stuckSignature(summary, baseFailing) : undefined,
     ...(baseline ? { baseline } : {}),
   };
 }
