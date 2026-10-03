@@ -24,7 +24,10 @@ import type { Environment, Workspace } from './ports.js';
 
 vi.mock('../phases/plan.js', () => ({ planPhase: vi.fn() }));
 vi.mock('../phases/build.js', () => ({ buildPhase: vi.fn() }));
-vi.mock('../phases/check.js', () => ({ checkPhase: vi.fn() }));
+vi.mock('../phases/check.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  checkPhase: vi.fn(),
+}));
 vi.mock('../phases/ship.js', () => ({ shipPhase: vi.fn() }));
 
 const { planPhase } = await import('../phases/plan.js');
@@ -1165,5 +1168,68 @@ describe('runIssue — PR classifier gate (#1724)', () => {
     await runIssue(baseRequest({ localOnly: true, prClassifier: classifier }), basePolicy(), t.ports);
     expect(t.readReviewFloorChanges).not.toHaveBeenCalled();
     expect(t.addLabels).not.toHaveBeenCalled();
+  });
+});
+
+describe('runIssue — environment release (#1928)', () => {
+  const ENV = {
+    baseSha: 'abc1234567890def',
+    failingChecks: ['tests', 'lint'],
+    logPaths: ['/logs/a.log', '/logs/check-base'],
+  };
+  const arrange = (request: Partial<RunRequest> = {}, createComment = vi.fn().mockResolvedValue({})) => {
+    vi.mocked(checkPhase).mockResolvedValue({
+      passed: false,
+      summary: CHECK_SUMMARY,
+      reworkRounds: 0,
+      environment: ENV,
+      failureSignature: 'sig',
+    });
+    const log = vi.fn();
+    const reworkHistory = {
+      priorSignature: vi.fn().mockResolvedValue(undefined),
+      record: vi.fn().mockResolvedValue(undefined),
+      clear: vi.fn().mockResolvedValue(undefined),
+    };
+    const ports = basePorts({
+      events: () => log,
+      octokit: { rest: { issues: { createComment } } } as never,
+      reworkHistory: reworkHistory as never,
+    });
+    return { log, createComment, reworkHistory, run: () => runIssue(baseRequest(request), basePolicy(), ports) };
+  };
+  const kinds = (log: ReturnType<typeof vi.fn>) => log.mock.calls.map((c) => c[0]);
+
+  it('returns a released outcome, posts one comment and emits environment-released', async () => {
+    const { run, log, createComment, reworkHistory } = arrange();
+    const outcome = await run();
+    expect(outcome).toMatchObject({
+      state: 'released',
+      reason: 'environment',
+      reworkRounds: 0,
+      baseSha: ENV.baseSha,
+      failingChecks: ENV.failingChecks,
+      failureSignature: 'sig',
+    });
+    expect(createComment).toHaveBeenCalledTimes(1);
+    const body = createComment.mock.calls[0][0].body as string;
+    for (const needle of ['tests', 'lint', ENV.baseSha, '/logs/a.log', '/logs/check-base']) {
+      expect(body).toContain(needle);
+    }
+    expect(kinds(log)).toContain('environment-released');
+    for (const parkKind of ['fail', 'escalate', 'held']) expect(kinds(log)).not.toContain(parkKind);
+    expect(reworkHistory.record).not.toHaveBeenCalled();
+  });
+
+  it('posts no comment on a local-only run', async () => {
+    const { run, createComment } = arrange({ localOnly: true });
+    expect(await run()).toMatchObject({ state: 'released' });
+    expect(createComment).not.toHaveBeenCalled();
+  });
+
+  it('logs environment_warning and still releases when the comment fails', async () => {
+    const { run, log } = arrange({}, vi.fn().mockRejectedValue(new Error('403')));
+    expect(await run()).toMatchObject({ state: 'released' });
+    expect(kinds(log)).toContain('environment_warning');
   });
 });

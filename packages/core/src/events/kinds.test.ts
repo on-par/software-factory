@@ -180,6 +180,12 @@ describe('skipped-already-closed classification (#681)', () => {
   });
 });
 
+describe('environment-released (#1928)', () => {
+  it('is a terminal warn that is not a park', () => {
+    expect(EVENT_TRAITS['environment-released']).toEqual({ severity: 'warn', isPark: false, isTerminal: true });
+  });
+});
+
 describe('lane-paused', () => {
   it('is registered in EVENT_TRAITS', () => {
     expect(Object.hasOwn(EVENT_TRAITS, 'lane-paused')).toBe(true);
