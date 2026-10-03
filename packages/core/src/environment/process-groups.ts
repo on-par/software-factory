@@ -1,6 +1,16 @@
 // src/environment/process-groups.ts — Kill a detached child's whole process group
 // (SIGTERM -> grace -> SIGKILL), and track pgids for a lane so terminal-state
-// cleanup can sweep every group it ever spawned.
+// cleanup can sweep every group it ever spawned. On win32 there are no POSIX
+// groups, so the tree is killed with `taskkill /T` (graceful, then `/F`).
+import { execFile } from 'node:child_process';
+
+export interface TaskkillResult {
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+export type TaskkillFn = (args: readonly string[]) => Promise<TaskkillResult>;
 
 export interface KillProcessGroupOptions {
   /** Milliseconds to wait after SIGTERM before escalating to SIGKILL. Default 5000. */
@@ -8,6 +18,10 @@ export interface KillProcessGroupOptions {
   killFn?: (pid: number, signal: NodeJS.Signals | 0) => void;
   isAliveFn?: (pgid: number) => boolean;
   sleepFn?: (ms: number) => Promise<void>;
+  /** Defaults to `process.platform`. `'win32'` kills the tree with taskkill. */
+  platform?: NodeJS.Platform;
+  /** Defaults to `defaultTaskkill`. Only used on win32. */
+  taskkillFn?: TaskkillFn;
 }
 
 export interface KillOutcome {
@@ -25,13 +39,74 @@ const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => set
 /** Signal-0 probe against the process *group* leader: `process.kill(-pgid, 0)`.
  *  ESRCH -> false (dead); EPERM -> true (alive, just not ours); mirrors
  *  `defaultIsPidAlive` in environment/index.ts. */
-export function defaultIsProcessGroupAlive(pgid: number): boolean {
+export function defaultIsProcessGroupAlive(pgid: number, platform: NodeJS.Platform = process.platform): boolean {
   try {
-    process.kill(-pgid, 0);
+    // win32 has no process groups: probe the root pid itself.
+    process.kill(platform === 'win32' ? pgid : -pgid, 0);
     return true;
   } catch (err: any) {
     return err?.code === 'EPERM';
   }
+}
+
+/** Runs `taskkill` without a shell. Always resolves; a non-numeric error code
+ *  (e.g. ENOENT) becomes `exitCode: null`. */
+export function defaultTaskkill(args: readonly string[]): Promise<TaskkillResult> {
+  return new Promise((resolve) => {
+    execFile('taskkill', [...args], { windowsHide: true }, (err: any, stdout, stderr) => {
+      const out = String(stdout ?? '');
+      const errOut = String(stderr ?? '');
+      if (!err) {
+        resolve({ exitCode: 0, stdout: out, stderr: errOut });
+        return;
+      }
+      resolve({
+        exitCode: typeof err.code === 'number' ? err.code : null,
+        stdout: out,
+        stderr: errOut || String(err.message ?? err),
+      });
+    });
+  });
+}
+
+function classifyTaskkill(r: TaskkillResult): 'sent' | 'dead' | 'not-ours' {
+  const text = `${r.stdout}${r.stderr}`;
+  if (r.exitCode === 128 || /not found/i.test(text)) return 'dead';
+  if (/access is denied/i.test(text)) return 'not-ours';
+  return 'sent';
+}
+
+/** win32 tree kill: `taskkill /T` -> grace -> `taskkill /T /F`. Needs the root
+ *  pid alive to find descendants. Never throws. */
+async function killProcessTreeWin32(
+  pid: number,
+  graceMs: number,
+  isAliveFn: (pgid: number) => boolean,
+  sleepFn: (ms: number) => Promise<void>,
+  taskkillFn: TaskkillFn,
+): Promise<KillOutcome> {
+  const run = async (args: string[]): Promise<TaskkillResult> => {
+    try {
+      return await taskkillFn(args);
+    } catch (err) {
+      return { exitCode: null, stdout: '', stderr: String(err) };
+    }
+  };
+
+  const graceful = classifyTaskkill(await run(['/T', '/PID', String(pid)]));
+  if (graceful === 'dead') return { pgid: pid, terminated: true, forced: false };
+  if (graceful === 'not-ours') return { pgid: pid, terminated: false, forced: false };
+
+  const deadline = Date.now() + graceMs;
+  while (Date.now() < deadline) {
+    if (!isAliveFn(pid)) return { pgid: pid, terminated: true, forced: false };
+    await sleepFn(Math.min(POLL_INTERVAL_MS, Math.max(deadline - Date.now(), 0)));
+  }
+
+  if (!isAliveFn(pid)) return { pgid: pid, terminated: true, forced: false };
+
+  await run(['/T', '/F', '/PID', String(pid)]);
+  return { pgid: pid, terminated: !isAliveFn(pid), forced: true };
 }
 
 /** SIGTERM the whole process group led by `pgid`, wait up to `graceMs` for it
@@ -40,8 +115,13 @@ export function defaultIsProcessGroupAlive(pgid: number): boolean {
 export async function killProcessGroup(pgid: number, opts: KillProcessGroupOptions = {}): Promise<KillOutcome> {
   const graceMs = opts.graceMs ?? 5000;
   const killFn = opts.killFn ?? ((pid, signal) => process.kill(pid, signal));
-  const isAliveFn = opts.isAliveFn ?? defaultIsProcessGroupAlive;
+  const platform = opts.platform ?? process.platform;
+  const isAliveFn = opts.isAliveFn ?? ((id: number) => defaultIsProcessGroupAlive(id, platform));
   const sleepFn = opts.sleepFn ?? defaultSleep;
+
+  if (platform === 'win32') {
+    return killProcessTreeWin32(pgid, graceMs, isAliveFn, sleepFn, opts.taskkillFn ?? defaultTaskkill);
+  }
 
   type SignalOutcome = 'sent' | 'dead' | 'not-ours';
 
@@ -103,7 +183,7 @@ export class ProcessGroupTracker {
    *  outcomes for the ones that were actually killed. Idempotent: a second
    *  call (nothing left tracked) resolves to `[]`. */
   async killAll(opts: KillProcessGroupOptions = {}): Promise<KillOutcome[]> {
-    const isAliveFn = opts.isAliveFn ?? defaultIsProcessGroupAlive;
+    const isAliveFn = opts.isAliveFn ?? ((pgid: number) => defaultIsProcessGroupAlive(pgid, opts.platform));
     const pgids = this.pgids;
     this.tracked.clear();
 
