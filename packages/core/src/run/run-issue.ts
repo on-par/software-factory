@@ -95,6 +95,8 @@ export interface RunRequest {
    *  shipPhase's own surface already takes plain path strings, not a path-resolution port). */
   eventsFile?: string;
   logsDir?: string;
+  /** state/baseline-cache.json (#1926), forwarded to checkPhase. */
+  baselineCachePath?: string;
 }
 
 type LogFn = (
@@ -591,6 +593,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       laneId: request.lane,
       onActivity: ports.onActivity,
       logsDir: request.logsDir,
+      baselineCachePath: request.baselineCachePath,
     });
     checkSummary = check.summary;
     reworkRounds = check.reworkRounds;
