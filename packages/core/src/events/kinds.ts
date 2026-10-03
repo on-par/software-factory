@@ -58,6 +58,7 @@ export type EventKind =
   | 'environment_release'
   | 'environment_release_failed'
   | 'environment_warning'
+  | 'environment-released'
   | 'escalate'
   | 'evidence'
   | 'fail'
@@ -180,9 +181,12 @@ export interface EventTraits {
   laneStatus?: LaneStatus;
 }
 
-/** Payload of a `lane-paused` event (#1906/#1916): the lane circuit breaker
- *  stopped `lane` after `firstIssue` and then `secondIssue` parked in a row
- *  with the same non-empty failure `signature`. */
+/** Payload of a `lane-paused` event. Two triggers: the lane circuit breaker
+ *  (#1906/#1916) stopped `lane` after `firstIssue` and then `secondIssue` parked in
+ *  a row with the same non-empty failure `signature`; or CHECK found every failing
+ *  checker also failing on the base (#1928, `cause: 'environment'`), where
+ *  `firstIssue === secondIssue` and `signature` is the CHECK failure signature
+ *  (`''` when missing). */
 export interface LanePausedPayload {
   lane: string;
   /** `failureSignature()` shared by both parks. */
@@ -191,6 +195,10 @@ export interface LanePausedPayload {
   failingChecks: string[];
   firstIssue: number;
   secondIssue: number;
+  /** Absent for the signature breaker (#1928). */
+  cause?: 'environment';
+  /** Base SHA the failing checkers also failed on; set when `cause` is 'environment'. */
+  baseSha?: string;
 }
 
 /** Every existing `EventKind`, classified once. New kinds must be added here —
@@ -245,6 +253,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   environment_release: { severity: 'info', isPark: false, isTerminal: false },
   environment_release_failed: { severity: 'info', isPark: false, isTerminal: false },
   environment_warning: { severity: 'warn', isPark: false, isTerminal: false },
+  'environment-released': { severity: 'warn', isPark: false, isTerminal: true },
   escalate: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },
   evidence: { severity: 'info', isPark: false, isTerminal: false },
   fail: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },

@@ -1456,6 +1456,21 @@ export class LaneParkError extends Error {
   }
 }
 
+/** CHECK found every failing checker also failing on the base SHA (#1928): the issue is
+ *  released to queued (not parked) and the lane pauses. */
+export class LaneEnvironmentPauseError extends Error {
+  readonly baseSha: string;
+  readonly failingChecks: string[];
+  readonly failureSignature?: string;
+
+  constructor(message: string, failure: { baseSha: string; failingChecks: string[]; failureSignature?: string }) {
+    super(message);
+    this.baseSha = failure.baseSha;
+    this.failingChecks = failure.failingChecks;
+    if (failure.failureSignature !== undefined) this.failureSignature = failure.failureSignature;
+  }
+}
+
 /** Resolves the stable lane URL a build/check agent should use, by probing whether
  *  a factory proxy (started by `factory run`/`supervise` or `factory proxy`) is
  *  currently alive for the configured domain. Never throws — an absent/dead proxy
@@ -1672,6 +1687,7 @@ export async function shipIssue(
   // RunOutcome's parked variant carries only the ParkReason enum, not free text.
   const TERMINAL_EVENT_KINDS = new Set<EventKind>([
     'ready',
+    'environment-released',
     'fail',
     'escalate',
     'held',
@@ -1958,6 +1974,14 @@ export async function shipIssue(
       console.log(chalk.green(`✅ Issue #${issueNum} → ${terminalMessage ?? 'ready'}`));
     }
     return outcome.branch;
+  }
+
+  if (outcome.state === 'released') {
+    throw new LaneEnvironmentPauseError(terminalMessage ?? 'environment failure on base', {
+      baseSha: outcome.baseSha,
+      failingChecks: outcome.failingChecks,
+      failureSignature: outcome.failureSignature,
+    });
   }
 
   const reason: ParkReason = outcome.state === 'escalated' ? 'escalate' : outcome.reason;
@@ -3932,6 +3956,30 @@ export async function runLane(
         );
         await settle(issue, 'done');
         continue;
+      }
+      if (err instanceof LaneEnvironmentPauseError) {
+        // The base is broken, not the issue (#1928): release to queued (never parked),
+        // pause the lane whatever laneBreakerThreshold is, and stop claiming.
+        streak = null;
+        await reapWorktree(issue).catch(() => {});
+        await settle(issue, 'queued');
+        const payload: LanePausedPayload = {
+          lane,
+          signature: err.failureSignature ?? '',
+          failingChecks: err.failingChecks,
+          firstIssue: issue,
+          secondIssue: issue,
+          cause: 'environment',
+          baseSha: err.baseSha,
+        };
+        emitEvent(
+          paths.events,
+          'lane-paused',
+          lane,
+          `lane '${lane}' paused: #${issue} failed only on checkers that also fail on base ${err.baseSha.slice(0, 8)} (${err.failingChecks.join(', ')}); #${issue} released to queued`,
+          { lane, lanePaused: payload },
+        );
+        return;
       }
       const reason = parkReasonFor(err);
       // Terminal reason events (escalate/timeout/fail/conflict) are emitted exactly

@@ -15,7 +15,13 @@ import type { SandboxPolicy } from '../sandbox/index.js';
 import type { BaselineReport } from '../checkers/baseline.js';
 import { BaselineCache } from '../checkers/baseline-cache.js';
 import type { CheckSummary, Constitution, ReworkInfo } from '../types/index.js';
-import { checkPhase, isEnvironmentFailure } from './check.js';
+import {
+  checkPhase,
+  type EnvironmentFailure,
+  environmentLogPaths,
+  isEnvironmentFailure,
+  renderEnvironmentReleaseComment,
+} from './check.js';
 
 const models: ModelsConfig = {
   version: 1,
@@ -157,12 +163,17 @@ describe('rework cause environment (#1927)', () => {
     expect(isEnvironmentFailure(summaryOf(['tests', 'PASS']), reportOf(['tests', 'fails-on-base']))).toBe(false);
   });
 
-  const runWithVerdict = async (verdict: 'fails-on-base' | 'clean-on-base') => {
+  const runWithVerdict = async (
+    verdict: 'fails-on-base' | 'clean-on-base',
+    extra: { logsDir?: string; priorFailureSignature?: string } = {},
+  ) => {
     const { worktree, specPath } = await makeFailingWorktree();
-    const { router } = makeRouter();
+    const { router, stub } = makeRouter();
     const order: string[] = [];
     const reworks: ReworkInfo[] = [];
-    await checkPhase({
+    const kinds: string[] = [];
+    const result = await checkPhase({
+      ...extra,
       issue: 77,
       worktree,
       specPath,
@@ -170,10 +181,11 @@ describe('rework cause environment (#1927)', () => {
       constitution: null,
       maxReworkRounds: 1,
       diffBase: 'abc1234567',
-      log: (type, _msg, extra) => {
-        if (type === 'rework' && extra?.rework) {
+      log: (type, _msg, logExtra) => {
+        kinds.push(type);
+        if (type === 'rework' && logExtra?.rework) {
           order.push('rework');
-          reworks.push(extra.rework);
+          reworks.push(logExtra.rework);
         }
       },
       runBaseline: async (o) => {
@@ -186,14 +198,92 @@ describe('rework cause environment (#1927)', () => {
         } as BaselineReport;
       },
     });
-    return { order, reworks };
+    return { order, reworks, result, kinds, stub };
   };
 
-  it('stamps environment on rework events, decided before the loop', { timeout: 120_000 }, async () => {
-    const { order, reworks } = await runWithVerdict('fails-on-base');
-    expect(reworks.length).toBeGreaterThan(0);
-    expect(reworks.every((r) => r.cause === 'environment')).toBe(true);
-    expect(order.indexOf('baseline')).toBeLessThan(order.indexOf('rework'));
+  it(
+    'skips rework and returns an environment failure when every failing checker fails on base (#1928)',
+    { timeout: 120_000 },
+    async () => {
+      const { reworks, result, stub } = await runWithVerdict('fails-on-base');
+      expect(reworks).toEqual([]);
+      expect(stub.calls).toHaveLength(0);
+      expect(result.reworkRounds).toBe(0);
+      expect(result.passed).toBe(false);
+      expect(result.environment).toEqual({
+        baseSha: 'abc1234567',
+        failingChecks: expect.any(Array),
+        logPaths: [],
+      });
+      expect(result.environment?.failingChecks.length).toBeGreaterThan(0);
+    },
+  );
+
+  it(
+    'includes the round-1 full-output log and the base log dir in logPaths (#1928)',
+    { timeout: 120_000 },
+    async () => {
+      const logsDir = await mkdtemp(join(tmpdir(), 'check-env-logs-'));
+      tempDirs.add(logsDir);
+      const { result } = await runWithVerdict('fails-on-base', { logsDir });
+      const paths = result.environment?.logPaths ?? [];
+      expect(paths.some((p) => p.startsWith(join(logsDir, 'issue-77', 'check-r0')))).toBe(true);
+      expect(paths).toContain(join(logsDir, 'issue-77', 'check-base'));
+    },
+  );
+
+  it('environment wins over a matching priorFailureSignature (#1928)', { timeout: 120_000 }, async () => {
+    const first = await runWithVerdict('fails-on-base');
+    const { result, kinds } = await runWithVerdict('fails-on-base', {
+      priorFailureSignature: first.result.failureSignature,
+    });
+    expect(kinds).not.toContain('held');
+    expect(result.crossRunStuck).toBeUndefined();
+    expect(result.environment).toBeDefined();
+  });
+
+  describe('environmentLogPaths / renderEnvironmentReleaseComment (#1928)', () => {
+    const failing = (checker: string, details: string) => ({ checker, result: 'FAIL' as const, details });
+    const sum = (results: CheckSummary['results']): CheckSummary => ({
+      results,
+      failures: results.filter((r) => r.result === 'FAIL').length,
+      passes: 0,
+      skips: 0,
+      total: results.length,
+    });
+
+    it('collects full-output paths from FAIL results, dedupes, ignores PASS, appends the base dir', () => {
+      const summary = sum([
+        failing('tests', 'exit 1\nfull output: /logs/a.log'),
+        failing('lint', 'x\nfull output: /logs/b.log\nfull output: /logs/a.log'),
+        { checker: 'types', result: 'PASS', details: 'full output: /logs/pass.log' },
+      ]);
+      expect(environmentLogPaths(summary, '/logs/check-base')).toEqual([
+        '/logs/a.log',
+        '/logs/b.log',
+        '/logs/check-base',
+      ]);
+      expect(environmentLogPaths(summary, undefined)).toEqual(['/logs/a.log', '/logs/b.log']);
+    });
+
+    it('renders checkers, the full SHA and every path', () => {
+      const failure: EnvironmentFailure = {
+        baseSha: 'abc1234567890def',
+        failingChecks: ['tests', 'lint'],
+        logPaths: ['/logs/a.log', '/logs/check-base'],
+      };
+      const body = renderEnvironmentReleaseComment(failure);
+      for (const needle of ['`tests`', '`lint`', 'abc1234567890def', '/logs/a.log', '/logs/check-base']) {
+        expect(body).toContain(needle);
+      }
+      expect(body).not.toContain('No log paths were recorded');
+    });
+
+    it('says so when no log paths were recorded', () => {
+      expect(renderEnvironmentReleaseComment({ baseSha: 'abc', failingChecks: ['tests'], logPaths: [] })).toContain(
+        'No log paths were recorded (logsDir not set).',
+      );
+    });
   });
 
   it('keeps factory-fault when the base is clean', { timeout: 120_000 }, async () => {

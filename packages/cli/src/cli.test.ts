@@ -39,6 +39,7 @@ import {
   LandFailureError,
   laneQueueDeps,
   landOpenPullRequest,
+  LaneEnvironmentPauseError,
   LaneParkError,
   listOpenFactoryPRs,
   main,
@@ -3544,6 +3545,56 @@ describe('cli', () => {
         expect(h.shipped).toEqual([1, 2, 3, 4]);
         expect(kinds(h.events, 'lane-paused')).toHaveLength(0);
       });
+    });
+
+    describe('environment pause (#1928)', () => {
+      it.each([0, undefined])(
+        'releases the issue to queued and pauses the lane (threshold %s)',
+        async (laneBreakerThreshold) => {
+          const shipped: number[] = [];
+          const events: any[] = [];
+          const released: any[] = [];
+          const queue = [1, 2];
+          const claimNext = vi.fn(async () => buildClaim(queue.shift()));
+          await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
+            claimNext,
+            ship: async (issue: number) => {
+              shipped.push(issue);
+              throw new LaneEnvironmentPauseError('base broken', {
+                baseSha: 'abc1234567890def',
+                failingChecks: ['tests'],
+                failureSignature: 'sig',
+              });
+            },
+            waitMerge: async () => {},
+            releaseIssue: async (issue: number, outcome: string) => {
+              released.push([issue, outcome]);
+            },
+            pathExists: () => false,
+            emitEvent: ((...args: any[]) => {
+              events.push(args);
+            }) as any,
+            laneBreakerThreshold,
+          });
+
+          const of = (kind: string) => events.filter((e) => e[1] === kind);
+          expect(shipped).toEqual([1]);
+          expect(released).toEqual([[1, 'queued']]);
+          expect(of('parked')).toHaveLength(0);
+          expect(of('lane-done')).toHaveLength(0);
+          expect(claimNext).toHaveBeenCalledTimes(1);
+          expect(of('lane-paused')).toHaveLength(1);
+          expect(of('lane-paused')[0][4].lanePaused).toEqual({
+            lane: 'app',
+            signature: 'sig',
+            failingChecks: ['tests'],
+            firstIssue: 1,
+            secondIssue: 1,
+            cause: 'environment',
+            baseSha: 'abc1234567890def',
+          });
+        },
+      );
     });
 
     it('reaps the parked worktree exactly once when ship throws a LaneParkError', async () => {
