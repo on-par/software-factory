@@ -197,7 +197,7 @@ export type RepoSlug = string;
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 /** Best-effort classification of why a rework round happened (#386). */
-export type ReworkCause = 'factory-fault' | 'direction-change' | 'external';
+export type ReworkCause = 'factory-fault' | 'direction-change' | 'external' | 'environment';
 
 /** Cause bucket for a retry attempt (#419): checker = rework round after failed
  *  checks, failover = provider/quota failover, timeout = runaway agent,

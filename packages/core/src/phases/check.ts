@@ -139,6 +139,16 @@ function classifyReworkCause(opts: {
   return 'factory-fault';
 }
 
+/** True when every round-1 failing checker also fails on the base SHA (#1927): the failure
+ *  belongs to the environment/base, not the lane. False without a usable baseline, on any
+ *  clean-on-base or not-run failing checker, or when nothing failed. */
+export function isEnvironmentFailure(summary: CheckSummary, baseline: BaselineReport | undefined): boolean {
+  if (!baseline || baseline.error !== undefined) return false;
+  const failing = failingCheckerNames(summary);
+  if (failing.length === 0) return false;
+  return failing.every((name) => baseline.checkers.some((c) => c.checker === name && c.verdict === 'fails-on-base'));
+}
+
 export async function checkPhase(opts: Parameters<typeof checkPhaseImpl>[0]): Promise<CheckPhaseResult> {
   return withLifecycle(
     {
@@ -299,6 +309,10 @@ async function checkPhaseImpl(opts: {
     }
   }
 
+  // Decided before the rework loop from the single pre-loop baseline (#1927).
+  const environmentCause = isEnvironmentFailure(summary, baseline);
+  if (environmentCause) log('check', 'every failing checker also fails on base — rework cause=environment');
+
   // Cross-run stuck (#740): round one already reproduces the exact failure a
   // prior run parked on. Skip the rework loop entirely rather than re-burning
   // a full budget against a root cause nothing has fixed since — a watchdog
@@ -356,7 +370,9 @@ async function checkPhaseImpl(opts: {
       runId,
     });
 
-    const cause = classifyReworkCause({ steering, failovers, failureReason });
+    const cause: ReworkCause = environmentCause
+      ? 'environment'
+      : classifyReworkCause({ steering, failovers, failureReason });
     log(
       'rework',
       `round ${reworkRounds}/${maxRounds}: ${summary.failures} failing (${failingChecks.join(', ')}) — cause=${cause}`,
