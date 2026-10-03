@@ -16,11 +16,14 @@ import type { BaselineReport } from '../checkers/baseline.js';
 import { BaselineCache } from '../checkers/baseline-cache.js';
 import type { CheckSummary, Constitution, ReworkInfo } from '../types/index.js';
 import {
+  baseFailingCheckers,
   checkPhase,
   type EnvironmentFailure,
+  excludeBaseFailing,
   environmentLogPaths,
   isEnvironmentFailure,
   renderEnvironmentReleaseComment,
+  stuckSignature,
 } from './check.js';
 
 const models: ModelsConfig = {
@@ -111,6 +114,198 @@ const tempDirs = new Set<string>();
 afterEach(async () => {
   await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
   tempDirs.clear();
+});
+
+describe('partial base overlap (#1929)', () => {
+  const summaryOf = (...results: Array<[string, 'PASS' | 'FAIL']>): CheckSummary => ({
+    results: results.map(([checker, result]) => ({
+      checker,
+      result,
+      details: result === 'FAIL' ? `${checker === 'tests' ? 'a' : 'b'} broke` : '',
+    })),
+    failures: results.filter(([, r]) => r === 'FAIL').length,
+    passes: results.filter(([, r]) => r === 'PASS').length,
+    skips: 0,
+    total: results.length,
+  });
+  const reportOf = (...entries: Array<[string, 'clean-on-base' | 'fails-on-base' | 'not-run']>): BaselineReport => ({
+    baseSha: 'abc1234567',
+    checkers: entries.map(([checker, verdict]) => ({ checker, verdict })),
+  });
+  const partialBaseline = async (o: { baseSha: string }) =>
+    ({
+      baseSha: o.baseSha,
+      checkers: [
+        { checker: 'tests', verdict: 'fails-on-base', baseResult: 'FAIL' },
+        { checker: 'lint', verdict: 'clean-on-base', baseResult: 'PASS' },
+      ],
+    }) as BaselineReport;
+
+  const makePartialWorktree = async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    await writeFile(join(worktree, 'package.json'), JSON.stringify({ scripts: { test: 'exit 1', lint: 'exit 1' } }));
+    return { worktree, specPath };
+  };
+
+  describe('baseFailingCheckers', () => {
+    it('returns fails-on-base checkers only', () => {
+      expect(baseFailingCheckers(reportOf(['tests', 'fails-on-base'], ['lint', 'clean-on-base']))).toEqual(
+        new Set(['tests']),
+      );
+    });
+
+    it('is empty without a usable baseline, or for not-run and clean-on-base entries', () => {
+      expect(baseFailingCheckers(undefined).size).toBe(0);
+      expect(baseFailingCheckers({ baseSha: 'abc1234567', checkers: [], error: 'boom' }).size).toBe(0);
+      expect(baseFailingCheckers(reportOf(['tests', 'not-run'], ['lint', 'clean-on-base'])).size).toBe(0);
+    });
+
+    it('keeps a checker with new failing tests, and includes one with an empty list', () => {
+      const report = (newFailingTests: string[]): BaselineReport => ({
+        baseSha: 'abc1234567',
+        checkers: [{ checker: 'tests', verdict: 'fails-on-base', newFailingTests }],
+      });
+      expect(baseFailingCheckers(report(['x'])).size).toBe(0);
+      expect(baseFailingCheckers(report([]))).toEqual(new Set(['tests']));
+    });
+  });
+
+  describe('excludeBaseFailing', () => {
+    it('drops only the excluded FAIL result and recomputes failures and total', () => {
+      const out = excludeBaseFailing(
+        summaryOf(['tests', 'FAIL'], ['lint', 'FAIL'], ['types', 'PASS']),
+        new Set(['tests']),
+      );
+      expect(out.results.map((r) => r.checker)).toEqual(['lint', 'types']);
+      expect(out.failures).toBe(1);
+      expect(out.total).toBe(2);
+      expect(out.passes).toBe(1);
+    });
+
+    it('keeps PASS results of an excluded checker', () => {
+      const out = excludeBaseFailing(summaryOf(['tests', 'PASS'], ['lint', 'FAIL']), new Set(['tests']));
+      expect(out.results.map((r) => r.checker)).toEqual(['tests', 'lint']);
+    });
+
+    it('returns the same reference when the set is empty', () => {
+      const summary = summaryOf(['tests', 'FAIL']);
+      expect(excludeBaseFailing(summary, new Set())).toBe(summary);
+    });
+  });
+
+  describe('stuckSignature', () => {
+    const both = summaryOf(['tests', 'FAIL'], ['lint', 'FAIL']);
+
+    it('excludes base-failing checkers and keeps the rest', () => {
+      const sig = stuckSignature(both, new Set(['tests']));
+      expect(sig).toContain('lint:');
+      expect(sig).not.toContain('tests:');
+    });
+
+    it('is the full signature with an empty set', () => {
+      const sig = stuckSignature(both, new Set());
+      expect(sig).toContain('lint:');
+      expect(sig).toContain('tests:');
+    });
+
+    it('falls back to the full non-empty signature when only base-failing checkers fail', () => {
+      const sig = stuckSignature(summaryOf(['tests', 'FAIL']), new Set(['tests']));
+      expect(sig).toContain('tests:');
+    });
+  });
+
+  const heldRun = async (priorFailureSignature: string) => {
+    const { worktree, specPath } = await makePartialWorktree();
+    const { router, stub } = makeRouter();
+    const result = await checkPhase({
+      issue: 1929,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      maxReworkRounds: 1,
+      diffBase: 'abc1234567',
+      priorFailureSignature,
+      log: () => {},
+      runBaseline: partialBaseline,
+    });
+    return { result, stub };
+  };
+
+  it('cross-run held matches the filtered or the full unfiltered signature', { timeout: 120_000 }, async () => {
+    const first = await heldRun('never-matches');
+    expect(first.result.failureSignature).toContain('lint:');
+    expect(first.result.failureSignature).not.toContain('tests:');
+
+    const filtered = await heldRun(first.result.failureSignature as string);
+    expect(filtered.result.crossRunStuck).toBe(true);
+    expect(filtered.stub.calls).toHaveLength(0);
+
+    const full = stuckSignature(first.result.summary, new Set());
+    expect(full).toContain('tests:');
+    const unfiltered = await heldRun(full);
+    expect(unfiltered.result.crossRunStuck).toBe(true);
+    expect(unfiltered.stub.calls).toHaveLength(0);
+  });
+
+  it('rework prompt and signature target only the lane-owned checker', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makePartialWorktree();
+    const { router, stub } = makeRouter();
+    const seen: string[][] = [];
+    const result = await checkPhase({
+      issue: 1929,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      maxReworkRounds: 1,
+      diffBase: 'abc1234567',
+      log: () => {},
+      runBaseline: async (o) => {
+        seen.push(o.failing.filter((r) => r.result === 'FAIL').map((r) => r.checker));
+        return partialBaseline(o);
+      },
+    });
+    expect(seen[0]).toEqual(expect.arrayContaining(['tests', 'lint']));
+    expect(stub.calls.length).toBeGreaterThanOrEqual(1);
+    expect(result.reworkRounds).toBe(1);
+    expect(result.environment).toBeUndefined();
+    expect(stub.calls[0].prompt).toContain('### lint');
+    expect(stub.calls[0].prompt).not.toContain('### tests');
+    expect(result.failureSignature).toContain('lint:');
+    expect(result.failureSignature).not.toContain('tests:');
+  });
+
+  it('stops rework when only base-failing checkers remain', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makePartialWorktree();
+    let calls = 0;
+    const fakeRouter = {
+      run: async () => {
+        calls++;
+        await writeFile(
+          join(worktree, 'package.json'),
+          JSON.stringify({ scripts: { test: 'exit 1', lint: 'exit 0' } }),
+        );
+        return { model: 'fake-model', output: 'done', exitCode: 0, attempts: [] };
+      },
+    } as any;
+    const messages: string[] = [];
+    const result = await checkPhase({
+      issue: 1929,
+      worktree,
+      specPath,
+      router: fakeRouter,
+      constitution: null,
+      maxReworkRounds: 2,
+      diffBase: 'abc1234567',
+      log: (_type, msg) => messages.push(msg),
+      runBaseline: partialBaseline,
+    });
+    expect(calls).toBe(1);
+    expect(messages.some((m) => m.includes('only base-failing checkers remain'))).toBe(true);
+    expect(result.passed).toBe(false);
+    expect(result.failureSignature).toContain('tests:');
+  });
 });
 
 describe('rework cause environment (#1927)', () => {
