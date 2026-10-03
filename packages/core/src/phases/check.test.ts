@@ -14,8 +14,8 @@ import { StubModelExecutor } from '../router/stub.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import type { BaselineReport } from '../checkers/baseline.js';
 import { BaselineCache } from '../checkers/baseline-cache.js';
-import type { Constitution, ReworkInfo } from '../types/index.js';
-import { checkPhase } from './check.js';
+import type { CheckSummary, Constitution, ReworkInfo } from '../types/index.js';
+import { checkPhase, isEnvironmentFailure } from './check.js';
 
 const models: ModelsConfig = {
   version: 1,
@@ -105,6 +105,102 @@ const tempDirs = new Set<string>();
 afterEach(async () => {
   await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
   tempDirs.clear();
+});
+
+describe('rework cause environment (#1927)', () => {
+  const summaryOf = (...results: Array<[string, 'PASS' | 'FAIL']>): CheckSummary => ({
+    results: results.map(([checker, result]) => ({ checker, result, details: '' })),
+    failures: results.filter(([, r]) => r === 'FAIL').length,
+    passes: results.filter(([, r]) => r === 'PASS').length,
+    skips: 0,
+    total: results.length,
+  });
+  const reportOf = (...entries: Array<[string, 'clean-on-base' | 'fails-on-base' | 'not-run']>): BaselineReport => ({
+    baseSha: 'abc1234567',
+    checkers: entries.map(([checker, verdict]) => ({ checker, verdict })),
+  });
+
+  it('is true when every failing checker fails on base', () => {
+    expect(isEnvironmentFailure(summaryOf(['tests', 'FAIL']), reportOf(['tests', 'fails-on-base']))).toBe(true);
+    expect(
+      isEnvironmentFailure(
+        summaryOf(['tests', 'FAIL'], ['lint', 'FAIL']),
+        reportOf(['tests', 'fails-on-base'], ['lint', 'fails-on-base']),
+      ),
+    ).toBe(true);
+  });
+
+  it('ignores baseline entries for checkers that did not fail', () => {
+    expect(
+      isEnvironmentFailure(
+        summaryOf(['tests', 'FAIL'], ['lint', 'PASS']),
+        reportOf(['tests', 'fails-on-base'], ['lint', 'clean-on-base']),
+      ),
+    ).toBe(true);
+  });
+
+  it('is false without a usable baseline', () => {
+    expect(isEnvironmentFailure(summaryOf(['tests', 'FAIL']), undefined)).toBe(false);
+    expect(
+      isEnvironmentFailure(summaryOf(['tests', 'FAIL']), { baseSha: 'abc1234567', checkers: [], error: 'boom' }),
+    ).toBe(false);
+  });
+
+  it('is false on partial overlap, not-run, or a missing checker', () => {
+    const failing = summaryOf(['tests', 'FAIL'], ['lint', 'FAIL']);
+    expect(isEnvironmentFailure(failing, reportOf(['tests', 'fails-on-base'], ['lint', 'clean-on-base']))).toBe(false);
+    expect(isEnvironmentFailure(failing, reportOf(['tests', 'fails-on-base'], ['lint', 'not-run']))).toBe(false);
+    expect(isEnvironmentFailure(failing, reportOf(['tests', 'fails-on-base']))).toBe(false);
+  });
+
+  it('is false when nothing failed', () => {
+    expect(isEnvironmentFailure(summaryOf(['tests', 'PASS']), reportOf(['tests', 'fails-on-base']))).toBe(false);
+  });
+
+  const runWithVerdict = async (verdict: 'fails-on-base' | 'clean-on-base') => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router } = makeRouter();
+    const order: string[] = [];
+    const reworks: ReworkInfo[] = [];
+    await checkPhase({
+      issue: 77,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      maxReworkRounds: 1,
+      diffBase: 'abc1234567',
+      log: (type, _msg, extra) => {
+        if (type === 'rework' && extra?.rework) {
+          order.push('rework');
+          reworks.push(extra.rework);
+        }
+      },
+      runBaseline: async (o) => {
+        order.push('baseline');
+        return {
+          baseSha: o.baseSha,
+          checkers: o.failing
+            .filter((r) => r.result === 'FAIL')
+            .map((r) => ({ checker: r.checker, verdict, baseResult: verdict === 'fails-on-base' ? 'FAIL' : 'PASS' })),
+        } as BaselineReport;
+      },
+    });
+    return { order, reworks };
+  };
+
+  it('stamps environment on rework events, decided before the loop', { timeout: 120_000 }, async () => {
+    const { order, reworks } = await runWithVerdict('fails-on-base');
+    expect(reworks.length).toBeGreaterThan(0);
+    expect(reworks.every((r) => r.cause === 'environment')).toBe(true);
+    expect(order.indexOf('baseline')).toBeLessThan(order.indexOf('rework'));
+  });
+
+  it('keeps factory-fault when the base is clean', { timeout: 120_000 }, async () => {
+    const { reworks } = await runWithVerdict('clean-on-base');
+    expect(reworks.length).toBeGreaterThan(0);
+    expect(reworks.every((r) => r.cause === 'factory-fault')).toBe(true);
+  });
 });
 
 describe('checkPhase baseline (#1925)', () => {
