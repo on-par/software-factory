@@ -57,6 +57,7 @@ import {
   resolveEnvironmentAcquirer,
   resolveLaneBaseUrl,
   resolveUsageKnobs,
+  renderLanePausedComment,
   runLane,
   sweepBetweenLaneIssues,
   scaffoldConstitution,
@@ -3452,8 +3453,10 @@ describe('cli', () => {
         const events: any[] = [];
         const released: any[] = [];
         const claimNext = vi.fn(async () => buildClaim(queued.shift()));
+        const commentIssue = vi.fn(async (_issue: number, _body: string) => {});
         const deps = {
           claimNext,
+          commentIssue,
           ship: async (issue: number) => {
             shipped.push(issue);
             const b = behavior[issue];
@@ -3469,7 +3472,7 @@ describe('cli', () => {
             events.push(args);
           }) as any,
         };
-        return { shipped, events, released, claimNext, deps };
+        return { shipped, events, released, claimNext, deps, commentIssue };
       };
       const kinds = (events: any[], kind: string) => events.filter((e) => e[1] === kind);
 
@@ -3490,6 +3493,54 @@ describe('cli', () => {
           [1, 'parked'],
           [2, 'parked'],
         ]);
+      });
+
+      it('posts one pause comment on the second parked issue', async () => {
+        const h = harness({ 1: parkErr('sig-A'), 2: parkErr('sig-A'), 3: parkErr('sig-A') }, [1, 2, 3]);
+        await runLane('app', [], '/repo', 'on-par/software-factory', paths, { ...h.deps, laneBreakerThreshold: 2 });
+
+        expect(h.commentIssue).toHaveBeenCalledTimes(1);
+        const [issue, body] = h.commentIssue.mock.calls[0];
+        expect(issue).toBe(2);
+        expect(body).toContain('#1');
+        expect(body).toContain('`tests`');
+        expect(body).toContain('factory run');
+        expect(body).toContain("'app'");
+        expect(h.commentIssue.mock.calls.some(([i]) => i === 1 || i === 3)).toBe(false);
+      });
+
+      it('posts no pause comment when the lane does not trip', async () => {
+        const differing = harness({ 1: parkErr('sig-A'), 2: parkErr('sig-B') }, [1, 2, 3]);
+        await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
+          ...differing.deps,
+          laneBreakerThreshold: 2,
+        });
+        expect(differing.commentIssue).not.toHaveBeenCalled();
+
+        const off = harness({ 1: parkErr('sig-A'), 2: parkErr('sig-A'), 3: parkErr('sig-A') }, [1, 2, 3]);
+        await runLane('app', [], '/repo', 'on-par/software-factory', paths, { ...off.deps, laneBreakerThreshold: 0 });
+        expect(off.commentIssue).not.toHaveBeenCalled();
+      });
+
+      it('still pauses when the comment fails', async () => {
+        const h = harness({ 1: parkErr('sig-A'), 2: parkErr('sig-A'), 3: parkErr('sig-A') }, [1, 2, 3]);
+        h.commentIssue.mockRejectedValue(new Error('github down'));
+        await runLane('app', [], '/repo', 'on-par/software-factory', paths, { ...h.deps, laneBreakerThreshold: 2 });
+
+        expect(kinds(h.events, 'lane-paused')).toHaveLength(1);
+        expect(kinds(h.events, 'lane-done')).toHaveLength(0);
+        expect(h.shipped).toEqual([1, 2]);
+      });
+
+      it('renders none recorded when no failing checks were shared', () => {
+        const body = renderLanePausedComment({
+          lane: 'app',
+          signature: 'sig-A',
+          failingChecks: [],
+          firstIssue: 1,
+          secondIssue: 2,
+        });
+        expect(body).toContain('none recorded');
       });
 
       it('does not pause when signatures differ', async () => {

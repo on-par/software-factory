@@ -3488,6 +3488,10 @@ async function cmdRun(
           runLane(planned.lane, planned.issues, repoRoot, ghRepo, paths, {
             ...planned.deps,
             laneBreakerThreshold,
+            commentIssue: async (issue, body) => {
+              const [owner, repoName] = ghRepo.split('/');
+              await getOctokit().rest.issues.createComment({ owner, repo: repoName, issue_number: issue, body });
+            },
             ship: (issue, o, c) => shipIssue(issue, { ...o, branchPrefix, prClassifier: opts.prClassifier }, c),
             sweepFinished: (issue) =>
               sweepBetweenLaneIssues(issue, planned.lane, repoRoot, ghRepo, paths).then(() => {}),
@@ -3674,6 +3678,9 @@ type RunLaneDeps = {
    *  non-empty failure signature. 0 or absent = off; cmdRun wires the resolved
    *  budget.laneBreakerThreshold. */
   laneBreakerThreshold?: number;
+  /** Posts the lane-paused comment on the tripping issue (#1919). Defaults to a no-op so
+   *  injected-deps callers and tests are unaffected; cmdRun wires it to issues.createComment. */
+  commentIssue?: (issue: number, body: string) => Promise<void>;
   ship?: (
     issue: number,
     opts: { product?: string; autoRework?: boolean; interactive?: boolean; approvePlan?: boolean },
@@ -3838,6 +3845,18 @@ async function withHeartbeat<T>(
   }
 }
 
+export function renderLanePausedComment(payload: LanePausedPayload): string {
+  const checks = payload.failingChecks.length
+    ? payload.failingChecks.map((c) => `\`${c}\``).join(', ')
+    : 'none recorded';
+  return [
+    `Lane '${payload.lane}' is paused: this issue and #${payload.firstIssue} parked with the same failure signature, so the factory stopped claiming issues on this lane.`,
+    `Shared failing checks: ${checks}`,
+    `To resume: fix the shared failure (often on the base branch), then re-run \`factory run\` to resume lane '${payload.lane}'.`,
+    `Failure signature: \`${payload.signature}\``,
+  ].join('\n\n');
+}
+
 export async function runLane(
   lane: string,
   issues: number[],
@@ -3858,6 +3877,7 @@ export async function runLane(
     sweepFinished = async () => {},
     countRemaining,
     laneBreakerThreshold = 0,
+    commentIssue = async () => {},
   } = deps;
   let streak: { signature: string; firstIssue: number; failingChecks: string[]; count: number } | null = null;
   let merged = 0;
@@ -4022,6 +4042,8 @@ export async function runLane(
           `lane '${lane}' paused: #${payload.firstIssue} and #${payload.secondIssue} parked with the same failure signature (${payload.failingChecks.join(', ') || 'no failing checks'})`,
           { lane, lanePaused: payload },
         );
+        // Tell the developer on GitHub why the lane stopped (#1919); fail-closed, never changes lane flow.
+        await commentIssue(payload.secondIssue, renderLanePausedComment(payload)).catch(() => {});
         return;
       }
       continue;
