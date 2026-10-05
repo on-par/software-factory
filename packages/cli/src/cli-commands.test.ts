@@ -4624,6 +4624,23 @@ Please add a widget that does the thing.
 describe('shipIssue (direct)', () => {
   const ctx = () => ({ repoRoot: h.repoRoot, ghRepo: h.ghRepo });
 
+  it('uses the injected octokit factory instead of the default client', async () => {
+    const fake = defaultOctokit();
+    const factory = vi.fn(() => fake as never);
+    const defaultGet = h.octokit.rest.issues.get;
+
+    await shipIssue(5, {}, ctx(), { octokit: factory });
+
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(fake.rest.issues.get).toHaveBeenCalled();
+    expect(defaultGet).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the default octokit factory when none is injected', async () => {
+    await shipIssue(5, {}, ctx());
+    expect(h.octokit.rest.issues.get).toHaveBeenCalled();
+  });
+
   it('uses the branchPrefix override for the branch name', async () => {
     expect(await shipIssue(5, { branchPrefix: 'sf' }, ctx())).toBe('sf/5-fix-the-bug');
   });
