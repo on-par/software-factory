@@ -354,12 +354,12 @@ let coreFakes = makeCoreFakes();
  */
 function makePhaseFakes() {
   return {
-    planPhase: vi.fn(async (opts: any) => {
+    planPhase: vi.fn<NonNullable<CliDeps['planPhase']>>(async (opts) => {
       if (h.triggerPlanProviderFailure) await opts.onProviderFailure?.(h.triggerPlanProviderFailure);
       return h.planResult;
-    }) as any,
-    buildPhase: vi.fn(async (_opts: any) => h.buildResult) as any,
-    checkPhase: vi.fn(async (opts: any) => {
+    }),
+    buildPhase: vi.fn<NonNullable<CliDeps['buildPhase']>>(async (_opts) => h.buildResult),
+    checkPhase: vi.fn<NonNullable<CliDeps['checkPhase']>>(async (opts) => {
       for (const s of h.checkResult.summary.results.filter((r: any) => r.result === 'SKIP')) {
         opts.log?.('check', `SKIPPED: ${s.checker} — ${s.details}`);
       }
@@ -368,8 +368,8 @@ function makePhaseFakes() {
       }
       h.costSinkCallback?.({ task: 'build', model: 'claude-model', inputTokens: 10, outputTokens: 5, cost: 0.02 });
       return h.checkResult;
-    }) as any,
-    shipPhase: vi.fn(async (_opts: any) => h.shipResult) as any,
+    }),
+    shipPhase: vi.fn<NonNullable<CliDeps['shipPhase']>>(async (_opts) => h.shipResult),
   } satisfies Pick<CliDeps, 'planPhase' | 'buildPhase' | 'checkPhase' | 'shipPhase'>;
 }
 /** Fresh phase doubles per test, spread into every main/shipIssue call (CliDeps phase overrides). */
@@ -4883,14 +4883,14 @@ describe('shipIssue (direct)', () => {
   });
 
   it('main() forwards phase overrides to the shipIssue it runs', async () => {
-    const customPlan = vi.fn(async (_opts: any) => h.planResult);
+    const customPlan = vi.fn(async (_opts) => h.planResult);
     await runMainWith({ planPhase: customPlan as never }, 'ship', '5');
     expect(customPlan).toHaveBeenCalled();
     expect(phases.planPhase).not.toHaveBeenCalled();
   });
 
   it('restores the default phases after main() returns', async () => {
-    const customShip = vi.fn(async (_opts: any) => h.shipResult);
+    const customShip = vi.fn(async (_opts) => h.shipResult);
     await runMainWith({ shipPhase: customShip as never }, 'ship', '5');
     const calls = customShip.mock.calls.length;
     await shipIssue(5, {}, ctx());
@@ -5210,7 +5210,7 @@ describe('shipIssue (direct)', () => {
   });
 
   it('tracks a pgid reported through onPgid and sweeps it before releasing the lease, without crashing the run', async () => {
-    phases.buildPhase.mockImplementationOnce(async (opts: any) => {
+    phases.buildPhase.mockImplementationOnce(async (opts) => {
       // An already-dead pgid: exercises the track -> killAll path without touching a real process group.
       opts.onPgid?.(999999999);
       return h.buildResult;
