@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 // packages/cli/src/cli/index.ts — CLI entry point: factory <command> [options]
 
-import { exec as execCb, execSync } from 'node:child_process';
+import { exec as execCb, execSync, type StdioOptions } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -418,6 +418,35 @@ function resolveInternalOps(overrides: Partial<InternalOps>, base: InternalOps =
   };
 }
 
+export type ShellExec = (
+  command: string,
+  options?: { cwd?: string; timeout?: number },
+) => Promise<{ stdout: string; stderr: string }>;
+export type ShellExecSync = (command: string, options?: { timeout?: number; stdio?: StdioOptions }) => string;
+
+type ShellOpKey = 'exec' | 'execSync';
+type ShellOps = Required<Pick<CliDeps, ShellOpKey>>;
+
+const promisifiedExec = promisify(execCb);
+const DEFAULT_SHELL_OPS: ShellOps = {
+  exec: async (command, options) => {
+    const { stdout, stderr } = await promisifiedExec(command, { ...options, encoding: 'utf-8' });
+    return { stdout, stderr };
+  },
+  execSync: (command, options) => String(execSync(command, { ...options, encoding: 'utf-8' })),
+};
+
+/** Shell exec seams for the current main() or cmdLand invocation; DEFAULT_SHELL_OPS outside them. */
+let shellOps: ShellOps = DEFAULT_SHELL_OPS;
+
+/** Per-field `??` so an explicit `undefined` override falls back instead of replacing the default. */
+function resolveShellOps(overrides: Partial<ShellOps>, base: ShellOps = shellOps): ShellOps {
+  return {
+    exec: overrides.exec ?? base.exec,
+    execSync: overrides.execSync ?? base.execSync,
+  };
+}
+
 type CoreOpKey =
   | 'ModelRouter'
   | 'ConstitutionLoader'
@@ -487,7 +516,6 @@ function resolvePhaseOps(overrides: Partial<PhaseOps>, base: PhaseOps = phaseOps
   };
 }
 
-const exec = promisify(execCb);
 type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<unknown>;
 
 export const PREREQUISITES_TEXT = `Prerequisites:
@@ -499,18 +527,28 @@ Run inside a git repository with a GitHub remote.
 
 // ---------- helpers ----------
 
-async function getRepoRoot(): Promise<string> {
+/** PATH probe via the injectable shell seam (mirrors core isCommandAvailable). */
+function isCommandAvailableViaShell(shell: ShellOps, cmd: string): boolean {
   try {
-    const { stdout } = await exec('git rev-parse --show-toplevel');
+    shell.execSync(`command -v ${cmd} 2>/dev/null`, { stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function getRepoRoot(shell: ShellOps = shellOps): Promise<string> {
+  try {
+    const { stdout } = await shell.exec('git rev-parse --show-toplevel');
     return stdout.trim();
   } catch {
     throw new CliExitError('factory: not inside a git repository', 2);
   }
 }
 
-async function getGitHubRepo(): Promise<string> {
+async function getGitHubRepo(shell: ShellOps = shellOps): Promise<string> {
   try {
-    const { stdout } = await exec('gh repo view --json nameWithOwner --jq .nameWithOwner');
+    const { stdout } = await shell.exec('gh repo view --json nameWithOwner --jq .nameWithOwner');
     return stdout.trim();
   } catch {
     throw new CliExitError('factory: no GitHub remote detected (gh repo view failed)', 2);
@@ -518,19 +556,19 @@ async function getGitHubRepo(): Promise<string> {
 }
 
 /** Env token first, then one `gh auth token` subprocess (≤5 s). `undefined` when neither yields one. */
-function resolveGitHubToken(): string | undefined {
+function resolveGitHubToken(shell: ShellOps = shellOps): string | undefined {
   let token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
   if (!token) {
     try {
-      const out = execSync('gh auth token', { encoding: 'utf-8', timeout: 5_000 });
+      const out = shell.execSync('gh auth token', { timeout: 5_000 });
       token = out.trim() || undefined;
     } catch {}
   }
   return token;
 }
 
-function getOctokit(): Octokit {
-  return createFactoryOctokit(resolveGitHubToken());
+function getOctokit(shell: ShellOps = shellOps): Octokit {
+  return createFactoryOctokit(resolveGitHubToken(shell));
 }
 
 export function errorDetail(err: unknown): string {
@@ -544,7 +582,7 @@ export function errorDetail(err: unknown): string {
 export function hasGitHubToken(env: NodeJS.ProcessEnv = process.env, tryToken?: () => string): boolean {
   if (env.GITHUB_TOKEN || env.GH_TOKEN) return true;
   try {
-    const out = (tryToken ?? (() => execSync('gh auth token', { encoding: 'utf-8', timeout: 5_000 })))();
+    const out = (tryToken ?? (() => shellOps.execSync('gh auth token', { timeout: 5_000 })))();
     return out.trim().length > 0;
   } catch {
     return false;
@@ -836,7 +874,7 @@ export async function cmdFeedback(prUrl: string, opts: { note?: string; branchPr
 async function resolveFactoryCommit(): Promise<string | null> {
   return resolveFactoryCheckoutCommit(
     dirname(fileURLToPath(import.meta.url)),
-    async (cmd, cwd) => (await exec(cmd, { cwd })).stdout,
+    async (cmd, cwd) => (await shellOps.exec(cmd, { cwd })).stdout,
   );
 }
 
@@ -996,7 +1034,7 @@ export function hasReachableWorker(diagnoses: ModelDiagnosis[]): boolean {
 
 function ollamaModelSet(): Set<string> | undefined {
   try {
-    const out = execSync('ollama list', { encoding: 'utf-8', timeout: 10_000 });
+    const out = shellOps.execSync('ollama list', { timeout: 10_000 });
     return new Set(
       out
         .split('\n')
@@ -1153,7 +1191,7 @@ async function cmdCheck(issueRaw: string, opts: { json?: boolean; deep?: boolean
 
 async function currentCommitSha(): Promise<string | null> {
   try {
-    const { stdout } = await exec('git rev-parse HEAD');
+    const { stdout } = await shellOps.exec('git rev-parse HEAD');
     return stdout.trim();
   } catch {
     return null;
@@ -1336,10 +1374,10 @@ export function usageWatchSourceLabel(source: WatchdogPolicySource, watch: boole
 }
 
 export async function cmdUsage(
-  deps: Pick<CliDeps, 'fetchSubscriptionUsage' | 'estimateTrailingSpend' | 'formatUsageReport'> = {},
+  deps: Pick<CliDeps, ShellOpKey | 'fetchSubscriptionUsage' | 'estimateTrailingSpend' | 'formatUsageReport'> = {},
 ) {
   const ops = resolveCoreOps(deps);
-  const repoRoot = await getRepoRoot();
+  const repoRoot = await getRepoRoot(resolveShellOps(deps));
   let knobs: UsageKnobs;
   try {
     knobs = resolveUsageKnobs(process.env, configLoaders.loadRepoConfig(repoRoot));
@@ -1542,7 +1580,9 @@ export function tuiQueueReader(input: {
   token?: () => string | undefined;
   octokit?: (token: string) => Octokit;
 }): QueueReader {
-  const { token: resolveToken = resolveGitHubToken, octokit = createFactoryOctokit } = input;
+  // Capture the invocation's shell seam: read() polls after main() has restored the module default.
+  const shell = shellOps;
+  const { token: resolveToken = () => resolveGitHubToken(shell), octokit = createFactoryOctokit } = input;
   if (input.localQueue) {
     return { source: 'local file', read: () => readQueue(input.queueFile, input.queueProposedFile) };
   }
@@ -1811,17 +1851,26 @@ export async function shipIssue(
   },
   deps: Pick<
     CliDeps,
-    'octokit' | 'planPhase' | 'buildPhase' | 'checkPhase' | 'shipPhase' | ConfigLoaderKey | GitOpKey | CoreOpKey
+    | 'octokit'
+    | 'planPhase'
+    | 'buildPhase'
+    | 'checkPhase'
+    | 'shipPhase'
+    | ConfigLoaderKey
+    | GitOpKey
+    | ShellOpKey
+    | CoreOpKey
   > = {},
 ): Promise<string> {
   const loaders = resolveConfigLoaders(deps);
   const git = resolveGitOps(deps);
+  const shell = resolveShellOps(deps);
   const core = resolveCoreOps(deps);
   const phases = resolvePhaseOps(deps);
-  const repoRoot = ctx?.repoRoot ?? (await getRepoRoot());
-  const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo());
+  const repoRoot = ctx?.repoRoot ?? (await getRepoRoot(shell));
+  const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo(shell));
   const paths = ctx?.paths ?? getFactoryPaths(repoRoot);
-  const octokit = (deps.octokit ?? getOctokit)();
+  const octokit = (deps.octokit ?? (() => getOctokit(shell)))();
   const [ghOwner, ghName] = ghRepo.split('/');
 
   const repoConfig = loaders.loadRepoConfig(repoRoot, paths.root);
@@ -1958,6 +2007,7 @@ export async function shipIssue(
     repoRoot,
     cliDisabled: opts.sandbox === false,
     laneId: lane,
+    isAvailable: (cmd) => isCommandAvailableViaShell(shell, cmd),
   });
   laneSandboxRuntime = sandboxPolicy?.runtime ?? 'none';
   const worktreeSandbox: WorktreeSandbox | undefined = worktreeSandboxFor(sandboxPolicy?.runtime, {
@@ -2937,11 +2987,11 @@ export async function cmdReset(
       cwd: process.cwd(),
       paths,
       branchPrefix,
-      git: (cmd) => exec(cmd, { cwd: repoRoot }).then((r) => r.stdout),
+      git: (cmd) => shellOps.exec(cmd, { cwd: repoRoot }).then((r) => r.stdout),
       removeWorktree: (p) => gitOps.cleanupWorktree(repoRoot, p, log, sandbox),
       readLeases: () => readPortLeases(paths.ports),
       releaseLease: (id) => releasePortLease({ registryFile: paths.ports, lockDir: paths.portsLock, worktreeId: id }),
-      runCommand: (cmd, o) => exec(cmd, { cwd: o?.cwd ?? repoRoot }).then((r) => ({ stdout: r.stdout })),
+      runCommand: (cmd, o) => shellOps.exec(cmd, { cwd: o?.cwd ?? repoRoot }).then((r) => ({ stdout: r.stdout })),
       dryRun: opts.dryRun === true,
       force: opts.force === true,
     });
@@ -2954,14 +3004,16 @@ export async function cmdReset(
 export async function cmdLand(
   issueNum: number,
   opts: { branchPrefix?: string; allowGated?: boolean } = {},
-  deps: Pick<CliDeps, ConfigLoaderKey | GitOpKey | InternalOpKey> = {},
+  deps: Pick<CliDeps, ConfigLoaderKey | GitOpKey | InternalOpKey | ShellOpKey> = {},
 ) {
   const previousLoaders = configLoaders;
   const previousGitOps = gitOps;
   const previousInternalOps = internalOps;
+  const previousShellOps = shellOps;
   configLoaders = resolveConfigLoaders(deps);
   gitOps = resolveGitOps(deps);
   internalOps = resolveInternalOps(deps);
+  shellOps = resolveShellOps(deps);
   try {
     const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
     const repoRoot = await getRepoRoot();
@@ -3016,6 +3068,7 @@ export async function cmdLand(
     configLoaders = previousLoaders;
     gitOps = previousGitOps;
     internalOps = previousInternalOps;
+    shellOps = previousShellOps;
   }
 }
 
@@ -3208,12 +3261,14 @@ explaining exclusions.`;
 
   let plannerError: unknown;
   logEvent(paths.events, 'triage', '-', `Triaging ${ghRepo} with ${model}`);
-  await exec(
-    `claude -p ${shellEscape(prompt)} ${flag ? `--model ${flag}` : ''} --allowedTools "Bash(gh issue:*)" "Bash(gh repo:*)" Read Glob Grep Write`,
-  ).catch((err: unknown) => {
-    plannerError = err;
-    logEvent(paths.events, 'warn', '-', `triage planner failed: ${errorDetail(err)}`);
-  });
+  await shellOps
+    .exec(
+      `claude -p ${shellEscape(prompt)} ${flag ? `--model ${flag}` : ''} --allowedTools "Bash(gh issue:*)" "Bash(gh repo:*)" Read Glob Grep Write`,
+    )
+    .catch((err: unknown) => {
+      plannerError = err;
+      logEvent(paths.events, 'warn', '-', `triage planner failed: ${errorDetail(err)}`);
+    });
 
   const proposed = existsSync(paths.queueProposed) ? readFileSync(paths.queueProposed, 'utf-8') : '';
   const message = triageProposalMessage(proposed, paths.queueProposed, paths.queue);
@@ -4373,7 +4428,7 @@ export async function squashMergeAndDelete(
 ): Promise<void> {
   const { sha } = opts;
   if (opts.admin) {
-    const run = opts.run ?? exec;
+    const run = opts.run ?? shellOps.exec;
     const pin = sha ? ` --match-head-commit ${shellEscape(sha)}` : '';
     await run(
       `gh pr merge ${prNumber} --repo ${shellEscape(`${owner}/${repoName}`)} --admin --squash --delete-branch${pin}`,
@@ -4535,7 +4590,7 @@ export async function rebaseDirtyPullRequest(opts: {
   run?: CommandRunner;
   pathExists?: (path: string) => boolean;
 }): Promise<void> {
-  const { issue, branch, worktree, prNumber, log, run = exec, pathExists = existsSync } = opts;
+  const { issue, branch, worktree, prNumber, log, run = shellOps.exec, pathExists = existsSync } = opts;
 
   if (!pathExists(worktree)) {
     const msg = `PR #${prNumber} DIRTY on ${branch} and worktree gone`;
@@ -5157,7 +5212,10 @@ function probeClaudeKeychain(): KeychainProbeStatus {
   const service = claudeKeychainService();
   const profile = { service, configDir: claudeConfigDirOverride() };
   try {
-    execSync(`security find-generic-password -s ${shellEscape(service)}`, { timeout: 10_000, stdio: 'ignore' });
+    shellOps.execSync(`security find-generic-password -s ${shellEscape(service)}`, {
+      timeout: 10_000,
+      stdio: 'ignore',
+    });
     return { status: 'readable', ...profile };
   } catch {
     return { status: 'unreadable', inTmux: !!process.env.TMUX, ...profile };
@@ -5170,7 +5228,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     envPresent: (key) => !!process.env[key],
     tryExec: (cmd) => {
       try {
-        return execSync(cmd, { encoding: 'utf-8', timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        return shellOps.execSync(cmd, { timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
       } catch {
         return null;
       }
@@ -5181,11 +5239,12 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
 
   let repoRoot: string | null;
   try {
-    repoRoot = execSync('git rev-parse --show-toplevel', {
-      encoding: 'utf-8',
-      timeout: 10_000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
+    repoRoot = shellOps
+      .execSync('git rev-parse --show-toplevel', {
+        timeout: 10_000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+      .trim();
   } catch {
     repoRoot = null;
   }
@@ -5193,7 +5252,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
   const CLAUDE_AUTH_PROBE = 'claude -p "reply with exactly: ok"';
   const probeExec = (cmd: string): string | null => {
     try {
-      return execSync(cmd, { encoding: 'utf-8', timeout: 120_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      return shellOps.execSync(cmd, { timeout: 120_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
     } catch {
       return null;
     }
@@ -5215,6 +5274,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
         : resolveSandboxPolicy(configLoaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox, {
             worktree: repoRoot,
             repoRoot,
+            isAvailable: (cmd) => isCommandAvailableViaShell(shellOps, cmd),
           });
     if (!policy) {
       sandboxDetail = 'skipped — sandbox disabled by config or FACTORY_SANDBOX';
@@ -5338,6 +5398,9 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
 
 /** Injectable seams for main(). Unset fields fall back to the real implementations. */
 export interface CliDeps {
+  /** Shell seams for every `exec` / `execSync` the CLI runs (git, gh, claude, ollama, security). Default to node:child_process. */
+  exec?: ShellExec;
+  execSync?: ShellExecSync;
   /** Passed to the `factory daemon start|stop|status|logs` wrappers. */
   daemon?: DaemonCtlDeps;
   /** Replaces the TUI entry point used by `factory tui`. */
@@ -5906,11 +5969,13 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
   const previousLoaders = configLoaders;
   const previousGitOps = gitOps;
   const previousInternalOps = internalOps;
+  const previousShellOps = shellOps;
   const previousCoreOps = coreOps;
   const previousPhaseOps = phaseOps;
   configLoaders = resolveConfigLoaders(deps, DEFAULT_CONFIG_LOADERS);
   gitOps = resolveGitOps(deps, DEFAULT_GIT_OPS);
   internalOps = resolveInternalOps(deps, DEFAULT_INTERNAL_OPS);
+  shellOps = resolveShellOps(deps, DEFAULT_SHELL_OPS);
   coreOps = resolveCoreOps(deps, DEFAULT_CORE_OPS);
   phaseOps = resolvePhaseOps(deps, DEFAULT_PHASE_OPS);
   try {
@@ -5926,6 +5991,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     configLoaders = previousLoaders;
     gitOps = previousGitOps;
     internalOps = previousInternalOps;
+    shellOps = previousShellOps;
     coreOps = previousCoreOps;
     phaseOps = previousPhaseOps;
   }

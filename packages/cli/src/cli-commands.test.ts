@@ -21,7 +21,7 @@ const h = vi.hoisted(() => {
     daemonExecImpl: (_cmd: string, _args: string[]) => ({ code: 0, stdout: '', stderr: '' }),
     daemonOut: [] as string[],
     ghRepo: 'on-par/software-factory',
-    // child_process shims
+    // shell seam (CliDeps.exec / execSync)
     execImpl: (_cmd: string): string => '',
     execSyncImpl: (_cmd: string): string => {
       throw new Error('execSync not stubbed');
@@ -85,20 +85,6 @@ const h = vi.hoisted(() => {
 // ---------------------------------------------------------------------------
 // Module mocks (hoisted above imports by vitest)
 // ---------------------------------------------------------------------------
-vi.mock('node:child_process', () => {
-  const exec = (cmd: string, optsOrCb: any, maybeCb?: any) => {
-    const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
-    try {
-      const stdout = h.execImpl(cmd);
-      cb(null, { stdout, stderr: '' });
-    } catch (err) {
-      cb(err);
-    }
-  };
-  const execSync = (cmd: string) => h.execSyncImpl(cmd);
-  return { exec, execSync, default: { exec, execSync } };
-});
-
 vi.mock('@octokit/rest', () => {
   // createFactoryOctokit (packages/cli/src/cli/octokit.ts) calls Octokit.plugin(...) at module load
   // time to attach retry/throttling — the double must expose it as a static too.
@@ -124,7 +110,7 @@ import {
   CliExitError,
   cmdConstitution,
   cmdLand as cliCmdLand,
-  cmdUsage,
+  cmdUsage as cliCmdUsage,
   formatInitReachability,
   IssueDecomposedError,
   LaneParkError,
@@ -268,6 +254,8 @@ function makeInternalFakes() {
       (report: any) =>
         `GC_REPORT:${report.dryRun ? 'dry' : 'real'}:removed=${report.removed.length}:kept=${report.kept}`,
     ),
+    exec: vi.fn(async (cmd: string) => ({ stdout: h.execImpl(cmd), stderr: '' })),
+    execSync: vi.fn((cmd: string) => h.execSyncImpl(cmd)),
   } satisfies Pick<
     CliDeps,
     | 'watchChecks'
@@ -281,6 +269,8 @@ function makeInternalFakes() {
     | 'listMicroVms'
     | 'reapOrphanMicroVm'
     | 'formatGcReport'
+    | 'exec'
+    | 'execSync'
   >;
 }
 /** Fresh fakes per test, spread into every main/cmdLand/shipIssue call. */
@@ -391,6 +381,11 @@ function shipIssue(...[issueNum, opts, ctx, deps]: Parameters<typeof cliShipIssu
     ...phases,
     ...deps,
   });
+}
+
+/** Direct cmdUsage calls get shell + core fakes so they never run real git/subscription ops. */
+function cmdUsage(deps: Parameters<typeof cliCmdUsage>[0] = {}) {
+  return cliCmdUsage({ ...ops, ...coreFakes, ...deps });
 }
 
 /** Direct cmdLand calls get the inert loaders (incl. h.factoryConfig) unless a test passes its own. */
@@ -1404,6 +1399,61 @@ bash scripts/verify.sh
     });
   });
 
+  describe('filing preview (#1858)', () => {
+    it('resolves the factory commit through the injected exec seam, not node:child_process (#2014)', async () => {
+      // h.repoRoot doubles as the factory checkout: the shell fake answers every
+      // `git rev-parse --show-toplevel` with it, so resolveFactoryCheckoutCommit
+      // finds the CLI package.json there and then asks the seam for HEAD.
+      mkdirSync(join(h.repoRoot, 'packages', 'cli'), { recursive: true });
+      writeFileSync(
+        join(h.repoRoot, 'packages', 'cli', 'package.json'),
+        JSON.stringify({ name: '@on-par/factory-cli' }),
+      );
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse --show-toplevel')) return h.repoRoot;
+        if (cmd.includes('rev-parse HEAD')) return 'c0ffee2014\n';
+        if (cmd.includes('gh repo view')) return h.ghRepo;
+        return '';
+      };
+      writeFileSync(
+        paths().events,
+        JSON.stringify({
+          ts: '2026-01-01T00:00:00Z',
+          type: 'park',
+          issue: '77',
+          fingerprint: 'fp-2014-shell-seam',
+          evidence: {
+            issue: '77',
+            phase: 'build',
+            model: 'claude-sonnet',
+            reason: 'unknown',
+            component: 'claude',
+            origin: 'factory-internal',
+            eventExcerpt: 'Error: boom',
+            logPath: '/tmp/x.log',
+          },
+        }) + '\n',
+      );
+      const out = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+      const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      try {
+        const res = await runMain('filing', 'preview', 'fp-2014-shell-seam');
+        expect(res.exited).toBe(false);
+        const written = out.mock.calls.map((c) => String(c[0])).join('');
+        expect(written).toContain('fp:fp-2014-shell-seam');
+        expect(written).toContain('c0ffee2014');
+        expect(ops.exec).toHaveBeenCalledWith(
+          'git rev-parse HEAD',
+          expect.objectContaining({ cwd: expect.any(String) }),
+        );
+        expect(err.mock.calls.map((c) => String(c[0])).join('')).toContain('Preview only — nothing was sent.');
+      } finally {
+        out.mockRestore();
+        err.mockRestore();
+      }
+    });
+  });
+
   describe('classifier report (#1727)', () => {
     const outRec = (prNumber: number, o: Record<string, unknown> = {}) => ({
       issue: String(prNumber),
@@ -2363,6 +2413,17 @@ bash scripts/verify.sh
       await runMain('stop');
       expect(existsSync(paths().stop)).toBe(true);
       expect(logged()).toContain('STOP set');
+    });
+
+    it('stop routes git rev-parse through the injected exec seam', async () => {
+      const commands: string[] = [];
+      const recordingExec = async (cmd: string) => {
+        commands.push(cmd);
+        return { stdout: `${h.repoRoot}\n`, stderr: '' };
+      };
+      await runMainWith({ exec: recordingExec }, 'stop');
+      expect(commands).toContain('git rev-parse --show-toplevel');
+      expect(existsSync(paths().stop)).toBe(true);
     });
 
     it('resume removes an existing STOP file', async () => {
@@ -4319,6 +4380,32 @@ Please add a widget that does the thing.
       const res = await runMain('doctor');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('== factory doctor ==');
+    });
+
+    it('probes the sandbox runtime through the injected execSync seam, not node:child_process (#2014)', async () => {
+      h.claudeAvailable = true;
+      const base = h.execSyncImpl;
+      h.execSyncImpl = (cmd: string) => {
+        if (cmd.includes('command -v sandbox-exec') || cmd.includes('command -v firejail')) {
+          throw new Error('not on PATH');
+        }
+        return base(cmd);
+      };
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('skipped — no sandbox runtime (sandbox-exec/firejail) on this host');
+      expect(ops.execSync).toHaveBeenCalledWith(
+        expect.stringMatching(/^command -v (sandbox-exec|firejail) /),
+        expect.anything(),
+      );
+    });
+
+    it('skips the sandboxed claude probe when sandbox is disabled by config', async () => {
+      h.claudeAvailable = true;
+      h.factoryConfig = { ...h.factoryConfig, sandbox: { ...h.factoryConfig.sandbox, enabled: false } };
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('skipped — sandbox disabled by config or FACTORY_SANDBOX');
     });
 
     it('reports .factory/STOP presence as an explicit, non-failing row', async () => {
