@@ -1624,11 +1624,12 @@ export async function shipIssue(
     /** Benchmark artifact directory (#509) — only set for local-only runs. */
     artifactsDir?: string;
   },
+  deps: Pick<CliDeps, 'octokit'> = {},
 ): Promise<string> {
   const repoRoot = ctx?.repoRoot ?? (await getRepoRoot());
   const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo());
   const paths = ctx?.paths ?? getFactoryPaths(repoRoot);
-  const octokit = getOctokit();
+  const octokit = (deps.octokit ?? getOctokit)();
   const [ghOwner, ghName] = ghRepo.split('/');
 
   const repoConfig = loadRepoConfig(repoRoot, paths.root);
@@ -5103,6 +5104,8 @@ export interface CliDeps {
   daemon?: DaemonCtlDeps;
   /** Replaces the TUI entry point used by `factory tui`. */
   runTui?: typeof runTui;
+  /** Builds the GitHub client shipIssue uses. Defaults to createFactoryOctokit with the resolved token. */
+  octokit?: () => Octokit;
 }
 
 // ---------- main ----------
