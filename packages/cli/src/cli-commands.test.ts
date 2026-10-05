@@ -142,8 +142,6 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
   return {
     ...actual,
     // Config loaders — return inert values.
-    loadModelsConfig: vi.fn(() => ({ models: {}, tiers: {} }) as any),
-    loadRoutesConfig: vi.fn(() => ({}) as any),
     loadFactoryConfigForRepo: vi.fn(() => h.factoryConfig),
     loadRepoConfig: vi.fn((repoRoot: string, stateRoot?: string) => actual.loadRepoConfig(repoRoot, stateRoot)),
     resolveTimeouts: vi.fn(() => ({ plan: 1, build: 1, check: 1, approval: 1 })),
@@ -284,7 +282,7 @@ import {
   IssueSkippedError,
   main,
   parseIssueArg,
-  shipIssue,
+  shipIssue as cliShipIssue,
 } from './cli/index.js';
 
 // ---------------------------------------------------------------------------
@@ -359,6 +357,17 @@ function defaultOctokit() {
   };
 }
 
+/** Inert config loaders injected through the CliDeps seams (#2064). */
+const inertConfigLoaders: Pick<CliDeps, 'loadModelsConfig' | 'loadRoutesConfig'> = {
+  loadModelsConfig: () => ({ models: {}, tiers: {} }) as never,
+  loadRoutesConfig: () => ({}) as never,
+};
+
+/** Direct shipIssue calls get the inert models/routes loaders unless a test passes its own. */
+function shipIssue(...[issueNum, opts, ctx, deps]: Parameters<typeof cliShipIssue>) {
+  return cliShipIssue(issueNum, opts, ctx, { ...inertConfigLoaders, ...deps });
+}
+
 const recordingRunTui: NonNullable<CliDeps['runTui']> = async (opts) => {
   h.runTuiCalls.push(opts);
 };
@@ -386,6 +395,10 @@ async function runMain(...args: string[]) {
 }
 
 async function runMainWith(deps: CliDeps | undefined, ...args: string[]) {
+  return runMainRaw({ ...inertConfigLoaders, ...deps }, ...args);
+}
+
+async function runMainRaw(deps: CliDeps | undefined, ...args: string[]) {
   try {
     await main(['node', 'factory', ...args], deps);
   } catch (err) {
@@ -843,7 +856,6 @@ describe('cli commands (via main dispatch)', () => {
       await runMainWith({ daemon: daemonDeps(), runTui: recordingRunTui, loadModelsConfig: stub }, 'models');
 
       expect(stub).toHaveBeenCalled();
-      expect(vi.mocked(core.loadModelsConfig)).not.toHaveBeenCalled();
       expect(vi.mocked(core.ModelRegistry).mock.calls.at(-1)?.[0]).toMatchObject({
         models: { 'distinctive-model-2063': {} },
       });
@@ -851,8 +863,9 @@ describe('cli commands (via main dispatch)', () => {
 
     it('uses the factory-core loadModelsConfig when none is injected', async () => {
       const core = await import('@on-par/factory-core');
-      await runMain('models');
-      expect(vi.mocked(core.loadModelsConfig)).toHaveBeenCalled();
+      await runMainRaw({ daemon: daemonDeps(), runTui: recordingRunTui }, 'models');
+      const arg = vi.mocked(core.ModelRegistry).mock.calls.at(-1)?.[0] as { models: object };
+      expect(Object.keys(arg.models).length).toBeGreaterThan(0);
     });
 
     it('restores the default loaders after main() returns', async () => {
@@ -4729,15 +4742,17 @@ describe('shipIssue (direct)', () => {
 
   it('uses an injected loadModelsConfig and loadRoutesConfig', async () => {
     const core = await import('@on-par/factory-core');
-    const models = vi.fn(() => ({ models: {}, tiers: {} }) as never);
-    const routes = vi.fn(() => ({}) as never);
+    const modelsValue = { models: { 'distinctive-model-2064': {} }, tiers: {} };
+    const routesValue = { 'distinctive-route-2064': {} };
+    const models = vi.fn(() => modelsValue as never);
+    const routes = vi.fn(() => routesValue as never);
 
     await shipIssue(5, {}, ctx(), { loadModelsConfig: models, loadRoutesConfig: routes });
 
     expect(models).toHaveBeenCalled();
     expect(routes).toHaveBeenCalled();
-    expect(vi.mocked(core.loadModelsConfig)).not.toHaveBeenCalled();
-    expect(vi.mocked(core.loadRoutesConfig)).not.toHaveBeenCalled();
+    expect(vi.mocked(core.ModelRouter).mock.calls.at(-1)?.[0]).toMatchObject(modelsValue);
+    expect(vi.mocked(core.ModelRouter).mock.calls.at(-1)?.[1]).toMatchObject(routesValue);
   });
 
   it('falls back to the default octokit factory when none is injected', async () => {
