@@ -296,11 +296,19 @@ import {
   withGitLock,
 } from '@on-par/factory-core/internal';
 
-import { cmdDaemonLogs, cmdDaemonStart, cmdDaemonStatus, cmdDaemonStop, DaemonCtlError } from './cli/daemon.js';
+import {
+  cmdDaemonLogs,
+  cmdDaemonStart,
+  cmdDaemonStatus,
+  cmdDaemonStop,
+  DaemonCtlError,
+  type DaemonCtlDeps,
+} from './cli/daemon.js';
 import { HELP_GROUPS, OTHER_GROUP } from './cli/help-groups.js';
 
 import {
   buildInitConfig,
+  type CliDeps,
   CliExitError,
   cmdConstitution,
   cmdLand,
@@ -388,8 +396,12 @@ function defaultOctokit() {
 
 async function runMain(...args: string[]) {
   process.argv = ['node', 'factory', ...args];
+  return runMainWith(undefined, ...args);
+}
+
+async function runMainWith(deps: CliDeps | undefined, ...args: string[]) {
   try {
-    await main();
+    await main(['node', 'factory', ...args], deps);
   } catch (err) {
     if (err instanceof ExitError) return { exited: true as const, code: err.code };
     throw err;
@@ -1564,6 +1576,21 @@ bash scripts/verify.sh
   });
 
   describe('tui', () => {
+    it('uses an injected deps.runTui instead of the real one, and the explicit argv wins over process.argv', async () => {
+      const fake = vi.fn(async () => {});
+      process.argv = ['node', 'factory'];
+      const res = await runMainWith({ runTui: fake }, 'tui');
+      expect(res.exited).toBe(false);
+      expect(fake).toHaveBeenCalledTimes(1);
+      expect(fake).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventsFile: expect.stringMatching(/\.factory[\\/]state[\\/]events\.ndjson$/),
+          repo: h.ghRepo,
+        }),
+      );
+      expect(h.runTuiCalls).toHaveLength(0);
+    });
+
     it('calls runTui with the events file, detected repo, and a GitHub-backed queue reader by default', async () => {
       const res = await runMain('tui');
       expect(res.exited).toBe(false);
@@ -2680,12 +2707,31 @@ bash scripts/verify.sh
       const res = await runMain('daemon', verb);
       expect(res.exited).toBe(false);
       expect(cmd).toHaveBeenCalledTimes(1);
+      expect(cmd).toHaveBeenCalledWith(undefined);
+    });
+
+    it.each([
+      ['start', cmdDaemonStart],
+      ['stop', cmdDaemonStop],
+      ['status', cmdDaemonStatus],
+    ])('daemon %s passes injected deps.daemon to its wrapper', async (verb, cmd) => {
+      const daemon: DaemonCtlDeps = { platform: 'darwin', home: '/tmp/x' };
+      const res = await runMainWith({ daemon }, 'daemon', verb);
+      expect(res.exited).toBe(false);
+      expect(cmd).toHaveBeenCalledTimes(1);
+      expect(cmd).toHaveBeenCalledWith(daemon);
+    });
+
+    it('daemon logs passes injected deps.daemon as the second argument', async () => {
+      const daemon: DaemonCtlDeps = { platform: 'darwin', home: '/tmp/x' };
+      await runMainWith({ daemon }, 'daemon', 'logs', '-n', '3');
+      expect(cmdDaemonLogs).toHaveBeenCalledWith(expect.objectContaining({ lines: '3' }), daemon);
     });
 
     it('daemon logs passes --follow and --lines through', async () => {
       const res = await runMain('daemon', 'logs', '-f', '-n', '7');
       expect(res.exited).toBe(false);
-      expect(cmdDaemonLogs).toHaveBeenCalledWith(expect.objectContaining({ follow: true, lines: '7' }));
+      expect(cmdDaemonLogs).toHaveBeenCalledWith(expect.objectContaining({ follow: true, lines: '7' }), undefined);
     });
 
     it('maps DaemonCtlError onto the CLI exit code', async () => {
