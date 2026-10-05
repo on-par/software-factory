@@ -1833,7 +1833,15 @@ export async function shipIssue(
   },
   deps: Pick<
     CliDeps,
-    'octokit' | 'planPhase' | 'buildPhase' | 'checkPhase' | 'shipPhase' | ConfigLoaderKey | GitOpKey | ShellOpKey | CoreOpKey
+    | 'octokit'
+    | 'planPhase'
+    | 'buildPhase'
+    | 'checkPhase'
+    | 'shipPhase'
+    | ConfigLoaderKey
+    | GitOpKey
+    | ShellOpKey
+    | CoreOpKey
   > = {},
 ): Promise<string> {
   const loaders = resolveConfigLoaders(deps);
