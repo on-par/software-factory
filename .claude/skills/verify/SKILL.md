@@ -46,6 +46,8 @@ CI (`.github/workflows/ci.yml`) runs the same steps as the full path. It also ru
 
 `*.integration.test.ts` files (real git worktrees, whole plan → build → check → ship cycles) are excluded from both verify paths. They run nightly in `.github/workflows/nightly-integration.yml` (07:00 UTC). Run them with `npm run test:integration` when you touch `packages/core/src/phases/` or worktree handling.
 
+`npm run mutation` (Stryker) runs on demand only. It is not part of `scripts/verify.sh` and CI does not run it (#805).
+
 ## Fixing common failures
 
 | Failing step                              | Fix                                                                                            |
