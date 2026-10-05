@@ -347,7 +347,11 @@ function makeCoreFakes() {
 /** Fresh fakes per test, spread into every main/shipIssue call. */
 let coreFakes = makeCoreFakes();
 
-/** Phase doubles injected through the CliDeps seams; the real runIssue sequences them (#675, ADR-0004). */
+/**
+ * Phase doubles. shipIssue builds ports and calls the real runIssue in @on-par/factory-core, which sequences
+ * PLAN->BUILD->CHECK->SHIP, the breaker, budget assertions and constitution logging (#675). Only the four
+ * phase functions are doubled, and they reach RunPorts through CliDeps phase overrides (ADR-0004).
+ */
 function makePhaseFakes() {
   return {
     planPhase: vi.fn(async (opts: any) => {
@@ -368,7 +372,7 @@ function makePhaseFakes() {
     shipPhase: vi.fn(async (_opts: any) => h.shipResult) as any,
   } satisfies Pick<CliDeps, 'planPhase' | 'buildPhase' | 'checkPhase' | 'shipPhase'>;
 }
-/** Fresh phase fakes per test, spread into every main/shipIssue call. */
+/** Fresh phase doubles per test, spread into every main/shipIssue call (CliDeps phase overrides). */
 let phases = makePhaseFakes();
 
 /** Direct shipIssue calls get the inert models/routes loaders unless a test passes its own. */
@@ -390,7 +394,7 @@ function cmdUsage(deps: Parameters<typeof cliCmdUsage>[0] = {}) {
 
 /** Direct cmdLand calls get the inert loaders (incl. h.factoryConfig) unless a test passes its own. */
 function cmdLand(...[issueNum, opts, deps]: Parameters<typeof cliCmdLand>) {
-  return cliCmdLand(issueNum, opts, { ...inertConfigLoaders, ...inertGitOps, ...ops, ...deps });
+  return cliCmdLand(issueNum, opts, { ...inertConfigLoaders, ...inertGitOps, ...ops, ...phases, ...deps });
 }
 
 const recordingRunTui: NonNullable<CliDeps['runTui']> = async (opts) => {
@@ -4871,9 +4875,26 @@ describe('shipIssue (direct)', () => {
     expect(phases.shipPhase).not.toHaveBeenCalled();
   });
 
-  it('uses the factory-core phases when no overrides are injected', async () => {
+  it('drives the deps-builder phase doubles when the test passes no override', async () => {
     await shipIssue(5, {}, ctx());
     expect(phases.planPhase).toHaveBeenCalled();
+    expect(phases.shipPhase).toHaveBeenCalled();
+    await expect(phases.planPhase.mock.results[0]?.value).resolves.toBe(h.planResult);
+  });
+
+  it('main() forwards phase overrides to the shipIssue it runs', async () => {
+    const customPlan = vi.fn(async (_opts: any) => h.planResult);
+    await runMainWith({ planPhase: customPlan as never }, 'ship', '5');
+    expect(customPlan).toHaveBeenCalled();
+    expect(phases.planPhase).not.toHaveBeenCalled();
+  });
+
+  it('restores the default phases after main() returns', async () => {
+    const customShip = vi.fn(async (_opts: any) => h.shipResult);
+    await runMainWith({ shipPhase: customShip as never }, 'ship', '5');
+    const calls = customShip.mock.calls.length;
+    await shipIssue(5, {}, ctx());
+    expect(customShip).toHaveBeenCalledTimes(calls);
     expect(phases.shipPhase).toHaveBeenCalled();
   });
 
