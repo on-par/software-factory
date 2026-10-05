@@ -149,61 +149,11 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
       buildFallback: h.modelOverrides.buildFallback,
       sources: {},
     })),
-    isCommandAvailable: vi.fn((cmd: string) => {
-      if (cmd === 'docker') return h.dockerAvailable ?? false;
-      if (cmd === 'sbx') return h.sbxAvailable ?? false;
-      return h.claudeAvailable ?? true;
-    }),
-    defaultFindPortListeners: vi.fn(async () => h.portListeners),
-    reapOrphanProcesses: vi.fn(async (opts: any) => {
-      for (const e of h.orphanEvents) opts.onEvent?.(e);
-      return h.orphanEvents;
-    }),
-    // Router / loaders as light stubs.
-    ModelRouter: vi.fn(function () {
-      return {
-        resolve: (route: string) => h.routerResolve(route),
-        resolveAll: (_route: string) => [],
-        registryRef: {
-          getClaudeFlag: () => '--flag',
-          getModelsInTier: () => ['m'],
-          get: (id: string) => (h.modelProviders[id] ? { provider: h.modelProviders[id] } : undefined),
-          getHarnessId: (id: string) => (h.modelProviders[id] === 'anthropic' ? 'claude-cli' : 'codex-cli'),
-          isCodexModel: (id: string) => h.modelProviders[id] === 'openai',
-        },
-        setCostSink: vi.fn((sink: (entry: any) => void) => {
-          h.costSinkCallback = sink;
-        }),
-      };
-    }),
-    ConstitutionLoader: vi.fn(function () {
-      return {
-        listProducts: () => ['alpha', 'beta'],
-        resolve: (worktree: string, product?: string) => h.constitutionResolve(worktree, product),
-      };
-    }),
-    ModelRegistry: vi.fn(function () {
-      return {
-        list: () => ['claude-model'],
-        getTiers: () => ['worker'],
-        estimateCost: () => 1.23,
-        isExperimental: () => false,
-        isAvailable: () => true,
-        getModelsInTier: () => ['claude-model'],
-      };
-    }),
     // Phases are stubbed here; the real runIssue (from `...actual`) sequences them (#675).
     planPhase: planPhaseMock,
     buildPhase: buildPhaseMock,
     checkPhase: checkPhaseMock,
     shipPhase: shipPhaseMock,
-    // Usage / reports.
-    estimateTrailingSpend: vi.fn(() => h.trailingSpend),
-    formatUsageReport: vi.fn(() => 'USAGE REPORT'),
-    watchUsage: vi.fn(async () => {}),
-    fetchSubscriptionUsage: vi.fn(async () => h.subscriptionUsage),
-    diagnoseModels: vi.fn(() => h.diagnoses),
-    writeLocalRunReport: vi.fn(async () => ({ path: '/tmp/report.md' })),
     diagnoseModelsDefault: undefined,
   };
 });
@@ -366,9 +316,80 @@ function makeInternalFakes() {
 /** Fresh fakes per test, spread into every main/cmdLand/shipIssue call. */
 let ops = makeInternalFakes();
 
+function makeCoreFakes() {
+  return {
+    isCommandAvailable: vi.fn((cmd: string) => {
+      if (cmd === 'docker') return h.dockerAvailable ?? false;
+      if (cmd === 'sbx') return h.sbxAvailable ?? false;
+      return h.claudeAvailable ?? true;
+    }),
+    defaultFindPortListeners: vi.fn(async () => h.portListeners) as any,
+    reapOrphanProcesses: vi.fn(async (opts: any) => {
+      for (const e of h.orphanEvents) opts.onEvent?.(e);
+      return h.orphanEvents;
+    }) as any,
+    // Router / loaders as light stubs.
+    ModelRouter: vi.fn(function () {
+      return {
+        resolve: (route: string) => h.routerResolve(route),
+        resolveAll: (_route: string) => [],
+        registryRef: {
+          getClaudeFlag: () => '--flag',
+          getModelsInTier: () => ['m'],
+          get: (id: string) => (h.modelProviders[id] ? { provider: h.modelProviders[id] } : undefined),
+          getHarnessId: (id: string) => (h.modelProviders[id] === 'anthropic' ? 'claude-cli' : 'codex-cli'),
+          isCodexModel: (id: string) => h.modelProviders[id] === 'openai',
+        },
+        setCostSink: vi.fn((sink: (entry: any) => void) => {
+          h.costSinkCallback = sink;
+        }),
+      };
+    }) as any,
+    ConstitutionLoader: vi.fn(function () {
+      return {
+        listProducts: () => ['alpha', 'beta'],
+        resolve: (worktree: string, product?: string) => h.constitutionResolve(worktree, product),
+      };
+    }) as any,
+    ModelRegistry: vi.fn(function () {
+      return {
+        list: () => ['claude-model'],
+        getTiers: () => ['worker'],
+        estimateCost: () => 1.23,
+        isExperimental: () => false,
+        isAvailable: () => true,
+        getModelsInTier: () => ['claude-model'],
+      };
+    }) as any,
+    // Usage / reports.
+    estimateTrailingSpend: vi.fn(() => h.trailingSpend) as any,
+    formatUsageReport: vi.fn(() => 'USAGE REPORT'),
+    watchUsage: vi.fn(async () => {}) as any,
+    fetchSubscriptionUsage: vi.fn(async () => h.subscriptionUsage) as any,
+    diagnoseModels: vi.fn(() => h.diagnoses) as any,
+    writeLocalRunReport: vi.fn(async () => ({ path: '/tmp/report.md' })) as any,
+  } satisfies Pick<
+    CliDeps,
+    | 'ModelRouter'
+    | 'ConstitutionLoader'
+    | 'ModelRegistry'
+    | 'isCommandAvailable'
+    | 'defaultFindPortListeners'
+    | 'reapOrphanProcesses'
+    | 'estimateTrailingSpend'
+    | 'formatUsageReport'
+    | 'watchUsage'
+    | 'fetchSubscriptionUsage'
+    | 'diagnoseModels'
+    | 'writeLocalRunReport'
+  >;
+}
+/** Fresh fakes per test, spread into every main/shipIssue call. */
+let coreFakes = makeCoreFakes();
+
 /** Direct shipIssue calls get the inert models/routes loaders unless a test passes its own. */
 function shipIssue(...[issueNum, opts, ctx, deps]: Parameters<typeof cliShipIssue>) {
-  return cliShipIssue(issueNum, opts, ctx, { ...inertConfigLoaders, ...inertGitOps, ...ops, ...deps });
+  return cliShipIssue(issueNum, opts, ctx, { ...inertConfigLoaders, ...inertGitOps, ...coreFakes, ...ops, ...deps });
 }
 
 /** Direct cmdLand calls get the inert loaders (incl. h.factoryConfig) unless a test passes its own. */
@@ -408,7 +429,7 @@ async function runMainWith(deps: CliDeps | undefined, ...args: string[]) {
 
 async function runMainRaw(deps: CliDeps | undefined, ...args: string[]) {
   try {
-    await main(['node', 'factory', ...args], { ...inertGitOps, ...ops, ...deps });
+    await main(['node', 'factory', ...args], { ...inertGitOps, ...coreFakes, ...ops, ...deps });
   } catch (err) {
     if (err instanceof ExitError) return { exited: true as const, code: err.code };
     throw err;
@@ -420,6 +441,7 @@ async function runMainRaw(deps: CliDeps | undefined, ...args: string[]) {
 
 beforeEach(() => {
   ops = makeInternalFakes();
+  coreFakes = makeCoreFakes();
   h.repoRoot = mkdtempSync(join(tmpdir(), 'factory-cli-'));
   h.constitutionsDir = mkdtempSync(join(tmpdir(), 'factory-const-'));
   h.daemonHome = mkdtempSync(join(tmpdir(), 'factory-daemon-home-'));
@@ -858,22 +880,20 @@ describe('cli commands (via main dispatch)', () => {
 
   describe('models', () => {
     it('uses an injected loadModelsConfig instead of the factory-core loader', async () => {
-      const core = await import('@on-par/factory-core');
       const config = { models: { 'distinctive-model-2063': {} }, tiers: {} };
       const stub = vi.fn(() => config as never);
 
       await runMainWith({ daemon: daemonDeps(), runTui: recordingRunTui, loadModelsConfig: stub }, 'models');
 
       expect(stub).toHaveBeenCalled();
-      expect(vi.mocked(core.ModelRegistry).mock.calls.at(-1)?.[0]).toMatchObject({
+      expect(coreFakes.ModelRegistry.mock.calls.at(-1)?.[0]).toMatchObject({
         models: { 'distinctive-model-2063': {} },
       });
     });
 
     it('uses the factory-core loadModelsConfig when none is injected', async () => {
-      const core = await import('@on-par/factory-core');
       await runMainRaw({ daemon: daemonDeps(), runTui: recordingRunTui }, 'models');
-      const arg = vi.mocked(core.ModelRegistry).mock.calls.at(-1)?.[0] as { models: object };
+      const arg = coreFakes.ModelRegistry.mock.calls.at(-1)?.[0] as { models: object };
       expect(Object.keys(arg.models).length).toBeGreaterThan(0);
     });
 
@@ -946,6 +966,11 @@ describe('cli commands (via main dispatch)', () => {
       const out = logged();
       expect(out).toContain('override-model');
       expect(out).not.toContain('shared');
+    });
+
+    it('uses a formatUsageReport override passed through main deps', async () => {
+      await runMainWith({ formatUsageReport: () => 'OVERRIDE USAGE' } as any, 'usage');
+      expect(logged()).toContain('OVERRIDE USAGE');
     });
 
     it('aggregates costs by model with a grand total', async () => {
@@ -2448,8 +2473,7 @@ bash scripts/verify.sh
     });
 
     it('logs a warn event without crashing the run when the usage watchdog rejects', async () => {
-      const core = await import('@on-par/factory-core');
-      vi.mocked(core.watchUsage).mockRejectedValueOnce(new Error('watchdog exploded'));
+      coreFakes.watchUsage.mockRejectedValueOnce(new Error('watchdog exploded'));
       writeFileSync(paths().queue, 'app 1\n');
       const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
@@ -2570,9 +2594,7 @@ bash scripts/verify.sh
       writeFileSync(paths().queue, '# header\n');
       const res = await runMain('run', '--local-queue', '--usage-threshold', '0.7', '--usage-poll', '15');
       expect(res.exited).toBe(false);
-      expect(vi.mocked(FactoryCore.watchUsage)).toHaveBeenCalledWith(
-        expect.objectContaining({ stopAt: 0.7, pollMs: 15_000 }),
-      );
+      expect(coreFakes.watchUsage).toHaveBeenCalledWith(expect.objectContaining({ stopAt: 0.7, pollMs: 15_000 }));
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('flag: --usage-threshold');
       expect(events).toContain('flag: --usage-poll');
@@ -3055,9 +3077,7 @@ bash scripts/verify.sh
         '15',
       );
       expect(res.exited).toBe(false);
-      expect(vi.mocked(FactoryCore.watchUsage)).toHaveBeenCalledWith(
-        expect.objectContaining({ stopAt: 0.7, pollMs: 15_000 }),
-      );
+      expect(coreFakes.watchUsage).toHaveBeenCalledWith(expect.objectContaining({ stopAt: 0.7, pollMs: 15_000 }));
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('flag: --usage-threshold');
       expect(events).toContain('flag: --usage-poll');
@@ -4759,7 +4779,6 @@ describe('shipIssue (direct)', () => {
   });
 
   it('uses an injected loadModelsConfig and loadRoutesConfig', async () => {
-    const core = await import('@on-par/factory-core');
     const modelsValue = { models: { 'distinctive-model-2064': {} }, tiers: {} };
     const routesValue = { 'distinctive-route-2064': {} };
     const models = vi.fn(() => modelsValue as never);
@@ -4769,8 +4788,8 @@ describe('shipIssue (direct)', () => {
 
     expect(models).toHaveBeenCalled();
     expect(routes).toHaveBeenCalled();
-    expect(vi.mocked(core.ModelRouter).mock.calls.at(-1)?.[0]).toMatchObject(modelsValue);
-    expect(vi.mocked(core.ModelRouter).mock.calls.at(-1)?.[1]).toMatchObject(routesValue);
+    expect(coreFakes.ModelRouter.mock.calls.at(-1)?.[0]).toMatchObject(modelsValue);
+    expect(coreFakes.ModelRouter.mock.calls.at(-1)?.[1]).toMatchObject(routesValue);
   });
 
   it('falls back to the default octokit factory when none is injected', async () => {
@@ -5213,7 +5232,6 @@ describe('shipIssue (direct)', () => {
   });
 
   it('logs environment_lease_failed when the conflict probe itself rejects and the range is exhausted', async () => {
-    const core = await import('@on-par/factory-core');
     const net = await import('node:net');
     const server = net.createServer();
     await new Promise<void>((resolve) => server.listen({ port: 0, host: '127.0.0.1' }, resolve));
@@ -5223,7 +5241,7 @@ describe('shipIssue (direct)', () => {
       ...h.factoryConfig,
       environment: { ports: { enabled: true, range: [busyPort, busyPort] } },
     };
-    vi.mocked(core.defaultFindPortListeners).mockRejectedValueOnce(new Error('lsof unavailable'));
+    coreFakes.defaultFindPortListeners.mockRejectedValueOnce(new Error('lsof unavailable'));
 
     try {
       await shipIssue(5, {}, ctx());
@@ -5291,9 +5309,8 @@ describe('shipIssue (direct)', () => {
   it('writes a local-only run report on success when FACTORY_LOCAL_ONLY=1', async () => {
     trackEnv('FACTORY_LOCAL_ONLY');
     process.env.FACTORY_LOCAL_ONLY = '1';
-    const core = await import('@on-par/factory-core');
     await shipIssue(5, {}, ctx());
-    expect(vi.mocked(core.writeLocalRunReport)).toHaveBeenCalled();
+    expect(coreFakes.writeLocalRunReport).toHaveBeenCalled();
     expect(logged()).toContain('local-only report');
   });
 
@@ -5306,9 +5323,8 @@ describe('shipIssue (direct)', () => {
       reworkRounds: 0,
       failureSignature: 'sig-1',
     };
-    const core = await import('@on-par/factory-core');
     await expect(shipIssue(5, {}, ctx())).rejects.toBeTruthy();
-    const report = vi.mocked(core.writeLocalRunReport).mock.calls.at(-1)?.[0] as any;
+    const report = coreFakes.writeLocalRunReport.mock.calls.at(-1)?.[0] as any;
     expect(report.outcome).toBe('failed');
   });
 
@@ -5484,7 +5500,7 @@ describe('CliExitError (direct command invocation)', () => {
   });
 
   it('cmdConstitution({}) rejects with code 2 and the usage message', async () => {
-    await expect(cmdConstitution({})).rejects.toMatchObject({
+    await expect(cmdConstitution({}, coreFakes)).rejects.toMatchObject({
       name: 'CliExitError',
       code: 2,
       message: expect.stringContaining('usage: factory constitution'),
@@ -5493,7 +5509,7 @@ describe('CliExitError (direct command invocation)', () => {
   });
 
   it("cmdConstitution({ product: 'nope' }) rejects with code 1 and the not-found message", async () => {
-    await expect(cmdConstitution({ product: 'nope' })).rejects.toMatchObject({
+    await expect(cmdConstitution({ product: 'nope' }, coreFakes)).rejects.toMatchObject({
       name: 'CliExitError',
       code: 1,
       message: expect.stringContaining("No constitution 'nope'"),
@@ -5504,7 +5520,7 @@ describe('CliExitError (direct command invocation)', () => {
   it('cmdUsage() rejects with code 2 when FACTORY_USAGE_CAP is invalid', async () => {
     trackEnv('FACTORY_USAGE_CAP');
     process.env.FACTORY_USAGE_CAP = '-5';
-    await expect(cmdUsage()).rejects.toMatchObject({
+    await expect(cmdUsage(coreFakes)).rejects.toMatchObject({
       name: 'CliExitError',
       code: 2,
       message: expect.stringContaining('FACTORY_USAGE_CAP'),
@@ -5514,7 +5530,7 @@ describe('CliExitError (direct command invocation)', () => {
 
   it('cmdUsage() prints the real subscription usage plus the heuristic comparison when the subscription signal is available', async () => {
     h.subscriptionUsage = { fiveHourUtilization: 42, fiveHourResetsAt: '2026-07-15T18:00:00Z' };
-    await cmdUsage();
+    await cmdUsage(coreFakes);
     const logged = logSpy.mock.calls.map((c: any[]) => c[0]).join('\n');
     expect(logged).toContain('5h subscription usage: 42% of plan limit, resets 2026-07-15T18:00:00Z');
     expect(logged).toContain('heuristic list-price estimate: USAGE REPORT');
@@ -5522,7 +5538,7 @@ describe('CliExitError (direct command invocation)', () => {
 
   it('cmdUsage() falls back to the heuristic with a warning when the subscription signal is unavailable', async () => {
     h.subscriptionUsage = null;
-    await cmdUsage();
+    await cmdUsage(coreFakes);
     const logged = logSpy.mock.calls.map((c: any[]) => c[0]).join('\n');
     expect(logged).toContain('real subscription usage unavailable');
     expect(logged).toContain('USAGE REPORT');
