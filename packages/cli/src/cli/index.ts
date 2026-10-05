@@ -2794,55 +2794,66 @@ export async function cmdReset(
   for (const line of lines) console.log(line);
 }
 
-export async function cmdLand(issueNum: number, opts: { branchPrefix?: string; allowGated?: boolean } = {}) {
-  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
-  const repoRoot = await getRepoRoot();
-  const ghRepo = await getGitHubRepo();
-  const paths = getFactoryPaths(repoRoot);
-  const octokit = getOctokit();
-  const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
-  const skipCI = configLoaders.resolveSkipCI(factoryConfig);
-
+/** deps overrides the config loaders for this call, like shipIssue. */
+export async function cmdLand(
+  issueNum: number,
+  opts: { branchPrefix?: string; allowGated?: boolean } = {},
+  deps: Pick<CliDeps, ConfigLoaderKey> = {},
+) {
+  const previousLoaders = configLoaders;
+  configLoaders = resolveConfigLoaders(deps);
   try {
-    const result = await landIssue(issueNum, repoRoot, ghRepo, paths, octokit, skipCI, branchPrefix, {
-      allowGated: opts.allowGated === true,
-    });
-    console.log(styleText('green', `✅ Landed PR #${result.prNumber} for issue #${issueNum}`));
-  } catch (err: any) {
-    if (err instanceof AwaitingReviewError) {
-      console.log(
-        styleText('yellow', `⏸ PR #${err.prNumber} for issue #${issueNum} awaiting human review — left open`),
-      );
-      return;
+    const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
+    const repoRoot = await getRepoRoot();
+    const ghRepo = await getGitHubRepo();
+    const paths = getFactoryPaths(repoRoot);
+    const octokit = getOctokit();
+    const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
+    const skipCI = configLoaders.resolveSkipCI(factoryConfig);
+
+    try {
+      const result = await landIssue(issueNum, repoRoot, ghRepo, paths, octokit, skipCI, branchPrefix, {
+        allowGated: opts.allowGated === true,
+      });
+      console.log(styleText('green', `✅ Landed PR #${result.prNumber} for issue #${issueNum}`));
+    } catch (err: any) {
+      if (err instanceof AwaitingReviewError) {
+        console.log(
+          styleText('yellow', `⏸ PR #${err.prNumber} for issue #${issueNum} awaiting human review — left open`),
+        );
+        return;
+      }
+      if (err instanceof CiUnverifiedError) {
+        console.log(
+          styleText(
+            'yellow',
+            `⏸ PR #${err.prNumber} for issue #${issueNum} — CI never reached a green verdict — left open, not merged`,
+          ),
+        );
+        return;
+      }
+      if (err instanceof CiFailedError) {
+        console.log(
+          styleText(
+            'yellow',
+            `⏸ PR #${err.prNumber} for issue #${issueNum} has a failing CI check — left open, not merged`,
+          ),
+        );
+        return;
+      }
+      if (err instanceof MergeGatedError) {
+        throw new CliExitError(`factory: ${err.message}`, 4);
+      }
+      if (err instanceof LandConflictError) {
+        throw new CliExitError(`factory: ${err.message}`, 3);
+      }
+      if (err instanceof LandFailureError) {
+        throw new CliExitError(`factory: ${err.message}`, err.code);
+      }
+      throw new CliExitError(`factory: merge failed for issue #${issueNum}: ${err.message}`, 5);
     }
-    if (err instanceof CiUnverifiedError) {
-      console.log(
-        styleText(
-          'yellow',
-          `⏸ PR #${err.prNumber} for issue #${issueNum} — CI never reached a green verdict — left open, not merged`,
-        ),
-      );
-      return;
-    }
-    if (err instanceof CiFailedError) {
-      console.log(
-        styleText(
-          'yellow',
-          `⏸ PR #${err.prNumber} for issue #${issueNum} has a failing CI check — left open, not merged`,
-        ),
-      );
-      return;
-    }
-    if (err instanceof MergeGatedError) {
-      throw new CliExitError(`factory: ${err.message}`, 4);
-    }
-    if (err instanceof LandConflictError) {
-      throw new CliExitError(`factory: ${err.message}`, 3);
-    }
-    if (err instanceof LandFailureError) {
-      throw new CliExitError(`factory: ${err.message}`, err.code);
-    }
-    throw new CliExitError(`factory: merge failed for issue #${issueNum}: ${err.message}`, 5);
+  } finally {
+    configLoaders = previousLoaders;
   }
 }
 

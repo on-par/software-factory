@@ -141,11 +141,7 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
 
   return {
     ...actual,
-    // Config loaders — return inert values.
-    loadFactoryConfigForRepo: vi.fn(() => h.factoryConfig),
-    loadRepoConfig: vi.fn((repoRoot: string, stateRoot?: string) => actual.loadRepoConfig(repoRoot, stateRoot)),
-    resolveTimeouts: vi.fn(() => ({ plan: 1, build: 1, check: 1, approval: 1 })),
-    resolveSkipCI: vi.fn(() => false),
+    // Config loaders — return inert values (the rest are injected via CliDeps, #2064/#2065).
     getConstitutionsDir: vi.fn(() => h.constitutionsDir),
     resolveEffectiveModelPins: vi.fn(() => ({
       plan: h.modelOverrides.plan,
@@ -197,12 +193,11 @@ vi.mock('@on-par/factory-core', async (importOriginal) => {
         getModelsInTier: () => ['claude-model'],
       };
     }),
-    // Phases are stubbed here; the real runIssue (from `actual`) sequences them (#675).
+    // Phases are stubbed here; the real runIssue (from `...actual`) sequences them (#675).
     planPhase: planPhaseMock,
     buildPhase: buildPhaseMock,
     checkPhase: checkPhaseMock,
     shipPhase: shipPhaseMock,
-    runIssue: actual.runIssue,
     // Usage / reports.
     estimateTrailingSpend: vi.fn(() => h.trailingSpend),
     formatUsageReport: vi.fn(() => 'USAGE REPORT'),
@@ -274,7 +269,7 @@ import {
   type CliDeps,
   CliExitError,
   cmdConstitution,
-  cmdLand,
+  cmdLand as cliCmdLand,
   cmdUsage,
   formatInitReachability,
   IssueDecomposedError,
@@ -357,15 +352,27 @@ function defaultOctokit() {
   };
 }
 
-/** Inert config loaders injected through the CliDeps seams (#2064). */
-const inertConfigLoaders: Pick<CliDeps, 'loadModelsConfig' | 'loadRoutesConfig'> = {
+/** Inert config loaders injected through the CliDeps seams (#2064, #2065). */
+const inertConfigLoaders: Pick<
+  CliDeps,
+  'loadModelsConfig' | 'loadRoutesConfig' | 'loadFactoryConfigForRepo' | 'resolveTimeouts' | 'resolveSkipCI'
+> = {
   loadModelsConfig: () => ({ models: {}, tiers: {} }) as never,
   loadRoutesConfig: () => ({}) as never,
+  // Lazy: per-test h.factoryConfig mutations are observed.
+  loadFactoryConfigForRepo: () => h.factoryConfig,
+  resolveTimeouts: () => ({ plan: 1, build: 1, check: 1, approval: 1 }),
+  resolveSkipCI: () => false,
 };
 
 /** Direct shipIssue calls get the inert models/routes loaders unless a test passes its own. */
 function shipIssue(...[issueNum, opts, ctx, deps]: Parameters<typeof cliShipIssue>) {
   return cliShipIssue(issueNum, opts, ctx, { ...inertConfigLoaders, ...deps });
+}
+
+/** Direct cmdLand calls get the inert loaders (incl. h.factoryConfig) unless a test passes its own. */
+function cmdLand(...[issueNum, opts, deps]: Parameters<typeof cliCmdLand>) {
+  return cliCmdLand(issueNum, opts, { ...inertConfigLoaders, ...deps });
 }
 
 const recordingRunTui: NonNullable<CliDeps['runTui']> = async (opts) => {
@@ -873,12 +880,10 @@ describe('cli commands (via main dispatch)', () => {
       const stub = vi.fn((repoRoot: string, stateRoot?: string) => core.loadRepoConfig(repoRoot, stateRoot));
       await runMainWith({ daemon: daemonDeps(), runTui: recordingRunTui, loadRepoConfig: stub as never }, 'models');
       const stubCalls = stub.mock.calls.length;
-      vi.mocked(core.loadRepoConfig).mockClear();
 
       await shipIssue(5, {}, { repoRoot: h.repoRoot, ghRepo: h.ghRepo });
 
       expect(stub.mock.calls.length).toBe(stubCalls);
-      expect(vi.mocked(core.loadRepoConfig)).toHaveBeenCalled();
     });
 
     it('routes constitution --product through an injected getConstitutionsDir', async () => {
@@ -4714,18 +4719,15 @@ describe('shipIssue (direct)', () => {
       resolveEffectiveModelPins: pins as never,
     });
 
-    expect(timeouts).toHaveBeenCalled();
-    expect(skip).toHaveBeenCalled();
+    expect(timeouts).toHaveBeenCalledWith(h.factoryConfig);
+    expect(skip).toHaveBeenCalledWith(h.factoryConfig);
     expect(pins).toHaveBeenCalled();
-    expect(vi.mocked(core.resolveTimeouts)).not.toHaveBeenCalled();
-    expect(vi.mocked(core.resolveSkipCI)).not.toHaveBeenCalled();
     expect(vi.mocked(core.resolveEffectiveModelPins)).not.toHaveBeenCalled();
   });
 
   it('uses injected loadFactoryConfigForRepo and loadRepoConfig', async () => {
     const core = await import('@on-par/factory-core');
     const repoValue = core.loadRepoConfig(h.repoRoot);
-    vi.mocked(core.loadRepoConfig).mockClear();
     const factoryConfig = vi.fn(() => h.factoryConfig);
     const repoConfig = vi.fn(() => repoValue);
 
@@ -4734,10 +4736,8 @@ describe('shipIssue (direct)', () => {
       loadRepoConfig: repoConfig as never,
     });
 
-    expect(factoryConfig).toHaveBeenCalled();
-    expect(repoConfig).toHaveBeenCalled();
-    expect(vi.mocked(core.loadFactoryConfigForRepo)).not.toHaveBeenCalled();
-    expect(vi.mocked(core.loadRepoConfig)).not.toHaveBeenCalled();
+    expect(factoryConfig).toHaveBeenCalledWith(expect.stringMatching(/\.factory\/config\.(json|yaml)$/));
+    expect(repoConfig).toHaveBeenCalledWith(h.repoRoot, paths().root);
   });
 
   it('uses an injected loadModelsConfig and loadRoutesConfig', async () => {
@@ -4791,8 +4791,9 @@ describe('shipIssue (direct)', () => {
 
   it('loads the committed repo config from paths.root, not paths.state', async () => {
     const core = await import('@on-par/factory-core');
-    await shipIssue(5, {}, ctx());
-    expect(vi.mocked(core.loadRepoConfig)).toHaveBeenCalledWith(h.repoRoot, paths().root);
+    const spy = vi.fn(core.loadRepoConfig);
+    await shipIssue(5, {}, ctx(), { loadRepoConfig: spy as never });
+    expect(spy).toHaveBeenCalledWith(h.repoRoot, paths().root);
   });
 
   it('keeps a claude-cli build pin on the claude route when PLAN picks codex (#1367)', async () => {
@@ -4818,8 +4819,9 @@ describe('shipIssue (direct)', () => {
     const core = await import('@on-par/factory-core');
     mkdirSync(paths().root, { recursive: true });
     writeFileSync(paths().config, JSON.stringify({ version: 1, providers: { ollama: false } }));
-    await shipIssue(5, {}, ctx());
-    expect(vi.mocked(core.loadRepoConfig).mock.results.at(-1)?.value).toEqual({
+    const spy = vi.fn(core.loadRepoConfig);
+    await shipIssue(5, {}, ctx(), { loadRepoConfig: spy as never });
+    expect(spy.mock.results.at(-1)?.value).toEqual({
       version: 2,
       providers: { ollama: false },
     });
@@ -5364,9 +5366,7 @@ describe('shipIssue (direct)', () => {
   });
 
   it('logs skip-ci when FACTORY_SKIP_CI resolves to true', async () => {
-    const core = await import('@on-par/factory-core');
-    vi.mocked(core.resolveSkipCI).mockReturnValueOnce(true);
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), { resolveSkipCI: () => true });
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('skip-ci');
     expect(events).toContain('skipping CI watch');
@@ -5518,6 +5518,15 @@ describe('CliExitError (direct command invocation)', () => {
       message: expect.stringContaining('no open PR'),
     });
     expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('cmdLand uses an injected loadFactoryConfigForRepo', async () => {
+    h.octokit.rest.pulls.list = vi.fn(async () => ({ data: [] }));
+    const load = vi.fn(() => h.factoryConfig);
+    await expect(cliCmdLand(5, {}, { ...inertConfigLoaders, loadFactoryConfigForRepo: load })).rejects.toMatchObject({
+      code: 1,
+    });
+    expect(load).toHaveBeenCalledWith(expect.stringMatching(/\.factory\/config\.(json|yaml)$/));
   });
 
   describe('cmdLand no-auto-merge gate (#1720)', () => {
