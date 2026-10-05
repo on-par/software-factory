@@ -418,6 +418,57 @@ function resolveInternalOps(overrides: Partial<InternalOps>, base: InternalOps =
   };
 }
 
+type CoreOpKey =
+  | 'ModelRouter'
+  | 'ConstitutionLoader'
+  | 'ModelRegistry'
+  | 'isCommandAvailable'
+  | 'defaultFindPortListeners'
+  | 'reapOrphanProcesses'
+  | 'estimateTrailingSpend'
+  | 'formatUsageReport'
+  | 'watchUsage'
+  | 'fetchSubscriptionUsage'
+  | 'diagnoseModels'
+  | 'writeLocalRunReport';
+type CoreOps = Required<Pick<CliDeps, CoreOpKey>>;
+
+const DEFAULT_CORE_OPS: CoreOps = {
+  ModelRouter,
+  ConstitutionLoader,
+  ModelRegistry,
+  isCommandAvailable,
+  defaultFindPortListeners,
+  reapOrphanProcesses,
+  estimateTrailingSpend,
+  formatUsageReport,
+  watchUsage,
+  fetchSubscriptionUsage,
+  diagnoseModels,
+  writeLocalRunReport,
+};
+
+/** factory-core classes/ops for the current main() invocation; DEFAULT_CORE_OPS outside it. */
+let coreOps: CoreOps = DEFAULT_CORE_OPS;
+
+/** Per-field `??` so an explicit `undefined` override falls back instead of replacing the default. */
+function resolveCoreOps(overrides: Partial<CoreOps>, base: CoreOps = coreOps): CoreOps {
+  return {
+    ModelRouter: overrides.ModelRouter ?? base.ModelRouter,
+    ConstitutionLoader: overrides.ConstitutionLoader ?? base.ConstitutionLoader,
+    ModelRegistry: overrides.ModelRegistry ?? base.ModelRegistry,
+    isCommandAvailable: overrides.isCommandAvailable ?? base.isCommandAvailable,
+    defaultFindPortListeners: overrides.defaultFindPortListeners ?? base.defaultFindPortListeners,
+    reapOrphanProcesses: overrides.reapOrphanProcesses ?? base.reapOrphanProcesses,
+    estimateTrailingSpend: overrides.estimateTrailingSpend ?? base.estimateTrailingSpend,
+    formatUsageReport: overrides.formatUsageReport ?? base.formatUsageReport,
+    watchUsage: overrides.watchUsage ?? base.watchUsage,
+    fetchSubscriptionUsage: overrides.fetchSubscriptionUsage ?? base.fetchSubscriptionUsage,
+    diagnoseModels: overrides.diagnoseModels ?? base.diagnoseModels,
+    writeLocalRunReport: overrides.writeLocalRunReport ?? base.writeLocalRunReport,
+  };
+}
+
 const exec = promisify(execCb);
 type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<unknown>;
 
@@ -574,8 +625,8 @@ async function cmdInit(opts: { force?: boolean } = {}) {
 
   // Doctor-style validation (policy=auto, N models reachable) — informational, never fails init.
   const modelsConfig = applyRepoConfig(configLoaders.loadModelsConfig(), configLoaders.loadRepoConfig(repoRoot));
-  const registry = new ModelRegistry(modelsConfig);
-  const diagnoses = diagnoseModels(registry, {}, resolveExperimental(), resolveLocalOnly());
+  const registry = new coreOps.ModelRegistry(modelsConfig);
+  const diagnoses = coreOps.diagnoseModels(registry, {}, resolveExperimental(), resolveLocalOnly());
   console.log(formatInitReachability(diagnoses));
   if (!hasReachableWorker(diagnoses)) {
     console.log(
@@ -844,13 +895,16 @@ export function scaffoldConstitution(template: string, product: string): string 
   return skeleton.replaceAll('<product-name>', JSON.stringify(product)).replaceAll('<Product>', display);
 }
 
-export async function cmdConstitution(opts: {
-  list?: boolean;
-  product?: string;
-  init?: string | boolean;
-  force?: boolean;
-}) {
-  const loader = new ConstitutionLoader();
+export async function cmdConstitution(
+  opts: {
+    list?: boolean;
+    product?: string;
+    init?: string | boolean;
+    force?: boolean;
+  },
+  deps: Pick<CliDeps, 'ConstitutionLoader'> = {},
+) {
+  const loader = new (resolveCoreOps(deps).ConstitutionLoader)();
 
   if (typeof opts.init === 'string' || opts.init === true) {
     const product = typeof opts.init === 'string' ? opts.init : undefined;
@@ -940,14 +994,13 @@ function ollamaModelSet(): Set<string> | undefined {
 async function cmdModels(opts: { doctor?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
   const modelsConfig = applyRepoConfig(configLoaders.loadModelsConfig(), configLoaders.loadRepoConfig(repoRoot));
-  const { ModelRegistry } = await import('@on-par/factory-core');
-  const registry = new ModelRegistry(modelsConfig);
+  const registry = new coreOps.ModelRegistry(modelsConfig);
   const allowExperimental = resolveExperimental();
   const localOnly = resolveLocalOnly();
 
   if (opts.doctor) {
     const ollamaModels = ollamaModelSet();
-    const diagnoses = diagnoseModels(
+    const diagnoses = coreOps.diagnoseModels(
       registry,
       {
         ollamaModelPresent: ollamaModels ? (model: string) => ollamaModels.has(model) : undefined,
@@ -1044,7 +1097,7 @@ async function cmdCheck(issueRaw: string, opts: { json?: boolean; deep?: boolean
     const repoRoot = await getRepoRoot();
     const repoConfig = configLoaders.loadRepoConfig(repoRoot);
     const effective = resolveEffectiveConfig(repoConfig);
-    const router = new ModelRouter(
+    const router = new coreOps.ModelRouter(
       applyRepoConfig(configLoaders.loadModelsConfig(), repoConfig),
       configLoaders.loadRoutesConfig(),
       false,
@@ -1264,7 +1317,10 @@ export function usageWatchSourceLabel(source: WatchdogPolicySource, watch: boole
   }
 }
 
-export async function cmdUsage() {
+export async function cmdUsage(
+  deps: Pick<CliDeps, 'fetchSubscriptionUsage' | 'estimateTrailingSpend' | 'formatUsageReport'> = {},
+) {
+  const ops = resolveCoreOps(deps);
   const repoRoot = await getRepoRoot();
   let knobs: UsageKnobs;
   try {
@@ -1273,9 +1329,9 @@ export async function cmdUsage() {
     throw new CliExitError(`factory: ${err.message}`, 2);
   }
 
-  const subscriptionPromise = fetchSubscriptionUsage();
-  const spend = estimateTrailingSpend();
-  const heuristicLine = formatUsageReport(spend, knobs.cap);
+  const subscriptionPromise = ops.fetchSubscriptionUsage();
+  const spend = ops.estimateTrailingSpend();
+  const heuristicLine = ops.formatUsageReport(spend, knobs.cap);
 
   const subscription = await subscriptionPromise;
   if (subscription !== null) {
@@ -1318,7 +1374,7 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
   const modelsConfig = applyRepoConfig(configLoaders.loadModelsConfig(), repoConfig);
   const routesConfig = configLoaders.loadRoutesConfig();
   const effective = resolveEffectiveConfig(repoConfig);
-  const router = new ModelRouter(
+  const router = new coreOps.ModelRouter(
     modelsConfig,
     routesConfig,
     false,
@@ -1508,7 +1564,7 @@ async function cmdTui(opts: { localQueue?: boolean } = {}, runTuiImpl: typeof ru
   const modelsConfig = applyRepoConfig(configLoaders.loadModelsConfig(), repoConfig);
   const routesConfig = configLoaders.loadRoutesConfig();
   const effective = resolveEffectiveConfig(repoConfig);
-  const router = new ModelRouter(
+  const router = new coreOps.ModelRouter(
     modelsConfig,
     routesConfig,
     false,
@@ -1626,7 +1682,11 @@ export function resolveEnvironmentAcquirer(opts: {
   range: [number, number];
   processGroupGraceMs: number;
   log: (type: EventKind, msg: string) => void;
+  findPortListeners?: typeof defaultFindPortListeners;
+  reapOrphanProcesses?: typeof reapOrphanProcesses;
 }): (() => Promise<Environment>) | undefined {
+  const findPortListeners = opts.findPortListeners ?? coreOps.defaultFindPortListeners;
+  const reapProcesses = opts.reapOrphanProcesses ?? coreOps.reapOrphanProcesses;
   if (opts.laneSandboxRuntime === 'docker-sandbox') {
     opts.log(
       'environment_lease',
@@ -1651,7 +1711,7 @@ export function resolveEnvironmentAcquirer(opts: {
         );
       },
       onPortConflict: (port) => {
-        void defaultFindPortListeners(port)
+        void findPortListeners(port)
           .then((listeners) => {
             const detail =
               listeners.length > 0
@@ -1669,7 +1729,7 @@ export function resolveEnvironmentAcquirer(opts: {
     });
     opts.log('environment_lease', `leased port ${lease.port} for worktree ${opts.worktree}`);
     if (reaped.length > 0) {
-      await reapOrphanProcesses({
+      await reapProcesses({
         reaped,
         graceMs: opts.processGroupGraceMs,
         onEvent: (e) =>
@@ -1733,11 +1793,12 @@ export async function shipIssue(
   },
   deps: Pick<
     CliDeps,
-    'octokit' | 'planPhase' | 'buildPhase' | 'checkPhase' | 'shipPhase' | ConfigLoaderKey | GitOpKey
+    'octokit' | 'planPhase' | 'buildPhase' | 'checkPhase' | 'shipPhase' | ConfigLoaderKey | GitOpKey | CoreOpKey
   > = {},
 ): Promise<string> {
   const loaders = resolveConfigLoaders(deps);
   const git = resolveGitOps(deps);
+  const core = resolveCoreOps(deps);
   const repoRoot = ctx?.repoRoot ?? (await getRepoRoot());
   const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo());
   const paths = ctx?.paths ?? getFactoryPaths(repoRoot);
@@ -1763,7 +1824,7 @@ export async function shipIssue(
         ? resolveEffectiveConfig(repoConfig)
         : { ...resolveEffectiveConfig(repoConfig), branchPrefix: opts.branchPrefix },
   };
-  const router = new ModelRouter(
+  const router = new core.ModelRouter(
     policy.models,
     policy.routes,
     false,
@@ -1787,7 +1848,7 @@ export async function shipIssue(
   });
   const modelPins = loaders.resolveEffectiveModelPins(router.registryRef, repoConfig);
   const codexOff = resolveCodexDisabled(repoConfig);
-  const constitutionLoader = new ConstitutionLoader();
+  const constitutionLoader = new core.ConstitutionLoader();
 
   const product = opts.product ?? readActiveProduct(paths.product);
   const autoRework = opts.autoRework ?? true;
@@ -1955,6 +2016,8 @@ export async function shipIssue(
         range: portsSettings.range,
         processGroupGraceMs,
         log,
+        findPortListeners: core.defaultFindPortListeners,
+        reapOrphanProcesses: core.reapOrphanProcesses,
       })
     : undefined;
 
@@ -2063,6 +2126,7 @@ export async function shipIssue(
         specPath,
         route: info.route,
         reason: info.reason,
+        writeLocalRunReport: core.writeLocalRunReport,
       }),
     writeBenchmarkArtifacts: (info) =>
       maybeWriteBenchmarkArtifacts({
@@ -2131,9 +2195,10 @@ async function maybeWriteLocalRunReport(opts: {
   specPath?: string;
   route?: string;
   reason?: string;
+  writeLocalRunReport?: typeof writeLocalRunReport;
 }): Promise<string | undefined> {
   if (process.env.FACTORY_LOCAL_ONLY !== '1') return undefined;
-  const report = await writeLocalRunReport({
+  const report = await (opts.writeLocalRunReport ?? coreOps.writeLocalRunReport)({
     issue: opts.issueNum,
     eventsFile: opts.paths.events,
     reportsDir: opts.paths.reports,
@@ -2306,7 +2371,7 @@ async function cmdShip(
     branchPrefix?: string;
   },
 ) {
-  if (!isCommandAvailable('claude')) {
+  if (!coreOps.isCommandAvailable('claude')) {
     throw new CliExitError(`factory: ${missingClaudeCliMessage()}`, 2);
   }
   const repoRoot = await getRepoRoot();
@@ -2360,7 +2425,7 @@ async function cmdRunIssue(
     runChildren?: boolean;
   },
 ) {
-  if (!isCommandAvailable('claude')) {
+  if (!coreOps.isCommandAvailable('claude')) {
     throw new CliExitError(`factory: ${missingClaudeCliMessage()}`, 2);
   }
   const repoRoot = await getRepoRoot();
@@ -2517,7 +2582,7 @@ async function cmdRunBrief(
     branchPrefix?: string;
   },
 ) {
-  if (!isCommandAvailable('claude')) {
+  if (!coreOps.isCommandAvailable('claude')) {
     throw new CliExitError(`factory: ${missingClaudeCliMessage()}`, 2);
   }
   const repoRoot = await getRepoRoot();
@@ -2658,12 +2723,12 @@ async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }) 
     process.env.FACTORY_LOCAL_ONLY = '1';
 
     const preflight = async (): Promise<OvernightPreflightResult> => {
-      if (!isCommandAvailable('claude')) return { ok: false, reason: missingClaudeCliMessage() };
-      const registry = new ModelRegistry(
+      if (!coreOps.isCommandAvailable('claude')) return { ok: false, reason: missingClaudeCliMessage() };
+      const registry = new coreOps.ModelRegistry(
         applyRepoConfig(configLoaders.loadModelsConfig(), configLoaders.loadRepoConfig(repoRoot)),
       );
       const ollamaModels = ollamaModelSet();
-      const diagnoses = diagnoseModels(
+      const diagnoses = coreOps.diagnoseModels(
         registry,
         { ollamaModelPresent: ollamaModels ? (m: string) => ollamaModels.has(m) : undefined },
         resolveExperimental(),
@@ -3102,7 +3167,7 @@ async function cmdTriage(opts: { product?: string }) {
   const modelsConfig = applyRepoConfig(configLoaders.loadModelsConfig(), repoConfig);
   const routesConfig = configLoaders.loadRoutesConfig();
   const effective = resolveEffectiveConfig(repoConfig);
-  const router = new ModelRouter(
+  const router = new coreOps.ModelRouter(
     modelsConfig,
     routesConfig,
     false,
@@ -3594,18 +3659,20 @@ async function cmdRun(
     }
     const controller = new AbortController();
     const watchdog = knobs.watch
-      ? watchUsage({
-          cap: knobs.cap,
-          stopAt: knobs.stopAt,
-          pollMs: knobs.pollMs,
-          stopFile: paths.stop,
-          eventsFile: paths.events,
-          signal: controller.signal,
-          estimator: knobs.estimator,
-        }).catch((err: any) => {
-          // a watchdog crash must never take down the run
-          logEvent(paths.events, 'warn', '-', `usage watchdog crashed: ${err.message}`);
-        })
+      ? coreOps
+          .watchUsage({
+            cap: knobs.cap,
+            stopAt: knobs.stopAt,
+            pollMs: knobs.pollMs,
+            stopFile: paths.stop,
+            eventsFile: paths.events,
+            signal: controller.signal,
+            estimator: knobs.estimator,
+          })
+          .catch((err: any) => {
+            // a watchdog crash must never take down the run
+            logEvent(paths.events, 'warn', '-', `usage watchdog crashed: ${err.message}`);
+          })
       : Promise.resolve();
 
     const { proxy } = await startLaneProxy(paths, resolveEnvironmentProxy(factoryConfig));
@@ -5064,7 +5131,7 @@ async function scanGreenPrs(ghRepo: string | undefined, octokit: Octokit | undef
 
 function probeClaudeKeychain(): KeychainProbeStatus {
   if (process.platform !== 'darwin') return { status: 'skipped', detail: 'skipped — not macOS' };
-  if (!isCommandAvailable('claude')) return { status: 'skipped', detail: 'skipped — claude CLI not on PATH' };
+  if (!coreOps.isCommandAvailable('claude')) return { status: 'skipped', detail: 'skipped — claude CLI not on PATH' };
   if (process.env.ANTHROPIC_API_KEY) return { status: 'skipped', detail: 'skipped — ANTHROPIC_API_KEY auth in use' };
   // Check the entry for the profile child `claude` runs will use (CLAUDE_CONFIG_DIR), not
   // always the default one.
@@ -5080,7 +5147,7 @@ function probeClaudeKeychain(): KeychainProbeStatus {
 
 async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
   const checks = runDoctorChecks({
-    commandAvailable: isCommandAvailable,
+    commandAvailable: coreOps.isCommandAvailable,
     envPresent: (key) => !!process.env[key],
     tryExec: (cmd) => {
       try {
@@ -5115,7 +5182,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
 
   let host: ClaudeAuthProbe = 'skipped';
   let hostDetail = 'skipped — claude CLI not on PATH';
-  if (isCommandAvailable('claude')) {
+  if (coreOps.isCommandAvailable('claude')) {
     host = probeExec(CLAUDE_AUTH_PROBE) === null ? 'failed' : 'ok';
     hostDetail = host === 'ok' ? 'claude -p succeeded on the host' : 'claude -p failed on the host';
   }
@@ -5154,11 +5221,11 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     const health = await inspectPortLeases({ registryFile: paths.ports });
     checks.push(...leaseChecks(health.map(toLeaseRow)));
 
-    const dockerAvailable = isCommandAvailable('docker');
+    const dockerAvailable = coreOps.isCommandAvailable('docker');
     const orphanContainers = dockerAvailable ? await internalOps.listOrphanContainers().catch(() => []) : [];
     checks.push(...orphanContainerChecks(orphanContainers.map((c) => c.name)));
 
-    const sbxAvailable = isCommandAvailable('sbx');
+    const sbxAvailable = coreOps.isCommandAvailable('sbx');
     const activeVmNames = new Set(health.filter((h) => h.alive).map((h) => microVmName(h.lease.worktreeId)));
     const orphanVmNames = sbxAvailable ? (await internalOps.listMicroVms()).filter((n) => !activeVmNames.has(n)) : [];
     checks.push(...orphanMicroVmChecks(orphanVmNames));
@@ -5197,7 +5264,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
 
       if (reaped.length > 0) {
         const graceMs = resolveProcessGroupGraceMs(factoryConfig);
-        const orphanEvents = await reapOrphanProcesses({ reaped, graceMs });
+        const orphanEvents = await coreOps.reapOrphanProcesses({ reaped, graceMs });
         for (const e of orphanEvents) {
           console.log(
             `reconcile: ${e.action === 'killed' ? 'killed' : 'found'} pid ${e.pid} (pgid ${e.pgid}, ${e.command}) squatting port ${e.port} of dead lane ${e.worktreeId}${e.action === 'reported' ? ' — not factory-started, left running' : ''}`,
@@ -5288,6 +5355,19 @@ export interface CliDeps {
   listMicroVms?: typeof listMicroVms;
   reapOrphanMicroVm?: typeof reapOrphanMicroVm;
   formatGcReport?: typeof formatGcReport;
+  /** factory-core classes and ops (routing, constitutions, process/port probes, usage, diagnose, local report). Each defaults to the export of the same name. */
+  ModelRouter?: typeof ModelRouter;
+  ConstitutionLoader?: typeof ConstitutionLoader;
+  ModelRegistry?: typeof ModelRegistry;
+  isCommandAvailable?: typeof isCommandAvailable;
+  defaultFindPortListeners?: typeof defaultFindPortListeners;
+  reapOrphanProcesses?: typeof reapOrphanProcesses;
+  estimateTrailingSpend?: typeof estimateTrailingSpend;
+  formatUsageReport?: typeof formatUsageReport;
+  watchUsage?: typeof watchUsage;
+  fetchSubscriptionUsage?: typeof fetchSubscriptionUsage;
+  diagnoseModels?: typeof diagnoseModels;
+  writeLocalRunReport?: typeof writeLocalRunReport;
 }
 
 // ---------- main ----------
@@ -5348,7 +5428,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .option('--list', 'List available constitutions')
     .option('--product <name>', 'Seed .factory/constitution.md from the bundled example constitution for <name>')
     .option('--force', 'With --init or --product, overwrite an existing .factory/constitution.md')
-    .action(cmdConstitution);
+    .action((opts) => cmdConstitution(opts));
 
   program
     .command('models')
@@ -5374,7 +5454,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
   program
     .command('usage')
     .description('Report 5-hour subscription usage (falls back to a list-price estimate)')
-    .action(cmdUsage);
+    .action(() => cmdUsage());
 
   program
     .command('status')
@@ -5807,9 +5887,11 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
   const previousLoaders = configLoaders;
   const previousGitOps = gitOps;
   const previousInternalOps = internalOps;
+  const previousCoreOps = coreOps;
   configLoaders = resolveConfigLoaders(deps, DEFAULT_CONFIG_LOADERS);
   gitOps = resolveGitOps(deps, DEFAULT_GIT_OPS);
   internalOps = resolveInternalOps(deps, DEFAULT_INTERNAL_OPS);
+  coreOps = resolveCoreOps(deps, DEFAULT_CORE_OPS);
   try {
     await program.parseAsync(argv);
   } catch (err) {
@@ -5823,5 +5905,6 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     configLoaders = previousLoaders;
     gitOps = previousGitOps;
     internalOps = previousInternalOps;
+    coreOps = previousCoreOps;
   }
 }
