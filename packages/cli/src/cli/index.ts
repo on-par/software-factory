@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { createRequire } from 'node:module';
 import { arch, hostname as osHostname, release, platform, userInfo } from 'node:os';
 import { basename, dirname, relative, resolve } from 'node:path';
-import { promisify } from 'node:util';
+import { promisify, styleText } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
 import type {
@@ -255,7 +255,6 @@ import {
   writePortFile,
 } from '@on-par/factory-core/internal';
 import { type QueueReader, runTui } from '@on-par/factory-tui';
-import chalk from 'chalk';
 import { Command } from 'commander';
 import { admissionStateReaderFor, runQueueReconcile } from './admission.js';
 import { runQueueClear } from './queue-clear.js';
@@ -387,15 +386,15 @@ export function buildInitConfig(format: 'yaml' | 'json' = 'yaml'): string {
 function writeIfAbsent(path: string, content: string, label: string, force = false): void {
   if (force) {
     writeFileSync(path, content);
-    console.log(chalk.green(`Wrote ${path}`));
+    console.log(styleText('green', `Wrote ${path}`));
     return;
   }
   try {
     writeFileSync(path, content, { flag: 'wx' });
-    console.log(chalk.green(`Wrote ${path}`));
+    console.log(styleText('green', `Wrote ${path}`));
   } catch (err: any) {
     if (err.code === 'EEXIST') {
-      console.log(chalk.yellow(`${label} exists — leaving as-is (use --force to overwrite)`));
+      console.log(styleText('yellow', `${label} exists — leaving as-is (use --force to overwrite)`));
       return;
     }
     throw err;
@@ -411,7 +410,7 @@ export function formatInitReachability(diagnoses: ModelDiagnosis[]): string {
 async function cmdInit(opts: { force?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
   if (!hasGitHubToken()) {
-    console.error(chalk.red(`factory: ${missingTokenMessage()}`));
+    console.error(styleText('red', `factory: ${missingTokenMessage()}`));
     process.exit(2);
   }
   const paths = getFactoryPaths(repoRoot);
@@ -467,10 +466,12 @@ async function cmdInit(opts: { force?: boolean } = {}) {
   const diagnoses = diagnoseModels(registry, {}, resolveExperimental(), resolveLocalOnly());
   console.log(formatInitReachability(diagnoses));
   if (!hasReachableWorker(diagnoses)) {
-    console.log(chalk.yellow('No worker model reachable yet — see `factory doctor` and `factory models --doctor`.'));
+    console.log(
+      styleText('yellow', 'No worker model reachable yet — see `factory doctor` and `factory models --doctor`.'),
+    );
   }
 
-  console.log(chalk.green(`Initialized ${paths.root}`));
+  console.log(styleText('green', `Initialized ${paths.root}`));
   console.log(`Next: factory constitution --product <name>, then factory triage`);
 }
 
@@ -788,7 +789,7 @@ export async function cmdConstitution(opts: {
 
     ensureDir(paths.state);
     writeFileSync(paths.product, opts.product);
-    console.log(chalk.green(`Active product: ${opts.product}`));
+    console.log(styleText('green', `Active product: ${opts.product}`));
     return;
   }
 
@@ -796,9 +797,9 @@ export async function cmdConstitution(opts: {
 }
 
 export function formatDoctorReport(diagnoses: ModelDiagnosis[]): string {
-  const lines = [chalk.bold('\n== Model Doctor ==')];
+  const lines = [styleText('bold', '\n== Model Doctor ==')];
   for (const d of diagnoses) {
-    const icon = d.reachable ? chalk.green('✅') : chalk.red('❌');
+    const icon = d.reachable ? styleText('green', '✅') : styleText('red', '❌');
     const tiers = d.tiers.join('/');
     lines.push(`  ${icon} ${d.model} provider=${d.provider} tier=${tiers} — ${d.reason}`);
   }
@@ -849,18 +850,18 @@ async function cmdModels(opts: { doctor?: boolean } = {}) {
     return;
   }
 
-  console.log(chalk.bold('\n== Available Models =='));
+  console.log(styleText('bold', '\n== Available Models =='));
   for (const m of registry.list()) {
     const tiers = registry.getTiers(m).join('/');
     const est = registry.estimateCost(m, 1_000_000, 1_000_000);
     const cost = est === null ? 'unpriced' : `$${est.toFixed(2)}/M`;
     const gated = registry.isExperimental(m) && !allowExperimental;
-    const avail = !gated && registry.isAvailable(m) ? chalk.green('✅') : chalk.red('❌');
-    const tag = registry.isExperimental(m) ? chalk.yellow(' [experimental]') : '';
+    const avail = !gated && registry.isAvailable(m) ? styleText('green', '✅') : styleText('red', '❌');
+    const tag = registry.isExperimental(m) ? styleText('yellow', ' [experimental]') : '';
     console.log(`  ${avail} ${m} tier=${tiers} ${cost}${tag}`);
   }
 
-  console.log(chalk.bold('\n== Tiers =='));
+  console.log(styleText('bold', '\n== Tiers =='));
   for (const tier of ['boss', 'worker', 'checker', 'triage']) {
     const models = registry.getModelsInTier(tier);
     console.log(`  ${tier}: ${models.join(' ')}`);
@@ -878,7 +879,7 @@ async function cmdCost(opts: { issue?: string } = {}) {
       console.log(`no cost data for issue ${opts.issue}`);
       return;
     }
-    console.log(chalk.bold(`== Costs for issue ${opts.issue} ==`));
+    console.log(styleText('bold', `== Costs for issue ${opts.issue} ==`));
     for (const c of filtered) {
       console.log(
         `  ${c.task} ${c.model} ${c.cost === null || c.cost === undefined ? 'unknown' : `$${c.cost.toFixed(4)}`}${c.failoverReason ? ` [failover: ${c.failoverReason}]` : ''}`,
@@ -911,7 +912,7 @@ async function cmdCost(opts: { issue?: string } = {}) {
     byModel.set(c.model, e);
   }
 
-  console.log(chalk.bold('== Cost Summary =='));
+  console.log(styleText('bold', '== Cost Summary =='));
   for (const [model, { tasks, priced, pricedCount, unpriced, failovers }] of byModel) {
     const failoverSuffix = failovers > 0 ? ` (${failovers} failover${failovers === 1 ? '' : 's'})` : '';
     const modelCost = formatCostTotal(pricedCount === 0 && unpriced > 0 ? null : priced, unpriced);
@@ -1048,7 +1049,8 @@ async function cmdKpis(opts: { branchPrefix?: string } = {}) {
     allEvents = [...events, ...reconstructHumanEvents(prSources, events)];
   } catch (err: any) {
     console.error(
-      chalk.yellow(
+      styleText(
+        'yellow',
         `factory: GitHub human-event reconstruction unavailable (${err?.message ?? err}) — KPIs use the local log only`,
       ),
     );
@@ -1064,11 +1066,12 @@ async function cmdKpis(opts: { branchPrefix?: string } = {}) {
       try {
         persistClassifierOutcomes(paths, allEvents, prSources, { now, windowDays });
       } catch (err: any) {
-        console.error(chalk.yellow(`factory: classifier outcomes not recorded (${err?.message ?? err})`));
+        console.error(styleText('yellow', `factory: classifier outcomes not recorded (${err?.message ?? err})`));
       }
     } catch (err: any) {
       console.error(
-        chalk.yellow(
+        styleText(
+          'yellow',
           `factory: post-merge defect signals unavailable (${err?.message ?? err}) — postMergeDefectRate omitted from this snapshot`,
         ),
       );
@@ -1082,7 +1085,8 @@ async function cmdKpis(opts: { branchPrefix?: string } = {}) {
     ({ history } = await appendKpiSnapshot(paths, repoRoot, kpis));
   } catch (err: any) {
     console.error(
-      chalk.yellow(
+      styleText(
+        'yellow',
         `factory: KPI snapshot failed (${err?.message ?? err}) — showing the report without persisting a new snapshot`,
       ),
     );
@@ -1165,7 +1169,8 @@ export async function cmdUsage() {
     console.log(`heuristic list-price estimate: ${heuristicLine}`);
   } else {
     console.log(
-      chalk.yellow(
+      styleText(
+        'yellow',
         `factory: real subscription usage unavailable — falling back to a rough list-price proxy, not the real subscription limit`,
       ),
     );
@@ -1175,7 +1180,7 @@ export async function cmdUsage() {
 
 function warnQueueDiagnostics(diagnostics: QueueDiagnostic[]): void {
   for (const d of diagnostics) {
-    console.error(chalk.yellow(`factory: queue ${d.message} — skipped`));
+    console.error(styleText('yellow', `factory: queue ${d.message} — skipped`));
   }
 }
 
@@ -1208,14 +1213,14 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
   );
   const product = readActiveProduct(paths.product) ?? '(none)';
 
-  console.log(chalk.bold(`== ${ghRepo} ==`));
+  console.log(styleText('bold', `== ${ghRepo} ==`));
   console.log(`Product: ${product}`);
   const worktreeParent = loadFactoryConfigForRepo(paths.config).worktree.parent;
   console.log(
     formatWorktreeLocation(resolveWorktreeRoot({ repoRoot, parent: worktreeParent, repo: ghRepo }), worktreeParent),
   );
 
-  console.log(chalk.bold('\n== Active =='));
+  console.log(styleText('bold', '\n== Active =='));
   if (existsSync(paths.queue)) {
     const { entries, diagnostics } = parseQueue(readFileSync(paths.queue, 'utf-8'));
     if (entries.length > 0) {
@@ -1239,7 +1244,7 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
     console.log('  (no queue file)');
   }
 
-  console.log(chalk.bold('\n== Queue =='));
+  console.log(styleText('bold', '\n== Queue =='));
   if (!hasGitHubToken()) {
     console.log('  (no GitHub token — run `gh auth login`)');
   } else {
@@ -1263,10 +1268,10 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
     }
   }
 
-  console.log(chalk.bold('\n== Health =='));
+  console.log(styleText('bold', '\n== Health =='));
 
   if (opts.kpis) {
-    console.log(chalk.bold('\n  Effective config:'));
+    console.log(styleText('bold', '\n  Effective config:'));
     for (const line of describeEffectiveConfig({
       router,
       repo: repoConfig,
@@ -1284,7 +1289,7 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
     console.log('\n  (Effective config and KPIs hidden — run `factory status --kpis` to view)');
   }
 
-  console.log(chalk.bold('\n  Provider breaker:'));
+  console.log(styleText('bold', '\n  Provider breaker:'));
   const openBreakers = await new ProviderBreaker(paths.breaker).list();
   if (openBreakers.length === 0) {
     console.log('    (closed)');
@@ -1294,7 +1299,7 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
     }
   }
 
-  console.log(chalk.bold('\n  Sweep heartbeat:'));
+  console.log(styleText('bold', '\n  Sweep heartbeat:'));
   const sweepStatus = checkSweepHeartbeat(
     loadFactoryConfigForRepo(paths.config).sweep,
     process.env,
@@ -1302,7 +1307,7 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
   );
   console.log(`    ${formatSweepHeartbeatStatusLine(sweepStatus)}`);
 
-  console.log(chalk.bold('\n  Last Events:'));
+  console.log(styleText('bold', '\n  Last Events:'));
   if (existsSync(paths.events)) {
     const events = readFileSync(paths.events, 'utf-8').trim().split('\n').slice(-12);
     for (const e of events) {
@@ -1316,7 +1321,7 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
   }
 
   if (opts.kpis) {
-    console.log(chalk.bold('\n  KPIs:'));
+    console.log(styleText('bold', '\n  KPIs:'));
     const kpiEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
     const kpiCosts = existsSync(paths.costs) ? readCosts(paths.costs) : [];
     for (const line of formatKpiLines(computeHealthKpis(kpiEvents, kpiCosts))) {
@@ -1325,7 +1330,7 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
   }
 
   if (existsSync(paths.stop)) {
-    console.log(chalk.red('\n!! STOP file present — factory halting between issues'));
+    console.log(styleText('red', '\n!! STOP file present — factory halting between issues'));
   }
 }
 
@@ -1715,12 +1720,12 @@ export async function shipIssue(
       // checkPhase logs each skipped checker as a 'check' event prefixed "SKIPPED: " —
       // echo it to the terminal the way shipIssue used to print it directly.
       if (type === 'check' && msg.startsWith('SKIPPED: ')) {
-        console.error(chalk.yellow(`  SKIP: ${msg.slice('SKIPPED: '.length)}`));
+        console.error(styleText('yellow', `  SKIP: ${msg.slice('SKIPPED: '.length)}`));
       }
       // Likewise for each failing checker, so a parked run still names which checker
       // failed and why — the parked RunOutcome carries only an aggregate count (#675).
       if (type === 'check' && msg.startsWith('FAILED: ')) {
-        console.error(chalk.red(`  FAIL: ${msg.slice('FAILED: '.length)}`));
+        console.error(styleText('red', `  FAIL: ${msg.slice('FAILED: '.length)}`));
       }
       logEvent(paths.events, type, issueNum, msg, { ...extra, lane, phase });
       // Best-effort lastEvent summary (#1327) for factory.run.snapshot — an
@@ -1743,7 +1748,7 @@ export async function shipIssue(
   const skipReason = closedWorkSkipReason(work);
   if (skipReason) {
     log('skipped-already-closed', skipReason);
-    console.log(chalk.yellow(`skipped: ${skipReason}`));
+    console.log(styleText('yellow', `skipped: ${skipReason}`));
     throw new IssueSkippedError(skipReason, 'already-closed');
   }
 
@@ -1759,7 +1764,7 @@ export async function shipIssue(
   });
   let activeSandboxPolicy: SandboxPolicy | undefined;
   if (opts.sandbox === false) {
-    console.error(chalk.yellow('factory: sandbox disabled by --no-sandbox — agent runs are UNCONTAINED'));
+    console.error(styleText('yellow', 'factory: sandbox disabled by --no-sandbox — agent runs are UNCONTAINED'));
     log('sandbox-disabled', 'sandbox disabled by --no-sandbox');
   } else if (!sandboxPolicy) {
     log('sandbox-disabled', 'sandbox disabled by config/FACTORY_SANDBOX');
@@ -1969,9 +1974,9 @@ export async function shipIssue(
 
   if (outcome.state === 'ready' || outcome.state === 'shipped') {
     if (ctx?.localOnly) {
-      console.log(chalk.green(`✅ Local-only run complete in ${worktree} (no PR — publishing disabled)`));
+      console.log(styleText('green', `✅ Local-only run complete in ${worktree} (no PR — publishing disabled)`));
     } else {
-      console.log(chalk.green(`✅ Issue #${issueNum} → ${terminalMessage ?? 'ready'}`));
+      console.log(styleText('green', `✅ Issue #${issueNum} → ${terminalMessage ?? 'ready'}`));
     }
     return outcome.branch;
   }
@@ -2020,7 +2025,7 @@ async function maybeWriteLocalRunReport(opts: {
     route: opts.route,
     reason: opts.reason,
   });
-  console.log(chalk.cyan(`local-only report: ${report.path}`));
+  console.log(styleText('cyan', `local-only report: ${report.path}`));
   return report.path;
 }
 
@@ -2061,7 +2066,7 @@ async function maybeWriteBenchmarkArtifacts(opts: {
       diffBase: opts.diffBase,
     });
     opts.log('benchmark-artifacts', `manifest written to ${manifestPath}`);
-    console.log(chalk.cyan(`benchmark artifacts: ${manifestPath}`));
+    console.log(styleText('cyan', `benchmark artifacts: ${manifestPath}`));
   } catch (err: any) {
     // Never let artifact emission mask the run outcome.
     opts.log('benchmark-artifacts-failed', `could not write benchmark artifacts: ${err.message}`);
@@ -2191,7 +2196,7 @@ async function cmdShip(
 
   const mergeNotice = mergeScopeNotice(process.env, issueNum);
   if (mergeNotice) {
-    console.error(chalk.yellow(mergeNotice));
+    console.error(styleText('yellow', mergeNotice));
     logEvent(paths.events, 'warn', issueNum, mergeNotice);
   }
 
@@ -2267,7 +2272,7 @@ async function cmdRunIssue(
         2,
       );
     }
-    console.log(chalk.cyan(`one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
+    console.log(styleText('cyan', `one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
     await runAutoWorktreeGc(repoRoot, paths, ghRepo, issueNum);
 
     const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
@@ -2315,7 +2320,7 @@ async function runDecomposedChildren(
   env: { repoRoot: string; ghRepo: string; workSources: ReturnType<typeof createDefaultWorkSourceRegistry> },
 ): Promise<void> {
   const list = children.map((n) => `#${n}`).join(', ');
-  console.log(chalk.cyan(`run-children: #${parent} decomposed into ${list} — running them in build order`));
+  console.log(styleText('cyan', `run-children: #${parent} decomposed into ${list} — running them in build order`));
   const paths = getFactoryPaths(env.repoRoot);
   const results = await runChildrenInOrder(
     children,
@@ -2329,7 +2334,7 @@ async function runDecomposedChildren(
       } catch (err) {
         return { issue: child, status: 'failed', detail: `could not resolve issue #${child} (${errorDetail(err)})` };
       }
-      console.log(chalk.cyan(`one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
+      console.log(styleText('cyan', `one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
       let outcome: RunOutcome | undefined;
       try {
         await shipIssue(child, opts, {
@@ -2343,7 +2348,9 @@ async function runDecomposedChildren(
       } catch (err: any) {
         if (err instanceof IssueDecomposedError) {
           const again = err.childIssues.map((n) => `#${n}`).join(', ');
-          console.log(chalk.cyan(`run-children: #${child} decomposed into ${again} — running them in its place`));
+          console.log(
+            styleText('cyan', `run-children: #${child} decomposed into ${again} — running them in its place`),
+          );
           return { issue: child, status: 'decomposed', children: err.childIssues };
         }
         if (err instanceof IssueSkippedError) {
@@ -2358,13 +2365,15 @@ async function runDecomposedChildren(
     (next) => {
       if (!existsSync(paths.stop)) return false;
       logEvent(paths.events, 'stopped', next, 'STOP file present');
-      console.log(chalk.yellow(`run-children: .factory/STOP present — not starting #${next} or any later child`));
+      console.log(
+        styleText('yellow', `run-children: .factory/STOP present — not starting #${next} or any later child`),
+      );
       return true;
     },
   );
   const ok = childRunSucceeded(results);
   for (const line of formatChildRunSummary(parent, results)) {
-    console.log(ok ? chalk.green(line) : chalk.yellow(line));
+    console.log(ok ? styleText('green', line) : styleText('yellow', line));
   }
   if (!ok) {
     throw new CliExitError(
@@ -2420,7 +2429,7 @@ async function cmdRunBrief(
         if (err instanceof InvalidArtifactsDirError) throw new CliExitError(`factory: ${err.message}`, 2);
         throw err;
       }
-      console.log(chalk.cyan(`local-only: benchmark artifacts will be written to ${artifactsDir}`));
+      console.log(styleText('cyan', `local-only: benchmark artifacts will be written to ${artifactsDir}`));
     }
 
     // Local-only runs never touch GitHub — no remote required, no mutation possible.
@@ -2443,10 +2452,10 @@ async function cmdRunBrief(
     }
     const digest = work.reference?.externalId ?? '';
     const runNum = briefRunNumber(digest);
-    console.log(chalk.cyan(`one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
+    console.log(styleText('cyan', `one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
     logEvent(paths.events, 'work-source', runNum, `inline local brief ${briefPath} (sha256 ${digest})`);
     if (localOnly) {
-      console.log(chalk.cyan(`local-only: workspace ${localOnly.workspace} — publishing disabled`));
+      console.log(styleText('cyan', `local-only: workspace ${localOnly.workspace} — publishing disabled`));
       logEvent(
         paths.events,
         'local-only',
@@ -2500,8 +2509,8 @@ async function cmdLocalSmallDryRun(issueNum: number, opts: { spec?: string; outp
     outputDir,
   });
 
-  console.log(chalk.green(`local-small dry run: ${result.planPath}`));
-  console.log(chalk.green(`local-small context: ${result.contextPath}`));
+  console.log(styleText('green', `local-small dry run: ${result.planPath}`));
+  console.log(styleText('green', `local-small context: ${result.contextPath}`));
 }
 
 async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }) {
@@ -2557,7 +2566,7 @@ async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }) 
     };
 
     const report = (item: OvernightStateItem) => {
-      console.log(chalk.yellow(`factory: issue #${item.issue} ${item.status} — ${item.reason ?? 'unknown'}`));
+      console.log(styleText('yellow', `factory: issue #${item.issue} ${item.status} — ${item.reason ?? 'unknown'}`));
       logEvent(
         paths.events,
         'overnight-park',
@@ -2573,10 +2582,10 @@ async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }) 
     const ready = result.processed.filter((item) => item.status === 'ready');
     const parked = result.processed.filter((item) => item.status === 'parked');
     const failed = result.processed.filter((item) => item.status === 'failed');
-    console.log(chalk.green(`overnight ready: ${ready.length}`));
-    console.log(chalk.yellow(`overnight parked: ${parked.length}`));
-    console.log(chalk.red(`overnight failed: ${failed.length}`));
-    console.log(chalk.yellow(`overnight skipped (already resumed): ${result.skipped.length}`));
+    console.log(styleText('green', `overnight ready: ${ready.length}`));
+    console.log(styleText('yellow', `overnight parked: ${parked.length}`));
+    console.log(styleText('red', `overnight failed: ${failed.length}`));
+    console.log(styleText('yellow', `overnight skipped (already resumed): ${result.skipped.length}`));
 
     if (result.halted) {
       throw new CliExitError(
@@ -2744,15 +2753,18 @@ export async function cmdLand(issueNum: number, opts: { branchPrefix?: string; a
     const result = await landIssue(issueNum, repoRoot, ghRepo, paths, octokit, skipCI, branchPrefix, {
       allowGated: opts.allowGated === true,
     });
-    console.log(chalk.green(`✅ Landed PR #${result.prNumber} for issue #${issueNum}`));
+    console.log(styleText('green', `✅ Landed PR #${result.prNumber} for issue #${issueNum}`));
   } catch (err: any) {
     if (err instanceof AwaitingReviewError) {
-      console.log(chalk.yellow(`⏸ PR #${err.prNumber} for issue #${issueNum} awaiting human review — left open`));
+      console.log(
+        styleText('yellow', `⏸ PR #${err.prNumber} for issue #${issueNum} awaiting human review — left open`),
+      );
       return;
     }
     if (err instanceof CiUnverifiedError) {
       console.log(
-        chalk.yellow(
+        styleText(
+          'yellow',
           `⏸ PR #${err.prNumber} for issue #${issueNum} — CI never reached a green verdict — left open, not merged`,
         ),
       );
@@ -2760,7 +2772,10 @@ export async function cmdLand(issueNum: number, opts: { branchPrefix?: string; a
     }
     if (err instanceof CiFailedError) {
       console.log(
-        chalk.yellow(`⏸ PR #${err.prNumber} for issue #${issueNum} has a failing CI check — left open, not merged`),
+        styleText(
+          'yellow',
+          `⏸ PR #${err.prNumber} for issue #${issueNum} has a failing CI check — left open, not merged`,
+        ),
       );
       return;
     }
@@ -3022,7 +3037,7 @@ export async function cmdTriageAccept(opts: { force?: boolean }) {
     '-',
     `accepted ${result.issues.length} issue(s) [${result.issues.join(', ')}] by ${acceptedBy}${suffix}`,
   );
-  console.log(chalk.green(`queue accepted — ${result.issues.length} issue(s) promoted to ${paths.queue}`));
+  console.log(styleText('green', `queue accepted — ${result.issues.length} issue(s) promoted to ${paths.queue}`));
 }
 
 export async function cmdQueueMigrate(opts: { file?: string; dryRun?: boolean } = {}): Promise<void> {
@@ -3088,7 +3103,10 @@ export async function cmdQueueMigrate(opts: { file?: string; dryRun?: boolean } 
 
   if (opts.dryRun) {
     console.log(
-      chalk.cyan(`dry run — ${plan.length} issue(s) would be labelled from ${queueFile}; no GitHub changes made`),
+      styleText(
+        'cyan',
+        `dry run — ${plan.length} issue(s) would be labelled from ${queueFile}; no GitHub changes made`,
+      ),
     );
     for (const step of plan) {
       console.log(`  #${step.issue} → lane ${step.lane}, position ${step.position} [${step.labels.join(', ')}]`);
@@ -3102,7 +3120,7 @@ export async function cmdQueueMigrate(opts: { file?: string; dryRun?: boolean } 
   } catch (err) {
     throw new CliExitError(`factory: queue migration failed — ${errorDetail(err)}`, 1);
   }
-  console.log(chalk.green(`queue migrated — ${entries.length} issue(s) labelled from ${queueFile}`));
+  console.log(styleText('green', `queue migrated — ${entries.length} issue(s) labelled from ${queueFile}`));
 }
 
 export async function cmdQueueAdd(lane: string, issueArgs: string[]): Promise<void> {
@@ -3123,11 +3141,11 @@ export async function cmdQueueAdd(lane: string, issueArgs: string[]): Promise<vo
 
   for (const r of results) {
     if (r.outcome === 'queued') {
-      console.log(chalk.green(`#${r.issue} queued → lane ${lane}, position ${r.position}`));
+      console.log(styleText('green', `#${r.issue} queued → lane ${lane}, position ${r.position}`));
     } else if (r.outcome === 'already-queued') {
       console.log(`#${r.issue} already queued — skipped`);
     } else {
-      console.error(chalk.red(`#${r.issue} failed — ${r.detail}`));
+      console.error(styleText('red', `#${r.issue} failed — ${r.detail}`));
     }
   }
 
@@ -3224,7 +3242,8 @@ async function cmdProxy() {
 
   if (!settings.enabled) {
     console.log(
-      chalk.yellow(
+      styleText(
+        'yellow',
         'factory proxy: environment.proxy.enabled is false in factory.json — starting anyway (running this command is the explicit opt-in)',
       ),
     );
@@ -3240,7 +3259,7 @@ async function cmdProxy() {
     startedAt: new Date().toISOString(),
   });
 
-  console.log(chalk.green(`factory proxy: listening on 127.0.0.1:${boundPort} (*.${settings.domain})`));
+  console.log(styleText('green', `factory proxy: listening on 127.0.0.1:${boundPort} (*.${settings.domain})`));
   const leases = readPortLeases(paths.ports);
   if (leases.length === 0) {
     console.log('  no active lane leases yet');
@@ -3250,7 +3269,8 @@ async function cmdProxy() {
     }
   }
   console.log(
-    chalk.dim(
+    styleText(
+      'dim',
       '  *.localhost resolves to loopback in Chrome/Firefox out of the box (RFC 6761); Safari/curl may need ' +
         'a dnsmasq-backed .test domain instead — documented here, not solved.',
     ),
@@ -3294,7 +3314,7 @@ async function cmdFactoryd(opts: { port?: string; registry?: string }): Promise<
   }
   const logSink = createDaemonLogSink(runtime.logFile);
   const log = (line: string) => {
-    console.log(chalk.dim(line));
+    console.log(styleText('dim', line));
     logSink(line);
   };
   if (acquired.stalePid !== null) log(`removed stale pid file (pid ${acquired.stalePid})`);
@@ -3316,7 +3336,7 @@ async function cmdFactoryd(opts: { port?: string; registry?: string }): Promise<
     `  GET http://127.0.0.1:${boundPort}/repos`,
     `  POST http://127.0.0.1:${boundPort}/runs  {"runId","repo","issue"}`,
   ];
-  console.log(chalk.green(banner[0]));
+  console.log(styleText('green', banner[0] ?? ''));
   for (const line of banner.slice(1)) console.log(line);
   for (const line of banner) logSink(line);
 
@@ -3364,7 +3384,7 @@ async function cmdRun(
     const stopStatus = readStopFileStatus(paths);
     if (stopStatus.present) {
       const msg = stopSentinelRunSkipMessage(stopStatus);
-      console.log(chalk.yellow(`!! ${msg}`));
+      console.log(styleText('yellow', `!! ${msg}`));
       logEvent(paths.events, 'stopped', 'all', msg);
       return;
     }
@@ -3393,7 +3413,7 @@ async function cmdRun(
             preflight: (issue) => preflightQueuedIssue(issue, createQueuePreflightOps(octokit, owner, repo)),
             onConflict: (issue, verdict) => {
               const line = `#${issue} refused — ${verdict.reason} | repair: ${verdict.repair}`;
-              console.error(chalk.yellow(`factory: ${line}`));
+              console.error(styleText('yellow', `factory: ${line}`));
               logEvent(paths.events, 'queue_admission_conflict', String(issue), line);
             },
           }),
@@ -4534,7 +4554,8 @@ export async function cmdResumeApproved(opts: { branchPrefix?: string } = {}) {
   const paths = getFactoryPaths(repoRoot);
   const result = await sweepApprovedPRs(repoRoot, ghRepo, paths, {}, { branchPrefix });
   console.log(
-    chalk.green(
+    styleText(
+      'green',
       `✅ resume-approved: ${result.landed.length} landed, ${result.skipped.length} skipped, ${result.failed.length} failed`,
     ),
   );
@@ -5055,8 +5076,8 @@ export async function main() {
     entryUrl: import.meta.url,
     env: process.env,
     argv: process.argv,
-    error: (m) => console.error(chalk.red(m)),
-    warn: (m) => console.error(chalk.yellow(m)),
+    error: (m) => console.error(styleText('red', m)),
+    warn: (m) => console.error(styleText('yellow', m)),
   });
   if (staleExit !== null) {
     process.exitCode = staleExit;
@@ -5561,7 +5582,7 @@ export async function main() {
     await program.parseAsync(process.argv);
   } catch (err) {
     if (err instanceof CliExitError) {
-      console.error(chalk.red(err.message));
+      console.error(styleText('red', err.message));
       process.exitCode = err.code;
       return;
     }
