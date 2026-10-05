@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-08-21
+- Amended by: [ADR-0147](0147-size-gate-slice-mode-ships-an-oversized-issue-as-sequential-slice-prs-under-the-same-issue-instead-of-filing-sub-issues.md) (adds `sizeGate.mode`; this behavior is now the `file` mode)
 
 ## Context
 
