@@ -2,11 +2,10 @@ import type * as ChildProcess from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 import * as FactoryCore from '@on-par/factory-core';
 import type * as FactoryCoreInternal from '@on-par/factory-core/internal';
-import type * as DaemonModule from './cli/daemon.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
@@ -16,6 +15,12 @@ const h = vi.hoisted(() => {
   return {
     repoRoot: '',
     constitutionsDir: '',
+    // daemon-control seam (CliDeps.daemon)
+    daemonHome: '',
+    daemonPlatform: 'darwin' as NodeJS.Platform,
+    daemonExecCalls: [] as Array<{ cmd: string; args: string[] }>,
+    daemonExecImpl: (_cmd: string, _args: string[]) => ({ code: 0, stdout: '', stderr: '' }),
+    daemonOut: [] as string[],
     ghRepo: 'on-par/software-factory',
     // child_process shims
     execImpl: (_cmd: string): string => '',
@@ -267,19 +272,6 @@ vi.mock('@on-par/factory-core/internal', async (importOriginal) => {
   };
 });
 
-// The daemon-control commands shell out to the real launchctl by default, so the
-// wiring tests stub them; DaemonCtlError stays real for the CliExitError mapping.
-vi.mock('./cli/daemon.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof DaemonModule>();
-  return {
-    ...actual,
-    cmdDaemonStart: vi.fn(async () => {}),
-    cmdDaemonStop: vi.fn(async () => {}),
-    cmdDaemonStatus: vi.fn(async () => {}),
-    cmdDaemonLogs: vi.fn(async () => {}),
-  };
-});
-
 import {
   cleanupWorktree,
   formatGcReport,
@@ -296,14 +288,7 @@ import {
   withGitLock,
 } from '@on-par/factory-core/internal';
 
-import {
-  cmdDaemonLogs,
-  cmdDaemonStart,
-  cmdDaemonStatus,
-  cmdDaemonStop,
-  DaemonCtlError,
-  type DaemonCtlDeps,
-} from './cli/daemon.js';
+import { FACTORYD_LABEL, factorydFiles, type DaemonCtlDeps } from './cli/daemon.js';
 import { HELP_GROUPS, OTHER_GROUP } from './cli/help-groups.js';
 
 import {
@@ -394,9 +379,26 @@ function defaultOctokit() {
   };
 }
 
+function daemonDeps(): DaemonCtlDeps {
+  return {
+    exec: async (cmd, args) => {
+      h.daemonExecCalls.push({ cmd, args });
+      return h.daemonExecImpl(cmd, args);
+    },
+    home: h.daemonHome,
+    uid: 501,
+    platform: h.daemonPlatform,
+    out: { write: (s: string) => h.daemonOut.push(s) },
+    nodePath: '/usr/local/bin/node',
+    cliScriptPath: '/opt/factory/cli.js',
+    registryFile: join(h.daemonHome, '.factory', 'registry.json'),
+    pollMs: 10,
+  };
+}
+
 async function runMain(...args: string[]) {
   process.argv = ['node', 'factory', ...args];
-  return runMainWith(undefined, ...args);
+  return runMainWith({ daemon: daemonDeps() }, ...args);
 }
 
 async function runMainWith(deps: CliDeps | undefined, ...args: string[]) {
@@ -414,6 +416,11 @@ async function runMainWith(deps: CliDeps | undefined, ...args: string[]) {
 beforeEach(() => {
   h.repoRoot = mkdtempSync(join(tmpdir(), 'factory-cli-'));
   h.constitutionsDir = mkdtempSync(join(tmpdir(), 'factory-const-'));
+  h.daemonHome = mkdtempSync(join(tmpdir(), 'factory-daemon-home-'));
+  h.daemonPlatform = 'darwin';
+  h.daemonExecCalls = [];
+  h.daemonExecImpl = () => ({ code: 0, stdout: '', stderr: '' });
+  h.daemonOut = [];
   mkdirSync(join(h.repoRoot, '.git', 'info'), { recursive: true });
   mkdirSync(paths().state, { recursive: true });
   mkdirSync(paths().plans, { recursive: true });
@@ -509,6 +516,7 @@ beforeEach(() => {
 afterEach(() => {
   rmSync(h.repoRoot, { recursive: true, force: true });
   rmSync(h.constitutionsDir, { recursive: true, force: true });
+  rmSync(h.daemonHome, { recursive: true, force: true });
   for (const [k, v] of Object.entries(savedEnv)) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
@@ -2699,46 +2707,66 @@ bash scripts/verify.sh
       expect(logged()).not.toContain('listening on');
     });
 
-    it.each([
-      ['start', cmdDaemonStart],
-      ['stop', cmdDaemonStop],
-      ['status', cmdDaemonStatus],
-    ])('daemon %s dispatches to its launchctl wrapper', async (verb, cmd) => {
-      const res = await runMain('daemon', verb);
+    const bootout = { cmd: 'launchctl', args: ['bootout', `gui/501/${FACTORYD_LABEL}`] };
+    const print = { cmd: 'launchctl', args: ['print', `gui/501/${FACTORYD_LABEL}`] };
+
+    it('daemon start installs the plist and bootstraps it through launchctl', async () => {
+      const { plistPath } = factorydFiles(h.daemonHome);
+      const res = await runMain('daemon', 'start');
       expect(res.exited).toBe(false);
-      expect(cmd).toHaveBeenCalledTimes(1);
-      expect(cmd).toHaveBeenCalledWith(undefined);
+      expect(h.daemonExecCalls).toEqual([
+        bootout,
+        { cmd: 'launchctl', args: ['bootstrap', 'gui/501', plistPath] },
+        print,
+      ]);
+      expect(existsSync(plistPath)).toBe(true);
+      expect(readFileSync(plistPath, 'utf-8')).toContain('/opt/factory/cli.js');
+      expect(h.daemonOut.join('')).toContain('factoryd: installed');
     });
 
-    it.each([
-      ['start', cmdDaemonStart],
-      ['stop', cmdDaemonStop],
-      ['status', cmdDaemonStatus],
-    ])('daemon %s passes injected deps.daemon to its wrapper', async (verb, cmd) => {
-      const daemon: DaemonCtlDeps = { platform: 'darwin', home: '/tmp/x' };
-      const res = await runMainWith({ daemon }, 'daemon', verb);
+    it('daemon stop boots the agent out through launchctl', async () => {
+      const res = await runMain('daemon', 'stop');
       expect(res.exited).toBe(false);
-      expect(cmd).toHaveBeenCalledTimes(1);
-      expect(cmd).toHaveBeenCalledWith(daemon);
+      expect(h.daemonExecCalls).toEqual([bootout]);
+      expect(h.daemonOut.join('')).toContain('factoryd: stopped');
     });
 
-    it('daemon logs passes injected deps.daemon as the second argument', async () => {
-      const daemon: DaemonCtlDeps = { platform: 'darwin', home: '/tmp/x' };
-      await runMainWith({ daemon }, 'daemon', 'logs', '-n', '3');
-      expect(cmdDaemonLogs).toHaveBeenCalledWith(expect.objectContaining({ lines: '3' }), daemon);
+    it('daemon status reports the pid and uptime of the running agent', async () => {
+      h.daemonExecImpl = (cmd) =>
+        cmd === 'launchctl'
+          ? { code: 0, stdout: '\tpid = 4242\n', stderr: '' }
+          : { code: 0, stdout: '01:02\n', stderr: '' };
+      const res = await runMain('daemon', 'status');
+      expect(res.exited).toBe(false);
+      expect(h.daemonExecCalls).toEqual([print, { cmd: 'ps', args: ['-o', 'etime=', '-p', '4242'] }]);
+      const out = h.daemonOut.join('');
+      expect(out).toContain('factoryd: running (pid 4242, uptime 01:02)');
+      expect(out).toContain('attached repos: none');
     });
 
-    it('daemon logs passes --follow and --lines through', async () => {
+    it('daemon logs -n prints the last N lines of the log', async () => {
+      const { logPath } = factorydFiles(h.daemonHome);
+      mkdirSync(dirname(logPath), { recursive: true });
+      writeFileSync(logPath, Array.from({ length: 10 }, (_, i) => `line${i + 1}\n`).join(''));
+      const res = await runMain('daemon', 'logs', '-n', '3');
+      expect(res.exited).toBe(false);
+      expect(h.daemonOut.join('')).toBe('line8\nline9\nline10\n');
+      expect(h.daemonExecCalls).toEqual([]);
+    });
+
+    it('daemon logs -f returns early when no log exists yet', async () => {
+      // Never create a log file here: follow mode would then block on SIGINT.
       const res = await runMain('daemon', 'logs', '-f', '-n', '7');
       expect(res.exited).toBe(false);
-      expect(cmdDaemonLogs).toHaveBeenCalledWith(expect.objectContaining({ follow: true, lines: '7' }), undefined);
+      expect(h.daemonOut.join('')).toContain('no daemon log yet');
     });
 
     it('maps DaemonCtlError onto the CLI exit code', async () => {
-      vi.mocked(cmdDaemonStatus).mockRejectedValueOnce(new DaemonCtlError('requires macOS launchd', 2));
+      h.daemonPlatform = 'linux';
       const res = await runMain('daemon', 'status');
       expect(res.exited).toBe(true);
       expect(res.code).toBe(2);
+      expect(h.daemonExecCalls).toEqual([]);
     });
 
     it('refuses to start when a live daemon holds the pid file, leaving it untouched', async () => {
