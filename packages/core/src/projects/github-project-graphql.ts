@@ -22,25 +22,6 @@ export function createOctokitGraphqlClient(octokit: Pick<Octokit, 'graphql'>): P
   return (query, variables) => octokit.graphql(query, variables) as Promise<unknown>;
 }
 
-/** Adapts a gh-authenticated Octokit into the injected rationale comment port, binding
- *  owner/repo (the record carries only the issue number). Mirrors the existing
- *  `octokit.rest.issues.createComment` call in `readiness/decompose.ts`. */
-export function createOctokitReprioritizationCommentClient(
-  octokit: Pick<Octokit, 'rest'>,
-  ctx: { owner: string; repo: string },
-): QueueRationaleCommentClient {
-  return {
-    async commentOnIssue({ issueNumber, body }) {
-      await octokit.rest.issues.createComment({
-        owner: ctx.owner,
-        repo: ctx.repo,
-        issue_number: issueNumber,
-        body,
-      });
-    },
-  };
-}
-
 export interface GithubProjectQueuePollerOptions {
   readonly octokit: Pick<Octokit, 'graphql'>;
   readonly projectId: string;

@@ -207,6 +207,7 @@ export {
   ensureDir,
   escalationLine,
   formatEventLine,
+  getIssueTitle,
   gitFetch,
   isEscalation,
   levelForType,

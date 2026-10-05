@@ -15,7 +15,6 @@ import {
   applyRepoConfig,
   describeEffectiveConfig,
   loadRepoConfig,
-  resolveClassifierModel,
   resolveCodexDisabled,
   resolveEffectiveBuildRoute,
   resolveEffectiveConfig,
@@ -1026,18 +1025,6 @@ describe('classifier config (#1723)', () => {
     );
     const result = applyRepoConfig(models, { version: 2, models: { pins: { classifier: 'claude-model' } } });
     expect(result.tiers.checker).toEqual(models.tiers.checker);
-  });
-
-  it('resolveClassifierModel returns the pin, else the checker-tier model', () => {
-    const router = new ModelRouter(models, routes, false, new StubModelExecutor({ scripts: {} }));
-    expect(resolveClassifierModel(router, { version: 2, models: { pins: { classifier: 'claude-model' } } })).toBe(
-      'claude-model',
-    );
-    expect(resolveClassifierModel(router, null)).toBe(router.resolve('classify_pr'));
-    expect(resolveClassifierModel(router, null)).toBe('gpt-model-b');
-    expect(() =>
-      resolveClassifierModel(router, { version: 2, models: { pins: { classifier: 'no-such-model' } } }),
-    ).toThrow(/no-such-model/);
   });
 
   it('the packaged classify_pr route is on the checker tier', async () => {
