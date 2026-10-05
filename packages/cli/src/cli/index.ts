@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 // packages/cli/src/cli/index.ts — CLI entry point: factory <command> [options]
 
-import { exec as execCb, execSync } from 'node:child_process';
+import { exec as execCb, execSync, type StdioOptions } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -314,7 +314,18 @@ import {
   sweepHeartbeatCheck,
 } from './sweep-heartbeat.js';
 
-const exec = promisify(execCb);
+/** Shell seam for the CLI (#2014). Tests inject fakes through CliDeps; production uses defaultCliShell. */
+export interface CliShell {
+  exec: (command: string, options?: { cwd?: string; timeout?: number }) => Promise<{ stdout: string; stderr: string }>;
+  execSync: (command: string, options?: { timeout?: number; stdio?: StdioOptions }) => string;
+}
+
+const execAsync = promisify(execCb);
+export const defaultCliShell: CliShell = {
+  exec: (command, options) => execAsync(command, options ?? {}),
+  execSync: (command, options) => String(execSync(command, { encoding: 'utf-8', ...options }) ?? ''),
+};
+
 type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<unknown>;
 
 export const PREREQUISITES_TEXT = `Prerequisites:
@@ -326,18 +337,18 @@ Run inside a git repository with a GitHub remote.
 
 // ---------- helpers ----------
 
-async function getRepoRoot(): Promise<string> {
+async function getRepoRoot(shell: CliShell): Promise<string> {
   try {
-    const { stdout } = await exec('git rev-parse --show-toplevel');
+    const { stdout } = await shell.exec('git rev-parse --show-toplevel');
     return stdout.trim();
   } catch {
     throw new CliExitError('factory: not inside a git repository', 2);
   }
 }
 
-async function getGitHubRepo(): Promise<string> {
+async function getGitHubRepo(shell: CliShell): Promise<string> {
   try {
-    const { stdout } = await exec('gh repo view --json nameWithOwner --jq .nameWithOwner');
+    const { stdout } = await shell.exec('gh repo view --json nameWithOwner --jq .nameWithOwner');
     return stdout.trim();
   } catch {
     throw new CliExitError('factory: no GitHub remote detected (gh repo view failed)', 2);
@@ -345,19 +356,19 @@ async function getGitHubRepo(): Promise<string> {
 }
 
 /** Env token first, then one `gh auth token` subprocess (≤5 s). `undefined` when neither yields one. */
-function resolveGitHubToken(): string | undefined {
+function resolveGitHubToken(shell: CliShell): string | undefined {
   let token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
   if (!token) {
     try {
-      const out = execSync('gh auth token', { encoding: 'utf-8', timeout: 5_000 });
+      const out = shell.execSync('gh auth token', { timeout: 5_000 });
       token = out.trim() || undefined;
     } catch {}
   }
   return token;
 }
 
-function getOctokit(): Octokit {
-  return createFactoryOctokit(resolveGitHubToken());
+function getOctokit(shell: CliShell): Octokit {
+  return createFactoryOctokit(resolveGitHubToken(shell));
 }
 
 export function errorDetail(err: unknown): string {
@@ -371,7 +382,7 @@ export function errorDetail(err: unknown): string {
 export function hasGitHubToken(env: NodeJS.ProcessEnv = process.env, tryToken?: () => string): boolean {
   if (env.GITHUB_TOKEN || env.GH_TOKEN) return true;
   try {
-    const out = (tryToken ?? (() => execSync('gh auth token', { encoding: 'utf-8', timeout: 5_000 })))();
+    const out = (tryToken ?? (() => defaultCliShell.execSync('gh auth token', { timeout: 5_000 })))();
     return out.trim().length > 0;
   } catch {
     return false;
@@ -415,9 +426,9 @@ export function formatInitReachability(diagnoses: ModelDiagnosis[]): string {
   return `policy=auto, ${reachable}/${diagnoses.length} models reachable`;
 }
 
-async function cmdInit(opts: { force?: boolean } = {}) {
-  const repoRoot = await getRepoRoot();
-  if (!hasGitHubToken()) {
+async function cmdInit(opts: { force?: boolean } = {}, shell: CliShell) {
+  const repoRoot = await getRepoRoot(shell);
+  if (!hasGitHubToken(process.env, () => shell.execSync('gh auth token', { timeout: 5_000 }))) {
     console.error(styleText('red', `factory: ${missingTokenMessage()}`));
     process.exit(2);
   }
@@ -612,8 +623,8 @@ export async function runMigrate(
   console.log('Verify: factory status');
 }
 
-async function cmdMigrate(opts: { dryRun?: boolean; toYaml?: boolean } = {}): Promise<void> {
-  await runMigrate(await getRepoRoot(), opts);
+async function cmdMigrate(opts: { dryRun?: boolean; toYaml?: boolean } = {}, shell: CliShell): Promise<void> {
+  await runMigrate(await getRepoRoot(shell), opts);
 }
 
 export class InvalidProductNameError extends Error {}
@@ -654,21 +665,29 @@ export async function runFeedbackCommand(
   }
 }
 
-export async function cmdFeedback(prUrl: string, opts: { note?: string; branchPrefix?: string }): Promise<void> {
-  const paths = getFactoryPaths(await getRepoRoot());
+export async function cmdFeedback(
+  prUrl: string,
+  opts: { note?: string; branchPrefix?: string },
+  shell: CliShell = defaultCliShell,
+): Promise<void> {
+  const paths = getFactoryPaths(await getRepoRoot(shell));
   const prefix = opts.branchPrefix === undefined ? resolveBranchPrefix() : branchPrefixOrExit(opts.branchPrefix);
-  await runFeedbackCommand(prUrl, opts, buildFeedbackDeps(getOctokit(), paths, prefix, createOctokitFilingClient));
+  await runFeedbackCommand(prUrl, opts, buildFeedbackDeps(getOctokit(shell), paths, prefix, createOctokitFilingClient));
 }
 
-async function resolveFactoryCommit(): Promise<string | null> {
+async function resolveFactoryCommit(shell: CliShell): Promise<string | null> {
   return resolveFactoryCheckoutCommit(
     dirname(fileURLToPath(import.meta.url)),
-    async (cmd, cwd) => (await exec(cmd, { cwd })).stdout,
+    async (cmd, cwd) => (await shell.exec(cmd, { cwd })).stdout,
   );
 }
 
-export async function cmdFilingPreview(runId: string, opts: { branchPrefix?: string }): Promise<void> {
-  const paths = getFactoryPaths(await getRepoRoot());
+export async function cmdFilingPreview(
+  runId: string,
+  opts: { branchPrefix?: string },
+  shell: CliShell = defaultCliShell,
+): Promise<void> {
+  const paths = getFactoryPaths(await getRepoRoot(shell));
   const prefix = opts.branchPrefix === undefined ? resolveBranchPrefix() : branchPrefixOrExit(opts.branchPrefix);
   const found = await runFilingPreview(runId, {
     out: process.stdout,
@@ -676,7 +695,7 @@ export async function cmdFilingPreview(runId: string, opts: { branchPrefix?: str
     eventsFile: paths.events,
     runsDir: daemonRuntimePaths().runsDir,
     factoryVersion: getCliVersion(),
-    factoryCommit: resolveFactoryCommit,
+    factoryCommit: () => resolveFactoryCommit(shell),
     os: `${platform()} ${release()} ${arch()}`,
     nodeVersion: process.version,
     usernames: [userInfo().username],
@@ -740,12 +759,15 @@ export function scaffoldConstitution(template: string, product: string): string 
   return skeleton.replaceAll('<product-name>', JSON.stringify(product)).replaceAll('<Product>', display);
 }
 
-export async function cmdConstitution(opts: {
-  list?: boolean;
-  product?: string;
-  init?: string | boolean;
-  force?: boolean;
-}) {
+export async function cmdConstitution(
+  opts: {
+    list?: boolean;
+    product?: string;
+    init?: string | boolean;
+    force?: boolean;
+  },
+  shell: CliShell = defaultCliShell,
+) {
   const loader = new ConstitutionLoader();
 
   if (typeof opts.init === 'string' || opts.init === true) {
@@ -760,7 +782,7 @@ export async function cmdConstitution(opts: {
         throw err;
       }
     }
-    const repoRoot = await getRepoRoot();
+    const repoRoot = await getRepoRoot(shell);
     const paths = getFactoryPaths(repoRoot);
     ensureDir(paths.root);
     const constitutionPath = resolve(paths.root, 'constitution.md');
@@ -785,7 +807,7 @@ export async function cmdConstitution(opts: {
     if (!products.includes(opts.product)) {
       throw new CliExitError(`No constitution '${opts.product}' found. Available products: ${products.join(', ')}`, 1);
     }
-    const repoRoot = await getRepoRoot();
+    const repoRoot = await getRepoRoot(shell);
     const paths = getFactoryPaths(repoRoot);
     ensureDir(paths.root);
     const constitutionPath = resolve(paths.root, 'constitution.md');
@@ -818,9 +840,9 @@ export function hasReachableWorker(diagnoses: ModelDiagnosis[]): boolean {
   return diagnoses.some((d) => d.reachable && (d.tiers.includes('worker') || d.tiers.includes('worker_fallback')));
 }
 
-function ollamaModelSet(): Set<string> | undefined {
+function ollamaModelSet(shell: CliShell): Set<string> | undefined {
   try {
-    const out = execSync('ollama list', { encoding: 'utf-8', timeout: 10_000 });
+    const out = shell.execSync('ollama list', { timeout: 10_000 });
     return new Set(
       out
         .split('\n')
@@ -833,8 +855,8 @@ function ollamaModelSet(): Set<string> | undefined {
   }
 }
 
-async function cmdModels(opts: { doctor?: boolean } = {}) {
-  const repoRoot = await getRepoRoot();
+async function cmdModels(opts: { doctor?: boolean } = {}, shell: CliShell) {
+  const repoRoot = await getRepoRoot(shell);
   const modelsConfig = applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot));
   const { ModelRegistry } = await import('@on-par/factory-core');
   const registry = new ModelRegistry(modelsConfig);
@@ -842,7 +864,7 @@ async function cmdModels(opts: { doctor?: boolean } = {}) {
   const localOnly = resolveLocalOnly();
 
   if (opts.doctor) {
-    const ollamaModels = ollamaModelSet();
+    const ollamaModels = ollamaModelSet(shell);
     const diagnoses = diagnoseModels(
       registry,
       {
@@ -876,8 +898,8 @@ async function cmdModels(opts: { doctor?: boolean } = {}) {
   }
 }
 
-async function cmdCost(opts: { issue?: string } = {}) {
-  const repoRoot = await getRepoRoot();
+async function cmdCost(opts: { issue?: string } = {}, shell: CliShell) {
+  const repoRoot = await getRepoRoot(shell);
   const paths = getFactoryPaths(repoRoot);
   const costs = readCosts(paths.costs);
 
@@ -931,13 +953,13 @@ async function cmdCost(opts: { issue?: string } = {}) {
   console.log(`  Total: ${formatCostTotal(grand.cost, grand.unpricedCount)}`);
 }
 
-async function cmdCheck(issueRaw: string, opts: { json?: boolean; deep?: boolean }) {
+async function cmdCheck(issueRaw: string, opts: { json?: boolean; deep?: boolean }, shell: CliShell) {
   const issueNum = parseIssueArg(issueRaw);
-  const ghRepo = await getGitHubRepo();
+  const ghRepo = await getGitHubRepo(shell);
   const [owner, repoName] = ghRepo.split('/');
   let runModel: DeepCheckModelRunner | undefined;
   if (opts.deep) {
-    const repoRoot = await getRepoRoot();
+    const repoRoot = await getRepoRoot(shell);
     const repoConfig = loadRepoConfig(repoRoot);
     const effective = resolveEffectiveConfig(repoConfig);
     const router = new ModelRouter(
@@ -955,11 +977,11 @@ async function cmdCheck(issueRaw: string, opts: { json?: boolean; deep?: boolean
     report = await runIssueCheck(issueNum, opts, {
       runModel,
       getIssue: async (n) => {
-        const { data } = await getOctokit().rest.issues.get({ owner, repo: repoName, issue_number: n });
+        const { data } = await getOctokit(shell).rest.issues.get({ owner, repo: repoName, issue_number: n });
         return { title: data.title, body: data.body ?? null };
       },
       getIssueState: async (n) => {
-        const { data } = await getOctokit().rest.issues.get({ owner, repo: repoName, issue_number: n });
+        const { data } = await getOctokit(shell).rest.issues.get({ owner, repo: repoName, issue_number: n });
         return data.state === 'closed' ? 'closed' : 'open';
       },
       log: (line) => console.log(line),
@@ -976,9 +998,9 @@ async function cmdCheck(issueRaw: string, opts: { json?: boolean; deep?: boolean
   }
 }
 
-async function currentCommitSha(): Promise<string | null> {
+async function currentCommitSha(shell: CliShell): Promise<string | null> {
   try {
-    const { stdout } = await exec('git rev-parse HEAD');
+    const { stdout } = await shell.exec('git rev-parse HEAD');
     return stdout.trim();
   } catch {
     return null;
@@ -1003,9 +1025,10 @@ async function appendKpiSnapshot(
   paths: ReturnType<typeof getFactoryPaths>,
   repoRoot: string,
   kpis: HealthKpis,
+  shell: CliShell,
 ): Promise<{ record: KpiHistoryRecord; history: KpiHistoryRecord[] }> {
   const record = kpisToHistoryRecord(kpis, new Date().toISOString().slice(0, 10), {
-    commitSha: await currentCommitSha(),
+    commitSha: await currentCommitSha(shell),
     models: resolvedModelTiers(repoRoot, paths.root),
   });
   const updated = appendKpiHistoryLine(readTextFileOrEmpty(paths.kpiHistory), record);
@@ -1027,8 +1050,8 @@ function persistClassifierOutcomes(
   writeFileSync(paths.classifierOutcomes, updated);
 }
 
-async function cmdClassifierReport(opts: { json?: boolean } = {}) {
-  const repoRoot = await getRepoRoot();
+async function cmdClassifierReport(opts: { json?: boolean } = {}, shell: CliShell) {
+  const repoRoot = await getRepoRoot(shell);
   const paths = getFactoryPaths(repoRoot);
   const report = summarizeClassifierOutcomes(parseClassifierOutcomes(readTextFileOrEmpty(paths.classifierOutcomes)));
   if (opts.json) {
@@ -1038,9 +1061,9 @@ async function cmdClassifierReport(opts: { json?: boolean } = {}) {
   for (const line of formatClassifierReport(report)) console.log(line);
 }
 
-async function cmdKpis(opts: { branchPrefix?: string } = {}) {
+async function cmdKpis(opts: { branchPrefix?: string } = {}, shell: CliShell) {
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
-  const repoRoot = await getRepoRoot();
+  const repoRoot = await getRepoRoot(shell);
   const paths = getFactoryPaths(repoRoot);
   const events = existsSync(paths.events) ? readEvents(paths.events) : [];
   const costs = existsSync(paths.costs) ? readCosts(paths.costs) : [];
@@ -1050,10 +1073,10 @@ async function cmdKpis(opts: { branchPrefix?: string } = {}) {
   let owner = '';
   let repoName = '';
   try {
-    const ghRepo = await getGitHubRepo();
+    const ghRepo = await getGitHubRepo(shell);
     [owner, repoName] = ghRepo.split('/');
     const issues = new Set(events.map((e) => e.issue).filter((i) => /^\d+$/.test(i)));
-    prSources = await fetchHumanEventSources(getOctokit(), owner, repoName, issues, branchPrefix);
+    prSources = await fetchHumanEventSources(getOctokit(shell), owner, repoName, issues, branchPrefix);
     allEvents = [...events, ...reconstructHumanEvents(prSources, events)];
   } catch (err: any) {
     console.error(
@@ -1069,7 +1092,7 @@ async function cmdKpis(opts: { branchPrefix?: string } = {}) {
       const windowDays = resolveDefectWindowDays(loadFactoryConfigForRepo(paths.config));
       const now = new Date().toISOString();
       const merged = mergedPrRefs(prSources);
-      const sources = await fetchDefectSources(getOctokit(), owner, repoName, merged, { now, windowDays });
+      const sources = await fetchDefectSources(getOctokit(shell), owner, repoName, merged, { now, windowDays });
       allEvents = [...allEvents, ...detectPostMergeDefects(sources, allEvents, { now, windowDays })];
       try {
         persistClassifierOutcomes(paths, allEvents, prSources, { now, windowDays });
@@ -1090,7 +1113,7 @@ async function cmdKpis(opts: { branchPrefix?: string } = {}) {
 
   let history: KpiHistoryRecord[];
   try {
-    ({ history } = await appendKpiSnapshot(paths, repoRoot, kpis));
+    ({ history } = await appendKpiSnapshot(paths, repoRoot, kpis, shell));
   } catch (err: any) {
     console.error(
       styleText(
@@ -1157,8 +1180,8 @@ export function usageWatchSourceLabel(source: WatchdogPolicySource, watch: boole
   }
 }
 
-export async function cmdUsage() {
-  const repoRoot = await getRepoRoot();
+export async function cmdUsage(shell: CliShell = defaultCliShell) {
+  const repoRoot = await getRepoRoot(shell);
   let knobs: UsageKnobs;
   try {
     knobs = resolveUsageKnobs(process.env, loadRepoConfig(repoRoot));
@@ -1202,9 +1225,9 @@ function formatClaimAge(lastActivityAt: string, now: number): string {
   return minutes < 1 ? '<1m' : `${minutes}m`;
 }
 
-export async function cmdStatus(opts: { kpis?: boolean } = {}) {
-  const repoRoot = await getRepoRoot();
-  const ghRepo = await getGitHubRepo();
+export async function cmdStatus(opts: { kpis?: boolean } = {}, shell: CliShell = defaultCliShell) {
+  const repoRoot = await getRepoRoot(shell);
+  const ghRepo = await getGitHubRepo(shell);
   const paths = getFactoryPaths(repoRoot);
 
   const repoConfig = loadRepoConfig(repoRoot);
@@ -1253,11 +1276,15 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
   }
 
   console.log(styleText('bold', '\n== Queue =='));
-  if (!hasGitHubToken()) {
+  if (!hasGitHubToken(process.env, () => shell.execSync('gh auth token', { timeout: 5_000 }))) {
     console.log('  (no GitHub token — run `gh auth login`)');
   } else {
     const [owner, repoName] = ghRepo.split('/');
-    const githubQueue = createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo: repoName });
+    const githubQueue = createGithubQueue({
+      client: createOctokitQueueClient(getOctokit(shell)),
+      owner,
+      repo: repoName,
+    });
     try {
       const lanes = await githubQueue.lanes();
       let printed = false;
@@ -1353,15 +1380,18 @@ const TUI_GITHUB_QUEUE_POLL_MS = 30_000;
  *  never runs inside the first poll. Octokit is built at most once and only on the GitHub path;
  *  when no token is present at startup, each poll re-resolves it so a `gh auth login` in another
  *  terminal is picked up without restarting the TUI. */
-export function tuiQueueReader(input: {
-  localQueue: boolean;
-  queueFile: string;
-  queueProposedFile: string;
-  repo: string | undefined;
-  token?: () => string | undefined;
-  octokit?: (token: string) => Octokit;
-}): QueueReader {
-  const { token: resolveToken = resolveGitHubToken, octokit = createFactoryOctokit } = input;
+export function tuiQueueReader(
+  input: {
+    localQueue: boolean;
+    queueFile: string;
+    queueProposedFile: string;
+    repo: string | undefined;
+    token?: () => string | undefined;
+    octokit?: (token: string) => Octokit;
+  },
+  shell: CliShell = defaultCliShell,
+): QueueReader {
+  const { token: resolveToken = () => resolveGitHubToken(shell), octokit = createFactoryOctokit } = input;
   if (input.localQueue) {
     return { source: 'local file', read: () => readQueue(input.queueFile, input.queueProposedFile) };
   }
@@ -1387,12 +1417,12 @@ export function tuiQueueReader(input: {
   };
 }
 
-async function cmdTui(opts: { localQueue?: boolean } = {}, runTuiImpl: typeof runTui = runTui) {
-  const repoRoot = await getRepoRoot();
+async function cmdTui(opts: { localQueue?: boolean } = {}, runTuiImpl: typeof runTui = runTui, shell: CliShell) {
+  const repoRoot = await getRepoRoot(shell);
   const paths = getFactoryPaths(repoRoot);
   let repo: string | undefined;
   try {
-    repo = await getGitHubRepo();
+    repo = await getGitHubRepo(shell);
   } catch {
     // header just omits the repo
   }
@@ -1425,12 +1455,15 @@ async function cmdTui(opts: { localQueue?: boolean } = {}, runTuiImpl: typeof ru
     eventsFile: paths.events,
     repo,
     stopFile: paths.stop,
-    queueReader: tuiQueueReader({
-      localQueue: opts.localQueue === true,
-      queueFile: paths.queue,
-      queueProposedFile: paths.queueProposed,
-      repo,
-    }),
+    queueReader: tuiQueueReader(
+      {
+        localQueue: opts.localQueue === true,
+        queueFile: paths.queue,
+        queueProposedFile: paths.queueProposed,
+        repo,
+      },
+      shell,
+    ),
     costsFile: paths.costs,
     approvalsDir: paths.approvals,
     steeringDir: paths.steering,
@@ -1624,11 +1657,12 @@ export async function shipIssue(
     /** Benchmark artifact directory (#509) — only set for local-only runs. */
     artifactsDir?: string;
   },
+  shell: CliShell = defaultCliShell,
 ): Promise<string> {
-  const repoRoot = ctx?.repoRoot ?? (await getRepoRoot());
-  const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo());
+  const repoRoot = ctx?.repoRoot ?? (await getRepoRoot(shell));
+  const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo(shell));
   const paths = ctx?.paths ?? getFactoryPaths(repoRoot);
-  const octokit = getOctokit();
+  const octokit = getOctokit(shell);
   const [ghOwner, ghName] = ghRepo.split('/');
 
   const repoConfig = loadRepoConfig(repoRoot, paths.root);
@@ -2089,6 +2123,7 @@ async function runAutoWorktreeGc(
   paths: ReturnType<typeof getFactoryPaths>,
   ghRepo: string,
   eventScope: string | number,
+  shell: CliShell,
 ): Promise<void> {
   try {
     const factoryConfig = loadFactoryConfigForRepo(paths.config);
@@ -2104,7 +2139,7 @@ async function runAutoWorktreeGc(
             repo: ghRepo,
             branchPrefix: resolveBranchPrefix(),
           },
-          { log: gcLog, octokit: getOctokit(), sandbox: gcSandbox },
+          { log: gcLog, octokit: getOctokit(shell), sandbox: gcSandbox },
         ),
       ),
     );
@@ -2138,12 +2173,13 @@ export async function sweepBetweenLaneIssues(
   ghRepo: string,
   paths: ReturnType<typeof getFactoryPaths>,
   deps: LaneGcDeps = {},
+  shell: CliShell = defaultCliShell,
 ): Promise<'disabled' | 'land-in-progress' | 'swept' | 'failed'> {
   const {
     loadConfig = loadFactoryConfigForRepo,
     sweep = sweepWorktrees,
     emitEvent = logEvent,
-    octokit = getOctokit,
+    octokit = () => getOctokit(shell),
   } = deps;
   try {
     const cfg = loadConfig(paths.config);
@@ -2192,11 +2228,12 @@ async function cmdShip(
     approvePlan?: boolean;
     branchPrefix?: string;
   },
+  shell: CliShell,
 ) {
   if (!isCommandAvailable('claude')) {
     throw new CliExitError(`factory: ${missingClaudeCliMessage()}`, 2);
   }
-  const repoRoot = await getRepoRoot();
+  const repoRoot = await getRepoRoot(shell);
   const paths = getFactoryPaths(repoRoot);
   if (!existsSync(paths.root)) {
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
@@ -2213,11 +2250,11 @@ async function cmdShip(
   return withRepoRunLock(paths, 'factory ship', async () => {
     let ghRepo: string | null = null;
     try {
-      ghRepo = await getGitHubRepo();
+      ghRepo = await getGitHubRepo(shell);
     } catch {
       /* shipIssue reports repo resolution itself */
     }
-    if (ghRepo) await runAutoWorktreeGc(repoRoot, paths, ghRepo, issueNum);
+    if (ghRepo) await runAutoWorktreeGc(repoRoot, paths, ghRepo, issueNum, shell);
 
     const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
     if (hasUnresolvedPark(priorEvents, String(issueNum))) {
@@ -2227,7 +2264,7 @@ async function cmdShip(
     }
 
     try {
-      return await shipIssue(issueNum, { ...opts, branchPrefix });
+      return await shipIssue(issueNum, { ...opts, branchPrefix }, undefined, shell);
     } catch (err: any) {
       if (err instanceof IssueSkippedError) return;
       throw new CliExitError(`Ship failed for issue #${issueNum}: ${err.message}`, 1);
@@ -2246,11 +2283,12 @@ async function cmdRunIssue(
     branchPrefix?: string;
     runChildren?: boolean;
   },
+  shell: CliShell,
 ) {
   if (!isCommandAvailable('claude')) {
     throw new CliExitError(`factory: ${missingClaudeCliMessage()}`, 2);
   }
-  const repoRoot = await getRepoRoot();
+  const repoRoot = await getRepoRoot(shell);
   const paths = getFactoryPaths(repoRoot);
   if (!existsSync(paths.root)) {
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
@@ -2260,11 +2298,11 @@ async function cmdRunIssue(
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
 
   await withRepoRunLock(paths, 'factory run-issue', async () => {
-    const ghRepo = await getGitHubRepo();
+    const ghRepo = await getGitHubRepo(shell);
 
     // Pre-flight: resolve the issue through the canonical work-request seam
     // BEFORE any worktree or PR exists — a bad issue exits here.
-    const workSources = createDefaultWorkSourceRegistry({ octokit: getOctokit() });
+    const workSources = createDefaultWorkSourceRegistry({ octokit: getOctokit(shell) });
     let work: WorkRequest;
     try {
       work = await workSources.resolve(GITHUB_ISSUE_SOURCE, {
@@ -2281,7 +2319,7 @@ async function cmdRunIssue(
       );
     }
     console.log(styleText('cyan', `one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
-    await runAutoWorktreeGc(repoRoot, paths, ghRepo, issueNum);
+    await runAutoWorktreeGc(repoRoot, paths, ghRepo, issueNum, shell);
 
     const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
     if (hasUnresolvedPark(priorEvents, String(issueNum))) {
@@ -2291,7 +2329,7 @@ async function cmdRunIssue(
     }
 
     try {
-      await shipIssue(issueNum, { ...shipOpts, branchPrefix }, { repoRoot, ghRepo, workRequest: work });
+      await shipIssue(issueNum, { ...shipOpts, branchPrefix }, { repoRoot, ghRepo, workRequest: work }, shell);
     } catch (err: any) {
       if (err instanceof IssueSkippedError) return;
       if (err instanceof IssueDecomposedError && runChildren) {
@@ -2300,6 +2338,7 @@ async function cmdRunIssue(
           err.childIssues,
           { ...shipOpts, branchPrefix },
           { repoRoot, ghRepo, workSources },
+          shell,
         );
         return;
       }
@@ -2326,6 +2365,7 @@ async function runDecomposedChildren(
   children: readonly number[],
   opts: Parameters<typeof shipIssue>[1],
   env: { repoRoot: string; ghRepo: string; workSources: ReturnType<typeof createDefaultWorkSourceRegistry> },
+  shell: CliShell,
 ): Promise<void> {
   const list = children.map((n) => `#${n}`).join(', ');
   console.log(styleText('cyan', `run-children: #${parent} decomposed into ${list} — running them in build order`));
@@ -2345,14 +2385,19 @@ async function runDecomposedChildren(
       console.log(styleText('cyan', `one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
       let outcome: RunOutcome | undefined;
       try {
-        await shipIssue(child, opts, {
-          repoRoot: env.repoRoot,
-          ghRepo: env.ghRepo,
-          workRequest: work,
-          onOutcome: (o) => {
-            outcome = o;
+        await shipIssue(
+          child,
+          opts,
+          {
+            repoRoot: env.repoRoot,
+            ghRepo: env.ghRepo,
+            workRequest: work,
+            onOutcome: (o) => {
+              outcome = o;
+            },
           },
-        });
+          shell,
+        );
       } catch (err: any) {
         if (err instanceof IssueDecomposedError) {
           const again = err.childIssues.map((n) => `#${n}`).join(', ');
@@ -2403,11 +2448,12 @@ async function cmdRunBrief(
     artifacts?: string;
     branchPrefix?: string;
   },
+  shell: CliShell,
 ) {
   if (!isCommandAvailable('claude')) {
     throw new CliExitError(`factory: ${missingClaudeCliMessage()}`, 2);
   }
-  const repoRoot = await getRepoRoot();
+  const repoRoot = await getRepoRoot(shell);
   const paths = getFactoryPaths(repoRoot);
   if (!existsSync(paths.root)) {
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
@@ -2441,11 +2487,11 @@ async function cmdRunBrief(
     }
 
     // Local-only runs never touch GitHub — no remote required, no mutation possible.
-    const ghRepo = localOnly ? 'local/workspace' : await getGitHubRepo();
+    const ghRepo = localOnly ? 'local/workspace' : await getGitHubRepo(shell);
 
     // Pre-flight: resolve the brief through the canonical work-request seam
     // BEFORE any worktree or PR exists — a malformed brief exits here, so BUILD never starts.
-    const workSources = createDefaultWorkSourceRegistry({ octokit: getOctokit() });
+    const workSources = createDefaultWorkSourceRegistry({ octokit: getOctokit(shell) });
     let work: WorkRequest;
     try {
       work = await workSources.resolve(LOCAL_BRIEF_SOURCE, { path: briefPath } satisfies LocalBriefParams);
@@ -2491,6 +2537,7 @@ async function cmdRunBrief(
           localOnly,
           artifactsDir,
         },
+        shell,
       );
     } catch (err: any) {
       throw new CliExitError(`Run failed for brief ${briefPath}: ${err.message}`, 1);
@@ -2498,11 +2545,11 @@ async function cmdRunBrief(
   });
 }
 
-async function cmdLocalSmallDryRun(issueNum: number, opts: { spec?: string; output?: string }) {
-  const repoRoot = await getRepoRoot();
-  const ghRepo = await getGitHubRepo();
+async function cmdLocalSmallDryRun(issueNum: number, opts: { spec?: string; output?: string }, shell: CliShell) {
+  const repoRoot = await getRepoRoot(shell);
+  const ghRepo = await getGitHubRepo(shell);
   const paths = getFactoryPaths(repoRoot);
-  const octokit = getOctokit();
+  const octokit = getOctokit(shell);
   const [owner, repoName] = ghRepo.split('/');
   const specPath = resolve(repoRoot, opts.spec ?? resolve(paths.plans, `issue-${issueNum}.md`));
   const outputDir = resolve(repoRoot, opts.output ?? resolve(paths.state, 'local-small', `issue-${issueNum}`));
@@ -2521,8 +2568,8 @@ async function cmdLocalSmallDryRun(issueNum: number, opts: { spec?: string; outp
   console.log(styleText('green', `local-small context: ${result.contextPath}`));
 }
 
-async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }) {
-  const repoRoot = await getRepoRoot();
+async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }, shell: CliShell) {
+  const repoRoot = await getRepoRoot(shell);
   const paths = getFactoryPaths(repoRoot);
   const queueFile = resolve(repoRoot, opts.queue ?? resolve(paths.state, 'local-small', 'overnight-queue'));
   const statePath = resolve(repoRoot, opts.state ?? resolve(paths.state, 'local-small', 'overnight-state.json'));
@@ -2541,13 +2588,13 @@ async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }) 
   }
 
   await withRepoRunLock(paths, 'factory local-small-overnight', async () => {
-    const ghRepo = await getGitHubRepo();
+    const ghRepo = await getGitHubRepo(shell);
     process.env.FACTORY_LOCAL_ONLY = '1';
 
     const preflight = async (): Promise<OvernightPreflightResult> => {
       if (!isCommandAvailable('claude')) return { ok: false, reason: missingClaudeCliMessage() };
       const registry = new ModelRegistry(applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot)));
-      const ollamaModels = ollamaModelSet();
+      const ollamaModels = ollamaModelSet(shell);
       const diagnoses = diagnoseModels(
         registry,
         { ollamaModelPresent: ollamaModels ? (m: string) => ollamaModels.has(m) : undefined },
@@ -2563,7 +2610,12 @@ async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }) 
 
     const processItem = async (issue: number): Promise<OvernightItemOutcome> => {
       try {
-        await shipIssue(issue, { autoRework: true, interactive: false }, { repoRoot, ghRepo, lane: 'overnight' });
+        await shipIssue(
+          issue,
+          { autoRework: true, interactive: false },
+          { repoRoot, ghRepo, lane: 'overnight' },
+          shell,
+        );
         return { status: 'ready' };
       } catch (err: any) {
         if (err instanceof IssueSkippedError) return { status: 'parked', reason: err.message };
@@ -2687,8 +2739,11 @@ export async function reapParkedLaneWorktree(
   }
 }
 
-export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string; branchPrefix?: string }) {
-  const repoRoot = await getRepoRoot();
+export async function cmdWorktreeGc(
+  opts: { dryRun?: boolean; ttlDays?: string; branchPrefix?: string },
+  shell: CliShell = defaultCliShell,
+) {
+  const repoRoot = await getRepoRoot(shell);
   const paths = getFactoryPaths(repoRoot);
   const factoryConfig = loadFactoryConfigForRepo(paths.config);
   const ttlDays = opts.ttlDays !== undefined ? Number(opts.ttlDays) : factoryConfig.worktree.gcTtlDays;
@@ -2698,8 +2753,12 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string; 
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
   const log = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
   // Best-effort GitHub evidence: tokenless/local-only repos keep today's pure-local behavior.
-  const ghRepo = await getGitHubRepo().catch(() => undefined);
-  const octokit = ghRepo ? (hasGitHubToken() ? getOctokit() : undefined) : undefined;
+  const ghRepo = await getGitHubRepo(shell).catch(() => undefined);
+  const octokit = ghRepo
+    ? hasGitHubToken(process.env, () => shell.execSync('gh auth token', { timeout: 5_000 }))
+      ? getOctokit(shell)
+      : undefined
+    : undefined;
   const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
   const run = () =>
     sweepWorktrees({ repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo, branchPrefix }, { log, octokit, sandbox });
@@ -2711,6 +2770,7 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string; 
 export async function cmdReset(
   issues: string[],
   opts: { branchPrefix?: string; dryRun?: boolean; force?: boolean },
+  shell: CliShell = defaultCliShell,
 ): Promise<void> {
   let nums: number[];
   try {
@@ -2718,7 +2778,7 @@ export async function cmdReset(
   } catch (err: any) {
     throw new CliExitError(err.message, 2);
   }
-  const repoRoot = await getRepoRoot();
+  const repoRoot = await getRepoRoot(shell);
   const paths = getFactoryPaths(repoRoot);
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
   const sandbox = gcWorktreeSandbox(loadFactoryConfigForRepo(paths.config).sandbox, repoRoot);
@@ -2729,11 +2789,11 @@ export async function cmdReset(
       cwd: process.cwd(),
       paths,
       branchPrefix,
-      git: (cmd) => exec(cmd, { cwd: repoRoot }).then((r) => r.stdout),
+      git: (cmd) => shell.exec(cmd, { cwd: repoRoot }).then((r) => r.stdout),
       removeWorktree: (p) => cleanupWorktree(repoRoot, p, log, sandbox),
       readLeases: () => readPortLeases(paths.ports),
       releaseLease: (id) => releasePortLease({ registryFile: paths.ports, lockDir: paths.portsLock, worktreeId: id }),
-      runCommand: (cmd, o) => exec(cmd, { cwd: o?.cwd ?? repoRoot }).then((r) => ({ stdout: r.stdout })),
+      runCommand: (cmd, o) => shell.exec(cmd, { cwd: o?.cwd ?? repoRoot }).then((r) => ({ stdout: r.stdout })),
       dryRun: opts.dryRun === true,
       force: opts.force === true,
     });
@@ -2742,19 +2802,33 @@ export async function cmdReset(
   for (const line of lines) console.log(line);
 }
 
-export async function cmdLand(issueNum: number, opts: { branchPrefix?: string; allowGated?: boolean } = {}) {
+export async function cmdLand(
+  issueNum: number,
+  opts: { branchPrefix?: string; allowGated?: boolean } = {},
+  shell: CliShell = defaultCliShell,
+) {
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
-  const repoRoot = await getRepoRoot();
-  const ghRepo = await getGitHubRepo();
+  const repoRoot = await getRepoRoot(shell);
+  const ghRepo = await getGitHubRepo(shell);
   const paths = getFactoryPaths(repoRoot);
-  const octokit = getOctokit();
+  const octokit = getOctokit(shell);
   const factoryConfig = loadFactoryConfigForRepo(paths.config);
   const skipCI = resolveSkipCI(factoryConfig);
 
   try {
-    const result = await landIssue(issueNum, repoRoot, ghRepo, paths, octokit, skipCI, branchPrefix, {
-      allowGated: opts.allowGated === true,
-    });
+    const result = await landIssue(
+      issueNum,
+      repoRoot,
+      ghRepo,
+      paths,
+      octokit,
+      skipCI,
+      branchPrefix,
+      {
+        allowGated: opts.allowGated === true,
+      },
+      shell,
+    );
     console.log(styleText('green', `✅ Landed PR #${result.prNumber} for issue #${issueNum}`));
   } catch (err: any) {
     if (err instanceof AwaitingReviewError) {
@@ -2794,6 +2868,17 @@ export async function cmdLand(issueNum: number, opts: { branchPrefix?: string; a
   }
 }
 
+/** landIssue minus its option and shell params: the shape sweep/wait-for-merge inject. */
+type LandFn = (
+  issueNum: number,
+  repoRoot: string,
+  ghRepo: string,
+  paths: ReturnType<typeof getFactoryPaths>,
+  octokit: Octokit,
+  skipCI?: boolean,
+  branchPrefix?: string,
+) => Promise<{ branch: string; prNumber: number }>;
+
 async function landIssue(
   issueNum: number,
   repoRoot: string,
@@ -2803,6 +2888,7 @@ async function landIssue(
   skipCI?: boolean,
   branchPrefix?: string,
   opts: { allowGated?: boolean } = {},
+  shell: CliShell = defaultCliShell,
 ): Promise<{ branch: string; prNumber: number }> {
   const [owner, repoName] = ghRepo.split('/');
   const log = (type: EventKind, msg: string, extra?: { failoverReason?: FailoverReason }) =>
@@ -2917,6 +3003,7 @@ async function landIssue(
         worktree,
         prNumber: prNumber!,
         log,
+        run: shell.exec,
         skipCI,
         adminMerge: resolveMergePolicy(landFactoryConfig).admin,
         withLock: withLandLock,
@@ -2948,9 +3035,9 @@ export function prLookupFailure(issueNum: number, branch: string, err: unknown):
   return new LandFailureError(`PR lookup failed for issue #${issueNum} (${branch}): ${errorDetail(err)}`, 5);
 }
 
-async function cmdTriage(opts: { product?: string }) {
-  const repoRoot = await getRepoRoot();
-  const ghRepo = await getGitHubRepo();
+async function cmdTriage(opts: { product?: string }, shell: CliShell) {
+  const repoRoot = await getRepoRoot(shell);
+  const ghRepo = await getGitHubRepo(shell);
   const paths = getFactoryPaths(repoRoot);
   if (!existsSync(paths.root)) {
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
@@ -2983,12 +3070,14 @@ explaining exclusions.`;
 
   let plannerError: unknown;
   logEvent(paths.events, 'triage', '-', `Triaging ${ghRepo} with ${model}`);
-  await exec(
-    `claude -p ${shellEscape(prompt)} ${flag ? `--model ${flag}` : ''} --allowedTools "Bash(gh issue:*)" "Bash(gh repo:*)" Read Glob Grep Write`,
-  ).catch((err: unknown) => {
-    plannerError = err;
-    logEvent(paths.events, 'warn', '-', `triage planner failed: ${errorDetail(err)}`);
-  });
+  await shell
+    .exec(
+      `claude -p ${shellEscape(prompt)} ${flag ? `--model ${flag}` : ''} --allowedTools "Bash(gh issue:*)" "Bash(gh repo:*)" Read Glob Grep Write`,
+    )
+    .catch((err: unknown) => {
+      plannerError = err;
+      logEvent(paths.events, 'warn', '-', `triage planner failed: ${errorDetail(err)}`);
+    });
 
   const proposed = existsSync(paths.queueProposed) ? readFileSync(paths.queueProposed, 'utf-8') : '';
   const message = triageProposalMessage(proposed, paths.queueProposed, paths.queue);
@@ -3004,8 +3093,8 @@ export function triageProposalMessage(proposed: string, proposedPath: string, qu
   return `${proposed}\n---\nreview and run: factory triage accept   (promotes ${proposedPath} -> ${queuePath})`;
 }
 
-export async function cmdTriageAccept(opts: { force?: boolean }) {
-  const repoRoot = await getRepoRoot();
+export async function cmdTriageAccept(opts: { force?: boolean }, shell: CliShell = defaultCliShell) {
+  const repoRoot = await getRepoRoot(shell);
   const paths = getFactoryPaths(repoRoot);
 
   if (!existsSync(paths.queueProposed)) {
@@ -3042,8 +3131,11 @@ export async function cmdTriageAccept(opts: { force?: boolean }) {
   console.log(styleText('green', `queue accepted — ${result.issues.length} issue(s) promoted to ${paths.queue}`));
 }
 
-export async function cmdQueueMigrate(opts: { file?: string; dryRun?: boolean } = {}): Promise<void> {
-  const repoRoot = await getRepoRoot();
+export async function cmdQueueMigrate(
+  opts: { file?: string; dryRun?: boolean } = {},
+  shell: CliShell = defaultCliShell,
+): Promise<void> {
+  const repoRoot = await getRepoRoot(shell);
   const paths = getFactoryPaths(repoRoot);
   const queueFile = opts.file ? resolve(repoRoot, opts.file) : paths.queue;
 
@@ -3078,8 +3170,8 @@ export async function cmdQueueMigrate(opts: { file?: string; dryRun?: boolean } 
   }
 
   // Stage 2 — GitHub preflight (read-only). Any closed/PR/inaccessible entry aborts all.
-  const [owner, repo] = (await getGitHubRepo()).split('/');
-  const octokit = getOctokit();
+  const [owner, repo] = (await getGitHubRepo(shell)).split('/');
+  const octokit = getOctokit(shell);
   const unreachable: string[] = [];
   for (const entry of entries) {
     try {
@@ -3125,7 +3217,7 @@ export async function cmdQueueMigrate(opts: { file?: string; dryRun?: boolean } 
   console.log(styleText('green', `queue migrated — ${entries.length} issue(s) labelled from ${queueFile}`));
 }
 
-export async function cmdQueueAdd(lane: string, issueArgs: string[]): Promise<void> {
+export async function cmdQueueAdd(lane: string, issueArgs: string[], shell: CliShell = defaultCliShell): Promise<void> {
   // Validate + dedupe BEFORE any GitHub call. parseIssueArg throws CliExitError(2) on bad input.
   const seen = new Set<number>();
   const issues: number[] = [];
@@ -3137,8 +3229,8 @@ export async function cmdQueueAdd(lane: string, issueArgs: string[]): Promise<vo
     }
   }
 
-  const [owner, repo] = (await getGitHubRepo()).split('/');
-  const queue = createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo });
+  const [owner, repo] = (await getGitHubRepo(shell)).split('/');
+  const queue = createGithubQueue({ client: createOctokitQueueClient(getOctokit(shell)), owner, repo });
   const results: EnqueueResult[] = await queue.enqueue(lane, issues);
 
   for (const r of results) {
@@ -3157,11 +3249,14 @@ export async function cmdQueueAdd(lane: string, issueArgs: string[]): Promise<vo
   }
 }
 
-export async function cmdQueueReconcile(opts: { lane?: string } = {}): Promise<void> {
-  const repoRoot = await getRepoRoot();
+export async function cmdQueueReconcile(
+  opts: { lane?: string } = {},
+  shell: CliShell = defaultCliShell,
+): Promise<void> {
+  const repoRoot = await getRepoRoot(shell);
   const paths = getFactoryPaths(repoRoot);
-  const [owner, repo] = (await getGitHubRepo()).split('/');
-  const client = createOctokitQueueClient(getOctokit());
+  const [owner, repo] = (await getGitHubRepo(shell)).split('/');
+  const client = createOctokitQueueClient(getOctokit(shell));
   const { report, conflicts } = await runQueueReconcile({
     readSnapshot: () => readGithubQueueSnapshot({ client, owner, repo }),
     reader: admissionStateReaderFor(paths.state),
@@ -3173,9 +3268,12 @@ export async function cmdQueueReconcile(opts: { lane?: string } = {}): Promise<v
   }
 }
 
-export async function cmdQueueClear(opts: { dryRun?: boolean; yes?: boolean; lane?: string } = {}): Promise<void> {
-  const [owner, repo] = (await getGitHubRepo()).split('/');
-  const queue = createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo });
+export async function cmdQueueClear(
+  opts: { dryRun?: boolean; yes?: boolean; lane?: string } = {},
+  shell: CliShell = defaultCliShell,
+): Promise<void> {
+  const [owner, repo] = (await getGitHubRepo(shell)).split('/');
+  const queue = createGithubQueue({ client: createOctokitQueueClient(getOctokit(shell)), owner, repo });
   const { report, exitCode, message } = await runQueueClear({
     previewClear: () => queue.previewClear(opts.lane),
     clear: () => queue.clear(opts.lane),
@@ -3236,8 +3334,8 @@ export async function startLaneProxy(
  *  `factory ship` (which only probes proxy.json and degrades — it never spawns
  *  a proxy itself). Running this command IS the opt-in: it starts even when
  *  environment.proxy.enabled is false in factory.json. */
-async function cmdProxy() {
-  const repoRoot = await getRepoRoot();
+async function cmdProxy(shell: CliShell) {
+  const repoRoot = await getRepoRoot(shell);
   const paths = getFactoryPaths(repoRoot);
   const factoryConfig = loadFactoryConfigForRepo(paths.config);
   const settings = resolveEnvironmentProxy(factoryConfig);
@@ -3377,8 +3475,9 @@ async function cmdRun(
     usagePoll?: string;
     branchPrefix?: string;
   } = {},
+  shell: CliShell,
 ): Promise<void> {
-  const repoRoot = await getRepoRoot();
+  const repoRoot = await getRepoRoot(shell);
   const paths = getFactoryPaths(repoRoot);
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
 
@@ -3391,21 +3490,21 @@ async function cmdRun(
       return;
     }
     writeRunFlagOverrides(paths.runFlags, { autoMerge: opts.autoMerge, prClassifier: opts.prClassifier });
-    const ghRepo = await getGitHubRepo();
+    const ghRepo = await getGitHubRepo(shell);
     const factoryConfig = loadFactoryConfigForRepo(paths.config);
-    const keychainErr = keychainPreflightError(probeClaudeKeychain());
+    const keychainErr = keychainPreflightError(probeClaudeKeychain(shell));
     if (keychainErr) {
       logEvent(paths.events, 'environment_warning', 'all', keychainErr);
       throw new Error(keychainErr);
     }
-    await runAutoWorktreeGc(repoRoot, paths, ghRepo, 'all');
+    await runAutoWorktreeGc(repoRoot, paths, ghRepo, 'all', shell);
 
     const { lanes, diagnostics } = await planRunLanes({
       localQueue: opts.localQueue === true,
       readLocalQueue: () => (existsSync(paths.queue) ? readFileSync(paths.queue, 'utf-8') : null),
       queue: () => {
         const [owner, repo] = ghRepo.split('/');
-        const octokit = getOctokit();
+        const octokit = getOctokit(shell);
         return createGithubQueue({
           client: createOctokitQueueClient(octokit),
           owner,
@@ -3507,23 +3606,32 @@ async function cmdRun(
           }
         }
         pids.push(
-          runLane(planned.lane, planned.issues, repoRoot, ghRepo, paths, {
-            ...planned.deps,
-            laneBreakerThreshold,
-            ship: (issue, o, c) => shipIssue(issue, { ...o, branchPrefix, prClassifier: opts.prClassifier }, c),
-            sweepFinished: (issue) =>
-              sweepBetweenLaneIssues(issue, planned.lane, repoRoot, ghRepo, paths).then(() => {}),
-            reapWorktree: (issue) =>
-              reapParkedLaneWorktree(
-                issue,
-                repoRoot,
-                ghRepo,
-                paths,
-                opts.branchPrefix === undefined ? undefined : branchPrefix,
-              ),
-            waitMerge: (issue, branch, root, gh, p, d = {}) =>
-              waitForMerge(issue, branch, root, gh, p, { ...d, mergeOverrides: { auto: opts.autoMerge } }),
-          }),
+          runLane(
+            planned.lane,
+            planned.issues,
+            repoRoot,
+            ghRepo,
+            paths,
+            {
+              ...planned.deps,
+              laneBreakerThreshold,
+              ship: (issue, o, c) =>
+                shipIssue(issue, { ...o, branchPrefix, prClassifier: opts.prClassifier }, c, shell),
+              sweepFinished: (issue) =>
+                sweepBetweenLaneIssues(issue, planned.lane, repoRoot, ghRepo, paths, undefined, shell).then(() => {}),
+              reapWorktree: (issue) =>
+                reapParkedLaneWorktree(
+                  issue,
+                  repoRoot,
+                  ghRepo,
+                  paths,
+                  opts.branchPrefix === undefined ? undefined : branchPrefix,
+                ),
+              waitMerge: (issue, branch, root, gh, p, d = {}) =>
+                waitForMerge(issue, branch, root, gh, p, { ...d, mergeOverrides: { auto: opts.autoMerge } }, shell),
+            },
+            shell,
+          ),
         );
       }
 
@@ -3543,7 +3651,7 @@ async function cmdRun(
         const events = existsSync(paths.events) ? readEvents(paths.events) : [];
         const costs = existsSync(paths.costs) ? readCosts(paths.costs) : [];
         const kpis = computeHealthKpis(events, costs);
-        await appendKpiSnapshot(paths, repoRoot, kpis);
+        await appendKpiSnapshot(paths, repoRoot, kpis, shell);
         logEvent(paths.events, 'kpi-snapshot', 'all', `KPI snapshot appended to ${paths.kpiHistory}`);
       } catch (err: any) {
         logEvent(paths.events, 'warn', 'all', `kpi snapshot failed: ${err.message}`);
@@ -3562,9 +3670,10 @@ export function createSuperviseRunQueue(
     pendingCount?: () => Promise<number>;
     emitEvent?: typeof logEvent;
   } = {},
+  shell: CliShell = defaultCliShell,
 ): () => Promise<void> {
   const {
-    cmdRunFn = cmdRun,
+    cmdRunFn = () => cmdRun({}, shell),
     readQueueFile = () => (existsSync(paths.queue) ? readFileSync(paths.queue, 'utf-8') : ''),
     pendingCount = async () => parseQueue(readQueueFile()).entries.length,
     emitEvent = logEvent,
@@ -3622,17 +3731,20 @@ export function createIngestHook(
   };
 }
 
-async function cmdSupervise(opts: {
-  now?: boolean;
-  localQueue?: boolean;
-  autoMerge?: boolean;
-  usageWatch?: boolean;
-  usageThreshold?: string;
-  usagePoll?: string;
-  branchPrefix?: string;
-}): Promise<void> {
+async function cmdSupervise(
+  opts: {
+    now?: boolean;
+    localQueue?: boolean;
+    autoMerge?: boolean;
+    usageWatch?: boolean;
+    usageThreshold?: string;
+    usagePoll?: string;
+    branchPrefix?: string;
+  },
+  shell: CliShell,
+): Promise<void> {
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
-  const repoRoot = await getRepoRoot();
+  const repoRoot = await getRepoRoot(shell);
   const paths = getFactoryPaths(repoRoot);
   const ingestCfg = resolveIngestConfig(loadFactoryConfigForRepo(paths.config));
 
@@ -3643,8 +3755,8 @@ async function cmdSupervise(opts: {
       warnQueueDiagnostics(parsed.diagnostics);
       return parsed.entries.length;
     }
-    const [owner, repo] = (await getGitHubRepo()).split('/');
-    const gq = createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo });
+    const [owner, repo] = (await getGitHubRepo(shell)).split('/');
+    const gq = createGithubQueue({ client: createOctokitQueueClient(getOctokit(shell)), owner, repo });
     const lanes = await gq.lanes();
     const counts = await Promise.all(lanes.map((lane) => gq.list(lane)));
     return counts.reduce((total, issues) => total + issues.length, 0);
@@ -3674,18 +3786,26 @@ async function cmdSupervise(opts: {
       stopFile: paths.stop,
       eventsFile: paths.events,
       now: opts.now,
-      runQueue: createSuperviseRunQueue(paths, ingestCfg, {
-        cmdRunFn: () =>
-          cmdRun({
-            localQueue: opts.localQueue,
-            autoMerge: opts.autoMerge,
-            usageWatch: opts.usageWatch,
-            usageThreshold: opts.usageThreshold,
-            usagePoll: opts.usagePoll,
-            branchPrefix: opts.branchPrefix,
-          }),
-        pendingCount: countPending,
-      }),
+      runQueue: createSuperviseRunQueue(
+        paths,
+        ingestCfg,
+        {
+          cmdRunFn: () =>
+            cmdRun(
+              {
+                localQueue: opts.localQueue,
+                autoMerge: opts.autoMerge,
+                usageWatch: opts.usageWatch,
+                usageThreshold: opts.usageThreshold,
+                usagePoll: opts.usagePoll,
+                branchPrefix: opts.branchPrefix,
+              },
+              shell,
+            ),
+          pendingCount: countPending,
+        },
+        shell,
+      ),
       ingest: ingestCfg.enabled ? createIngestHook(repoRoot, paths, ingestCfg, { branchPrefix }) : undefined,
     }),
   );
@@ -3867,9 +3987,10 @@ export async function runLane(
   ghRepo: string,
   paths: ReturnType<typeof getFactoryPaths>,
   deps: RunLaneDeps = {},
+  shell: CliShell = defaultCliShell,
 ) {
   const {
-    ship = shipIssue,
+    ship = (n, o, c) => shipIssue(n, o, c, shell),
     waitMerge = waitForMerge,
     pathExists = existsSync,
     emitEvent = logEvent,
@@ -4138,7 +4259,7 @@ export async function squashMergeAndDelete(
 ): Promise<void> {
   const { sha } = opts;
   if (opts.admin) {
-    const run = opts.run ?? exec;
+    const run = opts.run ?? defaultCliShell.exec;
     const pin = sha ? ` --match-head-commit ${shellEscape(sha)}` : '';
     await run(
       `gh pr merge ${prNumber} --repo ${shellEscape(`${owner}/${repoName}`)} --admin --squash --delete-branch${pin}`,
@@ -4300,7 +4421,7 @@ export async function rebaseDirtyPullRequest(opts: {
   run?: CommandRunner;
   pathExists?: (path: string) => boolean;
 }): Promise<void> {
-  const { issue, branch, worktree, prNumber, log, run = exec, pathExists = existsSync } = opts;
+  const { issue, branch, worktree, prNumber, log, run = defaultCliShell.exec, pathExists = existsSync } = opts;
 
   if (!pathExists(worktree)) {
     const msg = `PR #${prNumber} DIRTY on ${branch} and worktree gone`;
@@ -4508,7 +4629,7 @@ export interface SweepDeps {
   createOctokit?: () => Octokit;
   loadConfig?: (configPath: string) => FactoryConfig;
   listPRs?: typeof listOpenFactoryPRs;
-  land?: typeof landIssue;
+  land?: LandFn;
   emitEvent?: typeof logEvent;
   writeLine?: (line: string) => void;
 }
@@ -4519,16 +4640,18 @@ export async function sweepApprovedPRs(
   paths: ReturnType<typeof getFactoryPaths>,
   deps: SweepDeps = {},
   opts: { branchPrefix?: string } = {},
+  shell: CliShell = defaultCliShell,
 ): Promise<{
   landed: number[];
   skipped: Array<{ pr: number; branch: string; reason: string }>;
   failed: Array<{ pr: number; issue: number; reason: string }>;
 }> {
   const {
-    createOctokit = getOctokit,
+    createOctokit = () => getOctokit(shell),
     loadConfig = loadFactoryConfigForRepo,
     listPRs = listOpenFactoryPRs,
-    land = landIssue,
+    land = (issue, repoRoot, ghRepo, paths, octokit, skipCI, branchPrefix) =>
+      landIssue(issue, repoRoot, ghRepo, paths, octokit, skipCI, branchPrefix, {}, shell),
     emitEvent = logEvent,
     writeLine = (line: string) => console.log(line),
   } = deps;
@@ -4580,12 +4703,12 @@ export async function sweepApprovedPRs(
   return { landed, skipped, failed };
 }
 
-export async function cmdResumeApproved(opts: { branchPrefix?: string } = {}) {
+export async function cmdResumeApproved(opts: { branchPrefix?: string } = {}, shell: CliShell = defaultCliShell) {
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
-  const repoRoot = await getRepoRoot();
-  const ghRepo = await getGitHubRepo();
+  const repoRoot = await getRepoRoot(shell);
+  const ghRepo = await getGitHubRepo(shell);
   const paths = getFactoryPaths(repoRoot);
-  const result = await sweepApprovedPRs(repoRoot, ghRepo, paths, {}, { branchPrefix });
+  const result = await sweepApprovedPRs(repoRoot, ghRepo, paths, {}, { branchPrefix }, shell);
   console.log(
     styleText(
       'green',
@@ -4630,13 +4753,7 @@ type WaitForMergeDeps = {
   pathExists?: (path: string) => boolean;
   checkMerged?: typeof isPrMerged;
   loadConfig?: (configPath: string) => FactoryConfig;
-  land?: (
-    issueNum: number,
-    repoRoot: string,
-    ghRepo: string,
-    paths: ReturnType<typeof getFactoryPaths>,
-    octokit: Octokit,
-  ) => Promise<{ branch: string; prNumber: number }>;
+  land?: LandFn;
   listIssueLabels?: (octokit: Octokit, owner: string, repo: string, issue: number) => Promise<string[]>;
   sleep?: (ms: number) => Promise<void>;
   emitEvent?: typeof logEvent;
@@ -4662,13 +4779,15 @@ export async function waitForMerge(
   ghRepo: string,
   paths: ReturnType<typeof getFactoryPaths>,
   deps: WaitForMergeDeps = {},
+  shell: CliShell = defaultCliShell,
 ): Promise<void> {
   const {
-    createOctokit = getOctokit,
+    createOctokit = () => getOctokit(shell),
     pathExists = existsSync,
     checkMerged = isPrMerged,
     loadConfig = loadFactoryConfigForRepo,
-    land = landIssue,
+    land = (issue, repoRoot, ghRepo, paths, octokit, skipCI, branchPrefix) =>
+      landIssue(issue, repoRoot, ghRepo, paths, octokit, skipCI, branchPrefix, {}, shell),
     listIssueLabels = defaultListIssueLabels,
     sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
     emitEvent = logEvent,
@@ -4909,7 +5028,7 @@ async function scanGreenPrs(ghRepo: string | undefined, octokit: Octokit | undef
   }
 }
 
-function probeClaudeKeychain(): KeychainProbeStatus {
+function probeClaudeKeychain(shell: CliShell): KeychainProbeStatus {
   if (process.platform !== 'darwin') return { status: 'skipped', detail: 'skipped — not macOS' };
   if (!isCommandAvailable('claude')) return { status: 'skipped', detail: 'skipped — claude CLI not on PATH' };
   if (process.env.ANTHROPIC_API_KEY) return { status: 'skipped', detail: 'skipped — ANTHROPIC_API_KEY auth in use' };
@@ -4918,20 +5037,20 @@ function probeClaudeKeychain(): KeychainProbeStatus {
   const service = claudeKeychainService();
   const profile = { service, configDir: claudeConfigDirOverride() };
   try {
-    execSync(`security find-generic-password -s ${shellEscape(service)}`, { timeout: 10_000, stdio: 'ignore' });
+    shell.execSync(`security find-generic-password -s ${shellEscape(service)}`, { timeout: 10_000, stdio: 'ignore' });
     return { status: 'readable', ...profile };
   } catch {
     return { status: 'unreadable', inTmux: !!process.env.TMUX, ...profile };
   }
 }
 
-async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
+async function cmdDoctor(opts: { reconcile?: boolean } = {}, shell: CliShell) {
   const checks = runDoctorChecks({
     commandAvailable: isCommandAvailable,
     envPresent: (key) => !!process.env[key],
     tryExec: (cmd) => {
       try {
-        return execSync(cmd, { encoding: 'utf-8', timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        return shell.execSync(cmd, { timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
       } catch {
         return null;
       }
@@ -4942,11 +5061,12 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
 
   let repoRoot: string | null;
   try {
-    repoRoot = execSync('git rev-parse --show-toplevel', {
-      encoding: 'utf-8',
-      timeout: 10_000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
+    repoRoot = shell
+      .execSync('git rev-parse --show-toplevel', {
+        timeout: 10_000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+      .trim();
   } catch {
     repoRoot = null;
   }
@@ -4954,7 +5074,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
   const CLAUDE_AUTH_PROBE = 'claude -p "reply with exactly: ok"';
   const probeExec = (cmd: string): string | null => {
     try {
-      return execSync(cmd, { encoding: 'utf-8', timeout: 120_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      return shell.execSync(cmd, { timeout: 120_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
     } catch {
       return null;
     }
@@ -4992,7 +5112,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     }
   }
 
-  checks.push(claudeKeychainCheck(probeClaudeKeychain()));
+  checks.push(claudeKeychainCheck(probeClaudeKeychain(shell)));
   checks.push(...sandboxClaudeAuthChecks({ host, sandboxed, hostDetail, sandboxDetail }));
 
   if (repoRoot !== null) {
@@ -5022,8 +5142,11 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     // Full run-lifecycle reap (#998): dead-run worktrees and their branches. Uses the same
     // GitHub evidence and the same lock pairing as `factory worktree gc` (cmdWorktreeGc) —
     // a merged or closed PR is what makes a worktree reapable.
-    const ghRepo = await getGitHubRepo().catch(() => undefined);
-    const octokit = ghRepo && hasGitHubToken() ? getOctokit() : undefined;
+    const ghRepo = await getGitHubRepo(shell).catch(() => undefined);
+    const octokit =
+      ghRepo && hasGitHubToken(process.env, () => shell.execSync('gh auth token', { timeout: 5_000 }))
+        ? getOctokit(shell)
+        : undefined;
 
     // Green-and-ready PRs with no merge (#1000). Report only — doctor never lands a PR.
     checks.push(...unmergedGreenPrChecks(await scanGreenPrs(ghRepo, octokit)));
@@ -5103,11 +5226,19 @@ export interface CliDeps {
   daemon?: DaemonCtlDeps;
   /** Replaces the TUI entry point used by `factory tui`. */
   runTui?: typeof runTui;
+  /** Replaces child_process.exec (promisified) for every CLI shell-out. */
+  exec?: CliShell['exec'];
+  /** Replaces child_process.execSync for every CLI shell-out. */
+  execSync?: CliShell['execSync'];
 }
 
 // ---------- main ----------
 
 export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
+  const shell: CliShell = {
+    exec: deps.exec ?? defaultCliShell.exec,
+    execSync: deps.execSync ?? defaultCliShell.execSync,
+  };
   if (argv.slice(2).length === 0) {
     console.log(formatOverview());
     return;
@@ -5139,7 +5270,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
       'Set up .factory/ in this repo (config, constitution, queue file, .gitignore) and check model reachability',
     )
     .option('--force', 'Overwrite an existing .factory config, constitution, and .gitignore')
-    .action((opts: { force?: boolean }) => cmdInit(opts));
+    .action((opts: { force?: boolean }) => cmdInit(opts, shell));
 
   program
     .command('migrate')
@@ -5151,7 +5282,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
       '--to-yaml',
       'Convert .factory/config.json to .factory/config.yaml (removes the JSON only after a round-trip check)',
     )
-    .action((opts: { dryRun?: boolean; toYaml?: boolean }) => cmdMigrate(opts));
+    .action((opts: { dryRun?: boolean; toYaml?: boolean }) => cmdMigrate(opts, shell));
 
   program
     .command('constitution')
@@ -5163,13 +5294,13 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .option('--list', 'List available constitutions')
     .option('--product <name>', 'Seed .factory/constitution.md from the bundled example constitution for <name>')
     .option('--force', 'With --init or --product, overwrite an existing .factory/constitution.md')
-    .action(cmdConstitution);
+    .action((opts) => cmdConstitution(opts, shell));
 
   program
     .command('models')
     .description('List models with their tiers, cost per 1M tokens, and availability')
     .option('--doctor', 'Probe provider CLIs and env keys; report per-model reachability')
-    .action(cmdModels);
+    .action((opts) => cmdModels(opts, shell));
 
   program
     .command('doctor')
@@ -5178,31 +5309,31 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
       '--reconcile',
       'Reap stale port leases, dead-run worktrees, stale issue claims, orphan sf-job-*/factory.managed containers, and orphan factory-* sbx VMs',
     )
-    .action((opts: { reconcile?: boolean }) => cmdDoctor(opts));
+    .action((opts: { reconcile?: boolean }) => cmdDoctor(opts, shell));
 
   program
     .command('cost')
     .description('Show recorded model spend by model (--issue for one issue)')
     .option('--issue <number>', 'show per-entry detail for one issue')
-    .action((opts: { issue?: string }) => cmdCost(opts));
+    .action((opts: { issue?: string }) => cmdCost(opts, shell));
 
   program
     .command('usage')
     .description('Report 5-hour subscription usage (falls back to a list-price estimate)')
-    .action(cmdUsage);
+    .action(() => cmdUsage(shell));
 
   program
     .command('status')
     .description('Show active runs, the GitHub queue, provider health, and recent events')
     .option('--kpis', 'Show full Health KPIs and Effective config')
-    .action((opts: { kpis?: boolean }) => cmdStatus(opts));
+    .action((opts: { kpis?: boolean }) => cmdStatus(opts, shell));
 
   program
     .command('kpis')
     .description('Compute factory health KPIs and record a trend snapshot')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
     .action(async (opts) => {
-      await cmdKpis(opts);
+      await cmdKpis(opts, shell);
     });
 
   const classifierCmd = program.command('classifier').description('Inspect the shadow PR classifier track record');
@@ -5212,13 +5343,13 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
       'Confusion table, rule-of-three slip bounds and model-vs-floor agreement from classifier-outcomes.jsonl',
     )
     .option('--json', 'Print one JSON object with the same numbers')
-    .action((opts: { json?: boolean }) => cmdClassifierReport(opts));
+    .action((opts: { json?: boolean }) => cmdClassifierReport(opts, shell));
 
   program
     .command('tui')
     .description('Live read-only view of the current run (q to quit)')
     .option('--local-queue', 'Read .factory/queue instead of claiming issues from GitHub Issues')
-    .action((opts: { localQueue?: boolean }) => cmdTui(opts, deps.runTui ?? runTui));
+    .action((opts: { localQueue?: boolean }) => cmdTui(opts, deps.runTui ?? runTui, shell));
 
   program
     .command('logs')
@@ -5227,7 +5358,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .option('--json', 'Emit one JSON object per line')
     .option('--issue <number>', 'Only show events for this issue')
     .action(async (opts: { follow?: boolean; json?: boolean; issue?: string }) => {
-      const repoRoot = await getRepoRoot();
+      const repoRoot = await getRepoRoot(shell);
       const paths = getFactoryPaths(repoRoot);
       await cmdLogs(opts, { eventsFile: paths.events });
     });
@@ -5237,27 +5368,27 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .description("File one factory issue (bug, factory:needs-triage) from a PR's human review findings")
     .option('--note <text>', 'Use this as the issue title instead of the first finding')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
-    .action(cmdFeedback);
+    .action((prUrl, opts) => cmdFeedback(prUrl, opts, shell));
 
   const filingCmd = program.command('filing').description('Inspect upstream factory reports (nothing is sent)');
   filingCmd
     .command('preview <run-id>')
     .description('Print the exact redacted [factory-report] title and body that would be sent upstream; sends nothing')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
-    .action((runId: string, opts: { branchPrefix?: string }) => cmdFilingPreview(runId, opts));
+    .action((runId: string, opts: { branchPrefix?: string }) => cmdFilingPreview(runId, opts, shell));
 
   const triage = program
     .command('triage')
     .description('Have a model propose a queue from open issues into .factory/queue.proposed')
     .option('--product <name>', 'Product constitution to scope triage')
-    .action(cmdTriage);
+    .action((opts) => cmdTriage(opts, shell));
 
   triage
     .command('accept')
     .description('Validate and atomically promote .factory/queue.proposed to .factory/queue')
     .option('--force', 'Skip validation and promote as-is')
     .action(async (opts) => {
-      await cmdTriageAccept(opts);
+      await cmdTriageAccept(opts, shell);
     });
 
   const queue = program
@@ -5268,14 +5399,14 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .description('Copy valid .factory/queue lane order into GitHub issue labels')
     .option('--file <path>', 'Read the legacy queue from an explicit path instead of .factory/queue')
     .option('--dry-run', 'Print the intended label updates without mutating GitHub')
-    .action((opts: { file?: string; dryRun?: boolean }) => cmdQueueMigrate(opts));
+    .action((opts: { file?: string; dryRun?: boolean }) => cmdQueueMigrate(opts, shell));
   queue
     .command('add <lane> <issues...>')
     .description(
       'Queue explicit GitHub issues into a lane — applies factory:queued + factory:lane:<lane> (and an order label), creating any missing factory labels idempotently',
     )
     .action(async (lane: string, issues: string[]) => {
-      await cmdQueueAdd(lane, issues);
+      await cmdQueueAdd(lane, issues, shell);
     });
   queue
     .command('reconcile')
@@ -5284,7 +5415,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     )
     .option('--lane <lane>', 'Only reconcile one lane')
     .action(async (opts: { lane?: string }) => {
-      await cmdQueueReconcile(opts);
+      await cmdQueueReconcile(opts, shell);
     });
   queue
     .command('clear')
@@ -5295,7 +5426,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .option('--yes', 'Confirm and remove the queue labels')
     .option('--lane <lane>', 'Only clear queued issues in this lane (factory:lane:<lane>)')
     .action(async (opts: { dryRun?: boolean; yes?: boolean; lane?: string }) => {
-      await cmdQueueClear(opts);
+      await cmdQueueClear(opts, shell);
     });
 
   const hosted = program
@@ -5372,7 +5503,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
       '--deep',
       'Also call the triage-tier model once: preview the proposed split when the issue would split, otherwise suggest missing criteria and scope concerns (prints model id and cost; never files anything; exit 2 on invalid model output)',
     )
-    .action(cmdCheck);
+    .action((issueRaw, opts) => cmdCheck(issueRaw, opts, shell));
 
   program
     .command('ship <issue>')
@@ -5386,7 +5517,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .option('--no-sandbox', 'Disable the containment sandbox for agent runs (dangerous)')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
     .action(async (issueNum, opts) => {
-      await cmdShip(parseIssueArg(issueNum), opts);
+      await cmdShip(parseIssueArg(issueNum), opts, shell);
     });
 
   program
@@ -5400,7 +5531,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
     .option('--run-children', 'When the size gate decomposes the issue, run the child issues it filed')
     .action(async (issueNum, opts) => {
-      await cmdRunIssue(parseIssueArg(issueNum), opts);
+      await cmdRunIssue(parseIssueArg(issueNum), opts, shell);
     });
 
   program
@@ -5421,7 +5552,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     )
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
     .action(async (file, opts) => {
-      await cmdRunBrief(file, opts);
+      await cmdRunBrief(file, opts, shell);
     });
 
   program
@@ -5430,7 +5561,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .option('--spec <path>', 'Frozen spec path; defaults to .factory/plans/issue-<n>.md')
     .option('--output <path>', 'Artifact directory; defaults to .factory/local-small/issue-<n>')
     .action(async (issueNum, opts) => {
-      await cmdLocalSmallDryRun(parseIssueArg(issueNum), opts);
+      await cmdLocalSmallDryRun(parseIssueArg(issueNum), opts, shell);
     });
 
   program
@@ -5441,7 +5572,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .option('--queue <path>', 'Curated queue file; defaults to .factory/local-small/overnight-queue')
     .option('--state <path>', 'Resume-state file; defaults to .factory/local-small/overnight-state.json')
     .action(async (opts) => {
-      await cmdLocalSmallOvernight(opts);
+      await cmdLocalSmallOvernight(opts, shell);
     });
 
   program
@@ -5455,7 +5586,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
       'Merge even when the issue or PR carries the no-auto-merge gate label (human override; writes an AUDIT line and a merge-gated-override event)',
     )
     .action(async (issueNum, opts) => {
-      await cmdLand(parseIssueArg(issueNum), opts);
+      await cmdLand(parseIssueArg(issueNum), opts, shell);
     });
 
   program
@@ -5465,7 +5596,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     )
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
     .action(async (opts) => {
-      await cmdResumeApproved(opts);
+      await cmdResumeApproved(opts, shell);
     });
 
   program
@@ -5506,13 +5637,13 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
         usageThreshold?: string;
         usagePoll?: string;
         branchPrefix?: string;
-      }) => cmdRun(opts),
+      }) => cmdRun(opts, shell),
     );
 
   program
     .command('proxy')
     .description('Run the opt-in lane reverse proxy in the foreground (run and supervise start it themselves)')
-    .action(cmdProxy);
+    .action(() => cmdProxy(shell));
 
   const daemonCmd = program
     .command('daemon')
@@ -5554,7 +5685,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .option('--dry-run', 'Preview what would be removed without deleting anything')
     .option('--ttl-days <n>', 'Override worktree.gcTtlDays from factory.json')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
-    .action(cmdWorktreeGc);
+    .action((opts) => cmdWorktreeGc(opts, shell));
 
   program
     .command('reset <issue...>')
@@ -5567,7 +5698,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     )
     .option('--force', 'Remove worktrees and branches even when they have uncommitted changes or unpushed commits')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
-    .action(cmdReset);
+    .action((issues, opts) => cmdReset(issues, opts, shell));
 
   program
     .command('supervise')
@@ -5591,14 +5722,14 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .option('--usage-poll <seconds>', "Override .factory/config.json and FACTORY_USAGE_POLL for this run's usage poll")
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
     .action(async (opts) => {
-      await cmdSupervise(opts);
+      await cmdSupervise(opts, shell);
     });
 
   program
     .command('stop')
     .description('Tell running lanes to halt after their current issue')
     .action(async () => {
-      const repoRoot = await getRepoRoot();
+      const repoRoot = await getRepoRoot(shell);
       const paths = getFactoryPaths(repoRoot);
       ensureDir(paths.state);
       writeFileSync(paths.stop, '');
@@ -5609,7 +5740,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .command('resume')
     .description('Clear a stop so lanes pick up new issues again')
     .action(async () => {
-      const repoRoot = await getRepoRoot();
+      const repoRoot = await getRepoRoot(shell);
       const paths = getFactoryPaths(repoRoot);
       if (existsSync(paths.stop)) {
         await import('node:fs/promises').then((fs) => fs.unlink(paths.stop));

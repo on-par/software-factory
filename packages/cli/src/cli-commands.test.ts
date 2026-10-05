@@ -1,4 +1,4 @@
-import type * as ChildProcess from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,7 +22,7 @@ const h = vi.hoisted(() => {
     daemonExecImpl: (_cmd: string, _args: string[]) => ({ code: 0, stdout: '', stderr: '' }),
     daemonOut: [] as string[],
     ghRepo: 'on-par/software-factory',
-    // child_process shims
+    // shell seam (CliDeps.exec / CliDeps.execSync)
     execImpl: (_cmd: string): string => '',
     execSyncImpl: (_cmd: string): string => {
       throw new Error('execSync not stubbed');
@@ -86,20 +86,6 @@ const h = vi.hoisted(() => {
 // ---------------------------------------------------------------------------
 // Module mocks (hoisted above imports by vitest)
 // ---------------------------------------------------------------------------
-vi.mock('node:child_process', () => {
-  const exec = (cmd: string, optsOrCb: any, maybeCb?: any) => {
-    const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
-    try {
-      const stdout = h.execImpl(cmd);
-      cb(null, { stdout, stderr: '' });
-    } catch (err) {
-      cb(err);
-    }
-  };
-  const execSync = (cmd: string) => h.execSyncImpl(cmd);
-  return { exec, execSync, default: { exec, execSync } };
-});
-
 vi.mock('@octokit/rest', () => {
   // createFactoryOctokit (packages/cli/src/cli/octokit.ts) calls Octokit.plugin(...) at module load
   // time to attach retry/throttling — the double must expose it as a static too.
@@ -275,6 +261,8 @@ import {
   buildInitConfig,
   type CliDeps,
   CliExitError,
+  type CliShell,
+  defaultCliShell,
   cmdConstitution,
   cmdLand,
   cmdUsage,
@@ -363,6 +351,14 @@ const recordingRunTui: NonNullable<CliDeps['runTui']> = async (opts) => {
   h.runTuiCalls.push(opts);
 };
 
+function testShell(): CliShell {
+  return {
+    // async so a throwing h.execImpl becomes a rejection; both read h lazily since tests reassign them.
+    exec: async (cmd) => ({ stdout: h.execImpl(cmd), stderr: '' }),
+    execSync: (cmd) => h.execSyncImpl(cmd),
+  };
+}
+
 function daemonDeps(): DaemonCtlDeps {
   return {
     exec: async (cmd, args) => {
@@ -387,7 +383,7 @@ async function runMain(...args: string[]) {
 
 async function runMainWith(deps: CliDeps | undefined, ...args: string[]) {
   try {
-    await main(['node', 'factory', ...args], deps);
+    await main(['node', 'factory', ...args], { ...testShell(), ...deps });
   } catch (err) {
     if (err instanceof ExitError) return { exited: true as const, code: err.code };
     throw err;
@@ -2772,9 +2768,7 @@ bash scripts/verify.sh
       const registryFile = join(paths().state, 'registry.json');
       writeFileSync(registryFile, JSON.stringify({ version: 1, repos: {} }));
       const pidFile = join(paths().state, 'daemon.pid');
-      // A real (bypassing the module mock) short-lived child yields a pid that
-      // is guaranteed dead once spawnSync returns.
-      const { spawnSync } = await vi.importActual<typeof ChildProcess>('node:child_process');
+      // A short-lived child yields a pid that is guaranteed dead once spawnSync returns.
       const deadPid = spawnSync(process.execPath, ['-e', '']).pid;
       writeFileSync(pidFile, `${deadPid}\n`);
 
@@ -4625,11 +4619,11 @@ describe('shipIssue (direct)', () => {
   const ctx = () => ({ repoRoot: h.repoRoot, ghRepo: h.ghRepo });
 
   it('uses the branchPrefix override for the branch name', async () => {
-    expect(await shipIssue(5, { branchPrefix: 'sf' }, ctx())).toBe('sf/5-fix-the-bug');
+    expect(await shipIssue(5, { branchPrefix: 'sf' }, ctx(), testShell())).toBe('sf/5-fix-the-bug');
   });
 
   it('returns the branch on the happy path and logs a ready event', async () => {
-    const branch = await shipIssue(5, {}, ctx());
+    const branch = await shipIssue(5, {}, ctx(), testShell());
     expect(branch).toBe('factory/5-fix-the-bug');
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('ready');
@@ -4638,7 +4632,7 @@ describe('shipIssue (direct)', () => {
 
   it('loads the committed repo config from paths.root, not paths.state', async () => {
     const core = await import('@on-par/factory-core');
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
     expect(vi.mocked(core.loadRepoConfig)).toHaveBeenCalledWith(h.repoRoot, paths().root);
   });
 
@@ -4648,7 +4642,7 @@ describe('shipIssue (direct)', () => {
     h.modelProviders = { 'claude-sonnet-5': 'anthropic' };
     h.planResult = { ok: true, route: 'codex' };
 
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
 
     expect(vi.mocked(core.planPhase).mock.calls.at(-1)?.[0]).toMatchObject({ preferredRoute: 'claude' });
     expect(vi.mocked(core.buildPhase).mock.calls.at(-1)?.[0]).toMatchObject({
@@ -4665,7 +4659,7 @@ describe('shipIssue (direct)', () => {
     const core = await import('@on-par/factory-core');
     mkdirSync(paths().root, { recursive: true });
     writeFileSync(paths().config, JSON.stringify({ version: 1, providers: { ollama: false } }));
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
     expect(vi.mocked(core.loadRepoConfig).mock.results.at(-1)?.value).toEqual({
       version: 2,
       providers: { ollama: false },
@@ -4677,7 +4671,7 @@ describe('shipIssue (direct)', () => {
   it('refuses a closed issue before any resource is committed', async () => {
     h.octokit.rest.issues.get = vi.fn(async () => ({ data: { title: 'Fix the bug', state: 'closed' } }));
 
-    await expect(shipIssue(5, {}, ctx())).rejects.toBeInstanceOf(IssueSkippedError);
+    await expect(shipIssue(5, {}, ctx(), testShell())).rejects.toBeInstanceOf(IssueSkippedError);
 
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('skipped-already-closed');
@@ -4688,7 +4682,7 @@ describe('shipIssue (direct)', () => {
   });
 
   it('logs an issue-title event with the fetched title before any other events', async () => {
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
     const events = readFileSync(paths().events, 'utf-8')
       .trim()
       .split('\n')
@@ -4698,7 +4692,7 @@ describe('shipIssue (direct)', () => {
 
   it('logs model-override events when overrides are pinned', async () => {
     h.modelOverrides = { plan: 'plan-x', build: 'build-y' };
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('plan-x');
     expect(events).toContain('build-y');
@@ -4709,11 +4703,11 @@ describe('shipIssue (direct)', () => {
     h.modelProviders = { 'claude-plan': 'anthropic', 'gpt-plan': 'openai' };
     h.triggerPlanProviderFailure = { provider: 'anthropic', reason: 'usage_cap' };
 
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
     expect(readFileSync(paths().events, 'utf-8')).toContain('provider_breaker_open');
 
     h.triggerPlanProviderFailure = null;
-    await shipIssue(6, {}, ctx());
+    await shipIssue(6, {}, ctx(), testShell());
     expect(vi.mocked(FactoryCore.planPhase).mock.calls.at(-1)?.[0]).toMatchObject({ modelOverride: 'gpt-plan' });
   });
 
@@ -4726,7 +4720,7 @@ describe('shipIssue (direct)', () => {
       detail: 'msg="AI_APICallError: Weekly usage limit reached. Resets in 3hr 17min. To continue..."',
     };
 
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
 
     const breakerFile = JSON.parse(readFileSync(paths().breaker, 'utf-8'));
     expect(breakerFile.providers.anthropic.cooldownMs).toBe((3 * 60 + 17) * 60_000 + 2 * 60_000);
@@ -4745,7 +4739,7 @@ describe('shipIssue (direct)', () => {
       }),
     );
 
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
 
     expect(vi.mocked(FactoryCore.buildPhase).mock.calls.at(-1)?.[0]).toMatchObject({
       route: 'codex',
@@ -4756,26 +4750,26 @@ describe('shipIssue (direct)', () => {
 
   it('logs standards source when a repo constitution resolves', async () => {
     h.constitutionResolve = () => ({ source: 'repo', product: 'alpha' });
-    await shipIssue(5, { product: 'alpha' }, ctx());
+    await shipIssue(5, { product: 'alpha' }, ctx(), testShell());
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('Standards from repo instruction files');
   });
 
   it('logs bundled standards source when a bundled constitution resolves', async () => {
     h.constitutionResolve = () => ({ source: 'bundled', product: 'beta' });
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain("bundled constitution 'beta'");
   });
 
   it('throws a LaneParkError with reason escalate when the plan escalates', async () => {
     h.planResult = { ok: false, route: 'claude', escalate: 'needs human' };
-    await expect(shipIssue(5, {}, ctx())).rejects.toMatchObject({ reason: 'escalate' });
+    await expect(shipIssue(5, {}, ctx(), testShell())).rejects.toMatchObject({ reason: 'escalate' });
   });
 
   it('emits exactly one escalate event for the issue outside local-only mode', async () => {
     h.planResult = { ok: false, route: 'claude', escalate: 'needs human' };
-    await expect(shipIssue(5, {}, ctx())).rejects.toMatchObject({ reason: 'escalate' });
+    await expect(shipIssue(5, {}, ctx(), testShell())).rejects.toMatchObject({ reason: 'escalate' });
     const events = readFileSync(paths().events, 'utf-8')
       .trim()
       .split('\n')
@@ -4788,7 +4782,7 @@ describe('shipIssue (direct)', () => {
     writeFileSync(paths().queue, 'app 5\n');
     h.planResult = { ok: false, route: 'claude', escalate: 'decomposed', decomposed: { childIssues: [10, 11] } };
 
-    const err = await shipIssue(5, {}, ctx()).catch((e) => e);
+    const err = await shipIssue(5, {}, ctx(), testShell()).catch((e) => e);
 
     expect(err).toBeInstanceOf(IssueDecomposedError);
     expect(err.childIssues).toEqual([10, 11]);
@@ -4802,7 +4796,7 @@ describe('shipIssue (direct)', () => {
   it('logs decompose_filed without rewriting when the decomposed issue has no queue entry', async () => {
     h.planResult = { ok: false, route: 'claude', escalate: 'decomposed', decomposed: { childIssues: [10, 11] } };
 
-    await expect(shipIssue(5, {}, ctx())).rejects.toBeInstanceOf(IssueDecomposedError);
+    await expect(shipIssue(5, {}, ctx(), testShell())).rejects.toBeInstanceOf(IssueDecomposedError);
 
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('#5 had no queue entry to replace — continuing the lane with #10, #11');
@@ -4812,7 +4806,7 @@ describe('shipIssue (direct)', () => {
     mkdirSync(paths().queue); // a directory at the queue path makes readFileSync throw
     h.planResult = { ok: false, route: 'claude', escalate: 'decomposed', decomposed: { childIssues: [10] } };
 
-    await expect(shipIssue(5, {}, ctx())).rejects.toBeInstanceOf(IssueDecomposedError);
+    await expect(shipIssue(5, {}, ctx(), testShell())).rejects.toBeInstanceOf(IssueDecomposedError);
 
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('decompose_file_failed');
@@ -4826,7 +4820,7 @@ describe('shipIssue (direct)', () => {
       reworkRounds: 0,
       failureSignature: 'sig-1',
     };
-    const err = await shipIssue(5, {}, ctx()).catch((e) => e);
+    const err = await shipIssue(5, {}, ctx(), testShell()).catch((e) => e);
     expect(err).toBeInstanceOf(LaneParkError);
     expect(err.failureSignature).toBe('sig-1');
     expect(err.failingChecks).toEqual(['tests']);
@@ -4835,7 +4829,7 @@ describe('shipIssue (direct)', () => {
 
   it('leaves the failure signature undefined for a non-CHECK park', async () => {
     h.planResult = { ok: false, route: 'claude', escalate: 'needs human' };
-    const err = await shipIssue(5, {}, ctx()).catch((e) => e);
+    const err = await shipIssue(5, {}, ctx(), testShell()).catch((e) => e);
     expect(err).toBeInstanceOf(LaneParkError);
     expect(err.failureSignature).toBeUndefined();
     expect(err.failingChecks).toBeUndefined();
@@ -4843,17 +4837,17 @@ describe('shipIssue (direct)', () => {
 
   it('throws a LaneParkError with reason escalate when the build escalates', async () => {
     h.buildResult = { ok: false, escalate: 'stuck' };
-    await expect(shipIssue(5, {}, ctx())).rejects.toMatchObject({ reason: 'escalate' });
+    await expect(shipIssue(5, {}, ctx(), testShell())).rejects.toMatchObject({ reason: 'escalate' });
   });
 
   it('throws a LaneParkError with reason fail when the ship phase fails', async () => {
     h.shipResult = { ok: false };
-    await expect(shipIssue(5, {}, ctx())).rejects.toMatchObject({ reason: 'fail' });
+    await expect(shipIssue(5, {}, ctx(), testShell())).rejects.toMatchObject({ reason: 'fail' });
   });
 
   it('throws a LaneParkError with reason escalate and the denial message when ship is denied', async () => {
     h.shipResult = { ok: false, denied: true, deniedReason: 'not today' };
-    await expect(shipIssue(5, {}, ctx())).rejects.toMatchObject({
+    await expect(shipIssue(5, {}, ctx(), testShell())).rejects.toMatchObject({
       reason: 'escalate',
       message: 'ship denied: not today',
     });
@@ -4861,7 +4855,7 @@ describe('shipIssue (direct)', () => {
 
   it('does not construct an approval gate when interactive is not requested', async () => {
     const core = await import('@on-par/factory-core');
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
     const call = vi.mocked(core.shipPhase).mock.calls.at(-1)?.[0] as any;
     expect(call.approvalGate).toBeUndefined();
     expect(call.checkSummary).toBe(h.checkResult.summary);
@@ -4869,14 +4863,14 @@ describe('shipIssue (direct)', () => {
 
   it('constructs an approval gate when interactive:true is passed', async () => {
     const core = await import('@on-par/factory-core');
-    await shipIssue(5, { interactive: true }, ctx());
+    await shipIssue(5, { interactive: true }, ctx(), testShell());
     const call = vi.mocked(core.shipPhase).mock.calls.at(-1)?.[0] as any;
     expect(typeof call.approvalGate).toBe('function');
   });
 
   it('does not construct a plan approval gate when approvePlan is not requested', async () => {
     const core = await import('@on-par/factory-core');
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
     const call = vi.mocked(core.planPhase).mock.calls.at(-1)?.[0] as any;
     expect(call.approvalGate).toBeUndefined();
     expect(call.drainSteering).toBeUndefined();
@@ -4884,7 +4878,7 @@ describe('shipIssue (direct)', () => {
 
   it('constructs a plan approval gate when approvePlan:true is passed', async () => {
     const core = await import('@on-par/factory-core');
-    await shipIssue(5, { approvePlan: true }, ctx());
+    await shipIssue(5, { approvePlan: true }, ctx(), testShell());
     const call = vi.mocked(core.planPhase).mock.calls.at(-1)?.[0] as any;
     expect(typeof call.approvalGate).toBe('function');
     expect(typeof call.drainSteering).toBe('function');
@@ -4902,7 +4896,7 @@ describe('shipIssue (direct)', () => {
 
   it('passes an onPgid callback to buildPhase and checkPhase', async () => {
     const core = await import('@on-par/factory-core');
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
     const buildCall = vi.mocked(core.buildPhase).mock.calls.at(-1)?.[0] as any;
     const checkCall = vi.mocked(core.checkPhase).mock.calls.at(-1)?.[0] as any;
     expect(typeof buildCall.onPgid).toBe('function');
@@ -4911,7 +4905,7 @@ describe('shipIssue (direct)', () => {
 
   it('passes an onActivity callback to checkPhase that bumps the persisted phase snapshot heartbeat (#1326)', async () => {
     const core = await import('@on-par/factory-core');
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
 
     const checkCall = vi.mocked(core.checkPhase).mock.calls.at(-1)?.[0] as any;
     expect(typeof checkCall.onActivity).toBe('function');
@@ -4929,7 +4923,7 @@ describe('shipIssue (direct)', () => {
 
   it('updates the persisted phase snapshot lastEvent on every logged event (#1327)', async () => {
     const core = await import('@on-par/factory-core');
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
 
     const checkCall = vi.mocked(core.checkPhase).mock.calls.at(-1)?.[0] as any;
     expect(typeof checkCall.log).toBe('function');
@@ -4951,12 +4945,12 @@ describe('shipIssue (direct)', () => {
       return h.buildResult;
     });
 
-    const branch = await shipIssue(5, {}, ctx());
+    const branch = await shipIssue(5, {}, ctx(), testShell());
     expect(branch).toBe('factory/5-fix-the-bug');
   });
 
   it('does not log environment_cleanup when no process groups were tracked', async () => {
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
     expect(logged()).not.toContain('environment_cleanup');
   });
 
@@ -4981,7 +4975,7 @@ describe('shipIssue (direct)', () => {
       { action: 'killed', worktreeId: '/dead/worktree', port: 4002, pid: 111, pgid: 222, command: 'node server.js' },
     ];
 
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
 
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('environment_lease_reaped');
@@ -5004,7 +4998,7 @@ describe('shipIssue (direct)', () => {
     h.portListeners = [{ pid: 777, pgid: 888, command: 'some-other-proc' }];
 
     try {
-      await shipIssue(5, {}, ctx());
+      await shipIssue(5, {}, ctx(), testShell());
     } finally {
       server.close();
     }
@@ -5028,7 +5022,7 @@ describe('shipIssue (direct)', () => {
     h.portListeners = [];
 
     try {
-      await shipIssue(5, {}, ctx());
+      await shipIssue(5, {}, ctx(), testShell());
     } finally {
       server.close();
     }
@@ -5053,7 +5047,7 @@ describe('shipIssue (direct)', () => {
     vi.mocked(core.defaultFindPortListeners).mockRejectedValueOnce(new Error('lsof unavailable'));
 
     try {
-      await shipIssue(5, {}, ctx());
+      await shipIssue(5, {}, ctx(), testShell());
     } finally {
       server.close();
     }
@@ -5067,7 +5061,7 @@ describe('shipIssue (direct)', () => {
   it('logs that port leasing is disabled when environment.ports.enabled is false', async () => {
     h.factoryConfig = { ...h.factoryConfig, environment: { ports: { enabled: false, range: [3100, 3999] } } };
 
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
 
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('port leasing disabled (environment.ports.enabled=false or FACTORY_ENV_PORTS=0)');
@@ -5092,7 +5086,7 @@ describe('shipIssue (direct)', () => {
       }),
     );
 
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
 
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('stable lane URL http://');
@@ -5108,7 +5102,7 @@ describe('shipIssue (direct)', () => {
       },
     };
 
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
 
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('environment_proxy_unavailable');
@@ -5119,7 +5113,7 @@ describe('shipIssue (direct)', () => {
     trackEnv('FACTORY_LOCAL_ONLY');
     process.env.FACTORY_LOCAL_ONLY = '1';
     const core = await import('@on-par/factory-core');
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
     expect(vi.mocked(core.writeLocalRunReport)).toHaveBeenCalled();
     expect(logged()).toContain('local-only report');
   });
@@ -5134,21 +5128,21 @@ describe('shipIssue (direct)', () => {
       failureSignature: 'sig-1',
     };
     const core = await import('@on-par/factory-core');
-    await expect(shipIssue(5, {}, ctx())).rejects.toBeTruthy();
+    await expect(shipIssue(5, {}, ctx(), testShell())).rejects.toBeTruthy();
     const report = vi.mocked(core.writeLocalRunReport).mock.calls.at(-1)?.[0] as any;
     expect(report.outcome).toBe('failed');
   });
 
   it('logs sandbox-disabled by config when factory.json sandbox.enabled is false', async () => {
     h.factoryConfig = { ...h.factoryConfig, sandbox: { ...h.factoryConfig.sandbox, enabled: false } };
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('sandbox disabled by config/FACTORY_SANDBOX');
   });
 
   it('passes the docker-sandbox descriptor to setupWorktree without a speculative sandbox log when sandbox.runtime is docker-sandbox', async () => {
     h.factoryConfig = { ...h.factoryConfig, sandbox: { ...h.factoryConfig.sandbox, runtime: 'docker-sandbox' } };
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
     const events = readFileSync(paths().events, 'utf-8');
     // createMicroVm (not the CLI) owns the outcome-driven 'sandbox'/'sandbox-unavailable'
     // events; setupWorktree is mocked here, so neither fires — the CLI must not log a
@@ -5164,7 +5158,7 @@ describe('shipIssue (direct)', () => {
       if (cmd.includes('command -v sandbox-exec') || cmd.includes('command -v firejail')) return '/usr/bin/tool';
       throw new Error('not stubbed');
     };
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('sandbox-degraded');
     expect(events).toContain('host-level egress filtering unavailable');
@@ -5175,7 +5169,7 @@ describe('shipIssue (direct)', () => {
     h.factoryConfig = { ...h.factoryConfig, sandbox: { ...h.factoryConfig.sandbox, runtime: 'docker-sandbox' } };
     h.checkResult = { passed: true, summary: { results: [], failures: 0 }, reworkRounds: 2 };
 
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
 
     const costs = readFileSync(paths().costs, 'utf-8')
       .trim()
@@ -5187,7 +5181,7 @@ describe('shipIssue (direct)', () => {
   });
 
   it('stamps workspaceBackend "worktree" onto each cost row when workspace.backend is unset (#1532)', async () => {
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
 
     const costs = readFileSync(paths().costs, 'utf-8')
       .trim()
@@ -5200,7 +5194,7 @@ describe('shipIssue (direct)', () => {
   it('stamps workspaceBackend "disposable-docker" onto each cost row when workspace.backend is disposable-docker (#1532)', async () => {
     h.factoryConfig = { ...h.factoryConfig, workspace: { backend: 'disposable-docker' } };
 
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
 
     const costs = readFileSync(paths().costs, 'utf-8')
       .trim()
@@ -5213,7 +5207,7 @@ describe('shipIssue (direct)', () => {
   it('logs skip-ci when FACTORY_SKIP_CI resolves to true', async () => {
     const core = await import('@on-par/factory-core');
     vi.mocked(core.resolveSkipCI).mockReturnValueOnce(true);
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), testShell());
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('skip-ci');
     expect(events).toContain('skipping CI watch');
@@ -5231,7 +5225,7 @@ describe('shipIssue (direct)', () => {
       );
       return h.shipResult;
     });
-    await shipIssue(5, { interactive: true }, ctx());
+    await shipIssue(5, { interactive: true }, ctx(), testShell());
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('steering_unconsumed');
   });
@@ -5249,7 +5243,7 @@ describe('shipIssue (direct)', () => {
       writeQueuedSteering();
       const core = await import('@on-par/factory-core');
 
-      await shipIssue(5, { interactive: true }, ctx());
+      await shipIssue(5, { interactive: true }, ctx(), testShell());
 
       const buildCall = vi.mocked(core.buildPhase).mock.calls.at(-1)?.[0] as any;
       expect(buildCall.steering.messages).toEqual([
@@ -5263,7 +5257,7 @@ describe('shipIssue (direct)', () => {
     it('passes a drainSteering callback to checkPhase that drains the same issue steering queue', async () => {
       const core = await import('@on-par/factory-core');
 
-      await shipIssue(5, { interactive: true }, ctx());
+      await shipIssue(5, { interactive: true }, ctx(), testShell());
 
       const checkCall = vi.mocked(core.checkPhase).mock.calls.at(-1)?.[0] as any;
       expect(typeof checkCall.drainSteering).toBe('function');
@@ -5284,7 +5278,7 @@ describe('shipIssue (direct)', () => {
       writeQueuedSteering();
       const core = await import('@on-par/factory-core');
 
-      await shipIssue(5, {}, ctx());
+      await shipIssue(5, {}, ctx(), testShell());
 
       const buildCall = vi.mocked(core.buildPhase).mock.calls.at(-1)?.[0] as any;
       expect(buildCall.steering).toBeUndefined();
@@ -5312,8 +5306,8 @@ describe('CliExitError (direct command invocation)', () => {
     expect(err.code).toBe(3);
   });
 
-  it('cmdConstitution({}) rejects with code 2 and the usage message', async () => {
-    await expect(cmdConstitution({})).rejects.toMatchObject({
+  it('cmdConstitution({}, testShell()) rejects with code 2 and the usage message', async () => {
+    await expect(cmdConstitution({}, testShell())).rejects.toMatchObject({
       name: 'CliExitError',
       code: 2,
       message: expect.stringContaining('usage: factory constitution'),
@@ -5321,8 +5315,8 @@ describe('CliExitError (direct command invocation)', () => {
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
-  it("cmdConstitution({ product: 'nope' }) rejects with code 1 and the not-found message", async () => {
-    await expect(cmdConstitution({ product: 'nope' })).rejects.toMatchObject({
+  it("cmdConstitution({ product: 'nope' }, testShell()) rejects with code 1 and the not-found message", async () => {
+    await expect(cmdConstitution({ product: 'nope' }, testShell())).rejects.toMatchObject({
       name: 'CliExitError',
       code: 1,
       message: expect.stringContaining("No constitution 'nope'"),
@@ -5333,7 +5327,7 @@ describe('CliExitError (direct command invocation)', () => {
   it('cmdUsage() rejects with code 2 when FACTORY_USAGE_CAP is invalid', async () => {
     trackEnv('FACTORY_USAGE_CAP');
     process.env.FACTORY_USAGE_CAP = '-5';
-    await expect(cmdUsage()).rejects.toMatchObject({
+    await expect(cmdUsage(testShell())).rejects.toMatchObject({
       name: 'CliExitError',
       code: 2,
       message: expect.stringContaining('FACTORY_USAGE_CAP'),
@@ -5343,7 +5337,7 @@ describe('CliExitError (direct command invocation)', () => {
 
   it('cmdUsage() prints the real subscription usage plus the heuristic comparison when the subscription signal is available', async () => {
     h.subscriptionUsage = { fiveHourUtilization: 42, fiveHourResetsAt: '2026-07-15T18:00:00Z' };
-    await cmdUsage();
+    await cmdUsage(testShell());
     const logged = logSpy.mock.calls.map((c: any[]) => c[0]).join('\n');
     expect(logged).toContain('5h subscription usage: 42% of plan limit, resets 2026-07-15T18:00:00Z');
     expect(logged).toContain('heuristic list-price estimate: USAGE REPORT');
@@ -5351,7 +5345,7 @@ describe('CliExitError (direct command invocation)', () => {
 
   it('cmdUsage() falls back to the heuristic with a warning when the subscription signal is unavailable', async () => {
     h.subscriptionUsage = null;
-    await cmdUsage();
+    await cmdUsage(testShell());
     const logged = logSpy.mock.calls.map((c: any[]) => c[0]).join('\n');
     expect(logged).toContain('real subscription usage unavailable');
     expect(logged).toContain('USAGE REPORT');
@@ -5359,7 +5353,7 @@ describe('CliExitError (direct command invocation)', () => {
 
   it('cmdLand(5) rejects with code 1 when there is no open PR', async () => {
     h.octokit.rest.pulls.list = vi.fn(async () => ({ data: [] }));
-    await expect(cmdLand(5)).rejects.toMatchObject({
+    await expect(cmdLand(5, {}, testShell())).rejects.toMatchObject({
       name: 'CliExitError',
       code: 1,
       message: expect.stringContaining('no open PR'),
@@ -5381,7 +5375,7 @@ describe('CliExitError (direct command invocation)', () => {
     it('refuses with code 4 when the issue carries the gate label', async () => {
       h.octokit.rest.issues.listLabelsOnIssue = labelsFor([5]);
       vi.mocked(watchChecks).mockResolvedValue('success');
-      await expect(cmdLand(5)).rejects.toMatchObject({
+      await expect(cmdLand(5, {}, testShell())).rejects.toMatchObject({
         name: 'CliExitError',
         code: 4,
         message: expect.stringMatching(
@@ -5395,7 +5389,7 @@ describe('CliExitError (direct command invocation)', () => {
 
     it('refuses when only the PR carries the gate label', async () => {
       h.octokit.rest.issues.listLabelsOnIssue = labelsFor([77]);
-      await expect(cmdLand(5)).rejects.toMatchObject({
+      await expect(cmdLand(5, {}, testShell())).rejects.toMatchObject({
         code: 4,
         message: expect.stringContaining('PR #77 is labelled no-auto-merge'),
       });
@@ -5406,7 +5400,7 @@ describe('CliExitError (direct command invocation)', () => {
       h.octokit.rest.issues.listLabelsOnIssue = vi.fn(async () => {
         throw new Error('boom');
       });
-      await expect(cmdLand(5)).rejects.toMatchObject({
+      await expect(cmdLand(5, {}, testShell())).rejects.toMatchObject({
         code: 4,
         message: expect.stringContaining('could not be read'),
       });
@@ -5416,7 +5410,7 @@ describe('CliExitError (direct command invocation)', () => {
     it('--allow-gated merges past the gate with an AUDIT line and a merge-gated-override event', async () => {
       h.octokit.rest.issues.listLabelsOnIssue = labelsFor([5]);
       vi.mocked(watchChecks).mockResolvedValue('success');
-      await expect(cmdLand(5, { allowGated: true })).resolves.toBeUndefined();
+      await expect(cmdLand(5, { allowGated: true }, testShell())).resolves.toBeUndefined();
       expect(h.octokit.rest.pulls.merge).toHaveBeenCalled();
       expect(logged()).toMatch(/^AUDIT .*#5/m);
       expect(eventsOf().some((e) => e.type === 'merge-gated-override' && String(e.issue) === '5')).toBe(true);
@@ -5446,7 +5440,7 @@ describe('CliExitError (direct command invocation)', () => {
     vi.mocked(watchChecks).mockResolvedValue('success');
 
     try {
-      await expect(cmdLand(5)).resolves.toBeUndefined();
+      await expect(cmdLand(5, {}, testShell())).resolves.toBeUndefined();
       expect(setupWorktree).toHaveBeenCalledWith(
         h.repoRoot,
         branch,
@@ -5489,7 +5483,7 @@ describe('CliExitError (direct command invocation)', () => {
       throw new Error('At least 1 approving review is required by reviewers with write access.');
     });
 
-    await expect(cmdLand(5)).resolves.toBeUndefined();
+    await expect(cmdLand(5, {}, testShell())).resolves.toBeUndefined();
 
     expect(logged()).toContain('awaiting human review');
     expect(cleanupWorktree).toHaveBeenCalled();
@@ -5504,7 +5498,7 @@ describe('CliExitError (direct command invocation)', () => {
   it('cmdLand(5) resolves cleanly and leaves the PR open when CI reports a confirmed failure (regression: owner/example-app#707 merged with a failing e2e check)', async () => {
     vi.mocked(watchChecks).mockResolvedValueOnce('failure');
 
-    await expect(cmdLand(5)).resolves.toBeUndefined();
+    await expect(cmdLand(5, {}, testShell())).resolves.toBeUndefined();
 
     expect(logged()).toContain('failing CI check');
     expect(logged()).toContain('left open, not merged');
@@ -5521,7 +5515,7 @@ describe('CliExitError (direct command invocation)', () => {
   it('cmdLand(5) resolves cleanly and leaves the PR open when CI never reaches a green verdict (timeout)', async () => {
     vi.mocked(watchChecks).mockResolvedValueOnce('timeout');
 
-    await expect(cmdLand(5)).resolves.toBeUndefined();
+    await expect(cmdLand(5, {}, testShell())).resolves.toBeUndefined();
 
     expect(logged()).toContain('left open, not merged');
     expect(h.octokit.rest.pulls.merge).not.toHaveBeenCalled();
@@ -5632,5 +5626,18 @@ describe('factory --help layout', () => {
     const help = (await topLevelHelp()).replace(/\s+/g, ' ');
     expect(help).toContain('open a ready-for-review PR; never merges (merge later with land)');
     expect(help).toContain('Like ship, but loads the issue first');
+  });
+});
+
+describe('defaultCliShell', () => {
+  const probe = `"${process.execPath}" -e "process.stdout.write('ok')"`;
+
+  it('exec runs a real subprocess and resolves its stdout', async () => {
+    const { stdout } = await defaultCliShell.exec(probe);
+    expect(stdout).toBe('ok');
+  });
+
+  it('execSync runs a real subprocess and returns its stdout as a string', () => {
+    expect(defaultCliShell.execSync(probe)).toBe('ok');
   });
 });
