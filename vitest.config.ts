@@ -52,6 +52,8 @@ export default defineConfig({
         'packages/dashboard/src/main.tsx',
         // Product bin shim — a single runEntry(main) call; runEntry is covered by entry.test.ts.
         'packages/product/src/cli.ts',
+        // CLI bin shim — a single runEntry(main) call; runEntry is covered by entry.test.ts.
+        'packages/cli/src/cli.ts',
         // Test-only fixture kit (throwaway repos, fake Octokit) exercised by the
         // integration suites; it is scaffolding, not product code, and its fake
         // branches would only dilute the gate.
