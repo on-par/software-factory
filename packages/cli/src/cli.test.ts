@@ -26,6 +26,7 @@ import {
   getPullRequestLandState,
   hasReachableWorker,
   InvalidProductNameError,
+  isHeadModifiedMergeError,
   isPermanentMergeCheckError,
   cmdFeedback,
   cmdFilingPreview,
@@ -2051,6 +2052,150 @@ describe('cli', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('pins both merge paths to the verified head SHA when one is given', async () => {
+    const calls: any[] = [];
+    const octokit: any = {
+      rest: {
+        pulls: { merge: async (args: any) => calls.push(['merge', args]) },
+        git: { deleteRef: async () => {} },
+      },
+    };
+    const run = async (command: string) => {
+      calls.push(['run', command]);
+    };
+
+    await squashMergeAndDelete(octokit, 'on-par', 'software-factory', 'ship-it/19-land', 123, { sha: 'abc123' });
+    await squashMergeAndDelete(octokit, 'on-par', 'software-factory', 'ship-it/19-land', 123, {
+      admin: true,
+      run,
+      sha: 'abc123',
+    });
+
+    expect(calls).toEqual([
+      ['merge', { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash', sha: 'abc123' }],
+      [
+        'run',
+        "gh pr merge 123 --repo 'on-par/software-factory' --admin --squash --delete-branch --match-head-commit 'abc123'",
+      ],
+    ]);
+  });
+
+  it('recognizes a head-moved merge refusal from the REST API and from gh', () => {
+    expect(isHeadModifiedMergeError(Object.assign(new Error('Conflict'), { status: 409 }))).toBe(true);
+    expect(
+      isHeadModifiedMergeError(
+        Object.assign(new Error('Command failed: gh pr merge'), {
+          stderr: 'GraphQL: Head branch was modified. Review and try the merge again. (mergePullRequest)',
+        }),
+      ),
+    ).toBe(true);
+    expect(isHeadModifiedMergeError(Object.assign(new Error('Base branch was modified'), { status: 405 }))).toBe(false);
+    expect(isHeadModifiedMergeError(new Error('Pull Request is still a draft'))).toBe(false);
+  });
+
+  describe('landOpenPullRequest head-SHA pinning', () => {
+    const cleanOctokit = (merge: (args: any) => Promise<unknown>, calls: any[]): any => ({
+      graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
+      rest: {
+        pulls: {
+          get: async (args: any) => {
+            calls.push(['get', args.pull_number]);
+            return { data: { head: { sha: 'abc123' } } };
+          },
+          merge,
+        },
+        git: { deleteRef: async () => {} },
+      },
+    });
+    const baseOpts = {
+      owner: 'on-par',
+      repoName: 'software-factory',
+      ghRepo: 'on-par/software-factory',
+      repoRoot: '/repo',
+      issue: 20,
+      branch: 'ship-it/20-pin',
+      worktree: '/repo-factory-20',
+      prNumber: 123,
+      pathExists: () => true,
+      sleep: async () => {
+        throw new Error('sleep should not be called');
+      },
+    };
+
+    it('watches CI on the PR head SHA, not the branch ref, and merges that SHA', async () => {
+      const calls: any[] = [];
+      const octokit = cleanOctokit(async (args) => calls.push(['merge', args.sha]), calls);
+
+      await landOpenPullRequest({
+        ...baseOpts,
+        octokit,
+        log: () => {},
+        watch: async (opts) => {
+          calls.push(['watch', opts.ref]);
+          return 'success';
+        },
+      });
+
+      expect(calls).toEqual([
+        ['get', 123],
+        ['watch', 'abc123'],
+        ['merge', 'abc123'],
+      ]);
+    });
+
+    it('surfaces a 409 head-moved merge refusal as CI-unverified without retrying', async () => {
+      const calls: any[] = [];
+      let mergeCalls = 0;
+      const octokit = cleanOctokit(async () => {
+        mergeCalls++;
+        throw Object.assign(new Error('Head branch was modified. Review and try the merge again.'), { status: 409 });
+      }, calls);
+
+      const err = await landOpenPullRequest({
+        ...baseOpts,
+        octokit,
+        log: (type, msg) => calls.push(['log', type, msg]),
+        watch: async () => 'success',
+      }).catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(CiUnverifiedError);
+      expect(mergeCalls).toBe(1);
+      expect(calls).toContainEqual([
+        'log',
+        'ci-failed',
+        'PR #123 head moved past CI-verified commit abc123 — refusing to merge an unverified head',
+      ]);
+    });
+
+    it('still runs an unpinned admin merge when the CI watch is skipped', async () => {
+      const calls: any[] = [];
+      const octokit = cleanOctokit(async () => calls.push(['merge']), calls);
+
+      await landOpenPullRequest({
+        ...baseOpts,
+        octokit,
+        log: () => {},
+        run: async (command: string) => calls.push(['run', command]),
+        skipCI: true,
+        adminMerge: true,
+      });
+
+      const runs = calls.filter((c) => c[0] === 'run');
+      expect(runs).toHaveLength(1);
+      expect(runs[0][1]).toContain('--admin');
+      expect(runs[0][1]).not.toContain('--match-head-commit');
+    });
+
+    it('still merges unpinned when the CI watch is skipped without admin', async () => {
+      const calls: any[] = [];
+      const octokit = cleanOctokit(async (args) => calls.push(['merge', args.sha]), calls);
+
+      await landOpenPullRequest({ ...baseOpts, octokit, log: () => {}, skipCI: true });
+
+      expect(calls).toEqual([['merge', undefined]]);
+    });
+  });
+
   it('reads the pull request land state fields', async () => {
     const calls: any[] = [];
     const octokit: any = {
@@ -2090,6 +2235,7 @@ describe('cli', () => {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' } } }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -2130,7 +2276,7 @@ describe('cli', () => {
     expect(calls).toEqual([
       ['run', 'git rebase origin/main', { cwd: '/repo-factory-20' }],
       ['run', "git push --force-with-lease origin 'ship-it/20-dirty'", { cwd: '/repo-factory-20' }],
-      ['merge', { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash' }],
+      ['merge', { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash', sha: 'abc123' }],
       ['deleteRef', { owner: 'on-par', repo: 'software-factory', ref: 'heads/ship-it/20-dirty' }],
     ]);
   });
@@ -2141,6 +2287,7 @@ describe('cli', () => {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -2193,6 +2340,7 @@ describe('cli', () => {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -2240,6 +2388,7 @@ describe('cli', () => {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -2287,6 +2436,7 @@ describe('cli', () => {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -2337,6 +2487,7 @@ describe('cli', () => {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -2393,6 +2544,7 @@ describe('cli', () => {
       },
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -2428,7 +2580,7 @@ describe('cli', () => {
     expect(warnCall[2]).toContain('ready-for-review flip failed');
     expect(calls).toContainEqual([
       'merge',
-      { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash' },
+      { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash', sha: 'abc123' },
     ]);
   });
 
@@ -2438,6 +2590,7 @@ describe('cli', () => {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' } } }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -2487,6 +2640,7 @@ describe('cli', () => {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' } } }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -2542,6 +2696,7 @@ describe('cli', () => {
       },
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -2595,6 +2750,7 @@ describe('cli', () => {
       },
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async () => {
             mergeCalls++;
             if (mergeCalls === 1) throw new Error('Pull Request is still a draft');
@@ -2644,6 +2800,7 @@ describe('cli', () => {
       },
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async () => {
             mergeCalls++;
             if (mergeCalls < 3) throw new Error('Pull Request is not mergeable');
@@ -2690,6 +2847,7 @@ describe('cli', () => {
       }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async () => {
             mergeCalls++;
             throw mergeError;
@@ -2739,6 +2897,7 @@ describe('cli', () => {
       }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async () => {
             mergeCalls++;
             throw new Error('At least 1 approving review is required by reviewers with write access.');
@@ -2800,6 +2959,7 @@ describe('cli', () => {
       }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async () => {
             trace.push('merge');
           },
@@ -2851,6 +3011,7 @@ describe('cli', () => {
       }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async () => {
             trace.push('merge');
           },
@@ -2919,6 +3080,7 @@ describe('cli', () => {
       },
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async () => {
             trace.push('merge');
           },
@@ -2971,6 +3133,7 @@ describe('cli', () => {
       }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async () => {
             mergeCalls++;
             trace.push('merge');
