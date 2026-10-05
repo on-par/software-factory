@@ -13,6 +13,16 @@ const validCreds = JSON.stringify({
 });
 
 describe('readClaudeAccessToken', () => {
+  it('prefers an injected readKeychain over an injected exec', async () => {
+    const readKeychain = vi.fn().mockResolvedValue(validCreds);
+    const exec = vi.fn();
+
+    const token = await readClaudeAccessToken({ platform: 'darwin', readKeychain, exec });
+
+    expect(token).toBe('sk-ant-oat-fixture-token');
+    expect(exec).not.toHaveBeenCalled();
+  });
+
   it('returns the token from the keychain on darwin', async () => {
     const readKeychain = vi.fn().mockResolvedValue(validCreds);
     const readCredentialsFile = vi.fn();
