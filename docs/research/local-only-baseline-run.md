@@ -239,7 +239,7 @@ spec correctly names the target file and the primary 100%-coverage goal and
 picks a defensible `codex` route for mechanical test-writing, but it silently
 drops the issue's second acceptance clause (raising the ratchet thresholds),
 conflates "functions" with specific "line numbers" that read as unverified,
-and points at `npm run test:coverage` instead of the repo's actual gate
+and points at `npm run test:coverage` (a duplicate of `npm run test`, since removed in #1981) instead of the repo's actual gate
 (`bash scripts/verify.sh`).
 
 **Maintainability: 0/10 (n/a)** — no code was produced to maintain; this is a
