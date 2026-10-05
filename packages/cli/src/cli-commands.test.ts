@@ -114,26 +114,6 @@ vi.mock('@octokit/rest', () => {
   return { Octokit };
 });
 
-vi.mock('@on-par/factory-tui', () => ({
-  runTui: vi.fn(
-    async (opts: {
-      eventsFile: string;
-      repo?: string;
-      stopFile?: string;
-      queueReader?: {
-        source: string;
-        read: () => Promise<FactoryCore.QueueSnapshot> | FactoryCore.QueueSnapshot;
-        pollMs?: number;
-      };
-      costsFile?: string;
-      steeringDir?: string;
-      runsDir?: string;
-    }) => {
-      h.runTuiCalls.push(opts);
-    },
-  ),
-}));
-
 vi.mock('@on-par/factory-core', async (importOriginal) => {
   const actual = await importOriginal<typeof FactoryCore>();
 
@@ -379,6 +359,10 @@ function defaultOctokit() {
   };
 }
 
+const recordingRunTui: NonNullable<CliDeps['runTui']> = async (opts) => {
+  h.runTuiCalls.push(opts);
+};
+
 function daemonDeps(): DaemonCtlDeps {
   return {
     exec: async (cmd, args) => {
@@ -398,7 +382,7 @@ function daemonDeps(): DaemonCtlDeps {
 
 async function runMain(...args: string[]) {
   process.argv = ['node', 'factory', ...args];
-  return runMainWith({ daemon: daemonDeps() }, ...args);
+  return runMainWith({ daemon: daemonDeps(), runTui: recordingRunTui }, ...args);
 }
 
 async function runMainWith(deps: CliDeps | undefined, ...args: string[]) {
