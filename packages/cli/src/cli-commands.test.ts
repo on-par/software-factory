@@ -835,6 +835,53 @@ describe('cli commands (via main dispatch)', () => {
   });
 
   describe('models', () => {
+    it('uses an injected loadModelsConfig instead of the factory-core loader', async () => {
+      const core = await import('@on-par/factory-core');
+      const config = { models: { 'distinctive-model-2063': {} }, tiers: {} };
+      const stub = vi.fn(() => config as never);
+
+      await runMainWith({ daemon: daemonDeps(), runTui: recordingRunTui, loadModelsConfig: stub }, 'models');
+
+      expect(stub).toHaveBeenCalled();
+      expect(vi.mocked(core.loadModelsConfig)).not.toHaveBeenCalled();
+      expect(vi.mocked(core.ModelRegistry).mock.calls.at(-1)?.[0]).toMatchObject({
+        models: { 'distinctive-model-2063': {} },
+      });
+    });
+
+    it('uses the factory-core loadModelsConfig when none is injected', async () => {
+      const core = await import('@on-par/factory-core');
+      await runMain('models');
+      expect(vi.mocked(core.loadModelsConfig)).toHaveBeenCalled();
+    });
+
+    it('restores the default loaders after main() returns', async () => {
+      const core = await import('@on-par/factory-core');
+      const stub = vi.fn((repoRoot: string, stateRoot?: string) => core.loadRepoConfig(repoRoot, stateRoot));
+      await runMainWith({ daemon: daemonDeps(), runTui: recordingRunTui, loadRepoConfig: stub as never }, 'models');
+      const stubCalls = stub.mock.calls.length;
+      vi.mocked(core.loadRepoConfig).mockClear();
+
+      await shipIssue(5, {}, { repoRoot: h.repoRoot, ghRepo: h.ghRepo });
+
+      expect(stub.mock.calls.length).toBe(stubCalls);
+      expect(vi.mocked(core.loadRepoConfig)).toHaveBeenCalled();
+    });
+
+    it('routes constitution --product through an injected getConstitutionsDir', async () => {
+      const core = await import('@on-par/factory-core');
+      writeFileSync(join(h.constitutionsDir, 'alpha.md'), '# alpha');
+      const stub = vi.fn(() => h.constitutionsDir);
+      await runMainWith(
+        { daemon: daemonDeps(), runTui: recordingRunTui, getConstitutionsDir: stub },
+        'constitution',
+        '--product',
+        'alpha',
+      );
+      expect(stub).toHaveBeenCalled();
+      expect(vi.mocked(core.getConstitutionsDir)).not.toHaveBeenCalled();
+    });
+
     it('lists models, costs, and tiers', async () => {
       await runMain('models');
       const out = logged();
@@ -4634,6 +4681,63 @@ describe('shipIssue (direct)', () => {
     expect(factory).toHaveBeenCalledTimes(1);
     expect(fake.rest.issues.get).toHaveBeenCalled();
     expect(defaultGet).not.toHaveBeenCalled();
+  });
+
+  it('uses injected resolveTimeouts, resolveSkipCI and resolveEffectiveModelPins', async () => {
+    const core = await import('@on-par/factory-core');
+    const timeouts = vi.fn(() => ({ plan: 1, build: 1, check: 1, approval: 1 }));
+    const skip = vi.fn(() => false);
+    const pins = vi.fn(() => ({
+      plan: undefined,
+      planFallback: undefined,
+      build: undefined,
+      buildFallback: undefined,
+      sources: {},
+    }));
+
+    await shipIssue(5, {}, ctx(), {
+      resolveTimeouts: timeouts as never,
+      resolveSkipCI: skip,
+      resolveEffectiveModelPins: pins as never,
+    });
+
+    expect(timeouts).toHaveBeenCalled();
+    expect(skip).toHaveBeenCalled();
+    expect(pins).toHaveBeenCalled();
+    expect(vi.mocked(core.resolveTimeouts)).not.toHaveBeenCalled();
+    expect(vi.mocked(core.resolveSkipCI)).not.toHaveBeenCalled();
+    expect(vi.mocked(core.resolveEffectiveModelPins)).not.toHaveBeenCalled();
+  });
+
+  it('uses injected loadFactoryConfigForRepo and loadRepoConfig', async () => {
+    const core = await import('@on-par/factory-core');
+    const repoValue = core.loadRepoConfig(h.repoRoot);
+    vi.mocked(core.loadRepoConfig).mockClear();
+    const factoryConfig = vi.fn(() => h.factoryConfig);
+    const repoConfig = vi.fn(() => repoValue);
+
+    await shipIssue(5, {}, ctx(), {
+      loadFactoryConfigForRepo: factoryConfig as never,
+      loadRepoConfig: repoConfig as never,
+    });
+
+    expect(factoryConfig).toHaveBeenCalled();
+    expect(repoConfig).toHaveBeenCalled();
+    expect(vi.mocked(core.loadFactoryConfigForRepo)).not.toHaveBeenCalled();
+    expect(vi.mocked(core.loadRepoConfig)).not.toHaveBeenCalled();
+  });
+
+  it('uses an injected loadModelsConfig and loadRoutesConfig', async () => {
+    const core = await import('@on-par/factory-core');
+    const models = vi.fn(() => ({ models: {}, tiers: {} }) as never);
+    const routes = vi.fn(() => ({}) as never);
+
+    await shipIssue(5, {}, ctx(), { loadModelsConfig: models, loadRoutesConfig: routes });
+
+    expect(models).toHaveBeenCalled();
+    expect(routes).toHaveBeenCalled();
+    expect(vi.mocked(core.loadModelsConfig)).not.toHaveBeenCalled();
+    expect(vi.mocked(core.loadRoutesConfig)).not.toHaveBeenCalled();
   });
 
   it('falls back to the default octokit factory when none is injected', async () => {
