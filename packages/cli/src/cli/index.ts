@@ -1624,7 +1624,7 @@ export async function shipIssue(
     /** Benchmark artifact directory (#509) — only set for local-only runs. */
     artifactsDir?: string;
   },
-  deps: Pick<CliDeps, 'octokit'> = {},
+  deps: Pick<CliDeps, 'octokit' | 'planPhase' | 'buildPhase' | 'checkPhase' | 'shipPhase'> = {},
 ): Promise<string> {
   const repoRoot = ctx?.repoRoot ?? (await getRepoRoot());
   const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo());
@@ -1898,10 +1898,10 @@ export async function shipIssue(
     resolveBaseUrl,
     getIssueSpend: () => issueSpend,
     breaker,
-    planPhase,
-    buildPhase,
-    checkPhase,
-    shipPhase,
+    planPhase: deps.planPhase ?? planPhase,
+    buildPhase: deps.buildPhase ?? buildPhase,
+    checkPhase: deps.checkPhase ?? checkPhase,
+    shipPhase: deps.shipPhase ?? shipPhase,
     resolveConstitution: () =>
       // Resolved once here — runIssue calls this exactly once and reuses the value for
       // every phase, so the build worker can never author the standards it is graded by.
@@ -5106,6 +5106,11 @@ export interface CliDeps {
   runTui?: typeof runTui;
   /** Builds the GitHub client shipIssue uses. Defaults to createFactoryOctokit with the resolved token. */
   octokit?: () => Octokit;
+  /** Phase overrides shipIssue forwards into RunPorts. Each defaults to the factory-core phase. */
+  planPhase?: RunPorts['planPhase'];
+  buildPhase?: RunPorts['buildPhase'];
+  checkPhase?: RunPorts['checkPhase'];
+  shipPhase?: RunPorts['shipPhase'];
 }
 
 // ---------- main ----------

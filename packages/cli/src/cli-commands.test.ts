@@ -4641,6 +4641,23 @@ describe('shipIssue (direct)', () => {
     expect(h.octokit.rest.issues.get).toHaveBeenCalled();
   });
 
+  it('forwards an injected shipPhase override into RunPorts instead of the default', async () => {
+    const core = await import('@on-par/factory-core');
+    const ship = vi.fn(async () => h.shipResult);
+
+    await shipIssue(5, {}, ctx(), { shipPhase: ship as never });
+
+    expect(ship).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(core.shipPhase)).not.toHaveBeenCalled();
+  });
+
+  it('uses the factory-core phases when no overrides are injected', async () => {
+    const core = await import('@on-par/factory-core');
+    await shipIssue(5, {}, ctx());
+    expect(vi.mocked(core.planPhase)).toHaveBeenCalled();
+    expect(vi.mocked(core.shipPhase)).toHaveBeenCalled();
+  });
+
   it('uses the branchPrefix override for the branch name', async () => {
     expect(await shipIssue(5, { branchPrefix: 'sf' }, ctx())).toBe('sf/5-fix-the-bug');
   });
