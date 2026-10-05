@@ -379,14 +379,8 @@ export function errorDetail(err: unknown): string {
   return String(err);
 }
 
-export function hasGitHubToken(env: NodeJS.ProcessEnv = process.env, tryToken?: () => string): boolean {
-  if (env.GITHUB_TOKEN || env.GH_TOKEN) return true;
-  try {
-    const out = (tryToken ?? (() => defaultCliShell.execSync('gh auth token', { timeout: 5_000 })))();
-    return out.trim().length > 0;
-  } catch {
-    return false;
-  }
+export function hasGitHubToken(shell: CliShell): boolean {
+  return resolveGitHubToken(shell) !== undefined;
 }
 
 // ---------- commands ----------
@@ -428,7 +422,7 @@ export function formatInitReachability(diagnoses: ModelDiagnosis[]): string {
 
 async function cmdInit(opts: { force?: boolean } = {}, shell: CliShell) {
   const repoRoot = await getRepoRoot(shell);
-  if (!hasGitHubToken(process.env, () => shell.execSync('gh auth token', { timeout: 5_000 }))) {
+  if (!hasGitHubToken(shell)) {
     console.error(styleText('red', `factory: ${missingTokenMessage()}`));
     process.exit(2);
   }
@@ -1276,7 +1270,7 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}, shell: CliShell =
   }
 
   console.log(styleText('bold', '\n== Queue =='));
-  if (!hasGitHubToken(process.env, () => shell.execSync('gh auth token', { timeout: 5_000 }))) {
+  if (!hasGitHubToken(shell)) {
     console.log('  (no GitHub token — run `gh auth login`)');
   } else {
     const [owner, repoName] = ghRepo.split('/');
@@ -2755,7 +2749,7 @@ export async function cmdWorktreeGc(
   // Best-effort GitHub evidence: tokenless/local-only repos keep today's pure-local behavior.
   const ghRepo = await getGitHubRepo(shell).catch(() => undefined);
   const octokit = ghRepo
-    ? hasGitHubToken(process.env, () => shell.execSync('gh auth token', { timeout: 5_000 }))
+    ? hasGitHubToken(shell)
       ? getOctokit(shell)
       : undefined
     : undefined;
@@ -5144,7 +5138,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}, shell: CliShell) {
     // a merged or closed PR is what makes a worktree reapable.
     const ghRepo = await getGitHubRepo(shell).catch(() => undefined);
     const octokit =
-      ghRepo && hasGitHubToken(process.env, () => shell.execSync('gh auth token', { timeout: 5_000 }))
+      ghRepo && hasGitHubToken(shell)
         ? getOctokit(shell)
         : undefined;
 
