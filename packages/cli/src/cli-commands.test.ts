@@ -1364,6 +1364,61 @@ bash scripts/verify.sh
     });
   });
 
+  describe('filing preview (#1858)', () => {
+    it('resolves the factory commit through the injected exec seam, not node:child_process (#2014)', async () => {
+      // h.repoRoot doubles as the factory checkout: the shell fake answers every
+      // `git rev-parse --show-toplevel` with it, so resolveFactoryCheckoutCommit
+      // finds the CLI package.json there and then asks the seam for HEAD.
+      mkdirSync(join(h.repoRoot, 'packages', 'cli'), { recursive: true });
+      writeFileSync(
+        join(h.repoRoot, 'packages', 'cli', 'package.json'),
+        JSON.stringify({ name: '@on-par/factory-cli' }),
+      );
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse --show-toplevel')) return h.repoRoot;
+        if (cmd.includes('rev-parse HEAD')) return 'c0ffee2014\n';
+        if (cmd.includes('gh repo view')) return h.ghRepo;
+        return '';
+      };
+      writeFileSync(
+        paths().events,
+        JSON.stringify({
+          ts: '2026-01-01T00:00:00Z',
+          type: 'park',
+          issue: '77',
+          fingerprint: 'fp-2014-shell-seam',
+          evidence: {
+            issue: '77',
+            phase: 'build',
+            model: 'claude-sonnet',
+            reason: 'unknown',
+            component: 'claude',
+            origin: 'factory-internal',
+            eventExcerpt: 'Error: boom',
+            logPath: '/tmp/x.log',
+          },
+        }) + '\n',
+      );
+      const out = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+      const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      try {
+        const res = await runMain('filing', 'preview', 'fp-2014-shell-seam');
+        expect(res.exited).toBe(false);
+        const written = out.mock.calls.map((c) => String(c[0])).join('');
+        expect(written).toContain('fp:fp-2014-shell-seam');
+        expect(written).toContain('c0ffee2014');
+        expect(ops.exec).toHaveBeenCalledWith(
+          'git rev-parse HEAD',
+          expect.objectContaining({ cwd: expect.any(String) }),
+        );
+        expect(err.mock.calls.map((c) => String(c[0])).join('')).toContain('Preview only — nothing was sent.');
+      } finally {
+        out.mockRestore();
+        err.mockRestore();
+      }
+    });
+  });
+
   describe('classifier report (#1727)', () => {
     const outRec = (prNumber: number, o: Record<string, unknown> = {}) => ({
       issue: String(prNumber),
@@ -4325,6 +4380,32 @@ Please add a widget that does the thing.
       const res = await runMain('doctor');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('== factory doctor ==');
+    });
+
+    it('probes the sandbox runtime through the injected execSync seam, not node:child_process (#2014)', async () => {
+      h.claudeAvailable = true;
+      const base = h.execSyncImpl;
+      h.execSyncImpl = (cmd: string) => {
+        if (cmd.includes('command -v sandbox-exec') || cmd.includes('command -v firejail')) {
+          throw new Error('not on PATH');
+        }
+        return base(cmd);
+      };
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('skipped — no sandbox runtime (sandbox-exec/firejail) on this host');
+      expect(ops.execSync).toHaveBeenCalledWith(
+        expect.stringMatching(/^command -v (sandbox-exec|firejail) /),
+        expect.anything(),
+      );
+    });
+
+    it('skips the sandboxed claude probe when sandbox is disabled by config', async () => {
+      h.claudeAvailable = true;
+      h.factoryConfig = { ...h.factoryConfig, sandbox: { ...h.factoryConfig.sandbox, enabled: false } };
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('skipped — sandbox disabled by config or FACTORY_SANDBOX');
     });
 
     it('reports .factory/STOP presence as an explicit, non-failing row', async () => {

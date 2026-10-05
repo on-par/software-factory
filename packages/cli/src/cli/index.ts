@@ -5180,6 +5180,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
         : resolveSandboxPolicy(configLoaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox, {
             worktree: repoRoot,
             repoRoot,
+            isAvailable: (cmd) => isCommandAvailableViaShell(shellOps, cmd),
           });
     if (!policy) {
       sandboxDetail = 'skipped — sandbox disabled by config or FACTORY_SANDBOX';
