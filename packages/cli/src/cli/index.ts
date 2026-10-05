@@ -2748,11 +2748,7 @@ export async function cmdWorktreeGc(
   const log = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
   // Best-effort GitHub evidence: tokenless/local-only repos keep today's pure-local behavior.
   const ghRepo = await getGitHubRepo(shell).catch(() => undefined);
-  const octokit = ghRepo
-    ? hasGitHubToken(shell)
-      ? getOctokit(shell)
-      : undefined
-    : undefined;
+  const octokit = ghRepo ? (hasGitHubToken(shell) ? getOctokit(shell) : undefined) : undefined;
   const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
   const run = () =>
     sweepWorktrees({ repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo, branchPrefix }, { log, octokit, sandbox });
@@ -5137,10 +5133,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}, shell: CliShell) {
     // GitHub evidence and the same lock pairing as `factory worktree gc` (cmdWorktreeGc) —
     // a merged or closed PR is what makes a worktree reapable.
     const ghRepo = await getGitHubRepo(shell).catch(() => undefined);
-    const octokit =
-      ghRepo && hasGitHubToken(shell)
-        ? getOctokit(shell)
-        : undefined;
+    const octokit = ghRepo && hasGitHubToken(shell) ? getOctokit(shell) : undefined;
 
     // Green-and-ready PRs with no merge (#1000). Report only — doctor never lands a PR.
     checks.push(...unmergedGreenPrChecks(await scanGreenPrs(ghRepo, octokit)));
