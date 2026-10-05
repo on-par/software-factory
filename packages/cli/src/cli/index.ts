@@ -199,6 +199,7 @@ import {
   createDaemonLogSink,
   factoryBranchIssue,
   factoryBranchPrefixes,
+  getIssueTitle,
   LEGACY_BRANCH_PREFIX,
   createDockerEngine,
   createFactorydServer,
@@ -2587,12 +2588,6 @@ async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }) 
   });
 }
 
-async function getIssueTitle(octokit: Octokit, repo: string, issue: number): Promise<string> {
-  const [owner, repoName] = repo.split('/');
-  const { data } = await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issue });
-  return data.title;
-}
-
 function worktreePathFor(repoRoot: string, ghRepo: string, issueNum: number, prefix?: string): string {
   return laneWorktreePath({
     repoRoot,
@@ -2798,7 +2793,7 @@ async function landIssue(
   // PR that references this issue directly and use its real head branch.
   // Legacy-prefix (LEGACY_BRANCH_PREFIX) branches are guessed too, after the resolved prefix (#1708).
   const resolved = branchPrefix ?? resolveEffectiveConfig(loadRepoConfig(repoRoot)).branchPrefix;
-  const title = await getIssueTitle(octokit, ghRepo, issueNum);
+  const title = await getIssueTitle(ghRepo, issueNum, octokit);
   const guesses = factoryBranchPrefixes(resolved).map((p) => branchFor(issueNum, title, p));
   const guessedBranch = guesses[0];
 
