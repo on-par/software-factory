@@ -469,6 +469,24 @@ function resolveCoreOps(overrides: Partial<CoreOps>, base: CoreOps = coreOps): C
   };
 }
 
+type PhaseKey = 'planPhase' | 'buildPhase' | 'checkPhase' | 'shipPhase';
+type PhaseOps = Required<Pick<CliDeps, PhaseKey>>;
+
+const DEFAULT_PHASE_OPS: PhaseOps = { planPhase, buildPhase, checkPhase, shipPhase };
+
+/** factory-core phases for the current main() invocation; DEFAULT_PHASE_OPS outside it. */
+let phaseOps: PhaseOps = DEFAULT_PHASE_OPS;
+
+/** Per-field `??` so an explicit `undefined` override falls back instead of replacing the default. */
+function resolvePhaseOps(overrides: Partial<PhaseOps>, base: PhaseOps = phaseOps): PhaseOps {
+  return {
+    planPhase: overrides.planPhase ?? base.planPhase,
+    buildPhase: overrides.buildPhase ?? base.buildPhase,
+    checkPhase: overrides.checkPhase ?? base.checkPhase,
+    shipPhase: overrides.shipPhase ?? base.shipPhase,
+  };
+}
+
 const exec = promisify(execCb);
 type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<unknown>;
 
@@ -1799,6 +1817,7 @@ export async function shipIssue(
   const loaders = resolveConfigLoaders(deps);
   const git = resolveGitOps(deps);
   const core = resolveCoreOps(deps);
+  const phases = resolvePhaseOps(deps);
   const repoRoot = ctx?.repoRoot ?? (await getRepoRoot());
   const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo());
   const paths = ctx?.paths ?? getFactoryPaths(repoRoot);
@@ -2073,10 +2092,10 @@ export async function shipIssue(
     resolveBaseUrl,
     getIssueSpend: () => issueSpend,
     breaker,
-    planPhase: deps.planPhase ?? planPhase,
-    buildPhase: deps.buildPhase ?? buildPhase,
-    checkPhase: deps.checkPhase ?? checkPhase,
-    shipPhase: deps.shipPhase ?? shipPhase,
+    planPhase: phases.planPhase,
+    buildPhase: phases.buildPhase,
+    checkPhase: phases.checkPhase,
+    shipPhase: phases.shipPhase,
     resolveConstitution: () =>
       // Resolved once here — runIssue calls this exactly once and reuses the value for
       // every phase, so the build worker can never author the standards it is graded by.
@@ -5325,7 +5344,7 @@ export interface CliDeps {
   runTui?: typeof runTui;
   /** Builds the GitHub client shipIssue uses. Defaults to createFactoryOctokit with the resolved token. */
   octokit?: () => Octokit;
-  /** Phase overrides shipIssue forwards into RunPorts. Each defaults to the factory-core phase. */
+  /** Phase overrides forwarded into RunPorts by shipIssue, including calls made from main(). Each defaults to the factory-core phase. */
   planPhase?: RunPorts['planPhase'];
   buildPhase?: RunPorts['buildPhase'];
   checkPhase?: RunPorts['checkPhase'];
@@ -5888,10 +5907,12 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
   const previousGitOps = gitOps;
   const previousInternalOps = internalOps;
   const previousCoreOps = coreOps;
+  const previousPhaseOps = phaseOps;
   configLoaders = resolveConfigLoaders(deps, DEFAULT_CONFIG_LOADERS);
   gitOps = resolveGitOps(deps, DEFAULT_GIT_OPS);
   internalOps = resolveInternalOps(deps, DEFAULT_INTERNAL_OPS);
   coreOps = resolveCoreOps(deps, DEFAULT_CORE_OPS);
+  phaseOps = resolvePhaseOps(deps, DEFAULT_PHASE_OPS);
   try {
     await program.parseAsync(argv);
   } catch (err) {
@@ -5906,5 +5927,6 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     gitOps = previousGitOps;
     internalOps = previousInternalOps;
     coreOps = previousCoreOps;
+    phaseOps = previousPhaseOps;
   }
 }
