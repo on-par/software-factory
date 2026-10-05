@@ -260,7 +260,14 @@ import { Command } from 'commander';
 import { admissionStateReaderFor, runQueueReconcile } from './admission.js';
 import { runQueueClear } from './queue-clear.js';
 import { parseResetIssues, runReset } from './reset.js';
-import { cmdDaemonLogs, cmdDaemonStart, cmdDaemonStatus, cmdDaemonStop, DaemonCtlError } from './daemon.js';
+import {
+  cmdDaemonLogs,
+  cmdDaemonStart,
+  cmdDaemonStatus,
+  cmdDaemonStop,
+  DaemonCtlError,
+  type DaemonCtlDeps,
+} from './daemon.js';
 import {
   analyzeEventLog,
   type ClaudeAuthProbe,
@@ -1380,7 +1387,7 @@ export function tuiQueueReader(input: {
   };
 }
 
-async function cmdTui(opts: { localQueue?: boolean } = {}) {
+async function cmdTui(opts: { localQueue?: boolean } = {}, runTuiImpl: typeof runTui = runTui) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   let repo: string | undefined;
@@ -1414,7 +1421,7 @@ async function cmdTui(opts: { localQueue?: boolean } = {}) {
     }),
   });
 
-  await runTui({
+  await runTuiImpl({
     eventsFile: paths.events,
     repo,
     stopFile: paths.stop,
@@ -5090,10 +5097,18 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
   if (doctorFailed(checks)) process.exit(1);
 }
 
+/** Injectable seams for main(). Unset fields fall back to the real implementations. */
+export interface CliDeps {
+  /** Passed to the `factory daemon start|stop|status|logs` wrappers. */
+  daemon?: DaemonCtlDeps;
+  /** Replaces the TUI entry point used by `factory tui`. */
+  runTui?: typeof runTui;
+}
+
 // ---------- main ----------
 
-export async function main() {
-  if (process.argv.slice(2).length === 0) {
+export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
+  if (argv.slice(2).length === 0) {
     console.log(formatOverview());
     return;
   }
@@ -5101,7 +5116,7 @@ export async function main() {
   const staleExit = runStalenessGuard({
     entryUrl: import.meta.url,
     env: process.env,
-    argv: process.argv,
+    argv,
     error: (m) => console.error(styleText('red', m)),
     warn: (m) => console.error(styleText('yellow', m)),
   });
@@ -5203,7 +5218,7 @@ export async function main() {
     .command('tui')
     .description('Live read-only view of the current run (q to quit)')
     .option('--local-queue', 'Read .factory/queue instead of claiming issues from GitHub Issues')
-    .action((opts: { localQueue?: boolean }) => cmdTui(opts));
+    .action((opts: { localQueue?: boolean }) => cmdTui(opts, deps.runTui ?? runTui));
 
   program
     .command('logs')
@@ -5516,21 +5531,21 @@ export async function main() {
   daemonCmd
     .command('start')
     .description('Install + load the com.onpar.factoryd LaunchAgent (KeepAlive, RunAtLoad)')
-    .action(() => daemonCtl(() => cmdDaemonStart()));
+    .action(() => daemonCtl(() => cmdDaemonStart(deps.daemon)));
   daemonCmd
     .command('stop')
     .description('Unload the LaunchAgent (plist stays installed)')
-    .action(() => daemonCtl(() => cmdDaemonStop()));
+    .action(() => daemonCtl(() => cmdDaemonStop(deps.daemon)));
   daemonCmd
     .command('status')
     .description('Report factoryd pid, uptime, and attached repos')
-    .action(() => daemonCtl(() => cmdDaemonStatus()));
+    .action(() => daemonCtl(() => cmdDaemonStatus(deps.daemon)));
   daemonCmd
     .command('logs')
     .description('Print/tail ~/.factory/daemon.log')
     .option('-f, --follow', 'keep tailing')
     .option('-n, --lines <n>', 'lines to print first (default 100)')
-    .action((opts: { follow?: boolean; lines?: string }) => daemonCtl(() => cmdDaemonLogs(opts)));
+    .action((opts: { follow?: boolean; lines?: string }) => daemonCtl(() => cmdDaemonLogs(opts, deps.daemon)));
 
   const worktreeCmd = program.command('worktree').description('Clean up stale factory worktrees (gc)');
   worktreeCmd
@@ -5605,7 +5620,7 @@ export async function main() {
   applyHelpGroups(program);
 
   try {
-    await program.parseAsync(process.argv);
+    await program.parseAsync(argv);
   } catch (err) {
     if (err instanceof CliExitError) {
       console.error(styleText('red', err.message));
