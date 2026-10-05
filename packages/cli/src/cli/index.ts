@@ -458,6 +458,16 @@ Run inside a git repository with a GitHub remote.
 
 // ---------- helpers ----------
 
+/** PATH probe via the injectable shell seam (mirrors core isCommandAvailable). */
+function isCommandAvailableViaShell(shell: ShellOps, cmd: string): boolean {
+  try {
+    shell.execSync(`command -v ${cmd} 2>/dev/null`, { stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function getRepoRoot(shell: ShellOps = shellOps): Promise<string> {
   try {
     const { stdout } = await shell.exec('git rev-parse --show-toplevel');
@@ -1909,6 +1919,7 @@ export async function shipIssue(
     repoRoot,
     cliDisabled: opts.sandbox === false,
     laneId: lane,
+    isAvailable: (cmd) => isCommandAvailableViaShell(shell, cmd),
   });
   laneSandboxRuntime = sandboxPolicy?.runtime ?? 'none';
   const worktreeSandbox: WorktreeSandbox | undefined = worktreeSandboxFor(sandboxPolicy?.runtime, {
