@@ -62,3 +62,7 @@ when it is demoted, are left to a later ADR. ADR-0121's classes and rollout are 
 - The T0 default keeps human merge load high until promotions land.
 - Deterministic sampling is predictable. This is accepted, since the agent cannot steer the sampled set.
 - Eligibility needs both a class check and a path check, so code implementing tiers must evaluate both.
+
+## Related
+
+- [ADR-0145](0145-a-merge-trust-tier-is-promoted-only-by-a-human-merged-policy-change-on-published-evidence-and-demoted-at-least-one-tier-on-any-slip.md) defines the evidence for promotion and the slip-driven demotion that this ADR's Scope paragraph defers.
