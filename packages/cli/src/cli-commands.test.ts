@@ -21,7 +21,7 @@ const h = vi.hoisted(() => {
     daemonExecImpl: (_cmd: string, _args: string[]) => ({ code: 0, stdout: '', stderr: '' }),
     daemonOut: [] as string[],
     ghRepo: 'on-par/software-factory',
-    // child_process shims
+    // shell seam (CliDeps.exec / execSync)
     execImpl: (_cmd: string): string => '',
     execSyncImpl: (_cmd: string): string => {
       throw new Error('execSync not stubbed');
@@ -85,20 +85,6 @@ const h = vi.hoisted(() => {
 // ---------------------------------------------------------------------------
 // Module mocks (hoisted above imports by vitest)
 // ---------------------------------------------------------------------------
-vi.mock('node:child_process', () => {
-  const exec = (cmd: string, optsOrCb: any, maybeCb?: any) => {
-    const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
-    try {
-      const stdout = h.execImpl(cmd);
-      cb(null, { stdout, stderr: '' });
-    } catch (err) {
-      cb(err);
-    }
-  };
-  const execSync = (cmd: string) => h.execSyncImpl(cmd);
-  return { exec, execSync, default: { exec, execSync } };
-});
-
 vi.mock('@octokit/rest', () => {
   // createFactoryOctokit (packages/cli/src/cli/octokit.ts) calls Octokit.plugin(...) at module load
   // time to attach retry/throttling — the double must expose it as a static too.
@@ -219,7 +205,7 @@ import {
   CliExitError,
   cmdConstitution,
   cmdLand as cliCmdLand,
-  cmdUsage,
+  cmdUsage as cliCmdUsage,
   formatInitReachability,
   IssueDecomposedError,
   LaneParkError,
@@ -348,6 +334,8 @@ function makeInternalFakes() {
       (report: any) =>
         `GC_REPORT:${report.dryRun ? 'dry' : 'real'}:removed=${report.removed.length}:kept=${report.kept}`,
     ),
+    exec: vi.fn(async (cmd: string) => ({ stdout: h.execImpl(cmd), stderr: '' })),
+    execSync: vi.fn((cmd: string) => h.execSyncImpl(cmd)),
   } satisfies Pick<
     CliDeps,
     | 'watchChecks'
@@ -361,6 +349,8 @@ function makeInternalFakes() {
     | 'listMicroVms'
     | 'reapOrphanMicroVm'
     | 'formatGcReport'
+    | 'exec'
+    | 'execSync'
   >;
 }
 /** Fresh fakes per test, spread into every main/cmdLand/shipIssue call. */
@@ -369,6 +359,11 @@ let ops = makeInternalFakes();
 /** Direct shipIssue calls get the inert models/routes loaders unless a test passes its own. */
 function shipIssue(...[issueNum, opts, ctx, deps]: Parameters<typeof cliShipIssue>) {
   return cliShipIssue(issueNum, opts, ctx, { ...inertConfigLoaders, ...inertGitOps, ...ops, ...deps });
+}
+
+/** Direct cmdUsage calls get the shell fakes so they never run a real git. */
+function cmdUsage() {
+  return cliCmdUsage(ops);
 }
 
 /** Direct cmdLand calls get the inert loaders (incl. h.factoryConfig) unless a test passes its own. */
@@ -2328,6 +2323,17 @@ bash scripts/verify.sh
       await runMain('stop');
       expect(existsSync(paths().stop)).toBe(true);
       expect(logged()).toContain('STOP set');
+    });
+
+    it('stop routes git rev-parse through the injected exec seam', async () => {
+      const commands: string[] = [];
+      const recordingExec = async (cmd: string) => {
+        commands.push(cmd);
+        return { stdout: `${h.repoRoot}\n`, stderr: '' };
+      };
+      await runMainWith({ exec: recordingExec }, 'stop');
+      expect(commands).toContain('git rev-parse --show-toplevel');
+      expect(existsSync(paths().stop)).toBe(true);
     });
 
     it('resume removes an existing STOP file', async () => {
