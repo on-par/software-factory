@@ -382,9 +382,9 @@ function shipIssue(...[issueNum, opts, ctx, deps]: Parameters<typeof cliShipIssu
   return cliShipIssue(issueNum, opts, ctx, { ...inertConfigLoaders, ...inertGitOps, ...coreFakes, ...ops, ...deps });
 }
 
-/** Direct cmdUsage calls get the shell fakes so they never run a real git. */
-function cmdUsage() {
-  return cliCmdUsage(ops);
+/** Direct cmdUsage calls get shell + core fakes so they never run real git/subscription ops. */
+function cmdUsage(deps: Parameters<typeof cliCmdUsage>[0] = {}) {
+  return cliCmdUsage({ ...ops, ...coreFakes, ...deps });
 }
 
 /** Direct cmdLand calls get the inert loaders (incl. h.factoryConfig) unless a test passes its own. */
