@@ -55,6 +55,23 @@ ADR-0121, so in practice only promoted Class A categories (docs-only, tests-only
 **Scope.** This ADR defines the ladder and eligibility only. How a class earns promotion to T1 or T2, and
 when it is demoted, are left to a later ADR. ADR-0121's classes and rollout are unchanged.
 
+### Honesty caveat: humanInterventionRate
+
+`humanInterventionRate` (`packages/core/src/kpis/index.ts`) only counts explicit `human-*` events:
+`human-approved`, `human-edited`, `human-restarted`, `human-merged` and `human-abandoned`
+(`HumanEventType` in `packages/core/src/types/index.ts`). They are either logged live or rebuilt from PR facts by
+`reconstructHumanEvents` (`packages/core/src/kpis/human.ts`,
+[ADR-0012](0012-the-post-merge-defect-rate-is-scored-on-a-delayed-window-closed-cohort-not-on-all-runs.md)). An intervention that leaves no such
+event is not counted. Examples: editing, relabeling or re-queueing the issue, rerunning CI, a fix pushed
+under the factory's own identity, or help given outside GitHub. The rate is a lower bound on human
+intervention, not a complete count.
+
+Promotion evidence that uses this rate must carry this caveat. When a promotion PR or report under
+[ADR-0121](0121-a-pr-classifier-may-only-escalate-review-until-a-named-human-promotes-a-class-on-published-evidence.md)
+(promotion on published evidence, see its Receipts section) cites `humanInterventionRate` to justify moving a class above T0,
+it states next to the number that only explicit `human-*` events are counted. A low rate alone is never
+enough evidence for promotion.
+
 ## Consequences
 
 - One vocabulary for merge frequency, and the safe default is explicit.
@@ -62,3 +79,4 @@ when it is demoted, are left to a later ADR. ADR-0121's classes and rollout are 
 - The T0 default keeps human merge load high until promotions land.
 - Deterministic sampling is predictable. This is accepted, since the agent cannot steer the sampled set.
 - Eligibility needs both a class check and a path check, so code implementing tiers must evaluate both.
+- humanInterventionRate is a lower bound. Promotion evidence that cites it must say so, so a low rate is not read as complete.
