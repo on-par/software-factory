@@ -314,6 +314,110 @@ import {
   sweepHeartbeatCheck,
 } from './sweep-heartbeat.js';
 
+type ConfigLoaderKey =
+  | 'loadModelsConfig'
+  | 'loadRoutesConfig'
+  | 'loadFactoryConfigForRepo'
+  | 'loadRepoConfig'
+  | 'resolveTimeouts'
+  | 'resolveSkipCI'
+  | 'getConstitutionsDir'
+  | 'resolveEffectiveModelPins';
+type ConfigLoaders = Required<Pick<CliDeps, ConfigLoaderKey>>;
+
+const DEFAULT_CONFIG_LOADERS: ConfigLoaders = {
+  loadModelsConfig,
+  loadRoutesConfig,
+  loadFactoryConfigForRepo,
+  loadRepoConfig,
+  resolveTimeouts,
+  resolveSkipCI,
+  getConstitutionsDir,
+  resolveEffectiveModelPins,
+};
+
+/** Loaders for the current main() invocation; DEFAULT_CONFIG_LOADERS outside main(). */
+let configLoaders: ConfigLoaders = DEFAULT_CONFIG_LOADERS;
+
+/** Per-field `??` so an explicit `undefined` override falls back instead of replacing the default. */
+function resolveConfigLoaders(overrides: Partial<ConfigLoaders>, base: ConfigLoaders = configLoaders): ConfigLoaders {
+  return {
+    loadModelsConfig: overrides.loadModelsConfig ?? base.loadModelsConfig,
+    loadRoutesConfig: overrides.loadRoutesConfig ?? base.loadRoutesConfig,
+    loadFactoryConfigForRepo: overrides.loadFactoryConfigForRepo ?? base.loadFactoryConfigForRepo,
+    loadRepoConfig: overrides.loadRepoConfig ?? base.loadRepoConfig,
+    resolveTimeouts: overrides.resolveTimeouts ?? base.resolveTimeouts,
+    resolveSkipCI: overrides.resolveSkipCI ?? base.resolveSkipCI,
+    getConstitutionsDir: overrides.getConstitutionsDir ?? base.getConstitutionsDir,
+    resolveEffectiveModelPins: overrides.resolveEffectiveModelPins ?? base.resolveEffectiveModelPins,
+  };
+}
+
+type GitOpKey = 'setupWorktree' | 'cleanupWorktree' | 'gitFetch';
+type GitOps = Required<Pick<CliDeps, GitOpKey>>;
+
+const DEFAULT_GIT_OPS: GitOps = { setupWorktree, cleanupWorktree, gitFetch };
+
+/** Git worktree/fetch ops for the current main() or cmdLand invocation; DEFAULT_GIT_OPS outside them. */
+let gitOps: GitOps = DEFAULT_GIT_OPS;
+
+/** Per-field `??` so an explicit `undefined` override falls back instead of replacing the default. */
+function resolveGitOps(overrides: Partial<GitOps>, base: GitOps = gitOps): GitOps {
+  return {
+    setupWorktree: overrides.setupWorktree ?? base.setupWorktree,
+    cleanupWorktree: overrides.cleanupWorktree ?? base.cleanupWorktree,
+    gitFetch: overrides.gitFetch ?? base.gitFetch,
+  };
+}
+
+type InternalOpKey =
+  | 'watchChecks'
+  | 'createLocalSmallDryRun'
+  | 'readCosts'
+  | 'sweepWorktrees'
+  | 'releaseStaleClaims'
+  | 'findUnmergedGreenPrs'
+  | 'listOrphanContainers'
+  | 'reapOrphanContainers'
+  | 'listMicroVms'
+  | 'reapOrphanMicroVm'
+  | 'formatGcReport';
+type InternalOps = Required<Pick<CliDeps, InternalOpKey>>;
+
+const DEFAULT_INTERNAL_OPS: InternalOps = {
+  watchChecks,
+  createLocalSmallDryRun,
+  readCosts,
+  sweepWorktrees,
+  releaseStaleClaims,
+  findUnmergedGreenPrs,
+  listOrphanContainers,
+  reapOrphanContainers,
+  listMicroVms,
+  reapOrphanMicroVm,
+  formatGcReport,
+};
+
+/** factory-core/internal ops for the current main() or cmdLand invocation; DEFAULT_INTERNAL_OPS outside them. */
+let internalOps: InternalOps = DEFAULT_INTERNAL_OPS;
+
+/** Per-field `??` so an explicit `undefined` override falls back instead of replacing the default. */
+function resolveInternalOps(overrides: Partial<InternalOps>, base: InternalOps = internalOps): InternalOps {
+  return {
+    watchChecks: overrides.watchChecks ?? base.watchChecks,
+    createLocalSmallDryRun: overrides.createLocalSmallDryRun ?? base.createLocalSmallDryRun,
+    readCosts: overrides.readCosts ?? base.readCosts,
+    sweepWorktrees: overrides.sweepWorktrees ?? base.sweepWorktrees,
+    releaseStaleClaims: overrides.releaseStaleClaims ?? base.releaseStaleClaims,
+    findUnmergedGreenPrs: overrides.findUnmergedGreenPrs ?? base.findUnmergedGreenPrs,
+    listOrphanContainers: overrides.listOrphanContainers ?? base.listOrphanContainers,
+    reapOrphanContainers: overrides.reapOrphanContainers ?? base.reapOrphanContainers,
+    listMicroVms: overrides.listMicroVms ?? base.listMicroVms,
+    reapOrphanMicroVm: overrides.reapOrphanMicroVm ?? base.reapOrphanMicroVm,
+    formatGcReport: overrides.formatGcReport ?? base.formatGcReport,
+  };
+}
+
 const exec = promisify(execCb);
 type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<unknown>;
 
@@ -463,13 +567,13 @@ async function cmdInit(opts: { force?: boolean } = {}) {
 
   // Constitution scaffold: repo directory basename fills <product-name>/<Product>.
   const repoName = basename(repoRoot);
-  const template = readFileSync(resolve(getConstitutionsDir(), '_template.md'), 'utf-8');
+  const template = readFileSync(resolve(configLoaders.getConstitutionsDir(), '_template.md'), 'utf-8');
   writeIfAbsent(constitutionPath, scaffoldConstitution(template, repoName), '.factory/constitution.md', force);
 
   writeIfAbsent(gitignorePath, 'state/\n', '.factory/.gitignore', force);
 
   // Doctor-style validation (policy=auto, N models reachable) — informational, never fails init.
-  const modelsConfig = applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot));
+  const modelsConfig = applyRepoConfig(configLoaders.loadModelsConfig(), configLoaders.loadRepoConfig(repoRoot));
   const registry = new ModelRegistry(modelsConfig);
   const diagnoses = diagnoseModels(registry, {}, resolveExperimental(), resolveLocalOnly());
   console.log(formatInitReachability(diagnoses));
@@ -549,7 +653,7 @@ export async function runMigrate(
   } else if (rawConfig.version === 2) {
     console.log('config.json already v2');
   } else {
-    const v2 = loadRepoConfig(repoRoot);
+    const v2 = configLoaders.loadRepoConfig(repoRoot);
     if (!v2) throw new Error(`Expected ${paths.config} to exist`);
     const { $schema: _schema, version: _version, ...rest } = v2;
     // loadRepoConfig only returns the model-routing namespace; carry the runtime-policy
@@ -580,12 +684,12 @@ export async function runMigrate(
   const constitutionPath = resolve(paths.root, 'constitution.md');
   if (!existsSync(constitutionPath)) {
     const product = readActiveProduct(paths.product);
-    const productConstitution = product ? resolve(getConstitutionsDir(), `${product}.md`) : undefined;
+    const productConstitution = product ? resolve(configLoaders.getConstitutionsDir(), `${product}.md`) : undefined;
     const content =
       productConstitution && existsSync(productConstitution)
         ? readFileSync(productConstitution, 'utf-8')
         : scaffoldConstitution(
-            readFileSync(resolve(getConstitutionsDir(), '_template.md'), 'utf-8'),
+            readFileSync(resolve(configLoaders.getConstitutionsDir(), '_template.md'), 'utf-8'),
             basename(repoRoot),
           );
     if (dryRun) {
@@ -767,7 +871,7 @@ export async function cmdConstitution(opts: {
     if (existsSync(constitutionPath) && !opts.force) {
       throw new CliExitError('.factory/constitution.md already exists — use --force to overwrite', 1);
     }
-    const template = readFileSync(resolve(getConstitutionsDir(), '_template.md'), 'utf-8');
+    const template = readFileSync(resolve(configLoaders.getConstitutionsDir(), '_template.md'), 'utf-8');
     const content = scaffoldConstitution(template, product ?? basename(repoRoot));
     writeIfAbsent(constitutionPath, content, '.factory/constitution.md', opts.force);
     console.log(`Next: factory constitution --product ${product ?? basename(repoRoot)}`);
@@ -792,7 +896,7 @@ export async function cmdConstitution(opts: {
     if (existsSync(constitutionPath) && !opts.force) {
       throw new CliExitError('.factory/constitution.md already exists — use --force to overwrite', 1);
     }
-    const content = readFileSync(resolve(getConstitutionsDir(), `${opts.product}.md`), 'utf-8');
+    const content = readFileSync(resolve(configLoaders.getConstitutionsDir(), `${opts.product}.md`), 'utf-8');
     writeIfAbsent(constitutionPath, content, '.factory/constitution.md', opts.force);
 
     ensureDir(paths.state);
@@ -835,7 +939,7 @@ function ollamaModelSet(): Set<string> | undefined {
 
 async function cmdModels(opts: { doctor?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
-  const modelsConfig = applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot));
+  const modelsConfig = applyRepoConfig(configLoaders.loadModelsConfig(), configLoaders.loadRepoConfig(repoRoot));
   const { ModelRegistry } = await import('@on-par/factory-core');
   const registry = new ModelRegistry(modelsConfig);
   const allowExperimental = resolveExperimental();
@@ -879,7 +983,7 @@ async function cmdModels(opts: { doctor?: boolean } = {}) {
 async function cmdCost(opts: { issue?: string } = {}) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  const costs = readCosts(paths.costs);
+  const costs = internalOps.readCosts(paths.costs);
 
   if (opts.issue) {
     const filtered = costs.filter((c) => c.issue === String(opts.issue));
@@ -938,11 +1042,11 @@ async function cmdCheck(issueRaw: string, opts: { json?: boolean; deep?: boolean
   let runModel: DeepCheckModelRunner | undefined;
   if (opts.deep) {
     const repoRoot = await getRepoRoot();
-    const repoConfig = loadRepoConfig(repoRoot);
+    const repoConfig = configLoaders.loadRepoConfig(repoRoot);
     const effective = resolveEffectiveConfig(repoConfig);
     const router = new ModelRouter(
-      applyRepoConfig(loadModelsConfig(), repoConfig),
-      loadRoutesConfig(),
+      applyRepoConfig(configLoaders.loadModelsConfig(), repoConfig),
+      configLoaders.loadRoutesConfig(),
       false,
       undefined,
       effective.allowExperimental,
@@ -986,7 +1090,10 @@ async function currentCommitSha(): Promise<string | null> {
 }
 
 function resolvedModelTiers(repoRoot: string, stateRoot?: string): Record<string, string[]> {
-  const modelsConfig = applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot, stateRoot));
+  const modelsConfig = applyRepoConfig(
+    configLoaders.loadModelsConfig(),
+    configLoaders.loadRepoConfig(repoRoot, stateRoot),
+  );
   return modelsConfig.tiers ?? {};
 }
 
@@ -1043,7 +1150,7 @@ async function cmdKpis(opts: { branchPrefix?: string } = {}) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   const events = existsSync(paths.events) ? readEvents(paths.events) : [];
-  const costs = existsSync(paths.costs) ? readCosts(paths.costs) : [];
+  const costs = existsSync(paths.costs) ? internalOps.readCosts(paths.costs) : [];
 
   let allEvents = events;
   let prSources: PrSource[] = [];
@@ -1066,7 +1173,7 @@ async function cmdKpis(opts: { branchPrefix?: string } = {}) {
 
   if (prSources.length > 0) {
     try {
-      const windowDays = resolveDefectWindowDays(loadFactoryConfigForRepo(paths.config));
+      const windowDays = resolveDefectWindowDays(configLoaders.loadFactoryConfigForRepo(paths.config));
       const now = new Date().toISOString();
       const merged = mergedPrRefs(prSources);
       const sources = await fetchDefectSources(getOctokit(), owner, repoName, merged, { now, windowDays });
@@ -1161,7 +1268,7 @@ export async function cmdUsage() {
   const repoRoot = await getRepoRoot();
   let knobs: UsageKnobs;
   try {
-    knobs = resolveUsageKnobs(process.env, loadRepoConfig(repoRoot));
+    knobs = resolveUsageKnobs(process.env, configLoaders.loadRepoConfig(repoRoot));
   } catch (err: any) {
     throw new CliExitError(`factory: ${err.message}`, 2);
   }
@@ -1207,9 +1314,9 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
   const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
 
-  const repoConfig = loadRepoConfig(repoRoot);
-  const modelsConfig = applyRepoConfig(loadModelsConfig(), repoConfig);
-  const routesConfig = loadRoutesConfig();
+  const repoConfig = configLoaders.loadRepoConfig(repoRoot);
+  const modelsConfig = applyRepoConfig(configLoaders.loadModelsConfig(), repoConfig);
+  const routesConfig = configLoaders.loadRoutesConfig();
   const effective = resolveEffectiveConfig(repoConfig);
   const router = new ModelRouter(
     modelsConfig,
@@ -1223,7 +1330,7 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
 
   console.log(styleText('bold', `== ${ghRepo} ==`));
   console.log(`Product: ${product}`);
-  const worktreeParent = loadFactoryConfigForRepo(paths.config).worktree.parent;
+  const worktreeParent = configLoaders.loadFactoryConfigForRepo(paths.config).worktree.parent;
   console.log(
     formatWorktreeLocation(resolveWorktreeRoot({ repoRoot, parent: worktreeParent, repo: ghRepo }), worktreeParent),
   );
@@ -1284,10 +1391,10 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
       router,
       repo: repoConfig,
       repoConfigPath: '.factory/config.json',
-      mergePolicy: resolveMergePolicy(loadFactoryConfigForRepo(paths.config), process.env, {
+      mergePolicy: resolveMergePolicy(configLoaders.loadFactoryConfigForRepo(paths.config), process.env, {
         auto: readRunFlagOverrides(paths.runFlags).autoMerge,
       }),
-      prClassifier: resolvePrClassifierPolicy(loadFactoryConfigForRepo(paths.config), process.env, {
+      prClassifier: resolvePrClassifierPolicy(configLoaders.loadFactoryConfigForRepo(paths.config), process.env, {
         classifier: readRunFlagOverrides(paths.runFlags).prClassifier,
       }),
     })) {
@@ -1309,7 +1416,7 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
 
   console.log(styleText('bold', '\n  Sweep heartbeat:'));
   const sweepStatus = checkSweepHeartbeat(
-    loadFactoryConfigForRepo(paths.config).sweep,
+    configLoaders.loadFactoryConfigForRepo(paths.config).sweep,
     process.env,
     defaultSweepHeartbeatDeps(),
   );
@@ -1331,7 +1438,7 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
   if (opts.kpis) {
     console.log(styleText('bold', '\n  KPIs:'));
     const kpiEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
-    const kpiCosts = existsSync(paths.costs) ? readCosts(paths.costs) : [];
+    const kpiCosts = existsSync(paths.costs) ? internalOps.readCosts(paths.costs) : [];
     for (const line of formatKpiLines(computeHealthKpis(kpiEvents, kpiCosts))) {
       console.log(`    ${line}`);
     }
@@ -1397,9 +1504,9 @@ async function cmdTui(opts: { localQueue?: boolean } = {}, runTuiImpl: typeof ru
     // header just omits the repo
   }
 
-  const repoConfig = loadRepoConfig(repoRoot);
-  const modelsConfig = applyRepoConfig(loadModelsConfig(), repoConfig);
-  const routesConfig = loadRoutesConfig();
+  const repoConfig = configLoaders.loadRepoConfig(repoRoot);
+  const modelsConfig = applyRepoConfig(configLoaders.loadModelsConfig(), repoConfig);
+  const routesConfig = configLoaders.loadRoutesConfig();
   const effective = resolveEffectiveConfig(repoConfig);
   const router = new ModelRouter(
     modelsConfig,
@@ -1413,10 +1520,10 @@ async function cmdTui(opts: { localQueue?: boolean } = {}, runTuiImpl: typeof ru
     router,
     repo: repoConfig,
     repoConfigPath: '.factory/config.json',
-    mergePolicy: resolveMergePolicy(loadFactoryConfigForRepo(paths.config), process.env, {
+    mergePolicy: resolveMergePolicy(configLoaders.loadFactoryConfigForRepo(paths.config), process.env, {
       auto: readRunFlagOverrides(paths.runFlags).autoMerge,
     }),
-    prClassifier: resolvePrClassifierPolicy(loadFactoryConfigForRepo(paths.config), process.env, {
+    prClassifier: resolvePrClassifierPolicy(configLoaders.loadFactoryConfigForRepo(paths.config), process.env, {
       classifier: readRunFlagOverrides(paths.runFlags).prClassifier,
     }),
   });
@@ -1624,25 +1731,31 @@ export async function shipIssue(
     /** Benchmark artifact directory (#509) — only set for local-only runs. */
     artifactsDir?: string;
   },
+  deps: Pick<
+    CliDeps,
+    'octokit' | 'planPhase' | 'buildPhase' | 'checkPhase' | 'shipPhase' | ConfigLoaderKey | GitOpKey
+  > = {},
 ): Promise<string> {
+  const loaders = resolveConfigLoaders(deps);
+  const git = resolveGitOps(deps);
   const repoRoot = ctx?.repoRoot ?? (await getRepoRoot());
   const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo());
   const paths = ctx?.paths ?? getFactoryPaths(repoRoot);
-  const octokit = getOctokit();
+  const octokit = (deps.octokit ?? getOctokit)();
   const [ghOwner, ghName] = ghRepo.split('/');
 
-  const repoConfig = loadRepoConfig(repoRoot, paths.root);
-  const factoryConfig = loadFactoryConfigForRepo(paths.config);
+  const repoConfig = loaders.loadRepoConfig(repoRoot, paths.root);
+  const factoryConfig = loaders.loadFactoryConfigForRepo(paths.config);
   const classifierPolicy = resolvePrClassifierPolicy(factoryConfig, process.env, { classifier: opts.prClassifier });
-  const timeouts = resolveTimeouts(factoryConfig);
+  const timeouts = loaders.resolveTimeouts(factoryConfig);
   const failoverSettings = resolveAutoFailover(factoryConfig);
   const breaker = new ProviderBreaker(paths.breaker);
   const reworkHistory = new ReworkHistory(paths.reworkHistory);
   const laneFileGuard = new LaneFileGuard(paths.laneFiles);
   const efficiency = resolveEfficiencyPolicy(repoConfig);
   const policy: RunPolicy = {
-    models: applyRepoConfig(loadModelsConfig(), repoConfig),
-    routes: loadRoutesConfig(),
+    models: applyRepoConfig(loaders.loadModelsConfig(), repoConfig),
+    routes: loaders.loadRoutesConfig(),
     sandbox: factoryConfig.sandbox,
     budget: { perIssueCapUsd: efficiency.perIssueCapUsd },
     effective:
@@ -1672,7 +1785,7 @@ export async function shipIssue(
       workspaceBackend: laneWorkspaceBackend,
     });
   });
-  const modelPins = resolveEffectiveModelPins(router.registryRef, repoConfig);
+  const modelPins = loaders.resolveEffectiveModelPins(router.registryRef, repoConfig);
   const codexOff = resolveCodexDisabled(repoConfig);
   const constitutionLoader = new ConstitutionLoader();
 
@@ -1689,7 +1802,7 @@ export async function shipIssue(
   const branch = branchFor(issueNum, issueTitle, policy.effective.branchPrefix);
   const worktree = ctx?.localOnly
     ? ctx.localOnly.workspace
-    : worktreePathFor(repoRoot, ghRepo, issueNum, policy.effective.branchPrefix);
+    : worktreePathFor(repoRoot, ghRepo, issueNum, policy.effective.branchPrefix, loaders);
   const specPath = resolve(paths.plans, `issue-${issueNum}.md`);
   const runStartedAt = new Date().toISOString();
 
@@ -1812,7 +1925,7 @@ export async function shipIssue(
             paths.gitLock,
             // setupWorktree fetches origin itself before creating the worktree (#1167),
             // so no explicit gitFetch here — still under the git + file locks.
-            () => setupWorktree(root, br, wt, sp, sandbox, setupLog, setupOpts),
+            () => git.setupWorktree(root, br, wt, sp, sandbox, setupLog, setupOpts),
             { onSteal: (pid) => log('lock-stolen', `stole ${paths.gitLock} from dead holder pid ${pid ?? 'unknown'}`) },
           ),
         ),
@@ -1877,7 +1990,7 @@ export async function shipIssue(
     timeouts,
     modelPins,
     codexDisabled: codexOff,
-    skipCI: resolveSkipCI(factoryConfig),
+    skipCI: loaders.resolveSkipCI(factoryConfig),
     failover: failoverSettings,
     efficiency: { maxReworkRounds: efficiency.maxReworkRounds, fastPath: efficiency.fastPath },
     sandboxPolicy: activeSandboxPolicy,
@@ -1897,10 +2010,10 @@ export async function shipIssue(
     resolveBaseUrl,
     getIssueSpend: () => issueSpend,
     breaker,
-    planPhase,
-    buildPhase,
-    checkPhase,
-    shipPhase,
+    planPhase: deps.planPhase ?? planPhase,
+    buildPhase: deps.buildPhase ?? buildPhase,
+    checkPhase: deps.checkPhase ?? checkPhase,
+    shipPhase: deps.shipPhase ?? shipPhase,
     resolveConstitution: () =>
       // Resolved once here — runIssue calls this exactly once and reuses the value for
       // every phase, so the build worker can never author the standards it is graded by.
@@ -2091,13 +2204,13 @@ async function runAutoWorktreeGc(
   eventScope: string | number,
 ): Promise<void> {
   try {
-    const factoryConfig = loadFactoryConfigForRepo(paths.config);
+    const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
     if (!factoryConfig.worktree.autoGcOnRun) return;
     const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
     const gcSandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
     const report = await withGitLock(repoRoot, () =>
       withFileLock(paths.gitLock, () =>
-        sweepWorktrees(
+        internalOps.sweepWorktrees(
           {
             repoRoot,
             ttlDays: factoryConfig.worktree.gcTtlDays,
@@ -2114,7 +2227,7 @@ async function runAutoWorktreeGc(
       eventScope,
       `removed ${report.removed.length} stale worktree(s), kept ${report.kept}`,
     );
-    console.log(formatGcReport(report));
+    console.log(internalOps.formatGcReport(report));
   } catch (err: any) {
     logEvent(paths.events, 'warn', eventScope, `worktree gc failed: ${err.message}`);
   }
@@ -2140,8 +2253,8 @@ export async function sweepBetweenLaneIssues(
   deps: LaneGcDeps = {},
 ): Promise<'disabled' | 'land-in-progress' | 'swept' | 'failed'> {
   const {
-    loadConfig = loadFactoryConfigForRepo,
-    sweep = sweepWorktrees,
+    loadConfig = configLoaders.loadFactoryConfigForRepo,
+    sweep = internalOps.sweepWorktrees,
     emitEvent = logEvent,
     octokit = getOctokit,
   } = deps;
@@ -2171,7 +2284,7 @@ export async function sweepBetweenLaneIssues(
         `removed ${report.removed.length} stale worktree(s), kept ${report.kept}`,
         { lane },
       );
-      console.log(formatGcReport(report));
+      console.log(internalOps.formatGcReport(report));
     }
     return 'swept';
   } catch (err: any) {
@@ -2508,7 +2621,7 @@ async function cmdLocalSmallDryRun(issueNum: number, opts: { spec?: string; outp
   const outputDir = resolve(repoRoot, opts.output ?? resolve(paths.state, 'local-small', `issue-${issueNum}`));
   const { data: issue } = await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issueNum });
 
-  const result = await createLocalSmallDryRun({
+  const result = await internalOps.createLocalSmallDryRun({
     issue: issueNum,
     issueTitle: issue.title,
     issueBody: issue.body ?? '',
@@ -2546,7 +2659,9 @@ async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }) 
 
     const preflight = async (): Promise<OvernightPreflightResult> => {
       if (!isCommandAvailable('claude')) return { ok: false, reason: missingClaudeCliMessage() };
-      const registry = new ModelRegistry(applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot)));
+      const registry = new ModelRegistry(
+        applyRepoConfig(configLoaders.loadModelsConfig(), configLoaders.loadRepoConfig(repoRoot)),
+      );
       const ollamaModels = ollamaModelSet();
       const diagnoses = diagnoseModels(
         registry,
@@ -2604,10 +2719,16 @@ async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }) 
   });
 }
 
-function worktreePathFor(repoRoot: string, ghRepo: string, issueNum: number, prefix?: string): string {
+function worktreePathFor(
+  repoRoot: string,
+  ghRepo: string,
+  issueNum: number,
+  prefix?: string,
+  loaders: ConfigLoaders = configLoaders,
+): string {
   return laneWorktreePath({
     repoRoot,
-    parent: loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).worktree.parent,
+    parent: loaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).worktree.parent,
     repo: ghRepo,
     issue: issueNum,
     prefix,
@@ -2672,8 +2793,8 @@ export async function reapParkedLaneWorktree(
   prefixOverride?: string,
 ): Promise<void> {
   try {
-    const factoryConfig = loadFactoryConfigForRepo(paths.config);
-    const branchPrefix = prefixOverride ?? resolveEffectiveConfig(loadRepoConfig(repoRoot)).branchPrefix;
+    const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
+    const branchPrefix = prefixOverride ?? resolveEffectiveConfig(configLoaders.loadRepoConfig(repoRoot)).branchPrefix;
     const worktreePath = worktreePathFor(repoRoot, ghRepo, issue, branchPrefix);
     const log = (type: EventKind, msg: string) => logEvent(paths.events, type, issue, msg);
     const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
@@ -2690,7 +2811,7 @@ export async function reapParkedLaneWorktree(
 export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string; branchPrefix?: string }) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  const factoryConfig = loadFactoryConfigForRepo(paths.config);
+  const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
   const ttlDays = opts.ttlDays !== undefined ? Number(opts.ttlDays) : factoryConfig.worktree.gcTtlDays;
   if (!Number.isFinite(ttlDays) || ttlDays < 0) {
     throw new CliExitError('factory: --ttl-days must be a non-negative number', 2);
@@ -2702,9 +2823,12 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string; 
   const octokit = ghRepo ? (hasGitHubToken() ? getOctokit() : undefined) : undefined;
   const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
   const run = () =>
-    sweepWorktrees({ repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo, branchPrefix }, { log, octokit, sandbox });
+    internalOps.sweepWorktrees(
+      { repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo, branchPrefix },
+      { log, octokit, sandbox },
+    );
   const report = opts.dryRun ? await run() : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
-  console.log(formatGcReport(report));
+  console.log(internalOps.formatGcReport(report));
 }
 
 /** `factory reset <issue...>` (#1787): wipes an issue's local state; see reset.ts. */
@@ -2721,7 +2845,7 @@ export async function cmdReset(
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
-  const sandbox = gcWorktreeSandbox(loadFactoryConfigForRepo(paths.config).sandbox, repoRoot);
+  const sandbox = gcWorktreeSandbox(configLoaders.loadFactoryConfigForRepo(paths.config).sandbox, repoRoot);
   const log = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
   const run = () =>
     runReset(nums, {
@@ -2730,7 +2854,7 @@ export async function cmdReset(
       paths,
       branchPrefix,
       git: (cmd) => exec(cmd, { cwd: repoRoot }).then((r) => r.stdout),
-      removeWorktree: (p) => cleanupWorktree(repoRoot, p, log, sandbox),
+      removeWorktree: (p) => gitOps.cleanupWorktree(repoRoot, p, log, sandbox),
       readLeases: () => readPortLeases(paths.ports),
       releaseLease: (id) => releasePortLease({ registryFile: paths.ports, lockDir: paths.portsLock, worktreeId: id }),
       runCommand: (cmd, o) => exec(cmd, { cwd: o?.cwd ?? repoRoot }).then((r) => ({ stdout: r.stdout })),
@@ -2742,55 +2866,72 @@ export async function cmdReset(
   for (const line of lines) console.log(line);
 }
 
-export async function cmdLand(issueNum: number, opts: { branchPrefix?: string; allowGated?: boolean } = {}) {
-  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
-  const repoRoot = await getRepoRoot();
-  const ghRepo = await getGitHubRepo();
-  const paths = getFactoryPaths(repoRoot);
-  const octokit = getOctokit();
-  const factoryConfig = loadFactoryConfigForRepo(paths.config);
-  const skipCI = resolveSkipCI(factoryConfig);
-
+/** deps overrides the config loaders, git ops and internal ops for this call, like shipIssue. */
+export async function cmdLand(
+  issueNum: number,
+  opts: { branchPrefix?: string; allowGated?: boolean } = {},
+  deps: Pick<CliDeps, ConfigLoaderKey | GitOpKey | InternalOpKey> = {},
+) {
+  const previousLoaders = configLoaders;
+  const previousGitOps = gitOps;
+  const previousInternalOps = internalOps;
+  configLoaders = resolveConfigLoaders(deps);
+  gitOps = resolveGitOps(deps);
+  internalOps = resolveInternalOps(deps);
   try {
-    const result = await landIssue(issueNum, repoRoot, ghRepo, paths, octokit, skipCI, branchPrefix, {
-      allowGated: opts.allowGated === true,
-    });
-    console.log(styleText('green', `✅ Landed PR #${result.prNumber} for issue #${issueNum}`));
-  } catch (err: any) {
-    if (err instanceof AwaitingReviewError) {
-      console.log(
-        styleText('yellow', `⏸ PR #${err.prNumber} for issue #${issueNum} awaiting human review — left open`),
-      );
-      return;
+    const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
+    const repoRoot = await getRepoRoot();
+    const ghRepo = await getGitHubRepo();
+    const paths = getFactoryPaths(repoRoot);
+    const octokit = getOctokit();
+    const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
+    const skipCI = configLoaders.resolveSkipCI(factoryConfig);
+
+    try {
+      const result = await landIssue(issueNum, repoRoot, ghRepo, paths, octokit, skipCI, branchPrefix, {
+        allowGated: opts.allowGated === true,
+      });
+      console.log(styleText('green', `✅ Landed PR #${result.prNumber} for issue #${issueNum}`));
+    } catch (err: any) {
+      if (err instanceof AwaitingReviewError) {
+        console.log(
+          styleText('yellow', `⏸ PR #${err.prNumber} for issue #${issueNum} awaiting human review — left open`),
+        );
+        return;
+      }
+      if (err instanceof CiUnverifiedError) {
+        console.log(
+          styleText(
+            'yellow',
+            `⏸ PR #${err.prNumber} for issue #${issueNum} — CI never reached a green verdict — left open, not merged`,
+          ),
+        );
+        return;
+      }
+      if (err instanceof CiFailedError) {
+        console.log(
+          styleText(
+            'yellow',
+            `⏸ PR #${err.prNumber} for issue #${issueNum} has a failing CI check — left open, not merged`,
+          ),
+        );
+        return;
+      }
+      if (err instanceof MergeGatedError) {
+        throw new CliExitError(`factory: ${err.message}`, 4);
+      }
+      if (err instanceof LandConflictError) {
+        throw new CliExitError(`factory: ${err.message}`, 3);
+      }
+      if (err instanceof LandFailureError) {
+        throw new CliExitError(`factory: ${err.message}`, err.code);
+      }
+      throw new CliExitError(`factory: merge failed for issue #${issueNum}: ${err.message}`, 5);
     }
-    if (err instanceof CiUnverifiedError) {
-      console.log(
-        styleText(
-          'yellow',
-          `⏸ PR #${err.prNumber} for issue #${issueNum} — CI never reached a green verdict — left open, not merged`,
-        ),
-      );
-      return;
-    }
-    if (err instanceof CiFailedError) {
-      console.log(
-        styleText(
-          'yellow',
-          `⏸ PR #${err.prNumber} for issue #${issueNum} has a failing CI check — left open, not merged`,
-        ),
-      );
-      return;
-    }
-    if (err instanceof MergeGatedError) {
-      throw new CliExitError(`factory: ${err.message}`, 4);
-    }
-    if (err instanceof LandConflictError) {
-      throw new CliExitError(`factory: ${err.message}`, 3);
-    }
-    if (err instanceof LandFailureError) {
-      throw new CliExitError(`factory: ${err.message}`, err.code);
-    }
-    throw new CliExitError(`factory: merge failed for issue #${issueNum}: ${err.message}`, 5);
+  } finally {
+    configLoaders = previousLoaders;
+    gitOps = previousGitOps;
+    internalOps = previousInternalOps;
   }
 }
 
@@ -2814,7 +2955,7 @@ async function landIssue(
   // branch from the current title first, but fall back to matching the open
   // PR that references this issue directly and use its real head branch.
   // Legacy-prefix (LEGACY_BRANCH_PREFIX) branches are guessed too, after the resolved prefix (#1708).
-  const resolved = branchPrefix ?? resolveEffectiveConfig(loadRepoConfig(repoRoot)).branchPrefix;
+  const resolved = branchPrefix ?? resolveEffectiveConfig(configLoaders.loadRepoConfig(repoRoot)).branchPrefix;
   const title = await getIssueTitle(ghRepo, issueNum, octokit);
   const guesses = factoryBranchPrefixes(resolved).map((p) => branchFor(issueNum, title, p));
   const guessedBranch = guesses[0];
@@ -2832,7 +2973,7 @@ async function landIssue(
       }
       return undefined;
     };
-    [, prNumber] = await Promise.all([gitFetch(repoRoot), findByGuess()]);
+    [, prNumber] = await Promise.all([gitOps.gitFetch(repoRoot), findByGuess()]);
     if (!prNumber) {
       const fallback = await findOpenPRForIssue(octokit, owner, repoName, issueNum);
       if (fallback) {
@@ -2851,7 +2992,7 @@ async function landIssue(
     throw new LandFailureError(`no open PR for issue #${issueNum} (${guessedBranch})`, 1);
   }
 
-  const landFactoryConfig = loadFactoryConfigForRepo(paths.config);
+  const landFactoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
   // Every merge path honors the no-auto-merge gate on the issue and on the PR; unreadable labels fail closed (#1720).
   const filingPolicy = resolveFilingPolicy(landFactoryConfig);
   const gateLabel = filingPolicy.selfFixLabel;
@@ -2922,18 +3063,18 @@ async function landIssue(
         withLock: withLandLock,
         ensureWorktree: async () => {
           if (!existsSync(worktree)) {
-            await setupWorktree(repoRoot, branch, worktree, `origin/${branch}`, worktreeSandbox, log);
+            await gitOps.setupWorktree(repoRoot, branch, worktree, `origin/${branch}`, worktreeSandbox, log);
           }
         },
       });
     } catch (err) {
       if (err instanceof AwaitingReviewError || err instanceof CiFailedError) {
-        await withLandLock(() => cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
+        await withLandLock(() => gitOps.cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
       }
       throw err;
     }
     log('merged', `squash-merged PR #${prNumber}`);
-    await withLandLock(() => cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
+    await withLandLock(() => gitOps.cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
   } catch (err: any) {
     if (err instanceof LandConflictError || err instanceof AwaitingReviewError || err instanceof CiFailedError)
       throw err;
@@ -2957,9 +3098,9 @@ async function cmdTriage(opts: { product?: string }) {
   }
   const product = opts.product ?? readActiveProduct(paths.product);
 
-  const repoConfig = loadRepoConfig(repoRoot);
-  const modelsConfig = applyRepoConfig(loadModelsConfig(), repoConfig);
-  const routesConfig = loadRoutesConfig();
+  const repoConfig = configLoaders.loadRepoConfig(repoRoot);
+  const modelsConfig = applyRepoConfig(configLoaders.loadModelsConfig(), repoConfig);
+  const routesConfig = configLoaders.loadRoutesConfig();
   const effective = resolveEffectiveConfig(repoConfig);
   const router = new ModelRouter(
     modelsConfig,
@@ -3239,7 +3380,7 @@ export async function startLaneProxy(
 async function cmdProxy() {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  const factoryConfig = loadFactoryConfigForRepo(paths.config);
+  const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
   const settings = resolveEnvironmentProxy(factoryConfig);
 
   if (!settings.enabled) {
@@ -3392,7 +3533,7 @@ async function cmdRun(
     }
     writeRunFlagOverrides(paths.runFlags, { autoMerge: opts.autoMerge, prClassifier: opts.prClassifier });
     const ghRepo = await getGitHubRepo();
-    const factoryConfig = loadFactoryConfigForRepo(paths.config);
+    const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
     const keychainErr = keychainPreflightError(probeClaudeKeychain());
     if (keychainErr) {
       logEvent(paths.events, 'environment_warning', 'all', keychainErr);
@@ -3427,8 +3568,12 @@ async function cmdRun(
     let knobs: UsageKnobs;
     let laneBreakerThreshold: number;
     try {
-      knobs = resolveUsageKnobs(process.env, loadRepoConfig(repoRoot), usageFlagOverrides(opts, 'stopAt'));
-      laneBreakerThreshold = resolveLaneBreakerThreshold(loadRepoConfig(repoRoot));
+      knobs = resolveUsageKnobs(
+        process.env,
+        configLoaders.loadRepoConfig(repoRoot),
+        usageFlagOverrides(opts, 'stopAt'),
+      );
+      laneBreakerThreshold = resolveLaneBreakerThreshold(configLoaders.loadRepoConfig(repoRoot));
     } catch (err: any) {
       throw new CliExitError(`factory: ${err.message}`, 2);
     }
@@ -3541,7 +3686,7 @@ async function cmdRun(
     if (lanes.length > 0) {
       try {
         const events = existsSync(paths.events) ? readEvents(paths.events) : [];
-        const costs = existsSync(paths.costs) ? readCosts(paths.costs) : [];
+        const costs = existsSync(paths.costs) ? internalOps.readCosts(paths.costs) : [];
         const kpis = computeHealthKpis(events, costs);
         await appendKpiSnapshot(paths, repoRoot, kpis);
         logEvent(paths.events, 'kpi-snapshot', 'all', `KPI snapshot appended to ${paths.kpiHistory}`);
@@ -3634,7 +3779,7 @@ async function cmdSupervise(opts: {
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  const ingestCfg = resolveIngestConfig(loadFactoryConfigForRepo(paths.config));
+  const ingestCfg = resolveIngestConfig(configLoaders.loadFactoryConfigForRepo(paths.config));
 
   const countPending = async (): Promise<number> => {
     if (opts.localQueue === true) {
@@ -3656,7 +3801,11 @@ async function cmdSupervise(opts: {
 
   let knobs: UsageKnobs;
   try {
-    knobs = resolveUsageKnobs(process.env, loadRepoConfig(repoRoot), usageFlagOverrides(opts, 'resumeAt'));
+    knobs = resolveUsageKnobs(
+      process.env,
+      configLoaders.loadRepoConfig(repoRoot),
+      usageFlagOverrides(opts, 'resumeAt'),
+    );
   } catch (err: any) {
     throw new CliExitError(`factory: ${err.message}`, 2);
   }
@@ -3759,7 +3908,7 @@ export function createQueuePreflightOps(octokit: Octokit, owner: string, repo: s
     expectedHeadRepoFullName: `${owner}/${repo}`,
     findOpenPR: (issue) => findOpenPRForIssue(octokit, owner, repo, issue),
     getLandState: (prNumber) => getPullRequestLandState(octokit, owner, repo, prNumber),
-    watch: (ref) => watchChecks({ octokit, owner, repo, ref }),
+    watch: (ref) => internalOps.watchChecks({ octokit, owner, repo, ref }),
   };
 }
 
@@ -4359,7 +4508,7 @@ export async function landOpenPullRequest(opts: {
     sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
     skipCI = false,
     adminMerge = process.env.FACTORY_MERGE_ADMIN === '1',
-    watch = watchChecks,
+    watch = internalOps.watchChecks,
     withLock = (fn) => fn(),
     ensureWorktree,
   } = opts;
@@ -4526,7 +4675,7 @@ export async function sweepApprovedPRs(
 }> {
   const {
     createOctokit = getOctokit,
-    loadConfig = loadFactoryConfigForRepo,
+    loadConfig = configLoaders.loadFactoryConfigForRepo,
     listPRs = listOpenFactoryPRs,
     land = landIssue,
     emitEvent = logEvent,
@@ -4535,7 +4684,7 @@ export async function sweepApprovedPRs(
 
   const [owner, repoName] = ghRepo.split('/');
   const octokit = createOctokit();
-  const skipCI = resolveSkipCI(loadConfig(paths.config));
+  const skipCI = configLoaders.resolveSkipCI(loadConfig(paths.config));
   const prs = await listPRs(octokit, owner, repoName, opts.branchPrefix);
 
   const landed: number[] = [];
@@ -4667,7 +4816,7 @@ export async function waitForMerge(
     createOctokit = getOctokit,
     pathExists = existsSync,
     checkMerged = isPrMerged,
-    loadConfig = loadFactoryConfigForRepo,
+    loadConfig = configLoaders.loadFactoryConfigForRepo,
     land = landIssue,
     listIssueLabels = defaultListIssueLabels,
     sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
@@ -4679,7 +4828,7 @@ export async function waitForMerge(
   } = deps;
   const factoryConfig = loadConfig(paths.config);
   const isMergeEnabled = mergeEnabled ?? (() => resolveMergePolicy(factoryConfig, process.env, mergeOverrides).auto);
-  const skipCI = resolveSkipCI(factoryConfig);
+  const skipCI = configLoaders.resolveSkipCI(factoryConfig);
   const filingPolicy = resolveFilingPolicy(factoryConfig);
   const octokit = createOctokit();
   const [owner, repoName] = ghRepo.split('/');
@@ -4902,7 +5051,11 @@ async function scanGreenPrs(ghRepo: string | undefined, octokit: Octokit | undef
   if (!ghRepo || !octokit) return { status: 'skipped', detail: 'skipped — no GitHub repo or token' };
   const [owner, repoName] = ghRepo.split('/');
   try {
-    const prs = await findUnmergedGreenPrs({ client: createOctokitGreenPrClient(octokit), owner, repo: repoName });
+    const prs = await internalOps.findUnmergedGreenPrs({
+      client: createOctokitGreenPrClient(octokit),
+      owner,
+      repo: repoName,
+    });
     return { status: 'ok', rows: prs.map(toGreenPrRow) };
   } catch (err: any) {
     return { status: 'failed', detail: err?.message ?? String(err) };
@@ -4973,7 +5126,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     const policy =
       repoRoot === null
         ? undefined
-        : resolveSandboxPolicy(loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox, {
+        : resolveSandboxPolicy(configLoaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox, {
             worktree: repoRoot,
             repoRoot,
           });
@@ -4997,17 +5150,17 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
 
   if (repoRoot !== null) {
     const paths = getFactoryPaths(repoRoot);
-    const factoryConfig = loadFactoryConfigForRepo(paths.config);
+    const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
     const health = await inspectPortLeases({ registryFile: paths.ports });
     checks.push(...leaseChecks(health.map(toLeaseRow)));
 
     const dockerAvailable = isCommandAvailable('docker');
-    const orphanContainers = dockerAvailable ? await listOrphanContainers().catch(() => []) : [];
+    const orphanContainers = dockerAvailable ? await internalOps.listOrphanContainers().catch(() => []) : [];
     checks.push(...orphanContainerChecks(orphanContainers.map((c) => c.name)));
 
     const sbxAvailable = isCommandAvailable('sbx');
     const activeVmNames = new Set(health.filter((h) => h.alive).map((h) => microVmName(h.lease.worktreeId)));
-    const orphanVmNames = sbxAvailable ? (await listMicroVms()).filter((n) => !activeVmNames.has(n)) : [];
+    const orphanVmNames = sbxAvailable ? (await internalOps.listMicroVms()).filter((n) => !activeVmNames.has(n)) : [];
     checks.push(...orphanMicroVmChecks(orphanVmNames));
 
     const sweepStatus = checkSweepHeartbeat(factoryConfig.sweep, process.env, defaultSweepHeartbeatDeps());
@@ -5030,12 +5183,12 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
 
     if (opts.reconcile) {
       if (orphanContainers.length > 0) {
-        const reapedContainers = await reapOrphanContainers(orphanContainers);
+        const reapedContainers = await internalOps.reapOrphanContainers(orphanContainers);
         console.log(formatContainerReconcileReport(reapedContainers));
       }
 
       if (orphanVmNames.length > 0) {
-        const reapedVms = await Promise.all(orphanVmNames.map((name) => reapOrphanMicroVm(name)));
+        const reapedVms = await Promise.all(orphanVmNames.map((name) => internalOps.reapOrphanMicroVm(name)));
         console.log(formatMicroVmReconcileReport(reapedVms));
       }
 
@@ -5057,7 +5210,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
         const gcSandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
-            sweepWorktrees(
+            internalOps.sweepWorktrees(
               {
                 repoRoot,
                 ttlDays: factoryConfig.worktree.gcTtlDays,
@@ -5078,7 +5231,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
       try {
         if (ghRepo && octokit) {
           const [owner, repoName] = ghRepo.split('/');
-          const released = await releaseStaleClaims({
+          const released = await internalOps.releaseStaleClaims({
             client: createOctokitQueueClient(octokit),
             owner,
             repo: repoName,
@@ -5103,6 +5256,38 @@ export interface CliDeps {
   daemon?: DaemonCtlDeps;
   /** Replaces the TUI entry point used by `factory tui`. */
   runTui?: typeof runTui;
+  /** Builds the GitHub client shipIssue uses. Defaults to createFactoryOctokit with the resolved token. */
+  octokit?: () => Octokit;
+  /** Phase overrides shipIssue forwards into RunPorts. Each defaults to the factory-core phase. */
+  planPhase?: RunPorts['planPhase'];
+  buildPhase?: RunPorts['buildPhase'];
+  checkPhase?: RunPorts['checkPhase'];
+  shipPhase?: RunPorts['shipPhase'];
+  /** Config loaders and resolvers. Each defaults to the factory-core export of the same name. */
+  loadModelsConfig?: typeof loadModelsConfig;
+  loadRoutesConfig?: typeof loadRoutesConfig;
+  loadFactoryConfigForRepo?: typeof loadFactoryConfigForRepo;
+  loadRepoConfig?: typeof loadRepoConfig;
+  resolveTimeouts?: typeof resolveTimeouts;
+  resolveSkipCI?: typeof resolveSkipCI;
+  getConstitutionsDir?: typeof getConstitutionsDir;
+  resolveEffectiveModelPins?: typeof resolveEffectiveModelPins;
+  /** Git worktree/fetch side effects. Each defaults to the factory-core export of the same name. */
+  setupWorktree?: typeof setupWorktree;
+  cleanupWorktree?: typeof cleanupWorktree;
+  gitFetch?: typeof gitFetch;
+  /** factory-core/internal ops (CI watch, costs, worktree GC, reconcile reaps, local-small). Each defaults to the export of the same name. */
+  watchChecks?: typeof watchChecks;
+  createLocalSmallDryRun?: typeof createLocalSmallDryRun;
+  readCosts?: typeof readCosts;
+  sweepWorktrees?: typeof sweepWorktrees;
+  releaseStaleClaims?: typeof releaseStaleClaims;
+  findUnmergedGreenPrs?: typeof findUnmergedGreenPrs;
+  listOrphanContainers?: typeof listOrphanContainers;
+  reapOrphanContainers?: typeof reapOrphanContainers;
+  listMicroVms?: typeof listMicroVms;
+  reapOrphanMicroVm?: typeof reapOrphanMicroVm;
+  formatGcReport?: typeof formatGcReport;
 }
 
 // ---------- main ----------
@@ -5619,6 +5804,12 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
 
   applyHelpGroups(program);
 
+  const previousLoaders = configLoaders;
+  const previousGitOps = gitOps;
+  const previousInternalOps = internalOps;
+  configLoaders = resolveConfigLoaders(deps, DEFAULT_CONFIG_LOADERS);
+  gitOps = resolveGitOps(deps, DEFAULT_GIT_OPS);
+  internalOps = resolveInternalOps(deps, DEFAULT_INTERNAL_OPS);
   try {
     await program.parseAsync(argv);
   } catch (err) {
@@ -5628,5 +5819,9 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
       return;
     }
     throw err;
+  } finally {
+    configLoaders = previousLoaders;
+    gitOps = previousGitOps;
+    internalOps = previousInternalOps;
   }
 }
