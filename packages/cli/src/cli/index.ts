@@ -314,6 +314,45 @@ import {
   sweepHeartbeatCheck,
 } from './sweep-heartbeat.js';
 
+type ConfigLoaderKey =
+  | 'loadModelsConfig'
+  | 'loadRoutesConfig'
+  | 'loadFactoryConfigForRepo'
+  | 'loadRepoConfig'
+  | 'resolveTimeouts'
+  | 'resolveSkipCI'
+  | 'getConstitutionsDir'
+  | 'resolveEffectiveModelPins';
+type ConfigLoaders = Required<Pick<CliDeps, ConfigLoaderKey>>;
+
+const DEFAULT_CONFIG_LOADERS: ConfigLoaders = {
+  loadModelsConfig,
+  loadRoutesConfig,
+  loadFactoryConfigForRepo,
+  loadRepoConfig,
+  resolveTimeouts,
+  resolveSkipCI,
+  getConstitutionsDir,
+  resolveEffectiveModelPins,
+};
+
+/** Loaders for the current main() invocation; DEFAULT_CONFIG_LOADERS outside main(). */
+let configLoaders: ConfigLoaders = DEFAULT_CONFIG_LOADERS;
+
+/** Per-field `??` so an explicit `undefined` override falls back instead of replacing the default. */
+function resolveConfigLoaders(overrides: Partial<ConfigLoaders>, base: ConfigLoaders = configLoaders): ConfigLoaders {
+  return {
+    loadModelsConfig: overrides.loadModelsConfig ?? base.loadModelsConfig,
+    loadRoutesConfig: overrides.loadRoutesConfig ?? base.loadRoutesConfig,
+    loadFactoryConfigForRepo: overrides.loadFactoryConfigForRepo ?? base.loadFactoryConfigForRepo,
+    loadRepoConfig: overrides.loadRepoConfig ?? base.loadRepoConfig,
+    resolveTimeouts: overrides.resolveTimeouts ?? base.resolveTimeouts,
+    resolveSkipCI: overrides.resolveSkipCI ?? base.resolveSkipCI,
+    getConstitutionsDir: overrides.getConstitutionsDir ?? base.getConstitutionsDir,
+    resolveEffectiveModelPins: overrides.resolveEffectiveModelPins ?? base.resolveEffectiveModelPins,
+  };
+}
+
 const exec = promisify(execCb);
 type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<unknown>;
 
@@ -463,13 +502,13 @@ async function cmdInit(opts: { force?: boolean } = {}) {
 
   // Constitution scaffold: repo directory basename fills <product-name>/<Product>.
   const repoName = basename(repoRoot);
-  const template = readFileSync(resolve(getConstitutionsDir(), '_template.md'), 'utf-8');
+  const template = readFileSync(resolve(configLoaders.getConstitutionsDir(), '_template.md'), 'utf-8');
   writeIfAbsent(constitutionPath, scaffoldConstitution(template, repoName), '.factory/constitution.md', force);
 
   writeIfAbsent(gitignorePath, 'state/\n', '.factory/.gitignore', force);
 
   // Doctor-style validation (policy=auto, N models reachable) — informational, never fails init.
-  const modelsConfig = applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot));
+  const modelsConfig = applyRepoConfig(configLoaders.loadModelsConfig(), configLoaders.loadRepoConfig(repoRoot));
   const registry = new ModelRegistry(modelsConfig);
   const diagnoses = diagnoseModels(registry, {}, resolveExperimental(), resolveLocalOnly());
   console.log(formatInitReachability(diagnoses));
@@ -549,7 +588,7 @@ export async function runMigrate(
   } else if (rawConfig.version === 2) {
     console.log('config.json already v2');
   } else {
-    const v2 = loadRepoConfig(repoRoot);
+    const v2 = configLoaders.loadRepoConfig(repoRoot);
     if (!v2) throw new Error(`Expected ${paths.config} to exist`);
     const { $schema: _schema, version: _version, ...rest } = v2;
     // loadRepoConfig only returns the model-routing namespace; carry the runtime-policy
@@ -580,12 +619,12 @@ export async function runMigrate(
   const constitutionPath = resolve(paths.root, 'constitution.md');
   if (!existsSync(constitutionPath)) {
     const product = readActiveProduct(paths.product);
-    const productConstitution = product ? resolve(getConstitutionsDir(), `${product}.md`) : undefined;
+    const productConstitution = product ? resolve(configLoaders.getConstitutionsDir(), `${product}.md`) : undefined;
     const content =
       productConstitution && existsSync(productConstitution)
         ? readFileSync(productConstitution, 'utf-8')
         : scaffoldConstitution(
-            readFileSync(resolve(getConstitutionsDir(), '_template.md'), 'utf-8'),
+            readFileSync(resolve(configLoaders.getConstitutionsDir(), '_template.md'), 'utf-8'),
             basename(repoRoot),
           );
     if (dryRun) {
@@ -767,7 +806,7 @@ export async function cmdConstitution(opts: {
     if (existsSync(constitutionPath) && !opts.force) {
       throw new CliExitError('.factory/constitution.md already exists — use --force to overwrite', 1);
     }
-    const template = readFileSync(resolve(getConstitutionsDir(), '_template.md'), 'utf-8');
+    const template = readFileSync(resolve(configLoaders.getConstitutionsDir(), '_template.md'), 'utf-8');
     const content = scaffoldConstitution(template, product ?? basename(repoRoot));
     writeIfAbsent(constitutionPath, content, '.factory/constitution.md', opts.force);
     console.log(`Next: factory constitution --product ${product ?? basename(repoRoot)}`);
@@ -792,7 +831,7 @@ export async function cmdConstitution(opts: {
     if (existsSync(constitutionPath) && !opts.force) {
       throw new CliExitError('.factory/constitution.md already exists — use --force to overwrite', 1);
     }
-    const content = readFileSync(resolve(getConstitutionsDir(), `${opts.product}.md`), 'utf-8');
+    const content = readFileSync(resolve(configLoaders.getConstitutionsDir(), `${opts.product}.md`), 'utf-8');
     writeIfAbsent(constitutionPath, content, '.factory/constitution.md', opts.force);
 
     ensureDir(paths.state);
@@ -835,7 +874,7 @@ function ollamaModelSet(): Set<string> | undefined {
 
 async function cmdModels(opts: { doctor?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
-  const modelsConfig = applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot));
+  const modelsConfig = applyRepoConfig(configLoaders.loadModelsConfig(), configLoaders.loadRepoConfig(repoRoot));
   const { ModelRegistry } = await import('@on-par/factory-core');
   const registry = new ModelRegistry(modelsConfig);
   const allowExperimental = resolveExperimental();
@@ -938,11 +977,11 @@ async function cmdCheck(issueRaw: string, opts: { json?: boolean; deep?: boolean
   let runModel: DeepCheckModelRunner | undefined;
   if (opts.deep) {
     const repoRoot = await getRepoRoot();
-    const repoConfig = loadRepoConfig(repoRoot);
+    const repoConfig = configLoaders.loadRepoConfig(repoRoot);
     const effective = resolveEffectiveConfig(repoConfig);
     const router = new ModelRouter(
-      applyRepoConfig(loadModelsConfig(), repoConfig),
-      loadRoutesConfig(),
+      applyRepoConfig(configLoaders.loadModelsConfig(), repoConfig),
+      configLoaders.loadRoutesConfig(),
       false,
       undefined,
       effective.allowExperimental,
@@ -986,7 +1025,10 @@ async function currentCommitSha(): Promise<string | null> {
 }
 
 function resolvedModelTiers(repoRoot: string, stateRoot?: string): Record<string, string[]> {
-  const modelsConfig = applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot, stateRoot));
+  const modelsConfig = applyRepoConfig(
+    configLoaders.loadModelsConfig(),
+    configLoaders.loadRepoConfig(repoRoot, stateRoot),
+  );
   return modelsConfig.tiers ?? {};
 }
 
@@ -1066,7 +1108,7 @@ async function cmdKpis(opts: { branchPrefix?: string } = {}) {
 
   if (prSources.length > 0) {
     try {
-      const windowDays = resolveDefectWindowDays(loadFactoryConfigForRepo(paths.config));
+      const windowDays = resolveDefectWindowDays(configLoaders.loadFactoryConfigForRepo(paths.config));
       const now = new Date().toISOString();
       const merged = mergedPrRefs(prSources);
       const sources = await fetchDefectSources(getOctokit(), owner, repoName, merged, { now, windowDays });
@@ -1161,7 +1203,7 @@ export async function cmdUsage() {
   const repoRoot = await getRepoRoot();
   let knobs: UsageKnobs;
   try {
-    knobs = resolveUsageKnobs(process.env, loadRepoConfig(repoRoot));
+    knobs = resolveUsageKnobs(process.env, configLoaders.loadRepoConfig(repoRoot));
   } catch (err: any) {
     throw new CliExitError(`factory: ${err.message}`, 2);
   }
@@ -1207,9 +1249,9 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
   const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
 
-  const repoConfig = loadRepoConfig(repoRoot);
-  const modelsConfig = applyRepoConfig(loadModelsConfig(), repoConfig);
-  const routesConfig = loadRoutesConfig();
+  const repoConfig = configLoaders.loadRepoConfig(repoRoot);
+  const modelsConfig = applyRepoConfig(configLoaders.loadModelsConfig(), repoConfig);
+  const routesConfig = configLoaders.loadRoutesConfig();
   const effective = resolveEffectiveConfig(repoConfig);
   const router = new ModelRouter(
     modelsConfig,
@@ -1223,7 +1265,7 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
 
   console.log(styleText('bold', `== ${ghRepo} ==`));
   console.log(`Product: ${product}`);
-  const worktreeParent = loadFactoryConfigForRepo(paths.config).worktree.parent;
+  const worktreeParent = configLoaders.loadFactoryConfigForRepo(paths.config).worktree.parent;
   console.log(
     formatWorktreeLocation(resolveWorktreeRoot({ repoRoot, parent: worktreeParent, repo: ghRepo }), worktreeParent),
   );
@@ -1284,10 +1326,10 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
       router,
       repo: repoConfig,
       repoConfigPath: '.factory/config.json',
-      mergePolicy: resolveMergePolicy(loadFactoryConfigForRepo(paths.config), process.env, {
+      mergePolicy: resolveMergePolicy(configLoaders.loadFactoryConfigForRepo(paths.config), process.env, {
         auto: readRunFlagOverrides(paths.runFlags).autoMerge,
       }),
-      prClassifier: resolvePrClassifierPolicy(loadFactoryConfigForRepo(paths.config), process.env, {
+      prClassifier: resolvePrClassifierPolicy(configLoaders.loadFactoryConfigForRepo(paths.config), process.env, {
         classifier: readRunFlagOverrides(paths.runFlags).prClassifier,
       }),
     })) {
@@ -1309,7 +1351,7 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
 
   console.log(styleText('bold', '\n  Sweep heartbeat:'));
   const sweepStatus = checkSweepHeartbeat(
-    loadFactoryConfigForRepo(paths.config).sweep,
+    configLoaders.loadFactoryConfigForRepo(paths.config).sweep,
     process.env,
     defaultSweepHeartbeatDeps(),
   );
@@ -1397,9 +1439,9 @@ async function cmdTui(opts: { localQueue?: boolean } = {}, runTuiImpl: typeof ru
     // header just omits the repo
   }
 
-  const repoConfig = loadRepoConfig(repoRoot);
-  const modelsConfig = applyRepoConfig(loadModelsConfig(), repoConfig);
-  const routesConfig = loadRoutesConfig();
+  const repoConfig = configLoaders.loadRepoConfig(repoRoot);
+  const modelsConfig = applyRepoConfig(configLoaders.loadModelsConfig(), repoConfig);
+  const routesConfig = configLoaders.loadRoutesConfig();
   const effective = resolveEffectiveConfig(repoConfig);
   const router = new ModelRouter(
     modelsConfig,
@@ -1413,10 +1455,10 @@ async function cmdTui(opts: { localQueue?: boolean } = {}, runTuiImpl: typeof ru
     router,
     repo: repoConfig,
     repoConfigPath: '.factory/config.json',
-    mergePolicy: resolveMergePolicy(loadFactoryConfigForRepo(paths.config), process.env, {
+    mergePolicy: resolveMergePolicy(configLoaders.loadFactoryConfigForRepo(paths.config), process.env, {
       auto: readRunFlagOverrides(paths.runFlags).autoMerge,
     }),
-    prClassifier: resolvePrClassifierPolicy(loadFactoryConfigForRepo(paths.config), process.env, {
+    prClassifier: resolvePrClassifierPolicy(configLoaders.loadFactoryConfigForRepo(paths.config), process.env, {
       classifier: readRunFlagOverrides(paths.runFlags).prClassifier,
     }),
   });
@@ -1624,26 +1666,27 @@ export async function shipIssue(
     /** Benchmark artifact directory (#509) — only set for local-only runs. */
     artifactsDir?: string;
   },
-  deps: Pick<CliDeps, 'octokit' | 'planPhase' | 'buildPhase' | 'checkPhase' | 'shipPhase'> = {},
+  deps: Pick<CliDeps, 'octokit' | 'planPhase' | 'buildPhase' | 'checkPhase' | 'shipPhase' | ConfigLoaderKey> = {},
 ): Promise<string> {
+  const loaders = resolveConfigLoaders(deps);
   const repoRoot = ctx?.repoRoot ?? (await getRepoRoot());
   const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo());
   const paths = ctx?.paths ?? getFactoryPaths(repoRoot);
   const octokit = (deps.octokit ?? getOctokit)();
   const [ghOwner, ghName] = ghRepo.split('/');
 
-  const repoConfig = loadRepoConfig(repoRoot, paths.root);
-  const factoryConfig = loadFactoryConfigForRepo(paths.config);
+  const repoConfig = loaders.loadRepoConfig(repoRoot, paths.root);
+  const factoryConfig = loaders.loadFactoryConfigForRepo(paths.config);
   const classifierPolicy = resolvePrClassifierPolicy(factoryConfig, process.env, { classifier: opts.prClassifier });
-  const timeouts = resolveTimeouts(factoryConfig);
+  const timeouts = loaders.resolveTimeouts(factoryConfig);
   const failoverSettings = resolveAutoFailover(factoryConfig);
   const breaker = new ProviderBreaker(paths.breaker);
   const reworkHistory = new ReworkHistory(paths.reworkHistory);
   const laneFileGuard = new LaneFileGuard(paths.laneFiles);
   const efficiency = resolveEfficiencyPolicy(repoConfig);
   const policy: RunPolicy = {
-    models: applyRepoConfig(loadModelsConfig(), repoConfig),
-    routes: loadRoutesConfig(),
+    models: applyRepoConfig(loaders.loadModelsConfig(), repoConfig),
+    routes: loaders.loadRoutesConfig(),
     sandbox: factoryConfig.sandbox,
     budget: { perIssueCapUsd: efficiency.perIssueCapUsd },
     effective:
@@ -1673,7 +1716,7 @@ export async function shipIssue(
       workspaceBackend: laneWorkspaceBackend,
     });
   });
-  const modelPins = resolveEffectiveModelPins(router.registryRef, repoConfig);
+  const modelPins = loaders.resolveEffectiveModelPins(router.registryRef, repoConfig);
   const codexOff = resolveCodexDisabled(repoConfig);
   const constitutionLoader = new ConstitutionLoader();
 
@@ -1690,7 +1733,7 @@ export async function shipIssue(
   const branch = branchFor(issueNum, issueTitle, policy.effective.branchPrefix);
   const worktree = ctx?.localOnly
     ? ctx.localOnly.workspace
-    : worktreePathFor(repoRoot, ghRepo, issueNum, policy.effective.branchPrefix);
+    : worktreePathFor(repoRoot, ghRepo, issueNum, policy.effective.branchPrefix, loaders);
   const specPath = resolve(paths.plans, `issue-${issueNum}.md`);
   const runStartedAt = new Date().toISOString();
 
@@ -1878,7 +1921,7 @@ export async function shipIssue(
     timeouts,
     modelPins,
     codexDisabled: codexOff,
-    skipCI: resolveSkipCI(factoryConfig),
+    skipCI: loaders.resolveSkipCI(factoryConfig),
     failover: failoverSettings,
     efficiency: { maxReworkRounds: efficiency.maxReworkRounds, fastPath: efficiency.fastPath },
     sandboxPolicy: activeSandboxPolicy,
@@ -2092,7 +2135,7 @@ async function runAutoWorktreeGc(
   eventScope: string | number,
 ): Promise<void> {
   try {
-    const factoryConfig = loadFactoryConfigForRepo(paths.config);
+    const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
     if (!factoryConfig.worktree.autoGcOnRun) return;
     const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
     const gcSandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
@@ -2141,7 +2184,7 @@ export async function sweepBetweenLaneIssues(
   deps: LaneGcDeps = {},
 ): Promise<'disabled' | 'land-in-progress' | 'swept' | 'failed'> {
   const {
-    loadConfig = loadFactoryConfigForRepo,
+    loadConfig = configLoaders.loadFactoryConfigForRepo,
     sweep = sweepWorktrees,
     emitEvent = logEvent,
     octokit = getOctokit,
@@ -2547,7 +2590,9 @@ async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }) 
 
     const preflight = async (): Promise<OvernightPreflightResult> => {
       if (!isCommandAvailable('claude')) return { ok: false, reason: missingClaudeCliMessage() };
-      const registry = new ModelRegistry(applyRepoConfig(loadModelsConfig(), loadRepoConfig(repoRoot)));
+      const registry = new ModelRegistry(
+        applyRepoConfig(configLoaders.loadModelsConfig(), configLoaders.loadRepoConfig(repoRoot)),
+      );
       const ollamaModels = ollamaModelSet();
       const diagnoses = diagnoseModels(
         registry,
@@ -2605,10 +2650,16 @@ async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }) 
   });
 }
 
-function worktreePathFor(repoRoot: string, ghRepo: string, issueNum: number, prefix?: string): string {
+function worktreePathFor(
+  repoRoot: string,
+  ghRepo: string,
+  issueNum: number,
+  prefix?: string,
+  loaders: ConfigLoaders = configLoaders,
+): string {
   return laneWorktreePath({
     repoRoot,
-    parent: loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).worktree.parent,
+    parent: loaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).worktree.parent,
     repo: ghRepo,
     issue: issueNum,
     prefix,
@@ -2673,8 +2724,8 @@ export async function reapParkedLaneWorktree(
   prefixOverride?: string,
 ): Promise<void> {
   try {
-    const factoryConfig = loadFactoryConfigForRepo(paths.config);
-    const branchPrefix = prefixOverride ?? resolveEffectiveConfig(loadRepoConfig(repoRoot)).branchPrefix;
+    const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
+    const branchPrefix = prefixOverride ?? resolveEffectiveConfig(configLoaders.loadRepoConfig(repoRoot)).branchPrefix;
     const worktreePath = worktreePathFor(repoRoot, ghRepo, issue, branchPrefix);
     const log = (type: EventKind, msg: string) => logEvent(paths.events, type, issue, msg);
     const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
@@ -2691,7 +2742,7 @@ export async function reapParkedLaneWorktree(
 export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string; branchPrefix?: string }) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  const factoryConfig = loadFactoryConfigForRepo(paths.config);
+  const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
   const ttlDays = opts.ttlDays !== undefined ? Number(opts.ttlDays) : factoryConfig.worktree.gcTtlDays;
   if (!Number.isFinite(ttlDays) || ttlDays < 0) {
     throw new CliExitError('factory: --ttl-days must be a non-negative number', 2);
@@ -2722,7 +2773,7 @@ export async function cmdReset(
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
-  const sandbox = gcWorktreeSandbox(loadFactoryConfigForRepo(paths.config).sandbox, repoRoot);
+  const sandbox = gcWorktreeSandbox(configLoaders.loadFactoryConfigForRepo(paths.config).sandbox, repoRoot);
   const log = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
   const run = () =>
     runReset(nums, {
@@ -2749,8 +2800,8 @@ export async function cmdLand(issueNum: number, opts: { branchPrefix?: string; a
   const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
   const octokit = getOctokit();
-  const factoryConfig = loadFactoryConfigForRepo(paths.config);
-  const skipCI = resolveSkipCI(factoryConfig);
+  const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
+  const skipCI = configLoaders.resolveSkipCI(factoryConfig);
 
   try {
     const result = await landIssue(issueNum, repoRoot, ghRepo, paths, octokit, skipCI, branchPrefix, {
@@ -2815,7 +2866,7 @@ async function landIssue(
   // branch from the current title first, but fall back to matching the open
   // PR that references this issue directly and use its real head branch.
   // Legacy-prefix (LEGACY_BRANCH_PREFIX) branches are guessed too, after the resolved prefix (#1708).
-  const resolved = branchPrefix ?? resolveEffectiveConfig(loadRepoConfig(repoRoot)).branchPrefix;
+  const resolved = branchPrefix ?? resolveEffectiveConfig(configLoaders.loadRepoConfig(repoRoot)).branchPrefix;
   const title = await getIssueTitle(ghRepo, issueNum, octokit);
   const guesses = factoryBranchPrefixes(resolved).map((p) => branchFor(issueNum, title, p));
   const guessedBranch = guesses[0];
@@ -2852,7 +2903,7 @@ async function landIssue(
     throw new LandFailureError(`no open PR for issue #${issueNum} (${guessedBranch})`, 1);
   }
 
-  const landFactoryConfig = loadFactoryConfigForRepo(paths.config);
+  const landFactoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
   // Every merge path honors the no-auto-merge gate on the issue and on the PR; unreadable labels fail closed (#1720).
   const filingPolicy = resolveFilingPolicy(landFactoryConfig);
   const gateLabel = filingPolicy.selfFixLabel;
@@ -2958,9 +3009,9 @@ async function cmdTriage(opts: { product?: string }) {
   }
   const product = opts.product ?? readActiveProduct(paths.product);
 
-  const repoConfig = loadRepoConfig(repoRoot);
-  const modelsConfig = applyRepoConfig(loadModelsConfig(), repoConfig);
-  const routesConfig = loadRoutesConfig();
+  const repoConfig = configLoaders.loadRepoConfig(repoRoot);
+  const modelsConfig = applyRepoConfig(configLoaders.loadModelsConfig(), repoConfig);
+  const routesConfig = configLoaders.loadRoutesConfig();
   const effective = resolveEffectiveConfig(repoConfig);
   const router = new ModelRouter(
     modelsConfig,
@@ -3240,7 +3291,7 @@ export async function startLaneProxy(
 async function cmdProxy() {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  const factoryConfig = loadFactoryConfigForRepo(paths.config);
+  const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
   const settings = resolveEnvironmentProxy(factoryConfig);
 
   if (!settings.enabled) {
@@ -3393,7 +3444,7 @@ async function cmdRun(
     }
     writeRunFlagOverrides(paths.runFlags, { autoMerge: opts.autoMerge, prClassifier: opts.prClassifier });
     const ghRepo = await getGitHubRepo();
-    const factoryConfig = loadFactoryConfigForRepo(paths.config);
+    const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
     const keychainErr = keychainPreflightError(probeClaudeKeychain());
     if (keychainErr) {
       logEvent(paths.events, 'environment_warning', 'all', keychainErr);
@@ -3428,8 +3479,12 @@ async function cmdRun(
     let knobs: UsageKnobs;
     let laneBreakerThreshold: number;
     try {
-      knobs = resolveUsageKnobs(process.env, loadRepoConfig(repoRoot), usageFlagOverrides(opts, 'stopAt'));
-      laneBreakerThreshold = resolveLaneBreakerThreshold(loadRepoConfig(repoRoot));
+      knobs = resolveUsageKnobs(
+        process.env,
+        configLoaders.loadRepoConfig(repoRoot),
+        usageFlagOverrides(opts, 'stopAt'),
+      );
+      laneBreakerThreshold = resolveLaneBreakerThreshold(configLoaders.loadRepoConfig(repoRoot));
     } catch (err: any) {
       throw new CliExitError(`factory: ${err.message}`, 2);
     }
@@ -3635,7 +3690,7 @@ async function cmdSupervise(opts: {
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  const ingestCfg = resolveIngestConfig(loadFactoryConfigForRepo(paths.config));
+  const ingestCfg = resolveIngestConfig(configLoaders.loadFactoryConfigForRepo(paths.config));
 
   const countPending = async (): Promise<number> => {
     if (opts.localQueue === true) {
@@ -3657,7 +3712,11 @@ async function cmdSupervise(opts: {
 
   let knobs: UsageKnobs;
   try {
-    knobs = resolveUsageKnobs(process.env, loadRepoConfig(repoRoot), usageFlagOverrides(opts, 'resumeAt'));
+    knobs = resolveUsageKnobs(
+      process.env,
+      configLoaders.loadRepoConfig(repoRoot),
+      usageFlagOverrides(opts, 'resumeAt'),
+    );
   } catch (err: any) {
     throw new CliExitError(`factory: ${err.message}`, 2);
   }
@@ -4527,7 +4586,7 @@ export async function sweepApprovedPRs(
 }> {
   const {
     createOctokit = getOctokit,
-    loadConfig = loadFactoryConfigForRepo,
+    loadConfig = configLoaders.loadFactoryConfigForRepo,
     listPRs = listOpenFactoryPRs,
     land = landIssue,
     emitEvent = logEvent,
@@ -4536,7 +4595,7 @@ export async function sweepApprovedPRs(
 
   const [owner, repoName] = ghRepo.split('/');
   const octokit = createOctokit();
-  const skipCI = resolveSkipCI(loadConfig(paths.config));
+  const skipCI = configLoaders.resolveSkipCI(loadConfig(paths.config));
   const prs = await listPRs(octokit, owner, repoName, opts.branchPrefix);
 
   const landed: number[] = [];
@@ -4668,7 +4727,7 @@ export async function waitForMerge(
     createOctokit = getOctokit,
     pathExists = existsSync,
     checkMerged = isPrMerged,
-    loadConfig = loadFactoryConfigForRepo,
+    loadConfig = configLoaders.loadFactoryConfigForRepo,
     land = landIssue,
     listIssueLabels = defaultListIssueLabels,
     sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
@@ -4680,7 +4739,7 @@ export async function waitForMerge(
   } = deps;
   const factoryConfig = loadConfig(paths.config);
   const isMergeEnabled = mergeEnabled ?? (() => resolveMergePolicy(factoryConfig, process.env, mergeOverrides).auto);
-  const skipCI = resolveSkipCI(factoryConfig);
+  const skipCI = configLoaders.resolveSkipCI(factoryConfig);
   const filingPolicy = resolveFilingPolicy(factoryConfig);
   const octokit = createOctokit();
   const [owner, repoName] = ghRepo.split('/');
@@ -4974,7 +5033,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     const policy =
       repoRoot === null
         ? undefined
-        : resolveSandboxPolicy(loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox, {
+        : resolveSandboxPolicy(configLoaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox, {
             worktree: repoRoot,
             repoRoot,
           });
@@ -4998,7 +5057,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
 
   if (repoRoot !== null) {
     const paths = getFactoryPaths(repoRoot);
-    const factoryConfig = loadFactoryConfigForRepo(paths.config);
+    const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
     const health = await inspectPortLeases({ registryFile: paths.ports });
     checks.push(...leaseChecks(health.map(toLeaseRow)));
 
@@ -5111,6 +5170,15 @@ export interface CliDeps {
   buildPhase?: RunPorts['buildPhase'];
   checkPhase?: RunPorts['checkPhase'];
   shipPhase?: RunPorts['shipPhase'];
+  /** Config loaders and resolvers. Each defaults to the factory-core export of the same name. */
+  loadModelsConfig?: typeof loadModelsConfig;
+  loadRoutesConfig?: typeof loadRoutesConfig;
+  loadFactoryConfigForRepo?: typeof loadFactoryConfigForRepo;
+  loadRepoConfig?: typeof loadRepoConfig;
+  resolveTimeouts?: typeof resolveTimeouts;
+  resolveSkipCI?: typeof resolveSkipCI;
+  getConstitutionsDir?: typeof getConstitutionsDir;
+  resolveEffectiveModelPins?: typeof resolveEffectiveModelPins;
 }
 
 // ---------- main ----------
@@ -5627,6 +5695,8 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
 
   applyHelpGroups(program);
 
+  const previousLoaders = configLoaders;
+  configLoaders = resolveConfigLoaders(deps, DEFAULT_CONFIG_LOADERS);
   try {
     await program.parseAsync(argv);
   } catch (err) {
@@ -5636,5 +5706,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
       return;
     }
     throw err;
+  } finally {
+    configLoaders = previousLoaders;
   }
 }
