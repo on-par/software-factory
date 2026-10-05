@@ -7,7 +7,7 @@ import { resolve } from 'node:path';
 import type { CostEntry } from '../types/index.js';
 import { claudeConfigDirOverride } from '../utils/claude-config.js';
 import { logEvent } from '../utils/index.js';
-import type { SubscriptionUsage } from './subscription.js';
+import type { SubscriptionUsage, SubscriptionUsageDeps } from './subscription.js';
 import { fetchSubscriptionUsage } from './subscription.js';
 
 export const TRAILING_WINDOW_MS = 5 * 60 * 60 * 1000;
@@ -120,6 +120,10 @@ export interface ReadUsageOptions {
   estimator: boolean;
   fetchSubscription?: () => Promise<SubscriptionUsage | null>;
   estimateSpend?: () => number;
+  /** Deps for the default fetchSubscription (ignored when fetchSubscription is injected). */
+  subscription?: SubscriptionUsageDeps;
+  /** Home dir for the default estimator's transcript roots (ignored when estimateSpend is injected). */
+  home?: string;
 }
 
 /**
@@ -132,8 +136,11 @@ export async function readUsage(opts: ReadUsageOptions): Promise<UsageReading | 
   const {
     cap,
     estimator,
-    fetchSubscription = fetchSubscriptionUsage,
-    estimateSpend = () => estimateTrailingSpend(),
+    subscription: subscriptionDeps,
+    home,
+    fetchSubscription = () => fetchSubscriptionUsage(subscriptionDeps),
+    estimateSpend = () =>
+      estimateTrailingSpend(home === undefined ? {} : { roots: defaultTranscriptRoots(process.env, home) }),
   } = opts;
 
   const subscription = await fetchSubscription();
@@ -160,6 +167,10 @@ export interface WatchUsageOptions {
   eventsFile: string;
   signal?: AbortSignal;
   estimator?: boolean;
+  /** Forwarded to the default readUsageFn (ignored when readUsageFn is injected). */
+  subscription?: SubscriptionUsageDeps;
+  /** Forwarded to the default readUsageFn (ignored when readUsageFn is injected). */
+  home?: string;
   readUsageFn?: () => Promise<UsageReading | null>;
   emitEvent?: typeof logEvent;
   setStop?: (file: string) => void;
@@ -189,7 +200,9 @@ export async function watchUsage(opts: WatchUsageOptions): Promise<'stopped' | '
     eventsFile,
     signal,
     estimator = false,
-    readUsageFn = () => readUsage({ cap, estimator }),
+    subscription,
+    home,
+    readUsageFn = () => readUsage({ cap, estimator, subscription, home }),
     emitEvent = logEvent,
     setStop = (file: string) => writeFileSync(file, ''),
     sleep: wait = sleep,
