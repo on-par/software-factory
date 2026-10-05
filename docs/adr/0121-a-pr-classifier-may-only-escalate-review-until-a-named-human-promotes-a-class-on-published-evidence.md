@@ -94,3 +94,8 @@ Negative or accepted costs:
 - The model may be dropped entirely.
 
 Out of scope here: any Class A categories beyond docs-only and tests-only. Each later addition is its own human-merged policy PR.
+
+## Related
+
+- [ADR-0144](0144-merges-follow-a-t0-t1-t2-trust-tier-ladder-where-t0-human-merge-is-the-default-and-sensitive-paths-or-classifier-errors-fail-closed-to-t0.md) defines the T0/T1/T2 merge trust tiers and how this ADR's classes
+  combine with path rules to decide merge eligibility.
