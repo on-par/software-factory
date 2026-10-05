@@ -353,6 +353,23 @@ function resolveConfigLoaders(overrides: Partial<ConfigLoaders>, base: ConfigLoa
   };
 }
 
+type GitOpKey = 'setupWorktree' | 'cleanupWorktree' | 'gitFetch';
+type GitOps = Required<Pick<CliDeps, GitOpKey>>;
+
+const DEFAULT_GIT_OPS: GitOps = { setupWorktree, cleanupWorktree, gitFetch };
+
+/** Git worktree/fetch ops for the current main() or cmdLand invocation; DEFAULT_GIT_OPS outside them. */
+let gitOps: GitOps = DEFAULT_GIT_OPS;
+
+/** Per-field `??` so an explicit `undefined` override falls back instead of replacing the default. */
+function resolveGitOps(overrides: Partial<GitOps>, base: GitOps = gitOps): GitOps {
+  return {
+    setupWorktree: overrides.setupWorktree ?? base.setupWorktree,
+    cleanupWorktree: overrides.cleanupWorktree ?? base.cleanupWorktree,
+    gitFetch: overrides.gitFetch ?? base.gitFetch,
+  };
+}
+
 const exec = promisify(execCb);
 type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<unknown>;
 
@@ -1666,9 +1683,13 @@ export async function shipIssue(
     /** Benchmark artifact directory (#509) — only set for local-only runs. */
     artifactsDir?: string;
   },
-  deps: Pick<CliDeps, 'octokit' | 'planPhase' | 'buildPhase' | 'checkPhase' | 'shipPhase' | ConfigLoaderKey> = {},
+  deps: Pick<
+    CliDeps,
+    'octokit' | 'planPhase' | 'buildPhase' | 'checkPhase' | 'shipPhase' | ConfigLoaderKey | GitOpKey
+  > = {},
 ): Promise<string> {
   const loaders = resolveConfigLoaders(deps);
+  const git = resolveGitOps(deps);
   const repoRoot = ctx?.repoRoot ?? (await getRepoRoot());
   const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo());
   const paths = ctx?.paths ?? getFactoryPaths(repoRoot);
@@ -1856,7 +1877,7 @@ export async function shipIssue(
             paths.gitLock,
             // setupWorktree fetches origin itself before creating the worktree (#1167),
             // so no explicit gitFetch here — still under the git + file locks.
-            () => setupWorktree(root, br, wt, sp, sandbox, setupLog, setupOpts),
+            () => git.setupWorktree(root, br, wt, sp, sandbox, setupLog, setupOpts),
             { onSteal: (pid) => log('lock-stolen', `stole ${paths.gitLock} from dead holder pid ${pid ?? 'unknown'}`) },
           ),
         ),
@@ -2782,7 +2803,7 @@ export async function cmdReset(
       paths,
       branchPrefix,
       git: (cmd) => exec(cmd, { cwd: repoRoot }).then((r) => r.stdout),
-      removeWorktree: (p) => cleanupWorktree(repoRoot, p, log, sandbox),
+      removeWorktree: (p) => gitOps.cleanupWorktree(repoRoot, p, log, sandbox),
       readLeases: () => readPortLeases(paths.ports),
       releaseLease: (id) => releasePortLease({ registryFile: paths.ports, lockDir: paths.portsLock, worktreeId: id }),
       runCommand: (cmd, o) => exec(cmd, { cwd: o?.cwd ?? repoRoot }).then((r) => ({ stdout: r.stdout })),
@@ -2794,14 +2815,16 @@ export async function cmdReset(
   for (const line of lines) console.log(line);
 }
 
-/** deps overrides the config loaders for this call, like shipIssue. */
+/** deps overrides the config loaders and git ops for this call, like shipIssue. */
 export async function cmdLand(
   issueNum: number,
   opts: { branchPrefix?: string; allowGated?: boolean } = {},
-  deps: Pick<CliDeps, ConfigLoaderKey> = {},
+  deps: Pick<CliDeps, ConfigLoaderKey | GitOpKey> = {},
 ) {
   const previousLoaders = configLoaders;
+  const previousGitOps = gitOps;
   configLoaders = resolveConfigLoaders(deps);
+  gitOps = resolveGitOps(deps);
   try {
     const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
     const repoRoot = await getRepoRoot();
@@ -2854,6 +2877,7 @@ export async function cmdLand(
     }
   } finally {
     configLoaders = previousLoaders;
+    gitOps = previousGitOps;
   }
 }
 
@@ -2895,7 +2919,7 @@ async function landIssue(
       }
       return undefined;
     };
-    [, prNumber] = await Promise.all([gitFetch(repoRoot), findByGuess()]);
+    [, prNumber] = await Promise.all([gitOps.gitFetch(repoRoot), findByGuess()]);
     if (!prNumber) {
       const fallback = await findOpenPRForIssue(octokit, owner, repoName, issueNum);
       if (fallback) {
@@ -2985,18 +3009,18 @@ async function landIssue(
         withLock: withLandLock,
         ensureWorktree: async () => {
           if (!existsSync(worktree)) {
-            await setupWorktree(repoRoot, branch, worktree, `origin/${branch}`, worktreeSandbox, log);
+            await gitOps.setupWorktree(repoRoot, branch, worktree, `origin/${branch}`, worktreeSandbox, log);
           }
         },
       });
     } catch (err) {
       if (err instanceof AwaitingReviewError || err instanceof CiFailedError) {
-        await withLandLock(() => cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
+        await withLandLock(() => gitOps.cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
       }
       throw err;
     }
     log('merged', `squash-merged PR #${prNumber}`);
-    await withLandLock(() => cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
+    await withLandLock(() => gitOps.cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
   } catch (err: any) {
     if (err instanceof LandConflictError || err instanceof AwaitingReviewError || err instanceof CiFailedError)
       throw err;
@@ -5190,6 +5214,10 @@ export interface CliDeps {
   resolveSkipCI?: typeof resolveSkipCI;
   getConstitutionsDir?: typeof getConstitutionsDir;
   resolveEffectiveModelPins?: typeof resolveEffectiveModelPins;
+  /** Git worktree/fetch side effects. Each defaults to the factory-core export of the same name. */
+  setupWorktree?: typeof setupWorktree;
+  cleanupWorktree?: typeof cleanupWorktree;
+  gitFetch?: typeof gitFetch;
 }
 
 // ---------- main ----------
@@ -5707,7 +5735,9 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
   applyHelpGroups(program);
 
   const previousLoaders = configLoaders;
+  const previousGitOps = gitOps;
   configLoaders = resolveConfigLoaders(deps, DEFAULT_CONFIG_LOADERS);
+  gitOps = resolveGitOps(deps, DEFAULT_GIT_OPS);
   try {
     await program.parseAsync(argv);
   } catch (err) {
@@ -5719,5 +5749,6 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     throw err;
   } finally {
     configLoaders = previousLoaders;
+    gitOps = previousGitOps;
   }
 }
