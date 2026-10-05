@@ -370,6 +370,54 @@ function resolveGitOps(overrides: Partial<GitOps>, base: GitOps = gitOps): GitOp
   };
 }
 
+type InternalOpKey =
+  | 'watchChecks'
+  | 'createLocalSmallDryRun'
+  | 'readCosts'
+  | 'sweepWorktrees'
+  | 'releaseStaleClaims'
+  | 'findUnmergedGreenPrs'
+  | 'listOrphanContainers'
+  | 'reapOrphanContainers'
+  | 'listMicroVms'
+  | 'reapOrphanMicroVm'
+  | 'formatGcReport';
+type InternalOps = Required<Pick<CliDeps, InternalOpKey>>;
+
+const DEFAULT_INTERNAL_OPS: InternalOps = {
+  watchChecks,
+  createLocalSmallDryRun,
+  readCosts,
+  sweepWorktrees,
+  releaseStaleClaims,
+  findUnmergedGreenPrs,
+  listOrphanContainers,
+  reapOrphanContainers,
+  listMicroVms,
+  reapOrphanMicroVm,
+  formatGcReport,
+};
+
+/** factory-core/internal ops for the current main() or cmdLand invocation; DEFAULT_INTERNAL_OPS outside them. */
+let internalOps: InternalOps = DEFAULT_INTERNAL_OPS;
+
+/** Per-field `??` so an explicit `undefined` override falls back instead of replacing the default. */
+function resolveInternalOps(overrides: Partial<InternalOps>, base: InternalOps = internalOps): InternalOps {
+  return {
+    watchChecks: overrides.watchChecks ?? base.watchChecks,
+    createLocalSmallDryRun: overrides.createLocalSmallDryRun ?? base.createLocalSmallDryRun,
+    readCosts: overrides.readCosts ?? base.readCosts,
+    sweepWorktrees: overrides.sweepWorktrees ?? base.sweepWorktrees,
+    releaseStaleClaims: overrides.releaseStaleClaims ?? base.releaseStaleClaims,
+    findUnmergedGreenPrs: overrides.findUnmergedGreenPrs ?? base.findUnmergedGreenPrs,
+    listOrphanContainers: overrides.listOrphanContainers ?? base.listOrphanContainers,
+    reapOrphanContainers: overrides.reapOrphanContainers ?? base.reapOrphanContainers,
+    listMicroVms: overrides.listMicroVms ?? base.listMicroVms,
+    reapOrphanMicroVm: overrides.reapOrphanMicroVm ?? base.reapOrphanMicroVm,
+    formatGcReport: overrides.formatGcReport ?? base.formatGcReport,
+  };
+}
+
 const exec = promisify(execCb);
 type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<unknown>;
 
@@ -935,7 +983,7 @@ async function cmdModels(opts: { doctor?: boolean } = {}) {
 async function cmdCost(opts: { issue?: string } = {}) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  const costs = readCosts(paths.costs);
+  const costs = internalOps.readCosts(paths.costs);
 
   if (opts.issue) {
     const filtered = costs.filter((c) => c.issue === String(opts.issue));
@@ -1102,7 +1150,7 @@ async function cmdKpis(opts: { branchPrefix?: string } = {}) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   const events = existsSync(paths.events) ? readEvents(paths.events) : [];
-  const costs = existsSync(paths.costs) ? readCosts(paths.costs) : [];
+  const costs = existsSync(paths.costs) ? internalOps.readCosts(paths.costs) : [];
 
   let allEvents = events;
   let prSources: PrSource[] = [];
@@ -1390,7 +1438,7 @@ export async function cmdStatus(opts: { kpis?: boolean } = {}) {
   if (opts.kpis) {
     console.log(styleText('bold', '\n  KPIs:'));
     const kpiEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
-    const kpiCosts = existsSync(paths.costs) ? readCosts(paths.costs) : [];
+    const kpiCosts = existsSync(paths.costs) ? internalOps.readCosts(paths.costs) : [];
     for (const line of formatKpiLines(computeHealthKpis(kpiEvents, kpiCosts))) {
       console.log(`    ${line}`);
     }
@@ -2162,7 +2210,7 @@ async function runAutoWorktreeGc(
     const gcSandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
     const report = await withGitLock(repoRoot, () =>
       withFileLock(paths.gitLock, () =>
-        sweepWorktrees(
+        internalOps.sweepWorktrees(
           {
             repoRoot,
             ttlDays: factoryConfig.worktree.gcTtlDays,
@@ -2179,7 +2227,7 @@ async function runAutoWorktreeGc(
       eventScope,
       `removed ${report.removed.length} stale worktree(s), kept ${report.kept}`,
     );
-    console.log(formatGcReport(report));
+    console.log(internalOps.formatGcReport(report));
   } catch (err: any) {
     logEvent(paths.events, 'warn', eventScope, `worktree gc failed: ${err.message}`);
   }
@@ -2206,7 +2254,7 @@ export async function sweepBetweenLaneIssues(
 ): Promise<'disabled' | 'land-in-progress' | 'swept' | 'failed'> {
   const {
     loadConfig = configLoaders.loadFactoryConfigForRepo,
-    sweep = sweepWorktrees,
+    sweep = internalOps.sweepWorktrees,
     emitEvent = logEvent,
     octokit = getOctokit,
   } = deps;
@@ -2236,7 +2284,7 @@ export async function sweepBetweenLaneIssues(
         `removed ${report.removed.length} stale worktree(s), kept ${report.kept}`,
         { lane },
       );
-      console.log(formatGcReport(report));
+      console.log(internalOps.formatGcReport(report));
     }
     return 'swept';
   } catch (err: any) {
@@ -2573,7 +2621,7 @@ async function cmdLocalSmallDryRun(issueNum: number, opts: { spec?: string; outp
   const outputDir = resolve(repoRoot, opts.output ?? resolve(paths.state, 'local-small', `issue-${issueNum}`));
   const { data: issue } = await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issueNum });
 
-  const result = await createLocalSmallDryRun({
+  const result = await internalOps.createLocalSmallDryRun({
     issue: issueNum,
     issueTitle: issue.title,
     issueBody: issue.body ?? '',
@@ -2775,9 +2823,12 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string; 
   const octokit = ghRepo ? (hasGitHubToken() ? getOctokit() : undefined) : undefined;
   const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
   const run = () =>
-    sweepWorktrees({ repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo, branchPrefix }, { log, octokit, sandbox });
+    internalOps.sweepWorktrees(
+      { repoRoot, ttlDays, dryRun: opts.dryRun, repo: ghRepo, branchPrefix },
+      { log, octokit, sandbox },
+    );
   const report = opts.dryRun ? await run() : await withGitLock(repoRoot, () => withFileLock(paths.gitLock, run));
-  console.log(formatGcReport(report));
+  console.log(internalOps.formatGcReport(report));
 }
 
 /** `factory reset <issue...>` (#1787): wipes an issue's local state; see reset.ts. */
@@ -2815,16 +2866,18 @@ export async function cmdReset(
   for (const line of lines) console.log(line);
 }
 
-/** deps overrides the config loaders and git ops for this call, like shipIssue. */
+/** deps overrides the config loaders, git ops and internal ops for this call, like shipIssue. */
 export async function cmdLand(
   issueNum: number,
   opts: { branchPrefix?: string; allowGated?: boolean } = {},
-  deps: Pick<CliDeps, ConfigLoaderKey | GitOpKey> = {},
+  deps: Pick<CliDeps, ConfigLoaderKey | GitOpKey | InternalOpKey> = {},
 ) {
   const previousLoaders = configLoaders;
   const previousGitOps = gitOps;
+  const previousInternalOps = internalOps;
   configLoaders = resolveConfigLoaders(deps);
   gitOps = resolveGitOps(deps);
+  internalOps = resolveInternalOps(deps);
   try {
     const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
     const repoRoot = await getRepoRoot();
@@ -2878,6 +2931,7 @@ export async function cmdLand(
   } finally {
     configLoaders = previousLoaders;
     gitOps = previousGitOps;
+    internalOps = previousInternalOps;
   }
 }
 
@@ -3632,7 +3686,7 @@ async function cmdRun(
     if (lanes.length > 0) {
       try {
         const events = existsSync(paths.events) ? readEvents(paths.events) : [];
-        const costs = existsSync(paths.costs) ? readCosts(paths.costs) : [];
+        const costs = existsSync(paths.costs) ? internalOps.readCosts(paths.costs) : [];
         const kpis = computeHealthKpis(events, costs);
         await appendKpiSnapshot(paths, repoRoot, kpis);
         logEvent(paths.events, 'kpi-snapshot', 'all', `KPI snapshot appended to ${paths.kpiHistory}`);
@@ -3854,7 +3908,7 @@ export function createQueuePreflightOps(octokit: Octokit, owner: string, repo: s
     expectedHeadRepoFullName: `${owner}/${repo}`,
     findOpenPR: (issue) => findOpenPRForIssue(octokit, owner, repo, issue),
     getLandState: (prNumber) => getPullRequestLandState(octokit, owner, repo, prNumber),
-    watch: (ref) => watchChecks({ octokit, owner, repo, ref }),
+    watch: (ref) => internalOps.watchChecks({ octokit, owner, repo, ref }),
   };
 }
 
@@ -4454,7 +4508,7 @@ export async function landOpenPullRequest(opts: {
     sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
     skipCI = false,
     adminMerge = process.env.FACTORY_MERGE_ADMIN === '1',
-    watch = watchChecks,
+    watch = internalOps.watchChecks,
     withLock = (fn) => fn(),
     ensureWorktree,
   } = opts;
@@ -4997,7 +5051,11 @@ async function scanGreenPrs(ghRepo: string | undefined, octokit: Octokit | undef
   if (!ghRepo || !octokit) return { status: 'skipped', detail: 'skipped — no GitHub repo or token' };
   const [owner, repoName] = ghRepo.split('/');
   try {
-    const prs = await findUnmergedGreenPrs({ client: createOctokitGreenPrClient(octokit), owner, repo: repoName });
+    const prs = await internalOps.findUnmergedGreenPrs({
+      client: createOctokitGreenPrClient(octokit),
+      owner,
+      repo: repoName,
+    });
     return { status: 'ok', rows: prs.map(toGreenPrRow) };
   } catch (err: any) {
     return { status: 'failed', detail: err?.message ?? String(err) };
@@ -5097,12 +5155,12 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     checks.push(...leaseChecks(health.map(toLeaseRow)));
 
     const dockerAvailable = isCommandAvailable('docker');
-    const orphanContainers = dockerAvailable ? await listOrphanContainers().catch(() => []) : [];
+    const orphanContainers = dockerAvailable ? await internalOps.listOrphanContainers().catch(() => []) : [];
     checks.push(...orphanContainerChecks(orphanContainers.map((c) => c.name)));
 
     const sbxAvailable = isCommandAvailable('sbx');
     const activeVmNames = new Set(health.filter((h) => h.alive).map((h) => microVmName(h.lease.worktreeId)));
-    const orphanVmNames = sbxAvailable ? (await listMicroVms()).filter((n) => !activeVmNames.has(n)) : [];
+    const orphanVmNames = sbxAvailable ? (await internalOps.listMicroVms()).filter((n) => !activeVmNames.has(n)) : [];
     checks.push(...orphanMicroVmChecks(orphanVmNames));
 
     const sweepStatus = checkSweepHeartbeat(factoryConfig.sweep, process.env, defaultSweepHeartbeatDeps());
@@ -5125,12 +5183,12 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
 
     if (opts.reconcile) {
       if (orphanContainers.length > 0) {
-        const reapedContainers = await reapOrphanContainers(orphanContainers);
+        const reapedContainers = await internalOps.reapOrphanContainers(orphanContainers);
         console.log(formatContainerReconcileReport(reapedContainers));
       }
 
       if (orphanVmNames.length > 0) {
-        const reapedVms = await Promise.all(orphanVmNames.map((name) => reapOrphanMicroVm(name)));
+        const reapedVms = await Promise.all(orphanVmNames.map((name) => internalOps.reapOrphanMicroVm(name)));
         console.log(formatMicroVmReconcileReport(reapedVms));
       }
 
@@ -5152,7 +5210,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
         const gcSandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
-            sweepWorktrees(
+            internalOps.sweepWorktrees(
               {
                 repoRoot,
                 ttlDays: factoryConfig.worktree.gcTtlDays,
@@ -5173,7 +5231,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
       try {
         if (ghRepo && octokit) {
           const [owner, repoName] = ghRepo.split('/');
-          const released = await releaseStaleClaims({
+          const released = await internalOps.releaseStaleClaims({
             client: createOctokitQueueClient(octokit),
             owner,
             repo: repoName,
@@ -5218,6 +5276,18 @@ export interface CliDeps {
   setupWorktree?: typeof setupWorktree;
   cleanupWorktree?: typeof cleanupWorktree;
   gitFetch?: typeof gitFetch;
+  /** factory-core/internal ops (CI watch, costs, worktree GC, reconcile reaps, local-small). Each defaults to the export of the same name. */
+  watchChecks?: typeof watchChecks;
+  createLocalSmallDryRun?: typeof createLocalSmallDryRun;
+  readCosts?: typeof readCosts;
+  sweepWorktrees?: typeof sweepWorktrees;
+  releaseStaleClaims?: typeof releaseStaleClaims;
+  findUnmergedGreenPrs?: typeof findUnmergedGreenPrs;
+  listOrphanContainers?: typeof listOrphanContainers;
+  reapOrphanContainers?: typeof reapOrphanContainers;
+  listMicroVms?: typeof listMicroVms;
+  reapOrphanMicroVm?: typeof reapOrphanMicroVm;
+  formatGcReport?: typeof formatGcReport;
 }
 
 // ---------- main ----------
@@ -5736,8 +5806,10 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
 
   const previousLoaders = configLoaders;
   const previousGitOps = gitOps;
+  const previousInternalOps = internalOps;
   configLoaders = resolveConfigLoaders(deps, DEFAULT_CONFIG_LOADERS);
   gitOps = resolveGitOps(deps, DEFAULT_GIT_OPS);
+  internalOps = resolveInternalOps(deps, DEFAULT_INTERNAL_OPS);
   try {
     await program.parseAsync(argv);
   } catch (err) {
@@ -5750,5 +5822,6 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
   } finally {
     configLoaders = previousLoaders;
     gitOps = previousGitOps;
+    internalOps = previousInternalOps;
   }
 }
