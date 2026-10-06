@@ -5988,7 +5988,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .option('--run-children', 'When the size gate decomposes the issue, run the child issues it filed')
     .option(
       '--size-gate <mode>',
-      'Size gate mode for this run: file (file child issues / park) or off (skip both gates); beats sizeGate.mode in the config',
+      'Size gate mode for this run: file (file child issues / park), slice (ship as sequential slice PRs) or off (skip both gates); beats sizeGate.mode in the config',
     )
     .action(async (issueNum, opts) => {
       await cmdRunIssue(parseIssueArg(issueNum), opts);

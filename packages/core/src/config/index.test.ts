@@ -912,7 +912,12 @@ describe('resolveSizeGateMode (#2048)', () => {
     expect(resolveSizeGateMode({ ...config, sizeGate: { mode: 'off' } })).toBe('off');
   });
 
-  it.each(['slice', 'OFF', ' off ', ''])('resolves unknown mode %j to file', (mode) => {
+  it('resolves slice', () => {
+    const config = loadFactoryConfig();
+    expect(resolveSizeGateMode({ ...config, sizeGate: { mode: 'slice' } })).toBe('slice');
+  });
+
+  it.each(['SLICE', 'OFF', ' off ', ''])('resolves unknown mode %j to file', (mode) => {
     const config = loadFactoryConfig();
     expect(resolveSizeGateMode({ ...config, sizeGate: { mode } })).toBe('file');
   });
@@ -932,8 +937,9 @@ describe('resolveSizeGateMode (#2048)', () => {
 });
 
 describe('parseSizeGateMode (#2048)', () => {
-  it('passes file and off through', () => {
+  it('passes file, slice and off through', () => {
     expect(parseSizeGateMode('file')).toBe('file');
+    expect(parseSizeGateMode('slice')).toBe('slice');
     expect(parseSizeGateMode('off')).toBe('off');
   });
 

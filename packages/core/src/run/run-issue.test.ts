@@ -250,10 +250,12 @@ describe('runIssue — size gate mode (#2048)', () => {
   it.each([
     [undefined, true],
     ['file', true],
+    ['slice', true],
     ['off', false],
   ] as const)('sizeGateMode %s -> enforceSizeGate %s', async (mode, expected) => {
     await runIssue(baseRequest({ sizeGateMode: mode }), basePolicy(), basePorts());
     expect(vi.mocked(planPhase).mock.calls[0][0].enforceSizeGate).toBe(expected);
+    expect(vi.mocked(planPhase).mock.calls[0][0].sizeGateMode).toBe(mode);
   });
 });
 

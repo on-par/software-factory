@@ -4120,6 +4120,17 @@ bash scripts/verify.sh
         expect(enforced()).toBe(true);
       });
 
+      it('--size-gate slice passes sizeGateMode slice to planPhase', async () => {
+        await runMain('run-issue', '5', '--size-gate', 'slice');
+        expect(phases.planPhase.mock.calls.at(-1)?.[0].sizeGateMode).toBe('slice');
+      });
+
+      it('sizeGate.mode slice in the config passes sizeGateMode slice to planPhase', async () => {
+        h.factoryConfig = { ...h.factoryConfig, sizeGate: { mode: 'slice' } };
+        await runMain('run-issue', '5');
+        expect(phases.planPhase.mock.calls.at(-1)?.[0].sizeGateMode).toBe('slice');
+      });
+
       it('rejects an unknown mode with exit 2 before planning', async () => {
         const res = await runMain('run-issue', '5', '--size-gate', 'bogus');
         expect(res).toMatchObject({ exited: true, code: 2 });
@@ -4142,6 +4153,7 @@ bash scripts/verify.sh
           process.stdout.write = originalWrite;
         }
         expect(written.join('')).toContain('--size-gate');
+        expect(written.join('')).toContain('slice');
       });
     });
 
