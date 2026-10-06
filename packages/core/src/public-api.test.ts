@@ -445,6 +445,7 @@ const INTERNAL_API_KEYS = [
   'runClassifierBacktest',
   'selectBacktestPrs',
   // PR classifier routing (#1724)
+  'classifiedRecords',
   'classifierGateReason',
   'parseNumstat',
   'readReviewFloorChanges',
