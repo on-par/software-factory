@@ -183,6 +183,7 @@ file must be one that exists (or one you are creating), and every name/symbol mu
 be one you actually read or are adding — omit an entry rather than guess. Quote
 signature values in single quotes; unquoted YAML breaks on the colons in a
 TypeScript signature.
+Single-quote any list item that contains ': ' (for example a backticked \`uses: x@main\`) — unquoted, YAML reads the item as a map.
 Do not record new ADRs. Recording an architecture decision is a separate process from this
 change: plan no ADR and no \`docs/adr/\` file, unless the issue itself asks for one.
 Do not run tests, do not write or edit any other file, do not touch git.
@@ -620,7 +621,13 @@ async function planPhaseImpl(opts: {
       await updateSpecRoute(specPath, opts.preferredRoute, 'repo-config-pin');
     }
 
-    const { artifact: designArtifact, errors: designErrors } = parseDesignArtifact(parsed.data);
+    const { artifact: designArtifact, errors: designErrors, coerced: designCoerced } = parseDesignArtifact(parsed.data);
+    if (designCoerced.length > 0) {
+      log(
+        'design_artifact_coerced',
+        `coerced ${designCoerced.length} non-string design list item(s) to text: ${designCoerced.join(', ')}`,
+      );
+    }
     if (designArtifact) {
       await writeSpec(specPath, {
         designJson: JSON.stringify(designArtifact, null, 2),
