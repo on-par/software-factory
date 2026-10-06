@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Quickstart smoke test: packs @on-par/{adr-kit,contracts,repo-context} and
-# @on-par/factory-{config,core,tui,cli} into tarballs, installs them into a
+# Quickstart smoke test: packs the workspaces named in scripts/publish-workspaces.txt (the
+# same list publish.yml publishes) into tarballs, installs them into a
 # fresh project (as npm would from the registry), and verifies
 # `factory --version`, `factory --help`, and `factory init` work.
 #
@@ -18,15 +18,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
-(cd "$ROOT" && npm pack \
-  --workspace @on-par/adr-kit \
-  --workspace @on-par/contracts \
-  --workspace @on-par/repo-context \
-  --workspace @on-par/factory-config \
-  --workspace @on-par/factory-core \
-  --workspace @on-par/factory-tui \
-  --workspace @on-par/factory-cli \
-  --pack-destination "$PACKDIR")
+WS_ARGS=()
+while IFS= read -r line || [ -n "$line" ]; do
+  line="${line//$'\r'/}"
+  line="${line#"${line%%[![:space:]]*}"}"
+  line="${line%"${line##*[![:space:]]}"}"
+  [ -n "$line" ] && WS_ARGS+=(--workspace "$line")
+done <"$ROOT/scripts/publish-workspaces.txt"
+
+(cd "$ROOT" && npm pack "${WS_ARGS[@]}" --pack-destination "$PACKDIR")
 
 ADR_KIT_TGZ=("$PACKDIR"/on-par-adr-kit-*.tgz)
 CONTRACTS_TGZ=("$PACKDIR"/on-par-contracts-*.tgz)

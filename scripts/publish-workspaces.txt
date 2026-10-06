@@ -1,0 +1,7 @@
+@on-par/adr-kit
+@on-par/contracts
+@on-par/repo-context
+@on-par/factory-config
+@on-par/factory-core
+@on-par/factory-tui
+@on-par/factory-cli

@@ -126,3 +126,5 @@ jobs:
         run: bash scripts/repo-merge-settings.test.sh
       - name: ruleset-copilot-review unit test
         run: bash scripts/ruleset-copilot-review.test.sh
+      - name: publish-workspaces guard
+        run: bash scripts/publish-workspaces.test.sh
