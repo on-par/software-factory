@@ -133,6 +133,20 @@ describe('createFactorydServer', () => {
     expect(lines).toEqual(['GET /repos 200']);
   });
 
+  it('replaces control characters in the logged request path so a URL cannot forge log lines', async () => {
+    const lines: string[] = [];
+    factoryd = createFactorydServer({ registryFile, port: 0, log: (line) => lines.push(line) });
+    // Node's HTTP parser rejects raw control bytes on the wire, so drive the
+    // request handler directly with a URL that a lenient proxy could pass through.
+    const ended = new Promise<void>((resolvePromise) => {
+      const req = { method: 'GET', url: '/nope\r\nGET /forged 200\x1b[2J', headers: { host: '127.0.0.1' } };
+      const res = { headersSent: false, writeHead: () => undefined, end: () => resolvePromise() };
+      factoryd!.server.emit('request', req, res);
+    });
+    await ended;
+    expect(lines).toEqual(['GET /nope??GET /forged 200?[2J 404']);
+  });
+
   it('rejects a non-GET/POST method on /repos with 405 and an Allow: GET, POST header', async () => {
     const lines: string[] = [];
     factoryd = createFactorydServer({ registryFile, port: 0, log: (line) => lines.push(line) });
@@ -700,6 +714,26 @@ describe('createFactorydServer', () => {
           expect.objectContaining({ id: 'merge.admin', value: false, source: 'config' }),
         ]);
       });
+    });
+
+    it('PUT that fails while writing returns a generic 500 and logs the real error', async () => {
+      const checkoutDir = await writeCheckoutRegistry();
+      // A directory where the config file should be makes the write throw EISDIR.
+      await mkdir(getFactoryPaths(checkoutDir).config, { recursive: true });
+      const lines: string[] = [];
+      factoryd = createFactorydServer({ registryFile, port: 0, log: (line) => lines.push(line) });
+      await factoryd.start();
+
+      const { status, body } = await get(
+        factoryd.port,
+        '/repos/on-par/software-factory/policy',
+        'PUT',
+        JSON.stringify({ field: 'merge.auto', value: true }),
+      );
+      expect(status).toBe(500);
+      expect(JSON.parse(body)).toEqual({ error: 'failed to update policy' });
+      expect(body).not.toContain(checkoutDir);
+      expect(lines.some((l) => l.startsWith('policy update failed for on-par/software-factory: '))).toBe(true);
     });
 
     it('rejects a non-GET/PUT method with 405 and an Allow: GET, PUT header', async () => {

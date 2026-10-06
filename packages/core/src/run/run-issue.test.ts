@@ -1,11 +1,12 @@
 import { execFile as execFileCb } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.js';
@@ -123,6 +124,10 @@ function basePolicy(overrides: Partial<RunPolicy> = {}): RunPolicy {
   };
 }
 
+// Breaker files live in a private, unpredictable temp dir, never at a fixed /tmp path.
+const breakerDir = mkdtempSync(join(tmpdir(), 'run-issue-'));
+afterAll(() => rmSync(breakerDir, { recursive: true, force: true }));
+
 let breakerFileCounter = 0;
 
 function basePorts(overrides: Partial<RunPorts> = {}): RunPorts {
@@ -132,7 +137,7 @@ function basePorts(overrides: Partial<RunPorts> = {}): RunPorts {
     octokit: {} as Octokit,
     workspace: { path: '/tmp/wt', dispose: async () => {} } as Workspace,
     events: () => vi.fn(),
-    breaker: new ProviderBreaker(`/tmp/run-issue-test-breaker-${breakerFileCounter}.json`),
+    breaker: new ProviderBreaker(join(breakerDir, `breaker-${breakerFileCounter}.json`)),
     resolveConstitution: () => null,
     planPhase,
     buildPhase,
@@ -814,7 +819,7 @@ describe('runIssue — provider breaker and failover', () => {
       await opts.onProviderFailure?.({ provider: 'anthropic', reason: 'usage_cap' });
       return PLAN_OK;
     });
-    const breaker = new ProviderBreaker(`/tmp/run-issue-test-breaker-provider-fail.json`);
+    const breaker = new ProviderBreaker(join(breakerDir, 'breaker-provider-fail.json'));
     const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ events: () => log, breaker }));
     expect(outcome.state).toBe('ready');
     expect(events.some(([t, m]) => t === 'provider_breaker_open' && m.includes('anthropic'))).toBe(true);
@@ -831,7 +836,7 @@ describe('runIssue — provider breaker and failover', () => {
       });
       return PLAN_OK;
     });
-    const breaker = new ProviderBreaker(`/tmp/run-issue-test-breaker-reset-hint.json`);
+    const breaker = new ProviderBreaker(join(breakerDir, 'breaker-reset-hint.json'));
     await runIssue(
       baseRequest({ failover: { enabled: false, cooldownMs: 999, fallbackModel: 'x' } }),
       basePolicy(),
@@ -844,7 +849,7 @@ describe('runIssue — provider breaker and failover', () => {
 
   it('gates BUILD on an open codex breaker and reroutes a claude plan to its codex fallback', async () => {
     vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, route: 'claude' });
-    const breaker = new ProviderBreaker(`/tmp/run-issue-test-breaker-gate.json`);
+    const breaker = new ProviderBreaker(join(breakerDir, 'breaker-gate.json'));
     await breaker.open('anthropic', 'usage_cap', 60_000);
     const router = fakeRouter({
       'claude-build': { provider: 'anthropic' },

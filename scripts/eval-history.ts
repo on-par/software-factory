@@ -1,4 +1,6 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import type { EvalSummary } from '@on-par/factory-core';
 import { appendHistoryLine, parseHistory, renderTrend, summaryToHistoryRecord } from '@on-par/factory-core';
@@ -27,17 +29,34 @@ function parseArgs(argv: string[]): Args {
   return args;
 }
 
-const args = parseArgs(process.argv.slice(2));
+/** The file's contents, or undefined when it does not exist. Reading directly
+ *  (instead of existsSync first) leaves no gap for the file to change. */
+export function readFileIfExists(path: string): string | undefined {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw err;
+  }
+}
 
-if (!existsSync(args.report)) {
-  console.log(`no report at ${args.report} — skipping trend append`);
-  process.exitCode = 0;
-} else {
-  const summary: EvalSummary = JSON.parse(readFileSync(args.report, 'utf8'));
-  const existing = existsSync(args.history) ? readFileSync(args.history, 'utf8') : '';
+export function runEvalHistory(argv: string[], out: (text: string) => void = (t) => process.stdout.write(t)): void {
+  const args = parseArgs(argv);
+
+  const report = readFileIfExists(args.report);
+  if (report === undefined) {
+    out(`no report at ${args.report} — skipping trend append\n`);
+    return;
+  }
+  const summary: EvalSummary = JSON.parse(report);
+  const existing = readFileIfExists(args.history) ?? '';
   const record = summaryToHistoryRecord(summary, args.date, args.runUrl);
   const updated = appendHistoryLine(existing, record);
 
   writeFileSync(args.history, updated);
-  process.stdout.write(renderTrend(parseHistory(updated)));
+  out(renderTrend(parseHistory(updated)));
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  runEvalHistory(process.argv.slice(2));
 }

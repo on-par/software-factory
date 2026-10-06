@@ -19,8 +19,8 @@ function splitRow(line: string): string[] {
   const cells: string[] = [];
   let current = '';
   for (let i = 0; i < trimmed.length; i++) {
-    if (trimmed[i] === '\\' && trimmed[i + 1] === '|') {
-      current += '|';
+    if (trimmed[i] === '\\' && (trimmed[i + 1] === '|' || trimmed[i + 1] === '\\')) {
+      current += trimmed[i + 1];
       i++;
     } else if (trimmed[i] === '|') {
       cells.push(current.trim());
@@ -95,7 +95,7 @@ function pad(text: string, width: number): string {
 
 export function renderIndexTable(rows: readonly AdrIndexRow[]): string {
   const headerCells = ['Number', 'Title', 'Status'];
-  const escapeCell = (cell: string) => cell.replace(/\|/g, '\\|');
+  const escapeCell = (cell: string) => cell.replace(/[\\|]/g, '\\$&');
   const bodyCellsList = rows.map((row) => [numberCellText(row), escapeCell(row.title), escapeCell(row.status)]);
   const widths = headerCells.map((header, col) =>
     Math.max(header.length, ...bodyCellsList.map((cells) => cells[col].length)),

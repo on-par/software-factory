@@ -296,4 +296,19 @@ describe('renderIndexTable escaping', () => {
     expect(table).toContain('A \\| B');
     expect(parseIndexTable(table)).toEqual(rows);
   });
+
+  it('escapes backslashes so a title with \\ and | round-trips', () => {
+    const rows = [{ number: 1, title: 'C:\\dir\\ | a\\|b ends\\', status: 'Accepted', href: '0001-a.md' }];
+    const table = renderIndexTable(rows);
+    expect(table).toContain('C:\\\\dir\\\\ \\| a\\\\\\|b ends\\\\');
+    expect(parseIndexTable(table)).toEqual(rows);
+  });
+
+  it('does not double backslashes when the same row is upserted repeatedly', () => {
+    const row = { number: 1, title: 'Path C:\\x | y', status: 'Accepted', href: '0001-a.md' };
+    const once = upsertIndexRow(renderIndexTable([row]), row);
+    const twice = upsertIndexRow(once, row);
+    expect(twice).toBe(once);
+    expect(parseIndexTable(twice)).toEqual([row]);
+  });
 });

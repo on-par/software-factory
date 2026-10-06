@@ -47,7 +47,7 @@ export function laneWorktreePath(opts: {
 export async function ensureWorktreeParentExcluded(repoRoot: string, worktreeParent: string): Promise<boolean> {
   const rel = relative(resolve(repoRoot), resolve(worktreeParent));
   if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return false;
-  const { stdout } = await execGit('git rev-parse --git-path info/exclude', { cwd: repoRoot });
+  const { stdout } = await execGit(['rev-parse', '--git-path', 'info/exclude'], { cwd: repoRoot });
   const file = resolve(repoRoot, stdout.trim());
   const line = `/${rel.split(sep).join('/')}/`;
   let existing = '';

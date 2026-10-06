@@ -238,7 +238,6 @@ async function buildPhaseImpl(opts: {
         failoverReason: reason,
       });
       route = 'codex';
-      taskType = 'build_codex';
       result = await router.run(
         'build_codex',
         buildCommitOnlyPrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding }),
@@ -271,7 +270,6 @@ async function buildPhaseImpl(opts: {
         log('warn', `provider breaker callback failed (non-fatal): ${(breakerErr as Error).message}`);
       }
       route = 'claude';
-      taskType = 'build_claude';
       const claudePrompt = applySteering(claudeRoutePrompt(), steering);
       result = await router.run('build_claude', claudePrompt, {
         ...runOpts,

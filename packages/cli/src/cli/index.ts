@@ -328,6 +328,7 @@ import { cmdHostedQueue } from './hosted-queue.js';
 import { cmdHostedRunner } from './hosted-runner.js';
 import { resolveFactoryCheckoutCommit, runFilingPreview } from './filing.js';
 import { buildFeedbackDeps, type FeedbackDeps, runFeedback } from './feedback.js';
+import { ensureFactoryExcluded, writeSampleQueue } from './init-files.js';
 import { cmdLogs } from './logs.js';
 import { applyHelpGroups } from './help-groups.js';
 import { mergeScopeNotice } from './merge-scope.js';
@@ -688,25 +689,10 @@ async function cmdInit(opts: { force?: boolean } = {}) {
   ensureDir(paths.plans);
 
   // Add .factory/ to git exclude
-  const excludeFile = resolve(repoRoot, '.git/info/exclude');
-  const excludeContent = existsSync(excludeFile) ? readFileSync(excludeFile, 'utf-8') : '';
-  if (!excludeContent.includes('.factory/')) {
-    writeFileSync(excludeFile, excludeContent + (excludeContent.endsWith('\n') ? '' : '\n') + '.factory/\n');
-  }
+  ensureFactoryExcluded(resolve(repoRoot, '.git/info/exclude'));
 
   // Create sample queue if not exists
-  if (!existsSync(paths.queue)) {
-    writeFileSync(
-      paths.queue,
-      `# factory queue — "<lane> <issue#>", priority-ordered.
-# Lanes run in parallel; issues within a lane run serially.
-# Put issues that touch the same files in the same lane.
-# Example:
-#   app 61
-#   docs 66
-`,
-    );
-  }
+  writeSampleQueue(paths.queue);
 
   // Write onboarding files. Idempotent: never clobber an existing file unless --force.
   const force = opts.force === true;

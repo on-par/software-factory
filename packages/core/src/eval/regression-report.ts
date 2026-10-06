@@ -83,7 +83,7 @@ function truncate(text: string, limit: number): string {
 }
 
 function escapeCell(value: string): string {
-  return value.replace(/\|/g, '\\|');
+  return value.replace(/[\\|]/g, '\\$&');
 }
 
 function formatPass(pass: boolean | undefined): string {
