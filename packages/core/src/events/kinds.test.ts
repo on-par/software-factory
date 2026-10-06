@@ -37,6 +37,10 @@ describe('EVENT_TRAITS', () => {
 });
 
 describe('eventTraitsFor', () => {
+  it('classifies github_api_deprecated as a non-park warning', () => {
+    expect(eventTraitsFor('github_api_deprecated')).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
+  });
+
   it('classifies merge-gated-override as a non-park warning', () => {
     expect(eventTraitsFor('merge-gated-override')).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
   });
