@@ -7,6 +7,9 @@
 # breaking format:check for every unrelated verify.sh run until removed).
 .tmp/
 
+# Local agent/tool context (e.g. retro snapshots in .context/retros/).
+.context/
+
 # OS files
 .DS_Store
 

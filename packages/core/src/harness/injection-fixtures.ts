@@ -32,15 +32,23 @@ const FIXTURE_MANIFEST: Array<{ name: string; surface: InjectionSurface; canarie
 
 const FIXTURES_DIR = fileURLToPath(new URL('../__fixtures__/injection/', import.meta.url));
 
+/** Injectable I/O for loadInjectionFixtures; defaults to node:fs. */
+export interface InjectionFixtureDeps {
+  /** Synchronous file reader; must throw when the file is missing. */
+  readFile?: (path: string, encoding: 'utf8') => string;
+}
+
 /** Loads the curated adversarial injection payloads from __fixtures__/injection.
  *  Throws if a manifest entry's file is missing so a rename can't silently
- *  drop coverage of an attack vector. */
-export function loadInjectionFixtures(): InjectionFixture[] {
+ *  drop coverage of an attack vector. Pass `deps.readFile` to replace the
+ *  node:fs reader. */
+export function loadInjectionFixtures(deps: InjectionFixtureDeps = {}): InjectionFixture[] {
+  const readFile = deps.readFile ?? readFileSync;
   return FIXTURE_MANIFEST.map(({ name, surface, canaries }) => {
     const path = join(FIXTURES_DIR, name);
     let content: string;
     try {
-      content = readFileSync(path, 'utf8');
+      content = readFile(path, 'utf8');
     } catch {
       throw new Error(`injection fixture missing: ${path}`);
     }

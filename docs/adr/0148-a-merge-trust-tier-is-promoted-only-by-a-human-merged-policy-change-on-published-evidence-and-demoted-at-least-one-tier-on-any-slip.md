@@ -1,4 +1,4 @@
-# ADR-0145: A merge trust tier is promoted only by a human-merged policy change on published evidence, and demoted at least one tier on any slip
+# ADR-0148: A merge trust tier is promoted only by a human-merged policy change on published evidence, and demoted at least one tier on any slip
 
 - Status: Accepted
 - Date: 2026-10-05

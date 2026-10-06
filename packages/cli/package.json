@@ -39,11 +39,10 @@
     "@octokit/rest": "^22.0.0",
     "@on-par/factory-core": "^2.0.0",
     "@on-par/factory-tui": "^2.0.0",
-    "chalk": "^6.0.0",
     "commander": "^15.0.0"
   },
   "license": "MIT",
   "devDependencies": {
-    "@types/node": "^26.5.1"
+    "@types/node": "^26.6.4"
   }
 }

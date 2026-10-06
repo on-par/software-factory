@@ -1,6 +1,4 @@
-import type * as NodeFs from 'node:fs';
-
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { loadInjectionFixtures } from './injection-fixtures.js';
 
@@ -41,20 +39,35 @@ describe('loadInjectionFixtures', () => {
     }
   });
 
-  it('throws a clear error when a manifest file is missing', async () => {
-    vi.resetModules();
-    vi.doMock('node:fs', async (importActual) => {
-      const actual = await importActual<typeof NodeFs>();
-      return {
-        ...actual,
-        readFileSync: () => {
-          throw new Error('ENOENT: no such file or directory');
-        },
-      };
+  it('throws a clear error when a manifest file is missing', () => {
+    const readFile = () => {
+      throw new Error('ENOENT: no such file or directory');
+    };
+    expect(() => loadInjectionFixtures({ readFile })).toThrow(/injection fixture missing/);
+  });
+
+  it('names the missing file when only one manifest file is unreadable', () => {
+    const readFile = (path: string) => {
+      if (path.endsWith('web-content-rewrite-pwned.md')) throw new Error('ENOENT');
+      return 'stub CANARY';
+    };
+    expect(() => loadInjectionFixtures({ readFile })).toThrow(
+      /injection fixture missing: .*web-content-rewrite-pwned\.md/,
+    );
+  });
+
+  it('reads every manifest file through the injected readFile', () => {
+    const calls: Array<{ path: string; encoding: string }> = [];
+    const readFile = (path: string, encoding: 'utf8') => {
+      calls.push({ path, encoding });
+      return 'stub CANARY';
+    };
+    const fixtures = loadInjectionFixtures({ readFile });
+    expect(calls).toHaveLength(EXPECTED_NAMES.length);
+    EXPECTED_NAMES.forEach((name, i) => {
+      expect(calls[i]?.path.endsWith(name)).toBe(true);
+      expect(calls[i]?.encoding).toBe('utf8');
     });
-    const { loadInjectionFixtures: loadWithMissingFile } = await import('./injection-fixtures.js');
-    expect(() => loadWithMissingFile()).toThrow(/injection fixture missing/);
-    vi.doUnmock('node:fs');
-    vi.resetModules();
+    expect(fixtures.every((f) => f.content === 'stub CANARY')).toBe(true);
   });
 });

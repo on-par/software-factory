@@ -886,15 +886,3 @@ export function describeEffectiveConfig(opts: DescribeEffectiveConfigOpts): stri
 export function resolveReviewFloorRules(repo: RepoFactoryConfig | null): ReviewFloorRuleSet {
   return applyReviewFloorOverrides(repo?.classifier);
 }
-
-/** Model for the classify_pr route: the repo pin when set, else the route's checker-tier model. */
-export function resolveClassifierModel(router: ModelRouter, repo: RepoFactoryConfig | null): string | undefined {
-  const pin = repo?.models?.pins?.classifier;
-  if (pin === undefined) return router.resolve('classify_pr');
-  if (!router.registryRef.get(pin)) {
-    throw new Error(
-      `.factory/config.json: models.pins.classifier references unknown model '${pin}' (known models: ${router.registryRef.list().join(', ')})`,
-    );
-  }
-  return pin;
-}

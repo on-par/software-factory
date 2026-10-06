@@ -8,10 +8,10 @@ import type { Octokit } from '@octokit/rest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
-import type { BuildResult } from '../phases/build.js';
-import type { CheckPhaseResult } from '../phases/check.js';
-import type { PlanResult } from '../phases/plan.js';
-import type { ShipResult } from '../phases/ship.js';
+import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.js';
+import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
+import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
+import type { ShipResult, shipPhase as realShipPhase } from '../phases/ship.js';
 import type { PrShadowVerdict } from '../review/classifier.js';
 import { DEFAULT_REVIEW_FLOOR_RULES } from '../review/floor.js';
 import { ProviderBreaker } from '../router/breaker.js';
@@ -21,21 +21,12 @@ import type { WorkRequest } from '../work/index.js';
 import { LaneFileGuard } from './lane-file-guard.js';
 import type { RunPolicy } from './policy.js';
 import type { Environment, Workspace } from './ports.js';
+import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 
-vi.mock('../phases/plan.js', () => ({ planPhase: vi.fn() }));
-vi.mock('../phases/build.js', () => ({ buildPhase: vi.fn() }));
-vi.mock('../phases/check.js', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  checkPhase: vi.fn(),
-}));
-vi.mock('../phases/ship.js', () => ({ shipPhase: vi.fn() }));
-
-const { planPhase } = await import('../phases/plan.js');
-const { buildPhase } = await import('../phases/build.js');
-const { checkPhase } = await import('../phases/check.js');
-const { shipPhase } = await import('../phases/ship.js');
-const { runIssue } = await import('./run-issue.js');
-import type { RunPorts, RunRequest } from './run-issue.js';
+const planPhase = vi.fn<typeof realPlanPhase>();
+const buildPhase = vi.fn<typeof realBuildPhase>();
+const checkPhase = vi.fn<typeof realCheckPhase>();
+const shipPhase = vi.fn<typeof realShipPhase>();
 
 const execFile = promisify(execFileCb);
 
@@ -143,6 +134,10 @@ function basePorts(overrides: Partial<RunPorts> = {}): RunPorts {
     events: () => vi.fn(),
     breaker: new ProviderBreaker(`/tmp/run-issue-test-breaker-${breakerFileCounter}.json`),
     resolveConstitution: () => null,
+    planPhase,
+    buildPhase,
+    checkPhase,
+    shipPhase,
     ...overrides,
   };
 }
