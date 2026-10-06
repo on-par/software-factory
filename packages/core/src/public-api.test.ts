@@ -331,6 +331,11 @@ const INTERNAL_API_KEYS = [
   'clusterGarden',
   'readHarvestEvents',
   'renderGardenReport',
+  // Garden dedup (#2102)
+  'dedupGardenClusters',
+  'findGardenTrackingIssue',
+  'gardenClusterFingerprint',
+  'gardenKeyMarker',
   // Readiness deep check (#1732)
   'buildDecompositionPrompt',
   'parseDecompositionOutput',

@@ -172,6 +172,7 @@ import {
 import type {
   CiOutcome,
   EnqueueResult,
+  GardenCluster,
   GithubQueue,
   OvernightItemOutcome,
   OvernightPreflightResult,
@@ -193,6 +194,7 @@ import {
   DEFAULT_GARDEN_SINCE,
   capGardenClusters,
   clusterGarden,
+  dedupGardenClusters,
   filterGardenWindow,
   parseGardenDuration,
   readHarvestEvents,
@@ -1339,6 +1341,18 @@ async function cmdClassifierBacktestEntry(opts: ClassifierBacktestOptions) {
   }
 }
 
+/** Read-only GitHub search dedup (#2102); on any error the clusters are returned unannotated. */
+async function annotateGardenClusters(clusters: GardenCluster[]): Promise<GardenCluster[]> {
+  try {
+    const [owner, repo] = (await getGitHubRepo()).split('/');
+    if (!owner || !repo) throw new Error('cannot resolve the GitHub repository');
+    return await dedupGardenClusters(clusters, { client: createOctokitFilingClient(getOctokit()), owner, repo });
+  } catch (err) {
+    console.error(`factory garden: issue search unavailable, clusters not annotated: ${errorDetail(err)}`);
+    return clusters;
+  }
+}
+
 async function cmdGarden(
   opts: { report?: boolean; since?: string; maxClusters?: string; json?: boolean; out?: string } = {},
 ) {
@@ -1362,7 +1376,10 @@ async function cmdGarden(
   const paths = getFactoryPaths(repoRoot);
   const events = filterGardenWindow(readHarvestEvents([paths.events]), windowMs, new Date());
   const clusters = capGardenClusters(clusterGarden(events), maxClusters);
-  const text = opts.json ? renderGardenJson(clusters, { since, maxClusters }) : renderGardenReport(clusters).join('\n');
+  const annotated = clusters.length === 0 ? clusters : await annotateGardenClusters(clusters);
+  const text = opts.json
+    ? renderGardenJson(annotated, { since, maxClusters })
+    : renderGardenReport(annotated).join('\n');
   if (opts.out) {
     try {
       writeFileSync(opts.out, `${text}\n`);
@@ -5731,7 +5748,9 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
 
   program
     .command('garden')
-    .description('Read-only report of recurring failure patterns in local events (no network)')
+    .description(
+      'Read-only report of recurring failure patterns in local events, deduped against open issues by GitHub search',
+    )
     .option('--report', 'Print recurring CHECK failure-signature clusters as markdown')
     .option('--since <duration>', 'Only consider events from this window, e.g. 7d, 36h, 2w', DEFAULT_GARDEN_SINCE)
     .option('--max-clusters <n>', 'Print at most this many clusters', String(DEFAULT_GARDEN_MAX_CLUSTERS))

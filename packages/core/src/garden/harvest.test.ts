@@ -150,6 +150,25 @@ describe('garden harvest', () => {
   });
 
   describe('renderGardenReport', () => {
+    it('prints tracking lines before count, and nothing when tracking is absent (#2102)', () => {
+      const base = {
+        dimension: 'signature' as const,
+        key: 'k',
+        count: 1,
+        issues: ['1'],
+        firstSeen: 'a',
+        lastSeen: 'b',
+        samples: [],
+        failingChecks: [],
+      };
+      const tracked = renderGardenReport([{ ...base, tracking: { status: 'tracked', issue: 12 } }]);
+      expect(tracked.indexOf('- tracked: #12')).toBeGreaterThan(-1);
+      expect(tracked.indexOf('- tracked: #12')).toBeLessThan(tracked.indexOf('- count: 1'));
+      const fresh = renderGardenReport([{ ...base, tracking: { status: 'new' } }]);
+      expect(fresh.indexOf('- new')).toBeLessThan(fresh.indexOf('- count: 1'));
+      expect(renderGardenReport([base]).join('\n')).not.toMatch(/- (new|tracked)/);
+    });
+
     it('prints "no clusters" for empty input', () => {
       expect(renderGardenReport([])).toEqual(['no clusters']);
     });
