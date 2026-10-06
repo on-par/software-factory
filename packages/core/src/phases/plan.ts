@@ -529,7 +529,9 @@ async function planPhaseImpl(opts: {
   const adrContext = await readAdrContext(adrReader);
   const adrCtx = renderAdrConstraints(adrContext);
   if (adrContext.active.length > 0) {
-    const names = adrContext.active.map(adrLabel).join(', ');
+    const names = adrContext.active
+      .map((adr) => (adr.statusless ? `${adrLabel(adr)} (no status, treated as Accepted)` : adrLabel(adr)))
+      .join(', ');
     log(
       'adr_context',
       `${adrContext.active.length} accepted ADR(s) injected as design constraints: ${names}` +
@@ -539,7 +541,8 @@ async function planPhaseImpl(opts: {
     log('adr_context_empty', `no accepted ADRs found in ${adrContext.dir} — planning without ADR constraints`);
   }
   if (adrContext.skipped.length > 0) {
-    log('adr_skipped', `${adrContext.skipped.length} ADR file(s) skipped (not Accepted or unparsable)`);
+    const skippedList = adrContext.skipped.map((s) => `${s.path} (${s.reason})`).join(', ');
+    log('adr_skipped', `${adrContext.skipped.length} ADR file(s) skipped: ${skippedList}`);
   }
   log('adr_inject_completed', `ADR injection complete (${adrContext.active.length} active)`, {
     durationMs: Date.now() - adrInjectStartedAt,
