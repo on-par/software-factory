@@ -1,4 +1,15 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
@@ -89,6 +100,56 @@ describe('findCredentialFiles / zeroFill / scrubFile', () => {
 
     scrubFile(envPath);
     expect(existsSync(envPath)).toBe(false);
+  });
+
+  it('zeroFill refuses to follow a symlink and leaves the target untouched', () => {
+    dir = mkdtempSync(join(tmpdir(), 'gc-'));
+    const outside = mkdtempSync(join(tmpdir(), 'gc-outside-'));
+    try {
+      const target = join(outside, 'id_ed25519');
+      writeFileSync(target, 'PRIVATE KEY');
+      const link = join(dir, '.env');
+      symlinkSync(target, link);
+
+      expect(() => zeroFill(link)).toThrow();
+      expect(readFileSync(target, 'utf8')).toBe('PRIVATE KEY');
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('scrubFile removes a swapped-in symlink without touching its target', () => {
+    dir = mkdtempSync(join(tmpdir(), 'gc-'));
+    const outside = mkdtempSync(join(tmpdir(), 'gc-outside-'));
+    try {
+      const target = join(outside, 'id_ed25519');
+      writeFileSync(target, 'PRIVATE KEY');
+      const envPath = join(dir, '.env');
+      writeFileSync(envPath, 'SECRET=1');
+      expect(findCredentialFiles(dir)).toEqual([envPath]);
+
+      // The agent swaps the file for a symlink after the walk.
+      rmSync(envPath);
+      symlinkSync(target, envPath);
+
+      scrubFile(envPath);
+      expect(() => lstatSync(envPath)).toThrow();
+      expect(readFileSync(target, 'utf8')).toBe('PRIVATE KEY');
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('does not walk a .claude symlink that points outside the worktree', () => {
+    dir = mkdtempSync(join(tmpdir(), 'gc-'));
+    const outside = mkdtempSync(join(tmpdir(), 'gc-outside-'));
+    try {
+      writeFileSync(join(outside, 'credentials.json'), '{"token":"abc"}');
+      symlinkSync(outside, join(dir, '.claude'));
+      expect(findCredentialFiles(dir)).toEqual([]);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 });
 

@@ -2,7 +2,20 @@
 
 import { exec as execCb } from 'node:child_process';
 import type { Dirent } from 'node:fs';
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeSync,
+} from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -249,13 +262,14 @@ export function findCredentialFiles(worktreePath: string): string[] {
     if (name === '.env' || name.startsWith('.env.') || CREDENTIAL_BASENAMES.has(name)) {
       const filePath = join(worktreePath, name);
       try {
-        if (statSync(filePath).isFile()) found.push(filePath);
+        // lstat, not stat: a symlinked `.env` must never lead the scrub outside the worktree.
+        if (lstatSync(filePath).isFile()) found.push(filePath);
       } catch {}
     }
   }
 
   const claudeDir = join(worktreePath, '.claude');
-  if (existsSync(claudeDir)) {
+  if (isRealDirectory(claudeDir)) {
     walkFiles(claudeDir, found);
   }
 
@@ -280,13 +294,41 @@ function walkFiles(dir: string, found: string[]): void {
   }
 }
 
-export function zeroFill(filePath: string): void {
-  const size = statSync(filePath).size;
-  writeFileSync(filePath, Buffer.alloc(size));
+function isRealDirectory(path: string): boolean {
+  try {
+    return lstatSync(path).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
+/** Zero a file in place through one fd opened with O_NOFOLLOW. The worktree's agent can swap
+ *  a credential file for a symlink after `findCredentialFiles` walks it; a path-based
+ *  stat + write would then zero the link's target (e.g. `~/.ssh/id_*`). Throws ELOOP on a
+ *  symlink and refuses anything that is not a regular file. */
+export function zeroFill(filePath: string): void {
+  const fd = openSync(filePath, constants.O_WRONLY | constants.O_NOFOLLOW);
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) throw new Error(`refusing to zero-fill non-regular file ${filePath}`);
+    const zeros = Buffer.alloc(Math.min(stat.size, 64 * 1024));
+    let offset = 0;
+    while (offset < stat.size) {
+      offset += writeSync(fd, zeros, 0, Math.min(zeros.length, stat.size - offset), offset);
+    }
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** Zero-fill then delete. A symlink is unlinked without zeroing — rm removes the link, never
+ *  its target. */
 export function scrubFile(filePath: string): void {
-  zeroFill(filePath);
+  try {
+    zeroFill(filePath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code !== 'ELOOP') throw err;
+  }
   rmSync(filePath, { force: true });
 }
 
