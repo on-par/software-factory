@@ -79,8 +79,8 @@ export interface FactoryDefaults {
   design: { blockUnresolvedRegressions: boolean };
   /** BUILD policy (#1867). publishFromBuild: true lets the claude BUILD worker push and open a PR before CHECK; default false = commit-only, SHIP publishes. */
   build: { publishFromBuild: boolean };
-  /** Size gate policy (ADR-0147). file: gates file child issues / park (ADR-0043); slice: keep an oversized issue whole and ship it as slice PRs; off: skip both gates. */
-  sizeGate: { mode: 'file' | 'slice' | 'off' };
+  /** Size gate policy (ADR-0147). file: gates file child issues / park (ADR-0043); slice: keep an oversized issue whole and ship it as slice PRs, never filing issues (ADR-0156); off: skip both gates. maxSlices (1-20): cap on a not-yet-started slice plan; over it the plan is recorded and the run parks. */
+  sizeGate: { mode: 'file' | 'slice' | 'off'; maxSlices: number };
   sandbox: {
     enabled: boolean;
     runtime: 'auto' | 'sandbox-exec' | 'firejail' | 'docker-sandbox' | 'none';
@@ -699,8 +699,8 @@ export const defaultFactoryConfig: FactoryDefaults = {
    * opens the PR after CHECK); true lets the claude worker push and open a PR itself.
    */
   build: { publishFromBuild: false },
-  /** Size gates on: an oversized issue files child issues or parks (ADR-0043). */
-  sizeGate: { mode: 'file' },
+  /** Size gates on: an oversized issue files child issues or parks (ADR-0043). Slice cap 10 (ADR-0156). */
+  sizeGate: { mode: 'file', maxSlices: 10 },
   sandbox: {
     enabled: true,
     runtime: 'auto',

@@ -16,6 +16,7 @@ import {
 } from '@on-par/factory-config';
 import { z } from 'zod';
 import { readRepoConfigFile, resolveRepoConfigPath } from './repo-config-file.js';
+import { DEFAULT_MAX_SLICES, SLICE_CAP_CEILING } from '../readiness/slice-plan.js';
 import { runConfigSource } from './run-config-source.js';
 
 import type { FilingPolicy } from '../filing/policy.js';
@@ -153,7 +154,12 @@ const FactoryConfigSchema = z.object({
     .default({ blockUnresolvedRegressions: false }),
   build: z.object({ publishFromBuild: z.boolean().default(false) }).default({ publishFromBuild: false }),
   // Plain string on purpose: an unknown mode must load and resolve to `file`, not throw.
-  sizeGate: z.object({ mode: z.string().default('file') }).default({ mode: 'file' }),
+  sizeGate: z
+    .object({
+      mode: z.string().default('file'),
+      maxSlices: z.number().int().min(1).max(SLICE_CAP_CEILING).optional(),
+    })
+    .default({ mode: 'file' }),
   kpis: z
     .object({
       defectWindowDays: z.number().int().positive().default(14),
@@ -437,6 +443,18 @@ export function parseSizeGateMode(raw: unknown): SizeGateMode | undefined {
 /** sizeGate.mode from the factory config; missing or unknown resolves to `file`. */
 export function resolveSizeGateMode(config: FactoryConfig): SizeGateMode {
   return parseSizeGateMode(config.sizeGate?.mode) ?? 'file';
+}
+
+/** --max-slices value: a whole number from 1 to SLICE_CAP_CEILING, else undefined (ADR-0156). */
+export function parseMaxSlices(raw: string): number | undefined {
+  if (!/^\d+$/.test(raw)) return undefined;
+  const n = Number(raw);
+  return n >= 1 && n <= SLICE_CAP_CEILING ? n : undefined;
+}
+
+/** sizeGate.maxSlices from the factory config; absent resolves to DEFAULT_MAX_SLICES (10). */
+export function resolveSizeGateMaxSlices(config: FactoryConfig): number {
+  return config.sizeGate?.maxSlices ?? DEFAULT_MAX_SLICES;
 }
 
 export function resolveBuildPublish(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {

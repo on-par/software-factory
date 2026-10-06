@@ -25,6 +25,8 @@ import {
   resolvePrClassifierPolicy,
   resolveBuildPublish,
   resolveSizeGateMode,
+  resolveSizeGateMaxSlices,
+  parseMaxSlices,
   parseSizeGateMode,
   resolveDesignRegressionBlock,
   resolvePlanApproval,
@@ -933,6 +935,33 @@ describe('resolveSizeGateMode (#2048)', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('sizeGate.maxSlices (ADR-0156)', () => {
+  it('resolves to 10 when absent', () => {
+    expect(resolveSizeGateMaxSlices({ ...loadFactoryConfig(), sizeGate: { mode: 'slice' } })).toBe(10);
+  });
+
+  it('resolves a configured value', () => {
+    expect(resolveSizeGateMaxSlices({ ...loadFactoryConfig(), sizeGate: { mode: 'slice', maxSlices: 15 } })).toBe(15);
+  });
+
+  it.each([0, 21, 2.5, '10'])('fails config load for maxSlices %j naming sizeGate.maxSlices', async (value) => {
+    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
+    try {
+      const path = join(dir, 'factory.json');
+      await writeFile(path, JSON.stringify({ sizeGate: { mode: 'slice', maxSlices: value } }));
+      expect(() => loadFactoryConfigForRepo(path)).toThrow(/sizeGate\.maxSlices/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('parseMaxSlices accepts whole numbers 1-20 only', () => {
+    expect(parseMaxSlices('1')).toBe(1);
+    expect(parseMaxSlices('20')).toBe(20);
+    for (const bad of ['0', '21', '2.5', 'abc', '']) expect(parseMaxSlices(bad)).toBeUndefined();
   });
 });
 

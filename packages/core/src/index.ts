@@ -37,6 +37,8 @@ export {
   resolveBuildPublish,
   resolveSizeGateMode,
   parseSizeGateMode,
+  parseMaxSlices,
+  resolveSizeGateMaxSlices,
   SIZE_GATE_MODES,
   resolveDesignRegressionBlock,
   resolveEnvironmentProxy,

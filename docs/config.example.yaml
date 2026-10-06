@@ -127,12 +127,15 @@ design:
 # and opens the PR after CHECK. FACTORY_BUILD_PUBLISH=1/0 beats it.
 build:
   publishFromBuild: false
-# Size gate policy at PLAN (ADR-0147). mode: file (default) files child issues for an oversized
-# issue and parks when the post-plan gate trips; slice keeps the issue whole, records a slice plan
-# comment and ships one slice per run; off skips both gates and sends the whole issue to BUILD.
-# `factory run-issue --size-gate <mode>` beats it for one run.
+# Size gate policy at PLAN (ADR-0147, ADR-0156). mode: file (default) files child issues for an
+# oversized issue and parks when the post-plan gate trips; slice keeps the issue whole, never files
+# issues, records a slice plan comment and ships one slice per run; off skips both gates and sends
+# the whole issue to BUILD. maxSlices (1-20, default 10) caps a slice plan that has not started: an
+# over-cap plan is recorded and parks, and `--max-slices <n>` beats it for one run. `factory
+# run-issue --size-gate <mode>` beats mode for one run.
 sizeGate:
   mode: "file"
+  maxSlices: 10
 # Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging
 ci:
   skip: false

@@ -148,6 +148,7 @@ describe('shipped defaults', () => {
     expect(defaultFactoryConfig.worktree).not.toHaveProperty('prefix');
     expect(defaultFactoryConfig.timeouts.plan_seconds).toBe(1800);
     expect(defaultFactoryConfig.sizeGate.mode).toBe('file');
+    expect(defaultFactoryConfig.sizeGate.maxSlices).toBe(10);
     expect(defaultFactoryConfig.timeouts.build_seconds).toBe(7200);
     expect(defaultFactoryConfig.worktree.gcTtlDays).toBe(7);
     expect(defaultFactoryConfig.filing.maxPerDay).toBe(20);

@@ -1,6 +1,6 @@
 // packages/core/src/readiness/slice-plan.ts — the pure slice plan model for ADR-0147 slice mode.
 //
-// An oversized issue ships as up to MAX_SLICES sequential slice PRs. The only record of slice
+// An oversized issue ships as up to SLICE_CAP_CEILING sequential slice PRs. The only record of slice
 // state is one issue comment led by SLICE_PLAN_MARKER: a visible checklist plus a hidden data
 // comment carrying base64 JSON of the whole plan, so any story text round-trips exactly. This
 // module only builds, renders and parses that comment; it does no GitHub I/O.
@@ -13,8 +13,10 @@ import type { DecompositionOutput } from './decompose.js';
 
 /** ADR-0147 marker. The comment must start with it. Changing it needs a new ADR. */
 export const SLICE_PLAN_MARKER = '<!-- factory:slice-plan v1 -->';
-/** More stories than this and the work is an epic, not one issue (ADR-0147). */
-export const MAX_SLICES = 5;
+/** Hard ceiling on slices in one plan (ADR-0156): the schema bound, and the top of sizeGate.maxSlices. */
+export const SLICE_CAP_CEILING = 20;
+/** Effective slice cap when neither sizeGate.maxSlices nor --max-slices is set (ADR-0156). */
+export const DEFAULT_MAX_SLICES = 10;
 
 export type SliceState = 'pending' | 'pr-open' | 'merged';
 
@@ -52,7 +54,7 @@ const SliceSchema = z.object({
 
 const SlicePlanSchema = z.object({
   issue: z.number().int().positive(),
-  slices: z.array(SliceSchema).min(1).max(MAX_SLICES),
+  slices: z.array(SliceSchema).min(1).max(SLICE_CAP_CEILING),
 });
 
 export function slicePlanFromDecomposition(issue: number, decomposition: DecompositionOutput): SlicePlanBuildResult {
@@ -60,7 +62,7 @@ export function slicePlanFromDecomposition(issue: number, decomposition: Decompo
   if (stories.length === 0) {
     return { ok: false, reason: 'empty', storyCount: 0 };
   }
-  if (stories.length > MAX_SLICES) {
+  if (stories.length > SLICE_CAP_CEILING) {
     return { ok: false, reason: 'over-cap', storyCount: stories.length };
   }
   return {
@@ -124,6 +126,15 @@ export function parseSlicePlanComment(body: string): SlicePlanParseResult | null
     return { ok: false, error: 'slice plan indexes are not 1..n in order' };
   }
   return { ok: true, plan: parsed.data };
+}
+
+/** ADR-0156: the cap applies only while every slice is pending; a started plan runs to the end. */
+export function sliceCapExceeded(plan: SlicePlan, maxSlices: number): boolean {
+  return plan.slices.length > maxSlices && plan.slices.every((s) => s.state === 'pending');
+}
+
+export function overCapReason(sliceCount: number, maxSlices: number): string {
+  return `slice plan has ${sliceCount} slices (cap ${maxSlices}) — parked; rerun with --max-slices ${sliceCount} or split the issue`;
 }
 
 export function currentSlice(plan: SlicePlan): Slice | undefined {

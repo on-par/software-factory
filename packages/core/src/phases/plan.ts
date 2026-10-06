@@ -20,9 +20,9 @@ import {
   type ReadinessEnrichmentRetryContext,
 } from '../readiness/enrich.js';
 import type { SizeGateMode } from '../config/index.js';
-import { decomposeOversizedIssue, publishDecomposition, renderChildIssueBody } from '../readiness/decompose.js';
+import { decomposeOversizedIssue, renderChildIssueBody } from '../readiness/decompose.js';
 import { resolveSliceGate } from '../readiness/slice-gate.js';
-import { MAX_SLICES, type SlicePlan } from '../readiness/slice-plan.js';
+import { DEFAULT_MAX_SLICES, type SlicePlan } from '../readiness/slice-plan.js';
 import { MAX_BUILD_CALL_EDGES, MAX_BUILD_SIGNATURES, MAX_BUILD_TARGET_TYPES } from '../readiness/size.js';
 import { scoreIssueReadiness } from '../readiness/index.js';
 import type { ModelRouter } from '../router/index.js';
@@ -284,6 +284,8 @@ async function planPhaseImpl(opts: {
   enforceSizeGate?: boolean;
   /** sizeGate.mode (ADR-0147). 'slice' records a slice plan and plans only the current slice. Ignored when enforceSizeGate is false. */
   sizeGateMode?: SizeGateMode;
+  /** Slice cap for sizeGate.mode 'slice' (ADR-0156); default DEFAULT_MAX_SLICES. */
+  maxSlices?: number;
   /** Stop PLAN before BUILD when a worse/unknown behaviorDelta row is not in openQuestions (#1819). Default false = log only. */
   blockUnresolvedRegressions?: boolean;
   /** Local-only mode: force the route to codex so builds use a local harness. */
@@ -414,6 +416,7 @@ async function planPhaseImpl(opts: {
       body: issueBody,
       oversized: readiness.template === 'factory-task' && readiness.sizeOk === false,
       sizeReason: readiness.sizeReason,
+      maxSlices: opts.maxSlices ?? DEFAULT_MAX_SLICES,
       worktree,
       router,
       octokit,
@@ -433,22 +436,9 @@ async function planPhaseImpl(opts: {
       log('escalate', gate.reason);
       return park(gate.reason);
     }
-    if (gate.kind === 'fallback-file') {
-      const published = await publishDecomposition({
-        decomposition: gate.decomposition,
-        issue: params.issue,
-        repo: params.repo,
-        octokit,
-        log: (type, msg) => log(type, msg),
-        fileSubIssues: true,
-      });
-      return fileModeEscalation(
-        published.childIssues,
-        readiness,
-        specPath,
-        log,
-        `slice plan has ${gate.storyCount} slices (more than ${MAX_SLICES}) — `,
-      );
+    if (gate.kind === 'over-cap') {
+      log('size-gate-escalated', gate.reason);
+      return park(gate.reason);
     }
     if (gate.kind === 'slice') {
       const { plan, slice } = gate;
@@ -698,6 +688,7 @@ async function planPhaseImpl(opts: {
             body: issueBody,
             oversized: true,
             sizeReason: `plan scope exceeds the bounded-build budget: ${scope}`,
+            maxSlices: opts.maxSlices ?? DEFAULT_MAX_SLICES,
             worktree,
             router,
             octokit,
@@ -709,18 +700,9 @@ async function planPhaseImpl(opts: {
             const reason = `plan scope exceeds the bounded-build budget (${scope}) — sliced into ${gate.plan.slices.length} slice(s); the next run plans slice ${gate.slice.index}`;
             return { ...park(reason), sliced: { sliceCount: gate.plan.slices.length } };
           }
-          if (gate.kind === 'fallback-file') {
-            await publishDecomposition({
-              decomposition: gate.decomposition,
-              issue: params.issue,
-              repo: params.repo,
-              octokit,
-              log: (type, msg) => log(type, msg),
-              fileSubIssues: false,
-            });
-            const reason = `slice plan has ${gate.storyCount} slices (more than ${MAX_SLICES}) — ${fileReason}`;
-            log('size-gate-escalated', reason);
-            return park(reason);
+          if (gate.kind === 'over-cap') {
+            log('size-gate-escalated', gate.reason);
+            return park(gate.reason);
           }
           const reason = gate.kind === 'park' ? gate.reason : fileReason;
           log('escalate', reason);

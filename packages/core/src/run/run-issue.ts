@@ -91,6 +91,8 @@ export interface RunRequest {
   publishFromBuild?: boolean;
   /** sizeGate.mode resolved (ADR-0147, #2048); undefined = file (both size gates on). */
   sizeGateMode?: SizeGateMode;
+  /** sizeGate.maxSlices or --max-slices resolved (ADR-0156); undefined = DEFAULT_MAX_SLICES. */
+  maxSlices?: number;
   /** steward.enabled resolved (#2086); undefined = off (no steward-triggered event). */
   stewardEnabled?: boolean;
   prClassifier?: { rules: ReviewFloorRuleSet; gateLabel: string; modelPin?: string };
@@ -476,6 +478,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       fastPath: request.efficiency.fastPath,
       enforceSizeGate: (request.sizeGateMode ?? 'file') !== 'off',
       sizeGateMode: request.sizeGateMode,
+      maxSlices: request.maxSlices,
       blockUnresolvedRegressions: request.blockUnresolvedRegressions,
       preferredRoute: pinnedRoute,
     });
