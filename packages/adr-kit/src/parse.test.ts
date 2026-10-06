@@ -156,6 +156,42 @@ describe('parseAdr — leniency and edge cases', () => {
   });
 });
 
+describe('parseAdr — polynomial ReDoS guards (CodeQL #62-#66)', () => {
+  // A line of whitespace ending in a char `.` cannot match (a lone \r, U+2028) used to make
+  // `\s*(.+)$` backtrack quadratically: ~1.2s at 50k chars. Each case must stay linear.
+  const pad = ' '.repeat(50_000);
+  const cases: Array<[string, string]> = [
+    ['ADR-prefix H1', `# ADR-1:${pad}\r`],
+    ['numbered-dot H1', `# 1.${pad}\r`],
+    ['plain H1', `#${pad}\u2028`],
+    ['preamble Status line', `# T\n\nStatus${pad}:${pad}\r`],
+    ['section heading', `# T\n\n##${pad}\r`],
+    ['reference line', `# T\n\n## References\n\n-${pad}\r`],
+  ];
+
+  it.each(cases)('parses a hostile %s in linear time', (_name, source) => {
+    const started = performance.now();
+    parseAdr(source);
+    expect(performance.now() - started).toBeLessThan(250);
+  });
+
+  it('still treats a whitespace-only heading as an empty-titled section', () => {
+    const adr = parseAdr('# T\n\n## Context\n\nbody\n\n##   \n\nmore\n');
+    expect(adr.context).toBe('body');
+    expect(adr.extraSections).toEqual([{ heading: '', body: 'more' }]);
+  });
+
+  it('still reads a whitespace-only ADR title as empty, keeping the number', () => {
+    const adr = parseAdr('# ADR-0004:   \n');
+    expect(adr.number).toBe(4);
+    expect(adr.title).toBe('');
+  });
+
+  it('still reads a Status value with spaces around the colon', () => {
+    expect(parseAdr('# T\n\nStatus :   Accepted  \n').status).toBe('Accepted');
+  });
+});
+
 describe('tryParseAdr', () => {
   it('returns ok:true with the adr and convention on success', () => {
     const result = tryParseAdr(ACCEPTED_NYGARD);

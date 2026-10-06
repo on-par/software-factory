@@ -1,5 +1,14 @@
-import { existsSync } from 'node:fs';
-import { mkdir as mkdirFs, mkdtemp, readFile, rm, symlink, writeFile as writeFileFs } from 'node:fs/promises';
+import { existsSync, statSync } from 'node:fs';
+import {
+  mkdir as mkdirFs,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile as writeFileFs,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -182,13 +191,61 @@ describe('captureWorktreeState with a real git repository', () => {
       if (result.tracePath) await rm(result.tracePath, { force: true });
     },
   );
+
+  it('writes a private attempt trace inside the worktree that git never sees', async () => {
+    const repoDir = await makeRepo();
+    const logs: string[] = [];
+    const snapshot = await captureWorktreeState(defaultExecFn, repoDir, (msg) => logs.push(msg));
+    expect(snapshot).not.toBeNull();
+
+    await writeFileFs(join(repoDir, 'tracked.txt'), 'SECRET_TOKEN=abc\n');
+    const result = await resetWorktreeState(defaultExecFn, repoDir, snapshot!, (msg) => logs.push(msg));
+
+    expect(result.didReset).toBe(true);
+    expect(result.tracePath).toBeDefined();
+    const traceDir = join(await realpath(repoDir), '.factory', 'attempt-traces');
+    expect(result.tracePath!.startsWith(traceDir)).toBe(true);
+    expect(await readFile(result.tracePath!, 'utf-8')).toContain('SECRET_TOKEN=abc');
+    if (process.platform !== 'win32') {
+      expect(statSync(result.tracePath!).mode & 0o777).toBe(0o600);
+    }
+
+    // The trace survives `git clean -fd`, never shows in status, and `git add -A` never stages it.
+    const { stdout: status } = await defaultExecFn('git status --porcelain --ignored=no', { cwd: repoDir });
+    expect(status).toBe('');
+    await defaultExecFn('git add -A', { cwd: repoDir });
+    const { stdout: staged } = await defaultExecFn('git diff --cached --name-only', { cwd: repoDir });
+    expect(staged).toBe('');
+  });
+
+  it.skipIf(!symlinksSupported)('refuses to write a trace through a symlinked trace directory', async () => {
+    const repoDir = await makeRepo();
+    const outside = await mkdtemp(join(tmpdir(), 'wt-state-outside-'));
+    cleanupPaths.push(outside);
+    await mkdirFs(join(repoDir, '.factory'), { recursive: true });
+    await symlink(outside, join(repoDir, '.factory', 'attempt-traces'));
+    await writeFileFs(join(repoDir, '.gitignore'), '.factory/\n');
+    await defaultExecFn('git add -A', { cwd: repoDir });
+    await defaultExecFn('git commit -m ignore', { cwd: repoDir });
+    const logs: string[] = [];
+    const snapshot = await captureWorktreeState(defaultExecFn, repoDir, (msg) => logs.push(msg));
+    expect(snapshot).not.toBeNull();
+
+    await writeFileFs(join(repoDir, 'tracked.txt'), 'dirtied\n');
+    const result = await resetWorktreeState(defaultExecFn, repoDir, snapshot!, (msg) => logs.push(msg));
+
+    expect(result.didReset).toBe(true);
+    expect(result.tracePath).toBeUndefined();
+    expect(logs.some((msg) => msg.includes('failed to write attempt trace'))).toBe(true);
+    expect(await readdir(outside)).toEqual([]);
+  });
 });
 
 describe('resetWorktreeState', () => {
   const writtenFiles: string[] = [];
 
   afterEach(async () => {
-    await Promise.all(writtenFiles.map((path) => rm(path, { force: true })));
+    await Promise.all(writtenFiles.map((path) => rm(path, { recursive: true, force: true })));
     writtenFiles.length = 0;
   });
 
@@ -221,12 +278,14 @@ describe('resetWorktreeState', () => {
     ]);
     const logs: string[] = [];
 
-    const result = await resetWorktreeState(execFn, worktree, snapshot, (msg) => logs.push(msg));
+    const tmpWorktree = await mkdtemp(join(tmpdir(), 'wt-state-trace-'));
+    writtenFiles.push(tmpWorktree);
+
+    const result = await resetWorktreeState(execFn, tmpWorktree, snapshot, (msg) => logs.push(msg));
 
     expect(result.didReset).toBe(true);
     expect(result.tracePath).toBeDefined();
-    expect(result.tracePath!.startsWith(tmpdir())).toBe(true);
-    if (result.tracePath) writtenFiles.push(result.tracePath);
+    expect(result.tracePath!.startsWith(join(await realpath(tmpWorktree), '.factory', 'attempt-traces'))).toBe(true);
 
     const resetCmd = calls.find((c) => c.startsWith('git reset --hard'));
     expect(resetCmd).toBe(`git reset --hard 'abc123'`);
