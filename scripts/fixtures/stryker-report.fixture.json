@@ -1,0 +1,315 @@
+{
+  "schemaVersion": "2",
+  "thresholds": {
+    "high": 80,
+    "low": 60
+  },
+  "files": {
+    "packages/scbench-adapter/src/a.ts": {
+      "language": "typescript",
+      "source": "",
+      "mutants": [
+        {
+          "id": "a-0",
+          "mutatorName": "Block",
+          "replacement": "{}",
+          "location": {
+            "start": {
+              "line": 1,
+              "column": 1
+            },
+            "end": {
+              "line": 1,
+              "column": 2
+            }
+          },
+          "status": "Killed"
+        },
+        {
+          "id": "a-1",
+          "mutatorName": "Block",
+          "replacement": "{}",
+          "location": {
+            "start": {
+              "line": 1,
+              "column": 1
+            },
+            "end": {
+              "line": 1,
+              "column": 2
+            }
+          },
+          "status": "Killed"
+        },
+        {
+          "id": "a-2",
+          "mutatorName": "Block",
+          "replacement": "{}",
+          "location": {
+            "start": {
+              "line": 1,
+              "column": 1
+            },
+            "end": {
+              "line": 1,
+              "column": 2
+            }
+          },
+          "status": "Killed"
+        },
+        {
+          "id": "a-3",
+          "mutatorName": "Block",
+          "replacement": "{}",
+          "location": {
+            "start": {
+              "line": 1,
+              "column": 1
+            },
+            "end": {
+              "line": 1,
+              "column": 2
+            }
+          },
+          "status": "Killed"
+        },
+        {
+          "id": "a-4",
+          "mutatorName": "Block",
+          "replacement": "{}",
+          "location": {
+            "start": {
+              "line": 1,
+              "column": 1
+            },
+            "end": {
+              "line": 1,
+              "column": 2
+            }
+          },
+          "status": "Killed"
+        },
+        {
+          "id": "a-5",
+          "mutatorName": "Block",
+          "replacement": "{}",
+          "location": {
+            "start": {
+              "line": 1,
+              "column": 1
+            },
+            "end": {
+              "line": 1,
+              "column": 2
+            }
+          },
+          "status": "Killed"
+        },
+        {
+          "id": "a-6",
+          "mutatorName": "Block",
+          "replacement": "{}",
+          "location": {
+            "start": {
+              "line": 1,
+              "column": 1
+            },
+            "end": {
+              "line": 1,
+              "column": 2
+            }
+          },
+          "status": "Timeout"
+        },
+        {
+          "id": "a-7",
+          "mutatorName": "Block",
+          "replacement": "{}",
+          "location": {
+            "start": {
+              "line": 1,
+              "column": 1
+            },
+            "end": {
+              "line": 1,
+              "column": 2
+            }
+          },
+          "status": "Survived"
+        },
+        {
+          "id": "a-8",
+          "mutatorName": "Block",
+          "replacement": "{}",
+          "location": {
+            "start": {
+              "line": 1,
+              "column": 1
+            },
+            "end": {
+              "line": 1,
+              "column": 2
+            }
+          },
+          "status": "Survived"
+        },
+        {
+          "id": "a-9",
+          "mutatorName": "Block",
+          "replacement": "{}",
+          "location": {
+            "start": {
+              "line": 1,
+              "column": 1
+            },
+            "end": {
+              "line": 1,
+              "column": 2
+            }
+          },
+          "status": "NoCoverage"
+        },
+        {
+          "id": "a-10",
+          "mutatorName": "Block",
+          "replacement": "{}",
+          "location": {
+            "start": {
+              "line": 1,
+              "column": 1
+            },
+            "end": {
+              "line": 1,
+              "column": 2
+            }
+          },
+          "status": "CompileError"
+        }
+      ]
+    },
+    "packages/scbench-adapter/src/b.ts": {
+      "language": "typescript",
+      "source": "",
+      "mutants": [
+        {
+          "id": "b-0",
+          "mutatorName": "Block",
+          "replacement": "{}",
+          "location": {
+            "start": {
+              "line": 1,
+              "column": 1
+            },
+            "end": {
+              "line": 1,
+              "column": 2
+            }
+          },
+          "status": "Killed"
+        },
+        {
+          "id": "b-1",
+          "mutatorName": "Block",
+          "replacement": "{}",
+          "location": {
+            "start": {
+              "line": 1,
+              "column": 1
+            },
+            "end": {
+              "line": 1,
+              "column": 2
+            }
+          },
+          "status": "Killed"
+        },
+        {
+          "id": "b-2",
+          "mutatorName": "Block",
+          "replacement": "{}",
+          "location": {
+            "start": {
+              "line": 1,
+              "column": 1
+            },
+            "end": {
+              "line": 1,
+              "column": 2
+            }
+          },
+          "status": "Ignored"
+        }
+      ]
+    },
+    "packages/config/src/c.ts": {
+      "language": "typescript",
+      "source": "",
+      "mutants": [
+        {
+          "id": "c-0",
+          "mutatorName": "Block",
+          "replacement": "{}",
+          "location": {
+            "start": {
+              "line": 1,
+              "column": 1
+            },
+            "end": {
+              "line": 1,
+              "column": 2
+            }
+          },
+          "status": "Killed"
+        },
+        {
+          "id": "c-1",
+          "mutatorName": "Block",
+          "replacement": "{}",
+          "location": {
+            "start": {
+              "line": 1,
+              "column": 1
+            },
+            "end": {
+              "line": 1,
+              "column": 2
+            }
+          },
+          "status": "Killed"
+        },
+        {
+          "id": "c-2",
+          "mutatorName": "Block",
+          "replacement": "{}",
+          "location": {
+            "start": {
+              "line": 1,
+              "column": 1
+            },
+            "end": {
+              "line": 1,
+              "column": 2
+            }
+          },
+          "status": "Killed"
+        },
+        {
+          "id": "c-3",
+          "mutatorName": "Block",
+          "replacement": "{}",
+          "location": {
+            "start": {
+              "line": 1,
+              "column": 1
+            },
+            "end": {
+              "line": 1,
+              "column": 2
+            }
+          },
+          "status": "Survived"
+        }
+      ]
+    }
+  }
+}
