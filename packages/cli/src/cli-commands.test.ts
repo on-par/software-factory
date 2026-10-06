@@ -1,6 +1,7 @@
 import type * as ChildProcess from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
@@ -6051,6 +6052,49 @@ describe('shipIssue (direct)', () => {
     expect(events).toContain('sandbox-degraded');
     expect(events).toContain('host-level egress filtering unavailable');
     expect(events).not.toContain('sandbox-unavailable');
+  });
+
+  describe('report-only egress proxy (#2214)', () => {
+    const refused = (port: number): Promise<string> =>
+      new Promise((res) => {
+        const sock = connect(port, '127.0.0.1');
+        sock.on('connect', () => {
+          sock.destroy();
+          res('connected');
+        });
+        sock.on('error', (e: NodeJS.ErrnoException) => res(e.code ?? 'error'));
+      });
+
+    beforeEach(() => {
+      h.factoryConfig = { ...h.factoryConfig, sandbox: { ...h.factoryConfig.sandbox, runtime: 'sandbox-exec' } };
+    });
+
+    it('passes proxyUrl to the build phase, logs egress_summary, and closes the proxy', async () => {
+      let port = 0;
+      phases.buildPhase.mockImplementationOnce(async (opts) => {
+        const url = (opts.sandbox as any).proxyUrl as string;
+        port = Number(new URL(url).port);
+        expect(await refused(port)).toBe('connected');
+        return h.buildResult;
+      });
+      await shipIssue(5, {}, ctx());
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('egress_summary');
+      expect(port).toBeGreaterThan(0);
+      expect(await refused(port)).toBe('ECONNREFUSED');
+    });
+
+    it('closes the proxy when the build phase throws', async () => {
+      let port = 0;
+      phases.buildPhase.mockImplementationOnce(async (opts) => {
+        port = Number(new URL((opts.sandbox as any).proxyUrl as string).port);
+        throw new Error('build blew up');
+      });
+      await expect(shipIssue(5, {}, ctx())).rejects.toThrow();
+      expect(port).toBeGreaterThan(0);
+      expect(await refused(port)).toBe('ECONNREFUSED');
+      expect(readFileSync(paths().events, 'utf-8')).toContain('egress_summary');
+    });
   });
 
   it('stamps the resolved sandboxRuntime and running reworkRoundCount onto each cost row (#655)', async () => {

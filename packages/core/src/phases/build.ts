@@ -192,7 +192,7 @@ async function buildPhaseImpl(opts: {
   if (sandbox) {
     log(
       'sandbox',
-      `containment active (runtime ${sandbox.runtime}, net ${sandbox.allowHosts.length ? 'allow-list' : 'deny-all'})`,
+      `containment active (runtime ${sandbox.runtime}, net ${sandbox.allowHosts.length ? 'open (report-only)' : 'deny-all'})`,
     );
   }
 

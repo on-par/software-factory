@@ -5,7 +5,8 @@
 // worktree + known state dirs and gates network by an allowlist. Per-host
 // network filtering is not expressible in either runtime without a proxy —
 // see resolveSandboxPolicy's caller for the 'sandbox-degraded' warning this
-// implies when the allowlist is non-empty. `docker-sandbox` is a selectable
+// implies when the allowlist is non-empty. On sandbox-exec, egress is report-only
+// through a per-lane proxy (egress-proxy.ts, #2214): nothing is blocked yet. `docker-sandbox` is a selectable
 // runtime backed by a microVM lifecycle (create/mount/teardown, #653) owned by
 // utils/microvm.ts and driven from setupWorktree/cleanupWorktree; the VM itself is
 // the containment boundary, so it is not a command prefix and wraps nothing here.
@@ -45,6 +46,8 @@ export interface SandboxPolicy {
    *  NOT cover those siblings, which is why this is a separate field. */
   writableFilePrefixes: string[];
   allowHosts: string[];
+  /** Report-only egress proxy URL (#2214); set only for sandbox-exec with a non-empty allowlist. */
+  proxyUrl?: string;
   cpuMs: number;
   memMb: number;
 }
@@ -234,6 +237,24 @@ ${prefixRules}
 (allow file-write* (literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr") (subpath "/dev/fd"))${networkDeny}`;
 }
 
+/** True when a report-only egress proxy should run for this policy (#2214). */
+export function shouldProxyEgress(policy: SandboxPolicy | undefined): policy is SandboxPolicy {
+  return policy?.runtime === 'sandbox-exec' && policy.allowHosts.length > 0;
+}
+
+/** Proxy env vars injected into the sandbox-exec agent command; loopback stays direct. */
+export function egressProxyEnv(proxyUrl: string): Record<string, string> {
+  const noProxy = 'localhost,127.0.0.1,::1';
+  return {
+    HTTPS_PROXY: proxyUrl,
+    HTTP_PROXY: proxyUrl,
+    https_proxy: proxyUrl,
+    http_proxy: proxyUrl,
+    NO_PROXY: noProxy,
+    no_proxy: noProxy,
+  };
+}
+
 /** Wraps `cmd` with the platform sandbox + resource-limit prefix. Pure —
  *  runtime 'none' returns cmd unchanged. */
 export function wrapCommandInSandbox(cmd: string, policy: SandboxPolicy): string {
@@ -245,12 +266,18 @@ export function wrapCommandInSandbox(cmd: string, policy: SandboxPolicy): string
   const cpuSeconds = Math.ceil(policy.cpuMs / 1000);
   const ulimitPrefix =
     policy.runtime === 'firejail' ? `ulimit -t ${cpuSeconds} -v ${policy.memMb * 1024}` : `ulimit -t ${cpuSeconds}`;
-  const inner = `/bin/sh -c ${shellEscape(`${ulimitPrefix}; ${cmd}`)}`;
 
   if (policy.runtime === 'sandbox-exec') {
+    const proxyExports = policy.proxyUrl
+      ? `export ${Object.entries(egressProxyEnv(policy.proxyUrl))
+          .map(([k, v]) => `${k}=${shellEscape(v)}`)
+          .join(' ')}; `
+      : '';
+    const inner = `/bin/sh -c ${shellEscape(`${proxyExports}${ulimitPrefix}; ${cmd}`)}`;
     return `sandbox-exec -p ${shellEscape(buildDarwinProfile(policy))} ${inner}`;
   }
 
+  const inner = `/bin/sh -c ${shellEscape(`${ulimitPrefix}; ${cmd}`)}`;
   const writeFlags = [...policy.writablePaths, ...policy.writableFilePrefixes]
     .map((p) => `--read-write=${shellEscape(p)}`)
     .join(' ');

@@ -631,6 +631,10 @@ const INTERNAL_API_KEYS = [
   'reapOrphanMicroVm',
   'shellEscape',
   'slugify',
+  // report-only egress proxy for sandbox-exec (#2214)
+  'startEgressProxy',
+  'egressSummaryMessage',
+  'shouldProxyEgress',
   'watchChecks',
   'describeCommandFailure',
   'runCommand',
