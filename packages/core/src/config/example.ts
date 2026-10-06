@@ -55,7 +55,7 @@ const RUNTIME_NOTES: Record<string, string> = {
     'after CHECK. FACTORY_BUILD_PUBLISH=1/0 beats it.',
   sizeGate:
     'Size gate policy at PLAN (ADR-0147). mode: file (default) files child issues for an oversized issue and parks ' +
-    'when the post-plan gate trips; off skips both gates and sends the whole issue to BUILD. ' +
+    'when the post-plan gate trips; slice keeps the issue whole, records a slice plan comment and ships one slice per run; off skips both gates and sends the whole issue to BUILD. ' +
     '`factory run-issue --size-gate <mode>` beats it for one run.',
   timeouts:
     'Phase timeouts in seconds. FACTORY_PLAN_TIMEOUT, FACTORY_BUILD_TIMEOUT, FACTORY_CHECK_TIMEOUT and ' +

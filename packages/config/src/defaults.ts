@@ -79,8 +79,8 @@ export interface FactoryDefaults {
   design: { blockUnresolvedRegressions: boolean };
   /** BUILD policy (#1867). publishFromBuild: true lets the claude BUILD worker push and open a PR before CHECK; default false = commit-only, SHIP publishes. */
   build: { publishFromBuild: boolean };
-  /** Size gate policy (ADR-0147). file: gates file child issues / park (ADR-0043); off: skip both gates. */
-  sizeGate: { mode: 'file' | 'off' };
+  /** Size gate policy (ADR-0147). file: gates file child issues / park (ADR-0043); slice: keep an oversized issue whole and ship it as slice PRs; off: skip both gates. */
+  sizeGate: { mode: 'file' | 'slice' | 'off' };
   sandbox: {
     enabled: boolean;
     runtime: 'auto' | 'sandbox-exec' | 'firejail' | 'docker-sandbox' | 'none';

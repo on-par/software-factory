@@ -566,6 +566,8 @@ export interface DecomposeResult {
   /** Numbers of the child issues filed under the original issue, in build order.
    *  Empty unless deps.fileSubIssues was set AND every child was filed successfully. */
   childIssues: number[];
+  /** The decomposition that passed the INVEST gate, set whenever one did. */
+  decomposition?: DecompositionOutput;
 }
 
 export interface DecomposeDriverDeps {
@@ -590,6 +592,43 @@ export interface DecomposeDriverDeps {
    *  original issue, instead of only commenting. Off by default: only the PLAN
    *  pre-flight size gate opts in — the post-plan build-scope gate stays advisory (#823). */
   fileSubIssues?: boolean;
+  /** Default true. False returns the validated decomposition without posting the epic
+   *  comment or filing (slice mode, ADR-0147). */
+  postComment?: boolean;
+}
+
+/**
+ * Posts the rendered epic comment and, when `fileSubIssues` is set, files the stories as
+ * linked sub-issues. Never throws: a failure logs decompose_failed and returns nothing posted.
+ */
+export async function publishDecomposition(deps: {
+  decomposition: DecompositionOutput;
+  issue: number;
+  repo: string;
+  octokit: Octokit;
+  log: (type: EventKind, msg: string) => void;
+  fileSubIssues?: boolean;
+}): Promise<{ posted: boolean; childIssues: number[] }> {
+  const { decomposition, issue, repo, octokit, log } = deps;
+  const [owner, name] = repo.split('/');
+  try {
+    await octokit.rest.issues.createComment({
+      owner,
+      repo: name,
+      issue_number: issue,
+      body: renderDecompositionComment(decomposition),
+    });
+    log(
+      'decompose_comment_posted',
+      `posted proposed epic + ${decomposition.stories.length} INVEST-compliant stories as a comment on issue #${issue}`,
+    );
+
+    const childIssues = deps.fileSubIssues ? await fileDecomposition({ decomposition, issue, repo, octokit, log }) : [];
+    return { posted: true, childIssues };
+  } catch (error) {
+    log('decompose_failed', `decomposition of issue #${issue} failed: ${errorDetail(error)}`);
+    return { posted: false, childIssues: [] };
+  }
 }
 
 /**
@@ -603,8 +642,6 @@ export async function decomposeOversizedIssue(deps: DecomposeDriverDeps): Promis
   const { issue, repo, title, body, worktree, router, octokit, log, onProviderFailure } = deps;
   const timeoutSeconds = deps.timeoutSeconds;
   const maxAttempts = deps.maxAttempts ?? 2;
-  const [owner, name] = repo.split('/');
-
   try {
     log('decompose_started', `decomposing oversized issue #${issue} into a proposed epic + INVEST stories`);
     let violations: string[] = [];
@@ -628,22 +665,18 @@ export async function decomposeOversizedIssue(deps: DecomposeDriverDeps): Promis
         continue;
       }
 
-      const comment = renderDecompositionComment(parsed.decomposition);
-      await octokit.rest.issues.createComment({
-        owner,
-        repo: name,
-        issue_number: issue,
-        body: comment,
+      if (deps.postComment === false) {
+        return { posted: false, childIssues: [], decomposition: parsed.decomposition };
+      }
+      const published = await publishDecomposition({
+        decomposition: parsed.decomposition,
+        issue,
+        repo,
+        octokit,
+        log,
+        fileSubIssues: deps.fileSubIssues,
       });
-      log(
-        'decompose_comment_posted',
-        `posted proposed epic + ${parsed.decomposition.stories.length} INVEST-compliant stories as a comment on issue #${issue}`,
-      );
-
-      const childIssues = deps.fileSubIssues
-        ? await fileDecomposition({ decomposition: parsed.decomposition, issue, repo, octokit, log })
-        : [];
-      return { posted: true, childIssues };
+      return { ...published, decomposition: parsed.decomposition };
     }
 
     log(

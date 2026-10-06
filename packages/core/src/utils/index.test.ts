@@ -82,6 +82,12 @@ describe('utils', () => {
     expect(branchFor(7, 'Hello, World!')).toBe('ship-it/7-hello-world');
   });
 
+  it('adds an -sK- segment only for slice 2 and later (ADR-0147)', () => {
+    expect(branchFor(12, 'Add X', 'factory')).toBe('factory/12-add-x');
+    expect(branchFor(12, 'Add X', 'factory', 1)).toBe('factory/12-add-x');
+    expect(branchFor(12, 'Add X', 'factory', 2)).toBe('factory/12-s2-add-x');
+  });
+
   it('allows comparison runs to use a custom branch prefix', () => {
     expect(branchFor(7, 'Hello, World!', 'compare-local')).toBe('compare-local/7-hello-world');
   });

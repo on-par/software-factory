@@ -360,7 +360,8 @@ export function factoryBranchIssue(branch: string, prefix?: string): number | nu
   return null;
 }
 
-export function branchFor(issue: number, title: string, prefix?: string): string {
+export function branchFor(issue: number, title: string, prefix?: string, slice?: number): string {
+  if (slice !== undefined && slice >= 2) return `${branchPrefixSlug(prefix)}/${issue}-s${slice}-${slugify(title)}`;
   return `${branchPrefixSlug(prefix)}/${issue}-${slugify(title)}`;
 }
 

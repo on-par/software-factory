@@ -666,5 +666,8 @@ export {
 } from './readiness/slice-plan.js';
 export type { SlicePlanCommentLookup, SlicePlanUpsertResult } from './readiness/slice-plan-github.js';
 export { findSlicePlanComment, upsertSlicePlanComment } from './readiness/slice-plan-github.js';
+export type { SliceGateOutcome } from './readiness/slice-gate.js';
+export { resolveSliceGate } from './readiness/slice-gate.js';
+export { publishDecomposition } from './readiness/decompose.js';
 export type { ReadinessGapCriterion, ReadinessGapReport } from './readiness/enrich.js';
 export { buildReadinessGapPrompt, parseReadinessGapOutput } from './readiness/enrich.js';
