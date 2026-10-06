@@ -7,7 +7,7 @@ import type { CheckSummary } from '../types/index.js';
 const SECTION_LIMIT = 4000;
 
 export interface PrBodyInput {
-  /** One line naming the work item, e.g. "Implements #23. Built by the Software Factory ...". */
+  /** One line naming the work item, e.g. "Implements #23.". */
   summaryLine: string;
   /** Frozen spec body with the frontmatter stripped; intent sections are omitted when absent. */
   specBody?: string;
