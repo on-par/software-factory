@@ -203,3 +203,50 @@ export function renderGardenReport(clusters: readonly GardenCluster[]): string[]
   }
   return lines;
 }
+
+export interface GardenReportMeta {
+  /** The --since window as given, e.g. '14d'. */
+  since: string;
+  maxClusters: number;
+}
+
+export const DEFAULT_GARDEN_SINCE = '14d';
+export const DEFAULT_GARDEN_MAX_CLUSTERS = 10;
+
+const DURATION_UNIT_MS = { h: 3_600_000, d: 86_400_000, w: 604_800_000 } as const;
+
+/** Parses a strict `<positive int><h|d|w>` window (e.g. `7d`) into ms; undefined when malformed. */
+export function parseGardenDuration(input: string): number | undefined {
+  const m = /^(\d+)([hdw])$/.exec(input);
+  if (!m) return undefined;
+  const n = Number(m[1]);
+  return n > 0 ? n * DURATION_UNIT_MS[m[2] as keyof typeof DURATION_UNIT_MS] : undefined;
+}
+
+/** Keeps events whose ts is at or after `now - windowMs`; an event with a missing or unparseable ts is dropped. */
+export function filterGardenWindow(events: readonly HarvestedEvent[], windowMs: number, now: Date): HarvestedEvent[] {
+  const cutoff = now.getTime() - windowMs;
+  return events.filter((h) => {
+    const ts: unknown = h.event.ts;
+    if (typeof ts !== 'string') return false;
+    const t = Date.parse(ts);
+    return Number.isFinite(t) && t >= cutoff;
+  });
+}
+
+/** Keeps the `max` most recurrent clusters across all dimensions (count desc, ties by input order), in input order. */
+export function capGardenClusters(clusters: readonly GardenCluster[], max: number): GardenCluster[] {
+  const keep = new Set(
+    clusters
+      .map((c, i) => ({ c, i }))
+      .sort((a, b) => b.c.count - a.c.count || a.i - b.i)
+      .slice(0, max)
+      .map((x) => x.i),
+  );
+  return clusters.filter((_, i) => keep.has(i));
+}
+
+/** The same clusters as one pretty-printed JSON document. */
+export function renderGardenJson(clusters: readonly GardenCluster[], meta: GardenReportMeta): string {
+  return JSON.stringify({ since: meta.since, maxClusters: meta.maxClusters, clusters }, null, 2);
+}

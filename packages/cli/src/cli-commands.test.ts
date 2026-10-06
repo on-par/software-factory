@@ -1502,6 +1502,7 @@ bash scripts/verify.sh
   });
 
   describe('garden --report (#2083)', () => {
+    const hoursAgo = (n: number) => new Date(Date.now() - n * 3_600_000).toISOString();
     const parkLine = (issue: string, ts: string) =>
       JSON.stringify({
         ts,
@@ -1514,7 +1515,7 @@ bash scripts/verify.sh
     it('prints one cluster with count and path:line pointers, deterministically', async () => {
       writeFileSync(
         paths().events,
-        `${[parkLine('1', '2026-01-01T00:00:00Z'), parkLine('2', '2026-01-02T00:00:00Z'), parkLine('1', '2026-01-03T00:00:00Z')].join('\n')}\n`,
+        `${[parkLine('1', hoursAgo(3)), parkLine('2', hoursAgo(2)), parkLine('1', hoursAgo(1))].join('\n')}\n`,
       );
       await runMain('garden', '--report');
       const first = logged();
@@ -1532,11 +1533,10 @@ bash scripts/verify.sh
     });
 
     it('excludes events of an environment-released run', async () => {
-      const line = (type: string, issue: string) =>
-        JSON.stringify({ ts: '2026-01-01T00:00:00Z', type, issue, msg: 'm' });
+      const line = (type: string, issue: string) => JSON.stringify({ ts: hoursAgo(5), type, issue, msg: 'm' });
       writeFileSync(
         paths().events,
-        `${[line('human-edited', '9'), line('environment-released', '9'), parkLine('1', '2026-01-02T00:00:00Z')].join('\n')}\n`,
+        `${[line('human-edited', '9'), line('environment-released', '9'), parkLine('1', hoursAgo(4))].join('\n')}\n`,
       );
       await runMain('garden', '--report');
       expect(logged()).not.toContain('human-edited');
@@ -1547,6 +1547,74 @@ bash scripts/verify.sh
       const res = await runMain('garden', '--report');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('no clusters');
+    });
+
+    const sigLine = (issue: string, sig: string, ts: string) =>
+      JSON.stringify({
+        ts,
+        type: 'fail',
+        issue,
+        msg: 'parked',
+        checkFailure: { signature: sig, failingChecks: ['tests'] },
+      });
+
+    it('--since and --max-clusters scope the report', async () => {
+      writeFileSync(
+        paths().events,
+        `${[
+          sigLine('1', 'sig-a', hoursAgo(24)),
+          sigLine('2', 'sig-b', hoursAgo(25)),
+          sigLine('3', 'sig-c', hoursAgo(26)),
+          sigLine('4', 'sig-old', hoursAgo(24 * 30)),
+        ].join('\n')}\n`,
+      );
+      await runMain('garden', '--report', '--since', '7d', '--max-clusters', '2');
+      expect(logged()).not.toContain('sig-old');
+      expect((logged().match(/^### /gm) ?? []).length).toBeLessThanOrEqual(2);
+    });
+
+    it('--json prints the cluster data as JSON', async () => {
+      writeFileSync(paths().events, `${parkLine('1', hoursAgo(1))}\n`);
+      await runMain('garden', '--report', '--json');
+      const doc = JSON.parse(logged());
+      expect(doc.since).toBe('14d');
+      expect(doc.maxClusters).toBe(10);
+      expect(doc.clusters[0]).toMatchObject({ dimension: expect.any(String), key: expect.any(String), count: 1 });
+      for (const k of ['issues', 'samples', 'failingChecks', 'firstSeen', 'lastSeen'])
+        expect(doc.clusters[0]).toHaveProperty(k);
+    });
+
+    it('--out writes the report to a file and nothing to stdout', async () => {
+      writeFileSync(paths().events, `${parkLine('1', hoursAgo(1))}\n`);
+      const out = join(h.repoRoot, 'report.md');
+      await runMain('garden', '--report', '--out', out);
+      expect(readFileSync(out, 'utf8')).toContain('# Garden report');
+      expect(logSpy).not.toHaveBeenCalled();
+      expect(errored()).toContain(`wrote report to ${out}`);
+    });
+
+    it('--out with --json writes valid JSON', async () => {
+      writeFileSync(paths().events, `${parkLine('1', hoursAgo(1))}\n`);
+      const out = join(h.repoRoot, 'report.json');
+      await runMain('garden', '--report', '--json', '--out', out);
+      expect(JSON.parse(readFileSync(out, 'utf8')).clusters.length).toBeGreaterThan(0);
+      expect(logSpy).not.toHaveBeenCalled();
+    });
+
+    it('rejects an invalid --since or --max-clusters', async () => {
+      const a = await runMain('garden', '--report', '--since', 'bogus');
+      expect(a.exited).toBe(true);
+      expect(a.code).not.toBe(0);
+      const b = await runMain('garden', '--report', '--max-clusters', '0');
+      expect(b.exited).toBe(true);
+      expect(b.code).not.toBe(0);
+    });
+
+    it('exits non-zero when --out cannot be written', async () => {
+      const out = join(h.repoRoot, 'missing-dir', 'r.md');
+      const res = await runMain('garden', '--report', '--out', out);
+      expect(res.exited).toBe(true);
+      expect(errored()).toContain(`factory garden: cannot write ${out}`);
     });
 
     it('exits non-zero without --report', async () => {

@@ -321,6 +321,12 @@ const PUBLIC_API_KEYS = [
 
 const INTERNAL_API_KEYS = [
   // Garden harvest (#2083)
+  'DEFAULT_GARDEN_MAX_CLUSTERS',
+  'DEFAULT_GARDEN_SINCE',
+  'capGardenClusters',
+  'filterGardenWindow',
+  'parseGardenDuration',
+  'renderGardenJson',
   'clusterCheckFailures',
   'clusterGarden',
   'readHarvestEvents',
