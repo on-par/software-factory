@@ -19,34 +19,20 @@ Full matrix — including model harnesses, prompt evals, the server, and experim
 
 ## Monorepo Structure
 
-```
-software-factory/
-├── packages/
-│   ├── core/         @on-par/factory-core     — Engine: router, constitutions, checkers, phases
-│   ├── cli/          @on-par/factory-cli      — CLI app (factory init, ship, run, triage, ...)
-│   ├── config/       @on-par/factory-config   — Shared JSON configs + product constitutions
-│   ├── contracts/    @on-par/contracts        — Shared typed seam: Issue/Epic/Story/DesignArtifact schemas
-│   ├── adr-kit/      @on-par/adr-kit          — Pure ADR kernel: parse/serialize/template/numbering, zero deps
-│   ├── repo-context/ @on-par/repo-context     — Read-only repo reader port: GitHub contents-API + in-memory, zero deps
-│   └── server/       @on-par/factory-server   — Local HTTP server: GET /events relays the lane lifecycle bus as SSE
-├── tsconfig.base.json
-└── package.json      (npm workspaces root)
-```
-
-### Package Dependencies
+An npm-workspaces monorepo. The Wave-1 publish packages:
 
 ```
-config      ←  core  ←  cli
-contracts   ←  core  ←  server
+packages/
+├── cli/           @on-par/factory-cli      — the `factory` command
+├── core/          @on-par/factory-core     — engine: router, phases, checkers
+├── config/        @on-par/factory-config   — typed defaults + constitutions (zero deps)
+├── contracts/     @on-par/contracts        — shared zod schemas (Issue/Epic/Story/Design)
+├── tui/           @on-par/factory-tui      — read-only Ink TUI for a live run
+├── adr-kit/       @on-par/adr-kit          — pure ADR kernel (zero deps)
+└── repo-context/  @on-par/repo-context     — read-only repo reader port (zero deps)
 ```
 
-- **@on-par/factory-config** — Zero dependencies. Ships `defaults.ts` (typed model registry, route table, and factory defaults) and constitution markdown files.
-- **@on-par/contracts** — Zero dependencies besides zod. Zod schemas + inferred types for the engineering-ready Issue/Epic/Story, Gherkin AcceptanceCriterion, and DesignArtifact shapes PLAN emits and BUILD consumes.
-- **@on-par/factory-core** — The engine. Model registry, router with failover, constitution loader, checker framework, and the four pipeline phases (PLAN → BUILD → CHECK → SHIP). Imports config, contracts, adr-kit and repo-context.
-- **@on-par/factory-cli** — The `factory` CLI. Imports core.
-- **@on-par/factory-server** — Local HTTP server. `GET /events` relays the lane lifecycle bus as SSE, with `Last-Event-ID` resume via a bounded replay ring. Depends only on `@on-par/contracts` — no auth, loopback-only.
-- **@on-par/adr-kit** — Zero runtime dependencies. Pure, no-I/O ADR kernel: parses ADR markdown into a typed record, serializes it back byte-stably, models the repo's ADR convention (Nygard fallback, or inferred/reused when the repo already has ADRs), and provides next-number and index-table helpers. Imported by `@on-par/factory-core` (the ADR reader in `packages/core/src/adr/`) and by the private `packages/product` proposer (ADR reading and next-number filenames).
-- **@on-par/repo-context** — Zero runtime dependencies. Defines the `RepoContextReader` port (`readFile`, `readDir`, `exists`) that every repo-reading consumer shares, plus a GitHub contents-API implementation (for the proposer, which holds only a read-only token) and an in-memory implementation (for tests, and proof the port is backend-independent). Degrades to an empty result instead of throwing on a missing path, auth failure, or rate limit. Imported by `@on-par/factory-core` (PLAN, the ADR reader, the design-smells checker and the review classifier use its filesystem reader `createFsReader`) and by the private `packages/product` proposer.
+Private workspaces (server, dashboard, product, scbench-adapter) also live here but are not published. For the dependency graph and per-package detail, see [docs/architecture.md](docs/architecture.md). For contributor rules, see [AGENTS.md](AGENTS.md).
 
 ## Quick Start (5 minutes)
 
