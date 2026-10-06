@@ -664,5 +664,7 @@ export {
   slicePlanFromDecomposition,
   withSliceState,
 } from './readiness/slice-plan.js';
+export type { SlicePlanCommentLookup, SlicePlanUpsertResult } from './readiness/slice-plan-github.js';
+export { findSlicePlanComment, upsertSlicePlanComment } from './readiness/slice-plan-github.js';
 export type { ReadinessGapCriterion, ReadinessGapReport } from './readiness/enrich.js';
 export { buildReadinessGapPrompt, parseReadinessGapOutput } from './readiness/enrich.js';

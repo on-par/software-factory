@@ -350,9 +350,11 @@ const INTERNAL_API_KEYS = [
   'MAX_SLICES',
   'SLICE_PLAN_MARKER',
   'currentSlice',
+  'findSlicePlanComment',
   'parseSlicePlanComment',
   'renderSlicePlanComment',
   'slicePlanFromDecomposition',
+  'upsertSlicePlanComment',
   'withSliceState',
   // Worktree location (#1758)
   'ensureWorktreeParentExcluded',
