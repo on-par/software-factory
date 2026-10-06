@@ -113,14 +113,14 @@ export function readCosts(costsFile: string): CostEntry[] {
 // kills the child on expiry. Without one, a wedged worktree op hangs its caller
 // forever with no output — the failure mode #755 was opened for.
 export async function gitFetch(repoRoot: string): Promise<void> {
-  await execGit('git fetch origin -q --prune', { cwd: repoRoot });
+  await execGit(['fetch', 'origin', '-q', '--prune'], { cwd: repoRoot });
 }
 
 /** The repo default branch's remote-tracking ref (from origin/HEAD), or
  *  'origin/main' when origin/HEAD is unset (e.g. a clone of an empty bare repo). */
 export async function defaultRemoteBase(repoRoot: string): Promise<string> {
   try {
-    const { stdout } = await execGit('git symbolic-ref -q refs/remotes/origin/HEAD', { cwd: repoRoot });
+    const { stdout } = await execGit(['symbolic-ref', '-q', 'refs/remotes/origin/HEAD'], { cwd: repoRoot });
     const m = stdout.trim().match(/^refs\/remotes\/(origin\/.+)$/);
     if (m) return m[1];
   } catch {
@@ -133,10 +133,9 @@ export async function defaultRemoteBase(repoRoot: string): Promise<string> {
  *  exist. Reads local refs only; call after gitFetch (setupWorktree does). Never throws. */
 export async function detectRemoteBranch(repoRoot: string, branch: string): Promise<string | null> {
   try {
-    const { stdout } = await execGit(
-      `git rev-parse --verify -q ${shellEscape(`refs/remotes/origin/${branch}^{commit}`)}`,
-      { cwd: repoRoot },
-    );
+    const { stdout } = await execGit(['rev-parse', '--verify', '-q', `refs/remotes/origin/${branch}^{commit}`], {
+      cwd: repoRoot,
+    });
     return stdout.trim() || null;
   } catch {
     return null;
@@ -193,14 +192,12 @@ export async function setupWorktree(
     }
     log?.('remote-branch-preexisting', `origin/${branch} already exists @ ${remoteSha}; ${prText}`);
   }
-  await execGit(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot }).catch(() => {});
-  await execGit(`git branch -D ${shellEscape(branch)}`, { cwd: repoRoot }).catch(() => {});
+  await execGit(['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot }).catch(() => {});
+  await execGit(['branch', '-D', branch], { cwd: repoRoot }).catch(() => {});
   mkdirSync(dirname(worktreePath), { recursive: true });
   await ensureWorktreeParentExcluded(repoRoot, dirname(worktreePath));
-  await execGit(`git worktree add -b ${shellEscape(branch)} ${shellEscape(worktreePath)} ${shellEscape(base)}`, {
-    cwd: repoRoot,
-  });
-  const { stdout } = await execGit('git rev-parse --verify HEAD', { cwd: worktreePath });
+  await execGit(['worktree', 'add', '-b', branch, worktreePath, base], { cwd: repoRoot });
+  const { stdout } = await execGit(['rev-parse', '--verify', 'HEAD'], { cwd: worktreePath });
   log?.('worktree-base', `created from ${base} @ ${stdout.trim()}`);
   if (sandbox) {
     await createMicroVm({ ...sandbox, worktreePath, log });
@@ -217,13 +214,13 @@ export async function cleanupWorktree(
   if (sandbox) {
     await removeMicroVm({ ...sandbox, worktreePath, log });
   }
-  await execGit(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot }).catch((err: any) =>
+  await execGit(['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot }).catch((err: any) =>
     log(
       'warn',
       `git worktree remove failed for ${worktreePath}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`,
     ),
   );
-  await execGit('git worktree prune', { cwd: repoRoot }).catch((err: any) =>
+  await execGit(['worktree', 'prune'], { cwd: repoRoot }).catch((err: any) =>
     log(
       'warn',
       `git worktree prune failed in ${repoRoot}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`,
@@ -261,7 +258,7 @@ export async function reapLaneWorktree(
   }
 
   const lanePrefix = `${branchPrefixSlug(opts.branchPrefix)}/${opts.issue}-`;
-  const branch = await execGit('git rev-parse --abbrev-ref HEAD', { cwd: worktreePath }).then(
+  const branch = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: worktreePath }).then(
     (r) => r.stdout.trim(),
     () => null,
   );
@@ -273,7 +270,9 @@ export async function reapLaneWorktree(
     return { outcome: 'kept-branch-mismatch', branch, branchDeleted: false };
   }
 
-  const status = await execGit('git status --porcelain --untracked-files=no', { cwd: worktreePath }).catch(() => null);
+  const status = await execGit(['status', '--porcelain', '--untracked-files=no'], { cwd: worktreePath }).catch(
+    () => null,
+  );
   if (status === null || status.stdout.trim() !== '') {
     log(
       'warn',
@@ -282,20 +281,18 @@ export async function reapLaneWorktree(
     return { outcome: 'kept-dirty', branch, branchDeleted: false };
   }
 
-  const tip = await execGit('git rev-parse HEAD', { cwd: worktreePath }).then(
+  const tip = await execGit(['rev-parse', 'HEAD'], { cwd: worktreePath }).then(
     (r) => r.stdout.trim(),
     () => null,
   );
 
   await cleanupWorktree(repoRoot, worktreePath, log, opts.sandbox);
 
-  const lsRemote = await execGit(`git ls-remote --heads origin ${shellEscape(branch)}`, { cwd: repoRoot }).catch(
-    () => null,
-  );
+  const lsRemote = await execGit(['ls-remote', '--heads', 'origin', branch], { cwd: repoRoot }).catch(() => null);
   const onRemote =
     (lsRemote !== null && lsRemote.stdout.trim() !== '') ||
     (tip !== null &&
-      (await execGit(`git merge-base --is-ancestor ${shellEscape(tip)} origin/main`, { cwd: repoRoot }).then(
+      (await execGit(['merge-base', '--is-ancestor', tip, 'origin/main'], { cwd: repoRoot }).then(
         () => true,
         () => false,
       )));
@@ -303,7 +300,7 @@ export async function reapLaneWorktree(
   let branchDeleted = false;
   if (onRemote) {
     try {
-      await execGit(`git branch -D ${shellEscape(branch)}`, { cwd: repoRoot });
+      await execGit(['branch', '-D', branch], { cwd: repoRoot });
       branchDeleted = true;
     } catch (err: any) {
       log(

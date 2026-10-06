@@ -6,8 +6,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { execGit as exec } from '../utils/git-exec.js';
-import { shellEscape } from '../utils/index.js';
+import { execGit } from '../utils/git-exec.js';
 
 export interface SimWorkspace {
   /** Bare repo standing in for the GitHub remote — a local path, so pushes never touch the network. */
@@ -21,8 +20,8 @@ export interface SimWorkspace {
 }
 
 export async function simCommitAll(cwd: string, message: string): Promise<void> {
-  await exec('git add -A', { cwd });
-  await exec(`git commit -m ${shellEscape(message)}`, { cwd });
+  await execGit(['add', '-A'], { cwd });
+  await execGit(['commit', '-m', message], { cwd });
 }
 
 export async function createSimWorkspace(): Promise<SimWorkspace> {
@@ -32,14 +31,14 @@ export async function createSimWorkspace(): Promise<SimWorkspace> {
   const plansDir = join(plansRoot, 'plans');
   await mkdir(plansDir, { recursive: true });
 
-  await exec('git -c init.defaultBranch=main init --bare', { cwd: origin });
-  await exec(`git clone ${shellEscape(origin)} ${shellEscape(repoRoot)}`);
-  await exec('git config user.name factory-test', { cwd: repoRoot });
-  await exec('git config user.email factory@test', { cwd: repoRoot });
-  await exec('git checkout -b main', { cwd: repoRoot });
+  await execGit(['-c', 'init.defaultBranch=main', 'init', '--bare'], { cwd: origin });
+  await execGit(['clone', origin, repoRoot]);
+  await execGit(['config', 'user.name', 'factory-test'], { cwd: repoRoot });
+  await execGit(['config', 'user.email', 'factory@test'], { cwd: repoRoot });
+  await execGit(['checkout', '-b', 'main'], { cwd: repoRoot });
   await writeFile(join(repoRoot, 'README.md'), '# Throwaway\n');
   await simCommitAll(repoRoot, 'chore: initial commit');
-  await exec('git push -u origin main', { cwd: repoRoot });
+  await execGit(['push', '-u', 'origin', 'main'], { cwd: repoRoot });
 
   return {
     origin,
