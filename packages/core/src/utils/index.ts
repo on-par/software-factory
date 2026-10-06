@@ -4,11 +4,12 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
-import type { EventKind, LanePausedPayload } from '../events/kinds.js';
+import type { EventKind, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
 import { createLogger } from '../logger/index.js';
 import type { PrClassificationRecord } from '../review/classifier.js';
 import type { PrLookup } from '../phases/ship.js';
 import type {
+  CheckFailureInfo,
   CostEntry,
   FailoverReason,
   LogLevel,
@@ -41,6 +42,8 @@ export function logEvent(
     readiness?: ReadinessInfo;
     prClassification?: PrClassificationRecord;
     lanePaused?: LanePausedPayload;
+    stewardTriggered?: StewardTriggeredPayload;
+    checkFailure?: CheckFailureInfo;
     actor?: string;
     model?: string;
     tokens?: { input: number; output: number };
@@ -55,6 +58,8 @@ export function logEvent(
     readiness?: ReadinessInfo;
     prClassification?: PrClassificationRecord;
     lanePaused?: LanePausedPayload;
+    stewardTriggered?: StewardTriggeredPayload;
+    checkFailure?: CheckFailureInfo;
     actor?: string;
     model?: string;
     tokens?: { input: number; output: number };
@@ -65,6 +70,8 @@ export function logEvent(
   if (extra?.readiness) meta.readiness = extra.readiness;
   if (extra?.prClassification) meta.prClassification = extra.prClassification;
   if (extra?.lanePaused) meta.lanePaused = extra.lanePaused;
+  if (extra?.stewardTriggered) meta.stewardTriggered = extra.stewardTriggered;
+  if (extra?.checkFailure) meta.checkFailure = extra.checkFailure;
   if (extra?.actor) meta.actor = extra.actor;
   if (extra?.model) meta.model = extra.model;
   if (extra?.tokens) meta.tokens = extra.tokens;

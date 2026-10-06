@@ -125,6 +125,34 @@ describe('createLogger', () => {
     expect(without).not.toHaveProperty('lanePaused');
   });
 
+  it('includes stewardTriggered only when passed as extra (#2086)', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+    const logger = createLogger(eventsFile, {}, { out: { write: () => {} } });
+    const stewardTriggered = { trigger: 'check-exhausted' as const, failureSignature: 'sig-1' };
+
+    logger.info('steward-triggered', 'stuck', { stewardTriggered });
+    logger.info('steward-triggered', 'again');
+
+    const [withPayload, without] = readEvents(eventsFile);
+    expect(withPayload.stewardTriggered).toEqual(stewardTriggered);
+    expect(without).not.toHaveProperty('stewardTriggered');
+  });
+
+  it('includes checkFailure only when passed as extra (#2083)', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+    const logger = createLogger(eventsFile, { lane: 'app' }, { out: { write: () => {} } });
+    const checkFailure = { signature: 'sig-A', failingChecks: ['lint'] };
+
+    logger.warn('fail', 'parked', { checkFailure });
+    logger.warn('fail', 'again');
+
+    const [withPayload, without] = readEvents(eventsFile);
+    expect(withPayload.checkFailure).toEqual(checkFailure);
+    expect(without).not.toHaveProperty('checkFailure');
+  });
+
   it('includes actor only when passed as extra', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
     const eventsFile = join(tmpDir, 'events.ndjson');

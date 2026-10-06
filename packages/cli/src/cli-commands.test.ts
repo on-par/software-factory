@@ -33,7 +33,7 @@ const h = vi.hoisted(() => {
     reapedContainers: [] as Array<{ id: string; name: string; removed: boolean; detail: string }>,
     orphanVmNames: [] as string[],
     reapedVms: [] as Array<{ name: string; removed: boolean; detail: string }>,
-    // octokit instance returned by `new Octokit()`
+    // GitHub client injected through CliDeps.octokit
     octokit: {} as any,
     // configurable core behaviour
     constitutionResolve: (_worktree: string, _product?: string): any => null,
@@ -80,23 +80,6 @@ const h = vi.hoisted(() => {
     }>,
     setupWorktreeImpl: async (_repoRoot: string, _branch: string, _worktree: string, _startPoint?: string) => {},
   };
-});
-
-// ---------------------------------------------------------------------------
-// Module mocks (hoisted above imports by vitest)
-// ---------------------------------------------------------------------------
-vi.mock('@octokit/rest', () => {
-  // createFactoryOctokit (packages/cli/src/cli/octokit.ts) calls Octokit.plugin(...) at module load
-  // time to attach retry/throttling — the double must expose it as a static too.
-  class Octokit {
-    constructor() {
-      return h.octokit;
-    }
-    static plugin(): typeof Octokit {
-      return Octokit;
-    }
-  }
-  return { Octokit };
 });
 
 import { microVmName } from '@on-par/factory-core/internal';
@@ -256,6 +239,7 @@ function makeInternalFakes() {
     ),
     exec: vi.fn(async (cmd: string) => ({ stdout: h.execImpl(cmd), stderr: '' })),
     execSync: vi.fn((cmd: string) => h.execSyncImpl(cmd)),
+    octokit: () => h.octokit,
   } satisfies Pick<
     CliDeps,
     | 'watchChecks'
@@ -271,6 +255,7 @@ function makeInternalFakes() {
     | 'formatGcReport'
     | 'exec'
     | 'execSync'
+    | 'octokit'
   >;
 }
 /** Fresh fakes per test, spread into every main/cmdLand/shipIssue call. */
@@ -347,15 +332,19 @@ function makeCoreFakes() {
 /** Fresh fakes per test, spread into every main/shipIssue call. */
 let coreFakes = makeCoreFakes();
 
-/** Phase doubles injected through the CliDeps seams; the real runIssue sequences them (#675, ADR-0004). */
+/**
+ * Phase doubles. shipIssue builds ports and calls the real runIssue in @on-par/factory-core, which sequences
+ * PLAN->BUILD->CHECK->SHIP, the breaker, budget assertions and constitution logging (#675). Only the four
+ * phase functions are doubled, and they reach RunPorts through CliDeps phase overrides (ADR-0004).
+ */
 function makePhaseFakes() {
   return {
-    planPhase: vi.fn(async (opts: any) => {
+    planPhase: vi.fn<NonNullable<CliDeps['planPhase']>>(async (opts) => {
       if (h.triggerPlanProviderFailure) await opts.onProviderFailure?.(h.triggerPlanProviderFailure);
       return h.planResult;
-    }) as any,
-    buildPhase: vi.fn(async (_opts: any) => h.buildResult) as any,
-    checkPhase: vi.fn(async (opts: any) => {
+    }),
+    buildPhase: vi.fn<NonNullable<CliDeps['buildPhase']>>(async (_opts) => h.buildResult),
+    checkPhase: vi.fn<NonNullable<CliDeps['checkPhase']>>(async (opts) => {
       for (const s of h.checkResult.summary.results.filter((r: any) => r.result === 'SKIP')) {
         opts.log?.('check', `SKIPPED: ${s.checker} — ${s.details}`);
       }
@@ -364,11 +353,11 @@ function makePhaseFakes() {
       }
       h.costSinkCallback?.({ task: 'build', model: 'claude-model', inputTokens: 10, outputTokens: 5, cost: 0.02 });
       return h.checkResult;
-    }) as any,
-    shipPhase: vi.fn(async (_opts: any) => h.shipResult) as any,
+    }),
+    shipPhase: vi.fn<NonNullable<CliDeps['shipPhase']>>(async (_opts) => h.shipResult),
   } satisfies Pick<CliDeps, 'planPhase' | 'buildPhase' | 'checkPhase' | 'shipPhase'>;
 }
-/** Fresh phase fakes per test, spread into every main/shipIssue call. */
+/** Fresh phase doubles per test, spread into every main/shipIssue call (CliDeps phase overrides). */
 let phases = makePhaseFakes();
 
 /** Direct shipIssue calls get the inert models/routes loaders unless a test passes its own. */
@@ -390,7 +379,7 @@ function cmdUsage(deps: Parameters<typeof cliCmdUsage>[0] = {}) {
 
 /** Direct cmdLand calls get the inert loaders (incl. h.factoryConfig) unless a test passes its own. */
 function cmdLand(...[issueNum, opts, deps]: Parameters<typeof cliCmdLand>) {
-  return cliCmdLand(issueNum, opts, { ...inertConfigLoaders, ...inertGitOps, ...ops, ...deps });
+  return cliCmdLand(issueNum, opts, { ...inertConfigLoaders, ...inertGitOps, ...ops, ...phases, ...deps });
 }
 
 const recordingRunTui: NonNullable<CliDeps['runTui']> = async (opts) => {
@@ -1544,6 +1533,129 @@ bash scripts/verify.sh
     });
   });
 
+  describe('garden --report (#2083)', () => {
+    const hoursAgo = (n: number) => new Date(Date.now() - n * 3_600_000).toISOString();
+    const parkLine = (issue: string, ts: string) =>
+      JSON.stringify({
+        ts,
+        type: 'fail',
+        issue,
+        msg: 'parked',
+        checkFailure: { signature: 'tests|boom', failingChecks: ['tests'] },
+      });
+
+    it('prints one cluster with count and path:line pointers, deterministically', async () => {
+      writeFileSync(
+        paths().events,
+        `${[parkLine('1', hoursAgo(3)), parkLine('2', hoursAgo(2)), parkLine('1', hoursAgo(1))].join('\n')}\n`,
+      );
+      await runMain('garden', '--report');
+      const first = logged();
+      expect(first).toContain('## CHECK failure signatures');
+      expect(first).toContain('## Park reasons');
+      expect(first).toContain('## Failing checkers');
+      expect(first).toContain('### 1. `fail`');
+      expect(first).toContain('### 1. `tests`');
+      expect(first).not.toContain('### 2.');
+      expect(first).toContain('count: 3');
+      for (const n of [1, 2, 3]) expect(first).toContain(`${paths().events}:${n}`);
+      logSpy.mockClear();
+      await runMain('garden', '--report');
+      expect(logged()).toEqual(first);
+    });
+
+    it('excludes events of an environment-released run', async () => {
+      const line = (type: string, issue: string) => JSON.stringify({ ts: hoursAgo(5), type, issue, msg: 'm' });
+      writeFileSync(
+        paths().events,
+        `${[line('human-edited', '9'), line('environment-released', '9'), parkLine('1', hoursAgo(4))].join('\n')}\n`,
+      );
+      await runMain('garden', '--report');
+      expect(logged()).not.toContain('human-edited');
+      expect(logged()).not.toContain('## Human events');
+    });
+
+    it('prints no clusters for a missing events file and does not exit', async () => {
+      const res = await runMain('garden', '--report');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('no clusters');
+    });
+
+    const sigLine = (issue: string, sig: string, ts: string) =>
+      JSON.stringify({
+        ts,
+        type: 'fail',
+        issue,
+        msg: 'parked',
+        checkFailure: { signature: sig, failingChecks: ['tests'] },
+      });
+
+    it('--since and --max-clusters scope the report', async () => {
+      writeFileSync(
+        paths().events,
+        `${[
+          sigLine('1', 'sig-a', hoursAgo(24)),
+          sigLine('2', 'sig-b', hoursAgo(25)),
+          sigLine('3', 'sig-c', hoursAgo(26)),
+          sigLine('4', 'sig-old', hoursAgo(24 * 30)),
+        ].join('\n')}\n`,
+      );
+      await runMain('garden', '--report', '--since', '7d', '--max-clusters', '2');
+      expect(logged()).not.toContain('sig-old');
+      expect((logged().match(/^### /gm) ?? []).length).toBeLessThanOrEqual(2);
+    });
+
+    it('--json prints the cluster data as JSON', async () => {
+      writeFileSync(paths().events, `${parkLine('1', hoursAgo(1))}\n`);
+      await runMain('garden', '--report', '--json');
+      const doc = JSON.parse(logged());
+      expect(doc.since).toBe('14d');
+      expect(doc.maxClusters).toBe(10);
+      expect(doc.clusters[0]).toMatchObject({ dimension: expect.any(String), key: expect.any(String), count: 1 });
+      for (const k of ['issues', 'samples', 'failingChecks', 'firstSeen', 'lastSeen'])
+        expect(doc.clusters[0]).toHaveProperty(k);
+    });
+
+    it('--out writes the report to a file and nothing to stdout', async () => {
+      writeFileSync(paths().events, `${parkLine('1', hoursAgo(1))}\n`);
+      const out = join(h.repoRoot, 'report.md');
+      await runMain('garden', '--report', '--out', out);
+      expect(readFileSync(out, 'utf8')).toContain('# Garden report');
+      expect(logSpy).not.toHaveBeenCalled();
+      expect(errored()).toContain(`wrote report to ${out}`);
+    });
+
+    it('--out with --json writes valid JSON', async () => {
+      writeFileSync(paths().events, `${parkLine('1', hoursAgo(1))}\n`);
+      const out = join(h.repoRoot, 'report.json');
+      await runMain('garden', '--report', '--json', '--out', out);
+      expect(JSON.parse(readFileSync(out, 'utf8')).clusters.length).toBeGreaterThan(0);
+      expect(logSpy).not.toHaveBeenCalled();
+    });
+
+    it('rejects an invalid --since or --max-clusters', async () => {
+      const a = await runMain('garden', '--report', '--since', 'bogus');
+      expect(a.exited).toBe(true);
+      expect(a.code).not.toBe(0);
+      const b = await runMain('garden', '--report', '--max-clusters', '0');
+      expect(b.exited).toBe(true);
+      expect(b.code).not.toBe(0);
+    });
+
+    it('exits non-zero when --out cannot be written', async () => {
+      const out = join(h.repoRoot, 'missing-dir', 'r.md');
+      const res = await runMain('garden', '--report', '--out', out);
+      expect(res.exited).toBe(true);
+      expect(errored()).toContain(`factory garden: cannot write ${out}`);
+    });
+
+    it('exits non-zero without --report', async () => {
+      const res = await runMain('garden');
+      expect(res.exited).toBe(true);
+      expect(res.code).not.toBe(0);
+    });
+  });
+
   describe('kpis', () => {
     it('renders a report and trend, and records a snapshot on each run', async () => {
       writeFileSync(
@@ -1888,6 +2000,26 @@ bash scripts/verify.sh
       const text = written.join('').replace(/\s+/g, ' ');
       expect(text).toContain('--local-queue');
       expect(text).toContain('Read .factory/queue instead of claiming issues from GitHub Issues');
+    });
+
+    it('root --help ends with the env-var footer and the docs link', async () => {
+      const originalWrite = process.stdout.write;
+      const written: string[] = [];
+      process.stdout.write = ((chunk: string | Uint8Array) => {
+        written.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write;
+      let res: Awaited<ReturnType<typeof runMain>>;
+      try {
+        res = await runMain('--help');
+      } finally {
+        process.stdout.write = originalWrite;
+      }
+      expect(res.exited).toBe(true);
+      const text = written.join('');
+      expect(text.indexOf('Advanced / experimental:')).toBeLessThan(text.indexOf('Common environment variables:'));
+      expect(text).toContain('docs/config.example.yaml');
+      expect(text).toContain('factory <command> --help');
     });
 
     it('calls runTui with repo undefined when gh repo detection fails, and the reader says so', async () => {
@@ -4838,6 +4970,30 @@ describe('shipIssue (direct)', () => {
     expect(defaultGet).not.toHaveBeenCalled();
   });
 
+  it('main() routes deps.octokit to GitHub-backed commands', async () => {
+    const fake = defaultOctokit();
+    fake.rest.pulls.list = vi.fn(async () => ({ data: [] }));
+    const factory = vi.fn(() => fake as never);
+    const defaultList = h.octokit.rest.pulls.list;
+
+    await runMainWith({ octokit: factory }, 'land', '5');
+
+    expect(factory).toHaveBeenCalled();
+    expect(fake.rest.pulls.list).toHaveBeenCalled();
+    expect(defaultList).not.toHaveBeenCalled();
+  });
+
+  it('cmdLand uses an injected octokit factory', async () => {
+    const fake = defaultOctokit();
+    fake.rest.pulls.list = vi.fn(async () => ({ data: [] }));
+    const factory = vi.fn(() => fake as never);
+
+    await expect(cmdLand(5, {}, { octokit: factory })).rejects.toMatchObject({ code: 1 });
+
+    expect(factory).toHaveBeenCalled();
+    expect(fake.rest.pulls.list).toHaveBeenCalled();
+  });
+
   it('uses injected resolveTimeouts, resolveSkipCI and resolveEffectiveModelPins', async () => {
     const timeouts = vi.fn(() => ({ plan: 1, build: 1, check: 1, approval: 1 }));
     const skip = vi.fn(() => false);
@@ -4889,7 +5045,7 @@ describe('shipIssue (direct)', () => {
     expect(coreFakes.ModelRouter.mock.calls.at(-1)?.[1]).toMatchObject(routesValue);
   });
 
-  it('falls back to the default octokit factory when none is injected', async () => {
+  it('uses the h.octokit client injected through the shared ops fakes', async () => {
     await shipIssue(5, {}, ctx());
     expect(h.octokit.rest.issues.get).toHaveBeenCalled();
   });
@@ -4903,9 +5059,26 @@ describe('shipIssue (direct)', () => {
     expect(phases.shipPhase).not.toHaveBeenCalled();
   });
 
-  it('uses the factory-core phases when no overrides are injected', async () => {
+  it('drives the deps-builder phase doubles when the test passes no override', async () => {
     await shipIssue(5, {}, ctx());
     expect(phases.planPhase).toHaveBeenCalled();
+    expect(phases.shipPhase).toHaveBeenCalled();
+    await expect(phases.planPhase.mock.results[0]?.value).resolves.toBe(h.planResult);
+  });
+
+  it('main() forwards phase overrides to the shipIssue it runs', async () => {
+    const customPlan = vi.fn(async (_opts) => h.planResult);
+    await runMainWith({ planPhase: customPlan as never }, 'ship', '5');
+    expect(customPlan).toHaveBeenCalled();
+    expect(phases.planPhase).not.toHaveBeenCalled();
+  });
+
+  it('restores the default phases after main() returns', async () => {
+    const customShip = vi.fn(async (_opts) => h.shipResult);
+    await runMainWith({ shipPhase: customShip as never }, 'ship', '5');
+    const calls = customShip.mock.calls.length;
+    await shipIssue(5, {}, ctx());
+    expect(customShip).toHaveBeenCalledTimes(calls);
     expect(phases.shipPhase).toHaveBeenCalled();
   });
 
@@ -5221,7 +5394,7 @@ describe('shipIssue (direct)', () => {
   });
 
   it('tracks a pgid reported through onPgid and sweeps it before releasing the lease, without crashing the run', async () => {
-    phases.buildPhase.mockImplementationOnce(async (opts: any) => {
+    phases.buildPhase.mockImplementationOnce(async (opts) => {
       // An already-dead pgid: exercises the track -> killAll path without touching a real process group.
       opts.onPgid?.(999999999);
       return h.buildResult;

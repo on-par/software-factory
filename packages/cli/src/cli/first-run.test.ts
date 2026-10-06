@@ -18,9 +18,11 @@ describe('formatOverview', () => {
       pattern, and opens a pull request for each one.
 
       Common commands:
-        factory init          Initialize .factory/ in this repo
-        factory triage        Propose a work queue from open issues
-        factory ship <issue>  Plan → build → check → ship one issue
+        factory init                     Initialize .factory/ in this repo
+        factory ship <issue>             Plan → build → check one issue and open a PR
+        factory queue add <lane> <N...>  Queue issues into a lane (GitHub labels)
+        factory run                      Ship queued issues, lanes in parallel
+        factory status                   Show active runs and the queue
 
       Check your setup:       factory doctor
       All commands:           factory --help
@@ -32,8 +34,9 @@ describe('formatOverview', () => {
   it('contains the common-command hints and docs URL', () => {
     const overview = formatOverview();
     expect(overview).toContain('factory init');
-    expect(overview).toContain('factory triage');
     expect(overview).toContain('factory ship <issue>');
+    expect(overview).toContain('factory queue add');
+    expect(overview).toContain('factory run');
     expect(overview).toContain('factory doctor');
     expect(overview).toContain(DOCS_URL);
   });

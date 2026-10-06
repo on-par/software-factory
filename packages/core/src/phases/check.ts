@@ -59,7 +59,7 @@ export interface CheckPhaseResult {
   environment?: EnvironmentFailure;
 }
 
-const MAX_REWORK_ROUNDS = 3;
+export const MAX_REWORK_ROUNDS = 3;
 
 /** Consecutive no-progress rework rounds before the lane is declared stuck. */
 const STUCK_THRESHOLD = 2;

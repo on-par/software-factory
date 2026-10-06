@@ -391,6 +391,17 @@ const NotificationsSectionSchema = z
   .default({ on_ship: true, on_fail: true, on_escalate: true, on_park: true, on_merge: true })
   .describe('Event -> on/off notification switches (on_ship, on_fail, on_escalate, on_park, on_merge, ...).');
 
+// ---------- Steward ----------
+
+const StewardSectionSchema = z
+  .object({
+    enabled: z
+      .boolean()
+      .default(false)
+      .describe('Run the stuck-run steward on parked runs that match an ADR-0144 trigger. Off unless set to true.'),
+  })
+  .describe('Stuck-run steward (ADR-0144). Disabled by default.');
+
 // ---------- Top-level v2 schema ----------
 
 export const FactoryConfigV2Schema = z
@@ -402,6 +413,7 @@ export const FactoryConfigV2Schema = z
     budget: BudgetSectionSchema.prefault({}),
     intake: IntakeSectionSchema.prefault({}),
     constitution: ConstitutionSectionSchema.prefault({}),
+    steward: StewardSectionSchema.prefault({}),
     notifications: NotificationsSectionSchema,
   })
   .describe(

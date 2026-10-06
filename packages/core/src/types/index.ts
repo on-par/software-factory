@@ -1,6 +1,6 @@
 // src/types/index.ts — Core type definitions for the Software Factory
 
-import type { EventKind, LanePausedPayload } from '../events/kinds.js';
+import type { EventKind, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
 import type { PrClassificationRecord } from '../review/classifier.js';
 
 // ---------- Models ----------
@@ -214,6 +214,14 @@ export type ReworkCauseTag = 'merge-conflict' | 'checker-failure' | 'other';
  *  from the GitHub API at report time by reconstructHumanEvents(). */
 export type HumanEventType = 'human-approved' | 'human-edited' | 'human-restarted' | 'human-merged' | 'human-abandoned';
 
+/** CHECK failure that caused a park, carried on the park event (#2083). */
+export interface CheckFailureInfo {
+  /** `stuckSignature()` of the final CHECK, the same string as RunOutcome.failureSignature. */
+  signature: string;
+  /** Checker names that FAILed in that CHECK. */
+  failingChecks: string[];
+}
+
 /** Structured payload carried on `rework`/`stuck` events for later metrics (#386). */
 export interface ReworkInfo {
   /** 1-based rework round number, or 0 for a cross-run 'held' pre-empt (#740)
@@ -286,6 +294,10 @@ export interface FactoryEvent {
   prClassification?: PrClassificationRecord;
   /** Breaker details on a `lane-paused` event (#1916). */
   lanePaused?: LanePausedPayload;
+  /** Trigger details on a steward-triggered event (#2086). */
+  stewardTriggered?: StewardTriggeredPayload;
+  /** CHECK failure signature behind a park event (#2083). */
+  checkFailure?: CheckFailureInfo;
   model?: string;
   tokens?: { input: number; output: number };
   durationMs?: number;

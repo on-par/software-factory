@@ -9,6 +9,7 @@ import {
   severityOf,
   UNKNOWN_EVENT_TRAITS,
   type LanePausedPayload,
+  type StewardTriggeredPayload,
 } from './kinds.js';
 
 const VALID_SEVERITIES = new Set(['debug', 'info', 'warn', 'error']);
@@ -227,5 +228,37 @@ describe('lane-paused', () => {
     // @ts-expect-error secondIssue is required
     const noSecond: LanePausedPayload = { lane: 'l', signature: 's', failingChecks: [], firstIssue: 1 };
     expect([noLane, noSignature, noChecks, noFirst, noSecond]).toHaveLength(5);
+  });
+});
+
+describe('steward-triggered classification (#2084)', () => {
+  it('is a registered EventKind, not unknown', () => {
+    expect(Object.hasOwn(EVENT_TRAITS, 'steward-triggered')).toBe(true);
+    expect(eventTraitsFor('steward-triggered')).not.toBe(UNKNOWN_EVENT_TRAITS);
+    expect(eventTraitsFor('steward-triggered')).toEqual({ severity: 'info', isPark: false, isTerminal: false });
+  });
+
+  it('is never a park kind and drives no lane status', () => {
+    expect(isParkKind('steward-triggered')).toBe(false);
+    expect(laneStatusOf('steward-triggered')).toBeUndefined();
+    expect(severityOf('steward-triggered')).toBe('info');
+  });
+
+  it('accepts a trigger and a failure signature in its payload', () => {
+    const withSignature: StewardTriggeredPayload = { trigger: 'check-exhausted', failureSignature: 'tests:abc' };
+    const bare: StewardTriggeredPayload = { trigger: 'ship-failed' };
+    const event: FactoryEvent = {
+      ts: '2026-01-01T00:00:00.000Z',
+      type: 'steward-triggered',
+      issue: '1',
+      msg: 'steward triggered',
+    };
+    expect(event.type).toBe('steward-triggered');
+    expect(withSignature).toEqual({ trigger: 'check-exhausted', failureSignature: 'tests:abc' });
+    expect(bare.failureSignature).toBeUndefined();
+
+    // @ts-expect-error 'budget' is not an ADR-0144 trigger
+    const invalid: StewardTriggeredPayload = { trigger: 'budget' };
+    expect(invalid).toBeDefined();
   });
 });

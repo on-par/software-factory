@@ -2,6 +2,10 @@
 // (the `| Number | Title | Status |` table in docs/adr/README.md).
 import { AdrKitError } from './adr.js';
 import { formatAdrNumber } from './numbering.js';
+import { parseAdr } from './parse.js';
+
+export const ADR_INDEX_START = '<!-- adr-index:start -->';
+export const ADR_INDEX_END = '<!-- adr-index:end -->';
 
 export interface AdrIndexRow {
   number: number;
@@ -91,7 +95,8 @@ function pad(text: string, width: number): string {
 
 export function renderIndexTable(rows: readonly AdrIndexRow[]): string {
   const headerCells = ['Number', 'Title', 'Status'];
-  const bodyCellsList = rows.map((row) => [numberCellText(row), row.title, row.status]);
+  const escapeCell = (cell: string) => cell.replace(/\|/g, '\\|');
+  const bodyCellsList = rows.map((row) => [numberCellText(row), escapeCell(row.title), escapeCell(row.status)]);
   const widths = headerCells.map((header, col) =>
     Math.max(header.length, ...bodyCellsList.map((cells) => cells[col].length)),
   );
@@ -116,4 +121,74 @@ export function upsertIndexRow(markdown: string, row: AdrIndexRow): string {
   let result = newLines.join('\n');
   if (eol === '\r\n') result = result.replace(/\n/g, '\r\n');
   return result;
+}
+
+export interface AdrIndexSource {
+  /** Bare file name, e.g. '0001-boss-worker-checker-pipeline.md'. Also used as the row href. */
+  filename: string;
+  source: string;
+}
+
+function rowFromSource({ filename, source }: AdrIndexSource): AdrIndexRow {
+  let adr;
+  try {
+    adr = parseAdr(source, { filename });
+  } catch (error) {
+    throw new AdrKitError(`${filename}: ${error instanceof Error ? error.message : String(error)}`, 'parse');
+  }
+  if (adr.number === undefined) throw new AdrKitError(`${filename}: ADR has no number`, 'parse');
+  const title = adr.title.trim();
+  if (title === '') throw new AdrKitError(`${filename}: ADR has an empty title`, 'parse');
+  const status = adr.status.trim();
+  if (status === '') throw new AdrKitError(`${filename}: ADR has no Status line`, 'parse');
+  return { number: adr.number, title, status, href: filename };
+}
+
+export function buildIndexRows(files: readonly AdrIndexSource[]): AdrIndexRow[] {
+  return files.map(rowFromSource).sort((a, b) => {
+    if (a.number !== b.number) return a.number - b.number;
+    if (a.href === b.href) return 0;
+    return a.href < b.href ? -1 : 1;
+  });
+}
+
+export function replaceIndexBlock(markdown: string, table: string): string {
+  const eol = markdown.includes('\r\n') ? '\r\n' : '\n';
+  const startIdx = markdown.indexOf(ADR_INDEX_START);
+  const endIdx = markdown.indexOf(ADR_INDEX_END);
+  if (startIdx === -1) throw new AdrKitError(`missing ${ADR_INDEX_START} marker`, 'index');
+  if (endIdx === -1) throw new AdrKitError(`missing ${ADR_INDEX_END} marker`, 'index');
+  if (markdown.indexOf(ADR_INDEX_START, startIdx + 1) !== -1) {
+    throw new AdrKitError(`duplicate ${ADR_INDEX_START} marker`, 'index');
+  }
+  if (markdown.indexOf(ADR_INDEX_END, endIdx + 1) !== -1) {
+    throw new AdrKitError(`duplicate ${ADR_INDEX_END} marker`, 'index');
+  }
+  if (endIdx < startIdx) throw new AdrKitError(`${ADR_INDEX_END} comes before ${ADR_INDEX_START}`, 'index');
+  const body = table.replace(/\r?\n/g, eol);
+  return markdown.slice(0, startIdx + ADR_INDEX_START.length) + eol + eol + body + eol + eol + markdown.slice(endIdx);
+}
+
+export function diffIndexRows(committed: readonly AdrIndexRow[], generated: readonly AdrIndexRow[]): string[] {
+  const committedByHref = new Map(committed.map((row) => [row.href, row]));
+  const generatedHrefs = new Set(generated.map((row) => row.href));
+  const lines: string[] = [];
+  for (const row of generated) {
+    const label = formatAdrNumber(row.number);
+    const old = committedByHref.get(row.href);
+    if (!old) {
+      lines.push(`missing row: ${label} (${row.href})`);
+      continue;
+    }
+    if (old.title !== row.title) {
+      lines.push(`stale title: ${label} — index has "${old.title}", ADR has "${row.title}"`);
+    }
+    if (old.status !== row.status) {
+      lines.push(`stale status: ${label} — index has "${old.status}", ADR has "${row.status}"`);
+    }
+  }
+  for (const row of committed) {
+    if (!generatedHrefs.has(row.href)) lines.push(`extra row: ${formatAdrNumber(row.number)} (${row.href})`);
+  }
+  return lines;
 }
