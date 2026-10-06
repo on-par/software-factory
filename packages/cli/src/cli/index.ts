@@ -195,6 +195,7 @@ import {
   capGardenClusters,
   clusterGarden,
   dedupGardenClusters,
+  filterGardenOnlyNew,
   filterGardenWindow,
   markGardenTrackingUnknown,
   parseGardenDuration,
@@ -1362,7 +1363,14 @@ async function annotateGardenClusters(clusters: GardenCluster[]): Promise<Garden
 }
 
 async function cmdGarden(
-  opts: { report?: boolean; since?: string; maxClusters?: string; json?: boolean; out?: string } = {},
+  opts: {
+    report?: boolean;
+    since?: string;
+    maxClusters?: string;
+    json?: boolean;
+    out?: string;
+    onlyNew?: boolean;
+  } = {},
 ) {
   if (!opts.report) {
     console.error('factory garden: pass --report (the only mode in this release)');
@@ -1385,9 +1393,8 @@ async function cmdGarden(
   const events = filterGardenWindow(readHarvestEvents([paths.events]), windowMs, new Date());
   const clusters = capGardenClusters(clusterGarden(events), maxClusters);
   const annotated = clusters.length === 0 ? clusters : await annotateGardenClusters(clusters);
-  const text = opts.json
-    ? renderGardenJson(annotated, { since, maxClusters })
-    : renderGardenReport(annotated).join('\n');
+  const shown = opts.onlyNew ? filterGardenOnlyNew(annotated) : annotated;
+  const text = opts.json ? renderGardenJson(shown, { since, maxClusters }) : renderGardenReport(shown).join('\n');
   if (opts.out) {
     try {
       writeFileSync(opts.out, `${text}\n`);
@@ -5764,8 +5771,16 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .option('--max-clusters <n>', 'Print at most this many clusters', String(DEFAULT_GARDEN_MAX_CLUSTERS))
     .option('--json', 'Print the same cluster data as JSON')
     .option('--out <file>', 'Write the report to this file instead of stdout')
-    .action((opts: { report?: boolean; since?: string; maxClusters?: string; json?: boolean; out?: string }) =>
-      cmdGarden(opts),
+    .option('--only-new', 'Omit clusters an open issue already tracks; keep new and tracked: unknown clusters')
+    .action(
+      (opts: {
+        report?: boolean;
+        since?: string;
+        maxClusters?: string;
+        json?: boolean;
+        out?: string;
+        onlyNew?: boolean;
+      }) => cmdGarden(opts),
     );
 
   program

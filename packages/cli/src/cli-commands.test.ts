@@ -1853,6 +1853,54 @@ bash scripts/verify.sh
       });
     });
 
+    describe('--only-new (#2104)', () => {
+      const writeEvents = () => writeFileSync(paths().events, `${parkLine('1', hoursAgo(2))}\n`);
+      const mockTracked = () =>
+        h.octokit.rest.search.issuesAndPullRequests.mockImplementation((async () => ({
+          data: {
+            items: [
+              {
+                number: 31,
+                state: 'open',
+                body: '<!-- garden:fail --> <!-- garden:tests --> <!-- garden:tests|boom -->',
+              },
+            ],
+          },
+        })) as any);
+
+      it('omits clusters tracked by an open issue', async () => {
+        writeEvents();
+        mockTracked();
+        const res = await runMain('garden', '--report', '--only-new');
+        expect(res.exited).toBe(false);
+        expect(logged()).not.toContain('- tracked: #31');
+        expect(logged()).not.toContain('### 1.');
+        expect(logged()).toContain('no clusters');
+      });
+
+      it('keeps new clusters', async () => {
+        writeEvents();
+        await runMain('garden', '--report', '--only-new');
+        expect(logged()).toContain('- new');
+        expect(logged()).toContain('### 1.');
+      });
+
+      it('--json --only-new yields no clusters when all are tracked', async () => {
+        writeEvents();
+        mockTracked();
+        await runMain('garden', '--report', '--json', '--only-new');
+        expect(JSON.parse(logged()).clusters).toEqual([]);
+      });
+
+      it('keeps tracked: unknown clusters when the search fails', async () => {
+        writeEvents();
+        h.octokit.rest.search.issuesAndPullRequests.mockRejectedValue(new Error('rate limited'));
+        const res = await runMain('garden', '--report', '--only-new');
+        expect(res.exited).toBe(false);
+        expect(logged()).toContain('- tracked: unknown');
+      });
+    });
+
     it('exits non-zero without --report', async () => {
       const res = await runMain('garden');
       expect(res.exited).toBe(true);

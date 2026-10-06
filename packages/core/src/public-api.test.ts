@@ -333,6 +333,7 @@ const INTERNAL_API_KEYS = [
   'renderGardenReport',
   // Garden dedup (#2102)
   'dedupGardenClusters',
+  'filterGardenOnlyNew', // --only-new (#2104)
   'findGardenTrackingIssue',
   'gardenClusterFingerprint',
   'gardenKeyMarker',
