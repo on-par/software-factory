@@ -859,6 +859,23 @@ describe('loadRoutesConfig', () => {
     expect(() => loadRoutesConfig()).not.toThrow();
   });
 
+  it('keeps the steward route model, allowedTools and output', () => {
+    expect(loadRoutesConfig().routes.steward).toEqual(
+      expect.objectContaining({ tier: 'boss', model: 'claude-opus-5', allowedTools: [], output: 'json' }),
+    );
+  });
+
+  it('throws when a route declares an unsupported output', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-routes-config-'));
+    const path = join(tmpDir, 'routes.json');
+    await writeFile(
+      path,
+      JSON.stringify({ version: 1, routes: { plan: { tier: 'boss', description: 'stub', output: 'xml' } } }),
+    );
+
+    expect(() => loadRoutesConfig(path)).toThrow();
+  });
+
   it('parses a route declaring the optional requires field', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-routes-config-'));
     const path = join(tmpDir, 'routes.json');

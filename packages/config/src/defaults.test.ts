@@ -132,9 +132,9 @@ describe('shipped defaults', () => {
     });
   });
 
-  it('has 19 routes, each pointing at a known tier', () => {
+  it('has 20 routes, each pointing at a known tier', () => {
     const routeIds = Object.keys(defaultRoutesConfig.routes);
-    expect(routeIds).toHaveLength(19);
+    expect(routeIds).toHaveLength(20);
 
     const tierIds = new Set(Object.keys(defaultModelsConfig.tiers));
     for (const [route, def] of Object.entries(defaultRoutesConfig.routes)) {
@@ -241,5 +241,35 @@ describe('no JSON ships from this package', () => {
     }
 
     expect(offenders).toEqual([]);
+  });
+});
+
+describe('steward route (#2111)', () => {
+  const route = defaultRoutesConfig.routes.steward;
+
+  it('pins an exact model ID, not a tier or alias', () => {
+    expect(route?.model).toBe('claude-opus-5');
+    const model = route?.model as string;
+    expect(Object.keys(defaultModelsConfig.models)).toContain(model);
+    expect(defaultModelsConfig.models[model].claudeFlag).toBe(model);
+    expect(model).not.toBe(route?.tier);
+    expect(model).not.toMatch(/^(opus|sonnet|fable|haiku)$/);
+  });
+
+  it('is tool-less', () => {
+    expect(route?.allowedTools).toEqual([]);
+  });
+
+  it('declares JSON output', () => {
+    expect(route?.output).toBe('json');
+  });
+
+  it('leaves every other route without model/allowedTools/output', () => {
+    for (const [id, def] of Object.entries(defaultRoutesConfig.routes)) {
+      if (id === 'steward') continue;
+      expect(def.model, id).toBeUndefined();
+      expect(def.allowedTools, id).toBeUndefined();
+      expect(def.output, id).toBeUndefined();
+    }
   });
 });
