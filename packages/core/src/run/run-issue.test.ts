@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import type { Octokit } from '@octokit/rest';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { parseSlicePlanComment, renderSlicePlanComment, type SlicePlan } from '../readiness/slice-plan.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.js';
 import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
@@ -255,10 +256,106 @@ describe('runIssue — size gate mode (#2048)', () => {
   it.each([
     [undefined, true],
     ['file', true],
+    ['slice', true],
     ['off', false],
   ] as const)('sizeGateMode %s -> enforceSizeGate %s', async (mode, expected) => {
     await runIssue(baseRequest({ sizeGateMode: mode }), basePolicy(), basePorts());
     expect(vi.mocked(planPhase).mock.calls[0][0].enforceSizeGate).toBe(expected);
+    expect(vi.mocked(planPhase).mock.calls[0][0].sizeGateMode).toBe(mode);
+  });
+});
+
+describe('runIssue — slice shipping (ADR-0147)', () => {
+  const story = (n: number) => ({
+    schemaVersion: 1 as const,
+    kind: 'story' as const,
+    filesLikelyTouched: [],
+    labels: [],
+    title: `Story ${n}`,
+    role: 'operator',
+    want: `thing ${n} works`,
+    soThat: 'value',
+    problemStatement: `Problem ${n}`,
+    inScope: [`Scope ${n}`],
+    outOfScope: ['Persistent storage'],
+    acceptanceCriteria: [{ name: `ac ${n}`, given: [], when: ['run'], then: ['works'] }],
+    verification: [{ command: 'npm test', passWhen: 'passes' }],
+    tracesTo: ['INT-PROBLEM-01'],
+  });
+  const slicePlan: SlicePlan = {
+    issue: 1,
+    slices: [
+      { index: 1, title: 'One', story: story(1) as never, state: 'merged', prNumber: 10 },
+      { index: 2, title: 'Two', story: story(2) as never, state: 'pending' },
+      { index: 3, title: 'Three', story: story(3) as never, state: 'pending' },
+    ],
+  };
+
+  function sliceSetup(updateComment: ReturnType<typeof vi.fn>, events: ReturnType<typeof vi.fn> = vi.fn()) {
+    vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, slice: { plan: slicePlan, index: 2 } });
+    const octokit: Octokit = {
+      rest: {
+        users: { getAuthenticated: async () => ({ data: { id: 7 } }) },
+        issues: {
+          listComments: async () => ({ data: [{ id: 99, user: { id: 7 }, body: renderSlicePlanComment(slicePlan) }] }),
+          updateComment,
+        },
+      },
+    } as never;
+    return basePorts({ octokit, events: () => events as never });
+  }
+
+  const recorded = (updateComment: ReturnType<typeof vi.fn>) => {
+    const parsed = parseSlicePlanComment(updateComment.mock.calls[0][0].body);
+    if (!parsed?.ok) throw new Error(JSON.stringify(parsed));
+    return parsed.plan.slices[1];
+  };
+
+  it('threads the slice to SHIP, records pr-open with the PR number and reports it on the outcome', async () => {
+    const updateComment = vi.fn().mockResolvedValue({ data: {} });
+    vi.mocked(shipPhase).mockResolvedValue({ ok: true, prNumber: 55 });
+    const outcome = await runIssue(baseRequest({ sizeGateMode: 'slice' }), basePolicy(), sliceSetup(updateComment));
+
+    expect(vi.mocked(shipPhase).mock.calls[0][0].slice).toEqual({ index: 2, count: 3 });
+    expect(recorded(updateComment)).toMatchObject({ index: 2, state: 'pr-open', prNumber: 55 });
+    expect(outcome).toMatchObject({ state: 'ready', prNumber: 55, slice: { index: 2, count: 3 } });
+  });
+
+  it('records the slice as merged when SHIP found it already delivered', async () => {
+    const updateComment = vi.fn().mockResolvedValue({ data: {} });
+    vi.mocked(shipPhase).mockResolvedValue({ ok: true, prNumber: 55, alreadyDelivered: true });
+    await runIssue(baseRequest({ sizeGateMode: 'slice' }), basePolicy(), sliceSetup(updateComment));
+
+    expect(recorded(updateComment)).toMatchObject({ index: 2, state: 'merged', prNumber: 55 });
+  });
+
+  it('parks with fail naming the PR when recording it in the slice plan comment fails', async () => {
+    const updateComment = vi.fn().mockRejectedValue(new Error('boom'));
+    vi.mocked(shipPhase).mockResolvedValue({ ok: true, prNumber: 55 });
+    const events = vi.fn();
+    const outcome = await runIssue(
+      baseRequest({ sizeGateMode: 'slice' }),
+      basePolicy(),
+      sliceSetup(updateComment, events),
+    );
+
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
+    expect(events).toHaveBeenCalledWith('fail', expect.stringContaining('PR #55'), undefined);
+  });
+
+  it('skips the comment write when SHIP returns no PR number', async () => {
+    const updateComment = vi.fn().mockResolvedValue({ data: {} });
+    vi.mocked(shipPhase).mockResolvedValue({ ok: true, alreadyDelivered: true });
+    const outcome = await runIssue(baseRequest({ sizeGateMode: 'slice' }), basePolicy(), sliceSetup(updateComment));
+
+    expect(updateComment).not.toHaveBeenCalled();
+    expect(outcome.state).toBe('ready');
+  });
+
+  it('leaves a non-slice run without slice on SHIP or the outcome', async () => {
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts());
+    expect(vi.mocked(shipPhase).mock.calls[0][0].slice).toBeUndefined();
+    expect(outcome).not.toHaveProperty('slice');
   });
 });
 
@@ -535,6 +632,17 @@ describe('runIssue — decomposition', () => {
     vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, ok: false, decomposed: { childIssues: [2] } });
     const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ onDecomposed: vi.fn() }));
     expect(outcome).toMatchObject({ state: 'escalated' });
+  });
+});
+
+describe('runIssue — sliced whole issue (ADR-0147)', () => {
+  it('returns an escalated outcome naming the slice plan and never builds', async () => {
+    vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, ok: false, escalate: 'x', sliced: { sliceCount: 3 } });
+    const onDecomposed = vi.fn();
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ onDecomposed }));
+    expect(outcome).toMatchObject({ state: 'escalated', reason: expect.stringMatching(/sliced into 3 slice/) });
+    expect(buildPhase).not.toHaveBeenCalled();
+    expect(onDecomposed).not.toHaveBeenCalled();
   });
 });
 

@@ -12,6 +12,7 @@ import {
   extractJsonObject,
   fileDecomposition,
   parseDecompositionOutput,
+  publishDecomposition,
   renderChildIssueBody,
   renderDecompositionComment,
   validateDecomposition,
@@ -389,6 +390,32 @@ describe('decomposeOversizedIssue', () => {
     return { log: (type: string, msg: string) => events.push({ type, msg }), events };
   }
 
+  it('postComment: false returns the decomposition and posts and files nothing', async () => {
+    const stub = new StubModelExecutor({ scripts: { decompose: [{ output: VALID_DECOMPOSITION_JSON }] } });
+    const router = new ModelRouter(models, routes, false, stub);
+    const { octokit, createComment, create } = makeOctokit();
+    const { log } = makeLog();
+
+    const result = await decomposeOversizedIssue({
+      issue: 606,
+      repo,
+      title: 'Harden the import queue',
+      body: 'body',
+      worktree: '/tmp/wt',
+      router,
+      octokit,
+      log,
+      fileSubIssues: true,
+      postComment: false,
+    });
+
+    expect(result.posted).toBe(false);
+    expect(result.childIssues).toEqual([]);
+    expect(result.decomposition?.stories.length).toBeGreaterThan(0);
+    expect(createComment).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it('posts the rendered comment and returns { posted: true }', async () => {
     const stub = new StubModelExecutor({ scripts: { decompose: [{ output: VALID_DECOMPOSITION_JSON }] } });
     const router = new ModelRouter(models, routes, false, stub);
@@ -406,7 +433,7 @@ describe('decomposeOversizedIssue', () => {
       log,
     });
 
-    expect(result).toEqual({ posted: true, childIssues: [] });
+    expect(result).toMatchObject({ posted: true, childIssues: [] });
     expect(createComment).toHaveBeenCalledTimes(1);
     expect(createComment).toHaveBeenCalledWith({
       owner: 'on-par',
@@ -437,7 +464,7 @@ describe('decomposeOversizedIssue', () => {
       log,
     });
 
-    expect(result).toEqual({ posted: false, childIssues: [] });
+    expect(result).toMatchObject({ posted: false, childIssues: [] });
     expect(createComment).not.toHaveBeenCalled();
     const failed = events.find((e) => e.type === 'decompose_failed');
     expect(failed?.msg).toContain('fails INVEST (valuable)');
@@ -466,7 +493,7 @@ describe('decomposeOversizedIssue', () => {
     expect(stub.calls.map((call) => call.task)).toEqual(['decompose', 'decompose']);
     expect(stub.calls[1].prompt).toContain('story "Story one" fails INVEST (valuable)');
     expect(createComment).not.toHaveBeenCalled();
-    expect(result).toEqual({ posted: false, childIssues: [] });
+    expect(result).toMatchObject({ posted: false, childIssues: [] });
   });
 
   it('returns { posted: false } when the router throws', async () => {
@@ -486,7 +513,7 @@ describe('decomposeOversizedIssue', () => {
       log,
     });
 
-    expect(result).toEqual({ posted: false, childIssues: [] });
+    expect(result).toMatchObject({ posted: false, childIssues: [] });
     expect(createComment).not.toHaveBeenCalled();
     expect(events.some((e) => e.type === 'decompose_failed')).toBe(true);
   });
@@ -544,7 +571,7 @@ describe('decomposeOversizedIssue', () => {
       log,
     });
 
-    expect(result).toEqual({ posted: false, childIssues: [] });
+    expect(result).toMatchObject({ posted: false, childIssues: [] });
     const failed = events.find((e) => e.type === 'decompose_failed');
     expect(failed?.msg).toContain('boom');
   });
@@ -568,7 +595,7 @@ describe('decomposeOversizedIssue', () => {
       log,
     });
 
-    expect(result).toEqual({ posted: false, childIssues: [] });
+    expect(result).toMatchObject({ posted: false, childIssues: [] });
     expect(createComment).not.toHaveBeenCalled();
     expect(events.some((e) => e.type === 'decompose_failed')).toBe(true);
   });
@@ -592,7 +619,7 @@ describe('decomposeOversizedIssue', () => {
       log,
     });
 
-    expect(result).toEqual({ posted: false, childIssues: [] });
+    expect(result).toMatchObject({ posted: false, childIssues: [] });
     expect(createComment).not.toHaveBeenCalled();
     expect(stub.calls).toHaveLength(2);
     const failed = events.find((e) => e.type === 'decompose_failed');
@@ -648,7 +675,7 @@ describe('decomposeOversizedIssue', () => {
       issue_number: 606,
       sub_issue_id: 5902,
     });
-    expect(result).toEqual({ posted: true, childIssues: [901, 902] });
+    expect(result).toMatchObject({ posted: true, childIssues: [901, 902] });
     expect(events.some((e) => e.type === 'decompose_filed')).toBe(true);
   });
 
@@ -695,7 +722,7 @@ describe('decomposeOversizedIssue', () => {
       fileSubIssues: true,
     });
 
-    expect(result).toEqual({ posted: true, childIssues: [] });
+    expect(result).toMatchObject({ posted: true, childIssues: [] });
     expect(request).toHaveBeenCalledTimes(2); // GET duplicate check + link for the first, successfully-created child
     const failed = events.find((e) => e.type === 'decompose_file_failed');
     expect(failed?.msg).toContain('secondary rate limit');
@@ -723,7 +750,7 @@ describe('decomposeOversizedIssue', () => {
     });
 
     expect(create).toHaveBeenCalledTimes(2);
-    expect(result).toEqual({ posted: true, childIssues: [901, 902] });
+    expect(result).toMatchObject({ posted: true, childIssues: [901, 902] });
     const failed = events.find((e) => e.type === 'decompose_file_failed');
     expect(failed?.msg).toContain('sub-issues API unavailable');
     expect(failed?.msg).toContain('#901');
@@ -1002,5 +1029,55 @@ describe('extractJsonObject', () => {
     expect(extractJsonObject('```json\n{"a":1}\n```')).toBe('{"a":1}');
     expect(extractJsonObject('{"a":1}')).toBe('{"a":1}');
     expect(extractJsonObject('no json')).toBeUndefined();
+  });
+});
+
+describe('publishDecomposition', () => {
+  const repo = 'on-par/software-factory';
+  const decomposition = (() => {
+    const parsed = parseDecompositionOutput(VALID_DECOMPOSITION_JSON);
+    if (!parsed.ok) throw new Error(parsed.reason);
+    return parsed.decomposition;
+  })();
+
+  it('posts the epic comment and files the children when fileSubIssues is set', async () => {
+    const createComment = vi.fn().mockResolvedValue({});
+    const create = vi.fn().mockResolvedValue({ data: { number: 901, id: 5901 } });
+    const request = vi.fn().mockResolvedValue({ data: [] });
+    const addLabels = vi.fn().mockResolvedValue({});
+    const octokit = { rest: { issues: { createComment, create, addLabels } }, request } as any;
+    const events: string[] = [];
+
+    const result = await publishDecomposition({
+      decomposition,
+      issue: 606,
+      repo,
+      octokit,
+      log: (type) => events.push(type),
+      fileSubIssues: true,
+    });
+
+    expect(result.posted).toBe(true);
+    expect(result.childIssues.length).toBe(decomposition.stories.length);
+    expect(create).toHaveBeenCalled();
+    expect(events).toContain('decompose_comment_posted');
+  });
+
+  it('returns nothing posted without throwing when createComment fails', async () => {
+    const createComment = vi.fn().mockRejectedValue(new Error('boom'));
+    const octokit = { rest: { issues: { createComment } } } as any;
+    const events: { type: string; msg: string }[] = [];
+
+    const result = await publishDecomposition({
+      decomposition,
+      issue: 606,
+      repo,
+      octokit,
+      log: (type, msg) => events.push({ type, msg }),
+      fileSubIssues: true,
+    });
+
+    expect(result).toEqual({ posted: false, childIssues: [] });
+    expect(events).toContainEqual({ type: 'decompose_failed', msg: expect.stringContaining('boom') });
   });
 });

@@ -10,7 +10,15 @@ export type BuildRoute = 'codex' | 'claude' | 'opencode';
  *  supervisor and the sim onto this union. */
 export type RunOutcome =
   | { state: 'shipped'; route: BuildRoute; branch: string; reworkRounds: number; prNumber: number }
-  | { state: 'ready'; route: BuildRoute; branch: string; reworkRounds: number; prNumber?: number }
+  | {
+      state: 'ready';
+      route: BuildRoute;
+      branch: string;
+      reworkRounds: number;
+      prNumber?: number;
+      /** the ADR-0147 slice this run shipped */
+      slice?: { index: number; count: number };
+    }
   | {
       state: 'parked';
       reason: ParkReason;

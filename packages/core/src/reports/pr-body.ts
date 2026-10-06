@@ -15,6 +15,8 @@ export interface PrBodyInput {
   checkSummary?: CheckSummary;
   /** Issue the PR closes; omitted for a non-github work source. */
   closes?: number;
+  /** Parent issue of a non-final ADR-0147 slice; renders `Part of #N` and never a closing keyword. */
+  partOf?: number;
 }
 
 export interface SpecIntent {
@@ -39,7 +41,11 @@ export function renderPrBody(input: PrBodyInput): string {
       `${verification}This PR passed independent verification by checker agents before shipping.`,
     ),
     ['<details>', '<summary>Changed files</summary>', '', '```', input.diffStat, '```', '', '</details>'].join('\n'),
-    input.closes === undefined ? undefined : `Closes #${input.closes}`,
+    input.closes !== undefined
+      ? `Closes #${input.closes}`
+      : input.partOf !== undefined
+        ? `Part of #${input.partOf}`
+        : undefined,
   ]
     .filter((part): part is string => part !== undefined)
     .join('\n\n');

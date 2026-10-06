@@ -128,8 +128,9 @@ design:
 build:
   publishFromBuild: false
 # Size gate policy at PLAN (ADR-0147). mode: file (default) files child issues for an oversized
-# issue and parks when the post-plan gate trips; off skips both gates and sends the whole issue to
-# BUILD. `factory run-issue --size-gate <mode>` beats it for one run.
+# issue and parks when the post-plan gate trips; slice keeps the issue whole, records a slice plan
+# comment and ships one slice per run; off skips both gates and sends the whole issue to BUILD.
+# `factory run-issue --size-gate <mode>` beats it for one run.
 sizeGate:
   mode: "file"
 # Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging

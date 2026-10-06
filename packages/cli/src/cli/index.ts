@@ -194,6 +194,8 @@ import type {
 } from '@on-par/factory-core/internal';
 import {
   acquirePidFile,
+  currentSlice,
+  findSlicePlanComment,
   DEFAULT_GARDEN_MAX_CLUSTERS,
   DEFAULT_GARDEN_SINCE,
   capGardenClusters,
@@ -2086,7 +2088,21 @@ export async function shipIssue(
       issue: issueNum,
     } satisfies GithubIssueParams));
   const issueTitle = work.title;
-  const branch = branchFor(issueNum, issueTitle, policy.effective.branchPrefix);
+  const sizeGateMode = opts.sizeGate ?? resolveSizeGateMode(factoryConfig);
+  // ADR-0147: slice k >= 2 builds on its own branch, so read the slice plan before the worktree exists.
+  let sliceIndex: number | undefined;
+  if (sizeGateMode === 'slice' && !ctx?.localOnly && work.kind === GITHUB_ISSUE_SOURCE) {
+    try {
+      const lookup = await findSlicePlanComment({ octokit, repo: ghRepo, issue: issueNum });
+      if (lookup.status === 'found') sliceIndex = currentSlice(lookup.plan)?.index;
+    } catch (err) {
+      throw new LaneParkError(
+        `slice plan lookup failed for #${issueNum}: ${errorDetail(err)} — parked before creating a worktree`,
+        'escalate',
+      );
+    }
+  }
+  const branch = branchFor(issueNum, issueTitle, policy.effective.branchPrefix, sliceIndex);
   const worktree = ctx?.localOnly
     ? ctx.localOnly.workspace
     : worktreePathFor(repoRoot, ghRepo, issueNum, policy.effective.branchPrefix, loaders);
@@ -2272,7 +2288,7 @@ export async function shipIssue(
     localOnly: Boolean(ctx?.localOnly),
     blockUnresolvedRegressions: resolveDesignRegressionBlock(factoryConfig),
     publishFromBuild: resolveBuildPublish(factoryConfig),
-    sizeGateMode: opts.sizeGate ?? resolveSizeGateMode(factoryConfig),
+    sizeGateMode,
     prClassifier: classifierPolicy.enabled
       ? {
           rules: resolveReviewFloorRules(repoConfig),
@@ -4162,7 +4178,13 @@ type RunLaneDeps = {
   ship?: (
     issue: number,
     opts: { product?: string; autoRework?: boolean; interactive?: boolean; approvePlan?: boolean },
-    ctx?: { repoRoot: string; ghRepo: string; paths: ReturnType<typeof getFactoryPaths>; lane?: string },
+    ctx?: {
+      repoRoot: string;
+      ghRepo: string;
+      paths: ReturnType<typeof getFactoryPaths>;
+      lane?: string;
+      onOutcome?: (outcome: RunOutcome) => void;
+    },
   ) => Promise<string>;
   waitMerge?: typeof waitForMerge;
   pathExists?: (path: string) => boolean;
@@ -4415,10 +4437,34 @@ export async function runLane(
       continue;
     }
     try {
+      const sliceOutcome: { value?: RunOutcome } = {};
       const branch =
         decision.kind === 'adopt'
           ? decision.branch
-          : await withHeartbeat(issue, heartbeat, () => ship(issue, {}, { repoRoot, ghRepo, paths, lane }));
+          : await withHeartbeat(issue, heartbeat, () =>
+              ship(
+                issue,
+                {},
+                {
+                  repoRoot,
+                  ghRepo,
+                  paths,
+                  lane,
+                  onOutcome: (o) => {
+                    sliceOutcome.value = o;
+                  },
+                },
+              ),
+            );
+      const shipped = sliceOutcome.value;
+      if (shipped?.state === 'ready' && shipped.slice && shipped.slice.index < shipped.slice.count) {
+        // ADR-0147: a non-final slice's PR is open; hand the issue back for the next slice
+        // instead of waiting for the merge.
+        awaitingReview++;
+        streak = null;
+        await settle(issue, 'queued');
+        continue;
+      }
       await withHeartbeat(issue, heartbeat, () => waitMerge(issue, branch, repoRoot, ghRepo, paths));
       merged++;
       streak = null;
@@ -5974,7 +6020,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .option('--run-children', 'When the size gate decomposes the issue, run the child issues it filed')
     .option(
       '--size-gate <mode>',
-      'Size gate mode for this run: file (file child issues / park) or off (skip both gates); beats sizeGate.mode in the config',
+      'Size gate mode for this run: file (file child issues / park), slice (ship as sequential slice PRs) or off (skip both gates); beats sizeGate.mode in the config',
     )
     .action(async (issueNum, opts) => {
       await cmdRunIssue(parseIssueArg(issueNum), opts);

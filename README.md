@@ -65,22 +65,20 @@ contracts   ←  core  ←  server
 - Claude Code CLI (`claude`) on PATH — the TRIAGE phase shells out to `claude -p`, and Claude models in every tier dispatch through it
 - Optional: OpenAI Codex CLI (`codex`) for cheap worker builds, and `ollama` for free local worker models
 
-**Step 1 — Install**
+**Step 1 — Install from source**
 
-```bash
-npm install -g @on-par/factory-cli
-factory --version
-```
-
-Development alternative (clone and build from source):
+The `@on-par/*` packages are not on npm yet, so install the CLI from a clone:
 
 ```bash
 git clone https://github.com/on-par/software-factory
 cd software-factory
 npm install
 npm run build
-npm link --workspace @on-par/factory-cli
+npm link --workspace @on-par/factory-cli   # puts `factory` on your PATH
+factory --version
 ```
+
+> **Global npm install is not available yet.** `npm install -g @on-par/factory-cli` will work once the Wave-1 publish lands (epic #1566, blocked on #1560). Until then it returns a 404, so use the clone install above.
 
 **Step 2 — Point it at your repo**
 
