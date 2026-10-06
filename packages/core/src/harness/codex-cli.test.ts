@@ -1,12 +1,15 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { writeFile as realWriteFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile as realWriteFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
 import type { ModelsConfig } from '../config/index.js';
 import { ModelRegistry } from '../models/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
-import { CodexCliHarness } from './codex-cli.js';
+import { CodexCliHarness, quoteCodexFlags } from './codex-cli.js';
 import { codingHarnessContractCases, makeContractRequest } from './contract.js';
 import { HarnessError } from './index.js';
 
@@ -490,5 +493,90 @@ describe('CodexCliHarness failure classification', () => {
 
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('unknown');
+  });
+});
+
+describe('quoteCodexFlags (CodeQL #107)', () => {
+  /** What argv the shell would actually hand to codex for the rendered flags. */
+  function argvThroughShell(rendered: string, cwd: string): string[] {
+    const out = execFileSync('/bin/sh', ['-c', `printf '%s\\0' ${rendered}`], { cwd, encoding: 'utf-8' });
+    return out.split('\0').slice(0, -1);
+  }
+
+  it('leaves plain flags byte-identical', () => {
+    expect(quoteCodexFlags('-m gpt-5.6-sol -c model_reasoning_effort=medium')).toBe(
+      '-m gpt-5.6-sol -c model_reasoning_effort=medium',
+    );
+    expect(quoteCodexFlags('--oss --local-provider ollama -m qwen2.5-coder:14b')).toBe(
+      '--oss --local-provider ollama -m qwen2.5-coder:14b',
+    );
+    expect(quoteCodexFlags('')).toBe('');
+  });
+
+  it('keeps multiple -c key=value flags and shell-quoted values working', () => {
+    const flags = `-m gpt-6-astra -c 'developer_instructions="keep -c x=1 literal"' -c "a=b c" -c k=v`;
+    expect(quoteCodexFlags(flags)).toBe(flags.replace(`"a=b c"`, `'a=b c'`));
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'turns hostile shell syntax into literal codex arguments instead of running it',
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'codex-flag-'));
+      try {
+        const hostile = 'x; touch pwned1 && touch pwned2 | touch pwned3 $(touch pwned4) `touch pwned5` > pwned6';
+        const argv = argvThroughShell(quoteCodexFlags(hostile), dir);
+        expect(argv).toEqual([
+          'x;',
+          'touch',
+          'pwned1',
+          '&&',
+          'touch',
+          'pwned2',
+          '|',
+          'touch',
+          'pwned3',
+          '$(touch',
+          'pwned4)',
+          '`touch',
+          'pwned5`',
+          '>',
+          'pwned6',
+        ]);
+        for (let i = 1; i <= 6; i++) expect(existsSync(join(dir, `pwned${i}`))).toBe(false);
+
+        const quoted = `-c "x=$(touch pwned7)" -c 'y=\`touch pwned8\`' -c it\\'s`;
+        expect(argvThroughShell(quoteCodexFlags(quoted), dir)).toEqual([
+          '-c',
+          'x=$(touch pwned7)',
+          '-c',
+          'y=`touch pwned8`',
+          '-c',
+          "it's",
+        ]);
+        expect(existsSync(join(dir, 'pwned7'))).toBe(false);
+        expect(existsSync(join(dir, 'pwned8'))).toBe(false);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('rejects an unterminated quote', () => {
+    expect(() => quoteCodexFlags(`-c 'oops`)).toThrow(/unterminated/);
+  });
+
+  it('never splices a hostile codexFlag raw into the codex command', async () => {
+    const hostileRegistry = new ModelRegistry({
+      ...modelsConfig,
+      models: {
+        ...modelsConfig.models,
+        'codex-model': { ...modelsConfig.models['codex-model'], codexFlag: 'x; touch /tmp/pwned' },
+      },
+    });
+    const rec = successExec();
+    await new CodexCliHarness(rec.fn).run(
+      makeContractRequest({ model: 'codex-model', registry: hostileRegistry, prompt: 'p', worktree: '/tmp/w' }),
+    );
+    expect(rec.calls[0].cmd).toContain(`-C '/tmp/w' 'x;' touch /tmp/pwned -o '`);
   });
 });

@@ -43,7 +43,7 @@ export class CodexCliHarness implements CodingHarness {
   async run(request: HarnessRequest): Promise<HarnessResult> {
     const { model, prompt, worktree, timeoutSeconds, registry, sandbox, env, onPgid } = request;
     const effort = registry.getEffort(model, request.task);
-    const flags = registry.getCodexFlag(model) ?? '';
+    const flags = quoteCodexFlags(registry.getCodexFlag(model) ?? '');
     // Codex applies repeated config overrides in order; preserve arbitrary profile flags.
     const extraFlag = effort === undefined ? flags : `${flags} -c ${shellEscape(`model_reasoning_effort=${effort}`)}`;
 
@@ -93,6 +93,50 @@ export class CodexCliHarness implements CodingHarness {
       await this.unlink(outFile).catch(() => {});
     }
   }
+}
+
+const SAFE_SHELL_WORD = /^[\w@%+=:,./-]+$/;
+
+/** Render a configured `codexFlag` string for the codex shell command. The string can come from
+ *  the target repo's `.factory/config.yaml`, so it is never spliced in raw (CodeQL #107): it is
+ *  split into argv words (whitespace-separated, honouring POSIX single quotes, double quotes and
+ *  backslash escapes, with no expansion), and every word that is not plainly safe is re-quoted.
+ *  `;`, `$(...)`, backticks and redirects reach codex as literal argument text. Plain flags such
+ *  as `-m gpt-5.6-sol -c model_reasoning_effort=high` render byte-identical. */
+export function quoteCodexFlags(flags: string): string {
+  return splitShellWords(flags)
+    .map((word) => (SAFE_SHELL_WORD.test(word) ? word : shellEscape(word)))
+    .join(' ');
+}
+
+function splitShellWords(input: string): string[] {
+  const words: string[] = [];
+  let word = '';
+  let inWord = false;
+  let quote: "'" | '"' | null = null;
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+      else word += ch;
+    } else if (quote === '"') {
+      if (ch === '"') quote = null;
+      else if (ch === '\\' && i + 1 < input.length && '"\\$`'.includes(input[i + 1])) word += input[++i];
+      else word += ch;
+    } else if (/\s/.test(ch)) {
+      if (inWord) words.push(word);
+      word = '';
+      inWord = false;
+    } else {
+      inWord = true;
+      if (ch === "'" || ch === '"') quote = ch;
+      else if (ch === '\\' && i + 1 < input.length) word += input[++i];
+      else word += ch;
+    }
+  }
+  if (quote) throw new HarnessError(`unterminated ${quote} quote in codexFlag: ${input}`, 'error');
+  if (inWord) words.push(word);
+  return words;
 }
 
 async function mktemp(prefix: string, write: (path: string, data: string) => Promise<void>): Promise<string> {
