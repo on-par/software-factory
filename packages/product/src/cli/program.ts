@@ -20,7 +20,7 @@ import {
   renderJudgeReport,
 } from '../judge/index.js';
 import { renderPersonaPanel, runPersonaPanel } from '../persona/index.js';
-import type { Prompter } from './prompter.js';
+import type { Prompter, StdinPrompterDeps } from './prompter.js';
 import { createStdinPrompter } from './prompter.js';
 
 export interface ProgramDeps {
@@ -34,6 +34,16 @@ export interface ProgramDeps {
   createPrompter: () => Prompter;
 }
 
+/** Injectable seams for defaultDeps so tests never mock node:child_process or node:readline (#2027). */
+export interface DefaultDepsOptions {
+  /** Runs `git <args>` and returns stdout. Defaults to execSync. */
+  runGit?: (args: string) => string;
+  /** Opens the readline interface behind createPrompter. Defaults to node:readline/promises. */
+  createInterface?: StdinPrompterDeps['createInterface'];
+}
+
+const execGit = (args: string): string => execSync(`git ${args}`, { encoding: 'utf-8' });
+
 export function getProductVersion(): string {
   return createRequire(import.meta.url)('../../package.json').version;
 }
@@ -44,9 +54,9 @@ export function getProductVersion(): string {
  * home`/`adr next` compute the wrong ADR home (or ENOENT) whenever invoked
  * from a subdirectory, e.g. `npm run dev -w packages/product`.
  */
-function resolveRepoRoot(): string {
+function resolveRepoRoot(runGit: (args: string) => string): string {
   try {
-    return execSync('git rev-parse --show-toplevel', { encoding: 'utf-8' }).trim();
+    return runGit('rev-parse --show-toplevel').trim();
   } catch {
     return process.cwd();
   }
@@ -125,13 +135,14 @@ async function decomposeFromDump(
   return { doc: approval.doc, decomposition: decomposeResult.decomposition };
 }
 
-export function defaultDeps(): ProgramDeps {
+export function defaultDeps(io: DefaultDepsOptions = {}): ProgramDeps {
+  const { runGit = execGit, createInterface } = io;
   return {
-    repoRoot: resolveRepoRoot(),
+    repoRoot: resolveRepoRoot(runGit),
     listAdrs: (dir) => listAdrFilenames(dir),
     write: (line) => console.log(line),
     readFile: (path) => readFileFs(path, 'utf-8'),
-    createPrompter: () => createStdinPrompter(),
+    createPrompter: () => createStdinPrompter({ createInterface }),
   };
 }
 

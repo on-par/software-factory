@@ -1,25 +1,12 @@
 // packages/product/src/cli/program.test.ts (#469, #470, #471).
 
-import type * as NodeChildProcess from 'node:child_process';
 import { execSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { buildProgram, defaultDeps, getProductVersion, main, type ProgramDeps } from './program.js';
-import type { Prompter } from './prompter.js';
-
-vi.mock('node:child_process', async (importOriginal) => {
-  const actual = await importOriginal<typeof NodeChildProcess>();
-  return { ...actual, execSync: vi.fn(actual.execSync) };
-});
-
-vi.mock('node:readline/promises', () => ({
-  createInterface: vi.fn(() => ({
-    question: vi.fn(async () => 'answer'),
-    close: vi.fn(),
-  })),
-}));
+import type { Prompter, PrompterInterface, StdinPrompterDeps } from './prompter.js';
 
 function stubPrompter(overrides: Partial<Prompter> = {}): Prompter {
   return {
@@ -454,10 +441,11 @@ describe('defaultDeps', () => {
   });
 
   it('falls back to process.cwd() when git rev-parse fails', () => {
-    vi.mocked(execSync).mockImplementationOnce(() => {
+    const runGit = vi.fn((): string => {
       throw new Error('not a git repository');
     });
-    expect(defaultDeps().repoRoot).toBe(process.cwd());
+    expect(defaultDeps({ runGit }).repoRoot).toBe(process.cwd());
+    expect(runGit).toHaveBeenCalledWith('rev-parse --show-toplevel');
   });
 
   it('reads a real file via readFile', async () => {
@@ -465,9 +453,14 @@ describe('defaultDeps', () => {
     expect(contents).toContain('"name"');
   });
 
-  it('creates a prompter without opening real stdin (readline/promises is mocked)', () => {
-    const prompter = defaultDeps().createPrompter();
-    expect(typeof prompter.ask).toBe('function');
-    expect(typeof prompter.close).toBe('function');
+  it('creates a prompter through the injected createInterface without opening real stdin', async () => {
+    const rl: PrompterInterface = { question: vi.fn(async () => 'answer'), close: vi.fn() };
+    const createInterface = vi.fn<StdinPrompterDeps['createInterface']>(() => rl);
+    const prompter = defaultDeps({ createInterface }).createPrompter();
+    expect(createInterface).toHaveBeenCalledTimes(1);
+    await expect(prompter.ask('Q?')).resolves.toBe('answer');
+    expect(rl.question).toHaveBeenCalledWith('Q?\n> ');
+    prompter.close();
+    expect(rl.close).toHaveBeenCalled();
   });
 });

@@ -3,6 +3,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
+import type { Octokit } from '@octokit/rest';
 import type { EventKind, LanePausedPayload } from '../events/kinds.js';
 import { createLogger } from '../logger/index.js';
 import type { PrClassificationRecord } from '../review/classifier.js';
@@ -356,10 +357,11 @@ export function branchFor(issue: number, title: string, prefix?: string): string
   return `${branchPrefixSlug(prefix)}/${issue}-${slugify(title)}`;
 }
 
-export async function getIssueTitle(repo: string, issue: number, octokit: any): Promise<string> {
+export async function getIssueTitle(repo: string, issue: number, octokit: Pick<Octokit, 'rest'>): Promise<string> {
+  const [owner, repoName] = repo.split('/');
   const { data } = await octokit.rest.issues.get({
-    owner: repo.split('/')[0],
-    repo: repo.split('/')[1],
+    owner,
+    repo: repoName,
     issue_number: issue,
   });
   return data.title;
@@ -376,14 +378,6 @@ export function shellEscape(s: string): string {
 export function ensureDir(path: string): void {
   if (!existsSync(path)) {
     mkdirSync(path, { recursive: true });
-  }
-}
-
-export function readJsonIfExists<T>(path: string, fallback: T): T {
-  try {
-    return JSON.parse(readFileSync(path, 'utf-8')) as T;
-  } catch {
-    return fallback;
   }
 }
 

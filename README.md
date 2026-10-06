@@ -170,6 +170,18 @@ When the size gate decides an issue is too big, it files child issues and stops 
 
 Exit codes: `0` when every child reached ready-for-review, was skipped as closed, or was replaced by its own children. `1` when any child failed or was not started because of STOP, or when the issue was decomposed and `--run-children` was not passed. `2` when the parent issue cannot be resolved, before any worktree or PR exists. If the issue is not decomposed, the flag changes nothing.
 
+## Root npm scripts
+
+| Script                                                            | What it does                                                                                                                                                                                                                                 | Runs in                                                                   |
+| ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `npm run test`                                                    | Vitest with coverage thresholds (the full-suite gate).                                                                                                                                                                                       | `verify.sh` (full path), CI                                               |
+| `npm run test:integration`                                        | Pipeline integration suites.                                                                                                                                                                                                                 | Nightly workflow, on demand                                               |
+| `npm run sim-monte-carlo -- [options]`                            | Headless simulator Monte Carlo runs: synthetic issues through fake PLAN→BUILD→CHECK→SHIP, no model or GitHub calls. Prints shipped/parked/escalated rates and exits 1 on a breached `--max-*-rate` threshold. `-- --help` lists the options. | On demand                                                                 |
+| `npm run sandbox-ab-report -- [--costs <file>] [--events <file>]` | Docker-sandbox vs baseline A/B comparison over `.factory/costs.jsonl` and `.factory/events.ndjson` (defaults from `getFactoryPaths`), with a go/no-go recommendation (#656).                                                                 | On demand                                                                 |
+| `npm run mutation`                                                | Stryker mutation testing (`stryker.conf.json`).                                                                                                                                                                                              | On demand only. Not part of `scripts/verify.sh` and not run by CI (#805). |
+
+The commit gate is `bash scripts/verify.sh` (see the verify skill).
+
 ## Model Routing
 
 Each task type maps to a tier, and each tier is a hand-ordered priority list in `defaults.ts` — free local models first, then cloud models ranked by capability. The router takes the first available model in the list; when a model hits a usage limit, rate limit, or error, it automatically fails over to the next one. (`defaults.ts` is the source of truth; the snapshot below can drift.)
