@@ -7,6 +7,7 @@ import type { Octokit } from '@octokit/rest';
 
 import type { ApprovalGate } from '../approvals/index.js';
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
+import { readDesignArtifact } from '../design/index.js';
 import type { EventKind } from '../events/kinds.js';
 import { gatherEvidencePack } from '../reports/evidence-pack.js';
 import { renderPrBody } from '../reports/pr-body.js';
@@ -279,6 +280,8 @@ async function shipPhaseImpl(opts: {
           specBody: await readSpecBody(opts.specPath),
           diffStat: stat,
           checkSummary,
+          reworkRounds: opts.reworkRounds,
+          risk: await readRisk(opts.specPath),
           closes: inlineWork || !finalSlice ? undefined : issue,
           partOf: !inlineWork && !finalSlice ? issue : undefined,
         }),
@@ -363,6 +366,16 @@ async function readSpecBody(specPath: string | undefined): Promise<string | unde
   if (!specPath) return undefined;
   try {
     return (await readSpec(specPath)).body;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The design artifact's Risk / blast radius for the PR body; undefined when there is no readable artifact. */
+async function readRisk(specPath: string | undefined): Promise<string | undefined> {
+  if (!specPath) return undefined;
+  try {
+    return (await readDesignArtifact(specPath))?.riskBlastRadius;
   } catch {
     return undefined;
   }
