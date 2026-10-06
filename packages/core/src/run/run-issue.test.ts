@@ -535,6 +535,17 @@ describe('runIssue — decomposition', () => {
   });
 });
 
+describe('runIssue — sliced whole issue (ADR-0147)', () => {
+  it('returns an escalated outcome naming the slice plan and never builds', async () => {
+    vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, ok: false, escalate: 'x', sliced: { sliceCount: 3 } });
+    const onDecomposed = vi.fn();
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ onDecomposed }));
+    expect(outcome).toMatchObject({ state: 'escalated', reason: expect.stringMatching(/sliced into 3 slice/) });
+    expect(buildPhase).not.toHaveBeenCalled();
+    expect(onDecomposed).not.toHaveBeenCalled();
+  });
+});
+
 describe('runIssue — steward-triggered event (#2086)', () => {
   const CHECK_EXHAUSTED: CheckPhaseResult = {
     passed: false,
