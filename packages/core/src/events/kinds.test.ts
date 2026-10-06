@@ -158,6 +158,12 @@ describe('size-gate-escalated classification (#607)', () => {
   });
 });
 
+describe('size-gate-sliced classification (ADR-0147)', () => {
+  it('is info severity, not park, not terminal', () => {
+    expect(EVENT_TRAITS['size-gate-sliced']).toEqual({ severity: 'info', isPark: false, isTerminal: false });
+  });
+});
+
 // A run refused before any resource was committed because the target issue was already
 // closed (#681) is a clean terminal outcome, not a park — human-intervention KPIs must
 // never count it, and isParkKind must agree.

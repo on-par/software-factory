@@ -473,6 +473,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       enforceReadiness: true,
       fastPath: request.efficiency.fastPath,
       enforceSizeGate: (request.sizeGateMode ?? 'file') !== 'off',
+      sizeGateMode: request.sizeGateMode,
       blockUnresolvedRegressions: request.blockUnresolvedRegressions,
       preferredRoute: pinnedRoute,
     });

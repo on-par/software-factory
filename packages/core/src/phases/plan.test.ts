@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createLifecycleBus } from '../bus/index.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { parseDecompositionOutput } from '../readiness/decompose.js';
+import { renderSlicePlanComment, slicePlanFromDecomposition, withSliceState } from '../readiness/slice-plan.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE } from '../utils/untrusted-input.js';
@@ -1279,6 +1281,197 @@ npm run test`;
     expect(logs.some((l) => l.type === 'plan' && l.msg.startsWith('Archived existing spec before planning:'))).toBe(
       true,
     );
+  });
+
+  describe('slice mode (ADR-0147)', () => {
+    const oversizedBody = `## Problem statement
+The import queue stalls under load and loses jobs.
+
+## In scope
+- Item 1
+- Item 2
+- Item 3
+- Item 4
+- Item 5
+- Item 6
+
+## Out of scope
+Changing the queue API.
+
+## Acceptance criteria
+- [ ] Criterion 1
+- [ ] Criterion 2
+- [ ] Criterion 3
+- [ ] Criterion 4
+- [ ] Criterion 5
+- [ ] Criterion 6
+
+## Verification
+npm run test`;
+
+    const BOT = 42;
+    const PLAN_OUTPUT = '---\nroute: codex\n---\n# Spec\n';
+
+    const storyJson = (n: number, inScope: string[] = [`Scope ${n}`]) => ({
+      title: `Story ${n}`,
+      role: 'operator',
+      want: `thing ${n} works`,
+      soThat: 'value',
+      problemStatement: `Problem for slice ${n}`,
+      inScope,
+      outOfScope: ['Persistent storage'],
+      acceptanceCriteria: [{ name: `ac ${n}`, given: [], when: ['run'], then: ['works'] }],
+      verification: [{ command: 'npm test', passWhen: 'passes' }],
+      tracesTo: ['INT-PROBLEM-01'],
+    });
+
+    const decompositionOf = (count: number) => {
+      const stories = Array.from({ length: count }, (_, i) => storyJson(i + 1));
+      return JSON.stringify({
+        epic: { title: 'Epic', why: 'why', doneWhen: ['done'], children: stories.map((s) => s.title) },
+        stories,
+      });
+    };
+
+    // A plan comment as the factory would have written it; `inScope` lets a test make slice 1 oversized.
+    const planComment = (opts: { merged?: number[]; inScope?: string[] } = {}) => {
+      const parsed = parseDecompositionOutput(
+        JSON.stringify({
+          epic: { title: 'Epic', why: 'why', doneWhen: ['done'], children: ['Story 1', 'Story 2'] },
+          stories: [storyJson(1), storyJson(2)],
+        }),
+      );
+      if (!parsed.ok) throw new Error(parsed.reason);
+      const built = slicePlanFromDecomposition(607, parsed.decomposition);
+      if (!built.ok) throw new Error(built.reason);
+      let plan = built.plan;
+      if (opts.inScope) {
+        plan = {
+          ...plan,
+          slices: [{ ...plan.slices[0], story: { ...plan.slices[0].story, inScope: opts.inScope } }, plan.slices[1]],
+        };
+      }
+      for (const index of opts.merged ?? []) plan = withSliceState(plan, index, 'merged');
+      return renderSlicePlanComment(plan);
+    };
+
+    async function run(opts: {
+      decompose?: string[];
+      comments?: { id: number; user: { id: number }; body: string }[];
+    }) {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const stub = new StubModelExecutor({
+        scripts: {
+          decompose: (opts.decompose ?? []).map((output) => ({ output })),
+          plan: [{ output: PLAN_OUTPUT }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const createComment = vi.fn().mockResolvedValue({ data: { id: 9999 } });
+      const updateComment = vi.fn().mockResolvedValue({ data: {} });
+      const create = vi.fn().mockResolvedValue({ data: { number: 701, id: 6701 } });
+      const update = vi.fn();
+      const request = vi.fn().mockResolvedValue({ data: [] });
+      const events: string[] = [];
+      const result = await planPhase({
+        issue: 607,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath: join(worktree, 'issue-607.md'),
+        router,
+        constitution: null,
+        octokit: {
+          rest: {
+            users: { getAuthenticated: async () => ({ data: { id: BOT } }) },
+            issues: {
+              get: async () => ({ data: { title: 'Harden the import queue', body: oversizedBody } }),
+              listComments: async () => ({ data: opts.comments ?? [] }),
+              createComment,
+              updateComment,
+              create,
+              update,
+              addLabels: vi.fn().mockResolvedValue({}),
+            },
+          },
+          request,
+        } as any,
+        log: (type) => events.push(type),
+        sizeGateMode: 'slice',
+      });
+      return { result, stub, events, createComment, create, update };
+    }
+
+    const planPrompt = (stub: StubModelExecutor) => stub.calls.find((call) => call.task === 'plan')?.prompt ?? '';
+
+    it('AC1: keeps the issue whole, records one slice plan comment and plans slice 1 only', async () => {
+      const { result, stub, events, createComment, create, update } = await run({ decompose: [decompositionOf(2)] });
+
+      expect(result.ok).toBe(true);
+      expect(stub.calls.map((call) => call.task)).toEqual(['decompose', 'plan']);
+      expect(create).not.toHaveBeenCalled();
+      expect(update).not.toHaveBeenCalled();
+      expect(createComment).toHaveBeenCalledTimes(1);
+      expect(createComment.mock.calls[0][0].body).toContain('<!-- factory:slice-plan v1 -->');
+      expect(createComment.mock.calls[0][0].body).not.toContain('## Proposed epic');
+      expect(events).toContain('size-gate-sliced');
+      expect(events).not.toContain('size-gate-escalated');
+      expect(planPrompt(stub)).toContain('Problem for slice 1');
+      expect(planPrompt(stub)).not.toContain('Problem for slice 2');
+      expect(await readFile(result.specPath, 'utf8')).toContain('# Spec');
+    });
+
+    it('AC2: reuses a trusted plan without decomposing, and plans the first non-merged slice', async () => {
+      const first = await run({ comments: [{ id: 1, user: { id: BOT }, body: planComment() }] });
+      expect(first.result.ok).toBe(true);
+      expect(first.stub.calls.map((call) => call.task)).toEqual(['plan']);
+      expect(planPrompt(first.stub)).toContain('Problem for slice 1');
+      expect(first.createComment).not.toHaveBeenCalled();
+
+      const second = await run({ comments: [{ id: 1, user: { id: BOT }, body: planComment({ merged: [1] }) }] });
+      expect(second.result.ok).toBe(true);
+      expect(second.stub.calls.map((call) => call.task)).toEqual(['plan']);
+      expect(planPrompt(second.stub)).toContain('Problem for slice 2');
+      expect(planPrompt(second.stub)).not.toContain('Problem for slice 1');
+    });
+
+    it('AC3: parks when the current slice is still oversized and never decomposes again', async () => {
+      const inScope = ['a', 'b', 'c', 'd', 'e', 'f'];
+      const { result, stub, events } = await run({
+        comments: [{ id: 1, user: { id: BOT }, body: planComment({ inScope }) }],
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.escalate).toMatch(/slice 1\/2 of #607 exceeds the size gate/);
+      expect(stub.calls).toEqual([]);
+      expect(events).toContain('size-gate-escalated');
+    });
+
+    it('AC4a: more than 5 slices falls back to file mode from the same decomposition', async () => {
+      const { result, stub, events, createComment, create } = await run({ decompose: [decompositionOf(6)] });
+
+      expect(result.ok).toBe(false);
+      expect(stub.calls.map((call) => call.task)).toEqual(['decompose']);
+      expect(createComment).toHaveBeenCalledTimes(1);
+      expect(createComment.mock.calls[0][0].body).toContain('## Proposed epic');
+      expect(create).toHaveBeenCalledTimes(6);
+      expect(result.decomposed?.childIssues).toEqual([701, 701, 701, 701, 701, 701]);
+      expect(result.escalate).toMatch(/^slice plan has 6 slices/);
+      expect(events).toContain('size-gate-escalated');
+    });
+
+    it('AC4b: parks without any model call when the trusted marker comment is unreadable', async () => {
+      const { result, stub, createComment } = await run({
+        comments: [
+          { id: 3, user: { id: BOT }, body: '<!-- factory:slice-plan v1 -->\n<!-- factory:slice-plan-data !!! -->' },
+        ],
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.escalate).toMatch(/unreadable/);
+      expect(stub.calls).toEqual([]);
+      expect(createComment).not.toHaveBeenCalled();
+    });
   });
 
   describe('design artifact (#422)', () => {
