@@ -4,7 +4,13 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { CandidateIssue } from '../filing/index.js';
 import { upstreamReportMarker } from '../filing/upstream.js';
-import { dedupGardenClusters, findGardenTrackingIssue, gardenClusterFingerprint, gardenKeyMarker } from './dedup.js';
+import {
+  dedupGardenClusters,
+  findGardenTrackingIssue,
+  gardenClusterFingerprint,
+  gardenKeyMarker,
+  markGardenTrackingUnknown,
+} from './dedup.js';
 import type { GardenCluster } from './harvest.js';
 
 const cluster = (key: string, dimension: GardenCluster['dimension'] = 'signature'): GardenCluster => ({
@@ -139,9 +145,49 @@ describe('dedupGardenClusters', () => {
     expect(client.listCandidateIssues).not.toHaveBeenCalled();
   });
 
-  it('propagates a search rejection', async () => {
+  it('marks every cluster tracked: unknown when the search rejects', async () => {
+    const input = [cluster('a'), cluster('b', 'checker'), cluster('c', 'human')];
+    const snapshot = structuredClone(input);
+    const client = fakeClient();
+    const err = new Error('boom');
+    client.searchIssues.mockRejectedValue(err);
+    const onSearchError = vi.fn();
+    const out = await dedupGardenClusters(input, { client, ...target, onSearchError });
+    expect(out.map((x) => x.tracking)).toEqual(Array(3).fill({ status: 'unknown' }));
+    expect(out.map(({ tracking: _t, ...rest }) => rest)).toEqual(snapshot);
+    expect(input).toEqual(snapshot);
+    expect(onSearchError).toHaveBeenCalledTimes(1);
+    expect(onSearchError).toHaveBeenCalledWith(err);
+  });
+
+  it('a network failure on a later search still marks every cluster unknown', async () => {
+    const first = cluster('a');
+    const client = fakeClient();
+    client.searchIssues
+      .mockResolvedValueOnce([issue(5, gardenKeyMarker('a'))])
+      .mockResolvedValueOnce([issue(5, gardenKeyMarker('a'))])
+      .mockRejectedValue(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } }));
+    const out = await dedupGardenClusters([first, cluster('b')], { client, ...target });
+    expect(out.map((x) => x.tracking)).toEqual([{ status: 'unknown' }, { status: 'unknown' }]);
+  });
+
+  it('works without onSearchError', async () => {
     const client = fakeClient();
     client.searchIssues.mockRejectedValue(new Error('boom'));
-    await expect(dedupGardenClusters([c], { client, ...target })).rejects.toThrow('boom');
+    const out = await dedupGardenClusters([c], { client, ...target });
+    expect(out[0]?.tracking).toEqual({ status: 'unknown' });
+  });
+});
+
+describe('markGardenTrackingUnknown', () => {
+  it('sets unknown without mutating the input', () => {
+    const input = [cluster('a')];
+    const snapshot = structuredClone(input);
+    expect(markGardenTrackingUnknown(input)[0]?.tracking).toEqual({ status: 'unknown' });
+    expect(input).toEqual(snapshot);
+  });
+
+  it('returns an empty list for empty input', () => {
+    expect(markGardenTrackingUnknown([])).toEqual([]);
   });
 });

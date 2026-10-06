@@ -166,6 +166,10 @@ describe('garden harvest', () => {
       expect(tracked.indexOf('- tracked: #12')).toBeLessThan(tracked.indexOf('- count: 1'));
       const fresh = renderGardenReport([{ ...base, tracking: { status: 'new' } }]);
       expect(fresh.indexOf('- new')).toBeLessThan(fresh.indexOf('- count: 1'));
+      const unknown = renderGardenReport([{ ...base, tracking: { status: 'unknown' } }]);
+      expect(unknown.indexOf('- tracked: unknown')).toBeGreaterThan(-1);
+      expect(unknown.indexOf('- tracked: unknown')).toBeLessThan(unknown.indexOf('- count: 1'));
+      expect(unknown).not.toContain('- new');
       expect(renderGardenReport([base]).join('\n')).not.toMatch(/- (new|tracked)/);
     });
 

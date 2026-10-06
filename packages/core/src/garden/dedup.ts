@@ -1,4 +1,4 @@
-// src/garden/dedup.ts — Read-only dedup of garden clusters against open issues via GitHub search (#2102)
+// src/garden/dedup.ts — Read-only dedup of garden clusters against open issues via GitHub search (#2102); search failures degrade to tracking unknown (#2103)
 
 import { createHash } from 'node:crypto';
 
@@ -39,9 +39,19 @@ export function findGardenTrackingIssue(
   return numbers.length === 0 ? undefined : Math.min(...numbers);
 }
 
+/** Every cluster with tracking unknown — used when the open-issue search cannot run (#2103). */
+export function markGardenTrackingUnknown(clusters: readonly GardenCluster[]): GardenCluster[] {
+  return clusters.map((c) => ({ ...c, tracking: { status: 'unknown' } }));
+}
+
 export async function dedupGardenClusters(
   clusters: readonly GardenCluster[],
-  opts: { client: Pick<FilingGitHubClient, 'searchIssues'>; owner: string; repo: string },
+  opts: {
+    client: Pick<FilingGitHubClient, 'searchIssues'>;
+    owner: string;
+    repo: string;
+    onSearchError?: (err: unknown) => void;
+  },
 ): Promise<GardenCluster[]> {
   const { client, owner, repo } = opts;
   const cache = new Map<string, Promise<CandidateIssue[]>>();
@@ -54,13 +64,18 @@ export async function dedupGardenClusters(
     return hit;
   };
   const out: GardenCluster[] = [];
-  for (const c of clusters) {
-    const texts = [gardenClusterFingerprint(c)];
-    if (c.key.length <= MAX_KEY_SEARCH_CHARS) texts.push(`garden:${c.key}`);
-    const found: CandidateIssue[] = [];
-    for (const text of texts) found.push(...(await search(text)));
-    const n = findGardenTrackingIssue(c, found);
-    out.push({ ...c, tracking: n === undefined ? { status: 'new' } : { status: 'tracked', issue: n } });
+  try {
+    for (const c of clusters) {
+      const texts = [gardenClusterFingerprint(c)];
+      if (c.key.length <= MAX_KEY_SEARCH_CHARS) texts.push(`garden:${c.key}`);
+      const found: CandidateIssue[] = [];
+      for (const text of texts) found.push(...(await search(text)));
+      const n = findGardenTrackingIssue(c, found);
+      out.push({ ...c, tracking: n === undefined ? { status: 'new' } : { status: 'tracked', issue: n } });
+    }
+  } catch (err) {
+    opts.onSearchError?.(err);
+    return markGardenTrackingUnknown(clusters);
   }
   return out;
 }

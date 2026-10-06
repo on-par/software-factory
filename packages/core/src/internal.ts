@@ -29,6 +29,7 @@ export {
   findGardenTrackingIssue,
   gardenClusterFingerprint,
   gardenKeyMarker,
+  markGardenTrackingUnknown,
 } from './garden/dedup.js';
 
 // Failure fingerprint & evidence
