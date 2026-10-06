@@ -1,9 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { renderDesignArtifact } from '../design/index.js';
 import type { CheckSummary, FactoryEvent } from '../types/index.js';
 import { gatherEvidencePack, renderEvidencePack } from './evidence-pack.js';
 
@@ -41,12 +42,11 @@ const events: FactoryEvent[] = [
 ];
 
 describe('renderEvidencePack', () => {
-  it('renders a full pack with checker verdicts, spec summary, rework, timeline, and logs', () => {
+  it('renders a full pack with checker verdicts, rework, and logs', () => {
     const markdown = renderEvidencePack({
       issue: 385,
       checkSummary,
       reworkRounds: 2,
-      specSummary: 'Attach an evidence pack to every PR.',
       events,
       logFiles: ['issue-385.build.log', 'issue-385.check.log'],
     });
@@ -57,14 +57,13 @@ describe('renderEvidencePack', () => {
     expect(markdown).toContain('✅ PASS `compile`');
     expect(markdown).toContain('❌ FAIL `tests`');
     expect(markdown).toContain('⚪ SKIP `links`');
-    expect(markdown).toContain('Attach an evidence pack to every PR.');
     for (const event of events) {
       expect(markdown).toContain(`${event.type}: ${event.msg}`);
     }
     expect(markdown).toContain('issue-385.build.log');
     expect(markdown).toContain('issue-385.check.log');
-    expect(markdown.match(/<details>/g)?.length).toBe(6);
-    expect(markdown.match(/<\/details>/g)?.length).toBe(6);
+    expect(markdown.match(/<details>/g)?.length).toBe(4);
+    expect(markdown.match(/<\/details>/g)?.length).toBe(4);
   });
 
   it('truncates long checker details to ~200 characters', () => {
@@ -80,7 +79,7 @@ describe('renderEvidencePack', () => {
     expect(failLine).toContain('…');
   });
 
-  it('falls back cleanly when checkSummary, events, logFiles, and specSummary are all absent', () => {
+  it('falls back cleanly when checkSummary, events, and logFiles are all absent', () => {
     const markdown = renderEvidencePack({
       issue: 385,
       events: [],
@@ -90,9 +89,9 @@ describe('renderEvidencePack', () => {
     expect(markdown).toContain('## 🔎 Evidence pack');
     expect(markdown).toContain('No verification data available.');
     expect(markdown).toContain('No checker results recorded.');
-    expect(markdown).toContain('Spec summary unavailable.');
-    expect(markdown).toContain('No events recorded for this run window.');
-    expect(markdown).toContain('No per-issue log files found; see the event timeline above.');
+    expect(markdown).toContain('- No per-issue log files found.');
+    expect(markdown).not.toContain('Frozen spec');
+    expect(markdown).not.toContain('Event timeline');
     expect(markdown.length).toBeGreaterThan(0);
   });
 
@@ -130,7 +129,20 @@ describe('renderEvidencePack', () => {
     });
 
     expect(markdown).toContain('Design artifact');
-    expect(markdown).toContain('Restated problem here.');
+    expect(markdown).toContain('- Design artifact has no Behavior contract or Verification plan.');
+    expect(markdown).not.toContain('Restated problem here.');
+  });
+
+  it('falls back when designMarkdown is an empty string', () => {
+    const markdown = renderEvidencePack({ issue: 422, events: [], logFiles: [], designMarkdown: '' });
+
+    expect(markdown).toContain('- Design artifact has no Behavior contract or Verification plan.');
+  });
+
+  it('never renders a Frozen spec section (#2249)', () => {
+    const markdown = renderEvidencePack({ issue: 1, checkSummary, reworkRounds: 1, events, logFiles: [] });
+
+    expect(markdown).not.toContain('Frozen spec');
   });
 
   it('falls back to "No design artifact recorded." when designMarkdown is absent (#422)', () => {
@@ -290,7 +302,7 @@ describe('gatherEvidencePack', () => {
       logsDir,
     });
 
-    expect(markdown).toContain('Make the widget spin faster than before.');
+    expect(markdown).not.toContain('Make the widget spin faster than before.');
     expect(markdown).not.toContain('not part of the goal');
     expect(markdown).toContain('check: checked');
     expect(markdown).not.toContain('other issue');
@@ -303,28 +315,48 @@ describe('gatherEvidencePack', () => {
     expect(() => gatherEvidencePack({ issue: 385 })).not.toThrow();
     const markdown = gatherEvidencePack({ issue: 385 });
     expect(markdown).toContain('## 🔎 Evidence pack');
-    expect(markdown).toContain('Spec summary unavailable.');
+    expect(markdown).not.toContain('Frozen spec');
   });
 
-  it('uses the leading body excerpt when the spec has no Goal section', () => {
+  it('does not render the spec body when the spec has no Goal section', () => {
     const dir = mkdtemp();
     const specPath = join(dir, 'issue-8.md');
     writeFileSync(specPath, '# Spec: no goal section\n\nJust some body text describing the change.\n');
 
     const markdown = gatherEvidencePack({ issue: 8, specPath });
 
-    expect(markdown).toContain('Just some body text describing the change.');
+    expect(markdown).not.toContain('Just some body text describing the change.');
   });
 
   it('picks up a .design.md on disk beside the spec (#422)', () => {
     const dir = mkdtemp();
     const specPath = join(dir, 'issue-422.md');
     writeFileSync(specPath, '---\nroute: codex\n---\n# Spec\n');
-    writeFileSync(join(dir, 'issue-422.design.md'), '## Design artifact (#422)\n\nRestated problem text.');
+    writeFileSync(
+      join(dir, 'issue-422.design.md'),
+      [
+        '## Design artifact (#422)',
+        '',
+        '### Restated problem',
+        '',
+        'Restated problem text.',
+        '',
+        '### Behavior contract',
+        '',
+        '- Contract text.',
+        '',
+        '### Verification plan',
+        '',
+        '- Plan text.',
+        '',
+      ].join('\n'),
+    );
 
     const markdown = gatherEvidencePack({ issue: 422, specPath });
 
-    expect(markdown).toContain('Restated problem text.');
+    expect(markdown).toContain('Contract text.');
+    expect(markdown).toContain('Plan text.');
+    expect(markdown).not.toContain('Restated problem text.');
   });
 
   it('falls back to "No design artifact recorded." when no .design.md exists (#422)', () => {
@@ -385,5 +417,114 @@ describe('renderEvidencePack — regression_hunt (#1839)', () => {
     expect(out).not.toContain('PASS `regression_hunt`');
     expect(out).toContain('0 pass, 0 fail, 1 skip');
     expect(out).not.toContain('  - ');
+  });
+});
+
+describe('renderEvidencePack — design trim (#2249)', () => {
+  const artifact = {
+    restatedProblem: 'RESTATED-X',
+    approach: { chosen: 'APPROACH-X', rejected: [{ option: 'REJ-OPT-X', reason: 'REJ-WHY-X' }] },
+    interfacesTouched: ['IFACE-X'],
+    targetTypes: [{ name: 'TargetX', file: 'a.ts', kind: 'changed' as const }],
+    signatures: [{ symbol: 'symX', file: 'a.ts', signature: 'sigX()' }],
+    callGraph: [{ from: 'CALL-FROM-X', to: 'CALL-TO-X' }],
+    behaviorContract: ['BEHAVIOR-X'],
+    verificationPlan: [{ command: 'cmd-x', passWhen: 'PASSWHEN-X' }],
+    riskBlastRadius: 'RISK-X',
+    openQuestions: ['OPENQ-X'],
+  } as Parameters<typeof renderDesignArtifact>[0];
+  const render = (designMarkdown: string) => renderEvidencePack({ issue: 7, events: [], logFiles: [], designMarkdown });
+
+  it('keeps only the Behavior contract and Verification plan, in order', () => {
+    const md = render(renderDesignArtifact(artifact, 7));
+
+    expect(md).toContain('### Behavior contract');
+    expect(md).toContain('- BEHAVIOR-X');
+    expect(md).toContain('### Verification plan');
+    expect(md).toContain('- `cmd-x` — pass when: PASSWHEN-X');
+    expect(md.indexOf('### Behavior contract')).toBeLessThan(md.indexOf('### Verification plan'));
+    for (const heading of [
+      'Restated problem',
+      'Approach',
+      'Interfaces touched',
+      'Target types',
+      'Key signatures',
+      'Call graph',
+      'Risk / blast radius',
+      'Open questions',
+    ]) {
+      expect(md).not.toContain(`### ${heading}`);
+    }
+    for (const text of ['RESTATED-X', 'APPROACH-X', 'IFACE-X', 'CALL-FROM-X', 'RISK-X', 'OPENQ-X']) {
+      expect(md).not.toContain(text);
+    }
+  });
+
+  it('keeps only the subsection that is present', () => {
+    const md = render(
+      '## Design artifact (#7)\n\n### Approach\n\nAPPROACH-X\n\n### Behavior contract\n\n- ONLY-X\n\n### Risk\n\nRISK-X',
+    );
+
+    expect(md).toContain('- ONLY-X');
+    expect(md).not.toContain('### Verification plan');
+    expect(md).not.toContain('APPROACH-X');
+    expect(md).not.toContain('RISK-X');
+  });
+
+  it('captures a last-in-document subsection to the end of the string', () => {
+    const md = render('## Design artifact (#7)\n\n### Verification plan\n\n- LAST-A\n- LAST-B\n');
+
+    expect(md).toContain('### Verification plan\n\n- LAST-A\n- LAST-B');
+  });
+});
+
+describe('renderEvidencePack — PR #2162 fixture (#2249)', () => {
+  const before = readFileSync(
+    new URL('../__fixtures__/evidence-pack-2162/comment-before.md', import.meta.url),
+    'utf-8',
+  );
+  const checkers = [
+    ['worker_output', 'worker produced a diff against origin/main'],
+    ['compile', 'npm run build: OK'],
+    ['tests', 'scripts/verify.sh: OK'],
+    ['lint', 'lint: OK; tsc: OK'],
+    ['links', 'checked 4 links, all OK'],
+    ['accessibility', 'basic checks passed (alt, placeholder links) — scanned 2 HTML files'],
+    ['design_smells', 'no program-design smells found in the diff'],
+  ] as const;
+  const designMarkdown = before.split('<summary>Design artifact</summary>')[1]!.split('</details>')[0]!.trim();
+  const timeline = before.split('<summary>Event timeline</summary>')[1]!.split('</details>')[0]!;
+  const fixtureEvents: FactoryEvent[] = timeline
+    .split('\n')
+    .map((line) => line.match(/^- (\S+) ([^:]+): (.*)$/))
+    .filter((m): m is RegExpMatchArray => m !== null)
+    .map((m) => ({ ts: m[1]!, type: m[2]! as FactoryEvent['type'], issue: '2149', msg: m[3]! }));
+
+  it('renders in under half the original line count and keeps verdicts and rework', () => {
+    const rendered = renderEvidencePack({
+      issue: 2149,
+      checkSummary: {
+        failures: 0,
+        passes: checkers.length,
+        skips: 0,
+        total: checkers.length,
+        results: checkers.map(([checker, details]) => ({ checker, result: 'PASS' as const, details })),
+      },
+      reworkRounds: 0,
+      designMarkdown,
+      events: fixtureEvents,
+      logFiles: [],
+    });
+
+    expect(fixtureEvents.length).toBeGreaterThan(0);
+    expect(rendered.split('\n').length).toBeLessThan(before.split('\n').length / 2);
+    expect(rendered).toContain('Checker verdicts');
+    for (const [checker] of checkers) expect(rendered).toContain(`✅ PASS \`${checker}\``);
+    expect(rendered).toContain('Rework & verification');
+    expect(rendered).toContain('- Rework rounds: 0');
+    expect(rendered).toContain('- Final result: all checkers passed');
+    expect(rendered).not.toContain('Frozen spec');
+    expect(rendered).not.toContain('### Restated problem');
+    expect(rendered).not.toContain('Event timeline');
   });
 });
