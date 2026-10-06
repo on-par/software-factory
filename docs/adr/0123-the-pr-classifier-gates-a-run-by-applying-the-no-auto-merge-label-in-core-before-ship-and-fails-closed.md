@@ -17,4 +17,4 @@ Positive: one gate (the label) covers human-requested holds, self-fix bugs and c
 
 Negative: the label is per-issue and coarse. The reason lives only in the event log and the evidence pack, not on the label. A floor computed before SHIP does not see files SHIP itself adds, such as ADR drafts under `docs/adr`. A label-apply outage parks otherwise-good runs. A later model-based classifier must plug into this same pre-SHIP seam and may only escalate.
 
-References: ADR-0121, ADR-0122, issue #1724.
+References: ADR-0121, ADR-0151, issue #1724.

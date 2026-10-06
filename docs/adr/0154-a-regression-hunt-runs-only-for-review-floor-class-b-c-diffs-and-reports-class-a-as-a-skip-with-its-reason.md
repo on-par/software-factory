@@ -1,4 +1,4 @@
-# ADR-0129: A regression hunt runs only for review-floor class B/C diffs and reports class A as a SKIP with its reason
+# ADR-0154: A regression hunt runs only for review-floor class B/C diffs and reports class A as a SKIP with its reason
 
 - Status: Accepted
 - Date: 2026-10-02
@@ -33,7 +33,7 @@ Class B/C diffs, the risky ones, get an adversarial "is any input worse" pass, a
 in the PR's evidence pack and the CHECK log. Class A diffs skip the cost, and the skip is visible as a skip
 with its reason. The hunt's coverage is only as good as the floor's classing: a risky change that the floor
 calls A is not hunted. That is accepted because the floor fails toward B/C and repos can add C rules
-(ADR-0122). CHECK now depends on the review floor, so floor rule changes alter which diffs are hunted.
+(ADR-0151). CHECK now depends on the review floor, so floor rule changes alter which diffs are hunted.
 Other checkers can reuse the structured findings field, but its shape is the regression-finding shape. A
 checker with differently shaped findings needs a new field, not a reinterpretation of this one.
 

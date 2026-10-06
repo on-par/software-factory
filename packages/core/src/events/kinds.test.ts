@@ -257,7 +257,7 @@ describe('steward-triggered classification (#2084)', () => {
     expect(withSignature).toEqual({ trigger: 'check-exhausted', failureSignature: 'tests:abc' });
     expect(bare.failureSignature).toBeUndefined();
 
-    // @ts-expect-error 'budget' is not an ADR-0144 trigger
+    // @ts-expect-error 'budget' is not an ADR-0155 trigger
     const invalid: StewardTriggeredPayload = { trigger: 'budget' };
     expect(invalid).toBeDefined();
   });

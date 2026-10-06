@@ -1,4 +1,4 @@
-// src/steward/comment.ts — render a steward verdict as a fenced markdown issue comment with a hidden marker (#2118, #2119), and publish it once per failure signature (#2120, ADR-0144, ADR-0130)
+// src/steward/comment.ts — render a steward verdict as a fenced markdown issue comment with a hidden marker (#2118, #2119), and publish it once per failure signature (#2120, ADR-0155, ADR-0130)
 import { createHash } from 'node:crypto';
 import { fenceExcerpt, stripHiddenContent } from '../filing/sanitize.js';
 import type { StuckTrigger } from './detect.js';
@@ -7,7 +7,7 @@ import type { StewardVerdict } from './diagnose.js';
 /** Version tag in the hidden steward marker. */
 export const STEWARD_COMMENT_MARKER_VERSION = 'v1';
 
-/** First line of an escalated comment (#2119, ADR-0144). */
+/** First line of an escalated comment (#2119, ADR-0155). */
 export const STEWARD_ESCALATION_LINE = 'Escalated: steward confidence below 90%, no recommendation';
 
 export interface StewardCommentInput {

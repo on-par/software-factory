@@ -1,4 +1,4 @@
-# ADR-0122: Lane worktrees resolve from `worktree.parent` with owner/repo namespacing for shared roots and a fixed `<repo>-factory-` basename
+# ADR-0150: Lane worktrees resolve from `worktree.parent` with owner/repo namespacing for shared roots and a fixed `<repo>-factory-` basename
 
 - Status: Accepted
 - Date: 2026-10-01
@@ -15,4 +15,4 @@ Lane worktrees were always siblings of the checkout. The CLI hard-coded that pat
 
 New worktrees no longer clutter the repos directory and are easy to find in bulk. GC needs no change and reaps old and new layouts alike. Under the shared root the basename repeats the repo name, which is redundant but deliberate. New code that computes a lane worktree path must call `laneWorktreePath`. A repo that wants the old layout sets `worktree.parent: "../"`. The in-repo opt-in carries the risk that the target repo's tooling may scan nested checkouts.
 
-References: ADR-0103, ADR-0112, ADR-0118, ADR-0121; [issue #1758](https://github.com/on-par/software-factory/issues/1758).
+References: ADR-0103, ADR-0112, ADR-0118, ADR-0149; [issue #1758](https://github.com/on-par/software-factory/issues/1758).

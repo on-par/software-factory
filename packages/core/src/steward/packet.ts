@@ -1,4 +1,4 @@
-// src/steward/packet.ts — bounded steward input packet: fenced issue + frozen plan + capped lane diff + failing checker logs (#2095, #2096, #2097, #2098, ADR-0144)
+// src/steward/packet.ts — bounded steward input packet: fenced issue + frozen plan + capped lane diff + failing checker logs (#2095, #2096, #2097, #2098, ADR-0155)
 import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
@@ -9,10 +9,10 @@ import { stripHiddenContent } from '../filing/sanitize.js';
 import { wrapUntrustedIssueBody } from '../utils/untrusted-input.js';
 
 /**
- * Per-item caps. Title/body come from ADR-0144's Packet table; plan is provisional (#2095).
- * The diff caps are bytes/lines and provisional (#2096); ADR-0144 lists 20000 chars of diff.
- * The log caps come from ADR-0144's Failing checkers row: 10 checkers, 2000 chars each (#2097).
- * The ADR caps are provisional (#2098): ADR-0144's Packet table has no ADR row. 600 matches DEFAULT_MAX_DECISION_CHARS in adr/index.ts.
+ * Per-item caps. Title/body come from ADR-0155's Packet table; plan is provisional (#2095).
+ * The diff caps are bytes/lines and provisional (#2096); ADR-0155 lists 20000 chars of diff.
+ * The log caps come from ADR-0155's Failing checkers row: 10 checkers, 2000 chars each (#2097).
+ * The ADR caps are provisional (#2098): ADR-0155's Packet table has no ADR row. 600 matches DEFAULT_MAX_DECISION_CHARS in adr/index.ts.
  */
 export const STEWARD_PACKET_CAPS = {
   title: 256,

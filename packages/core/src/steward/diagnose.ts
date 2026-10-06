@@ -1,4 +1,4 @@
-// src/steward/diagnose.ts — steward verdict schema with confidence-based escalation, and the fail-closed tool-less diagnose call, and its cost attribution (#2110, #2112, #2113, ADR-0144)
+// src/steward/diagnose.ts — steward verdict schema with confidence-based escalation, and the fail-closed tool-less diagnose call, and its cost attribution (#2110, #2112, #2113, ADR-0155)
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { defaultRoutesConfig } from '@on-par/factory-config';
@@ -11,7 +11,7 @@ import type { CostEntry } from '../types/index.js';
 import { logCost } from '../utils/index.js';
 import type { StewardPacket } from './packet.js';
 
-/** Confidence below this value escalates the verdict. Fixed by ADR-0144; not a config value. */
+/** Confidence below this value escalates the verdict. Fixed by ADR-0155; not a config value. */
 export const STEWARD_ESCALATION_THRESHOLD = 0.9;
 
 /** Closed set of diagnosis categories. */
@@ -26,7 +26,7 @@ export const STEWARD_PACKET_FIELDS = [
   'adrs',
 ] as const satisfies readonly (keyof StewardPacket)[];
 
-/** Output caps from ADR-0144's output table. */
+/** Output caps from ADR-0155's output table. */
 export const STEWARD_VERDICT_CAPS = {
   diagnosis: 2000,
   nextStep: 1000,
@@ -89,7 +89,7 @@ export interface StewardModelCall {
   /** Pinned model-registry key from the steward route. */
   model: string;
   prompt: string;
-  /** Always empty: the steward is tool-less (ADR-0144). */
+  /** Always empty: the steward is tool-less (ADR-0155). */
   allowedTools: readonly string[];
   output: 'json';
 }
@@ -112,7 +112,7 @@ export type StewardErrorKind =
 export interface StewardErrorVerdict {
   escalate: true;
   reason: 'steward-error';
-  /** ADR-0144: failed output is an escalation with confidence 0. */
+  /** ADR-0155: failed output is an escalation with confidence 0. */
   confidence: 0;
   errorKind: StewardErrorKind;
   /** Short, factory-written description, at most STEWARD_ERROR_DETAIL_CHARS. */

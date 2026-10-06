@@ -1,4 +1,4 @@
-# ADR-0122: Repo classifier config may add C rules and redefine the A scope, but never remove a packaged C rule
+# ADR-0151: Repo classifier config may add C rules and redefine the A scope, but never remove a packaged C rule
 
 - Status: Accepted
 - Date: 2026-10-01

@@ -2,25 +2,43 @@
 //
 // Usage: npm run adr:index [-- --check]
 // Rewrites only the region between the adr-index markers; scripts/verify.sh runs the --check mode.
+// Also fails (in both modes) when two ADR files share a number.
 
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { buildIndexRows, diffIndexRows, parseIndexTable, renderIndexTable, replaceIndexBlock } from '@on-par/adr-kit';
+import {
+  buildIndexRows,
+  diffIndexRows,
+  findDuplicateAdrNumbers,
+  formatAdrNumber,
+  parseIndexTable,
+  renderIndexTable,
+  replaceIndexBlock,
+} from '@on-par/adr-kit';
 
 const adrDir = fileURLToPath(new URL('../docs/adr/', import.meta.url));
 const readmePath = `${adrDir}README.md`;
 const check = process.argv.includes('--check');
 
 function main(): void {
+  const names = readdirSync(adrDir)
+    .filter((name) => /^\d{4}-.*\.md$/.test(name))
+    .sort();
+  const duplicates = findDuplicateAdrNumbers(names);
+  if (duplicates.length > 0) {
+    for (const d of duplicates)
+      console.error(`duplicate ADR number ${formatAdrNumber(d.number)}: ${d.filenames.join(', ')}`);
+    console.error('adr:index: each ADR needs a unique number; renumber the later file(s) to the next free number');
+    process.exitCode = 1;
+    return;
+  }
+
   let rows;
   let readme: string;
   let next: string;
   try {
-    const files = readdirSync(adrDir)
-      .filter((name) => /^\d{4}-.*\.md$/.test(name))
-      .sort()
-      .map((filename) => ({ filename, source: readFileSync(`${adrDir}${filename}`, 'utf8') }));
+    const files = names.map((filename) => ({ filename, source: readFileSync(`${adrDir}${filename}`, 'utf8') }));
     rows = buildIndexRows(files);
     readme = readFileSync(readmePath, 'utf8');
     next = replaceIndexBlock(readme, renderIndexTable(rows));

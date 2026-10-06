@@ -1,4 +1,4 @@
-# ADR-0128: An unresolved worse/unknown behaviorDelta row is logged by PLAN and blocks only when design.blockUnresolvedRegressions is on
+# ADR-0153: An unresolved worse/unknown behaviorDelta row is logged by PLAN and blocks only when design.blockUnresolvedRegressions is on
 
 - Status: Accepted
 - Date: 2026-10-01

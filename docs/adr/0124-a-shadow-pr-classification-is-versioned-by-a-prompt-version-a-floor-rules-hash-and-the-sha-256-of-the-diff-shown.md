@@ -5,7 +5,7 @@
 
 ## Context
 
-ADR-0121 requires every classified PR to record the model id, prompt version, policy version and diff SHA. It also requires any change to the model, prompt or policy to demote a promoted class. Without a fixed definition, each later stage (escalate-only, auto-approve, backtests) could compute these differently, and evidence gathered under one definition would silently mix with evidence under another. No versioned review-policy file exists yet. The effective policy is the packaged floor rules merged with the repo's classifier config (ADR-0122). A commit SHA does not identify what the model saw, because CHECK and the classifier also read uncommitted worktree changes.
+ADR-0121 requires every classified PR to record the model id, prompt version, policy version and diff SHA. It also requires any change to the model, prompt or policy to demote a promoted class. Without a fixed definition, each later stage (escalate-only, auto-approve, backtests) could compute these differently, and evidence gathered under one definition would silently mix with evidence under another. No versioned review-policy file exists yet. The effective policy is the packaged floor rules merged with the repo's classifier config (ADR-0151). A commit SHA does not identify what the model saw, because CHECK and the classifier also read uncommitted worktree changes.
 
 ## Decision
 
@@ -17,4 +17,4 @@ Positive: evidence can be partitioned exactly by (model, prompt, policy). A poli
 
 Negative: rule edits that do not change behavior (reordering, a cosmetic id rename) still mint a new policy version and reset a streak. The prompt version depends on authors remembering to bump it. Reviewers must check this on any classifier prompt edit, and that edit is class C under the floor anyway.
 
-References: ADR-0121, ADR-0122, ADR-0123, issue #1725.
+References: ADR-0121, ADR-0151, ADR-0123, issue #1725.
