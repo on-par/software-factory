@@ -1501,6 +1501,45 @@ bash scripts/verify.sh
     });
   });
 
+  describe('garden --report (#2083)', () => {
+    const parkLine = (issue: string, ts: string) =>
+      JSON.stringify({
+        ts,
+        type: 'fail',
+        issue,
+        msg: 'parked',
+        checkFailure: { signature: 'tests|boom', failingChecks: ['tests'] },
+      });
+
+    it('prints one cluster with count and path:line pointers, deterministically', async () => {
+      writeFileSync(
+        paths().events,
+        `${[parkLine('1', '2026-01-01T00:00:00Z'), parkLine('2', '2026-01-02T00:00:00Z'), parkLine('1', '2026-01-03T00:00:00Z')].join('\n')}\n`,
+      );
+      await runMain('garden', '--report');
+      const first = logged();
+      expect(first.match(/## 1\./g)).toHaveLength(1);
+      expect(first).not.toContain('## 2.');
+      expect(first).toContain('count: 3');
+      for (const n of [1, 2, 3]) expect(first).toContain(`${paths().events}:${n}`);
+      logSpy.mockClear();
+      await runMain('garden', '--report');
+      expect(logged()).toEqual(first);
+    });
+
+    it('prints no clusters for a missing events file and does not exit', async () => {
+      const res = await runMain('garden', '--report');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('no clusters');
+    });
+
+    it('exits non-zero without --report', async () => {
+      const res = await runMain('garden');
+      expect(res.exited).toBe(true);
+      expect(res.code).not.toBe(0);
+    });
+  });
+
   describe('kpis', () => {
     it('renders a report and trend, and records a snapshot on each run', async () => {
       writeFileSync(

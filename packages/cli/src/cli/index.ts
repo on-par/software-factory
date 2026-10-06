@@ -12,6 +12,7 @@ import { promisify, styleText } from 'node:util';
 import type { Octokit } from '@octokit/rest';
 import type {
   BenchmarkRunFailure,
+  CheckFailureInfo,
   CheckSummary,
   Environment,
   EnvironmentProxySettings,
@@ -187,6 +188,9 @@ import type {
 } from '@on-par/factory-core/internal';
 import {
   acquirePidFile,
+  clusterCheckFailures,
+  readHarvestEvents,
+  renderGardenReport,
   formatWorktreeLocation,
   laneWorktreePath,
   resolveWorktreeRoot,
@@ -1280,6 +1284,17 @@ async function cmdClassifierReport(opts: { json?: boolean } = {}) {
   for (const line of formatClassifierReport(report)) console.log(line);
 }
 
+async function cmdGarden(opts: { report?: boolean } = {}) {
+  if (!opts.report) {
+    console.error('factory garden: pass --report (the only mode in this release)');
+    process.exit(1);
+  }
+  const repoRoot = await getRepoRoot();
+  const paths = getFactoryPaths(repoRoot);
+  const clusters = clusterCheckFailures(readHarvestEvents([paths.events]));
+  for (const line of renderGardenReport(clusters)) console.log(line);
+}
+
 async function cmdKpis(opts: { branchPrefix?: string } = {}) {
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
   const repoRoot = await getRepoRoot();
@@ -1991,6 +2006,7 @@ export async function shipIssue(
         tokens?: { input: number; output: number };
         readiness?: ReadinessInfo;
         prClassification?: PrClassificationRecord;
+        checkFailure?: CheckFailureInfo;
       },
     ) => {
       if (TERMINAL_EVENT_KINDS.has(type)) terminalMessage = msg;
@@ -5592,6 +5608,12 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     )
     .option('--json', 'Print one JSON object with the same numbers')
     .action((opts: { json?: boolean }) => cmdClassifierReport(opts));
+
+  program
+    .command('garden')
+    .description('Read-only report of recurring failure patterns in local events (no network)')
+    .option('--report', 'Print recurring CHECK failure-signature clusters as markdown')
+    .action((opts: { report?: boolean }) => cmdGarden(opts));
 
   program
     .command('tui')
