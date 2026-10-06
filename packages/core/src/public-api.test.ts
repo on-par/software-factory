@@ -346,6 +346,14 @@ const INTERNAL_API_KEYS = [
   'parseDecompositionOutput',
   'buildReadinessGapPrompt',
   'parseReadinessGapOutput',
+  // Slice plan model (ADR-0147)
+  'MAX_SLICES',
+  'SLICE_PLAN_MARKER',
+  'currentSlice',
+  'parseSlicePlanComment',
+  'renderSlicePlanComment',
+  'slicePlanFromDecomposition',
+  'withSliceState',
   // Worktree location (#1758)
   'ensureWorktreeParentExcluded',
   'formatWorktreeLocation',

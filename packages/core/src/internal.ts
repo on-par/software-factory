@@ -648,5 +648,21 @@ export { DEFAULT_REVIEW_CONSTITUTION, describeReviewConstitutionSource } from '.
 // Readiness deep check (#1732)
 export type { DecompositionOutput } from './readiness/decompose.js';
 export { buildDecompositionPrompt, parseDecompositionOutput } from './readiness/decompose.js';
+export type {
+  Slice,
+  SlicePlan,
+  SlicePlanBuildResult,
+  SlicePlanParseResult,
+  SliceState,
+} from './readiness/slice-plan.js';
+export {
+  MAX_SLICES,
+  SLICE_PLAN_MARKER,
+  currentSlice,
+  parseSlicePlanComment,
+  renderSlicePlanComment,
+  slicePlanFromDecomposition,
+  withSliceState,
+} from './readiness/slice-plan.js';
 export type { ReadinessGapCriterion, ReadinessGapReport } from './readiness/enrich.js';
 export { buildReadinessGapPrompt, parseReadinessGapOutput } from './readiness/enrich.js';
