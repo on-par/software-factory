@@ -21,6 +21,8 @@ import { buildPhase as buildPhaseDefault } from '../phases/build.js';
 import { checkPhase as checkPhaseDefault, renderEnvironmentReleaseComment } from '../phases/check.js';
 import { planPhase as planPhaseDefault } from '../phases/plan.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
+import { upsertSlicePlanComment } from '../readiness/slice-plan-github.js';
+import { withSliceState } from '../readiness/slice-plan.js';
 import type { ReviewFloorPathChange, ReviewFloorRuleSet } from '../review/floor.js';
 import {
   CLASSIFIER_PROMPT_VERSION,
@@ -815,6 +817,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       work: request.work,
       laneId: request.lane,
       reviewRouting,
+      slice: plan.slice ? { index: plan.slice.index, count: plan.slice.plan.slices.length } : undefined,
     });
     if (!ship.ok) {
       const reason: ParkReason = ship.denied ? 'escalate' : 'fail';
@@ -826,6 +829,30 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       return terminalParked(reason, message);
     }
 
+    if (plan.slice) {
+      const { index, plan: slicePlan } = plan.slice;
+      const count = slicePlan.slices.length;
+      if (ship.prNumber === undefined) {
+        log('ship', `slice ${index}/${count} shipped with no PR number — slice plan not updated`);
+      } else {
+        const state = ship.alreadyDelivered ? 'merged' : 'pr-open';
+        try {
+          await upsertSlicePlanComment({
+            octokit: ports.octokit,
+            repo: request.repo,
+            issue: request.issue,
+            plan: withSliceState(slicePlan, index, state, ship.prNumber),
+          });
+          log('ship', `recorded slice ${index}/${count} as ${state} (PR #${ship.prNumber}) in the slice plan comment`);
+        } catch (err) {
+          return terminalParked(
+            'fail',
+            `slice ${index}/${count} PR #${ship.prNumber} opened but recording it in the slice plan comment failed: ${errorMessage(err)}`,
+          );
+        }
+      }
+    }
+
     if (request.skipCI) {
       log('skip-ci', `skipping CI watch (FACTORY_SKIP_CI=1) — merging on local verify`);
     }
@@ -834,7 +861,14 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       : `PR #${ship.prNumber} ready for review`;
     log('ready', readyMsg);
     await ports.writeLocalRunReport?.({ outcome: 'ready', route, branch: request.branch, reworkRounds });
-    return { state: 'ready', route, branch: request.branch, reworkRounds, prNumber: ship.prNumber };
+    return {
+      state: 'ready',
+      route,
+      branch: request.branch,
+      reworkRounds,
+      prNumber: ship.prNumber,
+      ...(plan.slice ? { slice: { index: plan.slice.index, count: plan.slice.plan.slices.length } } : {}),
+    };
   } catch (err) {
     if (isDecomposeSignal(err)) throw err;
     if ((err as { reason?: unknown } | null | undefined)?.reason === 'local_auth') {

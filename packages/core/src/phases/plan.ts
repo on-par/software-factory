@@ -22,7 +22,7 @@ import {
 import type { SizeGateMode } from '../config/index.js';
 import { decomposeOversizedIssue, publishDecomposition, renderChildIssueBody } from '../readiness/decompose.js';
 import { resolveSliceGate } from '../readiness/slice-gate.js';
-import { MAX_SLICES } from '../readiness/slice-plan.js';
+import { MAX_SLICES, type SlicePlan } from '../readiness/slice-plan.js';
 import { MAX_BUILD_CALL_EDGES, MAX_BUILD_SIGNATURES, MAX_BUILD_TARGET_TYPES } from '../readiness/size.js';
 import { scoreIssueReadiness } from '../readiness/index.js';
 import type { ModelRouter } from '../router/index.js';
@@ -50,6 +50,9 @@ export interface PlanResult {
    *  issue was sliced and its slice plan comment recorded. `ok` stays false: this run ends before
    *  BUILD, and the next run plans the current slice from the comment. */
   sliced?: { sliceCount: number };
+  /** Set on an ok result when PLAN planned one slice of a sliced issue (ADR-0147). SHIP titles the PR
+   *  from it, and runIssue records the PR in the slice plan comment. */
+  slice?: { plan: SlicePlan; index: number };
 }
 
 export interface PlanPromptOpts {
@@ -401,6 +404,7 @@ async function planPhaseImpl(opts: {
 
   let planningSlice = false;
   let sliceLabel = '';
+  let plannedSlice: PlanResult['slice'];
   if (enforceSizeGate && opts.sizeGateMode === 'slice' && source.kind === GITHUB_ISSUE_SOURCE) {
     const params = source.params as GithubIssueParams;
     const gate = await resolveSliceGate({
@@ -452,6 +456,7 @@ async function planPhaseImpl(opts: {
       issueBody = renderChildIssueBody(slice.story, params.issue);
       readiness = scoreIssueReadiness({ title: issueTitle, body: issueBody });
       planningSlice = true;
+      plannedSlice = { plan, index: slice.index };
       sliceLabel = `slice ${slice.index}/${plan.slices.length} of #${params.issue}`;
       log('plan', `planning slice ${slice.index}/${plan.slices.length} of #${params.issue}: ${slice.title}`);
       if (readiness.sizeOk === false) {
@@ -509,6 +514,7 @@ async function planPhaseImpl(opts: {
       specPath,
       model: 'fast-path',
       designArtifact: fastPath.frontmatter.design,
+      ...(plannedSlice ? { slice: plannedSlice } : {}),
     };
   }
 
@@ -758,7 +764,14 @@ async function planPhaseImpl(opts: {
 
     log('plan', `Plan complete with model ${result.model}, route: ${route}`, { model: result.model });
 
-    const planResult: PlanResult = { ok: true, route, specPath, model: result.model, designArtifact };
+    const planResult: PlanResult = {
+      ok: true,
+      route,
+      specPath,
+      model: result.model,
+      designArtifact,
+      ...(plannedSlice ? { slice: plannedSlice } : {}),
+    };
 
     if (!approvalGate) return planResult;
 

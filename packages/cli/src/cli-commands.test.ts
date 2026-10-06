@@ -82,7 +82,7 @@ const h = vi.hoisted(() => {
   };
 });
 
-import { microVmName } from '@on-par/factory-core/internal';
+import { microVmName, renderSlicePlanComment } from '@on-par/factory-core/internal';
 
 import { FACTORYD_LABEL, factorydFiles, type DaemonCtlDeps } from './cli/daemon.js';
 import { HELP_GROUPS, OTHER_GROUP } from './cli/help-groups.js';
@@ -156,7 +156,9 @@ function defaultOctokit() {
         get: vi.fn(async () => ({ data: { title: 'Fix the bug' } })),
         listForRepo: vi.fn(async () => ({ data: [] })),
         listLabelsOnIssue: vi.fn(async () => ({ data: [] })),
+        listComments: vi.fn(async () => ({ data: [] })),
       },
+      users: { getAuthenticated: vi.fn(async () => ({ data: { id: 7 } })) },
       pulls: {
         list: vi.fn(async ({ state }: any) =>
           state === 'open'
@@ -5271,6 +5273,65 @@ describe('shipIssue (direct)', () => {
     await shipIssue(5, {}, ctx(), { setupWorktree: custom });
     expect(custom.mock.calls[0]?.slice(0, 3)).toEqual([h.repoRoot, expect.any(String), expect.any(String)]);
     expect(setupWorktree).not.toHaveBeenCalled();
+  });
+
+  describe('slice branch (ADR-0147)', () => {
+    const sliceStory = (n: number) => ({
+      schemaVersion: 1 as const,
+      kind: 'story' as const,
+      filesLikelyTouched: [],
+      labels: [],
+      title: `Story ${n}`,
+      role: 'operator',
+      want: `thing ${n} works`,
+      soThat: 'value',
+      problemStatement: `Problem ${n}`,
+      inScope: [`Scope ${n}`],
+      outOfScope: ['Persistent storage'],
+      acceptanceCriteria: [{ name: `ac ${n}`, given: [], when: ['run'], then: ['works'] }],
+      verification: [{ command: 'npm test', passWhen: 'passes' }],
+      tracesTo: ['INT-PROBLEM-01'],
+    });
+    const planComment = renderSlicePlanComment({
+      issue: 5,
+      slices: [
+        { index: 1, title: 'One', story: sliceStory(1) as never, state: 'merged', prNumber: 10 },
+        { index: 2, title: 'Two', story: sliceStory(2) as never, state: 'pending' },
+      ],
+    });
+    const sliceOctokit = (listComments: () => Promise<unknown>) => {
+      const fake = defaultOctokit() as any;
+      fake.rest.issues.listComments = vi.fn(listComments);
+      return fake;
+    };
+    const custom = () =>
+      vi.fn(async (..._args: Parameters<NonNullable<CliDeps['setupWorktree']>>) => undefined as never);
+
+    it('builds slice 2 on the -s2- branch when slice 1 is merged', async () => {
+      const setup = custom();
+      const fake = sliceOctokit(async () => ({ data: [{ id: 1, user: { id: 7 }, body: planComment }] }));
+      await shipIssue(5, { sizeGate: 'slice' }, ctx(), { setupWorktree: setup, octokit: () => fake });
+      expect(setup.mock.calls[0]?.[1]).toBe('factory/5-s2-fix-the-bug');
+    });
+
+    it('does not look up the slice plan in file mode', async () => {
+      const setup = custom();
+      const fake = sliceOctokit(async () => ({ data: [] }));
+      await shipIssue(5, { sizeGate: 'file' }, ctx(), { setupWorktree: setup, octokit: () => fake });
+      expect(fake.rest.issues.listComments).not.toHaveBeenCalled();
+      expect(setup.mock.calls[0]?.[1]).toBe('factory/5-fix-the-bug');
+    });
+
+    it('parks before creating a worktree when the slice plan lookup throws', async () => {
+      const setup = custom();
+      const fake = sliceOctokit(async () => {
+        throw new Error('network down');
+      });
+      await expect(
+        shipIssue(5, { sizeGate: 'slice' }, ctx(), { setupWorktree: setup, octokit: () => fake }),
+      ).rejects.toBeInstanceOf(LaneParkError);
+      expect(setup).not.toHaveBeenCalled();
+    });
   });
 
   it('uses the injected octokit factory instead of the default client', async () => {

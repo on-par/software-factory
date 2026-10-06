@@ -1483,6 +1483,14 @@ npm run test`;
       expect(planPrompt(second.stub)).not.toContain('Problem for slice 1');
     });
 
+    it('exposes the planned slice and its plan on the ok result', async () => {
+      const { result } = await run({ comments: [{ id: 1, user: { id: BOT }, body: planComment({ merged: [1] }) }] });
+      expect(result.ok).toBe(true);
+      expect(result.slice?.index).toBe(2);
+      expect(result.slice?.plan.slices).toHaveLength(2);
+      expect(result.slice?.plan.slices[0].state).toBe('merged');
+    });
+
     it('AC3: parks when the current slice is still oversized and never decomposes again', async () => {
       const inScope = ['a', 'b', 'c', 'd', 'e', 'f'];
       const { result, stub, events } = await run({
