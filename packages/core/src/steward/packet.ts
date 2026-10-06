@@ -1,14 +1,25 @@
-// src/steward/packet.ts — bounded steward input packet: fenced issue + frozen plan + capped lane diff (#2095, #2096, ADR-0144)
-import { readFile } from 'node:fs/promises';
+// src/steward/packet.ts — bounded steward input packet: fenced issue + frozen plan + capped lane diff + failing checker logs (#2095, #2096, #2097, ADR-0144)
+import { readdir, readFile } from 'node:fs/promises';
+import { hostname } from 'node:os';
 import { join } from 'node:path';
+import { capEvidenceExcerpt } from '../filing/index.js';
 import { stripHiddenContent } from '../filing/sanitize.js';
 import { wrapUntrustedIssueBody } from '../utils/untrusted-input.js';
 
 /**
  * Per-item caps. Title/body come from ADR-0144's Packet table; plan is provisional (#2095).
  * The diff caps are bytes/lines and provisional (#2096); ADR-0144 lists 20000 chars of diff.
+ * The log caps come from ADR-0144's Failing checkers row: 10 checkers, 2000 chars each (#2097).
  */
-export const STEWARD_PACKET_CAPS = { title: 256, body: 8000, plan: 8000, diffBytes: 20000, diffLines: 2000 } as const;
+export const STEWARD_PACKET_CAPS = {
+  title: 256,
+  body: 8000,
+  plan: 8000,
+  diffBytes: 20000,
+  diffLines: 2000,
+  logChars: 2000,
+  logFiles: 10,
+} as const;
 
 /** Lane diff artifact name inside the run directory (same name the benchmark artifact writer uses). */
 const DIFF_ARTIFACT = 'diff.patch';
@@ -61,10 +72,34 @@ export interface StewardDiffItem {
   truncated: boolean;
 }
 
+/** One failing checker log: a sanitized, capped excerpt plus a host:path pointer to the raw log (ADR-0131). */
+export interface StewardLogEntry extends StewardTextMeta {
+  /** Log file name without the `.log` extension, e.g. `verify-verify`. */
+  name: string;
+  /** Absolute path of the raw log on the originating machine. */
+  path: string;
+  /** `${host}:${path}`; the raw log itself is never in the packet. */
+  pointer: string;
+  /** Excerpt after stripHiddenContent and capEvidenceExcerpt. */
+  text: string;
+}
+
+export interface StewardLogsItem {
+  status: 'present';
+  /** Directory the logs were read from. */
+  dir: string;
+  entries: StewardLogEntry[];
+  /** Number of non-empty log files found before the file cap. */
+  originalCount: number;
+  /** True when originalCount exceeded the file cap. */
+  truncated: boolean;
+}
+
 export interface StewardPacket {
   issue: StewardIssueItem;
   plan: StewardPlanItem | StewardAbsentItem;
   diff: StewardDiffItem | StewardAbsentItem;
+  logs: StewardLogsItem | StewardAbsentItem;
 }
 
 export interface BuildStewardPacketOptions {
@@ -77,6 +112,12 @@ export interface BuildStewardPacketOptions {
   diffPath?: string;
   maxDiffBytes?: number;
   maxDiffLines?: number;
+  /** Explicit failing-checker log directory. Default: the highest-numbered `check-r<N>` directory in runDir. */
+  checkLogDir?: string;
+  maxLogChars?: number;
+  maxLogFiles?: number;
+  /** Host printed in each raw-log pointer (default: os.hostname()). */
+  host?: string;
 }
 
 function capText(raw: string, max: number): { text: string } & StewardTextMeta {
@@ -137,7 +178,70 @@ function capDiff(raw: string, maxBytes: number, maxLines: number): Omit<StewardD
   return { text, originalBytes, bytes, originalLines, lines, truncated: true };
 }
 
-/** Assembles the bounded steward packet: the fenced issue, the frozen plan and the capped lane diff. Reads the plan and lane diff; writes nothing. */
+/** The `check-r<N>` directory of the last CHECK round (numeric max), or absent. */
+async function latestRoundDir(runDir: string): Promise<string | StewardAbsentItem> {
+  let entries;
+  try {
+    entries = await readdir(runDir, { withFileTypes: true });
+  } catch (err) {
+    const missing = (err as NodeJS.ErrnoException).code === 'ENOENT';
+    return { status: 'absent', reason: missing ? 'missing' : 'unreadable' };
+  }
+  let best: { name: string; round: number } | undefined;
+  for (const e of entries) {
+    const m = /^check-r(\d+)$/.exec(e.name);
+    if (!m || !e.isDirectory()) continue;
+    const round = Number(m[1]);
+    if (!best || round > best.round) best = { name: e.name, round };
+  }
+  return best ? join(runDir, best.name) : { status: 'absent', reason: 'missing' };
+}
+
+async function readCheckerLogs(
+  dir: string,
+  maxChars: number,
+  maxFiles: number,
+  host: string,
+): Promise<StewardLogsItem | StewardAbsentItem> {
+  let dirents;
+  try {
+    dirents = await readdir(dir, { withFileTypes: true });
+  } catch (err) {
+    const missing = (err as NodeJS.ErrnoException).code === 'ENOENT';
+    return { status: 'absent', reason: missing ? 'missing' : 'unreadable' };
+  }
+  const files = dirents
+    .filter((e) => e.isFile() && e.name.endsWith('.log'))
+    .map((e) => e.name)
+    .sort();
+  if (files.length === 0) return { status: 'absent', reason: 'missing' };
+  const entries: StewardLogEntry[] = [];
+  for (const file of files) {
+    const path = join(dir, file);
+    const read = await readArtifact(path);
+    if ('status' in read) continue;
+    const c = capEvidenceExcerpt(stripHiddenContent(read.raw), maxChars);
+    entries.push({
+      name: file.slice(0, -'.log'.length),
+      path,
+      pointer: `${host}:${path}`,
+      text: c.text,
+      originalChars: c.totalChars,
+      chars: c.shownChars,
+      truncated: c.truncated,
+    });
+  }
+  if (entries.length === 0) return { status: 'absent', reason: 'empty' };
+  return {
+    status: 'present',
+    dir,
+    entries: entries.slice(0, maxFiles),
+    originalCount: entries.length,
+    truncated: entries.length > maxFiles,
+  };
+}
+
+/** Assembles the bounded steward packet: the fenced issue, the frozen plan, the capped lane diff and the sanitized failing checker logs. Reads the plan, lane diff and logs; writes nothing. */
 export async function buildStewardPacket(
   runDir: string,
   issue: StewardIssueInput,
@@ -170,5 +274,17 @@ export async function buildStewardPacket(
           ),
         }
       : diffRead;
-  return { issue: issueItem, plan, diff };
+
+  const host = stripHiddenContent(opts.host ?? hostname()) || 'unknown-host';
+  const logDir = opts.checkLogDir ?? (await latestRoundDir(runDir));
+  const logs =
+    typeof logDir === 'string'
+      ? await readCheckerLogs(
+          logDir,
+          opts.maxLogChars ?? STEWARD_PACKET_CAPS.logChars,
+          opts.maxLogFiles ?? STEWARD_PACKET_CAPS.logFiles,
+          host,
+        )
+      : logDir;
+  return { issue: issueItem, plan, diff, logs };
 }
