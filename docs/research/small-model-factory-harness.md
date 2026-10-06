@@ -406,7 +406,8 @@ hard dependency.
   `runOllamaCommandAgent`, `parseLocalAgentAction`, failover classification),
   `packages/core/src/phases/{plan,build,check}.ts`,
   `packages/core/src/models/index.ts` (`isLocalOnlyModel`, doctor probes),
-  `packages/config/src/{models,routes}.json`, `FACTORY_COMPARISON.md`; branch
+  `packages/config/src/{models,routes}.json`,
+  `docs/history/factory-comparison-2026-07-10.md`; branch
   diff `main...feat/local-only-ollama-factory` (e4a0e5f).
 - Run evidence: `.factory/events.ndjson` (issue 137,
   2026-07-13T19:31–19:46Z); `.factory/plans/issue-137.md` (mtime 14:26 CDT,
