@@ -674,7 +674,7 @@ describe('buildPhase sandbox', () => {
     expect(logs).toContainEqual({ type: 'sandbox_violation', msg: 'Operation not permitted' });
   });
 
-  it('logs an allow-list sandbox start event when the policy grants allowHosts', async () => {
+  it('logs a report-only open-network sandbox start event when the policy grants allowHosts', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);
     const specPath = join(worktree, 'issue-93.md');
@@ -707,7 +707,11 @@ describe('buildPhase sandbox', () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(logs).toContainEqual({ type: 'sandbox', msg: 'containment active (runtime sandbox-exec, net allow-list)' });
+    expect(logs).toContainEqual({
+      type: 'sandbox',
+      msg: 'containment active (runtime sandbox-exec, net open (report-only))',
+    });
+    expect(logs.some((l) => l.msg.includes('allow-list'))).toBe(false);
   });
 
   it('does not log a sandbox start event when no sandbox policy is set', async () => {

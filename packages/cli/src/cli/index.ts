@@ -199,6 +199,7 @@ import type {
 import {
   acquirePidFile,
   currentSlice,
+  egressSummaryMessage,
   findSlicePlanComment,
   upsertSlicePlanComment,
   withSliceState,
@@ -271,7 +272,9 @@ import {
   findOpenPR,
   setupWorktree,
   shellEscape,
+  shouldProxyEgress,
   slugify,
+  startEgressProxy,
   sweepWorktrees,
   watchChecks,
   withAdmissionGuard,
@@ -2421,7 +2424,28 @@ export async function shipIssue(
       }),
   };
 
-  const outcome = await runIssue(request, policy, ports);
+  // #2214: report-only per-lane egress proxy for sandbox-exec. Started here, after worktree setup,
+  // so the finally below is the single place that stops it on every exit path.
+  const proxied = shouldProxyEgress(request.sandboxPolicy) ? request.sandboxPolicy : undefined;
+  const egressProxy = proxied
+    ? await startEgressProxy({
+        allowHosts: proxied.allowHosts,
+        onHost: (host, allowed) => log('egress_host', `${host} (${allowed ? 'on allowlist' : 'not on allowlist'})`),
+      })
+    : undefined;
+  let outcome: Awaited<ReturnType<typeof runIssue>>;
+  try {
+    outcome = await runIssue(
+      proxied && egressProxy ? { ...request, sandboxPolicy: { ...proxied, proxyUrl: egressProxy.url } } : request,
+      policy,
+      ports,
+    );
+  } finally {
+    if (proxied && egressProxy) {
+      log('egress_summary', egressSummaryMessage(egressProxy.hosts(), proxied.allowHosts));
+      await egressProxy.close();
+    }
+  }
   ctx?.onOutcome?.(outcome);
 
   if (opts.interactive && !ctx?.localOnly && (outcome.state === 'ready' || outcome.state === 'shipped')) {

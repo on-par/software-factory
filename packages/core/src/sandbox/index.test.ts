@@ -9,6 +9,8 @@ import {
   resolveSandboxPolicy,
   resolveSandboxRuntime,
   sandboxEventFromError,
+  egressProxyEnv,
+  shouldProxyEgress,
   wrapCommandInSandbox,
 } from './index.js';
 
@@ -410,6 +412,25 @@ describe('wrapCommandInSandbox', () => {
     expect(wrapped).toContain('echo hi');
   });
 
+  it('exports the proxy env in the inner sh -c for sandbox-exec when proxyUrl is set (#2214)', () => {
+    const policy = { ...basePolicy, runtime: 'sandbox-exec' as const, proxyUrl: 'http://127.0.0.1:54321' };
+    const wrapped = wrapCommandInSandbox('echo hi', policy);
+    expect(wrapped).toContain('HTTPS_PROXY=');
+    expect(wrapped).toContain('http://127.0.0.1:54321');
+    for (const k of ['HTTP_PROXY', 'https_proxy', 'http_proxy', 'NO_PROXY', 'no_proxy']) {
+      expect(wrapped).toContain(`${k}=`);
+    }
+  });
+
+  it('adds no proxy env without proxyUrl (sandbox-exec) and ignores it for firejail', () => {
+    const exec = wrapCommandInSandbox('echo hi', { ...basePolicy, runtime: 'sandbox-exec' as const });
+    expect(exec).not.toContain('PROXY');
+    const fj = { ...basePolicy, runtime: 'firejail' as const };
+    expect(wrapCommandInSandbox('echo hi', { ...fj, proxyUrl: 'http://127.0.0.1:1' })).toBe(
+      wrapCommandInSandbox('echo hi', fj),
+    );
+  });
+
   it('wraps with firejail read-only root and read-write per writable path', () => {
     const policy = { ...basePolicy, runtime: 'firejail' as const };
     const wrapped = wrapCommandInSandbox('echo hi', policy);
@@ -509,5 +530,34 @@ describe('sandboxEventFromError', () => {
   it('classifies SIGXCPU as resource_limit even when auth wording is also present', () => {
     const err = new HarnessError('boom', 'local_auth', { signal: 'SIGXCPU', stdout: 'Please run /login to continue' });
     expect(sandboxEventFromError(err)).toMatchObject({ type: 'resource_limit' });
+  });
+});
+
+describe('egressProxyEnv / shouldProxyEgress (#2214)', () => {
+  const base = {
+    worktree: '/w',
+    writablePaths: [] as string[],
+    writableFilePrefixes: [] as string[],
+    allowHosts: ['api.anthropic.com'],
+    cpuMs: 1000,
+    memMb: 1,
+  };
+
+  it('returns the six proxy env keys', () => {
+    const env = egressProxyEnv('http://127.0.0.1:9');
+    expect(Object.keys(env).sort()).toEqual(
+      ['HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy'].sort(),
+    );
+    expect(env.HTTPS_PROXY).toBe('http://127.0.0.1:9');
+    expect(env.no_proxy).toBe('localhost,127.0.0.1,::1');
+  });
+
+  it('is true only for sandbox-exec with a non-empty allowlist', () => {
+    expect(shouldProxyEgress(undefined)).toBe(false);
+    for (const runtime of ['none', 'firejail', 'docker-sandbox'] as const) {
+      expect(shouldProxyEgress({ ...base, runtime })).toBe(false);
+    }
+    expect(shouldProxyEgress({ ...base, runtime: 'sandbox-exec', allowHosts: [] })).toBe(false);
+    expect(shouldProxyEgress({ ...base, runtime: 'sandbox-exec' })).toBe(true);
   });
 });
