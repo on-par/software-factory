@@ -53,6 +53,10 @@ const RUNTIME_NOTES: Record<string, string> = {
     'BUILD policy. publishFromBuild: true lets the claude BUILD worker push, open a PR and wait for CI before ' +
     'CHECK (the old behavior). Default false keeps BUILD commit-only on every route; SHIP pushes and opens the PR ' +
     'after CHECK. FACTORY_BUILD_PUBLISH=1/0 beats it.',
+  sizeGate:
+    'Size gate policy at PLAN (ADR-0147). mode: file (default) files child issues for an oversized issue and parks ' +
+    'when the post-plan gate trips; off skips both gates and sends the whole issue to BUILD. ' +
+    '`factory run-issue --size-gate <mode>` beats it for one run.',
   timeouts:
     'Phase timeouts in seconds. FACTORY_PLAN_TIMEOUT, FACTORY_BUILD_TIMEOUT, FACTORY_CHECK_TIMEOUT and ' +
     'FACTORY_APPROVAL_TIMEOUT beat these values.',
@@ -265,6 +269,7 @@ function runtimeNamespace(): Node[] {
     section('plan_approval'),
     section('design'),
     section('build'),
+    section('sizeGate'),
     section('ci'),
     section('worktree'),
     section('workspace'),

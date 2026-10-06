@@ -17,6 +17,7 @@ export type {
   MergePolicySource,
   ModelsConfig,
   RoutesConfig,
+  SizeGateMode,
 } from './config/index.js';
 export {
   FactoryConfigV2Schema,
@@ -34,6 +35,9 @@ export {
   resolveDefectWindowDays,
   resolveEnvironmentPorts,
   resolveBuildPublish,
+  resolveSizeGateMode,
+  parseSizeGateMode,
+  SIZE_GATE_MODES,
   resolveDesignRegressionBlock,
   resolveEnvironmentProxy,
   resolveIngestConfig,

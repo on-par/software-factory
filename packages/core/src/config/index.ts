@@ -152,6 +152,8 @@ const FactoryConfigSchema = z.object({
     .object({ blockUnresolvedRegressions: z.boolean().default(false) })
     .default({ blockUnresolvedRegressions: false }),
   build: z.object({ publishFromBuild: z.boolean().default(false) }).default({ publishFromBuild: false }),
+  // Plain string on purpose: an unknown mode must load and resolve to `file`, not throw.
+  sizeGate: z.object({ mode: z.string().default('file') }).default({ mode: 'file' }),
   kpis: z
     .object({
       defectWindowDays: z.number().int().positive().default(14),
@@ -321,6 +323,7 @@ export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'plan_approval',
   'design',
   'build',
+  'sizeGate',
   'kpis',
   'sandbox',
   'discovery',
@@ -420,6 +423,20 @@ function resolveEnabledFlag(env: NodeJS.ProcessEnv, envVar: string, fallback: bo
 
 export function resolveSkipCI(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
   return resolveEnabledFlag(env, 'FACTORY_SKIP_CI', config.ci?.skip ?? false);
+}
+
+/** sizeGate.mode values this build understands (ADR-0147). `slice` lands in a later issue. */
+export const SIZE_GATE_MODES = ['file', 'off'] as const;
+export type SizeGateMode = (typeof SIZE_GATE_MODES)[number];
+
+/** Exact match against SIZE_GATE_MODES; anything else is undefined. */
+export function parseSizeGateMode(raw: unknown): SizeGateMode | undefined {
+  return (SIZE_GATE_MODES as readonly unknown[]).includes(raw) ? (raw as SizeGateMode) : undefined;
+}
+
+/** sizeGate.mode from the factory config; missing or unknown resolves to `file`. */
+export function resolveSizeGateMode(config: FactoryConfig): SizeGateMode {
+  return parseSizeGateMode(config.sizeGate?.mode) ?? 'file';
 }
 
 export function resolveBuildPublish(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {

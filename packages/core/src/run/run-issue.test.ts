@@ -246,6 +246,17 @@ describe('runIssue — publishFromBuild threading (#1867)', () => {
   });
 });
 
+describe('runIssue — size gate mode (#2048)', () => {
+  it.each([
+    [undefined, true],
+    ['file', true],
+    ['off', false],
+  ] as const)('sizeGateMode %s -> enforceSizeGate %s', async (mode, expected) => {
+    await runIssue(baseRequest({ sizeGateMode: mode }), basePolicy(), basePorts());
+    expect(vi.mocked(planPhase).mock.calls[0][0].enforceSizeGate).toBe(expected);
+  });
+});
+
 describe('runIssue — invariant 2: budget asserted after each phase', () => {
   it('parks with reason fail when the budget is already exceeded after PLAN', async () => {
     const outcome = await runIssue(
