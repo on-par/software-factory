@@ -276,15 +276,6 @@ runs are an explicit human opt-in outside the factory, or
 
 **Safety note:** to run unattended, the factory invokes agent CLIs with permission checks disabled — `claude -p ... --dangerously-skip-permissions` and `codex exec --sandbox workspace-write --ask-for-approval never`. Every build runs inside an isolated git worktree (created as a sibling of your repo under the `factory/` branch prefix; override per command with `--branch-prefix`), never in your main checkout. The factory defaults to review mode: pipelines end at a green, ready-for-review PR and merging stays with you unless you explicitly opt in with `FACTORY_MERGE=1`. Admin bypass is separate: set `FACTORY_MERGE_ADMIN=1` only when the active GitHub token should use administrator privileges to merge through unmet requirements. Only run the factory against repos where you accept agent-authored code executing in that worktree (builds run tests, install dependencies, etc.).
 
-## SaaS Roadmap
-
-1. **Phase 1 (current)** — CLI tool (`@on-par/factory-cli`), run locally against any git repo
-2. **Phase 2** — Server mode (`@on-par/factory-server`) with GitHub webhook triggers
-3. **Phase 3** — Sandboxed execution via Docker/Daytona — users point at a repo, factory runs in isolated containers
-4. **Phase 4** — Multi-tenant SaaS with web dashboard, per-user model config, auto-merge policies
-
-The monorepo structure means the server package can import `@on-par/factory-core` for the router, checkers, phases, and constitution loader without duplicating code. New apps (dashboard, sandbox runner, webhook handler) each get their own workspace package.
-
 ## License
 
 MIT — On PAR Dev
