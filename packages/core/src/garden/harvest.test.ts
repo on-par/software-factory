@@ -6,7 +6,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { clusterCheckFailures, readHarvestEvents, renderGardenReport } from './harvest.js';
+import { clusterCheckFailures, clusterGarden, readHarvestEvents, renderGardenReport } from './harvest.js';
 
 let dir: string;
 beforeEach(() => {
@@ -143,8 +143,9 @@ describe('garden harvest', () => {
     it('renders the fields and pointers', () => {
       const f = write('e.ndjson', [park('fail', '1', 'sig'), park('fail', '2', 'sig'), park('fail', '1', 'sig')]);
       const out = renderGardenReport(run(f)).join('\n');
-      expect(out).toContain('# Garden report: recurring CHECK failure signatures');
-      expect(out).toContain('## 1. `sig`');
+      expect(out).toContain('# Garden report: recurring failure clusters');
+      expect(out).toContain('## CHECK failure signatures');
+      expect(out).toContain('### 1. `sig`');
       expect(out).toContain('count: 3');
       expect(out).toContain('distinct issues: 2 (#1, #2)');
       expect(out).toContain('first seen:');
@@ -163,6 +164,112 @@ describe('garden harvest', () => {
     it('prints (none) when no failing checkers were recorded', () => {
       const f = write('e.ndjson', [park('fail', '1', 's', undefined, [])]);
       expect(renderGardenReport(run(f)).join('\n')).toContain('failing checkers: (none)');
+    });
+  });
+  it('tags signature clusters with their dimension', () => {
+    const f = write('e.ndjson', [park('fail', '1', 'sig')]);
+    expect(run(f)[0]?.dimension).toBe('signature');
+  });
+
+  describe('clusterGarden', () => {
+    const ev = (type: string, issue: string, extra: Record<string, unknown> = {}, ts = '2026-01-01T00:00:00Z') =>
+      JSON.stringify({ ts, type, issue, msg: 'm', ...extra });
+    const garden = (lines: string[], opts?: { sampleLimit?: number }) =>
+      clusterGarden(readHarvestEvents([write('g.ndjson', lines)]), opts);
+    const pairs = (cs: ReturnType<typeof garden>, d: string) =>
+      cs.filter((c) => c.dimension === d).map((c) => [c.key, c.count]);
+
+    it('clusters terminal park kinds as park reasons, not stuck', () => {
+      const cs = garden([
+        ev('fail', '1'),
+        ev('fail', '2', { checkFailure: { signature: 's', failingChecks: ['tests'] } }),
+        ev('escalate', '3'),
+        ev('stuck', '3', { checkFailure: { signature: 's', failingChecks: ['tests'] } }),
+      ]);
+      expect(pairs(cs, 'park-reason')).toEqual([
+        ['fail', 2],
+        ['escalate', 1],
+      ]);
+      expect(cs.find((c) => c.dimension === 'park-reason' && c.key === 'fail')?.issues).toEqual(['1', '2']);
+    });
+
+    it('clusters failing checkers once per park event and ignores malformed lists', () => {
+      const cs = garden([
+        ev('fail', '1', { checkFailure: { signature: 'a', failingChecks: ['tests', 'lint'] } }),
+        ev('fail', '2', { checkFailure: { signature: 'b', failingChecks: ['tests', 'tests'] } }),
+        ev('fail', '3', { checkFailure: { signature: 'c', failingChecks: 'tests' } }),
+        ev('fail', '4', { checkFailure: { signature: 'd', failingChecks: [1, null, ''] } }),
+      ]);
+      expect(pairs(cs, 'checker')).toEqual([
+        ['tests', 2],
+        ['lint', 1],
+      ]);
+    });
+
+    it('clusters human-* events and ignores other types', () => {
+      const cs = garden([
+        ev('human-edited', '1'),
+        ev('human-edited', '2'),
+        ev('human-restarted', '1'),
+        ev('rework', '1'),
+      ]);
+      expect(pairs(cs, 'human')).toEqual([
+        ['human-edited', 2],
+        ['human-restarted', 1],
+      ]);
+      expect(cs).toHaveLength(2);
+    });
+
+    it('drops every event of an environment-released run but keeps later runs', () => {
+      const cs = garden([
+        ev('human-approved', '7'),
+        ev('human-approved', '8'),
+        ev('environment-released', '7', { checkFailure: { signature: 'env', failingChecks: ['tests'] } }),
+        ev('human-restarted', '7'),
+        ev('fail', '7', { checkFailure: { signature: 's', failingChecks: ['tests'] } }),
+      ]);
+      const approved = cs.filter((c) => c.key === 'human-approved');
+      expect(approved).toHaveLength(1);
+      expect(approved[0]?.issues).toEqual(['8']);
+      expect(approved[0]?.count).toBe(1);
+      expect(pairs(cs, 'human')).toContainEqual(['human-restarted', 1]);
+      expect(pairs(cs, 'park-reason')).toEqual([['fail', 1]]);
+      expect(pairs(cs, 'signature')).toEqual([['s', 1]]);
+      expect(cs.some((c) => c.key === 'env')).toBe(false);
+    });
+
+    it('produces no cluster for an environment-released event alone', () => {
+      expect(garden([ev('environment-released', '7')])).toEqual([]);
+    });
+
+    it('orders clusters by dimension', () => {
+      const cs = garden([
+        ev('human-edited', '1'),
+        ev('fail', '1', { checkFailure: { signature: 's', failingChecks: ['tests'] } }),
+      ]);
+      expect(cs.map((c) => c.dimension)).toEqual(['signature', 'park-reason', 'checker', 'human']);
+    });
+
+    it('honors sampleLimit in non-signature dimensions', () => {
+      const cs = garden([ev('human-edited', '1'), ev('human-edited', '2'), ev('human-edited', '3')], {
+        sampleLimit: 2,
+      });
+      expect(cs[0]?.samples).toHaveLength(2);
+    });
+
+    it('renders one section per non-empty dimension with numbering restarted', () => {
+      const lines = garden([
+        ev('human-edited', '1'),
+        ev('fail', '1', { checkFailure: { signature: 's', failingChecks: ['tests'] } }),
+      ]);
+      const out = renderGardenReport(lines);
+      const text = out.join('\n');
+      for (const h of ['CHECK failure signatures', 'Park reasons', 'Failing checkers', 'Human events'])
+        expect(text).toContain(`## ${h}`);
+      expect(text.match(/### 1\./g)).toHaveLength(4);
+      const only = renderGardenReport(garden([ev('human-edited', '1')])).join('\n');
+      expect(only).toContain('## Human events');
+      expect(only).not.toContain('## Park reasons');
     });
   });
 });
