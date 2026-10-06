@@ -4451,7 +4451,7 @@ export async function runLane(
       continue;
     }
     try {
-      let shipped = undefined as RunOutcome | undefined;
+      const sliceOutcome: { value?: RunOutcome } = {};
       const branch =
         decision.kind === 'adopt'
           ? decision.branch
@@ -4465,11 +4465,12 @@ export async function runLane(
                   paths,
                   lane,
                   onOutcome: (o) => {
-                    shipped = o;
+                    sliceOutcome.value = o;
                   },
                 },
               ),
             );
+      const shipped = sliceOutcome.value;
       if (shipped?.state === 'ready' && shipped.slice && shipped.slice.index < shipped.slice.count) {
         // ADR-0147: a non-final slice's PR is open; hand the issue back for the next slice
         // instead of waiting for the merge.
